@@ -1,0 +1,10 @@
+### main Meerschaum configuration goes here
+
+meerschaum:
+  connectors:
+    sql:
+      main:
+        flavor:   "timescaledb"
+        username: "Meerschaum"
+        password: "~myprivatepassword~"
+        host:     "node1"

@@ -6,9 +6,6 @@ import setuptools
 
 exec(open('meerschaum/_version.py').read())
 
-with open('README.md', 'r') as readmefile:
-    long_desc = readmefile.read()
-
 setuptools.setup(
     name = 'meerschaum',
     version = __version__,
@@ -16,9 +13,16 @@ setuptools.setup(
     url = '#',
     author = 'Bennett Meares',
     author_email = 'bennett.meares@gmail.com',
-    license = 'MIT',
+    license = '',
     packages = setuptools.find_packages(),
     install_requires = [],
+    entry_points = {
+        'console_scripts' : [
+            'meerschaum = meerschmaum.main:main',
+            'Meerschaum = meerschmaum.main:main',
+            'mrsm = meerschmaum.main:main'
+        ],
+    },
     zip_safe = True,
     package_data = {},
     python_requires = '>=3.8'
