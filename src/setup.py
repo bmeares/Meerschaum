@@ -13,19 +13,20 @@ setuptools.setup(
     url = '#',
     author = 'Bennett Meares',
     author_email = 'bennett.meares@gmail.com',
-    license = '',
+    license = 'MIT',
     packages = setuptools.find_packages(),
     install_requires = [
         'sqlalchemy',
+        'pandas',
     ],
     entry_points = {
         'console_scripts' : [
-            'meerschaum = meerschmaum.main:main',
-            'Meerschaum = meerschmaum.main:main',
-            'mrsm = meerschmaum.main:main'
+            'meerschaum = meerschaum.__main__:main',
+            'Meerschaum = meerschaum.__main__:main',
+            'mrsm = meerschaum.__main__:main'
         ],
     },
     zip_safe = True,
-    package_data = {},
+    package_data = {'' : ['*.yaml']},
     python_requires = '>=3.8'
 )

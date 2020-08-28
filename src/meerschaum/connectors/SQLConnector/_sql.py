@@ -57,6 +57,7 @@ def to_sql(
             dtype=dtype
         )
     except Exception as e:
+        print(f'Failed to commit dataframe with name: {name}')
         print(e)
         return False
     return True
