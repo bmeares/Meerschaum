@@ -6,5 +6,10 @@ mrsm CLI entrypoint
 """
 
 def main(sysargs=None):
-    print('sysargs:', sysargs)
+    #  print('sysargs:', sysargs)
+    from meerschaum.connectors import SQLConnector
+    connector = SQLConnector()
+    import pandas as pd
+    df = pd.DataFrame({})
+    connector.to_sql(df, name="test_table")
     pass

@@ -15,7 +15,9 @@ setuptools.setup(
     author_email = 'bennett.meares@gmail.com',
     license = '',
     packages = setuptools.find_packages(),
-    install_requires = [],
+    install_requires = [
+        'sqlalchemy',
+    ],
     entry_points = {
         'console_scripts' : [
             'meerschaum = meerschmaum.main:main',

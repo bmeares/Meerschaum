@@ -1,10 +1,16 @@
 ### main Meerschaum configuration goes here
 
 meerschaum:
-  connectors:
+  connections:
     sql:
-      main:
+      main: ### the main meerschaum database
         flavor:   "timescaledb"
-        username: "Meerschaum"
-        password: "~myprivatepassword~"
-        host:     "node1"
+        username: "meerschaum"
+        password: "gurgle2"
+        database: "meerschaum_db"
+        host:     "ec2-3-129-10-143.us-east-2.compute.amazonaws.com"
+        port:     5432
+      ### add additional SQL connetion labels here
+      test:
+        flavor:   "sqlite"
+        database: "test"
