@@ -4,7 +4,7 @@
 
 import setuptools
 
-exec(open('meerschaum/_version.py').read())
+exec(open('meerschaum/config/_version.py').read())
 
 setuptools.setup(
     name = 'meerschaum',

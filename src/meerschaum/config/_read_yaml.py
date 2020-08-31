@@ -3,20 +3,17 @@
 # vim:fenc=utf-8
 """
 Import the config yaml file
-and if interactive, print the welcome message
 """
 
-import yaml, sys, os
+import yaml
 try:
     import importlib.resources as pkg_resources
 except ImportError:
     import importlib_resources as pkg_resources
 
-from meerschaum._version import __version__ as version
-
 ### parse the yaml file
 config_filename = 'config.yaml'
-config_text = pkg_resources.read_text('meerschaum', config_filename)
+config_text = pkg_resources.read_text('meerschaum.resources', config_filename)
 try:
     ### cf dictionary
     config = yaml.safe_load(config_text)
@@ -25,12 +22,3 @@ except Exception as e:
     print(e)
     sys.exit()
 
-### if interactive shell, print welcome header
-header = "Hello, World!"
-try:
-    if sys.ps1:
-        interactive = True
-except AttributeError:
-    interactive = False
-if interactive:
-    print(header)
