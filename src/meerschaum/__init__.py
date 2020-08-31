@@ -2,5 +2,9 @@
 # -*- coding: utf-8 -*-
 # vim:fenc=utf-8
 
-from ._version import __version__
-from .config import header as __doc__
+from meerschaum.config import __version__
+from meerschaum.config import __doc__
+
+### ignore module warnings
+import warnings
+warnings.filterwarnings("ignore")
