@@ -5,7 +5,7 @@
 This module contains SQLConnector functions for executing SQL queries.
 """
 
-import modin.pandas as pd
+import pandas as pd
 import sqlalchemy
 
 def read(self, query : str, debug=False) -> pd.DataFrame:

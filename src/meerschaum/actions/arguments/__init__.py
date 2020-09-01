@@ -3,11 +3,7 @@
 # vim:fenc=utf-8
 
 """
-This module creates the argparse Parser
+This package includes argument parsing utilities
 """
 
-import argparse
-
-parser = argparse.ArgumentParser(description="Meerschaum actions parser")
-
-
+from ._parse_arguments import parse_arguments
