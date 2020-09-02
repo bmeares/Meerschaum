@@ -18,7 +18,7 @@ setuptools.setup(
     install_requires = [
         'sqlalchemy',
         'pandas',
-        'psycopg2',
+        'psycopg2-binary',
         'pyyaml',
     ],
     entry_points = {
