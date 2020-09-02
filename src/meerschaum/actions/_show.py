@@ -12,6 +12,9 @@ def show(
     ) -> tuple:
     """
     Show elements of a certain type.
+    
+    command: `show actions`
+
     Options:
         - actions
         - pipes
@@ -35,7 +38,7 @@ def show(
         print(f"Cannot show '{show_choice}'. Choose one:")
         for option in show_options:
             print(f"  - {option}")
-        return (False, f"Invalid choice {show_choice}")
+        return (False, f"Invalid choice '{show_choice}'")
 
     return show_options[show_choice](**kw)
 
