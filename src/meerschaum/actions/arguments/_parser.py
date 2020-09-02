@@ -24,5 +24,5 @@ parser.add_argument(
     '--version', '-V', action="version", version=doc
 )
 parser.add_argument(
-    '--pretty', '-p', action="store_true", help="Pretty print the output (where supported)"
+    '--nopretty', action="store_true", help="Print elements without 'pretty' formatting"
 )

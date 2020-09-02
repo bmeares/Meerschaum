@@ -5,7 +5,7 @@
 from meerschaum.config import __version__
 from meerschaum.config import __doc__
 ### import connectors package
-import meerschaum.connectors
+#  import meerschaum.connectors
 
 ### ignore module warnings
 import warnings
