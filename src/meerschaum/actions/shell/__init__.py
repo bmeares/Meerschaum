@@ -12,7 +12,6 @@ from meerschaum.actions.arguments import parse_arguments
 import inspect
 
 class Shell(cmd.Cmd):
-    #  added_methods = dict()
     prompt = "mrsm —> "
     intro = __doc__
 
@@ -49,7 +48,7 @@ class Shell(cmd.Cmd):
         ### execute the meerschaum action
         ### and print the response message in case of failure
         response = func(**args)
-        if not response[0]: print(reponse[1])
+        if not response[0]: print(response[1])
         return ""
 
     def do_exit(self, params):
