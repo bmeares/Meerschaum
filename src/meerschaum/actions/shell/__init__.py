@@ -69,8 +69,8 @@ class Shell(cmd.Cmd):
         state = action[0]
         if state == '':
             self.debug = not self.debug
-        elif state in on_commands: self.debug = True
-        elif state in off_commands: self.debug = False
+        elif state.lower() in on_commands: self.debug = True
+        elif state.lower() in off_commands: self.debug = False
         else: print(f"Unknown state '{state}'. Ignoring...")
 
         print(f"Debug mode is {'on' if self.debug else 'off'}.")
