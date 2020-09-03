@@ -18,7 +18,7 @@ parser.add_argument(
     'action', nargs='+', help="Action to execute"
 )
 parser.add_argument(
-    '--debug', '-d', help="Print debug statements (max verbosity)"
+    '--debug', '-d', action="store_true", help="Print debug statements (max verbosity)"
 )
 parser.add_argument(
     '--version', '-V', action="version", version=doc

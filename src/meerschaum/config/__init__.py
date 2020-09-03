@@ -8,7 +8,7 @@ and if interactive, print the welcome message
 """
 
 from meerschaum.config._version import __version__
-from meerschaum.config._read_yaml import config
+from meerschaum.config._read_yaml import config, config_filename, config_path
 
 ### if interactive shell, print welcome header
 import sys
