@@ -7,14 +7,18 @@ Functions for editing the configuration file
 """
 
 def edit_config(debug=False, **kw):
-    import sys, tempfile, os
+    import sys, tempfile, os, importlib
     from subprocess import call
-    from meerschaum.config import config_path
+    import meerschaum.config
 
+    ### get editor from environment
     EDITOR = os.environ.get('EDITOR', 'vim')
 
     if debug: print(f"Opening file '{config_path}' with editor '{EDITOR}'") 
 
-    call([EDITOR, config_path])
+    ### prompt user to edit config.yaml
+    call([EDITOR, meerschaum.config.config_path])
+
+    importlib.reload(meerschaum.config)
 
     return (True, "Success")
