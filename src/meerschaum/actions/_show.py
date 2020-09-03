@@ -26,22 +26,12 @@ def show(
             e.g.: `show actions` becomes ['actions']
     """
     
+    from meerschaum.utils.misc import choose_subaction
     show_options = {
         'actions' : _show_actions,
         'pipes'   : _show_pipes,
     }
-
-    if len(action) == 0: action = ['']
-    show_choice = action[0]
-
-    if show_choice not in show_options:
-        print(f"Cannot show '{show_choice}'. Choose one:")
-        for option in show_options:
-            print(f"  - {option}")
-        return (False, f"Invalid choice '{show_choice}'")
-
-    return show_options[show_choice](**kw)
-
+    return choose_subaction(action, show_options, **kw)
 
 def _show_actions(nopretty=False, **kw) -> tuple:
     """
@@ -67,4 +57,4 @@ def _show_actions(nopretty=False, **kw) -> tuple:
 
 ### TODO
 def _show_pipes(**kw):
-    pass
+    return (True, "Success")
