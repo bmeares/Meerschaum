@@ -30,16 +30,34 @@ def show(
     show_options = {
         'actions' : _show_actions,
         'pipes'   : _show_pipes,
+        'config'  : _show_config,
     }
     return choose_subaction(action, show_options, **kw)
 
-def _show_actions(nopretty=False, **kw) -> tuple:
+def _show_actions(**kw) -> tuple:
     """
     Show available actions
     """
     from meerschaum.actions import actions
+    return _show_dict(options=actions, **kw)
+
+def _show_config(**kw) -> tuple:
+    import pprint
+    from meerschaum.config import config as cf
+    pprint(cf)
+
+
+def _show_dict(
+        options={},
+        nopretty=False,
+        **kw
+    ) -> tuple:
+    """
+    Show available options from an iterable
+    """
+    from meerschaum.actions import actions
     if not nopretty:
-        header = "Available actions:"
+        header = "Available options:"
         print("\n" + header)
         ### calculate underline length
         underline_len = len(header)

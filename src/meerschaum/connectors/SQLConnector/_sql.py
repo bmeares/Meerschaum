@@ -43,6 +43,7 @@ def to_sql(
         index : bool = False,
         if_exists : str = 'replace',
         dtype : 'dictionary/scalar' = {},
+        **kw
     ):
     """
     """
@@ -54,7 +55,8 @@ def to_sql(
             con=self.engine,
             index=index,
             if_exists=if_exists,
-            dtype=dtype
+            dtype=dtype,
+            **kw
         )
     except Exception as e:
         print(f'Failed to commit dataframe with name: {name}')
