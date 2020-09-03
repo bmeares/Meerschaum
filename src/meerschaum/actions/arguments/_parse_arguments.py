@@ -12,7 +12,8 @@ import argcomplete
 
 def parse_arguments(sysargs : list) -> dict:
     argcomplete.autocomplete(parser)
-    args = parser.parse_args(sysargs)
+    args, unknown = parser.parse_known_args(sysargs)
+    if unknown: print(f"Unknown arguments: {unknown}")
     return vars(args)
 
 
