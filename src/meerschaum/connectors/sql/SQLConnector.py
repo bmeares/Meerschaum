@@ -13,7 +13,7 @@ class SQLConnector(Connector):
     Create and utilize sqlalchemy engines
     """
     from ._create_engine import flavor_configs, create_engine
-    from ._sql import read, exec, to_sql
+    from ._sql import read, exec, to_sql, bulk_insert
     def __init__(
             self,
             label='main',
@@ -29,7 +29,6 @@ class SQLConnector(Connector):
             raise Exception("Missing flavor. Update config.yaml or provide flavor as an argument")
         elif 'flavor' not in self.__dict__: self.flavor = flavor
 
-
         ### verify the flavor's requirements are met
         if self.flavor not in self.flavor_configs:
             raise Exception(f'Flavor {self.flavor} is not supported by Meerschaum SQLConnector')
@@ -37,5 +36,4 @@ class SQLConnector(Connector):
 
         ### build the sqlalchemy engine
         self.engine = self.create_engine(debug=debug)
-
 
