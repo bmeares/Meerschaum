@@ -9,4 +9,4 @@ import meerschaum.connectors
 
 ### ignore module warnings
 import warnings
-warnings.filterwarnings("ignore")
+#  warnings.filterwarnings("ignore")

@@ -25,7 +25,8 @@ for module_name in ["meerschaum.actions." + mod_name for mod_name in __all__]:
 
     """
     A couple important things happening here:
-    1. Find all functions in all modules (skip ones that begin with '_')
+    1. Find all functions in all modules in `actions` package
+        (skip functions that begin with '_')
     2. Add them as members to the Shell class
         - Original definition : meerschaum.actions.shell.Shell
         - New definition      : meerschaum.actions.Shell
