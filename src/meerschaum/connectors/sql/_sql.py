@@ -5,7 +5,7 @@
 This module contains SQLConnector functions for executing SQL queries.
 """
 
-import modin.pandas as pd
+import lazy_import
 import sqlalchemy
 
 ### database flavors that can use bulk insert
@@ -17,7 +17,7 @@ def read(
         chunksize=-1,
         debug=False,
         **kw
-    ) -> pd.DataFrame:
+    ) -> 'pd.DataFrame':
     """
     Read a SQL query or table into a pandas dataframe.
     """
@@ -28,7 +28,7 @@ def read(
         print(query_or_table)
         print(f"Fetching with chunksize: {chunksize}")
     try:
-        chunk_generator = pd.read_sql(
+        chunk_generator = self.pd.read_sql(
                     query_or_table,
                     self.engine,
                     chunksize=chunksize
@@ -47,7 +47,7 @@ def read(
         end = time.time()
         print(f"Fetched {len(chunk_list)} chunks in {round(end - start, 2)} seconds.")
 
-    return pd.concat(chunk_list)
+    return self.pd.concat(chunk_list)
 
 def exec(self, query, debug=False) -> bool:
     """
@@ -66,7 +66,7 @@ def exec(self, query, debug=False) -> bool:
 
 def to_sql(
         self,
-        df : pd.DataFrame,
+        df : 'pd.DataFrame',
         name : str = None,
         index : bool = False,
         if_exists : str = 'replace',
@@ -97,26 +97,27 @@ def to_sql(
         raise Exception("Name must not be None to submit to the SQL server")
 
     ### resort to defaults if None
-    method = method if method != "" else self.sys_config['method']
-    #  method = psql_insert_copy
+    if method == "":
+        if self.flavor in bulk_flavors:
+            method = psql_insert_copy
+        else:
+            method = self.sys_config['method']
     chunksize = chunksize if chunksize != -1 else self.sys_config['chunksize']
 
-    df_len = len(df)
-    if df_len > self.sys_config['bulk_insert_threshold'] and self.type in bulk_types:
-        print(f'DataFrame is {df_len} rows tall. Resorting to bulk insert...')
-        return self.bulk_insert(df, name=name, index=index, if_exists=if_exists, **kw)
+    #  df_len = len(df)
+    #  if df_len > self.sys_config['bulk_insert_threshold'] and self.type in bulk_types:
+        #  print(f'DataFrame is {df_len} rows tall. Resorting to bulk insert...')
+        #  return self.bulk_insert(df, name=name, index=index, if_exists=if_exists, **kw)
 
     if debug:
         import time
         start = time.time()
         print(f"Inserting {len(df)} rows with chunksize: {chunksize}...", end="")
 
-    import copy
-
     try:
         df.to_sql(
             name=name,
-            con=temp_engine,
+            con=self.engine,
             index=index,
             if_exists=if_exists,
             method=method,
@@ -126,6 +127,8 @@ def to_sql(
     except Exception as e:
         print(f'Failed to commit dataframe with name: {name}')
         print(e)
+        import traceback
+        traceback.print_exception(type(e), e, e.__traceback__)
         return False
 
     if debug:
@@ -135,51 +138,53 @@ def to_sql(
 
     return True
 
-def bulk_insert(
-        self,
-        df : pd.DataFrame,
-        name : str = None,
-        #  index : bool = False,
-        if_exists : str = 'replace',
-        debug=False,
-        **kw
-    ):
-    """
-    If possible, upload via copy_from rather than to_sql
-    """
+### DEPRECIATED in favor of psql_insert_copy
+###
+#  def bulk_insert(
+        #  self,
+        #  df : 'pd.DataFrame',
+        #  name : str = None,
+        #  #  index : bool = False,
+        #  if_exists : str = 'replace',
+        #  debug=False,
+        #  **kw
+    #  ):
+    #  """
+    #  If possible, upload via copy_from rather than to_sql
+    #  """
     
-    if name is None:
-        raise Exception("Name must not be None to submit to the SQL server")
+    #  if name is None:
+        #  raise Exception("Name must not be None to submit to the SQL server")
 
-    if self.flavor not in bulk_flavors:
-        raise Exception(f"SQLConnector flavor '{self.flavor}' must be one of the following: {bulk_flavors}. Use `to_sql` with a large chunksize instead.")
+    #  if self.flavor not in bulk_flavors:
+        #  raise Exception(f"SQLConnector flavor '{self.flavor}' must be one of the following: {bulk_flavors}. Use `to_sql` with a large chunksize instead.")
 
-    import io
-    if debug:
-        import time
-        start = time.time()
+    #  import io
+    #  if debug:
+        #  import time
+        #  start = time.time()
 
-    ### ensure the table exists
-    df[:0].to_sql(name, self.engine, if_exists=if_exists)
+    #  ### ensure the table exists
+    #  df[:0].to_sql(name, self.engine, if_exists=if_exists)
 
-    output = io.StringIO()
-    if debug: print("Parsing DataFrame to stream via to_csv...", end="")
-    df.to_csv(output, sep=',', header=False, index=False)
-    if debug: print(" done.")
+    #  output = io.StringIO()
+    #  if debug: print("Parsing DataFrame to stream via to_csv...", end="")
+    #  df.to_csv(output, sep=',', header=False, index=False)
+    #  if debug: print(" done.")
 
-    output.seek(0)
-    contents = output.getvalue()
-    connection = self.engine.raw_connection()
-    cursor = connection.cursor()
-    if debug: print("Copying to database via copy_from...", end="")
-    cursor.copy_from(output, name, null="", sep=",")
-    connection.commit()
-    cursor.close()
-    if debug:
-        end = time.time()
-        print(" done.")
-        print("It took {round(end - start, 2)} seconds to upload {len(df)} rows.")
-    return True
+    #  output.seek(0)
+    #  contents = output.getvalue()
+    #  connection = self.engine.raw_connection()
+    #  cursor = connection.cursor()
+    #  if debug: print("Copying to database via copy_from...", end="")
+    #  cursor.copy_from(output, name, null="", sep=",")
+    #  connection.commit()
+    #  cursor.close()
+    #  if debug:
+        #  end = time.time()
+        #  print(" done.")
+        #  print("It took {round(end - start, 2)} seconds to upload {len(df)} rows.")
+    #  return True
 
 def psql_insert_copy(table, conn, keys, data_iter):
     """

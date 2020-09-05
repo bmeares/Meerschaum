@@ -10,9 +10,16 @@ Defines basic data that Connectors should contain
 from meerschaum.config import config as cf
 conn_configs = cf['meerschaum']['connectors']
 connector_config = cf['system']['connectors']
+import lazy_import
 
 class Connector:
-    def __init__(self, conn_type : str = None, conn_label : str = "main", **kw):
+    def __init__(
+            self,
+            conn_type : str = None,
+            conn_label : str = "main",
+            pandas : str = None,
+            **kw
+        ):
         """
         conn_type : str
             The type of the connection. Used as a key in config.yaml to get attributes.
@@ -20,6 +27,10 @@ class Connector:
 
         conn_label : str
             The label for the connection. Used as a key within config.yaml
+
+        pandas : str
+            Custom pandas implementation name. Default is in system_config in meerschaum.config.
+            May change to modin.pandas soon.
 
         If config.yaml is set for the given type and label, the hierarchy looks like so:
         meerschaum:
@@ -42,6 +53,10 @@ class Connector:
         ### load system config into self.system_config
         if self.type in connector_config:
             self.sys_config = connector_config[self.type]
+
+        ### handle custom pandas implementation (e.g. modin)
+        pandas = pandas if pandas is not None else connector_config['all']['pandas']
+        self.pd = lazy_import.lazy_module(pandas)
 
     def verify_attributes(
             self,

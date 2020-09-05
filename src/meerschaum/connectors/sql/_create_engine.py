@@ -65,7 +65,7 @@ def create_engine(self, debug=False, **kw) -> 'sqlalchemy.engine.Engine':
 
     returns: sqlalchemy engine
     """
-    import sqlalchemy, urllib
+    import sqlalchemy, importlib, urllib
     ### supplement missing values with defaults (e.g. port number)
     for a, value in flavor_configs[self.flavor]['defaults'].items():
         if a not in self.__dict__:
@@ -82,10 +82,20 @@ def create_engine(self, debug=False, **kw) -> 'sqlalchemy.engine.Engine':
     if debug: print(engine_str)
     return sqlalchemy.create_engine(
         engine_str,
-        pool_size=5,
-        max_overflow=10,
-        pool_recycle=3600,
-        poolclass=sqlalchemy.pool.QueuePool,
+        pool_size=self.sys_config['pool_size'],
+        max_overflow=self.sys_config['max_overflow'],
+        pool_recycle=self.sys_config['pool_recycle'],
+        
+        ### I know this looks confusing, and maybe it's bad code,
+        ### but it's simple. It dynamically parses the config string
+        ### and splits it to separate the class name (QueuePool)
+        ### from the module name (sqlalchemy.pool).
+        poolclass=getattr(
+            importlib.import_module(
+                ".".join(self.sys_config['poolclass'].split('.')[:-1])
+            ),
+            self.sys_config['poolclass'].split('.')[-1]
+        ),
         **kw
     )
 
