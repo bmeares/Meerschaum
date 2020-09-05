@@ -31,6 +31,7 @@ def show(
         'actions' : _show_actions,
         'pipes'   : _show_pipes,
         'config'  : _show_config,
+        'modules' : _show_modules,
     }
     return choose_subaction(action, show_options, **kw)
 
@@ -42,10 +43,21 @@ def _show_actions(**kw) -> tuple:
     return _show_dict(options=actions, **kw)
 
 def _show_config(**kw) -> tuple:
+    """
+    Show the configuration dictionary
+    """
     import pprint
     from meerschaum.config import config as cf
-    pprint(cf)
+    pprint.pprint(cf)
+    return (True, "Success")
 
+def _show_modules(**kw) -> tuple:
+    """
+    Show the currently imported modules
+    """
+    import sys, pprint
+    pprint.pprint(list(sys.modules.keys()))
+    return (True, "Success")
 
 def _show_dict(
         options={},

@@ -3,12 +3,26 @@
 # vim:fenc=utf-8
 
 """
-Import configuration modules
+Import and update configuration dictionary
 and if interactive, print the welcome message
 """
 
 from meerschaum.config._version import __version__
 from meerschaum.config._read_yaml import config, config_filename, config_path
+
+### developer-specified values
+system_config = {
+    'connectors' : {
+        'sql' : {
+            'bulk_insert_threshold' : 10000,
+            'method' : 'multi',
+            'chunksize' : 1000,
+        },
+        'api' : {
+        },
+    }
+}
+config['system'] = system_config
 
 ### if interactive shell, print welcome header
 import sys

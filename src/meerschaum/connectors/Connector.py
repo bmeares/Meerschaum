@@ -8,7 +8,8 @@ Defines basic data that Connectors should contain
 """
 
 from meerschaum.config import config as cf
-conn_configs = cf['meerschaum']['connections']
+conn_configs = cf['meerschaum']['connectors']
+connector_config = cf['system']['connectors']
 
 class Connector:
     def __init__(self, conn_type : str = None, conn_label : str = "main", **kw):
@@ -31,10 +32,16 @@ class Connector:
         Example: type="sql", label="main"
         """
         self.type, self.label = conn_type, conn_label
-
+        ### add additional arguments to self.__dict__
         self.__dict__.update(kw)
+
+        ### load user config into self.__dict__
         if self.type in conn_configs and self.label in conn_configs[self.type]:
             self.__dict__.update(conn_configs[self.type][self.label])
+
+        ### load system config into self.system_config
+        if self.type in connector_config:
+            self.sys_config = connector_config[self.type]
 
     def verify_attributes(
             self,

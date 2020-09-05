@@ -20,6 +20,7 @@ setuptools.setup(
         'pandas',
         'psycopg2-binary',
         'pyyaml',
+        'lazy_import',
     ],
     entry_points = {
         'console_scripts' : [
