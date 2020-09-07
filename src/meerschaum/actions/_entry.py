@@ -20,12 +20,13 @@ def _entry(sysargs=[]):
     import sys
     args = parse_arguments(sysargs)
     main_action = args['action'][0]
+
+    ### if action does not exist, execute in bash
+    if main_action not in actions:
+        main_action = 'bash'
+        args['action'].insert(0, main_action)
+
     del args['action'][0]
     if len(args['action']) == 0: args['action'] = ['']
-    if main_action not in actions:
-        print(f"Action '{main_action}' is not valid.")
-        main_action = 'show'
-        args['action'] = ['actions']
-        args['pretty'] = True
 
     return actions[main_action](**args, sysargs=sysargs)

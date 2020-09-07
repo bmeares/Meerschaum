@@ -13,7 +13,7 @@ class SQLConnector(Connector):
     Create and utilize sqlalchemy engines
     """
     from ._create_engine import flavor_configs, create_engine
-    from ._sql import read, exec, to_sql, bulk_insert
+    from ._sql import read, exec, to_sql
     def __init__(
             self,
             label='main',
