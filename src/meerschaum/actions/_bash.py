@@ -7,17 +7,6 @@ NOTE: This action may be a huge security vulnerability
     if not handled appropriately!
 TODO: Filter out `bash` commands from the WebAPI.
 """
-### filter out banned commands from automatically executing
-banned_commands = {
-    'rm',
-    'wget',
-    'rsync',
-    'scp',
-    'ssh',
-    'curl',
-    'ftp',
-    'sftp',
-}
 from meerschaum.config import system_config
 
 def bash(
@@ -34,7 +23,7 @@ def bash(
     ### determine system encoding
     encoding = sys.getdefaultencoding()
 
-    command_list = ["/bin/bash"]
+    command_list = ["bash"]
 
     ### where to redirect stdout (default None)
     capture_stdout, capture_stderr = None, None
@@ -44,12 +33,9 @@ def bash(
     ### and read stdout, stderr and exit code
     if action[0] != '':
         capture_stdout = subprocess.PIPE
+        capture_stderr = subprocess.PIPE
         command_list += ["-c", " ".join(action)]
         timeout = system_config['shell']['timeout']
-
-    for a in action:
-        if a in banned_commands:
-            return (False, f"Invalid command: {a}")
 
     if debug:
         print('action:', action)
