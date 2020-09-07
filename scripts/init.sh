@@ -6,5 +6,6 @@
 # parse_yaml config.yaml
 
 . config.sh
+echo "TODO implement"
 
-echo "$meerschaum_connectors_sql_main_host"
+# echo "$meerschaum_connectors_sql_main_host"

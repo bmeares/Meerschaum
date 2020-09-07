@@ -20,6 +20,9 @@ class Shell(cmd.Cmd):
         """
         Pass line string to parent actions.
         Pass parsed arguments to custom actions
+
+        Overrides `default`: if action does not exist,
+            assume the action is `bash`
         """
         if line is None or len(line) == 0: return line
 
@@ -30,16 +33,20 @@ class Shell(cmd.Cmd):
         if not args['debug']: args['debug'] = self.debug
 
         action = args['action'][0]
-        ### delete the first action
-        ### e.g. 'show actions' -> ['actions']
-        del args['action'][0]
-        if len(args['action']) == 0: args['action'] = ['']
-
         try:
             func = getattr(self, 'do_' + action)
             func_param_kinds = inspect.signature(func).parameters.items()
         except AttributeError as ae:
-            return line
+            ### if function is not found, default to `bash`
+            action = "bash"
+            args['action'].insert(0, "bash")
+            func = getattr(self, 'do_bash')
+            func_param_kinds = inspect.signature(func).parameters.items()
+
+        ### delete the first action
+        ### e.g. 'show actions' -> ['actions']
+        del args['action'][0]
+        if len(args['action']) == 0: args['action'] = ['']
 
         positional_only = True
         for param in func_param_kinds:
@@ -59,6 +66,20 @@ class Shell(cmd.Cmd):
             print("\nError message:", response[1])
         return ""
 
+    def default(self, line):
+        """
+        If an action has not been declared, preprend 'bash' to the line
+        and execute in a subshell
+        """
+        self.do_default(line)
+
+    def do_default(self, action=[''], **kw):
+        """
+        If `action` is not implemented, execute in a subprocess.
+        (preprends 'bash' to the actions)
+        """
+        pass
+
     def do_debug(self, action=[''], **kw):
         """
         Toggle the shell's debug mode.
@@ -77,19 +98,19 @@ class Shell(cmd.Cmd):
 
     def do_exit(self, params):
         """
-        Exit the shell
+        Exit the Meerschaum shell
         """
         return True
 
     def do_quit(self, params):
         """
-        Exit the shell
+        Exit the Meerschuam shell
         """
         return True
 
     def do_EOF(self, line):
         """
-        Exit the shell
+        Exit the Meerschaum shell
         """
         return True
 
