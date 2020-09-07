@@ -29,6 +29,9 @@ system_config = {
         },
         'api' : {
         },
+    },
+    'shell' : {
+        'timeout' : 15,
     }
 }
 config['system'] = system_config
