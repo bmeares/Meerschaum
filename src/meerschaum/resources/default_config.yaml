@@ -1,0 +1,15 @@
+##################################
+# Edit the credentials below     #
+# for the `main` SQL connection. #
+##################################
+
+meerschaum:
+  connectors:
+    sql:
+      main:
+        flavor: "timescaledb"
+        host: "localhost"
+        username: "meerschaum"
+        password: "meerschaum"
+        database: "meerschaum_db"
+        port: 5432
