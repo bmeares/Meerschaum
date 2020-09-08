@@ -5,9 +5,6 @@
 This module contains SQLConnector functions for executing SQL queries.
 """
 
-import lazy_import
-import sqlalchemy
-
 ### database flavors that can use bulk insert
 bulk_flavors = {'postgres', 'timescaledb'}
 
@@ -21,6 +18,7 @@ def read(
     """
     Read a SQL query or table into a pandas dataframe.
     """
+    import sqlalchemy
     chunksize = chunksize if chunksize != -1 else self.sys_config['chunksize']
     if debug:
         import time
@@ -29,10 +27,10 @@ def read(
         print(f"Fetching with chunksize: {chunksize}")
     try:
         chunk_generator = self.pd.read_sql(
-                    query_or_table,
-                    self.engine,
-                    chunksize=chunksize
-                )
+            sqlalchemy.text(query_or_table),
+            self.engine,
+            chunksize=chunksize
+        )
     except Exception as e:
         print(f"Failed to execute query:\n\n{query_or_table}\n\n")
         print(e)
@@ -42,12 +40,22 @@ def read(
     for chunk in chunk_generator:
         chunk_list.append(chunk)
 
+    ### if no chunks returned, read without chunks
+    ### to get columns
+    if len(chunk_list) == 0:
+        df = self.pd.read_sql(
+            sqlalchemy.text(query_or_table),
+            self.engine
+        )
+    else:
+        df = self.pd.concat(chunk_list)
+
     ### chunksize is not None so must iterate
     if debug:
         end = time.time()
         print(f"Fetched {len(chunk_list)} chunks in {round(end - start, 2)} seconds.")
 
-    return self.pd.concat(chunk_list)
+    return df
 
 def exec(self, query, debug=False) -> bool:
     """
