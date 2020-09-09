@@ -4,6 +4,11 @@
 ### update system packages
 apt-get update && apt-get upgrade -y
 
+### install system packages
+apt-get install\
+  nano\
+  -y
+
 ### ensure latest version of pip
 pip install --upgrade pip
 

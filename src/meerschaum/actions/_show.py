@@ -91,6 +91,9 @@ def _show_pipes(**kw):
     return (True, "Success")
 
 def _show_version(**kw):
-    from meerschaum import __version__ as version
-    print(version)
+    """
+    Show the Meerschaum doc string
+    """
+    from meerschaum import __doc__ as doc
+    print(doc)
     return (True, "Success")
