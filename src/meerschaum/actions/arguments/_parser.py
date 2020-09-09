@@ -32,3 +32,6 @@ parser.add_argument(
 parser.add_argument(
     '--force', '-f', action="store_true", help="Override safety checks"
 )
+parser.add_argument(
+    '--port', '-p', type=int, help="Specify a port on which to run the Web API server"
+)
