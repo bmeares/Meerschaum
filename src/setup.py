@@ -21,9 +21,7 @@ setuptools.setup(
         'psycopg2-binary',
         'pyyaml',
         'lazy_import',
-        'flask',
-        'flask_restful',
-        'gunicorn',
+        'fastapi',
     ],
     entry_points = {
         'console_scripts' : [
