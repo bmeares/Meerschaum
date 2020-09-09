@@ -6,5 +6,11 @@ Start the Meerschaum WebAPI with the `api` action.
 """
 
 def api(debug=False, **kw):
-    from meerschaum.WebAPI import flask_app
-    print(flask_app)
+    """
+    Run the Meerschaum WebAPI
+    """
+    from meerschaum.api import flask_app, gunicorn_app, port
+    if debug:
+        flask_app.run(port=port)
+    else:
+        gunicorn_app(flask_app)

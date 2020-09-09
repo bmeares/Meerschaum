@@ -1,3 +1,4 @@
+
 ##################################
 # Edit the credentials below     #
 # for the `main` SQL connection. #
@@ -5,11 +6,39 @@
 
 meerschaum:
   connectors:
+    api:
+      main:
+        host: localhost
+        password: bDKPcUCFLrtv
+        protocol: http
+        username: meerschaum
     sql:
       main:
-        flavor: "timescaledb"
-        host: "localhost"
-        username: "meerschaum"
-        password: "meerschaum"
-        database: "meerschaum_db"
+        database: meerschaum_db
+        flavor: timescaledb
+        host: localhost
+        password: meerschaum
         port: 5432
+        username: meerschaum
+system:
+  api:
+    flask_app:
+      SECRET_KEY: ruLNrVFsvcsq
+    password: bDKPcUCFLrtv
+    port: 8000
+    protocol: http
+    username: meerschaum
+    version: 0.0.1
+  connectors:
+    all:
+      pandas: pandas
+    api: {}
+    sql:
+      chunksize: 1000
+      max_overflow: 10
+      method: multi
+      pool_recycle: 3600
+      pool_size: 5
+      poolclass: sqlalchemy.pool.QueuePool
+  shell:
+    timeout: 15

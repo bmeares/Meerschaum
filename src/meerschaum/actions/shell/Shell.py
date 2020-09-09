@@ -6,15 +6,18 @@
 This module is the entry point for the interactive shell
 """
 
-import cmd
+import cmd, sys, inspect
 from meerschaum.config import __doc__
-from meerschaum.actions.arguments import parse_arguments
-import inspect
+from meerschaum.actions.arguments import parse_line
 
 class Shell(cmd.Cmd):
-    prompt = "mrsm —> "
+    prompt = "𝚖𝚛𝚜𝚖 ➤ "
     intro = __doc__
     debug = False
+    ruler = '─'
+    close_message = "\nThank you for using Meerschaum!"
+    doc_header = "Meerschaum actions (`help <action>` for usage):"
+    undoc_header = "Unimplemented actions:"
 
     def precmd(self, line):
         """
@@ -27,10 +30,14 @@ class Shell(cmd.Cmd):
         if line is None or len(line) == 0:
             return line
 
-        if line in {'exit', 'quit', 'EOF'}:
+        if line in {
+            'exit',
+            'quit',
+            'EOF',
+        }:
             return "exit"
 
-        args = parse_arguments(line.split())
+        args = parse_line(line)
 
         ### if debug is not set on the command line,
         ### default to shell setting
@@ -112,3 +119,13 @@ class Shell(cmd.Cmd):
     def emptyline(self):
         pass
 
+    def preloop(self):
+        import signal
+        signal.signal(signal.SIGINT, sigint_handler)
+
+    def postloop(self):
+        print(self.close_message)
+
+### intercept SIGINT
+def sigint_handler(sig, frame):
+    print('\n' + Shell.prompt, end="", flush=True)

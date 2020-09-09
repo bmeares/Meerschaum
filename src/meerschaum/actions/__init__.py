@@ -6,22 +6,19 @@
 Actions available to the mrsm CLI
 """
 
-from meerschaum.utils.misc import add_method_to_class
+from meerschaum.utils.misc import add_method_to_class, get_modules_from_package
 from meerschaum.actions.shell import Shell
 
 ### build __all__ from other .py files in this package
-from os.path import dirname, basename, isfile, join
-import glob
-modules = glob.glob(join(dirname(__file__), "*.py"))
-__all__ = [ basename(f)[:-3] for f in modules if isfile(f) and not f.endswith('__init__.py')]
+import sys
+__all__, modules = get_modules_from_package(sys.modules[__name__], names=True)
 
 ### build the actions dictionary by importing all
 ### functions that do not begin with '_' from all submodules
 from inspect import getmembers, isfunction
 import importlib
 actions = dict()
-for module_name in ["meerschaum.actions." + mod_name for mod_name in __all__]:
-    module = importlib.import_module(module_name)
+for module in modules:
 
     """
     A couple important things happening here:

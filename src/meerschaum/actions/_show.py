@@ -32,6 +32,7 @@ def show(
         'pipes'   : _show_pipes,
         'config'  : _show_config,
         'modules' : _show_modules,
+        'version' : _show_version,
     }
     return choose_subaction(action, show_options, **kw)
 
@@ -87,4 +88,9 @@ def _show_dict(
 
 ### TODO
 def _show_pipes(**kw):
+    return (True, "Success")
+
+def _show_version(**kw):
+    from meerschaum import __version__ as version
+    print(version)
     return (True, "Success")

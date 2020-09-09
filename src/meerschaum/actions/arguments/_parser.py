@@ -26,3 +26,9 @@ parser.add_argument(
 parser.add_argument(
     '--nopretty', action="store_true", help="Print elements without 'pretty' formatting"
 )
+parser.add_argument(
+    '--yes', '-y', action="store_true", help="Agree to the default choices for prompts"
+)
+parser.add_argument(
+    '--force', '-f', action="store_true", help="Override safety checks"
+)

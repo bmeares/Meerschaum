@@ -25,9 +25,14 @@ def read(
         start = time.time()
         print(query_or_table)
         print(f"Fetching with chunksize: {chunksize}")
+
+    ### format with sqlalchemy
+    if ' ' not in query_or_table: formatted_query = query_or_table
+    else: formatted_query = sqlalchemy.text(query_or_table)
+
     try:
         chunk_generator = self.pd.read_sql(
-            sqlalchemy.text(query_or_table),
+            formatted_query,
             self.engine,
             chunksize=chunksize
         )
@@ -61,6 +66,7 @@ def exec(self, query, debug=False) -> bool:
     """
     Execute SQL code and return success status. e.g. calling stored procedures
     """
+    import sqlalchemy
     try:
         with self.engine.connect() as connection:
             result = connection.execute(
@@ -70,6 +76,7 @@ def exec(self, query, debug=False) -> bool:
         print(f"Failed to execute query:\n\n{query}\n\n")
         print(e)
         result = False
+
     return result
 
 def to_sql(
