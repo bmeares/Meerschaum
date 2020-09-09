@@ -24,6 +24,6 @@ def api(
         else: port = default_port
     
     if debug: print(f"Starting Meerschaum Web API on port {port}")
-    uvicorn.run('meerschaum.api:fast_api', port=port)
+    uvicorn.run('meerschaum.api:fast_api', port=port, host="0.0.0.0")
 
     return (True, "Success")
