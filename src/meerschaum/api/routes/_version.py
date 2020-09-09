@@ -6,9 +6,20 @@
 Return version information
 """
 
-from meerschaum.api import flask_app
+from meerschaum.api import fast_api
 
-@flask_app.route("/version")
-def get_version():
+@fast_api.get("/version")
+def get_api_version():
+    """
+    Get the Meerschaum API version
+    """
     from meerschaum.api import __version__ as version
-    return {'Meerschaum API version' : version}
+    return { 'Meerschaum API version' : version }
+
+@fast_api.get("/mrsm/version")
+def get_meerschaum_version():
+    """
+    Get the Meerschaum instance version
+    """
+    from meerschaum import __version__ as version
+    return { 'Meerschaum version' : version }

@@ -13,7 +13,7 @@ def edit_config(debug=False, **kw):
     from meerschaum.utils.misc import reload_package
 
     ### get editor from environment
-    EDITOR = os.environ.get('EDITOR', 'vi')
+    EDITOR = os.environ.get('EDITOR', meerschaum.config.system_config['shell']['default_editor'])
 
     if debug: print(f"Opening file '{meerschaum.config.config_path}' with editor '{EDITOR}'") 
 

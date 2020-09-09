@@ -1,7 +1,5 @@
-Some todo thoughts I have
-
-- `reload` command?
+- delete
+- actions in WebAPI
 - Pipes
+  - bootstrap
 - WebAPI
-- bootstrap
-- sql action

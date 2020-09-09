@@ -22,6 +22,8 @@ setuptools.setup(
         'pyyaml',
         'lazy_import',
         'flask',
+        'flask_restful',
+        'gunicorn',
     ],
     entry_points = {
         'console_scripts' : [
