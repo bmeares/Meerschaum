@@ -14,10 +14,11 @@ def reload(
     """
     Reload the meerschaum library
     """
-    import imp
-    import importlib, meerschaum
-    print(importlib.reload(meerschaum))
-    #  meerschaum = importlib.reload(meerschaum)
-    #  imp.reload(meerschaum)
+    import sys
+    from meerschaum.utils.misc import reload_package
+    reload_package(sys.modules[f'meerschaum'], debug=debug)
+    reload_package(sys.modules[f'meerschaum'], debug=debug)
 
     return (True, "Success")
+
+#  def deleteme(**kw): pass

@@ -1,5 +1,7 @@
 Some todo thoughts I have
 
-- intercept SIGINT
-- default command to `bash`
 - `reload` command?
+- Pipes
+- WebAPI
+- bootstrap
+- sql action
