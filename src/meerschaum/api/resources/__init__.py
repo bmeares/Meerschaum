@@ -3,8 +3,7 @@
 # vim:fenc=utf-8
 
 """
-Import resources from other modules
+Static files for the Meerschaum Web API
 """
 
-from meerschaum.utils.misc import import_children
-import_children()
+

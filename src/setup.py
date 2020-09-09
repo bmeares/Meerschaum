@@ -21,7 +21,7 @@ setuptools.setup(
         'psycopg2-binary',
         'pyyaml',
         'lazy_import',
-        'flask',
+        'fastapi',
     ],
     entry_points = {
         'console_scripts' : [

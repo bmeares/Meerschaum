@@ -57,6 +57,7 @@ default_system_config = {
     },
     'shell' : {
         'timeout'          : 15,
+        'default_editor'   : 'nano',
     },
     ### not to be confused with system_config['connectors']['api']
     'api' : {
@@ -72,7 +73,7 @@ default_system_config = {
 }
 
 ### file path of the resources package
-resources_context_manager = pkg_resources.path('meerschaum', 'resources')
+resources_context_manager = pkg_resources.path('meerschaum.config', 'resources')
 with resources_context_manager as file_path:
     resources_path = file_path
 

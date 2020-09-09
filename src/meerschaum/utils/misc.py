@@ -87,9 +87,11 @@ def get_modules_from_package(
 
     modules = []
     for module_name in [package.__name__ + "." + mod_name for mod_name in _all]:
+        ### there's probably a better way than a try: catch but it'll do for now
         try:
             modules.append(importlib.import_module(module_name))
-        except:
+        except Exception as e:
+            #  print(e)
             pass
     if names:
         return _all, modules
@@ -169,12 +171,14 @@ def yes_no(
     answer = str(input()).lower()
     return answer == options[0].lower()
 
-
 def reload_package(
         package : 'package',
         debug : bool = False,
         **kw
     ):
+    """
+    Recursively load a package's subpackages, even if they were not previously loaded
+    """
     import os
     import types
     import importlib
@@ -197,4 +201,24 @@ def reload_package(
                         reload_recursive_ex(module_child)
 
     return reload_recursive_ex(package)
+
+def is_int(s):
+    """
+    Check if string is an int
+    """
+    try:
+        float(s)
+    except ValueError:
+        return False
+    else:
+        return float(s).is_integer()
+
+def get_options_functions():
+    """
+    Get options functions from parent module
+    """
+    import inspect
+    parent_globals = inspect.stack()[1][0].f_globals
+    parent_package = parent_globals['__name__']
+    print(parent_package)
 
