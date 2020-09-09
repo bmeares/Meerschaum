@@ -1,0 +1,7 @@
+Some todo thoughts I have
+
+- `reload` command?
+- Pipes
+- WebAPI
+- bootstrap
+- sql action
