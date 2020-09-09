@@ -22,6 +22,7 @@ setuptools.setup(
         'pyyaml',
         'lazy_import',
         'fastapi',
+        'uvicorn',
     ],
     entry_points = {
         'console_scripts' : [
