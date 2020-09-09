@@ -6,9 +6,9 @@
 Default route
 """
 
-from meerschaum.api import flask_app
+from meerschaum.api import fast_api
 
-@flask_app.route("/")
+@fast_api.get("/")
 def index():
     """
     Meerschaum WebAPI index page

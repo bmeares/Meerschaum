@@ -23,3 +23,6 @@ pip install --upgrade\
   python-dateutil\
   psycopg2-binary\
   six
+  # flask\
+  # flask_restful\
+  # gunicorn
