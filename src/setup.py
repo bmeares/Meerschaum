@@ -23,6 +23,9 @@ setuptools.setup(
         'lazy_import',
         'fastapi',
         'uvicorn',
+        'databases',
+        'aiosqlite',
+        'graphene',
     ],
     entry_points = {
         'console_scripts' : [

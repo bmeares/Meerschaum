@@ -8,6 +8,7 @@ PARENT="$(dirname "$DIR")"
 export image="meerschaum:latest"
 export src="$PARENT/src"
 export dockerhub_user="bmeares"
+export port="8000"
 
 # . parse_yaml.sh
 # eval $(parse_yaml config.yaml)
