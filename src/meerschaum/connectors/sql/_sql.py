@@ -27,8 +27,11 @@ def read(
         print(f"Fetching with chunksize: {chunksize}")
 
     ### format with sqlalchemy
-    if ' ' not in query_or_table: formatted_query = query_or_table
-    else: formatted_query = sqlalchemy.text(query_or_table)
+    if ' ' not in query_or_table:
+        if debug: print(f"Reading from table {query_or_table}")
+        formatted_query = str(sqlalchemy.text("SELECT * FROM " + str(query_or_table)))
+    else:
+        formatted_query = str(sqlalchemy.text(query_or_table))
 
     try:
         chunk_generator = self.pd.read_sql(
@@ -49,7 +52,7 @@ def read(
     ### to get columns
     if len(chunk_list) == 0:
         df = self.pd.read_sql(
-            sqlalchemy.text(query_or_table),
+            sqlalchemy.text(formatted_query),
             self.engine
         )
     else:
