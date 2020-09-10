@@ -3,12 +3,12 @@
 # vim:fenc=utf-8
 
 from meerschaum.config import system_config
-import meerschaum.connectors
+from meerschaum.connectors import get_connector
 from fastapi import FastAPI
 import graphene
 from starlette.graphql import GraphQLApp
 
-connector = meerschaum.connectors.SQLConnector(label="meta")
+connector = get_connector(label="meta")
 database = connector.db
 
 ### TODO move GraphQL queries somewhere

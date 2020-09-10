@@ -31,7 +31,7 @@ def sql(
         print(sql.__doc__)
         return (False, 'Query must not be empty')
 
-    import meerschaum.connectors.sql
+    from meerschaum.connectors import get_connector
     from meerschaum.config import config as cf
 
     method = None
@@ -49,11 +49,10 @@ def sql(
     if action[0] in exec_methods and len(action) == 1:
         print(sql.__doc__)
         return (False, 'Query must not be empty')
-    ### attempt to use label
-    try:
-        conn = meerschaum.connectors.sql.SQLConnector(label)
-    except Exception as e:
-        return False, e
+
+    if (conn := get_connector(type='sql', label=label, debug=debug)) is False:
+        return False, ("Could not create SQL connector '{label}'.\n"
+            "Verify meerschaum:connectors:sql:{label} is defined with `edit config`")
 
     if debug:
         print(action)
