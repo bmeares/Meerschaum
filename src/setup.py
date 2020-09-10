@@ -26,7 +26,7 @@ setuptools.setup(
         'databases',
         'aiosqlite',
         'graphene',
-        'asyncpc',
+        'asyncpg',
     ],
     entry_points = {
         'console_scripts' : [
