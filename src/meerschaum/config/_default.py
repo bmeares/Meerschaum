@@ -122,7 +122,7 @@ def write_default_config(
     NOTE: regenerates passwords
     """
     import yaml, os
-    os.remove(default_path)
+    if os.path.isfile(default_path): os.remove(default_path)
     if debug: print(f"Writing default configuration to {default_path}...")
     with open(default_path, 'w') as f:
         f.write(default_header_comment)
