@@ -61,7 +61,8 @@ def choose_subaction(
 def get_modules_from_package(
         package : 'package',
         names : bool = False,
-        recursive : bool = False
+        recursive : bool = False,
+        debug : bool = False
     ):
     """
     Find and import all modules in a package.
@@ -85,13 +86,14 @@ def get_modules_from_package(
                     and not f.endswith('__pycache__')
     ]
 
+    if debug: print(_all)
     modules = []
     for module_name in [package.__name__ + "." + mod_name for mod_name in _all]:
         ### there's probably a better way than a try: catch but it'll do for now
         try:
             modules.append(importlib.import_module(module_name))
         except Exception as e:
-            #  print(e)
+            if debug: print(e)
             pass
     if names:
         return _all, modules
@@ -100,7 +102,8 @@ def get_modules_from_package(
 def import_children(
         package : 'package' = None,
         package_name : str = None,
-        types : list = ['method', 'builtin', 'function', 'class']
+        types : list = ['method', 'builtin', 'function', 'class'],
+        debug : bool = False
     ) -> list:
     """
     Import all functions in a package to its __init__.
@@ -133,7 +136,7 @@ def import_children(
     ### Set attributes in sys module version of package.
     ### Kinda like setting a dictionary
     ###   functions[name] = func
-    modules = get_modules_from_package(package)
+    modules = get_modules_from_package(package, debug=debug)
     _all, members = [], []
     for module in modules:
         for ob in inspect.getmembers(module):
@@ -143,7 +146,8 @@ def import_children(
                     _all.append(ob[0])
                     members.append(ob[1])
     
-    ### set __all__
+    if debug: print(_all)
+    ### set __all__ for import *
     setattr(sys.modules[package_name], '__all__', _all)
     return members
 
@@ -159,14 +163,17 @@ def generate_password(
 def yes_no(
         question : str = '',
         options : list = ['y', 'n'],
-        default : str = 'y'
+        default : str = 'y',
+        wrappers : tuple = ('[', ']'),
     ) -> bool:
     """
     Print a question and prompt the user with a yes / no input
     
     Returns bool (answer)
     """
-    ending = " (" + "/".join([ o.upper() if o == default else o.lower() for o in options ]) + ") "
+    ending = f" {wrappers[0]}" + "/".join(
+                [ o.upper() if o == default else o.lower() for o in options ]
+                ) + f"{wrappers[1]} "
     print(question, end=ending, flush=True)
     answer = str(input()).lower()
     return answer == options[0].lower()

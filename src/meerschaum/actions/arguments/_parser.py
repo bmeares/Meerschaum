@@ -33,5 +33,8 @@ parser.add_argument(
     '--force', '-f', action="store_true", help="Override safety checks"
 )
 parser.add_argument(
-    '--port', '-p', type=int, help="Specify a port on which to run the Web API server"
+    '--port', '-p', type=int, help="The port on which to run the Web API server"
+)
+parser.add_argument(
+    '--workers', '-w', type=int, help="How many workers to run a concurrent task"
 )
