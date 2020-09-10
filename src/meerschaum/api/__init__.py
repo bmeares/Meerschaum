@@ -8,7 +8,7 @@ from fastapi import FastAPI
 import graphene
 from starlette.graphql import GraphQLApp
 
-connector = meerschaum.connectors.SQLConnector(label="metadata")
+connector = meerschaum.connectors.SQLConnector(label="meta")
 database = connector.db
 
 ### TODO move GraphQL queries somewhere
