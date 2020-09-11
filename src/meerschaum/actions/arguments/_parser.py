@@ -8,6 +8,7 @@ This module creates the argparse Parser
 
 import argparse
 from meerschaum.config import __doc__ as doc
+from meerschaum.utils.misc import parse_params
 
 parser = argparse.ArgumentParser(
     description="Meerschaum actions parser",
@@ -37,4 +38,7 @@ parser.add_argument(
 )
 parser.add_argument(
     '--workers', '-w', type=int, help="How many workers to run a concurrent task"
+)
+parser.add_argument(
+    '--params', '-P', type=parse_params, help="Parameters dictionary"
 )
