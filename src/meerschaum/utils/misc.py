@@ -229,3 +229,16 @@ def get_options_functions():
     parent_package = parent_globals['__name__']
     print(parent_package)
 
+def parse_params(
+        params_string : str
+    ) -> dict:
+    """
+    Parse a string into a dictionary
+    """
+    params_dict = dict()
+    for param in params_string.split(","):
+        values = param.split(":")
+        key = values[0]
+        for value in values[1:]:
+            params_dict[key] = value
+    return params_dict

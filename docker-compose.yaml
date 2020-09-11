@@ -1,5 +1,26 @@
 version: "3.8"
 services:
+  meerschaum_db:
+    environment:
+      - TIMESCALEDB_TELEMETRY=off
+      - POSTGRES_USER=${POSTGRES_USER}
+      - POSTGRES_DB=${POSTGRES_DB}
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD}
+    image: "timescale/timescaledb:${TIMESCALEDB_VERSION}"
+    ports:
+      - "5432:5432"
+    hostname: "meerschaum_db"
+    volumes:
+      - meerschaum_db_data:/var/lib/postgresql/data
+    networks:
+      - backend
+      - frontend
+    # deploy:
+      # placement:
+        # max_replicas_per_node: 1
+        # constraints:
+          # - "node.role==manager"
+
   # redis:
     # image: redis
     # ports:
@@ -15,7 +36,7 @@ services:
         # condition: on-failure
 
   grafana:
-    image: "grafana/grafana"
+    image: "grafana/grafana:latest"
     ports:
       - "3000:3000"
     networks:
@@ -23,24 +44,17 @@ services:
     volumes:
       - grafana-storage:/var/lib/grafana
 
-  meerschaum_db:
-    environment:
-      - TIMESCALEDB_TELEMETRY=off
-      - POSTGRES_USER=${POSTGRES_USER}
-      - POSTGRES_DB=${POSTGRES_DB}
-      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD}
-    image: "timescale/timescaledb:${TIMESCALEDB_VERSION}"
-    ports:
-      - "5432:5432"
-    volumes:
-      - meerschaum_db_data:/var/lib/postgresql/data
-    networks:
-      - backend
-    # deploy:
-      # placement:
-        # max_replicas_per_node: 1
-        # constraints:
-          # - "node.role==manager"
+  # meerschaum_api:
+    # image: "bmeares/meerschaum:latest"
+    # ports:
+      # - "8000:8000"
+    # hostname: "meerschaum_api"
+    # networks:
+      # - frontend
+      # - backend
+    # command: "api"
+    # depends_on:
+      # - meerschaum_db
 
 networks:
   frontend:

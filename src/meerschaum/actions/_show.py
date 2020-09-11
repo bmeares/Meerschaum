@@ -28,11 +28,13 @@ def show(
     
     from meerschaum.utils.misc import choose_subaction
     show_options = {
-        'actions' : _show_actions,
-        'pipes'   : _show_pipes,
-        'config'  : _show_config,
-        'modules' : _show_modules,
-        'version' : _show_version,
+        'actions'    : _show_actions,
+        'pipes'      : _show_pipes,
+        'config'     : _show_config,
+        'modules'    : _show_modules,
+        'version'    : _show_version,
+        'connectors' : _show_connectors,
+        'arguments'  : _show_arguments,
     }
     return choose_subaction(action, show_options, **kw)
 
@@ -87,13 +89,34 @@ def _show_dict(
     return (True, "Success")
 
 ### TODO
-def _show_pipes(**kw):
+def _show_pipes(**kw) -> tuple:
     return (True, "Success")
 
-def _show_version(**kw):
+def _show_version(**kw) -> tuple:
     """
     Show the Meerschaum doc string
     """
     from meerschaum import __doc__ as doc
     print(doc)
     return (True, "Success")
+
+def _show_connectors(
+        debug : bool = False,
+        **kw
+    ) -> tuple:
+    from meerschaum.connectors import connectors
+    from meerschaum.config import config
+    from meerschaum.utils.formatting import make_header
+    import pprint
+    print(make_header("\nConfigured connectors:"))
+    pprint.pprint(config['meerschaum']['connectors'])
+    print(make_header("\nActive connectors:"))
+    pprint.pprint(connectors)
+    return True, "Success"
+
+def _show_arguments(
+        **kw
+    ):
+    import pprint
+    pprint.pprint(kw)
+    return True, "Success"
