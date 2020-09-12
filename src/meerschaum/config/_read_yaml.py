@@ -5,7 +5,7 @@
 Import the config yaml file
 """
 
-import yaml, sys, shutil, os.path
+import yaml, sys, shutil, os
 try:
     import importlib.resources as pkg_resources
 except ImportError:
@@ -35,3 +35,24 @@ except Exception as e:
     print(e)
     sys.exit()
 
+### apply preprocessing (e.g. main -> meta (if empty))
+from meerschaum.config._preprocess import preprocess_config
+config = preprocess_config(config)
+
+### if patch.yaml exists, patch config
+from meerschaum.config._patch import patch, patch_config
+if patch is not None: config = patch_config(config, patch)
+
+### if environment variable MEERSCHAUM_CONFIG is set, , patch config
+from meerschaum.utils.misc import string_to_dict
+environment_config = 'MEERSCHAUM_CONFIG'
+if environment_config in os.environ:
+    try:
+        config = patch_config(config, string_to_dict(str(os.environ[environment_config])))
+    except Exception as e:
+        print(
+            f"Environment variable {environment_config} is set but cannot be parsed.\n"
+            f"Unset {environment_config} or change to JSON or simplified dictionary format (see --help, under params for formatting)\n"
+            f"{environment_config} is set to:\n{os.environ[environment_config]}\n"
+            f"Skipping patching os environment into config..."
+        )

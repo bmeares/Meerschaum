@@ -73,8 +73,12 @@ class Shell(cmd.Cmd):
         ### execute the meerschaum action
         ### and print the response message in case of failure
         response = func(**args)
-        if isinstance(response, tuple) and not response[0]:
-            print("\nError message:", response[1])
+        if isinstance(response, tuple):
+            output = "\n"
+            if not response[0]: output += "Error message: " + response[1]
+            elif self.debug: output += response[1]
+            if len(output) > 1:
+                print(output)
         return ""
 
     def default(self, line):

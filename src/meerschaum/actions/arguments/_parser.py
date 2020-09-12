@@ -8,6 +8,8 @@ This module creates the argparse Parser
 
 import argparse
 from meerschaum.config import __doc__ as doc
+from meerschaum.utils.misc import string_to_dict
+import json
 
 parser = argparse.ArgumentParser(
     description="Meerschaum actions parser",
@@ -33,5 +35,22 @@ parser.add_argument(
     '--force', '-f', action="store_true", help="Override safety checks"
 )
 parser.add_argument(
-    '--port', '-p', type=int, help="Specify a port on which to run the Web API server"
+    '--port', '-p', type=int, help="The port on which to run the Web API server"
+)
+parser.add_argument(
+    '--workers', '-w', type=int, help="How many workers to run a concurrent task"
+)
+parser.add_argument(
+    '--params', '-P', type=string_to_dict, help=(
+        "Parameters dictionary in JSON format or simple format. Simple format is for one-depth dictionaries and does not need braces or quotes.\nJSON Example:\n"
+        "--params '{\"meerschaum\" : { \"connectors\" : \"main\" : { \"host\" : \"localhost\" } } }'"
+        "\n\nSimple example:\n"
+        "--params key1:value1,key2:value2"
+    )
+)
+parser.add_argument(
+    '--config', '-c', type=string_to_dict, help=(
+        "Temporarily update configuration for a single command. "
+        "See --params on formatting details."
+    )
 )

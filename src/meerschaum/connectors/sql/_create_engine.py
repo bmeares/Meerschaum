@@ -59,7 +59,12 @@ flavor_configs = {
         },
 }
 
-def create_engine(self, debug=False, **kw) -> 'sqlalchemy.engine.Engine':
+def create_engine(
+        self,
+        include_uri : bool = False,
+        debug : bool = False,
+        **kw
+    ) -> 'sqlalchemy.engine.Engine':
     """
     Create a sqlalchemy engine by building the engine string.
 
@@ -71,26 +76,29 @@ def create_engine(self, debug=False, **kw) -> 'sqlalchemy.engine.Engine':
         if a not in self.__dict__:
             self.__dict__[a] = value
 
+    connect_args = self.sys_config['connect_args']
     if self.flavor == "sqlite":
         engine_str = f"sqlite:///{self.database}.sqlite"
+        connect_args.update({"check_same_thread" : False})
     else:
         engine_str = (
             flavor_configs[self.flavor]['engine'] + "://" +
             self.username + ":" + urllib.parse.quote_plus(self.password) +
             "@" + self.host + ":" + str(self.port) + "/" + self.database
         )
-    if debug: print(engine_str)
-    return sqlalchemy.create_engine(
+    if debug: print(engine_str, connect_args)
+
+    engine = sqlalchemy.create_engine(
         engine_str,
-        pool_size=self.sys_config['pool_size'],
-        max_overflow=self.sys_config['max_overflow'],
-        pool_recycle=self.sys_config['pool_recycle'],
-        
+        pool_size    = self.sys_config['pool_size'],
+        max_overflow = self.sys_config['max_overflow'],
+        pool_recycle = self.sys_config['pool_recycle'],
+        connect_args = connect_args,
         ### I know this looks confusing, and maybe it's bad code,
         ### but it's simple. It dynamically parses the config string
         ### and splits it to separate the class name (QueuePool)
         ### from the module name (sqlalchemy.pool).
-        poolclass=getattr(
+        poolclass    = getattr(
             importlib.import_module(
                 ".".join(self.sys_config['poolclass'].split('.')[:-1])
             ),
@@ -98,4 +106,7 @@ def create_engine(self, debug=False, **kw) -> 'sqlalchemy.engine.Engine':
         ),
         **kw
     )
+
+    if include_uri: return engine, engine_str
+    return engine
 

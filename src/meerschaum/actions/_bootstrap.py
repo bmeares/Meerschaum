@@ -44,12 +44,13 @@ def _bootstrap_config(
     """
     Delete and regenerate the default Meerschaum configuration
     """
+    from meerschaum.utils.misc import reload_package, yes_no
+    import meerschaum.config
     import meerschaum.config._default as default
     import importlib, os
     from meerschaum.config._read_yaml import config_path
     answer = False
     if not yes:
-        from meerschaum.utils.misc import yes_no
         answer = yes_no(f"Delete {config_path}?", default='n')
 
     if answer or force:
@@ -61,4 +62,6 @@ def _bootstrap_config(
 
     if not default.write_default_config(debug=debug, **kw):
         return (False, "Failed to write default config")
+    reload_package(meerschaum.config, debug=debug, **kw)
+    reload_package(meerschaum.config, debug=debug, **kw)
     return (True, "Success")
