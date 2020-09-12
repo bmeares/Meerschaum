@@ -27,4 +27,8 @@ pip install --upgrade\
   databases\
   aiosqlite\
   graphene\
-  asyncpg
+  asyncpg\
+  cascadict\
+  fastapi\
+  pydantic\
+  pprintpp
