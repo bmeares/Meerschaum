@@ -8,11 +8,12 @@ Preprocessing on the configuration dictionary
 
 def preprocess_config(
         config : dict,
-        debug : bool =False,
+        debug : bool = False,
         **kw
     ) -> dict:
     """
     Apply preprocessing to the configuration dictionary
+    config : the config dict
     """
 
     ### if `meta` is not set, use `main`
@@ -23,3 +24,5 @@ def preprocess_config(
         config['meerschaum']['connectors']['sql']['meta'] = sql_connectors_config['main']
 
     return config 
+
+

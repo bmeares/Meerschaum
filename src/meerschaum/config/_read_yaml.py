@@ -35,3 +35,10 @@ except Exception as e:
     print(e)
     sys.exit()
 
+### apply preprocessing (e.g. main -> meta (if empty))
+from meerschaum.config._preprocess import preprocess_config
+config = preprocess_config(config)
+
+### if patch.yaml exists, patch config
+from meerschaum.config._patch import patch, patch_config
+if patch is not None: config = patch_config(config, patch)

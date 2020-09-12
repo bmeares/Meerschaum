@@ -28,6 +28,7 @@ setuptools.setup(
         'graphene',
         'asyncpg',
         'cascadict',
+        'pprintpp',
     ],
     entry_points = {
         'console_scripts' : [
