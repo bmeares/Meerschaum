@@ -14,25 +14,6 @@ services:
       - meerschaum_db_data:/var/lib/postgresql/data
     networks:
       - backend
-    # deploy:
-      # placement:
-        # max_replicas_per_node: 1
-        # constraints:
-          # - "node.role==manager"
-
-  # redis:
-    # image: redis
-    # ports:
-      # - "6379"
-    # networks:
-      # - frontend
-    # deploy:
-      # replicas: 2
-      # update_config:
-        # parallelism: 2
-        # delay: 10s
-      # restart_policy:
-        # condition: on-failure
 
   grafana:
     image: "grafana/grafana:latest"
@@ -40,6 +21,7 @@ services:
       - "3000:3000"
     networks:
       - frontend
+      - backend
     volumes:
       - grafana-storage:/var/lib/grafana
 
@@ -53,11 +35,11 @@ services:
       - backend
     command: "api"
     environment:
-      - MEERSCHAUM_CONFIG='{\"meerschaum\":{\"connectors\":{\"sql\":{\"meta\":{\"host\":\"${MEERSCHAUM_DB_HOSTNAME}\"}}}}}'
+      - MEERSCHAUM_CONFIG='{"meerschaum":{"connectors":{"sql":{"meta":{"host":"${MEERSCHAUM_DB_HOSTNAME}"}}}}}'
     depends_on:
       - meerschaum_db
-    # volumes:
-      # - meerschaum_config:${MEERSCHAUM_CONFIG_RESOURCES}
+    volumes:
+      - meerschaum_config:${MEERSCHAUM_CONFIG_RESOURCES}
 
 networks:
   frontend:
@@ -66,4 +48,4 @@ networks:
 volumes:
   meerschaum_db_data:
   grafana-storage:
-  # meerschaum_config:
+  meerschaum_config:
