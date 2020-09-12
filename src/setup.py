@@ -27,6 +27,7 @@ setuptools.setup(
         'aiosqlite',
         'graphene',
         'asyncpg',
+        'cascadict',
     ],
     entry_points = {
         'console_scripts' : [

@@ -15,6 +15,18 @@ def parse_arguments(sysargs : list) -> dict:
     """
     args, unknown = parser.parse_known_args(sysargs)
     if unknown: print(f"Unknown arguments: {unknown}")
+
+    ### if --config is not empty, cascade down config
+    ### and update new values on existing keys / add new keys/values
+    if args.config is not None:
+        import meerschaum.config
+        import cascadict
+        base = cascadict.CascaDict(meerschaum.config.config)
+        new = base.cascade(args.config)
+        meerschaum.config.config = new.copy_flat()
+        ### reapply preprocessing
+        meerschaum.config.config = meerschaum.config.preprocess_config(meerschaum.config.config)
+
     return parse_synonyms(vars(args))
 
 def parse_line(line : str) -> dict:
