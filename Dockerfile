@@ -1,4 +1,4 @@
-FROM python:latest
+FROM python:3.8-slim-buster
 MAINTAINER Bennett Meares <bennett.meares@gmail.com>
 
 ### install system requirements
