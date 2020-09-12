@@ -22,7 +22,13 @@ pip install --upgrade\
   numpy\
   python-dateutil\
   psycopg2-binary\
-  six
-  # flask\
-  # flask_restful\
-  # gunicorn
+  six\
+  uvicorn\
+  databases\
+  aiosqlite\
+  graphene\
+  asyncpg\
+  cascadict\
+  fastapi\
+  pydantic\
+  pprintpp

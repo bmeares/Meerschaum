@@ -14,6 +14,8 @@ class SQLConnector(Connector):
     """
     from ._create_engine import flavor_configs, create_engine
     from ._sql import read, exec, to_sql
+    
+
     def __init__(
             self,
             label='main',
@@ -21,8 +23,12 @@ class SQLConnector(Connector):
             debug=False,
             **kw
         ):
+        """
+        Build the SQLConnector engine and connect to the database
+        """
+        import databases, sqlalchemy, asyncio
         ### set __dict__ in base class
-        super(SQLConnector, self).__init__('sql', label=label, **kw)
+        super().__init__('sql', label=label, **kw)
 
         ### ensure flavor and label are set accordingly
         if 'flavor' not in self.__dict__ and flavor is None:
@@ -34,6 +40,20 @@ class SQLConnector(Connector):
             raise Exception(f'Flavor {self.flavor} is not supported by Meerschaum SQLConnector')
         self.verify_attributes(self.flavor_configs[self.flavor]['requirements'], debug=debug)
 
-        ### build the sqlalchemy engine
-        self.engine = self.create_engine(debug=debug)
+        ### build the sqlalchemy engine and set DATABASE_URL
+        self.engine, self.DATABASE_URL = self.create_engine(include_uri=True, debug=debug)
+
+    @property
+    def metadata(self):
+        import sqlalchemy
+        if '_metadata' not in self.__dict__:
+            self._metadata = sqlalchemy.MetaData(self.engine)
+        return self._metadata
+
+    @property
+    def db(self):
+        import databases
+        if '_db' not in self.__dict__:
+            self._db = databases.Database(self.DATABASE_URL)
+        return self._db
 

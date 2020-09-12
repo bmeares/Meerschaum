@@ -6,10 +6,42 @@
 Import Connector subclasses
 """
 
-import lazy_import
 from meerschaum.connectors.Connector import Connector
 from meerschaum.connectors.sql import SQLConnector
 
-### lazy import SQLConnector to delay importing pandas until necessary
-#  SQLConnector = lazy_import.lazy_callable("meerschaum.connectors.sql.SQLConnector")
+### store connectors partitioned by
+### type, label for resuse
+connectors = {
+    'api' : dict(),
+    'sql' : dict(),
+}
 
+def get_connector(
+        type : str = "sql",
+        label : str = "main",
+        debug : bool = False,
+        **kw
+    ):
+    """
+    Return existing connector or create new connection and store for reuse.
+
+    type : str (default "sql")
+        Connector type (sql, api, etc.)
+    label : str (default "main")
+        Connector label (e.g. main)
+
+    You can create new connectors if enough parameters are provided for the given type and flavor.
+    Example: flavor='sqlite', database='newdb'
+    """
+    if type not in connectors:
+        print(f"Cannot create Connector of type {type}")
+        return False        
+    if label not in connectors[type]:
+        try:
+            conn = SQLConnector(type=type, label=label, debug=debug, **kw)
+        except Exception as e:
+            print(e)
+            return False
+        connectors[type][label] = conn
+
+    return connectors[type][label]

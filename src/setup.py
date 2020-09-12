@@ -22,6 +22,13 @@ setuptools.setup(
         'pyyaml',
         'lazy_import',
         'fastapi',
+        'uvicorn',
+        'databases',
+        'aiosqlite',
+        'graphene',
+        'asyncpg',
+        'cascadict',
+        'pprintpp',
     ],
     entry_points = {
         'console_scripts' : [

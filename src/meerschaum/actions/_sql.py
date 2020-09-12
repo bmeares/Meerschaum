@@ -18,7 +18,7 @@ def sql(
     ):
     """
     Execute a SQL query and print the output.
-    Usage: `sql [query / table]`
+    Usage: `sql {label} [query / table]`
 
     Options:
         - `sql read [query / table]`
@@ -31,24 +31,32 @@ def sql(
         print(sql.__doc__)
         return (False, 'Query must not be empty')
 
+    from meerschaum.connectors import get_connector
+    from meerschaum.config import config as cf
+
+    method = None
+    label = None
+    query = action[-1]
+    for a in action[:-1]:
+        if a in exec_methods:
+            method = a
+            continue
+        if a in cf['meerschaum']['connectors']['sql']:
+            label = a
+    if method is None: method = 'read'
+    if label is None: label = 'main'
+
+    if action[0] in exec_methods and len(action) == 1:
+        print(sql.__doc__)
+        return (False, 'Query must not be empty')
+
+    if (conn := get_connector(type='sql', label=label, debug=debug)) is False:
+        return False, ("Could not create SQL connector '{label}'.\n"
+            "Verify meerschaum:connectors:sql:{label} is defined with `edit config`")
+
     if debug:
         print(action)
-
-    import meerschaum.connectors.sql
-    conn = meerschaum.connectors.sql.SQLConnector()
-
-    ### guess the method from the actions list
-    ### (default to 'read' if not provided)
-    if action[0] in exec_methods:
-        method = action[0]
-        try:
-            query = action[1]
-        except IndexError:
-            print(sql.__doc__)
-            return (False, 'Query must not be empty')
-    else:
-        method = 'read'
-        query = action[0]
+        print(conn)
 
     ### guess the method from the structure of the query
     if 'select' in query.lower() or ' ' not in query:

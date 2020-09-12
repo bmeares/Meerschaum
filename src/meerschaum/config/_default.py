@@ -22,9 +22,15 @@ defaut_meerschaum_config = {
                 'host'     : 'localhost',
                 'username' : 'meerschaum',
                 'password' : 'meerschaum',
-                'database' : 'meerschaum_db',
+                'database' : 'mrsm_main',
                 'port'     : 5432,
-            }
+            },
+            'meta'     : {
+            },
+            'local'        : {
+                'flavor'   : 'sqlite',
+                'database' : 'mrsm_local'
+            },
         },
         'api' : {
             'main' : {
@@ -50,6 +56,7 @@ default_system_config = {
             'max_overflow' : 10,
             'pool_recycle' : 3600,
             'poolclass'    : 'sqlalchemy.pool.QueuePool',
+            'connect_args' : {},
         },
 
         'api' : {
@@ -61,14 +68,19 @@ default_system_config = {
     },
     ### not to be confused with system_config['connectors']['api']
     'api' : {
-        'flask_app' : {
-            'SECRET_KEY'   : generate_password()
+        'uvicorn'          : {
+            'app'          : 'meerschaum.api:fast_api',
+            'port'         : 8000,
+            'host'         : '0.0.0.0',
+            'workers'      : 4,
         },
         'username'         : defaut_meerschaum_config['connectors']['api']['main']['username'],
         'password'         : defaut_meerschaum_config['connectors']['api']['main']['password'],
         'protocol'         : defaut_meerschaum_config['connectors']['api']['main']['protocol'],
-        'version'          : '0.0.1',
-        'port'             : 8000,
+        'version'          : '0.0.2',
+        'endpoints'        : {
+            'mrsm'         : '/mrsm',
+        }
     },
 }
 
@@ -109,8 +121,9 @@ def write_default_config(
     Overwrite the existing default_config.yaml.
     NOTE: regenerates passwords
     """
-    import yaml
-    if debug: print(f"Overwriting {default_path} with header comment...")
+    import yaml, os
+    if os.path.isfile(default_path): os.remove(default_path)
+    if debug: print(f"Writing default configuration to {default_path}...")
     with open(default_path, 'w') as f:
         f.write(default_header_comment)
         yaml.dump(default_config, f)

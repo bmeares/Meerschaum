@@ -21,4 +21,3 @@ def reload(
 
     return (True, "Success")
 
-#  def deleteme(**kw): pass
