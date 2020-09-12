@@ -18,6 +18,8 @@ def edit_config(
 
     if params is not None:
         meerschaum.config.config.update(params)
+        if not write_config(meerschaum.config.config, debug=debug):
+            return False, "Failed to update config!"
     else:
         ### get editor from environment
         EDITOR = os.environ.get('EDITOR', meerschaum.config.system_config['shell']['default_editor'])
@@ -45,7 +47,7 @@ def write_config(
     if config_dict is None:
         config_dict = config
 
-    with open(default_path, 'w') as f:
+    with open(config_path, 'w') as f:
         f.write(default_header_comment)
         yaml.dump(config_dict, f)
 

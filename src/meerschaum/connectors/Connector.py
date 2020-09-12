@@ -7,9 +7,9 @@ Generic Connector class
 Defines basic data that Connectors should contain
 """
 
-from meerschaum.config import config as cf
-conn_configs = cf['meerschaum']['connectors']
-connector_config = cf['system']['connectors']
+import meerschaum.config
+conn_configs = meerschaum.config.config['meerschaum']['connectors']
+connector_config = meerschaum.config.config['system']['connectors']
 import lazy_import
 
 class Connector:

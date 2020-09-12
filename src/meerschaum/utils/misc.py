@@ -229,16 +229,34 @@ def get_options_functions():
     parent_package = parent_globals['__name__']
     print(parent_package)
 
-def parse_params(
+def string_to_dict(
         params_string : str
     ) -> dict:
     """
     Parse a string into a dictionary
+
+    If the string begins with '{', parse as JSON. Else use simple parsing
+
     """
+
+    import ast
+
+    if str(params_string)[0] == '{':
+        import json
+        return json.loads(params_string)
+
     params_dict = dict()
     for param in params_string.split(","):
         values = param.split(":")
-        key = values[0]
+        try:
+            key = ast.literal_eval(values[0])
+        except:
+            key = str(values[0])
+
         for value in values[1:]:
-            params_dict[key] = value
+            try:
+                params_dict[key] = ast.literal_eval(value)
+            except:
+                params_dict[key] = str(value)
     return params_dict
+
