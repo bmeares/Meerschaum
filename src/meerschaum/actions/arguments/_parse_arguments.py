@@ -20,12 +20,13 @@ def parse_arguments(sysargs : list) -> dict:
     ### and update new values on existing keys / add new keys/values
     if args.config is not None:
         import meerschaum.config
-        import cascadict
-        base = cascadict.CascaDict(meerschaum.config.config)
-        new = base.cascade(args.config)
-        meerschaum.config.config = new.copy_flat()
-        ### reapply preprocessing
-        meerschaum.config.config = meerschaum.config.preprocess_config(meerschaum.config.config)
+        from meerschaum.config._patch import write_patch
+        from meerschaum.utils.misc import reload_package
+        write_patch(args.config)
+        #  meerschaum.config.apply_patch(args.config)
+        #  meerschaum.config.config = meerschaum.config.preprocess_config(meerschaum.config.config, patch=args.config)
+        reload_package(meerschaum.config)
+        reload_package(meerschaum.config)
 
     return parse_synonyms(vars(args))
 

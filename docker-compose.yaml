@@ -14,7 +14,6 @@ services:
       - meerschaum_db_data:/var/lib/postgresql/data
     networks:
       - backend
-      - frontend
     # deploy:
       # placement:
         # max_replicas_per_node: 1
@@ -53,9 +52,10 @@ services:
       - frontend
       - backend
     command: "api -c '{\"meerschaum\":{\"connectors\":{\"sql\":{\"meta\":{\"host\":\"${MEERSCHAUM_DB_HOSTNAME}\"}}}}}'"
-    # command: "show config -c '{\"meerschaum\":{\"connectors\":{\"sql\":{\"meta\":{\"host\":\"${MEERSCHAUM_DB_HOSTNAME}\"}}}}}'"
     depends_on:
       - meerschaum_db
+    # volumes:
+      # - meerschaum_config:${MEERSCHAUM_CONFIG_RESOURCES}
 
 networks:
   frontend:
@@ -64,3 +64,4 @@ networks:
 volumes:
   meerschaum_db_data:
   grafana-storage:
+  # meerschaum_config:

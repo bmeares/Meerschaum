@@ -25,7 +25,8 @@ def api(
     """
     from meerschaum.utils.misc import is_int
     from meerschaum.api import sys_config as api_config, __version__
-    import pprint, uvicorn
+    from pprintpp import pprint
+    import uvicorn
 
     uvicorn_config = dict(api_config['uvicorn'])
     if port is None:
@@ -38,8 +39,12 @@ def api(
 
     uvicorn_config['port'] = port
 
+    if debug:
+        from meerschaum.api import connector
+        print(f"Connection to database: {connector.host}")
+
     print(f"Starting Meerschaum API v{__version__} with the following configuration:")
-    pprint.pprint(uvicorn_config)
+    pprint(uvicorn_config)
     uvicorn.run(**uvicorn_config)
 
     return (True, "Success")

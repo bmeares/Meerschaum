@@ -45,21 +45,25 @@ def _show_actions(**kw) -> tuple:
     from meerschaum.actions import actions
     return _show_dict(options=actions, **kw)
 
-def _show_config(**kw) -> tuple:
+def _show_config(
+        debug : bool = False,
+        **kw
+    ) -> tuple:
     """
     Show the configuration dictionary
     """
-    import pprint
-    from meerschaum.config import config as cf
-    pprint.pprint(cf)
+    from pprintpp import pprint
+    from meerschaum.config import config, config_path
+    if debug: print(f"Configuration loaded from {config_path}")
+    pprint(config)
     return (True, "Success")
 
 def _show_modules(**kw) -> tuple:
     """
     Show the currently imported modules
     """
-    import sys, pprint
-    pprint.pprint(list(sys.modules.keys()))
+    import sys, pprintpp
+    pprintpp.pprint(list(sys.modules.keys()))
     return (True, "Success")
 
 def _show_dict(
@@ -107,16 +111,16 @@ def _show_connectors(
     from meerschaum.connectors import connectors
     from meerschaum.config import config
     from meerschaum.utils.formatting import make_header
-    import pprint
+    from pprintpp import pprint
     print(make_header("\nConfigured connectors:"))
-    pprint.pprint(config['meerschaum']['connectors'])
+    pprint(config['meerschaum']['connectors'])
     print(make_header("\nActive connectors:"))
-    pprint.pprint(connectors)
+    pprint(connectors)
     return True, "Success"
 
 def _show_arguments(
         **kw
     ):
-    import pprint
-    pprint.pprint(kw)
+    from pprintpp import pprint
+    pprint(kw)
     return True, "Success"
