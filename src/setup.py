@@ -38,6 +38,6 @@ setuptools.setup(
         ],
     },
     zip_safe = True,
-    package_data = {'' : ['*.yaml']},
+    package_data = {'' : ['*.yaml', '*.env']},
     python_requires = '>=3.8'
 )
