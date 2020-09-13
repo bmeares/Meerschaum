@@ -64,20 +64,26 @@ def general_write_config(
         Dictionary of paths -> dict or tuple of format (dict, header).
         If item is a tuple, the header will be written at the top of the file.
     """
+
+    from pathlib import Path
+
     for fp, value in files.items():
         config = value
         header = None
         if isinstance(value, tuple):
             config, header = value
-        with open(fp, 'w') as f:
+        path = Path(fp)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.touch(exist_ok=True)
+        with open(path, 'w+') as f:
             if header is not None:
-                if debug: print(f"Header detected, writing to {fp}...")
+                if debug: print(f"Header detected, writing to {path}...")
                 f.write(header)
             if isinstance(config, str):
-                if debug: print(f"Config is a string. Writing to {fp}...")
+                if debug: print(f"Config is a string. Writing to {path}...")
                 f.write(config)
             elif isinstance(config, dict):
-                if debug: print(f"Config is a dict. Writing to {fp}...")
+                if debug: print(f"Config is a dict. Writing to {path}...")
                 import yaml
                 yaml.dump(config, f)
 
