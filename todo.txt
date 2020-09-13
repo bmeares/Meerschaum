@@ -1,4 +1,3 @@
-- fix bootstrap config
 - delete
 - actions in WebAPI
 - Pipes
