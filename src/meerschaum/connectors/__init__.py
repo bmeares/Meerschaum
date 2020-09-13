@@ -8,12 +8,17 @@ Import Connector subclasses
 
 from meerschaum.connectors.Connector import Connector
 from meerschaum.connectors.sql import SQLConnector
+from meerschaum.connectors.api._APIConnector import APIConnector
 
 ### store connectors partitioned by
 ### type, label for resuse
 connectors = {
     'api' : dict(),
     'sql' : dict(),
+}
+types = {
+    'api' : APIConnector,
+    'sql' : SQLConnector,
 }
 
 def get_connector(
@@ -38,9 +43,9 @@ def get_connector(
         return False        
     if label not in connectors[type]:
         try:
-            conn = SQLConnector(type=type, label=label, debug=debug, **kw)
+            conn = types[type](label=label, debug=debug, **kw)
         except Exception as e:
-            print(e)
+            print('Cannot build connector:', e)
             return False
         connectors[type][label] = conn
 
