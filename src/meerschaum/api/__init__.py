@@ -8,7 +8,7 @@ from fastapi import FastAPI
 import graphene
 from starlette.graphql import GraphQLApp
 
-connector = get_connector(label="meta")
+connector = get_connector(type="sql", label="meta")
 database = connector.db
 
 ### TODO move GraphQL queries somewhere
