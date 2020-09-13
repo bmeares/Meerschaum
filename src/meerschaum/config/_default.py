@@ -38,6 +38,7 @@ defaut_meerschaum_config = {
                 'username' : 'meerschaum',
                 'password' : generate_password(),
                 'protocol' : 'http',
+                'port'     : 8000,
             }
         },
     },
@@ -70,7 +71,7 @@ default_system_config = {
     'api' : {
         'uvicorn'          : {
             'app'          : 'meerschaum.api:fast_api',
-            'port'         : 8000,
+            'port'         : defaut_meerschaum_config['connectors']['api']['main']['port'],
             'host'         : '0.0.0.0',
             'workers'      : 4,
         },

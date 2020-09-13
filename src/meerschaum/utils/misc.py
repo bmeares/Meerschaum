@@ -56,6 +56,7 @@ def choose_subaction(
         for option in options:
             print(f"  - {parent_action} {option}")
         return (False, f"Invalid choice '{choice}'")
+    kw['action'] = action
     return options[choice](**kw)
 
 def get_modules_from_package(
