@@ -10,7 +10,7 @@ setuptools.setup(
     name = 'meerschaum',
     version = __version__,
     description = 'The Meerschaum Project software library',
-    url = '#',
+    url = 'https://github.com/bmeares/Meerschaum',
     author = 'Bennett Meares',
     author_email = 'bennett.meares@gmail.com',
     license = 'MIT',
