@@ -15,12 +15,11 @@ class SQLConnector(Connector):
     from ._create_engine import flavor_configs, create_engine
     from ._sql import read, exec, to_sql
     
-
     def __init__(
             self,
-            label='main',
-            flavor=None,
-            debug=False,
+            label : str ='main',
+            flavor : str= None,
+            debug : bool = False,
             **kw
         ):
         """

@@ -6,15 +6,14 @@
 Write the default configuration values to config.yaml.
 """
 
-from meerschaum.utils.misc import generate_password
+#  from meerschaum.utils.misc import generate_password
 import yaml, sys, shutil, os.path
 try:
     import importlib.resources as pkg_resources
 except ImportError:
     import importlib_resources as pkg_resources
 
-
-defaut_meerschaum_config = {
+default_meerschaum_config = {
     'connectors' : {
         'sql' : {
             'main' : {
@@ -36,13 +35,15 @@ defaut_meerschaum_config = {
             'main' : {
                 'host'     : 'localhost',
                 'username' : 'meerschaum',
-                'password' : generate_password(),
+                #  'password' : generate_password(),
+                'password' : 'meerschaum',
                 'protocol' : 'http',
                 'port'     : 8000,
             }
         },
     },
 }
+default_meerschaum_config['connectors']['api']['local'] = default_meerschaum_config['connectors']['api']['main']
 default_system_config = {
     'connectors' : {
         'all' : {
@@ -71,17 +72,17 @@ default_system_config = {
     'api' : {
         'uvicorn'          : {
             'app'          : 'meerschaum.api:fast_api',
-            'port'         : defaut_meerschaum_config['connectors']['api']['main']['port'],
+            'port'         : default_meerschaum_config['connectors']['api']['main']['port'],
             'host'         : '0.0.0.0',
             'workers'      : 4,
         },
-        'username'         : defaut_meerschaum_config['connectors']['api']['main']['username'],
-        'password'         : defaut_meerschaum_config['connectors']['api']['main']['password'],
-        'protocol'         : defaut_meerschaum_config['connectors']['api']['main']['protocol'],
-        'version'          : '0.0.2',
+        'username'         : default_meerschaum_config['connectors']['api']['local']['username'],
+        'password'         : default_meerschaum_config['connectors']['api']['local']['password'],
+        'protocol'         : default_meerschaum_config['connectors']['api']['local']['protocol'],
+        'version'          : '0.0.3',
         'endpoints'        : {
             'mrsm'         : '/mrsm',
-        }
+        },
     },
 }
 
@@ -91,7 +92,7 @@ with resources_context_manager as file_path:
     resources_path = file_path
 
 default_config = dict()
-default_config['meerschaum'] = defaut_meerschaum_config
+default_config['meerschaum'] = default_meerschaum_config
 default_config['system'] = default_system_config
 default_filename = 'default_config.yaml'
 default_path = os.path.join(resources_path, default_filename)
@@ -120,10 +121,11 @@ def write_default_config(
     ):
     """
     Overwrite the existing default_config.yaml.
-    NOTE: regenerates passwords
     """
     import yaml, os
+    from meerschaum.config._patch import patch_path
     if os.path.isfile(default_path): os.remove(default_path)
+    if os.path.isfile(patch_path): os.remove(patch_path)
     if debug: print(f"Writing default configuration to {default_path}...")
     with open(default_path, 'w') as f:
         f.write(default_header_comment)
