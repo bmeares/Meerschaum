@@ -21,7 +21,6 @@ def get_actions():
 
 @fast_api.post(actions_endpoint + "/{action}")
 def do_action(action : str, keywords : dict = Body(...)):
-    print(keywords)
     if action not in actions:
-        return False, f"Invalid action {action}"
+        return False, f"Invalid action '{action}'"
     return actions[action](**keywords)

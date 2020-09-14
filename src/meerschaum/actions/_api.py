@@ -43,28 +43,19 @@ def api(
     api_label = "main"
     args_to_send = list(sysargs)
     ### remove `api`
-    del args_to_send[0]
+    if 'api' in args_to_send: del args_to_send[0]
     if action[0] in api_configs:
         api_label = action[0]
         ### remove label from actions
         del action[0]
-        del args_to_send[0]
+        if len(args_to_send) > 1: del args_to_send[0]
     kw['action'] = action
-    del kw['action'][0]
     kw['debug'] = debug
     kw['sysargs'] = args_to_send
  
     api_conn = get_connector(type='api', label=api_label)
-    response = api_conn.do_action(**kw)
-    status = (response.status_code == 200)
-    succeeded = response.text[0]
-    msg = response.text[1]
-    response_json = json.loads(response.text)
-    if debug: print(response_json)
-    if debug: print(response.text)
-    if debug: print(type(response.text))
-    if debug: print(succeeded, msg)
-    return succeeded, msg
+    success, message = api_conn.do_action(**kw)
+    return success, message
 
 def _api_server(
         action : list = [''],

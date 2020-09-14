@@ -79,7 +79,7 @@ default_system_config = {
         'username'         : default_meerschaum_config['connectors']['api']['local']['username'],
         'password'         : default_meerschaum_config['connectors']['api']['local']['password'],
         'protocol'         : default_meerschaum_config['connectors']['api']['local']['protocol'],
-        'version'          : '0.0.2',
+        'version'          : '0.0.3',
         'endpoints'        : {
             'mrsm'         : '/mrsm',
         },
@@ -123,7 +123,9 @@ def write_default_config(
     Overwrite the existing default_config.yaml.
     """
     import yaml, os
+    from meerschaum.config._patch import patch_path
     if os.path.isfile(default_path): os.remove(default_path)
+    if os.path.isfile(patch_path): os.remove(patch_path)
     if debug: print(f"Writing default configuration to {default_path}...")
     with open(default_path, 'w') as f:
         f.write(default_header_comment)
