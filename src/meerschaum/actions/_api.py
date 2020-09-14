@@ -7,21 +7,70 @@ Start the Meerschaum WebAPI with the `api` action.
 
 def api(
         action : list = [''],
+        sysargs : list = [],
+        debug : bool = False,
+        **kw
+    ):
+    """
+    Send commands to a Meerschaum WebAPI instance or boot a new instance
+
+    Usage: `api [commands] {options}`
+    Examples:
+        - `api [start, boot, init]`
+            - start the API server
+        - `api show config`
+            - execute `show config` on the `main` api instance
+        - `api main show config`
+            - see above
+    
+    If command is `server`, launch the Meerschaum WebAPI. If command is an api connector label,
+        connect to that label. Otherwise connect to `main` api connector.
+    """
+    if action[0] == '':
+        print(api.__doc__)
+        return False, "Please provide a command to excecute (see above)"
+
+    boot_keywords = {'start', 'boot', 'init'}
+    if action[0] in boot_keywords:
+        return _api_server(action=action, debug=debug, **kw)
+
+    from meerschaum.config import config as cf
+    from meerschaum.connectors import get_connector
+    import requests
+    if debug: from pprintpp import pprint
+    api_configs = cf['meerschaum']['connectors']['api']
+
+    api_label = "main"
+    args_to_send = list(sysargs)
+    ### remove `api`
+    if 'api' in args_to_send: del args_to_send[0]
+    if action[0] in api_configs:
+        api_label = action[0]
+        ### remove label from actions
+        del action[0]
+        if len(args_to_send) > 1: del args_to_send[0]
+    kw['action'] = action
+    kw['debug'] = debug
+    kw['sysargs'] = args_to_send
+ 
+    api_conn = get_connector(type='api', label=api_label)
+    success, message = api_conn.do_action(**kw)
+    return success, message
+
+def _api_server(
+        action : list = [''],
         port : int = None,
         workers : int = None,
         debug : bool = False,
         **kw
     ):
     """
-    Run the Meerschaum WebAPI
-
-    Usage: `api {options}`
+    Usage: `api server {options}`
     Options:
         - `-p, --port {number}`
             Port to listen to
         - `-w, --workers {number}`
             How many worker threads to run
-
     """
     from meerschaum.utils.misc import is_int
     from meerschaum.api import sys_config as api_config, __version__
@@ -30,9 +79,11 @@ def api(
 
     uvicorn_config = dict(api_config['uvicorn'])
     if port is None:
-        if is_int(action[0]):
-            port = int(action[0])
-        else: port = uvicorn_config['port']
+        ### default
+        port = uvicorn_config['port']
+        if len(action) > 1:
+            if is_int(action[1]):
+                port = int(action[1])
 
     if workers is not None:
         uvicorn_config['workers'] = workers
@@ -48,3 +99,4 @@ def api(
     uvicorn.run(**uvicorn_config)
 
     return (True, "Success")
+

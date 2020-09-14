@@ -97,7 +97,7 @@ stack_config = {
                 'frontend',
                 'backend'
             ],
-            'command' : 'api',
+            'command' : 'api start',
             'environment' : [
                 'MEERSCHAUM_CONFIG=${MEERSCHAUM_API_CONFIG}' 
             ],

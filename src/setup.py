@@ -3,8 +3,17 @@
 # vim:fenc=utf-8
 
 import setuptools
+from setuptools.command.install import install
 
 exec(open('meerschaum/config/_version.py').read())
+
+class PostInstallCommand(install):
+    """Post-installation for installation mode."""
+    def run(self):
+        install.run(self)
+        from meerschaum.actions import entry
+        entry(['bootstrap', 'config', '--debug', '--yes', '--force'])
+        entry(['bootstrap', 'stack', '--debug', '--yes', '--force'])
 
 setuptools.setup(
     name = 'meerschaum',
@@ -36,6 +45,9 @@ setuptools.setup(
             'Meerschaum = meerschaum.__main__:main',
             'mrsm = meerschaum.__main__:main'
         ],
+    },
+    cmdclass = {
+        'install' : PostInstallCommand,
     },
     zip_safe = True,
     package_data = {'' : ['*.yaml', '*.env']},
