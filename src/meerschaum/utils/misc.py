@@ -261,3 +261,32 @@ def string_to_dict(
                 params_dict[key] = str(value)
     return params_dict
 
+def parse_config_substitution(
+        value : str,
+        leading_key : str = '$MRSM',
+        delimeter : str = ','
+    ):
+    """
+    Parse Meerschaum config syntax
+    E.g. $MRSM{value1,value2} => ['value1', 'value2']
+    """
+    if not value.beginswith(leading_key):
+        return value
+    
+    return leading_key[len(leading_key):][1:-1].split(delimeter)
+    
+def search_for_substitution(
+        config : dict
+    ):
+    haystack = str(config)
+    modified_haystack = str(haystack)
+    needle = "$MRSM"
+    buff = str(needle)
+    max_index = len(haystack) - len(buff)
+    for i, letter in enumerate(haystack):
+        if i >= max_index: break
+        buff = haystack[i:i + len(needle)]
+        ### found needle. Step ahead to find end decorator
+        if buff == needle:
+            for c
+

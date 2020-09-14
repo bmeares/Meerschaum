@@ -24,7 +24,7 @@ def stack(
     from subprocess import call
     from meerschaum.config.stack import stack_resources_path, necessary_files, write_stack
     from meerschaum.utils.misc import yes_no
-    import os.path
+    import os
 
     bootstrap = False
     for fp in necessary_files:
