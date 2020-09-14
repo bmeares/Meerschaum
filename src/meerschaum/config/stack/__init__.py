@@ -43,6 +43,7 @@ POSTGRES_PASSWORD="{db_pass}"
 POSTGRES_DB="{db_base}"
 MEERSCHAUM_DB_HOSTNAME="{db_host}"
 MEERSCHAUM_API_HOSTNAME="{api_host}"
+ALLOW_IP_RANGE='0.0.0.0/0'
 """
 """
 MEERSCHAUM_API_CONFIG='{"meerschaum":{"connectors":{"sql":{"meta":{"host":"${MEERSCHAUM_DB_HOSTNAME}"}}}}}'
@@ -76,6 +77,7 @@ stack_config = {
                 'POSTGRES_USER=${POSTGRES_USER}',
                 'POSTGRES_DB=${POSTGRES_DB}',
                 'POSTGRES_PASSWORD=${POSTGRES_PASSWORD}',
+                'ALLOW_IP_RANGE=${ALLOW_IP_RANGE}',
             ],
             'image' : 'timescale/timescaledb:${TIMESCALEDB_VERSION}',
             'ports' : [

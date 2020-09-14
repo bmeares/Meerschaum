@@ -10,7 +10,27 @@ from meerschaum.api import fast_api, database
 
 @fast_api.on_event("startup")
 async def startup():
-    await database.connect()
+    async def connect(
+        max_retries : int = 20,
+        retry_wait : int = 3,
+        debug : bool = False
+    ):
+        import time
+        retries = 0
+        while retries < max_retries:
+            if debug:
+                print(f"Trying to connect to the database")
+                print(f"Attempt ({retries + 1} / {max_retries})")
+            try:
+                await database.connect()
+            except ConnectionRefusedError as e:
+                print(f"Connection failed. Retrying in {retry_wait} seconds...")
+                time.sleep(retry_wait)
+                retries += 1
+            else:
+                if debug: print("Connection established!")
+                break
+    await connect(debug=True)
 
 @fast_api.on_event("shutdown")
 async def startup():

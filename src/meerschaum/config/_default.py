@@ -84,6 +84,9 @@ default_system_config = {
             'mrsm'         : '/mrsm',
         },
     },
+    'arguments' : {
+        'sub_decorators'   : ['[', ']'],
+    },
 }
 
 ### file path of the resources package
