@@ -10,8 +10,8 @@ ADD ./src /src
 RUN pip install /src && rm -rf /src && mkdir -p /src
 
 ### Run post-install script
-ADD ./scripts/post_install.sh /root/post_install.sh
-RUN cd /root/ && /root/post_install.sh && rm -f /root/post_install.sh
+# ADD ./scripts/post_install.sh /root/post_install.sh
+# RUN cd /root/ && /root/post_install.sh && rm -f /root/post_install.sh
 
 ### shells launch inside /src (where we mount development files)
 WORKDIR /src
