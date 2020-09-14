@@ -12,15 +12,13 @@ except ImportError:
 
 
 import os, yaml
-from meerschaum.config._default import resources_path
-patch_filename = "patch.yaml"
-patch_path = os.path.join(resources_path, patch_filename)
-patch = None
-if os.path.isfile(patch_path):
+from meerschaum.config._paths import PATCH_FILENAME, PATCH_PATH
+patch_config = None
+if os.path.isfile(PATCH_PATH):
     patch = yaml.safe_load(
-                pkg_resources.read_text('meerschaum.config.resources', patch_filename)
-            )
-def patch_config(
+        pkg_resources.read_text('meerschaum.config.resources', PATCH_FILENAME)
+    )
+def apply_patch_to_config(
         config : dict,
         patch : dict
     ):

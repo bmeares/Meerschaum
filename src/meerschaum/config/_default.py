@@ -3,16 +3,11 @@
 # vim:fenc=utf-8
 
 """
-Write the default configuration values to config.yaml.
+The default configuration values to write to config.yaml.
 """
 
 #  from meerschaum.utils.misc import generate_password
-import yaml, sys, shutil, os.path
-try:
-    import importlib.resources as pkg_resources
-except ImportError:
-    import importlib_resources as pkg_resources
-
+import yaml, sys, os.path
 default_meerschaum_config = {
     'connectors' : {
         'sql' : {
@@ -89,16 +84,16 @@ default_system_config = {
     },
 }
 
-### file path of the resources package
-resources_context_manager = pkg_resources.path('meerschaum.config', 'resources')
-with resources_context_manager as file_path:
-    resources_path = file_path
+from meerschaum.config._paths import RESOURCES_PATH, DEFAULT_CONFIG_PATH
 
+### build default config dictionary
 default_config = dict()
 default_config['meerschaum'] = default_meerschaum_config
 default_config['system'] = default_system_config
-default_filename = 'default_config.yaml'
-default_path = os.path.join(resources_path, default_filename)
+### add configs from other packages
+from meerschaum.config.stack import default_stack_config
+default_config['stack'] = default_stack_config
+
 default_header_comment = """
 ##################################
 # Edit the credentials below     #
@@ -107,31 +102,4 @@ default_header_comment = """
 
 """
 
-def copy_default_to_config(config_filename):
-    try:
-        src_file = default_path
-        dest_file = os.path.join(resources_path, config_filename)
-        shutil.copyfile(src_file, dest_file)
-    except FileNotFoundError:
-        write_default_config()
-        return copy_default_to_config(config_filename)
-    return True
 
-
-def write_default_config(
-        debug : bool = False,
-        **kw
-    ):
-    """
-    Overwrite the existing default_config.yaml.
-    """
-    import yaml, os
-    from meerschaum.config._patch import patch_path
-    if os.path.isfile(default_path): os.remove(default_path)
-    if os.path.isfile(patch_path): os.remove(patch_path)
-    if debug: print(f"Writing default configuration to {default_path}...")
-    with open(default_path, 'w') as f:
-        f.write(default_header_comment)
-        yaml.dump(default_config, f)
-
-    return True

@@ -7,31 +7,28 @@ Docker Compose stack configuration goes here
 """
 
 import yaml, os
-from meerschaum.config._read_yaml import config as cf
+#  from meerschaum.config._read_yaml import config as cf
 try:
     import importlib.resources as pkg_resources
 except ImportError:
     import importlib_resources as pkg_resources
+from meerschaum.config._paths import GRAFANA_DATASOURCE_PATH, GRAFANA_DASHBOARD_PATH
+from meerschaum.config._paths import STACK_COMPOSE_PATH, STACK_ENV_PATH, STACK_COMPOSE_FILENAME
 
-stack_context_manager = pkg_resources.path('meerschaum.config', 'stack')
-with stack_context_manager as file_path:
-    stack_path = file_path
-
-stack_resources_path = os.path.join(stack_path, 'resources')
-compose_filename = 'docker-compose.yaml'
-compose_path = os.path.join(stack_resources_path, compose_filename)
-env_filename = '.env'
-env_path = os.path.join(stack_resources_path, env_filename)
-
-db_port = cf['meerschaum']['connectors']['sql']['main']['port']
-db_user = cf['meerschaum']['connectors']['sql']['main']['username']
-db_pass = cf['meerschaum']['connectors']['sql']['main']['password']
+db_port = "$MRSM{meerschaum,connectors,sql,main,port}"
+#  db_port = cf['meerschaum']['connectors']['sql']['main']['port']
+#  db_user = cf['meerschaum']['connectors']['sql']['main']['username']
+db_user = "$MRSM{meerschaum,connectors,sql,main,username}"
+db_pass = "$MRSM{meerschaum,connectors,sql,main,pass}"
+db_base = "$MRSM{meerschaum,connectors,sql,main,database}"
+#  db_pass = cf['meerschaum']['connectors']['sql']['main']['password']
 #  db_host = cf['meerschaum']['connectors']['sql']['main']['host']
 ### default localhost, meerschaum_db for docker network
 db_host = "meerschaum_db"
-db_base = cf['meerschaum']['connectors']['sql']['main']['database']
+#  db_base = cf['meerschaum']['connectors']['sql']['main']['database']
 
-api_port = cf['meerschaum']['connectors']['api']['main']['port']
+api_port = "$MRSM{meerschaum,connectors,api,main,port}"
+#  api_port = cf['meerschaum']['connectors']['api']['main']['port']
 api_host = "meerschaum_api"
 
 env_text = (f"""
@@ -57,7 +54,6 @@ compose_header = """
 #########################################
 """
 
-from meerschaum.config.stack.grafana import grafana_datasources_dir_path, grafana_dashboards_dir_path
 volumes = {
     'meerschaum_api_config_resources' : '${MEERSCHAUM_API_CONFIG_RESOURCES}',
     'meerschaum_db_data' : '/var/lib/postgresql/data',
@@ -68,7 +64,7 @@ networks = {
     'backend' : None,
 }
 
-stack_config = {
+default_docker_compose_config = {
     'version' : '3.8',
     'services': {
         'meerschaum_db' : {
@@ -121,25 +117,39 @@ stack_config = {
             ],
             'volumes' : [
                 'grafana_storage' + ':' + volumes['grafana_storage'],
-                f'{grafana_datasources_dir_path}:/etc/grafana/provisioning/datasources',
-                f'{grafana_dashboards_dir_path}:/etc/grafana/provisioning/dashboards',
+                f'{GRAFANA_DATASOURCE_PATH.parent}:/etc/grafana/provisioning/datasources',
+                f'{GRAFANA_DASHBOARD_PATH.parent}:/etc/grafana/provisioning/dashboards',
             ],
         },
     },
 }
-stack_config['networks'] = networks
-stack_config['volumes'] = {}
+default_docker_compose_config['networks'] = networks
+default_docker_compose_config['volumes'] = {}
 for key in volumes:
-    stack_config['volumes'][key] = None
+    default_docker_compose_config['volumes'][key] = None
 
-### collect necessary files for stack to work
-from meerschaum.config.stack.grafana import grafana_datasource_yaml_path, grafana_dashboard_yaml_path, datasource, dashboard
-necessary_files = {
-    env_path : env_text,
-    compose_path : (stack_config, compose_header),
-    grafana_datasource_yaml_path : datasource,
-    grafana_dashboard_yaml_path : dashboard,
-}
+default_stack_config = dict()
+default_stack_config[STACK_COMPOSE_FILENAME] = default_docker_compose_config
+default_stack_config['.env'] = env_text
+from meerschaum.config.stack.grafana import default_grafana_config
+default_stack_config['grafana'] = default_grafana_config
+
+#  try:
+    #  stack_config = cf['stack'][STACK_COMPOSE_FILENAME]
+#  except KeyError:
+    #  stack_config = dict(default_stack_config)
+#  try:
+    #  grafana_config = cf['stack']['grafana']
+#  except KeyError:
+    #  grafana_config = dict(default_grafana_config)
+
+#  ### collect necessary files for stack to work
+#  necessary_files = {
+    #  STACK_ENV_PATH : env_text,
+    #  STACK_COMPOSE_PATH : (stack_config, compose_header),
+    #  GRAFANA_DATASOURCE_PATH : grafana_config['datasource'],
+    #  GRAFANA_DASHBOARD_PATH : grafana_config['dashboard'],
+#  }
 
 def write_stack(
         debug : bool = False 
@@ -161,12 +171,12 @@ def edit_stack(
     """
     from meerschaum.config._edit import general_edit_config
     files = {
-        'compose' : compose_path,
-        'docker-compose' : compose_path,
-        'docker-compose.yaml' : compose_path,
-        'env' : env_path,
-        'environment' : env_path,
-        '.env' : env_path,
+        'compose' : STACK_COMPOSE_PATH,
+        'docker-compose' : STACK_COMPOSE_PATH,
+        'docker-compose.yaml' : STACK_COMPOSE_PATH,
+        'env' : STACK_ENV_PATH,
+        'environment' : STACK_ENV_PATH,
+        '.env' : STACK_ENV_PATH,
     }
     return general_edit_config(action=action, files=files, default='compose', debug=debug)
 

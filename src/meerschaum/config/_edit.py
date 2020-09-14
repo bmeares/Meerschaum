@@ -117,3 +117,51 @@ def general_edit_config(
 
     return True, "Success"
 
+def copy_default_to_config():
+    """
+    Copy the default config file to the main config file
+    """
+    from meerschaum.config._paths import DEFAULT_CONFIG_PATH, CONFIG_PATH
+    import shutil
+    try:
+        shutil.copyfile(DEFAULT_CONFIG_PATH, CONFIG_PATH)
+    except FileNotFoundError:
+        write_default_config()
+        return copy_default_to_config()
+    return True
+
+def write_default_config(
+        debug : bool = False,
+        **kw
+    ):
+    """
+    Overwrite the existing default_config.yaml.
+    """
+    import yaml, os
+    from meerschaum.config._paths import PATCH_PATH, DEFAULT_CONFIG_PATH
+    from meerschaum.config._default import default_config, default_header_comment
+    if os.path.isfile(DEFAULT_CONFIG_PATH): os.remove(DEFAULT_CONFIG_PATH)
+    if os.path.isfile(PATCH_PATH): os.remove(PATCH_PATH)
+    if debug:
+        from pprintpp import pprint
+        pprint(default_config)
+
+    config_copy = dict()
+    config_copy['meerschaum'] = dict(default_config['meerschaum'])
+
+    ### write meerschaum config first
+    if debug: print(f"Writing default Meerschaum configuration to {DEFAULT_CONFIG_PATH}...")
+    with open(DEFAULT_CONFIG_PATH, 'w') as f:
+        f.write(default_header_comment)
+        yaml.dump(config_copy, f)
+        f.write("\n\n")
+
+    config_copy = dict(default_config)
+    del config_copy['meerschaum']
+
+    ### write the rest of the configuration
+    if debug: print(f"Writing remaining default configuration to {DEFAULT_CONFIG_PATH}...")
+    with open(DEFAULT_CONFIG_PATH, 'a+') as f:
+        yaml.dump(config_copy, f)
+
+    return True

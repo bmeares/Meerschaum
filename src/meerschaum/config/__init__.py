@@ -8,7 +8,7 @@ and if interactive, print the welcome message
 """
 
 from meerschaum.config._version import __version__
-from meerschaum.config._read_yaml import config, config_filename, config_path
+from meerschaum.config._read_yaml import config
 
 ### developer-specified values
 system_config = config['system']
