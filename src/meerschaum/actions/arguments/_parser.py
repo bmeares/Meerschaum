@@ -54,3 +54,6 @@ parser.add_argument(
         "See --params on formatting details."
     )
 )
+parser.add_argument(
+    '--sub-args', '-A', nargs='+', help="Provide a list of arguments for subprocesses. You can also type sub-arguments in [] instead. E.g. `stack -A='--version'`, `ls [-lh]`, `echo -A these are sub-arguments`"
+)

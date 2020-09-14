@@ -8,6 +8,7 @@ Functions for running the Docker Compose stack
 
 def stack(
         action : list = [''],
+        sub_args : list = [],
         yes : bool = False,
         force : bool = False,
         debug : bool = False,
@@ -45,7 +46,7 @@ def stack(
     compose_command = ['up']
     if action[0] != '': compose_command = action
 
-    cmd_list = ['docker-compose'] + compose_command
+    cmd_list = ['docker-compose'] + compose_command + sub_args
     if debug: print(cmd_list)
     call(cmd_list, cwd=stack_resources_path)
     return True, "Success"

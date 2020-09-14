@@ -20,7 +20,6 @@ if os.path.isfile(patch_path):
     patch = yaml.safe_load(
                 pkg_resources.read_text('meerschaum.config.resources', patch_filename)
             )
-
 def patch_config(
         config : dict,
         patch : dict

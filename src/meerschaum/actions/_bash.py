@@ -11,6 +11,7 @@ from meerschaum.config import system_config
 
 def bash(
         action : list = [],
+        sub_args : list = [],
         debug : bool = False,
         **kw
     ):
@@ -34,11 +35,12 @@ def bash(
     if action[0] != '':
         capture_stdout = subprocess.PIPE
         capture_stderr = subprocess.PIPE
-        command_list += ["-c", " ".join(action)]
+        command_list += ["-c", " ".join(action + sub_args)]
         timeout = system_config['shell']['timeout']
 
     if debug:
         print('action:', action)
+        print('sub-args', sub_args)
         print(command_list)
 
     process = subprocess.Popen(
