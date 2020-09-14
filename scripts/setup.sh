@@ -31,4 +31,5 @@ pip install --upgrade\
   cascadict\
   fastapi\
   pydantic\
-  pprintpp
+  pprintpp\
+  requests
