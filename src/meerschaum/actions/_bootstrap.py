@@ -53,17 +53,17 @@ def _bootstrap_config(
 
     from meerschaum.utils.misc import reload_package, yes_no
     import meerschaum.config
-    import meerschaum.config._default as default
+    from meerschaum.config._edit import write_default_config
     import importlib, os
-    from meerschaum.config._read_yaml import config_path
+    from meerschaum.config._paths import CONFIG_PATH
     answer = False
     if not yes:
-        answer = yes_no(f"Delete {config_path}?", default='n')
+        answer = yes_no(f"Delete {CONFIG_PATH}?", default='n')
 
     if answer or force:
-        if debug: print(f"Removing {config_path}...")
+        if debug: print(f"Removing {CONFIG_PATH}...")
         try:
-            os.remove(config_path)
+            os.remove(CONFIG_PATH)
         except Exception as e:
             print(e)
     else:
@@ -71,7 +71,7 @@ def _bootstrap_config(
         if debug: print(msg)
         return True, msg
 
-    if not default.write_default_config(debug=debug, **kw):
+    if not write_default_config(debug=debug, **kw):
         return (False, "Failed to write default config")
     reload_package(meerschaum.config, debug=debug, **kw)
     reload_package(meerschaum.config, debug=debug, **kw)
@@ -87,10 +87,11 @@ def _bootstrap_stack(
     Delete and regenerate the default Meerschaum stack configuration
     """
     from meerschaum.utils.misc import yes_no
-    from meerschaum.config.stack import write_stack, compose_path, env_path
+    from meerschaum.config._paths import STACK_COMPOSE_PATH, STACK_ENV_PATH
+    from meerschaum.config.stack import write_stack
     answer = False
     if not yes:
-        answer = yes_no(f"Delete {compose_path} and {env_path}?", default='n')
+        answer = yes_no(f"Delete {STACK_COMPOSE_PATH} and {STACK_ENV_PATH}?", default='n')
 
     if answer or force:
         write_stack(debug=debug)
@@ -110,17 +111,18 @@ def _bootstrap_grafana(
     Delete and regenerate the default Meerschaum stack configuration
     """
     from meerschaum.utils.misc import yes_no
-    from meerschaum.config.stack.grafana import grafana_datasource_yaml_path, datasource, grafana_dashboard_yaml_path, dashboard
+    from meerschaum.config._paths import GRAFANA_DATASOURCE_PATH, GRAFANA_DASHBOARD_PATH
     from meerschaum.config._edit import general_write_config
+    from meerschaum.config import config as cf
     answer = False
     if not yes:
-        answer = yes_no(f"Delete {grafana_datasource_yaml_path} and {grafana_dashboard_yaml_path}?", default='n')
+        answer = yes_no(f"Delete {GRAFANA_DATASOURCE_PATH} and {GRAFANA_DASHBOARD_PATH}?", default='n')
 
     if answer or force:
         general_write_config(
             {
-                grafana_datasource_yaml_path : datasource,
-                grafana_dashboard_yaml_path : dashboard,
+                GRAFANA_DATASOURCE_PATH : cf['grafana']['datasource'],
+                GRAFANA_DASHBOARD_PATH : cf['grafana']['dashboard'],
             },
             debug=debug
         )

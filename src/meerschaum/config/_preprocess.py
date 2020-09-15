@@ -15,6 +15,10 @@ def preprocess_config(
     Apply preprocessing to the configuration dictionary
     config : the config dict
     """
+    from meerschaum.utils.misc import parse_config_substitution, search_and_substitute_config
+
+    ### replace Meerschaum substitution syntax with values from keys
+    config = search_and_substitute_config(config)
 
     ### if `meta` is not set, use `main`
     sql_connectors_config = config['meerschaum']['connectors']['sql']
