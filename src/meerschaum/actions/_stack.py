@@ -22,18 +22,19 @@ def stack(
         Docker Compose command to run. E.g. 'config' will print Docker Compose configuration
     """
     from subprocess import call
-    from meerschaum.config.stack import stack_resources_path, necessary_files, write_stack
-    from meerschaum.utils.misc import yes_no
-    import os.path
+    from meerschaum.config.stack import get_necessary_files, write_stack
+    from meerschaum.config._paths import STACK_COMPOSE_PATH
+    from meerschaum.utils.misc import yes_no, reload_package
+    import meerschaum.config
+    import os
 
     bootstrap = False
-    for fp in necessary_files:
+    for fp in get_necessary_files():
         if not os.path.isfile(fp):
             if not yes and not force:
                 if not yes_no(
-                            f"Missing file {fp}.\n\nBootstrap stack configuration?\n\n"
-                            f"NOTE: The following files will be overwritten: {list(necessary_files)}",
-
+                    f"Missing file {fp}.\n\nBootstrap stack configuration?\n\n"
+                    f"NOTE: The following files will be overwritten: {list(get_necessary_files())}"
                 ):
                     bootstrap = True
             else: ### yes or force is True
@@ -48,5 +49,7 @@ def stack(
 
     cmd_list = ['docker-compose'] + compose_command + sub_args
     if debug: print(cmd_list)
-    call(cmd_list, cwd=stack_resources_path)
+    call(cmd_list, cwd=STACK_COMPOSE_PATH.parent)
+    reload_package(meerschaum.config)
+    reload_package(meerschaum.config)
     return True, "Success"

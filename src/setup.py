@@ -12,13 +12,22 @@ class PostInstallCommand(install):
     def run(self):
         install.run(self)
         from meerschaum.actions import entry
-        entry(['bootstrap', 'config', '--debug', '--yes', '--force'])
-        entry(['bootstrap', 'stack', '--debug', '--yes', '--force'])
+        from meerschaum.config._paths import CONFIG_PATH, PATCH_PATH
+        import os, shutil
+        if CONFIG_PATH.is_file():
+            print(f"Found existing configuration in {CONFIG_PATH}")
+            print(f"Moving to {PATCH_PATH} and patching default configuration with existing configuration")
+            shutil.copy(CONFIG_PATH, PATCH_PATH)
+        else:
+            print(f"Configuration not found: {CONFIG_PATH}")
+
+        #  entry(['bootstrap', 'config', '--yes', '--force'])
+        #  entry(['bootstrap', 'stack', '--yes', '--force'])
 
 setuptools.setup(
     name = 'meerschaum',
     version = __version__,
-    description = 'The Meerschaum Project software library',
+    description = 'Create and Manage Pipes with Meerschaum',
     url = 'https://github.com/bmeares/Meerschaum',
     author = 'Bennett Meares',
     author_email = 'bennett.meares@gmail.com',

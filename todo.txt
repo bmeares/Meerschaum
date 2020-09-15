@@ -1,6 +1,7 @@
 - delete
   - remove configs, etc before building
-- actions in WebAPI
 - Pipes
   - bootstrap
-- WebAPI
+- preserve / cascade existing config
+  - on install, rename config.yaml to patch.yaml instead of always bootstrapping
+- move readme inside package
