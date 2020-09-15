@@ -12,15 +12,14 @@ class PostInstallCommand(install):
     def run(self):
         install.run(self)
         from meerschaum.actions import entry
-        from meerschaum.config import config_path
-        from meerschaum.config._patch import patch_path
+        from meerschaum.config._paths import CONFIG_PATH, PATCH_PATH
         import os, shutil
-        if os.path.isfile(config_path):
-            print(f"Found existing configuration in {config_path}")
-            print(f"Moving to {patch_path} and patching default configuration with existing configuration")
-            shutil.move(config_path, patch_path)
+        if CONFIG_PATH.is_file():
+            print(f"Found existing configuration in {CONFIG_PATH}")
+            print(f"Moving to {PATCH_PATH} and patching default configuration with existing configuration")
+            shutil.copy(CONFIG_PATH, PATCH_PATH)
         else:
-            print(f"Configuration not found: {config_path}")
+            print(f"Configuration not found: {CONFIG_PATH}")
 
         #  entry(['bootstrap', 'config', '--yes', '--force'])
         #  entry(['bootstrap', 'stack', '--yes', '--force'])

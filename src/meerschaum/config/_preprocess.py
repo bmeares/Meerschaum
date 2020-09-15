@@ -15,24 +15,10 @@ def preprocess_config(
     Apply preprocessing to the configuration dictionary
     config : the config dict
     """
-    from meerschaum.utils.misc import parse_config_substitution, search_for_substitution
+    from meerschaum.utils.misc import parse_config_substitution, search_and_substitute_config
 
-    #  def recurse_config(node, value):
-        #  if isinstance(value, str):
-            #  return node, node
-        #  try:
-            #  for child, value in node.items():
-                #  return recurse_config(child, value)
-        #  except:
-            #  print(node)
-            #  return node
-
-
-    #  for root, value in config.items():
-        #  print(recurse_config(root, value))
-
-    search_for_substitution(config)
-
+    ### replace Meerschaum substitution syntax with values from keys
+    config = search_and_substitute_config(config)
 
     ### if `meta` is not set, use `main`
     sql_connectors_config = config['meerschaum']['connectors']['sql']

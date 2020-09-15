@@ -14,6 +14,7 @@ def edit_config(
     import sys, tempfile, os, importlib
     from subprocess import call
     import meerschaum.config
+    from meerschaum.config._paths import CONFIG_PATH
     from meerschaum.utils.misc import reload_package
 
     if params is not None:
@@ -24,11 +25,10 @@ def edit_config(
         ### get editor from environment
         EDITOR = os.environ.get('EDITOR', meerschaum.config.system_config['shell']['default_editor'])
 
-        if debug: print(f"Opening file '{meerschaum.config.config_path}' with editor '{EDITOR}'") 
+        if debug: print(f"Opening file '{CONFIG_PATH}' with editor '{EDITOR}'") 
 
         ### prompt user to edit config.yaml
-        call([EDITOR, meerschaum.config.config_path])
-
+        call([EDITOR, CONFIG_PATH])
 
     if debug: print("Reloading configuration...")
     reload_package(meerschaum.config, debug=debug, **kw)

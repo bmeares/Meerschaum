@@ -263,30 +263,85 @@ def string_to_dict(
 
 def parse_config_substitution(
         value : str,
-        leading_key : str = '$MRSM',
-        delimeter : str = ','
+        leading_key : str = 'MRSM',
+        begin_key : str = '{',
+        end_key : str = '}',
+        delimeter : str = ':'
     ):
     """
-    Parse Meerschaum config syntax
-    E.g. $MRSM{value1,value2} => ['value1', 'value2']
+    Parse Meerschaum substitution syntax
+    E.g. MRSM{value1:value2} => ['value1', 'value2']
+    NOTE: Not currently used. See `search_and_substitute_config` below
     """
     if not value.beginswith(leading_key):
         return value
     
-    return leading_key[len(leading_key):][1:-1].split(delimeter)
+    return leading_key[len(leading_key):][len():-1].split(delimeter)
     
-def search_for_substitution(
-        config : dict
-    ):
-    haystack = str(config)
-    modified_haystack = str(haystack)
-    needle = "$MRSM"
+def search_and_substitute_config(
+        config : dict,
+        leading_key : str = "MRSM",
+        delimiter : str = ":",
+        begin_key : str = "{",
+        end_key : str = "}"
+    ) -> dict:
+    """
+    Search the config for Meerschaum substitution syntax and substite with value of keys
+
+    Example:
+        MRSM{meerschaum:connectors:main:host} => cf['meerschaum']['connectors']['main']['host']
+    """
+    import yaml
+    needle = leading_key
+    haystack = yaml.dump(config)
+    mod_haystack = list(str(haystack))
     buff = str(needle)
     max_index = len(haystack) - len(buff)
-    for i, letter in enumerate(haystack):
-        if i >= max_index: break
-        buff = haystack[i:i + len(needle)]
-        ### found needle. Step ahead to find end decorator
-        if buff == needle:
-            for c
+
+    patterns = dict()
+
+    begin, end, floor = 0, 0, 0
+    while needle in haystack[floor:]:
+        ### extract the keys
+        hs = haystack[floor:]
+
+        ### the first character of the keys
+        ### MRSM{value1:value2}
+        ###       ^
+        begin = hs.find(needle) + len(needle) + len(begin_key)
+
+        ### number of characters to end of keys
+        ### (really it's the index of the beginning of the end_key relative to the beginning
+        ###     but the math works out)
+        ### MRSM{value1}
+        ###       ^     ^  => 6
+        length = hs[begin:].find(end_key)
+
+        ### index of the end_key (end of `length` characters)
+        end = begin + length
+
+        ### advance the floor to find the next leading key
+        floor += end + len(end_key)
+        keys = hs[begin:end].split(delimiter)
+
+        ### follow the pointers to the value
+        c = config
+        for i, k in enumerate(keys):
+            try:
+                c = c[k]
+            except KeyError:
+                print(f"WARNING: Invalid keys in config: {keys}")
+        value = c
+
+        ### pattern to search and replace
+        pattern = leading_key + begin_key + delimiter.join(keys) + end_key
+        ### store patterns and values
+        patterns[pattern] = value
+
+    ### replace the patterns with the values
+    for pattern, value in patterns.items():
+        haystack = haystack.replace(pattern, str(value))
+
+    ### parse back into dict
+    return yaml.safe_load(haystack)
 

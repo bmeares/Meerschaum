@@ -20,7 +20,8 @@ def parse_arguments(sysargs : list) -> dict:
     ### if --config is not empty, cascade down config
     ### and update new values on existing keys / add new keys/values
     if args.config is not None:
-        from meerschaum.config._patch import write_patch, patch_path
+        from meerschaum.config._patch import write_patch
+        from meerschaum.config._paths import PATCH_PATH
         from meerschaum.utils.misc import reload_package
         import os
         write_patch(args.config)
@@ -29,8 +30,7 @@ def parse_arguments(sysargs : list) -> dict:
         reload_package(meerschaum.config)
         reload_package(meerschaum.config)
         ### clean up patch so it's not loaded next time
-        os.remove(patch_path)
-
+        os.remove(PATCH_PATH)
 
     begin_decorator, end_decorator = meerschaum.config.config['system']['arguments']['sub_decorators']
 
