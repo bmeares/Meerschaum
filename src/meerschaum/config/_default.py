@@ -23,7 +23,7 @@ default_meerschaum_config = {
             },
             'local'        : {
                 'flavor'   : 'sqlite',
-                'database' : 'mrsm_local'
+                'database' : 'mrsm_local',
             },
         },
         'api' : {

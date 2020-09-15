@@ -113,6 +113,7 @@ def _bootstrap_grafana(
     from meerschaum.utils.misc import yes_no
     from meerschaum.config._paths import GRAFANA_DATASOURCE_PATH, GRAFANA_DASHBOARD_PATH
     from meerschaum.config._edit import general_write_config
+    from meerschaum.config import config as cf
     answer = False
     if not yes:
         answer = yes_no(f"Delete {GRAFANA_DATASOURCE_PATH} and {GRAFANA_DASHBOARD_PATH}?", default='n')
@@ -120,8 +121,8 @@ def _bootstrap_grafana(
     if answer or force:
         general_write_config(
             {
-                grafana_datasource_yaml_path : datasource,
-                grafana_dashboard_yaml_path : dashboard,
+                GRAFANA_DATASOURCE_PATH : cf['grafana']['datasource'],
+                GRAFANA_DASHBOARD_PATH : cf['grafana']['dashboard'],
             },
             debug=debug
         )

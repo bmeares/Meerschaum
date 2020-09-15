@@ -10,7 +10,6 @@ try:
 except ImportError:
     import importlib_resources as pkg_resources
 
-
 import os, yaml
 from meerschaum.config._paths import PATCH_FILENAME, PATCH_PATH
 patch_config = None
@@ -36,7 +35,7 @@ def write_patch(
     """
     Write patch dict to yaml
     """
-    if os.path.isfile(patch_path):
-        os.remove(patch_path)
-    with open(patch_path, 'w') as f:
+    if os.path.isfile(PATCH_PATH):
+        os.remove(PATCH_PATH)
+    with open(PATCH_PATH, 'w') as f:
         yaml.dump(patch, f)

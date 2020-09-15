@@ -28,7 +28,7 @@ DEFAULT_CONFIG_PATH = Path(os.path.join(RESOURCES_PATH, DEFAULT_CONFIG_FILENAME)
 PATCH_FILENAME = "patch.yaml"
 PATCH_PATH = Path(os.path.join(RESOURCES_PATH, PATCH_FILENAME))
 
-GRAFANA_RESOURCES_PATH = Path(os.path.join(ROOT_PATH, 'config', 'stack', 'grafana', 'resources'))
+GRAFANA_RESOURCES_PATH = Path(os.path.join(ROOT_PATH, 'meerschaum', 'config', 'stack', 'grafana', 'resources'))
 GRAFANA_DATASOURCE_PATH = Path(os.path.join(GRAFANA_RESOURCES_PATH, 'provisioning', 'datasources', 'datasource.yaml'))
 GRAFANA_DASHBOARD_PATH = Path(os.path.join(GRAFANA_RESOURCES_PATH, 'provisioning', 'dashboards', 'dashboard.yaml'))
 

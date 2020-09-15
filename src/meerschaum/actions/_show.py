@@ -53,8 +53,9 @@ def _show_config(
     Show the configuration dictionary
     """
     from pprintpp import pprint
-    from meerschaum.config import config, config_path
-    if debug: print(f"Configuration loaded from {config_path}")
+    from meerschaum.config import config
+    from meerschaum.config._paths import CONFIG_PATH
+    if debug: print(f"Configuration loaded from {CONFIG_PATH}")
     pprint(config)
     return (True, "Success")
 
