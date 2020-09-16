@@ -4,9 +4,8 @@
 
 from meerschaum.config import __version__
 from meerschaum.config import __doc__
-
-import apipkg
-apipkg.initpkg(
+from meerschaum.utils.apipkg import initpkg
+initpkg(
     __name__,
     {
         'get_connector' : 'meerschaum.connectors:get_connector',
