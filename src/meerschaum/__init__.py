@@ -5,8 +5,15 @@
 from meerschaum.config import __version__
 from meerschaum.config import __doc__
 
-import meerschaum.connectors
+import apipkg
+apipkg.initpkg(
+    __name__,
+    {
+        'get_connector' : 'meerschaum.connectors:get_connector',
+        'entry' : 'meerschaum.actions._entry:_entry',
+    }
+)
 
-### ignore module warnings
-import warnings
-#  warnings.filterwarnings("ignore")
+import meerschaum.utils.warnings
+#  import meerschaum.connectors
+

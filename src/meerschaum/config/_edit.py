@@ -11,19 +11,26 @@ def edit_config(
         debug : bool = False,
         **kw
     ) -> tuple:
+    """
+    Edit the configuration file
+
+    params: patch to apply. Depreciated / replaced by --config (at least in this case)
+    """
     import sys, tempfile, os, importlib
     from subprocess import call
     import meerschaum.config
+    from meerschaum.config import config as cf, system_config
     from meerschaum.config._paths import CONFIG_PATH
     from meerschaum.utils.misc import reload_package
 
     if params is not None:
-        meerschaum.config.config.update(params)
-        if not write_config(meerschaum.config.config, debug=debug):
+        from meerschaum.utils import apply_patch_to_config
+        cf = apply_patch_to_config(cf, params)
+        if not write_config(cf, debug=debug):
             return False, "Failed to update config!"
     else:
         ### get editor from environment
-        EDITOR = os.environ.get('EDITOR', meerschaum.config.system_config['shell']['default_editor'])
+        EDITOR = os.environ.get('EDITOR', system_config['shell']['default_editor'])
 
         if debug: print(f"Opening file '{CONFIG_PATH}' with editor '{EDITOR}'") 
 
@@ -41,13 +48,14 @@ def write_config(
         debug : bool = False,
         **kw
     ) -> bool:
-    from meerschaum.config import config_path, config
+    from meerschaum.config._paths import CONFIG_PATH
+    from meerschaum.config import config
     from meerschaum.config._default import default_header_comment
     import yaml
     if config_dict is None:
         config_dict = config
 
-    with open(config_path, 'w') as f:
+    with open(CONFIG_PATH, 'w') as f:
         f.write(default_header_comment)
         yaml.dump(config_dict, f)
 

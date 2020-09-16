@@ -18,6 +18,9 @@ def _entry(sysargs=[]):
     from meerschaum.actions.arguments import parse_arguments
     from meerschaum.actions import actions
     import sys
+    if not isinstance(sysargs, list):
+        import shlex
+        sysargs = shlex.split(sysargs)
     args = parse_arguments(sysargs)
     main_action = args['action'][0]
 

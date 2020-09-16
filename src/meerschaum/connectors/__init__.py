@@ -6,7 +6,7 @@
 Import Connector subclasses
 """
 
-from meerschaum.connectors.Connector import Connector
+from meerschaum.connectors._Connector import Connector
 from meerschaum.connectors.sql import SQLConnector
 from meerschaum.connectors.api._APIConnector import APIConnector
 

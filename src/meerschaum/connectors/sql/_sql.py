@@ -18,7 +18,8 @@ def read(
     """
     Read a SQL query or table into a pandas dataframe.
     """
-    import sqlalchemy
+    from meerschaum.utils.misc import attempt_import
+    sqlalchemy = attempt_import("sqlalchemy")
     chunksize = chunksize if chunksize != -1 else self.sys_config['chunksize']
     if debug:
         import time
@@ -69,7 +70,8 @@ def exec(self, query, debug=False) -> bool:
     """
     Execute SQL code and return success status. e.g. calling stored procedures
     """
-    import sqlalchemy
+    from meerschaum.utils.misc import attempt_import
+    sqlalchemy = attempt_import("sqlalchemy")
     try:
         with self.engine.connect() as connection:
             result = connection.execute(
