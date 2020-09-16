@@ -7,10 +7,9 @@ Generic Connector class
 Defines basic data that Connectors should contain
 """
 
-import meerschaum.config
-conn_configs = meerschaum.config.config['meerschaum']['connectors']
-connector_config = meerschaum.config.config['system']['connectors']
-import lazy_import
+from meerschaum.config import config as cf
+conn_configs = cf['meerschaum']['connectors']
+connector_config = cf['system']['connectors']
 
 class Connector:
     def __init__(
@@ -56,7 +55,13 @@ class Connector:
 
         ### handle custom pandas implementation (e.g. modin)
         pandas = pandas if pandas is not None else connector_config['all']['pandas']
-        self.pd = lazy_import.lazy_module(pandas)
+
+    @property
+    def pd(self):
+        if '_pd' not in self.__dict__:
+            from meerschaum.utils.misc import attempt_import
+            self._pd = attempt_import(self._pandas_name)
+        return self._pd
 
     def verify_attributes(
             self,

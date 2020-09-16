@@ -17,7 +17,6 @@ from meerschaum.config._paths import CONFIG_PATH, CONFIG_FILENAME
 try:
     with open(CONFIG_PATH, 'r') as f:
         config_text = f.read()
-    #  config_text = pkg_resources.read_text('meerschaum.config.resources', CONFIG_FILENAME)
 except FileNotFoundError:
     print(f"NOTE: Configuration file is missing. Falling back to default configuration.")
     print(f"You can edit the configuration with `edit config` or replace the file {CONFIG_PATH}")
@@ -30,8 +29,13 @@ try:
     ### cf dictionary
     config = yaml.safe_load(config_text)
 except Exception as e:
-    print(f'Unable to parse {config_filename}')
+    print(f"Unable to parse {CONFIG_FILENAME}!")
     print(e)
+    input(f"Press [Enter] to open {CONFIG_FILENAME} and fix formatting errors.")
+    import os, subprocess
+    from meerschaum.config._default import default_system_config
+    EDITOR = os.environ.get('EDITOR', default_system_config['shell']['default_editor'])
+    subprocess.call([EDITOR, CONFIG_PATH])
     sys.exit()
 
 ### apply preprocessing (e.g. main -> meta (if empty))

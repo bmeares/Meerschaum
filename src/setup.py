@@ -24,6 +24,29 @@ class PostInstallCommand(install):
         #  entry(['bootstrap', 'config', '--yes', '--force'])
         #  entry(['bootstrap', 'stack', '--yes', '--force'])
 
+required = [
+    'pyyaml',
+    'cascadict',
+    'pprintpp',
+    'requests',
+    'apipkg',
+]
+
+extras = {
+    'full' : [
+        'pandas',
+        'sqlalchemy',
+        'psycopg2-binary',
+        'uvicorn',
+        'fastapi',
+        'databases',
+        'aiosqlite',
+        'asyncpg',
+        'graphene',
+        'starlette',
+    ],
+}
+
 setuptools.setup(
     name = 'meerschaum',
     version = __version__,
@@ -33,22 +56,8 @@ setuptools.setup(
     author_email = 'bennett.meares@gmail.com',
     license = 'MIT',
     packages = setuptools.find_packages(),
-    install_requires = [
-        'sqlalchemy',
-        'pandas',
-        'psycopg2-binary',
-        'pyyaml',
-        'lazy_import',
-        'fastapi',
-        'uvicorn',
-        'databases',
-        'aiosqlite',
-        'graphene',
-        'asyncpg',
-        'cascadict',
-        'pprintpp',
-        'requests',
-    ],
+    install_requires = required,
+    extras_require = extras,
     entry_points = {
         'console_scripts' : [
             'meerschaum = meerschaum.__main__:main',

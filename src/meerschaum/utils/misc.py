@@ -345,3 +345,35 @@ def search_and_substitute_config(
     ### parse back into dict
     return yaml.safe_load(haystack)
 
+def is_installed(
+        name : str
+    ) -> bool:
+    """
+    Check whether a package is installed.
+    name : str
+        Name of the package in question
+    """
+    import importlib
+    return importlib.util.find_spec(name) is None
+
+def attempt_import(
+        *names : list
+    ) -> 'module or tuple of modules':
+    from meerschaum.utils.warnings import warn
+    import importlib
+
+    modules = []
+    for name in names:
+        if importlib.util.find_spec(name) is None:
+            warn(
+                (f"\n\nMissing package '{name}'; features will not work correctly. "
+                f"\n\nRun `pip install meerschaum[full]` to install the complete version of Meerschaum.\n"),
+                ImportWarning,
+                stacklevel = 2
+            )
+            modules.append(None)
+        else:
+            modules.append(importlib.import_module(name))
+    modules = tuple(modules)
+    if len(modules) == 0: return modules[0]
+    return modules
