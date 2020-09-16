@@ -29,7 +29,6 @@ required = [
     'cascadict',
     'pprintpp',
     'requests',
-    'apipkg',
 ]
 
 extras = {
