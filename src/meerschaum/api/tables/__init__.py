@@ -7,7 +7,8 @@ Define API SQLAlchemy tables
 """
 
 from meerschaum.api import connector
-import sqlalchemy
+from meerschaum.utils.misc import attempt_import
+sqlalchemy = attempt_import('sqlalchemy')
 
 tables = {
     'pipes' : sqlalchemy.Table(
