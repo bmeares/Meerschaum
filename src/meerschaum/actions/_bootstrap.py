@@ -52,7 +52,7 @@ def _bootstrap_config(
             return possible_config_funcs[action[0]](**kw)
 
     from meerschaum.utils.misc import reload_package, yes_no
-    import meerschaum.config
+    import meerschaum.config as config_module
     from meerschaum.config._edit import write_default_config
     import importlib, os
     from meerschaum.config._paths import CONFIG_PATH
@@ -73,8 +73,8 @@ def _bootstrap_config(
 
     if not write_default_config(debug=debug, **kw):
         return (False, "Failed to write default config")
-    reload_package(meerschaum.config, debug=debug, **kw)
-    reload_package(meerschaum.config, debug=debug, **kw)
+    #  reload_package(config_module, debug=debug, **kw)
+    #  reload_package(config_module, debug=debug, **kw)
     return (True, "Success")
 
 def _bootstrap_stack(
