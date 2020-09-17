@@ -108,7 +108,8 @@ def import_children(
         package : 'package' = None,
         package_name : str = None,
         types : list = ['method', 'builtin', 'function', 'class', 'module'],
-        lazy : bool = False,
+        lazy : bool = True,
+        recursive : bool = False,
         debug : bool = False
     ) -> list:
     """
@@ -142,7 +143,7 @@ def import_children(
     ### Set attributes in sys module version of package.
     ### Kinda like setting a dictionary
     ###   functions[name] = func
-    modules = get_modules_from_package(package, recursive=True, lazy=lazy, debug=debug)
+    modules = get_modules_from_package(package, recursive=recursive, lazy=lazy, debug=debug)
     _all, members = [], []
     for module in modules:
         objects = []
@@ -210,6 +211,8 @@ def reload_package(
     del fn
 
     def reload_recursive_ex(module):
+        ### forces import of lazily-imported modules
+        module = importlib.import_module(module.__name__)
         importlib.reload(module)
 
         for module_child in get_modules_from_package(module, recursive=True, lazy=lazy):
@@ -410,7 +413,44 @@ def lazy_import(
         name : str,
         local_name : str = None
     ):
+    """
+    Lazily import a package
+    Uses the tensorflow LazyLoader implementation (Apache 2.0 License)
+    """
     from meerschaum.utils.lazy_loader import LazyLoader
     if local_name is None:
         local_name = name
     return LazyLoader(local_name, globals(), name)
+
+def edit_file(
+        path : 'pathlib.Path',
+        default_editor : str = 'pyvim',
+        debug : bool = False
+    ):
+    """
+    Open a file for editing. Attempts to use the user's defined EDITOR,
+    otherwise uses pyvim.
+    """
+    import os
+    from subprocess import call
+    try:
+        EDITOR = os.environ.get('EDITOR', default_editor)
+        if debug: print(f"Opening file '{path}' with editor '{EDITOR}'") 
+        call([EDITOR, path])
+    except Exception as e: ### can't open with default editors
+        if debug: print(e)
+        if debug: print('Failed to open file with system editor. Falling back to pyvim...')
+        run_python_package('pyvim', [path])
+
+def run_python_package(
+        package_name : str,
+        args : list = []
+    ):
+    """
+    Runs an installed python package.
+    E.g. Translates to `/usr/bin/python -m [package]`
+    """
+    import sys
+    from subprocess import call
+    command = [sys.executable, '-m', package_name] + args
+    return call(command)

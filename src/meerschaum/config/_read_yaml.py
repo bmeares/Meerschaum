@@ -32,10 +32,9 @@ except Exception as e:
     print(f"Unable to parse {CONFIG_FILENAME}!")
     print(e)
     input(f"Press [Enter] to open {CONFIG_FILENAME} and fix formatting errors.")
-    import os, subprocess
     from meerschaum.config._default import default_system_config
-    EDITOR = os.environ.get('EDITOR', default_system_config['shell']['default_editor'])
-    subprocess.call([EDITOR, CONFIG_PATH])
+    from meerschaum.utils.misc import edit_file
+    edit_file(CONFIG_PATH)
     sys.exit()
 
 ### apply preprocessing (e.g. main -> meta (if empty))

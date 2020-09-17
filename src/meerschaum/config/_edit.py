@@ -17,11 +17,10 @@ def edit_config(
     params: patch to apply. Depreciated / replaced by --config (at least in this case)
     """
     import sys, tempfile, os, importlib
-    from subprocess import call
     import meerschaum.config
-    from meerschaum.config import config as cf, system_config
+    from meerschaum.config import config as cf
     from meerschaum.config._paths import CONFIG_PATH
-    from meerschaum.utils.misc import reload_package
+    from meerschaum.utils.misc import reload_package, edit_file
 
     if params is not None:
         from meerschaum.utils import apply_patch_to_config
@@ -29,13 +28,7 @@ def edit_config(
         if not write_config(cf, debug=debug):
             return False, "Failed to update config!"
     else:
-        ### get editor from environment
-        EDITOR = os.environ.get('EDITOR', system_config['shell']['default_editor'])
-
-        if debug: print(f"Opening file '{CONFIG_PATH}' with editor '{EDITOR}'") 
-
-        ### prompt user to edit config.yaml
-        call([EDITOR, CONFIG_PATH])
+        edit_file(CONFIG_PATH, debug=debug)
 
     if debug: print("Reloading configuration...")
     reload_package(meerschaum.config, debug=debug, **kw)
