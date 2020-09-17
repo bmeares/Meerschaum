@@ -23,7 +23,6 @@ def bootstrap(
         'pipe'    : _bootstrap_pipe,
         'config'  : _bootstrap_config,
         'stack'   : _bootstrap_stack,
-        'grafana' : _bootstrap_grafana,
     }
     return choose_subaction(action, options, **kw)
 
@@ -53,9 +52,10 @@ def _bootstrap_config(
 
     from meerschaum.utils.misc import reload_package, yes_no
     import meerschaum.config
-    from meerschaum.config._edit import write_default_config
+    from meerschaum.config._edit import write_default_config, write_config
     import importlib, os
     from meerschaum.config._paths import CONFIG_PATH
+    from meerschaum.config._default import default_config
     answer = False
     if not yes:
         answer = yes_no(f"Delete {CONFIG_PATH}?", default='n')
@@ -71,10 +71,14 @@ def _bootstrap_config(
         if debug: print(msg)
         return True, msg
 
+    if not write_config(default_config, debug=debug, **kw):
+        return (False, "Failed to write default configuration")
+
     if not write_default_config(debug=debug, **kw):
-        return (False, "Failed to write default config")
-    reload_package(meerschaum.config, debug=debug, **kw)
-    reload_package(meerschaum.config, debug=debug, **kw)
+        return (False, "Failed to write default configuration")
+    #  if debug: print("Reloading and rebuilding config...")
+    #  reload_package(meerschaum.config, debug=debug, **kw)
+    #  reload_package(meerschaum.config, debug=debug, **kw)
     return (True, "Success")
 
 def _bootstrap_stack(

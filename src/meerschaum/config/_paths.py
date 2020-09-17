@@ -38,3 +38,5 @@ STACK_COMPOSE_PATH = Path(os.path.join(STACK_RESOURCES_PATH, STACK_COMPOSE_FILEN
 STACK_ENV_FILENAME = ".env"
 STACK_ENV_PATH = Path(os.path.join(STACK_RESOURCES_PATH, STACK_ENV_FILENAME))
 
+SHELL_RESOURCES_PATH = Path(os.path.join(ROOT_PATH, 'meerschaum', 'actions', 'shell', 'resources'))
+SHELL_HISTORY_PATH = Path(os.path.join(SHELL_RESOURCES_PATH, '.mrsm_history'))

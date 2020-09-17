@@ -11,7 +11,7 @@ from meerschaum.api import fast_api, database
 @fast_api.on_event("startup")
 async def startup():
     async def connect(
-        max_retries : int = 20,
+        max_retries : int = 40,
         retry_wait : int = 3,
         debug : bool = False
     ):

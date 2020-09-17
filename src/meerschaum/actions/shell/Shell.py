@@ -6,18 +6,20 @@
 This module is the entry point for the interactive shell
 """
 
-import cmd, sys, inspect
-from meerschaum.config import __doc__
+import cmd as cmd, sys, inspect
+from meerschaum.config import __doc__, config as cf
 from meerschaum.actions.arguments import parse_line
 
+shell_config = cf['system']['shell']
+
 class Shell(cmd.Cmd):
-    prompt = "𝚖𝚛𝚜𝚖 ➤ "
+    prompt = shell_config['prompt']
     intro = __doc__
     debug = False
-    ruler = '─'
-    close_message = "\nThank you for using Meerschaum!"
-    doc_header = "Meerschaum actions (`help <action>` for usage):"
-    undoc_header = "Unimplemented actions:"
+    ruler = shell_config['ruler']
+    close_message = shell_config['close_message']
+    doc_header = shell_config['doc_header']
+    undoc_header = shell_config['undoc_header']
 
     def precmd(self, line):
         """
@@ -124,12 +126,38 @@ class Shell(cmd.Cmd):
         pass
 
     def preloop(self):
-        import signal
-        signal.signal(signal.SIGINT, sigint_handler)
+        import signal, readline, os
+        from meerschaum.config._paths import SHELL_HISTORY_PATH
+        #  signal.signal(signal.SIGINT, sigint_handler)
+        if SHELL_HISTORY_PATH.exists():
+            readline.read_history_file(SHELL_HISTORY_PATH)
 
     def postloop(self):
-        print(self.close_message)
+        import readline
+        from meerschaum.config._paths import SHELL_HISTORY_PATH
+        readline.set_history_length(shell_config['max_history'])
+        readline.write_history_file(SHELL_HISTORY_PATH)
+        print('\n' + self.close_message)
 
-### intercept SIGINT
-def sigint_handler(sig, frame):
-    print('\n' + Shell.prompt, end="", flush=True)
+    def cmdloop(self, *args, **kw):
+        """
+        Patch builtin cmdloop with my own input (defined below)
+        """
+        old_input = cmd.__builtins__['input']
+        cmd.__builtins__['input'] = input_with_sigint(old_input)
+        try:
+            super().cmdloop(*args, **kw)
+        finally:
+            cmd.__builtins__['input'] = old_input
+
+def input_with_sigint(_input):
+    """
+    Patch builtin input()
+    """
+    def _input_with_sigint(*args):
+        try:
+            return _input(*args)
+        except KeyboardInterrupt:
+            print("^C")
+            return ""
+    return _input_with_sigint

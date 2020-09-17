@@ -70,7 +70,9 @@ def create_engine(
 
     returns: sqlalchemy engine
     """
-    import sqlalchemy, importlib, urllib
+    from meerschaum.utils.misc import attempt_import
+    sqlalchemy = attempt_import('sqlalchemy')
+    import importlib, urllib
     ### supplement missing values with defaults (e.g. port number)
     for a, value in flavor_configs[self.flavor]['defaults'].items():
         if a not in self.__dict__:
