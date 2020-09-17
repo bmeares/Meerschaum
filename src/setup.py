@@ -29,6 +29,7 @@ required = [
     'cascadict',
     'pprintpp',
     'requests',
+    'pyvim',
 ]
 
 extras = {

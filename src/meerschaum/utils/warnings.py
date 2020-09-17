@@ -12,6 +12,10 @@ warnings.filterwarnings(
     "default",
     category = ImportWarning
 )
+warnings.filterwarnings(
+    "ignore",
+    category = RuntimeWarning
+)
 
 def enable_depreciation_warnings(name):
     import meerschaum.actions

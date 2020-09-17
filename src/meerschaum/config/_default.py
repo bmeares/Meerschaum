@@ -60,8 +60,7 @@ default_system_config = {
         },
     },
     'shell' : {
-        'timeout'          : 15,
-        'default_editor'   : 'nano',
+        'timeout'          : 60,
     },
     ### not to be confused with system_config['connectors']['api']
     'api' : {
