@@ -75,7 +75,8 @@ def _api_server(
     from meerschaum.utils.misc import is_int
     from meerschaum.api import sys_config as api_config, __version__
     from pprintpp import pprint
-    import uvicorn
+    from meerschaum.utils.misc import attempt_import
+    uvicorn = attempt_import('uvicorn')
 
     uvicorn_config = dict(api_config['uvicorn'])
     if port is None:

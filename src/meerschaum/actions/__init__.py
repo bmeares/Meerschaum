@@ -8,6 +8,8 @@ Actions available to the mrsm CLI
 
 from meerschaum.utils.misc import add_method_to_class, get_modules_from_package
 from meerschaum.actions.shell import Shell
+from meerschaum.utils.warnings import enable_depreciation_warnings
+enable_depreciation_warnings(__name__)
 
 ### build __all__ from other .py files in this package
 import sys

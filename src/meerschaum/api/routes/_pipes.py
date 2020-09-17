@@ -9,7 +9,8 @@ Interact with Pipes
 from meerschaum.api import fast_api, endpoints, database, connector
 from meerschaum.api.models import Pipe, PipeIn
 from meerschaum.api.tables import tables
-import sqlalchemy
+from meerschaum.utils.misc import attempt_import
+sqlalchemy = attempt_import('sqlalchemy')
 pipes_endpoint = endpoints['mrsm'] + '/pipes'
 
 @fast_api.post(pipes_endpoint)
