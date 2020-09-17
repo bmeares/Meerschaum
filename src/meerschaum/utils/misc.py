@@ -63,6 +63,7 @@ def get_modules_from_package(
         package : 'package',
         names : bool = False,
         recursive : bool = False,
+        lazy : bool = False,
         debug : bool = False
     ):
     """
@@ -92,7 +93,10 @@ def get_modules_from_package(
     for module_name in [package.__name__ + "." + mod_name for mod_name in _all]:
         ### there's probably a better way than a try: catch but it'll do for now
         try:
-            modules.append(importlib.import_module(module_name))
+            if lazy:
+                modules.append(lazy_import(module_name))
+            else:
+                modules.append(importlib.import_module(module_name))
         except Exception as e:
             if debug: print(e)
             pass
@@ -103,7 +107,8 @@ def get_modules_from_package(
 def import_children(
         package : 'package' = None,
         package_name : str = None,
-        types : list = ['method', 'builtin', 'function', 'class'],
+        types : list = ['method', 'builtin', 'function', 'class', 'module'],
+        lazy : bool = False,
         debug : bool = False
     ) -> list:
     """
@@ -118,7 +123,7 @@ def import_children(
 
     types : list
         types of members to return.
-        Default : ['method', 'builtin', 'class', 'function']
+        Default : ['method', 'builtin', 'class', 'function', 'package', 'module']
 
     Returns: list of members
     """
@@ -137,16 +142,23 @@ def import_children(
     ### Set attributes in sys module version of package.
     ### Kinda like setting a dictionary
     ###   functions[name] = func
-    modules = get_modules_from_package(package, debug=debug)
+    modules = get_modules_from_package(package, recursive=True, lazy=lazy, debug=debug)
     _all, members = [], []
     for module in modules:
+        objects = []
         for ob in inspect.getmembers(module):
             for t in types:
+                ### ob is a tuple of (name, object)
                 if getattr(inspect, 'is' + t)(ob[1]):
-                    setattr(sys.modules[package_name], ob[0], ob[1])
-                    _all.append(ob[0])
-                    members.append(ob[1])
-    
+                    objects.append(ob)
+
+        if 'module' in types:
+            objects.append((module.__name__.split('.')[0], module))
+    for ob in objects:
+        setattr(sys.modules[package_name], ob[0], ob[1])
+        _all.append(ob[0])
+        members.append(ob[1])
+
     if debug: print(_all)
     ### set __all__ for import *
     setattr(sys.modules[package_name], '__all__', _all)
@@ -181,6 +193,7 @@ def yes_no(
 
 def reload_package(
         package : 'package',
+        lazy : bool = False,
         debug : bool = False,
         **kw
     ):
@@ -199,7 +212,7 @@ def reload_package(
     def reload_recursive_ex(module):
         importlib.reload(module)
 
-        for module_child in get_modules_from_package(module, recursive=True):
+        for module_child in get_modules_from_package(module, recursive=True, lazy=lazy):
             if isinstance(module_child, types.ModuleType) and hasattr(module_child, '__name__'):
                 fn_child = getattr(module_child, "__file__", None)
                 if (fn_child is not None) and fn_child.startswith(fn_dir):
@@ -357,8 +370,19 @@ def is_installed(
     return importlib.util.find_spec(name) is None
 
 def attempt_import(
-        *names : list
+        *names : list,
+        lazy : bool = True
     ) -> 'module or tuple of modules':
+    """
+    Raise a warning if packages are not installed; otherwise import and return modules.
+    If lazy = True, return lazy-imported modules.
+
+    Returns tuple of modules if multiple names are provided, else returns one module.
+
+    Examples:
+        pandas, sqlalchemy = attempt_import('pandas', 'sqlalchemy')
+        pandas = attempt_import('pandas')
+    """
     from meerschaum.utils.warnings import warn
     import importlib
 
@@ -373,7 +397,20 @@ def attempt_import(
             )
             modules.append(None)
         else:
-            modules.append(importlib.import_module(name))
+            if not lazy:
+                mod = importlib.import_module(name)
+            else:
+                mod = lazy_import(name)
+            modules.append(mod)
     modules = tuple(modules)
-    if len(modules) == 0: return modules[0]
+    if len(modules) == 1: return modules[0]
     return modules
+
+def lazy_import(
+        name : str,
+        local_name : str = None
+    ):
+    from meerschaum.utils.lazy_loader import LazyLoader
+    if local_name is None:
+        local_name = name
+    return LazyLoader(local_name, globals(), name)
