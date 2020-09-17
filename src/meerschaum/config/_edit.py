@@ -48,6 +48,10 @@ def write_config(
     if config_dict is None:
         config_dict = config
 
+    if debug:
+        from pprintpp import pprint
+        print(f"Writing configuration to {CONFIG_PATH:}")
+        pprint(config_dict)
     with open(CONFIG_PATH, 'w') as f:
         f.write(default_header_comment)
         yaml.dump(config_dict, f)

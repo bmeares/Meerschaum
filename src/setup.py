@@ -43,14 +43,18 @@ extras = {
         'aiosqlite',
         'asyncpg',
         'graphene',
-        'starlette',
     ],
 }
+
+with open('README.md', 'r') as f:
+    readme = f.read()
 
 setuptools.setup(
     name = 'meerschaum',
     version = __version__,
     description = 'Create and Manage Pipes with Meerschaum',
+    long_description = readme,
+    long_description_content_type = 'text/markdown',
     url = 'https://github.com/bmeares/Meerschaum',
     author = 'Bennett Meares',
     author_email = 'bennett.meares@gmail.com',

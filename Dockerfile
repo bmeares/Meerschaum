@@ -7,7 +7,7 @@ RUN cd /root/ && /root/setup.sh && rm -f /root/setup.sh
 
 ### install python package and make /src empty 
 ADD ./src /src
-RUN pip install /src && rm -rf /src && mkdir -p /src
+RUN pip install --no-cache-dir --upgrade /src[full] && rm -rf /src && mkdir -p /src
 
 ### Run post-install script
 # ADD ./scripts/post_install.sh /root/post_install.sh
