@@ -2,6 +2,3 @@
   - remove configs, etc before building
 - Pipes
   - bootstrap
-- preserve / cascade existing config
-  - on install, rename config.yaml to patch.yaml instead of always bootstrapping
-- move readme inside package
