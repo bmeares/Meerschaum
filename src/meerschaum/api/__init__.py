@@ -4,9 +4,8 @@
 
 from meerschaum.config import system_config
 from meerschaum.connectors import get_connector
-from fastapi import FastAPI
-import graphene
-from starlette.graphql import GraphQLApp
+from meerschaum.utils.misc import attempt_import
+fastapi, graphene, starlette_graphql = attempt_import('fastapi', 'graphene', 'starlette.graphql', lazy=True)
 
 connector = get_connector(type="sql", label="meta")
 database = connector.db
@@ -20,8 +19,8 @@ class Query(graphene.ObjectType):
         return 'hello' + name
 
 sys_config = system_config['api']
-fast_api = FastAPI()
-fast_api.add_route("/graphql", GraphQLApp(schema=graphene.Schema(query=Query)))
+fast_api = fastapi.FastAPI()
+fast_api.add_route("/graphql", starlette_graphql.GraphQLApp(schema=graphene.Schema(query=Query)))
 
 __version__ = sys_config['version']
 endpoints = sys_config['endpoints']

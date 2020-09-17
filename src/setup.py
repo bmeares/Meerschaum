@@ -24,31 +24,44 @@ class PostInstallCommand(install):
         #  entry(['bootstrap', 'config', '--yes', '--force'])
         #  entry(['bootstrap', 'stack', '--yes', '--force'])
 
+required = [
+    'pyyaml',
+    'cascadict',
+    'pprintpp',
+    'requests',
+    'pyvim',
+]
+
+extras = {
+    'full' : [
+        'pandas',
+        'sqlalchemy',
+        'psycopg2-binary',
+        'uvicorn',
+        'fastapi',
+        'databases',
+        'aiosqlite',
+        'asyncpg',
+        'graphene',
+    ],
+}
+
+with open('README.md', 'r') as f:
+    readme = f.read()
+
 setuptools.setup(
     name = 'meerschaum',
     version = __version__,
     description = 'Create and Manage Pipes with Meerschaum',
+    long_description = readme,
+    long_description_content_type = 'text/markdown',
     url = 'https://github.com/bmeares/Meerschaum',
     author = 'Bennett Meares',
     author_email = 'bennett.meares@gmail.com',
     license = 'MIT',
     packages = setuptools.find_packages(),
-    install_requires = [
-        'sqlalchemy',
-        'pandas',
-        'psycopg2-binary',
-        'pyyaml',
-        'lazy_import',
-        'fastapi',
-        'uvicorn',
-        'databases',
-        'aiosqlite',
-        'graphene',
-        'asyncpg',
-        'cascadict',
-        'pprintpp',
-        'requests',
-    ],
+    install_requires = required,
+    extras_require = extras,
     entry_points = {
         'console_scripts' : [
             'meerschaum = meerschaum.__main__:main',
