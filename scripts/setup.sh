@@ -8,10 +8,10 @@ export DEBIAN_FRONTEND=noninteractive
 apt-get update && apt-get upgrade -y
 
 ### install system packages
-apt-get install\
-	nano\
-	-y\
-  --no-install-recommends
+# apt-get install\
+	# nano\
+	# -y\
+  # --no-install-recommends
 
 ### cleanup
 apt-get clean

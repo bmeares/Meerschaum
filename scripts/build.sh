@@ -7,6 +7,6 @@ DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" >/dev/null 2>&1 && pwd )"
 docker build --squash -t "$image" . || exit 1
 
 ### build the pip package
-cd "$DIR"/../src
+cd "$DIR"/../
 python setup.py sdist
 
