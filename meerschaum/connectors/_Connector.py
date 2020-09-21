@@ -55,6 +55,7 @@ class Connector:
 
         ### handle custom pandas implementation (e.g. modin)
         pandas = pandas if pandas is not None else connector_config['all']['pandas']
+        self._pandas_name = pandas
 
     @property
     def pd(self):

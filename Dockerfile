@@ -1,12 +1,13 @@
 FROM python:3.8-slim-buster
 MAINTAINER Bennett Meares <bennett.meares@gmail.com>
 
+### copy project files
+ADD . /src
+
 ### install system requirements
-ADD ./scripts/setup.sh /root/setup.sh
-RUN cd /root/ && /root/setup.sh && rm -f /root/setup.sh
+RUN cd /src/ && /src/scripts/setup.sh && rm -rf /src/scripts/
 
 ### install python package and make /src empty 
-ADD ./src /src
 RUN pip install --no-cache-dir --upgrade /src[full] && rm -rf /src && mkdir -p /src
 
 ### Run post-install script

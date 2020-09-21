@@ -11,7 +11,7 @@ from meerschaum.connectors.sql import SQLConnector
 from meerschaum.connectors.api._APIConnector import APIConnector
 
 ### store connectors partitioned by
-### type, label for resuse
+### type, label for reuse
 connectors = {
     'api' : dict(),
     'sql' : dict(),

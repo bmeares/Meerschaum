@@ -9,6 +9,11 @@ This module is the entry point for the interactive shell
 import cmd as cmd, sys, inspect
 from meerschaum.config import __doc__, config as cf
 from meerschaum.actions.arguments import parse_line
+### readline is Unix-like only. Disable readline features for Windows
+try:
+    import readline
+except ImportError:
+    readline = None
 
 shell_config = cf['system']['shell']
 
@@ -126,17 +131,17 @@ class Shell(cmd.Cmd):
         pass
 
     def preloop(self):
-        import signal, readline, os
+        import signal, os
         from meerschaum.config._paths import SHELL_HISTORY_PATH
-        #  signal.signal(signal.SIGINT, sigint_handler)
         if SHELL_HISTORY_PATH.exists():
-            readline.read_history_file(SHELL_HISTORY_PATH)
+            if readline:
+                readline.read_history_file(SHELL_HISTORY_PATH)
 
     def postloop(self):
-        import readline
         from meerschaum.config._paths import SHELL_HISTORY_PATH
-        readline.set_history_length(shell_config['max_history'])
-        readline.write_history_file(SHELL_HISTORY_PATH)
+        if readline:
+            readline.set_history_length(shell_config['max_history'])
+            readline.write_history_file(SHELL_HISTORY_PATH)
         print('\n' + self.close_message)
 
     def cmdloop(self, *args, **kw):

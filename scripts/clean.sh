@@ -3,9 +3,6 @@
 DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" >/dev/null 2>&1 && pwd )"
 . "$DIR"/config.sh
 
-### publish to Docker Hub
-docker push "$image"
-
-### publish to PyPy
 cd "$DIR"/../
-twine upload dist/*
+python setup.py clean --all
+rm -rf build dist meerschaum.egg-info

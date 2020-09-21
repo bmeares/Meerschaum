@@ -23,7 +23,7 @@ def api(
         - `api main show config`
             - see above
     
-    If command is `server`, launch the Meerschaum WebAPI. If command is an api connector label,
+    If command is `start`, launch the Meerschaum WebAPI. If command is an api connector label,
         connect to that label. Otherwise connect to `main` api connector.
     """
     if action[0] == '':
@@ -97,6 +97,7 @@ def _api_server(
 
     print(f"Starting Meerschaum API v{__version__} with the following configuration:")
     pprint(uvicorn_config)
+
     uvicorn.run(**uvicorn_config)
 
     return (True, "Success")
