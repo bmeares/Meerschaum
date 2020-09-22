@@ -3,24 +3,25 @@
 # vim:fenc=utf-8
 
 """
-Interact with Pipes
+Register Pipes via the Meerschaum API
 """
 
 from meerschaum.api import fast_api, endpoints, database, connector
-from meerschaum.api.models import Pipe, PipeIn
+from meerschaum.api.models import MetaPipe
 from meerschaum.api.tables import get_tables
 from meerschaum.utils.misc import attempt_import
 sqlalchemy = attempt_import('sqlalchemy')
 pipes_endpoint = endpoints['mrsm'] + '/pipes'
 
 @fast_api.post(pipes_endpoint)
-async def register_pipe(pipe : PipeIn):
+async def register_pipe(pipe : MetaPipe):
     """
     Register a new Pipe
     """
     query = get_tables()['pipes'].insert().values(
-            building_key = pipe.building_key,
-            metric = pipe.metric
+        location_key = pipe.location_key,
+        metric_key = pipe.metric_key,
+        connector_keys = pipe.connector_keys
     )
 
     last_record_id = await database.execute(query)

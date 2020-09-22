@@ -19,14 +19,16 @@ def get_tables():
     """
     Substantiate and create sqlalchemy tables
     """
+    global tables
     if len(tables) == 0:
         tables = {
             'pipes' : sqlalchemy.Table(
                           "pipes",
                           connector.metadata,
                           sqlalchemy.Column("pipe_id", sqlalchemy.Integer, primary_key=True),
-                          sqlalchemy.Column("building_key", sqlalchemy.String),
-                          sqlalchemy.Column("metric", sqlalchemy.String),
+                          sqlalchemy.Column("location_key", sqlalchemy.String),
+                          sqlalchemy.Column("metric_key", sqlalchemy.String),
+                          sqlalchemy.Column("connector_keys", sqlalchemy.String)
                       ),
         }
 

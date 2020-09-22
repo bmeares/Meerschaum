@@ -454,3 +454,15 @@ def run_python_package(
     from subprocess import call
     command = [sys.executable, '-m', package_name] + args
     return call(command)
+
+def parse_connector_keys(keys : str) -> 'meerschaum.connectors.Connector':
+    """
+    Parse connector keys and return Connector object
+    """
+    from meerschaum.connectors import get_connector
+    try:
+        vals = keys.split(':')
+        conn = get_connector(vals[0], vals[1])
+    except Exception as e:
+        return False
+    return conn
