@@ -17,5 +17,5 @@ actions = lazy_import('meerschaum.actions')
 connectors = lazy_import('meerschaum.connectors')
 utils = lazy_import('meerschaum.utils')
 config = lazy_import('meerschaum.config')
-Pipe = lazy_import('meerschaum.Pipe')
+Pipe = lazy_import('meerschaum.Pipe').Pipe
 api = lazy_import('meerschaum.api')

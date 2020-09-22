@@ -35,22 +35,46 @@ api_port = "MRSM{meerschaum:connectors:api:main:port}"
 
 api_host = "meerschaum_api"
 
-env_text = (f"""
-### Edit environment variables with `edit stack env`
-COMPOSE_PROJECT_NAME="meerschaum_stack"
-TIMESCALEDB_VERSION="latest-pg12"
-POSTGRES_USER="{db_user}"
-POSTGRES_PASSWORD="{db_pass}"
-POSTGRES_DB="{db_base}"
-MEERSCHAUM_DB_HOSTNAME="{db_host}"
-MEERSCHAUM_API_HOSTNAME="{api_host}"
-ALLOW_IP_RANGE='0.0.0.0/0'
-"""
-"""
-MEERSCHAUM_API_CONFIG='{"meerschaum":{"connectors":{"sql":{"meta":{"host":"${MEERSCHAUM_DB_HOSTNAME}"}}}}}'
-MEERSCHAUM_API_CONFIG_RESOURCES=/usr/local/lib/python3.8/site-packages/meerschaum/config/resources/
-"""
+env_dict = {
+    'COMPOSE_PROJECT_NAME' : 'meerschaum_stack',
+    'TIMESCALEDB_VERSION' : 'latest-pg12',
+    'POSTGRES_USER' : f'{db_user}',
+    'POSTGRES_PASSWORD' : f'{db_pass}',
+    'POSTGRES_DB' : f'{db_base}',
+    'MEERSCHAUM_DB_HOSTNAME' : f'{db_host}',
+    'MEERSCHAUM_API_HOSTNAME' : f'{api_host}',
+    'ALLOW_IP_RANGE' : '0.0.0.0/0',
+    'MEERSCHAUM_API_CONFIG_RESOURCES' : '/usr/local/lib/python3.8/site-packages/meerschaum/config/resources/',
+}
+env_dict['MEERSCHAUM_API_CONFIG'] = (
+    '{"meerschaum":{"connectors":{"sql":{"meta":{"host":"' +
+    env_dict['MEERSCHAUM_DB_HOSTNAME']  + '"}}}}}'
 )
+
+#  env_text = (f"""
+#  ### Edit environment variables with `edit stack env`
+#  COMPOSE_PROJECT_NAME="meerschaum_stack"
+#  TIMESCALEDB_VERSION="latest-pg12"
+#  POSTGRES_USER="{db_user}"
+#  POSTGRES_PASSWORD="{db_pass}"
+#  POSTGRES_DB="{db_base}"
+#  MEERSCHAUM_DB_HOSTNAME="{db_host}"
+#  MEERSCHAUM_API_HOSTNAME="{api_host}"
+#  ALLOW_IP_RANGE='0.0.0.0/0'
+#  """
+#  """
+#  MEERSCHAUM_API_CONFIG='{"meerschaum":{"connectors":{"sql":{"meta":{"host":"${MEERSCHAUM_DB_HOSTNAME}"}}}}}'
+#  MEERSCHAUM_API_CONFIG_RESOURCES=/usr/local/lib/python3.8/site-packages/meerschaum/config/resources/
+#  """
+#  )
+
+### source environment variables
+#  for line in env_text.split('\n'):
+    #  values = line.split('=')
+    #  if len(values) != 2: continue
+    #  os.environ[values[0]] = values[1]
+    #  print(os.environ[values[0]])
+
 compose_header = """
 ##############################################################
 #                                                            #
@@ -81,16 +105,16 @@ default_docker_compose_config = {
         'meerschaum_db' : {
             'environment' : [
                 'TIMESCALEDB_TELEMETRY=off',
-                'POSTGRES_USER=${POSTGRES_USER}',
-                'POSTGRES_DB=${POSTGRES_DB}',
-                'POSTGRES_PASSWORD=${POSTGRES_PASSWORD}',
-                'ALLOW_IP_RANGE=${ALLOW_IP_RANGE}',
+                'POSTGRES_USER=' + env_dict['POSTGRES_USER'],
+                'POSTGRES_DB=' + env_dict['POSTGRES_DB'],
+                'POSTGRES_PASSWORD=' + env_dict['POSTGRES_PASSWORD'],
+                'ALLOW_IP_RANGE=' + env_dict['ALLOW_IP_RANGE'],
             ],
-            'image' : 'timescale/timescaledb:${TIMESCALEDB_VERSION}',
+            'image' : 'timescale/timescaledb:' + env_dict['TIMESCALEDB_VERSION'],
             'ports' : [
                 f'{db_port}:{db_port}',
             ],
-            'hostname' : '${MEERSCHAUM_DB_HOSTNAME}',
+            'hostname' : env_dict['MEERSCHAUM_DB_HOSTNAME'],
             'volumes' : [
                 'meerschaum_db_data' + ':' + volumes['meerschaum_db_data'],
             ],
@@ -108,7 +132,7 @@ default_docker_compose_config = {
             ],
             'command' : 'api start',
             'environment' : [
-                'MEERSCHAUM_CONFIG=${MEERSCHAUM_API_CONFIG}' 
+                'MEERSCHAUM_CONFIG=' + env_dict['MEERSCHAUM_API_CONFIG'],
             ],
             'depends_on' : [
                 'meerschaum_db'
@@ -154,7 +178,7 @@ for key in volumes:
 
 default_stack_config = dict()
 default_stack_config[STACK_COMPOSE_FILENAME] = default_docker_compose_config
-default_stack_config['.env'] = env_text
+#  default_stack_config['.env'] = env_text
 from meerschaum.config.stack.grafana import default_grafana_config
 default_stack_config['grafana'] = default_grafana_config
 
@@ -170,7 +194,7 @@ def get_necessary_files():
     from meerschaum.config._paths import STACK_ENV_FILENAME, STACK_COMPOSE_FILENAME
     from meerschaum.config import config
     return {
-        STACK_ENV_PATH : config['stack'][STACK_ENV_FILENAME],
+        #  STACK_ENV_PATH : config['stack'][STACK_ENV_FILENAME],
         STACK_COMPOSE_PATH : (config['stack'][STACK_COMPOSE_FILENAME], compose_header),
         GRAFANA_DATASOURCE_PATH : config['stack']['grafana']['datasource'],
         GRAFANA_DASHBOARD_PATH : config['stack']['grafana']['dashboard'],
@@ -199,9 +223,9 @@ def edit_stack(
         'compose' : STACK_COMPOSE_PATH,
         'docker-compose' : STACK_COMPOSE_PATH,
         'docker-compose.yaml' : STACK_COMPOSE_PATH,
-        'env' : STACK_ENV_PATH,
-        'environment' : STACK_ENV_PATH,
-        '.env' : STACK_ENV_PATH,
+        #  'env' : STACK_ENV_PATH,
+        #  'environment' : STACK_ENV_PATH,
+        #  '.env' : STACK_ENV_PATH,
     }
     return general_edit_config(action=action, files=files, default='compose', debug=debug)
 
