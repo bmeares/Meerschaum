@@ -42,8 +42,8 @@ def _delete_config(
     """
     import os
     from meerschaum.utils.misc import yes_no
-    from meerschaum.config._paths import CONFIG_PATH, STACK_COMPOSE_PATH
-    paths = [CONFIG_PATH, STACK_COMPOSE_PATH]
+    from meerschaum.config._paths import CONFIG_PATH, STACK_COMPOSE_PATH, DEFAULT_CONFIG_PATH
+    paths = [CONFIG_PATH, STACK_COMPOSE_PATH, DEFAULT_CONFIG_PATH]
     answer = False
     if not yes:
         sep = '\n' + '  - '
