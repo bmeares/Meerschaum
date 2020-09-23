@@ -25,7 +25,7 @@ class PostInstallCommand(install):
         #  entry(['bootstrap', 'stack', '--yes', '--force'])
 
 required = [
-    'pyyaml',
+    'PyYAML',
     'cascadict',
     'pprintpp',
     'requests',

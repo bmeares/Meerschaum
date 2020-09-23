@@ -6,7 +6,7 @@
 Interact with the Meerschaum WebAPI with the APIConnector
 """
 
-from meerschaum.connectors import Connector
+from meerschaum.connectors._Connector import Connector
 
 class APIConnector(Connector):
 

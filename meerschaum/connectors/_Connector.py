@@ -14,17 +14,17 @@ connector_config = cf['system']['connectors']
 class Connector:
     def __init__(
             self,
-            conn_type : str = None,
-            conn_label : str = "main",
+            type : str = None,
+            label : str = "main",
             pandas : str = None,
             **kw
         ):
         """
-        conn_type : str
+        type : str
             The type of the connection. Used as a key in config.yaml to get attributes.
             Valid types: ['sql', 'api' TODO, 'mqtt' TODO, 'metasys' TODO?, 'sas' TODO?]
 
-        conn_label : str
+        label : str
             The label for the connection. Used as a key within config.yaml
 
         pandas : str
@@ -34,16 +34,21 @@ class Connector:
         If config.yaml is set for the given type and label, the hierarchy looks like so:
         meerschaum:
             connections:
-                {conn_type}:
-                    {conn_label}:
+                {type}:
+                    {label}:
                         ### attributes go here
 
         Read config.yaml for attributes partitioned by connection type and connection label.
         Example: type="sql", label="main"
         """
-        self.type, self.label = conn_type, conn_label
-        ### add additional arguments to self.__dict__
-        self.__dict__.update(kw)
+        if label == 'default':
+            raise Exception("Label cannot be 'default'. Did you mean 'main'?")
+        self.type, self.label = type, label
+
+        ### inherit attributes from 'default' if exists
+        inherit_from = 'default'
+        if self.type in conn_configs and inherit_from in conn_configs[self.type]:
+            self.__dict__.update(conn_configs[self.type][inherit_from])
 
         ### load user config into self.__dict__
         if self.type in conn_configs and self.label in conn_configs[self.type]:
@@ -52,6 +57,9 @@ class Connector:
         ### load system config into self.system_config
         if self.type in connector_config:
             self.sys_config = connector_config[self.type]
+
+        ### add additional arguments or override configuration
+        self.__dict__.update(kw)
 
         ### handle custom pandas implementation (e.g. modin)
         pandas = pandas if pandas is not None else connector_config['all']['pandas']
@@ -89,8 +97,8 @@ class Connector:
                 missing_attributes.add(a)
         if len(missing_attributes) > 0:
             raise Exception(
-                f"Please provide connection configuration for type: {self.type}, label: {self.label} "
-                f"in config.yaml or as arguments for the Connector.\n"
+                f"Please provide connection configuration for type: '{self.type}', label: '{self.label}' "
+                f"in the configuration file (open with `mrsm edit config`) or as arguments for the Connector.\n\n"
                 f"Missing attributes: {missing_attributes}"
             )
 
