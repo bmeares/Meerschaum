@@ -89,7 +89,7 @@ compose_header = """
 """
 
 volumes = {
-    'meerschaum_api_config_resources' : '${MEERSCHAUM_API_CONFIG_RESOURCES}',
+    'meerschaum_api_config_resources' : env_dict['MEERSCHAUM_API_CONFIG_RESOURCES'],
     'meerschaum_db_data' : '/var/lib/postgresql/data',
     'grafana_storage' : '/var/lib/grafana',
     'portainer_data' : '/data',
