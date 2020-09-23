@@ -369,7 +369,7 @@ def is_installed(
     name : str
         Name of the package in question
     """
-    import importlib
+    import importlib.util
     return importlib.util.find_spec(name) is None
 
 def attempt_import(
@@ -387,7 +387,7 @@ def attempt_import(
         pandas = attempt_import('pandas')
     """
     from meerschaum.utils.warnings import warn
-    import importlib
+    import importlib, importlib.util
 
     modules = []
     for name in names:

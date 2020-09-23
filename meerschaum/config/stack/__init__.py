@@ -135,7 +135,7 @@ default_docker_compose_config = {
                 'MEERSCHAUM_CONFIG=' + env_dict['MEERSCHAUM_API_CONFIG'],
             ],
             'depends_on' : [
-                'meerschaum_db'
+                'meerschaum_db',
             ],
             'volumes' : [
                 'meerschaum_api_config_resources' + ':' + volumes['meerschaum_api_config_resources']
@@ -149,6 +149,9 @@ default_docker_compose_config = {
             'networks' : [
                 'frontend',
                 'backend',
+            ],
+            'depends_on' : [
+                'meerschaum_db',
             ],
             'volumes' : [
                 'grafana_storage' + ':' + volumes['grafana_storage'],

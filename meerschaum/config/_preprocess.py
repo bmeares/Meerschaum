@@ -28,6 +28,8 @@ def preprocess_config(
     ### add meta to SQL connectors
     sql_connectors_config = config['meerschaum']['connectors']['sql']
     if 'meta' in sql_connectors_config and len(sql_connectors_config['meta']) != 0:
+        pass
+    else:
         config['meerschaum']['connectors']['sql']['meta'] = sql_connectors_config['main']
 
     return config 

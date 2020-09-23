@@ -65,7 +65,7 @@ def _api_server(
         **kw
     ):
     """
-    Usage: `api server {options}`
+    Usage: `api start {options}`
     Options:
         - `-p, --port {number}`
             Port to listen to
