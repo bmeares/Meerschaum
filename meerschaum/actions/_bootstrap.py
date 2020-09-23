@@ -22,7 +22,7 @@ def bootstrap(
     options = {
         'pipe'    : _bootstrap_pipe,
         'config'  : _bootstrap_config,
-        'stack'   : _bootstrap_stack,
+        #  'stack'   : _bootstrap_stack,
     }
     return choose_subaction(action, options, **kw)
 
@@ -50,36 +50,24 @@ def _bootstrap_config(
         if action[1] in possible_config_funcs:
             return possible_config_funcs[action[0]](**kw)
 
-    from meerschaum.utils.misc import reload_package, yes_no
-    import meerschaum.config
     from meerschaum.config._edit import write_default_config, write_config
-    import importlib, os
-    from meerschaum.config._paths import CONFIG_PATH
     from meerschaum.config._default import default_config
-    answer = False
-    if not yes:
-        answer = yes_no(f"Delete {CONFIG_PATH}?", default='n')
 
-    if answer or force:
-        if debug: print(f"Removing {CONFIG_PATH}...")
-        try:
-            os.remove(CONFIG_PATH)
-        except Exception as e:
-            print(e)
-    else:
-        msg = "No edits made"
-        if debug: print(msg)
-        return True, msg
+    from meerschaum.actions import actions
+    if not actions['delete'](['config'], debug=debug, yes=yes, force=force, **kw)[0]:
+        return False, "Aborting bootstrap"
 
     if not write_config(default_config, debug=debug, **kw):
         return (False, "Failed to write default configuration")
 
     if not write_default_config(debug=debug, **kw):
         return (False, "Failed to write default configuration")
-    #  if debug: print("Reloading and rebuilding config...")
-    #  reload_package(meerschaum.config, debug=debug, **kw)
-    #  reload_package(meerschaum.config, debug=debug, **kw)
-    return (True, "Success")
+
+    from meerschaum.config.stack import write_stack
+    if not write_stack(debug=debug):
+        return False, "Failed to write stack"
+
+    return (True, "Successfully bootstrapped configuration files")
 
 def _bootstrap_stack(
         yes : bool = False,

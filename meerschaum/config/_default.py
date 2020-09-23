@@ -11,34 +11,40 @@ import yaml, sys, os.path
 default_meerschaum_config = {
     'connectors' : {
         'sql' : {
-            'main' : {
-                'flavor'   : 'timescaledb',
-                'host'     : 'localhost',
+            'default'      : {
                 'username' : 'meerschaum',
                 'password' : 'meerschaum',
+            },
+            'main'         : {
+                'username' : 'meerschaum',
+                'password' : 'meerschaum',
+                'flavor'   : 'timescaledb',
+                'host'     : 'localhost',
                 'database' : 'mrsm_main',
                 'port'     : 5432,
             },
-            'meta'     : {
-            },
+            'meta'         : {},
             'local'        : {
                 'flavor'   : 'sqlite',
-                'database' : 'mrsm_local',
             },
         },
         'api' : {
-            'main' : {
-                'host'     : 'localhost',
+            'default'      : {
                 'username' : 'meerschaum',
-                #  'password' : generate_password(),
                 'password' : 'meerschaum',
                 'protocol' : 'http',
                 'port'     : 8000,
-            }
+            },
+            'main'         : {
+                'host'     : 'localhost',
+                'port'     : 8000,
+            },
+            'local'        : {
+                'host'     : 'localhost',
+            },
         },
     },
 }
-default_meerschaum_config['connectors']['api']['local'] = default_meerschaum_config['connectors']['api']['main']
 default_system_config = {
     'connectors' : {
         'all' : {
@@ -72,13 +78,13 @@ default_system_config = {
     'api' : {
         'uvicorn'          : {
             'app'          : 'meerschaum.api:fast_api',
-            'port'         : default_meerschaum_config['connectors']['api']['main']['port'],
+            'port'         : default_meerschaum_config['connectors']['api']['default']['port'],
             'host'         : '0.0.0.0',
             'workers'      : 4,
         },
-        'username'         : default_meerschaum_config['connectors']['api']['local']['username'],
-        'password'         : default_meerschaum_config['connectors']['api']['local']['password'],
-        'protocol'         : default_meerschaum_config['connectors']['api']['local']['protocol'],
+        'username'         : default_meerschaum_config['connectors']['api']['default']['username'],
+        'password'         : default_meerschaum_config['connectors']['api']['default']['password'],
+        'protocol'         : default_meerschaum_config['connectors']['api']['default']['protocol'],
         'version'          : '0.0.3',
         'endpoints'        : {
             'mrsm'         : '/mrsm',
@@ -90,6 +96,7 @@ default_system_config = {
 }
 
 ### if using Windows, switch to ASCII
+### TODO define fancy graphics mode in formatting module
 if 'win' in sys.platform:
     default_system_config['shell']['prompt'] = 'mrsm > '
 
@@ -104,11 +111,14 @@ from meerschaum.config.stack import default_stack_config
 default_config['stack'] = default_stack_config
 
 default_header_comment = """
-##################################
-# Edit the credentials below     #
-# for the `main` SQL connection. #
-##################################
+##################################################################################
+#                                                                                #
+#  Edit the credentials below for the `main` connectors or add new connectors.   #
+#                                                                                #
+#  Connectors inherit from `default`, and flavor-dependent defaults are defined  #
+#  for SQL connectors (e.g. port 5432 for PostgreSQL).                           #
+#                                                                                #
+#################################################################################
 
 """
-
 

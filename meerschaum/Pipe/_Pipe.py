@@ -30,4 +30,6 @@ class Pipe:
             from meerschaum.utils.misc import parse_connector_keys
             if (conn := parse_connector_keys(self.connector_keys)):
                 self._connector = conn
+            else:
+                return None
         return self._connector
