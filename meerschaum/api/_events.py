@@ -23,7 +23,7 @@ async def startup():
                 print(f"Attempt ({retries + 1} / {max_retries})")
             try:
                 await database.connect()
-            except ConnectionRefusedError as e:
+            except Exception as e:
                 print(f"Connection failed. Retrying in {retry_wait} seconds...")
                 time.sleep(retry_wait)
                 retries += 1

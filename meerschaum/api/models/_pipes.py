@@ -7,11 +7,6 @@ Register new Pipes
 """
 from meerschaum.utils.misc import attempt_import
 pydantic, sqlalchemy, databases = attempt_import('pydantic', 'sqlalchemy', 'databases')
-from meerschaum.connectors import SQLConnector
-
-#  class PipeIn(pydantic.BaseModel):
-    #  building_key : str
-    #  metric : str
 
 class MetaPipe(pydantic.BaseModel):
     location_key : str
