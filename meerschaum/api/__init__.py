@@ -2,6 +2,7 @@
 # -*- coding: utf-8 -*-
 # vim:fenc=utf-8
 
+__version__ = "0.0.4"
 from meerschaum.config import system_config
 from meerschaum.connectors import get_connector
 from meerschaum.utils.misc import attempt_import
@@ -22,7 +23,6 @@ sys_config = system_config['api']
 fast_api = fastapi.FastAPI()
 fast_api.add_route("/graphql", starlette_graphql.GraphQLApp(schema=graphene.Schema(query=Query)))
 
-__version__ = sys_config['version']
 endpoints = sys_config['endpoints']
 
 ### import WebAPI routes

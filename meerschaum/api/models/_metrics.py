@@ -3,13 +3,12 @@
 # vim:fenc=utf-8
 
 """
-Register new Pipes
+Metric model
 """
+
 from meerschaum.utils.misc import attempt_import
 pydantic = attempt_import('pydantic')
 
-class MetaPipe(pydantic.BaseModel):
-    location_key : str
+class Metric(pydantic.BaseModel):
     metric_key : str
-    connector_keys : str ### e.g. sql:main
-
+    metric_name : str

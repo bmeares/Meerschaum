@@ -85,7 +85,6 @@ default_system_config = {
         'username'         : default_meerschaum_config['connectors']['api']['default']['username'],
         'password'         : default_meerschaum_config['connectors']['api']['default']['password'],
         'protocol'         : default_meerschaum_config['connectors']['api']['default']['protocol'],
-        'version'          : '0.0.3',
         'endpoints'        : {
             'mrsm'         : '/mrsm',
         },

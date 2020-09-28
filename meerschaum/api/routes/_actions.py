@@ -13,14 +13,14 @@ from fastapi import Body
 actions_endpoint = endpoints['mrsm'] + "/actions"
 
 @fast_api.get(actions_endpoint)
-def get_actions():
+def get_actions() -> list:
     """
     Return a list of available actions
     """
     return list(actions)
 
 @fast_api.post(actions_endpoint + "/{action}")
-def do_action(action : str, keywords : dict = Body(...)):
+def do_action(action : str, keywords : dict = Body(...)) -> tuple:
     if action not in actions:
         return False, f"Invalid action '{action}'"
     return actions[action](**keywords)
