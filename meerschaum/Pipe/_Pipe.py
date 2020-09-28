@@ -24,6 +24,9 @@ class Pipe:
         self.metric_key = metric_key
         self.connector_keys = connector_keys
 
+        ### aggregations
+        self._aggregations = dict()
+
     @property
     def connector(self):
         if '_connector' not in self.__dict__:
