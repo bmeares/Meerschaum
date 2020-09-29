@@ -342,7 +342,7 @@ def search_and_substitute_config(
 
         ### follow the pointers to the value
         c = config
-        for i, k in enumerate(keys):
+        for k in keys:
             try:
                 c = c[k]
             except KeyError:

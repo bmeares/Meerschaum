@@ -19,17 +19,26 @@ def get_pipes(
     """
     Return a dictionary (or list) of Pipe objects.
 
-    connector_keys : dict
-
-    location_keys : list
-        List of location_keys. A string is converted to a list of length 1.
+    connector_keys : list
+        List of connector keys.
         If parameter is omitted or is '*', fetch all location_keys.
 
     metric_keys : list
-        List of metric_keys. See location_keys for more information.
+        List of metric keys.
+        See connector_keys for formatting
+
+    location_keys : list
+        List of location keys.
+        See connector_keys for formatting
 
     params : dict
         Dictionary of additional parameters to search by. This may include 
+
+    source : str
+        ['api', 'sql'] Default "sql"
+        Source of pipes data and metadata.
+        If 'sql', pull from the `meta` and `main` SQL connectors.
+        If 'api', pull from the `main` WebAPI.
     """
     #  raise NotImplementedError("TODO finish get_pipes")
     ### fetch meta connector
@@ -43,8 +52,8 @@ def get_pipes(
         #  from meerschaum.api.tables import get_tables
         #  pipes_table = get_tables()['pipes']
     ### TODO get pipes from API
-    #  elif source == 'api':
-        #  pass
+    elif source == 'api':
+        raise NotImplementedError(f"Source '{source}' has not yet been implemented.")
     else:
         raise NotImplementedError(f"Invalid source '{source}'")
 
@@ -69,10 +78,10 @@ def get_pipes(
     #  if location_keys in [None, ['*']] and source == 'sql':
         #  location_keys = select_distinct('location_key')
 
-    q = """
-    SELECT DISTINCT pipes.connector_keys, pipes.metric_key, pipes.location_key
-    FROM pipes
-    """
+    q = """SELECT DISTINCT
+    pipes.connector_keys, pipes.metric_key, pipes.location_key
+FROM pipes
+"""
     ### NOTE implement left joins later?
     """
     LEFT JOIN metrics ON metrics.metric_key = pipes.metric_key AND metrics.connector_keys = pipes.connector_keys
@@ -87,25 +96,45 @@ def get_pipes(
         'location_key' : location_keys,
     }
     for col, vals in cols.items():
-        if vals not in [None, ['*']]:
+        if vals not in [None, [], ['*']]:
             params[col] = vals
 
-    print(params)
-    input()
     def build_where():
-        where = "\nWHERE 1"
+        """
+        Build the WHERE clause based on the input criteria
+        """
+        where = ""
+        leading_and = "\n    AND "
         for key, value in params.items():
-            where += f"\n  AND {key} = '{value}'"
+            if isinstance(value, list):
+                where += f"{leading_and}{key} IN ("
+                for item in value:
+                    where += f"'{item}', "
+                where = where[:-2] + ")"
+                continue
+            where += f"{leading_and}{key} = '{value}'"
+        if len(where) > 1: where = "WHERE\n    " + where[len(leading_and):]
         return where
     q += build_where()
 
+    pipes = dict()
+
+    from meerschaum import Pipe
     if debug: print(q)
-    print(meta_connector.read(q))
+    result = meta_connector.engine.execute(q)
+    for ck, mk, lk in result:
+        if ck not in pipes:
+            pipes[ck] = dict()
 
-    if debug:
-        print('Connector keys:', connector_keys)
-        print('Metric keys:', metric_keys)
-        print('Location keys:', location_keys)
+        if mk not in pipes[ck]:
+            pipes[ck][mk] = dict()
 
-    #  for i in meta_connector.read(q).iterrows():
-        #  print(i)
+        pipes[ck][mk][lk] = Pipe(ck, mk, lk, debug=debug)
+
+    if not as_list: return pipes
+    pipes_list = []
+    for ck in pipes.values():
+        for mk in ck.values():
+            pipes_list += list(mk.values())
+    return pipes_list
+
