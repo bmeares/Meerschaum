@@ -73,6 +73,6 @@ setuptools.setup(
         'install' : PostInstallCommand,
     },
     zip_safe = True,
-    package_data = {'' : ['*.yaml', '*.env']},
+    package_data = {'' : ['*.yaml', '*.env', 'Dockerfile*']},
     python_requires = '>=3.8'
 )
