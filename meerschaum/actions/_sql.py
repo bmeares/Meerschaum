@@ -33,6 +33,7 @@ def sql(
 
     from meerschaum.connectors import get_connector
     from meerschaum.config import config as cf
+    from meerschaum.utils.debug import dprint
 
     method = None
     label = None
@@ -55,8 +56,8 @@ def sql(
             "Verify meerschaum:connectors:sql:{label} is defined with `edit config`")
 
     if debug:
-        print(action)
-        print(conn)
+        dprint(action)
+        dprint(conn)
 
     ### guess the method from the structure of the query
     if 'select' in query.lower() or ' ' not in query:

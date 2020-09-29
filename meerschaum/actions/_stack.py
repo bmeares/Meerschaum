@@ -6,11 +6,6 @@
 Functions for running the Docker Compose stack
 """
 
-#  custom_subactions = {
-    #  'build' : _stack_build,
-#  }
-
-
 def stack(
         action : list = [''],
         sub_args : list = [],
@@ -31,6 +26,7 @@ def stack(
     from meerschaum.config._paths import STACK_COMPOSE_PATH
     from meerschaum.utils.misc import yes_no, reload_package
     import meerschaum.config
+    from meerschaum.utils.debug import dprint
     import os
 
     bootstrap = False
@@ -59,7 +55,7 @@ def stack(
         sub_args.append('--build')
 
     cmd_list = ['docker-compose'] + compose_command + sub_args
-    if debug: print(cmd_list)
+    if debug: dprint(cmd_list)
     call(cmd_list, cwd=STACK_COMPOSE_PATH.parent)
     reload_package(meerschaum.config)
     reload_package(meerschaum.config)

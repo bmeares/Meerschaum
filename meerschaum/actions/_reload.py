@@ -16,6 +16,7 @@ def reload(
     """
     import sys
     from meerschaum.utils.misc import reload_package
+    from meerschaum.utils.debug import dprint
     reload_package(sys.modules[f'meerschaum'], debug=debug)
     reload_package(sys.modules[f'meerschaum'], debug=debug)
 

@@ -3,7 +3,7 @@
 # vim:fenc=utf-8
 """
 Functions for bootstrapping elements
-(pipes, server connections, etc)
+(pipes, configuration, etc)
 """
 
 def bootstrap(
@@ -81,6 +81,7 @@ def _bootstrap_stack(
     from meerschaum.utils.misc import yes_no
     from meerschaum.config._paths import STACK_COMPOSE_PATH, STACK_ENV_PATH
     from meerschaum.config.stack import write_stack
+    from meerschaum.utils.debug import dprint
     answer = False
     if not yes:
         answer = yes_no(f"Delete {STACK_COMPOSE_PATH} and {STACK_ENV_PATH}?", default='n')
@@ -89,7 +90,7 @@ def _bootstrap_stack(
         write_stack(debug=debug)
     else:
         msg = "No edits made"
-        if debug: print(msg)
+        if debug: dprint(msg)
         return True, msg
     return True, "Success"
 
@@ -106,6 +107,7 @@ def _bootstrap_grafana(
     from meerschaum.config._paths import GRAFANA_DATASOURCE_PATH, GRAFANA_DASHBOARD_PATH
     from meerschaum.config._edit import general_write_config
     from meerschaum.config import config as cf
+    from meerschaum.utils.debug import dprint
     answer = False
     if not yes:
         answer = yes_no(f"Delete {GRAFANA_DATASOURCE_PATH} and {GRAFANA_DASHBOARD_PATH}?", default='n')
@@ -120,7 +122,7 @@ def _bootstrap_grafana(
         )
     else:
         msg = "No edits made"
-        if debug: print(msg)
+        if debug: dprint(msg)
         return True, msg
     return True, "Success"
 

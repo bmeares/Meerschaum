@@ -65,13 +65,61 @@ default_system_config = {
         'api' : {
         },
     },
+    ### control output colors and Unicode vs ASCII
+    'formatting'           : {
+        'unicode'          : True,
+        'ansi'             : True,
+    },
     'shell' : {
+        'ansi'             : {
+            'intro'        : {
+                'color'    : [
+                    'bold',
+                    'bright blue',
+                ],
+            },
+            'close_message': {
+                'color'    : [
+                    'bright blue',
+                ],
+            },
+            'doc_header': {
+                'color'    : [
+                    'bright blue',
+                ],
+            },
+            'undoc_header': {
+                'color'    : [
+                    'bright blue',
+                ],
+            },
+            'ruler': {
+                'color'    : [
+                    'bold',
+                    'bright blue',
+                ],
+            },
+            'prompt': {
+                'color'    : [
+                    'green',
+                ],
+            },
+        },
+        'ascii'            : {
+            'prompt'       : 'mrsm > ',
+            'ruler'        : '-',
+            'close_message': 'Thank you for using Meerschaum!',
+            'doc_header'   : 'Meerschaum actions (`help <action>` for usage):',
+            'undoc_header' : 'Unimplemented actions:',
+        },
+        'unicode'          : {
+            'prompt'       : '𝚖𝚛𝚜𝚖 ➤ ',
+            'ruler'        : '─',
+            'close_message': 'Thank you for using Meerschaum! 👋',
+            'doc_header'   : 'Meerschaum actions (`help <action>` for usage):',
+            'undoc_header' : 'Unimplemented actions:',
+        },
         'timeout'          : 60,
-        'prompt'           : '𝚖𝚛𝚜𝚖 ➤ ',
-        'ruler'            : '─',
-        'close_message'    : 'Thank you for using Meerschaum!',
-        'doc_header'       : 'Meerschaum actions (`help <action>` for usage):',
-        'undoc_header'     : 'Unimplemented actions:',
         'max_history'      : 1000,
     },
     ### not to be confused with system_config['connectors']['api']
@@ -94,11 +142,6 @@ default_system_config = {
     },
 }
 
-### if using Windows, switch to ASCII
-### TODO define fancy graphics mode in formatting module
-if 'win' in sys.platform:
-    default_system_config['shell']['prompt'] = 'mrsm > '
-
 from meerschaum.config._paths import RESOURCES_PATH, DEFAULT_CONFIG_PATH
 
 ### build default config dictionary
@@ -117,7 +160,7 @@ default_header_comment = """
 #  Connectors inherit from `default`, and flavor-dependent defaults are defined  #
 #  for SQL connectors (e.g. port 5432 for PostgreSQL).                           #
 #                                                                                #
-#################################################################################
+##################################################################################
 
 """
 

@@ -30,6 +30,8 @@ required = [
     'pprintpp',
     'requests',
     'pyvim',
+    'colorama',
+    'more_termcolor',
 ]
 
 extras = {
