@@ -24,14 +24,11 @@ def parse_arguments(sysargs : list) -> dict:
         from meerschaum.config._paths import PATCH_PATH
         from meerschaum.utils.misc import reload_package
         import os, meerschaum.config
-        write_patch(args.config, debug=True)
-        #  meerschaum.config.config
+        write_patch(args.config)
         reload_package(meerschaum.config)
         reload_package(meerschaum.config)
-        meerschaum.config.config = apply_patch_to_config(meerschaum.config.config, args.config)
         ### clean up patch so it's not loaded next time
-        #  print(f"Removing patch: {PATCH_PATH}")
-        #  os.remove(PATCH_PATH)
+        os.remove(PATCH_PATH)
 
     begin_decorator, end_decorator = cf['system']['arguments']['sub_decorators']
 

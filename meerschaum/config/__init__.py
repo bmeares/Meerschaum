@@ -20,8 +20,6 @@ config = preprocess_config(config)
 ### if patch.yaml exists, apply patch to config
 from meerschaum.config._patch import patch_config, apply_patch_to_config
 if patch_config is not None:
-    print('Applying patch to config:')
-    print(patch_config)
     config = apply_patch_to_config(config, patch_config)
 
 ### if environment variable MEERSCHAUM_CONFIG is set, , patch config
