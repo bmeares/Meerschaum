@@ -20,10 +20,10 @@ def parse_arguments(sysargs : list) -> dict:
     ### if --config is not empty, cascade down config
     ### and update new values on existing keys / add new keys/values
     if args.config is not None:
-        from meerschaum.config._patch import write_patch
+        from meerschaum.config._patch import write_patch, apply_patch_to_config
         from meerschaum.config._paths import PATCH_PATH
         from meerschaum.utils.misc import reload_package
-        import os
+        import os, meerschaum.config
         write_patch(args.config)
         reload_package(meerschaum.config)
         reload_package(meerschaum.config)
@@ -37,7 +37,7 @@ def parse_arguments(sysargs : list) -> dict:
     for i, action in enumerate(args_dict['action']):
         if action.startswith(begin_decorator) and action.endswith(end_decorator):
             ### remove decorators
-            sub_arguments += action[1:-1].split(' ')
+            sub_arguments += action[len(begin_decorator):-1 * len(end_decorator)].split(' ')
             ### remove sub-argument from action list
             del args_dict['action'][i]
 
@@ -53,7 +53,15 @@ def parse_arguments(sysargs : list) -> dict:
             parsed_sub_arguments.append(sub_arg)
     args_dict['sub_args'] = parsed_sub_arguments
 
-    return parse_synonyms(vars(args))
+    ### remove None (but not False) args
+    none_args = []
+    for a, v in args_dict.items():
+        if v is None:
+            none_args.append(a)
+    for a in none_args:
+        del args_dict[a]
+
+    return parse_synonyms(args_dict)
 
 def parse_line(line : str) -> dict:
     """

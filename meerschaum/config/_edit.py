@@ -6,6 +6,9 @@
 Functions for editing the configuration file
 """
 
+#  from meerschaum.utils.debug import dprint
+import sys
+
 def edit_config(
         params : dict = None,
         debug : bool = False,
@@ -16,11 +19,12 @@ def edit_config(
 
     params: patch to apply. Depreciated / replaced by --config (at least in this case)
     """
-    import sys, tempfile, os, importlib
+    import tempfile, os, importlib
     import meerschaum.config
     from meerschaum.config import config as cf
     from meerschaum.config._paths import CONFIG_PATH
     from meerschaum.utils.misc import reload_package, edit_file
+    from meerschaum.utils.debug import dprint
 
     if params is not None:
         from meerschaum.utils import apply_patch_to_config
@@ -30,7 +34,7 @@ def edit_config(
     else:
         edit_file(CONFIG_PATH, debug=debug)
 
-    if debug: print("Reloading configuration...")
+    if debug: dprint("Reloading configuration...")
     reload_package(meerschaum.config, debug=debug, **kw)
     reload_package(meerschaum.config, debug=debug, **kw)
 
@@ -44,14 +48,15 @@ def write_config(
     from meerschaum.config._paths import CONFIG_PATH
     from meerschaum.config import config
     from meerschaum.config._default import default_header_comment
+    from meerschaum.utils.debug import dprint
     import yaml
     if config_dict is None:
         config_dict = config
 
     if debug:
         from pprintpp import pprint
-        print(f"Writing configuration to {CONFIG_PATH:}")
-        pprint(config_dict)
+        dprint(f"Writing configuration to {CONFIG_PATH:}")
+        pprint(config_dict, stream=sys.stderr)
     with open(CONFIG_PATH, 'w') as f:
         f.write(default_header_comment)
         yaml.dump(config_dict, f)
@@ -70,6 +75,7 @@ def general_write_config(
         If item is a tuple, the header will be written at the top of the file.
     """
 
+    from meerschaum.utils.debug import dprint
     from pathlib import Path
 
     for fp, value in files.items():
@@ -82,13 +88,13 @@ def general_write_config(
         path.touch(exist_ok=True)
         with open(path, 'w+') as f:
             if header is not None:
-                if debug: print(f"Header detected, writing to {path}...")
+                if debug: dprint(f"Header detected, writing to {path}...")
                 f.write(header)
             if isinstance(config, str):
-                if debug: print(f"Config is a string. Writing to {path}...")
+                if debug: dprint(f"Config is a string. Writing to {path}...")
                 f.write(config)
             elif isinstance(config, dict):
-                if debug: print(f"Config is a dict. Writing to {path}...")
+                if debug: dprint(f"Config is a dict. Writing to {path}...")
                 import yaml
                 yaml.dump(config, f)
 
@@ -105,20 +111,17 @@ def general_edit_config(
     """
     if default is None:
         raise Exception("Provide a default choice for which file to edit")
-    from meerschaum.config import system_config
     import os
     from subprocess import call
-    EDITOR = os.environ.get('EDITOR', system_config['shell']['default_editor'])
+    from meerschaum.utils.misc import edit_file
+    from meerschaum.utils.debug import dprint
 
     file_to_edit = files[default]
     if len(action) > 1:
         if action[1] in files:
             file_to_edit = files[action[1]]
 
-    if debug: print(f"Opening file '{file_to_edit}' with editor '{EDITOR}'") 
-
-    ### open editor
-    call([EDITOR, file_to_edit])
+    edit_file(file_to_edit)
 
     return True, "Success"
 
@@ -145,17 +148,18 @@ def write_default_config(
     import yaml, os
     from meerschaum.config._paths import PATCH_PATH, DEFAULT_CONFIG_PATH
     from meerschaum.config._default import default_config, default_header_comment
+    from meerschaum.utils.debug import dprint
     if os.path.isfile(DEFAULT_CONFIG_PATH): os.remove(DEFAULT_CONFIG_PATH)
     if os.path.isfile(PATCH_PATH): os.remove(PATCH_PATH)
     if debug:
         from pprintpp import pprint
-        pprint(default_config)
+        pprint(default_config, stream=sys.stderr)
 
     config_copy = dict()
     config_copy['meerschaum'] = dict(default_config['meerschaum'])
 
     ### write meerschaum config first
-    if debug: print(f"Writing default Meerschaum configuration to {DEFAULT_CONFIG_PATH}...")
+    if debug: dprint(f"Writing default Meerschaum configuration to {DEFAULT_CONFIG_PATH}...")
     with open(DEFAULT_CONFIG_PATH, 'w') as f:
         f.write(default_header_comment)
         yaml.dump(config_copy, f)
@@ -165,7 +169,7 @@ def write_default_config(
     del config_copy['meerschaum']
 
     ### write the rest of the configuration
-    if debug: print(f"Writing remaining default configuration to {DEFAULT_CONFIG_PATH}...")
+    if debug: dprint(f"Writing remaining default configuration to {DEFAULT_CONFIG_PATH}...")
     with open(DEFAULT_CONFIG_PATH, 'a+') as f:
         yaml.dump(config_copy, f)
 
