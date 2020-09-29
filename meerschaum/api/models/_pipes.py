@@ -9,7 +9,7 @@ from meerschaum.utils.misc import attempt_import
 pydantic = attempt_import('pydantic')
 
 class MetaPipe(pydantic.BaseModel):
-    location_key : str
-    metric_key : str
     connector_keys : str ### e.g. sql:main
+    metric_key : str
+    location_key : str = None
 

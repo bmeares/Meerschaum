@@ -19,9 +19,9 @@ async def register_pipe(pipe : MetaPipe):
     Register a new Pipe
     """
     query = get_tables()['pipes'].insert().values(
-        location_key = pipe.location_key,
+        connector_keys = pipe.connector_keys,
         metric_key = pipe.metric_key,
-        connector_keys = pipe.connector_keys
+        location_key = pipe.location_key
     )
 
     last_record_id = await database.execute(query)

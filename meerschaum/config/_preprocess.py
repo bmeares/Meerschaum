@@ -20,11 +20,6 @@ def preprocess_config(
     ### replace Meerschaum substitution syntax with values from keys
     config = search_and_substitute_config(config)
 
-    ### if main does not exist / is empty, inherit from default
-    #  for type in config['meerschaum']['connectors']:
-        #  if 'main' in config['meerschaum']['connectors'][type] and len(config['meerschaum']['connectors'][type]['main']) != 0:
-            #  config['meerschaum']['connectors'][type]['main'] = config['meerschaum']['connectors'][type]['default']
-
     ### add meta to SQL connectors
     sql_connectors_config = config['meerschaum']['connectors']['sql']
     if 'meta' in sql_connectors_config and len(sql_connectors_config['meta']) != 0:
@@ -33,5 +28,4 @@ def preprocess_config(
         config['meerschaum']['connectors']['sql']['meta'] = sql_connectors_config['main']
 
     return config 
-
 

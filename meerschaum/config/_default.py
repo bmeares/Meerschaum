@@ -7,7 +7,7 @@ The default configuration values to write to config.yaml.
 """
 
 #  from meerschaum.utils.misc import generate_password
-import yaml, sys, os.path
+import yaml, sys, os, multiprocessing
 default_meerschaum_config = {
     'connectors' : {
         'sql' : {
@@ -80,7 +80,7 @@ default_system_config = {
             'app'          : 'meerschaum.api:fast_api',
             'port'         : default_meerschaum_config['connectors']['api']['default']['port'],
             'host'         : '0.0.0.0',
-            'workers'      : 4,
+            'workers'      : multiprocessing.cpu_count(),
         },
         'username'         : default_meerschaum_config['connectors']['api']['default']['username'],
         'password'         : default_meerschaum_config['connectors']['api']['default']['password'],
