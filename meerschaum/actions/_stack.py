@@ -6,6 +6,11 @@
 Functions for running the Docker Compose stack
 """
 
+#  custom_subactions = {
+    #  'build' : _stack_build,
+#  }
+
+
 def stack(
         action : list = [''],
         sub_args : list = [],
@@ -45,7 +50,13 @@ def stack(
         write_stack(debug=debug)
 
     compose_command = ['up']
-    if action[0] != '': compose_command = action
+    ### default: alias stack as docker-compose
+    if action[0] != '':
+        compose_command = action
+
+    ### if command is just `stack`, add --build
+    elif '--build' not in sub_args:
+        sub_args.append('--build')
 
     cmd_list = ['docker-compose'] + compose_command + sub_args
     if debug: print(cmd_list)
@@ -53,3 +64,7 @@ def stack(
     reload_package(meerschaum.config)
     reload_package(meerschaum.config)
     return True, "Success"
+
+#  def _stack_build(
+        
+    #  ):

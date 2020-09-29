@@ -30,12 +30,18 @@ def apply_patch_to_config(
     return new.copy_flat()
 
 def write_patch(
-        patch : dict
+        patch : dict,
+        debug : bool = False
     ):
     """
     Write patch dict to yaml
     """
     if os.path.isfile(PATCH_PATH):
+        if debug: print(f"Removing existing patch: {PATCH_PATH}")
         os.remove(PATCH_PATH)
+    if debug:
+        import pprintpp
+        print(f"Writing configuration to {PATCH_PATH}:")
+        pprintpp.pprint(patch)
     with open(PATCH_PATH, 'w') as f:
         yaml.dump(patch, f)

@@ -142,7 +142,12 @@ default_docker_compose_config = {
             ],
         },
         'grafana' : {
-            'image' : 'grafana/grafana:latest',
+            'image' : 'meerschaum-grafana:latest',
+            #  'image' : 'grafana/grafana:latest',
+            'build' : {
+                'dockerfile' : 'Dockerfile-grafana',
+                'context' : './dockerfiles/grafana',
+            },
             'ports' : [
                 '3000:3000',
             ],

@@ -88,7 +88,7 @@ def create_engine(
             self.username + ":" + urllib.parse.quote_plus(self.password) +
             "@" + self.host + ":" + str(self.port) + "/" + self.database
         )
-    if debug: print(engine_str, connect_args)
+    #  if debug: print(engine_str, connect_args)
 
     engine = sqlalchemy.create_engine(
         engine_str,
@@ -106,6 +106,7 @@ def create_engine(
             ),
             self.sys_config['poolclass'].split('.')[-1]
         ),
+        echo         = debug,
         **kw
     )
 
