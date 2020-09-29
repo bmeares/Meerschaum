@@ -17,6 +17,7 @@ def delete(
     delete [config, pipe]
     """
     from meerschaum.utils.misc import choose_subaction
+    from meerschaum.utils.debug import dprint
     options = {
         'config' : _delete_config, 
         'pipe' : _delete_pipe,
@@ -43,6 +44,7 @@ def _delete_config(
     import os
     from meerschaum.utils.misc import yes_no
     from meerschaum.config._paths import CONFIG_PATH, STACK_COMPOSE_PATH, DEFAULT_CONFIG_PATH
+    from meerschaum.utils.debug import dprint
     paths = [CONFIG_PATH, STACK_COMPOSE_PATH, DEFAULT_CONFIG_PATH]
     answer = False
     if not yes:
@@ -51,16 +53,13 @@ def _delete_config(
 
     if answer or force:
         for path in paths:
-            if debug: print(f"Removing {path}...")
-            try:
+            if debug: dprint(f"Removing {path}...")
+            if os.path.isfile(path):
                 os.remove(path)
-            except Exception as e:
-                print(e)
     else:
         msg = "Nothing deleted."
-        if debug: print(msg)
+        if debug: dprint(msg)
         return False, msg
     
     return True, "Successfully deleted configuration files"
-
 

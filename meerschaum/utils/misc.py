@@ -5,6 +5,11 @@
 Miscellaneous functions go here
 """
 
+#  from meerschaum.utils.debug import dprint
+import sys
+#  def dprint(*args, file=sys.stderr, **kw):
+    #  print(*args, file=file, **kw)
+
 def add_method_to_class(
         func : 'function',
         class_def : 'class', 
@@ -74,6 +79,7 @@ def get_modules_from_package(
     names = False (default) : modules
     names = True            : (__all__, modules)
     """
+    from meerschaum.utils.debug import dprint
     from os.path import dirname, join, isfile, isdir, basename
     import glob, importlib
 
@@ -88,7 +94,7 @@ def get_modules_from_package(
                     and not f.endswith('__pycache__')
     ]
 
-    if debug: print(_all)
+    if debug: dprint(_all)
     modules = []
     for module_name in [package.__name__ + "." + mod_name for mod_name in _all]:
         ### there's probably a better way than a try: catch but it'll do for now
@@ -98,7 +104,7 @@ def get_modules_from_package(
             else:
                 modules.append(importlib.import_module(module_name))
         except Exception as e:
-            if debug: print(e)
+            if debug: dprint(e)
             pass
     if names:
         return _all, modules
@@ -129,6 +135,7 @@ def import_children(
     Returns: list of members
     """
     import sys, inspect
+    from meerschaum.utils.debug import dprint
     
     ### if package_name and package are None, use parent
     if package is None and package_name is None:
@@ -160,7 +167,7 @@ def import_children(
         _all.append(ob[0])
         members.append(ob[1])
 
-    if debug: print(_all)
+    if debug: dprint(_all)
     ### set __all__ for import *
     setattr(sys.modules[package_name], '__all__', _all)
     return members
@@ -201,9 +208,8 @@ def reload_package(
     """
     Recursively load a package's subpackages, even if they were not previously loaded
     """
-    import os
-    import types
-    import importlib
+    import os, types, importlib
+    from meerschaum.utils.debug import dprint
     assert(hasattr(package, "__package__"))
     fn = package.__file__
     fn_dir = os.path.dirname(fn) + os.sep
@@ -220,7 +226,7 @@ def reload_package(
                 fn_child = getattr(module_child, "__file__", None)
                 if (fn_child is not None) and fn_child.startswith(fn_dir):
                     if fn_child not in module_visit:
-                        if debug: print("reloading:", fn_child, "from", module)
+                        if debug: dprint(f"reloading: {fn_child} from {module}")
                         module_visit.add(fn_child)
                         reload_recursive_ex(module_child)
 
@@ -342,7 +348,7 @@ def search_and_substitute_config(
 
         ### follow the pointers to the value
         c = config
-        for i, k in enumerate(keys):
+        for k in keys:
             try:
                 c = c[k]
             except KeyError:
@@ -394,7 +400,7 @@ def attempt_import(
         if importlib.util.find_spec(name) is None:
             warn(
                 (f"\n\nMissing package '{name}'; features will not work correctly. "
-                f"\n\nRun `pip install meerschaum[full]` to install the complete version of Meerschaum.\n"),
+                f"\n\nRun `pip install -U meerschaum[full]` to install the complete version of Meerschaum.\n"),
                 ImportWarning,
                 stacklevel = 2
             )
@@ -433,13 +439,14 @@ def edit_file(
     """
     import os
     from subprocess import call
+    from meerschaum.utils.debug import dprint
     try:
         EDITOR = os.environ.get('EDITOR', default_editor)
-        if debug: print(f"Opening file '{path}' with editor '{EDITOR}'") 
+        if debug: dprint(f"Opening file '{path}' with editor '{EDITOR}'") 
         call([EDITOR, path])
     except Exception as e: ### can't open with default editors
-        if debug: print(e)
-        if debug: print('Failed to open file with system editor. Falling back to pyvim...')
+        if debug: dprint(e)
+        if debug: dprint('Failed to open file with system editor. Falling back to pyvim...')
         run_python_package('pyvim', [path])
 
 def run_python_package(

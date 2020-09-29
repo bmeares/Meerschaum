@@ -9,6 +9,8 @@ This module is the entry point for the interactive shell
 import cmd as cmd, sys, inspect
 from meerschaum.config import __doc__, config as cf
 from meerschaum.actions.arguments import parse_line
+from meerschaum.utils.formatting import UNICODE, ANSI
+from more_termcolor import colored
 ### readline is Unix-like only. Disable readline features for Windows
 try:
     import readline
@@ -16,15 +18,34 @@ except ImportError:
     readline = None
 
 shell_config = cf['system']['shell']
+output_config = shell_config['unicode'] if UNICODE else shell_config['ascii']
 
 class Shell(cmd.Cmd):
-    prompt = shell_config['prompt']
-    intro = __doc__
-    debug = False
-    ruler = shell_config['ruler']
-    close_message = shell_config['close_message']
-    doc_header = shell_config['doc_header']
-    undoc_header = shell_config['undoc_header']
+    def __init__(self):
+        super().__init__()
+        self.prompt = output_config['prompt']
+        self.intro = __doc__
+        self.debug = False
+        self.ruler = output_config['ruler']
+        self.close_message = output_config['close_message']
+        self.doc_header = output_config['doc_header']
+        self.undoc_header = output_config['undoc_header']
+
+        if ANSI:
+            def apply_colors(attr, key):
+                return colored(
+                    attr,
+                    *shell_config['ansi'][key]['color'],
+                )
+
+            for attr_key in shell_config['ansi']:
+                self.__dict__[attr_key] = apply_colors(self.__dict__[attr_key], attr_key)
+
+        #  intro = apply_colors(intro, 'intro')
+        #  close_message = apply_colors(close_message, 'close_message')
+        #  doc_header = apply_colors(doc_header, 'doc_header')
+        #  undoc_header = apply_colors(undoc_header, 'undoc_header')
+        #  ruler = apply_colors(ruler, 'ruler')
 
     def precmd(self, line):
         """

@@ -55,7 +55,8 @@ def _show_config(
     from pprintpp import pprint
     from meerschaum.config import config
     from meerschaum.config._paths import CONFIG_PATH
-    if debug: print(f"Configuration loaded from {CONFIG_PATH}")
+    from meerschaum.utils.debug import dprint
+    if debug: dprint(f"Configuration loaded from {CONFIG_PATH}")
     pprint(config)
     return (True, "Success")
 
@@ -93,8 +94,10 @@ def _show_dict(
         print(action)
     return (True, "Success")
 
-### TODO
 def _show_pipes(**kw) -> tuple:
+    from meerschaum import get_pipes
+    import pprintpp
+    pprintpp.pprint(get_pipes(**kw))
     return (True, "Success")
 
 def _show_version(**kw) -> tuple:

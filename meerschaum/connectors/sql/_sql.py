@@ -5,6 +5,9 @@
 This module contains SQLConnector functions for executing SQL queries.
 """
 
+from meerschaum.utils.debug import dprint
+
+
 ### database flavors that can use bulk insert
 bulk_flavors = {'postgres', 'timescaledb'}
 
@@ -24,12 +27,12 @@ def read(
     if debug:
         import time
         start = time.time()
-        print(query_or_table)
-        print(f"Fetching with chunksize: {chunksize}")
+        dprint(query_or_table)
+        dprint(f"Fetching with chunksize: {chunksize}")
 
     ### format with sqlalchemy
     if ' ' not in query_or_table:
-        if debug: print(f"Reading from table {query_or_table}")
+        if debug: dprint(f"Reading from table {query_or_table}")
         formatted_query = str(sqlalchemy.text("SELECT * FROM " + str(query_or_table)))
     else:
         formatted_query = str(sqlalchemy.text(query_or_table))
@@ -62,7 +65,7 @@ def read(
     ### chunksize is not None so must iterate
     if debug:
         end = time.time()
-        print(f"Fetched {len(chunk_list)} chunks in {round(end - start, 2)} seconds.")
+        dprint(f"Fetched {len(chunk_list)} chunks in {round(end - start, 2)} seconds.")
 
     return df
 
@@ -132,7 +135,7 @@ def to_sql(
     if debug:
         import time
         start = time.time()
-        print(f"Inserting {len(df)} rows with chunksize: {chunksize}...", end="")
+        dprint(f"Inserting {len(df)} rows with chunksize: {chunksize}...", end="")
 
     try:
         df.to_sql(
@@ -153,8 +156,8 @@ def to_sql(
 
     if debug:
         end = time.time()
-        print(f" done.")
-        print(f"It took {round(end - start, 2)} seconds.")
+        dprint(f" done.")
+        dprint(f"It took {round(end - start, 2)} seconds.")
 
     return True
 

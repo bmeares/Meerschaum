@@ -20,6 +20,7 @@ def bash(
     """
     import subprocess
     import sys
+    from meerschaum.utils.debug import dprint
 
     ### determine system encoding
     encoding = sys.getdefaultencoding()
@@ -39,9 +40,9 @@ def bash(
         timeout = system_config['shell']['timeout']
 
     if debug:
-        print('action:', action)
-        print('sub-args', sub_args)
-        print(command_list)
+        dprint('action:', action)
+        dprint('sub-args', sub_args)
+        dprint(command_list)
 
     process = subprocess.Popen(
                 command_list,
@@ -73,12 +74,12 @@ def bash(
         error_output = error_output_data.decode(encoding)
 
     if debug:
-        print("stdout:")
-        print(output)
-        print("\nstderr:")
-        print(error_output)
-        print("\nexit code:")
-        print(exit_code)
+        dprint("stdout:")
+        dprint(output)
+        dprint("\nstderr:")
+        dprint(error_output)
+        dprint("\nexit code:")
+        dprint(exit_code)
 
     if exit_code != 0:
         return (False, error_output)

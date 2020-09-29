@@ -6,7 +6,8 @@
 Functions to interact with /mrsm/actions
 """
 
-import requests, json
+from meerschaum.utils.debug import dprint
+import requests, json, sys
 
 def get_actions(
         self,
@@ -36,7 +37,7 @@ def do_action(
 
     if sysargs is not None and action[0] == '':
         from meerschaum.actions.arguments import parse_arguments
-        if debug: print(f"Parsing sysargs:\n{sysargs}")
+        if debug: dprint(f"Parsing sysargs:\n{sysargs}")
         json_dict = parse_arguments(sysargs)
     else:
         json_dict = kw
@@ -51,8 +52,8 @@ def do_action(
     
     if debug:
         from pprintpp import pprint
-        print(f"Sending data to '{self.url + r_url}':")
-        pprint(json_dict)
+        dprint(f"Sending data to '{self.url + r_url}':")
+        pprint(json_dict, stream=sys.stderr)
 
     response = self.post(r_url, json=json_dict)
     try:
@@ -61,5 +62,5 @@ def do_action(
         print(f"Invalid response: {response}")
         print(e)
         return False, response.text
-    if debug: print(response)
+    if debug: dprint(response)
     return response_list[0], response_list[1]

@@ -7,6 +7,7 @@ Declare FastAPI events in this module (startup, shutdown, etc)
 """
 
 from meerschaum.api import fast_api, database
+from meerschaum.utils.debug import dprint
 
 @fast_api.on_event("startup")
 async def startup():
@@ -19,8 +20,8 @@ async def startup():
         retries = 0
         while retries < max_retries:
             if debug:
-                print(f"Trying to connect to the database")
-                print(f"Attempt ({retries + 1} / {max_retries})")
+                dprint(f"Trying to connect to the database")
+                dprint(f"Attempt ({retries + 1} / {max_retries})")
             try:
                 await database.connect()
             except Exception as e:
@@ -28,7 +29,7 @@ async def startup():
                 time.sleep(retry_wait)
                 retries += 1
             else:
-                if debug: print("Connection established!")
+                if debug: dprint("Connection established!")
                 break
     await connect(debug=True)
 

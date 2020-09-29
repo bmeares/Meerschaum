@@ -26,6 +26,7 @@ def stack(
     from meerschaum.config._paths import STACK_COMPOSE_PATH
     from meerschaum.utils.misc import yes_no, reload_package
     import meerschaum.config
+    from meerschaum.utils.debug import dprint
     import os
 
     bootstrap = False
@@ -45,11 +46,21 @@ def stack(
         write_stack(debug=debug)
 
     compose_command = ['up']
-    if action[0] != '': compose_command = action
+    ### default: alias stack as docker-compose
+    if action[0] != '':
+        compose_command = action
+
+    ### if command is just `stack`, add --build
+    elif '--build' not in sub_args:
+        sub_args.append('--build')
 
     cmd_list = ['docker-compose'] + compose_command + sub_args
-    if debug: print(cmd_list)
+    if debug: dprint(cmd_list)
     call(cmd_list, cwd=STACK_COMPOSE_PATH.parent)
     reload_package(meerschaum.config)
     reload_package(meerschaum.config)
     return True, "Success"
+
+#  def _stack_build(
+        
+    #  ):

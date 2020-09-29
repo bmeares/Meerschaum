@@ -5,6 +5,8 @@
 Start the Meerschaum WebAPI with the `api` action.
 """
 
+import sys
+
 def api(
         action : list = [''],
         sysargs : list = [],
@@ -76,6 +78,7 @@ def _api_server(
     from meerschaum.api import sys_config as api_config, __version__
     from pprintpp import pprint
     from meerschaum.utils.misc import attempt_import
+    from meerschaum.utils.debug import dprint
     uvicorn = attempt_import('uvicorn')
 
     uvicorn_config = dict(api_config['uvicorn'])
@@ -93,10 +96,10 @@ def _api_server(
 
     if debug:
         from meerschaum.api import connector
-        print(f"Connection to database: {connector.host}")
+        dprint(f"Connection to database: {connector.host}")
 
-    print(f"Starting Meerschaum API v{__version__} with the following configuration:")
-    pprint(uvicorn_config)
+        dprint(f"Starting Meerschaum API v{__version__} with the following configuration:")
+        pprint(uvicorn_config, stream=sys.stderr)
 
     uvicorn.run(**uvicorn_config)
 
