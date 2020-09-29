@@ -2,4 +2,4 @@
 # -*- coding: utf-8 -*-
 # vim:fenc=utf-8
 
-__version__ = '0.0.25'
+__version__ = '0.0.26'
