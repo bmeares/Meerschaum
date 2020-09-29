@@ -51,30 +51,6 @@ env_dict['MEERSCHAUM_API_CONFIG'] = (
     env_dict['MEERSCHAUM_DB_HOSTNAME']  + '"}}}}}'
 )
 
-#  env_text = (f"""
-#  ### Edit environment variables with `edit stack env`
-#  COMPOSE_PROJECT_NAME="meerschaum_stack"
-#  TIMESCALEDB_VERSION="latest-pg12"
-#  POSTGRES_USER="{db_user}"
-#  POSTGRES_PASSWORD="{db_pass}"
-#  POSTGRES_DB="{db_base}"
-#  MEERSCHAUM_DB_HOSTNAME="{db_host}"
-#  MEERSCHAUM_API_HOSTNAME="{api_host}"
-#  ALLOW_IP_RANGE='0.0.0.0/0'
-#  """
-#  """
-#  MEERSCHAUM_API_CONFIG='{"meerschaum":{"connectors":{"sql":{"meta":{"host":"${MEERSCHAUM_DB_HOSTNAME}"}}}}}'
-#  MEERSCHAUM_API_CONFIG_RESOURCES=/usr/local/lib/python3.8/site-packages/meerschaum/config/resources/
-#  """
-#  )
-
-### source environment variables
-#  for line in env_text.split('\n'):
-    #  values = line.split('=')
-    #  if len(values) != 2: continue
-    #  os.environ[values[0]] = values[1]
-    #  print(os.environ[values[0]])
-
 compose_header = """
 ##############################################################
 #                                                            #
@@ -142,12 +118,12 @@ default_docker_compose_config = {
             ],
         },
         'grafana' : {
-            'image' : 'meerschaum-grafana:latest',
-            #  'image' : 'grafana/grafana:latest',
-            'build' : {
-                'dockerfile' : 'Dockerfile-grafana',
-                'context' : './dockerfiles/grafana',
-            },
+            #  'image' : 'meerschaum-grafana:latest',
+            'image' : 'grafana/grafana:latest',
+            #  'build' : {
+                #  'dockerfile' : 'Dockerfile-grafana',
+                #  'context' : './dockerfiles/grafana',
+            #  },
             'ports' : [
                 '3000:3000',
             ],
