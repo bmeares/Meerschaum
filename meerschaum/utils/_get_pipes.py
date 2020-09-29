@@ -6,6 +6,8 @@
 Implement the get_pipes() function
 """
 
+from meerschaum.utils.debug import dprint
+
 def get_pipes(
         connector_keys : list = [],
         location_keys : list = [],
@@ -120,7 +122,7 @@ FROM pipes
     pipes = dict()
 
     from meerschaum import Pipe
-    if debug: print(q)
+    if debug: dprint(q)
     result = meta_connector.engine.execute(q)
     for ck, mk, lk in result:
         if ck not in pipes:

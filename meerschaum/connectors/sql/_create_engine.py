@@ -6,6 +6,8 @@
 This module contains the logic that builds the sqlalchemy engine string.
 """
 
+from meerschaum.utils.debug import dprint
+
 ### determine driver and requirements from flavor
 default_requirements = {
     'username',
@@ -88,7 +90,7 @@ def create_engine(
             self.username + ":" + urllib.parse.quote_plus(self.password) +
             "@" + self.host + ":" + str(self.port) + "/" + self.database
         )
-    #  if debug: print(engine_str, connect_args)
+    #  if debug: dprint(engine_str, connect_args)
 
     engine = sqlalchemy.create_engine(
         engine_str,

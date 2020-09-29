@@ -44,5 +44,5 @@ rm -rf /var/lib/apt/lists/*
 
 ### we need to install pyyaml first because it's needed
 ### for post-install
-pip install --no-cache-dir --upgrade PyYAML
+pip install --no-cache-dir --upgrade PyYAML colorama more_termcolor
 pip install --no-cache-dir --upgrade /src[full]

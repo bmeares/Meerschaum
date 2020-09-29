@@ -47,8 +47,20 @@ env_dict = {
     'MEERSCHAUM_API_CONFIG_RESOURCES' : '/usr/local/lib/python3.8/site-packages/meerschaum/config/resources/',
 }
 env_dict['MEERSCHAUM_API_CONFIG'] = (
-    '{"meerschaum":{"connectors":{"sql":{"meta":{"host":"' +
-    env_dict['MEERSCHAUM_DB_HOSTNAME']  + '"}}}}}'
+    """{
+        \"meerschaum\" : {
+            \"connectors\" : {
+                \"sql\": {
+                    \"meta\" : {
+                        \"host\": """ + '\"' + env_dict['MEERSCHAUM_DB_HOSTNAME'] + """\"
+                    },
+                    \"main\" : {
+                        \"host\": """ + '\"' + env_dict['MEERSCHAUM_DB_HOSTNAME'] + """\"
+                    }
+                }
+            }
+        }
+    }"""
 )
 
 compose_header = """

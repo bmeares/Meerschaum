@@ -7,6 +7,7 @@ Generic Connector class
 Defines basic data that Connectors should contain
 """
 
+from meerschaum.utils.debug import dprint
 from meerschaum.config import config as cf
 conn_configs = cf['meerschaum']['connectors']
 connector_config = cf['system']['connectors']
@@ -89,8 +90,8 @@ class Connector:
         Child classes may enforce additional requirements.
         """
         if debug:
-            print(f'required attributes: {required_attributes}')
-            print(f'attributes: {self.__dict__}')
+            dprint(f'required attributes: {required_attributes}')
+            dprint(f'attributes: {self.__dict__}')
         missing_attributes = set()
         for a in required_attributes:
             if a not in self.__dict__:
