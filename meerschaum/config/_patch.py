@@ -14,7 +14,7 @@ import os, yaml
 from meerschaum.config._paths import PATCH_FILENAME, PATCH_PATH
 patch_config = None
 if os.path.isfile(PATCH_PATH):
-    patch = yaml.safe_load(
+    patch_config = yaml.safe_load(
         pkg_resources.read_text('meerschaum.config.resources', PATCH_FILENAME)
     )
 def apply_patch_to_config(

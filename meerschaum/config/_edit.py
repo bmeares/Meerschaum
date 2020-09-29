@@ -105,20 +105,16 @@ def general_edit_config(
     """
     if default is None:
         raise Exception("Provide a default choice for which file to edit")
-    from meerschaum.config import system_config
     import os
     from subprocess import call
-    EDITOR = os.environ.get('EDITOR', system_config['shell']['default_editor'])
+    from meerschaum.utils.misc import edit_file
 
     file_to_edit = files[default]
     if len(action) > 1:
         if action[1] in files:
             file_to_edit = files[action[1]]
 
-    if debug: print(f"Opening file '{file_to_edit}' with editor '{EDITOR}'") 
-
-    ### open editor
-    call([EDITOR, file_to_edit])
+    edit_file(file_to_edit)
 
     return True, "Success"
 
