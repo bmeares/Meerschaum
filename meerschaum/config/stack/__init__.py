@@ -6,12 +6,12 @@
 Docker Compose stack configuration goes here
 """
 
-import yaml, os
-#  from meerschaum.config._read_yaml import config as cf
+import os
 try:
     import importlib.resources as pkg_resources
 except ImportError:
     import importlib_resources as pkg_resources
+
 from meerschaum.config._paths import GRAFANA_DATASOURCE_PATH, GRAFANA_DASHBOARD_PATH
 from meerschaum.config._paths import STACK_COMPOSE_PATH, STACK_ENV_PATH, STACK_COMPOSE_FILENAME
 

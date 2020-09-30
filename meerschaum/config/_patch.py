@@ -10,14 +10,19 @@ try:
 except ImportError:
     import importlib_resources as pkg_resources
 
-import os, yaml
+import os
+try:
+    import yaml
+except ImportError:
+    yaml = None
 from meerschaum.config._paths import PATCH_FILENAME, PATCH_PATH
 #  from meerschaum.utils.debug import dprint
 patch_config = None
 if os.path.isfile(PATCH_PATH):
-    patch_config = yaml.safe_load(
-        pkg_resources.read_text('meerschaum.config.resources', PATCH_FILENAME)
-    )
+    if yaml:
+        patch_config = yaml.safe_load(
+            pkg_resources.read_text('meerschaum.config.resources', PATCH_FILENAME)
+        )
 def apply_patch_to_config(
         config : dict,
         patch : dict
@@ -44,5 +49,6 @@ def write_patch(
         import pprintpp
         print(f"Writing configuration to {PATCH_PATH}:", file=sys.stderr)
         pprintpp.pprint(patch, stream=sys.stderr)
-    with open(PATCH_PATH, 'w') as f:
-        yaml.dump(patch, f)
+    if yaml:
+        with open(PATCH_PATH, 'w') as f:
+            yaml.dump(patch, f)

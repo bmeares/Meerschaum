@@ -50,9 +50,6 @@ def get_pipes(
     ### TODO add source options as argument?
     if source == 'sql':
         pass
-        #  print("SOURCE", source)
-        #  from meerschaum.api.tables import get_tables
-        #  pipes_table = get_tables()['pipes']
     ### TODO get pipes from API
     elif source == 'api':
         raise NotImplementedError(f"Source '{source}' has not yet been implemented.")
@@ -63,33 +60,10 @@ def get_pipes(
     from meerschaum.api.tables import get_tables
     tables = get_tables()
 
-    def select_distinct(column : str) -> list:
-        """
-        Get all distinct values of a single column from the `pipes` table
-        """
-        q = f"SELECT DISTINCT {column} FROM pipes"
-        return list(meta_connector.read(q)[column])
-
-    ### catch all cases
-    #  if connector_keys in [None, ['*']] and source == 'sql':
-        #  connector_keys = select_distinct('connector_keys')
-
-    #  if metric_keys in [None, ['*']] and source == 'sql':
-        #  metric_keys = select_distinct('metric_key')
-
-    #  if location_keys in [None, ['*']] and source == 'sql':
-        #  location_keys = select_distinct('location_key')
-
     q = """SELECT DISTINCT
     pipes.connector_keys, pipes.metric_key, pipes.location_key
 FROM pipes
 """
-    ### NOTE implement left joins later?
-    """
-    LEFT JOIN metrics ON metrics.metric_key = pipes.metric_key AND metrics.connector_keys = pipes.connector_keys
-    LEFT JOIN locations ON locations.location_key = pipes.location_key AND locations.connector_keys = pipes.connector_keys
-    """
-
     ### Add three primary keys to params dictionary
     ###   (separated for convenience of arguments)
     cols = {

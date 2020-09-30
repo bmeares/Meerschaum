@@ -6,12 +6,19 @@
 Default route
 """
 
-from meerschaum.api import fast_api
+from meerschaum.api import (
+    fast_api,
+    endpoints,
+    database,
+    connector,
+    HTMLResponse,
+    Request,
+    templates
+)
 
-@fast_api.get("/")
-def index():
+@fast_api.get("/", response_class=HTMLResponse)
+def index(request : Request):
     """
     Meerschaum WebAPI index page
     """
-    from meerschaum import __doc__ as doc
-    return doc
+    return templates.TemplateResponse("index.html", {"request" : request})

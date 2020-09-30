@@ -11,7 +11,6 @@ class PostInstallCommand(install):
     """Post-installation for installation mode."""
     def run(self):
         install.run(self)
-        from meerschaum.actions import entry
         from meerschaum.config._paths import CONFIG_PATH, PATCH_PATH
         import os, shutil
         if CONFIG_PATH.is_file():
@@ -20,9 +19,6 @@ class PostInstallCommand(install):
             shutil.copy(CONFIG_PATH, PATCH_PATH)
         else:
             print(f"Configuration not found: {CONFIG_PATH}")
-
-        #  entry(['bootstrap', 'config', '--yes', '--force'])
-        #  entry(['bootstrap', 'stack', '--yes', '--force'])
 
 required = [
     'PyYAML',
@@ -45,6 +41,8 @@ extras = {
         'aiosqlite',
         'asyncpg',
         'graphene',
+        'jinja2',
+        'aiofiles',
     ],
 }
 
@@ -75,6 +73,6 @@ setuptools.setup(
         'install' : PostInstallCommand,
     },
     zip_safe = True,
-    package_data = {'' : ['*.yaml', '*.env', 'Dockerfile*']},
+    package_data = {'' : ['*.yaml', '*.env', 'Dockerfile*', '*.html', '*.css', '*.js']},
     python_requires = '>=3.8'
 )

@@ -40,3 +40,7 @@ STACK_ENV_PATH = Path(os.path.join(STACK_RESOURCES_PATH, STACK_ENV_FILENAME))
 
 SHELL_RESOURCES_PATH = Path(os.path.join(ROOT_PATH, 'meerschaum', 'actions', 'shell', 'resources'))
 SHELL_HISTORY_PATH = Path(os.path.join(SHELL_RESOURCES_PATH, '.mrsm_history'))
+
+API_RESOURCES_PATH = Path(os.path.join(ROOT_PATH, 'meerschaum', 'api', 'resources'))
+API_STATIC_PATH = Path(os.path.join(API_RESOURCES_PATH, 'static'))
+API_TEMPLATES_PATH = Path(os.path.join(API_RESOURCES_PATH, 'templates'))
