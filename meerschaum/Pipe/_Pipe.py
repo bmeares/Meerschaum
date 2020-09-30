@@ -6,11 +6,14 @@ Pipes are the primary data access objects in the Meerschaum system
 """
 
 class Pipe:
+    from ._fetch import fetch
+    from ._register import register
     def __init__(
         self,
         connector_keys : str,
         metric_key : str,
         location_key : str = None,
+        source : str = 'sql',
         debug : bool = False
     ):
         """
@@ -22,6 +25,13 @@ class Pipe:
         self.connector_keys = connector_keys
         self.metric_key = metric_key
         self.location_key = location_key
+        
+        from meerschaum.api.models import MetaPipe
+        self.meta = MetaPipe(
+            connector_keys = connector_keys,
+            metric_key = metric_key,
+            location_key = location_key
+        )
 
         ### TODO aggregations?
         self._aggregations = dict()
@@ -35,6 +45,19 @@ class Pipe:
             else:
                 return None
         return self._connector
+
+    @property
+    def id(self):
+        if '_id' not in self.__dict__:
+            from meerschaum import get_connector
+            meta_connector = get_connector('sql', 'meta')
+            q = """
+            SELECT pipe_id
+            FROM pipes
+            WHERE connector_keys = '{self.connector_keys}'
+                AND metric_key = '{self.metric_key}'
+                AND location_key """ + 
+            self._id = meta_connector.value("SELECT pipe_id FROM pipes WHERE conn")
     
     def __str__(self):
         name = f"{self.connector_keys.replace(':', '_')}_{self.metric_key}"

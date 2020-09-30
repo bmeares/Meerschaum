@@ -42,19 +42,26 @@ def get_pipes(
         If 'sql', pull from the `meta` and `main` SQL connectors.
         If 'api', pull from the `main` WebAPI.
     """
-    #  raise NotImplementedError("TODO finish get_pipes")
-    ### fetch meta connector
-    from meerschaum.connectors import get_connector
-    meta_connector = get_connector(type='sql', label='meta')
 
-    ### TODO add source options as argument?
-    if source == 'sql':
-        pass
-    ### TODO get pipes from API
-    elif source == 'api':
+    def flatten_dict(pipes_dict):
+        pipes_list = []
+        for ck in pipes_dict.values():
+            for mk in ck.values():
+                pipes_list += list(mk.values())
+        return pipes_list
+
+    from meerschaum.connectors import get_connector
+
+    ### fetch meta connector
+    if source == 'api':
+        api_connector = get_connector('api') 
+        if not as_list:
+            return api_connector.get_pipes()
+        return flatten_dict(api_connector.get_pipes())
+    elif source != 'sql':
         raise NotImplementedError(f"Source '{source}' has not yet been implemented.")
-    else:
-        raise NotImplementedError(f"Invalid source '{source}'")
+
+    meta_connector = get_connector(type='sql', label='meta')
 
     ### creates metadata
     from meerschaum.api.tables import get_tables
@@ -105,12 +112,8 @@ FROM pipes
         if mk not in pipes[ck]:
             pipes[ck][mk] = dict()
 
-        pipes[ck][mk][lk] = Pipe(ck, mk, lk, debug=debug)
+        pipes[ck][mk][lk] = Pipe(ck, mk, lk, source='sql', debug=debug)
 
     if not as_list: return pipes
-    pipes_list = []
-    for ck in pipes.values():
-        for mk in ck.values():
-            pipes_list += list(mk.values())
-    return pipes_list
+    return flatten_dict(pipes)
 

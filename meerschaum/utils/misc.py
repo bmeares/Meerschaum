@@ -5,7 +5,6 @@
 Miscellaneous functions go here
 """
 
-#  from meerschaum.utils.debug import dprint
 import sys
 #  def dprint(*args, file=sys.stderr, **kw):
     #  print(*args, file=file, **kw)
@@ -476,3 +475,18 @@ def parse_connector_keys(keys : str) -> 'meerschaum.connectors.Connector':
     except Exception as e:
         return False
     return conn
+
+def is_pipe_registered(
+        pipe : 'Pipe or MetaPipe',
+        pipes : dict,
+        debug : bool = False
+    ):
+    """
+    Check if a Pipe or MetaPipe is inside the pipes dictionary.
+    """
+    from meerschaum.utils.debug import dprint
+    ck, mk, lk = pipe.connector_keys, pipe.metric_key, pipe.location_key
+    if debug:
+        dprint(f'{ck}, {mk}, {lk}')
+        dprint(f'{pipe}, {pipes}')
+    return ck in pipes and mk in pipes[ck] and lk in pipes[ck][mk]

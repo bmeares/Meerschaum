@@ -13,7 +13,8 @@ class SQLConnector(Connector):
     Create and utilize sqlalchemy engines
     """
     from ._create_engine import flavor_configs, create_engine
-    from ._sql import read, exec, to_sql
+    from ._sql import read, value, exec, to_sql
+    from ._fetch import fetch
     
     def __init__(
             self,
@@ -26,7 +27,12 @@ class SQLConnector(Connector):
         Build the SQLConnector engine and connect to the database
         """
         from meerschaum.utils.misc import attempt_import
-        databases, sqlalchemy, asyncio = attempt_import('databases', 'sqlalchemy', 'asyncio')
+        databases, sqlalchemy, sqlalchemy_orm, asyncio = attempt_import(
+            'databases',
+            'sqlalchemy',
+            'sqlalchemy.orm',
+            'asyncio'
+        )
         ### set __dict__ in base class
         super().__init__('sql', label=label, **kw)
 
@@ -42,6 +48,11 @@ class SQLConnector(Connector):
 
         ### build the sqlalchemy engine and set DATABASE_URL
         self.engine, self.DATABASE_URL = self.create_engine(include_uri=True, debug=debug)
+
+        ### create a sqlalchemy session for building ORM queries
+        #  self.Session = sqlalchemy_orm.sessionmaker()
+        #  self.Session.configure(bind=self.engine)
+        #  self.session = self.Session()
 
     @property
     def metadata(self):
@@ -59,3 +70,6 @@ class SQLConnector(Connector):
             self._db = databases.Database(self.DATABASE_URL)
         return self._db
 
+    def __del__(self):
+        pass
+        #  self.session.close()
