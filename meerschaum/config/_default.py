@@ -6,8 +6,8 @@
 The default configuration values to write to config.yaml.
 """
 
-#  from meerschaum.utils.misc import generate_password
-import yaml, sys, os, multiprocessing
+import sys, os, multiprocessing
+
 default_meerschaum_config = {
     'connectors' : {
         'sql' : {
@@ -137,8 +137,35 @@ default_system_config = {
             'mrsm'         : '/mrsm',
         },
     },
-    'arguments' : {
+    'arguments'            : {
         'sub_decorators'   : ['[', ']'],
+    },
+    'warnings'             : {
+        'unicode'          : {
+            'icon'         : '⚠',
+        },
+        'ascii'            : {
+            'icon'         : 'WARNING',
+        },
+        'ansi'             : {
+            'color'        : [
+                'bold',
+                'yellow',
+            ],
+        },
+    },
+    'debug'                : {
+        'unicode'          : {
+            'leader'       : '🐞',
+        },
+        'ascii'            : {
+            'leader'       : 'DEBUG',
+        },
+        'ansi'             : {
+            'color'        : [
+                'cyan',
+            ],
+        },
     },
 }
 

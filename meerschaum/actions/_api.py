@@ -93,6 +93,7 @@ def _api_server(
         uvicorn_config['workers'] = workers
 
     uvicorn_config['port'] = port
+    uvicorn_config['reload'] = debug
 
     if debug:
         from meerschaum.api import connector

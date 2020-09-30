@@ -313,7 +313,10 @@ def search_and_substitute_config(
     Example:
         MRSM{meerschaum:connectors:main:host} => cf['meerschaum']['connectors']['main']['host']
     """
-    import yaml
+    try:
+        import yaml
+    except ImportError:
+        return config
     needle = leading_key
     haystack = yaml.dump(config)
     mod_haystack = list(str(haystack))

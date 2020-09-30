@@ -1,21 +1,37 @@
-FROM python:3.8-slim-buster
+FROM python:3.8-slim-buster as common-base
 MAINTAINER Bennett Meares <bennett.meares@gmail.com>
 
-### copy project files
-COPY . /src
+FROM common-base as base-builder
 
-### install system requirements
-RUN cd /src/ && /src/scripts/setup.sh && rm -rf /src && mkdir -p /src
-
-### install python package and make /src empty 
-# RUN pip install --no-cache-dir --upgrade /src[full] && rm -rf /src && mkdir -p /src
-
-### Run post-install script
-# ADD ./scripts/post_install.sh /root/post_install.sh
-# RUN cd /root/ && /root/post_install.sh && rm -f /root/post_install.sh
-
-### shells launch inside /src (where we mount development files)
+RUN mkdir -p /src
 WORKDIR /src
+
+FROM base-builder as dependencies
+
+### Step 1: extract dependencies for caching
+COPY setup.py .
+COPY README.md .
+COPY meerschaum/config/_version.py ./meerschaum/config/
+RUN python setup.py egg_info
+
+### Step 2: Install dependencies
+FROM base-builder as builder
+RUN mkdir -p /install
+COPY --from=dependencies /src/meerschaum.egg-info/requires.txt /tmp/
+RUN sh -c 'pip install --no-warn-script-location --prefix=/install $(sed "s/[[][^]]*[]]//g" /tmp/requires.txt)'
+
+### copy project files
+COPY . .
+
+### Step 3: install Meerschaum
+RUN sh -c 'pip install --no-warn-script-location --prefix=/install .[full]'
+
+### Step 4: install into clean image
+FROM common-base
+
+RUN mkdir -p /src
+WORKDIR /src
+COPY --from=builder /install /usr/local
 
 ### default: launch into the mrsm shell
 ENTRYPOINT ["mrsm"]

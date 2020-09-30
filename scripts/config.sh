@@ -9,7 +9,7 @@ export dockerhub_user="bmeares"
 export tag="latest"
 export base_name="meerschaum"
 export image="$dockerhub_user/$base_name:$tag"
-export src="$PARENT/src"
+export src="$PARENT"
 export port="8000"
 
 # . parse_yaml.sh
