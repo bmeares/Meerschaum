@@ -46,8 +46,8 @@ def _bootstrap_config(
         'stack'   : _bootstrap_stack,
         'grafana' : _bootstrap_grafana,
     }
-    if len(action) > 1:
-        if action[1] in possible_config_funcs:
+    if len(action) > 0:
+        if action[0] in possible_config_funcs:
             return possible_config_funcs[action[0]](**kw)
 
     from meerschaum.config._edit import write_default_config, write_config

@@ -34,7 +34,7 @@ def api(
 
     boot_keywords = {'start', 'boot', 'init'}
     if action[0] in boot_keywords:
-        return _api_server(action=action, debug=debug, **kw)
+        return _api_start(action=action, debug=debug, **kw)
 
     from meerschaum.config import config as cf
     from meerschaum.connectors import get_connector
@@ -59,7 +59,7 @@ def api(
     success, message = api_conn.do_action(**kw)
     return success, message
 
-def _api_server(
+def _api_start(
         action : list = [''],
         port : int = None,
         workers : int = None,

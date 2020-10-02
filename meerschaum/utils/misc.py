@@ -6,8 +6,6 @@ Miscellaneous functions go here
 """
 
 import sys
-#  def dprint(*args, file=sys.stderr, **kw):
-    #  print(*args, file=file, **kw)
 
 def add_method_to_class(
         func : 'function',
@@ -60,7 +58,9 @@ def choose_subaction(
         for option in options:
             print(f"  - {parent_action} {option}")
         return (False, f"Invalid choice '{choice}'")
-    kw['action'] = action
+    ### remove parent sub-action
+    kw['action'] = list(action)
+    del kw['action'][0]
     return options[choice](**kw)
 
 def get_modules_from_package(
@@ -490,3 +490,60 @@ def is_pipe_registered(
         dprint(f'{ck}, {mk}, {lk}')
         dprint(f'{pipe}, {pipes}')
     return ck in pipes and mk in pipes[ck] and lk in pipes[ck][mk]
+
+def get_subactions(action : str, globs : dict = None) -> list:
+    """
+    Return a list of function pointers to all subactions for a given action
+    """
+    if globs is None:
+        import importlib
+        module = importlib.import_module(f'meerschaum.actions._{action}')
+        globs = vars(module)
+    subactions = []
+    for item in globs:
+        if f'_{action}' in item:
+            subactions.append(globs[item])
+    return subactions
+
+def choices_docstring(action : str, globs : dict = None):
+    options_str = f"\n    Options: {action} "
+    subactions = get_subactions(action, globs=globs)
+    options_str += "["
+    sa_names = []
+    for sa in subactions:
+        sa_names.append(sa.__name__[len(f"_{action}") + 1:])
+    for sa_name in sorted(sa_names):
+        options_str += f"{sa_name}, "
+    options_str = options_str[:-2] + "]"
+    return options_str
+
+def print_options(
+        options={},
+        nopretty=False,
+        **kw
+    ) -> None:
+    """
+    Show available options from an iterable
+    """
+    from meerschaum.actions import actions
+    if not nopretty:
+        header = "Available options:"
+        print("\n" + header)
+        ### calculate underline length
+        underline_len = len(header)
+        for a in actions:
+            if len(a) + 4 > underline_len:
+                underline_len = len(a) + 4
+        ### print underline
+        for i in range(underline_len): print('-', end="")
+        print("\n", end="")
+    ### print actions
+    for action in sorted(actions):
+        if not nopretty: print("  - ", end="")
+        print(action)
+
+def sorted_dict(d : dict) -> dict:
+    """
+    Sort a dictionary's keys and return a new dictionary
+    """
+    return {key: value for key, value in sorted(my_dict.items(), key=lambda item: item[1])}

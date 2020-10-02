@@ -104,7 +104,10 @@ FROM pipes
 
     from meerschaum import Pipe
     if debug: dprint(q)
-    result = meta_connector.engine.execute(q)
+    try:
+        result = meta_connector.engine.execute(q)
+    except Exception:
+        return pipes
     for ck, mk, lk in result:
         if ck not in pipes:
             pipes[ck] = dict()

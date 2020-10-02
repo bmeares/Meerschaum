@@ -6,27 +6,18 @@
 This module contains functions for printing elements.
 """
 
+
 def show(
-        action:list=[],
+        action : list = [''],
         **kw
     ) -> tuple:
     """
     Show elements of a certain type.
     
-    command: `show actions`
-
-    Options:
-        - actions
-        - pipes
-
-    params:
-        action : list
-            What items to show 
-            The 'action' list contains strings following the 'show' command'.
-            e.g.: `show actions` becomes ['actions']
+    Command: `show {option}`
     """
     
-    from meerschaum.utils.misc import choose_subaction
+    from meerschaum.utils.misc import choose_subaction, sorted_dict
     show_options = {
         'actions'    : _show_actions,
         'pipes'      : _show_pipes,
@@ -36,14 +27,16 @@ def show(
         'connectors' : _show_connectors,
         'arguments'  : _show_arguments,
     }
-    return choose_subaction(action, show_options, **kw)
+    return choose_subaction(action, sorted_dict(show_options), **kw)
 
 def _show_actions(**kw) -> tuple:
     """
     Show available actions
     """
     from meerschaum.actions import actions
-    return _show_dict(options=actions, **kw)
+    from meerschaum.utils.misc import print_options
+    print_options(options=actions, **kw)
+    return True, "Success"
 
 def _show_config(
         debug : bool = False,
@@ -65,39 +58,16 @@ def _show_modules(**kw) -> tuple:
     Show the currently imported modules
     """
     import sys, pprintpp
-    pprintpp.pprint(list(sys.modules.keys()))
-    return (True, "Success")
-
-def _show_dict(
-        options={},
-        nopretty=False,
-        **kw
-    ) -> tuple:
-    """
-    Show available options from an iterable
-    """
-    from meerschaum.actions import actions
-    if not nopretty:
-        header = "Available options:"
-        print("\n" + header)
-        ### calculate underline length
-        underline_len = len(header)
-        for a in actions:
-            if len(a) + 4 > underline_len:
-                underline_len = len(a) + 4
-        ### print underline
-        for i in range(underline_len): print('-', end="")
-        print("\n", end="")
-    ### print actions
-    for action in sorted(actions):
-        if not nopretty: print("  - ", end="")
-        print(action)
+    #  pprintpp.pprint(list(sys.modules.keys()))
+    #  pprintpp.pprint(globals())
+    from meerschaum.utils.misc import add_subactions_to_action_docstrings
+    add_subactions_to_action_docstrings()
     return (True, "Success")
 
 def _show_pipes(**kw) -> tuple:
     from meerschaum import get_pipes
     import pprintpp
-    pprintpp.pprint(get_pipes(**kw))
+    print(kw['action'])
     return (True, "Success")
 
 def _show_version(**kw) -> tuple:
@@ -128,3 +98,10 @@ def _show_arguments(
     from pprintpp import pprint
     pprint(kw)
     return True, "Success"
+
+### NOTE: This must be the final statement of the module.
+###       Any subactions added below these lines will not
+###       be added to the `help` docstring.
+from meerschaum.utils.misc import choices_docstring
+show.__doc__ += choices_docstring('show')
+
