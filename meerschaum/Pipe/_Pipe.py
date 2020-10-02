@@ -9,6 +9,7 @@ class Pipe:
     from ._fetch import fetch
     from ._register import register
     from ._attributes import attributes, parameters
+    from ._show import show
     def __init__(
         self,
         connector_keys : str,

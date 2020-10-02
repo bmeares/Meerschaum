@@ -14,7 +14,11 @@ def show(
     """
     Show elements of a certain type.
     
-    Command: `show {option}`
+    Command:
+        `show {option}`
+
+    Example:
+        `show pipes`
     """
     
     from meerschaum.utils.misc import choose_subaction, sorted_dict
@@ -27,7 +31,7 @@ def show(
         'connectors' : _show_connectors,
         'arguments'  : _show_arguments,
     }
-    return choose_subaction(action, sorted_dict(show_options), **kw)
+    return choose_subaction(action, show_options, **kw)
 
 def _show_actions(**kw) -> tuple:
     """
@@ -58,16 +62,29 @@ def _show_modules(**kw) -> tuple:
     Show the currently imported modules
     """
     import sys, pprintpp
-    #  pprintpp.pprint(list(sys.modules.keys()))
-    #  pprintpp.pprint(globals())
-    from meerschaum.utils.misc import add_subactions_to_action_docstrings
-    add_subactions_to_action_docstrings()
+    pprintpp.pprint(list(sys.modules.keys()))
     return (True, "Success")
 
-def _show_pipes(**kw) -> tuple:
+def _show_pipes(
+        nopretty : bool = False,
+        debug : bool = False,
+        **kw
+    ) -> tuple:
     from meerschaum import get_pipes
-    import pprintpp
-    print(kw['action'])
+    from meerschaum.utils.misc import flatten_pipes_dict
+    pipes = get_pipes(debug=debug, **kw)
+
+    if len(pipes) == 1:
+        return flatten_pipes_dict(pipes)[0].show(debug=debug, **kw)
+
+    if not nopretty:
+        import pprintpp
+        pprintpp.pprint(pipes)
+    else:
+        pipes_list = flatten_pipes_dict(pipes)
+        for p in pipes_list:
+            print(p)
+
     return (True, "Success")
 
 def _show_version(**kw) -> tuple:
@@ -102,6 +119,6 @@ def _show_arguments(
 ### NOTE: This must be the final statement of the module.
 ###       Any subactions added below these lines will not
 ###       be added to the `help` docstring.
-from meerschaum.utils.misc import choices_docstring
-show.__doc__ += choices_docstring('show')
+from meerschaum.utils.misc import choices_docstring as _choices_docstring
+show.__doc__ += _choices_docstring('show')
 

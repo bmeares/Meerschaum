@@ -16,7 +16,7 @@ class PostInstallCommand(install):
         if CONFIG_PATH.is_file():
             print(f"Found existing configuration in {CONFIG_PATH}")
             print(f"Moving to {PATCH_PATH} and patching default configuration with existing configuration")
-            shutil.copy(CONFIG_PATH, PATCH_PATH)
+            shutil.move(CONFIG_PATH, PATCH_PATH)
         else:
             print(f"Configuration not found: {CONFIG_PATH}")
 
@@ -29,22 +29,41 @@ required = [
     'colorama',
     'more_termcolor',
 ]
-
+drivers = [
+    'psycopg2-binary',
+    'pymysql',
+    'pyodbc',
+]
+clis = [
+    'pgcli',
+    'mycli',
+    'litecli',
+]
+sql = drivers + clis + [
+    'pandas',
+    'sqlalchemy',
+    'databases',
+    'aiosqlite',
+    'asyncpg',
+]
+api = sql + [
+    'uvicorn',
+    'fastapi',
+    'graphene',
+    'jinja2',
+    'aiofiles',
+]
 extras = {
-    'full' : [
-        'pandas',
-        'sqlalchemy',
-        'psycopg2-binary',
-        'uvicorn',
-        'fastapi',
-        'databases',
-        'aiosqlite',
-        'asyncpg',
-        'graphene',
-        'jinja2',
-        'aiofiles',
-    ],
+    'drivers' : drivers,
+    'clis' : clis,
+    'sql' : sql,
+    'api' : api,
 }
+full = set()
+for k, dependencies in extras.items():
+    for dependency in dependencies:
+        full.add(dependency)
+extras['full'] = list(full)
 
 with open('README.md', 'r') as f:
     readme = f.read()
@@ -66,7 +85,7 @@ setuptools.setup(
         'console_scripts' : [
             'meerschaum = meerschaum.__main__:main',
             'Meerschaum = meerschaum.__main__:main',
-            'mrsm = meerschaum.__main__:main'
+            'mrsm = meerschaum.__main__:main',
         ],
     },
     cmdclass = {
@@ -74,5 +93,17 @@ setuptools.setup(
     },
     zip_safe = True,
     package_data = {'' : ['*.yaml', '*.env', 'Dockerfile*', '*.html', '*.css', '*.js']},
-    python_requires = '>=3.8'
+    python_requires = '>=3.8',
+    classifiers = [
+        "Development Status :: 3 - Alpha",
+        "Intended Audience :: System Administrators",
+        "License :: OSI Approved :: MIT License",
+        "Operating System :: POSIX :: Linux",
+        "Operating System :: Microsoft :: Windows",
+        "Operating System :: MacOS",
+        "Programming Language :: SQL",
+        "Programming Language :: Python :: 3.8",
+        "Programming Language :: Python :: 3.9",
+        "Topic :: Database",
+    ]
 )

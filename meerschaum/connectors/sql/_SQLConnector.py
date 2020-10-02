@@ -15,6 +15,7 @@ class SQLConnector(Connector):
     from ._create_engine import flavor_configs, create_engine
     from ._sql import read, value, exec, to_sql
     from ._fetch import fetch
+    from ._cli import cli
     
     def __init__(
             self,

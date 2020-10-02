@@ -55,7 +55,7 @@ def choose_subaction(
     choice = action[0]
     if choice not in options:
         print(f"Cannot {parent_action} '{choice}'. Choose one:")
-        for option in options:
+        for option in sorted(options):
             print(f"  - {parent_action} {option}")
         return (False, f"Invalid choice '{choice}'")
     ### remove parent sub-action
@@ -506,7 +506,7 @@ def get_subactions(action : str, globs : dict = None) -> list:
     return subactions
 
 def choices_docstring(action : str, globs : dict = None):
-    options_str = f"\n    Options: {action} "
+    options_str = f"\n    Options:\n        `{action} "
     subactions = get_subactions(action, globs=globs)
     options_str += "["
     sa_names = []
@@ -514,7 +514,7 @@ def choices_docstring(action : str, globs : dict = None):
         sa_names.append(sa.__name__[len(f"_{action}") + 1:])
     for sa_name in sorted(sa_names):
         options_str += f"{sa_name}, "
-    options_str = options_str[:-2] + "]"
+    options_str = options_str[:-2] + "]`"
     return options_str
 
 def print_options(
@@ -544,6 +544,20 @@ def print_options(
 
 def sorted_dict(d : dict) -> dict:
     """
-    Sort a dictionary's keys and return a new dictionary
+    Sort a dictionary's keys and values and return a new dictionary
     """
-    return {key: value for key, value in sorted(my_dict.items(), key=lambda item: item[1])}
+    try:
+        return {key: value for key, value in sorted(d.items(), key=lambda item: item[1])}
+    except:
+        return d
+
+def flatten_pipes_dict(pipes_dict : dict) -> list:
+    """
+    Convert the standard pipes dictionary into a list
+    """
+    pipes_list = []
+    for ck in pipes_dict.values():
+        for mk in ck.values():
+            pipes_list += list(mk.values())
+    return pipes_list
+

@@ -14,15 +14,17 @@ def bootstrap(
     Bootstrap an element (pipe, configuration).
 
     Command:
-        bootstrap [pipe, config {stack, grafana}]
+        `bootstrap {option}`
+
     Example:
-        bootstrap config stack
+        `bootstrap config`
     """
     from meerschaum.utils.misc import choose_subaction
     options = {
         'pipe'    : _bootstrap_pipe,
         'config'  : _bootstrap_config,
-        #  'stack'   : _bootstrap_stack,
+        'stack'   : _bootstrap_stack,
+        'grafana' : _bootstrap_grafana,
     }
     return choose_subaction(action, options, **kw)
 
@@ -84,10 +86,11 @@ def _bootstrap_stack(
     from meerschaum.utils.debug import dprint
     answer = False
     if not yes:
-        answer = yes_no(f"Delete {STACK_COMPOSE_PATH} and {STACK_ENV_PATH}?", default='n')
+        answer = yes_no(f"Delete {STACK_COMPOSE_PATH}?", default='n')
 
     if answer or force:
-        write_stack(debug=debug)
+        if not write_stack(debug=debug):
+            return False, "Failed to write stack configuration"
     else:
         msg = "No edits made"
         if debug: dprint(msg)
@@ -125,4 +128,10 @@ def _bootstrap_grafana(
         if debug: dprint(msg)
         return True, msg
     return True, "Success"
+
+### NOTE: This must be the final statement of the module.
+###       Any subactions added below these lines will not
+###       be added to the `help` docstring.
+from meerschaum.utils.misc import choices_docstring as _choices_docstring
+bootstrap.__doc__ += _choices_docstring('bootstrap')
 

@@ -12,8 +12,8 @@ from meerschaum.config import config as cf
 
 ANSI = cf['system']['formatting']['ansi']
 UNICODE = cf['system']['formatting']['unicode']
-import sys
-if sys.platform == 'win32':
+import platform
+if platform.system() == 'Windows':
     UNICODE = False
 CHARSET = 'unicode' if UNICODE else 'ascii'
 
@@ -27,7 +27,7 @@ except:
     print(f"Failed to initialize colorama. Ignoring...")
 
 def colored_fallback(*args, **kw):
-    return args[0]
+    return ' '.join(args)
 
 try:
     colored = more_termcolor.colored
