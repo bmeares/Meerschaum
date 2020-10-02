@@ -3,7 +3,7 @@
 # vim:fenc=utf-8
 
 """
-Handle all things warnings here
+Handle all things warnings and errors here
 """
 
 import warnings
@@ -37,3 +37,15 @@ def warn(*args, stacklevel=2, **kw):
     if ANSI:
         a[0] = colored(a[0], *warn_config['ansi']['color'])
     return warnings.warn(*a, stacklevel=stacklevel, **kw)
+
+def error(message):
+    """
+    Raise an error with custom Meerschaum formatting
+    """
+    from meerschaum.utils.formatting import CHARSET, ANSI, colored
+    from meerschaum.config import config as cf
+    error_config = cf['system']['errors']
+    message = error_config[CHARSET]['icon'] + ' ' + message
+    if ANSI:
+        message = colored(message, *error_config['ansi']['color'])
+    raise Exception(message)

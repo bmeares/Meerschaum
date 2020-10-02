@@ -25,27 +25,54 @@ async def register_pipe(pipe : MetaPipe):
     query = get_tables()['pipes'].insert().values(
         connector_keys = pipe.connector_keys,
         metric_key = pipe.metric_key,
-        location_key = pipe.location_key
+        location_key = pipe.location_key,
+        parameters = pipe.parameters,
     )
+    pipes = get_pipes_sql(debug=True)
 
     last_record_id = await database.execute(query)
     return {**pipe.dict(), "pipe_id": last_record_id}
 
+@fast_api.patch(pipes_endpoint)
+async def update_pipe(keywords : dict = fastapi.Body(...)):
+    print(keywords)
+    pass
+
 @fast_api.get(pipes_endpoint)
 async def get_pipes() -> dict:
+    """
+    Get all registered Pipes with metadata, excluding parameters.
+    """
     return pipes
 
 @fast_api.get(pipes_endpoint + '/{connector_keys}')
 async def get_pipes_by_connector(
         connector_keys : str
     ) -> dict:
+    """
+    Get all registered Pipes by connector_keys with metadata, excluding parameters.
+    """
+    if connector_keys not in pipes:
+        raise fastapi.HTTPException(status_code=404, detail=f"connector_keys '{connector_keys}' not found.")
     return pipes[connector_keys]
 
 @fast_api.get(pipes_endpoint + '/{connector_keys}/{metric_key}')
 async def get_pipes_by_connector_and_metric(
         connector_keys : str,
-        metric_key : str
+        metric_key : str,
+        parent : bool = False
     ):
+    """
+    Get all registered Pipes by connector_keys and metric_key with metadata, excluding parameters.
+
+    parent : bool (default False)
+        Return the parent Pipe (location_key is None)
+    """
+    if connector_keys not in pipes:
+        raise fastapi.HTTPException(status_code=404, detail=f"connector_keys '{connector_keys}' not found.")
+    if metric_key not in pipes[connector_keys]:
+        raise fastapi.HTTPException(status_code=404, detail=f"metric_key '{metric_key}' not found.")
+    if parent: return pipes[connector_keys][metric_key][None]
     return pipes[connector_keys][metric_key]
 
 @fast_api.get(pipes_endpoint + '/{connector_keys}/{metric_key}/{location_key}')
@@ -54,5 +81,15 @@ async def get_pipes_by_connector_and_metric_and_location(
         metric_key : str,
         location_key : str
     ):
+    """
+    Get a specific Pipe with metadata, excluding parameters.
+    """
+    if connector_keys not in pipes:
+        raise fastapi.HTTPException(status_code=404, detail=f"connector_keys '{connector_keys}' not found.")
+    if metric_key not in pipes[connector_keys]:
+        raise fastapi.HTTPException(status_code=404, detail=f"metric_key '{metric_key}' not found.")
+    if location_key not in pipes[connector_keys][metric_key]:
+        raise fastapi.HTTPException(status_code=404, detail=f"location_key '{location_key}' not found.")
+ 
     return pipes[connector_keys][metric_key][location_key]
 

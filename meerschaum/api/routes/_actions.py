@@ -6,9 +6,8 @@
 Execute Meerschaum Actions via the API
 """
 
-from meerschaum.api import fast_api, endpoints
+from meerschaum.api import fastapi, fast_api, endpoints
 from meerschaum.actions import actions
-from fastapi import Body
 
 actions_endpoint = endpoints['mrsm'] + "/actions"
 
@@ -20,7 +19,7 @@ def get_actions() -> list:
     return list(actions)
 
 @fast_api.post(actions_endpoint + "/{action}")
-def do_action(action : str, keywords : dict = Body(...)) -> tuple:
+def do_action(action : str, keywords : dict = fastapi.Body(...)) -> tuple:
     if action not in actions:
         return False, f"Invalid action '{action}'"
     return actions[action](**keywords)

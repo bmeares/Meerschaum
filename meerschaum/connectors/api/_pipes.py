@@ -7,6 +7,7 @@ Register or fetch Pipes from the API
 """
 
 from meerschaum.utils.debug import dprint
+from meerschaum.utils.warnings import error
 
 def register_pipe(
         self,
@@ -17,6 +18,20 @@ def register_pipe(
     Submit a POST to the API to register a new Pipe object.
     Returns a tuple of (success_bool, response_dict)
     """
+    if pipe.parameters is None:
+        error(f"""
+        Parameters is None for {pipe}. Please set the `parameters` member and re-register (see below):
+        """ + """
+        >>> pipe.parameters = {
+        >>>     "fetch" : {
+        >>>         "definition" : "SELECT * FROM test",
+        >>>         "backtrack_minutes" : 1000,
+        >>>     },
+        >>> }
+        >>> 
+        >>> pipe.register()
+        """)
+    pipe.meta.parameters = pipe.parameters
     response = self.post('/mrsm/pipes', json=pipe.meta.dict())
     return response.__bool__(), response.json()
 

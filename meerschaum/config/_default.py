@@ -154,6 +154,20 @@ default_system_config = {
             ],
         },
     },
+    'errors'             : {
+        'unicode'          : {
+            'icon'         : '🛑',
+        },
+        'ascii'            : {
+            'icon'         : 'ERROR',
+        },
+        'ansi'             : {
+            'color'        : [
+                'bold',
+                'red',
+            ],
+        },
+    },
     'debug'                : {
         'unicode'          : {
             'leader'       : '🐞',
