@@ -28,8 +28,10 @@ if yaml:
         print(f"NOTE: Configuration file is missing. Falling back to default configuration.")
         print(f"You can edit the configuration with `edit config` or replace the file {CONFIG_PATH}")
         copy_default_to_config()
-
-    config_text = pkg_resources.read_text('meerschaum.config.resources', CONFIG_FILENAME)
+    finally:
+        ### copy is finished. Read again
+        with open(CONFIG_PATH, 'r') as f:
+            config_text = f.read()
 
 ### parse the yaml file
 try:
