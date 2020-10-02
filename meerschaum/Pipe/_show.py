@@ -8,8 +8,8 @@ Show information about a Pipe
 
 def show(
         self,
-        action : list = [''],
-        debug : bool = False
+        debug : bool = False,
+        **kw
     ) -> tuple:
     """
     Show aspects about a Pipe

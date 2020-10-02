@@ -43,21 +43,15 @@ def get_pipes(
         If 'api', pull from the `main` WebAPI.
     """
 
-    def flatten_dict(pipes_dict):
-        pipes_list = []
-        for ck in pipes_dict.values():
-            for mk in ck.values():
-                pipes_list += list(mk.values())
-        return pipes_list
-
     from meerschaum.connectors import get_connector
+    from meerschaum.utils.misc import flatten_pipes_dict
 
     ### fetch meta connector
     if source == 'api':
         api_connector = get_connector('api') 
         if not as_list:
             return api_connector.get_pipes()
-        return flatten_dict(api_connector.get_pipes())
+        return flatten_pipes_dict(api_connector.get_pipes())
     elif source != 'sql':
         raise NotImplementedError(f"Source '{source}' has not yet been implemented.")
 
@@ -78,17 +72,19 @@ FROM pipes
         'metric_key' : metric_keys,
         'location_key' : location_keys,
     }
+    ### make deep copy because something weird is happening with pointers
+    parameters = dict(params)
     for col, vals in cols.items():
         if vals not in [None, [], ['*']]:
-            params[col] = vals
+            parameters[col] = vals
 
-    def build_where():
+    def build_where(parameters : dict):
         """
         Build the WHERE clause based on the input criteria
         """
         where = ""
         leading_and = "\n    AND "
-        for key, value in params.items():
+        for key, value in parameters.items():
             if isinstance(value, list):
                 where += f"{leading_and}{key} IN ("
                 for item in value:
@@ -98,7 +94,14 @@ FROM pipes
             where += f"{leading_and}{key} = '{value}'"
         if len(where) > 1: where = "WHERE\n    " + where[len(leading_and):]
         return where
-    q += build_where()
+
+    q += build_where(parameters)
+
+    if debug: dprint(f"connector_keys: {connector_keys}")
+    if debug: dprint(f"metric_keys: {metric_keys}")
+    if debug: dprint(f"location_keys: {location_keys}")
+    if debug: dprint(f"parameters: {parameters}")
+
 
     pipes = dict()
 
@@ -118,5 +121,5 @@ FROM pipes
         pipes[ck][mk][lk] = Pipe(ck, mk, lk, source='sql', debug=debug)
 
     if not as_list: return pipes
-    return flatten_dict(pipes)
+    return flatten_pipes_dict(pipes)
 
