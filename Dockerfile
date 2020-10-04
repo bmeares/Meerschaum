@@ -1,37 +1,17 @@
-FROM python:3.8-slim-buster as common-base
+FROM python:3.8-slim-buster
 MAINTAINER Bennett Meares <bennett.meares@gmail.com>
 
-FROM common-base as base-builder
-
 RUN mkdir -p /src
 WORKDIR /src
 
-FROM base-builder as dependencies
+# RUN pip install pgcli --only-binary psycopg2
 
-### Step 1: extract dependencies for caching
-COPY setup.py .
-COPY README.md .
-COPY meerschaum/config/_version.py ./meerschaum/config/
-RUN python setup.py egg_info
+# RUN apt-get update && apt-get install --no-install-recommends libpq-dev python-dev -y
+  # pip install psycopg2-binary
 
-### Step 2: Install dependencies
-FROM base-builder as builder
-RUN mkdir -p /install
-COPY --from=dependencies /src/meerschaum.egg-info/requires.txt /tmp/
-RUN sh -c 'pip install --no-warn-script-location --prefix=/install $(sed "s/[[][^]]*[]]//g" /tmp/requires.txt)'
-
-### copy project files
 COPY . .
-
-### Step 3: install Meerschaum
-RUN sh -c 'pip install --no-warn-script-location --prefix=/install .[full]'
-
-### Step 4: install into clean image
-FROM common-base
-
-RUN mkdir -p /src
-WORKDIR /src
-COPY --from=builder /install /usr/local
+# RUN apt-get install unixodbc-dev postgresql-server-dev-12 -y
+RUN pip install --no-cache-dir .[full]
 
 ### default: launch into the mrsm shell
 ENTRYPOINT ["mrsm"]

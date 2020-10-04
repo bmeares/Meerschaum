@@ -5,11 +5,6 @@
 """
 Functions for patching the configuration dictionary
 """
-try:
-    import importlib.resources as pkg_resources
-except ImportError:
-    import importlib_resources as pkg_resources
-
 import os
 try:
     import yaml
@@ -20,9 +15,9 @@ from meerschaum.config._paths import PATCH_FILENAME, PATCH_PATH
 patch_config = None
 if os.path.isfile(PATCH_PATH):
     if yaml:
-        patch_config = yaml.safe_load(
-            pkg_resources.read_text('meerschaum.config.resources', PATCH_FILENAME)
-        )
+        with open(PATCH_PATH, 'r') as f:
+            patch_text = f.read()
+        patch_config = yaml.safe_load(patch_text)
 def apply_patch_to_config(
         config : dict,
         patch : dict

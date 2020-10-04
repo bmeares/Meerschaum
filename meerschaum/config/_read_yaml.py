@@ -7,11 +7,6 @@ Import the config yaml file
 
 import sys, shutil, os
 try:
-    import importlib.resources as pkg_resources
-except ImportError:
-    import importlib_resources as pkg_resources
-
-try:
     import yaml
 except ImportError:
     print("Failed to import PyYAML. Assuming we are installing in a fresh environment...", file=sys.stderr)

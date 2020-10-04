@@ -13,10 +13,11 @@ class PostInstallCommand(install):
         install.run(self)
         from meerschaum.config._paths import CONFIG_PATH, PATCH_PATH
         import os, shutil
-        if CONFIG_PATH.is_file():
+        if CONFIG_PATH.exists():
             print(f"Found existing configuration in {CONFIG_PATH}")
             print(f"Moving to {PATCH_PATH} and patching default configuration with existing configuration")
-            shutil.move(CONFIG_PATH, PATCH_PATH)
+            shutil.copy(CONFIG_PATH, PATCH_PATH)
+            #  shutil.move(CONFIG_PATH)
         else:
             print(f"Configuration not found: {CONFIG_PATH}")
 
@@ -29,17 +30,18 @@ required = [
     'colorama',
     'more_termcolor',
 ]
+### TODO bake drivers into Docker image
 drivers = [
     'psycopg2-binary',
-    'pymysql',
-    'pyodbc',
+    #  'pymysql',
+    #  'pyodbc',
 ]
-clis = [
+cli = [
     'pgcli',
     'mycli',
     'litecli',
 ]
-sql = drivers + clis + [
+sql = drivers + [
     'pandas',
     'sqlalchemy',
     'databases',
@@ -55,12 +57,13 @@ api = sql + [
 ]
 extras = {
     'drivers' : drivers,
-    'clis' : clis,
+    'cli' : cli,
     'sql' : sql,
     'api' : api,
 }
 full = set()
 for k, dependencies in extras.items():
+    if k == 'cli': continue
     for dependency in dependencies:
         full.add(dependency)
 extras['full'] = list(full)
@@ -92,7 +95,7 @@ setuptools.setup(
         'install' : PostInstallCommand,
     },
     zip_safe = True,
-    package_data = {'' : ['*.yaml', '*.env', 'Dockerfile*', '*.html', '*.css', '*.js']},
+    package_data = {'' : ['*.html', '*.css', '*.js']},
     python_requires = '>=3.8',
     classifiers = [
         "Development Status :: 3 - Alpha",

@@ -7,12 +7,6 @@ Stack configuration for Grafana
 """
 
 import os
-try:
-    import importlib.resources as pkg_resources
-except ImportError:
-    import importlib_resources as pkg_resources
-
-
 from meerschaum.config.stack import db_host, db_user, db_pass, db_port, db_base
 
 default_datasource = {
