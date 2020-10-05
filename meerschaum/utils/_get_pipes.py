@@ -46,16 +46,31 @@ def get_pipes(
     from meerschaum.connectors import get_connector
     from meerschaum.utils.misc import flatten_pipes_dict
 
+    default_source_labels = {
+        'api' : 'main',
+        'sql' : 'meta',
+    }
+
+    ### determine where to pull Pipe data from
+    source_keys = source.split(':')
+    source_type = source_keys[0]
+    try:
+        source_label = source_keys[1]
+    except:
+        source_label = default_source_labels[source_type]
+    source_keys = source_type + ':' + source_label
+
     ### fetch meta connector
-    if source == 'api':
-        api_connector = get_connector('api') 
+    if source_type == 'api':
+        api_connector = get_connector(type=source_type, label=source_label) 
         if not as_list:
             return api_connector.get_pipes()
         return flatten_pipes_dict(api_connector.get_pipes())
-    elif source != 'sql':
+    elif source_type != 'sql':
         raise NotImplementedError(f"Source '{source}' has not yet been implemented.")
 
-    meta_connector = get_connector(type='sql', label='meta')
+    ### default: sql:meta
+    meta_connector = get_connector(type=source_type, label=source_label)
 
     ### creates metadata
     from meerschaum.api.tables import get_tables

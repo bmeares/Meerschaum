@@ -33,7 +33,7 @@ required = [
 ### TODO bake drivers into Docker image
 drivers = [
     'psycopg2-binary',
-    #  'pymysql',
+    'pymysql',
     #  'pyodbc',
 ]
 cli = [

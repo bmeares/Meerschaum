@@ -25,8 +25,8 @@ class Shell(cmd.Cmd):
         Customize the CLI from configuration
         """
         super().__init__()
+        self.intro = output_config['intro'] + '\n' + __doc__
         self.prompt = output_config['prompt']
-        self.intro = __doc__
         self.debug = False
         self.ruler = output_config['ruler']
         self.close_message = output_config['close_message']
