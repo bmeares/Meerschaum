@@ -5,10 +5,7 @@
 Miscellaneous functions go here
 """
 
-#  from meerschaum.utils.debug import dprint
 import sys
-#  def dprint(*args, file=sys.stderr, **kw):
-    #  print(*args, file=file, **kw)
 
 def add_method_to_class(
         func : 'function',
@@ -58,10 +55,12 @@ def choose_subaction(
     choice = action[0]
     if choice not in options:
         print(f"Cannot {parent_action} '{choice}'. Choose one:")
-        for option in options:
+        for option in sorted(options):
             print(f"  - {parent_action} {option}")
         return (False, f"Invalid choice '{choice}'")
-    kw['action'] = action
+    ### remove parent sub-action
+    kw['action'] = list(action)
+    del kw['action'][0]
     return options[choice](**kw)
 
 def get_modules_from_package(
@@ -313,7 +312,10 @@ def search_and_substitute_config(
     Example:
         MRSM{meerschaum:connectors:main:host} => cf['meerschaum']['connectors']['main']['host']
     """
-    import yaml
+    try:
+        import yaml
+    except ImportError:
+        return config
     needle = leading_key
     haystack = yaml.dump(config)
     mod_haystack = list(str(haystack))
@@ -473,3 +475,89 @@ def parse_connector_keys(keys : str) -> 'meerschaum.connectors.Connector':
     except Exception as e:
         return False
     return conn
+
+def is_pipe_registered(
+        pipe : 'Pipe or MetaPipe',
+        pipes : dict,
+        debug : bool = False
+    ):
+    """
+    Check if a Pipe or MetaPipe is inside the pipes dictionary.
+    """
+    from meerschaum.utils.debug import dprint
+    ck, mk, lk = pipe.connector_keys, pipe.metric_key, pipe.location_key
+    if debug:
+        dprint(f'{ck}, {mk}, {lk}')
+        dprint(f'{pipe}, {pipes}')
+    return ck in pipes and mk in pipes[ck] and lk in pipes[ck][mk]
+
+def get_subactions(action : str, globs : dict = None) -> list:
+    """
+    Return a list of function pointers to all subactions for a given action
+    """
+    if globs is None:
+        import importlib
+        module = importlib.import_module(f'meerschaum.actions._{action}')
+        globs = vars(module)
+    subactions = []
+    for item in globs:
+        if f'_{action}' in item:
+            subactions.append(globs[item])
+    return subactions
+
+def choices_docstring(action : str, globs : dict = None):
+    options_str = f"\n    Options:\n        `{action} "
+    subactions = get_subactions(action, globs=globs)
+    options_str += "["
+    sa_names = []
+    for sa in subactions:
+        sa_names.append(sa.__name__[len(f"_{action}") + 1:])
+    for sa_name in sorted(sa_names):
+        options_str += f"{sa_name}, "
+    options_str = options_str[:-2] + "]`"
+    return options_str
+
+def print_options(
+        options={},
+        nopretty=False,
+        **kw
+    ) -> None:
+    """
+    Show available options from an iterable
+    """
+    from meerschaum.actions import actions
+    if not nopretty:
+        header = "Available options:"
+        print("\n" + header)
+        ### calculate underline length
+        underline_len = len(header)
+        for a in actions:
+            if len(a) + 4 > underline_len:
+                underline_len = len(a) + 4
+        ### print underline
+        for i in range(underline_len): print('-', end="")
+        print("\n", end="")
+    ### print actions
+    for action in sorted(actions):
+        if not nopretty: print("  - ", end="")
+        print(action)
+
+def sorted_dict(d : dict) -> dict:
+    """
+    Sort a dictionary's keys and values and return a new dictionary
+    """
+    try:
+        return {key: value for key, value in sorted(d.items(), key=lambda item: item[1])}
+    except:
+        return d
+
+def flatten_pipes_dict(pipes_dict : dict) -> list:
+    """
+    Convert the standard pipes dictionary into a list
+    """
+    pipes_list = []
+    for ck in pipes_dict.values():
+        for mk in ck.values():
+            pipes_list += list(mk.values())
+    return pipes_list
+

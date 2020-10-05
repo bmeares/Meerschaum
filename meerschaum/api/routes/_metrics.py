@@ -27,7 +27,7 @@ async def register_metric(metric : Metric):
     return {**metric.dict(), "metric_id": last_record_id}
 
 @fast_api.get(endpoint)
-async def get_pipes():
+async def get_metrics():
     query = get_tables()['metrics'].select()
     return await database.fetch_all(query)
 

@@ -5,19 +5,19 @@
 """
 Functions for patching the configuration dictionary
 """
+import os
 try:
-    import importlib.resources as pkg_resources
+    import yaml
 except ImportError:
-    import importlib_resources as pkg_resources
-
-import os, yaml
+    yaml = None
 from meerschaum.config._paths import PATCH_FILENAME, PATCH_PATH
 #  from meerschaum.utils.debug import dprint
 patch_config = None
 if os.path.isfile(PATCH_PATH):
-    patch_config = yaml.safe_load(
-        pkg_resources.read_text('meerschaum.config.resources', PATCH_FILENAME)
-    )
+    if yaml:
+        with open(PATCH_PATH, 'r') as f:
+            patch_text = f.read()
+        patch_config = yaml.safe_load(patch_text)
 def apply_patch_to_config(
         config : dict,
         patch : dict
@@ -44,5 +44,6 @@ def write_patch(
         import pprintpp
         print(f"Writing configuration to {PATCH_PATH}:", file=sys.stderr)
         pprintpp.pprint(patch, stream=sys.stderr)
-    with open(PATCH_PATH, 'w') as f:
-        yaml.dump(patch, f)
+    if yaml:
+        with open(PATCH_PATH, 'w') as f:
+            yaml.dump(patch, f)

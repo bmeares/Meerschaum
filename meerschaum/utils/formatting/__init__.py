@@ -12,10 +12,25 @@ from meerschaum.config import config as cf
 
 ANSI = cf['system']['formatting']['ansi']
 UNICODE = cf['system']['formatting']['unicode']
-import sys
-if 'win' in sys.platform:
+import platform
+if platform.system() == 'Windows':
     UNICODE = False
+CHARSET = 'unicode' if UNICODE else 'ascii'
+
+from meerschaum.utils.misc import attempt_import
 
 ### init colorama for Windows color output
-import colorama
-colorama.init()
+colorama, more_termcolor = attempt_import('colorama', 'more_termcolor')
+try:
+    colorama.init()
+except:
+    print(f"Failed to initialize colorama. Ignoring...")
+
+def colored_fallback(*args, **kw):
+    return ' '.join(args)
+
+try:
+    colored = more_termcolor.colored
+except:
+    print(f"Failed to import more_termcolor. Ignoring color output...")
+    colored = colored_fallback

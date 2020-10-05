@@ -6,12 +6,7 @@
 Docker Compose stack configuration goes here
 """
 
-import yaml, os
-#  from meerschaum.config._read_yaml import config as cf
-try:
-    import importlib.resources as pkg_resources
-except ImportError:
-    import importlib_resources as pkg_resources
+import os
 from meerschaum.config._paths import GRAFANA_DATASOURCE_PATH, GRAFANA_DASHBOARD_PATH
 from meerschaum.config._paths import STACK_COMPOSE_PATH, STACK_ENV_PATH, STACK_COMPOSE_FILENAME
 
@@ -44,7 +39,7 @@ env_dict = {
     'MEERSCHAUM_DB_HOSTNAME' : f'{db_host}',
     'MEERSCHAUM_API_HOSTNAME' : f'{api_host}',
     'ALLOW_IP_RANGE' : '0.0.0.0/0',
-    'MEERSCHAUM_API_CONFIG_RESOURCES' : '/usr/local/lib/python3.8/site-packages/meerschaum/config/resources/',
+    'MEERSCHAUM_API_CONFIG_RESOURCES' : '/root/.config/meerschaum/config/resources/',
 }
 env_dict['MEERSCHAUM_API_CONFIG'] = (
     """{

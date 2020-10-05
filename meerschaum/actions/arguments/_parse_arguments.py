@@ -61,6 +61,10 @@ def parse_arguments(sysargs : list) -> dict:
     for a in none_args:
         del args_dict[a]
 
+    ### location_key '[None]' or 'None' -> None
+    if 'location_keys' in args_dict:
+        args_dict['location_keys'] = [ None if lk in ('[None]', 'None') else lk for lk in args_dict['location_keys'] ]
+
     return parse_synonyms(args_dict)
 
 def parse_line(line : str) -> dict:

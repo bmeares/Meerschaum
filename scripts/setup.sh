@@ -44,5 +44,8 @@ rm -rf /var/lib/apt/lists/*
 
 ### we need to install pyyaml first because it's needed
 ### for post-install
-pip install --no-cache-dir --upgrade PyYAML colorama more_termcolor
-pip install --no-cache-dir --upgrade /src[full]
+# pip install --no-cache-dir --upgrade /src[full]
+
+### install dependencies (required and full)
+python setup.py egg_info
+pip install --no-cache-dir $(sed "s/[[][^]]*[]]//g" meerschaum.egg-info/requires.txt)

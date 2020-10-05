@@ -27,7 +27,7 @@ async def register_location(location : Location):
     return {**location.dict(), "location_id": last_record_id}
 
 @fast_api.get(endpoint)
-async def get_pipes():
+async def get_locations():
     query = get_tables()['locations'].select()
     return await database.fetch_all(query)
 

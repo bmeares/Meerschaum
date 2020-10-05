@@ -8,7 +8,7 @@ Define API SQLAlchemy tables
 
 from meerschaum.api import connector
 from meerschaum.utils.misc import attempt_import
-sqlalchemy = attempt_import('sqlalchemy')
+sqlalchemy, sqlalchemy_dialects_postgresql = attempt_import('sqlalchemy', 'sqlalchemy.dialects.postgresql')
 
 ### this needs to be accessed through get_tables,
 ### otherwise it will attempt to connect to the SQL server
@@ -29,6 +29,7 @@ def get_tables():
                 sqlalchemy.Column("connector_keys", sqlalchemy.String, index=True, nullable=False),
                 sqlalchemy.Column("metric_key", sqlalchemy.String, index=True, nullable=False),
                 sqlalchemy.Column("location_key", sqlalchemy.String, index=True),
+                sqlalchemy.Column("parameters", sqlalchemy_dialects_postgresql.JSON),
                 sqlalchemy.UniqueConstraint('connector_keys', 'metric_key', 'location_key', name='pipe_index')
             ),
             'metrics' : sqlalchemy.Table(
