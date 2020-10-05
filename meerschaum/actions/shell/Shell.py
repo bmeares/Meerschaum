@@ -7,7 +7,7 @@ This module is the entry point for the interactive shell
 """
 
 import cmd as cmd, sys, inspect
-from meerschaum.config import __doc__, config as cf
+from meerschaum.config import __doc__, config as cf, get_config
 from meerschaum.actions.arguments import parse_line
 from meerschaum.utils.formatting import UNICODE, CHARSET, ANSI, colored
 ### readline is Unix-like only. Disable readline features for Windows
@@ -16,8 +16,7 @@ try:
 except ImportError:
     readline = None
 
-shell_config = cf['system']['shell']
-output_config = shell_config[CHARSET]
+patch = True
 
 class Shell(cmd.Cmd):
     def __init__(self):
@@ -25,22 +24,22 @@ class Shell(cmd.Cmd):
         Customize the CLI from configuration
         """
         super().__init__()
-        self.intro = output_config['intro'] + '\n' + __doc__
-        self.prompt = output_config['prompt']
+        self.intro = get_config('system', 'shell', CHARSET, 'intro', patch=patch) + '\n' + __doc__
+        self.prompt = get_config('system', 'shell', CHARSET, 'prompt', patch=patch)
         self.debug = False
-        self.ruler = output_config['ruler']
-        self.close_message = output_config['close_message']
-        self.doc_header = output_config['doc_header']
-        self.undoc_header = output_config['undoc_header']
+        self.ruler = get_config('system', 'shell', CHARSET, 'ruler', patch=patch)
+        self.close_message = get_config('system', 'shell', CHARSET, 'close_message', patch=patch)
+        self.doc_header = get_config('system', 'shell', CHARSET, 'doc_header', patch=patch)
+        self.undoc_header = get_config('system', 'shell', CHARSET, 'undoc_header', patch=patch)
 
         if ANSI:
             def apply_colors(attr, key):
                 return colored(
                     attr,
-                    *shell_config['ansi'][key]['color'],
+                    *get_config('system', 'shell', 'ansi', key, 'color', patch=patch)
                 )
 
-            for attr_key in shell_config['ansi']:
+            for attr_key in get_config('system', 'shell', 'ansi', patch=patch):
                 self.__dict__[attr_key] = apply_colors(self.__dict__[attr_key], attr_key)
 
     def precmd(self, line):
@@ -157,7 +156,7 @@ class Shell(cmd.Cmd):
     def postloop(self):
         from meerschaum.config._paths import SHELL_HISTORY_PATH
         if readline:
-            readline.set_history_length(shell_config['max_history'])
+            readline.set_history_length(get_config('system', 'shell', 'max_history', patch=patch))
             readline.write_history_file(SHELL_HISTORY_PATH)
         print('\n' + self.close_message)
 

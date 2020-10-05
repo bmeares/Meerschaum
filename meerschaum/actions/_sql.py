@@ -44,7 +44,7 @@ def sql(
     if action[0] == '':
         return get_connector().cli(debug=debug) 
 
-    from meerschaum.config import config as cf
+    from meerschaum.config import config as cf, get_config
     from meerschaum.utils.debug import dprint
 
     method = None
@@ -56,7 +56,7 @@ def sql(
             method = a
             continue
         ### check if user specifies a label
-        if a in cf['meerschaum']['connectors']['sql']:
+        if a in get_config('meerschaum', 'connectors', 'sql', patch=True):
             label = a
     if method is None: method = 'read'
     if label is None: label = 'main'

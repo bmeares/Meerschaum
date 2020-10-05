@@ -109,7 +109,7 @@ def _bootstrap_grafana(
     from meerschaum.utils.misc import yes_no
     from meerschaum.config._paths import GRAFANA_DATASOURCE_PATH, GRAFANA_DASHBOARD_PATH
     from meerschaum.config._edit import general_write_config
-    from meerschaum.config import config as cf
+    from meerschaum.config import config as cf, get_config
     from meerschaum.utils.debug import dprint
     answer = False
     if not yes:
@@ -118,8 +118,8 @@ def _bootstrap_grafana(
     if answer or force:
         general_write_config(
             {
-                GRAFANA_DATASOURCE_PATH : cf['grafana']['datasource'],
-                GRAFANA_DASHBOARD_PATH : cf['grafana']['dashboard'],
+                GRAFANA_DATASOURCE_PATH : get_config('stack', 'grafana', 'datasource', patch=True),
+                GRAFANA_DASHBOARD_PATH : get_config('stack', 'grafana', 'dashboard'),
             },
             debug=debug
         )

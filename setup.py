@@ -11,13 +11,12 @@ class PostInstallCommand(install):
     """Post-installation for installation mode."""
     def run(self):
         install.run(self)
-        from meerschaum.config._paths import CONFIG_PATH, PATCH_PATH
+        from meerschaum.config._paths import CONFIG_PATH, PERMANENT_PATCH_PATH
         import os, shutil
         if CONFIG_PATH.exists():
             print(f"Found existing configuration in {CONFIG_PATH}")
-            print(f"Moving to {PATCH_PATH} and patching default configuration with existing configuration")
-            shutil.copy(CONFIG_PATH, PATCH_PATH)
-            #  shutil.move(CONFIG_PATH)
+            print(f"Moving to {PERMANENT_PATCH_PATH} and patching default configuration with existing configuration")
+            shutil.move(CONFIG_PATH, PERMANENT_PATCH_PATH)
         else:
             print(f"Configuration not found: {CONFIG_PATH}")
 
