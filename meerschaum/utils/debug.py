@@ -14,10 +14,11 @@ def dprint(
         msg : str,
         leader : bool = True,
         package: bool = True,
-        color : str = 'cyan',
+        color : 'str or list' = None,
         attrs : list = [],
     ):
-    from meerschaum.utils.formatting import UNICODE, ANSI
+    from meerschaum.utils.formatting import CHARSET, ANSI, colored
+    from meerschaum.config import config as cf
     parent_globals = inspect.stack()[1][0].f_globals
     parent_package = parent_globals['__name__']
     msg = str(msg)
@@ -25,10 +26,13 @@ def dprint(
     if package:
         premsg = parent_package + ':\n'
     if leader:
-        debug_leader = "DEBUG:"
-        if UNICODE: debug_leader = "🐞"
+        debug_leader = cf['system']['debug'][CHARSET]['leader']
         premsg = debug_leader + ' ' + premsg
     if ANSI:
-        from more_termcolor import colored
-        premsg = colored(premsg, color)
+        if color is not None:
+            if isinstance(color, str):
+                color = [color]
+        else:
+            color = cf['system']['debug']['ansi']['color']
+        premsg = colored(premsg, *color)
     log.warning(premsg + msg)

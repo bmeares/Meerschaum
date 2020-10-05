@@ -6,8 +6,8 @@
 The default configuration values to write to config.yaml.
 """
 
-#  from meerschaum.utils.misc import generate_password
-import yaml, sys, os, multiprocessing
+import sys, os, multiprocessing
+
 default_meerschaum_config = {
     'connectors' : {
         'sql' : {
@@ -106,6 +106,9 @@ default_system_config = {
             },
         },
         'ascii'            : {
+            'intro'        : """       ___  ___  __   __   __                       
+ |\/| |__  |__  |__) /__` /  ` |__|  /\  |  |  |\/|
+ |  | |___ |___ |  \ .__/ \__, |  | /~~\ \__/  |  |\n""",
             'prompt'       : 'mrsm > ',
             'ruler'        : '-',
             'close_message': 'Thank you for using Meerschaum!',
@@ -113,6 +116,9 @@ default_system_config = {
             'undoc_header' : 'Unimplemented actions:',
         },
         'unicode'          : {
+            'intro'        : """
+ █▄ ▄█ ██▀ ██▀ █▀▄ ▄▀▀ ▄▀▀ █▄█ ▄▀▄ █ █ █▄ ▄█
+ █ ▀ █ █▄▄ █▄▄ █▀▄ ▄██ ▀▄▄ █ █ █▀█ ▀▄█ █ ▀ █\n""",
             'prompt'       : '𝚖𝚛𝚜𝚖 ➤ ',
             'ruler'        : '─',
             'close_message': 'Thank you for using Meerschaum! 👋',
@@ -137,8 +143,49 @@ default_system_config = {
             'mrsm'         : '/mrsm',
         },
     },
-    'arguments' : {
+    'arguments'            : {
         'sub_decorators'   : ['[', ']'],
+    },
+    'warnings'             : {
+        'unicode'          : {
+            'icon'         : '⚠',
+        },
+        'ascii'            : {
+            'icon'         : 'WARNING',
+        },
+        'ansi'             : {
+            'color'        : [
+                'bold',
+                'yellow',
+            ],
+        },
+    },
+    'errors'             : {
+        'unicode'          : {
+            'icon'         : '🛑',
+        },
+        'ascii'            : {
+            'icon'         : 'ERROR',
+        },
+        'ansi'             : {
+            'color'        : [
+                'bold',
+                'red',
+            ],
+        },
+    },
+    'debug'                : {
+        'unicode'          : {
+            'leader'       : '🐞',
+        },
+        'ascii'            : {
+            'leader'       : 'DEBUG',
+        },
+        'ansi'             : {
+            'color'        : [
+                'cyan',
+            ],
+        },
     },
 }
 

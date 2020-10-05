@@ -13,6 +13,7 @@ class APIConnector(Connector):
     from ._post import post
     from ._get import get
     from ._actions import get_actions, do_action
+    from ._pipes import register_pipe, get_pipes
 
     def __init__(
         self,

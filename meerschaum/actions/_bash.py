@@ -5,7 +5,6 @@
 """
 NOTE: This action may be a huge security vulnerability
     if not handled appropriately!
-TODO: Filter out `bash` commands from the WebAPI.
 """
 from meerschaum.config import system_config
 

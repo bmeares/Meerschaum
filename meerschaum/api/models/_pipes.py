@@ -12,4 +12,5 @@ class MetaPipe(pydantic.BaseModel):
     connector_keys : str ### e.g. sql:main
     metric_key : str
     location_key : str = None
+    parameters : dict = None
 

@@ -16,32 +16,39 @@ default_requirements = {
     'database',
 }
 flavor_configs = {
-        'timescaledb' : {
+        'timescaledb'      : {
             'engine'       : 'postgres',
             'requirements' : default_requirements,
             'defaults'     : {
-                'port' : 5432,
+                'port'     : 5432,
             },
         },
-        'postgres'    : {
+        'postgres'         : {
             'engine'       : 'postgres',
             'requirements' : default_requirements,
             'defaults'     : {
-                'port' : 5432,
+                'port'     : 5432,
             },
         },
-        'mssql'       : {
+        'mssql'            : {
             'engine'       : 'mssql+pyodbc',
             'requirements' : default_requirements,
             'defaults'     : {
-                'port' : 1433,
+                'port'     : 1433,
             },
         },
-        'mysql'       : {
+        'mysql'            : {
             'engine'       : 'mysql+pymysql',
             'requirements' : default_requirements,
             'defaults'     : {
-                'port' : 3306,
+                'port'     : 3306,
+            },
+        },
+        'mariadb'          : {
+            'engine'       : 'mysql+pymysql',
+            'requirements' : default_requirements,
+            'defaults'     : {
+                'port'     : 3306,
             },
         },
         'oracle'      : {

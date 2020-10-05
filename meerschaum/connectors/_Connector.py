@@ -103,6 +103,19 @@ class Connector:
                 f"Missing attributes: {missing_attributes}"
             )
 
+    def fetch(
+            self,
+            instructions : dict
+        ) -> 'pd.DataFrame':
+        """
+        Abstract method for all Connectors.
+        In addition to specialized functionality, all Connectors must be able to fetch data
+        based on criteria provided in the instructions dictionary.
+
+        Returns pandas (or pandas derivative) DataFrame
+        """
+        raise NotImplementedError("fetch() must be implemented in children classes")
+
     def __str__(self):
         return f'Meerschaum {self.type.upper()} Connector: {self.label}'
 

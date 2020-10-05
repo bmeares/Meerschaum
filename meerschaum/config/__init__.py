@@ -49,7 +49,11 @@ except AttributeError:
 if interactive:
     msg = __doc__
     if config['system']['formatting']['ansi']:
-        from more_termcolor import colored
-        msg = colored(msg, 'blue', attrs=['bold'])
+        try:
+            from more_termcolor import colored
+        except:
+            pass
+        else:
+            msg = colored(msg, 'bright blue', attrs=['bold'])
     print(msg, file=sys.stderr)
 

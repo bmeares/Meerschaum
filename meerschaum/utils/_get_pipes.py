@@ -42,54 +42,44 @@ def get_pipes(
         If 'sql', pull from the `meta` and `main` SQL connectors.
         If 'api', pull from the `main` WebAPI.
     """
-    #  raise NotImplementedError("TODO finish get_pipes")
-    ### fetch meta connector
-    from meerschaum.connectors import get_connector
-    meta_connector = get_connector(type='sql', label='meta')
 
-    ### TODO add source options as argument?
-    if source == 'sql':
-        pass
-        #  print("SOURCE", source)
-        #  from meerschaum.api.tables import get_tables
-        #  pipes_table = get_tables()['pipes']
-    ### TODO get pipes from API
-    elif source == 'api':
+    from meerschaum.connectors import get_connector
+    from meerschaum.utils.misc import flatten_pipes_dict
+
+    default_source_labels = {
+        'api' : 'main',
+        'sql' : 'meta',
+    }
+
+    ### determine where to pull Pipe data from
+    source_keys = source.split(':')
+    source_type = source_keys[0]
+    try:
+        source_label = source_keys[1]
+    except:
+        source_label = default_source_labels[source_type]
+    source_keys = source_type + ':' + source_label
+
+    ### fetch meta connector
+    if source_type == 'api':
+        api_connector = get_connector(type=source_type, label=source_label) 
+        if not as_list:
+            return api_connector.get_pipes()
+        return flatten_pipes_dict(api_connector.get_pipes())
+    elif source_type != 'sql':
         raise NotImplementedError(f"Source '{source}' has not yet been implemented.")
-    else:
-        raise NotImplementedError(f"Invalid source '{source}'")
+
+    ### default: sql:meta
+    meta_connector = get_connector(type=source_type, label=source_label)
 
     ### creates metadata
     from meerschaum.api.tables import get_tables
     tables = get_tables()
 
-    def select_distinct(column : str) -> list:
-        """
-        Get all distinct values of a single column from the `pipes` table
-        """
-        q = f"SELECT DISTINCT {column} FROM pipes"
-        return list(meta_connector.read(q)[column])
-
-    ### catch all cases
-    #  if connector_keys in [None, ['*']] and source == 'sql':
-        #  connector_keys = select_distinct('connector_keys')
-
-    #  if metric_keys in [None, ['*']] and source == 'sql':
-        #  metric_keys = select_distinct('metric_key')
-
-    #  if location_keys in [None, ['*']] and source == 'sql':
-        #  location_keys = select_distinct('location_key')
-
     q = """SELECT DISTINCT
     pipes.connector_keys, pipes.metric_key, pipes.location_key
 FROM pipes
 """
-    ### NOTE implement left joins later?
-    """
-    LEFT JOIN metrics ON metrics.metric_key = pipes.metric_key AND metrics.connector_keys = pipes.connector_keys
-    LEFT JOIN locations ON locations.location_key = pipes.location_key AND locations.connector_keys = pipes.connector_keys
-    """
-
     ### Add three primary keys to params dictionary
     ###   (separated for convenience of arguments)
     cols = {
@@ -97,17 +87,19 @@ FROM pipes
         'metric_key' : metric_keys,
         'location_key' : location_keys,
     }
+    ### make deep copy because something weird is happening with pointers
+    parameters = dict(params)
     for col, vals in cols.items():
         if vals not in [None, [], ['*']]:
-            params[col] = vals
+            parameters[col] = vals
 
-    def build_where():
+    def build_where(parameters : dict):
         """
         Build the WHERE clause based on the input criteria
         """
         where = ""
         leading_and = "\n    AND "
-        for key, value in params.items():
+        for key, value in parameters.items():
             if isinstance(value, list):
                 where += f"{leading_and}{key} IN ("
                 for item in value:
@@ -117,13 +109,23 @@ FROM pipes
             where += f"{leading_and}{key} = '{value}'"
         if len(where) > 1: where = "WHERE\n    " + where[len(leading_and):]
         return where
-    q += build_where()
+
+    q += build_where(parameters)
+
+    if debug: dprint(f"connector_keys: {connector_keys}")
+    if debug: dprint(f"metric_keys: {metric_keys}")
+    if debug: dprint(f"location_keys: {location_keys}")
+    if debug: dprint(f"parameters: {parameters}")
+
 
     pipes = dict()
 
     from meerschaum import Pipe
     if debug: dprint(q)
-    result = meta_connector.engine.execute(q)
+    try:
+        result = meta_connector.engine.execute(q)
+    except Exception:
+        return pipes
     for ck, mk, lk in result:
         if ck not in pipes:
             pipes[ck] = dict()
@@ -131,12 +133,8 @@ FROM pipes
         if mk not in pipes[ck]:
             pipes[ck][mk] = dict()
 
-        pipes[ck][mk][lk] = Pipe(ck, mk, lk, debug=debug)
+        pipes[ck][mk][lk] = Pipe(ck, mk, lk, source='sql', debug=debug)
 
     if not as_list: return pipes
-    pipes_list = []
-    for ck in pipes.values():
-        for mk in ck.values():
-            pipes_list += list(mk.values())
-    return pipes_list
+    return flatten_pipes_dict(pipes)
 

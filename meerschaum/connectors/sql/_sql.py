@@ -69,6 +69,13 @@ def read(
 
     return df
 
+def value(self, query, **kw):
+    """
+    Return a single value from a SQL query
+    (index a DataFrame a [0, 0]
+    """
+    return self.read(query, **kw).iloc[0, 0]
+
 def exec(self, query, debug=False) -> bool:
     """
     Execute SQL code and return success status. e.g. calling stored procedures
@@ -160,54 +167,6 @@ def to_sql(
         dprint(f"It took {round(end - start, 2)} seconds.")
 
     return True
-
-### DEPRECIATED in favor of psql_insert_copy
-###
-#  def bulk_insert(
-        #  self,
-        #  df : 'pd.DataFrame',
-        #  name : str = None,
-        #  #  index : bool = False,
-        #  if_exists : str = 'replace',
-        #  debug=False,
-        #  **kw
-    #  ):
-    #  """
-    #  If possible, upload via copy_from rather than to_sql
-    #  """
-    
-    #  if name is None:
-        #  raise Exception("Name must not be None to submit to the SQL server")
-
-    #  if self.flavor not in bulk_flavors:
-        #  raise Exception(f"SQLConnector flavor '{self.flavor}' must be one of the following: {bulk_flavors}. Use `to_sql` with a large chunksize instead.")
-
-    #  import io
-    #  if debug:
-        #  import time
-        #  start = time.time()
-
-    #  ### ensure the table exists
-    #  df[:0].to_sql(name, self.engine, if_exists=if_exists)
-
-    #  output = io.StringIO()
-    #  if debug: print("Parsing DataFrame to stream via to_csv...", end="")
-    #  df.to_csv(output, sep=',', header=False, index=False)
-    #  if debug: print(" done.")
-
-    #  output.seek(0)
-    #  contents = output.getvalue()
-    #  connection = self.engine.raw_connection()
-    #  cursor = connection.cursor()
-    #  if debug: print("Copying to database via copy_from...", end="")
-    #  cursor.copy_from(output, name, null="", sep=",")
-    #  connection.commit()
-    #  cursor.close()
-    #  if debug:
-        #  end = time.time()
-        #  print(" done.")
-        #  print("It took {round(end - start, 2)} seconds to upload {len(df)} rows.")
-    #  return True
 
 def psql_insert_copy(table, conn, keys, data_iter):
     """

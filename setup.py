@@ -11,18 +11,15 @@ class PostInstallCommand(install):
     """Post-installation for installation mode."""
     def run(self):
         install.run(self)
-        from meerschaum.actions import entry
         from meerschaum.config._paths import CONFIG_PATH, PATCH_PATH
         import os, shutil
-        if CONFIG_PATH.is_file():
+        if CONFIG_PATH.exists():
             print(f"Found existing configuration in {CONFIG_PATH}")
             print(f"Moving to {PATCH_PATH} and patching default configuration with existing configuration")
             shutil.copy(CONFIG_PATH, PATCH_PATH)
+            #  shutil.move(CONFIG_PATH)
         else:
             print(f"Configuration not found: {CONFIG_PATH}")
-
-        #  entry(['bootstrap', 'config', '--yes', '--force'])
-        #  entry(['bootstrap', 'stack', '--yes', '--force'])
 
 required = [
     'PyYAML',
@@ -33,20 +30,43 @@ required = [
     'colorama',
     'more_termcolor',
 ]
-
+### TODO bake drivers into Docker image
+drivers = [
+    'psycopg2-binary',
+    'pymysql',
+    #  'pyodbc',
+]
+cli = [
+    'pgcli',
+    'mycli',
+    'litecli',
+]
+sql = drivers + [
+    'pandas',
+    'sqlalchemy',
+    'databases',
+    'aiosqlite',
+    'asyncpg',
+]
+api = sql + [
+    'uvicorn',
+    'fastapi',
+    'graphene',
+    'jinja2',
+    'aiofiles',
+]
 extras = {
-    'full' : [
-        'pandas',
-        'sqlalchemy',
-        'psycopg2-binary',
-        'uvicorn',
-        'fastapi',
-        'databases',
-        'aiosqlite',
-        'asyncpg',
-        'graphene',
-    ],
+    'drivers' : drivers,
+    'cli' : cli,
+    'sql' : sql,
+    'api' : api,
 }
+full = set()
+for k, dependencies in extras.items():
+    if k == 'cli': continue
+    for dependency in dependencies:
+        full.add(dependency)
+extras['full'] = list(full)
 
 with open('README.md', 'r') as f:
     readme = f.read()
@@ -68,13 +88,25 @@ setuptools.setup(
         'console_scripts' : [
             'meerschaum = meerschaum.__main__:main',
             'Meerschaum = meerschaum.__main__:main',
-            'mrsm = meerschaum.__main__:main'
+            'mrsm = meerschaum.__main__:main',
         ],
     },
     cmdclass = {
         'install' : PostInstallCommand,
     },
     zip_safe = True,
-    package_data = {'' : ['*.yaml', '*.env', 'Dockerfile*']},
-    python_requires = '>=3.8'
+    package_data = {'' : ['*.html', '*.css', '*.js']},
+    python_requires = '>=3.8',
+    classifiers = [
+        "Development Status :: 3 - Alpha",
+        "Intended Audience :: System Administrators",
+        "License :: OSI Approved :: MIT License",
+        "Operating System :: POSIX :: Linux",
+        "Operating System :: Microsoft :: Windows",
+        "Operating System :: MacOS",
+        "Programming Language :: SQL",
+        "Programming Language :: Python :: 3.8",
+        "Programming Language :: Python :: 3.9",
+        "Topic :: Database",
+    ]
 )

@@ -6,11 +6,16 @@ Pipes are the primary data access objects in the Meerschaum system
 """
 
 class Pipe:
+    from ._fetch import fetch
+    from ._register import register
+    from ._attributes import attributes, parameters
+    from ._show import show
     def __init__(
         self,
         connector_keys : str,
         metric_key : str,
         location_key : str = None,
+        source : str = 'sql',
         debug : bool = False
     ):
         """
@@ -22,6 +27,15 @@ class Pipe:
         self.connector_keys = connector_keys
         self.metric_key = metric_key
         self.location_key = location_key
+        
+        ### NOTE to register this Pipe, the parameters dictionary must be set first!
+        from meerschaum.api.models import MetaPipe
+        self.meta = MetaPipe(
+            connector_keys = connector_keys,
+            metric_key = metric_key,
+            location_key = location_key,
+            #  parameters = self.
+        )
 
         ### TODO aggregations?
         self._aggregations = dict()
@@ -35,7 +49,21 @@ class Pipe:
             else:
                 return None
         return self._connector
-    
+
+    @property
+    def id(self):
+        if '_id' not in self.__dict__:
+            from meerschaum import get_connector
+            meta_connector = get_connector('sql', 'meta')
+            q = f"""
+            SELECT pipe_id
+            FROM pipes
+            WHERE connector_keys = '{self.connector_keys}'
+                AND metric_key = '{self.metric_key}'
+                AND location_key """ + "IS NULL" if self.location_key is None else f"= '{self.location_key}'"
+            self._id = meta_connector.value(q)
+        return self._id
+
     def __str__(self):
         name = f"{self.connector_keys.replace(':', '_')}_{self.metric_key}"
         if self.location_key is not None:

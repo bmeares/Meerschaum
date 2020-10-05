@@ -14,7 +14,11 @@ def sync_configs(
     """
     Synchronize sub-configuration with main configuration file
     """
-    import os, sys, yaml
+    import os, sys
+    try:
+        import yaml
+    except ImportError:
+        return
     from meerschaum.config._patch import apply_patch_to_config
     import meerschaum.config
     from meerschaum.utils.misc import reload_package, search_and_substitute_config
@@ -26,7 +30,11 @@ def sync_configs(
         """
         header_comment = ""
         with open(path, 'r') as f:
-            config = yaml.safe_load(f)
+            if yaml:
+                config = yaml.safe_load(f)
+            else:
+                print("PyYAML not installed!")
+                sys.exit()
             f.seek(0)
             for line in f:
                 #  print(len(line))
