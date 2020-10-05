@@ -30,8 +30,8 @@ def warn(*args, stacklevel=2, **kw):
     Raise a warning with custom Meerschaum formatting
     """
     from meerschaum.utils.formatting import CHARSET, ANSI, colored
-    from meerschaum.config import config as cf
-    warn_config = cf['system']['warnings']
+    from meerschaum.config import config as cf, get_config
+    warn_config = get_config('system', 'warnings', patch=True)
     a = list(args)
     a[0] = ' ' + warn_config[CHARSET]['icon'] + ' ' + a[0]
     if ANSI:
@@ -43,8 +43,8 @@ def error(message):
     Raise an error with custom Meerschaum formatting
     """
     from meerschaum.utils.formatting import CHARSET, ANSI, colored
-    from meerschaum.config import config as cf
-    error_config = cf['system']['errors']
+    from meerschaum.config import config as cf, get_config
+    error_config = get_config('system', 'errors', patch=True)
     message = error_config[CHARSET]['icon'] + ' ' + message
     if ANSI:
         message = colored(message, *error_config['ansi']['color'])

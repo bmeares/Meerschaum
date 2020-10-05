@@ -13,7 +13,7 @@ def parse_arguments(sysargs : list) -> dict:
     """
     Parse a list of arguments into standard Meerschaum arguments.
     """
-    from meerschaum.config import config as cf
+    from meerschaum.config import config as cf, get_config
     args, unknown = parser.parse_known_args(sysargs)
     if unknown: print(f"Unknown arguments: {unknown}")
 
@@ -30,7 +30,7 @@ def parse_arguments(sysargs : list) -> dict:
         ### clean up patch so it's not loaded next time
         os.remove(PATCH_PATH)
 
-    begin_decorator, end_decorator = cf['system']['arguments']['sub_decorators']
+    begin_decorator, end_decorator = get_config('system', 'arguments', 'sub_decorators', patch=True)
 
     args_dict = vars(args)
     sub_arguments = []

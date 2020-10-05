@@ -10,14 +10,22 @@ try:
     import yaml
 except ImportError:
     yaml = None
-from meerschaum.config._paths import PATCH_FILENAME, PATCH_PATH
-#  from meerschaum.utils.debug import dprint
+from meerschaum.config._paths import PATCH_FILENAME, PATCH_PATH, PERMANENT_PATCH_PATH
 patch_config = None
 if os.path.isfile(PATCH_PATH):
     if yaml:
         with open(PATCH_PATH, 'r') as f:
             patch_text = f.read()
         patch_config = yaml.safe_load(patch_text)
+
+permanent_patch_config = None
+if os.path.isfile(PERMANENT_PATCH_PATH):
+    if yaml:
+        with open(PERMANENT_PATCH_PATH, 'r') as f:
+            permanent_patch_text = f.read()
+        permanent_patch_config = yaml.safe_load(permanent_patch_text)
+
+
 def apply_patch_to_config(
         config : dict,
         patch : dict

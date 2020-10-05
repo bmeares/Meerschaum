@@ -354,7 +354,8 @@ def search_and_substitute_config(
             try:
                 c = c[k]
             except KeyError:
-                print(f"WARNING: Invalid keys in config: {keys}")
+                from meerschaum.utils.warnings import warn
+                warn(f"Invalid keys in config: {keys}")
         value = c
 
         ### pattern to search and replace

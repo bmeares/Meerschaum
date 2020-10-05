@@ -8,10 +8,10 @@ Utilities for formatting output text
 
 from meerschaum.utils.formatting._shell import make_header
 
-from meerschaum.config import config as cf
+from meerschaum.config import config as cf, get_config
 
-ANSI = cf['system']['formatting']['ansi']
-UNICODE = cf['system']['formatting']['unicode']
+ANSI = get_config('system', 'formatting', 'ansi', patch=True)
+UNICODE = get_config('system', 'formatting', 'unicode', patch=True)
 import platform
 if platform.system() == 'Windows':
     UNICODE = False

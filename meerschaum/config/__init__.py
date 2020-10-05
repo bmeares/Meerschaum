@@ -10,6 +10,9 @@ and if interactive, print the welcome message
 from meerschaum.config._version import __version__
 from meerschaum.config._read_yaml import config
 
+from meerschaum.utils.debug import dprint
+import os
+
 ### developer-specified values
 system_config = config['system']
 
@@ -18,9 +21,20 @@ from meerschaum.config._preprocess import preprocess_config
 config = preprocess_config(config)
 
 ### if patch.yaml exists, apply patch to config
-from meerschaum.config._patch import patch_config, apply_patch_to_config
+from meerschaum.config._patch import permanent_patch_config, patch_config, apply_patch_to_config
 if patch_config is not None:
+    from meerschaum.config._paths import PATCH_PATH
     config = apply_patch_to_config(config, patch_config)
+    if PATCH_PATH.exists(): os.remove(PATCH_PATH)
+
+### if permanent_patch.yaml exists, apply patch to config, write config, and delete patch
+if permanent_patch_config is not None:
+    from meerschaum.config._edit import write_config
+    dprint("Found permanent patch configuration. Updating main config and deleting permanent patch...")
+    config = apply_patch_to_config(config, permanent_patch_config)
+    write_config(config)
+    from meerschaum.config._paths import PERMANENT_PATCH_PATH
+    if PERMANENT_PATCH_PATH.exists(): os.remove(PERMANENT_PATCH_PATH)
 
 ### if environment variable MEERSCHAUM_CONFIG is set, , patch config
 from meerschaum.utils.misc import string_to_dict
@@ -37,6 +51,31 @@ if environment_config in os.environ:
             f"Skipping patching os environment into config..."
         )
 
+def get_config(*keys, patch=False, debug=False):
+    """
+    Return the Meerschaum configuration dictionary.
+    If positional arguments are provided, index by the keys.
+    Raises a warning if invalid keys are provided.
+
+    E.g. get_config('system', 'shell') == config['system']['shell']
+    """
+    from meerschaum.utils.debug import dprint
+    if debug: dprint(f"Indexing keys: {keys}")
+    c = config
+    if len(keys) > 0:
+        for k in keys:
+            try:
+                c = c[k]
+            except KeyError:
+                from meerschaum.utils.warnings import warn
+                warn(f"Invalid keys in config: {keys}")
+                if patch:
+                    from meerschaum.config._paths import PERMANENT_PATCH_PATH, CONFIG_PATH
+                    import shutil, sys
+                    if debug: dprint(f"Moving {CONFIG_PATH} to {PERMANENT_PATCH_PATH}. Restart Meerschaum to patch configuration with new defaults.")
+                    shutil.move(CONFIG_PATH, PERMANENT_PATCH_PATH)
+                    sys.exit()
+    return c
 
 ### if interactive shell, print welcome header
 import sys
