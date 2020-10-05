@@ -36,11 +36,11 @@ def api(
     if action[0] in boot_keywords:
         return _api_start(action=action, debug=debug, **kw)
 
-    from meerschaum.config import config as cf
+    from meerschaum.config import config as cf, get_config
     from meerschaum.connectors import get_connector
     import requests
     if debug: from pprintpp import pprint
-    api_configs = cf['meerschaum']['connectors']['api']
+    api_configs = get_config('meerschaum', 'connectors', 'api', patch=True)
 
     api_label = "main"
     args_to_send = list(sysargs)

@@ -13,8 +13,8 @@ endpoint = endpoints['mrsm'] + '/connectors'
 
 @fast_api.get(endpoint)
 def get_connectors(type : str = None):
-    from meerschaum.config import config as cf
-    if type is not None and type not in cf['meerschaum']['connectors']:
+    from meerschaum.config import config as cf, get_config
+    if type is not None and type not in get_config('meerschaum', 'connectors'):
         raise HTTPException(status_code=404, detail=f"No connectors of type '{type}'")
     types = []
     if type is not None:
