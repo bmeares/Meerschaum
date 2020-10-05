@@ -17,7 +17,8 @@ def get(
     Wrapper for requests.get
     """
     if 'auth' in kw:
-        print('Ignoring auth, using existing configuration')
+        from meerschaum.utils.warnings import warn
+        warn('Ignoring auth, using existing configuration')
         del kw['auth']
     return requests.get(self.url + r_url, auth=self.auth, **kw)
 
