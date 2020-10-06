@@ -6,10 +6,6 @@
 Implement the Connector fetch() method
 """
 
-#  flavor_dateadds = {
-    #  'postgres'  : 
-#  }
-
 import datetime
 from dateutil import parser
 
