@@ -112,12 +112,6 @@ FROM pipes
 
     q += build_where(parameters)
 
-    if debug: dprint(f"connector_keys: {connector_keys}")
-    if debug: dprint(f"metric_keys: {metric_keys}")
-    if debug: dprint(f"location_keys: {location_keys}")
-    if debug: dprint(f"parameters: {parameters}")
-
-
     pipes = dict()
 
     from meerschaum import Pipe

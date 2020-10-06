@@ -111,6 +111,12 @@ class Shell(cmd.Cmd):
         """
         self.do_default(line)
 
+    def do_pass(self, line):
+        """
+        Do nothing.
+        """
+        pass
+
     def do_default(self, action=[''], **kw):
         """
         If `action` is not implemented, execute in a subprocess.
@@ -180,5 +186,5 @@ def input_with_sigint(_input):
             return _input(*args)
         except KeyboardInterrupt:
             print("^C")
-            return ""
+            return "pass"
     return _input_with_sigint

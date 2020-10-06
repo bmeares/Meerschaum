@@ -10,6 +10,7 @@ class Pipe:
     from ._register import register
     from ._attributes import attributes, parameters
     from ._show import show
+    from ._edit import edit
     def __init__(
         self,
         connector_keys : str,

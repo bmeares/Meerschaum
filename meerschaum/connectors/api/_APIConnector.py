@@ -11,9 +11,10 @@ from meerschaum.connectors._Connector import Connector
 class APIConnector(Connector):
 
     from ._post import post
+    from ._patch import patch
     from ._get import get
     from ._actions import get_actions, do_action
-    from ._pipes import register_pipe, get_pipes
+    from ._pipes import register_pipe, get_pipes, edit_pipe
 
     def __init__(
         self,

@@ -18,21 +18,44 @@ def register_pipe(
     Submit a POST to the API to register a new Pipe object.
     Returns a tuple of (success_bool, response_dict)
     """
-    if pipe.parameters is None:
-        error(f"""
-        Parameters is None for {pipe}. Please set the `parameters` member and re-register (see below):
-        """ + """
-        >>> pipe.parameters = {
-        >>>     "fetch" : {
-        >>>         "definition" : "SELECT * FROM test",
-        >>>         "backtrack_minutes" : 1000,
-        >>>     },
-        >>> }
-        >>> 
-        >>> pipe.register()
-        """)
+    #  if pipe.parameters is None:
+        #  error(f"""
+        #  Parameters is None for {pipe}. Please set the `parameters` member and re-register (see below):
+        #  """ + """
+        #  >>> pipe.parameters = {
+        #  >>>     "fetch" : {
+        #  >>>         "definition" : "SELECT * FROM test",
+        #  >>>         "backtrack_minutes" : 1000,
+        #  >>>     },
+        #  >>> }
+        #  >>> 
+        #  >>> pipe.register()
+        #  """)
     pipe.meta.parameters = pipe.parameters
+    if pipe.meta.parameters is None: pipe.meta.parameters = dict()
     response = self.post('/mrsm/pipes', json=pipe.meta.dict())
+    return response.__bool__(), response.json()
+
+def edit_pipe(
+        self,
+        pipe : 'meerschaum.Pipe',
+        patch : bool = False,
+        debug : bool = False
+    ) -> tuple:
+    """
+    Submit a PATCH to the API to edit an existing Pipe.
+    Returns a tuple of (success_bool, response_dict)
+    """
+    pipe.meta.parameters = pipe.parameters
+    if pipe.meta.parameters is None: pipe.meta.parameters = dict()
+    if debug:
+        from meerschaum.utils.debug import dprint
+        dprint(f"patch: {patch}")
+    response = self.patch(
+        '/mrsm/pipes',
+        json=pipe.meta.dict(),
+        params={'patch' : patch}
+    )
     return response.__bool__(), response.json()
 
 def get_pipes(

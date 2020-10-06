@@ -51,6 +51,9 @@ parser.add_argument(
     '-V', '--version', action="version", version=doc
 )
 parser.add_argument(
+    '--patch', action="store_true", help="Patch parameters instead of overwriting."
+)
+parser.add_argument(
     '--nopretty', action="store_true", help="Print elements without 'pretty' formatting"
 )
 parser.add_argument(
