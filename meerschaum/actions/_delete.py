@@ -13,18 +13,16 @@ def delete(
     ):
     """
     Delete an element.
-
-    delete [config, pipe]
     """
     from meerschaum.utils.misc import choose_subaction
     from meerschaum.utils.debug import dprint
     options = {
         'config' : _delete_config, 
-        'pipe' : _delete_pipe,
+        'pipe' : _delete_pipes,
     }
     return choose_subaction(action, options, **kw)
 
-def _delete_pipe(
+def _delete_pipes(
         #  action : list = [''],
         debug : bool = False,
         **kw
@@ -32,7 +30,6 @@ def _delete_pipe(
     return False, "TODO IMPLEMENT"
 
 def _delete_config(
-        #  action : list = [''],
         yes : bool = False,
         force : bool = False,
         debug : bool = False,
@@ -63,3 +60,8 @@ def _delete_config(
     
     return True, "Successfully deleted configuration files"
 
+### NOTE: This must be the final statement of the module.
+###       Any subactions added below these lines will not
+###       be added to the `help` docstring.
+from meerschaum.utils.misc import choices_docstring as _choices_docstring
+delete.__doc__ += _choices_docstring('delete')

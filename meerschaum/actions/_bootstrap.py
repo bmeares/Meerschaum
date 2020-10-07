@@ -21,14 +21,14 @@ def bootstrap(
     """
     from meerschaum.utils.misc import choose_subaction
     options = {
-        'pipe'    : _bootstrap_pipe,
+        'pipes'   : _bootstrap_pipes,
         'config'  : _bootstrap_config,
         'stack'   : _bootstrap_stack,
         'grafana' : _bootstrap_grafana,
     }
     return choose_subaction(action, options, **kw)
 
-def _bootstrap_pipe(**kw):
+def _bootstrap_pipes(**kw):
     """
     Create a new Pipe
     """

@@ -10,35 +10,58 @@ class Pipe:
     from ._register import register
     from ._attributes import attributes, parameters
     from ._show import show
+    from ._edit import edit
     def __init__(
         self,
         connector_keys : str,
         metric_key : str,
         location_key : str = None,
-        source : str = 'sql',
+        parameters : dict = None,
+        source : str = 'sql:main',
         debug : bool = False
     ):
         """
-        connector_str : keys to get Meerschaum connector
+        connector_keys : str
+            keys to get Meerschaum connector
             e.g. 'sql:main'
-        metric_key : standard Meerschaum metric key
-        location_key : standard Meerschaum location key
+        
+        metric_key : str
+            standard Meerschaum metric key
+        
+        location_key : str
+            standard Meerschaum location key
+
+        parameters : dict : {}
+            parameters dictionary to give the Pipe.
+            This dictionary is NOT stored in memory but rather is used for registration purposes.
+        
+        source : str : 'sql:main'
+            connector_keys for the source connector
         """
         self.connector_keys = connector_keys
         self.metric_key = metric_key
         self.location_key = location_key
+
+        ### only set parameters if values are provided
+        if parameters is not None:
+            self._parameters = parameters
         
-        ### NOTE to register this Pipe, the parameters dictionary must be set first!
+        ### NOTE: The parameters dictionary is {} by default.
+        ###       A Pipe may be registered without parameters, then edited,
+        ###       or a Pipe may be registered with parameters set in-memory first.
         from meerschaum.api.models import MetaPipe
         self.meta = MetaPipe(
             connector_keys = connector_keys,
             metric_key = metric_key,
             location_key = location_key,
-            #  parameters = self.
+            parameters = parameters
         )
 
         ### TODO aggregations?
-        self._aggregations = dict()
+        #  self._aggregations = dict()
+
+        ### TODO implement source. This one will be tough bc of datetime parsing (need regex magic),
+        ###      but the groundwork is there, just have to implement it in the API.
 
     @property
     def connector(self):
@@ -60,11 +83,14 @@ class Pipe:
             FROM pipes
             WHERE connector_keys = '{self.connector_keys}'
                 AND metric_key = '{self.metric_key}'
-                AND location_key """ + "IS NULL" if self.location_key is None else f"= '{self.location_key}'"
+                AND location_key """ + ("IS NULL" if self.location_key is None else f"= '{self.location_key}'")
             self._id = meta_connector.value(q)
         return self._id
 
     def __str__(self):
+        """
+        The Pipe's SQL table name. Converts the ':' in the connector_keys to an '_'.
+        """
         name = f"{self.connector_keys.replace(':', '_')}_{self.metric_key}"
         if self.location_key is not None:
             name += f"_{self.location_key}"
