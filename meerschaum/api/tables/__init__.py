@@ -22,16 +22,6 @@ def get_tables():
     global tables
     if len(tables) == 0:
         tables = {
-            'pipes' : sqlalchemy.Table(
-                "pipes",
-                connector.metadata,
-                sqlalchemy.Column("pipe_id", sqlalchemy.Integer, primary_key=True),
-                sqlalchemy.Column("connector_keys", sqlalchemy.String, index=True, nullable=False),
-                sqlalchemy.Column("metric_key", sqlalchemy.String, index=True, nullable=False),
-                sqlalchemy.Column("location_key", sqlalchemy.String, index=True),
-                sqlalchemy.Column("parameters", sqlalchemy_dialects_postgresql.JSON),
-                sqlalchemy.UniqueConstraint('connector_keys', 'metric_key', 'location_key', name='pipe_index')
-            ),
             'metrics' : sqlalchemy.Table(
                 'metrics',
                 connector.metadata,
@@ -54,6 +44,30 @@ def get_tables():
                 #  sqlalchemy.Column('connector_keys')
             ),
         }
+        ### leveage PostgreSQL JSON data type
+        if connector.flavor in ('postgres', 'timescaledb'):
+            tables['pipes'] = sqlalchemy.Table(
+                "pipes",
+                connector.metadata,
+                sqlalchemy.Column("pipe_id", sqlalchemy.Integer, primary_key=True),
+                sqlalchemy.Column("connector_keys", sqlalchemy.String, index=True, nullable=False),
+                sqlalchemy.Column("metric_key", sqlalchemy.String, index=True, nullable=False),
+                sqlalchemy.Column("location_key", sqlalchemy.String, index=True),
+                sqlalchemy.Column("parameters", sqlalchemy_dialects_postgresql.JSON),
+                sqlalchemy.UniqueConstraint('connector_keys', 'metric_key', 'location_key', name='pipe_index')
+            )
+        ### other databases flavors just use text
+        else:
+            tables['pipes'] = sqlalchemy.Table(
+                "pipes",
+                connector.metadata,
+                sqlalchemy.Column("pipe_id", sqlalchemy.Integer, primary_key=True),
+                sqlalchemy.Column("connector_keys", sqlalchemy.String, index=True, nullable=False),
+                sqlalchemy.Column("metric_key", sqlalchemy.String, index=True, nullable=False),
+                sqlalchemy.Column("location_key", sqlalchemy.String, index=True),
+                sqlalchemy.Column("parameters", sqlalchemy.String),
+                sqlalchemy.UniqueConstraint('connector_keys', 'metric_key', 'location_key', name='pipe_index')
+            )
 
         connector.metadata.create_all()
     return tables

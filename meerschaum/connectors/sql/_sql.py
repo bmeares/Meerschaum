@@ -44,8 +44,12 @@ def read(
             chunksize=chunksize
         )
     except Exception as e:
-        print(f"Failed to execute query:\n\n{query_or_table}\n\n")
+        import inspect, pprintpp
+        print(f"Failed to execute query:\n\n{query}\n\n")
         print(e)
+        print(f"Stack:")
+        pprintpp.pprint(inspect.stack())
+
         return False
 
     chunk_list = []
@@ -72,9 +76,12 @@ def read(
 def value(self, query, **kw):
     """
     Return a single value from a SQL query
-    (index a DataFrame a [0, 0]
+    (index a DataFrame a [0, 0])
     """
-    return self.read(query, **kw).iloc[0, 0]
+    try:
+        return self.read(query, **kw).iloc[0, 0]
+    except:
+        return None
 
 def exec(self, query, debug=False) -> bool:
     """
@@ -88,8 +95,12 @@ def exec(self, query, debug=False) -> bool:
                 sqlalchemy.text(query).execution_options(autocommit=True)
             )
     except Exception as e:
+        import inspect, pprintpp
+
         print(f"Failed to execute query:\n\n{query}\n\n")
         print(e)
+        print(f"Stack:")
+        pprintpp.pprint(inspect.stack())
         result = False
 
     return result
@@ -155,10 +166,11 @@ def to_sql(
             **kw
         )
     except Exception as e:
-        print(f'Failed to commit dataframe with name: {name}')
+        import inspect, pprintpp
+        print(f"Failed to execute query:\n\n{query}\n\n")
         print(e)
-        import traceback
-        traceback.print_exception(type(e), e, e.__traceback__)
+        print(f"Stack:")
+        pprintpp.pprint(inspect.stack())
         return False
 
     if debug:
