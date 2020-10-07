@@ -101,7 +101,7 @@ default_system_config = {
             },
             'prompt': {
                 'color'    : [
-                    'green',
+                    'bright green',
                 ],
             },
         },

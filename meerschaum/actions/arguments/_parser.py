@@ -68,11 +68,13 @@ parser.add_argument(
 parser.add_argument(
     '-w', '--workers', type=int, help="How many workers to run a concurrent task"
 )
-
 parser.add_argument(
     '-c', '--config', type=string_to_dict, help=(
         "Temporarily update configuration for a single command. "
         "See --params on formatting details."
     )
+)
+parser.add_argument(
+    '--api-label', help="Label for the API Connector, e.g. when registering pipes",
 )
 

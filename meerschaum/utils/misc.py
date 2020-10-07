@@ -260,13 +260,13 @@ def string_to_dict(
     If the string begins with '{', parse as JSON. Else use simple parsing
 
     """
-
-    import ast
+    if params_string == "": return dict()
 
     if str(params_string)[0] == '{':
         import json
         return json.loads(params_string)
 
+    import ast
     params_dict = dict()
     for param in params_string.split(","):
         values = param.split(":")
