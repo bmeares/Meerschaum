@@ -12,14 +12,24 @@ def attributes(self):
         ### TODO add API connector
         from meerschaum import get_connector
         meta_connector = get_connector('sql', 'meta')
+        #  if self.id is None: return None
         try:
             self._attributes = meta_connector.read(
                 ("SELECT * " +
                  "FROM pipes " +
-                f"WHERE pipe_id = {self.id}")
+                f"WHERE pipe_id = {self.id}"),
             ).to_dict('records')[0]
+
         except:
             return None
+        
+        ### handle non-PostgreSQL databases (text vs JSON)
+        if not isinstance(self._attributes['parameters'], dict):
+            try:
+                import json
+                self._attributes['parameters'] = json.loads(self._attributes['parameters'])
+            except:
+                self._attributes['parameters'] = dict()
 
     return self._attributes
 

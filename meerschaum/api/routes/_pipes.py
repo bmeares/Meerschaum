@@ -34,16 +34,86 @@ async def register_pipe(pipe : MetaPipe):
     return {**pipe.dict(), "pipe_id": last_record_id}
 
 @fast_api.patch(pipes_endpoint)
-async def update_pipe(keywords : dict = fastapi.Body(...)):
-    print(keywords)
-    pass
+async def edit_pipe(pipe : MetaPipe, patch : bool = False):
+    """
+    Edit a Pipe's parameters.
+    patch : bool : False
+        If patch is True, update the existing parameters by cascading.
+        Otherwise overwrite the parameters (default)
+    """
+    from meerschaum.utils.debug import dprint
+    global pipes
+    pipes = get_pipes_sql()
+    if not is_pipe_registered(pipe, pipes):
+        raise fastapi.HTTPException(status_code=404, detail="Pipe is not registered.")
+
+    if not patch:
+        parameters = pipe.parameters
+    else:
+        from meerschaum.config._patch import apply_patch_to_config
+        parameters = apply_patch_to_config(
+            pipes[pipe.connector_keys][pipe.metric_key][pipe.location_key].parameters,
+            pipe.parameters
+        )
+
+    q = f"""
+    UPDATE pipes
+    SET parameters = '{str(pipe.parameters).replace("'", '"')}'
+    WHERE connector_keys = '{pipe.connector_keys}'
+        AND metric_key = '{pipe.metric_key}'
+        AND location_key """ + ("IS NULL" if pipe.location_key is None else f"= '{pipe.location_key}'")
+    dprint(q)
+    return_code = connector.exec(q)
+    pipes = get_pipes_sql()
+    return pipes[pipe.connector_keys][pipe.metric_key][pipe.location_key]
+
+@fast_api.get(pipes_endpoint + '/keys')
+async def fetch_pipes_keys(
+        connector_keys : str = "",
+        metric_keys : str = "",
+        location_keys : str = "",
+        params : str = "",
+        debug : bool = False
+    ) -> list:
+    """
+    Get a list of tuples of all registered Pipes' keys.
+    """
+    from meerschaum.utils.misc import string_to_dict
+    from meerschaum.utils.debug import dprint
+    import json
+
+    if debug: dprint(f"location_keys: {len(location_keys)}")
+
+    return connector.fetch_pipes_keys(
+        connector_keys = json.loads(connector_keys),
+        metric_keys = json.loads(metric_keys),
+        location_keys = json.loads(location_keys),
+        params = json.loads(params),
+        debug = debug
+    )
 
 @fast_api.get(pipes_endpoint)
-async def get_pipes() -> dict:
+async def get_pipes(
+        connector_keys : str = "",
+        metric_keys : str = "",
+        location_keys : str = "",
+        debug : bool = False
+    ) -> dict:
     """
     Get all registered Pipes with metadata, excluding parameters.
     """
-    return pipes
+    if connector_keys == "" and metric_keys == "" and location_keys == "":
+        return pipes
+
+    import json
+
+    return get_pipes_sql(
+        connector_keys = json.loads(connector_keys),
+        metric_keys = json.loads(metric_keys),
+        location_keys = json.loads(location_keys),
+        source = 'sql',
+        debug = debug
+    )
 
 @fast_api.get(pipes_endpoint + '/{connector_keys}')
 async def get_pipes_by_connector(
@@ -60,7 +130,7 @@ async def get_pipes_by_connector(
 async def get_pipes_by_connector_and_metric(
         connector_keys : str,
         metric_key : str,
-        parent : bool = False
+        parent : bool = False,
     ):
     """
     Get all registered Pipes by connector_keys and metric_key with metadata, excluding parameters.

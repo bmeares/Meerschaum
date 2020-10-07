@@ -38,7 +38,7 @@ def warn(*args, stacklevel=2, **kw):
         a[0] = colored(a[0], *warn_config['ansi']['color'])
     return warnings.warn(*a, stacklevel=stacklevel, **kw)
 
-def error(message):
+def error(message, exception_class = Exception):
     """
     Raise an error with custom Meerschaum formatting
     """
@@ -48,4 +48,4 @@ def error(message):
     message = error_config[CHARSET]['icon'] + ' ' + message
     if ANSI:
         message = colored(message, *error_config['ansi']['color'])
-    raise Exception(message)
+    raise exception_class(message)

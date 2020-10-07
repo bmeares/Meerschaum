@@ -16,7 +16,3 @@ from meerschaum.api import (
     templates
 )
 
-
-@fast_api.get("/secret", response_class=HTMLResponse)
-async def secret(request : Request):
-    return templates.TemplateResponse("secret.html", {"request" : request})

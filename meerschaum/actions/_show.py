@@ -75,7 +75,7 @@ def _show_pipes(
     pipes = get_pipes(debug=debug, **kw)
 
     if len(pipes) == 1:
-        return flatten_pipes_dict(pipes)[0].show(debug=debug, **kw)
+        return flatten_pipes_dict(pipes)[0].show(debug=debug, nopretty=nopretty, **kw)
 
     if not nopretty:
         import pprintpp
