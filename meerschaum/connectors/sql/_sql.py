@@ -14,8 +14,8 @@ bulk_flavors = {'postgres', 'timescaledb'}
 def read(
         self,
         query_or_table : str,
-        chunksize=-1,
-        debug=False,
+        chunksize : int = -1,
+        debug : bool = False,
         **kw
     ) -> 'pd.DataFrame':
     """
@@ -41,12 +41,12 @@ def read(
         chunk_generator = self.pd.read_sql(
             formatted_query,
             self.engine,
-            chunksize=chunksize
+            chunksize = chunksize
         )
     except Exception as e:
         import inspect, pprintpp
-        print(f"Failed to execute query:\n\n{query_or_table}\n\n")
-        print(e)
+        if debug: dprint(f"Failed to execute query:\n\n{query_or_table}\n\n")
+        if debug: dprint(e)
 
         return None
 

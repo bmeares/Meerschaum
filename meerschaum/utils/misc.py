@@ -593,3 +593,30 @@ def round_time(
             rounding = (seconds + round_to / 2) // round_to * round_to
 
     return dt + datetime.timedelta(0, rounding - seconds, - dt.microsecond)
+
+def parse_iso_df(
+        df : 'pd.DataFrame',
+        debug : bool = False
+    ) -> 'pd.DataFrame':
+    """
+    Parse a pandas DataFrame for datetime columns and cast as datetimes
+    """
+
+    ### import pandas (or pandas replacement)
+    from meerschaum.utils.misc import attempt_import
+    from meerschaum.config import get_config
+    pd = attempt_import(get_config('system', 'connectors', 'all', 'pandas'))
+
+    ### apply regex to columns to determine which are ISO datetimes
+    iso_dt_regex = r'\d{4}-\d{2}-\d{2}T\d{2}\:\d{2}\:\d{2}'
+    dt_mask = df.astype(str).apply(
+        lambda s : s.str.match(iso_dt_regex).all()
+    )
+
+    ### list of datetime column names
+    datetimes = list(df.loc[:, dt_mask])
+
+    ### apply to_datetime
+    df[datetimes] = df[datetimes].apply(pd.to_datetime)
+
+    return df

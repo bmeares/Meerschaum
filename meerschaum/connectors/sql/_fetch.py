@@ -41,6 +41,8 @@ def dateadd_str(
         if begin == 'now': begin = "UTC_TIMESTAMP()"
         elif begin_time: begin = f'"{begin}"'
         da = f"DATE_ADD({begin}, INTERVAL {number} {datepart})"
+    #  elif flavor == 'oracle':
+        #  if begin == 'now': begin
     return da
 
 def fetch(

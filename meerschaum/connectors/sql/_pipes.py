@@ -83,3 +83,42 @@ def fetch_pipes_keys(
         error(str(e))
 
     return data
+
+def create_indices(
+        self,
+        pipe : 'meerschaum.Pipe',
+        debug : bool = False
+    ) -> 'bool':
+    """
+    Create indices for a Pipe's datetime and ID columns.
+    """
+    from meerschaum.utils.debug import dprint
+    index_queries = []
+
+    ### create datetime index
+    if 'datetime' in pipe.columns and pipe.columns['datetime']:
+        if self.flavor == 'timescaledb':
+            ## create hypertable
+            dt_query = f"SELECT create_hypertable('{pipe}', '{pipe.columns['datetime']}', migrate_data => true);"
+        elif self.flavor in ('postgresql', 'mysql', 'mariadb'):
+            dt_query = f"CREATE INDEX ON {pipe} ({pipe.columns['datetime']})"
+        else: ### mssql, sqlite, etc.
+            dt_query = f"CREATE INDEX {pipe.columns['datetime']}_index ON {pipe} ({pipe.columns['datetime']})"
+            
+        index_queries.append(dt_query)
+
+    ### create id index
+    if 'id' in pipe.columns and pipe.columns['id']:
+        if self.flavor in ('timescaledb', 'postgresql', 'mysql', 'mariadb'):
+            id_query = f"CREATE INDEX ON {pipe} ({pipe.columns['id']})"
+        else: ### mssql, sqlite, etc.
+            id_query = f"CREATE INDEX {pipe.columns['id']}_index ON {pipe} ({pipe.columns['id']})"
+
+        index_queries.append(id_query)
+
+    for q in index_queries:
+        if debug: dprint(q)
+        if not self.exec(q, debug=debug):
+            return None
+    return True
+
