@@ -83,7 +83,7 @@ networks = {
 }
 
 default_docker_compose_config = {
-    'version' : '3.8',
+    'version' : '3',
     'services': {
         'meerschaum_db' : {
             'environment' : [
