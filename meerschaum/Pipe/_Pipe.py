@@ -8,9 +8,11 @@ Pipes are the primary data access objects in the Meerschaum system
 class Pipe:
     from ._fetch import fetch
     from ._register import register
-    from ._attributes import attributes, parameters
+    from ._attributes import attributes, parameters, columns
     from ._show import show
     from ._edit import edit
+    from ._sync import sync, get_sync_time, get_backtrack_data, exists
+
     def __init__(
         self,
         connector_keys : str,
@@ -86,6 +88,17 @@ class Pipe:
                 AND location_key """ + ("IS NULL" if self.location_key is None else f"= '{self.location_key}'")
             self._id = meta_connector.value(q)
         return self._id
+
+    @property
+    def sync_time(self):
+        if '_sync_time' not in self.__dict__:
+            self._sync_time = self.get_sync_time()
+
+        if self._sync_time is None:
+            del self._sync_time
+            return None
+
+        return self._sync_time
 
     def __str__(self):
         """

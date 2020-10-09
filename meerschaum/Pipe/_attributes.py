@@ -41,8 +41,12 @@ def parameters(self):
         self._parameters = self.attributes['parameters']
     return self._parameters
 
-### set to setter in class definition
 @parameters.setter
 def parameters(self, parameters):
     self._parameters = parameters
 
+@property
+def columns(self):
+    if 'columns' not in self.parameters:
+        return dict()
+    return self.parameters['columns']

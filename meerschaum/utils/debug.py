@@ -16,6 +16,7 @@ def dprint(
         package: bool = True,
         color : 'str or list' = None,
         attrs : list = [],
+        **kw
     ):
     from meerschaum.utils.formatting import CHARSET, ANSI, colored
     from meerschaum.config import config as cf
@@ -35,4 +36,4 @@ def dprint(
         else:
             color = cf['system']['debug']['ansi']['color']
         premsg = colored(premsg, *color)
-    log.warning(premsg + msg)
+    log.warning(premsg + msg, **kw)

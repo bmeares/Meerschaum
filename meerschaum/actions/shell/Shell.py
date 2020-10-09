@@ -158,6 +158,16 @@ class Shell(cmd.Cmd):
         if SHELL_HISTORY_PATH.exists():
             if readline:
                 readline.read_history_file(SHELL_HISTORY_PATH)
+        """
+        Patch builtin cmdloop with my own input (defined below)
+        """
+        old_input = cmd.__builtins__['input']
+        cmd.__builtins__['input'] = input_with_sigint(old_input)
+        #  try:
+            #  super().cmdloop(*args, **kw)
+        #  finally:
+            #  cmd.__builtins__['input'] = old_input
+
 
     def postloop(self):
         from meerschaum.config._paths import SHELL_HISTORY_PATH
@@ -166,17 +176,7 @@ class Shell(cmd.Cmd):
             readline.write_history_file(SHELL_HISTORY_PATH)
         print('\n' + self.close_message)
 
-    def cmdloop(self, *args, **kw):
-        """
-        Patch builtin cmdloop with my own input (defined below)
-        """
-        old_input = cmd.__builtins__['input']
-        cmd.__builtins__['input'] = input_with_sigint(old_input)
-        try:
-            super().cmdloop(*args, **kw)
-        finally:
-            cmd.__builtins__['input'] = old_input
-
+    #  def cmdloop(self, *args, **kw):
 def input_with_sigint(_input):
     """
     Patch builtin input()
