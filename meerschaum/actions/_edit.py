@@ -44,7 +44,7 @@ def _edit_pipes(
     pipes = get_pipes(debug=debug, as_list=True, **kw)
     for p in pipes:
         try:
-            text = input(f"Press [Enter] to edit {p} or [CTRL-C] to quit: ")
+            text = input(f"Press [Enter] to edit '{p}' or [CTRL-C] to quit: ")
         except KeyboardInterrupt:
             return False, "User pressed CTRL+C"
         if text != 'pass':

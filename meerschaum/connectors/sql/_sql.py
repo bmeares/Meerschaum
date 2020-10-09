@@ -45,10 +45,10 @@ def read(
         )
     except Exception as e:
         import inspect, pprintpp
-        print(f"Failed to execute query:\n\n{query}\n\n")
+        print(f"Failed to execute query:\n\n{query_or_table}\n\n")
         print(e)
-        print(f"Stack:")
-        pprintpp.pprint(inspect.stack())
+        #  print(f"Stack:")
+        #  pprintpp.pprint(inspect.stack())
 
         return False
 
@@ -113,7 +113,7 @@ def to_sql(
         if_exists : str = 'replace',
         method : str = "",
         chunksize : int = -1,
-        debug=False,
+        debug : bool = False,
         **kw
     ):
     """
@@ -153,7 +153,7 @@ def to_sql(
     if debug:
         import time
         start = time.time()
-        dprint(f"Inserting {len(df)} rows with chunksize: {chunksize}...", end="")
+        print(f"Inserting {len(df)} rows with chunksize: {chunksize}...", end="")
 
     try:
         df.to_sql(
@@ -175,7 +175,7 @@ def to_sql(
 
     if debug:
         end = time.time()
-        dprint(f" done.")
+        print(f" done.")
         dprint(f"It took {round(end - start, 2)} seconds.")
 
     return True
