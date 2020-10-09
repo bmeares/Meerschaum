@@ -82,7 +82,7 @@ def _show_pipes(
     from meerschaum.utils.misc import flatten_pipes_dict
     pipes = get_pipes(debug=debug, **kw)
 
-    if len(pipes) == 1:
+    if len(flatten_pipes_dict(pipes)) == 1:
         return flatten_pipes_dict(pipes)[0].show(debug=debug, nopretty=nopretty, **kw)
 
     if not nopretty:
