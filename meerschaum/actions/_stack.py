@@ -27,17 +27,27 @@ def stack(
     from meerschaum.utils.misc import yes_no, reload_package
     import meerschaum.config
     from meerschaum.utils.debug import dprint
+    from meerschaum.utils.warnings import warn
     import os
+
+    bootstrap_question = (
+        "Bootstrap configuration?\n\n"
+        "The following files will be overwritten:"
+    )
+    for f in get_necessary_files():
+        bootstrap_question += "\n  - " + str(f)
+    bootstrap_question += "\n"
 
     bootstrap = False
     for fp in get_necessary_files():
         if not os.path.isfile(fp):
             if not yes and not force:
-                if not yes_no(
-                    f"Missing file {fp}.\n\nBootstrap stack configuration?\n\n"
-                    f"NOTE: The following files will be overwritten: {list(get_necessary_files())}"
-                ):
+                if yes_no(bootstrap_question):
                     bootstrap = True
+                else:
+                    warn_message = "Cannot start stack without bootstrapping"
+                    warn(warn_message)
+                    return False, warn_message
             else: ### yes or force is True
                 bootstrap = True
             break

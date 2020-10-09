@@ -192,11 +192,12 @@ def yes_no(
     Returns bool (answer)
     """
     ending = f" {wrappers[0]}" + "/".join(
-                [ o.upper() if o == default else o.lower() for o in options ]
+                [ o.upper() if o.lower() == default.lower() else o.lower() for o in options ]
                 ) + f"{wrappers[1]} "
     print(question, end=ending, flush=True)
-    answer = str(input()).lower()
-    return answer == options[0].lower()
+    answer = input()
+    if answer == "": answer = default
+    return answer.lower() == options[0].lower()
 
 def reload_package(
         package : 'package',
