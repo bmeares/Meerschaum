@@ -26,20 +26,14 @@ def sync(
         return None
     if debug: dprint("Fetched data:\n" + str(fetch_df))
 
-    if not self.exists(debug = debug):
+    if (not self.exists(debug=debug)):
         ### create empty table
         sql_connector.to_sql(
-            pd.DataFrame(
-                columns = list(fetch_df.columns)
-            ),
+            fetch_df.head(0),
             if_exists = 'append',
             name = str(self)
         )
-        #  if sql_connector.flavor == 'timescaledb':
-            ### create hypertable
-            #  query = f"SELECT create_hypertable('{self}', '{self.columns['datetime']}');"
-            #  result = sql_connector.exec(query)
-            #  print(type(result))
+        sql_connector.create_indices(self, debug=debug)
 
     if fetch_df is not None:
         pass
