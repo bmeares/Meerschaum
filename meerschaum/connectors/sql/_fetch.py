@@ -8,18 +8,25 @@ Implement the Connector fetch() method
 
 import datetime
 from dateutil import parser
+from meerschaum.utils.debug import dprint
 
 def dateadd_str(
         flavor : str = 'postgres',
         datepart : str = 'day',
         number : float = -1,
-        begin : str = 'now'
-    ):
+        begin : 'str or datetime.datetime' = 'now'
+    ) -> str:
+    """
+    Generate a DATEADD clause depending on flavor
+    """
+    if not begin: return None
     begin_time = None
-    try:
-        begin_time = parser.parse(begin)
-    except Exception:
-        pass
+    if not isinstance(begin, datetime.datetime):
+        try:
+            begin_time = parser.parse(begin)
+        except Exception:
+            begin_time = None
+    else: begin_time = begin
 
     da = ""
     if flavor in ('postgres', 'timescaledb'):
@@ -38,11 +45,48 @@ def dateadd_str(
 
 def fetch(
         self,
-        instructions : dict,
+        pipe : 'meerschaum.Pipe',
         begin : str = 'now',
         debug : bool = False
     ) -> 'pd.DataFrame':
+    """
+    Execute the SQL definition and if datetime and backtrack_minutes are provided, append a
+        `WHERE dt > begin` subquery.
+
+    begin : str : 'now'
+        Most recent datatime to search for data. If backtrack_minutes is provided, subtract backtrack_minutes
+
+
+    pipe : Pipe
+        parameters:fetch : dict
+            Parameters necessary to execute a query. See pipe.parameters['fetch']
+
+            Keys:
+                definition : str
+                    base SQL query to execute
+
+                datetime : str
+                    name of the datetime column for the remote table
+
+                backtrack_minutes : int or float
+                    how many minutes before `begin` to search for data
+                    
+    Returns pandas dataframe of the selected data.
+    """
     from meerschaum.utils.debug import dprint
+    from meerschaum.utils.warnings import warn
+
+    if 'columns' not in pipe.parameters or 'fetch' not in pipe.parameters:
+        warn(f"Parameters for '{pipe}' must include 'columns' and 'fetch'")
+        return None
+
+    datetime = None
+    if 'datetime' not in pipe.columns:
+        warn(f"Missing datetime column for '{pipe}'. Will select all data instead")
+    else: datetime = pipe.columns['datetime']
+
+    instructions = pipe.parameters['fetch']
+
     try:
         definition = instructions['definition']
     except KeyError:
@@ -51,15 +95,13 @@ def fetch(
     if 'order by' in definition.lower():
         raise Exception("Cannot fetch with an ORDER clause in the definition")
 
-    datetime, da = None, None
-    if 'datetime' in instructions:
-        datetime = instructions['datetime']
+    da = None
+    if datetime:
         if 'backtrack_minutes' in instructions:
             btm = instructions['backtrack_minutes']
-            ### TODO change begin from max to newest pipe data
             da = dateadd_str(flavor=self.flavor, datepart='minute', number=(-1 * btm), begin=begin)
 
-    meta_def = f"""WITH definition AS ({definition}) SELECT * FROM definition"""
+    meta_def = f"WITH definition AS ({definition}) SELECT * FROM definition"
     if datetime and da:
         meta_def += f"\nWHERE {datetime} > {da}"
 

@@ -42,7 +42,7 @@ def fetch_pipes_keys(
                 where += (f"{leading_and}CAST({key} AS TEXT) = '" + json.dumps(value) + "'")
                 continue
 
-            where += f"{leading_and}{key} " + ("IS NULL" if value is None else "= '{value}'")
+            where += f"{leading_and}{key} " + ("IS NULL" if value is None else f"= '{value}'")
         if len(where) > 1: where = "\nWHERE\n    " + where[len(leading_and):]
         return where
 
