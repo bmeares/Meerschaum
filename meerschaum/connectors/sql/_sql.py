@@ -47,10 +47,8 @@ def read(
         import inspect, pprintpp
         print(f"Failed to execute query:\n\n{query_or_table}\n\n")
         print(e)
-        #  print(f"Stack:")
-        #  pprintpp.pprint(inspect.stack())
 
-        return False
+        return None
 
     chunk_list = []
     for chunk in chunk_generator:

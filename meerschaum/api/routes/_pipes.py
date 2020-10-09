@@ -164,3 +164,12 @@ async def get_pipes_by_connector_and_metric_and_location(
  
     return pipes[connector_keys][metric_key][location_key]
 
+@fast_api.get(pipes_endpoint + '{connector_keys}/{metric_key}/{location_key}/sync_time')
+async def get_sync_time(
+        connector_keys : str,
+        metric_key : str,
+        location_key : str
+    ):
+    if location_key == '[None]': location_key = None
+    if is_pipe_registered(pipe, pipes):
+        return pipe.sync_time

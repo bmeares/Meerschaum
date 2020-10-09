@@ -11,7 +11,7 @@ class Pipe:
     from ._attributes import attributes, parameters, columns
     from ._show import show
     from ._edit import edit
-    from ._sync import sync, get_sync_time
+    from ._sync import sync, get_sync_time, get_backtrack_data, exists
 
     def __init__(
         self,

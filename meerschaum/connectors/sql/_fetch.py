@@ -8,22 +8,27 @@ Implement the Connector fetch() method
 
 import datetime
 from dateutil import parser
+from meerschaum.utils.debug import dprint
 
 def dateadd_str(
         flavor : str = 'postgres',
         datepart : str = 'day',
         number : float = -1,
-        begin : str = 'now'
+        begin : 'str or datetime.datetime' = 'now'
     ) -> str:
+    """
+    Generate a DATEADD clause depending on flavor
+    """
     if not begin: return None
     begin_time = None
-    try:
-        begin_time = parser.parse(begin)
-    except Exception:
-        begin_time = None
+    if not isinstance(begin, datetime.datetime):
+        try:
+            begin_time = parser.parse(begin)
+        except Exception:
+            begin_time = None
+    else: begin_time = begin
 
     da = ""
-    begin = f"'{begin}'"
     if flavor in ('postgres', 'timescaledb'):
         if begin == 'now': begin = "CAST(NOW() AT TIME ZONE 'utc' AS TIMESTAMP)"
         elif begin_time: begin = f"CAST('{begin}' AS TIMESTAMP)"
@@ -96,7 +101,7 @@ def fetch(
             btm = instructions['backtrack_minutes']
             da = dateadd_str(flavor=self.flavor, datepart='minute', number=(-1 * btm), begin=begin)
 
-    meta_def = f"""WITH definition AS ({definition}) SELECT * FROM definition"""
+    meta_def = f"WITH definition AS ({definition}) SELECT * FROM definition"
     if datetime and da:
         meta_def += f"\nWHERE {datetime} > {da}"
 
