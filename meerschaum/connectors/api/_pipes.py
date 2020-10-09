@@ -70,8 +70,8 @@ def edit_pipe(
         dprint(f"patch: {patch}")
     response = self.patch(
         '/mrsm/pipes',
-        json=pipe.meta.dict(),
-        params={'patch' : patch}
+        json = pipe.meta.dict(),
+        params = {'patch' : patch}
     )
     return response.__bool__(), response.json()
 

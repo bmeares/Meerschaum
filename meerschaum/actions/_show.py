@@ -43,18 +43,26 @@ def _show_actions(**kw) -> tuple:
     return True, "Success"
 
 def _show_config(
+        action : list = [''],
         debug : bool = False,
         **kw
     ) -> tuple:
     """
-    Show the configuration dictionary
+    Show the configuration dictionary.
+    Sub-actions defined in the action list are index in the config dictionary.
+
+    E.g. `show config pipes` -> cf['pipes']
     """
     from pprintpp import pprint
-    from meerschaum.config import config
+    from meerschaum.config import get_config
     from meerschaum.config._paths import CONFIG_PATH
     from meerschaum.utils.debug import dprint
     if debug: dprint(f"Configuration loaded from {CONFIG_PATH}")
-    pprint(config)
+
+    keys = list(action)
+    if keys == ['']: keys = []
+
+    pprint(get_config(*keys))
     return (True, "Success")
 
 def _show_modules(**kw) -> tuple:
