@@ -56,8 +56,10 @@ class Connector:
             self.__dict__.update(conn_configs[self.type][self.label])
 
         ### load system config into self.system_config
+        ### (deep copy so future Connectors don't inherit changes)
         if self.type in connector_config:
-            self.sys_config = connector_config[self.type]
+            from copy import deepcopy
+            self.sys_config = deepcopy(connector_config[self.type])
 
         ### add additional arguments or override configuration
         self.__dict__.update(kw)
@@ -78,7 +80,7 @@ class Connector:
             required_attributes : set = {
                 'label'
             },
-            debug=False
+            debug : bool = False
         ):
         """
         Ensure that the required attributes have been met.
