@@ -58,7 +58,8 @@ def fetch_pipes_keys(
     }
 
     ### make deep copy because something weird is happening with pointers
-    parameters = dict(params)
+    from copy import deepcopy
+    parameters = deepcopy(params)
     for col, vals in cols.items():
         ### allow for IS NULL to be declared as a single-item list ([None])
         if vals == [None]: vals = None
