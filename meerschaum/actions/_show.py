@@ -104,6 +104,7 @@ def _show_version(**kw) -> tuple:
     return (True, "Success")
 
 def _show_connectors(
+        action : list = [''],
         debug : bool = False,
         **kw
     ) -> tuple:
@@ -115,6 +116,12 @@ def _show_connectors(
     pprint(config['meerschaum']['connectors'])
     print(make_header("\nActive connectors:"))
     pprint(connectors)
+
+    from meerschaum.utils.misc import parse_connector_keys
+    if action != []:
+        if (conn := parse_connector_keys(action[0], debug=debug)):
+            pprint(conn.__dict__)
+
     return True, "Success"
 
 def _show_arguments(

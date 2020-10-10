@@ -41,6 +41,11 @@ def dateadd_str(
         if begin == 'now': begin = "UTC_TIMESTAMP()"
         elif begin_time: begin = f'"{begin}"'
         da = f"DATE_ADD({begin}, INTERVAL {number} {datepart})"
+    elif flavor == 'sqlite':
+        da = f"datetime('{begin}', '{number} {datepart}')"
+    ### TODO figure out oracle's TO_DATE syntax
+    #  elif flavor == 'oracle':
+        #  if begin == 'now': begin
     return da
 
 def fetch(
@@ -105,6 +110,12 @@ def fetch(
     if datetime and da:
         meta_def += f"\nWHERE {datetime} > {da}"
 
-    if debug: print(meta_def)
+    if debug: dprint(meta_def)
 
-    return self.read(meta_def)
+    df = self.read(meta_def)
+    ### if sqlite, parse for datetimes
+    if self.flavor == 'sqlite':
+        from meerschaum.utils.misc import parse_df_datetimes
+        return parse_df_datetimes(df, debug=debug)
+    return df
+

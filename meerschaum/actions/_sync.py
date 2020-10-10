@@ -35,6 +35,10 @@ def _sync_pipes(
         debug=debug,
         **kw
     )
+    if debug:
+        from meerschaum import get_connector
+        import pprintpp
+        #  pprintpp.pprint(get_connector().__dict__)
     for p in pipes:
         p.sync(debug=debug)
 
