@@ -7,6 +7,7 @@ Interface with SQL servers using sqlalchemy
 """
 
 from meerschaum.connectors._Connector import Connector
+from meerschaum.utils.warnings import error
 
 class SQLConnector(Connector):
     """
@@ -16,11 +17,11 @@ class SQLConnector(Connector):
     from ._sql import read, value, exec, to_sql
     from ._fetch import fetch
     from ._cli import cli
-    from ._pipes import fetch_pipes_keys
+    from ._pipes import fetch_pipes_keys, create_indices
     
     def __init__(
             self,
-            label : str ='main',
+            label : str = 'main',
             flavor : str = None,
             debug : bool = False,
             **kw
@@ -45,7 +46,7 @@ class SQLConnector(Connector):
 
         ### verify the flavor's requirements are met
         if self.flavor not in self.flavor_configs:
-            raise Exception(f"Flavor '{self.flavor}' is not supported by Meerschaum SQLConnector")
+            error(f"Flavor '{self.flavor}' is not supported by Meerschaum SQLConnector")
         self.verify_attributes(self.flavor_configs[self.flavor]['requirements'], debug=debug)
 
         ### build the sqlalchemy engine and set DATABASE_URL

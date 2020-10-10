@@ -108,7 +108,7 @@ def get_pipes(
         debug = debug
     )
    
-    ### popuate the `pipes` dictionary with Pipes based on the keys
+    ### populate the `pipes` dictionary with Pipes based on the keys
     ### obtained from the chosen `method`.
     from meerschaum import Pipe
     pipes = dict()

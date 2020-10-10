@@ -466,16 +466,18 @@ def run_python_package(
     command = [sys.executable, '-m', package_name] + args
     return call(command)
 
-def parse_connector_keys(keys : str) -> 'meerschaum.connectors.Connector':
+def parse_connector_keys(keys : str, **kw) -> 'meerschaum.connectors.Connector':
     """
     Parse connector keys and return Connector object
     """
     from meerschaum.connectors import get_connector
     try:
         vals = keys.split(':')
-        conn = get_connector(vals[0], vals[1])
+        conn = get_connector(type=vals[0], label=vals[1], **kw)
     except Exception as e:
-        return False
+        from meerschaum.utils.warnings import warn
+        warn(str(e))
+        return None
     return conn
 
 def is_pipe_registered(
@@ -593,3 +595,32 @@ def round_time(
             rounding = (seconds + round_to / 2) // round_to * round_to
 
     return dt + datetime.timedelta(0, rounding - seconds, - dt.microsecond)
+
+def parse_df_datetimes(
+        df : 'pd.DataFrame',
+        debug : bool = False
+    ) -> 'pd.DataFrame':
+    """
+    Parse a pandas DataFrame for datetime columns and cast as datetimes
+    """
+
+    ### import pandas (or pandas replacement)
+    from meerschaum.utils.misc import attempt_import
+    from meerschaum.config import get_config
+    from meerschaum.utils.debug import dprint
+    pd = attempt_import(get_config('system', 'connectors', 'all', 'pandas'))
+
+    ### apply regex to columns to determine which are ISO datetimes
+    iso_dt_regex = r'\d{4}-\d{2}-\d{2}.\d{2}\:\d{2}\:\d{2}'
+    dt_mask = df.astype(str).apply(
+        lambda s : s.str.match(iso_dt_regex).all()
+    )
+
+    ### list of datetime column names
+    datetimes = list(df.loc[:, dt_mask])
+    if debug: dprint(datetimes)
+
+    ### apply to_datetime
+    df[datetimes] = df[datetimes].apply(pd.to_datetime)
+
+    return df

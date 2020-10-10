@@ -7,15 +7,14 @@ This module contains SQLConnector functions for executing SQL queries.
 
 from meerschaum.utils.debug import dprint
 
-
 ### database flavors that can use bulk insert
 bulk_flavors = {'postgres', 'timescaledb'}
 
 def read(
         self,
         query_or_table : str,
-        chunksize=-1,
-        debug=False,
+        chunksize : int = -1,
+        debug : bool = False,
         **kw
     ) -> 'pd.DataFrame':
     """
@@ -41,12 +40,12 @@ def read(
         chunk_generator = self.pd.read_sql(
             formatted_query,
             self.engine,
-            chunksize=chunksize
+            chunksize = chunksize
         )
     except Exception as e:
         import inspect, pprintpp
-        print(f"Failed to execute query:\n\n{query_or_table}\n\n")
-        print(e)
+        if debug: dprint(f"Failed to execute query:\n\n{query_or_table}\n\n")
+        if debug: dprint(e)
 
         return None
 
@@ -71,7 +70,11 @@ def read(
 
     return df
 
-def value(self, query, **kw):
+def value(
+        self,
+        query : str,
+        **kw
+    ):
     """
     Return a single value from a SQL query
     (index a DataFrame a [0, 0])
@@ -81,7 +84,11 @@ def value(self, query, **kw):
     except:
         return None
 
-def exec(self, query, debug=False) -> bool:
+def exec(
+        self,
+        query : str,
+        debug : bool = False
+    ) -> bool:
     """
     Execute SQL code and return success status. e.g. calling stored procedures
     """
@@ -90,16 +97,18 @@ def exec(self, query, debug=False) -> bool:
     try:
         with self.engine.connect() as connection:
             result = connection.execute(
-                sqlalchemy.text(query).execution_options(autocommit=True)
+                sqlalchemy.text(query).execution_options(
+                    autocommit = True
+                )
             )
     except Exception as e:
-        import inspect, pprintpp
+        #  import inspect, pprintpp
 
-        print(f"Failed to execute query:\n\n{query}\n\n")
-        print(e)
-        print(f"Stack:")
-        pprintpp.pprint(inspect.stack())
-        result = False
+        #  print(f"Failed to execute query:\n\n{query}\n\n")
+        if debug: dprint(e)
+        #  print(f"Stack:")
+        #  pprintpp.pprint(inspect.stack())
+        result = None
 
     return result
 
@@ -143,11 +152,6 @@ def to_sql(
             method = self.sys_config['method']
     chunksize = chunksize if chunksize != -1 else self.sys_config['chunksize']
 
-    #  df_len = len(df)
-    #  if df_len > self.sys_config['bulk_insert_threshold'] and self.type in bulk_types:
-        #  print(f'DataFrame is {df_len} rows tall. Resorting to bulk insert...')
-        #  return self.bulk_insert(df, name=name, index=index, if_exists=if_exists, **kw)
-
     if debug:
         import time
         start = time.time()
@@ -155,21 +159,17 @@ def to_sql(
 
     try:
         df.to_sql(
-            name=name,
-            con=self.engine,
-            index=index,
-            if_exists=if_exists,
-            method=method,
-            chunksize=chunksize,
+            name = name,
+            con = self.engine,
+            index = index,
+            if_exists = if_exists,
+            method = method,
+            chunksize = chunksize,
             **kw
         )
     except Exception as e:
-        import inspect, pprintpp
-        print(f"Failed to execute query:\n\n{query}\n\n")
-        print(e)
-        print(f"Stack:")
-        pprintpp.pprint(inspect.stack())
-        return False
+        if debug: dprint(e)
+        return None
 
     if debug:
         end = time.time()
