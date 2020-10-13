@@ -581,7 +581,7 @@ def round_time(
     round_to = date_delta.total_seconds()
     if dt is None:
         dt = datetime.now()
-    seconds = (dt - dt.min).seconds
+    seconds = (dt.replace(tzinfo=None) - dt.min.replace(tzinfo=None)).seconds
 
     if seconds % round_to == 0 and dt.microsecond == 0:
         rounding = (seconds + round_to / 2) // round_to * round_to
@@ -610,6 +610,10 @@ def parse_df_datetimes(
     from meerschaum.utils.debug import dprint
     pd = attempt_import(get_config('system', 'connectors', 'all', 'pandas'))
 
+    ### if df is a dict, build DataFrame
+    if not isinstance(df, pd.DataFrame):
+        df = pd.DataFrame(df)
+
     ### apply regex to columns to determine which are ISO datetimes
     iso_dt_regex = r'\d{4}-\d{2}-\d{2}.\d{2}\:\d{2}\:\d{2}'
     dt_mask = df.astype(str).apply(
@@ -622,5 +626,9 @@ def parse_df_datetimes(
 
     ### apply to_datetime
     df[datetimes] = df[datetimes].apply(pd.to_datetime)
+
+    ### strip timezone information
+    for dt in datetimes:
+        df[dt] = df[dt].dt.tz_localize(None)
 
     return df

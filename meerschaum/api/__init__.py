@@ -2,7 +2,7 @@
 # -*- coding: utf-8 -*-
 # vim:fenc=utf-8
 
-__version__ = "0.0.7"
+__version__ = "0.0.8"
 from meerschaum.config import system_config
 from meerschaum.connectors import get_connector
 from meerschaum.utils._get_pipes import get_pipes as get_pipes_sql

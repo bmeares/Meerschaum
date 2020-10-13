@@ -18,6 +18,7 @@ async def register_pipe(pipe : MetaPipe):
     """
     Register a new Pipe
     """
+    if pipe.location_key == '[None]': pipe.location_key = None
     global pipes
     pipes = get_pipes_sql(debug=True)
     if is_pipe_registered(pipe, pipes):
@@ -164,12 +165,39 @@ async def get_pipes_by_connector_and_metric_and_location(
  
     return pipes[connector_keys][metric_key][location_key]
 
-@fast_api.get(pipes_endpoint + '{connector_keys}/{metric_key}/{location_key}/sync_time')
+@fast_api.get(pipes_endpoint + '/{connector_keys}/{metric_key}/{location_key}/sync_time')
 async def get_sync_time(
         connector_keys : str,
         metric_key : str,
         location_key : str
-    ):
+    ) -> 'datetime.datetime':
+    """
+    Get a Pipe's latest datetime value.
+    """
     if location_key == '[None]': location_key = None
     if is_pipe_registered(pipe, pipes):
         return pipe.sync_time
+
+@fast_api.post(pipes_endpoint + '/{connector_keys}/{metric_key}/{location_key}/data')
+async def sync_pipe(
+        connector_keys : str,
+        metric_key : str,
+        location_key : str,
+        data : dict = {},
+    ) -> bool:
+    """
+    Add data to an existing Pipe.
+    """
+    from meerschaum.utils.misc import parse_df_datetimes
+    from meerschaum import Pipe
+    import json
+    df = parse_df_datetimes(data)
+    p = Pipe(connector_keys, metric_key, location_key)
+    if not is_pipe_registered(p, pipes):
+        raise fastapi.HTTPException(
+            status_code = 409,
+            detail = "Pipe must be registered with the datetime column specified"
+        )
+
+    return p.sync(df, debug=True)
+

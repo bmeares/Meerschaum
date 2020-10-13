@@ -24,6 +24,7 @@ def sync(
     from meerschaum import get_connector
     from meerschaum.config import get_config
     from meerschaum.utils.misc import attempt_import, round_time
+    import datetime as datetime_pkg
     pd = attempt_import(get_config('system', 'connectors', 'all', 'pandas'))
 
     if df is None:
@@ -32,9 +33,9 @@ def sync(
     try:
         datetime = self.columns['datetime']
     except:
-        error(
-            f"Columns not defined for {self}." +
-            f"Please set at a minimum pipe.columns = {'datetime' : 'column_name'}" +
+        warn(
+            f"Columns not defined for {self}.\n" +
+            f"Please set at a minimum pipe.columns = " + "{'datetime' : 'column_name'} " +
             f"or register Pipe '{self}'"
         )
 
@@ -68,7 +69,7 @@ def sync(
             self.columns['datetime']
         ].min().to_pydatetime(),
         to = 'down'
-    )
+    ) - datetime_pkg.timedelta(minutes=1)
     if debug: dprint(f"Looking at data newer than {begin}")
 
     ### backtrack_df is existing Pipe data that overlaps with the fetched df
