@@ -40,6 +40,7 @@ class Pipe:
         source : str : 'sql:main'
             connector_keys for the source connector
         """
+        if location_key == '[None]': location_key = None
         self.connector_keys = connector_keys
         self.metric_key = metric_key
         self.location_key = location_key
@@ -77,7 +78,7 @@ class Pipe:
 
     @property
     def id(self):
-        if not ('_id' in self.__dict__ and self.id):
+        if not ('_id' in self.__dict__ and self._id):
             from meerschaum import get_connector
             meta_connector = get_connector('sql', 'meta')
             q = f"""
