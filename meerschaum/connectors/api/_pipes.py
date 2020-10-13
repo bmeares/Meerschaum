@@ -134,6 +134,9 @@ def sync_pipe(
     location_key = pipe.location_key
     if location_key is None: location_key = '[None]'
     r_url = f'/mrsm/pipes/{pipe.connector_keys}/{pipe.metric_key}/{location_key}/data'
+    if debug:
+        from meerschaum.utils.debug import dprint
+        dprint(r_url)
     try:
         response = self.post(
             r_url,
@@ -144,4 +147,4 @@ def sync_pipe(
         warn(e)
         return None
 
-    return response.__bool__(), response.json()
+    return tuple(response.json())
