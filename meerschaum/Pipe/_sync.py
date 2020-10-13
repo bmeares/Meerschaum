@@ -14,7 +14,7 @@ def sync(
         df : 'pd.DataFrame' = None,
         debug : bool = False,
         **kw
-    ) -> bool:
+    ) -> tuple:
     """
     Fetch new data from the source and update the Pipe's table with new data.
 
@@ -29,6 +29,9 @@ def sync(
 
     if df is None:
         df = self.fetch(debug = debug)
+    else:
+        if self.source_connector.type == 'api':
+            return self.source_connector.sync_pipe(self, df, debug=debug)
 
     try:
         datetime = self.columns['datetime']
@@ -90,7 +93,7 @@ def sync(
         if_exists = 'append',
         debug = debug
     )
-    return True
+    return True, "Success"
 
 def get_backtrack_data(
         self,
