@@ -123,3 +123,24 @@ def create_indices(
             return None
     return True
 
+def delete_pipe(
+        self,
+        pipe : 'meerschaum.Pipe',
+        debug : bool = False,
+    ) -> tuple:
+    """
+    Delete a Pipe's entry and drop its table
+    """
+    if not pipe.id:
+        return False, "Pipe is not registered"
+    q = f"DELETE FROM pipes WHERE pipe_id = {pipe.id}"
+    if not self.exec(q):
+        return False, f"Failed to delete '{pipe}'"
+    
+    q = f"DROP TABLE {pipe}"
+    if self.exec(q) is None:
+        q = f"DROP VIEW {pipe}"
+    if self.exec(q) is None:
+        return False, "Failed to drop '{pipe}'"
+
+    return True, "Success"

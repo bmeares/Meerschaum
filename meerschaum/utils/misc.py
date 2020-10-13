@@ -632,3 +632,51 @@ def parse_df_datetimes(
         df[dt] = df[dt].dt.tz_localize(None)
 
     return df
+
+async def retry_connect(
+        connector : 'meerschaum.connectors.SQLConnector or databases.Database' = None,
+        max_retries : int = 40,
+        retry_wait : int = 3,
+        debug : bool = False,
+    ):
+    """
+    Keep trying to connect to the database.
+    Use wait_for_connection for non-async
+    """
+    from meerschaum.utils.warnings import warn
+    from meerschaum.utils.debug import dprint
+    from meerschaum import get_connector
+    from meerschaum.connectors.sql import SQLConnector
+    import time
+
+    ### get default connector if None is provided
+    if connector is None:
+        connector = get_connector()
+
+    database = connector
+    if isinstance(connector, SQLConnector):
+        database = connector.db
+
+
+    retries = 0
+    while retries < max_retries:
+        if debug:
+            dprint(f"Trying to connect to the database")
+            dprint(f"Attempt ({retries + 1} / {max_retries})")
+        try:
+            await database.connect()
+
+        except Exception as e:
+            dprint(f"Connection failed. Retrying in {retry_wait} seconds...")
+            time.sleep(retry_wait)
+            retries += 1
+        else:
+            if debug: dprint("Connection established!")
+            break
+
+def wait_for_connection(**kw):
+    """
+    Block until a connection to the SQL database is made.
+    """
+    import asyncio
+    asyncio.run(retry_connect(**kw))
