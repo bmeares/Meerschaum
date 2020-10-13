@@ -77,7 +77,7 @@ class Pipe:
 
     @property
     def id(self):
-        if '_id' not in self.__dict__:
+        if not ('_id' in self.__dict__ and self.id):
             from meerschaum import get_connector
             meta_connector = get_connector('sql', 'meta')
             q = f"""

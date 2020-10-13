@@ -47,6 +47,17 @@ def parameters(self, parameters):
 
 @property
 def columns(self):
+    if not self.parameters:
+        if '_columns' in self.__dict__:
+            return self._columns
+        return None
     if 'columns' not in self.parameters:
-        return dict()
+        return None
     return self.parameters['columns']
+
+@columns.setter
+def columns(self, columns):
+    if not self.parameters:
+        self._columns = columns
+    else:
+        self._parameters['columns'] = columns

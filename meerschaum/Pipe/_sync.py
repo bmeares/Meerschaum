@@ -7,10 +7,11 @@ Synchronize a Pipe's data with its source via its connector
 """
 
 from meerschaum.utils.debug import dprint
-from meerschaum.utils.warnings import warn
+from meerschaum.utils.warnings import warn, error
 
 def sync(
         self,
+        df : 'pd.DataFrame' = None,
         debug : bool = False,
         **kw
     ) -> bool:
@@ -25,12 +26,28 @@ def sync(
     from meerschaum.utils.misc import attempt_import, round_time
     pd = attempt_import(get_config('system', 'connectors', 'all', 'pandas'))
 
-    ### fetch_df is the dataframe returned from the remote source via the connector
-    fetch_df = self.fetch(debug=debug)
-    if fetch_df is None:
+    if df is None:
+        df = self.fetch(debug = debug)
+
+    try:
+        datetime = self.columns['datetime']
+    except:
+        error(
+            f"Columns not defined for {self}." +
+            f"Please set at a minimum pipe.columns = {'datetime' : 'column_name'}" +
+            f"or register Pipe '{self}'"
+        )
+
+    ### if Pipe is not registered
+    if not self.id:
+        self.register(debug=debug)
+
+    ### fetched df is the dataframe returned from the remote source
+    ### via the connector
+    if df is None:
         warn(f"Was not able to sync '{self}'")
         return None
-    if debug: dprint("Fetched data:\n" + str(fetch_df))
+    if debug: dprint("Fetched data:\n" + str(df))
 
     sql_connector = get_connector(type='sql', label='main', debug=debug)
 
@@ -38,7 +55,7 @@ def sync(
     if not self.exists(debug=debug):
         ### create empty table
         sql_connector.to_sql(
-            fetch_df.head(0),
+            df.head(0),
             if_exists = 'append',
             name = str(self)
         )
@@ -47,21 +64,21 @@ def sync(
 
     ### begin is the oldest data in the new dataframe
     begin = round_time(
-        fetch_df[
+        df[
             self.columns['datetime']
         ].min().to_pydatetime(),
         to = 'down'
     )
     if debug: dprint(f"Looking at data newer than {begin}")
 
-    ### backtrack_df is existing Pipe data that overlaps with the fetch_df
+    ### backtrack_df is existing Pipe data that overlaps with the fetched df
     backtrack_df = self.get_backtrack_data(begin=begin, debug=debug)
     if debug: dprint("Existing data:\n" + str(backtrack_df))
 
     ### merge the dataframes and drop duplicate data
     new_data_df = pd.concat([
         backtrack_df,
-        fetch_df
+        df
     ]).drop_duplicates(keep=False)
     if debug: dprint(f"New unseen data:\n" + str(new_data_df))
 
@@ -86,7 +103,7 @@ def get_backtrack_data(
     ### DEFAULT : 0
     try:
         backtrack_minutes = self.parameters['fetch']['backtrack_minutes']
-    except KeyError:
+    except:
         pass
 
     if begin is None: begin = self.sync_time
