@@ -77,11 +77,12 @@ def get_connector(
             refresh = True
 
     ### only create an object if refresh is True (can be manually specified, otherwise determined above)
+    import traceback
     if refresh:
         try:
             conn = types[type](label=label, debug=debug, **kw)
-        except Exception as e:
-            print('Cannot build connector:\n', e)
+        except:
+            print(traceback.print_exc())
             return False
         connectors[type][label] = conn
 

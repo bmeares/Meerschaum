@@ -16,6 +16,7 @@ def get_pipes(
         source : str = 'sql',
         as_list : bool = False,
         method : str = 'registered',
+        wait : bool = False,
         debug : bool = False,
         **kw
     )-> 'dict or list':
@@ -62,6 +63,10 @@ def get_pipes(
 
         If 'all', create Pipes from predefined metrics and locations. Required connector_keys.
             NOTE: Not implemented!
+
+    wait : bool : False
+        Wait for a connection before getting Pipes. Should only be true for cases where the
+        database might not be running (like the API).
     """
 
     from meerschaum.connectors import get_connector
@@ -94,8 +99,9 @@ def get_pipes(
     ### keys for source (not metadata)
     source_keys = source_type + ':' + source_label
 
-    ### get SQL or API connector (keys come from `connector.fetch_pipes_keys()`)
-    connector = get_connector(type=meta_type, label=meta_label)
+    ### Get SQL or API connector (keys come from `connector.fetch_pipes_keys()`).
+    ### If `wait`, wait until a connection is made
+    connector = get_connector(type=meta_type, label=meta_label, wait=wait)
 
     ### get a list of tuples of keys based on the method type
     result = methods(

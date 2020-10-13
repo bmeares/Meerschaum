@@ -148,3 +148,19 @@ def sync_pipe(
         return None
 
     return tuple(response.json())
+
+def delete_pipe(
+        self,
+        pipe : 'mrsm.Pipe' = None,
+        debug : bool = None,        
+    ) -> tuple:
+    """
+    Delete a Pipe and drop its table.
+    """
+    return self.do_action(
+        ['delete', 'pipes'],
+        connector_keys = pipe.connector_keys,
+        metric_keys = pipe.metric_key,
+        location_keys = pipe.location_key,
+        debug = debug
+    )
