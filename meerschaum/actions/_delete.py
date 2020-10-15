@@ -8,7 +8,6 @@ Functions for deleting elements
 
 def delete(
         action : list = [''],
-        debug : bool = False,
         **kw
     ):
     """
@@ -24,10 +23,23 @@ def delete(
 
 def _delete_pipes(
         debug : bool = False,
+        yes : bool = False,
+        force : bool = False,
         **kw
     ) -> tuple:
     from meerschaum import get_pipes
+    from meerschaum.utils.misc import yes_no
+    import pprintpp
     pipes = get_pipes(as_list=True, debug=debug, **kw)
+    if len(pipes) == 0:
+        return False, "No pipes to delete"
+    question = "Are you sure you want to delete these Pipes? THIS CANNOT BE UNDONE!\n"
+    for p in pipes:
+        question += f" - {p}" + "\n"
+    if not yes and not force:
+        answer = yes_no(question, default='n')
+    if not answer:
+        return False, "No pipes deleted."
     for p in pipes:
         success_tuple = p.delete(debug=debug)
         if not success_tuple[0]:
