@@ -581,7 +581,7 @@ def round_time(
     round_to = date_delta.total_seconds()
     if dt is None:
         dt = datetime.now()
-    seconds = (dt - dt.min).seconds
+    seconds = (dt.replace(tzinfo=None) - dt.min.replace(tzinfo=None)).seconds
 
     if seconds % round_to == 0 and dt.microsecond == 0:
         rounding = (seconds + round_to / 2) // round_to * round_to
@@ -610,6 +610,10 @@ def parse_df_datetimes(
     from meerschaum.utils.debug import dprint
     pd = attempt_import(get_config('system', 'connectors', 'all', 'pandas'))
 
+    ### if df is a dict, build DataFrame
+    if not isinstance(df, pd.DataFrame):
+        df = pd.DataFrame(df)
+
     ### apply regex to columns to determine which are ISO datetimes
     iso_dt_regex = r'\d{4}-\d{2}-\d{2}.\d{2}\:\d{2}\:\d{2}'
     dt_mask = df.astype(str).apply(
@@ -623,4 +627,56 @@ def parse_df_datetimes(
     ### apply to_datetime
     df[datetimes] = df[datetimes].apply(pd.to_datetime)
 
+    ### strip timezone information
+    for dt in datetimes:
+        df[dt] = df[dt].dt.tz_localize(None)
+
     return df
+
+async def retry_connect(
+        connector : 'meerschaum.connectors.SQLConnector or databases.Database' = None,
+        max_retries : int = 40,
+        retry_wait : int = 3,
+        debug : bool = False,
+    ):
+    """
+    Keep trying to connect to the database.
+    Use wait_for_connection for non-async
+    """
+    from meerschaum.utils.warnings import warn
+    from meerschaum.utils.debug import dprint
+    from meerschaum import get_connector
+    from meerschaum.connectors.sql import SQLConnector
+    import time
+
+    ### get default connector if None is provided
+    if connector is None:
+        connector = get_connector()
+
+    database = connector
+    if isinstance(connector, SQLConnector):
+        database = connector.db
+
+
+    retries = 0
+    while retries < max_retries:
+        if debug:
+            dprint(f"Trying to connect to the database")
+            dprint(f"Attempt ({retries + 1} / {max_retries})")
+        try:
+            await database.connect()
+
+        except Exception as e:
+            dprint(f"Connection failed. Retrying in {retry_wait} seconds...")
+            time.sleep(retry_wait)
+            retries += 1
+        else:
+            if debug: dprint("Connection established!")
+            break
+
+def wait_for_connection(**kw):
+    """
+    Block until a connection to the SQL database is made.
+    """
+    import asyncio
+    asyncio.run(retry_connect(**kw))

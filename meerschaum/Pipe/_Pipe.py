@@ -4,6 +4,11 @@
 """
 Pipes are the primary data access objects in the Meerschaum system
 """
+default_source_labels = {
+    'api' : 'main',
+    'sql' : 'main',
+}
+
 
 class Pipe:
     from ._fetch import fetch
@@ -12,6 +17,7 @@ class Pipe:
     from ._show import show
     from ._edit import edit
     from ._sync import sync, get_sync_time, get_backtrack_data, exists
+    from ._delete import delete
 
     def __init__(
         self,
@@ -40,6 +46,7 @@ class Pipe:
         source : str : 'sql:main'
             connector_keys for the source connector
         """
+        if location_key == '[None]': location_key = None
         self.connector_keys = connector_keys
         self.metric_key = metric_key
         self.location_key = location_key
@@ -59,11 +66,30 @@ class Pipe:
             parameters = parameters
         )
 
+        ### determine where to pull Pipe data from
+        source_keys = source.split(':')
+        source_type = source_keys[0]
+        if len(source_keys) == 2:
+            source_label = source_keys[1]
+        elif source_type in default_source_labels:
+            source_label = default_source_labels[source_type]
+        self.source_keys = source_type + ':' + source_label
+
         ### TODO aggregations?
         #  self._aggregations = dict()
 
         ### TODO implement source. This one will be tough bc of datetime parsing (need regex magic),
         ###      but the groundwork is there, just have to implement it in the API.
+
+    @property
+    def source_connector(self):
+        if '_source_connector' not in self.__dict__:
+            from meerschaum.utils.misc import parse_connector_keys
+            if (conn := parse_connector_keys(self.source_keys)):
+                    self._source_connector = conn
+            else:
+                return None
+        return self._source_connector
 
     @property
     def connector(self):
@@ -77,7 +103,7 @@ class Pipe:
 
     @property
     def id(self):
-        if '_id' not in self.__dict__:
+        if not ('_id' in self.__dict__ and self._id):
             from meerschaum import get_connector
             meta_connector = get_connector('sql', 'meta')
             q = f"""

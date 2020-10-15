@@ -134,7 +134,7 @@ default_system_config = {
             'app'          : 'meerschaum.api:fast_api',
             'port'         : default_meerschaum_config['connectors']['api']['default']['port'],
             'host'         : '0.0.0.0',
-            'workers'      : multiprocessing.cpu_count(),
+            'workers'      : int(multiprocessing.cpu_count() / 2),
         },
         'username'         : default_meerschaum_config['connectors']['api']['default']['username'],
         'password'         : default_meerschaum_config['connectors']['api']['default']['password'],

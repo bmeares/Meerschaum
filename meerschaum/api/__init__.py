@@ -2,16 +2,21 @@
 # -*- coding: utf-8 -*-
 # vim:fenc=utf-8
 
-__version__ = "0.0.7"
+__version__ = "0.0.8"
 from meerschaum.config import system_config
 from meerschaum.connectors import get_connector
-from meerschaum.utils._get_pipes import get_pipes as get_pipes_sql
 from meerschaum.utils.misc import attempt_import
+from meerschaum.utils._get_pipes import get_pipes as get_pipes_sql
 fastapi, graphene, starlette_graphql = attempt_import('fastapi', 'graphene', 'starlette.graphql', lazy=True)
 
 connector = get_connector(type="sql", label="meta")
 database = connector.db
-pipes = get_pipes_sql()
+_pipes = None
+def pipes(refresh=True):
+    global _pipes
+    if pipes is None or refresh:
+        _pipes = get_pipes_sql()
+    return _pipes
 
 ### TODO move GraphQL queries somewhere
 class Query(graphene.ObjectType):
