@@ -148,6 +148,9 @@ which is equivalent to `docker-compose down -v`.
 ## I can't open the Meerschaum shell!
 You can invoke `mrsm` directly with `python -m meerschaum`. Check your `PATH` includes packages installed by `pip`, such as `~/.local/bin`.
 
+## How do I turn off the emoji / colors / I'm running Windows?
+Open the configuration file with `mrsm edit config` and search for the key `formatting` under the `system` section. From there, you can turn off emoji (`unicode: false`) or colors (`ansi: false`).
+
 ## Connectors don't work for `<database flavor>`!
 Although Connectors *should*  work with any database flavor supported by `sqlalchemy` Engines, it is difficult to test against many database flavors. When bugs are encountered, please open an issue and describe your configuration!
 
