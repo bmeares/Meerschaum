@@ -19,7 +19,7 @@ def fetch(
     returns : pd.DataFrame of newest unseen data
     """
     ### TODO diff the existing data with new data
-    if 'fetch' in self.attributes['parameters']:
+    if self.attributes and 'fetch' in self.attributes['parameters']:
         return self.connector.fetch(
             self,
             begin = self.sync_time,

@@ -17,12 +17,13 @@ class SQLConnector(Connector):
     from ._sql import read, value, exec, to_sql
     from ._fetch import fetch
     from ._cli import cli
-    from ._pipes import fetch_pipes_keys, create_indices
+    from ._pipes import fetch_pipes_keys, create_indices, delete_pipe
     
     def __init__(
             self,
             label : str = 'main',
             flavor : str = None,
+            wait : bool = False,
             debug : bool = False,
             **kw
         ):
@@ -51,6 +52,11 @@ class SQLConnector(Connector):
 
         ### build the sqlalchemy engine and set DATABASE_URL
         self.engine, self.DATABASE_URL = self.create_engine(include_uri=True, debug=debug)
+
+        self.wait = wait
+        if self.wait:
+            from meerschaum.utils.misc import wait_for_connection
+            wait_for_connection(connector=self.db, debug=debug)
 
         ### create a sqlalchemy session for building ORM queries
         #  self.Session = sqlalchemy_orm.sessionmaker()

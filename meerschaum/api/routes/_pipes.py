@@ -18,9 +18,9 @@ async def register_pipe(pipe : MetaPipe):
     """
     Register a new Pipe
     """
-    global pipes
-    pipes = get_pipes_sql(debug=True)
-    if is_pipe_registered(pipe, pipes):
+    if pipe.location_key == '[None]': pipe.location_key = None
+    pipes(refresh=True)
+    if is_pipe_registered(pipe, pipes()):
         raise fastapi.HTTPException(status_code=409, detail="Pipe already registered")
     query = get_tables()['pipes'].insert().values(
         connector_keys = pipe.connector_keys,
@@ -28,7 +28,7 @@ async def register_pipe(pipe : MetaPipe):
         location_key = pipe.location_key,
         parameters = pipe.parameters,
     )
-    pipes = get_pipes_sql(debug=True)
+    pipes(refresh=True)
 
     last_record_id = await database.execute(query)
     return {**pipe.dict(), "pipe_id": last_record_id}
@@ -42,9 +42,8 @@ async def edit_pipe(pipe : MetaPipe, patch : bool = False):
         Otherwise overwrite the parameters (default)
     """
     from meerschaum.utils.debug import dprint
-    global pipes
-    pipes = get_pipes_sql()
-    if not is_pipe_registered(pipe, pipes):
+    pipes(refresh=True)
+    if not is_pipe_registered(pipe, pipes()):
         raise fastapi.HTTPException(status_code=404, detail="Pipe is not registered.")
 
     if not patch:
@@ -52,7 +51,7 @@ async def edit_pipe(pipe : MetaPipe, patch : bool = False):
     else:
         from meerschaum.config._patch import apply_patch_to_config
         parameters = apply_patch_to_config(
-            pipes[pipe.connector_keys][pipe.metric_key][pipe.location_key].parameters,
+            pipes()[pipe.connector_keys][pipe.metric_key][pipe.location_key].parameters,
             pipe.parameters
         )
 
@@ -65,8 +64,8 @@ async def edit_pipe(pipe : MetaPipe, patch : bool = False):
         AND location_key """ + ("IS NULL" if pipe.location_key is None else f"= '{pipe.location_key}'")
     dprint(q)
     return_code = connector.exec(q)
-    pipes = get_pipes_sql()
-    return pipes[pipe.connector_keys][pipe.metric_key][pipe.location_key]
+    pipes(refresh=True)
+    return pipes()[pipe.connector_keys][pipe.metric_key][pipe.location_key]
 
 @fast_api.get(pipes_endpoint + '/keys')
 async def fetch_pipes_keys(
@@ -104,7 +103,7 @@ async def get_pipes(
     Get all registered Pipes with metadata, excluding parameters.
     """
     if connector_keys == "" and metric_keys == "" and location_keys == "":
-        return pipes
+        return pipes()
 
     import json
 
@@ -123,9 +122,9 @@ async def get_pipes_by_connector(
     """
     Get all registered Pipes by connector_keys with metadata, excluding parameters.
     """
-    if connector_keys not in pipes:
+    if connector_keys not in pipes():
         raise fastapi.HTTPException(status_code=404, detail=f"connector_keys '{connector_keys}' not found.")
-    return pipes[connector_keys]
+    return pipes()[connector_keys]
 
 @fast_api.get(pipes_endpoint + '/{connector_keys}/{metric_key}')
 async def get_pipes_by_connector_and_metric(
@@ -139,12 +138,12 @@ async def get_pipes_by_connector_and_metric(
     parent : bool (default False)
         Return the parent Pipe (location_key is None)
     """
-    if connector_keys not in pipes:
+    if connector_keys not in pipes():
         raise fastapi.HTTPException(status_code=404, detail=f"connector_keys '{connector_keys}' not found.")
-    if metric_key not in pipes[connector_keys]:
+    if metric_key not in pipes()[connector_keys]:
         raise fastapi.HTTPException(status_code=404, detail=f"metric_key '{metric_key}' not found.")
-    if parent: return pipes[connector_keys][metric_key][None]
-    return pipes[connector_keys][metric_key]
+    if parent: return pipes()[connector_keys][metric_key][None]
+    return pipes()[connector_keys][metric_key]
 
 @fast_api.get(pipes_endpoint + '/{connector_keys}/{metric_key}/{location_key}')
 async def get_pipes_by_connector_and_metric_and_location(
@@ -155,21 +154,49 @@ async def get_pipes_by_connector_and_metric_and_location(
     """
     Get a specific Pipe with metadata, excluding parameters.
     """
-    if connector_keys not in pipes:
+    if connector_keys not in pipes():
         raise fastapi.HTTPException(status_code=404, detail=f"connector_keys '{connector_keys}' not found.")
-    if metric_key not in pipes[connector_keys]:
+    if metric_key not in pipes()[connector_keys]:
         raise fastapi.HTTPException(status_code=404, detail=f"metric_key '{metric_key}' not found.")
-    if location_key not in pipes[connector_keys][metric_key]:
+    if location_key not in pipes()[connector_keys][metric_key]:
         raise fastapi.HTTPException(status_code=404, detail=f"location_key '{location_key}' not found.")
  
-    return pipes[connector_keys][metric_key][location_key]
+    return pipes()[connector_keys][metric_key][location_key]
 
-@fast_api.get(pipes_endpoint + '{connector_keys}/{metric_key}/{location_key}/sync_time')
+@fast_api.get(pipes_endpoint + '/{connector_keys}/{metric_key}/{location_key}/sync_time')
 async def get_sync_time(
         connector_keys : str,
         metric_key : str,
         location_key : str
-    ):
+    ) -> 'datetime.datetime':
+    """
+    Get a Pipe's latest datetime value.
+    """
     if location_key == '[None]': location_key = None
-    if is_pipe_registered(pipe, pipes):
+    if is_pipe_registered(pipe, pipes()):
         return pipe.sync_time
+
+@fast_api.post(pipes_endpoint + '/{connector_keys}/{metric_key}/{location_key}/data')
+async def sync_pipe(
+        connector_keys : str,
+        metric_key : str,
+        location_key : str,
+        data : dict = {},
+    ) -> bool:
+    """
+    Add data to an existing Pipe.
+    """
+    from meerschaum.utils.misc import parse_df_datetimes
+    from meerschaum import Pipe
+    import json
+    df = parse_df_datetimes(data)
+    p = Pipe(connector_keys, metric_key, location_key)
+    if not is_pipe_registered(p, pipes()):
+        raise fastapi.HTTPException(
+            status_code = 409,
+            detail = "Pipe must be registered with the datetime column specified"
+        )
+
+    return p.sync(df, debug=True)
+
+#  @fast_api.post(pipes_endpoint + '/{connector_keys}/{metric_key}/{location_key}/delete')

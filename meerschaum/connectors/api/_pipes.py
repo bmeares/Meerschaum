@@ -119,3 +119,48 @@ def fetch_pipes_keys(
         result.append( (t['connector_keys'], t['metric_key'], t['location_key']) )
     return result
 
+def sync_pipe(
+        self,
+        pipe : 'mrsm.Pipe' = None,
+        df : 'pd.DataFrame' = None,
+        debug : bool = False
+    ) -> tuple:
+    """
+    Append a pandas DataFrame to a Pipe.
+    If Pipe does not exist, it is registered with supplied metadata
+        NOTE: columns['datetime'] must be set for new Pipes.
+    """
+    import json
+    location_key = pipe.location_key
+    if location_key is None: location_key = '[None]'
+    r_url = f'/mrsm/pipes/{pipe.connector_keys}/{pipe.metric_key}/{location_key}/data'
+    if debug:
+        from meerschaum.utils.debug import dprint
+        dprint(r_url)
+    try:
+        response = self.post(
+            r_url,
+            data = df.to_json(date_format='iso')
+        )
+    except Exception as e:
+        from meerschaum.utils.warnings import warn
+        warn(e)
+        return None
+
+    return tuple(response.json())
+
+def delete_pipe(
+        self,
+        pipe : 'mrsm.Pipe' = None,
+        debug : bool = None,        
+    ) -> tuple:
+    """
+    Delete a Pipe and drop its table.
+    """
+    return self.do_action(
+        ['delete', 'pipes'],
+        connector_keys = pipe.connector_keys,
+        metric_keys = pipe.metric_key,
+        location_keys = pipe.location_key,
+        debug = debug
+    )

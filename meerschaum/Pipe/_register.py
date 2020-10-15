@@ -14,6 +14,10 @@ def register(
     """
     Send a POST to the Meerschaum API to register a new Pipe
     """
+    if not self.parameters:
+        self.parameters = {
+            'columns' : self.columns,
+        }
     if api_connector is None:
         from meerschaum import get_connector
         api_connector = get_connector(type='api')

@@ -18,16 +18,22 @@ def delete(
     from meerschaum.utils.debug import dprint
     options = {
         'config' : _delete_config, 
-        'pipe' : _delete_pipes,
+        'pipes' : _delete_pipes,
     }
     return choose_subaction(action, options, **kw)
 
 def _delete_pipes(
-        #  action : list = [''],
         debug : bool = False,
         **kw
-    ):
-    return False, "TODO IMPLEMENT"
+    ) -> tuple:
+    from meerschaum import get_pipes
+    pipes = get_pipes(as_list=True, debug=debug, **kw)
+    for p in pipes:
+        success_tuple = p.delete(debug=debug)
+        if not success_tuple[0]:
+            return success_tuple
+
+    return True, "Success"
 
 def _delete_config(
         yes : bool = False,
