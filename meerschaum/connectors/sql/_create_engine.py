@@ -17,14 +17,14 @@ default_requirements = {
 }
 flavor_configs = {
     'timescaledb'      : {
-        'engine'       : 'postgres',
+        'engine'       : 'postgresql',
         'requirements' : default_requirements,
         'defaults'     : {
             'port'     : 5432,
         },
     },
-    'postgres'         : {
-        'engine'       : 'postgres',
+    'postgresql'         : {
+        'engine'       : 'postgresql',
         'requirements' : default_requirements,
         'defaults'     : {
             'port'     : 5432,

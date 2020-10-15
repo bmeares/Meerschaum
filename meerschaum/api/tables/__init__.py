@@ -45,7 +45,7 @@ def get_tables():
             ),
         }
         ### leveage PostgreSQL JSON data type
-        if connector.flavor in ('postgres', 'timescaledb'):
+        if connector.flavor in ('postgresql', 'timescaledb'):
             tables['pipes'] = sqlalchemy.Table(
                 "pipes",
                 connector.metadata,
