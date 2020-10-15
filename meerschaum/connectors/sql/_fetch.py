@@ -11,7 +11,7 @@ from dateutil import parser
 from meerschaum.utils.debug import dprint
 
 def dateadd_str(
-        flavor : str = 'postgres',
+        flavor : str = 'postgresql',
         datepart : str = 'day',
         number : float = -1,
         begin : 'str or datetime.datetime' = 'now'
@@ -29,7 +29,7 @@ def dateadd_str(
     else: begin_time = begin
 
     da = ""
-    if flavor in ('postgres', 'timescaledb'):
+    if flavor in ('postgresql', 'timescaledb'):
         if begin == 'now': begin = "CAST(NOW() AT TIME ZONE 'utc' AS TIMESTAMP)"
         elif begin_time: begin = f"CAST('{begin}' AS TIMESTAMP)"
         da = begin + f" + INTERVAL '{number} {datepart}'"

@@ -94,14 +94,20 @@ def create_indices(
     Create indices for a Pipe's datetime and ID columns.
     """
     from meerschaum.utils.debug import dprint
+    from meerschaum.utils.misc import pg_capital
     index_queries = []
 
     ### create datetime index
     if 'datetime' in pipe.columns and pipe.columns['datetime']:
         if self.flavor == 'timescaledb':
             ## create hypertable
-            dt_query = f"SELECT create_hypertable('{pipe}', '{pipe.columns['datetime']}', migrate_data => true);"
-        elif self.flavor in ('postgresql', 'mysql', 'mariadb'):
+            dt_query = (
+                f"SELECT create_hypertable('{pg_capital(str(pipe))}', " +
+                "'{pg_capital(pipe.columns['datetime'])}', migrate_data => true);"
+            )
+        elif self.flavor == 'postgresql':
+            dt_query = f"CREATE INDEX ON {pg_capital(str(pipe))} ({pg_capital(pipe.columns['datetime'])})"
+        elif self.flavor in ('mysql', 'mariadb'):
             dt_query = f"CREATE INDEX ON {pipe} ({pipe.columns['datetime']})"
         else: ### mssql, sqlite, etc.
             dt_query = f"CREATE INDEX {pipe.columns['datetime']}_index ON {pipe} ({pipe.columns['datetime']})"
@@ -110,7 +116,9 @@ def create_indices(
 
     ### create id index
     if 'id' in pipe.columns and pipe.columns['id']:
-        if self.flavor in ('timescaledb', 'postgresql', 'mysql', 'mariadb'):
+        if self.flavor in ('timescaledb', 'postgresql'):
+            id_query = f"CREATE INDEX ON {pg_capital(str(pipe))} ({pg_capital(pipe.columns['id'])})"
+        elif self.flavor in ('mysql', 'mariadb'):
             id_query = f"CREATE INDEX ON {pipe} ({pipe.columns['id']})"
         else: ### mssql, sqlite, etc.
             id_query = f"CREATE INDEX {pipe.columns['id']}_index ON {pipe} ({pipe.columns['id']})"
@@ -131,16 +139,22 @@ def delete_pipe(
     """
     Delete a Pipe's entry and drop its table
     """
+    from meerschaum.utils.warnings import warn
+    from meerschaum.utils.misc import pg_capital
+    from meerschaum.utils.debug import dprint
+    pipe_name = str(pipe)
+    if self.flavor in ('postgresql', 'timescaledb'):
+        pipe_name = pg_capital(pipe_name)
     if not pipe.id:
-        return False, "Pipe is not registered"
+        return False, f"Pipe '{pipe}' is not registered"
     q = f"DELETE FROM pipes WHERE pipe_id = {pipe.id}"
     if not self.exec(q):
-        return False, f"Failed to delete '{pipe}'"
+        return False, f"Failed to delete registration for '{pipe}'"
     
-    q = f"DROP TABLE {pipe}"
-    if self.exec(q) is None:
-        q = f"DROP VIEW {pipe}"
-    if self.exec(q) is None:
-        return False, "Failed to drop '{pipe}'"
+    q = f"DROP TABLE {pipe_name}"
+    if self.exec(q, debug=debug) is None:
+        q = f"DROP VIEW {pipe_name}"
+    if self.exec(q, debug=debug) is None:
+        if debug: dprint(f"Failed to drop '{pipe}'. Ignoring...")
 
     return True, "Success"

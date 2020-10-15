@@ -680,3 +680,19 @@ def wait_for_connection(**kw):
     """
     import asyncio
     asyncio.run(retry_connect(**kw))
+
+def pg_capital(s : str) -> str:
+    """
+    If string contains a capital letter, wrap it in double quotes
+
+    returns: string
+    """
+    if '"' in s: return s
+    needs_quotes = False
+    for c in str(s):
+        if c.isupper():
+            needs_quotes = True
+            break
+    if needs_quotes:
+        return '"' + s + '"'
+    return s

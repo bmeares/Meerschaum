@@ -83,7 +83,7 @@ def sync(
     new_data_df = pd.concat([
         backtrack_df,
         df
-    ]).drop_duplicates(keep=False)
+    ]).drop_duplicates(keep=False, ingnore_index=True)
     if debug: dprint(f"New unseen data:\n" + str(new_data_df))
 
     ### append new data to Pipe's table
