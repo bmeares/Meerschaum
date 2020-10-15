@@ -8,7 +8,7 @@ This module contains SQLConnector functions for executing SQL queries.
 from meerschaum.utils.debug import dprint
 
 ### database flavors that can use bulk insert
-bulk_flavors = {'postgres', 'timescaledb'}
+bulk_flavors = {'postgresql', 'timescaledb'}
 
 def read(
         self,
@@ -20,7 +20,7 @@ def read(
     """
     Read a SQL query or table into a pandas dataframe.
     """
-    from meerschaum.utils.misc import attempt_import
+    from meerschaum.utils.misc import attempt_import, pg_capital
     sqlalchemy = attempt_import("sqlalchemy")
     chunksize = chunksize if chunksize != -1 else self.sys_config['chunksize']
     if debug:
@@ -31,6 +31,8 @@ def read(
 
     ### format with sqlalchemy
     if ' ' not in query_or_table:
+        if self.flavor in ('postgresql', 'timescaledb'):
+            query_or_table = pg_capital(query_or_table)
         if debug: dprint(f"Reading from table {query_or_table}")
         formatted_query = str(sqlalchemy.text("SELECT * FROM " + str(query_or_table)))
     else:
@@ -151,6 +153,10 @@ def to_sql(
         else:
             method = self.sys_config['method']
     chunksize = chunksize if chunksize != -1 else self.sys_config['chunksize']
+
+    from meerschaum.utils.misc import pg_capital
+    if self.flavor in ('timescaledb', 'postgresql'):
+        name = pg_capital(name)
 
     if debug:
         import time
