@@ -1,26 +1,40 @@
 # Build Pipes with Meerschaum
 Meerschaum is a platform for quickly creating and managing time-series data streams called Pipes. With Meerschaum, you can have a data visualization stack running in minutes.
 
+# Table of Contents
+- [Disclaimer](#disclaimer)
+- [Setup](#setup)
+  - [Requirements](#requirements)
+  - [Installation](#installation)
+  - [Quickstart](#quickstart)
+  - [Create Visualizations with Grafana](#create-visualizations-with-grafana)
+- [FAQ](#faq)
+  - [What are Pipes, exactly?](#what-are-pipes-exactly)
+  - [I broke my configuration. How do I start over?](#i-broke-my-configuration-how-do-i-start-over)
+  - [I can't open the Meerschaum shell!](#i-cant-open-the-meerschaum-shell)
+  - [Connectors don't work for `<database flavor>`!](#connectors-dont-work-for-database-flavor)
+- [Thank you](#thank-you)
+
 # Disclaimer
 Meerschaum is undergoing active development and is still an alpha release. Expect to encounter bugs, and please open issues when you find them! Meerschaum is distributed with no warranty, so use with care!
 
 Meerschaum was built using powerful open source software like TimescaleDB, Grafana, pandas, and more. Check the [Thank You](#Thank-You) section below for more information about dependencies.
 
-## Setup
-### Requirements
+# Setup
+## Requirements
 Before getting started, make sure you have [Docker](https://www.docker.com/get-started) and Docker Compose installed. You can install Docker Compose with `pip`:
 ```
 pip install docker-compose
 ```
 
-### Installation
+## Installation
 To install the `full` version of Meerschaum, install with `pip`:
 ```
 pip install meerschaum[full]
 ```
 
-### Quickstart
-#### Launch the Meerschaum Shell
+## Quickstart
+### Launch the Meerschaum Shell
 To jump into the `mrsm` shell, run the command:
 ```
 mrsm
@@ -35,14 +49,14 @@ $ mrsm
 > show version
 ```
 
-#### Start the Stack
+### Start the Stack
 To start the Meerschaum stack in the background (using `docker-compose -d`), run the command
 ```
 mrsm stack [-d]
 ```
 <img alt="Demonstrating how to start the Meerschaum stack" src="https://i.imgur.com/wyI3CO1.gif" height="450">
 
-#### Add a Connector
+### Add a Connector
 If you want to create a Pipe for remote data, you first need to define a Connector. Run this command to open the configuration YAML file with your text editor:
 ```
 mrsm edit config
@@ -63,7 +77,7 @@ Note that for `sqlite` connectors, only the `database` parameter is needed (path
 <img alt="Adding a Meerschaum Connector" src="https://imgur.com/7iKvBsV.gif" height="450">
 
 
-#### Register a Pipe
+### Register a Pipe
 Pipes are defined by three keys:
 1. Connection (keys for a connector in the format `type:label`; e.g. `sql:exampledb` for the Connector added above)
 2. Metric (label for the contents of the Pipe's data, such as `power` or `temperature`)
@@ -89,7 +103,7 @@ fetch:
 ```
 This information describes the remote dataset we will add into the Pipe. The columns defined will be indexed, and the definition is executed on the remote server to get the data.
 
-#### Add Data to a Pipe
+### Add Data to a Pipe
 If you defined the parameters described above, just run the command below to fetch new data and sync the Pipe:
 ```
 mrsm sync pipes
@@ -109,7 +123,7 @@ If you want to add an existing dataframe to a Pipe, run `pipe.sync(df)` to appen
 ```
 In this case, the Pipe has created and indexed the table `sql_exampledb_mydata` on the Meerschaum TimescaleDB database.
 
-### Create Visualizations with Grafana
+## Create Visualizations with Grafana
 Grafana is included in the Meerschaum stack, pre-configured with the Meerschaum TimescaleDB database. Open a web browser and navigate to `http://localhost:3000` and log in to Grafana with username `admin`, password `admin`.
 <img alt="Grafana pre-configured with Meerschaum" src="https://imgur.com/cYTfiFT.png" height="450">
 
