@@ -66,12 +66,12 @@ For this example, let's add a connector called `exampledb`. Add a new entry unde
 meerschaum:
   connectors:
     sql:
-	  exampledb:
-	    username: myuser
-		password: mypass
-		flavor: postgresql
-		host: myserverhostname
-		database: mydb
+      exampledb:
+        username: myuser
+	  password: mypass
+	  flavor: postgresql
+	  host: myserverhostname
+	  database: mydb
 ```
 Note that for `sqlite` connectors, only the `database` parameter is needed (path to the `.sqlite` file).
 <img alt="Adding a Meerschaum Connector" src="https://imgur.com/7iKvBsV.gif" height="450">
