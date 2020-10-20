@@ -1,3 +1,14 @@
+<img src="https://meerschaum.io/images/banner_1920x320.png" alt="Meerschaum banner">
+
+![PyPI](https://img.shields.io/pypi/v/meerschaum?color=%2300cc66&label=Version)
+![PyPI - Python Version](https://img.shields.io/pypi/pyversions/meerschaum?label=Python&logo=python&logoColor=%23ffffff)
+![PyPI - Status](https://img.shields.io/pypi/status/meerschaum?label=Release%20Status)
+![Docker Image Size (tag)](https://img.shields.io/docker/image-size/bmeares/meerschaum/latest?label=Image%20Size&logo=docker&logoColor=%23ffffff)
+![Lines of code](https://img.shields.io/tokei/lines/github/bmeares/Meerschaum?label=Total%20Lines)
+![PyPI - License](https://img.shields.io/pypi/l/meerschaum?label=License)
+![Maintenance](https://img.shields.io/maintenance/yes/2020?label=Maintained)
+
+
 # Build Pipes with Meerschaum
 Meerschaum is a platform for quickly creating and managing time-series data streams called Pipes. With Meerschaum, you can have a data visualization stack running in minutes.
 
