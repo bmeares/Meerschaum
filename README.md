@@ -85,6 +85,7 @@ meerschaum:
 	  database: mydb
 ```
 Note that for `sqlite` connectors, only the `database` parameter is needed (path to the `.sqlite` file).
+
 <img alt="Adding a Meerschaum Connector" src="https://imgur.com/7iKvBsV.gif" height="450">
 
 
@@ -136,6 +137,7 @@ In this case, the Pipe has created and indexed the table `sql_exampledb_mydata` 
 
 ## Create Visualizations with Grafana
 Grafana is included in the Meerschaum stack, pre-configured with the Meerschaum TimescaleDB database. Open a web browser and navigate to `http://localhost:3000` and log in to Grafana with username `admin`, password `admin`.
+
 <img alt="Grafana pre-configured with Meerschaum" src="https://imgur.com/cYTfiFT.png" height="450">
 
 
@@ -157,7 +159,7 @@ stack down [-v]
 which is equivalent to `docker-compose down -v`.
 
 ## I can't open the Meerschaum shell!
-You can invoke `mrsm` directly with `python -m meerschaum`. Check your `PATH` includes packages installed by `pip`, such as `~/.local/bin`.
+You can invoke `mrsm` directly with `python -m meerschaum`. Check that your `PATH` includes packages installed by `pip`, such as `~/.local/bin`.
 
 ## How do I turn off the emoji / colors / I'm running Windows?
 Open the configuration file with `mrsm edit config` and search for the key `formatting` under the `system` section. From there, you can turn off emoji (`unicode: false`) or colors (`ansi: false`).
@@ -174,4 +176,14 @@ As of now, there is (limited) support for the following database flavors:
 
 # Thank you
 I want to give my sincere thanks to the developers of the following projects:
-TODO: Insert full dependencies list with links to original repositories
+- [Docker](https://www.docker.com/)
+- [Pandas](https://pandas.pydata.org/)
+- [SQLAlchemy](https://www.sqlalchemy.org/)
+- [FastAPI](https://fastapi.tiangolo.com/)
+- [Uvicorn](https://www.uvicorn.org/)
+- [pprintpp](https://pypi.org/project/pprintpp/)
+- [CascaDict](https://pypi.org/project/cascadict/)
+- [pyvim](https://github.com/prompt-toolkit/pyvim)
+- [Colorama](https://github.com/tartley/colorama)
+- [more_termcolor](https://github.com/giladbarnea/more_termcolor)
+- [SQL CLI Tools](https://github.com/dbcli)
