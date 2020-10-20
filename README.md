@@ -88,10 +88,10 @@ meerschaum:
     sql:
       exampledb:
         username: myuser
-	  password: mypass
-	  flavor: postgresql
-	  host: myserverhostname
-	  database: mydb
+        password: mypass
+        flavor: postgresql
+        host: myserverhostname
+        database: mydb
 ```
 Note that for `sqlite` connectors, only the `database` parameter is needed (path to the `.sqlite` file).
 
