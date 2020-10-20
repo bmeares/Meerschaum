@@ -1,4 +1,4 @@
-<img src="https://mrsm.io/images/banner_1920x320.png" alt="Meerschaum banner">
+<img src="https://meerschaum.io/images/banner_1920x320.png" alt="Meerschaum banner">
 
 ![PyPI](https://img.shields.io/pypi/v/meerschaum?color=%2300cc66&label=Version)
 ![PyPI - Python Version](https://img.shields.io/pypi/pyversions/meerschaum?label=Python&logo=python&logoColor=%23ffffff)
