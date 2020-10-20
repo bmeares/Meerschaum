@@ -76,7 +76,7 @@ To start the Meerschaum stack in the background (using `docker-compose -d`), run
 ```
 mrsm stack [-d]
 ```
-<img alt="Demonstrating how to start the Meerschaum stack" src="https://i.imgur.com/wyI3CO1.gif" height="450">
+<img alt="Demonstrating how to start the Meerschaum stack" src="https://i.imgur.com/wyI3CO1.gif" style="max-height: 450px">
 
 ### Add a Connector
 If you want to create a Pipe for remote data, you first need to define a Connector. Run this command to open the configuration YAML file with your text editor:
@@ -97,7 +97,7 @@ meerschaum:
 ```
 Note that for `sqlite` connectors, only the `database` parameter is needed (path to the `.sqlite` file).
 
-<img alt="Adding a Meerschaum Connector" src="https://imgur.com/7iKvBsV.gif" height="450">
+<img alt="Adding a Meerschaum Connector" src="https://imgur.com/7iKvBsV.gif" style="max-height: 450px">
 
 
 ### Register a Pipe
@@ -149,8 +149,7 @@ In this case, the Pipe has created and indexed the table `sql_exampledb_mydata` 
 ## Create Visualizations with Grafana
 Grafana is included in the Meerschaum stack, pre-configured with the Meerschaum TimescaleDB database. Open a web browser and navigate to `http://localhost:3000` and log in to Grafana with username `admin`, password `admin`.
 
-<img alt="Grafana pre-configured with Meerschaum" src="https://imgur.com/cYTfiFT.png" height="450">
-
+<img alt="Grafana pre-configured with Meerschaum" src="https://imgur.com/cYTfiFT.png" style="max-height: 450px">
 
 # FAQ
 ## What are Pipes, exactly?
