@@ -1,4 +1,0 @@
-- delete
-  - remove configs, etc before building
-- Pipes
-  - bootstrap
