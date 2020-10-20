@@ -33,7 +33,16 @@ Meerschaum was built using powerful open source software like TimescaleDB, Grafa
 
 # Setup
 ## Requirements
-Before getting started, make sure you have [Docker](https://www.docker.com/get-started) and Docker Compose installed. You can install Docker Compose with `pip`:
+Make sure you have [Docker](https://www.docker.com/get-started) and Docker Compose installed.
+
+If you are running Linux, search your repositories for `docker.io` or run this script:
+```
+curl https://get.docker.com | sh
+```
+
+If you're on Windows or MacOS, install [Docker Desktop](https://www.docker.com/get-started).
+
+You can install Docker Compose with `pip`:
 ```
 pip install docker-compose
 ```
