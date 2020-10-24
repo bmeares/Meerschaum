@@ -46,6 +46,11 @@ def sync(
     if not self.id:
         self.register(debug=debug)
 
+    ### quit here if implicitly syncing MQTT pipes.
+    ### (pipe.sync() is called in the callback of the MQTTConnector.fetch() method)
+    if df is None and self.connector.type == 'mqtt':
+        return True, "Success"
+
     ### fetched df is the dataframe returned from the remote source
     ### via the connector
     if df is None:
