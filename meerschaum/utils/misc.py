@@ -404,7 +404,7 @@ def attempt_import(
         if importlib.util.find_spec(name) is None:
             warn(
                 (f"\n\nMissing package '{name}'; features will not work correctly. "
-                f"\n\nRun `pip install -U meerschaum[full]` to install the complete version of Meerschaum.\n"),
+                f"\n\nRun `pip install {name}`.\n"),
                 ImportWarning,
                 stacklevel = 2
             )
@@ -696,3 +696,11 @@ def pg_capital(s : str) -> str:
     if needs_quotes:
         return '"' + s + '"'
     return s
+
+def import_pandas() -> 'module':
+    """
+    Quality-of-life function to attempt to import the configured version of pandas
+    """
+    from meerschaum.config import get_config
+    return attempt_import(get_config('system', 'connectors', 'all', 'pandas'))
+

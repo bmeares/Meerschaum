@@ -79,7 +79,7 @@ def fetch(
     Returns pandas dataframe of the selected data.
     """
     from meerschaum.utils.debug import dprint
-    from meerschaum.utils.warnings import warn
+    from meerschaum.utils.warnings import warn, error
 
     if 'columns' not in pipe.parameters or 'fetch' not in pipe.parameters:
         warn(f"Parameters for '{pipe}' must include 'columns' and 'fetch'")
@@ -95,10 +95,10 @@ def fetch(
     try:
         definition = instructions['definition']
     except KeyError:
-        raise KeyError("Cannot fetch without a definition")
+        error("Cannot fetch without a definition", KeyError)
 
     if 'order by' in definition.lower():
-        raise Exception("Cannot fetch with an ORDER clause in the definition")
+        error("Cannot fetch with an ORDER clause in the definition")
 
     da = None
     if datetime:

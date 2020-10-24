@@ -77,4 +77,7 @@ parser.add_argument(
 parser.add_argument(
     '--api-label', help="Label for the API Connector, e.g. when registering pipes",
 )
+parser.add_argument(
+    '--gui', action='store_true', help="Open a DataFrame in an interactive pandasgui window."
+)
 
