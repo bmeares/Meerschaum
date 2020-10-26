@@ -71,7 +71,7 @@ def get_columns(self, *args):
     for col in args:
         col_name = None
         try:
-            col_name = pipe.columns[col]
+            col_name = self.columns[col]
         except:
             error(f"Missing '{col}'" + f' column for pipe "{self}".')
         if col_name is None:
