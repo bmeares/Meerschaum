@@ -77,4 +77,6 @@ def get_columns(self, *args):
         if col_name is None:
             error(f"Please define the name of the '{col}' column for pipe {self}.")
         col_names.append(col_name)
+    if len(col_names) == 1:
+        return col_names[0]
     return tuple(col_names)

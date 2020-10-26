@@ -35,6 +35,11 @@ def fetch(
         warn(f"Missing topic from parameters for pipe {pipe}. Defaulting to \"#\" (all possible topics!).")
         topic = '#'
 
+    ### default: only include values that have changed
+    skip_duplicates = True
+    if 'skip_duplicates' in instructions:
+        skip_duplicates = instructions['skip_duplicates']
+
     ### callback is executed each time a message is published
     def _fetch_callback(msg : str):
         from meerschaum.utils.misc import import_pandas, parse_df_datetimes, df_from_literal
@@ -58,4 +63,10 @@ def fetch(
     if callback is None:
         callback = _fetch_callback
 
-    self.subscribe(topic, callback, debug=debug)
+    ### subscribe to the Pipe's topic
+    self.subscribe(
+        topic,
+        callback,
+        skip_duplicates = skip_duplicates,
+        debug = debug
+    )

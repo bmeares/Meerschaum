@@ -4,7 +4,7 @@
 """
 Pipes are the primary data access objects in the Meerschaum system
 """
-default_source_labels = {
+default_instance_labels = {
     'api' : 'main',
     'sql' : 'main',
 }
@@ -12,6 +12,7 @@ default_source_labels = {
 
 class Pipe:
     from ._fetch import fetch
+    from ._data import data, get_data
     from ._register import register
     from ._attributes import attributes, parameters, columns, get_columns
     from ._show import show
@@ -25,7 +26,7 @@ class Pipe:
         metric_key : str,
         location_key : str = None,
         parameters : dict = None,
-        source : str = 'sql:main',
+        mrsm_instance : str = 'sql:main',
         debug : bool = False
     ):
         """
@@ -43,8 +44,8 @@ class Pipe:
             parameters dictionary to give the Pipe.
             This dictionary is NOT stored in memory but rather is used for registration purposes.
         
-        source : str : 'sql:main'
-            connector_keys for the source connector
+        mrsm_instance : str : 'sql:main'
+            connector_keys for the Meerschaum instance connector (SQL or API connector)
         """
         if location_key == '[None]': location_key = None
         self.connector_keys = connector_keys
@@ -67,29 +68,29 @@ class Pipe:
         )
 
         ### determine where to pull Pipe data from
-        source_keys = source.split(':')
-        source_type = source_keys[0]
-        if len(source_keys) == 2:
-            source_label = source_keys[1]
-        elif source_type in default_source_labels:
-            source_label = default_source_labels[source_type]
-        self.source_keys = source_type + ':' + source_label
+        instance_keys = mrsm_instance.split(':')
+        instance_type = instance_keys[0]
+        if len(instance_keys) == 2:
+            instance_label = instance_keys[1]
+        elif instance_type in default_instance_labels:
+            instance_label = default_instance_labels[instance_type]
+        self.instance_keys = instance_type + ':' + instance_label
 
         ### TODO aggregations?
         #  self._aggregations = dict()
 
-        ### TODO implement source. This one will be tough bc of datetime parsing (need regex magic),
+        ### TODO implement instance. This one will be tough bc of datetime parsing (need regex magic),
         ###      but the groundwork is there, just have to implement it in the API.
 
     @property
-    def source_connector(self):
-        if '_source_connector' not in self.__dict__:
+    def instance_connector(self):
+        if '_instance_connector' not in self.__dict__:
             from meerschaum.utils.misc import parse_connector_keys
-            if (conn := parse_connector_keys(self.source_keys)):
-                    self._source_connector = conn
+            if (conn := parse_connector_keys(self.instance_keys)):
+                self._instance_connector = conn
             else:
                 return None
-        return self._source_connector
+        return self._instance_connector
 
     @property
     def connector(self):

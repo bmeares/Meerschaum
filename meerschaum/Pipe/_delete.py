@@ -11,7 +11,7 @@ def delete(
         debug : bool = False,
     ) -> tuple:
     """
-    Call the Pipe's source connector's delete_pipe method
+    Call the Pipe's instance connector's delete_pipe method
     """
-    return self.source_connector.delete_pipe(self, debug=debug)
+    return self.instance_connector.delete_pipe(self, debug=debug)
     

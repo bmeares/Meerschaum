@@ -158,3 +158,80 @@ def delete_pipe(
         if debug: dprint(f"Failed to drop '{pipe}'. Ignoring...")
 
     return True, "Success"
+
+def get_backtrack_data(
+        self,
+        pipe : 'meerschaum.Pipe' = None,
+        backtrack_minutes : int = 0,
+        begin : 'datetime.datetime' = None,
+        debug : bool = False
+    ) -> 'pd.DataFrame':
+    """
+    Get the most recent backtrack_minutes' worth of data from a Pipe
+    """
+    from meerschaum.utils.warnings import error, warn
+    if pipe is None:
+        error(f"Pipe must be provided")
+    from meerschaum.utils.debug import dprint
+    from meerschaum.connectors.sql._fetch import dateadd_str
+    da = dateadd_str(
+        flavor = self.flavor,
+        datepart = 'minute',
+        number = (-1 * backtrack_minutes),
+        begin = begin
+    )
+
+    query = f"SELECT * FROM {pipe}" + (f" WHERE {pipe.get_columns('datetime')} > {da}" if da else "")
+    if debug: dprint(query)
+
+    return self.read(query)
+
+def get_pipe_data(
+        self,
+        pipe : 'meerschaum.Pipe' = None,
+        begin : 'datetime.datetime or str' = None,
+        end : 'datetime.datetime or str' = None,
+        debug : bool = False
+    ) -> 'pd.DataFrame':
+    """
+    Fetch data from a Pipe.
+
+    begin : datetime.datetime : None
+        Lower bound for the query (inclusive)
+
+    end : datetime.datetime : None
+        Upper bound for the query (inclusive)
+    """
+    from meerschaum.utils.debug import dprint
+    from meerschaum.utils.misc import pg_capital
+    from meerschaum.connectors.sql._fetch import dateadd_str
+    query = f"SELECT * FROM {pipe}"
+    where = ""
+
+    dt = pipe.get_columns('datetime')
+    if self.flavor in ('postgresql', 'timescaledb'):
+        dt = pg_capital(dt)
+
+    if begin is not None:
+        begin_da = dateadd_str(
+            datepart = 'minute',
+            number = 0,
+            begin = begin
+        )
+        where += f"{dt} >= {begin_da}" + (" AND " if end is not None else "")
+
+    if end is not None:
+        end_da = dateadd_str(
+            datepart = 'minute',
+            number = 0,
+            begin = end
+        )
+        where += f"{dt} <= {end_da}"
+
+    if len(where) > 0:
+        query += "\nWHERE " + where
+
+    query += "\nORDER BY " + dt + " DESC"
+
+    if debug: dprint(f"Getting Pipe data with begin = '{begin}' and end = '{end}'")
+    return self.read(query, debug=debug)
