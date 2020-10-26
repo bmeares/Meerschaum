@@ -6,10 +6,11 @@
 Register Pipes via the Meerschaum API
 """
 
-from meerschaum.api import fastapi, fast_api, endpoints, database, connector, pipes, get_pipes_sql
+from meerschaum.api import fastapi, fast_api, endpoints, database, connector, pipes, get_pipe, get_pipes_sql
 from meerschaum.api.models import MetaPipe
 from meerschaum.api.tables import get_tables
-from meerschaum.utils.misc import attempt_import, is_pipe_registered
+from meerschaum.utils.misc import attempt_import, is_pipe_registered, round_time
+import datetime
 sqlalchemy = attempt_import('sqlalchemy')
 pipes_endpoint = endpoints['mrsm'] + '/pipes'
 
@@ -111,7 +112,7 @@ async def get_pipes(
         connector_keys = json.loads(connector_keys),
         metric_keys = json.loads(metric_keys),
         location_keys = json.loads(location_keys),
-        source = 'sql',
+        mrsm_instance = 'sql',
         debug = debug
     )
 
@@ -158,6 +159,7 @@ async def get_pipes_by_connector_and_metric_and_location(
         raise fastapi.HTTPException(status_code=404, detail=f"connector_keys '{connector_keys}' not found.")
     if metric_key not in pipes()[connector_keys]:
         raise fastapi.HTTPException(status_code=404, detail=f"metric_key '{metric_key}' not found.")
+    if location_key == '[None]': location_key = None
     if location_key not in pipes()[connector_keys][metric_key]:
         raise fastapi.HTTPException(status_code=404, detail=f"location_key '{location_key}' not found.")
  
@@ -199,4 +201,58 @@ async def sync_pipe(
 
     return p.sync(df, debug=True)
 
-#  @fast_api.post(pipes_endpoint + '/{connector_keys}/{metric_key}/{location_key}/delete')
+@fast_api.get(pipes_endpoint + '/{connector_keys}/{metric_key}/{location_key}/data')
+def get_pipe_data(
+        connector_keys : str,
+        metric_key : str,
+        location_key : str,
+        begin : datetime.datetime = None,
+        end : datetime.datetime = None,
+        orient : str = 'columns'
+    ) -> bool:
+    """
+    Get a Pipe's data. Optionally set query boundaries
+    """
+    return fastapi.Response(
+        content = get_pipe(
+            connector_keys,
+            metric_key,
+            location_key
+        ).get_data(
+            begin = begin,
+            end = end,
+            debug = True
+        ).to_json(
+            date_format = 'iso',
+            orient = orient
+        ),
+        media_type = 'application/json'
+    )
+@fast_api.get(pipes_endpoint + '/{connector_keys}/{metric_key}/{location_key}/backtrack_data')
+def get_backtrack_data(
+        connector_keys : str,
+        metric_key : str,
+        location_key : str,
+        begin : datetime.datetime = None,
+        backtrack_minutes : int = 0,
+        orient : str = 'columns'
+    ) -> bool:
+    """
+    Get a Pipe's data. Optionally set query boundaries
+    """
+    return fastapi.Response(
+        content = get_pipe(
+            connector_keys,
+            metric_key,
+            location_key
+        ).get_backtrack_data(
+            begin = begin,
+            backtrack_minutes = backtrack_minutes,
+            debug = True
+        ).to_json(
+            date_format = 'iso',
+            orient = orient
+        ),
+        media_type = 'application/json'
+    )
+

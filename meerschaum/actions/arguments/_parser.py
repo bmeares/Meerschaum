@@ -37,8 +37,8 @@ parser.add_argument(
     )
 )
 parser.add_argument(
-    '-S', '--source', help=(
-        "Connector Keys (type:label) to the data source for Pipe objects. If label is omitted, assume `meta` for `sql` and `main` for `api`."
+    '-I', '--mrsm-instance', help=(
+        "Connector Keys (type:label) to the Meerschaum instance for Pipe objects. If label is omitted, assume `meta` for `sql` and `main` for `api`."
     )
 )
 parser.add_argument(

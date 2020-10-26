@@ -27,20 +27,16 @@ def sync(
     import datetime as datetime_pkg
     pd = attempt_import(get_config('system', 'connectors', 'all', 'pandas'))
 
+    ### default: fetch new data via the connector.
+    ### If new data is provided, skip fetching
     if df is None:
         df = self.fetch(debug = debug)
-    else:
-        if self.source_connector.type == 'api':
-            return self.source_connector.sync_pipe(self, df, debug=debug)
 
-    try:
-        datetime = self.columns['datetime']
-    except:
-        warn(
-            f"Columns not defined for {self}.\n" +
-            f"Please set at a minimum pipe.columns = " + "{'datetime' : 'column_name'} " +
-            f"or register Pipe '{self}'"
-        )
+    ### if the instance connector is API, use its method. Otherwise do SQL things below
+    if self.instance_connector.type == 'api':
+        return self.instance_connector.sync_pipe(self, df, debug=debug)
+
+    datetime = self.get_columns('datetime')
 
     ### if Pipe is not registered
     if not self.id:
@@ -58,9 +54,9 @@ def sync(
         return None
     if debug: dprint("Fetched data:\n" + str(df))
 
-    ### TODO use source connector, check for api instead of only SQL
-    sql_connector = get_connector(type='sql', label='main', debug=debug)
-    #  source_connector = self.source_connector
+    ### TODO use instance connector, check for api instead of only SQL
+    ### NOTE: actually, this SHOULD only be executed if the instance connector is SQL
+    sql_connector = self.instance_connector
 
     ### if table does not exist, create it with indices
     if not self.exists(debug=debug):
@@ -116,19 +112,12 @@ def get_backtrack_data(
 
     if begin is None: begin = self.sync_time
 
-    from meerschaum.connectors.sql._fetch import dateadd_str
-    da = dateadd_str(
-        datepart = 'minute',
-        number = (-1 * backtrack_minutes),
-        begin = begin
+    return self.instance_connector.get_backtrack_data(
+        pipe = self,
+        backtrack_minutes = backtrack_minutes,
+        begin = begin,
+        debug = debug
     )
-
-    query = f"SELECT * FROM {self}" + (f" WHERE {self.columns['datetime']} > {da}" if da else "")
-    if debug: dprint(query)
-
-    from meerschaum import get_connector
-    main_connector = get_connector(type='sql')
-    return main_connector.read(query)
 
 def get_sync_time(
         self,

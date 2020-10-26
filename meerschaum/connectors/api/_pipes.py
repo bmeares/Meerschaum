@@ -9,6 +9,16 @@ Register or fetch Pipes from the API
 from meerschaum.utils.debug import dprint
 from meerschaum.utils.warnings import error
 
+def pipe_r_url(
+        pipe : 'meerschaum.Pipe'
+    ) -> str:
+    """
+    Generate a relative URL path from a Pipe's keys.
+    """
+    location_key = pipe.location_key
+    if location_key is None: location_key = '[None]'
+    return f'/mrsm/pipes/{pipe.connector_keys}/{pipe.metric_key}/{location_key}'
+
 def register_pipe(
         self,
         pipe : 'meerschaum.Pipe',
@@ -81,12 +91,12 @@ def fetch_pipes_keys(
         metric_keys : list = [],
         location_keys : list = [],
         params : dict = dict(),
-        source : str = 'api',
+        mrsm_instance : str = 'api',
         debug : bool = False
     ) -> 'dict or list':
     """
     NOTE: This function no longer builds Pipes. Use the main `get_pipes()` function
-          with the arguments `source = 'api' and `method = 'registered'` (default).
+          with the arguments `mrsm_instance = 'api' and `method = 'registered'` (default).
 
     Fetch registered Pipes' keys from the API.
 
@@ -121,7 +131,7 @@ def fetch_pipes_keys(
 
 def sync_pipe(
         self,
-        pipe : 'mrsm.Pipe' = None,
+        pipe : 'meerschaum.Pipe' = None,
         df : 'pd.DataFrame' = None,
         debug : bool = False
     ) -> tuple:
@@ -130,10 +140,7 @@ def sync_pipe(
     If Pipe does not exist, it is registered with supplied metadata
         NOTE: columns['datetime'] must be set for new Pipes.
     """
-    import json
-    location_key = pipe.location_key
-    if location_key is None: location_key = '[None]'
-    r_url = f'/mrsm/pipes/{pipe.connector_keys}/{pipe.metric_key}/{location_key}/data'
+    r_url = pipe_r_url(pipe) + '/data'
     if debug:
         from meerschaum.utils.debug import dprint
         dprint(r_url)
@@ -162,5 +169,55 @@ def delete_pipe(
         connector_keys = pipe.connector_keys,
         metric_keys = pipe.metric_key,
         location_keys = pipe.location_key,
+        force = True,
         debug = debug
     )
+
+def get_pipe_data(
+        self,
+        pipe : 'meerschaum.Pipe',
+        begin : 'datetime.datetime' = None,
+        end : 'datetime.datetime' = None,
+        debug : bool = False
+    ) -> 'pd.DataFrame':
+    """
+    Fetch data from the API
+    """
+    r_url = pipe_r_url(pipe)
+    try:
+        response = self.get(r_url + "/data", params={'begin': begin, 'end': end})
+    except Exception as e:
+        from meerschaum.utils.warnings import warn
+        warn(e)
+        return None
+    from meerschaum.utils.misc import import_pandas, parse_df_datetimes
+    pd = import_pandas()
+    return parse_df_datetimes(pd.read_json(response.text))
+
+def get_backtrack_data(
+        self,
+        pipe : 'meerschaum.Pipe',
+        begin : 'datetime.datetime',
+        backtrack_minutes : int = 0,
+        debug : bool = False
+    ) -> 'pd.DataFrame':
+    """
+    Get a Pipe's backtrack data from the API
+    """
+    r_url = pipe_r_url(pipe)
+    try:
+        response = self.get(
+            r_url + "/backtrack_data",
+            params = {
+                'begin': begin,
+                'backtrack_minutes': backtrack_minutes,
+            }
+        )
+    except Exception as e:
+        from meerschaum.utils.warnings import warn
+        warn(e)
+        return None
+    from meerschaum.utils.misc import import_pandas, parse_df_datetimes
+    pd = import_pandas()
+    return parse_df_datetimes(pd.read_json(response.text))
+

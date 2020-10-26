@@ -568,7 +568,7 @@ def flatten_pipes_dict(pipes_dict : dict) -> list:
 def round_time(
         dt : 'datetime.datetime' = None,
         date_delta : 'datetime.timedelta' = None,
-        to : 'str' = 'average'
+        to : 'str' = 'down'
     ) -> 'datetime.datetime':
     """
     Round a datetime object to a multiple of a timedelta
