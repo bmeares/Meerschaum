@@ -102,11 +102,13 @@ def fetch(
 
     da = None
     if datetime:
+        ### default: do not backtrack
+        btm = 0
         if 'backtrack_minutes' in instructions:
             btm = instructions['backtrack_minutes']
-            da = dateadd_str(flavor=self.flavor, datepart='minute', number=(-1 * btm), begin=begin)
+        da = dateadd_str(flavor=self.flavor, datepart='minute', number=(-1 * btm), begin=begin)
 
-    meta_def = f"WITH definition AS ({definition}) SELECT * FROM definition"
+    meta_def = f"WITH definition AS ({definition}) SELECT DISTINCT * FROM definition"
     if datetime and da:
         meta_def += f"\nWHERE {datetime} > {da}"
 
