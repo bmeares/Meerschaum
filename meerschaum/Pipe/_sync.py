@@ -86,11 +86,8 @@ def sync(
     backtrack_df = self.get_backtrack_data(begin=begin, debug=debug)
     if debug: dprint("Existing data:\n" + str(backtrack_df))
 
-    ### merge the dataframes and drop duplicate data
-    new_data_df = pd.concat([
-        backtrack_df,
-        df
-    ]).drop_duplicates(keep=False, ignore_index=True)
+    ### remove data we've already seen before
+    new_data_df = df[~df.isin(backtrack_df)].dropna(how='all')
     if debug: dprint(f"New unseen data:\n" + str(new_data_df))
 
     ### append new data to Pipe's table
