@@ -20,7 +20,7 @@ def fetch(
     """
     ### TODO diff the existing data with new data
     if self.attributes and 'fetch' in self.attributes['parameters']:
-        return self.instance_connector.fetch(
+        return self.connector.fetch(
             self,
             begin = self.sync_time,
             debug = debug
