@@ -50,6 +50,9 @@ class MQTTConnector(Connector):
         if 'username' in self.__dict__ and 'password' in self.__dict__:
             self.client.username_pw_set(username=self.username, password=self.password)
 
+        ### keep a record of the last messages per topic in case we want to omit duplicate values
+        self._last_msgs = dict()
+
     def __del__(self):
         #  self.client.loop_stop(force=True)
         self.client.disconnect()

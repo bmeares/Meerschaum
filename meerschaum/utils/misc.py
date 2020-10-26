@@ -713,15 +713,16 @@ def df_from_literal(
     Parse a literal (if nessary), and use a Pipe's column names to generate a DataFrame.
     """
     from meerschaum.utils.warnings import error, warn
+    from meerschaum.utils.debug import dprint
+
     if pipe is None or literal is None:
         error("Please provide a Pipe and a literal value")
     ### this will raise an error if the columns are undefined
     dt_name, val_name = pipe.get_columns('datetime', 'value')
 
     val = literal
-    print(val)
-    print(type(val))
     if isinstance(literal, str):
+        if debug: dprint(f"Received literal string: '{literal}'")
         import ast
         try:
             val = ast.literal_eval(literal)
