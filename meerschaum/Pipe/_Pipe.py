@@ -13,7 +13,7 @@ default_source_labels = {
 class Pipe:
     from ._fetch import fetch
     from ._register import register
-    from ._attributes import attributes, parameters, columns
+    from ._attributes import attributes, parameters, columns, get_columns
     from ._show import show
     from ._edit import edit
     from ._sync import sync, get_sync_time, get_backtrack_data, exists
