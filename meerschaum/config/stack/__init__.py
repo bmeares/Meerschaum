@@ -94,7 +94,7 @@ networks = {
 default_docker_compose_config = {
     'version' : '3',
     'services': {
-        'db' : {
+        'meerschaum_db' : {
             'environment' : [
                 'TIMESCALEDB_TELEMETRY=off',
                 'POSTGRES_USER=' + env_dict['POSTGRES_USER'],
@@ -127,7 +127,7 @@ default_docker_compose_config = {
                 'MEERSCHAUM_CONFIG=' + env_dict['MEERSCHAUM_API_CONFIG'],
             ],
             'depends_on' : [
-                'db',
+                'meerschaum_db',
             ],
             'volumes' : [
                 'meerschaum_api_config_resources' + ':' + volumes['meerschaum_api_config_resources']
@@ -148,7 +148,7 @@ default_docker_compose_config = {
                 'backend',
             ],
             'depends_on' : [
-                'db',
+                'meerschaum_db',
             ],
             'volumes' : [
                 'grafana_storage' + ':' + volumes['grafana_storage'],
