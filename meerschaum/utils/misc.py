@@ -705,14 +705,16 @@ def import_pandas() -> 'module':
     return attempt_import(get_config('system', 'connectors', 'all', 'pandas'))
 
 def df_from_literal(
-        pipe : 'meerschaum.Pipe',
-        literal : str,
+        pipe : 'meerschaum.Pipe' = None,
+        literal : str = None,
         debug : bool = False
     ) -> 'pd.DataFrame':
     """
     Parse a literal (if nessary), and use a Pipe's column names to generate a DataFrame.
     """
     from meerschaum.utils.warnings import error, warn
+    if pipe is None or literal is None:
+        error("Please provide a Pipe and a literal value")
     ### this will raise an error if the columns are undefined
     dt_name, val_name = pipe.get_columns('datetime', 'value')
 
