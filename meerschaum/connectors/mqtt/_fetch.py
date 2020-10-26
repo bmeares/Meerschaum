@@ -49,7 +49,7 @@ def fetch(
 
         ### if parsing JSON fails, see if we can parse it literally
         if df is None:
-            df = df_from_literal(msg, debug=debug)
+            df = df_from_literal(pipe, msg, debug=debug)
 
         if debug: dprint(f"{df}")
         pipe.sync(df, debug=debug)
