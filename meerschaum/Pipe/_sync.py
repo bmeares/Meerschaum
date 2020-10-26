@@ -58,7 +58,9 @@ def sync(
         return None
     if debug: dprint("Fetched data:\n" + str(df))
 
+    ### TODO use source connector, check for api instead of only SQL
     sql_connector = get_connector(type='sql', label='main', debug=debug)
+    #  source_connector = self.source_connector
 
     ### if table does not exist, create it with indices
     if not self.exists(debug=debug):
