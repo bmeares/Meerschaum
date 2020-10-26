@@ -36,6 +36,7 @@ def _delete_pipes(
     question = "Are you sure you want to delete these Pipes? THIS CANNOT BE UNDONE!\n"
     for p in pipes:
         question += f" - {p}" + "\n"
+    answer = force
     if not yes and not force:
         answer = yes_no(question, default='n')
     if not answer:

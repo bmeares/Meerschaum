@@ -13,7 +13,7 @@ def get_pipes(
         metric_keys : 'str or list' = [],
         location_keys : 'str or list' = [],
         params : dict = dict(),
-        source : str = 'sql',
+        mrsm_instance : str = 'sql',
         as_list : bool = False,
         method : str = 'registered',
         wait : bool = False,
@@ -38,9 +38,9 @@ def get_pipes(
     params : dict
         Dictionary of additional parameters to search by. This may include 
 
-    source : str
+    mrsm_instance : str
         ['api', 'sql'] Default "sql"
-        Connector keys for the source of the Pipes.
+        Connector keys for the Meerschaum instance of the Pipes.
         
         Source of pipes data and metadata.
         If 'sql', pull from the `meta` and `main` SQL connectors.
@@ -56,7 +56,7 @@ def get_pipes(
         TODO implement all (left join with metrics and locations)
 
         If 'registered', create Pipes based on registered keys in the connector's `pipes` table
-            (API or SQL connector, depends on source)
+            (API or SQL connector, depends on mrsm_instance)
 
         If 'explicit', create Pipes from provided connector_keys, metric_keys, and location_keys
             instead of consulting the pipes table. Useful for creating non-existent Pipes.
@@ -78,26 +78,26 @@ def get_pipes(
     }
 
     ### determine where to pull Pipe data from
-    source_keys = source.split(':')
-    source_type = source_keys[0]
+    instance_keys = mrsm_instance.split(':')
+    instance_type = instance_keys[0]
     try:
-        meta_label = source_keys[1]
+        meta_label = instance_keys[1]
     except:
-        meta_label = default_meta_labels[source_type]
-    meta_type = source_type
+        meta_label = default_meta_labels[instance_type]
+    meta_type = instance_type
 
-    ### keys for metadata (not source)
+    ### keys for metadata (not instance)
     meta_keys = meta_type + ':' + meta_label
 
-    ### Substitute 'sql:meta' to 'sql:main' for source.
+    ### Substitute 'sql:meta' to 'sql:main' for instance.
     ### There's probably a more scalable way to do this,
     ### but I hope sql:meta / sql:main is the only case.
-    source_label = meta_label
-    if source_type == "sql" and meta_label == "meta": 
-        source_label = "main"
+    instance_label = meta_label
+    if instance_type == "sql" and meta_label == "meta": 
+        instance_label = "main"
 
-    ### keys for source (not metadata)
-    source_keys = source_type + ':' + source_label
+    ### keys for instance (not metadata)
+    instance_keys = instance_type + ':' + instance_label
 
     ### Get SQL or API connector (keys come from `connector.fetch_pipes_keys()`).
     ### If `wait`, wait until a connection is made
@@ -125,7 +125,7 @@ def get_pipes(
         if mk not in pipes[ck]:
             pipes[ck][mk] = dict()
 
-        pipes[ck][mk][lk] = Pipe(ck, mk, lk, source=source_keys, debug=debug)
+        pipes[ck][mk][lk] = Pipe(ck, mk, lk, mrsm_instance=instance_keys, debug=debug)
 
     if not as_list: return pipes
     return flatten_pipes_dict(pipes)

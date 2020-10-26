@@ -10,15 +10,30 @@ def subscribe(
         self,
         topic : str = '#',
         callback : 'function' = None,
+        skip_duplicates = True,
+        forever : bool = False,
         debug : bool = False,
         **kw
     ):
     """
-    Subscribe to a MQTT topic and execute a callback function.
+    Subscribe to an MQTT topic and execute a callback function.
 
-    Callback function must take only one string parameter.
+    topic : str : '#'
+        MQTT topic to subscribe to. Default is all available topics.
+        (WARNING: this may have unexpected results!)
+
+    callback : function
+        Callback function must take only one string parameter.
+
+    skip_duplicates : bool : True
+        If True, only execute the callback function if the message value is different from the last
+        one received.
+
+    forever : bool : False
+        If `forever` is True, block the main thread in a loop. Otherwise spin up a new thread
+        for the duration of the main thread.
     """
-    from meerschaum.utils.warnings import error
+    from meerschaum.utils.warnings import error, warn
     from meerschaum.utils.debug import dprint
     
     ### default callback action: debug print message
@@ -30,18 +45,34 @@ def subscribe(
 
     ### decode the payload and execute the callback function with the string as the only parameter
     def _parse_message(client, userdata, message):
-        return callback(message.payload.decode('utf-8'))
+        """
+        Parse the payload (assuming it's a UTF-8 string. May add options to this later)
+        and if skip_duplicates is True, check for a change in the payload.
+        """
+        execute_callback = True
+        if skip_duplicates:
+            ### check if the current message is different from the last
+            if message.topic not in self._last_msgs:
+                execute_callback = True
+            else:
+                execute_callback = (self._last_msgs[message.topic] != message.payload)
+        self._last_msgs[message.topic] = message.payload
+        if execute_callback:
+            return callback(message.payload.decode('utf-8'))
+        dprint("Message on topic " + f'"{topic}"' + " has not changed since the last message. Skipping...")
 
     self.client.on_message = _parse_message
 
     try:
         self.client.connect(self.host, self.port, self.keepalive)
     except:
-        error(f"Failed to connect to MQTT broker \"{self.host}\" with connector: {self}")
+        error("Failed to connect to MQTT broker " + '"{self.host}"' + " with connector: " + f"{self}")
 
     self.client.subscribe(topic)
-    if debug: dprint(f"Subscribed to \"{topic}\". Starting network loop...")
+    if debug: dprint("Subscribed to " + f'"{topic}"' + ". Starting network loop...")
 
     ### start a new thread that fires callback when messages are received
-    self.client.loop_start()
-    #  self.client.loop_forever()
+    if not forever:
+        self.client.loop_start()
+    else:
+        self.client.loop_forever()
