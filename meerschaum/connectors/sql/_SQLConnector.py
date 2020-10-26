@@ -17,7 +17,13 @@ class SQLConnector(Connector):
     from ._sql import read, value, exec, to_sql
     from ._fetch import fetch
     from ._cli import cli
-    from ._pipes import fetch_pipes_keys, create_indices, delete_pipe
+    from ._pipes import (
+        fetch_pipes_keys,
+        create_indices,
+        delete_pipe,
+        get_backtrack_data,
+        get_pipe_data,
+    )
     
     def __init__(
             self,

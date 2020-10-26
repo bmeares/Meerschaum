@@ -568,7 +568,7 @@ def flatten_pipes_dict(pipes_dict : dict) -> list:
 def round_time(
         dt : 'datetime.datetime' = None,
         date_delta : 'datetime.timedelta' = None,
-        to : 'str' = 'average'
+        to : 'str' = 'down'
     ) -> 'datetime.datetime':
     """
     Round a datetime object to a multiple of a timedelta
@@ -703,4 +703,41 @@ def import_pandas() -> 'module':
     """
     from meerschaum.config import get_config
     return attempt_import(get_config('system', 'connectors', 'all', 'pandas'))
+
+def df_from_literal(
+        pipe : 'meerschaum.Pipe' = None,
+        literal : str = None,
+        debug : bool = False
+    ) -> 'pd.DataFrame':
+    """
+    Parse a literal (if nessary), and use a Pipe's column names to generate a DataFrame.
+    """
+    from meerschaum.utils.warnings import error, warn
+    from meerschaum.utils.debug import dprint
+
+    if pipe is None or literal is None:
+        error("Please provide a Pipe and a literal value")
+    ### this will raise an error if the columns are undefined
+    dt_name, val_name = pipe.get_columns('datetime', 'value')
+
+    val = literal
+    if isinstance(literal, str):
+        if debug: dprint(f"Received literal string: '{literal}'")
+        import ast
+        try:
+            val = ast.literal_eval(literal)
+        except:
+            warn(
+                "Failed to parse value from string:\n" + f"{literal}" +
+                "\n\nWill cast as a string instead."\
+            )
+            val = literal
+
+    ### NOTE: we do everything in UTC if possible.
+    ### In dealing with timezones / Daylight Savings lies madness.
+    import datetime
+    now = datetime.datetime.utcnow()
+
+    pd = import_pandas()
+    return pd.DataFrame({dt_name : [now], val_name : [val]})
 

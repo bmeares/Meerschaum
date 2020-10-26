@@ -12,11 +12,14 @@ fastapi, graphene, starlette_graphql = attempt_import('fastapi', 'graphene', 'st
 connector = get_connector(type="sql", label="meta")
 database = connector.db
 _pipes = None
-def pipes(refresh=True):
+def pipes(refresh=False):
     global _pipes
-    if pipes is None or refresh:
+    if _pipes is None or refresh:
         _pipes = get_pipes_sql()
     return _pipes
+def get_pipe(connector_keys, metric_key, location_key, refresh=False):
+    if location_key == '[None]': location_key = None
+    return pipes(refresh=refresh)[connector_keys][metric_key][location_key]
 
 ### TODO move GraphQL queries somewhere
 class Query(graphene.ObjectType):
