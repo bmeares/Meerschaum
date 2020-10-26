@@ -719,6 +719,8 @@ def df_from_literal(
     dt_name, val_name = pipe.get_columns('datetime', 'value')
 
     val = literal
+    print(val)
+    print(type(val))
     if isinstance(literal, str):
         import ast
         try:
