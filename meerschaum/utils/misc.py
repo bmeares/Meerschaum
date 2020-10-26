@@ -722,11 +722,11 @@ def df_from_literal(
     if isinstance(literal, str):
         import ast
         try:
-            val = ast.literal_eval(msg)
+            val = ast.literal_eval(literal)
         except:
             warn(
                 "Failed to parse value from string:\n" + f"{literal}" +
-                "\n\n. Will cast as a string instead."\
+                "\n\nWill cast as a string instead."\
             )
             val = literal
 
