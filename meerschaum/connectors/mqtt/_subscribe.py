@@ -10,6 +10,7 @@ def subscribe(
         self,
         topic : str = '#',
         callback : 'function' = None,
+        forever : bool = False,
         debug : bool = False,
         **kw
     ):
@@ -17,6 +18,9 @@ def subscribe(
     Subscribe to a MQTT topic and execute a callback function.
 
     Callback function must take only one string parameter.
+
+    If `forever` is True, block the main thread in a loop. Otherwise spin up a new thread
+    for the duration of the main thread.
     """
     from meerschaum.utils.warnings import error
     from meerschaum.utils.debug import dprint
@@ -43,5 +47,7 @@ def subscribe(
     if debug: dprint(f"Subscribed to \"{topic}\". Starting network loop...")
 
     ### start a new thread that fires callback when messages are received
-    self.client.loop_start()
-    #  self.client.loop_forever()
+    if not forever:
+        self.client.loop_start()
+    else:
+        self.client.loop_forever()

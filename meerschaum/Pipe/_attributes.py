@@ -61,3 +61,20 @@ def columns(self, columns):
         self._columns = columns
     else:
         self._parameters['columns'] = columns
+
+def get_columns(self, *args):
+    """
+    Check if the requested columns are defined
+    """
+    from meerschaum.utils.warnings import error, warn
+    col_names = []
+    for col in args:
+        col_name = None
+        try:
+            col_name = pipe.columns[col]
+        except:
+            error(f"Missing '{col}'" + f' column for pipe "{self}".')
+        if col_name is None:
+            error(f"Please define the name of the '{col}' column for pipe {self}.")
+        col_names.append(col_name)
+    return tuple(col_names)
