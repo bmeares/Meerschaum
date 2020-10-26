@@ -52,7 +52,10 @@ def subscribe(
         execute_callback = True
         if skip_duplicates:
             ### check if the current message is different from the last
-            execute_callback = (self._last_msgs[message.topic] != message.payload)
+            if message.topic not in self._last_msgs:
+                execute_callback = True
+            else:
+                execute_callback = (self._last_msgs[message.topic] != message.payload)
         self._last_msgs[message.topic] = message.payload
         if execute_callback:
             return callback(message.payload.decode('utf-8'))
