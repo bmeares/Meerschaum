@@ -704,3 +704,35 @@ def import_pandas() -> 'module':
     from meerschaum.config import get_config
     return attempt_import(get_config('system', 'connectors', 'all', 'pandas'))
 
+def df_from_literal(
+        pipe : 'meerschaum.Pipe',
+        literal : str,
+        debug : bool = False
+    ) -> 'pd.DataFrame':
+    """
+    Parse a literal (if nessary), and use a Pipe's column names to generate a DataFrame.
+    """
+    from meerschaum.utils.warnings import error, warn
+    ### this will raise an error if the columns are undefined
+    dt_name, val_name = pipe.get_columns('datetime', 'value')
+
+    val = literal
+    if isinstance(literal, str):
+        import ast
+        try:
+            val = ast.literal_eval(msg)
+        except:
+            warn(
+                "Failed to parse value from string:\n" + f"{literal}" +
+                "\n\n. Will cast as a string instead."\
+            )
+            val = literal
+
+    ### NOTE: we do everything in UTC if possible.
+    ### In dealing with timezones / Daylight Savings lies madness.
+    import datetime
+    now = datetime.datetime.utcnow()
+
+    pd = import_pandas()
+    return pd.DataFrame({dt_name : [now], val_name : [val]})
+

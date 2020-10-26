@@ -11,6 +11,7 @@ Fetch is called when implicitly syncing pipes with connectors.
 def fetch(
         self,
         pipe : 'meerschaum.Pipe',
+        callback : 'function' = None,
         debug : bool = False,
         **kw
     ) -> 'None':
@@ -28,15 +29,33 @@ def fetch(
         return None
     
     instructions = pipe.parameters['fetch']
-    if 'topic' not in instructions:
+    try:
+        topic = instructions['topic']
+    except KeyError:
         warn(f"Missing topic from parameters for pipe {pipe}. Defaulting to \"#\" (all possible topics!).")
+        topic = '#'
 
     ### callback is executed each time a message is published
     def _fetch_callback(msg : str):
-        from meerschaum.utils.misc import import_pandas, parse_df_datetimes
+        from meerschaum.utils.misc import import_pandas, parse_df_datetimes, df_from_literal
         pd = import_pandas()
-        df = parse_df_datetimes(pd.read_json(msg))
+
+        df = None
+        ### first, try to parse JSON
+        try:
+            df = parse_df_datetimes(pd.read_json(msg))
+        except:
+            pass
+
+        ### if parsing JSON fails, see if we can parse it literally
+        if df is None:
+            df = df_from_literal(msg, debug=debug)
+
         if debug: dprint(f"{df}")
         pipe.sync(df, debug=debug)
 
-    self.subscribe(instructions['topic'], _fetch_callback, debug=debug)
+    ### optional: user may override callback
+    if callback is None:
+        callback = _fetch_callback
+
+    self.subscribe(topic, callback, debug=debug)
