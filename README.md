@@ -1,5 +1,18 @@
+<img src="https://meerschaum.io/images/banner_1920x320.png" alt="Meerschaum banner">
+
+![PyPI](https://img.shields.io/pypi/v/meerschaum?color=%2300cc66&label=Version)
+![PyPI - Python Version](https://img.shields.io/pypi/pyversions/meerschaum?label=Python&logo=python&logoColor=%23ffffff)
+![PyPI - Status](https://img.shields.io/pypi/status/meerschaum?label=Release%20Status)
+![Docker Image Size (tag)](https://img.shields.io/docker/image-size/bmeares/meerschaum/latest?label=Image%20Size&logo=docker&logoColor=%23ffffff)
+![Lines of code](https://img.shields.io/tokei/lines/github/bmeares/Meerschaum?label=Total%20Lines)
+![PyPI - License](https://img.shields.io/pypi/l/meerschaum?label=License)
+![Maintenance](https://img.shields.io/maintenance/yes/2020?label=Maintained)
+
+
 # Build Pipes with Meerschaum
 Meerschaum is a platform for quickly creating and managing time-series data streams called Pipes. With Meerschaum, you can have a data visualization stack running in minutes.
+
+Please visit https://meerschaum.io for setup, usage, and troubleshooting information. You can read a brief overview of the project below.
 
 # Table of Contents
 - [Disclaimer](#disclaimer)
@@ -22,7 +35,16 @@ Meerschaum was built using powerful open source software like TimescaleDB, Grafa
 
 # Setup
 ## Requirements
-Before getting started, make sure you have [Docker](https://www.docker.com/get-started) and Docker Compose installed. You can install Docker Compose with `pip`:
+Make sure you have [Docker](https://www.docker.com/get-started) and Docker Compose installed.
+
+If you are running Linux, search your repositories for `docker.io` or run this script:
+```
+curl https://get.docker.com | sh
+```
+
+If you're on Windows or MacOS, install [Docker Desktop](https://www.docker.com/get-started).
+
+You can install Docker Compose with `pip`:
 ```
 pip install docker-compose
 ```
@@ -54,7 +76,7 @@ To start the Meerschaum stack in the background (using `docker-compose -d`), run
 ```
 mrsm stack [-d]
 ```
-<img alt="Demonstrating how to start the Meerschaum stack" src="https://i.imgur.com/wyI3CO1.gif" height="450">
+<img alt="Demonstrating how to start the Meerschaum stack" src="https://i.imgur.com/wyI3CO1.gif" style="max-height: 450px">
 
 ### Add a Connector
 If you want to create a Pipe for remote data, you first need to define a Connector. Run this command to open the configuration YAML file with your text editor:
@@ -68,13 +90,14 @@ meerschaum:
     sql:
       exampledb:
         username: myuser
-	  password: mypass
-	  flavor: postgresql
-	  host: myserverhostname
-	  database: mydb
+        password: mypass
+        flavor: postgresql
+        host: myserverhostname
+        database: mydb
 ```
 Note that for `sqlite` connectors, only the `database` parameter is needed (path to the `.sqlite` file).
-<img alt="Adding a Meerschaum Connector" src="https://imgur.com/7iKvBsV.gif" height="450">
+
+<img alt="Adding a Meerschaum Connector" src="https://imgur.com/7iKvBsV.gif" style="max-height: 450px">
 
 
 ### Register a Pipe
@@ -125,8 +148,8 @@ In this case, the Pipe has created and indexed the table `sql_exampledb_mydata` 
 
 ## Create Visualizations with Grafana
 Grafana is included in the Meerschaum stack, pre-configured with the Meerschaum TimescaleDB database. Open a web browser and navigate to `http://localhost:3000` and log in to Grafana with username `admin`, password `admin`.
-<img alt="Grafana pre-configured with Meerschaum" src="https://imgur.com/cYTfiFT.png" height="450">
 
+<img alt="Grafana pre-configured with Meerschaum" src="https://imgur.com/cYTfiFT.png" style="max-height: 450px">
 
 # FAQ
 ## What are Pipes, exactly?
@@ -146,7 +169,10 @@ stack down [-v]
 which is equivalent to `docker-compose down -v`.
 
 ## I can't open the Meerschaum shell!
-You can invoke `mrsm` directly with `python -m meerschaum`. Check your `PATH` includes packages installed by `pip`, such as `~/.local/bin`.
+You can invoke `mrsm` directly with `python -m meerschaum`. Check that your `PATH` includes packages installed by `pip`, such as `~/.local/bin`.
+
+## How do I turn off the emoji / colors / I'm running Windows?
+Open the configuration file with `mrsm edit config` and search for the key `formatting` under the `system` section. From there, you can turn off emoji (`unicode: false`) or colors (`ansi: false`).
 
 ## Connectors don't work for `<database flavor>`!
 Although Connectors *should*  work with any database flavor supported by `sqlalchemy` Engines, it is difficult to test against many database flavors. When bugs are encountered, please open an issue and describe your configuration!
@@ -160,4 +186,14 @@ As of now, there is (limited) support for the following database flavors:
 
 # Thank you
 I want to give my sincere thanks to the developers of the following projects:
-TODO: Insert full dependencies list with links to original repositories
+- [Docker](https://www.docker.com/)
+- [Pandas](https://pandas.pydata.org/)
+- [SQLAlchemy](https://www.sqlalchemy.org/)
+- [FastAPI](https://fastapi.tiangolo.com/)
+- [Uvicorn](https://www.uvicorn.org/)
+- [pprintpp](https://pypi.org/project/pprintpp/)
+- [CascaDict](https://pypi.org/project/cascadict/)
+- [pyvim](https://github.com/prompt-toolkit/pyvim)
+- [Colorama](https://github.com/tartley/colorama)
+- [more_termcolor](https://github.com/giladbarnea/more_termcolor)
+- [SQL CLI Tools](https://github.com/dbcli)
