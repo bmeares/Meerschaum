@@ -7,7 +7,12 @@ Docker Compose stack configuration goes here
 """
 
 import os
-from meerschaum.config._paths import GRAFANA_DATASOURCE_PATH, GRAFANA_DASHBOARD_PATH
+from meerschaum.config._paths import (
+    GRAFANA_DATASOURCE_PATH,
+    GRAFANA_DASHBOARD_PATH,
+    #  GRAFANA_INI_PATH,
+    MOSQUITTO_CONFIG_PATH,
+)
 from meerschaum.config._paths import STACK_COMPOSE_PATH, STACK_ENV_PATH, STACK_COMPOSE_FILENAME
 
 #  db_port = cf['meerschaum']['connectors']['sql']['main']['port']
@@ -29,6 +34,9 @@ db_host = "meerschaum_db"
 api_port = "MRSM{meerschaum:connectors:api:main:port}"
 
 api_host = "meerschaum_api"
+
+mqtt_port = "MRSM{meerschaum:connectors:mqtt:main:port}"
+mqtt_host = "meerschaum_mqtt"
 
 env_dict = {
     'COMPOSE_PROJECT_NAME' : 'meerschaum_stack',
@@ -76,6 +84,7 @@ volumes = {
     'meerschaum_db_data' : '/var/lib/postgresql/data',
     'grafana_storage' : '/var/lib/grafana',
     'portainer_data' : '/data',
+    'mosquitto.conf' : '/mosquitto/config/mosquitto.conf',
 }
 networks = {
     'frontend' : None,
@@ -105,7 +114,7 @@ default_docker_compose_config = {
                 'backend',
             ],
         },
-        'meerschaum_api' : {
+        'api' : {
             'image' : 'bmeares/meerschaum:latest',
             'ports' : [f'{api_port}:{api_port}'],
             'hostname' : f'{api_host}',
@@ -145,6 +154,11 @@ default_docker_compose_config = {
                 'grafana_storage' + ':' + volumes['grafana_storage'],
                 f'{GRAFANA_DATASOURCE_PATH.parent}:/etc/grafana/provisioning/datasources',
                 f'{GRAFANA_DASHBOARD_PATH.parent}:/etc/grafana/provisioning/dashboards',
+                #  f'{GRAFANA_INI_PATH}:/etc/grafana/grafana.ini',
+            ],
+            'environment' : [
+                'GF_SECURITY_ALLOW_EMBEDDING=true',
+                'GF_ANALYTICS_REPORTING_ENABLED=false',
             ],
         },
         'portainer' : {
@@ -160,6 +174,22 @@ default_docker_compose_config = {
                 'portainer_data:' + volumes['portainer_data'],
             ],
         },
+        'mosquitto' : {
+            'image' : 'eclipse-mosquitto',
+            'hostname' : mqtt_host,
+            'ports' : [
+                ### TODO figure out how to handle tcp vs websockets config
+                f'{mqtt_port}:1883',
+                '9001:9001',
+            ],
+            'networks' : [
+                'frontend',
+            ],
+            #  'volumes' : [
+                #  str(MOSQUITTO_CONFIG_PATH) + ':' + volumes['mosquitto.conf'],
+            #  ],
+
+        }
     },
 }
 default_docker_compose_config['networks'] = networks
@@ -168,27 +198,39 @@ for key in volumes:
     default_docker_compose_config['volumes'][key] = None
 
 default_stack_config = dict()
+### compose project name (prepends to all services)
+default_stack_config['project_name'] = 'mrsm'
 default_stack_config[STACK_COMPOSE_FILENAME] = default_docker_compose_config
 #  default_stack_config['.env'] = env_text
 from meerschaum.config.stack.grafana import default_grafana_config
 default_stack_config['grafana'] = default_grafana_config
+from meerschaum.config.stack.mosquitto import default_mosquitto_config
+default_stack_config['mosquitto'] = default_mosquitto_config
 
 ### check if configs are in sync
 from meerschaum.config._paths import CONFIG_PATH, STACK_ENV_PATH, STACK_COMPOSE_PATH
 from meerschaum.config._paths import STACK_COMPOSE_FILENAME, STACK_ENV_FILENAME
 from meerschaum.config._paths import GRAFANA_DATASOURCE_PATH, GRAFANA_DASHBOARD_PATH
+from meerschaum.config._paths import MOSQUITTO_CONFIG_PATH
 from meerschaum.config._sync import sync_configs
 sync_configs(CONFIG_PATH, ['stack', STACK_COMPOSE_FILENAME], STACK_COMPOSE_PATH)
 
 def get_necessary_files():
-    from meerschaum.config._paths import STACK_ENV_PATH, STACK_COMPOSE_PATH, GRAFANA_DATASOURCE_PATH, GRAFANA_DASHBOARD_PATH
+    from meerschaum.config._paths import (
+        STACK_ENV_PATH,
+        STACK_COMPOSE_PATH,
+        GRAFANA_DATASOURCE_PATH,
+        GRAFANA_DASHBOARD_PATH,
+        #  MOSQUITTO_CONFIG_PATH,
+    )
     from meerschaum.config._paths import STACK_ENV_FILENAME, STACK_COMPOSE_FILENAME
-    from meerschaum.config import config
+    from meerschaum.config import get_config, config
     return {
         #  STACK_ENV_PATH : config['stack'][STACK_ENV_FILENAME],
         STACK_COMPOSE_PATH : (config['stack'][STACK_COMPOSE_FILENAME], compose_header),
         GRAFANA_DATASOURCE_PATH : config['stack']['grafana']['datasource'],
         GRAFANA_DASHBOARD_PATH : config['stack']['grafana']['dashboard'],
+        MOSQUITTO_CONFIG_PATH : get_config('stack', 'mosquitto', 'mosquitto.conf', patch=True),
     }
 
 

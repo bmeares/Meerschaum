@@ -43,6 +43,16 @@ default_meerschaum_config = {
                 'host'     : 'localhost',
             },
         },
+        'mqtt' : {
+            'default'      : {
+                'port'     : 1883,
+                'keepalive': 60,
+            },
+            'main'         : {
+                'host'     : 'localhost',
+                'port'     : 1883,
+            },
+        },
     },
 }
 default_system_config = {
