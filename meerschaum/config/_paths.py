@@ -42,8 +42,12 @@ PERMANENT_PATCH_PATH = Path(os.path.join(RESOURCES_PATH, PERMANENT_PATCH_FILENAM
 GRAFANA_RESOURCES_PATH = Path(os.path.join(CONFIG_ROOT_PATH, 'stack', 'grafana', 'resources'))
 GRAFANA_DATASOURCE_PATH = Path(os.path.join(GRAFANA_RESOURCES_PATH, 'provisioning', 'datasources', 'datasource.yaml'))
 GRAFANA_DASHBOARD_PATH = Path(os.path.join(GRAFANA_RESOURCES_PATH, 'provisioning', 'dashboards', 'dashboard.yaml'))
+#  GRAFANA_INI_PATH = Path(os.path.join(GRAFANA_RESOURCES_PATH, 'grafana.ini'))
 
-STACK_RESOURCES_PATH = Path(os.path.join(CONFIG_ROOT_PATH, 'stack', 'resources'))
+MOSQUITTO_RESOURCES_PATH = Path(os.path.join(CONFIG_ROOT_PATH, 'stack', 'mosquitto', 'resources'))
+MOSQUITTO_CONFIG_PATH = Path(os.path.join(MOSQUITTO_RESOURCES_PATH, 'mosquitto.conf'))
+
+STACK_RESOURCES_PATH = Path(os.path.join(CONFIG_ROOT_PATH, 'stack'))
 STACK_COMPOSE_FILENAME = "docker-compose.yaml"
 STACK_COMPOSE_PATH = Path(os.path.join(STACK_RESOURCES_PATH, STACK_COMPOSE_FILENAME))
 STACK_ENV_FILENAME = ".env"

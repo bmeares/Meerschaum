@@ -21,6 +21,7 @@ class PostInstallCommand(install):
             print(f"Configuration not found: {CONFIG_PATH}")
 
 required = [
+    'python-dateutil',
     'PyYAML',
     'cascadict',
     'pprintpp',
@@ -28,6 +29,9 @@ required = [
     'pyvim',
     'colorama',
     'more_termcolor',
+]
+iot = [
+    'paho-mqtt',
 ]
 ### TODO bake drivers into Docker image
 drivers = [
@@ -39,6 +43,9 @@ cli = [
     'pgcli',
     'mycli',
     'litecli',
+]
+analysis = [
+    #  'pandasgui',
 ]
 sql = drivers + [
     'pandas',
@@ -59,6 +66,8 @@ extras = {
     'cli' : cli,
     'sql' : sql,
     'api' : api,
+    'iot' : iot,
+    'analysis' : analysis,
 }
 full = set()
 for k, dependencies in extras.items():

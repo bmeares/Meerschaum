@@ -26,8 +26,10 @@ def stack(
     from meerschaum.config._paths import STACK_COMPOSE_PATH
     from meerschaum.utils.misc import yes_no, reload_package
     import meerschaum.config
+    from meerschaum.config import get_config
     from meerschaum.utils.debug import dprint
     from meerschaum.utils.warnings import warn
+    from meerschaum.utils.formatting import ANSI
     import os
 
     bootstrap_question = (
@@ -64,13 +66,23 @@ def stack(
     elif '--build' not in sub_args:
         sub_args.append('--build')
 
-    cmd_list = ['docker-compose'] + compose_command + sub_args
+    ### define project name when starting containers
+    project_name_list = ['--project-name', get_config('stack', 'project_name', patch=True)]
+    
+    ### disable ANSI if the user sets ANSI mode to False
+    ansi_list = [] if ANSI else ['--no-ansi']
+
+    debug_list = ['--log-level', 'DEBUG'] if debug else []
+
+    ### prepend settings before the docker-compose action
+    settings_list = project_name_list + ansi_list + debug_list
+
+    cmd_list = ['docker-compose'] + settings_list + compose_command + sub_args
     if debug: dprint(cmd_list)
     call(cmd_list, cwd=STACK_COMPOSE_PATH.parent)
-    reload_package(meerschaum.config)
-    reload_package(meerschaum.config)
+
+    ### not sure why I decided to reload the config here...
+    #  reload_package(meerschaum.config)
+    #  reload_package(meerschaum.config)
     return True, "Success"
 
-#  def _stack_build(
-        
-    #  ):

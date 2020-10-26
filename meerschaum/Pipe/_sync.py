@@ -46,6 +46,11 @@ def sync(
     if not self.id:
         self.register(debug=debug)
 
+    ### quit here if implicitly syncing MQTT pipes.
+    ### (pipe.sync() is called in the callback of the MQTTConnector.fetch() method)
+    if df is None and self.connector.type == 'mqtt':
+        return True, "Success"
+
     ### fetched df is the dataframe returned from the remote source
     ### via the connector
     if df is None:
@@ -53,7 +58,9 @@ def sync(
         return None
     if debug: dprint("Fetched data:\n" + str(df))
 
+    ### TODO use source connector, check for api instead of only SQL
     sql_connector = get_connector(type='sql', label='main', debug=debug)
+    #  source_connector = self.source_connector
 
     ### if table does not exist, create it with indices
     if not self.exists(debug=debug):

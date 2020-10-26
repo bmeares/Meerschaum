@@ -60,6 +60,12 @@ class Shell(cmd.Cmd):
         }:
             return "exit"
 
+        ### first things first: save history BEFORE execution
+        from meerschaum.config._paths import SHELL_HISTORY_PATH
+        if readline:
+            readline.set_history_length(get_config('system', 'shell', 'max_history', patch=patch))
+            readline.write_history_file(SHELL_HISTORY_PATH)
+
         args = parse_line(line)
 
         ### if debug is not set on the command line,
@@ -103,6 +109,9 @@ class Shell(cmd.Cmd):
             if len(output) > 1:
                 print(output)
         return ""
+
+    def post_cmd(stop : bool = False, line : str = ""):
+        pass
 
     def default(self, line):
         """
@@ -188,3 +197,5 @@ def input_with_sigint(_input):
             print("^C")
             return "pass"
     return _input_with_sigint
+
+

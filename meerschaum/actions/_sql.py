@@ -13,7 +13,8 @@ exec_methods = {
 
 def sql(
         action : list = [''],
-        debug=False,
+        gui : bool = False,
+        debug : bool = False,
         **kw
     ):
     """
@@ -94,6 +95,10 @@ def sql(
     sqlalchemy_engine_result = attempt_import('sqlalchemy.engine.result')
     if isinstance(result, sqlalchemy_engine_result.ResultProxy):
         print("Success")
-    else: print(result)
+    else:
+        print(result)
+        if gui:
+            pandasgui = attempt_import('pandasgui')
+            pandasgui.show(result)
 
     return (True, "Success")
