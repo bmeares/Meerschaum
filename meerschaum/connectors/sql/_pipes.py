@@ -103,7 +103,7 @@ def create_indices(
             ## create hypertable
             dt_query = (
                 f"SELECT create_hypertable('{pg_capital(str(pipe))}', " +
-                f"'{pg_capital(pipe.columns['datetime'])}', migrate_data => true);"
+                f"'{pipe.columns['datetime']}', migrate_data => true);"
             )
         elif self.flavor == 'postgresql':
             dt_query = f"CREATE INDEX ON {pg_capital(str(pipe))} ({pg_capital(pipe.columns['datetime'])})"
