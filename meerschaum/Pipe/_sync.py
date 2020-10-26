@@ -30,6 +30,8 @@ def sync(
     ### default: fetch new data via the connector.
     ### If new data is provided, skip fetching
     if df is None:
+        if self.connector is None:
+            return False, "Cannot fetch without a connector"
         df = self.fetch(debug = debug)
 
     ### if the instance connector is API, use its method. Otherwise do SQL things below
