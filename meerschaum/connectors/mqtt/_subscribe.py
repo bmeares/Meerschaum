@@ -53,7 +53,7 @@ def subscribe(
         if skip_duplicates:
             ### check if the current message is different from the last
             execute_callback = (self.last_msg[message.topic] != message.payload)
-        self.last_msg[message.topic] = message.payload
+        self.last_msgs[message.topic] = message.payload
         if execute_callback:
             return callback(message.payload.decode('utf-8'))
         dprint("Message on topic " + f'"{topic}"' + " has not changed since the last message. Skipping...")
