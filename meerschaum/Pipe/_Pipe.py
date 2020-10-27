@@ -67,20 +67,15 @@ class Pipe:
             parameters = parameters
         )
 
-        ### determine where to pull Pipe data from
-        instance_keys = mrsm_instance.split(':')
-        instance_type = instance_keys[0]
-        if len(instance_keys) == 2:
-            instance_label = instance_keys[1]
-        elif instance_type in default_instance_labels:
-            instance_label = default_instance_labels[instance_type]
-        self.instance_keys = instance_type + ':' + instance_label
+        ### NOTE: must be SQL or API Connector for this work
+        if not isinstance(mrsm_instance, str):
+            self._instance_connector = mrsm_instance
+            self.instance_keys = mrsm_instance.type + ':' + mrsm_instance.label
+        else:
+            self.instance_keys = mrsm_instance
 
         ### TODO aggregations?
         #  self._aggregations = dict()
-
-        ### TODO implement instance. This one will be tough bc of datetime parsing (need regex magic),
-        ###      but the groundwork is there, just have to implement it in the API.
 
     @property
     def instance_connector(self):
@@ -105,15 +100,7 @@ class Pipe:
     @property
     def id(self):
         if not ('_id' in self.__dict__ and self._id):
-            from meerschaum import get_connector
-            meta_connector = get_connector('sql', 'meta')
-            q = f"""
-            SELECT pipe_id
-            FROM pipes
-            WHERE connector_keys = '{self.connector_keys}'
-                AND metric_key = '{self.metric_key}'
-                AND location_key """ + ("IS NULL" if self.location_key is None else f"= '{self.location_key}'")
-            self._id = meta_connector.value(q)
+            self._id = self.instance_connector.get_pipe_id(self)
         return self._id
 
     @property

@@ -221,3 +221,33 @@ def get_backtrack_data(
     pd = import_pandas()
     return parse_df_datetimes(pd.read_json(response.text))
 
+def get_pipe_id(
+        self,
+        pipe : 'meerschuam.Pipe'
+    ) -> int:
+    """
+    Get a Pipe's ID from the API
+    """
+    r_url = pipe_r_url(pipe)
+    response = self.get(
+        r_url + '/id'
+    )
+    try:
+        return int(response.text)
+    except:
+        return None
+
+def get_pipe_attributes(
+        self,
+        pipe : 'meerschaum.Pipe'
+    ) -> dict:
+    """
+    Get a Pipe's attributes from the API
+    """
+    r_url = pipe_r_url(pipe)
+    response = self.get(r_url + '/attributes')
+    import json
+    try:
+        return json.loads(response.text)
+    except:
+        return None

@@ -480,6 +480,14 @@ def parse_connector_keys(keys : str, **kw) -> 'meerschaum.connectors.Connector':
         return None
     return conn
 
+def parse_instance_keys(keys : str, **kw):
+    """
+    Parse the Meerschaum instance value into a Connector object
+    """
+    if ':' not in keys:
+        keys += ':main'
+    return parse_connector_keys(keys)
+
 def is_pipe_registered(
         pipe : 'Pipe or MetaPipe',
         pipes : dict,
