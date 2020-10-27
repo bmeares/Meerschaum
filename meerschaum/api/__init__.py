@@ -7,15 +7,44 @@ from meerschaum.config import system_config
 from meerschaum.connectors import get_connector
 from meerschaum.utils.misc import attempt_import
 from meerschaum.utils._get_pipes import get_pipes as get_pipes_sql
-fastapi, graphene, starlette_graphql = attempt_import('fastapi', 'graphene', 'starlette.graphql', lazy=True)
+#  fastapi, graphene, starlette_graphql = attempt_import('fastapi', 'graphene', 'starlette.graphql', lazy=True)
+fastapi = attempt_import('fastapi', lazy=True)
 
-connector = get_connector(type="sql")
-database = connector.db
+connector = None
+def get_connector(instance_keys : str = None):
+    """
+    Create the connector
+    """
+    global connector
+    if connector is None:
+        from meerschaum.config._paths import API_UVICORN_CONFIG_PATH
+        yaml = attempt_import('yaml')
+        if instance_keys is None:
+            with open(API_UVICORN_CONFIG_PATH, 'r') as f:
+                uvicorn_config = yaml.safe_load(f)
+
+            ### Default: main SQL connector
+            if 'mrsm_instance' not in uvicorn_config:
+                uvicorn_config['mrsm_instance'] = 'sql'
+
+            instance_keys = uvicorn_config['mrsm_instance']
+
+        from meerschaum.utils.misc import parse_instance_keys
+        connector = parse_instance_keys(instance_keys)
+    return connector
+
+database = None
+def get_database(instance_keys : str = None):
+    global database
+    if database is None:
+        database = get_connector(instance_keys).db
+    return database
+
 _pipes = None
 def pipes(refresh=False):
     global _pipes
     if _pipes is None or refresh:
-        _pipes = get_pipes_sql()
+        _pipes = get_pipes_sql(mrsm_instance=get_connector())
     return _pipes
 
 def get_pipe(connector_keys, metric_key, location_key, refresh=False):
@@ -31,16 +60,16 @@ def get_pipe(connector_keys, metric_key, location_key, refresh=False):
     return p
 
 ### TODO move GraphQL queries somewhere
-class Query(graphene.ObjectType):
-    hello = graphene.String(
-        name = graphene.String(default_value="stranger")
-    )
-    def resolve_hello(self, info, name):
-        return 'hello' + name
+#  class Query(graphene.ObjectType):
+    #  hello = graphene.String(
+        #  name = graphene.String(default_value="stranger")
+    #  )
+    #  def resolve_hello(self, info, name):
+        #  return 'hello' + name
 
 sys_config = system_config['api']
 fast_api = fastapi.FastAPI(title='Meerschaum API')
-fast_api.add_route("/graphql", starlette_graphql.GraphQLApp(schema=graphene.Schema(query=Query)))
+#  fast_api.add_route("/graphql", starlette_graphql.GraphQLApp(schema=graphene.Schema(query=Query)))
 
 fastapi_responses, fastapi_templating, fastapi_staticfiles = attempt_import(
     'fastapi.responses',

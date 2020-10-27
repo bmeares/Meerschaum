@@ -406,4 +406,32 @@ def get_pipe_attributes(
 
     return attributes
 
+def get_sync_time(
+        self,
+        pipe : 'meerschaum.Pipe',
+        debug : bool = False,
+    ) -> 'datetime.datetime':
+    """
+    Get a Pipe's most recent datetime
+    """
+    from meerschaum.utils.misc import pg_capital
+    datetime = pipe.columns['datetime']
+    table = str(pipe)
+    if self.type in ('postgresql', 'timescaledb'):
+        datetime = pg_capital(datetime)
+        table = pg_capital(table)
+
+    q = f"SELECT {datetime} FROM {table} ORDER BY {datetime} DESC LIMIT 1"
+    try:
+        from meerschaum.utils.misc import round_time
+        import datetime
+        sync_time = round_time(
+            self.value(q).to_pydatetime(),
+            date_delta = datetime.timedelta(minutes=1),
+            to = 'down'
+        )
+    except:
+        sync_time = None
+
+    return sync_time
 
