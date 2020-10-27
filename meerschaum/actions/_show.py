@@ -30,6 +30,7 @@ def show(
         'version'    : _show_version,
         'connectors' : _show_connectors,
         'arguments'  : _show_arguments,
+        'data'       : _show_data,
     }
     return choose_subaction(action, show_options, **kw)
 
@@ -126,10 +127,26 @@ def _show_connectors(
 
 def _show_arguments(
         **kw
-    ):
+    ) -> tuple:
     from pprintpp import pprint
     pprint(kw)
     return True, "Success"
+
+def _show_data(
+        gui : bool = False,
+        debug : bool = False,
+        **kw
+    ):
+    from meerschaum import get_pipes
+    pipes = get_pipes(as_list=True, debug=debug, **kw)
+    for p in pipes:
+        df = p.get_backtrack_data(backtrack_minutes=1440, debug=debug)
+        print(df)
+        if gui:
+            pandasgui = attempt_import('pandasgui')
+            pandasgui.show(result)
+    return True, "Success"
+
 
 ### NOTE: This must be the final statement of the module.
 ###       Any subactions added below these lines will not

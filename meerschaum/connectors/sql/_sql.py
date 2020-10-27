@@ -90,12 +90,13 @@ def exec(
         self,
         query : str,
         debug : bool = False
-    ) -> bool:
+    ) -> 'resultProxy or None':
     """
     Execute SQL code and return success status. e.g. calling stored procedures
     """
     from meerschaum.utils.misc import attempt_import
     sqlalchemy = attempt_import("sqlalchemy")
+    if debug: dprint("Executing query:\n" + f"{query}")
     try:
         with self.engine.connect() as connection:
             result = connection.execute(

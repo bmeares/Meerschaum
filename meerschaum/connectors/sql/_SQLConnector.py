@@ -23,6 +23,10 @@ class SQLConnector(Connector):
         delete_pipe,
         get_backtrack_data,
         get_pipe_data,
+        register_pipe,
+        edit_pipe,
+        get_pipe_id,
+        get_pipe_attributes,
     )
     
     def __init__(
