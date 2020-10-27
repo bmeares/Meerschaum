@@ -29,6 +29,7 @@ required = [
     'pyvim',
     'colorama',
     'more_termcolor',
+    'aiofiles',
 ]
 iot = [
     'paho-mqtt',
@@ -59,7 +60,6 @@ api = sql + [
     'fastapi',
     #  'graphene',
     'jinja2',
-    'aiofiles',
 ]
 extras = {
     'drivers' : drivers,
@@ -85,7 +85,7 @@ setuptools.setup(
     description = 'Create and Manage Pipes with Meerschaum',
     long_description = readme,
     long_description_content_type = 'text/markdown',
-    url = 'https://github.com/bmeares/Meerschaum',
+    url = 'https://meerschaum.io',
     author = 'Bennett Meares',
     author_email = 'bennett.meares@gmail.com',
     license = 'MIT',
