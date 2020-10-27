@@ -63,6 +63,7 @@ def _api_start(
         action : list = [''],
         port : int = None,
         workers : int = None,
+        mrsm_instance : str = 'sql',
         debug : bool = False,
         **kw
     ):
@@ -79,6 +80,7 @@ def _api_start(
     from pprintpp import pprint
     from meerschaum.utils.misc import attempt_import
     from meerschaum.utils.debug import dprint
+    from meerschaum.config._paths import API_UVICORN_CONFIG_PATH
     uvicorn = attempt_import('uvicorn')
 
     uvicorn_config = dict(api_config['uvicorn'])
@@ -94,10 +96,23 @@ def _api_start(
 
     uvicorn_config['port'] = port
     uvicorn_config['reload'] = debug
+    uvicorn_config['mrsm_instance'] = mrsm_instance
 
+    custom_keys = ['mrsm_instance']
+
+    ### write config to a temporary file to communicate with uvicorn threads
+    yaml = attempt_import('yaml')
+    with open(API_UVICORN_CONFIG_PATH, 'w+') as f:
+        yaml.dump(uvicorn_config, f)
+
+    ### remove custom keys before callign uvicorn
+    for k in custom_keys:
+        del uvicorn_config[k]
+
+    from meerschaum.api import get_connector
     if debug:
-        from meerschaum.api import connector
-        dprint(f"Connection to database: {connector.host}")
+        ### instantiate the SQL connector
+        dprint(f"Connecting to Meerschaum instance: {mrsm_instance}")
 
         dprint(f"Starting Meerschaum API v{__version__} with the following configuration:")
         pprint(uvicorn_config, stream=sys.stderr)

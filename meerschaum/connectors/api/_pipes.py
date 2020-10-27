@@ -223,7 +223,8 @@ def get_backtrack_data(
 
 def get_pipe_id(
         self,
-        pipe : 'meerschuam.Pipe'
+        pipe : 'meerschuam.Pipe',
+        debug : bool = False,
     ) -> int:
     """
     Get a Pipe's ID from the API
@@ -239,7 +240,8 @@ def get_pipe_id(
 
 def get_pipe_attributes(
         self,
-        pipe : 'meerschaum.Pipe'
+        pipe : 'meerschaum.Pipe',
+        debug : bool = False,
     ) -> dict:
     """
     Get a Pipe's attributes from the API
@@ -251,3 +253,18 @@ def get_pipe_attributes(
         return json.loads(response.text)
     except:
         return None
+
+def get_sync_time(
+        self,
+        pipe : 'meerschaum.Pipe',
+        debug : bool = False,
+    ) -> 'datetime.datetime':
+    """
+    Get a Pipe's most recent datetime value from the API
+    """
+    import datetime, json
+    r_url = pipe_r_url(pipe)
+    response = self.get(r_url + '/sync_time')
+    dt = datetime.datetime.fromisoformat(json.loads(response.text))
+    return dt
+

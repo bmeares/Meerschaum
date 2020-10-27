@@ -69,14 +69,16 @@ def get_pipes(
         database might not be running (like the API).
     """
 
-    from meerschaum.connectors import get_connector
     from meerschaum.utils.misc import flatten_pipes_dict
 
     ### Get SQL or API connector (keys come from `connector.fetch_pipes_keys()`).
     ### If `wait`, wait until a connection is made
-    from meerschaum.utils.misc import parse_instance_keys
-    connector = parse_instance_keys(keys=mrsm_instance, wait=wait, debug=debug)
-    if debug: dprint(f"{connector}")
+    if isinstance(mrsm_instance, str):
+        from meerschaum.utils.misc import parse_instance_keys
+        connector = parse_instance_keys(keys=mrsm_instance, wait=wait, debug=debug)
+    else: ### NOTE: mrsm_instance MUST be a SQL or API connector for this to work
+        connector = mrsm_instance
+    if debug: dprint(f"Using instance connector: {connector}")
 
     ### get a list of tuples of keys based on the method type
     result = methods(

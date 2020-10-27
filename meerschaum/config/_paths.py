@@ -61,8 +61,10 @@ API_RESOURCES_PATH = Path(os.path.join(PACKAGE_ROOT_PATH, 'api', 'resources'))
 API_STATIC_PATH = Path(os.path.join(API_RESOURCES_PATH, 'static'))
 API_TEMPLATES_PATH = Path(os.path.join(API_RESOURCES_PATH, 'templates'))
 
-PIPES_RESOURCES_PATH = Path(os.path.join(RESOURCES_PATH, 'pipes'))
+API_UVICORN_RESOURCES_PATH = Path(os.path.join(RESOURCES_PATH, 'uvicorn'))
+API_UVICORN_CONFIG_PATH = Path(os.path.join(API_UVICORN_RESOURCES_PATH, '.thread_config.yaml'))
 
+PIPES_RESOURCES_PATH = Path(os.path.join(RESOURCES_PATH, 'pipes'))
 
 ### NOTE: This must be the bottom of the module
 paths_glob = dict(globals())
