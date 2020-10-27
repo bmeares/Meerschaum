@@ -9,7 +9,7 @@ from meerschaum.utils.misc import attempt_import
 from meerschaum.utils._get_pipes import get_pipes as get_pipes_sql
 fastapi, graphene, starlette_graphql = attempt_import('fastapi', 'graphene', 'starlette.graphql', lazy=True)
 
-connector = get_connector(type="sql", label="meta")
+connector = get_connector(type="sql")
 database = connector.db
 _pipes = None
 def pipes(refresh=False):
@@ -17,9 +17,18 @@ def pipes(refresh=False):
     if _pipes is None or refresh:
         _pipes = get_pipes_sql()
     return _pipes
+
 def get_pipe(connector_keys, metric_key, location_key, refresh=False):
+    """
+    Index the pipes dictionary or create a new Pipe object
+    """
+    from meerschaum.utils.misc import is_pipe_registered
+    from meerschaum import Pipe
     if location_key == '[None]': location_key = None
-    return pipes(refresh=refresh)[connector_keys][metric_key][location_key]
+    p = Pipe(connector_keys, metric_key, location_key)
+    if is_pipe_registered(p, pipes()):
+        return pipes(refresh=refresh)[connector_keys][metric_key][location_key]
+    return p
 
 ### TODO move GraphQL queries somewhere
 class Query(graphene.ObjectType):

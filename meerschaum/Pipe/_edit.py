@@ -8,7 +8,6 @@ Edit a Pipe's parameters here.
 
 def edit(
         self,
-        api_connector : 'APIConnector' = None,
         patch : bool = False,
         debug : bool = False,
         **kw
@@ -17,10 +16,6 @@ def edit(
     Edit a Pipe's configuration.
     If `patch` is True, update parameters by cascading rather than overwriting.
     """
-    if api_connector is None:
-        from meerschaum import get_connector
-        api_connector = get_connector(type='api')
-
     from meerschaum.config._paths import PIPES_RESOURCES_PATH
     from meerschaum.utils.misc import edit_file
     import pathlib, os
@@ -67,4 +62,4 @@ def edit(
         import pprintpp
         pprintpp.pprint(self.parameters)
 
-    return api_connector.edit_pipe(self, patch=patch, debug=debug)
+    return self.instance_connector.edit_pipe(self, patch=patch, debug=debug)

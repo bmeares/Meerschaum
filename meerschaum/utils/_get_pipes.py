@@ -72,36 +72,11 @@ def get_pipes(
     from meerschaum.connectors import get_connector
     from meerschaum.utils.misc import flatten_pipes_dict
 
-    default_meta_labels = {
-        'api' : 'main',
-        'sql' : 'meta',
-    }
-
-    ### determine where to pull Pipe data from
-    instance_keys = mrsm_instance.split(':')
-    instance_type = instance_keys[0]
-    try:
-        meta_label = instance_keys[1]
-    except:
-        meta_label = default_meta_labels[instance_type]
-    meta_type = instance_type
-
-    ### keys for metadata (not instance)
-    meta_keys = meta_type + ':' + meta_label
-
-    ### Substitute 'sql:meta' to 'sql:main' for instance.
-    ### There's probably a more scalable way to do this,
-    ### but I hope sql:meta / sql:main is the only case.
-    instance_label = meta_label
-    if instance_type == "sql" and meta_label == "meta": 
-        instance_label = "main"
-
-    ### keys for instance (not metadata)
-    instance_keys = instance_type + ':' + instance_label
-
     ### Get SQL or API connector (keys come from `connector.fetch_pipes_keys()`).
     ### If `wait`, wait until a connection is made
-    connector = get_connector(type=meta_type, label=meta_label, wait=wait)
+    from meerschaum.utils.misc import parse_instance_keys
+    connector = parse_instance_keys(keys=mrsm_instance, wait=wait, debug=debug)
+    if debug: dprint(f"{connector}")
 
     ### get a list of tuples of keys based on the method type
     result = methods(
@@ -125,7 +100,7 @@ def get_pipes(
         if mk not in pipes[ck]:
             pipes[ck][mk] = dict()
 
-        pipes[ck][mk][lk] = Pipe(ck, mk, lk, mrsm_instance=instance_keys, debug=debug)
+        pipes[ck][mk][lk] = Pipe(ck, mk, lk, mrsm_instance=connector, debug=debug)
 
     if not as_list: return pipes
     return flatten_pipes_dict(pipes)

@@ -14,6 +14,8 @@ default_meerschaum_config = {
             'default'      : {
                 'username' : 'meerschaum',
                 'password' : 'meerschaum',
+                'database' : 'mrsm_main',
+                'flavor'   : 'timescaledb',
             },
             'main'         : {
                 'username' : 'meerschaum',
@@ -23,7 +25,6 @@ default_meerschaum_config = {
                 'database' : 'mrsm_main',
                 'port'     : 5432,
             },
-            'meta'         : {},
             'local'        : {
                 'flavor'   : 'sqlite',
             },
