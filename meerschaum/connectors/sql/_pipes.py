@@ -18,7 +18,7 @@ def register_pipe(
     Register a new Pipe
     """
     from meerschaum.utils.debug import dprint
-    from meerschaum.api.tables import get_tables
+    #  from meerschaum.api.tables import get_tables
     #  from meerschaum.utils.misc import wait_for_connection, retry_connect
     #  import asyncio
 
@@ -197,8 +197,8 @@ def fetch_pipes_keys(
     ) + build_where(parameters)
 
     ### creates metadata
-    from meerschaum.api.tables import get_tables
-    tables = get_tables()
+    #  from meerschaum.api.tables import get_tables
+    #  tables = get_tables()
 
     ### execute the query and return a list of tuples
     try:
