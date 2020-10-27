@@ -20,8 +20,13 @@ def get_connector(instance_keys : str = None):
         from meerschaum.config._paths import API_UVICORN_CONFIG_PATH
         yaml = attempt_import('yaml')
         if instance_keys is None:
-            with open(API_UVICORN_CONFIG_PATH, 'r') as f:
-                uvicorn_config = yaml.safe_load(f)
+            try:
+                with open(API_UVICORN_CONFIG_PATH, 'r') as f:
+                    uvicorn_config = yaml.safe_load(f)
+            except:
+                uvicorn_config = dict()
+
+            if uvicorn_config is None: uvicorn_config = dict()
 
             ### Default: main SQL connector
             if 'mrsm_instance' not in uvicorn_config:
