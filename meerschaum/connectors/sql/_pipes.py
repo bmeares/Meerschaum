@@ -9,6 +9,130 @@ NOTE: These methods will only work for connectors which correspond to an
       existing Meerschaum database. Use with caution!
 """
 
+def register_pipe(
+        self,
+        pipe : 'meerschaum.Pipe',
+        debug : bool = False,
+    ) -> dict:
+    """
+    Register a new Pipe
+    """
+    from meerschaum.utils.debug import dprint
+    from meerschaum.api.tables import get_tables
+    #  from meerschaum.utils.misc import wait_for_connection, retry_connect
+    #  import asyncio
+
+    if pipe.id is not None:
+        return False, f"Pipe '{pipe}' is already registered"
+
+    ### NOTE: if `parameters` is supplied in the Pipe constructor,
+    ###       then `pipe.parameters` will exist and not be fetched from the database.
+
+    ### 1. Prioritize the Pipe object's `parameters` first.
+    ###    E.g. if the user manually sets the `parameters` property
+    ###    or if the Pipe already exists
+    ###    (which shouldn't be able to be registered anyway but that's an issue for later).
+    parameters = None
+    try:
+        parameters = pipe.parameters
+    except Exception as e:
+        if debug: dprint(str(e))
+        parameters = None
+
+    ### 2. If the parent pipe does not have `parameters` either manually set
+    ###    or within the database, check the `meta.parameters` value (likely None as well)
+    if parameters is None:
+        try:
+            parameters = pipe.meta.parameters
+        except Exception as e:
+            if debug: dprint(str(e))
+            parameters = None
+
+    ### ensure `parameters` is a dictionary
+    if parameters is None:
+        parameters = dict()
+
+    ### override `meta.parameters` with parameters found from the above process
+    pipe.meta.parameters = parameters
+
+    ### NOTE: I know it seems strange that I'm reverting from a perfectly
+    ### working async ORM query to a hand-written synchronous query.
+    ### But I value the design change more than miniscule performanc gain,
+    ### and I know that this method may be refactored later if necessary.
+
+    ### generate the INSERT statement
+    #  query = get_tables()['pipes'].insert().values(
+        #  connector_keys = pipe.connector_keys,
+        #  metric_key = pipe.metric_key,
+        #  location_key = pipe.location_key,
+        #  parameters = pipe.parameters,
+    #  )
+    #  asyncio.run(retry_connect(connector=self, debug=debug))
+    #  last_record_id = asyncio.run(self.db.execute(query))
+    #  return {**pipe.meta.dict(), "pipe_id": last_record_id}
+    import json
+    location_key = pipe.location_key
+    if location_key is None:
+        location_key = 'NULL'
+    else:
+        location_key = "'" + location_key + "'"
+    query = f"""
+    INSERT INTO pipes (
+        connector_keys,
+        metric_key,
+        location_key,
+        parameters
+    ) VALUES (
+        '{pipe.connector_keys}',
+        '{pipe.metric_key}',
+        {location_key},
+        '{json.dumps(pipe.parameters)}'
+    );
+    """
+    result = self.exec(query, debug=debug)
+    if result is None:
+        return False, f"Failed to register pipe '{pipe}'"
+    return True, f"Successfully registered pipe '{pipe}'"
+
+def edit_pipe(
+        self,
+        pipe : 'meerschaum.Pipe' = None,
+        patch : bool = False,
+        debug : bool = False
+    ) -> tuple:
+    """
+    Edit a Pipe's parameters.
+    patch : bool : False
+        If patch is True, update the existing parameters by cascading.
+        Otherwise overwrite the parameters (default)
+    """
+
+    from meerschaum.utils.debug import dprint
+    if not patch:
+        parameters = pipe.parameters
+    else:
+        from meerschaum import Pipe
+        from meerschaum.config._patch import apply_patch_to_config
+        original_parameters = Pipe(pipe.connector_keys, pipe.metric_key, pipe.location_key).parameters
+        parameters = apply_patch_to_config(
+            original_parameters,
+            pipe.parameters
+        )
+
+    import json
+    q = f"""
+    UPDATE pipes
+    SET parameters = '{json.dumps(pipe.parameters)}'
+    WHERE connector_keys = '{pipe.connector_keys}'
+        AND metric_key = '{pipe.metric_key}'
+        AND location_key """ + ("IS NULL" if pipe.location_key is None else f"= '{pipe.location_key}'")
+    result = self.exec(q, debug=debug)
+    message = f"Successfully edited pipe '{pipe}'"
+    if result is None:
+        message = f"Failed to edit pipe '{pipe}'"
+    return (result is not None), message
+
+
 def fetch_pipes_keys(
         self,
         connector_keys : list = [],
@@ -235,3 +359,51 @@ def get_pipe_data(
 
     if debug: dprint(f"Getting Pipe data with begin = '{begin}' and end = '{end}'")
     return self.read(query, debug=debug)
+
+def get_pipe_id(
+        self,
+        pipe : 'meerschaum.Pipe',
+        debug : bool = False,
+    ) -> int:
+    """
+    Get a Pipe's ID from the pipes table.
+    """
+    query = f"""
+    SELECT pipe_id
+    FROM pipes
+    WHERE connector_keys = '{pipe.connector_keys}'
+        AND metric_key = '{pipe.metric_key}'
+        AND location_key """ + ("IS NULL" if pipe.location_key is None else f"= '{pipe.location_key}'")
+    return self.value(query, debug=debug)
+
+def get_pipe_attributes(
+        self,
+        pipe : 'meerschaum.Pipe',
+        debug : bool = False
+    ) -> dict:
+    """
+    Get a Pipe's attributes dictionary
+    """
+    from meerschaum.utils.warnings import warn
+    try:
+        attributes = self.read(
+            ("SELECT * " +
+             "FROM pipes " +
+            f"WHERE pipe_id = {pipe.id}"),
+        ).to_dict('records')[0]
+
+    except Exception as e:
+        warn(e)
+        return None
+    
+    ### handle non-PostgreSQL databases (text vs JSON)
+    if not isinstance(attributes['parameters'], dict):
+        try:
+            import json
+            attributes['parameters'] = json.loads(attributes['parameters'])
+        except:
+            attributes['parameters'] = dict()
+
+    return attributes
+
+

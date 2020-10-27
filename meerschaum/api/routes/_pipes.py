@@ -15,24 +15,19 @@ sqlalchemy = attempt_import('sqlalchemy')
 pipes_endpoint = endpoints['mrsm'] + '/pipes'
 
 @fast_api.post(pipes_endpoint)
-async def register_pipe(pipe : MetaPipe):
+def register_pipe(pipe : MetaPipe):
     """
     Register a new Pipe
     """
-    if pipe.location_key == '[None]': pipe.location_key = None
-    pipes(refresh=True)
-    if is_pipe_registered(pipe, pipes()):
+    pipe_object = get_pipe(pipe.connector_keys, pipe.metric_key, pipe.location_key)
+    pipe_object.meta = pipe
+    if is_pipe_registered(pipe_object, pipes(refresh=True)):
+        print('memes')
         raise fastapi.HTTPException(status_code=409, detail="Pipe already registered")
-    query = get_tables()['pipes'].insert().values(
-        connector_keys = pipe.connector_keys,
-        metric_key = pipe.metric_key,
-        location_key = pipe.location_key,
-        parameters = pipe.parameters,
-    )
+    results = connector.register_pipe(pipe_object)
     pipes(refresh=True)
 
-    last_record_id = await database.execute(query)
-    return {**pipe.dict(), "pipe_id": last_record_id}
+    return results
 
 @fast_api.patch(pipes_endpoint)
 async def edit_pipe(pipe : MetaPipe, patch : bool = False):
@@ -46,27 +41,11 @@ async def edit_pipe(pipe : MetaPipe, patch : bool = False):
     pipes(refresh=True)
     if not is_pipe_registered(pipe, pipes()):
         raise fastapi.HTTPException(status_code=404, detail="Pipe is not registered.")
+    
+    results = connector.edit_pipe(pipe=pipe, patch=patch)
 
-    if not patch:
-        parameters = pipe.parameters
-    else:
-        from meerschaum.config._patch import apply_patch_to_config
-        parameters = apply_patch_to_config(
-            pipes()[pipe.connector_keys][pipe.metric_key][pipe.location_key].parameters,
-            pipe.parameters
-        )
-
-    import json
-    q = f"""
-    UPDATE pipes
-    SET parameters = '{json.dumps(pipe.parameters)}'
-    WHERE connector_keys = '{pipe.connector_keys}'
-        AND metric_key = '{pipe.metric_key}'
-        AND location_key """ + ("IS NULL" if pipe.location_key is None else f"= '{pipe.location_key}'")
-    dprint(q)
-    return_code = connector.exec(q)
     pipes(refresh=True)
-    return pipes()[pipe.connector_keys][pipe.metric_key][pipe.location_key]
+    return results
 
 @fast_api.get(pipes_endpoint + '/keys')
 async def fetch_pipes_keys(
@@ -256,3 +235,29 @@ def get_backtrack_data(
         media_type = 'application/json'
     )
 
+@fast_api.get(pipes_endpoint + '/{connector_keys}/{metric_key}/{location_key}/id')
+def get_pipe_id(
+        connector_keys : str,
+        metric_key : str,
+        location_key : str
+    ) -> int:
+    """
+    Get a Pipe's ID
+    """
+    return int(get_pipe(
+        connector_keys,
+        metric_key,
+        location_key
+    ).id)
+
+
+@fast_api.get(pipes_endpoint + '/{connector_keys}/{metric_key}/{location_key}/attributes')
+def get_pipe_attributes(
+        connector_keys : str,
+        metric_key : str,
+        location_key : str
+    ) -> dict:
+    """
+    Get a Pipe's attributes
+    """
+    return get_pipe(connector_keys, metric_key, location_key).attributes

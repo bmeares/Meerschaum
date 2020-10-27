@@ -26,7 +26,6 @@ def _register_pipes(
         metric_keys : list = [],
         location_keys : list = [],
         params : dict = dict(),
-        api_label : str = 'main',
         debug : bool = False,
         **kw
     ) -> tuple:
@@ -36,6 +35,7 @@ def _register_pipes(
     """
     from meerschaum import get_pipes, get_connector
     from meerschaum.utils.debug import dprint
+    from meerschaum.utils.warnings import warn
 
     pipes = get_pipes(
         connector_keys = connector_keys,
@@ -47,13 +47,21 @@ def _register_pipes(
         debug = debug,
         **kw
     )
-    api_connector = get_connector(type='api', label=api_label)
 
+    success, message = True, "Success"
+    failed_message = ""
     for p in pipes:
         if debug: dprint(f"Registering pipe '{p}'...")
-        p.register(api_connector=api_connector, debug=debug)
+        ss, msg = p.register(debug=debug)
+        if not ss:
+            warn(f"{msg}")
+            success = False
+            failed_message += f"{p}, "
 
-    return True, "Success"
+    if len(failed_message) > 0:
+        message = "Failed to register pipes: " + failed_message[:(-1 * len(', '))]
+
+    return success, message
 
 
 def _register_metrics(**kw):

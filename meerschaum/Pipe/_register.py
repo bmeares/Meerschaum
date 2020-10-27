@@ -8,7 +8,6 @@ Register a Pipe object
 
 def register(
         self,
-        api_connector : 'APIConnector' = None,
         debug : bool = False
     ):
     """
@@ -18,8 +17,5 @@ def register(
         self.parameters = {
             'columns' : self.columns,
         }
-    if api_connector is None:
-        from meerschaum import get_connector
-        api_connector = get_connector(type='api')
-    return api_connector.register_pipe(self, debug=debug)
-    
+    return self.instance_connector.register_pipe(self, debug=debug)
+
