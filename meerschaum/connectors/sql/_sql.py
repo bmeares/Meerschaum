@@ -144,25 +144,25 @@ def to_sql(
     **kw : keyword arguments
         Additional arguments will be passed to the DataFrame's `to_sql` function
     """
+    from meerschaum.utils.warnings import error
     if name is None:
-        raise Exception("Name must not be None to submit to the SQL server")
+        error("Name must not be None to submit to the SQL server")
+
+    from meerschaum.utils.misc import pg_capital
 
     ### resort to defaults if None
     if method == "":
         if self.flavor in bulk_flavors:
             method = psql_insert_copy
+            #  name = pg_capital(name)
         else:
             method = self.sys_config['method']
     chunksize = chunksize if chunksize != -1 else self.sys_config['chunksize']
 
-    from meerschaum.utils.misc import pg_capital
-    if self.flavor in ('timescaledb', 'postgresql'):
-        name = pg_capital(name)
-
     if debug:
         import time
         start = time.time()
-        print(f"Inserting {len(df)} rows with chunksize: {chunksize}...", end="")
+        print(f"Inserting {len(df)} rows with chunksize: {chunksize}...", end="", flush=True)
 
     try:
         df.to_sql(
@@ -180,7 +180,7 @@ def to_sql(
 
     if debug:
         end = time.time()
-        print(f" done.")
+        print(f" done.", flush=True)
         dprint(f"It took {round(end - start, 2)} seconds.")
 
     return True
@@ -199,6 +199,9 @@ def psql_insert_copy(table, conn, keys, data_iter):
     """
     import csv
     from io import StringIO
+
+    from meerschaum.utils.misc import pg_capital
+
     # gets a DBAPI connection that can provide a cursor
     dbapi_conn = conn.connection
     with dbapi_conn.cursor() as cur:
@@ -209,11 +212,12 @@ def psql_insert_copy(table, conn, keys, data_iter):
 
         columns = ', '.join('"{}"'.format(k) for k in keys)
         if table.schema:
-            table_name = '{}.{}'.format(table.schema, table.name)
+            table_name = '{}.{}'.format(pg_capital(table.schema), pg_capital(table.name))
         else:
-            table_name = table.name
+            table_name = pg_capital(table.name)
 
         sql = 'COPY {} ({}) FROM STDIN WITH CSV'.format(
-            table_name, columns)
+            table_name, columns
+        )
         cur.copy_expert(sql=sql, file=s_buf)
 

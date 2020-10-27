@@ -118,9 +118,9 @@ def _show_connectors(
     print(make_header("\nActive connectors:"))
     pprint(connectors)
 
-    from meerschaum.utils.misc import parse_connector_keys
+    from meerschaum.utils.misc import parse_instance_keys
     if action != []:
-        if (conn := parse_connector_keys(action[0], debug=debug)):
+        if (conn := parse_instance_keys(action[0], debug=debug)):
             pprint(conn.__dict__)
 
     return True, "Success"

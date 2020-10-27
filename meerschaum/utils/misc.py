@@ -749,3 +749,22 @@ def df_from_literal(
     pd = import_pandas()
     return pd.DataFrame({dt_name : [now], val_name : [val]})
 
+def filter_unseen_df(
+        old_df : 'pd.DataFrame',
+        new_df : 'pd.DataFrame',
+        debug : bool = False,
+    ) -> 'pd.DataFrame':
+    """
+    Left join two DataFrames to find the newest unseen data.
+
+    I have scoured the web for the best way to do this.
+    My intuition was to join on datetime and id, but the code below accounts for values as well,
+    without needing to define expicit columns or indices.
+
+    The logic below is based off this StackOverflow question, with an index reset thrown on top:
+    https://stackoverflow.com/questions/48647534/python-pandas-find-difference-between-two-data-frames#48647840
+    """
+    from meerschaum.utils.debug import dprint
+    filtered_df = new_df[~new_df.apply(tuple, 1).isin(old_df.apply(tuple, 1))].reset_index(drop=True)
+    if debug: dprint(filtered_df)
+    return filtered_df
