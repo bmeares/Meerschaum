@@ -57,7 +57,7 @@ sql = drivers + [
 api = sql + [
     'uvicorn',
     'fastapi',
-    'graphene',
+    #  'graphene',
     'jinja2',
     'aiofiles',
 ]

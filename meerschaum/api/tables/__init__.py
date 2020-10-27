@@ -6,7 +6,7 @@
 Define API SQLAlchemy tables
 """
 
-from meerschaum.api import connector
+from meerschaum.api import get_connector
 from meerschaum.utils.misc import attempt_import
 sqlalchemy, sqlalchemy_dialects_postgresql = attempt_import('sqlalchemy', 'sqlalchemy.dialects.postgresql')
 
@@ -19,12 +19,13 @@ def get_tables():
     """
     Substantiate and create sqlalchemy tables
     """
+    from meerschaum.utils.warnings import warn
     global tables
     if len(tables) == 0:
         tables = {
             'metrics' : sqlalchemy.Table(
                 'metrics',
-                connector.metadata,
+                get_connector().metadata,
                 sqlalchemy.Column('metric_id', sqlalchemy.Integer, primary_key=True),
                 sqlalchemy.Column('connector_keys', sqlalchemy.String, index=True),
                 sqlalchemy.Column('metric_key', sqlalchemy.String, index=True),
@@ -32,7 +33,7 @@ def get_tables():
             ),
             'locations' : sqlalchemy.Table(
                 'locations',
-                connector.metadata,
+                get_connector().metadata,
                 sqlalchemy.Column('location_id', sqlalchemy.Integer, primary_key=True),
                 sqlalchemy.Column('connector_keys', sqlalchemy.String, index=True),
                 sqlalchemy.Column('location_key', sqlalchemy.String, index=True),
@@ -45,10 +46,10 @@ def get_tables():
             ),
         }
         ### leveage PostgreSQL JSON data type
-        if connector.flavor in ('postgresql', 'timescaledb'):
+        if get_connector().flavor in ('postgresql', 'timescaledb'):
             tables['pipes'] = sqlalchemy.Table(
                 "pipes",
-                connector.metadata,
+                get_connector().metadata,
                 sqlalchemy.Column("pipe_id", sqlalchemy.Integer, primary_key=True),
                 sqlalchemy.Column("connector_keys", sqlalchemy.String, index=True, nullable=False),
                 sqlalchemy.Column("metric_key", sqlalchemy.String, index=True, nullable=False),
@@ -60,7 +61,7 @@ def get_tables():
         else:
             tables['pipes'] = sqlalchemy.Table(
                 "pipes",
-                connector.metadata,
+                get_connector().metadata,
                 sqlalchemy.Column("pipe_id", sqlalchemy.Integer, primary_key=True),
                 sqlalchemy.Column("connector_keys", sqlalchemy.String, index=True, nullable=False),
                 sqlalchemy.Column("metric_key", sqlalchemy.String, index=True, nullable=False),
@@ -69,6 +70,9 @@ def get_tables():
                 sqlalchemy.UniqueConstraint('connector_keys', 'metric_key', 'location_key', name='pipe_index')
             )
 
-        connector.metadata.create_all()
+        try:
+            get_connector().metadata.create_all()
+        except Exception as e:
+            warn(e)
     return tables
 

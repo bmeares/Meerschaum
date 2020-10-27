@@ -24,6 +24,7 @@ class APIConnector(Connector):
         get_backtrack_data,
         get_pipe_id,
         get_pipe_attributes,
+        get_sync_time,
     )
 
     def __init__(

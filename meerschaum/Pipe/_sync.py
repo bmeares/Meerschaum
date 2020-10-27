@@ -128,34 +128,22 @@ def get_sync_time(
     """
     Get the most recent datetime value for a Pipe
     """
-    
+    from meerschaum.utils.warnings import error, warn
+    if self.columns is None:
+        warn(f"No columns found for pipe '{self}'. Is pipe registered?")
+        return None
+
     if 'datetime' not in self.columns:
-        from meerschaum.utils.warnings import error
-        error(
+        warn(
             f"'datetime' must be declared in parameters:columns for Pipe '{self}'.\n\n" +
             f"You can add parameters for this Pipe with the following command:\n\n" +
             f"mrsm edit pipes -C {self.connector_keys} -M " +
             f"{self.metric_key} -L " +
             (f"[None]" if self.location_key is None else f"{self.location_key}")
         )
+        return None
 
-    datetime = self.columns['datetime']
-
-    q = f"SELECT {datetime} FROM {self} ORDER BY {datetime} DESC LIMIT 1"
-    from meerschaum import get_connector
-    main_connector = get_connector(type='sql', label='main')
-    try:
-        from meerschaum.utils.misc import round_time
-        import datetime
-        sync_time = round_time(
-            main_connector.value(q).to_pydatetime(),
-            date_delta = datetime.timedelta(minutes=1),
-            to='down'
-        )
-    except:
-        sync_time = None
-
-    return sync_time
+    return self.instance_connector.get_sync_time(self, debug=debug)
 
 def exists(
         self,
@@ -167,9 +155,11 @@ def exists(
     ### TODO test against views
 
     from meerschaum import get_connector
+    from meerschaum.utils.misc import pg_capital
+    conn = self.instance_connector
     conn = get_connector('sql', 'main')
     if conn.flavor in ('timescaledb', 'postgresql'):
-        q = f"SELECT to_regclass('{self}')"
+        q = f"SELECT to_regclass('{pg_capital(str(self))}')"
     elif conn.flavor == 'mssql':
         q = f"SELECT OBJECT_ID('{self}')"
     elif conn.flavor in ('mysql', 'mariadb'):

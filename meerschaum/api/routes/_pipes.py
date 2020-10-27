@@ -6,7 +6,7 @@
 Register Pipes via the Meerschaum API
 """
 
-from meerschaum.api import fastapi, fast_api, endpoints, database, connector, pipes, get_pipe, get_pipes_sql
+from meerschaum.api import fastapi, fast_api, endpoints, database, get_connector, pipes, get_pipe, get_pipes_sql
 from meerschaum.api.models import MetaPipe
 from meerschaum.api.tables import get_tables
 from meerschaum.utils.misc import attempt_import, is_pipe_registered, round_time
@@ -24,7 +24,7 @@ def register_pipe(pipe : MetaPipe):
     if is_pipe_registered(pipe_object, pipes(refresh=True)):
         print('memes')
         raise fastapi.HTTPException(status_code=409, detail="Pipe already registered")
-    results = connector.register_pipe(pipe_object)
+    results = get_connector().register_pipe(pipe_object)
     pipes(refresh=True)
 
     return results
@@ -42,7 +42,7 @@ async def edit_pipe(pipe : MetaPipe, patch : bool = False):
     if not is_pipe_registered(pipe, pipes()):
         raise fastapi.HTTPException(status_code=404, detail="Pipe is not registered.")
     
-    results = connector.edit_pipe(pipe=pipe, patch=patch)
+    results = get_connector().edit_pipe(pipe=pipe, patch=patch)
 
     pipes(refresh=True)
     return results
@@ -64,7 +64,7 @@ async def fetch_pipes_keys(
 
     if debug: dprint(f"location_keys: {len(location_keys)}")
 
-    return connector.fetch_pipes_keys(
+    return get_connector().fetch_pipes_keys(
         connector_keys = json.loads(connector_keys),
         metric_keys = json.loads(metric_keys),
         location_keys = json.loads(location_keys),
@@ -154,6 +154,7 @@ async def get_sync_time(
     Get a Pipe's latest datetime value.
     """
     if location_key == '[None]': location_key = None
+    pipe = get_pipe(connector_keys, metric_key, location_key)
     if is_pipe_registered(pipe, pipes()):
         return pipe.sync_time
 

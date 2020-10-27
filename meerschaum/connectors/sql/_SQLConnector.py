@@ -27,6 +27,7 @@ class SQLConnector(Connector):
         edit_pipe,
         get_pipe_id,
         get_pipe_attributes,
+        get_sync_time,
     )
     
     def __init__(

@@ -9,7 +9,15 @@ Handle all things warnings and errors here
 import warnings
 
 warnings.filterwarnings(
-    "default",
+    "always",
+    category = UserWarning
+)
+warnings.filterwarnings(
+    "ignore",
+    category = DeprecationWarning
+)
+warnings.filterwarnings(
+    "always",
     category = ImportWarning
 )
 warnings.filterwarnings(
@@ -20,7 +28,7 @@ warnings.filterwarnings(
 def enable_depreciation_warnings(name):
     import meerschaum.actions
     warnings.filterwarnings(
-        "default",
+        "always",
         category = DeprecationWarning,
         module = name
     )
