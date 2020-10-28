@@ -138,9 +138,12 @@ def _show_data(
         **kw
     ):
     from meerschaum import get_pipes
+    from meerschaum.utils.misc import attempt_import
     pipes = get_pipes(as_list=True, debug=debug, **kw)
+    backtrack_minutes = 1440
     for p in pipes:
-        df = p.get_backtrack_data(backtrack_minutes=1440, debug=debug)
+        df = p.get_backtrack_data(backtrack_minutes=backtrack_minutes, debug=debug)
+        print(f"Last {backtrack_minutes} minutes of data for Pipe '{p}'")
         print(df)
         if gui:
             pandasgui = attempt_import('pandasgui')

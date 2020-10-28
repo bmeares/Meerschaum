@@ -36,7 +36,7 @@ def sync(
 
     ### if the instance connector is API, use its method. Otherwise do SQL things below
     if self.instance_connector.type == 'api':
-        return self.instance_connector.sync_pipe(self, df, debug=debug)
+        return self.instance_connector.sync_pipe(self, df, debug=debug, **kw)
 
     datetime = self.get_columns('datetime')
 
@@ -90,12 +90,16 @@ def sync(
     new_data_df = filter_unseen_df(backtrack_df, df, debug=debug)
     if debug: dprint(f"New unseen data:\n" + str(new_data_df))
 
+    if_exists = kw.get('if_exists', 'append')
+
+
     ### append new data to Pipe's table
     sql_connector.to_sql(
         new_data_df,
         name = str(self),
-        if_exists = 'append',
-        debug = debug
+        if_exists = if_exists,
+        debug = debug,
+        **kw
     )
     return True, "Success"
 
