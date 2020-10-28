@@ -305,10 +305,17 @@ def get_backtrack_data(
         begin = begin
     )
 
-    query = f"SELECT * FROM {pipe}" + (f" WHERE {pipe.get_columns('datetime')} > {da}" if da else "")
-    if debug: dprint(query)
+    ### check for capitals
+    from meerschaum.utils.misc import pg_capital
+    dt = pipe.get_columns('datetime')
+    table = str(pipe)
+    if self.flavor in ('timescaledb', 'postgresql'):
+        dt = pg_capital(dt)
+        table = pg_capital(table)
 
-    return self.read(query)
+    query = f"SELECT * FROM {table}" + (f" WHERE {dt} > {da}" if da else "")
+
+    return self.read(query, debug=debug)
 
 def get_pipe_data(
         self,
@@ -415,7 +422,7 @@ def get_sync_time(
     Get a Pipe's most recent datetime
     """
     from meerschaum.utils.misc import pg_capital
-    datetime = pipe.columns['datetime']
+    datetime = pipe.get_columns('datetime')
     table = str(pipe)
     if self.type in ('postgresql', 'timescaledb'):
         datetime = pg_capital(datetime)
@@ -426,7 +433,7 @@ def get_sync_time(
         from meerschaum.utils.misc import round_time
         import datetime
         sync_time = round_time(
-            self.value(q).to_pydatetime(),
+            self.value(q, debug=debug).to_pydatetime(),
             date_delta = datetime.timedelta(minutes=1),
             to = 'down'
         )

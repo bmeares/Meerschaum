@@ -7,11 +7,13 @@ Docker Compose stack configuration goes here
 """
 
 import os
+import json
 from meerschaum.config._paths import (
     GRAFANA_DATASOURCE_PATH,
     GRAFANA_DASHBOARD_PATH,
     #  GRAFANA_INI_PATH,
     MOSQUITTO_CONFIG_PATH,
+    CONFIG_ROOT_PATH,
 )
 from meerschaum.config._paths import STACK_COMPOSE_PATH, STACK_ENV_PATH, STACK_COMPOSE_FILENAME
 
@@ -49,22 +51,22 @@ env_dict = {
     'ALLOW_IP_RANGE' : '0.0.0.0/0',
     'MEERSCHAUM_API_CONFIG_RESOURCES' : '/root/.config/meerschaum',
 }
-env_dict['MEERSCHAUM_API_CONFIG'] = (
-    """{
-        \"meerschaum\" : {
-            \"connectors\" : {
-                \"sql\": {
-                    \"meta\" : {
-                        \"host\": """ + '\"' + env_dict['MEERSCHAUM_DB_HOSTNAME'] + """\"
+### apply patch to host config to change hostname to the Docker service name
+env_dict['MEERSCHAUM_API_CONFIG'] = json.dumps(
+    {
+        'meerschaum' : {
+            'connectors' : {
+                'sql' : {
+                    'main' : {
+                        'host' : env_dict['MEERSCHAUM_DB_HOSTNAME'],
                     },
-                    \"main\" : {
-                        \"host\": """ + '\"' + env_dict['MEERSCHAUM_DB_HOSTNAME'] + """\"
-                    }
-                }
-            }
-        }
-    }"""
+                },
+            },
+        },
+    },
+    separators = (',', ':'),
 )
+
 
 compose_header = """
 ##############################################################
@@ -80,7 +82,8 @@ compose_header = """
 """
 
 volumes = {
-    'meerschaum_api_config_resources' : env_dict['MEERSCHAUM_API_CONFIG_RESOURCES'],
+    'meerschaum_api_config' : '/root/.config/meerschaum',
+    #  'meerschaum_api_config' : env_dict['MEERSCHAUM_API_CONFIG'],
     'meerschaum_db_data' : '/var/lib/postgresql/data',
     'grafana_storage' : '/var/lib/grafana',
     'portainer_data' : '/data',
@@ -130,7 +133,7 @@ default_docker_compose_config = {
                 'meerschaum_db',
             ],
             'volumes' : [
-                'meerschaum_api_config_resources' + ':' + volumes['meerschaum_api_config_resources']
+                str(CONFIG_ROOT_PATH) + ':' + volumes['meerschaum_api_config'],
             ],
         },
         'grafana' : {
@@ -159,6 +162,8 @@ default_docker_compose_config = {
             'environment' : [
                 'GF_SECURITY_ALLOW_EMBEDDING=true',
                 'GF_ANALYTICS_REPORTING_ENABLED=false',
+                'GF_AUTH_ANONYMOUS_ENABLED=true',
+                'GF_AUTH_ANONYMOUS_ORGANIZATION=public',
             ],
         },
         'portainer' : {

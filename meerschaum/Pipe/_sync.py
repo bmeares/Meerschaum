@@ -66,7 +66,8 @@ def sync(
         sql_connector.to_sql(
             df.head(0),
             if_exists = 'append',
-            name = str(self)
+            name = str(self),
+            debug = debug
         )
         ### build indices on Pipe's root table
         sql_connector.create_indices(self, debug=debug)
@@ -78,14 +79,15 @@ def sync(
         ].min().to_pydatetime(),
         to = 'down'
     ) - datetime_pkg.timedelta(minutes=1)
-    if debug: dprint(f"Looking at data newer than {begin}")
+    if debug: dprint(f"Looking at data newer than '{begin}'")
 
     ### backtrack_df is existing Pipe data that overlaps with the fetched df
     backtrack_df = self.get_backtrack_data(begin=begin, debug=debug)
     if debug: dprint("Existing data:\n" + str(backtrack_df))
 
     ### remove data we've already seen before
-    new_data_df = df[~df.isin(backtrack_df)].dropna(how='all')
+    from meerschaum.utils.misc import filter_unseen_df
+    new_data_df = filter_unseen_df(backtrack_df, df, debug=debug)
     if debug: dprint(f"New unseen data:\n" + str(new_data_df))
 
     ### append new data to Pipe's table
