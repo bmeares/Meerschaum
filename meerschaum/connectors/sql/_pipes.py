@@ -89,6 +89,11 @@ def register_pipe(
         '{json.dumps(pipe.parameters)}'
     );
     """
+
+    ### ensure pipes table exists
+    from meerschaum.connectors.sql.tables import get_tables
+    tables = get_tables()
+
     result = self.exec(query, debug=debug)
     if result is None:
         return False, f"Failed to register pipe '{pipe}'"

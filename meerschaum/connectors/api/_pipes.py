@@ -133,7 +133,8 @@ def sync_pipe(
         self,
         pipe : 'meerschaum.Pipe' = None,
         df : 'pd.DataFrame' = None,
-        debug : bool = False
+        debug : bool = False,
+        **kw
     ) -> tuple:
     """
     Append a pandas DataFrame to a Pipe.
@@ -147,7 +148,7 @@ def sync_pipe(
     try:
         response = self.post(
             r_url,
-            data = df.to_json(date_format='iso')
+            data = df.to_json(date_format='iso', date_unit='us')
         )
     except Exception as e:
         from meerschaum.utils.warnings import warn
