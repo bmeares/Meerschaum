@@ -14,6 +14,44 @@ def parse_arguments(sysargs : list) -> dict:
     Parse a list of arguments into standard Meerschaum arguments.
     """
     from meerschaum.config import config as cf, get_config
+    import copy
+
+    sub_arguments = []
+    sub_arg_indices = []
+    begin_decorator, end_decorator = get_config('system', 'arguments', 'sub_decorators', patch=True)
+    found_begin_decorator = False
+    for i, word in enumerate(sysargs):
+        is_sub_arg = False
+        if not found_begin_decorator:
+            found_begin_decorator = word.startswith(begin_decorator)
+            found_end_decorator = word.endswith(end_decorator)
+
+        if found_begin_decorator:
+            ### check if sub arg is ever closed
+            for a in sysargs[i:]:
+                if a.endswith(end_decorator):
+                    is_sub_arg = True
+                    found_begin_decorator = False
+        elif found_end_decorator:
+            for a in sysargs[:i]:
+                if a.startswith(begin_decorator):
+                    is_sub_arg = True
+                    found_begin_decorator = False
+        if is_sub_arg:
+            ### remove decorators
+            sa = word
+            if sa.startswith(begin_decorator): sa = sa[len(begin_decorator):]
+            if sa.endswith(end_decorator): sa = sa[:-1 *len(end_decorator)]
+            sub_arguments.append(sa)
+            ### remove sub-argument from action list
+            sub_arg_indices.append(i)
+
+    ### rebuild sysargs without sub_arguments
+    sysargs = [
+        word for i, word in enumerate(sysargs)
+            if i not in sub_arg_indices
+    ]
+
     args, unknown = parser.parse_known_args(sysargs)
     if unknown: print(f"Unknown arguments: {unknown}")
 
@@ -30,17 +68,8 @@ def parse_arguments(sysargs : list) -> dict:
         ### clean up patch so it's not loaded next time
         os.remove(PATCH_PATH)
 
-    begin_decorator, end_decorator = get_config('system', 'arguments', 'sub_decorators', patch=True)
 
     args_dict = vars(args)
-    sub_arguments = []
-    for i, action in enumerate(args_dict['action']):
-        if action.startswith(begin_decorator) and action.endswith(end_decorator):
-            ### remove decorators
-            sub_arguments += action[len(begin_decorator):-1 * len(end_decorator)].split(' ')
-            ### remove sub-argument from action list
-            del args_dict['action'][i]
-
     ### append decorated arguments to sub_arguments list
     if 'sub_args' not in args_dict: args_dict['sub_args'] = []
     if args_dict['sub_args'] is None: args_dict['sub_args'] = []

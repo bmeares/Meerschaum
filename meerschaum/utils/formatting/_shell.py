@@ -27,3 +27,21 @@ def make_header(
     for i in range(max_length):
         s += ruler
     return s
+
+def clear_screen(debug : bool = False) -> bool:
+    from meerschaum.utils.formatting import ANSI
+    from meerschaum.utils.debug import dprint
+    if debug:
+        dprint("Skipping screen clear.")
+        return True
+    if ANSI:
+        clear_string = '\033c'
+        print(clear_string, end="", flush=True)
+        return True
+    ### ANSI support is disabled, try system level instead
+    import platform, os
+    if platform.system() == 'Windows':
+        command = 'cls'
+    command = 'clear' if platform.system() != "Windows" else "cls"
+    rc = os.system(command)
+    return rc == 0

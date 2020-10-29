@@ -22,7 +22,7 @@ def sync(
     return choose_subaction(action, options, **kw)
 
 def _sync_pipes(
-        workers : int = None
+        workers : int = None,
         debug : bool = False,
         **kw
     ) -> tuple:

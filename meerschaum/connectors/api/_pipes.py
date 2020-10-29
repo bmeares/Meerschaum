@@ -216,7 +216,7 @@ def get_backtrack_data(
         )
     except Exception as e:
         from meerschaum.utils.warnings import warn
-        warn(e)
+        warn(f"Failed to parse backtrack data JSON for pipe '{pipe}'. Exception:\n" + str(e))
         return None
     from meerschaum.utils.misc import import_pandas, parse_df_datetimes
     pd = import_pandas()

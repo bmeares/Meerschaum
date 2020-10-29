@@ -30,6 +30,7 @@ required = [
     'colorama',
     'more_termcolor',
     'aiofiles',
+    'cmd2',
 ]
 iot = [
     'paho-mqtt',
@@ -61,6 +62,9 @@ api = sql + [
     #  'graphene',
     'jinja2',
 ]
+stack = [
+    'docker',
+]
 extras = {
     'drivers' : drivers,
     'cli' : cli,
@@ -68,6 +72,7 @@ extras = {
     'api' : api,
     'iot' : iot,
     'analysis' : analysis,
+    'stack' : stack,
 }
 full = set()
 for k, dependencies in extras.items():
@@ -88,6 +93,8 @@ setuptools.setup(
     url = 'https://meerschaum.io',
     author = 'Bennett Meares',
     author_email = 'bennett.meares@gmail.com',
+    maintainer = 'Bennett Meares',
+    maintainer_email = 'bennett,meares@gmail.com',
     license = 'MIT',
     packages = setuptools.find_packages(),
     install_requires = required,

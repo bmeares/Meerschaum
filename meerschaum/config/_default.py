@@ -138,6 +138,8 @@ default_system_config = {
         },
         'timeout'          : 60,
         'max_history'      : 1000,
+        'clear_screen'     : False,
+        'cmd'              : 'cmd2',
     },
     ### not to be confused with system_config['connectors']['api']
     'api' : {
