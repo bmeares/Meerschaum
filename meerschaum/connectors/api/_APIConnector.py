@@ -8,6 +8,10 @@ Interact with the Meerschaum WebAPI with the APIConnector
 
 from meerschaum.connectors._Connector import Connector
 
+required_attributes = {
+    'host',
+}
+
 class APIConnector(Connector):
 
     from ._post import post
@@ -33,15 +37,21 @@ class APIConnector(Connector):
         debug : bool = False,
         **kw
     ):
-        import requests.auth
         super().__init__('api', label=label, **kw)
+        if 'protocol' not in self.__dict__:
+            self.protocol = 'http'
+        if 'port' not in self.__dict__:
+            self.port = 8000
+        self.verify_attributes(required_attributes)
         self.url = (
             self.protocol + '://' +
             self.host + ':' +
             str(self.port)
         )
-        self.auth = requests.auth.HTTPBasicAuth(
-            self.username,
-            self.password
-        )
+        import requests.auth
+        if 'username' in self.__dict__ and 'password' in self.__dict__:
+            self.auth = requests.auth.HTTPBasicAuth(
+                self.username,
+                self.password
+            )
 

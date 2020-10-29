@@ -33,8 +33,9 @@ if permanent_patch_config is not None:
     dprint("Found permanent patch configuration. Updating main config and deleting permanent patch...")
     config = apply_patch_to_config(config, permanent_patch_config)
     write_config(config)
-    from meerschaum.config._paths import PERMANENT_PATCH_PATH
+    from meerschaum.config._paths import PERMANENT_PATCH_PATH, DEFAULT_CONFIG_PATH
     if PERMANENT_PATCH_PATH.exists(): os.remove(PERMANENT_PATCH_PATH)
+    if DEFAULT_CONFIG_PATH.exists(): os.remove(DEFAULT_CONFIG_PATH)
 
 ### if environment variable MEERSCHAUM_CONFIG is set, , patch config
 from meerschaum.utils.misc import string_to_dict
@@ -68,11 +69,11 @@ def get_config(*keys, patch=False, debug=False):
                 c = c[k]
             except KeyError:
                 from meerschaum.utils.warnings import warn
-                warn(f"Invalid keys in config: {keys}")
+                warn(f"Invalid keys in config: {keys}", stacklevel=3)
                 if patch:
                     from meerschaum.config._paths import PERMANENT_PATCH_PATH, CONFIG_PATH
                     import shutil, sys
-                    if debug: dprint(f"Moving {CONFIG_PATH} to {PERMANENT_PATCH_PATH}. Restart Meerschaum to patch configuration with new defaults.")
+                    dprint(f"Moving {CONFIG_PATH} to {PERMANENT_PATCH_PATH}. Restart Meerschaum to patch configuration with new defaults.")
                     shutil.move(CONFIG_PATH, PERMANENT_PATCH_PATH)
                     sys.exit()
     return c

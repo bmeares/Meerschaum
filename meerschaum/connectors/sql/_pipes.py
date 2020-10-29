@@ -18,9 +18,10 @@ def register_pipe(
     Register a new Pipe
     """
     from meerschaum.utils.debug import dprint
-    #  from meerschaum.api.tables import get_tables
-    #  from meerschaum.utils.misc import wait_for_connection, retry_connect
-    #  import asyncio
+
+    ### ensure pipes table exists
+    from meerschaum.connectors.sql.tables import get_tables
+    tables = get_tables()
 
     if pipe.id is not None:
         return False, f"Pipe '{pipe}' is already registered"
@@ -90,10 +91,6 @@ def register_pipe(
     );
     """
 
-    ### ensure pipes table exists
-    from meerschaum.connectors.sql.tables import get_tables
-    tables = get_tables()
-
     result = self.exec(query, debug=debug)
     if result is None:
         return False, f"Failed to register pipe '{pipe}'"
@@ -123,6 +120,10 @@ def edit_pipe(
             original_parameters,
             pipe.parameters
         )
+
+    ### ensure pipes table exists
+    from meerschaum.connectors.sql.tables import get_tables
+    tables = get_tables()
 
     import json
     q = f"""
@@ -201,9 +202,9 @@ def fetch_pipes_keys(
             "FROM pipes"
     ) + build_where(parameters)
 
-    ### creates metadata
-    #  from meerschaum.api.tables import get_tables
-    #  tables = get_tables()
+    ### ensure pipes table exists
+    from meerschaum.connectors.sql.tables import get_tables
+    tables = get_tables()
 
     ### execute the query and return a list of tuples
     try:
@@ -224,7 +225,8 @@ def create_indices(
     """
     from meerschaum.utils.debug import dprint
     from meerschaum.utils.misc import pg_capital
-    index_queries = []
+    from meerschaum.utils.warnings import warn
+    index_queries = dict()
 
     ### create datetime index
     if 'datetime' in pipe.columns and pipe.columns['datetime']:
@@ -241,7 +243,7 @@ def create_indices(
         else: ### mssql, sqlite, etc.
             dt_query = f"CREATE INDEX {pipe.columns['datetime']}_index ON {pipe} ({pipe.columns['datetime']})"
             
-        index_queries.append(dt_query)
+        index_queries[pipe.get_columns('datetime')] = dt_query
 
     ### create id index
     if 'id' in pipe.columns and pipe.columns['id']:
@@ -252,12 +254,12 @@ def create_indices(
         else: ### mssql, sqlite, etc.
             id_query = f"CREATE INDEX {pipe.columns['id']}_index ON {pipe} ({pipe.columns['id']})"
 
-        index_queries.append(id_query)
+        index_queries[pipe.get_columns('id')] = id_query
 
-    for q in index_queries:
-        if debug: dprint(q)
+    for col, q in index_queries.items():
+        if debug: dprint(f"Creating index on column '{col}' for Pipe '{pipe}'")
         if not self.exec(q, debug=debug):
-            return None
+            warn(f"Failed to create index on column '{col}' for Pipe '{pipe}'")
     return True
 
 def delete_pipe(
@@ -276,6 +278,11 @@ def delete_pipe(
         pipe_name = pg_capital(pipe_name)
     if not pipe.id:
         return False, f"Pipe '{pipe}' is not registered"
+
+    ### ensure pipes table exists
+    from meerschaum.connectors.sql.tables import get_tables
+    tables = get_tables()
+
     q = f"DELETE FROM pipes WHERE pipe_id = {pipe.id}"
     if not self.exec(q):
         return False, f"Failed to delete registration for '{pipe}'"
