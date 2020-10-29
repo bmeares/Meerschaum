@@ -6,7 +6,7 @@
 Register Pipes via the Meerschaum API
 """
 
-from meerschaum.api import fastapi, fast_api, endpoints, database, get_connector, pipes, get_pipe, get_pipes_sql
+from meerschaum.api import fastapi, fast_api, endpoints, get_connector, pipes, get_pipe, get_pipes_sql
 from meerschaum.api.models import MetaPipe
 from meerschaum.api.tables import get_tables
 from meerschaum.utils.misc import attempt_import, is_pipe_registered, round_time
@@ -188,7 +188,7 @@ def get_pipe_data(
         location_key : str,
         begin : datetime.datetime = None,
         end : datetime.datetime = None,
-        orient : str = 'columns'
+        orient : str = 'records'
     ) -> bool:
     """
     Get a Pipe's data. Optionally set query boundaries
@@ -204,7 +204,8 @@ def get_pipe_data(
             debug = True
         ).to_json(
             date_format = 'iso',
-            orient = orient
+            orient = orient,
+            date_unit = 'us',
         ),
         media_type = 'application/json'
     )
@@ -215,7 +216,7 @@ def get_backtrack_data(
         location_key : str,
         begin : datetime.datetime = None,
         backtrack_minutes : int = 0,
-        orient : str = 'columns'
+        orient : str = 'records'
     ) -> bool:
     """
     Get a Pipe's data. Optionally set query boundaries
@@ -231,7 +232,8 @@ def get_backtrack_data(
             debug = True
         ).to_json(
             date_format = 'iso',
-            orient = orient
+            orient = orient,
+            date_unit = 'us'
         ),
         media_type = 'application/json'
     )
@@ -245,11 +247,17 @@ def get_pipe_id(
     """
     Get a Pipe's ID
     """
-    return int(get_pipe(
-        connector_keys,
-        metric_key,
-        location_key
-    ).id)
+    try:
+        pipe_id = int(
+            get_pipe(
+                connector_keys,
+                metric_key,
+                location_key
+            ).id
+        )
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+    return pipe_id
 
 
 @fast_api.get(pipes_endpoint + '/{connector_keys}/{metric_key}/{location_key}/attributes')

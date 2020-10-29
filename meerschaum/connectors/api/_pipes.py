@@ -141,6 +141,10 @@ def sync_pipe(
     If Pipe does not exist, it is registered with supplied metadata
         NOTE: columns['datetime'] must be set for new Pipes.
     """
+    from meerschaum.utils.warnings import warn
+    if df is None:
+        warn(f"DataFrame is None. Cannot sync pipe '{pipe}")
+        return None
     r_url = pipe_r_url(pipe) + '/data'
     if debug:
         from meerschaum.utils.debug import dprint
@@ -151,7 +155,6 @@ def sync_pipe(
             data = df.to_json(date_format='iso', date_unit='us')
         )
     except Exception as e:
-        from meerschaum.utils.warnings import warn
         warn(e)
         return None
 
@@ -184,16 +187,23 @@ def get_pipe_data(
     """
     Fetch data from the API
     """
+    from meerschaum.utils.warnings import warn
     r_url = pipe_r_url(pipe)
     try:
         response = self.get(r_url + "/data", params={'begin': begin, 'end': end})
     except Exception as e:
-        from meerschaum.utils.warnings import warn
         warn(e)
         return None
     from meerschaum.utils.misc import import_pandas, parse_df_datetimes
     pd = import_pandas()
-    return parse_df_datetimes(pd.read_json(response.text))
+    try:
+        df = pd.read_json(response.text)
+    except Exception as e:
+        warn(str(e))
+        return None
+    df = parse_df_datetimes(pd.read_json(response.text), debug=debug)
+    if debug: dprint(df)
+    return df
 
 def get_backtrack_data(
         self,
@@ -205,6 +215,8 @@ def get_backtrack_data(
     """
     Get a Pipe's backtrack data from the API
     """
+    from meerschaum.utils.debug import dprint
+    from meerschaum.utils.warnings import warn
     r_url = pipe_r_url(pipe)
     try:
         response = self.get(
@@ -215,12 +227,19 @@ def get_backtrack_data(
             }
         )
     except Exception as e:
-        from meerschaum.utils.warnings import warn
         warn(f"Failed to parse backtrack data JSON for pipe '{pipe}'. Exception:\n" + str(e))
         return None
     from meerschaum.utils.misc import import_pandas, parse_df_datetimes
+    if debug: dprint(response.text)
     pd = import_pandas()
-    return parse_df_datetimes(pd.read_json(response.text))
+    try:
+        df = pd.read_json(response.text)
+    except Exception as e:
+        warn(str(e))
+        return None
+    df = parse_df_datetimes(pd.read_json(response.text), debug=debug)
+    if debug: dprint(df)
+    return df
 
 def get_pipe_id(
         self,
@@ -230,10 +249,12 @@ def get_pipe_id(
     """
     Get a Pipe's ID from the API
     """
+    from meerschaum.utils.debug import dprint
     r_url = pipe_r_url(pipe)
     response = self.get(
         r_url + '/id'
     )
+    if debug: dprint(response.text)
     try:
         return int(response.text)
     except:
