@@ -204,7 +204,7 @@ def fetch_pipes_keys(
 
     ### ensure pipes table exists
     from meerschaum.connectors.sql.tables import get_tables
-    tables = get_tables()
+    tables = get_tables(mrsm_instance=str(self))
 
     ### execute the query and return a list of tuples
     try:
@@ -454,3 +454,19 @@ def get_sync_time(
 
     return sync_time
 
+def pipe_exists(
+        self,
+        pipe : 'meerschaum.Pipe',
+        debug : bool = False
+    ) -> bool:
+    """
+    Check that a Pipe's table exists
+    """
+    from meerschaum.utils.misc import pg_capital
+    if self.flavor in ('timescaledb', 'postgresql'):
+        q = f"SELECT to_regclass('{pg_capital(str(pipe))}')"
+    elif conn.flavor == 'mssql':
+        q = f"SELECT OBJECT_ID('{pipe}')"
+    elif conn.flavor in ('mysql', 'mariadb'):
+        q = f"SHOW TABLES LIKE '{pipe}'"
+    return self.value(q, debug=debug) is not None

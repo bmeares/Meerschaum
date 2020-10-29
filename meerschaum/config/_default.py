@@ -9,6 +9,8 @@ The default configuration values to write to config.yaml.
 import sys, os, multiprocessing
 
 default_meerschaum_config = {
+    'instance' : 'sql:main',
+    'api_instance' : 'sql:main',
     'connectors' : {
         'sql' : {
             'default'      : {

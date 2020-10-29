@@ -45,6 +45,9 @@ parser.add_argument(
     '-A', '--sub-args', nargs='+', help="Provide a list of arguments for subprocesses. You can also type sub-arguments in [] instead. E.g. `stack -A='--version'`, `ls [-lh]`, `echo -A these are sub-arguments`"
 )
 parser.add_argument(
+    '-l', '--loop', action="store_true", help="Loop the specified action forever (only for select actions)"
+)
+parser.add_argument(
     '-d', '--debug', action="store_true", help="Print debug statements (max verbosity)"
 )
 parser.add_argument(

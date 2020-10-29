@@ -26,11 +26,16 @@ def get_tables(
     sqlalchemy, sqlalchemy_dialects_postgresql = attempt_import('sqlalchemy', 'sqlalchemy.dialects.postgresql')
 
     if mrsm_instance is None:
-        conn = get_connector()
+        conn = get_connector(debug=debug)
     elif isinstance(mrsm_instance, str):
-        conn = parse_instance_keys(mrsm_instance)
+        conn = parse_instance_keys(mrsm_instance, debug=debug)
     else: ### NOTE: mrsm_instance MUST BE a SQL Connector for this to work!
         conn = mrsm_instance
+
+    ### kind of a hack. Create the tables remotely
+    from meerschaum.connectors.api import APIConnector
+    if isinstance(conn, APIConnector):
+        return conn.create_metadata(debug=debug)
 
     global tables
     if len(tables) == 0:
@@ -60,7 +65,7 @@ def get_tables(
 
         tables['pipes'] = sqlalchemy.Table(
             "pipes",
-            get_connector().metadata,
+            conn.metadata,
             sqlalchemy.Column("pipe_id", sqlalchemy.Integer, primary_key=True),
             sqlalchemy.Column("connector_keys", sqlalchemy.String, index=True, nullable=False),
             sqlalchemy.Column("metric_key", sqlalchemy.String, index=True, nullable=False),
@@ -68,10 +73,10 @@ def get_tables(
             sqlalchemy.Column("parameters", params_type),
             sqlalchemy.UniqueConstraint('connector_keys', 'metric_key', 'location_key', name='pipe_index')
         )
-
         try:
             conn.metadata.create_all()
         except Exception as e:
             warn(e)
+    
     return tables
 

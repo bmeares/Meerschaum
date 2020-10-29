@@ -290,3 +290,29 @@ def get_sync_time(
     dt = datetime.datetime.fromisoformat(json.loads(response.text))
     return dt
 
+def pipe_exists(
+        self,
+        pipe : 'meerschaum.Pipe',
+        debug : bool = False
+    ) -> bool:
+    """
+    Consult the API to see if a Pipe exists
+    """
+    import json
+    r_url = pipe_r_url(pipe)
+    response = self.get(r_url + '/exists')
+    if debug: dprint("Received response: " + str(response.text))
+    return json.loads(response.text)
+
+def create_metadata(
+        self,
+        debug : bool = False
+    ) -> bool:
+    """
+    Create Pipe metadata tables
+    """
+    import json
+    r_url = '/mrsm/metadata'
+    response = self.post(r_url)
+    if debug: dprint("Create metadata response: {response.text}")
+    return json.loads(response.text)

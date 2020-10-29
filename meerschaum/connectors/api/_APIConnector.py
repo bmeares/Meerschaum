@@ -29,6 +29,8 @@ class APIConnector(Connector):
         get_pipe_id,
         get_pipe_attributes,
         get_sync_time,
+        pipe_exists,
+        create_metadata,
     )
 
     def __init__(
