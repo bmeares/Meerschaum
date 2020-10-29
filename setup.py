@@ -94,7 +94,7 @@ setuptools.setup(
     author = 'Bennett Meares',
     author_email = 'bennett.meares@gmail.com',
     maintainer = 'Bennett Meares',
-    maintainer_email = 'bennett,meares@gmail.com',
+    maintainer_email = 'bennett.meares@gmail.com',
     license = 'MIT',
     packages = setuptools.find_packages(),
     install_requires = required,
