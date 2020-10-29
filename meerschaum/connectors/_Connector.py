@@ -91,6 +91,7 @@ class Connector:
         The Connector base class checks the minimum requirements.
         Child classes may enforce additional requirements.
         """
+        from meerschaum.utils.warnings import error, warn
         if debug:
             dprint(f'required attributes: {required_attributes}')
             dprint(f'attributes: {self.__dict__}')
@@ -99,8 +100,8 @@ class Connector:
             if a not in self.__dict__:
                 missing_attributes.add(a)
         if len(missing_attributes) > 0:
-            raise Exception(
-                f"Please provide connection configuration for type: '{self.type}', label: '{self.label}' "
+            error(
+                f"Please provide connection configuration for connector: '{self.type}:{self.label}' "
                 f"in the configuration file (open with `mrsm edit config`) or as arguments for the Connector.\n\n"
                 f"Missing attributes: {missing_attributes}"
             )
@@ -119,7 +120,8 @@ class Connector:
         raise NotImplementedError("fetch() must be implemented in children classes")
 
     def __str__(self):
-        return f'Meerschaum {self.type.upper()} Connector: {self.label}'
+        return f"{self.type}:{self.label}"
+        #  return f'Meerschaum {self.type.upper()} Connector: {self.label}'
 
     def __repr__(self):
         return str(self)

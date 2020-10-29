@@ -384,7 +384,8 @@ def is_installed(
 
 def attempt_import(
         *names : list,
-        lazy : bool = True
+        lazy : bool = True,
+        warn : bool = True
     ) -> 'module or tuple of modules':
     """
     Raise a warning if packages are not installed; otherwise import and return modules.
@@ -396,24 +397,27 @@ def attempt_import(
         pandas, sqlalchemy = attempt_import('pandas', 'sqlalchemy')
         pandas = attempt_import('pandas')
     """
-    from meerschaum.utils.warnings import warn
+    from meerschaum.utils.warnings import warn as warn_function
     import importlib, importlib.util
 
     modules = []
     for name in names:
-        if importlib.util.find_spec(name) is None:
-            warn(
+        if importlib.util.find_spec(name) is None and warn:
+            warn_function(
                 (f"\n\nMissing package '{name}'; features will not work correctly. "
                 f"\n\nRun `pip install {name}`.\n"),
                 ImportWarning,
                 stacklevel = 2
             )
             modules.append(None)
-        else:
-            if not lazy:
+        else: ### package is installed but might not be available (e.g. virtualenv)
+            ### determine the import method (lazy vs normal)
+            if not lazy: import_method = importlib.import_module if not lazy else lazy_import
+            try:
                 mod = importlib.import_module(name)
-            else:
-                mod = lazy_import(name)
+            except:
+                mod = None
+
             modules.append(mod)
     modules = tuple(modules)
     if len(modules) == 1: return modules[0]
@@ -484,8 +488,8 @@ def parse_instance_keys(keys : str, **kw):
     """
     Parse the Meerschaum instance value into a Connector object
     """
-    if ':' not in keys:
-        keys += ':main'
+    if ':' not in keys: keys += ':'
+    if keys.endswith(':'): keys += 'main'
     return parse_connector_keys(keys)
 
 def is_pipe_registered(

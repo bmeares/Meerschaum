@@ -41,7 +41,7 @@ def warn(*args, stacklevel=2, **kw):
     from meerschaum.config import config as cf, get_config
     warn_config = get_config('system', 'warnings', patch=True)
     a = list(args)
-    a[0] = ' ' + warn_config[CHARSET]['icon'] + ' ' + a[0]
+    a[0] = ' ' + warn_config[CHARSET]['icon'] + ' ' + str(a[0])
     if ANSI:
         a[0] = colored(a[0], *warn_config['ansi']['color'])
     return warnings.warn(*a, stacklevel=stacklevel, **kw)
