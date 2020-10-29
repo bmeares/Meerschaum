@@ -26,7 +26,7 @@ class Pipe:
         metric_key : str,
         location_key : str = None,
         parameters : dict = None,
-        mrsm_instance : str = 'sql:main',
+        mrsm_instance : str = None,
         debug : bool = False
     ):
         """
@@ -44,7 +44,7 @@ class Pipe:
             parameters dictionary to give the Pipe.
             This dictionary is NOT stored in memory but rather is used for registration purposes.
         
-        mrsm_instance : str : 'sql:main'
+        mrsm_instance : str : None
             connector_keys for the Meerschaum instance connector (SQL or API connector)
         """
         if location_key == '[None]': location_key = None
@@ -68,6 +68,8 @@ class Pipe:
         )
 
         ### NOTE: must be SQL or API Connector for this work
+        from meerschaum.config import get_config
+        if mrsm_instance is None: mrsm_instance = get_config('meerschaum', 'instance', patch=True)
         if not isinstance(mrsm_instance, str):
             self._instance_connector = mrsm_instance
             self.instance_keys = mrsm_instance.type + ':' + mrsm_instance.label

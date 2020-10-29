@@ -63,7 +63,7 @@ def _api_start(
         action : list = [''],
         port : int = None,
         workers : int = None,
-        mrsm_instance : str = 'sql',
+        mrsm_instance : str = None,
         debug : bool = False,
         **kw
     ):
@@ -81,6 +81,7 @@ def _api_start(
     from meerschaum.utils.misc import attempt_import
     from meerschaum.utils.debug import dprint
     from meerschaum.config._paths import API_UVICORN_CONFIG_PATH
+    from meerschaum.config import get_config
     uvicorn = attempt_import('uvicorn')
 
     uvicorn_config = dict(api_config['uvicorn'])
@@ -93,6 +94,8 @@ def _api_start(
 
     if workers is not None:
         uvicorn_config['workers'] = workers
+
+    if mrsm_instance is None: mrsm_instance = get_config('meerschaum', 'api_instance', patch=True)
 
     uvicorn_config['port'] = port
     uvicorn_config['reload'] = debug

@@ -166,19 +166,19 @@ default_docker_compose_config = {
                 'GF_AUTH_ANONYMOUS_ORGANIZATION=public',
             ],
         },
-        'portainer' : {
-            'image' : 'portainer/portainer',
-            'command' : '-H unix:///var/run/docker.sock',
-            'restart' : 'always',
-            'ports' : [
-                '9000:9000',
-                '8001:8000',
-            ],
-            'volumes' : [
-                '/var/run/docker.sock:/var/run/docker.sock',
-                'portainer_data:' + volumes['portainer_data'],
-            ],
-        },
+        #  'portainer' : {
+            #  'image' : 'portainer/portainer',
+            #  'command' : '-H unix:///var/run/docker.sock',
+            #  'restart' : 'always',
+            #  'ports' : [
+                #  '9000:9000',
+                #  '8001:8000',
+            #  ],
+            #  'volumes' : [
+                #  '/var/run/docker.sock:/var/run/docker.sock',
+                #  'portainer_data:' + volumes['portainer_data'],
+            #  ],
+        #  },
         'mosquitto' : {
             'image' : 'eclipse-mosquitto',
             'hostname' : mqtt_host,

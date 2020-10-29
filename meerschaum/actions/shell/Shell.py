@@ -9,7 +9,7 @@ This module is the entry point for the interactive shell
 import sys, inspect
 from meerschaum.utils.misc import attempt_import
 from meerschaum.config import __doc__, config as cf, get_config
-cmd = attempt_import(get_config('system', 'shell', 'cmd'), warn=False)
+cmd = attempt_import(get_config('system', 'shell', 'cmd', patch=True), warn=False)
 if cmd is None or isinstance(cmd, dict): cmd = attempt_import('cmd')
 from meerschaum.actions.arguments import parse_line
 from meerschaum.utils.formatting import UNICODE, CHARSET, ANSI, colored
@@ -28,6 +28,7 @@ commands_to_remove = {
     'run_pyscript',
     'run_script',
     'shell',
+    'pyscript',
     #  'set',
     'py',
     'shell',
@@ -71,8 +72,7 @@ class Shell(cmd.Cmd):
         self.undoc_header = get_config('system', 'shell', CHARSET, 'undoc_header', patch=patch)
 
         ### create default instance connector
-        from meerschaum import get_connector
-        self.instance_connector = get_connector()
+        self.instance_keys = get_config('meerschaum', 'instance', patch=patch)
 
         ### update hidden commands list (cmd2 only)
         try:
@@ -146,7 +146,7 @@ class Shell(cmd.Cmd):
         if not args['debug']: args['debug'] = self.debug
 
         ### if no instance is provided, use current shell default
-        if 'mrsm_instance' not in args: args['mrsm_instance'] = str(self.instance_connector)
+        if 'mrsm_instance' not in args: args['mrsm_instance'] = str(self.instance_keys)
 
         action = args['action'][0]
 
@@ -227,19 +227,20 @@ class Shell(cmd.Cmd):
         Set a default Meerschaum instance for the duration of this shell.
         """
         from meerschaum import get_connector
+        from meerschaum.config import get_config
         from meerschaum.utils.misc import parse_instance_keys
         from meerschaum.utils.warnings import warn
 
         instance_keys = action[0]
-        if instance_keys == '': instance_keys = 'sql'
+        if instance_keys == '': instance_keys = get_config('meerschaum', 'instance', patch=True)
 
         conn = parse_instance_keys(instance_keys, debug=debug)
         if conn is None or not conn:
             conn = get_connector(debug=debug)
 
-        self.instance_connector = conn
+        self.instance_keys = str(conn)
 
-        print(f"Default instance for the current shell:\n{conn}")
+        print(f"Default instance for the current shell: {conn}")
         return True, "Success"
 
     def do_exit(self, params):

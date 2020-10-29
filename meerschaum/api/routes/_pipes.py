@@ -62,14 +62,22 @@ async def fetch_pipes_keys(
     from meerschaum.utils.debug import dprint
     import json
 
-    if debug: dprint(f"location_keys: {len(location_keys)}")
+    if debug: dprint(f"location_keys: {location_keys}")
 
-    return get_connector().fetch_pipes_keys(
+    conn = get_connector(debug=True)
+    dprint("conn: " + str(conn))
+    dprint("conn_keys: " + connector_keys)
+    dprint("metric_keys:" + metric_keys)
+    dprint(location_keys)
+    dprint(json.loads(params))
+
+
+    return get_connector(debug=True).fetch_pipes_keys(
         connector_keys = json.loads(connector_keys),
         metric_keys = json.loads(metric_keys),
         location_keys = json.loads(location_keys),
         params = json.loads(params),
-        debug = debug
+        debug = True
     )
 
 @fast_api.get(pipes_endpoint)
@@ -91,7 +99,6 @@ async def get_pipes(
         connector_keys = json.loads(connector_keys),
         metric_keys = json.loads(metric_keys),
         location_keys = json.loads(location_keys),
-        mrsm_instance = 'sql',
         debug = debug
     )
 
@@ -259,7 +266,6 @@ def get_pipe_id(
         raise HTTPException(status_code=500, detail=str(e))
     return pipe_id
 
-
 @fast_api.get(pipes_endpoint + '/{connector_keys}/{metric_key}/{location_key}/attributes')
 def get_pipe_attributes(
         connector_keys : str,
@@ -270,3 +276,28 @@ def get_pipe_attributes(
     Get a Pipe's attributes
     """
     return get_pipe(connector_keys, metric_key, location_key).attributes
+
+@fast_api.get(pipes_endpoint + '/{connector_keys}/{metric_key}/{location_key}/exists')
+def get_pipe_attributes(
+        connector_keys : str,
+        metric_key : str,
+        location_key : str
+    ) -> dict:
+    """
+    Determine if a Pipe exists or not
+    """
+    return get_pipe(connector_keys, metric_key, location_key).exists()
+
+@fast_api.post('/mrsm/metadata')
+def create_metadata(
+        
+    ) -> bool:
+    """
+    Create Pipe metadata tables
+    """
+    from meerschaum.connectors.sql.tables import get_tables
+    try:
+        tables = get_tables()
+    except:
+        return False
+    return True
