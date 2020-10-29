@@ -34,9 +34,11 @@ def sync(
             return False, "Cannot fetch without a connector"
         df = self.fetch(debug = debug)
 
+    if debug: dprint("DataFrame to sync:\n" + f"{df}")
+
     ### if the instance connector is API, use its method. Otherwise do SQL things below
     if self.instance_connector.type == 'api':
-        return self.instance_connector.sync_pipe(self, df, debug=debug, **kw)
+        return self.instance_connector.sync_pipe(pipe=self, df=df, debug=debug, **kw)
 
     datetime = self.get_columns('datetime')
 

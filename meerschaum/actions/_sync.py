@@ -22,11 +22,12 @@ def sync(
     return choose_subaction(action, options, **kw)
 
 def _sync_pipes(
+        workers : int = None,
         debug : bool = False,
         **kw
     ) -> tuple:
     """
-    TODO implement
+    Fetch new data for Pipes
     """
     from meerschaum import get_pipes
     pipes = get_pipes(
@@ -35,6 +36,11 @@ def _sync_pipes(
         debug=debug,
         **kw
     )
+
+    import multiprocessing
+    if workers is None:
+        workers = multiprocessing.cpu_count()
+
     if debug:
         from meerschaum import get_connector
         import pprintpp

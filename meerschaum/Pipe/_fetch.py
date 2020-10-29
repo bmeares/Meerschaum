@@ -18,10 +18,12 @@ def fetch(
 
     returns : pd.DataFrame of newest unseen data
     """
-    ### TODO diff the existing data with new data
+    from meerschaum.utils.debug import dprint
+    from meerschaum.utils.warnings import warn
     if self.attributes and 'fetch' in self.attributes['parameters']:
         return self.connector.fetch(
             self,
             begin = self.sync_time,
             debug = debug
         )
+    warn(f"Cannot get fetch parameters from attributes for pipe '{self}'")

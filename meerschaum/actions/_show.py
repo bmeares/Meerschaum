@@ -121,6 +121,7 @@ def _show_connectors(
     from meerschaum.utils.misc import parse_instance_keys
     if action != []:
         if (conn := parse_instance_keys(action[0], debug=debug)):
+            print(make_header("\n" + f"Attributes for connector '{conn}':"))
             pprint(conn.__dict__)
 
     return True, "Success"
@@ -139,10 +140,17 @@ def _show_data(
     ):
     from meerschaum import get_pipes
     from meerschaum.utils.misc import attempt_import
+    from meerschaum.utils.warnings import warn
     pipes = get_pipes(as_list=True, debug=debug, **kw)
     backtrack_minutes = 1440
     for p in pipes:
-        df = p.get_backtrack_data(backtrack_minutes=backtrack_minutes, debug=debug)
+        try:
+            df = p.get_backtrack_data(backtrack_minutes=backtrack_minutes, debug=debug)
+        except:
+            df = None
+        if df is None:
+            warn(f"Failed to fetch data for pipe '{p}'.")
+            continue
         print(f"Last {backtrack_minutes} minutes of data for Pipe '{p}'")
         print(df)
         if gui:
