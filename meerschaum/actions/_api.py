@@ -11,6 +11,7 @@ def api(
         action : list = [''],
         sysargs : list = [],
         debug : bool = False,
+        mrsm_instance : str = None,
         **kw
     ):
     """
@@ -38,6 +39,7 @@ def api(
 
     from meerschaum.config import config as cf, get_config
     from meerschaum.connectors import get_connector
+    from meerschaum.utils.warnings import warn
     import requests
     if debug: from pprintpp import pprint
     api_configs = get_config('meerschaum', 'connectors', 'api', patch=True)
@@ -54,9 +56,17 @@ def api(
     kw['action'] = action
     kw['debug'] = debug
     kw['sysargs'] = args_to_send
+    kw['yes'] = True
  
     api_conn = get_connector(type='api', label=api_label)
+    
+    if mrsm_instance is not None and str(mrsm_instance) == str(api_conn):
+        warn(f"Cannot send Meerschaum instance keys '{mrsm_instance}' to itself. Removing from arguments...")
+    elif mrsm_instance is not None: kw['mrsm_instance'] = str(mrsm_instance)
+
     success, message = api_conn.do_action(**kw)
+    msg = f"Action " + ('succeeded' if success else 'failed') + " with message:\n" + str(message)
+    print(msg)
     return success, message
 
 def _api_start(
