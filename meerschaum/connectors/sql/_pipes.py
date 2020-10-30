@@ -54,7 +54,7 @@ def register_pipe(
         parameters = dict()
 
     ### override `meta.parameters` with parameters found from the above process
-    pipe.meta.parameters = parameters
+    #  pipe.meta.parameters = parameters
 
     ### NOTE: I know it seems strange that I'm reverting from a perfectly
     ### working async ORM query to a hand-written synchronous query.
