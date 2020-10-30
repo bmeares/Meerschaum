@@ -13,7 +13,7 @@ def get_pipes(
         metric_keys : 'str or list' = [],
         location_keys : 'str or list' = [],
         params : dict = dict(),
-        mrsm_instance : str = 'sql',
+        mrsm_instance : str = None,
         as_list : bool = False,
         method : str = 'registered',
         wait : bool = False,
@@ -70,15 +70,20 @@ def get_pipes(
     """
 
     from meerschaum.utils.misc import flatten_pipes_dict
+    from meerschaum.config import get_config
+    from meerschaum.utils.warnings import error
 
     ### Get SQL or API connector (keys come from `connector.fetch_pipes_keys()`).
     ### If `wait`, wait until a connection is made
+    if mrsm_instance is None: mrsm_instance = get_config('meerschaum', 'instance', patch=True)
     if isinstance(mrsm_instance, str):
         from meerschaum.utils.misc import parse_instance_keys
         connector = parse_instance_keys(keys=mrsm_instance, wait=wait, debug=debug)
     else: ### NOTE: mrsm_instance MUST be a SQL or API connector for this to work
         connector = mrsm_instance
     if debug: dprint(f"Using instance connector: {connector}")
+    if not connector:
+        error(f"Could not create connector from keys: '{mrsm_instance}'")
 
     ### get a list of tuples of keys based on the method type
     result = methods(

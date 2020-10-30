@@ -18,8 +18,8 @@ connectors = {
 types = dict()
 
 def get_connector(
-        type : str = "sql",
-        label : str = "main",
+        type : str = None,
+        label : str = None,
         refresh : bool = False,
         debug : bool = False,
         **kw
@@ -39,6 +39,13 @@ def get_connector(
     You can create new connectors if enough parameters are provided for the given type and flavor.
     Example: flavor='sqlite', database='newdb'
     """
+    if type is None and label is None:
+        from meerschaum.config import get_config
+        from meerschaum.utils.misc import parse_instance_keys
+        default_instance_keys = get_config('meerschaum', 'instance', patch=True)
+        ### recursive call to get_connector
+        return parse_instance_keys(default_instance_keys)
+
     global types, connectors
 
     if type not in connectors:

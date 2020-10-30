@@ -31,35 +31,7 @@ def register_pipe(
 
     ### NOTE: if `parameters` is supplied in the Pipe constructor,
     ###       then `pipe.parameters` will exist and not be fetched from the database.
-
-    ### 1. Prioritize the Pipe object's `parameters` first.
-    ###    E.g. if the user manually sets the `parameters` property
-    ###    or if the Pipe already exists
-    ###    (which shouldn't be able to be registered anyway but that's an issue for later).
-    parameters = None
-    try:
-        parameters = pipe.parameters
-    except Exception as e:
-        if debug: dprint(str(e))
-        parameters = None
-
-    ### 2. If the parent pipe does not have `parameters` either manually set
-    ###    or within the database, check the `meta.parameters` value (likely None as well)
-    if parameters is None:
-        try:
-            parameters = pipe.meta.parameters
-        except Exception as e:
-            if debug: dprint(str(e))
-            parameters = None
-
-    ### ensure `parameters` is a dictionary
-    if parameters is None:
-        parameters = dict()
-
-    ### override `meta.parameters` with parameters found from the above process
-    pipe.meta.parameters = parameters
-
-    response = self.post('/mrsm/pipes', json=pipe.meta.dict())
+    response = self.post('/mrsm/pipes', json=pipe.meta)
     if debug: dprint(response.text)
     return response.__bool__(), response.json()
 
@@ -73,14 +45,12 @@ def edit_pipe(
     Submit a PATCH to the API to edit an existing Pipe.
     Returns a tuple of (success_bool, response_dict)
     """
-    pipe.meta.parameters = pipe.parameters
-    if pipe.meta.parameters is None: pipe.meta.parameters = dict()
     if debug:
         from meerschaum.utils.debug import dprint
         dprint(f"patch: {patch}")
     response = self.patch(
         '/mrsm/pipes',
-        json = pipe.meta.dict(),
+        json = pipe.meta,
         params = {'patch' : patch}
     )
     return response.__bool__(), response.json()
@@ -290,3 +260,29 @@ def get_sync_time(
     dt = datetime.datetime.fromisoformat(json.loads(response.text))
     return dt
 
+def pipe_exists(
+        self,
+        pipe : 'meerschaum.Pipe',
+        debug : bool = False
+    ) -> bool:
+    """
+    Consult the API to see if a Pipe exists
+    """
+    import json
+    r_url = pipe_r_url(pipe)
+    response = self.get(r_url + '/exists')
+    if debug: dprint("Received response: " + str(response.text))
+    return json.loads(response.text)
+
+def create_metadata(
+        self,
+        debug : bool = False
+    ) -> bool:
+    """
+    Create Pipe metadata tables
+    """
+    import json
+    r_url = '/mrsm/metadata'
+    response = self.post(r_url)
+    if debug: dprint("Create metadata response: {response.text}")
+    return json.loads(response.text)

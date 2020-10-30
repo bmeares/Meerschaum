@@ -11,6 +11,7 @@ def api(
         action : list = [''],
         sysargs : list = [],
         debug : bool = False,
+        mrsm_instance : str = None,
         **kw
     ):
     """
@@ -38,6 +39,7 @@ def api(
 
     from meerschaum.config import config as cf, get_config
     from meerschaum.connectors import get_connector
+    from meerschaum.utils.warnings import warn
     import requests
     if debug: from pprintpp import pprint
     api_configs = get_config('meerschaum', 'connectors', 'api', patch=True)
@@ -54,16 +56,24 @@ def api(
     kw['action'] = action
     kw['debug'] = debug
     kw['sysargs'] = args_to_send
+    kw['yes'] = True
  
     api_conn = get_connector(type='api', label=api_label)
+    
+    if mrsm_instance is not None and str(mrsm_instance) == str(api_conn):
+        warn(f"Cannot send Meerschaum instance keys '{mrsm_instance}' to itself. Removing from arguments...")
+    elif mrsm_instance is not None: kw['mrsm_instance'] = str(mrsm_instance)
+
     success, message = api_conn.do_action(**kw)
+    msg = f"Action " + ('succeeded' if success else 'failed') + " with message:\n" + str(message)
+    print(msg)
     return success, message
 
 def _api_start(
         action : list = [''],
         port : int = None,
         workers : int = None,
-        mrsm_instance : str = 'sql',
+        mrsm_instance : str = None,
         debug : bool = False,
         **kw
     ):
@@ -81,6 +91,7 @@ def _api_start(
     from meerschaum.utils.misc import attempt_import
     from meerschaum.utils.debug import dprint
     from meerschaum.config._paths import API_UVICORN_CONFIG_PATH
+    from meerschaum.config import get_config
     uvicorn = attempt_import('uvicorn')
 
     uvicorn_config = dict(api_config['uvicorn'])
@@ -93,6 +104,8 @@ def _api_start(
 
     if workers is not None:
         uvicorn_config['workers'] = workers
+
+    if mrsm_instance is None: mrsm_instance = get_config('meerschaum', 'api_instance', patch=True)
 
     uvicorn_config['port'] = port
     uvicorn_config['reload'] = debug
