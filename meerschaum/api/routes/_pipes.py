@@ -62,9 +62,7 @@ async def fetch_pipes_keys(
     from meerschaum.utils.debug import dprint
     import json
 
-    if debug: dprint(f"location_keys: {len(location_keys)}")
-
-    return get_connector().fetch_pipes_keys(
+    return get_connector(debug=debug).fetch_pipes_keys(
         connector_keys = json.loads(connector_keys),
         metric_keys = json.loads(metric_keys),
         location_keys = json.loads(location_keys),
@@ -91,7 +89,6 @@ async def get_pipes(
         connector_keys = json.loads(connector_keys),
         metric_keys = json.loads(metric_keys),
         location_keys = json.loads(location_keys),
-        mrsm_instance = 'sql',
         debug = debug
     )
 
@@ -172,7 +169,7 @@ async def sync_pipe(
     from meerschaum import Pipe
     import json
     df = parse_df_datetimes(data)
-    p = Pipe(connector_keys, metric_key, location_key)
+    p = get_pipe(connector_keys, metric_key, location_key)
     if not is_pipe_registered(p, pipes()):
         raise fastapi.HTTPException(
             status_code = 409,
@@ -256,9 +253,8 @@ def get_pipe_id(
             ).id
         )
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        raise fastapi.HTTPException(status_code=404, detail=str(e))
     return pipe_id
-
 
 @fast_api.get(pipes_endpoint + '/{connector_keys}/{metric_key}/{location_key}/attributes')
 def get_pipe_attributes(
@@ -270,3 +266,28 @@ def get_pipe_attributes(
     Get a Pipe's attributes
     """
     return get_pipe(connector_keys, metric_key, location_key).attributes
+
+@fast_api.get(pipes_endpoint + '/{connector_keys}/{metric_key}/{location_key}/exists')
+def get_pipe_attributes(
+        connector_keys : str,
+        metric_key : str,
+        location_key : str
+    ) -> dict:
+    """
+    Determine if a Pipe exists or not
+    """
+    return get_pipe(connector_keys, metric_key, location_key).exists()
+
+@fast_api.post('/mrsm/metadata')
+def create_metadata(
+        
+    ) -> bool:
+    """
+    Create Pipe metadata tables
+    """
+    from meerschaum.connectors.sql.tables import get_tables
+    try:
+        tables = get_tables(mrsm_instance=get_connector())
+    except Exception as e:
+        raise fastapi.HTTPException(status_code=500, detail=str(e))
+    return True

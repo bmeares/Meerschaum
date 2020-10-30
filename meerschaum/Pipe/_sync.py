@@ -23,9 +23,9 @@ def sync(
     """
     from meerschaum import get_connector
     from meerschaum.config import get_config
-    from meerschaum.utils.misc import attempt_import, round_time
+    from meerschaum.utils.misc import attempt_import, round_time, import_pandas
     import datetime as datetime_pkg
-    pd = attempt_import(get_config('system', 'connectors', 'all', 'pandas'))
+    pd = import_pandas()
 
     ### default: fetch new data via the connector.
     ### If new data is provided, skip fetching
@@ -161,15 +161,5 @@ def exists(
     See if a Pipe's table or view exists
     """
     ### TODO test against views
+    return self.instance_connector.pipe_exists(pipe=self, debug=debug)
 
-    from meerschaum import get_connector
-    from meerschaum.utils.misc import pg_capital
-    conn = self.instance_connector
-    conn = get_connector('sql', 'main')
-    if conn.flavor in ('timescaledb', 'postgresql'):
-        q = f"SELECT to_regclass('{pg_capital(str(self))}')"
-    elif conn.flavor == 'mssql':
-        q = f"SELECT OBJECT_ID('{self}')"
-    elif conn.flavor in ('mysql', 'mariadb'):
-        q = f"SHOW TABLES LIKE '{self}'"
-    return conn.value(q) is not None

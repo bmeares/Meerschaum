@@ -407,7 +407,7 @@ def attempt_import(
                 (f"\n\nMissing package '{name}'; features will not work correctly. "
                 f"\n\nRun `pip install {name}`.\n"),
                 ImportWarning,
-                stacklevel = 2
+                stacklevel = 3
             )
             modules.append(None)
         else: ### package is installed but might not be available (e.g. virtualenv)

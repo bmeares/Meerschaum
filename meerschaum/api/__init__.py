@@ -2,19 +2,20 @@
 # -*- coding: utf-8 -*-
 # vim:fenc=utf-8
 
-__version__ = "0.0.8"
-from meerschaum.config import system_config
-from meerschaum.connectors import get_connector
+__version__ = "0.0.10"
+from meerschaum.config import system_config, get_config
+#  from meerschaum.connectors import get_connector
 from meerschaum.utils.misc import attempt_import
 from meerschaum.utils._get_pipes import get_pipes as get_pipes_sql
 #  fastapi, graphene, starlette_graphql = attempt_import('fastapi', 'graphene', 'starlette.graphql', lazy=True)
 fastapi = attempt_import('fastapi', lazy=True)
 
 connector = None
-def get_connector(instance_keys : str = None):
+def get_connector(instance_keys : str = None, debug : bool = False):
     """
     Create the connector
     """
+    from meerschaum.utils.debug import dprint
     global connector
     if connector is None:
         from meerschaum.config._paths import API_UVICORN_CONFIG_PATH
@@ -30,16 +31,18 @@ def get_connector(instance_keys : str = None):
 
             ### Default: main SQL connector
             if 'mrsm_instance' not in uvicorn_config:
-                uvicorn_config['mrsm_instance'] = 'sql'
+                uvicorn_config['mrsm_instance'] = get_config('meerschaum', 'api_instance', patch=True)
 
             instance_keys = uvicorn_config['mrsm_instance']
 
         from meerschaum.utils.misc import parse_instance_keys
-        connector = parse_instance_keys(instance_keys)
+        connector = parse_instance_keys(instance_keys, debug=debug)
+    if debug: dprint(f"API instance connector: {connector}")
     return connector
 
 database = None
 def get_database(instance_keys : str = None):
+    #  if instance_keys is None
     global database
     if database is None:
         database = get_connector(instance_keys).db
@@ -59,7 +62,7 @@ def get_pipe(connector_keys, metric_key, location_key, refresh=False):
     from meerschaum.utils.misc import is_pipe_registered
     from meerschaum import Pipe
     if location_key == '[None]': location_key = None
-    p = Pipe(connector_keys, metric_key, location_key)
+    p = Pipe(connector_keys, metric_key, location_key, mrsm_instance=get_connector())
     if is_pipe_registered(p, pipes()):
         return pipes(refresh=refresh)[connector_keys][metric_key][location_key]
     return p
