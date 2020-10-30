@@ -71,6 +71,7 @@ def get_pipes(
 
     from meerschaum.utils.misc import flatten_pipes_dict
     from meerschaum.config import get_config
+    from meerschaum.utils.warnings import error
 
     ### Get SQL or API connector (keys come from `connector.fetch_pipes_keys()`).
     ### If `wait`, wait until a connection is made
@@ -81,6 +82,8 @@ def get_pipes(
     else: ### NOTE: mrsm_instance MUST be a SQL or API connector for this to work
         connector = mrsm_instance
     if debug: dprint(f"Using instance connector: {connector}")
+    if not connector:
+        error(f"Could not create connector from keys: '{mrsm_instance}'")
 
     ### get a list of tuples of keys based on the method type
     result = methods(

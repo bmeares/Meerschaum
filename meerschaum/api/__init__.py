@@ -16,9 +16,7 @@ def get_connector(instance_keys : str = None, debug : bool = False):
     Create the connector
     """
     from meerschaum.utils.debug import dprint
-    if debug: dprint(f"instance keys: {instance_keys}")
     global connector
-    if debug: dprint(f"connector: {connector}")
     if connector is None:
         from meerschaum.config._paths import API_UVICORN_CONFIG_PATH
         yaml = attempt_import('yaml')
@@ -39,7 +37,7 @@ def get_connector(instance_keys : str = None, debug : bool = False):
 
         from meerschaum.utils.misc import parse_instance_keys
         connector = parse_instance_keys(instance_keys, debug=debug)
-    if debug: dprint(f"Returning connector: {connector}")
+    if debug: dprint(f"API instance connector: {connector}")
     return connector
 
 database = None
@@ -63,9 +61,8 @@ def get_pipe(connector_keys, metric_key, location_key, refresh=False):
     """
     from meerschaum.utils.misc import is_pipe_registered
     from meerschaum import Pipe
-    instance_keys = get_config('meerschaum', 'api_instance', patch=True)
     if location_key == '[None]': location_key = None
-    p = Pipe(connector_keys, metric_key, location_key, mrsm_instance=instance_keys)
+    p = Pipe(connector_keys, metric_key, location_key, mrsm_instance=get_connector())
     if is_pipe_registered(p, pipes()):
         return pipes(refresh=refresh)[connector_keys][metric_key][location_key]
     return p

@@ -1,4 +1,3 @@
-#! /usr/bin/env python
 # -*- coding: utf-8 -*-
 # vim:fenc=utf-8
 
@@ -34,6 +33,7 @@ commands_to_remove = {
     'shell',
     'shortcuts',
     'history',
+    'load',
 }
 ### cmd2 only: hide commands
 hidden_commands = {
@@ -145,10 +145,12 @@ class Shell(cmd.Cmd):
         ### default to shell setting
         if not args['debug']: args['debug'] = self.debug
 
-        ### if no instance is provided, use current shell default
-        if 'mrsm_instance' not in args: args['mrsm_instance'] = str(self.instance_keys)
-
         action = args['action'][0]
+
+        ### if no instance is provided, use current shell default,
+        ### but not for the 'api' command (to avoid recursion)
+        if 'mrsm_instance' not in args and action != 'api':
+            args['mrsm_instance'] = str(self.instance_keys)
 
         ### parse out empty strings
         if action.strip("\"'") == '':
@@ -224,7 +226,27 @@ class Shell(cmd.Cmd):
 
     def do_instance(self, action : list = [''], debug : bool = False, **kw):
         """
-        Set a default Meerschaum instance for the duration of this shell.
+        Temporarily set a default Meerschaum instance for the duration of the shell.
+        The default instance is loaded from the Meerschaum configuraton file
+          (at keys 'meerschaum:instance').
+
+        You can change the default instance with `edit config`.
+
+        Usage:
+            instance {instance keys}
+
+        Examples:
+            ### reset to default instance
+            instance
+
+            ### set the instance to 'api:main'
+            instance api
+
+            ### set the instance to a non-default connector
+            instance api:myremoteinstance
+
+        Note that instances must be configured, be either API or SQL connections,
+          and be accessible to this machine over the network.
         """
         from meerschaum import get_connector
         from meerschaum.config import get_config

@@ -21,7 +21,7 @@ def register_pipe(
 
     ### ensure pipes table exists
     from meerschaum.connectors.sql.tables import get_tables
-    tables = get_tables()
+    tables = get_tables(mrsm_instance=self, debug=debug)
 
     if pipe.id is not None:
         return False, f"Pipe '{pipe}' is already registered"
@@ -123,7 +123,7 @@ def edit_pipe(
 
     ### ensure pipes table exists
     from meerschaum.connectors.sql.tables import get_tables
-    tables = get_tables()
+    tables = get_tables(mrsm_instance=self, debug=debug)
 
     import json
     q = f"""
@@ -204,7 +204,7 @@ def fetch_pipes_keys(
 
     ### ensure pipes table exists
     from meerschaum.connectors.sql.tables import get_tables
-    tables = get_tables(mrsm_instance=str(self))
+    tables = get_tables(mrsm_instance=self, debug=debug)
 
     ### execute the query and return a list of tuples
     try:
@@ -281,10 +281,10 @@ def delete_pipe(
 
     ### ensure pipes table exists
     from meerschaum.connectors.sql.tables import get_tables
-    tables = get_tables()
+    tables = get_tables(mrsm_instance=self, debug=debug)
 
     q = f"DELETE FROM pipes WHERE pipe_id = {pipe.id}"
-    if not self.exec(q):
+    if not self.exec(q, debug=debug):
         return False, f"Failed to delete registration for '{pipe}'"
     
     q = f"DROP TABLE {pipe_name}"

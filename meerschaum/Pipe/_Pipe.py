@@ -59,25 +59,37 @@ class Pipe:
         ### NOTE: The parameters dictionary is {} by default.
         ###       A Pipe may be registered without parameters, then edited,
         ###       or a Pipe may be registered with parameters set in-memory first.
-        from meerschaum.api.models import MetaPipe
-        self.meta = MetaPipe(
-            connector_keys = connector_keys,
-            metric_key = metric_key,
-            location_key = location_key,
-            parameters = parameters
-        )
-
-        ### NOTE: must be SQL or API Connector for this work
         from meerschaum.config import get_config
         if mrsm_instance is None: mrsm_instance = get_config('meerschaum', 'instance', patch=True)
         if not isinstance(mrsm_instance, str):
             self._instance_connector = mrsm_instance
             self.instance_keys = mrsm_instance.type + ':' + mrsm_instance.label
-        else:
+        else: ### NOTE: must be SQL or API Connector for this work
             self.instance_keys = mrsm_instance
 
         ### TODO aggregations?
         #  self._aggregations = dict()
+
+
+    @property
+    def meta(self):
+        """
+        Simulate the MetaPipe model without importing FastAPI
+        """
+        refresh = False
+        if '_meta' not in self.__dict__: refresh = True
+        elif self.parameters != self._meta['parameters']: refresh = True
+            
+        if refresh:
+            parameters = self.parameters
+            if parameters is None: parameters = dict()
+            self._meta = {
+                'connector_keys' : self.connector_keys,
+                'metric_key'     : self.metric_key,
+                'location_key'   : self.location_key,
+                'parameters'     : parameters,
+            }
+        return self._meta
 
     @property
     def instance_connector(self):

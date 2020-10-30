@@ -48,6 +48,9 @@ parser.add_argument(
     '-l', '--loop', action="store_true", help="Loop the specified action forever (only for select actions)"
 )
 parser.add_argument(
+    '--min-seconds', type=int, help="The minimum number of seconds between Pipe syncs"
+)
+parser.add_argument(
     '-d', '--debug', action="store_true", help="Print debug statements (max verbosity)"
 )
 parser.add_argument(

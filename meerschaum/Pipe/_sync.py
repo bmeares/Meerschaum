@@ -23,9 +23,9 @@ def sync(
     """
     from meerschaum import get_connector
     from meerschaum.config import get_config
-    from meerschaum.utils.misc import attempt_import, round_time
+    from meerschaum.utils.misc import attempt_import, round_time, import_pandas
     import datetime as datetime_pkg
-    pd = attempt_import(get_config('system', 'connectors', 'all', 'pandas'))
+    pd = import_pandas()
 
     ### default: fetch new data via the connector.
     ### If new data is provided, skip fetching

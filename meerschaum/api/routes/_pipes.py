@@ -62,22 +62,12 @@ async def fetch_pipes_keys(
     from meerschaum.utils.debug import dprint
     import json
 
-    if debug: dprint(f"location_keys: {location_keys}")
-
-    conn = get_connector(debug=True)
-    dprint("conn: " + str(conn))
-    dprint("conn_keys: " + connector_keys)
-    dprint("metric_keys:" + metric_keys)
-    dprint(location_keys)
-    dprint(json.loads(params))
-
-
-    return get_connector(debug=True).fetch_pipes_keys(
+    return get_connector(debug=debug).fetch_pipes_keys(
         connector_keys = json.loads(connector_keys),
         metric_keys = json.loads(metric_keys),
         location_keys = json.loads(location_keys),
         params = json.loads(params),
-        debug = True
+        debug = debug
     )
 
 @fast_api.get(pipes_endpoint)
@@ -179,7 +169,7 @@ async def sync_pipe(
     from meerschaum import Pipe
     import json
     df = parse_df_datetimes(data)
-    p = Pipe(connector_keys, metric_key, location_key)
+    p = get_pipe(connector_keys, metric_key, location_key)
     if not is_pipe_registered(p, pipes()):
         raise fastapi.HTTPException(
             status_code = 409,
@@ -263,7 +253,7 @@ def get_pipe_id(
             ).id
         )
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        raise fastapi.HTTPException(status_code=404, detail=str(e))
     return pipe_id
 
 @fast_api.get(pipes_endpoint + '/{connector_keys}/{metric_key}/{location_key}/attributes')
@@ -297,7 +287,7 @@ def create_metadata(
     """
     from meerschaum.connectors.sql.tables import get_tables
     try:
-        tables = get_tables()
-    except:
-        return False
+        tables = get_tables(mrsm_instance=get_connector())
+    except Exception as e:
+        raise fastapi.HTTPException(status_code=500, detail=str(e))
     return True
