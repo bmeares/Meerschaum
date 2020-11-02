@@ -113,7 +113,7 @@ setuptools.setup(
     package_data = {'' : ['*.html', '*.css', '*.js']},
     python_requires = '>=3.8',
     classifiers = [
-        "Development Status :: 3 - Alpha",
+        "Development Status :: 4 - Beta",
         "Intended Audience :: System Administrators",
         "License :: OSI Approved :: MIT License",
         "Operating System :: POSIX :: Linux",
