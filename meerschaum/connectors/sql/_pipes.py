@@ -224,7 +224,7 @@ def create_indices(
     Create indices for a Pipe's datetime and ID columns.
     """
     from meerschaum.utils.debug import dprint
-    from meerschaum.utils.misc import pg_capital
+    from meerschaum.utils.misc import sql_item_name
     from meerschaum.utils.warnings import warn
     index_queries = dict()
 
@@ -233,26 +233,26 @@ def create_indices(
         if self.flavor == 'timescaledb':
             ## create hypertable
             dt_query = (
-                f"SELECT create_hypertable('{pg_capital(str(pipe))}', " +
+                f"SELECT create_hypertable('{sql_item_name(str(pipe), self.flavor)}', " +
                 f"'{pipe.columns['datetime']}', migrate_data => true);"
             )
         elif self.flavor == 'postgresql':
-            dt_query = f"CREATE INDEX ON {pg_capital(str(pipe))} ({pg_capital(pipe.columns['datetime'])})"
+            dt_query = f"CREATE INDEX ON {sql_item_name(str(pipe), self.flavor)} ({sql_item_name(pipe.get_columns('datetime'), self.flavor)})"
         elif self.flavor in ('mysql', 'mariadb'):
-            dt_query = f"CREATE INDEX ON {pipe} ({pipe.columns['datetime']})"
+            dt_query = f"CREATE INDEX ON {sql_item_name(str(pipe), self.flavor)} ({sql_item_name(pipe.get_columns('datetime'), self.flavor)})"
         else: ### mssql, sqlite, etc.
-            dt_query = f"CREATE INDEX {pipe.columns['datetime']}_index ON {pipe} ({pipe.columns['datetime']})"
+            dt_query = f"CREATE INDEX {pipe.get_columns('datetime').lower()}_index ON {pipe} ({sql_item_name(pipe.get_columns('datetime'), self.flavor)})"
             
         index_queries[pipe.get_columns('datetime')] = dt_query
 
     ### create id index
     if 'id' in pipe.columns and pipe.columns['id']:
         if self.flavor in ('timescaledb', 'postgresql'):
-            id_query = f"CREATE INDEX ON {pg_capital(str(pipe))} ({pg_capital(pipe.columns['id'])})"
+            id_query = f"CREATE INDEX ON {sql_item_name(str(pipe), self.flavor)} ({sql_item_name(pipe.get_columns('id'), self.flavor)})"
         elif self.flavor in ('mysql', 'mariadb'):
-            id_query = f"CREATE INDEX ON {pipe} ({pipe.columns['id']})"
+            id_query = f"CREATE INDEX ON {sql_item_name(str(pipe), self.flavor)} ({sql_item_name(pipe.get_columns('id'), self.flavor)})"
         else: ### mssql, sqlite, etc.
-            id_query = f"CREATE INDEX {pipe.columns['id']}_index ON {pipe} ({pipe.columns['id']})"
+            id_query = f"CREATE INDEX {pipe.get_columns('id').lower()}_index ON {sql_item_name(str(pipe), self.flavor)} ({sql_item_name(pipe.get_columns('id'), self.flavor)})"
 
         index_queries[pipe.get_columns('id')] = id_query
 
@@ -271,11 +271,9 @@ def delete_pipe(
     Delete a Pipe's entry and drop its table
     """
     from meerschaum.utils.warnings import warn
-    from meerschaum.utils.misc import pg_capital
+    from meerschaum.utils.misc import sql_item_name
     from meerschaum.utils.debug import dprint
-    pipe_name = str(pipe)
-    if self.flavor in ('postgresql', 'timescaledb'):
-        pipe_name = pg_capital(pipe_name)
+    pipe_name = sql_item_name(str(pipe), self.flavor)
     if not pipe.id:
         return False, f"Pipe '{pipe}' is not registered"
 
@@ -318,16 +316,19 @@ def get_backtrack_data(
     )
 
     ### check for capitals
-    from meerschaum.utils.misc import pg_capital
-    dt = pipe.get_columns('datetime')
-    table = str(pipe)
-    if self.flavor in ('timescaledb', 'postgresql'):
-        dt = pg_capital(dt)
-        table = pg_capital(table)
+    from meerschaum.utils.misc import sql_item_name
+    table = sql_item_name(str(pipe), self.flavor)
+    dt = sql_item_name(pipe.get_columns('datetime'), self.flavor)
 
     query = f"SELECT * FROM {table}" + (f" WHERE {dt} > {da}" if da else "")
+    
+    df = self.read(query, debug=debug)
 
-    return self.read(query, debug=debug)
+    if self.flavor == 'sqlite':
+        from meerschaum.utils.misc import parse_df_datetimes
+        df = parse_df_datetimes(df, debug=debug)
+
+    return df
 
 def get_pipe_data(
         self,
@@ -346,14 +347,12 @@ def get_pipe_data(
         Upper bound for the query (inclusive)
     """
     from meerschaum.utils.debug import dprint
-    from meerschaum.utils.misc import pg_capital
+    from meerschaum.utils.misc import sql_item_name
     from meerschaum.connectors.sql._fetch import dateadd_str
     query = f"SELECT * FROM {pipe}"
     where = ""
 
-    dt = pipe.get_columns('datetime')
-    if self.flavor in ('postgresql', 'timescaledb'):
-        dt = pg_capital(dt)
+    dt = sql_item_name(pipe.get_columns('datetime'), self.flavor)
 
     if begin is not None:
         begin_da = dateadd_str(
@@ -377,7 +376,11 @@ def get_pipe_data(
     query += "\nORDER BY " + dt + " DESC"
 
     if debug: dprint(f"Getting Pipe data with begin = '{begin}' and end = '{end}'")
-    return self.read(query, debug=debug)
+    df = self.read(query, debug=debug)
+    if self.flavor == 'sqlite':
+        from meerschaum.utils.misc import parse_df_datetimes
+        return parse_df_datetimes(df, debug=debug)
+    return df
 
 def get_pipe_id(
         self,
@@ -433,24 +436,34 @@ def get_sync_time(
     """
     Get a Pipe's most recent datetime
     """
-    from meerschaum.utils.misc import pg_capital
-    datetime = pipe.get_columns('datetime')
-    table = str(pipe)
-    if self.type in ('postgresql', 'timescaledb'):
-        datetime = pg_capital(datetime)
-        table = pg_capital(table)
+    from meerschaum.utils.misc import sql_item_name
+    from meerschaum.utils.warnings import warn
+    table = sql_item_name(str(pipe), self.flavor)
+    dt = sql_item_name(pipe.get_columns('datetime'), self.flavor)
 
-    q = f"SELECT {datetime} FROM {table} ORDER BY {datetime} DESC LIMIT 1"
+    q = f"SELECT {dt} FROM {table} ORDER BY {dt} DESC LIMIT 1"
+    if self.flavor == 'mssql':
+        q = f"SELECT TOP 1 {dt} FROM {table} ORDER BY {dt} DESC"
     try:
         from meerschaum.utils.misc import round_time
         import datetime
-        sync_time = round_time(
-            self.value(q, debug=debug).to_pydatetime(),
-            date_delta = datetime.timedelta(minutes=1),
-            to = 'down'
-        )
-    except:
+        db_time = self.value(q, debug=debug)
+        
+        ### sqlite returns str
+        if db_time is None: return None
+        elif isinstance(db_time, str):
+            from meerschaum.utils.misc import attempt_import
+            dateutil_parser = attempt_import('dateutil.parser')
+            st = dateutil_parser.parse(db_time)
+        else:
+            st = db_time.to_pydatetime()
+
+        ### round down to smooth timestamp
+        sync_time = round_time(st, date_delta=datetime.timedelta(minutes=1), to='down') 
+
+    except Exception as e:
         sync_time = None
+        warn(e)
 
     return sync_time
 
@@ -462,11 +475,18 @@ def pipe_exists(
     """
     Check that a Pipe's table exists
     """
-    from meerschaum.utils.misc import pg_capital
+    from meerschaum.utils.misc import sql_item_name
+    from meerschaum.utils.debug import dprint
+    ### default: select no rows. NOTE: this might not work for Oracle
+    q = f"SELECT COUNT(*) FROM {pipe}"
     if self.flavor in ('timescaledb', 'postgresql'):
-        q = f"SELECT to_regclass('{pg_capital(str(pipe))}')"
-    elif conn.flavor == 'mssql':
+        q = f"SELECT to_regclass('{sql_item_name(str(pipe), self.flavor)}')"
+    elif self.flavor == 'mssql':
         q = f"SELECT OBJECT_ID('{pipe}')"
-    elif conn.flavor in ('mysql', 'mariadb'):
+    elif self.flavor in ('mysql', 'mariadb'):
         q = f"SHOW TABLES LIKE '{pipe}'"
-    return self.value(q, debug=debug) is not None
+    elif self.flavor == 'sqlite':
+        q = f"SELECT name FROM sqlite_master WHERE name='{pipe}'"
+    exists = self.value(q, debug=debug) is not None
+    if debug: dprint(f"Pipe '{pipe}' " + ('exists.' if exists else 'does not exist.'))
+    return exists
