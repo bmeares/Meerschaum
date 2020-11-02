@@ -59,7 +59,7 @@ def write_config(
         pprint(config_dict, stream=sys.stderr)
     with open(CONFIG_PATH, 'w') as f:
         f.write(default_header_comment)
-        yaml.dump(config_dict, f)
+        yaml.dump(config_dict, f, sort_keys=False)
 
     return True
 

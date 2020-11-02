@@ -41,7 +41,7 @@ def _pipes_lap(
     )
 
     ### enforce minimum cooldown
-    sync_times_dict = dict()
+    #  sync_times_dict = dict()
 
     def sync_pipe(p):
         """
@@ -61,7 +61,14 @@ def _pipes_lap(
 
         #  sync_times_dict[p] = time.time()
         #  print(sync_times_dict)
-        return p.sync(debug=debug)
+        from meerschaum.utils.warnings import warn
+        try:
+            return_tuple = p.sync(debug=debug)
+        except Exception as e:
+            warn(str(e))
+            return_tuple = (False, f"Failed to sync Pipe '{p}' with exception:" + "\n" + str(e))
+        
+        return return_tuple
 
     from multiprocessing import cpu_count
     from multiprocessing.pool import ThreadPool as Pool
@@ -72,12 +79,17 @@ def _pipes_lap(
     pool = Pool(processes=workers)
 
     results = pool.map(sync_pipe, pipes)
-
-    ### determine which Pipes failed to sync
-    pipe_indices = [i for p, i in enumerate(pipes)]
-    succeeded_pipes = [pipe_indices[i] for i, r in enumerate(results) if r[0]]
-    failed_pipes = [pipe_indices[i] for i, r in enumerate(results) if not r[0]]
-    results_dict = dict([(p, r) for p, r in zip(pipe_indices, results)])
+    if results is None:
+        warn(f"Failed to fetch results from syncing Pipes.")
+        succeeded_pipes = []
+        failed_pipes = pipes
+        results_dict = dict([(p, (False, f"Could not fetch sync result for Pipe '{p}'")) for p in pipes])
+    else:
+        ### determine which Pipes failed to sync
+        pipe_indices = [i for p, i in enumerate(pipes)]
+        succeeded_pipes = [pipe_indices[i] for i, r in enumerate(results) if r[0]]
+        failed_pipes = [pipe_indices[i] for i, r in enumerate(results) if not r[0]]
+        results_dict = dict([(p, r) for p, r in zip(pipe_indices, results)])
 
     if len(failed_pipes) > 0:
         print("\n" + f"Failed to sync Pipes:")
@@ -89,7 +101,6 @@ def _pipes_lap(
             print(f"  - {p}")
 
     if debug:
-        from meerschaum import get_connector
         import pprintpp
         dprint("\n" + f"Return values for each Pipe:")
         pprintpp.pprint(results_dict)
@@ -98,7 +109,7 @@ def _pipes_lap(
 
 def _sync_pipes(
         loop : bool = False,
-        min_seconds : int = 0,
+        min_seconds : int = 1,
         debug : bool = False,
         **kw
     ) -> tuple:
@@ -109,12 +120,21 @@ def _sync_pipes(
     import time
     run = True
     msg = ""
+    cooldown = 2 * (min_seconds + 1)
     while run:
         lap_begin = time.time()
-        success, fail = _pipes_lap(
-            debug=debug,
-            **kw
-        )
+        try:
+            success, fail = _pipes_lap(
+                debug=debug,
+                **kw
+            )
+        except Exception as e:
+            from meerschaum.utils.warnings import warn
+            print(e)
+            warn(f"Failed to sync all pipes. Waiting for {cooldown} seconds, then trying again.")
+            time.sleep(cooldown)
+            cooldown = int(cooldown * 1.5)
+            continue
         lap_end = time.time()
         msg = (
             "\n" + f"It took {round(lap_end - lap_begin, 2)} seconds to sync {len(success) + len(fail)} pipes" + "\n" + 

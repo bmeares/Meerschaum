@@ -37,6 +37,8 @@ def os(
         capture_stderr = subprocess.PIPE
         command_list += action + sub_args
         timeout = system_config['shell']['timeout']
+    else:
+        return False, os.__doc__
 
     if debug:
         dprint(command_list)

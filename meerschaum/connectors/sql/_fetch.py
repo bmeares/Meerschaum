@@ -80,6 +80,7 @@ def fetch(
     """
     from meerschaum.utils.debug import dprint
     from meerschaum.utils.warnings import warn, error
+    from meerschaum.utils.misc import sql_item_name
 
     if 'columns' not in pipe.parameters or 'fetch' not in pipe.parameters:
         warn(f"Parameters for '{pipe}' must include 'columns' and 'fetch'")
@@ -88,7 +89,8 @@ def fetch(
     datetime = None
     if 'datetime' not in pipe.columns:
         warn(f"Missing datetime column for '{pipe}'. Will select all data instead")
-    else: datetime = pipe.columns['datetime']
+    else:
+        datetime = sql_item_name(pipe.get_columns('datetime'), self.flavor)
 
     instructions = pipe.parameters['fetch']
 
@@ -112,12 +114,10 @@ def fetch(
     if datetime and da:
         meta_def += f"\nWHERE {datetime} > {da}"
 
-    if debug: dprint(meta_def)
-
-    df = self.read(meta_def)
+    df = self.read(meta_def, debug=debug)
     ### if sqlite, parse for datetimes
     if self.flavor == 'sqlite':
         from meerschaum.utils.misc import parse_df_datetimes
-        return parse_df_datetimes(df, debug=debug)
+        df = parse_df_datetimes(df, debug=debug)
     return df
 

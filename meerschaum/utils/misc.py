@@ -617,14 +617,18 @@ def parse_df_datetimes(
     """
 
     ### import pandas (or pandas replacement)
-    from meerschaum.utils.misc import attempt_import
-    from meerschaum.config import get_config
     from meerschaum.utils.debug import dprint
-    pd = attempt_import(get_config('system', 'connectors', 'all', 'pandas'))
+    pd = import_pandas()
 
     ### if df is a dict, build DataFrame
     if not isinstance(df, pd.DataFrame):
+        if debug: dprint(f"df is not a DataFrame. Casting to DataFrame...")
         df = pd.DataFrame(df)
+
+    ### skip parsing if DataFrame is empty
+    if len(df) == 0:
+        if debug: dprint(f"df is empty. Returning original DataFrame without casting datetime columns...")
+        return df
 
     ### apply regex to columns to determine which are ISO datetimes
     iso_dt_regex = r'\d{4}-\d{2}-\d{2}.\d{2}\:\d{2}\:\d{2}'
@@ -634,7 +638,7 @@ def parse_df_datetimes(
 
     ### list of datetime column names
     datetimes = list(df.loc[:, dt_mask])
-    if debug: dprint(datetimes)
+    if debug: dprint("Converting columns to datetimes: " + str(datetimes))
 
     ### apply to_datetime
     df[datetimes] = df[datetimes].apply(pd.to_datetime)
@@ -692,6 +696,14 @@ def wait_for_connection(**kw):
     """
     import asyncio
     asyncio.run(retry_connect(**kw))
+
+def sql_item_name(s : str, flavor : str) -> str:
+    """
+    Parse SQL items depending on the flavor
+    """
+    if flavor in {'timescaledb', 'postgresql'}: s = pg_capital(s)
+    elif flavor == 'sqlite': s = "\"" + s + "\""
+    return s
 
 def pg_capital(s : str) -> str:
     """
@@ -762,13 +774,19 @@ def filter_unseen_df(
     Left join two DataFrames to find the newest unseen data.
 
     I have scoured the web for the best way to do this.
-    My intuition was to join on datetime and id, but the code below accounts for values as well,
+    My intuition was to join on datetime and id, but the code below accounts for values as well
     without needing to define expicit columns or indices.
 
     The logic below is based off this StackOverflow question, with an index reset thrown on top:
     https://stackoverflow.com/questions/48647534/python-pandas-find-difference-between-two-data-frames#48647840
+
+    Also, NaN apparently does not equal NaN, so I am temporarily replacing instances of NaN with a
+    custom string, per this StackOverflow question:
+    https://stackoverflow.com/questions/31833635/pandas-checking-for-nan-not-working-using-isin
     """
     from meerschaum.utils.debug import dprint
-    filtered_df = new_df[~new_df.apply(tuple, 1).isin(old_df.apply(tuple, 1))].reset_index(drop=True)
-    if debug: dprint(filtered_df)
+
+    custom_nan = 'mrsm_NaN'
+    filtered_df = new_df[~new_df.fillna(custom_nan).apply(tuple, 1).isin(old_df.fillna(custom_nan).apply(tuple, 1))].reset_index(drop=True)
+    if debug: dprint("Filtered DF:" + "\n" + f"{filtered_df}")
     return filtered_df
