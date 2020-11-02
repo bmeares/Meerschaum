@@ -20,7 +20,7 @@ def read(
     """
     Read a SQL query or table into a pandas dataframe.
     """
-    from meerschaum.utils.misc import attempt_import, pg_capital
+    from meerschaum.utils.misc import attempt_import, sql_item_name
     sqlalchemy = attempt_import("sqlalchemy")
     chunksize = chunksize if chunksize != -1 else self.sys_config['chunksize']
     if debug:
@@ -32,7 +32,7 @@ def read(
     ### format with sqlalchemy
     if ' ' not in query_or_table:
         if self.flavor in ('postgresql', 'timescaledb'):
-            query_or_table = pg_capital(query_or_table)
+            query_or_table = sql_item_name(query_or_table, self.flavor)
         if debug: dprint(f"Reading from table {query_or_table}")
         formatted_query = str(sqlalchemy.text("SELECT * FROM " + str(query_or_table)))
     else:
@@ -63,7 +63,7 @@ def read(
             self.engine
         )
     else:
-        df = self.pd.concat(chunk_list)
+        df = self.pd.concat(chunk_list).reset_index(drop=True)
 
     ### chunksize is not None so must iterate
     if debug:
@@ -148,13 +148,13 @@ def to_sql(
     if name is None:
         error("Name must not be None to submit to the SQL server")
 
-    from meerschaum.utils.misc import pg_capital
+    from meerschaum.utils.misc import sql_item_name
 
     ### resort to defaults if None
     if method == "":
         if self.flavor in bulk_flavors:
             method = psql_insert_copy
-            #  name = pg_capital(name)
+            #  name = sql_item_name(name, self.flavor)
         else:
             method = self.sys_config['method']
     chunksize = chunksize if chunksize != -1 else self.sys_config['chunksize']
@@ -200,7 +200,7 @@ def psql_insert_copy(table, conn, keys, data_iter):
     import csv
     from io import StringIO
 
-    from meerschaum.utils.misc import pg_capital
+    from meerschaum.utils.misc import sql_item_name
 
     # gets a DBAPI connection that can provide a cursor
     dbapi_conn = conn.connection
@@ -212,9 +212,9 @@ def psql_insert_copy(table, conn, keys, data_iter):
 
         columns = ', '.join('"{}"'.format(k) for k in keys)
         if table.schema:
-            table_name = '{}.{}'.format(pg_capital(table.schema), pg_capital(table.name))
+            table_name = '{}.{}'.format(sql_item_name(table.schema, 'postgresql'), sql_item_name(table.name, 'postgresql'))
         else:
-            table_name = pg_capital(table.name)
+            table_name = sql_item_name(table.name, 'postgresql')
 
         sql = 'COPY {} ({}) FROM STDIN WITH CSV'.format(
             table_name, columns

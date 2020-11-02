@@ -105,6 +105,7 @@ default_docker_compose_config = {
                 'POSTGRES_PASSWORD=' + env_dict['POSTGRES_PASSWORD'],
                 'ALLOW_IP_RANGE=' + env_dict['ALLOW_IP_RANGE'],
             ],
+            'restart' : 'always',
             'image' : 'timescale/timescaledb:' + env_dict['TIMESCALEDB_VERSION'],
             'ports' : [
                 f'{db_port}:{db_port}',
@@ -129,6 +130,7 @@ default_docker_compose_config = {
             'environment' : [
                 'MEERSCHAUM_CONFIG=' + env_dict['MEERSCHAUM_API_CONFIG'],
             ],
+            'restart' : 'always',
             'depends_on' : [
                 'meerschaum_db',
             ],
@@ -150,6 +152,7 @@ default_docker_compose_config = {
                 'frontend',
                 'backend',
             ],
+            'restart' : 'always',
             'depends_on' : [
                 'meerschaum_db',
             ],
@@ -187,6 +190,7 @@ default_docker_compose_config = {
                 f'{mqtt_port}:1883',
                 '9001:9001',
             ],
+            'restart' : 'always',
             'networks' : [
                 'frontend',
             ],

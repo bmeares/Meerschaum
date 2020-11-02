@@ -32,7 +32,7 @@ def sync(
     if df is None:
         if self.connector is None:
             return False, "Cannot fetch without a connector"
-        df = self.fetch(debug = debug)
+        df = self.fetch(debug=debug)
 
     if debug: dprint("DataFrame to sync:\n" + f"{df}")
 
@@ -54,16 +54,18 @@ def sync(
     ### fetched df is the dataframe returned from the remote source
     ### via the connector
     if df is None:
-        warn(f"Was not able to sync '{self}'")
-        return None
+        warning_msg = f"Was not able to sync Pipe '{self}'"
+        warn(warning_msg)
+        return False, warning_msg
     if debug: dprint("Fetched data:\n" + str(df))
 
-    ### TODO use instance connector, check for api instead of only SQL
-    ### NOTE: actually, this SHOULD only be executed if the instance connector is SQL
+    ### NOTE: this SHOULD only be executed if the instance connector is SQL
     sql_connector = self.instance_connector
 
     ### if table does not exist, create it with indices
     if not self.exists(debug=debug):
+        if debug: dprint(f"Creating empty table for Pipe '{self}'...")
+        if debug: dprint("New table data types:\n" + f"{df.head(0).dtypes}")
         ### create empty table
         sql_connector.to_sql(
             df.head(0),
@@ -77,7 +79,7 @@ def sync(
     ### begin is the oldest data in the new dataframe
     begin = round_time(
         df[
-            self.columns['datetime']
+            self.get_columns('datetime')
         ].min().to_pydatetime(),
         to = 'down'
     ) - datetime_pkg.timedelta(minutes=1)
@@ -93,7 +95,6 @@ def sync(
     if debug: dprint(f"New unseen data:\n" + str(new_data_df))
 
     if_exists = kw.get('if_exists', 'append')
-
 
     ### append new data to Pipe's table
     sql_connector.to_sql(

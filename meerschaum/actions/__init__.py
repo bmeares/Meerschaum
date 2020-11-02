@@ -7,7 +7,6 @@ Actions available to the mrsm CLI
 """
 
 from meerschaum.utils.misc import add_method_to_class, get_modules_from_package
-from meerschaum.actions.shell import Shell
 from meerschaum.utils.warnings import enable_depreciation_warnings
 enable_depreciation_warnings(__name__)
 
@@ -30,13 +29,17 @@ for module in modules:
         - Original definition : meerschaum.actions.shell.Shell
         - New definition      : meerschaum.actions.Shell
     3. Populate the actions dictionary with function names and functions
+
+    UPDATE:
+    Shell modifications have been deferred to get_shell in order to improve lazy loading.
+
     """
 
     actions.update(
         dict(
             [
                 ### __name__ and new function pointer
-                (ob[0], add_method_to_class(func=ob[1], class_def=Shell, method_name='do_' + ob[0]))
+                (ob[0], ob[1])
                     for ob in getmembers(module)
                         if isfunction(ob[1])
                             and ob[0][0] != '_'            
@@ -44,6 +47,18 @@ for module in modules:
         )
     )
 
-from meerschaum.actions._entry import _entry as entry
 
-shell = Shell()
+from meerschaum.actions._entry import _entry as entry
+shell = None
+def get_shell():
+    """
+    Lazy load the Shell
+    """
+    global shell
+    if shell is None:
+        from meerschaum.actions.shell import Shell
+        for a, f in actions.items():
+            add_method_to_class(func=f, class_def=Shell, method_name='do_' + a)
+
+        shell = Shell()
+    return shell
