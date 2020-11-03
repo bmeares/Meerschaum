@@ -26,6 +26,7 @@ def sync(
     from meerschaum.utils.misc import attempt_import, round_time, import_pandas
     import datetime as datetime_pkg
     pd = import_pandas()
+    np = attempt_import('numpy')
 
     ### default: fetch new data via the connector.
     ### If new data is provided, skip fetching
@@ -77,16 +78,25 @@ def sync(
         sql_connector.create_indices(self, debug=debug)
 
     ### begin is the oldest data in the new dataframe
+    try:
+        min_dt = df[self.get_columns('datetime')].min().to_pydatetime()
+    except:
+        min_dt = None
+    if min_dt in (np.nan, None):
+        min_dt = self.sync_time
     begin = round_time(
-        df[
-            self.get_columns('datetime')
-        ].min().to_pydatetime(),
+        min_dt,
         to = 'down'
     ) - datetime_pkg.timedelta(minutes=1)
     if debug: dprint(f"Looking at data newer than '{begin}'")
 
     ### backtrack_df is existing Pipe data that overlaps with the fetched df
-    backtrack_df = self.get_backtrack_data(begin=begin, debug=debug)
+    try:
+        backtrack_minutes = self.parameters['fetch']['backtrack_minutes']
+    except:
+        backtrack_minutes = 0
+
+    backtrack_df = self.get_backtrack_data(begin=begin, backtrack_minutes=backtrack_minutes, debug=debug)
     if debug: dprint("Existing data:\n" + str(backtrack_df))
 
     ### remove data we've already seen before
@@ -105,30 +115,6 @@ def sync(
         **kw
     )
     return True, "Success"
-
-def get_backtrack_data(
-        self,
-        backtrack_minutes : int = 0,
-        begin : 'datetime.datetime' = None,
-        debug : bool = False
-    )-> 'pd.DataFrame':
-    """
-    Get the last few `backtrack_minutes`' worth of data from a Pipe, or specify a begin datetime.
-    """
-    ### DEFAULT : 0
-    try:
-        backtrack_minutes = self.parameters['fetch']['backtrack_minutes']
-    except:
-        pass
-
-    if begin is None: begin = self.sync_time
-
-    return self.instance_connector.get_backtrack_data(
-        pipe = self,
-        backtrack_minutes = backtrack_minutes,
-        begin = begin,
-        debug = debug
-    )
 
 def get_sync_time(
         self,

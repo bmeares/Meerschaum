@@ -14,6 +14,7 @@ from meerschaum.config._paths import (
     #  GRAFANA_INI_PATH,
     MOSQUITTO_CONFIG_PATH,
     CONFIG_ROOT_PATH,
+    SPLITGRAPH_CONFIG_PATH,
 )
 from meerschaum.config._paths import STACK_COMPOSE_PATH, STACK_ENV_PATH, STACK_COMPOSE_FILENAME
 
@@ -88,6 +89,8 @@ volumes = {
     'grafana_storage' : '/var/lib/grafana',
     'portainer_data' : '/data',
     'mosquitto.conf' : '/mosquitto/config/mosquitto.conf',
+    'splitgraph_data' : '/var/lib/splitgraph/objects',
+    'splitgraph_metadata' : '/var/lib/postgresql/data',
 }
 networks = {
     'frontend' : None,
@@ -198,7 +201,31 @@ default_docker_compose_config = {
                 #  str(MOSQUITTO_CONFIG_PATH) + ':' + volumes['mosquitto.conf'],
             #  ],
 
-        }
+        },
+        #  'splitgraph' : {
+            #  'image'  : 'splitgraph/engine',
+            #  'ports' : [
+                #  '0.0.0.0:5433:5432',
+            #  ],
+            #  'environment' : [
+                #  'POSTGRES_USER=' + 'sgr',
+                #  'POSTGRES_PASSWORD=' + 'supersecure',
+                #  'POSTGRES_DB=splitgraph',
+                #  'SG_LOGLEVEL=INFO',
+                #  'SG_CONFIG_FILE=/.sgconfig',
+            #  ],
+            #  'expose' : [
+                #  5432,
+            #  ],
+            #  'volumes' : [
+                #  'splitgraph_data:' + volumes['splitgraph_data'],
+                #  'splitgraph_metadata:' + volumes['splitgraph_metadata'],
+                #  str(SPLITGRAPH_CONFIG_PATH) + ':/.sgconfig',
+            #  ],
+            #  'networks' : [
+                #  'backend',
+            #  ],
+        #  },
     },
 }
 default_docker_compose_config['networks'] = networks

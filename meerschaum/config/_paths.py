@@ -66,6 +66,8 @@ API_UVICORN_CONFIG_PATH = Path(os.path.join(API_UVICORN_RESOURCES_PATH, '.thread
 
 PIPES_RESOURCES_PATH = Path(os.path.join(RESOURCES_PATH, 'pipes'))
 
+SPLITGRAPH_CONFIG_PATH = Path(os.path.join(Path.home(), '.splitgraph', '.sgconfig'))
+
 ### NOTE: This must be the bottom of the module
 paths_glob = dict(globals())
 for var, path in paths_glob.items():

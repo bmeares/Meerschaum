@@ -155,7 +155,10 @@ def _show_data(
         print(df)
         if gui:
             pandasgui = attempt_import('pandasgui')
-            pandasgui.show(result)
+            try:
+                pandasgui.show(df)
+            except:
+                df.plot()
     return True, "Success"
 
 

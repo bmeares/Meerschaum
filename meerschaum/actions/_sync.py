@@ -61,11 +61,12 @@ def _pipes_lap(
 
         #  sync_times_dict[p] = time.time()
         #  print(sync_times_dict)
+        #  return p.sync(debug=debug)
         from meerschaum.utils.warnings import warn
         try:
             return_tuple = p.sync(debug=debug)
         except Exception as e:
-            warn(str(e))
+            warn(str(e), stacklevel=4)
             return_tuple = (False, f"Failed to sync Pipe '{p}' with exception:" + "\n" + str(e))
         
         return return_tuple
@@ -131,18 +132,20 @@ def _sync_pipes(
         except Exception as e:
             from meerschaum.utils.warnings import warn
             print(e)
-            warn(f"Failed to sync all pipes. Waiting for {cooldown} seconds, then trying again.")
+            warn(f"Failed to sync all pipes. Waiting for {cooldown} seconds, then trying again.", stacklevel=3)
             time.sleep(cooldown)
             cooldown = int(cooldown * 1.5)
             continue
+        cooldown = 2 * (min_seconds + 1)
         lap_end = time.time()
         msg = (
             "\n" + f"It took {round(lap_end - lap_begin, 2)} seconds to sync {len(success) + len(fail)} pipes" + "\n" + 
             f"  ({len(success)} succeeded, {len(fail)} failed)."
         )
         print(msg)
-        if min_seconds > 0: print("\n" + f"Sleeping for {min_seconds} second" + ("s" if abs(min_seconds) != 1 else ""))
-        time.sleep(min_seconds)
+        if min_seconds > 0 and loop:
+            print("\n" + f"Sleeping for {min_seconds} second" + ("s" if abs(min_seconds) != 1 else ""))
+            time.sleep(min_seconds)
         run = loop
     return True, msg
 
