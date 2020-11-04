@@ -308,6 +308,7 @@ def get_backtrack_data(
         error(f"Pipe must be provided")
     from meerschaum.utils.debug import dprint
     from meerschaum.connectors.sql._fetch import dateadd_str
+    if begin is None: begin = pipe.sync_time
     da = dateadd_str(
         flavor = self.flavor,
         datepart = 'minute',
@@ -448,7 +449,7 @@ def get_sync_time(
         from meerschaum.utils.misc import round_time
         import datetime
         db_time = self.value(q, debug=debug)
-        
+
         ### sqlite returns str
         if db_time is None: return None
         elif isinstance(db_time, str):
@@ -463,7 +464,7 @@ def get_sync_time(
 
     except Exception as e:
         sync_time = None
-        warn(e)
+        warn(str(e))
 
     return sync_time
 
