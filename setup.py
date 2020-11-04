@@ -64,6 +64,8 @@ api = sql + [
 ]
 stack = [
     'docker',
+    'splitgraph',
+    'docker-compose',
 ]
 extras = {
     'drivers' : drivers,

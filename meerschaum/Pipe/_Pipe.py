@@ -12,12 +12,12 @@ default_instance_labels = {
 
 class Pipe:
     from ._fetch import fetch
-    from ._data import data, get_data
+    from ._data import data, get_data, get_backtrack_data
     from ._register import register
     from ._attributes import attributes, parameters, columns, get_columns
     from ._show import show
     from ._edit import edit
-    from ._sync import sync, get_sync_time, get_backtrack_data, exists
+    from ._sync import sync, get_sync_time, exists
     from ._delete import delete
 
     def __init__(
