@@ -42,12 +42,12 @@ def register_pipe(
 
     ### 2. If the parent pipe does not have `parameters` either manually set
     ###    or within the database, check the `meta.parameters` value (likely None as well)
-    if parameters is None:
-        try:
-            parameters = pipe.meta.parameters
-        except Exception as e:
-            if debug: dprint(str(e))
-            parameters = None
+    #  if parameters is None:
+        #  try:
+            #  parameters = pipe.meta.parameters
+        #  except Exception as e:
+            #  if debug: dprint(str(e))
+            #  parameters = None
 
     ### ensure `parameters` is a dictionary
     if parameters is None:
