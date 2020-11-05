@@ -22,6 +22,7 @@ def register_pipe(pipe : MetaPipe):
     pipe_object = get_pipe(pipe.connector_keys, pipe.metric_key, pipe.location_key)
     if is_pipe_registered(pipe_object, pipes(refresh=True)):
         raise fastapi.HTTPException(status_code=409, detail="Pipe already registered")
+    pipe_object.parameters = pipe.parameters
     results = get_connector().register_pipe(pipe_object)
     pipes(refresh=True)
 

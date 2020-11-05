@@ -156,7 +156,7 @@ def write_default_config(
         pprint(default_config, stream=sys.stderr)
 
     config_copy = dict()
-    config_copy['meerschaum'] = dict(default_config['meerschaum'])
+    config_copy['meerschaum'] = default_config['meerschaum'].copy()
 
     ### write meerschaum config first
     if debug: dprint(f"Writing default Meerschaum configuration to {DEFAULT_CONFIG_PATH}...")
@@ -165,7 +165,7 @@ def write_default_config(
         yaml.dump(config_copy, f)
         f.write("\n\n")
 
-    config_copy = dict(default_config)
+    config_copy = default_config.copy()
     del config_copy['meerschaum']
 
     ### write the rest of the configuration
