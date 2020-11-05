@@ -32,6 +32,7 @@ class APIConnector(Connector):
         pipe_exists,
         create_metadata,
     )
+    from ._fetch import fetch
 
     def __init__(
         self,
