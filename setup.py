@@ -113,7 +113,7 @@ setuptools.setup(
     },
     zip_safe = True,
     package_data = {'' : ['*.html', '*.css', '*.js']},
-    python_requires = '>=3.8',
+    python_requires = '>=3.7',
     classifiers = [
         "Development Status :: 4 - Beta",
         "Intended Audience :: System Administrators",
@@ -122,6 +122,7 @@ setuptools.setup(
         "Operating System :: Microsoft :: Windows",
         "Operating System :: MacOS",
         "Programming Language :: SQL",
+        "Programming Language :: Python :: 3.7",
         "Programming Language :: Python :: 3.8",
         "Topic :: Database",
     ]

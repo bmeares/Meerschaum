@@ -332,14 +332,14 @@ def search_and_substitute_config(
 
         ### the first character of the keys
         ### MRSM{value1:value2}
-        ###       ^
+        ###      ^
         begin = hs.find(needle) + len(needle) + len(begin_key)
 
         ### number of characters to end of keys
         ### (really it's the index of the beginning of the end_key relative to the beginning
         ###     but the math works out)
         ### MRSM{value1}
-        ###       ^     ^  => 6
+        ###      ^     ^  => 6
         length = hs[begin:].find(end_key)
 
         ### index of the end_key (end of `length` characters)
@@ -768,6 +768,7 @@ def df_from_literal(
 def filter_unseen_df(
         old_df : 'pd.DataFrame',
         new_df : 'pd.DataFrame',
+        custom_nan : str = 'mrsm_NaN',
         debug : bool = False,
     ) -> 'pd.DataFrame':
     """
@@ -784,9 +785,28 @@ def filter_unseen_df(
     custom string, per this StackOverflow question:
     https://stackoverflow.com/questions/31833635/pandas-checking-for-nan-not-working-using-isin
     """
-    from meerschaum.utils.debug import dprint
+    return new_df[~new_df.fillna(custom_nan).apply(tuple, 1).isin(old_df.fillna(custom_nan).apply(tuple, 1))].reset_index(drop=True)
 
-    custom_nan = 'mrsm_NaN'
-    filtered_df = new_df[~new_df.fillna(custom_nan).apply(tuple, 1).isin(old_df.fillna(custom_nan).apply(tuple, 1))].reset_index(drop=True)
-    if debug: dprint("Filtered DF:" + "\n" + f"{filtered_df}")
-    return filtered_df
+def replace_pipes_in_dict(
+        pipes : dict = None,
+        func : 'function' = str,
+        debug : bool = False,
+        **kw
+    ) -> dict:
+    """
+    Replace the Pipes in a Pipes dict with the result of another function
+    """
+    if pipes is None:
+        from meerschaum import get_pipes
+        pipes = get_pipes(debug=debug, **kw)
+
+    def change_dict(d):
+        for k, v in d.items():
+            if isinstance(v, dict):
+                change_dict(v)
+            else:
+                d[k] = func(v)
+    result = pipes.copy()
+    change_dict(result)
+    return result
+

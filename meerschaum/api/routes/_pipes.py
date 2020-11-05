@@ -20,9 +20,7 @@ def register_pipe(pipe : MetaPipe):
     Register a new Pipe
     """
     pipe_object = get_pipe(pipe.connector_keys, pipe.metric_key, pipe.location_key)
-    pipe_object.meta = pipe
     if is_pipe_registered(pipe_object, pipes(refresh=True)):
-        print('memes')
         raise fastapi.HTTPException(status_code=409, detail="Pipe already registered")
     results = get_connector().register_pipe(pipe_object)
     pipes(refresh=True)
@@ -80,17 +78,12 @@ async def get_pipes(
     """
     Get all registered Pipes with metadata, excluding parameters.
     """
-    if connector_keys == "" and metric_keys == "" and location_keys == "":
-        return pipes()
-
-    import json
-
-    return get_pipes_sql(
-        connector_keys = json.loads(connector_keys),
-        metric_keys = json.loads(metric_keys),
-        location_keys = json.loads(location_keys),
-        debug = debug
-    )
+    from meerschaum.utils.misc import replace_pipes_in_dict
+    kw = {'debug' : debug}
+    if connector_keys != "": kw['connector_keys'] = connector_keys
+    if metric_keys != "": kw['metric_keys'] = metric_keys
+    if location_keys != "": kw['location_keys'] = location_keys
+    return replace_pipes_in_dict(get_pipes_sql(**kw), str)
 
 @fast_api.get(pipes_endpoint + '/{connector_keys}')
 async def get_pipes_by_connector(
@@ -99,9 +92,10 @@ async def get_pipes_by_connector(
     """
     Get all registered Pipes by connector_keys with metadata, excluding parameters.
     """
+    from meerschaum.utils.misc import replace_pipes_in_dict
     if connector_keys not in pipes():
         raise fastapi.HTTPException(status_code=404, detail=f"connector_keys '{connector_keys}' not found.")
-    return pipes()[connector_keys]
+    return replace_pipes_in_dict(pipes()[connector_keys], str)
 
 @fast_api.get(pipes_endpoint + '/{connector_keys}/{metric_key}')
 async def get_pipes_by_connector_and_metric(
@@ -115,12 +109,13 @@ async def get_pipes_by_connector_and_metric(
     parent : bool (default False)
         Return the parent Pipe (location_key is None)
     """
+    from meerschaum.utils.misc import replace_pipes_in_dict
     if connector_keys not in pipes():
         raise fastapi.HTTPException(status_code=404, detail=f"connector_keys '{connector_keys}' not found.")
     if metric_key not in pipes()[connector_keys]:
         raise fastapi.HTTPException(status_code=404, detail=f"metric_key '{metric_key}' not found.")
     if parent: return pipes()[connector_keys][metric_key][None]
-    return pipes()[connector_keys][metric_key]
+    return replace_pipes_in_dict(pipes()[connector_keys][metric_key], str)
 
 @fast_api.get(pipes_endpoint + '/{connector_keys}/{metric_key}/{location_key}')
 async def get_pipes_by_connector_and_metric_and_location(
@@ -139,7 +134,7 @@ async def get_pipes_by_connector_and_metric_and_location(
     if location_key not in pipes()[connector_keys][metric_key]:
         raise fastapi.HTTPException(status_code=404, detail=f"location_key '{location_key}' not found.")
  
-    return pipes()[connector_keys][metric_key][location_key]
+    return str(pipes()[connector_keys][metric_key][location_key])
 
 @fast_api.get(pipes_endpoint + '/{connector_keys}/{metric_key}/{location_key}/sync_time')
 async def get_sync_time(
