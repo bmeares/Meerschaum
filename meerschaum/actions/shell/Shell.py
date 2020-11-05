@@ -290,6 +290,10 @@ class Shell(cmd.Cmd):
         """
         old_input = cmd.__builtins__['input']
         cmd.__builtins__['input'] = input_with_sigint(old_input)
+        ### if the user specifies, clear the screen before initializing the shell
+        if _clear_screen:
+            from meerschaum.utils.formatting._shell import clear_screen
+            clear_screen(debug=self.debug)
 
     def postloop(self):
         from meerschaum.config._paths import SHELL_HISTORY_PATH
