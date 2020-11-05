@@ -33,7 +33,13 @@ def register_pipe(
     ###       then `pipe.parameters` will exist and not be fetched from the database.
     response = self.post('/mrsm/pipes', json=pipe.meta)
     if debug: dprint(response.text)
-    return response.__bool__(), response.json()
+    if isinstance(response.json(), list):
+        response_tuple = response.__bool__(), response.json()[1]
+    elif 'detail' in response.json():
+        response_tuple = response.__bool__(), response.json()['detail']
+    else:
+        response_tuple = response.__bool__(), response.text
+    return response_tuple
 
 def edit_pipe(
         self,
