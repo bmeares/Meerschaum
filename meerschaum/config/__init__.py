@@ -13,9 +13,6 @@ from meerschaum.config._read_yaml import config
 from meerschaum.utils.debug import dprint
 import os
 
-### developer-specified values
-system_config = config['system']
-
 ### apply config preprocessing (e.g. main to meta)
 from meerschaum.config._preprocess import preprocess_config
 config = preprocess_config(config)
@@ -77,6 +74,8 @@ def get_config(*keys, patch=False, debug=False):
                     shutil.move(CONFIG_PATH, PERMANENT_PATCH_PATH)
                     sys.exit()
     return c
+
+system_config = get_config('system', patch=True)
 
 ### if interactive shell, print welcome header
 import sys

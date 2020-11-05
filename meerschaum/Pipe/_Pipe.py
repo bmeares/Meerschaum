@@ -95,7 +95,8 @@ class Pipe:
     def instance_connector(self):
         if '_instance_connector' not in self.__dict__:
             from meerschaum.utils.misc import parse_instance_keys
-            if (conn := parse_instance_keys(self.instance_keys)):
+            conn = parse_instance_keys(self.instance_keys)
+            if conn:
                 self._instance_connector = conn
             else:
                 return None
@@ -105,7 +106,8 @@ class Pipe:
     def connector(self):
         if '_connector' not in self.__dict__:
             from meerschaum.utils.misc import parse_instance_keys
-            if (conn := parse_instance_keys(self.connector_keys)):
+            conn = parse_instance_keys(self.connector_keys)
+            if conn:
                 self._connector = conn
             else:
                 return None
@@ -127,6 +129,13 @@ class Pipe:
             return None
 
         return self._sync_time
+
+    #  def json(self, *args, **kw):
+        #  """
+        #  Serialize Pipes into JSON
+        #  """
+        #  #  import json
+        #  return str(self)
 
     def __str__(self):
         """
