@@ -37,15 +37,18 @@ def dateadd_str(
         if begin == 'now': begin = "GETUTCDATE()"
         elif begin_time: begin = f"CAST('{begin}' AS DATETIME)"
         da = f"DATEADD({datepart}, {number}, {begin})"
-    elif flavor in ('mysql'):
+    elif flavor in ('mysql', 'mariadb'):
         if begin == 'now': begin = "UTC_TIMESTAMP()"
         elif begin_time: begin = f'"{begin}"'
         da = f"DATE_ADD({begin}, INTERVAL {number} {datepart})"
     elif flavor == 'sqlite':
         da = f"datetime('{begin}', '{number} {datepart}')"
-    ### TODO figure out oracle's TO_DATE syntax
-    #  elif flavor == 'oracle':
-        #  if begin == 'now': begin
+    elif flavor == 'oracle':
+        if begin == 'now': 
+            begin = str(datetime.datetime.utcnow().strftime('%Y:%m:%d %M:%S.%f'))
+        elif begin_time: begin = str(begin.strftime('%Y:%m:%d %M:%S.%f'))
+        dt_format = 'YYYY-MM-DD HH24:MI:SS.FF'
+        da = f"TO_TIMESTAMP('{begin}', '{dt_format}') + INTERVAL '{number}' {datepart}"
     return da
 
 def fetch(
