@@ -62,7 +62,8 @@ def sql(
     if method is None: method = 'read'
     if label is None: label = 'main'
 
-    if (conn := get_connector(type='sql', label=label, debug=debug)) is False:
+    conn = get_connector(type='sql', label=label, debug=debug)
+    if not conn:
         return False, (f"Could not create SQL connector '{label}'.\n"
             f"Verify meerschaum:connectors:sql:{label} is defined correctly with `show connectors`," + 
             " and update or add connectors with `edit config`."

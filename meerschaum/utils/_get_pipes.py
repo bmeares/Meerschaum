@@ -73,6 +73,10 @@ def get_pipes(
     from meerschaum.config import get_config
     from meerschaum.utils.warnings import error
 
+    #  if connector_keys == "": connector_keys = None
+    #  if metric_keys == "": metric_keys = None
+    #  if location_keys == "": location_keys = None
+
     ### Get SQL or API connector (keys come from `connector.fetch_pipes_keys()`).
     ### If `wait`, wait until a connection is made
     if mrsm_instance is None: mrsm_instance = get_config('meerschaum', 'instance', patch=True)

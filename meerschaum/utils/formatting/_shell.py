@@ -20,7 +20,8 @@ def make_header(
     words = message.split('\n')
     max_length = 0
     for w in words:
-        if (length := len(w)) > max_length:
+        length = len(w)
+        if length > max_length:
             max_length = length
     
     s = message + "\n"

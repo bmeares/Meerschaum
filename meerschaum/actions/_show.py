@@ -120,7 +120,8 @@ def _show_connectors(
 
     from meerschaum.utils.misc import parse_instance_keys
     if action != []:
-        if (conn := parse_instance_keys(action[0], debug=debug)):
+        conn = parse_instance_keys(action[0], debug=debug)
+        if conn:
             print(make_header("\n" + f"Attributes for connector '{conn}':"))
             pprint(conn.__dict__)
 
