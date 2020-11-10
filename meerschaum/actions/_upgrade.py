@@ -24,11 +24,15 @@ def upgrade(
     from meerschaum.utils.misc import run_python_package, yes_no, attempt_import
 
     is_stack_running = False
+    client = None
     docker = attempt_import('docker', warn=False)
     if docker:
-        client = docker.from_env()
-        containers = client.containers.list()
-        is_stack_running = len(containers) > 0
+        try:
+            client = docker.from_env()
+            containers = client.containers.list()
+            is_stack_running = len(containers) > 0
+        except:
+            pass
 
     if is_stack_running:
         answer = True or force
@@ -53,6 +57,6 @@ def upgrade(
     run_python_package('pip', command)
 
     if debug: dprint("Pulling new Docker images...")
-    actions['stack'](['pull'], debug=debug)
+    if client: actions['stack'](['pull'], debug=debug)
 
     return True, "Success"
