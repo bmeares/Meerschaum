@@ -229,12 +229,12 @@ def create_indices(
     index_queries = dict()
 
     ### create datetime index
-    if 'datetime' in pipe.columns and pipe.columns['datetime']:
+    if 'datetime' in pipe.columns and pipe.get_columns('datetime'):
         if self.flavor == 'timescaledb':
             ## create hypertable
             dt_query = (
                 f"SELECT create_hypertable('{sql_item_name(str(pipe), self.flavor)}', " +
-                f"'{pipe.columns['datetime']}', migrate_data => true);"
+                f"'{pipe.get_columns('datetime')}', migrate_data => true);"
             )
         elif self.flavor == 'postgresql':
             dt_query = f"CREATE INDEX ON {sql_item_name(str(pipe), self.flavor)} ({sql_item_name(pipe.get_columns('datetime'), self.flavor)})"
@@ -246,7 +246,7 @@ def create_indices(
         index_queries[pipe.get_columns('datetime')] = dt_query
 
     ### create id index
-    if 'id' in pipe.columns and pipe.columns['id']:
+    if 'id' in pipe.columns and pipe.get_columns('id'):
         if self.flavor in ('timescaledb', 'postgresql'):
             id_query = f"CREATE INDEX ON {sql_item_name(str(pipe), self.flavor)} ({sql_item_name(pipe.get_columns('id'), self.flavor)})"
         elif self.flavor in ('mysql', 'mariadb'):
@@ -428,6 +428,101 @@ def get_pipe_attributes(
             attributes['parameters'] = dict()
 
     return attributes
+
+def sync_pipe(
+        self,
+        pipe : 'meerschaum.Pipe',
+        df : 'pd.DataFrame' = None,
+        check_existing : bool = True,
+        blocking : bool = True,
+        callback : 'function' = None,
+        error_callback : 'function' = None,
+        debug : bool = False,
+        **kw
+    ) -> tuple:
+    """
+    Sync a Pipe using a SQL Connection
+    """
+    from meerschaum.utils.warnings import warn
+    from meerschaum.utils.debug import dprint
+    if df is None:
+        msg = f"DataFrame is None. Cannot sync pipe '{pipe}"
+        warn(msg)
+        return False, msg
+
+    datetime = pipe.get_columns('datetime')
+
+    ### if Pipe is not registered
+    if not pipe.id:
+        pipe.register(debug=debug)
+
+    ### quit here if implicitly syncing MQTT pipes.
+    ### (pipe.sync() is called in the callback of the MQTTConnector.fetch() method)
+    if df is None and pipe.connector.type == 'mqtt':
+        return True, "Success"
+
+    ### df is the dataframe returned from the remote source
+    ### via the connector
+    if debug: dprint("Fetched data:\n" + str(df))
+
+    ### if table does not exist, create it with indices
+    if not pipe.exists(debug=debug):
+        if debug: dprint(f"Creating empty table for Pipe '{pipe}'...")
+        if debug: dprint("New table data types:\n" + f"{df.head(0).dtypes}")
+        ### create empty table
+        self.to_sql(
+            df.head(0),
+            if_exists = 'append',
+            name = str(pipe),
+            debug = debug
+        )
+        ### build indices on Pipe's root table
+        self.create_indices(column, debug=debug)
+
+    def filter_existing():
+        from meerschaum.utils.misc import attempt_import, round_time
+        np = attempt_import('numpy')
+        import datetime as datetime_pkg
+        ### begin is the oldest data in the new dataframe
+        try:
+            min_dt = df[pipe.get_columns('datetime')].min().to_pydatetime()
+        except:
+            min_dt = None
+        if min_dt in (np.nan, None):
+            min_dt = pipe.sync_time
+        begin = round_time(
+            min_dt,
+            to = 'down'
+        ) - datetime_pkg.timedelta(minutes=1)
+        if debug: dprint(f"Looking at data newer than '{begin}'")
+
+        ### backtrack_df is existing Pipe data that overlaps with the fetched df
+        try:
+            backtrack_minutes = pipe.parameters['fetch']['backtrack_minutes']
+        except:
+            backtrack_minutes = 0
+
+        backtrack_df = pipe.get_backtrack_data(begin=begin, backtrack_minutes=backtrack_minutes, debug=debug)
+        if debug: dprint("Existing data:\n" + str(backtrack_df))
+
+        ### remove data we've already seen before
+        from meerschaum.utils.misc import filter_unseen_df
+        return filter_unseen_df(backtrack_df, df, debug=debug)
+
+    new_data_df = filter_existing() if check_existing else df
+    if debug: dprint(f"New unseen data:\n" + str(new_data_df))
+
+    if_exists = kw.get('if_exists', 'append')
+
+    ### append new data to Pipe's table
+    return self.to_sql(
+        new_data_df,
+        name = str(pipe),
+        if_exists = if_exists,
+        debug = debug,
+        as_tuple = True,
+        **kw
+    )
 
 def get_sync_time(
         self,

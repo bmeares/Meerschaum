@@ -119,8 +119,8 @@ def sync_pipe(
     """
     from meerschaum.utils.warnings import warn
     if df is None:
-        warn(f"DataFrame is None. Cannot sync pipe '{pipe}")
-        return None
+        msg = f"DataFrame is None. Cannot sync pipe '{pipe}"
+        return False, msg
     r_url = pipe_r_url(pipe) + '/data'
     if debug:
         from meerschaum.utils.debug import dprint
@@ -133,8 +133,8 @@ def sync_pipe(
             data = df.to_json(date_format='iso', date_unit='us')
         )
     except Exception as e:
-        warn(e)
-        return None
+        warn(str(e))
+        return False, str(e)
 
     return tuple(response.json())
 
@@ -170,7 +170,7 @@ def get_pipe_data(
     try:
         response = self.get(r_url + "/data", params={'begin': begin, 'end': end})
     except Exception as e:
-        warn(e)
+        warn(str(e))
         return None
     from meerschaum.utils.misc import import_pandas, parse_df_datetimes
     pd = import_pandas()
@@ -180,7 +180,7 @@ def get_pipe_data(
         warn(str(e))
         return None
     df = parse_df_datetimes(pd.read_json(response.text), debug=debug)
-    if debug: dprint(df)
+    #  if debug: dprint(df)
     return df
 
 def get_backtrack_data(
@@ -216,7 +216,7 @@ def get_backtrack_data(
         warn(str(e))
         return None
     df = parse_df_datetimes(pd.read_json(response.text), debug=debug)
-    if debug: dprint(df)
+    #  if debug: dprint(df)
     return df
 
 def get_pipe_id(
