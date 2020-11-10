@@ -27,6 +27,7 @@ class SQLConnector(Connector):
         edit_pipe,
         get_pipe_id,
         get_pipe_attributes,
+        sync_pipe,
         get_sync_time,
         pipe_exists,
     )

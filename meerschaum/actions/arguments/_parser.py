@@ -75,6 +75,12 @@ parser.add_argument(
     '-w', '--workers', type=int, help="How many workers to run a concurrent task"
 )
 parser.add_argument(
+    '--unblock', action="store_true", help="Run the action asynchronously, if possible.",
+)
+parser.add_argument(
+    '--async', action="store_true", help="Run the action asynchronously, if possible. Alias for --unblock",
+)
+parser.add_argument(
     '-c', '--config', type=string_to_dict, help=(
         "Temporarily update configuration for a single command. "
         "See --params on formatting details."

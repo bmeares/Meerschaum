@@ -18,6 +18,12 @@ async def startup():
 
 @fast_api.on_event("shutdown")
 async def startup():
+    from meerschaum.config._paths import API_UVICORN_CONFIG_PATH
+    try:
+        dprint(f"Removing Uvicorn configuration ({API_UVICORN_CONFIG_PATH})")
+        os.remove(API_UVICORN_CONFIG_PATH)
+    except:
+        pass
     dprint("Closing database connection...")
     await get_connector().db.disconnect()
 

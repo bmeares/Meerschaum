@@ -24,6 +24,7 @@ def sync(
 def _pipes_lap(
         workers : int = None,
         debug : bool = None,
+        unblock : bool = False,
         #  min_seconds : int = 0,
         **kw
     ) -> tuple:
@@ -64,7 +65,7 @@ def _pipes_lap(
         #  return p.sync(debug=debug)
         from meerschaum.utils.warnings import warn
         try:
-            return_tuple = p.sync(debug=debug)
+            return_tuple = p.sync(blocking=(not unblock), debug=debug)
         except Exception as e:
             warn(str(e), stacklevel=4)
             return_tuple = (False, f"Failed to sync Pipe '{p}' with exception:" + "\n" + str(e))
@@ -79,7 +80,8 @@ def _pipes_lap(
 
     pool = Pool(processes=workers)
 
-    results = pool.map(sync_pipe, pipes)
+    results = pool.map_async(sync_pipe, pipes)
+    results = results.get()
     if results is None:
         warn(f"Failed to fetch results from syncing Pipes.")
         succeeded_pipes = []
