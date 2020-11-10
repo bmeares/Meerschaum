@@ -124,6 +124,7 @@ def to_sql(
         method : str = "",
         chunksize : int = -1,
         debug : bool = False,
+        as_tuple : bool = False,
         **kw
     ):
     """
@@ -140,7 +141,9 @@ def to_sql(
         Drop and create the table ('replace') or append if it exists ('append') or raise Exception ('fail')
         (default 'replace')
     method : str
-        None or multi. Details 
+        None or multi. Details on pandas.to_sql
+    as_tuple : bool = False
+        If True, return a (success_bool, message) tuple instead of a bool
     **kw : keyword arguments
         Additional arguments will be passed to the DataFrame's `to_sql` function
     """
@@ -154,7 +157,6 @@ def to_sql(
     if method == "":
         if self.flavor in bulk_flavors:
             method = psql_insert_copy
-            #  name = sql_item_name(name, self.flavor)
         else:
             method = self.sys_config['method']
     chunksize = chunksize if chunksize != -1 else self.sys_config['chunksize']
@@ -165,6 +167,7 @@ def to_sql(
         print(f"Inserting {len(df)} rows with chunksize: {chunksize}...", end="", flush=True)
 
     try:
+        success = True
         df.to_sql(
             name = name,
             con = self.engine,
@@ -175,15 +178,18 @@ def to_sql(
             **kw
         )
     except Exception as e:
-        if debug: dprint(e)
-        return None
+        if debug: dprint(str(e))
+        success, msg = None, str(e)
 
     if debug:
         end = time.time()
         print(f" done.", flush=True)
-        dprint(f"It took {round(end - start, 2)} seconds.")
+        if success:
+            msg = f"It took {round(end - start, 2)} seconds."
+            dprint(msg)
 
-    return True
+    if as_tuple: return success, msg
+    return success
 
 def psql_insert_copy(table, conn, keys, data_iter):
     """

@@ -118,4 +118,5 @@ def parse_synonyms(
     Check for synonyms (e.g. force = True -> yes = True)
     """
     if args_dict['force']: args_dict['yes'] = True
+    if args_dict['async']: args_dict['unblock'] = True
     return args_dict
