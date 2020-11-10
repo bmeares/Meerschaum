@@ -128,6 +128,8 @@ def sync_pipe(
     try:
         response = self.post(
             r_url,
+            ### handles check_existing
+            params = kw,
             data = df.to_json(date_format='iso', date_unit='us')
         )
     except Exception as e:

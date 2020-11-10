@@ -8,9 +8,6 @@ Defines basic data that Connectors should contain
 """
 
 from meerschaum.utils.debug import dprint
-from meerschaum.config import config as cf
-conn_configs = cf['meerschaum']['connectors']
-connector_config = cf['system']['connectors']
 
 class Connector:
     def __init__(
@@ -45,6 +42,10 @@ class Connector:
         if label == 'default':
             raise Exception("Label cannot be 'default'. Did you mean 'main'?")
         self.type, self.label = type, label
+
+        from meerschaum.config import get_config
+        conn_configs = get_config('meerschaum', 'connectors')
+        connector_config = get_config('system', 'connectors')
 
         ### inherit attributes from 'default' if exists
         inherit_from = 'default'

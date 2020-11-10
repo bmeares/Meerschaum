@@ -12,6 +12,7 @@ from meerschaum.utils.warnings import warn, error
 def sync(
         self,
         df : 'pd.DataFrame' = None,
+        check_existing = True,
         debug : bool = False,
         **kw
     ) -> tuple:
@@ -39,7 +40,13 @@ def sync(
 
     ### if the instance connector is API, use its method. Otherwise do SQL things below
     if self.instance_connector.type == 'api':
-        return self.instance_connector.sync_pipe(pipe=self, df=df, debug=debug, **kw)
+        return self.instance_connector.sync_pipe(
+            pipe = self,
+            df = df,
+            debug = debug,
+            check_existing = check_existing,
+            **kw
+        )
 
     datetime = self.get_columns('datetime')
 
@@ -77,31 +84,34 @@ def sync(
         ### build indices on Pipe's root table
         sql_connector.create_indices(self, debug=debug)
 
-    ### begin is the oldest data in the new dataframe
-    try:
-        min_dt = df[self.get_columns('datetime')].min().to_pydatetime()
-    except:
-        min_dt = None
-    if min_dt in (np.nan, None):
-        min_dt = self.sync_time
-    begin = round_time(
-        min_dt,
-        to = 'down'
-    ) - datetime_pkg.timedelta(minutes=1)
-    if debug: dprint(f"Looking at data newer than '{begin}'")
+    def filter_existing():
+        ### begin is the oldest data in the new dataframe
+        try:
+            min_dt = df[self.get_columns('datetime')].min().to_pydatetime()
+        except:
+            min_dt = None
+        if min_dt in (np.nan, None):
+            min_dt = self.sync_time
+        begin = round_time(
+            min_dt,
+            to = 'down'
+        ) - datetime_pkg.timedelta(minutes=1)
+        if debug: dprint(f"Looking at data newer than '{begin}'")
 
-    ### backtrack_df is existing Pipe data that overlaps with the fetched df
-    try:
-        backtrack_minutes = self.parameters['fetch']['backtrack_minutes']
-    except:
-        backtrack_minutes = 0
+        ### backtrack_df is existing Pipe data that overlaps with the fetched df
+        try:
+            backtrack_minutes = self.parameters['fetch']['backtrack_minutes']
+        except:
+            backtrack_minutes = 0
 
-    backtrack_df = self.get_backtrack_data(begin=begin, backtrack_minutes=backtrack_minutes, debug=debug)
-    if debug: dprint("Existing data:\n" + str(backtrack_df))
+        backtrack_df = self.get_backtrack_data(begin=begin, backtrack_minutes=backtrack_minutes, debug=debug)
+        if debug: dprint("Existing data:\n" + str(backtrack_df))
 
-    ### remove data we've already seen before
-    from meerschaum.utils.misc import filter_unseen_df
-    new_data_df = filter_unseen_df(backtrack_df, df, debug=debug)
+        ### remove data we've already seen before
+        from meerschaum.utils.misc import filter_unseen_df
+        return filter_unseen_df(backtrack_df, df, debug=debug)
+
+    new_data_df = filter_existing() if check_existing else df
     if debug: dprint(f"New unseen data:\n" + str(new_data_df))
 
     if_exists = kw.get('if_exists', 'append')
