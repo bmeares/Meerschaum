@@ -157,6 +157,7 @@ async def sync_pipe(
         metric_key : str,
         location_key : str,
         data : dict = {},
+        check_existing : bool = True,
     ) -> bool:
     """
     Add data to an existing Pipe.
@@ -166,13 +167,13 @@ async def sync_pipe(
     import json
     df = parse_df_datetimes(data)
     p = get_pipe(connector_keys, metric_key, location_key)
-    if not is_pipe_registered(p, pipes()):
+    if not is_pipe_registered(p, pipes(refresh=True)):
         raise fastapi.HTTPException(
             status_code = 409,
             detail = "Pipe must be registered with the datetime column specified"
         )
 
-    return p.sync(df, debug=True)
+    return p.sync(df, debug=True, check_existing=check_existing)
 
 @fast_api.get(pipes_endpoint + '/{connector_keys}/{metric_key}/{location_key}/data')
 def get_pipe_data(
