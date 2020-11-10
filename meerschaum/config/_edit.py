@@ -125,7 +125,7 @@ def general_edit_config(
 
     return True, "Success"
 
-def copy_default_to_config():
+def copy_default_to_config(debug : bool = False):
     """
     Copy the default config file to the main config file
     """
@@ -134,8 +134,8 @@ def copy_default_to_config():
     try:
         shutil.copyfile(DEFAULT_CONFIG_PATH, CONFIG_PATH)
     except FileNotFoundError:
-        write_default_config()
-        return copy_default_to_config()
+        write_default_config(debug=debug)
+        return copy_default_to_config(debug=debug)
     return True
 
 def write_default_config(
@@ -162,7 +162,7 @@ def write_default_config(
     if debug: dprint(f"Writing default Meerschaum configuration to {DEFAULT_CONFIG_PATH}...")
     with open(DEFAULT_CONFIG_PATH, 'w') as f:
         f.write(default_header_comment)
-        yaml.dump(config_copy, f)
+        yaml.dump(config_copy, f, sort_keys=False)
         f.write("\n\n")
 
     config_copy = default_config.copy()
