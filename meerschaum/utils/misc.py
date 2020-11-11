@@ -592,7 +592,7 @@ def round_time(
     if date_delta is None: date_delta = datetime.timedelta(minutes=1)
     round_to = date_delta.total_seconds()
     if dt is None:
-        dt = datetime.now()
+        dt = datetime.datetime.utcnow()
     seconds = (dt.replace(tzinfo=None) - dt.min.replace(tzinfo=None)).seconds
 
     if seconds % round_to == 0 and dt.microsecond == 0:
@@ -726,7 +726,11 @@ def import_pandas() -> 'module':
     Quality-of-life function to attempt to import the configured version of pandas
     """
     from meerschaum.config import get_config
-    return attempt_import(get_config('system', 'connectors', 'all', 'pandas'))
+    pandas_module_name = get_config('system', 'connectors', 'all', 'pandas', patch=True)
+    ### NOTE: modin does NOT currently work!
+    if pandas_module_name == 'modin':
+        pandas_module_name = 'modin.pandas'
+    return attempt_import(pandas_module_name)
 
 def df_from_literal(
         pipe : 'meerschaum.Pipe' = None,

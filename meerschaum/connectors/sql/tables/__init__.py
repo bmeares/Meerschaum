@@ -10,7 +10,10 @@ Define SQLAlchemy tables
 ### this needs to be accessed through get_tables,
 ### otherwise it will attempt to connect to the SQL server
 ### before FastAPI and break things
-tables = dict()
+#  tables = dict()
+
+### store a tables dict for each connector
+connector_tables = dict()
 
 def get_tables(
         mrsm_instance : str = None,
@@ -19,6 +22,7 @@ def get_tables(
     """
     Substantiate and create sqlalchemy tables
     """
+    from meerschaum.utils.debug import dprint
     from meerschaum.utils.warnings import warn
     from meerschaum.utils.misc import attempt_import, parse_instance_keys
     from meerschaum import get_connector
@@ -37,9 +41,10 @@ def get_tables(
     if isinstance(conn, APIConnector):
         return conn.create_metadata(debug=debug)
 
-    global tables
-    if len(tables) == 0:
-        tables = {
+    global connector_tables
+    if conn not in connector_tables:
+        if debug: dprint(f"Creating tables for connector '{conn}'")
+        _tables = {
             'metrics' : sqlalchemy.Table(
                 'metrics',
                 conn.metadata,
@@ -63,7 +68,7 @@ def get_tables(
         if conn.flavor in ('postgresql', 'timescaledb'):
             params_type = sqlalchemy_dialects_postgresql.JSON
 
-        tables['pipes'] = sqlalchemy.Table(
+        _tables['pipes'] = sqlalchemy.Table(
             "pipes",
             conn.metadata,
             sqlalchemy.Column("pipe_id", sqlalchemy.Integer, primary_key=True),
@@ -76,7 +81,10 @@ def get_tables(
         try:
             conn.metadata.create_all()
         except Exception as e:
-            warn(e)
+            warn(str(e))
+
+        ### store the table dict for reuse (per connector)
+        connector_tables[conn] = _tables
     
-    return tables
+    return connector_tables[conn]
 
