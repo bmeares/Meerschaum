@@ -54,10 +54,11 @@ def get_columns(self, *args):
         col_name = None
         try:
             col_name = self.columns[col]
+            if col_name is None:
+                error(f"Please define the name of the '{col}' column for Pipe '{self}'.")
         except:
-            error(f"Missing '{col}'" + f' column for pipe "{self}".')
-        if col_name is None:
-            error(f"Please define the name of the '{col}' column for pipe {self}.")
+            col_name = None
+        if col_name is None: error(f"Missing '{col}'" + f" column for Pipe '{self}'.")
         col_names.append(col_name)
     if len(col_names) == 1:
         return col_names[0]

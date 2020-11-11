@@ -6,6 +6,7 @@ This module contains SQLConnector functions for executing SQL queries.
 """
 
 from meerschaum.utils.debug import dprint
+from meerschaum.utils.warnings import warn
 
 ### database flavors that can use bulk insert
 bulk_flavors = {'postgresql', 'timescaledb'}
@@ -47,7 +48,7 @@ def read(
     except Exception as e:
         import inspect, pprintpp
         if debug: dprint(f"Failed to execute query:\n\n{query_or_table}\n\n")
-        if debug: dprint(e)
+        if debug: warn(str(e))
 
         return None
 
@@ -108,7 +109,7 @@ def exec(
         #  import inspect, pprintpp
 
         #  print(f"Failed to execute query:\n\n{query}\n\n")
-        if debug: dprint(e)
+        if debug: warn(str(e))
         #  print(f"Stack:")
         #  pprintpp.pprint(inspect.stack())
         result = None
@@ -147,6 +148,7 @@ def to_sql(
     **kw : keyword arguments
         Additional arguments will be passed to the DataFrame's `to_sql` function
     """
+    import time
     from meerschaum.utils.warnings import error
     if name is None:
         error("Name must not be None to submit to the SQL server")
@@ -161,13 +163,13 @@ def to_sql(
             method = self.sys_config['method']
     chunksize = chunksize if chunksize != -1 else self.sys_config['chunksize']
 
+    success, msg = False, "Default to_sql message"
+    start = time.time()
     if debug:
-        import time
-        start = time.time()
-        print(f"Inserting {len(df)} rows with chunksize: {chunksize}...", end="", flush=True)
+        msg = f"Inserting {len(df)} rows with chunksize: {chunksize}..."
+        print(msg, end="", flush=True)
 
     try:
-        success = True
         df.to_sql(
             name = name,
             con = self.engine,
@@ -177,16 +179,18 @@ def to_sql(
             chunksize = chunksize,
             **kw
         )
+        success = True
     except Exception as e:
-        if debug: dprint(str(e))
+        if debug: warn(str(e))
         success, msg = None, str(e)
 
+    end = time.time()
+    if success:
+        msg = f"It took {round(end - start, 2)} seconds to sync {len(df)} rows to {name}."
+
     if debug:
-        end = time.time()
         print(f" done.", flush=True)
-        if success:
-            msg = f"It took {round(end - start, 2)} seconds."
-            dprint(msg)
+        dprint(msg)
 
     if as_tuple: return success, msg
     return success

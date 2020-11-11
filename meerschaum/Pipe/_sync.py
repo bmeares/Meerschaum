@@ -12,6 +12,8 @@ from meerschaum.utils.warnings import warn, error
 def sync(
         self,
         df : 'pd.DataFrame' = None,
+        force : bool = False,
+        retries : bool = 30,
         check_existing = True,
         blocking : bool = True,
         callback : 'function' = None,
@@ -25,11 +27,16 @@ def sync(
     Get new remote data via fetch, get existing data in the same time period,
         and merge the two, only keeping the unseen data.
     """
+    from meerschaum.utils.warnings import warn
     if (callback is not None or error_callback is not None) and blocking:
-        from meerschaum.utils.warnings import warn
         warn("Callback functions are only executed when blocking = False. Ignoring...")
 
     def do_sync(p, df=None):
+        ### ensure that Pipe is registered
+        if not p.id:
+            register_tuple = p.register(debug=debug)
+            if not register_tuple[0]: return register_tuple
+
         ### default: fetch new data via the connector.
         ### If new data is provided, skip fetching
         if df is None:
@@ -39,22 +46,39 @@ def sync(
 
         if debug: dprint("DataFrame to sync:\n" + f"{df}")
 
-        return p.instance_connector.sync_pipe(
-            pipe = p,
-            df = df,
-            check_existing = check_existing,
-            blocking = blocking,
-            callback = callback,
-            error_callback = error_callback,
-            debug = debug,
-            **kw
-        )
+        ### if force, continue to sync until success
+        return_tuple = False, f"Did not sync Pipe '{p}'"
+        run = True
+        _retries = 1
+        while run:
+            return_tuple = p.instance_connector.sync_pipe(
+                pipe = p,
+                df = df,
+                check_existing = check_existing,
+                blocking = blocking,
+                callback = callback,
+                error_callback = error_callback,
+                debug = debug,
+                **kw
+            )
+            _retries += 1
+            run = (not return_tuple[0]) and force and _retries <= retries
+            if run and debug: dprint(f"Syncing failed for Pipe '{p}'. Attempt ( {_retries} / {retries} )")
+            if _retries > retries: warn(f"Unable to sync Pipe '{p}' within {retries} attempts!")
+        return return_tuple
+
     if blocking: return do_sync(self, df=df)
     from multiprocessing import cpu_count
     from multiprocessing.pool import ThreadPool as Pool
     pool = Pool(cpu_count())
     try:
-        pool.apply_async(do_sync, (self,), kwds={'df' : df}, callback=callback, error_callback=error_callback)
+        pool.apply_async(
+            do_sync,
+            (self,),
+            kwds = {'df' : df },
+            callback = callback,
+            error_callback = error_callback
+        )
     except Exception as e:
         return False, str(e)
     return True, f"Spawned asyncronous sync for pipe '{self}'"
@@ -68,7 +92,7 @@ def get_sync_time(
     """
     from meerschaum.utils.warnings import error, warn
     if self.columns is None:
-        warn(f"No columns found for pipe '{self}'. Is pipe registered?")
+        warn(f"No columns found for Pipe '{self}'. Pipe might not be registered or is missing columns in parameters.")
         return None
 
     if 'datetime' not in self.columns:
