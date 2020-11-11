@@ -25,6 +25,7 @@ def _pipes_lap(
         workers : int = None,
         debug : bool = None,
         unblock : bool = False,
+        force : bool = False,
         #  min_seconds : int = 0,
         **kw
     ) -> tuple:
@@ -41,33 +42,15 @@ def _pipes_lap(
         **kw
     )
 
-    ### enforce minimum cooldown
-    #  sync_times_dict = dict()
-
     def sync_pipe(p):
         """
         Wrapper function for the Pool
         """
-        ### check if enough seconds have passed
-        #  last_sync_time = None
-        #  if p in sync_times_dict:
-            #  last_sync_time = sync_times_dict[p]
-        #  too_soon = False
-        #  now = time.time()
-        #  if last_sync_time:
-            #  too_soon = ((diff := (now - last_sync_time)) >= min_seconds)
-
-        #  if too_soon:
-            #  return False, f"Too soon for Pipe '{p}'. There are {round(diff, 2)} seconds until next sync."
-
-        #  sync_times_dict[p] = time.time()
-        #  print(sync_times_dict)
-        #  return p.sync(debug=debug)
         from meerschaum.utils.warnings import warn
         try:
-            return_tuple = p.sync(blocking=(not unblock), debug=debug)
+            return_tuple = p.sync(blocking=(not unblock), force=force, debug=debug)
         except Exception as e:
-            warn(str(e), stacklevel=4)
+            warn(str(e), stacklevel=3)
             return_tuple = (False, f"Failed to sync Pipe '{p}' with exception:" + "\n" + str(e))
         
         return return_tuple
@@ -128,7 +111,7 @@ def _sync_pipes(
         lap_begin = time.time()
         try:
             success, fail = _pipes_lap(
-                debug=debug,
+                debug = debug,
                 **kw
             )
         except Exception as e:

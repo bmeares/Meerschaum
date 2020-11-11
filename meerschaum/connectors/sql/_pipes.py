@@ -446,15 +446,15 @@ def sync_pipe(
     from meerschaum.utils.warnings import warn
     from meerschaum.utils.debug import dprint
     if df is None:
-        msg = f"DataFrame is None. Cannot sync pipe '{pipe}"
+        msg = f"DataFrame is None. Cannot sync Pipe '{pipe}'"
         warn(msg)
         return False, msg
 
-    datetime = pipe.get_columns('datetime')
-
     ### if Pipe is not registered
     if not pipe.id:
-        pipe.register(debug=debug)
+        register_tuple = pipe.register(debug=debug)
+        if not register_tuple[0]:
+            return register_tuple
 
     ### quit here if implicitly syncing MQTT pipes.
     ### (pipe.sync() is called in the callback of the MQTTConnector.fetch() method)
@@ -477,7 +477,7 @@ def sync_pipe(
             debug = debug
         )
         ### build indices on Pipe's root table
-        self.create_indices(column, debug=debug)
+        self.create_indices(pipe, debug=debug)
 
     def filter_existing():
         from meerschaum.utils.misc import attempt_import, round_time

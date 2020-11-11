@@ -39,6 +39,7 @@ def warn(*args, stacklevel=2, **kw):
     """
     from meerschaum.utils.formatting import CHARSET, ANSI, colored
     from meerschaum.config import config as cf, get_config
+
     warn_config = get_config('system', 'warnings', patch=True)
     a = list(args)
     a[0] = ' ' + warn_config[CHARSET]['icon'] + ' ' + str(a[0])

@@ -187,12 +187,15 @@ def get_pipe_data(
     """
     Get a Pipe's data. Optionally set query boundaries
     """
+    p = get_pipe(connector_keys, metric_key, location_key)
+    if not is_pipe_registered(p, pipes(refresh=True)):
+        raise fastapi.HTTPException(
+            status_code = 409,
+            detail = "Pipe must be registered with the datetime column specified"
+        )
+
     return fastapi.Response(
-        content = get_pipe(
-            connector_keys,
-            metric_key,
-            location_key
-        ).get_data(
+        content = p.get_data(
             begin = begin,
             end = end,
             debug = True
