@@ -13,11 +13,12 @@ def sync(
         self,
         df : 'pd.DataFrame' = None,
         force : bool = False,
-        retries : bool = 30,
+        retries : bool = 10,
+        min_seconds : int = 1,
         check_existing = True,
         blocking : bool = True,
+        workers : int = None,
         callback : 'function' = None,
-        error_callback : 'function' = None,
         debug : bool = False,
         **kw
     ) -> tuple:
@@ -28,7 +29,9 @@ def sync(
         and merge the two, only keeping the unseen data.
     """
     from meerschaum.utils.warnings import warn
-    if (callback is not None or error_callback is not None) and blocking:
+    from meerschaum.utils.misc import attempt_import
+    import time
+    if (callback is not None) and blocking:
         warn("Callback functions are only executed when blocking = False. Ignoring...")
 
     def do_sync(p, df=None):
@@ -57,34 +60,40 @@ def sync(
                 check_existing = check_existing,
                 blocking = blocking,
                 callback = callback,
-                error_callback = error_callback,
                 debug = debug,
                 **kw
             )
             _retries += 1
             run = (not return_tuple[0]) and force and _retries <= retries
-            if run and debug: dprint(f"Syncing failed for Pipe '{p}'. Attempt ( {_retries} / {retries} )")
+            if run and debug:
+                dprint(f"Syncing failed for Pipe '{p}'. Attempt ( {_retries} / {retries} )")
+                dprint(f"Sleeping for {min_seconds} seconds...")
+                time.sleep(min_seconds)
             if _retries > retries: warn(f"Unable to sync Pipe '{p}' within {retries} attempts!")
         return return_tuple
 
     if blocking: return do_sync(self, df=df)
-    from multiprocessing import cpu_count
-    from multiprocessing.pool import ThreadPool as Pool
-    pool = Pool(cpu_count())
+
+    ### TODO implement concurrent syncing (split DataFrame? mimic the functionality of modin?)
+    from meerschaum.utils.threading import Thread
+    def cb(result_tuple : tuple): dprint(f"Asynchronous result from Pipe '{self}': {result_tuple}")
+    if callback is None and debug: callback = cb
     try:
-        pool.apply_async(
-            do_sync,
-            (self,),
-            kwds = {'df' : df },
+        thread = Thread(
+            target = do_sync,
+            args = (self,),
+            kwargs = {'df' : df},
+            daemon = False,
             callback = callback,
-            error_callback = error_callback
         )
+        thread.start()
     except Exception as e:
         return False, str(e)
     return True, f"Spawned asyncronous sync for pipe '{self}'"
 
 def get_sync_time(
         self,
+        params : dict = None,
         debug : bool = False
     ) -> 'datetime.datetime':
     """
@@ -105,7 +114,7 @@ def get_sync_time(
         )
         return None
 
-    return self.instance_connector.get_sync_time(self, debug=debug)
+    return self.instance_connector.get_sync_time(self, params=params, debug=debug)
 
 def exists(
         self,

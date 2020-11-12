@@ -32,4 +32,9 @@ def _entry(sysargs=[]):
     del args['action'][0]
     if len(args['action']) == 0: args['action'] = ['']
 
+    ### monkey patch socket if async is specified
+    #  if 'unblock' in args:
+        #  from meerschaum.utils.misc import enforce_gevent_monkey_patch
+        #  enforce_gevent_monkey_patch()
+
     return actions[main_action](**args, sysargs=sysargs)
