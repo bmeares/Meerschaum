@@ -5,8 +5,8 @@
 Example script for syncing NOAA weather data
 """
 
-### NOTE: this adds the parent Meerschaum directory to PATH to import the development version
-### instead of the system version.
+### NOTE: This adds the parent Meerschaum directory to PATH to import the development version
+###       instead of the system version.
 ###
 ### If you are running this on Windows or don't have the development version cloned,
 ### simply comment out the below line.
@@ -35,14 +35,15 @@ def main():
     #  conn = mrsm.get_connector('api', 'mrsm', host="mrsm.io")
     pipe = mrsm.Pipe('noaa', 'weather', mrsm_instance=args.mrsm_instance)
 
-    ### Specify the columns in case Pipe is not registered
+    ### Specify the columns in case Pipe is not registered.
     pipe.columns = {
         "datetime" : "timestamp",
         "id" : "station",
     }
 
     ### NOAA weather stations
-    ### NOTE: the Pipe's columns' types are determined by the first dataframe encountered
+    ### NOTE: Normally the Pipe's columns' types are determined by the first dataframe encountered.
+    ###       In this script, we cast everything to floats to avoid integers.
     stations = {
         'KATL' : 'Atlanta',
         'KGGE' : 'Georgetown',
@@ -51,12 +52,12 @@ def main():
         'KCLT' : 'Charlotte',
         'KCEU' : 'Clemson',
     }
-    ### fetch data from the stations
+    ### Fetch data from the stations.
+    ### TODO: Figure out why SQL connector breaks Pool.
     pool = get_pool('ThreadPool')
     args = [(stationID, location, pipe) for stationID, location in stations.items()]
     dataframes = dict(pool.starmap(do_fetch, args))
-    pool.close()
-    pool.join()
+    pool.close(); pool.join()
 
     ### only keep the common columns (skipping empty dataframes)
     common_cols = None
@@ -64,26 +65,29 @@ def main():
         if df is None: continue
         if len(df.columns) == 0: continue
         if common_cols is None:
-            common_cols = set(df.columns)
+            common_cols = list(set(df.columns))
             continue
         try:
-            common_cols = common_cols & set(df.columns)
+            common_cols = list(set(common_cols) & set(df.columns))
         except Exception as e:
             warn(str(e))
-    ### in case all dataframes are empty
-    if common_cols is None: common_cols = set()
+    ### Make empty set in case all dataframes are empty.
+    if common_cols is None: common_cols = list()
+    ### Pandas needs the columns to be in the same order, so sort the columns.
+    common_cols.sort()
 
-    ### will cast all but these to floats
-    non_float_cols = {'label', 'timestamp', 'station', 'location'}
-    float_cols = common_cols - non_float_cols
+    ### Cast all but these columns to floats.
+    non_float_cols = sorted(list({'label', 'timestamp', 'station', 'location'}))
+    float_cols = sorted(list(set(common_cols) - set(non_float_cols)))
 
-    ### pipe.sync returns a tuple of success bool and message. E.g. (True, "Success") or (False, "Error message")
+    ### Cast the value columns to floats to avoid integers.
     _dataframes = dict()
     for stationID, df in dataframes.items():
         if df is not None:
             try:
+                ### Only keep commons columns and ensure they are sorted.
                 df = df[common_cols]
-                df[list(float_cols)] = df[list(float_cols)].astype('float')
+                df[float_cols] = df[float_cols].astype('float')
             except Exception as e:
                 warn(str(e))
                 df = None
@@ -99,7 +103,9 @@ def main():
                     pipe.sync(df.head(1), force=True, debug=debug)
                     break
 
-    ### finally, time to sync the dataframes
+    ### Finally, time to sync the dataframes.
+    ### pipe.sync returns a tuple of success bool and message.
+    ### E.g. (True, "Success") or (False, "Error message")
     success_dict = dict()
     for stationID, df in dataframes.items():
         success = pipe.sync(
@@ -129,14 +135,14 @@ def do_fetch(stationID, location, pipe):
 
 def fetch_station_data(stationID : str, location : str, pipe : mrsm.Pipe):
     """
-    Sync a weather station's data into a Meerschaum Pipe.
+    Fetch JSON for a given stationID from NOAA and parse into a dataframe
     """
     ### Get the latest sync time for this station so we don't request duplicate data.
     try:
         start = pipe.get_sync_time(
-            {"station" : stationID}
-        ).astimezone(
-            pytz.timezone('UTC')
+            { "station" : stationID }
+        ).replace(
+            tzinfo=pytz.timezone('UTC')
         ).isoformat()
     except Exception as e:
         start = None
@@ -155,7 +161,7 @@ def fetch_station_data(stationID : str, location : str, pipe : mrsm.Pipe):
     ### build a dictionary from the JSON response (flattens JSON)
     d = dict()
     if 'features' not in data:
-        print(data)
+        warn(f"Failed to fetch data for station '{stationID}' ({location}):\n" + str(data))
         return None
     for record in data['features']:
         properties = record['properties']
@@ -164,30 +170,30 @@ def fetch_station_data(stationID : str, location : str, pipe : mrsm.Pipe):
         d['location'].append(location)
 
         for col, v in properties.items():
-            ### specific to this API; filter out features we don't want.
+            ### Specific to this API; filter out features we don't want.
             if not v: continue
-            ### at this point, the timestamp is a string. It will get casted below in `parse_df_datetimes`
+            ### At this point, the timestamp is a string. It will get casted below in `parse_df_datetimes`.
             if col == 'timestamp': val = v
-            ### we could just use the stationID provided, but it's given in the JSON so we might as well use it
+            ### We could just use the stationID provided, but it's given in the JSON so we might as well use it.
             elif col == 'station': val = v.split('/')[-1]
 
-            ### skip features that don't contain a simple 'value' key.
+            ### Skip features that don't contain a simple 'value' key.
             ### NOTE: this will need to be tweaked if we want more information that doesn't apply here.
             elif not isinstance(v, dict): continue
             elif 'value' not in v: continue
             else: val = v['value']
 
-            ### if possible, append units to column name.
+            ### If possible, append units to column name.
             if isinstance(v, dict):
                 if 'unitCode' in v:
                     col += " (" + v['unitCode'].replace('unit:', '') + ")"
 
-            ### grow the lists in the dictionary.
-            ### e.g. { 'col1' : [ 1, 2, 3 ], 'col2' : [ 4, 5, 6 ] }
+            ### Grow the lists in the dictionary.
+            ### E.g. { 'col1' : [ 1, 2, 3 ], 'col2' : [ 4, 5, 6 ] }
             if col not in d: d[col] = []
             d[col].append(val)
 
-    ### create a pandas DataFrame from the dictionary and parse for datetimes
+    ### Create a pandas DataFrame from the dictionary and parse for datetimes.
     return parse_df_datetimes(pd.DataFrame(d))
 
 if __name__ == "__main__": main()

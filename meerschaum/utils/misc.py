@@ -788,7 +788,15 @@ def filter_unseen_df(
     Also, NaN apparently does not equal NaN, so I am temporarily replacing instances of NaN with a
     custom string, per this StackOverflow question:
     https://stackoverflow.com/questions/31833635/pandas-checking-for-nan-not-working-using-isin
+
+    Lastly, use the old DataFrame's columns for the new DataFrame, because order matters when checking equality.
     """
+    old_cols = list(old_df.columns)
+    try:
+        new_df = new_df[old_cols]
+    except Exception as e:
+        warn(f"Was not about to cast old columns onto new DataFrame. Are both DataFrames the same shape? Error:\n{e}")
+        return None
     return new_df[~new_df.fillna(custom_nan).apply(tuple, 1).isin(old_df.fillna(custom_nan).apply(tuple, 1))].reset_index(drop=True)
 
 def replace_pipes_in_dict(
