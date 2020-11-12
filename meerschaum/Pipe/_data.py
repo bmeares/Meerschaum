@@ -28,8 +28,8 @@ def get_data(
 
 def get_backtrack_data(
         self,
-        begin : 'datetime.datetime' = None,
         backtrack_minutes : int = 0,
+        begin : 'datetime.datetime' = None,
         debug : bool = False
     ) -> 'pd.DataFrame':
     """

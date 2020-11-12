@@ -523,9 +523,9 @@ def get_sync_time(
     dt = sql_item_name(pipe.get_columns('datetime'), self.flavor)
 
     where = "" if params is None else build_where(params)
-    q = f"SELECT {dt}\nFROM\n{table}{where}\nORDER BY {dt} DESC\nLIMIT 1"
+    q = f"SELECT {dt}\nFROM {table}{where}\nORDER BY {dt} DESC\nLIMIT 1"
     if self.flavor == 'mssql':
-        q = f"SELECT TOP 1 {dt}\nFROM {table}\n{where}\nORDER BY {dt} DESC"
+        q = f"SELECT TOP 1 {dt}\nFROM {table}{where}\nORDER BY {dt} DESC"
     try:
         from meerschaum.utils.misc import round_time
         import datetime
