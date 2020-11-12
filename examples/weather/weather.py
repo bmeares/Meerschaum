@@ -105,7 +105,7 @@ def main():
         success = pipe.sync(
             df,
             blocking = False,
-            check_existing = False,
+            check_existing = True,
             force = True,
             debug = debug
         )[0] if df is not None else False
