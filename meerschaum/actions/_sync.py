@@ -26,7 +26,7 @@ def _pipes_lap(
         debug : bool = None,
         unblock : bool = False,
         force : bool = False,
-        #  min_seconds : int = 0,
+        min_seconds : int = 1,
         **kw
     ) -> tuple:
     """
@@ -34,6 +34,7 @@ def _pipes_lap(
     """
     from meerschaum import get_pipes
     from meerschaum.utils.debug import dprint
+    from meerschaum.utils.misc import enforce_gevent_monkey_patch, attempt_import
     import time
     pipes = get_pipes(
         as_list=True,
@@ -48,20 +49,22 @@ def _pipes_lap(
         """
         from meerschaum.utils.warnings import warn
         try:
-            return_tuple = p.sync(blocking=(not unblock), force=force, debug=debug)
+            ### NOTE: skip check_existing flag
+            return_tuple = p.sync(
+                blocking = (not unblock),
+                force = force,
+                debug = debug,
+                min_seconds = min_seconds,
+                workers = workers
+            )
         except Exception as e:
             warn(str(e), stacklevel=3)
             return_tuple = (False, f"Failed to sync Pipe '{p}' with exception:" + "\n" + str(e))
         
         return return_tuple
 
-    from multiprocessing import cpu_count
-    from multiprocessing.pool import ThreadPool as Pool
-    import multiprocessing
-    if workers is None:
-        workers = cpu_count()
-
-    pool = Pool(processes=workers)
+    from meerschaum.utils.pool import get_pool
+    pool = get_pool('ThreadPool')
 
     results = pool.map_async(sync_pipe, pipes)
     results = results.get()
@@ -82,7 +85,9 @@ def _pipes_lap(
         for p in failed_pipes: print(f"  - {p}")
 
     if len(succeeded_pipes) > 0:
-        print("\n" + f"Successfully synced Pipes:")
+        success_msg = "\nSuccessfully synced Pipes:"
+        if unblock: success_msg = "\nSuccessfully spawned threads for Pipes:"
+        print(success_msg)
         for p in succeeded_pipes:
             print(f"  - {p}")
 
@@ -111,13 +116,14 @@ def _sync_pipes(
         lap_begin = time.time()
         try:
             success, fail = _pipes_lap(
+                min_seconds = min_seconds,
                 debug = debug,
                 **kw
             )
         except Exception as e:
             from meerschaum.utils.warnings import warn
             print(e)
-            warn(f"Failed to sync all pipes. Waiting for {cooldown} seconds, then trying again.", stacklevel=3)
+            warn(f"Failed to sync all pipes. Waiting for {cooldown} seconds, then trying again.", stacklevel=2)
             time.sleep(cooldown)
             cooldown = int(cooldown * 1.5)
             continue
