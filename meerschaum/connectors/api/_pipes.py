@@ -117,20 +117,26 @@ def sync_pipe(
     If Pipe does not exist, it is registered with supplied metadata
         NOTE: columns['datetime'] must be set for new Pipes.
     """
+    from meerschaum.utils.debug import dprint
     from meerschaum.utils.warnings import warn
+    import json
     if df is None:
         msg = f"DataFrame is None. Cannot sync pipe '{pipe}"
         return False, msg
+
+    ### allow syncing dict or JSON without needing to import pandas (for IOT devices)
+    if isinstance(df, dict): json_str = json.dumps(df)
+    elif isinstance(df, str): json_str = df
+    else: json_str = df.to_json(date_format='iso', date_unit='us')
+
     r_url = pipe_r_url(pipe) + '/data'
-    if debug:
-        from meerschaum.utils.debug import dprint
-        dprint(r_url)
+    if debug: dprint(f"Posting data to {r_url}...")
     try:
         response = self.post(
             r_url,
             ### handles check_existing
             params = kw,
-            data = df.to_json(date_format='iso', date_unit='us')
+            data = json_str
         )
     except Exception as e:
         warn(str(e))
@@ -257,6 +263,7 @@ def get_pipe_attributes(
 def get_sync_time(
         self,
         pipe : 'meerschaum.Pipe',
+        params : dict = None,
         debug : bool = False,
     ) -> 'datetime.datetime':
     """
@@ -264,8 +271,11 @@ def get_sync_time(
     """
     import datetime, json
     r_url = pipe_r_url(pipe)
-    response = self.get(r_url + '/sync_time')
-    dt = datetime.datetime.fromisoformat(json.loads(response.text))
+    response = self.get(r_url + '/sync_time', json=params, params={'debug' : debug})
+    try:
+        dt = datetime.datetime.fromisoformat(json.loads(response.text))
+    except:
+        df = None
     return dt
 
 def pipe_exists(

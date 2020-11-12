@@ -138,10 +138,12 @@ async def get_pipes_by_connector_and_metric_and_location(
     return str(pipes()[connector_keys][metric_key][location_key])
 
 @fast_api.get(pipes_endpoint + '/{connector_keys}/{metric_key}/{location_key}/sync_time')
-async def get_sync_time(
+def get_sync_time(
         connector_keys : str,
         metric_key : str,
-        location_key : str
+        location_key : str,
+        params : dict = None,
+        debug : bool = False,
     ) -> 'datetime.datetime':
     """
     Get a Pipe's latest datetime value.
@@ -149,23 +151,26 @@ async def get_sync_time(
     if location_key == '[None]': location_key = None
     pipe = get_pipe(connector_keys, metric_key, location_key)
     if is_pipe_registered(pipe, pipes()):
-        return pipe.sync_time
+        return pipe.get_sync_time(params=params, debug=debug)
 
 @fast_api.post(pipes_endpoint + '/{connector_keys}/{metric_key}/{location_key}/data')
-async def sync_pipe(
+def sync_pipe(
         connector_keys : str,
         metric_key : str,
         location_key : str,
         data : dict = {},
         check_existing : bool = True,
-    ) -> bool:
+        blocking : bool = True,
+        force : bool = False,
+        workers : int = None,
+        debug : bool = False,
+    ) -> tuple:
     """
     Add data to an existing Pipe.
     """
     from meerschaum.utils.misc import parse_df_datetimes
     from meerschaum import Pipe
     import json
-    df = parse_df_datetimes(data)
     p = get_pipe(connector_keys, metric_key, location_key)
     if not is_pipe_registered(p, pipes(refresh=True)):
         raise fastapi.HTTPException(
@@ -173,7 +178,15 @@ async def sync_pipe(
             detail = "Pipe must be registered with the datetime column specified"
         )
 
-    return p.sync(df, debug=True, check_existing=check_existing)
+    df = parse_df_datetimes(data)
+    return p.sync(
+        df,
+        debug = debug,
+        check_existing = check_existing,
+        blocking = blocking,
+        force = force,
+        workers = workers
+    )
 
 @fast_api.get(pipes_endpoint + '/{connector_keys}/{metric_key}/{location_key}/data')
 def get_pipe_data(
@@ -183,7 +196,7 @@ def get_pipe_data(
         begin : datetime.datetime = None,
         end : datetime.datetime = None,
         orient : str = 'records'
-    ) -> bool:
+    ) -> str:
     """
     Get a Pipe's data. Optionally set query boundaries
     """

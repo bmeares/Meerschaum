@@ -31,6 +31,7 @@ required = [
     'more_termcolor',
     'aiofiles',
     'cmd2',
+    'gevent',
 ]
 iot = [
     'paho-mqtt',

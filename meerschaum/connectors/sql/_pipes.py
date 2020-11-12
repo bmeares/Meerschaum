@@ -150,34 +150,9 @@ def fetch_pipes_keys(
     """
     Build a query to return a list of tuples corresponding to the parameters provided.
     """
-    def build_where(parameters : dict):
-        """
-        Build the WHERE clause based on the input criteria
-        """
-        where = ""
-        leading_and = "\n    AND "
-        for key, value in parameters.items():
-            ### search across a list (i.e. IN syntax)
-            if isinstance(value, list):
-                where += f"{leading_and}{key} IN ("
-                for item in value:
-                    where += f"'{item}', "
-                where = where[:-2] + ")"
-                continue
-
-            ### search a dictionary
-            ### TODO take advantage of PostgreSQL JSON types
-            elif isinstance(value, dict):
-                import json
-                where += (f"{leading_and}CAST({key} AS TEXT) = '" + json.dumps(value) + "'")
-                continue
-
-            where += f"{leading_and}{key} " + ("IS NULL" if value is None else f"= '{value}'")
-        if len(where) > 1: where = "\nWHERE\n    " + where[len(leading_and):]
-        return where
-
     from meerschaum.utils.warnings import error
     from meerschaum.utils.debug import dprint
+    from meerschaum.utils.misc import build_where
 
     ### Add three primary keys to params dictionary
     ###   (separated for convenience of arguments)
@@ -435,8 +410,6 @@ def sync_pipe(
         df : 'pd.DataFrame' = None,
         check_existing : bool = True,
         blocking : bool = True,
-        callback : 'function' = None,
-        error_callback : 'function' = None,
         debug : bool = False,
         **kw
     ) -> tuple:
@@ -445,10 +418,16 @@ def sync_pipe(
     """
     from meerschaum.utils.warnings import warn
     from meerschaum.utils.debug import dprint
+    from meerschaum.utils.misc import import_pandas
     if df is None:
         msg = f"DataFrame is None. Cannot sync Pipe '{pipe}'"
         warn(msg)
         return False, msg
+
+    ## allow syncing for JSON or dict as well as DataFrame
+    pd = import_pandas()
+    if isinstance(df, dict): df = pd.DataFrame(df)
+    elif isinstance(df, str): df = pd.read_json(df)
 
     ### if Pipe is not registered
     if not pipe.id:
@@ -479,37 +458,7 @@ def sync_pipe(
         ### build indices on Pipe's root table
         self.create_indices(pipe, debug=debug)
 
-    def filter_existing():
-        from meerschaum.utils.misc import attempt_import, round_time
-        np = attempt_import('numpy')
-        import datetime as datetime_pkg
-        ### begin is the oldest data in the new dataframe
-        try:
-            min_dt = df[pipe.get_columns('datetime')].min().to_pydatetime()
-        except:
-            min_dt = None
-        if min_dt in (np.nan, None):
-            min_dt = pipe.sync_time
-        begin = round_time(
-            min_dt,
-            to = 'down'
-        ) - datetime_pkg.timedelta(minutes=1)
-        if debug: dprint(f"Looking at data newer than '{begin}'")
-
-        ### backtrack_df is existing Pipe data that overlaps with the fetched df
-        try:
-            backtrack_minutes = pipe.parameters['fetch']['backtrack_minutes']
-        except:
-            backtrack_minutes = 0
-
-        backtrack_df = pipe.get_backtrack_data(begin=begin, backtrack_minutes=backtrack_minutes, debug=debug)
-        if debug: dprint("Existing data:\n" + str(backtrack_df))
-
-        ### remove data we've already seen before
-        from meerschaum.utils.misc import filter_unseen_df
-        return filter_unseen_df(backtrack_df, df, debug=debug)
-
-    new_data_df = filter_existing() if check_existing else df
+    new_data_df = filter_existing(pipe, df, debug=debug) if check_existing else df
     if debug: dprint(f"New unseen data:\n" + str(new_data_df))
 
     if_exists = kw.get('if_exists', 'append')
@@ -524,22 +473,59 @@ def sync_pipe(
         **kw
     )
 
+def filter_existing(pipe, df, debug : bool = False):
+    """
+    Remove duplicate data from backtrack_data and a new dataframe
+    """
+    from meerschaum.utils.warnings import warn
+    from meerschaum.utils.debug import dprint
+    from meerschaum.utils.misc import attempt_import, round_time
+    np = attempt_import('numpy')
+    import datetime as datetime_pkg
+    ### begin is the oldest data in the new dataframe
+    try:
+        min_dt = df[pipe.get_columns('datetime')].min().to_pydatetime()
+    except:
+        min_dt = pipe.get_sync_time(debug=debug)
+    if min_dt in (np.nan, None):
+        min_dt = None
+    begin = round_time(
+        min_dt,
+        to = 'down'
+    ) - datetime_pkg.timedelta(minutes=1)
+    if debug: dprint(f"Looking at data newer than '{begin}'")
+
+    ### backtrack_df is existing Pipe data that overlaps with the fetched df
+    try:
+        backtrack_minutes = pipe.parameters['fetch']['backtrack_minutes']
+    except:
+        backtrack_minutes = 0
+
+    backtrack_df = pipe.get_backtrack_data(begin=begin, backtrack_minutes=backtrack_minutes, debug=debug)
+    if debug: dprint("Existing data:\n" + str(backtrack_df))
+
+    ### remove data we've already seen before
+    from meerschaum.utils.misc import filter_unseen_df
+    return filter_unseen_df(backtrack_df, df, debug=debug)
+
 def get_sync_time(
         self,
         pipe : 'meerschaum.Pipe',
+        params : dict = None,
         debug : bool = False,
     ) -> 'datetime.datetime':
     """
     Get a Pipe's most recent datetime
     """
-    from meerschaum.utils.misc import sql_item_name
+    from meerschaum.utils.misc import sql_item_name, build_where
     from meerschaum.utils.warnings import warn
     table = sql_item_name(str(pipe), self.flavor)
     dt = sql_item_name(pipe.get_columns('datetime'), self.flavor)
 
-    q = f"SELECT {dt} FROM {table} ORDER BY {dt} DESC LIMIT 1"
+    where = "" if params is None else build_where(params)
+    q = f"SELECT {dt}\nFROM\n{table}{where}\nORDER BY {dt} DESC\nLIMIT 1"
     if self.flavor == 'mssql':
-        q = f"SELECT TOP 1 {dt} FROM {table} ORDER BY {dt} DESC"
+        q = f"SELECT TOP 1 {dt}\nFROM {table}\n{where}\nORDER BY {dt} DESC"
     try:
         from meerschaum.utils.misc import round_time
         import datetime
