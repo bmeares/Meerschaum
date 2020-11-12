@@ -410,7 +410,6 @@ def sync_pipe(
         df : 'pd.DataFrame' = None,
         check_existing : bool = True,
         blocking : bool = True,
-        callback : 'function' = None,
         debug : bool = False,
         **kw
     ) -> tuple:

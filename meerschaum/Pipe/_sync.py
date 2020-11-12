@@ -19,6 +19,7 @@ def sync(
         blocking : bool = True,
         workers : int = None,
         callback : 'function' = None,
+        error_callback : 'function' = None,
         debug : bool = False,
         **kw
     ) -> tuple:
@@ -31,7 +32,7 @@ def sync(
     from meerschaum.utils.warnings import warn
     from meerschaum.utils.misc import attempt_import
     import time
-    if (callback is not None) and blocking:
+    if (callback is not None or error_callback is not None) and blocking:
         warn("Callback functions are only executed when blocking = False. Ignoring...")
 
     def do_sync(p, df=None):
@@ -59,7 +60,6 @@ def sync(
                 df = df,
                 check_existing = check_existing,
                 blocking = blocking,
-                callback = callback,
                 debug = debug,
                 **kw
             )
@@ -77,7 +77,9 @@ def sync(
     ### TODO implement concurrent syncing (split DataFrame? mimic the functionality of modin?)
     from meerschaum.utils.threading import Thread
     def cb(result_tuple : tuple): dprint(f"Asynchronous result from Pipe '{self}': {result_tuple}")
+    def errcb(x): dprint(f"Error received for Pipe '{self}': {x}")
     if callback is None and debug: callback = cb
+    if error_callback is None and debug: error_callback = errcb
     try:
         thread = Thread(
             target = do_sync,
@@ -85,6 +87,7 @@ def sync(
             kwargs = {'df' : df},
             daemon = False,
             callback = callback,
+            error_callback = error_callback
         )
         thread.start()
     except Exception as e:
