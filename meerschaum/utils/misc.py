@@ -814,3 +814,37 @@ def replace_pipes_in_dict(
     change_dict(result)
     return result
 
+def build_where(parameters : dict):
+    """
+    Build the WHERE clause based on the input criteria
+    """
+    where = ""
+    leading_and = "\n    AND "
+    for key, value in parameters.items():
+        ### search across a list (i.e. IN syntax)
+        if isinstance(value, list):
+            where += f"{leading_and}{key} IN ("
+            for item in value:
+                where += f"'{item}', "
+            where = where[:-2] + ")"
+            continue
+
+        ### search a dictionary
+        elif isinstance(value, dict):
+            import json
+            where += (f"{leading_and}CAST({key} AS TEXT) = '" + json.dumps(value) + "'")
+            continue
+
+        where += f"{leading_and}{key} " + ("IS NULL" if value is None else f"= '{value}'")
+    if len(where) > 1: where = "\nWHERE\n    " + where[len(leading_and):]
+    return where
+
+def enforce_gevent_monkey_patch():
+    """
+    Check if gevent monkey patching is enabled, and if not, then apply patching
+    """
+    import socket
+    gevent, gevent_socket, gevent_monkey = attempt_import('gevent', 'gevent.socket', 'gevent.monkey')
+    if not socket.socket is gevent_socket.socket:
+        gevent_monkey.patch_all()
+
