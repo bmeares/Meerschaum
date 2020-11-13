@@ -22,7 +22,7 @@ def add_method_to_class(
         new name of the method. None will use func.__name__
     """
     from functools import wraps
-    
+
     @wraps(func)
     def wrapper(self, *args, **kw):
         return func(*args, **kw)
@@ -217,6 +217,8 @@ def reload_package(
     del fn
 
     def reload_recursive_ex(module):
+        import os, types, importlib
+        from meerschaum.utils.debug import dprint
         ### forces import of lazily-imported modules
         module = importlib.import_module(module.__name__)
         importlib.reload(module)
@@ -795,9 +797,19 @@ def filter_unseen_df(
     try:
         new_df = new_df[old_cols]
     except Exception as e:
-        warn(f"Was not about to cast old columns onto new DataFrame. Are both DataFrames the same shape? Error:\n{e}")
+        warn(f"Was not able to cast old columns onto new DataFrame. Are both DataFrames the same shape? Error:\n{e}")
         return None
     return new_df[~new_df.fillna(custom_nan).apply(tuple, 1).isin(old_df.fillna(custom_nan).apply(tuple, 1))].reset_index(drop=True)
+
+def change_dict(d : dict, func : 'function'):
+    """
+    Originally was local, moving to global for multiprocessing debugging
+    """
+    for k, v in d.items():
+        if isinstance(v, dict):
+            change_dict(v)
+        else:
+            d[k] = func(v)
 
 def replace_pipes_in_dict(
         pipes : dict = None,
@@ -812,14 +824,8 @@ def replace_pipes_in_dict(
         from meerschaum import get_pipes
         pipes = get_pipes(debug=debug, **kw)
 
-    def change_dict(d):
-        for k, v in d.items():
-            if isinstance(v, dict):
-                change_dict(v)
-            else:
-                d[k] = func(v)
     result = pipes.copy()
-    change_dict(result)
+    change_dict(result, func)
     return result
 
 def build_where(parameters : dict):
