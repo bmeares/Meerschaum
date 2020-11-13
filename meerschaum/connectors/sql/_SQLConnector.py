@@ -104,7 +104,7 @@ class SQLConnector(Connector):
 
     @property
     def DATABASE_URL(self):
-        return str(self.engine)
+        return str(self.engine.url)
 
     @property
     def metadata(self):
