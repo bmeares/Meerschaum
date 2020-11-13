@@ -34,8 +34,7 @@ def sync(
     import time
     if (callback is not None or error_callback is not None) and blocking:
         warn("Callback functions are only executed when blocking = False. Ignoring...")
-
-    def do_sync(p, df=None):
+    def _sync(p, df = None):
         ### ensure that Pipe is registered
         if not p.id:
             register_tuple = p.register(debug=debug)
@@ -58,8 +57,6 @@ def sync(
             return_tuple = p.instance_connector.sync_pipe(
                 pipe = p,
                 df = df,
-                check_existing = check_existing,
-                blocking = blocking,
                 debug = debug,
                 **kw
             )
@@ -72,17 +69,17 @@ def sync(
             if _retries > retries: warn(f"Unable to sync Pipe '{p}' within {retries} attempts!")
         return return_tuple
 
-    if blocking: return do_sync(self, df=df)
+    if blocking: return _sync(self, df = df)
 
     ### TODO implement concurrent syncing (split DataFrame? mimic the functionality of modin?)
     from meerschaum.utils.threading import Thread
-    def cb(result_tuple : tuple): dprint(f"Asynchronous result from Pipe '{self}': {result_tuple}")
-    def errcb(x): dprint(f"Error received for Pipe '{self}': {x}")
-    if callback is None and debug: callback = cb
-    if error_callback is None and debug: error_callback = errcb
+    def default_callback(result_tuple : tuple): dprint(f"Asynchronous result from Pipe '{self}': {result_tuple}")
+    def default_error_callback(x): dprint(f"Error received for Pipe '{self}': {x}")
+    if callback is None and debug: callback = default_callback
+    if error_callback is None and debug: error_callback = default_error_callback
     try:
         thread = Thread(
-            target = do_sync,
+            target = _sync,
             args = (self,),
             kwargs = {'df' : df},
             daemon = False,
