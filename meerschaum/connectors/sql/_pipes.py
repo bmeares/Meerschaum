@@ -40,37 +40,15 @@ def register_pipe(
         if debug: dprint(str(e))
         parameters = None
 
-    ### 2. If the parent pipe does not have `parameters` either manually set
-    ###    or within the database, check the `meta.parameters` value (likely None as well)
-    #  if parameters is None:
-        #  try:
-            #  parameters = pipe.meta.parameters
-        #  except Exception as e:
-            #  if debug: dprint(str(e))
-            #  parameters = None
-
     ### ensure `parameters` is a dictionary
     if parameters is None:
         parameters = dict()
 
-    ### override `meta.parameters` with parameters found from the above process
-    #  pipe.meta.parameters = parameters
-
     ### NOTE: I know it seems strange that I'm reverting from a perfectly
     ### working async ORM query to a hand-written synchronous query.
-    ### But I value the design change more than miniscule performanc gain,
+    ### But I value the design change more than miniscule performance gain,
     ### and I know that this method may be refactored later if necessary.
 
-    ### generate the INSERT statement
-    #  query = get_tables()['pipes'].insert().values(
-        #  connector_keys = pipe.connector_keys,
-        #  metric_key = pipe.metric_key,
-        #  location_key = pipe.location_key,
-        #  parameters = pipe.parameters,
-    #  )
-    #  asyncio.run(retry_connect(connector=self, debug=debug))
-    #  last_record_id = asyncio.run(self.db.execute(query))
-    #  return {**pipe.meta.dict(), "pipe_id": last_record_id}
     import json
     location_key = pipe.location_key
     if location_key is None:
@@ -194,14 +172,17 @@ def create_indices(
         self,
         pipe : 'meerschaum.Pipe',
         debug : bool = False
-    ) -> 'bool':
+    ) -> bool:
     """
     Create indices for a Pipe's datetime and ID columns.
     """
     from meerschaum.utils.debug import dprint
+    import pprintpp
     from meerschaum.utils.misc import sql_item_name
     from meerschaum.utils.warnings import warn
     index_queries = dict()
+
+    if debug: dprint(f"Creating indices for Pipe '{pipe}'...")
 
     ### create datetime index
     if 'datetime' in pipe.columns and pipe.get_columns('datetime'):
@@ -217,11 +198,11 @@ def create_indices(
             dt_query = f"CREATE INDEX ON {sql_item_name(str(pipe), self.flavor)} ({sql_item_name(pipe.get_columns('datetime'), self.flavor)})"
         else: ### mssql, sqlite, etc.
             dt_query = f"CREATE INDEX {pipe.get_columns('datetime').lower()}_index ON {pipe} ({sql_item_name(pipe.get_columns('datetime'), self.flavor)})"
-            
+         
         index_queries[pipe.get_columns('datetime')] = dt_query
 
     ### create id index
-    if 'id' in pipe.columns and pipe.get_columns('id'):
+    if 'id' in pipe.columns and pipe.get_columns('id', error=False):
         if self.flavor in ('timescaledb', 'postgresql'):
             id_query = f"CREATE INDEX ON {sql_item_name(str(pipe), self.flavor)} ({sql_item_name(pipe.get_columns('id'), self.flavor)})"
         elif self.flavor in ('mysql', 'mariadb'):
@@ -235,6 +216,7 @@ def create_indices(
         if debug: dprint(f"Creating index on column '{col}' for Pipe '{pipe}'")
         if not self.exec(q, debug=debug):
             warn(f"Failed to create index on column '{col}' for Pipe '{pipe}'")
+            return False
     return True
 
 def delete_pipe(
@@ -449,14 +431,20 @@ def sync_pipe(
         if debug: dprint(f"Creating empty table for Pipe '{pipe}'...")
         if debug: dprint("New table data types:\n" + f"{df.head(0).dtypes}")
         ### create empty table
-        self.to_sql(
+        success = self.to_sql(
             df.head(0),
             if_exists = 'append',
             name = str(pipe),
             debug = debug
         )
+        if success and debug: dprint(f"Successfully created table for Pipe '{pipe}'. Creating indices...")
+        elif not success:
+            msg = f"Failed to create table for Pipe '{pipe}'."
+            if debug: dprint(msg + " Exiting...")
+            return False, msg
         ### build indices on Pipe's root table
-        self.create_indices(pipe, debug=debug)
+        if not self.create_indices(pipe, debug=debug):
+            if debug: dprint(f"Failed to create indices for Pipe '{pipe}'. Continuing...")
 
     new_data_df = filter_existing(pipe, df, debug=debug) if check_existing else df
     if debug: dprint(f"New unseen data:\n" + str(new_data_df))

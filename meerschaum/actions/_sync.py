@@ -58,13 +58,20 @@ def _pipes_lap(
                 workers = workers
             )
         except Exception as e:
-            warn(str(e), stacklevel=3)
+            import traceback
+            traceback.print_exception(type(e), e, e.__traceback__)
+            print("Error: " + str(e))
             return_tuple = (False, f"Failed to sync Pipe '{p}' with exception:" + "\n" + str(e))
         
         return return_tuple
 
-    from meerschaum.utils.pool import get_pool
-    pool = get_pool('ThreadPool')
+    #  from meerschaum.utils.pool import get_pool
+    #  pool = get_pool('ThreadPool', workers=workers)
+    
+    from multiprocessing import cpu_count
+    from multiprocessing.pool import ThreadPool as Pool
+    if workers is None: workers = cpu_count()
+    pool = Pool(workers)
 
     results = pool.map_async(sync_pipe, pipes)
     results = results.get()
@@ -121,8 +128,9 @@ def _sync_pipes(
                 **kw
             )
         except Exception as e:
+            import traceback
+            traceback.print_exc()
             from meerschaum.utils.warnings import warn
-            print(e)
             warn(f"Failed to sync all pipes. Waiting for {cooldown} seconds, then trying again.", stacklevel=2)
             time.sleep(cooldown)
             cooldown = int(cooldown * 1.5)
