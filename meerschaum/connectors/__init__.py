@@ -61,6 +61,10 @@ def get_connector(
             'sql'  : SQLConnector,
             'mqtt' : MQTTConnector,
         }
+    
+    ### always refresh MQTT Connectors NOTE: test this!
+    if type == 'mqtt': refresh = True
+
     ### determine if we need to call the constructor
     if not refresh:
         ### see if any user-supplied arguments differ from the existing instance
