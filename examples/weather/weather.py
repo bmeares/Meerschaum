@@ -17,7 +17,7 @@ from meerschaum.utils.misc import parse_df_datetimes
 from meerschaum.utils.warnings import warn
 from meerschaum.utils.pool import get_pool
 
-import requests, pandas as pd, json, pytz, sys, argparse
+import requests, pandas as pd, json, pytz, sys, argparse, datetime
 parser = argparse.ArgumentParser(description="Sync weather station data into a Pipe")
 parser.add_argument('-d', '--debug', action='store_true')
 parser.add_argument('-I', '--mrsm-instance', type=str)
@@ -139,10 +139,12 @@ def fetch_station_data(stationID : str, location : str, pipe : mrsm.Pipe):
     """
     ### Get the latest sync time for this station so we don't request duplicate data.
     try:
-        start = pipe.get_sync_time(
-            { "station" : stationID }
+        start = (
+            pipe.get_sync_time(
+                { "station" : stationID }
+            ) - datetime.timedelta(hours=24)
         ).replace(
-            tzinfo=pytz.timezone('UTC')
+            tzinfo = pytz.timezone('UTC')
         ).isoformat()
     except Exception as e:
         start = None
