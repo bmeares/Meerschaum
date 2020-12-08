@@ -151,16 +151,18 @@ def import_children(
     ###   functions[name] = func
     modules = get_modules_from_package(package, recursive=recursive, lazy=lazy, debug=debug)
     _all, members = [], []
+    objects = []
     for module in modules:
-        objects = []
+        _objects = []
         for ob in inspect.getmembers(module):
             for t in types:
                 ### ob is a tuple of (name, object)
                 if getattr(inspect, 'is' + t)(ob[1]):
-                    objects.append(ob)
+                    _objects.append(ob)
 
         if 'module' in types:
-            objects.append((module.__name__.split('.')[0], module))
+            _objects.append((module.__name__.split('.')[0], module))
+        objects += _objects
     for ob in objects:
         setattr(sys.modules[package_name], ob[0], ob[1])
         _all.append(ob[0])
@@ -793,6 +795,7 @@ def filter_unseen_df(
 
     Lastly, use the old DataFrame's columns for the new DataFrame, because order matters when checking equality.
     """
+    if old_df is None: return new_df
     old_cols = list(old_df.columns)
     try:
         new_df = new_df[old_cols]
