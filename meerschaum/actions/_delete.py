@@ -79,6 +79,14 @@ def _delete_config(
     
     return True, "Successfully deleted configuration files"
 
+def _delete_plugin(
+        yes : bool = False,
+        force : bool = False,
+        debug : bool = False,
+        **kw
+    ) -> tuple:
+    pass
+
 ### NOTE: This must be the final statement of the module.
 ###       Any subactions added below these lines will not
 ###       be added to the `help` docstring.

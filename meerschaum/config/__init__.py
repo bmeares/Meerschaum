@@ -9,6 +9,7 @@ and if interactive, print the welcome message
 
 from meerschaum.config._version import __version__
 from meerschaum.config._read_yaml import config
+from meerschaum.config._edit import write_config
 
 from meerschaum.utils.debug import dprint
 import os
