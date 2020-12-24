@@ -22,6 +22,7 @@ def read(
     Read a SQL query or table into a pandas dataframe.
     """
     from meerschaum.utils.misc import attempt_import, sql_item_name
+    sqlparse = attempt_import("sqlparse")
     sqlalchemy = attempt_import("sqlalchemy")
     chunksize = chunksize if chunksize != -1 else self.sys_config['chunksize']
     if debug:
@@ -38,6 +39,7 @@ def read(
         formatted_query = str(sqlalchemy.text("SELECT * FROM " + str(query_or_table)))
     else:
         formatted_query = str(sqlalchemy.text(query_or_table))
+    formatted_query = sqlparse.format(formatted_query)
 
     try:
         chunk_generator = self.pd.read_sql(
@@ -96,6 +98,8 @@ def exec(
     Execute SQL code and return success status. e.g. calling stored procedures
     """
     from meerschaum.utils.misc import attempt_import
+    sqlparse = attempt_import("sqlparse")
+    query = sqlparse.format(query)
     sqlalchemy = attempt_import("sqlalchemy")
     if debug: dprint("Executing query:\n" + f"{query}")
     try:

@@ -802,6 +802,7 @@ def filter_unseen_df(
     except Exception as e:
         warn(f"Was not able to cast old columns onto new DataFrame. Are both DataFrames the same shape? Error:\n{e}")
         return None
+    if len(old_df) == 0: return new_df
     return new_df[~new_df.fillna(custom_nan).apply(tuple, 1).isin(old_df.fillna(custom_nan).apply(tuple, 1))].reset_index(drop=True)
 
 def change_dict(d : dict, func : 'function'):

@@ -9,9 +9,10 @@ Fetch connectors with get_connector
 ### store connectors partitioned by
 ### type, label for reuse
 connectors = {
-    'api'  : dict(),
-    'sql'  : dict(),
-    'mqtt' : dict(),
+    'api'    : dict(),
+    'sql'    : dict(),
+    'mqtt'   : dict(),
+    'plugin' : dict(),
 }
 ### fill this with classes only on execution
 ### for lazy loading
@@ -54,12 +55,14 @@ def get_connector(
 
     if len(types) == 0:
         from meerschaum.connectors.sql import SQLConnector
-        from meerschaum.connectors.api._APIConnector import APIConnector
-        from meerschaum.connectors.mqtt._MQTTConnector import MQTTConnector
+        from meerschaum.connectors.api import APIConnector
+        from meerschaum.connectors.mqtt import MQTTConnector
+        from meerschaum.connectors.plugin import PluginConnector
         types = {
             'api'  : APIConnector,
             'sql'  : SQLConnector,
             'mqtt' : MQTTConnector,
+            'plugin' : PluginConnector,
         }
     
     ### always refresh MQTT Connectors NOTE: test this!

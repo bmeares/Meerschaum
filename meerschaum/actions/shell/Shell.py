@@ -42,7 +42,7 @@ hidden_commands = {
     'quit',
 }
 class Shell(cmd.Cmd):
-    def __init__(self):
+    def __init__(self, actions : dict = {}):
         """
         Customize the CLI from configuration
         """
@@ -63,6 +63,7 @@ class Shell(cmd.Cmd):
             except:
                 pass
 
+        self._actions = actions
         self.intro = get_config('system', 'shell', CHARSET, 'intro', patch=patch) + '\n' + __doc__
         self.prompt = get_config('system', 'shell', CHARSET, 'prompt', patch=patch)
         self.debug = False
@@ -159,27 +160,27 @@ class Shell(cmd.Cmd):
 
         try:
             func = getattr(self, 'do_' + action)
-            func_param_kinds = inspect.signature(func).parameters.items()
+            #  func_param_kinds = inspect.signature(func).parameters.items()
         except AttributeError as ae:
             ### if function is not found, default to `bash`
             action = "bash"
             args['action'].insert(0, "bash")
             func = getattr(self, 'do_bash')
-            func_param_kinds = inspect.signature(func).parameters.items()
+            #  func_param_kinds = inspect.signature(func).parameters.items()
 
         ### delete the first action
         ### e.g. 'show actions' -> ['actions']
         del args['action'][0]
         if len(args['action']) == 0: args['action'] = ['']
 
-        positional_only = True
-        for param in func_param_kinds:
+        positional_only = (action not in self._actions)
+        #  for param in func_param_kinds:
             ### if variable keyword arguments found,
             ### use meerschaum parser, else just pass
             ### the line string without parsing
-            if str(param[1].kind) == "VAR_KEYWORD":
-                positional_only = False
-                break
+            #  if str(param[1].kind) == "VAR_KEYWORD":
+                #  positional_only = False
+                #  break
         
         if positional_only:
             #  if self.debug: print("Did not find keyword arguments. " + "Returning original line:\n" + str(original_line))

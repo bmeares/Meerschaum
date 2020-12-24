@@ -65,7 +65,7 @@ def register_pipe(
         '{pipe.connector_keys}',
         '{pipe.metric_key}',
         {location_key},
-        '{json.dumps(pipe.parameters)}'
+        '{json.dumps(pipe.parameters).replace("'", "''")}'
     );
     """
 
@@ -261,8 +261,7 @@ def get_backtrack_data(
     Get the most recent backtrack_minutes' worth of data from a Pipe
     """
     from meerschaum.utils.warnings import error, warn
-    if pipe is None:
-        error(f"Pipe must be provided")
+    if pipe is None: error(f"Pipe must be provided")
     from meerschaum.utils.debug import dprint
     from meerschaum.connectors.sql._fetch import dateadd_str
     if begin is None: begin = pipe.sync_time

@@ -102,7 +102,7 @@ def fetch(
     except KeyError:
         error("Cannot fetch without a definition", KeyError)
 
-    if 'order by' in definition.lower():
+    if 'order by' in definition.lower() and 'over' not in definition.lower():
         error("Cannot fetch with an ORDER clause in the definition")
 
     da = None
