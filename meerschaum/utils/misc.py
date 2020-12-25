@@ -538,29 +538,29 @@ def choices_docstring(action : str, globs : dict = None):
     return options_str
 
 def print_options(
-        options={},
-        nopretty=False,
+        options : dict = {},
+        nopretty : bool = False,
+        name : str = 'options',
         **kw
     ) -> None:
     """
     Show available options from an iterable
     """
-    from meerschaum.actions import actions
     if not nopretty:
-        header = "Available options:"
+        header = f"Available {name}:"
         print("\n" + header)
         ### calculate underline length
         underline_len = len(header)
-        for a in actions:
-            if len(a) + 4 > underline_len:
-                underline_len = len(a) + 4
+        for o in options:
+            if len(str(o)) + 4 > underline_len:
+                underline_len = len(str(a)) + 4
         ### print underline
         for i in range(underline_len): print('-', end="")
         print("\n", end="")
     ### print actions
-    for action in sorted(actions):
+    for option in sorted(options):
         if not nopretty: print("  - ", end="")
-        print(action)
+        print(option)
 
 def sorted_dict(d : dict) -> dict:
     """

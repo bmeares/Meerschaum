@@ -19,11 +19,13 @@ if os.path.isfile(PATCH_PATH):
         patch_config = yaml.safe_load(patch_text)
 
 permanent_patch_config = None
-if os.path.isfile(PERMANENT_PATCH_PATH):
+if PERMANENT_PATCH_PATH.exists():
     if yaml:
         with open(PERMANENT_PATCH_PATH, 'r') as f:
             permanent_patch_text = f.read()
         permanent_patch_config = yaml.safe_load(permanent_patch_text)
+else:
+    permanent_patch_config = None
 
 
 def apply_patch_to_config(

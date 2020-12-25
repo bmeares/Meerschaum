@@ -46,3 +46,4 @@ def clear_screen(debug : bool = False) -> bool:
     command = 'clear' if platform.system() != "Windows" else "cls"
     rc = os.system(command)
     return rc == 0
+

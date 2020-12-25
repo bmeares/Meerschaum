@@ -14,10 +14,6 @@ from meerschaum.config import config as cf
 ANSI = cf['system']['formatting']['ansi']
 #  UNICODE = get_config('system', 'formatting', 'unicode', patch=True)
 UNICODE = cf['system']['formatting']['unicode']
-import platform
-if platform.system() == 'Windows':
-    UNICODE = False
-    ANSI = False
 CHARSET = 'unicode' if UNICODE else 'ascii'
 
 from meerschaum.utils.misc import attempt_import
@@ -37,3 +33,22 @@ try:
 except:
     print(f"Failed to import more_termcolor. Ignoring color output...")
     colored = colored_fallback
+
+
+def print_tuple(tup : tuple):
+    """
+    Print Meerschaum return tuple
+    """
+    from meerschaum.utils.formatting import ANSI, CHARSET, colored
+    from meerschaum.config import config as cf, get_config
+
+    status = 'success' if tup[0] else 'failure'
+
+    status_config = get_config('system', status, patch=True)
+
+    msg = ' ' + status_config[CHARSET]['icon'] + ' ' + str(tup[1])
+    if ANSI:
+        msg = colored(msg, *status_config['ansi']['color'])
+
+    print(msg)
+

@@ -31,6 +31,7 @@ def show(
         'connectors' : _show_connectors,
         'arguments'  : _show_arguments,
         'data'       : _show_data,
+        'plugins'    : _show_plugins,
     }
     return choose_subaction(action, show_options, **kw)
 
@@ -40,7 +41,7 @@ def _show_actions(**kw) -> tuple:
     """
     from meerschaum.actions import actions
     from meerschaum.utils.misc import print_options
-    print_options(options=actions, **kw)
+    print_options(options=actions, name='actions', **kw)
     return True, "Success"
 
 def _show_config(
@@ -161,6 +162,17 @@ def _show_data(
             except:
                 df.plot()
     return True, "Success"
+
+def _show_plugins(
+        action : list = [''],
+        debug : bool = False,
+        **kw
+    ):
+    from meerschaum.actions import _plugins_names
+    from meerschaum.utils.misc import print_options
+    print_options(_plugins_names, name='plugins', **kw)
+    return True, "Success"
+
 
 
 ### NOTE: This must be the final statement of the module.

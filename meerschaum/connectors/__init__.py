@@ -47,6 +47,10 @@ def get_connector(
         ### recursive call to get_connector
         return parse_instance_keys(default_instance_keys)
 
+    ### NOTE: the default instance connector may not be main.
+    ### Only fall back to 'main' if the type is provided by the label is omitted.
+    if label is None: label = 'main'
+
     global types, connectors
 
     if type not in connectors:

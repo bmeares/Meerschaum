@@ -6,6 +6,10 @@
 Functions for fetching new data into the Pipe
 """
 
+connectors_without_fetch_params = {
+    'plugin',
+}
+
 def fetch(
         self,
         debug : bool = False
@@ -20,7 +24,10 @@ def fetch(
     """
     from meerschaum.utils.debug import dprint
     from meerschaum.utils.warnings import warn
-    if self.attributes and 'fetch' in self.attributes['parameters']:
+    if (
+        self.connector.type in connectors_without_fetch_params
+        or (self.attributes and 'fetch' in self.attributes['parameters'])
+    ):
         return self.connector.fetch(
             self,
             begin = self.sync_time,
