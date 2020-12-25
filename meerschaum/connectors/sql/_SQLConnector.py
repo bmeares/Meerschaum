@@ -31,6 +31,7 @@ class SQLConnector(Connector):
         get_sync_time,
         pipe_exists,
     )
+    from ._plugins import register_plugin, get_plugin_id, get_plugin_version
     
     def __init__(
             self,

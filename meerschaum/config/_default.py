@@ -8,6 +8,12 @@ The default configuration values to write to config.yaml.
 
 import sys, os, multiprocessing
 
+default_unicode, default_ansi = True, True
+import platform
+if platform.system() == 'Windows':
+    default_unicode, default_ansi = False, False
+
+
 default_meerschaum_config = {
     'instance' : 'sql:main',
     'api_instance' : 'sql:main',
@@ -30,6 +36,9 @@ default_meerschaum_config = {
             'local'        : {
                 'flavor'   : 'sqlite',
             },
+            'mrsm'         : {
+                'host'     : 'mrsm.io',
+            },
         },
         'api' : {
             'default'      : {
@@ -44,6 +53,9 @@ default_meerschaum_config = {
             },
             'local'        : {
                 'host'     : 'localhost',
+            },
+            'mrsm'         : {
+                'host'     : 'mrsm.io',
             },
         },
         'mqtt' : {
@@ -80,8 +92,8 @@ default_system_config = {
     },
     ### control output colors and Unicode vs ASCII
     'formatting'           : {
-        'unicode'          : True,
-        'ansi'             : True,
+        'unicode'          : default_unicode,
+        'ansi'             : default_ansi,
     },
     'shell' : {
         'ansi'             : {
@@ -175,7 +187,35 @@ default_system_config = {
             ],
         },
     },
-    'errors'             : {
+    'success'              : {
+        'unicode'          : {
+            'icon'         : '🎉',
+        },
+        'ascii'            : {
+            'icon'         : '+',
+        },
+        'ansi'             : {
+            'color'        : [
+                'bold',
+                'bright green',
+            ],
+        },
+    },
+    'failure'              : {
+        'unicode'          : {
+            'icon'         : '💢',
+        },
+        'ascii'            : {
+            'icon'         : '-',
+        },
+        'ansi'             : {
+            'color'        : [
+                'bold',
+                'red',
+                ],
+        },
+    },
+    'errors'               : {
         'unicode'          : {
             'icon'         : '🛑',
         },

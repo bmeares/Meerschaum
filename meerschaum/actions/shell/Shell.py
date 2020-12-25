@@ -216,7 +216,10 @@ class Shell(cmd.Cmd):
         """
         on_commands = {'on', 'true'}
         off_commands = {'off', 'false'}
-        state = action[0]
+        try:
+            state = action[0]
+        except IndexError:
+            state = ''
         if state == '':
             self.debug = not self.debug
         elif state.lower() in on_commands: self.debug = True

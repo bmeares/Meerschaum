@@ -15,10 +15,10 @@ import sys
 __all__, modules = get_modules_from_package(sys.modules[__name__], names=True)
 
 ### append the plugins modules
-from meerschaum.config._paths import RESOURCES_PATH, PLUGINS_RESOURCES_PATH
+from meerschaum.config._paths import RESOURCES_PATH, PLUGINS_RESOURCES_PATH, PLUGINS_ARCHIVES_RESOURCES_PATH
 if RESOURCES_PATH not in sys.path: sys.path.append(str(RESOURCES_PATH))
 import plugins
-_plugins_names, plugins_modules = get_modules_from_package(plugins, names=True)
+_plugins_names, plugins_modules = get_modules_from_package(plugins, names=True, recursive=True)
 __all__ += _plugins_names
 modules += plugins_modules
 

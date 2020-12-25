@@ -40,6 +40,14 @@ def sync(
             register_tuple = p.register(debug=debug)
             if not register_tuple[0]: return register_tuple
 
+        ### If connector is a plugin with a `sync()` method, return that instead.
+        ### If the plugin does not have a `sync()` method but does have a `fetch()` method,
+        ### use that instead.
+        ### NOTE: The DataFrame must be None for the plugin sync method to apply.
+        ### If a DataFrame is provided, continue as expected.
+        if p.connector.type == 'plugin' and p.connector.sync is not None and df is None:
+            return p.connector.sync(p, debug=debug, **kw)
+
         ### default: fetch new data via the connector.
         ### If new data is provided, skip fetching
         if df is None:
