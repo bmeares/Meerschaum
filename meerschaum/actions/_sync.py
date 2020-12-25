@@ -35,6 +35,7 @@ def _pipes_lap(
     from meerschaum import get_pipes
     from meerschaum.utils.debug import dprint
     from meerschaum.utils.misc import enforce_gevent_monkey_patch, attempt_import
+    from meerschaum.utils.formatting import print_tuple
     import time
     pipes = get_pipes(
         as_list = True,
@@ -63,6 +64,7 @@ def _pipes_lap(
             print("Error: " + str(e))
             return_tuple = (False, f"Failed to sync Pipe '{p}' with exception:" + "\n" + str(e))
         
+        print_tuple(return_tuple)
         return return_tuple
 
     #  from meerschaum.utils.pool import get_pool

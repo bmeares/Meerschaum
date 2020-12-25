@@ -38,7 +38,7 @@ def install(
     for name in action:
         success, msg = instance_connector.install_plugin(name, debug=debug)
         successes[name] = (success, msg)
-        print_tuple((success, '\n' + msg))
+        print_tuple((success, msg))
 
     reload_package(meerschaum.actions)
     return True, "Success"
