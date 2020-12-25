@@ -58,6 +58,7 @@ sql = drivers + [
     'databases',
     'aiosqlite',
     'asyncpg',
+    'sqlparse',
 ]
 api = sql + [
     'uvicorn',

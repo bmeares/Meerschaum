@@ -35,11 +35,15 @@ def register_plugin(
     r_url = plugin_r_url(plugin)
     try:
         response = self.post(r_url, files=files, params=metadata)
-        success, msg = json.loads(response.text)
     except:
         success, msg = False, f"Failed to register plugin '{plugin}'"
     finally:
         file_pointer.close()
+
+    try:
+        success, msg = json.loads(response.text)
+    except:
+        success, msg = False, response.text
 
     return success, msg
 

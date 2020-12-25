@@ -45,8 +45,12 @@ def sync(
         ### use that instead.
         ### NOTE: The DataFrame must be None for the plugin sync method to apply.
         ### If a DataFrame is provided, continue as expected.
-        if p.connector.type == 'plugin' and p.connector.sync is not None and df is None:
-            return p.connector.sync(p, debug=debug, **kw)
+        if df is None:
+            try:
+                if p.connector.type == 'plugin' and p.connector.sync is not None:
+                    return p.connector.sync(p, debug=debug, **kw)
+            except:
+                pass
 
         ### default: fetch new data via the connector.
         ### If new data is provided, skip fetching
