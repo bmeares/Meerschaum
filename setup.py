@@ -11,8 +11,10 @@ class PostInstallCommand(install):
     """Post-installation for installation mode."""
     def run(self):
         install.run(self)
+        from meerschaum.config._edit import write_default_config
         from meerschaum.config._paths import CONFIG_PATH, PERMANENT_PATCH_PATH
         import os, shutil
+
         if CONFIG_PATH.exists():
             print(f"Found existing configuration in {CONFIG_PATH}")
             print(f"Moving to {PERMANENT_PATCH_PATH} and patching default configuration with existing configuration")
@@ -62,6 +64,7 @@ api = sql + [
     'fastapi',
     #  'graphene',
     'jinja2',
+    'python-multipart',
 ]
 stack = [
     'docker',

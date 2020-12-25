@@ -71,6 +71,14 @@ PIPES_RESOURCES_PATH = Path(os.path.join(RESOURCES_PATH, 'pipes'))
 
 SPLITGRAPH_CONFIG_PATH = Path(os.path.join(Path.home(), '.splitgraph', '.sgconfig'))
 
+PLUGINS_RESOURCES_PATH = Path(os.path.join(RESOURCES_PATH, 'plugins'))
+PLUGINS_ARCHIVES_RESOURCES_PATH = Path(os.path.join(PLUGINS_RESOURCES_PATH, '.archives'))
+PLUGINS_TEMP_RESOURCES_PATH = Path(os.path.join(PLUGINS_RESOURCES_PATH, '.tmp'))
+PLUGINS_INIT_PATH = Path(os.path.join(PLUGINS_RESOURCES_PATH, '__init__.py'))
+PLUGINS_INIT_PATH.parent.mkdir(parents=True, exist_ok=True)
+PLUGINS_INIT_PATH.touch()
+
+
 ### NOTE: This must be the bottom of the module
 paths_glob = dict(globals())
 for var, path in paths_glob.items():

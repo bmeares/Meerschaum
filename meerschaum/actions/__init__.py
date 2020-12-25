@@ -14,6 +14,15 @@ enable_depreciation_warnings(__name__)
 import sys
 __all__, modules = get_modules_from_package(sys.modules[__name__], names=True)
 
+### append the plugins modules
+from meerschaum.config._paths import RESOURCES_PATH, PLUGINS_RESOURCES_PATH, PLUGINS_ARCHIVES_RESOURCES_PATH
+if RESOURCES_PATH not in sys.path: sys.path.append(str(RESOURCES_PATH))
+import plugins
+_plugins_names, plugins_modules = get_modules_from_package(plugins, names=True, recursive=True)
+__all__ += _plugins_names
+modules += plugins_modules
+
+
 ### build the actions dictionary by importing all
 ### functions that do not begin with '_' from all submodules
 from inspect import getmembers, isfunction
@@ -42,6 +51,7 @@ for module in modules:
                 (ob[0], ob[1])
                     for ob in getmembers(module)
                         if isfunction(ob[1])
+                            and ob[0] == module.__name__.replace('_', '').split('.')[-1]
                             and ob[0][0] != '_'            
             ]
         )
@@ -60,5 +70,5 @@ def get_shell():
         for a, f in actions.items():
             add_method_to_class(func=f, class_def=Shell, method_name='do_' + a)
 
-        shell = Shell()
+        shell = Shell(actions)
     return shell

@@ -151,16 +151,18 @@ def import_children(
     ###   functions[name] = func
     modules = get_modules_from_package(package, recursive=recursive, lazy=lazy, debug=debug)
     _all, members = [], []
+    objects = []
     for module in modules:
-        objects = []
+        _objects = []
         for ob in inspect.getmembers(module):
             for t in types:
                 ### ob is a tuple of (name, object)
                 if getattr(inspect, 'is' + t)(ob[1]):
-                    objects.append(ob)
+                    _objects.append(ob)
 
         if 'module' in types:
-            objects.append((module.__name__.split('.')[0], module))
+            _objects.append((module.__name__.split('.')[0], module))
+        objects += _objects
     for ob in objects:
         setattr(sys.modules[package_name], ob[0], ob[1])
         _all.append(ob[0])
@@ -536,29 +538,29 @@ def choices_docstring(action : str, globs : dict = None):
     return options_str
 
 def print_options(
-        options={},
-        nopretty=False,
+        options : dict = {},
+        nopretty : bool = False,
+        name : str = 'options',
         **kw
     ) -> None:
     """
     Show available options from an iterable
     """
-    from meerschaum.actions import actions
     if not nopretty:
-        header = "Available options:"
+        header = f"Available {name}:"
         print("\n" + header)
         ### calculate underline length
         underline_len = len(header)
-        for a in actions:
-            if len(a) + 4 > underline_len:
-                underline_len = len(a) + 4
+        for o in options:
+            if len(str(o)) + 4 > underline_len:
+                underline_len = len(str(a)) + 4
         ### print underline
         for i in range(underline_len): print('-', end="")
         print("\n", end="")
     ### print actions
-    for action in sorted(actions):
+    for option in sorted(options):
         if not nopretty: print("  - ", end="")
-        print(action)
+        print(option)
 
 def sorted_dict(d : dict) -> dict:
     """
@@ -793,12 +795,14 @@ def filter_unseen_df(
 
     Lastly, use the old DataFrame's columns for the new DataFrame, because order matters when checking equality.
     """
+    if old_df is None: return new_df
     old_cols = list(old_df.columns)
     try:
         new_df = new_df[old_cols]
     except Exception as e:
         warn(f"Was not able to cast old columns onto new DataFrame. Are both DataFrames the same shape? Error:\n{e}")
         return None
+    if len(old_df) == 0: return new_df
     return new_df[~new_df.fillna(custom_nan).apply(tuple, 1).isin(old_df.fillna(custom_nan).apply(tuple, 1))].reset_index(drop=True)
 
 def change_dict(d : dict, func : 'function'):

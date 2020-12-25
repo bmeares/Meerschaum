@@ -16,7 +16,7 @@ class APIConnector(Connector):
 
     from ._post import post
     from ._patch import patch
-    from ._get import get
+    from ._get import get, wget
     from ._actions import get_actions, do_action
     from ._pipes import (
         register_pipe,
@@ -33,6 +33,7 @@ class APIConnector(Connector):
         create_metadata,
     )
     from ._fetch import fetch
+    from ._plugins import register_plugin, install_plugin
 
     def __init__(
         self,

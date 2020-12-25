@@ -9,6 +9,7 @@ and if interactive, print the welcome message
 
 from meerschaum.config._version import __version__
 from meerschaum.config._read_yaml import config
+from meerschaum.config._edit import write_config
 
 from meerschaum.utils.debug import dprint
 import os
@@ -18,6 +19,7 @@ from meerschaum.config._preprocess import preprocess_config
 config = preprocess_config(config)
 
 ### if patch.yaml exists, apply patch to config
+from meerschaum.config._paths import PERMANENT_PATCH_PATH
 from meerschaum.config._patch import permanent_patch_config, patch_config, apply_patch_to_config
 if patch_config is not None:
     from meerschaum.config._paths import PATCH_PATH
@@ -25,12 +27,13 @@ if patch_config is not None:
     if PATCH_PATH.exists(): os.remove(PATCH_PATH)
 
 ### if permanent_patch.yaml exists, apply patch to config, write config, and delete patch
-if permanent_patch_config is not None:
+if permanent_patch_config is not None and PERMANENT_PATCH_PATH.exists():
     from meerschaum.config._edit import write_config
     dprint("Found permanent patch configuration. Updating main config and deleting permanent patch...")
     config = apply_patch_to_config(config, permanent_patch_config)
     write_config(config)
     from meerschaum.config._paths import PERMANENT_PATCH_PATH, DEFAULT_CONFIG_PATH
+    permanent_patch_config = None
     if PERMANENT_PATCH_PATH.exists(): os.remove(PERMANENT_PATCH_PATH)
     if DEFAULT_CONFIG_PATH.exists(): os.remove(DEFAULT_CONFIG_PATH)
 
