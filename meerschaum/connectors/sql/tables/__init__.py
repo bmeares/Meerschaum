@@ -44,6 +44,12 @@ def get_tables(
     global connector_tables
     if conn not in connector_tables:
         if debug: dprint(f"Creating tables for connector '{conn}'")
+
+        params_type = sqlalchemy.String
+        ### leverage PostgreSQL JSON data type
+        if conn.flavor in ('postgresql', 'timescaledb'):
+            params_type = sqlalchemy_dialects_postgresql.JSON
+
         _tables = {
             'metrics' : sqlalchemy.Table(
                 'metrics',
@@ -61,12 +67,15 @@ def get_tables(
                 sqlalchemy.Column('location_key', sqlalchemy.String, index=True),
                 sqlalchemy.Column('location_name', sqlalchemy.String)
             ),
+            'plugins' : sqlalchemy.Table(
+                'plugins',
+                conn.metadata,
+                sqlalchemy.Column('plugin_id', sqlalchemy.Integer, primary_key=True),
+                sqlalchemy.Column('plugin_name', sqlalchemy.String, index=True, nullable=False),
+                sqlalchemy.Column('version', sqlalchemy.String),
+                sqlalchemy.Column('attributes', params_type)
+            ),
         }
-
-        params_type = sqlalchemy.String
-        ### leveage PostgreSQL JSON data type
-        if conn.flavor in ('postgresql', 'timescaledb'):
-            params_type = sqlalchemy_dialects_postgresql.JSON
 
         _tables['pipes'] = sqlalchemy.Table(
             "pipes",

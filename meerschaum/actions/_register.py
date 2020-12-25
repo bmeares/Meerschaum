@@ -18,6 +18,7 @@ def register(
         'pipes'     : _register_pipes,
         'metrics'   : _register_metrics,
         'locations' : _register_locations,
+        'plugins'   : _register_plugins,
     }
     return choose_subaction(action, options, **kw)
 
@@ -69,6 +70,61 @@ def _register_metrics(**kw):
 
 def _register_locations(**kw):
     pass
+
+def _register_plugins(
+        action : list = [],
+        debug : bool = False,
+        mrsm_instance : str = None,
+        **kw
+    ) -> tuple:
+    from meerschaum.utils.debug import dprint
+    from meerschaum.utils.misc import parse_instance_keys
+    from meerschaum.config import get_config
+    from meerschaum.utils.warnings import warn, error
+    from meerschaum import Plugin
+    from meerschaum.connectors.api import APIConnector
+    from meerschaum import get_connector
+    from meerschaum.utils.formatting import print_tuple
+    if mrsm_instance is None: mrsm_instance = get_config('meerschaum', 'instance', patch=True)
+    instance_connector = parse_instance_keys(mrsm_instance)
+    default_connector = get_connector('api', 'mrsm')
+    if not isinstance(instance_connector, APIConnector):
+        instance_connector = default_connector
+
+    if len(action) == 0: return False, "No plugins to register"
+
+    plugins_to_register = dict()
+    from meerschaum.actions import _plugins_names
+    for p in action:
+        if p not in _plugins_names:
+            warn(f"Plugin '{p}' is not installed and cannot be registered. Ignoring...")
+        else:
+            plugins_to_register[p] = Plugin(p)
+
+    successes = dict()
+
+    for name, plugin in plugins_to_register.items():
+        print(f"Registering plugin '{plugin}' to Meerschaum API '{instance_connector}'..." + '\n')
+        success, msg = instance_connector.register_plugin(plugin, debug=debug)
+        print_tuple((success, msg + '\n'))
+        successes[name] = (success, msg)
+
+    total_success, total_fail = 0, 0
+    for p, tup in successes.items():
+        if tup[0]: total_success += 1
+        else: total_fail += 1
+
+    if debug:
+        from pprintpp import pprint
+        dprint("Return values for each plugin:")
+        pprint(successes)
+
+    msg = (
+        f"Finished processing {len(plugins_to_register)} plugins." + '\n' +
+        f"  {total_success} succeeded, {total_fail} failed."
+    )
+    print(msg)
+    return True, msg
 
 
 ### NOTE: This must be the final statement of the module.

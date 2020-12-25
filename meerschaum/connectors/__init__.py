@@ -9,9 +9,10 @@ Fetch connectors with get_connector
 ### store connectors partitioned by
 ### type, label for reuse
 connectors = {
-    'api'  : dict(),
-    'sql'  : dict(),
-    'mqtt' : dict(),
+    'api'    : dict(),
+    'sql'    : dict(),
+    'mqtt'   : dict(),
+    'plugin' : dict(),
 }
 ### fill this with classes only on execution
 ### for lazy loading
@@ -46,6 +47,10 @@ def get_connector(
         ### recursive call to get_connector
         return parse_instance_keys(default_instance_keys)
 
+    ### NOTE: the default instance connector may not be main.
+    ### Only fall back to 'main' if the type is provided by the label is omitted.
+    if label is None: label = 'main'
+
     global types, connectors
 
     if type not in connectors:
@@ -54,13 +59,19 @@ def get_connector(
 
     if len(types) == 0:
         from meerschaum.connectors.sql import SQLConnector
-        from meerschaum.connectors.api._APIConnector import APIConnector
-        from meerschaum.connectors.mqtt._MQTTConnector import MQTTConnector
+        from meerschaum.connectors.api import APIConnector
+        from meerschaum.connectors.mqtt import MQTTConnector
+        from meerschaum.connectors.plugin import PluginConnector
         types = {
             'api'  : APIConnector,
             'sql'  : SQLConnector,
             'mqtt' : MQTTConnector,
+            'plugin' : PluginConnector,
         }
+    
+    ### always refresh MQTT Connectors NOTE: test this!
+    if type == 'mqtt': refresh = True
+
     ### determine if we need to call the constructor
     if not refresh:
         ### see if any user-supplied arguments differ from the existing instance

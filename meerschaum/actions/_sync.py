@@ -37,7 +37,7 @@ def _pipes_lap(
     from meerschaum.utils.misc import enforce_gevent_monkey_patch, attempt_import
     import time
     pipes = get_pipes(
-        as_list=True,
+        as_list = True,
         method = 'registered',
         debug = debug,
         **kw
