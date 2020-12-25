@@ -106,7 +106,7 @@ def edit_pipe(
     import json
     q = f"""
     UPDATE pipes
-    SET parameters = '{json.dumps(pipe.parameters)}'
+    SET parameters = '{json.dumps(pipe.parameters).replace("'", "''")}'
     WHERE connector_keys = '{pipe.connector_keys}'
         AND metric_key = '{pipe.metric_key}'
         AND location_key """ + ("IS NULL" if pipe.location_key is None else f"= '{pipe.location_key}'")
@@ -115,7 +115,6 @@ def edit_pipe(
     if result is None:
         message = f"Failed to edit pipe '{pipe}'"
     return (result is not None), message
-
 
 def fetch_pipes_keys(
         self,

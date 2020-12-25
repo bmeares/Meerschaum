@@ -57,7 +57,7 @@ def sync(
         if df is None:
             if p.connector is None:
                 return False, "Cannot fetch without a connector"
-            df = p.fetch(debug=debug)
+            df = p.fetch(debug=debug, **kw)
 
         if debug: dprint("DataFrame to sync:\n" + f"{df}")
 
