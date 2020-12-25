@@ -24,7 +24,8 @@ def install(
         install [plugin] -I api:mycustominstance
     """
     from meerschaum.utils.debug import dprint
-    from meerschaum.utils.misc import parse_instance_keys
+    from meerschaum.utils.misc import parse_instance_keys, reload_package
+    import meerschaum.actions
     from meerschaum.utils.formatting import print_tuple
     from meerschaum import Plugin
     from meerschaum.connectors.api import APIConnector
@@ -37,7 +38,7 @@ def install(
     for name in action:
         success, msg = instance_connector.install_plugin(name, debug=debug)
         successes[name] = (success, msg)
-        print_tuple((success, msg + '\n'))
+        print_tuple((success, '\n' + msg))
 
-
+    reload_package(meerschaum.actions)
     return True, "Success"
