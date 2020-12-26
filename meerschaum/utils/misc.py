@@ -210,7 +210,7 @@ def reload_package(
     """
     Recursively load a package's subpackages, even if they were not previously loaded
     """
-    import os, types, importlib
+    import os, types, importlib, sys
     from meerschaum.utils.debug import dprint
     assert(hasattr(package, "__package__"))
     fn = package.__file__
@@ -222,8 +222,11 @@ def reload_package(
         import os, types, importlib
         from meerschaum.utils.debug import dprint
         ### forces import of lazily-imported modules
+        del sys.modules[module.__name__]
+        module = __import__(module.__name__)
         module = importlib.import_module(module.__name__)
-        importlib.reload(module)
+        _module = importlib.reload(module)
+        sys.modules[module.__name__] = _module
 
         for module_child in get_modules_from_package(module, recursive=True, lazy=lazy):
             if isinstance(module_child, types.ModuleType) and hasattr(module_child, '__name__'):
@@ -473,6 +476,13 @@ def run_python_package(
     from subprocess import call
     command = [sys.executable, '-m', package_name] + args
     return call(command)
+
+def pip_install(*packages : list, args : list = []):
+    """
+    Install pip packages
+    """
+    if 'install' not in args: args = ['install'] + args
+    return run_python_package('pip', args + list(packages)) == 0
 
 def parse_connector_keys(keys : str, **kw) -> 'meerschaum.connectors.Connector':
     """
@@ -776,6 +786,7 @@ def df_from_literal(
 def filter_unseen_df(
         old_df : 'pd.DataFrame',
         new_df : 'pd.DataFrame',
+        dtypes : dict = None,
         custom_nan : str = 'mrsm_NaN',
         debug : bool = False,
     ) -> 'pd.DataFrame':
@@ -802,7 +813,13 @@ def filter_unseen_df(
     except Exception as e:
         warn(f"Was not able to cast old columns onto new DataFrame. Are both DataFrames the same shape? Error:\n{e}")
         return None
+
+    ### assume the old_df knows what it's doing, even if it's technically wrong.
+    if dtypes is None: dtypes = dict(old_df.dtypes)
+    new_df = new_df.astype(dtypes)
+
     if len(old_df) == 0: return new_df
+
     return new_df[~new_df.fillna(custom_nan).apply(tuple, 1).isin(old_df.fillna(custom_nan).apply(tuple, 1))].reset_index(drop=True)
 
 def change_dict(d : dict, func : 'function'):
@@ -866,3 +883,9 @@ def enforce_gevent_monkey_patch():
     if not socket.socket is gevent_socket.socket:
         gevent_monkey.patch_all()
 
+def reload_plugins(debug : bool = False):
+    """
+    Convenience method for reloading the actions package (which loads plugins)
+    """
+    import meerschaum.actions
+    reload_package(meerschaum.actions, debug=debug)

@@ -48,18 +48,10 @@ class Plugin:
         if self.module is None: return None
         return self.module.__file__
 
-    @property
-    def instance_connector(self):
-        if '_instance_connector' not in self.__dict__:
-            from meerschaum.utils.misc import parse_instance_keys
-            conn = parse_instance_keys(self.instance_keys)
-            if conn:
-                self._instance_connector = conn
-            else:
-                return None
-        return self._instance_connector
-
     def make_tar(self, debug : bool = False) -> str:
+        """
+        Compress the plugin's source files into a .tar.gz archive and return the archive's file path.
+        """
         import tarfile, os
         from meerschaum.config._paths import PLUGINS_RESOURCES_PATH, PLUGINS_ARCHIVES_RESOURCES_PATH
         from meerschaum.utils.debug import dprint
@@ -127,6 +119,7 @@ class Plugin:
         from meerschaum.utils.warnings import warn, error
         from meerschaum.utils.debug import dprint
         import tarfile, os, pathlib, shutil
+        from meerschaum.utils.misc import reload_plugins
         old_cwd = os.getcwd()
         old_version = ''
         new_version = ''
@@ -177,6 +170,7 @@ class Plugin:
         from packaging import version as packaging_version
         is_new_version = (packaging_version.parse(old_version) <= packaging_version.parse(new_version))
         
+        success_msg = f"Successfully installed plugin '{self}'"
         success = None
         if is_new_version:
             for src_dir, dirs, files in os.walk(temp_dir):
@@ -200,7 +194,7 @@ class Plugin:
                         )
                         print(msg)
                         break
-            if success is None: success, msg = True, f"Successfully installed plugin '{self}'"
+            if success is None: success, msg = True, success_msg
         else:
             success, msg = False, (
                 f"Failed to install plugin '{self}': " +
@@ -211,7 +205,91 @@ class Plugin:
         tarf.close()
         os.chdir(old_cwd)
 
+        reload_plugins()
+
+        ### if we've already failed, return here
+        if not success: return success, msg
+
+        ### attempt to install dependencies
+        if not self.install_dependencies(debug=debug):
+            return False, f"Failed to install dependencies for plugin '{self}'"
+
+        ### handling success tuple, bool, or other (typically None)
+        setup_tuple = self.setup(debug=debug)
+        if isinstance(setup_tuple, tuple):
+            if not setup_tuple[0]:
+                success, msg = setup_tuple
+        elif isinstance(setup_tuple, bool):
+            if not setup_tuple:
+                success, msg = False, (
+                    f"Failed to run post-install setup for plugin '{self}'." + '\n' +
+                    f"Check `setup()` in '{self.__file__}' for more information " +
+                    f"(no error message provided)."
+                )
+            else:
+                success, msg = True, success_msg
+        elif setup_tuple is None:
+            success = True
+            msg = f"Post-install for plugin '{self}' returned None. Assuming plugin successfully installed."
+            warn(msg)
+        else:
+            success = False
+            msg = f"Post-install for plugin '{self}' returned unexpected value of type '{type(setup_tuple)}': {setup_tuple}"
+
         return success, msg
+
+    def setup(self, *args, debug : bool = False, **kw):
+        """
+        If exists, run the plugin's setup() function
+        """
+        from meerschaum.utils.debug import dprint
+        import inspect
+        _setup = None
+        for name, fp in inspect.getmembers(self.module):
+            if name == 'setup' and inspect.isfunction(fp):
+                _setup = fp
+                break
+
+        ### assume success if no setup() is found (not necessary)
+        if _setup is None: return True
+
+
+        sig = inspect.signature(_setup)
+        has_debug, has_kw = ('debug' in sig.parameters), False
+        for k, v in sig.parameters.items():
+            if '**' in str(v):
+                has_kw = True
+                break
+
+        _kw = {}
+        if has_kw: _kw.update(kw)
+        if has_debug: _kw['debug'] = debug
+
+        if debug: dprint(f"Running setup for plugin '{self}'")
+        try:
+            return _setup(*args, **_kw)
+        except Exception as e:
+            return False, str(e)
+
+    @property
+    def dependencies(self):
+        import inspect
+        required = []
+        for name, val in inspect.getmembers(self.module):
+            if name == 'required':
+                required = val
+        return required
+
+    def install_dependencies(self, debug : bool = False) -> bool:
+        """
+        If specified, install dependencies
+        """
+        from meerschaum.utils.misc import pip_install
+        from meerschaum.utils.debug import dprint
+        if self.dependencies:
+            if debug: dprint(f"Installing dependencies: {self.dependencies}")
+            return pip_install(*self.dependencies)
+        return True
 
     def __str__(self):
         return self.name
