@@ -78,13 +78,16 @@ def _register_plugins(
         **kw
     ) -> tuple:
     from meerschaum.utils.debug import dprint
-    from meerschaum.utils.misc import parse_instance_keys
+    from meerschaum.utils.misc import parse_instance_keys, reload_plugins
     from meerschaum.config import get_config
     from meerschaum.utils.warnings import warn, error
     from meerschaum import Plugin
     from meerschaum.connectors.api import APIConnector
     from meerschaum import get_connector
     from meerschaum.utils.formatting import print_tuple
+
+    reload_plugins(debug=debug)
+
     if mrsm_instance is None: mrsm_instance = get_config('meerschaum', 'instance', patch=True)
     instance_connector = parse_instance_keys(mrsm_instance)
     default_connector = get_connector('api', 'mrsm')
@@ -124,6 +127,7 @@ def _register_plugins(
         f"  {total_success} succeeded, {total_fail} failed."
     )
     print(msg)
+    reload_plugins(debug=debug)
     return True, msg
 
 

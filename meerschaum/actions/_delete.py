@@ -117,12 +117,19 @@ def _delete_plugins(
 
     ### delete the folders or files
     for name, m in modules_to_delete.items():
+        ### __init__.py might be missing
+        if m.__file__ is None:
+            try:
+                shutil.rmtree(os.path.join(PLUGINS_RESOURCES_PATH, name))
+            except Exception as e:
+                return False, str(e)
+            continue
         try:
             if '__init__.py' in m.__file__:
                 shutil.rmtree(m.__file__.replace('__init__.py', ''))
             else:
                 os.remove(m.__file__)
-        except:
+        except Exception as e:
             return False, f"Could not remove plugin '{name}'"
 
     reload_package(meerschaum.actions)
