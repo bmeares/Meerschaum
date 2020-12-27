@@ -193,11 +193,12 @@ def yes_no(
     
     Returns bool (answer)
     """
+    from prompt_toolkit import prompt
     ending = f" {wrappers[0]}" + "/".join(
                 [ o.upper() if o.lower() == default.lower() else o.lower() for o in options ]
                 ) + f"{wrappers[1]} "
     print(question, end=ending, flush=True)
-    answer = input()
+    answer = prompt()
     if answer == "": answer = default
     return answer.lower() == options[0].lower()
 
@@ -556,19 +557,22 @@ def print_options(
     """
     Show available options from an iterable
     """
+    _options = []
+    for o in options: _options.append(str(o))
+
     if not nopretty:
         header = f"Available {name}:"
-        print("\n" + header)
+        print(header)
         ### calculate underline length
         underline_len = len(header)
-        for o in options:
+        for o in _options:
             if len(str(o)) + 4 > underline_len:
-                underline_len = len(str(a)) + 4
+                underline_len = len(str(o)) + 4
         ### print underline
         for i in range(underline_len): print('-', end="")
         print("\n", end="")
     ### print actions
-    for option in sorted(options):
+    for option in sorted(_options):
         if not nopretty: print("  - ", end="")
         print(option)
 

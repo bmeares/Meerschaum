@@ -33,6 +33,9 @@ required = [
     'more_termcolor',
     'aiofiles',
     'cmd2',
+    'python-multipart',
+    'packaging',
+    'prompt_toolkit',
     #  'gevent',
 ]
 iot = [
@@ -65,7 +68,6 @@ api = sql + [
     'fastapi',
     #  'graphene',
     'jinja2',
-    'python-multipart',
 ]
 stack = [
     'docker',

@@ -35,7 +35,7 @@ except:
     colored = colored_fallback
 
 
-def print_tuple(tup : tuple):
+def print_tuple(tup : tuple, skip_common : bool = True, common_only : bool = False):
     """
     Print Meerschaum return tuple
     """
@@ -50,5 +50,17 @@ def print_tuple(tup : tuple):
     if ANSI:
         msg = colored(msg, *status_config['ansi']['color'])
 
-    print(msg)
+    omit_messages = { 'Success', 'Succeeded', 'success', '', None }
+
+    do_print = True
+
+    if common_only:
+        skip_common = False
+        do_print = tup[1] in omit_messages
+
+    if skip_common:
+        do_print = tup[1] not in omit_messages
+
+    if do_print:
+        print(msg)
 

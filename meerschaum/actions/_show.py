@@ -32,6 +32,7 @@ def show(
         'arguments'  : _show_arguments,
         'data'       : _show_data,
         'plugins'    : _show_plugins,
+        'help'       : _show_help,
     }
     return choose_subaction(action, show_options, **kw)
 
@@ -42,6 +43,14 @@ def _show_actions(**kw) -> tuple:
     from meerschaum.actions import actions
     from meerschaum.utils.misc import print_options
     print_options(options=actions, name='actions', **kw)
+    return True, "Success"
+
+def _show_help(**kw) -> tuple:
+    """
+    Print the --help menu from argparse
+    """
+    from meerschaum.actions.arguments._parser import parser
+    print(parser.format_help())
     return True, "Success"
 
 def _show_config(
@@ -97,12 +106,19 @@ def _show_pipes(
 
     return (True, "Success")
 
-def _show_version(**kw) -> tuple:
+def _show_version(nopretty : bool = False, **kw) -> tuple:
     """
     Show the Meerschaum doc string
     """
-    from meerschaum import __doc__ as doc
-    print(doc)
+    from meerschaum import __doc__ as doc, __version__ as version
+    from meerschaum.utils.warnings import info
+    _print = print
+    if nopretty:
+        msg = version
+    else:
+        msg = doc
+        _print = info
+    _print(msg)
     return (True, "Success")
 
 def _show_connectors(
@@ -140,9 +156,10 @@ def _show_data(
         debug : bool = False,
         **kw
     ):
+    import sys
     from meerschaum import get_pipes
     from meerschaum.utils.misc import attempt_import
-    from meerschaum.utils.warnings import warn
+    from meerschaum.utils.warnings import warn, info
     pipes = get_pipes(as_list=True, debug=debug, **kw)
     backtrack_minutes = 1440
     for p in pipes:
@@ -153,8 +170,8 @@ def _show_data(
         if df is None:
             warn(f"Failed to fetch data for pipe '{p}'.")
             continue
-        print(f"Last {backtrack_minutes} minutes of data for Pipe '{p}'")
-        print(df)
+        info(f"Last {backtrack_minutes} minutes of data for Pipe '{p}'")
+        print(df, file=sys.stderr)
         if gui:
             pandasgui = attempt_import('pandasgui')
             try:

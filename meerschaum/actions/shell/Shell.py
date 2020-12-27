@@ -63,7 +63,10 @@ class Shell(cmd.Cmd):
             except:
                 pass
 
+        ### NOTE: custom actions must be added to the self._actions dictionary
         self._actions = actions
+        self._actions['instance'] = self.do_instance
+        self._actions['debug'] = self.do_instance
         self.intro = get_config('system', 'shell', CHARSET, 'intro', patch=patch) + '\n' + __doc__
         self.prompt = get_config('system', 'shell', CHARSET, 'prompt', patch=patch)
         self.debug = False
@@ -188,13 +191,13 @@ class Shell(cmd.Cmd):
         
         ### execute the meerschaum action
         ### and print the response message in case of failure
+        from meerschaum.utils.formatting import print_tuple
         response = func(**args)
         if isinstance(response, tuple):
-            output = "\n"
-            if not response[0]: output += "Error message: " + response[1]
-            elif self.debug: output += response[1]
-            if len(output) > 1:
-                print(output)
+            if not response[0] or self.debug:
+                print()
+                print_tuple(response, skip_common=self.debug)
+                print()
         return ""
 
     def post_cmd(stop : bool = False, line : str = ""):
@@ -214,6 +217,7 @@ class Shell(cmd.Cmd):
         Command: `debug {on/true | off/false}`
         Ommitting on / off will toggle the existing value.
         """
+        from meerschaum.utils.warnings import info
         on_commands = {'on', 'true'}
         off_commands = {'off', 'false'}
         try:
@@ -224,9 +228,9 @@ class Shell(cmd.Cmd):
             self.debug = not self.debug
         elif state.lower() in on_commands: self.debug = True
         elif state.lower() in off_commands: self.debug = False
-        else: print(f"Unknown state '{state}'. Ignoring...")
+        else: info(f"Unknown state '{state}'. Ignoring...")
 
-        print(f"Debug mode is {'on' if self.debug else 'off'}.")
+        info(f"Debug mode is {'on' if self.debug else 'off'}.")
 
     def do_instance(self, action : list = [''], debug : bool = False, **kw):
         """
@@ -255,9 +259,12 @@ class Shell(cmd.Cmd):
         from meerschaum import get_connector
         from meerschaum.config import get_config
         from meerschaum.utils.misc import parse_instance_keys
-        from meerschaum.utils.warnings import warn
+        from meerschaum.utils.warnings import warn, info
 
-        instance_keys = action[0]
+        try:
+            instance_keys = action[0]
+        except:
+            instance_keys = ''
         if instance_keys == '': instance_keys = get_config('meerschaum', 'instance', patch=True)
 
         conn = parse_instance_keys(instance_keys, debug=debug)
@@ -266,7 +273,7 @@ class Shell(cmd.Cmd):
 
         self.instance_keys = str(conn)
 
-        print(f"Default instance for the current shell: {conn}")
+        info(f"Default instance for the current shell: {conn}")
         return True, "Success"
 
     def do_exit(self, params):

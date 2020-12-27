@@ -29,8 +29,10 @@ def api(
     If command is `start`, launch the Meerschaum WebAPI. If command is an api connector label,
         connect to that label. Otherwise connect to `main` api connector.
     """
+    from meerschaum.utils.warnings import warn, info
+    from meerschaum.utils.formatting import print_tuple
     if action[0] == '':
-        print(api.__doc__)
+        info(api.__doc__)
         return False, "Please provide a command to excecute (see above)"
 
     boot_keywords = {'start', 'boot', 'init'}
@@ -39,7 +41,6 @@ def api(
 
     from meerschaum.config import config as cf, get_config
     from meerschaum.connectors import get_connector
-    from meerschaum.utils.warnings import warn
     import requests
     if debug: from pprintpp import pprint
     api_configs = get_config('meerschaum', 'connectors', 'api', patch=True)
@@ -65,8 +66,8 @@ def api(
     elif mrsm_instance is not None: kw['mrsm_instance'] = str(mrsm_instance)
 
     success, message = api_conn.do_action(**kw)
+    print_tuple((success, message), common_only=True)
     msg = f"Action " + ('succeeded' if success else 'failed') + " with message:\n" + str(message)
-    print(msg)
     return success, message
 
 def _api_start(
