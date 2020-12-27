@@ -19,6 +19,7 @@ def register(
         'metrics'   : _register_metrics,
         'locations' : _register_locations,
         'plugins'   : _register_plugins,
+        'users'     : _register_users,
     }
     return choose_subaction(action, options, **kw)
 
@@ -94,7 +95,7 @@ def _register_plugins(
     if not isinstance(instance_connector, APIConnector):
         instance_connector = default_connector
 
-    if len(action) == 0: return False, "No plugins to register"
+    if len(action) == 0 or action == ['']: return False, "No plugins to register"
 
     plugins_to_register = dict()
     from meerschaum.actions import _plugins_names
@@ -123,13 +124,65 @@ def _register_plugins(
         pprint(successes)
 
     msg = (
-        f"Finished processing {len(plugins_to_register)} plugins." + '\n' +
+        f"Finished registering {len(plugins_to_register)} plugins." + '\n' +
         f"  {total_success} succeeded, {total_fail} failed."
     )
     info(msg)
     reload_plugins(debug=debug)
     return True, msg
 
+def _register_users(
+        action : list = [],
+        mrsm_instance : str = None,
+        debug : bool = False,
+        **kw
+    ) -> tuple:
+    from meerschaum.config import get_config
+    from meerschaum import get_connector
+    from meerschaum.utils.misc import parse_instance_keys
+    from meerschaum.utils.debug import dprint
+    from meerschaum.utils.warnings import warn, error, info
+    from meerschaum import User
+    from meerschaum.connectors.api import APIConnector
+    from meerschaum.utils.formatting import print_tuple
+    from prompt_toolkit import prompt
+    if mrsm_instance is None: mrsm_instance = get_config('meerschaum', 'instance', patch=True)
+    instance_connector = parse_instance_keys(mrsm_instance)
+
+    if len(action) == 0 or action == ['']: return False, "No users to register."
+
+    nonregistered_users = []
+    for username in action:
+        user = User(username=username, password='')
+        user_id = instance_connector.get_user_id(user)
+        if user_id is not None:
+            info(f"User '{user}' already exists. Skipping...")
+            continue
+        nonregistered_users.append(user)
+
+    success = dict()
+    for _user in nonregistered_users:
+        username = _user.username
+        password = prompt(f"Password for user '{username}': ")
+        email = prompt(f"Email for user '{username}' (empty to omit): ")
+        if len(email) == 0: email = None
+        user = User(username, password, email=email)
+        info(f"Registering user '{user}' on Meerschaum instance '{instance_connector}'...")
+        result_tuple = instance_connector.register_user(user, debug=debug)
+        print_tuple(result_tuple)
+        success[username] = result_tuple[0]
+
+    succeeded, failed = 0, 0
+    for username, r in success.items():
+        if r: succeeded += 1
+        else: failed += 1
+
+    msg = (
+        f"Finished registering {len(action)} users." + '\n' +
+        f"  {succeeded} succeeded, {failed} failed."
+    )
+    info(msg)
+    return True, msg
 
 ### NOTE: This must be the final statement of the module.
 ###       Any subactions added below these lines will not

@@ -4,7 +4,7 @@ DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" >/dev/null 2>&1 && pwd )"
 . "$DIR"/config.sh
 
 ### delete leftover files before building
-# scripts/clean.sh
+scripts/clean.sh
 
 ### experimental features must be enabled
 docker build --squash -t "$image" . || exit 1

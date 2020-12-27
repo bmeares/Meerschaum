@@ -97,3 +97,18 @@ def get_plugin_version(
     """
     return self.value(query, debug=debug)
 
+def get_plugins(
+        self,
+        debug : bool = False,
+        **kw
+    ) -> list:
+    ### ensure plugins table exists
+    from meerschaum.connectors.sql.tables import get_tables
+    tables = get_tables(mrsm_instance=self, debug=debug)
+
+    q = f"""
+    SELECT plugin_name
+    FROM plugins
+    """
+    return list(self.read(q, debug=debug)['plugin_name'])
+

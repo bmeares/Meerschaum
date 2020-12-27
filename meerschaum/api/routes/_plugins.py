@@ -59,3 +59,11 @@ def get_plugin(
     if plugin.archive_path.exists():
         return FileResponse(plugin.archive_path, filename=f'{plugin.name}.tar.gz')
     return False, f"Archive for plugin '{plugin}' could not be found"
+
+@fast_api.get(plugins_endpoint)
+def get_plugins() -> list:
+    """
+    Return a list of registered plugins
+    """
+    return get_connector().get_plugins()
+    
