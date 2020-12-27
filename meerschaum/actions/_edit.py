@@ -16,10 +16,11 @@ def edit(
     """
     from meerschaum.utils.misc import choose_subaction
     options = {
-            'config'  : _edit_config,
-            'pipes'    : _edit_pipes,
-            'stack'   : _edit_stack,
-            'grafana' : _edit_grafana,
+        'config'  : _edit_config,
+        'pipes'   : _edit_pipes,
+        'stack'   : _edit_stack,
+        'grafana' : _edit_grafana,
+        'users'   : _edit_users,
     }
     return choose_subaction(action, options, **kw)
 
@@ -60,6 +61,49 @@ def _edit_pipes(
         if text != 'pass':
             p.edit(debug=debug, **kw)
     return (True, "Success")
+
+def _edit_users(
+        action : list = [''],
+        mrsm_instance : str = None,
+        debug : bool = False,
+        **kw
+    ) -> tuple:
+    from meerschaum.config import get_config
+    from meerschaum import get_connector
+    from meerschaum.utils.misc import parse_instance_keys
+    from meerschaum.utils.debug import dprint
+    from meerschaum.utils.warnings import warn, error, info
+    from meerschaum import User
+    from meerschaum.connectors.api import APIConnector
+    from meerschaum.utils.formatting import print_tuple
+    from prompt_toolkit import prompt
+    if mrsm_instance is None: mrsm_instance = get_config('meerschaum', 'instance', patch=True)
+    instance_connector = parse_instance_keys(mrsm_instance)
+
+    if len(action) == 0 or action == ['']: return False, "No users to edit."
+
+    success = dict()
+    for username in action:
+        password = prompt(f"Password for user '{username}': ")
+        email = prompt(f"Email for user '{username}' (empty to omit): ")
+        if len(email) == 0: email = None
+        user = User(username, password, email=email)
+        info(f"Editing user '{user}' on Meerschaum instance '{instance_connector}'...")
+        result_tuple = instance_connector.edit_user(user, debug=debug)
+        print_tuple(result_tuple)
+        success[username] = result_tuple[0]
+
+    succeeded, failed = 0, 0
+    for username, r in success.items():
+        if r: succeeded += 1
+        else: failed += 1
+
+    msg = (
+        f"Finished editing {len(action)} users." + '\n' +
+        f"  {succeeded} succeeded, {failed} failed."
+    )
+    info(msg)
+    return True, msg
 
 ### NOTE: This must be the final statement of the module.
 ###       Any subactions added below these lines will not

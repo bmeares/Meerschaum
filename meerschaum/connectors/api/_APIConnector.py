@@ -33,7 +33,8 @@ class APIConnector(Connector):
         create_metadata,
     )
     from ._fetch import fetch
-    from ._plugins import register_plugin, install_plugin
+    from ._plugins import register_plugin, install_plugin, get_plugins
+    from ._users import get_users, login, edit_user
 
     def __init__(
         self,
@@ -52,10 +53,12 @@ class APIConnector(Connector):
             self.host + ':' +
             str(self.port)
         )
-        import requests.auth
+        import requests, requests.auth
+        self.auth = None
         if 'username' in self.__dict__ and 'password' in self.__dict__:
             self.auth = requests.auth.HTTPBasicAuth(
                 self.username,
                 self.password
             )
+        self.session = requests.Session()
 

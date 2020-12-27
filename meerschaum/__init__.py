@@ -19,6 +19,7 @@ utils = lazy_import('meerschaum.utils')
 config = lazy_import('meerschaum.config')
 Pipe = lazy_import('meerschaum.Pipe').Pipe
 Plugin = lazy_import('meerschaum.Plugin').Plugin
+User = lazy_import('meerschaum.User').User
 api = lazy_import('meerschaum.api')
 get_pipes = utils._get_pipes.get_pipes
 get_connector = connectors.get_connector

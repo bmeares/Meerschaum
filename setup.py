@@ -68,6 +68,7 @@ api = sql + [
     'fastapi',
     #  'graphene',
     'jinja2',
+    'passlib',
 ]
 stack = [
     'docker',

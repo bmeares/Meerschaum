@@ -14,6 +14,7 @@ bulk_flavors = {'postgresql', 'timescaledb'}
 def read(
         self,
         query_or_table : str,
+        params : dict = {},
         chunksize : int = -1,
         debug : bool = False,
         **kw
@@ -45,6 +46,7 @@ def read(
         chunk_generator = self.pd.read_sql(
             formatted_query,
             self.engine,
+            params = params,
             chunksize = chunksize
         )
     except Exception as e:
@@ -78,24 +80,38 @@ def read(
 def value(
         self,
         query : str,
+        *args,
         **kw
     ):
     """
     Return a single value from a SQL query
-    (index a DataFrame a [0, 0])
+    (index a DataFrame at [0, 0])
     """
     try:
-        return self.read(query, **kw).iloc[0, 0]
+        return self.read(query, *args, **kw).iloc[0, 0]
     except:
         return None
+
+def execute(
+        self,
+        *args,
+        **kw
+    ) -> 'resultProxy or None':
+    return self.exec(*args, **kw)
 
 def exec(
         self,
         query : str,
-        debug : bool = False
+        *args,
+        debug : bool = False,
+        **kw
     ) -> 'resultProxy or None':
     """
-    Execute SQL code and return success status. e.g. calling stored procedures
+    Execute SQL code and return success status. e.g. calling stored procedures.
+
+    Wrapper for self.engine.connect() and connection.execute().
+
+    If inserting data, please use bind variables to avoid SQL injection!
     """
     from meerschaum.utils.misc import attempt_import
     sqlparse = attempt_import("sqlparse")
@@ -105,14 +121,14 @@ def exec(
     try:
         with self.engine.connect() as connection:
             result = connection.execute(
-                sqlalchemy.text(query).execution_options(
-                    autocommit = True
-                )
+                query,
+                *args,
+                **kw
             )
     except Exception as e:
-        #  import inspect, pprintpp
+        import inspect, pprintpp
 
-        #  print(f"Failed to execute query:\n\n{query}\n\n")
+        print(f"Failed to execute query:\n\n{query}\n\n")
         if debug: warn(str(e))
         #  print(f"Stack:")
         #  pprintpp.pprint(inspect.stack())

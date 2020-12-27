@@ -7,4 +7,4 @@ cd "$DIR"/../
 python setup.py clean --all
 rm -rf build dist meerschaum.egg-info
 ### delete configuration from development environment
-python -m meerschaum delete config --force
+# python -m meerschaum delete config --force

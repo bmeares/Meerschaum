@@ -20,7 +20,7 @@ def get(
         from meerschaum.utils.warnings import warn
         warn('Ignoring auth, using existing configuration')
         del kw['auth']
-    return requests.get(self.url + r_url, auth=self.auth, **kw)
+    return self.session.get(self.url + r_url, auth=self.auth, **kw)
 
 def wget(
         self,

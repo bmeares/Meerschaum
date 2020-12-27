@@ -67,11 +67,21 @@ def get_tables(
                 sqlalchemy.Column('location_key', sqlalchemy.String, index=True),
                 sqlalchemy.Column('location_name', sqlalchemy.String)
             ),
+            'users' : sqlalchemy.Table(
+                'users',
+                conn.metadata,
+                sqlalchemy.Column('user_id', sqlalchemy.Integer, primary_key=True),
+                sqlalchemy.Column('username', sqlalchemy.String, index=True, nullable=False),
+                sqlalchemy.Column('password_hash', sqlalchemy.String),
+                sqlalchemy.Column('email', sqlalchemy.String),
+                sqlalchemy.Column('attributes', params_type)
+            ),
             'plugins' : sqlalchemy.Table(
                 'plugins',
                 conn.metadata,
                 sqlalchemy.Column('plugin_id', sqlalchemy.Integer, primary_key=True),
                 sqlalchemy.Column('plugin_name', sqlalchemy.String, index=True, nullable=False),
+                sqlalchemy.Column('user_id', sqlalchemy.Integer, sqlalchemy.schema.ForeignKey("users.user_id"), nullable=False),
                 sqlalchemy.Column('version', sqlalchemy.String),
                 sqlalchemy.Column('attributes', params_type)
             ),

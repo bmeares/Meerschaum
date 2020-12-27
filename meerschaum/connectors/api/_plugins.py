@@ -66,3 +66,13 @@ def install_plugin(
     plugin = Plugin(name, archive_path=archive_path)
     return plugin.install(debug=debug)
 
+def get_plugins(
+        self,
+        debug : bool = False
+    ) -> list:
+    """
+    Return a list of registered plugins
+    """
+    import json
+    return json.loads(self.get('/mrsm/plugins').text)
+

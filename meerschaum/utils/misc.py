@@ -197,8 +197,7 @@ def yes_no(
     ending = f" {wrappers[0]}" + "/".join(
                 [ o.upper() if o.lower() == default.lower() else o.lower() for o in options ]
                 ) + f"{wrappers[1]} "
-    print(question, end=ending, flush=True)
-    answer = prompt()
+    answer = prompt(question + ending)
     if answer == "": answer = default
     return answer.lower() == options[0].lower()
 
@@ -552,6 +551,7 @@ def print_options(
         options : dict = {},
         nopretty : bool = False,
         name : str = 'options',
+        header : str = None,
         **kw
     ) -> None:
     """
@@ -561,10 +561,11 @@ def print_options(
     for o in options: _options.append(str(o))
 
     if not nopretty:
-        header = f"Available {name}:"
-        print(header)
+        if header is None: _header = f"Available {name}:"
+        else: _header = header
+        print(_header)
         ### calculate underline length
-        underline_len = len(header)
+        underline_len = len(_header)
         for o in _options:
             if len(str(o)) + 4 > underline_len:
                 underline_len = len(str(o)) + 4

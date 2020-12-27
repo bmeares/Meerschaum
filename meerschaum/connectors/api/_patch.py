@@ -6,8 +6,6 @@
 Wrappers for requests.post
 """
 
-import requests
-
 def patch(
         self,
         r_url : str,
@@ -19,4 +17,4 @@ def patch(
     if 'auth' in kw:
         print('Ignoring auth, using existing configuration')
         del kw['auth']
-    return requests.patch(self.url + r_url, auth=self.auth, **kw)
+    return self.session.patch(self.url + r_url, auth=self.auth, **kw)

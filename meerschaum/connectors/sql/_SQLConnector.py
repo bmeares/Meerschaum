@@ -14,7 +14,7 @@ class SQLConnector(Connector):
     Create and utilize sqlalchemy engines
     """
     from ._create_engine import flavor_configs, create_engine
-    from ._sql import read, value, exec, to_sql
+    from ._sql import read, value, exec, execute, to_sql
     from ._fetch import fetch
     from ._cli import cli
     from ._pipes import (
@@ -31,7 +31,8 @@ class SQLConnector(Connector):
         get_sync_time,
         pipe_exists,
     )
-    from ._plugins import register_plugin, get_plugin_id, get_plugin_version
+    from ._plugins import register_plugin, get_plugin_id, get_plugin_version, get_plugins
+    from ._users import register_user, get_user_id, get_users, edit_user, delete_user
     
     def __init__(
             self,

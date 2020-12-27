@@ -33,6 +33,7 @@ def show(
         'data'       : _show_data,
         'plugins'    : _show_plugins,
         'help'       : _show_help,
+        'users'      : _show_users,
     }
     return choose_subaction(action, show_options, **kw)
 
@@ -182,12 +183,46 @@ def _show_data(
 
 def _show_plugins(
         action : list = [''],
+        mrsm_instance : str = None,
         debug : bool = False,
         **kw
     ):
     from meerschaum.actions import _plugins_names
     from meerschaum.utils.misc import print_options
-    print_options(_plugins_names, name='plugins', **kw)
+    from meerschaum.utils.misc import parse_instance_keys
+    from meerschaum.utils.warnings import info
+    if mrsm_instance is None: mrsm_instance = 'api:mrsm'
+    instance_connector = parse_instance_keys(mrsm_instance)
+
+    if action == [''] or len(action) == 0:
+        _to_print = _plugins_names
+        header = "Installed plugins:"
+        info("To see all installable plugins, run `show plugins all`")
+    elif action[0] in ('all', 'remote'):
+        _to_print = instance_connector.get_plugins(debug=debug)
+        header = f"Available plugins from '{instance_connector}':"
+
+    print()
+    print_options(_to_print, header=header, debug=debug, **kw)
+    print()
+
+    return True, "Success"
+
+def _show_users(
+        mrsm_instance : str = None,
+        debug : bool = False,
+        **kw
+    ) -> tuple:
+    from meerschaum.config import get_config
+    from meerschaum.utils.misc import parse_instance_keys, print_options
+    if mrsm_instance is None: mrsm_instance = get_config('meerschaum', 'instance', patch=True)
+    instance_connector = parse_instance_keys(mrsm_instance)
+    #  default_connector = get_connector('api', 'main')
+    #  if not isinstance(instance_connector, APIConnector):
+        #  instance_connector = default_connector
+    users_list = instance_connector.get_users(debug=debug)
+    print_options(users_list, header='Registered users')
+
     return True, "Success"
 
 

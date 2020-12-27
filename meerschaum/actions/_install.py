@@ -32,7 +32,7 @@ def install(
     if mrsm_instance is None or str(mrsm_instance).split(':')[0] != 'api': mrsm_instance = 'api:mrsm'
     instance_connector = parse_instance_keys(mrsm_instance)
 
-    if action == ['']: return False, "No plugins to install"
+    if action == [''] or len(action) == 0: return False, "No plugins to install"
 
     successes = dict()
     for name in action:

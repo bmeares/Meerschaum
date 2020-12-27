@@ -19,6 +19,7 @@ def delete(
         'config'  : _delete_config, 
         'pipes'   : _delete_pipes,
         'plugins' : _delete_plugins,
+        'users'   : _delete_users,
     }
     return choose_subaction(action, options, **kw)
 
@@ -134,6 +135,68 @@ def _delete_plugins(
 
     reload_package(meerschaum.actions)
     return True, "Success"
+
+def _delete_users(
+        action : list = [''],
+        mrsm_instance : str = None,
+        yes : bool = False,
+        force : bool = False,
+        debug : bool = False,
+        **kw
+    ) -> tuple:
+    from meerschaum.config import get_config
+    from meerschaum import get_connector
+    from meerschaum.utils.misc import parse_instance_keys, yes_no
+    from meerschaum.utils.debug import dprint
+    from meerschaum.utils.warnings import warn, error, info
+    from meerschaum import User
+    from meerschaum.connectors.api import APIConnector
+    from meerschaum.utils.formatting import print_tuple
+    from prompt_toolkit import prompt
+    if mrsm_instance is None: mrsm_instance = get_config('meerschaum', 'instance', patch=True)
+    instance_connector = parse_instance_keys(mrsm_instance)
+
+
+    registered_users = []
+    for username in action:
+        user = User(username=username, password='')
+        user_id = instance_connector.get_user_id(user)
+        if user_id is None:
+            info(f"User '{user}' does not exist. Skipping...")
+            continue
+        user.user_id = user_id
+        registered_users.append(user)
+
+    if len(registered_users) == 0: return False, "No users to delete."
+
+    ### verify that the user absolutely wants to do this (skips on --force)
+    question = f"Are you sure you want to delete these users from Meerschaum instance '{instance_connector}'?\n"
+    for username in registered_users:
+        question += f" - {username}" + "\n"
+    answer = force
+    if not yes and not force:
+        answer = yes_no(question, default='n')
+    if not answer:
+        return False, "No users deleted."
+
+    success = dict()
+    for user in registered_users:
+        info(f"Deleting user '{user}' on Meerschaum instance '{instance_connector}'...")
+        result_tuple = instance_connector.delete_user(user, debug=debug)
+        print_tuple(result_tuple)
+        success[username] = result_tuple[0]
+
+    succeeded, failed = 0, 0
+    for username, r in success.items():
+        if r: succeeded += 1
+        else: failed += 1
+
+    msg = (
+        f"Finished deleting {len(action)} users." + '\n' +
+        f"  {succeeded} succeeded, {failed} failed."
+    )
+    info(msg)
+    return True, msg
 
 ### NOTE: This must be the final statement of the module.
 ###       Any subactions added below these lines will not
