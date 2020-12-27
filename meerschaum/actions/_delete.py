@@ -90,14 +90,14 @@ def _delete_plugins(
     import meerschaum.actions
     from meerschaum.actions import _plugins_names, plugins_modules
     from meerschaum.config._paths import PLUGINS_RESOURCES_PATH
-    from meerschaum.utils.warnings import warn, error
+    from meerschaum.utils.warnings import warn, error, info
     from meerschaum.utils.misc import yes_no, reload_package
     import os, shutil
 
     ### parse the provided plugins and link them to their modules
     modules_to_delete = dict()
     for plugin in action:
-        if plugin not in _plugins_names: warn(f"Plugin '{plugin}' is not installed. Ignoring...")
+        if plugin not in _plugins_names: info(f"Plugin '{plugin}' is not installed. Ignoring...")
         else:
             for m in plugins_modules:
                 if plugin == m.__name__.split('.')[-1]:

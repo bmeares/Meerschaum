@@ -41,12 +41,22 @@ def _edit_pipes(
         **kw
     ):
     from meerschaum import get_pipes
+    from prompt_toolkit import prompt
+    from meerschaum.actions.shell.Shell import input_with_sigint
+    from meerschaum.utils.misc import print_options
+    _input = input_with_sigint(input)
+
     pipes = get_pipes(debug=debug, as_list=True, **kw)
+    print_options(pipes)
+
+    try:
+        prompt("Press [Enter] to edit the following pipes or [CTRL-C] to cancel: ")
+    except KeyboardInterrupt:
+        return False, f"No pipes changed."
+
     for p in pipes:
-        try:
-            text = input(f"Press [Enter] to edit '{p}' or [CTRL-C] to quit: ")
-        except KeyboardInterrupt:
-            return False, "User pressed CTRL+C"
+        text = _input(f"Press [Enter] to edit '{p}' or [CTRL-C] to skip: ")
+        ### 
         if text != 'pass':
             p.edit(debug=debug, **kw)
     return (True, "Success")

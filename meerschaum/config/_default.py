@@ -229,6 +229,20 @@ default_system_config = {
             ],
         },
     },
+    'info'                 : {
+        'unicode'          : {
+            'icon'         : '💬',
+        },
+        'ascii'            : {
+            'icon'         : 'INFO',
+        },
+        'ansi'             : {
+            'color'        : [
+                'bold',
+                'bright magenta',
+            ],
+        },
+    },
     'debug'                : {
         'unicode'          : {
             'leader'       : '🐞',

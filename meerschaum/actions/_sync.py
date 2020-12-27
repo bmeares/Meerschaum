@@ -116,8 +116,9 @@ def _sync_pipes(
     """
     Fetch new data for Pipes
     """
+    from meerschaum.utils.warnings import info
     from meerschaum.utils.debug import dprint
-    import time
+    import time, sys
     run = True
     msg = ""
     cooldown = 2 * (min_seconds + 1)
@@ -139,13 +140,15 @@ def _sync_pipes(
             continue
         cooldown = 2 * (min_seconds + 1)
         lap_end = time.time()
+        print(file=sys.stderr)
         msg = (
-            "\n" + f"It took {round(lap_end - lap_begin, 2)} seconds to sync {len(success) + len(fail)} pipes" + "\n" + 
+            f"It took {round(lap_end - lap_begin, 2)} seconds to sync {len(success) + len(fail)} pipes" + "\n" + 
             f"  ({len(success)} succeeded, {len(fail)} failed)."
         )
-        print(msg)
+        info(msg)
         if min_seconds > 0 and loop:
-            print("\n" + f"Sleeping for {min_seconds} second" + ("s" if abs(min_seconds) != 1 else ""))
+            print(file=sys.stderr)
+            info(f"Sleeping for {min_seconds} second" + ("s" if abs(min_seconds) != 1 else ""))
             time.sleep(min_seconds)
         run = loop
     return True, msg

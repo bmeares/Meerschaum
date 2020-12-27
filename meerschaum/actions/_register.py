@@ -36,7 +36,7 @@ def _register_pipes(
     """
     from meerschaum import get_pipes, get_connector
     from meerschaum.utils.debug import dprint
-    from meerschaum.utils.warnings import warn
+    from meerschaum.utils.warnings import warn, info
 
     pipes = get_pipes(
         connector_keys = connector_keys,
@@ -80,7 +80,7 @@ def _register_plugins(
     from meerschaum.utils.debug import dprint
     from meerschaum.utils.misc import parse_instance_keys, reload_plugins
     from meerschaum.config import get_config
-    from meerschaum.utils.warnings import warn, error
+    from meerschaum.utils.warnings import warn, error, info
     from meerschaum import Plugin
     from meerschaum.connectors.api import APIConnector
     from meerschaum import get_connector
@@ -107,7 +107,7 @@ def _register_plugins(
     successes = dict()
 
     for name, plugin in plugins_to_register.items():
-        print(f"Registering plugin '{plugin}' to Meerschaum API '{instance_connector}'..." + '\n')
+        info(f"Registering plugin '{plugin}' to Meerschaum API '{instance_connector}'..." + '\n')
         success, msg = instance_connector.register_plugin(plugin, debug=debug)
         print_tuple((success, msg + '\n'))
         successes[name] = (success, msg)
@@ -126,7 +126,7 @@ def _register_plugins(
         f"Finished processing {len(plugins_to_register)} plugins." + '\n' +
         f"  {total_success} succeeded, {total_fail} failed."
     )
-    print(msg)
+    info(msg)
     reload_plugins(debug=debug)
     return True, msg
 

@@ -30,8 +30,7 @@ def register_plugin(
         from packaging import version as packaging_version
         if packaging_version.parse(old_version) >= packaging_version.parse(new_version):
             return False, (
-                f"Version '{new_version}' of plugin '{plugin}' must be greater than existing version '{old_version}'." + "\n"
-                f"Please upgrade `__version__` within '{plugin.__file__}'"
+                f"Version '{new_version}' of plugin '{plugin}' must be greater than existing version '{old_version}'."
             )
 
     ### ensure plugins table exists
