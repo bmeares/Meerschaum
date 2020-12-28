@@ -6,12 +6,17 @@
 User class definition
 """
 
-from passlib.context import CryptContext
-pwd_context = CryptContext(
-    schemes=["pbkdf2_sha256"],
-    default="pbkdf2_sha256",
-    pbkdf2_sha256__default_rounds=30000
-)
+pwd_context = None
+def get_pwd_context():
+    global pwd_context
+    if pwd_context is None:
+        from passlib.context import CryptContext
+        pwd_context = CryptContext(
+            schemes=["pbkdf2_sha256"],
+            default="pbkdf2_sha256",
+            pbkdf2_sha256__default_rounds=30000
+        )
+    return pwd_context
 
 class User():
     def __init__(
@@ -23,7 +28,7 @@ class User():
         user_id : int = None
     ):
         self.password = password
-        self.password_hash = pwd_context.encrypt(password)
+        self.password_hash = get_pwd_context().encrypt(password)
         self.username = username
         self.email = email
         self._attributes = attributes

@@ -37,9 +37,9 @@ def login(
     username = data.username
     password = data.password
 
-    from meerschaum.User._User import pwd_context
+    from meerschaum.User._User import get_pwd_context
     user = User(username, password)
-    correct_password = pwd_context.verify(password, get_connector().get_user_password_hash(user))
+    correct_password = get_pwd_context().verify(password, get_connector().get_user_password_hash(user))
     if not correct_password:
         raise InvalidCredentialsException
 
