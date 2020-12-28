@@ -32,7 +32,7 @@ class SQLConnector(Connector):
         pipe_exists,
     )
     from ._plugins import register_plugin, get_plugin_id, get_plugin_version, get_plugins
-    from ._users import register_user, get_user_id, get_users, edit_user, delete_user
+    from ._users import register_user, get_user_id, get_users, edit_user, delete_user, get_user_password_hash
     
     def __init__(
             self,

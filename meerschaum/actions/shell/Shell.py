@@ -42,7 +42,7 @@ hidden_commands = {
     'quit',
 }
 class Shell(cmd.Cmd):
-    def __init__(self, actions : dict = {}):
+    def __init__(self, actions : dict = {}, sysargs : list = []):
         """
         Customize the CLI from configuration
         """
@@ -65,6 +65,7 @@ class Shell(cmd.Cmd):
 
         ### NOTE: custom actions must be added to the self._actions dictionary
         self._actions = actions
+        self._sysargs = sysargs
         self._actions['instance'] = self.do_instance
         self._actions['debug'] = self.do_instance
         self.intro = get_config('system', 'shell', CHARSET, 'intro', patch=patch) + '\n' + __doc__
@@ -144,6 +145,10 @@ class Shell(cmd.Cmd):
             readline.write_history_file(SHELL_HISTORY_PATH)
 
         args = parse_line(line)
+
+        ### NOTE: pass `shell` flag in case actions need to distinguish between
+        ###       being run on the command line and being run in the shell
+        args['shell'] = True
 
         ### if debug is not set on the command line,
         ### default to shell setting
@@ -305,6 +310,11 @@ class Shell(cmd.Cmd):
         if _clear_screen:
             from meerschaum.utils.formatting._shell import clear_screen
             clear_screen(debug=self.debug)
+
+        ### if sysargs are provided, skip printing the intro and execute instead
+        if self._sysargs:
+            self.intro = None
+            self.precmd(' '.join(self._sysargs))
 
     def postloop(self):
         from meerschaum.config._paths import SHELL_HISTORY_PATH

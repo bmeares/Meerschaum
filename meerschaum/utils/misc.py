@@ -502,9 +502,20 @@ def parse_instance_keys(keys : str, **kw):
     """
     Parse the Meerschaum instance value into a Connector object
     """
+    from meerschaum.config import get_config
+    if keys is None: keys = get_config('meerschaum', 'instance')
     if ':' not in keys: keys += ':'
     if keys.endswith(':'): keys += 'main'
-    return parse_connector_keys(keys)
+    return parse_connector_keys(keys, **kw)
+
+def parse_repo_keys(keys : str = None, **kw):
+    """
+    Parse the Meerschaum repository value into a Connector object
+    """
+    from meerschaum.config import get_config
+    if keys is None: keys = get_config('meerschaum', 'default_repository', patch=True)
+    if ':' not in keys: keys = 'api:' + keys
+    return parse_connector_keys(keys, **kw)
 
 def is_pipe_registered(
         pipe : 'Pipe or MetaPipe',

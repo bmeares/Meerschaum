@@ -6,7 +6,7 @@
 Routes for managing plugins
 """
 
-from meerschaum.api import fastapi, fast_api, endpoints, get_connector, pipes, get_pipe, get_pipes_sql
+from meerschaum.api import fastapi, fast_api, endpoints, get_connector, pipes, get_pipe, get_pipes_sql, manager
 from meerschaum.api.tables import get_tables
 from fastapi import FastAPI, File, UploadFile
 from meerschaum.utils.misc import attempt_import
@@ -14,13 +14,16 @@ from starlette.responses import FileResponse
 
 sqlalchemy = attempt_import('sqlalchemy')
 plugins_endpoint = endpoints['mrsm'] + '/plugins'
+typing = attempt_import('typing')
 
 @fast_api.post(plugins_endpoint + '/{name}')
 def register_plugin(
         name : str,
         version : str = None,
         attributes : str = None,
-        archive : UploadFile = File(...)
+        archive : UploadFile = File(...),
+        logged_in_username : str = fastapi.Depends(manager),
+        user_id : typing.Optional[int] = fastapi.Cookie(None)
     ) -> tuple:
     """
     Register a plugin and save its archive file
@@ -32,7 +35,7 @@ def register_plugin(
     if attributes is None: attributes = json.dumps(dict())
     attributes = json.loads(attributes)
     
-    plugin = Plugin(name, version=version, attributes=attributes)
+    plugin = Plugin(name, version=version, attributes=attributes, user_id=user_id)
 
     success, msg = get_connector().register_plugin(plugin, make_archive=False, debug=True)
 
@@ -61,9 +64,11 @@ def get_plugin(
     return False, f"Archive for plugin '{plugin}' could not be found"
 
 @fast_api.get(plugins_endpoint)
-def get_plugins() -> list:
+def get_plugins(
+        user_id : int = None
+    ) -> list:
     """
     Return a list of registered plugins
     """
-    return get_connector().get_plugins()
+    return get_connector().get_plugins(user_id=user_id)
     

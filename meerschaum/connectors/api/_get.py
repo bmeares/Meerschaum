@@ -6,21 +6,23 @@
 Wrappers for requests.get
 """
 
-import requests
-
 def get(
         self,
         r_url : str,
+        headers : dict = {},
+        use_token : bool = True,
         **kw
     ):
     """
     Wrapper for requests.get
     """
-    if 'auth' in kw:
-        from meerschaum.utils.warnings import warn
-        warn('Ignoring auth, using existing configuration')
-        del kw['auth']
-    return self.session.get(self.url + r_url, auth=self.auth, **kw)
+    if use_token: headers.update({ 'Authorization': f'Bearer {self.token}' })
+
+    return self.session.get(
+        self.url + r_url,
+        headers = headers,
+        **kw
+    )
 
 def wget(
         self,

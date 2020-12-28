@@ -63,4 +63,7 @@ def do_action(
         print(e)
         return False, response.text
     if debug: dprint(response)
-    return response_list[0], response_list[1]
+    try:
+        return response_list[0], response_list[1]
+    except:
+        return False, f"Failed to parse result from action '{root_action}'"

@@ -34,7 +34,7 @@ class APIConnector(Connector):
     )
     from ._fetch import fetch
     from ._plugins import register_plugin, install_plugin, get_plugins
-    from ._users import get_users, login, edit_user
+    from ._users import get_users, login, edit_user, get_user_id, delete_user, register_user
 
     def __init__(
         self,
@@ -55,10 +55,17 @@ class APIConnector(Connector):
         )
         import requests, requests.auth
         self.auth = None
+        self._token = None
         if 'username' in self.__dict__ and 'password' in self.__dict__:
             self.auth = requests.auth.HTTPBasicAuth(
                 self.username,
                 self.password
             )
         self.session = requests.Session()
+
+    @property
+    def token(self):
+        if self._token is None:
+            self.login()
+        return self._token
 

@@ -60,15 +60,17 @@ for module in modules:
 
 from meerschaum.actions._entry import _entry as entry
 shell = None
-def get_shell():
+def get_shell(sysargs : list = []):
     """
     Lazy load the Shell
     """
     global shell
+
     if shell is None:
         from meerschaum.actions.shell import Shell
         for a, f in actions.items():
             add_method_to_class(func=f, class_def=Shell, method_name='do_' + a)
 
-        shell = Shell(actions)
+        shell = Shell(actions, sysargs=sysargs)
+
     return shell
