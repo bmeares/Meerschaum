@@ -19,17 +19,23 @@ def get_users(
 
 def login(
         self,
-        #  user : 'meerschaum.User',
         **kw
     ) -> tuple:
     """
     Log in and set the session token
     """
+    import json
     login_data = {
         'username' : self.username,
         'password' : self.password,
     }
-    self.post('/mrsm/login', json=login_data)
+    response = self.post('/mrsm/login', data=login_data, use_token=False)
+    if response:
+        msg = f"Successfully logged into '{self}' as user '{login_data['username']}'"
+        self._token = json.loads(response.text)['access_token']
+    else: msg = f"Failed to log into '{self}' as user '{login_data['username']}'"
+
+    return response.__bool__(), msg
 
 def edit_user(
         self,
@@ -83,3 +89,38 @@ def register_user(
 
     return tuple(success_tuple)
     
+def get_user_id(
+        self,
+        user : 'meerschaum.User',
+        debug : bool = False,
+        **kw
+    ) -> int:
+    """
+    Get a user's ID
+    """
+    import json
+    r_url = f"/mrsm/users/{user.username}/id"
+    response = self.get(r_url)
+    try:
+        user_id = json.loads(response.text)
+    except Exception as e:
+        user_id = None
+    return user_id
+
+def delete_user(
+        self,
+        user : 'meerschaum.User',
+        debug : bool = False,
+        **kw
+    ) -> tuple:
+    """
+    Delete a user
+    """
+    import json
+    r_url = f"/mrsm/users/{user.username}/delete"
+    response = self.post(r_url)
+    try:
+        success_tuple = tuple(json.loads(response.text))
+    except:
+        success_tuple = False, f"Failed to delete user '{user.username}'"
+    return success_tuple

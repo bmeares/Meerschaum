@@ -16,6 +16,10 @@ def register_user(
     Register a new user
     """
     from meerschaum.utils.warnings import warn, error, info
+
+    valid_tuple = valid_username(user.username)
+    if not valid_tuple[0]: return valid_tuple
+
     old_id = self.get_user_id(user, debug=debug)
 
     if old_id is not None:
@@ -55,6 +59,37 @@ def register_user(
         return False, f"Failed to register user '{user}'"
     return True, f"Successfully registered user '{user}'"
 
+def valid_username(username : str) -> tuple:
+    """
+    Verify that a given username is valid
+    """
+    fail_reasons = []
+
+    min_length = 4
+    if len(username) < min_length: fail_reasons.append(f"Usernames must have at least {min_length} characters")
+
+    max_length = 26
+    if len(username) > max_length: fail_reasons.append(f"Usernames must contain {max_length} or fewer characters")
+
+    acceptable_chars = {'_', '-'}
+    for c in username:
+        if not c.isalnum() and c not in acceptable_chars:
+            fail_reasons.append(
+                (
+                    f"Usernames may only contain alphanumeric characters and the following special characters: "
+                    + str(list(acceptable_chars))
+                )
+            )
+            break
+
+    if len(fail_reasons) > 0:
+        msg = f"Username '{username}' is invalid for the following reasons:" + '\n'
+        for reason in fail_reasons:
+            msg += f" - {reason}" + '\n'
+        return False, msg
+
+    return True, "Success"
+
 def edit_user(
         self,
         user : 'meerschaum.User',
@@ -68,6 +103,9 @@ def edit_user(
     else: user_id = self.get_user_id(user, debug=debug)
 
     import json
+    valid_tuple = valid_username(user.username)
+    if not valid_tuple[0]: return valid_tuple
+
     bind_variables = {
         'user_id' : user_id,
         'username' : user.username,
@@ -75,6 +113,7 @@ def edit_user(
         'password_hash' : user.password_hash,
         'attributes' : json.dumps(user.attributes),
     }
+    
 
     query = f"""
     UPDATE users
@@ -144,4 +183,26 @@ def get_users(
     FROM users
     """
     return list(self.read(q, debug=debug)['username'])
+
+def get_user_password_hash(
+        self,
+        user : 'meerschaum.User',
+        debug : bool = False,
+        **kw
+    ) -> str:
+    """
+    Return a user's password hash
+    """
+    if user.user_id is not None: user_id = user.user_id
+    else: user_id = self.get_user_id(user, debug=debug)
+
+    if user_id is None: return False, f"User '{user.username}' is not registered and cannot be deleted."
+
+    query = f"""
+    SELECT password_hash
+    FROM users
+    WHERE user_id = %s
+    """
+
+    return self.value(query, (user_id,), debug=debug)
 

@@ -14,11 +14,13 @@ class Plugin:
         self,
         name : str,
         version : str = None,
+        user_id : int = None,
         attributes : dict = {},
         archive_path : pathlib.Path = None
     ):
         self.name = name
         self.attributes = attributes
+        self.user_id = user_id
         if version is None:
             try:
                 self.version = self.module.__version__
@@ -132,10 +134,13 @@ class Plugin:
             except:
                 old_version = ''
             if debug: dprint(f"Found existing version '{old_version}' for plugin '{self}'")
-        tarf = tarfile.open(
-            self.archive_path,
-            'r:gz'
-        )
+        try:
+            tarf = tarfile.open(
+                self.archive_path,
+                'r:gz'
+            )
+        except:
+            return False, f"Plugin '{self.name}' could not be downloaded"
 
         temp_dir = pathlib.Path(os.path.join(PLUGINS_TEMP_RESOURCES_PATH, self.name))
         temp_dir.mkdir(exist_ok=True)

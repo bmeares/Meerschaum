@@ -8,7 +8,7 @@ Install plugins
 
 def install(
         action : list = [''],
-        mrsm_instance : str = None,
+        repository : str = None,
         debug : bool = False,
         **kw
     ):
@@ -16,27 +16,33 @@ def install(
     Install a plugin.
 
     By default, install from the main Meerschaum repository (mrsm.io).
-    Use a private repository with `--mrsm-instance` or `-I`.
+    Use a private repository by specifying the API label after the plugin.
+    NOTE: the --instance flag is ignored!
 
     Usage:
-        install [plugin]
+        install [plugin] {API label}
 
-        install [plugin] -I api:mycustominstance
+    Examples:
+        install apex
+        install apex --repo mrsm  (mrsm is the default instance)
+        install apex --repo mycustominstance
     """
     from meerschaum.utils.debug import dprint
-    from meerschaum.utils.misc import parse_instance_keys, reload_package
+    from meerschaum.utils.warnings import info
+    from meerschaum.utils.misc import parse_repo_keys, reload_package
     import meerschaum.actions
     from meerschaum.utils.formatting import print_tuple
     from meerschaum import Plugin
     from meerschaum.connectors.api import APIConnector
-    if mrsm_instance is None or str(mrsm_instance).split(':')[0] != 'api': mrsm_instance = 'api:mrsm'
-    instance_connector = parse_instance_keys(mrsm_instance)
 
     if action == [''] or len(action) == 0: return False, "No plugins to install"
 
+    repo_connector = parse_repo_keys(repository)
+
     successes = dict()
     for name in action:
-        success, msg = instance_connector.install_plugin(name, debug=debug)
+        info(f"Installing plugin '{name}' from Meerschaum repository '{repo_connector}'")
+        success, msg = repo_connector.install_plugin(name, debug=debug)
         successes[name] = (success, msg)
         print_tuple((success, msg))
 

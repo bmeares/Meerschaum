@@ -17,6 +17,7 @@ if platform.system() == 'Windows':
 default_meerschaum_config = {
     'instance' : 'sql:main',
     'api_instance' : 'sql:main',
+    'default_repository' : 'api:mrsm',
     'connectors' : {
         'sql' : {
             'default'      : {

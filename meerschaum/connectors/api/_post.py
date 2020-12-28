@@ -9,12 +9,17 @@ Wrappers for requests.post
 def post(
         self,
         r_url : str,
+        headers : dict = {},
+        use_token : bool = True,
         **kw
     ):
     """
     Wrapper for requests.post
     """
-    if 'auth' in kw:
-        print('Ignoring auth, using existing configuration')
-        del kw['auth']
-    return self.session.post(self.url + r_url, auth=self.auth, **kw)
+    if use_token: headers.update({ 'Authorization': f'Bearer {self.token}' })
+
+    return self.session.post(
+        self.url + r_url,
+        headers = headers,
+        **kw
+    )

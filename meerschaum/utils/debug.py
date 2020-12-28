@@ -28,7 +28,7 @@ def dprint(
         premsg = parent_package + ':\n'
     if leader:
         debug_leader = cf['system']['debug'][CHARSET]['leader']
-        premsg = debug_leader + ' ' + premsg
+        premsg = ' ' + debug_leader + ' ' + premsg
     if ANSI:
         if color is not None:
             if isinstance(color, str):

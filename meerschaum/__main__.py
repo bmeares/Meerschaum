@@ -12,7 +12,13 @@ def main():
     from meerschaum.actions import entry, get_shell
     from meerschaum.utils.formatting import print_tuple
     sysargs = sys.argv[1:]
-    if len(sysargs) == 0: return get_shell().cmdloop()
+
+    ### try to launch a shell if --shell is provided
+    if len(sysargs) == 0 or '--shell' in sysargs:
+        if '--shell' in sysargs: sysargs.remove('--shell')
+        return get_shell(sysargs).cmdloop()
+
+    ### print success or failure message
     return_tuple = entry(sysargs)
     if isinstance(return_tuple, tuple):
         print_tuple(return_tuple)

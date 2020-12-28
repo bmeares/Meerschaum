@@ -7,8 +7,30 @@ from meerschaum.config import system_config, get_config
 #  from meerschaum.connectors import get_connector
 from meerschaum.utils.misc import attempt_import
 from meerschaum.utils._get_pipes import get_pipes as get_pipes_sql
+import pathlib, os
 #  fastapi, graphene, starlette_graphql = attempt_import('fastapi', 'graphene', 'starlette.graphql', lazy=True)
 fastapi = attempt_import('fastapi', lazy=True)
+
+fastapi_login = attempt_import('fastapi_login')
+LoginManager = fastapi_login.LoginManager
+def generate_secret_key():
+    """
+    Read or generate the keyfile
+    """
+    from meerschaum.config._paths import API_RESOURCES_PATH
+    keyfilepath = pathlib.Path(os.path.join(API_RESOURCES_PATH, '.api_secret_key'))
+    if not keyfilepath.exists():
+        secret_key = os.urandom(24).hex()
+        with open(keyfilepath, 'w') as f:
+            f.write(secret_key)
+    else:
+        with open(keyfilepath, 'r') as f:
+            secret_key = f.read()
+
+    return secret_key
+
+SECRET = generate_secret_key()
+manager = LoginManager(SECRET, tokenUrl='/mrsm/login')
 
 connector = None
 def get_connector(instance_keys : str = None, debug : bool = False):
@@ -99,4 +121,5 @@ endpoints = sys_config['endpoints']
 ### import WebAPI routes
 import meerschaum.api.routes as routes
 import meerschaum.api._events
+
 

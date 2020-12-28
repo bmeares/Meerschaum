@@ -64,21 +64,20 @@ def _edit_pipes(
 
 def _edit_users(
         action : list = [''],
-        mrsm_instance : str = None,
+        repository : str = None,
         debug : bool = False,
         **kw
     ) -> tuple:
     from meerschaum.config import get_config
     from meerschaum import get_connector
-    from meerschaum.utils.misc import parse_instance_keys
+    from meerschaum.utils.misc import parse_repo_keys
     from meerschaum.utils.debug import dprint
     from meerschaum.utils.warnings import warn, error, info
     from meerschaum import User
     from meerschaum.connectors.api import APIConnector
     from meerschaum.utils.formatting import print_tuple
     from prompt_toolkit import prompt
-    if mrsm_instance is None: mrsm_instance = get_config('meerschaum', 'instance', patch=True)
-    instance_connector = parse_instance_keys(mrsm_instance)
+    repo_connector = parse_repo_keys(repository)
 
     if len(action) == 0 or action == ['']: return False, "No users to edit."
 
@@ -88,8 +87,8 @@ def _edit_users(
         email = prompt(f"Email for user '{username}' (empty to omit): ")
         if len(email) == 0: email = None
         user = User(username, password, email=email)
-        info(f"Editing user '{user}' on Meerschaum instance '{instance_connector}'...")
-        result_tuple = instance_connector.edit_user(user, debug=debug)
+        info(f"Editing user '{user}' on Meerschaum instance '{repo_connector}'...")
+        result_tuple = repo_connector.edit_user(user, debug=debug)
         print_tuple(result_tuple)
         success[username] = result_tuple[0]
 

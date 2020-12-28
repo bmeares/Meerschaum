@@ -21,6 +21,7 @@ groups['actions'] = parser.add_argument_group(title='Actions options')
 groups['pipes'] = parser.add_argument_group(title='Pipes options')
 groups['sync'] = parser.add_argument_group(title='Sync options')
 groups['api'] = parser.add_argument_group(title='API options')
+groups['plugins'] = parser.add_argument_group(title='Plugins options')
 groups['misc'] = parser.add_argument_group(title='Miscellaneous options')
 
 
@@ -38,7 +39,11 @@ groups['actions'].add_argument(
     '-f', '--force', action="store_true", help="Override safety checks"
 )
 groups['actions'].add_argument(
-    '-A', '--sub-args', nargs=argparse.REMAINDER, help="Provide a list of arguments for subprocesses. You can also type sub-arguments in [] instead. E.g. `stack -A='--version'`, `ls [-lh]`, `echo -A these are sub-arguments`"
+    '-A', '--sub-args', nargs=argparse.REMAINDER,
+    help=(
+        "Provide a list of arguments for subprocesses. You can also type sub-arguments in [] instead." + 
+        " E.g. `stack -A='--version'`, `ls [-lh]`, `echo -A these are sub-arguments`"
+    )
 )
 
 ### Pipes options
@@ -53,7 +58,8 @@ groups['pipes'].add_argument(
 )
 groups['pipes'].add_argument(
     '-i', '-I', '--mrsm-instance', '--instance', help=(
-        "Connector Keys (type:label) to the Meerschaum instance for Pipe objects. If label is omitted, use the configured default interface (usually 'sql:main')"
+        "Connector Keys (type:label) to the Meerschaum instance for Pipe objects. " +
+        "If label is omitted, use the configured default interface (usually 'sql:main')"
     )
 )
 
@@ -73,7 +79,14 @@ groups['api'].add_argument(
     '-p', '--port', type=int, help="The port on which to run the Web API server"
 )
 groups['api'].add_argument(
-    '-w', '--workers', type=int, help="How many workers to run a concurrent action (e.g. running the API or syncing pipes)"
+    '-w', '--workers', type=int,
+    help="How many workers to run a concurrent action (e.g. running the API or syncing pipes)"
+)
+
+### Plugins options
+groups['plugins'].add_argument(
+    '-r', '--repository', '--repo', type=str,
+    help="Meerschaum plugins repository to connect to. Specify an API label (default: 'mrsm')"
 )
 
 ### Miscellaneous arguments
@@ -105,4 +118,7 @@ groups['misc'].add_argument(
 )
 groups['misc'].add_argument(
     '--gui', action='store_true', help="Open a DataFrame in an interactive pandasgui or matplotlib window."
+)
+groups['misc'].add_argument(
+    '--shell', action='store_true', help="Open a Meerschaum shell and execute the provided action"
 )

@@ -37,30 +37,39 @@ def register_plugin(
     from meerschaum.connectors.sql.tables import get_tables
     tables = get_tables(mrsm_instance=self, debug=debug)
 
-    version = 'NULL' if plugin.version is None else f"'{plugin.version}'"
-
     import json
-    attributes = json.dumps(plugin.attributes).replace("'", "''")
+    bind_variables = {
+        'plugin_name' : plugin.name,
+        'version' : plugin.version,
+        'attributes' : json.dumps(plugin.attributes),
+        'user_id' : plugin.user_id,
+        'plugin_id' : old_id,
+    }
+
     if old_id is None:
         query = f"""
         INSERT INTO plugins (
             plugin_name,
             version,
+            user_id,
             attributes
         ) VALUES (
-            '{plugin.name}',
-            {version},
-            '{attributes}'
+            %(plugin_name)s,
+            %(version)s,
+            %(user_id)s,
+            %(attributes)s
         );
         """
     else:
         query = f"""
         UPDATE plugins
-        SET plugin_name = '{plugin.name}', version = {version}, attributes = '{attributes}'
-        WHERE plugin_id = {old_id}
+        SET plugin_name = %(plugin_name)s',
+            version = %(version)s,
+            attributes = %(attributes)s'
+        WHERE plugin_id = %(plugin_id)s
         """
 
-    result = self.exec(query, debug=debug)
+    result = self.exec(query, bind_variables, debug=debug)
     if result is None:
         return False, f"Failed to register plugin '{plugin}'"
     return True, f"Successfully registered plugin '{plugin}'"
@@ -77,9 +86,9 @@ def get_plugin_id(
     query = f"""
     SELECT plugin_id
     FROM plugins
-    WHERE plugin_name = '{plugin.name}'
+    WHERE plugin_name = %s
     """
-    return self.value(query, debug=debug)
+    return self.value(query, (plugin.name,), debug=debug)
 
 def get_plugin_version(
         self,
@@ -99,6 +108,7 @@ def get_plugin_version(
 
 def get_plugins(
         self,
+        user_id : int = None,
         debug : bool = False,
         **kw
     ) -> list:
@@ -106,9 +116,13 @@ def get_plugins(
     from meerschaum.connectors.sql.tables import get_tables
     tables = get_tables(mrsm_instance=self, debug=debug)
 
+    bind_variables = {'user_id' : user_id}
+
     q = f"""
     SELECT plugin_name
     FROM plugins
-    """
-    return list(self.read(q, debug=debug)['plugin_name'])
+    """ + ("""
+    WHERE user_id = %s
+    """ if user_id is not None else "")
+    return list(self.read(q, bind_variables, debug=debug)['plugin_name'])
 

@@ -74,5 +74,9 @@ def get_plugins(
     Return a list of registered plugins
     """
     import json
-    return json.loads(self.get('/mrsm/plugins').text)
+    from meerschaum.utils.warnings import warn, error
+    response = self.get('/mrsm/plugins')
+    plugins = json.loads(response.text)
+    if not isinstance(plugins, list): error(response.text)
+    return plugins
 
