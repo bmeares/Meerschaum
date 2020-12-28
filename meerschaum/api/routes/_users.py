@@ -43,12 +43,13 @@ def login(
     if not correct_password:
         raise InvalidCredentialsException
 
+    expires = datetime.datetime.utcnow() + datetime.timedelta(minutes=15)
     access_token = manager.create_access_token(
         data = dict(sub=username),
         expires_delta = datetime.timedelta(minutes=15)
     )
     response.set_cookie(key="user_id", value=get_connector().get_user_id(user))
-    return {'access_token': access_token, 'token_type': 'bearer'}
+    return {'access_token': access_token, 'token_type': 'bearer', 'expires' : expires}
 
 @fast_api.get(users_endpoint + "/me")
 def read_current_user(
@@ -116,6 +117,10 @@ def delete_user(
     """
     Delete a user
     """
-    user = User(username, '')
-    return get_connector().delete_user(user)
+    user = User(username, '', user_id=user_id)
+    user_type = get_connector().get_user_type(user)
+    if user_type == 'admin' or logged_in_username == user.username:
+        return get_connector().delete_user(user)
+    
+    return False, f"Cannot delete user '{user}': Permission denied"
 

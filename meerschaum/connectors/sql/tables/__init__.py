@@ -74,6 +74,7 @@ def get_tables(
                 sqlalchemy.Column('username', sqlalchemy.String, index=True, nullable=False),
                 sqlalchemy.Column('password_hash', sqlalchemy.String),
                 sqlalchemy.Column('email', sqlalchemy.String),
+                sqlalchemy.Column('user_type', sqlalchemy.String),
                 sqlalchemy.Column('attributes', params_type)
             ),
             'plugins' : sqlalchemy.Table(

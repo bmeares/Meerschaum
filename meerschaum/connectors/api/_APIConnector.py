@@ -54,18 +54,25 @@ class APIConnector(Connector):
             str(self.port)
         )
         import requests, requests.auth
-        self.auth = None
+        #  self.auth = None
         self._token = None
-        if 'username' in self.__dict__ and 'password' in self.__dict__:
-            self.auth = requests.auth.HTTPBasicAuth(
-                self.username,
-                self.password
-            )
+        self._expires = None
+        #  if 'username' in self.__dict__ and 'password' in self.__dict__:
+            #  self.auth = requests.auth.HTTPBasicAuth(
+                #  self.username,
+                #  self.password
+            #  )
         self.session = requests.Session()
 
     @property
     def token(self):
-        if self._token is None:
+        import datetime
+
+        expired = True
+        if self._expires is not None:
+            expired = (self._expires < datetime.datetime.utcnow() + datetime.timedelta(minutes=1))
+
+        if self._token is None or expired:
             self.login()
         return self._token
 
