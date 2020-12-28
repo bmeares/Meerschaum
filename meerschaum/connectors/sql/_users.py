@@ -166,7 +166,15 @@ def delete_user(
     FROM users
     WHERE user_id = %s
     """
-    result = self.value(query, (user_id,), debug=debug)
+    result = self.exec(query, (user_id,), debug=True)
+    if result is None: return False, f"Failed to delete user '{user}'"
+    query = f"""
+    DELETE
+    FROM plugins
+    WHERE user_id = %s
+    """
+    result = self.exec(query, (user_id,), debug=True)
+    if result is None: return False, f"Failed to delete plugins of user '{user}'"
     return True, f"Successfully deleted user '{user}'"
 
 def get_users(
@@ -196,7 +204,7 @@ def get_user_password_hash(
     if user.user_id is not None: user_id = user.user_id
     else: user_id = self.get_user_id(user, debug=debug)
 
-    if user_id is None: return False, f"User '{user.username}' is not registered and cannot be deleted."
+    if user_id is None: return None
 
     query = f"""
     SELECT password_hash

@@ -81,7 +81,8 @@ def get_tables(
                 conn.metadata,
                 sqlalchemy.Column('plugin_id', sqlalchemy.Integer, primary_key=True),
                 sqlalchemy.Column('plugin_name', sqlalchemy.String, index=True, nullable=False),
-                sqlalchemy.Column('user_id', sqlalchemy.Integer, sqlalchemy.schema.ForeignKey("users.user_id"), nullable=False),
+                sqlalchemy.Column('user_id', sqlalchemy.Integer, nullable=False),
+                #  sqlalchemy.Column('user_id', sqlalchemy.Integer, sqlalchemy.schema.ForeignKey("users.user_id"), nullable=False),
                 sqlalchemy.Column('version', sqlalchemy.String),
                 sqlalchemy.Column('attributes', params_type)
             ),

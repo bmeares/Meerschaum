@@ -24,6 +24,8 @@ def login(
     """
     Log in and set the session token
     """
+    from meerschaum.utils.warnings import warn, info, error
+    from meerschaum import User
     import json
     login_data = {
         'username' : self.username,
@@ -33,7 +35,15 @@ def login(
     if response:
         msg = f"Successfully logged into '{self}' as user '{login_data['username']}'"
         self._token = json.loads(response.text)['access_token']
-    else: msg = f"Failed to log into '{self}' as user '{login_data['username']}'"
+    else:
+        msg = ''
+        if self.get_user_id(User(self.username, self.password), use_token=False) is None:
+            msg = f"User '{self.username}' does not exist for '{self}'." + '\n'
+        msg += (
+            f"Failed to log into '{self}' as user '{login_data['username']}'. " +
+            f"Please verify login details for connector '{self}' with `edit config`."
+        )
+        warn(msg)
 
     return response.__bool__(), msg
 
@@ -100,9 +110,9 @@ def get_user_id(
     """
     import json
     r_url = f"/mrsm/users/{user.username}/id"
-    response = self.get(r_url)
+    response = self.get(r_url, **kw)
     try:
-        user_id = json.loads(response.text)
+        user_id = int(json.loads(response.text))
     except Exception as e:
         user_id = None
     return user_id
