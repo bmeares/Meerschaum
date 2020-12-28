@@ -152,7 +152,7 @@ def _register_users(
     nonregistered_users = []
     for username in action:
         user = User(username=username, password='')
-        user_id = repo_connector.get_user_id(user)
+        user_id = repo_connector.get_user_id(user, debug=debug)
         if user_id is not None:
             info(f"User '{user}' already exists. Skipping...")
             continue
@@ -177,8 +177,8 @@ def _register_users(
         else: failed += 1
 
     msg = (
-        f"Finished registering {len(action)} users." + '\n' +
-        f"  {succeeded} succeeded, {failed} failed."
+        f"Finished registering {succeeded + failed} users." + '\n' +
+        f"  ({succeeded} succeeded, {failed} failed)"
     )
     info(msg)
     return True, msg

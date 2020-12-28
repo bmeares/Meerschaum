@@ -59,8 +59,8 @@ def read_current_user(
 
 @fast_api.get(users_endpoint)
 def get_users(
-        logged_in_username : str = fastapi.Depends(manager),
-        user_id : typing.Optional[int] = fastapi.Cookie(None)
+        #  logged_in_username : str = fastapi.Depends(manager),
+        #  user_id : typing.Optional[int] = fastapi.Cookie(None)
     ) -> list:
     """
     Return a list of registered users
@@ -72,9 +72,7 @@ def register_user(
         username : str,
         password : str,
         email : str = None,
-        attributes : dict = None,
-        logged_in_username : str = fastapi.Depends(manager),
-        user_id : typing.Optional[int] = fastapi.Cookie(None)
+        attributes : dict = None
     ):
     """
     Register a new user
@@ -100,8 +98,8 @@ def edit_user(
 @fast_api.get(users_endpoint + "/{username}/id")
 def get_user_id(
         username : str,
-        logged_in_username : str = fastapi.Depends(manager),
-        user_id : typing.Optional[int] = fastapi.Cookie(None)
+        #  logged_in_username : str = fastapi.Depends(manager),
+        #  user_id : typing.Optional[int] = fastapi.Cookie(None)
     ):
     """
     Get a user's ID

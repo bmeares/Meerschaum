@@ -73,7 +73,7 @@ api = sql + [
 ]
 stack = [
     'docker',
-    'splitgraph',
+    #  'splitgraph',
     'docker-compose',
 ]
 extras = {
