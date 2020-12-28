@@ -26,7 +26,7 @@ def login(
     """
     from meerschaum.utils.warnings import warn, info, error
     from meerschaum import User
-    import json
+    import json, datetime
     login_data = {
         'username' : self.username,
         'password' : self.password,
@@ -35,6 +35,10 @@ def login(
     if response:
         msg = f"Successfully logged into '{self}' as user '{login_data['username']}'"
         self._token = json.loads(response.text)['access_token']
+        self._expires = datetime.datetime.strptime(
+            json.loads(response.text)['expires'], 
+            '%Y-%m-%dT%H:%M:%S.%f'
+        )
     else:
         msg = ''
         if self.get_user_id(User(self.username, self.password), use_token=False) is None:

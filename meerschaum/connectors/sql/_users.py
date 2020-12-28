@@ -214,3 +214,25 @@ def get_user_password_hash(
 
     return self.value(query, (user_id,), debug=debug)
 
+def get_user_type(
+        self,
+        user : 'meerschaum.User',
+        debug : bool = False,
+        **kw
+    ) -> str:
+    """
+    Return a user's type
+    """
+    if user.user_id is not None: user_id = user.user_id
+    else: user_id = self.get_user_id(user, debug=debug)
+
+    if user_id is None: return None
+
+    query = f"""
+    SELECT user_type
+    FROM users
+    WHERE user_id = %s
+    """
+
+    return self.value(query, (user_id,), debug=debug)
+
