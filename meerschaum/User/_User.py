@@ -22,17 +22,19 @@ class User():
     def __init__(
         self,
         username : str,
-        password : str,
+        password : str = '',
         email : str = None,
         attributes : dict = None,
-        user_id : int = None
+        user_id : int = None,
+        repository : str = None
     ):
         self.password = password
         self.password_hash = get_pwd_context().encrypt(password)
         self.username = username
         self.email = email
         self._attributes = attributes
-        self.user_id = user_id
+        self._user_id = user_id
+        self._repository_keys = repository
 
     def __repr__(self):
         return str(self)
@@ -46,3 +48,19 @@ class User():
             self._attributes = dict()
         return self._attributes
 
+    @property
+    def repository(self):
+        from meerschaum.utils.misc import parse_repo_keys
+        if '_repository' not in self.__dict__:
+            self._repository = parse_repo_keys(self._repository_keys)
+        return self._repository
+
+    @property
+    def user_id(self):
+        if self._user_id is None:
+            self._user_id = self.repository.get_user_id(self)
+        return self._user_id
+
+    @user_id.setter
+    def user_id(self, user_id):
+        self._user_id = user_id

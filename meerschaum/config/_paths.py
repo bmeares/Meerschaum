@@ -78,6 +78,8 @@ PLUGINS_INIT_PATH = Path(os.path.join(PLUGINS_RESOURCES_PATH, '__init__.py'))
 PLUGINS_INIT_PATH.parent.mkdir(parents=True, exist_ok=True)
 PLUGINS_INIT_PATH.touch()
 
+SQLITE_DB_PATH = Path(os.path.join(RESOURCES_PATH, 'mrsm_local.db'))
+
 
 ### NOTE: This must be the bottom of the module
 paths_glob = dict(globals())

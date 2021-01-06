@@ -24,7 +24,7 @@ from fastapi_login.exceptions import InvalidCredentialsException
 def load_user(
         username: str
     ):
-    return username
+    return User(username, repository=get_connector())
 
 @fast_api.post('/mrsm/login')
 def login(
@@ -48,20 +48,17 @@ def login(
         data = dict(sub=username),
         expires_delta = datetime.timedelta(minutes=15)
     )
-    response.set_cookie(key="user_id", value=get_connector().get_user_id(user))
+    #  response.set_cookie(key="user_id", value=get_connector().get_user_id(user))
     return {'access_token': access_token, 'token_type': 'bearer', 'expires' : expires}
 
 @fast_api.get(users_endpoint + "/me")
 def read_current_user(
-        logged_in_username : str = fastapi.Depends(manager),
-        user_id : typing.Optional[int] = fastapi.Cookie(None)
+        curr_user : str = fastapi.Depends(manager),
     ):
-    return {"username" : logged_in_username, 'user_id' : user_id}
+    return {"username" : curr_user.username, 'user_id' : curr_user.user_id}
 
 @fast_api.get(users_endpoint)
 def get_users(
-        #  logged_in_username : str = fastapi.Depends(manager),
-        #  user_id : typing.Optional[int] = fastapi.Cookie(None)
     ) -> list:
     """
     Return a list of registered users
@@ -87,39 +84,38 @@ def edit_user(
         password : str,
         email : str = None,
         attributes : dict = None,
-        logged_in_username : str = fastapi.Depends(manager),
-        user_id : typing.Optional[int] = fastapi.Cookie(None)
+        curr_user : str = fastapi.Depends(manager),
     ):
     """
     Edit an existing user
     """
-    user = User(username, password, email=email, attributes=attributes)
-    return get_connector().edit_user(user)
+    user = User(username)
+    user_type = get_connector().get_user_type(curr_user)
+    if user_type == 'admin' or curr_user.username == user.username:
+        return get_connector().edit_user(user)
+    
+    return False, f"Cannot edit user '{user}': Permission denied"
 
 @fast_api.get(users_endpoint + "/{username}/id")
 def get_user_id(
         username : str,
-        #  logged_in_username : str = fastapi.Depends(manager),
-        #  user_id : typing.Optional[int] = fastapi.Cookie(None)
     ):
     """
     Get a user's ID
     """
-    user = User(username, '')
-    return get_connector().get_user_id(user)
+    return User(username, repository=get_connector()).user_id
 
 @fast_api.post(users_endpoint + "/{username}/delete")
 def delete_user(
         username : str,
-        logged_in_username : str = fastapi.Depends(manager),
-        user_id : typing.Optional[int] = fastapi.Cookie(None)
+        curr_user : str = fastapi.Depends(manager),
     ):
     """
     Delete a user
     """
-    user = User(username, '', user_id=user_id)
-    user_type = get_connector().get_user_type(user)
-    if user_type == 'admin' or logged_in_username == user.username:
+    user = User(username)
+    user_type = get_connector().get_user_type(curr_user)
+    if user_type == 'admin' or curr_user.username == user.username:
         return get_connector().delete_user(user)
     
     return False, f"Cannot delete user '{user}': Permission denied"

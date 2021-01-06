@@ -15,6 +15,7 @@ class Connector:
             type : str = None,
             label : str = "main",
             pandas : str = None,
+            inherit_default : bool = True,
             **kw
         ):
         """
@@ -48,9 +49,10 @@ class Connector:
         connector_config = get_config('system', 'connectors')
 
         ### inherit attributes from 'default' if exists
-        inherit_from = 'default'
-        if self.type in conn_configs and inherit_from in conn_configs[self.type]:
-            self.__dict__.update(conn_configs[self.type][inherit_from])
+        if inherit_default:
+            inherit_from = 'default'
+            if self.type in conn_configs and inherit_from in conn_configs[self.type]:
+                self.__dict__.update(conn_configs[self.type][inherit_from])
 
         ### load user config into self.__dict__
         if self.type in conn_configs and self.label in conn_configs[self.type]:

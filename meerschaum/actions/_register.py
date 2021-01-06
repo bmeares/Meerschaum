@@ -56,7 +56,7 @@ def _register_pipes(
         if debug: dprint(f"Registering pipe '{p}'...")
         ss, msg = p.register(debug=debug)
         if not ss:
-            warn(f"{msg}")
+            warn(f"{msg}", stack=False)
             success = False
             failed_message += f"{p}, "
 
@@ -75,6 +75,7 @@ def _register_locations(**kw):
 def _register_plugins(
         action : list = [],
         repository : str = None,
+        shell : bool = False,
         debug : bool = False,
         **kw
     ) -> tuple:
@@ -99,7 +100,7 @@ def _register_plugins(
     from meerschaum.actions import _plugins_names
     for p in action:
         if p not in _plugins_names:
-            warn(f"Plugin '{p}' is not installed and cannot be registered. Ignoring...")
+            warn(f"Plugin '{p}' is not installed and cannot be registered. Ignoring...", stack=False)
         else:
             plugins_to_register[p] = Plugin(p)
 
@@ -123,27 +124,29 @@ def _register_plugins(
 
     msg = (
         f"Finished registering {len(plugins_to_register)} plugins." + '\n' +
-        f"  {total_success} succeeded, {total_fail} failed."
+        f"    ({total_success} succeeded, {total_fail} failed)"
     )
-    info(msg)
+    if shell: info(msg)
     reload_plugins(debug=debug)
     return True, msg
 
 def _register_users(
         action : list = [],
         repository : str = None,
+        shell : bool = False,
         debug : bool = False,
         **kw
     ) -> tuple:
     from meerschaum.config import get_config
     from meerschaum import get_connector
-    from meerschaum.utils.misc import parse_repo_keys
+    from meerschaum.utils.misc import parse_repo_keys, is_valid_email
     from meerschaum.utils.debug import dprint
     from meerschaum.utils.warnings import warn, error, info
     from meerschaum import User
     from meerschaum.connectors.api import APIConnector
     from meerschaum.utils.formatting import print_tuple
     from prompt_toolkit import prompt
+    from getpass import getpass
     repo_connector = parse_repo_keys(repository)
 
     if len(action) == 0 or action == ['']: return False, "No users to register."
@@ -158,18 +161,39 @@ def _register_users(
             continue
         nonregistered_users.append(user)
 
+    def get_password(username):
+        while True:
+            password = getpass(prompt=f"Password for user '{username}': ")
+            _password = getpass(prompt=f"Confirm password for user '{username}': ")
+            if password != _password:
+                warn(f"Passwords do not match! Please try again.", stack=False)
+                continue
+            else:
+                return password
+
+    def get_email():
+        while True:
+            email = prompt(f"Email for user '{username}' (empty to omit): ")
+            if email == '' or is_valid_email(email): return email
+            else: warn(f"Invalid email! Please try again.", stack=False)
+
     ### prompt for passwords and emails, then try to register
     success = dict()
+    successfully_registered_users = set()
     for _user in nonregistered_users:
-        username = _user.username
-        password = prompt(f"Password for user '{username}': ")
-        email = prompt(f"Email for user '{username}' (empty to omit): ")
+        try:
+            username = _user.username
+            password = get_password(username)
+            email = get_email()
+        except:
+            return False, f"Aborted registering users {', '.join([str(u) for u in nonregistered_users if u not in successfully_registered_users])}"
         if len(email) == 0: email = None
         user = User(username, password, email=email)
         info(f"Registering user '{user}' to Meerschaum repository '{repo_connector}'...")
         result_tuple = repo_connector.register_user(user, debug=debug)
         print_tuple(result_tuple)
         success[username] = result_tuple[0]
+        if success[username]: successfully_registered_users.add(user)
 
     succeeded, failed = 0, 0
     for username, r in success.items():
@@ -180,7 +204,7 @@ def _register_users(
         f"Finished registering {succeeded + failed} users." + '\n' +
         f"  ({succeeded} succeeded, {failed} failed)"
     )
-    info(msg)
+    if shell: info(msg)
     return True, msg
 
 ### NOTE: This must be the final statement of the module.

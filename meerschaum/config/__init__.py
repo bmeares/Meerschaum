@@ -63,19 +63,31 @@ def get_config(*keys, patch=False, debug=False):
     from meerschaum.utils.debug import dprint
     if debug: dprint(f"Indexing keys: {keys}")
     c = config
+    invalid_keys = False
     if len(keys) > 0:
         for k in keys:
             try:
                 c = c[k]
-            except KeyError:
+            except:
+                invalid_keys = True
+                break
+        if invalid_keys:
+            from meerschaum.config._paths import PERMANENT_PATCH_PATH, CONFIG_PATH
+            warning_msg = f"Invalid keys in config: {keys}"
+            debug_msg = f"Moving {CONFIG_PATH} to {PERMANENT_PATCH_PATH}. Restart Meerschaum to patch configuration with new defaults."
+            try:
                 from meerschaum.utils.warnings import warn
-                warn(f"Invalid keys in config: {keys}", stacklevel=3)
-                if patch:
-                    from meerschaum.config._paths import PERMANENT_PATCH_PATH, CONFIG_PATH
-                    import shutil, sys
-                    dprint(f"Moving {CONFIG_PATH} to {PERMANENT_PATCH_PATH}. Restart Meerschaum to patch configuration with new defaults.")
-                    shutil.move(CONFIG_PATH, PERMANENT_PATCH_PATH)
-                    sys.exit()
+                warn(warning_msg, stacklevel=3)
+            except:
+                print(f"Invalid keys in config: {keys}")
+            if patch:
+                import shutil, sys
+                try:
+                    dprint(debug_msg)
+                except:
+                    print(debug_msg)
+                shutil.move(CONFIG_PATH, PERMANENT_PATCH_PATH)
+                sys.exit()
     return c
 
 system_config = get_config('system', patch=True)

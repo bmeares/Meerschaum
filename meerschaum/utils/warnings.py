@@ -33,19 +33,21 @@ def enable_depreciation_warnings(name):
         module = name
     )
 
-def warn(*args, stacklevel=2, **kw):
+def warn(*args, stacklevel=2, stack=True, **kw):
     """
     Raise a warning with custom Meerschaum formatting
     """
     from meerschaum.utils.formatting import CHARSET, ANSI, colored
     from meerschaum.config import config as cf, get_config
+    import sys
 
     warn_config = get_config('system', 'warnings', patch=True)
     a = list(args)
     a[0] = ' ' + warn_config[CHARSET]['icon'] + ' ' + str(a[0])
     if ANSI:
         a[0] = colored(a[0], *warn_config['ansi']['color'])
-    return warnings.warn(*a, stacklevel=stacklevel, **kw)
+    if stacklevel is None or not stack: print(a[0], file=sys.stderr)
+    else: return warnings.warn(*a, stacklevel=stacklevel, **kw)
 
 def error(message : str, exception_class = Exception):
     """

@@ -22,8 +22,9 @@ def register_plugin(
         version : str = None,
         attributes : str = None,
         archive : UploadFile = File(...),
-        logged_in_username : str = fastapi.Depends(manager),
-        user_id : typing.Optional[int] = fastapi.Cookie(None)
+        curr_user : str = fastapi.Depends(manager),
+        #  logged_in_username : str = fastapi.Depends(manager),
+        #  user_id : typing.Optional[int] = fastapi.Cookie(None)
     ) -> tuple:
     """
     Register a plugin and save its archive file
@@ -35,7 +36,11 @@ def register_plugin(
     if attributes is None: attributes = json.dumps(dict())
     attributes = json.loads(attributes)
     
-    plugin = Plugin(name, version=version, attributes=attributes, user_id=user_id)
+    plugin = Plugin(name, version=version, attributes=attributes)
+    plugin_user_id = get_connector().get_plugin_user_id(plugin)
+    if plugin_user_id is not None and plugin_user_id != curr_user.user_id:
+        return False, f"User '{curr_user.username}' cannot edit plugin '{plugin}'"
+    else: plugin.user_id = curr_user.user_id
 
     success, msg = get_connector().register_plugin(plugin, make_archive=False, debug=True)
 
