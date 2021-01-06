@@ -68,6 +68,7 @@ def install_plugin(
 
 def get_plugins(
         self,
+        user_id : int = None,
         debug : bool = False
     ) -> list:
     """
@@ -75,7 +76,7 @@ def get_plugins(
     """
     import json
     from meerschaum.utils.warnings import warn, error
-    response = self.get('/mrsm/plugins')
+    response = self.get('/mrsm/plugins', params={'user_id' : user_id})
     plugins = json.loads(response.text)
     if not isinstance(plugins, list): error(response.text)
     return plugins

@@ -141,6 +141,7 @@ def _delete_users(
         repository : str = None,
         yes : bool = False,
         force : bool = False,
+        shell : bool = False,
         debug : bool = False,
         **kw
     ) -> tuple:
@@ -179,7 +180,7 @@ def _delete_users(
 
     success = dict()
     for user in registered_users:
-        info(f"Deleting user '{user}' on Meerschaum instance '{repo_connector}'...")
+        info(f"Deleting user '{user}' from Meerschaum repository '{repo_connector}'...")
         result_tuple = repo_connector.delete_user(user, debug=debug)
         print_tuple(result_tuple)
         success[username] = result_tuple[0]
@@ -191,9 +192,9 @@ def _delete_users(
 
     msg = (
         f"Finished deleting {len(action)} users." + '\n' +
-        f"  {succeeded} succeeded, {failed} failed."
+        f"    ({succeeded} succeeded, {failed} failed)"
     )
-    info(msg)
+    if shell: info(msg)
     return True, msg
 
 ### NOTE: This must be the final statement of the module.

@@ -201,12 +201,12 @@ def _show_plugins(
         info("To see plugins created by a certain user, run `show plugins [username]`")
     elif action[0] in ('all'):
         _to_print = repo_connector.get_plugins(debug=debug)
-        header = f"Available plugins from Meerschaum instance '{repo_connector}':"
+        header = f"Available plugins from Meerschaum repository '{repo_connector}':"
     else:
         username = action[0]
         user_id = repo_connector.get_user_id(User(username, ''))
         _to_print = repo_connector.get_plugins(user_id=user_id, debug=debug)
-        header = f"Plugins from user '{username}' at Meerschaum instance '{repo_connector}':"
+        header = f"Plugins from user '{username}' at Meerschaum repository '{repo_connector}':"
 
     print()
     print_options(_to_print, header=header, debug=debug, **kw)

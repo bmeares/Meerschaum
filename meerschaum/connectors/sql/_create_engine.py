@@ -7,6 +7,7 @@ This module contains the logic that builds the sqlalchemy engine string.
 """
 
 from meerschaum.utils.debug import dprint
+from meerschaum.config._paths import SQLITE_DB_PATH
 
 ### determine driver and requirements from flavor
 default_requirements = {
@@ -63,7 +64,7 @@ flavor_configs = {
         'requirements' : {
         },
         'defaults'     : {
-            'database' : 'meerschaum_local',
+            'database' : SQLITE_DB_PATH,
         },
     },
 }
@@ -83,13 +84,14 @@ def create_engine(
     sqlalchemy = attempt_import('sqlalchemy')
     import importlib, urllib
     ### supplement missing values with defaults (e.g. port number)
+    #  print(self.__dict__)
     for a, value in flavor_configs[self.flavor]['defaults'].items():
         if a not in self.__dict__:
             self.__dict__[a] = value
 
     ### self.sys_config was deepcopied and can be updated safely
     if self.flavor == "sqlite":
-        engine_str = f"sqlite:///{self.database}.sqlite"
+        engine_str = f"sqlite:///{self.database}"
         self.sys_config['connect_args'].update({"check_same_thread" : False})
     else:
         engine_str = (

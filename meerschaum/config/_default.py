@@ -21,17 +21,17 @@ default_meerschaum_config = {
     'connectors' : {
         'sql' : {
             'default'      : {
-                'username' : 'meerschaum',
-                'password' : 'meerschaum',
-                'database' : 'mrsm_main',
+                'username' : 'mrsm',
+                'password' : 'mrsm',
+                'database' : 'meerschaum',
                 'flavor'   : 'timescaledb',
             },
             'main'         : {
-                'username' : 'meerschaum',
-                'password' : 'meerschaum',
+                'username' : 'mrsm',
+                'password' : 'mrsm',
                 'flavor'   : 'timescaledb',
                 'host'     : 'localhost',
-                'database' : 'mrsm_main',
+                'database' : 'meerschaum',
                 'port'     : 5432,
             },
             'local'        : {
@@ -43,8 +43,8 @@ default_meerschaum_config = {
         },
         'api' : {
             'default'      : {
-                'username' : 'meerschaum',
-                'password' : 'meerschaum',
+                'username' : 'mrsm',
+                'password' : 'mrsm',
                 'protocol' : 'http',
                 'port'     : 8000,
             },
@@ -127,7 +127,22 @@ default_system_config = {
             },
             'prompt': {
                 'color'    : [
-                    'bright green',
+                    'green',
+                ],
+            },
+            'instance' : {
+                'color'    : [
+                    #  'bold',
+                    #  'dark',
+                    'cyan',
+                    #  'bright cyan',
+                ],
+            },
+            'username' : {
+                'color'    : [
+                    'bold',
+                    #  'dark',
+                    'white',
                 ],
             },
         },
@@ -135,7 +150,7 @@ default_system_config = {
             'intro'        : """       ___  ___  __   __   __                       
  |\/| |__  |__  |__) /__` /  ` |__|  /\  |  |  |\/|
  |  | |___ |___ |  \ .__/ \__, |  | /~~\ \__/  |  |\n""",
-            'prompt'       : 'mrsm > ',
+            'prompt'       : ' [ {username}@{instance} ] > ',
             'ruler'        : '-',
             'close_message': 'Thank you for using Meerschaum!',
             'doc_header'   : 'Meerschaum actions (`help <action>` for usage):',
@@ -145,9 +160,9 @@ default_system_config = {
             'intro'        : """
  █▄ ▄█ ██▀ ██▀ █▀▄ ▄▀▀ ▄▀▀ █▄█ ▄▀▄ █ █ █▄ ▄█
  █ ▀ █ █▄▄ █▄▄ █▀▄ ▄██ ▀▄▄ █ █ █▀█ ▀▄█ █ ▀ █\n""",
-            'prompt'       : '𝚖𝚛𝚜𝚖 ➤ ',
+            'prompt'       : ' [ {username}@{instance} ] ➤ ',
             'ruler'        : '─',
-            'close_message': 'Thank you for using Meerschaum! 👋',
+            'close_message': ' 👋 Thank you for using Meerschaum! ',
             'doc_header'   : 'Meerschaum actions (`help <action>` for usage):',
             'undoc_header' : 'Unimplemented actions:',
         },
@@ -266,6 +281,9 @@ default_pipes_config       = {
         },
     },
 }
+default_plugins_config     = {
+    'plugins'              : {},
+}
 
 from meerschaum.config._paths import RESOURCES_PATH, DEFAULT_CONFIG_PATH
 
@@ -274,6 +292,7 @@ default_config = dict()
 default_config['meerschaum'] = default_meerschaum_config
 default_config['system'] = default_system_config
 default_config['pipes'] = default_pipes_config
+default_config['plugins'] = default_plugins_config
 ### add configs from other packages
 from meerschaum.config.stack import default_stack_config
 default_config['stack'] = default_stack_config

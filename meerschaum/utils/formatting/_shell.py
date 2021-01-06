@@ -17,6 +17,9 @@ def make_header(
     Example:
         'My\nheader' -> 'My\nheader\n──────'
     """
+
+    from meerschaum.utils.formatting import ANSI, UNICODE, colored
+    if not UNICODE: ruler = '-'
     words = message.split('\n')
     max_length = 0
     for w in words:

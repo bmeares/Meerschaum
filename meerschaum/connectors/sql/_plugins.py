@@ -102,9 +102,44 @@ def get_plugin_version(
     query = f"""
     SELECT version
     FROM plugins
-    WHERE plugin_name = '{plugin.name}'
+    WHERE plugin_name = %s
     """
-    return self.value(query, debug=debug)
+    return self.value(query, (plugin.name,), debug=debug)
+
+def get_plugin_user_id(
+        self,
+        plugin : 'meerschaum.Plugin',
+        debug : bool = False
+    ) -> str:
+    ### ensure plugins table exists
+    from meerschaum.connectors.sql.tables import get_tables
+    tables = get_tables(mrsm_instance=self, debug=debug)
+
+    query = """
+    SELECT user_id
+    FROM plugins
+    WHERE plugin_name = %s
+    """
+    return self.value(query, (plugin.name,), debug=debug)
+
+def get_plugin_username(
+        self,
+        plugin : 'meerschaum.Plugin',
+        debug : bool = False
+    ) -> str:
+    ### ensure plugins table exists
+    from meerschaum.connectors.sql.tables import get_tables
+    tables = get_tables(mrsm_instance=self, debug=debug)
+
+    bind_variables = { 'plugin_name' : plugin.name, }
+
+    query = f"""
+    SELECT users.username
+    FROM plugins
+    INNER JOIN users ON users.user_id = plugins.user_id
+    WHERE plugin_name = %(plugin_name)s
+    """
+    return self.value(query, bind_variables, debug=debug)
 
 def get_plugins(
         self,
@@ -122,7 +157,7 @@ def get_plugins(
     SELECT plugin_name
     FROM plugins
     """ + ("""
-    WHERE user_id = %s
+    WHERE user_id = %(user_id)s
     """ if user_id is not None else "")
     return list(self.read(q, bind_variables, debug=debug)['plugin_name'])
 

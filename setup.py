@@ -24,7 +24,7 @@ class PostInstallCommand(install):
 
 required = [
     'python-dateutil',
-    'PyYAML',
+    'PyYAML>=5.3.1',
     'cascadict',
     'pprintpp',
     'requests',

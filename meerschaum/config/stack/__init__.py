@@ -30,8 +30,8 @@ db_pass = "MRSM{meerschaum:connectors:sql:main:password}"
 #  db_base = cf['meerschaum']['connectors']['sql']['main']['database']
 db_base = "MRSM{meerschaum:connectors:sql:main:database}"
 
-### default localhost, meerschaum_db for docker network
-db_host = "meerschaum_db"
+### default localhost, db for docker network
+db_host = "db"
 
 #  api_port = cf['meerschaum']['connectors']['api']['main']['port']
 api_port = "MRSM{meerschaum:connectors:api:main:port}"
@@ -87,10 +87,10 @@ volumes = {
     #  'meerschaum_api_config' : env_dict['MEERSCHAUM_API_CONFIG'],
     'meerschaum_db_data' : '/var/lib/postgresql/data',
     'grafana_storage' : '/var/lib/grafana',
-    'portainer_data' : '/data',
+    #  'portainer_data' : '/data',
     'mosquitto.conf' : '/mosquitto/config/mosquitto.conf',
-    'splitgraph_data' : '/var/lib/splitgraph/objects',
-    'splitgraph_metadata' : '/var/lib/postgresql/data',
+    #  'splitgraph_data' : '/var/lib/splitgraph/objects',
+    #  'splitgraph_metadata' : '/var/lib/postgresql/data',
 }
 networks = {
     'frontend' : None,
@@ -100,7 +100,7 @@ networks = {
 default_docker_compose_config = {
     'version' : '3',
     'services': {
-        'meerschaum_db' : {
+        'db' : {
             'environment' : [
                 'TIMESCALEDB_TELEMETRY=off',
                 'POSTGRES_USER=' + env_dict['POSTGRES_USER'],
@@ -135,7 +135,7 @@ default_docker_compose_config = {
             ],
             'restart' : 'always',
             'depends_on' : [
-                'meerschaum_db',
+                'db',
             ],
             'volumes' : [
                 str(CONFIG_ROOT_PATH) + ':' + volumes['meerschaum_api_config'],
@@ -157,7 +157,7 @@ default_docker_compose_config = {
             ],
             'restart' : 'always',
             'depends_on' : [
-                'meerschaum_db',
+                'db',
             ],
             'volumes' : [
                 'grafana_storage' + ':' + volumes['grafana_storage'],

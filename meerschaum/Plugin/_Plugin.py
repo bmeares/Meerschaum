@@ -78,6 +78,7 @@ class Plugin:
             '__pycache__/',
             'eggs/',
             '__pypackages__/',
+            '.git',
         }
 
         if not is_dir: tarf.add(f"{self.name}.py")

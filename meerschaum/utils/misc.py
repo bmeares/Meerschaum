@@ -489,6 +489,7 @@ def parse_connector_keys(keys : str, **kw) -> 'meerschaum.connectors.Connector':
     Parse connector keys and return Connector object
     """
     from meerschaum.connectors import get_connector
+    keys = str(keys)
     try:
         vals = keys.split(':')
         conn = get_connector(type=vals[0], label=vals[1], **kw)
@@ -504,6 +505,7 @@ def parse_instance_keys(keys : str, **kw):
     """
     from meerschaum.config import get_config
     if keys is None: keys = get_config('meerschaum', 'instance')
+    keys = str(keys)
     if ':' not in keys: keys += ':'
     if keys.endswith(':'): keys += 'main'
     return parse_connector_keys(keys, **kw)
@@ -514,6 +516,7 @@ def parse_repo_keys(keys : str = None, **kw):
     """
     from meerschaum.config import get_config
     if keys is None: keys = get_config('meerschaum', 'default_repository', patch=True)
+    keys = str(keys)
     if ':' not in keys: keys = 'api:' + keys
     return parse_connector_keys(keys, **kw)
 
@@ -568,25 +571,29 @@ def print_options(
     """
     Show available options from an iterable
     """
+    from meerschaum.utils.formatting import make_header
     _options = []
     for o in options: _options.append(str(o))
 
+    print()
     if not nopretty:
         if header is None: _header = f"Available {name}:"
         else: _header = header
-        print(_header)
+        print(make_header(_header))
         ### calculate underline length
-        underline_len = len(_header)
-        for o in _options:
-            if len(str(o)) + 4 > underline_len:
-                underline_len = len(str(o)) + 4
-        ### print underline
-        for i in range(underline_len): print('-', end="")
-        print("\n", end="")
+        #  underline_len = len(_header)
+        #  for o in _options:
+            #  if len(str(o)) + 4 > underline_len:
+                #  underline_len = len(str(o)) + 4
+        #  ### print underline
+        #  for i in range(underline_len): print('-', end="")
+        #  print("\n", end="")
     ### print actions
     for option in sorted(_options):
         if not nopretty: print("  - ", end="")
         print(option)
+
+    print()
 
 def sorted_dict(d : dict) -> dict:
     """
@@ -905,3 +912,27 @@ def reload_plugins(debug : bool = False):
     """
     import meerschaum.actions
     reload_package(meerschaum.actions, debug=debug)
+
+def is_valid_email(email : str) -> bool:
+    """
+    Check whether a string is a valid email
+    """
+    import re
+    regex = '^[a-z0-9]+[\._]?[a-z0-9]+[@]\w+[.]\w{2,3}$'
+    return re.search(regex, email)
+
+def string_width(string : str) -> int:
+    """
+    Calculate the width of a string after its last newline
+    """
+    found_newline = False
+    width = 0
+    for c in reversed(string):
+        if c == '\n' and found_newline: break
+        elif c == '\n':
+            found_newline = True
+            continue
+        if found_newline:
+            width += 1
+    return width
+

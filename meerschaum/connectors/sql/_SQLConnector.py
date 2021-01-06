@@ -31,8 +31,23 @@ class SQLConnector(Connector):
         get_sync_time,
         pipe_exists,
     )
-    from ._plugins import register_plugin, get_plugin_id, get_plugin_version, get_plugins
-    from ._users import register_user, get_user_id, get_users, edit_user, delete_user, get_user_password_hash, get_user_type
+    from ._plugins import (
+        register_plugin,
+        get_plugin_id,
+        get_plugin_version,
+        get_plugins,
+        get_plugin_user_id,
+        get_plugin_username
+    )
+    from ._users import (
+        register_user,
+        get_user_id,
+        get_users,
+        edit_user,
+        delete_user,
+        get_user_password_hash,
+        get_user_type
+    )
     
     def __init__(
             self,
@@ -53,7 +68,7 @@ class SQLConnector(Connector):
             'asyncio'
         )
         ### set __dict__ in base class
-        super().__init__('sql', label=label, **kw)
+        super().__init__('sql', label=label, inherit_default=(label != 'local'), **kw)
 
         ### ensure flavor and label are set accordingly
         if 'flavor' not in self.__dict__ and flavor is None:
