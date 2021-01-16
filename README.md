@@ -29,29 +29,26 @@ Please visit https://meerschaum.io for setup, usage, and troubleshooting informa
 - [Thank you](#thank-you)
 
 # Disclaimer
-Meerschaum is undergoing active development and is still an alpha release. Expect to encounter bugs, and please open issues when you find them! Meerschaum is distributed with no warranty, so use with care!
+Meerschaum is undergoing active development and is still a beta release. Expect to encounter bugs, and please open issues when you find them! Meerschaum is distributed with no warranty, so use with care!
 
 Meerschaum was built using powerful open source software like TimescaleDB, Grafana, pandas, and more. Check the [Thank You](#Thank-You) section below for more information about dependencies.
 
 # Setup
 ## Requirements
-Make sure you have [Docker](https://www.docker.com/get-started) and Docker Compose installed.
+To install Meerschaum, you need will [pip](https://pip.pypa.io/en/stable/installing/) installed.
+
+To access the full feature set of Meerschaum, make sure you have [Docker](https://www.docker.com/get-started) installed.
 
 If you are running Linux, search your repositories for `docker.io` or run this script:
-```
+```bash
 curl https://get.docker.com | sh
 ```
 
 If you're on Windows or MacOS, install [Docker Desktop](https://www.docker.com/get-started).
 
-You can install Docker Compose with `pip`:
-```
-pip install docker-compose
-```
-
 ## Installation
 To install the `full` version of Meerschaum, install with `pip`:
-```
+```bash
 pip install meerschaum[full]
 ```
 
@@ -73,18 +70,18 @@ $ mrsm
 
 ### Start the Stack
 To start the Meerschaum stack in the background (using `docker-compose -d`), run the command
-```
+```bash
 mrsm stack [-d]
 ```
 <img alt="Demonstrating how to start the Meerschaum stack" src="https://i.imgur.com/wyI3CO1.gif" style="max-height: 450px">
 
 ### Add a Connector
 If you want to create a Pipe for remote data, you first need to define a Connector. Run this command to open the configuration YAML file with your text editor:
-```
+```bash
 mrsm edit config
 ```
 For this example, let's add a connector called `exampledb`. Add a new entry under the `sql` section:
-```
+```yaml
 meerschaum:
   connectors:
     sql:
@@ -107,17 +104,17 @@ Pipes are defined by three keys:
 3. Location (optional; `None` if omitted)
 
 To register a Pipe, run this command:
-```
-mrsm register pipes -C sql:exampledb -M mydata
+```bash
+mrsm register pipes -c sql:exampledb -m mydata
 ```
 This will create a Pipe with the connector we added above (`sql:exampledb`) and the metric `mydata`. The location for this Pipe is `None`.
 
 Next, we need to edit the parameters for this pipe. Run this command to open your text editor:
-```
-mrsm edit pipes -C sql:exampledb -M mydata
+```bash
+mrsm edit pipes -c sql:exampledb -m mydata
 ```
 For this example, edit the YAML file to look something like this:
-```
+```yaml
 columns:
   datetime: mydtcolumn
   id: myidcolumn
@@ -132,12 +129,13 @@ If you defined the parameters described above, just run the command below to fet
 mrsm sync pipes
 ```
 If you want to add an existing dataframe to a Pipe, run `pipe.sync(df)` to append the dataframe to the Pipe's table. You can launch into a Python shell with `mrsm python`:
-```
+```python
 >>> import meerschaum as mrsm
 >>> pipe = mrsm.Pipe('sql:exampledb', 'mydata')
 >>> 
->>> if not pipe.columns: ### if pipe has not been registered, you can define columns here
->>>   pipe.columns = {'datetime' : 'mydtcolumn', 'id' : 'myidcolumn'}
+>>> ### if pipe has not been registered, you can define columns here
+>>> if not pipe.columns:
+>>>   pipe.columns = { 'datetime' : 'mydtcolumn', 'id' : 'myidcolumn' }
 >>> 
 >>> import pandas as pd
 >>> df = pd.read_csv('mydata.csv')
@@ -175,7 +173,7 @@ You can invoke `mrsm` directly with `python -m meerschaum`. Check that your `PAT
 Open the configuration file with `mrsm edit config` and search for the key `formatting` under the `system` section. From there, you can turn off emoji (`unicode: false`) or colors (`ansi: false`).
 
 ## Connectors don't work for `<database flavor>`!
-Although Connectors *should*  work with any database flavor supported by `sqlalchemy` Engines, it is difficult to test against many database flavors. When bugs are encountered, please open an issue and describe your configuration!
+Although Connectors *should* work with any database flavor supported by `sqlalchemy` Engines, it is difficult to test against many database flavors. When bugs are encountered, please open an issue and describe your configuration!
 
 As of now, there is (limited) support for the following database flavors:
 - PostgreSQL / TimescaleDB
@@ -197,3 +195,5 @@ I want to give my sincere thanks to the developers of the following projects:
 - [Colorama](https://github.com/tartley/colorama)
 - [more_termcolor](https://github.com/giladbarnea/more_termcolor)
 - [SQL CLI Tools](https://github.com/dbcli)
+- [rich](https://github.com/willmcgugan/rich)
+- 

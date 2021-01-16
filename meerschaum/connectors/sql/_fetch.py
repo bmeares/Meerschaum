@@ -6,10 +6,6 @@
 Implement the Connector fetch() method
 """
 
-import datetime
-from dateutil import parser
-from meerschaum.utils.debug import dprint
-
 def dateadd_str(
         flavor : str = 'postgresql',
         datepart : str = 'day',
@@ -19,11 +15,14 @@ def dateadd_str(
     """
     Generate a DATEADD clause depending on flavor
     """
+    from meerschaum.utils.debug import dprint
+    from meerschaum.utils.packages import attempt_import
+    dateutil, datetime = attempt_import('dateutil', 'datetime')
     if not begin: return None
     begin_time = None
     if not isinstance(begin, datetime.datetime):
         try:
-            begin_time = parser.parse(begin)
+            begin_time = dateutil.parser.parse(begin)
         except Exception:
             begin_time = None
     else: begin_time = begin
@@ -55,7 +54,8 @@ def fetch(
         self,
         pipe : 'meerschaum.Pipe',
         begin : str = 'now',
-        debug : bool = False
+        debug : bool = False,
+        **Kw
     ) -> 'pd.DataFrame':
     """
     Execute the SQL definition and if datetime and backtrack_minutes are provided, append a
@@ -84,9 +84,11 @@ def fetch(
     from meerschaum.utils.debug import dprint
     from meerschaum.utils.warnings import warn, error
     from meerschaum.utils.misc import sql_item_name
+    from meerschaum.utils.packages import attempt_import
+    datetime = attempt_import('datetime')
 
     if 'columns' not in pipe.parameters or 'fetch' not in pipe.parameters:
-        warn(f"Parameters for '{pipe}' must include 'columns' and 'fetch'")
+        warn(f"Parameters for '{pipe}' must include 'columns' and 'fetch'", stack=False)
         return None
 
     datetime = None
@@ -123,4 +125,3 @@ def fetch(
         from meerschaum.utils.misc import parse_df_datetimes
         df = parse_df_datetimes(df, debug=debug)
     return df
-

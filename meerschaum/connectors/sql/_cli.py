@@ -23,7 +23,7 @@ def cli(
     """
     Launch an interactive CLI for the SQLConnector's flavor
     """
-    from meerschaum.utils.misc import attempt_import, run_python_package
+    from meerschaum.utils.packages import run_python_package, attempt_import
     from meerschaum.utils.debug import dprint
     from meerschaum.utils.warnings import error
     import sys, subprocess
@@ -40,7 +40,7 @@ def cli(
 
     ### open sqlalchemy engine URI or just database if sqlite
     cli_arg_str = self.DATABASE_URL
-    if self.flavor == 'sqlite': cli_arg_str = self.database + ".sqlite"
+    if self.flavor == 'sqlite': cli_arg_str = str(self.database)
 
     ### run the module in a subprocess because it calls sys.exit(), and __main__ does not
     ### work for these CLIs (something to do with Click?)

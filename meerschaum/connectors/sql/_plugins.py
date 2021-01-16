@@ -17,6 +17,10 @@ def register_plugin(
     """
 
     from meerschaum.utils.warnings import warn, error
+    from meerschaum.utils.packages import attempt_import
+    sqlalchemy = attempt_import('sqlalchemy')
+    from meerschaum.connectors.sql.tables import get_tables
+    plugins = get_tables(mrsm_instance=self, debug=debug)['plugins']
 
     old_id = self.get_plugin_id(plugin, debug=debug)
 
@@ -33,10 +37,6 @@ def register_plugin(
                 f"Version '{new_version}' of plugin '{plugin}' must be greater than existing version '{old_version}'."
             )
 
-    ### ensure plugins table exists
-    from meerschaum.connectors.sql.tables import get_tables
-    tables = get_tables(mrsm_instance=self, debug=debug)
-
     import json
     bind_variables = {
         'plugin_name' : plugin.name,
@@ -47,29 +47,15 @@ def register_plugin(
     }
 
     if old_id is None:
-        query = f"""
-        INSERT INTO plugins (
-            plugin_name,
-            version,
-            user_id,
-            attributes
-        ) VALUES (
-            %(plugin_name)s,
-            %(version)s,
-            %(user_id)s,
-            %(attributes)s
-        );
-        """
+        query = sqlalchemy.insert(plugins).values(**bind_variables)
     else:
-        query = f"""
-        UPDATE plugins
-        SET plugin_name = %(plugin_name)s',
-            version = %(version)s,
-            attributes = %(attributes)s'
-        WHERE plugin_id = %(plugin_id)s
-        """
+        query = (
+            sqlalchemy.update(plugins).
+            values(**bind_variables).
+            where(plugins.c.plugin_id == old_id)
+        )
 
-    result = self.exec(query, bind_variables, debug=debug)
+    result = self.exec(query, debug=debug)
     if result is None:
         return False, f"Failed to register plugin '{plugin}'"
     return True, f"Successfully registered plugin '{plugin}'"
@@ -81,14 +67,13 @@ def get_plugin_id(
     ) -> int:
     ### ensure plugins table exists
     from meerschaum.connectors.sql.tables import get_tables
-    tables = get_tables(mrsm_instance=self, debug=debug)
+    plugins = get_tables(mrsm_instance=self, debug=debug)['plugins']
+    from meerschaum.utils.packages import attempt_import
+    sqlalchemy = attempt_import('sqlalchemy')
 
-    query = f"""
-    SELECT plugin_id
-    FROM plugins
-    WHERE plugin_name = %s
-    """
-    return self.value(query, (plugin.name,), debug=debug)
+    query = sqlalchemy.select([plugins.c.plugin_id]).where(plugins.c.plugin_name == plugin.name)
+    
+    return self.value(query, debug=debug)
 
 def get_plugin_version(
         self,
@@ -97,14 +82,13 @@ def get_plugin_version(
     ) -> str:
     ### ensure plugins table exists
     from meerschaum.connectors.sql.tables import get_tables
-    tables = get_tables(mrsm_instance=self, debug=debug)
+    plugins = get_tables(mrsm_instance=self, debug=debug)['plugins']
+    from meerschaum.utils.packages import attempt_import
+    sqlalchemy = attempt_import('sqlalchemy')
 
-    query = f"""
-    SELECT version
-    FROM plugins
-    WHERE plugin_name = %s
-    """
-    return self.value(query, (plugin.name,), debug=debug)
+    query = sqlalchemy.select([plugins.c.version]).where(plugins.c.plugin_name == plugin.name)
+
+    return self.value(query, debug=debug)
 
 def get_plugin_user_id(
         self,
@@ -113,14 +97,13 @@ def get_plugin_user_id(
     ) -> str:
     ### ensure plugins table exists
     from meerschaum.connectors.sql.tables import get_tables
-    tables = get_tables(mrsm_instance=self, debug=debug)
+    plugins = get_tables(mrsm_instance=self, debug=debug)['plugins']
+    from meerschaum.utils.packages import attempt_import
+    sqlalchemy = attempt_import('sqlalchemy')
 
-    query = """
-    SELECT user_id
-    FROM plugins
-    WHERE plugin_name = %s
-    """
-    return self.value(query, (plugin.name,), debug=debug)
+    query = sqlalchemy.select([plugins.c.user_id]).where(plugins.c.plugin_name == plugin.name)
+
+    return self.value(query, debug=debug)
 
 def get_plugin_username(
         self,
@@ -129,17 +112,41 @@ def get_plugin_username(
     ) -> str:
     ### ensure plugins table exists
     from meerschaum.connectors.sql.tables import get_tables
-    tables = get_tables(mrsm_instance=self, debug=debug)
+    plugins = get_tables(mrsm_instance=self, debug=debug)['plugins']
+    users = get_tables(mrsm_instance=self, debug=debug)['users']
+    from meerschaum.utils.packages import attempt_import
+    sqlalchemy = attempt_import('sqlalchemy')
 
-    bind_variables = { 'plugin_name' : plugin.name, }
+    query = (
+        sqlalchemy.select([users.c.username]).
+        where(
+            users.c.users_id == plugins.c.user_id
+            and plugins.c.plugin_name == plugin.name
+        )
+    )
 
-    query = f"""
-    SELECT users.username
-    FROM plugins
-    INNER JOIN users ON users.user_id = plugins.user_id
-    WHERE plugin_name = %(plugin_name)s
-    """
-    return self.value(query, bind_variables, debug=debug)
+    #  query = f"""
+    #  SELECT users.username
+    #  FROM plugins
+    #  INNER JOIN users ON users.user_id = plugins.user_id
+    #  WHERE plugin_name = %(plugin_name)s
+    #  """
+    return self.value(query, debug=debug)
+
+def get_plugin_attributes(
+        self,
+        plugin : 'meerschaum.Plugin',
+        debug : bool = False
+    ) -> str:
+    ### ensure plugins table exists
+    from meerschaum.connectors.sql.tables import get_tables
+    plugins = get_tables(mrsm_instance=self, debug=debug)['plugins']
+    from meerschaum.utils.packages import attempt_import
+    sqlalchemy = attempt_import('sqlalchemy')
+
+    query = sqlalchemy.select([plugins.c.attributes]).where(plugins.c.plugin_name == plugin.name)
+
+    return self.value(query, debug=debug)
 
 def get_plugins(
         self,
@@ -149,15 +156,19 @@ def get_plugins(
     ) -> list:
     ### ensure plugins table exists
     from meerschaum.connectors.sql.tables import get_tables
-    tables = get_tables(mrsm_instance=self, debug=debug)
+    plugins = get_tables(mrsm_instance=self, debug=debug)['plugins']
+    from meerschaum.utils.packages import attempt_import
+    sqlalchemy = attempt_import('sqlalchemy')
 
-    bind_variables = {'user_id' : user_id}
+    query = sqlalchemy.select([plugins.c.plugin_name])
+    if user_id is not None: query = query.where(plugins.c.user_id == user_id)
 
-    q = f"""
-    SELECT plugin_name
-    FROM plugins
-    """ + ("""
-    WHERE user_id = %(user_id)s
-    """ if user_id is not None else "")
-    return list(self.read(q, bind_variables, debug=debug)['plugin_name'])
+    #  q = f"""
+    #  SELECT plugin_name
+    #  FROM plugins
+    #  """ + ("""
+    #  WHERE user_id = %(user_id)s
+    #  """ if user_id is not None else "")
+
+    return list(self.read(q, debug=debug)['plugin_name'])
 

@@ -21,7 +21,7 @@ def fetch(
     from meerschaum.utils.warnings import warn, error
 
     if 'fetch' not in pipe.parameters:
-        warn(f"Missing 'fetch' parameters for Pipe '{pipe}'")
+        warn(f"Missing 'fetch' parameters for Pipe '{pipe}'.", stack=False)
         return None
 
     instructions = pipe.parameters['fetch']
@@ -45,3 +45,4 @@ def fetch(
         mrsm_instance = self
     )
     return p.get_data(begin=begin, debug=debug)
+

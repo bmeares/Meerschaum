@@ -21,7 +21,8 @@ def sync_configs(
         return
     from meerschaum.config._patch import apply_patch_to_config
     import meerschaum.config
-    from meerschaum.utils.misc import reload_package, search_and_substitute_config
+    from meerschaum.utils.packages import reload_package
+    from meerschaum.utils.misc import search_and_substitute_config
     if not os.path.isfile(config_path) or not os.path.isfile(sub_path): return
 
     def read_config(path):

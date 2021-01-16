@@ -30,10 +30,17 @@ def sync(
         and merge the two, only keeping the unseen data.
     """
     from meerschaum.utils.warnings import warn
-    from meerschaum.utils.misc import attempt_import
     import time
     if (callback is not None or error_callback is not None) and blocking:
         warn("Callback functions are only executed when blocking = False. Ignoring...")
+    kw['force'] = force
+    kw['retries'] = retries
+    kw['min_seconds'] = min_seconds
+    kw['check_existing'] = check_existing
+    kw['blocking'] = blocking
+    kw['workers'] = workers
+    kw['callback'] = callback
+    kw['error_callback'] = error_callback
     def _sync(p, df = None):
         ### ensure that Pipe is registered
         if not p.id:
@@ -48,9 +55,17 @@ def sync(
         if df is None:
             try:
                 if p.connector.type == 'plugin' and p.connector.sync is not None:
-                    return p.connector.sync(p, debug=debug, **kw)
-            except:
-                pass
+                    from meerschaum.utils.packages import activate_venv, deactivate_venv
+                    activate_venv(p.connector.label, debug=debug)
+                    return_tuple = p.connector.sync(p, debug=debug, **kw)
+                    deactivate_venv(p.connector.label, debug=debug)
+                    if not isinstance(return_tuple, tuple):
+                        return_tuple = False, f"Plugin '{p.connector.label}' returned non-tuple value: {return_tuple}"
+                    return return_tuple
+                    
+            except Exception as e:
+                msg = f"Failed to sync Pipe '{p}' with exception: '" + str(e) + "'"
+                return False, msg
 
         ### default: fetch new data via the connector.
         ### If new data is provided, skip fetching

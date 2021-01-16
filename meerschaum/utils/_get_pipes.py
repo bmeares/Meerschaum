@@ -99,6 +99,7 @@ def get_pipes(
         params = params,
         debug = debug
     )
+    if result is None: error(f"Unable to build pipes!")
    
     ### populate the `pipes` dictionary with Pipes based on the keys
     ### obtained from the chosen `method`.

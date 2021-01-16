@@ -26,6 +26,7 @@ with package_root_context_manager as file_path:
 ### file path of the resources package
 #  RESOURCES_PATH = Path(os.path.join(CONFIG_ROOT_PATH, 'config', 'resources'))
 RESOURCES_PATH = CONFIG_ROOT_PATH
+VIRTENV_RESOURCES_PATH = Path(os.path.join(RESOURCES_PATH, 'venvs'))
 
 CONFIG_FILENAME = "config.yaml"
 CONFIG_PATH = Path(os.path.join(RESOURCES_PATH, CONFIG_FILENAME))
@@ -79,6 +80,7 @@ PLUGINS_INIT_PATH.parent.mkdir(parents=True, exist_ok=True)
 PLUGINS_INIT_PATH.touch()
 
 SQLITE_DB_PATH = Path(os.path.join(RESOURCES_PATH, 'mrsm_local.db'))
+
 
 
 ### NOTE: This must be the bottom of the module

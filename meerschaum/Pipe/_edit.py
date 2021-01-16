@@ -9,6 +9,7 @@ Edit a Pipe's parameters here.
 def edit(
         self,
         patch : bool = False,
+        interactive : bool = True,
         debug : bool = False,
         **kw
     ):
@@ -16,6 +17,8 @@ def edit(
     Edit a Pipe's configuration.
     If `patch` is True, update parameters by cascading rather than overwriting.
     """
+    if not interactive:
+        return self.instance_connector.edit_pipe(self, patch=patch, debug=debug, **kw)
     from meerschaum.config._paths import PIPES_RESOURCES_PATH
     from meerschaum.utils.misc import edit_file
     import pathlib, os
@@ -59,7 +62,7 @@ def edit(
     self.parameters = file_parameters
 
     if debug:
-        import pprintpp
-        pprintpp.pprint(self.parameters)
+        from meerschaum.utils.formatting import pprint
+        pprint(self.parameters)
 
-    return self.instance_connector.edit_pipe(self, patch=patch, debug=debug)
+    return self.instance_connector.edit_pipe(self, patch=patch, debug=debug, **kw)

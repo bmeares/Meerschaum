@@ -23,11 +23,17 @@ def get_tables(
     Substantiate and create sqlalchemy tables
     """
     from meerschaum.utils.debug import dprint
-    from meerschaum.utils.warnings import warn
-    from meerschaum.utils.misc import attempt_import, parse_instance_keys
+    from meerschaum.utils.warnings import warn, error
+    from meerschaum.utils.misc import parse_instance_keys
+    from meerschaum.utils.packages import attempt_import
     from meerschaum import get_connector
 
-    sqlalchemy, sqlalchemy_dialects_postgresql = attempt_import('sqlalchemy', 'sqlalchemy.dialects.postgresql')
+    sqlalchemy, sqlalchemy_dialects_postgresql = attempt_import(
+        'sqlalchemy',
+        'sqlalchemy.dialects.postgresql'
+    )
+    if not sqlalchemy:
+        error(f"Failed to import sqlalchemy. Is sqlalchemy installed?")
 
     if mrsm_instance is None:
         conn = get_connector(debug=debug)
@@ -51,22 +57,22 @@ def get_tables(
             params_type = sqlalchemy_dialects_postgresql.JSON
 
         _tables = {
-            'metrics' : sqlalchemy.Table(
-                'metrics',
-                conn.metadata,
-                sqlalchemy.Column('metric_id', sqlalchemy.Integer, primary_key=True),
-                sqlalchemy.Column('connector_keys', sqlalchemy.String, index=True),
-                sqlalchemy.Column('metric_key', sqlalchemy.String, index=True),
-                sqlalchemy.Column('metric_name', sqlalchemy.String)
-            ),
-            'locations' : sqlalchemy.Table(
-                'locations',
-                conn.metadata,
-                sqlalchemy.Column('location_id', sqlalchemy.Integer, primary_key=True),
-                sqlalchemy.Column('connector_keys', sqlalchemy.String, index=True),
-                sqlalchemy.Column('location_key', sqlalchemy.String, index=True),
-                sqlalchemy.Column('location_name', sqlalchemy.String)
-            ),
+            #  'metrics' : sqlalchemy.Table(
+                #  'metrics',
+                #  conn.metadata,
+                #  sqlalchemy.Column('metric_id', sqlalchemy.Integer, primary_key=True),
+                #  sqlalchemy.Column('connector_keys', sqlalchemy.String, index=True),
+                #  sqlalchemy.Column('metric_key', sqlalchemy.String, index=True),
+                #  sqlalchemy.Column('metric_name', sqlalchemy.String)
+            #  ),
+            #  'locations' : sqlalchemy.Table(
+                #  'locations',
+                #  conn.metadata,
+                #  sqlalchemy.Column('location_id', sqlalchemy.Integer, primary_key=True),
+                #  sqlalchemy.Column('connector_keys', sqlalchemy.String, index=True),
+                #  sqlalchemy.Column('location_key', sqlalchemy.String, index=True),
+                #  sqlalchemy.Column('location_name', sqlalchemy.String)
+            #  ),
             'users' : sqlalchemy.Table(
                 'users',
                 conn.metadata,

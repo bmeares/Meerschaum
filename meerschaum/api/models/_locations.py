@@ -6,10 +6,10 @@
 Locations model
 """
 
-from meerschaum.utils.misc import attempt_import
-pydantic = attempt_import('pydantic')
+#  from meerschaum.utils.misc import attempt_import
+#  pydantic = attempt_import('pydantic')
 
-class Location(pydantic.BaseModel):
-    connector_keys : str
-    location_key : str
-    location_name : str
+#  class Location(pydantic.BaseModel):
+    #  connector_keys : str
+    #  location_key : str
+    #  location_name : str

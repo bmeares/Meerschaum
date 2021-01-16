@@ -23,7 +23,8 @@ def edit_config(
     import meerschaum.config
     from meerschaum.config import config as cf
     from meerschaum.config._paths import CONFIG_PATH
-    from meerschaum.utils.misc import reload_package, edit_file
+    from meerschaum.utils.packages import reload_package
+    from meerschaum.utils.misc import edit_file
     from meerschaum.utils.debug import dprint
 
     if params is not None:
@@ -54,7 +55,7 @@ def write_config(
         config_dict = config
 
     if debug:
-        from pprintpp import pprint
+        from meerschaum.utils.formatting import pprint
         dprint(f"Writing configuration to {CONFIG_PATH:}")
         pprint(config_dict, stream=sys.stderr)
     with open(CONFIG_PATH, 'w') as f:
@@ -152,7 +153,7 @@ def write_default_config(
     if os.path.isfile(DEFAULT_CONFIG_PATH): os.remove(DEFAULT_CONFIG_PATH)
     if os.path.isfile(PATCH_PATH): os.remove(PATCH_PATH)
     if debug:
-        from pprintpp import pprint
+        from meerschaum.utils.formatting import pprint
         pprint(default_config, stream=sys.stderr)
 
     config_copy = dict()

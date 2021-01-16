@@ -27,10 +27,13 @@ def login(
     from meerschaum.utils.warnings import warn, info, error
     from meerschaum import User
     import json, datetime
-    login_data = {
-        'username' : self.username,
-        'password' : self.password,
-    }
+    try:
+        login_data = {
+            'username' : self.username,
+            'password' : self.password,
+        }
+    except:
+        return False, f"Please provide a username and password for '{self}' with `edit config`."
     response = self.post('/mrsm/login', data=login_data, use_token=False)
     if response:
         msg = f"Successfully logged into '{self}' as user '{login_data['username']}'"
@@ -47,7 +50,7 @@ def login(
             f"Failed to log into '{self}' as user '{login_data['username']}'. " +
             f"Please verify login details for connector '{self}' with `edit config`."
         )
-        warn(msg)
+        warn(msg, stack=False)
 
     return response.__bool__(), msg
 

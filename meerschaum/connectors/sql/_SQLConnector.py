@@ -30,6 +30,7 @@ class SQLConnector(Connector):
         sync_pipe,
         get_sync_time,
         pipe_exists,
+        get_pipe_rowcount,
     )
     from ._plugins import (
         register_plugin,
@@ -37,7 +38,8 @@ class SQLConnector(Connector):
         get_plugin_version,
         get_plugins,
         get_plugin_user_id,
-        get_plugin_username
+        get_plugin_username,
+        get_plugin_attributes,
     )
     from ._users import (
         register_user,
@@ -60,15 +62,16 @@ class SQLConnector(Connector):
         """
         Build the SQLConnector engine and connect to the database
         """
-        from meerschaum.utils.misc import attempt_import
-        databases, sqlalchemy, sqlalchemy_orm, asyncio = attempt_import(
-            'databases',
-            'sqlalchemy',
-            'sqlalchemy.orm',
-            'asyncio'
-        )
         ### set __dict__ in base class
-        super().__init__('sql', label=label, inherit_default=(label != 'local'), **kw)
+        super().__init__('sql', label=label, **kw)
+        if self.flavor == 'sqlite':
+            self._reset_attributes()
+            self._set_attributes(
+                'sql',
+                label = label,
+                inherit_default = False,
+                **kw
+            )
 
         ### ensure flavor and label are set accordingly
         if 'flavor' not in self.__dict__ and flavor is None:
@@ -125,7 +128,7 @@ class SQLConnector(Connector):
 
     @property
     def metadata(self):
-        from meerschaum.utils.misc import attempt_import
+        from meerschaum.utils.packages import attempt_import
         sqlalchemy = attempt_import('sqlalchemy')
         if '_metadata' not in self.__dict__:
             self._metadata = sqlalchemy.MetaData(self.engine)
@@ -133,7 +136,7 @@ class SQLConnector(Connector):
 
     @property
     def db(self):
-        from meerschaum.utils.misc import attempt_import
+        from meerschaum.utils.packages import attempt_import
         databases = attempt_import('databases')
         if '_db' not in self.__dict__:
             self._db = databases.Database(self.DATABASE_URL)

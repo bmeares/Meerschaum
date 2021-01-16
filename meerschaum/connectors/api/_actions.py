@@ -7,7 +7,6 @@ Functions to interact with /mrsm/actions
 """
 
 from meerschaum.utils.debug import dprint
-import requests, json, sys
 
 def get_actions(
         self,
@@ -34,6 +33,9 @@ def do_action(
     
     Returns: tuple (succeeded : bool, message : str)
     """
+    from meerschaum.utils.packages import attempt_import
+    json = attempt_import('json')
+    import sys
 
     if sysargs is not None and action[0] == '':
         from meerschaum.actions.arguments import parse_arguments
@@ -51,7 +53,7 @@ def do_action(
     r_url = f'/mrsm/actions/{root_action}'
     
     if debug:
-        from pprintpp import pprint
+        from meerschaum.utils.formatting import pprint
         dprint(f"Sending data to '{self.url + r_url}':")
         pprint(json_dict, stream=sys.stderr)
 

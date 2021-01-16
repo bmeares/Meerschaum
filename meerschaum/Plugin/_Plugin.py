@@ -173,8 +173,11 @@ class Plugin:
                 if debug: dprint(f"Attempting to install plugin '{self}' version '{new_version}'...")
                 break
 
-        from packaging import version as packaging_version
-        is_new_version = (packaging_version.parse(old_version) <= packaging_version.parse(new_version))
+        from meerschaum.utils.packages import attempt_import
+        packaging_version = attempt_import('packaging.version')
+        is_new_version = (
+            packaging_version.parse(old_version) <= packaging_version.parse(new_version)
+        )
         
         success_msg = f"Successfully installed plugin '{self}'"
         success = None
@@ -244,10 +247,11 @@ class Plugin:
 
         return success, msg
 
-    def setup(self, *args, debug : bool = False, **kw):
+    def setup(self, *args, debug : bool = False, **kw) -> tuple:
         """
         If exists, run the plugin's setup() function
         """
+        from meerschaum.utils.packages import activate_venv, deactivate_venv
         from meerschaum.utils.debug import dprint
         import inspect
         _setup = None
@@ -258,7 +262,6 @@ class Plugin:
 
         ### assume success if no setup() is found (not necessary)
         if _setup is None: return True
-
 
         sig = inspect.signature(_setup)
         has_debug, has_kw = ('debug' in sig.parameters), False
@@ -271,30 +274,44 @@ class Plugin:
         if has_kw: _kw.update(kw)
         if has_debug: _kw['debug'] = debug
 
-        if debug: dprint(f"Running setup for plugin '{self}'")
+        if debug: dprint(f"Running setup for plugin '{self}'...")
         try:
-            return _setup(*args, **_kw)
+            activate_venv(venv=self.name, debug=debug)
+            return_tuple = _setup(*args, **_kw)
+            deactivate_venv(venv=self.name, debug=debug)
         except Exception as e:
             return False, str(e)
 
+        if isinstance(return_tuple, tuple):
+            return return_tuple
+        if isinstance(return_tuple, bool):
+            return return_tuple, f"Setup for Plugin '{self.name}' did not return a message."
+        if return_tuple is None:
+            return False, f"Setup for Plugin '{self.name}' returned None."
+        return False, f"Unknown return value from setup for Plugin '{self.name}': {return_tuple}"
+
     @property
     def dependencies(self):
+        from meerschaum.utils.packages import activate_venv, deactivate_venv
         import inspect
+        activate_venv(venv=self.name)
         required = []
         for name, val in inspect.getmembers(self.module):
             if name == 'required':
                 required = val
+                break
+        deactivate_venv(venv=self.name)
         return required
 
     def install_dependencies(self, debug : bool = False) -> bool:
         """
         If specified, install dependencies
         """
-        from meerschaum.utils.misc import pip_install
+        from meerschaum.utils.packages import pip_install
         from meerschaum.utils.debug import dprint
         if self.dependencies:
             if debug: dprint(f"Installing dependencies: {self.dependencies}")
-            return pip_install(*self.dependencies)
+            return pip_install(*self.dependencies, venv=self.name, debug=debug)
         return True
 
     def __str__(self):

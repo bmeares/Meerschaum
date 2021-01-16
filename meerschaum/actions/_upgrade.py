@@ -21,7 +21,8 @@ def upgrade(
     """
     from meerschaum.utils.debug import dprint
     from meerschaum.actions import actions
-    from meerschaum.utils.misc import run_python_package, yes_no, attempt_import
+    from meerschaum.utils.misc import yes_no
+    from meerschaum.utils.packages import run_python_package, attempt_import
 
     is_stack_running = False
     client = None

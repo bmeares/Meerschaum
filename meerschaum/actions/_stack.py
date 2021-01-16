@@ -24,7 +24,8 @@ def stack(
     from subprocess import call
     from meerschaum.config.stack import get_necessary_files, write_stack
     from meerschaum.config._paths import STACK_COMPOSE_PATH
-    from meerschaum.utils.misc import yes_no, reload_package
+    #  from meerschaum.utils.packages import reload_package
+    from meerschaum.utils.misc import yes_no
     import meerschaum.config
     from meerschaum.config import get_config
     from meerschaum.utils.debug import dprint

@@ -81,3 +81,18 @@ def get_plugins(
     if not isinstance(plugins, list): error(response.text)
     return plugins
 
+def get_plugin_attributes(
+        self,
+        plugin : 'meerschaum.Plugin',
+        debug : bool = False
+    ) -> list:
+    """
+    Return attributes of a registered plugin
+    """
+    import json
+    from meerschaum.utils.warnings import warn, error
+    response = self.get(f'/mrsm/plugins/{plugin.name}/attributes')
+    attributes = json.loads(response.text)
+    if not isinstance(attributes, dict): error(response.text)
+    return attributes
+

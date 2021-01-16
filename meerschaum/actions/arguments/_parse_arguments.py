@@ -60,7 +60,7 @@ def parse_arguments(sysargs : list) -> dict:
     if args.config is not None:
         from meerschaum.config._patch import write_patch, apply_patch_to_config
         from meerschaum.config._paths import PATCH_PATH
-        from meerschaum.utils.misc import reload_package
+        from meerschaum.utils.packages import reload_package
         import os, meerschaum.config
         write_patch(args.config)
         reload_package(meerschaum.config)

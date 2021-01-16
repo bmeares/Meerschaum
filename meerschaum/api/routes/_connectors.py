@@ -6,12 +6,12 @@
 Register and show connectors
 """
 
-from meerschaum.api import fast_api, endpoints
+from meerschaum.api import app, endpoints
 from fastapi import Body, HTTPException
 
 endpoint = endpoints['mrsm'] + '/connectors'
 
-@fast_api.get(endpoint)
+@app.get(endpoint)
 def get_connectors(type : str = None):
     from meerschaum.config import config as cf, get_config
     if type is not None and type not in get_config('meerschaum', 'connectors'):
@@ -30,7 +30,7 @@ def get_connectors(type : str = None):
     if type is not None: return response_dict[type]
     return response_dict
 
-@fast_api.get(endpoint + "/{type}")
+@app.get(endpoint + "/{type}")
 def get_connectors_by_type(type : str):
     return get_connectors(type)
 

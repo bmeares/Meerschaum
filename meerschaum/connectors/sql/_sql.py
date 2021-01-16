@@ -16,14 +16,15 @@ def read(
         query_or_table : str,
         params : dict = {},
         chunksize : int = -1,
+        silent : bool = False,
         debug : bool = False,
         **kw
     ) -> 'pd.DataFrame':
     """
     Read a SQL query or table into a pandas dataframe.
     """
-    from meerschaum.utils.misc import attempt_import, sql_item_name
-    sqlparse = attempt_import("sqlparse")
+    from meerschaum.utils.misc import sql_item_name
+    from meerschaum.utils.packages import attempt_import
     sqlalchemy = attempt_import("sqlalchemy")
     chunksize = chunksize if chunksize != -1 else self.sys_config['chunksize']
     if debug:
@@ -32,15 +33,25 @@ def read(
         dprint(query_or_table)
         dprint(f"Fetching with chunksize: {chunksize}")
 
-    ### format with sqlalchemy
-    if ' ' not in query_or_table:
+    ### This might be sqlalchemy object or the string of a table name.
+    ### We check for spaces and quotes to see if it might be a weird table.
+    if (
+        ' ' not in str(query_or_table)
+        or (
+            ' ' in str(query_or_table)
+            and str(query_or_table).startswith('"')
+            and str(query_or_table).endswith('"')
+        )
+    ):
         if self.flavor in ('postgresql', 'timescaledb'):
-            query_or_table = sql_item_name(query_or_table, self.flavor)
+            query_or_table = sql_item_name(str(query_or_table), self.flavor)
         if debug: dprint(f"Reading from table {query_or_table}")
         formatted_query = str(sqlalchemy.text("SELECT * FROM " + str(query_or_table)))
     else:
-        formatted_query = str(sqlalchemy.text(query_or_table))
-    formatted_query = sqlparse.format(formatted_query)
+        try:
+            formatted_query = str(sqlalchemy.text(query_or_table))
+        except:
+            formatted_query = query_or_table
 
     try:
         chunk_generator = self.pd.read_sql(
@@ -50,9 +61,9 @@ def read(
             chunksize = chunksize
         )
     except Exception as e:
-        import inspect, pprintpp
+        import inspect
         if debug: dprint(f"Failed to execute query:\n\n{query_or_table}\n\n")
-        if debug: warn(str(e))
+        if not silent: warn(str(e))
 
         return None
 
@@ -103,6 +114,7 @@ def exec(
         self,
         query : str,
         *args,
+        silent : bool = False,
         debug : bool = False,
         **kw
     ) -> 'resultProxy or None':
@@ -113,9 +125,8 @@ def exec(
 
     If inserting data, please use bind variables to avoid SQL injection!
     """
-    from meerschaum.utils.misc import attempt_import
-    sqlparse = attempt_import("sqlparse")
-    query = sqlparse.format(query)
+    from meerschaum.utils.debug import dprint
+    from meerschaum.utils.packages import attempt_import
     sqlalchemy = attempt_import("sqlalchemy")
     if debug: dprint("Executing query:\n" + f"{query}")
     try:
@@ -126,12 +137,10 @@ def exec(
                 **kw
             )
     except Exception as e:
-        import inspect, pprintpp
+        import inspect
 
-        print(f"Failed to execute query:\n\n{query}\n\n")
-        if debug: warn(str(e))
-        #  print(f"Stack:")
-        #  pprintpp.pprint(inspect.stack())
+        if debug: dprint(f"Failed to execute query:\n\n{query}\n\n")
+        if not silent: warn(str(e))
         result = None
 
     return result
@@ -144,6 +153,7 @@ def to_sql(
         if_exists : str = 'replace',
         method : str = "",
         chunksize : int = -1,
+        silent : bool = False,
         debug : bool = False,
         as_tuple : bool = False,
         **kw
@@ -189,6 +199,14 @@ def to_sql(
         msg = f"Inserting {len(df)} rows with chunksize: {chunksize}..."
         print(msg, end="", flush=True)
 
+    ### filter out non-pandas args
+    import inspect
+    to_sql_params = inspect.signature(df.to_sql).parameters
+    to_sql_kw = dict()
+    for k, v in kw.items():
+        if k in to_sql_params:
+            to_sql_kw[k] = v
+
     try:
         df.to_sql(
             name = name,
@@ -197,11 +215,11 @@ def to_sql(
             if_exists = if_exists,
             method = method,
             chunksize = chunksize,
-            **kw
+            **to_sql_kw
         )
         success = True
     except Exception as e:
-        if debug: warn(str(e))
+        if not silent: warn(str(e))
         success, msg = None, str(e)
 
     end = time.time()

@@ -2,9 +2,6 @@
 # -*- coding: utf-8 -*-
 # vim:fenc=utf-8
 
-### set warnings filter
-import meerschaum.utils.warnings
-
 ### load metadata
 from meerschaum.config import __version__
 from meerschaum.config import __doc__
@@ -12,7 +9,7 @@ from meerschaum.config import __doc__
 ### TODO edit import_children to recursively lazy import submodules
 ### lazy import submodules
 #  from meerschaum.utils.misc import import_children
-from meerschaum.utils.misc import lazy_import
+from meerschaum.utils.packages import lazy_import
 actions = lazy_import('meerschaum.actions')
 connectors = lazy_import('meerschaum.connectors')
 utils = lazy_import('meerschaum.utils')

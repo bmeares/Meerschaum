@@ -40,8 +40,8 @@ def get_connector(
     You can create new connectors if enough parameters are provided for the given type and flavor.
     Example: flavor='sqlite', database='newdb'
     """
+    from meerschaum.config import get_config
     if type is None and label is None:
-        from meerschaum.config import get_config
         from meerschaum.utils.misc import parse_instance_keys
         default_instance_keys = get_config('meerschaum', 'instance', patch=True)
         ### recursive call to get_connector
@@ -53,9 +53,23 @@ def get_connector(
 
     global types, connectors
 
+    ### type might actually be a label. Check if so and raise a warning.
     if type not in connectors:
-        print(f"Cannot create Connector of type '{type}'")
-        return False        
+        possibilities, poss_msg = [], ""
+        for _type in get_config('meerschaum', 'connectors'):
+            if type in get_config('meerschaum', 'connectors', _type):
+                possibilities.append(f"{_type}:{type}")
+        if len(possibilities) > 0:
+            poss_msg = " Did you mean"
+            for poss in possibilities[:-1]:
+                poss_msg += f" '{poss}',"
+            if poss_msg.endswith(','): poss_msg = poss_msg[:-1]
+            if len(possibilities) > 1: poss_msg += " or"
+            poss_msg += f" '{possibilities[-1]}'?"
+
+        from meerschaum.utils.warnings import warn
+        warn(f"Cannot create Connector of type '{type}'." + poss_msg, stack=False)
+        return None
 
     if len(types) == 0:
         from meerschaum.connectors.sql import SQLConnector
@@ -63,9 +77,9 @@ def get_connector(
         from meerschaum.connectors.mqtt import MQTTConnector
         from meerschaum.connectors.plugin import PluginConnector
         types = {
-            'api'  : APIConnector,
-            'sql'  : SQLConnector,
-            'mqtt' : MQTTConnector,
+            'api'    : APIConnector,
+            'sql'    : SQLConnector,
+            'mqtt'   : MQTTConnector,
             'plugin' : PluginConnector,
         }
     
@@ -98,13 +112,12 @@ def get_connector(
             refresh = True
 
     ### only create an object if refresh is True (can be manually specified, otherwise determined above)
+    from meerschaum.utils.warnings import error
     import traceback
+    error_msg = None
     if refresh:
-        try:
-            conn = types[type](label=label, debug=debug, **kw)
-        except:
-            print(traceback.print_exc())
-            return False
+        ### will raise an error if configuration is incorrect / missing
+        conn = types[type](label=label, debug=debug, **kw)
         connectors[type][label] = conn
 
     return connectors[type][label]

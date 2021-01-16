@@ -8,5 +8,7 @@ These include tools from primary utilities (get_pipes)
 to miscellaneous helper functions.
 """
 
-from meerschaum.utils.misc import import_children
+from meerschaum.utils.packages import import_children
 import_children()
+
+

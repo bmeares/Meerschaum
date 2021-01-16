@@ -63,116 +63,6 @@ def choose_subaction(
     del kw['action'][0]
     return options[choice](**kw)
 
-def get_modules_from_package(
-        package : 'package',
-        names : bool = False,
-        recursive : bool = False,
-        lazy : bool = False,
-        debug : bool = False
-    ):
-    """
-    Find and import all modules in a package.
-
-    Returns: either list of modules or tuple of lists
-    
-    names = False (default) : modules
-    names = True            : (__all__, modules)
-    """
-    from meerschaum.utils.debug import dprint
-    from os.path import dirname, join, isfile, isdir, basename
-    import glob, importlib
-
-    if recursive: pattern = '*'
-    else: pattern = '*.py'
-    module_names = glob.glob(join(dirname(package.__file__), pattern), recursive=recursive)
-    _all = [
-        basename(f)[:-3] if isfile(f) else basename(f)
-            for f in module_names
-                if (isfile(f) or isdir(f))
-                    and not f.endswith('__init__.py')
-                    and not f.endswith('__pycache__')
-    ]
-
-    if debug: dprint(_all)
-    modules = []
-    for module_name in [package.__name__ + "." + mod_name for mod_name in _all]:
-        ### there's probably a better way than a try: catch but it'll do for now
-        try:
-            if lazy:
-                modules.append(lazy_import(module_name))
-            else:
-                modules.append(importlib.import_module(module_name))
-        except Exception as e:
-            if debug: dprint(e)
-            pass
-    if names:
-        return _all, modules
-    return modules
-
-def import_children(
-        package : 'package' = None,
-        package_name : str = None,
-        types : list = ['method', 'builtin', 'function', 'class', 'module'],
-        lazy : bool = True,
-        recursive : bool = False,
-        debug : bool = False
-    ) -> list:
-    """
-    Import all functions in a package to its __init__.
-    package : package (default None)
-        Package to import its functions into.
-        If None (default), use parent
-    
-    package_name : str (default None)
-        Name of package to import its functions into
-        If None (default), use parent
-
-    types : list
-        types of members to return.
-        Default : ['method', 'builtin', 'class', 'function', 'package', 'module']
-
-    Returns: list of members
-    """
-    import sys, inspect
-    from meerschaum.utils.debug import dprint
-    
-    ### if package_name and package are None, use parent
-    if package is None and package_name is None:
-        package_name = inspect.stack()[1][0].f_globals['__name__']
-
-    ### populate package or package_name from other other
-    if package is None:
-        package = sys.modules[package_name]
-    elif package_name is None:
-        package_name = package.__name__
-
-    ### Set attributes in sys module version of package.
-    ### Kinda like setting a dictionary
-    ###   functions[name] = func
-    modules = get_modules_from_package(package, recursive=recursive, lazy=lazy, debug=debug)
-    _all, members = [], []
-    objects = []
-    for module in modules:
-        _objects = []
-        for ob in inspect.getmembers(module):
-            for t in types:
-                ### ob is a tuple of (name, object)
-                if getattr(inspect, 'is' + t)(ob[1]):
-                    _objects.append(ob)
-
-        if 'module' in types:
-            _objects.append((module.__name__.split('.')[0], module))
-        objects += _objects
-    for ob in objects:
-        setattr(sys.modules[package_name], ob[0], ob[1])
-        _all.append(ob[0])
-        members.append(ob[1])
-
-    if debug: dprint(_all)
-    ### set __all__ for import *
-    setattr(sys.modules[package_name], '__all__', _all)
-    return members
-
 def generate_password(
         length : int = 12
     ):
@@ -193,51 +83,17 @@ def yes_no(
     
     Returns bool (answer)
     """
+    from meerschaum.utils.warnings import error
     from prompt_toolkit import prompt
     ending = f" {wrappers[0]}" + "/".join(
                 [ o.upper() if o.lower() == default.lower() else o.lower() for o in options ]
                 ) + f"{wrappers[1]} "
-    answer = prompt(question + ending)
+    try:
+        answer = prompt(question + ending)
+    except:
+        error(f"Error getting response.", stack=False)
     if answer == "": answer = default
     return answer.lower() == options[0].lower()
-
-def reload_package(
-        package : 'package',
-        lazy : bool = False,
-        debug : bool = False,
-        **kw
-    ):
-    """
-    Recursively load a package's subpackages, even if they were not previously loaded
-    """
-    import os, types, importlib, sys
-    from meerschaum.utils.debug import dprint
-    assert(hasattr(package, "__package__"))
-    fn = package.__file__
-    fn_dir = os.path.dirname(fn) + os.sep
-    module_visit = {fn}
-    del fn
-
-    def reload_recursive_ex(module):
-        import os, types, importlib
-        from meerschaum.utils.debug import dprint
-        ### forces import of lazily-imported modules
-        del sys.modules[module.__name__]
-        module = __import__(module.__name__)
-        module = importlib.import_module(module.__name__)
-        _module = importlib.reload(module)
-        sys.modules[module.__name__] = _module
-
-        for module_child in get_modules_from_package(module, recursive=True, lazy=lazy):
-            if isinstance(module_child, types.ModuleType) and hasattr(module_child, '__name__'):
-                fn_child = getattr(module_child, "__file__", None)
-                if (fn_child is not None) and fn_child.startswith(fn_dir):
-                    if fn_child not in module_visit:
-                        if debug: dprint(f"reloading: {fn_child} from {module}")
-                        module_visit.add(fn_child)
-                        reload_recursive_ex(module_child)
-
-    return reload_recursive_ex(package)
 
 def is_int(s):
     """
@@ -378,71 +234,6 @@ def search_and_substitute_config(
     ### parse back into dict
     return yaml.safe_load(haystack)
 
-def is_installed(
-        name : str
-    ) -> bool:
-    """
-    Check whether a package is installed.
-    name : str
-        Name of the package in question
-    """
-    import importlib.util
-    return importlib.util.find_spec(name) is None
-
-def attempt_import(
-        *names : list,
-        lazy : bool = True,
-        warn : bool = True
-    ) -> 'module or tuple of modules':
-    """
-    Raise a warning if packages are not installed; otherwise import and return modules.
-    If lazy = True, return lazy-imported modules.
-
-    Returns tuple of modules if multiple names are provided, else returns one module.
-
-    Examples:
-        pandas, sqlalchemy = attempt_import('pandas', 'sqlalchemy')
-        pandas = attempt_import('pandas')
-    """
-    from meerschaum.utils.warnings import warn as warn_function
-    import importlib, importlib.util
-
-    modules = []
-    for name in names:
-        if importlib.util.find_spec(name) is None and warn:
-            warn_function(
-                (f"\n\nMissing package '{name}'; features will not work correctly. "
-                f"\n\nRun `pip install {name}`.\n"),
-                ImportWarning,
-                stacklevel = 3
-            )
-            modules.append(None)
-        else: ### package is installed but might not be available (e.g. virtualenv)
-            ### determine the import method (lazy vs normal)
-            if not lazy: import_method = importlib.import_module if not lazy else lazy_import
-            try:
-                mod = importlib.import_module(name)
-            except:
-                mod = None
-
-            modules.append(mod)
-    modules = tuple(modules)
-    if len(modules) == 1: return modules[0]
-    return modules
-
-def lazy_import(
-        name : str,
-        local_name : str = None
-    ):
-    """
-    Lazily import a package
-    Uses the tensorflow LazyLoader implementation (Apache 2.0 License)
-    """
-    from meerschaum.utils.lazy_loader import LazyLoader
-    if local_name is None:
-        local_name = name
-    return LazyLoader(local_name, globals(), name)
-
 def edit_file(
         path : 'pathlib.Path',
         default_editor : str = 'pyvim',
@@ -455,6 +246,7 @@ def edit_file(
     import os
     from subprocess import call
     from meerschaum.utils.debug import dprint
+    from meerschaum.utils.packages import run_python_package
     try:
         EDITOR = os.environ.get('EDITOR', default_editor)
         if debug: dprint(f"Opening file '{path}' with editor '{EDITOR}'") 
@@ -462,44 +254,34 @@ def edit_file(
     except Exception as e: ### can't open with default editors
         if debug: dprint(e)
         if debug: dprint('Failed to open file with system editor. Falling back to pyvim...')
-        run_python_package('pyvim', [path])
+        run_python_package('pyvim', [path], debug=debug)
 
-def run_python_package(
-        package_name : str,
-        args : list = []
-    ):
-    """
-    Runs an installed python package.
-    E.g. Translates to `/usr/bin/python -m [package]`
-    """
-    import sys
-    from subprocess import call
-    command = [sys.executable, '-m', package_name] + args
-    return call(command)
-
-def pip_install(*packages : list, args : list = []):
-    """
-    Install pip packages
-    """
-    if 'install' not in args: args = ['install'] + args
-    return run_python_package('pip', args + list(packages)) == 0
-
-def parse_connector_keys(keys : str, **kw) -> 'meerschaum.connectors.Connector':
+def parse_connector_keys(keys : str, construct : bool = True, **kw) -> 'meerschaum.connectors.Connector':
     """
     Parse connector keys and return Connector object
     """
     from meerschaum.connectors import get_connector
+    from meerschaum.config import get_config
+    from meerschaum.utils.warnings import error
     keys = str(keys)
-    try:
-        vals = keys.split(':')
+    vals = keys.split(':')
+    if construct:
         conn = get_connector(type=vals[0], label=vals[1], **kw)
-    except Exception as e:
-        from meerschaum.utils.warnings import warn
-        warn(str(e))
-        return None
+        if conn is None:
+            error(f"Unable to parse connector keys '{keys}'", stack=False)
+    else: conn = get_config('meerschaum', 'connectors', vals[0], vals[1])
+
+    #  try:
+        #  vals = keys.split(':')
+        #  if construct: conn = get_connector(type=vals[0], label=vals[1], **kw)
+        #  else: conn = get_config('meerschaum', 'connectors', vals[0], vals[1])
+    #  except Exception as e:
+        #  from meerschaum.utils.warnings import warn, error
+        #  warn(str(e))
+        #  return None
     return conn
 
-def parse_instance_keys(keys : str, **kw):
+def parse_instance_keys(keys : str, construct : bool = True, **kw):
     """
     Parse the Meerschaum instance value into a Connector object
     """
@@ -508,7 +290,7 @@ def parse_instance_keys(keys : str, **kw):
     keys = str(keys)
     if ':' not in keys: keys += ':'
     if keys.endswith(':'): keys += 'main'
-    return parse_connector_keys(keys, **kw)
+    return parse_connector_keys(keys, construct=construct, **kw)
 
 def parse_repo_keys(keys : str = None, **kw):
     """
@@ -652,7 +434,7 @@ def parse_df_datetimes(
     """
     Parse a pandas DataFrame for datetime columns and cast as datetimes
     """
-
+    from meerschaum.utils.packages import import_pandas
     ### import pandas (or pandas replacement)
     from meerschaum.utils.debug import dprint
     pd = import_pandas()
@@ -758,17 +540,6 @@ def pg_capital(s : str) -> str:
         return '"' + s + '"'
     return s
 
-def import_pandas() -> 'module':
-    """
-    Quality-of-life function to attempt to import the configured version of pandas
-    """
-    from meerschaum.config import get_config
-    pandas_module_name = get_config('system', 'connectors', 'all', 'pandas', patch=True)
-    ### NOTE: modin does NOT currently work!
-    if pandas_module_name == 'modin':
-        pandas_module_name = 'modin.pandas'
-    return attempt_import(pandas_module_name)
-
 def df_from_literal(
         pipe : 'meerschaum.Pipe' = None,
         literal : str = None,
@@ -777,6 +548,7 @@ def df_from_literal(
     """
     Parse a literal (if nessary), and use a Pipe's column names to generate a DataFrame.
     """
+    from meerschaum.utils.packages import import_pandas
     from meerschaum.utils.warnings import error, warn
     from meerschaum.utils.debug import dprint
 
@@ -851,7 +623,7 @@ def change_dict(d : dict, func : 'function'):
     """
     for k, v in d.items():
         if isinstance(v, dict):
-            change_dict(v)
+            change_dict(v, func)
         else:
             d[k] = func(v)
 
@@ -901,6 +673,7 @@ def enforce_gevent_monkey_patch():
     """
     Check if gevent monkey patching is enabled, and if not, then apply patching
     """
+    from meerschaum.utils.packages import attempt_import
     import socket
     gevent, gevent_socket, gevent_monkey = attempt_import('gevent', 'gevent.socket', 'gevent.monkey')
     if not socket.socket is gevent_socket.socket:
@@ -911,6 +684,7 @@ def reload_plugins(debug : bool = False):
     Convenience method for reloading the actions package (which loads plugins)
     """
     import meerschaum.actions
+    from meerschaum.utils.packages import reload_package
     reload_package(meerschaum.actions, debug=debug)
 
 def is_valid_email(email : str) -> bool:

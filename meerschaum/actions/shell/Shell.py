@@ -6,7 +6,7 @@ This module is the entry point for the interactive shell
 """
 
 import sys, inspect
-from meerschaum.utils.misc import attempt_import
+from meerschaum.utils.packages import attempt_import
 from meerschaum.config import __doc__, __version__ as version, config as cf, get_config
 cmd = attempt_import(get_config('system', 'shell', 'cmd', patch=True), warn=False)
 if cmd is None or isinstance(cmd, dict): cmd = attempt_import('cmd')
@@ -120,24 +120,28 @@ class Shell(cmd.Cmd):
         mask = prompt
         if '{instance}' in self._prompt:
             if instance is None: instance = self.instance_keys
-            self.instance = colored(instance, *get_config('system', 'shell', 'ansi', 'instance', 'color', patch=True))
+            self.instance = instance
+            if ANSI: self.instance = colored(self.instance, *get_config('system', 'shell', 'ansi', 'instance', 'color', patch=True))
             prompt = prompt.replace('{instance}', self.instance)
             mask = mask.replace('{instance}', ''.join(['\0' for c in '{instance}']))
 
         if '{username}' in self._prompt:
             if username is None:
                 try:
-                    username = parse_instance_keys(self.instance_keys).username
+                    username = parse_instance_keys(self.instance_keys, construct=False)['username']
                 except:
                     username = '(no username)'
-            self.username = colored(username, *get_config('system', 'shell', 'ansi', 'username', 'color', patch=True))
+            self.username = username
+            if ANSI: self.username = colored(self.username, *get_config('system', 'shell', 'ansi', 'username', 'color', patch=True))
             prompt = prompt.replace('{username}', self.username)
             mask = mask.replace('{username}', ''.join(['\0' for c in '{username}']))
 
         remainder_prompt = list(self._prompt)
         for i, c in enumerate(mask):
             if c != '\0':
-                remainder_prompt[i] = colored(c, *get_config('system', 'shell', 'ansi', 'prompt', 'color', patch=True))
+                _c = c
+                if ANSI: _c = colored(_c, *get_config('system', 'shell', 'ansi', 'prompt', 'color', patch=True))
+                remainder_prompt[i] = _c
         self.prompt = ''.join(remainder_prompt).replace('{username}', self.username).replace('{instance}', self.instance)
 
     def precmd(self, line):
@@ -323,8 +327,6 @@ class Shell(cmd.Cmd):
             conn = get_connector(debug=debug)
 
         self.instance_keys = str(conn)
-        #  self.prompt = 'mrsm@' + self.instance_keys
-        #  print(self.prompt.replace('{instance}', self.instance_keys))
 
         self.update_prompt(instance=str(conn))
         info(f"Default instance for the current shell: {conn}")
@@ -383,9 +385,8 @@ class Shell(cmd.Cmd):
         """
         If the user specifies, clear the screen.
         """
-        if _clear_screen:
-            from meerschaum.utils.formatting._shell import clear_screen
-            clear_screen(debug=self.debug)
+        ### NOTE: The screen clearing is defined in the custom input below
+        pass
 
     def preloop(self):
         import signal, os
@@ -421,7 +422,14 @@ def input_with_sigint(_input):
     """
     def _input_with_sigint(*args):
         try:
-            return _input(*args)
+            parsed = _input(*args)
+            ### clear screen on empty input
+            ### NOTE: would it be better to do nothing instead?
+            if len(parsed.strip()) == 0:
+                if _clear_screen:
+                    from meerschaum.utils.formatting._shell import clear_screen
+                    clear_screen()
+            return parsed
         except KeyboardInterrupt:
             print("^C")
             return "pass"

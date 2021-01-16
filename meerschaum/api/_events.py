@@ -6,17 +6,17 @@
 Declare FastAPI events in this module (startup, shutdown, etc)
 """
 
-from meerschaum.api import fast_api, get_connector
+from meerschaum.api import app, get_connector
 from meerschaum.utils.debug import dprint
 
-@fast_api.on_event("startup")
+@app.on_event("startup")
 async def startup():
     from meerschaum.utils.misc import retry_connect
     import sys
     conn = get_connector()
     await retry_connect(get_connector(), debug=True)
 
-@fast_api.on_event("shutdown")
+@app.on_event("shutdown")
 async def startup():
     from meerschaum.config._paths import API_UVICORN_CONFIG_PATH
     try:

@@ -6,16 +6,29 @@
 Register Pipes via the Meerschaum API
 """
 
-from meerschaum.api import fastapi, fast_api, endpoints, get_connector, pipes, get_pipe, get_pipes_sql
+from meerschaum.api import (
+    fastapi,
+    app,
+    endpoints,
+    get_connector,
+    pipes,
+    get_pipe,
+    get_pipes_sql,
+    manager
+)
 from meerschaum.api.models import MetaPipe
 from meerschaum.api.tables import get_tables
-from meerschaum.utils.misc import attempt_import, is_pipe_registered, round_time
-import datetime
+from meerschaum.utils.packages import attempt_import
+from meerschaum.utils.misc import is_pipe_registered, round_time
+datetime = attempt_import('datetime')
 sqlalchemy = attempt_import('sqlalchemy')
 pipes_endpoint = endpoints['mrsm'] + '/pipes'
 
-@fast_api.post(pipes_endpoint)
-def register_pipe(pipe : MetaPipe):
+@app.post(pipes_endpoint)
+def register_pipe(
+        pipe : MetaPipe,
+        curr_user : str = fastapi.Depends(manager)
+    ):
     """
     Register a new Pipe
     """
@@ -28,8 +41,12 @@ def register_pipe(pipe : MetaPipe):
 
     return results
 
-@fast_api.patch(pipes_endpoint)
-async def edit_pipe(pipe : MetaPipe, patch : bool = False):
+@app.patch(pipes_endpoint)
+def edit_pipe(
+        pipe : MetaPipe,
+        patch : bool = False,
+        curr_user : str = fastapi.Depends(manager)
+    ):
     """
     Edit a Pipe's parameters.
     patch : bool : False
@@ -46,12 +63,13 @@ async def edit_pipe(pipe : MetaPipe, patch : bool = False):
     pipes(refresh=True)
     return results
 
-@fast_api.get(pipes_endpoint + '/keys')
+@app.get(pipes_endpoint + '/keys')
 async def fetch_pipes_keys(
         connector_keys : str = "",
         metric_keys : str = "",
         location_keys : str = "",
         params : str = "",
+        curr_user : str = fastapi.Depends(manager),
         debug : bool = False
     ) -> list:
     """
@@ -69,11 +87,12 @@ async def fetch_pipes_keys(
         debug = debug
     )
 
-@fast_api.get(pipes_endpoint)
+@app.get(pipes_endpoint)
 async def get_pipes(
         connector_keys : str = "",
         metric_keys : str = "",
         location_keys : str = "",
+        curr_user : str = fastapi.Depends(manager),
         debug : bool = False
     ) -> dict:
     """
@@ -86,9 +105,10 @@ async def get_pipes(
     if location_keys != "": kw['location_keys'] = location_keys
     return replace_pipes_in_dict(get_pipes_sql(**kw), str)
 
-@fast_api.get(pipes_endpoint + '/{connector_keys}')
+@app.get(pipes_endpoint + '/{connector_keys}')
 async def get_pipes_by_connector(
-        connector_keys : str
+        connector_keys : str,
+        curr_user : str = fastapi.Depends(manager)
     ) -> dict:
     """
     Get all registered Pipes by connector_keys with metadata, excluding parameters.
@@ -98,11 +118,12 @@ async def get_pipes_by_connector(
         raise fastapi.HTTPException(status_code=404, detail=f"connector_keys '{connector_keys}' not found.")
     return replace_pipes_in_dict(pipes()[connector_keys], str)
 
-@fast_api.get(pipes_endpoint + '/{connector_keys}/{metric_key}')
+@app.get(pipes_endpoint + '/{connector_keys}/{metric_key}')
 async def get_pipes_by_connector_and_metric(
         connector_keys : str,
         metric_key : str,
         parent : bool = False,
+        curr_user : str = fastapi.Depends(manager)
     ):
     """
     Get all registered Pipes by connector_keys and metric_key with metadata, excluding parameters.
@@ -118,11 +139,12 @@ async def get_pipes_by_connector_and_metric(
     if parent: return pipes()[connector_keys][metric_key][None]
     return replace_pipes_in_dict(pipes()[connector_keys][metric_key], str)
 
-@fast_api.get(pipes_endpoint + '/{connector_keys}/{metric_key}/{location_key}')
+@app.get(pipes_endpoint + '/{connector_keys}/{metric_key}/{location_key}')
 async def get_pipes_by_connector_and_metric_and_location(
         connector_keys : str,
         metric_key : str,
-        location_key : str
+        location_key : str,
+        curr_user : str = fastapi.Depends(manager)
     ):
     """
     Get a specific Pipe with metadata, excluding parameters.
@@ -131,19 +153,20 @@ async def get_pipes_by_connector_and_metric_and_location(
         raise fastapi.HTTPException(status_code=404, detail=f"connector_keys '{connector_keys}' not found.")
     if metric_key not in pipes()[connector_keys]:
         raise fastapi.HTTPException(status_code=404, detail=f"metric_key '{metric_key}' not found.")
-    if location_key == '[None]': location_key = None
+    if location_key in ('[None]', 'None', 'null'): location_key = None
     if location_key not in pipes()[connector_keys][metric_key]:
         raise fastapi.HTTPException(status_code=404, detail=f"location_key '{location_key}' not found.")
  
     return str(pipes()[connector_keys][metric_key][location_key])
 
-@fast_api.get(pipes_endpoint + '/{connector_keys}/{metric_key}/{location_key}/sync_time')
+@app.get(pipes_endpoint + '/{connector_keys}/{metric_key}/{location_key}/sync_time')
 def get_sync_time(
         connector_keys : str,
         metric_key : str,
         location_key : str,
         params : dict = None,
         debug : bool = False,
+        curr_user : str = fastapi.Depends(manager)
     ) -> 'datetime.datetime':
     """
     Get a Pipe's latest datetime value.
@@ -153,7 +176,7 @@ def get_sync_time(
     if is_pipe_registered(pipe, pipes()):
         return pipe.get_sync_time(params=params, debug=debug)
 
-@fast_api.post(pipes_endpoint + '/{connector_keys}/{metric_key}/{location_key}/data')
+@app.post(pipes_endpoint + '/{connector_keys}/{metric_key}/{location_key}/data')
 def sync_pipe(
         connector_keys : str,
         metric_key : str,
@@ -163,6 +186,7 @@ def sync_pipe(
         blocking : bool = True,
         force : bool = False,
         workers : int = None,
+        curr_user : str = fastapi.Depends(manager),
         debug : bool = False,
     ) -> tuple:
     """
@@ -188,14 +212,15 @@ def sync_pipe(
         workers = workers
     )
 
-@fast_api.get(pipes_endpoint + '/{connector_keys}/{metric_key}/{location_key}/data')
+@app.get(pipes_endpoint + '/{connector_keys}/{metric_key}/{location_key}/data')
 def get_pipe_data(
         connector_keys : str,
         metric_key : str,
         location_key : str,
         begin : datetime.datetime = None,
         end : datetime.datetime = None,
-        orient : str = 'records'
+        orient : str = 'records',
+        curr_user : str = fastapi.Depends(manager),
     ) -> str:
     """
     Get a Pipe's data. Optionally set query boundaries
@@ -219,14 +244,15 @@ def get_pipe_data(
         ),
         media_type = 'application/json'
     )
-@fast_api.get(pipes_endpoint + '/{connector_keys}/{metric_key}/{location_key}/backtrack_data')
+@app.get(pipes_endpoint + '/{connector_keys}/{metric_key}/{location_key}/backtrack_data')
 def get_backtrack_data(
         connector_keys : str,
         metric_key : str,
         location_key : str,
         begin : datetime.datetime = None,
         backtrack_minutes : int = 0,
-        orient : str = 'records'
+        orient : str = 'records',
+        curr_user : str = fastapi.Depends(manager),
     ) -> bool:
     """
     Get a Pipe's data. Optionally set query boundaries
@@ -248,11 +274,12 @@ def get_backtrack_data(
         media_type = 'application/json'
     )
 
-@fast_api.get(pipes_endpoint + '/{connector_keys}/{metric_key}/{location_key}/id')
+@app.get(pipes_endpoint + '/{connector_keys}/{metric_key}/{location_key}/id')
 def get_pipe_id(
         connector_keys : str,
         metric_key : str,
-        location_key : str
+        location_key : str,
+        curr_user : str = fastapi.Depends(manager),
     ) -> int:
     """
     Get a Pipe's ID
@@ -269,31 +296,33 @@ def get_pipe_id(
         raise fastapi.HTTPException(status_code=404, detail=str(e))
     return pipe_id
 
-@fast_api.get(pipes_endpoint + '/{connector_keys}/{metric_key}/{location_key}/attributes')
+@app.get(pipes_endpoint + '/{connector_keys}/{metric_key}/{location_key}/attributes')
 def get_pipe_attributes(
         connector_keys : str,
         metric_key : str,
-        location_key : str
+        location_key : str,
+        curr_user : str = fastapi.Depends(manager),
     ) -> dict:
     """
     Get a Pipe's attributes
     """
     return get_pipe(connector_keys, metric_key, location_key).attributes
 
-@fast_api.get(pipes_endpoint + '/{connector_keys}/{metric_key}/{location_key}/exists')
+@app.get(pipes_endpoint + '/{connector_keys}/{metric_key}/{location_key}/exists')
 def get_pipe_attributes(
         connector_keys : str,
         metric_key : str,
-        location_key : str
+        location_key : str,
+        curr_user : str = fastapi.Depends(manager),
     ) -> dict:
     """
     Determine if a Pipe exists or not
     """
     return get_pipe(connector_keys, metric_key, location_key).exists()
 
-@fast_api.post('/mrsm/metadata')
+@app.post('/mrsm/metadata')
 def create_metadata(
-        
+        curr_user : str = fastapi.Depends(manager),
     ) -> bool:
     """
     Create Pipe metadata tables
@@ -304,3 +333,15 @@ def create_metadata(
     except Exception as e:
         raise fastapi.HTTPException(status_code=500, detail=str(e))
     return True
+
+@app.get(pipes_endpoint + '/{connector_keys}/{metric_key}/{location_key}/rowcount')
+def get_rowcount(
+        connector_keys : str,
+        metric_key : str,
+        location_key : str,
+        curr_user : str = fastapi.Depends(manager),
+    ) -> int:
+    """
+    Return a Pipe's row count
+    """
+    return get_pipe(connector_keys, metric_key, location_key).get_rowcount()

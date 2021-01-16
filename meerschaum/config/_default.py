@@ -95,53 +95,64 @@ default_system_config = {
     'formatting'           : {
         'unicode'          : default_unicode,
         'ansi'             : default_ansi,
+        'emoji'            : {
+            'hand'         : '👋',
+            'error'        : '🛑',
+            'failure'      : '💢',
+            'success'      : '🎉',
+            'info'         : '💬',
+            'debug'        : '🐞',
+        },
     },
     'shell' : {
         'ansi'             : {
             'intro'        : {
+                #  'style'    : "bold bright_blue",
                 'color'    : [
                     'bold',
                     'bright blue',
                 ],
             },
             'close_message': {
+                #  'style'    : "bright_blue",
                 'color'    : [
                     'bright blue',
                 ],
             },
             'doc_header': {
+                #  'style'    : "bright_blue",
                 'color'    : [
                     'bright blue',
                 ],
             },
             'undoc_header': {
+                #  'style'    : "bright_blue",
                 'color'    : [
                     'bright blue',
                 ],
             },
             'ruler': {
+                #  'style'    : "bright_blue",
                 'color'    : [
                     'bold',
                     'bright blue',
                 ],
             },
             'prompt': {
+                #  'style'    : "green",
                 'color'    : [
                     'green',
                 ],
             },
             'instance' : {
+                #  'style'    : "cyan",
                 'color'    : [
-                    #  'bold',
-                    #  'dark',
                     'cyan',
-                    #  'bright cyan',
                 ],
             },
             'username' : {
+                #  'style'    : "white",
                 'color'    : [
-                    'bold',
-                    #  'dark',
                     'white',
                 ],
             },
@@ -150,7 +161,7 @@ default_system_config = {
             'intro'        : """       ___  ___  __   __   __                       
  |\/| |__  |__  |__) /__` /  ` |__|  /\  |  |  |\/|
  |  | |___ |___ |  \ .__/ \__, |  | /~~\ \__/  |  |\n""",
-            'prompt'       : ' [ {username}@{instance} ] > ',
+            'prompt'       : '\n [ {username}@{instance} ] > ',
             'ruler'        : '-',
             'close_message': 'Thank you for using Meerschaum!',
             'doc_header'   : 'Meerschaum actions (`help <action>` for usage):',
@@ -160,21 +171,21 @@ default_system_config = {
             'intro'        : """
  █▄ ▄█ ██▀ ██▀ █▀▄ ▄▀▀ ▄▀▀ █▄█ ▄▀▄ █ █ █▄ ▄█
  █ ▀ █ █▄▄ █▄▄ █▀▄ ▄██ ▀▄▄ █ █ █▀█ ▀▄█ █ ▀ █\n""",
-            'prompt'       : ' [ {username}@{instance} ] ➤ ',
+            'prompt'       : '\n [ {username}@{instance} ] ➤ ',
             'ruler'        : '─',
-            'close_message': ' 👋 Thank you for using Meerschaum! ',
+            'close_message': ' MRSM{system:formatting:emoji:hand} Thank you for using Meerschaum! ',
             'doc_header'   : 'Meerschaum actions (`help <action>` for usage):',
             'undoc_header' : 'Unimplemented actions:',
         },
         'timeout'          : 60,
         'max_history'      : 1000,
-        'clear_screen'     : False,
+        'clear_screen'     : True,
         'cmd'              : 'cmd2',
     },
     ### not to be confused with system_config['connectors']['api']
     'api' : {
         'uvicorn'          : {
-            'app'          : 'meerschaum.api:fast_api',
+            'app'          : 'meerschaum.api:app',
             'port'         : default_meerschaum_config['connectors']['api']['default']['port'],
             'host'         : '0.0.0.0',
             'workers'      : max(int(multiprocessing.cpu_count() / 2), 1),
@@ -205,7 +216,7 @@ default_system_config = {
     },
     'success'              : {
         'unicode'          : {
-            'icon'         : '🎉',
+            'icon'         : 'MRSM{system:formatting:emoji:success}',
         },
         'ascii'            : {
             'icon'         : '+',
@@ -219,7 +230,7 @@ default_system_config = {
     },
     'failure'              : {
         'unicode'          : {
-            'icon'         : '💢',
+            'icon'         : 'MRSM{system:formatting:emoji:failure}',
         },
         'ascii'            : {
             'icon'         : '-',
@@ -233,7 +244,7 @@ default_system_config = {
     },
     'errors'               : {
         'unicode'          : {
-            'icon'         : '🛑',
+            'icon'         : 'MRSM{system:formatting:emoji:error}',
         },
         'ascii'            : {
             'icon'         : 'ERROR',
@@ -247,7 +258,7 @@ default_system_config = {
     },
     'info'                 : {
         'unicode'          : {
-            'icon'         : '💬',
+            'icon'         : 'MRSM{system:formatting:emoji:info}',
         },
         'ascii'            : {
             'icon'         : 'INFO',
@@ -261,10 +272,10 @@ default_system_config = {
     },
     'debug'                : {
         'unicode'          : {
-            'leader'       : '🐞',
+            'icon'       : 'MRSM{system:formatting:emoji:debug}',
         },
         'ascii'            : {
-            'leader'       : 'DEBUG',
+            'icon'       : 'DEBUG',
         },
         'ansi'             : {
             'color'        : [

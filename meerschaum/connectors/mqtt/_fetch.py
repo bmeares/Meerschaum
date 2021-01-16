@@ -42,7 +42,8 @@ def fetch(
 
     ### callback is executed each time a message is published
     def _fetch_callback(msg : str):
-        from meerschaum.utils.misc import import_pandas, parse_df_datetimes, df_from_literal
+        from meerschaum.utils.packages import import_pandas
+        from meerschaum.utils.misc import parse_df_datetimes, df_from_literal
         pd = import_pandas()
 
         df = None
