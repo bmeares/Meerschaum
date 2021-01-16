@@ -18,8 +18,15 @@ def dprint(
         attrs : list = [],
         **kw
     ):
-    from meerschaum.utils.formatting import CHARSET, ANSI, colored
+    try:
+        from meerschaum.utils.formatting import CHARSET, ANSI, colored
+    except ImportError:
+        from meerschaum.utils.formatting import colored_fallback
+        CHARSET, ANSI, colored = 'ascii', False, colored_fallback
+    from meerschaum.config._paths import CONFIG_PATH, PERMANENT_PATCH_PATH
+    ### NOTE: We can't import get_config for some reason
     from meerschaum.config import config as cf
+
     parent_globals = inspect.stack()[1][0].f_globals
     parent_package = parent_globals['__name__']
     msg = str(msg)
@@ -27,13 +34,24 @@ def dprint(
     if package:
         premsg = parent_package + ':\n'
     if leader:
-        debug_leader = cf['system']['debug'][CHARSET]['leader']
+        try:
+            debug_leader = cf['system']['debug'][CHARSET]['icon']
+        except KeyError:
+            print("Failed to load config. Please delete the following files and restart Meerschaum:")
+            for p in [CONFIG_PATH, PERMANENT_PATCH_PATH]:
+                print('  - ' + str(p))
+            debug_leader = ''
+            ### crash if we can't load the leader
+            #  sys.exit(1)
         premsg = ' ' + debug_leader + ' ' + premsg
     if ANSI:
         if color is not None:
             if isinstance(color, str):
                 color = [color]
         else:
-            color = cf['system']['debug']['ansi']['color']
+            try:
+                color = cf['system']['debug']['ansi']['color']
+            except KeyError:
+                color = []
         premsg = colored(premsg, *color)
     log.warning(premsg + msg, **kw)

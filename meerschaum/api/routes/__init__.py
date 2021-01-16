@@ -6,6 +6,6 @@
 Import all routes from other modules in package
 """
 
-from meerschaum.utils.misc import import_children
+from meerschaum.utils.packages import import_children
 import_children()
 

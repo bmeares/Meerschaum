@@ -42,8 +42,23 @@ def get_backtrack_data(
         debug = debug
     )
 
-@property
-def data(
-        self
-    ) -> 'pd.DataFrame':
-    return self.get_data()
+### NOTE: removed this
+#  @property
+#  def data(
+        #  self
+    #  ) -> 'pd.DataFrame':
+    #  return self.get_data()
+
+def get_rowcount(
+        self,
+        begin : 'datetime.datetime' = None,
+        end : 'datetime.datetime' = None,
+        remote : bool = False,
+        debug : bool = False
+    ) -> int:
+    """
+    Get a Pipe's cached or remote rowcount
+    """
+    connector = self.instance_connector
+    if remote: connector = self.connector
+    return connector.get_pipe_rowcount(begin=begin, end=end, remote=remote, debug=debug)

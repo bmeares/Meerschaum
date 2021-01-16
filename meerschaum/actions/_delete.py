@@ -31,7 +31,7 @@ def _delete_pipes(
     ) -> tuple:
     from meerschaum import get_pipes
     from meerschaum.utils.misc import yes_no
-    import pprintpp
+    from meerschaum.utils.formatting import pprint
     pipes = get_pipes(as_list=True, debug=debug, **kw)
     if len(pipes) == 0:
         return False, "No pipes to delete"
@@ -92,7 +92,8 @@ def _delete_plugins(
     from meerschaum.actions import _plugins_names, plugins_modules
     from meerschaum.config._paths import PLUGINS_RESOURCES_PATH
     from meerschaum.utils.warnings import warn, error, info
-    from meerschaum.utils.misc import yes_no, reload_package
+    from meerschaum.utils.packages import reload_package
+    from meerschaum.utils.misc import yes_no
     import os, shutil
 
     ### parse the provided plugins and link them to their modules

@@ -19,6 +19,10 @@ class PluginConnector(Connector):
         debug : bool = False,
         **kw
     ):
+        """
+        The PluginConnector imports fetch and sync methods from a Plugin (if possible) and
+        allows Pipes to have connectors of type 'plugin'.
+        """
         super().__init__('plugin', label=label, **kw)
 
         import os, pathlib

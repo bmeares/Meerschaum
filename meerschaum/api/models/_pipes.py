@@ -5,7 +5,7 @@
 """
 Register new Pipes
 """
-from meerschaum.utils.misc import attempt_import
+from meerschaum.utils.packages import attempt_import
 pydantic = attempt_import('pydantic')
 
 class MetaPipe(pydantic.BaseModel):

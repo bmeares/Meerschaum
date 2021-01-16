@@ -34,7 +34,7 @@ def _pipes_lap(
     """
     from meerschaum import get_pipes
     from meerschaum.utils.debug import dprint
-    from meerschaum.utils.misc import enforce_gevent_monkey_patch, attempt_import
+    from meerschaum.utils.packages import attempt_import
     from meerschaum.utils.formatting import print_tuple
     import time
     pipes = get_pipes(
@@ -85,8 +85,12 @@ def _pipes_lap(
     else:
         ### determine which Pipes failed to sync
         pipe_indices = [i for p, i in enumerate(pipes)]
-        succeeded_pipes = [pipe_indices[i] for i, r in enumerate(results) if r[0]]
-        failed_pipes = [pipe_indices[i] for i, r in enumerate(results) if not r[0]]
+        try:
+            succeeded_pipes = [pipe_indices[i] for i, r in enumerate(results) if r[0]]
+            failed_pipes = [pipe_indices[i] for i, r in enumerate(results) if not r[0]]
+        except TypeError:
+            succeeded_pipes = []
+            failed_pipes = [p for p in pipes]
         results_dict = dict([(p, r) for p, r in zip(pipe_indices, results)])
 
     if len(failed_pipes) > 0:
@@ -101,9 +105,9 @@ def _pipes_lap(
             print(f"  - {p}")
 
     if debug:
-        import pprintpp
+        from meerschaum.utils.formatting import pprint
         dprint("\n" + f"Return values for each Pipe:")
-        pprintpp.pprint(results_dict)
+        pprint(results_dict)
 
     return succeeded_pipes, failed_pipes
 
@@ -134,7 +138,7 @@ def _sync_pipes(
             import traceback
             traceback.print_exc()
             from meerschaum.utils.warnings import warn
-            warn(f"Failed to sync all pipes. Waiting for {cooldown} seconds, then trying again.", stacklevel=2)
+            warn(f"Failed to sync all pipes. Waiting for {cooldown} seconds, then trying again.", stack=False)
             time.sleep(cooldown)
             cooldown = int(cooldown * 1.5)
             continue

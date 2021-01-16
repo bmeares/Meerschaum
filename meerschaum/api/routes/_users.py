@@ -6,8 +6,8 @@
 Routes for managing users
 """
 
-from meerschaum.utils.misc import attempt_import
-from meerschaum.api import fastapi, fast_api, endpoints, get_connector, pipes, get_pipe, get_pipes_sql, manager
+from meerschaum.utils.packages import attempt_import
+from meerschaum.api import fastapi, app, endpoints, get_connector, pipes, get_pipe, get_pipes_sql, manager
 from meerschaum.api.tables import get_tables
 from starlette.responses import Response, JSONResponse
 from meerschaum import User
@@ -26,7 +26,7 @@ def load_user(
     ):
     return User(username, repository=get_connector())
 
-@fast_api.post('/mrsm/login')
+@app.post('/mrsm/login')
 def login(
         response : Response,
         data : OAuth2PasswordRequestForm = fastapi.Depends()
@@ -51,13 +51,13 @@ def login(
     #  response.set_cookie(key="user_id", value=get_connector().get_user_id(user))
     return {'access_token': access_token, 'token_type': 'bearer', 'expires' : expires}
 
-@fast_api.get(users_endpoint + "/me")
+@app.get(users_endpoint + "/me")
 def read_current_user(
         curr_user : str = fastapi.Depends(manager),
     ):
     return {"username" : curr_user.username, 'user_id' : curr_user.user_id}
 
-@fast_api.get(users_endpoint)
+@app.get(users_endpoint)
 def get_users(
     ) -> list:
     """
@@ -65,7 +65,7 @@ def get_users(
     """
     return get_connector().get_users()
 
-@fast_api.post(users_endpoint + "/{username}/register")
+@app.post(users_endpoint + "/{username}/register")
 def register_user(
         username : str,
         password : str,
@@ -78,7 +78,7 @@ def register_user(
     user = User(username, password, email=email, attributes=attributes)
     return get_connector().register_user(user)
 
-@fast_api.post(users_endpoint + "/{username}/edit")
+@app.post(users_endpoint + "/{username}/edit")
 def edit_user(
         username : str,
         password : str,
@@ -96,7 +96,7 @@ def edit_user(
     
     return False, f"Cannot edit user '{user}': Permission denied"
 
-@fast_api.get(users_endpoint + "/{username}/id")
+@app.get(users_endpoint + "/{username}/id")
 def get_user_id(
         username : str,
     ):
@@ -105,7 +105,7 @@ def get_user_id(
     """
     return User(username, repository=get_connector()).user_id
 
-@fast_api.post(users_endpoint + "/{username}/delete")
+@app.post(users_endpoint + "/{username}/delete")
 def delete_user(
         username : str,
         curr_user : str = fastapi.Depends(manager),

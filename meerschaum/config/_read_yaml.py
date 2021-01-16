@@ -6,11 +6,13 @@ Import the config yaml file
 """
 
 import sys, shutil, os
-try:
-    import yaml
-except ImportError:
-    print("Failed to import PyYAML. Assuming we are installing in a fresh environment...", file=sys.stderr)
-    yaml = None
+from meerschaum.utils.packages import attempt_import
+yaml = attempt_import('yaml')
+#  try:
+    #  import yaml
+#  except ImportError:
+    #  print("Failed to import PyYAML. Assuming we are installing in a fresh environment...", file=sys.stderr)
+    #  yaml = None
 
 from meerschaum.config._edit import copy_default_to_config
 from meerschaum.config._paths import CONFIG_PATH, CONFIG_FILENAME

@@ -6,9 +6,9 @@
 Return version information
 """
 
-from meerschaum.api import fast_api
+from meerschaum.api import app
 
-@fast_api.get("/version")
+@app.get("/version")
 def get_api_version():
     """
     Get the Meerschaum API version
@@ -16,7 +16,7 @@ def get_api_version():
     from meerschaum.api import __version__ as version
     return { 'Meerschaum API version' : version }
 
-@fast_api.get("/mrsm/version")
+@app.get("/mrsm/version")
 def get_meerschaum_version():
     """
     Get the Meerschaum instance version

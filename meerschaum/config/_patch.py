@@ -18,12 +18,15 @@ if os.path.isfile(PATCH_PATH):
             patch_text = f.read()
         patch_config = yaml.safe_load(patch_text)
 
+from meerschaum.utils.misc import search_and_substitute_config
 permanent_patch_config = None
 if PERMANENT_PATCH_PATH.exists():
     if yaml:
         with open(PERMANENT_PATCH_PATH, 'r') as f:
             permanent_patch_text = f.read()
-        permanent_patch_config = yaml.safe_load(permanent_patch_text)
+        permanent_patch_config = search_and_substitute_config(
+            yaml.safe_load(permanent_patch_text)
+        )
 else:
     permanent_patch_config = None
 
@@ -35,8 +38,9 @@ def apply_patch_to_config(
     """
     Patch the config dict with a new dict (cascade patching)
     """
-    from cascadict import CascaDict
-    base = CascaDict(config)
+    from meerschaum.utils.packages import attempt_import
+    cascadict = attempt_import("cascadict", warn=True, install=True)
+    base = cascadict.CascaDict(config)
     new = base.cascade(patch)
     return new.copy_flat()
 
@@ -51,9 +55,9 @@ def write_patch(
         if debug: print(f"Removing existing patch: {PATCH_PATH}", file=sys.stderr)
         os.remove(PATCH_PATH)
     if debug:
-        import pprintpp
+        from meerschaum.utils.formatting import pprint
         print(f"Writing configuration to {PATCH_PATH}:", file=sys.stderr)
-        pprintpp.pprint(patch, stream=sys.stderr)
+        pprint(patch, stream=sys.stderr)
     if yaml:
         with open(PATCH_PATH, 'w') as f:
-            yaml.dump(patch, f)
+            yaml.dump(patch, f, sort_keys=False)

@@ -118,7 +118,7 @@ def _register_plugins(
         else: total_fail += 1
 
     if debug:
-        from pprintpp import pprint
+        from meerschaum.utils.formatting import pprint
         dprint("Return values for each plugin:")
         pprint(successes)
 

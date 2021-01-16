@@ -6,25 +6,33 @@
 Routes for managing plugins
 """
 
-from meerschaum.api import fastapi, fast_api, endpoints, get_connector, pipes, get_pipe, get_pipes_sql, manager
+from meerschaum.api import (
+    fastapi,
+    app,
+    endpoints,
+    get_connector,
+    pipes,
+    get_pipe,
+    get_pipes_sql,
+    manager,
+)
 from meerschaum.api.tables import get_tables
 from fastapi import FastAPI, File, UploadFile
-from meerschaum.utils.misc import attempt_import
-from starlette.responses import FileResponse
+from meerschaum.utils.packages import attempt_import
+starlette_responses = attempt_import('starlette.responses')
+FileResponse = starlette_responses.FileResponse
 
 sqlalchemy = attempt_import('sqlalchemy')
 plugins_endpoint = endpoints['mrsm'] + '/plugins'
 typing = attempt_import('typing')
 
-@fast_api.post(plugins_endpoint + '/{name}')
+@app.post(plugins_endpoint + '/{name}')
 def register_plugin(
         name : str,
         version : str = None,
         attributes : str = None,
         archive : UploadFile = File(...),
         curr_user : str = fastapi.Depends(manager),
-        #  logged_in_username : str = fastapi.Depends(manager),
-        #  user_id : typing.Optional[int] = fastapi.Cookie(None)
     ) -> tuple:
     """
     Register a plugin and save its archive file
@@ -55,7 +63,7 @@ def register_plugin(
 
     return success, msg
 
-@fast_api.get(plugins_endpoint + '/{name}')
+@app.get(plugins_endpoint + '/{name}')
 def get_plugin(
         name : str
     ) -> FileResponse:
@@ -68,7 +76,17 @@ def get_plugin(
         return FileResponse(plugin.archive_path, filename=f'{plugin.name}.tar.gz')
     return False, f"Archive for plugin '{plugin}' could not be found"
 
-@fast_api.get(plugins_endpoint)
+@app.get(plugins_endpoint + '/{name}/attributes')
+def get_plugin_attributes(
+        name : str
+    ) -> dict:
+    """
+    Download a plugin's archive file
+    """
+    from meerschaum import Plugin
+    return get_connector().get_plugin_attributes(Plugin(name))
+
+@app.get(plugins_endpoint)
 def get_plugins(
         user_id : int = None
     ) -> list:

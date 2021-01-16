@@ -31,17 +31,20 @@ class APIConnector(Connector):
         get_sync_time,
         pipe_exists,
         create_metadata,
+        get_pipe_rowcount,
     )
     from ._fetch import fetch
-    from ._plugins import register_plugin, install_plugin, get_plugins
+    from ._plugins import register_plugin, install_plugin, get_plugins, get_plugin_attributes
     from ._users import get_users, login, edit_user, get_user_id, delete_user, register_user
 
     def __init__(
         self,
         label : str = 'main',
+        wait : bool = False,
         debug : bool = False,
         **kw
     ):
+        self.wait = wait
         super().__init__('api', label=label, **kw)
         if 'protocol' not in self.__dict__:
             self.protocol = 'http'
@@ -53,16 +56,21 @@ class APIConnector(Connector):
             self.host + ':' +
             str(self.port)
         )
-        import requests, requests.auth
-        #  self.auth = None
         self._token = None
         self._expires = None
-        #  if 'username' in self.__dict__ and 'password' in self.__dict__:
-            #  self.auth = requests.auth.HTTPBasicAuth(
-                #  self.username,
-                #  self.password
-            #  )
-        self.session = requests.Session()
+        self._session = None
+
+    @property
+    def session(self):
+        if self._session is None:
+            from meerschaum.utils.packages import attempt_import
+            from meerschaum.utils.warnings import error
+            requests = attempt_import('requests')
+            if requests:
+                self._session = requests.Session()
+            if self._session is None:
+                error(f"Failed to import requests. Is requests installed?")
+        return self._session
 
     @property
     def token(self):

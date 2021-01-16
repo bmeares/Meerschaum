@@ -10,14 +10,7 @@ Defines basic data that Connectors should contain
 from meerschaum.utils.debug import dprint
 
 class Connector:
-    def __init__(
-            self,
-            type : str = None,
-            label : str = "main",
-            pandas : str = None,
-            inherit_default : bool = True,
-            **kw
-        ):
+    def __init__(self, type=None, label=None, **kw):
         """
         type : str
             The type of the connection. Used as a key in config.yaml to get attributes.
@@ -40,8 +33,23 @@ class Connector:
         Read config.yaml for attributes partitioned by connection type and connection label.
         Example: type="sql", label="main"
         """
+        self._original_dict = self.__dict__.copy()
+        self._set_attributes(type=type, label=label, **kw)
+
+    def _reset_attributes(self):
+        self.__dict__ = self._original_dict
+
+    def _set_attributes(
+            self,
+            type : str = None,
+            label : str = "main",
+            pandas : str = None,
+            inherit_default : bool = True,
+            **kw
+        ):
+        from meerschaum.utils.warnings import error
         if label == 'default':
-            raise Exception("Label cannot be 'default'. Did you mean 'main'?")
+            error("Label cannot be 'default'. Did you mean 'main'?")
         self.type, self.label = type, label
 
         from meerschaum.config import get_config
@@ -74,7 +82,7 @@ class Connector:
     @property
     def pd(self):
         if '_pd' not in self.__dict__:
-            from meerschaum.utils.misc import attempt_import
+            from meerschaum.utils.packages import attempt_import
             self._pd = attempt_import(self._pandas_name)
         return self._pd
 
@@ -104,9 +112,11 @@ class Connector:
                 missing_attributes.add(a)
         if len(missing_attributes) > 0:
             error(
-                f"Please provide connection configuration for connector: '{self.type}:{self.label}' "
+                f"Please provide connection configuration for connector '{self.type}:{self.label}' "
                 f"in the configuration file (open with `mrsm edit config`) or as arguments for the Connector.\n\n"
-                f"Missing attributes: {missing_attributes}"
+                f"Missing attributes: {missing_attributes}",
+                silent = True,
+                stack = False
             )
 
     def fetch(
@@ -120,11 +130,11 @@ class Connector:
 
         Returns pandas (or pandas derivative) DataFrame
         """
-        raise NotImplementedError("fetch() must be implemented in children classes")
+        from meerschaum.utils.warnings import error
+        error("fetch() must be implemented in children classes", NotImplementedError)
 
     def __str__(self):
         return f"{self.type}:{self.label}"
-        #  return f'Meerschaum {self.type.upper()} Connector: {self.label}'
 
     def __repr__(self):
         return str(self)

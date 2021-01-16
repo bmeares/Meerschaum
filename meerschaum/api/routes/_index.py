@@ -7,7 +7,7 @@ Default route
 """
 
 from meerschaum.api import (
-    fast_api,
+    app,
     endpoints,
     database,
     connector,
@@ -16,7 +16,7 @@ from meerschaum.api import (
     templates
 )
 
-@fast_api.get("/", response_class=HTMLResponse)
+@app.get("/", response_class=HTMLResponse)
 def index(request : Request):
     """
     Meerschaum WebAPI index page

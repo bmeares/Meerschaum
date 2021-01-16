@@ -30,7 +30,7 @@ class MQTTConnector(Connector):
         if 'keepalive' not in self.__dict__:
             self.keepalive = 60
 
-        from meerschaum.utils.misc import attempt_import
+        from meerschaum.utils.packages import attempt_import
         mqtt = attempt_import('paho.mqtt.client')
 
         ### default: 'tcp'. Can also be 'websockets'

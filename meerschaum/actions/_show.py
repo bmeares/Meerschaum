@@ -21,7 +21,7 @@ def show(
         `show pipes`
     """
     
-    from meerschaum.utils.misc import choose_subaction, sorted_dict
+    from meerschaum.utils.misc import choose_subaction
     show_options = {
         'actions'    : _show_actions,
         'pipes'      : _show_pipes,
@@ -65,7 +65,7 @@ def _show_config(
 
     E.g. `show config pipes` -> cf['pipes']
     """
-    from pprintpp import pprint
+    from meerschaum.utils.formatting import pprint
     from meerschaum.config import get_config
     from meerschaum.config._paths import CONFIG_PATH
     from meerschaum.utils.debug import dprint
@@ -81,8 +81,9 @@ def _show_modules(**kw) -> tuple:
     """
     Show the currently imported modules
     """
-    import sys, pprintpp
-    pprintpp.pprint(list(sys.modules.keys()))
+    import sys
+    from meerschaum.utils.formatting import pprint
+    pprint(list(sys.modules.keys()))
     return (True, "Success")
 
 def _show_pipes(
@@ -93,13 +94,13 @@ def _show_pipes(
     from meerschaum import get_pipes
     from meerschaum.utils.misc import flatten_pipes_dict
     pipes = get_pipes(debug=debug, **kw)
+    from meerschaum.utils.formatting import ANSI, pprint_pipes
 
     if len(flatten_pipes_dict(pipes)) == 1:
         return flatten_pipes_dict(pipes)[0].show(debug=debug, nopretty=nopretty, **kw)
 
     if not nopretty:
-        import pprintpp
-        pprintpp.pprint(pipes)
+        pprint_pipes(pipes)
     else:
         pipes_list = flatten_pipes_dict(pipes)
         for p in pipes_list:
@@ -130,7 +131,7 @@ def _show_connectors(
     from meerschaum.connectors import connectors
     from meerschaum.config import config
     from meerschaum.utils.formatting import make_header
-    from pprintpp import pprint
+    from meerschaum.utils.formatting import pprint
     print(make_header("\nConfigured connectors:"))
     pprint(config['meerschaum']['connectors'])
     print(make_header("\nActive connectors:"))
@@ -148,7 +149,7 @@ def _show_connectors(
 def _show_arguments(
         **kw
     ) -> tuple:
-    from pprintpp import pprint
+    from meerschaum.utils.formatting import pprint
     pprint(kw)
     return True, "Success"
 
@@ -159,7 +160,7 @@ def _show_data(
     ):
     import sys
     from meerschaum import get_pipes
-    from meerschaum.utils.misc import attempt_import
+    from meerschaum.utils.packages import attempt_import
     from meerschaum.utils.warnings import warn, info
     pipes = get_pipes(as_list=True, debug=debug, **kw)
     backtrack_minutes = 1440
@@ -169,7 +170,7 @@ def _show_data(
         except:
             df = None
         if df is None:
-            warn(f"Failed to fetch data for pipe '{p}'.")
+            warn(f"Failed to fetch data for pipe '{p}'.", stack=False)
             continue
         info(f"Last {backtrack_minutes} minutes of data for Pipe '{p}'")
         print(df, file=sys.stderr)
@@ -221,9 +222,12 @@ def _show_users(
     ) -> tuple:
     from meerschaum.config import get_config
     from meerschaum.utils.misc import parse_repo_keys, print_options
-    repo_connector = parse_repo_keys(repository)
-    users_list = repo_connector.get_users(debug=debug)
-    print_options(users_list, header='Registered users:')
+    try:
+        repo_connector = parse_repo_keys(repository)
+        users_list = repo_connector.get_users(debug=debug)
+    except:
+        return False, f"Failed to get users from repository '{repository}'"
+    print_options(users_list, header=f"Registered users for repository '{repo_connector}':")
     return True, "Success"
 
 ### NOTE: This must be the final statement of the module.

@@ -92,7 +92,7 @@ def sql(
     if result is False:
         return (False, "Failed to execute query!")
     
-    from meerschaum.utils.misc import attempt_import
+    from meerschaum.utils.packages import attempt_import
     sqlalchemy_engine_result = attempt_import('sqlalchemy.engine.result')
     if isinstance(result, sqlalchemy_engine_result.ResultProxy):
         print("Success")

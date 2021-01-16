@@ -25,6 +25,26 @@ warnings.filterwarnings(
     category = RuntimeWarning
 )
 
+import sys
+import inspect
+class SilentException(Exception):
+    def __init__(self, msg : str = ''):
+        try:
+            ln = sys.exc_info()[-1].tb_lineno
+        except AttributeError:
+            ln = inspect.currentframe().f_back.f_lineno
+            #  ln = inspect.currentframe().f_lineno
+        self.args = "{0.__name__} (line {1}): {2}".format(type(self), ln, msg),
+        #  self.args = msg
+
+def excepthook(type, value, traceback):
+    print('exception')
+    print(type, value, traceback)
+
+#  sys._excepthook = sys.excepthook
+#  sys.excepthook = excepthook
+#  sys.__excepthook__ = excepthook
+
 def enable_depreciation_warnings(name):
     import meerschaum.actions
     warnings.filterwarnings(
@@ -37,11 +57,28 @@ def warn(*args, stacklevel=2, stack=True, **kw):
     """
     Raise a warning with custom Meerschaum formatting
     """
-    from meerschaum.utils.formatting import CHARSET, ANSI, colored
-    from meerschaum.config import config as cf, get_config
+    try:
+        from meerschaum.utils.formatting import CHARSET, ANSI, colored
+    except ImportError:
+        CHARSET = 'ascii'
+        ANSI = False
+    try:
+        from meerschaum.config import config as cf
+        from meerschaum.config import get_config
+    except ImportError:
+        get_config = None
     import sys
 
-    warn_config = get_config('system', 'warnings', patch=True)
+    if get_config is None:
+        try:
+            warn_config = cf['system']['warnings']
+        except:
+            warn_config = {
+                'ansi' : {'color' : []},
+                'unicode' : {'icon' : ''},
+                'ascii' : {'icon' : ''},
+            }
+    else: warn_config = get_config('system', 'warnings', patch=True)
     a = list(args)
     a[0] = ' ' + warn_config[CHARSET]['icon'] + ' ' + str(a[0])
     if ANSI:
@@ -49,17 +86,96 @@ def warn(*args, stacklevel=2, stack=True, **kw):
     if stacklevel is None or not stack: print(a[0], file=sys.stderr)
     else: return warnings.warn(*a, stacklevel=stacklevel, **kw)
 
-def error(message : str, exception_class = Exception):
+def exception_with_traceback(
+        message : str,
+        exception_class = Exception, 
+        stacklevel = 1,
+        tb_type = 'single'
+    ):
+    """
+    Traceback construction help found here:
+    https://stackoverflow.com/questions/27138440/how-to-create-a-traceback-object
+    """
+    import sys, types
+    tb, depth = None, 0
+    while True:
+        try:
+            frame = sys._getframe(depth)
+            depth += 1
+        except ValueError as e:
+            break
+
+        tb = types.TracebackType(tb, frame, frame.f_lasti, frame.f_lineno)
+
+    tbs, _tb = [], tb
+    while True:
+        if _tb is None: break
+        tbs.append(_tb)
+        _tb = _tb.tb_next
+
+    found_main, main_i = False, 0
+    first_mrsm_after_main = None
+    last_mrsm_i = None
+    tbs[(-1 * stacklevel)].tb_next = None
+    for i, _tb in enumerate([_tb for _tb in tbs]):
+        if 'meerschaum' in str(_tb.tb_frame) and '__main__.py' in str(_tb.tb_frame):
+            found_main = True
+            main_i = i
+            continue
+        if i >= (len(tbs) - (stacklevel - 1)):
+            tbs[i] = None
+        elif (
+                found_main and 'meerschaum' in str(_tb.tb_frame)
+                and first_mrsm_after_main is None
+                and 'Shell' not in str(_tb.tb_frame)
+            ):
+            first_mrsm_after_main = i
+        elif 'meerschaum' in str(_tb.tb_frame):
+            last_mrsm_i = i
+
+    tbs = [_tb for _tb in tbs if tb is not None]
+
+    if tb_type == 'single':
+        return exception_class(message).with_traceback(tbs[-3])
+    return exception_class(message).with_traceback(tbs[first_mrsm_after_main])
+
+def error(
+        message : str,
+        exception_class = Exception,
+        nopretty : bool = False,
+        silent : bool = True,
+        stack : bool = True,
+    ):
     """
     Raise an error with custom Meerschaum formatting
     """
-    from meerschaum.utils.formatting import CHARSET, ANSI, colored
+    from meerschaum.utils.formatting import CHARSET, ANSI, colored, pprint, console, rich_traceback
     from meerschaum.config import config as cf, get_config
+    import types, sys, inspect
     error_config = get_config('system', 'errors', patch=True)
-    message = ' ' + error_config[CHARSET]['icon'] + ' ' + message
-    if ANSI:
-        message = colored(message, *error_config['ansi']['color'])
-    raise exception_class(message)
+    message = ' ' + error_config[CHARSET]['icon'] + ' ' + str(message)
+    exception = exception_with_traceback(message, exception_class, stacklevel=3)
+    color_message = str(message)
+    color_exception = exception_with_traceback(color_message, exception_class, stacklevel=3)
+    if ANSI and not nopretty and not stack:
+        color_message = '\n' + colored(message, *error_config['ansi']['color'])
+        color_exception = exception_with_traceback(color_message, exception_class, stacklevel=3)
+    try:
+        trace = rich_traceback.Traceback.extract(exception_class, exception, exception.__traceback__)
+        rtb = rich_traceback.Traceback(trace)
+    except:
+        trace, rtb = None, None
+    if trace is None or rtb is None:
+        nopretty = True
+    if not nopretty and stack:
+        console.print(rtb)
+    frame = sys._getframe(len(inspect.stack()) - 1)
+    sys.tracebacklimit = 0
+    #  help(sys.excepthook)
+    #  if silent: raise SilentException(message)
+    #  if silent: sys.tracebacklimit = 0
+    #  else: sys.tracebacklimit = None
+    raise color_exception
 
 def info(message : str, **kw):
     """
@@ -73,3 +189,5 @@ def info(message : str, **kw):
     if ANSI:
         message = colored(message, *info_config['ansi']['color'])
     print(message, file=sys.stderr)
+
+

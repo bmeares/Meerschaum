@@ -80,9 +80,9 @@ def create_engine(
 
     returns: sqlalchemy engine
     """
-    from meerschaum.utils.misc import attempt_import
+    from meerschaum.utils.packages import attempt_import
     sqlalchemy = attempt_import('sqlalchemy')
-    import importlib, urllib
+    import urllib
     ### supplement missing values with defaults (e.g. port number)
     #  print(self.__dict__)
     for a, value in flavor_configs[self.flavor]['defaults'].items():
@@ -112,7 +112,7 @@ def create_engine(
         ### and splits it to separate the class name (QueuePool)
         ### from the module name (sqlalchemy.pool).
         poolclass    = getattr(
-            importlib.import_module(
+            attempt_import(
                 ".".join(self.sys_config['poolclass'].split('.')[:-1])
             ),
             self.sys_config['poolclass'].split('.')[-1]

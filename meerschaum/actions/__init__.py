@@ -6,7 +6,8 @@
 Actions available to the mrsm CLI
 """
 
-from meerschaum.utils.misc import add_method_to_class, get_modules_from_package
+from meerschaum.utils.packages import get_modules_from_package
+from meerschaum.utils.misc import add_method_to_class
 from meerschaum.utils.warnings import enable_depreciation_warnings
 enable_depreciation_warnings(__name__)
 
@@ -15,10 +16,17 @@ import sys
 __all__, modules = get_modules_from_package(sys.modules[__name__], names=True)
 
 ### append the plugins modules
-from meerschaum.config._paths import RESOURCES_PATH, PLUGINS_RESOURCES_PATH, PLUGINS_ARCHIVES_RESOURCES_PATH
+from meerschaum.config._paths import (
+    RESOURCES_PATH, PLUGINS_RESOURCES_PATH, PLUGINS_ARCHIVES_RESOURCES_PATH
+)
 if RESOURCES_PATH not in sys.path: sys.path.append(str(RESOURCES_PATH))
 import plugins
-_plugins_names, plugins_modules = get_modules_from_package(plugins, names=True, recursive=True)
+_plugins_names, plugins_modules = get_modules_from_package(
+    plugins,
+    names = True,
+    recursive = True,
+    modules_venvs = True
+)
 __all__ += _plugins_names
 modules += plugins_modules
 

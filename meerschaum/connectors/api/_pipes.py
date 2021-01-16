@@ -45,7 +45,8 @@ def edit_pipe(
         self,
         pipe : 'meerschaum.Pipe',
         patch : bool = False,
-        debug : bool = False
+        debug : bool = False,
+        **kw
     ) -> tuple:
     """
     Submit a PATCH to the API to edit an existing Pipe.
@@ -100,6 +101,7 @@ def fetch_pipes_keys(
     except Exception as e:
         error(str(e))
 
+    if 'detail' in j: error(j['detail'], stack=False)
     result = []
     for t in j:
         result.append( (t['connector_keys'], t['metric_key'], t['location_key']) )
@@ -178,7 +180,8 @@ def get_pipe_data(
     except Exception as e:
         warn(str(e))
         return None
-    from meerschaum.utils.misc import import_pandas, parse_df_datetimes
+    from meerschaum.utils.packages import import_pandas
+    from meerschaum.utils.misc import parse_df_datetimes
     pd = import_pandas()
     try:
         df = pd.read_json(response.text)
@@ -213,7 +216,8 @@ def get_backtrack_data(
     except Exception as e:
         warn(f"Failed to parse backtrack data JSON for pipe '{pipe}'. Exception:\n" + str(e))
         return None
-    from meerschaum.utils.misc import import_pandas, parse_df_datetimes
+    from meerschaum.utils.packages import import_pandas
+    from meerschaum.utils.misc import parse_df_datetimes
     if debug: dprint(response.text)
     pd = import_pandas()
     try:
@@ -304,3 +308,12 @@ def create_metadata(
     response = self.post(r_url)
     if debug: dprint("Create metadata response: {response.text}")
     return json.loads(response.text)
+
+def get_pipe_rowcount(
+        self,
+        pipe : 'meerschaum.Pipe',
+        begin : 'datetime.datetime' = None,
+        end : 'datetime.datetime' = None,
+        debug : bool = False,
+    ) -> int:
+    pass

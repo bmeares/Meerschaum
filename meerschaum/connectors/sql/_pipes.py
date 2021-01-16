@@ -78,7 +78,8 @@ def edit_pipe(
         self,
         pipe : 'meerschaum.Pipe' = None,
         patch : bool = False,
-        debug : bool = False
+        debug : bool = False,
+        **kw
     ) -> tuple:
     """
     Edit a Pipe's parameters.
@@ -149,9 +150,9 @@ def fetch_pipes_keys(
             parameters[col] = vals
 
     q = (
-            "SELECT DISTINCT\n" +
-            "    pipes.connector_keys, pipes.metric_key, pipes.location_key\n" +
-            "FROM pipes"
+        "SELECT DISTINCT\n" +
+        "    pipes.connector_keys, pipes.metric_key, pipes.location_key\n" +
+        "FROM pipes"
     ) + build_where(parameters)
 
     ### ensure pipes table exists
@@ -161,11 +162,11 @@ def fetch_pipes_keys(
     ### execute the query and return a list of tuples
     try:
         if debug: dprint(q)
-        data = self.engine.execute(q).fetchall()
+        return self.engine.execute(q).fetchall()
     except Exception as e:
         error(str(e))
 
-    return data
+    return None
 
 def create_indices(
         self,
@@ -176,7 +177,6 @@ def create_indices(
     Create indices for a Pipe's datetime and ID columns.
     """
     from meerschaum.utils.debug import dprint
-    import pprintpp
     from meerschaum.utils.misc import sql_item_name
     from meerschaum.utils.warnings import warn
     index_queries = dict()
@@ -242,9 +242,9 @@ def delete_pipe(
         return False, f"Failed to delete registration for '{pipe}'"
     
     q = f"DROP TABLE {pipe_name}"
-    if self.exec(q, debug=debug) is None:
+    if self.exec(q, silent=True, debug=debug) is None:
         q = f"DROP VIEW {pipe_name}"
-    if self.exec(q, debug=debug) is None:
+    if self.exec(q, silent=True, debug=debug) is None:
         if debug: dprint(f"Failed to drop '{pipe}'. Ignoring...")
 
     return True, "Success"
@@ -398,7 +398,7 @@ def sync_pipe(
     """
     from meerschaum.utils.warnings import warn
     from meerschaum.utils.debug import dprint
-    from meerschaum.utils.misc import import_pandas
+    from meerschaum.utils.packages import import_pandas
     if df is None:
         msg = f"DataFrame is None. Cannot sync Pipe '{pipe}'"
         warn(msg)
@@ -448,6 +448,7 @@ def sync_pipe(
     if debug: dprint(f"New unseen data:\n" + str(new_data_df))
 
     if_exists = kw.get('if_exists', 'append')
+    if 'if_exists' in kw: kw.pop('if_exists')
 
     ### append new data to Pipe's table
     return self.to_sql(
@@ -465,7 +466,8 @@ def filter_existing(pipe, df, debug : bool = False):
     """
     from meerschaum.utils.warnings import warn
     from meerschaum.utils.debug import dprint
-    from meerschaum.utils.misc import attempt_import, round_time
+    from meerschaum.utils.misc import round_time
+    from meerschaum.utils.packages import attempt_import
     np = attempt_import('numpy')
     import datetime as datetime_pkg
     ### begin is the oldest data in the new dataframe
@@ -520,7 +522,7 @@ def get_sync_time(
         ### sqlite returns str
         if db_time is None: return None
         elif isinstance(db_time, str):
-            from meerschaum.utils.misc import attempt_import
+            from meerschaum.utils.packages import attempt_import
             dateutil_parser = attempt_import('dateutil.parser')
             st = dateutil_parser.parse(db_time)
         else:
@@ -558,3 +560,42 @@ def pipe_exists(
     exists = self.value(q, debug=debug) is not None
     if debug: dprint(f"Pipe '{pipe}' " + ('exists.' if exists else 'does not exist.'))
     return exists
+
+def get_pipe_rowcount(
+        self,
+        pipe : 'meerschaum.Pipe',
+        begin : 'datetime.datetime' = None,
+        end : 'datetime.datetime' = None,
+        remote : bool = False,
+        debug : bool = False
+    ) -> int:
+    """
+    Return the number of rows between datetimes for a Pipe's instance cache or remote source
+    """
+    from meerschaum.utils.warnings import error, warn
+    if remote:
+        msg = f"'fetch:definition' must be an attribute of pipe '{pipe}' to get a remote rowcount"
+        if 'fetch' not in pipe.parameters:
+            error(msg)
+            return None
+        if 'definition' not in pipe.parameters['fetch']:
+            error(msg)
+            return None
+    if 'datetime' not in pipe.columns: error(f"Pipe '{pipe}' must have a 'datetime' column declared (columns:datetime)")
+    src = str(pipe) if not remote else pipe.parameters['fetch']['definition']
+    query = f"""
+    WITH src AS ({src})
+    SELECT COUNT({pipe.columns['datetime']})
+    FROM src
+    """
+    if begin is not None or end is not None: query += "WHERE"
+    if begin is not None:
+        query += f"""
+        {pipe.columns['datetime']} > {dateadd_str(flavor=self.flavor, datepart='minute', number=(0), begin=begin)}
+        """
+    if end is not None and begin is not None: query += "AND"
+    if end is not None:
+        query += f"""
+        {pipe.columns['datetime']} <= {dateadd_str(flavor=self.flavor, datepart='minute', number=(0), begin=end)}
+        """
+    return self.value(query, debug=debug)

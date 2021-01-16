@@ -48,10 +48,10 @@ def _edit_pipes(
     _input = input_with_sigint(input)
 
     pipes = get_pipes(debug=debug, as_list=True, **kw)
-    print_options(pipes)
+    print_options(pipes, header=f'Pipes to be edited:')
 
     try:
-        prompt("Press [Enter] to edit the following pipes or [CTRL-C] to cancel: ")
+        prompt("Press [Enter] to begin editing the above pipes or [CTRL-C] to cancel: ")
     except KeyboardInterrupt:
         return False, f"No pipes changed."
 

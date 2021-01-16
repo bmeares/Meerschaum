@@ -42,7 +42,7 @@ def api(
     from meerschaum.config import config as cf, get_config
     from meerschaum.connectors import get_connector
     import requests
-    if debug: from pprintpp import pprint
+    if debug: from meerschaum.utils.formatting import pprint
     api_configs = get_config('meerschaum', 'connectors', 'api', patch=True)
 
     api_label = "main"
@@ -86,13 +86,15 @@ def _api_start(
         - `-w, --workers {number}`
             How many worker threads to run
     """
+    from meerschaum.utils.packages import attempt_import
     from meerschaum.utils.misc import is_int
     from meerschaum.api import sys_config as api_config, __version__
-    from pprintpp import pprint
-    from meerschaum.utils.misc import attempt_import
+    from meerschaum.utils.formatting import pprint
     from meerschaum.utils.debug import dprint
+    from meerschaum.utils.warnings import error, warn
     from meerschaum.config._paths import API_UVICORN_CONFIG_PATH
     from meerschaum.config import get_config
+    import os
     uvicorn = attempt_import('uvicorn')
 
     uvicorn_config = dict(api_config['uvicorn'])
@@ -119,12 +121,12 @@ def _api_start(
     try:
         if debug: dprint(f"Removing and writing Uvicorn config: ({API_UVICORN_CONFIG_PATH})")
         os.remove(API_UVICORN_CONFIG_PATH)
-    except:
-        pass
+    except Exception as e:
+        error(e)
     with open(API_UVICORN_CONFIG_PATH, 'w+') as f:
         yaml.dump(uvicorn_config, f)
 
-    ### remove custom keys before callign uvicorn
+    ### remove custom keys before calling uvicorn
     for k in custom_keys:
         del uvicorn_config[k]
 
