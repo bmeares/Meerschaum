@@ -16,14 +16,13 @@ def generate_secret_key():
     """
     Read or generate the keyfile
     """
-    from meerschaum.config._paths import API_RESOURCES_PATH
-    keyfilepath = pathlib.Path(os.path.join(API_RESOURCES_PATH, '.api_secret_key'))
-    if not keyfilepath.exists():
+    from meerschaum.config._paths import API_SECRET_KEY_PATH
+    if not API_SECRET_KEY_PATH.exists():
         secret_key = os.urandom(24).hex()
-        with open(keyfilepath, 'w') as f:
+        with open(API_SECRET_KEY_PATH, 'w') as f:
             f.write(secret_key)
     else:
-        with open(keyfilepath, 'r') as f:
+        with open(API_SECRET_KEY_PATH, 'r') as f:
             secret_key = f.read()
 
     return secret_key

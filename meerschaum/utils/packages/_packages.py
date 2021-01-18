@@ -20,7 +20,6 @@ packages = {
     '_required' : {
         'wheel'            : 'wheel',
         'virtualenv'       : 'virtualenv',
-        'imphook'          : 'imphook',
         'dateutil'         : 'python-dateutil',
         'yaml'             : 'PyYAML>=5.3.1',
         'cascadict'        : 'cascadict',
@@ -51,6 +50,10 @@ packages = {
     'stack' : {
         'docker'  : 'docker',
         'compose' : 'docker-compose',
+    },
+    'build' : {
+        'cx_Freeze'   : 'cx_Freeze>=6.5.1',
+        'pyinstaller' : 'pyinstaller',
     },
 }
 packages['sql'] = {
