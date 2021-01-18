@@ -65,7 +65,10 @@ API_RESOURCES_PATH = Path(os.path.join(PACKAGE_ROOT_PATH, 'api', 'resources'))
 API_STATIC_PATH = Path(os.path.join(API_RESOURCES_PATH, 'static'))
 API_TEMPLATES_PATH = Path(os.path.join(API_RESOURCES_PATH, 'templates'))
 
-API_UVICORN_RESOURCES_PATH = Path(os.path.join(RESOURCES_PATH, 'uvicorn'))
+API_CONFIG_RESOURCES_PATH = Path(os.path.join(RESOURCES_PATH, 'api'))
+API_SECRET_KEY_PATH = Path(os.path.join(API_CONFIG_RESOURCES_PATH, '.api_secret_key'))
+
+API_UVICORN_RESOURCES_PATH = Path(os.path.join(API_CONFIG_RESOURCES_PATH, 'uvicorn'))
 API_UVICORN_CONFIG_PATH = Path(os.path.join(API_UVICORN_RESOURCES_PATH, '.thread_config.yaml'))
 
 PIPES_RESOURCES_PATH = Path(os.path.join(RESOURCES_PATH, 'pipes'))

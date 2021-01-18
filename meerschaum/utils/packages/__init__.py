@@ -38,13 +38,14 @@ def deactivate_venv(
     if debug: dprint(f"Deactivating virtual environment '{venv}'...")
     if venv in active_venvs: active_venvs.remove(venv)
     indices, new_path = [], []
+    if sys.path is None: return False
     for i, p in enumerate(sys.path):
         if f'venvs/{venv}/lib' not in str(p):
             new_path.append(p)
     sys.path = new_path
 
     ### clear the import virtual environment override
-    uninstall_import_hook(venv, debug=debug)
+    #  uninstall_import_hook(venv, debug=debug)
 
     if debug: dprint(f'sys.path: {sys.path}')
     return True
@@ -69,12 +70,16 @@ def activate_venv(
         if debug: dprint(f"Creating virtual environment '{venv}'...")
         virtualenv.cli_run([venv, '--download', '--system-site-packages'])
     if debug: dprint(f"Activating virtual environment '{venv}'...")
-    exec(open(activate_this_path).read(), {'__file__' : activate_this_path})
+    try:
+        exec(open(activate_this_path).read(), {'__file__' : activate_this_path})
+    except Exception as e:
+        warn(str(e)
+        return False
     active_venvs.add(venv)
     os.chdir(old_cwd)
 
     ### override built-in import with attempt_import
-    install_import_hook(venv, debug=debug)
+    #  install_import_hook(venv, debug=debug)
 
     if debug: dprint(f'sys.path: {sys.path}')
     return True
@@ -83,18 +88,24 @@ def pip_install(
         *packages : list,
         args : list = ['--upgrade'],
         venv : str = 'mrsm',
+        deactivate : bool = True,
         debug : bool = False
     ) -> bool:
     """
     Install pip packages
     """
-    from meerschaum.utils.warnings import error
+    try:
+        import pip
+    except ImportError:
+        import ensurepip
+        ensurepip.bootstrap(upgrade=True,)
     if venv is not None:
         activate_venv(venv=venv, debug=debug)
         if '--ignore-installed' not in args: args += ['--ignore-installed']
     if 'install' not in args: args = ['install'] + args
     success = run_python_package('pip', args + list(packages), venv=venv, debug=debug) == 0
-    if venv is not None: deactivate_venv(venv=venv, debug=debug)
+    if venv is not None and deactivate:
+        deactivate_venv(venv=venv, debug=debug)
     return success
 
 def run_python_package(
@@ -184,7 +195,8 @@ def attempt_import(
                     stacklevel = 3
                 )
             if install:
-                install_success = pip_install(install_name, venv=venv, debug=debug)
+                ### NOTE: pip_install deactivates venv, so deactivate must be False.
+                install_success = pip_install(install_name, venv=venv, deactivate=False, debug=debug)
                 if not install_success and warn:
                     warn_function(
                         f"Failed to install '{install_name}'.",
@@ -397,10 +409,15 @@ def is_installed(
 ### NOTE: this is at the bottom to avoid import problems
 #  from meerschaum.utils.packages._ImportHook import install
 
+from meerschaum.utils.warnings import warn
 from importlib.machinery import PathFinder
 class ImportHook(PathFinder):
-    def __init__(self, venv : str = None):
+    def __init__(self, venv : str = None, debug : bool = False):
         self.venv = venv
+        self.debug = debug
+
+    #  def __del__(self):
+        #  deactivate_venv(self.venv, debug=self.debug)
 
     def create_module(self, spec):
         print(spec)
@@ -409,19 +426,21 @@ class ImportHook(PathFinder):
         print(module)
 
     def find_spec(self, fullname, path=None, target=None):
-        if self.venv is not None:
+        if self.venv is not None and self.venv not in active_venvs:
             activate_venv(self.venv, debug=False)
         result = super(ImportHook, self).find_spec(fullname, path, target)
         #  try:
             #  __import__(fullname)
         #  except Exception as e:
             #  print(str(e))
-        #  if result is None and path is None and target is None:
-            #  #  print(fullname)
+        if result is None and path is None and target is None:
+            if not fullname in sys.builtin_module_names:
+                warn(fullname, stacklevel=3)
+                pip_install(fullname, venv=self.venv, debug=self.debug)
             #  pass
             #  #  attempt_import(fullname, debug=True, venv=self.venv, precheck=False)
-        if self.venv is not None:
-            deactivate_venv(self.venv, debug=False)
+        #  if self.venv is not None:
+            #  deactivate_venv(self.venv, debug=False)
         return result
 
 def install_import_hook(venv : str = 'mrsm', debug : bool = False) -> bool:
@@ -432,7 +451,7 @@ def install_import_hook(venv : str = 'mrsm', debug : bool = False) -> bool:
         if venv != 'mrsm':
             warn(
                 f"Virtual environment '{_import_hook_venv}' was set as the import hook " +
-                f"but is being overwritten by '{venv}'.", stacklevel=3
+                f"but is being overwritten by '{venv}'.", stacklevel=4
             )
         else:
             if debug:
@@ -450,7 +469,9 @@ def install_import_hook(venv : str = 'mrsm', debug : bool = False) -> bool:
             found_hook = True
             break
     if not found_hook:
-        sys.meta_path.insert(0, ImportHook(venv))
+        sys.meta_path.insert(0, ImportHook(venv, debug=True))
+
+    return True
 
 def uninstall_import_hook(venv : str = 'mrsm', all_hooks : bool = False, debug : bool = False) -> bool:
     global _import_hook_venv
@@ -458,7 +479,7 @@ def uninstall_import_hook(venv : str = 'mrsm', all_hooks : bool = False, debug :
     importlib.import_module = _import_module
     _import_hook_venv = None
     return True
-    new_meta_path = []
+    new_meta_path, to_delete = [], []
     for finder in sys.meta_path:
         if (
             not isinstance(finder, ImportHook) or (
@@ -466,5 +487,10 @@ def uninstall_import_hook(venv : str = 'mrsm', all_hooks : bool = False, debug :
             )
         ):
             new_meta_path.append(finder)
+        else:
+            to_delete.append(finder)
     sys.meta_path = new_meta_path
+    del to_delete[:]
+
+    return True
 

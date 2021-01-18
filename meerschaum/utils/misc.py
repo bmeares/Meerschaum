@@ -710,3 +710,45 @@ def string_width(string : str) -> int:
             width += 1
     return width
 
+def _pyinstaller_traverse_dir(
+        directory : str,
+        ignore_patterns : list = ['.pyc', 'dist', 'build', '.git', '.log'],
+        include_dotfiles : bool = False
+    ) -> list:
+    """
+    Recursively traverse a directory and return a list of its contents.
+    """
+    import os, pathlib
+    paths = []
+    _directory = pathlib.Path(directory)
+
+    def _found_pattern(name : str):
+        for pattern in ignore_patterns:
+            if pattern.replace('/', os.path.sep) in str(name):
+                return True
+        return False
+
+    for root, dirs, files in os.walk(_directory):
+        _root = str(root)[len(str(_directory.parent)):]
+        if _root.startswith(os.path.sep):
+            _root = _root[len(os.path.sep):]
+        if _root.startswith('.') and not include_dotfiles:
+            continue
+        ### ignore certain patterns
+        if _found_pattern(_root):
+            continue
+
+        for filename in files:
+            if filename.startswith('.') and not include_dotfiles:
+                continue
+            path = os.path.join(root, filename)
+            if _found_pattern(path):
+                continue
+
+            _path = str(path)[len(str(_directory.parent)):]
+            if _path.startswith(os.path.sep):
+                _path = _path[len(os.path.sep):]
+            _path = os.path.sep.join(_path.split(os.path.sep)[:-1])
+
+            paths.append((path, _path))
+    return paths

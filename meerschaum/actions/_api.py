@@ -119,8 +119,10 @@ def _api_start(
     ### write config to a temporary file to communicate with uvicorn threads
     yaml = attempt_import('yaml')
     try:
-        if debug: dprint(f"Removing and writing Uvicorn config: ({API_UVICORN_CONFIG_PATH})")
-        os.remove(API_UVICORN_CONFIG_PATH)
+        if API_UVICORN_CONFIG_PATH.exists():
+            if debug: dprint(f"Removing and writing Uvicorn config: ({API_UVICORN_CONFIG_PATH})")
+            os.remove(API_UVICORN_CONFIG_PATH)
+        assert(not API_UVICORN_CONFIG_PATH.exists())
     except Exception as e:
         error(e)
     with open(API_UVICORN_CONFIG_PATH, 'w+') as f:
