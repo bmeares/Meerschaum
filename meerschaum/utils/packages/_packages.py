@@ -17,18 +17,21 @@ packages = {
     'required' : {
     
     },
+    'formatting' : {
+        'pprintpp'       : 'pprintpp',
+        'asciitree'      : 'asciitree',
+        'colorama'       : 'colorama',
+        'rich'           : 'rich>=9.8.0',
+        'more_termcolor' : 'more-termcolor',
+    },
     '_required' : {
         'wheel'            : 'wheel',
         'virtualenv'       : 'virtualenv',
         'dateutil'         : 'python-dateutil',
         'yaml'             : 'PyYAML>=5.3.1',
         'cascadict'        : 'cascadict',
-        'pprintpp'         : 'pprintpp',
         'requests'         : 'requests',
         'pyvim'            : 'pyvim',
-        'colorama'         : 'colorama',
-        'rich'             : 'rich>=9.8.0',
-        'more_termcolor'   : 'more-termcolor',
         'aiofiles'         : 'aiofiles',
         'cmd2'             : 'cmd2',
         'python-multipart' : 'multipart',
