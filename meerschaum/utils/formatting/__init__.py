@@ -18,9 +18,6 @@ ANSI = cf['system']['formatting']['ansi']
 UNICODE = cf['system']['formatting']['unicode']
 CHARSET = 'unicode' if UNICODE else 'ascii'
 
-def colored_fallback(*args, **kw):
-    return ' '.join(args)
-
 from meerschaum.utils.packages import attempt_import
 from meerschaum.utils.warnings import warn
 
@@ -39,9 +36,54 @@ except:
     warn(f"Failed to initialize colorama. Ignoring...", stack=False)
     ANSI, UNICODE, CHARSET = False, False, 'ascii'
 
-try:
-    colored = more_termcolor.colored
-except:
+def colored_fallback(*args, **kw):
+    return ' '.join(args)
+
+def translate_rich_to_termcolor(*colors) -> tuple:
+    """
+    Translate between rich and more_termcolor terminology.
+    This is probably prone to breaking
+    """
+    _colors = []
+    for c in colors:
+        _c_list = []
+        ### handle 'bright'
+        c = c.replace('bright_', 'bright ')
+
+        ### handle 'on'
+        if ' on ' in c:
+            _on = c.split(' on ')
+            _colors.append(_on[0])
+            for _c in _on[1:]:
+                _c_list.append('on ' + _c)
+        else:
+            _c_list += [c]
+
+        _colors += _c_list
+
+    return tuple(_colors)
+
+def colored(text : str, *colors, **kw):
+    try:
+        colored_text = more_termcolor.colored(text, *colors, **kw)
+    except:
+        colored_text = None
+
+    if colored_text is not None: return colored_text
+
+    try:
+        _colors = translate_rich_to_termcolor(*colors)
+        colored_text = more_termcolor.colored(text, *_colors, **kw)
+    except:
+        colored_text = None
+
+    if colored_text is None:
+        ### TODO warn here?
+        return text
+
+    return colored_text
+
+if more_termcolor is None:
     warn(f"Failed to import more_termcolor. Ignoring color output...", stack=False)
     colored = colored_fallback
     ANSI, UNICODE, CHARSET = False, False, 'ascii'

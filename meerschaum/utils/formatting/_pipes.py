@@ -12,10 +12,25 @@ def pprint_pipes(pipes : dict):
     """
     from meerschaum.utils.warnings import error
     from meerschaum.utils.packages import attempt_import
-    from meerschaum.utils.misc import sorted_dict
+    from meerschaum.utils.misc import sorted_dict, replace_pipes_in_dict
     from meerschaum.utils.formatting import UNICODE, ANSI, pprint
+    import copy
+
+    def ascii_print_pipes():
+        asciitree = attempt_import('asciitree')
+        def _replace_pipe_ascii_tree(pipe):
+            return {str(pipe) : {}}
+        ascii_dict = replace_pipes_in_dict(pipes, _replace_pipe_ascii_tree)
+        tree = asciitree.LeftAligned()
+        output = ''
+        for k, v in ascii_dict.items():
+            output += tree(v) + '\n\n'
+        if len(output) > 0: output = output[:-2]
+        print(output)
+
     if not UNICODE:
-        return pprint(pipes, width=1, expand_all=True, indent_guides=False)
+        return ascii_print_pipes()
+        #  return pprint(pipes, width=1, expand_all=True, indent_guides=False)
     rich = attempt_import('rich', warn=False)
     if rich is None:
         return pprint(pipes)
@@ -63,51 +78,38 @@ def pprint_pipes(pipes : dict):
         border_style = guide_style
     )
 
-    rich.print(key_table)
-    return None
-
-    cols = list()
-    conn_trees = dict()
-    metric_trees = dict()
+    cols = []
+    conn_trees = {}
+    metric_trees = {}
     pipes = sorted_dict(pipes)
     for conn_keys, metrics in pipes.items():
         conn_trees[conn_keys] = Tree(
-            #  Panel.fit(
-                #  Text(icons['connector']) +
-                Text(conn_keys + "", styles['connector']),
-                #  title = Text(icons['connector'] + "Connector"),
-                #  border_style = guide_style,
-            #  ),
-            #  guide_style = guide_style
+            Text(
+                icons['connector'] + conn_keys,
+                style = styles['connector'],
+            ),
             guide_style = styles['connector']
         )
         metric_trees[conn_keys] = dict()
         for metric, locations in metrics.items():
             metric_trees[conn_keys][metric] = Tree(
-                #  Panel.fit(
-                    #  Text(icons['metric']) +
-                    Text(metric, styles['metric']),
-                    #  title = Text(icons['metric'] + "Metric"),
-                    #  style = guide_style,
-                    #  box = box.SIMPLE
-                #  ),
+                Text(
+                    icons['metric'] + metric,
+                    style = styles['metric']
+                ),
                 guide_style = styles['metric']
             )
             conn_trees[conn_keys].add(metric_trees[conn_keys][metric])
             for location, pipe in locations.items():
                 if location is None: _location = Text(str(location), style=none_style)
                 else: _location = Text(location, style=styles['location'])
-                #  _location = Panel.fit(
-                    #  str(pipe),
-                    #  title=Text(icons['location']) +_location,
-                    #  title_align='left',
-                    #  box=box.SIMPLE
-                    #  #  Text(f" : ") + Text(f"{pipe}")
-                #  )
                 _location = Text(icons['location']) + _location + Text("\n" + str(pipe) + "\n")
                 metric_trees[conn_keys][metric].add(_location)
 
-    columns = Columns(cols)
+    cols += [key_table]
     for k, t in conn_trees.items():
-        rich.print(t)
+        cols.append(t)
+
+    columns = Columns(cols)
+    rich.print(columns)
 
