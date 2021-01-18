@@ -2,14 +2,16 @@
 # -*- coding: utf-8 -*-
 # vim:fenc=utf-8
 
-import setuptools
+import setuptools, sys
 from setuptools import setup
 from setuptools.command.install import install
-try:
-    import cx_Freeze
-    from cx_Freeze import setup, Executable
-except ImportError:
-    cx_Freeze, Executable = None, None
+cx_Freeze, Executable = None, None
+if 'build_exe' in sys.argv:
+    try:
+        import cx_Freeze
+        from cx_Freeze import setup, Executable
+    except ImportError:
+        cx_Freeze, Executable = None, None
 
 ### read values from within the package
 exec(open('meerschaum/config/_version.py').read())
@@ -86,6 +88,7 @@ setup_kw_args = {
     ],
 }
 if cx_Freeze is not None and Executable is not None:
+    #  pass
     setup_kw_args['options'] = {
         'build_exe' : {
             'packages' : setuptools.find_packages(),
