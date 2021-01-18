@@ -6,7 +6,7 @@
 Functions for managing packages and virtual environments reside here.
 """
 
-import importlib
+import importlib, importlib.util
 _import_module = importlib.import_module
 from meerschaum.utils.packages._packages import packages, all_packages
 import os, pathlib, sys
@@ -73,7 +73,7 @@ def activate_venv(
     try:
         exec(open(activate_this_path).read(), {'__file__' : activate_this_path})
     except Exception as e:
-        warn(str(e)
+        warn(str(e))
         return False
     active_venvs.add(venv)
     os.chdir(old_cwd)
