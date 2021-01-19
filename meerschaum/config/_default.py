@@ -190,8 +190,8 @@ default_system_config = {
             'host'         : '0.0.0.0',
             'workers'      : max(int(multiprocessing.cpu_count() / 2), 1),
         },
-        'username'         : default_meerschaum_config['connectors']['api']['default']['username'],
-        'password'         : default_meerschaum_config['connectors']['api']['default']['password'],
+        #  'username'         : default_meerschaum_config['connectors']['api']['default']['username'],
+        #  'password'         : default_meerschaum_config['connectors']['api']['default']['password'],
         'protocol'         : default_meerschaum_config['connectors']['api']['default']['protocol'],
         'endpoints'        : {
             'mrsm'         : '/mrsm',

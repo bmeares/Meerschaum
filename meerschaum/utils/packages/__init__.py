@@ -84,6 +84,20 @@ def activate_venv(
     if debug: dprint(f'sys.path: {sys.path}')
     return True
 
+def venv_exec(code : str, venv : str = 'mrsm', debug : bool = False) -> bool:
+    """
+    Execute Python code in a subprocess via a virtual environment's interpeter.
+
+    Return True if the code successfully executes, False on failure.
+    """
+    import subprocess, sys
+    from meerschaum.config._paths import VIRTENV_RESOURCES_PATH
+    executable = (
+        sys.executable if venv is None
+        else os.path.join(VIRTENV_RESOURCES_PATH, venv, 'bin', 'python')
+    )
+    return subprocess.call([executable, '-c', code]) == 0
+
 def pip_install(
         *packages : list,
         args : list = ['--upgrade'],
