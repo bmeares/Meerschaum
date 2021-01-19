@@ -8,44 +8,25 @@ Formatting functions for printing pipes
 
 def pprint_pipes(pipes : dict):
     """
-    Build and print a rich.tree.Tree object from a pipes dictionary.
+    Print a stylized tree of a Pipes dictionary.
+    Supports ANSI and UNICODE global settings.
+
+    This code is pretty unreadable. Just a warning. But it's thoroughly tested,
+    so things *shouldn't* break.
     """
     from meerschaum.utils.warnings import error
     from meerschaum.utils.packages import attempt_import
     from meerschaum.utils.misc import sorted_dict, replace_pipes_in_dict
-    from meerschaum.utils.formatting import UNICODE, ANSI, pprint
+    from meerschaum.utils.formatting import UNICODE, ANSI, pprint, colored
     import copy
-
-    def ascii_print_pipes():
-        asciitree = attempt_import('asciitree')
-        def _replace_pipe_ascii_tree(pipe):
-            return {str(pipe) : {}}
-        ascii_dict = replace_pipes_in_dict(pipes, _replace_pipe_ascii_tree)
-        tree = asciitree.LeftAligned()
-        output = ''
-        for k, v in ascii_dict.items():
-            output += tree(v) + '\n\n'
-        if len(output) > 0: output = output[:-2]
-        print(output)
-
-    if not UNICODE:
-        return ascii_print_pipes()
-        #  return pprint(pipes, width=1, expand_all=True, indent_guides=False)
     rich = attempt_import('rich', warn=False)
-    if rich is None:
-        return pprint(pipes)
-
-    from rich import box
-    from rich.panel import Panel
-    from rich.tree import Tree
-    from rich.text import Text
-    from rich.columns import Columns
-    from rich.table import Table
+    Text = None
+    if rich is not None:
+        from rich.text import Text
 
     icons = {'connector' : '', 'metric' : '', 'location' : '', 'key' : ''}
-    styles = {'connector' : '', 'metric' : '', 'location' : ''}
+    styles = {'connector' : '', 'metric' : '', 'location' : '', 'key' : ''}
     guide_style, none_style = '', ''
-    ### NOTE: unicode should always be true, at least until there's an ASCII way to print Trees
     if UNICODE:
         icons['connector'] = '🔌 '
         icons['metric'] = '📊 '
@@ -59,23 +40,127 @@ def pprint_pipes(pipes : dict):
         guide_style = 'dim'
         none_style = 'black on magenta'
 
-    key_table = Table(
-        title=Text(icons['key'] + "Keys"),
-        show_header=False, expand=False, style="", header_style="", border_style=""
-    )
-    key_table.add_column()
-    #  key_table.add_column(justify='right')
-    #  key_table.add_column(icons['key'] + "Keys")
-    key_table.add_row(Text('\n' + icons['connector'] + "Connector", style=styles['connector']))
-    key_table.add_row(Text('\n' + icons['metric'] + "Metric", style=styles['metric']))
-    key_table.add_row(Text('\n' + icons['location'] + "Location\n", style=styles['location']))
+    print()
+
+    def ascii_print_pipes():
+        """
+        Print the dictionary with no unicode allowed. Also works in case rich fails to import
+        (though rich should auto-install when `attempt_import()` is called).
+        """
+        asciitree = attempt_import('asciitree')
+        def _replace_pipe_ascii_tree(pipe):
+            return {str(pipe) : {}}
+        ascii_dict, replace_dict = {}, {'connector' : {}, 'metric' : {}, 'location' : {}}
+        for conn_keys, metrics in pipes.items():
+            _colored_conn_key = colored(icons['connector'] + conn_keys, styles['connector'])
+            if Text is not None:
+                replace_dict['connector'][_colored_conn_key] = Text(conn_keys, style=styles['connector'])
+            ascii_dict[_colored_conn_key] = {}
+            for metric, locations in metrics.items():
+                _colored_metric_key = colored(icons['metric'] + metric, styles['metric'])
+                if Text is not None:
+                    replace_dict['metric'][_colored_metric_key] = Text(metric, style=styles['metric'])
+                ascii_dict[_colored_conn_key][_colored_metric_key] = {}
+                for location, pipe in locations.items():
+                    if location is None:
+                        _location_style = none_style
+                    else:
+                        _location_style = styles['location']
+                    pipe_addendum = '\n         ' + str(pipe)
+                    _colored_location = colored(icons['location'] + str(location), _location_style)
+                    _colored_location_key = _colored_location + pipe_addendum
+                    if Text is not None:
+                        replace_dict['location'][_colored_location] = Text(str(location), style=_location_style)
+                    ascii_dict[_colored_conn_key][_colored_metric_key][_colored_location_key] = {}
+
+        tree = asciitree.LeftAligned()
+        output = ''
+        cols = []
+
+        ### This is pretty terrible, unreadable code.
+        ### Please know that I'm normally better than this.
+        key_str = (
+            (Text("     ") if Text is not None else "     ") +
+            (
+                Text("Key", style='underline') if Text is not None else
+                colored("Key", 'underline')
+            ) + (Text('\n\n  ') if Text is not None else '\n\n  ') +
+            (
+                Text("Connector", style=styles['connector']) if Text is not None else
+                colored("Connector", styles['connector'])
+            ) + (Text('\n   +-- ') if Text is not None else '\n   +-- ') +
+            (
+                Text("Metric", style=styles['metric']) if Text is not None else
+                colored("Metric", styles['metric'])
+            ) + (Text('\n       +-- ') if Text is not None else '\n       +-- ') +
+            (
+                Text("Location", style=styles['location']) if Text is not None else
+                colored("Location", styles['location'])
+            ) + (Text('\n\n') if Text is not None else '\n\n')
+        )
+
+        output += str(key_str)
+        cols.append(key_str)
+
+        def replace_tree_text(tree_str : str) -> Text:
+            """
+            Replace the colored words with stylized Text instead.
+            Is not executed if ANSI and UNICODE are disabled.
+            """
+            tree_text = Text(tree_str) if Text is not None else None
+            for k, v in replace_dict.items():
+                for _colored, _text in v.items():
+                    parts = []
+                    lines = tree_text.split(_colored)
+                    for part in lines:
+                        parts += [part, _text]
+                    if lines[-1] != Text(''):
+                        parts = parts[:-1]
+                    _tree_text = Text('')
+                    for part in parts:
+                        _tree_text += part
+                    tree_text = _tree_text
+            return tree_text
+
+        tree_output = ""
+        for k, v in ascii_dict.items():
+            branch = {k : v}
+            tree_output += tree(branch) + '\n\n'
+            if not UNICODE and not ANSI:
+                _col = (Text(tree(branch)) if Text is not None else tree(branch))
+            else:
+                _col = replace_tree_text(tree(branch))
+            cols.append(_col)
+        if len(output) > 0: tree_output = tree_output[:-2]
+        output += tree_output
+
+        if rich is None:
+            return print(output)
+
+        from rich.columns import Columns
+        columns = Columns(cols)
+        rich.print(columns)
+
+    if not UNICODE:
+        return ascii_print_pipes()
+
+    from rich import box
+    from rich.panel import Panel
+    from rich.tree import Tree
+    from rich.text import Text
+    from rich.columns import Columns
+    from rich.table import Table
 
     key_panel = Panel(
         (
-            Text(icons['connector'] + "Connector", style=styles['connector']) + "\n"
+            Text("\n") +
+            Text(icons['connector'] + "Connector", style=styles['connector']) + Text("\n\n") +
+            Text(icons['metric'] + "Metric", style=styles['metric']) + Text("\n\n") +
+            Text(icons['location'] + "Location", style=styles['location']) + Text("\n")
         ),
         title = Text(icons['key'] + "Keys", style=guide_style),
-        border_style = guide_style
+        border_style = guide_style,
+        expand = True
     )
 
     cols = []
@@ -106,7 +191,7 @@ def pprint_pipes(pipes : dict):
                 _location = Text(icons['location']) + _location + Text("\n" + str(pipe) + "\n")
                 metric_trees[conn_keys][metric].add(_location)
 
-    cols += [key_table]
+    cols += [key_panel]
     for k, t in conn_trees.items():
         cols.append(t)
 
