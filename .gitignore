@@ -2,6 +2,7 @@
 *.yaml
 *.sqlite
 *.mrsm_history
+.pyinstaller
 
 # Byte-compiled / optimized / DLL files
 __pycache__/
