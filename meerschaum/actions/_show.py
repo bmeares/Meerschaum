@@ -96,6 +96,9 @@ def _show_pipes(
     pipes = get_pipes(debug=debug, **kw)
     from meerschaum.utils.formatting import ANSI, pprint_pipes
 
+    if len(pipes) == 0:
+        return False, "No pipes to show."
+
     if len(flatten_pipes_dict(pipes)) == 1:
         return flatten_pipes_dict(pipes)[0].show(debug=debug, nopretty=nopretty, **kw)
 
