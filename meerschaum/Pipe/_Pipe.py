@@ -19,6 +19,7 @@ class Pipe:
     from ._edit import edit
     from ._sync import sync, get_sync_time, exists
     from ._delete import delete
+    from ._drop import drop
 
     def __init__(
         self,
@@ -33,17 +34,17 @@ class Pipe:
         connector_keys : str
             keys to get Meerschaum connector
             e.g. 'sql:main'
-        
+
         metric_key : str
             standard Meerschaum metric key
-        
+
         location_key : str
             standard Meerschaum location key
 
         parameters : dict : {}
             parameters dictionary to give the Pipe.
             This dictionary is NOT stored in memory but rather is used for registration purposes.
-        
+
         mrsm_instance : str : None
             connector_keys for the Meerschaum instance connector (SQL or API connector)
         """
@@ -55,7 +56,7 @@ class Pipe:
         ### only set parameters if values are provided
         if parameters is not None:
             self._parameters = parameters
-        
+
         ### NOTE: The parameters dictionary is {} by default.
         ###       A Pipe may be registered without parameters, then edited,
         ###       or a Pipe may be registered with parameters set in-memory first.
@@ -79,7 +80,7 @@ class Pipe:
         refresh = False
         if '_meta' not in self.__dict__: refresh = True
         elif self.parameters != self._meta['parameters']: refresh = True
-            
+
         if refresh:
             parameters = self.parameters
             if parameters is None: parameters = dict()

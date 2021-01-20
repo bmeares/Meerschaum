@@ -6,14 +6,44 @@
 Implement the Connector fetch() method
 """
 
+from meerschaum.utils.typing import Optional, Union
+
 def dateadd_str(
         flavor : str = 'postgresql',
         datepart : str = 'day',
-        number : float = -1,
-        begin : 'str or datetime.datetime' = 'now'
+        number : Union[int, float] = -1,
+        begin : Union[str, 'datetime.datetime'] = 'now'
     ) -> str:
     """
-    Generate a DATEADD clause depending on flavor
+    Generate a DATEADD clause depending on database flavor.
+    This function is pretty fragile / complex, so I may depreciate
+    it in favor of a pure-Python or ORM solution.
+
+    :param flavor:
+        SQL database flavor, e.g. postgresql, sqlite.
+        Currently supported flavors:
+        - postgresql
+        - timescaledb
+        - mssql
+        - mysql
+        - mariadb
+        - sqlite
+        - oracle
+
+    :param datepart:
+        Which part of the date to modify. Supported values* (*AFAIK).
+        - year
+        - month
+        - day
+        - hour
+        - minute
+        - second
+
+    :param number:
+        How many units to add to the date part.
+
+    :param begin:
+        Base datetime to which to add dateparts.
     """
     from meerschaum.utils.debug import dprint
     from meerschaum.utils.packages import attempt_import
@@ -29,23 +59,32 @@ def dateadd_str(
 
     da = ""
     if flavor in ('postgresql', 'timescaledb'):
-        if begin == 'now': begin = "CAST(NOW() AT TIME ZONE 'utc' AS TIMESTAMP)"
-        elif begin_time: begin = f"CAST('{begin}' AS TIMESTAMP)"
+        if begin == 'now':
+            begin = "CAST(NOW() AT TIME ZONE 'utc' AS TIMESTAMP)"
+        elif begin_time:
+            begin = f"CAST('{begin}' AS TIMESTAMP)"
         da = begin + f" + INTERVAL '{number} {datepart}'"
-    elif flavor in ('mssql'):
-        if begin == 'now': begin = "GETUTCDATE()"
-        elif begin_time: begin = f"CAST('{begin}' AS DATETIME)"
+    elif flavor in ('mssql',):
+        if begin == 'now':
+            begin = "GETUTCDATE()"
+        elif begin_time:
+            begin = f"CAST('{begin}' AS DATETIME)"
         da = f"DATEADD({datepart}, {number}, {begin})"
     elif flavor in ('mysql', 'mariadb'):
-        if begin == 'now': begin = "UTC_TIMESTAMP()"
-        elif begin_time: begin = f'"{begin}"'
+        if begin == 'now':
+            begin = "UTC_TIMESTAMP()"
+        elif begin_time:
+            begin = f'"{begin}"'
         da = f"DATE_ADD({begin}, INTERVAL {number} {datepart})"
     elif flavor == 'sqlite':
         da = f"datetime('{begin}', '{number} {datepart}')"
     elif flavor == 'oracle':
-        if begin == 'now': 
-            begin = str(datetime.datetime.utcnow().strftime('%Y:%m:%d %M:%S.%f'))
-        elif begin_time: begin = str(begin.strftime('%Y:%m:%d %M:%S.%f'))
+        if begin == 'now':
+            begin = str(
+                datetime.datetime.utcnow().strftime('%Y:%m:%d %M:%S.%f')
+            )
+        elif begin_time:
+            begin = str(begin.strftime('%Y:%m:%d %M:%S.%f'))
         dt_format = 'YYYY-MM-DD HH24:MI:SS.FF'
         da = f"TO_TIMESTAMP('{begin}', '{dt_format}') + INTERVAL '{number}' {datepart}"
     return da
@@ -55,31 +94,36 @@ def fetch(
         pipe : 'meerschaum.Pipe',
         begin : str = 'now',
         debug : bool = False,
-        **Kw
-    ) -> 'pd.DataFrame':
+        **kw
+    ) -> Optional['pd.DataFrame']:
     """
-    Execute the SQL definition and if datetime and backtrack_minutes are provided, append a
-        `WHERE dt > begin` subquery.
+    Execute the SQL definition and return a Pandas DataFrame.
 
-    begin : str : 'now'
-        Most recent datatime to search for data. If backtrack_minutes is provided, subtract backtrack_minutes
+    If pipe.columns['datetime'] and
+        pipe.parameters['fetch']['backtrack_minutes'] are provided,
+        append a `WHERE dt > begin` subquery.
 
+    :param begin:
+        Most recent datatime to search for data.
+        If `backtrack_minutes` is provided, subtract `backtrack_minutes`.
 
-    pipe : Pipe
-        parameters:fetch : dict
-            Parameters necessary to execute a query. See pipe.parameters['fetch']
+    :param pipe:
+        Below are the various pipe parameters available to pipe.fetch.
 
-            Keys:
-                definition : str
-                    base SQL query to execute
+        pipe.columns['datetime'] : str
+            Name of the datetime column for the remote table.
 
-                datetime : str
-                    name of the datetime column for the remote table
+        pipe.parameters['fetch'] : dict
+            Parameters necessary to execute a query.
+            See pipe.parameters['fetch'].
 
-                backtrack_minutes : int or float
-                    how many minutes before `begin` to search for data
-                    
-    Returns pandas dataframe of the selected data.
+            pipe.parameters['fetch']['definition'] : str
+                Raw SQL query to execute to generate the pandas DataFrame.
+
+            pipe.parameters['backtrack_minutes'] : Union[int, float]
+                How many minutes before `begin` to search for data.
+
+    :param debug: Verbosity toggle.
     """
     from meerschaum.utils.debug import dprint
     from meerschaum.utils.warnings import warn, error

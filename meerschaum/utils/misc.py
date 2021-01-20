@@ -5,21 +5,27 @@
 Miscellaneous functions go here
 """
 
+from __future__ import annotations
+from meerschaum.utils.typing import Union, Mapping, Any, Callable, Optional, ClassVar
+
 import sys
 
 def add_method_to_class(
-        func : 'function',
-        class_def : 'class', 
-        method_name : str = None
-    ) -> 'function':
+        func : Callable[[Any], Any],
+        class_def : ClassVar[dict[Any, Any]],
+        method_name : Optional[str] = None
+    ) -> Callable[[Any], Any]:
     """
-    Add function `func` to class `class_def`
-    func - function :
-        function to be added as a method of the class
-    class_def - class :
-        class we are modifying
-    method_name - str (default None) :
-        new name of the method. None will use func.__name__
+    Add function `func` to class `class_def`.
+
+    :param func:
+        Function to be added as a method of the class
+
+    :param class_def:
+        Class we are modifying
+
+    :param method_name:
+        New name of the method. None will use func.__name__ (default).
     """
     from functools import wraps
 
@@ -40,7 +46,7 @@ def choose_subaction(
     Given a dictionary of options and the standard Meerschaum actions list,
     check if choice is valid and execute chosen function, else show available
     options and return False
-    
+
     action - list:
         subactions (e.g. `show pipes` -> ['pipes'])
     options - dict:
@@ -88,7 +94,7 @@ def yes_no(
     ) -> bool:
     """
     Print a question and prompt the user with a yes / no input
-    
+
     Returns bool (answer)
     """
     from meerschaum.utils.warnings import error
@@ -168,9 +174,9 @@ def parse_config_substitution(
     """
     if not value.beginswith(leading_key):
         return value
-    
+
     return leading_key[len(leading_key):][len():-1].split(delimeter)
-    
+
 def search_and_substitute_config(
         config : dict,
         leading_key : str = "MRSM",
@@ -257,14 +263,18 @@ def edit_file(
     from meerschaum.utils.packages import run_python_package
     try:
         EDITOR = os.environ.get('EDITOR', default_editor)
-        if debug: dprint(f"Opening file '{path}' with editor '{EDITOR}'") 
+        if debug: dprint(f"Opening file '{path}' with editor '{EDITOR}'")
         call([EDITOR, path])
     except Exception as e: ### can't open with default editors
         if debug: dprint(e)
         if debug: dprint('Failed to open file with system editor. Falling back to pyvim...')
         run_python_package('pyvim', [path], debug=debug)
 
-def parse_connector_keys(keys : str, construct : bool = True, **kw) -> 'meerschaum.connectors.Connector':
+def parse_connector_keys(
+        keys : str,
+        construct : bool = True,
+        **kw : Any
+    ) -> Union[meerschaum.connectors.Connector, Mapping[str, Any]]:
     """
     Parse connector keys and return Connector object
     """
@@ -277,16 +287,14 @@ def parse_connector_keys(keys : str, construct : bool = True, **kw) -> 'meerscha
         conn = get_connector(type=vals[0], label=vals[1], **kw)
         if conn is None:
             error(f"Unable to parse connector keys '{keys}'", stack=False)
-    else: conn = get_config('meerschaum', 'connectors', vals[0], vals[1])
+    else:
+        type_config = get_config('meerschaum', 'connectors', vals[0])
+        default_config = type_config.get('default', None)
+        conn = type_config.get(vals[1], None)
+        if default_config is not None:
+            default_config.update(conn)
+            conn = default_config
 
-    #  try:
-        #  vals = keys.split(':')
-        #  if construct: conn = get_connector(type=vals[0], label=vals[1], **kw)
-        #  else: conn = get_config('meerschaum', 'connectors', vals[0], vals[1])
-    #  except Exception as e:
-        #  from meerschaum.utils.warnings import warn, error
-        #  warn(str(e))
-        #  return None
     return conn
 
 def parse_instance_keys(keys : str, construct : bool = True, **kw):

@@ -19,7 +19,8 @@ __all__, modules = get_modules_from_package(sys.modules[__name__], names=True)
 from meerschaum.config._paths import (
     RESOURCES_PATH, PLUGINS_RESOURCES_PATH, PLUGINS_ARCHIVES_RESOURCES_PATH
 )
-if RESOURCES_PATH not in sys.path: sys.path.append(str(RESOURCES_PATH))
+if str(RESOURCES_PATH) not in sys.path: sys.path.append(str(RESOURCES_PATH))
+if str(RESOURCES_PATH) not in __path__: __path__.append(str(RESOURCES_PATH))
 import plugins
 _plugins_names, plugins_modules = get_modules_from_package(
     plugins,
@@ -60,7 +61,7 @@ for module in modules:
                     for ob in getmembers(module)
                         if isfunction(ob[1])
                             and ob[0] == module.__name__.replace('_', '').split('.')[-1]
-                            and ob[0][0] != '_'            
+                            and ob[0][0] != '_'
             ]
         )
     )

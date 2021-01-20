@@ -6,9 +6,6 @@
 Create and manipulate SQL tables with ORM
 """
 
-from meerschaum.utils.packages import import_children
-
-import_children()
 from meerschaum.api.models._pipes import MetaPipe
 #  from meerschaum.api.models._metrics import Metric
 #  from meerschaum.api.models._locations import Location

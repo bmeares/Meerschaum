@@ -80,7 +80,7 @@ default_system_config = {
         },
         'sql' : {
             'method'       : 'multi',
-            'chunksize'    : 1000,
+            'chunksize'    : 900,
             'pool_size'    : 5,
             'max_overflow' : 10,
             'pool_recycle' : 3600,
@@ -158,7 +158,7 @@ default_system_config = {
             },
         },
         'ascii'            : {
-            'intro'        : """       ___  ___  __   __   __                       
+            'intro'        : """       ___  ___  __   __   __
  |\/| |__  |__  |__) /__` /  ` |__|  /\  |  |  |\/|
  |  | |___ |___ |  \ .__/ \__, |  | /~~\ \__/  |  |\n""",
             'prompt'       : '\n [ {username}@{instance} ] > ',
@@ -182,7 +182,8 @@ default_system_config = {
         'clear_screen'     : True,
         'cmd'              : 'cmd2',
     },
-    ### not to be confused with system_config['connectors']['api']
+    ### not to be confused with system_config['connectors']['api'], this is the configuration
+    ### for the API server itself.
     'api' : {
         'uvicorn'          : {
             'app'          : 'meerschaum.api:app',
@@ -190,8 +191,11 @@ default_system_config = {
             'host'         : '0.0.0.0',
             'workers'      : max(int(multiprocessing.cpu_count() / 2), 1),
         },
-        #  'username'         : default_meerschaum_config['connectors']['api']['default']['username'],
-        #  'password'         : default_meerschaum_config['connectors']['api']['default']['password'],
+        'allow_registration' : {
+            'users'        : False,
+            'pipes'        : True,
+            'plugins'      : True,
+        },
         'protocol'         : default_meerschaum_config['connectors']['api']['default']['protocol'],
         'endpoints'        : {
             'mrsm'         : '/mrsm',
@@ -319,4 +323,3 @@ default_header_comment = """
 ##################################################################################
 
 """
-

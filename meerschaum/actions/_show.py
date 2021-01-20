@@ -5,22 +5,23 @@
 """
 This module contains functions for printing elements.
 """
-
+from __future__ import annotations
+from meerschaum.utils.typing import SuccessTuple, Union, Sequence, Any, Optional
 
 def show(
-        action : list = [''],
-        **kw
+        action : Sequence[str] = [''],
+        **kw : Any
     ) -> tuple:
     """
     Show elements of a certain type.
-    
+
     Command:
         `show {option}`
 
     Example:
         `show pipes`
     """
-    
+
     from meerschaum.utils.misc import choose_subaction
     show_options = {
         'actions'    : _show_actions,
@@ -37,7 +38,7 @@ def show(
     }
     return choose_subaction(action, show_options, **kw)
 
-def _show_actions(**kw) -> tuple:
+def _show_actions(**kw : Any) -> SuccessTuple:
     """
     Show available actions
     """
@@ -46,7 +47,7 @@ def _show_actions(**kw) -> tuple:
     print_options(options=actions, name='actions', **kw)
     return True, "Success"
 
-def _show_help(**kw) -> tuple:
+def _show_help(**kw : Any) -> SuccessTuple:
     """
     Print the --help menu from argparse
     """
@@ -55,10 +56,10 @@ def _show_help(**kw) -> tuple:
     return True, "Success"
 
 def _show_config(
-        action : list = [''],
+        action : Sequence[str] = [''],
         debug : bool = False,
-        **kw
-    ) -> tuple:
+        **kw : Any
+    ) -> SuccessTuple:
     """
     Show the configuration dictionary.
     Sub-actions defined in the action list are index in the config dictionary.
@@ -77,7 +78,7 @@ def _show_config(
     pprint(get_config(*keys))
     return (True, "Success")
 
-def _show_modules(**kw) -> tuple:
+def _show_modules(**kw : Any) -> SuccessTuple:
     """
     Show the currently imported modules
     """
@@ -89,8 +90,12 @@ def _show_modules(**kw) -> tuple:
 def _show_pipes(
         nopretty : bool = False,
         debug : bool = False,
-        **kw
-    ) -> tuple:
+        **kw : Any
+    ) -> SuccessTuple:
+    """
+    Print a stylized tree of available Meerschaum pipes.
+    Respects global ANSI and UNICODE settings.
+    """
     from meerschaum import get_pipes
     from meerschaum.utils.misc import flatten_pipes_dict
     pipes = get_pipes(debug=debug, **kw)
@@ -111,9 +116,9 @@ def _show_pipes(
 
     return (True, "Success")
 
-def _show_version(nopretty : bool = False, **kw) -> tuple:
+def _show_version(nopretty : bool = False, **kw : Any) -> SuccessTuple:
     """
-    Show the Meerschaum doc string
+    Show the Meerschaum doc string.
     """
     from meerschaum import __doc__ as doc, __version__ as version
     from meerschaum.utils.warnings import info
@@ -127,10 +132,20 @@ def _show_version(nopretty : bool = False, **kw) -> tuple:
     return (True, "Success")
 
 def _show_connectors(
-        action : list = [''],
+        action : Sequence[str] = [''],
         debug : bool = False,
-        **kw
-    ) -> tuple:
+        **kw : Any
+    ) -> SuccessTuple:
+    """
+    Show connectors configuration and, if requested, specific connector attributes.
+
+    Examples:
+        `show connectors`
+            Display the connectors configuration.
+
+        `show connectors sql:main`
+            Show the connectors configuration and the attributes for the connector 'sql:main'.
+    """
     from meerschaum.connectors import connectors
     from meerschaum.config import config
     from meerschaum.utils.formatting import make_header
@@ -150,33 +165,82 @@ def _show_connectors(
     return True, "Success"
 
 def _show_arguments(
-        **kw
-    ) -> tuple:
+        **kw : Any
+    ) -> SuccessTuple:
+    """
+    Show the parsed keyword arguments.
+    """
     from meerschaum.utils.formatting import pprint
     pprint(kw)
     return True, "Success"
 
 def _show_data(
+        action : Sequence[str] = [''],
         gui : bool = False,
+        begin : Optional[datetime.datetime] = None,
+        end : Optional[datetime.datetime] = None,
         debug : bool = False,
-        **kw
-    ):
+        **kw : Any
+    ) -> SuccessTuple:
+    """
+    Show pipes data as Pandas DataFrames.
+
+    Usage:
+        - Use --gui to open an interactive window.
+
+        - `show data all` to grab all data for the chosen Pipes.
+          WARNING: This may be dangerous!
+
+        - `show data 60` to grab the last 60 (or any number) minutes of data for all pipes.
+
+        - `show data --begin 2020-01-01 --end 2021-01-01` to specify date rangers.
+          NOTE: You must specify to at least the day, otherwise the date parser will assume you mean today's date.
+
+        - Regular pipes parameters (-c, -m, -l, etc.)
+
+    Examples:
+        - show data -m weather --gui
+            Open an interactive pandasgui window for the last 1440 minutes of data for all pipes of metric 'weather'.
+    """
     import sys
     from meerschaum import get_pipes
     from meerschaum.utils.packages import attempt_import
     from meerschaum.utils.warnings import warn, info
+    from meerschaum.utils.formatting import pprint
     pipes = get_pipes(as_list=True, debug=debug, **kw)
-    backtrack_minutes = 1440
+    try:
+        backtrack_minutes = float(action[0])
+    except:
+        backtrack_minutes = (
+            1440 if (
+                begin is None and end is None and (action and action[0] != 'all')
+            ) else None
+        )
+
     for p in pipes:
         try:
-            df = p.get_backtrack_data(backtrack_minutes=backtrack_minutes, debug=debug)
+            if backtrack_minutes is not None:
+                df = p.get_backtrack_data(backtrack_minutes=backtrack_minutes, debug=debug)
+            else:
+                df = p.get_data(begin=begin, end=end, debug=debug)
         except:
             df = None
         if df is None:
             warn(f"Failed to fetch data for pipe '{p}'.", stack=False)
             continue
-        info(f"Last {backtrack_minutes} minutes of data for Pipe '{p}'")
-        print(df, file=sys.stderr)
+
+        info_msg = (
+            f"Last {backtrack_minutes} minutes of data for pipe '{p}':"
+            if backtrack_minutes is not None else
+            (
+                f"Data for pipe '{p}'" +
+                    (f" from {begin}" if begin is not None else '') +
+                    (f" to {end}" if end is not None else '') + ':'
+            )
+        )
+
+        info(info_msg)
+        pprint(df, file=sys.stderr)
         if gui:
             pandasgui = attempt_import('pandasgui')
             try:
@@ -186,11 +250,14 @@ def _show_data(
     return True, "Success"
 
 def _show_plugins(
-        action : list = [''],
-        repository : str = 'api:mrsm',
+        action : Sequence[str] = [''],
+        repository : Optional[str] = None,
         debug : bool = False,
-        **kw
-    ):
+        **kw : Any
+    ) -> SuccessTuple:
+    """
+    Show the installed plugins.
+    """
     from meerschaum.actions import _plugins_names
     from meerschaum.utils.misc import print_options
     from meerschaum.utils.misc import parse_repo_keys
@@ -219,10 +286,13 @@ def _show_plugins(
     return True, "Success"
 
 def _show_users(
-        repository : str = None,
+        repository : Optional[str] = None,
         debug : bool = False,
-        **kw
-    ) -> tuple:
+        **kw : Any
+    ) -> SuccessTuple:
+    """
+    Show the registered users in a Meerschaum repository (default is mrsm.io).
+    """
     from meerschaum.config import get_config
     from meerschaum.utils.misc import parse_repo_keys, print_options
     try:
@@ -238,4 +308,3 @@ def _show_users(
 ###       be added to the `help` docstring.
 from meerschaum.utils.misc import choices_docstring as _choices_docstring
 show.__doc__ += _choices_docstring('show')
-

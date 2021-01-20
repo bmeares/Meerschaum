@@ -7,50 +7,53 @@ Implement the get_pipes() function
 """
 
 from meerschaum.utils.debug import dprint
+from meerschaum.utils.typing import (
+    Sequence, Optional, Union, Mapping, Any, InstanceConnector, PipesDict
+)
 
 def get_pipes(
-        connector_keys : 'str or list' = [],
-        metric_keys : 'str or list' = [],
-        location_keys : 'str or list' = [],
-        params : dict = dict(),
-        mrsm_instance : str = None,
+        connector_keys : Union[str, Sequence[str]] = [],
+        metric_keys : Union[str, Sequence[str]] = [],
+        location_keys : Union[str, Sequence[str]] = [],
+        params : Mapping[str, Any] = dict(),
+        mrsm_instance : Union[str, InstanceConnector, None] = None,
         as_list : bool = False,
         method : str = 'registered',
         wait : bool = False,
         debug : bool = False,
-        **kw
-    )-> 'dict or list':
+        **kw : Any
+    ) -> Union[PipesDict, Sequence['meerschaum.Pipe']]:
     """
     Return a dictionary (or list) of Pipe objects.
 
-    connector_keys : list
+    :param connector_keys:
         String or list of connector keys.
         If parameter is omitted or is '*', fetch all connector_keys.
 
-    metric_keys : list
+    :param metric_keys:
         String or list of metric keys.
         See connector_keys for formatting
 
-    location_keys : list
+    :param location_keys:
         String or list of location keys.
         See connector_keys for formatting
 
-    params : dict
-        Dictionary of additional parameters to search by. This may include 
+    :param params:
+        Dictionary of additional parameters to search by.
+        Params are parsed into a SQL WHERE clause.
+        E.g. { 'a' : 1, 'b' : 2 } equates to 'WHERE a = 1 AND b = 2'
 
-    mrsm_instance : str
-        ['api', 'sql'] Default "sql"
-        Connector keys for the Meerschaum instance of the Pipes.
-        
-        Source of pipes data and metadata.
-        If 'sql', pull from the `meta` and `main` SQL connectors.
-        If 'api', pull from the `main` WebAPI.
+    :param mrsm_instance:
+        Connector keys for the Meerschaum instance of the pipes.
+        Must be of SQLConnector or APIConnector and point to a valid
+        Meerschaum instance.
 
-    as_list : bool : False
+    :param as_list:
         If True, return pipes in a list instead of a hierarchical dictionary.
         False : { connector_keys : { metric_key : { location_key : Pipe } } }
         True  : [ Pipe ]
-    
+        Defaults to False.
+
     method : str : 'registered'
         ['registered', 'explicit', 'all']
         TODO implement all (left join with metrics and locations)
@@ -79,7 +82,8 @@ def get_pipes(
 
     ### Get SQL or API connector (keys come from `connector.fetch_pipes_keys()`).
     ### If `wait`, wait until a connection is made
-    if mrsm_instance is None: mrsm_instance = get_config('meerschaum', 'instance', patch=True)
+    if mrsm_instance is None:
+        mrsm_instance = get_config('meerschaum', 'instance', patch=True)
     if isinstance(mrsm_instance, str):
         from meerschaum.utils.misc import parse_instance_keys
         connector = parse_instance_keys(keys=mrsm_instance, wait=wait, debug=debug)
@@ -100,7 +104,7 @@ def get_pipes(
         debug = debug
     )
     if result is None: error(f"Unable to build pipes!")
-   
+
     ### populate the `pipes` dictionary with Pipes based on the keys
     ### obtained from the chosen `method`.
     from meerschaum import Pipe
@@ -159,7 +163,7 @@ def methods(
             **kw
         ) -> list:
         """
-        Explicitly build Pipes based on provided keys. 
+        Explicitly build Pipes based on provided keys.
         Raises an error if connector_keys or metric_keys is empty,
         and assumes location_keys = [None] if empty
         """
@@ -190,7 +194,10 @@ def methods(
         Fetch all available metrics and locations and create every combination.
         Connector keys are required.
         """
-        raise error("Need to implement metrics and locations logic in SQL and API", NotImplementedError)
+        raise error(
+            "Need to implement metrics and locations logic in SQL and API",
+            NotImplementedError
+        )
 
     methods = {
         'registered' : _registered,
@@ -201,4 +208,3 @@ def methods(
     if method not in methods:
         error(f"Method '{method}' is not supported!", NotImplementedError)
     return methods[method](**kw)
-

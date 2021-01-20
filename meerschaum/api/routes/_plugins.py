@@ -37,13 +37,23 @@ def register_plugin(
     """
     Register a plugin and save its archive file
     """
+    from meerschaum.config import get_config
+    allow_pipes = get_config('system', 'api', 'allow_registration', 'plugins', patch=True)
+    if not allow_plugins:
+        return False, (
+            "The administrator for this server has not allowed plugin registration.\n\n" +
+            "Please contact the system administrator, or if you are running this server, " +
+            "open the configuration file with `edit config` and search for 'allow_registration'. " +
+            " Under the keys system:api:allow_registration, you can toggle various registration types."
+        )
+
     import json, shutil, pathlib, os
     from meerschaum.config._paths import PLUGINS_RESOURCES_PATH, PLUGINS_ARCHIVES_RESOURCES_PATH
     from meerschaum import Plugin
     get_tables()
     if attributes is None: attributes = json.dumps(dict())
     attributes = json.loads(attributes)
-    
+
     plugin = Plugin(name, version=version, attributes=attributes)
     plugin_user_id = get_connector().get_plugin_user_id(plugin)
     if plugin_user_id is not None and plugin_user_id != curr_user.user_id:
@@ -94,4 +104,3 @@ def get_plugins(
     Return a list of registered plugins
     """
     return get_connector().get_plugins(user_id=user_id)
-    

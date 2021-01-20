@@ -28,7 +28,12 @@ def get_pool(pool_class_name : str = 'ThreadPool', workers : int = None):
 
     if pool_class_name not in pools:
         build_pool(workers)
-    if pools[pool_class_name]._state == 'CLOSE':
+
+    if pools[pool_class_name]._state not in ('RUN', 0):
+        try:
+            pools[pool_class_name].close()
+        except:
+            pass
         del pools[pool_class_name]
         build_pool(workers)
 

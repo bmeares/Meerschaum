@@ -18,6 +18,12 @@ ANSI = cf['system']['formatting']['ansi']
 UNICODE = cf['system']['formatting']['unicode']
 CHARSET = 'unicode' if UNICODE else 'ascii'
 
+### I encountered a bug in git bash on Windows.
+### This seems to resolve it; not sure if this is the best way.
+import os
+if 'PYTHONIOENCODING' not in os.environ:
+    os.environ['PYTHONIOENCODING'] = 'utf-8'
+
 from meerschaum.utils.packages import attempt_import
 from meerschaum.utils.warnings import warn
 
@@ -130,4 +136,3 @@ def print_tuple(tup : tuple, skip_common : bool = True, common_only : bool = Fal
 
     if do_print:
         print(msg)
-

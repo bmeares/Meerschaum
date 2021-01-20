@@ -36,8 +36,8 @@ def edit_config(
         edit_file(CONFIG_PATH, debug=debug)
 
     if debug: dprint("Reloading configuration...")
-    reload_package(meerschaum.config, debug=debug, **kw)
-    reload_package(meerschaum.config, debug=debug, **kw)
+    # reload_package(meerschaum.config, debug=debug, **kw)
+    # reload_package(meerschaum.config, debug=debug, **kw)
 
     return (True, "Success")
 

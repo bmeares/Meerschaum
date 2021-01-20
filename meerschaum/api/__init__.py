@@ -9,6 +9,7 @@ from meerschaum.utils._get_pipes import get_pipes as get_pipes_sql
 import pathlib, os
 fastapi = attempt_import('fastapi', lazy=True)
 starlette_reponses = attempt_import('starlette.responses')
+python_multipart = attempt_import('multipart')
 
 fastapi_login = attempt_import('fastapi_login')
 LoginManager = fastapi_login.LoginManager
@@ -110,4 +111,3 @@ endpoints = sys_config['endpoints']
 ### import WebAPI routes
 import meerschaum.api.routes as routes
 import meerschaum.api._events
-
