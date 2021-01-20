@@ -5,6 +5,11 @@
 This module contains SQLConnector functions for executing SQL queries.
 """
 
+from __future__ import annotations
+from meerschaum.utils.typing import (
+    Union, Mapping, SuccessTuple, Optional, Any, Sequence, Iterable
+)
+
 from meerschaum.utils.debug import dprint
 from meerschaum.utils.warnings import warn
 
@@ -14,12 +19,12 @@ bulk_flavors = {'postgresql', 'timescaledb'}
 def read(
         self,
         query_or_table : str,
-        params : dict = {},
+        params : Mapping[str, Any] = {},
         chunksize : int = -1,
         silent : bool = False,
         debug : bool = False,
-        **kw
-    ) -> 'pd.DataFrame':
+        **kw : Any
+    ) -> Optional[pandas.DataFrame]:
     """
     Read a SQL query or table into a pandas dataframe.
     """
@@ -91,9 +96,9 @@ def read(
 def value(
         self,
         query : str,
-        *args,
-        **kw
-    ):
+        *args : Any,
+        **kw : Any
+    ) -> Any:
     """
     Return a single value from a SQL query
     (index a DataFrame at [0, 0])
@@ -105,19 +110,19 @@ def value(
 
 def execute(
         self,
-        *args,
-        **kw
-    ) -> 'resultProxy or None':
+        *args : Any,
+        **kw : Any
+    ) -> Optional[sqlalchemy.engine.result.resultProxy]:
     return self.exec(*args, **kw)
 
 def exec(
         self,
         query : str,
-        *args,
+        *args : Any,
         silent : bool = False,
         debug : bool = False,
-        **kw
-    ) -> 'resultProxy or None':
+        **kw : Any
+    ) -> Optional[sqlalchemy.engine.result.resultProxy]:
     """
     Execute SQL code and return success status. e.g. calling stored procedures.
 
@@ -147,7 +152,7 @@ def exec(
 
 def to_sql(
         self,
-        df : 'pd.DataFrame',
+        df : pandas.DataFrame,
         name : str = None,
         index : bool = False,
         if_exists : str = 'replace',
@@ -157,24 +162,30 @@ def to_sql(
         debug : bool = False,
         as_tuple : bool = False,
         **kw
-    ):
+    ) -> Union[bool, SuccessTuple]:
     """
     Upload a DataFrame's contents to the SQL server
 
-    df : pandas.DataFrame
+    :param df:
         The DataFrame to be uploaded
-    name : str
+
+    :param name:
         The name of the table to be created
-    index : bool (False)
+
+    :param index:
         If True, creates the DataFrame's indices as columns (default False)
-    if_exists : str ('replace')
+
+    :param if_exists: str
         ['replace', 'append', 'fail']
         Drop and create the table ('replace') or append if it exists ('append') or raise Exception ('fail')
         (default 'replace')
-    method : str
+
+    :param method:
         None or multi. Details on pandas.to_sql
-    as_tuple : bool = False
+
+    :param as_tuple:
         If True, return a (success_bool, message) tuple instead of a bool
+
     **kw : keyword arguments
         Additional arguments will be passed to the DataFrame's `to_sql` function
     """
@@ -233,13 +244,16 @@ def to_sql(
     if as_tuple: return success, msg
     return success
 
-def psql_insert_copy(table, conn, keys, data_iter):
+def psql_insert_copy(
+        table : pandas.io.sql.SQLTable,
+        conn : Union[sqlalchemy.engine.Engine, sqlalchemy.engine.Connection],
+        keys : Sequence[str],
+        data_iter : Iterable[Any]
+    ) -> None:
     """
     Execute SQL statement inserting data
 
-    Parameters
-    ----------
-    table : pandas.io.sql.SQLTable
+    :param table : pandas.io.sql.SQLTable
     conn : sqlalchemy.engine.Engine or sqlalchemy.engine.Connection
     keys : list of str
         Column names
@@ -268,4 +282,3 @@ def psql_insert_copy(table, conn, keys, data_iter):
             table_name, columns
         )
         cur.copy_expert(sql=sql, file=s_buf)
-

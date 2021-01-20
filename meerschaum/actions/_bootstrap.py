@@ -134,4 +134,3 @@ def _bootstrap_grafana(
 ###       be added to the `help` docstring.
 from meerschaum.utils.misc import choices_docstring as _choices_docstring
 bootstrap.__doc__ += _choices_docstring('bootstrap')
-

@@ -6,12 +6,15 @@
 Manage users via the SQL Connector
 """
 
+from __future__ import annotations
+from meerschaum.utils.typing import SuccessTuple, Optional, Any
+
 def register_user(
         self,
-        user : 'meerschaum.User',
+        user : meerschaum.User,
         debug : bool = False,
-        **kw
-    ) -> tuple:
+        **kw : Any
+    ) -> SuccessTuple:
     """
     Register a new user
     """
@@ -31,7 +34,7 @@ def register_user(
     from meerschaum.connectors.sql.tables import get_tables
     tables = get_tables(mrsm_instance=self, debug=debug)
 
-    import json
+    json = attempt_import('json')
     bind_variables = {
         'user_id' : old_id,
         'username' : user.username,
@@ -52,7 +55,7 @@ def register_user(
         return False, f"Failed to register user '{user}'"
     return True, f"Successfully registered user '{user}'"
 
-def valid_username(username : str) -> tuple:
+def valid_username(username : str) -> SuccessTuple:
     """
     Verify that a given username is valid
     """
@@ -87,10 +90,10 @@ def valid_username(username : str) -> tuple:
 
 def edit_user(
         self,
-        user : 'meerschaum.User',
+        user : meerschaum.User,
         debug : bool = False,
-        **kw
-    ) -> tuple:
+        **kw : Any
+    ) -> SuccessTuple:
     """
     Update an existing user
     """
@@ -113,7 +116,7 @@ def edit_user(
         'password_hash' : user.password_hash,
         'attributes' : json.dumps(user.attributes),
     }
-    
+
     query = sqlalchemy.update(users).values(**bind_variables).where(users.c.user_id == user_id)
 
     result = self.exec(query, debug=debug)
@@ -123,7 +126,7 @@ def edit_user(
 
 def get_user_id(
         self,
-        user : 'meerschaum.User',
+        user : meerschaum.User,
         debug : bool = False
     ) -> int:
     ### ensure users table exists
@@ -143,9 +146,9 @@ def get_user_id(
 
 def delete_user(
         self,
-        user : 'meerschaum.User',
+        user : meerschaum.User,
         debug : bool = False
-    ) -> tuple:
+    ) -> SuccessTuple:
     ### ensure users table exists
     from meerschaum.connectors.sql.tables import get_tables
     users = get_tables(mrsm_instance=self, debug=debug)['users']
@@ -173,7 +176,7 @@ def delete_user(
 def get_users(
         self,
         debug : bool = False,
-        **kw
+        **kw : Any
     ) -> list:
     ### ensure users table exists
     from meerschaum.connectors.sql.tables import get_tables
@@ -187,9 +190,9 @@ def get_users(
 
 def get_user_password_hash(
         self,
-        user : 'meerschaum.User',
+        user : meerschaum.User,
         debug : bool = False,
-        **kw
+        **kw : Any
     ) -> str:
     """
     Return a user's password hash
@@ -210,10 +213,10 @@ def get_user_password_hash(
 
 def get_user_type(
         self,
-        user : 'meerschaum.User',
+        user : meerschaum.User,
         debug : bool = False,
-        **kw
-    ) -> str:
+        **kw : Any
+    ) -> Optional[str]:
     """
     Return a user's type
     """
@@ -230,4 +233,3 @@ def get_user_type(
     query = sqlalchemy.select([users.c.usr_type]).where(users.c.user_id == user_id)
 
     return self.value(query, debug=debug)
-

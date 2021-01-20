@@ -88,7 +88,6 @@ setup_kw_args = {
     ],
 }
 if cx_Freeze is not None and Executable is not None:
-    #  pass
     setup_kw_args['options'] = {
         'build_exe' : {
             'packages' : setuptools.find_packages(),

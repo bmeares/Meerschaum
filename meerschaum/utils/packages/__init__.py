@@ -9,7 +9,7 @@ Functions for managing packages and virtual environments reside here.
 import importlib, importlib.util
 _import_module = importlib.import_module
 from meerschaum.utils.packages._packages import packages, all_packages
-import os, pathlib, sys
+import os, pathlib, sys, platform
 from meerschaum.utils.warnings import warn, error
 from meerschaum.utils.debug import dprint
 
@@ -62,7 +62,10 @@ def activate_venv(
     from meerschaum.config._paths import VIRTENV_RESOURCES_PATH
     virtualenv = attempt_import('virtualenv', install=True, venv=None, debug=debug)
     venv_path = pathlib.Path(os.path.join(VIRTENV_RESOURCES_PATH, venv))
-    bin_path = pathlib.Path(os.path.join(venv_path), 'bin')
+    bin_path = pathlib.Path(
+        os.path.join(venv_path),
+        ('bin' if platform.system() != 'Windows' else "Scripts")
+    )
     activate_this_path = pathlib.Path(os.path.join(bin_path, 'activate_this.py'))
     old_cwd = pathlib.Path(os.getcwd())
     os.chdir(VIRTENV_RESOURCES_PATH)
@@ -94,7 +97,11 @@ def venv_exec(code : str, venv : str = 'mrsm', debug : bool = False) -> bool:
     from meerschaum.config._paths import VIRTENV_RESOURCES_PATH
     executable = (
         sys.executable if venv is None
-        else os.path.join(VIRTENV_RESOURCES_PATH, venv, 'bin', 'python')
+        else os.path.join(
+            VIRTENV_RESOURCES_PATH, venv, (
+                'bin' if platform.system() != 'Windows' else 'Scripts'
+            ), 'python'
+        )
     )
     return subprocess.call([executable, '-c', code]) == 0
 
@@ -116,7 +123,8 @@ def pip_install(
     if venv is not None:
         activate_venv(venv=venv, debug=debug)
         if '--ignore-installed' not in args: args += ['--ignore-installed']
-    if 'install' not in args: args = ['install'] + args
+    ### NOTE: Added pip to be checked on each install. Too much?
+    if 'install' not in args: args = ['install'] + args + ['pip']
     success = run_python_package('pip', args + list(packages), venv=venv, debug=debug) == 0
     if venv is not None and deactivate:
         deactivate_venv(venv=venv, debug=debug)
@@ -138,9 +146,13 @@ def run_python_package(
     from meerschaum.config._paths import VIRTENV_RESOURCES_PATH
     executable = (
         sys.executable if venv is None
-        else os.path.join(VIRTENV_RESOURCES_PATH, venv, 'bin', 'python')
+        else os.path.join(
+            VIRTENV_RESOURCES_PATH, venv, (
+                'bin' if platform.system() != 'Windows' else 'Scripts'
+            ), 'python'
+        )
     )
-    command = [executable, '-m', package_name] + args
+    command = [executable, '-m', str(package_name)] + [str(a) for a in args]
     if debug: print(command)
     return call(command)
 
@@ -268,7 +280,7 @@ def get_modules_from_package(
     Find and import all modules in a package.
 
     Returns: either list of modules or tuple of lists
-    
+
     names = False (default) : modules
     names = True            : (__all__, modules)
     """
@@ -320,7 +332,7 @@ def import_children(
     package : package (default None)
         Package to import its functions into.
         If None (default), use parent
-    
+
     package_name : str (default None)
         Name of package to import its functions into
         If None (default), use parent
@@ -333,7 +345,7 @@ def import_children(
     """
     import sys, inspect
     from meerschaum.utils.debug import dprint
-    
+
     ### if package_name and package are None, use parent
     if package is None and package_name is None:
         package_name = inspect.stack()[1][0].f_globals['__name__']
@@ -507,4 +519,3 @@ def uninstall_import_hook(venv : str = 'mrsm', all_hooks : bool = False, debug :
     del to_delete[:]
 
     return True
-

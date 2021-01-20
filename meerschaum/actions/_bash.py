@@ -10,6 +10,7 @@ NOTE: This action may be a huge security vulnerability
 def bash(
         action : list = [],
         sub_args : list = [],
+        use_bash : bool = True,
         debug : bool = False,
         **kw
     ):
@@ -22,10 +23,13 @@ def bash(
     import sys
     from meerschaum.utils.debug import dprint
 
-    command_list = ["bash"]
-
-    if action[0] != '':
-        command_list += ["-c", " ".join(action + sub_args)]
+    if use_bash:
+        command_list = ["bash"]
+        if action[0] != '':
+            command_list += ["-c", " ".join(action + sub_args)]
+    else:
+        command_list = action + sub_args
+        if action[0] == '': command_list = 'bash'
 
     if debug:
         dprint(f'action  : {action}')

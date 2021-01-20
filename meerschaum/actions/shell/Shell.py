@@ -5,6 +5,9 @@
 This module is the entry point for the interactive shell
 """
 
+from __future__ import annotations
+from meerschaum.utils.typing import Union, SuccessTuple, Any
+
 import sys, inspect
 from meerschaum.utils.packages import attempt_import
 from meerschaum.config import __doc__, __version__ as version, config as cf, get_config
@@ -128,11 +131,17 @@ class Shell(cmd.Cmd):
         if '{username}' in self._prompt:
             if username is None:
                 try:
+                    # conn = parse_instance_keys(self.instance_keys, construct=True)
+                    # help(conn)
                     username = parse_instance_keys(self.instance_keys, construct=False)['username']
-                except:
+                except KeyError:
                     username = '(no username)'
-            self.username = username
-            if ANSI: self.username = colored(self.username, *get_config('system', 'shell', 'ansi', 'username', 'color', patch=True))
+                except Exception as e:
+                    username = str(e)
+            self.username = (
+                username if not ANSI else
+                colored(username, *get_config('system', 'shell', 'ansi', 'username', 'color', patch=True))
+            )
             prompt = prompt.replace('{username}', self.username)
             mask = mask.replace('{username}', ''.join(['\0' for c in '{username}']))
 
@@ -232,18 +241,9 @@ class Shell(cmd.Cmd):
         if len(args['action']) == 0: args['action'] = ['']
 
         positional_only = (action not in self._actions)
-        #  for param in func_param_kinds:
-            ### if variable keyword arguments found,
-            ### use meerschaum parser, else just pass
-            ### the line string without parsing
-            #  if str(param[1].kind) == "VAR_KEYWORD":
-                #  positional_only = False
-                #  break
-        
         if positional_only:
-            #  if self.debug: print("Did not find keyword arguments. " + "Returning original line:\n" + str(original_line))
             return original_line
-        
+
         ### execute the meerschaum action
         ### and print the response message in case of failure
         from meerschaum.utils.formatting import print_tuple
@@ -287,7 +287,12 @@ class Shell(cmd.Cmd):
 
         info(f"Debug mode is {'on' if self.debug else 'off'}.")
 
-    def do_instance(self, action : list = [''], debug : bool = False, **kw):
+    def do_instance(
+        self,
+        action : list = [''],
+        debug : bool = False,
+        **kw : Any
+    ) -> SuccessTuple:
         """
         Temporarily set a default Meerschaum instance for the duration of the shell.
         The default instance is loaded from the Meerschaum configuraton file
@@ -332,7 +337,12 @@ class Shell(cmd.Cmd):
         info(f"Default instance for the current shell: {conn}")
         return True, "Success"
 
-    def do_repo(self, action : list = [''], debug : bool = False, **kw):
+    def do_repo(
+        self,
+        action : list = [''],
+        debug : bool = False,
+        **kw : Any
+    ) -> SuccessTuple:
         """
         Temporarily set a default Meerschaum repository for the duration of the shell.
         The default repository (mrsm.io) is loaded from the Meerschaum configuraton file
@@ -375,7 +385,7 @@ class Shell(cmd.Cmd):
         info(f"Default repository for the current shell: {conn}")
         return True, "Success"
 
-    def do_exit(self, params):
+    def do_exit(self, params) -> True:
         """
         Exit the Meerschaum shell.
         """
@@ -434,4 +444,3 @@ def input_with_sigint(_input):
             print("^C")
             return "pass"
     return _input_with_sigint
-

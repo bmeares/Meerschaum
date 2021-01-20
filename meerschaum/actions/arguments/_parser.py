@@ -11,9 +11,25 @@ from meerschaum.config import __doc__ as doc
 from meerschaum.utils.misc import string_to_dict
 import json
 
+def parse_datetime(dt_str : str):
+    from meerschaum.utils.packages import attempt_import
+    dateutil_parser, datetime = attempt_import('dateutil.parser', 'datetime')
+
+    try:
+        if dt_str.lower() == 'now':
+            dt = datetime.datetime.utcnow()
+        else:
+            dt = dateutil_parser.parse(dt_str)
+    except:
+        dt = None
+    if dt is None:
+        from meerschaum.utils.warnings import warn, error
+        error(f"'{dt_str}' is not a valid datetime format.", stack=False)
+    return dt
+
 parser = argparse.ArgumentParser(
-    description="Create and Build Pipes with Meerschaum",
-    usage="mrsm [action with optional arguments] {options}"
+    description = "Create and Build Pipes with Meerschaum",
+    usage = "mrsm [action with optional arguments] {options}"
 )
 
 groups = dict()
@@ -41,7 +57,7 @@ groups['actions'].add_argument(
 groups['actions'].add_argument(
     '-A', '--sub-args', nargs=argparse.REMAINDER,
     help=(
-        "Provide a list of arguments for subprocesses. You can also type sub-arguments in [] instead." + 
+        "Provide a list of arguments for subprocesses. You can also type sub-arguments in [] instead." +
         " E.g. `stack -A='--version'`, `ls [-lh]`, `echo -A these are sub-arguments`"
     )
 )
@@ -72,6 +88,12 @@ groups['sync'].add_argument(
 )
 groups['sync'].add_argument(
     '--async', action="store_true", help="Run the action asynchronously, if possible. Alias for --unblock",
+)
+groups['sync'].add_argument(
+    '--begin', type=parse_datetime, help="Specify a begin datetime for syncing or displaying data."
+)
+groups['sync'].add_argument(
+    '--end', type=parse_datetime, help="Specify an end datetime for syncing or displaying data."
 )
 
 ### API options
@@ -121,4 +143,7 @@ groups['misc'].add_argument(
 )
 groups['misc'].add_argument(
     '--shell', action='store_true', help="Open a Meerschaum shell and execute the provided action"
+)
+groups['misc'].add_argument(
+    '--use-bash', action='store_true', help="Execute non-implemented actions via `bash -c`. Default behavior is to execute directly."
 )

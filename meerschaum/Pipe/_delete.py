@@ -9,9 +9,9 @@ Delete a Pipe's contents and registration
 def delete(
         self,
         debug : bool = False,
+        **kw
     ) -> tuple:
     """
     Call the Pipe's instance connector's delete_pipe method
     """
-    return self.instance_connector.delete_pipe(self, debug=debug)
-    
+    return self.instance_connector.delete_pipe(self, debug=debug, **kw)

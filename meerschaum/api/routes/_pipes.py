@@ -30,8 +30,17 @@ def register_pipe(
         curr_user : str = fastapi.Depends(manager)
     ):
     """
-    Register a new Pipe
+    Register a new pipe.
     """
+    from meerschaum.config import get_config
+    allow_pipes = get_config('system', 'api', 'allow_registration', 'pipes', patch=True)
+    if not allow_pipes:
+        return False, (
+            "The administrator for this server has not allowed pipe registration.\n\n" +
+            "Please contact the system administrator, or if you are running this server, " +
+            "open the configuration file with `edit config` and search for 'allow_registration'. " +
+            " Under the keys system:api:allow_registration, you can toggle various registration types."
+        )
     pipe_object = get_pipe(pipe.connector_keys, pipe.metric_key, pipe.location_key)
     if is_pipe_registered(pipe_object, pipes(refresh=True)):
         raise fastapi.HTTPException(status_code=409, detail="Pipe already registered")
@@ -57,7 +66,7 @@ def edit_pipe(
     pipes(refresh=True)
     if not is_pipe_registered(pipe, pipes()):
         raise fastapi.HTTPException(status_code=404, detail="Pipe is not registered.")
-    
+
     results = get_connector().edit_pipe(pipe=pipe, patch=patch)
 
     pipes(refresh=True)
@@ -156,7 +165,7 @@ async def get_pipes_by_connector_and_metric_and_location(
     if location_key in ('[None]', 'None', 'null'): location_key = None
     if location_key not in pipes()[connector_keys][metric_key]:
         raise fastapi.HTTPException(status_code=404, detail=f"location_key '{location_key}' not found.")
- 
+
     return str(pipes()[connector_keys][metric_key][location_key])
 
 @app.get(pipes_endpoint + '/{connector_keys}/{metric_key}/{location_key}/sync_time')

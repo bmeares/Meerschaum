@@ -15,7 +15,7 @@ packages dictionary is structured in the following schema:
 
 packages = {
     'required' : {
-    
+
     },
     'formatting' : {
         'pprintpp'       : 'pprintpp',
@@ -34,7 +34,6 @@ packages = {
         'pyvim'            : 'pyvim',
         'aiofiles'         : 'aiofiles',
         'cmd2'             : 'cmd2',
-        'python-multipart' : 'multipart',
         'packaging'        : 'packaging',
         'prompt_toolkit'   : 'prompt-toolkit',
     },
@@ -65,7 +64,7 @@ packages['sql'] = {
     'databases'  : 'databases',
     'aiosqlite'  : 'aiosqlite',
     'asyncpg'    : 'asyncpg',
-    
+
 }
 packages['sql'].update(packages['drivers'])
 packages['api'] = {
@@ -75,10 +74,10 @@ packages['api'] = {
     'jinja2'        : 'jinja2',
     'passlib'       : 'passlib',
     'fastapi_login' : 'fastapi-login',
+    'multipart'     : 'python-multipart',
 }
 packages['api'].update(packages['sql'])
 
 all_packages = dict()
 for group, import_names in packages.items():
     all_packages.update(import_names)
-

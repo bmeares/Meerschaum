@@ -10,7 +10,7 @@ NOTE: `sync` required a SQL connection and is not intended for client use
 
 def sync(
         action : list = [''],
-        **kw        
+        **kw
     ) -> tuple:
     """
     Sync elements
@@ -63,13 +63,13 @@ def _pipes_lap(
             traceback.print_exception(type(e), e, e.__traceback__)
             print("Error: " + str(e))
             return_tuple = (False, f"Failed to sync Pipe '{p}' with exception:" + "\n" + str(e))
-        
+
         print_tuple(return_tuple)
         return return_tuple
 
     #  from meerschaum.utils.pool import get_pool
     #  pool = get_pool('ThreadPool', workers=workers)
-    
+
     from multiprocessing import cpu_count
     from multiprocessing.pool import ThreadPool as Pool
     if workers is None: workers = cpu_count()
@@ -146,8 +146,9 @@ def _sync_pipes(
         lap_end = time.time()
         print(file=sys.stderr)
         msg = (
-            f"It took {round(lap_end - lap_begin, 2)} seconds to sync {len(success) + len(fail)} pipes" + "\n" + 
-            f"  ({len(success)} succeeded, {len(fail)} failed)."
+            f"It took {round(lap_end - lap_begin, 2)} seconds to sync {len(success) + len(fail)} pipe" +
+            ("s" if (len(success) + len(fail)) > 1 else "") + "\n" +
+            f"    ({len(success)} succeeded, {len(fail)} failed)."
         )
         info(msg)
         if min_seconds > 0 and loop:
@@ -162,4 +163,3 @@ def _sync_pipes(
 ###       be added to the `help` docstring.
 from meerschaum.utils.misc import choices_docstring as _choices_docstring
 sync.__doc__ += _choices_docstring('sync')
-
