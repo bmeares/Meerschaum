@@ -49,19 +49,27 @@ def choose_subaction(
         Functions must accept **kw keyword arguments
         and return a tuple of success code and message
     """
+    from meerschaum.utils.warnings import warn, info
     import inspect
     parent_action = inspect.stack()[1][3]
     if len(action) == 0: action = ['']
     choice = action[0]
-    if choice not in options:
-        print(f"Cannot {parent_action} '{choice}'. Choose one:")
+
+    def valid_choice(_choice : str, _options : dict):
+        if _choice in _options: return _choice
+        if (_choice + 's') in options: return _choice + 's'
+        return None
+
+    parsed_choice = valid_choice(choice, options)
+    if parsed_choice is None:
+        warn(f"Cannot {parent_action} '{choice}'. Choose one:", stack=False)
         for option in sorted(options):
             print(f"  - {parent_action} {option}")
         return (False, f"Invalid choice '{choice}'")
     ### remove parent sub-action
     kw['action'] = list(action)
     del kw['action'][0]
-    return options[choice](**kw)
+    return options[parsed_choice](**kw)
 
 def generate_password(
         length : int = 12

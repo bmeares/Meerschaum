@@ -211,12 +211,13 @@ def create_indices(
 
         index_queries[pipe.get_columns('id')] = id_query
 
+    failures = 0
     for col, q in index_queries.items():
         if debug: dprint(f"Creating index on column '{col}' for Pipe '{pipe}'")
-        if not self.exec(q, debug=debug):
+        if not self.exec(q, silent=True, debug=debug):
             warn(f"Failed to create index on column '{col}' for Pipe '{pipe}'")
-            return False
-    return True
+            failures += 1
+    return failures == 0
 
 def delete_pipe(
         self,
@@ -517,7 +518,7 @@ def get_sync_time(
     try:
         from meerschaum.utils.misc import round_time
         import datetime
-        db_time = self.value(q, debug=debug)
+        db_time = self.value(q, silent=True, debug=debug)
 
         ### sqlite returns str
         if db_time is None: return None
