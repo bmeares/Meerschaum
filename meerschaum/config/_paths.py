@@ -12,16 +12,26 @@ try:
 except ImportError:
     import importlib_resources as pkg_resources
 
+package_root_context_manager = pkg_resources.path('meerschaum', '__init__.py')
+with package_root_context_manager as file_path:
+    PACKAGE_ROOT_PATH = Path(os.path.join(Path(file_path.parent.parent), 'meerschaum'))
+
+PYINSTALLER_LOCKFILE_PATH = Path(os.path.join(PACKAGE_ROOT_PATH), '.pyinstaller')
+_pyinstall = PYINSTALLER_LOCKFILE_PATH.exists()
+# if _pyinstall:
+#     from PyInstaller.utils.hooks import logger
+#     logger.info("Found lockfile!")
+#     print('found the file')
+# else:
+#     print(str(PYINSTALLER_LOCKFILE_PATH))
+
 CONFIG_ROOT_PATH = Path(os.path.join(Path.home(), '.config', 'meerschaum'))
 if platform.system() == 'Windows':
     CONFIG_ROOT_PATH = Path(os.path.join(os.environ['AppData'], 'Meerschaum'))
 
 ### bootstrap the root
-CONFIG_ROOT_PATH.mkdir(parents=True, exist_ok=True)
-
-package_root_context_manager = pkg_resources.path('meerschaum', '__init__.py')
-with package_root_context_manager as file_path:
-    PACKAGE_ROOT_PATH = Path(os.path.join(Path(file_path.parent.parent), 'meerschaum'))
+if not _pyinstall:
+    CONFIG_ROOT_PATH.mkdir(parents=True, exist_ok=True)
 
 ### file path of the resources package
 #  RESOURCES_PATH = Path(os.path.join(CONFIG_ROOT_PATH, 'config', 'resources'))
@@ -79,15 +89,16 @@ PLUGINS_RESOURCES_PATH = Path(os.path.join(RESOURCES_PATH, 'plugins'))
 PLUGINS_ARCHIVES_RESOURCES_PATH = Path(os.path.join(PLUGINS_RESOURCES_PATH, '.archives'))
 PLUGINS_TEMP_RESOURCES_PATH = Path(os.path.join(PLUGINS_RESOURCES_PATH, '.tmp'))
 PLUGINS_INIT_PATH = Path(os.path.join(PLUGINS_RESOURCES_PATH, '__init__.py'))
-PLUGINS_INIT_PATH.parent.mkdir(parents=True, exist_ok=True)
-PLUGINS_INIT_PATH.touch()
+if not _pyinstall:
+    PLUGINS_INIT_PATH.parent.mkdir(parents=True, exist_ok=True)
+    PLUGINS_INIT_PATH.touch()
 
 SQLITE_DB_PATH = Path(os.path.join(RESOURCES_PATH, 'mrsm_local.db'))
 
 
-
 ### NOTE: This must be the bottom of the module
-paths_glob = dict(globals())
-for var, path in paths_glob.items():
-    if 'RESOURCES_PATH' in var:
-        path.mkdir(parents=True, exist_ok=True)
+if not _pyinstall:
+    paths_glob = dict(globals())
+    for var, path in paths_glob.items():
+        if 'RESOURCES_PATH' in var:
+            path.mkdir(parents=True, exist_ok=True)

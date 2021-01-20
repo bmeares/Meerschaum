@@ -55,7 +55,7 @@ packages = {
     },
     'build' : {
         'cx_Freeze'   : 'cx_Freeze>=6.5.1',
-        'pyinstaller' : 'pyinstaller',
+        'PyInstaller' : 'pyinstaller',
     },
 }
 packages['sql'] = {
