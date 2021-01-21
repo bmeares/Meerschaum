@@ -1,0 +1,1294 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, minimum-scale=1" />
+<meta name="generator" content="pdoc 0.9.2" />
+<title>meerschaum.Pipe API documentation</title>
+<meta name="description" content="Pipes are the primary metaphor of the Meerschaum system.
+You can interact with pipe data via `meerschaum.Pipe` objects …" />
+<link rel="preload stylesheet" as="style" href="https://cdnjs.cloudflare.com/ajax/libs/10up-sanitize.css/11.0.1/sanitize.min.css" integrity="sha256-PK9q560IAAa6WVRRh76LtCaI8pjTJ2z11v0miyNNjrs=" crossorigin>
+<link rel="preload stylesheet" as="style" href="https://cdnjs.cloudflare.com/ajax/libs/10up-sanitize.css/11.0.1/typography.min.css" integrity="sha256-7l/o7C8jubJiy74VsKTidCy1yBkRtiUGbVkYBylBqUg=" crossorigin>
+<link rel="stylesheet preload" as="style" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/10.1.1/styles/github.min.css" crossorigin>
+<style>:root{--highlight-color:#fe9}.flex{display:flex !important}body{line-height:1.5em}#content{padding:20px}#sidebar{padding:30px;overflow:hidden}#sidebar > *:last-child{margin-bottom:2cm}.http-server-breadcrumbs{font-size:130%;margin:0 0 15px 0}#footer{font-size:.75em;padding:5px 30px;border-top:1px solid #ddd;text-align:right}#footer p{margin:0 0 0 1em;display:inline-block}#footer p:last-child{margin-right:30px}h1,h2,h3,h4,h5{font-weight:300}h1{font-size:2.5em;line-height:1.1em}h2{font-size:1.75em;margin:1em 0 .50em 0}h3{font-size:1.4em;margin:25px 0 10px 0}h4{margin:0;font-size:105%}h1:target,h2:target,h3:target,h4:target,h5:target,h6:target{background:var(--highlight-color);padding:.2em 0}a{color:#058;text-decoration:none;transition:color .3s ease-in-out}a:hover{color:#e82}.title code{font-weight:bold}h2[id^="header-"]{margin-top:2em}.ident{color:#900}pre code{background:#f8f8f8;font-size:.8em;line-height:1.4em}code{background:#f2f2f1;padding:1px 4px;overflow-wrap:break-word}h1 code{background:transparent}pre{background:#f8f8f8;border:0;border-top:1px solid #ccc;border-bottom:1px solid #ccc;margin:1em 0;padding:1ex}#http-server-module-list{display:flex;flex-flow:column}#http-server-module-list div{display:flex}#http-server-module-list dt{min-width:10%}#http-server-module-list p{margin-top:0}.toc ul,#index{list-style-type:none;margin:0;padding:0}#index code{background:transparent}#index h3{border-bottom:1px solid #ddd}#index ul{padding:0}#index h4{margin-top:.6em;font-weight:bold}@media (min-width:200ex){#index .two-column{column-count:2}}@media (min-width:300ex){#index .two-column{column-count:3}}dl{margin-bottom:2em}dl dl:last-child{margin-bottom:4em}dd{margin:0 0 1em 3em}#header-classes + dl > dd{margin-bottom:3em}dd dd{margin-left:2em}dd p{margin:10px 0}.name{background:#eee;font-weight:bold;font-size:.85em;padding:5px 10px;display:inline-block;min-width:40%}.name:hover{background:#e0e0e0}dt:target .name{background:var(--highlight-color)}.name > span:first-child{white-space:nowrap}.name.class > span:nth-child(2){margin-left:.4em}.inherited{color:#999;border-left:5px solid #eee;padding-left:1em}.inheritance em{font-style:normal;font-weight:bold}.desc h2{font-weight:400;font-size:1.25em}.desc h3{font-size:1em}.desc dt code{background:inherit}.source summary,.git-link-div{color:#666;text-align:right;font-weight:400;font-size:.8em;text-transform:uppercase}.source summary > *{white-space:nowrap;cursor:pointer}.git-link{color:inherit;margin-left:1em}.source pre{max-height:500px;overflow:auto;margin:0}.source pre code{font-size:12px;overflow:visible}.hlist{list-style:none}.hlist li{display:inline}.hlist li:after{content:',\2002'}.hlist li:last-child:after{content:none}.hlist .hlist{display:inline;padding-left:1em}img{max-width:100%}td{padding:0 .5em}.admonition{padding:.1em .5em;margin-bottom:1em}.admonition-title{font-weight:bold}.admonition.note,.admonition.info,.admonition.important{background:#aef}.admonition.todo,.admonition.versionadded,.admonition.tip,.admonition.hint{background:#dfd}.admonition.warning,.admonition.versionchanged,.admonition.deprecated{background:#fd4}.admonition.error,.admonition.danger,.admonition.caution{background:lightpink}</style>
+<style media="screen and (min-width: 700px)">@media screen and (min-width:700px){#sidebar{width:30%;height:100vh;overflow:auto;position:sticky;top:0}#content{width:70%;max-width:100ch;padding:3em 4em;border-left:1px solid #ddd}pre code{font-size:1em}.item .name{font-size:1em}main{display:flex;flex-direction:row-reverse;justify-content:flex-end}.toc ul ul,#index ul{padding-left:1.5em}.toc > ul > li{margin-top:.5em}}</style>
+<style media="print">@media print{#sidebar h1{page-break-before:always}.source{display:none}}@media print{*{background:transparent !important;color:#000 !important;box-shadow:none !important;text-shadow:none !important}a[href]:after{content:" (" attr(href) ")";font-size:90%}a[href][title]:after{content:none}abbr[title]:after{content:" (" attr(title) ")"}.ir a:after,a[href^="javascript:"]:after,a[href^="#"]:after{content:""}pre,blockquote{border:1px solid #999;page-break-inside:avoid}thead{display:table-header-group}tr,img{page-break-inside:avoid}img{max-width:100% !important}@page{margin:0.5cm}p,h2,h3{orphans:3;widows:3}h1,h2,h3,h4,h5,h6{page-break-after:avoid}}</style>
+<script defer src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/10.1.1/highlight.min.js" integrity="sha256-Uv3H6lx7dJmRfRvH8TH6kJD1TSK1aFcwgx+mdg3epi8=" crossorigin></script>
+<script>window.addEventListener('DOMContentLoaded', () => hljs.initHighlighting())</script>
+</head>
+<body>
+<main>
+<article id="content">
+<header>
+<h1 class="title">Module <code>meerschaum.Pipe</code></h1>
+</header>
+<section id="section-intro">
+<p>Pipes are the primary metaphor of the Meerschaum system.
+You can interact with pipe data via <code><a title="meerschaum.Pipe" href="#meerschaum.Pipe">meerschaum.Pipe</a></code> objects.</p>
+<p>If you are working with multiple pipes, it is highly recommended that you instead use
+<code><a title="meerschaum.utils.get_pipes" href="../utils/get_pipes.html">meerschaum.utils.get_pipes</a></code> (available as <code>meerschaum.get_pipes</code>)
+to create a dictionary of Pipe objects.</p>
+<pre><code>&gt;&gt;&gt; from meerschaum import get_pipes
+&gt;&gt;&gt; pipes = get_pipes()
+</code></pre>
+<h1 id="examples">Examples</h1>
+<p>For the below examples to work, <code>sql:remote_server</code> must be defined (check with <code>edit config</code>)
+with correct credentials, as well as a network connection and valid permissions.</p>
+<h2 id="manually-adding-data">Manually Adding Data</h2>
+<hr>
+<pre><code>&gt;&gt;&gt; from meerschaum import Pipe
+&gt;&gt;&gt; pipe = Pipe('sql:remote_server', 'energy')
+&gt;&gt;&gt; 
+&gt;&gt;&gt; ### Columns only need to be defined if you're creating a new pipe.
+&gt;&gt;&gt; pipe.columns = { 'datetime' : 'time', 'id' : 'station_id' }
+&gt;&gt;&gt; 
+&gt;&gt;&gt; ### Create a Pandas DataFrame somehow,
+&gt;&gt;&gt; ### or you can use a dictionary of lists instead.
+&gt;&gt;&gt; df = pd.read_csv('data.csv')
+&gt;&gt;&gt; 
+&gt;&gt;&gt; pipe.sync(df)
+</code></pre>
+<h2 id="registering-a-remote-pipe">Registering a Remote Pipe</h2>
+<hr>
+<pre><code>&gt;&gt;&gt; from meerschaum import Pipe
+&gt;&gt;&gt; pipe = Pipe('sql:remote_server', 'energy')
+&gt;&gt;&gt; pipe.attributes = {
+...     'fetch' : {
+...         'definition' : 'SELECT * FROM energy_table',
+...     },
+... }
+&gt;&gt;&gt; pipe.sync()
+</code></pre>
+<details class="source">
+<summary>
+<span>Expand source code</span>
+</summary>
+<pre><code class="python">#! /usr/bin/env python
+# -*- coding: utf-8 -*-
+# vim:fenc=utf-8
+&#34;&#34;&#34;
+Pipes are the primary metaphor of the Meerschaum system.
+You can interact with pipe data via `meerschaum.Pipe` objects.
+
+If you are working with multiple pipes, it is highly recommended that you instead use
+`meerschaum.utils.get_pipes` (available as `meerschaum.get_pipes`)
+to create a dictionary of Pipe objects.
+
+```
+&gt;&gt;&gt; from meerschaum import get_pipes
+&gt;&gt;&gt; pipes = get_pipes()
+```
+
+# Examples
+For the below examples to work, `sql:remote_server` must be defined (check with `edit config`)
+with correct credentials, as well as a network connection and valid permissions.
+
+## Manually Adding Data
+---
+
+```
+&gt;&gt;&gt; from meerschaum import Pipe
+&gt;&gt;&gt; pipe = Pipe(&#39;sql:remote_server&#39;, &#39;energy&#39;)
+&gt;&gt;&gt; 
+&gt;&gt;&gt; ### Columns only need to be defined if you&#39;re creating a new pipe.
+&gt;&gt;&gt; pipe.columns = { &#39;datetime&#39; : &#39;time&#39;, &#39;id&#39; : &#39;station_id&#39; }
+&gt;&gt;&gt; 
+&gt;&gt;&gt; ### Create a Pandas DataFrame somehow,
+&gt;&gt;&gt; ### or you can use a dictionary of lists instead.
+&gt;&gt;&gt; df = pd.read_csv(&#39;data.csv&#39;)
+&gt;&gt;&gt; 
+&gt;&gt;&gt; pipe.sync(df)
+```
+
+## Registering a Remote Pipe
+---
+
+```
+&gt;&gt;&gt; from meerschaum import Pipe
+&gt;&gt;&gt; pipe = Pipe(&#39;sql:remote_server&#39;, &#39;energy&#39;)
+&gt;&gt;&gt; pipe.attributes = {
+...     &#39;fetch&#39; : {
+...         &#39;definition&#39; : &#39;SELECT * FROM energy_table&#39;,
+...     },
+... }
+&gt;&gt;&gt; pipe.sync()
+```
+
+&#34;&#34;&#34;
+default_instance_labels = {
+    &#39;api&#39; : &#39;main&#39;,
+    &#39;sql&#39; : &#39;main&#39;,
+}
+
+
+class Pipe:
+    from ._fetch import fetch
+    from ._data import get_data, get_backtrack_data, get_rowcount
+    from ._register import register
+    from ._attributes import attributes, parameters, columns, get_columns
+    from ._show import show
+    from ._edit import edit
+    from ._sync import sync, get_sync_time, exists
+    from ._delete import delete
+    from ._drop import drop
+
+    def __init__(
+        self,
+        connector_keys : str,
+        metric_key : str,
+        location_key : str = None,
+        parameters : dict = None,
+        mrsm_instance : str = None,
+        debug : bool = False
+    ):
+        &#34;&#34;&#34;
+        connector_keys : str
+            keys to get Meerschaum connector
+            e.g. &#39;sql:main&#39;
+
+        metric_key : str
+            standard Meerschaum metric key
+
+        location_key : str
+            standard Meerschaum location key
+
+        parameters : dict : {}
+            parameters dictionary to give the Pipe.
+            This dictionary is NOT stored in memory but rather is used for registration purposes.
+
+        mrsm_instance : str : None
+            connector_keys for the Meerschaum instance connector (SQL or API connector)
+        &#34;&#34;&#34;
+        if location_key == &#39;[None]&#39;: location_key = None
+        self.connector_keys = connector_keys
+        self.metric_key = metric_key
+        self.location_key = location_key
+
+        ### only set parameters if values are provided
+        if parameters is not None:
+            self._parameters = parameters
+
+        ### NOTE: The parameters dictionary is {} by default.
+        ###       A Pipe may be registered without parameters, then edited,
+        ###       or a Pipe may be registered with parameters set in-memory first.
+        from meerschaum.config import get_config
+        if mrsm_instance is None: mrsm_instance = get_config(&#39;meerschaum&#39;, &#39;instance&#39;, patch=True)
+        if not isinstance(mrsm_instance, str):
+            self._instance_connector = mrsm_instance
+            self.instance_keys = mrsm_instance.type + &#39;:&#39; + mrsm_instance.label
+        else: ### NOTE: must be SQL or API Connector for this work
+            self.instance_keys = mrsm_instance
+
+        ### TODO aggregations?
+        #  self._aggregations = dict()
+
+
+    @property
+    def meta(self):
+        &#34;&#34;&#34;
+        Simulate the MetaPipe model without importing FastAPI
+        &#34;&#34;&#34;
+        refresh = False
+        if &#39;_meta&#39; not in self.__dict__: refresh = True
+        elif self.parameters != self._meta[&#39;parameters&#39;]: refresh = True
+
+        if refresh:
+            parameters = self.parameters
+            if parameters is None: parameters = dict()
+            self._meta = {
+                &#39;connector_keys&#39; : self.connector_keys,
+                &#39;metric_key&#39;     : self.metric_key,
+                &#39;location_key&#39;   : self.location_key,
+                &#39;parameters&#39;     : parameters,
+            }
+        return self._meta
+
+    @property
+    def instance_connector(self):
+        if &#39;_instance_connector&#39; not in self.__dict__:
+            from meerschaum.utils.misc import parse_instance_keys
+            conn = parse_instance_keys(self.instance_keys)
+            if conn:
+                self._instance_connector = conn
+            else:
+                return None
+        return self._instance_connector
+
+    @property
+    def connector(self):
+        if &#39;_connector&#39; not in self.__dict__:
+            from meerschaum.utils.misc import parse_instance_keys
+            conn = parse_instance_keys(self.connector_keys)
+            if conn:
+                self._connector = conn
+            else:
+                return None
+        return self._connector
+
+    @property
+    def id(self):
+        if not (&#39;_id&#39; in self.__dict__ and self._id):
+            self._id = self.instance_connector.get_pipe_id(self)
+        return self._id
+
+    @property
+    def sync_time(self):
+        return self.get_sync_time()
+
+    #  def json(self, *args, **kw):
+        #  &#34;&#34;&#34;
+        #  Serialize Pipes into JSON
+        #  &#34;&#34;&#34;
+        #  #  import json
+        #  return str(self)
+
+    def __str__(self):
+        &#34;&#34;&#34;
+        The Pipe&#39;s SQL table name. Converts the &#39;:&#39; in the connector_keys to an &#39;_&#39;.
+        &#34;&#34;&#34;
+        name = f&#34;{self.connector_keys.replace(&#39;:&#39;, &#39;_&#39;)}_{self.metric_key}&#34;
+        if self.location_key is not None:
+            name += f&#34;_{self.location_key}&#34;
+        return name
+
+    def __repr__(self):
+        return str(self)</code></pre>
+</details>
+</section>
+<section>
+</section>
+<section>
+</section>
+<section>
+</section>
+<section>
+<h2 class="section-title" id="header-classes">Classes</h2>
+<dl>
+<dt id="meerschaum.Pipe.Pipe"><code class="flex name class">
+<span>class <span class="ident">Pipe</span></span>
+<span>(</span><span>connector_keys: str, metric_key: str, location_key: str = None, parameters: dict = None, mrsm_instance: str = None, debug: bool = False)</span>
+</code></dt>
+<dd>
+<div class="desc"><p>connector_keys : str
+keys to get Meerschaum connector
+e.g. 'sql:main'</p>
+<p>metric_key : str
+standard Meerschaum metric key</p>
+<p>location_key : str
+standard Meerschaum location key</p>
+<p>parameters : dict : {}
+parameters dictionary to give the Pipe.
+This dictionary is NOT stored in memory but rather is used for registration purposes.</p>
+<p>mrsm_instance : str : None
+connector_keys for the Meerschaum instance connector (SQL or API connector)</p></div>
+<details class="source">
+<summary>
+<span>Expand source code</span>
+</summary>
+<pre><code class="python">class Pipe:
+    from ._fetch import fetch
+    from ._data import get_data, get_backtrack_data, get_rowcount
+    from ._register import register
+    from ._attributes import attributes, parameters, columns, get_columns
+    from ._show import show
+    from ._edit import edit
+    from ._sync import sync, get_sync_time, exists
+    from ._delete import delete
+    from ._drop import drop
+
+    def __init__(
+        self,
+        connector_keys : str,
+        metric_key : str,
+        location_key : str = None,
+        parameters : dict = None,
+        mrsm_instance : str = None,
+        debug : bool = False
+    ):
+        &#34;&#34;&#34;
+        connector_keys : str
+            keys to get Meerschaum connector
+            e.g. &#39;sql:main&#39;
+
+        metric_key : str
+            standard Meerschaum metric key
+
+        location_key : str
+            standard Meerschaum location key
+
+        parameters : dict : {}
+            parameters dictionary to give the Pipe.
+            This dictionary is NOT stored in memory but rather is used for registration purposes.
+
+        mrsm_instance : str : None
+            connector_keys for the Meerschaum instance connector (SQL or API connector)
+        &#34;&#34;&#34;
+        if location_key == &#39;[None]&#39;: location_key = None
+        self.connector_keys = connector_keys
+        self.metric_key = metric_key
+        self.location_key = location_key
+
+        ### only set parameters if values are provided
+        if parameters is not None:
+            self._parameters = parameters
+
+        ### NOTE: The parameters dictionary is {} by default.
+        ###       A Pipe may be registered without parameters, then edited,
+        ###       or a Pipe may be registered with parameters set in-memory first.
+        from meerschaum.config import get_config
+        if mrsm_instance is None: mrsm_instance = get_config(&#39;meerschaum&#39;, &#39;instance&#39;, patch=True)
+        if not isinstance(mrsm_instance, str):
+            self._instance_connector = mrsm_instance
+            self.instance_keys = mrsm_instance.type + &#39;:&#39; + mrsm_instance.label
+        else: ### NOTE: must be SQL or API Connector for this work
+            self.instance_keys = mrsm_instance
+
+        ### TODO aggregations?
+        #  self._aggregations = dict()
+
+
+    @property
+    def meta(self):
+        &#34;&#34;&#34;
+        Simulate the MetaPipe model without importing FastAPI
+        &#34;&#34;&#34;
+        refresh = False
+        if &#39;_meta&#39; not in self.__dict__: refresh = True
+        elif self.parameters != self._meta[&#39;parameters&#39;]: refresh = True
+
+        if refresh:
+            parameters = self.parameters
+            if parameters is None: parameters = dict()
+            self._meta = {
+                &#39;connector_keys&#39; : self.connector_keys,
+                &#39;metric_key&#39;     : self.metric_key,
+                &#39;location_key&#39;   : self.location_key,
+                &#39;parameters&#39;     : parameters,
+            }
+        return self._meta
+
+    @property
+    def instance_connector(self):
+        if &#39;_instance_connector&#39; not in self.__dict__:
+            from meerschaum.utils.misc import parse_instance_keys
+            conn = parse_instance_keys(self.instance_keys)
+            if conn:
+                self._instance_connector = conn
+            else:
+                return None
+        return self._instance_connector
+
+    @property
+    def connector(self):
+        if &#39;_connector&#39; not in self.__dict__:
+            from meerschaum.utils.misc import parse_instance_keys
+            conn = parse_instance_keys(self.connector_keys)
+            if conn:
+                self._connector = conn
+            else:
+                return None
+        return self._connector
+
+    @property
+    def id(self):
+        if not (&#39;_id&#39; in self.__dict__ and self._id):
+            self._id = self.instance_connector.get_pipe_id(self)
+        return self._id
+
+    @property
+    def sync_time(self):
+        return self.get_sync_time()
+
+    #  def json(self, *args, **kw):
+        #  &#34;&#34;&#34;
+        #  Serialize Pipes into JSON
+        #  &#34;&#34;&#34;
+        #  #  import json
+        #  return str(self)
+
+    def __str__(self):
+        &#34;&#34;&#34;
+        The Pipe&#39;s SQL table name. Converts the &#39;:&#39; in the connector_keys to an &#39;_&#39;.
+        &#34;&#34;&#34;
+        name = f&#34;{self.connector_keys.replace(&#39;:&#39;, &#39;_&#39;)}_{self.metric_key}&#34;
+        if self.location_key is not None:
+            name += f&#34;_{self.location_key}&#34;
+        return name
+
+    def __repr__(self):
+        return str(self)</code></pre>
+</details>
+<h3>Instance variables</h3>
+<dl>
+<dt id="meerschaum.Pipe.Pipe.attributes"><code class="name">var <span class="ident">attributes</span></code></dt>
+<dd>
+<div class="desc"></div>
+<details class="source">
+<summary>
+<span>Expand source code</span>
+</summary>
+<pre><code class="python">@property
+def attributes(self):
+    from meerschaum.utils.debug import dprint
+    from meerschaum.utils.warnings import warn
+    if &#39;_attributes&#39; not in self.__dict__:
+        if self.id is None: return None
+        self._attributes = self.instance_connector.get_pipe_attributes(self)
+    return self._attributes</code></pre>
+</details>
+</dd>
+<dt id="meerschaum.Pipe.Pipe.columns"><code class="name">var <span class="ident">columns</span></code></dt>
+<dd>
+<div class="desc"></div>
+<details class="source">
+<summary>
+<span>Expand source code</span>
+</summary>
+<pre><code class="python">@property
+def columns(self):
+    if not self.parameters:
+        if &#39;_columns&#39; in self.__dict__:
+            return self._columns
+        return None
+    if &#39;columns&#39; not in self.parameters:
+        return None
+    return self.parameters[&#39;columns&#39;]</code></pre>
+</details>
+</dd>
+<dt id="meerschaum.Pipe.Pipe.connector"><code class="name">var <span class="ident">connector</span></code></dt>
+<dd>
+<div class="desc"></div>
+<details class="source">
+<summary>
+<span>Expand source code</span>
+</summary>
+<pre><code class="python">@property
+def connector(self):
+    if &#39;_connector&#39; not in self.__dict__:
+        from meerschaum.utils.misc import parse_instance_keys
+        conn = parse_instance_keys(self.connector_keys)
+        if conn:
+            self._connector = conn
+        else:
+            return None
+    return self._connector</code></pre>
+</details>
+</dd>
+<dt id="meerschaum.Pipe.Pipe.id"><code class="name">var <span class="ident">id</span></code></dt>
+<dd>
+<div class="desc"></div>
+<details class="source">
+<summary>
+<span>Expand source code</span>
+</summary>
+<pre><code class="python">@property
+def id(self):
+    if not (&#39;_id&#39; in self.__dict__ and self._id):
+        self._id = self.instance_connector.get_pipe_id(self)
+    return self._id</code></pre>
+</details>
+</dd>
+<dt id="meerschaum.Pipe.Pipe.instance_connector"><code class="name">var <span class="ident">instance_connector</span></code></dt>
+<dd>
+<div class="desc"></div>
+<details class="source">
+<summary>
+<span>Expand source code</span>
+</summary>
+<pre><code class="python">@property
+def instance_connector(self):
+    if &#39;_instance_connector&#39; not in self.__dict__:
+        from meerschaum.utils.misc import parse_instance_keys
+        conn = parse_instance_keys(self.instance_keys)
+        if conn:
+            self._instance_connector = conn
+        else:
+            return None
+    return self._instance_connector</code></pre>
+</details>
+</dd>
+<dt id="meerschaum.Pipe.Pipe.meta"><code class="name">var <span class="ident">meta</span></code></dt>
+<dd>
+<div class="desc"><p>Simulate the MetaPipe model without importing FastAPI</p></div>
+<details class="source">
+<summary>
+<span>Expand source code</span>
+</summary>
+<pre><code class="python">@property
+def meta(self):
+    &#34;&#34;&#34;
+    Simulate the MetaPipe model without importing FastAPI
+    &#34;&#34;&#34;
+    refresh = False
+    if &#39;_meta&#39; not in self.__dict__: refresh = True
+    elif self.parameters != self._meta[&#39;parameters&#39;]: refresh = True
+
+    if refresh:
+        parameters = self.parameters
+        if parameters is None: parameters = dict()
+        self._meta = {
+            &#39;connector_keys&#39; : self.connector_keys,
+            &#39;metric_key&#39;     : self.metric_key,
+            &#39;location_key&#39;   : self.location_key,
+            &#39;parameters&#39;     : parameters,
+        }
+    return self._meta</code></pre>
+</details>
+</dd>
+<dt id="meerschaum.Pipe.Pipe.parameters"><code class="name">var <span class="ident">parameters</span></code></dt>
+<dd>
+<div class="desc"></div>
+<details class="source">
+<summary>
+<span>Expand source code</span>
+</summary>
+<pre><code class="python">@property
+def parameters(self):
+    if &#39;_parameters&#39; not in self.__dict__:
+        if not self.attributes:
+            return None
+        self._parameters = self.attributes[&#39;parameters&#39;]
+    return self._parameters</code></pre>
+</details>
+</dd>
+<dt id="meerschaum.Pipe.Pipe.sync_time"><code class="name">var <span class="ident">sync_time</span></code></dt>
+<dd>
+<div class="desc"></div>
+<details class="source">
+<summary>
+<span>Expand source code</span>
+</summary>
+<pre><code class="python">@property
+def sync_time(self):
+    return self.get_sync_time()</code></pre>
+</details>
+</dd>
+</dl>
+<h3>Methods</h3>
+<dl>
+<dt id="meerschaum.Pipe.Pipe.delete"><code class="name flex">
+<span>def <span class="ident">delete</span></span>(<span>self, debug: bool = False, **kw) ‑> tuple</span>
+</code></dt>
+<dd>
+<div class="desc"><p>Call the Pipe's instance connector's delete_pipe method</p></div>
+<details class="source">
+<summary>
+<span>Expand source code</span>
+</summary>
+<pre><code class="python">def delete(
+        self,
+        debug : bool = False,
+        **kw
+    ) -&gt; tuple:
+    &#34;&#34;&#34;
+    Call the Pipe&#39;s instance connector&#39;s delete_pipe method
+    &#34;&#34;&#34;
+    return self.instance_connector.delete_pipe(self, debug=debug, **kw)</code></pre>
+</details>
+</dd>
+<dt id="meerschaum.Pipe.Pipe.drop"><code class="name flex">
+<span>def <span class="ident">drop</span></span>(<span>self, debug: bool = False, **kw: Any) ‑> Tuple[bool, str]</span>
+</code></dt>
+<dd>
+<div class="desc"><p>Call the Pipe's instance connector's drop_pipe method</p></div>
+<details class="source">
+<summary>
+<span>Expand source code</span>
+</summary>
+<pre><code class="python">def drop(
+        self,
+        debug : bool = False,
+        **kw : Any
+    ) -&gt; SuccessTuple:
+    &#34;&#34;&#34;
+    Call the Pipe&#39;s instance connector&#39;s drop_pipe method
+    &#34;&#34;&#34;
+    return self.instance_connector.drop_pipe(self, debug=debug, **kw)</code></pre>
+</details>
+</dd>
+<dt id="meerschaum.Pipe.Pipe.edit"><code class="name flex">
+<span>def <span class="ident">edit</span></span>(<span>self, patch: bool = False, interactive: bool = True, debug: bool = False, **kw)</span>
+</code></dt>
+<dd>
+<div class="desc"><p>Edit a Pipe's configuration.
+If <code>patch</code> is True, update parameters by cascading rather than overwriting.</p></div>
+<details class="source">
+<summary>
+<span>Expand source code</span>
+</summary>
+<pre><code class="python">def edit(
+        self,
+        patch : bool = False,
+        interactive : bool = True,
+        debug : bool = False,
+        **kw
+    ):
+    &#34;&#34;&#34;
+    Edit a Pipe&#39;s configuration.
+    If `patch` is True, update parameters by cascading rather than overwriting.
+    &#34;&#34;&#34;
+    if not interactive:
+        return self.instance_connector.edit_pipe(self, patch=patch, debug=debug, **kw)
+    from meerschaum.config._paths import PIPES_RESOURCES_PATH
+    from meerschaum.utils.misc import edit_file
+    import pathlib, os
+    parameters_filename = str(self) + &#39;.yaml&#39;
+    parameters_path = pathlib.Path(os.path.join(PIPES_RESOURCES_PATH, parameters_filename))
+    
+    import yaml
+
+    edit_header = &#34;#######################################&#34;
+    for i in range(len(str(self))): edit_header += &#34;#&#34;
+    edit_header += &#34;\n&#34;
+    edit_header += f&#34;# Edit the parameters for the Pipe &#39;{self}&#39; #&#34;
+    edit_header += &#34;\n#######################################&#34;
+    for i in range(len(str(self))): edit_header += &#34;#&#34;
+    edit_header += &#34;\n\n&#34;
+
+    from meerschaum.config import get_config
+    parameters = dict(get_config(&#39;pipes&#39;, &#39;parameters&#39;, patch=True))
+    from meerschaum.config._patch import apply_patch_to_config
+    parameters = apply_patch_to_config(parameters, self.parameters)
+
+    ### write parameters to yaml file
+    with open(parameters_path, &#39;w&#39;) as f:
+        f.write(edit_header)
+        yaml.dump(parameters, f)
+
+    ### only quit editing if yaml is valid
+    editing = True
+    while editing:
+        edit_file(parameters_path)
+        try:
+            with open(parameters_path, &#39;r&#39;) as f:
+                file_parameters = yaml.load(f.read())
+        except Exception as e:
+            from meerschaum.utils.warnings import warn
+            warn(f&#34;Invalid format defined for &#39;{self}&#39;:\n\n{e}&#34;)
+            input(f&#34;Press [Enter] to correct the configuration for &#39;{self}&#39;: &#34;)
+        else:
+            editing = False
+
+    self.parameters = file_parameters
+
+    if debug:
+        from meerschaum.utils.formatting import pprint
+        pprint(self.parameters)
+
+    return self.instance_connector.edit_pipe(self, patch=patch, debug=debug, **kw)</code></pre>
+</details>
+</dd>
+<dt id="meerschaum.Pipe.Pipe.exists"><code class="name flex">
+<span>def <span class="ident">exists</span></span>(<span>self, debug: bool = False) ‑> bool</span>
+</code></dt>
+<dd>
+<div class="desc"><p>See if a Pipe's table or view exists.</p></div>
+<details class="source">
+<summary>
+<span>Expand source code</span>
+</summary>
+<pre><code class="python">def exists(
+        self,
+        debug : bool = False
+    ) -&gt; bool:
+    &#34;&#34;&#34;
+    See if a Pipe&#39;s table or view exists.
+    &#34;&#34;&#34;
+    ### TODO test against views
+    return self.instance_connector.pipe_exists(pipe=self, debug=debug)</code></pre>
+</details>
+</dd>
+<dt id="meerschaum.Pipe.Pipe.fetch"><code class="name flex">
+<span>def <span class="ident">fetch</span></span>(<span>self, debug: bool = False, **kw) ‑> pd.DataFrame or None</span>
+</code></dt>
+<dd>
+<div class="desc"><p>Fetch a Pipe's latest data from its connector.</p>
+<p>returns : pd.DataFrame of newest unseen data</p></div>
+<details class="source">
+<summary>
+<span>Expand source code</span>
+</summary>
+<pre><code class="python">def fetch(
+        self,
+        debug : bool = False,
+        **kw
+    ) -&gt; &#39;pd.DataFrame or None&#39;:
+    &#34;&#34;&#34;
+    Fetch a Pipe&#39;s latest data from its connector.
+
+    returns : pd.DataFrame of newest unseen data
+    &#34;&#34;&#34;
+    from meerschaum.utils.debug import dprint
+    from meerschaum.utils.warnings import warn
+    if &#39;fetch&#39; in dir(self.connector):
+        if self.connector.type == &#39;plugin&#39;:
+            from meerschaum.utils.packages import activate_venv, deactivate_venv
+            activate_venv(self.connector.label, debug=debug)
+        df = self.connector.fetch(
+            self,
+            begin = self.sync_time,
+            debug = debug,
+            **kw
+        )
+        if self.connector.type == &#39;plugin&#39;:
+            deactivate_venv(self.connector.label, debug=debug)
+        return df
+    warn(f&#34;No `fetch()` function defined for connector &#39;{self.connector}&#39;&#34;)
+    return None</code></pre>
+</details>
+</dd>
+<dt id="meerschaum.Pipe.Pipe.get_backtrack_data"><code class="name flex">
+<span>def <span class="ident">get_backtrack_data</span></span>(<span>self, backtrack_minutes: int = 0, begin: datetime.datetime = None, debug: bool = False) ‑> Union[pd.DataFrame, NoneType]</span>
+</code></dt>
+<dd>
+<div class="desc"><p>Get the most recent data from the instance connector as a Pandas DataFrame.</p>
+<p>:param backtrack_minutes:
+How many minutes from <code>begin</code> to select from.
+Defaults to 0. This may return a few rows due to a rounding quirk.</p>
+<p>:param begin:
+The starting point from which to search for data.
+If begin is None (default), use the most recent observed datetime
+(AKA sync_time).</p>
+<pre><code>E.g. begin = 02:00
+
+Search this region.           Ignore this, even if there's data.
+</code></pre>
+<p>/
+/
+/
+/
+/
+/
+/
+/
+/
+|
+-----|----------|----------|----------|----------|----------|
+00:00
+01:00
+02:00
+03:00
+04:00
+05:00</p>
+<p>:param debug: Verbosity toggle.</p></div>
+<details class="source">
+<summary>
+<span>Expand source code</span>
+</summary>
+<pre><code class="python">def get_backtrack_data(
+        self,
+        backtrack_minutes : int = 0,
+        begin : &#39;datetime.datetime&#39; = None,
+        debug : bool = False
+    ) -&gt; Optional[&#39;pd.DataFrame&#39;]:
+    &#34;&#34;&#34;
+    Get the most recent data from the instance connector as a Pandas DataFrame.
+
+    :param backtrack_minutes:
+        How many minutes from `begin` to select from.
+        Defaults to 0. This may return a few rows due to a rounding quirk.
+
+    :param begin:
+        The starting point from which to search for data.
+        If begin is None (default), use the most recent observed datetime
+        (AKA sync_time).
+
+        E.g. begin = 02:00
+
+        Search this region.           Ignore this, even if there&#39;s data.
+       /  /  /  /  /  /  /  /  /  |
+       -----|----------|----------|----------|----------|----------|
+          00:00      01:00      02:00      03:00      04:00      05:00
+
+    :param debug: Verbosity toggle.
+    &#34;&#34;&#34;
+    return self.instance_connector.get_backtrack_data(
+        pipe = self,
+        begin = begin,
+        backtrack_minutes = backtrack_minutes,
+        debug = debug
+    )</code></pre>
+</details>
+</dd>
+<dt id="meerschaum.Pipe.Pipe.get_columns"><code class="name flex">
+<span>def <span class="ident">get_columns</span></span>(<span>self, *args, error=True)</span>
+</code></dt>
+<dd>
+<div class="desc"><p>Check if the requested columns are defined</p></div>
+<details class="source">
+<summary>
+<span>Expand source code</span>
+</summary>
+<pre><code class="python">def get_columns(self, *args, error=True):
+    &#34;&#34;&#34;
+    Check if the requested columns are defined
+    &#34;&#34;&#34;
+    from meerschaum.utils.warnings import error as _error, warn
+    col_names = []
+    for col in args:
+        col_name = None
+        try:
+            col_name = self.columns[col]
+            if col_name is None and error:
+                _error(f&#34;Please define the name of the &#39;{col}&#39; column for Pipe &#39;{self}&#39;.&#34;)
+        except:
+            col_name = None
+        if col_name is None and error: _error(f&#34;Missing &#39;{col}&#39;&#34; + f&#34; column for Pipe &#39;{self}&#39;.&#34;)
+        col_names.append(col_name)
+    if len(col_names) == 1:
+        return col_names[0]
+    return tuple(col_names)</code></pre>
+</details>
+</dd>
+<dt id="meerschaum.Pipe.Pipe.get_data"><code class="name flex">
+<span>def <span class="ident">get_data</span></span>(<span>self, begin: Union[ForwardRef('datetime.datetime'), NoneType] = None, end: Union[ForwardRef('datetime.datetime'), NoneType] = None, refresh: bool = False, debug: bool = False) ‑> Union[pandas.DataFrame, NoneType]</span>
+</code></dt>
+<dd>
+<div class="desc"><p>Get data from the instance connector.</p></div>
+<details class="source">
+<summary>
+<span>Expand source code</span>
+</summary>
+<pre><code class="python">def get_data(
+        self,
+        begin : Optional[&#39;datetime.datetime&#39;] = None,
+        end : Optional[&#39;datetime.datetime&#39;] = None,
+        refresh : bool = False,
+        debug : bool = False
+    ) -&gt; Optional[&#39;pandas.DataFrame&#39;]:
+    &#34;&#34;&#34;
+    Get data from the instance connector.
+    &#34;&#34;&#34;
+    if refresh or True: ### TODO remove `or True`
+        self._data = self.instance_connector.get_pipe_data(
+            pipe = self,
+            begin = begin,
+            end = end,
+            debug = debug
+        )
+    ### TODO caching / sync logic
+    return self._data</code></pre>
+</details>
+</dd>
+<dt id="meerschaum.Pipe.Pipe.get_rowcount"><code class="name flex">
+<span>def <span class="ident">get_rowcount</span></span>(<span>self, begin: Union[ForwardRef('datetime.datetime'), NoneType] = None, end: Union[ForwardRef('datetime.datetime'), NoneType] = None, remote: bool = False, debug: bool = False) ‑> Union[int, NoneType]</span>
+</code></dt>
+<dd>
+<div class="desc"><p>Get a Pipe's cached or remote rowcount.</p>
+<p>:param begin:
+Count rows where datetime &gt; begin.</p>
+<p>:param end:
+Count rows where datetime &lt;= end.</p>
+<p>:param remote:
+Count rows from a pipe's remote source.
+NOTE: This is experimental!</p>
+<p>:param debug: Verbosity toggle.</p></div>
+<details class="source">
+<summary>
+<span>Expand source code</span>
+</summary>
+<pre><code class="python">def get_rowcount(
+        self,
+        begin : Optional[&#39;datetime.datetime&#39;] = None,
+        end : Optional[&#39;datetime.datetime&#39;] = None,
+        remote : bool = False,
+        debug : bool = False
+    ) -&gt; Optional[int]:
+    &#34;&#34;&#34;
+    Get a Pipe&#39;s cached or remote rowcount.
+
+    :param begin:
+        Count rows where datetime &gt; begin.
+
+    :param end:
+        Count rows where datetime &lt;= end.
+
+    :param remote:
+        Count rows from a pipe&#39;s remote source.
+        NOTE: This is experimental!
+
+    :param debug: Verbosity toggle.
+    &#34;&#34;&#34;
+    connector = self.instance_connector
+    if remote: connector = self.connector
+    return connector.get_pipe_rowcount(begin=begin, end=end, remote=remote, debug=debug)</code></pre>
+</details>
+</dd>
+<dt id="meerschaum.Pipe.Pipe.get_sync_time"><code class="name flex">
+<span>def <span class="ident">get_sync_time</span></span>(<span>self, params: Union[Mapping[str, Any], NoneType] = None, debug: bool = False) ‑> Union[datetime.datetime, NoneType]</span>
+</code></dt>
+<dd>
+<div class="desc"><p>Get the most recent datetime value for a Pipe.</p>
+<p>:param params:
+Dictionary to build a WHERE clause for a specific column.
+E.g. params = None returns the latest possible datetime,
+but params = { 'a' : 1 } returns the latest datetime 'WHERE a = 1'.</p>
+<p>:param debug: Verbosity toggle.</p></div>
+<details class="source">
+<summary>
+<span>Expand source code</span>
+</summary>
+<pre><code class="python">def get_sync_time(
+        self,
+        params : Optional[Mapping[str, Any]] = None,
+        debug : bool = False
+    ) -&gt; Optional[&#39;datetime.datetime&#39;]:
+    &#34;&#34;&#34;
+    Get the most recent datetime value for a Pipe.
+
+    :param params:
+        Dictionary to build a WHERE clause for a specific column.
+        E.g. params = None returns the latest possible datetime,
+        but params = { &#39;a&#39; : 1 } returns the latest datetime &#39;WHERE a = 1&#39;.
+
+    :param debug: Verbosity toggle.
+    &#34;&#34;&#34;
+    from meerschaum.utils.warnings import error, warn
+    if self.columns is None:
+        warn(
+            f&#34;No columns found for Pipe &#39;{self}&#39;. &#34; +
+            &#34;Pipe might not be registered or is missing columns in parameters.&#34;
+        )
+        return None
+
+    if &#39;datetime&#39; not in self.columns:
+        warn(
+            f&#34;&#39;datetime&#39; must be declared in parameters:columns for Pipe &#39;{self}&#39;.\n\n&#34; +
+            f&#34;You can add parameters for this Pipe with the following command:\n\n&#34; +
+            f&#34;mrsm edit pipes -C {self.connector_keys} -M &#34; +
+            f&#34;{self.metric_key} -L &#34; +
+            (f&#34;[None]&#34; if self.location_key is None else f&#34;{self.location_key}&#34;)
+        )
+        return None
+
+    return self.instance_connector.get_sync_time(
+        self, params = params, debug = debug
+    )</code></pre>
+</details>
+</dd>
+<dt id="meerschaum.Pipe.Pipe.register"><code class="name flex">
+<span>def <span class="ident">register</span></span>(<span>self, debug: bool = False)</span>
+</code></dt>
+<dd>
+<div class="desc"><p>Send a POST to the Meerschaum API to register a new Pipe</p></div>
+<details class="source">
+<summary>
+<span>Expand source code</span>
+</summary>
+<pre><code class="python">def register(
+        self,
+        debug : bool = False
+    ):
+    &#34;&#34;&#34;
+    Send a POST to the Meerschaum API to register a new Pipe
+    &#34;&#34;&#34;
+    if not self.parameters:
+        self.parameters = {
+            &#39;columns&#39; : self.columns,
+        }
+    return self.instance_connector.register_pipe(self, debug=debug)</code></pre>
+</details>
+</dd>
+<dt id="meerschaum.Pipe.Pipe.show"><code class="name flex">
+<span>def <span class="ident">show</span></span>(<span>self, nopretty: bool = False, debug: bool = False, **kw) ‑> tuple</span>
+</code></dt>
+<dd>
+<div class="desc"><p>Show aspects about a Pipe</p></div>
+<details class="source">
+<summary>
+<span>Expand source code</span>
+</summary>
+<pre><code class="python">def show(
+        self,
+        nopretty : bool = False,
+        debug : bool = False,
+        **kw
+    ) -&gt; tuple:
+    &#34;&#34;&#34;
+    Show aspects about a Pipe
+    &#34;&#34;&#34;
+    from meerschaum.utils.formatting import pprint, make_header
+    from meerschaum.utils.warnings import info
+    if not nopretty:
+        print(make_header(f&#34;Attributes for pipe &#39;{self}&#39;:&#34;))
+        pprint(self.attributes)
+    else: print(self.attributes)
+
+    return True, &#34;Success&#34;</code></pre>
+</details>
+</dd>
+<dt id="meerschaum.Pipe.Pipe.sync"><code class="name flex">
+<span>def <span class="ident">sync</span></span>(<span>self, df: Union[ForwardRef('pd.DataFrame'), NoneType] = None, begin: Union[ForwardRef('datetime.datetime'), NoneType] = None, end: Union[ForwardRef('datetime.datetime'), NoneType] = None, force: bool = False, retries: int = 10, min_seconds: int = 1, check_existing: bool = True, blocking: bool = True, workers: Union[int, NoneType] = None, callback: Callable[[Tuple[bool, str]], Any] = None, error_callback: Callable[[Exception], Any] = None, debug: bool = False, **kw: Any) ‑> Tuple[bool, str]</span>
+</code></dt>
+<dd>
+<div class="desc"><p>Fetch new data from the source and update the pipe's table with new data.</p>
+<p>Get new remote data via fetch, get existing data in the same time period,
+and merge the two, only keeping the unseen data.</p>
+<p>:param df:
+An optional DataFrame to sync into the pipe. Defaults to None.</p>
+<p>:param begin:
+Optionally specify the earliest datetime to search for data.
+Defaults to None.</p>
+<p>:param end:
+Optionally specify the latelst datetime to search for data.
+Defaults to None.</p>
+<p>:param force:
+If True, keep trying to sync untul <code>retries</code> attempts.
+Defaults to False.</p>
+<p>:param retries:
+If force, how many attempts to try syncing before declaring failure.
+Defaults to 10.</p>
+<p>:param min_seconds:
+If force, how many seconds to sleep between retries. Defaults to 1.</p>
+<p>:param check_existing:
+If True, pull and diff with existing data from the pipe.
+Defaults to True.</p>
+<p>:param blocking:
+If True, wait for sync to finish and return its result, otherwise
+asyncronously sync (oxymoron?) and return success. Defaults to True.</p>
+<p>:param workers:
+No use directly within <code><a title="meerschaum.Pipe.Pipe.sync" href="#meerschaum.Pipe.Pipe.sync">sync()</a></code>. Instead is passed on to
+instance connectors' <code>sync_pipe()</code> methods (e.g. PluginConnector).
+Defaults to None.</p>
+<p>:param callback:
+Callback function which expects a SuccessTuple as input.
+Only applies when blocking = False.</p>
+<p>:param error_callback:
+Callback function which expects an Exception as input.
+Only applies when blocking = False.</p>
+<p>:param debug: Verbosity toggle. Defaults to False.
+:param kw: Catch-all for keyword arguments.</p></div>
+<details class="source">
+<summary>
+<span>Expand source code</span>
+</summary>
+<pre><code class="python">def sync(
+        self,
+        df : Optional[&#39;pd.DataFrame&#39;] = None,
+        begin : Optional[&#39;datetime.datetime&#39;] = None,
+        end : Optional[&#39;datetime.datetime&#39;] = None,
+        force : bool = False,
+        retries : int = 10,
+        min_seconds : int = 1,
+        check_existing : bool = True,
+        blocking : bool = True,
+        workers : Optional[int] = None,
+        callback : Callable[[Tuple[bool, str]], Any] = None,
+        error_callback : Callable[[Exception], Any] = None,
+        debug : bool = False,
+        **kw : Any
+    ) -&gt; SuccessTuple:
+    &#34;&#34;&#34;
+    Fetch new data from the source and update the pipe&#39;s table with new data.
+
+    Get new remote data via fetch, get existing data in the same time period,
+    and merge the two, only keeping the unseen data.
+
+    :param df:
+        An optional DataFrame to sync into the pipe. Defaults to None.
+
+    :param begin:
+        Optionally specify the earliest datetime to search for data.
+        Defaults to None.
+
+    :param end:
+        Optionally specify the latelst datetime to search for data.
+        Defaults to None.
+
+    :param force:
+        If True, keep trying to sync untul `retries` attempts.
+        Defaults to False.
+
+    :param retries:
+        If force, how many attempts to try syncing before declaring failure.
+        Defaults to 10.
+
+    :param min_seconds:
+        If force, how many seconds to sleep between retries. Defaults to 1.
+
+    :param check_existing:
+        If True, pull and diff with existing data from the pipe.
+        Defaults to True.
+
+    :param blocking:
+        If True, wait for sync to finish and return its result, otherwise
+        asyncronously sync (oxymoron?) and return success. Defaults to True.
+
+    :param workers:
+        No use directly within `Pipe.sync()`. Instead is passed on to
+        instance connectors&#39; `sync_pipe()` methods (e.g. PluginConnector).
+        Defaults to None.
+
+    :param callback:
+        Callback function which expects a SuccessTuple as input.
+        Only applies when blocking = False.
+
+    :param error_callback:
+        Callback function which expects an Exception as input.
+        Only applies when blocking = False.
+
+    :param debug: Verbosity toggle. Defaults to False.
+    :param kw: Catch-all for keyword arguments.
+    &#34;&#34;&#34;
+    from meerschaum.utils.warnings import warn
+    import time
+    if (callback is not None or error_callback is not None) and blocking:
+        warn(&#34;Callback functions are only executed when blocking = False. Ignoring...&#34;)
+
+    ### add the stated arguments back into kw
+    kw.update({
+        &#39;begin&#39; : begin, &#39;end&#39; : end, &#39;force&#39; : force, &#39;retries&#39; : retries,
+        &#39;min_seconds&#39; : min_seconds, &#39;check_existing&#39; : check_existing,
+        &#39;blocking&#39; : blocking, &#39;workers&#39; : workers, &#39;callback&#39; : callback,
+        &#39;error_callback&#39; : error_callback,
+    })
+
+    def _sync(
+        p : &#39;meerschaum.Pipe&#39;,
+        df : Optional[&#39;pandas.DataFrame&#39;] = None
+    ) -&gt; SuccessTuple:
+        ### ensure that Pipe is registered
+        if not p.id:
+            register_tuple = p.register(debug=debug)
+            if not register_tuple[0]: return register_tuple
+
+        ### If connector is a plugin with a `sync()` method, return that instead.
+        ### If the plugin does not have a `sync()` method but does have a `fetch()` method,
+        ### use that instead.
+        ### NOTE: The DataFrame must be None for the plugin sync method to apply.
+        ### If a DataFrame is provided, continue as expected.
+        if df is None:
+            try:
+                if p.connector.type == &#39;plugin&#39; and p.connector.sync is not None:
+                    from meerschaum.utils.packages import activate_venv, deactivate_venv
+                    activate_venv(p.connector.label, debug=debug)
+                    return_tuple = p.connector.sync(p, debug=debug, **kw)
+                    deactivate_venv(p.connector.label, debug=debug)
+                    if not isinstance(return_tuple, tuple):
+                        return_tuple = False, f&#34;Plugin &#39;{p.connector.label}&#39; returned non-tuple value: {return_tuple}&#34;
+                    return return_tuple
+
+            except Exception as e:
+                msg = f&#34;Failed to sync pipe &#39;{p}&#39; with exception: &#39;&#34; + str(e) + &#34;&#39;&#34;
+                return False, msg
+
+        ### default: fetch new data via the connector.
+        ### If new data is provided, skip fetching
+        if df is None:
+            if p.connector is None:
+                return False, f&#34;Cannot fetch data for pipe &#39;{p}&#39; without a connector.&#34;
+            df = p.fetch(debug=debug, **kw)
+
+        if debug: dprint(&#34;DataFrame to sync:\n&#34; + f&#34;{df}&#34;)
+
+        ### if force, continue to sync until success
+        return_tuple = False, f&#34;Did not sync pipe &#39;{p}&#39;.&#34;
+        run = True
+        _retries = 1
+        while run:
+            return_tuple = p.instance_connector.sync_pipe(
+                pipe = p,
+                df = df,
+                debug = debug,
+                **kw
+            )
+            _retries += 1
+            run = (not return_tuple[0]) and force and _retries &lt;= retries
+            if run and debug:
+                dprint(f&#34;Syncing failed for pipe &#39;{p}&#39;. Attempt ( {_retries} / {retries} )&#34;)
+                dprint(f&#34;Sleeping for {min_seconds} seconds...&#34;)
+                time.sleep(min_seconds)
+            if _retries &gt; retries:
+                warn(
+                    f&#34;Unable to sync pipe &#39;{p}&#39; within {retries} attempt&#34; +
+                        (&#34;s&#34; if retries != 1 else &#34;&#34;) + &#34;!&#34;
+                )
+        return return_tuple
+
+    if blocking: return _sync(self, df = df)
+
+    ### TODO implement concurrent syncing (split DataFrame? mimic the functionality of modin?)
+    from meerschaum.utils.threading import Thread
+    def default_callback(result_tuple : SuccessTuple):
+        dprint(f&#34;Asynchronous result from Pipe &#39;{self}&#39;: {result_tuple}&#34;)
+    def default_error_callback(x : Exception):
+        dprint(f&#34;Error received for Pipe &#39;{self}&#39;: {x}&#34;)
+    if callback is None and debug:
+        callback = default_callback
+    if error_callback is None and debug:
+        error_callback = default_error_callback
+    try:
+        thread = Thread(
+            target = _sync,
+            args = (self,),
+            kwargs = {&#39;df&#39; : df},
+            daemon = False,
+            callback = callback,
+            error_callback = error_callback
+        )
+        thread.start()
+    except Exception as e:
+        return False, str(e)
+    return True, f&#34;Spawned asyncronous sync for pipe &#39;{self}&#39;&#34;</code></pre>
+</details>
+</dd>
+</dl>
+</dd>
+</dl>
+</section>
+</article>
+<nav id="sidebar">
+<h1>Index</h1>
+<div class="toc">
+<ul>
+<li><a href="#examples">Examples</a><ul>
+<li><a href="#manually-adding-data">Manually Adding Data</a></li>
+<li><a href="#registering-a-remote-pipe">Registering a Remote Pipe</a></li>
+</ul>
+</li>
+</ul>
+</div>
+<ul id="index">
+<li><h3>Super-module</h3>
+<ul>
+<li><code><a title="meerschaum" href="../index.html">meerschaum</a></code></li>
+</ul>
+</li>
+<li><h3><a href="#header-classes">Classes</a></h3>
+<ul>
+<li>
+<h4><code><a title="meerschaum.Pipe.Pipe" href="#meerschaum.Pipe.Pipe">Pipe</a></code></h4>
+<ul class="two-column">
+<li><code><a title="meerschaum.Pipe.Pipe.attributes" href="#meerschaum.Pipe.Pipe.attributes">attributes</a></code></li>
+<li><code><a title="meerschaum.Pipe.Pipe.columns" href="#meerschaum.Pipe.Pipe.columns">columns</a></code></li>
+<li><code><a title="meerschaum.Pipe.Pipe.connector" href="#meerschaum.Pipe.Pipe.connector">connector</a></code></li>
+<li><code><a title="meerschaum.Pipe.Pipe.delete" href="#meerschaum.Pipe.Pipe.delete">delete</a></code></li>
+<li><code><a title="meerschaum.Pipe.Pipe.drop" href="#meerschaum.Pipe.Pipe.drop">drop</a></code></li>
+<li><code><a title="meerschaum.Pipe.Pipe.edit" href="#meerschaum.Pipe.Pipe.edit">edit</a></code></li>
+<li><code><a title="meerschaum.Pipe.Pipe.exists" href="#meerschaum.Pipe.Pipe.exists">exists</a></code></li>
+<li><code><a title="meerschaum.Pipe.Pipe.fetch" href="#meerschaum.Pipe.Pipe.fetch">fetch</a></code></li>
+<li><code><a title="meerschaum.Pipe.Pipe.get_backtrack_data" href="#meerschaum.Pipe.Pipe.get_backtrack_data">get_backtrack_data</a></code></li>
+<li><code><a title="meerschaum.Pipe.Pipe.get_columns" href="#meerschaum.Pipe.Pipe.get_columns">get_columns</a></code></li>
+<li><code><a title="meerschaum.Pipe.Pipe.get_data" href="#meerschaum.Pipe.Pipe.get_data">get_data</a></code></li>
+<li><code><a title="meerschaum.Pipe.Pipe.get_rowcount" href="#meerschaum.Pipe.Pipe.get_rowcount">get_rowcount</a></code></li>
+<li><code><a title="meerschaum.Pipe.Pipe.get_sync_time" href="#meerschaum.Pipe.Pipe.get_sync_time">get_sync_time</a></code></li>
+<li><code><a title="meerschaum.Pipe.Pipe.id" href="#meerschaum.Pipe.Pipe.id">id</a></code></li>
+<li><code><a title="meerschaum.Pipe.Pipe.instance_connector" href="#meerschaum.Pipe.Pipe.instance_connector">instance_connector</a></code></li>
+<li><code><a title="meerschaum.Pipe.Pipe.meta" href="#meerschaum.Pipe.Pipe.meta">meta</a></code></li>
+<li><code><a title="meerschaum.Pipe.Pipe.parameters" href="#meerschaum.Pipe.Pipe.parameters">parameters</a></code></li>
+<li><code><a title="meerschaum.Pipe.Pipe.register" href="#meerschaum.Pipe.Pipe.register">register</a></code></li>
+<li><code><a title="meerschaum.Pipe.Pipe.show" href="#meerschaum.Pipe.Pipe.show">show</a></code></li>
+<li><code><a title="meerschaum.Pipe.Pipe.sync" href="#meerschaum.Pipe.Pipe.sync">sync</a></code></li>
+<li><code><a title="meerschaum.Pipe.Pipe.sync_time" href="#meerschaum.Pipe.Pipe.sync_time">sync_time</a></code></li>
+</ul>
+</li>
+</ul>
+</li>
+</ul>
+</nav>
+</main>
+<footer id="footer">
+<p>Generated by <a href="https://pdoc3.github.io/pdoc"><cite>pdoc</cite> 0.9.2</a>.</p>
+</footer>
+</body>
+</html>

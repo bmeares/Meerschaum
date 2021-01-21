@@ -252,7 +252,7 @@ def lazy_import(
     Lazily import a package
     Uses the tensorflow LazyLoader implementation (Apache 2.0 License)
     """
-    from meerschaum.utils.lazy_loader import LazyLoader
+    from meerschaum.utils.packages.lazy_loader import LazyLoader
     if local_name is None:
         local_name = name
     return LazyLoader(local_name, globals(), name)
@@ -304,7 +304,11 @@ def get_modules_from_package(
     for module_name in [package.__name__ + "." + mod_name for mod_name in _all]:
         ### there's probably a better way than a try: catch but it'll do for now
         try:
-            if modules_venvs: activate_venv(module_name.split('.')[-1], debug=debug)
+            ### if specified, activate the module's virtual environment before importing.
+            ### NOTE: this only considers the filename, so two modules from different packages
+            ### may end up sharing virtual environments.
+            if modules_venvs:
+                activate_venv(module_name.split('.')[-1], debug=debug)
             if lazy:
                 modules.append(lazy_import(module_name))
             else:
@@ -313,7 +317,8 @@ def get_modules_from_package(
             if debug: dprint(e)
             pass
         finally:
-            if modules_venvs: deactivate_venv(module_name.split('.')[-1], debug=debug)
+            if modules_venvs:
+                deactivate_venv(module_name.split('.')[-1], debug=debug)
     if names:
         return _all, modules
 

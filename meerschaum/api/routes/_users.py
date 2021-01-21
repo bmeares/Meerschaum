@@ -18,7 +18,7 @@ from meerschaum.api import (
 )
 from meerschaum.api.tables import get_tables
 from starlette.responses import Response, JSONResponse
-from meerschaum import User
+from meerschaum._internal import User
 import os, pathlib, datetime
 
 sqlalchemy = attempt_import('sqlalchemy')
@@ -31,7 +31,7 @@ from fastapi_login.exceptions import InvalidCredentialsException
 @manager.user_loader
 def load_user(
         username: str
-    ) -> meerschaum.User:
+    ) -> meerschaum._interal.User:
     return User(username, repository=get_connector())
 
 @app.post('/mrsm/login')
@@ -45,7 +45,7 @@ def login(
     username = data.username
     password = data.password
 
-    from meerschaum.User._User import get_pwd_context
+    from meerschaum._internal.User._User import get_pwd_context
     user = User(username, password)
     correct_password = get_pwd_context().verify(
         password, get_connector().get_user_password_hash(user)

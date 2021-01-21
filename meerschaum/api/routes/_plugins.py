@@ -49,7 +49,7 @@ def register_plugin(
 
     import json, shutil, pathlib, os
     from meerschaum.config._paths import PLUGINS_RESOURCES_PATH, PLUGINS_ARCHIVES_RESOURCES_PATH
-    from meerschaum import Plugin
+    from meerschaum._internal import Plugin
     get_tables()
     if attributes is None: attributes = json.dumps(dict())
     attributes = json.loads(attributes)
@@ -80,7 +80,7 @@ def get_plugin(
     """
     Download a plugin's archive file
     """
-    from meerschaum import Plugin
+    from meerschaum._internal import Plugin
     plugin = Plugin(name)
     if plugin.archive_path.exists():
         return FileResponse(plugin.archive_path, filename=f'{plugin.name}.tar.gz')
@@ -93,7 +93,7 @@ def get_plugin_attributes(
     """
     Download a plugin's archive file
     """
-    from meerschaum import Plugin
+    from meerschaum._internal import Plugin
     return get_connector().get_plugin_attributes(Plugin(name))
 
 @app.get(plugins_endpoint)

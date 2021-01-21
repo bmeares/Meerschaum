@@ -6,8 +6,11 @@
 Manage plugins via the API connector
 """
 
+from __future__ import annotations
+from meerschaum.utils.typing import Union, Any, Optional, SuccessTuple, Mapping, Sequence
+
 def plugin_r_url(
-        plugin : 'meerschaum.Plugin or str'
+        plugin : Union[meerschaum._internal.Plugin, str]
     ) -> str:
     """
     Generate a relative URL path from a Pipe's keys.
@@ -16,12 +19,12 @@ def plugin_r_url(
 
 def register_plugin(
         self,
-        plugin : 'meerschaum.Plugin',
+        plugin : meerschaum._internal.Plugin,
         make_archive : bool = True,
         debug : bool = False
-    ) -> tuple:
+    ) -> SuccessTuple:
     """
-    Register a plugin and upload its archive
+    Register a plugin and upload its archive.
     """
     import json
     if make_archive: archive_path = plugin.make_tar(debug=debug)
@@ -51,12 +54,15 @@ def install_plugin(
         self,
         name : str,
         debug : bool = False
-    ) -> tuple:
+    ) -> SuccessTuple:
     """
-    Download and attempt to install a plugin from the API
+    Download and attempt to install a plugin from the API.
+
+    :param name:
+        The name of the plugin to be installed.
     """
     import os, pathlib
-    from meerschaum import Plugin
+    from meerschaum._internal import Plugin
     from meerschaum.config._paths import PLUGINS_TEMP_RESOURCES_PATH
     from meerschaum.utils.debug import dprint
     r_url = plugin_r_url(name)
@@ -68,11 +74,14 @@ def install_plugin(
 
 def get_plugins(
         self,
-        user_id : int = None,
+        user_id : Optional[int] = None,
         debug : bool = False
-    ) -> list:
+    ) -> Sequence[str]:
     """
-    Return a list of registered plugins
+    Return a list of registered plugin names.
+
+    :param user_id:
+        If specified, return all plugins from a certain user.
     """
     import json
     from meerschaum.utils.warnings import warn, error
@@ -83,16 +92,17 @@ def get_plugins(
 
 def get_plugin_attributes(
         self,
-        plugin : 'meerschaum.Plugin',
+        plugin : meerschaum._internal.Plugin,
         debug : bool = False
-    ) -> list:
+    ) -> Mapping[str, Any]:
     """
-    Return attributes of a registered plugin
+    Return attributes of a registered plugin.
     """
     import json
     from meerschaum.utils.warnings import warn, error
     response = self.get(f'/mrsm/plugins/{plugin.name}/attributes')
     attributes = json.loads(response.text)
-    if not isinstance(attributes, dict): error(response.text)
+    if not isinstance(attributes, dict):
+        error(response.text)
     return attributes
 

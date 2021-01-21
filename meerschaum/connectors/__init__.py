@@ -3,8 +3,15 @@
 # vim:fenc=utf-8
 
 """
-Fetch connectors with get_connector
+Create connectors with `meerschaum.connectors.get_connector()`.
+For ease of use, you can also import from the root `meerschaum` module:
+```
+>>> from meerschaum import get_connector
+>>> conn = get_connector()
+```
 """
+
+from meerschaum.connectors.Connector import Connector
 
 ### store connectors partitioned by
 ### type, label for reuse
