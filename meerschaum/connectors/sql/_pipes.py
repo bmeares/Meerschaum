@@ -389,7 +389,10 @@ def get_pipe_id(
         pipes.c.metric_key == pipe.metric_key and
         pipes.c.location_key == pipe.location_key
     )
-    return self.value(query, debug=debug)
+    _id = self.value(query, debug=debug)
+    if _id is not None:
+        _id = int(_id)
+    return _id
 
 def get_pipe_attributes(
         self,

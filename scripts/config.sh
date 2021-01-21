@@ -11,6 +11,10 @@ export base_name="meerschaum"
 export image="$dockerhub_user/$base_name:$tag"
 export src="$PARENT"
 export port="8000"
+export publish_branch="master"
+export remote_docs_user="meerschaum"
+export remote_docs_host="docs.meerschaum.io"
+export remote_docs_dir="~/docs"
 
 # . parse_yaml.sh
 # eval $(parse_yaml config.yaml)

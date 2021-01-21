@@ -57,6 +57,10 @@ packages = {
         'cx_Freeze'   : 'cx_Freeze>=6.5.1',
         'PyInstaller' : 'pyinstaller',
     },
+    'docs' : {
+        'mkdocs' : 'mkdocs',
+        'pdoc' : 'pdoc3',
+    },
 }
 packages['sql'] = {
     'pandas'     : 'pandas',
