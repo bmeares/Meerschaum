@@ -86,29 +86,6 @@ def generate_password(
     import secrets, string
     return ''.join((secrets.choice(string.ascii_letters) for i in range(length)))
 
-def yes_no(
-        question : str = '',
-        options : list = ['y', 'n'],
-        default : str = 'y',
-        wrappers : tuple = ('[', ']'),
-    ) -> bool:
-    """
-    Print a question and prompt the user with a yes / no input
-
-    Returns bool (answer)
-    """
-    from meerschaum.utils.warnings import error
-    from prompt_toolkit import prompt
-    ending = f" {wrappers[0]}" + "/".join(
-                [ o.upper() if o.lower() == default.lower() else o.lower() for o in options ]
-                ) + f"{wrappers[1]} "
-    try:
-        answer = prompt(question + ending)
-    except:
-        error(f"Error getting response.", stack=False)
-    if answer == "": answer = default
-    return answer.lower() == options[0].lower()
-
 def is_int(s):
     """
     Check if string is an int

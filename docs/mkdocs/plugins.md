@@ -10,4 +10,7 @@ Meerschaum plugins can perform any of three functions:
 2. Sync
 3. Action
 
-Fetch plugins are the most straightforward: 
+### Fetch Plugins
+
+Fetch plugins are the most straightforward: they pull data from some data source and return a dictionary or Pandas DataFrame. For example, one common use-case for a fetch plugin is to parse JSON data from a web API.
+

@@ -4,7 +4,7 @@ theme:
   logo: assets/logo_500x500.png
   name: material
   palette:
-    scheme: slate
+    # scheme: slate
     # primary: brown
 extra_css:
   - stylesheets/extra.css

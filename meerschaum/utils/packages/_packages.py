@@ -58,8 +58,9 @@ packages = {
         'PyInstaller' : 'pyinstaller',
     },
     'docs' : {
-        'mkdocs' : 'mkdocs',
-        'pdoc' : 'pdoc3',
+        'mkdocs'          : 'mkdocs',
+        'pdoc'            : 'pdoc3',
+        'mkdocs_material' : 'mkdocs-material',
     },
 }
 packages['sql'] = {

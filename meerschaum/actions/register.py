@@ -39,6 +39,17 @@ def _register_pipes(
     from meerschaum.utils.debug import dprint
     from meerschaum.utils.warnings import warn, info
 
+    if (
+        len(connector_keys) == 0 or
+        len(metric_keys) == 0
+    ):
+        warn(
+            "You must provide connector keys (-c) and metrics (-m) to register pipes.\n\n" +
+            "Run `bootstrap pipe` for an interactive guide that creates pipes.",
+            stack = False
+        )
+        return False, "Missing connector keys or metrics"
+
     pipes = get_pipes(
         connector_keys = connector_keys,
         metric_keys = metric_keys,
