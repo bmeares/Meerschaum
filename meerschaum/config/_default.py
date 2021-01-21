@@ -102,6 +102,7 @@ default_system_config = {
             'success'      : '🎉',
             'info'         : '💬',
             'debug'        : '🐞',
+            'question'     : '❓',
         },
     },
     'shell' : {
@@ -271,6 +272,19 @@ default_system_config = {
             'color'        : [
                 'bold',
                 'bright magenta',
+            ],
+        },
+    },
+    'question'             : {
+        'unicode'          : {
+            'icon'         : 'MRSM{system:formatting:emoji:question}',
+        },
+        'ascii'            : {
+            'icon'         : '',
+        },
+        'ansi'             : {
+            'color'        : [
+                'green',
             ],
         },
     },

@@ -6,10 +6,13 @@ Functions for bootstrapping elements
 (pipes, configuration, etc)
 """
 
+from __future__ import annotations
+from meerschaum.utils.Typing import Union, Any, Sequence, SuccessTuple, Optional
+
 def bootstrap(
-        action : list = [''],
-        **kw
-    ):
+        action : Sequence[str] = [''],
+        **kw : Any
+    ) -> SuccessTuple:
     """
     Bootstrap an element (pipe, configuration).
 
@@ -28,21 +31,43 @@ def bootstrap(
     }
     return choose_subaction(action, options, **kw)
 
-def _bootstrap_pipes(**kw):
+def _bootstrap_pipes(
+        action : Sequence[str] = [],
+        connector_keys : Sequence[str] = [],
+        metric_keys : Sequence[str] = [],
+        location_keys : Optional[Sequence[Optional[str]]] = [],
+        debug : bool,
+        **kw : Any
+    ) -> SuccessTuple:
     """
-    Create a new Pipe
+    Create a new pipe.
+    If no keys are provided, guide the user through the steps required.
     """
+    from meerschaum.utils.config import get_config
+    from meerschaum.utils.warnings import info, warn, error
+    from meerschaum.utils.debug import dprint
+    from meerschaum.utils.packages import attempt_import
+    from meerschaum.utils.prompt import yes_no
+    prompt_toolkit = attempt_import('prompt_toolkit')
+
+    if (
+        len(connector_keys) > 0 or
+        len(metric_keys) > 0 or
+        len(location_keys) > 0:
+    ):
+        info()
+
     return (True, "Success")
 
 def _bootstrap_config(
-        action : list = [''],
+        action : Sequence[str] = [''],
         yes : bool = False,
         force : bool = False,
         debug : bool = False,
-        **kw
-    ):
+        **kw : Any
+    ) -> SuccessTuple:
     """
-    Delete and regenerate the default Meerschaum configuration
+    Delete and regenerate the default Meerschaum configuration.
     """
     possible_config_funcs = {
         'stack'   : _bootstrap_stack,
@@ -75,12 +100,12 @@ def _bootstrap_stack(
         yes : bool = False,
         force : bool = False,
         debug : bool = False,
-        **kw
-    ):
+        **kw : Any
+    ) -> SuccessTuple:
     """
     Delete and regenerate the default Meerschaum stack configuration
     """
-    from meerschaum.utils.misc import yes_no
+    from meerschaum.utils.prompt import yes_no
     from meerschaum.config._paths import STACK_COMPOSE_PATH, STACK_ENV_PATH
     from meerschaum.config.stack import write_stack
     from meerschaum.utils.debug import dprint
@@ -101,12 +126,12 @@ def _bootstrap_grafana(
         yes : bool = False,
         force : bool = False,
         debug : bool = False,
-        **kw
-    ):
+        **kw : Any
+    ) -> SuccessTuple:
     """
     Delete and regenerate the default Meerschaum stack configuration
     """
-    from meerschaum.utils.misc import yes_no
+    from meerschaum.utils.prompt import yes_no
     from meerschaum.config._paths import GRAFANA_DATASOURCE_PATH, GRAFANA_DASHBOARD_PATH
     from meerschaum.config._edit import general_write_config
     from meerschaum.config import config as cf, get_config

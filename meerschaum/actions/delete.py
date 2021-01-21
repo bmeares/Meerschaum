@@ -30,7 +30,7 @@ def _delete_pipes(
         **kw
     ) -> tuple:
     from meerschaum import get_pipes
-    from meerschaum.utils.misc import yes_no
+    from meerschaum.utils.prompt import yes_no
     from meerschaum.utils.formatting import pprint
     pipes = get_pipes(as_list=True, debug=debug, **kw)
     if len(pipes) == 0:
@@ -60,7 +60,7 @@ def _delete_config(
     Delete configuration files
     """
     import os
-    from meerschaum.utils.misc import yes_no
+    from meerschaum.utils.prompt import yes_no
     from meerschaum.config._paths import CONFIG_PATH, STACK_COMPOSE_PATH, DEFAULT_CONFIG_PATH
     from meerschaum.utils.debug import dprint
     paths = [CONFIG_PATH, STACK_COMPOSE_PATH, DEFAULT_CONFIG_PATH]
@@ -93,7 +93,7 @@ def _delete_plugins(
     from meerschaum.config._paths import PLUGINS_RESOURCES_PATH
     from meerschaum.utils.warnings import warn, error, info
     from meerschaum.utils.packages import reload_package
-    from meerschaum.utils.misc import yes_no
+    from meerschaum.utils.prompt import yes_no
     import os, shutil
 
     ### parse the provided plugins and link them to their modules
@@ -149,7 +149,8 @@ def _delete_users(
     ) -> tuple:
     from meerschaum.config import get_config
     from meerschaum import get_connector
-    from meerschaum.utils.misc import parse_repo_keys, yes_no
+    from meerschaum.utils.misc import parse_repo_keys
+    from meerschaum.utils.prompt import yes_no
     from meerschaum.utils.debug import dprint
     from meerschaum.utils.warnings import warn, error, info
     from meerschaum._internal import User
