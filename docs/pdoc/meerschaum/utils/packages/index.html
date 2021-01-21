@@ -36,6 +36,7 @@ Functions for managing packages and virtual environments reside here.
 &#34;&#34;&#34;
 
 import importlib, importlib.util
+
 _import_module = importlib.import_module
 from meerschaum.utils.packages._packages import packages, all_packages
 import os, pathlib, sys, platform
@@ -45,10 +46,11 @@ from meerschaum.utils.debug import dprint
 _import_hook_venv = None
 active_venvs = set()
 
+
 def is_venv_active(
-        venv : str = &#39;mrsm&#39;,
-        debug : bool = False
-    ) -&gt; bool:
+        venv: str = &#39;mrsm&#39;,
+        debug: bool = False
+) -&gt; bool:
     &#34;&#34;&#34;
     Check if a virtual environment is active
     &#34;&#34;&#34;
@@ -56,10 +58,11 @@ def is_venv_active(
     if debug: dprint(f&#34;Checking if virtual environment &#39;{venv}&#39; is active.&#34;)
     return venv in active_venvs
 
+
 def deactivate_venv(
-        venv : str = &#39;mrsm&#39;,
-        debug : bool = False
-    ) -&gt; bool:
+        venv: str = &#39;mrsm&#39;,
+        debug: bool = False
+) -&gt; bool:
     &#34;&#34;&#34;
     Remove a virtual environment from sys.path (if it&#39;s been activated)
     &#34;&#34;&#34;
@@ -79,10 +82,11 @@ def deactivate_venv(
     if debug: dprint(f&#39;sys.path: {sys.path}&#39;)
     return True
 
+
 def activate_venv(
-        venv : str = &#39;mrsm&#39;,
-        debug : bool = False
-    ) -&gt; bool:
+        venv: str = &#39;mrsm&#39;,
+        debug: bool = False
+) -&gt; bool:
     &#34;&#34;&#34;
     Create a virtual environment (if it doesn&#39;t exist) and add it to sys.path if necessary
     &#34;&#34;&#34;
@@ -103,7 +107,7 @@ def activate_venv(
         virtualenv.cli_run([venv, &#39;--download&#39;, &#39;--system-site-packages&#39;])
     if debug: dprint(f&#34;Activating virtual environment &#39;{venv}&#39;...&#34;)
     try:
-        exec(open(activate_this_path).read(), {&#39;__file__&#39; : activate_this_path})
+        exec(open(activate_this_path).read(), {&#39;__file__&#39;: activate_this_path})
     except Exception as e:
         warn(str(e))
         return False
@@ -116,7 +120,8 @@ def activate_venv(
     if debug: dprint(f&#39;sys.path: {sys.path}&#39;)
     return True
 
-def venv_exec(code : str, venv : str = &#39;mrsm&#39;, debug : bool = False) -&gt; bool:
+
+def venv_exec(code: str, venv: str = &#39;mrsm&#39;, debug: bool = False) -&gt; bool:
     &#34;&#34;&#34;
     Execute Python code in a subprocess via a virtual environment&#39;s interpeter.
 
@@ -134,13 +139,14 @@ def venv_exec(code : str, venv : str = &#39;mrsm&#39;, debug : bool = False) -&g
     )
     return subprocess.call([executable, &#39;-c&#39;, code]) == 0
 
+
 def pip_install(
-        *packages : list,
-        args : list = [&#39;--upgrade&#39;],
-        venv : str = &#39;mrsm&#39;,
-        deactivate : bool = True,
-        debug : bool = False
-    ) -&gt; bool:
+        *packages: list,
+        args: list = [&#39;--upgrade&#39;],
+        venv: str = &#39;mrsm&#39;,
+        deactivate: bool = True,
+        debug: bool = False
+) -&gt; bool:
     &#34;&#34;&#34;
     Install pip packages
     &#34;&#34;&#34;
@@ -148,10 +154,11 @@ def pip_install(
         import pip
     except ImportError:
         import ensurepip
-        ensurepip.bootstrap(upgrade=True,)
+        ensurepip.bootstrap(upgrade=True, )
     if venv is not None:
         activate_venv(venv=venv, debug=debug)
-        if &#39;--ignore-installed&#39; not in args: args += [&#39;--ignore-installed&#39;]
+        if &#39;--ignore-installed&#39; not in args:
+            args += [&#39;--ignore-installed&#39;]
     ### NOTE: Added pip to be checked on each install. Too much?
     if &#39;install&#39; not in args: args = [&#39;install&#39;] + args + [&#39;pip&#39;]
     success = run_python_package(&#39;pip&#39;, args + list(packages), venv=venv, debug=debug) == 0
@@ -159,12 +166,13 @@ def pip_install(
         deactivate_venv(venv=venv, debug=debug)
     return success
 
+
 def run_python_package(
-        package_name : str,
-        args : list = [],
-        venv : str = None,
-        debug : bool = False
-    ) -&gt; int:
+        package_name: str,
+        args: list = [],
+        venv: str = None,
+        debug: bool = False
+) -&gt; int:
     &#34;&#34;&#34;
     Runs an installed python package.
     E.g. Translates to `/usr/bin/python -m [package]`
@@ -185,15 +193,16 @@ def run_python_package(
     if debug: print(command)
     return call(command)
 
+
 def attempt_import(
-        *names : list,
-        lazy : bool = True,
-        warn : bool = True,
-        install : bool = True,
-        venv : str = &#39;mrsm&#39;,
-        precheck : bool = True,
-        debug : bool = False,
-    ) -&gt; &#39;module or tuple of modules&#39;:
+        *names: list,
+        lazy: bool = True,
+        warn: bool = True,
+        install: bool = True,
+        venv: str = &#39;mrsm&#39;,
+        precheck: bool = True,
+        debug: bool = False,
+) -&gt; &#39;module or tuple of modules&#39;:
     &#34;&#34;&#34;
     Raise a warning if packages are not installed; otherwise import and return modules.
     If lazy = True, return lazy-imported modules.
@@ -215,7 +224,7 @@ def attempt_import(
     _warnings = _import_module(&#39;meerschaum.utils.warnings&#39;)
     warn_function = _warnings.warn
 
-    def do_import(_name : str):
+    def do_import(_name: str):
         #  is_venv_active(venv, debug=debug)
         if venv is not None: activate_venv(venv=venv, debug=debug)
         ### determine the import method (lazy vs normal)
@@ -247,7 +256,7 @@ def attempt_import(
                 warn_function(
                     f&#34;Package &#39;{install_name}&#39; is not declared in meerschaum.utils.packages.&#34;,
                     ImportWarning,
-                    stacklevel = 3
+                    stacklevel=3
                 )
             if install:
                 ### NOTE: pip_install deactivates venv, so deactivate must be False.
@@ -256,14 +265,14 @@ def attempt_import(
                     warn_function(
                         f&#34;Failed to install &#39;{install_name}&#39;.&#34;,
                         ImportWarning,
-                        stacklevel = 3
+                        stacklevel=3
                     )
             elif warn:
                 warn_function(
                     (f&#34;\n\nMissing package &#39;{name}&#39;; features will not work correctly. &#34;
-                    f&#34;\n\nRun `pip install {install_name}` set install=True when calling attempt_import.\n&#34;),
+                     f&#34;\n\nRun `pip install {install_name}` set install=True when calling attempt_import.\n&#34;),
                     ImportWarning,
-                    stacklevel = 3
+                    stacklevel=3
                 )
         modules.append(do_import(name))
 
@@ -273,10 +282,11 @@ def attempt_import(
     if len(modules) == 1: return modules[0]
     return modules
 
+
 def lazy_import(
-        name : str,
-        local_name : str = None
-    ):
+        name: str,
+        local_name: str = None
+):
     &#34;&#34;&#34;
     Lazily import a package
     Uses the tensorflow LazyLoader implementation (Apache 2.0 License)
@@ -285,6 +295,7 @@ def lazy_import(
     if local_name is None:
         local_name = name
     return LazyLoader(local_name, globals(), name)
+
 
 def import_pandas() -&gt; &#39;module&#39;:
     &#34;&#34;&#34;
@@ -297,14 +308,15 @@ def import_pandas() -&gt; &#39;module&#39;:
         pandas_module_name = &#39;modin.pandas&#39;
     return attempt_import(pandas_module_name)
 
+
 def get_modules_from_package(
-        package : &#39;package&#39;,
-        names : bool = False,
-        recursive : bool = False,
-        lazy : bool = False,
-        modules_venvs : bool = False,
-        debug : bool = False
-    ):
+        package: &#39;package&#39;,
+        names: bool = False,
+        recursive: bool = False,
+        lazy: bool = False,
+        modules_venvs: bool = False,
+        debug: bool = False
+):
     &#34;&#34;&#34;
     Find and import all modules in a package.
 
@@ -317,15 +329,17 @@ def get_modules_from_package(
     from os.path import dirname, join, isfile, isdir, basename
     import glob, importlib
 
-    if recursive: pattern = &#39;*&#39;
-    else: pattern = &#39;*.py&#39;
+    if recursive:
+        pattern = &#39;*&#39;
+    else:
+        pattern = &#39;*.py&#39;
     module_names = glob.glob(join(dirname(package.__file__), pattern), recursive=recursive)
     _all = [
         basename(f)[:-3] if isfile(f) else basename(f)
-            for f in module_names
-                if (isfile(f) or isdir(f))
-                    and not f.endswith(&#39;__init__.py&#39;)
-                    and not f.endswith(&#39;__pycache__&#39;)
+        for f in module_names
+        if (isfile(f) or isdir(f))
+           and not f.endswith(&#39;__init__.py&#39;)
+           and not f.endswith(&#39;__pycache__&#39;)
     ]
 
     if debug: dprint(_all)
@@ -353,14 +367,15 @@ def get_modules_from_package(
 
     return modules
 
+
 def import_children(
-        package : &#39;package&#39; = None,
-        package_name : str = None,
-        types : list = [&#39;method&#39;, &#39;builtin&#39;, &#39;function&#39;, &#39;class&#39;, &#39;module&#39;],
-        lazy : bool = True,
-        recursive : bool = False,
-        debug : bool = False
-    ) -&gt; list:
+        package: &#39;package&#39; = None,
+        package_name: str = None,
+        types: list = [&#39;method&#39;, &#39;builtin&#39;, &#39;function&#39;, &#39;class&#39;, &#39;module&#39;],
+        lazy: bool = True,
+        recursive: bool = False,
+        debug: bool = False
+) -&gt; list:
     &#34;&#34;&#34;
     Import all functions in a package to its __init__.
     package : package (default None)
@@ -417,18 +432,19 @@ def import_children(
     setattr(sys.modules[package_name], &#39;__all__&#39;, _all)
     return members
 
+
 def reload_package(
-        package : &#39;package&#39;,
-        lazy : bool = False,
-        debug : bool = False,
+        package: &#39;package&#39;,
+        lazy: bool = False,
+        debug: bool = False,
         **kw
-    ):
+):
     &#34;&#34;&#34;
     Recursively load a package&#39;s subpackages, even if they were not previously loaded
     &#34;&#34;&#34;
     import os, types, importlib, sys
     from meerschaum.utils.debug import dprint
-    assert(hasattr(package, &#34;__package__&#34;))
+    assert (hasattr(package, &#34;__package__&#34;))
     fn = package.__file__
     fn_dir = os.path.dirname(fn) + os.sep
     module_visit = {fn}
@@ -455,9 +471,10 @@ def reload_package(
 
     return reload_recursive_ex(package)
 
+
 def is_installed(
-        name : str
-    ) -&gt; bool:
+        name: str
+) -&gt; bool:
     &#34;&#34;&#34;
     Check whether a package is installed.
     name : str
@@ -466,18 +483,21 @@ def is_installed(
     import importlib.util
     return importlib.util.find_spec(name) is None
 
+
 ### NOTE: this is at the bottom to avoid import problems
 #  from meerschaum.utils.packages._ImportHook import install
 
 from meerschaum.utils.warnings import warn
 from importlib.machinery import PathFinder
+
+
 class ImportHook(PathFinder):
-    def __init__(self, venv : str = None, debug : bool = False):
+    def __init__(self, venv: str = None, debug: bool = False):
         self.venv = venv
         self.debug = debug
 
     #  def __del__(self):
-        #  deactivate_venv(self.venv, debug=self.debug)
+    #  deactivate_venv(self.venv, debug=self.debug)
 
     def create_module(self, spec):
         print(spec)
@@ -490,9 +510,9 @@ class ImportHook(PathFinder):
             activate_venv(self.venv, debug=False)
         result = super(ImportHook, self).find_spec(fullname, path, target)
         #  try:
-            #  __import__(fullname)
+        #  __import__(fullname)
         #  except Exception as e:
-            #  print(str(e))
+        #  print(str(e))
         if result is None and path is None and target is None:
             if not fullname in sys.builtin_module_names:
                 warn(fullname, stacklevel=3)
@@ -500,10 +520,11 @@ class ImportHook(PathFinder):
             #  pass
             #  #  attempt_import(fullname, debug=True, venv=self.venv, precheck=False)
         #  if self.venv is not None:
-            #  deactivate_venv(self.venv, debug=False)
+        #  deactivate_venv(self.venv, debug=False)
         return result
 
-def install_import_hook(venv : str = &#39;mrsm&#39;, debug : bool = False) -&gt; bool:
+
+def install_import_hook(venv: str = &#39;mrsm&#39;, debug: bool = False) -&gt; bool:
     global _import_hook_venv
     from meerschaum.utils.debug import dprint
     from meerschaum.utils.warnings import warn
@@ -516,9 +537,9 @@ def install_import_hook(venv : str = &#39;mrsm&#39;, debug : bool = False) -&gt;
         else:
             if debug:
                 dprint(f&#34;_import_hook_venv is &#39;{_import_hook_venv}&#39;, &#34; +
-                    &#34;attempted to install venv &#39;{venv}&#39;. &#34; +
-                    &#34;Uninstall import hook before installing &#39;{venv}&#39;.&#34;
-                )
+                       &#34;attempted to install venv &#39;{venv}&#39;. &#34; +
+                       &#34;Uninstall import hook before installing &#39;{venv}&#39;.&#34;
+                       )
             return False
     if debug: dprint(f&#34;Installing import hook for virtual environment &#39;{venv}&#39;...&#34;)
     importlib.import_module = attempt_import
@@ -533,7 +554,8 @@ def install_import_hook(venv : str = &#39;mrsm&#39;, debug : bool = False) -&gt;
 
     return True
 
-def uninstall_import_hook(venv : str = &#39;mrsm&#39;, all_hooks : bool = False, debug : bool = False) -&gt; bool:
+
+def uninstall_import_hook(venv: str = &#39;mrsm&#39;, all_hooks: bool = False, debug: bool = False) -&gt; bool:
     global _import_hook_venv
     if debug: dprint(f&#34;Uninstalling import hook (was set to {_import_hook_venv})...&#34;)
     importlib.import_module = _import_module
@@ -542,9 +564,9 @@ def uninstall_import_hook(venv : str = &#39;mrsm&#39;, all_hooks : bool = False,
     new_meta_path, to_delete = [], []
     for finder in sys.meta_path:
         if (
-            not isinstance(finder, ImportHook) or (
+                not isinstance(finder, ImportHook) or (
                 isinstance(finder, ImportHook) and not all_hooks and finder.venv != venv
-            )
+        )
         ):
             new_meta_path.append(finder)
         else:
@@ -579,9 +601,9 @@ def uninstall_import_hook(venv : str = &#39;mrsm&#39;, all_hooks : bool = False,
 <span>Expand source code</span>
 </summary>
 <pre><code class="python">def activate_venv(
-        venv : str = &#39;mrsm&#39;,
-        debug : bool = False
-    ) -&gt; bool:
+        venv: str = &#39;mrsm&#39;,
+        debug: bool = False
+) -&gt; bool:
     &#34;&#34;&#34;
     Create a virtual environment (if it doesn&#39;t exist) and add it to sys.path if necessary
     &#34;&#34;&#34;
@@ -602,7 +624,7 @@ def uninstall_import_hook(venv : str = &#39;mrsm&#39;, all_hooks : bool = False,
         virtualenv.cli_run([venv, &#39;--download&#39;, &#39;--system-site-packages&#39;])
     if debug: dprint(f&#34;Activating virtual environment &#39;{venv}&#39;...&#34;)
     try:
-        exec(open(activate_this_path).read(), {&#39;__file__&#39; : activate_this_path})
+        exec(open(activate_this_path).read(), {&#39;__file__&#39;: activate_this_path})
     except Exception as e:
         warn(str(e))
         return False
@@ -631,14 +653,14 @@ pandas = attempt_import('pandas')</p></div>
 <span>Expand source code</span>
 </summary>
 <pre><code class="python">def attempt_import(
-        *names : list,
-        lazy : bool = True,
-        warn : bool = True,
-        install : bool = True,
-        venv : str = &#39;mrsm&#39;,
-        precheck : bool = True,
-        debug : bool = False,
-    ) -&gt; &#39;module or tuple of modules&#39;:
+        *names: list,
+        lazy: bool = True,
+        warn: bool = True,
+        install: bool = True,
+        venv: str = &#39;mrsm&#39;,
+        precheck: bool = True,
+        debug: bool = False,
+) -&gt; &#39;module or tuple of modules&#39;:
     &#34;&#34;&#34;
     Raise a warning if packages are not installed; otherwise import and return modules.
     If lazy = True, return lazy-imported modules.
@@ -660,7 +682,7 @@ pandas = attempt_import('pandas')</p></div>
     _warnings = _import_module(&#39;meerschaum.utils.warnings&#39;)
     warn_function = _warnings.warn
 
-    def do_import(_name : str):
+    def do_import(_name: str):
         #  is_venv_active(venv, debug=debug)
         if venv is not None: activate_venv(venv=venv, debug=debug)
         ### determine the import method (lazy vs normal)
@@ -692,7 +714,7 @@ pandas = attempt_import('pandas')</p></div>
                 warn_function(
                     f&#34;Package &#39;{install_name}&#39; is not declared in meerschaum.utils.packages.&#34;,
                     ImportWarning,
-                    stacklevel = 3
+                    stacklevel=3
                 )
             if install:
                 ### NOTE: pip_install deactivates venv, so deactivate must be False.
@@ -701,14 +723,14 @@ pandas = attempt_import('pandas')</p></div>
                     warn_function(
                         f&#34;Failed to install &#39;{install_name}&#39;.&#34;,
                         ImportWarning,
-                        stacklevel = 3
+                        stacklevel=3
                     )
             elif warn:
                 warn_function(
                     (f&#34;\n\nMissing package &#39;{name}&#39;; features will not work correctly. &#34;
-                    f&#34;\n\nRun `pip install {install_name}` set install=True when calling attempt_import.\n&#34;),
+                     f&#34;\n\nRun `pip install {install_name}` set install=True when calling attempt_import.\n&#34;),
                     ImportWarning,
-                    stacklevel = 3
+                    stacklevel=3
                 )
         modules.append(do_import(name))
 
@@ -729,9 +751,9 @@ pandas = attempt_import('pandas')</p></div>
 <span>Expand source code</span>
 </summary>
 <pre><code class="python">def deactivate_venv(
-        venv : str = &#39;mrsm&#39;,
-        debug : bool = False
-    ) -&gt; bool:
+        venv: str = &#39;mrsm&#39;,
+        debug: bool = False
+) -&gt; bool:
     &#34;&#34;&#34;
     Remove a virtual environment from sys.path (if it&#39;s been activated)
     &#34;&#34;&#34;
@@ -766,13 +788,13 @@ names = True
 <span>Expand source code</span>
 </summary>
 <pre><code class="python">def get_modules_from_package(
-        package : &#39;package&#39;,
-        names : bool = False,
-        recursive : bool = False,
-        lazy : bool = False,
-        modules_venvs : bool = False,
-        debug : bool = False
-    ):
+        package: &#39;package&#39;,
+        names: bool = False,
+        recursive: bool = False,
+        lazy: bool = False,
+        modules_venvs: bool = False,
+        debug: bool = False
+):
     &#34;&#34;&#34;
     Find and import all modules in a package.
 
@@ -785,15 +807,17 @@ names = True
     from os.path import dirname, join, isfile, isdir, basename
     import glob, importlib
 
-    if recursive: pattern = &#39;*&#39;
-    else: pattern = &#39;*.py&#39;
+    if recursive:
+        pattern = &#39;*&#39;
+    else:
+        pattern = &#39;*.py&#39;
     module_names = glob.glob(join(dirname(package.__file__), pattern), recursive=recursive)
     _all = [
         basename(f)[:-3] if isfile(f) else basename(f)
-            for f in module_names
-                if (isfile(f) or isdir(f))
-                    and not f.endswith(&#39;__init__.py&#39;)
-                    and not f.endswith(&#39;__pycache__&#39;)
+        for f in module_names
+        if (isfile(f) or isdir(f))
+           and not f.endswith(&#39;__init__.py&#39;)
+           and not f.endswith(&#39;__pycache__&#39;)
     ]
 
     if debug: dprint(_all)
@@ -842,13 +866,13 @@ Default : ['method', 'builtin', 'class', 'function', 'package', 'module']</p>
 <span>Expand source code</span>
 </summary>
 <pre><code class="python">def import_children(
-        package : &#39;package&#39; = None,
-        package_name : str = None,
-        types : list = [&#39;method&#39;, &#39;builtin&#39;, &#39;function&#39;, &#39;class&#39;, &#39;module&#39;],
-        lazy : bool = True,
-        recursive : bool = False,
-        debug : bool = False
-    ) -&gt; list:
+        package: &#39;package&#39; = None,
+        package_name: str = None,
+        types: list = [&#39;method&#39;, &#39;builtin&#39;, &#39;function&#39;, &#39;class&#39;, &#39;module&#39;],
+        lazy: bool = True,
+        recursive: bool = False,
+        debug: bool = False
+) -&gt; list:
     &#34;&#34;&#34;
     Import all functions in a package to its __init__.
     package : package (default None)
@@ -936,7 +960,7 @@ Default : ['method', 'builtin', 'class', 'function', 'package', 'module']</p>
 <summary>
 <span>Expand source code</span>
 </summary>
-<pre><code class="python">def install_import_hook(venv : str = &#39;mrsm&#39;, debug : bool = False) -&gt; bool:
+<pre><code class="python">def install_import_hook(venv: str = &#39;mrsm&#39;, debug: bool = False) -&gt; bool:
     global _import_hook_venv
     from meerschaum.utils.debug import dprint
     from meerschaum.utils.warnings import warn
@@ -949,9 +973,9 @@ Default : ['method', 'builtin', 'class', 'function', 'package', 'module']</p>
         else:
             if debug:
                 dprint(f&#34;_import_hook_venv is &#39;{_import_hook_venv}&#39;, &#34; +
-                    &#34;attempted to install venv &#39;{venv}&#39;. &#34; +
-                    &#34;Uninstall import hook before installing &#39;{venv}&#39;.&#34;
-                )
+                       &#34;attempted to install venv &#39;{venv}&#39;. &#34; +
+                       &#34;Uninstall import hook before installing &#39;{venv}&#39;.&#34;
+                       )
             return False
     if debug: dprint(f&#34;Installing import hook for virtual environment &#39;{venv}&#39;...&#34;)
     importlib.import_module = attempt_import
@@ -979,8 +1003,8 @@ Name of the package in question</p></div>
 <span>Expand source code</span>
 </summary>
 <pre><code class="python">def is_installed(
-        name : str
-    ) -&gt; bool:
+        name: str
+) -&gt; bool:
     &#34;&#34;&#34;
     Check whether a package is installed.
     name : str
@@ -1000,9 +1024,9 @@ Name of the package in question</p></div>
 <span>Expand source code</span>
 </summary>
 <pre><code class="python">def is_venv_active(
-        venv : str = &#39;mrsm&#39;,
-        debug : bool = False
-    ) -&gt; bool:
+        venv: str = &#39;mrsm&#39;,
+        debug: bool = False
+) -&gt; bool:
     &#34;&#34;&#34;
     Check if a virtual environment is active
     &#34;&#34;&#34;
@@ -1022,9 +1046,9 @@ Uses the tensorflow LazyLoader implementation (Apache 2.0 License)</p></div>
 <span>Expand source code</span>
 </summary>
 <pre><code class="python">def lazy_import(
-        name : str,
-        local_name : str = None
-    ):
+        name: str,
+        local_name: str = None
+):
     &#34;&#34;&#34;
     Lazily import a package
     Uses the tensorflow LazyLoader implementation (Apache 2.0 License)
@@ -1045,12 +1069,12 @@ Uses the tensorflow LazyLoader implementation (Apache 2.0 License)</p></div>
 <span>Expand source code</span>
 </summary>
 <pre><code class="python">def pip_install(
-        *packages : list,
-        args : list = [&#39;--upgrade&#39;],
-        venv : str = &#39;mrsm&#39;,
-        deactivate : bool = True,
-        debug : bool = False
-    ) -&gt; bool:
+        *packages: list,
+        args: list = [&#39;--upgrade&#39;],
+        venv: str = &#39;mrsm&#39;,
+        deactivate: bool = True,
+        debug: bool = False
+) -&gt; bool:
     &#34;&#34;&#34;
     Install pip packages
     &#34;&#34;&#34;
@@ -1058,10 +1082,11 @@ Uses the tensorflow LazyLoader implementation (Apache 2.0 License)</p></div>
         import pip
     except ImportError:
         import ensurepip
-        ensurepip.bootstrap(upgrade=True,)
+        ensurepip.bootstrap(upgrade=True, )
     if venv is not None:
         activate_venv(venv=venv, debug=debug)
-        if &#39;--ignore-installed&#39; not in args: args += [&#39;--ignore-installed&#39;]
+        if &#39;--ignore-installed&#39; not in args:
+            args += [&#39;--ignore-installed&#39;]
     ### NOTE: Added pip to be checked on each install. Too much?
     if &#39;install&#39; not in args: args = [&#39;install&#39;] + args + [&#39;pip&#39;]
     success = run_python_package(&#39;pip&#39;, args + list(packages), venv=venv, debug=debug) == 0
@@ -1080,17 +1105,17 @@ Uses the tensorflow LazyLoader implementation (Apache 2.0 License)</p></div>
 <span>Expand source code</span>
 </summary>
 <pre><code class="python">def reload_package(
-        package : &#39;package&#39;,
-        lazy : bool = False,
-        debug : bool = False,
+        package: &#39;package&#39;,
+        lazy: bool = False,
+        debug: bool = False,
         **kw
-    ):
+):
     &#34;&#34;&#34;
     Recursively load a package&#39;s subpackages, even if they were not previously loaded
     &#34;&#34;&#34;
     import os, types, importlib, sys
     from meerschaum.utils.debug import dprint
-    assert(hasattr(package, &#34;__package__&#34;))
+    assert (hasattr(package, &#34;__package__&#34;))
     fn = package.__file__
     fn_dir = os.path.dirname(fn) + os.sep
     module_visit = {fn}
@@ -1129,11 +1154,11 @@ E.g. Translates to <code>/usr/bin/python -m [package]</code></p></div>
 <span>Expand source code</span>
 </summary>
 <pre><code class="python">def run_python_package(
-        package_name : str,
-        args : list = [],
-        venv : str = None,
-        debug : bool = False
-    ) -&gt; int:
+        package_name: str,
+        args: list = [],
+        venv: str = None,
+        debug: bool = False
+) -&gt; int:
     &#34;&#34;&#34;
     Runs an installed python package.
     E.g. Translates to `/usr/bin/python -m [package]`
@@ -1164,7 +1189,7 @@ E.g. Translates to <code>/usr/bin/python -m [package]</code></p></div>
 <summary>
 <span>Expand source code</span>
 </summary>
-<pre><code class="python">def uninstall_import_hook(venv : str = &#39;mrsm&#39;, all_hooks : bool = False, debug : bool = False) -&gt; bool:
+<pre><code class="python">def uninstall_import_hook(venv: str = &#39;mrsm&#39;, all_hooks: bool = False, debug: bool = False) -&gt; bool:
     global _import_hook_venv
     if debug: dprint(f&#34;Uninstalling import hook (was set to {_import_hook_venv})...&#34;)
     importlib.import_module = _import_module
@@ -1173,9 +1198,9 @@ E.g. Translates to <code>/usr/bin/python -m [package]</code></p></div>
     new_meta_path, to_delete = [], []
     for finder in sys.meta_path:
         if (
-            not isinstance(finder, ImportHook) or (
+                not isinstance(finder, ImportHook) or (
                 isinstance(finder, ImportHook) and not all_hooks and finder.venv != venv
-            )
+        )
         ):
             new_meta_path.append(finder)
         else:
@@ -1196,7 +1221,7 @@ E.g. Translates to <code>/usr/bin/python -m [package]</code></p></div>
 <summary>
 <span>Expand source code</span>
 </summary>
-<pre><code class="python">def venv_exec(code : str, venv : str = &#39;mrsm&#39;, debug : bool = False) -&gt; bool:
+<pre><code class="python">def venv_exec(code: str, venv: str = &#39;mrsm&#39;, debug: bool = False) -&gt; bool:
     &#34;&#34;&#34;
     Execute Python code in a subprocess via a virtual environment&#39;s interpeter.
 
@@ -1231,12 +1256,12 @@ E.g. Translates to <code>/usr/bin/python -m [package]</code></p></div>
 <span>Expand source code</span>
 </summary>
 <pre><code class="python">class ImportHook(PathFinder):
-    def __init__(self, venv : str = None, debug : bool = False):
+    def __init__(self, venv: str = None, debug: bool = False):
         self.venv = venv
         self.debug = debug
 
     #  def __del__(self):
-        #  deactivate_venv(self.venv, debug=self.debug)
+    #  deactivate_venv(self.venv, debug=self.debug)
 
     def create_module(self, spec):
         print(spec)
@@ -1249,9 +1274,9 @@ E.g. Translates to <code>/usr/bin/python -m [package]</code></p></div>
             activate_venv(self.venv, debug=False)
         result = super(ImportHook, self).find_spec(fullname, path, target)
         #  try:
-            #  __import__(fullname)
+        #  __import__(fullname)
         #  except Exception as e:
-            #  print(str(e))
+        #  print(str(e))
         if result is None and path is None and target is None:
             if not fullname in sys.builtin_module_names:
                 warn(fullname, stacklevel=3)
@@ -1259,7 +1284,7 @@ E.g. Translates to <code>/usr/bin/python -m [package]</code></p></div>
             #  pass
             #  #  attempt_import(fullname, debug=True, venv=self.venv, precheck=False)
         #  if self.venv is not None:
-            #  deactivate_venv(self.venv, debug=False)
+        #  deactivate_venv(self.venv, debug=False)
         return result</code></pre>
 </details>
 <h3>Ancestors</h3>
@@ -1309,9 +1334,9 @@ E.g. Translates to <code>/usr/bin/python -m [package]</code></p></div>
         activate_venv(self.venv, debug=False)
     result = super(ImportHook, self).find_spec(fullname, path, target)
     #  try:
-        #  __import__(fullname)
+    #  __import__(fullname)
     #  except Exception as e:
-        #  print(str(e))
+    #  print(str(e))
     if result is None and path is None and target is None:
         if not fullname in sys.builtin_module_names:
             warn(fullname, stacklevel=3)
@@ -1319,7 +1344,7 @@ E.g. Translates to <code>/usr/bin/python -m [package]</code></p></div>
         #  pass
         #  #  attempt_import(fullname, debug=True, venv=self.venv, precheck=False)
     #  if self.venv is not None:
-        #  deactivate_venv(self.venv, debug=False)
+    #  deactivate_venv(self.venv, debug=False)
     return result</code></pre>
 </details>
 </dd>

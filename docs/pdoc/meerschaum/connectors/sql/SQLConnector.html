@@ -1258,7 +1258,10 @@ Upper bound for the query (inclusive)</p></div>
         pipes.c.metric_key == pipe.metric_key and
         pipes.c.location_key == pipe.location_key
     )
-    return self.value(query, debug=debug)</code></pre>
+    _id = self.value(query, debug=debug)
+    if _id is not None:
+        _id = int(_id)
+    return _id</code></pre>
 </details>
 </dd>
 <dt id="meerschaum.connectors.sql.SQLConnector.SQLConnector.get_pipe_rowcount"><code class="name flex">
