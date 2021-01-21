@@ -1,0 +1,1429 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, minimum-scale=1" />
+<meta name="generator" content="pdoc 0.9.2" />
+<title>meerschaum.actions.shell.Shell API documentation</title>
+<meta name="description" content="Meerschaum v0.2.0" />
+<link rel="preload stylesheet" as="style" href="https://cdnjs.cloudflare.com/ajax/libs/10up-sanitize.css/11.0.1/sanitize.min.css" integrity="sha256-PK9q560IAAa6WVRRh76LtCaI8pjTJ2z11v0miyNNjrs=" crossorigin>
+<link rel="preload stylesheet" as="style" href="https://cdnjs.cloudflare.com/ajax/libs/10up-sanitize.css/11.0.1/typography.min.css" integrity="sha256-7l/o7C8jubJiy74VsKTidCy1yBkRtiUGbVkYBylBqUg=" crossorigin>
+<link rel="stylesheet preload" as="style" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/10.1.1/styles/github.min.css" crossorigin>
+<style>:root{--highlight-color:#fe9}.flex{display:flex !important}body{line-height:1.5em}#content{padding:20px}#sidebar{padding:30px;overflow:hidden}#sidebar > *:last-child{margin-bottom:2cm}.http-server-breadcrumbs{font-size:130%;margin:0 0 15px 0}#footer{font-size:.75em;padding:5px 30px;border-top:1px solid #ddd;text-align:right}#footer p{margin:0 0 0 1em;display:inline-block}#footer p:last-child{margin-right:30px}h1,h2,h3,h4,h5{font-weight:300}h1{font-size:2.5em;line-height:1.1em}h2{font-size:1.75em;margin:1em 0 .50em 0}h3{font-size:1.4em;margin:25px 0 10px 0}h4{margin:0;font-size:105%}h1:target,h2:target,h3:target,h4:target,h5:target,h6:target{background:var(--highlight-color);padding:.2em 0}a{color:#058;text-decoration:none;transition:color .3s ease-in-out}a:hover{color:#e82}.title code{font-weight:bold}h2[id^="header-"]{margin-top:2em}.ident{color:#900}pre code{background:#f8f8f8;font-size:.8em;line-height:1.4em}code{background:#f2f2f1;padding:1px 4px;overflow-wrap:break-word}h1 code{background:transparent}pre{background:#f8f8f8;border:0;border-top:1px solid #ccc;border-bottom:1px solid #ccc;margin:1em 0;padding:1ex}#http-server-module-list{display:flex;flex-flow:column}#http-server-module-list div{display:flex}#http-server-module-list dt{min-width:10%}#http-server-module-list p{margin-top:0}.toc ul,#index{list-style-type:none;margin:0;padding:0}#index code{background:transparent}#index h3{border-bottom:1px solid #ddd}#index ul{padding:0}#index h4{margin-top:.6em;font-weight:bold}@media (min-width:200ex){#index .two-column{column-count:2}}@media (min-width:300ex){#index .two-column{column-count:3}}dl{margin-bottom:2em}dl dl:last-child{margin-bottom:4em}dd{margin:0 0 1em 3em}#header-classes + dl > dd{margin-bottom:3em}dd dd{margin-left:2em}dd p{margin:10px 0}.name{background:#eee;font-weight:bold;font-size:.85em;padding:5px 10px;display:inline-block;min-width:40%}.name:hover{background:#e0e0e0}dt:target .name{background:var(--highlight-color)}.name > span:first-child{white-space:nowrap}.name.class > span:nth-child(2){margin-left:.4em}.inherited{color:#999;border-left:5px solid #eee;padding-left:1em}.inheritance em{font-style:normal;font-weight:bold}.desc h2{font-weight:400;font-size:1.25em}.desc h3{font-size:1em}.desc dt code{background:inherit}.source summary,.git-link-div{color:#666;text-align:right;font-weight:400;font-size:.8em;text-transform:uppercase}.source summary > *{white-space:nowrap;cursor:pointer}.git-link{color:inherit;margin-left:1em}.source pre{max-height:500px;overflow:auto;margin:0}.source pre code{font-size:12px;overflow:visible}.hlist{list-style:none}.hlist li{display:inline}.hlist li:after{content:',\2002'}.hlist li:last-child:after{content:none}.hlist .hlist{display:inline;padding-left:1em}img{max-width:100%}td{padding:0 .5em}.admonition{padding:.1em .5em;margin-bottom:1em}.admonition-title{font-weight:bold}.admonition.note,.admonition.info,.admonition.important{background:#aef}.admonition.todo,.admonition.versionadded,.admonition.tip,.admonition.hint{background:#dfd}.admonition.warning,.admonition.versionchanged,.admonition.deprecated{background:#fd4}.admonition.error,.admonition.danger,.admonition.caution{background:lightpink}</style>
+<style media="screen and (min-width: 700px)">@media screen and (min-width:700px){#sidebar{width:30%;height:100vh;overflow:auto;position:sticky;top:0}#content{width:70%;max-width:100ch;padding:3em 4em;border-left:1px solid #ddd}pre code{font-size:1em}.item .name{font-size:1em}main{display:flex;flex-direction:row-reverse;justify-content:flex-end}.toc ul ul,#index ul{padding-left:1.5em}.toc > ul > li{margin-top:.5em}}</style>
+<style media="print">@media print{#sidebar h1{page-break-before:always}.source{display:none}}@media print{*{background:transparent !important;color:#000 !important;box-shadow:none !important;text-shadow:none !important}a[href]:after{content:" (" attr(href) ")";font-size:90%}a[href][title]:after{content:none}abbr[title]:after{content:" (" attr(title) ")"}.ir a:after,a[href^="javascript:"]:after,a[href^="#"]:after{content:""}pre,blockquote{border:1px solid #999;page-break-inside:avoid}thead{display:table-header-group}tr,img{page-break-inside:avoid}img{max-width:100% !important}@page{margin:0.5cm}p,h2,h3{orphans:3;widows:3}h1,h2,h3,h4,h5,h6{page-break-after:avoid}}</style>
+<script defer src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/10.1.1/highlight.min.js" integrity="sha256-Uv3H6lx7dJmRfRvH8TH6kJD1TSK1aFcwgx+mdg3epi8=" crossorigin></script>
+<script>window.addEventListener('DOMContentLoaded', () => hljs.initHighlighting())</script>
+</head>
+<body>
+<main>
+<article id="content">
+<header>
+<h1 class="title">Module <code>meerschaum.actions.shell.Shell</code></h1>
+</header>
+<section id="section-intro">
+<p>Meerschaum v0.2.0</p>
+<details class="source">
+<summary>
+<span>Expand source code</span>
+</summary>
+<pre><code class="python"># -*- coding: utf-8 -*-
+# vim:fenc=utf-8
+
+&#34;&#34;&#34;
+This module is the entry point for the interactive shell
+&#34;&#34;&#34;
+
+from __future__ import annotations
+from meerschaum.utils.typing import Union, SuccessTuple, Any
+
+import sys, inspect
+from meerschaum.utils.packages import attempt_import
+from meerschaum.config import __doc__, __version__ as version, config as cf, get_config
+cmd = attempt_import(get_config(&#39;system&#39;, &#39;shell&#39;, &#39;cmd&#39;, patch=True), warn=False)
+if cmd is None or isinstance(cmd, dict): cmd = attempt_import(&#39;cmd&#39;)
+from meerschaum.actions.arguments import parse_line
+from meerschaum.utils.formatting import UNICODE, CHARSET, ANSI, colored
+_clear_screen = get_config(&#39;system&#39;, &#39;shell&#39;, &#39;clear_screen&#39;, patch=True)
+from meerschaum.utils.misc import parse_instance_keys, string_width
+### readline is Unix-like only. Disable readline features for Windows
+try:
+    import readline
+except ImportError:
+    readline = None
+
+patch = True
+### remove default cmd2 commands
+commands_to_remove = {
+    &#39;alias&#39;,
+    &#39;macro&#39;,
+    &#39;run_pyscript&#39;,
+    &#39;run_script&#39;,
+    &#39;shell&#39;,
+    &#39;pyscript&#39;,
+    #  &#39;set&#39;,
+    &#39;py&#39;,
+    &#39;shell&#39;,
+    &#39;shortcuts&#39;,
+    &#39;history&#39;,
+    &#39;load&#39;,
+}
+### cmd2 only: hide commands
+hidden_commands = {
+    &#39;pass&#39;,
+    &#39;exit&#39;,
+    &#39;quit&#39;,
+}
+class Shell(cmd.Cmd):
+    def __init__(self, actions : dict = {}, sysargs : list = []):
+        &#34;&#34;&#34;
+        Customize the CLI from configuration
+        &#34;&#34;&#34;
+        try: ### try cmd2 arguments first
+            super().__init__(
+                allow_cli_args = False,
+                auto_load_commands = False,
+                persistent_history_length = 1000,
+                persistent_history_file = None,
+            )
+        except: ### fall back to default init (cmd)
+            super().__init__()
+
+        ### remove default commands from the Cmd class
+        for command in commands_to_remove:
+            try:
+                delattr(cmd.Cmd, f&#39;do_{command}&#39;)
+            except:
+                pass
+
+        ### NOTE: custom actions must be added to the self._actions dictionary
+        self._actions = actions
+        self._sysargs = sysargs
+        self._actions[&#39;instance&#39;] = self.do_instance
+        self._actions[&#39;repo&#39;] = self.do_repo
+        self._actions[&#39;debug&#39;] = self.do_debug
+        self.intro = get_config(&#39;system&#39;, &#39;shell&#39;, CHARSET, &#39;intro&#39;, patch=patch)
+        self.intro += &#39;\n&#39; + &#39;&#39;.join(
+            [&#39; &#39;
+                for i in range(
+                    string_width(self.intro) - len(&#39;v&#39; + version)
+                )
+            ]
+        ) + &#39;v&#39; + version
+        self._prompt = get_config(&#39;system&#39;, &#39;shell&#39;, CHARSET, &#39;prompt&#39;, patch=patch)
+        self.prompt = self._prompt
+        self.debug = False
+        self.ruler = get_config(&#39;system&#39;, &#39;shell&#39;, CHARSET, &#39;ruler&#39;, patch=patch)
+        self.close_message = get_config(&#39;system&#39;, &#39;shell&#39;, CHARSET, &#39;close_message&#39;, patch=patch)
+        self.doc_header = get_config(&#39;system&#39;, &#39;shell&#39;, CHARSET, &#39;doc_header&#39;, patch=patch)
+        self.undoc_header = get_config(&#39;system&#39;, &#39;shell&#39;, CHARSET, &#39;undoc_header&#39;, patch=patch)
+
+        ### create default instance and repository connectors
+        self.instance_keys = get_config(&#39;meerschaum&#39;, &#39;instance&#39;, patch=patch)
+        ### self.instance is a stylized version of self.instance_keys
+        self.instance = str(self.instance_keys)
+        ### this will be updated later in update_prompt ONLY IF {username} is in the prompt
+        self.username = &#39;&#39;
+        self.repo_keys = get_config(&#39;meerschaum&#39;, &#39;default_repository&#39;, patch=patch)
+
+        ### update hidden commands list (cmd2 only)
+        try:
+            for c in hidden_commands:
+                self.hidden_commands.append(c)
+        except Exception as e:
+            pass
+
+        if ANSI:
+            def apply_colors(attr, key):
+                return colored(
+                    attr,
+                    *get_config(&#39;system&#39;, &#39;shell&#39;, &#39;ansi&#39;, key, &#39;color&#39;, patch=patch)
+                )
+
+            for attr_key in get_config(&#39;system&#39;, &#39;shell&#39;, &#39;ansi&#39;, patch=patch):
+                self.__dict__[attr_key] = apply_colors(self.__dict__[attr_key], attr_key)
+
+        ### replace {instance} in prompt with stylized instance string
+        self.update_prompt()
+
+    def update_prompt(self, instance=None, username=None):
+        from meerschaum.config import get_config
+        prompt = self._prompt
+        mask = prompt
+        if &#39;{instance}&#39; in self._prompt:
+            if instance is None: instance = self.instance_keys
+            self.instance = instance
+            if ANSI: self.instance = colored(self.instance, *get_config(&#39;system&#39;, &#39;shell&#39;, &#39;ansi&#39;, &#39;instance&#39;, &#39;color&#39;, patch=True))
+            prompt = prompt.replace(&#39;{instance}&#39;, self.instance)
+            mask = mask.replace(&#39;{instance}&#39;, &#39;&#39;.join([&#39;\0&#39; for c in &#39;{instance}&#39;]))
+
+        if &#39;{username}&#39; in self._prompt:
+            if username is None:
+                try:
+                    # conn = parse_instance_keys(self.instance_keys, construct=True)
+                    # help(conn)
+                    username = parse_instance_keys(self.instance_keys, construct=False)[&#39;username&#39;]
+                except KeyError:
+                    username = &#39;(no username)&#39;
+                except Exception as e:
+                    username = str(e)
+            self.username = (
+                username if not ANSI else
+                colored(username, *get_config(&#39;system&#39;, &#39;shell&#39;, &#39;ansi&#39;, &#39;username&#39;, &#39;color&#39;, patch=True))
+            )
+            prompt = prompt.replace(&#39;{username}&#39;, self.username)
+            mask = mask.replace(&#39;{username}&#39;, &#39;&#39;.join([&#39;\0&#39; for c in &#39;{username}&#39;]))
+
+        remainder_prompt = list(self._prompt)
+        for i, c in enumerate(mask):
+            if c != &#39;\0&#39;:
+                _c = c
+                if ANSI: _c = colored(_c, *get_config(&#39;system&#39;, &#39;shell&#39;, &#39;ansi&#39;, &#39;prompt&#39;, &#39;color&#39;, patch=True))
+                remainder_prompt[i] = _c
+        self.prompt = &#39;&#39;.join(remainder_prompt).replace(&#39;{username}&#39;, self.username).replace(&#39;{instance}&#39;, self.instance)
+
+    def precmd(self, line):
+        &#34;&#34;&#34;
+        Pass line string to parent actions.
+        Pass parsed arguments to custom actions
+
+        Overrides `default`: if action does not exist,
+            assume the action is `bash`
+        &#34;&#34;&#34;
+        ### make a backup of line for later
+        import copy
+        original_line = copy.deepcopy(line)
+
+        ### cmd2 support: check if command exists
+        try:
+            command = line.command
+            line = str(command) + (&#39; &#39; + str(line) if len(str(line)) &gt; 0 else &#39;&#39;)
+        except Exception:
+            ### we&#39;re probably running the original cmd, not cmd2
+            command = None
+            line = str(line)
+
+        ### if the user specifies, clear the screen before executing any commands
+        if _clear_screen:
+            from meerschaum.utils.formatting._shell import clear_screen
+            clear_screen(debug=self.debug)
+
+        ### return blank commands (spaces break argparse)
+        if original_line is None or len(str(line).strip()) == 0:
+            return original_line
+
+        if line in {
+            &#39;exit&#39;,
+            &#39;quit&#39;,
+            &#39;EOF&#39;,
+        }:
+            return &#34;exit&#34;
+        ### help shortcut
+        help_token = &#39;?&#39;
+        if line.startswith(help_token):
+            return &#34;help &#34; + line[len(help_token):]
+
+        ### first things first: save history BEFORE execution
+        from meerschaum.config._paths import SHELL_HISTORY_PATH
+        if readline:
+            readline.set_history_length(get_config(&#39;system&#39;, &#39;shell&#39;, &#39;max_history&#39;, patch=patch))
+            readline.write_history_file(SHELL_HISTORY_PATH)
+
+        args = parse_line(line)
+
+        ### NOTE: pass `shell` flag in case actions need to distinguish between
+        ###       being run on the command line and being run in the shell
+        args[&#39;shell&#39;] = True
+
+        ### if debug is not set on the command line,
+        ### default to shell setting
+        if not args[&#39;debug&#39;]: args[&#39;debug&#39;] = self.debug
+
+        action = args[&#39;action&#39;][0]
+
+        ### if no instance is provided, use current shell default,
+        ### but not for the &#39;api&#39; command (to avoid recursion)
+        if &#39;mrsm_instance&#39; not in args and action != &#39;api&#39;:
+            args[&#39;mrsm_instance&#39;] = str(self.instance_keys)
+
+        if &#39;repository&#39; not in args and action != &#39;api&#39;:
+            args[&#39;repository&#39;] = str(self.repo_keys)
+
+        ### parse out empty strings
+        if action.strip(&#34;\&#34;&#39;&#34;) == &#39;&#39;:
+            self.emptyline()
+            return &#34;&#34;
+
+        try:
+            func = getattr(self, &#39;do_&#39; + action)
+            #  func_param_kinds = inspect.signature(func).parameters.items()
+        except AttributeError as ae:
+            ### if function is not found, default to `bash`
+            action = &#34;bash&#34;
+            args[&#39;action&#39;].insert(0, &#34;bash&#34;)
+            func = getattr(self, &#39;do_bash&#39;)
+            #  func_param_kinds = inspect.signature(func).parameters.items()
+
+        ### delete the first action
+        ### e.g. &#39;show actions&#39; -&gt; [&#39;actions&#39;]
+        del args[&#39;action&#39;][0]
+        if len(args[&#39;action&#39;]) == 0: args[&#39;action&#39;] = [&#39;&#39;]
+
+        positional_only = (action not in self._actions)
+        if positional_only:
+            return original_line
+
+        ### execute the meerschaum action
+        ### and print the response message in case of failure
+        from meerschaum.utils.formatting import print_tuple
+        response = func(**args)
+        if isinstance(response, tuple):
+            if not response[0] or self.debug:
+                print()
+                print_tuple(response, skip_common=self.debug)
+                print()
+        return &#34;&#34;
+
+    def post_cmd(stop : bool = False, line : str = &#34;&#34;):
+        pass
+
+    def do_pass(self, line):
+        &#34;&#34;&#34;
+        Do nothing.
+        &#34;&#34;&#34;
+        pass
+
+    def do_debug(self, action=[&#39;&#39;], **kw):
+        &#34;&#34;&#34;
+        Toggle the shell&#39;s debug mode.
+        If debug = on, append `--debug` to all commands.
+
+        Command: `debug {on/true | off/false}`
+        Ommitting on / off will toggle the existing value.
+        &#34;&#34;&#34;
+        from meerschaum.utils.warnings import info
+        on_commands = {&#39;on&#39;, &#39;true&#39;}
+        off_commands = {&#39;off&#39;, &#39;false&#39;}
+        try:
+            state = action[0]
+        except IndexError:
+            state = &#39;&#39;
+        if state == &#39;&#39;:
+            self.debug = not self.debug
+        elif state.lower() in on_commands: self.debug = True
+        elif state.lower() in off_commands: self.debug = False
+        else: info(f&#34;Unknown state &#39;{state}&#39;. Ignoring...&#34;)
+
+        info(f&#34;Debug mode is {&#39;on&#39; if self.debug else &#39;off&#39;}.&#34;)
+
+    def do_instance(
+        self,
+        action : list = [&#39;&#39;],
+        debug : bool = False,
+        **kw : Any
+    ) -&gt; SuccessTuple:
+        &#34;&#34;&#34;
+        Temporarily set a default Meerschaum instance for the duration of the shell.
+        The default instance is loaded from the Meerschaum configuraton file
+          (at keys &#39;meerschaum:instance&#39;).
+
+        You can change the default instance with `edit config`.
+
+        Usage:
+            instance {instance keys}
+
+        Examples:
+            ### reset to default instance
+            instance
+
+            ### set the instance to &#39;api:main&#39;
+            instance api
+
+            ### set the instance to a non-default connector
+            instance api:myremoteinstance
+
+        Note that instances must be configured, be either API or SQL connections,
+          and be accessible to this machine over the network.
+        &#34;&#34;&#34;
+        from meerschaum import get_connector
+        from meerschaum.config import get_config
+        from meerschaum.utils.misc import parse_instance_keys
+        from meerschaum.utils.warnings import warn, info
+
+        try:
+            instance_keys = action[0]
+        except:
+            instance_keys = &#39;&#39;
+        if instance_keys == &#39;&#39;: instance_keys = get_config(&#39;meerschaum&#39;, &#39;instance&#39;, patch=True)
+
+        conn = parse_instance_keys(instance_keys, debug=debug)
+        if conn is None or not conn:
+            conn = get_connector(debug=debug)
+
+        self.instance_keys = str(conn)
+
+        self.update_prompt(instance=str(conn))
+        info(f&#34;Default instance for the current shell: {conn}&#34;)
+        return True, &#34;Success&#34;
+
+    def do_repo(
+        self,
+        action : list = [&#39;&#39;],
+        debug : bool = False,
+        **kw : Any
+    ) -&gt; SuccessTuple:
+        &#34;&#34;&#34;
+        Temporarily set a default Meerschaum repository for the duration of the shell.
+        The default repository (mrsm.io) is loaded from the Meerschaum configuraton file
+          (at keys &#39;meerschaum:default_repository&#39;).
+
+        You can change the default repository with `edit config`.
+
+        Usage:
+            repo {API label}
+
+        Examples:
+            ### reset to default repository
+            repo
+
+            ### set the repo to &#39;api:main&#39;
+            repository api
+
+            ### set the repository to a non-default repo
+            repo myremoterepo
+
+        Note that repositories are a subset of instances.
+        &#34;&#34;&#34;
+        from meerschaum import get_connector
+        from meerschaum.config import get_config
+        from meerschaum.utils.misc import parse_repo_keys
+        from meerschaum.utils.warnings import warn, info
+
+        try:
+            repo_keys = action[0]
+        except:
+            repo_keys = &#39;&#39;
+        if repo_keys == &#39;&#39;: repo_keys = get_config(&#39;meerschaum&#39;, &#39;default_repository&#39;, patch=True)
+
+        conn = parse_repo_keys(repo_keys, debug=debug)
+        if conn is None or not conn:
+            conn = get_connector(&#39;api&#39;, debug=debug)
+
+        self.repo_keys = str(conn)
+
+        info(f&#34;Default repository for the current shell: {conn}&#34;)
+        return True, &#34;Success&#34;
+
+    def do_exit(self, params) -&gt; True:
+        &#34;&#34;&#34;
+        Exit the Meerschaum shell.
+        &#34;&#34;&#34;
+        return True
+
+    def emptyline(self):
+        &#34;&#34;&#34;
+        If the user specifies, clear the screen.
+        &#34;&#34;&#34;
+        ### NOTE: The screen clearing is defined in the custom input below
+        pass
+
+    def preloop(self):
+        import signal, os
+        from meerschaum.config._paths import SHELL_HISTORY_PATH
+        if SHELL_HISTORY_PATH.exists():
+            if readline:
+                readline.read_history_file(SHELL_HISTORY_PATH)
+        &#34;&#34;&#34;
+        Patch builtin cmdloop with my own input (defined below)
+        &#34;&#34;&#34;
+        old_input = cmd.__builtins__[&#39;input&#39;]
+        cmd.__builtins__[&#39;input&#39;] = input_with_sigint(old_input)
+        ### if the user specifies, clear the screen before initializing the shell
+        if _clear_screen:
+            from meerschaum.utils.formatting._shell import clear_screen
+            clear_screen(debug=self.debug)
+
+        ### if sysargs are provided, skip printing the intro and execute instead
+        if self._sysargs:
+            self.intro = None
+            self.precmd(&#39; &#39;.join(self._sysargs))
+
+    def postloop(self):
+        from meerschaum.config._paths import SHELL_HISTORY_PATH
+        if readline:
+            readline.set_history_length(get_config(&#39;system&#39;, &#39;shell&#39;, &#39;max_history&#39;, patch=patch))
+            readline.write_history_file(SHELL_HISTORY_PATH)
+        print(&#39;\n&#39; + self.close_message)
+
+def input_with_sigint(_input):
+    &#34;&#34;&#34;
+    Patch builtin input()
+    &#34;&#34;&#34;
+    def _input_with_sigint(*args):
+        try:
+            parsed = _input(*args)
+            ### clear screen on empty input
+            ### NOTE: would it be better to do nothing instead?
+            if len(parsed.strip()) == 0:
+                if _clear_screen:
+                    from meerschaum.utils.formatting._shell import clear_screen
+                    clear_screen()
+            return parsed
+        except KeyboardInterrupt:
+            print(&#34;^C&#34;)
+            return &#34;pass&#34;
+    return _input_with_sigint</code></pre>
+</details>
+</section>
+<section>
+</section>
+<section>
+</section>
+<section>
+<h2 class="section-title" id="header-functions">Functions</h2>
+<dl>
+<dt id="meerschaum.actions.shell.Shell.input_with_sigint"><code class="name flex">
+<span>def <span class="ident">input_with_sigint</span></span>(<span>_input)</span>
+</code></dt>
+<dd>
+<div class="desc"><p>Patch builtin input()</p></div>
+<details class="source">
+<summary>
+<span>Expand source code</span>
+</summary>
+<pre><code class="python">def input_with_sigint(_input):
+    &#34;&#34;&#34;
+    Patch builtin input()
+    &#34;&#34;&#34;
+    def _input_with_sigint(*args):
+        try:
+            parsed = _input(*args)
+            ### clear screen on empty input
+            ### NOTE: would it be better to do nothing instead?
+            if len(parsed.strip()) == 0:
+                if _clear_screen:
+                    from meerschaum.utils.formatting._shell import clear_screen
+                    clear_screen()
+            return parsed
+        except KeyboardInterrupt:
+            print(&#34;^C&#34;)
+            return &#34;pass&#34;
+    return _input_with_sigint</code></pre>
+</details>
+</dd>
+</dl>
+</section>
+<section>
+<h2 class="section-title" id="header-classes">Classes</h2>
+<dl>
+<dt id="meerschaum.actions.shell.Shell.Shell"><code class="flex name class">
+<span>class <span class="ident">Shell</span></span>
+<span>(</span><span>actions: dict = {}, sysargs: list = [])</span>
+</code></dt>
+<dd>
+<div class="desc"><p>An easy but powerful framework for writing line-oriented command interpreters.</p>
+<p>Extends the Python Standard Library’s cmd package by adding a lot of useful features
+to the out of the box configuration.</p>
+<p>Line-oriented command interpreters are often useful for test harnesses, internal tools, and rapid prototypes.</p>
+<p>Customize the CLI from configuration</p></div>
+<details class="source">
+<summary>
+<span>Expand source code</span>
+</summary>
+<pre><code class="python">class Shell(cmd.Cmd):
+    def __init__(self, actions : dict = {}, sysargs : list = []):
+        &#34;&#34;&#34;
+        Customize the CLI from configuration
+        &#34;&#34;&#34;
+        try: ### try cmd2 arguments first
+            super().__init__(
+                allow_cli_args = False,
+                auto_load_commands = False,
+                persistent_history_length = 1000,
+                persistent_history_file = None,
+            )
+        except: ### fall back to default init (cmd)
+            super().__init__()
+
+        ### remove default commands from the Cmd class
+        for command in commands_to_remove:
+            try:
+                delattr(cmd.Cmd, f&#39;do_{command}&#39;)
+            except:
+                pass
+
+        ### NOTE: custom actions must be added to the self._actions dictionary
+        self._actions = actions
+        self._sysargs = sysargs
+        self._actions[&#39;instance&#39;] = self.do_instance
+        self._actions[&#39;repo&#39;] = self.do_repo
+        self._actions[&#39;debug&#39;] = self.do_debug
+        self.intro = get_config(&#39;system&#39;, &#39;shell&#39;, CHARSET, &#39;intro&#39;, patch=patch)
+        self.intro += &#39;\n&#39; + &#39;&#39;.join(
+            [&#39; &#39;
+                for i in range(
+                    string_width(self.intro) - len(&#39;v&#39; + version)
+                )
+            ]
+        ) + &#39;v&#39; + version
+        self._prompt = get_config(&#39;system&#39;, &#39;shell&#39;, CHARSET, &#39;prompt&#39;, patch=patch)
+        self.prompt = self._prompt
+        self.debug = False
+        self.ruler = get_config(&#39;system&#39;, &#39;shell&#39;, CHARSET, &#39;ruler&#39;, patch=patch)
+        self.close_message = get_config(&#39;system&#39;, &#39;shell&#39;, CHARSET, &#39;close_message&#39;, patch=patch)
+        self.doc_header = get_config(&#39;system&#39;, &#39;shell&#39;, CHARSET, &#39;doc_header&#39;, patch=patch)
+        self.undoc_header = get_config(&#39;system&#39;, &#39;shell&#39;, CHARSET, &#39;undoc_header&#39;, patch=patch)
+
+        ### create default instance and repository connectors
+        self.instance_keys = get_config(&#39;meerschaum&#39;, &#39;instance&#39;, patch=patch)
+        ### self.instance is a stylized version of self.instance_keys
+        self.instance = str(self.instance_keys)
+        ### this will be updated later in update_prompt ONLY IF {username} is in the prompt
+        self.username = &#39;&#39;
+        self.repo_keys = get_config(&#39;meerschaum&#39;, &#39;default_repository&#39;, patch=patch)
+
+        ### update hidden commands list (cmd2 only)
+        try:
+            for c in hidden_commands:
+                self.hidden_commands.append(c)
+        except Exception as e:
+            pass
+
+        if ANSI:
+            def apply_colors(attr, key):
+                return colored(
+                    attr,
+                    *get_config(&#39;system&#39;, &#39;shell&#39;, &#39;ansi&#39;, key, &#39;color&#39;, patch=patch)
+                )
+
+            for attr_key in get_config(&#39;system&#39;, &#39;shell&#39;, &#39;ansi&#39;, patch=patch):
+                self.__dict__[attr_key] = apply_colors(self.__dict__[attr_key], attr_key)
+
+        ### replace {instance} in prompt with stylized instance string
+        self.update_prompt()
+
+    def update_prompt(self, instance=None, username=None):
+        from meerschaum.config import get_config
+        prompt = self._prompt
+        mask = prompt
+        if &#39;{instance}&#39; in self._prompt:
+            if instance is None: instance = self.instance_keys
+            self.instance = instance
+            if ANSI: self.instance = colored(self.instance, *get_config(&#39;system&#39;, &#39;shell&#39;, &#39;ansi&#39;, &#39;instance&#39;, &#39;color&#39;, patch=True))
+            prompt = prompt.replace(&#39;{instance}&#39;, self.instance)
+            mask = mask.replace(&#39;{instance}&#39;, &#39;&#39;.join([&#39;\0&#39; for c in &#39;{instance}&#39;]))
+
+        if &#39;{username}&#39; in self._prompt:
+            if username is None:
+                try:
+                    # conn = parse_instance_keys(self.instance_keys, construct=True)
+                    # help(conn)
+                    username = parse_instance_keys(self.instance_keys, construct=False)[&#39;username&#39;]
+                except KeyError:
+                    username = &#39;(no username)&#39;
+                except Exception as e:
+                    username = str(e)
+            self.username = (
+                username if not ANSI else
+                colored(username, *get_config(&#39;system&#39;, &#39;shell&#39;, &#39;ansi&#39;, &#39;username&#39;, &#39;color&#39;, patch=True))
+            )
+            prompt = prompt.replace(&#39;{username}&#39;, self.username)
+            mask = mask.replace(&#39;{username}&#39;, &#39;&#39;.join([&#39;\0&#39; for c in &#39;{username}&#39;]))
+
+        remainder_prompt = list(self._prompt)
+        for i, c in enumerate(mask):
+            if c != &#39;\0&#39;:
+                _c = c
+                if ANSI: _c = colored(_c, *get_config(&#39;system&#39;, &#39;shell&#39;, &#39;ansi&#39;, &#39;prompt&#39;, &#39;color&#39;, patch=True))
+                remainder_prompt[i] = _c
+        self.prompt = &#39;&#39;.join(remainder_prompt).replace(&#39;{username}&#39;, self.username).replace(&#39;{instance}&#39;, self.instance)
+
+    def precmd(self, line):
+        &#34;&#34;&#34;
+        Pass line string to parent actions.
+        Pass parsed arguments to custom actions
+
+        Overrides `default`: if action does not exist,
+            assume the action is `bash`
+        &#34;&#34;&#34;
+        ### make a backup of line for later
+        import copy
+        original_line = copy.deepcopy(line)
+
+        ### cmd2 support: check if command exists
+        try:
+            command = line.command
+            line = str(command) + (&#39; &#39; + str(line) if len(str(line)) &gt; 0 else &#39;&#39;)
+        except Exception:
+            ### we&#39;re probably running the original cmd, not cmd2
+            command = None
+            line = str(line)
+
+        ### if the user specifies, clear the screen before executing any commands
+        if _clear_screen:
+            from meerschaum.utils.formatting._shell import clear_screen
+            clear_screen(debug=self.debug)
+
+        ### return blank commands (spaces break argparse)
+        if original_line is None or len(str(line).strip()) == 0:
+            return original_line
+
+        if line in {
+            &#39;exit&#39;,
+            &#39;quit&#39;,
+            &#39;EOF&#39;,
+        }:
+            return &#34;exit&#34;
+        ### help shortcut
+        help_token = &#39;?&#39;
+        if line.startswith(help_token):
+            return &#34;help &#34; + line[len(help_token):]
+
+        ### first things first: save history BEFORE execution
+        from meerschaum.config._paths import SHELL_HISTORY_PATH
+        if readline:
+            readline.set_history_length(get_config(&#39;system&#39;, &#39;shell&#39;, &#39;max_history&#39;, patch=patch))
+            readline.write_history_file(SHELL_HISTORY_PATH)
+
+        args = parse_line(line)
+
+        ### NOTE: pass `shell` flag in case actions need to distinguish between
+        ###       being run on the command line and being run in the shell
+        args[&#39;shell&#39;] = True
+
+        ### if debug is not set on the command line,
+        ### default to shell setting
+        if not args[&#39;debug&#39;]: args[&#39;debug&#39;] = self.debug
+
+        action = args[&#39;action&#39;][0]
+
+        ### if no instance is provided, use current shell default,
+        ### but not for the &#39;api&#39; command (to avoid recursion)
+        if &#39;mrsm_instance&#39; not in args and action != &#39;api&#39;:
+            args[&#39;mrsm_instance&#39;] = str(self.instance_keys)
+
+        if &#39;repository&#39; not in args and action != &#39;api&#39;:
+            args[&#39;repository&#39;] = str(self.repo_keys)
+
+        ### parse out empty strings
+        if action.strip(&#34;\&#34;&#39;&#34;) == &#39;&#39;:
+            self.emptyline()
+            return &#34;&#34;
+
+        try:
+            func = getattr(self, &#39;do_&#39; + action)
+            #  func_param_kinds = inspect.signature(func).parameters.items()
+        except AttributeError as ae:
+            ### if function is not found, default to `bash`
+            action = &#34;bash&#34;
+            args[&#39;action&#39;].insert(0, &#34;bash&#34;)
+            func = getattr(self, &#39;do_bash&#39;)
+            #  func_param_kinds = inspect.signature(func).parameters.items()
+
+        ### delete the first action
+        ### e.g. &#39;show actions&#39; -&gt; [&#39;actions&#39;]
+        del args[&#39;action&#39;][0]
+        if len(args[&#39;action&#39;]) == 0: args[&#39;action&#39;] = [&#39;&#39;]
+
+        positional_only = (action not in self._actions)
+        if positional_only:
+            return original_line
+
+        ### execute the meerschaum action
+        ### and print the response message in case of failure
+        from meerschaum.utils.formatting import print_tuple
+        response = func(**args)
+        if isinstance(response, tuple):
+            if not response[0] or self.debug:
+                print()
+                print_tuple(response, skip_common=self.debug)
+                print()
+        return &#34;&#34;
+
+    def post_cmd(stop : bool = False, line : str = &#34;&#34;):
+        pass
+
+    def do_pass(self, line):
+        &#34;&#34;&#34;
+        Do nothing.
+        &#34;&#34;&#34;
+        pass
+
+    def do_debug(self, action=[&#39;&#39;], **kw):
+        &#34;&#34;&#34;
+        Toggle the shell&#39;s debug mode.
+        If debug = on, append `--debug` to all commands.
+
+        Command: `debug {on/true | off/false}`
+        Ommitting on / off will toggle the existing value.
+        &#34;&#34;&#34;
+        from meerschaum.utils.warnings import info
+        on_commands = {&#39;on&#39;, &#39;true&#39;}
+        off_commands = {&#39;off&#39;, &#39;false&#39;}
+        try:
+            state = action[0]
+        except IndexError:
+            state = &#39;&#39;
+        if state == &#39;&#39;:
+            self.debug = not self.debug
+        elif state.lower() in on_commands: self.debug = True
+        elif state.lower() in off_commands: self.debug = False
+        else: info(f&#34;Unknown state &#39;{state}&#39;. Ignoring...&#34;)
+
+        info(f&#34;Debug mode is {&#39;on&#39; if self.debug else &#39;off&#39;}.&#34;)
+
+    def do_instance(
+        self,
+        action : list = [&#39;&#39;],
+        debug : bool = False,
+        **kw : Any
+    ) -&gt; SuccessTuple:
+        &#34;&#34;&#34;
+        Temporarily set a default Meerschaum instance for the duration of the shell.
+        The default instance is loaded from the Meerschaum configuraton file
+          (at keys &#39;meerschaum:instance&#39;).
+
+        You can change the default instance with `edit config`.
+
+        Usage:
+            instance {instance keys}
+
+        Examples:
+            ### reset to default instance
+            instance
+
+            ### set the instance to &#39;api:main&#39;
+            instance api
+
+            ### set the instance to a non-default connector
+            instance api:myremoteinstance
+
+        Note that instances must be configured, be either API or SQL connections,
+          and be accessible to this machine over the network.
+        &#34;&#34;&#34;
+        from meerschaum import get_connector
+        from meerschaum.config import get_config
+        from meerschaum.utils.misc import parse_instance_keys
+        from meerschaum.utils.warnings import warn, info
+
+        try:
+            instance_keys = action[0]
+        except:
+            instance_keys = &#39;&#39;
+        if instance_keys == &#39;&#39;: instance_keys = get_config(&#39;meerschaum&#39;, &#39;instance&#39;, patch=True)
+
+        conn = parse_instance_keys(instance_keys, debug=debug)
+        if conn is None or not conn:
+            conn = get_connector(debug=debug)
+
+        self.instance_keys = str(conn)
+
+        self.update_prompt(instance=str(conn))
+        info(f&#34;Default instance for the current shell: {conn}&#34;)
+        return True, &#34;Success&#34;
+
+    def do_repo(
+        self,
+        action : list = [&#39;&#39;],
+        debug : bool = False,
+        **kw : Any
+    ) -&gt; SuccessTuple:
+        &#34;&#34;&#34;
+        Temporarily set a default Meerschaum repository for the duration of the shell.
+        The default repository (mrsm.io) is loaded from the Meerschaum configuraton file
+          (at keys &#39;meerschaum:default_repository&#39;).
+
+        You can change the default repository with `edit config`.
+
+        Usage:
+            repo {API label}
+
+        Examples:
+            ### reset to default repository
+            repo
+
+            ### set the repo to &#39;api:main&#39;
+            repository api
+
+            ### set the repository to a non-default repo
+            repo myremoterepo
+
+        Note that repositories are a subset of instances.
+        &#34;&#34;&#34;
+        from meerschaum import get_connector
+        from meerschaum.config import get_config
+        from meerschaum.utils.misc import parse_repo_keys
+        from meerschaum.utils.warnings import warn, info
+
+        try:
+            repo_keys = action[0]
+        except:
+            repo_keys = &#39;&#39;
+        if repo_keys == &#39;&#39;: repo_keys = get_config(&#39;meerschaum&#39;, &#39;default_repository&#39;, patch=True)
+
+        conn = parse_repo_keys(repo_keys, debug=debug)
+        if conn is None or not conn:
+            conn = get_connector(&#39;api&#39;, debug=debug)
+
+        self.repo_keys = str(conn)
+
+        info(f&#34;Default repository for the current shell: {conn}&#34;)
+        return True, &#34;Success&#34;
+
+    def do_exit(self, params) -&gt; True:
+        &#34;&#34;&#34;
+        Exit the Meerschaum shell.
+        &#34;&#34;&#34;
+        return True
+
+    def emptyline(self):
+        &#34;&#34;&#34;
+        If the user specifies, clear the screen.
+        &#34;&#34;&#34;
+        ### NOTE: The screen clearing is defined in the custom input below
+        pass
+
+    def preloop(self):
+        import signal, os
+        from meerschaum.config._paths import SHELL_HISTORY_PATH
+        if SHELL_HISTORY_PATH.exists():
+            if readline:
+                readline.read_history_file(SHELL_HISTORY_PATH)
+        &#34;&#34;&#34;
+        Patch builtin cmdloop with my own input (defined below)
+        &#34;&#34;&#34;
+        old_input = cmd.__builtins__[&#39;input&#39;]
+        cmd.__builtins__[&#39;input&#39;] = input_with_sigint(old_input)
+        ### if the user specifies, clear the screen before initializing the shell
+        if _clear_screen:
+            from meerschaum.utils.formatting._shell import clear_screen
+            clear_screen(debug=self.debug)
+
+        ### if sysargs are provided, skip printing the intro and execute instead
+        if self._sysargs:
+            self.intro = None
+            self.precmd(&#39; &#39;.join(self._sysargs))
+
+    def postloop(self):
+        from meerschaum.config._paths import SHELL_HISTORY_PATH
+        if readline:
+            readline.set_history_length(get_config(&#39;system&#39;, &#39;shell&#39;, &#39;max_history&#39;, patch=patch))
+            readline.write_history_file(SHELL_HISTORY_PATH)
+        print(&#39;\n&#39; + self.close_message)</code></pre>
+</details>
+<h3>Ancestors</h3>
+<ul class="hlist">
+<li>cmd2.cmd2.Cmd</li>
+<li>cmd.Cmd</li>
+</ul>
+<h3>Methods</h3>
+<dl>
+<dt id="meerschaum.actions.shell.Shell.Shell.do_debug"><code class="name flex">
+<span>def <span class="ident">do_debug</span></span>(<span>self, action=[''], **kw)</span>
+</code></dt>
+<dd>
+<div class="desc"><p>Toggle the shell's debug mode.
+If debug = on, append <code>--debug</code> to all commands.</p>
+<p>Command: <code>debug {on/true | off/false}</code>
+Ommitting on / off will toggle the existing value.</p></div>
+<details class="source">
+<summary>
+<span>Expand source code</span>
+</summary>
+<pre><code class="python">def do_debug(self, action=[&#39;&#39;], **kw):
+    &#34;&#34;&#34;
+    Toggle the shell&#39;s debug mode.
+    If debug = on, append `--debug` to all commands.
+
+    Command: `debug {on/true | off/false}`
+    Ommitting on / off will toggle the existing value.
+    &#34;&#34;&#34;
+    from meerschaum.utils.warnings import info
+    on_commands = {&#39;on&#39;, &#39;true&#39;}
+    off_commands = {&#39;off&#39;, &#39;false&#39;}
+    try:
+        state = action[0]
+    except IndexError:
+        state = &#39;&#39;
+    if state == &#39;&#39;:
+        self.debug = not self.debug
+    elif state.lower() in on_commands: self.debug = True
+    elif state.lower() in off_commands: self.debug = False
+    else: info(f&#34;Unknown state &#39;{state}&#39;. Ignoring...&#34;)
+
+    info(f&#34;Debug mode is {&#39;on&#39; if self.debug else &#39;off&#39;}.&#34;)</code></pre>
+</details>
+</dd>
+<dt id="meerschaum.actions.shell.Shell.Shell.do_exit"><code class="name flex">
+<span>def <span class="ident">do_exit</span></span>(<span>self, params) ‑> True</span>
+</code></dt>
+<dd>
+<div class="desc"><p>Exit the Meerschaum shell.</p></div>
+<details class="source">
+<summary>
+<span>Expand source code</span>
+</summary>
+<pre><code class="python">def do_exit(self, params) -&gt; True:
+    &#34;&#34;&#34;
+    Exit the Meerschaum shell.
+    &#34;&#34;&#34;
+    return True</code></pre>
+</details>
+</dd>
+<dt id="meerschaum.actions.shell.Shell.Shell.do_instance"><code class="name flex">
+<span>def <span class="ident">do_instance</span></span>(<span>self, action: list = [''], debug: bool = False, **kw: Any) ‑> Tuple[bool, str]</span>
+</code></dt>
+<dd>
+<div class="desc"><p>Temporarily set a default Meerschaum instance for the duration of the shell.
+The default instance is loaded from the Meerschaum configuraton file
+(at keys 'meerschaum:instance').</p>
+<p>You can change the default instance with <code>edit config</code>.</p>
+<h2 id="usage">Usage</h2>
+<p>instance {instance keys}</p>
+<h2 id="examples">Examples</h2>
+<h3 id="reset-to-default-instance">reset to default instance</h3>
+<p>instance</p>
+<h3 id="set-the-instance-to-apimain">set the instance to 'api:main'</h3>
+<p>instance api</p>
+<h3 id="set-the-instance-to-a-non-default-connector">set the instance to a non-default connector</h3>
+<p>instance api:myremoteinstance</p>
+<p>Note that instances must be configured, be either API or SQL connections,
+and be accessible to this machine over the network.</p></div>
+<details class="source">
+<summary>
+<span>Expand source code</span>
+</summary>
+<pre><code class="python">def do_instance(
+    self,
+    action : list = [&#39;&#39;],
+    debug : bool = False,
+    **kw : Any
+) -&gt; SuccessTuple:
+    &#34;&#34;&#34;
+    Temporarily set a default Meerschaum instance for the duration of the shell.
+    The default instance is loaded from the Meerschaum configuraton file
+      (at keys &#39;meerschaum:instance&#39;).
+
+    You can change the default instance with `edit config`.
+
+    Usage:
+        instance {instance keys}
+
+    Examples:
+        ### reset to default instance
+        instance
+
+        ### set the instance to &#39;api:main&#39;
+        instance api
+
+        ### set the instance to a non-default connector
+        instance api:myremoteinstance
+
+    Note that instances must be configured, be either API or SQL connections,
+      and be accessible to this machine over the network.
+    &#34;&#34;&#34;
+    from meerschaum import get_connector
+    from meerschaum.config import get_config
+    from meerschaum.utils.misc import parse_instance_keys
+    from meerschaum.utils.warnings import warn, info
+
+    try:
+        instance_keys = action[0]
+    except:
+        instance_keys = &#39;&#39;
+    if instance_keys == &#39;&#39;: instance_keys = get_config(&#39;meerschaum&#39;, &#39;instance&#39;, patch=True)
+
+    conn = parse_instance_keys(instance_keys, debug=debug)
+    if conn is None or not conn:
+        conn = get_connector(debug=debug)
+
+    self.instance_keys = str(conn)
+
+    self.update_prompt(instance=str(conn))
+    info(f&#34;Default instance for the current shell: {conn}&#34;)
+    return True, &#34;Success&#34;</code></pre>
+</details>
+</dd>
+<dt id="meerschaum.actions.shell.Shell.Shell.do_pass"><code class="name flex">
+<span>def <span class="ident">do_pass</span></span>(<span>self, line)</span>
+</code></dt>
+<dd>
+<div class="desc"><p>Do nothing.</p></div>
+<details class="source">
+<summary>
+<span>Expand source code</span>
+</summary>
+<pre><code class="python">def do_pass(self, line):
+    &#34;&#34;&#34;
+    Do nothing.
+    &#34;&#34;&#34;
+    pass</code></pre>
+</details>
+</dd>
+<dt id="meerschaum.actions.shell.Shell.Shell.do_repo"><code class="name flex">
+<span>def <span class="ident">do_repo</span></span>(<span>self, action: list = [''], debug: bool = False, **kw: Any) ‑> Tuple[bool, str]</span>
+</code></dt>
+<dd>
+<div class="desc"><p>Temporarily set a default Meerschaum repository for the duration of the shell.
+The default repository (mrsm.io) is loaded from the Meerschaum configuraton file
+(at keys 'meerschaum:default_repository').</p>
+<p>You can change the default repository with <code>edit config</code>.</p>
+<h2 id="usage">Usage</h2>
+<p>repo {API label}</p>
+<h2 id="examples">Examples</h2>
+<h3 id="reset-to-default-repository">reset to default repository</h3>
+<p>repo</p>
+<h3 id="set-the-repo-to-apimain">set the repo to 'api:main'</h3>
+<p>repository api</p>
+<h3 id="set-the-repository-to-a-non-default-repo">set the repository to a non-default repo</h3>
+<p>repo myremoterepo</p>
+<p>Note that repositories are a subset of instances.</p></div>
+<details class="source">
+<summary>
+<span>Expand source code</span>
+</summary>
+<pre><code class="python">def do_repo(
+    self,
+    action : list = [&#39;&#39;],
+    debug : bool = False,
+    **kw : Any
+) -&gt; SuccessTuple:
+    &#34;&#34;&#34;
+    Temporarily set a default Meerschaum repository for the duration of the shell.
+    The default repository (mrsm.io) is loaded from the Meerschaum configuraton file
+      (at keys &#39;meerschaum:default_repository&#39;).
+
+    You can change the default repository with `edit config`.
+
+    Usage:
+        repo {API label}
+
+    Examples:
+        ### reset to default repository
+        repo
+
+        ### set the repo to &#39;api:main&#39;
+        repository api
+
+        ### set the repository to a non-default repo
+        repo myremoterepo
+
+    Note that repositories are a subset of instances.
+    &#34;&#34;&#34;
+    from meerschaum import get_connector
+    from meerschaum.config import get_config
+    from meerschaum.utils.misc import parse_repo_keys
+    from meerschaum.utils.warnings import warn, info
+
+    try:
+        repo_keys = action[0]
+    except:
+        repo_keys = &#39;&#39;
+    if repo_keys == &#39;&#39;: repo_keys = get_config(&#39;meerschaum&#39;, &#39;default_repository&#39;, patch=True)
+
+    conn = parse_repo_keys(repo_keys, debug=debug)
+    if conn is None or not conn:
+        conn = get_connector(&#39;api&#39;, debug=debug)
+
+    self.repo_keys = str(conn)
+
+    info(f&#34;Default repository for the current shell: {conn}&#34;)
+    return True, &#34;Success&#34;</code></pre>
+</details>
+</dd>
+<dt id="meerschaum.actions.shell.Shell.Shell.emptyline"><code class="name flex">
+<span>def <span class="ident">emptyline</span></span>(<span>self)</span>
+</code></dt>
+<dd>
+<div class="desc"><p>If the user specifies, clear the screen.</p></div>
+<details class="source">
+<summary>
+<span>Expand source code</span>
+</summary>
+<pre><code class="python">def emptyline(self):
+    &#34;&#34;&#34;
+    If the user specifies, clear the screen.
+    &#34;&#34;&#34;
+    ### NOTE: The screen clearing is defined in the custom input below
+    pass</code></pre>
+</details>
+</dd>
+<dt id="meerschaum.actions.shell.Shell.Shell.post_cmd"><code class="name flex">
+<span>def <span class="ident">post_cmd</span></span>(<span>stop: bool = False, line: str = '')</span>
+</code></dt>
+<dd>
+<div class="desc"></div>
+<details class="source">
+<summary>
+<span>Expand source code</span>
+</summary>
+<pre><code class="python">def post_cmd(stop : bool = False, line : str = &#34;&#34;):
+    pass</code></pre>
+</details>
+</dd>
+<dt id="meerschaum.actions.shell.Shell.Shell.postloop"><code class="name flex">
+<span>def <span class="ident">postloop</span></span>(<span>self)</span>
+</code></dt>
+<dd>
+<div class="desc"><p>Hook method executed once when the :meth:<code>~.cmd2.Cmd.cmdloop()</code>
+method is about to return.</p>
+<p>See :meth:<code>~cmd2.Cmd.register_postloop_hook</code> for a more robust way
+to run hooks after the command loop completes. See
+:ref:<code>features/hooks:Application Lifecycle Hooks</code> for more information.</p></div>
+<details class="source">
+<summary>
+<span>Expand source code</span>
+</summary>
+<pre><code class="python">def postloop(self):
+    from meerschaum.config._paths import SHELL_HISTORY_PATH
+    if readline:
+        readline.set_history_length(get_config(&#39;system&#39;, &#39;shell&#39;, &#39;max_history&#39;, patch=patch))
+        readline.write_history_file(SHELL_HISTORY_PATH)
+    print(&#39;\n&#39; + self.close_message)</code></pre>
+</details>
+</dd>
+<dt id="meerschaum.actions.shell.Shell.Shell.precmd"><code class="name flex">
+<span>def <span class="ident">precmd</span></span>(<span>self, line)</span>
+</code></dt>
+<dd>
+<div class="desc"><p>Pass line string to parent actions.
+Pass parsed arguments to custom actions</p>
+<p>Overrides <code>default</code>: if action does not exist,
+assume the action is <code>bash</code></p></div>
+<details class="source">
+<summary>
+<span>Expand source code</span>
+</summary>
+<pre><code class="python">def precmd(self, line):
+    &#34;&#34;&#34;
+    Pass line string to parent actions.
+    Pass parsed arguments to custom actions
+
+    Overrides `default`: if action does not exist,
+        assume the action is `bash`
+    &#34;&#34;&#34;
+    ### make a backup of line for later
+    import copy
+    original_line = copy.deepcopy(line)
+
+    ### cmd2 support: check if command exists
+    try:
+        command = line.command
+        line = str(command) + (&#39; &#39; + str(line) if len(str(line)) &gt; 0 else &#39;&#39;)
+    except Exception:
+        ### we&#39;re probably running the original cmd, not cmd2
+        command = None
+        line = str(line)
+
+    ### if the user specifies, clear the screen before executing any commands
+    if _clear_screen:
+        from meerschaum.utils.formatting._shell import clear_screen
+        clear_screen(debug=self.debug)
+
+    ### return blank commands (spaces break argparse)
+    if original_line is None or len(str(line).strip()) == 0:
+        return original_line
+
+    if line in {
+        &#39;exit&#39;,
+        &#39;quit&#39;,
+        &#39;EOF&#39;,
+    }:
+        return &#34;exit&#34;
+    ### help shortcut
+    help_token = &#39;?&#39;
+    if line.startswith(help_token):
+        return &#34;help &#34; + line[len(help_token):]
+
+    ### first things first: save history BEFORE execution
+    from meerschaum.config._paths import SHELL_HISTORY_PATH
+    if readline:
+        readline.set_history_length(get_config(&#39;system&#39;, &#39;shell&#39;, &#39;max_history&#39;, patch=patch))
+        readline.write_history_file(SHELL_HISTORY_PATH)
+
+    args = parse_line(line)
+
+    ### NOTE: pass `shell` flag in case actions need to distinguish between
+    ###       being run on the command line and being run in the shell
+    args[&#39;shell&#39;] = True
+
+    ### if debug is not set on the command line,
+    ### default to shell setting
+    if not args[&#39;debug&#39;]: args[&#39;debug&#39;] = self.debug
+
+    action = args[&#39;action&#39;][0]
+
+    ### if no instance is provided, use current shell default,
+    ### but not for the &#39;api&#39; command (to avoid recursion)
+    if &#39;mrsm_instance&#39; not in args and action != &#39;api&#39;:
+        args[&#39;mrsm_instance&#39;] = str(self.instance_keys)
+
+    if &#39;repository&#39; not in args and action != &#39;api&#39;:
+        args[&#39;repository&#39;] = str(self.repo_keys)
+
+    ### parse out empty strings
+    if action.strip(&#34;\&#34;&#39;&#34;) == &#39;&#39;:
+        self.emptyline()
+        return &#34;&#34;
+
+    try:
+        func = getattr(self, &#39;do_&#39; + action)
+        #  func_param_kinds = inspect.signature(func).parameters.items()
+    except AttributeError as ae:
+        ### if function is not found, default to `bash`
+        action = &#34;bash&#34;
+        args[&#39;action&#39;].insert(0, &#34;bash&#34;)
+        func = getattr(self, &#39;do_bash&#39;)
+        #  func_param_kinds = inspect.signature(func).parameters.items()
+
+    ### delete the first action
+    ### e.g. &#39;show actions&#39; -&gt; [&#39;actions&#39;]
+    del args[&#39;action&#39;][0]
+    if len(args[&#39;action&#39;]) == 0: args[&#39;action&#39;] = [&#39;&#39;]
+
+    positional_only = (action not in self._actions)
+    if positional_only:
+        return original_line
+
+    ### execute the meerschaum action
+    ### and print the response message in case of failure
+    from meerschaum.utils.formatting import print_tuple
+    response = func(**args)
+    if isinstance(response, tuple):
+        if not response[0] or self.debug:
+            print()
+            print_tuple(response, skip_common=self.debug)
+            print()
+    return &#34;&#34;</code></pre>
+</details>
+</dd>
+<dt id="meerschaum.actions.shell.Shell.Shell.preloop"><code class="name flex">
+<span>def <span class="ident">preloop</span></span>(<span>self)</span>
+</code></dt>
+<dd>
+<div class="desc"><p>Hook method executed once when the :meth:<code>~.cmd2.Cmd.cmdloop()</code>
+method is called.</p>
+<p>See :meth:<code>~cmd2.Cmd.register_preloop_hook</code> for a more robust way
+to run hooks before the command loop begins. See
+:ref:<code>features/hooks:Application Lifecycle Hooks</code> for more information.</p></div>
+<details class="source">
+<summary>
+<span>Expand source code</span>
+</summary>
+<pre><code class="python">def preloop(self):
+    import signal, os
+    from meerschaum.config._paths import SHELL_HISTORY_PATH
+    if SHELL_HISTORY_PATH.exists():
+        if readline:
+            readline.read_history_file(SHELL_HISTORY_PATH)
+    &#34;&#34;&#34;
+    Patch builtin cmdloop with my own input (defined below)
+    &#34;&#34;&#34;
+    old_input = cmd.__builtins__[&#39;input&#39;]
+    cmd.__builtins__[&#39;input&#39;] = input_with_sigint(old_input)
+    ### if the user specifies, clear the screen before initializing the shell
+    if _clear_screen:
+        from meerschaum.utils.formatting._shell import clear_screen
+        clear_screen(debug=self.debug)
+
+    ### if sysargs are provided, skip printing the intro and execute instead
+    if self._sysargs:
+        self.intro = None
+        self.precmd(&#39; &#39;.join(self._sysargs))</code></pre>
+</details>
+</dd>
+<dt id="meerschaum.actions.shell.Shell.Shell.update_prompt"><code class="name flex">
+<span>def <span class="ident">update_prompt</span></span>(<span>self, instance=None, username=None)</span>
+</code></dt>
+<dd>
+<div class="desc"></div>
+<details class="source">
+<summary>
+<span>Expand source code</span>
+</summary>
+<pre><code class="python">def update_prompt(self, instance=None, username=None):
+    from meerschaum.config import get_config
+    prompt = self._prompt
+    mask = prompt
+    if &#39;{instance}&#39; in self._prompt:
+        if instance is None: instance = self.instance_keys
+        self.instance = instance
+        if ANSI: self.instance = colored(self.instance, *get_config(&#39;system&#39;, &#39;shell&#39;, &#39;ansi&#39;, &#39;instance&#39;, &#39;color&#39;, patch=True))
+        prompt = prompt.replace(&#39;{instance}&#39;, self.instance)
+        mask = mask.replace(&#39;{instance}&#39;, &#39;&#39;.join([&#39;\0&#39; for c in &#39;{instance}&#39;]))
+
+    if &#39;{username}&#39; in self._prompt:
+        if username is None:
+            try:
+                # conn = parse_instance_keys(self.instance_keys, construct=True)
+                # help(conn)
+                username = parse_instance_keys(self.instance_keys, construct=False)[&#39;username&#39;]
+            except KeyError:
+                username = &#39;(no username)&#39;
+            except Exception as e:
+                username = str(e)
+        self.username = (
+            username if not ANSI else
+            colored(username, *get_config(&#39;system&#39;, &#39;shell&#39;, &#39;ansi&#39;, &#39;username&#39;, &#39;color&#39;, patch=True))
+        )
+        prompt = prompt.replace(&#39;{username}&#39;, self.username)
+        mask = mask.replace(&#39;{username}&#39;, &#39;&#39;.join([&#39;\0&#39; for c in &#39;{username}&#39;]))
+
+    remainder_prompt = list(self._prompt)
+    for i, c in enumerate(mask):
+        if c != &#39;\0&#39;:
+            _c = c
+            if ANSI: _c = colored(_c, *get_config(&#39;system&#39;, &#39;shell&#39;, &#39;ansi&#39;, &#39;prompt&#39;, &#39;color&#39;, patch=True))
+            remainder_prompt[i] = _c
+    self.prompt = &#39;&#39;.join(remainder_prompt).replace(&#39;{username}&#39;, self.username).replace(&#39;{instance}&#39;, self.instance)</code></pre>
+</details>
+</dd>
+</dl>
+</dd>
+</dl>
+</section>
+</article>
+<nav id="sidebar">
+<h1>Index</h1>
+<div class="toc">
+<ul></ul>
+</div>
+<ul id="index">
+<li><h3>Super-module</h3>
+<ul>
+<li><code><a title="meerschaum.actions.shell" href="index.html">meerschaum.actions.shell</a></code></li>
+</ul>
+</li>
+<li><h3><a href="#header-functions">Functions</a></h3>
+<ul class="">
+<li><code><a title="meerschaum.actions.shell.Shell.input_with_sigint" href="#meerschaum.actions.shell.Shell.input_with_sigint">input_with_sigint</a></code></li>
+</ul>
+</li>
+<li><h3><a href="#header-classes">Classes</a></h3>
+<ul>
+<li>
+<h4><code><a title="meerschaum.actions.shell.Shell.Shell" href="#meerschaum.actions.shell.Shell.Shell">Shell</a></code></h4>
+<ul class="two-column">
+<li><code><a title="meerschaum.actions.shell.Shell.Shell.do_debug" href="#meerschaum.actions.shell.Shell.Shell.do_debug">do_debug</a></code></li>
+<li><code><a title="meerschaum.actions.shell.Shell.Shell.do_exit" href="#meerschaum.actions.shell.Shell.Shell.do_exit">do_exit</a></code></li>
+<li><code><a title="meerschaum.actions.shell.Shell.Shell.do_instance" href="#meerschaum.actions.shell.Shell.Shell.do_instance">do_instance</a></code></li>
+<li><code><a title="meerschaum.actions.shell.Shell.Shell.do_pass" href="#meerschaum.actions.shell.Shell.Shell.do_pass">do_pass</a></code></li>
+<li><code><a title="meerschaum.actions.shell.Shell.Shell.do_repo" href="#meerschaum.actions.shell.Shell.Shell.do_repo">do_repo</a></code></li>
+<li><code><a title="meerschaum.actions.shell.Shell.Shell.emptyline" href="#meerschaum.actions.shell.Shell.Shell.emptyline">emptyline</a></code></li>
+<li><code><a title="meerschaum.actions.shell.Shell.Shell.post_cmd" href="#meerschaum.actions.shell.Shell.Shell.post_cmd">post_cmd</a></code></li>
+<li><code><a title="meerschaum.actions.shell.Shell.Shell.postloop" href="#meerschaum.actions.shell.Shell.Shell.postloop">postloop</a></code></li>
+<li><code><a title="meerschaum.actions.shell.Shell.Shell.precmd" href="#meerschaum.actions.shell.Shell.Shell.precmd">precmd</a></code></li>
+<li><code><a title="meerschaum.actions.shell.Shell.Shell.preloop" href="#meerschaum.actions.shell.Shell.Shell.preloop">preloop</a></code></li>
+<li><code><a title="meerschaum.actions.shell.Shell.Shell.update_prompt" href="#meerschaum.actions.shell.Shell.Shell.update_prompt">update_prompt</a></code></li>
+</ul>
+</li>
+</ul>
+</li>
+</ul>
+</nav>
+</main>
+<footer id="footer">
+<p>Generated by <a href="https://pdoc3.github.io/pdoc"><cite>pdoc</cite> 0.9.2</a>.</p>
+</footer>
+</body>
+</html>

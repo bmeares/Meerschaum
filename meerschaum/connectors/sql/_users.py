@@ -11,7 +11,7 @@ from meerschaum.utils.typing import SuccessTuple, Optional, Any
 
 def register_user(
         self,
-        user : meerschaum.User,
+        user : meerschaum._internal.User,
         debug : bool = False,
         **kw : Any
     ) -> SuccessTuple:
@@ -90,7 +90,7 @@ def valid_username(username : str) -> SuccessTuple:
 
 def edit_user(
         self,
-        user : meerschaum.User,
+        user : meerschaum._internal.User,
         debug : bool = False,
         **kw : Any
     ) -> SuccessTuple:
@@ -126,7 +126,7 @@ def edit_user(
 
 def get_user_id(
         self,
-        user : meerschaum.User,
+        user : meerschaum._internal.User,
         debug : bool = False
     ) -> int:
     ### ensure users table exists
@@ -146,7 +146,7 @@ def get_user_id(
 
 def delete_user(
         self,
-        user : meerschaum.User,
+        user : meerschaum._internal.User,
         debug : bool = False
     ) -> SuccessTuple:
     ### ensure users table exists
@@ -190,7 +190,7 @@ def get_users(
 
 def get_user_password_hash(
         self,
-        user : meerschaum.User,
+        user : meerschaum._internal.User,
         debug : bool = False,
         **kw : Any
     ) -> str:
@@ -213,7 +213,7 @@ def get_user_password_hash(
 
 def get_user_type(
         self,
-        user : meerschaum.User,
+        user : meerschaum._internal.User,
         debug : bool = False,
         **kw : Any
     ) -> Optional[str]:

@@ -1,0 +1,2306 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, minimum-scale=1" />
+<meta name="generator" content="pdoc 0.9.2" />
+<title>meerschaum.connectors.sql.SQLConnector API documentation</title>
+<meta name="description" content="Interface with SQL servers using sqlalchemy." />
+<link rel="preload stylesheet" as="style" href="https://cdnjs.cloudflare.com/ajax/libs/10up-sanitize.css/11.0.1/sanitize.min.css" integrity="sha256-PK9q560IAAa6WVRRh76LtCaI8pjTJ2z11v0miyNNjrs=" crossorigin>
+<link rel="preload stylesheet" as="style" href="https://cdnjs.cloudflare.com/ajax/libs/10up-sanitize.css/11.0.1/typography.min.css" integrity="sha256-7l/o7C8jubJiy74VsKTidCy1yBkRtiUGbVkYBylBqUg=" crossorigin>
+<link rel="stylesheet preload" as="style" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/10.1.1/styles/github.min.css" crossorigin>
+<style>:root{--highlight-color:#fe9}.flex{display:flex !important}body{line-height:1.5em}#content{padding:20px}#sidebar{padding:30px;overflow:hidden}#sidebar > *:last-child{margin-bottom:2cm}.http-server-breadcrumbs{font-size:130%;margin:0 0 15px 0}#footer{font-size:.75em;padding:5px 30px;border-top:1px solid #ddd;text-align:right}#footer p{margin:0 0 0 1em;display:inline-block}#footer p:last-child{margin-right:30px}h1,h2,h3,h4,h5{font-weight:300}h1{font-size:2.5em;line-height:1.1em}h2{font-size:1.75em;margin:1em 0 .50em 0}h3{font-size:1.4em;margin:25px 0 10px 0}h4{margin:0;font-size:105%}h1:target,h2:target,h3:target,h4:target,h5:target,h6:target{background:var(--highlight-color);padding:.2em 0}a{color:#058;text-decoration:none;transition:color .3s ease-in-out}a:hover{color:#e82}.title code{font-weight:bold}h2[id^="header-"]{margin-top:2em}.ident{color:#900}pre code{background:#f8f8f8;font-size:.8em;line-height:1.4em}code{background:#f2f2f1;padding:1px 4px;overflow-wrap:break-word}h1 code{background:transparent}pre{background:#f8f8f8;border:0;border-top:1px solid #ccc;border-bottom:1px solid #ccc;margin:1em 0;padding:1ex}#http-server-module-list{display:flex;flex-flow:column}#http-server-module-list div{display:flex}#http-server-module-list dt{min-width:10%}#http-server-module-list p{margin-top:0}.toc ul,#index{list-style-type:none;margin:0;padding:0}#index code{background:transparent}#index h3{border-bottom:1px solid #ddd}#index ul{padding:0}#index h4{margin-top:.6em;font-weight:bold}@media (min-width:200ex){#index .two-column{column-count:2}}@media (min-width:300ex){#index .two-column{column-count:3}}dl{margin-bottom:2em}dl dl:last-child{margin-bottom:4em}dd{margin:0 0 1em 3em}#header-classes + dl > dd{margin-bottom:3em}dd dd{margin-left:2em}dd p{margin:10px 0}.name{background:#eee;font-weight:bold;font-size:.85em;padding:5px 10px;display:inline-block;min-width:40%}.name:hover{background:#e0e0e0}dt:target .name{background:var(--highlight-color)}.name > span:first-child{white-space:nowrap}.name.class > span:nth-child(2){margin-left:.4em}.inherited{color:#999;border-left:5px solid #eee;padding-left:1em}.inheritance em{font-style:normal;font-weight:bold}.desc h2{font-weight:400;font-size:1.25em}.desc h3{font-size:1em}.desc dt code{background:inherit}.source summary,.git-link-div{color:#666;text-align:right;font-weight:400;font-size:.8em;text-transform:uppercase}.source summary > *{white-space:nowrap;cursor:pointer}.git-link{color:inherit;margin-left:1em}.source pre{max-height:500px;overflow:auto;margin:0}.source pre code{font-size:12px;overflow:visible}.hlist{list-style:none}.hlist li{display:inline}.hlist li:after{content:',\2002'}.hlist li:last-child:after{content:none}.hlist .hlist{display:inline;padding-left:1em}img{max-width:100%}td{padding:0 .5em}.admonition{padding:.1em .5em;margin-bottom:1em}.admonition-title{font-weight:bold}.admonition.note,.admonition.info,.admonition.important{background:#aef}.admonition.todo,.admonition.versionadded,.admonition.tip,.admonition.hint{background:#dfd}.admonition.warning,.admonition.versionchanged,.admonition.deprecated{background:#fd4}.admonition.error,.admonition.danger,.admonition.caution{background:lightpink}</style>
+<style media="screen and (min-width: 700px)">@media screen and (min-width:700px){#sidebar{width:30%;height:100vh;overflow:auto;position:sticky;top:0}#content{width:70%;max-width:100ch;padding:3em 4em;border-left:1px solid #ddd}pre code{font-size:1em}.item .name{font-size:1em}main{display:flex;flex-direction:row-reverse;justify-content:flex-end}.toc ul ul,#index ul{padding-left:1.5em}.toc > ul > li{margin-top:.5em}}</style>
+<style media="print">@media print{#sidebar h1{page-break-before:always}.source{display:none}}@media print{*{background:transparent !important;color:#000 !important;box-shadow:none !important;text-shadow:none !important}a[href]:after{content:" (" attr(href) ")";font-size:90%}a[href][title]:after{content:none}abbr[title]:after{content:" (" attr(title) ")"}.ir a:after,a[href^="javascript:"]:after,a[href^="#"]:after{content:""}pre,blockquote{border:1px solid #999;page-break-inside:avoid}thead{display:table-header-group}tr,img{page-break-inside:avoid}img{max-width:100% !important}@page{margin:0.5cm}p,h2,h3{orphans:3;widows:3}h1,h2,h3,h4,h5,h6{page-break-after:avoid}}</style>
+<script defer src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/10.1.1/highlight.min.js" integrity="sha256-Uv3H6lx7dJmRfRvH8TH6kJD1TSK1aFcwgx+mdg3epi8=" crossorigin></script>
+<script>window.addEventListener('DOMContentLoaded', () => hljs.initHighlighting())</script>
+</head>
+<body>
+<main>
+<article id="content">
+<header>
+<h1 class="title">Module <code>meerschaum.connectors.sql.SQLConnector</code></h1>
+</header>
+<section id="section-intro">
+<p>Interface with SQL servers using sqlalchemy.</p>
+<details class="source">
+<summary>
+<span>Expand source code</span>
+</summary>
+<pre><code class="python">#! /usr/bin/env python
+# -*- coding: utf-8 -*-
+# vim:fenc=utf-8
+
+&#34;&#34;&#34;
+Interface with SQL servers using sqlalchemy.
+&#34;&#34;&#34;
+
+from meerschaum.connectors import Connector
+from meerschaum.utils.warnings import error
+
+class SQLConnector(Connector):
+    &#34;&#34;&#34;
+    Create and utilize sqlalchemy engines
+    &#34;&#34;&#34;
+    from ._create_engine import flavor_configs, create_engine
+    from ._sql import read, value, exec, execute, to_sql
+    from ._fetch import fetch
+    from ._cli import cli
+    from ._pipes import (
+        fetch_pipes_keys,
+        create_indices,
+        delete_pipe,
+        get_backtrack_data,
+        get_pipe_data,
+        register_pipe,
+        edit_pipe,
+        get_pipe_id,
+        get_pipe_attributes,
+        sync_pipe,
+        get_sync_time,
+        pipe_exists,
+        get_pipe_rowcount,
+    )
+    from ._plugins import (
+        register_plugin,
+        get_plugin_id,
+        get_plugin_version,
+        get_plugins,
+        get_plugin_user_id,
+        get_plugin_username,
+        get_plugin_attributes,
+    )
+    from ._users import (
+        register_user,
+        get_user_id,
+        get_users,
+        edit_user,
+        delete_user,
+        get_user_password_hash,
+        get_user_type
+    )
+    
+    def __init__(
+            self,
+            label : str = &#39;main&#39;,
+            flavor : str = None,
+            wait : bool = False,
+            debug : bool = False,
+            **kw
+        ):
+        &#34;&#34;&#34;
+        Build the SQLConnector engine and connect to the database
+        &#34;&#34;&#34;
+        ### set __dict__ in base class
+        super().__init__(&#39;sql&#39;, label=label, **kw)
+        if self.flavor == &#39;sqlite&#39;:
+            self._reset_attributes()
+            self._set_attributes(
+                &#39;sql&#39;,
+                label = label,
+                inherit_default = False,
+                **kw
+            )
+
+        ### ensure flavor and label are set accordingly
+        if &#39;flavor&#39; not in self.__dict__ and flavor is None:
+            raise Exception(&#34;Missing flavor. Update config.yaml or provide flavor as an argument&#34;)
+        elif &#39;flavor&#39; not in self.__dict__: self.flavor = flavor
+
+        ### verify the flavor&#39;s requirements are met
+        if self.flavor not in self.flavor_configs:
+            error(f&#34;Flavor &#39;{self.flavor}&#39; is not supported by Meerschaum SQLConnector&#34;)
+        self.verify_attributes(self.flavor_configs[self.flavor][&#39;requirements&#39;], debug=debug)
+
+        self.wait = wait
+        if self.wait:
+            from meerschaum.utils.misc import wait_for_connection
+            wait_for_connection(connector=self.db, debug=debug)
+
+        ### store the PID  anf thread at initialization so we can dispose of the Pool in child processes or threads
+        import os; self._pid = os.getpid()
+        import threading; self._thread = threading.current_thread()
+        self._debug = debug
+
+        ### create a sqlalchemy session for building ORM queries
+        #  self.Session = sqlalchemy_orm.sessionmaker()
+        #  self.Session.configure(bind=self.engine)
+        #  self.session = self.Session()
+
+    @property
+    def engine(self):
+        import os, threading
+        ### build the sqlalchemy engine
+        if &#39;_engine&#39; not in self.__dict__:
+            self._engine = self.create_engine(debug=self._debug)
+
+        same_process = os.getpid() == self._pid
+        same_thread = threading.current_thread() is self._thread
+
+        ### handle child processes
+        if not same_process:
+            self._pid = os.getpid()
+            self._thread = threading.current_thread()
+            from meerschaum.utils.warnings import warn
+            warn(f&#34;Different PID detected. Disposing of connections...&#34;)
+            self._engine.dispose()
+
+        ### handle different threads
+        if not same_thread:
+            pass
+
+        return self._engine
+
+    @property
+    def DATABASE_URL(self):
+        return str(self.engine.url)
+
+    @property
+    def metadata(self):
+        from meerschaum.utils.packages import attempt_import
+        sqlalchemy = attempt_import(&#39;sqlalchemy&#39;)
+        if &#39;_metadata&#39; not in self.__dict__:
+            self._metadata = sqlalchemy.MetaData(self.engine)
+        return self._metadata
+
+    @property
+    def db(self):
+        from meerschaum.utils.packages import attempt_import
+        databases = attempt_import(&#39;databases&#39;)
+        if &#39;_db&#39; not in self.__dict__:
+            self._db = databases.Database(self.DATABASE_URL)
+        return self._db
+
+    def __getstate__(self): return self.__dict__
+    def __setstate__(self, d): self.__dict__.update(d)
+    def __call__(self): return self
+
+    #  def __del__(self):
+        #  pass
+        #  self.session.close()</code></pre>
+</details>
+</section>
+<section>
+</section>
+<section>
+</section>
+<section>
+</section>
+<section>
+<h2 class="section-title" id="header-classes">Classes</h2>
+<dl>
+<dt id="meerschaum.connectors.sql.SQLConnector.SQLConnector"><code class="flex name class">
+<span>class <span class="ident">SQLConnector</span></span>
+<span>(</span><span>label: str = 'main', flavor: str = None, wait: bool = False, debug: bool = False, **kw)</span>
+</code></dt>
+<dd>
+<div class="desc"><p>Create and utilize sqlalchemy engines</p>
+<p>Build the SQLConnector engine and connect to the database</p></div>
+<details class="source">
+<summary>
+<span>Expand source code</span>
+</summary>
+<pre><code class="python">class SQLConnector(Connector):
+    &#34;&#34;&#34;
+    Create and utilize sqlalchemy engines
+    &#34;&#34;&#34;
+    from ._create_engine import flavor_configs, create_engine
+    from ._sql import read, value, exec, execute, to_sql
+    from ._fetch import fetch
+    from ._cli import cli
+    from ._pipes import (
+        fetch_pipes_keys,
+        create_indices,
+        delete_pipe,
+        get_backtrack_data,
+        get_pipe_data,
+        register_pipe,
+        edit_pipe,
+        get_pipe_id,
+        get_pipe_attributes,
+        sync_pipe,
+        get_sync_time,
+        pipe_exists,
+        get_pipe_rowcount,
+    )
+    from ._plugins import (
+        register_plugin,
+        get_plugin_id,
+        get_plugin_version,
+        get_plugins,
+        get_plugin_user_id,
+        get_plugin_username,
+        get_plugin_attributes,
+    )
+    from ._users import (
+        register_user,
+        get_user_id,
+        get_users,
+        edit_user,
+        delete_user,
+        get_user_password_hash,
+        get_user_type
+    )
+    
+    def __init__(
+            self,
+            label : str = &#39;main&#39;,
+            flavor : str = None,
+            wait : bool = False,
+            debug : bool = False,
+            **kw
+        ):
+        &#34;&#34;&#34;
+        Build the SQLConnector engine and connect to the database
+        &#34;&#34;&#34;
+        ### set __dict__ in base class
+        super().__init__(&#39;sql&#39;, label=label, **kw)
+        if self.flavor == &#39;sqlite&#39;:
+            self._reset_attributes()
+            self._set_attributes(
+                &#39;sql&#39;,
+                label = label,
+                inherit_default = False,
+                **kw
+            )
+
+        ### ensure flavor and label are set accordingly
+        if &#39;flavor&#39; not in self.__dict__ and flavor is None:
+            raise Exception(&#34;Missing flavor. Update config.yaml or provide flavor as an argument&#34;)
+        elif &#39;flavor&#39; not in self.__dict__: self.flavor = flavor
+
+        ### verify the flavor&#39;s requirements are met
+        if self.flavor not in self.flavor_configs:
+            error(f&#34;Flavor &#39;{self.flavor}&#39; is not supported by Meerschaum SQLConnector&#34;)
+        self.verify_attributes(self.flavor_configs[self.flavor][&#39;requirements&#39;], debug=debug)
+
+        self.wait = wait
+        if self.wait:
+            from meerschaum.utils.misc import wait_for_connection
+            wait_for_connection(connector=self.db, debug=debug)
+
+        ### store the PID  anf thread at initialization so we can dispose of the Pool in child processes or threads
+        import os; self._pid = os.getpid()
+        import threading; self._thread = threading.current_thread()
+        self._debug = debug
+
+        ### create a sqlalchemy session for building ORM queries
+        #  self.Session = sqlalchemy_orm.sessionmaker()
+        #  self.Session.configure(bind=self.engine)
+        #  self.session = self.Session()
+
+    @property
+    def engine(self):
+        import os, threading
+        ### build the sqlalchemy engine
+        if &#39;_engine&#39; not in self.__dict__:
+            self._engine = self.create_engine(debug=self._debug)
+
+        same_process = os.getpid() == self._pid
+        same_thread = threading.current_thread() is self._thread
+
+        ### handle child processes
+        if not same_process:
+            self._pid = os.getpid()
+            self._thread = threading.current_thread()
+            from meerschaum.utils.warnings import warn
+            warn(f&#34;Different PID detected. Disposing of connections...&#34;)
+            self._engine.dispose()
+
+        ### handle different threads
+        if not same_thread:
+            pass
+
+        return self._engine
+
+    @property
+    def DATABASE_URL(self):
+        return str(self.engine.url)
+
+    @property
+    def metadata(self):
+        from meerschaum.utils.packages import attempt_import
+        sqlalchemy = attempt_import(&#39;sqlalchemy&#39;)
+        if &#39;_metadata&#39; not in self.__dict__:
+            self._metadata = sqlalchemy.MetaData(self.engine)
+        return self._metadata
+
+    @property
+    def db(self):
+        from meerschaum.utils.packages import attempt_import
+        databases = attempt_import(&#39;databases&#39;)
+        if &#39;_db&#39; not in self.__dict__:
+            self._db = databases.Database(self.DATABASE_URL)
+        return self._db
+
+    def __getstate__(self): return self.__dict__
+    def __setstate__(self, d): self.__dict__.update(d)
+    def __call__(self): return self</code></pre>
+</details>
+<h3>Ancestors</h3>
+<ul class="hlist">
+<li><a title="meerschaum.connectors.Connector.Connector" href="../Connector.html#meerschaum.connectors.Connector.Connector">Connector</a></li>
+</ul>
+<h3>Class variables</h3>
+<dl>
+<dt id="meerschaum.connectors.sql.SQLConnector.SQLConnector.flavor_configs"><code class="name">var <span class="ident">flavor_configs</span></code></dt>
+<dd>
+<div class="desc"></div>
+</dd>
+</dl>
+<h3>Instance variables</h3>
+<dl>
+<dt id="meerschaum.connectors.sql.SQLConnector.SQLConnector.DATABASE_URL"><code class="name">var <span class="ident">DATABASE_URL</span></code></dt>
+<dd>
+<div class="desc"></div>
+<details class="source">
+<summary>
+<span>Expand source code</span>
+</summary>
+<pre><code class="python">@property
+def DATABASE_URL(self):
+    return str(self.engine.url)</code></pre>
+</details>
+</dd>
+<dt id="meerschaum.connectors.sql.SQLConnector.SQLConnector.db"><code class="name">var <span class="ident">db</span></code></dt>
+<dd>
+<div class="desc"></div>
+<details class="source">
+<summary>
+<span>Expand source code</span>
+</summary>
+<pre><code class="python">@property
+def db(self):
+    from meerschaum.utils.packages import attempt_import
+    databases = attempt_import(&#39;databases&#39;)
+    if &#39;_db&#39; not in self.__dict__:
+        self._db = databases.Database(self.DATABASE_URL)
+    return self._db</code></pre>
+</details>
+</dd>
+<dt id="meerschaum.connectors.sql.SQLConnector.SQLConnector.engine"><code class="name">var <span class="ident">engine</span></code></dt>
+<dd>
+<div class="desc"></div>
+<details class="source">
+<summary>
+<span>Expand source code</span>
+</summary>
+<pre><code class="python">@property
+def engine(self):
+    import os, threading
+    ### build the sqlalchemy engine
+    if &#39;_engine&#39; not in self.__dict__:
+        self._engine = self.create_engine(debug=self._debug)
+
+    same_process = os.getpid() == self._pid
+    same_thread = threading.current_thread() is self._thread
+
+    ### handle child processes
+    if not same_process:
+        self._pid = os.getpid()
+        self._thread = threading.current_thread()
+        from meerschaum.utils.warnings import warn
+        warn(f&#34;Different PID detected. Disposing of connections...&#34;)
+        self._engine.dispose()
+
+    ### handle different threads
+    if not same_thread:
+        pass
+
+    return self._engine</code></pre>
+</details>
+</dd>
+<dt id="meerschaum.connectors.sql.SQLConnector.SQLConnector.metadata"><code class="name">var <span class="ident">metadata</span></code></dt>
+<dd>
+<div class="desc"></div>
+<details class="source">
+<summary>
+<span>Expand source code</span>
+</summary>
+<pre><code class="python">@property
+def metadata(self):
+    from meerschaum.utils.packages import attempt_import
+    sqlalchemy = attempt_import(&#39;sqlalchemy&#39;)
+    if &#39;_metadata&#39; not in self.__dict__:
+        self._metadata = sqlalchemy.MetaData(self.engine)
+    return self._metadata</code></pre>
+</details>
+</dd>
+</dl>
+<h3>Methods</h3>
+<dl>
+<dt id="meerschaum.connectors.sql.SQLConnector.SQLConnector.cli"><code class="name flex">
+<span>def <span class="ident">cli</span></span>(<span>self, debug: bool = False)</span>
+</code></dt>
+<dd>
+<div class="desc"><p>Launch an interactive CLI for the SQLConnector's flavor</p></div>
+<details class="source">
+<summary>
+<span>Expand source code</span>
+</summary>
+<pre><code class="python">def cli(
+        self,
+        debug : bool = False
+    ):
+    &#34;&#34;&#34;
+    Launch an interactive CLI for the SQLConnector&#39;s flavor
+    &#34;&#34;&#34;
+    from meerschaum.utils.packages import venv_exec, attempt_import
+    from meerschaum.utils.debug import dprint
+    from meerschaum.utils.warnings import error
+    import sys, subprocess
+
+    if self.flavor not in flavor_clis:
+        return False, f&#34;No CLI available for flavor &#39;{self.flavor}&#39;.&#34;
+
+    ### get CLI module to launch
+    cli_name = flavor_clis[self.flavor]
+    if debug: dprint(f&#34;Opening CLI &#39;{cli_name}&#39; for {self} (flavor &#39;{self.flavor}&#39;)...&#34;)
+
+    ### attempt an import to raise warnings if not installed
+    cli = attempt_import(cli_name, debug=debug)
+
+    ### open sqlalchemy engine URI or just database if sqlite
+    cli_arg_str = self.DATABASE_URL
+    if self.flavor == &#39;sqlite&#39;: cli_arg_str = str(self.database)
+
+    ### run the module in a subprocess because it calls sys.exit(), and __main__ does not
+    ### work for these CLIs (something to do with Click?)
+    launch_cli = f&#34;from {cli_name} import main; main.cli([&#39;{cli_arg_str}&#39;])&#34;
+
+    success = venv_exec(launch_cli, debug=debug)
+    return success, f&#34;CLI exited with response: {success}&#34;</code></pre>
+</details>
+</dd>
+<dt id="meerschaum.connectors.sql.SQLConnector.SQLConnector.create_engine"><code class="name flex">
+<span>def <span class="ident">create_engine</span></span>(<span>self, include_uri: bool = False, debug: bool = False, **kw) ‑> sqlalchemy.engine.Engine</span>
+</code></dt>
+<dd>
+<div class="desc"><p>Create a sqlalchemy engine by building the engine string.</p>
+<p>returns: sqlalchemy engine</p></div>
+<details class="source">
+<summary>
+<span>Expand source code</span>
+</summary>
+<pre><code class="python">def create_engine(
+        self,
+        include_uri : bool = False,
+        debug : bool = False,
+        **kw
+    ) -&gt; &#39;sqlalchemy.engine.Engine&#39;:
+    &#34;&#34;&#34;
+    Create a sqlalchemy engine by building the engine string.
+
+    returns: sqlalchemy engine
+    &#34;&#34;&#34;
+    from meerschaum.utils.packages import attempt_import
+    sqlalchemy = attempt_import(&#39;sqlalchemy&#39;)
+    import urllib
+    ### supplement missing values with defaults (e.g. port number)
+    #  print(self.__dict__)
+    for a, value in flavor_configs[self.flavor][&#39;defaults&#39;].items():
+        if a not in self.__dict__:
+            self.__dict__[a] = value
+
+    ### self.sys_config was deepcopied and can be updated safely
+    if self.flavor == &#34;sqlite&#34;:
+        engine_str = f&#34;sqlite:///{self.database}&#34;
+        self.sys_config[&#39;connect_args&#39;].update({&#34;check_same_thread&#34; : False})
+    else:
+        engine_str = (
+            flavor_configs[self.flavor][&#39;engine&#39;] + &#34;://&#34; +
+            self.username + &#34;:&#34; + urllib.parse.quote_plus(self.password) +
+            &#34;@&#34; + self.host + &#34;:&#34; + str(self.port) + &#34;/&#34; + self.database
+        )
+    if debug: dprint(f&#34;{engine_str}&#34; + &#39;\n&#39; + f&#34;{self.sys_config[&#39;connect_args&#39;]}&#34;)
+
+    engine = sqlalchemy.create_engine(
+        engine_str,
+        pool_size    = self.sys_config[&#39;pool_size&#39;],
+        max_overflow = self.sys_config[&#39;max_overflow&#39;],
+        pool_recycle = self.sys_config[&#39;pool_recycle&#39;],
+        connect_args = self.sys_config[&#39;connect_args&#39;],
+        ### I know this looks confusing, and maybe it&#39;s bad code,
+        ### but it&#39;s simple. It dynamically parses the config string
+        ### and splits it to separate the class name (QueuePool)
+        ### from the module name (sqlalchemy.pool).
+        poolclass    = getattr(
+            attempt_import(
+                &#34;.&#34;.join(self.sys_config[&#39;poolclass&#39;].split(&#39;.&#39;)[:-1])
+            ),
+            self.sys_config[&#39;poolclass&#39;].split(&#39;.&#39;)[-1]
+        ),
+        echo         = debug,
+        **kw
+    )
+
+    if include_uri: return engine, engine_str
+    return engine</code></pre>
+</details>
+</dd>
+<dt id="meerschaum.connectors.sql.SQLConnector.SQLConnector.create_indices"><code class="name flex">
+<span>def <span class="ident">create_indices</span></span>(<span>self, pipe: <a title="meerschaum.Pipe" href="../../Pipe/index.html">meerschaum.Pipe</a>, debug: bool = False) ‑> bool</span>
+</code></dt>
+<dd>
+<div class="desc"><p>Create indices for a Pipe's datetime and ID columns.</p></div>
+<details class="source">
+<summary>
+<span>Expand source code</span>
+</summary>
+<pre><code class="python">def create_indices(
+        self,
+        pipe : meerschaum.Pipe,
+        debug : bool = False
+    ) -&gt; bool:
+    &#34;&#34;&#34;
+    Create indices for a Pipe&#39;s datetime and ID columns.
+    &#34;&#34;&#34;
+    from meerschaum.utils.debug import dprint
+    from meerschaum.utils.misc import sql_item_name
+    from meerschaum.utils.warnings import warn
+    index_queries = dict()
+
+    if debug: dprint(f&#34;Creating indices for Pipe &#39;{pipe}&#39;...&#34;)
+
+    ### create datetime index
+    if &#39;datetime&#39; in pipe.columns and pipe.get_columns(&#39;datetime&#39;):
+        if self.flavor == &#39;timescaledb&#39;:
+            ## create hypertable
+            dt_query = (
+                f&#34;SELECT create_hypertable(&#39;{sql_item_name(str(pipe), self.flavor)}&#39;, &#34; +
+                f&#34;&#39;{pipe.get_columns(&#39;datetime&#39;)}&#39;, migrate_data =&gt; true);&#34;
+            )
+        elif self.flavor == &#39;postgresql&#39;:
+            dt_query = f&#34;CREATE INDEX ON {sql_item_name(str(pipe), self.flavor)} ({sql_item_name(pipe.get_columns(&#39;datetime&#39;), self.flavor)})&#34;
+        elif self.flavor in (&#39;mysql&#39;, &#39;mariadb&#39;):
+            dt_query = f&#34;CREATE INDEX ON {sql_item_name(str(pipe), self.flavor)} ({sql_item_name(pipe.get_columns(&#39;datetime&#39;), self.flavor)})&#34;
+        else: ### mssql, sqlite, etc.
+            dt_query = f&#34;CREATE INDEX {pipe.get_columns(&#39;datetime&#39;).lower()}_index ON {pipe} ({sql_item_name(pipe.get_columns(&#39;datetime&#39;), self.flavor)})&#34;
+
+        index_queries[pipe.get_columns(&#39;datetime&#39;)] = dt_query
+
+    ### create id index
+    if &#39;id&#39; in pipe.columns and pipe.get_columns(&#39;id&#39;, error=False):
+        if self.flavor in (&#39;timescaledb&#39;, &#39;postgresql&#39;):
+            id_query = f&#34;CREATE INDEX ON {sql_item_name(str(pipe), self.flavor)} ({sql_item_name(pipe.get_columns(&#39;id&#39;), self.flavor)})&#34;
+        elif self.flavor in (&#39;mysql&#39;, &#39;mariadb&#39;):
+            id_query = f&#34;CREATE INDEX ON {sql_item_name(str(pipe), self.flavor)} ({sql_item_name(pipe.get_columns(&#39;id&#39;), self.flavor)})&#34;
+        else: ### mssql, sqlite, etc.
+            id_query = f&#34;CREATE INDEX {pipe.get_columns(&#39;id&#39;).lower()}_index ON {sql_item_name(str(pipe), self.flavor)} ({sql_item_name(pipe.get_columns(&#39;id&#39;), self.flavor)})&#34;
+
+        index_queries[pipe.get_columns(&#39;id&#39;)] = id_query
+
+    failures = 0
+    for col, q in index_queries.items():
+        if debug: dprint(f&#34;Creating index on column &#39;{col}&#39; for Pipe &#39;{pipe}&#39;&#34;)
+        if not self.exec(q, silent=True, debug=debug):
+            warn(f&#34;Failed to create index on column &#39;{col}&#39; for Pipe &#39;{pipe}&#39;&#34;)
+            failures += 1
+    return failures == 0</code></pre>
+</details>
+</dd>
+<dt id="meerschaum.connectors.sql.SQLConnector.SQLConnector.delete_pipe"><code class="name flex">
+<span>def <span class="ident">delete_pipe</span></span>(<span>self, pipe: <a title="meerschaum.Pipe" href="../../Pipe/index.html">meerschaum.Pipe</a>, debug: bool = False) ‑> SuccessTuple</span>
+</code></dt>
+<dd>
+<div class="desc"><p>Delete a Pipe's registration and drop its table.</p></div>
+<details class="source">
+<summary>
+<span>Expand source code</span>
+</summary>
+<pre><code class="python">def delete_pipe(
+        self,
+        pipe : meerschaum.Pipe,
+        debug : bool = False,
+    ) -&gt; SuccessTuple:
+    &#34;&#34;&#34;
+    Delete a Pipe&#39;s registration and drop its table.
+    &#34;&#34;&#34;
+    from meerschaum.utils.warnings import warn
+    from meerschaum.utils.misc import sql_item_name
+    from meerschaum.utils.debug import dprint
+    from meerschaum.utils.packages import attempt_import
+    sqlalchemy = attempt_import(&#39;sqlalchemy&#39;)
+    pipe_name = sql_item_name(str(pipe), self.flavor)
+    if not pipe.id:
+        return False, f&#34;Pipe &#39;{pipe}&#39; is not registered&#34;
+
+    ### ensure pipes table exists
+    from meerschaum.connectors.sql.tables import get_tables
+    pipes = get_tables(mrsm_instance=self, debug=debug)[&#39;pipes&#39;]
+
+    q = sqlalchemy.delete(pipes).where(pipes.c.pipe_id == pipe.id)
+    # q = f&#34;DELETE FROM pipes WHERE pipe_id = {pipe.id}&#34;
+    if not self.exec(q, debug=debug):
+        return False, f&#34;Failed to delete registration for &#39;{pipe}&#39;&#34;
+
+    q = f&#34;DROP TABLE {pipe_name}&#34;
+    if self.exec(q, silent=True, debug=debug) is None:
+        q = f&#34;DROP VIEW {pipe_name}&#34;
+    if self.exec(q, silent=True, debug=debug) is None:
+        if debug: dprint(f&#34;Failed to drop &#39;{pipe}&#39;. Ignoring...&#34;)
+
+    return True, &#34;Success&#34;</code></pre>
+</details>
+</dd>
+<dt id="meerschaum.connectors.sql.SQLConnector.SQLConnector.delete_user"><code class="name flex">
+<span>def <span class="ident">delete_user</span></span>(<span>self, user: meerschaum._internal.User, debug: bool = False) ‑> SuccessTuple</span>
+</code></dt>
+<dd>
+<div class="desc"></div>
+<details class="source">
+<summary>
+<span>Expand source code</span>
+</summary>
+<pre><code class="python">def delete_user(
+        self,
+        user : meerschaum._internal.User,
+        debug : bool = False
+    ) -&gt; SuccessTuple:
+    ### ensure users table exists
+    from meerschaum.connectors.sql.tables import get_tables
+    users = get_tables(mrsm_instance=self, debug=debug)[&#39;users&#39;]
+    plugins = get_tables(mrsm_instance=self, debug=debug)[&#39;plugins&#39;]
+    from meerschaum.utils.packages import attempt_import
+    sqlalchemy = attempt_import(&#39;sqlalchemy&#39;)
+
+    if user.user_id is not None: user_id = user.user_id
+    else: user_id = self.get_user_id(user, debug=debug)
+
+    if user_id is None:
+        return False, f&#34;User &#39;{user.username}&#39; is not registered and cannot be deleted.&#34;
+
+    query = sqlalchemy.delete(users).where(users.c.user_id == user_id)
+
+    result = self.exec(query, debug=True)
+    if result is None: return False, f&#34;Failed to delete user &#39;{user}&#39;&#34;
+
+    query = sqlalchemy.delete(plugins).where(users.c.user_id == user_id)
+    result = self.exec(query, debug=True)
+    if result is None: return False, f&#34;Failed to delete plugins of user &#39;{user}&#39;&#34;
+
+    return True, f&#34;Successfully deleted user &#39;{user}&#39;&#34;</code></pre>
+</details>
+</dd>
+<dt id="meerschaum.connectors.sql.SQLConnector.SQLConnector.edit_pipe"><code class="name flex">
+<span>def <span class="ident">edit_pipe</span></span>(<span>self, pipe: <a title="meerschaum.Pipe" href="../../Pipe/index.html">meerschaum.Pipe</a> = None, patch: bool = False, debug: bool = False, **kw: Any) ‑> SuccessTuple</span>
+</code></dt>
+<dd>
+<div class="desc"><p>Edit a Pipe's parameters.</p>
+<p>:param pipe:
+The pipe to be edited.</p>
+<p>:param patch:
+If patch is True, update the existing parameters by cascading.
+Otherwise overwrite the parameters (default).</p>
+<p>:param debug: Verbosity toggle.</p></div>
+<details class="source">
+<summary>
+<span>Expand source code</span>
+</summary>
+<pre><code class="python">def edit_pipe(
+        self,
+        pipe : meerschaum.Pipe = None,
+        patch : bool = False,
+        debug : bool = False,
+        **kw : Any
+    ) -&gt; SuccessTuple:
+    &#34;&#34;&#34;
+    Edit a Pipe&#39;s parameters.
+
+    :param pipe:
+        The pipe to be edited.
+
+    :param patch:
+        If patch is True, update the existing parameters by cascading.
+        Otherwise overwrite the parameters (default).
+
+    :param debug: Verbosity toggle.
+    &#34;&#34;&#34;
+
+    if pipe.id is None:
+        return False, f&#34;pipe &#39;{pipe}&#39; is not registered and cannot be edited.&#34;
+
+    from meerschaum.utils.debug import dprint
+    from meerschaum.utils.packages import attempt_import
+    if not patch:
+        parameters = pipe.parameters
+    else:
+        from meerschaum import Pipe
+        from meerschaum.config._patch import apply_patch_to_config
+        original_parameters = Pipe(pipe.connector_keys, pipe.metric_key, pipe.location_key).parameters
+        parameters = apply_patch_to_config(
+            original_parameters,
+            pipe.parameters
+        )
+
+    ### ensure pipes table exists
+    from meerschaum.connectors.sql.tables import get_tables
+    pipes = get_tables(mrsm_instance=self, debug=debug)[&#39;pipes&#39;]
+
+    json, sqlalchemy = attempt_import(&#39;json&#39;, &#39;sqlalchemy&#39;)
+
+    values = {
+        &#39;parameters&#39; : json.dumps(pipe.parameters),
+    }
+    q = sqlalchemy.update(pipes).values(**values).where(
+        pipes.c.pipe_id == pipe.id
+    )
+
+    result = self.exec(q, debug=debug)
+    message = f&#34;Successfully edited pipe &#39;{pipe}&#39;&#34;
+    if result is None:
+        message = f&#34;Failed to edit pipe &#39;{pipe}&#39;&#34;
+    return (result is not None), message</code></pre>
+</details>
+</dd>
+<dt id="meerschaum.connectors.sql.SQLConnector.SQLConnector.edit_user"><code class="name flex">
+<span>def <span class="ident">edit_user</span></span>(<span>self, user: meerschaum._internal.User, debug: bool = False, **kw: Any) ‑> SuccessTuple</span>
+</code></dt>
+<dd>
+<div class="desc"><p>Update an existing user</p></div>
+<details class="source">
+<summary>
+<span>Expand source code</span>
+</summary>
+<pre><code class="python">def edit_user(
+        self,
+        user : meerschaum._internal.User,
+        debug : bool = False,
+        **kw : Any
+    ) -&gt; SuccessTuple:
+    &#34;&#34;&#34;
+    Update an existing user
+    &#34;&#34;&#34;
+    from meerschaum.utils.packages import attempt_import
+    sqlalchemy = attempt_import(&#39;sqlalchemy&#39;)
+    from meerschaum.connectors.sql.tables import get_tables
+    users = get_tables(mrsm_instance=self, debug=debug)[&#39;users&#39;]
+
+    if user.user_id is None: user_id = user.user_id
+    else: user_id = self.get_user_id(user, debug=debug)
+
+    import json
+    valid_tuple = valid_username(user.username)
+    if not valid_tuple[0]: return valid_tuple
+
+    bind_variables = {
+        &#39;user_id&#39; : user_id,
+        &#39;username&#39; : user.username,
+        &#39;email&#39; : user.email,
+        &#39;password_hash&#39; : user.password_hash,
+        &#39;attributes&#39; : json.dumps(user.attributes),
+    }
+
+    query = sqlalchemy.update(users).values(**bind_variables).where(users.c.user_id == user_id)
+
+    result = self.exec(query, debug=debug)
+    if result is None:
+        return False, f&#34;Failed to edit user &#39;{user}&#39;&#34;
+    return True, f&#34;Successfully edited user &#39;{user}&#39;&#34;</code></pre>
+</details>
+</dd>
+<dt id="meerschaum.connectors.sql.SQLConnector.SQLConnector.exec"><code class="name flex">
+<span>def <span class="ident">exec</span></span>(<span>self, query: str, *args: Any, silent: bool = False, debug: bool = False, **kw: Any) ‑> Optional[sqlalchemy.engine.result.resultProxy]</span>
+</code></dt>
+<dd>
+<div class="desc"><p>Execute SQL code and return success status. e.g. calling stored procedures.</p>
+<p>Wrapper for self.engine.connect() and connection.execute().</p>
+<p>If inserting data, please use bind variables to avoid SQL injection!</p></div>
+<details class="source">
+<summary>
+<span>Expand source code</span>
+</summary>
+<pre><code class="python">def exec(
+        self,
+        query : str,
+        *args : Any,
+        silent : bool = False,
+        debug : bool = False,
+        **kw : Any
+    ) -&gt; Optional[sqlalchemy.engine.result.resultProxy]:
+    &#34;&#34;&#34;
+    Execute SQL code and return success status. e.g. calling stored procedures.
+
+    Wrapper for self.engine.connect() and connection.execute().
+
+    If inserting data, please use bind variables to avoid SQL injection!
+    &#34;&#34;&#34;
+    from meerschaum.utils.debug import dprint
+    from meerschaum.utils.packages import attempt_import
+    sqlalchemy = attempt_import(&#34;sqlalchemy&#34;)
+    if debug: dprint(&#34;Executing query:\n&#34; + f&#34;{query}&#34;)
+    try:
+        with self.engine.connect() as connection:
+            result = connection.execute(
+                query,
+                *args,
+                **kw
+            )
+    except Exception as e:
+        import inspect
+
+        if debug: dprint(f&#34;Failed to execute query:\n\n{query}\n\n&#34;)
+        if not silent: warn(str(e))
+        result = None
+
+    return result</code></pre>
+</details>
+</dd>
+<dt id="meerschaum.connectors.sql.SQLConnector.SQLConnector.execute"><code class="name flex">
+<span>def <span class="ident">execute</span></span>(<span>self, *args: Any, **kw: Any) ‑> Optional[sqlalchemy.engine.result.resultProxy]</span>
+</code></dt>
+<dd>
+<div class="desc"></div>
+<details class="source">
+<summary>
+<span>Expand source code</span>
+</summary>
+<pre><code class="python">def execute(
+        self,
+        *args : Any,
+        **kw : Any
+    ) -&gt; Optional[sqlalchemy.engine.result.resultProxy]:
+    return self.exec(*args, **kw)</code></pre>
+</details>
+</dd>
+<dt id="meerschaum.connectors.sql.SQLConnector.SQLConnector.fetch"><code class="name flex">
+<span>def <span class="ident">fetch</span></span>(<span>self, pipe: <a title="meerschaum.Pipe" href="../../Pipe/index.html">meerschaum.Pipe</a>, begin: str = 'now', debug: bool = False, **kw) ‑> Union[pd.DataFrame, NoneType]</span>
+</code></dt>
+<dd>
+<div class="desc"><p>Execute the SQL definition and return a Pandas DataFrame.</p>
+<p>If pipe.columns['datetime'] and
+pipe.parameters['fetch']['backtrack_minutes'] are provided,
+append a <code>WHERE dt &gt; begin</code> subquery.</p>
+<p>:param begin:
+Most recent datatime to search for data.
+If <code>backtrack_minutes</code> is provided, subtract <code>backtrack_minutes</code>.</p>
+<p>:param pipe:
+Below are the various pipe parameters available to pipe.fetch.</p>
+<pre><code>pipe.columns['datetime'] : str
+    Name of the datetime column for the remote table.
+
+pipe.parameters['fetch'] : dict
+    Parameters necessary to execute a query.
+    See pipe.parameters['fetch'].
+
+    pipe.parameters['fetch']['definition'] : str
+        Raw SQL query to execute to generate the pandas DataFrame.
+
+    pipe.parameters['backtrack_minutes'] : Union[int, float]
+        How many minutes before &lt;code&gt;begin&lt;/code&gt; to search for data.
+</code></pre>
+<p>:param debug: Verbosity toggle.</p></div>
+<details class="source">
+<summary>
+<span>Expand source code</span>
+</summary>
+<pre><code class="python">def fetch(
+        self,
+        pipe : &#39;meerschaum.Pipe&#39;,
+        begin : str = &#39;now&#39;,
+        debug : bool = False,
+        **kw
+    ) -&gt; Optional[&#39;pd.DataFrame&#39;]:
+    &#34;&#34;&#34;
+    Execute the SQL definition and return a Pandas DataFrame.
+
+    If pipe.columns[&#39;datetime&#39;] and
+        pipe.parameters[&#39;fetch&#39;][&#39;backtrack_minutes&#39;] are provided,
+        append a `WHERE dt &gt; begin` subquery.
+
+    :param begin:
+        Most recent datatime to search for data.
+        If `backtrack_minutes` is provided, subtract `backtrack_minutes`.
+
+    :param pipe:
+        Below are the various pipe parameters available to pipe.fetch.
+
+        pipe.columns[&#39;datetime&#39;] : str
+            Name of the datetime column for the remote table.
+
+        pipe.parameters[&#39;fetch&#39;] : dict
+            Parameters necessary to execute a query.
+            See pipe.parameters[&#39;fetch&#39;].
+
+            pipe.parameters[&#39;fetch&#39;][&#39;definition&#39;] : str
+                Raw SQL query to execute to generate the pandas DataFrame.
+
+            pipe.parameters[&#39;backtrack_minutes&#39;] : Union[int, float]
+                How many minutes before `begin` to search for data.
+
+    :param debug: Verbosity toggle.
+    &#34;&#34;&#34;
+    from meerschaum.utils.debug import dprint
+    from meerschaum.utils.warnings import warn, error
+    from meerschaum.utils.misc import sql_item_name
+    from meerschaum.utils.packages import attempt_import
+    datetime = attempt_import(&#39;datetime&#39;)
+
+    if &#39;columns&#39; not in pipe.parameters or &#39;fetch&#39; not in pipe.parameters:
+        warn(f&#34;Parameters for &#39;{pipe}&#39; must include &#39;columns&#39; and &#39;fetch&#39;&#34;, stack=False)
+        return None
+
+    datetime = None
+    if &#39;datetime&#39; not in pipe.columns:
+        warn(f&#34;Missing datetime column for &#39;{pipe}&#39;. Will select all data instead&#34;)
+    else:
+        datetime = sql_item_name(pipe.get_columns(&#39;datetime&#39;), self.flavor)
+
+    instructions = pipe.parameters[&#39;fetch&#39;]
+
+    try:
+        definition = instructions[&#39;definition&#39;]
+    except KeyError:
+        error(&#34;Cannot fetch without a definition&#34;, KeyError)
+
+    if &#39;order by&#39; in definition.lower() and &#39;over&#39; not in definition.lower():
+        error(&#34;Cannot fetch with an ORDER clause in the definition&#34;)
+
+    da = None
+    if datetime:
+        ### default: do not backtrack
+        btm = 0
+        if &#39;backtrack_minutes&#39; in instructions:
+            btm = instructions[&#39;backtrack_minutes&#39;]
+        da = dateadd_str(flavor=self.flavor, datepart=&#39;minute&#39;, number=(-1 * btm), begin=begin)
+
+    meta_def = f&#34;WITH definition AS ({definition}) SELECT DISTINCT * FROM definition&#34;
+    if datetime and da:
+        meta_def += f&#34;\nWHERE {datetime} &gt; {da}&#34;
+
+    df = self.read(meta_def, debug=debug)
+    ### if sqlite, parse for datetimes
+    if self.flavor == &#39;sqlite&#39;:
+        from meerschaum.utils.misc import parse_df_datetimes
+        df = parse_df_datetimes(df, debug=debug)
+    return df</code></pre>
+</details>
+</dd>
+<dt id="meerschaum.connectors.sql.SQLConnector.SQLConnector.fetch_pipes_keys"><code class="name flex">
+<span>def <span class="ident">fetch_pipes_keys</span></span>(<span>self, connector_keys: Sequence[str] = [], metric_keys: Sequence[str] = [], location_keys: Sequence[str] = [], params: Mapping[str, Any] = {}, debug: bool = False) ‑> Optional[Sequence[Tuple[str, str, Optional[str]]]]</span>
+</code></dt>
+<dd>
+<div class="desc"><p>Return a list of tuples corresponding to the parameters provided.</p>
+<p>:param connector_keys:
+List of connector_keys to search by.</p>
+<p>:param metric_keys:
+List of metric_keys to search by.</p>
+<p>:param location_keys:
+List of location_keys to search by.</p>
+<p>:param params:
+Dictionary of additional parameters to search by.
+E.g. &ndash;params pipe_id:1</p>
+<p>:param debug: Verbosity toggle.</p></div>
+<details class="source">
+<summary>
+<span>Expand source code</span>
+</summary>
+<pre><code class="python">def fetch_pipes_keys(
+        self,
+        connector_keys : Sequence[str] = [],
+        metric_keys : Sequence[str] = [],
+        location_keys : Sequence[str] = [],
+        params : Mapping[str, Any] = {},
+        debug : bool = False
+    ) -&gt; Optional[Sequence[Tuple[str, str, Optional[str]]]]:
+    &#34;&#34;&#34;
+    Return a list of tuples corresponding to the parameters provided.
+
+    :param connector_keys:
+        List of connector_keys to search by.
+
+    :param metric_keys:
+        List of metric_keys to search by.
+
+    :param location_keys:
+        List of location_keys to search by.
+
+    :param params:
+        Dictionary of additional parameters to search by.
+        E.g. --params pipe_id:1
+
+    :param debug: Verbosity toggle.
+    &#34;&#34;&#34;
+    from meerschaum.utils.warnings import error
+    from meerschaum.utils.debug import dprint
+    from meerschaum.utils.packages import attempt_import
+    json, sqlalchemy = attempt_import(&#39;json&#39;, &#39;sqlalchemy&#39;)
+
+    ### Add three primary keys to params dictionary
+    ###   (separated for convenience of arguments)
+    cols = {
+        &#39;connector_keys&#39; : connector_keys,
+        &#39;metric_key&#39; : metric_keys,
+        &#39;location_key&#39; : location_keys,
+    }
+
+    ### make deep copy because something weird is happening with pointers
+    from copy import deepcopy
+    parameters = deepcopy(params)
+    for col, vals in cols.items():
+        ### allow for IS NULL to be declared as a single-item list ([None])
+        if vals == [None]: vals = None
+        if vals not in [[], [&#39;*&#39;]]:
+            parameters[col] = vals
+    cols = {k : v for k, v in cols.items() if v != [None]}
+
+    from meerschaum.connectors.sql.tables import get_tables
+    pipes = get_tables(mrsm_instance=self, debug=debug)[&#39;pipes&#39;]
+
+    _params = {}
+    for k, v in parameters.items():
+        _v = json.dumps(v) if isinstance(v, dict) else v
+        _params[k] = _v
+
+    ### parse regular params
+    _where = [
+        pipes.c[key] == val
+        for key, val in _params.items() if not isinstance(val, list)
+    ]
+    q = sqlalchemy.select(
+        [pipes.c.connector_keys, pipes.c.metric_key, pipes.c.location_key]
+    ).where(sqlalchemy.and_(*_where))
+
+    ### parse IN params
+    for c, vals in cols.items():
+        if vals:
+            q = q.where(pipes.c[c].in_(vals))
+
+    ### execute the query and return a list of tuples
+    try:
+        if debug: dprint(q)
+        return self.engine.execute(q).fetchall()
+    except Exception as e:
+        error(str(e))
+
+    return None</code></pre>
+</details>
+</dd>
+<dt id="meerschaum.connectors.sql.SQLConnector.SQLConnector.get_backtrack_data"><code class="name flex">
+<span>def <span class="ident">get_backtrack_data</span></span>(<span>self, pipe: Optional[<a title="meerschaum.Pipe" href="../../Pipe/index.html">meerschaum.Pipe</a>] = None, backtrack_minutes: int = 0, begin: Optional[datetime.datetime] = None, debug: bool = False) ‑> Optional[pandas.DataFrame]</span>
+</code></dt>
+<dd>
+<div class="desc"><p>Get the most recent backtrack_minutes' worth of data from a Pipe</p></div>
+<details class="source">
+<summary>
+<span>Expand source code</span>
+</summary>
+<pre><code class="python">def get_backtrack_data(
+        self,
+        pipe : Optional[meerschaum.Pipe] = None,
+        backtrack_minutes : int = 0,
+        begin : Optional[datetime.datetime] = None,
+        debug : bool = False
+    ) -&gt; Optional[pandas.DataFrame]:
+    &#34;&#34;&#34;
+    Get the most recent backtrack_minutes&#39; worth of data from a Pipe
+    &#34;&#34;&#34;
+    from meerschaum.utils.warnings import error, warn
+    if pipe is None: error(f&#34;Pipe must be provided&#34;)
+    from meerschaum.utils.debug import dprint
+    from meerschaum.connectors.sql._fetch import dateadd_str
+    if begin is None: begin = pipe.sync_time
+    da = dateadd_str(
+        flavor = self.flavor,
+        datepart = &#39;minute&#39;,
+        number = (-1 * backtrack_minutes),
+        begin = begin
+    )
+
+    ### check for capitals
+    from meerschaum.utils.misc import sql_item_name
+    table = sql_item_name(str(pipe), self.flavor)
+    dt = sql_item_name(pipe.get_columns(&#39;datetime&#39;), self.flavor)
+
+    query = f&#34;SELECT * FROM {table}&#34; + (f&#34; WHERE {dt} &gt; {da}&#34; if da else &#34;&#34;)
+
+    df = self.read(query, debug=debug)
+
+    if self.flavor == &#39;sqlite&#39;:
+        from meerschaum.utils.misc import parse_df_datetimes
+        df = parse_df_datetimes(df, debug=debug)
+
+    return df</code></pre>
+</details>
+</dd>
+<dt id="meerschaum.connectors.sql.SQLConnector.SQLConnector.get_pipe_attributes"><code class="name flex">
+<span>def <span class="ident">get_pipe_attributes</span></span>(<span>self, pipe: <a title="meerschaum.Pipe" href="../../Pipe/index.html">meerschaum.Pipe</a>, debug: bool = False) ‑> Optional[Mapping[Any, Any]]</span>
+</code></dt>
+<dd>
+<div class="desc"><p>Get a Pipe's attributes dictionary</p></div>
+<details class="source">
+<summary>
+<span>Expand source code</span>
+</summary>
+<pre><code class="python">def get_pipe_attributes(
+        self,
+        pipe : meerschaum.Pipe,
+        debug : bool = False
+    ) -&gt; Optional[Mapping[Any, Any]]:
+    &#34;&#34;&#34;
+    Get a Pipe&#39;s attributes dictionary
+    &#34;&#34;&#34;
+    from meerschaum.utils.warnings import warn
+    from meerschaum.connectors.sql.tables import get_tables
+    from meerschaum.utils.packages import attempt_import
+    sqlalchemy = attempt_import(&#39;sqlalchemy&#39;)
+    pipes = get_tables()[&#39;pipes&#39;]
+    try:
+        q = sqlalchemy.select([pipes]).where(pipes.c.pipe_id == pipe.id)
+        attributes = self.read(q, debug=debug).to_dict(&#39;records&#39;)[0]
+    except Exception as e:
+        warn(e)
+        return None
+
+    ### handle non-PostgreSQL databases (text vs JSON)
+    if not isinstance(attributes[&#39;parameters&#39;], dict):
+        try:
+            import json
+            attributes[&#39;parameters&#39;] = json.loads(attributes[&#39;parameters&#39;])
+        except:
+            attributes[&#39;parameters&#39;] = dict()
+
+    return attributes</code></pre>
+</details>
+</dd>
+<dt id="meerschaum.connectors.sql.SQLConnector.SQLConnector.get_pipe_data"><code class="name flex">
+<span>def <span class="ident">get_pipe_data</span></span>(<span>self, pipe: Optional[<a title="meerschaum.Pipe" href="../../Pipe/index.html">meerschaum.Pipe</a>] = None, begin: Union[datetime.datetime, str, None] = None, end: Union[datetime.datetime, str, None] = None, debug: bool = False) ‑> Optional[pandas.DataFrame]</span>
+</code></dt>
+<dd>
+<div class="desc"><p>Fetch data from a Pipe.</p>
+<p>:param begin:
+Lower bound for the query (inclusive)</p>
+<p>:param end:
+Upper bound for the query (inclusive)</p></div>
+<details class="source">
+<summary>
+<span>Expand source code</span>
+</summary>
+<pre><code class="python">def get_pipe_data(
+        self,
+        pipe : Optional[meerschaum.Pipe] = None,
+        begin : Union[datetime.datetime, str, None] = None,
+        end : Union[datetime.datetime, str, None] = None,
+        debug : bool = False
+    ) -&gt; Optional[pandas.DataFrame]:
+    &#34;&#34;&#34;
+    Fetch data from a Pipe.
+
+    :param begin:
+        Lower bound for the query (inclusive)
+
+    :param end:
+        Upper bound for the query (inclusive)
+    &#34;&#34;&#34;
+    from meerschaum.utils.debug import dprint
+    from meerschaum.utils.misc import sql_item_name
+    from meerschaum.connectors.sql._fetch import dateadd_str
+    query = f&#34;SELECT * FROM {pipe}&#34;
+    where = &#34;&#34;
+
+    dt = sql_item_name(pipe.get_columns(&#39;datetime&#39;), self.flavor)
+
+    if begin is not None:
+        begin_da = dateadd_str(
+            flavor = self.flavor,
+            datepart = &#39;minute&#39;,
+            number = 0,
+            begin = begin
+        )
+        where += f&#34;{dt} &gt;= {begin_da}&#34; + (&#34; AND &#34; if end is not None else &#34;&#34;)
+
+    if end is not None:
+        end_da = dateadd_str(
+            flavor = self.flavor,
+            datepart = &#39;minute&#39;,
+            number = 0,
+            begin = end
+        )
+        where += f&#34;{dt} &lt;= {end_da}&#34;
+
+    if len(where) &gt; 0:
+        query += &#34;\nWHERE &#34; + where
+
+    query += &#34;\nORDER BY &#34; + dt + &#34; DESC&#34;
+
+    if debug: dprint(f&#34;Getting Pipe data with begin = &#39;{begin}&#39; and end = &#39;{end}&#39;&#34;)
+    df = self.read(query, debug=debug)
+    if self.flavor == &#39;sqlite&#39;:
+        from meerschaum.utils.misc import parse_df_datetimes
+        return parse_df_datetimes(df, debug=debug)
+    return df</code></pre>
+</details>
+</dd>
+<dt id="meerschaum.connectors.sql.SQLConnector.SQLConnector.get_pipe_id"><code class="name flex">
+<span>def <span class="ident">get_pipe_id</span></span>(<span>self, pipe: <a title="meerschaum.Pipe" href="../../Pipe/index.html">meerschaum.Pipe</a>, debug: bool = False) ‑> int</span>
+</code></dt>
+<dd>
+<div class="desc"><p>Get a Pipe's ID from the pipes table.</p></div>
+<details class="source">
+<summary>
+<span>Expand source code</span>
+</summary>
+<pre><code class="python">def get_pipe_id(
+        self,
+        pipe : meerschaum.Pipe,
+        debug : bool = False,
+    ) -&gt; int:
+    &#34;&#34;&#34;
+    Get a Pipe&#39;s ID from the pipes table.
+    &#34;&#34;&#34;
+    from meerschaum.utils.packages import attempt_import
+    json, sqlalchemy = attempt_import(&#39;json&#39;, &#39;sqlalchemy&#39;)
+    from meerschaum.connectors.sql.tables import get_tables
+    pipes = get_tables()[&#39;pipes&#39;]
+
+    query = sqlalchemy.select([pipes.c.pipe_id]).where(
+        pipes.c.connector_keys == pipe.connector_keys and
+        pipes.c.metric_key == pipe.metric_key and
+        pipes.c.location_key == pipe.location_key
+    )
+    return self.value(query, debug=debug)</code></pre>
+</details>
+</dd>
+<dt id="meerschaum.connectors.sql.SQLConnector.SQLConnector.get_pipe_rowcount"><code class="name flex">
+<span>def <span class="ident">get_pipe_rowcount</span></span>(<span>self, pipe: "'<a title="meerschaum.Pipe" href="../../Pipe/index.html">meerschaum.Pipe</a>'", begin: "'datetime.datetime'" = None, end: "'datetime.datetime'" = None, remote: bool = False, debug: bool = False) ‑> int</span>
+</code></dt>
+<dd>
+<div class="desc"><p>Return the number of rows between datetimes for a Pipe's instance cache or remote source</p></div>
+<details class="source">
+<summary>
+<span>Expand source code</span>
+</summary>
+<pre><code class="python">def get_pipe_rowcount(
+        self,
+        pipe : &#39;meerschaum.Pipe&#39;,
+        begin : &#39;datetime.datetime&#39; = None,
+        end : &#39;datetime.datetime&#39; = None,
+        remote : bool = False,
+        debug : bool = False
+    ) -&gt; int:
+    &#34;&#34;&#34;
+    Return the number of rows between datetimes for a Pipe&#39;s instance cache or remote source
+    &#34;&#34;&#34;
+    from meerschaum.utils.warnings import error, warn
+    if remote:
+        msg = f&#34;&#39;fetch:definition&#39; must be an attribute of pipe &#39;{pipe}&#39; to get a remote rowcount&#34;
+        if &#39;fetch&#39; not in pipe.parameters:
+            error(msg)
+            return None
+        if &#39;definition&#39; not in pipe.parameters[&#39;fetch&#39;]:
+            error(msg)
+            return None
+    if &#39;datetime&#39; not in pipe.columns: error(f&#34;Pipe &#39;{pipe}&#39; must have a &#39;datetime&#39; column declared (columns:datetime)&#34;)
+    src = str(pipe) if not remote else pipe.parameters[&#39;fetch&#39;][&#39;definition&#39;]
+    query = f&#34;&#34;&#34;
+    WITH src AS ({src})
+    SELECT COUNT({pipe.columns[&#39;datetime&#39;]})
+    FROM src
+    &#34;&#34;&#34;
+    if begin is not None or end is not None: query += &#34;WHERE&#34;
+    if begin is not None:
+        query += f&#34;&#34;&#34;
+        {pipe.columns[&#39;datetime&#39;]} &gt; {dateadd_str(flavor=self.flavor, datepart=&#39;minute&#39;, number=(0), begin=begin)}
+        &#34;&#34;&#34;
+    if end is not None and begin is not None: query += &#34;AND&#34;
+    if end is not None:
+        query += f&#34;&#34;&#34;
+        {pipe.columns[&#39;datetime&#39;]} &lt;= {dateadd_str(flavor=self.flavor, datepart=&#39;minute&#39;, number=(0), begin=end)}
+        &#34;&#34;&#34;
+    return self.value(query, debug=debug)</code></pre>
+</details>
+</dd>
+<dt id="meerschaum.connectors.sql.SQLConnector.SQLConnector.get_plugin_attributes"><code class="name flex">
+<span>def <span class="ident">get_plugin_attributes</span></span>(<span>self, plugin: meerschaum._internal.Plugin, debug: bool = False) ‑> str</span>
+</code></dt>
+<dd>
+<div class="desc"></div>
+<details class="source">
+<summary>
+<span>Expand source code</span>
+</summary>
+<pre><code class="python">def get_plugin_attributes(
+        self,
+        plugin : &#39;meerschaum._internal.Plugin&#39;,
+        debug : bool = False
+    ) -&gt; str:
+    ### ensure plugins table exists
+    from meerschaum.connectors.sql.tables import get_tables
+    plugins = get_tables(mrsm_instance=self, debug=debug)[&#39;plugins&#39;]
+    from meerschaum.utils.packages import attempt_import
+    sqlalchemy = attempt_import(&#39;sqlalchemy&#39;)
+
+    query = sqlalchemy.select([plugins.c.attributes]).where(plugins.c.plugin_name == plugin.name)
+
+    return self.value(query, debug=debug)</code></pre>
+</details>
+</dd>
+<dt id="meerschaum.connectors.sql.SQLConnector.SQLConnector.get_plugin_id"><code class="name flex">
+<span>def <span class="ident">get_plugin_id</span></span>(<span>self, plugin: meerschaum._internal.Plugin, debug: bool = False) ‑> int</span>
+</code></dt>
+<dd>
+<div class="desc"></div>
+<details class="source">
+<summary>
+<span>Expand source code</span>
+</summary>
+<pre><code class="python">def get_plugin_id(
+        self,
+        plugin : &#39;meerschaum._internal.Plugin&#39;,
+        debug : bool = False
+    ) -&gt; int:
+    ### ensure plugins table exists
+    from meerschaum.connectors.sql.tables import get_tables
+    plugins = get_tables(mrsm_instance=self, debug=debug)[&#39;plugins&#39;]
+    from meerschaum.utils.packages import attempt_import
+    sqlalchemy = attempt_import(&#39;sqlalchemy&#39;)
+
+    query = sqlalchemy.select([plugins.c.plugin_id]).where(plugins.c.plugin_name == plugin.name)
+    
+    return self.value(query, debug=debug)</code></pre>
+</details>
+</dd>
+<dt id="meerschaum.connectors.sql.SQLConnector.SQLConnector.get_plugin_user_id"><code class="name flex">
+<span>def <span class="ident">get_plugin_user_id</span></span>(<span>self, plugin: meerschaum._internal.Plugin, debug: bool = False) ‑> str</span>
+</code></dt>
+<dd>
+<div class="desc"></div>
+<details class="source">
+<summary>
+<span>Expand source code</span>
+</summary>
+<pre><code class="python">def get_plugin_user_id(
+        self,
+        plugin : &#39;meerschaum._internal.Plugin&#39;,
+        debug : bool = False
+    ) -&gt; str:
+    ### ensure plugins table exists
+    from meerschaum.connectors.sql.tables import get_tables
+    plugins = get_tables(mrsm_instance=self, debug=debug)[&#39;plugins&#39;]
+    from meerschaum.utils.packages import attempt_import
+    sqlalchemy = attempt_import(&#39;sqlalchemy&#39;)
+
+    query = sqlalchemy.select([plugins.c.user_id]).where(plugins.c.plugin_name == plugin.name)
+
+    return self.value(query, debug=debug)</code></pre>
+</details>
+</dd>
+<dt id="meerschaum.connectors.sql.SQLConnector.SQLConnector.get_plugin_username"><code class="name flex">
+<span>def <span class="ident">get_plugin_username</span></span>(<span>self, plugin: meerschaum._internal.Plugin, debug: bool = False) ‑> str</span>
+</code></dt>
+<dd>
+<div class="desc"></div>
+<details class="source">
+<summary>
+<span>Expand source code</span>
+</summary>
+<pre><code class="python">def get_plugin_username(
+        self,
+        plugin : &#39;meerschaum._internal.Plugin&#39;,
+        debug : bool = False
+    ) -&gt; str:
+    ### ensure plugins table exists
+    from meerschaum.connectors.sql.tables import get_tables
+    plugins = get_tables(mrsm_instance=self, debug=debug)[&#39;plugins&#39;]
+    users = get_tables(mrsm_instance=self, debug=debug)[&#39;users&#39;]
+    from meerschaum.utils.packages import attempt_import
+    sqlalchemy = attempt_import(&#39;sqlalchemy&#39;)
+
+    query = (
+        sqlalchemy.select([users.c.username]).
+        where(
+            users.c.users_id == plugins.c.user_id
+            and plugins.c.plugin_name == plugin.name
+        )
+    )
+
+    #  query = f&#34;&#34;&#34;
+    #  SELECT users.username
+    #  FROM plugins
+    #  INNER JOIN users ON users.user_id = plugins.user_id
+    #  WHERE plugin_name = %(plugin_name)s
+    #  &#34;&#34;&#34;
+    return self.value(query, debug=debug)</code></pre>
+</details>
+</dd>
+<dt id="meerschaum.connectors.sql.SQLConnector.SQLConnector.get_plugin_version"><code class="name flex">
+<span>def <span class="ident">get_plugin_version</span></span>(<span>self, plugin: meerschaum._internal.Plugin, debug: bool = False) ‑> str</span>
+</code></dt>
+<dd>
+<div class="desc"></div>
+<details class="source">
+<summary>
+<span>Expand source code</span>
+</summary>
+<pre><code class="python">def get_plugin_version(
+        self,
+        plugin : &#39;meerschaum._internal.Plugin&#39;,
+        debug : bool = False
+    ) -&gt; str:
+    ### ensure plugins table exists
+    from meerschaum.connectors.sql.tables import get_tables
+    plugins = get_tables(mrsm_instance=self, debug=debug)[&#39;plugins&#39;]
+    from meerschaum.utils.packages import attempt_import
+    sqlalchemy = attempt_import(&#39;sqlalchemy&#39;)
+
+    query = sqlalchemy.select([plugins.c.version]).where(plugins.c.plugin_name == plugin.name)
+
+    return self.value(query, debug=debug)</code></pre>
+</details>
+</dd>
+<dt id="meerschaum.connectors.sql.SQLConnector.SQLConnector.get_plugins"><code class="name flex">
+<span>def <span class="ident">get_plugins</span></span>(<span>self, user_id: int = None, debug: bool = False, **kw) ‑> list</span>
+</code></dt>
+<dd>
+<div class="desc"></div>
+<details class="source">
+<summary>
+<span>Expand source code</span>
+</summary>
+<pre><code class="python">def get_plugins(
+        self,
+        user_id : int = None,
+        debug : bool = False,
+        **kw
+    ) -&gt; list:
+    ### ensure plugins table exists
+    from meerschaum.connectors.sql.tables import get_tables
+    plugins = get_tables(mrsm_instance=self, debug=debug)[&#39;plugins&#39;]
+    from meerschaum.utils.packages import attempt_import
+    sqlalchemy = attempt_import(&#39;sqlalchemy&#39;)
+
+    query = sqlalchemy.select([plugins.c.plugin_name])
+    if user_id is not None: query = query.where(plugins.c.user_id == user_id)
+
+    #  q = f&#34;&#34;&#34;
+    #  SELECT plugin_name
+    #  FROM plugins
+    #  &#34;&#34;&#34; + (&#34;&#34;&#34;
+    #  WHERE user_id = %(user_id)s
+    #  &#34;&#34;&#34; if user_id is not None else &#34;&#34;)
+
+    return list(self.read(q, debug=debug)[&#39;plugin_name&#39;])</code></pre>
+</details>
+</dd>
+<dt id="meerschaum.connectors.sql.SQLConnector.SQLConnector.get_sync_time"><code class="name flex">
+<span>def <span class="ident">get_sync_time</span></span>(<span>self, pipe: "'<a title="meerschaum.Pipe" href="../../Pipe/index.html">meerschaum.Pipe</a>'", params: dict = None, debug: bool = False) ‑> datetime.datetime</span>
+</code></dt>
+<dd>
+<div class="desc"><p>Get a Pipe's most recent datetime</p></div>
+<details class="source">
+<summary>
+<span>Expand source code</span>
+</summary>
+<pre><code class="python">def get_sync_time(
+        self,
+        pipe : &#39;meerschaum.Pipe&#39;,
+        params : dict = None,
+        debug : bool = False,
+    ) -&gt; &#39;datetime.datetime&#39;:
+    &#34;&#34;&#34;
+    Get a Pipe&#39;s most recent datetime
+    &#34;&#34;&#34;
+    from meerschaum.utils.misc import sql_item_name, build_where
+    from meerschaum.utils.warnings import warn
+    table = sql_item_name(str(pipe), self.flavor)
+    dt = sql_item_name(pipe.get_columns(&#39;datetime&#39;), self.flavor)
+
+    where = &#34;&#34; if params is None else build_where(params)
+    q = f&#34;SELECT {dt}\nFROM {table}{where}\nORDER BY {dt} DESC\nLIMIT 1&#34;
+    if self.flavor == &#39;mssql&#39;:
+        q = f&#34;SELECT TOP 1 {dt}\nFROM {table}{where}\nORDER BY {dt} DESC&#34;
+    try:
+        from meerschaum.utils.misc import round_time
+        import datetime
+        db_time = self.value(q, silent=True, debug=debug)
+
+        ### sqlite returns str
+        if db_time is None: return None
+        elif isinstance(db_time, str):
+            from meerschaum.utils.packages import attempt_import
+            dateutil_parser = attempt_import(&#39;dateutil.parser&#39;)
+            st = dateutil_parser.parse(db_time)
+        else:
+            st = db_time.to_pydatetime()
+
+        ### round down to smooth timestamp
+        sync_time = round_time(st, date_delta=datetime.timedelta(minutes=1), to=&#39;down&#39;)
+
+    except Exception as e:
+        sync_time = None
+        warn(str(e))
+
+    return sync_time</code></pre>
+</details>
+</dd>
+<dt id="meerschaum.connectors.sql.SQLConnector.SQLConnector.get_user_id"><code class="name flex">
+<span>def <span class="ident">get_user_id</span></span>(<span>self, user: meerschaum._internal.User, debug: bool = False) ‑> int</span>
+</code></dt>
+<dd>
+<div class="desc"></div>
+<details class="source">
+<summary>
+<span>Expand source code</span>
+</summary>
+<pre><code class="python">def get_user_id(
+        self,
+        user : meerschaum._internal.User,
+        debug : bool = False
+    ) -&gt; int:
+    ### ensure users table exists
+    from meerschaum.utils.packages import attempt_import
+    sqlalchemy = attempt_import(&#39;sqlalchemy&#39;)
+    from meerschaum.connectors.sql.tables import get_tables
+    users = get_tables(mrsm_instance=self, debug=debug)[&#39;users&#39;]
+
+    query = (
+        sqlalchemy.select([users.c.user_id]).
+        where(users.c.username == user.username)
+    )
+
+    result = self.value(query, debug=debug)
+    if result is not None: return int(result)
+    return None</code></pre>
+</details>
+</dd>
+<dt id="meerschaum.connectors.sql.SQLConnector.SQLConnector.get_user_password_hash"><code class="name flex">
+<span>def <span class="ident">get_user_password_hash</span></span>(<span>self, user: meerschaum._internal.User, debug: bool = False, **kw: Any) ‑> str</span>
+</code></dt>
+<dd>
+<div class="desc"><p>Return a user's password hash</p></div>
+<details class="source">
+<summary>
+<span>Expand source code</span>
+</summary>
+<pre><code class="python">def get_user_password_hash(
+        self,
+        user : meerschaum._internal.User,
+        debug : bool = False,
+        **kw : Any
+    ) -&gt; str:
+    &#34;&#34;&#34;
+    Return a user&#39;s password hash
+    &#34;&#34;&#34;
+    from meerschaum.connectors.sql.tables import get_tables
+    users = get_tables(mrsm_instance=self, debug=debug)[&#39;users&#39;]
+    from meerschaum.utils.packages import attempt_import
+    sqlalchemy = attempt_import(&#39;sqlalchemy&#39;)
+
+    if user.user_id is not None: user_id = user.user_id
+    else: user_id = self.get_user_id(user, debug=debug)
+
+    if user_id is None: return None
+
+    query = sqlalchemy.select([users.c.password_hash]).where(users.c.user_id == user_id)
+
+    return self.value(query, debug=debug)</code></pre>
+</details>
+</dd>
+<dt id="meerschaum.connectors.sql.SQLConnector.SQLConnector.get_user_type"><code class="name flex">
+<span>def <span class="ident">get_user_type</span></span>(<span>self, user: meerschaum._internal.User, debug: bool = False, **kw: Any) ‑> Optional[str]</span>
+</code></dt>
+<dd>
+<div class="desc"><p>Return a user's type</p></div>
+<details class="source">
+<summary>
+<span>Expand source code</span>
+</summary>
+<pre><code class="python">def get_user_type(
+        self,
+        user : meerschaum._internal.User,
+        debug : bool = False,
+        **kw : Any
+    ) -&gt; Optional[str]:
+    &#34;&#34;&#34;
+    Return a user&#39;s type
+    &#34;&#34;&#34;
+    from meerschaum.connectors.sql.tables import get_tables
+    users = get_tables(mrsm_instance=self, debug=debug)[&#39;users&#39;]
+    from meerschaum.utils.packages import attempt_import
+    sqlalchemy = attempt_import(&#39;sqlalchemy&#39;)
+
+    if user.user_id is not None: user_id = user.user_id
+    else: user_id = self.get_user_id(user, debug=debug)
+
+    if user_id is None: return None
+
+    query = sqlalchemy.select([users.c.usr_type]).where(users.c.user_id == user_id)
+
+    return self.value(query, debug=debug)</code></pre>
+</details>
+</dd>
+<dt id="meerschaum.connectors.sql.SQLConnector.SQLConnector.get_users"><code class="name flex">
+<span>def <span class="ident">get_users</span></span>(<span>self, debug: bool = False, **kw: Any) ‑> list</span>
+</code></dt>
+<dd>
+<div class="desc"></div>
+<details class="source">
+<summary>
+<span>Expand source code</span>
+</summary>
+<pre><code class="python">def get_users(
+        self,
+        debug : bool = False,
+        **kw : Any
+    ) -&gt; list:
+    ### ensure users table exists
+    from meerschaum.connectors.sql.tables import get_tables
+    users = get_tables(mrsm_instance=self, debug=debug)[&#39;users&#39;]
+    from meerschaum.utils.packages import attempt_import
+    sqlalchemy = attempt_import(&#39;sqlalchemy&#39;)
+
+    query = sqlalchemy.select([users.c.username])
+
+    return list(self.read(query, debug=debug)[&#39;username&#39;])</code></pre>
+</details>
+</dd>
+<dt id="meerschaum.connectors.sql.SQLConnector.SQLConnector.pipe_exists"><code class="name flex">
+<span>def <span class="ident">pipe_exists</span></span>(<span>self, pipe: "'<a title="meerschaum.Pipe" href="../../Pipe/index.html">meerschaum.Pipe</a>'", debug: bool = False) ‑> bool</span>
+</code></dt>
+<dd>
+<div class="desc"><p>Check that a Pipe's table exists</p></div>
+<details class="source">
+<summary>
+<span>Expand source code</span>
+</summary>
+<pre><code class="python">def pipe_exists(
+        self,
+        pipe : &#39;meerschaum.Pipe&#39;,
+        debug : bool = False
+    ) -&gt; bool:
+    &#34;&#34;&#34;
+    Check that a Pipe&#39;s table exists
+    &#34;&#34;&#34;
+    from meerschaum.utils.misc import sql_item_name
+    from meerschaum.utils.debug import dprint
+    ### default: select no rows. NOTE: this might not work for Oracle
+    q = f&#34;SELECT COUNT(*) FROM {pipe}&#34;
+    if self.flavor in (&#39;timescaledb&#39;, &#39;postgresql&#39;):
+        q = f&#34;SELECT to_regclass(&#39;{sql_item_name(str(pipe), self.flavor)}&#39;)&#34;
+    elif self.flavor == &#39;mssql&#39;:
+        q = f&#34;SELECT OBJECT_ID(&#39;{pipe}&#39;)&#34;
+    elif self.flavor in (&#39;mysql&#39;, &#39;mariadb&#39;):
+        q = f&#34;SHOW TABLES LIKE &#39;{pipe}&#39;&#34;
+    elif self.flavor == &#39;sqlite&#39;:
+        q = f&#34;SELECT name FROM sqlite_master WHERE name=&#39;{pipe}&#39;&#34;
+    exists = self.value(q, debug=debug) is not None
+    if debug: dprint(f&#34;Pipe &#39;{pipe}&#39; &#34; + (&#39;exists.&#39; if exists else &#39;does not exist.&#39;))
+    return exists</code></pre>
+</details>
+</dd>
+<dt id="meerschaum.connectors.sql.SQLConnector.SQLConnector.read"><code class="name flex">
+<span>def <span class="ident">read</span></span>(<span>self, query_or_table: str, params: Mapping[str, Any] = {}, chunksize: int = -1, silent: bool = False, debug: bool = False, **kw: Any) ‑> Optional[pandas.DataFrame]</span>
+</code></dt>
+<dd>
+<div class="desc"><p>Read a SQL query or table into a pandas dataframe.</p></div>
+<details class="source">
+<summary>
+<span>Expand source code</span>
+</summary>
+<pre><code class="python">def read(
+        self,
+        query_or_table : str,
+        params : Mapping[str, Any] = {},
+        chunksize : int = -1,
+        silent : bool = False,
+        debug : bool = False,
+        **kw : Any
+    ) -&gt; Optional[pandas.DataFrame]:
+    &#34;&#34;&#34;
+    Read a SQL query or table into a pandas dataframe.
+    &#34;&#34;&#34;
+    from meerschaum.utils.misc import sql_item_name
+    from meerschaum.utils.packages import attempt_import
+    sqlalchemy = attempt_import(&#34;sqlalchemy&#34;)
+    chunksize = chunksize if chunksize != -1 else self.sys_config[&#39;chunksize&#39;]
+    if debug:
+        import time
+        start = time.time()
+        dprint(query_or_table)
+        dprint(f&#34;Fetching with chunksize: {chunksize}&#34;)
+
+    ### This might be sqlalchemy object or the string of a table name.
+    ### We check for spaces and quotes to see if it might be a weird table.
+    if (
+        &#39; &#39; not in str(query_or_table)
+        or (
+            &#39; &#39; in str(query_or_table)
+            and str(query_or_table).startswith(&#39;&#34;&#39;)
+            and str(query_or_table).endswith(&#39;&#34;&#39;)
+        )
+    ):
+        if self.flavor in (&#39;postgresql&#39;, &#39;timescaledb&#39;):
+            query_or_table = sql_item_name(str(query_or_table), self.flavor)
+        if debug: dprint(f&#34;Reading from table {query_or_table}&#34;)
+        formatted_query = str(sqlalchemy.text(&#34;SELECT * FROM &#34; + str(query_or_table)))
+    else:
+        try:
+            formatted_query = str(sqlalchemy.text(query_or_table))
+        except:
+            formatted_query = query_or_table
+
+    try:
+        chunk_generator = self.pd.read_sql(
+            formatted_query,
+            self.engine,
+            params = params,
+            chunksize = chunksize
+        )
+    except Exception as e:
+        import inspect
+        if debug: dprint(f&#34;Failed to execute query:\n\n{query_or_table}\n\n&#34;)
+        if not silent: warn(str(e))
+
+        return None
+
+    chunk_list = []
+    for chunk in chunk_generator:
+        chunk_list.append(chunk)
+
+    ### if no chunks returned, read without chunks
+    ### to get columns
+    if len(chunk_list) == 0:
+        df = self.pd.read_sql(
+            sqlalchemy.text(formatted_query),
+            self.engine
+        )
+    else:
+        df = self.pd.concat(chunk_list).reset_index(drop=True)
+
+    ### chunksize is not None so must iterate
+    if debug:
+        end = time.time()
+        dprint(f&#34;Fetched {len(chunk_list)} chunks in {round(end - start, 2)} seconds.&#34;)
+
+    return df</code></pre>
+</details>
+</dd>
+<dt id="meerschaum.connectors.sql.SQLConnector.SQLConnector.register_pipe"><code class="name flex">
+<span>def <span class="ident">register_pipe</span></span>(<span>self, pipe: <a title="meerschaum.Pipe" href="../../Pipe/index.html">meerschaum.Pipe</a>, debug: bool = False) ‑> SuccessTuple</span>
+</code></dt>
+<dd>
+<div class="desc"><p>Register a new pipe.
+A pipe's attributes must be set before registering.</p></div>
+<details class="source">
+<summary>
+<span>Expand source code</span>
+</summary>
+<pre><code class="python">def register_pipe(
+        self,
+        pipe : meerschaum.Pipe,
+        debug : bool = False,
+    ) -&gt; SuccessTuple:
+    &#34;&#34;&#34;
+    Register a new pipe.
+    A pipe&#39;s attributes must be set before registering.
+    &#34;&#34;&#34;
+    from meerschaum.utils.debug import dprint
+    from meerschaum.utils.packages import attempt_import
+
+    ### ensure pipes table exists
+    from meerschaum.connectors.sql.tables import get_tables
+    pipes = get_tables(mrsm_instance=self, debug=debug)[&#39;pipes&#39;]
+
+    if pipe.id is not None:
+        return False, f&#34;Pipe &#39;{pipe}&#39; is already registered&#34;
+
+    ### NOTE: if `parameters` is supplied in the Pipe constructor,
+    ###       then `pipe.parameters` will exist and not be fetched from the database.
+
+    ### 1. Prioritize the Pipe object&#39;s `parameters` first.
+    ###    E.g. if the user manually sets the `parameters` property
+    ###    or if the Pipe already exists
+    ###    (which shouldn&#39;t be able to be registered anyway but that&#39;s an issue for later).
+    parameters = None
+    try:
+        parameters = pipe.parameters
+    except Exception as e:
+        if debug: dprint(str(e))
+        parameters = None
+
+    ### ensure `parameters` is a dictionary
+    if parameters is None:
+        parameters = dict()
+
+    json, sqlalchemy = attempt_import(&#39;json&#39;, &#39;sqlalchemy&#39;)
+    values = {
+        &#39;connector_keys&#39; : pipe.connector_keys,
+        &#39;metric_key&#39;     : pipe.metric_key,
+        &#39;location_key&#39;   : pipe.location_key,
+        &#39;parameters&#39;     : json.dumps(pipe.parameters),
+    }
+    query = sqlalchemy.insert(pipes).values(**values)
+    result = self.exec(query, debug=debug)
+    if result is None:
+        return False, f&#34;Failed to register pipe &#39;{pipe}&#39;&#34;
+    return True, f&#34;Successfully registered pipe &#39;{pipe}&#39;&#34;</code></pre>
+</details>
+</dd>
+<dt id="meerschaum.connectors.sql.SQLConnector.SQLConnector.register_plugin"><code class="name flex">
+<span>def <span class="ident">register_plugin</span></span>(<span>self, plugin: meerschaum._internal.Plugin, debug: bool = False, **kw) ‑> tuple</span>
+</code></dt>
+<dd>
+<div class="desc"><p>Register a new plugin</p></div>
+<details class="source">
+<summary>
+<span>Expand source code</span>
+</summary>
+<pre><code class="python">def register_plugin(
+        self,
+        plugin : &#39;meerschaum._internal.Plugin&#39;,
+        debug : bool = False,
+        **kw
+    ) -&gt; tuple:
+    &#34;&#34;&#34;
+    Register a new plugin
+    &#34;&#34;&#34;
+
+    from meerschaum.utils.warnings import warn, error
+    from meerschaum.utils.packages import attempt_import
+    sqlalchemy = attempt_import(&#39;sqlalchemy&#39;)
+    from meerschaum.connectors.sql.tables import get_tables
+    plugins = get_tables(mrsm_instance=self, debug=debug)[&#39;plugins&#39;]
+
+    old_id = self.get_plugin_id(plugin, debug=debug)
+
+    if old_id is not None:
+        old_version = self.get_plugin_version(plugin, debug=debug)
+        new_version = plugin.version
+        if old_version is None: old_version = &#39;&#39;
+        if new_version is None: new_version = &#39;&#39;
+
+        ### verify that the new version is greater than the old
+        from packaging import version as packaging_version
+        if packaging_version.parse(old_version) &gt;= packaging_version.parse(new_version):
+            return False, (
+                f&#34;Version &#39;{new_version}&#39; of plugin &#39;{plugin}&#39; must be greater than existing version &#39;{old_version}&#39;.&#34;
+            )
+
+    import json
+    bind_variables = {
+        &#39;plugin_name&#39; : plugin.name,
+        &#39;version&#39; : plugin.version,
+        &#39;attributes&#39; : json.dumps(plugin.attributes),
+        &#39;user_id&#39; : plugin.user_id,
+        &#39;plugin_id&#39; : old_id,
+    }
+
+    if old_id is None:
+        query = sqlalchemy.insert(plugins).values(**bind_variables)
+    else:
+        query = (
+            sqlalchemy.update(plugins).
+            values(**bind_variables).
+            where(plugins.c.plugin_id == old_id)
+        )
+
+    result = self.exec(query, debug=debug)
+    if result is None:
+        return False, f&#34;Failed to register plugin &#39;{plugin}&#39;&#34;
+    return True, f&#34;Successfully registered plugin &#39;{plugin}&#39;&#34;</code></pre>
+</details>
+</dd>
+<dt id="meerschaum.connectors.sql.SQLConnector.SQLConnector.register_user"><code class="name flex">
+<span>def <span class="ident">register_user</span></span>(<span>self, user: meerschaum._internal.User, debug: bool = False, **kw: Any) ‑> SuccessTuple</span>
+</code></dt>
+<dd>
+<div class="desc"><p>Register a new user</p></div>
+<details class="source">
+<summary>
+<span>Expand source code</span>
+</summary>
+<pre><code class="python">def register_user(
+        self,
+        user : meerschaum._internal.User,
+        debug : bool = False,
+        **kw : Any
+    ) -&gt; SuccessTuple:
+    &#34;&#34;&#34;
+    Register a new user
+    &#34;&#34;&#34;
+    from meerschaum.utils.warnings import warn, error, info
+    from meerschaum.utils.packages import attempt_import
+    sqlalchemy = attempt_import(&#39;sqlalchemy&#39;)
+
+    valid_tuple = valid_username(user.username)
+    if not valid_tuple[0]: return valid_tuple
+
+    old_id = self.get_user_id(user, debug=debug)
+
+    if old_id is not None:
+        return False, f&#34;User &#39;{user}&#39; already exists.&#34;
+
+    ### ensure users table exists
+    from meerschaum.connectors.sql.tables import get_tables
+    tables = get_tables(mrsm_instance=self, debug=debug)
+
+    json = attempt_import(&#39;json&#39;)
+    bind_variables = {
+        &#39;user_id&#39; : old_id,
+        &#39;username&#39; : user.username,
+        &#39;email&#39; : user.email,
+        &#39;password_hash&#39; : user.password_hash,
+        &#39;attributes&#39; : json.dumps(user.attributes),
+    }
+    if old_id is not None:
+        return False, f&#34;User &#39;{username}&#39; already exists&#34;
+    if old_id is None:
+        query = (
+            sqlalchemy.insert(tables[&#39;users&#39;]).
+            values(**bind_variables)
+        )
+
+    result = self.exec(query, debug=debug)
+    if result is None:
+        return False, f&#34;Failed to register user &#39;{user}&#39;&#34;
+    return True, f&#34;Successfully registered user &#39;{user}&#39;&#34;</code></pre>
+</details>
+</dd>
+<dt id="meerschaum.connectors.sql.SQLConnector.SQLConnector.sync_pipe"><code class="name flex">
+<span>def <span class="ident">sync_pipe</span></span>(<span>self, pipe: "'<a title="meerschaum.Pipe" href="../../Pipe/index.html">meerschaum.Pipe</a>'", df: "'pd.DataFrame'" = None, begin: "'datetime.datetime'" = None, end: "'datetime.datetime'" = None, check_existing: bool = True, blocking: bool = True, debug: bool = False, **kw) ‑> tuple</span>
+</code></dt>
+<dd>
+<div class="desc"><p>Sync a pipe using a SQL Connection.</p>
+<p>:param pipe: The Meerschaum Pipe instance into which to sync the data.
+:type pipe: meerschaum.Pipe
+:param df: An optional DataFrame to sync into the pipe, defaults to None.
+:type df: pandas.DataFrame
+:param begin: Optionally specify the earliest datetime to search for data, defaults to None.
+:type begin: datetime.datetime
+:param end: Optionally specify the latelst datetime to search for data, defaults to None.
+:type end: datetime.datetime
+:param check_existing: If True, pull and diff with existing data from the pipe, defaults to True.
+:type check_existing: bool
+:param blocking: If True, wait for sync to finish and return its result, otherwise asyncronously sync. Defaults to True.
+:type blocking: bool
+:param debug: Verbosity toggle. Defaults to False.
+:type debug: bool
+:param kw: Catch-all for keyword arguments.
+:type kw: dict</p></div>
+<details class="source">
+<summary>
+<span>Expand source code</span>
+</summary>
+<pre><code class="python">def sync_pipe(
+        self,
+        pipe : &#39;meerschaum.Pipe&#39;,
+        df : &#39;pd.DataFrame&#39; = None,
+        begin : &#39;datetime.datetime&#39; = None,
+        end : &#39;datetime.datetime&#39; = None,
+        check_existing : bool = True,
+        blocking : bool = True,
+        debug : bool = False,
+        **kw
+    ) -&gt; tuple:
+    &#34;&#34;&#34;
+    Sync a pipe using a SQL Connection.
+
+    :param pipe: The Meerschaum Pipe instance into which to sync the data.
+    :type pipe: meerschaum.Pipe
+    :param df: An optional DataFrame to sync into the pipe, defaults to None.
+    :type df: pandas.DataFrame
+    :param begin: Optionally specify the earliest datetime to search for data, defaults to None.
+    :type begin: datetime.datetime
+    :param end: Optionally specify the latelst datetime to search for data, defaults to None.
+    :type end: datetime.datetime
+    :param check_existing: If True, pull and diff with existing data from the pipe, defaults to True.
+    :type check_existing: bool
+    :param blocking: If True, wait for sync to finish and return its result, otherwise asyncronously sync. Defaults to True.
+    :type blocking: bool
+    :param debug: Verbosity toggle. Defaults to False.
+    :type debug: bool
+    :param kw: Catch-all for keyword arguments.
+    :type kw: dict
+    &#34;&#34;&#34;
+    from meerschaum.utils.warnings import warn
+    from meerschaum.utils.debug import dprint
+    from meerschaum.utils.packages import import_pandas
+    if df is None:
+        msg = f&#34;DataFrame is None. Cannot sync Pipe &#39;{pipe}&#39;&#34;
+        warn(msg)
+        return False, msg
+
+    ## allow syncing for JSON or dict as well as DataFrame
+    pd = import_pandas()
+    if isinstance(df, dict): df = pd.DataFrame(df)
+    elif isinstance(df, str): df = pd.read_json(df)
+
+    ### if Pipe is not registered
+    if not pipe.id:
+        register_tuple = pipe.register(debug=debug)
+        if not register_tuple[0]:
+            return register_tuple
+
+    ### quit here if implicitly syncing MQTT pipes.
+    ### (pipe.sync() is called in the callback of the MQTTConnector.fetch() method)
+    if df is None and pipe.connector.type == &#39;mqtt&#39;:
+        return True, &#34;Success&#34;
+
+    ### df is the dataframe returned from the remote source
+    ### via the connector
+    if debug: dprint(&#34;Fetched data:\n&#34; + str(df))
+
+    ### if table does not exist, create it with indices
+    if not pipe.exists(debug=debug):
+        if debug: dprint(f&#34;Creating empty table for Pipe &#39;{pipe}&#39;...&#34;)
+        if debug: dprint(&#34;New table data types:\n&#34; + f&#34;{df.head(0).dtypes}&#34;)
+        ### create empty table
+        success = self.to_sql(
+            df.head(0),
+            if_exists = &#39;append&#39;,
+            name = str(pipe),
+            debug = debug
+        )
+        if success and debug: dprint(f&#34;Successfully created table for Pipe &#39;{pipe}&#39;. Creating indices...&#34;)
+        elif not success:
+            msg = f&#34;Failed to create table for Pipe &#39;{pipe}&#39;.&#34;
+            if debug: dprint(msg + &#34; Exiting...&#34;)
+            return False, msg
+        ### build indices on Pipe&#39;s root table
+        if not self.create_indices(pipe, debug=debug):
+            if debug: dprint(f&#34;Failed to create indices for Pipe &#39;{pipe}&#39;. Continuing...&#34;)
+
+    new_data_df = filter_existing(pipe, df, debug=debug) if check_existing else df
+    if debug: dprint(f&#34;New unseen data:\n&#34; + str(new_data_df))
+
+    if_exists = kw.get(&#39;if_exists&#39;, &#39;append&#39;)
+    if &#39;if_exists&#39; in kw: kw.pop(&#39;if_exists&#39;)
+
+    ### append new data to Pipe&#39;s table
+    return self.to_sql(
+        new_data_df,
+        name = str(pipe),
+        if_exists = if_exists,
+        debug = debug,
+        as_tuple = True,
+        **kw
+    )</code></pre>
+</details>
+</dd>
+<dt id="meerschaum.connectors.sql.SQLConnector.SQLConnector.to_sql"><code class="name flex">
+<span>def <span class="ident">to_sql</span></span>(<span>self, df: pandas.DataFrame, name: str = None, index: bool = False, if_exists: str = 'replace', method: str = '', chunksize: int = -1, silent: bool = False, debug: bool = False, as_tuple: bool = False, **kw) ‑> Union[bool, SuccessTuple]</span>
+</code></dt>
+<dd>
+<div class="desc"><p>Upload a DataFrame's contents to the SQL server</p>
+<p>:param df:
+The DataFrame to be uploaded</p>
+<p>:param name:
+The name of the table to be created</p>
+<p>:param index:
+If True, creates the DataFrame's indices as columns (default False)</p>
+<p>:param if_exists: str
+['replace', 'append', 'fail']
+Drop and create the table ('replace') or append if it exists ('append') or raise Exception ('fail')
+(default 'replace')</p>
+<p>:param method:
+None or multi. Details on pandas.to_sql</p>
+<p>:param as_tuple:
+If True, return a (success_bool, message) tuple instead of a bool</p>
+<p>**kw : keyword arguments
+Additional arguments will be passed to the DataFrame's <code>to_sql</code> function</p></div>
+<details class="source">
+<summary>
+<span>Expand source code</span>
+</summary>
+<pre><code class="python">def to_sql(
+        self,
+        df : pandas.DataFrame,
+        name : str = None,
+        index : bool = False,
+        if_exists : str = &#39;replace&#39;,
+        method : str = &#34;&#34;,
+        chunksize : int = -1,
+        silent : bool = False,
+        debug : bool = False,
+        as_tuple : bool = False,
+        **kw
+    ) -&gt; Union[bool, SuccessTuple]:
+    &#34;&#34;&#34;
+    Upload a DataFrame&#39;s contents to the SQL server
+
+    :param df:
+        The DataFrame to be uploaded
+
+    :param name:
+        The name of the table to be created
+
+    :param index:
+        If True, creates the DataFrame&#39;s indices as columns (default False)
+
+    :param if_exists: str
+        [&#39;replace&#39;, &#39;append&#39;, &#39;fail&#39;]
+        Drop and create the table (&#39;replace&#39;) or append if it exists (&#39;append&#39;) or raise Exception (&#39;fail&#39;)
+        (default &#39;replace&#39;)
+
+    :param method:
+        None or multi. Details on pandas.to_sql
+
+    :param as_tuple:
+        If True, return a (success_bool, message) tuple instead of a bool
+
+    **kw : keyword arguments
+        Additional arguments will be passed to the DataFrame&#39;s `to_sql` function
+    &#34;&#34;&#34;
+    import time
+    from meerschaum.utils.warnings import error
+    if name is None:
+        error(&#34;Name must not be None to submit to the SQL server&#34;)
+
+    from meerschaum.utils.misc import sql_item_name
+
+    ### resort to defaults if None
+    if method == &#34;&#34;:
+        if self.flavor in bulk_flavors:
+            method = psql_insert_copy
+        else:
+            method = self.sys_config[&#39;method&#39;]
+    chunksize = chunksize if chunksize != -1 else self.sys_config[&#39;chunksize&#39;]
+
+    success, msg = False, &#34;Default to_sql message&#34;
+    start = time.time()
+    if debug:
+        msg = f&#34;Inserting {len(df)} rows with chunksize: {chunksize}...&#34;
+        print(msg, end=&#34;&#34;, flush=True)
+
+    ### filter out non-pandas args
+    import inspect
+    to_sql_params = inspect.signature(df.to_sql).parameters
+    to_sql_kw = dict()
+    for k, v in kw.items():
+        if k in to_sql_params:
+            to_sql_kw[k] = v
+
+    try:
+        df.to_sql(
+            name = name,
+            con = self.engine,
+            index = index,
+            if_exists = if_exists,
+            method = method,
+            chunksize = chunksize,
+            **to_sql_kw
+        )
+        success = True
+    except Exception as e:
+        if not silent: warn(str(e))
+        success, msg = None, str(e)
+
+    end = time.time()
+    if success:
+        msg = f&#34;It took {round(end - start, 2)} seconds to sync {len(df)} rows to {name}.&#34;
+
+    if debug:
+        print(f&#34; done.&#34;, flush=True)
+        dprint(msg)
+
+    if as_tuple: return success, msg
+    return success</code></pre>
+</details>
+</dd>
+<dt id="meerschaum.connectors.sql.SQLConnector.SQLConnector.value"><code class="name flex">
+<span>def <span class="ident">value</span></span>(<span>self, query: str, *args: Any, **kw: Any) ‑> Any</span>
+</code></dt>
+<dd>
+<div class="desc"><p>Return a single value from a SQL query
+(index a DataFrame at [0, 0])</p></div>
+<details class="source">
+<summary>
+<span>Expand source code</span>
+</summary>
+<pre><code class="python">def value(
+        self,
+        query : str,
+        *args : Any,
+        **kw : Any
+    ) -&gt; Any:
+    &#34;&#34;&#34;
+    Return a single value from a SQL query
+    (index a DataFrame at [0, 0])
+    &#34;&#34;&#34;
+    try:
+        return self.read(query, *args, **kw).iloc[0, 0]
+    except:
+        return None</code></pre>
+</details>
+</dd>
+</dl>
+<h3>Inherited members</h3>
+<ul class="hlist">
+<li><code><b><a title="meerschaum.connectors.Connector.Connector" href="../Connector.html#meerschaum.connectors.Connector.Connector">Connector</a></b></code>:
+<ul class="hlist">
+<li><code><a title="meerschaum.connectors.Connector.Connector.verify_attributes" href="../Connector.html#meerschaum.connectors.Connector.Connector.verify_attributes">verify_attributes</a></code></li>
+</ul>
+</li>
+</ul>
+</dd>
+</dl>
+</section>
+</article>
+<nav id="sidebar">
+<h1>Index</h1>
+<div class="toc">
+<ul></ul>
+</div>
+<ul id="index">
+<li><h3>Super-module</h3>
+<ul>
+<li><code><a title="meerschaum.connectors.sql" href="index.html">meerschaum.connectors.sql</a></code></li>
+</ul>
+</li>
+<li><h3><a href="#header-classes">Classes</a></h3>
+<ul>
+<li>
+<h4><code><a title="meerschaum.connectors.sql.SQLConnector.SQLConnector" href="#meerschaum.connectors.sql.SQLConnector.SQLConnector">SQLConnector</a></code></h4>
+<ul class="">
+<li><code><a title="meerschaum.connectors.sql.SQLConnector.SQLConnector.DATABASE_URL" href="#meerschaum.connectors.sql.SQLConnector.SQLConnector.DATABASE_URL">DATABASE_URL</a></code></li>
+<li><code><a title="meerschaum.connectors.sql.SQLConnector.SQLConnector.cli" href="#meerschaum.connectors.sql.SQLConnector.SQLConnector.cli">cli</a></code></li>
+<li><code><a title="meerschaum.connectors.sql.SQLConnector.SQLConnector.create_engine" href="#meerschaum.connectors.sql.SQLConnector.SQLConnector.create_engine">create_engine</a></code></li>
+<li><code><a title="meerschaum.connectors.sql.SQLConnector.SQLConnector.create_indices" href="#meerschaum.connectors.sql.SQLConnector.SQLConnector.create_indices">create_indices</a></code></li>
+<li><code><a title="meerschaum.connectors.sql.SQLConnector.SQLConnector.db" href="#meerschaum.connectors.sql.SQLConnector.SQLConnector.db">db</a></code></li>
+<li><code><a title="meerschaum.connectors.sql.SQLConnector.SQLConnector.delete_pipe" href="#meerschaum.connectors.sql.SQLConnector.SQLConnector.delete_pipe">delete_pipe</a></code></li>
+<li><code><a title="meerschaum.connectors.sql.SQLConnector.SQLConnector.delete_user" href="#meerschaum.connectors.sql.SQLConnector.SQLConnector.delete_user">delete_user</a></code></li>
+<li><code><a title="meerschaum.connectors.sql.SQLConnector.SQLConnector.edit_pipe" href="#meerschaum.connectors.sql.SQLConnector.SQLConnector.edit_pipe">edit_pipe</a></code></li>
+<li><code><a title="meerschaum.connectors.sql.SQLConnector.SQLConnector.edit_user" href="#meerschaum.connectors.sql.SQLConnector.SQLConnector.edit_user">edit_user</a></code></li>
+<li><code><a title="meerschaum.connectors.sql.SQLConnector.SQLConnector.engine" href="#meerschaum.connectors.sql.SQLConnector.SQLConnector.engine">engine</a></code></li>
+<li><code><a title="meerschaum.connectors.sql.SQLConnector.SQLConnector.exec" href="#meerschaum.connectors.sql.SQLConnector.SQLConnector.exec">exec</a></code></li>
+<li><code><a title="meerschaum.connectors.sql.SQLConnector.SQLConnector.execute" href="#meerschaum.connectors.sql.SQLConnector.SQLConnector.execute">execute</a></code></li>
+<li><code><a title="meerschaum.connectors.sql.SQLConnector.SQLConnector.fetch" href="#meerschaum.connectors.sql.SQLConnector.SQLConnector.fetch">fetch</a></code></li>
+<li><code><a title="meerschaum.connectors.sql.SQLConnector.SQLConnector.fetch_pipes_keys" href="#meerschaum.connectors.sql.SQLConnector.SQLConnector.fetch_pipes_keys">fetch_pipes_keys</a></code></li>
+<li><code><a title="meerschaum.connectors.sql.SQLConnector.SQLConnector.flavor_configs" href="#meerschaum.connectors.sql.SQLConnector.SQLConnector.flavor_configs">flavor_configs</a></code></li>
+<li><code><a title="meerschaum.connectors.sql.SQLConnector.SQLConnector.get_backtrack_data" href="#meerschaum.connectors.sql.SQLConnector.SQLConnector.get_backtrack_data">get_backtrack_data</a></code></li>
+<li><code><a title="meerschaum.connectors.sql.SQLConnector.SQLConnector.get_pipe_attributes" href="#meerschaum.connectors.sql.SQLConnector.SQLConnector.get_pipe_attributes">get_pipe_attributes</a></code></li>
+<li><code><a title="meerschaum.connectors.sql.SQLConnector.SQLConnector.get_pipe_data" href="#meerschaum.connectors.sql.SQLConnector.SQLConnector.get_pipe_data">get_pipe_data</a></code></li>
+<li><code><a title="meerschaum.connectors.sql.SQLConnector.SQLConnector.get_pipe_id" href="#meerschaum.connectors.sql.SQLConnector.SQLConnector.get_pipe_id">get_pipe_id</a></code></li>
+<li><code><a title="meerschaum.connectors.sql.SQLConnector.SQLConnector.get_pipe_rowcount" href="#meerschaum.connectors.sql.SQLConnector.SQLConnector.get_pipe_rowcount">get_pipe_rowcount</a></code></li>
+<li><code><a title="meerschaum.connectors.sql.SQLConnector.SQLConnector.get_plugin_attributes" href="#meerschaum.connectors.sql.SQLConnector.SQLConnector.get_plugin_attributes">get_plugin_attributes</a></code></li>
+<li><code><a title="meerschaum.connectors.sql.SQLConnector.SQLConnector.get_plugin_id" href="#meerschaum.connectors.sql.SQLConnector.SQLConnector.get_plugin_id">get_plugin_id</a></code></li>
+<li><code><a title="meerschaum.connectors.sql.SQLConnector.SQLConnector.get_plugin_user_id" href="#meerschaum.connectors.sql.SQLConnector.SQLConnector.get_plugin_user_id">get_plugin_user_id</a></code></li>
+<li><code><a title="meerschaum.connectors.sql.SQLConnector.SQLConnector.get_plugin_username" href="#meerschaum.connectors.sql.SQLConnector.SQLConnector.get_plugin_username">get_plugin_username</a></code></li>
+<li><code><a title="meerschaum.connectors.sql.SQLConnector.SQLConnector.get_plugin_version" href="#meerschaum.connectors.sql.SQLConnector.SQLConnector.get_plugin_version">get_plugin_version</a></code></li>
+<li><code><a title="meerschaum.connectors.sql.SQLConnector.SQLConnector.get_plugins" href="#meerschaum.connectors.sql.SQLConnector.SQLConnector.get_plugins">get_plugins</a></code></li>
+<li><code><a title="meerschaum.connectors.sql.SQLConnector.SQLConnector.get_sync_time" href="#meerschaum.connectors.sql.SQLConnector.SQLConnector.get_sync_time">get_sync_time</a></code></li>
+<li><code><a title="meerschaum.connectors.sql.SQLConnector.SQLConnector.get_user_id" href="#meerschaum.connectors.sql.SQLConnector.SQLConnector.get_user_id">get_user_id</a></code></li>
+<li><code><a title="meerschaum.connectors.sql.SQLConnector.SQLConnector.get_user_password_hash" href="#meerschaum.connectors.sql.SQLConnector.SQLConnector.get_user_password_hash">get_user_password_hash</a></code></li>
+<li><code><a title="meerschaum.connectors.sql.SQLConnector.SQLConnector.get_user_type" href="#meerschaum.connectors.sql.SQLConnector.SQLConnector.get_user_type">get_user_type</a></code></li>
+<li><code><a title="meerschaum.connectors.sql.SQLConnector.SQLConnector.get_users" href="#meerschaum.connectors.sql.SQLConnector.SQLConnector.get_users">get_users</a></code></li>
+<li><code><a title="meerschaum.connectors.sql.SQLConnector.SQLConnector.metadata" href="#meerschaum.connectors.sql.SQLConnector.SQLConnector.metadata">metadata</a></code></li>
+<li><code><a title="meerschaum.connectors.sql.SQLConnector.SQLConnector.pipe_exists" href="#meerschaum.connectors.sql.SQLConnector.SQLConnector.pipe_exists">pipe_exists</a></code></li>
+<li><code><a title="meerschaum.connectors.sql.SQLConnector.SQLConnector.read" href="#meerschaum.connectors.sql.SQLConnector.SQLConnector.read">read</a></code></li>
+<li><code><a title="meerschaum.connectors.sql.SQLConnector.SQLConnector.register_pipe" href="#meerschaum.connectors.sql.SQLConnector.SQLConnector.register_pipe">register_pipe</a></code></li>
+<li><code><a title="meerschaum.connectors.sql.SQLConnector.SQLConnector.register_plugin" href="#meerschaum.connectors.sql.SQLConnector.SQLConnector.register_plugin">register_plugin</a></code></li>
+<li><code><a title="meerschaum.connectors.sql.SQLConnector.SQLConnector.register_user" href="#meerschaum.connectors.sql.SQLConnector.SQLConnector.register_user">register_user</a></code></li>
+<li><code><a title="meerschaum.connectors.sql.SQLConnector.SQLConnector.sync_pipe" href="#meerschaum.connectors.sql.SQLConnector.SQLConnector.sync_pipe">sync_pipe</a></code></li>
+<li><code><a title="meerschaum.connectors.sql.SQLConnector.SQLConnector.to_sql" href="#meerschaum.connectors.sql.SQLConnector.SQLConnector.to_sql">to_sql</a></code></li>
+<li><code><a title="meerschaum.connectors.sql.SQLConnector.SQLConnector.value" href="#meerschaum.connectors.sql.SQLConnector.SQLConnector.value">value</a></code></li>
+</ul>
+</li>
+</ul>
+</li>
+</ul>
+</nav>
+</main>
+<footer id="footer">
+<p>Generated by <a href="https://pdoc3.github.io/pdoc"><cite>pdoc</cite> 0.9.2</a>.</p>
+</footer>
+</body>
+</html>

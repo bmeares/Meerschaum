@@ -3,7 +3,7 @@
 # vim:fenc=utf-8
 
 """
-Actions available to the mrsm CLI
+Default actions available to the mrsm CLI.
 """
 
 from meerschaum.utils.packages import get_modules_from_package
@@ -60,7 +60,9 @@ for module in modules:
                 (ob[0], ob[1])
                     for ob in getmembers(module)
                         if isfunction(ob[1])
+                            ### check that the function belongs to the module
                             and ob[0] == module.__name__.replace('_', '').split('.')[-1]
+                            ### skip functions that start with '_'
                             and ob[0][0] != '_'
             ]
         )

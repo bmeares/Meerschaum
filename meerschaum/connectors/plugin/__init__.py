@@ -3,7 +3,7 @@
 # vim:fenc=utf-8
 
 """
-Import the Plugin class definition
+Allow pipes to source data from installed plugins.
 """
 
-from meerschaum.connectors.plugin._PluginConnector import PluginConnector
+from meerschaum.connectors.plugin.PluginConnector import PluginConnector

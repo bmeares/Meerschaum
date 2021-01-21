@@ -1,0 +1,14 @@
+site_name: Meerschaum Documentation
+theme:
+  favicon: assets/logo.ico
+  logo: assets/logo_500x500.png
+  name: material
+  palette:
+    scheme: slate
+    # primary: brown
+extra_css:
+  - stylesheets/extra.css
+docs_dir: mkdocs
+plugins:
+  - search
+repo_url: https://github.com/bmeares/Meerschaum

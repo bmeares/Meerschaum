@@ -339,7 +339,7 @@ def get_subactions(action : str, globs : dict = None) -> list:
     """
     if globs is None:
         import importlib
-        module = importlib.import_module(f'meerschaum.actions._{action}')
+        module = importlib.import_module(f'meerschaum.actions.{action}')
         globs = vars(module)
     subactions = []
     for item in globs:
@@ -485,7 +485,7 @@ def parse_df_datetimes(
     return df
 
 async def retry_connect(
-        connector : 'meerschaum.connectors.SQLConnector or databases.Database' = None,
+        connector : Union[meerschaum.connectors.sql.SQLConnector, databases.Database, None] = None,
         max_retries : int = 40,
         retry_wait : int = 3,
         debug : bool = False,

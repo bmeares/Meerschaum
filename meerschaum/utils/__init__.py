@@ -14,4 +14,4 @@ to miscellaneous helper functions.
 # from meerschaum.utils.packages import import_children
 # import_children()
 
-from meerschaum.utils._get_pipes import get_pipes
+from meerschaum.utils.get_pipes import get_pipes

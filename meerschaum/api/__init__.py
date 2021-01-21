@@ -2,10 +2,14 @@
 # -*- coding: utf-8 -*-
 # vim:fenc=utf-8
 
+"""
+Meerschaum API backend. Start an API instance with `api start`.
+"""
+
 __version__ = "0.0.13"
 from meerschaum.config import system_config, get_config
 from meerschaum.utils.packages import attempt_import
-from meerschaum.utils._get_pipes import get_pipes as get_pipes_sql
+from meerschaum.utils.get_pipes import get_pipes as get_pipes_sql
 import pathlib, os
 fastapi = attempt_import('fastapi', lazy=True)
 starlette_reponses = attempt_import('starlette.responses')

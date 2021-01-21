@@ -8,7 +8,7 @@ Functions for managing plugins registration via the SQL connector
 
 def register_plugin(
         self,
-        plugin : 'meerschaum.Plugin',
+        plugin : 'meerschaum._internal.Plugin',
         debug : bool = False,
         **kw
     ) -> tuple:
@@ -62,7 +62,7 @@ def register_plugin(
 
 def get_plugin_id(
         self,
-        plugin : 'meerschaum.Plugin',
+        plugin : 'meerschaum._internal.Plugin',
         debug : bool = False
     ) -> int:
     ### ensure plugins table exists
@@ -77,7 +77,7 @@ def get_plugin_id(
 
 def get_plugin_version(
         self,
-        plugin : 'meerschaum.Plugin',
+        plugin : 'meerschaum._internal.Plugin',
         debug : bool = False
     ) -> str:
     ### ensure plugins table exists
@@ -92,7 +92,7 @@ def get_plugin_version(
 
 def get_plugin_user_id(
         self,
-        plugin : 'meerschaum.Plugin',
+        plugin : 'meerschaum._internal.Plugin',
         debug : bool = False
     ) -> str:
     ### ensure plugins table exists
@@ -107,7 +107,7 @@ def get_plugin_user_id(
 
 def get_plugin_username(
         self,
-        plugin : 'meerschaum.Plugin',
+        plugin : 'meerschaum._internal.Plugin',
         debug : bool = False
     ) -> str:
     ### ensure plugins table exists
@@ -135,7 +135,7 @@ def get_plugin_username(
 
 def get_plugin_attributes(
         self,
-        plugin : 'meerschaum.Plugin',
+        plugin : 'meerschaum._internal.Plugin',
         debug : bool = False
     ) -> str:
     ### ensure plugins table exists
