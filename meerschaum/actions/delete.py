@@ -149,14 +149,13 @@ def _delete_users(
     ) -> tuple:
     from meerschaum.config import get_config
     from meerschaum import get_connector
-    from meerschaum.utils.misc import parse_repo_keys
-    from meerschaum.utils.prompt import yes_no
+    from meerschaum.connectors.parse import parse_repo_keys
+    from meerschaum.utils.prompt import yes_no, prompt
     from meerschaum.utils.debug import dprint
     from meerschaum.utils.warnings import warn, error, info
     from meerschaum._internal import User
     from meerschaum.connectors.api import APIConnector
     from meerschaum.utils.formatting import print_tuple
-    from prompt_toolkit import prompt
     repo_connector = parse_repo_keys(repository)
 
     registered_users = []

@@ -16,7 +16,7 @@ if cmd is None or isinstance(cmd, dict): cmd = attempt_import('cmd')
 from meerschaum.actions.arguments import parse_line
 from meerschaum.utils.formatting import UNICODE, CHARSET, ANSI, colored
 _clear_screen = get_config('system', 'shell', 'clear_screen', patch=True)
-from meerschaum.utils.misc import parse_instance_keys, string_width
+from meerschaum.connectors.parse import parse_instance_keys, string_width
 ### readline is Unix-like only. Disable readline features for Windows
 try:
     import readline
@@ -131,8 +131,6 @@ class Shell(cmd.Cmd):
         if '{username}' in self._prompt:
             if username is None:
                 try:
-                    # conn = parse_instance_keys(self.instance_keys, construct=True)
-                    # help(conn)
                     username = parse_instance_keys(self.instance_keys, construct=False)['username']
                 except KeyError:
                     username = '(no username)'
@@ -318,7 +316,7 @@ class Shell(cmd.Cmd):
         """
         from meerschaum import get_connector
         from meerschaum.config import get_config
-        from meerschaum.utils.misc import parse_instance_keys
+        from meerschaum.connectors.parse import parse_instance_keys
         from meerschaum.utils.warnings import warn, info
 
         try:
@@ -367,7 +365,7 @@ class Shell(cmd.Cmd):
         """
         from meerschaum import get_connector
         from meerschaum.config import get_config
-        from meerschaum.utils.misc import parse_repo_keys
+        from meerschaum.connectors.parse import parse_repo_keys
         from meerschaum.utils.warnings import warn, info
 
         try:

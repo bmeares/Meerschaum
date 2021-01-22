@@ -24,7 +24,7 @@ def get_tables(
     """
     from meerschaum.utils.debug import dprint
     from meerschaum.utils.warnings import warn, error
-    from meerschaum.utils.misc import parse_instance_keys
+    from meerschaum.connectors.parse import parse_instance_keys
     from meerschaum.utils.packages import attempt_import
     from meerschaum import get_connector
 
