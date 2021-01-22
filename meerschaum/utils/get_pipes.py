@@ -98,18 +98,21 @@ def get_pipes(
     from meerschaum.config import get_config
     from meerschaum.utils.warnings import error
 
-    #  if connector_keys == "": connector_keys = None
-    #  if metric_keys == "": metric_keys = None
-    #  if location_keys == "": location_keys = None
-
     ### Get SQL or API connector (keys come from `connector.fetch_pipes_keys()`).
     ### If `wait`, wait until a connection is made
     if mrsm_instance is None:
         mrsm_instance = get_config('meerschaum', 'instance', patch=True)
     if isinstance(mrsm_instance, str):
-        from meerschaum.utils.misc import parse_instance_keys
+        from meerschaum.connectors.parse import parse_instance_keys
         connector = parse_instance_keys(keys=mrsm_instance, wait=wait, debug=debug)
     else: ### NOTE: mrsm_instance MUST be a SQL or API connector for this to work
+        from meerschaum.connectors import Connector
+        valid_connector = False
+        if issubclass(type(mrsm_instance, Connector)):
+            if mrsm_instance.type in ('api', 'sql'):
+                valid_connector = True
+        if not valid_connector:
+            error(f"Invalid instance connector: {mrsm_instance}")
         connector = mrsm_instance
     if debug: dprint(f"Using instance connector: {connector}")
     if not connector:

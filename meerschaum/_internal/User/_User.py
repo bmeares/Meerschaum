@@ -50,7 +50,7 @@ class User():
 
     @property
     def repository(self):
-        from meerschaum.utils.misc import parse_repo_keys
+        from meerschaum.connectors.parse import parse_repo_keys
         if '_repository' not in self.__dict__:
             self._repository = parse_repo_keys(self._repository_keys)
         return self._repository

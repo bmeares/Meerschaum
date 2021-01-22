@@ -60,7 +60,7 @@ def get_connector(instance_keys : str = None, debug : bool = False):
 
             instance_keys = uvicorn_config['mrsm_instance']
 
-        from meerschaum.utils.misc import parse_instance_keys
+        from meerschaum.connectors.parse import parse_instance_keys
         connector = parse_instance_keys(instance_keys, debug=debug)
     if debug: dprint(f"API instance connector: {connector}")
     return connector

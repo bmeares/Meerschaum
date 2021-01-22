@@ -141,7 +141,7 @@ class Pipe:
     @property
     def instance_connector(self):
         if '_instance_connector' not in self.__dict__:
-            from meerschaum.utils.misc import parse_instance_keys
+            from meerschaum.connectors.parse import parse_instance_keys
             conn = parse_instance_keys(self.instance_keys)
             if conn:
                 self._instance_connector = conn
@@ -152,7 +152,7 @@ class Pipe:
     @property
     def connector(self):
         if '_connector' not in self.__dict__:
-            from meerschaum.utils.misc import parse_instance_keys
+            from meerschaum.connectors.parse import parse_instance_keys
             conn = parse_instance_keys(self.connector_keys)
             if conn:
                 self._connector = conn

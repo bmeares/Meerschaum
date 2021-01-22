@@ -7,7 +7,7 @@ Functions for bootstrapping elements
 """
 
 from __future__ import annotations
-from meerschaum.utils.Typing import Union, Any, Sequence, SuccessTuple, Optional
+from meerschaum.utils.typing import Union, Any, Sequence, SuccessTuple, Optional
 
 def bootstrap(
         action : Sequence[str] = [''],
@@ -24,10 +24,11 @@ def bootstrap(
     """
     from meerschaum.utils.misc import choose_subaction
     options = {
-        'pipes'   : _bootstrap_pipes,
-        'config'  : _bootstrap_config,
-        'stack'   : _bootstrap_stack,
-        'grafana' : _bootstrap_grafana,
+        'pipes'      : _bootstrap_pipes,
+        'config'     : _bootstrap_config,
+        'stack'      : _bootstrap_stack,
+        'connectors' : _bootstrap_connectors,
+        #  'grafana' : _bootstrap_grafana,
     }
     return choose_subaction(action, options, **kw)
 
@@ -36,7 +37,8 @@ def _bootstrap_pipes(
         connector_keys : Sequence[str] = [],
         metric_keys : Sequence[str] = [],
         location_keys : Optional[Sequence[Optional[str]]] = [],
-        debug : bool,
+        yes : bool = False,
+        debug : bool = False,
         **kw : Any
     ) -> SuccessTuple:
     """
@@ -46,21 +48,60 @@ def _bootstrap_pipes(
     from meerschaum.utils.config import get_config
     from meerschaum.utils.warnings import info, warn, error
     from meerschaum.utils.debug import dprint
-    from meerschaum.utils.packages import attempt_import
-    from meerschaum.utils.prompt import yes_no
-    prompt_toolkit = attempt_import('prompt_toolkit')
+    from meerschaum.utils.prompt import yes_no, prompt
+    from meerschaum.connectors.parse import is_valid_connector_keys
+
+    def _get_connector_keys(ck : Optional[str]) -> str:
+        """
+        Check if the connector keys are valid. If not, prompt the user until they are.
+        """
+        while True:
+            if not is_valid_connector_keys(ck):
+                if yes or yes_no(
+                    f"Connector keys '{ck}' don't correspond with a registered connector. " + 
+                    "Would you like to add one now?"
+                ):
+                    pass
+            else:
+                return ck
+
+
 
     if (
-        len(connector_keys) > 0 or
-        len(metric_keys) > 0 or
-        len(location_keys) > 0:
+        len(connector_keys) > 0 and
+        len(metric_keys) > 0
     ):
-        info()
+        info(
+            "You've provided the following keys:\n" +
+            "  - Connector Keys: " + str(connector_keys) + "\n" +
+            "  - Metric Keys: " + str(metric_keys) + "\n" +
+            (
+                ("  - Location Keys: " + str(location_keys) + "\n")
+                if len(location_keys) > 0 else ""
+            )
+        )
+        yes_no()
 
     return (True, "Success")
 
+def _bootstrap_connectors(
+        action : Sequence[str] = [],
+        connector_keys : Sequence[str] = [],
+        debug : bool = False,
+        **kw : Any
+    ) -> SuccessTuple:
+    """
+    Prompt the user for the details necessary to create a Connector.
+    """
+    from meerschaum.connectors import is_valid_connector_keys
+    from meerschaum.utils.prompt import prompt, yes_no
+    if len(connector_keys) == 0:
+
+        pass
+
+
 def _bootstrap_config(
-        action : Sequence[str] = [''],
+        action : Sequence[str] = [],
         yes : bool = False,
         force : bool = False,
         debug : bool = False,

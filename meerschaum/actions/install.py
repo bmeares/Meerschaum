@@ -44,7 +44,7 @@ def _install_plugins(
     from meerschaum.utils.debug import dprint
     from meerschaum.utils.warnings import info
     from meerschaum.utils.packages import reload_package
-    from meerschaum.utils.misc import parse_repo_keys
+    from meerschaum.connectors.parse import parse_repo_keys
     import meerschaum.actions
     from meerschaum.utils.formatting import print_tuple
     from meerschaum._internal import Plugin

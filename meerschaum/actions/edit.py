@@ -42,7 +42,7 @@ def _edit_pipes(
         **kw
     ):
     from meerschaum import get_pipes
-    from prompt_toolkit import prompt
+    from meerschaum.utils.prompt import prompt
     from meerschaum.actions.shell.Shell import input_with_sigint
     from meerschaum.utils.misc import print_options
     _input = input_with_sigint(input)
@@ -51,7 +51,7 @@ def _edit_pipes(
     print_options(pipes, header=f'Pipes to be edited:')
 
     try:
-        prompt("Press [Enter] to begin editing the above pipes or [CTRL-C] to cancel: ")
+        prompt("Press [Enter] to begin editing the above pipes or [CTRL-C] to cancel: ", icon=False)
     except KeyboardInterrupt:
         return False, f"No pipes changed."
 
@@ -70,13 +70,13 @@ def _edit_users(
     ) -> tuple:
     from meerschaum.config import get_config
     from meerschaum import get_connector
-    from meerschaum.utils.misc import parse_repo_keys
+    from meerschaum.connectors.parse import parse_repo_keys
     from meerschaum.utils.debug import dprint
     from meerschaum.utils.warnings import warn, error, info
     from meerschaum._internal import User
     from meerschaum.connectors.api import APIConnector
     from meerschaum.utils.formatting import print_tuple
-    from prompt_toolkit import prompt
+    from meerschaum.utils.prompt import prompt
     repo_connector = parse_repo_keys(repository)
 
     if len(action) == 0 or action == ['']: return False, "No users to edit."

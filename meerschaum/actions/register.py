@@ -91,7 +91,8 @@ def _register_plugins(
         **kw
     ) -> tuple:
     from meerschaum.utils.debug import dprint
-    from meerschaum.utils.misc import parse_repo_keys, reload_plugins
+    from meerschaum.utils.misc import reload_plugins
+    from meerschaum.connectors.parse import parse_repo_keys
     from meerschaum.config import get_config
     from meerschaum.utils.warnings import warn, error, info
     from meerschaum._internal import Plugin
@@ -148,19 +149,25 @@ def _register_users(
         debug : bool = False,
         **kw
     ) -> tuple:
+    """
+    Register a new user to a Meerschaum repository.
+    By default, register to the public mrsm.io repository (or whatever is defined in config).
+    """
     from meerschaum.config import get_config
     from meerschaum import get_connector
-    from meerschaum.utils.misc import parse_repo_keys, is_valid_email
+    from meerschaum.utils.misc import is_valid_email
+    from meerschaum.connectors.parse import parse_repo_keys
     from meerschaum.utils.debug import dprint
     from meerschaum.utils.warnings import warn, error, info
     from meerschaum._internal import User
     from meerschaum.connectors.api import APIConnector
     from meerschaum.utils.formatting import print_tuple
-    from prompt_toolkit import prompt
+    from meerschaum.utils.prompt import prompt
     from getpass import getpass
     repo_connector = parse_repo_keys(repository)
 
-    if len(action) == 0 or action == ['']: return False, "No users to register."
+    if len(action) == 0 or action == ['']:
+        return False, "No users to register."
 
     ### filter out existing users
     nonregistered_users = []

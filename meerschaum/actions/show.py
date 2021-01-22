@@ -155,7 +155,7 @@ def _show_connectors(
     print(make_header("\nActive connectors:"))
     pprint(connectors)
 
-    from meerschaum.utils.misc import parse_instance_keys
+    from meerschaum.connectors.parse import parse_instance_keys
     if action != []:
         conn = parse_instance_keys(action[0], debug=debug)
         if conn:
@@ -260,7 +260,7 @@ def _show_plugins(
     """
     from meerschaum.actions import _plugins_names
     from meerschaum.utils.misc import print_options
-    from meerschaum.utils.misc import parse_repo_keys
+    from meerschaum.connectors.parse import parse_repo_keys
     from meerschaum.utils.warnings import info
     from meerschaum._internal import User
     repo_connector = parse_repo_keys(repository)
@@ -294,7 +294,8 @@ def _show_users(
     Show the registered users in a Meerschaum repository (default is mrsm.io).
     """
     from meerschaum.config import get_config
-    from meerschaum.utils.misc import parse_repo_keys, print_options
+    from meerschaum.connectors.parse import parse_repo_keys
+    from meerschaum.utils.misc import print_options
     try:
         repo_connector = parse_repo_keys(repository)
         users_list = repo_connector.get_users(debug=debug)

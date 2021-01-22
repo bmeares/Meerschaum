@@ -11,6 +11,9 @@ For ease of use, you can also import from the root `meerschaum` module:
 ```
 """
 
+from __future__ import annotations
+from meerschaum.utils.typing import Any, SuccessTuple, Union, Optional, Sequence, Mapping
+
 from meerschaum.connectors.Connector import Connector
 
 ### store connectors partitioned by
@@ -30,33 +33,50 @@ def get_connector(
         label : str = None,
         refresh : bool = False,
         debug : bool = False,
-        **kw
+        **kw : Any
     ):
     """
     Return existing connector or create new connection and store for reuse.
 
-    type : str (default "sql")
-        Connector type (sql, api, etc.)
-    label : str (default "main")
-        Connector label (e.g. main)
-    refresh : bool (default False)
-        Refresh the Connector instance
-    kw : dict
-        Other arguments to pass to the Connector constructor.
-
     You can create new connectors if enough parameters are provided for the given type and flavor.
-    Example: flavor='sqlite', database='newdb'
+
+    For example, the following parameters would create a new SQLConnector that isn't in the configuration file.
+    
+    ```
+    >>> conn = get_connector(
+    ...     type = 'sql',
+    ...     label = 'newlabel',
+    ...     flavor = 'sqlite',
+    ...     database = '/file/path/to/database.db'
+    ... )
+    >>> 
+    ```
+
+    :param type:
+        Connector type (sql, api, etc.). Defaults to the type of the configured `instance_connector`.
+    
+    :param label:
+        Connector label (e.g. main). Defaults to `'main'`.
+
+    :param refresh:
+        Refresh the Connector instance / construct new object. Defaults to `False`.
+
+    :param kw:
+        Other arguments to pass to the Connector constructor.
+        If the Connector has already been constructed and new arguments are provided,
+        refresh is set to True and the old Connector is replaced.
+
     """
     from meerschaum.config import get_config
     if type is None and label is None:
-        from meerschaum.utils.misc import parse_instance_keys
         default_instance_keys = get_config('meerschaum', 'instance', patch=True)
         ### recursive call to get_connector
         return parse_instance_keys(default_instance_keys)
 
     ### NOTE: the default instance connector may not be main.
     ### Only fall back to 'main' if the type is provided by the label is omitted.
-    if label is None: label = 'main'
+    if label is None:
+        label = 'main'
 
     global types, connectors
 

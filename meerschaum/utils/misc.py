@@ -247,54 +247,6 @@ def edit_file(
         if debug: dprint('Failed to open file with system editor. Falling back to pyvim...')
         run_python_package('pyvim', [path], debug=debug)
 
-def parse_connector_keys(
-        keys : str,
-        construct : bool = True,
-        **kw : Any
-    ) -> Union[meerschaum.connectors.Connector, Mapping[str, Any]]:
-    """
-    Parse connector keys and return Connector object
-    """
-    from meerschaum.connectors import get_connector
-    from meerschaum.config import get_config
-    from meerschaum.utils.warnings import error
-    keys = str(keys)
-    vals = keys.split(':')
-    if construct:
-        conn = get_connector(type=vals[0], label=vals[1], **kw)
-        if conn is None:
-            error(f"Unable to parse connector keys '{keys}'", stack=False)
-    else:
-        type_config = get_config('meerschaum', 'connectors', vals[0])
-        default_config = type_config.get('default', None)
-        conn = type_config.get(vals[1], None)
-        if default_config is not None:
-            default_config.update(conn)
-            conn = default_config
-
-    return conn
-
-def parse_instance_keys(keys : str, construct : bool = True, **kw):
-    """
-    Parse the Meerschaum instance value into a Connector object
-    """
-    from meerschaum.config import get_config
-    if keys is None: keys = get_config('meerschaum', 'instance')
-    keys = str(keys)
-    if ':' not in keys: keys += ':'
-    if keys.endswith(':'): keys += 'main'
-    return parse_connector_keys(keys, construct=construct, **kw)
-
-def parse_repo_keys(keys : str = None, **kw):
-    """
-    Parse the Meerschaum repository value into a Connector object
-    """
-    from meerschaum.config import get_config
-    if keys is None: keys = get_config('meerschaum', 'default_repository', patch=True)
-    keys = str(keys)
-    if ':' not in keys: keys = 'api:' + keys
-    return parse_connector_keys(keys, **kw)
-
 def is_pipe_registered(
         pipe : 'Pipe or MetaPipe',
         pipes : dict,
