@@ -6,10 +6,13 @@
 Synchronize across config files
 """
 
+from __future__ import annotations
+from meerschaum.utils.typing import Optional, List
+
 def sync_configs(
-        config_path : 'Path',
-        keys : list,
-        sub_path : 'Path'
+        config_path : pathlib.Path,
+        keys : List[str],
+        sub_path : pathlib.Path
     ) -> None:
     """
     Synchronize sub-configuration with main configuration file
@@ -23,7 +26,8 @@ def sync_configs(
     import meerschaum.config
     from meerschaum.utils.packages import reload_package
     from meerschaum.utils.misc import search_and_substitute_config
-    if not os.path.isfile(config_path) or not os.path.isfile(sub_path): return
+    if not os.path.isfile(config_path) or not os.path.isfile(sub_path):
+        return
 
     def read_config(path):
         """
@@ -68,6 +72,11 @@ def sync_configs(
             f.write(new_header)
             f.write(new_config_text)
 
-        reload_package(meerschaum.config)
-        reload_package(meerschaum.config)
+        try:
+            reload_package(meerschaum.config)
+            reload_package(meerschaum.config)
+        except:
+            print("Restart Meerschaum to reload config.")
+            import sys
+            sys.exit(1)
 
