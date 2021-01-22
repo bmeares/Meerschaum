@@ -206,7 +206,7 @@ class Pipe:
     @property
     def instance_connector(self):
         if &#39;_instance_connector&#39; not in self.__dict__:
-            from meerschaum.utils.misc import parse_instance_keys
+            from meerschaum.connectors.parse import parse_instance_keys
             conn = parse_instance_keys(self.instance_keys)
             if conn:
                 self._instance_connector = conn
@@ -217,7 +217,7 @@ class Pipe:
     @property
     def connector(self):
         if &#39;_connector&#39; not in self.__dict__:
-            from meerschaum.utils.misc import parse_instance_keys
+            from meerschaum.connectors.parse import parse_instance_keys
             conn = parse_instance_keys(self.connector_keys)
             if conn:
                 self._connector = conn
@@ -370,7 +370,7 @@ connector_keys for the Meerschaum instance connector (SQL or API connector)</p><
     @property
     def instance_connector(self):
         if &#39;_instance_connector&#39; not in self.__dict__:
-            from meerschaum.utils.misc import parse_instance_keys
+            from meerschaum.connectors.parse import parse_instance_keys
             conn = parse_instance_keys(self.instance_keys)
             if conn:
                 self._instance_connector = conn
@@ -381,7 +381,7 @@ connector_keys for the Meerschaum instance connector (SQL or API connector)</p><
     @property
     def connector(self):
         if &#39;_connector&#39; not in self.__dict__:
-            from meerschaum.utils.misc import parse_instance_keys
+            from meerschaum.connectors.parse import parse_instance_keys
             conn = parse_instance_keys(self.connector_keys)
             if conn:
                 self._connector = conn
@@ -465,7 +465,7 @@ def columns(self):
 <pre><code class="python">@property
 def connector(self):
     if &#39;_connector&#39; not in self.__dict__:
-        from meerschaum.utils.misc import parse_instance_keys
+        from meerschaum.connectors.parse import parse_instance_keys
         conn = parse_instance_keys(self.connector_keys)
         if conn:
             self._connector = conn
@@ -498,7 +498,7 @@ def id(self):
 <pre><code class="python">@property
 def instance_connector(self):
     if &#39;_instance_connector&#39; not in self.__dict__:
-        from meerschaum.utils.misc import parse_instance_keys
+        from meerschaum.connectors.parse import parse_instance_keys
         conn = parse_instance_keys(self.instance_keys)
         if conn:
             self._instance_connector = conn

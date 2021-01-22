@@ -16,7 +16,8 @@ if cmd is None or isinstance(cmd, dict): cmd = attempt_import('cmd')
 from meerschaum.actions.arguments import parse_line
 from meerschaum.utils.formatting import UNICODE, CHARSET, ANSI, colored
 _clear_screen = get_config('system', 'shell', 'clear_screen', patch=True)
-from meerschaum.connectors.parse import parse_instance_keys, string_width
+from meerschaum.connectors.parse import parse_instance_keys
+from meerschaum.utils.misc import string_width
 ### readline is Unix-like only. Disable readline features for Windows
 try:
     import readline

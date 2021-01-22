@@ -115,29 +115,6 @@ def generate_password(
     import secrets, string
     return &#39;&#39;.join((secrets.choice(string.ascii_letters) for i in range(length)))
 
-def yes_no(
-        question : str = &#39;&#39;,
-        options : list = [&#39;y&#39;, &#39;n&#39;],
-        default : str = &#39;y&#39;,
-        wrappers : tuple = (&#39;[&#39;, &#39;]&#39;),
-    ) -&gt; bool:
-    &#34;&#34;&#34;
-    Print a question and prompt the user with a yes / no input
-
-    Returns bool (answer)
-    &#34;&#34;&#34;
-    from meerschaum.utils.warnings import error
-    from prompt_toolkit import prompt
-    ending = f&#34; {wrappers[0]}&#34; + &#34;/&#34;.join(
-                [ o.upper() if o.lower() == default.lower() else o.lower() for o in options ]
-                ) + f&#34;{wrappers[1]} &#34;
-    try:
-        answer = prompt(question + ending)
-    except:
-        error(f&#34;Error getting response.&#34;, stack=False)
-    if answer == &#34;&#34;: answer = default
-    return answer.lower() == options[0].lower()
-
 def is_int(s):
     &#34;&#34;&#34;
     Check if string is an int
@@ -298,54 +275,6 @@ def edit_file(
         if debug: dprint(e)
         if debug: dprint(&#39;Failed to open file with system editor. Falling back to pyvim...&#39;)
         run_python_package(&#39;pyvim&#39;, [path], debug=debug)
-
-def parse_connector_keys(
-        keys : str,
-        construct : bool = True,
-        **kw : Any
-    ) -&gt; Union[meerschaum.connectors.Connector, Mapping[str, Any]]:
-    &#34;&#34;&#34;
-    Parse connector keys and return Connector object
-    &#34;&#34;&#34;
-    from meerschaum.connectors import get_connector
-    from meerschaum.config import get_config
-    from meerschaum.utils.warnings import error
-    keys = str(keys)
-    vals = keys.split(&#39;:&#39;)
-    if construct:
-        conn = get_connector(type=vals[0], label=vals[1], **kw)
-        if conn is None:
-            error(f&#34;Unable to parse connector keys &#39;{keys}&#39;&#34;, stack=False)
-    else:
-        type_config = get_config(&#39;meerschaum&#39;, &#39;connectors&#39;, vals[0])
-        default_config = type_config.get(&#39;default&#39;, None)
-        conn = type_config.get(vals[1], None)
-        if default_config is not None:
-            default_config.update(conn)
-            conn = default_config
-
-    return conn
-
-def parse_instance_keys(keys : str, construct : bool = True, **kw):
-    &#34;&#34;&#34;
-    Parse the Meerschaum instance value into a Connector object
-    &#34;&#34;&#34;
-    from meerschaum.config import get_config
-    if keys is None: keys = get_config(&#39;meerschaum&#39;, &#39;instance&#39;)
-    keys = str(keys)
-    if &#39;:&#39; not in keys: keys += &#39;:&#39;
-    if keys.endswith(&#39;:&#39;): keys += &#39;main&#39;
-    return parse_connector_keys(keys, construct=construct, **kw)
-
-def parse_repo_keys(keys : str = None, **kw):
-    &#34;&#34;&#34;
-    Parse the Meerschaum repository value into a Connector object
-    &#34;&#34;&#34;
-    from meerschaum.config import get_config
-    if keys is None: keys = get_config(&#39;meerschaum&#39;, &#39;default_repository&#39;, patch=True)
-    keys = str(keys)
-    if &#39;:&#39; not in keys: keys = &#39;api:&#39; + keys
-    return parse_connector_keys(keys, **kw)
 
 def is_pipe_registered(
         pipe : &#39;Pipe or MetaPipe&#39;,
@@ -1319,43 +1248,6 @@ NOTE: Not currently used. See <code><a title="meerschaum.utils.misc.search_and_s
     return leading_key[len(leading_key):][len():-1].split(delimeter)</code></pre>
 </details>
 </dd>
-<dt id="meerschaum.utils.misc.parse_connector_keys"><code class="name flex">
-<span>def <span class="ident">parse_connector_keys</span></span>(<span>keys: str, construct: bool = True, **kw: Any) ‑> Union[<a title="meerschaum.connectors.Connector" href="../connectors/Connector.html">meerschaum.connectors.Connector</a>, Mapping[str, Any]]</span>
-</code></dt>
-<dd>
-<div class="desc"><p>Parse connector keys and return Connector object</p></div>
-<details class="source">
-<summary>
-<span>Expand source code</span>
-</summary>
-<pre><code class="python">def parse_connector_keys(
-        keys : str,
-        construct : bool = True,
-        **kw : Any
-    ) -&gt; Union[meerschaum.connectors.Connector, Mapping[str, Any]]:
-    &#34;&#34;&#34;
-    Parse connector keys and return Connector object
-    &#34;&#34;&#34;
-    from meerschaum.connectors import get_connector
-    from meerschaum.config import get_config
-    from meerschaum.utils.warnings import error
-    keys = str(keys)
-    vals = keys.split(&#39;:&#39;)
-    if construct:
-        conn = get_connector(type=vals[0], label=vals[1], **kw)
-        if conn is None:
-            error(f&#34;Unable to parse connector keys &#39;{keys}&#39;&#34;, stack=False)
-    else:
-        type_config = get_config(&#39;meerschaum&#39;, &#39;connectors&#39;, vals[0])
-        default_config = type_config.get(&#39;default&#39;, None)
-        conn = type_config.get(vals[1], None)
-        if default_config is not None:
-            default_config.update(conn)
-            conn = default_config
-
-    return conn</code></pre>
-</details>
-</dd>
 <dt id="meerschaum.utils.misc.parse_df_datetimes"><code class="name flex">
 <span>def <span class="ident">parse_df_datetimes</span></span>(<span>df: "'pd.DataFrame'", debug: bool = False) ‑> pd.DataFrame</span>
 </code></dt>
@@ -1405,47 +1297,6 @@ NOTE: Not currently used. See <code><a title="meerschaum.utils.misc.search_and_s
         df[dt] = df[dt].dt.tz_localize(None)
 
     return df</code></pre>
-</details>
-</dd>
-<dt id="meerschaum.utils.misc.parse_instance_keys"><code class="name flex">
-<span>def <span class="ident">parse_instance_keys</span></span>(<span>keys: str, construct: bool = True, **kw)</span>
-</code></dt>
-<dd>
-<div class="desc"><p>Parse the Meerschaum instance value into a Connector object</p></div>
-<details class="source">
-<summary>
-<span>Expand source code</span>
-</summary>
-<pre><code class="python">def parse_instance_keys(keys : str, construct : bool = True, **kw):
-    &#34;&#34;&#34;
-    Parse the Meerschaum instance value into a Connector object
-    &#34;&#34;&#34;
-    from meerschaum.config import get_config
-    if keys is None: keys = get_config(&#39;meerschaum&#39;, &#39;instance&#39;)
-    keys = str(keys)
-    if &#39;:&#39; not in keys: keys += &#39;:&#39;
-    if keys.endswith(&#39;:&#39;): keys += &#39;main&#39;
-    return parse_connector_keys(keys, construct=construct, **kw)</code></pre>
-</details>
-</dd>
-<dt id="meerschaum.utils.misc.parse_repo_keys"><code class="name flex">
-<span>def <span class="ident">parse_repo_keys</span></span>(<span>keys: str = None, **kw)</span>
-</code></dt>
-<dd>
-<div class="desc"><p>Parse the Meerschaum repository value into a Connector object</p></div>
-<details class="source">
-<summary>
-<span>Expand source code</span>
-</summary>
-<pre><code class="python">def parse_repo_keys(keys : str = None, **kw):
-    &#34;&#34;&#34;
-    Parse the Meerschaum repository value into a Connector object
-    &#34;&#34;&#34;
-    from meerschaum.config import get_config
-    if keys is None: keys = get_config(&#39;meerschaum&#39;, &#39;default_repository&#39;, patch=True)
-    keys = str(keys)
-    if &#39;:&#39; not in keys: keys = &#39;api:&#39; + keys
-    return parse_connector_keys(keys, **kw)</code></pre>
 </details>
 </dd>
 <dt id="meerschaum.utils.misc.pg_capital"><code class="name flex">
@@ -1865,40 +1716,6 @@ from:
     asyncio.run(retry_connect(**kw))</code></pre>
 </details>
 </dd>
-<dt id="meerschaum.utils.misc.yes_no"><code class="name flex">
-<span>def <span class="ident">yes_no</span></span>(<span>question: str = '', options: list = ['y', 'n'], default: str = 'y', wrappers: tuple = ('[', ']')) ‑> bool</span>
-</code></dt>
-<dd>
-<div class="desc"><p>Print a question and prompt the user with a yes / no input</p>
-<p>Returns bool (answer)</p></div>
-<details class="source">
-<summary>
-<span>Expand source code</span>
-</summary>
-<pre><code class="python">def yes_no(
-        question : str = &#39;&#39;,
-        options : list = [&#39;y&#39;, &#39;n&#39;],
-        default : str = &#39;y&#39;,
-        wrappers : tuple = (&#39;[&#39;, &#39;]&#39;),
-    ) -&gt; bool:
-    &#34;&#34;&#34;
-    Print a question and prompt the user with a yes / no input
-
-    Returns bool (answer)
-    &#34;&#34;&#34;
-    from meerschaum.utils.warnings import error
-    from prompt_toolkit import prompt
-    ending = f&#34; {wrappers[0]}&#34; + &#34;/&#34;.join(
-                [ o.upper() if o.lower() == default.lower() else o.lower() for o in options ]
-                ) + f&#34;{wrappers[1]} &#34;
-    try:
-        answer = prompt(question + ending)
-    except:
-        error(f&#34;Error getting response.&#34;, stack=False)
-    if answer == &#34;&#34;: answer = default
-    return answer.lower() == options[0].lower()</code></pre>
-</details>
-</dd>
 </dl>
 </section>
 <section>
@@ -1934,10 +1751,7 @@ from:
 <li><code><a title="meerschaum.utils.misc.is_pipe_registered" href="#meerschaum.utils.misc.is_pipe_registered">is_pipe_registered</a></code></li>
 <li><code><a title="meerschaum.utils.misc.is_valid_email" href="#meerschaum.utils.misc.is_valid_email">is_valid_email</a></code></li>
 <li><code><a title="meerschaum.utils.misc.parse_config_substitution" href="#meerschaum.utils.misc.parse_config_substitution">parse_config_substitution</a></code></li>
-<li><code><a title="meerschaum.utils.misc.parse_connector_keys" href="#meerschaum.utils.misc.parse_connector_keys">parse_connector_keys</a></code></li>
 <li><code><a title="meerschaum.utils.misc.parse_df_datetimes" href="#meerschaum.utils.misc.parse_df_datetimes">parse_df_datetimes</a></code></li>
-<li><code><a title="meerschaum.utils.misc.parse_instance_keys" href="#meerschaum.utils.misc.parse_instance_keys">parse_instance_keys</a></code></li>
-<li><code><a title="meerschaum.utils.misc.parse_repo_keys" href="#meerschaum.utils.misc.parse_repo_keys">parse_repo_keys</a></code></li>
 <li><code><a title="meerschaum.utils.misc.pg_capital" href="#meerschaum.utils.misc.pg_capital">pg_capital</a></code></li>
 <li><code><a title="meerschaum.utils.misc.print_options" href="#meerschaum.utils.misc.print_options">print_options</a></code></li>
 <li><code><a title="meerschaum.utils.misc.reload_plugins" href="#meerschaum.utils.misc.reload_plugins">reload_plugins</a></code></li>
@@ -1950,7 +1764,6 @@ from:
 <li><code><a title="meerschaum.utils.misc.string_to_dict" href="#meerschaum.utils.misc.string_to_dict">string_to_dict</a></code></li>
 <li><code><a title="meerschaum.utils.misc.string_width" href="#meerschaum.utils.misc.string_width">string_width</a></code></li>
 <li><code><a title="meerschaum.utils.misc.wait_for_connection" href="#meerschaum.utils.misc.wait_for_connection">wait_for_connection</a></code></li>
-<li><code><a title="meerschaum.utils.misc.yes_no" href="#meerschaum.utils.misc.yes_no">yes_no</a></code></li>
 </ul>
 </li>
 </ul>

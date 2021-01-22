@@ -45,7 +45,8 @@ if cmd is None or isinstance(cmd, dict): cmd = attempt_import(&#39;cmd&#39;)
 from meerschaum.actions.arguments import parse_line
 from meerschaum.utils.formatting import UNICODE, CHARSET, ANSI, colored
 _clear_screen = get_config(&#39;system&#39;, &#39;shell&#39;, &#39;clear_screen&#39;, patch=True)
-from meerschaum.utils.misc import parse_instance_keys, string_width
+from meerschaum.connectors.parse import parse_instance_keys
+from meerschaum.utils.misc import string_width
 ### readline is Unix-like only. Disable readline features for Windows
 try:
     import readline
@@ -160,8 +161,6 @@ class Shell(cmd.Cmd):
         if &#39;{username}&#39; in self._prompt:
             if username is None:
                 try:
-                    # conn = parse_instance_keys(self.instance_keys, construct=True)
-                    # help(conn)
                     username = parse_instance_keys(self.instance_keys, construct=False)[&#39;username&#39;]
                 except KeyError:
                     username = &#39;(no username)&#39;
@@ -347,7 +346,7 @@ class Shell(cmd.Cmd):
         &#34;&#34;&#34;
         from meerschaum import get_connector
         from meerschaum.config import get_config
-        from meerschaum.utils.misc import parse_instance_keys
+        from meerschaum.connectors.parse import parse_instance_keys
         from meerschaum.utils.warnings import warn, info
 
         try:
@@ -396,7 +395,7 @@ class Shell(cmd.Cmd):
         &#34;&#34;&#34;
         from meerschaum import get_connector
         from meerschaum.config import get_config
-        from meerschaum.utils.misc import parse_repo_keys
+        from meerschaum.connectors.parse import parse_repo_keys
         from meerschaum.utils.warnings import warn, info
 
         try:
@@ -616,8 +615,6 @@ to the out of the box configuration.</p>
         if &#39;{username}&#39; in self._prompt:
             if username is None:
                 try:
-                    # conn = parse_instance_keys(self.instance_keys, construct=True)
-                    # help(conn)
                     username = parse_instance_keys(self.instance_keys, construct=False)[&#39;username&#39;]
                 except KeyError:
                     username = &#39;(no username)&#39;
@@ -803,7 +800,7 @@ to the out of the box configuration.</p>
         &#34;&#34;&#34;
         from meerschaum import get_connector
         from meerschaum.config import get_config
-        from meerschaum.utils.misc import parse_instance_keys
+        from meerschaum.connectors.parse import parse_instance_keys
         from meerschaum.utils.warnings import warn, info
 
         try:
@@ -852,7 +849,7 @@ to the out of the box configuration.</p>
         &#34;&#34;&#34;
         from meerschaum import get_connector
         from meerschaum.config import get_config
-        from meerschaum.utils.misc import parse_repo_keys
+        from meerschaum.connectors.parse import parse_repo_keys
         from meerschaum.utils.warnings import warn, info
 
         try:
@@ -1024,7 +1021,7 @@ and be accessible to this machine over the network.</p></div>
     &#34;&#34;&#34;
     from meerschaum import get_connector
     from meerschaum.config import get_config
-    from meerschaum.utils.misc import parse_instance_keys
+    from meerschaum.connectors.parse import parse_instance_keys
     from meerschaum.utils.warnings import warn, info
 
     try:
@@ -1112,7 +1109,7 @@ The default repository (mrsm.io) is loaded from the Meerschaum configuraton file
     &#34;&#34;&#34;
     from meerschaum import get_connector
     from meerschaum.config import get_config
-    from meerschaum.utils.misc import parse_repo_keys
+    from meerschaum.connectors.parse import parse_repo_keys
     from meerschaum.utils.warnings import warn, info
 
     try:
@@ -1355,8 +1352,6 @@ to run hooks before the command loop begins. See
     if &#39;{username}&#39; in self._prompt:
         if username is None:
             try:
-                # conn = parse_instance_keys(self.instance_keys, construct=True)
-                # help(conn)
                 username = parse_instance_keys(self.instance_keys, construct=False)[&#39;username&#39;]
             except KeyError:
                 username = &#39;(no username)&#39;

@@ -68,6 +68,17 @@ def _register_pipes(
     from meerschaum.utils.debug import dprint
     from meerschaum.utils.warnings import warn, info
 
+    if (
+        len(connector_keys) == 0 or
+        len(metric_keys) == 0
+    ):
+        warn(
+            &#34;You must provide connector keys (-c) and metrics (-m) to register pipes.\n\n&#34; +
+            &#34;Run `bootstrap pipe` for an interactive guide that creates pipes.&#34;,
+            stack = False
+        )
+        return False, &#34;Missing connector keys or metrics&#34;
+
     pipes = get_pipes(
         connector_keys = connector_keys,
         metric_keys = metric_keys,
@@ -109,7 +120,8 @@ def _register_plugins(
         **kw
     ) -&gt; tuple:
     from meerschaum.utils.debug import dprint
-    from meerschaum.utils.misc import parse_repo_keys, reload_plugins
+    from meerschaum.utils.misc import reload_plugins
+    from meerschaum.connectors.parse import parse_repo_keys
     from meerschaum.config import get_config
     from meerschaum.utils.warnings import warn, error, info
     from meerschaum._internal import Plugin
@@ -166,19 +178,25 @@ def _register_users(
         debug : bool = False,
         **kw
     ) -&gt; tuple:
+    &#34;&#34;&#34;
+    Register a new user to a Meerschaum repository.
+    By default, register to the public mrsm.io repository (or whatever is defined in config).
+    &#34;&#34;&#34;
     from meerschaum.config import get_config
     from meerschaum import get_connector
-    from meerschaum.utils.misc import parse_repo_keys, is_valid_email
+    from meerschaum.utils.misc import is_valid_email
+    from meerschaum.connectors.parse import parse_repo_keys
     from meerschaum.utils.debug import dprint
     from meerschaum.utils.warnings import warn, error, info
     from meerschaum._internal import User
     from meerschaum.connectors.api import APIConnector
     from meerschaum.utils.formatting import print_tuple
-    from prompt_toolkit import prompt
+    from meerschaum.utils.prompt import prompt
     from getpass import getpass
     repo_connector = parse_repo_keys(repository)
 
-    if len(action) == 0 or action == [&#39;&#39;]: return False, &#34;No users to register.&#34;
+    if len(action) == 0 or action == [&#39;&#39;]:
+        return False, &#34;No users to register.&#34;
 
     ### filter out existing users
     nonregistered_users = []

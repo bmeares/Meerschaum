@@ -47,6 +47,9 @@ For ease of use, you can also import from the root `meerschaum` module:
 ```
 &#34;&#34;&#34;
 
+from __future__ import annotations
+from meerschaum.utils.typing import Any, SuccessTuple, Union, Optional, Sequence, Mapping
+
 from meerschaum.connectors.Connector import Connector
 
 ### store connectors partitioned by
@@ -66,33 +69,50 @@ def get_connector(
         label : str = None,
         refresh : bool = False,
         debug : bool = False,
-        **kw
+        **kw : Any
     ):
     &#34;&#34;&#34;
     Return existing connector or create new connection and store for reuse.
 
-    type : str (default &#34;sql&#34;)
-        Connector type (sql, api, etc.)
-    label : str (default &#34;main&#34;)
-        Connector label (e.g. main)
-    refresh : bool (default False)
-        Refresh the Connector instance
-    kw : dict
-        Other arguments to pass to the Connector constructor.
-
     You can create new connectors if enough parameters are provided for the given type and flavor.
-    Example: flavor=&#39;sqlite&#39;, database=&#39;newdb&#39;
+
+    For example, the following parameters would create a new SQLConnector that isn&#39;t in the configuration file.
+    
+    ```
+    &gt;&gt;&gt; conn = get_connector(
+    ...     type = &#39;sql&#39;,
+    ...     label = &#39;newlabel&#39;,
+    ...     flavor = &#39;sqlite&#39;,
+    ...     database = &#39;/file/path/to/database.db&#39;
+    ... )
+    &gt;&gt;&gt; 
+    ```
+
+    :param type:
+        Connector type (sql, api, etc.). Defaults to the type of the configured `instance_connector`.
+    
+    :param label:
+        Connector label (e.g. main). Defaults to `&#39;main&#39;`.
+
+    :param refresh:
+        Refresh the Connector instance / construct new object. Defaults to `False`.
+
+    :param kw:
+        Other arguments to pass to the Connector constructor.
+        If the Connector has already been constructed and new arguments are provided,
+        refresh is set to True and the old Connector is replaced.
+
     &#34;&#34;&#34;
     from meerschaum.config import get_config
     if type is None and label is None:
-        from meerschaum.utils.misc import parse_instance_keys
         default_instance_keys = get_config(&#39;meerschaum&#39;, &#39;instance&#39;, patch=True)
         ### recursive call to get_connector
         return parse_instance_keys(default_instance_keys)
 
     ### NOTE: the default instance connector may not be main.
     ### Only fall back to &#39;main&#39; if the type is provided by the label is omitted.
-    if label is None: label = &#39;main&#39;
+    if label is None:
+        label = &#39;main&#39;
 
     global types, connectors
 
@@ -182,6 +202,10 @@ Consult implemented child classes like SQLConnector, APIConnector, …</p></div>
 <dd>
 <div class="desc"><p>Read data from MQTT topics.</p></div>
 </dd>
+<dt><code class="name"><a title="meerschaum.connectors.parse" href="parse.html">meerschaum.connectors.parse</a></code></dt>
+<dd>
+<div class="desc"><p>Utility functions for parsing connector keys.</p></div>
+</dd>
 <dt><code class="name"><a title="meerschaum.connectors.plugin" href="plugin/index.html">meerschaum.connectors.plugin</a></code></dt>
 <dd>
 <div class="desc"><p>Allow pipes to source data from installed plugins.</p></div>
@@ -198,20 +222,30 @@ Consult implemented child classes like SQLConnector, APIConnector, …</p></div>
 <h2 class="section-title" id="header-functions">Functions</h2>
 <dl>
 <dt id="meerschaum.connectors.get_connector"><code class="name flex">
-<span>def <span class="ident">get_connector</span></span>(<span>type: str = None, label: str = None, refresh: bool = False, debug: bool = False, **kw)</span>
+<span>def <span class="ident">get_connector</span></span>(<span>type: str = None, label: str = None, refresh: bool = False, debug: bool = False, **kw: Any)</span>
 </code></dt>
 <dd>
 <div class="desc"><p>Return existing connector or create new connection and store for reuse.</p>
-<p>type : str (default "sql")
-Connector type (sql, api, etc.)
-label : str (default "main")
-Connector label (e.g. main)
-refresh : bool (default False)
-Refresh the Connector instance
-kw : dict
-Other arguments to pass to the Connector constructor.</p>
-<p>You can create new connectors if enough parameters are provided for the given type and flavor.
-Example: flavor='sqlite', database='newdb'</p></div>
+<p>You can create new connectors if enough parameters are provided for the given type and flavor.</p>
+<p>For example, the following parameters would create a new SQLConnector that isn't in the configuration file.</p>
+<pre><code>&gt;&gt;&gt; conn = get_connector(
+...     type = 'sql',
+...     label = 'newlabel',
+...     flavor = 'sqlite',
+...     database = '/file/path/to/database.db'
+... )
+&gt;&gt;&gt; 
+</code></pre>
+<p>:param type:
+Connector type (sql, api, etc.). Defaults to the type of the configured <code>instance_connector</code>.</p>
+<p>:param label:
+Connector label (e.g. main). Defaults to <code>'main'</code>.</p>
+<p>:param refresh:
+Refresh the Connector instance / construct new object. Defaults to <code>False</code>.</p>
+<p>:param kw:
+Other arguments to pass to the Connector constructor.
+If the Connector has already been constructed and new arguments are provided,
+refresh is set to True and the old Connector is replaced.</p></div>
 <details class="source">
 <summary>
 <span>Expand source code</span>
@@ -221,33 +255,50 @@ Example: flavor='sqlite', database='newdb'</p></div>
         label : str = None,
         refresh : bool = False,
         debug : bool = False,
-        **kw
+        **kw : Any
     ):
     &#34;&#34;&#34;
     Return existing connector or create new connection and store for reuse.
 
-    type : str (default &#34;sql&#34;)
-        Connector type (sql, api, etc.)
-    label : str (default &#34;main&#34;)
-        Connector label (e.g. main)
-    refresh : bool (default False)
-        Refresh the Connector instance
-    kw : dict
-        Other arguments to pass to the Connector constructor.
-
     You can create new connectors if enough parameters are provided for the given type and flavor.
-    Example: flavor=&#39;sqlite&#39;, database=&#39;newdb&#39;
+
+    For example, the following parameters would create a new SQLConnector that isn&#39;t in the configuration file.
+    
+    ```
+    &gt;&gt;&gt; conn = get_connector(
+    ...     type = &#39;sql&#39;,
+    ...     label = &#39;newlabel&#39;,
+    ...     flavor = &#39;sqlite&#39;,
+    ...     database = &#39;/file/path/to/database.db&#39;
+    ... )
+    &gt;&gt;&gt; 
+    ```
+
+    :param type:
+        Connector type (sql, api, etc.). Defaults to the type of the configured `instance_connector`.
+    
+    :param label:
+        Connector label (e.g. main). Defaults to `&#39;main&#39;`.
+
+    :param refresh:
+        Refresh the Connector instance / construct new object. Defaults to `False`.
+
+    :param kw:
+        Other arguments to pass to the Connector constructor.
+        If the Connector has already been constructed and new arguments are provided,
+        refresh is set to True and the old Connector is replaced.
+
     &#34;&#34;&#34;
     from meerschaum.config import get_config
     if type is None and label is None:
-        from meerschaum.utils.misc import parse_instance_keys
         default_instance_keys = get_config(&#39;meerschaum&#39;, &#39;instance&#39;, patch=True)
         ### recursive call to get_connector
         return parse_instance_keys(default_instance_keys)
 
     ### NOTE: the default instance connector may not be main.
     ### Only fall back to &#39;main&#39; if the type is provided by the label is omitted.
-    if label is None: label = &#39;main&#39;
+    if label is None:
+        label = &#39;main&#39;
 
     global types, connectors
 
@@ -342,6 +393,7 @@ Example: flavor='sqlite', database='newdb'</p></div>
 <li><code><a title="meerschaum.connectors.Connector" href="Connector.html">meerschaum.connectors.Connector</a></code></li>
 <li><code><a title="meerschaum.connectors.api" href="api/index.html">meerschaum.connectors.api</a></code></li>
 <li><code><a title="meerschaum.connectors.mqtt" href="mqtt/index.html">meerschaum.connectors.mqtt</a></code></li>
+<li><code><a title="meerschaum.connectors.parse" href="parse.html">meerschaum.connectors.parse</a></code></li>
 <li><code><a title="meerschaum.connectors.plugin" href="plugin/index.html">meerschaum.connectors.plugin</a></code></li>
 <li><code><a title="meerschaum.connectors.sql" href="sql/index.html">meerschaum.connectors.sql</a></code></li>
 </ul>
