@@ -22,7 +22,7 @@ def upgrade(
     from meerschaum.utils.debug import dprint
     from meerschaum.actions import actions
     from meerschaum.utils.prompt import yes_no
-    from meerschaum.utils.packages import run_python_package, attempt_import
+    from meerschaum.utils.packages import pip_install, attempt_import
 
     is_stack_running = False
     client = None
@@ -48,14 +48,13 @@ def upgrade(
     if action != [''] and len(action) > 0:
         dependencies = action[0]
 
-    command = [
-        'install',
-        '--upgrade',
-        'meerschaum' + (('[' + ','.join(dependencies.split(',')) + ']') if dependencies else ''),
-    ]
+    install_name = 'meerschaum' + (
+        ('[' + ','.join(dependencies.split(',')) + ']') if dependencies else ''
+    )
 
     if debug: dprint('Upgrade meerschaum with dependencies: \"' + f'{dependencies}' + '\"')
-    run_python_package('pip', command)
+    if not pip_install(install_name, venv=None, debug=debug):
+        return False, f"Failed to upgrade Meerschaum via pip."
 
     if debug: dprint("Pulling new Docker images...")
     if client: actions['stack'](['pull'], debug=debug)

@@ -71,7 +71,7 @@ setup_kw_args = {
         'install'                   : PostInstallCommand,
     },
     'zip_safe'                      : True,
-    'package_data'                  : {'' : ['*.html', '*.css', '*.js']},
+    'package_data'                  : {'' : ['*.html', '*.css', '*.js', '*.png', '*.ico']},
     'python_requires'               : '>=3.7',
     'classifiers'                   : [
         "Development Status :: 4 - Beta",

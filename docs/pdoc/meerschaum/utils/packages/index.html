@@ -160,7 +160,8 @@ def pip_install(
         if &#39;--ignore-installed&#39; not in args:
             args += [&#39;--ignore-installed&#39;]
     ### NOTE: Added pip to be checked on each install. Too much?
-    if &#39;install&#39; not in args: args = [&#39;install&#39;] + args + [&#39;pip&#39;]
+    if &#39;install&#39; not in args:
+        args = [&#39;install&#39;] + args + [&#39;pip&#39;]
     success = run_python_package(&#39;pip&#39;, args + list(packages), venv=venv, debug=debug) == 0
     if venv is not None and deactivate:
         deactivate_venv(venv=venv, debug=debug)
@@ -1088,7 +1089,8 @@ Uses the tensorflow LazyLoader implementation (Apache 2.0 License)</p></div>
         if &#39;--ignore-installed&#39; not in args:
             args += [&#39;--ignore-installed&#39;]
     ### NOTE: Added pip to be checked on each install. Too much?
-    if &#39;install&#39; not in args: args = [&#39;install&#39;] + args + [&#39;pip&#39;]
+    if &#39;install&#39; not in args:
+        args = [&#39;install&#39;] + args + [&#39;pip&#39;]
     success = run_python_package(&#39;pip&#39;, args + list(packages), venv=venv, debug=debug) == 0
     if venv is not None and deactivate:
         deactivate_venv(venv=venv, debug=debug)
