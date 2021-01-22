@@ -30,13 +30,13 @@
 from typing import *
 SuccessTuple = Tuple[bool, str]
 InstanceConnector = Union[
-    &#39;meerschaum.connectors.SQLConnector&#39;,
-    &#39;meerschaum.connectors.APIConnector&#39;
+    &#39;meerschaum.connectors.sql.SQLConnector&#39;,
+    &#39;meerschaum.connectors.api.APIConnector&#39;
 ]
 PipesDict = Mapping[
     str, Mapping[                   ### connector_keys : metrics
         str, Mapping[               ### metric_key     : locations
-            str, &#39;meerschaum.Pipe&#39;  ### location_key   : Pipe
+            str, &#39;meerschaum.Pipe.Pipe&#39;  ### location_key   : Pipe
         ]
     ]
 ]</code></pre>

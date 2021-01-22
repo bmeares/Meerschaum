@@ -51,7 +51,7 @@ def upgrade(
     from meerschaum.utils.debug import dprint
     from meerschaum.actions import actions
     from meerschaum.utils.prompt import yes_no
-    from meerschaum.utils.packages import run_python_package, attempt_import
+    from meerschaum.utils.packages import pip_install, attempt_import
 
     is_stack_running = False
     client = None
@@ -77,14 +77,13 @@ def upgrade(
     if action != [&#39;&#39;] and len(action) &gt; 0:
         dependencies = action[0]
 
-    command = [
-        &#39;install&#39;,
-        &#39;--upgrade&#39;,
-        &#39;meerschaum&#39; + ((&#39;[&#39; + &#39;,&#39;.join(dependencies.split(&#39;,&#39;)) + &#39;]&#39;) if dependencies else &#39;&#39;),
-    ]
+    install_name = &#39;meerschaum&#39; + (
+        (&#39;[&#39; + &#39;,&#39;.join(dependencies.split(&#39;,&#39;)) + &#39;]&#39;) if dependencies else &#39;&#39;
+    )
 
     if debug: dprint(&#39;Upgrade meerschaum with dependencies: \&#34;&#39; + f&#39;{dependencies}&#39; + &#39;\&#34;&#39;)
-    run_python_package(&#39;pip&#39;, command)
+    if not pip_install(install_name, venv=None, debug=debug):
+        return False, f&#34;Failed to upgrade Meerschaum via pip.&#34;
 
     if debug: dprint(&#34;Pulling new Docker images...&#34;)
     if client: actions[&#39;stack&#39;]([&#39;pull&#39;], debug=debug)
@@ -126,7 +125,7 @@ def upgrade(
     from meerschaum.utils.debug import dprint
     from meerschaum.actions import actions
     from meerschaum.utils.prompt import yes_no
-    from meerschaum.utils.packages import run_python_package, attempt_import
+    from meerschaum.utils.packages import pip_install, attempt_import
 
     is_stack_running = False
     client = None
@@ -152,14 +151,13 @@ def upgrade(
     if action != [&#39;&#39;] and len(action) &gt; 0:
         dependencies = action[0]
 
-    command = [
-        &#39;install&#39;,
-        &#39;--upgrade&#39;,
-        &#39;meerschaum&#39; + ((&#39;[&#39; + &#39;,&#39;.join(dependencies.split(&#39;,&#39;)) + &#39;]&#39;) if dependencies else &#39;&#39;),
-    ]
+    install_name = &#39;meerschaum&#39; + (
+        (&#39;[&#39; + &#39;,&#39;.join(dependencies.split(&#39;,&#39;)) + &#39;]&#39;) if dependencies else &#39;&#39;
+    )
 
     if debug: dprint(&#39;Upgrade meerschaum with dependencies: \&#34;&#39; + f&#39;{dependencies}&#39; + &#39;\&#34;&#39;)
-    run_python_package(&#39;pip&#39;, command)
+    if not pip_install(install_name, venv=None, debug=debug):
+        return False, f&#34;Failed to upgrade Meerschaum via pip.&#34;
 
     if debug: dprint(&#34;Pulling new Docker images...&#34;)
     if client: actions[&#39;stack&#39;]([&#39;pull&#39;], debug=debug)

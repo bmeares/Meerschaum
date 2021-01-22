@@ -131,7 +131,8 @@ def pip_install(
         if '--ignore-installed' not in args:
             args += ['--ignore-installed']
     ### NOTE: Added pip to be checked on each install. Too much?
-    if 'install' not in args: args = ['install'] + args + ['pip']
+    if 'install' not in args:
+        args = ['install'] + args + ['pip']
     success = run_python_package('pip', args + list(packages), venv=venv, debug=debug) == 0
     if venv is not None and deactivate:
         deactivate_venv(venv=venv, debug=debug)
