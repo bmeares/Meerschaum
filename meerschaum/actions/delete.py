@@ -6,6 +6,9 @@
 Functions for deleting elements
 """
 
+from __future__ import annotations
+from meerschaum.utils.typing import Any, SuccessTuple, Union, Optional, List
+
 def delete(
         action : list = [''],
         **kw
@@ -16,10 +19,11 @@ def delete(
     from meerschaum.utils.misc import choose_subaction
     from meerschaum.utils.debug import dprint
     options = {
-        'config'  : _delete_config, 
-        'pipes'   : _delete_pipes,
-        'plugins' : _delete_plugins,
-        'users'   : _delete_users,
+        'config'     : _delete_config, 
+        'pipes'      : _delete_pipes,
+        'plugins'    : _delete_plugins,
+        'users'      : _delete_users,
+        'connectors' : _delete_connectors,
     }
     return choose_subaction(action, options, **kw)
 
@@ -32,9 +36,10 @@ def _delete_pipes(
     from meerschaum import get_pipes
     from meerschaum.utils.prompt import yes_no
     from meerschaum.utils.formatting import pprint
+    from meerschaum.utils.warnings import warn
     pipes = get_pipes(as_list=True, debug=debug, **kw)
     if len(pipes) == 0:
-        return False, "No pipes to delete"
+        return False, "No pipes to delete."
     question = "Are you sure you want to delete these Pipes? THIS CANNOT BE UNDONE!\n"
     for p in pipes:
         question += f" - {p}" + "\n"
@@ -43,12 +48,25 @@ def _delete_pipes(
         answer = yes_no(question, default='n')
     if not answer:
         return False, "No pipes deleted."
+
+    successes, fails = 0, 0
+    success_dict = {}
+
     for p in pipes:
         success_tuple = p.delete(debug=debug)
-        if not success_tuple[0]:
-            return success_tuple
+        success_dict[p] = success_tuple[1]
+        if success_tuple[0]:
+            successes += 1
+        else:
+            fails += 1
+            warn(success_tuple[1], stack=False)
 
-    return True, "Success"
+    msg = (
+        f"Finished deleting {len(pipes)} pipes.\n" +
+        f"    ({successes} succeeded, {fails} failed)"
+    )
+    
+    return successes > 0, msg
 
 def _delete_config(
         yes : bool = False,
@@ -198,6 +216,66 @@ def _delete_users(
     )
     if shell: info(msg)
     return True, msg
+
+def _delete_connectors(
+        connector_keys : List[str] = [],
+        yes : bool = False,
+        force : bool = False,
+        debug : bool = False,
+        **kw : Any
+    ) -> SuccessTuple:
+    """
+    Delete configured connectors.
+
+    Example:
+        `delete connectors -c sql:test`
+    """
+    from meerschaum.utils.prompt import yes_no, prompt
+    from meerschaum.connectors.parse import parse_connector_keys
+    from meerschaum.config import config as cf
+    from meerschaum.config._edit import write_config
+    from meerschaum.utils.warnings import info, warn
+    import os
+
+    if len(connector_keys) == 0:
+        return False, "No connector keys provided. Run again with `-c` to list connector keys."
+
+    to_delete = []
+    for ck in connector_keys:
+        try:
+            conn = parse_connector_keys(ck, debug=debug)
+        except:
+            warn(f"Could not parse connector '{ck}'. Skipping...", stack=False)
+            continue
+
+        if not force:
+            if yes or not yes_no(
+                f"Are you sure you want to delete connector '{conn}' from the configuration file?",
+                default='n'
+            ):
+                info(f"Skipping connector '{conn}'...")
+                continue
+        to_delete.append(conn)
+
+    if len(to_delete) == 0:
+        return False, "No changes made to the configuration file."
+    for c in to_delete:
+        try:
+            if c.flavor == 'sqlite':
+                if force or yes_no(f"Detected sqlite database '{c.database}'. Delete this file?", default='n'):
+                    try:
+                        os.remove(c.database)
+                    except:
+                        warn(f"Failed to delete database file for connector '{c}'. Ignoring...", stack=False)
+        except:
+            pass
+        try:
+            del cf['meerschaum']['connectors'][c.type][c.label]
+        except:
+            warn(f"Failed to delete connector '{c}' from configuration. Skipping...")
+
+    write_config(cf, debug=debug)
+    return True, "Success"
 
 ### NOTE: This must be the final statement of the module.
 ###       Any subactions added below these lines will not

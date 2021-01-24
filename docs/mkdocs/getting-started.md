@@ -8,7 +8,18 @@ Meerschaum is customizable to best fit your situation, but if you're starting fr
 
 To install Meerschaum, you need will need [Python 3.7+](https://www.python.org/) with [pip](https://pip.pypa.io/en/stable/installing/) installed.
 
-If you plan on running the default Meerschaum back-end database, make sure you have [Docker](https://www.docker.com/get-started) installed. Docker is used for the `stack` command, so if you have another database, you can skip installing Docker.
+#### (Optional but recommended) Server Stack Requirements
+
+Meerschaum comes with the `stack` command which leverages [Docker Compose](https://docs.docker.com/compose/) to create all the necessary services in a full-stack Meerschaum installation ― services such as a database instance, API server, pre-configured Grafana instance, MQTT broker, and more.
+
+The [stack](#starting-the-stack) is only needed for back-end server installations and is optional, so you can skip this step for any of the following reasons:
+
+- You want a minimal install with SQLite instead of a dedicated database like TimescaleDB.
+- You don't want to / can't install Docker.
+  - You can install and run Meerschaum without any elevated privileges. More info on running [unprivileged Meerschaum here](#unprivileged-installation).
+- You only need to use Meerschaum as a client for an existing Meerschaum instance.
+
+If you plan on running the default, pre-configured Meerschaum database, make sure you have [Docker](https://www.docker.com/get-started) installed. Docker is used for the `stack` command, so if you have another database, you can skip installing Docker.
 
 If you are running Linux, search your repositories for `docker.io` or run this script:
 
@@ -36,7 +47,19 @@ That's it! You've got Meerschaum installed. Continue below for information on [b
 
 ### Starting the Stack
 
+To bring up the stack, run the following command:
 
+```bash
+mrsm stack up [-d]
+```
+
+The `stack` command is an alias for [docker-compose](https://docs.docker.com/compose/), and any flags passed to `docker-compose` are wrapped in brackets (e.g. `[-d]`).
+
+If you want to stop all the services in the stack, run the stack command with `down`:
+
+```bash
+mrsm stack down
+```
 
 ### Bootstrapping a Pipe
 

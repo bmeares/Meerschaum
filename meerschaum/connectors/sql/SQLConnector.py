@@ -31,6 +31,7 @@ class SQLConnector(Connector):
         get_sync_time,
         pipe_exists,
         get_pipe_rowcount,
+        drop_pipe,
     )
     from ._plugins import (
         register_plugin,
@@ -64,7 +65,7 @@ class SQLConnector(Connector):
         """
         ### set __dict__ in base class
         super().__init__('sql', label=label, **kw)
-        if self.flavor == 'sqlite':
+        if 'flavor' in self.__dict__ and self.flavor == 'sqlite':
             self._reset_attributes()
             self._set_attributes(
                 'sql',
@@ -88,9 +89,9 @@ class SQLConnector(Connector):
             from meerschaum.utils.misc import wait_for_connection
             wait_for_connection(connector=self.db, debug=debug)
 
-        ### store the PID  anf thread at initialization so we can dispose of the Pool in child processes or threads
+        ### store the PID and thread at initialization so we can dispose of the Pool in child processes or threads
         import os; self._pid = os.getpid()
-        import threading; self._thread = threading.current_thread()
+        import threading; self._thread_ident = threading.current_thread().ident
         self._debug = debug
 
         ### create a sqlalchemy session for building ORM queries
@@ -106,7 +107,7 @@ class SQLConnector(Connector):
             self._engine = self.create_engine(debug=self._debug)
 
         same_process = os.getpid() == self._pid
-        same_thread = threading.current_thread() is self._thread
+        same_thread = threading.current_thread().ident == self._thread_ident
 
         ### handle child processes
         if not same_process:

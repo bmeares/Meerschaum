@@ -15,6 +15,7 @@ from __future__ import annotations
 from meerschaum.utils.typing import Any, SuccessTuple, Union, Optional, Sequence, Mapping
 
 from meerschaum.connectors.Connector import Connector
+from meerschaum.connectors.sql._create_engine import flavor_configs as sql_flavor_configs
 
 ### store connectors partitioned by
 ### type, label for reuse
@@ -23,6 +24,31 @@ connectors = {
     'sql'    : dict(),
     'mqtt'   : dict(),
     'plugin' : dict(),
+}
+attributes = {
+    'api' : {
+        'required' : [
+            'host',
+        ],
+        'default' : {
+            'username' : 'mrsm',
+            'password' : 'mrsm',
+            'protocol' : 'http',
+            'port'     : 8000,
+        },
+    },
+    'sql' : {
+        'flavors' : sql_flavor_configs,
+    },
+    'mqtt' : {
+        'required' : [
+            'host',
+        ],
+        'default' : {
+            'port'     : 1883,
+            'keepalive': 60,
+        },
+    },
 }
 ### fill this with classes only on execution
 ### for lazy loading
@@ -67,6 +93,7 @@ def get_connector(
         refresh is set to True and the old Connector is replaced.
 
     """
+    from meerschaum.connectors.parse import parse_instance_keys
     from meerschaum.config import get_config
     if type is None and label is None:
         default_instance_keys = get_config('meerschaum', 'instance', patch=True)

@@ -92,10 +92,10 @@ def is_int(s):
     """
     try:
         float(s)
-    except ValueError:
+    except:
         return False
-    else:
-        return float(s).is_integer()
+    
+    return float(s).is_integer()
 
 def get_options_functions():
     """
@@ -697,3 +697,16 @@ def _pyinstaller_traverse_dir(
 
             paths.append((path, _path))
     return paths
+
+def replace_password(d : dict) -> dict:
+    """
+    Recursively replace passwords in a dictionary.
+    """
+    _d = d.copy()
+    for k, v in d.items():
+        if isinstance(v, dict):
+            _d[k] = replace_password(v)
+        elif 'password' in str(k).lower():
+            _d[k] = ''.join(['*' for char in str(v)])
+    return _d
+

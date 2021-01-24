@@ -3,6 +3,7 @@
 *.sqlite
 *.mrsm_history
 .pyinstaller
+.venv/
 
 # Byte-compiled / optimized / DLL files
 __pycache__/

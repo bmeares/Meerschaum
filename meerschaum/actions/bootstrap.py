@@ -45,7 +45,7 @@ def _bootstrap_pipes(
     Create a new pipe.
     If no keys are provided, guide the user through the steps required.
     """
-    from meerschaum.utils.config import get_config
+    from meerschaum.config import get_config
     from meerschaum.utils.warnings import info, warn, error
     from meerschaum.utils.debug import dprint
     from meerschaum.utils.prompt import yes_no, prompt
@@ -64,8 +64,6 @@ def _bootstrap_pipes(
                     pass
             else:
                 return ck
-
-
 
     if (
         len(connector_keys) > 0 and
@@ -87,18 +85,123 @@ def _bootstrap_pipes(
 def _bootstrap_connectors(
         action : Sequence[str] = [],
         connector_keys : Sequence[str] = [],
+        yes : bool = False,
+        force : bool = False,
         debug : bool = False,
         **kw : Any
     ) -> SuccessTuple:
     """
     Prompt the user for the details necessary to create a Connector.
     """
-    from meerschaum.connectors import is_valid_connector_keys
-    from meerschaum.utils.prompt import prompt, yes_no
-    if len(connector_keys) == 0:
+    from meerschaum.connectors.parse import is_valid_connector_keys
+    from meerschaum.connectors import connectors, get_connector
+    from meerschaum.utils.prompt import prompt, yes_no, choose
+    from meerschaum.config import get_config, config as cf
+    from meerschaum.config._edit import write_config
+    from meerschaum.utils.formatting import pprint
+    from meerschaum.utils.formatting._shell import clear_screen
+    from meerschaum.connectors import attributes as connector_attributes
+    from meerschaum.utils.warnings import warn, info
+    from meerschaum.utils.misc import is_int
 
+    _clear = get_config('system', 'shell', 'clear_screen', patch=True)
+
+    if len(connector_keys) == 0:
         pass
 
+    _type = choose(
+        (
+            'Please choose a connector type.\n' +
+            'For more information on connectors, please visit https://docs.meerschaum.io/connectors'
+        ),
+        sorted(list(connectors)),
+        default='sql'
+    )
+    if _clear: clear_screen(debug=debug)
+
+    _label_choices = sorted(
+        [label for label in get_config('meerschaum', 'connectors', _type)
+            if label != 'default']
+    )
+    new_connector_label = 'New connector'
+    _label_choices.append(new_connector_label)
+    _label = choose(
+        'Please choose a connector label.\n' +
+        f"If you want to create a new connector, choose '{new_connector_label}' ({len(_label_choices)}).",
+        _label_choices,
+        default = 'main'
+    )
+    if _label == new_connector_label:
+        while True:
+            _label = prompt(f"New label for '{_type}' connector:")
+            if _label in get_config('meerschaum', 'connectors', _type):
+                warn(f"Connector '{_type}:{_label}' already exists.", stack=False)
+                overwrite = yes_no(f"Do you want to overwrite connector '{_type}:{_label}'?", default='n')
+                if not overwrite and not force:
+                    return False, f"No changes made to connector configuration."
+            elif _label == "":
+                warn(f"Please enter a label.", stack=False)
+            else:
+                break
+
+        new_attributes = {}
+        if 'flavors' in connector_attributes[_type]:
+            flavor = choose(
+                f"Flavor for connector '{_type}:{_label}':",
+                sorted(list(connector_attributes[_type]['flavors'])),
+                default = (
+                    'timescaledb' if 'timescaledb' in connector_attributes[_type]['flavors']
+                    else None
+                )
+            )
+            new_attributes['flavor'] = flavor
+            required = sorted(list(connector_attributes[_type]['flavors'][flavor]['requirements']))
+            default = connector_attributes[_type]['flavors'][flavor]['defaults']
+        else:
+            required = sorted(list(connector_attributes[_type]['required']))
+            default = connector_attributes[_type]['default']
+        info(
+            f"Please answer the following questions to configure the new connector '{_type}:{_label}'." + '\n' +
+            "Press Ctrl+C to skip."
+        )
+        for r in required:
+            try:
+                val = prompt(f"Value for '{r}':")
+            except KeyboardInterrupt:
+                continue
+            if is_int(val): val = int(val)
+            new_attributes[r] = val
+
+        for k, v in default.items():
+            ### skip already configured attributes, (e.g. flavor or from required)
+            if k in new_attributes:
+                continue
+            try:
+                val = prompt(f"Value for {k}:", default=v)
+            except KeyboardInterrupt:
+                pass
+            if is_int(val): val = int(val)
+            new_attributes[k] = val
+
+        if _clear: clear_screen(debug=debug)
+        conn = get_connector(_type, _label, **new_attributes)
+        try:
+            conn = get_connector(_type, _label, **new_attributes)
+        except Exception as e:
+            return False, f"Failed to bootstrap connector '{_type}:{_label}' with exception:\n{e}"
+
+        pprint(new_attributes)
+        ok = (
+            yes_no(f"Are you ok with these new attributes for connector '{conn}'?", default='y')
+            if not yes
+            else yes
+        )
+        if not ok:
+            return False, "No changes made to connectors configuration."
+        
+        cf['meerschaum']['connectors'][_type][_label] = new_attributes
+        write_config(cf, debug=debug)
+        return True, "Success"
 
 def _bootstrap_config(
         action : Sequence[str] = [],

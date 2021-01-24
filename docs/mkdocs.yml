@@ -12,3 +12,4 @@ docs_dir: mkdocs
 plugins:
   - search
 repo_url: https://github.com/bmeares/Meerschaum
+edit_uri: ""

@@ -12,7 +12,8 @@ from meerschaum.utils.typing import Any, Union, Optional, Tuple, List
 def prompt(
         question : str,
         icon : bool = True,
-        default : Optional[str] = None,
+        default : Union[str, Tuple[str, str], None] = None,
+        detect_password : bool = True,
         **kw : Any
     ) -> str:
     """
@@ -36,9 +37,23 @@ def prompt(
     prompt_toolkit = attempt_import('prompt_toolkit')
     question_config = get_config('system', 'question', patch=True)
 
+    ### if a default is provided, append it to the question.
+    default_answer = default
     if default is not None:
-        question += f" (default: '{default}')"
-   
+        question += f" (default: "
+        if isinstance(default, tuple) and len(default) > 1:
+            question += f"{default[0]} [{default[1]}]"
+            default_answer = default[0]
+        else:
+            question += f"{default}"
+        question += ")"
+    if not question.endswith(':'):
+        question += ":"
+
+    ### detect password
+    if detect_password and 'password' in question:
+        kw['is_password'] = True
+  
     ### Add the icon and only color the first line.
     lines = question.split('\n')
     first_line = lines[0]
@@ -59,7 +74,7 @@ def prompt(
         **kw
     )
     if answer == '' and default is not None:
-        return default
+        return default_answer
     return answer
 
 def yes_no(
@@ -165,13 +180,15 @@ def choose(
         question += '\n'
         for i, c in enumerate(choices):
             question += f"  {i + 1}. {c}\n"
+        default_tuple = (_default, default)
     else:
+        default_tuple = default
         question += '\n'
         for c in choices:
             question += f"  - {c}\n"
 
     while True:
-        answer = prompt(question, icon=icon, default=_default)
+        answer = prompt(question, icon=icon, default=default_tuple)
         if answer in _choices or answer == default:
             break
         _warn(f"Please pick a valid choice.", stack=False)

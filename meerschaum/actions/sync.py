@@ -126,6 +126,7 @@ def _sync_pipes(
     run = True
     msg = ""
     cooldown = 2 * (min_seconds + 1)
+    success = []
     while run:
         lap_begin = time.time()
         try:
@@ -156,7 +157,7 @@ def _sync_pipes(
             info(f"Sleeping for {min_seconds} second" + ("s" if abs(min_seconds) != 1 else ""))
             time.sleep(min_seconds)
         run = loop
-    return True, msg
+    return len(success) > 0, msg
 
 ### NOTE: This must be the final statement of the module.
 ###       Any subactions added below these lines will not

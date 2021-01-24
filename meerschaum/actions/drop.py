@@ -25,22 +25,58 @@ def drop(
 
 def _drop_pipes(
         action : Sequence[str] = [''],
+        yes : bool = False,
+        force : bool = False,
         debug : bool = False,
         **kw : Any
     ) -> SuccessTuple:
     """
     Drop pipes' tables but keep pipe metadata registration.
     """
+    from meerschaum.utils.prompt import prompt, yes_no
     from meerschaum import get_pipes
+    from meerschaum.utils.warnings import warn
+    from meerschaum.utils.debug import dprint
+    from meerschaum.utils.formatting import pprint
     pipes = get_pipes(as_list=True, debug=debug, **kw)
+    if len(pipes) == 0:
+        return False, "No pipes to drop."
+    question = "Are you sure you want to drop these pipes' tables? Data will be lost and will need to be resynced.\n"
     for p in pipes:
-        p.drop()
-    return False, "Not implemented"
+        question += f" - {p}" + "\n"
+    answer = force
+    if not yes and not force:
+        answer = yes_no(question, default='n')
+    if not answer:
+        return False, "No pipes dropped."
+
+    success_dict = {}
+    successes, fails = 0, 0
+    msg = ""
+
+    for p in pipes:
+        success_tup = p.drop(debug=debug)
+        success_dict[p] = success_tup[1]
+        if success_tup[0]:
+            successes += 1
+        else:
+            fails += 1
+            warn(success_tup[1], stack=False)
+    
+    if debug:
+        dprint("Results for dropping pipes.")
+        pprint(success_dict)
+
+    msg = (
+        f"Finished dropping {len(pipes)} pipes.\n" + 
+        f"    ({successes} succeeded, {fails} failed)"
+    )
+    return successes > 0, msg
 
 def _drop_tables(
-    action : Sequence[str] = [''],
-    **kw : Any
-) -> SuccessTuple:
+        action : Sequence[str] = [''],
+        **kw : Any
+    ) -> SuccessTuple:
     """
     Drop SQL tables. WARNING: This is very dangerous!
     """
