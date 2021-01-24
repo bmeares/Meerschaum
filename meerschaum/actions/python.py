@@ -48,11 +48,13 @@ def python(
     
     #  end_with_semicolon = False
     #  end_with_semicolon = joined_actions[-1].endswith(';')
-    print_command = 'print("""'
+    print_command = 'import sys; print("""'
+    ps1 = "f'{sys.ps1}"
     for i, a in enumerate(joined_actions):
-        line = ">>> " + f"{a}".replace(';', '\n')
-        if '\n' not in line and i != len(joined_actions) - 1: line += "\n"
-        print_command += line
+        line = ps1 + f"{a}".replace(';', '\n')
+        if '\n' not in line and i != len(joined_actions) - 1:
+            line += "\n"
+        print_command += line[len(ps1):]
     print_command += '""")'
 
     command = ""

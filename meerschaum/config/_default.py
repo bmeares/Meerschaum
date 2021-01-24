@@ -13,6 +13,7 @@ import platform
 if platform.system() == 'Windows':
     default_unicode, default_ansi = False, False
 
+from meerschaum.connectors import attributes as connector_attributes
 
 default_meerschaum_config = {
     'instance' : 'sql:main',
@@ -20,12 +21,7 @@ default_meerschaum_config = {
     'default_repository' : 'api:mrsm',
     'connectors' : {
         'sql' : {
-            'default'      : {
-                'username' : 'mrsm',
-                'password' : 'mrsm',
-                'database' : 'meerschaum',
-                'flavor'   : 'timescaledb',
-            },
+            'default'      : connector_attributes['sql']['flavors']['timescaledb']['defaults'],
             'main'         : {
                 'username' : 'mrsm',
                 'password' : 'mrsm',
@@ -37,17 +33,12 @@ default_meerschaum_config = {
             'local'        : {
                 'flavor'   : 'sqlite',
             },
-            'mrsm'         : {
-                'host'     : 'mrsm.io',
-            },
+            #  'mrsm'         : {
+                #  'host'     : 'mrsm.io',
+            #  },
         },
         'api' : {
-            'default'      : {
-                'username' : 'mrsm',
-                'password' : 'mrsm',
-                'protocol' : 'http',
-                'port'     : 8000,
-            },
+            'default'      : connector_attributes['api']['default'],
             'main'         : {
                 'host'     : 'localhost',
                 'port'     : 8000,
@@ -60,10 +51,7 @@ default_meerschaum_config = {
             },
         },
         'mqtt' : {
-            'default'      : {
-                'port'     : 1883,
-                'keepalive': 60,
-            },
+            'default'      : connector_attributes['mqtt']['default'],
             'main'         : {
                 'host'     : 'localhost',
                 'port'     : 1883,

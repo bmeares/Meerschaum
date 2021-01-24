@@ -6,6 +6,8 @@
 Register or fetch Pipes from the API
 """
 
+from __future__ import annotations
+from meerschaum.utils.typing import SuccessTuple, Union, Any, Optional, Mapping, List
 from meerschaum.utils.debug import dprint
 from meerschaum.utils.warnings import error
 
@@ -21,9 +23,9 @@ def pipe_r_url(
 
 def register_pipe(
         self,
-        pipe : 'meerschaum.Pipe',
+        pipe : meerschaum.Pipe,
         debug : bool = False
-    ) -> tuple:
+    ) -> SuccessTuple:
     """
     Submit a POST to the API to register a new Pipe object.
     Returns a tuple of (success_bool, response_dict)
@@ -43,11 +45,11 @@ def register_pipe(
 
 def edit_pipe(
         self,
-        pipe : 'meerschaum.Pipe',
+        pipe : meerschaum.Pipe,
         patch : bool = False,
         debug : bool = False,
-        **kw
-    ) -> tuple:
+        **kw : Any
+    ) -> SuccessTuple:
     """
     Submit a PATCH to the API to edit an existing Pipe.
     Returns a tuple of (success_bool, response_dict)
@@ -70,7 +72,7 @@ def fetch_pipes_keys(
         params : dict = dict(),
         mrsm_instance : str = 'api',
         debug : bool = False
-    ) -> 'dict or list':
+    ) -> Union[List[str], Mapping[str, Any]]:
     """
     NOTE: This function no longer builds Pipes. Use the main `get_pipes()` function
           with the arguments `mrsm_instance = 'api' and `method = 'registered'` (default).
@@ -109,11 +111,11 @@ def fetch_pipes_keys(
 
 def sync_pipe(
         self,
-        pipe : 'meerschaum.Pipe' = None,
-        df : 'pd.DataFrame' = None,
+        pipe : Optional[meerschaum.Pipe] = None,
+        df : Optional[pandas.DataFrame] = None,
         debug : bool = False,
-        **kw
-    ) -> tuple:
+        **kw : Any
+    ) -> SuccessTuple:
     """
     Append a pandas DataFrame to a Pipe.
     If Pipe does not exist, it is registered with supplied metadata
@@ -148,12 +150,14 @@ def sync_pipe(
 
 def delete_pipe(
         self,
-        pipe : 'mrsm.Pipe' = None,
+        pipe : Optional[meerscahum.Pipe] = None,
         debug : bool = None,        
-    ) -> tuple:
+    ) -> SuccessTuple:
     """
     Delete a Pipe and drop its table.
     """
+    from meerschaum.utils.warning import error
+    if pipe is None: error(f"Pipe cannot be None.")
     return self.do_action(
         ['delete', 'pipes'],
         connector_keys = pipe.connector_keys,
@@ -165,11 +169,11 @@ def delete_pipe(
 
 def get_pipe_data(
         self,
-        pipe : 'meerschaum.Pipe',
-        begin : 'datetime.datetime' = None,
-        end : 'datetime.datetime' = None,
+        pipe : meerschaum.Pipe,
+        begin : Optional[datetime.datetime] = None,
+        end : Optional[datetime.datetime] = None,
         debug : bool = False
-    ) -> 'pd.DataFrame':
+    ) -> pandas.DataFrame:
     """
     Fetch data from the API
     """
@@ -194,13 +198,13 @@ def get_pipe_data(
 
 def get_backtrack_data(
         self,
-        pipe : 'meerschaum.Pipe',
-        begin : 'datetime.datetime',
+        pipe : meerschaum.Pipe,
+        begin : datetime.datetime,
         backtrack_minutes : int = 0,
         debug : bool = False
-    ) -> 'pd.DataFrame':
+    ) -> pandas.DataFrame:
     """
-    Get a Pipe's backtrack data from the API
+    Get a Pipe's backtrack data from the API.
     """
     from meerschaum.utils.debug import dprint
     from meerschaum.utils.warnings import warn
@@ -231,7 +235,7 @@ def get_backtrack_data(
 
 def get_pipe_id(
         self,
-        pipe : 'meerschuam.Pipe',
+        pipe : meerschuam.Pipe,
         debug : bool = False,
     ) -> int:
     """
@@ -250,9 +254,9 @@ def get_pipe_id(
 
 def get_pipe_attributes(
         self,
-        pipe : 'meerschaum.Pipe',
+        pipe : meerschaum.Pipe,
         debug : bool = False,
-    ) -> dict:
+    ) -> Mapping[str, Any]:
     """
     Get a Pipe's attributes from the API
     """
@@ -269,7 +273,7 @@ def get_sync_time(
         pipe : 'meerschaum.Pipe',
         params : dict = None,
         debug : bool = False,
-    ) -> 'datetime.datetime':
+    ) -> datetime.datetime:
     """
     Get a Pipe's most recent datetime value from the API
     """
@@ -317,3 +321,21 @@ def get_pipe_rowcount(
         debug : bool = False,
     ) -> int:
     pass
+
+def drop_pipe(
+        self,
+        pipe : meerschaum.Pipe,
+        debug : bool = False
+    ) -> SuccessTuple:
+    """
+    Drop a pipe's tables but maintain its registration.
+    """
+    return self.do_action(
+        ['drop', 'pipes'],
+        connector_keys = pipe.connector_keys,
+        metric_keys = pipe.metric_key,
+        location_keys = pipe.location_key,
+        force = True,
+        debug = debug
+    )
+

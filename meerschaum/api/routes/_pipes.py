@@ -354,3 +354,4 @@ def get_rowcount(
     Return a Pipe's row count
     """
     return get_pipe(connector_keys, metric_key, location_key).get_rowcount()
+

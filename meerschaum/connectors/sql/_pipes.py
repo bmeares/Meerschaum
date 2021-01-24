@@ -259,7 +259,12 @@ def delete_pipe(
     from meerschaum.utils.debug import dprint
     from meerschaum.utils.packages import attempt_import
     sqlalchemy = attempt_import('sqlalchemy')
-    pipe_name = sql_item_name(str(pipe), self.flavor)
+
+    ### try dropping first
+    drop_tuple = pipe.drop(debug=debug)
+    if not drop_tuple[0]:
+        return drop_tuple
+
     if not pipe.id:
         return False, f"Pipe '{pipe}' is not registered"
 
@@ -268,15 +273,8 @@ def delete_pipe(
     pipes = get_tables(mrsm_instance=self, debug=debug)['pipes']
 
     q = sqlalchemy.delete(pipes).where(pipes.c.pipe_id == pipe.id)
-    # q = f"DELETE FROM pipes WHERE pipe_id = {pipe.id}"
     if not self.exec(q, debug=debug):
         return False, f"Failed to delete registration for '{pipe}'"
-
-    q = f"DROP TABLE {pipe_name}"
-    if self.exec(q, silent=True, debug=debug) is None:
-        q = f"DROP VIEW {pipe_name}"
-    if self.exec(q, silent=True, debug=debug) is None:
-        if debug: dprint(f"Failed to drop '{pipe}'. Ignoring...")
 
     return True, "Success"
 
@@ -598,7 +596,7 @@ def get_sync_time(
 
 def pipe_exists(
         self,
-        pipe : 'meerschaum.Pipe',
+        pipe : meerschaum.Pipe,
         debug : bool = False
     ) -> bool:
     """
@@ -658,3 +656,25 @@ def get_pipe_rowcount(
         {pipe.columns['datetime']} <= {dateadd_str(flavor=self.flavor, datepart='minute', number=(0), begin=end)}
         """
     return self.value(query, debug=debug)
+
+def drop_pipe(
+        self,
+        pipe : meerschaum.Pipe,
+        debug : bool = False
+    ) -> SuccessTuple:
+    """
+    Drop a pipe's tables but maintain its registration.
+    """
+    if not pipe.exists(debug=debug):
+        return True, f"Pipe '{pipe}' does not exist, so nothing was dropped."
+
+    from meerschaum.utils.misc import sql_item_name
+    pipe_name = sql_item_name(str(pipe), self.flavor)
+    success = self.exec(f"DROP TABLE {pipe_name}", silent=True, debug=debug) is not None
+    if not success:
+        success = self.exec(f"DROP VIEW {pipe_name}", silent=True, debug=debug) is not None
+    
+    msg = "Success" if success else f"Failed to drop pipe '{pipe}'."
+    if debug: dprint(msg)
+    return success, msg
+

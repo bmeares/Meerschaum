@@ -32,6 +32,7 @@ class APIConnector(Connector):
         pipe_exists,
         create_metadata,
         get_pipe_rowcount,
+        drop_pipe,
     )
     from ._fetch import fetch
     from ._plugins import register_plugin, install_plugin, get_plugins, get_plugin_attributes
