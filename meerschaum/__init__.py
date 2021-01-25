@@ -8,6 +8,7 @@ from meerschaum._internal.docs import index as __doc__
 
 from meerschaum.utils.packages import lazy_import
 actions = lazy_import('meerschaum.actions')
+action = actions.make_action
 connectors = lazy_import('meerschaum.connectors')
 utils = lazy_import('meerschaum.utils')
 config = lazy_import('meerschaum.config')

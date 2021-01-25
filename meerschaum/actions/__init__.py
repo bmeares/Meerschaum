@@ -6,6 +6,8 @@
 Default actions available to the mrsm CLI.
 """
 
+from __future__ import annotations
+from meerschaum.utils.typing import Callable, Any, Optional, Union
 from meerschaum.utils.packages import get_modules_from_package
 from meerschaum.utils.misc import add_method_to_class
 from meerschaum.utils.warnings import enable_depreciation_warnings
@@ -78,10 +80,35 @@ def get_shell(sysargs : list = []):
     global shell
 
     if shell is None:
-        from meerschaum.actions.shell import Shell
+        import meerschaum.actions.shell as shell_pkg
         for a, f in actions.items():
-            add_method_to_class(func=f, class_def=Shell, method_name='do_' + a)
+            add_method_to_class(func=f, class_def=shell_pkg.Shell, method_name='do_' + a)
 
-        shell = Shell(actions, sysargs=sysargs)
+        shell = shell_pkg.Shell(actions, sysargs=sysargs)
 
     return shell
+
+def make_action(function : Callable[[Any], Any]):
+    """
+    Make a function a Meerschaum action. Useful for plugins that are adding multiple actions.
+
+    Usage:
+    ```
+    >>> import meerschaum as mrsm
+    >>> 
+    >>> @mrsm.action
+    ... def my_action(**kw):
+    ...     print('foo')
+    ...     return True, "Success"
+    >>> 
+    ```
+    """
+    global __all__, actions
+    import meerschaum.actions.shell as shell_pkg
+    from meerschaum.utils.formatting import pprint
+    if function.__name__ not in __all__:
+        __all__.append(function.__name__)
+    actions[function.__name__] = function
+    add_method_to_class(function, shell_pkg.Shell)
+    add_method_to_class(function, get_shell())
+    return function
