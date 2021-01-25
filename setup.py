@@ -87,22 +87,22 @@ setup_kw_args = {
         "Topic :: Database",
     ],
 }
-if cx_Freeze is not None and Executable is not None:
-    setup_kw_args['options'] = {
-        'build_exe' : {
-            'packages' : setuptools.find_packages(),
-            'includes' : [
-                'pip', 'venv', 'os', 'sys', 'importlib', 'pathlib',
-            ],
-            'optimize' : 0,
-        },
-    }
-    setup_kw_args['executables'] = [
-        Executable(
-            "meerschaum/__main__.py",
-            target_name = 'mrsm',
-        )
-    ]
+#  if cx_Freeze is not None and Executable is not None:
+    #  setup_kw_args['options'] = {
+        #  'build_exe' : {
+            #  'packages' : setuptools.find_packages(),
+            #  'includes' : [
+                #  'pip', 'venv', 'os', 'sys', 'importlib', 'pathlib',
+            #  ],
+            #  'optimize' : 0,
+        #  },
+    #  }
+    #  setup_kw_args['executables'] = [
+        #  Executable(
+            #  "meerschaum/__main__.py",
+            #  target_name = 'mrsm',
+        #  )
+    #  ]
 
 
 setup(**setup_kw_args)

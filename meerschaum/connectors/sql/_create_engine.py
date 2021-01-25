@@ -83,6 +83,8 @@ def create_engine(
     from meerschaum.utils.packages import attempt_import
     sqlalchemy = attempt_import('sqlalchemy')
     import urllib
+    if self.flavor in ('timescaledb', 'postgresql'):
+        psycopg2 = attempt_import('psycopg2', debug=self._debug)
     ### supplement missing values with defaults (e.g. port number)
     #  print(self.__dict__)
     for a, value in flavor_configs[self.flavor]['defaults'].items():
