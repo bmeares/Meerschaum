@@ -179,5 +179,5 @@ def get_plugins(
     #  WHERE user_id = %(user_id)s
     #  """ if user_id is not None else "")
 
-    return list(self.read(q, debug=debug)['plugin_name'])
+    return list(self.read(query, debug=debug)['plugin_name'])
 
