@@ -46,7 +46,7 @@ def register_plugin(
         'version' : plugin.version,
         'attributes' : json.dumps(plugin.attributes),
         'user_id' : plugin.user_id,
-        'plugin_id' : old_id,
+        #  'plugin_id' : old_id,
     }
 
     if old_id is None:
