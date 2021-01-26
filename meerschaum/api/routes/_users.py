@@ -14,7 +14,7 @@ from meerschaum.utils.typing import (
 from meerschaum.utils.packages import attempt_import
 from meerschaum.api import (
     fastapi, app, endpoints, get_connector, pipes, get_pipe,
-    get_pipes_sql, manager
+    get_pipes_sql, manager, debug
 )
 from meerschaum.api.tables import get_tables
 from starlette.responses import Response, JSONResponse
@@ -38,6 +38,7 @@ def load_user(
 def login(
         response : Response,
         data : OAuth2PasswordRequestForm = fastapi.Depends()
+        #  data : OAuth2PasswordRequestForm
     ) -> JSONResponse:
     """
     Login and set the session token
@@ -48,7 +49,7 @@ def login(
     from meerschaum._internal.User._User import get_pwd_context
     user = User(username, password)
     correct_password = get_pwd_context().verify(
-        password, get_connector().get_user_password_hash(user)
+        password, get_connector().get_user_password_hash(user, debug=debug)
     )
     if not correct_password:
         raise InvalidCredentialsException
@@ -65,14 +66,14 @@ def login(
 def read_current_user(
         curr_user : str = fastapi.Depends(manager),
     ) -> Mapping[str, Union[str, int]]:
-    return {"username" : curr_user.username, 'user_id' : curr_user.user_id}
+    return {"username" : curr_user.username, 'user_id' : get_connector().get_user_id(curr_user)}
 
 @app.get(users_endpoint)
 def get_users() -> Sequence[str]:
     """
     Return a list of registered users
     """
-    return get_connector().get_users()
+    return get_connector().get_users(debug=debug)
 
 @app.post(users_endpoint + "/{username}/register")
 def register_user(
@@ -94,7 +95,7 @@ def register_user(
             " Under the keys system:api:allow_registration, you can toggle various registration types."
         )
     user = User(username, password, email=email, attributes=attributes)
-    return get_connector().register_user(user)
+    return get_connector().register_user(user, debug=debug)
 
 @app.post(users_endpoint + "/{username}/edit")
 def edit_user(
@@ -110,7 +111,7 @@ def edit_user(
     user = User(username)
     user_type = get_connector().get_user_type(curr_user)
     if user_type == 'admin' or curr_user.username == user.username:
-        return get_connector().edit_user(user)
+        return get_connector().edit_user(user, debug=debug)
 
     return False, f"Cannot edit user '{user}': Permission denied"
 
@@ -121,7 +122,7 @@ def get_user_id(
     """
     Get a user's ID
     """
-    return User(username, repository=get_connector()).user_id
+    return get_connector().get_user_id(User(username), debug=debug)
 
 @app.post(users_endpoint + "/{username}/delete")
 def delete_user(
@@ -132,8 +133,8 @@ def delete_user(
     Delete a user
     """
     user = User(username)
-    user_type = get_connector().get_user_type(curr_user)
+    user_type = get_connector().get_user_type(curr_user, debug=debug)
     if user_type == 'admin' or curr_user.username == user.username:
-        return get_connector().delete_user(user)
+        return get_connector().delete_user(user, debug=debug)
 
     return False, f"Cannot delete user '{user}': Permission denied"

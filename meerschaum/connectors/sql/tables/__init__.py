@@ -23,6 +23,7 @@ def get_tables(
     Substantiate and create sqlalchemy tables
     """
     from meerschaum.utils.debug import dprint
+    from meerschaum.utils.formatting import pprint
     from meerschaum.utils.warnings import warn, error
     from meerschaum.connectors.parse import parse_instance_keys
     from meerschaum.utils.packages import attempt_import
@@ -105,13 +106,24 @@ def get_tables(
             sqlalchemy.Column("parameters", params_type),
             sqlalchemy.UniqueConstraint('connector_keys', 'metric_key', 'location_key', name='pipe_index')
         )
+
+        if debug:
+            dprint(f"Tables to be created:")
+            pprint(_tables)
+
         try:
-            conn.metadata.create_all()
+            conn.metadata.create_all(bind=conn.engine)
         except Exception as e:
             warn(str(e))
 
+        if debug: dprint("Done creating tables")
+
         ### store the table dict for reuse (per connector)
         connector_tables[conn] = _tables
+
+    if debug:
+        dprint("connector_tables")
+        pprint(connector_tables)
     
     return connector_tables[conn]
 

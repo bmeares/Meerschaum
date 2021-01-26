@@ -13,7 +13,7 @@ import sys
 def add_method_to_class(
         func : Callable[[Any], Any],
         class_def : ClassVar[dict[Any, Any]],
-        method_name : Optional[str] = None
+        method_name : Optional[str] = None,
     ) -> Callable[[Any], Any]:
     """
     Add function `func` to class `class_def`.
@@ -29,9 +29,21 @@ def add_method_to_class(
     """
     from functools import wraps
 
+    is_class = isinstance(class_def, type)
+    if is_class:
+        def _wrapper(self, *args, **kw):
+            return func(*args, **kw)
+            
+    else:
+        def _wrapper(*args, **kw):
+            try:
+                return func(self, *args, **kw)
+            except:
+                return func(*args, **kw)
+    
     @wraps(func)
-    def wrapper(self, *args, **kw):
-        return func(*args, **kw)
+    def wrapper(*args, **kw):
+        return _wrapper(*args, **kw)
 
     if method_name is None: method_name = func.__name__
     setattr(class_def, method_name, wrapper)
@@ -709,5 +721,4 @@ def replace_password(d : dict) -> dict:
         elif 'password' in str(k).lower():
             _d[k] = ''.join(['*' for char in str(v)])
     return _d
-
 

@@ -7,31 +7,35 @@ Default actions available to the mrsm CLI.
 """
 
 from __future__ import annotations
-from meerschaum.utils.typing import Callable, Any, Optional, Union
+from meerschaum.utils.typing import Callable, Any, Optional, Union, List
 from meerschaum.utils.packages import get_modules_from_package
 from meerschaum.utils.misc import add_method_to_class
 from meerschaum.utils.warnings import enable_depreciation_warnings
 enable_depreciation_warnings(__name__)
+_shell = None
+_custom_actions = []
 
 ### build __all__ from other .py files in this package
 import sys
 __all__, modules = get_modules_from_package(sys.modules[__name__], names=True)
 
 ### append the plugins modules
-from meerschaum.config._paths import (
-    RESOURCES_PATH, PLUGINS_RESOURCES_PATH, PLUGINS_ARCHIVES_RESOURCES_PATH
-)
-if str(RESOURCES_PATH) not in sys.path: sys.path.append(str(RESOURCES_PATH))
-if str(RESOURCES_PATH) not in __path__: __path__.append(str(RESOURCES_PATH))
-import plugins
-_plugins_names, plugins_modules = get_modules_from_package(
-    plugins,
-    names = True,
-    recursive = True,
-    modules_venvs = True
-)
-__all__ += _plugins_names
-modules += plugins_modules
+#  from meerschaum.config._paths import (
+    #  RESOURCES_PATH, PLUGINS_RESOURCES_PATH, PLUGINS_ARCHIVES_RESOURCES_PATH
+#  )
+#  if str(RESOURCES_PATH) not in sys.path: sys.path.append(str(RESOURCES_PATH))
+#  if str(RESOURCES_PATH) not in __path__: __path__.append(str(RESOURCES_PATH))
+#  import plugins
+#  from plugins import testing
+#  help(testing)
+#  _plugins_names, plugins_modules = get_modules_from_package(
+    #  plugins,
+    #  names = True,
+    #  recursive = True,
+    #  modules_venvs = True
+#  )
+#  __all__ += _plugins_names
+#  modules += plugins_modules
 
 
 ### build the actions dictionary by importing all
@@ -70,45 +74,24 @@ for module in modules:
         )
     )
 
-
 from meerschaum.actions._entry import _entry as entry
-shell = None
-def get_shell(sysargs : list = []):
+def get_shell(sysargs : List[str] = [], debug : bool = False):
     """
     Lazy load the Shell
     """
-    global shell
+    global _shell
+    from meerschaum.utils.debug import dprint
 
-    if shell is None:
+    if _shell is None:
+        if debug: dprint("Loading the shell...")
         import meerschaum.actions.shell as shell_pkg
         for a, f in actions.items():
             add_method_to_class(func=f, class_def=shell_pkg.Shell, method_name='do_' + a)
 
-        shell = shell_pkg.Shell(actions, sysargs=sysargs)
+        _shell = shell_pkg.Shell(actions, sysargs=sysargs)
 
-    return shell
+    return _shell
 
-def make_action(function : Callable[[Any], Any]):
-    """
-    Make a function a Meerschaum action. Useful for plugins that are adding multiple actions.
-
-    Usage:
-    ```
-    >>> import meerschaum as mrsm
-    >>> 
-    >>> @mrsm.action
-    ... def my_action(**kw):
-    ...     print('foo')
-    ...     return True, "Success"
-    >>> 
-    ```
-    """
-    global __all__, actions
-    import meerschaum.actions.shell as shell_pkg
-    from meerschaum.utils.formatting import pprint
-    if function.__name__ not in __all__:
-        __all__.append(function.__name__)
-    actions[function.__name__] = function
-    add_method_to_class(function, shell_pkg.Shell)
-    add_method_to_class(function, get_shell())
-    return function
+from meerschaum.actions.plugins import make_action, load_plugins, import_plugins
+plugins = import_plugins()
+load_plugins()

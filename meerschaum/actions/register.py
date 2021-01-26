@@ -109,9 +109,10 @@ def _register_plugins(
     if len(action) == 0 or action == ['']: return False, "No plugins to register"
 
     plugins_to_register = dict()
-    from meerschaum.actions import _plugins_names
+    from meerschaum.actions.plugins import get_plugins_names
+    plugins_names = get_plugins_names()
     for p in action:
-        if p not in _plugins_names:
+        if p not in plugins_names:
             warn(f"Plugin '{p}' is not installed and cannot be registered. Ignoring...", stack=False)
         else:
             plugins_to_register[p] = Plugin(p)
@@ -163,7 +164,6 @@ def _register_users(
     from meerschaum.connectors.api import APIConnector
     from meerschaum.utils.formatting import print_tuple
     from meerschaum.utils.prompt import prompt
-    from getpass import getpass
     repo_connector = parse_repo_keys(repository)
 
     if len(action) == 0 or action == ['']:
@@ -181,8 +181,8 @@ def _register_users(
 
     def get_password(username):
         while True:
-            password = getpass(prompt=f"Password for user '{username}': ")
-            _password = getpass(prompt=f"Confirm password for user '{username}': ")
+            password = prompt(f"Password for user '{username}': ")
+            _password = prompt(f"Confirm password for user '{username}': ")
             if password != _password:
                 warn(f"Passwords do not match! Please try again.", stack=False)
                 continue
@@ -203,7 +203,7 @@ def _register_users(
             username = _user.username
             password = get_password(username)
             email = get_email()
-        except:
+        except Exception as e:
             return False, f"Aborted registering users {', '.join([str(u) for u in nonregistered_users if u not in successfully_registered_users])}"
         if len(email) == 0: email = None
         user = User(username, password, email=email)

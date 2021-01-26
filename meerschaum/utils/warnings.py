@@ -170,11 +170,11 @@ def error(
     if not nopretty and stack:
         console.print(rtb)
     frame = sys._getframe(len(inspect.stack()) - 1)
-    sys.tracebacklimit = 0
+    #  sys.tracebacklimit = 0
     #  help(sys.excepthook)
     #  if silent: raise SilentException(message)
-    #  if silent: sys.tracebacklimit = 0
-    #  else: sys.tracebacklimit = None
+    if silent: sys.tracebacklimit = 0
+    else: sys.tracebacklimit = None
     raise color_exception
 
 def info(message : str, **kw):

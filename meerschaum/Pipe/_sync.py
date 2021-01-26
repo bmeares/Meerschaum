@@ -80,7 +80,7 @@ def sync(
     :param debug: Verbosity toggle. Defaults to False.
     :param kw: Catch-all for keyword arguments.
     """
-    from meerschaum.utils.warnings import warn
+    from meerschaum.utils.warnings import warn, error
     import time
     if (callback is not None or error_callback is not None) and blocking:
         warn("Callback functions are only executed when blocking = False. Ignoring...")
@@ -120,6 +120,7 @@ def sync(
 
             except Exception as e:
                 msg = f"Failed to sync pipe '{p}' with exception: '" + str(e) + "'"
+                if debug: error(msg, silent=False)
                 return False, msg
 
         ### default: fetch new data via the connector.
