@@ -565,7 +565,10 @@ def metadata(self):
     index_queries = dict()
 
     if debug: dprint(f&#34;Creating indices for Pipe &#39;{pipe}&#39;...&#34;)
-    if pipe.datetime is None:
+    if (
+        pipe.columns is None or
+        pipe.columns.get(&#39;datetime&#39;, None) is None
+    ):
         warn(f&#34;Unable to create indices for pipe &#39;{pipe}&#39; without columns.&#34;)
         return False
 
@@ -1350,7 +1353,7 @@ Upper bound for the query (inclusive)</p></div>
 </details>
 </dd>
 <dt id="meerschaum.connectors.sql.SQLConnector.SQLConnector.get_plugin_attributes"><code class="name flex">
-<span>def <span class="ident">get_plugin_attributes</span></span>(<span>self, plugin: meerschaum._internal.Plugin, debug: bool = False) ‑> str</span>
+<span>def <span class="ident">get_plugin_attributes</span></span>(<span>self, plugin: "'meerschaum._internal.Plugin'", debug: bool = False) ‑> dict</span>
 </code></dt>
 <dd>
 <div class="desc"></div>
@@ -1362,7 +1365,7 @@ Upper bound for the query (inclusive)</p></div>
         self,
         plugin : &#39;meerschaum._internal.Plugin&#39;,
         debug : bool = False
-    ) -&gt; str:
+    ) -&gt; dict:
     ### ensure plugins table exists
     from meerschaum.connectors.sql.tables import get_tables
     plugins = get_tables(mrsm_instance=self, debug=debug)[&#39;plugins&#39;]
@@ -1375,7 +1378,7 @@ Upper bound for the query (inclusive)</p></div>
 </details>
 </dd>
 <dt id="meerschaum.connectors.sql.SQLConnector.SQLConnector.get_plugin_id"><code class="name flex">
-<span>def <span class="ident">get_plugin_id</span></span>(<span>self, plugin: meerschaum._internal.Plugin, debug: bool = False) ‑> int</span>
+<span>def <span class="ident">get_plugin_id</span></span>(<span>self, plugin: "'meerschaum._internal.Plugin'", debug: bool = False) ‑> Union[int, NoneType]</span>
 </code></dt>
 <dd>
 <div class="desc"></div>
@@ -1387,7 +1390,7 @@ Upper bound for the query (inclusive)</p></div>
         self,
         plugin : &#39;meerschaum._internal.Plugin&#39;,
         debug : bool = False
-    ) -&gt; int:
+    ) -&gt; Optional[int]:
     ### ensure plugins table exists
     from meerschaum.connectors.sql.tables import get_tables
     plugins = get_tables(mrsm_instance=self, debug=debug)[&#39;plugins&#39;]
@@ -1396,11 +1399,14 @@ Upper bound for the query (inclusive)</p></div>
 
     query = sqlalchemy.select([plugins.c.plugin_id]).where(plugins.c.plugin_name == plugin.name)
     
-    return self.value(query, debug=debug)</code></pre>
+    try:
+        return int(self.value(query, debug=debug))
+    except:
+        return None</code></pre>
 </details>
 </dd>
 <dt id="meerschaum.connectors.sql.SQLConnector.SQLConnector.get_plugin_user_id"><code class="name flex">
-<span>def <span class="ident">get_plugin_user_id</span></span>(<span>self, plugin: meerschaum._internal.Plugin, debug: bool = False) ‑> str</span>
+<span>def <span class="ident">get_plugin_user_id</span></span>(<span>self, plugin: "'meerschaum._internal.Plugin'", debug: bool = False) ‑> Union[int, NoneType]</span>
 </code></dt>
 <dd>
 <div class="desc"></div>
@@ -1412,7 +1418,7 @@ Upper bound for the query (inclusive)</p></div>
         self,
         plugin : &#39;meerschaum._internal.Plugin&#39;,
         debug : bool = False
-    ) -&gt; str:
+    ) -&gt; Optional[int]:
     ### ensure plugins table exists
     from meerschaum.connectors.sql.tables import get_tables
     plugins = get_tables(mrsm_instance=self, debug=debug)[&#39;plugins&#39;]
@@ -1421,11 +1427,14 @@ Upper bound for the query (inclusive)</p></div>
 
     query = sqlalchemy.select([plugins.c.user_id]).where(plugins.c.plugin_name == plugin.name)
 
-    return self.value(query, debug=debug)</code></pre>
+    try:
+        return int(self.value(query, debug=debug))
+    except:
+        return None</code></pre>
 </details>
 </dd>
 <dt id="meerschaum.connectors.sql.SQLConnector.SQLConnector.get_plugin_username"><code class="name flex">
-<span>def <span class="ident">get_plugin_username</span></span>(<span>self, plugin: meerschaum._internal.Plugin, debug: bool = False) ‑> str</span>
+<span>def <span class="ident">get_plugin_username</span></span>(<span>self, plugin: "'meerschaum._internal.Plugin'", debug: bool = False) ‑> str</span>
 </code></dt>
 <dd>
 <div class="desc"></div>
@@ -1463,7 +1472,7 @@ Upper bound for the query (inclusive)</p></div>
 </details>
 </dd>
 <dt id="meerschaum.connectors.sql.SQLConnector.SQLConnector.get_plugin_version"><code class="name flex">
-<span>def <span class="ident">get_plugin_version</span></span>(<span>self, plugin: meerschaum._internal.Plugin, debug: bool = False) ‑> str</span>
+<span>def <span class="ident">get_plugin_version</span></span>(<span>self, plugin: "'meerschaum._internal.Plugin'", debug: bool = False) ‑> str</span>
 </code></dt>
 <dd>
 <div class="desc"></div>
@@ -1518,7 +1527,7 @@ Upper bound for the query (inclusive)</p></div>
     #  WHERE user_id = %(user_id)s
     #  &#34;&#34;&#34; if user_id is not None else &#34;&#34;)
 
-    return list(self.read(q, debug=debug)[&#39;plugin_name&#39;])</code></pre>
+    return list(self.read(query, debug=debug)[&#39;plugin_name&#39;])</code></pre>
 </details>
 </dd>
 <dt id="meerschaum.connectors.sql.SQLConnector.SQLConnector.get_sync_time"><code class="name flex">
@@ -1573,7 +1582,7 @@ Upper bound for the query (inclusive)</p></div>
 </details>
 </dd>
 <dt id="meerschaum.connectors.sql.SQLConnector.SQLConnector.get_user_id"><code class="name flex">
-<span>def <span class="ident">get_user_id</span></span>(<span>self, user: meerschaum._internal.User, debug: bool = False) ‑> int</span>
+<span>def <span class="ident">get_user_id</span></span>(<span>self, user: meerschaum._internal.User, debug: bool = False) ‑> Optional[int]</span>
 </code></dt>
 <dd>
 <div class="desc"></div>
@@ -1585,7 +1594,7 @@ Upper bound for the query (inclusive)</p></div>
         self,
         user : meerschaum._internal.User,
         debug : bool = False
-    ) -&gt; int:
+    ) -&gt; Optional[int]:
     ### ensure users table exists
     from meerschaum.utils.packages import attempt_import
     sqlalchemy = attempt_import(&#39;sqlalchemy&#39;)
@@ -1881,7 +1890,7 @@ A pipe's attributes must be set before registering.</p></div>
 </details>
 </dd>
 <dt id="meerschaum.connectors.sql.SQLConnector.SQLConnector.register_plugin"><code class="name flex">
-<span>def <span class="ident">register_plugin</span></span>(<span>self, plugin: meerschaum._internal.Plugin, debug: bool = False, **kw) ‑> tuple</span>
+<span>def <span class="ident">register_plugin</span></span>(<span>self, plugin: "'meerschaum._internal.Plugin'", debug: bool = False, **kw) ‑> tuple</span>
 </code></dt>
 <dd>
 <div class="desc"><p>Register a new plugin</p></div>
@@ -1926,7 +1935,7 @@ A pipe's attributes must be set before registering.</p></div>
         &#39;version&#39; : plugin.version,
         &#39;attributes&#39; : json.dumps(plugin.attributes),
         &#39;user_id&#39; : plugin.user_id,
-        &#39;plugin_id&#39; : old_id,
+        #  &#39;plugin_id&#39; : old_id,
     }
 
     if old_id is None:
