@@ -699,7 +699,7 @@ If <code>patch</code> is True, update parameters by cascading rather than overwr
 </details>
 </dd>
 <dt id="meerschaum.Pipe.Pipe.fetch"><code class="name flex">
-<span>def <span class="ident">fetch</span></span>(<span>self, debug: bool = False, **kw) ‑> pd.DataFrame or None</span>
+<span>def <span class="ident">fetch</span></span>(<span>self, begin: Optional[datetime.datetime] = None, end: Optional[datetime.datetime] = None, debug: bool = False, **kw: Any) ‑> 'pd.DataFrame or None'</span>
 </code></dt>
 <dd>
 <div class="desc"><p>Fetch a Pipe's latest data from its connector.</p>
@@ -710,8 +710,10 @@ If <code>patch</code> is True, update parameters by cascading rather than overwr
 </summary>
 <pre><code class="python">def fetch(
         self,
+        begin : Optional[datetime.datetime] = None,
+        end : Optional[datetime.datetime] = None,
         debug : bool = False,
-        **kw
+        **kw : Any
     ) -&gt; &#39;pd.DataFrame or None&#39;:
     &#34;&#34;&#34;
     Fetch a Pipe&#39;s latest data from its connector.
@@ -726,7 +728,8 @@ If <code>patch</code> is True, update parameters by cascading rather than overwr
             activate_venv(self.connector.label, debug=debug)
         df = self.connector.fetch(
             self,
-            begin = self.sync_time,
+            begin = self.sync_time if begin is None else begin,
+            end = end,
             debug = debug,
             **kw
         )
@@ -1130,7 +1133,7 @@ Only applies when blocking = False.</p>
     :param debug: Verbosity toggle. Defaults to False.
     :param kw: Catch-all for keyword arguments.
     &#34;&#34;&#34;
-    from meerschaum.utils.warnings import warn
+    from meerschaum.utils.warnings import warn, error
     import time
     if (callback is not None or error_callback is not None) and blocking:
         warn(&#34;Callback functions are only executed when blocking = False. Ignoring...&#34;)
@@ -1170,6 +1173,7 @@ Only applies when blocking = False.</p>
 
             except Exception as e:
                 msg = f&#34;Failed to sync pipe &#39;{p}&#39; with exception: &#39;&#34; + str(e) + &#34;&#39;&#34;
+                if debug: error(msg, silent=False)
                 return False, msg
 
         ### default: fetch new data via the connector.

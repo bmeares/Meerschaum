@@ -42,7 +42,7 @@ import sys
 def add_method_to_class(
         func : Callable[[Any], Any],
         class_def : ClassVar[dict[Any, Any]],
-        method_name : Optional[str] = None
+        method_name : Optional[str] = None,
     ) -&gt; Callable[[Any], Any]:
     &#34;&#34;&#34;
     Add function `func` to class `class_def`.
@@ -58,9 +58,21 @@ def add_method_to_class(
     &#34;&#34;&#34;
     from functools import wraps
 
+    is_class = isinstance(class_def, type)
+    if is_class:
+        def _wrapper(self, *args, **kw):
+            return func(*args, **kw)
+            
+    else:
+        def _wrapper(*args, **kw):
+            try:
+                return func(self, *args, **kw)
+            except:
+                return func(*args, **kw)
+    
     @wraps(func)
-    def wrapper(self, *args, **kw):
-        return func(*args, **kw)
+    def wrapper(*args, **kw):
+        return _wrapper(*args, **kw)
 
     if method_name is None: method_name = func.__name__
     setattr(class_def, method_name, wrapper)
@@ -121,10 +133,10 @@ def is_int(s):
     &#34;&#34;&#34;
     try:
         float(s)
-    except ValueError:
+    except:
         return False
-    else:
-        return float(s).is_integer()
+    
+    return float(s).is_integer()
 
 def get_options_functions():
     &#34;&#34;&#34;
@@ -725,7 +737,19 @@ def _pyinstaller_traverse_dir(
             _path = os.path.sep.join(_path.split(os.path.sep)[:-1])
 
             paths.append((path, _path))
-    return paths</code></pre>
+    return paths
+
+def replace_password(d : dict) -&gt; dict:
+    &#34;&#34;&#34;
+    Recursively replace passwords in a dictionary.
+    &#34;&#34;&#34;
+    _d = d.copy()
+    for k, v in d.items():
+        if isinstance(v, dict):
+            _d[k] = replace_password(v)
+        elif &#39;password&#39; in str(k).lower():
+            _d[k] = &#39;&#39;.join([&#39;*&#39; for char in str(v)])
+    return _d</code></pre>
 </details>
 </section>
 <section>
@@ -753,7 +777,7 @@ New name of the method. None will use func.<strong>name</strong> (default).</p><
 <pre><code class="python">def add_method_to_class(
         func : Callable[[Any], Any],
         class_def : ClassVar[dict[Any, Any]],
-        method_name : Optional[str] = None
+        method_name : Optional[str] = None,
     ) -&gt; Callable[[Any], Any]:
     &#34;&#34;&#34;
     Add function `func` to class `class_def`.
@@ -769,9 +793,21 @@ New name of the method. None will use func.<strong>name</strong> (default).</p><
     &#34;&#34;&#34;
     from functools import wraps
 
+    is_class = isinstance(class_def, type)
+    if is_class:
+        def _wrapper(self, *args, **kw):
+            return func(*args, **kw)
+            
+    else:
+        def _wrapper(*args, **kw):
+            try:
+                return func(self, *args, **kw)
+            except:
+                return func(*args, **kw)
+    
     @wraps(func)
-    def wrapper(self, *args, **kw):
-        return func(*args, **kw)
+    def wrapper(*args, **kw):
+        return _wrapper(*args, **kw)
 
     if method_name is None: method_name = func.__name__
     setattr(class_def, method_name, wrapper)
@@ -1170,10 +1206,10 @@ custom string, per this StackOverflow question:
     &#34;&#34;&#34;
     try:
         float(s)
-    except ValueError:
+    except:
         return False
-    else:
-        return float(s).is_integer()</code></pre>
+    
+    return float(s).is_integer()</code></pre>
 </details>
 </dd>
 <dt id="meerschaum.utils.misc.is_pipe_registered"><code class="name flex">
@@ -1386,6 +1422,28 @@ NOTE: Not currently used. See <code><a title="meerschaum.utils.misc.search_and_s
     import meerschaum.actions
     from meerschaum.utils.packages import reload_package
     reload_package(meerschaum.actions, debug=debug)</code></pre>
+</details>
+</dd>
+<dt id="meerschaum.utils.misc.replace_password"><code class="name flex">
+<span>def <span class="ident">replace_password</span></span>(<span>d: dict) ‑> dict</span>
+</code></dt>
+<dd>
+<div class="desc"><p>Recursively replace passwords in a dictionary.</p></div>
+<details class="source">
+<summary>
+<span>Expand source code</span>
+</summary>
+<pre><code class="python">def replace_password(d : dict) -&gt; dict:
+    &#34;&#34;&#34;
+    Recursively replace passwords in a dictionary.
+    &#34;&#34;&#34;
+    _d = d.copy()
+    for k, v in d.items():
+        if isinstance(v, dict):
+            _d[k] = replace_password(v)
+        elif &#39;password&#39; in str(k).lower():
+            _d[k] = &#39;&#39;.join([&#39;*&#39; for char in str(v)])
+    return _d</code></pre>
 </details>
 </dd>
 <dt id="meerschaum.utils.misc.replace_pipes_in_dict"><code class="name flex">
@@ -1755,6 +1813,7 @@ from:
 <li><code><a title="meerschaum.utils.misc.pg_capital" href="#meerschaum.utils.misc.pg_capital">pg_capital</a></code></li>
 <li><code><a title="meerschaum.utils.misc.print_options" href="#meerschaum.utils.misc.print_options">print_options</a></code></li>
 <li><code><a title="meerschaum.utils.misc.reload_plugins" href="#meerschaum.utils.misc.reload_plugins">reload_plugins</a></code></li>
+<li><code><a title="meerschaum.utils.misc.replace_password" href="#meerschaum.utils.misc.replace_password">replace_password</a></code></li>
 <li><code><a title="meerschaum.utils.misc.replace_pipes_in_dict" href="#meerschaum.utils.misc.replace_pipes_in_dict">replace_pipes_in_dict</a></code></li>
 <li><code><a title="meerschaum.utils.misc.retry_connect" href="#meerschaum.utils.misc.retry_connect">retry_connect</a></code></li>
 <li><code><a title="meerschaum.utils.misc.round_time" href="#meerschaum.utils.misc.round_time">round_time</a></code></li>

@@ -94,4 +94,5 @@ def get_shell(sysargs : List[str] = [], debug : bool = False):
 
 from meerschaum.actions.plugins import make_action, load_plugins, import_plugins
 plugins = import_plugins()
+__pdoc__ = {'plugins' : False}
 load_plugins()

@@ -54,22 +54,58 @@ def drop(
 
 def _drop_pipes(
         action : Sequence[str] = [&#39;&#39;],
+        yes : bool = False,
+        force : bool = False,
         debug : bool = False,
         **kw : Any
     ) -&gt; SuccessTuple:
     &#34;&#34;&#34;
     Drop pipes&#39; tables but keep pipe metadata registration.
     &#34;&#34;&#34;
+    from meerschaum.utils.prompt import prompt, yes_no
     from meerschaum import get_pipes
+    from meerschaum.utils.warnings import warn
+    from meerschaum.utils.debug import dprint
+    from meerschaum.utils.formatting import pprint
     pipes = get_pipes(as_list=True, debug=debug, **kw)
+    if len(pipes) == 0:
+        return False, &#34;No pipes to drop.&#34;
+    question = &#34;Are you sure you want to drop these pipes&#39; tables? Data will be lost and will need to be resynced.\n&#34;
     for p in pipes:
-        p.drop()
-    return False, &#34;Not implemented&#34;
+        question += f&#34; - {p}&#34; + &#34;\n&#34;
+    answer = force
+    if not yes and not force:
+        answer = yes_no(question, default=&#39;n&#39;)
+    if not answer:
+        return False, &#34;No pipes dropped.&#34;
+
+    success_dict = {}
+    successes, fails = 0, 0
+    msg = &#34;&#34;
+
+    for p in pipes:
+        success_tup = p.drop(debug=debug)
+        success_dict[p] = success_tup[1]
+        if success_tup[0]:
+            successes += 1
+        else:
+            fails += 1
+            warn(success_tup[1], stack=False)
+    
+    if debug:
+        dprint(&#34;Results for dropping pipes.&#34;)
+        pprint(success_dict)
+
+    msg = (
+        f&#34;Finished dropping {len(pipes)} pipes.\n&#34; + 
+        f&#34;    ({successes} succeeded, {fails} failed)&#34;
+    )
+    return successes &gt; 0, msg
 
 def _drop_tables(
-    action : Sequence[str] = [&#39;&#39;],
-    **kw : Any
-) -&gt; SuccessTuple:
+        action : Sequence[str] = [&#39;&#39;],
+        **kw : Any
+    ) -&gt; SuccessTuple:
     &#34;&#34;&#34;
     Drop SQL tables. WARNING: This is very dangerous!
     &#34;&#34;&#34;

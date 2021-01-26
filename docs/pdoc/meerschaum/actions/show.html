@@ -287,7 +287,7 @@ def _show_plugins(
     &#34;&#34;&#34;
     Show the installed plugins.
     &#34;&#34;&#34;
-    from meerschaum.actions import _plugins_names
+    from meerschaum.actions.plugins import get_plugins_names
     from meerschaum.utils.misc import print_options
     from meerschaum.connectors.parse import parse_repo_keys
     from meerschaum.utils.warnings import info
@@ -295,7 +295,7 @@ def _show_plugins(
     repo_connector = parse_repo_keys(repository)
 
     if action == [&#39;&#39;] or len(action) == 0:
-        _to_print = _plugins_names
+        _to_print = get_plugins_names()
         header = &#34;Installed plugins:&#34;
         info(&#34;To see all installable plugins, run `show plugins all`&#34;)
         info(&#34;To see plugins created by a certain user, run `show plugins [username]`&#34;)

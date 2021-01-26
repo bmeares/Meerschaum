@@ -121,7 +121,7 @@
     
       <div class="md-header-nav__source">
         
-<a href="https://github.com/bmeares/Meerschaum/" title="Go to repository" class="md-source">
+<a href="https://github.com/bmeares/Meerschaum" title="Go to repository" class="md-source">
   <div class="md-source__icon md-icon">
     
     <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><path d="M439.55 236.05L244 40.45a28.87 28.87 0 00-40.81 0l-40.66 40.63 51.52 51.52c27.06-9.14 52.68 16.77 43.39 43.68l49.66 49.66c34.23-11.8 61.18 31 35.47 56.69-26.49 26.49-70.21-2.87-56-37.34L240.22 199v121.85c25.3 12.54 22.26 41.85 9.08 55a34.34 34.34 0 01-48.55 0c-17.57-17.6-11.07-46.91 11.25-56v-123c-20.8-8.51-24.6-30.74-18.64-45L142.57 101 8.45 235.14a28.86 28.86 0 000 40.81l195.61 195.6a28.86 28.86 0 0040.8 0l194.69-194.69a28.86 28.86 0 000-40.81z"/></svg>
@@ -165,7 +165,7 @@
   
     <div class="md-nav__source">
       
-<a href="https://github.com/bmeares/Meerschaum/" title="Go to repository" class="md-source">
+<a href="https://github.com/bmeares/Meerschaum" title="Go to repository" class="md-source">
   <div class="md-source__icon md-icon">
     
     <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><path d="M439.55 236.05L244 40.45a28.87 28.87 0 00-40.81 0l-40.66 40.63 51.52 51.52c27.06-9.14 52.68 16.77 43.39 43.68l49.66 49.66c34.23-11.8 61.18 31 35.47 56.69-26.49 26.49-70.21-2.87-56-37.34L240.22 199v121.85c25.3 12.54 22.26 41.85 9.08 55a34.34 34.34 0 01-48.55 0c-17.57-17.6-11.07-46.91 11.25-56v-123c-20.8-8.51-24.6-30.74-18.64-45L142.57 101 8.45 235.14a28.86 28.86 0 000 40.81l195.61 195.6a28.86 28.86 0 0040.8 0l194.69-194.69a28.86 28.86 0 000-40.81z"/></svg>
@@ -245,6 +245,19 @@
   <a href="#requirements" class="md-nav__link">
     Requirements
   </a>
+  
+    <nav class="md-nav" aria-label="Requirements">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#optional-but-recommended-server-stack-requirements" class="md-nav__link">
+    (Optional but recommended) Server Stack Requirements
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
   
 </li>
         
@@ -351,6 +364,19 @@
     Requirements
   </a>
   
+    <nav class="md-nav" aria-label="Requirements">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#optional-but-recommended-server-stack-requirements" class="md-nav__link">
+    (Optional but recommended) Server Stack Requirements
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
 </li>
         
           <li class="md-nav__item">
@@ -391,17 +417,22 @@
             <article class="md-content__inner md-typeset">
               
                 
-                  <a href="https://github.com/bmeares/Meerschaum/edit/master/docs/getting-started.md" title="Edit this page" class="md-content__button md-icon">
-                    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M20.71 7.04c.39-.39.39-1.04 0-1.41l-2.34-2.34c-.37-.39-1.02-.39-1.41 0l-1.84 1.83 3.75 3.75M3 17.25V21h3.75L17.81 9.93l-3.75-3.75L3 17.25z"/></svg>
-                  </a>
-                
                 
                 <h1 id="getting-started">Getting Started</h1>
 <p>Meerschaum is customizable to best fit your situation, but if you're starting from scratch, the defaults work just fine. Read the <a href="#quick-start">Quick Start</a> guide below and follow the steps to install and use Meerschaum.</p>
 <h2 id="quick-start">Quick Start</h2>
 <h3 id="requirements">Requirements</h3>
 <p>To install Meerschaum, you need will need <a href="https://www.python.org/">Python 3.7+</a> with <a href="https://pip.pypa.io/en/stable/installing/">pip</a> installed.</p>
-<p>If you plan on running the default Meerschaum back-end database, make sure you have <a href="https://www.docker.com/get-started">Docker</a> installed. Docker is used for the <code>stack</code> command, so if you have another database, you can skip installing Docker.</p>
+<h4 id="optional-but-recommended-server-stack-requirements">(Optional but recommended) Server Stack Requirements</h4>
+<p>Meerschaum comes with the <code>stack</code> command which leverages <a href="https://docs.docker.com/compose/">Docker Compose</a> to create all the necessary services in a full-stack Meerschaum installation ― services such as a database instance, API server, pre-configured Grafana instance, MQTT broker, and more.</p>
+<p>The <a href="#starting-the-stack">stack</a> is only needed for back-end server installations and is optional, so you can skip this step for any of the following reasons:</p>
+<ul>
+<li>You want a minimal install with SQLite instead of a dedicated database like TimescaleDB.</li>
+<li>You don't want to / can't install Docker.</li>
+<li>You can install and run Meerschaum without any elevated privileges. More info on running <a href="#unprivileged-installation">unprivileged Meerschaum here</a>.</li>
+<li>You only need to use Meerschaum as a client for an existing Meerschaum instance.</li>
+</ul>
+<p>If you plan on running the default, pre-configured Meerschaum database, make sure you have <a href="https://www.docker.com/get-started">Docker</a> installed. Docker is used for the <code>stack</code> command, so if you have another database, you can skip installing Docker.</p>
 <p>If you are running Linux, search your repositories for <code>docker.io</code> or run this script:</p>
 <pre><code class="bash">curl https://get.docker.com | sh
 </code></pre>
@@ -418,6 +449,15 @@
 
 <p>That's it! You've got Meerschaum installed. Continue below for information on <a href="#starting-the-stack">bringing up a stack</a> and creating your first pipes.</p>
 <h3 id="starting-the-stack">Starting the Stack</h3>
+<p>To bring up the stack, run the following command:</p>
+<pre><code class="bash">mrsm stack up [-d]
+</code></pre>
+
+<p>The <code>stack</code> command is an alias for <a href="https://docs.docker.com/compose/">docker-compose</a>, and any flags passed to <code>docker-compose</code> are wrapped in brackets (e.g. <code>[-d]</code>).</p>
+<p>If you want to stop all the services in the stack, run the stack command with <code>down</code>:</p>
+<pre><code class="bash">mrsm stack down
+</code></pre>
+
 <h3 id="bootstrapping-a-pipe">Bootstrapping a Pipe</h3>
                 
               

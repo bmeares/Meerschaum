@@ -60,6 +60,7 @@ class SQLConnector(Connector):
         get_sync_time,
         pipe_exists,
         get_pipe_rowcount,
+        drop_pipe,
     )
     from ._plugins import (
         register_plugin,
@@ -93,7 +94,7 @@ class SQLConnector(Connector):
         &#34;&#34;&#34;
         ### set __dict__ in base class
         super().__init__(&#39;sql&#39;, label=label, **kw)
-        if self.flavor == &#39;sqlite&#39;:
+        if &#39;flavor&#39; in self.__dict__ and self.flavor == &#39;sqlite&#39;:
             self._reset_attributes()
             self._set_attributes(
                 &#39;sql&#39;,
@@ -117,9 +118,9 @@ class SQLConnector(Connector):
             from meerschaum.utils.misc import wait_for_connection
             wait_for_connection(connector=self.db, debug=debug)
 
-        ### store the PID  anf thread at initialization so we can dispose of the Pool in child processes or threads
+        ### store the PID and thread at initialization so we can dispose of the Pool in child processes or threads
         import os; self._pid = os.getpid()
-        import threading; self._thread = threading.current_thread()
+        import threading; self._thread_ident = threading.current_thread().ident
         self._debug = debug
 
         ### create a sqlalchemy session for building ORM queries
@@ -135,7 +136,7 @@ class SQLConnector(Connector):
             self._engine = self.create_engine(debug=self._debug)
 
         same_process = os.getpid() == self._pid
-        same_thread = threading.current_thread() is self._thread
+        same_thread = threading.current_thread().ident == self._thread_ident
 
         ### handle child processes
         if not same_process:
@@ -222,6 +223,7 @@ class SQLConnector(Connector):
         get_sync_time,
         pipe_exists,
         get_pipe_rowcount,
+        drop_pipe,
     )
     from ._plugins import (
         register_plugin,
@@ -255,7 +257,7 @@ class SQLConnector(Connector):
         &#34;&#34;&#34;
         ### set __dict__ in base class
         super().__init__(&#39;sql&#39;, label=label, **kw)
-        if self.flavor == &#39;sqlite&#39;:
+        if &#39;flavor&#39; in self.__dict__ and self.flavor == &#39;sqlite&#39;:
             self._reset_attributes()
             self._set_attributes(
                 &#39;sql&#39;,
@@ -279,9 +281,9 @@ class SQLConnector(Connector):
             from meerschaum.utils.misc import wait_for_connection
             wait_for_connection(connector=self.db, debug=debug)
 
-        ### store the PID  anf thread at initialization so we can dispose of the Pool in child processes or threads
+        ### store the PID and thread at initialization so we can dispose of the Pool in child processes or threads
         import os; self._pid = os.getpid()
-        import threading; self._thread = threading.current_thread()
+        import threading; self._thread_ident = threading.current_thread().ident
         self._debug = debug
 
         ### create a sqlalchemy session for building ORM queries
@@ -297,7 +299,7 @@ class SQLConnector(Connector):
             self._engine = self.create_engine(debug=self._debug)
 
         same_process = os.getpid() == self._pid
-        same_thread = threading.current_thread() is self._thread
+        same_thread = threading.current_thread().ident == self._thread_ident
 
         ### handle child processes
         if not same_process:
@@ -393,7 +395,7 @@ def engine(self):
         self._engine = self.create_engine(debug=self._debug)
 
     same_process = os.getpid() == self._pid
-    same_thread = threading.current_thread() is self._thread
+    same_thread = threading.current_thread().ident == self._thread_ident
 
     ### handle child processes
     if not same_process:
@@ -496,6 +498,8 @@ def metadata(self):
     from meerschaum.utils.packages import attempt_import
     sqlalchemy = attempt_import(&#39;sqlalchemy&#39;)
     import urllib
+    if self.flavor in (&#39;timescaledb&#39;, &#39;postgresql&#39;):
+        psycopg2 = attempt_import(&#39;psycopg2&#39;, debug=self._debug)
     ### supplement missing values with defaults (e.g. port number)
     #  print(self.__dict__)
     for a, value in flavor_configs[self.flavor][&#39;defaults&#39;].items():
@@ -561,6 +565,9 @@ def metadata(self):
     index_queries = dict()
 
     if debug: dprint(f&#34;Creating indices for Pipe &#39;{pipe}&#39;...&#34;)
+    if pipe.datetime is None:
+        warn(f&#34;Unable to create indices for pipe &#39;{pipe}&#39; without columns.&#34;)
+        return False
 
     ### create datetime index
     if &#39;datetime&#39; in pipe.columns and pipe.get_columns(&#39;datetime&#39;):
@@ -621,7 +628,12 @@ def metadata(self):
     from meerschaum.utils.debug import dprint
     from meerschaum.utils.packages import attempt_import
     sqlalchemy = attempt_import(&#39;sqlalchemy&#39;)
-    pipe_name = sql_item_name(str(pipe), self.flavor)
+
+    ### try dropping first
+    drop_tuple = pipe.drop(debug=debug)
+    if not drop_tuple[0]:
+        return drop_tuple
+
     if not pipe.id:
         return False, f&#34;Pipe &#39;{pipe}&#39; is not registered&#34;
 
@@ -630,15 +642,8 @@ def metadata(self):
     pipes = get_tables(mrsm_instance=self, debug=debug)[&#39;pipes&#39;]
 
     q = sqlalchemy.delete(pipes).where(pipes.c.pipe_id == pipe.id)
-    # q = f&#34;DELETE FROM pipes WHERE pipe_id = {pipe.id}&#34;
     if not self.exec(q, debug=debug):
         return False, f&#34;Failed to delete registration for &#39;{pipe}&#39;&#34;
-
-    q = f&#34;DROP TABLE {pipe_name}&#34;
-    if self.exec(q, silent=True, debug=debug) is None:
-        q = f&#34;DROP VIEW {pipe_name}&#34;
-    if self.exec(q, silent=True, debug=debug) is None:
-        if debug: dprint(f&#34;Failed to drop &#39;{pipe}&#39;. Ignoring...&#34;)
 
     return True, &#34;Success&#34;</code></pre>
 </details>
@@ -675,11 +680,42 @@ def metadata(self):
     result = self.exec(query, debug=True)
     if result is None: return False, f&#34;Failed to delete user &#39;{user}&#39;&#34;
 
-    query = sqlalchemy.delete(plugins).where(users.c.user_id == user_id)
+    query = sqlalchemy.delete(plugins).where(plugins.c.user_id == user_id)
     result = self.exec(query, debug=True)
     if result is None: return False, f&#34;Failed to delete plugins of user &#39;{user}&#39;&#34;
 
     return True, f&#34;Successfully deleted user &#39;{user}&#39;&#34;</code></pre>
+</details>
+</dd>
+<dt id="meerschaum.connectors.sql.SQLConnector.SQLConnector.drop_pipe"><code class="name flex">
+<span>def <span class="ident">drop_pipe</span></span>(<span>self, pipe: <a title="meerschaum.Pipe" href="../../Pipe/index.html">meerschaum.Pipe</a>, debug: bool = False) ‑> SuccessTuple</span>
+</code></dt>
+<dd>
+<div class="desc"><p>Drop a pipe's tables but maintain its registration.</p></div>
+<details class="source">
+<summary>
+<span>Expand source code</span>
+</summary>
+<pre><code class="python">def drop_pipe(
+        self,
+        pipe : meerschaum.Pipe,
+        debug : bool = False
+    ) -&gt; SuccessTuple:
+    &#34;&#34;&#34;
+    Drop a pipe&#39;s tables but maintain its registration.
+    &#34;&#34;&#34;
+    if not pipe.exists(debug=debug):
+        return True, f&#34;Pipe &#39;{pipe}&#39; does not exist, so nothing was dropped.&#34;
+
+    from meerschaum.utils.misc import sql_item_name
+    pipe_name = sql_item_name(str(pipe), self.flavor)
+    success = self.exec(f&#34;DROP TABLE {pipe_name}&#34;, silent=True, debug=debug) is not None
+    if not success:
+        success = self.exec(f&#34;DROP VIEW {pipe_name}&#34;, silent=True, debug=debug) is not None
+    
+    msg = &#34;Success&#34; if success else f&#34;Failed to drop pipe &#39;{pipe}&#39;.&#34;
+    if debug: dprint(msg)
+    return success, msg</code></pre>
 </details>
 </dd>
 <dt id="meerschaum.connectors.sql.SQLConnector.SQLConnector.edit_pipe"><code class="name flex">
@@ -1584,13 +1620,18 @@ Upper bound for the query (inclusive)</p></div>
     &#34;&#34;&#34;
     Return a user&#39;s password hash
     &#34;&#34;&#34;
+    from meerschaum.utils.debug import dprint
     from meerschaum.connectors.sql.tables import get_tables
     users = get_tables(mrsm_instance=self, debug=debug)[&#39;users&#39;]
     from meerschaum.utils.packages import attempt_import
     sqlalchemy = attempt_import(&#39;sqlalchemy&#39;)
 
-    if user.user_id is not None: user_id = user.user_id
-    else: user_id = self.get_user_id(user, debug=debug)
+    if user.user_id is not None:
+        user_id = user.user_id
+        if debug: dprint(f&#34;Already given user_id: {user_id}&#34;)
+    else:
+        if debug: dprint(f&#34;Fetching user_id...&#34;)
+        user_id = self.get_user_id(user, debug=debug)
 
     if user_id is None: return None
 
@@ -1627,7 +1668,7 @@ Upper bound for the query (inclusive)</p></div>
 
     if user_id is None: return None
 
-    query = sqlalchemy.select([users.c.usr_type]).where(users.c.user_id == user_id)
+    query = sqlalchemy.select([users.c.user_type]).where(users.c.user_id == user_id)
 
     return self.value(query, debug=debug)</code></pre>
 </details>
@@ -1658,7 +1699,7 @@ Upper bound for the query (inclusive)</p></div>
 </details>
 </dd>
 <dt id="meerschaum.connectors.sql.SQLConnector.SQLConnector.pipe_exists"><code class="name flex">
-<span>def <span class="ident">pipe_exists</span></span>(<span>self, pipe: "'<a title="meerschaum.Pipe" href="../../Pipe/index.html">meerschaum.Pipe</a>'", debug: bool = False) ‑> bool</span>
+<span>def <span class="ident">pipe_exists</span></span>(<span>self, pipe: <a title="meerschaum.Pipe" href="../../Pipe/index.html">meerschaum.Pipe</a>, debug: bool = False) ‑> bool</span>
 </code></dt>
 <dd>
 <div class="desc"><p>Check that a Pipe's table exists</p></div>
@@ -1668,7 +1709,7 @@ Upper bound for the query (inclusive)</p></div>
 </summary>
 <pre><code class="python">def pipe_exists(
         self,
-        pipe : &#39;meerschaum.Pipe&#39;,
+        pipe : meerschaum.Pipe,
         debug : bool = False
     ) -&gt; bool:
     &#34;&#34;&#34;
@@ -2262,6 +2303,7 @@ Additional arguments will be passed to the DataFrame's <code>to_sql</code> funct
 <li><code><a title="meerschaum.connectors.sql.SQLConnector.SQLConnector.db" href="#meerschaum.connectors.sql.SQLConnector.SQLConnector.db">db</a></code></li>
 <li><code><a title="meerschaum.connectors.sql.SQLConnector.SQLConnector.delete_pipe" href="#meerschaum.connectors.sql.SQLConnector.SQLConnector.delete_pipe">delete_pipe</a></code></li>
 <li><code><a title="meerschaum.connectors.sql.SQLConnector.SQLConnector.delete_user" href="#meerschaum.connectors.sql.SQLConnector.SQLConnector.delete_user">delete_user</a></code></li>
+<li><code><a title="meerschaum.connectors.sql.SQLConnector.SQLConnector.drop_pipe" href="#meerschaum.connectors.sql.SQLConnector.SQLConnector.drop_pipe">drop_pipe</a></code></li>
 <li><code><a title="meerschaum.connectors.sql.SQLConnector.SQLConnector.edit_pipe" href="#meerschaum.connectors.sql.SQLConnector.SQLConnector.edit_pipe">edit_pipe</a></code></li>
 <li><code><a title="meerschaum.connectors.sql.SQLConnector.SQLConnector.edit_user" href="#meerschaum.connectors.sql.SQLConnector.SQLConnector.edit_user">edit_user</a></code></li>
 <li><code><a title="meerschaum.connectors.sql.SQLConnector.SQLConnector.engine" href="#meerschaum.connectors.sql.SQLConnector.SQLConnector.engine">engine</a></code></li>
