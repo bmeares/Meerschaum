@@ -6,6 +6,9 @@
 Functions for managing plugins registration via the SQL connector
 """
 
+from __future__ import annotations
+from meerschaum.utils.typing import Optional
+
 def register_plugin(
         self,
         plugin : 'meerschaum._internal.Plugin',
@@ -64,7 +67,7 @@ def get_plugin_id(
         self,
         plugin : 'meerschaum._internal.Plugin',
         debug : bool = False
-    ) -> int:
+    ) -> Optional[int]:
     ### ensure plugins table exists
     from meerschaum.connectors.sql.tables import get_tables
     plugins = get_tables(mrsm_instance=self, debug=debug)['plugins']
@@ -73,7 +76,10 @@ def get_plugin_id(
 
     query = sqlalchemy.select([plugins.c.plugin_id]).where(plugins.c.plugin_name == plugin.name)
     
-    return self.value(query, debug=debug)
+    try:
+        return int(self.value(query, debug=debug))
+    except:
+        return None
 
 def get_plugin_version(
         self,
@@ -94,7 +100,7 @@ def get_plugin_user_id(
         self,
         plugin : 'meerschaum._internal.Plugin',
         debug : bool = False
-    ) -> str:
+    ) -> Optional[int]:
     ### ensure plugins table exists
     from meerschaum.connectors.sql.tables import get_tables
     plugins = get_tables(mrsm_instance=self, debug=debug)['plugins']
@@ -103,7 +109,10 @@ def get_plugin_user_id(
 
     query = sqlalchemy.select([plugins.c.user_id]).where(plugins.c.plugin_name == plugin.name)
 
-    return self.value(query, debug=debug)
+    try:
+        return int(self.value(query, debug=debug))
+    except:
+        return None
 
 def get_plugin_username(
         self,
@@ -137,7 +146,7 @@ def get_plugin_attributes(
         self,
         plugin : 'meerschaum._internal.Plugin',
         debug : bool = False
-    ) -> str:
+    ) -> dict:
     ### ensure plugins table exists
     from meerschaum.connectors.sql.tables import get_tables
     plugins = get_tables(mrsm_instance=self, debug=debug)['plugins']
