@@ -57,7 +57,7 @@ def register_plugin(
 
     plugin = Plugin(name, version=version, attributes=attributes)
     plugin_user_id = get_connector().get_plugin_user_id(plugin)
-    if plugin_user_id is not None and plugin_user_id != get_connector.get_user_id(curr_user):
+    if plugin_user_id is not None and plugin_user_id != get_connector().get_user_id(curr_user):
         return False, f"User '{curr_user.username}' cannot edit plugin '{plugin}'"
     else:
         plugin.user_id = get_connector().get_user_id(curr_user)
