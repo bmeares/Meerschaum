@@ -167,7 +167,7 @@ def delete_user(
     result = self.exec(query, debug=True)
     if result is None: return False, f"Failed to delete user '{user}'"
 
-    query = sqlalchemy.delete(plugins).where(users.c.user_id == user_id)
+    query = sqlalchemy.delete(plugins).where(plugins.c.user_id == user_id)
     result = self.exec(query, debug=True)
     if result is None: return False, f"Failed to delete plugins of user '{user}'"
 
@@ -197,13 +197,18 @@ def get_user_password_hash(
     """
     Return a user's password hash
     """
+    from meerschaum.utils.debug import dprint
     from meerschaum.connectors.sql.tables import get_tables
     users = get_tables(mrsm_instance=self, debug=debug)['users']
     from meerschaum.utils.packages import attempt_import
     sqlalchemy = attempt_import('sqlalchemy')
 
-    if user.user_id is not None: user_id = user.user_id
-    else: user_id = self.get_user_id(user, debug=debug)
+    if user.user_id is not None:
+        user_id = user.user_id
+        if debug: dprint(f"Already given user_id: {user_id}")
+    else:
+        if debug: dprint(f"Fetching user_id...")
+        user_id = self.get_user_id(user, debug=debug)
 
     if user_id is None: return None
 
@@ -230,6 +235,6 @@ def get_user_type(
 
     if user_id is None: return None
 
-    query = sqlalchemy.select([users.c.usr_type]).where(users.c.user_id == user_id)
+    query = sqlalchemy.select([users.c.user_type]).where(users.c.user_id == user_id)
 
     return self.value(query, debug=debug)

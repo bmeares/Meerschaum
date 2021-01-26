@@ -47,11 +47,12 @@ def prompt(
         else:
             question += f"{default}"
         question += ")"
-    if not question.endswith(':'):
-        question += ":"
+    #  if not question.endswith(': '):
+        #  if question.endswith(':'): question += " "
+        #  else: question += ": "
 
     ### detect password
-    if detect_password and 'password' in question:
+    if detect_password and 'password' in question.lower():
         kw['is_password'] = True
   
     ### Add the icon and only color the first line.

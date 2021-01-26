@@ -288,7 +288,7 @@ def get_modules_from_package(
         lazy: bool = False,
         modules_venvs: bool = False,
         debug: bool = False
-):
+    ):
     """
     Find and import all modules in a package.
 

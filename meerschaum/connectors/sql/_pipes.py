@@ -209,6 +209,9 @@ def create_indices(
     index_queries = dict()
 
     if debug: dprint(f"Creating indices for Pipe '{pipe}'...")
+    if pipe.datetime is None:
+        warn(f"Unable to create indices for pipe '{pipe}' without columns.")
+        return False
 
     ### create datetime index
     if 'datetime' in pipe.columns and pipe.get_columns('datetime'):

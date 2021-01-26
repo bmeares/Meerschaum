@@ -37,7 +37,7 @@ def register_plugin(
     }
     r_url = plugin_r_url(plugin)
     try:
-        response = self.post(r_url, files=files, params=metadata)
+        response = self.post(r_url, files=files, params=metadata, debug=debug)
     except:
         success, msg = False, f"Failed to register plugin '{plugin}'"
     finally:

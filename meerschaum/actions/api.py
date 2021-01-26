@@ -108,7 +108,10 @@ def _api_start(
     if workers is not None:
         uvicorn_config['workers'] = workers
 
-    if mrsm_instance is None: mrsm_instance = get_config('meerschaum', 'api_instance', patch=True)
+    uvicorn_config['debug'] = debug
+
+    if mrsm_instance is None:
+        mrsm_instance = get_config('meerschaum', 'api_instance', patch=True)
 
     uvicorn_config['port'] = port
     uvicorn_config['reload'] = debug

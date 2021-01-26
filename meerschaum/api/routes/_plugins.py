@@ -15,6 +15,7 @@ from meerschaum.api import (
     get_pipe,
     get_pipes_sql,
     manager,
+    debug,
 )
 from meerschaum.api.tables import get_tables
 from fastapi import FastAPI, File, UploadFile
@@ -38,7 +39,7 @@ def register_plugin(
     Register a plugin and save its archive file
     """
     from meerschaum.config import get_config
-    allow_pipes = get_config('system', 'api', 'allow_registration', 'plugins', patch=True)
+    allow_plugins = get_config('system', 'api', 'allow_registration', 'plugins', patch=True)
     if not allow_plugins:
         return False, (
             "The administrator for this server has not allowed plugin registration.\n\n" +
@@ -56,11 +57,12 @@ def register_plugin(
 
     plugin = Plugin(name, version=version, attributes=attributes)
     plugin_user_id = get_connector().get_plugin_user_id(plugin)
-    if plugin_user_id is not None and plugin_user_id != curr_user.user_id:
+    if plugin_user_id is not None and plugin_user_id != get_connector.get_user_id(curr_user):
         return False, f"User '{curr_user.username}' cannot edit plugin '{plugin}'"
-    else: plugin.user_id = curr_user.user_id
+    else:
+        plugin.user_id = get_connector().get_user_id(curr_user)
 
-    success, msg = get_connector().register_plugin(plugin, make_archive=False, debug=True)
+    success, msg = get_connector().register_plugin(plugin, make_archive=False, debug=debug)
 
     ### TODO delete and install new version of plugin on success
     if success:

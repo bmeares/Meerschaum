@@ -6,7 +6,7 @@
 Meerschaum API backend. Start an API instance with `api start`.
 """
 
-__version__ = "0.0.13"
+__version__ = "0.0.14"
 from meerschaum.config import system_config, get_config
 from meerschaum.utils.packages import attempt_import
 from meerschaum.utils.get_pipes import get_pipes as get_pipes_sql
@@ -35,30 +35,37 @@ def generate_secret_key():
 SECRET = generate_secret_key()
 manager = LoginManager(SECRET, tokenUrl='/mrsm/login')
 
+uvicorn_config = None
+def get_uvicorn_config() -> dict:
+    global uvicorn_config
+    from meerschaum.config._paths import API_UVICORN_CONFIG_PATH
+    yaml = attempt_import('yaml')
+    if uvicorn_config is None:
+        try:
+            with open(API_UVICORN_CONFIG_PATH, 'r') as f:
+                uvicorn_config = yaml.safe_load(f)
+        except:
+            uvicorn_config = dict()
+
+        if uvicorn_config is None: uvicorn_config = dict()
+
+        ### Default: main SQL connector
+        if 'mrsm_instance' not in uvicorn_config:
+            uvicorn_config['mrsm_instance'] = get_config('meerschaum', 'api_instance', patch=True)
+    return uvicorn_config
+
+debug = get_uvicorn_config().get('debug', False)
+
 connector = None
-def get_connector(instance_keys : str = None, debug : bool = False):
+def get_connector(instance_keys : str = None):
     """
     Create the connector
     """
     from meerschaum.utils.debug import dprint
     global connector
     if connector is None:
-        from meerschaum.config._paths import API_UVICORN_CONFIG_PATH
-        yaml = attempt_import('yaml')
         if instance_keys is None:
-            try:
-                with open(API_UVICORN_CONFIG_PATH, 'r') as f:
-                    uvicorn_config = yaml.safe_load(f)
-            except:
-                uvicorn_config = dict()
-
-            if uvicorn_config is None: uvicorn_config = dict()
-
-            ### Default: main SQL connector
-            if 'mrsm_instance' not in uvicorn_config:
-                uvicorn_config['mrsm_instance'] = get_config('meerschaum', 'api_instance', patch=True)
-
-            instance_keys = uvicorn_config['mrsm_instance']
+            instance_keys = get_uvicorn_config()['mrsm_instance']
 
         from meerschaum.connectors.parse import parse_instance_keys
         connector = parse_instance_keys(instance_keys, debug=debug)

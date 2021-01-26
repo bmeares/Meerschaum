@@ -37,8 +37,8 @@ class Plugin:
     @property
     def module(self):
         if '_module' not in self.__dict__:
-            from meerschaum.actions import plugins_modules
-            for m in plugins_modules:
+            from meerschaum.actions.plugins import get_plugins_modules
+            for m in get_plugins_modules():
                 if self.name == m.__name__.split('.')[-1]:
                     self._module = m
                     break

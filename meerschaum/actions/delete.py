@@ -179,14 +179,15 @@ def _delete_users(
     registered_users = []
     for username in action:
         user = User(username=username, password='')
-        user_id = repo_connector.get_user_id(user)
+        user_id = repo_connector.get_user_id(user, debug=debug)
         if user_id is None:
             info(f"User '{user}' does not exist. Skipping...")
             continue
         user.user_id = user_id
         registered_users.append(user)
 
-    if len(registered_users) == 0: return False, "No users to delete."
+    if len(registered_users) == 0:
+        return False, "No users to delete."
 
     ### verify that the user absolutely wants to do this (skips on --force)
     question = f"Are you sure you want to delete these users from Meerschaum instance '{repo_connector}'?\n"

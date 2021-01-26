@@ -57,8 +57,12 @@ class User():
 
     @property
     def user_id(self):
-        if self._user_id is None:
-            self._user_id = self.repository.get_user_id(self)
+        """
+        NOTE: This causes recursion with the API,
+              so don't try to get fancy with read-only attributes.
+        """
+        #  if self._user_id is None:
+            #  self._user_id = self.repository.get_user_id(self)
         return self._user_id
 
     @user_id.setter

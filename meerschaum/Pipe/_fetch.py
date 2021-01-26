@@ -6,10 +6,15 @@
 Functions for fetching new data into the Pipe
 """
 
+from __future__ import annotations
+from meerschaum.utils.typing import Optional, Any
+
 def fetch(
         self,
+        begin : Optional[datetime.datetime] = None,
+        end : Optional[datetime.datetime] = None,
         debug : bool = False,
-        **kw
+        **kw : Any
     ) -> 'pd.DataFrame or None':
     """
     Fetch a Pipe's latest data from its connector.
@@ -24,7 +29,8 @@ def fetch(
             activate_venv(self.connector.label, debug=debug)
         df = self.connector.fetch(
             self,
-            begin = self.sync_time,
+            begin = self.sync_time if begin is None else begin,
+            end = end,
             debug = debug,
             **kw
         )
