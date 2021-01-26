@@ -209,7 +209,10 @@ def create_indices(
     index_queries = dict()
 
     if debug: dprint(f"Creating indices for Pipe '{pipe}'...")
-    if pipe.datetime is None:
+    if (
+        pipe.columns is None or
+        pipe.columns.get('datetime', None) is None
+    ):
         warn(f"Unable to create indices for pipe '{pipe}' without columns.")
         return False
 
