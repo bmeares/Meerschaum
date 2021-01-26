@@ -128,7 +128,7 @@ def get_user_id(
         self,
         user : meerschaum._internal.User,
         debug : bool = False
-    ) -> int:
+    ) -> Optional[int]:
     ### ensure users table exists
     from meerschaum.utils.packages import attempt_import
     sqlalchemy = attempt_import('sqlalchemy')
