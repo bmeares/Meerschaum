@@ -51,6 +51,7 @@ from __future__ import annotations
 from meerschaum.utils.typing import Any, SuccessTuple, Union, Optional, Sequence, Mapping
 
 from meerschaum.connectors.Connector import Connector
+from meerschaum.connectors.sql._create_engine import flavor_configs as sql_flavor_configs
 
 ### store connectors partitioned by
 ### type, label for reuse
@@ -59,6 +60,31 @@ connectors = {
     &#39;sql&#39;    : dict(),
     &#39;mqtt&#39;   : dict(),
     &#39;plugin&#39; : dict(),
+}
+attributes = {
+    &#39;api&#39; : {
+        &#39;required&#39; : [
+            &#39;host&#39;,
+        ],
+        &#39;default&#39; : {
+            &#39;username&#39; : &#39;mrsm&#39;,
+            &#39;password&#39; : &#39;mrsm&#39;,
+            &#39;protocol&#39; : &#39;http&#39;,
+            &#39;port&#39;     : 8000,
+        },
+    },
+    &#39;sql&#39; : {
+        &#39;flavors&#39; : sql_flavor_configs,
+    },
+    &#39;mqtt&#39; : {
+        &#39;required&#39; : [
+            &#39;host&#39;,
+        ],
+        &#39;default&#39; : {
+            &#39;port&#39;     : 1883,
+            &#39;keepalive&#39;: 60,
+        },
+    },
 }
 ### fill this with classes only on execution
 ### for lazy loading
@@ -103,6 +129,7 @@ def get_connector(
         refresh is set to True and the old Connector is replaced.
 
     &#34;&#34;&#34;
+    from meerschaum.connectors.parse import parse_instance_keys
     from meerschaum.config import get_config
     if type is None and label is None:
         default_instance_keys = get_config(&#39;meerschaum&#39;, &#39;instance&#39;, patch=True)
@@ -289,6 +316,7 @@ refresh is set to True and the old Connector is replaced.</p></div>
         refresh is set to True and the old Connector is replaced.
 
     &#34;&#34;&#34;
+    from meerschaum.connectors.parse import parse_instance_keys
     from meerschaum.config import get_config
     if type is None and label is None:
         default_instance_keys = get_config(&#39;meerschaum&#39;, &#39;instance&#39;, patch=True)

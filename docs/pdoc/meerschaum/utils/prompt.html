@@ -41,7 +41,8 @@ from meerschaum.utils.typing import Any, Union, Optional, Tuple, List
 def prompt(
         question : str,
         icon : bool = True,
-        default : Optional[str] = None,
+        default : Union[str, Tuple[str, str], None] = None,
+        detect_password : bool = True,
         **kw : Any
     ) -&gt; str:
     &#34;&#34;&#34;
@@ -65,9 +66,24 @@ def prompt(
     prompt_toolkit = attempt_import(&#39;prompt_toolkit&#39;)
     question_config = get_config(&#39;system&#39;, &#39;question&#39;, patch=True)
 
+    ### if a default is provided, append it to the question.
+    default_answer = default
     if default is not None:
-        question += f&#34; (default: &#39;{default}&#39;)&#34;
-   
+        question += f&#34; (default: &#34;
+        if isinstance(default, tuple) and len(default) &gt; 1:
+            question += f&#34;{default[0]} [{default[1]}]&#34;
+            default_answer = default[0]
+        else:
+            question += f&#34;{default}&#34;
+        question += &#34;)&#34;
+    #  if not question.endswith(&#39;: &#39;):
+        #  if question.endswith(&#39;:&#39;): question += &#34; &#34;
+        #  else: question += &#34;: &#34;
+
+    ### detect password
+    if detect_password and &#39;password&#39; in question.lower():
+        kw[&#39;is_password&#39;] = True
+  
     ### Add the icon and only color the first line.
     lines = question.split(&#39;\n&#39;)
     first_line = lines[0]
@@ -88,7 +104,7 @@ def prompt(
         **kw
     )
     if answer == &#39;&#39; and default is not None:
-        return default
+        return default_answer
     return answer
 
 def yes_no(
@@ -194,13 +210,15 @@ def choose(
         question += &#39;\n&#39;
         for i, c in enumerate(choices):
             question += f&#34;  {i + 1}. {c}\n&#34;
+        default_tuple = (_default, default)
     else:
+        default_tuple = default
         question += &#39;\n&#39;
         for c in choices:
             question += f&#34;  - {c}\n&#34;
 
     while True:
-        answer = prompt(question, icon=icon, default=_default)
+        answer = prompt(question, icon=icon, default=default_tuple)
         if answer in _choices or answer == default:
             break
         _warn(f&#34;Please pick a valid choice.&#34;, stack=False)
@@ -255,13 +273,15 @@ def choose(
         question += &#39;\n&#39;
         for i, c in enumerate(choices):
             question += f&#34;  {i + 1}. {c}\n&#34;
+        default_tuple = (_default, default)
     else:
+        default_tuple = default
         question += &#39;\n&#39;
         for c in choices:
             question += f&#34;  - {c}\n&#34;
 
     while True:
-        answer = prompt(question, icon=icon, default=_default)
+        answer = prompt(question, icon=icon, default=default_tuple)
         if answer in _choices or answer == default:
             break
         _warn(f&#34;Please pick a valid choice.&#34;, stack=False)
@@ -272,7 +292,7 @@ def choose(
 </details>
 </dd>
 <dt id="meerschaum.utils.prompt.prompt"><code class="name flex">
-<span>def <span class="ident">prompt</span></span>(<span>question: str, icon: bool = True, default: Optional[str] = None, **kw: Any) ‑> str</span>
+<span>def <span class="ident">prompt</span></span>(<span>question: str, icon: bool = True, default: Union[str, Tuple[str, str], None] = None, detect_password: bool = True, **kw: Any) ‑> str</span>
 </code></dt>
 <dd>
 <div class="desc"><p>Ask the user a question and return the answer.
@@ -292,7 +312,8 @@ If the response is '', return the default value.</p></div>
 <pre><code class="python">def prompt(
         question : str,
         icon : bool = True,
-        default : Optional[str] = None,
+        default : Union[str, Tuple[str, str], None] = None,
+        detect_password : bool = True,
         **kw : Any
     ) -&gt; str:
     &#34;&#34;&#34;
@@ -316,9 +337,24 @@ If the response is '', return the default value.</p></div>
     prompt_toolkit = attempt_import(&#39;prompt_toolkit&#39;)
     question_config = get_config(&#39;system&#39;, &#39;question&#39;, patch=True)
 
+    ### if a default is provided, append it to the question.
+    default_answer = default
     if default is not None:
-        question += f&#34; (default: &#39;{default}&#39;)&#34;
-   
+        question += f&#34; (default: &#34;
+        if isinstance(default, tuple) and len(default) &gt; 1:
+            question += f&#34;{default[0]} [{default[1]}]&#34;
+            default_answer = default[0]
+        else:
+            question += f&#34;{default}&#34;
+        question += &#34;)&#34;
+    #  if not question.endswith(&#39;: &#39;):
+        #  if question.endswith(&#39;:&#39;): question += &#34; &#34;
+        #  else: question += &#34;: &#34;
+
+    ### detect password
+    if detect_password and &#39;password&#39; in question.lower():
+        kw[&#39;is_password&#39;] = True
+  
     ### Add the icon and only color the first line.
     lines = question.split(&#39;\n&#39;)
     first_line = lines[0]
@@ -339,7 +375,7 @@ If the response is '', return the default value.</p></div>
         **kw
     )
     if answer == &#39;&#39; and default is not None:
-        return default
+        return default_answer
     return answer</code></pre>
 </details>
 </dd>

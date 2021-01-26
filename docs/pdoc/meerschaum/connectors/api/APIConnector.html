@@ -61,6 +61,7 @@ class APIConnector(Connector):
         pipe_exists,
         create_metadata,
         get_pipe_rowcount,
+        drop_pipe,
     )
     from ._fetch import fetch
     from ._plugins import register_plugin, install_plugin, get_plugins, get_plugin_attributes
@@ -168,6 +169,7 @@ Example: type="sql", label="main"</p></div>
         pipe_exists,
         create_metadata,
         get_pipe_rowcount,
+        drop_pipe,
     )
     from ._fetch import fetch
     from ._plugins import register_plugin, install_plugin, get_plugins, get_plugin_attributes
@@ -293,7 +295,7 @@ def token(self):
 </details>
 </dd>
 <dt id="meerschaum.connectors.api.APIConnector.APIConnector.delete_pipe"><code class="name flex">
-<span>def <span class="ident">delete_pipe</span></span>(<span>self, pipe: mrsm.Pipe = None, debug: bool = None) ‑> tuple</span>
+<span>def <span class="ident">delete_pipe</span></span>(<span>self, pipe: Optional[meerscahum.Pipe] = None, debug: bool = None) ‑> SuccessTuple</span>
 </code></dt>
 <dd>
 <div class="desc"><p>Delete a Pipe and drop its table.</p></div>
@@ -303,12 +305,14 @@ def token(self):
 </summary>
 <pre><code class="python">def delete_pipe(
         self,
-        pipe : &#39;mrsm.Pipe&#39; = None,
+        pipe : Optional[meerscahum.Pipe] = None,
         debug : bool = None,        
-    ) -&gt; tuple:
+    ) -&gt; SuccessTuple:
     &#34;&#34;&#34;
     Delete a Pipe and drop its table.
     &#34;&#34;&#34;
+    from meerschaum.utils.warning import error
+    if pipe is None: error(f&#34;Pipe cannot be None.&#34;)
     return self.do_action(
         [&#39;delete&#39;, &#39;pipes&#39;],
         connector_keys = pipe.connector_keys,
@@ -415,8 +419,35 @@ Example: action = ['show', 'config']</p>
         return False, f&#34;Failed to parse result from action &#39;{root_action}&#39;&#34;</code></pre>
 </details>
 </dd>
+<dt id="meerschaum.connectors.api.APIConnector.APIConnector.drop_pipe"><code class="name flex">
+<span>def <span class="ident">drop_pipe</span></span>(<span>self, pipe: <a title="meerschaum.Pipe" href="../../Pipe/index.html">meerschaum.Pipe</a>, debug: bool = False) ‑> SuccessTuple</span>
+</code></dt>
+<dd>
+<div class="desc"><p>Drop a pipe's tables but maintain its registration.</p></div>
+<details class="source">
+<summary>
+<span>Expand source code</span>
+</summary>
+<pre><code class="python">def drop_pipe(
+        self,
+        pipe : meerschaum.Pipe,
+        debug : bool = False
+    ) -&gt; SuccessTuple:
+    &#34;&#34;&#34;
+    Drop a pipe&#39;s tables but maintain its registration.
+    &#34;&#34;&#34;
+    return self.do_action(
+        [&#39;drop&#39;, &#39;pipes&#39;],
+        connector_keys = pipe.connector_keys,
+        metric_keys = pipe.metric_key,
+        location_keys = pipe.location_key,
+        force = True,
+        debug = debug
+    )</code></pre>
+</details>
+</dd>
 <dt id="meerschaum.connectors.api.APIConnector.APIConnector.edit_pipe"><code class="name flex">
-<span>def <span class="ident">edit_pipe</span></span>(<span>self, pipe: <a title="meerschaum.Pipe" href="../../Pipe/index.html">meerschaum.Pipe</a>, patch: bool = False, debug: bool = False, **kw) ‑> tuple</span>
+<span>def <span class="ident">edit_pipe</span></span>(<span>self, pipe: <a title="meerschaum.Pipe" href="../../Pipe/index.html">meerschaum.Pipe</a>, patch: bool = False, debug: bool = False, **kw: Any) ‑> SuccessTuple</span>
 </code></dt>
 <dd>
 <div class="desc"><p>Submit a PATCH to the API to edit an existing Pipe.
@@ -427,11 +458,11 @@ Returns a tuple of (success_bool, response_dict)</p></div>
 </summary>
 <pre><code class="python">def edit_pipe(
         self,
-        pipe : &#39;meerschaum.Pipe&#39;,
+        pipe : meerschaum.Pipe,
         patch : bool = False,
         debug : bool = False,
-        **kw
-    ) -&gt; tuple:
+        **kw : Any
+    ) -&gt; SuccessTuple:
     &#34;&#34;&#34;
     Submit a PATCH to the API to edit an existing Pipe.
     Returns a tuple of (success_bool, response_dict)
@@ -532,7 +563,7 @@ Returns a tuple of (success_bool, response_dict)</p></div>
 </details>
 </dd>
 <dt id="meerschaum.connectors.api.APIConnector.APIConnector.fetch_pipes_keys"><code class="name flex">
-<span>def <span class="ident">fetch_pipes_keys</span></span>(<span>self, connector_keys: list = [], metric_keys: list = [], location_keys: list = [], params: dict = {}, mrsm_instance: str = 'api', debug: bool = False) ‑> dict</span>
+<span>def <span class="ident">fetch_pipes_keys</span></span>(<span>self, connector_keys: list = [], metric_keys: list = [], location_keys: list = [], params: dict = {}, mrsm_instance: str = 'api', debug: bool = False) ‑> Union[List[str], Mapping[str, Any]]</span>
 </code></dt>
 <dd>
 <div class="desc"><p>NOTE: This function no longer builds Pipes. Use the main <code>get_pipes()</code> function
@@ -554,7 +585,7 @@ This is used by the main <code>get_pipes()</code> function for the 'api' method.
         params : dict = dict(),
         mrsm_instance : str = &#39;api&#39;,
         debug : bool = False
-    ) -&gt; &#39;dict or list&#39;:
+    ) -&gt; Union[List[str], Mapping[str, Any]]:
     &#34;&#34;&#34;
     NOTE: This function no longer builds Pipes. Use the main `get_pipes()` function
           with the arguments `mrsm_instance = &#39;api&#39; and `method = &#39;registered&#39;` (default).
@@ -639,23 +670,23 @@ This is used by the main <code>get_pipes()</code> function for the 'api' method.
 </details>
 </dd>
 <dt id="meerschaum.connectors.api.APIConnector.APIConnector.get_backtrack_data"><code class="name flex">
-<span>def <span class="ident">get_backtrack_data</span></span>(<span>self, pipe: <a title="meerschaum.Pipe" href="../../Pipe/index.html">meerschaum.Pipe</a>, begin: datetime.datetime, backtrack_minutes: int = 0, debug: bool = False) ‑> pd.DataFrame</span>
+<span>def <span class="ident">get_backtrack_data</span></span>(<span>self, pipe: <a title="meerschaum.Pipe" href="../../Pipe/index.html">meerschaum.Pipe</a>, begin: datetime.datetime, backtrack_minutes: int = 0, debug: bool = False) ‑> pandas.DataFrame</span>
 </code></dt>
 <dd>
-<div class="desc"><p>Get a Pipe's backtrack data from the API</p></div>
+<div class="desc"><p>Get a Pipe's backtrack data from the API.</p></div>
 <details class="source">
 <summary>
 <span>Expand source code</span>
 </summary>
 <pre><code class="python">def get_backtrack_data(
         self,
-        pipe : &#39;meerschaum.Pipe&#39;,
-        begin : &#39;datetime.datetime&#39;,
+        pipe : meerschaum.Pipe,
+        begin : datetime.datetime,
         backtrack_minutes : int = 0,
         debug : bool = False
-    ) -&gt; &#39;pd.DataFrame&#39;:
+    ) -&gt; pandas.DataFrame:
     &#34;&#34;&#34;
-    Get a Pipe&#39;s backtrack data from the API
+    Get a Pipe&#39;s backtrack data from the API.
     &#34;&#34;&#34;
     from meerschaum.utils.debug import dprint
     from meerschaum.utils.warnings import warn
@@ -686,7 +717,7 @@ This is used by the main <code>get_pipes()</code> function for the 'api' method.
 </details>
 </dd>
 <dt id="meerschaum.connectors.api.APIConnector.APIConnector.get_pipe_attributes"><code class="name flex">
-<span>def <span class="ident">get_pipe_attributes</span></span>(<span>self, pipe: <a title="meerschaum.Pipe" href="../../Pipe/index.html">meerschaum.Pipe</a>, debug: bool = False) ‑> dict</span>
+<span>def <span class="ident">get_pipe_attributes</span></span>(<span>self, pipe: <a title="meerschaum.Pipe" href="../../Pipe/index.html">meerschaum.Pipe</a>, debug: bool = False) ‑> Mapping[str, Any]</span>
 </code></dt>
 <dd>
 <div class="desc"><p>Get a Pipe's attributes from the API</p></div>
@@ -696,9 +727,9 @@ This is used by the main <code>get_pipes()</code> function for the 'api' method.
 </summary>
 <pre><code class="python">def get_pipe_attributes(
         self,
-        pipe : &#39;meerschaum.Pipe&#39;,
+        pipe : meerschaum.Pipe,
         debug : bool = False,
-    ) -&gt; dict:
+    ) -&gt; Mapping[str, Any]:
     &#34;&#34;&#34;
     Get a Pipe&#39;s attributes from the API
     &#34;&#34;&#34;
@@ -712,7 +743,7 @@ This is used by the main <code>get_pipes()</code> function for the 'api' method.
 </details>
 </dd>
 <dt id="meerschaum.connectors.api.APIConnector.APIConnector.get_pipe_data"><code class="name flex">
-<span>def <span class="ident">get_pipe_data</span></span>(<span>self, pipe: <a title="meerschaum.Pipe" href="../../Pipe/index.html">meerschaum.Pipe</a>, begin: datetime.datetime = None, end: datetime.datetime = None, debug: bool = False) ‑> pd.DataFrame</span>
+<span>def <span class="ident">get_pipe_data</span></span>(<span>self, pipe: <a title="meerschaum.Pipe" href="../../Pipe/index.html">meerschaum.Pipe</a>, begin: Optional[datetime.datetime] = None, end: Optional[datetime.datetime] = None, debug: bool = False) ‑> pandas.DataFrame</span>
 </code></dt>
 <dd>
 <div class="desc"><p>Fetch data from the API</p></div>
@@ -722,11 +753,11 @@ This is used by the main <code>get_pipes()</code> function for the 'api' method.
 </summary>
 <pre><code class="python">def get_pipe_data(
         self,
-        pipe : &#39;meerschaum.Pipe&#39;,
-        begin : &#39;datetime.datetime&#39; = None,
-        end : &#39;datetime.datetime&#39; = None,
+        pipe : meerschaum.Pipe,
+        begin : Optional[datetime.datetime] = None,
+        end : Optional[datetime.datetime] = None,
         debug : bool = False
-    ) -&gt; &#39;pd.DataFrame&#39;:
+    ) -&gt; pandas.DataFrame:
     &#34;&#34;&#34;
     Fetch data from the API
     &#34;&#34;&#34;
@@ -761,7 +792,7 @@ This is used by the main <code>get_pipes()</code> function for the 'api' method.
 </summary>
 <pre><code class="python">def get_pipe_id(
         self,
-        pipe : &#39;meerschuam.Pipe&#39;,
+        pipe : meerschuam.Pipe,
         debug : bool = False,
     ) -&gt; int:
     &#34;&#34;&#34;
@@ -780,7 +811,7 @@ This is used by the main <code>get_pipes()</code> function for the 'api' method.
 </details>
 </dd>
 <dt id="meerschaum.connectors.api.APIConnector.APIConnector.get_pipe_rowcount"><code class="name flex">
-<span>def <span class="ident">get_pipe_rowcount</span></span>(<span>self, pipe: <a title="meerschaum.Pipe" href="../../Pipe/index.html">meerschaum.Pipe</a>, begin: datetime.datetime = None, end: datetime.datetime = None, debug: bool = False) ‑> int</span>
+<span>def <span class="ident">get_pipe_rowcount</span></span>(<span>self, pipe: "'<a title="meerschaum.Pipe" href="../../Pipe/index.html">meerschaum.Pipe</a>'", begin: "'datetime.datetime'" = None, end: "'datetime.datetime'" = None, debug: bool = False) ‑> int</span>
 </code></dt>
 <dd>
 <div class="desc"></div>
@@ -855,7 +886,7 @@ If specified, return all plugins from a certain user.</p></div>
 </details>
 </dd>
 <dt id="meerschaum.connectors.api.APIConnector.APIConnector.get_sync_time"><code class="name flex">
-<span>def <span class="ident">get_sync_time</span></span>(<span>self, pipe: <a title="meerschaum.Pipe" href="../../Pipe/index.html">meerschaum.Pipe</a>, params: dict = None, debug: bool = False) ‑> datetime.datetime</span>
+<span>def <span class="ident">get_sync_time</span></span>(<span>self, pipe: "'<a title="meerschaum.Pipe" href="../../Pipe/index.html">meerschaum.Pipe</a>'", params: dict = None, debug: bool = False) ‑> datetime.datetime</span>
 </code></dt>
 <dd>
 <div class="desc"><p>Get a Pipe's most recent datetime value from the API</p></div>
@@ -868,7 +899,7 @@ If specified, return all plugins from a certain user.</p></div>
         pipe : &#39;meerschaum.Pipe&#39;,
         params : dict = None,
         debug : bool = False,
-    ) -&gt; &#39;datetime.datetime&#39;:
+    ) -&gt; datetime.datetime:
     &#34;&#34;&#34;
     Get a Pipe&#39;s most recent datetime value from the API
     &#34;&#34;&#34;
@@ -1041,7 +1072,7 @@ The name of the plugin to be installed.</p></div>
 </details>
 </dd>
 <dt id="meerschaum.connectors.api.APIConnector.APIConnector.pipe_exists"><code class="name flex">
-<span>def <span class="ident">pipe_exists</span></span>(<span>self, pipe: <a title="meerschaum.Pipe" href="../../Pipe/index.html">meerschaum.Pipe</a>, debug: bool = False) ‑> bool</span>
+<span>def <span class="ident">pipe_exists</span></span>(<span>self, pipe: "'<a title="meerschaum.Pipe" href="../../Pipe/index.html">meerschaum.Pipe</a>'", debug: bool = False) ‑> bool</span>
 </code></dt>
 <dd>
 <div class="desc"><p>Consult the API to see if a Pipe exists</p></div>
@@ -1065,7 +1096,7 @@ The name of the plugin to be installed.</p></div>
 </details>
 </dd>
 <dt id="meerschaum.connectors.api.APIConnector.APIConnector.post"><code class="name flex">
-<span>def <span class="ident">post</span></span>(<span>self, r_url: str, headers: dict = {}, use_token: bool = True, **kw)</span>
+<span>def <span class="ident">post</span></span>(<span>self, r_url: str, headers: dict = {}, use_token: bool = True, debug: bool = False, **kw)</span>
 </code></dt>
 <dd>
 <div class="desc"><p>Wrapper for requests.post</p></div>
@@ -1078,12 +1109,22 @@ The name of the plugin to be installed.</p></div>
         r_url : str,
         headers : dict = {},
         use_token : bool = True,
+        debug : bool = False,
         **kw
     ):
     &#34;&#34;&#34;
     Wrapper for requests.post
     &#34;&#34;&#34;
-    if use_token: headers.update({ &#39;Authorization&#39;: f&#39;Bearer {self.token}&#39; })
+    from meerschaum.utils.debug import dprint
+    from meerschaum.utils.formatting import pprint
+    if use_token:
+        if debug: dprint(f&#34;Fetching token...&#34;)
+        headers.update({ &#39;Authorization&#39;: f&#39;Bearer {self.token}&#39; })
+
+    if debug:
+        dprint(f&#34;Posting arguments to &#39;{self.url + r_url}&#39;&#34;)
+        pprint(kw)
+        if headers: pprint(headers)
 
     return self.session.post(
         self.url + r_url,
@@ -1093,7 +1134,7 @@ The name of the plugin to be installed.</p></div>
 </details>
 </dd>
 <dt id="meerschaum.connectors.api.APIConnector.APIConnector.register_pipe"><code class="name flex">
-<span>def <span class="ident">register_pipe</span></span>(<span>self, pipe: <a title="meerschaum.Pipe" href="../../Pipe/index.html">meerschaum.Pipe</a>, debug: bool = False) ‑> tuple</span>
+<span>def <span class="ident">register_pipe</span></span>(<span>self, pipe: <a title="meerschaum.Pipe" href="../../Pipe/index.html">meerschaum.Pipe</a>, debug: bool = False) ‑> SuccessTuple</span>
 </code></dt>
 <dd>
 <div class="desc"><p>Submit a POST to the API to register a new Pipe object.
@@ -1104,9 +1145,9 @@ Returns a tuple of (success_bool, response_dict)</p></div>
 </summary>
 <pre><code class="python">def register_pipe(
         self,
-        pipe : &#39;meerschaum.Pipe&#39;,
+        pipe : meerschaum.Pipe,
         debug : bool = False
-    ) -&gt; tuple:
+    ) -&gt; SuccessTuple:
     &#34;&#34;&#34;
     Submit a POST to the API to register a new Pipe object.
     Returns a tuple of (success_bool, response_dict)
@@ -1154,7 +1195,7 @@ Returns a tuple of (success_bool, response_dict)</p></div>
     }
     r_url = plugin_r_url(plugin)
     try:
-        response = self.post(r_url, files=files, params=metadata)
+        response = self.post(r_url, files=files, params=metadata, debug=debug)
     except:
         success, msg = False, f&#34;Failed to register plugin &#39;{plugin}&#39;&#34;
     finally:
@@ -1205,7 +1246,7 @@ Returns a tuple of (success_bool, response_dict)</p></div>
 </details>
 </dd>
 <dt id="meerschaum.connectors.api.APIConnector.APIConnector.sync_pipe"><code class="name flex">
-<span>def <span class="ident">sync_pipe</span></span>(<span>self, pipe: <a title="meerschaum.Pipe" href="../../Pipe/index.html">meerschaum.Pipe</a> = None, df: pd.DataFrame = None, debug: bool = False, **kw) ‑> tuple</span>
+<span>def <span class="ident">sync_pipe</span></span>(<span>self, pipe: Optional[<a title="meerschaum.Pipe" href="../../Pipe/index.html">meerschaum.Pipe</a>] = None, df: Optional[pandas.DataFrame] = None, debug: bool = False, **kw: Any) ‑> SuccessTuple</span>
 </code></dt>
 <dd>
 <div class="desc"><p>Append a pandas DataFrame to a Pipe.
@@ -1217,11 +1258,11 @@ NOTE: columns['datetime'] must be set for new Pipes.</p></div>
 </summary>
 <pre><code class="python">def sync_pipe(
         self,
-        pipe : &#39;meerschaum.Pipe&#39; = None,
-        df : &#39;pd.DataFrame&#39; = None,
+        pipe : Optional[meerschaum.Pipe] = None,
+        df : Optional[pandas.DataFrame] = None,
         debug : bool = False,
-        **kw
-    ) -&gt; tuple:
+        **kw : Any
+    ) -&gt; SuccessTuple:
     &#34;&#34;&#34;
     Append a pandas DataFrame to a Pipe.
     If Pipe does not exist, it is registered with supplied metadata
@@ -1329,6 +1370,7 @@ NOTE: columns['datetime'] must be set for new Pipes.</p></div>
 <li><code><a title="meerschaum.connectors.api.APIConnector.APIConnector.delete_pipe" href="#meerschaum.connectors.api.APIConnector.APIConnector.delete_pipe">delete_pipe</a></code></li>
 <li><code><a title="meerschaum.connectors.api.APIConnector.APIConnector.delete_user" href="#meerschaum.connectors.api.APIConnector.APIConnector.delete_user">delete_user</a></code></li>
 <li><code><a title="meerschaum.connectors.api.APIConnector.APIConnector.do_action" href="#meerschaum.connectors.api.APIConnector.APIConnector.do_action">do_action</a></code></li>
+<li><code><a title="meerschaum.connectors.api.APIConnector.APIConnector.drop_pipe" href="#meerschaum.connectors.api.APIConnector.APIConnector.drop_pipe">drop_pipe</a></code></li>
 <li><code><a title="meerschaum.connectors.api.APIConnector.APIConnector.edit_pipe" href="#meerschaum.connectors.api.APIConnector.APIConnector.edit_pipe">edit_pipe</a></code></li>
 <li><code><a title="meerschaum.connectors.api.APIConnector.APIConnector.edit_user" href="#meerschaum.connectors.api.APIConnector.APIConnector.edit_user">edit_user</a></code></li>
 <li><code><a title="meerschaum.connectors.api.APIConnector.APIConnector.fetch" href="#meerschaum.connectors.api.APIConnector.APIConnector.fetch">fetch</a></code></li>

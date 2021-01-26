@@ -915,6 +915,215 @@ to the out of the box configuration.</p>
 </ul>
 <h3>Methods</h3>
 <dl>
+<dt id="meerschaum.actions.shell.Shell.Shell.do_api"><code class="name flex">
+<span>def <span class="ident">do_api</span></span>(<span>action: list = [''], sysargs: list = [], debug: bool = False, mrsm_instance: str = None, **kw)</span>
+</code></dt>
+<dd>
+<div class="desc"><p>Send commands to a Meerschaum WebAPI instance or boot a new instance</p>
+<p>Usage: <code>api [commands] {options}</code></p>
+<h2 id="examples">Examples</h2>
+<ul>
+<li><code>api [start, boot, init]</code><ul>
+<li>start the API server</li>
+</ul>
+</li>
+<li><code>api show config</code><ul>
+<li>execute <code>show config</code> on the <code>main</code> api instance</li>
+</ul>
+</li>
+<li><code>api main show config</code><ul>
+<li>see above</li>
+</ul>
+</li>
+</ul>
+<p>If command is <code>start</code>, launch the Meerschaum WebAPI. If command is an api connector label,
+connect to that label. Otherwise connect to <code>main</code> api connector.</p></div>
+<details class="source">
+<summary>
+<span>Expand source code</span>
+</summary>
+<pre><code class="python">def api(
+        action : list = [&#39;&#39;],
+        sysargs : list = [],
+        debug : bool = False,
+        mrsm_instance : str = None,
+        **kw
+    ):
+    &#34;&#34;&#34;
+    Send commands to a Meerschaum WebAPI instance or boot a new instance
+
+    Usage: `api [commands] {options}`
+    Examples:
+        - `api [start, boot, init]`
+            - start the API server
+        - `api show config`
+            - execute `show config` on the `main` api instance
+        - `api main show config`
+            - see above
+    
+    If command is `start`, launch the Meerschaum WebAPI. If command is an api connector label,
+        connect to that label. Otherwise connect to `main` api connector.
+    &#34;&#34;&#34;
+    from meerschaum.utils.warnings import warn, info
+    from meerschaum.utils.formatting import print_tuple
+    if action[0] == &#39;&#39;:
+        info(api.__doc__)
+        return False, &#34;Please provide a command to excecute (see above)&#34;
+
+    boot_keywords = {&#39;start&#39;, &#39;boot&#39;, &#39;init&#39;}
+    if action[0] in boot_keywords:
+        return _api_start(action=action, debug=debug, **kw)
+
+    from meerschaum.config import config as cf, get_config
+    from meerschaum.connectors import get_connector
+    import requests
+    if debug: from meerschaum.utils.formatting import pprint
+    api_configs = get_config(&#39;meerschaum&#39;, &#39;connectors&#39;, &#39;api&#39;, patch=True)
+
+    api_label = &#34;main&#34;
+    args_to_send = list(sysargs)
+    ### remove `api`
+    if &#39;api&#39; in args_to_send: del args_to_send[0]
+    if action[0] in api_configs:
+        api_label = action[0]
+        ### remove label from actions
+        del action[0]
+        if len(args_to_send) &gt; 1: del args_to_send[0]
+    kw[&#39;action&#39;] = action
+    kw[&#39;debug&#39;] = debug
+    kw[&#39;sysargs&#39;] = args_to_send
+    kw[&#39;yes&#39;] = True
+ 
+    api_conn = get_connector(type=&#39;api&#39;, label=api_label)
+    
+    if mrsm_instance is not None and str(mrsm_instance) == str(api_conn):
+        warn(f&#34;Cannot send Meerschaum instance keys &#39;{mrsm_instance}&#39; to itself. Removing from arguments...&#34;)
+    elif mrsm_instance is not None: kw[&#39;mrsm_instance&#39;] = str(mrsm_instance)
+
+    success, message = api_conn.do_action(**kw)
+    print_tuple((success, message), common_only=True)
+    msg = f&#34;Action &#34; + (&#39;succeeded&#39; if success else &#39;failed&#39;) + &#34; with message:\n&#34; + str(message)
+    return success, message</code></pre>
+</details>
+</dd>
+<dt id="meerschaum.actions.shell.Shell.Shell.do_bash"><code class="name flex">
+<span>def <span class="ident">do_bash</span></span>(<span>action: list = [], sub_args: list = [], use_bash: bool = True, debug: bool = False, **kw)</span>
+</code></dt>
+<dd>
+<div class="desc"><p>Launch a bash shell as a Meershaum action</p></div>
+<details class="source">
+<summary>
+<span>Expand source code</span>
+</summary>
+<pre><code class="python">def bash(
+        action : list = [],
+        sub_args : list = [],
+        use_bash : bool = True,
+        debug : bool = False,
+        **kw
+    ):
+    &#34;&#34;&#34;
+    Launch a bash shell as a Meershaum action
+    &#34;&#34;&#34;
+    from meerschaum.config import system_config
+
+    import subprocess
+    import sys
+    from meerschaum.utils.debug import dprint
+
+    if use_bash:
+        command_list = [&#34;bash&#34;]
+        if action[0] != &#39;&#39;:
+            command_list += [&#34;-c&#34;, &#34; &#34;.join(action + sub_args)]
+    else:
+        command_list = action + sub_args
+        if action[0] == &#39;&#39;: command_list = &#39;bash&#39;
+
+    if debug:
+        dprint(f&#39;action  : {action}&#39;)
+        dprint(f&#39;sub-args: {sub_args}&#39;)
+        dprint(command_list)
+
+    process = subprocess.Popen(
+        command_list,
+        shell = False,
+    )
+
+    exit_code = process.wait()
+
+    if exit_code != 0:
+        return (False, f&#34;Returned exit code: {exit_code}&#34;)
+    return (True, &#34;Success&#34;)</code></pre>
+</details>
+</dd>
+<dt id="meerschaum.actions.shell.Shell.Shell.do_bootstrap"><code class="name flex">
+<span>def <span class="ident">do_bootstrap</span></span>(<span>action: Sequence[str] = [''], **kw: Any) ‑> Tuple[bool, str]</span>
+</code></dt>
+<dd>
+<div class="desc"><p>Bootstrap an element (pipe, configuration).</p>
+<h2 id="command">Command</h2>
+<p><code>bootstrap {option}</code></p>
+<h2 id="example">Example</h2>
+<p><code>bootstrap config</code></p>
+<h2 id="options">Options</h2>
+<p><code>bootstrap [config, connectors, grafana, pipes, stack]</code></p></div>
+<details class="source">
+<summary>
+<span>Expand source code</span>
+</summary>
+<pre><code class="python">def bootstrap(
+        action : Sequence[str] = [&#39;&#39;],
+        **kw : Any
+    ) -&gt; SuccessTuple:
+    &#34;&#34;&#34;
+    Bootstrap an element (pipe, configuration).
+
+    Command:
+        `bootstrap {option}`
+
+    Example:
+        `bootstrap config`
+    &#34;&#34;&#34;
+    from meerschaum.utils.misc import choose_subaction
+    options = {
+        &#39;pipes&#39;      : _bootstrap_pipes,
+        &#39;config&#39;     : _bootstrap_config,
+        &#39;stack&#39;      : _bootstrap_stack,
+        &#39;connectors&#39; : _bootstrap_connectors,
+        #  &#39;grafana&#39; : _bootstrap_grafana,
+    }
+    return choose_subaction(action, options, **kw)</code></pre>
+</details>
+</dd>
+<dt id="meerschaum.actions.shell.Shell.Shell.do_clear"><code class="name flex">
+<span>def <span class="ident">do_clear</span></span>(<span>action: list = [''], **kw) ‑> tuple</span>
+</code></dt>
+<dd>
+<div class="desc"><p>Clear pipes of their data, or clear the screen.</p>
+<h2 id="options">Options</h2>
+<p><code>clear [pipes]</code></p></div>
+<details class="source">
+<summary>
+<span>Expand source code</span>
+</summary>
+<pre><code class="python">def clear(
+    action : list = [&#39;&#39;],
+    **kw
+) -&gt; tuple:
+    &#34;&#34;&#34;
+    Clear pipes of their data, or clear the screen.
+    &#34;&#34;&#34;
+    from meerschaum.utils.misc import choose_subaction
+    if action == [&#39;&#39;] or action == []:
+        from meerschaum.utils.formatting._shell import clear_screen
+        return clear_screen(kw.get(&#39;debug&#39;, False)), &#39;&#39;
+
+    options = {
+        &#39;pipes&#39; : _clear_pipes,
+    }
+    return choose_subaction(action, options, **kw)</code></pre>
+</details>
+</dd>
 <dt id="meerschaum.actions.shell.Shell.Shell.do_debug"><code class="name flex">
 <span>def <span class="ident">do_debug</span></span>(<span>self, action=[''], **kw)</span>
 </code></dt>
@@ -951,6 +1160,92 @@ Ommitting on / off will toggle the existing value.</p></div>
     info(f&#34;Debug mode is {&#39;on&#39; if self.debug else &#39;off&#39;}.&#34;)</code></pre>
 </details>
 </dd>
+<dt id="meerschaum.actions.shell.Shell.Shell.do_delete"><code class="name flex">
+<span>def <span class="ident">do_delete</span></span>(<span>action: list = [''], **kw)</span>
+</code></dt>
+<dd>
+<div class="desc"><p>Delete an element.</p>
+<h2 id="options">Options</h2>
+<p><code>delete [config, connectors, pipes, plugins, users]</code></p></div>
+<details class="source">
+<summary>
+<span>Expand source code</span>
+</summary>
+<pre><code class="python">def delete(
+        action : list = [&#39;&#39;],
+        **kw
+    ):
+    &#34;&#34;&#34;
+    Delete an element.
+    &#34;&#34;&#34;
+    from meerschaum.utils.misc import choose_subaction
+    from meerschaum.utils.debug import dprint
+    options = {
+        &#39;config&#39;     : _delete_config, 
+        &#39;pipes&#39;      : _delete_pipes,
+        &#39;plugins&#39;    : _delete_plugins,
+        &#39;users&#39;      : _delete_users,
+        &#39;connectors&#39; : _delete_connectors,
+    }
+    return choose_subaction(action, options, **kw)</code></pre>
+</details>
+</dd>
+<dt id="meerschaum.actions.shell.Shell.Shell.do_drop"><code class="name flex">
+<span>def <span class="ident">do_drop</span></span>(<span>action: Sequence[str] = [''], **kw: Any) ‑> Tuple[bool, str]</span>
+</code></dt>
+<dd>
+<div class="desc"><p>Drop pipe data (maintaining registration) or tables.</p>
+<h2 id="options">Options</h2>
+<p><code>drop [pipes, tables]</code></p></div>
+<details class="source">
+<summary>
+<span>Expand source code</span>
+</summary>
+<pre><code class="python">def drop(
+        action : Sequence[str] = [&#39;&#39;],
+        **kw : Any
+    ) -&gt; SuccessTuple:
+    &#34;&#34;&#34;
+    Drop pipe data (maintaining registration) or tables.
+    &#34;&#34;&#34;
+    from meerschaum.utils.misc import choose_subaction
+
+    options = {
+        &#39;pipes&#39;  : _drop_pipes,
+        &#39;tables&#39; : _drop_tables,
+    }
+    return choose_subaction(action, options, **kw)</code></pre>
+</details>
+</dd>
+<dt id="meerschaum.actions.shell.Shell.Shell.do_edit"><code class="name flex">
+<span>def <span class="ident">do_edit</span></span>(<span>action: list = [''], **kw) ‑> tuple</span>
+</code></dt>
+<dd>
+<div class="desc"><p>Edit an existing element.</p>
+<h2 id="options">Options</h2>
+<p><code>edit [config, grafana, pipes, stack, users]</code></p></div>
+<details class="source">
+<summary>
+<span>Expand source code</span>
+</summary>
+<pre><code class="python">def edit(
+        action : list = [&#39;&#39;],
+        **kw
+    ) -&gt; tuple:
+    &#34;&#34;&#34;
+    Edit an existing element.
+    &#34;&#34;&#34;
+    from meerschaum.utils.misc import choose_subaction
+    options = {
+        &#39;config&#39;  : _edit_config,
+        &#39;pipes&#39;   : _edit_pipes,
+        &#39;stack&#39;   : _edit_stack,
+        &#39;grafana&#39; : _edit_grafana,
+        &#39;users&#39;   : _edit_users,
+    }
+    return choose_subaction(action, options, **kw)</code></pre>
+</details>
+</dd>
 <dt id="meerschaum.actions.shell.Shell.Shell.do_exit"><code class="name flex">
 <span>def <span class="ident">do_exit</span></span>(<span>self, params) ‑> True</span>
 </code></dt>
@@ -965,6 +1260,32 @@ Ommitting on / off will toggle the existing value.</p></div>
     Exit the Meerschaum shell.
     &#34;&#34;&#34;
     return True</code></pre>
+</details>
+</dd>
+<dt id="meerschaum.actions.shell.Shell.Shell.do_install"><code class="name flex">
+<span>def <span class="ident">do_install</span></span>(<span>action: list = [''], **kw) ‑> tuple</span>
+</code></dt>
+<dd>
+<div class="desc"><p>Install Meerschaum plugins or Python packages.</p>
+<h2 id="options">Options</h2>
+<p><code>install [packages, plugins]</code></p></div>
+<details class="source">
+<summary>
+<span>Expand source code</span>
+</summary>
+<pre><code class="python">def install(
+        action : list = [&#39;&#39;],
+        **kw
+    ) -&gt; tuple:
+    &#34;&#34;&#34;
+    Install Meerschaum plugins or Python packages.
+    &#34;&#34;&#34;
+    from meerschaum.utils.misc import choose_subaction
+    options = {
+        &#39;plugins&#39;  : _install_plugins,
+        &#39;packages&#39; : _install_packages,
+    }
+    return choose_subaction(action, options, **kw)</code></pre>
 </details>
 </dd>
 <dt id="meerschaum.actions.shell.Shell.Shell.do_instance"><code class="name flex">
@@ -1041,6 +1362,92 @@ and be accessible to this machine over the network.</p></div>
     return True, &#34;Success&#34;</code></pre>
 </details>
 </dd>
+<dt id="meerschaum.actions.shell.Shell.Shell.do_os"><code class="name flex">
+<span>def <span class="ident">do_os</span></span>(<span>action: list = [''], sub_args: list = [], debug: bool = False, **kw)</span>
+</code></dt>
+<dd>
+<div class="desc"><p>Launch a subprocess and read its output to stdout</p></div>
+<details class="source">
+<summary>
+<span>Expand source code</span>
+</summary>
+<pre><code class="python">def os(
+        action : list = [&#39;&#39;],
+        sub_args : list = [],
+        debug : bool = False,
+        **kw
+    ):
+    &#34;&#34;&#34;
+    Launch a subprocess and read its output to stdout
+    &#34;&#34;&#34;
+    from meerschaum.config import system_config
+
+    import subprocess
+    import sys
+    from meerschaum.utils.debug import dprint
+
+    ### determine system encoding
+    encoding = sys.getdefaultencoding()
+
+    command_list = []
+    #  command_list = [&#34;bash&#34;]
+
+    ### where to redirect stdout (default None)
+    capture_stdout, capture_stderr = None, None
+    timeout = None
+
+    ### if actions are provided, don&#39;t launch interactive shell
+    ### and read stdout, stderr and exit code
+    if action[0] != &#39;&#39;:
+        capture_stdout = subprocess.PIPE
+        capture_stderr = subprocess.PIPE
+        command_list += action + sub_args
+        timeout = system_config[&#39;shell&#39;][&#39;timeout&#39;]
+    else:
+        return False, os.__doc__
+
+    if debug:
+        dprint(command_list)
+
+    process = subprocess.Popen(
+        command_list,
+        shell = False,
+        stdout = capture_stdout,
+        stderr = capture_stderr
+    )
+
+    try:
+        output_data, error_output_data = process.communicate(timeout=timeout)
+    except Exception as e:
+        print(e)
+        process.kill()
+        output_data, error_output_data = process.communicate()
+
+    exit_code = process.wait()
+
+    output = None
+    if output_data is not None:
+        output = output_data.decode(encoding)
+
+    if output is not None:
+        print(output, end=&#34;&#34;)
+    else:
+        output = &#34;Success&#34;
+
+    error_output = &#34;Error&#34;
+    if error_output_data is not None:
+        error_output = error_output_data.decode(encoding)
+
+    if debug:
+        dprint(&#34;stdout:\n&#34; + f&#34;{output}&#34;)
+        dprint(&#34;stderr:\n&#34; + f&#34;{error_output}&#34;)
+        dprint(f&#34;exit code: {exit_code}&#34;)
+
+    if exit_code != 0:
+        return (False, error_output)
+    return (True, output)</code></pre>
+</details>
+</dd>
 <dt id="meerschaum.actions.shell.Shell.Shell.do_pass"><code class="name flex">
 <span>def <span class="ident">do_pass</span></span>(<span>self, line)</span>
 </code></dt>
@@ -1055,6 +1462,127 @@ and be accessible to this machine over the network.</p></div>
     Do nothing.
     &#34;&#34;&#34;
     pass</code></pre>
+</details>
+</dd>
+<dt id="meerschaum.actions.shell.Shell.Shell.do_python"><code class="name flex">
+<span>def <span class="ident">do_python</span></span>(<span>action: list = [''], debug: bool = False, **kw) ‑> tuple</span>
+</code></dt>
+<dd>
+<div class="desc"><p>Launch a Python interpreter with Meerschaum imported. Commands are optional.
+Note that quotes must be escaped and commands must be separated by semicolons</p>
+<h2 id="usage">Usage</h2>
+<p><code>python {commands}</code></p>
+<h2 id="example">Example</h2>
+<p><code>python print(\'Hello, World!\'); pipes = mrsm.get_pipes()</code></p>
+<pre><code>Hello, World!
+```python-repl
+&gt;&gt;&gt; import meerschaum as mrsm
+&gt;&gt;&gt; print('Hello, World!')
+&gt;&gt;&gt; pipes = mrsm.get_pipes()
+</code></pre>
+<p>```</p></div>
+<details class="source">
+<summary>
+<span>Expand source code</span>
+</summary>
+<pre><code class="python">def python(
+        action : list = [&#39;&#39;],
+        debug : bool = False,
+        **kw
+    ) -&gt; tuple:
+    &#34;&#34;&#34;
+    Launch a Python interpreter with Meerschaum imported. Commands are optional.
+    Note that quotes must be escaped and commands must be separated by semicolons
+
+    Usage:
+        `python {commands}`
+
+    Example:
+        `python print(\\&#39;Hello, World!\\&#39;); pipes = mrsm.get_pipes()`
+
+        ```
+        Hello, World!
+        &gt;&gt;&gt; import meerschaum as mrsm
+        &gt;&gt;&gt; print(&#39;Hello, World!&#39;)
+        &gt;&gt;&gt; pipes = mrsm.get_pipes()
+        ```
+    &#34;&#34;&#34;
+    import sys, subprocess
+    from meerschaum.utils.debug import dprint
+    from meerschaum.utils.warnings import warn, error
+
+    joined_actions = [&#39;import meerschaum as mrsm&#39;]
+    line = &#34;&#34;
+    for i, a in enumerate(action):
+        if a == &#39;&#39;: continue
+        line += a + &#34; &#34;
+        if a.endswith(&#39;;&#39;) or i == len(action) - 1:
+            joined_actions.append(line[:-1])
+            line = &#34;&#34;
+
+    ### ensure meerschaum is imported
+    #  joined_actions = [&#39;import meerschaum as mrsm;&#39;] + joined_actions
+    if debug: dprint(joined_actions)
+
+    #  for a in joined_actions:
+
+    
+    #  end_with_semicolon = False
+    #  end_with_semicolon = joined_actions[-1].endswith(&#39;;&#39;)
+    print_command = &#39;import sys; print(&#34;&#34;&#34;&#39;
+    ps1 = &#34;&gt;&gt;&gt; &#34;
+    for i, a in enumerate(joined_actions):
+        line = ps1 + f&#34;{a}&#34;.replace(&#39;;&#39;, &#39;\n&#39;)
+        if &#39;\n&#39; not in line and i != len(joined_actions) - 1:
+            line += &#34;\n&#34;
+        #  print(line)
+        #  print_command += line[len(ps1):]
+        print_command += line
+    print_command += &#39;&#34;&#34;&#34;)&#39;
+
+    command = &#34;&#34;
+    for a in joined_actions:
+        command += a
+        if not a.endswith(&#39;;&#39;): command += &#39;;&#39;
+        command += &#39; &#39;
+
+    #  if not end_with_semicolon:
+        #  command += &#34;;&#34;
+
+    command += print_command
+
+    if debug: dprint(f&#34;command:\n{command}&#34;)
+    return_code = subprocess.call([sys.executable, &#39;-i&#39;, &#39;-c&#39;, command])
+    return return_code == 0, &#34;Success&#34; if return_code == 0 else f&#34;Python interpreter returned {return_code}&#34;</code></pre>
+</details>
+</dd>
+<dt id="meerschaum.actions.shell.Shell.Shell.do_register"><code class="name flex">
+<span>def <span class="ident">do_register</span></span>(<span>action: list = [''], **kw) ‑> tuple</span>
+</code></dt>
+<dd>
+<div class="desc"><p>Register new elements.</p>
+<h2 id="options">Options</h2>
+<p><code>register [locations, metrics, pipes, plugins, users]</code></p></div>
+<details class="source">
+<summary>
+<span>Expand source code</span>
+</summary>
+<pre><code class="python">def register(
+        action : list = [&#39;&#39;],
+        **kw
+    ) -&gt; tuple:
+    &#34;&#34;&#34;
+    Register new elements.
+    &#34;&#34;&#34;
+    from meerschaum.utils.misc import choose_subaction
+    options = {
+        &#39;pipes&#39;     : _register_pipes,
+        &#39;metrics&#39;   : _register_metrics,
+        &#39;locations&#39; : _register_locations,
+        &#39;plugins&#39;   : _register_plugins,
+        &#39;users&#39;     : _register_users,
+    }
+    return choose_subaction(action, options, **kw)</code></pre>
 </details>
 </dd>
 <dt id="meerschaum.actions.shell.Shell.Shell.do_repo"><code class="name flex">
@@ -1125,6 +1653,375 @@ The default repository (mrsm.io) is loaded from the Meerschaum configuraton file
     self.repo_keys = str(conn)
 
     info(f&#34;Default repository for the current shell: {conn}&#34;)
+    return True, &#34;Success&#34;</code></pre>
+</details>
+</dd>
+<dt id="meerschaum.actions.shell.Shell.Shell.do_show"><code class="name flex">
+<span>def <span class="ident">do_show</span></span>(<span>action: Sequence[str] = [''], **kw: Any) ‑> tuple</span>
+</code></dt>
+<dd>
+<div class="desc"><p>Show elements of a certain type.</p>
+<h2 id="command">Command</h2>
+<p><code>show {option}</code></p>
+<h2 id="example">Example</h2>
+<p><code>show pipes</code></p>
+<h2 id="options">Options</h2>
+<p><code>show [actions, arguments, config, connectors, data, help, modules, pipes, plugins, users, version]</code></p></div>
+<details class="source">
+<summary>
+<span>Expand source code</span>
+</summary>
+<pre><code class="python">def show(
+        action : Sequence[str] = [&#39;&#39;],
+        **kw : Any
+    ) -&gt; tuple:
+    &#34;&#34;&#34;
+    Show elements of a certain type.
+
+    Command:
+        `show {option}`
+
+    Example:
+        `show pipes`
+    &#34;&#34;&#34;
+
+    from meerschaum.utils.misc import choose_subaction
+    show_options = {
+        &#39;actions&#39;    : _show_actions,
+        &#39;pipes&#39;      : _show_pipes,
+        &#39;config&#39;     : _show_config,
+        &#39;modules&#39;    : _show_modules,
+        &#39;version&#39;    : _show_version,
+        &#39;connectors&#39; : _show_connectors,
+        &#39;arguments&#39;  : _show_arguments,
+        &#39;data&#39;       : _show_data,
+        &#39;plugins&#39;    : _show_plugins,
+        &#39;help&#39;       : _show_help,
+        &#39;users&#39;      : _show_users,
+    }
+    return choose_subaction(action, show_options, **kw)</code></pre>
+</details>
+</dd>
+<dt id="meerschaum.actions.shell.Shell.Shell.do_sql"><code class="name flex">
+<span>def <span class="ident">do_sql</span></span>(<span>action: list = [''], gui: bool = False, debug: bool = False, **kw)</span>
+</code></dt>
+<dd>
+<div class="desc"><p>Execute a SQL query or launch an interactive CLI. All positional arguments are optional.</p>
+<h2 id="usage">Usage</h2>
+<p><code>sql {label} {method} {query / table}</code></p>
+<h2 id="options">Options</h2>
+<ul>
+<li>
+<p><code>sql {label}</code>
+Launch an interactive CLI. If {label} is omitted, use 'main'.</p>
+</li>
+<li>
+<p><code>sql {label} read [query / table]</code>
+Read a table or query as a pandas DataFrame and print the result</p>
+</li>
+<li>
+<p><code>sql {label} exec [query]</code>
+Execute a query and print the success status</p>
+</li>
+</ul></div>
+<details class="source">
+<summary>
+<span>Expand source code</span>
+</summary>
+<pre><code class="python">def sql(
+        action : list = [&#39;&#39;],
+        gui : bool = False,
+        debug : bool = False,
+        **kw
+    ):
+    &#34;&#34;&#34;
+    Execute a SQL query or launch an interactive CLI. All positional arguments are optional.
+    
+    Usage:
+        `sql {label} {method} {query / table}`
+
+    Options:
+        - `sql {label}`
+            Launch an interactive CLI. If {label} is omitted, use &#39;main&#39;.
+
+        - `sql {label} read [query / table]`
+            Read a table or query as a pandas DataFrame and print the result
+        
+        - `sql {label} exec [query]`
+            Execute a query and print the success status
+    &#34;&#34;&#34;
+
+    ### input: `sql read` or `sql exec`
+    if action[0] in exec_methods and len(action) == 1:
+        print(sql.__doc__)
+        return (False, &#39;Query must not be empty&#39;)
+
+    from meerschaum.connectors import get_connector
+
+    ### input: `sql`
+    if action[0] == &#39;&#39;:
+        return get_connector().cli(debug=debug) 
+
+    from meerschaum.config import config as cf, get_config
+    from meerschaum.utils.debug import dprint
+
+    method = None
+    label = None
+    query = action[-1]
+    for a in action[:]:
+        ### check if user specifies an exec method (read vs exec)
+        if a in exec_methods:
+            method = a
+            continue
+        ### check if user specifies a label
+        if a in get_config(&#39;meerschaum&#39;, &#39;connectors&#39;, &#39;sql&#39;, patch=True):
+            label = a
+    if method is None: method = &#39;read&#39;
+    if label is None: label = &#39;main&#39;
+
+    conn = get_connector(type=&#39;sql&#39;, label=label, debug=debug)
+    if not conn:
+        return False, (f&#34;Could not create SQL connector &#39;{label}&#39;.\n&#34;
+            f&#34;Verify meerschaum:connectors:sql:{label} is defined correctly with `show connectors`,&#34; + 
+            &#34; and update or add connectors with `edit config`.&#34;
+        )
+
+    if debug:
+        dprint(action)
+        dprint(conn)
+
+    ### input: `sql main`
+    if query == label:
+        if debug: dprint(f&#34;No query provided. Opening CLI on connector &#39;{label}&#39;&#34;)
+        return conn.cli(debug=debug)
+
+    ### guess the method from the structure of the query
+    if &#39;select&#39; in query.lower() or &#39; &#39; not in query:
+        if method != &#39;read&#39;:
+            print(&#34;Method changed to &#39;read&#39;&#34;)
+            method = &#39;read&#39;
+    else:
+        if method != &#39;exec&#39;:
+            print(&#34;Method changed to &#39;exec&#39;&#34;)
+            method = &#39;exec&#39;
+
+    result = getattr(conn, method)(query, debug=debug)
+    if result is False:
+        return (False, &#34;Failed to execute query!&#34;)
+    
+    from meerschaum.utils.packages import attempt_import
+    sqlalchemy_engine_result = attempt_import(&#39;sqlalchemy.engine.result&#39;)
+    if isinstance(result, sqlalchemy_engine_result.ResultProxy):
+        print(&#34;Success&#34;)
+    else:
+        print(result)
+        if gui:
+            pandasgui = attempt_import(&#39;pandasgui&#39;)
+            pandasgui.show(result)
+
+    return (True, &#34;Success&#34;)</code></pre>
+</details>
+</dd>
+<dt id="meerschaum.actions.shell.Shell.Shell.do_stack"><code class="name flex">
+<span>def <span class="ident">do_stack</span></span>(<span>action: list = [''], sub_args: list = [], yes: bool = False, force: bool = False, debug: bool = False, **kw) ‑> tuple</span>
+</code></dt>
+<dd>
+<div class="desc"><p>Control the Meerschaum stack with Docker Compose.
+Usage: <code>stack {command}</code></p>
+<p>command : action[0] : default 'up'
+Docker Compose command to run. E.g. 'config' will print Docker Compose configuration</p></div>
+<details class="source">
+<summary>
+<span>Expand source code</span>
+</summary>
+<pre><code class="python">def stack(
+        action : list = [&#39;&#39;],
+        sub_args : list = [],
+        yes : bool = False,
+        force : bool = False,
+        debug : bool = False,
+        **kw
+    ) -&gt; tuple:
+    &#34;&#34;&#34;
+    Control the Meerschaum stack with Docker Compose.
+    Usage: `stack {command}`
+    
+    command : action[0] : default &#39;up&#39;
+        Docker Compose command to run. E.g. &#39;config&#39; will print Docker Compose configuration
+    &#34;&#34;&#34;
+    from subprocess import call
+    from meerschaum.config.stack import get_necessary_files, write_stack
+    from meerschaum.config._paths import STACK_COMPOSE_PATH
+    #  from meerschaum.utils.packages import reload_package
+    from meerschaum.utils.prompt import yes_no
+    import meerschaum.config
+    from meerschaum.config import get_config
+    from meerschaum.utils.debug import dprint
+    from meerschaum.utils.warnings import warn
+    from meerschaum.utils.formatting import ANSI
+    import os
+
+    bootstrap_question = (
+        &#34;Bootstrap configuration?\n\n&#34;
+        &#34;The following files will be overwritten:&#34;
+    )
+    for f in get_necessary_files():
+        bootstrap_question += &#34;\n  - &#34; + str(f)
+    bootstrap_question += &#34;\n&#34;
+
+    bootstrap = False
+    for fp in get_necessary_files():
+        if not os.path.isfile(fp):
+            if not yes and not force:
+                if yes_no(bootstrap_question):
+                    bootstrap = True
+                else:
+                    warn_message = &#34;Cannot start stack without bootstrapping&#34;
+                    warn(warn_message)
+                    return False, warn_message
+            else: ### yes or force is True
+                bootstrap = True
+            break
+    ### if bootstrap flag was set, create files
+    if bootstrap:
+        write_stack(debug=debug)
+
+    compose_command = [&#39;up&#39;]
+    ### default: alias stack as docker-compose
+    if action[0] != &#39;&#39;:
+        compose_command = action
+
+    ### if command is just `stack`, add --build
+    elif &#39;--build&#39; not in sub_args:
+        sub_args.append(&#39;--build&#39;)
+
+    ### define project name when starting containers
+    project_name_list = [&#39;--project-name&#39;, get_config(&#39;stack&#39;, &#39;project_name&#39;, patch=True)]
+    
+    ### disable ANSI if the user sets ANSI mode to False
+    ansi_list = [] if ANSI else [&#39;--no-ansi&#39;]
+
+    debug_list = [&#39;--log-level&#39;, &#39;DEBUG&#39;] if debug else []
+
+    ### prepend settings before the docker-compose action
+    settings_list = project_name_list + ansi_list + debug_list
+
+    cmd_list = [&#39;docker-compose&#39;] + settings_list + compose_command + sub_args
+    if debug: dprint(cmd_list)
+    call(cmd_list, cwd=STACK_COMPOSE_PATH.parent)
+
+    ### not sure why I decided to reload the config here...
+    #  reload_package(meerschaum.config)
+    #  reload_package(meerschaum.config)
+    return True, &#34;Success&#34;</code></pre>
+</details>
+</dd>
+<dt id="meerschaum.actions.shell.Shell.Shell.do_sync"><code class="name flex">
+<span>def <span class="ident">do_sync</span></span>(<span>action: list = [''], **kw) ‑> tuple</span>
+</code></dt>
+<dd>
+<div class="desc"><p>Sync elements</p>
+<h2 id="options">Options</h2>
+<p><code>sync [pipes]</code></p></div>
+<details class="source">
+<summary>
+<span>Expand source code</span>
+</summary>
+<pre><code class="python">def sync(
+        action : list = [&#39;&#39;],
+        **kw
+    ) -&gt; tuple:
+    &#34;&#34;&#34;
+    Sync elements
+    &#34;&#34;&#34;
+    from meerschaum.utils.misc import choose_subaction
+    options = {
+        &#39;pipes&#39;   : _sync_pipes,
+    }
+    return choose_subaction(action, options, **kw)</code></pre>
+</details>
+</dd>
+<dt id="meerschaum.actions.shell.Shell.Shell.do_test"><code class="name flex">
+<span>def <span class="ident">do_test</span></span>(<span>**kw)</span>
+</code></dt>
+<dd>
+<div class="desc"><p>Run Meerschaum tests.</p></div>
+<details class="source">
+<summary>
+<span>Expand source code</span>
+</summary>
+<pre><code class="python">@make_action
+def test(**kw):
+    &#34;&#34;&#34;
+    Run Meerschaum tests.
+    &#34;&#34;&#34;
+    pass</code></pre>
+</details>
+</dd>
+<dt id="meerschaum.actions.shell.Shell.Shell.do_upgrade"><code class="name flex">
+<span>def <span class="ident">do_upgrade</span></span>(<span>action: list = [''], yes: bool = True, force: bool = False, debug: bool = False, **kw) ‑> tuple</span>
+</code></dt>
+<dd>
+<div class="desc"><p>Upgrade the current Meerschaum instance. Optionally specify dependency versions (such as [full])</p>
+<h2 id="example">Example</h2>
+<p>mrsm upgrade full</p></div>
+<details class="source">
+<summary>
+<span>Expand source code</span>
+</summary>
+<pre><code class="python">def upgrade(
+        action : list = [&#39;&#39;],
+        yes : bool = True,
+        force : bool = False,
+        debug : bool = False,
+        **kw
+    ) -&gt; tuple:
+    &#34;&#34;&#34;
+    Upgrade the current Meerschaum instance. Optionally specify dependency versions (such as [full])
+
+    Example:
+        mrsm upgrade full
+    &#34;&#34;&#34;
+    from meerschaum.utils.debug import dprint
+    from meerschaum.actions import actions
+    from meerschaum.utils.prompt import yes_no
+    from meerschaum.utils.packages import pip_install, attempt_import
+
+    is_stack_running = False
+    client = None
+    docker = attempt_import(&#39;docker&#39;, warn=False)
+    if docker:
+        try:
+            client = docker.from_env()
+            containers = client.containers.list()
+            is_stack_running = len(containers) &gt; 0
+        except:
+            pass
+
+    if is_stack_running:
+        answer = True or force
+        if not yes and not force:
+            answer = yes_no(f&#34;Take down the stack?&#34;, default=&#39;y&#39;)
+
+        if answer:
+            if debug: dprint(&#34;Taking stack down...&#34;)
+            actions[&#39;stack&#39;]([&#39;down&#39;], debug=debug)
+
+    dependencies = None
+    if action != [&#39;&#39;] and len(action) &gt; 0:
+        dependencies = action[0]
+
+    install_name = &#39;meerschaum&#39; + (
+        (&#39;[&#39; + &#39;,&#39;.join(dependencies.split(&#39;,&#39;)) + &#39;]&#39;) if dependencies else &#39;&#39;
+    )
+
+    if debug: dprint(&#39;Upgrade meerschaum with dependencies: \&#34;&#39; + f&#39;{dependencies}&#39; + &#39;\&#34;&#39;)
+    if not pip_install(install_name, venv=None, debug=debug):
+        return False, f&#34;Failed to upgrade Meerschaum via pip.&#34;
+
+    if debug: dprint(&#34;Pulling new Docker images...&#34;)
+    if client: actions[&#39;stack&#39;]([&#39;pull&#39;], debug=debug)
+
     return True, &#34;Success&#34;</code></pre>
 </details>
 </dd>
@@ -1329,6 +2226,23 @@ to run hooks before the command loop begins. See
         self.precmd(&#39; &#39;.join(self._sysargs))</code></pre>
 </details>
 </dd>
+<dt id="meerschaum.actions.shell.Shell.Shell.test"><code class="name flex">
+<span>def <span class="ident">test</span></span>(<span>**kw)</span>
+</code></dt>
+<dd>
+<div class="desc"><p>Run Meerschaum tests.</p></div>
+<details class="source">
+<summary>
+<span>Expand source code</span>
+</summary>
+<pre><code class="python">@make_action
+def test(**kw):
+    &#34;&#34;&#34;
+    Run Meerschaum tests.
+    &#34;&#34;&#34;
+    pass</code></pre>
+</details>
+</dd>
 <dt id="meerschaum.actions.shell.Shell.Shell.update_prompt"><code class="name flex">
 <span>def <span class="ident">update_prompt</span></span>(<span>self, instance=None, username=None)</span>
 </code></dt>
@@ -1399,16 +2313,34 @@ to run hooks before the command loop begins. See
 <li>
 <h4><code><a title="meerschaum.actions.shell.Shell.Shell" href="#meerschaum.actions.shell.Shell.Shell">Shell</a></code></h4>
 <ul class="two-column">
+<li><code><a title="meerschaum.actions.shell.Shell.Shell.do_api" href="#meerschaum.actions.shell.Shell.Shell.do_api">do_api</a></code></li>
+<li><code><a title="meerschaum.actions.shell.Shell.Shell.do_bash" href="#meerschaum.actions.shell.Shell.Shell.do_bash">do_bash</a></code></li>
+<li><code><a title="meerschaum.actions.shell.Shell.Shell.do_bootstrap" href="#meerschaum.actions.shell.Shell.Shell.do_bootstrap">do_bootstrap</a></code></li>
+<li><code><a title="meerschaum.actions.shell.Shell.Shell.do_clear" href="#meerschaum.actions.shell.Shell.Shell.do_clear">do_clear</a></code></li>
 <li><code><a title="meerschaum.actions.shell.Shell.Shell.do_debug" href="#meerschaum.actions.shell.Shell.Shell.do_debug">do_debug</a></code></li>
+<li><code><a title="meerschaum.actions.shell.Shell.Shell.do_delete" href="#meerschaum.actions.shell.Shell.Shell.do_delete">do_delete</a></code></li>
+<li><code><a title="meerschaum.actions.shell.Shell.Shell.do_drop" href="#meerschaum.actions.shell.Shell.Shell.do_drop">do_drop</a></code></li>
+<li><code><a title="meerschaum.actions.shell.Shell.Shell.do_edit" href="#meerschaum.actions.shell.Shell.Shell.do_edit">do_edit</a></code></li>
 <li><code><a title="meerschaum.actions.shell.Shell.Shell.do_exit" href="#meerschaum.actions.shell.Shell.Shell.do_exit">do_exit</a></code></li>
+<li><code><a title="meerschaum.actions.shell.Shell.Shell.do_install" href="#meerschaum.actions.shell.Shell.Shell.do_install">do_install</a></code></li>
 <li><code><a title="meerschaum.actions.shell.Shell.Shell.do_instance" href="#meerschaum.actions.shell.Shell.Shell.do_instance">do_instance</a></code></li>
+<li><code><a title="meerschaum.actions.shell.Shell.Shell.do_os" href="#meerschaum.actions.shell.Shell.Shell.do_os">do_os</a></code></li>
 <li><code><a title="meerschaum.actions.shell.Shell.Shell.do_pass" href="#meerschaum.actions.shell.Shell.Shell.do_pass">do_pass</a></code></li>
+<li><code><a title="meerschaum.actions.shell.Shell.Shell.do_python" href="#meerschaum.actions.shell.Shell.Shell.do_python">do_python</a></code></li>
+<li><code><a title="meerschaum.actions.shell.Shell.Shell.do_register" href="#meerschaum.actions.shell.Shell.Shell.do_register">do_register</a></code></li>
 <li><code><a title="meerschaum.actions.shell.Shell.Shell.do_repo" href="#meerschaum.actions.shell.Shell.Shell.do_repo">do_repo</a></code></li>
+<li><code><a title="meerschaum.actions.shell.Shell.Shell.do_show" href="#meerschaum.actions.shell.Shell.Shell.do_show">do_show</a></code></li>
+<li><code><a title="meerschaum.actions.shell.Shell.Shell.do_sql" href="#meerschaum.actions.shell.Shell.Shell.do_sql">do_sql</a></code></li>
+<li><code><a title="meerschaum.actions.shell.Shell.Shell.do_stack" href="#meerschaum.actions.shell.Shell.Shell.do_stack">do_stack</a></code></li>
+<li><code><a title="meerschaum.actions.shell.Shell.Shell.do_sync" href="#meerschaum.actions.shell.Shell.Shell.do_sync">do_sync</a></code></li>
+<li><code><a title="meerschaum.actions.shell.Shell.Shell.do_test" href="#meerschaum.actions.shell.Shell.Shell.do_test">do_test</a></code></li>
+<li><code><a title="meerschaum.actions.shell.Shell.Shell.do_upgrade" href="#meerschaum.actions.shell.Shell.Shell.do_upgrade">do_upgrade</a></code></li>
 <li><code><a title="meerschaum.actions.shell.Shell.Shell.emptyline" href="#meerschaum.actions.shell.Shell.Shell.emptyline">emptyline</a></code></li>
 <li><code><a title="meerschaum.actions.shell.Shell.Shell.post_cmd" href="#meerschaum.actions.shell.Shell.Shell.post_cmd">post_cmd</a></code></li>
 <li><code><a title="meerschaum.actions.shell.Shell.Shell.postloop" href="#meerschaum.actions.shell.Shell.Shell.postloop">postloop</a></code></li>
 <li><code><a title="meerschaum.actions.shell.Shell.Shell.precmd" href="#meerschaum.actions.shell.Shell.Shell.precmd">precmd</a></code></li>
 <li><code><a title="meerschaum.actions.shell.Shell.Shell.preloop" href="#meerschaum.actions.shell.Shell.Shell.preloop">preloop</a></code></li>
+<li><code><a title="meerschaum.actions.shell.Shell.Shell.test" href="#meerschaum.actions.shell.Shell.Shell.test">test</a></code></li>
 <li><code><a title="meerschaum.actions.shell.Shell.Shell.update_prompt" href="#meerschaum.actions.shell.Shell.Shell.update_prompt">update_prompt</a></code></li>
 </ul>
 </li>

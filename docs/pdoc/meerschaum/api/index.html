@@ -35,7 +35,7 @@
 Meerschaum API backend. Start an API instance with `api start`.
 &#34;&#34;&#34;
 
-__version__ = &#34;0.0.13&#34;
+__version__ = &#34;0.0.14&#34;
 from meerschaum.config import system_config, get_config
 from meerschaum.utils.packages import attempt_import
 from meerschaum.utils.get_pipes import get_pipes as get_pipes_sql
@@ -64,30 +64,37 @@ def generate_secret_key():
 SECRET = generate_secret_key()
 manager = LoginManager(SECRET, tokenUrl=&#39;/mrsm/login&#39;)
 
+uvicorn_config = None
+def get_uvicorn_config() -&gt; dict:
+    global uvicorn_config
+    from meerschaum.config._paths import API_UVICORN_CONFIG_PATH
+    yaml = attempt_import(&#39;yaml&#39;)
+    if uvicorn_config is None:
+        try:
+            with open(API_UVICORN_CONFIG_PATH, &#39;r&#39;) as f:
+                uvicorn_config = yaml.safe_load(f)
+        except:
+            uvicorn_config = dict()
+
+        if uvicorn_config is None: uvicorn_config = dict()
+
+        ### Default: main SQL connector
+        if &#39;mrsm_instance&#39; not in uvicorn_config:
+            uvicorn_config[&#39;mrsm_instance&#39;] = get_config(&#39;meerschaum&#39;, &#39;api_instance&#39;, patch=True)
+    return uvicorn_config
+
+debug = get_uvicorn_config().get(&#39;debug&#39;, False)
+
 connector = None
-def get_connector(instance_keys : str = None, debug : bool = False):
+def get_connector(instance_keys : str = None):
     &#34;&#34;&#34;
     Create the connector
     &#34;&#34;&#34;
     from meerschaum.utils.debug import dprint
     global connector
     if connector is None:
-        from meerschaum.config._paths import API_UVICORN_CONFIG_PATH
-        yaml = attempt_import(&#39;yaml&#39;)
         if instance_keys is None:
-            try:
-                with open(API_UVICORN_CONFIG_PATH, &#39;r&#39;) as f:
-                    uvicorn_config = yaml.safe_load(f)
-            except:
-                uvicorn_config = dict()
-
-            if uvicorn_config is None: uvicorn_config = dict()
-
-            ### Default: main SQL connector
-            if &#39;mrsm_instance&#39; not in uvicorn_config:
-                uvicorn_config[&#39;mrsm_instance&#39;] = get_config(&#39;meerschaum&#39;, &#39;api_instance&#39;, patch=True)
-
-            instance_keys = uvicorn_config[&#39;mrsm_instance&#39;]
+            instance_keys = get_uvicorn_config()[&#39;mrsm_instance&#39;]
 
         from meerschaum.connectors.parse import parse_instance_keys
         connector = parse_instance_keys(instance_keys, debug=debug)
@@ -198,7 +205,7 @@ import meerschaum.api._events</code></pre>
 </details>
 </dd>
 <dt id="meerschaum.api.get_connector"><code class="name flex">
-<span>def <span class="ident">get_connector</span></span>(<span>instance_keys: str = None, debug: bool = False)</span>
+<span>def <span class="ident">get_connector</span></span>(<span>instance_keys: str = None)</span>
 </code></dt>
 <dd>
 <div class="desc"><p>Create the connector</p></div>
@@ -206,29 +213,15 @@ import meerschaum.api._events</code></pre>
 <summary>
 <span>Expand source code</span>
 </summary>
-<pre><code class="python">def get_connector(instance_keys : str = None, debug : bool = False):
+<pre><code class="python">def get_connector(instance_keys : str = None):
     &#34;&#34;&#34;
     Create the connector
     &#34;&#34;&#34;
     from meerschaum.utils.debug import dprint
     global connector
     if connector is None:
-        from meerschaum.config._paths import API_UVICORN_CONFIG_PATH
-        yaml = attempt_import(&#39;yaml&#39;)
         if instance_keys is None:
-            try:
-                with open(API_UVICORN_CONFIG_PATH, &#39;r&#39;) as f:
-                    uvicorn_config = yaml.safe_load(f)
-            except:
-                uvicorn_config = dict()
-
-            if uvicorn_config is None: uvicorn_config = dict()
-
-            ### Default: main SQL connector
-            if &#39;mrsm_instance&#39; not in uvicorn_config:
-                uvicorn_config[&#39;mrsm_instance&#39;] = get_config(&#39;meerschaum&#39;, &#39;api_instance&#39;, patch=True)
-
-            instance_keys = uvicorn_config[&#39;mrsm_instance&#39;]
+            instance_keys = get_uvicorn_config()[&#39;mrsm_instance&#39;]
 
         from meerschaum.connectors.parse import parse_instance_keys
         connector = parse_instance_keys(instance_keys, debug=debug)
@@ -275,6 +268,34 @@ import meerschaum.api._events</code></pre>
     return p</code></pre>
 </details>
 </dd>
+<dt id="meerschaum.api.get_uvicorn_config"><code class="name flex">
+<span>def <span class="ident">get_uvicorn_config</span></span>(<span>) ‑> dict</span>
+</code></dt>
+<dd>
+<div class="desc"></div>
+<details class="source">
+<summary>
+<span>Expand source code</span>
+</summary>
+<pre><code class="python">def get_uvicorn_config() -&gt; dict:
+    global uvicorn_config
+    from meerschaum.config._paths import API_UVICORN_CONFIG_PATH
+    yaml = attempt_import(&#39;yaml&#39;)
+    if uvicorn_config is None:
+        try:
+            with open(API_UVICORN_CONFIG_PATH, &#39;r&#39;) as f:
+                uvicorn_config = yaml.safe_load(f)
+        except:
+            uvicorn_config = dict()
+
+        if uvicorn_config is None: uvicorn_config = dict()
+
+        ### Default: main SQL connector
+        if &#39;mrsm_instance&#39; not in uvicorn_config:
+            uvicorn_config[&#39;mrsm_instance&#39;] = get_config(&#39;meerschaum&#39;, &#39;api_instance&#39;, patch=True)
+    return uvicorn_config</code></pre>
+</details>
+</dd>
 <dt id="meerschaum.api.pipes"><code class="name flex">
 <span>def <span class="ident">pipes</span></span>(<span>refresh=False)</span>
 </code></dt>
@@ -316,11 +337,12 @@ import meerschaum.api._events</code></pre>
 </ul>
 </li>
 <li><h3><a href="#header-functions">Functions</a></h3>
-<ul class="">
+<ul class="two-column">
 <li><code><a title="meerschaum.api.generate_secret_key" href="#meerschaum.api.generate_secret_key">generate_secret_key</a></code></li>
 <li><code><a title="meerschaum.api.get_connector" href="#meerschaum.api.get_connector">get_connector</a></code></li>
 <li><code><a title="meerschaum.api.get_database" href="#meerschaum.api.get_database">get_database</a></code></li>
 <li><code><a title="meerschaum.api.get_pipe" href="#meerschaum.api.get_pipe">get_pipe</a></code></li>
+<li><code><a title="meerschaum.api.get_uvicorn_config" href="#meerschaum.api.get_uvicorn_config">get_uvicorn_config</a></code></li>
 <li><code><a title="meerschaum.api.pipes" href="#meerschaum.api.pipes">pipes</a></code></li>
 </ul>
 </li>

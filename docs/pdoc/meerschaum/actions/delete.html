@@ -35,6 +35,9 @@
 Functions for deleting elements
 &#34;&#34;&#34;
 
+from __future__ import annotations
+from meerschaum.utils.typing import Any, SuccessTuple, Union, Optional, List
+
 def delete(
         action : list = [&#39;&#39;],
         **kw
@@ -45,10 +48,11 @@ def delete(
     from meerschaum.utils.misc import choose_subaction
     from meerschaum.utils.debug import dprint
     options = {
-        &#39;config&#39;  : _delete_config, 
-        &#39;pipes&#39;   : _delete_pipes,
-        &#39;plugins&#39; : _delete_plugins,
-        &#39;users&#39;   : _delete_users,
+        &#39;config&#39;     : _delete_config, 
+        &#39;pipes&#39;      : _delete_pipes,
+        &#39;plugins&#39;    : _delete_plugins,
+        &#39;users&#39;      : _delete_users,
+        &#39;connectors&#39; : _delete_connectors,
     }
     return choose_subaction(action, options, **kw)
 
@@ -61,9 +65,10 @@ def _delete_pipes(
     from meerschaum import get_pipes
     from meerschaum.utils.prompt import yes_no
     from meerschaum.utils.formatting import pprint
+    from meerschaum.utils.warnings import warn
     pipes = get_pipes(as_list=True, debug=debug, **kw)
     if len(pipes) == 0:
-        return False, &#34;No pipes to delete&#34;
+        return False, &#34;No pipes to delete.&#34;
     question = &#34;Are you sure you want to delete these Pipes? THIS CANNOT BE UNDONE!\n&#34;
     for p in pipes:
         question += f&#34; - {p}&#34; + &#34;\n&#34;
@@ -72,12 +77,25 @@ def _delete_pipes(
         answer = yes_no(question, default=&#39;n&#39;)
     if not answer:
         return False, &#34;No pipes deleted.&#34;
+
+    successes, fails = 0, 0
+    success_dict = {}
+
     for p in pipes:
         success_tuple = p.delete(debug=debug)
-        if not success_tuple[0]:
-            return success_tuple
+        success_dict[p] = success_tuple[1]
+        if success_tuple[0]:
+            successes += 1
+        else:
+            fails += 1
+            warn(success_tuple[1], stack=False)
 
-    return True, &#34;Success&#34;
+    msg = (
+        f&#34;Finished deleting {len(pipes)} pipes.\n&#34; +
+        f&#34;    ({successes} succeeded, {fails} failed)&#34;
+    )
+    
+    return successes &gt; 0, msg
 
 def _delete_config(
         yes : bool = False,
@@ -190,14 +208,15 @@ def _delete_users(
     registered_users = []
     for username in action:
         user = User(username=username, password=&#39;&#39;)
-        user_id = repo_connector.get_user_id(user)
+        user_id = repo_connector.get_user_id(user, debug=debug)
         if user_id is None:
             info(f&#34;User &#39;{user}&#39; does not exist. Skipping...&#34;)
             continue
         user.user_id = user_id
         registered_users.append(user)
 
-    if len(registered_users) == 0: return False, &#34;No users to delete.&#34;
+    if len(registered_users) == 0:
+        return False, &#34;No users to delete.&#34;
 
     ### verify that the user absolutely wants to do this (skips on --force)
     question = f&#34;Are you sure you want to delete these users from Meerschaum instance &#39;{repo_connector}&#39;?\n&#34;
@@ -228,6 +247,66 @@ def _delete_users(
     if shell: info(msg)
     return True, msg
 
+def _delete_connectors(
+        connector_keys : List[str] = [],
+        yes : bool = False,
+        force : bool = False,
+        debug : bool = False,
+        **kw : Any
+    ) -&gt; SuccessTuple:
+    &#34;&#34;&#34;
+    Delete configured connectors.
+
+    Example:
+        `delete connectors -c sql:test`
+    &#34;&#34;&#34;
+    from meerschaum.utils.prompt import yes_no, prompt
+    from meerschaum.connectors.parse import parse_connector_keys
+    from meerschaum.config import config as cf
+    from meerschaum.config._edit import write_config
+    from meerschaum.utils.warnings import info, warn
+    import os
+
+    if len(connector_keys) == 0:
+        return False, &#34;No connector keys provided. Run again with `-c` to list connector keys.&#34;
+
+    to_delete = []
+    for ck in connector_keys:
+        try:
+            conn = parse_connector_keys(ck, debug=debug)
+        except:
+            warn(f&#34;Could not parse connector &#39;{ck}&#39;. Skipping...&#34;, stack=False)
+            continue
+
+        if not force:
+            if yes or not yes_no(
+                f&#34;Are you sure you want to delete connector &#39;{conn}&#39; from the configuration file?&#34;,
+                default=&#39;n&#39;
+            ):
+                info(f&#34;Skipping connector &#39;{conn}&#39;...&#34;)
+                continue
+        to_delete.append(conn)
+
+    if len(to_delete) == 0:
+        return False, &#34;No changes made to the configuration file.&#34;
+    for c in to_delete:
+        try:
+            if c.flavor == &#39;sqlite&#39;:
+                if force or yes_no(f&#34;Detected sqlite database &#39;{c.database}&#39;. Delete this file?&#34;, default=&#39;n&#39;):
+                    try:
+                        os.remove(c.database)
+                    except:
+                        warn(f&#34;Failed to delete database file for connector &#39;{c}&#39;. Ignoring...&#34;, stack=False)
+        except:
+            pass
+        try:
+            del cf[&#39;meerschaum&#39;][&#39;connectors&#39;][c.type][c.label]
+        except:
+            warn(f&#34;Failed to delete connector &#39;{c}&#39; from configuration. Skipping...&#34;)
+
+    write_config(cf, debug=debug)
+    return True, &#34;Success&#34;
+
 ### NOTE: This must be the final statement of the module.
 ###       Any subactions added below these lines will not
 ###       be added to the `help` docstring.
@@ -248,7 +327,7 @@ delete.__doc__ += _choices_docstring(&#39;delete&#39;)</code></pre>
 <dd>
 <div class="desc"><p>Delete an element.</p>
 <h2 id="options">Options</h2>
-<p><code><a title="meerschaum.actions.delete.delete" href="#meerschaum.actions.delete.delete">delete()</a> [config, pipes, plugins, users]</code></p></div>
+<p><code><a title="meerschaum.actions.delete.delete" href="#meerschaum.actions.delete.delete">delete()</a> [config, connectors, pipes, plugins, users]</code></p></div>
 <details class="source">
 <summary>
 <span>Expand source code</span>
@@ -263,10 +342,11 @@ delete.__doc__ += _choices_docstring(&#39;delete&#39;)</code></pre>
     from meerschaum.utils.misc import choose_subaction
     from meerschaum.utils.debug import dprint
     options = {
-        &#39;config&#39;  : _delete_config, 
-        &#39;pipes&#39;   : _delete_pipes,
-        &#39;plugins&#39; : _delete_plugins,
-        &#39;users&#39;   : _delete_users,
+        &#39;config&#39;     : _delete_config, 
+        &#39;pipes&#39;      : _delete_pipes,
+        &#39;plugins&#39;    : _delete_plugins,
+        &#39;users&#39;      : _delete_users,
+        &#39;connectors&#39; : _delete_connectors,
     }
     return choose_subaction(action, options, **kw)</code></pre>
 </details>

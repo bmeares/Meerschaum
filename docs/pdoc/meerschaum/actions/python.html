@@ -49,11 +49,12 @@ def python(
     Example:
         `python print(\\&#39;Hello, World!\\&#39;); pipes = mrsm.get_pipes()`
 
-    Result:
+        ```
         Hello, World!
         &gt;&gt;&gt; import meerschaum as mrsm
         &gt;&gt;&gt; print(&#39;Hello, World!&#39;)
         &gt;&gt;&gt; pipes = mrsm.get_pipes()
+        ```
     &#34;&#34;&#34;
     import sys, subprocess
     from meerschaum.utils.debug import dprint
@@ -77,10 +78,14 @@ def python(
     
     #  end_with_semicolon = False
     #  end_with_semicolon = joined_actions[-1].endswith(&#39;;&#39;)
-    print_command = &#39;print(&#34;&#34;&#34;&#39;
+    print_command = &#39;import sys; print(&#34;&#34;&#34;&#39;
+    ps1 = &#34;&gt;&gt;&gt; &#34;
     for i, a in enumerate(joined_actions):
-        line = &#34;&gt;&gt;&gt; &#34; + f&#34;{a}&#34;.replace(&#39;;&#39;, &#39;\n&#39;)
-        if &#39;\n&#39; not in line and i != len(joined_actions) - 1: line += &#34;\n&#34;
+        line = ps1 + f&#34;{a}&#34;.replace(&#39;;&#39;, &#39;\n&#39;)
+        if &#39;\n&#39; not in line and i != len(joined_actions) - 1:
+            line += &#34;\n&#34;
+        #  print(line)
+        #  print_command += line[len(ps1):]
         print_command += line
     print_command += &#39;&#34;&#34;&#34;)&#39;
 
@@ -117,12 +122,13 @@ Note that quotes must be escaped and commands must be separated by semicolons</p
 <p><code>python {commands}</code></p>
 <h2 id="example">Example</h2>
 <p><code>python print(\'Hello, World!\'); pipes = mrsm.get_pipes()</code></p>
-<h2 id="result">Result</h2>
-<p>Hello, World!</p>
-<pre><code class="python-repl">&gt;&gt;&gt; import meerschaum as mrsm
+<pre><code>Hello, World!
+```python-repl
+&gt;&gt;&gt; import meerschaum as mrsm
 &gt;&gt;&gt; print('Hello, World!')
 &gt;&gt;&gt; pipes = mrsm.get_pipes()
-</code></pre></div>
+</code></pre>
+<p>```</p></div>
 <details class="source">
 <summary>
 <span>Expand source code</span>
@@ -142,11 +148,12 @@ Note that quotes must be escaped and commands must be separated by semicolons</p
     Example:
         `python print(\\&#39;Hello, World!\\&#39;); pipes = mrsm.get_pipes()`
 
-    Result:
+        ```
         Hello, World!
         &gt;&gt;&gt; import meerschaum as mrsm
         &gt;&gt;&gt; print(&#39;Hello, World!&#39;)
         &gt;&gt;&gt; pipes = mrsm.get_pipes()
+        ```
     &#34;&#34;&#34;
     import sys, subprocess
     from meerschaum.utils.debug import dprint
@@ -170,10 +177,14 @@ Note that quotes must be escaped and commands must be separated by semicolons</p
     
     #  end_with_semicolon = False
     #  end_with_semicolon = joined_actions[-1].endswith(&#39;;&#39;)
-    print_command = &#39;print(&#34;&#34;&#34;&#39;
+    print_command = &#39;import sys; print(&#34;&#34;&#34;&#39;
+    ps1 = &#34;&gt;&gt;&gt; &#34;
     for i, a in enumerate(joined_actions):
-        line = &#34;&gt;&gt;&gt; &#34; + f&#34;{a}&#34;.replace(&#39;;&#39;, &#39;\n&#39;)
-        if &#39;\n&#39; not in line and i != len(joined_actions) - 1: line += &#34;\n&#34;
+        line = ps1 + f&#34;{a}&#34;.replace(&#39;;&#39;, &#39;\n&#39;)
+        if &#39;\n&#39; not in line and i != len(joined_actions) - 1:
+            line += &#34;\n&#34;
+        #  print(line)
+        #  print_command += line[len(ps1):]
         print_command += line
     print_command += &#39;&#34;&#34;&#34;)&#39;
 

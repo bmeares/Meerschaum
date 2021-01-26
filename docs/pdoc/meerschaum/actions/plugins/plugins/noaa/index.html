@@ -1,0 +1,762 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, minimum-scale=1" />
+<meta name="generator" content="pdoc 0.9.2" />
+<title>meerschaum.actions.plugins.plugins.noaa API documentation</title>
+<meta name="description" content="Example script for syncing NOAA weather data" />
+<link rel="preload stylesheet" as="style" href="https://cdnjs.cloudflare.com/ajax/libs/10up-sanitize.css/11.0.1/sanitize.min.css" integrity="sha256-PK9q560IAAa6WVRRh76LtCaI8pjTJ2z11v0miyNNjrs=" crossorigin>
+<link rel="preload stylesheet" as="style" href="https://cdnjs.cloudflare.com/ajax/libs/10up-sanitize.css/11.0.1/typography.min.css" integrity="sha256-7l/o7C8jubJiy74VsKTidCy1yBkRtiUGbVkYBylBqUg=" crossorigin>
+<link rel="stylesheet preload" as="style" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/10.1.1/styles/github.min.css" crossorigin>
+<style>:root{--highlight-color:#fe9}.flex{display:flex !important}body{line-height:1.5em}#content{padding:20px}#sidebar{padding:30px;overflow:hidden}#sidebar > *:last-child{margin-bottom:2cm}.http-server-breadcrumbs{font-size:130%;margin:0 0 15px 0}#footer{font-size:.75em;padding:5px 30px;border-top:1px solid #ddd;text-align:right}#footer p{margin:0 0 0 1em;display:inline-block}#footer p:last-child{margin-right:30px}h1,h2,h3,h4,h5{font-weight:300}h1{font-size:2.5em;line-height:1.1em}h2{font-size:1.75em;margin:1em 0 .50em 0}h3{font-size:1.4em;margin:25px 0 10px 0}h4{margin:0;font-size:105%}h1:target,h2:target,h3:target,h4:target,h5:target,h6:target{background:var(--highlight-color);padding:.2em 0}a{color:#058;text-decoration:none;transition:color .3s ease-in-out}a:hover{color:#e82}.title code{font-weight:bold}h2[id^="header-"]{margin-top:2em}.ident{color:#900}pre code{background:#f8f8f8;font-size:.8em;line-height:1.4em}code{background:#f2f2f1;padding:1px 4px;overflow-wrap:break-word}h1 code{background:transparent}pre{background:#f8f8f8;border:0;border-top:1px solid #ccc;border-bottom:1px solid #ccc;margin:1em 0;padding:1ex}#http-server-module-list{display:flex;flex-flow:column}#http-server-module-list div{display:flex}#http-server-module-list dt{min-width:10%}#http-server-module-list p{margin-top:0}.toc ul,#index{list-style-type:none;margin:0;padding:0}#index code{background:transparent}#index h3{border-bottom:1px solid #ddd}#index ul{padding:0}#index h4{margin-top:.6em;font-weight:bold}@media (min-width:200ex){#index .two-column{column-count:2}}@media (min-width:300ex){#index .two-column{column-count:3}}dl{margin-bottom:2em}dl dl:last-child{margin-bottom:4em}dd{margin:0 0 1em 3em}#header-classes + dl > dd{margin-bottom:3em}dd dd{margin-left:2em}dd p{margin:10px 0}.name{background:#eee;font-weight:bold;font-size:.85em;padding:5px 10px;display:inline-block;min-width:40%}.name:hover{background:#e0e0e0}dt:target .name{background:var(--highlight-color)}.name > span:first-child{white-space:nowrap}.name.class > span:nth-child(2){margin-left:.4em}.inherited{color:#999;border-left:5px solid #eee;padding-left:1em}.inheritance em{font-style:normal;font-weight:bold}.desc h2{font-weight:400;font-size:1.25em}.desc h3{font-size:1em}.desc dt code{background:inherit}.source summary,.git-link-div{color:#666;text-align:right;font-weight:400;font-size:.8em;text-transform:uppercase}.source summary > *{white-space:nowrap;cursor:pointer}.git-link{color:inherit;margin-left:1em}.source pre{max-height:500px;overflow:auto;margin:0}.source pre code{font-size:12px;overflow:visible}.hlist{list-style:none}.hlist li{display:inline}.hlist li:after{content:',\2002'}.hlist li:last-child:after{content:none}.hlist .hlist{display:inline;padding-left:1em}img{max-width:100%}td{padding:0 .5em}.admonition{padding:.1em .5em;margin-bottom:1em}.admonition-title{font-weight:bold}.admonition.note,.admonition.info,.admonition.important{background:#aef}.admonition.todo,.admonition.versionadded,.admonition.tip,.admonition.hint{background:#dfd}.admonition.warning,.admonition.versionchanged,.admonition.deprecated{background:#fd4}.admonition.error,.admonition.danger,.admonition.caution{background:lightpink}</style>
+<style media="screen and (min-width: 700px)">@media screen and (min-width:700px){#sidebar{width:30%;height:100vh;overflow:auto;position:sticky;top:0}#content{width:70%;max-width:100ch;padding:3em 4em;border-left:1px solid #ddd}pre code{font-size:1em}.item .name{font-size:1em}main{display:flex;flex-direction:row-reverse;justify-content:flex-end}.toc ul ul,#index ul{padding-left:1.5em}.toc > ul > li{margin-top:.5em}}</style>
+<style media="print">@media print{#sidebar h1{page-break-before:always}.source{display:none}}@media print{*{background:transparent !important;color:#000 !important;box-shadow:none !important;text-shadow:none !important}a[href]:after{content:" (" attr(href) ")";font-size:90%}a[href][title]:after{content:none}abbr[title]:after{content:" (" attr(title) ")"}.ir a:after,a[href^="javascript:"]:after,a[href^="#"]:after{content:""}pre,blockquote{border:1px solid #999;page-break-inside:avoid}thead{display:table-header-group}tr,img{page-break-inside:avoid}img{max-width:100% !important}@page{margin:0.5cm}p,h2,h3{orphans:3;widows:3}h1,h2,h3,h4,h5,h6{page-break-after:avoid}}</style>
+<script defer src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/10.1.1/highlight.min.js" integrity="sha256-Uv3H6lx7dJmRfRvH8TH6kJD1TSK1aFcwgx+mdg3epi8=" crossorigin></script>
+<script>window.addEventListener('DOMContentLoaded', () => hljs.initHighlighting())</script>
+</head>
+<body>
+<main>
+<article id="content">
+<header>
+<h1 class="title">Module <code>meerschaum.actions.plugins.plugins.noaa</code></h1>
+</header>
+<section id="section-intro">
+<p>Example script for syncing NOAA weather data</p>
+<details class="source">
+<summary>
+<span>Expand source code</span>
+</summary>
+<pre><code class="python">#! /usr/bin/env python
+# -*- coding: utf-8 -*-
+# vim:fenc=utf-8
+&#34;&#34;&#34;
+Example script for syncing NOAA weather data
+&#34;&#34;&#34;
+
+from __future__ import annotations
+from typing import Optional
+
+__version__ = &#39;1.0.5&#39;
+
+required = [
+    &#39;pandas&#39;,
+    &#39;requests&#39;,
+    &#39;prompt-toolkit&#39;,
+    &#39;requests&#39;,
+]
+
+def get_stations(
+        pipe : &#39;meerschaum.Pipe&#39;,
+        debug : bool = False
+    ) -&gt; dict:
+    if &#39;noaa&#39; not in pipe.parameters:
+        pipe.parameters[&#39;noaa&#39;] = dict()
+    if &#39;stations&#39; not in pipe.parameters[&#39;noaa&#39;]:
+        pipe.parameters[&#39;noaa&#39;][&#39;stations&#39;] = dict()
+    if pipe.parameters[&#39;noaa&#39;][&#39;stations&#39;] is None:
+        pipe.parameters[&#39;noaa&#39;][&#39;stations&#39;] = dict()
+
+    if len(pipe.parameters[&#39;noaa&#39;][&#39;stations&#39;]) &gt; 0: return pipe.parameters[&#39;noaa&#39;][&#39;stations&#39;]
+
+    from prompt_toolkit import prompt
+    import requests, json, re
+    from meerschaum.utils.warnings import warn, info
+    from meerschaum.utils.prompt import yes_no
+    from meerschaum.utils.formatting import pprint
+
+    instructions = f&#34;&#34;&#34;
+    Visit https://www.weather.gov and use the local forecast search tool
+    on the top left to find specific station IDs (e.g. &#39;KATL&#39; for Atanta).
+
+    To fetch all stations from a state, enter the state abbreviation
+    (e.g. &#39;GA&#39; for Georgia).
+
+    NOTE: This will be slow! In the future, run with --async to sync more quickly.
+    &#34;&#34;&#34;
+    info(instructions)
+
+    stations = dict()
+
+    while True:
+        stationID = prompt(&#34;Enter station ID or state abbreviation, empty to stop: &#34;)
+        if stationID == &#39;&#39;: break
+        if len(stationID) == 2:
+            state_abbrev = stationID
+            if yes_no(
+                f&#34;Are you sure you want to fetch from all stations in the state &#39;{state_abbrev}&#39;? &#34; +
+                &#34;This will be very slow!&#34;
+            ):
+                stations = get_state_stations(state_abbrev)
+                break
+
+        url = f&#34;https://api.weather.gov/stations/{stationID}&#34;
+        info = json.loads(requests.get(url).text)
+        try:
+            geo = info[&#39;geometry&#39;]
+        except:
+            geo = None
+        try:
+            name = info[&#39;properties&#39;][&#39;name&#39;].rstrip()
+        except:
+            warn(f&#34;Unable to fetch name for station &#39;{stationID}&#39;. Skipping...&#34;, stack=False)
+            continue
+
+        if not yes_no(f&#34;Is &#39;{name}&#39; a good label for station &#39;{stationID}&#39;?&#34;):
+            name = prompt(f&#34;New label for station &#39;{stationID}&#39;: &#34;)
+
+        stations[stationID] = dict()
+        stations[stationID][&#39;name&#39;] = name
+        if geo is not None: stations[stationID][&#39;geometry&#39;] = geo
+
+    pprint(stations)
+    if not yes_no(f&#34;Would you like to register the above stations to pipe &#39;{pipe}&#39;?&#34;):
+        print(&#34;Resetting stations and starting over...&#34;)
+        pipe.parameters[&#39;noaa&#39;][&#39;stations&#39;] = dict()
+        return get_stations(pipe, debug=debug)
+
+    pipe.parameters[&#39;noaa&#39;][&#39;stations&#39;] = stations
+    pipe.edit(interactive=False, debug=debug)
+    return stations
+
+def get_state_stations(
+        state_abbrev : str,
+        debug : bool = False
+    ) -&gt; dict:
+    &#34;&#34;&#34;
+    Parse every station in a state
+    &#34;&#34;&#34;
+    from meerschaum.utils.warnings import warn
+    import requests, json
+    url = f&#34;https://api.weather.gov/stations&#34;
+    stations = dict()
+    print(f&#34;Retrieving stations for state &#39;{state_abbrev}&#39;...&#34;)
+    d = json.loads(requests.get(url, params={&#39;state&#39; : state_abbrev}).text)
+    if &#39;features&#39; not in d:
+        warn(f&#34;No stations retrieved for state &#39;{state_abbrev}&#39;.&#34;, stack=False)
+        return stations
+    for f in d[&#39;features&#39;]:
+        stationID = None
+        try:
+            stationID = f[&#39;id&#39;].split(&#39;/stations/&#39;)[-1]
+            geo = f.get(&#39;geometry&#39;, None)
+            name = f[&#39;properties&#39;][&#39;name&#39;].lstrip().rstrip()
+        except:
+            if stationID is not None:
+                warn(f&#34;Could not determine name for station &#39;{stationID}&#39;. Skipping...&#34;)
+            continue
+        stations[stationID] = dict()
+        stations[stationID][&#39;name&#39;] = name
+        stations[stationID][&#39;geometry&#39;] = geo
+    return stations
+
+def sync(
+        pipe : &#39;meerschaum.Pipe&#39;,
+        debug : bool = False,
+        blocking : bool = True,
+        workers : int = None,
+        **kw
+    ) -&gt; tuple:
+    &#34;&#34;&#34;
+    Fetch JSON data from NOAA and sync it into a Pipe.
+    Overrides the default Meerschaum sync function.
+    &#34;&#34;&#34;
+    from meerschaum.utils.debug import dprint
+    from meerschaum.utils.warnings import warn, info
+    from meerschaum.utils.pool import get_pool
+
+    ### Specify the columns in case Pipe is not registered.
+    ### NOTE: Normally the Pipe&#39;s columns&#39; types are determined by the first dataframe encountered.
+    ###       In this script, we cast everything to floats to avoid integers.
+    if not pipe.columns:
+        pipe.columns = {
+            &#34;datetime&#34; : &#34;timestamp&#34;,
+            &#34;id&#34; : &#34;station&#34;,
+        }
+        pipe.edit(interactive=False, debug=debug)
+
+    ### dictionary of NOAA weather stations and names
+    stations = get_stations(pipe, debug=debug)
+    if workers is None: workers = int(len(stations) / 2) + 1
+
+    ### Fetch data from the stations.
+    pool = get_pool(&#39;ThreadPool&#39;, workers=workers)
+    args = [(stationID, info, pipe) for stationID, info in stations.items()]
+    dataframes = dict(pool.starmap(do_fetch, args))
+    print(dataframes)
+    pool.close(); pool.join()
+
+    ### only keep the common columns (skipping empty dataframes)
+    common_cols = None
+    for stationID, df in dataframes.items():
+        if df is None: continue
+        #  print(df)
+        if len(df.columns) == 0: continue
+        #  df.rename(columns=(lambda x : x.lstrip().rstrip()), inplace=True)
+        if common_cols is None:
+            common_cols = list(set(df.columns))
+            continue
+        try:
+            common_cols = list(set(common_cols) &amp; set(df.columns))
+        except Exception as e:
+            warn(str(e))
+    ### Make empty set in case all dataframes are empty.
+    if common_cols is None: common_cols = list()
+    ### Pandas needs the columns to be in the same order, so sort the columns.
+    common_cols.sort()
+
+    ### Cast all but these columns to floats.
+    non_float_cols = sorted(list({&#39;label&#39;, &#39;timestamp&#39;, &#39;station&#39;, &#39;location&#39;, &#39;geometry&#39;}))
+    float_cols = sorted(list(set(common_cols) - set(non_float_cols)))
+
+    ### Cast the value columns to floats to avoid integers.
+    _dataframes = dict()
+    for stationID, df in dataframes.items():
+        if df is not None:
+            try:
+                ### Only keep commons columns and ensure they are sorted.
+                if debug: dprint(f&#34;Common columns: {common_cols}&#34;)
+                df = df[common_cols]
+                df[float_cols] = df[float_cols].astype(&#39;float&#39;)
+            except Exception as e:
+                if debug: warn(str(e))
+                warn(f&#34;Unable to parse data from station &#39;{stationID}&#39; ({stations[stationID][&#39;name&#39;]})&#34;, stack=False)
+                df = None
+            _dataframes[stationID] = df
+    dataframes = _dataframes
+
+    ### Make sure Pipe exists.
+    ### Normally this is handled when syncing for the first time, but threading breaks things.
+    if not pipe.exists(debug=debug):
+        for stationID, df in dataframes.items():
+            if df is not None:
+                if len(df) &gt; 0:
+                    pipe.sync(df.head(1), force=True, debug=debug)
+                    break
+
+    ### Finally, time to sync the dataframes.
+    ### pipe.sync returns a tuple of success bool and message.
+    ### E.g. (True, &#34;Success&#34;) or (False, &#34;Error message&#34;)
+    success_dict = dict()
+    for stationID, df in dataframes.items():
+        info(f&#34;Syncing data from station &#39;{stationID}&#39; ({stations[stationID][&#39;name&#39;]})...&#34;)
+        success = pipe.sync(
+            df,
+            blocking = blocking,
+            workers = workers,
+            check_existing = True,
+            force = True,
+            debug = debug
+        )[0] if df is not None else False
+        success_dict[stationID] = success
+
+    succeeded, failed = 0, 0
+    for stationID, success in success_dict.items():
+        if not success:
+            warn(f&#34;Failed to sync from station &#39;{stationID}&#39; ({stations[stationID][&#39;name&#39;]})&#34;, stack=False)
+            failed += 1
+        else:
+            succeeded += 1
+
+    return (succeeded &gt; 0), f&#34;Synced from {succeeded + failed} stations, {failed} failed.&#34;
+
+def do_fetch(stationID : str, info : dict, pipe : &#39;meerschaum.Pipe&#39;) -&gt; Optional[pandas.DataFrame]:
+    &#34;&#34;&#34;
+    Wrapper for fetch_station_data (below)
+    &#34;&#34;&#34;
+    from meerschaum.utils.warnings import warn
+    try:
+        df = fetch_station_data(stationID, info, pipe)
+    except Exception as e:
+        msg = str(e)
+        warn(f&#34;Failed to sync station &#39;{stationID}&#39; ({info[&#39;name&#39;]}). Error:\n{msg}&#34;)
+        df = None
+
+    return df
+
+def fetch_station_data(
+        stationID : str,
+        info : dict,
+        pipe : meerschaum.Pipe
+    ) -&gt; Optional[pandas.DataFrame]:
+    &#34;&#34;&#34;
+    Fetch JSON for a given stationID from NOAA and parse into a dataframe
+    &#34;&#34;&#34;
+    from meerschaum.utils.packages import import_pandas
+    from meerschaum.utils.misc import parse_df_datetimes
+    from meerschaum.utils.warnings import warn
+    import json, pytz, datetime, requests
+    pd = import_pandas()
+    ### Get the latest sync time for this station so we don&#39;t request duplicate data.
+    try:
+        start = (
+            pipe.get_sync_time(
+                { &#34;station&#34; : stationID }
+            ) - datetime.timedelta(hours=24)
+        ).replace(
+            tzinfo = pytz.timezone(&#39;UTC&#39;)
+        ).isoformat()
+    except Exception as e:
+        start = None
+
+    ### fetch JSON from NOAA since the start time (sync_time for this stationID)
+    if start: print(f&#34;Fetching data newer than {start} for station &#39;{stationID}&#39; ({info[&#39;name&#39;]})...&#34;, flush=True)
+    else: print(f&#34;Fetching all possible data for station &#39;{stationID}&#39; ({info[&#39;name&#39;]})...&#34;, flush=True)
+    url = f&#34;https://api.weather.gov/stations/{stationID}/observations/&#34;
+    response = None
+    try:
+        response = requests.get(url, params={&#34;start&#34;:start})
+        data = json.loads(response.text)
+    except Exception as e:
+        print(f&#34;\nFailed to parse JSON with exception: {e}&#34;, flush=True)
+        if response is not None:
+            print(&#34;Received text:\n&#34; + response.text)
+        return None
+    print(f&#34;Done fetching data for station &#39;{stationID}&#39; ({info[&#39;name&#39;]}).&#34;, flush=True)
+
+    ### build a dictionary from the JSON response (flattens JSON)
+    d = dict()
+    if &#39;features&#39; not in data:
+        warn(f&#34;Failed to fetch data for station &#39;{stationID}&#39; ({info[&#39;name&#39;]}):\n&#34; + str(data))
+        return None
+    for record in data[&#39;features&#39;]:
+        properties = record[&#39;properties&#39;]
+
+        if &#39;location&#39; not in d: d[&#39;location&#39;] = []
+        d[&#39;location&#39;].append(info[&#39;name&#39;])
+
+        if &#39;geometry&#39; not in d: d[&#39;geometry&#39;] = []
+        geo = None
+        if &#39;geometry&#39; in info: geo = json.dumps(info[&#39;geometry&#39;])
+        d[&#39;geometry&#39;].append(geo)
+
+        for col, v in properties.items():
+            ### Specific to this API; filter out features we don&#39;t want.
+            if not v: continue
+            ### At this point, the timestamp is a string. It will get casted below in `parse_df_datetimes`.
+            if col == &#39;timestamp&#39;: val = v
+            ### We could just use the stationID provided, but it&#39;s given in the JSON so we might as well use it.
+            elif col == &#39;station&#39;: val = v.split(&#39;/&#39;)[-1]
+
+            ### Skip features that don&#39;t contain a simple &#39;value&#39; key.
+            ### NOTE: this will need to be tweaked if we want more information that doesn&#39;t apply here.
+            elif not isinstance(v, dict): continue
+            elif &#39;value&#39; not in v: continue
+            else: val = v[&#39;value&#39;]
+
+            ### If possible, append units to column name.
+            if isinstance(v, dict):
+                if &#39;unitCode&#39; in v:
+                    col += &#34; (&#34; + v[&#39;unitCode&#39;].replace(&#39;unit:&#39;, &#39;&#39;) + &#34;)&#34;
+
+            ### Grow the lists in the dictionary.
+            ### E.g. { &#39;col1&#39; : [ 1, 2, 3 ], &#39;col2&#39; : [ 4, 5, 6 ] }
+            if col not in d: d[col] = []
+            d[col].append(val)
+
+    ### Create a pandas DataFrame from the dictionary and parse for datetimes.
+    return parse_df_datetimes(pd.DataFrame(d))</code></pre>
+</details>
+</section>
+<section>
+</section>
+<section>
+</section>
+<section>
+<h2 class="section-title" id="header-functions">Functions</h2>
+<dl>
+<dt id="meerschaum.actions.plugins.plugins.noaa.do_fetch"><code class="name flex">
+<span>def <span class="ident">do_fetch</span></span>(<span>stationID: str, info: dict, pipe: "'<a title="meerschaum.Pipe" href="../../../../Pipe/index.html">meerschaum.Pipe</a>'") ‑> Optional[pandas.DataFrame]</span>
+</code></dt>
+<dd>
+<div class="desc"><p>Wrapper for fetch_station_data (below)</p></div>
+<details class="source">
+<summary>
+<span>Expand source code</span>
+</summary>
+<pre><code class="python">def do_fetch(stationID : str, info : dict, pipe : &#39;meerschaum.Pipe&#39;) -&gt; Optional[pandas.DataFrame]:
+    &#34;&#34;&#34;
+    Wrapper for fetch_station_data (below)
+    &#34;&#34;&#34;
+    from meerschaum.utils.warnings import warn
+    try:
+        df = fetch_station_data(stationID, info, pipe)
+    except Exception as e:
+        msg = str(e)
+        warn(f&#34;Failed to sync station &#39;{stationID}&#39; ({info[&#39;name&#39;]}). Error:\n{msg}&#34;)
+        df = None
+
+    return df</code></pre>
+</details>
+</dd>
+<dt id="meerschaum.actions.plugins.plugins.noaa.fetch_station_data"><code class="name flex">
+<span>def <span class="ident">fetch_station_data</span></span>(<span>stationID: str, info: dict, pipe: <a title="meerschaum.Pipe" href="../../../../Pipe/index.html">meerschaum.Pipe</a>) ‑> Optional[pandas.DataFrame]</span>
+</code></dt>
+<dd>
+<div class="desc"><p>Fetch JSON for a given stationID from NOAA and parse into a dataframe</p></div>
+<details class="source">
+<summary>
+<span>Expand source code</span>
+</summary>
+<pre><code class="python">def fetch_station_data(
+        stationID : str,
+        info : dict,
+        pipe : meerschaum.Pipe
+    ) -&gt; Optional[pandas.DataFrame]:
+    &#34;&#34;&#34;
+    Fetch JSON for a given stationID from NOAA and parse into a dataframe
+    &#34;&#34;&#34;
+    from meerschaum.utils.packages import import_pandas
+    from meerschaum.utils.misc import parse_df_datetimes
+    from meerschaum.utils.warnings import warn
+    import json, pytz, datetime, requests
+    pd = import_pandas()
+    ### Get the latest sync time for this station so we don&#39;t request duplicate data.
+    try:
+        start = (
+            pipe.get_sync_time(
+                { &#34;station&#34; : stationID }
+            ) - datetime.timedelta(hours=24)
+        ).replace(
+            tzinfo = pytz.timezone(&#39;UTC&#39;)
+        ).isoformat()
+    except Exception as e:
+        start = None
+
+    ### fetch JSON from NOAA since the start time (sync_time for this stationID)
+    if start: print(f&#34;Fetching data newer than {start} for station &#39;{stationID}&#39; ({info[&#39;name&#39;]})...&#34;, flush=True)
+    else: print(f&#34;Fetching all possible data for station &#39;{stationID}&#39; ({info[&#39;name&#39;]})...&#34;, flush=True)
+    url = f&#34;https://api.weather.gov/stations/{stationID}/observations/&#34;
+    response = None
+    try:
+        response = requests.get(url, params={&#34;start&#34;:start})
+        data = json.loads(response.text)
+    except Exception as e:
+        print(f&#34;\nFailed to parse JSON with exception: {e}&#34;, flush=True)
+        if response is not None:
+            print(&#34;Received text:\n&#34; + response.text)
+        return None
+    print(f&#34;Done fetching data for station &#39;{stationID}&#39; ({info[&#39;name&#39;]}).&#34;, flush=True)
+
+    ### build a dictionary from the JSON response (flattens JSON)
+    d = dict()
+    if &#39;features&#39; not in data:
+        warn(f&#34;Failed to fetch data for station &#39;{stationID}&#39; ({info[&#39;name&#39;]}):\n&#34; + str(data))
+        return None
+    for record in data[&#39;features&#39;]:
+        properties = record[&#39;properties&#39;]
+
+        if &#39;location&#39; not in d: d[&#39;location&#39;] = []
+        d[&#39;location&#39;].append(info[&#39;name&#39;])
+
+        if &#39;geometry&#39; not in d: d[&#39;geometry&#39;] = []
+        geo = None
+        if &#39;geometry&#39; in info: geo = json.dumps(info[&#39;geometry&#39;])
+        d[&#39;geometry&#39;].append(geo)
+
+        for col, v in properties.items():
+            ### Specific to this API; filter out features we don&#39;t want.
+            if not v: continue
+            ### At this point, the timestamp is a string. It will get casted below in `parse_df_datetimes`.
+            if col == &#39;timestamp&#39;: val = v
+            ### We could just use the stationID provided, but it&#39;s given in the JSON so we might as well use it.
+            elif col == &#39;station&#39;: val = v.split(&#39;/&#39;)[-1]
+
+            ### Skip features that don&#39;t contain a simple &#39;value&#39; key.
+            ### NOTE: this will need to be tweaked if we want more information that doesn&#39;t apply here.
+            elif not isinstance(v, dict): continue
+            elif &#39;value&#39; not in v: continue
+            else: val = v[&#39;value&#39;]
+
+            ### If possible, append units to column name.
+            if isinstance(v, dict):
+                if &#39;unitCode&#39; in v:
+                    col += &#34; (&#34; + v[&#39;unitCode&#39;].replace(&#39;unit:&#39;, &#39;&#39;) + &#34;)&#34;
+
+            ### Grow the lists in the dictionary.
+            ### E.g. { &#39;col1&#39; : [ 1, 2, 3 ], &#39;col2&#39; : [ 4, 5, 6 ] }
+            if col not in d: d[col] = []
+            d[col].append(val)
+
+    ### Create a pandas DataFrame from the dictionary and parse for datetimes.
+    return parse_df_datetimes(pd.DataFrame(d))</code></pre>
+</details>
+</dd>
+<dt id="meerschaum.actions.plugins.plugins.noaa.get_state_stations"><code class="name flex">
+<span>def <span class="ident">get_state_stations</span></span>(<span>state_abbrev: str, debug: bool = False) ‑> dict</span>
+</code></dt>
+<dd>
+<div class="desc"><p>Parse every station in a state</p></div>
+<details class="source">
+<summary>
+<span>Expand source code</span>
+</summary>
+<pre><code class="python">def get_state_stations(
+        state_abbrev : str,
+        debug : bool = False
+    ) -&gt; dict:
+    &#34;&#34;&#34;
+    Parse every station in a state
+    &#34;&#34;&#34;
+    from meerschaum.utils.warnings import warn
+    import requests, json
+    url = f&#34;https://api.weather.gov/stations&#34;
+    stations = dict()
+    print(f&#34;Retrieving stations for state &#39;{state_abbrev}&#39;...&#34;)
+    d = json.loads(requests.get(url, params={&#39;state&#39; : state_abbrev}).text)
+    if &#39;features&#39; not in d:
+        warn(f&#34;No stations retrieved for state &#39;{state_abbrev}&#39;.&#34;, stack=False)
+        return stations
+    for f in d[&#39;features&#39;]:
+        stationID = None
+        try:
+            stationID = f[&#39;id&#39;].split(&#39;/stations/&#39;)[-1]
+            geo = f.get(&#39;geometry&#39;, None)
+            name = f[&#39;properties&#39;][&#39;name&#39;].lstrip().rstrip()
+        except:
+            if stationID is not None:
+                warn(f&#34;Could not determine name for station &#39;{stationID}&#39;. Skipping...&#34;)
+            continue
+        stations[stationID] = dict()
+        stations[stationID][&#39;name&#39;] = name
+        stations[stationID][&#39;geometry&#39;] = geo
+    return stations</code></pre>
+</details>
+</dd>
+<dt id="meerschaum.actions.plugins.plugins.noaa.get_stations"><code class="name flex">
+<span>def <span class="ident">get_stations</span></span>(<span>pipe: "'<a title="meerschaum.Pipe" href="../../../../Pipe/index.html">meerschaum.Pipe</a>'", debug: bool = False) ‑> dict</span>
+</code></dt>
+<dd>
+<div class="desc"></div>
+<details class="source">
+<summary>
+<span>Expand source code</span>
+</summary>
+<pre><code class="python">def get_stations(
+        pipe : &#39;meerschaum.Pipe&#39;,
+        debug : bool = False
+    ) -&gt; dict:
+    if &#39;noaa&#39; not in pipe.parameters:
+        pipe.parameters[&#39;noaa&#39;] = dict()
+    if &#39;stations&#39; not in pipe.parameters[&#39;noaa&#39;]:
+        pipe.parameters[&#39;noaa&#39;][&#39;stations&#39;] = dict()
+    if pipe.parameters[&#39;noaa&#39;][&#39;stations&#39;] is None:
+        pipe.parameters[&#39;noaa&#39;][&#39;stations&#39;] = dict()
+
+    if len(pipe.parameters[&#39;noaa&#39;][&#39;stations&#39;]) &gt; 0: return pipe.parameters[&#39;noaa&#39;][&#39;stations&#39;]
+
+    from prompt_toolkit import prompt
+    import requests, json, re
+    from meerschaum.utils.warnings import warn, info
+    from meerschaum.utils.prompt import yes_no
+    from meerschaum.utils.formatting import pprint
+
+    instructions = f&#34;&#34;&#34;
+    Visit https://www.weather.gov and use the local forecast search tool
+    on the top left to find specific station IDs (e.g. &#39;KATL&#39; for Atanta).
+
+    To fetch all stations from a state, enter the state abbreviation
+    (e.g. &#39;GA&#39; for Georgia).
+
+    NOTE: This will be slow! In the future, run with --async to sync more quickly.
+    &#34;&#34;&#34;
+    info(instructions)
+
+    stations = dict()
+
+    while True:
+        stationID = prompt(&#34;Enter station ID or state abbreviation, empty to stop: &#34;)
+        if stationID == &#39;&#39;: break
+        if len(stationID) == 2:
+            state_abbrev = stationID
+            if yes_no(
+                f&#34;Are you sure you want to fetch from all stations in the state &#39;{state_abbrev}&#39;? &#34; +
+                &#34;This will be very slow!&#34;
+            ):
+                stations = get_state_stations(state_abbrev)
+                break
+
+        url = f&#34;https://api.weather.gov/stations/{stationID}&#34;
+        info = json.loads(requests.get(url).text)
+        try:
+            geo = info[&#39;geometry&#39;]
+        except:
+            geo = None
+        try:
+            name = info[&#39;properties&#39;][&#39;name&#39;].rstrip()
+        except:
+            warn(f&#34;Unable to fetch name for station &#39;{stationID}&#39;. Skipping...&#34;, stack=False)
+            continue
+
+        if not yes_no(f&#34;Is &#39;{name}&#39; a good label for station &#39;{stationID}&#39;?&#34;):
+            name = prompt(f&#34;New label for station &#39;{stationID}&#39;: &#34;)
+
+        stations[stationID] = dict()
+        stations[stationID][&#39;name&#39;] = name
+        if geo is not None: stations[stationID][&#39;geometry&#39;] = geo
+
+    pprint(stations)
+    if not yes_no(f&#34;Would you like to register the above stations to pipe &#39;{pipe}&#39;?&#34;):
+        print(&#34;Resetting stations and starting over...&#34;)
+        pipe.parameters[&#39;noaa&#39;][&#39;stations&#39;] = dict()
+        return get_stations(pipe, debug=debug)
+
+    pipe.parameters[&#39;noaa&#39;][&#39;stations&#39;] = stations
+    pipe.edit(interactive=False, debug=debug)
+    return stations</code></pre>
+</details>
+</dd>
+<dt id="meerschaum.actions.plugins.plugins.noaa.sync"><code class="name flex">
+<span>def <span class="ident">sync</span></span>(<span>pipe: "'<a title="meerschaum.Pipe" href="../../../../Pipe/index.html">meerschaum.Pipe</a>'", debug: bool = False, blocking: bool = True, workers: int = None, **kw) ‑> tuple</span>
+</code></dt>
+<dd>
+<div class="desc"><p>Fetch JSON data from NOAA and sync it into a Pipe.
+Overrides the default Meerschaum sync function.</p></div>
+<details class="source">
+<summary>
+<span>Expand source code</span>
+</summary>
+<pre><code class="python">def sync(
+        pipe : &#39;meerschaum.Pipe&#39;,
+        debug : bool = False,
+        blocking : bool = True,
+        workers : int = None,
+        **kw
+    ) -&gt; tuple:
+    &#34;&#34;&#34;
+    Fetch JSON data from NOAA and sync it into a Pipe.
+    Overrides the default Meerschaum sync function.
+    &#34;&#34;&#34;
+    from meerschaum.utils.debug import dprint
+    from meerschaum.utils.warnings import warn, info
+    from meerschaum.utils.pool import get_pool
+
+    ### Specify the columns in case Pipe is not registered.
+    ### NOTE: Normally the Pipe&#39;s columns&#39; types are determined by the first dataframe encountered.
+    ###       In this script, we cast everything to floats to avoid integers.
+    if not pipe.columns:
+        pipe.columns = {
+            &#34;datetime&#34; : &#34;timestamp&#34;,
+            &#34;id&#34; : &#34;station&#34;,
+        }
+        pipe.edit(interactive=False, debug=debug)
+
+    ### dictionary of NOAA weather stations and names
+    stations = get_stations(pipe, debug=debug)
+    if workers is None: workers = int(len(stations) / 2) + 1
+
+    ### Fetch data from the stations.
+    pool = get_pool(&#39;ThreadPool&#39;, workers=workers)
+    args = [(stationID, info, pipe) for stationID, info in stations.items()]
+    dataframes = dict(pool.starmap(do_fetch, args))
+    print(dataframes)
+    pool.close(); pool.join()
+
+    ### only keep the common columns (skipping empty dataframes)
+    common_cols = None
+    for stationID, df in dataframes.items():
+        if df is None: continue
+        #  print(df)
+        if len(df.columns) == 0: continue
+        #  df.rename(columns=(lambda x : x.lstrip().rstrip()), inplace=True)
+        if common_cols is None:
+            common_cols = list(set(df.columns))
+            continue
+        try:
+            common_cols = list(set(common_cols) &amp; set(df.columns))
+        except Exception as e:
+            warn(str(e))
+    ### Make empty set in case all dataframes are empty.
+    if common_cols is None: common_cols = list()
+    ### Pandas needs the columns to be in the same order, so sort the columns.
+    common_cols.sort()
+
+    ### Cast all but these columns to floats.
+    non_float_cols = sorted(list({&#39;label&#39;, &#39;timestamp&#39;, &#39;station&#39;, &#39;location&#39;, &#39;geometry&#39;}))
+    float_cols = sorted(list(set(common_cols) - set(non_float_cols)))
+
+    ### Cast the value columns to floats to avoid integers.
+    _dataframes = dict()
+    for stationID, df in dataframes.items():
+        if df is not None:
+            try:
+                ### Only keep commons columns and ensure they are sorted.
+                if debug: dprint(f&#34;Common columns: {common_cols}&#34;)
+                df = df[common_cols]
+                df[float_cols] = df[float_cols].astype(&#39;float&#39;)
+            except Exception as e:
+                if debug: warn(str(e))
+                warn(f&#34;Unable to parse data from station &#39;{stationID}&#39; ({stations[stationID][&#39;name&#39;]})&#34;, stack=False)
+                df = None
+            _dataframes[stationID] = df
+    dataframes = _dataframes
+
+    ### Make sure Pipe exists.
+    ### Normally this is handled when syncing for the first time, but threading breaks things.
+    if not pipe.exists(debug=debug):
+        for stationID, df in dataframes.items():
+            if df is not None:
+                if len(df) &gt; 0:
+                    pipe.sync(df.head(1), force=True, debug=debug)
+                    break
+
+    ### Finally, time to sync the dataframes.
+    ### pipe.sync returns a tuple of success bool and message.
+    ### E.g. (True, &#34;Success&#34;) or (False, &#34;Error message&#34;)
+    success_dict = dict()
+    for stationID, df in dataframes.items():
+        info(f&#34;Syncing data from station &#39;{stationID}&#39; ({stations[stationID][&#39;name&#39;]})...&#34;)
+        success = pipe.sync(
+            df,
+            blocking = blocking,
+            workers = workers,
+            check_existing = True,
+            force = True,
+            debug = debug
+        )[0] if df is not None else False
+        success_dict[stationID] = success
+
+    succeeded, failed = 0, 0
+    for stationID, success in success_dict.items():
+        if not success:
+            warn(f&#34;Failed to sync from station &#39;{stationID}&#39; ({stations[stationID][&#39;name&#39;]})&#34;, stack=False)
+            failed += 1
+        else:
+            succeeded += 1
+
+    return (succeeded &gt; 0), f&#34;Synced from {succeeded + failed} stations, {failed} failed.&#34;</code></pre>
+</details>
+</dd>
+</dl>
+</section>
+<section>
+</section>
+</article>
+<nav id="sidebar">
+<h1>Index</h1>
+<div class="toc">
+<ul></ul>
+</div>
+<ul id="index">
+<li><h3>Super-module</h3>
+<ul>
+<li><code><a title="meerschaum.actions.plugins.plugins" href="../index.html">meerschaum.actions.plugins.plugins</a></code></li>
+</ul>
+</li>
+<li><h3><a href="#header-functions">Functions</a></h3>
+<ul class="">
+<li><code><a title="meerschaum.actions.plugins.plugins.noaa.do_fetch" href="#meerschaum.actions.plugins.plugins.noaa.do_fetch">do_fetch</a></code></li>
+<li><code><a title="meerschaum.actions.plugins.plugins.noaa.fetch_station_data" href="#meerschaum.actions.plugins.plugins.noaa.fetch_station_data">fetch_station_data</a></code></li>
+<li><code><a title="meerschaum.actions.plugins.plugins.noaa.get_state_stations" href="#meerschaum.actions.plugins.plugins.noaa.get_state_stations">get_state_stations</a></code></li>
+<li><code><a title="meerschaum.actions.plugins.plugins.noaa.get_stations" href="#meerschaum.actions.plugins.plugins.noaa.get_stations">get_stations</a></code></li>
+<li><code><a title="meerschaum.actions.plugins.plugins.noaa.sync" href="#meerschaum.actions.plugins.plugins.noaa.sync">sync</a></code></li>
+</ul>
+</li>
+</ul>
+</nav>
+</main>
+<footer id="footer">
+<p>Generated by <a href="https://pdoc3.github.io/pdoc"><cite>pdoc</cite> 0.9.2</a>.</p>
+</footer>
+</body>
+</html>

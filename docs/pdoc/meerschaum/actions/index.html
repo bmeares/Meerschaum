@@ -35,30 +35,36 @@
 Default actions available to the mrsm CLI.
 &#34;&#34;&#34;
 
+from __future__ import annotations
+from meerschaum.utils.typing import Callable, Any, Optional, Union, List
 from meerschaum.utils.packages import get_modules_from_package
 from meerschaum.utils.misc import add_method_to_class
 from meerschaum.utils.warnings import enable_depreciation_warnings
 enable_depreciation_warnings(__name__)
+_shell = None
+_custom_actions = []
 
 ### build __all__ from other .py files in this package
 import sys
 __all__, modules = get_modules_from_package(sys.modules[__name__], names=True)
 
 ### append the plugins modules
-from meerschaum.config._paths import (
-    RESOURCES_PATH, PLUGINS_RESOURCES_PATH, PLUGINS_ARCHIVES_RESOURCES_PATH
-)
-if str(RESOURCES_PATH) not in sys.path: sys.path.append(str(RESOURCES_PATH))
-if str(RESOURCES_PATH) not in __path__: __path__.append(str(RESOURCES_PATH))
-import plugins
-_plugins_names, plugins_modules = get_modules_from_package(
-    plugins,
-    names = True,
-    recursive = True,
-    modules_venvs = True
-)
-__all__ += _plugins_names
-modules += plugins_modules
+#  from meerschaum.config._paths import (
+    #  RESOURCES_PATH, PLUGINS_RESOURCES_PATH, PLUGINS_ARCHIVES_RESOURCES_PATH
+#  )
+#  if str(RESOURCES_PATH) not in sys.path: sys.path.append(str(RESOURCES_PATH))
+#  if str(RESOURCES_PATH) not in __path__: __path__.append(str(RESOURCES_PATH))
+#  import plugins
+#  from plugins import testing
+#  help(testing)
+#  _plugins_names, plugins_modules = get_modules_from_package(
+    #  plugins,
+    #  names = True,
+    #  recursive = True,
+    #  modules_venvs = True
+#  )
+#  __all__ += _plugins_names
+#  modules += plugins_modules
 
 
 ### build the actions dictionary by importing all
@@ -97,23 +103,28 @@ for module in modules:
         )
     )
 
-
 from meerschaum.actions._entry import _entry as entry
-shell = None
-def get_shell(sysargs : list = []):
+def get_shell(sysargs : List[str] = [], debug : bool = False):
     &#34;&#34;&#34;
     Lazy load the Shell
     &#34;&#34;&#34;
-    global shell
+    global _shell
+    from meerschaum.utils.debug import dprint
 
-    if shell is None:
-        from meerschaum.actions.shell import Shell
+    if _shell is None:
+        if debug: dprint(&#34;Loading the shell...&#34;)
+        import meerschaum.actions.shell as shell_pkg
         for a, f in actions.items():
-            add_method_to_class(func=f, class_def=Shell, method_name=&#39;do_&#39; + a)
+            add_method_to_class(func=f, class_def=shell_pkg.Shell, method_name=&#39;do_&#39; + a)
 
-        shell = Shell(actions, sysargs=sysargs)
+        _shell = shell_pkg.Shell(actions, sysargs=sysargs)
 
-    return shell</code></pre>
+    return _shell
+
+from meerschaum.actions.plugins import make_action, load_plugins, import_plugins
+plugins = import_plugins()
+__pdoc__ = {&#39;plugins&#39; : False}
+load_plugins()</code></pre>
 </details>
 </section>
 <section>
@@ -161,10 +172,6 @@ if not handled appropriately!</p></div>
 <dd>
 <div class="desc"><p>Open subprocesses and read their output</p></div>
 </dd>
-<dt><code class="name"><a title="meerschaum.actions.plugins" href="plugins/index.html">meerschaum.actions.plugins</a></code></dt>
-<dd>
-<div class="desc"></div>
-</dd>
 <dt><code class="name"><a title="meerschaum.actions.python" href="python.html">meerschaum.actions.python</a></code></dt>
 <dd>
 <div class="desc"><p>Similar to the <code><a title="meerschaum.actions.bash" href="bash.html">meerschaum.actions.bash</a></code> action, run Python commands from the Meerschaum shell</p></div>
@@ -196,10 +203,6 @@ if not handled appropriately!</p></div>
 <dt><code class="name"><a title="meerschaum.actions.upgrade" href="upgrade.html">meerschaum.actions.upgrade</a></code></dt>
 <dd>
 <div class="desc"><p>Upgrade your current Meerschaum environment</p></div>
-</dd>
-<dt><code class="name"><a title="meerschaum.actions.venvs" href="venvs/index.html">meerschaum.actions.venvs</a></code></dt>
-<dd>
-<div class="desc"></div>
 </dd>
 </dl>
 </section>
@@ -233,7 +236,6 @@ if not handled appropriately!</p></div>
 <li><code><a title="meerschaum.actions.edit" href="edit.html">meerschaum.actions.edit</a></code></li>
 <li><code><a title="meerschaum.actions.install" href="install.html">meerschaum.actions.install</a></code></li>
 <li><code><a title="meerschaum.actions.os" href="os.html">meerschaum.actions.os</a></code></li>
-<li><code><a title="meerschaum.actions.plugins" href="plugins/index.html">meerschaum.actions.plugins</a></code></li>
 <li><code><a title="meerschaum.actions.python" href="python.html">meerschaum.actions.python</a></code></li>
 <li><code><a title="meerschaum.actions.register" href="register.html">meerschaum.actions.register</a></code></li>
 <li><code><a title="meerschaum.actions.shell" href="shell/index.html">meerschaum.actions.shell</a></code></li>
@@ -242,7 +244,6 @@ if not handled appropriately!</p></div>
 <li><code><a title="meerschaum.actions.stack" href="stack.html">meerschaum.actions.stack</a></code></li>
 <li><code><a title="meerschaum.actions.sync" href="sync.html">meerschaum.actions.sync</a></code></li>
 <li><code><a title="meerschaum.actions.upgrade" href="upgrade.html">meerschaum.actions.upgrade</a></code></li>
-<li><code><a title="meerschaum.actions.venvs" href="venvs/index.html">meerschaum.actions.venvs</a></code></li>
 </ul>
 </li>
 </ul>
