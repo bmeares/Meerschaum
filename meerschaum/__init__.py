@@ -7,12 +7,15 @@ from meerschaum.config import __version__
 from meerschaum._internal.docs import index as __doc__
 
 from meerschaum.utils.packages import lazy_import
-actions = lazy_import('meerschaum.actions')
-connectors = lazy_import('meerschaum.connectors')
-utils = lazy_import('meerschaum.utils')
-config = lazy_import('meerschaum.config')
-Pipe = lazy_import('meerschaum.Pipe').Pipe
-api = lazy_import('meerschaum.api')
-get_pipes = utils.get_pipes
-get_connector = connectors.get_connector
+#  actions = lazy_import('meerschaum.actions')
+#  connectors = lazy_import('meerschaum.connectors')
+#  utils = lazy_import('meerschaum.utils')
+#  config = lazy_import('meerschaum.config')
+#  Pipe = lazy_import('meerschaum.Pipe').Pipe
+from meerschaum.Pipe import Pipe
+#  api = lazy_import('meerschaum.api')
+#  get_pipes = utils.get_pipes
+from meerschaum.utils import get_pipes
+from meerschaum.connectors import get_connector
+#  get_connector = connectors.get_connector
 

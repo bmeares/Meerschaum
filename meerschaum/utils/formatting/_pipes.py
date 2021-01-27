@@ -15,11 +15,12 @@ def pprint_pipes(pipes : dict):
     so things *shouldn't* break.
     """
     from meerschaum.utils.warnings import error
-    from meerschaum.utils.packages import attempt_import
+    from meerschaum.utils.packages import attempt_import, import_rich
     from meerschaum.utils.misc import sorted_dict, replace_pipes_in_dict
     from meerschaum.utils.formatting import UNICODE, ANSI, pprint, colored
     import copy
-    rich = attempt_import('rich', warn=False)
+    #  rich = attempt_import('rich', warn=False)
+    rich = import_rich('rich', warn=False)
     Text = None
     if rich is not None:
         from rich.text import Text

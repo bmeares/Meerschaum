@@ -653,7 +653,7 @@ def metadata(self):
 </details>
 </dd>
 <dt id="meerschaum.connectors.sql.SQLConnector.SQLConnector.delete_user"><code class="name flex">
-<span>def <span class="ident">delete_user</span></span>(<span>self, user: meerschaum._internal.User, debug: bool = False) ‑> SuccessTuple</span>
+<span>def <span class="ident">delete_user</span></span>(<span>self, user: meerschaum._internal.User.User, debug: bool = False) ‑> SuccessTuple</span>
 </code></dt>
 <dd>
 <div class="desc"></div>
@@ -663,7 +663,7 @@ def metadata(self):
 </summary>
 <pre><code class="python">def delete_user(
         self,
-        user : meerschaum._internal.User,
+        user : meerschaum._internal.User.User,
         debug : bool = False
     ) -&gt; SuccessTuple:
     ### ensure users table exists
@@ -794,7 +794,7 @@ Otherwise overwrite the parameters (default).</p>
 </details>
 </dd>
 <dt id="meerschaum.connectors.sql.SQLConnector.SQLConnector.edit_user"><code class="name flex">
-<span>def <span class="ident">edit_user</span></span>(<span>self, user: meerschaum._internal.User, debug: bool = False, **kw: Any) ‑> SuccessTuple</span>
+<span>def <span class="ident">edit_user</span></span>(<span>self, user: meerschaum._internal.User.User, debug: bool = False, **kw: Any) ‑> SuccessTuple</span>
 </code></dt>
 <dd>
 <div class="desc"><p>Update an existing user</p></div>
@@ -804,7 +804,7 @@ Otherwise overwrite the parameters (default).</p>
 </summary>
 <pre><code class="python">def edit_user(
         self,
-        user : meerschaum._internal.User,
+        user : meerschaum._internal.User.User,
         debug : bool = False,
         **kw : Any
     ) -&gt; SuccessTuple:
@@ -1354,7 +1354,7 @@ Upper bound for the query (inclusive)</p></div>
 </details>
 </dd>
 <dt id="meerschaum.connectors.sql.SQLConnector.SQLConnector.get_plugin_attributes"><code class="name flex">
-<span>def <span class="ident">get_plugin_attributes</span></span>(<span>self, plugin: "'meerschaum._internal.Plugin'", debug: bool = False) ‑> dict</span>
+<span>def <span class="ident">get_plugin_attributes</span></span>(<span>self, plugin: "'meerschaum._internal.Plugin.Plugin'", debug: bool = False) ‑> dict</span>
 </code></dt>
 <dd>
 <div class="desc"></div>
@@ -1364,7 +1364,7 @@ Upper bound for the query (inclusive)</p></div>
 </summary>
 <pre><code class="python">def get_plugin_attributes(
         self,
-        plugin : &#39;meerschaum._internal.Plugin&#39;,
+        plugin : &#39;meerschaum._internal.Plugin.Plugin&#39;,
         debug : bool = False
     ) -&gt; dict:
     ### ensure plugins table exists
@@ -1379,7 +1379,7 @@ Upper bound for the query (inclusive)</p></div>
 </details>
 </dd>
 <dt id="meerschaum.connectors.sql.SQLConnector.SQLConnector.get_plugin_id"><code class="name flex">
-<span>def <span class="ident">get_plugin_id</span></span>(<span>self, plugin: "'meerschaum._internal.Plugin'", debug: bool = False) ‑> Union[int, NoneType]</span>
+<span>def <span class="ident">get_plugin_id</span></span>(<span>self, plugin: "'meerschaum._internal.Plugin.Plugin'", debug: bool = False) ‑> Union[int, NoneType]</span>
 </code></dt>
 <dd>
 <div class="desc"></div>
@@ -1389,7 +1389,7 @@ Upper bound for the query (inclusive)</p></div>
 </summary>
 <pre><code class="python">def get_plugin_id(
         self,
-        plugin : &#39;meerschaum._internal.Plugin&#39;,
+        plugin : &#39;meerschaum._internal.Plugin.Plugin&#39;,
         debug : bool = False
     ) -&gt; Optional[int]:
     ### ensure plugins table exists
@@ -1407,7 +1407,7 @@ Upper bound for the query (inclusive)</p></div>
 </details>
 </dd>
 <dt id="meerschaum.connectors.sql.SQLConnector.SQLConnector.get_plugin_user_id"><code class="name flex">
-<span>def <span class="ident">get_plugin_user_id</span></span>(<span>self, plugin: "'meerschaum._internal.Plugin'", debug: bool = False) ‑> Union[int, NoneType]</span>
+<span>def <span class="ident">get_plugin_user_id</span></span>(<span>self, plugin: "'meerschaum._internal.Plugin.Plugin'", debug: bool = False) ‑> Union[int, NoneType]</span>
 </code></dt>
 <dd>
 <div class="desc"></div>
@@ -1417,7 +1417,7 @@ Upper bound for the query (inclusive)</p></div>
 </summary>
 <pre><code class="python">def get_plugin_user_id(
         self,
-        plugin : &#39;meerschaum._internal.Plugin&#39;,
+        plugin : &#39;meerschaum._internal.Plugin.Plugin&#39;,
         debug : bool = False
     ) -&gt; Optional[int]:
     ### ensure plugins table exists
@@ -1435,7 +1435,7 @@ Upper bound for the query (inclusive)</p></div>
 </details>
 </dd>
 <dt id="meerschaum.connectors.sql.SQLConnector.SQLConnector.get_plugin_username"><code class="name flex">
-<span>def <span class="ident">get_plugin_username</span></span>(<span>self, plugin: "'meerschaum._internal.Plugin'", debug: bool = False) ‑> str</span>
+<span>def <span class="ident">get_plugin_username</span></span>(<span>self, plugin: "'meerschaum._internal.Plugin.Plugin'", debug: bool = False) ‑> str</span>
 </code></dt>
 <dd>
 <div class="desc"></div>
@@ -1445,7 +1445,7 @@ Upper bound for the query (inclusive)</p></div>
 </summary>
 <pre><code class="python">def get_plugin_username(
         self,
-        plugin : &#39;meerschaum._internal.Plugin&#39;,
+        plugin : &#39;meerschaum._internal.Plugin.Plugin&#39;,
         debug : bool = False
     ) -&gt; str:
     ### ensure plugins table exists
@@ -1473,7 +1473,7 @@ Upper bound for the query (inclusive)</p></div>
 </details>
 </dd>
 <dt id="meerschaum.connectors.sql.SQLConnector.SQLConnector.get_plugin_version"><code class="name flex">
-<span>def <span class="ident">get_plugin_version</span></span>(<span>self, plugin: "'meerschaum._internal.Plugin'", debug: bool = False) ‑> str</span>
+<span>def <span class="ident">get_plugin_version</span></span>(<span>self, plugin: "'meerschaum._internal.Plugin.Plugin'", debug: bool = False) ‑> str</span>
 </code></dt>
 <dd>
 <div class="desc"></div>
@@ -1483,7 +1483,7 @@ Upper bound for the query (inclusive)</p></div>
 </summary>
 <pre><code class="python">def get_plugin_version(
         self,
-        plugin : &#39;meerschaum._internal.Plugin&#39;,
+        plugin : &#39;meerschaum._internal.Plugin.Plugin&#39;,
         debug : bool = False
     ) -&gt; str:
     ### ensure plugins table exists
@@ -1583,7 +1583,7 @@ Upper bound for the query (inclusive)</p></div>
 </details>
 </dd>
 <dt id="meerschaum.connectors.sql.SQLConnector.SQLConnector.get_user_id"><code class="name flex">
-<span>def <span class="ident">get_user_id</span></span>(<span>self, user: meerschaum._internal.User, debug: bool = False) ‑> Optional[int]</span>
+<span>def <span class="ident">get_user_id</span></span>(<span>self, user: meerschaum._internal.User.User, debug: bool = False) ‑> Optional[int]</span>
 </code></dt>
 <dd>
 <div class="desc"></div>
@@ -1593,7 +1593,7 @@ Upper bound for the query (inclusive)</p></div>
 </summary>
 <pre><code class="python">def get_user_id(
         self,
-        user : meerschaum._internal.User,
+        user : meerschaum._internal.User.User,
         debug : bool = False
     ) -&gt; Optional[int]:
     ### ensure users table exists
@@ -1613,7 +1613,7 @@ Upper bound for the query (inclusive)</p></div>
 </details>
 </dd>
 <dt id="meerschaum.connectors.sql.SQLConnector.SQLConnector.get_user_password_hash"><code class="name flex">
-<span>def <span class="ident">get_user_password_hash</span></span>(<span>self, user: meerschaum._internal.User, debug: bool = False, **kw: Any) ‑> str</span>
+<span>def <span class="ident">get_user_password_hash</span></span>(<span>self, user: meerschaum._internal.User.User, debug: bool = False, **kw: Any) ‑> str</span>
 </code></dt>
 <dd>
 <div class="desc"><p>Return a user's password hash</p></div>
@@ -1623,7 +1623,7 @@ Upper bound for the query (inclusive)</p></div>
 </summary>
 <pre><code class="python">def get_user_password_hash(
         self,
-        user : meerschaum._internal.User,
+        user : meerschaum._internal.User.User,
         debug : bool = False,
         **kw : Any
     ) -&gt; str:
@@ -1651,7 +1651,7 @@ Upper bound for the query (inclusive)</p></div>
 </details>
 </dd>
 <dt id="meerschaum.connectors.sql.SQLConnector.SQLConnector.get_user_type"><code class="name flex">
-<span>def <span class="ident">get_user_type</span></span>(<span>self, user: meerschaum._internal.User, debug: bool = False, **kw: Any) ‑> Optional[str]</span>
+<span>def <span class="ident">get_user_type</span></span>(<span>self, user: meerschaum._internal.User.User, debug: bool = False, **kw: Any) ‑> Optional[str]</span>
 </code></dt>
 <dd>
 <div class="desc"><p>Return a user's type</p></div>
@@ -1661,7 +1661,7 @@ Upper bound for the query (inclusive)</p></div>
 </summary>
 <pre><code class="python">def get_user_type(
         self,
-        user : meerschaum._internal.User,
+        user : meerschaum._internal.User.User,
         debug : bool = False,
         **kw : Any
     ) -&gt; Optional[str]:
@@ -1891,7 +1891,7 @@ A pipe's attributes must be set before registering.</p></div>
 </details>
 </dd>
 <dt id="meerschaum.connectors.sql.SQLConnector.SQLConnector.register_plugin"><code class="name flex">
-<span>def <span class="ident">register_plugin</span></span>(<span>self, plugin: "'meerschaum._internal.Plugin'", debug: bool = False, **kw) ‑> tuple</span>
+<span>def <span class="ident">register_plugin</span></span>(<span>self, plugin: "'meerschaum._internal.Plugin.Plugin'", debug: bool = False, **kw) ‑> tuple</span>
 </code></dt>
 <dd>
 <div class="desc"><p>Register a new plugin</p></div>
@@ -1901,7 +1901,7 @@ A pipe's attributes must be set before registering.</p></div>
 </summary>
 <pre><code class="python">def register_plugin(
         self,
-        plugin : &#39;meerschaum._internal.Plugin&#39;,
+        plugin : &#39;meerschaum._internal.Plugin.Plugin&#39;,
         debug : bool = False,
         **kw
     ) -&gt; tuple:
@@ -1955,7 +1955,7 @@ A pipe's attributes must be set before registering.</p></div>
 </details>
 </dd>
 <dt id="meerschaum.connectors.sql.SQLConnector.SQLConnector.register_user"><code class="name flex">
-<span>def <span class="ident">register_user</span></span>(<span>self, user: meerschaum._internal.User, debug: bool = False, **kw: Any) ‑> SuccessTuple</span>
+<span>def <span class="ident">register_user</span></span>(<span>self, user: meerschaum._internal.User.User, debug: bool = False, **kw: Any) ‑> SuccessTuple</span>
 </code></dt>
 <dd>
 <div class="desc"><p>Register a new user</p></div>
@@ -1965,7 +1965,7 @@ A pipe's attributes must be set before registering.</p></div>
 </summary>
 <pre><code class="python">def register_user(
         self,
-        user : meerschaum._internal.User,
+        user : meerschaum._internal.User.User,
         debug : bool = False,
         **kw : Any
     ) -&gt; SuccessTuple:

@@ -149,9 +149,11 @@ def error(
     """
     Raise an error with custom Meerschaum formatting
     """
-    from meerschaum.utils.formatting import CHARSET, ANSI, colored, pprint, console, rich_traceback
+    from meerschaum.utils.formatting import CHARSET, ANSI, colored, pprint, get_console
+    from meerschaum.utils.packages import import_rich
     from meerschaum.config import config as cf, get_config
     import types, sys, inspect
+    rich = import_rich()
     error_config = get_config('system', 'errors', patch=True)
     message = ' ' + error_config[CHARSET]['icon'] + ' ' + str(message)
     exception = exception_with_traceback(message, exception_class, stacklevel=3)
@@ -161,14 +163,15 @@ def error(
         color_message = '\n' + colored(message, *error_config['ansi']['color'])
         color_exception = exception_with_traceback(color_message, exception_class, stacklevel=3)
     try:
-        trace = rich_traceback.Traceback.extract(exception_class, exception, exception.__traceback__)
-        rtb = rich_traceback.Traceback(trace)
+        trace = rich.traceback.Traceback.extract(exception_class, exception, exception.__traceback__)
+        rtb = rich.traceback.Traceback(trace)
     except:
         trace, rtb = None, None
     if trace is None or rtb is None:
         nopretty = True
     if not nopretty and stack:
-        console.print(rtb)
+        if get_console() is not None:
+            get_console().print(rtb)
     frame = sys._getframe(len(inspect.stack()) - 1)
     #  sys.tracebacklimit = 0
     #  help(sys.excepthook)

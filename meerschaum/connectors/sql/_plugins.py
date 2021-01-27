@@ -11,7 +11,7 @@ from meerschaum.utils.typing import Optional
 
 def register_plugin(
         self,
-        plugin : 'meerschaum._internal.Plugin',
+        plugin : 'meerschaum._internal.Plugin.Plugin',
         debug : bool = False,
         **kw
     ) -> tuple:
@@ -65,7 +65,7 @@ def register_plugin(
 
 def get_plugin_id(
         self,
-        plugin : 'meerschaum._internal.Plugin',
+        plugin : 'meerschaum._internal.Plugin.Plugin',
         debug : bool = False
     ) -> Optional[int]:
     ### ensure plugins table exists
@@ -83,7 +83,7 @@ def get_plugin_id(
 
 def get_plugin_version(
         self,
-        plugin : 'meerschaum._internal.Plugin',
+        plugin : 'meerschaum._internal.Plugin.Plugin',
         debug : bool = False
     ) -> str:
     ### ensure plugins table exists
@@ -98,7 +98,7 @@ def get_plugin_version(
 
 def get_plugin_user_id(
         self,
-        plugin : 'meerschaum._internal.Plugin',
+        plugin : 'meerschaum._internal.Plugin.Plugin',
         debug : bool = False
     ) -> Optional[int]:
     ### ensure plugins table exists
@@ -116,7 +116,7 @@ def get_plugin_user_id(
 
 def get_plugin_username(
         self,
-        plugin : 'meerschaum._internal.Plugin',
+        plugin : 'meerschaum._internal.Plugin.Plugin',
         debug : bool = False
     ) -> str:
     ### ensure plugins table exists
@@ -144,7 +144,7 @@ def get_plugin_username(
 
 def get_plugin_attributes(
         self,
-        plugin : 'meerschaum._internal.Plugin',
+        plugin : 'meerschaum._internal.Plugin.Plugin',
         debug : bool = False
     ) -> dict:
     ### ensure plugins table exists

@@ -9,7 +9,6 @@ Default actions available to the mrsm CLI.
 from __future__ import annotations
 from meerschaum.utils.typing import Callable, Any, Optional, Union, List
 from meerschaum.utils.packages import get_modules_from_package
-from meerschaum.utils.misc import add_method_to_class
 from meerschaum.utils.warnings import enable_depreciation_warnings
 enable_depreciation_warnings(__name__)
 _shell = None
@@ -84,10 +83,10 @@ def get_shell(sysargs : List[str] = [], debug : bool = False):
 
     if _shell is None:
         if debug: dprint("Loading the shell...")
+        from meerschaum.utils.misc import add_method_to_class
         import meerschaum.actions.shell as shell_pkg
         for a, f in actions.items():
             add_method_to_class(func=f, class_def=shell_pkg.Shell, method_name='do_' + a)
-        #  delattr(shell_pkg.Shell, '_alias_create')
 
         _shell = shell_pkg.Shell(actions, sysargs=sysargs)
 
@@ -96,4 +95,4 @@ def get_shell(sysargs : List[str] = [], debug : bool = False):
 from meerschaum.actions.plugins import make_action, load_plugins, import_plugins
 plugins = import_plugins()
 __pdoc__ = {'plugins' : False}
-load_plugins()
+load_plugins(debug=True)

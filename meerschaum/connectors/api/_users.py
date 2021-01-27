@@ -25,7 +25,7 @@ def login(
     Log in and set the session token
     """
     from meerschaum.utils.warnings import warn, info, error
-    from meerschaum._internal import User
+    from meerschaum._internal.User import User
     import json, datetime
     try:
         login_data = {
@@ -56,7 +56,7 @@ def login(
 
 def edit_user(
         self,
-        user : 'meerschaum._internal.User',
+        user : 'meerschaum._internal.User.User',
         debug : bool = False,
         **kw
     ) -> tuple:
@@ -82,7 +82,7 @@ def edit_user(
 
 def register_user(
         self,
-        user : 'meerschaum._internal.User',
+        user : 'meerschaum._internal.User.User',
         debug : bool = False,
         **kw
     ) -> tuple:
@@ -108,7 +108,7 @@ def register_user(
     
 def get_user_id(
         self,
-        user : 'meerschaum._internal.User',
+        user : 'meerschaum._internal.User.User',
         debug : bool = False,
         **kw
     ) -> int:
@@ -126,7 +126,7 @@ def get_user_id(
 
 def delete_user(
         self,
-        user : 'meerschaum._internal.User',
+        user : 'meerschaum._internal.User.User',
         debug : bool = False,
         **kw
     ) -> tuple:

@@ -28,14 +28,14 @@ def make_action(
     >>> 
     ```
     """
-    import meerschaum.actions
+    from meerschaum.actions import __all__ as _all, actions
     global __all__, actions
-    import meerschaum.actions.shell as shell_pkg
+    #  import meerschaum.actions.shell as shell_pkg
     from meerschaum.utils.formatting import pprint
     from meerschaum.utils.misc import add_method_to_class
-    if function.__name__ not in meerschaum.actions.__all__:
-        meerschaum.actions.__all__.append(function.__name__)
-    meerschaum.actions.actions[function.__name__] = function
+    if function.__name__ not in _all:
+        _all.append(function.__name__)
+    actions[function.__name__] = function
     #  add_method_to_class(function, shell_pkg.Shell)
     #  if shell and meerschaum.actions._shell is not None:
         #  add_method_to_class(function, meerschaum.actions.get_shell(debug=debug), 'do_' + function.__name__)
@@ -65,7 +65,8 @@ def import_plugins() -> Optional['ModuleType']:
 def load_plugins(debug : bool = False, shell : bool = False):
     ### append the plugins modules
     from inspect import isfunction, getmembers
-    import meerschaum.actions
+    #  import meerschaum.actions as actions_mod
+    from meerschaum.actions import __all__ as _all, modules
     from meerschaum.utils.packages import get_modules_from_package
     _plugins_names, plugins_modules = get_modules_from_package(
         import_plugins(),
@@ -73,8 +74,10 @@ def load_plugins(debug : bool = False, shell : bool = False):
         recursive = True,
         modules_venvs = True
     )
-    meerschaum.actions.__all__ += _plugins_names
-    meerschaum.actions.modules += plugins_modules
+    _all += _plugins_names
+    #  actions_mod.__all__ += _plugins_names
+    #  actions_mod.modules += plugins_modules
+    modules += plugins_modules
     for module in plugins_modules:
         for name, func in getmembers(module):
             if not isfunction(func): continue

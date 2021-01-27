@@ -351,9 +351,11 @@ Defaults to True.</p></div>
     &#34;&#34;&#34;
     Raise an error with custom Meerschaum formatting
     &#34;&#34;&#34;
-    from meerschaum.utils.formatting import CHARSET, ANSI, colored, pprint, console, rich_traceback
+    from meerschaum.utils.formatting import CHARSET, ANSI, colored, pprint, get_console
+    from meerschaum.utils.packages import import_rich
     from meerschaum.config import config as cf, get_config
     import types, sys, inspect
+    rich = import_rich()
     error_config = get_config(&#39;system&#39;, &#39;errors&#39;, patch=True)
     message = &#39; &#39; + error_config[CHARSET][&#39;icon&#39;] + &#39; &#39; + str(message)
     exception = exception_with_traceback(message, exception_class, stacklevel=3)
@@ -363,14 +365,15 @@ Defaults to True.</p></div>
         color_message = &#39;\n&#39; + colored(message, *error_config[&#39;ansi&#39;][&#39;color&#39;])
         color_exception = exception_with_traceback(color_message, exception_class, stacklevel=3)
     try:
-        trace = rich_traceback.Traceback.extract(exception_class, exception, exception.__traceback__)
-        rtb = rich_traceback.Traceback(trace)
+        trace = rich.traceback.Traceback.extract(exception_class, exception, exception.__traceback__)
+        rtb = rich.traceback.Traceback(trace)
     except:
         trace, rtb = None, None
     if trace is None or rtb is None:
         nopretty = True
     if not nopretty and stack:
-        console.print(rtb)
+        if get_console() is not None:
+            get_console().print(rtb)
     frame = sys._getframe(len(inspect.stack()) - 1)
     #  sys.tracebacklimit = 0
     #  help(sys.excepthook)

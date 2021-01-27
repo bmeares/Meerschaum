@@ -28,12 +28,9 @@ from meerschaum.utils.packages import attempt_import
 from meerschaum.utils.warnings import warn
 
 ### init colorama for Windows color output
-colorama, more_termcolor, rich_console, rich_pretty, rich_traceback = attempt_import(
+colorama, more_termcolor = attempt_import(
     'colorama',
     'more_termcolor',
-    'rich.console',
-    'rich.pretty',
-    'rich.traceback',
 )
 
 try:
@@ -94,15 +91,25 @@ if more_termcolor is None:
     colored = colored_fallback
     ANSI, UNICODE, CHARSET = False, False, 'ascii'
 
-try:
-    console = rich_console.Console()
-    #  if ANSI:
-        #  rich_pretty.install()
-        #  rich_traceback.install(console=console, extra_lines=10)
-except:
-    warn(f"Failed to import rich. Ignoring color output...", stack=False)
-    console = None
-    ANSI, UNICODE, CHARSET = False, False, 'ascii'
+console = None
+def get_console():
+    global console
+    from meerschaum.utils.packages import import_rich
+    if not ANSI and not UNICODE:
+        return None
+    rich = import_rich()
+    try:
+        console = rich.console.Console()
+    except:
+        console = None
+    return console
+
+#  try:
+    #  console = rich_console.Console()
+#  except:
+    #  warn(f"Failed to import rich. Ignoring color output...", stack=False)
+    #  console = None
+    #  ANSI, UNICODE, CHARSET = False, False, 'ascii'
 
 def print_tuple(tup : tuple, skip_common : bool = True, common_only : bool = False):
     """

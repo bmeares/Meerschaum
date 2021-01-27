@@ -22,6 +22,7 @@ packages = {
         'colorama'       : 'colorama',
         'rich'           : 'rich>=9.8.0',
         'more_termcolor' : 'more-termcolor',
+        'pygments'       : 'pygments',
     },
     '_required' : {
         'pip'               : 'pip',
