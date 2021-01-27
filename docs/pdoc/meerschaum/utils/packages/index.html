@@ -349,7 +349,7 @@ def lazy_import(
     return LazyLoader(local_name, globals(), name, venv=venv)
 
 
-def import_pandas() -&gt; &#39;module&#39;:
+def import_pandas() -&gt; &#39;ModuleType&#39;:
     &#34;&#34;&#34;
     Quality-of-life function to attempt to import the configured version of pandas
     &#34;&#34;&#34;
@@ -360,6 +360,16 @@ def import_pandas() -&gt; &#39;module&#39;:
         pandas_module_name = &#39;modin.pandas&#39;
     return attempt_import(pandas_module_name)
 
+def import_rich(lazy: bool = True, **kw) -&gt; &#39;ModuleType&#39;:
+    &#34;&#34;&#34;
+    Quality of life function for importing rich.
+    &#34;&#34;&#34;
+    from meerschaum.utils.formatting import ANSI, UNICODE
+    if not ANSI and not UNICODE:
+        return None
+
+    pygments = attempt_import(&#39;pygments&#39;, lazy=False)
+    return attempt_import(&#39;rich&#39;, lazy=lazy, **kw)
 
 def get_modules_from_package(
         package: &#39;package&#39;,
@@ -1041,7 +1051,7 @@ Default : ['method', 'builtin', 'class', 'function', 'package', 'module']</p></d
 </details>
 </dd>
 <dt id="meerschaum.utils.packages.import_pandas"><code class="name flex">
-<span>def <span class="ident">import_pandas</span></span>(<span>) ‑> module</span>
+<span>def <span class="ident">import_pandas</span></span>(<span>) ‑> ModuleType</span>
 </code></dt>
 <dd>
 <div class="desc"><p>Quality-of-life function to attempt to import the configured version of pandas</p></div>
@@ -1049,7 +1059,7 @@ Default : ['method', 'builtin', 'class', 'function', 'package', 'module']</p></d
 <summary>
 <span>Expand source code</span>
 </summary>
-<pre><code class="python">def import_pandas() -&gt; &#39;module&#39;:
+<pre><code class="python">def import_pandas() -&gt; &#39;ModuleType&#39;:
     &#34;&#34;&#34;
     Quality-of-life function to attempt to import the configured version of pandas
     &#34;&#34;&#34;
@@ -1059,6 +1069,27 @@ Default : ['method', 'builtin', 'class', 'function', 'package', 'module']</p></d
     if pandas_module_name == &#39;modin&#39;:
         pandas_module_name = &#39;modin.pandas&#39;
     return attempt_import(pandas_module_name)</code></pre>
+</details>
+</dd>
+<dt id="meerschaum.utils.packages.import_rich"><code class="name flex">
+<span>def <span class="ident">import_rich</span></span>(<span>lazy: bool = True, **kw) ‑> ModuleType</span>
+</code></dt>
+<dd>
+<div class="desc"><p>Quality of life function for importing rich.</p></div>
+<details class="source">
+<summary>
+<span>Expand source code</span>
+</summary>
+<pre><code class="python">def import_rich(lazy: bool = True, **kw) -&gt; &#39;ModuleType&#39;:
+    &#34;&#34;&#34;
+    Quality of life function for importing rich.
+    &#34;&#34;&#34;
+    from meerschaum.utils.formatting import ANSI, UNICODE
+    if not ANSI and not UNICODE:
+        return None
+
+    pygments = attempt_import(&#39;pygments&#39;, lazy=False)
+    return attempt_import(&#39;rich&#39;, lazy=lazy, **kw)</code></pre>
 </details>
 </dd>
 <dt id="meerschaum.utils.packages.install_import_hook"><code class="name flex">
@@ -1512,6 +1543,7 @@ E.g. Translates to <code>/usr/bin/python -m [package]</code></p></div>
 <li><code><a title="meerschaum.utils.packages.get_modules_from_package" href="#meerschaum.utils.packages.get_modules_from_package">get_modules_from_package</a></code></li>
 <li><code><a title="meerschaum.utils.packages.import_children" href="#meerschaum.utils.packages.import_children">import_children</a></code></li>
 <li><code><a title="meerschaum.utils.packages.import_pandas" href="#meerschaum.utils.packages.import_pandas">import_pandas</a></code></li>
+<li><code><a title="meerschaum.utils.packages.import_rich" href="#meerschaum.utils.packages.import_rich">import_rich</a></code></li>
 <li><code><a title="meerschaum.utils.packages.install_import_hook" href="#meerschaum.utils.packages.install_import_hook">install_import_hook</a></code></li>
 <li><code><a title="meerschaum.utils.packages.is_installed" href="#meerschaum.utils.packages.is_installed">is_installed</a></code></li>
 <li><code><a title="meerschaum.utils.packages.is_venv_active" href="#meerschaum.utils.packages.is_venv_active">is_venv_active</a></code></li>

@@ -11,7 +11,7 @@ from meerschaum.utils.typing import Union, SuccessTuple, Any
 import sys, inspect
 from meerschaum.utils.packages import attempt_import
 from meerschaum.config import __doc__, __version__ as version, config as cf, get_config
-cmd = attempt_import(get_config('system', 'shell', 'cmd', patch=True), warn=False, lazy=False)
+cmd = attempt_import(get_config('system', 'shell', 'cmd', patch=True), warn=False, lazy=True)
 if cmd is None or isinstance(cmd, dict):
     cmd = attempt_import('cmd')
 from meerschaum.actions.arguments import parse_line
@@ -54,6 +54,15 @@ class Shell(cmd.Cmd):
         """
         Customize the CLI from configuration
         """
+        #  delattr(cmd.Cmd, '_alias_create')
+        #  delattr(cmd.Cmd, '_alias_delete')
+        #  delattr(cmd.Cmd, '_alias_list')
+        #  delattr(cmd.Cmd, '_macro_create')
+        #  delattr(cmd.Cmd, '_macro_delete')
+        #  delattr(cmd.Cmd, '_macro_list')
+        #  delattr(cmd.Cmd, 'do_alias')
+        #  delattr(cmd.Cmd, 'do_macro')
+
         try: ### try cmd2 arguments first
             super().__init__(
                 allow_cli_args = False,
@@ -275,11 +284,11 @@ class Shell(cmd.Cmd):
         """
         pass
 
-    def do_alias(self, line):
-        pass
+    #  def do_alias(self, line):
+        #  pass
 
-    def do_macro(self, line):
-        pass
+    #  def do_macro(self, line):
+        #  pass
 
     def do_debug(self, action=[''], **kw):
         """

@@ -16,21 +16,23 @@ def pprint(
     If detect_password is True (default), search and replace passwords with '*' characters.
     Does not mutate objects.
     """
-    from meerschaum.utils.packages import attempt_import
-    from meerschaum.utils.formatting import ANSI, UNICODE, console
+    from meerschaum.utils.packages import attempt_import, import_rich
+    from meerschaum.utils.formatting import ANSI, UNICODE
     from meerschaum.utils.warnings import error
     from meerschaum.utils.misc import replace_password, dict_from_od
     from collections import OrderedDict
     import copy
     pprintpp = attempt_import('pprintpp', warn=False)
-    rich_pretty = attempt_import('rich.pretty', warn=False)
+    rich = import_rich()
     try:
         _pprint = pprintpp.pprint
     except:
         import pprint
         _pprint = pprint.pprint
     try:
-        rich_pprint = rich_pretty.pprint
+        if rich is not None:
+            import rich.pretty
+        rich_pprint = rich.pretty.pprint
     except:
         rich_pprint = _pprint
 

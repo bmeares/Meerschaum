@@ -10,7 +10,7 @@ from __future__ import annotations
 from meerschaum.utils.typing import Union, Any, Optional, SuccessTuple, Mapping, Sequence
 
 def plugin_r_url(
-        plugin : Union[meerschaum._internal.Plugin, str]
+        plugin : Union[meerschaum._internal.Plugin.Plugin, str]
     ) -> str:
     """
     Generate a relative URL path from a Pipe's keys.
@@ -19,7 +19,7 @@ def plugin_r_url(
 
 def register_plugin(
         self,
-        plugin : meerschaum._internal.Plugin,
+        plugin : meerschaum._internal.Plugin.Plugin,
         make_archive : bool = True,
         debug : bool = False
     ) -> SuccessTuple:
@@ -62,7 +62,7 @@ def install_plugin(
         The name of the plugin to be installed.
     """
     import os, pathlib
-    from meerschaum._internal import Plugin
+    from meerschaum._internal.Plugin import Plugin
     from meerschaum.config._paths import PLUGINS_TEMP_RESOURCES_PATH
     from meerschaum.utils.debug import dprint
     r_url = plugin_r_url(name)
@@ -92,7 +92,7 @@ def get_plugins(
 
 def get_plugin_attributes(
         self,
-        plugin : meerschaum._internal.Plugin,
+        plugin : meerschaum._internal.Plugin.Plugin,
         debug : bool = False
     ) -> Mapping[str, Any]:
     """

@@ -52,13 +52,8 @@ class LazyLoader(types.ModuleType):
     def _load(self):
         """Load the module and insert it into the parent's globals."""
         from meerschaum.utils.packages import attempt_import
-        #  if self._venv is not None:
-            #  from meerschaum.utils.packages import activate_venv(venv)
-            #  activate_venv(self._venv, debug=self._debug)
-
-        module = attempt_import(self.__name__, venv=self._venv, lazy=False, debug=True)
-
-        module = importlib.import_module(self.__name__)
+        module = attempt_import(self.__name__, venv=self._venv, lazy=False, debug=self._debug)
+        #  module = importlib.import_module(self.__name__)
         self._parent_module_globals[self._local_name] = module
 
         # Update this object's dict so that if someone keeps a reference to the

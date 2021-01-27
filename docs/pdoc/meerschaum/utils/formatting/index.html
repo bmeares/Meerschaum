@@ -57,12 +57,9 @@ from meerschaum.utils.packages import attempt_import
 from meerschaum.utils.warnings import warn
 
 ### init colorama for Windows color output
-colorama, more_termcolor, rich_console, rich_pretty, rich_traceback = attempt_import(
+colorama, more_termcolor = attempt_import(
     &#39;colorama&#39;,
     &#39;more_termcolor&#39;,
-    &#39;rich.console&#39;,
-    &#39;rich.pretty&#39;,
-    &#39;rich.traceback&#39;,
 )
 
 try:
@@ -123,15 +120,25 @@ if more_termcolor is None:
     colored = colored_fallback
     ANSI, UNICODE, CHARSET = False, False, &#39;ascii&#39;
 
-try:
-    console = rich_console.Console()
-    #  if ANSI:
-        #  rich_pretty.install()
-        #  rich_traceback.install(console=console, extra_lines=10)
-except:
-    warn(f&#34;Failed to import rich. Ignoring color output...&#34;, stack=False)
-    console = None
-    ANSI, UNICODE, CHARSET = False, False, &#39;ascii&#39;
+console = None
+def get_console():
+    global console
+    from meerschaum.utils.packages import import_rich
+    if not ANSI and not UNICODE:
+        return None
+    rich = import_rich()
+    try:
+        console = rich.console.Console()
+    except:
+        console = None
+    return console
+
+#  try:
+    #  console = rich_console.Console()
+#  except:
+    #  warn(f&#34;Failed to import rich. Ignoring color output...&#34;, stack=False)
+    #  console = None
+    #  ANSI, UNICODE, CHARSET = False, False, &#39;ascii&#39;
 
 def print_tuple(tup : tuple, skip_common : bool = True, common_only : bool = False):
     &#34;&#34;&#34;
@@ -215,6 +222,28 @@ def print_tuple(tup : tuple, skip_common : bool = True, common_only : bool = Fal
 </summary>
 <pre><code class="python">def colored_fallback(*args, **kw):
     return &#39; &#39;.join(args)</code></pre>
+</details>
+</dd>
+<dt id="meerschaum.utils.formatting.get_console"><code class="name flex">
+<span>def <span class="ident">get_console</span></span>(<span>)</span>
+</code></dt>
+<dd>
+<div class="desc"></div>
+<details class="source">
+<summary>
+<span>Expand source code</span>
+</summary>
+<pre><code class="python">def get_console():
+    global console
+    from meerschaum.utils.packages import import_rich
+    if not ANSI and not UNICODE:
+        return None
+    rich = import_rich()
+    try:
+        console = rich.console.Console()
+    except:
+        console = None
+    return console</code></pre>
 </details>
 </dd>
 <dt id="meerschaum.utils.formatting.print_tuple"><code class="name flex">
@@ -315,6 +344,7 @@ This is probably prone to breaking</p></div>
 <ul class="">
 <li><code><a title="meerschaum.utils.formatting.colored" href="#meerschaum.utils.formatting.colored">colored</a></code></li>
 <li><code><a title="meerschaum.utils.formatting.colored_fallback" href="#meerschaum.utils.formatting.colored_fallback">colored_fallback</a></code></li>
+<li><code><a title="meerschaum.utils.formatting.get_console" href="#meerschaum.utils.formatting.get_console">get_console</a></code></li>
 <li><code><a title="meerschaum.utils.formatting.print_tuple" href="#meerschaum.utils.formatting.print_tuple">print_tuple</a></code></li>
 <li><code><a title="meerschaum.utils.formatting.translate_rich_to_termcolor" href="#meerschaum.utils.formatting.translate_rich_to_termcolor">translate_rich_to_termcolor</a></code></li>
 </ul>

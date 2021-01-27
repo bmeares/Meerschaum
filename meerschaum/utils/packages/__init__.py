@@ -320,7 +320,7 @@ def lazy_import(
     return LazyLoader(local_name, globals(), name, venv=venv)
 
 
-def import_pandas() -> 'module':
+def import_pandas() -> 'ModuleType':
     """
     Quality-of-life function to attempt to import the configured version of pandas
     """
@@ -331,6 +331,16 @@ def import_pandas() -> 'module':
         pandas_module_name = 'modin.pandas'
     return attempt_import(pandas_module_name)
 
+def import_rich(lazy: bool = True, **kw) -> 'ModuleType':
+    """
+    Quality of life function for importing rich.
+    """
+    from meerschaum.utils.formatting import ANSI, UNICODE
+    if not ANSI and not UNICODE:
+        return None
+
+    pygments = attempt_import('pygments', lazy=False)
+    return attempt_import('rich', lazy=lazy, **kw)
 
 def get_modules_from_package(
         package: 'package',

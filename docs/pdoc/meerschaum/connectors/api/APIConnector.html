@@ -324,7 +324,7 @@ def token(self):
 </details>
 </dd>
 <dt id="meerschaum.connectors.api.APIConnector.APIConnector.delete_user"><code class="name flex">
-<span>def <span class="ident">delete_user</span></span>(<span>self, user: meerschaum._internal.User, debug: bool = False, **kw) ‑> tuple</span>
+<span>def <span class="ident">delete_user</span></span>(<span>self, user: meerschaum._internal.User.User, debug: bool = False, **kw) ‑> tuple</span>
 </code></dt>
 <dd>
 <div class="desc"><p>Delete a user</p></div>
@@ -334,7 +334,7 @@ def token(self):
 </summary>
 <pre><code class="python">def delete_user(
         self,
-        user : &#39;meerschaum._internal.User&#39;,
+        user : &#39;meerschaum._internal.User.User&#39;,
         debug : bool = False,
         **kw
     ) -&gt; tuple:
@@ -479,7 +479,7 @@ Returns a tuple of (success_bool, response_dict)</p></div>
 </details>
 </dd>
 <dt id="meerschaum.connectors.api.APIConnector.APIConnector.edit_user"><code class="name flex">
-<span>def <span class="ident">edit_user</span></span>(<span>self, user: meerschaum._internal.User, debug: bool = False, **kw) ‑> tuple</span>
+<span>def <span class="ident">edit_user</span></span>(<span>self, user: meerschaum._internal.User.User, debug: bool = False, **kw) ‑> tuple</span>
 </code></dt>
 <dd>
 <div class="desc"><p>Edit an existing user</p></div>
@@ -489,7 +489,7 @@ Returns a tuple of (success_bool, response_dict)</p></div>
 </summary>
 <pre><code class="python">def edit_user(
         self,
-        user : &#39;meerschaum._internal.User&#39;,
+        user : &#39;meerschaum._internal.User.User&#39;,
         debug : bool = False,
         **kw
     ) -&gt; tuple:
@@ -830,7 +830,7 @@ This is used by the main <code>get_pipes()</code> function for the 'api' method.
 </details>
 </dd>
 <dt id="meerschaum.connectors.api.APIConnector.APIConnector.get_plugin_attributes"><code class="name flex">
-<span>def <span class="ident">get_plugin_attributes</span></span>(<span>self, plugin: meerschaum._internal.Plugin, debug: bool = False) ‑> Mapping[str, Any]</span>
+<span>def <span class="ident">get_plugin_attributes</span></span>(<span>self, plugin: meerschaum._internal.Plugin.Plugin, debug: bool = False) ‑> Mapping[str, Any]</span>
 </code></dt>
 <dd>
 <div class="desc"><p>Return attributes of a registered plugin.</p></div>
@@ -840,7 +840,7 @@ This is used by the main <code>get_pipes()</code> function for the 'api' method.
 </summary>
 <pre><code class="python">def get_plugin_attributes(
         self,
-        plugin : meerschaum._internal.Plugin,
+        plugin : meerschaum._internal.Plugin.Plugin,
         debug : bool = False
     ) -&gt; Mapping[str, Any]:
     &#34;&#34;&#34;
@@ -914,7 +914,7 @@ If specified, return all plugins from a certain user.</p></div>
 </details>
 </dd>
 <dt id="meerschaum.connectors.api.APIConnector.APIConnector.get_user_id"><code class="name flex">
-<span>def <span class="ident">get_user_id</span></span>(<span>self, user: meerschaum._internal.User, debug: bool = False, **kw) ‑> int</span>
+<span>def <span class="ident">get_user_id</span></span>(<span>self, user: meerschaum._internal.User.User, debug: bool = False, **kw) ‑> int</span>
 </code></dt>
 <dd>
 <div class="desc"><p>Get a user's ID</p></div>
@@ -924,7 +924,7 @@ If specified, return all plugins from a certain user.</p></div>
 </summary>
 <pre><code class="python">def get_user_id(
         self,
-        user : &#39;meerschaum._internal.User&#39;,
+        user : &#39;meerschaum._internal.User.User&#39;,
         debug : bool = False,
         **kw
     ) -&gt; int:
@@ -985,7 +985,7 @@ The name of the plugin to be installed.</p></div>
         The name of the plugin to be installed.
     &#34;&#34;&#34;
     import os, pathlib
-    from meerschaum._internal import Plugin
+    from meerschaum._internal.Plugin import Plugin
     from meerschaum.config._paths import PLUGINS_TEMP_RESOURCES_PATH
     from meerschaum.utils.debug import dprint
     r_url = plugin_r_url(name)
@@ -1013,7 +1013,7 @@ The name of the plugin to be installed.</p></div>
     Log in and set the session token
     &#34;&#34;&#34;
     from meerschaum.utils.warnings import warn, info, error
-    from meerschaum._internal import User
+    from meerschaum._internal.User import User
     import json, datetime
     try:
         login_data = {
@@ -1167,7 +1167,7 @@ Returns a tuple of (success_bool, response_dict)</p></div>
 </details>
 </dd>
 <dt id="meerschaum.connectors.api.APIConnector.APIConnector.register_plugin"><code class="name flex">
-<span>def <span class="ident">register_plugin</span></span>(<span>self, plugin: meerschaum._internal.Plugin, make_archive: bool = True, debug: bool = False) ‑> SuccessTuple</span>
+<span>def <span class="ident">register_plugin</span></span>(<span>self, plugin: meerschaum._internal.Plugin.Plugin, make_archive: bool = True, debug: bool = False) ‑> SuccessTuple</span>
 </code></dt>
 <dd>
 <div class="desc"><p>Register a plugin and upload its archive.</p></div>
@@ -1177,7 +1177,7 @@ Returns a tuple of (success_bool, response_dict)</p></div>
 </summary>
 <pre><code class="python">def register_plugin(
         self,
-        plugin : meerschaum._internal.Plugin,
+        plugin : meerschaum._internal.Plugin.Plugin,
         make_archive : bool = True,
         debug : bool = False
     ) -&gt; SuccessTuple:
@@ -1210,7 +1210,7 @@ Returns a tuple of (success_bool, response_dict)</p></div>
 </details>
 </dd>
 <dt id="meerschaum.connectors.api.APIConnector.APIConnector.register_user"><code class="name flex">
-<span>def <span class="ident">register_user</span></span>(<span>self, user: meerschaum._internal.User, debug: bool = False, **kw) ‑> tuple</span>
+<span>def <span class="ident">register_user</span></span>(<span>self, user: meerschaum._internal.User.User, debug: bool = False, **kw) ‑> tuple</span>
 </code></dt>
 <dd>
 <div class="desc"><p>Register a new user</p></div>
@@ -1220,7 +1220,7 @@ Returns a tuple of (success_bool, response_dict)</p></div>
 </summary>
 <pre><code class="python">def register_user(
         self,
-        user : &#39;meerschaum._internal.User&#39;,
+        user : &#39;meerschaum._internal.User.User&#39;,
         debug : bool = False,
         **kw
     ) -&gt; tuple:
