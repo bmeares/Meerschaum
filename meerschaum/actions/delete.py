@@ -10,9 +10,9 @@ from __future__ import annotations
 from meerschaum.utils.typing import Any, SuccessTuple, Union, Optional, List
 
 def delete(
-        action : list = [''],
-        **kw
-    ):
+        action : List[str] = [],
+        **kw : Any
+    ) -> SuccessTuple:
     """
     Delete an element.
     """
@@ -32,7 +32,10 @@ def _delete_pipes(
         yes : bool = False,
         force : bool = False,
         **kw
-    ) -> tuple:
+    ) -> SuccessTuple:
+    """
+    Drop pipes and delete their registrations.
+    """
     from meerschaum import get_pipes
     from meerschaum.utils.prompt import yes_no
     from meerschaum.utils.formatting import pprint
@@ -72,10 +75,10 @@ def _delete_config(
         yes : bool = False,
         force : bool = False,
         debug : bool = False,
-        **kw
-    ) -> tuple:
+        **kw : Any
+    ) -> SuccessTuple:
     """
-    Delete configuration files
+    Delete configuration files.
     """
     import os
     from meerschaum.utils.prompt import yes_no
@@ -100,12 +103,15 @@ def _delete_config(
     return True, "Successfully deleted configuration files"
 
 def _delete_plugins(
-        action : list = [''],
+        action : List[str] = [],
         yes : bool = False,
         force : bool = False,
         debug : bool = False,
-        **kw
-    ) -> tuple:
+        **kw : Any
+    ) -> SuccessTuple:
+    """
+    Remove installed plugins. Does not affect repository registrations.
+    """
     import meerschaum.actions
     from meerschaum.actions import _plugins_names, plugins_modules
     from meerschaum.config._paths import PLUGINS_RESOURCES_PATH
@@ -157,14 +163,17 @@ def _delete_plugins(
     return True, "Success"
 
 def _delete_users(
-        action : list = [''],
+        action : List[str] = [],
         repository : str = None,
         yes : bool = False,
         force : bool = False,
         shell : bool = False,
         debug : bool = False,
         **kw
-    ) -> tuple:
+    ) -> SuccessTuple:
+    """
+    Delete plugins from a repository. Adequate permissions are required.
+    """
     from meerschaum.config import get_config
     from meerschaum import get_connector
     from meerschaum.connectors.parse import parse_repo_keys

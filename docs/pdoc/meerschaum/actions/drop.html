@@ -38,7 +38,7 @@ from __future__ import annotations
 from meerschaum.utils.typing import SuccessTuple, Union, Any, Optional, Sequence
 
 def drop(
-        action : Sequence[str] = [&#39;&#39;],
+        action : Sequence[str] = [],
         **kw : Any
     ) -&gt; SuccessTuple:
     &#34;&#34;&#34;
@@ -53,7 +53,7 @@ def drop(
     return choose_subaction(action, options, **kw)
 
 def _drop_pipes(
-        action : Sequence[str] = [&#39;&#39;],
+        action : Sequence[str] = [],
         yes : bool = False,
         force : bool = False,
         debug : bool = False,
@@ -103,7 +103,7 @@ def _drop_pipes(
     return successes &gt; 0, msg
 
 def _drop_tables(
-        action : Sequence[str] = [&#39;&#39;],
+        action : Sequence[str] = [],
         **kw : Any
     ) -&gt; SuccessTuple:
     &#34;&#34;&#34;
@@ -126,7 +126,7 @@ drop.__doc__ += _choices_docstring(&#39;drop&#39;)</code></pre>
 <h2 class="section-title" id="header-functions">Functions</h2>
 <dl>
 <dt id="meerschaum.actions.drop.drop"><code class="name flex">
-<span>def <span class="ident">drop</span></span>(<span>action: Sequence[str] = [''], **kw: Any) ‑> Tuple[bool, str]</span>
+<span>def <span class="ident">drop</span></span>(<span>action: Sequence[str] = [], **kw: Any) ‑> Tuple[bool, str]</span>
 </code></dt>
 <dd>
 <div class="desc"><p>Drop pipe data (maintaining registration) or tables.</p>
@@ -137,7 +137,7 @@ drop.__doc__ += _choices_docstring(&#39;drop&#39;)</code></pre>
 <span>Expand source code</span>
 </summary>
 <pre><code class="python">def drop(
-        action : Sequence[str] = [&#39;&#39;],
+        action : Sequence[str] = [],
         **kw : Any
     ) -&gt; SuccessTuple:
     &#34;&#34;&#34;

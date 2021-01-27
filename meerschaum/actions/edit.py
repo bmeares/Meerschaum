@@ -6,11 +6,13 @@
 Functions for editing elements belong here.
 """
 
+from __future__ import annotations
+from meerschaum.utils.typing import List, Any, SuccessTuple
 
 def edit(
-        action : list = [''],
-        **kw
-    ) -> tuple:
+        action : List[str] = [],
+        **kw : Any
+    ) -> SuccessTuple:
     """
     Edit an existing element.
     """
@@ -24,23 +26,26 @@ def edit(
     }
     return choose_subaction(action, options, **kw)
 
-def _edit_stack(*args, **kw):
+def _edit_stack(*args, **kw) -> SuccessTuple:
     from meerschaum.config.stack import edit_stack
     return edit_stack(*args, **kw)
 
-def _edit_config(*args, **kw):
+def _edit_config(*args, **kw) -> SuccessTuple:
     from meerschaum.config._edit import edit_config
     return edit_config(*args, **kw)
 
-def _edit_grafana(*args, **kw):
+def _edit_grafana(*args, **kw) -> SuccessTuple:
     from meerschaum.config.stack.grafana import edit_grafana
     return edit_grafana(*args, **kw)
 
 def _edit_pipes(
-        action : list = [''],
+        action : List[str] = [],
         debug : bool = False,
-        **kw
-    ):
+        **kw : Any
+    ) -> SuccessTuple:
+    """
+    Open and edit pipes' configuration files.
+    """
     from meerschaum import get_pipes
     from meerschaum.utils.prompt import prompt
     from meerschaum.actions.shell.Shell import input_with_sigint
@@ -63,11 +68,14 @@ def _edit_pipes(
     return (True, "Success")
 
 def _edit_users(
-        action : list = [''],
+        action : List[str] = [],
         repository : str = None,
         debug : bool = False,
-        **kw
-    ) -> tuple:
+        **kw : Any
+    ) -> SuccessTuple:
+    """
+    Edit users' registration information.
+    """
     from meerschaum.config import get_config
     from meerschaum import get_connector
     from meerschaum.connectors.parse import parse_repo_keys

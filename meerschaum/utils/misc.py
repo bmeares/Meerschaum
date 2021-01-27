@@ -179,9 +179,12 @@ def search_and_substitute_config(
     Example:
         MRSM{meerschaum:connectors:main:host} => cf['meerschaum']['connectors']['main']['host']
     """
+    from meerschaum.utils.packages import attempt_import
     try:
-        import yaml
-    except ImportError:
+        from meerschaum.utils.yaml import yaml
+        #  import yaml
+        #  ruamel_yaml = attempt_import()
+    except:
         return config
     needle = leading_key
     haystack = yaml.dump(config)
@@ -235,7 +238,7 @@ def search_and_substitute_config(
         haystack = haystack.replace(pattern, str(value))
 
     ### parse back into dict
-    return yaml.safe_load(haystack)
+    return yaml.load(haystack)
 
 def edit_file(
         path : 'pathlib.Path',
@@ -721,4 +724,37 @@ def replace_password(d : dict) -> dict:
         elif 'password' in str(k).lower():
             _d[k] = ''.join(['*' for char in str(v)])
     return _d
+
+def filter_keywords(
+        func : Callable[[Any], Any],
+        **kw : Any
+    ) -> Mapping[str, Any]:
+    """
+    Filter out unsupported keywords.
+
+    :param func:
+        The function to inspect.
+    """
+    import inspect
+    func_params = inspect.signature(func).parameters
+    func_kw = dict()
+    for k, v in kw.items():
+        if k in func_params:
+            func_kw[k] = v
+    return func_kw
+
+def dict_from_od(od : collections.OrderedDict) -> dict:
+    """
+    Convert an ordered dict to a dict.
+    Does not mutate the original OrderedDict.
+    """
+    from collections import OrderedDict
+    _d = dict(od)
+    for k, v in od.items():
+        if isinstance(v, OrderedDict) or (
+            issubclass(type(v), OrderedDict)
+        ):
+            _d[k] = dict_from_od(v)
+    return _d
+
 

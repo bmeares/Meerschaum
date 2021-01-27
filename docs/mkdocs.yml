@@ -1,15 +1,59 @@
 site_name: Meerschaum Documentation
+site_url: https://meerschaum.io
 theme:
+  features:
+    - navigation.sections
+    - navigation.instant
+    - navigation.expand
+    # - toc.integrate
   favicon: assets/logo.ico
   logo: assets/logo_500x500.png
   name: material
-  palette:
-    # scheme: slate
-    # primary: brown
+  # # palette:
+    # # scheme: slate
+    # # primary: brown
 extra_css:
   - stylesheets/extra.css
 docs_dir: mkdocs
 plugins:
   - search
+  - autolinks
+  # - add-number
+  # - pdf-export
+  - awesome-pages
+  # - mkdocstrings
+  # - enumerate-headings:
+      # toc_depth: 3
 repo_url: https://github.com/bmeares/Meerschaum
 edit_uri: ""
+markdown_extensions:
+  - attr_list:
+  - pymdownx.highlight:
+      linenums: true
+  - pymdownx.superfences
+  - pymdownx.inlinehilite
+  - pymdownx.emoji:
+      emoji_index: !!python/name:materialx.emoji.twemoji
+      emoji_generator: !!python/name:materialx.emoji.to_svg
+  - pymdownx.betterem:
+      smart_enable: all
+  - pymdownx.caret
+  - pymdownx.mark
+  - pymdownx.tilde
+  - pymdownx.smartsymbols
+  - pymdownx.tabbed
+  - admonition
+  - pymdownx.details
+  - toc:
+      permalink: true
+      slugify: !!python/name:pymdownx.slugs.uslugify
+      toc_depth: 3
+
+extra:
+  social:
+  - icon: fontawesome/brands/github
+    link: https://github.com/bmeares/Meerschaum
+  - icon: fontawesome/brands/linkedin
+    link: https://www.linkedin.com/in/bennettmeares/
+  - icon: fontawesome/brands/discord
+    link: https://discord.gg/8U8qMUjvcc

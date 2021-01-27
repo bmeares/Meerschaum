@@ -7,17 +7,20 @@ Functions for editing the configuration file
 """
 
 #  from meerschaum.utils.debug import dprint
+from __future__ import annotations
+from meerschaum.utils.typing import Optional, Any, SuccessTuple, Mapping
 import sys
 
 def edit_config(
-        params : dict = None,
+        params : Optional[Mapping[str, Any]] = None,
         debug : bool = False,
-        **kw
-    ) -> tuple:
+        **kw : Any
+    ) -> SuccessTuple:
     """
     Edit the configuration file
 
-    params: patch to apply. Depreciated / replaced by --config (at least in this case)
+    :param params:
+        patch to apply. Depreciated / replaced by --config (at least in this case)
     """
     import tempfile, os, importlib
     import meerschaum.config
@@ -44,13 +47,14 @@ def edit_config(
 def write_config(
         config_dict : dict = None,
         debug : bool = False,
-        **kw
+        **kw : Any
     ) -> bool:
     from meerschaum.config._paths import CONFIG_PATH
     from meerschaum.config import config
     from meerschaum.config._default import default_header_comment
     from meerschaum.utils.debug import dprint
-    import yaml
+    from meerschaum.utils.yaml import yaml
+    #  import yaml
     if config_dict is None:
         config_dict = config
 
@@ -60,7 +64,7 @@ def write_config(
         pprint(config_dict, stream=sys.stderr)
     with open(CONFIG_PATH, 'w') as f:
         f.write(default_header_comment)
-        yaml.dump(config_dict, f, sort_keys=False)
+        yaml.dump(config_dict, stream=f, sort_keys=False)
 
     return True
 
@@ -96,8 +100,9 @@ def general_write_config(
                 f.write(config)
             elif isinstance(config, dict):
                 if debug: dprint(f"Config is a dict. Writing to {path}...")
-                import yaml
-                yaml.dump(config, f)
+                #  import yaml
+                from meerschaum.utils.yaml import yaml
+                yaml.dump(config, stream=f)
 
     return True
 
@@ -146,7 +151,8 @@ def write_default_config(
     """
     Overwrite the existing default_config.yaml.
     """
-    import yaml, os
+    from meerschaum.utils.yaml import yaml
+    import os
     from meerschaum.config._paths import PATCH_PATH, DEFAULT_CONFIG_PATH
     from meerschaum.config._default import default_config, default_header_comment
     from meerschaum.utils.debug import dprint
@@ -163,7 +169,7 @@ def write_default_config(
     if debug: dprint(f"Writing default Meerschaum configuration to {DEFAULT_CONFIG_PATH}...")
     with open(DEFAULT_CONFIG_PATH, 'w') as f:
         f.write(default_header_comment)
-        yaml.dump(config_copy, f, sort_keys=False)
+        yaml.dump(config_copy, stream=f, sort_keys=False)
         f.write("\n\n")
 
     config_copy = default_config.copy()
@@ -172,6 +178,6 @@ def write_default_config(
     ### write the rest of the configuration
     if debug: dprint(f"Writing remaining default configuration to {DEFAULT_CONFIG_PATH}...")
     with open(DEFAULT_CONFIG_PATH, 'a+') as f:
-        yaml.dump(config_copy, f)
+        yaml.dump(config_copy, stream=f, sort_keys=False)
 
     return True

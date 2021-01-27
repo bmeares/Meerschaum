@@ -35,14 +35,17 @@
 Functions for running the Docker Compose stack
 &#34;&#34;&#34;
 
+from __future__ import annotations
+from meerschaum.utils.typing import SuccessTuple, Any, List
+
 def stack(
-        action : list = [&#39;&#39;],
+        action : List[str] = [],
         sub_args : list = [],
         yes : bool = False,
         force : bool = False,
         debug : bool = False,
-        **kw
-    ) -&gt; tuple:
+        **kw : Any
+    ) -&gt; SuccessTuple:
     &#34;&#34;&#34;
     Control the Meerschaum stack with Docker Compose.
     Usage: `stack {command}`
@@ -125,7 +128,7 @@ def stack(
 <h2 class="section-title" id="header-functions">Functions</h2>
 <dl>
 <dt id="meerschaum.actions.stack.stack"><code class="name flex">
-<span>def <span class="ident">stack</span></span>(<span>action: list = [''], sub_args: list = [], yes: bool = False, force: bool = False, debug: bool = False, **kw) ‑> tuple</span>
+<span>def <span class="ident">stack</span></span>(<span>action: List[str] = [], sub_args: list = [], yes: bool = False, force: bool = False, debug: bool = False, **kw: Any) ‑> Tuple[bool, str]</span>
 </code></dt>
 <dd>
 <div class="desc"><p>Control the Meerschaum stack with Docker Compose.
@@ -137,13 +140,13 @@ Docker Compose command to run. E.g. 'config' will print Docker Compose configura
 <span>Expand source code</span>
 </summary>
 <pre><code class="python">def stack(
-        action : list = [&#39;&#39;],
+        action : List[str] = [],
         sub_args : list = [],
         yes : bool = False,
         force : bool = False,
         debug : bool = False,
-        **kw
-    ) -&gt; tuple:
+        **kw : Any
+    ) -&gt; SuccessTuple:
     &#34;&#34;&#34;
     Control the Meerschaum stack with Docker Compose.
     Usage: `stack {command}`

@@ -8,10 +8,13 @@ Synchronize Pipes' data with sources
 NOTE: `sync` required a SQL connection and is not intended for client use
 """
 
+from __future__ import annotations
+from meerschaum.utils.typing import SuccessTuple, Any, List
+
 def sync(
-        action : list = [''],
-        **kw
-    ) -> tuple:
+        action : List[str] = [],
+        **kw : Any
+    ) -> SuccessTuple:
     """
     Sync elements
     """
@@ -116,7 +119,7 @@ def _sync_pipes(
         min_seconds : int = 1,
         debug : bool = False,
         **kw
-    ) -> tuple:
+    ) -> SuccessTuple:
     """
     Fetch new data for Pipes
     """

@@ -35,16 +35,19 @@
 Directly interact with the SQL server via Meerschaum actions
 &#34;&#34;&#34;
 
+from __future__ import annotations
+from meerschaum.utils.typing import SuccessTuple, Any, List
+
 exec_methods = {
     &#39;read&#39;,
     &#39;exec&#39;,
 }
 
 def sql(
-        action : list = [&#39;&#39;],
+        action : List[str] = [],
         gui : bool = False,
         debug : bool = False,
-        **kw
+        **kw : Any
     ):
     &#34;&#34;&#34;
     Execute a SQL query or launch an interactive CLI. All positional arguments are optional.
@@ -64,14 +67,14 @@ def sql(
     &#34;&#34;&#34;
 
     ### input: `sql read` or `sql exec`
-    if action[0] in exec_methods and len(action) == 1:
+    if len(action) == 1 and action[0] in exec_methods:
         print(sql.__doc__)
         return (False, &#39;Query must not be empty&#39;)
 
     from meerschaum.connectors import get_connector
 
     ### input: `sql`
-    if action[0] == &#39;&#39;:
+    if len(action) == 0:
         return get_connector().cli(debug=debug) 
 
     from meerschaum.config import config as cf, get_config
@@ -142,7 +145,7 @@ def sql(
 <h2 class="section-title" id="header-functions">Functions</h2>
 <dl>
 <dt id="meerschaum.actions.sql.sql"><code class="name flex">
-<span>def <span class="ident">sql</span></span>(<span>action: list = [''], gui: bool = False, debug: bool = False, **kw)</span>
+<span>def <span class="ident">sql</span></span>(<span>action: List[str] = [], gui: bool = False, debug: bool = False, **kw: Any)</span>
 </code></dt>
 <dd>
 <div class="desc"><p>Execute a SQL query or launch an interactive CLI. All positional arguments are optional.</p>
@@ -168,10 +171,10 @@ Execute a query and print the success status</p>
 <span>Expand source code</span>
 </summary>
 <pre><code class="python">def sql(
-        action : list = [&#39;&#39;],
+        action : List[str] = [],
         gui : bool = False,
         debug : bool = False,
-        **kw
+        **kw : Any
     ):
     &#34;&#34;&#34;
     Execute a SQL query or launch an interactive CLI. All positional arguments are optional.
@@ -191,14 +194,14 @@ Execute a query and print the success status</p>
     &#34;&#34;&#34;
 
     ### input: `sql read` or `sql exec`
-    if action[0] in exec_methods and len(action) == 1:
+    if len(action) == 1 and action[0] in exec_methods:
         print(sql.__doc__)
         return (False, &#39;Query must not be empty&#39;)
 
     from meerschaum.connectors import get_connector
 
     ### input: `sql`
-    if action[0] == &#39;&#39;:
+    if len(action) == 0:
         return get_connector().cli(debug=debug) 
 
     from meerschaum.config import config as cf, get_config

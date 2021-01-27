@@ -35,10 +35,13 @@
 Register new Pipes. Requires the API to be running.
 &#34;&#34;&#34;
 
+from __future__ import annotations
+from meerschaum.utils.typing import SuccessTuple, Any, List, Optional
+
 def register(
-        action : list = [&#39;&#39;],
-        **kw
-    ) -&gt; tuple:
+        action : List[str] = [],
+        **kw : Any
+    ) -&gt; SuccessTuple:
     &#34;&#34;&#34;
     Register new elements.
     &#34;&#34;&#34;
@@ -53,13 +56,13 @@ def register(
     return choose_subaction(action, options, **kw)
 
 def _register_pipes(
-        connector_keys : list = [],
-        metric_keys : list = [],
-        location_keys : list = [],
+        connector_keys : List[str] = [],
+        metric_keys : List[str] = [],
+        location_keys : List[str] = [],
         params : dict = dict(),
         debug : bool = False,
-        **kw
-    ) -&gt; tuple:
+        **kw : Any
+    ) -&gt; SuccessTuple:
     &#34;&#34;&#34;
     Create and register Pipe objects.
     Required: connector_keys and metric_keys. If location_keys is empty, assume [None]
@@ -113,8 +116,8 @@ def _register_locations(**kw):
     pass
 
 def _register_plugins(
-        action : list = [],
-        repository : str = None,
+        action : List[str] = [],
+        repository : Optional[str] = None,
         shell : bool = False,
         debug : bool = False,
         **kw
@@ -177,7 +180,7 @@ def _register_users(
         repository : str = None,
         shell : bool = False,
         debug : bool = False,
-        **kw
+        **kw : Any
     ) -&gt; tuple:
     &#34;&#34;&#34;
     Register a new user to a Meerschaum repository.
@@ -269,7 +272,7 @@ register.__doc__ += _choices_docstring(&#39;register&#39;)</code></pre>
 <h2 class="section-title" id="header-functions">Functions</h2>
 <dl>
 <dt id="meerschaum.actions.register.register"><code class="name flex">
-<span>def <span class="ident">register</span></span>(<span>action: list = [''], **kw) ‑> tuple</span>
+<span>def <span class="ident">register</span></span>(<span>action: List[str] = [], **kw: Any) ‑> Tuple[bool, str]</span>
 </code></dt>
 <dd>
 <div class="desc"><p>Register new elements.</p>
@@ -280,9 +283,9 @@ register.__doc__ += _choices_docstring(&#39;register&#39;)</code></pre>
 <span>Expand source code</span>
 </summary>
 <pre><code class="python">def register(
-        action : list = [&#39;&#39;],
-        **kw
-    ) -&gt; tuple:
+        action : List[str] = [],
+        **kw : Any
+    ) -&gt; SuccessTuple:
     &#34;&#34;&#34;
     Register new elements.
     &#34;&#34;&#34;

@@ -9,9 +9,9 @@ from __future__ import annotations
 from meerschaum.utils.typing import SuccessTuple, Union, Sequence, Any, Optional
 
 def show(
-        action : Sequence[str] = [''],
+        action : Sequence[str] = [],
         **kw : Any
-    ) -> tuple:
+    ) -> SuccessTuple:
     """
     Show elements of a certain type.
 
@@ -56,7 +56,7 @@ def _show_help(**kw : Any) -> SuccessTuple:
     return True, "Success"
 
 def _show_config(
-        action : Sequence[str] = [''],
+        action : Sequence[str] = [],
         debug : bool = False,
         **kw : Any
     ) -> SuccessTuple:
@@ -132,7 +132,7 @@ def _show_version(nopretty : bool = False, **kw : Any) -> SuccessTuple:
     return (True, "Success")
 
 def _show_connectors(
-        action : Sequence[str] = [''],
+        action : Sequence[str] = [],
         debug : bool = False,
         **kw : Any
     ) -> SuccessTuple:
@@ -175,7 +175,7 @@ def _show_arguments(
     return True, "Success"
 
 def _show_data(
-        action : Sequence[str] = [''],
+        action : Sequence[str] = [],
         gui : bool = False,
         begin : Optional[datetime.datetime] = None,
         end : Optional[datetime.datetime] = None,
@@ -250,7 +250,7 @@ def _show_data(
     return True, "Success"
 
 def _show_plugins(
-        action : Sequence[str] = [''],
+        action : Sequence[str] = [],
         repository : Optional[str] = None,
         debug : bool = False,
         **kw : Any

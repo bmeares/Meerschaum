@@ -11,8 +11,9 @@ from meerschaum.utils.typing import Union, SuccessTuple, Any
 import sys, inspect
 from meerschaum.utils.packages import attempt_import
 from meerschaum.config import __doc__, __version__ as version, config as cf, get_config
-cmd = attempt_import(get_config('system', 'shell', 'cmd', patch=True), warn=False)
-if cmd is None or isinstance(cmd, dict): cmd = attempt_import('cmd')
+cmd = attempt_import(get_config('system', 'shell', 'cmd', patch=True), warn=False, lazy=False)
+if cmd is None or isinstance(cmd, dict):
+    cmd = attempt_import('cmd')
 from meerschaum.actions.arguments import parse_line
 from meerschaum.utils.formatting import UNICODE, CHARSET, ANSI, colored
 _clear_screen = get_config('system', 'shell', 'clear_screen', patch=True)
@@ -42,6 +43,8 @@ commands_to_remove = {
 }
 ### cmd2 only: hide commands
 hidden_commands = {
+    #  'macro',
+    #  'alias',
     'pass',
     'exit',
     'quit',
@@ -58,13 +61,22 @@ class Shell(cmd.Cmd):
                 persistent_history_length = 1000,
                 persistent_history_file = None,
             )
+            _init = True
         except: ### fall back to default init (cmd)
-            super().__init__()
+            _init = False
+        
+        if not _init:
+            try:
+                super().__init__()
+            except Exception as e:
+                print(e)
+                sys.exit(1)
 
         ### remove default commands from the Cmd class
         for command in commands_to_remove:
             try:
                 delattr(cmd.Cmd, f'do_{command}')
+                #  self.disable_command(command)
             except:
                 pass
 
@@ -237,7 +249,7 @@ class Shell(cmd.Cmd):
         ### delete the first action
         ### e.g. 'show actions' -> ['actions']
         del args['action'][0]
-        if len(args['action']) == 0: args['action'] = ['']
+        #  if len(args['action']) == 0: args['action'] = ['']
 
         positional_only = (action not in self._actions)
         if positional_only:
@@ -261,6 +273,12 @@ class Shell(cmd.Cmd):
         """
         Do nothing.
         """
+        pass
+
+    def do_alias(self, line):
+        pass
+
+    def do_macro(self, line):
         pass
 
     def do_debug(self, action=[''], **kw):

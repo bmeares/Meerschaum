@@ -39,11 +39,12 @@ uvicorn_config = None
 def get_uvicorn_config() -> dict:
     global uvicorn_config
     from meerschaum.config._paths import API_UVICORN_CONFIG_PATH
-    yaml = attempt_import('yaml')
+    from meerschaum.utils.yaml import yaml
+    #  yaml = attempt_import('yaml')
     if uvicorn_config is None:
         try:
             with open(API_UVICORN_CONFIG_PATH, 'r') as f:
-                uvicorn_config = yaml.safe_load(f)
+                uvicorn_config = yaml.load(f)
         except:
             uvicorn_config = dict()
 

@@ -1,14 +1,11 @@
-# Getting Started
+# Quick Start
+Meerschaum is customizable to best fit your situation, but if you're starting from scratch, the defaults work just fine. Read the guide below and follow the steps to install and use Meerschaum.
 
-Meerschaum is customizable to best fit your situation, but if you're starting from scratch, the defaults work just fine. Read the [Quick Start](#quick-start) guide below and follow the steps to install and use Meerschaum.
-
-## Quick Start
-
-### Requirements
+## **Step 1:** Requirements
 
 To install Meerschaum, you need will need [Python 3.7+](https://www.python.org/) with [pip](https://pip.pypa.io/en/stable/installing/) installed.
 
-#### (Optional but recommended) Server Stack Requirements
+### **Step 1.5:** Server Stack Requirements
 
 Meerschaum comes with the `stack` command which leverages [Docker Compose](https://docs.docker.com/compose/) to create all the necessary services in a full-stack Meerschaum installation ― services such as a database instance, API server, pre-configured Grafana instance, MQTT broker, and more.
 
@@ -29,23 +26,22 @@ curl https://get.docker.com | sh
 
 If you're on Windows or MacOS, install [Docker Desktop](https://www.docker.com/get-started).
 
-### Installation
+## **Step 2:** Installation
 
 Install Meerschaum from [PyPI](https://pypi.org/project/meerschaum/):
 
 ```bash
 python -m pip install --upgrade meerschaum
 ```
-
-Meerschaum will auto-install packages in as you use them (into a virtual environment, to preserve your base environment). If you'd rather install all of its dependencies at installation, you can request the `full` version:
-
-```bash
-python -m pip install --upgrade meerschaum[full]
-```
+!!! tip
+    Meerschaum will auto-install packages in as you use them (into a virtual environment, to preserve your base environment). If you'd rather install all of its dependencies at installation, you can request the `full` version:
+    ```bash
+    python -m pip install --upgrade meerschaum[full]
+    ```
 
 That's it! You've got Meerschaum installed. Continue below for information on [bringing up a stack](#starting-the-stack) and creating your first pipes.
 
-### Starting the Stack
+## **Step 3:** Starting the Stack
 
 To bring up the stack, run the following command:
 
@@ -61,5 +57,4 @@ If you want to stop all the services in the stack, run the stack command with `d
 mrsm stack down
 ```
 
-### Bootstrapping a Pipe
 

@@ -39,7 +39,10 @@ PipesDict = Mapping[
             str, &#39;meerschaum.Pipe.Pipe&#39;  ### location_key   : Pipe
         ]
     ]
-]</code></pre>
+]
+from meerschaum.utils.packages import attempt_import
+### trigger an install of typing_extensions, which is needed for rich
+typing_extensions = attempt_import(&#39;typing_extensions&#39;, lazy=False)</code></pre>
 </details>
 </section>
 <section>

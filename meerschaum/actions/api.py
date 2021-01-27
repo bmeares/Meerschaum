@@ -8,7 +8,7 @@ Start the Meerschaum WebAPI with the `api` action.
 import sys
 
 def api(
-        action : list = [''],
+        action : list = [],
         sysargs : list = [],
         debug : bool = False,
         mrsm_instance : str = None,
@@ -31,7 +31,7 @@ def api(
     """
     from meerschaum.utils.warnings import warn, info
     from meerschaum.utils.formatting import print_tuple
-    if action[0] == '':
+    if len(action) == 0:
         info(api.__doc__)
         return False, "Please provide a command to excecute (see above)"
 
@@ -120,7 +120,8 @@ def _api_start(
     custom_keys = ['mrsm_instance']
 
     ### write config to a temporary file to communicate with uvicorn threads
-    yaml = attempt_import('yaml')
+    #  yaml = attempt_import('yaml')
+    from meerschaum.utils.yaml import yaml
     try:
         if API_UVICORN_CONFIG_PATH.exists():
             if debug: dprint(f"Removing and writing Uvicorn config: ({API_UVICORN_CONFIG_PATH})")
@@ -129,7 +130,7 @@ def _api_start(
     except Exception as e:
         error(e)
     with open(API_UVICORN_CONFIG_PATH, 'w+') as f:
-        yaml.dump(uvicorn_config, f)
+        yaml.dump(uvicorn_config, stream=f)
 
     ### remove custom keys before calling uvicorn
     for k in custom_keys:

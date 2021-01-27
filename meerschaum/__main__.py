@@ -26,8 +26,11 @@ def main():
     ### final step: close global pools
     from meerschaum.utils.pool import get_pools
     for class_name, pool in get_pools().items():
-        pool.close()
-        pool.join()
+        try:
+            pool.close()
+            pool.join()
+        except:
+            pass
 
 if __name__ == "__main__":
     main()

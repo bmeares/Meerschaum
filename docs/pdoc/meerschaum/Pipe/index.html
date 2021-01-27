@@ -635,7 +635,8 @@ If <code>patch</code> is True, update parameters by cascading rather than overwr
     parameters_filename = str(self) + &#39;.yaml&#39;
     parameters_path = pathlib.Path(os.path.join(PIPES_RESOURCES_PATH, parameters_filename))
     
-    import yaml
+    from meerschaum.utils.yaml import yaml
+    #  import yaml
 
     edit_header = &#34;#######################################&#34;
     for i in range(len(str(self))): edit_header += &#34;#&#34;
@@ -653,7 +654,7 @@ If <code>patch</code> is True, update parameters by cascading rather than overwr
     ### write parameters to yaml file
     with open(parameters_path, &#39;w&#39;) as f:
         f.write(edit_header)
-        yaml.dump(parameters, f)
+        yaml.dump(parameters, stream=f, sort_keys=False)
 
     ### only quit editing if yaml is valid
     editing = True
@@ -741,7 +742,7 @@ If <code>patch</code> is True, update parameters by cascading rather than overwr
 </details>
 </dd>
 <dt id="meerschaum.Pipe.Pipe.get_backtrack_data"><code class="name flex">
-<span>def <span class="ident">get_backtrack_data</span></span>(<span>self, backtrack_minutes: int = 0, begin: datetime.datetime = None, debug: bool = False) ‑> Union[pd.DataFrame, NoneType]</span>
+<span>def <span class="ident">get_backtrack_data</span></span>(<span>self, backtrack_minutes: int = 0, begin: "'datetime.datetime'" = None, debug: bool = False) ‑> Union[pd.DataFrame, NoneType]</span>
 </code></dt>
 <dd>
 <div class="desc"><p>Get the most recent data from the instance connector as a Pandas DataFrame.</p>
@@ -754,25 +755,13 @@ If begin is None (default), use the most recent observed datetime
 (AKA sync_time).</p>
 <pre><code>E.g. begin = 02:00
 
+```
 Search this region.           Ignore this, even if there's data.
-</code></pre>
-<p>/
-/
-/
-/
-/
-/
-/
-/
-/
-|
+/  /  /  /  /  /  /  /  /  |
 -----|----------|----------|----------|----------|----------|
-00:00
-01:00
-02:00
-03:00
-04:00
-05:00</p>
+   00:00      01:00      02:00      03:00      04:00      05:00
+```
+</code></pre>
 <p>:param debug: Verbosity toggle.</p></div>
 <details class="source">
 <summary>
@@ -798,10 +787,12 @@ Search this region.           Ignore this, even if there's data.
 
         E.g. begin = 02:00
 
+        ```
         Search this region.           Ignore this, even if there&#39;s data.
-       /  /  /  /  /  /  /  /  /  |
-       -----|----------|----------|----------|----------|----------|
-          00:00      01:00      02:00      03:00      04:00      05:00
+        /  /  /  /  /  /  /  /  /  |
+        -----|----------|----------|----------|----------|----------|
+           00:00      01:00      02:00      03:00      04:00      05:00
+        ```
 
     :param debug: Verbosity toggle.
     &#34;&#34;&#34;
@@ -844,7 +835,7 @@ Search this region.           Ignore this, even if there's data.
 </details>
 </dd>
 <dt id="meerschaum.Pipe.Pipe.get_data"><code class="name flex">
-<span>def <span class="ident">get_data</span></span>(<span>self, begin: Union[ForwardRef('datetime.datetime'), NoneType] = None, end: Union[ForwardRef('datetime.datetime'), NoneType] = None, refresh: bool = False, debug: bool = False) ‑> Union[pandas.DataFrame, NoneType]</span>
+<span>def <span class="ident">get_data</span></span>(<span>self, begin: Optional[datetime.datetime] = None, end: Optional[datetime.datetime] = None, refresh: bool = False, debug: bool = False) ‑> Optional[pandas.DataFrame]</span>
 </code></dt>
 <dd>
 <div class="desc"><p>Get data from the instance connector.</p></div>
@@ -854,11 +845,11 @@ Search this region.           Ignore this, even if there's data.
 </summary>
 <pre><code class="python">def get_data(
         self,
-        begin : Optional[&#39;datetime.datetime&#39;] = None,
-        end : Optional[&#39;datetime.datetime&#39;] = None,
+        begin : Optional[datetime.datetime] = None,
+        end : Optional[datetime.datetime] = None,
         refresh : bool = False,
         debug : bool = False
-    ) -&gt; Optional[&#39;pandas.DataFrame&#39;]:
+    ) -&gt; Optional[pandas.DataFrame]:
     &#34;&#34;&#34;
     Get data from the instance connector.
     &#34;&#34;&#34;
@@ -874,7 +865,7 @@ Search this region.           Ignore this, even if there's data.
 </details>
 </dd>
 <dt id="meerschaum.Pipe.Pipe.get_rowcount"><code class="name flex">
-<span>def <span class="ident">get_rowcount</span></span>(<span>self, begin: Union[ForwardRef('datetime.datetime'), NoneType] = None, end: Union[ForwardRef('datetime.datetime'), NoneType] = None, remote: bool = False, debug: bool = False) ‑> Union[int, NoneType]</span>
+<span>def <span class="ident">get_rowcount</span></span>(<span>self, begin: "Optional['datetime.datetime']" = None, end: "Optional['datetime.datetime']" = None, remote: bool = False, debug: bool = False) ‑> Union[int, NoneType]</span>
 </code></dt>
 <dd>
 <div class="desc"><p>Get a Pipe's cached or remote rowcount.</p>

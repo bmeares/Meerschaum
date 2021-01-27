@@ -1,0 +1,452 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, minimum-scale=1" />
+<meta name="generator" content="pdoc 0.9.2" />
+<title>meerschaum.utils.yaml API documentation</title>
+<meta name="description" content="Meerschaum wrapper around YAML libraries …" />
+<link rel="preload stylesheet" as="style" href="https://cdnjs.cloudflare.com/ajax/libs/10up-sanitize.css/11.0.1/sanitize.min.css" integrity="sha256-PK9q560IAAa6WVRRh76LtCaI8pjTJ2z11v0miyNNjrs=" crossorigin>
+<link rel="preload stylesheet" as="style" href="https://cdnjs.cloudflare.com/ajax/libs/10up-sanitize.css/11.0.1/typography.min.css" integrity="sha256-7l/o7C8jubJiy74VsKTidCy1yBkRtiUGbVkYBylBqUg=" crossorigin>
+<link rel="stylesheet preload" as="style" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/10.1.1/styles/github.min.css" crossorigin>
+<style>:root{--highlight-color:#fe9}.flex{display:flex !important}body{line-height:1.5em}#content{padding:20px}#sidebar{padding:30px;overflow:hidden}#sidebar > *:last-child{margin-bottom:2cm}.http-server-breadcrumbs{font-size:130%;margin:0 0 15px 0}#footer{font-size:.75em;padding:5px 30px;border-top:1px solid #ddd;text-align:right}#footer p{margin:0 0 0 1em;display:inline-block}#footer p:last-child{margin-right:30px}h1,h2,h3,h4,h5{font-weight:300}h1{font-size:2.5em;line-height:1.1em}h2{font-size:1.75em;margin:1em 0 .50em 0}h3{font-size:1.4em;margin:25px 0 10px 0}h4{margin:0;font-size:105%}h1:target,h2:target,h3:target,h4:target,h5:target,h6:target{background:var(--highlight-color);padding:.2em 0}a{color:#058;text-decoration:none;transition:color .3s ease-in-out}a:hover{color:#e82}.title code{font-weight:bold}h2[id^="header-"]{margin-top:2em}.ident{color:#900}pre code{background:#f8f8f8;font-size:.8em;line-height:1.4em}code{background:#f2f2f1;padding:1px 4px;overflow-wrap:break-word}h1 code{background:transparent}pre{background:#f8f8f8;border:0;border-top:1px solid #ccc;border-bottom:1px solid #ccc;margin:1em 0;padding:1ex}#http-server-module-list{display:flex;flex-flow:column}#http-server-module-list div{display:flex}#http-server-module-list dt{min-width:10%}#http-server-module-list p{margin-top:0}.toc ul,#index{list-style-type:none;margin:0;padding:0}#index code{background:transparent}#index h3{border-bottom:1px solid #ddd}#index ul{padding:0}#index h4{margin-top:.6em;font-weight:bold}@media (min-width:200ex){#index .two-column{column-count:2}}@media (min-width:300ex){#index .two-column{column-count:3}}dl{margin-bottom:2em}dl dl:last-child{margin-bottom:4em}dd{margin:0 0 1em 3em}#header-classes + dl > dd{margin-bottom:3em}dd dd{margin-left:2em}dd p{margin:10px 0}.name{background:#eee;font-weight:bold;font-size:.85em;padding:5px 10px;display:inline-block;min-width:40%}.name:hover{background:#e0e0e0}dt:target .name{background:var(--highlight-color)}.name > span:first-child{white-space:nowrap}.name.class > span:nth-child(2){margin-left:.4em}.inherited{color:#999;border-left:5px solid #eee;padding-left:1em}.inheritance em{font-style:normal;font-weight:bold}.desc h2{font-weight:400;font-size:1.25em}.desc h3{font-size:1em}.desc dt code{background:inherit}.source summary,.git-link-div{color:#666;text-align:right;font-weight:400;font-size:.8em;text-transform:uppercase}.source summary > *{white-space:nowrap;cursor:pointer}.git-link{color:inherit;margin-left:1em}.source pre{max-height:500px;overflow:auto;margin:0}.source pre code{font-size:12px;overflow:visible}.hlist{list-style:none}.hlist li{display:inline}.hlist li:after{content:',\2002'}.hlist li:last-child:after{content:none}.hlist .hlist{display:inline;padding-left:1em}img{max-width:100%}td{padding:0 .5em}.admonition{padding:.1em .5em;margin-bottom:1em}.admonition-title{font-weight:bold}.admonition.note,.admonition.info,.admonition.important{background:#aef}.admonition.todo,.admonition.versionadded,.admonition.tip,.admonition.hint{background:#dfd}.admonition.warning,.admonition.versionchanged,.admonition.deprecated{background:#fd4}.admonition.error,.admonition.danger,.admonition.caution{background:lightpink}</style>
+<style media="screen and (min-width: 700px)">@media screen and (min-width:700px){#sidebar{width:30%;height:100vh;overflow:auto;position:sticky;top:0}#content{width:70%;max-width:100ch;padding:3em 4em;border-left:1px solid #ddd}pre code{font-size:1em}.item .name{font-size:1em}main{display:flex;flex-direction:row-reverse;justify-content:flex-end}.toc ul ul,#index ul{padding-left:1.5em}.toc > ul > li{margin-top:.5em}}</style>
+<style media="print">@media print{#sidebar h1{page-break-before:always}.source{display:none}}@media print{*{background:transparent !important;color:#000 !important;box-shadow:none !important;text-shadow:none !important}a[href]:after{content:" (" attr(href) ")";font-size:90%}a[href][title]:after{content:none}abbr[title]:after{content:" (" attr(title) ")"}.ir a:after,a[href^="javascript:"]:after,a[href^="#"]:after{content:""}pre,blockquote{border:1px solid #999;page-break-inside:avoid}thead{display:table-header-group}tr,img{page-break-inside:avoid}img{max-width:100% !important}@page{margin:0.5cm}p,h2,h3{orphans:3;widows:3}h1,h2,h3,h4,h5,h6{page-break-after:avoid}}</style>
+<script defer src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/10.1.1/highlight.min.js" integrity="sha256-Uv3H6lx7dJmRfRvH8TH6kJD1TSK1aFcwgx+mdg3epi8=" crossorigin></script>
+<script>window.addEventListener('DOMContentLoaded', () => hljs.initHighlighting())</script>
+</head>
+<body>
+<main>
+<article id="content">
+<header>
+<h1 class="title">Module <code>meerschaum.utils.yaml</code></h1>
+</header>
+<section id="section-intro">
+<p>Meerschaum wrapper around YAML libraries.</p>
+<p>This is so switching between PyYAML and ruamel.yaml is smoother.</p>
+<details class="source">
+<summary>
+<span>Expand source code</span>
+</summary>
+<pre><code class="python">#! /usr/bin/env python
+# -*- coding: utf-8 -*-
+# vim:fenc=utf-8
+
+&#34;&#34;&#34;
+Meerschaum wrapper around YAML libraries.
+
+This is so switching between PyYAML and ruamel.yaml is smoother.
+&#34;&#34;&#34;
+
+### The first import that is found will be used.
+_lib = None
+_import_name = None
+_yaml_imports = [&#39;yaml&#39;, &#39;ruamel.yaml&#39;]
+_yaml = None
+
+class yaml:
+    global _yaml, _import_name, _lib
+    from meerschaum.utils.packages import attempt_import, all_packages
+    from meerschaum.utils.warnings import error
+    for k in all_packages:
+        if k in _yaml_imports:
+            _import_name = k
+            break
+    if _import_name is None:
+        error(f&#34;No YAML libraries declared in meerschaum.packages.&#34;)
+
+    _lib = attempt_import(_import_name, split=False, lazy=False)
+    if _import_name == &#39;ruamel.yaml&#39;:
+        _yaml = _lib.YAML()
+    else:
+        _yaml = _lib
+
+    def safe_load(*args, **kw):
+        from meerschaum.utils.misc import filter_keywords
+        if _import_name == &#39;ruamel.yaml&#39;:
+            return _yaml.load(*args, **filter_keywords(_yaml.load, **kw))
+        return _yaml.safe_load(*args, **filter_keywords(_yaml.safe_load, **kw))
+
+    def load(*args, **kw):
+        from meerschaum.utils.misc import filter_keywords
+        return _yaml.load(*args, **filter_keywords(_yaml.load, **kw))
+
+    def dump(*args, stream=None, **kw):
+        from meerschaum.utils.misc import filter_keywords
+        get_string = False
+        if stream is None and _import_name == &#39;ruamel.yaml&#39;:
+            stream = _lib.compat.StringIO()
+            get_string = True
+        result = _yaml.dump(*args, stream=stream, **filter_keywords(_yaml.dump, **kw))
+        if get_string:
+            return stream.getvalue()
+        return result</code></pre>
+</details>
+</section>
+<section>
+</section>
+<section>
+</section>
+<section>
+</section>
+<section>
+<h2 class="section-title" id="header-classes">Classes</h2>
+<dl>
+<dt id="meerschaum.utils.yaml.yaml"><code class="flex name class">
+<span>class <span class="ident">yaml</span></span>
+</code></dt>
+<dd>
+<div class="desc"></div>
+<details class="source">
+<summary>
+<span>Expand source code</span>
+</summary>
+<pre><code class="python">class yaml:
+    global _yaml, _import_name, _lib
+    from meerschaum.utils.packages import attempt_import, all_packages
+    from meerschaum.utils.warnings import error
+    for k in all_packages:
+        if k in _yaml_imports:
+            _import_name = k
+            break
+    if _import_name is None:
+        error(f&#34;No YAML libraries declared in meerschaum.packages.&#34;)
+
+    _lib = attempt_import(_import_name, split=False, lazy=False)
+    if _import_name == &#39;ruamel.yaml&#39;:
+        _yaml = _lib.YAML()
+    else:
+        _yaml = _lib
+
+    def safe_load(*args, **kw):
+        from meerschaum.utils.misc import filter_keywords
+        if _import_name == &#39;ruamel.yaml&#39;:
+            return _yaml.load(*args, **filter_keywords(_yaml.load, **kw))
+        return _yaml.safe_load(*args, **filter_keywords(_yaml.safe_load, **kw))
+
+    def load(*args, **kw):
+        from meerschaum.utils.misc import filter_keywords
+        return _yaml.load(*args, **filter_keywords(_yaml.load, **kw))
+
+    def dump(*args, stream=None, **kw):
+        from meerschaum.utils.misc import filter_keywords
+        get_string = False
+        if stream is None and _import_name == &#39;ruamel.yaml&#39;:
+            stream = _lib.compat.StringIO()
+            get_string = True
+        result = _yaml.dump(*args, stream=stream, **filter_keywords(_yaml.dump, **kw))
+        if get_string:
+            return stream.getvalue()
+        return result</code></pre>
+</details>
+<h3>Class variables</h3>
+<dl>
+<dt id="meerschaum.utils.yaml.yaml.all_packages"><code class="name">var <span class="ident">all_packages</span></code></dt>
+<dd>
+<div class="desc"></div>
+</dd>
+<dt id="meerschaum.utils.yaml.yaml.k"><code class="name">var <span class="ident">k</span></code></dt>
+<dd>
+<div class="desc"></div>
+</dd>
+</dl>
+<h3>Methods</h3>
+<dl>
+<dt id="meerschaum.utils.yaml.yaml.attempt_import"><code class="name flex">
+<span>def <span class="ident">attempt_import</span></span>(<span>*names: List[str], lazy: bool = True, warn: bool = True, install: bool = True, venv: str = 'mrsm', precheck: bool = True, split: bool = True, debug: bool = False) ‑> Union['ModuleType', Tuple['ModuleType']]</span>
+</code></dt>
+<dd>
+<div class="desc"><p>Raise a warning if packages are not installed; otherwise import and return modules.
+If lazy = True, return lazy-imported modules.</p>
+<p>Returns tuple of modules if multiple names are provided, else returns one module.</p>
+<h2 id="examples">Examples</h2>
+<pre><code>```python-repl
+&gt;&gt;&gt; pandas, sqlalchemy = attempt_import('pandas', 'sqlalchemy')
+&gt;&gt;&gt; pandas = attempt_import('pandas')
+</code></pre>
+<p>```</p>
+<p>:param names:
+The packages to be imported.</p>
+<p>:param lazy:
+If True, lazily load packages.
+Defaults to False.</p>
+<p>:param warn:
+If True, raise a warning if a package cannot be imported.
+Defaults to True.</p>
+<p>:param install:
+If True, attempt to install a missing package into the designated virtual environment.
+Defaults to True.</p>
+<p>:param venv:
+The virtual environment in which to search for packages and to install packages into.
+Defaults to 'mrsm'.</p>
+<p>:param split:
+If True, split packages' names on '.'.
+Defaults to True.</p></div>
+<details class="source">
+<summary>
+<span>Expand source code</span>
+</summary>
+<pre><code class="python">def attempt_import(
+        *names: List[str],
+        lazy: bool = True,
+        warn: bool = True,
+        install: bool = True,
+        venv: str = &#39;mrsm&#39;,
+        precheck: bool = True,
+        split: bool = True,
+        debug: bool = False
+    ) -&gt; Union[&#39;ModuleType&#39;, Tuple[&#39;ModuleType&#39;]]:
+    &#34;&#34;&#34;
+    Raise a warning if packages are not installed; otherwise import and return modules.
+    If lazy = True, return lazy-imported modules.
+
+    Returns tuple of modules if multiple names are provided, else returns one module.
+
+    Examples:
+
+        ```
+        &gt;&gt;&gt; pandas, sqlalchemy = attempt_import(&#39;pandas&#39;, &#39;sqlalchemy&#39;)
+        &gt;&gt;&gt; pandas = attempt_import(&#39;pandas&#39;)
+
+        ```
+
+    :param names:
+        The packages to be imported.
+
+    :param lazy:
+        If True, lazily load packages.
+        Defaults to False.
+
+    :param warn:
+        If True, raise a warning if a package cannot be imported.
+        Defaults to True.
+
+    :param install:
+        If True, attempt to install a missing package into the designated virtual environment.
+        Defaults to True.
+
+    :param venv:
+        The virtual environment in which to search for packages and to install packages into.
+        Defaults to &#39;mrsm&#39;.
+
+    :param split:
+        If True, split packages&#39; names on &#39;.&#39;.
+        Defaults to True.
+
+    &#34;&#34;&#34;
+
+    ### to prevent recursion, check if parent Meerschaum package is being imported
+    if names == (&#39;meerschaum&#39;,):
+        return _import_module(&#39;meerschaum&#39;)
+
+    if venv == &#39;mrsm&#39; and _import_hook_venv is not None:
+        if debug: f&#34;Import hook for virtual environmnt &#39;{_import_hook_venv}&#39; is active.&#34;
+        venv = _import_hook_venv
+
+    if venv is not None: activate_venv(venv=venv, debug=debug)
+    _warnings = _import_module(&#39;meerschaum.utils.warnings&#39;)
+    warn_function = _warnings.warn
+
+    def do_import(_name: str):
+        #  is_venv_active(venv, debug=debug)
+        if venv is not None: activate_venv(venv=venv, debug=debug)
+        ### determine the import method (lazy vs normal)
+        import_method = _import_module if not lazy else lazy_import
+        try:
+            mod = import_method(_name)
+        except Exception as e:
+            if warn:
+                warn_function(
+                    f&#34;Failed to import module &#39;{_name}&#39;.\nException:\n{e}&#34;,
+                    ImportWarning,
+                    stacklevel=(5 if lazy else 4)
+                )
+            mod = None
+        if venv is not None: deactivate_venv(venv=venv, debug=debug)
+        return mod
+
+    modules = []
+    for name in names:
+        root_name = name.split(&#39;.&#39;)[0] if split else name
+        if venv is not None: activate_venv(debug=debug)
+        if precheck is False:
+            found_modules = do_import(name) is not None
+        else:
+            try:
+                found_module = (importlib.util.find_spec(name) is not None)
+            except ModuleNotFoundError as e:
+                found_module = False
+        if not found_module:
+            install_name = root_name
+            if root_name in all_packages:
+                install_name = all_packages[root_name]
+            elif warn:
+                warn_function(
+                    f&#34;Package &#39;{install_name}&#39; is not declared in meerschaum.utils.packages.&#34;,
+                    ImportWarning,
+                    stacklevel=3
+                )
+            if install:
+                ### NOTE: pip_install deactivates venv, so deactivate must be False.
+                install_success = pip_install(install_name, venv=venv, deactivate=False, debug=debug)
+                if not install_success and warn:
+                    warn_function(
+                        f&#34;Failed to install &#39;{install_name}&#39;.&#34;,
+                        ImportWarning,
+                        stacklevel=3
+                    )
+            elif warn:
+                warn_function(
+                    (f&#34;\n\nMissing package &#39;{name}&#39;; features will not work correctly. &#34;
+                     f&#34;\n\nRun `pip install {install_name}` set install=True when calling attempt_import.\n&#34;),
+                    ImportWarning,
+                    stacklevel=3
+                )
+        modules.append(do_import(name))
+
+    if venv is not None: deactivate_venv(venv=venv, debug=debug)
+
+    modules = tuple(modules)
+    if len(modules) == 1: return modules[0]
+    return modules</code></pre>
+</details>
+</dd>
+<dt id="meerschaum.utils.yaml.yaml.dump"><code class="name flex">
+<span>def <span class="ident">dump</span></span>(<span>*args, stream=None, **kw)</span>
+</code></dt>
+<dd>
+<div class="desc"></div>
+<details class="source">
+<summary>
+<span>Expand source code</span>
+</summary>
+<pre><code class="python">def dump(*args, stream=None, **kw):
+    from meerschaum.utils.misc import filter_keywords
+    get_string = False
+    if stream is None and _import_name == &#39;ruamel.yaml&#39;:
+        stream = _lib.compat.StringIO()
+        get_string = True
+    result = _yaml.dump(*args, stream=stream, **filter_keywords(_yaml.dump, **kw))
+    if get_string:
+        return stream.getvalue()
+    return result</code></pre>
+</details>
+</dd>
+<dt id="meerschaum.utils.yaml.yaml.error"><code class="name flex">
+<span>def <span class="ident">error</span></span>(<span>message: str, exception_class=builtins.Exception, nopretty: bool = False, silent: bool = True, stack: bool = True)</span>
+</code></dt>
+<dd>
+<div class="desc"><p>Raise an error with custom Meerschaum formatting</p></div>
+<details class="source">
+<summary>
+<span>Expand source code</span>
+</summary>
+<pre><code class="python">def error(
+        message : str,
+        exception_class = Exception,
+        nopretty : bool = False,
+        silent : bool = True,
+        stack : bool = True,
+    ):
+    &#34;&#34;&#34;
+    Raise an error with custom Meerschaum formatting
+    &#34;&#34;&#34;
+    from meerschaum.utils.formatting import CHARSET, ANSI, colored, pprint, console, rich_traceback
+    from meerschaum.config import config as cf, get_config
+    import types, sys, inspect
+    error_config = get_config(&#39;system&#39;, &#39;errors&#39;, patch=True)
+    message = &#39; &#39; + error_config[CHARSET][&#39;icon&#39;] + &#39; &#39; + str(message)
+    exception = exception_with_traceback(message, exception_class, stacklevel=3)
+    color_message = str(message)
+    color_exception = exception_with_traceback(color_message, exception_class, stacklevel=3)
+    if ANSI and not nopretty and not stack:
+        color_message = &#39;\n&#39; + colored(message, *error_config[&#39;ansi&#39;][&#39;color&#39;])
+        color_exception = exception_with_traceback(color_message, exception_class, stacklevel=3)
+    try:
+        trace = rich_traceback.Traceback.extract(exception_class, exception, exception.__traceback__)
+        rtb = rich_traceback.Traceback(trace)
+    except:
+        trace, rtb = None, None
+    if trace is None or rtb is None:
+        nopretty = True
+    if not nopretty and stack:
+        console.print(rtb)
+    frame = sys._getframe(len(inspect.stack()) - 1)
+    #  sys.tracebacklimit = 0
+    #  help(sys.excepthook)
+    #  if silent: raise SilentException(message)
+    if silent: sys.tracebacklimit = 0
+    else: sys.tracebacklimit = None
+    raise color_exception</code></pre>
+</details>
+</dd>
+<dt id="meerschaum.utils.yaml.yaml.load"><code class="name flex">
+<span>def <span class="ident">load</span></span>(<span>*args, **kw)</span>
+</code></dt>
+<dd>
+<div class="desc"></div>
+<details class="source">
+<summary>
+<span>Expand source code</span>
+</summary>
+<pre><code class="python">def load(*args, **kw):
+    from meerschaum.utils.misc import filter_keywords
+    return _yaml.load(*args, **filter_keywords(_yaml.load, **kw))</code></pre>
+</details>
+</dd>
+<dt id="meerschaum.utils.yaml.yaml.safe_load"><code class="name flex">
+<span>def <span class="ident">safe_load</span></span>(<span>*args, **kw)</span>
+</code></dt>
+<dd>
+<div class="desc"></div>
+<details class="source">
+<summary>
+<span>Expand source code</span>
+</summary>
+<pre><code class="python">def safe_load(*args, **kw):
+    from meerschaum.utils.misc import filter_keywords
+    if _import_name == &#39;ruamel.yaml&#39;:
+        return _yaml.load(*args, **filter_keywords(_yaml.load, **kw))
+    return _yaml.safe_load(*args, **filter_keywords(_yaml.safe_load, **kw))</code></pre>
+</details>
+</dd>
+</dl>
+</dd>
+</dl>
+</section>
+</article>
+<nav id="sidebar">
+<h1>Index</h1>
+<div class="toc">
+<ul></ul>
+</div>
+<ul id="index">
+<li><h3>Super-module</h3>
+<ul>
+<li><code><a title="meerschaum.utils" href="index.html">meerschaum.utils</a></code></li>
+</ul>
+</li>
+<li><h3><a href="#header-classes">Classes</a></h3>
+<ul>
+<li>
+<h4><code><a title="meerschaum.utils.yaml.yaml" href="#meerschaum.utils.yaml.yaml">yaml</a></code></h4>
+<ul class="two-column">
+<li><code><a title="meerschaum.utils.yaml.yaml.all_packages" href="#meerschaum.utils.yaml.yaml.all_packages">all_packages</a></code></li>
+<li><code><a title="meerschaum.utils.yaml.yaml.attempt_import" href="#meerschaum.utils.yaml.yaml.attempt_import">attempt_import</a></code></li>
+<li><code><a title="meerschaum.utils.yaml.yaml.dump" href="#meerschaum.utils.yaml.yaml.dump">dump</a></code></li>
+<li><code><a title="meerschaum.utils.yaml.yaml.error" href="#meerschaum.utils.yaml.yaml.error">error</a></code></li>
+<li><code><a title="meerschaum.utils.yaml.yaml.k" href="#meerschaum.utils.yaml.yaml.k">k</a></code></li>
+<li><code><a title="meerschaum.utils.yaml.yaml.load" href="#meerschaum.utils.yaml.yaml.load">load</a></code></li>
+<li><code><a title="meerschaum.utils.yaml.yaml.safe_load" href="#meerschaum.utils.yaml.yaml.safe_load">safe_load</a></code></li>
+</ul>
+</li>
+</ul>
+</li>
+</ul>
+</nav>
+</main>
+<footer id="footer">
+<p>Generated by <a href="https://pdoc3.github.io/pdoc"><cite>pdoc</cite> 0.9.2</a>.</p>
+</footer>
+</body>
+</html>

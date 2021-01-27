@@ -6,10 +6,13 @@
 Install plugins
 """
 
+from __future__ import annotations
+from meerschaum.utils.typing import List, Any, SuccessTuple, Optional
+
 def install(
-        action : list = [''],
-        **kw
-    ) -> tuple:
+        action : List[str] = [],
+        **kw : Any
+    ) -> SuccessTuple:
     """
     Install Meerschaum plugins or Python packages.
     """
@@ -21,11 +24,11 @@ def install(
     return choose_subaction(action, options, **kw)
 
 def _install_plugins(
-        action : list = [],
-        repository : str = None,
-        debug : bool = None,
-        **kw
-    ) -> tuple:
+        action : List[str] = [],
+        repository : Optional[str] = None,
+        debug : bool = False,
+        **kw : Any
+    ) -> SuccessTuple:
     """
     Install a plugin.
 
@@ -65,11 +68,18 @@ def _install_plugins(
     return True, "Success"
 
 def _install_packages(
-        action : list = [],
+        action : List[str] = [],
         debug : bool = False,
-        **kw
+        **kw : Any
     ) -> tuple:
-    if len(action) == 0: return False, f"No packages to install"
+    """
+    Install PyPI packages into the Meerschaum virtual environment.
+
+    Example:
+        `install packages pandas numpy`
+    """
+    if len(action) == 0:
+        return False, f"No packages to install"
     from meerschaum.utils.warnings import info
     from meerschaum.config._paths import MRSM_VIRTENV_PATH
     import sys

@@ -30,7 +30,6 @@ def _entry(sysargs=[]):
         args['action'].insert(0, main_action)
 
     del args['action'][0]
-    if len(args['action']) == 0: args['action'] = ['']
 
     ### monkey patch socket if async is specified
     #  if 'unblock' in args:

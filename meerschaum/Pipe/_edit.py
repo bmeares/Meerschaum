@@ -25,7 +25,8 @@ def edit(
     parameters_filename = str(self) + '.yaml'
     parameters_path = pathlib.Path(os.path.join(PIPES_RESOURCES_PATH, parameters_filename))
     
-    import yaml
+    from meerschaum.utils.yaml import yaml
+    #  import yaml
 
     edit_header = "#######################################"
     for i in range(len(str(self))): edit_header += "#"
@@ -43,7 +44,7 @@ def edit(
     ### write parameters to yaml file
     with open(parameters_path, 'w') as f:
         f.write(edit_header)
-        yaml.dump(parameters, f)
+        yaml.dump(parameters, stream=f, sort_keys=False)
 
     ### only quit editing if yaml is valid
     editing = True

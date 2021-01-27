@@ -34,14 +34,18 @@
 &#34;&#34;&#34;
 Open subprocesses and read their output
 &#34;&#34;&#34;
+
+from __future__ import annotations
+from meerschaum.utils.typing import List, Any, SuccessTuple
+
 def os(
-        action : list = [&#39;&#39;],
-        sub_args : list = [],
+        action : List[str] = [],
+        sub_args : List[str] = [],
         debug : bool = False,
-        **kw
-    ):
+        **kw : Any
+    ) -&gt; SuccessTuple:
     &#34;&#34;&#34;
-    Launch a subprocess and read its output to stdout
+    Launch a subprocess and read its output to stdout.
     &#34;&#34;&#34;
     from meerschaum.config import system_config
 
@@ -61,7 +65,7 @@ def os(
 
     ### if actions are provided, don&#39;t launch interactive shell
     ### and read stdout, stderr and exit code
-    if action[0] != &#39;&#39;:
+    if len(action) &gt; 0:
         capture_stdout = subprocess.PIPE
         capture_stderr = subprocess.PIPE
         command_list += action + sub_args
@@ -119,22 +123,22 @@ def os(
 <h2 class="section-title" id="header-functions">Functions</h2>
 <dl>
 <dt id="meerschaum.actions.os.os"><code class="name flex">
-<span>def <span class="ident">os</span></span>(<span>action: list = [''], sub_args: list = [], debug: bool = False, **kw)</span>
+<span>def <span class="ident">os</span></span>(<span>action: List[str] = [], sub_args: List[str] = [], debug: bool = False, **kw: Any) ‑> Tuple[bool, str]</span>
 </code></dt>
 <dd>
-<div class="desc"><p>Launch a subprocess and read its output to stdout</p></div>
+<div class="desc"><p>Launch a subprocess and read its output to stdout.</p></div>
 <details class="source">
 <summary>
 <span>Expand source code</span>
 </summary>
 <pre><code class="python">def os(
-        action : list = [&#39;&#39;],
-        sub_args : list = [],
+        action : List[str] = [],
+        sub_args : List[str] = [],
         debug : bool = False,
-        **kw
-    ):
+        **kw : Any
+    ) -&gt; SuccessTuple:
     &#34;&#34;&#34;
-    Launch a subprocess and read its output to stdout
+    Launch a subprocess and read its output to stdout.
     &#34;&#34;&#34;
     from meerschaum.config import system_config
 
@@ -154,7 +158,7 @@ def os(
 
     ### if actions are provided, don&#39;t launch interactive shell
     ### and read stdout, stderr and exit code
-    if action[0] != &#39;&#39;:
+    if len(action) &gt; 0:
         capture_stdout = subprocess.PIPE
         capture_stderr = subprocess.PIPE
         command_list += action + sub_args

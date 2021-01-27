@@ -136,23 +136,23 @@ def get_tables(
             sqlalchemy.UniqueConstraint(&#39;connector_keys&#39;, &#39;metric_key&#39;, &#39;location_key&#39;, name=&#39;pipe_index&#39;)
         )
 
-        if debug:
-            dprint(f&#34;Tables to be created:&#34;)
-            pprint(_tables)
+        #  if debug:
+            #  dprint(f&#34;Tables to be created:&#34;)
+            #  pprint(_tables)
 
         try:
             conn.metadata.create_all(bind=conn.engine)
         except Exception as e:
             warn(str(e))
 
-        if debug: dprint(&#34;Done creating tables&#34;)
+        #  if debug: dprint(&#34;Done creating tables&#34;)
 
         ### store the table dict for reuse (per connector)
         connector_tables[conn] = _tables
 
-    if debug:
-        dprint(&#34;connector_tables&#34;)
-        pprint(connector_tables)
+    #  if debug:
+        #  dprint(&#34;connector_tables&#34;)
+        #  pprint(connector_tables)
     
     return connector_tables[conn]</code></pre>
 </details>
@@ -265,23 +265,23 @@ def get_tables(
             sqlalchemy.UniqueConstraint(&#39;connector_keys&#39;, &#39;metric_key&#39;, &#39;location_key&#39;, name=&#39;pipe_index&#39;)
         )
 
-        if debug:
-            dprint(f&#34;Tables to be created:&#34;)
-            pprint(_tables)
+        #  if debug:
+            #  dprint(f&#34;Tables to be created:&#34;)
+            #  pprint(_tables)
 
         try:
             conn.metadata.create_all(bind=conn.engine)
         except Exception as e:
             warn(str(e))
 
-        if debug: dprint(&#34;Done creating tables&#34;)
+        #  if debug: dprint(&#34;Done creating tables&#34;)
 
         ### store the table dict for reuse (per connector)
         connector_tables[conn] = _tables
 
-    if debug:
-        dprint(&#34;connector_tables&#34;)
-        pprint(connector_tables)
+    #  if debug:
+        #  dprint(&#34;connector_tables&#34;)
+        #  pprint(connector_tables)
     
     return connector_tables[conn]</code></pre>
 </details>

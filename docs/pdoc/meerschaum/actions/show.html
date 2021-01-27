@@ -38,9 +38,9 @@ from __future__ import annotations
 from meerschaum.utils.typing import SuccessTuple, Union, Sequence, Any, Optional
 
 def show(
-        action : Sequence[str] = [&#39;&#39;],
+        action : Sequence[str] = [],
         **kw : Any
-    ) -&gt; tuple:
+    ) -&gt; SuccessTuple:
     &#34;&#34;&#34;
     Show elements of a certain type.
 
@@ -85,7 +85,7 @@ def _show_help(**kw : Any) -&gt; SuccessTuple:
     return True, &#34;Success&#34;
 
 def _show_config(
-        action : Sequence[str] = [&#39;&#39;],
+        action : Sequence[str] = [],
         debug : bool = False,
         **kw : Any
     ) -&gt; SuccessTuple:
@@ -161,7 +161,7 @@ def _show_version(nopretty : bool = False, **kw : Any) -&gt; SuccessTuple:
     return (True, &#34;Success&#34;)
 
 def _show_connectors(
-        action : Sequence[str] = [&#39;&#39;],
+        action : Sequence[str] = [],
         debug : bool = False,
         **kw : Any
     ) -&gt; SuccessTuple:
@@ -204,7 +204,7 @@ def _show_arguments(
     return True, &#34;Success&#34;
 
 def _show_data(
-        action : Sequence[str] = [&#39;&#39;],
+        action : Sequence[str] = [],
         gui : bool = False,
         begin : Optional[datetime.datetime] = None,
         end : Optional[datetime.datetime] = None,
@@ -279,7 +279,7 @@ def _show_data(
     return True, &#34;Success&#34;
 
 def _show_plugins(
-        action : Sequence[str] = [&#39;&#39;],
+        action : Sequence[str] = [],
         repository : Optional[str] = None,
         debug : bool = False,
         **kw : Any
@@ -348,7 +348,7 @@ show.__doc__ += _choices_docstring(&#39;show&#39;)</code></pre>
 <h2 class="section-title" id="header-functions">Functions</h2>
 <dl>
 <dt id="meerschaum.actions.show.show"><code class="name flex">
-<span>def <span class="ident">show</span></span>(<span>action: Sequence[str] = [''], **kw: Any) ‑> tuple</span>
+<span>def <span class="ident">show</span></span>(<span>action: Sequence[str] = [], **kw: Any) ‑> Tuple[bool, str]</span>
 </code></dt>
 <dd>
 <div class="desc"><p>Show elements of a certain type.</p>
@@ -363,9 +363,9 @@ show.__doc__ += _choices_docstring(&#39;show&#39;)</code></pre>
 <span>Expand source code</span>
 </summary>
 <pre><code class="python">def show(
-        action : Sequence[str] = [&#39;&#39;],
+        action : Sequence[str] = [],
         **kw : Any
-    ) -&gt; tuple:
+    ) -&gt; SuccessTuple:
     &#34;&#34;&#34;
     Show elements of a certain type.
 

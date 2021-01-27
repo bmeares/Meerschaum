@@ -19,7 +19,9 @@ def pprint(
     from meerschaum.utils.packages import attempt_import
     from meerschaum.utils.formatting import ANSI, UNICODE, console
     from meerschaum.utils.warnings import error
-    from meerschaum.utils.misc import replace_password
+    from meerschaum.utils.misc import replace_password, dict_from_od
+    from collections import OrderedDict
+    import copy
     pprintpp = attempt_import('pprintpp', warn=False)
     rich_pretty = attempt_import('rich.pretty', warn=False)
     try:
@@ -35,6 +37,16 @@ def pprint(
     if ANSI: func = rich_pprint
     else: func = _pprint
 
+    args_copy = copy.deepcopy(args)
+    _args = []
+    for a in args:
+        c = a
+        ### convert OrderedDict into dict
+        if isinstance(a, OrderedDict) or issubclass(type(a), OrderedDict):
+            c = dict_from_od(c.copy())
+        _args.append(c)
+    args = _args
+
     _args = list(args)
     if detect_password:
         _args = []
@@ -45,12 +57,8 @@ def pprint(
             _args.append(c)
 
     ### filter out unsupported keywords
-    import inspect
-    func_params = inspect.signature(func).parameters
-    func_kw = dict()
-    for k, v in kw.items():
-        if k in func_params:
-            func_kw[k] = v
+    from meerschaum.utils.misc import filter_keywords
+    func_kw = filter_keywords(func, **kw)
     error_msg = None
     try:
         func(*_args, **func_kw)

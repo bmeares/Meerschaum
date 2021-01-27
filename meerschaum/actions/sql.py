@@ -6,16 +6,19 @@
 Directly interact with the SQL server via Meerschaum actions
 """
 
+from __future__ import annotations
+from meerschaum.utils.typing import SuccessTuple, Any, List
+
 exec_methods = {
     'read',
     'exec',
 }
 
 def sql(
-        action : list = [''],
+        action : List[str] = [],
         gui : bool = False,
         debug : bool = False,
-        **kw
+        **kw : Any
     ):
     """
     Execute a SQL query or launch an interactive CLI. All positional arguments are optional.
@@ -35,14 +38,14 @@ def sql(
     """
 
     ### input: `sql read` or `sql exec`
-    if action[0] in exec_methods and len(action) == 1:
+    if len(action) == 1 and action[0] in exec_methods:
         print(sql.__doc__)
         return (False, 'Query must not be empty')
 
     from meerschaum.connectors import get_connector
 
     ### input: `sql`
-    if action[0] == '':
+    if len(action) == 0:
         return get_connector().cli(debug=debug) 
 
     from meerschaum.config import config as cf, get_config
