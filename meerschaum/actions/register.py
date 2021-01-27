@@ -6,10 +6,13 @@
 Register new Pipes. Requires the API to be running.
 """
 
+from __future__ import annotations
+from meerschaum.utils.typing import SuccessTuple, Any, List, Optional
+
 def register(
-        action : list = [''],
-        **kw
-    ) -> tuple:
+        action : List[str] = [],
+        **kw : Any
+    ) -> SuccessTuple:
     """
     Register new elements.
     """
@@ -24,13 +27,13 @@ def register(
     return choose_subaction(action, options, **kw)
 
 def _register_pipes(
-        connector_keys : list = [],
-        metric_keys : list = [],
-        location_keys : list = [],
+        connector_keys : List[str] = [],
+        metric_keys : List[str] = [],
+        location_keys : List[str] = [],
         params : dict = dict(),
         debug : bool = False,
-        **kw
-    ) -> tuple:
+        **kw : Any
+    ) -> SuccessTuple:
     """
     Create and register Pipe objects.
     Required: connector_keys and metric_keys. If location_keys is empty, assume [None]
@@ -84,8 +87,8 @@ def _register_locations(**kw):
     pass
 
 def _register_plugins(
-        action : list = [],
-        repository : str = None,
+        action : List[str] = [],
+        repository : Optional[str] = None,
         shell : bool = False,
         debug : bool = False,
         **kw
@@ -148,7 +151,7 @@ def _register_users(
         repository : str = None,
         shell : bool = False,
         debug : bool = False,
-        **kw
+        **kw : Any
     ) -> tuple:
     """
     Register a new user to a Meerschaum repository.

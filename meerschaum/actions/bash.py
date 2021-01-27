@@ -25,11 +25,11 @@ def bash(
 
     if use_bash:
         command_list = ["bash"]
-        if action[0] != '':
+        if len(action) == 0:
             command_list += ["-c", " ".join(action + sub_args)]
     else:
         command_list = action + sub_args
-        if action[0] == '': command_list = 'bash'
+        if len(action) == 0: command_list = 'bash'
 
     if debug:
         dprint(f'action  : {action}')

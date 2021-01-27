@@ -208,9 +208,12 @@ def search_and_substitute_config(
     Example:
         MRSM{meerschaum:connectors:main:host} =&gt; cf[&#39;meerschaum&#39;][&#39;connectors&#39;][&#39;main&#39;][&#39;host&#39;]
     &#34;&#34;&#34;
+    from meerschaum.utils.packages import attempt_import
     try:
-        import yaml
-    except ImportError:
+        from meerschaum.utils.yaml import yaml
+        #  import yaml
+        #  ruamel_yaml = attempt_import()
+    except:
         return config
     needle = leading_key
     haystack = yaml.dump(config)
@@ -264,7 +267,7 @@ def search_and_substitute_config(
         haystack = haystack.replace(pattern, str(value))
 
     ### parse back into dict
-    return yaml.safe_load(haystack)
+    return yaml.load(haystack)
 
 def edit_file(
         path : &#39;pathlib.Path&#39;,
@@ -749,6 +752,38 @@ def replace_password(d : dict) -&gt; dict:
             _d[k] = replace_password(v)
         elif &#39;password&#39; in str(k).lower():
             _d[k] = &#39;&#39;.join([&#39;*&#39; for char in str(v)])
+    return _d
+
+def filter_keywords(
+        func : Callable[[Any], Any],
+        **kw : Any
+    ) -&gt; Mapping[str, Any]:
+    &#34;&#34;&#34;
+    Filter out unsupported keywords.
+
+    :param func:
+        The function to inspect.
+    &#34;&#34;&#34;
+    import inspect
+    func_params = inspect.signature(func).parameters
+    func_kw = dict()
+    for k, v in kw.items():
+        if k in func_params:
+            func_kw[k] = v
+    return func_kw
+
+def dict_from_od(od : collections.OrderedDict) -&gt; dict:
+    &#34;&#34;&#34;
+    Convert an ordered dict to a dict.
+    Does not mutate the original OrderedDict.
+    &#34;&#34;&#34;
+    from collections import OrderedDict
+    _d = dict(od)
+    for k, v in od.items():
+        if isinstance(v, OrderedDict) or (
+            issubclass(type(v), OrderedDict)
+        ):
+            _d[k] = dict_from_od(v)
     return _d</code></pre>
 </details>
 </section>
@@ -998,6 +1033,31 @@ and return a tuple of success code and message</p></div>
     return pd.DataFrame({dt_name : [now], val_name : [val]})</code></pre>
 </details>
 </dd>
+<dt id="meerschaum.utils.misc.dict_from_od"><code class="name flex">
+<span>def <span class="ident">dict_from_od</span></span>(<span>od: collections.OrderedDict) ‑> dict</span>
+</code></dt>
+<dd>
+<div class="desc"><p>Convert an ordered dict to a dict.
+Does not mutate the original OrderedDict.</p></div>
+<details class="source">
+<summary>
+<span>Expand source code</span>
+</summary>
+<pre><code class="python">def dict_from_od(od : collections.OrderedDict) -&gt; dict:
+    &#34;&#34;&#34;
+    Convert an ordered dict to a dict.
+    Does not mutate the original OrderedDict.
+    &#34;&#34;&#34;
+    from collections import OrderedDict
+    _d = dict(od)
+    for k, v in od.items():
+        if isinstance(v, OrderedDict) or (
+            issubclass(type(v), OrderedDict)
+        ):
+            _d[k] = dict_from_od(v)
+    return _d</code></pre>
+</details>
+</dd>
 <dt id="meerschaum.utils.misc.edit_file"><code class="name flex">
 <span>def <span class="ident">edit_file</span></span>(<span>path: "'pathlib.Path'", default_editor: str = 'pyvim', debug: bool = False)</span>
 </code></dt>
@@ -1049,6 +1109,36 @@ otherwise uses pyvim.</p></div>
     gevent, gevent_socket, gevent_monkey = attempt_import(&#39;gevent&#39;, &#39;gevent.socket&#39;, &#39;gevent.monkey&#39;)
     if not socket.socket is gevent_socket.socket:
         gevent_monkey.patch_all()</code></pre>
+</details>
+</dd>
+<dt id="meerschaum.utils.misc.filter_keywords"><code class="name flex">
+<span>def <span class="ident">filter_keywords</span></span>(<span>func: Callable[[Any], Any], **kw: Any) ‑> Mapping[str, Any]</span>
+</code></dt>
+<dd>
+<div class="desc"><p>Filter out unsupported keywords.</p>
+<p>:param func:
+The function to inspect.</p></div>
+<details class="source">
+<summary>
+<span>Expand source code</span>
+</summary>
+<pre><code class="python">def filter_keywords(
+        func : Callable[[Any], Any],
+        **kw : Any
+    ) -&gt; Mapping[str, Any]:
+    &#34;&#34;&#34;
+    Filter out unsupported keywords.
+
+    :param func:
+        The function to inspect.
+    &#34;&#34;&#34;
+    import inspect
+    func_params = inspect.signature(func).parameters
+    func_kw = dict()
+    for k, v in kw.items():
+        if k in func_params:
+            func_kw[k] = v
+    return func_kw</code></pre>
 </details>
 </dd>
 <dt id="meerschaum.utils.misc.filter_unseen_df"><code class="name flex">
@@ -1594,9 +1684,12 @@ from:
     Example:
         MRSM{meerschaum:connectors:main:host} =&gt; cf[&#39;meerschaum&#39;][&#39;connectors&#39;][&#39;main&#39;][&#39;host&#39;]
     &#34;&#34;&#34;
+    from meerschaum.utils.packages import attempt_import
     try:
-        import yaml
-    except ImportError:
+        from meerschaum.utils.yaml import yaml
+        #  import yaml
+        #  ruamel_yaml = attempt_import()
+    except:
         return config
     needle = leading_key
     haystack = yaml.dump(config)
@@ -1650,7 +1743,7 @@ from:
         haystack = haystack.replace(pattern, str(value))
 
     ### parse back into dict
-    return yaml.safe_load(haystack)</code></pre>
+    return yaml.load(haystack)</code></pre>
 </details>
 </dd>
 <dt id="meerschaum.utils.misc.sorted_dict"><code class="name flex">
@@ -1798,8 +1891,10 @@ from:
 <li><code><a title="meerschaum.utils.misc.choices_docstring" href="#meerschaum.utils.misc.choices_docstring">choices_docstring</a></code></li>
 <li><code><a title="meerschaum.utils.misc.choose_subaction" href="#meerschaum.utils.misc.choose_subaction">choose_subaction</a></code></li>
 <li><code><a title="meerschaum.utils.misc.df_from_literal" href="#meerschaum.utils.misc.df_from_literal">df_from_literal</a></code></li>
+<li><code><a title="meerschaum.utils.misc.dict_from_od" href="#meerschaum.utils.misc.dict_from_od">dict_from_od</a></code></li>
 <li><code><a title="meerschaum.utils.misc.edit_file" href="#meerschaum.utils.misc.edit_file">edit_file</a></code></li>
 <li><code><a title="meerschaum.utils.misc.enforce_gevent_monkey_patch" href="#meerschaum.utils.misc.enforce_gevent_monkey_patch">enforce_gevent_monkey_patch</a></code></li>
+<li><code><a title="meerschaum.utils.misc.filter_keywords" href="#meerschaum.utils.misc.filter_keywords">filter_keywords</a></code></li>
 <li><code><a title="meerschaum.utils.misc.filter_unseen_df" href="#meerschaum.utils.misc.filter_unseen_df">filter_unseen_df</a></code></li>
 <li><code><a title="meerschaum.utils.misc.flatten_pipes_dict" href="#meerschaum.utils.misc.flatten_pipes_dict">flatten_pipes_dict</a></code></li>
 <li><code><a title="meerschaum.utils.misc.generate_password" href="#meerschaum.utils.misc.generate_password">generate_password</a></code></li>

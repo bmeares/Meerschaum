@@ -87,6 +87,7 @@ def get_shell(sysargs : List[str] = [], debug : bool = False):
         import meerschaum.actions.shell as shell_pkg
         for a, f in actions.items():
             add_method_to_class(func=f, class_def=shell_pkg.Shell, method_name='do_' + a)
+        #  delattr(shell_pkg.Shell, '_alias_create')
 
         _shell = shell_pkg.Shell(actions, sysargs=sysargs)
 

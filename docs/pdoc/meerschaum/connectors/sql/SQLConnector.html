@@ -499,7 +499,8 @@ def metadata(self):
     sqlalchemy = attempt_import(&#39;sqlalchemy&#39;)
     import urllib
     if self.flavor in (&#39;timescaledb&#39;, &#39;postgresql&#39;):
-        psycopg2 = attempt_import(&#39;psycopg2&#39;, debug=self._debug)
+        ### trigger install if not installed
+        psycopg2 = attempt_import(&#39;psycopg2&#39;, debug=self._debug, lazy=False)
     ### supplement missing values with defaults (e.g. port number)
     #  print(self.__dict__)
     for a, value in flavor_configs[self.flavor][&#39;defaults&#39;].items():

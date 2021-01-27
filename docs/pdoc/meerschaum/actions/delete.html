@@ -39,9 +39,9 @@ from __future__ import annotations
 from meerschaum.utils.typing import Any, SuccessTuple, Union, Optional, List
 
 def delete(
-        action : list = [&#39;&#39;],
-        **kw
-    ):
+        action : List[str] = [],
+        **kw : Any
+    ) -&gt; SuccessTuple:
     &#34;&#34;&#34;
     Delete an element.
     &#34;&#34;&#34;
@@ -61,7 +61,10 @@ def _delete_pipes(
         yes : bool = False,
         force : bool = False,
         **kw
-    ) -&gt; tuple:
+    ) -&gt; SuccessTuple:
+    &#34;&#34;&#34;
+    Drop pipes and delete their registrations.
+    &#34;&#34;&#34;
     from meerschaum import get_pipes
     from meerschaum.utils.prompt import yes_no
     from meerschaum.utils.formatting import pprint
@@ -101,10 +104,10 @@ def _delete_config(
         yes : bool = False,
         force : bool = False,
         debug : bool = False,
-        **kw
-    ) -&gt; tuple:
+        **kw : Any
+    ) -&gt; SuccessTuple:
     &#34;&#34;&#34;
-    Delete configuration files
+    Delete configuration files.
     &#34;&#34;&#34;
     import os
     from meerschaum.utils.prompt import yes_no
@@ -129,12 +132,15 @@ def _delete_config(
     return True, &#34;Successfully deleted configuration files&#34;
 
 def _delete_plugins(
-        action : list = [&#39;&#39;],
+        action : List[str] = [],
         yes : bool = False,
         force : bool = False,
         debug : bool = False,
-        **kw
-    ) -&gt; tuple:
+        **kw : Any
+    ) -&gt; SuccessTuple:
+    &#34;&#34;&#34;
+    Remove installed plugins. Does not affect repository registrations.
+    &#34;&#34;&#34;
     import meerschaum.actions
     from meerschaum.actions import _plugins_names, plugins_modules
     from meerschaum.config._paths import PLUGINS_RESOURCES_PATH
@@ -186,14 +192,17 @@ def _delete_plugins(
     return True, &#34;Success&#34;
 
 def _delete_users(
-        action : list = [&#39;&#39;],
+        action : List[str] = [],
         repository : str = None,
         yes : bool = False,
         force : bool = False,
         shell : bool = False,
         debug : bool = False,
         **kw
-    ) -&gt; tuple:
+    ) -&gt; SuccessTuple:
+    &#34;&#34;&#34;
+    Delete plugins from a repository. Adequate permissions are required.
+    &#34;&#34;&#34;
     from meerschaum.config import get_config
     from meerschaum import get_connector
     from meerschaum.connectors.parse import parse_repo_keys
@@ -322,7 +331,7 @@ delete.__doc__ += _choices_docstring(&#39;delete&#39;)</code></pre>
 <h2 class="section-title" id="header-functions">Functions</h2>
 <dl>
 <dt id="meerschaum.actions.delete.delete"><code class="name flex">
-<span>def <span class="ident">delete</span></span>(<span>action: list = [''], **kw)</span>
+<span>def <span class="ident">delete</span></span>(<span>action: List[str] = [], **kw: Any) ‑> Tuple[bool, str]</span>
 </code></dt>
 <dd>
 <div class="desc"><p>Delete an element.</p>
@@ -333,9 +342,9 @@ delete.__doc__ += _choices_docstring(&#39;delete&#39;)</code></pre>
 <span>Expand source code</span>
 </summary>
 <pre><code class="python">def delete(
-        action : list = [&#39;&#39;],
-        **kw
-    ):
+        action : List[str] = [],
+        **kw : Any
+    ) -&gt; SuccessTuple:
     &#34;&#34;&#34;
     Delete an element.
     &#34;&#34;&#34;

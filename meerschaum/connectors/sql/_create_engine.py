@@ -84,7 +84,8 @@ def create_engine(
     sqlalchemy = attempt_import('sqlalchemy')
     import urllib
     if self.flavor in ('timescaledb', 'postgresql'):
-        psycopg2 = attempt_import('psycopg2', debug=self._debug)
+        ### trigger install if not installed
+        psycopg2 = attempt_import('psycopg2', debug=self._debug, lazy=False)
     ### supplement missing values with defaults (e.g. port number)
     #  print(self.__dict__)
     for a, value in flavor_configs[self.flavor]['defaults'].items():

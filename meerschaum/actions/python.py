@@ -5,11 +5,14 @@
 Similar to the `bash` action, run Python commands from the Meerschaum shell
 """
 
+from __future__ import annotations
+from meerschaum.utils.typing import SuccessTuple, Any, List
+
 def python(
-        action : list = [''],
+        action : List[str] = [],
         debug : bool = False,
-        **kw
-    ) -> tuple:
+        **kw : Any
+    ) -> SuccessTuple:
     """
     Launch a Python interpreter with Meerschaum imported. Commands are optional.
     Note that quotes must be escaped and commands must be separated by semicolons

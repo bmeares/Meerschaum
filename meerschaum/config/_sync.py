@@ -19,8 +19,9 @@ def sync_configs(
     """
     import os, sys
     try:
-        import yaml
-    except ImportError:
+        from meerschaum.utils.yaml import yaml
+        #  import yaml
+    except:
         return
     from meerschaum.config._patch import apply_patch_to_config
     import meerschaum.config
@@ -36,7 +37,7 @@ def sync_configs(
         header_comment = ""
         with open(path, 'r') as f:
             if yaml:
-                config = yaml.safe_load(f)
+                config = yaml.load(f)
             else:
                 print("PyYAML not installed!")
                 sys.exit()

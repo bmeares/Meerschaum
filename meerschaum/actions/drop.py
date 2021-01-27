@@ -9,7 +9,7 @@ from __future__ import annotations
 from meerschaum.utils.typing import SuccessTuple, Union, Any, Optional, Sequence
 
 def drop(
-        action : Sequence[str] = [''],
+        action : Sequence[str] = [],
         **kw : Any
     ) -> SuccessTuple:
     """
@@ -24,7 +24,7 @@ def drop(
     return choose_subaction(action, options, **kw)
 
 def _drop_pipes(
-        action : Sequence[str] = [''],
+        action : Sequence[str] = [],
         yes : bool = False,
         force : bool = False,
         debug : bool = False,
@@ -74,7 +74,7 @@ def _drop_pipes(
     return successes > 0, msg
 
 def _drop_tables(
-        action : Sequence[str] = [''],
+        action : Sequence[str] = [],
         **kw : Any
     ) -> SuccessTuple:
     """

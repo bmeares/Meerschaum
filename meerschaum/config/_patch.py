@@ -7,26 +7,28 @@ Functions for patching the configuration dictionary
 """
 import os
 try:
-    import yaml
-except ImportError:
+    from meerschaum.utils.yaml import yaml
+    #  import yaml
+except:
     yaml = None
 from meerschaum.config._paths import PATCH_FILENAME, PATCH_PATH, PERMANENT_PATCH_PATH
 patch_config = None
 if os.path.isfile(PATCH_PATH):
-    if yaml:
+    if yaml is not None:
         with open(PATCH_PATH, 'r') as f:
-            patch_text = f.read()
-        patch_config = yaml.safe_load(patch_text)
+            patch_config = yaml.load(f)
+            #  patch_text = f.read()
+        #  patch_config = yaml.load(patch_text)
 
 from meerschaum.utils.misc import search_and_substitute_config
 permanent_patch_config = None
 if PERMANENT_PATCH_PATH.exists():
-    if yaml:
+    if yaml is not None:
         with open(PERMANENT_PATCH_PATH, 'r') as f:
-            permanent_patch_text = f.read()
-        permanent_patch_config = search_and_substitute_config(
-            yaml.safe_load(permanent_patch_text)
-        )
+            #  permanent_patch_text = f.read()
+            permanent_patch_config = search_and_substitute_config(
+                yaml.load(f)
+            )
 else:
     permanent_patch_config = None
 
@@ -58,6 +60,6 @@ def write_patch(
         from meerschaum.utils.formatting import pprint
         print(f"Writing configuration to {PATCH_PATH}:", file=sys.stderr)
         pprint(patch, stream=sys.stderr)
-    if yaml:
+    if yaml is not None:
         with open(PATCH_PATH, 'w') as f:
-            yaml.dump(patch, f, sort_keys=False)
+            yaml.dump(patch, stream=f, sort_keys=False)

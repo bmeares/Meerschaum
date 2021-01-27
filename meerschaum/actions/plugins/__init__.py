@@ -9,7 +9,11 @@ Handle plugins imports here.
 from __future__ import annotations
 from meerschaum.utils.typing import Callable, Any, Union, Optional
 
-def make_action(function : Callable[[Any], Any], debug : bool = False):
+def make_action(
+        function : Callable[[Any], Any],
+        shell : bool = False,
+        debug : bool = False
+    ) -> Callable[[Any], Any]:
     """
     Make a function a Meerschaum action. Useful for plugins that are adding multiple actions.
 
@@ -32,8 +36,9 @@ def make_action(function : Callable[[Any], Any], debug : bool = False):
     if function.__name__ not in meerschaum.actions.__all__:
         meerschaum.actions.__all__.append(function.__name__)
     meerschaum.actions.actions[function.__name__] = function
-    add_method_to_class(function, shell_pkg.Shell)
-    add_method_to_class(function, meerschaum.actions.get_shell(debug=debug), 'do_' + function.__name__)
+    #  add_method_to_class(function, shell_pkg.Shell)
+    #  if shell and meerschaum.actions._shell is not None:
+        #  add_method_to_class(function, meerschaum.actions.get_shell(debug=debug), 'do_' + function.__name__)
     return function
 
 def import_plugins() -> Optional['ModuleType']:
@@ -57,7 +62,7 @@ def import_plugins() -> Optional['ModuleType']:
 
     return plugins
 
-def load_plugins(debug : bool = False):
+def load_plugins(debug : bool = False, shell : bool = False):
     ### append the plugins modules
     from inspect import isfunction, getmembers
     import meerschaum.actions
@@ -74,7 +79,7 @@ def load_plugins(debug : bool = False):
         for name, func in getmembers(module):
             if not isfunction(func): continue
             if name == module.__name__.split('.')[-1]:
-                make_action(func, debug=debug)
+                make_action(func, shell=shell, debug=debug)
 
 def get_plugins_names() -> Optional[List[str]]:
     from meerschaum.utils.packages import get_modules_from_package

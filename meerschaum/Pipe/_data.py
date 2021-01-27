@@ -6,15 +6,16 @@
 Functions for getting Pipe data
 """
 
+from __future__ import annotations
 from meerschaum.utils.typing import Optional
 
 def get_data(
         self,
-        begin : Optional['datetime.datetime'] = None,
-        end : Optional['datetime.datetime'] = None,
+        begin : Optional[datetime.datetime] = None,
+        end : Optional[datetime.datetime] = None,
         refresh : bool = False,
         debug : bool = False
-    ) -> Optional['pandas.DataFrame']:
+    ) -> Optional[pandas.DataFrame]:
     """
     Get data from the instance connector.
     """
@@ -48,10 +49,12 @@ def get_backtrack_data(
 
         E.g. begin = 02:00
 
+        ```
         Search this region.           Ignore this, even if there's data.
-       /  /  /  /  /  /  /  /  /  |
-       -----|----------|----------|----------|----------|----------|
-          00:00      01:00      02:00      03:00      04:00      05:00
+        /  /  /  /  /  /  /  /  /  |
+        -----|----------|----------|----------|----------|----------|
+           00:00      01:00      02:00      03:00      04:00      05:00
+        ```
 
     :param debug: Verbosity toggle.
     """

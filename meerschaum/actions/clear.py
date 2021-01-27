@@ -5,10 +5,12 @@
 Functions for clearing elements
 """
 
+from meerschaum.utils.typing import List, SuccessTuple, Any
+
 def clear(
-    action : list = [''],
-    **kw
-) -> tuple:
+        action : List[str] = [],
+        **kw : Any
+    ) -> SuccessTuple:
     """
     Clear pipes of their data, or clear the screen.
     """
@@ -23,10 +25,11 @@ def clear(
     return choose_subaction(action, options, **kw)
 
 def _clear_pipes(
-    action : list = [''],
-    **kw
-) -> tuple:
+        action : List[str] = [],
+        **kw : Any
+    ) -> SuccessTuple:
     """
+    Clear pipes' data without dropping any tables.
     """
     return False, "Not implemented"
 

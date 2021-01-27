@@ -38,10 +38,13 @@ Synchronize Pipes&#39; data with sources
 NOTE: `sync` required a SQL connection and is not intended for client use
 &#34;&#34;&#34;
 
+from __future__ import annotations
+from meerschaum.utils.typing import SuccessTuple, Any, List
+
 def sync(
-        action : list = [&#39;&#39;],
-        **kw
-    ) -&gt; tuple:
+        action : List[str] = [],
+        **kw : Any
+    ) -&gt; SuccessTuple:
     &#34;&#34;&#34;
     Sync elements
     &#34;&#34;&#34;
@@ -146,7 +149,7 @@ def _sync_pipes(
         min_seconds : int = 1,
         debug : bool = False,
         **kw
-    ) -&gt; tuple:
+    ) -&gt; SuccessTuple:
     &#34;&#34;&#34;
     Fetch new data for Pipes
     &#34;&#34;&#34;
@@ -204,7 +207,7 @@ sync.__doc__ += _choices_docstring(&#39;sync&#39;)</code></pre>
 <h2 class="section-title" id="header-functions">Functions</h2>
 <dl>
 <dt id="meerschaum.actions.sync.sync"><code class="name flex">
-<span>def <span class="ident">sync</span></span>(<span>action: list = [''], **kw) ‑> tuple</span>
+<span>def <span class="ident">sync</span></span>(<span>action: List[str] = [], **kw: Any) ‑> Tuple[bool, str]</span>
 </code></dt>
 <dd>
 <div class="desc"><p>Sync elements</p>
@@ -215,9 +218,9 @@ sync.__doc__ += _choices_docstring(&#39;sync&#39;)</code></pre>
 <span>Expand source code</span>
 </summary>
 <pre><code class="python">def sync(
-        action : list = [&#39;&#39;],
-        **kw
-    ) -&gt; tuple:
+        action : List[str] = [],
+        **kw : Any
+    ) -&gt; SuccessTuple:
     &#34;&#34;&#34;
     Sync elements
     &#34;&#34;&#34;

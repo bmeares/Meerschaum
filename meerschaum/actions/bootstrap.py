@@ -10,7 +10,7 @@ from __future__ import annotations
 from meerschaum.utils.typing import Union, Any, Sequence, SuccessTuple, Optional
 
 def bootstrap(
-        action : Sequence[str] = [''],
+        action : Sequence[str] = [],
         **kw : Any
     ) -> SuccessTuple:
     """

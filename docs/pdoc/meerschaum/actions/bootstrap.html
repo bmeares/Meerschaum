@@ -41,7 +41,7 @@ from __future__ import annotations
 from meerschaum.utils.typing import Union, Any, Sequence, SuccessTuple, Optional
 
 def bootstrap(
-        action : Sequence[str] = [&#39;&#39;],
+        action : Sequence[str] = [],
         **kw : Any
     ) -&gt; SuccessTuple:
     &#34;&#34;&#34;
@@ -344,7 +344,7 @@ bootstrap.__doc__ += _choices_docstring(&#39;bootstrap&#39;)</code></pre>
 <h2 class="section-title" id="header-functions">Functions</h2>
 <dl>
 <dt id="meerschaum.actions.bootstrap.bootstrap"><code class="name flex">
-<span>def <span class="ident">bootstrap</span></span>(<span>action: Sequence[str] = [''], **kw: Any) ‑> Tuple[bool, str]</span>
+<span>def <span class="ident">bootstrap</span></span>(<span>action: Sequence[str] = [], **kw: Any) ‑> Tuple[bool, str]</span>
 </code></dt>
 <dd>
 <div class="desc"><p>Bootstrap an element (pipe, configuration).</p>
@@ -359,7 +359,7 @@ bootstrap.__doc__ += _choices_docstring(&#39;bootstrap&#39;)</code></pre>
 <span>Expand source code</span>
 </summary>
 <pre><code class="python">def bootstrap(
-        action : Sequence[str] = [&#39;&#39;],
+        action : Sequence[str] = [],
         **kw : Any
     ) -&gt; SuccessTuple:
     &#34;&#34;&#34;

@@ -5,14 +5,18 @@
 """
 Open subprocesses and read their output
 """
+
+from __future__ import annotations
+from meerschaum.utils.typing import List, Any, SuccessTuple
+
 def os(
-        action : list = [''],
-        sub_args : list = [],
+        action : List[str] = [],
+        sub_args : List[str] = [],
         debug : bool = False,
-        **kw
-    ):
+        **kw : Any
+    ) -> SuccessTuple:
     """
-    Launch a subprocess and read its output to stdout
+    Launch a subprocess and read its output to stdout.
     """
     from meerschaum.config import system_config
 
@@ -32,7 +36,7 @@ def os(
 
     ### if actions are provided, don't launch interactive shell
     ### and read stdout, stderr and exit code
-    if action[0] != '':
+    if len(action) > 0:
         capture_stdout = subprocess.PIPE
         capture_stderr = subprocess.PIPE
         command_list += action + sub_args

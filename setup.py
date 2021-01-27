@@ -37,12 +37,6 @@ extras = {}
 for group in packages:
     extras[group] = [ install_name for import_name, install_name in packages[group].items() ]
 
-full = list()
-for group, import_names in packages.items():
-    if group == 'cli': continue ### skip pgcli because it fails to install if postgres utils aren't installed
-    full += [ install_name for import_name, install_name in import_names.items() ]
-extras['full'] = full
-
 with open('README.md', 'r') as f:
     readme = f.read()
 

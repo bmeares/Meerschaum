@@ -6,14 +6,17 @@
 Functions for running the Docker Compose stack
 """
 
+from __future__ import annotations
+from meerschaum.utils.typing import SuccessTuple, Any, List
+
 def stack(
-        action : list = [''],
+        action : List[str] = [],
         sub_args : list = [],
         yes : bool = False,
         force : bool = False,
         debug : bool = False,
-        **kw
-    ) -> tuple:
+        **kw : Any
+    ) -> SuccessTuple:
     """
     Control the Meerschaum stack with Docker Compose.
     Usage: `stack {command}`

@@ -34,11 +34,14 @@
 Similar to the `bash` action, run Python commands from the Meerschaum shell
 &#34;&#34;&#34;
 
+from __future__ import annotations
+from meerschaum.utils.typing import SuccessTuple, Any, List
+
 def python(
-        action : list = [&#39;&#39;],
+        action : List[str] = [],
         debug : bool = False,
-        **kw
-    ) -&gt; tuple:
+        **kw : Any
+    ) -&gt; SuccessTuple:
     &#34;&#34;&#34;
     Launch a Python interpreter with Meerschaum imported. Commands are optional.
     Note that quotes must be escaped and commands must be separated by semicolons
@@ -113,7 +116,7 @@ def python(
 <h2 class="section-title" id="header-functions">Functions</h2>
 <dl>
 <dt id="meerschaum.actions.python.python"><code class="name flex">
-<span>def <span class="ident">python</span></span>(<span>action: list = [''], debug: bool = False, **kw) ‑> tuple</span>
+<span>def <span class="ident">python</span></span>(<span>action: List[str] = [], debug: bool = False, **kw: Any) ‑> Tuple[bool, str]</span>
 </code></dt>
 <dd>
 <div class="desc"><p>Launch a Python interpreter with Meerschaum imported. Commands are optional.
@@ -134,10 +137,10 @@ Note that quotes must be escaped and commands must be separated by semicolons</p
 <span>Expand source code</span>
 </summary>
 <pre><code class="python">def python(
-        action : list = [&#39;&#39;],
+        action : List[str] = [],
         debug : bool = False,
-        **kw
-    ) -&gt; tuple:
+        **kw : Any
+    ) -&gt; SuccessTuple:
     &#34;&#34;&#34;
     Launch a Python interpreter with Meerschaum imported. Commands are optional.
     Note that quotes must be escaped and commands must be separated by semicolons

@@ -56,11 +56,11 @@ def bash(
 
     if use_bash:
         command_list = [&#34;bash&#34;]
-        if action[0] != &#39;&#39;:
+        if len(action) == 0:
             command_list += [&#34;-c&#34;, &#34; &#34;.join(action + sub_args)]
     else:
         command_list = action + sub_args
-        if action[0] == &#39;&#39;: command_list = &#39;bash&#39;
+        if len(action) == 0: command_list = &#39;bash&#39;
 
     if debug:
         dprint(f&#39;action  : {action}&#39;)
@@ -113,11 +113,11 @@ def bash(
 
     if use_bash:
         command_list = [&#34;bash&#34;]
-        if action[0] != &#39;&#39;:
+        if len(action) == 0:
             command_list += [&#34;-c&#34;, &#34; &#34;.join(action + sub_args)]
     else:
         command_list = action + sub_args
-        if action[0] == &#39;&#39;: command_list = &#39;bash&#39;
+        if len(action) == 0: command_list = &#39;bash&#39;
 
     if debug:
         dprint(f&#39;action  : {action}&#39;)

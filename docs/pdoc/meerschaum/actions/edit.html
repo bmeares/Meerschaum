@@ -35,11 +35,13 @@
 Functions for editing elements belong here.
 &#34;&#34;&#34;
 
+from __future__ import annotations
+from meerschaum.utils.typing import List, Any, SuccessTuple
 
 def edit(
-        action : list = [&#39;&#39;],
-        **kw
-    ) -&gt; tuple:
+        action : List[str] = [],
+        **kw : Any
+    ) -&gt; SuccessTuple:
     &#34;&#34;&#34;
     Edit an existing element.
     &#34;&#34;&#34;
@@ -53,23 +55,26 @@ def edit(
     }
     return choose_subaction(action, options, **kw)
 
-def _edit_stack(*args, **kw):
+def _edit_stack(*args, **kw) -&gt; SuccessTuple:
     from meerschaum.config.stack import edit_stack
     return edit_stack(*args, **kw)
 
-def _edit_config(*args, **kw):
+def _edit_config(*args, **kw) -&gt; SuccessTuple:
     from meerschaum.config._edit import edit_config
     return edit_config(*args, **kw)
 
-def _edit_grafana(*args, **kw):
+def _edit_grafana(*args, **kw) -&gt; SuccessTuple:
     from meerschaum.config.stack.grafana import edit_grafana
     return edit_grafana(*args, **kw)
 
 def _edit_pipes(
-        action : list = [&#39;&#39;],
+        action : List[str] = [],
         debug : bool = False,
-        **kw
-    ):
+        **kw : Any
+    ) -&gt; SuccessTuple:
+    &#34;&#34;&#34;
+    Open and edit pipes&#39; configuration files.
+    &#34;&#34;&#34;
     from meerschaum import get_pipes
     from meerschaum.utils.prompt import prompt
     from meerschaum.actions.shell.Shell import input_with_sigint
@@ -92,11 +97,14 @@ def _edit_pipes(
     return (True, &#34;Success&#34;)
 
 def _edit_users(
-        action : list = [&#39;&#39;],
+        action : List[str] = [],
         repository : str = None,
         debug : bool = False,
-        **kw
-    ) -&gt; tuple:
+        **kw : Any
+    ) -&gt; SuccessTuple:
+    &#34;&#34;&#34;
+    Edit users&#39; registration information.
+    &#34;&#34;&#34;
     from meerschaum.config import get_config
     from meerschaum import get_connector
     from meerschaum.connectors.parse import parse_repo_keys
@@ -148,7 +156,7 @@ edit.__doc__ += _choices_docstring(&#39;edit&#39;)</code></pre>
 <h2 class="section-title" id="header-functions">Functions</h2>
 <dl>
 <dt id="meerschaum.actions.edit.edit"><code class="name flex">
-<span>def <span class="ident">edit</span></span>(<span>action: list = [''], **kw) ‑> tuple</span>
+<span>def <span class="ident">edit</span></span>(<span>action: List[str] = [], **kw: Any) ‑> Tuple[bool, str]</span>
 </code></dt>
 <dd>
 <div class="desc"><p>Edit an existing element.</p>
@@ -159,9 +167,9 @@ edit.__doc__ += _choices_docstring(&#39;edit&#39;)</code></pre>
 <span>Expand source code</span>
 </summary>
 <pre><code class="python">def edit(
-        action : list = [&#39;&#39;],
-        **kw
-    ) -&gt; tuple:
+        action : List[str] = [],
+        **kw : Any
+    ) -&gt; SuccessTuple:
     &#34;&#34;&#34;
     Edit an existing element.
     &#34;&#34;&#34;
