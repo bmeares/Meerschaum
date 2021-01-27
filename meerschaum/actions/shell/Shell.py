@@ -66,11 +66,11 @@ class Shell(cmd.Cmd):
             _init = False
         
         if not _init:
-            try:
-                super().__init__()
-            except Exception as e:
-                print(e)
-                sys.exit(1)
+            #  try:
+            super().__init__()
+            #  except Exception as e:
+                #  print(e)
+                #  sys.exit(1)
 
         ### remove default commands from the Cmd class
         for command in commands_to_remove:
