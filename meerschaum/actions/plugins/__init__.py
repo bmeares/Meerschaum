@@ -19,9 +19,9 @@ def make_action(
 
     Usage:
     ```
-    >>> import meerschaum as mrsm
+    >>> from meerschaum.actions.plugins import make_action
     >>> 
-    >>> @mrsm.action
+    >>> @make_action
     ... def my_action(**kw):
     ...     print('foo')
     ...     return True, "Success"
@@ -41,17 +41,21 @@ def make_action(
         #  add_method_to_class(function, meerschaum.actions.get_shell(debug=debug), 'do_' + function.__name__)
     return function
 
+#  __path__ = None
 def import_plugins() -> Optional['ModuleType']:
     """
     Import the Meerschaum plugins directory.
     """
+    global __path__
     import sys
     from meerschaum.config._paths import (
         RESOURCES_PATH, PLUGINS_RESOURCES_PATH, PLUGINS_ARCHIVES_RESOURCES_PATH
     )
     from meerschaum.utils.warnings import error, warn
-    if str(RESOURCES_PATH) not in sys.path: sys.path.append(str(RESOURCES_PATH))
-    if str(RESOURCES_PATH) not in __path__: __path__.append(str(RESOURCES_PATH))
+    if str(RESOURCES_PATH) not in sys.path:
+        sys.path.insert(0, str(RESOURCES_PATH))
+    if str(RESOURCES_PATH) not in __path__:
+        __path__.append(str(RESOURCES_PATH))
     try:
         import plugins
     except ImportError:
@@ -59,6 +63,8 @@ def import_plugins() -> Optional['ModuleType']:
 
     if plugins is None:
         warn(f"Failed to import plugins.", stacklevel=3)
+
+    sys.path.remove(str(RESOURCES_PATH))
 
     return plugins
 

@@ -6,10 +6,6 @@
 Functions to handle debug statements
 """
 
-import sys, logging, inspect
-logging.basicConfig(format='%(message)s')
-log = logging.getLogger(__name__)
-
 def dprint(
         msg : str,
         leader : bool = True,
@@ -17,7 +13,7 @@ def dprint(
         color : 'str or list' = None,
         attrs : list = [],
         **kw
-    ):
+    ) -> None:
     try:
         from meerschaum.utils.formatting import CHARSET, ANSI, colored
     except ImportError:
@@ -26,6 +22,9 @@ def dprint(
     from meerschaum.config._paths import CONFIG_PATH, PERMANENT_PATCH_PATH
     ### NOTE: We can't import get_config for some reason
     from meerschaum.config import config as cf
+    import logging, sys, inspect
+    logging.basicConfig(format='%(message)s')
+    log = logging.getLogger(__name__)
 
     parent_globals = inspect.stack()[1][0].f_globals
     parent_package = parent_globals['__name__']

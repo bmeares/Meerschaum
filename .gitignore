@@ -4,6 +4,7 @@
 *.mrsm_history
 .pyinstaller
 .venv/
+.tuna/
 
 # Byte-compiled / optimized / DLL files
 __pycache__/
