@@ -25,9 +25,9 @@ warnings.filterwarnings(
     category = RuntimeWarning
 )
 
-import sys
-import inspect
+#  import sys
 class SilentException(Exception):
+    import inspect
     def __init__(self, msg : str = ''):
         try:
             ln = sys.exc_info()[-1].tb_lineno

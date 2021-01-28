@@ -179,15 +179,18 @@ def search_and_substitute_config(
     Example:
         MRSM{meerschaum:connectors:main:host} => cf['meerschaum']['connectors']['main']['host']
     """
-    from meerschaum.utils.packages import attempt_import
+    #  from meerschaum.utils.packages import attempt_import
+    import json
     try:
-        from meerschaum.utils.yaml import yaml
+        pass
+        #  from meerschaum.utils.yaml import yaml
         #  import yaml
         #  ruamel_yaml = attempt_import()
     except:
         return config
     needle = leading_key
-    haystack = yaml.dump(config)
+    #  haystack = yaml.dump(config)
+    haystack = json.dumps(config)
     mod_haystack = list(str(haystack))
     buff = str(needle)
     max_index = len(haystack) - len(buff)
@@ -238,7 +241,8 @@ def search_and_substitute_config(
         haystack = haystack.replace(pattern, str(value))
 
     ### parse back into dict
-    return yaml.load(haystack)
+    #  return yaml.load(haystack)
+    return json.loads(haystack)
 
 def edit_file(
         path : 'pathlib.Path',

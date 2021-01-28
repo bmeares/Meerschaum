@@ -16,7 +16,10 @@ _custom_actions = []
 
 ### build __all__ from other .py files in this package
 import sys
-__all__, modules = get_modules_from_package(sys.modules[__name__], names=True)
+__all__, modules = get_modules_from_package(
+    sys.modules[__name__],
+    names = True,
+)
 
 ### append the plugins modules
 #  from meerschaum.config._paths import (
@@ -40,7 +43,6 @@ __all__, modules = get_modules_from_package(sys.modules[__name__], names=True)
 ### build the actions dictionary by importing all
 ### functions that do not begin with '_' from all submodules
 from inspect import getmembers, isfunction
-import importlib
 actions = dict()
 for module in modules:
 

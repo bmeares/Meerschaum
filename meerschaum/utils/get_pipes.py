@@ -6,7 +6,6 @@
 Return a dictionary (or list) of pipe objects. See documentation below for more information.
 """
 
-from meerschaum.utils.debug import dprint
 from meerschaum.utils.typing import (
     Sequence, Optional, Union, Mapping, Any, InstanceConnector, PipesDict
 )
@@ -94,7 +93,6 @@ def get_pipes(
         database might not be running (like the API).
     """
 
-    from meerschaum.utils.misc import flatten_pipes_dict
     from meerschaum.config import get_config
     from meerschaum.utils.warnings import error
 
@@ -114,7 +112,9 @@ def get_pipes(
         if not valid_connector:
             error(f"Invalid instance connector: {mrsm_instance}")
         connector = mrsm_instance
-    if debug: dprint(f"Using instance connector: {connector}")
+    if debug:
+        from meerschaum.utils.debug import dprint
+        dprint(f"Using instance connector: {connector}")
     if not connector:
         error(f"Could not create connector from keys: '{mrsm_instance}'")
 
@@ -128,7 +128,8 @@ def get_pipes(
         params = params,
         debug = debug
     )
-    if result is None: error(f"Unable to build pipes!")
+    if result is None:
+        error(f"Unable to build pipes!")
 
     ### populate the `pipes` dictionary with Pipes based on the keys
     ### obtained from the chosen `method`.
@@ -143,7 +144,9 @@ def get_pipes(
 
         pipes[ck][mk][lk] = Pipe(ck, mk, lk, mrsm_instance=connector, debug=debug)
 
-    if not as_list: return pipes
+    if not as_list:
+        return pipes
+    from meerschaum.utils.misc import flatten_pipes_dict
     return flatten_pipes_dict(pipes)
 
 def methods(
