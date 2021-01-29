@@ -208,15 +208,18 @@ def search_and_substitute_config(
     Example:
         MRSM{meerschaum:connectors:main:host} =&gt; cf[&#39;meerschaum&#39;][&#39;connectors&#39;][&#39;main&#39;][&#39;host&#39;]
     &#34;&#34;&#34;
-    from meerschaum.utils.packages import attempt_import
+    #  from meerschaum.utils.packages import attempt_import
+    import json
     try:
-        from meerschaum.utils.yaml import yaml
+        pass
+        #  from meerschaum.utils.yaml import yaml
         #  import yaml
         #  ruamel_yaml = attempt_import()
     except:
         return config
     needle = leading_key
-    haystack = yaml.dump(config)
+    #  haystack = yaml.dump(config)
+    haystack = json.dumps(config)
     mod_haystack = list(str(haystack))
     buff = str(needle)
     max_index = len(haystack) - len(buff)
@@ -267,7 +270,8 @@ def search_and_substitute_config(
         haystack = haystack.replace(pattern, str(value))
 
     ### parse back into dict
-    return yaml.load(haystack)
+    #  return yaml.load(haystack)
+    return json.loads(haystack)
 
 def edit_file(
         path : &#39;pathlib.Path&#39;,
@@ -1684,15 +1688,18 @@ from:
     Example:
         MRSM{meerschaum:connectors:main:host} =&gt; cf[&#39;meerschaum&#39;][&#39;connectors&#39;][&#39;main&#39;][&#39;host&#39;]
     &#34;&#34;&#34;
-    from meerschaum.utils.packages import attempt_import
+    #  from meerschaum.utils.packages import attempt_import
+    import json
     try:
-        from meerschaum.utils.yaml import yaml
+        pass
+        #  from meerschaum.utils.yaml import yaml
         #  import yaml
         #  ruamel_yaml = attempt_import()
     except:
         return config
     needle = leading_key
-    haystack = yaml.dump(config)
+    #  haystack = yaml.dump(config)
+    haystack = json.dumps(config)
     mod_haystack = list(str(haystack))
     buff = str(needle)
     max_index = len(haystack) - len(buff)
@@ -1743,7 +1750,8 @@ from:
         haystack = haystack.replace(pattern, str(value))
 
     ### parse back into dict
-    return yaml.load(haystack)</code></pre>
+    #  return yaml.load(haystack)
+    return json.loads(haystack)</code></pre>
 </details>
 </dd>
 <dt id="meerschaum.utils.misc.sorted_dict"><code class="name flex">

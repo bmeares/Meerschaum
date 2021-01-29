@@ -35,10 +35,6 @@
 Functions to handle debug statements
 &#34;&#34;&#34;
 
-import sys, logging, inspect
-logging.basicConfig(format=&#39;%(message)s&#39;)
-log = logging.getLogger(__name__)
-
 def dprint(
         msg : str,
         leader : bool = True,
@@ -46,7 +42,7 @@ def dprint(
         color : &#39;str or list&#39; = None,
         attrs : list = [],
         **kw
-    ):
+    ) -&gt; None:
     try:
         from meerschaum.utils.formatting import CHARSET, ANSI, colored
     except ImportError:
@@ -55,6 +51,9 @@ def dprint(
     from meerschaum.config._paths import CONFIG_PATH, PERMANENT_PATCH_PATH
     ### NOTE: We can&#39;t import get_config for some reason
     from meerschaum.config import config as cf
+    import logging, sys, inspect
+    logging.basicConfig(format=&#39;%(message)s&#39;)
+    log = logging.getLogger(__name__)
 
     parent_globals = inspect.stack()[1][0].f_globals
     parent_package = parent_globals[&#39;__name__&#39;]
@@ -94,7 +93,7 @@ def dprint(
 <h2 class="section-title" id="header-functions">Functions</h2>
 <dl>
 <dt id="meerschaum.utils.debug.dprint"><code class="name flex">
-<span>def <span class="ident">dprint</span></span>(<span>msg: str, leader: bool = True, package: bool = True, color: str or list = None, attrs: list = [], **kw)</span>
+<span>def <span class="ident">dprint</span></span>(<span>msg: str, leader: bool = True, package: bool = True, color: str or list = None, attrs: list = [], **kw) ‑> NoneType</span>
 </code></dt>
 <dd>
 <div class="desc"></div>
@@ -109,7 +108,7 @@ def dprint(
         color : &#39;str or list&#39; = None,
         attrs : list = [],
         **kw
-    ):
+    ) -&gt; None:
     try:
         from meerschaum.utils.formatting import CHARSET, ANSI, colored
     except ImportError:
@@ -118,6 +117,9 @@ def dprint(
     from meerschaum.config._paths import CONFIG_PATH, PERMANENT_PATCH_PATH
     ### NOTE: We can&#39;t import get_config for some reason
     from meerschaum.config import config as cf
+    import logging, sys, inspect
+    logging.basicConfig(format=&#39;%(message)s&#39;)
+    log = logging.getLogger(__name__)
 
     parent_globals = inspect.stack()[1][0].f_globals
     parent_package = parent_globals[&#39;__name__&#39;]

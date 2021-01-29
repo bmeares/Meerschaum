@@ -35,7 +35,6 @@
 Return a dictionary (or list) of pipe objects. See documentation below for more information.
 &#34;&#34;&#34;
 
-from meerschaum.utils.debug import dprint
 from meerschaum.utils.typing import (
     Sequence, Optional, Union, Mapping, Any, InstanceConnector, PipesDict
 )
@@ -123,7 +122,6 @@ def get_pipes(
         database might not be running (like the API).
     &#34;&#34;&#34;
 
-    from meerschaum.utils.misc import flatten_pipes_dict
     from meerschaum.config import get_config
     from meerschaum.utils.warnings import error
 
@@ -143,7 +141,9 @@ def get_pipes(
         if not valid_connector:
             error(f&#34;Invalid instance connector: {mrsm_instance}&#34;)
         connector = mrsm_instance
-    if debug: dprint(f&#34;Using instance connector: {connector}&#34;)
+    if debug:
+        from meerschaum.utils.debug import dprint
+        dprint(f&#34;Using instance connector: {connector}&#34;)
     if not connector:
         error(f&#34;Could not create connector from keys: &#39;{mrsm_instance}&#39;&#34;)
 
@@ -157,7 +157,8 @@ def get_pipes(
         params = params,
         debug = debug
     )
-    if result is None: error(f&#34;Unable to build pipes!&#34;)
+    if result is None:
+        error(f&#34;Unable to build pipes!&#34;)
 
     ### populate the `pipes` dictionary with Pipes based on the keys
     ### obtained from the chosen `method`.
@@ -172,7 +173,9 @@ def get_pipes(
 
         pipes[ck][mk][lk] = Pipe(ck, mk, lk, mrsm_instance=connector, debug=debug)
 
-    if not as_list: return pipes
+    if not as_list:
+        return pipes
+    from meerschaum.utils.misc import flatten_pipes_dict
     return flatten_pipes_dict(pipes)
 
 def methods(
@@ -415,7 +418,6 @@ database might not be running (like the API).</p></div>
         database might not be running (like the API).
     &#34;&#34;&#34;
 
-    from meerschaum.utils.misc import flatten_pipes_dict
     from meerschaum.config import get_config
     from meerschaum.utils.warnings import error
 
@@ -435,7 +437,9 @@ database might not be running (like the API).</p></div>
         if not valid_connector:
             error(f&#34;Invalid instance connector: {mrsm_instance}&#34;)
         connector = mrsm_instance
-    if debug: dprint(f&#34;Using instance connector: {connector}&#34;)
+    if debug:
+        from meerschaum.utils.debug import dprint
+        dprint(f&#34;Using instance connector: {connector}&#34;)
     if not connector:
         error(f&#34;Could not create connector from keys: &#39;{mrsm_instance}&#39;&#34;)
 
@@ -449,7 +453,8 @@ database might not be running (like the API).</p></div>
         params = params,
         debug = debug
     )
-    if result is None: error(f&#34;Unable to build pipes!&#34;)
+    if result is None:
+        error(f&#34;Unable to build pipes!&#34;)
 
     ### populate the `pipes` dictionary with Pipes based on the keys
     ### obtained from the chosen `method`.
@@ -464,7 +469,9 @@ database might not be running (like the API).</p></div>
 
         pipes[ck][mk][lk] = Pipe(ck, mk, lk, mrsm_instance=connector, debug=debug)
 
-    if not as_list: return pipes
+    if not as_list:
+        return pipes
+    from meerschaum.utils.misc import flatten_pipes_dict
     return flatten_pipes_dict(pipes)</code></pre>
 </details>
 </dd>
