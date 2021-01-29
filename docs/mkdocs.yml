@@ -9,9 +9,8 @@ theme:
   favicon: assets/logo.ico
   logo: assets/logo_500x500.png
   name: material
-  # # palette:
-    # # scheme: slate
-    # # primary: brown
+  # palette:
+    # scheme: slate
 extra_css:
   - stylesheets/extra.css
 docs_dir: mkdocs
@@ -20,7 +19,8 @@ plugins:
   - autolinks
   # - add-number
   # - pdf-export
-  - awesome-pages
+  - awesome-pages:
+      collapse_single_pages: true
   # - mkdocstrings
   # - enumerate-headings:
       # toc_depth: 3
@@ -57,3 +57,5 @@ extra:
     link: https://www.linkedin.com/in/bennettmeares/
   - icon: fontawesome/brands/discord
     link: https://discord.gg/8U8qMUjvcc
+  - icon: fontawesome/solid/beer
+    link: https://www.buymeacoffee.com/bmeares

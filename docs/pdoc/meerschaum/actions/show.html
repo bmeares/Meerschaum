@@ -158,6 +158,7 @@ def _show_version(nopretty : bool = False, **kw : Any) -&gt; SuccessTuple:
         msg = &#34;Meerschaum v&#34; + version
         _print = info
     _print(msg)
+    import sys
     return (True, &#34;Success&#34;)
 
 def _show_connectors(

@@ -368,6 +368,7 @@ def import_rich(lazy: bool = True, **kw) -&gt; &#39;ModuleType&#39;:
     if not ANSI and not UNICODE:
         return None
 
+    typing_extensions = attempt_import(&#39;typing_extensions&#39;, lazy=False)
     pygments = attempt_import(&#39;pygments&#39;, lazy=False)
     return attempt_import(&#39;rich&#39;, lazy=lazy, **kw)
 
@@ -1088,6 +1089,7 @@ Default : ['method', 'builtin', 'class', 'function', 'package', 'module']</p></d
     if not ANSI and not UNICODE:
         return None
 
+    typing_extensions = attempt_import(&#39;typing_extensions&#39;, lazy=False)
     pygments = attempt_import(&#39;pygments&#39;, lazy=False)
     return attempt_import(&#39;rich&#39;, lazy=lazy, **kw)</code></pre>
 </details>
