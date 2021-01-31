@@ -55,15 +55,18 @@ def dprint(
     logging.basicConfig(format=&#39;%(message)s&#39;)
     log = logging.getLogger(__name__)
 
-    parent_globals = inspect.stack()[1][0].f_globals
+    parent_frame = inspect.stack()[1][0]
+    parent_info = inspect.getframeinfo(parent_frame)
+    parent_lineno = parent_info.lineno
+    parent_globals = parent_frame.f_globals
     parent_package = parent_globals[&#39;__name__&#39;]
     msg = str(msg)
     premsg = &#34;&#34;
     if package:
-        premsg = parent_package + &#39;:\n&#39;
+        premsg = parent_package + &#39;:&#39; + str(parent_lineno) + &#39;\n&#39;
     if leader:
         try:
-            debug_leader = cf[&#39;system&#39;][&#39;debug&#39;][CHARSET][&#39;icon&#39;]
+            debug_leader = cf[&#39;system&#39;][&#39;debug&#39;][CHARSET][&#39;icon&#39;] if cf is not None else &#39;&#39;
         except KeyError:
             print(&#34;Failed to load config. Please delete the following files and restart Meerschaum:&#34;)
             for p in [CONFIG_PATH, PERMANENT_PATCH_PATH]:
@@ -78,7 +81,7 @@ def dprint(
                 color = [color]
         else:
             try:
-                color = cf[&#39;system&#39;][&#39;debug&#39;][&#39;ansi&#39;][&#39;color&#39;]
+                color = cf[&#39;system&#39;][&#39;debug&#39;][&#39;ansi&#39;][&#39;color&#39;] if cf is not None else &#39;&#39;
             except KeyError:
                 color = []
         premsg = colored(premsg, *color)
@@ -121,15 +124,18 @@ def dprint(
     logging.basicConfig(format=&#39;%(message)s&#39;)
     log = logging.getLogger(__name__)
 
-    parent_globals = inspect.stack()[1][0].f_globals
+    parent_frame = inspect.stack()[1][0]
+    parent_info = inspect.getframeinfo(parent_frame)
+    parent_lineno = parent_info.lineno
+    parent_globals = parent_frame.f_globals
     parent_package = parent_globals[&#39;__name__&#39;]
     msg = str(msg)
     premsg = &#34;&#34;
     if package:
-        premsg = parent_package + &#39;:\n&#39;
+        premsg = parent_package + &#39;:&#39; + str(parent_lineno) + &#39;\n&#39;
     if leader:
         try:
-            debug_leader = cf[&#39;system&#39;][&#39;debug&#39;][CHARSET][&#39;icon&#39;]
+            debug_leader = cf[&#39;system&#39;][&#39;debug&#39;][CHARSET][&#39;icon&#39;] if cf is not None else &#39;&#39;
         except KeyError:
             print(&#34;Failed to load config. Please delete the following files and restart Meerschaum:&#34;)
             for p in [CONFIG_PATH, PERMANENT_PATCH_PATH]:
@@ -144,7 +150,7 @@ def dprint(
                 color = [color]
         else:
             try:
-                color = cf[&#39;system&#39;][&#39;debug&#39;][&#39;ansi&#39;][&#39;color&#39;]
+                color = cf[&#39;system&#39;][&#39;debug&#39;][&#39;ansi&#39;][&#39;color&#39;] if cf is not None else &#39;&#39;
             except KeyError:
                 color = []
         premsg = colored(premsg, *color)

@@ -10,6 +10,7 @@ scripts/clean.sh
 scripts/docs.sh
 
 ### experimental features must be enabled
+docker pull "$python_image"
 docker build --squash -t "$image" . || exit 1
 
 ### build the pip package

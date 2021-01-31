@@ -24,7 +24,7 @@ def edit_config(
     """
     import tempfile, os, importlib
     import meerschaum.config
-    from meerschaum.config import config as cf
+    from meerschaum.config import _config, set_config; cf = _config()
     from meerschaum.config._paths import CONFIG_PATH
     from meerschaum.utils.packages import reload_package
     from meerschaum.utils.misc import edit_file
@@ -32,7 +32,7 @@ def edit_config(
 
     if params is not None:
         from meerschaum.utils import apply_patch_to_config
-        cf = apply_patch_to_config(cf, params)
+        set_config(apply_patch_to_config(cf, params))
         if not write_config(cf, debug=debug):
             return False, "Failed to update config!"
     else:

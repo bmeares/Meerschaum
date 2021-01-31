@@ -298,8 +298,9 @@ default_pipes_config       = {
         },
     },
 }
-default_plugins_config     = {
-    'plugins'              : {},
+default_plugins_config     = {}
+default_experimental_config = {
+    'venv' : True,
 }
 
 from meerschaum.config._paths import RESOURCES_PATH, DEFAULT_CONFIG_PATH
@@ -310,6 +311,7 @@ default_config['meerschaum'] = default_meerschaum_config
 default_config['system'] = default_system_config
 default_config['pipes'] = default_pipes_config
 default_config['plugins'] = default_plugins_config
+default_config['experimental'] = default_experimental_config
 ### add configs from other packages
 from meerschaum.config.stack import default_stack_config
 default_config['stack'] = default_stack_config

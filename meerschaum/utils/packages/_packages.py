@@ -15,6 +15,8 @@ packages dictionary is structured in the following schema:
 
 packages = {
     'required' : {
+        #  'ruamel.yaml'       : 'ruamel.yaml',
+        'yaml'              : 'PyYAML>=5.3.1',
     },
     'formatting' : {
         'pprintpp'       : 'pprintpp',
@@ -26,12 +28,12 @@ packages = {
     },
     '_required' : {
         'pip'               : 'pip',
+        'update_checker'    : 'update-checker',
+        'semver'            : 'semver',
         'wheel'             : 'wheel',
         'typing_extensions' : 'typing_extensions',
         'virtualenv'        : 'virtualenv',
         'dateutil'          : 'python-dateutil',
-        'ruamel.yaml'       : 'ruamel.yaml',
-        #  'yaml'              : 'PyYAML>=5.3.1',
         'cascadict'         : 'cascadict',
         'requests'          : 'requests',
         'pyvim'             : 'pyvim',
@@ -60,6 +62,10 @@ packages = {
         'cx_Freeze'   : 'cx_Freeze>=6.5.1',
         'PyInstaller' : 'pyinstaller',
     },
+    'dev-tools' : {
+        'tuna'     : 'tuna',
+        'snakeviz' : 'snakeviz',
+    },
     'docs' : {
         'mkdocs'                      : 'mkdocs',
         'pdoc'                        : 'pdoc3',
@@ -74,7 +80,6 @@ packages['sql'] = {
     'databases'  : 'databases',
     'aiosqlite'  : 'aiosqlite',
     'asyncpg'    : 'asyncpg',
-
 }
 packages['sql'].update(packages['drivers'])
 packages['api'] = {
@@ -92,11 +97,12 @@ all_packages = dict()
 for group, import_names in packages.items():
     all_packages.update(import_names)
 
+skip_groups = {'docs', 'build', 'cli', 'dev-tools'}
 full = list()
 _full = dict()
 for group, import_names in packages.items():
     ### omit 'cli' and 'docs' from 'full'
-    if group in ('cli', 'docs'):
+    if group in skip_groups:
         continue
     full += [ install_name for import_name, install_name in import_names.items() ]
     for import_name, install_name in import_names.items():

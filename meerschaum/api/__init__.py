@@ -7,7 +7,7 @@ Meerschaum API backend. Start an API instance with `api start`.
 """
 
 __version__ = "0.0.14"
-from meerschaum.config import system_config, get_config
+from meerschaum.config import get_config
 from meerschaum.utils.packages import attempt_import
 from meerschaum.utils.get_pipes import get_pipes as get_pipes_sql
 import pathlib, os
@@ -100,7 +100,7 @@ def get_pipe(connector_keys, metric_key, location_key, refresh=False):
         return pipes(refresh=refresh)[connector_keys][metric_key][location_key]
     return p
 
-sys_config = system_config['api']
+sys_config = get_config('system', 'api')
 app = fastapi.FastAPI(title='Meerschaum API')
 
 fastapi_responses, fastapi_templating, fastapi_staticfiles = attempt_import(

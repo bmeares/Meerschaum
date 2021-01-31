@@ -17,7 +17,7 @@ async def startup():
     await retry_connect(get_connector(), debug=True)
 
 @app.on_event("shutdown")
-async def startup():
+async def shutdown():
     from meerschaum.config._paths import API_UVICORN_CONFIG_PATH
     try:
         dprint(f"Removing Uvicorn configuration ({API_UVICORN_CONFIG_PATH})")

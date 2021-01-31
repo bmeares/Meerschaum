@@ -174,7 +174,6 @@ def _delete_users(
     """
     Delete plugins from a repository. Adequate permissions are required.
     """
-    from meerschaum.config import get_config
     from meerschaum import get_connector
     from meerschaum.connectors.parse import parse_repo_keys
     from meerschaum.utils.prompt import yes_no, prompt
@@ -242,7 +241,7 @@ def _delete_connectors(
     """
     from meerschaum.utils.prompt import yes_no, prompt
     from meerschaum.connectors.parse import parse_connector_keys
-    from meerschaum.config import config as cf
+    from meerschaum.config import _config; cf = _config()
     from meerschaum.config._edit import write_config
     from meerschaum.utils.warnings import info, warn
     import os

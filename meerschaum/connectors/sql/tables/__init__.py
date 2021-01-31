@@ -107,23 +107,13 @@ def get_tables(
             sqlalchemy.UniqueConstraint('connector_keys', 'metric_key', 'location_key', name='pipe_index')
         )
 
-        #  if debug:
-            #  dprint(f"Tables to be created:")
-            #  pprint(_tables)
-
         try:
             conn.metadata.create_all(bind=conn.engine)
         except Exception as e:
             warn(str(e))
 
-        #  if debug: dprint("Done creating tables")
-
         ### store the table dict for reuse (per connector)
         connector_tables[conn] = _tables
 
-    #  if debug:
-        #  dprint("connector_tables")
-        #  pprint(connector_tables)
-    
     return connector_tables[conn]
 

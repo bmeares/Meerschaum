@@ -15,22 +15,48 @@ _import_module = importlib.import_module
 from meerschaum.utils.packages._packages import packages, all_packages
 import os, pathlib, sys, platform
 from meerschaum.utils.warnings import warn, error
-from meerschaum.utils.debug import dprint
 
 _import_hook_venv = None
 active_venvs = set()
-def need_update(package : 'ModuleType') -> bool:
+def need_update(
+        package : 'ModuleType',
+        split : bool = True,
+        debug : bool = False,
+    ) -> bool:
+    """
+    Check if a Meerschaum dependency needs an update.
+    """
+    if debug: from meerschaum.utils.debug import dprint
     import re
-    install_name = all_packages[package.__name__]
-    _install_no_version = re.split('[=<>, ]', install_name)[0]
-    version = install_name.replace(_install_no_version, '')
-    print(version)
-    update_checker = attempt_import('update_checker', lazy=False)
+    root_name = package.__name__.split('.')[0] if split else package.__version__
+    install_name = all_packages.get(root_name, root_name)
+
+    _install_no_version = re.split('[=<>,! ]', install_name)[0]
+    if debug: dprint(f"_install_no_version: {_install_no_version}")
+    required_version = install_name.replace(_install_no_version, '')
+    if debug: dprint(f"required_version: {required_version}")
+    update_checker = attempt_import('update_checker', lazy=False, check_update=False)
     checker = update_checker.UpdateChecker()
     try:
         version = package.__version__
     except:
         return False
+
+    result = checker.check(_install_no_version, version)
+    if result is None:
+        return False
+    if required_version:
+        semver = attempt_import('semver')
+        if debug:
+            dprint(f"Available version: {result.available_version}")
+            dprint(f"Required version: {required_version}")
+        return semver.match(result.available_version, required_version)
+
+    packaging_version = attempt_import('packaging.version')
+    return (
+        packaging_version.parse(result.available_version) > 
+        packaging_version.parse(version)
+    )
 
 def is_venv_active(
         venv: str = 'mrsm',
@@ -40,7 +66,9 @@ def is_venv_active(
     Check if a virtual environment is active
     """
     if venv is None: return False
-    if debug: dprint(f"Checking if virtual environment '{venv}' is active.")
+    if debug:
+        from meerschaum.utils.debug import dprint
+        dprint(f"Checking if virtual environment '{venv}' is active.")
     return venv in active_venvs
 
 
@@ -52,7 +80,9 @@ def deactivate_venv(
     Remove a virtual environment from sys.path (if it's been activated)
     """
     global active_venvs
-    if debug: dprint(f"Deactivating virtual environment '{venv}'...")
+    if debug:
+        from meerschaum.utils.debug import dprint
+        dprint(f"Deactivating virtual environment '{venv}'...")
     if venv in active_venvs: active_venvs.remove(venv)
     indices, new_path = [], []
     if sys.path is None: return False
@@ -77,6 +107,7 @@ def activate_venv(
     """
     global active_venvs
     if venv in active_venvs: return True
+    if debug: from meerschaum.utils.debug import dprint
     from meerschaum.config._paths import VIRTENV_RESOURCES_PATH
     virtualenv = attempt_import('virtualenv', install=True, venv=None, lazy=False, debug=debug)
     venv_path = pathlib.Path(os.path.join(VIRTENV_RESOURCES_PATH, venv))
@@ -130,28 +161,81 @@ def pip_install(
         args: List[str] = ['--upgrade'],
         venv: str = 'mrsm',
         deactivate: bool = True,
+        split : bool = True,
+        check_update : bool = True,
         debug: bool = False
     ) -> bool:
     """
     Install pip packages
     """
     try:
+        from meerschaum.utils.formatting import ANSI, UNICODE
+    except ImportError:
+        ANSI, UNICODE = False, False
+    _args = list(args)
+    try:
+        if venv is not None: activate_venv(venv=venv)
         import pip
+        if venv is not None and deactivate: deactivate_venv(venv=venv)
     except ImportError:
         import ensurepip
         ensurepip.bootstrap(upgrade=True, )
+        import pip
     if venv is not None:
         activate_venv(venv=venv, debug=debug)
-        if '--ignore-installed' not in args:
+        if '--ignore-installed' not in args and '-I' not in _args:
             args += ['--ignore-installed']
     ### NOTE: Added pip to be checked on each install. Too much?
-    if 'install' not in args:
-        args = ['install'] + args
-    success = run_python_package('pip', args + list(packages), venv=venv, debug=debug) == 0
+    if 'install' not in _args:
+        _install = ['install']
+        if check_update and need_update(pip, debug=debug):
+            _install.append('pip')
+        _args = _install + _args
+
+    if not ANSI and '--no-color' not in _args:
+        _args.append('--no-color')
+
+    if '--no-warn-conflicts' not in _args:
+        _args.append('--no-warn-conflicts')
+
+    if '--disable-pip-version-check' not in _args:
+        _args.append('--disable-pip-version-check')
+
+    #  if venv is not None and '--user' not in _args:
+        #  _args.append('--user')
+    if venv is not None and '--target' not in _args and '-t' not in _args:
+        import os
+        from meerschaum.config._paths import VIRTENV_RESOURCES_PATH
+        _args += ['--target', str(os.path.join(VIRTENV_RESOURCES_PATH, venv))]
+    if '--progress-bar' in _args:
+        _args.remove('--progress-bar')
+    if UNICODE:
+        _args += ['--progress-bar', 'emoji']
+    else:
+        _args += ['--progress-bar', 'ascii']
+    if debug:
+        if '-v' not in _args or '-vv' not in _args or '-vvv' not in _args:
+            _args.append('-vvv')
+    else:
+        if '-q' not in _args or '-qq' not in _args or '-qqq' not in _args:
+            _args.append('-qqq')
+
+    _packages = []
+    for p in packages:
+        root_name = p.split('.')[0] if split else p
+        install_name = all_packages.get(root_name, root_name)
+        _packages.append(install_name)
+
+    msg = f"Installing packages:"
+    for p in _packages:
+        msg += f'\n  - {p}'
+    print(msg)
+    success = run_python_package('pip', _args + _packages, venv=venv, debug=debug) == 0
     if venv is not None and deactivate:
         deactivate_venv(venv=venv, debug=debug)
+    msg = "Successfully installed packages." if success else "Failed to install packages."
+    print(msg)
     return success
-
 
 def run_python_package(
         package_name: str,
@@ -165,7 +249,6 @@ def run_python_package(
     """
     import sys, os
     from subprocess import call
-    from meerschaum.utils.debug import dprint
     from meerschaum.config._paths import VIRTENV_RESOURCES_PATH
     executable = (
         sys.executable if venv is None
@@ -176,7 +259,9 @@ def run_python_package(
         )
     )
     command = [executable, '-m', str(package_name)] + [str(a) for a in args]
-    if debug: print(command)
+    if debug:
+        from meerschaum.utils.debug import dprint
+        dprint(command)
     return call(command)
 
 
@@ -188,6 +273,7 @@ def attempt_import(
         venv: str = 'mrsm',
         precheck: bool = True,
         split: bool = True,
+        check_update : bool = False,
         debug: bool = False
     ) -> Union['ModuleType', Tuple['ModuleType']]:
     """
@@ -217,15 +303,26 @@ def attempt_import(
 
     :param install:
         If True, attempt to install a missing package into the designated virtual environment.
+        If `check_update` is True, install updates if available.
         Defaults to True.
 
     :param venv:
         The virtual environment in which to search for packages and to install packages into.
         Defaults to 'mrsm'.
 
+    :param precheck:
+        If True, attempt to find module before importing (necessary for checking if modules exist
+        and retaining lazy imports), otherwise assume lazy is False.
+        Defaults to True.        
+
     :param split:
         If True, split packages' names on '.'.
         Defaults to True.
+
+    :param check_update:
+        If True, check PyPI for the most recent version.
+        If `install` is True, install updates if available.
+        Defaults to False.
 
     """
 
@@ -260,44 +357,78 @@ def attempt_import(
         return mod
 
     modules = []
+    if venv is not None: activate_venv(debug=debug)
     for name in names:
+        ### Check if package is a declared dependency.
         root_name = name.split('.')[0] if split else name
-        if venv is not None: activate_venv(debug=debug)
+        install_name = all_packages.get(root_name, None)
+        if install_name is None and warn:
+            warn_function(
+                f"Package '{root_name}' is not declared in meerschaum.utils.packages.",
+                ImportWarning,
+                stacklevel = 3
+            )
+            install_name = root_name
+
+        ### Determine if the package exists.
         if precheck is False:
-            found_modules = do_import(name) is not None
+            found_module = do_import(name) is not None
         else:
             try:
                 found_module = (importlib.util.find_spec(name) is not None)
             except ModuleNotFoundError as e:
                 found_module = False
+
         if not found_module:
-            install_name = root_name
-            if root_name in all_packages:
-                install_name = all_packages[root_name]
-            elif warn:
-                warn_function(
-                    f"Package '{install_name}' is not declared in meerschaum.utils.packages.",
-                    ImportWarning,
-                    stacklevel=3
-                )
             if install:
                 ### NOTE: pip_install deactivates venv, so deactivate must be False.
-                install_success = pip_install(install_name, venv=venv, deactivate=False, debug=debug)
-                if not install_success and warn:
+                if warn and not pip_install(
+                    install_name,
+                    venv = venv,
+                    deactivate = False,
+                    split = split,
+                    check_update = check_update,
+                    debug = debug
+                ):
                     warn_function(
                         f"Failed to install '{install_name}'.",
                         ImportWarning,
-                        stacklevel=3
+                        stacklevel = 3
                     )
             elif warn:
+                ### Raise a warning if we can't find the package and install = False.
                 warn_function(
                     (f"\n\nMissing package '{name}'; features will not work correctly. "
-                     f"\n\nRun `pip install {install_name}` set install=True when calling attempt_import.\n"),
+                     f"\n\nSet install=True when calling attempt_import.\n"),
                     ImportWarning,
-                    stacklevel=3
+                    stacklevel = 3
                 )
-        modules.append(do_import(name))
 
+        ### Do the import. Will be lazy if lazy=True.
+        m = do_import(name)
+        modules.append(m)
+
+        ### Check for updates (skip this by default)
+        if check_update:
+            if need_update(m, split=split, debug=debug):
+                if install:
+                    if warn and not pip_install(
+                        install_name,
+                        venv = venv,
+                        split = split,
+                        deactivate = False,
+                        check_update = check_update,
+                        debug = debug
+                    ):
+                        warn_function(
+                                f"There's an update available for '{install_name}', " +
+                                "but it failed to install. " +
+                                "Try install via Meershaum with `install packages '{install_name}'`.",
+                                ImportWarning,
+                                stacklevel = 3
+                        )
+                elif warn:
+                    warn_function(f"There's an update available for '{m.__name__}'.", stack=False)
     if venv is not None: deactivate_venv(venv=venv, debug=debug)
 
     modules = tuple(modules)
@@ -359,7 +490,6 @@ def get_modules_from_package(
     names = False (default) : modules
     names = True            : (__all__, modules)
     """
-    from meerschaum.utils.debug import dprint
     from os.path import dirname, join, isfile, isdir, basename
     import glob, importlib
 
@@ -376,7 +506,9 @@ def get_modules_from_package(
            and not f.endswith('__pycache__')
     ]
 
-    if debug: dprint(_all)
+    if debug:
+        from meerschaum.utils.debug import dprint
+        dprint(str(_all))
     modules = []
     for module_name in [package.__name__ + "." + mod_name for mod_name in _all]:
         ### there's probably a better way than a try: catch but it'll do for now
@@ -428,7 +560,6 @@ def import_children(
 
     """
     import sys, inspect
-    from meerschaum.utils.debug import dprint
 
     ### if package_name and package are None, use parent
     if package is None and package_name is None:
@@ -462,7 +593,9 @@ def import_children(
         _all.append(ob[0])
         members.append(ob[1])
 
-    if debug: dprint(_all)
+    if debug:
+        from meerschaum.utils.debug import dprint
+        dprint(str(_all))
     ### set __all__ for import *
     setattr(sys.modules[package_name], '__all__', _all)
     return members
@@ -478,7 +611,6 @@ def reload_package(
     Recursively load a package's subpackages, even if they were not previously loaded
     """
     import os, types, importlib, sys
-    from meerschaum.utils.debug import dprint
     assert (hasattr(package, "__package__"))
     fn = package.__file__
     fn_dir = os.path.dirname(fn) + os.sep
@@ -561,7 +693,8 @@ class ImportHook(PathFinder):
 
 def install_import_hook(venv: str = 'mrsm', debug: bool = False) -> bool:
     global _import_hook_venv
-    from meerschaum.utils.debug import dprint
+    if debug:
+        from meerschaum.utils.debug import dprint
     from meerschaum.utils.warnings import warn
     if _import_hook_venv is not None and _import_hook_venv != venv:
         if venv != 'mrsm':
@@ -592,7 +725,9 @@ def install_import_hook(venv: str = 'mrsm', debug: bool = False) -> bool:
 
 def uninstall_import_hook(venv: str = 'mrsm', all_hooks: bool = False, debug: bool = False) -> bool:
     global _import_hook_venv
-    if debug: dprint(f"Uninstalling import hook (was set to {_import_hook_venv})...")
+    if debug:
+        from meerschaum.utils.debug import dprint
+        dprint(f"Uninstalling import hook (was set to {_import_hook_venv})...")
     importlib.import_module = _import_module
     _import_hook_venv = None
     return True

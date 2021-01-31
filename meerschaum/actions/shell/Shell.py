@@ -10,7 +10,7 @@ from meerschaum.utils.typing import Union, SuccessTuple, Any
 
 import sys, inspect
 from meerschaum.utils.packages import attempt_import
-from meerschaum.config import __doc__, __version__ as version, config as cf, get_config
+from meerschaum.config import __doc__, __version__ as version, get_config
 cmd = attempt_import(get_config('system', 'shell', 'cmd', patch=True), warn=False, lazy=True)
 if cmd is None or isinstance(cmd, dict):
     cmd = attempt_import('cmd')
