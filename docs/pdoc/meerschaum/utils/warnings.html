@@ -92,7 +92,7 @@ def warn(*args, stacklevel=2, stack=True, **kw):
         CHARSET = &#39;ascii&#39;
         ANSI = False
     try:
-        from meerschaum.config import config as cf
+        from meerschaum.config import _config; cf = _config()
         from meerschaum.config import get_config
     except ImportError:
         get_config = None
@@ -180,7 +180,7 @@ def error(
     &#34;&#34;&#34;
     from meerschaum.utils.formatting import CHARSET, ANSI, colored, pprint, get_console
     from meerschaum.utils.packages import import_rich
-    from meerschaum.config import config as cf, get_config
+    from meerschaum.config import get_config
     import types, sys, inspect
     rich = import_rich()
     error_config = get_config(&#39;system&#39;, &#39;errors&#39;, patch=True)
@@ -269,7 +269,7 @@ def info(message : str, **kw):
     &#34;&#34;&#34;
     from meerschaum.utils.formatting import CHARSET, ANSI, colored, pprint, get_console
     from meerschaum.utils.packages import import_rich
-    from meerschaum.config import config as cf, get_config
+    from meerschaum.config import get_config
     import types, sys, inspect
     rich = import_rich()
     error_config = get_config(&#39;system&#39;, &#39;errors&#39;, patch=True)
@@ -419,7 +419,7 @@ def info(message : str, **kw):
         CHARSET = &#39;ascii&#39;
         ANSI = False
     try:
-        from meerschaum.config import config as cf
+        from meerschaum.config import _config; cf = _config()
         from meerschaum.config import get_config
     except ImportError:
         get_config = None

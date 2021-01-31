@@ -121,15 +121,14 @@ def _show_version(nopretty : bool = False, **kw : Any) -> SuccessTuple:
     Show the Meerschaum doc string.
     """
     from meerschaum import __version__ as version
-    from meerschaum.utils.warnings import info
     _print = print
     if nopretty:
         msg = version
     else:
+        from meerschaum.utils.warnings import info
         msg = "Meerschaum v" + version
         _print = info
     _print(msg)
-    import sys
     return (True, "Success")
 
 def _show_connectors(

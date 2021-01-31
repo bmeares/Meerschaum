@@ -39,7 +39,7 @@ def api(
     if action[0] in boot_keywords:
         return _api_start(action=action, debug=debug, **kw)
 
-    from meerschaum.config import config as cf, get_config
+    from meerschaum.config import get_config
     from meerschaum.connectors import get_connector
     import requests
     if debug: from meerschaum.utils.formatting import pprint

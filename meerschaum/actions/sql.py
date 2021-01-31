@@ -48,7 +48,7 @@ def sql(
     if len(action) == 0:
         return get_connector().cli(debug=debug) 
 
-    from meerschaum.config import config as cf, get_config
+    from meerschaum.config import get_config
     from meerschaum.utils.debug import dprint
 
     method = None

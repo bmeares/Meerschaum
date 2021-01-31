@@ -47,7 +47,7 @@ def os(
     &#34;&#34;&#34;
     Launch a subprocess and read its output to stdout.
     &#34;&#34;&#34;
-    from meerschaum.config import system_config
+    from meerschaum.config import get_config
 
     import subprocess
     import sys
@@ -69,7 +69,7 @@ def os(
         capture_stdout = subprocess.PIPE
         capture_stderr = subprocess.PIPE
         command_list += action + sub_args
-        timeout = system_config[&#39;shell&#39;][&#39;timeout&#39;]
+        timeout = get_config(&#39;shell&#39;, &#39;timeout&#39;, patch=True)
     else:
         return False, os.__doc__
 
@@ -140,7 +140,7 @@ def os(
     &#34;&#34;&#34;
     Launch a subprocess and read its output to stdout.
     &#34;&#34;&#34;
-    from meerschaum.config import system_config
+    from meerschaum.config import get_config
 
     import subprocess
     import sys
@@ -162,7 +162,7 @@ def os(
         capture_stdout = subprocess.PIPE
         capture_stderr = subprocess.PIPE
         command_list += action + sub_args
-        timeout = system_config[&#39;shell&#39;][&#39;timeout&#39;]
+        timeout = get_config(&#39;shell&#39;, &#39;timeout&#39;, patch=True)
     else:
         return False, os.__doc__
 

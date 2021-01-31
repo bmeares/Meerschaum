@@ -18,7 +18,7 @@ def os(
     """
     Launch a subprocess and read its output to stdout.
     """
-    from meerschaum.config import system_config
+    from meerschaum.config import get_config
 
     import subprocess
     import sys
@@ -40,7 +40,7 @@ def os(
         capture_stdout = subprocess.PIPE
         capture_stderr = subprocess.PIPE
         command_list += action + sub_args
-        timeout = system_config['shell']['timeout']
+        timeout = get_config('shell', 'timeout', patch=True)
     else:
         return False, os.__doc__
 

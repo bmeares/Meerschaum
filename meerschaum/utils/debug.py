@@ -26,15 +26,18 @@ def dprint(
     logging.basicConfig(format='%(message)s')
     log = logging.getLogger(__name__)
 
-    parent_globals = inspect.stack()[1][0].f_globals
+    parent_frame = inspect.stack()[1][0]
+    parent_info = inspect.getframeinfo(parent_frame)
+    parent_lineno = parent_info.lineno
+    parent_globals = parent_frame.f_globals
     parent_package = parent_globals['__name__']
     msg = str(msg)
     premsg = ""
     if package:
-        premsg = parent_package + ':\n'
+        premsg = parent_package + ':' + str(parent_lineno) + '\n'
     if leader:
         try:
-            debug_leader = cf['system']['debug'][CHARSET]['icon']
+            debug_leader = cf['system']['debug'][CHARSET]['icon'] if cf is not None else ''
         except KeyError:
             print("Failed to load config. Please delete the following files and restart Meerschaum:")
             for p in [CONFIG_PATH, PERMANENT_PATCH_PATH]:
@@ -49,7 +52,7 @@ def dprint(
                 color = [color]
         else:
             try:
-                color = cf['system']['debug']['ansi']['color']
+                color = cf['system']['debug']['ansi']['color'] if cf is not None else ''
             except KeyError:
                 color = []
         premsg = colored(premsg, *color)

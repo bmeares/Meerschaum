@@ -94,9 +94,9 @@ def _bootstrap_connectors(
     Prompt the user for the details necessary to create a Connector.
     """
     from meerschaum.connectors.parse import is_valid_connector_keys
-    from meerschaum.connectors import connectors, get_connector
+    from meerschaum.connectors import connectors, get_connector, _config; cf = _config()
     from meerschaum.utils.prompt import prompt, yes_no, choose
-    from meerschaum.config import get_config, config as cf
+    from meerschaum.config import get_config
     from meerschaum.config._edit import write_config
     from meerschaum.utils.formatting import pprint
     from meerschaum.utils.formatting._shell import clear_screen
@@ -278,7 +278,7 @@ def _bootstrap_grafana(
     from meerschaum.utils.prompt import yes_no
     from meerschaum.config._paths import GRAFANA_DATASOURCE_PATH, GRAFANA_DASHBOARD_PATH
     from meerschaum.config._edit import general_write_config
-    from meerschaum.config import config as cf, get_config
+    from meerschaum.config import get_config
     from meerschaum.utils.debug import dprint
     answer = False
     if not yes:

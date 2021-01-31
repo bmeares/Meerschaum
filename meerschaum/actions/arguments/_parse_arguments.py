@@ -13,7 +13,7 @@ def parse_arguments(sysargs : list) -> dict:
     """
     Parse a list of arguments into standard Meerschaum arguments.
     """
-    from meerschaum.config import config as cf, get_config
+    from meerschaum.config import get_config
     import copy
 
     sub_arguments = []

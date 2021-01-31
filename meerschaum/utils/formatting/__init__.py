@@ -10,7 +10,7 @@ from meerschaum.utils.formatting._shell import make_header
 from meerschaum.utils.formatting._pprint import pprint
 from meerschaum.utils.formatting._pipes import pprint_pipes
 
-from meerschaum.config import config as cf
+from meerschaum.config import _config; cf = _config()
 
 #  ANSI = get_config('system', 'formatting', 'ansi', patch=True)
 ANSI = cf['system']['formatting']['ansi']
@@ -116,7 +116,7 @@ def print_tuple(tup : tuple, skip_common : bool = True, common_only : bool = Fal
     Print Meerschaum return tuple
     """
     from meerschaum.utils.formatting import ANSI, CHARSET, colored
-    from meerschaum.config import config as cf, get_config
+    from meerschaum.config import get_config
 
     try:
         status = 'success' if tup[0] else 'failure'

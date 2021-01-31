@@ -17,8 +17,6 @@ def bash(
     """
     Launch a bash shell as a Meershaum action
     """
-    from meerschaum.config import system_config
-
     import subprocess
     import sys
     from meerschaum.utils.debug import dprint

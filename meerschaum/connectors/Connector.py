@@ -29,7 +29,7 @@ class Connector:
             The label for the connection. Used as a key within config.yaml
 
         pandas : str
-            Custom pandas implementation name. Default is in system_config in meerschaum.config.
+            Custom pandas implementation name.
             May change to modin.pandas soon.
 
         If config.yaml is set for the given type and label, the hierarchy looks like so:
@@ -75,7 +75,7 @@ class Connector:
         if self.type in conn_configs and self.label in conn_configs[self.type]:
             self.__dict__.update(conn_configs[self.type][self.label])
 
-        ### load system config into self.system_config
+        ### load system config into self.sys_config
         ### (deep copy so future Connectors don't inherit changes)
         if self.type in connector_config:
             from copy import deepcopy

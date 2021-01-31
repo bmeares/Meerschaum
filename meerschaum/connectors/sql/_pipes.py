@@ -47,7 +47,8 @@ def register_pipe(
     if parameters is None:
         parameters = dict()
 
-    json, sqlalchemy = attempt_import('json', 'sqlalchemy')
+    import json
+    sqlalchemy = attempt_import('sqlalchemy')
     values = {
         'connector_keys' : pipe.connector_keys,
         'metric_key'     : pipe.metric_key,
@@ -100,7 +101,8 @@ def edit_pipe(
     from meerschaum.connectors.sql.tables import get_tables
     pipes = get_tables(mrsm_instance=self, debug=debug)['pipes']
 
-    json, sqlalchemy = attempt_import('json', 'sqlalchemy')
+    import json
+    sqlalchemy = attempt_import('sqlalchemy')
 
     values = {
         'parameters' : json.dumps(pipe.parameters),
@@ -144,7 +146,8 @@ def fetch_pipes_keys(
     from meerschaum.utils.warnings import error
     from meerschaum.utils.debug import dprint
     from meerschaum.utils.packages import attempt_import
-    json, sqlalchemy = attempt_import('json', 'sqlalchemy')
+    sqlalchemy = attempt_import('sqlalchemy')
+    import json
 
     ### Add three primary keys to params dictionary
     ###   (separated for convenience of arguments)
@@ -384,7 +387,8 @@ def get_pipe_id(
     Get a Pipe's ID from the pipes table.
     """
     from meerschaum.utils.packages import attempt_import
-    json, sqlalchemy = attempt_import('json', 'sqlalchemy')
+    import json
+    sqlalchemy = attempt_import('sqlalchemy')
     from meerschaum.connectors.sql.tables import get_tables
     pipes = get_tables()['pipes']
 

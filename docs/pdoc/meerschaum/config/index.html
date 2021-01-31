@@ -37,14 +37,22 @@ and if interactive, print the welcome message
 &#34;&#34;&#34;
 
 from meerschaum.config._version import __version__
-from meerschaum.config._read_yaml import read_config
 from meerschaum.config._edit import write_config
 
 import os
 
 ### apply config preprocessing (e.g. main to meta)
-from meerschaum.config._preprocess import preprocess_config
-config = preprocess_config(read_config())
+config = None
+def _config():
+    &#34;&#34;&#34;
+    Read and process the configuration file.
+    &#34;&#34;&#34;
+    global config
+    if config is None:
+        from meerschaum.config._preprocess import preprocess_config
+        from meerschaum.config._read_yaml import read_config
+        config = preprocess_config(read_config())
+    return config
 
 ### if patch.yaml exists, apply patch to config
 from meerschaum.config._paths import PERMANENT_PATCH_PATH
@@ -66,20 +74,16 @@ if permanent_patch_config is not None and PERMANENT_PATCH_PATH.exists():
     if PERMANENT_PATCH_PATH.exists(): os.remove(PERMANENT_PATCH_PATH)
     if DEFAULT_CONFIG_PATH.exists(): os.remove(DEFAULT_CONFIG_PATH)
 
-### if environment variable MEERSCHAUM_CONFIG is set, , patch config
-from meerschaum.utils.misc import string_to_dict
-import os
-environment_config = &#39;MEERSCHAUM_CONFIG&#39;
-if environment_config in os.environ:
-    try:
-        config = apply_patch_to_config(config, string_to_dict(str(os.environ[environment_config])))
-    except Exception as e:
-        print(
-            f&#34;Environment variable {environment_config} is set but cannot be parsed.\n&#34;
-            f&#34;Unset {environment_config} or change to JSON or simplified dictionary format (see --help, under params for formatting)\n&#34;
-            f&#34;{environment_config} is set to:\n{os.environ[environment_config]}\n&#34;
-            f&#34;Skipping patching os environment into config...&#34;
-        )
+def set_config(cf : dict) -&gt; dict:
+    &#34;&#34;&#34;
+    Set the configuration dictionary to a dictionary
+    &#34;&#34;&#34;
+    global config
+    if not isinstance(cf, dict):
+        from meerschaum.utils.warnings import error
+        error(f&#34;Invalid value for config: {cf}&#34;, stacklevel=3)
+    config = cf
+    return config
 
 def get_config(*keys, patch=False, debug=False):
     &#34;&#34;&#34;
@@ -91,7 +95,7 @@ def get_config(*keys, patch=False, debug=False):
     &#34;&#34;&#34;
     from meerschaum.utils.debug import dprint
     if debug: dprint(f&#34;Indexing keys: {keys}&#34;)
-    c = config
+    c = _config()
     invalid_keys = False
     if len(keys) &gt; 0:
         for k in keys:
@@ -119,7 +123,27 @@ def get_config(*keys, patch=False, debug=False):
                 sys.exit()
     return c
 
-system_config = get_config(&#39;system&#39;, patch=True)
+### If environment variable MEERSCHAUM_CONFIG is set, patch config before anything else.
+from meerschaum.utils.misc import string_to_dict
+import os
+environment_config = &#39;MEERSCHAUM_CONFIG&#39;
+if environment_config in os.environ:
+    try:
+        set_config(
+            apply_patch_to_config(
+                _config(),
+                string_to_dict(
+                    str(os.environ[environment_config])
+                )
+            )
+        )
+    except Exception as e:
+        print(
+            f&#34;Environment variable {environment_config} is set but cannot be parsed.\n&#34;
+            f&#34;Unset {environment_config} or change to JSON or simplified dictionary format (see --help, under params for formatting)\n&#34;
+            f&#34;{environment_config} is set to:\n{os.environ[environment_config]}\n&#34;
+            f&#34;Skipping patching os environment into config...&#34;
+        )
 
 ### if interactive shell, print welcome header
 import sys
@@ -131,13 +155,13 @@ except AttributeError:
     interactive = False
 if interactive:
     msg = __doc__
-    if config[&#39;system&#39;][&#39;formatting&#39;][&#39;ansi&#39;]:
-        try:
-            from more_termcolor import colored
-        except:
-            pass
-        else:
-            msg = colored(msg, &#39;bright blue&#39;, attrs=[&#39;bold&#39;])
+    #  if config[&#39;system&#39;][&#39;formatting&#39;][&#39;ansi&#39;]:
+        #  try:
+            #  from more_termcolor import colored
+        #  except:
+            #  pass
+        #  else:
+            #  msg = colored(msg, &#39;bright blue&#39;, attrs=[&#39;bold&#39;])
     print(msg, file=sys.stderr)</code></pre>
 </details>
 </section>
@@ -181,7 +205,7 @@ Raises a warning if invalid keys are provided.</p>
     &#34;&#34;&#34;
     from meerschaum.utils.debug import dprint
     if debug: dprint(f&#34;Indexing keys: {keys}&#34;)
-    c = config
+    c = _config()
     invalid_keys = False
     if len(keys) &gt; 0:
         for k in keys:
@@ -210,6 +234,27 @@ Raises a warning if invalid keys are provided.</p>
     return c</code></pre>
 </details>
 </dd>
+<dt id="meerschaum.config.set_config"><code class="name flex">
+<span>def <span class="ident">set_config</span></span>(<span>cf: dict) ‑> dict</span>
+</code></dt>
+<dd>
+<div class="desc"><p>Set the configuration dictionary to a dictionary</p></div>
+<details class="source">
+<summary>
+<span>Expand source code</span>
+</summary>
+<pre><code class="python">def set_config(cf : dict) -&gt; dict:
+    &#34;&#34;&#34;
+    Set the configuration dictionary to a dictionary
+    &#34;&#34;&#34;
+    global config
+    if not isinstance(cf, dict):
+        from meerschaum.utils.warnings import error
+        error(f&#34;Invalid value for config: {cf}&#34;, stacklevel=3)
+    config = cf
+    return config</code></pre>
+</details>
+</dd>
 </dl>
 </section>
 <section>
@@ -235,6 +280,7 @@ Raises a warning if invalid keys are provided.</p>
 <li><h3><a href="#header-functions">Functions</a></h3>
 <ul class="">
 <li><code><a title="meerschaum.config.get_config" href="#meerschaum.config.get_config">get_config</a></code></li>
+<li><code><a title="meerschaum.config.set_config" href="#meerschaum.config.set_config">set_config</a></code></li>
 </ul>
 </li>
 </ul>
