@@ -20,7 +20,11 @@ def get_pool(pool_class_name : str = 'ThreadPool', workers : int = None):
     def build_pool(workers):
         global pools
         from meerschaum.utils.packages import attempt_import
-        Pool = getattr(attempt_import('multiprocessing.pool'), pool_class_name)
+        try:
+            Pool = getattr(attempt_import('multiprocessing.pool', warn=False, venv=None, lazy=False), pool_class_name)
+        except:
+            Pool = getattr(attempt_import('multiprocessing.pool', warn=False, venv=None, lazy=False), 'ThreadPool')
+
         if workers is None:
             from multiprocessing import cpu_count
             workers = cpu_count()

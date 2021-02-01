@@ -12,7 +12,7 @@ from meerschaum.utils.packages import attempt_import
 from meerschaum.utils.get_pipes import get_pipes as get_pipes_sql
 import pathlib, os
 fastapi = attempt_import('fastapi', lazy=True)
-starlette_reponses = attempt_import('starlette.responses')
+starlette_reponses = attempt_import('starlette.responses', warn=False)
 python_multipart = attempt_import('multipart')
 
 fastapi_login = attempt_import('fastapi_login')
@@ -103,12 +103,20 @@ def get_pipe(connector_keys, metric_key, location_key, refresh=False):
 sys_config = get_config('system', 'api')
 app = fastapi.FastAPI(title='Meerschaum API')
 
-fastapi_responses, fastapi_templating, fastapi_staticfiles = attempt_import(
+(
+    fastapi_responses,
+    fastapi_templating,
+    fastapi_staticfiles,
+    fastapi_middleware_wsgi
+) = attempt_import(
     'fastapi.responses',
     'fastapi.templating',
-    'fastapi.staticfiles'
+    'fastapi.staticfiles',
+    'fastapi.middleware.wsgi'
 )
 jinja2 = attempt_import('jinja2')
+
+### TODO Add Django integration
 
 
 HTMLResponse = fastapi_responses.HTMLResponse

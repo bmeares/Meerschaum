@@ -6,7 +6,7 @@
 Register new Pipes
 """
 from meerschaum.utils.packages import attempt_import
-pydantic = attempt_import('pydantic')
+pydantic = attempt_import('pydantic', warn=False, debug=True)
 
 class MetaPipe(pydantic.BaseModel):
     connector_keys : str ### e.g. sql:main

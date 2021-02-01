@@ -23,7 +23,8 @@ def pprint_pipes(pipes : dict):
     rich = import_rich('rich', warn=False)
     Text = None
     if rich is not None:
-        from rich.text import Text
+        rich_text = attempt_import('rich.text')
+        Text = rich_text.Text
 
     icons = {'connector' : '', 'metric' : '', 'location' : '', 'key' : ''}
     styles = {'connector' : '', 'metric' : '', 'location' : '', 'key' : ''}
@@ -138,19 +139,27 @@ def pprint_pipes(pipes : dict):
         if rich is None:
             return print(output)
 
-        from rich.columns import Columns
+        rich_columns = attempt_import('rich.columns')
+        Columns = rich_columns.Columns
         columns = Columns(cols)
         rich.print(columns)
 
     if not UNICODE:
         return ascii_print_pipes()
 
+    rich_panel, rich_tree, rich_text, rich_columns, rich_table = attempt_import(
+        'rich.panel',
+        'rich.tree',
+        'rich.text',
+        'rich.columns',
+        'rich.table',
+    )
     from rich import box
-    from rich.panel import Panel
-    from rich.tree import Tree
-    from rich.text import Text
-    from rich.columns import Columns
-    from rich.table import Table
+    Panel = rich_panel.Panel
+    Tree = rich_tree.Tree
+    Text = rich_text.Text
+    Columns = rich_columns.Columns
+    Table = rich_table.Table
 
     key_panel = Panel(
         (

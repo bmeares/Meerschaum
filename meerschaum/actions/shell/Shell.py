@@ -11,11 +11,10 @@ from meerschaum.utils.typing import Union, SuccessTuple, Any
 import sys, inspect
 from meerschaum.utils.packages import attempt_import
 from meerschaum.config import __doc__, __version__ as version, get_config
-cmd = attempt_import(get_config('system', 'shell', 'cmd', patch=True), warn=False, lazy=True)
+cmd = attempt_import(get_config('system', 'shell', 'cmd', patch=True), warn=False, lazy=False)
 if cmd is None or isinstance(cmd, dict):
-    cmd = attempt_import('cmd')
+    cmd = attempt_import('cmd', lazy=False, warn=False)
 from meerschaum.actions.arguments import parse_line
-from meerschaum.utils.formatting import UNICODE, CHARSET, ANSI, colored
 _clear_screen = get_config('system', 'shell', 'clear_screen', patch=True)
 from meerschaum.connectors.parse import parse_instance_keys
 from meerschaum.utils.misc import string_width
@@ -54,12 +53,15 @@ class Shell(cmd.Cmd):
         """
         Customize the CLI from configuration
         """
-        #  delattr(cmd.Cmd, '_alias_create')
-        #  delattr(cmd.Cmd, '_alias_delete')
-        #  delattr(cmd.Cmd, '_alias_list')
-        #  delattr(cmd.Cmd, '_macro_create')
-        #  delattr(cmd.Cmd, '_macro_delete')
-        #  delattr(cmd.Cmd, '_macro_list')
+        try:
+            delattr(cmd.Cmd, '_alias_create')
+            delattr(cmd.Cmd, '_alias_delete')
+            delattr(cmd.Cmd, '_alias_list')
+            delattr(cmd.Cmd, '_macro_create')
+            delattr(cmd.Cmd, '_macro_delete')
+            delattr(cmd.Cmd, '_macro_list')
+        except AttributeError:
+            pass
         #  delattr(cmd.Cmd, 'do_alias')
         #  delattr(cmd.Cmd, 'do_macro')
 
@@ -95,6 +97,21 @@ class Shell(cmd.Cmd):
         self._actions['instance'] = self.do_instance
         self._actions['repo'] = self.do_repo
         self._actions['debug'] = self.do_debug
+        self.load_config()
+        ### update hidden commands list (cmd2 only)
+        try:
+            for c in hidden_commands:
+                self.hidden_commands.append(c)
+        except Exception as e:
+            pass
+
+    def load_config(self, instance : str = None):
+        """
+        Set attributes from the system configuration.
+        """
+        from meerschaum.utils.misc import remove_ansi
+        from meerschaum.utils.formatting import CHARSET, ANSI, UNICODE, colored
+        
         self.intro = get_config('system', 'shell', CHARSET, 'intro', patch=patch)
         self.intro += '\n' + ''.join(
             [' '
@@ -111,20 +128,17 @@ class Shell(cmd.Cmd):
         self.doc_header = get_config('system', 'shell', CHARSET, 'doc_header', patch=patch)
         self.undoc_header = get_config('system', 'shell', CHARSET, 'undoc_header', patch=patch)
 
-        ### create default instance and repository connectors
-        self.instance_keys = get_config('meerschaum', 'instance', patch=patch)
-        ### self.instance is a stylized version of self.instance_keys
-        self.instance = str(self.instance_keys)
+        if instance is None:
+            ### create default instance and repository connectors
+            self.instance_keys = remove_ansi(get_config('meerschaum', 'instance', patch=patch))
+            ### self.instance is a stylized version of self.instance_keys
+            self.instance = str(self.instance_keys)
+        else:
+            self.instance = instance
+            self.instance_keys = remove_ansi(str(instance))
         ### this will be updated later in update_prompt ONLY IF {username} is in the prompt
         self.username = ''
         self.repo_keys = get_config('meerschaum', 'default_repository', patch=patch)
-
-        ### update hidden commands list (cmd2 only)
-        try:
-            for c in hidden_commands:
-                self.hidden_commands.append(c)
-        except Exception as e:
-            pass
 
         if ANSI:
             def apply_colors(attr, key):
@@ -141,6 +155,7 @@ class Shell(cmd.Cmd):
 
     def update_prompt(self, instance=None, username=None):
         from meerschaum.config import get_config
+        from meerschaum.utils.formatting import ANSI, colored
         prompt = self._prompt
         mask = prompt
         if '{instance}' in self._prompt:
@@ -152,8 +167,9 @@ class Shell(cmd.Cmd):
 
         if '{username}' in self._prompt:
             if username is None:
+                from meerschaum.utils.misc import remove_ansi
                 try:
-                    username = parse_instance_keys(self.instance_keys, construct=False)['username']
+                    username = parse_instance_keys(remove_ansi(self.instance_keys), construct=False)['username']
                 except KeyError:
                     username = '(no username)'
                 except Exception as e:
@@ -172,6 +188,8 @@ class Shell(cmd.Cmd):
                 if ANSI: _c = colored(_c, *get_config('system', 'shell', 'ansi', 'prompt', 'color', patch=True))
                 remainder_prompt[i] = _c
         self.prompt = ''.join(remainder_prompt).replace('{username}', self.username).replace('{instance}', self.instance)
+        ### flush stdout
+        print("", end="", flush=True)
 
     def precmd(self, line):
         """
@@ -273,10 +291,18 @@ class Shell(cmd.Cmd):
                 print()
                 print_tuple(response, skip_common=self.debug)
                 print()
+
+        self.postcmd(False, "")
+
         return ""
 
-    def post_cmd(stop : bool = False, line : str = ""):
-        pass
+    #  def postcmd(stop : bool = False, line : str = ""):
+        #  pass
+
+    def postcmd(self, stop : bool = False, line : str = ""):
+        self.load_config(self.instance)
+        if stop:
+            return True
 
     def do_pass(self, line):
         """
@@ -346,18 +372,20 @@ class Shell(cmd.Cmd):
         from meerschaum.config import get_config
         from meerschaum.connectors.parse import parse_instance_keys
         from meerschaum.utils.warnings import warn, info
+        from meerschaum.utils.misc import remove_ansi
 
         try:
             instance_keys = action[0]
         except:
             instance_keys = ''
-        if instance_keys == '': instance_keys = get_config('meerschaum', 'instance', patch=True)
+        if instance_keys == '':
+            instance_keys = get_config('meerschaum', 'instance', patch=True)
 
         conn = parse_instance_keys(instance_keys, debug=debug)
         if conn is None or not conn:
             conn = get_connector(debug=debug)
 
-        self.instance_keys = str(conn)
+        self.instance_keys = remove_ansi(str(conn))
 
         self.update_prompt(instance=str(conn))
         info(f"Default instance for the current shell: {conn}")

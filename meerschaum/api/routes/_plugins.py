@@ -20,12 +20,11 @@ from meerschaum.api import (
 from meerschaum.api.tables import get_tables
 from fastapi import FastAPI, File, UploadFile
 from meerschaum.utils.packages import attempt_import
-starlette_responses = attempt_import('starlette.responses')
+starlette_responses = attempt_import('starlette.responses', warn=False)
 FileResponse = starlette_responses.FileResponse
 
 sqlalchemy = attempt_import('sqlalchemy')
 plugins_endpoint = endpoints['mrsm'] + '/plugins'
-typing = attempt_import('typing')
 
 @app.post(plugins_endpoint + '/{name}')
 def register_plugin(

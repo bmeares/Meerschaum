@@ -105,7 +105,11 @@ for module in modules:
     )
 
 from meerschaum.actions._entry import _entry as entry
-def get_shell(sysargs : List[str] = [], debug : bool = False):
+def get_shell(
+        sysargs : List[str] = [],
+        reload : bool = False,
+        debug : bool = False
+    ):
     &#34;&#34;&#34;
     Lazy load the Shell
     &#34;&#34;&#34;
@@ -121,6 +125,8 @@ def get_shell(sysargs : List[str] = [], debug : bool = False):
 
         _shell = shell_pkg.Shell(actions, sysargs=sysargs)
 
+    if reload:
+        _shell.load_config()
     return _shell
 
 from meerschaum.actions.plugins import make_action, load_plugins, import_plugins
@@ -182,6 +188,10 @@ if not handled appropriately!</p></div>
 <dd>
 <div class="desc"><p>Register new Pipes. Requires the API to be running.</p></div>
 </dd>
+<dt><code class="name"><a title="meerschaum.actions.reload" href="reload.html">meerschaum.actions.reload</a></code></dt>
+<dd>
+<div class="desc"><p>Reload the running Meerschaum instance.</p></div>
+</dd>
 <dt><code class="name"><a title="meerschaum.actions.shell" href="shell/index.html">meerschaum.actions.shell</a></code></dt>
 <dd>
 <div class="desc"><p>Import the Shell class definition</p></div>
@@ -240,6 +250,7 @@ if not handled appropriately!</p></div>
 <li><code><a title="meerschaum.actions.os" href="os.html">meerschaum.actions.os</a></code></li>
 <li><code><a title="meerschaum.actions.python" href="python.html">meerschaum.actions.python</a></code></li>
 <li><code><a title="meerschaum.actions.register" href="register.html">meerschaum.actions.register</a></code></li>
+<li><code><a title="meerschaum.actions.reload" href="reload.html">meerschaum.actions.reload</a></code></li>
 <li><code><a title="meerschaum.actions.shell" href="shell/index.html">meerschaum.actions.shell</a></code></li>
 <li><code><a title="meerschaum.actions.show" href="show.html">meerschaum.actions.show</a></code></li>
 <li><code><a title="meerschaum.actions.sql" href="sql.html">meerschaum.actions.sql</a></code></li>

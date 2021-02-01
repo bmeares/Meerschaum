@@ -38,18 +38,21 @@ NOTE: This action may be a huge security vulnerability
     if not handled appropriately!
 &#34;&#34;&#34;
 
+from meerschaum.utils.typing import SuccessTuple, List, Any
+
 def bash(
-        action : list = [],
-        sub_args : list = [],
+        action : List[str] = [],
+        sub_args : List[str] = [],
         use_bash : bool = True,
         debug : bool = False,
-        **kw
-    ):
+        **kw : Any
+    ) -&gt; SuccessTuple:
     &#34;&#34;&#34;
     Launch a bash shell as a Meershaum action
     &#34;&#34;&#34;
     import subprocess
     import sys
+    from meerschaum.utils.warnings import error
     from meerschaum.utils.debug import dprint
 
     if use_bash:
@@ -65,12 +68,15 @@ def bash(
         dprint(f&#39;sub-args: {sub_args}&#39;)
         dprint(command_list)
 
-    process = subprocess.Popen(
-        command_list,
-        shell = False,
-    )
-
-    exit_code = process.wait()
+    try:
+        process = subprocess.Popen(
+            command_list,
+            shell = False,
+        )
+        exit_code = process.wait()
+    except FileNotFoundError:
+        msg = f&#34;Invalid commands: &#39;{command_list}&#39;&#34;
+        return False, msg
 
     if exit_code != 0:
         return (False, f&#34;Returned exit code: {exit_code}&#34;)
@@ -85,7 +91,7 @@ def bash(
 <h2 class="section-title" id="header-functions">Functions</h2>
 <dl>
 <dt id="meerschaum.actions.bash.bash"><code class="name flex">
-<span>def <span class="ident">bash</span></span>(<span>action: list = [], sub_args: list = [], use_bash: bool = True, debug: bool = False, **kw)</span>
+<span>def <span class="ident">bash</span></span>(<span>action: List[str] = [], sub_args: List[str] = [], use_bash: bool = True, debug: bool = False, **kw: Any) ‑> Tuple[bool, str]</span>
 </code></dt>
 <dd>
 <div class="desc"><p>Launch a bash shell as a Meershaum action</p></div>
@@ -94,17 +100,18 @@ def bash(
 <span>Expand source code</span>
 </summary>
 <pre><code class="python">def bash(
-        action : list = [],
-        sub_args : list = [],
+        action : List[str] = [],
+        sub_args : List[str] = [],
         use_bash : bool = True,
         debug : bool = False,
-        **kw
-    ):
+        **kw : Any
+    ) -&gt; SuccessTuple:
     &#34;&#34;&#34;
     Launch a bash shell as a Meershaum action
     &#34;&#34;&#34;
     import subprocess
     import sys
+    from meerschaum.utils.warnings import error
     from meerschaum.utils.debug import dprint
 
     if use_bash:
@@ -120,12 +127,15 @@ def bash(
         dprint(f&#39;sub-args: {sub_args}&#39;)
         dprint(command_list)
 
-    process = subprocess.Popen(
-        command_list,
-        shell = False,
-    )
-
-    exit_code = process.wait()
+    try:
+        process = subprocess.Popen(
+            command_list,
+            shell = False,
+        )
+        exit_code = process.wait()
+    except FileNotFoundError:
+        msg = f&#34;Invalid commands: &#39;{command_list}&#39;&#34;
+        return False, msg
 
     if exit_code != 0:
         return (False, f&#34;Returned exit code: {exit_code}&#34;)

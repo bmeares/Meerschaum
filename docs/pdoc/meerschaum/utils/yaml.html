@@ -37,16 +37,15 @@ Meerschaum wrapper around YAML libraries.
 
 This is so switching between PyYAML and ruamel.yaml is smoother.
 &#34;&#34;&#34;
-
-### The first import that is found will be used.
 _lib = None
 _import_name = None
+### The first import that is found will be used.
 _yaml_imports = [&#39;yaml&#39;, &#39;ruamel.yaml&#39;]
 _yaml = None
 
 class yaml:
     global _yaml, _import_name, _lib
-    from meerschaum.utils.packages import attempt_import, all_packages
+    from meerschaum.utils.packages import attempt_import, all_packages, _import_module
     from meerschaum.utils.warnings import error
     for k in all_packages:
         if k in _yaml_imports:
@@ -55,7 +54,10 @@ class yaml:
     if _import_name is None:
         error(f&#34;No YAML libraries declared in meerschaum.packages.&#34;)
 
-    _lib = attempt_import(_import_name, split=False, lazy=False)
+    try:
+        _lib = _import_module(_import_name)
+    except:
+        _lib = attempt_import(_import_name, split=False, lazy=False, install=True)
     if _import_name == &#39;ruamel.yaml&#39;:
         _yaml = _lib.YAML()
     else:
@@ -103,7 +105,7 @@ class yaml:
 </summary>
 <pre><code class="python">class yaml:
     global _yaml, _import_name, _lib
-    from meerschaum.utils.packages import attempt_import, all_packages
+    from meerschaum.utils.packages import attempt_import, all_packages, _import_module
     from meerschaum.utils.warnings import error
     for k in all_packages:
         if k in _yaml_imports:
@@ -112,7 +114,10 @@ class yaml:
     if _import_name is None:
         error(f&#34;No YAML libraries declared in meerschaum.packages.&#34;)
 
-    _lib = attempt_import(_import_name, split=False, lazy=False)
+    try:
+        _lib = _import_module(_import_name)
+    except:
+        _lib = attempt_import(_import_name, split=False, lazy=False, install=True)
     if _import_name == &#39;ruamel.yaml&#39;:
         _yaml = _lib.YAML()
     else:
@@ -153,7 +158,7 @@ class yaml:
 <h3>Methods</h3>
 <dl>
 <dt id="meerschaum.utils.yaml.yaml.attempt_import"><code class="name flex">
-<span>def <span class="ident">attempt_import</span></span>(<span>*names: List[str], lazy: bool = True, warn: bool = True, install: bool = True, venv: str = 'mrsm', precheck: bool = True, split: bool = True, check_update: bool = False, debug: bool = False) ‑> Union['ModuleType', Tuple['ModuleType']]</span>
+<span>def <span class="ident">attempt_import</span></span>(<span>*names: List[str], lazy: bool = True, warn: bool = True, install: bool = True, venv: str = 'mrsm', precheck: bool = True, split: bool = True, check_update: bool = False, deactivate: bool = True, color: bool = True, debug: bool = False) ‑> Union['ModuleType', Tuple['ModuleType']]</span>
 </code></dt>
 <dd>
 <div class="desc"><p>Raise a warning if packages are not installed; otherwise import and return modules.
@@ -205,6 +210,8 @@ Defaults to False.</p></div>
         precheck: bool = True,
         split: bool = True,
         check_update : bool = False,
+        deactivate : bool = True,
+        color : bool = True,
         debug: bool = False
     ) -&gt; Union[&#39;ModuleType&#39;, Tuple[&#39;ModuleType&#39;]]:
     &#34;&#34;&#34;
@@ -265,31 +272,34 @@ Defaults to False.</p></div>
         if debug: f&#34;Import hook for virtual environmnt &#39;{_import_hook_venv}&#39; is active.&#34;
         venv = _import_hook_venv
 
-    if venv is not None: activate_venv(venv=venv, debug=debug)
+    if venv is not None: activate_venv(venv=venv, color=color, debug=debug)
     _warnings = _import_module(&#39;meerschaum.utils.warnings&#39;)
     warn_function = _warnings.warn
 
-    def do_import(_name: str):
+    def do_import(_name: str, **kw):
         #  is_venv_active(venv, debug=debug)
         if venv is not None: activate_venv(venv=venv, debug=debug)
         ### determine the import method (lazy vs normal)
+        from meerschaum.utils.misc import filter_keywords
         import_method = _import_module if not lazy else lazy_import
         try:
-            mod = import_method(_name)
+            mod = import_method(_name, **(filter_keywords(import_method, **kw)))
         except Exception as e:
             if warn:
                 warn_function(
                     f&#34;Failed to import module &#39;{_name}&#39;.\nException:\n{e}&#34;,
                     ImportWarning,
-                    stacklevel=(5 if lazy else 4)
+                    stacklevel = (5 if lazy else 4),
+                    color = False,
                 )
             mod = None
-        if venv is not None: deactivate_venv(venv=venv, debug=debug)
+        if venv is not None: deactivate_venv(venv=venv, color=color, debug=debug)
         return mod
 
     modules = []
-    if venv is not None: activate_venv(debug=debug)
     for name in names:
+        ### Enforce virtual environment (something is deactivating in the loop so check each pass).
+        if venv is not None: activate_venv(debug=debug)
         ### Check if package is a declared dependency.
         root_name = name.split(&#39;.&#39;)[0] if split else name
         install_name = all_packages.get(root_name, None)
@@ -297,13 +307,14 @@ Defaults to False.</p></div>
             warn_function(
                 f&#34;Package &#39;{root_name}&#39; is not declared in meerschaum.utils.packages.&#34;,
                 ImportWarning,
-                stacklevel = 3
+                stacklevel = 3,
+                color = color
             )
             install_name = root_name
 
         ### Determine if the package exists.
         if precheck is False:
-            found_module = do_import(name) is not None
+            found_module = do_import(name, debug=debug, warn=False, venv=venv, color=color) is not None
         else:
             try:
                 found_module = (importlib.util.find_spec(name) is not None)
@@ -313,18 +324,20 @@ Defaults to False.</p></div>
         if not found_module:
             if install:
                 ### NOTE: pip_install deactivates venv, so deactivate must be False.
-                if warn and not pip_install(
+                if not pip_install(
                     install_name,
                     venv = venv,
                     deactivate = False,
                     split = split,
                     check_update = check_update,
+                    color = color,
                     debug = debug
-                ):
+                ) and warn:
                     warn_function(
                         f&#34;Failed to install &#39;{install_name}&#39;.&#34;,
                         ImportWarning,
-                        stacklevel = 3
+                        stacklevel = 3,
+                        color = color
                     )
             elif warn:
                 ### Raise a warning if we can&#39;t find the package and install = False.
@@ -332,35 +345,43 @@ Defaults to False.</p></div>
                     (f&#34;\n\nMissing package &#39;{name}&#39;; features will not work correctly. &#34;
                      f&#34;\n\nSet install=True when calling attempt_import.\n&#34;),
                     ImportWarning,
-                    stacklevel = 3
+                    stacklevel = 3,
+                    color = color
                 )
 
         ### Do the import. Will be lazy if lazy=True.
-        m = do_import(name)
+        m = do_import(name, debug=debug, warn=warn, venv=venv, color=color)
         modules.append(m)
 
         ### Check for updates (skip this by default)
         if check_update:
             if need_update(m, split=split, debug=debug):
                 if install:
-                    if warn and not pip_install(
+                    if not pip_install(
                         install_name,
                         venv = venv,
                         split = split,
                         deactivate = False,
                         check_update = check_update,
+                        color = color,
                         debug = debug
-                    ):
+                    ) and warn:
                         warn_function(
-                                f&#34;There&#39;s an update available for &#39;{install_name}&#39;, &#34; +
-                                &#34;but it failed to install. &#34; +
-                                &#34;Try install via Meershaum with `install packages &#39;{install_name}&#39;`.&#34;,
-                                ImportWarning,
-                                stacklevel = 3
+                            f&#34;There&#39;s an update available for &#39;{install_name}&#39;, &#34; +
+                            &#34;but it failed to install. &#34; +
+                            &#34;Try install via Meershaum with `install packages &#39;{install_name}&#39;`.&#34;,
+                            ImportWarning,
+                            stacklevel = 3,
+                            color = color
                         )
                 elif warn:
-                    warn_function(f&#34;There&#39;s an update available for &#39;{m.__name__}&#39;.&#34;, stack=False)
-    if venv is not None: deactivate_venv(venv=venv, debug=debug)
+                    warn_function(
+                        f&#34;There&#39;s an update available for &#39;{m.__name__}&#39;.&#34;,
+                        stack = False,
+                        color = color
+                    )
+    if venv is not None and deactivate:
+        deactivate_venv(venv=venv, debug=debug, color=color)
 
     modules = tuple(modules)
     if len(modules) == 1: return modules[0]

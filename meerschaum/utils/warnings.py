@@ -53,23 +53,25 @@ def enable_depreciation_warnings(name):
         module = name
     )
 
-def warn(*args, stacklevel=2, stack=True, **kw):
+def warn(*args, stacklevel=2, stack=True, color : bool = True, **kw):
     """
     Raise a warning with custom Meerschaum formatting
     """
-    try:
-        from meerschaum.utils.formatting import CHARSET, ANSI, colored
-    except ImportError:
-        CHARSET = 'ascii'
-        ANSI = False
-    try:
-        from meerschaum.config import _config; cf = _config()
-        from meerschaum.config import get_config
-    except ImportError:
-        get_config = None
+    get_config = None
+    if color:
+        try:
+            from meerschaum.utils.formatting import CHARSET, ANSI, colored
+        except ImportError:
+            CHARSET = 'ascii'
+            ANSI = False
+        try:
+            from meerschaum.config import _config; cf = _config()
+            from meerschaum.config import get_config
+        except ImportError:
+            get_config = None
     import sys
 
-    if get_config is None:
+    if get_config is None and color:
         try:
             warn_config = cf['system']['warnings']
         except:
@@ -78,13 +80,17 @@ def warn(*args, stacklevel=2, stack=True, **kw):
                 'unicode' : {'icon' : ''},
                 'ascii' : {'icon' : ''},
             }
-    else: warn_config = get_config('system', 'warnings', patch=True)
+    elif color:
+        warn_config = get_config('system', 'warnings', patch=True)
     a = list(args)
-    a[0] = ' ' + warn_config[CHARSET]['icon'] + ' ' + str(a[0])
-    if ANSI:
-        a[0] = colored(a[0], *warn_config['ansi']['color'])
-    if stacklevel is None or not stack: print(a[0], file=sys.stderr)
-    else: return warnings.warn(*a, stacklevel=stacklevel, **kw)
+    a[0] = ' ' + (warn_config[CHARSET]['icon'] if color else '') + ' ' + str(a[0])
+    if color:
+        if ANSI:
+            a[0] = colored(a[0], *warn_config['ansi']['color'])
+    if stacklevel is None or not stack:
+        print(a[0], file=sys.stderr)
+    else:
+        return warnings.warn(*a, stacklevel=stacklevel, **kw)
 
 def exception_with_traceback(
         message : str,
@@ -191,6 +197,8 @@ def info(message : str, **kw):
     message = ' ' + info_config[CHARSET]['icon'] + ' ' + message
     if ANSI:
         message = colored(message, *info_config['ansi']['color'])
-    print(message, file=sys.stderr)
+    ### NOTE: There's a bug somewhere because I have to flush stdout every time.
+    #  print("", end="", flush=True)
+    print(message, file=sys.stderr, flush=True)
 
 

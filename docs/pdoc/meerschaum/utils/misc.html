@@ -788,7 +788,14 @@ def dict_from_od(od : collections.OrderedDict) -&gt; dict:
             issubclass(type(v), OrderedDict)
         ):
             _d[k] = dict_from_od(v)
-    return _d</code></pre>
+    return _d
+
+def remove_ansi(s : str) -&gt; str:
+    &#34;&#34;&#34;
+    Remove ANSI escape characters from a string.
+    &#34;&#34;&#34;
+    import re
+    return re.compile(r&#39;\x1B(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~])&#39;).sub(&#39;&#39;, s)</code></pre>
 </details>
 </section>
 <section>
@@ -1518,6 +1525,23 @@ NOTE: Not currently used. See <code><a title="meerschaum.utils.misc.search_and_s
     reload_package(meerschaum.actions, debug=debug)</code></pre>
 </details>
 </dd>
+<dt id="meerschaum.utils.misc.remove_ansi"><code class="name flex">
+<span>def <span class="ident">remove_ansi</span></span>(<span>s: str) ‑> str</span>
+</code></dt>
+<dd>
+<div class="desc"><p>Remove ANSI escape characters from a string.</p></div>
+<details class="source">
+<summary>
+<span>Expand source code</span>
+</summary>
+<pre><code class="python">def remove_ansi(s : str) -&gt; str:
+    &#34;&#34;&#34;
+    Remove ANSI escape characters from a string.
+    &#34;&#34;&#34;
+    import re
+    return re.compile(r&#39;\x1B(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~])&#39;).sub(&#39;&#39;, s)</code></pre>
+</details>
+</dd>
 <dt id="meerschaum.utils.misc.replace_password"><code class="name flex">
 <span>def <span class="ident">replace_password</span></span>(<span>d: dict) ‑> dict</span>
 </code></dt>
@@ -1916,6 +1940,7 @@ from:
 <li><code><a title="meerschaum.utils.misc.pg_capital" href="#meerschaum.utils.misc.pg_capital">pg_capital</a></code></li>
 <li><code><a title="meerschaum.utils.misc.print_options" href="#meerschaum.utils.misc.print_options">print_options</a></code></li>
 <li><code><a title="meerschaum.utils.misc.reload_plugins" href="#meerschaum.utils.misc.reload_plugins">reload_plugins</a></code></li>
+<li><code><a title="meerschaum.utils.misc.remove_ansi" href="#meerschaum.utils.misc.remove_ansi">remove_ansi</a></code></li>
 <li><code><a title="meerschaum.utils.misc.replace_password" href="#meerschaum.utils.misc.replace_password">replace_password</a></code></li>
 <li><code><a title="meerschaum.utils.misc.replace_pipes_in_dict" href="#meerschaum.utils.misc.replace_pipes_in_dict">replace_pipes_in_dict</a></code></li>
 <li><code><a title="meerschaum.utils.misc.retry_connect" href="#meerschaum.utils.misc.retry_connect">retry_connect</a></code></li>

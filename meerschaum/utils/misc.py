@@ -761,4 +761,9 @@ def dict_from_od(od : collections.OrderedDict) -> dict:
             _d[k] = dict_from_od(v)
     return _d
 
-
+def remove_ansi(s : str) -> str:
+    """
+    Remove ANSI escape characters from a string.
+    """
+    import re
+    return re.compile(r'\x1B(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~])').sub('', s)

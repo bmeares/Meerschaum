@@ -40,8 +40,12 @@ class LazyLoader(types.ModuleType):
         parent_module_globals,
         name,
         venv : str = None,
+        warn : bool = True,
+        deactivate : bool = True,
         debug : bool = False
     ):
+        self._warn = warn
+        self._deactivate = deactivate
         self._debug = debug
         self._venv = venv
         self._local_name = local_name
@@ -52,7 +56,14 @@ class LazyLoader(types.ModuleType):
     def _load(self):
         """Load the module and insert it into the parent's globals."""
         from meerschaum.utils.packages import attempt_import
-        module = attempt_import(self.__name__, venv=self._venv, lazy=False, debug=self._debug)
+        module = attempt_import(
+            self.__name__,
+            venv = self._venv,
+            lazy = False,
+            warn = self._warn,
+            deactivate = self._deactivate,
+            debug = self._debug
+        )
         #  module = importlib.import_module(self.__name__)
         self._parent_module_globals[self._local_name] = module
 

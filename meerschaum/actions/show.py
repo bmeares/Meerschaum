@@ -262,7 +262,7 @@ def _show_plugins(
     from meerschaum.utils.misc import print_options
     from meerschaum.connectors.parse import parse_repo_keys
     from meerschaum.utils.warnings import info
-    from meerschaum._internal import User
+    from meerschaum._internal.User import User
     repo_connector = parse_repo_keys(repository)
 
     if action == [''] or len(action) == 0:

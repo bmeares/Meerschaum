@@ -10,13 +10,20 @@ from meerschaum.utils.formatting._shell import make_header
 from meerschaum.utils.formatting._pprint import pprint
 from meerschaum.utils.formatting._pipes import pprint_pipes
 
-from meerschaum.config import _config; cf = _config()
+_attrs = {
+    'ANSI' : None,
+    'UNICODE' : None,
+    'CHARSET' : None,
+}
+__all__ = sorted([
+    'ANSI', 'CHARSET', 'UNICODE',
+    'colored',
+    'translate_rich_to_termcolor',
+    'get_console',
+    'print_tuple',
+])
+__pdoc__ = {}
 
-#  ANSI = get_config('system', 'formatting', 'ansi', patch=True)
-ANSI = cf['system']['formatting']['ansi']
-#  UNICODE = get_config('system', 'formatting', 'unicode', patch=True)
-UNICODE = cf['system']['formatting']['unicode']
-CHARSET = 'unicode' if UNICODE else 'ascii'
 
 ### I encountered a bug in git bash on Windows.
 ### This seems to resolve it; not sure if this is the best way.
@@ -24,20 +31,6 @@ import os
 if 'PYTHONIOENCODING' not in os.environ:
     os.environ['PYTHONIOENCODING'] = 'utf-8'
 
-from meerschaum.utils.packages import attempt_import
-from meerschaum.utils.warnings import warn
-
-### init colorama for Windows color output
-colorama, more_termcolor = attempt_import(
-    'colorama',
-    'more_termcolor',
-)
-
-try:
-    colorama.init()
-except:
-    warn(f"Failed to initialize colorama. Ignoring...", stack=False)
-    ANSI, UNICODE, CHARSET = False, False, 'ascii'
 
 def colored_fallback(*args, **kw):
     return ' '.join(args)
@@ -66,13 +59,46 @@ def translate_rich_to_termcolor(*colors) -> tuple:
 
     return tuple(_colors)
 
+def _init():
+    global attrs
+    from meerschaum.utils.packages import attempt_import
+    ### init colorama for Windows color output
+    colorama, more_termcolor = attempt_import(
+        'colorama',
+        'more_termcolor',
+        lazy = False,
+        warn = False,
+        color = False,
+    )
+    try:
+        colorama.init()
+        success = True
+    except:
+        #  warn(f"Failed to initialize colorama. Ignoring...", stack=False)
+        _attrs['ANSI'], _attrs['UNICODE'], _attrs['CHARSET'] = False, False, 'ascii'
+        success = False
+
+    if more_termcolor is None:
+        #  warn(f"Failed to import more_termcolor. Ignoring color output...", stack=False)
+        #  colored = colored_fallback
+        _attrs['ANSI'], _attrs['UNICODE'], _attrs['CHARSET'] = False, False, 'ascii'
+        success = False
+
+    return success
+
+_colorama_init = False
 def colored(text : str, *colors, **kw):
+    from meerschaum.utils.packages import attempt_import
+    global _colorama_init
+    _colorama_init = _init() if not _colorama_init else True
+    more_termcolor = attempt_import('more_termcolor', install=False, lazy=False)
     try:
         colored_text = more_termcolor.colored(text, *colors, **kw)
-    except:
+    except Exception as e:
         colored_text = None
 
-    if colored_text is not None: return colored_text
+    if colored_text is not None:
+        return colored_text
 
     try:
         _colors = translate_rich_to_termcolor(*colors)
@@ -81,21 +107,16 @@ def colored(text : str, *colors, **kw):
         colored_text = None
 
     if colored_text is None:
-        ### TODO warn here?
+        ### NOTE: warn here?
         return text
 
     return colored_text
-
-if more_termcolor is None:
-    warn(f"Failed to import more_termcolor. Ignoring color output...", stack=False)
-    colored = colored_fallback
-    ANSI, UNICODE, CHARSET = False, False, 'ascii'
 
 console = None
 def get_console():
     global console
     from meerschaum.utils.packages import import_rich
-    if not ANSI and not UNICODE:
+    if not __getattr__('ANSI') and not __getattr__('UNICODE'):
         return None
     rich = import_rich()
     try:
@@ -143,3 +164,31 @@ def print_tuple(tup : tuple, skip_common : bool = True, common_only : bool = Fal
 
     if do_print:
         print(msg)
+
+
+def __getattr__(name : str) -> str:
+    """
+    Lazily load module-level variables
+    """
+    global attrs
+    if name in _attrs:
+        if _attrs[name] is not None:
+            return _attrs[name]
+        from meerschaum.config import _config; cf = _config()
+        if name.lower() in cf['system']['formatting']:
+            _attrs[name] = cf['system']['formatting'][name.lower()]
+        elif name == 'CHARSET':
+            _attrs[name] = 'unicode' if __getattr__('UNICODE') else 'ascii'
+        return _attrs[name]
+    
+    if name == '__wrapped__':
+        import sys
+        return sys.modules[__name__]
+    if name == '__all__':
+        return __all__
+
+    try:
+        return globals()[name]
+    except KeyError:
+        raise AttributeError(f"Could not find '{name}'")
+

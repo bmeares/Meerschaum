@@ -8,7 +8,7 @@ Import the config yaml file
 def read_config():
     import sys, shutil, os
     from meerschaum.utils.packages import attempt_import
-    from meerschaum.utils.yaml import yaml
+    from meerschaum.utils.yaml import yaml, _yaml
 #  yaml = attempt_import('yaml')
 #  try:
         #  import yaml
@@ -19,7 +19,7 @@ def read_config():
     from meerschaum.config._edit import copy_default_to_config
     from meerschaum.config._paths import CONFIG_PATH, CONFIG_FILENAME
 
-    if yaml is not None:
+    if _yaml is not None:
         try:
             with open(CONFIG_PATH, 'r') as f:
                 config_text = f.read()
@@ -32,9 +32,9 @@ def read_config():
             with open(CONFIG_PATH, 'r') as f:
                 config_text = f.read()
 
-### parse the yaml file
+    ### parse the yaml file
     try:
-        if yaml is not None:
+        if _yaml is not None:
             ### cf dictionary
             config = yaml.load(config_text)
         else:

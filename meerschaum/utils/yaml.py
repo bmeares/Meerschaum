@@ -7,16 +7,15 @@ Meerschaum wrapper around YAML libraries.
 
 This is so switching between PyYAML and ruamel.yaml is smoother.
 """
-
-### The first import that is found will be used.
 _lib = None
 _import_name = None
+### The first import that is found will be used.
 _yaml_imports = ['yaml', 'ruamel.yaml']
 _yaml = None
 
 class yaml:
     global _yaml, _import_name, _lib
-    from meerschaum.utils.packages import attempt_import, all_packages
+    from meerschaum.utils.packages import attempt_import, all_packages, _import_module
     from meerschaum.utils.warnings import error
     for k in all_packages:
         if k in _yaml_imports:
@@ -25,7 +24,10 @@ class yaml:
     if _import_name is None:
         error(f"No YAML libraries declared in meerschaum.packages.")
 
-    _lib = attempt_import(_import_name, split=False, lazy=False)
+    try:
+        _lib = _import_module(_import_name)
+    except:
+        _lib = attempt_import(_import_name, split=False, lazy=False, install=True)
     if _import_name == 'ruamel.yaml':
         _yaml = _lib.YAML()
     else:
