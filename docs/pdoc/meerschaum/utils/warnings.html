@@ -82,23 +82,25 @@ def enable_depreciation_warnings(name):
         module = name
     )
 
-def warn(*args, stacklevel=2, stack=True, **kw):
+def warn(*args, stacklevel=2, stack=True, color : bool = True, **kw):
     &#34;&#34;&#34;
     Raise a warning with custom Meerschaum formatting
     &#34;&#34;&#34;
-    try:
-        from meerschaum.utils.formatting import CHARSET, ANSI, colored
-    except ImportError:
-        CHARSET = &#39;ascii&#39;
-        ANSI = False
-    try:
-        from meerschaum.config import _config; cf = _config()
-        from meerschaum.config import get_config
-    except ImportError:
-        get_config = None
+    get_config = None
+    if color:
+        try:
+            from meerschaum.utils.formatting import CHARSET, ANSI, colored
+        except ImportError:
+            CHARSET = &#39;ascii&#39;
+            ANSI = False
+        try:
+            from meerschaum.config import _config; cf = _config()
+            from meerschaum.config import get_config
+        except ImportError:
+            get_config = None
     import sys
 
-    if get_config is None:
+    if get_config is None and color:
         try:
             warn_config = cf[&#39;system&#39;][&#39;warnings&#39;]
         except:
@@ -107,13 +109,17 @@ def warn(*args, stacklevel=2, stack=True, **kw):
                 &#39;unicode&#39; : {&#39;icon&#39; : &#39;&#39;},
                 &#39;ascii&#39; : {&#39;icon&#39; : &#39;&#39;},
             }
-    else: warn_config = get_config(&#39;system&#39;, &#39;warnings&#39;, patch=True)
+    elif color:
+        warn_config = get_config(&#39;system&#39;, &#39;warnings&#39;, patch=True)
     a = list(args)
-    a[0] = &#39; &#39; + warn_config[CHARSET][&#39;icon&#39;] + &#39; &#39; + str(a[0])
-    if ANSI:
-        a[0] = colored(a[0], *warn_config[&#39;ansi&#39;][&#39;color&#39;])
-    if stacklevel is None or not stack: print(a[0], file=sys.stderr)
-    else: return warnings.warn(*a, stacklevel=stacklevel, **kw)
+    a[0] = &#39; &#39; + (warn_config[CHARSET][&#39;icon&#39;] if color else &#39;&#39;) + &#39; &#39; + str(a[0])
+    if color:
+        if ANSI:
+            a[0] = colored(a[0], *warn_config[&#39;ansi&#39;][&#39;color&#39;])
+    if stacklevel is None or not stack:
+        print(a[0], file=sys.stderr)
+    else:
+        return warnings.warn(*a, stacklevel=stacklevel, **kw)
 
 def exception_with_traceback(
         message : str,
@@ -220,7 +226,9 @@ def info(message : str, **kw):
     message = &#39; &#39; + info_config[CHARSET][&#39;icon&#39;] + &#39; &#39; + message
     if ANSI:
         message = colored(message, *info_config[&#39;ansi&#39;][&#39;color&#39;])
-    print(message, file=sys.stderr)</code></pre>
+    ### NOTE: There&#39;s a bug somewhere because I have to flush stdout every time.
+    #  print(&#34;&#34;, end=&#34;&#34;, flush=True)
+    print(message, file=sys.stderr, flush=True)</code></pre>
 </details>
 </section>
 <section>
@@ -397,11 +405,13 @@ def info(message : str, **kw):
     message = &#39; &#39; + info_config[CHARSET][&#39;icon&#39;] + &#39; &#39; + message
     if ANSI:
         message = colored(message, *info_config[&#39;ansi&#39;][&#39;color&#39;])
-    print(message, file=sys.stderr)</code></pre>
+    ### NOTE: There&#39;s a bug somewhere because I have to flush stdout every time.
+    #  print(&#34;&#34;, end=&#34;&#34;, flush=True)
+    print(message, file=sys.stderr, flush=True)</code></pre>
 </details>
 </dd>
 <dt id="meerschaum.utils.warnings.warn"><code class="name flex">
-<span>def <span class="ident">warn</span></span>(<span>*args, stacklevel=2, stack=True, **kw)</span>
+<span>def <span class="ident">warn</span></span>(<span>*args, stacklevel=2, stack=True, color: bool = True, **kw)</span>
 </code></dt>
 <dd>
 <div class="desc"><p>Raise a warning with custom Meerschaum formatting</p></div>
@@ -409,23 +419,25 @@ def info(message : str, **kw):
 <summary>
 <span>Expand source code</span>
 </summary>
-<pre><code class="python">def warn(*args, stacklevel=2, stack=True, **kw):
+<pre><code class="python">def warn(*args, stacklevel=2, stack=True, color : bool = True, **kw):
     &#34;&#34;&#34;
     Raise a warning with custom Meerschaum formatting
     &#34;&#34;&#34;
-    try:
-        from meerschaum.utils.formatting import CHARSET, ANSI, colored
-    except ImportError:
-        CHARSET = &#39;ascii&#39;
-        ANSI = False
-    try:
-        from meerschaum.config import _config; cf = _config()
-        from meerschaum.config import get_config
-    except ImportError:
-        get_config = None
+    get_config = None
+    if color:
+        try:
+            from meerschaum.utils.formatting import CHARSET, ANSI, colored
+        except ImportError:
+            CHARSET = &#39;ascii&#39;
+            ANSI = False
+        try:
+            from meerschaum.config import _config; cf = _config()
+            from meerschaum.config import get_config
+        except ImportError:
+            get_config = None
     import sys
 
-    if get_config is None:
+    if get_config is None and color:
         try:
             warn_config = cf[&#39;system&#39;][&#39;warnings&#39;]
         except:
@@ -434,13 +446,17 @@ def info(message : str, **kw):
                 &#39;unicode&#39; : {&#39;icon&#39; : &#39;&#39;},
                 &#39;ascii&#39; : {&#39;icon&#39; : &#39;&#39;},
             }
-    else: warn_config = get_config(&#39;system&#39;, &#39;warnings&#39;, patch=True)
+    elif color:
+        warn_config = get_config(&#39;system&#39;, &#39;warnings&#39;, patch=True)
     a = list(args)
-    a[0] = &#39; &#39; + warn_config[CHARSET][&#39;icon&#39;] + &#39; &#39; + str(a[0])
-    if ANSI:
-        a[0] = colored(a[0], *warn_config[&#39;ansi&#39;][&#39;color&#39;])
-    if stacklevel is None or not stack: print(a[0], file=sys.stderr)
-    else: return warnings.warn(*a, stacklevel=stacklevel, **kw)</code></pre>
+    a[0] = &#39; &#39; + (warn_config[CHARSET][&#39;icon&#39;] if color else &#39;&#39;) + &#39; &#39; + str(a[0])
+    if color:
+        if ANSI:
+            a[0] = colored(a[0], *warn_config[&#39;ansi&#39;][&#39;color&#39;])
+    if stacklevel is None or not stack:
+        print(a[0], file=sys.stderr)
+    else:
+        return warnings.warn(*a, stacklevel=stacklevel, **kw)</code></pre>
 </details>
 </dd>
 </dl>

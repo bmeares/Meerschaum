@@ -442,26 +442,33 @@ def sync_pipe(
         blocking : bool = True,
         debug : bool = False,
         **kw
-    ) -> tuple:
+    ) -> SuccessTuple:
     """
     Sync a pipe using a SQL Connection.
 
-    :param pipe: The Meerschaum Pipe instance into which to sync the data.
-    :type pipe: meerschaum.Pipe
-    :param df: An optional DataFrame to sync into the pipe, defaults to None.
-    :type df: pandas.DataFrame
-    :param begin: Optionally specify the earliest datetime to search for data, defaults to None.
-    :type begin: datetime.datetime
-    :param end: Optionally specify the latelst datetime to search for data, defaults to None.
-    :type end: datetime.datetime
-    :param check_existing: If True, pull and diff with existing data from the pipe, defaults to True.
-    :type check_existing: bool
-    :param blocking: If True, wait for sync to finish and return its result, otherwise asyncronously sync. Defaults to True.
-    :type blocking: bool
-    :param debug: Verbosity toggle. Defaults to False.
-    :type debug: bool
-    :param kw: Catch-all for keyword arguments.
-    :type kw: dict
+    :param pipe:
+        The Meerschaum Pipe instance into which to sync the data.
+
+    :param df:
+        An optional DataFrame to sync into the pipe, defaults to None.
+
+    :param begin:
+        Optionally specify the earliest datetime to search for data, defaults to None.
+
+    :param end:
+        Optionally specify the latelst datetime to search for data, defaults to None.
+
+    :param check_existing:
+        If True, pull and diff with existing data from the pipe, defaults to True.
+
+    :param blocking:
+        If True, wait for sync to finish and return its result, otherwise asyncronously sync. Defaults to True.
+
+    :param debug:
+        Verbosity toggle. Defaults to False.
+
+    :param kw:
+        Catch-all for keyword arguments.
     """
     from meerschaum.utils.warnings import warn
     from meerschaum.utils.debug import dprint

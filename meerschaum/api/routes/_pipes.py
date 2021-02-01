@@ -20,8 +20,7 @@ from meerschaum.api.models import MetaPipe
 from meerschaum.api.tables import get_tables
 from meerschaum.utils.packages import attempt_import
 from meerschaum.utils.misc import is_pipe_registered, round_time
-datetime = attempt_import('datetime')
-sqlalchemy = attempt_import('sqlalchemy')
+import datetime
 pipes_endpoint = endpoints['mrsm'] + '/pipes'
 
 @app.post(pipes_endpoint)

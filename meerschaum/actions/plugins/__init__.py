@@ -49,13 +49,13 @@ def import_plugins() -> Optional['ModuleType']:
     global __path__
     import sys
     from meerschaum.config._paths import (
-        RESOURCES_PATH, PLUGINS_RESOURCES_PATH, PLUGINS_ARCHIVES_RESOURCES_PATH
+        PLUGINS_RESOURCES_PATH, PLUGINS_ARCHIVES_RESOURCES_PATH
     )
     from meerschaum.utils.warnings import error, warn
-    if str(RESOURCES_PATH) not in sys.path:
-        sys.path.insert(0, str(RESOURCES_PATH))
-    if str(RESOURCES_PATH) not in __path__:
-        __path__.append(str(RESOURCES_PATH))
+    if str(PLUGINS_RESOURCES_PATH.parent) not in sys.path:
+        sys.path.insert(0, str(PLUGINS_RESOURCES_PATH.parent))
+    if str(PLUGINS_RESOURCES_PATH.parent) not in __path__:
+        __path__.append(str(PLUGINS_RESOURCES_PATH.parent))
     try:
         import plugins
     except ImportError:
@@ -64,7 +64,7 @@ def import_plugins() -> Optional['ModuleType']:
     if plugins is None:
         warn(f"Failed to import plugins.", stacklevel=3)
 
-    sys.path.remove(str(RESOURCES_PATH))
+    sys.path.remove(str(PLUGINS_RESOURCES_PATH.parent))
 
     return plugins
 

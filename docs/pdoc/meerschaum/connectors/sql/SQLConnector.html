@@ -2015,26 +2015,26 @@ A pipe's attributes must be set before registering.</p></div>
 </details>
 </dd>
 <dt id="meerschaum.connectors.sql.SQLConnector.SQLConnector.sync_pipe"><code class="name flex">
-<span>def <span class="ident">sync_pipe</span></span>(<span>self, pipe: "'<a title="meerschaum.Pipe" href="../../Pipe/index.html">meerschaum.Pipe</a>'", df: "'pd.DataFrame'" = None, begin: "'datetime.datetime'" = None, end: "'datetime.datetime'" = None, check_existing: bool = True, blocking: bool = True, debug: bool = False, **kw) ‑> tuple</span>
+<span>def <span class="ident">sync_pipe</span></span>(<span>self, pipe: "'<a title="meerschaum.Pipe" href="../../Pipe/index.html">meerschaum.Pipe</a>'", df: "'pd.DataFrame'" = None, begin: "'datetime.datetime'" = None, end: "'datetime.datetime'" = None, check_existing: bool = True, blocking: bool = True, debug: bool = False, **kw) ‑> Tuple[bool, str]</span>
 </code></dt>
 <dd>
 <div class="desc"><p>Sync a pipe using a SQL Connection.</p>
-<p>:param pipe: The Meerschaum Pipe instance into which to sync the data.
-:type pipe: meerschaum.Pipe
-:param df: An optional DataFrame to sync into the pipe, defaults to None.
-:type df: pandas.DataFrame
-:param begin: Optionally specify the earliest datetime to search for data, defaults to None.
-:type begin: datetime.datetime
-:param end: Optionally specify the latelst datetime to search for data, defaults to None.
-:type end: datetime.datetime
-:param check_existing: If True, pull and diff with existing data from the pipe, defaults to True.
-:type check_existing: bool
-:param blocking: If True, wait for sync to finish and return its result, otherwise asyncronously sync. Defaults to True.
-:type blocking: bool
-:param debug: Verbosity toggle. Defaults to False.
-:type debug: bool
-:param kw: Catch-all for keyword arguments.
-:type kw: dict</p></div>
+<p>:param pipe:
+The Meerschaum Pipe instance into which to sync the data.</p>
+<p>:param df:
+An optional DataFrame to sync into the pipe, defaults to None.</p>
+<p>:param begin:
+Optionally specify the earliest datetime to search for data, defaults to None.</p>
+<p>:param end:
+Optionally specify the latelst datetime to search for data, defaults to None.</p>
+<p>:param check_existing:
+If True, pull and diff with existing data from the pipe, defaults to True.</p>
+<p>:param blocking:
+If True, wait for sync to finish and return its result, otherwise asyncronously sync. Defaults to True.</p>
+<p>:param debug:
+Verbosity toggle. Defaults to False.</p>
+<p>:param kw:
+Catch-all for keyword arguments.</p></div>
 <details class="source">
 <summary>
 <span>Expand source code</span>
@@ -2049,26 +2049,33 @@ A pipe's attributes must be set before registering.</p></div>
         blocking : bool = True,
         debug : bool = False,
         **kw
-    ) -&gt; tuple:
+    ) -&gt; SuccessTuple:
     &#34;&#34;&#34;
     Sync a pipe using a SQL Connection.
 
-    :param pipe: The Meerschaum Pipe instance into which to sync the data.
-    :type pipe: meerschaum.Pipe
-    :param df: An optional DataFrame to sync into the pipe, defaults to None.
-    :type df: pandas.DataFrame
-    :param begin: Optionally specify the earliest datetime to search for data, defaults to None.
-    :type begin: datetime.datetime
-    :param end: Optionally specify the latelst datetime to search for data, defaults to None.
-    :type end: datetime.datetime
-    :param check_existing: If True, pull and diff with existing data from the pipe, defaults to True.
-    :type check_existing: bool
-    :param blocking: If True, wait for sync to finish and return its result, otherwise asyncronously sync. Defaults to True.
-    :type blocking: bool
-    :param debug: Verbosity toggle. Defaults to False.
-    :type debug: bool
-    :param kw: Catch-all for keyword arguments.
-    :type kw: dict
+    :param pipe:
+        The Meerschaum Pipe instance into which to sync the data.
+
+    :param df:
+        An optional DataFrame to sync into the pipe, defaults to None.
+
+    :param begin:
+        Optionally specify the earliest datetime to search for data, defaults to None.
+
+    :param end:
+        Optionally specify the latelst datetime to search for data, defaults to None.
+
+    :param check_existing:
+        If True, pull and diff with existing data from the pipe, defaults to True.
+
+    :param blocking:
+        If True, wait for sync to finish and return its result, otherwise asyncronously sync. Defaults to True.
+
+    :param debug:
+        Verbosity toggle. Defaults to False.
+
+    :param kw:
+        Catch-all for keyword arguments.
     &#34;&#34;&#34;
     from meerschaum.utils.warnings import warn
     from meerschaum.utils.debug import dprint

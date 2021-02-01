@@ -16,25 +16,26 @@ packages dictionary is structured in the following schema:
 packages = {
     'required' : {
         #  'ruamel.yaml'       : 'ruamel.yaml',
-        'yaml'              : 'PyYAML>=5.3.1',
+        'yaml'       : 'PyYAML>=5.3.1',
+        'virtualenv' : 'virtualenv',
+        'typing_extensions' : 'typing_extensions',
+        'pygments'       : 'pygments',
+        'colorama'       : 'colorama',
+        'rich'           : 'rich>=9.8.0',
+        'more_termcolor' : 'more-termcolor',
+        'cascadict'         : 'cascadict',
     },
     'formatting' : {
         'pprintpp'       : 'pprintpp',
         'asciitree'      : 'asciitree',
-        'colorama'       : 'colorama',
-        'rich'           : 'rich>=9.8.0',
-        'more_termcolor' : 'more-termcolor',
-        'pygments'       : 'pygments',
     },
     '_required' : {
         'pip'               : 'pip',
         'update_checker'    : 'update-checker',
         'semver'            : 'semver',
         'wheel'             : 'wheel',
-        'typing_extensions' : 'typing_extensions',
         'virtualenv'        : 'virtualenv',
         'dateutil'          : 'python-dateutil',
-        'cascadict'         : 'cascadict',
         'requests'          : 'requests',
         'pyvim'             : 'pyvim',
         'aiofiles'          : 'aiofiles',
@@ -90,6 +91,7 @@ packages['api'] = {
     'passlib'       : 'passlib',
     'fastapi_login' : 'fastapi-login',
     'multipart'     : 'python-multipart',
+    'django'        : 'Django',
 }
 packages['api'].update(packages['sql'])
 

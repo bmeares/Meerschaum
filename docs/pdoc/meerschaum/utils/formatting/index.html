@@ -23,156 +23,6 @@
 </header>
 <section id="section-intro">
 <p>Utilities for formatting output text</p>
-<details class="source">
-<summary>
-<span>Expand source code</span>
-</summary>
-<pre><code class="python">#! /usr/bin/env python
-# -*- coding: utf-8 -*-
-# vim:fenc=utf-8
-
-&#34;&#34;&#34;
-Utilities for formatting output text
-&#34;&#34;&#34;
-
-from meerschaum.utils.formatting._shell import make_header
-from meerschaum.utils.formatting._pprint import pprint
-from meerschaum.utils.formatting._pipes import pprint_pipes
-
-from meerschaum.config import _config; cf = _config()
-
-#  ANSI = get_config(&#39;system&#39;, &#39;formatting&#39;, &#39;ansi&#39;, patch=True)
-ANSI = cf[&#39;system&#39;][&#39;formatting&#39;][&#39;ansi&#39;]
-#  UNICODE = get_config(&#39;system&#39;, &#39;formatting&#39;, &#39;unicode&#39;, patch=True)
-UNICODE = cf[&#39;system&#39;][&#39;formatting&#39;][&#39;unicode&#39;]
-CHARSET = &#39;unicode&#39; if UNICODE else &#39;ascii&#39;
-
-### I encountered a bug in git bash on Windows.
-### This seems to resolve it; not sure if this is the best way.
-import os
-if &#39;PYTHONIOENCODING&#39; not in os.environ:
-    os.environ[&#39;PYTHONIOENCODING&#39;] = &#39;utf-8&#39;
-
-from meerschaum.utils.packages import attempt_import
-from meerschaum.utils.warnings import warn
-
-### init colorama for Windows color output
-colorama, more_termcolor = attempt_import(
-    &#39;colorama&#39;,
-    &#39;more_termcolor&#39;,
-)
-
-try:
-    colorama.init()
-except:
-    warn(f&#34;Failed to initialize colorama. Ignoring...&#34;, stack=False)
-    ANSI, UNICODE, CHARSET = False, False, &#39;ascii&#39;
-
-def colored_fallback(*args, **kw):
-    return &#39; &#39;.join(args)
-
-def translate_rich_to_termcolor(*colors) -&gt; tuple:
-    &#34;&#34;&#34;
-    Translate between rich and more_termcolor terminology.
-    This is probably prone to breaking
-    &#34;&#34;&#34;
-    _colors = []
-    for c in colors:
-        _c_list = []
-        ### handle &#39;bright&#39;
-        c = c.replace(&#39;bright_&#39;, &#39;bright &#39;)
-
-        ### handle &#39;on&#39;
-        if &#39; on &#39; in c:
-            _on = c.split(&#39; on &#39;)
-            _colors.append(_on[0])
-            for _c in _on[1:]:
-                _c_list.append(&#39;on &#39; + _c)
-        else:
-            _c_list += [c]
-
-        _colors += _c_list
-
-    return tuple(_colors)
-
-def colored(text : str, *colors, **kw):
-    try:
-        colored_text = more_termcolor.colored(text, *colors, **kw)
-    except:
-        colored_text = None
-
-    if colored_text is not None: return colored_text
-
-    try:
-        _colors = translate_rich_to_termcolor(*colors)
-        colored_text = more_termcolor.colored(text, *_colors, **kw)
-    except:
-        colored_text = None
-
-    if colored_text is None:
-        ### TODO warn here?
-        return text
-
-    return colored_text
-
-if more_termcolor is None:
-    warn(f&#34;Failed to import more_termcolor. Ignoring color output...&#34;, stack=False)
-    colored = colored_fallback
-    ANSI, UNICODE, CHARSET = False, False, &#39;ascii&#39;
-
-console = None
-def get_console():
-    global console
-    from meerschaum.utils.packages import import_rich
-    if not ANSI and not UNICODE:
-        return None
-    rich = import_rich()
-    try:
-        console = rich.console.Console()
-    except:
-        console = None
-    return console
-
-#  try:
-    #  console = rich_console.Console()
-#  except:
-    #  warn(f&#34;Failed to import rich. Ignoring color output...&#34;, stack=False)
-    #  console = None
-    #  ANSI, UNICODE, CHARSET = False, False, &#39;ascii&#39;
-
-def print_tuple(tup : tuple, skip_common : bool = True, common_only : bool = False):
-    &#34;&#34;&#34;
-    Print Meerschaum return tuple
-    &#34;&#34;&#34;
-    from meerschaum.utils.formatting import ANSI, CHARSET, colored
-    from meerschaum.config import get_config
-
-    try:
-        status = &#39;success&#39; if tup[0] else &#39;failure&#39;
-    except TypeError:
-        status = &#39;failure&#39;
-        tup = None, None
-
-    status_config = get_config(&#39;system&#39;, status, patch=True)
-
-    msg = &#39; &#39; + status_config[CHARSET][&#39;icon&#39;] + &#39; &#39; + str(tup[1])
-    if ANSI:
-        msg = colored(msg, *status_config[&#39;ansi&#39;][&#39;color&#39;])
-
-    omit_messages = { &#39;Success&#39;, &#39;Succeeded&#39;, &#39;success&#39;, &#39;&#39;, None }
-
-    do_print = True
-
-    if common_only:
-        skip_common = False
-        do_print = tup[1] in omit_messages
-
-    if skip_common:
-        do_print = tup[1] not in omit_messages
-
-    if do_print:
-        print(msg)</code></pre>
-</details>
 </section>
 <section>
 </section>
@@ -191,12 +41,17 @@ def print_tuple(tup : tuple, skip_common : bool = True, common_only : bool = Fal
 <span>Expand source code</span>
 </summary>
 <pre><code class="python">def colored(text : str, *colors, **kw):
+    from meerschaum.utils.packages import attempt_import
+    global _colorama_init
+    _colorama_init = _init() if not _colorama_init else True
+    more_termcolor = attempt_import(&#39;more_termcolor&#39;, install=False, lazy=False)
     try:
         colored_text = more_termcolor.colored(text, *colors, **kw)
-    except:
+    except Exception as e:
         colored_text = None
 
-    if colored_text is not None: return colored_text
+    if colored_text is not None:
+        return colored_text
 
     try:
         _colors = translate_rich_to_termcolor(*colors)
@@ -205,23 +60,10 @@ def print_tuple(tup : tuple, skip_common : bool = True, common_only : bool = Fal
         colored_text = None
 
     if colored_text is None:
-        ### TODO warn here?
+        ### NOTE: warn here?
         return text
 
     return colored_text</code></pre>
-</details>
-</dd>
-<dt id="meerschaum.utils.formatting.colored_fallback"><code class="name flex">
-<span>def <span class="ident">colored_fallback</span></span>(<span>*args, **kw)</span>
-</code></dt>
-<dd>
-<div class="desc"></div>
-<details class="source">
-<summary>
-<span>Expand source code</span>
-</summary>
-<pre><code class="python">def colored_fallback(*args, **kw):
-    return &#39; &#39;.join(args)</code></pre>
 </details>
 </dd>
 <dt id="meerschaum.utils.formatting.get_console"><code class="name flex">
@@ -236,7 +78,7 @@ def print_tuple(tup : tuple, skip_common : bool = True, common_only : bool = Fal
 <pre><code class="python">def get_console():
     global console
     from meerschaum.utils.packages import import_rich
-    if not ANSI and not UNICODE:
+    if not __getattr__(&#39;ANSI&#39;) and not __getattr__(&#39;UNICODE&#39;):
         return None
     rich = import_rich()
     try:
@@ -343,7 +185,6 @@ This is probably prone to breaking</p></div>
 <li><h3><a href="#header-functions">Functions</a></h3>
 <ul class="">
 <li><code><a title="meerschaum.utils.formatting.colored" href="#meerschaum.utils.formatting.colored">colored</a></code></li>
-<li><code><a title="meerschaum.utils.formatting.colored_fallback" href="#meerschaum.utils.formatting.colored_fallback">colored_fallback</a></code></li>
 <li><code><a title="meerschaum.utils.formatting.get_console" href="#meerschaum.utils.formatting.get_console">get_console</a></code></li>
 <li><code><a title="meerschaum.utils.formatting.print_tuple" href="#meerschaum.utils.formatting.print_tuple">print_tuple</a></code></li>
 <li><code><a title="meerschaum.utils.formatting.translate_rich_to_termcolor" href="#meerschaum.utils.formatting.translate_rich_to_termcolor">translate_rich_to_termcolor</a></code></li>

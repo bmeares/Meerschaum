@@ -69,8 +69,12 @@ class LazyLoader(types.ModuleType):
         parent_module_globals,
         name,
         venv : str = None,
+        warn : bool = True,
+        deactivate : bool = True,
         debug : bool = False
     ):
+        self._warn = warn
+        self._deactivate = deactivate
         self._debug = debug
         self._venv = venv
         self._local_name = local_name
@@ -81,7 +85,14 @@ class LazyLoader(types.ModuleType):
     def _load(self):
         &#34;&#34;&#34;Load the module and insert it into the parent&#39;s globals.&#34;&#34;&#34;
         from meerschaum.utils.packages import attempt_import
-        module = attempt_import(self.__name__, venv=self._venv, lazy=False, debug=self._debug)
+        module = attempt_import(
+            self.__name__,
+            venv = self._venv,
+            lazy = False,
+            warn = self._warn,
+            deactivate = self._deactivate,
+            debug = self._debug
+        )
         #  module = importlib.import_module(self.__name__)
         self._parent_module_globals[self._local_name] = module
 
@@ -112,7 +123,7 @@ class LazyLoader(types.ModuleType):
 <dl>
 <dt id="meerschaum.utils.packages.lazy_loader.LazyLoader"><code class="flex name class">
 <span>class <span class="ident">LazyLoader</span></span>
-<span>(</span><span>local_name, parent_module_globals, name, venv: str = None, debug: bool = False)</span>
+<span>(</span><span>local_name, parent_module_globals, name, venv: str = None, warn: bool = True, deactivate: bool = True, debug: bool = False)</span>
 </code></dt>
 <dd>
 <div class="desc"><p>Lazily import a module, mainly to avoid pulling in large dependencies.</p>
@@ -136,8 +147,12 @@ needed, and this allows them to only be loaded when they are used.</p></div>
         parent_module_globals,
         name,
         venv : str = None,
+        warn : bool = True,
+        deactivate : bool = True,
         debug : bool = False
     ):
+        self._warn = warn
+        self._deactivate = deactivate
         self._debug = debug
         self._venv = venv
         self._local_name = local_name
@@ -148,7 +163,14 @@ needed, and this allows them to only be loaded when they are used.</p></div>
     def _load(self):
         &#34;&#34;&#34;Load the module and insert it into the parent&#39;s globals.&#34;&#34;&#34;
         from meerschaum.utils.packages import attempt_import
-        module = attempt_import(self.__name__, venv=self._venv, lazy=False, debug=self._debug)
+        module = attempt_import(
+            self.__name__,
+            venv = self._venv,
+            lazy = False,
+            warn = self._warn,
+            deactivate = self._deactivate,
+            debug = self._debug
+        )
         #  module = importlib.import_module(self.__name__)
         self._parent_module_globals[self._local_name] = module
 

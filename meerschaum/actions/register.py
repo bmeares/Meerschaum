@@ -19,8 +19,8 @@ def register(
     from meerschaum.utils.misc import choose_subaction
     options = {
         'pipes'     : _register_pipes,
-        'metrics'   : _register_metrics,
-        'locations' : _register_locations,
+        #  'metrics'   : _register_metrics,
+        #  'locations' : _register_locations,
         'plugins'   : _register_plugins,
         'users'     : _register_users,
     }
@@ -98,7 +98,7 @@ def _register_plugins(
     from meerschaum.connectors.parse import parse_repo_keys
     from meerschaum.config import get_config
     from meerschaum.utils.warnings import warn, error, info
-    from meerschaum._internal import Plugin
+    from meerschaum._internal.Plugin import Plugin
     from meerschaum.connectors.api import APIConnector
     from meerschaum import get_connector
     from meerschaum.utils.formatting import print_tuple

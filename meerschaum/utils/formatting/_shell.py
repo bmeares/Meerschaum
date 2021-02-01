@@ -35,15 +35,18 @@ def make_header(
 def clear_screen(debug : bool = False) -> bool:
     from meerschaum.utils.formatting import ANSI, get_console
     from meerschaum.utils.debug import dprint
+    print("", end="", flush=True)
     if debug:
         dprint("Skipping screen clear.")
         return True
     if ANSI:
         if get_console() is not None:
             get_console().clear()
+            print("", end="", flush=True)
             return True
         clear_string, reset_string = '\033c', '\033[0m'
         print(clear_string + reset_string, end="")
+        print("", end="", flush=True)
         return True
     ### ANSI support is disabled, try system level instead
     import platform, os

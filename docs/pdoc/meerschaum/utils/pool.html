@@ -49,7 +49,11 @@ def get_pool(pool_class_name : str = &#39;ThreadPool&#39;, workers : int = None)
     def build_pool(workers):
         global pools
         from meerschaum.utils.packages import attempt_import
-        Pool = getattr(attempt_import(&#39;multiprocessing.pool&#39;), pool_class_name)
+        try:
+            Pool = getattr(attempt_import(&#39;multiprocessing.pool&#39;, warn=False, venv=None, lazy=False), pool_class_name)
+        except:
+            Pool = getattr(attempt_import(&#39;multiprocessing.pool&#39;, warn=False, venv=None, lazy=False), &#39;ThreadPool&#39;)
+
         if workers is None:
             from multiprocessing import cpu_count
             workers = cpu_count()
@@ -106,7 +110,11 @@ Pools are joined and closed on exit.</p></div>
     def build_pool(workers):
         global pools
         from meerschaum.utils.packages import attempt_import
-        Pool = getattr(attempt_import(&#39;multiprocessing.pool&#39;), pool_class_name)
+        try:
+            Pool = getattr(attempt_import(&#39;multiprocessing.pool&#39;, warn=False, venv=None, lazy=False), pool_class_name)
+        except:
+            Pool = getattr(attempt_import(&#39;multiprocessing.pool&#39;, warn=False, venv=None, lazy=False), &#39;ThreadPool&#39;)
+
         if workers is None:
             from multiprocessing import cpu_count
             workers = cpu_count()

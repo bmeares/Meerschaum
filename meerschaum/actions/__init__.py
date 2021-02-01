@@ -76,7 +76,11 @@ for module in modules:
     )
 
 from meerschaum.actions._entry import _entry as entry
-def get_shell(sysargs : List[str] = [], debug : bool = False):
+def get_shell(
+        sysargs : List[str] = [],
+        reload : bool = False,
+        debug : bool = False
+    ):
     """
     Lazy load the Shell
     """
@@ -92,6 +96,8 @@ def get_shell(sysargs : List[str] = [], debug : bool = False):
 
         _shell = shell_pkg.Shell(actions, sysargs=sysargs)
 
+    if reload:
+        _shell.load_config()
     return _shell
 
 from meerschaum.actions.plugins import make_action, load_plugins, import_plugins

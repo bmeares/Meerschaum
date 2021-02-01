@@ -110,13 +110,6 @@ def _install_packages(
     if len(action) == 0:
         return False, f&#34;No packages to install&#34;
     from meerschaum.utils.warnings import info
-    from meerschaum.config._paths import MRSM_VIRTENV_PATH
-    import sys
-    if str(MRSM_VIRTENV_PATH) not in sys.path:
-        sys.path.insert(1, str(MRSM_VIRTENV_PATH))
-
-    info(f&#34;Will install the following plugins to &#39;{str(MRSM_VIRTENV_PATH)}&#39;:\n{action}&#34;)
-
     from meerschaum.utils.packages import pip_install
     if pip_install(action, debug=debug):
         return True, f&#34;Successfully installed packages to virtual environment &#39;mrsm&#39;:\n{action}&#34;

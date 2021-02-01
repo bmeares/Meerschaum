@@ -222,8 +222,8 @@ def methods(
         Fetch all available metrics and locations and create every combination.
         Connector keys are required.
         """
-        raise error(
-            "Need to implement metrics and locations logic in SQL and API",
+        error(
+            "Need to implement metrics and locations logic in SQL and API.",
             NotImplementedError
         )
 

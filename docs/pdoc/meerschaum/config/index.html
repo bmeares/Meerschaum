@@ -43,36 +43,16 @@ import os
 
 ### apply config preprocessing (e.g. main to meta)
 config = None
-def _config():
+def _config(reload : bool = False):
     &#34;&#34;&#34;
     Read and process the configuration file.
     &#34;&#34;&#34;
     global config
-    if config is None:
+    if config is None or reload:
         from meerschaum.config._preprocess import preprocess_config
         from meerschaum.config._read_yaml import read_config
         config = preprocess_config(read_config())
     return config
-
-### if patch.yaml exists, apply patch to config
-from meerschaum.config._paths import PERMANENT_PATCH_PATH
-from meerschaum.config._patch import permanent_patch_config, patch_config, apply_patch_to_config
-if patch_config is not None:
-    from meerschaum.config._paths import PATCH_PATH
-    config = apply_patch_to_config(config, patch_config)
-    if PATCH_PATH.exists(): os.remove(PATCH_PATH)
-
-### if permanent_patch.yaml exists, apply patch to config, write config, and delete patch
-if permanent_patch_config is not None and PERMANENT_PATCH_PATH.exists():
-    from meerschaum.config._edit import write_config
-    from meerschaum.utils.debug import dprint
-    dprint(&#34;Found permanent patch configuration. Updating main config and deleting permanent patch...&#34;)
-    config = apply_patch_to_config(config, permanent_patch_config)
-    write_config(config)
-    from meerschaum.config._paths import PERMANENT_PATCH_PATH, DEFAULT_CONFIG_PATH
-    permanent_patch_config = None
-    if PERMANENT_PATCH_PATH.exists(): os.remove(PERMANENT_PATCH_PATH)
-    if DEFAULT_CONFIG_PATH.exists(): os.remove(DEFAULT_CONFIG_PATH)
 
 def set_config(cf : dict) -&gt; dict:
     &#34;&#34;&#34;
@@ -122,6 +102,27 @@ def get_config(*keys, patch=False, debug=False):
                 shutil.move(CONFIG_PATH, PERMANENT_PATCH_PATH)
                 sys.exit()
     return c
+
+### if patch.yaml exists, apply patch to config
+from meerschaum.config._paths import PERMANENT_PATCH_PATH
+from meerschaum.config._patch import permanent_patch_config, patch_config, apply_patch_to_config
+if patch_config is not None:
+    from meerschaum.config._paths import PATCH_PATH
+    set_config(apply_patch_to_config(_config(), patch_config))
+    if PATCH_PATH.exists():
+        os.remove(PATCH_PATH)
+
+### if permanent_patch.yaml exists, apply patch to config, write config, and delete patch
+if permanent_patch_config is not None and PERMANENT_PATCH_PATH.exists():
+    from meerschaum.config._edit import write_config
+    from meerschaum.utils.debug import dprint
+    dprint(&#34;Found permanent patch configuration. Updating main config and deleting permanent patch...&#34;)
+    set_config(apply_patch_to_config(_config(), permanent_patch_config))
+    write_config(_config())
+    from meerschaum.config._paths import PERMANENT_PATCH_PATH, DEFAULT_CONFIG_PATH
+    permanent_patch_config = None
+    if PERMANENT_PATCH_PATH.exists(): os.remove(PERMANENT_PATCH_PATH)
+    if DEFAULT_CONFIG_PATH.exists(): os.remove(DEFAULT_CONFIG_PATH)
 
 ### If environment variable MEERSCHAUM_CONFIG is set, patch config before anything else.
 from meerschaum.utils.misc import string_to_dict

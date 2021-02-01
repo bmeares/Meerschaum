@@ -22,7 +22,6 @@ from meerschaum._internal.User import User
 import os, pathlib, datetime
 
 sqlalchemy = attempt_import('sqlalchemy')
-typing = attempt_import('typing')
 users_endpoint = endpoints['mrsm'] + '/users'
 
 from fastapi.security import OAuth2PasswordRequestForm

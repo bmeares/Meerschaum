@@ -31,8 +31,8 @@ def pprint(
         _pprint = pprint.pprint
     try:
         if rich is not None:
-            import rich.pretty
-        rich_pprint = rich.pretty.pprint
+            rich_pretty = attempt_import('rich.pretty')
+        rich_pprint = rich_pretty.pprint
     except:
         rich_pprint = _pprint
 
