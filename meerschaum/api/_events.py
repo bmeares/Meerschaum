@@ -6,15 +6,21 @@
 Declare FastAPI events in this module (startup, shutdown, etc)
 """
 
-from meerschaum.api import app, get_connector
+from meerschaum.api import app, get_connector, get_uvicorn_config, debug
 from meerschaum.utils.debug import dprint
 
 @app.on_event("startup")
 async def startup():
     from meerschaum.utils.misc import retry_connect
-    import sys
+    import sys, os
     conn = get_connector()
-    await retry_connect(get_connector(), debug=True)
+    connected = await retry_connect(
+        get_connector(),
+        workers = get_uvicorn_config().get('workers', None),
+        debug = debug
+    )
+    if not connected:
+        os._exit(1)
 
 @app.on_event("shutdown")
 async def shutdown():

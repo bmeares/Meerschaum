@@ -76,6 +76,7 @@ packages = {
     },
 }
 packages['sql'] = {
+    'numpy'      : 'numpy',
     'pandas'     : 'pandas',
     'sqlalchemy' : 'sqlalchemy',
     'databases'  : 'databases',

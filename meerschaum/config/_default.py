@@ -180,15 +180,17 @@ default_system_config = {
             'host'         : '0.0.0.0',
             'workers'      : max(int(multiprocessing.cpu_count() / 2), 1),
         },
-        'allow_registration' : {
-            'users'        : False,
-            'pipes'        : True,
-            'plugins'      : True,
+        'permissions':       {
+            'registration' : {
+                'users'    : False,
+                'pipes'    : True,
+                'plugins'  : True,
+            },
+            'actions'      : {
+                'non_admin': False,
+            },
         },
         'protocol'         : default_meerschaum_config['connectors']['api']['default']['protocol'],
-        'endpoints'        : {
-            'mrsm'         : '/mrsm',
-        },
     },
     'arguments'            : {
         'sub_decorators'   : ['[', ']'],

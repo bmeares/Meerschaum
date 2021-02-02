@@ -82,7 +82,8 @@ def get_tables(
                 sqlalchemy.Column('password_hash', sqlalchemy.String),
                 sqlalchemy.Column('email', sqlalchemy.String),
                 sqlalchemy.Column('user_type', sqlalchemy.String),
-                sqlalchemy.Column('attributes', params_type)
+                sqlalchemy.Column('attributes', params_type),
+                extend_existing = True,
             ),
             'plugins' : sqlalchemy.Table(
                 'plugins',
@@ -92,7 +93,8 @@ def get_tables(
                 sqlalchemy.Column('user_id', sqlalchemy.Integer, nullable=False),
                 #  sqlalchemy.Column('user_id', sqlalchemy.Integer, sqlalchemy.schema.ForeignKey("users.user_id"), nullable=False),
                 sqlalchemy.Column('version', sqlalchemy.String),
-                sqlalchemy.Column('attributes', params_type)
+                sqlalchemy.Column('attributes', params_type),
+                extend_existing = True,
             ),
         }
 
@@ -104,7 +106,8 @@ def get_tables(
             sqlalchemy.Column("metric_key", sqlalchemy.String, index=True, nullable=False),
             sqlalchemy.Column("location_key", sqlalchemy.String, index=True),
             sqlalchemy.Column("parameters", params_type),
-            sqlalchemy.UniqueConstraint('connector_keys', 'metric_key', 'location_key', name='pipe_index')
+            sqlalchemy.UniqueConstraint('connector_keys', 'metric_key', 'location_key', name='pipe_index'),
+            extend_existing = True,
         )
 
         try:

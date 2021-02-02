@@ -172,7 +172,8 @@ class Pipe:
         ###       A Pipe may be registered without parameters, then edited,
         ###       or a Pipe may be registered with parameters set in-memory first.
         from meerschaum.config import get_config
-        if mrsm_instance is None: mrsm_instance = get_config(&#39;meerschaum&#39;, &#39;instance&#39;, patch=True)
+        if mrsm_instance is None:
+            mrsm_instance = get_config(&#39;meerschaum&#39;, &#39;instance&#39;, patch=True)
         if not isinstance(mrsm_instance, str):
             self._instance_connector = mrsm_instance
             self.instance_keys = mrsm_instance.type + &#39;:&#39; + mrsm_instance.label
@@ -252,7 +253,27 @@ class Pipe:
         return name
 
     def __repr__(self):
-        return str(self)</code></pre>
+        return str(self)
+
+    def __getstate__(self):
+        &#34;&#34;&#34;
+        Define the state dictionary (pickling).
+        &#34;&#34;&#34;
+        state = {
+            &#39;connector_keys&#39; : self.connector_keys,
+            &#39;metric_key&#39; : self.metric_key,
+            &#39;location_key&#39; : self.location_key,
+            &#39;parameters&#39; : self.parameters,
+            &#39;mrsm_instance&#39; :  self.instance_keys,
+        }
+        return state
+
+    def __setstate__(self, _state : dict):
+        &#34;&#34;&#34;
+        Read the state (unpickling).
+        &#34;&#34;&#34;
+        self.__init__(**_state)
+        </code></pre>
 </details>
 </section>
 <section>
@@ -336,7 +357,8 @@ connector_keys for the Meerschaum instance connector (SQL or API connector)</p><
         ###       A Pipe may be registered without parameters, then edited,
         ###       or a Pipe may be registered with parameters set in-memory first.
         from meerschaum.config import get_config
-        if mrsm_instance is None: mrsm_instance = get_config(&#39;meerschaum&#39;, &#39;instance&#39;, patch=True)
+        if mrsm_instance is None:
+            mrsm_instance = get_config(&#39;meerschaum&#39;, &#39;instance&#39;, patch=True)
         if not isinstance(mrsm_instance, str):
             self._instance_connector = mrsm_instance
             self.instance_keys = mrsm_instance.type + &#39;:&#39; + mrsm_instance.label
@@ -416,7 +438,26 @@ connector_keys for the Meerschaum instance connector (SQL or API connector)</p><
         return name
 
     def __repr__(self):
-        return str(self)</code></pre>
+        return str(self)
+
+    def __getstate__(self):
+        &#34;&#34;&#34;
+        Define the state dictionary (pickling).
+        &#34;&#34;&#34;
+        state = {
+            &#39;connector_keys&#39; : self.connector_keys,
+            &#39;metric_key&#39; : self.metric_key,
+            &#39;location_key&#39; : self.location_key,
+            &#39;parameters&#39; : self.parameters,
+            &#39;mrsm_instance&#39; :  self.instance_keys,
+        }
+        return state
+
+    def __setstate__(self, _state : dict):
+        &#34;&#34;&#34;
+        Read the state (unpickling).
+        &#34;&#34;&#34;
+        self.__init__(**_state)</code></pre>
 </details>
 <h3>Instance variables</h3>
 <dl>
@@ -629,11 +670,11 @@ If <code>patch</code> is True, update parameters by cascading rather than overwr
     &#34;&#34;&#34;
     if not interactive:
         return self.instance_connector.edit_pipe(self, patch=patch, debug=debug, **kw)
-    from meerschaum.config._paths import PIPES_RESOURCES_PATH
+    from meerschaum.config._paths import PIPES_CACHE_RESOURCES_PATH
     from meerschaum.utils.misc import edit_file
     import pathlib, os
     parameters_filename = str(self) + &#39;.yaml&#39;
-    parameters_path = pathlib.Path(os.path.join(PIPES_RESOURCES_PATH, parameters_filename))
+    parameters_path = pathlib.Path(os.path.join(PIPES_CACHE_RESOURCES_PATH, parameters_filename))
     
     from meerschaum.utils.yaml import yaml
     #  import yaml

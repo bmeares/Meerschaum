@@ -188,14 +188,13 @@ def _register_users(
     &#34;&#34;&#34;
     from meerschaum.config import get_config
     from meerschaum import get_connector
-    from meerschaum.utils.misc import is_valid_email
     from meerschaum.connectors.parse import parse_repo_keys
     from meerschaum.utils.debug import dprint
     from meerschaum.utils.warnings import warn, error, info
-    from meerschaum._internal import User
+    from meerschaum._internal.User import User
     from meerschaum.connectors.api import APIConnector
     from meerschaum.utils.formatting import print_tuple
-    from meerschaum.utils.prompt import prompt
+    from meerschaum.utils.prompt import prompt, get_password, get_email
     repo_connector = parse_repo_keys(repository)
 
     if len(action) == 0 or action == [&#39;&#39;]:
@@ -211,30 +210,14 @@ def _register_users(
             continue
         nonregistered_users.append(user)
 
-    def get_password(username):
-        while True:
-            password = prompt(f&#34;Password for user &#39;{username}&#39;: &#34;)
-            _password = prompt(f&#34;Confirm password for user &#39;{username}&#39;: &#34;)
-            if password != _password:
-                warn(f&#34;Passwords do not match! Please try again.&#34;, stack=False)
-                continue
-            else:
-                return password
-
-    def get_email():
-        while True:
-            email = prompt(f&#34;Email for user &#39;{username}&#39; (empty to omit): &#34;)
-            if email == &#39;&#39; or is_valid_email(email): return email
-            else: warn(f&#34;Invalid email! Please try again.&#34;, stack=False)
-
     ### prompt for passwords and emails, then try to register
     success = dict()
     successfully_registered_users = set()
     for _user in nonregistered_users:
         try:
             username = _user.username
-            password = get_password(username)
-            email = get_email()
+            password = get_password(username, minimum_length=7)
+            email = get_email(username, allow_omit=True)
         except Exception as e:
             return False, f&#34;Aborted registering users {&#39;, &#39;.join([str(u) for u in nonregistered_users if u not in successfully_registered_users])}&#34;
         if len(email) == 0: email = None

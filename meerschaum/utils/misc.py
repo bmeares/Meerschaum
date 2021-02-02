@@ -14,6 +14,7 @@ def add_method_to_class(
         func : Callable[[Any], Any],
         class_def : ClassVar[dict[Any, Any]],
         method_name : Optional[str] = None,
+        keep_self : Optional[bool] = None,
     ) -> Callable[[Any], Any]:
     """
     Add function `func` to class `class_def`.
@@ -30,23 +31,26 @@ def add_method_to_class(
     from functools import wraps
 
     is_class = isinstance(class_def, type)
-    if is_class:
-        def _wrapper(self, *args, **kw):
-            return func(*args, **kw)
-            
-    else:
-        def _wrapper(*args, **kw):
-            try:
-                return func(self, *args, **kw)
-            except:
-                return func(*args, **kw)
+    #  if is_class and not keep_self:
+        #  def _wrapper(self, *args, **kw):
+            #  return func(*args, **kw)
+    #  else:
+        #  def _wrapper(self, *args, **kw):
+            #  return func(self, *args, **kw)
     
     @wraps(func)
-    def wrapper(*args, **kw):
-        return _wrapper(*args, **kw)
+    def wrapper(self, *args, **kw):
+        print(self, args, kw)
+        return func(*args, **kw)
 
-    if method_name is None: method_name = func.__name__
-    setattr(class_def, method_name, wrapper)
+    if method_name is None:
+        method_name = func.__name__
+
+    setattr(class_def, method_name, (
+            wrapper if ((is_class and keep_self is None) or keep_self is False) else func
+        )
+    )
+
     return func
 
 def choose_subaction(
@@ -312,34 +316,93 @@ def print_options(
         nopretty : bool = False,
         name : str = 'options',
         header : str = None,
+        actions : bool = False,
+        num_cols : int = 8,
         **kw
     ) -> None:
     """
     Show available options from an iterable
     """
+    from meerschaum.utils.packages import import_rich
     from meerschaum.utils.formatting import make_header
+    from meerschaum.actions import actions as _actions
+
     _options = []
     for o in options: _options.append(str(o))
+    if header is None: _header = f"Available {name}:"
+    else: _header = header
 
-    print()
-    if not nopretty:
-        if header is None: _header = f"Available {name}:"
-        else: _header = header
-        print(make_header(_header))
-        ### calculate underline length
-        #  underline_len = len(_header)
-        #  for o in _options:
-            #  if len(str(o)) + 4 > underline_len:
-                #  underline_len = len(str(o)) + 4
-        #  ### print underline
-        #  for i in range(underline_len): print('-', end="")
-        #  print("\n", end="")
-    ### print actions
-    for option in sorted(_options):
-        if not nopretty: print("  - ", end="")
-        print(option)
+    def _print_options_no_rich():
+        if not nopretty:
+            print()
+            print(make_header(_header))
+            ### calculate underline length
+            #  underline_len = len(_header)
+            #  for o in _options:
+                #  if len(str(o)) + 4 > underline_len:
+                    #  underline_len = len(str(o)) + 4
+            #  ### print underline
+            #  for i in range(underline_len): print('-', end="")
+            #  print("\n", end="")
+        ### print actions
+        for option in sorted(_options):
+            if not nopretty: print("  - ", end="")
+            print(option)
+        if not nopretty:
+            print()
 
-    print()
+    rich = import_rich()
+    if rich is None or nopretty:
+        return _print_options_no_rich()
+
+    from meerschaum.utils.formatting import pprint
+    from meerschaum.utils.packages import attempt_import
+    rich_columns = attempt_import('rich.columns')
+    rich_panel = attempt_import('rich.panel')
+    rich_table = attempt_import('rich.table')
+    from rich import box
+    Panel = rich_panel.Panel
+    Columns = rich_columns.Columns
+    Table = rich_table.Table
+
+    if _header is not None:
+        table = Table(
+            title = '\n' + _header,
+            box = box.SIMPLE,
+            show_header = False,
+            show_footer = False,
+            title_style = ''
+        )
+    else:
+        table = Table.grid(padding=(0, 2))
+    for i in range(num_cols):
+        table.add_column()
+
+    chunks = iterate_chunks(sorted(_options), num_cols, fillvalue='')
+    for c in chunks:
+        table.add_row(*c)
+
+    cols = Columns([
+        o for o in sorted(_options)
+        #  Panel(
+            #  (o if not actions else (_actions[o].__doc__ if _actions[o].__doc__ is not None else '')),
+            #  title = (None if not actions else o),
+            #  expand = False,
+            #  box = box.SIMPLE,
+        #  ) for o in sorted(_options)
+    ], expand=True, equal=True, title=header, padding=(0, 0))
+    #  rich.print(cols)
+    rich.print(table)
+
+
+def iterate_chunks(iterable, chunksize : int, fillvalue : Optional[Any] = None):
+    """
+    Iterate over a list in chunks.
+    Found here: https://stackoverflow.com/questions/434287/what-is-the-most-pythonic-way-to-iterate-over-a-list-in-chunks
+    """
+    from itertools import zip_longest
+    args = [iter(iterable)] * chunksize
+    return zip_longest(*args, fillvalue=fillvalue)
 
 def sorted_dict(d : dict) -> dict:
     """
@@ -432,21 +495,50 @@ def parse_df_datetimes(
 
     return df
 
+def timed_input(
+        seconds : int = 10,
+        timeout_message : str = "",
+        prompt : str = "",
+        icon : bool = False,
+        **kw
+    ) -> Optional[str]:
+    from meerschaum.utils.prompt import prompt as _prompt
+    import signal
+
+    class TimeoutExpired(Exception):
+        pass
+
+    def alarm_handler(signum, frame):
+        raise TimeoutExpired
+
+    # set signal handler
+    signal.signal(signal.SIGALRM, alarm_handler)
+    signal.alarm(seconds) # produce SIGALRM in `timeout` seconds
+
+    try:
+        #  return _prompt(prompt, icon=icon, **kw)
+        return input(prompt)
+    except TimeoutExpired:
+        return None
+    finally:
+        signal.alarm(0) # cancel alarm
+
 async def retry_connect(
         connector : Union[meerschaum.connectors.sql.SQLConnector, databases.Database, None] = None,
         max_retries : int = 40,
         retry_wait : int = 3,
+        workers : int = 1,
         debug : bool = False,
     ):
     """
     Keep trying to connect to the database.
     Use wait_for_connection for non-async
     """
-    from meerschaum.utils.warnings import warn
+    from meerschaum.utils.warnings import warn, error, info
     from meerschaum.utils.debug import dprint
     from meerschaum import get_connector
     from meerschaum.connectors.sql import SQLConnector
-    import time
+    import time, sys
 
     ### get default connector if None is provided
     if connector is None:
@@ -456,7 +548,6 @@ async def retry_connect(
     if isinstance(connector, SQLConnector):
         database = connector.db
 
-
     retries = 0
     while retries < max_retries:
         if debug:
@@ -464,14 +555,28 @@ async def retry_connect(
             dprint(f"Attempt ({retries + 1} / {max_retries})")
         try:
             await database.connect()
+            connected = True
 
         except Exception as e:
-            dprint(f"Connection failed. Retrying in {retry_wait} seconds...")
-            time.sleep(retry_wait)
-            retries += 1
-        else:
+            connected = False
+
+        if connected:
             if debug: dprint("Connection established!")
+            return True
             break
+
+        warn(f"Connection failed. Press [Enter] to retry or wait {retry_wait} seconds.", stack=False)
+        info(
+            f"To quit, press CTRL-C, then enter 'q' for each worker" +
+            (f" ({workers})." if workers is not None else ".")
+        )
+        try:
+            text = timed_input(retry_wait)
+            if text in ('q', 'quit', 'pass', 'exit', 'stop'):
+                return None
+        except KeyboardInterrupt:
+            return None
+        retries += 1
 
 def wait_for_connection(**kw):
     """
@@ -647,9 +752,10 @@ def reload_plugins(debug : bool = False):
     """
     Convenience method for reloading the actions package (which loads plugins)
     """
-    import meerschaum.actions
     from meerschaum.utils.packages import reload_package
-    reload_package(meerschaum.actions, debug=debug)
+    from meerschaum.actions import get_shell
+    reload_package('meerschaum', debug=debug)
+    #  get_shell(reload=True)
 
 def is_valid_email(email : str) -> bool:
     """
@@ -767,3 +873,27 @@ def remove_ansi(s : str) -> str:
     """
     import re
     return re.compile(r'\x1B(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~])').sub('', s)
+
+def get_connector_labels(
+        *types : str,
+        search_term : str = '',
+        ignore_exact_match = True,
+    ) -> List[str]:
+    """
+    Read connector lables from config.
+    """
+    from meerschaum.config import get_config
+    connectors = get_config('meerschaum', 'connectors')
+
+    _types = list(types)
+    if len(_types) == 0:
+        _types = list(connectors.keys())
+
+    conns = []
+    for t in _types:
+        conns += [ f'{t}:{label}' for label in connectors.get(t, {}) if label != 'default' ]
+
+    possibilities = [ c for c in conns if c.startswith(search_term) and c != (search_term if ignore_exact_match else None) ]
+    return sorted(possibilities)
+
+

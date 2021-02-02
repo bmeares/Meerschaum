@@ -13,9 +13,10 @@ def plugin_r_url(
         plugin : Union[meerschaum._internal.Plugin.Plugin, str]
     ) -> str:
     """
-    Generate a relative URL path from a Pipe's keys.
+    Generate a relative URL path from a Plugin.
     """
-    return f'/mrsm/plugins/{plugin}'
+    from meerschaum.config.static import _static_config
+    return f"{_static_config()['api']['endpoints']['plugins']}/{plugin}"
 
 def register_plugin(
         self,
@@ -75,6 +76,7 @@ def install_plugin(
 def get_plugins(
         self,
         user_id : Optional[int] = None,
+        search_term : Optional[str] = None,
         debug : bool = False
     ) -> Sequence[str]:
     """
@@ -85,9 +87,15 @@ def get_plugins(
     """
     import json
     from meerschaum.utils.warnings import warn, error
-    response = self.get('/mrsm/plugins', params={'user_id' : user_id})
+    from meerschaum.config.static import _static_config
+    response = self.get(
+        _static_config()['api']['endpoints']['plugins'],
+        params = {'user_id' : user_id, 'search_term' : search_term},
+        debug = debug
+    )
     plugins = json.loads(response.text)
-    if not isinstance(plugins, list): error(response.text)
+    if not isinstance(plugins, list):
+        error(response.text)
     return plugins
 
 def get_plugin_attributes(
@@ -100,9 +108,14 @@ def get_plugin_attributes(
     """
     import json
     from meerschaum.utils.warnings import warn, error
-    response = self.get(f'/mrsm/plugins/{plugin.name}/attributes')
+    from meerschaum.config.static import _static_config
+    r_url = plugin_r_url(plugin) + '/attributes'
+    response = self.get(r_url, debug=debug)
     attributes = json.loads(response.text)
     if not isinstance(attributes, dict):
         error(response.text)
+    elif not response and 'detail' in attributes:
+        warn(attributes['detail'])
+        return None
     return attributes
 

@@ -78,7 +78,8 @@ class SQLConnector(Connector):
         edit_user,
         delete_user,
         get_user_password_hash,
-        get_user_type
+        get_user_type,
+        get_user_attributes,
     )
     
     def __init__(
@@ -241,7 +242,8 @@ class SQLConnector(Connector):
         edit_user,
         delete_user,
         get_user_password_hash,
-        get_user_type
+        get_user_type,
+        get_user_attributes,
     )
     
     def __init__(
@@ -501,8 +503,8 @@ def metadata(self):
     if self.flavor in (&#39;timescaledb&#39;, &#39;postgresql&#39;):
         ### trigger install if not installed
         psycopg2 = attempt_import(&#39;psycopg2&#39;, debug=self._debug, lazy=False)
+
     ### supplement missing values with defaults (e.g. port number)
-    #  print(self.__dict__)
     for a, value in flavor_configs[self.flavor][&#39;defaults&#39;].items():
         if a not in self.__dict__:
             self.__dict__[a] = value
@@ -511,6 +513,7 @@ def metadata(self):
     if self.flavor == &#34;sqlite&#34;:
         engine_str = f&#34;sqlite:///{self.database}&#34;
         self.sys_config[&#39;connect_args&#39;].update({&#34;check_same_thread&#34; : False})
+        aiosqlite = attempt_import(&#39;aiosqlite&#39;, debug=self._debug, lazy=False)
     else:
         engine_str = (
             flavor_configs[self.flavor][&#39;engine&#39;] + &#34;://&#34; +
@@ -681,11 +684,11 @@ def metadata(self):
 
     query = sqlalchemy.delete(users).where(users.c.user_id == user_id)
 
-    result = self.exec(query, debug=True)
+    result = self.exec(query, debug=debug)
     if result is None: return False, f&#34;Failed to delete user &#39;{user}&#39;&#34;
 
     query = sqlalchemy.delete(plugins).where(plugins.c.user_id == user_id)
-    result = self.exec(query, debug=True)
+    result = self.exec(query, debug=debug)
     if result is None: return False, f&#34;Failed to delete plugins of user &#39;{user}&#39;&#34;
 
     return True, f&#34;Successfully deleted user &#39;{user}&#39;&#34;</code></pre>
@@ -798,7 +801,7 @@ Otherwise overwrite the parameters (default).</p>
 <span>def <span class="ident">edit_user</span></span>(<span>self, user: meerschaum._internal.User.User, debug: bool = False, **kw: Any) ‑> SuccessTuple</span>
 </code></dt>
 <dd>
-<div class="desc"><p>Update an existing user</p></div>
+<div class="desc"><p>Update an existing user's metadata.</p></div>
 <details class="source">
 <summary>
 <span>Expand source code</span>
@@ -810,15 +813,16 @@ Otherwise overwrite the parameters (default).</p>
         **kw : Any
     ) -&gt; SuccessTuple:
     &#34;&#34;&#34;
-    Update an existing user
+    Update an existing user&#39;s metadata.
     &#34;&#34;&#34;
     from meerschaum.utils.packages import attempt_import
     sqlalchemy = attempt_import(&#39;sqlalchemy&#39;)
     from meerschaum.connectors.sql.tables import get_tables
     users = get_tables(mrsm_instance=self, debug=debug)[&#39;users&#39;]
 
-    if user.user_id is None: user_id = user.user_id
-    else: user_id = self.get_user_id(user, debug=debug)
+    user_id = user.user_id if user.user_id is not None else self.get_user_id(user, debug=debug)
+    if user_id is None:
+        return False, f&#34;User &#39;{user.username}&#39; does not exist. Register user &#39;{user.username}&#39; before editing.&#34;
 
     import json
     valid_tuple = valid_username(user.username)
@@ -827,10 +831,13 @@ Otherwise overwrite the parameters (default).</p>
     bind_variables = {
         &#39;user_id&#39; : user_id,
         &#39;username&#39; : user.username,
-        &#39;email&#39; : user.email,
-        &#39;password_hash&#39; : user.password_hash,
-        &#39;attributes&#39; : json.dumps(user.attributes),
     }
+    if user.password != &#39;&#39;:
+        bind_variables[&#39;password_hash&#39;] = user.password_hash
+    if user.email != &#39;&#39;:
+        bind_variables[&#39;email&#39;] = user.email
+    if user.attributes is not None and user.attributes != {}:
+        bind_variables[&#39;attributes&#39;] = json.dumps(user.attributes)
 
     query = sqlalchemy.update(users).values(**bind_variables).where(users.c.user_id == user_id)
 
@@ -905,7 +912,7 @@ Otherwise overwrite the parameters (default).</p>
 </details>
 </dd>
 <dt id="meerschaum.connectors.sql.SQLConnector.SQLConnector.fetch"><code class="name flex">
-<span>def <span class="ident">fetch</span></span>(<span>self, pipe: <a title="meerschaum.Pipe" href="../../Pipe/index.html">meerschaum.Pipe</a>, begin: str = 'now', debug: bool = False, **kw) ‑> Union[pd.DataFrame, NoneType]</span>
+<span>def <span class="ident">fetch</span></span>(<span>self, pipe: "'<a title="meerschaum.Pipe" href="../../Pipe/index.html">meerschaum.Pipe</a>'", begin: str = 'now', debug: bool = False, **kw) ‑> Union[pd.DataFrame, NoneType]</span>
 </code></dt>
 <dd>
 <div class="desc"><p>Execute the SQL definition and return a Pandas DataFrame.</p>
@@ -974,8 +981,7 @@ pipe.parameters['fetch'] : dict
     from meerschaum.utils.debug import dprint
     from meerschaum.utils.warnings import warn, error
     from meerschaum.utils.misc import sql_item_name
-    from meerschaum.utils.packages import attempt_import
-    datetime = attempt_import(&#39;datetime&#39;)
+    import datetime
 
     if &#39;columns&#39; not in pipe.parameters or &#39;fetch&#39; not in pipe.parameters:
         warn(f&#34;Parameters for &#39;{pipe}&#39; must include &#39;columns&#39; and &#39;fetch&#39;&#34;, stack=False)
@@ -1357,7 +1363,7 @@ Upper bound for the query (inclusive)</p></div>
 </details>
 </dd>
 <dt id="meerschaum.connectors.sql.SQLConnector.SQLConnector.get_plugin_attributes"><code class="name flex">
-<span>def <span class="ident">get_plugin_attributes</span></span>(<span>self, plugin: "'meerschaum._internal.Plugin.Plugin'", debug: bool = False) ‑> dict</span>
+<span>def <span class="ident">get_plugin_attributes</span></span>(<span>self, plugin: "'meerschaum._internal.Plugin.Plugin'", debug: bool = False) ‑> Dict[str, Any]</span>
 </code></dt>
 <dd>
 <div class="desc"></div>
@@ -1369,7 +1375,7 @@ Upper bound for the query (inclusive)</p></div>
         self,
         plugin : &#39;meerschaum._internal.Plugin.Plugin&#39;,
         debug : bool = False
-    ) -&gt; dict:
+    ) -&gt; Dict[str, Any]:
     ### ensure plugins table exists
     from meerschaum.connectors.sql.tables import get_tables
     plugins = get_tables(mrsm_instance=self, debug=debug)[&#39;plugins&#39;]
@@ -1501,7 +1507,7 @@ Upper bound for the query (inclusive)</p></div>
 </details>
 </dd>
 <dt id="meerschaum.connectors.sql.SQLConnector.SQLConnector.get_plugins"><code class="name flex">
-<span>def <span class="ident">get_plugins</span></span>(<span>self, user_id: int = None, debug: bool = False, **kw) ‑> list</span>
+<span>def <span class="ident">get_plugins</span></span>(<span>self, user_id: Optional[int] = None, search_term: Optional[str] = None, debug: bool = False, **kw: Any) ‑> List[str]</span>
 </code></dt>
 <dd>
 <div class="desc"></div>
@@ -1511,10 +1517,11 @@ Upper bound for the query (inclusive)</p></div>
 </summary>
 <pre><code class="python">def get_plugins(
         self,
-        user_id : int = None,
+        user_id : Optional[int] = None,
+        search_term : Optional[str] = None,
         debug : bool = False,
-        **kw
-    ) -&gt; list:
+        **kw : Any
+    ) -&gt; List[str]:
     ### ensure plugins table exists
     from meerschaum.connectors.sql.tables import get_tables
     plugins = get_tables(mrsm_instance=self, debug=debug)[&#39;plugins&#39;]
@@ -1522,7 +1529,10 @@ Upper bound for the query (inclusive)</p></div>
     sqlalchemy = attempt_import(&#39;sqlalchemy&#39;)
 
     query = sqlalchemy.select([plugins.c.plugin_name])
-    if user_id is not None: query = query.where(plugins.c.user_id == user_id)
+    if user_id is not None:
+        query = query.where(plugins.c.user_id == user_id)
+    if search_term is not None:
+        query = query.where(plugins.c.plugin_name.like(search_term + &#39;%&#39;))
 
     #  q = f&#34;&#34;&#34;
     #  SELECT plugin_name
@@ -1583,6 +1593,53 @@ Upper bound for the query (inclusive)</p></div>
         warn(str(e))
 
     return sync_time</code></pre>
+</details>
+</dd>
+<dt id="meerschaum.connectors.sql.SQLConnector.SQLConnector.get_user_attributes"><code class="name flex">
+<span>def <span class="ident">get_user_attributes</span></span>(<span>self, user: meerschaum._internal.User.User, debug: bool = False) ‑> Optional[Dict[str, Any]]</span>
+</code></dt>
+<dd>
+<div class="desc"></div>
+<details class="source">
+<summary>
+<span>Expand source code</span>
+</summary>
+<pre><code class="python">def get_user_attributes(
+        self,
+        user : meerschaum._internal.User.User,
+        debug : bool = False
+    ) -&gt; Optional[Dict[str, Any]]:
+    ### ensure users table exists
+    from meerschaum.utils.packages import attempt_import
+    sqlalchemy = attempt_import(&#39;sqlalchemy&#39;)
+    from meerschaum.connectors.sql.tables import get_tables
+    users = get_tables(mrsm_instance=self, debug=debug)[&#39;users&#39;]
+
+    if user.user_id is not None: user_id = user.user_id
+    else: user_id = self.get_user_id(user, debug=debug)
+
+    query = (
+        sqlalchemy.select([users.c.attributes]).
+        where(users.c.user_id == user_id)
+    )
+
+    result = self.value(query, debug=debug)
+    if result is not None and not isinstance(result, dict):
+        try:
+            result = dict(result)
+            _parsed = True
+        except:
+            _parsed = False
+        if not _parsed:
+            try:
+                import json
+                result = json.loads(result)
+                _parsed = True
+            except:
+                _parsed = False
+        if not _parsed:
+            warn(f&#34;Received unexpected type for attributes: {result}&#34;)
+    return result</code></pre>
 </details>
 </dd>
 <dt id="meerschaum.connectors.sql.SQLConnector.SQLConnector.get_user_id"><code class="name flex">
@@ -1895,7 +1952,7 @@ A pipe's attributes must be set before registering.</p></div>
 </details>
 </dd>
 <dt id="meerschaum.connectors.sql.SQLConnector.SQLConnector.register_plugin"><code class="name flex">
-<span>def <span class="ident">register_plugin</span></span>(<span>self, plugin: "'meerschaum._internal.Plugin.Plugin'", debug: bool = False, **kw) ‑> tuple</span>
+<span>def <span class="ident">register_plugin</span></span>(<span>self, plugin: "'meerschaum._internal.Plugin.Plugin'", debug: bool = False, **kw: Any) ‑> Tuple[bool, str]</span>
 </code></dt>
 <dd>
 <div class="desc"><p>Register a new plugin</p></div>
@@ -1907,8 +1964,8 @@ A pipe's attributes must be set before registering.</p></div>
         self,
         plugin : &#39;meerschaum._internal.Plugin.Plugin&#39;,
         debug : bool = False,
-        **kw
-    ) -&gt; tuple:
+        **kw : Any
+    ) -&gt; SuccessTuple:
     &#34;&#34;&#34;
     Register a new plugin
     &#34;&#34;&#34;
@@ -1998,10 +2055,11 @@ A pipe's attributes must be set before registering.</p></div>
         &#39;username&#39; : user.username,
         &#39;email&#39; : user.email,
         &#39;password_hash&#39; : user.password_hash,
+        &#39;user_type&#39; : user.type,
         &#39;attributes&#39; : json.dumps(user.attributes),
     }
     if old_id is not None:
-        return False, f&#34;User &#39;{username}&#39; already exists&#34;
+        return False, f&#34;User &#39;{username}&#39; already exists.&#34;
     if old_id is None:
         query = (
             sqlalchemy.insert(tables[&#39;users&#39;]).
@@ -2345,6 +2403,7 @@ Additional arguments will be passed to the DataFrame's <code>to_sql</code> funct
 <li><code><a title="meerschaum.connectors.sql.SQLConnector.SQLConnector.get_plugin_version" href="#meerschaum.connectors.sql.SQLConnector.SQLConnector.get_plugin_version">get_plugin_version</a></code></li>
 <li><code><a title="meerschaum.connectors.sql.SQLConnector.SQLConnector.get_plugins" href="#meerschaum.connectors.sql.SQLConnector.SQLConnector.get_plugins">get_plugins</a></code></li>
 <li><code><a title="meerschaum.connectors.sql.SQLConnector.SQLConnector.get_sync_time" href="#meerschaum.connectors.sql.SQLConnector.SQLConnector.get_sync_time">get_sync_time</a></code></li>
+<li><code><a title="meerschaum.connectors.sql.SQLConnector.SQLConnector.get_user_attributes" href="#meerschaum.connectors.sql.SQLConnector.SQLConnector.get_user_attributes">get_user_attributes</a></code></li>
 <li><code><a title="meerschaum.connectors.sql.SQLConnector.SQLConnector.get_user_id" href="#meerschaum.connectors.sql.SQLConnector.SQLConnector.get_user_id">get_user_id</a></code></li>
 <li><code><a title="meerschaum.connectors.sql.SQLConnector.SQLConnector.get_user_password_hash" href="#meerschaum.connectors.sql.SQLConnector.SQLConnector.get_user_password_hash">get_user_password_hash</a></code></li>
 <li><code><a title="meerschaum.connectors.sql.SQLConnector.SQLConnector.get_user_type" href="#meerschaum.connectors.sql.SQLConnector.SQLConnector.get_user_type">get_user_type</a></code></li>

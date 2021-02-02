@@ -3,29 +3,40 @@
 # vim:fenc=utf-8
 
 """
-Manage users via the API Connector
+Manage users via the API Connector.
 """
+
+from meerschaum.utils.typing import Optional, Any, List, SuccessTuple
 
 def get_users(
         self,
         debug : bool = False,
-        **kw
-    ) -> list:
+        **kw : Any
+    ) -> List[str]:
     """
-    Return a list of registered users
+    Return a list of registered users.
     """
+    from meerschaum.config.static import _static_config
     import json
-    return json.loads(self.get('/mrsm/users').text)
+    return json.loads(
+        self.get(
+            f"{_static_config()['api']['endpoints']['users']}",
+            debug = debug,
+            use_token = False
+        ).text
+    )
 
 def login(
         self,
-        **kw
-    ) -> tuple:
+        debug : bool = False,
+        **kw : Any
+    ) -> SuccessTuple:
     """
-    Log in and set the session token
+    Log in and set the session token.
     """
     from meerschaum.utils.warnings import warn, info, error
     from meerschaum._internal.User import User
+    from meerschaum.config.static import _static_config
     import json, datetime
     try:
         login_data = {
@@ -34,7 +45,12 @@ def login(
         }
     except:
         return False, f"Please provide a username and password for '{self}' with `edit config`."
-    response = self.post('/mrsm/login', data=login_data, use_token=False)
+    response = self.post(
+        _static_config()['api']['endpoints']['login'],
+        data = login_data,
+        use_token = False,
+        debug = debug
+    )
     if response:
         msg = f"Successfully logged into '{self}' as user '{login_data['username']}'"
         self._token = json.loads(response.text)['access_token']
@@ -44,7 +60,7 @@ def login(
         )
     else:
         msg = ''
-        if self.get_user_id(User(self.username, self.password), use_token=False) is None:
+        if self.get_user_id(User(self.username, self.password), use_token=False, debug=debug) is None:
             msg = f"User '{self.username}' does not exist for '{self}'." + '\n'
         msg += (
             f"Failed to log into '{self}' as user '{login_data['username']}'. " +
@@ -58,21 +74,25 @@ def edit_user(
         self,
         user : 'meerschaum._internal.User.User',
         debug : bool = False,
-        **kw
-    ) -> tuple:
+        **kw : Any
+    ) -> SuccessTuple:
     """
-    Edit an existing user
+    Edit an existing user.
     """
     import json
-    r_url = f"/mrsm/users/{user.username}/edit"
+    from meerschaum.config.static import _static_config
+    r_url = f"{_static_config()['api']['endpoints']['users']}/{user.username}/edit"
     params = {
         'password' : user.password,
         'email' : user.email,
         'attributes' : user.attributes,
     }
-    response = self.post(r_url, json=user.attributes, params=params)
+    response = self.post(r_url, json=user.attributes, params=params, debug=debug)
     try:
-        success_tuple = tuple(json.loads(response.text))
+        _json = json.loads(response.text)
+        if isinstance(_json, dict) and 'detail' in _json:
+            return False, _json['detail']
+        success_tuple = tuple(_json)
     except:
         if response.text: msg = response.text
         else: msg = f"Failed to edit user '{user}'"
@@ -84,21 +104,25 @@ def register_user(
         self,
         user : 'meerschaum._internal.User.User',
         debug : bool = False,
-        **kw
-    ) -> tuple:
+        **kw : Any
+    ) -> SuccessTuple:
     """
-    Register a new user
+    Register a new user.
     """
     import json
-    r_url = f"/mrsm/users/{user.username}/register"
+    from meerschaum.config.static import _static_config
+    r_url = f"{_static_config()['api']['endpoints']['users']}/{user.username}/register"
     params = {
         'password' : user.password,
         'email' : user.email,
         'attributes' : user.attributes,
     }
-    response = self.post(r_url, json=user.attributes, params=params)
+    response = self.post(r_url, json=user.attributes, params=params, debug=debug)
     try:
-        success_tuple = tuple(json.loads(response.text))
+        _json = json.loads(response.text)
+        if isinstance(_json, dict) and 'detail' in _json:
+            return False, _json['detail']
+        success_tuple = tuple(_json)
     except:
         if response.text: msg = response.text
         else: msg = f"Failed to register user '{user}'"
@@ -111,13 +135,14 @@ def get_user_id(
         user : 'meerschaum._internal.User.User',
         debug : bool = False,
         **kw
-    ) -> int:
+    ) -> Optional[int]:
     """
-    Get a user's ID
+    Get a user's ID.
     """
+    from meerschaum.config.static import _static_config
     import json
-    r_url = f"/mrsm/users/{user.username}/id"
-    response = self.get(r_url, **kw)
+    r_url = f"{_static_config()['api']['endpoints']['users']}/{user.username}/id"
+    response = self.get(r_url, debug=debug, **kw)
     try:
         user_id = int(json.loads(response.text))
     except Exception as e:
@@ -129,15 +154,39 @@ def delete_user(
         user : 'meerschaum._internal.User.User',
         debug : bool = False,
         **kw
-    ) -> tuple:
+    ) -> SuccessTuple:
     """
-    Delete a user
+    Delete a user.
     """
+    from meerschaum.config.static import _static_config
     import json
-    r_url = f"/mrsm/users/{user.username}/delete"
-    response = self.post(r_url)
+    r_url = f"{_static_config()['api']['endpoints']['users']}/{user.username}/delete"
+    response = self.post(r_url, debug=debug)
     try:
-        success_tuple = tuple(json.loads(response.text))
+        _json = json.loads(response.text)
+        if isinstance(_json, dict) and 'detail' in _json:
+            return False, _json['detail']
+        success_tuple = tuple(_json)
     except:
         success_tuple = False, f"Failed to delete user '{user.username}'"
     return success_tuple
+
+def get_user_attributes(
+        self,
+        user : 'meerschaum._internal.User.User',
+        debug : bool = False,
+        **kw
+    ) -> int:
+    """
+    Get a user's attributes.
+    """
+    from meerschaum.config.static import _static_config
+    import json
+    r_url = f"{_static_config()['api']['endpoints']['users']}/{user.username}/attributes"
+    response = self.get(r_url, debug=debug, **kw)
+    try:
+        attributes = json.loads(response.text)
+    except Exception as e:
+        attributes = None
+    return attributes
+

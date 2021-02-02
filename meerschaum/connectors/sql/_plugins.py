@@ -7,14 +7,14 @@ Functions for managing plugins registration via the SQL connector
 """
 
 from __future__ import annotations
-from meerschaum.utils.typing import Optional
+from meerschaum.utils.typing import Optional, Any, List, SuccessTuple, Dict
 
 def register_plugin(
         self,
         plugin : 'meerschaum._internal.Plugin.Plugin',
         debug : bool = False,
-        **kw
-    ) -> tuple:
+        **kw : Any
+    ) -> SuccessTuple:
     """
     Register a new plugin
     """
@@ -146,7 +146,7 @@ def get_plugin_attributes(
         self,
         plugin : 'meerschaum._internal.Plugin.Plugin',
         debug : bool = False
-    ) -> dict:
+    ) -> Dict[str, Any]:
     ### ensure plugins table exists
     from meerschaum.connectors.sql.tables import get_tables
     plugins = get_tables(mrsm_instance=self, debug=debug)['plugins']
@@ -159,10 +159,11 @@ def get_plugin_attributes(
 
 def get_plugins(
         self,
-        user_id : int = None,
+        user_id : Optional[int] = None,
+        search_term : Optional[str] = None,
         debug : bool = False,
-        **kw
-    ) -> list:
+        **kw : Any
+    ) -> List[str]:
     ### ensure plugins table exists
     from meerschaum.connectors.sql.tables import get_tables
     plugins = get_tables(mrsm_instance=self, debug=debug)['plugins']
@@ -170,7 +171,10 @@ def get_plugins(
     sqlalchemy = attempt_import('sqlalchemy')
 
     query = sqlalchemy.select([plugins.c.plugin_name])
-    if user_id is not None: query = query.where(plugins.c.user_id == user_id)
+    if user_id is not None:
+        query = query.where(plugins.c.user_id == user_id)
+    if search_term is not None:
+        query = query.where(plugins.c.plugin_name.like(search_term + '%'))
 
     #  q = f"""
     #  SELECT plugin_name

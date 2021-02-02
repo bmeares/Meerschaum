@@ -6,6 +6,9 @@
 Routes for managing plugins
 """
 
+from __future__ import annotations
+from meerschaum.utils.typing import Optional, List
+
 from meerschaum.api import (
     fastapi,
     app,
@@ -20,11 +23,12 @@ from meerschaum.api import (
 from meerschaum.api.tables import get_tables
 from fastapi import FastAPI, File, UploadFile
 from meerschaum.utils.packages import attempt_import
+import meerschaum._internal.User
 starlette_responses = attempt_import('starlette.responses', warn=False)
 FileResponse = starlette_responses.FileResponse
 
 sqlalchemy = attempt_import('sqlalchemy')
-plugins_endpoint = endpoints['mrsm'] + '/plugins'
+plugins_endpoint = endpoints['plugins']
 
 @app.post(plugins_endpoint + '/{name}')
 def register_plugin(
@@ -32,24 +36,24 @@ def register_plugin(
         version : str = None,
         attributes : str = None,
         archive : UploadFile = File(...),
-        curr_user : str = fastapi.Depends(manager),
+        curr_user : 'meerschaum._internal.User.User' = fastapi.Depends(manager),
     ) -> tuple:
     """
     Register a plugin and save its archive file
     """
     from meerschaum.config import get_config
-    allow_plugins = get_config('system', 'api', 'allow_registration', 'plugins', patch=True)
+    allow_plugins = get_config('system', 'api', 'permissions', 'registration', 'plugins', patch=True)
     if not allow_plugins:
         return False, (
             "The administrator for this server has not allowed plugin registration.\n\n" +
             "Please contact the system administrator, or if you are running this server, " +
-            "open the configuration file with `edit config` and search for 'allow_registration'. " +
-            " Under the keys system:api:allow_registration, you can toggle various registration types."
+            "open the configuration file with `edit config` and search for 'permissions'. " +
+            " Under the keys system:api:permissions:registration, you can toggle various registration types."
         )
 
     import json, shutil, pathlib, os
     from meerschaum.config._paths import PLUGINS_RESOURCES_PATH, PLUGINS_ARCHIVES_RESOURCES_PATH
-    from meerschaum._internal import Plugin
+    from meerschaum._internal.Plugin import Plugin
     get_tables()
     if attributes is None: attributes = json.dumps(dict())
     attributes = json.loads(attributes)
@@ -81,7 +85,7 @@ def get_plugin(
     """
     Download a plugin's archive file
     """
-    from meerschaum._internal import Plugin
+    from meerschaum._internal.Plugin import Plugin
     plugin = Plugin(name)
     if plugin.archive_path.exists():
         return FileResponse(plugin.archive_path, filename=f'{plugin.name}.tar.gz')
@@ -94,14 +98,15 @@ def get_plugin_attributes(
     """
     Download a plugin's archive file
     """
-    from meerschaum._internal import Plugin
+    from meerschaum._internal.Plugin import Plugin
     return get_connector().get_plugin_attributes(Plugin(name))
 
 @app.get(plugins_endpoint)
 def get_plugins(
-        user_id : int = None
-    ) -> list:
+        user_id : Optional[int] = None,
+        search_term : Optional[str] = None,
+    ) -> List[str]:
     """
     Return a list of registered plugins
     """
-    return get_connector().get_plugins(user_id=user_id)
+    return get_connector().get_plugins(user_id=user_id, search_term=search_term)

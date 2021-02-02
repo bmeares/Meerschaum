@@ -115,24 +115,62 @@ def get_shell(
     &#34;&#34;&#34;
     global _shell
     from meerschaum.utils.debug import dprint
+    import meerschaum.actions.shell as shell_pkg
 
-    if _shell is None:
+    if _shell is None or reload:
         if debug: dprint(&#34;Loading the shell...&#34;)
-        from meerschaum.utils.misc import add_method_to_class
-        import meerschaum.actions.shell as shell_pkg
-        for a, f in actions.items():
-            add_method_to_class(func=f, class_def=shell_pkg.Shell, method_name=&#39;do_&#39; + a)
 
-        _shell = shell_pkg.Shell(actions, sysargs=sysargs)
-
-    if reload:
-        _shell.load_config()
+        if _shell is None:
+            shell_pkg._insert_shell_actions()
+            _shell = shell_pkg.Shell(actions, sysargs=sysargs)
+        elif reload:
+            _shell.__init__()
     return _shell
+
+def get_subactions(action : str) -&gt; Dict[str, Callable[[Any], Any]]:
+    &#34;&#34;&#34;
+    Return a dictionary of an action&#39;s subactions.
+    &#34;&#34;&#34;
+    import importlib, inspect
+    subactions = {}
+    try:
+        action_module = importlib.import_module(f&#34;meerschaum.actions.{action}&#34;)
+    except ImportError:
+        action_module = None
+    if action_module is not None:
+        for name, f in inspect.getmembers(action_module):
+            if not inspect.isfunction(f):
+                continue
+            if action + &#39;_&#39; in name and not name.lstrip(&#39;_&#39;).startswith(&#39;complete&#39;):
+                _name = name.replace(action, &#39;&#39;)
+                _name = _name.lstrip(&#39;_&#39;)
+                subactions[_name] = f
+    return subactions
+
+def get_completer(action : str) -&gt; Optional[Callable[[&#39;Shell&#39;, str, str, int, int], List[str]]]:
+    &#34;&#34;&#34;
+    Search for a custom completer function for an action.
+    &#34;&#34;&#34;
+    import importlib, inspect
+    try:
+        action_module = importlib.import_module(f&#34;meerschaum.actions.{action}&#34;)
+    except ImportError:
+        action_module = None
+    if action_module is not None:
+        for name, f in inspect.getmembers(action_module):
+            if not inspect.isfunction(f):
+                continue
+            if &#39;complete_&#39; + action in name:
+                #  _name = name.replace(&#39;complete_&#39; + action, &#39;&#39;)
+                #  _name = _name.lstrip(&#39;_&#39;)
+                return f
+    return None
+
 
 from meerschaum.actions.plugins import make_action, load_plugins, import_plugins
 plugins = import_plugins()
 __pdoc__ = {&#39;plugins&#39; : False}
-load_plugins(debug=True)</code></pre>
+load_plugins()</code></pre>
 </details>
 </section>
 <section>

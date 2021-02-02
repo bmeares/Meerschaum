@@ -19,6 +19,7 @@ def fetch(
     """
     from meerschaum.utils.debug import dprint
     from meerschaum.utils.warnings import warn, error
+    from meerschaum.config.static import _static_config
 
     if 'fetch' not in pipe.parameters:
         warn(f"Missing 'fetch' parameters for Pipe '{pipe}'.", stack=False)

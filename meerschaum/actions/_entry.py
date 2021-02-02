@@ -8,20 +8,21 @@ The entry point for launching Meerschaum actions.
 def _entry(sysargs=[]):
     """
     Parse arguments and launch a Meerschaum action.
-    The `action` list removes the first element and ensures a minimum
-    length of 1.
+    The `action` list removes the first element.
 
     Examples of action:
     'show actions' -> ['actions']
-    'show' -> ['']
+    'show' -> []
     """
     from meerschaum.actions.arguments import parse_arguments
-    from meerschaum.actions import actions
+    from meerschaum.actions import actions, get_shell
     import sys
     if not isinstance(sysargs, list):
         import shlex
         sysargs = shlex.split(sysargs)
     args = parse_arguments(sysargs)
+    if len(args['action']) == 0:
+        return get_shell().cmdloop()
     main_action = args['action'][0]
 
     ### if action does not exist, execute in bash

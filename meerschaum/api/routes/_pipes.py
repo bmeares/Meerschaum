@@ -6,6 +6,8 @@
 Register Pipes via the Meerschaum API
 """
 
+from __future__ import annotations
+
 from meerschaum.api import (
     fastapi,
     app,
@@ -14,31 +16,33 @@ from meerschaum.api import (
     pipes,
     get_pipe,
     get_pipes_sql,
-    manager
+    manager,
+    debug
 )
 from meerschaum.api.models import MetaPipe
 from meerschaum.api.tables import get_tables
 from meerschaum.utils.packages import attempt_import
 from meerschaum.utils.misc import is_pipe_registered, round_time
+import meerschaum._internal.User
 import datetime
-pipes_endpoint = endpoints['mrsm'] + '/pipes'
+pipes_endpoint = endpoints['pipes']
 
 @app.post(pipes_endpoint)
 def register_pipe(
         pipe : MetaPipe,
-        curr_user : str = fastapi.Depends(manager)
+        curr_user : 'meerschaum._internal.User.User' = fastapi.Depends(manager),
     ):
     """
     Register a new pipe.
     """
     from meerschaum.config import get_config
-    allow_pipes = get_config('system', 'api', 'allow_registration', 'pipes', patch=True)
+    allow_pipes = get_config('system', 'api', 'permissions', 'registrations', 'pipes', patch=True)
     if not allow_pipes:
         return False, (
             "The administrator for this server has not allowed pipe registration.\n\n" +
             "Please contact the system administrator, or if you are running this server, " +
-            "open the configuration file with `edit config` and search for 'allow_registration'. " +
-            " Under the keys system:api:allow_registration, you can toggle various registration types."
+            "open the configuration file with `edit config` and search for 'permissions'. " +
+            " Under the keys system:api:permissions:registration, you can toggle various registration types."
         )
     pipe_object = get_pipe(pipe.connector_keys, pipe.metric_key, pipe.location_key)
     if is_pipe_registered(pipe_object, pipes(refresh=True)):
@@ -53,7 +57,7 @@ def register_pipe(
 def edit_pipe(
         pipe : MetaPipe,
         patch : bool = False,
-        curr_user : str = fastapi.Depends(manager)
+        curr_user : 'meerschaum._internal.User.User' = fastapi.Depends(manager),
     ):
     """
     Edit a Pipe's parameters.
@@ -77,7 +81,7 @@ async def fetch_pipes_keys(
         metric_keys : str = "",
         location_keys : str = "",
         params : str = "",
-        curr_user : str = fastapi.Depends(manager),
+        curr_user : 'meerschaum._internal.User.User' = fastapi.Depends(manager),
         debug : bool = False
     ) -> list:
     """
@@ -87,7 +91,7 @@ async def fetch_pipes_keys(
     from meerschaum.utils.debug import dprint
     import json
 
-    return get_connector(debug=debug).fetch_pipes_keys(
+    return get_connector().fetch_pipes_keys(
         connector_keys = json.loads(connector_keys),
         metric_keys = json.loads(metric_keys),
         location_keys = json.loads(location_keys),
@@ -100,7 +104,7 @@ async def get_pipes(
         connector_keys : str = "",
         metric_keys : str = "",
         location_keys : str = "",
-        curr_user : str = fastapi.Depends(manager),
+        curr_user : 'meerschaum._internal.User.User' = fastapi.Depends(manager),
         debug : bool = False
     ) -> dict:
     """
@@ -116,7 +120,7 @@ async def get_pipes(
 @app.get(pipes_endpoint + '/{connector_keys}')
 async def get_pipes_by_connector(
         connector_keys : str,
-        curr_user : str = fastapi.Depends(manager)
+        curr_user : 'meerschaum._internal.User.User' = fastapi.Depends(manager),
     ) -> dict:
     """
     Get all registered Pipes by connector_keys with metadata, excluding parameters.
@@ -131,7 +135,7 @@ async def get_pipes_by_connector_and_metric(
         connector_keys : str,
         metric_key : str,
         parent : bool = False,
-        curr_user : str = fastapi.Depends(manager)
+        curr_user : 'meerschaum._internal.User.User' = fastapi.Depends(manager),
     ):
     """
     Get all registered Pipes by connector_keys and metric_key with metadata, excluding parameters.
@@ -152,7 +156,7 @@ async def get_pipes_by_connector_and_metric_and_location(
         connector_keys : str,
         metric_key : str,
         location_key : str,
-        curr_user : str = fastapi.Depends(manager)
+        curr_user : 'meerschaum._internal.User.User' = fastapi.Depends(manager),
     ):
     """
     Get a specific Pipe with metadata, excluding parameters.
@@ -174,7 +178,7 @@ def get_sync_time(
         location_key : str,
         params : dict = None,
         debug : bool = False,
-        curr_user : str = fastapi.Depends(manager)
+        curr_user : 'meerschaum._internal.User.User' = fastapi.Depends(manager),
     ) -> 'datetime.datetime':
     """
     Get a Pipe's latest datetime value.
@@ -194,7 +198,7 @@ def sync_pipe(
         blocking : bool = True,
         force : bool = False,
         workers : int = None,
-        curr_user : str = fastapi.Depends(manager),
+        curr_user : 'meerschaum._internal.User.User' = fastapi.Depends(manager),
         debug : bool = False,
     ) -> tuple:
     """
@@ -228,7 +232,7 @@ def get_pipe_data(
         begin : datetime.datetime = None,
         end : datetime.datetime = None,
         orient : str = 'records',
-        curr_user : str = fastapi.Depends(manager),
+        curr_user : 'meerschaum._internal.User.User' = fastapi.Depends(manager),
     ) -> str:
     """
     Get a Pipe's data. Optionally set query boundaries
@@ -244,7 +248,7 @@ def get_pipe_data(
         content = p.get_data(
             begin = begin,
             end = end,
-            debug = True
+            debug = debug
         ).to_json(
             date_format = 'iso',
             orient = orient,
@@ -260,7 +264,7 @@ def get_backtrack_data(
         begin : datetime.datetime = None,
         backtrack_minutes : int = 0,
         orient : str = 'records',
-        curr_user : str = fastapi.Depends(manager),
+        curr_user : 'meerschaum._internal.User.User' = fastapi.Depends(manager),
     ) -> bool:
     """
     Get a Pipe's data. Optionally set query boundaries
@@ -273,7 +277,7 @@ def get_backtrack_data(
         ).get_backtrack_data(
             begin = begin,
             backtrack_minutes = backtrack_minutes,
-            debug = True
+            debug = debug
         ).to_json(
             date_format = 'iso',
             orient = orient,
@@ -287,7 +291,7 @@ def get_pipe_id(
         connector_keys : str,
         metric_key : str,
         location_key : str,
-        curr_user : str = fastapi.Depends(manager),
+        curr_user : 'meerschaum._internal.User.User' = fastapi.Depends(manager),
     ) -> int:
     """
     Get a Pipe's ID
@@ -309,7 +313,7 @@ def get_pipe_attributes(
         connector_keys : str,
         metric_key : str,
         location_key : str,
-        curr_user : str = fastapi.Depends(manager),
+        curr_user : 'meerschaum._internal.User.User' = fastapi.Depends(manager),
     ) -> dict:
     """
     Get a Pipe's attributes
@@ -321,20 +325,22 @@ def get_pipe_attributes(
         connector_keys : str,
         metric_key : str,
         location_key : str,
-        curr_user : str = fastapi.Depends(manager),
+        curr_user : 'meerschaum._internal.User.User' = fastapi.Depends(manager),
     ) -> dict:
     """
     Determine if a Pipe exists or not
     """
     return get_pipe(connector_keys, metric_key, location_key).exists()
 
-@app.post('/mrsm/metadata')
+@app.post(endpoints['metadata'])
 def create_metadata(
-        curr_user : str = fastapi.Depends(manager),
+        curr_user : 'meerschaum._internal.User.User' = fastapi.Depends(manager),
     ) -> bool:
     """
     Create Pipe metadata tables
     """
+    #  if curr_user.type != 'admin':
+        #  return False
     from meerschaum.connectors.sql.tables import get_tables
     try:
         tables = get_tables(mrsm_instance=get_connector())
@@ -347,7 +353,7 @@ def get_rowcount(
         connector_keys : str,
         metric_key : str,
         location_key : str,
-        curr_user : str = fastapi.Depends(manager),
+        curr_user : 'meerschaum._internal.User.User' = fastapi.Depends(manager),
     ) -> int:
     """
     Return a Pipe's row count

@@ -22,6 +22,7 @@ def pprint(
     from meerschaum.utils.misc import replace_password, dict_from_od
     from collections import OrderedDict
     import copy
+    modify = True
     pprintpp = attempt_import('pprintpp', warn=False)
     rich = import_rich()
     try:
@@ -39,7 +40,11 @@ def pprint(
     if ANSI: func = rich_pprint
     else: func = _pprint
 
-    args_copy = copy.deepcopy(args)
+    try:
+        args_copy = copy.deepcopy(args)
+    except:
+        args_copy = args
+        modify = False
     _args = []
     for a in args:
         c = a
@@ -50,7 +55,7 @@ def pprint(
     args = _args
 
     _args = list(args)
-    if detect_password:
+    if detect_password and modify:
         _args = []
         for a in args:
             c = a

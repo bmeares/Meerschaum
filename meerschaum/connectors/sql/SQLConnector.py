@@ -49,7 +49,8 @@ class SQLConnector(Connector):
         edit_user,
         delete_user,
         get_user_password_hash,
-        get_user_type
+        get_user_type,
+        get_user_attributes,
     )
     
     def __init__(

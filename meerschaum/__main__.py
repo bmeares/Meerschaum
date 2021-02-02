@@ -13,6 +13,10 @@ def main():
     from meerschaum.utils.formatting import print_tuple
     sysargs = sys.argv[1:]
 
+    if '--help' in sysargs or '-h' in sysargs:
+        from meerschaum.actions.arguments._parser import parse_help
+        return parse_help(sysargs)
+
     ### try to launch a shell if --shell is provided
     if len(sysargs) == 0 or '--shell' in sysargs:
         if '--shell' in sysargs: sysargs.remove('--shell')

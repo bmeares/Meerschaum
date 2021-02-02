@@ -23,6 +23,26 @@ def install(
     }
     return choose_subaction(action, options, **kw)
 
+def _complete_install(
+        action : List[str] = [],
+        **kw : Any
+    ) -> List[str]:
+    """
+    Override the default Meerschaum `complete_` function.
+    """
+    options = {
+        'plugins' : _complete_install_plugins,
+        'packages': _complete_install_packages,
+    }
+
+    if len(action) > 0 and action[0] in options:
+        sub = action[0]
+        del action[0]
+        return options[sub](action=action, **kw)
+
+    from meerschaum.actions.shell import default_action_completer
+    return default_action_completer(action=(['install'] + action), **kw)
+
 def _install_plugins(
         action : List[str] = [],
         repository : Optional[str] = None,
@@ -46,14 +66,15 @@ def _install_plugins(
     """
     from meerschaum.utils.debug import dprint
     from meerschaum.utils.warnings import info
-    from meerschaum.utils.packages import reload_package
+    from meerschaum.utils.misc import reload_plugins
     from meerschaum.connectors.parse import parse_repo_keys
     import meerschaum.actions
     from meerschaum.utils.formatting import print_tuple
     from meerschaum._internal import Plugin
     from meerschaum.connectors.api import APIConnector
 
-    if action == [''] or len(action) == 0: return False, "No plugins to install"
+    if action == [''] or len(action) == 0:
+        return False, "No plugins to install"
 
     repo_connector = parse_repo_keys(repository)
 
@@ -64,14 +85,37 @@ def _install_plugins(
         successes[name] = (success, msg)
         print_tuple((success, msg))
 
-    reload_package(meerschaum.actions)
+    reload_plugins()
     return True, "Success"
+
+def _complete_install_plugins(
+        action : List[str] = [],
+        repository : Optional[str] = None,
+        **kw : Any
+    ):
+    """
+    Search for plugins to autocomplete command line text.
+    """
+    if len(action) == 0:
+        search_term = None
+    else:
+        search_term = action[0]
+        #  return []
+    from meerschaum.connectors.parse import parse_repo_keys
+    try:
+        repo_connector = parse_repo_keys(repository)
+    except:
+        return []
+    results = repo_connector.get_plugins(search_term=search_term)
+    if len(results) == 1 and results[0] == search_term:
+        return []
+    return sorted(results)
 
 def _install_packages(
         action : List[str] = [],
         debug : bool = False,
         **kw : Any
-    ) -> tuple:
+    ) -> SuccessTuple:
     """
     Install PyPI packages into the Meerschaum virtual environment.
 
@@ -85,6 +129,11 @@ def _install_packages(
     if pip_install(action, debug=debug):
         return True, f"Successfully installed packages to virtual environment 'mrsm':\n{action}"
     return False, f"Failed to install packages:\n{action}"
+
+def _complete_install_packages(
+
+    ) -> List[str]:
+    pass
 
 
 ### NOTE: This must be the final statement of the module.

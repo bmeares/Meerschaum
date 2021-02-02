@@ -113,19 +113,19 @@ def _delete_plugins(
     Remove installed plugins. Does not affect repository registrations.
     """
     import meerschaum.actions
-    from meerschaum.actions import _plugins_names, plugins_modules
+    from meerschaum.actions.plugins import get_plugins_names, get_plugins_modules
     from meerschaum.config._paths import PLUGINS_RESOURCES_PATH
     from meerschaum.utils.warnings import warn, error, info
-    from meerschaum.utils.packages import reload_package
+    from meerschaum.utils.misc import reload_plugins
     from meerschaum.utils.prompt import yes_no
     import os, shutil
 
     ### parse the provided plugins and link them to their modules
     modules_to_delete = dict()
     for plugin in action:
-        if plugin not in _plugins_names: info(f"Plugin '{plugin}' is not installed. Ignoring...")
+        if plugin not in get_plugins_names(): info(f"Plugin '{plugin}' is not installed. Ignoring...")
         else:
-            for m in plugins_modules:
+            for m in get_plugins_modules():
                 if plugin == m.__name__.split('.')[-1]:
                     modules_to_delete[plugin] = m
                     break
@@ -159,7 +159,7 @@ def _delete_plugins(
         except Exception as e:
             return False, f"Could not remove plugin '{name}'"
 
-    reload_package(meerschaum.actions)
+    reload_plugins()
     return True, "Success"
 
 def _delete_users(

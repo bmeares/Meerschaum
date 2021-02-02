@@ -6,7 +6,7 @@ This module is the entry point for the interactive shell
 """
 
 from __future__ import annotations
-from meerschaum.utils.typing import Union, SuccessTuple, Any
+from meerschaum.utils.typing import Union, SuccessTuple, Any, Callable, Optional, List
 
 import sys, inspect
 from meerschaum.utils.packages import attempt_import
@@ -14,7 +14,6 @@ from meerschaum.config import __doc__, __version__ as version, get_config
 cmd = attempt_import(get_config('system', 'shell', 'cmd', patch=True), warn=False, lazy=False)
 if cmd is None or isinstance(cmd, dict):
     cmd = attempt_import('cmd', lazy=False, warn=False)
-from meerschaum.actions.arguments import parse_line
 _clear_screen = get_config('system', 'shell', 'clear_screen', patch=True)
 from meerschaum.connectors.parse import parse_instance_keys
 from meerschaum.utils.misc import string_width
@@ -47,12 +46,132 @@ hidden_commands = {
     'pass',
     'exit',
     'quit',
+    'eof',
+    'exit',
+    '_relative_run_script',
+    'ipy',
 }
+
+def _insert_shell_actions(
+        shell : Optional['Shell'] = None,
+        actions : Optional[Dict[str, Callable[[Any], SuccessTuple]]] = None,
+        keep_self = False,
+    ) -> None:
+    """
+    Update the Shell with Meerschaum actions.
+    """
+    from meerschaum.utils.misc import add_method_to_class
+    import meerschaum.actions.shell as shell_pkg
+    from meerschaum.actions import get_completer
+    if actions is None:
+        from meerschaum.actions import actions
+
+    _shell = shell if shell is not None else shell_pkg.Shell
+
+    for a, f in actions.items():
+        #  if keep_self:
+        #  setattr(_shell, 'do_' + a, f)
+        #  else:
+        add_method_to_class(
+            func = f,
+            class_def = _shell,
+            method_name = 'do_' + a,
+            #  keep_self = True,
+        )
+        _completer = get_completer(a)
+        if _completer is None:
+            _completer = shell_pkg.default_action_completer
+        completer = _completer_wrapper(_completer)
+
+        setattr(_shell, 'complete_' + a, completer)
+        #  add_method_to_class(
+            #  func = completer,
+            #  class_def = _shell,
+            #  method_name = 'complete_' + a,
+            #  keep_self = True,
+        #  )
+
+def _completer_wrapper(
+        target : Callable[[Any], List[str]]
+    ) -> Callable['meerschaum.actions.shell.Shell', str, str, int, int]:
+    """
+    Wrapper for `complete_` functions so they can instead use Meerschaum arguments.
+    """
+    from functools import wraps
+
+    ### I have no idea why I had to remove `self`.
+    ### Maybe it has to do with adding to an object instead of a class.
+    @wraps(target)
+    def wrapper(text, line, begin_index, end_index):
+        _check_keys = _check_complete_keys(line)
+        if _check_keys is not None:
+            return _check_keys
+
+        from meerschaum.actions.arguments._parse_arguments import parse_line
+        args = parse_line(line)
+        if target.__name__ != 'default_action_completer':
+            if len(args['action']) > 0:
+                del args['action'][0]
+        return target(
+            text=text, line=line, begin_index=begin_index, end_index=end_index,
+            **args
+        )
+
+    return wrapper
+
+def default_action_completer(
+        text : Optional[str] = None,
+        line : Optional[str] = None,
+        begin_index : Optional[int] = None,
+        end_index : Optional[int] = None,
+        action : List[str] = [],
+        **kw : Any
+    ) -> List[str]:
+    """
+    Search for subactions by default. This may be overridden by each action.
+    """
+    from meerschaum.actions import get_subactions
+    subactions = get_subactions(action[0]) if len(action) > 0 else {}
+    sub = action[1] if len(action) > 1 else ''
+    possibilities = []
+    for sa in subactions:
+        if sa.startswith(sub) and sa != sub:
+            possibilities.append(sa)
+    return sorted(possibilities)
+
+def _check_complete_keys(
+        line : str
+    ) -> Optional[List[str]]:
+    from meerschaum.actions.arguments._parse_arguments import parse_line
+    ### TODO Add all triggers
+    trigger_args = {
+        '-c' : 'connector_keys',
+        '--connector-keys' : 'connector_keys',
+        '-r' : 'repository',
+        '--repository' : 'repository',
+        '-i' : 'mrsm_instance',
+        '--instance' : 'mrsm_instance',
+        '--mrsm-instance' : 'mrsm_instance',
+    }
+
+    from meerschaum.utils.misc import get_connector_labels
+    for trigger, var in trigger_args.items():
+        if trigger in line:
+            ### check if any text has been entered for the key
+            if line.rstrip(' ').endswith(trigger):
+                return get_connector_labels()
+            args = parse_line(line.rstrip(' '))
+            search_term = args[var] if var != 'connector_keys' else args[var][0]
+            return get_connector_labels(search_term=search_term)
+
+    return None
+
 class Shell(cmd.Cmd):
     def __init__(self, actions : dict = {}, sysargs : list = []):
         """
         Customize the CLI from configuration
         """
+        _insert_shell_actions(shell=self, keep_self=True)
         try:
             delattr(cmd.Cmd, '_alias_create')
             delattr(cmd.Cmd, '_alias_delete')
@@ -97,6 +216,7 @@ class Shell(cmd.Cmd):
         self._actions['instance'] = self.do_instance
         self._actions['repo'] = self.do_repo
         self._actions['debug'] = self.do_debug
+        self.debug = False
         self.load_config()
         ### update hidden commands list (cmd2 only)
         try:
@@ -122,7 +242,6 @@ class Shell(cmd.Cmd):
         ) + 'v' + version
         self._prompt = get_config('system', 'shell', CHARSET, 'prompt', patch=patch)
         self.prompt = self._prompt
-        self.debug = False
         self.ruler = get_config('system', 'shell', CHARSET, 'ruler', patch=patch)
         self.close_message = get_config('system', 'shell', CHARSET, 'close_message', patch=patch)
         self.doc_header = get_config('system', 'shell', CHARSET, 'doc_header', patch=patch)
@@ -150,8 +269,14 @@ class Shell(cmd.Cmd):
             for attr_key in get_config('system', 'shell', 'ansi', patch=patch):
                 self.__dict__[attr_key] = apply_colors(self.__dict__[attr_key], attr_key)
 
+        ### refresh actions
+        _insert_shell_actions(shell=self, keep_self=True)
+
         ### replace {instance} in prompt with stylized instance string
         self.update_prompt()
+
+    def insert_actions(self):
+        from meerschaum.actions import actions
 
     def update_prompt(self, instance=None, username=None):
         from meerschaum.config import get_config
@@ -238,7 +363,12 @@ class Shell(cmd.Cmd):
             readline.set_history_length(get_config('system', 'shell', 'max_history', patch=patch))
             readline.write_history_file(SHELL_HISTORY_PATH)
 
+        from meerschaum.actions.arguments import parse_line
         args = parse_line(line)
+        if args['help']:
+            from meerschaum.actions.arguments._parser import parse_help
+            parse_help(args)
+            return ""
 
         ### NOTE: pass `shell` flag in case actions need to distinguish between
         ###       being run on the command line and being run in the shell
@@ -340,11 +470,11 @@ class Shell(cmd.Cmd):
         info(f"Debug mode is {'on' if self.debug else 'off'}.")
 
     def do_instance(
-        self,
-        action : list = [''],
-        debug : bool = False,
-        **kw : Any
-    ) -> SuccessTuple:
+            self,
+            action : list = [''],
+            debug : bool = False,
+            **kw : Any
+        ) -> SuccessTuple:
         """
         Temporarily set a default Meerschaum instance for the duration of the shell.
         The default instance is loaded from the Meerschaum configuraton file
@@ -356,6 +486,7 @@ class Shell(cmd.Cmd):
             instance {instance keys}
 
         Examples:
+            ```
             ### reset to default instance
             instance
 
@@ -364,6 +495,7 @@ class Shell(cmd.Cmd):
 
             ### set the instance to a non-default connector
             instance api:myremoteinstance
+            ```
 
         Note that instances must be configured, be either API or SQL connections,
           and be accessible to this machine over the network.
@@ -391,12 +523,19 @@ class Shell(cmd.Cmd):
         info(f"Default instance for the current shell: {conn}")
         return True, "Success"
 
+    def complete_instance(self, text, line, begin_index, end_index):
+        from meerschaum.utils.misc import get_connector_labels
+        from meerschaum.actions.arguments._parse_arguments import parse_line
+        args = parse_line(line)
+        _text = args['action'][1] if len(args['action']) > 1 else ""
+        return get_connector_labels('api', 'sql', search_term=_text, ignore_exact_match=True)
+
     def do_repo(
-        self,
-        action : list = [''],
-        debug : bool = False,
-        **kw : Any
-    ) -> SuccessTuple:
+            self,
+            action : list = [''],
+            debug : bool = False,
+            **kw : Any
+        ) -> SuccessTuple:
         """
         Temporarily set a default Meerschaum repository for the duration of the shell.
         The default repository (mrsm.io) is loaded from the Meerschaum configuraton file
@@ -438,6 +577,77 @@ class Shell(cmd.Cmd):
 
         info(f"Default repository for the current shell: {conn}")
         return True, "Success"
+
+    def complete_repo(self, *args) -> List[str]:
+        return self.complete_instance(*args)
+
+    def do_help(self, line) -> List[str]:
+        """
+        Show help for Meerschaum actions.
+
+        You can also view help for actions and subactions with `--help`.
+
+        Examples:
+        ```
+        help show
+        help show pipes
+        show pipes --help
+        show pipes -h
+        ```
+        """
+        from meerschaum.actions import actions
+        from meerschaum.actions.arguments._parser import parse_help
+        from meerschaum.actions.arguments._parse_arguments import parse_line
+        import textwrap
+        args = parse_line(line)
+        if len(args['action']) == 0:
+            del args['action']
+            self._actions['show'](['actions'], **args)
+            return ""
+        if args['action'][0] not in self._actions:
+            try:
+                print(textwrap.dedent(getattr(self, f"do_{args['action'][0]}").__doc__))
+            except:
+                print(f"No help on '{args['action'][0]}'.")
+            return ""
+        parse_help(args)
+        return ""
+
+    def complete_help(self, text, line, begin_index, end_index):
+        """
+        Autocomplete the `help` command.
+        """
+        import inspect
+        from meerschaum.actions.arguments._parse_arguments import parse_line
+        from meerschaum.actions import get_subactions
+        from meerschaum.actions.shell import Shell as _Shell
+        args = parse_line(line)
+        if len(args['action']) > 0 and args['action'][0] == 'help':
+            ### remove 'help'
+            del args['action'][0]
+
+        action = args['action'][0] if len(args['action']) > 0 else ""
+        sub = args['action'][1] if len(args['action']) > 1 else ""
+        possibilities = []
+
+        ### Search for subactions
+        if sub is not None:
+            for sa in get_subactions(action):
+                if sa.startswith(sub) and sa != sub:
+                    possibilities.append(sa)
+        
+        ### We found subarguments. Stop looking here.
+        if len(possibilities) > 0:
+            return possibilities
+
+        ### No subactions. We're looking for an action.
+        for name, f in inspect.getmembers(_Shell):
+            if not inspect.isfunction(f):
+                continue
+            #  print(name)
+            if name.startswith(f'do_{action}') and name != f'do_{action}' and name.replace('do_', '') not in self.hidden_commands:
+                possibilities.append(name.replace('do_', ''))
+        return possibilities
 
     def do_exit(self, params) -> True:
         """

@@ -7,7 +7,7 @@ Manage users via the SQL Connector
 """
 
 from __future__ import annotations
-from meerschaum.utils.typing import SuccessTuple, Optional, Any
+from meerschaum.utils.typing import SuccessTuple, Optional, Any, Dict
 
 def register_user(
         self,
@@ -40,10 +40,11 @@ def register_user(
         'username' : user.username,
         'email' : user.email,
         'password_hash' : user.password_hash,
+        'user_type' : user.type,
         'attributes' : json.dumps(user.attributes),
     }
     if old_id is not None:
-        return False, f"User '{username}' already exists"
+        return False, f"User '{username}' already exists."
     if old_id is None:
         query = (
             sqlalchemy.insert(tables['users']).
@@ -95,15 +96,16 @@ def edit_user(
         **kw : Any
     ) -> SuccessTuple:
     """
-    Update an existing user
+    Update an existing user's metadata.
     """
     from meerschaum.utils.packages import attempt_import
     sqlalchemy = attempt_import('sqlalchemy')
     from meerschaum.connectors.sql.tables import get_tables
     users = get_tables(mrsm_instance=self, debug=debug)['users']
 
-    if user.user_id is None: user_id = user.user_id
-    else: user_id = self.get_user_id(user, debug=debug)
+    user_id = user.user_id if user.user_id is not None else self.get_user_id(user, debug=debug)
+    if user_id is None:
+        return False, f"User '{user.username}' does not exist. Register user '{user.username}' before editing."
 
     import json
     valid_tuple = valid_username(user.username)
@@ -112,10 +114,13 @@ def edit_user(
     bind_variables = {
         'user_id' : user_id,
         'username' : user.username,
-        'email' : user.email,
-        'password_hash' : user.password_hash,
-        'attributes' : json.dumps(user.attributes),
     }
+    if user.password != '':
+        bind_variables['password_hash'] = user.password_hash
+    if user.email != '':
+        bind_variables['email'] = user.email
+    if user.attributes is not None and user.attributes != {}:
+        bind_variables['attributes'] = json.dumps(user.attributes)
 
     query = sqlalchemy.update(users).values(**bind_variables).where(users.c.user_id == user_id)
 
@@ -144,6 +149,43 @@ def get_user_id(
     if result is not None: return int(result)
     return None
 
+def get_user_attributes(
+        self,
+        user : meerschaum._internal.User.User,
+        debug : bool = False
+    ) -> Optional[Dict[str, Any]]:
+    ### ensure users table exists
+    from meerschaum.utils.packages import attempt_import
+    sqlalchemy = attempt_import('sqlalchemy')
+    from meerschaum.connectors.sql.tables import get_tables
+    users = get_tables(mrsm_instance=self, debug=debug)['users']
+
+    if user.user_id is not None: user_id = user.user_id
+    else: user_id = self.get_user_id(user, debug=debug)
+
+    query = (
+        sqlalchemy.select([users.c.attributes]).
+        where(users.c.user_id == user_id)
+    )
+
+    result = self.value(query, debug=debug)
+    if result is not None and not isinstance(result, dict):
+        try:
+            result = dict(result)
+            _parsed = True
+        except:
+            _parsed = False
+        if not _parsed:
+            try:
+                import json
+                result = json.loads(result)
+                _parsed = True
+            except:
+                _parsed = False
+        if not _parsed:
+            warn(f"Received unexpected type for attributes: {result}")
+    return result
+
 def delete_user(
         self,
         user : meerschaum._internal.User.User,
@@ -164,11 +206,11 @@ def delete_user(
 
     query = sqlalchemy.delete(users).where(users.c.user_id == user_id)
 
-    result = self.exec(query, debug=True)
+    result = self.exec(query, debug=debug)
     if result is None: return False, f"Failed to delete user '{user}'"
 
     query = sqlalchemy.delete(plugins).where(plugins.c.user_id == user_id)
-    result = self.exec(query, debug=True)
+    result = self.exec(query, debug=debug)
     if result is None: return False, f"Failed to delete plugins of user '{user}'"
 
     return True, f"Successfully deleted user '{user}'"

@@ -107,7 +107,8 @@ class Pipe:
         ###       A Pipe may be registered without parameters, then edited,
         ###       or a Pipe may be registered with parameters set in-memory first.
         from meerschaum.config import get_config
-        if mrsm_instance is None: mrsm_instance = get_config('meerschaum', 'instance', patch=True)
+        if mrsm_instance is None:
+            mrsm_instance = get_config('meerschaum', 'instance', patch=True)
         if not isinstance(mrsm_instance, str):
             self._instance_connector = mrsm_instance
             self.instance_keys = mrsm_instance.type + ':' + mrsm_instance.label
@@ -188,3 +189,23 @@ class Pipe:
 
     def __repr__(self):
         return str(self)
+
+    def __getstate__(self):
+        """
+        Define the state dictionary (pickling).
+        """
+        state = {
+            'connector_keys' : self.connector_keys,
+            'metric_key' : self.metric_key,
+            'location_key' : self.location_key,
+            'parameters' : self.parameters,
+            'mrsm_instance' :  self.instance_keys,
+        }
+        return state
+
+    def __setstate__(self, _state : dict):
+        """
+        Read the state (unpickling).
+        """
+        self.__init__(**_state)
+        

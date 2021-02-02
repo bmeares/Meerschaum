@@ -9,7 +9,7 @@ Register and show connectors
 from meerschaum.api import app, endpoints
 from fastapi import Body, HTTPException
 
-endpoint = endpoints['mrsm'] + '/connectors'
+endpoint = endpoints['connectors']
 
 @app.get(endpoint)
 def get_connectors(type : str = None):
