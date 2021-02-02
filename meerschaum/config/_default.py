@@ -11,7 +11,7 @@ import sys, os, multiprocessing
 default_unicode, default_ansi = True, True
 import platform
 if platform.system() == 'Windows':
-    default_unicode, default_ansi = False, False
+    default_unicode, default_ansi = False, True
 
 from meerschaum.connectors import attributes as connector_attributes
 

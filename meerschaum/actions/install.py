@@ -100,7 +100,6 @@ def _complete_install_plugins(
         search_term = None
     else:
         search_term = action[0]
-        #  return []
     from meerschaum.connectors.parse import parse_repo_keys
     try:
         repo_connector = parse_repo_keys(repository)
@@ -113,6 +112,7 @@ def _complete_install_plugins(
 
 def _install_packages(
         action : List[str] = [],
+        sub_args : List[str] = [],
         debug : bool = False,
         **kw : Any
     ) -> SuccessTuple:
@@ -126,14 +126,14 @@ def _install_packages(
         return False, f"No packages to install"
     from meerschaum.utils.warnings import info
     from meerschaum.utils.packages import pip_install
-    if pip_install(action, debug=debug):
+    if pip_install(*action, args=['--upgrade'] + sub_args, debug=debug):
         return True, f"Successfully installed packages to virtual environment 'mrsm':\n{action}"
     return False, f"Failed to install packages:\n{action}"
 
 def _complete_install_packages(
 
     ) -> List[str]:
-    pass
+    return []
 
 
 ### NOTE: This must be the final statement of the module.

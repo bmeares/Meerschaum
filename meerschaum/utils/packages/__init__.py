@@ -226,7 +226,7 @@ def pip_install(
     if '--progress-bar' in _args:
         _args.remove('--progress-bar')
     if UNICODE:
-        _args += ['--progress-bar', 'emoji']
+        _args += ['--progress-bar', 'pretty']
     else:
         _args += ['--progress-bar', 'ascii']
     if debug:
@@ -235,8 +235,8 @@ def pip_install(
             #  _args.append('-v')
     else:
         if '-q' not in _args or '-qq' not in _args or '-qqq' not in _args:
-            #  pass
-            _args.append('-qqq')
+            pass
+            #  _args.append('-q')
 
 
     _packages = []
