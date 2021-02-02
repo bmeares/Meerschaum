@@ -6,6 +6,9 @@
 User class definition
 """
 
+from __future__ import annotations
+from meerschaum.utils.typing import Optional, Dict, Any
+
 pwd_context = None
 def get_pwd_context():
     global pwd_context
@@ -23,15 +26,17 @@ class User():
         self,
         username : str,
         password : str = '',
-        email : str = None,
-        attributes : dict = None,
-        user_id : int = None,
-        repository : str = None
+        type : Optional[str] = None,
+        email : Optional[str] = None,
+        attributes : Optional[Dict[str, Any]] = None,
+        user_id : Optional[int] = None,
+        repository : Optional[str] = None
     ):
         self.password = password
         self.password_hash = get_pwd_context().encrypt(password)
         self.username = username
         self.email = email
+        self.type = type
         self._attributes = attributes
         self._user_id = user_id
         self._repository_keys = repository
@@ -43,20 +48,20 @@ class User():
         return self.username
 
     @property
-    def attributes(self):
+    def attributes(self) -> Dict[str, Any]:
         if self._attributes is None:
             self._attributes = dict()
         return self._attributes
 
     @property
-    def repository(self):
+    def repository(self) -> meerschaum.connectors.Connector:
         from meerschaum.connectors.parse import parse_repo_keys
         if '_repository' not in self.__dict__:
             self._repository = parse_repo_keys(self._repository_keys)
         return self._repository
 
     @property
-    def user_id(self):
+    def user_id(self) -> int:
         """
         NOTE: This causes recursion with the API,
               so don't try to get fancy with read-only attributes.

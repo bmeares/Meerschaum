@@ -8,7 +8,7 @@ Routes for managing users
 
 from __future__ import annotations
 from meerschaum.utils.typing import (
-    Optional, Union, SuccessTuple, Any, Mapping, Sequence
+    Optional, Union, SuccessTuple, Any, Mapping, Sequence, Dict, List
 )
 
 from meerschaum.utils.packages import attempt_import
@@ -21,8 +21,9 @@ from starlette.responses import Response, JSONResponse
 from meerschaum._internal.User import User
 import os, pathlib, datetime
 
+import meerschaum._internal.User
 sqlalchemy = attempt_import('sqlalchemy')
-users_endpoint = endpoints['mrsm'] + '/users'
+users_endpoint = endpoints['users']
 
 from fastapi.security import OAuth2PasswordRequestForm
 from fastapi_login.exceptions import InvalidCredentialsException
@@ -33,7 +34,7 @@ def load_user(
     ) -> User:
     return User(username, repository=get_connector())
 
-@app.post('/mrsm/login')
+@app.post(endpoints['login'])
 def login(
         response : Response,
         data : OAuth2PasswordRequestForm = fastapi.Depends()
@@ -63,9 +64,17 @@ def login(
 
 @app.get(users_endpoint + "/me")
 def read_current_user(
-        curr_user : str = fastapi.Depends(manager),
+        curr_user : 'meerschaum._internal.User.User' = fastapi.Depends(manager),
     ) -> Mapping[str, Union[str, int]]:
-    return {"username" : curr_user.username, 'user_id' : get_connector().get_user_id(curr_user)}
+    """
+    Return attributes of the current User.
+    """
+    return {
+        'username' : curr_user.username,
+        'user_id' : get_connector().get_user_id(curr_user),
+        'user_type' : get_connector().get_user_type(curr_user),
+        'attributes' : get_connector().get_user_attributes(curr_user),
+    }
 
 @app.get(users_endpoint)
 def get_users() -> Sequence[str]:
@@ -78,37 +87,41 @@ def get_users() -> Sequence[str]:
 def register_user(
         username : str,
         password : str,
-        email : str = None,
-        attributes : dict = None
+        type : Optional[str] = None,
+        email : Optional[str] = None,
+        attributes : Optional[Dict[str, Any]] = None
     ) -> SuccessTuple:
     """
     Register a new user
     """
     from meerschaum.config import get_config
-    allow_users = get_config('system', 'api', 'allow_registration', 'users', patch=True)
+    allow_users = get_config('system', 'api', 'permissions', 'registration', 'users', patch=True)
     if not allow_users:
         return False, (
             "The administrator for this server has not allowed user registration.\n\n" +
             "Please contact the system administrator, or if you are running this server, " +
-            "open the configuration file with `edit config` and search for 'allow_registration'. " +
-            " Under the keys system:api:allow_registration, you can toggle various registration types."
+            "open the configuration file with `edit config` and search for 'permissions'. " +
+            " Under the keys system:api:permissions:registration, you can toggle various registration types."
         )
-    user = User(username, password, email=email, attributes=attributes)
+    user = User(username, password, type=type, email=email, attributes=attributes)
     return get_connector().register_user(user, debug=debug)
 
 @app.post(users_endpoint + "/{username}/edit")
 def edit_user(
         username : str,
         password : str,
-        email : str = None,
-        attributes : dict = None,
-        curr_user : str = fastapi.Depends(manager),
+        type : Optional[str] = None,
+        email : Optional[str] = None,
+        attributes : Optional[Dict[str, Any]] = None,
+        curr_user : 'meerschaum._internal.User.User' = fastapi.Depends(manager),
     ) -> SuccessTuple:
     """
     Edit an existing user
     """
-    user = User(username)
+    user = User(username, password, email=email, attributes=attributes)
     user_type = get_connector().get_user_type(curr_user)
+    if user_type == 'admin' and type is not None:
+        user.type = type
     if user_type == 'admin' or curr_user.username == user.username:
         return get_connector().edit_user(user, debug=debug)
 
@@ -123,10 +136,19 @@ def get_user_id(
     """
     return get_connector().get_user_id(User(username), debug=debug)
 
+@app.get(users_endpoint + "/{username}/attributes")
+def get_user_attributes(
+        username : str,
+    ) -> Optional[Dict[str, Any]]:
+    """
+    Get a user's attributes.
+    """
+    return get_connector().get_user_attributes(User(username), debug=debug)
+
 @app.post(users_endpoint + "/{username}/delete")
 def delete_user(
         username : str,
-        curr_user : str = fastapi.Depends(manager),
+        curr_user : 'meerschaum._internal.User.User' = fastapi.Depends(manager),
     ) -> SuccessTuple:
     """
     Delete a user

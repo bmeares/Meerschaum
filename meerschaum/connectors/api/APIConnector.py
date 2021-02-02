@@ -35,8 +35,20 @@ class APIConnector(Connector):
         drop_pipe,
     )
     from ._fetch import fetch
-    from ._plugins import register_plugin, install_plugin, get_plugins, get_plugin_attributes
-    from ._users import get_users, login, edit_user, get_user_id, delete_user, register_user
+    from ._plugins import (
+        register_plugin,
+        install_plugin,
+        get_plugins,
+        get_plugin_attributes,
+    )
+    from ._users import (
+        get_users, login,
+        edit_user,
+        get_user_id,
+        delete_user,
+        register_user,
+        get_user_attributes,
+    )
 
     def __init__(
         self,

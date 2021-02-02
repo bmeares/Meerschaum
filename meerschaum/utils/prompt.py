@@ -84,7 +84,8 @@ def yes_no(
         default : str = 'y',
         wrappers : Tuple[str, str] = ('[', ']'),
         icon : bool = True,
-        interactive : bool = False
+        interactive : bool = False,
+        **kw : Any
     ) -> bool:
     """
     Print a question and prompt the user with a yes / no input.
@@ -136,7 +137,7 @@ def yes_no(
     ) + f"{wrappers[1]}"
     while True:
         try:
-            answer = prompt(question + ending, icon=icon)
+            answer = prompt(question + ending, icon=icon, detect_password=False)
             success = True
         except:
             success = False
@@ -189,7 +190,7 @@ def choose(
             question += f"  - {c}\n"
 
     while True:
-        answer = prompt(question, icon=icon, default=default_tuple)
+        answer = prompt(question, icon=icon, default=default_tuple, **kw)
         if answer in _choices or answer == default:
             break
         _warn(f"Please pick a valid choice.", stack=False)
@@ -197,4 +198,55 @@ def choose(
     if numeric:
         return choices[int(answer) - 1]
     return answer
+
+def get_password(
+        username : Optional[str] = None,
+        minimum_length : Optional[int] = None,
+        **kw : Any
+    ) -> str:
+    """
+    Prompt the user for a password.
+    """
+    from meerschaum.utils.warnings import warn
+    while True:
+        password = prompt(f"Password" + (f" for user '{username}': " if username is not None else ": "), **kw)
+        if minimum_length is not None and len(password) < minimum_length:
+            warn(
+                "Password is too short. " +
+                f"Please enter a password that is at least {minimum_length} characters.",
+                stack = False
+            )
+            continue
+        _password = prompt(
+            f"Confirm password" + (f" for user '{username}': ") if username is not None else ": ",
+            **kw
+        )
+        if password != _password:
+            warn(f"Passwords do not match! Please try again.", stack=False)
+            continue
+        else:
+            return password
+
+def get_email(username : Optional[str] = None, allow_omit : bool = True, **kw : Any) -> str:
+    """
+    Prompt the user for an email and enforce that it's valid.
+
+    :param username:
+        Include an optional username to print.
+
+    :param allow_omit:
+        Allow the user to omit the email.
+    """
+    from meerschaum.utils.warnings import warn
+    from meerschaum.utils.misc import is_valid_email
+    while True:
+        email = prompt(
+            f"Email for user" + (f" '{username}'" if username is not None else "") +
+            (" (empty to omit): " if allow_omit else ": "),
+            **kw
+        )
+        if (allow_omit and email == '') or is_valid_email(email):
+            return email
+        else:
+            warn(f"Invalid email! Please try again.", stack=False)
 

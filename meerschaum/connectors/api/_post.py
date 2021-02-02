@@ -17,16 +17,17 @@ def post(
     """
     Wrapper for requests.post
     """
-    from meerschaum.utils.debug import dprint
-    from meerschaum.utils.formatting import pprint
+    if debug: from meerschaum.utils.debug import dprint
+
     if use_token:
-        if debug: dprint(f"Fetching token...")
+        if debug: dprint(f"Checking token...")
         headers.update({ 'Authorization': f'Bearer {self.token}' })
 
     if debug:
-        dprint(f"Posting arguments to '{self.url + r_url}'")
-        pprint(kw)
+        from meerschaum.utils.formatting import pprint
+        dprint(f"Sending POST request to {self.url + r_url}")
         if headers: pprint(headers)
+        pprint(kw)
 
     return self.session.post(
         self.url + r_url,

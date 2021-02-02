@@ -86,8 +86,8 @@ def create_engine(
     if self.flavor in ('timescaledb', 'postgresql'):
         ### trigger install if not installed
         psycopg2 = attempt_import('psycopg2', debug=self._debug, lazy=False)
+
     ### supplement missing values with defaults (e.g. port number)
-    #  print(self.__dict__)
     for a, value in flavor_configs[self.flavor]['defaults'].items():
         if a not in self.__dict__:
             self.__dict__[a] = value
@@ -96,6 +96,7 @@ def create_engine(
     if self.flavor == "sqlite":
         engine_str = f"sqlite:///{self.database}"
         self.sys_config['connect_args'].update({"check_same_thread" : False})
+        aiosqlite = attempt_import('aiosqlite', debug=self._debug, lazy=False)
     else:
         engine_str = (
             flavor_configs[self.flavor]['engine'] + "://" +

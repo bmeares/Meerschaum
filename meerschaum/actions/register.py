@@ -159,14 +159,13 @@ def _register_users(
     """
     from meerschaum.config import get_config
     from meerschaum import get_connector
-    from meerschaum.utils.misc import is_valid_email
     from meerschaum.connectors.parse import parse_repo_keys
     from meerschaum.utils.debug import dprint
     from meerschaum.utils.warnings import warn, error, info
-    from meerschaum._internal import User
+    from meerschaum._internal.User import User
     from meerschaum.connectors.api import APIConnector
     from meerschaum.utils.formatting import print_tuple
-    from meerschaum.utils.prompt import prompt
+    from meerschaum.utils.prompt import prompt, get_password, get_email
     repo_connector = parse_repo_keys(repository)
 
     if len(action) == 0 or action == ['']:
@@ -182,30 +181,14 @@ def _register_users(
             continue
         nonregistered_users.append(user)
 
-    def get_password(username):
-        while True:
-            password = prompt(f"Password for user '{username}': ")
-            _password = prompt(f"Confirm password for user '{username}': ")
-            if password != _password:
-                warn(f"Passwords do not match! Please try again.", stack=False)
-                continue
-            else:
-                return password
-
-    def get_email():
-        while True:
-            email = prompt(f"Email for user '{username}' (empty to omit): ")
-            if email == '' or is_valid_email(email): return email
-            else: warn(f"Invalid email! Please try again.", stack=False)
-
     ### prompt for passwords and emails, then try to register
     success = dict()
     successfully_registered_users = set()
     for _user in nonregistered_users:
         try:
             username = _user.username
-            password = get_password(username)
-            email = get_email()
+            password = get_password(username, minimum_length=7)
+            email = get_email(username, allow_omit=True)
         except Exception as e:
             return False, f"Aborted registering users {', '.join([str(u) for u in nonregistered_users if u not in successfully_registered_users])}"
         if len(email) == 0: email = None

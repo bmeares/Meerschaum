@@ -111,7 +111,8 @@ def get_tables(
                 sqlalchemy.Column(&#39;password_hash&#39;, sqlalchemy.String),
                 sqlalchemy.Column(&#39;email&#39;, sqlalchemy.String),
                 sqlalchemy.Column(&#39;user_type&#39;, sqlalchemy.String),
-                sqlalchemy.Column(&#39;attributes&#39;, params_type)
+                sqlalchemy.Column(&#39;attributes&#39;, params_type),
+                extend_existing = True,
             ),
             &#39;plugins&#39; : sqlalchemy.Table(
                 &#39;plugins&#39;,
@@ -121,7 +122,8 @@ def get_tables(
                 sqlalchemy.Column(&#39;user_id&#39;, sqlalchemy.Integer, nullable=False),
                 #  sqlalchemy.Column(&#39;user_id&#39;, sqlalchemy.Integer, sqlalchemy.schema.ForeignKey(&#34;users.user_id&#34;), nullable=False),
                 sqlalchemy.Column(&#39;version&#39;, sqlalchemy.String),
-                sqlalchemy.Column(&#39;attributes&#39;, params_type)
+                sqlalchemy.Column(&#39;attributes&#39;, params_type),
+                extend_existing = True,
             ),
         }
 
@@ -133,7 +135,8 @@ def get_tables(
             sqlalchemy.Column(&#34;metric_key&#34;, sqlalchemy.String, index=True, nullable=False),
             sqlalchemy.Column(&#34;location_key&#34;, sqlalchemy.String, index=True),
             sqlalchemy.Column(&#34;parameters&#34;, params_type),
-            sqlalchemy.UniqueConstraint(&#39;connector_keys&#39;, &#39;metric_key&#39;, &#39;location_key&#39;, name=&#39;pipe_index&#39;)
+            sqlalchemy.UniqueConstraint(&#39;connector_keys&#39;, &#39;metric_key&#39;, &#39;location_key&#39;, name=&#39;pipe_index&#39;),
+            extend_existing = True,
         )
 
         try:
@@ -230,7 +233,8 @@ def get_tables(
                 sqlalchemy.Column(&#39;password_hash&#39;, sqlalchemy.String),
                 sqlalchemy.Column(&#39;email&#39;, sqlalchemy.String),
                 sqlalchemy.Column(&#39;user_type&#39;, sqlalchemy.String),
-                sqlalchemy.Column(&#39;attributes&#39;, params_type)
+                sqlalchemy.Column(&#39;attributes&#39;, params_type),
+                extend_existing = True,
             ),
             &#39;plugins&#39; : sqlalchemy.Table(
                 &#39;plugins&#39;,
@@ -240,7 +244,8 @@ def get_tables(
                 sqlalchemy.Column(&#39;user_id&#39;, sqlalchemy.Integer, nullable=False),
                 #  sqlalchemy.Column(&#39;user_id&#39;, sqlalchemy.Integer, sqlalchemy.schema.ForeignKey(&#34;users.user_id&#34;), nullable=False),
                 sqlalchemy.Column(&#39;version&#39;, sqlalchemy.String),
-                sqlalchemy.Column(&#39;attributes&#39;, params_type)
+                sqlalchemy.Column(&#39;attributes&#39;, params_type),
+                extend_existing = True,
             ),
         }
 
@@ -252,7 +257,8 @@ def get_tables(
             sqlalchemy.Column(&#34;metric_key&#34;, sqlalchemy.String, index=True, nullable=False),
             sqlalchemy.Column(&#34;location_key&#34;, sqlalchemy.String, index=True),
             sqlalchemy.Column(&#34;parameters&#34;, params_type),
-            sqlalchemy.UniqueConstraint(&#39;connector_keys&#39;, &#39;metric_key&#39;, &#39;location_key&#39;, name=&#39;pipe_index&#39;)
+            sqlalchemy.UniqueConstraint(&#39;connector_keys&#39;, &#39;metric_key&#39;, &#39;location_key&#39;, name=&#39;pipe_index&#39;),
+            extend_existing = True,
         )
 
         try:

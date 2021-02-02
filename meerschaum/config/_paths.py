@@ -81,7 +81,9 @@ API_SECRET_KEY_PATH = Path(os.path.join(API_CONFIG_RESOURCES_PATH, '.api_secret_
 API_UVICORN_RESOURCES_PATH = Path(os.path.join(API_CONFIG_RESOURCES_PATH, 'uvicorn'))
 API_UVICORN_CONFIG_PATH = Path(os.path.join(API_UVICORN_RESOURCES_PATH, '.thread_config.yaml'))
 
-PIPES_RESOURCES_PATH = Path(os.path.join(RESOURCES_PATH, 'pipes'))
+CACHE_RESOURCES_PATH = Path(os.path.join(RESOURCES_PATH, '.cache'))
+PIPES_CACHE_RESOURCES_PATH = Path(os.path.join(RESOURCES_PATH, 'pipes'))
+USERS_CACHE_RESOURCES_PATH = Path(os.path.join(CACHE_RESOURCES_PATH, 'users'))
 
 SPLITGRAPH_CONFIG_PATH = Path(os.path.join(Path.home(), '.splitgraph', '.sgconfig'))
 

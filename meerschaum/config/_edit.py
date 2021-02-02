@@ -102,7 +102,7 @@ def general_write_config(
                 if debug: dprint(f"Config is a dict. Writing to {path}...")
                 #  import yaml
                 from meerschaum.utils.yaml import yaml
-                yaml.dump(config, stream=f)
+                yaml.dump(config, stream=f, sort_keys=False)
 
     return True
 

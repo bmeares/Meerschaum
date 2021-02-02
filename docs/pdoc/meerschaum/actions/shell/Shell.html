@@ -35,7 +35,7 @@ This module is the entry point for the interactive shell
 &#34;&#34;&#34;
 
 from __future__ import annotations
-from meerschaum.utils.typing import Union, SuccessTuple, Any
+from meerschaum.utils.typing import Union, SuccessTuple, Any, Callable, Optional, List
 
 import sys, inspect
 from meerschaum.utils.packages import attempt_import
@@ -43,7 +43,6 @@ from meerschaum.config import __doc__, __version__ as version, get_config
 cmd = attempt_import(get_config(&#39;system&#39;, &#39;shell&#39;, &#39;cmd&#39;, patch=True), warn=False, lazy=False)
 if cmd is None or isinstance(cmd, dict):
     cmd = attempt_import(&#39;cmd&#39;, lazy=False, warn=False)
-from meerschaum.actions.arguments import parse_line
 _clear_screen = get_config(&#39;system&#39;, &#39;shell&#39;, &#39;clear_screen&#39;, patch=True)
 from meerschaum.connectors.parse import parse_instance_keys
 from meerschaum.utils.misc import string_width
@@ -76,12 +75,132 @@ hidden_commands = {
     &#39;pass&#39;,
     &#39;exit&#39;,
     &#39;quit&#39;,
+    &#39;eof&#39;,
+    &#39;exit&#39;,
+    &#39;_relative_run_script&#39;,
+    &#39;ipy&#39;,
 }
+
+def _insert_shell_actions(
+        shell : Optional[&#39;Shell&#39;] = None,
+        actions : Optional[Dict[str, Callable[[Any], SuccessTuple]]] = None,
+        keep_self = False,
+    ) -&gt; None:
+    &#34;&#34;&#34;
+    Update the Shell with Meerschaum actions.
+    &#34;&#34;&#34;
+    from meerschaum.utils.misc import add_method_to_class
+    import meerschaum.actions.shell as shell_pkg
+    from meerschaum.actions import get_completer
+    if actions is None:
+        from meerschaum.actions import actions
+
+    _shell = shell if shell is not None else shell_pkg.Shell
+
+    for a, f in actions.items():
+        #  if keep_self:
+        #  setattr(_shell, &#39;do_&#39; + a, f)
+        #  else:
+        add_method_to_class(
+            func = f,
+            class_def = _shell,
+            method_name = &#39;do_&#39; + a,
+            #  keep_self = True,
+        )
+        _completer = get_completer(a)
+        if _completer is None:
+            _completer = shell_pkg.default_action_completer
+        completer = _completer_wrapper(_completer)
+
+        setattr(_shell, &#39;complete_&#39; + a, completer)
+        #  add_method_to_class(
+            #  func = completer,
+            #  class_def = _shell,
+            #  method_name = &#39;complete_&#39; + a,
+            #  keep_self = True,
+        #  )
+
+def _completer_wrapper(
+        target : Callable[[Any], List[str]]
+    ) -&gt; Callable[&#39;meerschaum.actions.shell.Shell&#39;, str, str, int, int]:
+    &#34;&#34;&#34;
+    Wrapper for `complete_` functions so they can instead use Meerschaum arguments.
+    &#34;&#34;&#34;
+    from functools import wraps
+
+    ### I have no idea why I had to remove `self`.
+    ### Maybe it has to do with adding to an object instead of a class.
+    @wraps(target)
+    def wrapper(text, line, begin_index, end_index):
+        _check_keys = _check_complete_keys(line)
+        if _check_keys is not None:
+            return _check_keys
+
+        from meerschaum.actions.arguments._parse_arguments import parse_line
+        args = parse_line(line)
+        if target.__name__ != &#39;default_action_completer&#39;:
+            if len(args[&#39;action&#39;]) &gt; 0:
+                del args[&#39;action&#39;][0]
+        return target(
+            text=text, line=line, begin_index=begin_index, end_index=end_index,
+            **args
+        )
+
+    return wrapper
+
+def default_action_completer(
+        text : Optional[str] = None,
+        line : Optional[str] = None,
+        begin_index : Optional[int] = None,
+        end_index : Optional[int] = None,
+        action : List[str] = [],
+        **kw : Any
+    ) -&gt; List[str]:
+    &#34;&#34;&#34;
+    Search for subactions by default. This may be overridden by each action.
+    &#34;&#34;&#34;
+    from meerschaum.actions import get_subactions
+    subactions = get_subactions(action[0]) if len(action) &gt; 0 else {}
+    sub = action[1] if len(action) &gt; 1 else &#39;&#39;
+    possibilities = []
+    for sa in subactions:
+        if sa.startswith(sub) and sa != sub:
+            possibilities.append(sa)
+    return sorted(possibilities)
+
+def _check_complete_keys(
+        line : str
+    ) -&gt; Optional[List[str]]:
+    from meerschaum.actions.arguments._parse_arguments import parse_line
+    ### TODO Add all triggers
+    trigger_args = {
+        &#39;-c&#39; : &#39;connector_keys&#39;,
+        &#39;--connector-keys&#39; : &#39;connector_keys&#39;,
+        &#39;-r&#39; : &#39;repository&#39;,
+        &#39;--repository&#39; : &#39;repository&#39;,
+        &#39;-i&#39; : &#39;mrsm_instance&#39;,
+        &#39;--instance&#39; : &#39;mrsm_instance&#39;,
+        &#39;--mrsm-instance&#39; : &#39;mrsm_instance&#39;,
+    }
+
+    from meerschaum.utils.misc import get_connector_labels
+    for trigger, var in trigger_args.items():
+        if trigger in line:
+            ### check if any text has been entered for the key
+            if line.rstrip(&#39; &#39;).endswith(trigger):
+                return get_connector_labels()
+            args = parse_line(line.rstrip(&#39; &#39;))
+            search_term = args[var] if var != &#39;connector_keys&#39; else args[var][0]
+            return get_connector_labels(search_term=search_term)
+
+    return None
+
 class Shell(cmd.Cmd):
     def __init__(self, actions : dict = {}, sysargs : list = []):
         &#34;&#34;&#34;
         Customize the CLI from configuration
         &#34;&#34;&#34;
+        _insert_shell_actions(shell=self, keep_self=True)
         try:
             delattr(cmd.Cmd, &#39;_alias_create&#39;)
             delattr(cmd.Cmd, &#39;_alias_delete&#39;)
@@ -126,6 +245,7 @@ class Shell(cmd.Cmd):
         self._actions[&#39;instance&#39;] = self.do_instance
         self._actions[&#39;repo&#39;] = self.do_repo
         self._actions[&#39;debug&#39;] = self.do_debug
+        self.debug = False
         self.load_config()
         ### update hidden commands list (cmd2 only)
         try:
@@ -151,7 +271,6 @@ class Shell(cmd.Cmd):
         ) + &#39;v&#39; + version
         self._prompt = get_config(&#39;system&#39;, &#39;shell&#39;, CHARSET, &#39;prompt&#39;, patch=patch)
         self.prompt = self._prompt
-        self.debug = False
         self.ruler = get_config(&#39;system&#39;, &#39;shell&#39;, CHARSET, &#39;ruler&#39;, patch=patch)
         self.close_message = get_config(&#39;system&#39;, &#39;shell&#39;, CHARSET, &#39;close_message&#39;, patch=patch)
         self.doc_header = get_config(&#39;system&#39;, &#39;shell&#39;, CHARSET, &#39;doc_header&#39;, patch=patch)
@@ -179,8 +298,14 @@ class Shell(cmd.Cmd):
             for attr_key in get_config(&#39;system&#39;, &#39;shell&#39;, &#39;ansi&#39;, patch=patch):
                 self.__dict__[attr_key] = apply_colors(self.__dict__[attr_key], attr_key)
 
+        ### refresh actions
+        _insert_shell_actions(shell=self, keep_self=True)
+
         ### replace {instance} in prompt with stylized instance string
         self.update_prompt()
+
+    def insert_actions(self):
+        from meerschaum.actions import actions
 
     def update_prompt(self, instance=None, username=None):
         from meerschaum.config import get_config
@@ -267,7 +392,12 @@ class Shell(cmd.Cmd):
             readline.set_history_length(get_config(&#39;system&#39;, &#39;shell&#39;, &#39;max_history&#39;, patch=patch))
             readline.write_history_file(SHELL_HISTORY_PATH)
 
+        from meerschaum.actions.arguments import parse_line
         args = parse_line(line)
+        if args[&#39;help&#39;]:
+            from meerschaum.actions.arguments._parser import parse_help
+            parse_help(args)
+            return &#34;&#34;
 
         ### NOTE: pass `shell` flag in case actions need to distinguish between
         ###       being run on the command line and being run in the shell
@@ -369,11 +499,11 @@ class Shell(cmd.Cmd):
         info(f&#34;Debug mode is {&#39;on&#39; if self.debug else &#39;off&#39;}.&#34;)
 
     def do_instance(
-        self,
-        action : list = [&#39;&#39;],
-        debug : bool = False,
-        **kw : Any
-    ) -&gt; SuccessTuple:
+            self,
+            action : list = [&#39;&#39;],
+            debug : bool = False,
+            **kw : Any
+        ) -&gt; SuccessTuple:
         &#34;&#34;&#34;
         Temporarily set a default Meerschaum instance for the duration of the shell.
         The default instance is loaded from the Meerschaum configuraton file
@@ -385,6 +515,7 @@ class Shell(cmd.Cmd):
             instance {instance keys}
 
         Examples:
+            ```
             ### reset to default instance
             instance
 
@@ -393,6 +524,7 @@ class Shell(cmd.Cmd):
 
             ### set the instance to a non-default connector
             instance api:myremoteinstance
+            ```
 
         Note that instances must be configured, be either API or SQL connections,
           and be accessible to this machine over the network.
@@ -420,12 +552,19 @@ class Shell(cmd.Cmd):
         info(f&#34;Default instance for the current shell: {conn}&#34;)
         return True, &#34;Success&#34;
 
+    def complete_instance(self, text, line, begin_index, end_index):
+        from meerschaum.utils.misc import get_connector_labels
+        from meerschaum.actions.arguments._parse_arguments import parse_line
+        args = parse_line(line)
+        _text = args[&#39;action&#39;][1] if len(args[&#39;action&#39;]) &gt; 1 else &#34;&#34;
+        return get_connector_labels(&#39;api&#39;, &#39;sql&#39;, search_term=_text, ignore_exact_match=True)
+
     def do_repo(
-        self,
-        action : list = [&#39;&#39;],
-        debug : bool = False,
-        **kw : Any
-    ) -&gt; SuccessTuple:
+            self,
+            action : list = [&#39;&#39;],
+            debug : bool = False,
+            **kw : Any
+        ) -&gt; SuccessTuple:
         &#34;&#34;&#34;
         Temporarily set a default Meerschaum repository for the duration of the shell.
         The default repository (mrsm.io) is loaded from the Meerschaum configuraton file
@@ -467,6 +606,77 @@ class Shell(cmd.Cmd):
 
         info(f&#34;Default repository for the current shell: {conn}&#34;)
         return True, &#34;Success&#34;
+
+    def complete_repo(self, *args) -&gt; List[str]:
+        return self.complete_instance(*args)
+
+    def do_help(self, line) -&gt; List[str]:
+        &#34;&#34;&#34;
+        Show help for Meerschaum actions.
+
+        You can also view help for actions and subactions with `--help`.
+
+        Examples:
+        ```
+        help show
+        help show pipes
+        show pipes --help
+        show pipes -h
+        ```
+        &#34;&#34;&#34;
+        from meerschaum.actions import actions
+        from meerschaum.actions.arguments._parser import parse_help
+        from meerschaum.actions.arguments._parse_arguments import parse_line
+        import textwrap
+        args = parse_line(line)
+        if len(args[&#39;action&#39;]) == 0:
+            del args[&#39;action&#39;]
+            self._actions[&#39;show&#39;]([&#39;actions&#39;], **args)
+            return &#34;&#34;
+        if args[&#39;action&#39;][0] not in self._actions:
+            try:
+                print(textwrap.dedent(getattr(self, f&#34;do_{args[&#39;action&#39;][0]}&#34;).__doc__))
+            except:
+                print(f&#34;No help on &#39;{args[&#39;action&#39;][0]}&#39;.&#34;)
+            return &#34;&#34;
+        parse_help(args)
+        return &#34;&#34;
+
+    def complete_help(self, text, line, begin_index, end_index):
+        &#34;&#34;&#34;
+        Autocomplete the `help` command.
+        &#34;&#34;&#34;
+        import inspect
+        from meerschaum.actions.arguments._parse_arguments import parse_line
+        from meerschaum.actions import get_subactions
+        from meerschaum.actions.shell import Shell as _Shell
+        args = parse_line(line)
+        if len(args[&#39;action&#39;]) &gt; 0 and args[&#39;action&#39;][0] == &#39;help&#39;:
+            ### remove &#39;help&#39;
+            del args[&#39;action&#39;][0]
+
+        action = args[&#39;action&#39;][0] if len(args[&#39;action&#39;]) &gt; 0 else &#34;&#34;
+        sub = args[&#39;action&#39;][1] if len(args[&#39;action&#39;]) &gt; 1 else &#34;&#34;
+        possibilities = []
+
+        ### Search for subactions
+        if sub is not None:
+            for sa in get_subactions(action):
+                if sa.startswith(sub) and sa != sub:
+                    possibilities.append(sa)
+        
+        ### We found subarguments. Stop looking here.
+        if len(possibilities) &gt; 0:
+            return possibilities
+
+        ### No subactions. We&#39;re looking for an action.
+        for name, f in inspect.getmembers(_Shell):
+            if not inspect.isfunction(f):
+                continue
+            #  print(name)
+            if name.startswith(f&#39;do_{action}&#39;) and name != f&#39;do_{action}&#39; and name.replace(&#39;do_&#39;, &#39;&#39;) not in self.hidden_commands:
+                possibilities.append(name.replace(&#39;do_&#39;, &#39;&#39;))
+        return possibilities
 
     def do_exit(self, params) -&gt; True:
         &#34;&#34;&#34;
@@ -536,6 +746,36 @@ def input_with_sigint(_input):
 <section>
 <h2 class="section-title" id="header-functions">Functions</h2>
 <dl>
+<dt id="meerschaum.actions.shell.Shell.default_action_completer"><code class="name flex">
+<span>def <span class="ident">default_action_completer</span></span>(<span>text: Optional[str] = None, line: Optional[str] = None, begin_index: Optional[int] = None, end_index: Optional[int] = None, action: List[str] = [], **kw: Any) ‑> List[str]</span>
+</code></dt>
+<dd>
+<div class="desc"><p>Search for subactions by default. This may be overridden by each action.</p></div>
+<details class="source">
+<summary>
+<span>Expand source code</span>
+</summary>
+<pre><code class="python">def default_action_completer(
+        text : Optional[str] = None,
+        line : Optional[str] = None,
+        begin_index : Optional[int] = None,
+        end_index : Optional[int] = None,
+        action : List[str] = [],
+        **kw : Any
+    ) -&gt; List[str]:
+    &#34;&#34;&#34;
+    Search for subactions by default. This may be overridden by each action.
+    &#34;&#34;&#34;
+    from meerschaum.actions import get_subactions
+    subactions = get_subactions(action[0]) if len(action) &gt; 0 else {}
+    sub = action[1] if len(action) &gt; 1 else &#39;&#39;
+    possibilities = []
+    for sa in subactions:
+        if sa.startswith(sub) and sa != sub:
+            possibilities.append(sa)
+    return sorted(possibilities)</code></pre>
+</details>
+</dd>
 <dt id="meerschaum.actions.shell.Shell.input_with_sigint"><code class="name flex">
 <span>def <span class="ident">input_with_sigint</span></span>(<span>_input)</span>
 </code></dt>
@@ -589,6 +829,7 @@ to the out of the box configuration.</p>
         &#34;&#34;&#34;
         Customize the CLI from configuration
         &#34;&#34;&#34;
+        _insert_shell_actions(shell=self, keep_self=True)
         try:
             delattr(cmd.Cmd, &#39;_alias_create&#39;)
             delattr(cmd.Cmd, &#39;_alias_delete&#39;)
@@ -633,6 +874,7 @@ to the out of the box configuration.</p>
         self._actions[&#39;instance&#39;] = self.do_instance
         self._actions[&#39;repo&#39;] = self.do_repo
         self._actions[&#39;debug&#39;] = self.do_debug
+        self.debug = False
         self.load_config()
         ### update hidden commands list (cmd2 only)
         try:
@@ -658,7 +900,6 @@ to the out of the box configuration.</p>
         ) + &#39;v&#39; + version
         self._prompt = get_config(&#39;system&#39;, &#39;shell&#39;, CHARSET, &#39;prompt&#39;, patch=patch)
         self.prompt = self._prompt
-        self.debug = False
         self.ruler = get_config(&#39;system&#39;, &#39;shell&#39;, CHARSET, &#39;ruler&#39;, patch=patch)
         self.close_message = get_config(&#39;system&#39;, &#39;shell&#39;, CHARSET, &#39;close_message&#39;, patch=patch)
         self.doc_header = get_config(&#39;system&#39;, &#39;shell&#39;, CHARSET, &#39;doc_header&#39;, patch=patch)
@@ -686,8 +927,14 @@ to the out of the box configuration.</p>
             for attr_key in get_config(&#39;system&#39;, &#39;shell&#39;, &#39;ansi&#39;, patch=patch):
                 self.__dict__[attr_key] = apply_colors(self.__dict__[attr_key], attr_key)
 
+        ### refresh actions
+        _insert_shell_actions(shell=self, keep_self=True)
+
         ### replace {instance} in prompt with stylized instance string
         self.update_prompt()
+
+    def insert_actions(self):
+        from meerschaum.actions import actions
 
     def update_prompt(self, instance=None, username=None):
         from meerschaum.config import get_config
@@ -774,7 +1021,12 @@ to the out of the box configuration.</p>
             readline.set_history_length(get_config(&#39;system&#39;, &#39;shell&#39;, &#39;max_history&#39;, patch=patch))
             readline.write_history_file(SHELL_HISTORY_PATH)
 
+        from meerschaum.actions.arguments import parse_line
         args = parse_line(line)
+        if args[&#39;help&#39;]:
+            from meerschaum.actions.arguments._parser import parse_help
+            parse_help(args)
+            return &#34;&#34;
 
         ### NOTE: pass `shell` flag in case actions need to distinguish between
         ###       being run on the command line and being run in the shell
@@ -876,11 +1128,11 @@ to the out of the box configuration.</p>
         info(f&#34;Debug mode is {&#39;on&#39; if self.debug else &#39;off&#39;}.&#34;)
 
     def do_instance(
-        self,
-        action : list = [&#39;&#39;],
-        debug : bool = False,
-        **kw : Any
-    ) -&gt; SuccessTuple:
+            self,
+            action : list = [&#39;&#39;],
+            debug : bool = False,
+            **kw : Any
+        ) -&gt; SuccessTuple:
         &#34;&#34;&#34;
         Temporarily set a default Meerschaum instance for the duration of the shell.
         The default instance is loaded from the Meerschaum configuraton file
@@ -892,6 +1144,7 @@ to the out of the box configuration.</p>
             instance {instance keys}
 
         Examples:
+            ```
             ### reset to default instance
             instance
 
@@ -900,6 +1153,7 @@ to the out of the box configuration.</p>
 
             ### set the instance to a non-default connector
             instance api:myremoteinstance
+            ```
 
         Note that instances must be configured, be either API or SQL connections,
           and be accessible to this machine over the network.
@@ -927,12 +1181,19 @@ to the out of the box configuration.</p>
         info(f&#34;Default instance for the current shell: {conn}&#34;)
         return True, &#34;Success&#34;
 
+    def complete_instance(self, text, line, begin_index, end_index):
+        from meerschaum.utils.misc import get_connector_labels
+        from meerschaum.actions.arguments._parse_arguments import parse_line
+        args = parse_line(line)
+        _text = args[&#39;action&#39;][1] if len(args[&#39;action&#39;]) &gt; 1 else &#34;&#34;
+        return get_connector_labels(&#39;api&#39;, &#39;sql&#39;, search_term=_text, ignore_exact_match=True)
+
     def do_repo(
-        self,
-        action : list = [&#39;&#39;],
-        debug : bool = False,
-        **kw : Any
-    ) -&gt; SuccessTuple:
+            self,
+            action : list = [&#39;&#39;],
+            debug : bool = False,
+            **kw : Any
+        ) -&gt; SuccessTuple:
         &#34;&#34;&#34;
         Temporarily set a default Meerschaum repository for the duration of the shell.
         The default repository (mrsm.io) is loaded from the Meerschaum configuraton file
@@ -974,6 +1235,77 @@ to the out of the box configuration.</p>
 
         info(f&#34;Default repository for the current shell: {conn}&#34;)
         return True, &#34;Success&#34;
+
+    def complete_repo(self, *args) -&gt; List[str]:
+        return self.complete_instance(*args)
+
+    def do_help(self, line) -&gt; List[str]:
+        &#34;&#34;&#34;
+        Show help for Meerschaum actions.
+
+        You can also view help for actions and subactions with `--help`.
+
+        Examples:
+        ```
+        help show
+        help show pipes
+        show pipes --help
+        show pipes -h
+        ```
+        &#34;&#34;&#34;
+        from meerschaum.actions import actions
+        from meerschaum.actions.arguments._parser import parse_help
+        from meerschaum.actions.arguments._parse_arguments import parse_line
+        import textwrap
+        args = parse_line(line)
+        if len(args[&#39;action&#39;]) == 0:
+            del args[&#39;action&#39;]
+            self._actions[&#39;show&#39;]([&#39;actions&#39;], **args)
+            return &#34;&#34;
+        if args[&#39;action&#39;][0] not in self._actions:
+            try:
+                print(textwrap.dedent(getattr(self, f&#34;do_{args[&#39;action&#39;][0]}&#34;).__doc__))
+            except:
+                print(f&#34;No help on &#39;{args[&#39;action&#39;][0]}&#39;.&#34;)
+            return &#34;&#34;
+        parse_help(args)
+        return &#34;&#34;
+
+    def complete_help(self, text, line, begin_index, end_index):
+        &#34;&#34;&#34;
+        Autocomplete the `help` command.
+        &#34;&#34;&#34;
+        import inspect
+        from meerschaum.actions.arguments._parse_arguments import parse_line
+        from meerschaum.actions import get_subactions
+        from meerschaum.actions.shell import Shell as _Shell
+        args = parse_line(line)
+        if len(args[&#39;action&#39;]) &gt; 0 and args[&#39;action&#39;][0] == &#39;help&#39;:
+            ### remove &#39;help&#39;
+            del args[&#39;action&#39;][0]
+
+        action = args[&#39;action&#39;][0] if len(args[&#39;action&#39;]) &gt; 0 else &#34;&#34;
+        sub = args[&#39;action&#39;][1] if len(args[&#39;action&#39;]) &gt; 1 else &#34;&#34;
+        possibilities = []
+
+        ### Search for subactions
+        if sub is not None:
+            for sa in get_subactions(action):
+                if sa.startswith(sub) and sa != sub:
+                    possibilities.append(sa)
+        
+        ### We found subarguments. Stop looking here.
+        if len(possibilities) &gt; 0:
+            return possibilities
+
+        ### No subactions. We&#39;re looking for an action.
+        for name, f in inspect.getmembers(_Shell):
+            if not inspect.isfunction(f):
+                continue
+            #  print(name)
+            if name.startswith(f&#39;do_{action}&#39;) and name != f&#39;do_{action}&#39; and name.replace(&#39;do_&#39;, &#39;&#39;) not in self.hidden_commands:
+                possibilities.append(name.replace(&#39;do_&#39;, &#39;&#39;))
+        return possibilities
 
     def do_exit(self, params) -&gt; True:
         &#34;&#34;&#34;
@@ -1023,6 +1355,82 @@ to the out of the box configuration.</p>
 </ul>
 <h3>Methods</h3>
 <dl>
+<dt id="meerschaum.actions.shell.Shell.Shell.complete_help"><code class="name flex">
+<span>def <span class="ident">complete_help</span></span>(<span>self, text, line, begin_index, end_index)</span>
+</code></dt>
+<dd>
+<div class="desc"><p>Autocomplete the <code>help</code> command.</p></div>
+<details class="source">
+<summary>
+<span>Expand source code</span>
+</summary>
+<pre><code class="python">def complete_help(self, text, line, begin_index, end_index):
+    &#34;&#34;&#34;
+    Autocomplete the `help` command.
+    &#34;&#34;&#34;
+    import inspect
+    from meerschaum.actions.arguments._parse_arguments import parse_line
+    from meerschaum.actions import get_subactions
+    from meerschaum.actions.shell import Shell as _Shell
+    args = parse_line(line)
+    if len(args[&#39;action&#39;]) &gt; 0 and args[&#39;action&#39;][0] == &#39;help&#39;:
+        ### remove &#39;help&#39;
+        del args[&#39;action&#39;][0]
+
+    action = args[&#39;action&#39;][0] if len(args[&#39;action&#39;]) &gt; 0 else &#34;&#34;
+    sub = args[&#39;action&#39;][1] if len(args[&#39;action&#39;]) &gt; 1 else &#34;&#34;
+    possibilities = []
+
+    ### Search for subactions
+    if sub is not None:
+        for sa in get_subactions(action):
+            if sa.startswith(sub) and sa != sub:
+                possibilities.append(sa)
+    
+    ### We found subarguments. Stop looking here.
+    if len(possibilities) &gt; 0:
+        return possibilities
+
+    ### No subactions. We&#39;re looking for an action.
+    for name, f in inspect.getmembers(_Shell):
+        if not inspect.isfunction(f):
+            continue
+        #  print(name)
+        if name.startswith(f&#39;do_{action}&#39;) and name != f&#39;do_{action}&#39; and name.replace(&#39;do_&#39;, &#39;&#39;) not in self.hidden_commands:
+            possibilities.append(name.replace(&#39;do_&#39;, &#39;&#39;))
+    return possibilities</code></pre>
+</details>
+</dd>
+<dt id="meerschaum.actions.shell.Shell.Shell.complete_instance"><code class="name flex">
+<span>def <span class="ident">complete_instance</span></span>(<span>self, text, line, begin_index, end_index)</span>
+</code></dt>
+<dd>
+<div class="desc"></div>
+<details class="source">
+<summary>
+<span>Expand source code</span>
+</summary>
+<pre><code class="python">def complete_instance(self, text, line, begin_index, end_index):
+    from meerschaum.utils.misc import get_connector_labels
+    from meerschaum.actions.arguments._parse_arguments import parse_line
+    args = parse_line(line)
+    _text = args[&#39;action&#39;][1] if len(args[&#39;action&#39;]) &gt; 1 else &#34;&#34;
+    return get_connector_labels(&#39;api&#39;, &#39;sql&#39;, search_term=_text, ignore_exact_match=True)</code></pre>
+</details>
+</dd>
+<dt id="meerschaum.actions.shell.Shell.Shell.complete_repo"><code class="name flex">
+<span>def <span class="ident">complete_repo</span></span>(<span>self, *args) ‑> List[str]</span>
+</code></dt>
+<dd>
+<div class="desc"></div>
+<details class="source">
+<summary>
+<span>Expand source code</span>
+</summary>
+<pre><code class="python">def complete_repo(self, *args) -&gt; List[str]:
+    return self.complete_instance(*args)</code></pre>
+</details>
+</dd>
 <dt id="meerschaum.actions.shell.Shell.Shell.do_debug"><code class="name flex">
 <span>def <span class="ident">do_debug</span></span>(<span>self, action=[''], **kw)</span>
 </code></dt>
@@ -1075,6 +1483,55 @@ Ommitting on / off will toggle the existing value.</p></div>
     return True</code></pre>
 </details>
 </dd>
+<dt id="meerschaum.actions.shell.Shell.Shell.do_help"><code class="name flex">
+<span>def <span class="ident">do_help</span></span>(<span>self, line) ‑> List[str]</span>
+</code></dt>
+<dd>
+<div class="desc"><p>Show help for Meerschaum actions.</p>
+<p>You can also view help for actions and subactions with <code>--help</code>.</p>
+<p>Examples:</p>
+<pre><code>help show
+help show pipes
+show pipes --help
+show pipes -h
+</code></pre></div>
+<details class="source">
+<summary>
+<span>Expand source code</span>
+</summary>
+<pre><code class="python">def do_help(self, line) -&gt; List[str]:
+    &#34;&#34;&#34;
+    Show help for Meerschaum actions.
+
+    You can also view help for actions and subactions with `--help`.
+
+    Examples:
+    ```
+    help show
+    help show pipes
+    show pipes --help
+    show pipes -h
+    ```
+    &#34;&#34;&#34;
+    from meerschaum.actions import actions
+    from meerschaum.actions.arguments._parser import parse_help
+    from meerschaum.actions.arguments._parse_arguments import parse_line
+    import textwrap
+    args = parse_line(line)
+    if len(args[&#39;action&#39;]) == 0:
+        del args[&#39;action&#39;]
+        self._actions[&#39;show&#39;]([&#39;actions&#39;], **args)
+        return &#34;&#34;
+    if args[&#39;action&#39;][0] not in self._actions:
+        try:
+            print(textwrap.dedent(getattr(self, f&#34;do_{args[&#39;action&#39;][0]}&#34;).__doc__))
+        except:
+            print(f&#34;No help on &#39;{args[&#39;action&#39;][0]}&#39;.&#34;)
+        return &#34;&#34;
+    parse_help(args)
+    return &#34;&#34;</code></pre>
+</details>
+</dd>
 <dt id="meerschaum.actions.shell.Shell.Shell.do_instance"><code class="name flex">
 <span>def <span class="ident">do_instance</span></span>(<span>self, action: list = [''], debug: bool = False, **kw: Any) ‑> Tuple[bool, str]</span>
 </code></dt>
@@ -1086,12 +1543,15 @@ The default instance is loaded from the Meerschaum configuraton file
 <h2 id="usage">Usage</h2>
 <p>instance {instance keys}</p>
 <h2 id="examples">Examples</h2>
-<h3 id="reset-to-default-instance">reset to default instance</h3>
-<p>instance</p>
-<h3 id="set-the-instance-to-apimain">set the instance to 'api:main'</h3>
-<p>instance api</p>
-<h3 id="set-the-instance-to-a-non-default-connector">set the instance to a non-default connector</h3>
-<p>instance api:myremoteinstance</p>
+<pre><code>### reset to default instance
+instance
+
+### set the instance to 'api:main'
+instance api
+
+### set the instance to a non-default connector
+instance api:myremoteinstance
+</code></pre>
 <p>Note that instances must be configured, be either API or SQL connections,
 and be accessible to this machine over the network.</p></div>
 <details class="source">
@@ -1099,11 +1559,11 @@ and be accessible to this machine over the network.</p></div>
 <span>Expand source code</span>
 </summary>
 <pre><code class="python">def do_instance(
-    self,
-    action : list = [&#39;&#39;],
-    debug : bool = False,
-    **kw : Any
-) -&gt; SuccessTuple:
+        self,
+        action : list = [&#39;&#39;],
+        debug : bool = False,
+        **kw : Any
+    ) -&gt; SuccessTuple:
     &#34;&#34;&#34;
     Temporarily set a default Meerschaum instance for the duration of the shell.
     The default instance is loaded from the Meerschaum configuraton file
@@ -1115,6 +1575,7 @@ and be accessible to this machine over the network.</p></div>
         instance {instance keys}
 
     Examples:
+        ```
         ### reset to default instance
         instance
 
@@ -1123,6 +1584,7 @@ and be accessible to this machine over the network.</p></div>
 
         ### set the instance to a non-default connector
         instance api:myremoteinstance
+        ```
 
     Note that instances must be configured, be either API or SQL connections,
       and be accessible to this machine over the network.
@@ -1190,11 +1652,11 @@ The default repository (mrsm.io) is loaded from the Meerschaum configuraton file
 <span>Expand source code</span>
 </summary>
 <pre><code class="python">def do_repo(
-    self,
-    action : list = [&#39;&#39;],
-    debug : bool = False,
-    **kw : Any
-) -&gt; SuccessTuple:
+        self,
+        action : list = [&#39;&#39;],
+        debug : bool = False,
+        **kw : Any
+    ) -&gt; SuccessTuple:
     &#34;&#34;&#34;
     Temporarily set a default Meerschaum repository for the duration of the shell.
     The default repository (mrsm.io) is loaded from the Meerschaum configuraton file
@@ -1255,6 +1717,19 @@ The default repository (mrsm.io) is loaded from the Meerschaum configuraton file
     pass</code></pre>
 </details>
 </dd>
+<dt id="meerschaum.actions.shell.Shell.Shell.insert_actions"><code class="name flex">
+<span>def <span class="ident">insert_actions</span></span>(<span>self)</span>
+</code></dt>
+<dd>
+<div class="desc"></div>
+<details class="source">
+<summary>
+<span>Expand source code</span>
+</summary>
+<pre><code class="python">def insert_actions(self):
+    from meerschaum.actions import actions</code></pre>
+</details>
+</dd>
 <dt id="meerschaum.actions.shell.Shell.Shell.load_config"><code class="name flex">
 <span>def <span class="ident">load_config</span></span>(<span>self, instance: str = None)</span>
 </code></dt>
@@ -1281,7 +1756,6 @@ The default repository (mrsm.io) is loaded from the Meerschaum configuraton file
     ) + &#39;v&#39; + version
     self._prompt = get_config(&#39;system&#39;, &#39;shell&#39;, CHARSET, &#39;prompt&#39;, patch=patch)
     self.prompt = self._prompt
-    self.debug = False
     self.ruler = get_config(&#39;system&#39;, &#39;shell&#39;, CHARSET, &#39;ruler&#39;, patch=patch)
     self.close_message = get_config(&#39;system&#39;, &#39;shell&#39;, CHARSET, &#39;close_message&#39;, patch=patch)
     self.doc_header = get_config(&#39;system&#39;, &#39;shell&#39;, CHARSET, &#39;doc_header&#39;, patch=patch)
@@ -1308,6 +1782,9 @@ The default repository (mrsm.io) is loaded from the Meerschaum configuraton file
 
         for attr_key in get_config(&#39;system&#39;, &#39;shell&#39;, &#39;ansi&#39;, patch=patch):
             self.__dict__[attr_key] = apply_colors(self.__dict__[attr_key], attr_key)
+
+    ### refresh actions
+    _insert_shell_actions(shell=self, keep_self=True)
 
     ### replace {instance} in prompt with stylized instance string
     self.update_prompt()</code></pre>
@@ -1415,7 +1892,12 @@ assume the action is <code>bash</code></p></div>
         readline.set_history_length(get_config(&#39;system&#39;, &#39;shell&#39;, &#39;max_history&#39;, patch=patch))
         readline.write_history_file(SHELL_HISTORY_PATH)
 
+    from meerschaum.actions.arguments import parse_line
     args = parse_line(line)
+    if args[&#39;help&#39;]:
+        from meerschaum.actions.arguments._parser import parse_help
+        parse_help(args)
+        return &#34;&#34;
 
     ### NOTE: pass `shell` flag in case actions need to distinguish between
     ###       being run on the command line and being run in the shell
@@ -1575,6 +2057,7 @@ to run hooks before the command loop begins. See
 </li>
 <li><h3><a href="#header-functions">Functions</a></h3>
 <ul class="">
+<li><code><a title="meerschaum.actions.shell.Shell.default_action_completer" href="#meerschaum.actions.shell.Shell.default_action_completer">default_action_completer</a></code></li>
 <li><code><a title="meerschaum.actions.shell.Shell.input_with_sigint" href="#meerschaum.actions.shell.Shell.input_with_sigint">input_with_sigint</a></code></li>
 </ul>
 </li>
@@ -1583,12 +2066,17 @@ to run hooks before the command loop begins. See
 <li>
 <h4><code><a title="meerschaum.actions.shell.Shell.Shell" href="#meerschaum.actions.shell.Shell.Shell">Shell</a></code></h4>
 <ul class="two-column">
+<li><code><a title="meerschaum.actions.shell.Shell.Shell.complete_help" href="#meerschaum.actions.shell.Shell.Shell.complete_help">complete_help</a></code></li>
+<li><code><a title="meerschaum.actions.shell.Shell.Shell.complete_instance" href="#meerschaum.actions.shell.Shell.Shell.complete_instance">complete_instance</a></code></li>
+<li><code><a title="meerschaum.actions.shell.Shell.Shell.complete_repo" href="#meerschaum.actions.shell.Shell.Shell.complete_repo">complete_repo</a></code></li>
 <li><code><a title="meerschaum.actions.shell.Shell.Shell.do_debug" href="#meerschaum.actions.shell.Shell.Shell.do_debug">do_debug</a></code></li>
 <li><code><a title="meerschaum.actions.shell.Shell.Shell.do_exit" href="#meerschaum.actions.shell.Shell.Shell.do_exit">do_exit</a></code></li>
+<li><code><a title="meerschaum.actions.shell.Shell.Shell.do_help" href="#meerschaum.actions.shell.Shell.Shell.do_help">do_help</a></code></li>
 <li><code><a title="meerschaum.actions.shell.Shell.Shell.do_instance" href="#meerschaum.actions.shell.Shell.Shell.do_instance">do_instance</a></code></li>
 <li><code><a title="meerschaum.actions.shell.Shell.Shell.do_pass" href="#meerschaum.actions.shell.Shell.Shell.do_pass">do_pass</a></code></li>
 <li><code><a title="meerschaum.actions.shell.Shell.Shell.do_repo" href="#meerschaum.actions.shell.Shell.Shell.do_repo">do_repo</a></code></li>
 <li><code><a title="meerschaum.actions.shell.Shell.Shell.emptyline" href="#meerschaum.actions.shell.Shell.Shell.emptyline">emptyline</a></code></li>
+<li><code><a title="meerschaum.actions.shell.Shell.Shell.insert_actions" href="#meerschaum.actions.shell.Shell.Shell.insert_actions">insert_actions</a></code></li>
 <li><code><a title="meerschaum.actions.shell.Shell.Shell.load_config" href="#meerschaum.actions.shell.Shell.Shell.load_config">load_config</a></code></li>
 <li><code><a title="meerschaum.actions.shell.Shell.Shell.postcmd" href="#meerschaum.actions.shell.Shell.Shell.postcmd">postcmd</a></code></li>
 <li><code><a title="meerschaum.actions.shell.Shell.Shell.postloop" href="#meerschaum.actions.shell.Shell.Shell.postloop">postloop</a></code></li>

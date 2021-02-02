@@ -110,20 +110,66 @@ def _edit_users(
     from meerschaum.connectors.parse import parse_repo_keys
     from meerschaum.utils.debug import dprint
     from meerschaum.utils.warnings import warn, error, info
-    from meerschaum._internal import User
+    from meerschaum._internal.User import User
     from meerschaum.connectors.api import APIConnector
     from meerschaum.utils.formatting import print_tuple
-    from meerschaum.utils.prompt import prompt
+    from meerschaum.utils.prompt import prompt, yes_no, get_password, get_email
+    from meerschaum.utils.misc import edit_file
+    from meerschaum.config._paths import USERS_CACHE_RESOURCES_PATH
+    from meerschaum.utils.yaml import yaml
+    import os, pathlib
     repo_connector = parse_repo_keys(repository)
 
-    if len(action) == 0 or action == [&#39;&#39;]: return False, &#34;No users to edit.&#34;
+    def build_user(username : str):
+        ### Change the password
+        password = &#39;&#39;
+        if yes_no(f&#34;Change the password for user &#39;{username}&#39;?&#34;, default=&#39;n&#39;):
+            password = get_password(username, minimum_length=7)
+
+        ## Make an admin
+        _type = None
+        if yes_no(f&#34;Change the user type for user &#39;{username}&#39;?&#34;, default=&#39;n&#39;):
+            is_admin = yes_no(f&#34;Make user &#39;{username}&#39; an admin?&#34;, default=&#39;n&#39;)
+            _type = &#39;admin&#39; if is_admin else None
+
+        ### Change the email
+        email = &#39;&#39;
+        if yes_no(f&#34;Change the email for user &#39;{username}&#39;?&#34;, default=&#39;n&#39;):
+            email = get_email(username)
+
+        ### Change the attributes
+        attributes = None
+        if yes_no(f&#34;Edit the attributes YAML file for user &#39;{username}&#39;?&#34;, default=&#39;n&#39;):
+            attr_path = pathlib.Path(os.path.join(USERS_CACHE_RESOURCES_PATH, f&#39;{username}.yaml&#39;))
+            try:
+                existing_attrs = repo_connector.get_user_attributes(User(username), debug=debug)
+                with open(attr_path, &#39;w+&#39;) as f:
+                    yaml.dump(existing_attrs, stream=f)
+                edit_file(attr_path)
+                with open(attr_path, &#39;r&#39;) as f:
+                    attributes = yaml.load(f)
+            except Exception as e:
+                warn(
+                    f&#34;Unable to set attributes for user &#39;{username}&#39; due to exception:\n&#34; + f&#34;{e}&#34; +
+                    &#34;\nSkipping attributes...&#34;,
+                    stack = False
+                )
+                attributes = None
+
+        ### Submit changes
+        return User(username, password, email=email, type=_type, attributes=attributes)
+
+    if len(action) == 0 or action == [&#39;&#39;]:
+        return False, &#34;No users to edit.&#34;
 
     success = dict()
     for username in action:
-        password = prompt(f&#34;Password for user &#39;{username}&#39;: &#34;)
-        email = prompt(f&#34;Email for user &#39;{username}&#39; (empty to omit): &#34;)
-        if len(email) == 0: email = None
-        user = User(username, password, email=email)
+        try:
+            user = build_user(username)
+        except Exception as e:
+            print(e)
+            info(f&#34;Skipping editing user &#39;{username}&#39;...&#34;)
+            continue
         info(f&#34;Editing user &#39;{user}&#39; on Meerschaum instance &#39;{repo_connector}&#39;...&#34;)
         result_tuple = repo_connector.edit_user(user, debug=debug)
         print_tuple(result_tuple)
@@ -135,8 +181,8 @@ def _edit_users(
         else: failed += 1
 
     msg = (
-        f&#34;Finished editing {len(action)} users.&#34; + &#39;\n&#39; +
-        f&#34;  {succeeded} succeeded, {failed} failed.&#34;
+        f&#34;Finished editing {len(action)} users&#34; + &#39;\n&#39; +
+        f&#34;    ({succeeded} succeeded, {failed} failed).&#34;
     )
     info(msg)
     return True, msg

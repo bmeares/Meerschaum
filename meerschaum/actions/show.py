@@ -44,7 +44,7 @@ def _show_actions(**kw : Any) -> SuccessTuple:
     """
     from meerschaum.actions import actions
     from meerschaum.utils.misc import print_options
-    print_options(options=actions, name='actions', **kw)
+    print_options(options=actions, name='actions', actions=False, **kw)
     return True, "Success"
 
 def _show_help(**kw : Any) -> SuccessTuple:
@@ -296,10 +296,15 @@ def _show_users(
     from meerschaum.config import get_config
     from meerschaum.connectors.parse import parse_repo_keys
     from meerschaum.utils.misc import print_options
+    repo_connector = parse_repo_keys(repository)
+    users_list = repo_connector.get_users(debug=debug)
+
     try:
         repo_connector = parse_repo_keys(repository)
         users_list = repo_connector.get_users(debug=debug)
-    except:
+    except Exception as e:
+        import traceback
+        traceback.print_stack()
         return False, f"Failed to get users from repository '{repository}'"
     print_options(users_list, header=f"Registered users for repository '{repo_connector}':")
     return True, "Success"

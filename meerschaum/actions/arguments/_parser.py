@@ -6,12 +6,15 @@
 This module creates the argparse Parser
 """
 
+from __future__ import annotations
+from meerschaum.utils.typing import Union, Dict, List, Any
+
 import argparse
 from meerschaum.config import __doc__ as doc
 from meerschaum.utils.misc import string_to_dict
 import json
 
-def parse_datetime(dt_str : str):
+def parse_datetime(dt_str : str) -> datetime.datetime:
     from meerschaum.utils.packages import attempt_import
     dateutil_parser, datetime = attempt_import('dateutil.parser', 'datetime')
 
@@ -27,9 +30,46 @@ def parse_datetime(dt_str : str):
         error(f"'{dt_str}' is not a valid datetime format.", stack=False)
     return dt
 
+def parse_help(sysargs : Union[List[str], Dict[str, Any]]) -> None:
+    from meerschaum.actions.arguments._parse_arguments import parse_arguments, parse_line
+    from meerschaum.actions import actions, get_subactions
+    import importlib, inspect, textwrap
+    if isinstance(sysargs, list):
+        args = parse_arguments(sysargs)
+    elif isinstance(sysargs, dict):
+        args = sysargs
+    elif isinstance(sysargs, str):
+        args = parse_line(sysargs)
+    _args = args.copy()
+    del _args['action']
+    if len(args['action']) == 0:
+        return actions['show'](['help'], **_args)
+    if args['action'][0] not in actions:
+        return actions['show'](['actions'], **_args)
+
+    ### Check for subactions.
+    if len(args['action']) > 1:
+        subaction = get_subactions(args['action'][0])[args['action'][1]]
+        try:
+            subaction = get_subactions(args['action'][0])[args['action'][1]]
+        except Exception as e:
+            subaction = None
+        if subaction is not None:
+            return print(textwrap.dedent(subaction.__doc__))
+
+    try:
+        doc = actions[args['action'][0]].__doc__
+    except:
+        doc = None
+    if doc is None:
+        doc = "No help available for '" + f"{args['action'][0]}" + "'."
+    return print(textwrap.dedent(doc))
+
 parser = argparse.ArgumentParser(
+    prog = 'mrsm',
     description = "Create and Build Pipes with Meerschaum",
-    usage = "mrsm [action with optional arguments] {options}"
+    usage = "mrsm [action with optional arguments] {options}",
+    add_help = False,
 )
 
 groups = dict()
@@ -43,7 +83,10 @@ groups['misc'] = parser.add_argument_group(title='Miscellaneous options')
 
 ### Actions options
 groups['actions'].add_argument(
-    'action', nargs='+', help="Actions list to execute. E.g. `api start`"
+    'action', nargs='*', help="Actions list to execute. E.g. `api start`"
+)
+groups['actions'].add_argument(
+    '-h', '--help', action='store_true', help="Print a help message for an action."
 )
 groups['actions'].add_argument(
     '--loop', action="store_true", help="Loop the specified action forever (only for select actions)"

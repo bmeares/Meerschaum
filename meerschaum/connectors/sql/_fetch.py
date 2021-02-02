@@ -6,13 +6,14 @@
 Implement the Connector fetch() method
 """
 
+from __future__ import annotations
 from meerschaum.utils.typing import Optional, Union
 
 def dateadd_str(
         flavor : str = 'postgresql',
         datepart : str = 'day',
         number : Union[int, float] = -1,
-        begin : Union[str, 'datetime.datetime'] = 'now'
+        begin : Union[str, datetime.datetime] = 'now'
     ) -> str:
     """
     Generate a DATEADD clause depending on database flavor.
@@ -47,7 +48,8 @@ def dateadd_str(
     """
     from meerschaum.utils.debug import dprint
     from meerschaum.utils.packages import attempt_import
-    dateutil, datetime = attempt_import('dateutil', 'datetime')
+    import datetime
+    dateutil = attempt_import('dateutil')
     if not begin: return None
     begin_time = None
     if not isinstance(begin, datetime.datetime):
@@ -128,8 +130,7 @@ def fetch(
     from meerschaum.utils.debug import dprint
     from meerschaum.utils.warnings import warn, error
     from meerschaum.utils.misc import sql_item_name
-    from meerschaum.utils.packages import attempt_import
-    datetime = attempt_import('datetime')
+    import datetime
 
     if 'columns' not in pipe.parameters or 'fetch' not in pipe.parameters:
         warn(f"Parameters for '{pipe}' must include 'columns' and 'fetch'", stack=False)

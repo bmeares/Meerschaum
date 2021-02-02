@@ -120,7 +120,6 @@ def _api_start(
     custom_keys = ['mrsm_instance']
 
     ### write config to a temporary file to communicate with uvicorn threads
-    #  yaml = attempt_import('yaml')
     from meerschaum.utils.yaml import yaml
     try:
         if API_UVICORN_CONFIG_PATH.exists():

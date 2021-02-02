@@ -8,10 +8,10 @@ Create and access locations
 
 #  from meerschaum.api import app, endpoints, database, connector
 #  from meerschaum.api.models import Location
-#  from meerschaum.api.tables import get_tables
+from meerschaum.api import app, debug, manager, get_connector, endpoints
+from meerschaum.api.tables import get_tables
 #  from meerschaum.utils.misc import attempt_import
 #  sqlalchemy = attempt_import('sqlalchemy')
-#  endpoint = endpoints['mrsm'] + '/locations'
 
 #  @app.post(endpoint)
 #  async def register_location(location : Location):
@@ -26,8 +26,8 @@ Create and access locations
     #  last_record_id = await database.execute(query)
     #  return {**location.dict(), "location_id": last_record_id}
 
-#  @app.get(endpoint)
+#  @app.get('/locations')
 #  async def get_locations():
-    #  query = get_tables()['locations'].select()
+    #  query = get_tables()['pipes'].select()
     #  return await database.fetch_all(query)
 

@@ -8,9 +8,11 @@ Meerschaum API backend. Start an API instance with `api start`.
 
 __version__ = "0.0.14"
 from meerschaum.config import get_config
+from meerschaum.config.static import _static_config
 from meerschaum.utils.packages import attempt_import
 from meerschaum.utils.get_pipes import get_pipes as get_pipes_sql
 import pathlib, os
+endpoints = _static_config()['api']['endpoints']
 fastapi = attempt_import('fastapi', lazy=True)
 starlette_reponses = attempt_import('starlette.responses', warn=False)
 python_multipart = attempt_import('multipart')
@@ -33,14 +35,13 @@ def generate_secret_key():
     return secret_key
 
 SECRET = generate_secret_key()
-manager = LoginManager(SECRET, tokenUrl='/mrsm/login')
+manager = LoginManager(SECRET, tokenUrl=endpoints['login'])
 
 uvicorn_config = None
 def get_uvicorn_config() -> dict:
     global uvicorn_config
     from meerschaum.config._paths import API_UVICORN_CONFIG_PATH
     from meerschaum.utils.yaml import yaml
-    #  yaml = attempt_import('yaml')
     if uvicorn_config is None:
         try:
             with open(API_UVICORN_CONFIG_PATH, 'r') as f:
@@ -126,7 +127,6 @@ from meerschaum.config._paths import API_RESOURCES_PATH, API_STATIC_PATH, API_TE
 app.mount('/static', fastapi_staticfiles.StaticFiles(directory=str(API_STATIC_PATH)), name='static')
 templates = fastapi_templating.Jinja2Templates(directory=str(API_TEMPLATES_PATH))
 
-endpoints = sys_config['endpoints']
 
 ### import WebAPI routes
 import meerschaum.api.routes as routes
