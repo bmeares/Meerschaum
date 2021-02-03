@@ -3,7 +3,7 @@ Meerschaum is customizable to best fit your situation, but if you're starting fr
 
 ## **Step 1:** Requirements
 
-To install Meerschaum, you need will need [Python 3.7+](https://www.python.org/) with [pip](https://pip.pypa.io/en/stable/installing/) installed.
+To install Meerschaum, you need will need [Python 3.7+](https://www.python.org/) with [`pip`](https://pip.pypa.io/en/stable/installing/) installed (Python 3.4+ comes with `pip` pre-installed).
 
 ### **Step 1.5:** Server Stack Requirements
 

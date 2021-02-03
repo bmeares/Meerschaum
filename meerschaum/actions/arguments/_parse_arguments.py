@@ -7,18 +7,26 @@
 This module contains functions for parsing arguments
 """
 
+from __future__ import annotations
+from meerschaum.utils.typing import List, Dict, Any, Optional
+
 from meerschaum.actions.arguments._parser import parser
 
-def parse_arguments(sysargs : list) -> dict:
+def parse_arguments(sysargs : List[str]) -> dict[str, Any]:
     """
     Parse a list of arguments into standard Meerschaum arguments.
+    Returns a dictionary of argument_name -> argument_value.
+
+    :param sysargs:
+        List of command-line arguments to process. Does not include the executable.
+        E.g. ['show', 'version', '--nopretty']
     """
-    from meerschaum.config import get_config
     import copy
+    from meerschaum.config.static import _static_config
 
     sub_arguments = []
     sub_arg_indices = []
-    begin_decorator, end_decorator = get_config('system', 'arguments', 'sub_decorators', patch=True)
+    begin_decorator, end_decorator = _static_config()['system']['arguments']['sub_decorators']
     found_begin_decorator = False
     for i, word in enumerate(sysargs):
         is_sub_arg = False
@@ -63,16 +71,18 @@ def parse_arguments(sysargs : list) -> dict:
         from meerschaum.utils.packages import reload_package
         import os, meerschaum.config
         write_patch(args.config)
-        reload_package(meerschaum.config)
-        reload_package(meerschaum.config)
+        reload_package('meerschaum')
+        #  reload_package(meerschaum.config)
         ### clean up patch so it's not loaded next time
         os.remove(PATCH_PATH)
 
 
     args_dict = vars(args)
     ### append decorated arguments to sub_arguments list
-    if 'sub_args' not in args_dict: args_dict['sub_args'] = []
-    if args_dict['sub_args'] is None: args_dict['sub_args'] = []
+    if 'sub_args' not in args_dict:
+        args_dict['sub_args'] = []
+    if args_dict['sub_args'] is None:
+        args_dict['sub_args'] = []
     sub_arguments = args_dict['sub_args'] + sub_arguments
     parsed_sub_arguments = []
     for sub_arg in sub_arguments:
@@ -92,7 +102,10 @@ def parse_arguments(sysargs : list) -> dict:
 
     ### location_key '[None]' or 'None' -> None
     if 'location_keys' in args_dict:
-        args_dict['location_keys'] = [ None if lk in ('[None]', 'None') else lk for lk in args_dict['location_keys'] ]
+        args_dict['location_keys'] = [
+            None if lk in ('[None]', 'None')
+            else lk for lk in args_dict['location_keys'] 
+        ]
 
     return parse_synonyms(args_dict)
 

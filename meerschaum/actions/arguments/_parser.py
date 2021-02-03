@@ -182,6 +182,13 @@ groups['misc'].add_argument(
     )
 )
 groups['misc'].add_argument(
+    '--config-dir', help=(
+        "Use an alternate location for the configuration directory (containing 'config.yaml'). " +
+        "The default location is '~/.config/meerschaum' on Linux / MacOS and " +
+        "'%%APPDATA%%\Meerschaum\\' on Windows."
+    )
+)
+groups['misc'].add_argument(
     '--gui', action='store_true', help="Open a DataFrame in an interactive pandasgui or matplotlib window."
 )
 groups['misc'].add_argument(
