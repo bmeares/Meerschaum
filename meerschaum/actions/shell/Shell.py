@@ -232,14 +232,17 @@ class Shell(cmd.Cmd):
         from meerschaum.utils.misc import remove_ansi
         from meerschaum.utils.formatting import CHARSET, ANSI, UNICODE, colored
         
-        self.intro = get_config('system', 'shell', CHARSET, 'intro', patch=patch)
-        self.intro += '\n' + ''.join(
-            [' '
-                for i in range(
-                    string_width(self.intro) - len('v' + version)
-                )
-            ]
-        ) + 'v' + version
+        if self.__dict__.get('intro', None) != '':
+            self.intro = get_config('system', 'shell', CHARSET, 'intro', patch=patch)
+            self.intro += '\n' + ''.join(
+                [' '
+                    for i in range(
+                        string_width(self.intro) - len('v' + version)
+                    )
+                ]
+            ) + 'v' + version
+        else:
+            self.intro = ""
         self._prompt = get_config('system', 'shell', CHARSET, 'prompt', patch=patch)
         self.prompt = self._prompt
         self.ruler = get_config('system', 'shell', CHARSET, 'ruler', patch=patch)
@@ -680,7 +683,7 @@ class Shell(cmd.Cmd):
 
         ### if sysargs are provided, skip printing the intro and execute instead
         if self._sysargs:
-            self.intro = None
+            self.intro = ""
             self.precmd(' '.join(self._sysargs))
 
     def postloop(self):

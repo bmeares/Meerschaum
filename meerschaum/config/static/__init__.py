@@ -25,6 +25,17 @@ def _static_config():
                     'connectors' : '/connectors',
                     'version' : '/version',
                 }
-            }
+            },
+            'config' : {
+                'default_filetype' : 'json',
+            },
+            'system' : {
+                'arguments' : {
+                    'sub_decorators' : (
+                        '[',
+                        ']'
+                    ),
+                },
+            },
         }
     return static_config

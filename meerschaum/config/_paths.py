@@ -38,20 +38,19 @@ if not _pyinstall:
 RESOURCES_PATH = CONFIG_ROOT_PATH
 VIRTENV_RESOURCES_PATH = Path(os.path.join(RESOURCES_PATH, 'venvs'))
 
-CONFIG_FILENAME = "config.yaml"
-CONFIG_PATH = Path(os.path.join(RESOURCES_PATH, CONFIG_FILENAME))
+CONFIG_DIR_PATH = Path(os.path.join(RESOURCES_PATH, 'config'))
+CONFIG_DIR_PATH.mkdir(parents=True, exist_ok=True)
+#  CONFIG_FILENAME = "config.yaml"
+#  CONFIG_PATH = Path(os.path.join(RESOURCES_PATH, CONFIG_FILENAME))
 
 #  CONNECTORS_FILENAME = ""
 #  CONNECTORS_PATH = Path(os.path.join(RESOURCES_PATH, CONNECTORS_FILENAME))
 
-DEFAULT_CONFIG_FILENAME = "default_config.yaml"
-DEFAULT_CONFIG_PATH = Path(os.path.join(CONFIG_ROOT_PATH, DEFAULT_CONFIG_FILENAME))
+DEFAULT_CONFIG_DIR_PATH = Path(os.path.join(RESOURCES_PATH, 'default_config'))
 
-PATCH_FILENAME = "patch.yaml"
-PATCH_PATH = Path(os.path.join(RESOURCES_PATH, PATCH_FILENAME))
+PATCH_DIR_PATH = Path(os.path.join(RESOURCES_PATH, 'patch_config'))
 
-PERMANENT_PATCH_FILENAME = "permanent_patch.yaml"
-PERMANENT_PATCH_PATH = Path(os.path.join(RESOURCES_PATH, PERMANENT_PATCH_FILENAME))
+PERMANENT_PATCH_DIR_PATH = Path(os.path.join(RESOURCES_PATH, 'permanent_patch_config'))
 
 GRAFANA_RESOURCES_PATH = Path(os.path.join(CONFIG_ROOT_PATH, 'stack', 'grafana', 'resources'))
 GRAFANA_DATASOURCE_PATH = Path(os.path.join(GRAFANA_RESOURCES_PATH, 'provisioning', 'datasources', 'datasource.yaml'))
@@ -95,7 +94,8 @@ if not _pyinstall:
     PLUGINS_INIT_PATH.parent.mkdir(parents=True, exist_ok=True)
     PLUGINS_INIT_PATH.touch()
 
-SQLITE_DB_PATH = Path(os.path.join(RESOURCES_PATH, 'mrsm_local.db'))
+SQLITE_RESOURCES_PATH = Path(os.path.join(RESOURCES_PATH, 'sqlite'))
+SQLITE_DB_PATH = Path(os.path.join(SQLITE_RESOURCES_PATH, 'mrsm_local.db'))
 
 
 ### NOTE: This must be the bottom of the module

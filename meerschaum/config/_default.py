@@ -192,9 +192,6 @@ default_system_config = {
         },
         'protocol'         : default_meerschaum_config['connectors']['api']['default']['protocol'],
     },
-    'arguments'            : {
-        'sub_decorators'   : ['[', ']'],
-    },
     'warnings'             : {
         'unicode'          : {
             'icon'         : '⚠',
