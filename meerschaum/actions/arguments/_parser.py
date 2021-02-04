@@ -65,6 +65,16 @@ def parse_help(sysargs : Union[List[str], Dict[str, Any]]) -> None:
         doc = "No help available for '" + f"{args['action'][0]}" + "'."
     return print(textwrap.dedent(doc))
 
+def get_arguments_triggers() -> Dict[str, Tuple[str]]:
+    """
+    Return a dictionary of arguments and their triggers.
+    """
+    triggers = {}
+    _actions = parser._actions
+    for _a in _actions:
+        triggers[_a.dest] = tuple(_a.option_strings)
+    return triggers
+
 parser = argparse.ArgumentParser(
     prog = 'mrsm',
     description = "Create and Build Pipes with Meerschaum",

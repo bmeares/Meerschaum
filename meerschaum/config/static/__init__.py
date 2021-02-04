@@ -28,6 +28,7 @@ def _static_config():
             },
             'config' : {
                 'default_filetype' : 'json',
+                'environment_key' : 'MEERSCHAUM_CONFIG',
             },
             'system' : {
                 'arguments' : {
@@ -36,6 +37,9 @@ def _static_config():
                         ']'
                     ),
                 },
+            },
+            'connectors' : {
+                'default_label' : 'main',
             },
         }
     return static_config

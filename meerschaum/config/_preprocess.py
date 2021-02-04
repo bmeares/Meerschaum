@@ -12,10 +12,13 @@ def preprocess_config(
         **kw
     ) -> dict:
     """
+    NOTE: This function is not depreciated. DO NOT USE! Refer to meerschaum.config._read_config instead.
+
     Apply preprocessing to the configuration dictionary
     config : the config dict
     """
-    from meerschaum.utils.misc import parse_config_substitution, search_and_substitute_config
+    #  from meerschaum.utils.misc import parse_config_substitution, search_and_substitute_config
+    from meerschaum.config._read_config import search_and_substitute_config
 
     ### replace Meerschaum substitution syntax with values from keys
     config = search_and_substitute_config(config)

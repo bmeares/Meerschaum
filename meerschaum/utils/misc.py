@@ -163,90 +163,12 @@ def parse_config_substitution(
     """
     Parse Meerschaum substitution syntax
     E.g. MRSM{value1:value2} => ['value1', 'value2']
-    NOTE: Not currently used. See `search_and_substitute_config` below
+    NOTE: Not currently used. See `search_and_substitute_config` in `meerschaum.config._read_yaml`.
     """
     if not value.beginswith(leading_key):
         return value
 
     return leading_key[len(leading_key):][len():-1].split(delimeter)
-
-def search_and_substitute_config(
-        config : dict,
-        leading_key : str = "MRSM",
-        delimiter : str = ":",
-        begin_key : str = "{",
-        end_key : str = "}"
-    ) -> dict:
-    """
-    Search the config for Meerschaum substitution syntax and substite with value of keys
-
-    Example:
-        MRSM{meerschaum:connectors:main:host} => cf['meerschaum']['connectors']['main']['host']
-    """
-    #  from meerschaum.utils.packages import attempt_import
-    import json
-    try:
-        pass
-        #  from meerschaum.utils.yaml import yaml
-        #  import yaml
-        #  ruamel_yaml = attempt_import()
-    except:
-        return config
-    needle = leading_key
-    #  haystack = yaml.dump(config)
-    haystack = json.dumps(config)
-    mod_haystack = list(str(haystack))
-    buff = str(needle)
-    max_index = len(haystack) - len(buff)
-
-    patterns = dict()
-
-    begin, end, floor = 0, 0, 0
-    while needle in haystack[floor:]:
-        ### extract the keys
-        hs = haystack[floor:]
-
-        ### the first character of the keys
-        ### MRSM{value1:value2}
-        ###      ^
-        begin = hs.find(needle) + len(needle) + len(begin_key)
-
-        ### number of characters to end of keys
-        ### (really it's the index of the beginning of the end_key relative to the beginning
-        ###     but the math works out)
-        ### MRSM{value1}
-        ###      ^     ^  => 6
-        length = hs[begin:].find(end_key)
-
-        ### index of the end_key (end of `length` characters)
-        end = begin + length
-
-        ### advance the floor to find the next leading key
-        floor += end + len(end_key)
-        keys = hs[begin:end].split(delimiter)
-
-        ### follow the pointers to the value
-        c = config
-        for k in keys:
-            try:
-                c = c[k]
-            except KeyError:
-                from meerschaum.utils.warnings import warn
-                warn(f"Invalid keys in config: {keys}")
-        value = c
-
-        ### pattern to search and replace
-        pattern = leading_key + begin_key + delimiter.join(keys) + end_key
-        ### store patterns and values
-        patterns[pattern] = value
-
-    ### replace the patterns with the values
-    for pattern, value in patterns.items():
-        haystack = haystack.replace(pattern, str(value))
-
-    ### parse back into dict
-    #  return yaml.load(haystack)
-    return json.loads(haystack)
 
 def edit_file(
         path : 'pathlib.Path',
@@ -285,9 +207,12 @@ def is_pipe_registered(
         dprint(f'{pipe}, {pipes}')
     return ck in pipes and mk in pipes[ck] and lk in pipes[ck][mk]
 
-def get_subactions(action : str, globs : dict = None) -> list:
+def _get_subaction_names(action : str, globs : dict = None) -> List[str]:
     """
-    Return a list of function pointers to all subactions for a given action
+    NOTE: Don't use this function. You should use `meerschaum.actions.get_subactions()` instead.
+    This only exists for internal use.
+
+    Return a list of function pointers to all subactions for a given action.
     """
     if globs is None:
         import importlib
@@ -295,17 +220,21 @@ def get_subactions(action : str, globs : dict = None) -> list:
         globs = vars(module)
     subactions = []
     for item in globs:
-        if f'_{action}' in item:
+        if f'_{action}' in item and 'complete' not in item.lstrip('_'):
             subactions.append(globs[item])
     return subactions
 
-def choices_docstring(action : str, globs : dict = None):
+def choices_docstring(action : str, globs : Optional[Dict[str, Any]] = None) -> str:
     options_str = f"\n    Options:\n        `{action} "
-    subactions = get_subactions(action, globs=globs)
+    subactions = _get_subaction_names(action, globs=globs)
     options_str += "["
     sa_names = []
     for sa in subactions:
-        sa_names.append(sa.__name__[len(f"_{action}") + 1:])
+        try:
+            sa_names.append(sa.__name__[len(f"_{action}") + 1:])
+        except Exception as e:
+            print(e)
+            return ""
     for sa_name in sorted(sa_names):
         options_str += f"{sa_name}, "
     options_str = options_str[:-2] + "]`"
@@ -847,6 +776,10 @@ def filter_keywords(
     """
     import inspect
     func_params = inspect.signature(func).parameters
+    ### If the function has a **kw method, skip filtering.
+    for param, _type in func_params.items():
+        if '**' in str(_type):
+            return kw
     func_kw = dict()
     for k, v in kw.items():
         if k in func_params:

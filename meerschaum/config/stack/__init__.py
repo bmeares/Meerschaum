@@ -242,14 +242,15 @@ from meerschaum.config.stack.grafana import default_grafana_config
 default_stack_config['grafana'] = default_grafana_config
 from meerschaum.config.stack.mosquitto import default_mosquitto_config
 default_stack_config['mosquitto'] = default_mosquitto_config
+default_stack_config['filetype'] = 'yaml'
 
 ### check if configs are in sync
-from meerschaum.config._paths import CONFIG_PATH, STACK_ENV_PATH, STACK_COMPOSE_PATH
+from meerschaum.config._paths import CONFIG_DIR_PATH, STACK_ENV_PATH, STACK_COMPOSE_PATH
 from meerschaum.config._paths import STACK_COMPOSE_FILENAME, STACK_ENV_FILENAME
 from meerschaum.config._paths import GRAFANA_DATASOURCE_PATH, GRAFANA_DASHBOARD_PATH
 from meerschaum.config._paths import MOSQUITTO_CONFIG_PATH
-from meerschaum.config._sync import sync_configs
-sync_configs(CONFIG_PATH, ['stack', STACK_COMPOSE_FILENAME], STACK_COMPOSE_PATH)
+from meerschaum.config._sync import sync_yaml_configs
+sync_yaml_configs(os.path.join(CONFIG_DIR_PATH, 'stack.yaml'), ['stack', STACK_COMPOSE_FILENAME], STACK_COMPOSE_PATH)
 
 def get_necessary_files():
     from meerschaum.config._paths import (
@@ -273,11 +274,11 @@ def get_necessary_files():
 def write_stack(
         debug : bool = False 
     ):
-    from meerschaum.config._edit import general_write_config
+    from meerschaum.config._edit import general_write_yaml_config
     """
     Write Docker Compose configuration files
     """
-    return general_write_config(get_necessary_files(), debug=debug)
+    return general_write_yaml_config(get_necessary_files(), debug=debug)
    
 def edit_stack(
         action : list = [''],
