@@ -43,13 +43,13 @@ class yaml:
         from meerschaum.utils.misc import filter_keywords
         return _yaml.load(*args, **filter_keywords(_yaml.load, **kw))
 
-    def dump(*args, stream=None, **kw):
+    def dump(data, stream=None, **kw):
         from meerschaum.utils.misc import filter_keywords
         get_string = False
         if stream is None and _import_name == 'ruamel.yaml':
             stream = _lib.compat.StringIO()
             get_string = True
-        result = _yaml.dump(*args, stream=stream, **filter_keywords(_yaml.dump, **kw))
+        result = _yaml.dump(data, stream, **filter_keywords(_yaml.dump, **kw))
         if get_string:
             return stream.getvalue()
         return result

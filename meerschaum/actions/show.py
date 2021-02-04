@@ -38,6 +38,26 @@ def show(
     }
     return choose_subaction(action, show_options, **kw)
 
+def _complete_show(
+        action : List[str] = [],
+        **kw : Any
+    ) -> List[str]:
+    """
+    Override the default Meerschaum `complete_` function.
+    """
+
+    options = {
+        'connectors': _complete_show_connectors,
+    }
+
+    if len(action) > 0 and action[0] in options:
+        sub = action[0]
+        del action[0]
+        return options[sub](action=action, **kw)
+
+    from meerschaum.actions.shell import default_action_completer
+    return default_action_completer(action=(['show'] + action), **kw)
+
 def _show_actions(**kw : Any) -> SuccessTuple:
     """
     Show available actions
@@ -68,14 +88,14 @@ def _show_config(
     """
     from meerschaum.utils.formatting import pprint
     from meerschaum.config import get_config
-    from meerschaum.config._paths import CONFIG_PATH
+    from meerschaum.config._paths import CONFIG_DIR_PATH
     from meerschaum.utils.debug import dprint
-    if debug: dprint(f"Configuration loaded from {CONFIG_PATH}")
+    if debug: dprint(f"Configuration loaded from {CONFIG_DIR_PATH}")
 
-    keys = list(action)
-    if keys == ['']: keys = []
-
-    pprint(get_config(*keys))
+    valid, config = get_config(*action, as_tuple=True, warn=False)
+    if not valid:
+        return False, f"Invalid configuration keys '{action}'."
+    pprint(config)
     return (True, "Success")
 
 def _show_modules(**kw : Any) -> SuccessTuple:
@@ -157,12 +177,17 @@ def _show_connectors(
 
     from meerschaum.connectors.parse import parse_instance_keys
     if action != []:
-        conn = parse_instance_keys(action[0], debug=debug)
-        if conn:
-            print(make_header("\n" + f"Attributes for connector '{conn}':"))
-            pprint(conn.__dict__)
+        attr, keys = parse_instance_keys(action[0], construct=False, as_tuple=True, debug=debug)
+        if attr:
+            print(make_header("\n" + f"Attributes for connector '{keys}':"))
+            pprint(attr)
 
     return True, "Success"
+
+def _complete_show_connectors(action : List[str] = [], **kw : Any) -> List[str]:
+    from meerschaum.utils.misc import get_connector_labels
+    _text = action[0] if len(action) > 0 else ""
+    return get_connector_labels(search_term=_text, ignore_exact_match=True)
 
 def _show_arguments(
         **kw : Any

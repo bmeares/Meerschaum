@@ -95,6 +95,7 @@ def get_connector(
     """
     from meerschaum.connectors.parse import parse_instance_keys
     from meerschaum.config import get_config
+    from meerschaum.config.static import _static_config
     if type is None and label is None:
         default_instance_keys = get_config('meerschaum', 'instance', patch=True)
         ### recursive call to get_connector
@@ -102,8 +103,7 @@ def get_connector(
 
     ### NOTE: the default instance connector may not be main.
     ### Only fall back to 'main' if the type is provided by the label is omitted.
-    if label is None:
-        label = 'main'
+    label = label if label is not None else _static_config()['connectors']['default_label']
 
     global types, connectors
 

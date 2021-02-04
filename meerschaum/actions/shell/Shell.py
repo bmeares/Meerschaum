@@ -142,7 +142,9 @@ def default_action_completer(
 def _check_complete_keys(
         line : str
     ) -> Optional[List[str]]:
+    from meerschaum.actions.arguments._parser import parser, get_arguments_triggers
     from meerschaum.actions.arguments._parse_arguments import parse_line
+
     ### TODO Add all triggers
     trigger_args = {
         '-c' : 'connector_keys',
@@ -154,15 +156,49 @@ def _check_complete_keys(
         '--mrsm-instance' : 'mrsm_instance',
     }
 
+
+    ### TODO Find out arg possibilities
+    possibilities = []
+    #  last_word = line.split(' ')[-1]
+    last_word = line.rstrip(' ').split(' ')[-1]
+
+    if last_word.startswith('-'):
+        for _arg, _triggers in get_arguments_triggers().items():
+            for _trigger in _triggers:
+                if _trigger.startswith(last_word):
+                    #  and _trigger != last_word
+                    if _trigger != last_word or not line.endswith(' '):
+                        possibilities.append(_trigger)
+        if not line.endswith(' '):
+            return possibilities
+
+    #  print()
+    #  print(last_word)
+    #  print(len(line.split(' ')[-1]))
+    #  print()
+
+    if last_word.startswith('-') and not last_word.endswith('-'):
+        if line.endswith(' ') and last_word in trigger_args:
+            is_trigger = True
+        elif line.endswith(' '):
+            ### return empty list so we don't try to parse an incomplete line.
+            #  print('ABORT')
+            return []
+
     from meerschaum.utils.misc import get_connector_labels
+
+    if last_word.rstrip(' ') in trigger_args:
+        return get_connector_labels()
+
     for trigger, var in trigger_args.items():
         if trigger in line:
             ### check if any text has been entered for the key
             if line.rstrip(' ').endswith(trigger):
                 return get_connector_labels()
-            args = parse_line(line.rstrip(' '))
-            search_term = args[var] if var != 'connector_keys' else args[var][0]
-            return get_connector_labels(search_term=search_term)
+
+            #  args = parse_line(line.rstrip(' '))
+            #  search_term = args[var] if var != 'connector_keys' else args[var][0]
+            return get_connector_labels(search_term=last_word.rstrip(' '))
 
     return None
 

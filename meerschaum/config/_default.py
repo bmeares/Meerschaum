@@ -302,8 +302,6 @@ default_experimental_config = {
     'venv' : True,
 }
 
-from meerschaum.config._paths import RESOURCES_PATH, DEFAULT_CONFIG_PATH
-
 ### build default config dictionary
 default_config = dict()
 default_config['meerschaum'] = default_meerschaum_config

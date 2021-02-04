@@ -14,7 +14,6 @@ if PATCH_DIR_PATH.exists():
     if _yaml is not None:
         patch_config = read_config(directory=PATCH_DIR_PATH)
 
-#  from meerschaum.utils.misc import search_and_substitute_config
 permanent_patch_config = None
 if PERMANENT_PATCH_DIR_PATH.exists():
     if _yaml is not None:

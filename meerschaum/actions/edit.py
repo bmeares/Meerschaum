@@ -26,13 +26,64 @@ def edit(
     }
     return choose_subaction(action, options, **kw)
 
+def _complete_edit(
+        action : List[str] = [],
+        **kw : Any
+    ) -> List[str]:
+    """
+    Override the default Meerschaum `complete_` function.
+    """
+    options = {
+        'config' : _complete_edit_config,
+    }
+
+    if len(action) > 0 and action[0] in options:
+        sub = action[0]
+        del action[0]
+        return options[sub](action=action, **kw)
+
+    from meerschaum.actions.shell import default_action_completer
+    return default_action_completer(action=(['edit'] + action), **kw)
+
 def _edit_stack(*args, **kw) -> SuccessTuple:
     from meerschaum.config.stack import edit_stack
     return edit_stack(*args, **kw)
 
-def _edit_config(*args, **kw) -> SuccessTuple:
+def _edit_config(action : List[str] = [], **kw) -> SuccessTuple:
+    """
+    Edit Meerschaum configuration files.
+
+    Specify a specific configuration key to edit.
+    Defaults to editing `meerschaum` configuration (connectors, instance, etc.).
+
+    Examples:
+        ```
+        ### Edit the main 'meerschaum' configuration.
+        edit config
+
+        ### Edit 'system' configuration.
+        edit config system
+
+        ### Create a new configuration file called 'myconfig'.
+        edit config myconfig
+
+        ```
+    """
     from meerschaum.config._edit import edit_config
-    return edit_config(*args, **kw)
+    if len(action) == 0:
+        action.append('meerschaum')
+    return edit_config(keys=action, **kw)
+
+def _complete_edit_config(action : List[str] = [], **kw : Any):
+    from meerschaum.config._read_config import get_possible_keys
+    keys = get_possible_keys()
+    if len(action) == 0:
+        return keys
+    possibilities = []
+    for key in keys:
+        if key.startswith(action[0]) and action[0] != key:
+            possibilities.append(key)
+    return possibilities
 
 def _edit_grafana(*args, **kw) -> SuccessTuple:
     from meerschaum.config.stack.grafana import edit_grafana

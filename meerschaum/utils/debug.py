@@ -22,7 +22,7 @@ def dprint(
             from meerschaum.utils.formatting import CHARSET, ANSI, colored
         except ImportError:
             CHARSET, ANSI, colored = 'ascii', False, None
-        from meerschaum.config._paths import CONFIG_PATH, PERMANENT_PATCH_PATH
+        from meerschaum.config._paths import CONFIG_DIR_PATH, PERMANENT_PATCH_DIR_PATH
         from meerschaum.config import _config; cf = _config()
         _color = color
     else:
@@ -44,8 +44,8 @@ def dprint(
         try:
             debug_leader = cf['system']['debug'][CHARSET]['icon'] if cf is not None else ''
         except KeyError:
-            print("Failed to load config. Please delete the following files and restart Meerschaum:")
-            for p in [CONFIG_PATH, PERMANENT_PATCH_PATH]:
+            print("Failed to load config. Please delete the following directories and restart Meerschaum:")
+            for p in [CONFIG_DIR_PATH, PERMANENT_PATCH_DIR_PATH]:
                 print('  - ' + str(p))
             debug_leader = ''
             ### crash if we can't load the leader

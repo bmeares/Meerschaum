@@ -7,13 +7,28 @@ Utility functions for parsing connector keys.
 """
 
 from __future__ import annotations
-from meerschaum.utils.typing import Mapping, Any, SuccessTuple, Union, Optional
+from meerschaum.utils.typing import Mapping, Any, SuccessTuple, Union, Optional, Dict
 
 def parse_connector_keys(
         keys : str,
         construct : bool = True,
+        as_tuple : bool = False,
         **kw : Any
-    ) -> Union[meerschaum.connectors.Connector, Mapping[str, Any], None]:
+    ) -> (
+        Union[
+            meerschaum.connectors.Connector,
+            Dict[str, Any],
+            Tuple[
+                Union[
+                    meerschaum.connectors.Connector,
+                    Dict[str, Any],
+                    None
+                ],
+                str
+            ],
+            None
+        ]
+    ):
     """
     Convenience function for parsing connector keys and returning Connector objects.
 
@@ -24,17 +39,21 @@ def parse_connector_keys(
     :param construct:
         If True, return a Connector. Otherwise return the configuration dictionary for a Connector.
         **NOTE:** This may include passwords, so be careful.
+
+    :param as_tuple:
+        If True, return a tuple of (conn, keys). `conn` may be a dict or connector.
     """
     from meerschaum.connectors import get_connector
     from meerschaum.config import get_config
+    from meerschaum.config.static import _static_config
     from meerschaum.utils.warnings import error
 
     ### `get_connector()` handles the logic for falling back to 'main',
     ### so don't make any decisions here.
     vals = str(keys).split(':')
-    _get_connector_kw = {'type' : vals[0]}
-    if len(vals) > 1:
-        _get_connector_kw['label'] = vals[1]
+    _type = vals[0]
+    _label = vals[1] if len(vals) > 1 else _static_config()['connectors']['default_label']
+    _get_connector_kw = {'type' : _type, 'label' : _label}
     _get_connector_kw.update(kw)
 
     if construct:
@@ -46,16 +65,23 @@ def parse_connector_keys(
         ### invalid type
         if vals[0] not in connectors_config:
             return None
-        type_config = get_config('meerschaum', 'connectors', vals[0])
+        type_config = get_config('meerschaum', 'connectors', _type)
         default_config = type_config.get('default', None)
-        conn = type_config.get(vals[1], None)
-        if default_config is not None:
+        conn = type_config.get(_label, None)
+        if default_config is not None and conn is not None:
             default_config.update(conn)
             conn = default_config
 
+    if as_tuple:
+        return conn, _type + ':' + _label
     return conn
 
-def parse_instance_keys(keys : str, construct : bool = True, **kw):
+def parse_instance_keys(
+        keys : str,
+        construct : bool = True,
+        as_tuple : bool = False,
+        **kw
+    ):
     """
     Parse the Meerschaum instance value into a Connector object.
     """
@@ -68,7 +94,7 @@ def parse_instance_keys(keys : str, construct : bool = True, **kw):
         keys = get_config('meerschaum', 'instance')
     keys = str(keys)
     
-    return parse_connector_keys(keys, construct=construct, **kw)
+    return parse_connector_keys(keys, construct=construct, as_tuple=as_tuple, **kw)
 
 def parse_repo_keys(keys : str = None, **kw):
     """

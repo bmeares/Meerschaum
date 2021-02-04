@@ -174,9 +174,9 @@ def __getattr__(name : str) -> str:
     if name in _attrs:
         if _attrs[name] is not None:
             return _attrs[name]
-        from meerschaum.config import _config; cf = _config()
-        if name.lower() in cf['system']['formatting']:
-            _attrs[name] = cf['system']['formatting'][name.lower()]
+        from meerschaum.config import get_config
+        if name.lower() in get_config('system', 'formatting'):
+            _attrs[name] = get_config('system', 'formatting', name.lower())
         elif name == 'CHARSET':
             _attrs[name] = 'unicode' if __getattr__('UNICODE') else 'ascii'
         return _attrs[name]

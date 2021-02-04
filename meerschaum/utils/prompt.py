@@ -159,7 +159,8 @@ def choose(
         default : Optional[str] = None,
         numeric : bool = True,
         icon : bool = True,
-        warn : bool = True
+        warn : bool = True,
+        **kw
     ) -> str:
     from meerschaum.utils.warnings import warn as _warn
 
