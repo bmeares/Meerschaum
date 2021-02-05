@@ -7,7 +7,7 @@ Interact with Pipes metadata via SQLConnector.
 """
 from __future__ import annotations
 from meerschaum.utils.typing import (
-    Union, Any, Sequence, SuccessTuple, Mapping, Tuple
+    Union, Any, Sequence, SuccessTuple, Mapping, Tuple, Dict, Optional,
 )
 
 def register_pipe(
@@ -329,6 +329,7 @@ def get_pipe_data(
         pipe : Optional[meerschaum.Pipe] = None,
         begin : Union[datetime.datetime, str, None] = None,
         end : Union[datetime.datetime, str, None] = None,
+        params : Optional[Dict[str, Any]] = None,
         debug : bool = False
     ) -> Optional[pandas.DataFrame]:
     """
@@ -365,6 +366,10 @@ def get_pipe_data(
             begin = end
         )
         where += f"{dt} <= {end_da}"
+
+    if params is not None:
+        from meerschaum.utils.misc import build_where
+        where += build_where(params).replace('WHERE', ('AND' if (begin is not None or end is not None) else ""))
 
     if len(where) > 0:
         query += "\nWHERE " + where
@@ -641,11 +646,13 @@ def get_pipe_rowcount(
         begin : 'datetime.datetime' = None,
         end : 'datetime.datetime' = None,
         remote : bool = False,
+        params : Optional[Dict[str, Any]] = None,
         debug : bool = False
     ) -> int:
     """
     Return the number of rows between datetimes for a Pipe's instance cache or remote source
     """
+    from meerschaum.connectors.sql._fetch import dateadd_str
     from meerschaum.utils.warnings import error, warn
     if remote:
         msg = f"'fetch:definition' must be an attribute of pipe '{pipe}' to get a remote rowcount"
@@ -656,7 +663,7 @@ def get_pipe_rowcount(
             error(msg)
             return None
     if 'datetime' not in pipe.columns: error(f"Pipe '{pipe}' must have a 'datetime' column declared (columns:datetime)")
-    src = str(pipe) if not remote else pipe.parameters['fetch']['definition']
+    src = f"SELECT * FROM {pipe}" if not remote else pipe.parameters['fetch']['definition']
     query = f"""
     WITH src AS ({src})
     SELECT COUNT({pipe.columns['datetime']})
@@ -672,7 +679,15 @@ def get_pipe_rowcount(
         query += f"""
         {pipe.columns['datetime']} <= {dateadd_str(flavor=self.flavor, datepart='minute', number=(0), begin=end)}
         """
-    return self.value(query, debug=debug)
+    if params is not None:
+        from meerschaum.utils.misc import build_where
+        query += build_where(params).replace('WHERE', ('AND' if (begin is not None or end is not None) else "WHERE"))
+        
+    result = self.value(query, debug=debug)
+    try:
+        return int(result)
+    except:
+        return None
 
 def drop_pipe(
         self,

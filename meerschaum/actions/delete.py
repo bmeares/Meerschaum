@@ -179,7 +179,7 @@ def _delete_users(
     from meerschaum.utils.prompt import yes_no, prompt
     from meerschaum.utils.debug import dprint
     from meerschaum.utils.warnings import warn, error, info
-    from meerschaum._internal import User
+    from meerschaum._internal.User import User
     from meerschaum.connectors.api import APIConnector
     from meerschaum.utils.formatting import print_tuple
     repo_connector = parse_repo_keys(repository)

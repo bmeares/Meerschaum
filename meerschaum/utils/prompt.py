@@ -14,6 +14,7 @@ def prompt(
         icon : bool = True,
         default : Union[str, Tuple[str, str], None] = None,
         detect_password : bool = True,
+        is_password : bool = False,
         **kw : Any
     ) -> str:
     """
@@ -52,7 +53,7 @@ def prompt(
         #  else: question += ": "
 
     ### detect password
-    if detect_password and 'password' in question.lower():
+    if (detect_password and 'password' in question.lower()) or is_password:
         kw['is_password'] = True
   
     ### Add the icon and only color the first line.
@@ -210,7 +211,11 @@ def get_password(
     """
     from meerschaum.utils.warnings import warn
     while True:
-        password = prompt(f"Password" + (f" for user '{username}': " if username is not None else ": "), **kw)
+        password = prompt(
+            f"Password" + (f" for user '{username}': " if username is not None else ": "),
+            is_password = True,
+            **kw
+        )
         if minimum_length is not None and len(password) < minimum_length:
             warn(
                 "Password is too short. " +
@@ -220,6 +225,7 @@ def get_password(
             continue
         _password = prompt(
             f"Confirm password" + (f" for user '{username}': ") if username is not None else ": ",
+            is_password = True,
             **kw
         )
         if password != _password:

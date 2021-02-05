@@ -7,6 +7,7 @@ Register Pipes via the Meerschaum API
 """
 
 from __future__ import annotations
+from meerschaum.utils.typing import Any, Optional, Dict
 
 from meerschaum.api import (
     fastapi,
@@ -231,6 +232,7 @@ def get_pipe_data(
         location_key : str,
         begin : datetime.datetime = None,
         end : datetime.datetime = None,
+        params : Optional[Dict[str, Any]] = None,
         orient : str = 'records',
         curr_user : 'meerschaum._internal.User.User' = fastapi.Depends(manager),
     ) -> str:
@@ -248,6 +250,7 @@ def get_pipe_data(
         content = p.get_data(
             begin = begin,
             end = end,
+            params = params, 
             debug = debug
         ).to_json(
             date_format = 'iso',
@@ -353,10 +356,17 @@ def get_rowcount(
         connector_keys : str,
         metric_key : str,
         location_key : str,
+        begin : Optional['datetime.datetime'] = None,
+        end : Optional['datetime.datetime'] = None,
+        params : Optional[Dict[str, Any]] = None,
         curr_user : 'meerschaum._internal.User.User' = fastapi.Depends(manager),
     ) -> int:
     """
     Return a Pipe's row count
     """
-    return get_pipe(connector_keys, metric_key, location_key).get_rowcount()
+    return get_pipe(connector_keys, metric_key, location_key).get_rowcount(
+        begin = begin,
+        end = end,
+        params = params,
+    )
 
