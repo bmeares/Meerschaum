@@ -99,15 +99,14 @@ def _register_plugins(
     from meerschaum.config import get_config
     from meerschaum.utils.warnings import warn, error, info
     from meerschaum._internal.Plugin import Plugin
-    from meerschaum.connectors.api import APIConnector
     from meerschaum import get_connector
     from meerschaum.utils.formatting import print_tuple
 
     reload_plugins(debug=debug)
 
     repo_connector = parse_repo_keys(repository)
-    if not isinstance(repo_connector, APIConnector):
-        return False, f"Can only upload plugins to the Meerschaum API. Connector '{repo_connector}' is of type '{repo_connector.type}'"
+    if repo_connector.__dict__.get('type', None) != 'api':
+        return False, f"Can only upload plugins to the Meerschaum API. Connector '{repo_connector}' is of type '{repo_connector.get('type', type(repo_connector))}'."
 
     if len(action) == 0 or action == ['']: return False, "No plugins to register"
 
@@ -163,7 +162,6 @@ def _register_users(
     from meerschaum.utils.debug import dprint
     from meerschaum.utils.warnings import warn, error, info
     from meerschaum._internal.User import User
-    from meerschaum.connectors.api import APIConnector
     from meerschaum.utils.formatting import print_tuple
     from meerschaum.utils.prompt import prompt, get_password, get_email
     repo_connector = parse_repo_keys(repository)
