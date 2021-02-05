@@ -81,14 +81,15 @@ class Plugin:
             '.git',
         }
 
-        if not is_dir: tarf.add(f"{self.name}.py")
+        if not is_dir:
+            tarf.add(f"{self.name}.py")
         else:
             for root, dirs, files in os.walk(self.name):
                 for f in files:
                     good_file = True
                     fp = os.path.join(root, f)
                     for pattern in patterns_to_ignore:
-                        if pattern in str(fp):
+                        if pattern in str(fp) or f.startswith('.'):
                             good_file = False
                             break
                     if good_file:
