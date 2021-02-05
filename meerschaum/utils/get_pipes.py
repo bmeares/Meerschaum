@@ -106,7 +106,7 @@ def get_pipes(
     else: ### NOTE: mrsm_instance MUST be a SQL or API connector for this to work
         from meerschaum.connectors import Connector
         valid_connector = False
-        if issubclass(type(mrsm_instance, Connector)):
+        if issubclass(type(mrsm_instance), Connector):
             if mrsm_instance.type in ('api', 'sql'):
                 valid_connector = True
         if not valid_connector:

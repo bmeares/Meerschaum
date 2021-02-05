@@ -178,6 +178,7 @@ def get_pipe_data(
         pipe : meerschaum.Pipe,
         begin : Optional[datetime.datetime] = None,
         end : Optional[datetime.datetime] = None,
+        params : Optional[Dict[str, Any]] = None,
         debug : bool = False
     ) -> pandas.DataFrame:
     """
@@ -186,7 +187,7 @@ def get_pipe_data(
     from meerschaum.utils.warnings import warn
     r_url = pipe_r_url(pipe)
     try:
-        response = self.get(r_url + "/data", params={'begin': begin, 'end': end}, debug=debug)
+        response = self.get(r_url + "/data", json=params, params={'begin': begin, 'end': end}, debug=debug)
     except Exception as e:
         warn(str(e))
         return None
@@ -327,9 +328,28 @@ def get_pipe_rowcount(
         pipe : 'meerschaum.Pipe',
         begin : 'datetime.datetime' = None,
         end : 'datetime.datetime' = None,
+        params : Optional[Dict[str, Any]] = None,
+        remote : bool = False,
         debug : bool = False,
-    ) -> int:
-    pass
+    ) -> Optional[int]:
+    """
+    Get a pipe's row couunt from the API.
+    """
+    import json
+    r_url = pipe_r_url(pipe)
+    response = self.get(
+        r_url + "/rowcount",
+        json = params,
+        params = {
+            'begin' : begin,
+            'end' : end,
+            'remote' : remote,
+        }
+    )
+    try:
+        return int(json.loads(response.text))
+    except:
+        return None
 
 def drop_pipe(
         self,

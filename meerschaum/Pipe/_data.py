@@ -7,13 +7,14 @@ Functions for getting Pipe data
 """
 
 from __future__ import annotations
-from meerschaum.utils.typing import Optional
+from meerschaum.utils.typing import Optional, Dict, Any
 
 def get_data(
         self,
         begin : Optional[datetime.datetime] = None,
         end : Optional[datetime.datetime] = None,
         refresh : bool = False,
+        params : Optional[Dict[str, Any]] = None,
         debug : bool = False
     ) -> Optional[pandas.DataFrame]:
     """
@@ -24,6 +25,7 @@ def get_data(
             pipe = self,
             begin = begin,
             end = end,
+            params = params,
             debug = debug
         )
     ### TODO caching / sync logic
@@ -77,6 +79,7 @@ def get_rowcount(
         begin : Optional['datetime.datetime'] = None,
         end : Optional['datetime.datetime'] = None,
         remote : bool = False,
+        params : Optional[Dict[str, Any]] = None,
         debug : bool = False
     ) -> Optional[int]:
     """
@@ -96,4 +99,4 @@ def get_rowcount(
     """
     connector = self.instance_connector
     if remote: connector = self.connector
-    return connector.get_pipe_rowcount(begin=begin, end=end, remote=remote, debug=debug)
+    return connector.get_pipe_rowcount(self, begin=begin, end=end, remote=remote, params=params, debug=debug)
