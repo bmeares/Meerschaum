@@ -293,7 +293,7 @@ def _show_plugins(
     if action == [''] or len(action) == 0:
         _to_print = get_plugins_names()
         header = "Installed plugins:"
-        info("To see all installable plugins, run `show plugins all`")
+        info(f"To see all installable plugins from repository '{repo_connector}', run `show plugins all`")
         info("To see plugins created by a certain user, run `show plugins [username]`")
     elif action[0] in ('all'):
         _to_print = repo_connector.get_plugins(debug=debug)
@@ -304,9 +304,7 @@ def _show_plugins(
         _to_print = repo_connector.get_plugins(user_id=user_id, debug=debug)
         header = f"Plugins from user '{username}' at Meerschaum repository '{repo_connector}':"
 
-    print()
     print_options(_to_print, header=header, debug=debug, **kw)
-    print()
 
     return True, "Success"
 

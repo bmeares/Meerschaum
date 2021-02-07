@@ -66,6 +66,7 @@ packages = {
     'dev-tools' : {
         'tuna'     : 'tuna',
         'snakeviz' : 'snakeviz',
+        'mypy' : 'mypy',
     },
     'docs' : {
         'mkdocs'                      : 'mkdocs',
@@ -92,7 +93,6 @@ packages['api'] = {
     'passlib'       : 'passlib',
     'fastapi_login' : 'fastapi-login',
     'multipart'     : 'python-multipart',
-    'django'        : 'Django',
 }
 packages['api'].update(packages['sql'])
 

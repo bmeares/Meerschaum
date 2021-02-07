@@ -192,9 +192,9 @@ groups['misc'].add_argument(
     )
 )
 groups['misc'].add_argument(
-    '--config-dir', help=(
-        "Use an alternate location for the configuration directory (containing 'config.yaml'). " +
-        "The default location is '~/.config/meerschaum' on Linux / MacOS and " +
+    '--root-dir', help=(
+        "Use an alternate location for the Meerschaum directory. " +
+        "The default location is '~/.config/meerschaum/' on Linux / MacOS and " +
         "'%%APPDATA%%\Meerschaum\\' on Windows."
     )
 )
