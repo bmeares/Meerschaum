@@ -15,7 +15,8 @@ def _entry(sysargs=[]):
     'show' -> []
     """
     from meerschaum.actions.arguments import parse_arguments
-    from meerschaum.actions import actions, get_shell
+    from meerschaum.actions import actions, original_actions, get_shell
+    from meerschaum.utils.packages import activate_venv, deactivate_venv
     import sys
     if not isinstance(sysargs, list):
         import shlex
@@ -30,11 +31,16 @@ def _entry(sysargs=[]):
         main_action = 'bash'
         args['action'].insert(0, main_action)
 
+    ### Check if the action is a plugin, and if so, activate virtual environment.
+    plugin_name = (
+        actions[main_action].__module__.split('.')[-1] if actions[main_action].__module__.startswith('plugins.')
+        else None
+    )
+
     del args['action'][0]
 
-    ### monkey patch socket if async is specified
-    #  if 'unblock' in args:
-        #  from meerschaum.utils.misc import enforce_gevent_monkey_patch
-        #  enforce_gevent_monkey_patch()
+    activate_venv(venv=plugin_name, debug=True)
+    result = actions[main_action](**args, sysargs=sysargs)
+    deactivate_venv(venv=plugin_name, debug=True)
 
-    return actions[main_action](**args, sysargs=sysargs)
+    return result

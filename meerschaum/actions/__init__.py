@@ -56,6 +56,7 @@ for module in modules:
         )
     )
 
+original_actions = actions.copy()
 from meerschaum.actions._entry import _entry as entry
 def get_shell(
         sysargs : List[str] = [],

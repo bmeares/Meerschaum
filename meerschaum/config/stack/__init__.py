@@ -13,10 +13,9 @@ from meerschaum.config._paths import (
     GRAFANA_DASHBOARD_PATH,
     #  GRAFANA_INI_PATH,
     MOSQUITTO_CONFIG_PATH,
-    CONFIG_ROOT_PATH,
-    SPLITGRAPH_CONFIG_PATH,
+    ROOT_DIR_PATH,
 )
-from meerschaum.config._paths import STACK_COMPOSE_PATH, STACK_ENV_PATH, STACK_COMPOSE_FILENAME
+from meerschaum.config._paths import STACK_COMPOSE_PATH, STACK_ENV_PATH
 
 #  db_port = cf['meerschaum']['connectors']['sql']['main']['port']
 db_port = "MRSM{meerschaum:connectors:sql:main:port}"
@@ -138,7 +137,7 @@ default_docker_compose_config = {
                 'db',
             ],
             'volumes' : [
-                str(CONFIG_ROOT_PATH) + ':' + volumes['meerschaum_api_config'],
+                str(ROOT_DIR_PATH) + ':' + volumes['meerschaum_api_config'],
             ],
         },
         'grafana' : {
@@ -236,7 +235,8 @@ for key in volumes:
 default_stack_config = dict()
 ### compose project name (prepends to all services)
 default_stack_config['project_name'] = 'mrsm'
-default_stack_config[STACK_COMPOSE_FILENAME] = default_docker_compose_config
+compose_filename = os.path.split(STACK_COMPOSE_PATH)[1]
+default_stack_config[compose_filename] = default_docker_compose_config
 #  default_stack_config['.env'] = env_text
 from meerschaum.config.stack.grafana import default_grafana_config
 default_stack_config['grafana'] = default_grafana_config

@@ -82,6 +82,7 @@ def deactivate_venv(
     Remove a virtual environment from sys.path (if it's been activated)
     """
     global active_venvs
+    if venv is None: return True
     if debug:
         from meerschaum.utils.debug import dprint
         dprint(f"Deactivating virtual environment '{venv}'...", color=color)
@@ -113,8 +114,9 @@ def activate_venv(
     """
     global active_venvs
     if venv in active_venvs: return True
+    if venv is None: return True
     if debug: from meerschaum.utils.debug import dprint
-    import sys
+    import sys, os
     from meerschaum.config._paths import VIRTENV_RESOURCES_PATH
     virtualenv = attempt_import(
         'virtualenv',
@@ -151,7 +153,6 @@ def activate_venv(
         sys.path.insert(0, str(target))
     if debug: dprint(f'sys.path: {sys.path}', color=color)
     return True
-
 
 def venv_exec(code: str, venv: str = 'mrsm', debug: bool = False) -> bool:
     """
@@ -553,17 +554,14 @@ def get_modules_from_package(
     names = True            : (__all__, modules)
     """
     from os.path import dirname, join, isfile, isdir, basename
-    import glob, importlib
+    import glob
 
-    if recursive:
-        pattern = '*'
-    else:
-        pattern = '*.py'
+    pattern = '*' if recursive else '*.py'
     module_names = glob.glob(join(dirname(package.__file__), pattern), recursive=recursive)
     _all = [
         basename(f)[:-3] if isfile(f) else basename(f)
         for f in module_names
-        if (isfile(f) or isdir(f))
+        if ((isfile(f) and f.endswith('.py')) or isdir(f))
            and not f.endswith('__init__.py')
            and not f.endswith('__pycache__')
     ]

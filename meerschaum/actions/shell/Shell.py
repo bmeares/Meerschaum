@@ -402,6 +402,16 @@ class Shell(cmd.Cmd):
             readline.set_history_length(get_config('system', 'shell', 'max_history', patch=patch))
             readline.write_history_file(SHELL_HISTORY_PATH)
 
+        ### TODO Migrate to using entry for everything instead of replicating entry inside precmd.
+        #  from meerschaum.actions._entry import entry
+        #  from meerschaum.actions.arguments._parser import get_arguments_triggers
+        #  import shlex
+        #  _sysargs = shlex.split(line)
+        #  _avail_args = get_arguments_triggers()
+        #  for a, _triggers in _avail_args.items():
+            #  if a == 'help'
+
+
         from meerschaum.actions.arguments import parse_line
         args = parse_line(line)
         if args['help']:
@@ -445,16 +455,23 @@ class Shell(cmd.Cmd):
         ### delete the first action
         ### e.g. 'show actions' -> ['actions']
         del args['action'][0]
-        #  if len(args['action']) == 0: args['action'] = ['']
 
         positional_only = (action not in self._actions)
         if positional_only:
             return original_line
 
+        from meerschaum.utils.packages import activate_venv, deactivate_venv
+        plugin_name = (
+            self._actions[action].__module__.split('.')[-1] if self._actions[action].__module__.startswith('plugins.')
+            else None
+        )
+
         ### execute the meerschaum action
         ### and print the response message in case of failure
         from meerschaum.utils.formatting import print_tuple
+        activate_venv(venv=plugin_name, debug=self.debug)
         response = func(**args)
+        deactivate_venv(venv=plugin_name, debug=self.debug)
         if isinstance(response, tuple):
             if not response[0] or self.debug:
                 print()

@@ -17,21 +17,19 @@ def main():
         return parse_help(sysargs)
 
     ### Check for a custom configuration directory.
-    if '--config-dir' in sysargs:
+    if '--root-dir' in sysargs:
         from meerschaum.actions.arguments._parse_arguments import parse_arguments
-        import meerschaum.config._paths as _paths, pathlib, os, sys
+        from meerschaum.config._paths import set_root
+        import pathlib
         args = parse_arguments(sysargs)
-        original_config_dir_path = _paths.CONFIG_ROOT_PATH
-        config_dir_path = pathlib.Path(args['config_dir'])
+        config_dir_path = pathlib.Path(args['root_dir']).absolute()
         if not config_dir_path.exists():
             print(
                 f"Invalid config directory '{str(config_dir_path)}'.\n" +
                 "Please enter a valid path for `--config-dir`."
             )
             sys.exit(1)
-        _paths.CONFIG_ROOT_PATH = config_dir_path
-        from meerschaum.config._read_config import read_config
-        
+        set_root(config_dir_path)
 
     from meerschaum.actions import entry, get_shell
 
