@@ -25,5 +25,4 @@ twine upload dist/*
 
 ### Update documentation.
 cd "$PARENT/docs"
-# python -m mkdocs gh-deploy
-ssh "$remote_docs_user"@"$remote_docs_host" "cd $remote_docs_dir/Meerschaum; git pull origin $publish_branch"
+ssh "$remote_docs_user"@"$remote_docs_host" "cd $remote_docs_dir/Meerschaum; git pull origin $publish_branch; scripts/docs.sh"
