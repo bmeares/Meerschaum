@@ -166,7 +166,7 @@ groups['plugins'].add_argument(
 
 ### Miscellaneous arguments
 groups['misc'].add_argument(
-    '-d', '--debug', action="store_true", help="Print debug statements (max verbosity)"
+    '--debug', action="store_true", help="Print debug statements (max verbosity)"
 )
 groups['misc'].add_argument(
     '-V', '--version', action="version", version=doc

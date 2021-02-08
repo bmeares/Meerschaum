@@ -11,7 +11,8 @@ from meerschaum.utils.typing import SuccessTuple, Any, List
 
 def stack(
         action : List[str] = [],
-        sub_args : list = [],
+        sysargs : List[str] = [],
+        sub_args : List[str] = [],
         yes : bool = False,
         force : bool = False,
         debug : bool = False,
@@ -34,7 +35,7 @@ def stack(
     from meerschaum.utils.debug import dprint
     from meerschaum.utils.warnings import warn
     from meerschaum.utils.formatting import ANSI
-    import os
+    import os, sys
 
     bootstrap_question = (
         "Bootstrap configuration?\n\n"
@@ -63,7 +64,7 @@ def stack(
 
     compose_command = ['up']
     ### default: alias stack as docker-compose
-    if action[0] != '':
+    if len(action) > 0 and action[0] != '':
         compose_command = action
 
     ### if command is just `stack`, add --build
@@ -81,7 +82,10 @@ def stack(
     ### prepend settings before the docker-compose action
     settings_list = project_name_list + ansi_list + debug_list
 
-    cmd_list = ['docker-compose'] + settings_list + compose_command + sub_args
+    #  cmd_list = ['docker-compose'] + settings_list + compose_command + sub_args
+    cmd_list = ['docker-compose'] + settings_list + compose_command + (
+        sysargs[2:] if (len(sysargs) > 2 and not sub_args) else sub_args
+    )
     if debug: dprint(cmd_list)
     call(cmd_list, cwd=STACK_COMPOSE_PATH.parent)
 

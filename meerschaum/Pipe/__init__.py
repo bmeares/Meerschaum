@@ -50,11 +50,6 @@ with correct credentials, as well as a network connection and valid permissions.
 ```
 
 """
-default_instance_labels = {
-    'api' : 'main',
-    'sql' : 'main',
-}
-
 
 class Pipe:
     from ._fetch import fetch
@@ -94,7 +89,7 @@ class Pipe:
         mrsm_instance : str : None
             connector_keys for the Meerschaum instance connector (SQL or API connector)
         """
-        if location_key == '[None]': location_key = None
+        if location_key in ('[None]', 'None'): location_key = None
         self.connector_keys = connector_keys
         self.metric_key = metric_key
         self.location_key = location_key
@@ -170,13 +165,6 @@ class Pipe:
     @property
     def sync_time(self):
         return self.get_sync_time()
-
-    #  def json(self, *args, **kw):
-        #  """
-        #  Serialize Pipes into JSON
-        #  """
-        #  #  import json
-        #  return str(self)
 
     def __str__(self):
         """

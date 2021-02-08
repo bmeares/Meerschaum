@@ -13,11 +13,14 @@ pwd_context = None
 def get_pwd_context():
     global pwd_context
     if pwd_context is None:
-        from passlib.context import CryptContext
-        pwd_context = CryptContext(
-            schemes=["pbkdf2_sha256"],
-            default="pbkdf2_sha256",
-            pbkdf2_sha256__default_rounds=30000
+        from meerschaum.config.static import _static_config
+        from meerschaum.utils.packages import attempt_import
+        hash_config = _static_config()['users']['password_hash']
+        passlib_context = attempt_import('passlib.context')
+        pwd_context = passlib_context.CryptContext(
+            schemes = hash_config['schemes'],
+            default = hash_config['default'],
+            pbkdf2_sha256__default_rounds = hash_config['pbkdf2_sha256__default_rounds']
         )
     return pwd_context
 

@@ -80,21 +80,23 @@ def _delete_config(
     """
     Delete configuration files.
     """
-    import os
+    import os, shutil
     from meerschaum.utils.prompt import yes_no
-    from meerschaum.config._paths import CONFIG_PATH, STACK_COMPOSE_PATH, DEFAULT_CONFIG_PATH
+    from meerschaum.config._paths import CONFIG_DIR_PATH, STACK_COMPOSE_PATH, DEFAULT_CONFIG_DIR_PATH
     from meerschaum.utils.debug import dprint
-    paths = [CONFIG_PATH, STACK_COMPOSE_PATH, DEFAULT_CONFIG_PATH]
+    paths = [CONFIG_DIR_PATH, STACK_COMPOSE_PATH, DEFAULT_CONFIG_DIR_PATH]
     answer = False
     if not yes:
         sep = '\n' + '  - '
-        answer = yes_no(f"Delete files?{sep + sep.join([str(p) for p in paths])}\n", default='n')
+        answer = yes_no(f"Delete files and directories?{sep + sep.join([str(p) for p in paths])}\n", default='n')
 
     if answer or force:
         for path in paths:
             if debug: dprint(f"Removing {path}...")
             if os.path.isfile(path):
                 os.remove(path)
+            elif os.path.isdir(path):
+                shutil.rmtree(path)
     else:
         msg = "Nothing deleted."
         if debug: dprint(msg)

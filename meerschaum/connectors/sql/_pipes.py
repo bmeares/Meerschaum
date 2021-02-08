@@ -395,7 +395,7 @@ def get_pipe_id(
     import json
     sqlalchemy = attempt_import('sqlalchemy')
     from meerschaum.connectors.sql.tables import get_tables
-    pipes = get_tables()['pipes']
+    pipes = get_tables(mrsm_instance=self, debug=debug)['pipes']
 
     query = sqlalchemy.select([pipes.c.pipe_id]).where(
         pipes.c.connector_keys == pipe.connector_keys and
@@ -419,7 +419,7 @@ def get_pipe_attributes(
     from meerschaum.connectors.sql.tables import get_tables
     from meerschaum.utils.packages import attempt_import
     sqlalchemy = attempt_import('sqlalchemy')
-    pipes = get_tables()['pipes']
+    pipes = get_tables(mrsm_instance=self, debug=debug)['pipes']
     try:
         q = sqlalchemy.select([pipes]).where(pipes.c.pipe_id == pipe.id)
         attributes = self.read(q, debug=debug).to_dict('records')[0]

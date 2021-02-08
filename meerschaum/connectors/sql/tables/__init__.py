@@ -6,19 +6,16 @@
 Define SQLAlchemy tables
 """
 
-
-### this needs to be accessed through get_tables,
-### otherwise it will attempt to connect to the SQL server
-### before FastAPI and break things
-#  tables = dict()
+from __future__ import annotations
+from meerschaum.utils.typing import Optional, Dict, Union
 
 ### store a tables dict for each connector
 connector_tables = dict()
 
 def get_tables(
-        mrsm_instance : str = None,
-        debug : bool = None
-    ):
+        mrsm_instance : Optional[Union[str, meerschaum.connectors.Connector]] = None,
+        debug : Optional[bool] = None
+    ) -> Dict[str, sqlalchemy.Table]:
     """
     Substantiate and create sqlalchemy tables
     """
@@ -28,6 +25,10 @@ def get_tables(
     from meerschaum.connectors.parse import parse_instance_keys
     from meerschaum.utils.packages import attempt_import
     from meerschaum import get_connector
+
+    #  print('CREATE TABLES')
+    #  import traceback
+    #  traceback.print_stack()
 
     sqlalchemy, sqlalchemy_dialects_postgresql = attempt_import(
         'sqlalchemy',

@@ -55,13 +55,13 @@ def parse_arguments(sysargs : List[str]) -> dict[str, Any]:
             sub_arg_indices.append(i)
 
     ### rebuild sysargs without sub_arguments
-    sysargs = [
+    filtered_sysargs = [
         word for i, word in enumerate(sysargs)
             if i not in sub_arg_indices
     ]
 
-    args, unknown = parser.parse_known_args(sysargs)
-    if unknown: print(f"Unknown arguments: {unknown}")
+    args, unknown = parser.parse_known_args(filtered_sysargs)
+    #  if unknown: print(f"Unknown arguments: {unknown}")
 
     ### if --config is not empty, cascade down config
     ### and update new values on existing keys / add new keys/values
@@ -78,6 +78,7 @@ def parse_arguments(sysargs : List[str]) -> dict[str, Any]:
 
 
     args_dict = vars(args)
+    args_dict['sysargs'] = sysargs
     ### append decorated arguments to sub_arguments list
     if 'sub_args' not in args_dict:
         args_dict['sub_args'] = []
