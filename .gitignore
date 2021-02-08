@@ -10,7 +10,7 @@
 *.db
 portable/
 docs/pdoc/*
-docs/site/
+docs/site/*
 
 # Byte-compiled / optimized / DLL files
 __pycache__/
