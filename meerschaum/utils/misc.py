@@ -182,7 +182,7 @@ def edit_file(
     import os
     from subprocess import call
     from meerschaum.utils.debug import dprint
-    from meerschaum.utils.packages import run_python_package
+    from meerschaum.utils.packages import run_python_package, attempt_import
     try:
         EDITOR = os.environ.get('EDITOR', default_editor)
         if debug: dprint(f"Opening file '{path}' with editor '{EDITOR}'")
@@ -190,7 +190,8 @@ def edit_file(
     except Exception as e: ### can't open with default editors
         if debug: dprint(e)
         if debug: dprint('Failed to open file with system editor. Falling back to pyvim...')
-        run_python_package('pyvim', [path], debug=debug)
+        pyvim = attempt_import('pyvim' lazy=False)
+        run_python_package('pyvim', [path], venv='mrsm', debug=debug)
 
 def is_pipe_registered(
         pipe : 'Pipe or MetaPipe',
