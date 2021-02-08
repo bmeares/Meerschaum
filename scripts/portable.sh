@@ -17,10 +17,15 @@ tars["DEBIAN"]="debian.tar.zst"
 tars["MACOS"]="macos.tar.gz"
 
 ### Check if zstd is installed.
-v=`zstd -V`
+v=$(zstd -V)
 if [ "$?" != 0 ]; then
   echo "Installing zstd..."
-  sudo apt update && sudo apt install zstd -y
+  sudo apt-get update && sudo apt-get install zstd -y
+fi
+h=$(clang --help)
+if [ $? != 0 ]; then
+  echo "Installing clang..."
+  sudo apt-get install clang -y
 fi
 
 shopt -s extglob
