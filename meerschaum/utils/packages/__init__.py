@@ -126,6 +126,9 @@ def activate_venv(
         #  precheck = False,
         debug = debug
     )
+    if virtualenv is None:
+        print(f"Failed to import virtualenv! Please ensure virtualenv is installed and restart Meerschaum.")
+        sys.exit(1)
     venv_path = pathlib.Path(os.path.join(VIRTENV_RESOURCES_PATH, venv))
     bin_path = pathlib.Path(
         os.path.join(venv_path),
