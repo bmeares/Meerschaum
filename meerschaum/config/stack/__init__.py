@@ -11,28 +11,22 @@ import json
 from meerschaum.config._paths import (
     GRAFANA_DATASOURCE_PATH,
     GRAFANA_DASHBOARD_PATH,
-    #  GRAFANA_INI_PATH,
     MOSQUITTO_CONFIG_PATH,
     ROOT_DIR_PATH,
 )
 from meerschaum.config._paths import STACK_COMPOSE_PATH, STACK_ENV_PATH
 
-#  db_port = cf['meerschaum']['connectors']['sql']['main']['port']
 db_port = "MRSM{meerschaum:connectors:sql:main:port}"
 
-#  db_user = cf['meerschaum']['connectors']['sql']['main']['username']
 db_user = "MRSM{meerschaum:connectors:sql:main:username}"
 
-#  db_pass = cf['meerschaum']['connectors']['sql']['main']['password']
 db_pass = "MRSM{meerschaum:connectors:sql:main:password}"
 
-#  db_base = cf['meerschaum']['connectors']['sql']['main']['database']
 db_base = "MRSM{meerschaum:connectors:sql:main:database}"
 
 ### default localhost, db for docker network
 db_host = "db"
 
-#  api_port = cf['meerschaum']['connectors']['api']['main']['port']
 api_port = "MRSM{meerschaum:connectors:api:main:port}"
 
 api_host = "meerschaum_api"
@@ -264,9 +258,9 @@ def get_necessary_files():
     from meerschaum.config import get_config, config
     return {
         #  STACK_ENV_PATH : config['stack'][STACK_ENV_FILENAME],
-        STACK_COMPOSE_PATH : (config['stack'][STACK_COMPOSE_FILENAME], compose_header),
-        GRAFANA_DATASOURCE_PATH : config['stack']['grafana']['datasource'],
-        GRAFANA_DASHBOARD_PATH : config['stack']['grafana']['dashboard'],
+        STACK_COMPOSE_PATH : (get_config('stack', STACK_COMPOSE_FILENAME), compose_header),
+        GRAFANA_DATASOURCE_PATH : get_config('stack', 'grafana', 'datasource'),
+        GRAFANA_DASHBOARD_PATH : get_config('stack', 'grafana', 'dashboard'),
         MOSQUITTO_CONFIG_PATH : get_config('stack', 'mosquitto', 'mosquitto.conf', patch=True),
     }
 

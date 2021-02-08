@@ -41,5 +41,14 @@ def _static_config():
             'connectors' : {
                 'default_label' : 'main',
             },
+            'users' : {
+                'password_hash' : {
+                    'schemes' : [
+                        'pbkdf2_sha256',
+                    ],
+                    'default' : 'pbkdf2_sha256',
+                    'pbkdf2_sha256__default_rounds' : 30000,
+                },
+            },
         }
     return static_config

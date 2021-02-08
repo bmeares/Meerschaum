@@ -67,6 +67,7 @@ packages = {
         'tuna'     : 'tuna',
         'snakeviz' : 'snakeviz',
         'mypy' : 'mypy',
+        'pytest' : 'pytest',
     },
     'docs' : {
         'mkdocs'                      : 'mkdocs',

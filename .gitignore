@@ -7,6 +7,8 @@
 .tuna/
 .snakeviz/
 *.prof
+*.db
+portable/
 
 # Byte-compiled / optimized / DLL files
 __pycache__/

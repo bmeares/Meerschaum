@@ -33,17 +33,9 @@ def edit_config(
         fp = get_keyfile_path(k, create_new=True)
         edit_file(fp)
 
-    #  if params is not None:
-        #  from meerschaum.utils import apply_patch_to_config
-        #  set_config(apply_patch_to_config(cf, params))
-        #  if not write_config(cf, debug=debug):
-            #  return False, "Failed to update config!"
-    #  else:
-        #  edit_file(CONFIG_PATH, debug=debug)
-
     if debug: dprint("Reloading configuration...")
     reload_package('meerschaum', debug=debug, **kw)
-    # reload_package(meerschaum.config, debug=debug, **kw)
+    reload_package('meerschaum', debug=debug, **kw)
 
     return (True, "Success")
 
