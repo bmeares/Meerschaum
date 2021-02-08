@@ -192,90 +192,12 @@ def parse_config_substitution(
     &#34;&#34;&#34;
     Parse Meerschaum substitution syntax
     E.g. MRSM{value1:value2} =&gt; [&#39;value1&#39;, &#39;value2&#39;]
-    NOTE: Not currently used. See `search_and_substitute_config` below
+    NOTE: Not currently used. See `search_and_substitute_config` in `meerschaum.config._read_yaml`.
     &#34;&#34;&#34;
     if not value.beginswith(leading_key):
         return value
 
     return leading_key[len(leading_key):][len():-1].split(delimeter)
-
-def search_and_substitute_config(
-        config : dict,
-        leading_key : str = &#34;MRSM&#34;,
-        delimiter : str = &#34;:&#34;,
-        begin_key : str = &#34;{&#34;,
-        end_key : str = &#34;}&#34;
-    ) -&gt; dict:
-    &#34;&#34;&#34;
-    Search the config for Meerschaum substitution syntax and substite with value of keys
-
-    Example:
-        MRSM{meerschaum:connectors:main:host} =&gt; cf[&#39;meerschaum&#39;][&#39;connectors&#39;][&#39;main&#39;][&#39;host&#39;]
-    &#34;&#34;&#34;
-    #  from meerschaum.utils.packages import attempt_import
-    import json
-    try:
-        pass
-        #  from meerschaum.utils.yaml import yaml
-        #  import yaml
-        #  ruamel_yaml = attempt_import()
-    except:
-        return config
-    needle = leading_key
-    #  haystack = yaml.dump(config)
-    haystack = json.dumps(config)
-    mod_haystack = list(str(haystack))
-    buff = str(needle)
-    max_index = len(haystack) - len(buff)
-
-    patterns = dict()
-
-    begin, end, floor = 0, 0, 0
-    while needle in haystack[floor:]:
-        ### extract the keys
-        hs = haystack[floor:]
-
-        ### the first character of the keys
-        ### MRSM{value1:value2}
-        ###      ^
-        begin = hs.find(needle) + len(needle) + len(begin_key)
-
-        ### number of characters to end of keys
-        ### (really it&#39;s the index of the beginning of the end_key relative to the beginning
-        ###     but the math works out)
-        ### MRSM{value1}
-        ###      ^     ^  =&gt; 6
-        length = hs[begin:].find(end_key)
-
-        ### index of the end_key (end of `length` characters)
-        end = begin + length
-
-        ### advance the floor to find the next leading key
-        floor += end + len(end_key)
-        keys = hs[begin:end].split(delimiter)
-
-        ### follow the pointers to the value
-        c = config
-        for k in keys:
-            try:
-                c = c[k]
-            except KeyError:
-                from meerschaum.utils.warnings import warn
-                warn(f&#34;Invalid keys in config: {keys}&#34;)
-        value = c
-
-        ### pattern to search and replace
-        pattern = leading_key + begin_key + delimiter.join(keys) + end_key
-        ### store patterns and values
-        patterns[pattern] = value
-
-    ### replace the patterns with the values
-    for pattern, value in patterns.items():
-        haystack = haystack.replace(pattern, str(value))
-
-    ### parse back into dict
-    #  return yaml.load(haystack)
-    return json.loads(haystack)
 
 def edit_file(
         path : &#39;pathlib.Path&#39;,
@@ -314,9 +236,12 @@ def is_pipe_registered(
         dprint(f&#39;{pipe}, {pipes}&#39;)
     return ck in pipes and mk in pipes[ck] and lk in pipes[ck][mk]
 
-def get_subactions(action : str, globs : dict = None) -&gt; list:
+def _get_subaction_names(action : str, globs : dict = None) -&gt; List[str]:
     &#34;&#34;&#34;
-    Return a list of function pointers to all subactions for a given action
+    NOTE: Don&#39;t use this function. You should use `meerschaum.actions.get_subactions()` instead.
+    This only exists for internal use.
+
+    Return a list of function pointers to all subactions for a given action.
     &#34;&#34;&#34;
     if globs is None:
         import importlib
@@ -324,17 +249,21 @@ def get_subactions(action : str, globs : dict = None) -&gt; list:
         globs = vars(module)
     subactions = []
     for item in globs:
-        if f&#39;_{action}&#39; in item:
+        if f&#39;_{action}&#39; in item and &#39;complete&#39; not in item.lstrip(&#39;_&#39;):
             subactions.append(globs[item])
     return subactions
 
-def choices_docstring(action : str, globs : dict = None):
+def choices_docstring(action : str, globs : Optional[Dict[str, Any]] = None) -&gt; str:
     options_str = f&#34;\n    Options:\n        `{action} &#34;
-    subactions = get_subactions(action, globs=globs)
+    subactions = _get_subaction_names(action, globs=globs)
     options_str += &#34;[&#34;
     sa_names = []
     for sa in subactions:
-        sa_names.append(sa.__name__[len(f&#34;_{action}&#34;) + 1:])
+        try:
+            sa_names.append(sa.__name__[len(f&#34;_{action}&#34;) + 1:])
+        except Exception as e:
+            print(e)
+            return &#34;&#34;
     for sa_name in sorted(sa_names):
         options_str += f&#34;{sa_name}, &#34;
     options_str = options_str[:-2] + &#34;]`&#34;
@@ -701,9 +630,14 @@ def filter_unseen_df(
     &#34;&#34;&#34;
     if old_df is None: return new_df
     old_cols = list(old_df.columns)
+    print(&#39;old_df:&#39;, old_df)
+    print(&#39;old_df.columns:&#39;, old_df.columns)
+    print(&#39;new_df:&#39;, new_df)
+    print(&#39;new_df.columns:&#39;, new_df.columns)
     try:
         new_df = new_df[old_cols]
     except Exception as e:
+        from meerschaum.utils.warnings import warn
         warn(f&#34;Was not able to cast old columns onto new DataFrame. Are both DataFrames the same shape? Error:\n{e}&#34;)
         return None
 
@@ -876,6 +810,10 @@ def filter_keywords(
     &#34;&#34;&#34;
     import inspect
     func_params = inspect.signature(func).parameters
+    ### If the function has a **kw method, skip filtering.
+    for param, _type in func_params.items():
+        if &#39;**&#39; in str(_type):
+            return kw
     func_kw = dict()
     for k, v in kw.items():
         if k in func_params:
@@ -923,7 +861,15 @@ def get_connector_labels(
         conns += [ f&#39;{t}:{label}&#39; for label in connectors.get(t, {}) if label != &#39;default&#39; ]
 
     possibilities = [ c for c in conns if c.startswith(search_term) and c != (search_term if ignore_exact_match else None) ]
-    return sorted(possibilities)</code></pre>
+    return sorted(possibilities)
+
+def json_serialize_datetime(dt : datetime.datetime) -&gt; str:
+    &#34;&#34;&#34;
+    Serialize a datetime.datetime object into JSON (ISO format string).
+    &#34;&#34;&#34;
+    import datetime
+    if isinstance(dt, datetime.datetime):
+        return dt.isoformat() + &#39;Z&#39;</code></pre>
 </details>
 </section>
 <section>
@@ -1048,7 +994,7 @@ New name of the method. None will use func.<strong>name</strong> (default).</p><
 </details>
 </dd>
 <dt id="meerschaum.utils.misc.choices_docstring"><code class="name flex">
-<span>def <span class="ident">choices_docstring</span></span>(<span>action: str, globs: dict = None)</span>
+<span>def <span class="ident">choices_docstring</span></span>(<span>action: str, globs: Optional[Dict[str, Any]] = None) ‑> str</span>
 </code></dt>
 <dd>
 <div class="desc"></div>
@@ -1056,13 +1002,17 @@ New name of the method. None will use func.<strong>name</strong> (default).</p><
 <summary>
 <span>Expand source code</span>
 </summary>
-<pre><code class="python">def choices_docstring(action : str, globs : dict = None):
+<pre><code class="python">def choices_docstring(action : str, globs : Optional[Dict[str, Any]] = None) -&gt; str:
     options_str = f&#34;\n    Options:\n        `{action} &#34;
-    subactions = get_subactions(action, globs=globs)
+    subactions = _get_subaction_names(action, globs=globs)
     options_str += &#34;[&#34;
     sa_names = []
     for sa in subactions:
-        sa_names.append(sa.__name__[len(f&#34;_{action}&#34;) + 1:])
+        try:
+            sa_names.append(sa.__name__[len(f&#34;_{action}&#34;) + 1:])
+        except Exception as e:
+            print(e)
+            return &#34;&#34;
     for sa_name in sorted(sa_names):
         options_str += f&#34;{sa_name}, &#34;
     options_str = options_str[:-2] + &#34;]`&#34;
@@ -1277,6 +1227,10 @@ The function to inspect.</p></div>
     &#34;&#34;&#34;
     import inspect
     func_params = inspect.signature(func).parameters
+    ### If the function has a **kw method, skip filtering.
+    for param, _type in func_params.items():
+        if &#39;**&#39; in str(_type):
+            return kw
     func_kw = dict()
     for k, v in kw.items():
         if k in func_params:
@@ -1327,9 +1281,14 @@ custom string, per this StackOverflow question:
     &#34;&#34;&#34;
     if old_df is None: return new_df
     old_cols = list(old_df.columns)
+    print(&#39;old_df:&#39;, old_df)
+    print(&#39;old_df.columns:&#39;, old_df.columns)
+    print(&#39;new_df:&#39;, new_df)
+    print(&#39;new_df.columns:&#39;, new_df.columns)
     try:
         new_df = new_df[old_cols]
     except Exception as e:
+        from meerschaum.utils.warnings import warn
         warn(f&#34;Was not able to cast old columns onto new DataFrame. Are both DataFrames the same shape? Error:\n{e}&#34;)
         return None
 
@@ -1432,30 +1391,6 @@ custom string, per this StackOverflow question:
     print(parent_package)</code></pre>
 </details>
 </dd>
-<dt id="meerschaum.utils.misc.get_subactions"><code class="name flex">
-<span>def <span class="ident">get_subactions</span></span>(<span>action: str, globs: dict = None) ‑> list</span>
-</code></dt>
-<dd>
-<div class="desc"><p>Return a list of function pointers to all subactions for a given action</p></div>
-<details class="source">
-<summary>
-<span>Expand source code</span>
-</summary>
-<pre><code class="python">def get_subactions(action : str, globs : dict = None) -&gt; list:
-    &#34;&#34;&#34;
-    Return a list of function pointers to all subactions for a given action
-    &#34;&#34;&#34;
-    if globs is None:
-        import importlib
-        module = importlib.import_module(f&#39;meerschaum.actions.{action}&#39;)
-        globs = vars(module)
-    subactions = []
-    for item in globs:
-        if f&#39;_{action}&#39; in item:
-            subactions.append(globs[item])
-    return subactions</code></pre>
-</details>
-</dd>
 <dt id="meerschaum.utils.misc.is_int"><code class="name flex">
 <span>def <span class="ident">is_int</span></span>(<span>s)</span>
 </code></dt>
@@ -1540,13 +1475,31 @@ Found here: <a href="https://stackoverflow.com/questions/434287/what-is-the-most
     return zip_longest(*args, fillvalue=fillvalue)</code></pre>
 </details>
 </dd>
+<dt id="meerschaum.utils.misc.json_serialize_datetime"><code class="name flex">
+<span>def <span class="ident">json_serialize_datetime</span></span>(<span>dt: datetime.datetime) ‑> str</span>
+</code></dt>
+<dd>
+<div class="desc"><p>Serialize a datetime.datetime object into JSON (ISO format string).</p></div>
+<details class="source">
+<summary>
+<span>Expand source code</span>
+</summary>
+<pre><code class="python">def json_serialize_datetime(dt : datetime.datetime) -&gt; str:
+    &#34;&#34;&#34;
+    Serialize a datetime.datetime object into JSON (ISO format string).
+    &#34;&#34;&#34;
+    import datetime
+    if isinstance(dt, datetime.datetime):
+        return dt.isoformat() + &#39;Z&#39;</code></pre>
+</details>
+</dd>
 <dt id="meerschaum.utils.misc.parse_config_substitution"><code class="name flex">
 <span>def <span class="ident">parse_config_substitution</span></span>(<span>value: str, leading_key: str = 'MRSM', begin_key: str = '{', end_key: str = '}', delimeter: str = ':')</span>
 </code></dt>
 <dd>
 <div class="desc"><p>Parse Meerschaum substitution syntax
 E.g. MRSM{value1:value2} =&gt; ['value1', 'value2']
-NOTE: Not currently used. See <code><a title="meerschaum.utils.misc.search_and_substitute_config" href="#meerschaum.utils.misc.search_and_substitute_config">search_and_substitute_config()</a></code> below</p></div>
+NOTE: Not currently used. See <code>search_and_substitute_config</code> in <code>meerschaum.config._read_yaml</code>.</p></div>
 <details class="source">
 <summary>
 <span>Expand source code</span>
@@ -1561,7 +1514,7 @@ NOTE: Not currently used. See <code><a title="meerschaum.utils.misc.search_and_s
     &#34;&#34;&#34;
     Parse Meerschaum substitution syntax
     E.g. MRSM{value1:value2} =&gt; [&#39;value1&#39;, &#39;value2&#39;]
-    NOTE: Not currently used. See `search_and_substitute_config` below
+    NOTE: Not currently used. See `search_and_substitute_config` in `meerschaum.config._read_yaml`.
     &#34;&#34;&#34;
     if not value.beginswith(leading_key):
         return value
@@ -1935,96 +1888,6 @@ from:
     return dt + datetime.timedelta(0, rounding - seconds, - dt.microsecond)</code></pre>
 </details>
 </dd>
-<dt id="meerschaum.utils.misc.search_and_substitute_config"><code class="name flex">
-<span>def <span class="ident">search_and_substitute_config</span></span>(<span>config: dict, leading_key: str = 'MRSM', delimiter: str = ':', begin_key: str = '{', end_key: str = '}') ‑> dict</span>
-</code></dt>
-<dd>
-<div class="desc"><p>Search the config for Meerschaum substitution syntax and substite with value of keys</p>
-<h2 id="example">Example</h2>
-<p>MRSM{meerschaum:connectors:main:host} =&gt; cf['meerschaum']['connectors']['main']['host']</p></div>
-<details class="source">
-<summary>
-<span>Expand source code</span>
-</summary>
-<pre><code class="python">def search_and_substitute_config(
-        config : dict,
-        leading_key : str = &#34;MRSM&#34;,
-        delimiter : str = &#34;:&#34;,
-        begin_key : str = &#34;{&#34;,
-        end_key : str = &#34;}&#34;
-    ) -&gt; dict:
-    &#34;&#34;&#34;
-    Search the config for Meerschaum substitution syntax and substite with value of keys
-
-    Example:
-        MRSM{meerschaum:connectors:main:host} =&gt; cf[&#39;meerschaum&#39;][&#39;connectors&#39;][&#39;main&#39;][&#39;host&#39;]
-    &#34;&#34;&#34;
-    #  from meerschaum.utils.packages import attempt_import
-    import json
-    try:
-        pass
-        #  from meerschaum.utils.yaml import yaml
-        #  import yaml
-        #  ruamel_yaml = attempt_import()
-    except:
-        return config
-    needle = leading_key
-    #  haystack = yaml.dump(config)
-    haystack = json.dumps(config)
-    mod_haystack = list(str(haystack))
-    buff = str(needle)
-    max_index = len(haystack) - len(buff)
-
-    patterns = dict()
-
-    begin, end, floor = 0, 0, 0
-    while needle in haystack[floor:]:
-        ### extract the keys
-        hs = haystack[floor:]
-
-        ### the first character of the keys
-        ### MRSM{value1:value2}
-        ###      ^
-        begin = hs.find(needle) + len(needle) + len(begin_key)
-
-        ### number of characters to end of keys
-        ### (really it&#39;s the index of the beginning of the end_key relative to the beginning
-        ###     but the math works out)
-        ### MRSM{value1}
-        ###      ^     ^  =&gt; 6
-        length = hs[begin:].find(end_key)
-
-        ### index of the end_key (end of `length` characters)
-        end = begin + length
-
-        ### advance the floor to find the next leading key
-        floor += end + len(end_key)
-        keys = hs[begin:end].split(delimiter)
-
-        ### follow the pointers to the value
-        c = config
-        for k in keys:
-            try:
-                c = c[k]
-            except KeyError:
-                from meerschaum.utils.warnings import warn
-                warn(f&#34;Invalid keys in config: {keys}&#34;)
-        value = c
-
-        ### pattern to search and replace
-        pattern = leading_key + begin_key + delimiter.join(keys) + end_key
-        ### store patterns and values
-        patterns[pattern] = value
-
-    ### replace the patterns with the values
-    for pattern, value in patterns.items():
-        haystack = haystack.replace(pattern, str(value))
-
-    ### parse back into dict
-    #  return yaml.load(haystack)
-    return json.loads(haystack)</code></pre>
-</details>
-</dd>
 <dt id="meerschaum.utils.misc.sorted_dict"><code class="name flex">
 <span>def <span class="ident">sorted_dict</span></span>(<span>d: dict) ‑> dict</span>
 </code></dt>
@@ -2217,11 +2080,11 @@ from:
 <li><code><a title="meerschaum.utils.misc.generate_password" href="#meerschaum.utils.misc.generate_password">generate_password</a></code></li>
 <li><code><a title="meerschaum.utils.misc.get_connector_labels" href="#meerschaum.utils.misc.get_connector_labels">get_connector_labels</a></code></li>
 <li><code><a title="meerschaum.utils.misc.get_options_functions" href="#meerschaum.utils.misc.get_options_functions">get_options_functions</a></code></li>
-<li><code><a title="meerschaum.utils.misc.get_subactions" href="#meerschaum.utils.misc.get_subactions">get_subactions</a></code></li>
 <li><code><a title="meerschaum.utils.misc.is_int" href="#meerschaum.utils.misc.is_int">is_int</a></code></li>
 <li><code><a title="meerschaum.utils.misc.is_pipe_registered" href="#meerschaum.utils.misc.is_pipe_registered">is_pipe_registered</a></code></li>
 <li><code><a title="meerschaum.utils.misc.is_valid_email" href="#meerschaum.utils.misc.is_valid_email">is_valid_email</a></code></li>
 <li><code><a title="meerschaum.utils.misc.iterate_chunks" href="#meerschaum.utils.misc.iterate_chunks">iterate_chunks</a></code></li>
+<li><code><a title="meerschaum.utils.misc.json_serialize_datetime" href="#meerschaum.utils.misc.json_serialize_datetime">json_serialize_datetime</a></code></li>
 <li><code><a title="meerschaum.utils.misc.parse_config_substitution" href="#meerschaum.utils.misc.parse_config_substitution">parse_config_substitution</a></code></li>
 <li><code><a title="meerschaum.utils.misc.parse_df_datetimes" href="#meerschaum.utils.misc.parse_df_datetimes">parse_df_datetimes</a></code></li>
 <li><code><a title="meerschaum.utils.misc.pg_capital" href="#meerschaum.utils.misc.pg_capital">pg_capital</a></code></li>
@@ -2232,7 +2095,6 @@ from:
 <li><code><a title="meerschaum.utils.misc.replace_pipes_in_dict" href="#meerschaum.utils.misc.replace_pipes_in_dict">replace_pipes_in_dict</a></code></li>
 <li><code><a title="meerschaum.utils.misc.retry_connect" href="#meerschaum.utils.misc.retry_connect">retry_connect</a></code></li>
 <li><code><a title="meerschaum.utils.misc.round_time" href="#meerschaum.utils.misc.round_time">round_time</a></code></li>
-<li><code><a title="meerschaum.utils.misc.search_and_substitute_config" href="#meerschaum.utils.misc.search_and_substitute_config">search_and_substitute_config</a></code></li>
 <li><code><a title="meerschaum.utils.misc.sorted_dict" href="#meerschaum.utils.misc.sorted_dict">sorted_dict</a></code></li>
 <li><code><a title="meerschaum.utils.misc.sql_item_name" href="#meerschaum.utils.misc.sql_item_name">sql_item_name</a></code></li>
 <li><code><a title="meerschaum.utils.misc.string_to_dict" href="#meerschaum.utils.misc.string_to_dict">string_to_dict</a></code></li>

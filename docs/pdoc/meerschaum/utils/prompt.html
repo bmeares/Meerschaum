@@ -43,6 +43,7 @@ def prompt(
         icon : bool = True,
         default : Union[str, Tuple[str, str], None] = None,
         detect_password : bool = True,
+        is_password : bool = False,
         **kw : Any
     ) -&gt; str:
     &#34;&#34;&#34;
@@ -81,7 +82,7 @@ def prompt(
         #  else: question += &#34;: &#34;
 
     ### detect password
-    if detect_password and &#39;password&#39; in question.lower():
+    if (detect_password and &#39;password&#39; in question.lower()) or is_password:
         kw[&#39;is_password&#39;] = True
   
     ### Add the icon and only color the first line.
@@ -188,7 +189,8 @@ def choose(
         default : Optional[str] = None,
         numeric : bool = True,
         icon : bool = True,
-        warn : bool = True
+        warn : bool = True,
+        **kw
     ) -&gt; str:
     from meerschaum.utils.warnings import warn as _warn
 
@@ -238,7 +240,11 @@ def get_password(
     &#34;&#34;&#34;
     from meerschaum.utils.warnings import warn
     while True:
-        password = prompt(f&#34;Password&#34; + (f&#34; for user &#39;{username}&#39;: &#34; if username is not None else &#34;: &#34;), **kw)
+        password = prompt(
+            f&#34;Password&#34; + (f&#34; for user &#39;{username}&#39;: &#34; if username is not None else &#34;: &#34;),
+            is_password = True,
+            **kw
+        )
         if minimum_length is not None and len(password) &lt; minimum_length:
             warn(
                 &#34;Password is too short. &#34; +
@@ -248,6 +254,7 @@ def get_password(
             continue
         _password = prompt(
             f&#34;Confirm password&#34; + (f&#34; for user &#39;{username}&#39;: &#34;) if username is not None else &#34;: &#34;,
+            is_password = True,
             **kw
         )
         if password != _password:
@@ -288,7 +295,7 @@ def get_email(username : Optional[str] = None, allow_omit : bool = True, **kw : 
 <h2 class="section-title" id="header-functions">Functions</h2>
 <dl>
 <dt id="meerschaum.utils.prompt.choose"><code class="name flex">
-<span>def <span class="ident">choose</span></span>(<span>question: str, choices: List[str], default: Optional[str] = None, numeric: bool = True, icon: bool = True, warn: bool = True) ‑> str</span>
+<span>def <span class="ident">choose</span></span>(<span>question: str, choices: List[str], default: Optional[str] = None, numeric: bool = True, icon: bool = True, warn: bool = True, **kw) ‑> str</span>
 </code></dt>
 <dd>
 <div class="desc"></div>
@@ -302,7 +309,8 @@ def get_email(username : Optional[str] = None, allow_omit : bool = True, **kw : 
         default : Optional[str] = None,
         numeric : bool = True,
         icon : bool = True,
-        warn : bool = True
+        warn : bool = True,
+        **kw
     ) -&gt; str:
     from meerschaum.utils.warnings import warn as _warn
 
@@ -399,7 +407,11 @@ Allow the user to omit the email.</p></div>
     &#34;&#34;&#34;
     from meerschaum.utils.warnings import warn
     while True:
-        password = prompt(f&#34;Password&#34; + (f&#34; for user &#39;{username}&#39;: &#34; if username is not None else &#34;: &#34;), **kw)
+        password = prompt(
+            f&#34;Password&#34; + (f&#34; for user &#39;{username}&#39;: &#34; if username is not None else &#34;: &#34;),
+            is_password = True,
+            **kw
+        )
         if minimum_length is not None and len(password) &lt; minimum_length:
             warn(
                 &#34;Password is too short. &#34; +
@@ -409,6 +421,7 @@ Allow the user to omit the email.</p></div>
             continue
         _password = prompt(
             f&#34;Confirm password&#34; + (f&#34; for user &#39;{username}&#39;: &#34;) if username is not None else &#34;: &#34;,
+            is_password = True,
             **kw
         )
         if password != _password:
@@ -419,7 +432,7 @@ Allow the user to omit the email.</p></div>
 </details>
 </dd>
 <dt id="meerschaum.utils.prompt.prompt"><code class="name flex">
-<span>def <span class="ident">prompt</span></span>(<span>question: str, icon: bool = True, default: Union[str, Tuple[str, str], None] = None, detect_password: bool = True, **kw: Any) ‑> str</span>
+<span>def <span class="ident">prompt</span></span>(<span>question: str, icon: bool = True, default: Union[str, Tuple[str, str], None] = None, detect_password: bool = True, is_password: bool = False, **kw: Any) ‑> str</span>
 </code></dt>
 <dd>
 <div class="desc"><p>Ask the user a question and return the answer.
@@ -441,6 +454,7 @@ If the response is '', return the default value.</p></div>
         icon : bool = True,
         default : Union[str, Tuple[str, str], None] = None,
         detect_password : bool = True,
+        is_password : bool = False,
         **kw : Any
     ) -&gt; str:
     &#34;&#34;&#34;
@@ -479,7 +493,7 @@ If the response is '', return the default value.</p></div>
         #  else: question += &#34;: &#34;
 
     ### detect password
-    if detect_password and &#39;password&#39; in question.lower():
+    if (detect_password and &#39;password&#39; in question.lower()) or is_password:
         kw[&#39;is_password&#39;] = True
   
     ### Add the icon and only color the first line.

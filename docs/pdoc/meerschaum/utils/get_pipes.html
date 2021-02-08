@@ -35,6 +35,8 @@
 Return a dictionary (or list) of pipe objects. See documentation below for more information.
 &#34;&#34;&#34;
 
+from __future__ import annotations
+
 from meerschaum.utils.typing import (
     Sequence, Optional, Union, Mapping, Any, InstanceConnector, PipesDict
 )
@@ -135,7 +137,7 @@ def get_pipes(
     else: ### NOTE: mrsm_instance MUST be a SQL or API connector for this to work
         from meerschaum.connectors import Connector
         valid_connector = False
-        if issubclass(type(mrsm_instance, Connector)):
+        if issubclass(type(mrsm_instance), Connector):
             if mrsm_instance.type in (&#39;api&#39;, &#39;sql&#39;):
                 valid_connector = True
         if not valid_connector:
@@ -180,8 +182,8 @@ def get_pipes(
 
 def methods(
         method : str,
-        connector : &#39;Connector (API or SQL)&#39;,
-        **kw
+        connector : &#39;meerschaum.connectors.Connector&#39;,
+        **kw : Any
     ) -&gt; list:
     &#34;&#34;&#34;
     Return a list of tuples containing (connector_keys, metric_key, location_key)
@@ -275,7 +277,7 @@ def methods(
 <h2 class="section-title" id="header-functions">Functions</h2>
 <dl>
 <dt id="meerschaum.utils.get_pipes.get_pipes"><code class="name flex">
-<span>def <span class="ident">get_pipes</span></span>(<span>connector_keys: Union[str, Sequence[str]] = [], metric_keys: Union[str, Sequence[str]] = [], location_keys: Union[str, Sequence[str]] = [], params: Mapping[str, Any] = {}, mrsm_instance: Union[str, ForwardRef('<a title="meerschaum.connectors.sql.SQLConnector" href="../connectors/sql/SQLConnector.html">meerschaum.connectors.sql.SQLConnector</a>'), ForwardRef('<a title="meerschaum.connectors.api.APIConnector" href="../connectors/api/APIConnector.html">meerschaum.connectors.api.APIConnector</a>'), NoneType] = None, as_list: bool = False, method: str = 'registered', wait: bool = False, debug: bool = False, **kw: Any) ‑> Union[Mapping[str, Mapping[str, Mapping[str, <a title="meerschaum.Pipe.Pipe" href="../Pipe/index.html#meerschaum.Pipe.Pipe">Pipe</a>]]], Sequence[<a title="meerschaum.Pipe" href="../Pipe/index.html">meerschaum.Pipe</a>]]</span>
+<span>def <span class="ident">get_pipes</span></span>(<span>connector_keys: Union[str, Sequence[str]] = [], metric_keys: Union[str, Sequence[str]] = [], location_keys: Union[str, Sequence[str]] = [], params: Mapping[str, Any] = {}, mrsm_instance: Union[str, InstanceConnector, None] = None, as_list: bool = False, method: str = 'registered', wait: bool = False, debug: bool = False, **kw: Any) ‑> Union[Mapping[str, Mapping[str, Mapping[str, <a title="meerschaum.Pipe.Pipe" href="../Pipe/index.html#meerschaum.Pipe.Pipe">Pipe</a>]]], Sequence[<a title="meerschaum.Pipe" href="../Pipe/index.html">meerschaum.Pipe</a>]]</span>
 </code></dt>
 <dd>
 <div class="desc"><p>Return a dictionary (or list) of pipe objects.
@@ -431,7 +433,7 @@ database might not be running (like the API).</p></div>
     else: ### NOTE: mrsm_instance MUST be a SQL or API connector for this to work
         from meerschaum.connectors import Connector
         valid_connector = False
-        if issubclass(type(mrsm_instance, Connector)):
+        if issubclass(type(mrsm_instance), Connector):
             if mrsm_instance.type in (&#39;api&#39;, &#39;sql&#39;):
                 valid_connector = True
         if not valid_connector:
@@ -476,7 +478,7 @@ database might not be running (like the API).</p></div>
 </details>
 </dd>
 <dt id="meerschaum.utils.get_pipes.methods"><code class="name flex">
-<span>def <span class="ident">methods</span></span>(<span>method: str, connector: Connector (API or SQL), **kw) ‑> list</span>
+<span>def <span class="ident">methods</span></span>(<span>method: str, connector: "'<a title="meerschaum.connectors.Connector" href="../connectors/Connector.html">meerschaum.connectors.Connector</a>'", **kw: Any) ‑> list</span>
 </code></dt>
 <dd>
 <div class="desc"><p>Return a list of tuples containing (connector_keys, metric_key, location_key)
@@ -487,8 +489,8 @@ based on the method of choosing keys.</p></div>
 </summary>
 <pre><code class="python">def methods(
         method : str,
-        connector : &#39;Connector (API or SQL)&#39;,
-        **kw
+        connector : &#39;meerschaum.connectors.Connector&#39;,
+        **kw : Any
     ) -&gt; list:
     &#34;&#34;&#34;
     Return a list of tuples containing (connector_keys, metric_key, location_key)

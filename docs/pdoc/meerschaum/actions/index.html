@@ -50,25 +50,6 @@ __all__, modules = get_modules_from_package(
     names = True,
 )
 
-### append the plugins modules
-#  from meerschaum.config._paths import (
-    #  RESOURCES_PATH, PLUGINS_RESOURCES_PATH, PLUGINS_ARCHIVES_RESOURCES_PATH
-#  )
-#  if str(RESOURCES_PATH) not in sys.path: sys.path.append(str(RESOURCES_PATH))
-#  if str(RESOURCES_PATH) not in __path__: __path__.append(str(RESOURCES_PATH))
-#  import plugins
-#  from plugins import testing
-#  help(testing)
-#  _plugins_names, plugins_modules = get_modules_from_package(
-    #  plugins,
-    #  names = True,
-    #  recursive = True,
-    #  modules_venvs = True
-#  )
-#  __all__ += _plugins_names
-#  modules += plugins_modules
-
-
 ### build the actions dictionary by importing all
 ### functions that do not begin with &#39;_&#39; from all submodules
 from inspect import getmembers, isfunction
@@ -104,6 +85,7 @@ for module in modules:
         )
     )
 
+original_actions = actions.copy()
 from meerschaum.actions._entry import _entry as entry
 def get_shell(
         sysargs : List[str] = [],

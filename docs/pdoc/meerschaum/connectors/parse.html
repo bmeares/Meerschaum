@@ -36,13 +36,28 @@ Utility functions for parsing connector keys.
 &#34;&#34;&#34;
 
 from __future__ import annotations
-from meerschaum.utils.typing import Mapping, Any, SuccessTuple, Union, Optional
+from meerschaum.utils.typing import Mapping, Any, SuccessTuple, Union, Optional, Dict
 
 def parse_connector_keys(
         keys : str,
         construct : bool = True,
+        as_tuple : bool = False,
         **kw : Any
-    ) -&gt; Union[meerschaum.connectors.Connector, Mapping[str, Any], None]:
+    ) -&gt; (
+        Union[
+            meerschaum.connectors.Connector,
+            Dict[str, Any],
+            Tuple[
+                Union[
+                    meerschaum.connectors.Connector,
+                    Dict[str, Any],
+                    None
+                ],
+                str
+            ],
+            None
+        ]
+    ):
     &#34;&#34;&#34;
     Convenience function for parsing connector keys and returning Connector objects.
 
@@ -53,17 +68,21 @@ def parse_connector_keys(
     :param construct:
         If True, return a Connector. Otherwise return the configuration dictionary for a Connector.
         **NOTE:** This may include passwords, so be careful.
+
+    :param as_tuple:
+        If True, return a tuple of (conn, keys). `conn` may be a dict or connector.
     &#34;&#34;&#34;
     from meerschaum.connectors import get_connector
     from meerschaum.config import get_config
+    from meerschaum.config.static import _static_config
     from meerschaum.utils.warnings import error
 
     ### `get_connector()` handles the logic for falling back to &#39;main&#39;,
     ### so don&#39;t make any decisions here.
     vals = str(keys).split(&#39;:&#39;)
-    _get_connector_kw = {&#39;type&#39; : vals[0]}
-    if len(vals) &gt; 1:
-        _get_connector_kw[&#39;label&#39;] = vals[1]
+    _type = vals[0]
+    _label = vals[1] if len(vals) &gt; 1 else _static_config()[&#39;connectors&#39;][&#39;default_label&#39;]
+    _get_connector_kw = {&#39;type&#39; : _type, &#39;label&#39; : _label}
     _get_connector_kw.update(kw)
 
     if construct:
@@ -75,16 +94,23 @@ def parse_connector_keys(
         ### invalid type
         if vals[0] not in connectors_config:
             return None
-        type_config = get_config(&#39;meerschaum&#39;, &#39;connectors&#39;, vals[0])
+        type_config = get_config(&#39;meerschaum&#39;, &#39;connectors&#39;, _type)
         default_config = type_config.get(&#39;default&#39;, None)
-        conn = type_config.get(vals[1], None)
-        if default_config is not None:
+        conn = type_config.get(_label, None)
+        if default_config is not None and conn is not None:
             default_config.update(conn)
             conn = default_config
 
+    if as_tuple:
+        return conn, _type + &#39;:&#39; + _label
     return conn
 
-def parse_instance_keys(keys : str, construct : bool = True, **kw):
+def parse_instance_keys(
+        keys : str,
+        construct : bool = True,
+        as_tuple : bool = False,
+        **kw
+    ):
     &#34;&#34;&#34;
     Parse the Meerschaum instance value into a Connector object.
     &#34;&#34;&#34;
@@ -97,7 +123,7 @@ def parse_instance_keys(keys : str, construct : bool = True, **kw):
         keys = get_config(&#39;meerschaum&#39;, &#39;instance&#39;)
     keys = str(keys)
     
-    return parse_connector_keys(keys, construct=construct, **kw)
+    return parse_connector_keys(keys, construct=construct, as_tuple=as_tuple, **kw)
 
 def parse_repo_keys(keys : str = None, **kw):
     &#34;&#34;&#34;
@@ -155,7 +181,7 @@ def is_valid_connector_keys(
 </details>
 </dd>
 <dt id="meerschaum.connectors.parse.parse_connector_keys"><code class="name flex">
-<span>def <span class="ident">parse_connector_keys</span></span>(<span>keys: str, construct: bool = True, **kw: Any) ‑> Union[<a title="meerschaum.connectors.Connector" href="Connector.html">meerschaum.connectors.Connector</a>, Mapping[str, Any], None]</span>
+<span>def <span class="ident">parse_connector_keys</span></span>(<span>keys: str, construct: bool = True, as_tuple: bool = False, **kw: Any) ‑> Union[<a title="meerschaum.connectors.Connector" href="Connector.html">meerschaum.connectors.Connector</a>, Dict[str, Any], Tuple[Union[<a title="meerschaum.connectors.Connector" href="Connector.html">meerschaum.connectors.Connector</a>, Dict[str, Any], None], str], None]</span>
 </code></dt>
 <dd>
 <div class="desc"><p>Convenience function for parsing connector keys and returning Connector objects.</p>
@@ -164,7 +190,9 @@ Keys are split by a colon (':') into type and label. If the label is omitted,
 (e.g. 'sql'), pass it along to <code><a title="meerschaum.connectors.get_connector" href="index.html#meerschaum.connectors.get_connector">get_connector()</a></code> to parse.</p>
 <p>:param construct:
 If True, return a Connector. Otherwise return the configuration dictionary for a Connector.
-<strong>NOTE:</strong> This may include passwords, so be careful.</p></div>
+<strong>NOTE:</strong> This may include passwords, so be careful.</p>
+<p>:param as_tuple:
+If True, return a tuple of (conn, keys). <code>conn</code> may be a dict or connector.</p></div>
 <details class="source">
 <summary>
 <span>Expand source code</span>
@@ -172,8 +200,23 @@ If True, return a Connector. Otherwise return the configuration dictionary for a
 <pre><code class="python">def parse_connector_keys(
         keys : str,
         construct : bool = True,
+        as_tuple : bool = False,
         **kw : Any
-    ) -&gt; Union[meerschaum.connectors.Connector, Mapping[str, Any], None]:
+    ) -&gt; (
+        Union[
+            meerschaum.connectors.Connector,
+            Dict[str, Any],
+            Tuple[
+                Union[
+                    meerschaum.connectors.Connector,
+                    Dict[str, Any],
+                    None
+                ],
+                str
+            ],
+            None
+        ]
+    ):
     &#34;&#34;&#34;
     Convenience function for parsing connector keys and returning Connector objects.
 
@@ -184,17 +227,21 @@ If True, return a Connector. Otherwise return the configuration dictionary for a
     :param construct:
         If True, return a Connector. Otherwise return the configuration dictionary for a Connector.
         **NOTE:** This may include passwords, so be careful.
+
+    :param as_tuple:
+        If True, return a tuple of (conn, keys). `conn` may be a dict or connector.
     &#34;&#34;&#34;
     from meerschaum.connectors import get_connector
     from meerschaum.config import get_config
+    from meerschaum.config.static import _static_config
     from meerschaum.utils.warnings import error
 
     ### `get_connector()` handles the logic for falling back to &#39;main&#39;,
     ### so don&#39;t make any decisions here.
     vals = str(keys).split(&#39;:&#39;)
-    _get_connector_kw = {&#39;type&#39; : vals[0]}
-    if len(vals) &gt; 1:
-        _get_connector_kw[&#39;label&#39;] = vals[1]
+    _type = vals[0]
+    _label = vals[1] if len(vals) &gt; 1 else _static_config()[&#39;connectors&#39;][&#39;default_label&#39;]
+    _get_connector_kw = {&#39;type&#39; : _type, &#39;label&#39; : _label}
     _get_connector_kw.update(kw)
 
     if construct:
@@ -206,18 +253,20 @@ If True, return a Connector. Otherwise return the configuration dictionary for a
         ### invalid type
         if vals[0] not in connectors_config:
             return None
-        type_config = get_config(&#39;meerschaum&#39;, &#39;connectors&#39;, vals[0])
+        type_config = get_config(&#39;meerschaum&#39;, &#39;connectors&#39;, _type)
         default_config = type_config.get(&#39;default&#39;, None)
-        conn = type_config.get(vals[1], None)
-        if default_config is not None:
+        conn = type_config.get(_label, None)
+        if default_config is not None and conn is not None:
             default_config.update(conn)
             conn = default_config
 
+    if as_tuple:
+        return conn, _type + &#39;:&#39; + _label
     return conn</code></pre>
 </details>
 </dd>
 <dt id="meerschaum.connectors.parse.parse_instance_keys"><code class="name flex">
-<span>def <span class="ident">parse_instance_keys</span></span>(<span>keys: str, construct: bool = True, **kw)</span>
+<span>def <span class="ident">parse_instance_keys</span></span>(<span>keys: str, construct: bool = True, as_tuple: bool = False, **kw)</span>
 </code></dt>
 <dd>
 <div class="desc"><p>Parse the Meerschaum instance value into a Connector object.</p></div>
@@ -225,7 +274,12 @@ If True, return a Connector. Otherwise return the configuration dictionary for a
 <summary>
 <span>Expand source code</span>
 </summary>
-<pre><code class="python">def parse_instance_keys(keys : str, construct : bool = True, **kw):
+<pre><code class="python">def parse_instance_keys(
+        keys : str,
+        construct : bool = True,
+        as_tuple : bool = False,
+        **kw
+    ):
     &#34;&#34;&#34;
     Parse the Meerschaum instance value into a Connector object.
     &#34;&#34;&#34;
@@ -238,7 +292,7 @@ If True, return a Connector. Otherwise return the configuration dictionary for a
         keys = get_config(&#39;meerschaum&#39;, &#39;instance&#39;)
     keys = str(keys)
     
-    return parse_connector_keys(keys, construct=construct, **kw)</code></pre>
+    return parse_connector_keys(keys, construct=construct, as_tuple=as_tuple, **kw)</code></pre>
 </details>
 </dd>
 <dt id="meerschaum.connectors.parse.parse_repo_keys"><code class="name flex">

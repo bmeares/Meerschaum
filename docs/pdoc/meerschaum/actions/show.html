@@ -67,6 +67,26 @@ def show(
     }
     return choose_subaction(action, show_options, **kw)
 
+def _complete_show(
+        action : List[str] = [],
+        **kw : Any
+    ) -&gt; List[str]:
+    &#34;&#34;&#34;
+    Override the default Meerschaum `complete_` function.
+    &#34;&#34;&#34;
+
+    options = {
+        &#39;connectors&#39;: _complete_show_connectors,
+    }
+
+    if len(action) &gt; 0 and action[0] in options:
+        sub = action[0]
+        del action[0]
+        return options[sub](action=action, **kw)
+
+    from meerschaum.actions.shell import default_action_completer
+    return default_action_completer(action=([&#39;show&#39;] + action), **kw)
+
 def _show_actions(**kw : Any) -&gt; SuccessTuple:
     &#34;&#34;&#34;
     Show available actions
@@ -97,14 +117,14 @@ def _show_config(
     &#34;&#34;&#34;
     from meerschaum.utils.formatting import pprint
     from meerschaum.config import get_config
-    from meerschaum.config._paths import CONFIG_PATH
+    from meerschaum.config._paths import CONFIG_DIR_PATH
     from meerschaum.utils.debug import dprint
-    if debug: dprint(f&#34;Configuration loaded from {CONFIG_PATH}&#34;)
+    if debug: dprint(f&#34;Configuration loaded from {CONFIG_DIR_PATH}&#34;)
 
-    keys = list(action)
-    if keys == [&#39;&#39;]: keys = []
-
-    pprint(get_config(*keys))
+    valid, config = get_config(*action, as_tuple=True, warn=False)
+    if not valid:
+        return False, f&#34;Invalid configuration keys &#39;{action}&#39;.&#34;
+    pprint(config)
     return (True, &#34;Success&#34;)
 
 def _show_modules(**kw : Any) -&gt; SuccessTuple:
@@ -186,12 +206,17 @@ def _show_connectors(
 
     from meerschaum.connectors.parse import parse_instance_keys
     if action != []:
-        conn = parse_instance_keys(action[0], debug=debug)
-        if conn:
-            print(make_header(&#34;\n&#34; + f&#34;Attributes for connector &#39;{conn}&#39;:&#34;))
-            pprint(conn.__dict__)
+        attr, keys = parse_instance_keys(action[0], construct=False, as_tuple=True, debug=debug)
+        if attr:
+            print(make_header(&#34;\n&#34; + f&#34;Attributes for connector &#39;{keys}&#39;:&#34;))
+            pprint(attr)
 
     return True, &#34;Success&#34;
+
+def _complete_show_connectors(action : List[str] = [], **kw : Any) -&gt; List[str]:
+    from meerschaum.utils.misc import get_connector_labels
+    _text = action[0] if len(action) &gt; 0 else &#34;&#34;
+    return get_connector_labels(search_term=_text, ignore_exact_match=True)
 
 def _show_arguments(
         **kw : Any
@@ -297,7 +322,7 @@ def _show_plugins(
     if action == [&#39;&#39;] or len(action) == 0:
         _to_print = get_plugins_names()
         header = &#34;Installed plugins:&#34;
-        info(&#34;To see all installable plugins, run `show plugins all`&#34;)
+        info(f&#34;To see all installable plugins from repository &#39;{repo_connector}&#39;, run `show plugins all`&#34;)
         info(&#34;To see plugins created by a certain user, run `show plugins [username]`&#34;)
     elif action[0] in (&#39;all&#39;):
         _to_print = repo_connector.get_plugins(debug=debug)
@@ -308,9 +333,7 @@ def _show_plugins(
         _to_print = repo_connector.get_plugins(user_id=user_id, debug=debug)
         header = f&#34;Plugins from user &#39;{username}&#39; at Meerschaum repository &#39;{repo_connector}&#39;:&#34;
 
-    print()
     print_options(_to_print, header=header, debug=debug, **kw)
-    print()
 
     return True, &#34;Success&#34;
 

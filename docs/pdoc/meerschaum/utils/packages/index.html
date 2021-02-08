@@ -111,6 +111,7 @@ def deactivate_venv(
     Remove a virtual environment from sys.path (if it&#39;s been activated)
     &#34;&#34;&#34;
     global active_venvs
+    if venv is None: return True
     if debug:
         from meerschaum.utils.debug import dprint
         dprint(f&#34;Deactivating virtual environment &#39;{venv}&#39;...&#34;, color=color)
@@ -142,8 +143,9 @@ def activate_venv(
     &#34;&#34;&#34;
     global active_venvs
     if venv in active_venvs: return True
+    if venv is None: return True
     if debug: from meerschaum.utils.debug import dprint
-    import sys
+    import sys, os
     from meerschaum.config._paths import VIRTENV_RESOURCES_PATH
     virtualenv = attempt_import(
         &#39;virtualenv&#39;,
@@ -180,7 +182,6 @@ def activate_venv(
         sys.path.insert(0, str(target))
     if debug: dprint(f&#39;sys.path: {sys.path}&#39;, color=color)
     return True
-
 
 def venv_exec(code: str, venv: str = &#39;mrsm&#39;, debug: bool = False) -&gt; bool:
     &#34;&#34;&#34;
@@ -255,7 +256,7 @@ def pip_install(
     if &#39;--progress-bar&#39; in _args:
         _args.remove(&#39;--progress-bar&#39;)
     if UNICODE:
-        _args += [&#39;--progress-bar&#39;, &#39;emoji&#39;]
+        _args += [&#39;--progress-bar&#39;, &#39;pretty&#39;]
     else:
         _args += [&#39;--progress-bar&#39;, &#39;ascii&#39;]
     if debug:
@@ -264,8 +265,8 @@ def pip_install(
             #  _args.append(&#39;-v&#39;)
     else:
         if &#39;-q&#39; not in _args or &#39;-qq&#39; not in _args or &#39;-qqq&#39; not in _args:
-            #  pass
-            _args.append(&#39;-qqq&#39;)
+            pass
+            #  _args.append(&#39;-q&#39;)
 
 
     _packages = []
@@ -582,17 +583,14 @@ def get_modules_from_package(
     names = True            : (__all__, modules)
     &#34;&#34;&#34;
     from os.path import dirname, join, isfile, isdir, basename
-    import glob, importlib
+    import glob
 
-    if recursive:
-        pattern = &#39;*&#39;
-    else:
-        pattern = &#39;*.py&#39;
+    pattern = &#39;*&#39; if recursive else &#39;*.py&#39;
     module_names = glob.glob(join(dirname(package.__file__), pattern), recursive=recursive)
     _all = [
         basename(f)[:-3] if isfile(f) else basename(f)
         for f in module_names
-        if (isfile(f) or isdir(f))
+        if ((isfile(f) and f.endswith(&#39;.py&#39;)) or isdir(f))
            and not f.endswith(&#39;__init__.py&#39;)
            and not f.endswith(&#39;__pycache__&#39;)
     ]
@@ -872,6 +870,13 @@ def venv_target_path(venv : str, debug : bool = False) -&gt; pathlib.Path:
     if &#39;site-packages&#39; in os.listdir(target_path): ### Windows
         target_path = os.path.join(target_path, &#39;site-packages&#39;)
     else:
+        from meerschaum.config._paths import set_root
+        #  set_root(os.environ.get(&#39;MEERSCHAUM_ROOT_DIR&#39;, None))
+        #  print(os.environ.get(&#39;MEERSCHAUM_ROOT_DIR&#39;, &#39;NOTHING&#39;))
+        #  print(target_path)
+        #  print(os.listdir(target_path))
+        import traceback
+        traceback.print_stack()
         print(f&#34;Failed to find site-packages directory for virtual environment &#39;{venv}&#39;.&#34;)
         sys.exit(1)
 
@@ -913,8 +918,9 @@ def venv_target_path(venv : str, debug : bool = False) -&gt; pathlib.Path:
     &#34;&#34;&#34;
     global active_venvs
     if venv in active_venvs: return True
+    if venv is None: return True
     if debug: from meerschaum.utils.debug import dprint
-    import sys
+    import sys, os
     from meerschaum.config._paths import VIRTENV_RESOURCES_PATH
     virtualenv = attempt_import(
         &#39;virtualenv&#39;,
@@ -1202,6 +1208,7 @@ Defaults to False.</p></div>
     Remove a virtual environment from sys.path (if it&#39;s been activated)
     &#34;&#34;&#34;
     global active_venvs
+    if venv is None: return True
     if debug:
         from meerschaum.utils.debug import dprint
         dprint(f&#34;Deactivating virtual environment &#39;{venv}&#39;...&#34;, color=color)
@@ -1253,17 +1260,14 @@ names = True
     names = True            : (__all__, modules)
     &#34;&#34;&#34;
     from os.path import dirname, join, isfile, isdir, basename
-    import glob, importlib
+    import glob
 
-    if recursive:
-        pattern = &#39;*&#39;
-    else:
-        pattern = &#39;*.py&#39;
+    pattern = &#39;*&#39; if recursive else &#39;*.py&#39;
     module_names = glob.glob(join(dirname(package.__file__), pattern), recursive=recursive)
     _all = [
         basename(f)[:-3] if isfile(f) else basename(f)
         for f in module_names
-        if (isfile(f) or isdir(f))
+        if ((isfile(f) and f.endswith(&#39;.py&#39;)) or isdir(f))
            and not f.endswith(&#39;__init__.py&#39;)
            and not f.endswith(&#39;__pycache__&#39;)
     ]
@@ -1663,7 +1667,7 @@ Uses the tensorflow LazyLoader implementation (Apache 2.0 License)</p></div>
     if &#39;--progress-bar&#39; in _args:
         _args.remove(&#39;--progress-bar&#39;)
     if UNICODE:
-        _args += [&#39;--progress-bar&#39;, &#39;emoji&#39;]
+        _args += [&#39;--progress-bar&#39;, &#39;pretty&#39;]
     else:
         _args += [&#39;--progress-bar&#39;, &#39;ascii&#39;]
     if debug:
@@ -1672,8 +1676,8 @@ Uses the tensorflow LazyLoader implementation (Apache 2.0 License)</p></div>
             #  _args.append(&#39;-v&#39;)
     else:
         if &#39;-q&#39; not in _args or &#39;-qq&#39; not in _args or &#39;-qqq&#39; not in _args:
-            #  pass
-            _args.append(&#39;-qqq&#39;)
+            pass
+            #  _args.append(&#39;-q&#39;)
 
 
     _packages = []
@@ -1878,6 +1882,13 @@ E.g. Translates to <code>/usr/bin/python -m [package]</code></p></div>
     if &#39;site-packages&#39; in os.listdir(target_path): ### Windows
         target_path = os.path.join(target_path, &#39;site-packages&#39;)
     else:
+        from meerschaum.config._paths import set_root
+        #  set_root(os.environ.get(&#39;MEERSCHAUM_ROOT_DIR&#39;, None))
+        #  print(os.environ.get(&#39;MEERSCHAUM_ROOT_DIR&#39;, &#39;NOTHING&#39;))
+        #  print(target_path)
+        #  print(os.listdir(target_path))
+        import traceback
+        traceback.print_stack()
         print(f&#34;Failed to find site-packages directory for virtual environment &#39;{venv}&#39;.&#34;)
         sys.exit(1)
 

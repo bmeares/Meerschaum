@@ -115,17 +115,14 @@ with correct credentials, as well as a network connection and valid permissions.
 ```
 
 &#34;&#34;&#34;
-default_instance_labels = {
-    &#39;api&#39; : &#39;main&#39;,
-    &#39;sql&#39; : &#39;main&#39;,
-}
-
 
 class Pipe:
     from ._fetch import fetch
     from ._data import get_data, get_backtrack_data, get_rowcount
     from ._register import register
-    from ._attributes import attributes, parameters, columns, get_columns
+    from ._attributes import (
+        attributes, parameters, columns, get_columns, get_id, id
+    )
     from ._show import show
     from ._edit import edit
     from ._sync import sync, get_sync_time, exists
@@ -159,7 +156,7 @@ class Pipe:
         mrsm_instance : str : None
             connector_keys for the Meerschaum instance connector (SQL or API connector)
         &#34;&#34;&#34;
-        if location_key == &#39;[None]&#39;: location_key = None
+        if location_key in (&#39;[None]&#39;, &#39;None&#39;): location_key = None
         self.connector_keys = connector_keys
         self.metric_key = metric_key
         self.location_key = location_key
@@ -227,21 +224,8 @@ class Pipe:
         return self._connector
 
     @property
-    def id(self):
-        if not (&#39;_id&#39; in self.__dict__ and self._id):
-            self._id = self.instance_connector.get_pipe_id(self)
-        return self._id
-
-    @property
     def sync_time(self):
         return self.get_sync_time()
-
-    #  def json(self, *args, **kw):
-        #  &#34;&#34;&#34;
-        #  Serialize Pipes into JSON
-        #  &#34;&#34;&#34;
-        #  #  import json
-        #  return str(self)
 
     def __str__(self):
         &#34;&#34;&#34;
@@ -310,7 +294,9 @@ connector_keys for the Meerschaum instance connector (SQL or API connector)</p><
     from ._fetch import fetch
     from ._data import get_data, get_backtrack_data, get_rowcount
     from ._register import register
-    from ._attributes import attributes, parameters, columns, get_columns
+    from ._attributes import (
+        attributes, parameters, columns, get_columns, get_id, id
+    )
     from ._show import show
     from ._edit import edit
     from ._sync import sync, get_sync_time, exists
@@ -344,7 +330,7 @@ connector_keys for the Meerschaum instance connector (SQL or API connector)</p><
         mrsm_instance : str : None
             connector_keys for the Meerschaum instance connector (SQL or API connector)
         &#34;&#34;&#34;
-        if location_key == &#39;[None]&#39;: location_key = None
+        if location_key in (&#39;[None]&#39;, &#39;None&#39;): location_key = None
         self.connector_keys = connector_keys
         self.metric_key = metric_key
         self.location_key = location_key
@@ -412,21 +398,8 @@ connector_keys for the Meerschaum instance connector (SQL or API connector)</p><
         return self._connector
 
     @property
-    def id(self):
-        if not (&#39;_id&#39; in self.__dict__ and self._id):
-            self._id = self.instance_connector.get_pipe_id(self)
-        return self._id
-
-    @property
     def sync_time(self):
         return self.get_sync_time()
-
-    #  def json(self, *args, **kw):
-        #  &#34;&#34;&#34;
-        #  Serialize Pipes into JSON
-        #  &#34;&#34;&#34;
-        #  #  import json
-        #  return str(self)
 
     def __str__(self):
         &#34;&#34;&#34;
@@ -525,7 +498,7 @@ def connector(self):
 <pre><code class="python">@property
 def id(self):
     if not (&#39;_id&#39; in self.__dict__ and self._id):
-        self._id = self.instance_connector.get_pipe_id(self)
+        self._id = self.get_id()
     return self._id</code></pre>
 </details>
 </dd>
@@ -624,7 +597,15 @@ def sync_time(self):
     &#34;&#34;&#34;
     Call the Pipe&#39;s instance connector&#39;s delete_pipe method
     &#34;&#34;&#34;
-    return self.instance_connector.delete_pipe(self, debug=debug, **kw)</code></pre>
+    result = self.instance_connector.delete_pipe(self, debug=debug, **kw)
+    if not isinstance(result, tuple):
+        return False, f&#34;Received unexpected result from &#39;{self.instance_connector}&#39;: {result}&#34;
+    if result[0]:
+        to_delete = [&#39;_id&#39;, &#39;_attributes&#39;, &#39;_parameters&#39;, &#39;_columns&#39;]
+        for member in to_delete:
+            if member in self.__dict__:
+                del self.__dict__[member]
+    return result</code></pre>
 </details>
 </dd>
 <dt id="meerschaum.Pipe.Pipe.drop"><code class="name flex">
@@ -876,7 +857,7 @@ Search this region.           Ignore this, even if there's data.
 </details>
 </dd>
 <dt id="meerschaum.Pipe.Pipe.get_data"><code class="name flex">
-<span>def <span class="ident">get_data</span></span>(<span>self, begin: Optional[datetime.datetime] = None, end: Optional[datetime.datetime] = None, refresh: bool = False, debug: bool = False) ‑> Optional[pandas.DataFrame]</span>
+<span>def <span class="ident">get_data</span></span>(<span>self, begin: Optional[datetime.datetime] = None, end: Optional[datetime.datetime] = None, refresh: bool = False, params: Optional[Dict[str, Any]] = None, debug: bool = False) ‑> Optional[pandas.DataFrame]</span>
 </code></dt>
 <dd>
 <div class="desc"><p>Get data from the instance connector.</p></div>
@@ -889,6 +870,7 @@ Search this region.           Ignore this, even if there's data.
         begin : Optional[datetime.datetime] = None,
         end : Optional[datetime.datetime] = None,
         refresh : bool = False,
+        params : Optional[Dict[str, Any]] = None,
         debug : bool = False
     ) -&gt; Optional[pandas.DataFrame]:
     &#34;&#34;&#34;
@@ -899,14 +881,31 @@ Search this region.           Ignore this, even if there's data.
             pipe = self,
             begin = begin,
             end = end,
+            params = params,
             debug = debug
         )
     ### TODO caching / sync logic
     return self._data</code></pre>
 </details>
 </dd>
+<dt id="meerschaum.Pipe.Pipe.get_id"><code class="name flex">
+<span>def <span class="ident">get_id</span></span>(<span>self, **kw)</span>
+</code></dt>
+<dd>
+<div class="desc"><p>Fetch a pipe's ID from its instance connector.</p></div>
+<details class="source">
+<summary>
+<span>Expand source code</span>
+</summary>
+<pre><code class="python">def get_id(self, **kw):
+    &#34;&#34;&#34;
+    Fetch a pipe&#39;s ID from its instance connector.
+    &#34;&#34;&#34;
+    return self.instance_connector.get_pipe_id(self, **kw)</code></pre>
+</details>
+</dd>
 <dt id="meerschaum.Pipe.Pipe.get_rowcount"><code class="name flex">
-<span>def <span class="ident">get_rowcount</span></span>(<span>self, begin: "Optional['datetime.datetime']" = None, end: "Optional['datetime.datetime']" = None, remote: bool = False, debug: bool = False) ‑> Union[int, NoneType]</span>
+<span>def <span class="ident">get_rowcount</span></span>(<span>self, begin: "Optional['datetime.datetime']" = None, end: "Optional['datetime.datetime']" = None, remote: bool = False, params: Optional[Dict[str, Any]] = None, debug: bool = False) ‑> Union[int, NoneType]</span>
 </code></dt>
 <dd>
 <div class="desc"><p>Get a Pipe's cached or remote rowcount.</p>
@@ -927,6 +926,7 @@ NOTE: This is experimental!</p>
         begin : Optional[&#39;datetime.datetime&#39;] = None,
         end : Optional[&#39;datetime.datetime&#39;] = None,
         remote : bool = False,
+        params : Optional[Dict[str, Any]] = None,
         debug : bool = False
     ) -&gt; Optional[int]:
     &#34;&#34;&#34;
@@ -946,7 +946,7 @@ NOTE: This is experimental!</p>
     &#34;&#34;&#34;
     connector = self.instance_connector
     if remote: connector = self.connector
-    return connector.get_pipe_rowcount(begin=begin, end=end, remote=remote, debug=debug)</code></pre>
+    return connector.get_pipe_rowcount(self, begin=begin, end=end, remote=remote, params=params, debug=debug)</code></pre>
 </details>
 </dd>
 <dt id="meerschaum.Pipe.Pipe.get_sync_time"><code class="name flex">
@@ -1306,6 +1306,7 @@ Only applies when blocking = False.</p>
 <li><code><a title="meerschaum.Pipe.Pipe.get_backtrack_data" href="#meerschaum.Pipe.Pipe.get_backtrack_data">get_backtrack_data</a></code></li>
 <li><code><a title="meerschaum.Pipe.Pipe.get_columns" href="#meerschaum.Pipe.Pipe.get_columns">get_columns</a></code></li>
 <li><code><a title="meerschaum.Pipe.Pipe.get_data" href="#meerschaum.Pipe.Pipe.get_data">get_data</a></code></li>
+<li><code><a title="meerschaum.Pipe.Pipe.get_id" href="#meerschaum.Pipe.Pipe.get_id">get_id</a></code></li>
 <li><code><a title="meerschaum.Pipe.Pipe.get_rowcount" href="#meerschaum.Pipe.Pipe.get_rowcount">get_rowcount</a></code></li>
 <li><code><a title="meerschaum.Pipe.Pipe.get_sync_time" href="#meerschaum.Pipe.Pipe.get_sync_time">get_sync_time</a></code></li>
 <li><code><a title="meerschaum.Pipe.Pipe.id" href="#meerschaum.Pipe.Pipe.id">id</a></code></li>

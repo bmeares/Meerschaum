@@ -171,7 +171,9 @@ def default_action_completer(
 def _check_complete_keys(
         line : str
     ) -&gt; Optional[List[str]]:
+    from meerschaum.actions.arguments._parser import parser, get_arguments_triggers
     from meerschaum.actions.arguments._parse_arguments import parse_line
+
     ### TODO Add all triggers
     trigger_args = {
         &#39;-c&#39; : &#39;connector_keys&#39;,
@@ -183,15 +185,49 @@ def _check_complete_keys(
         &#39;--mrsm-instance&#39; : &#39;mrsm_instance&#39;,
     }
 
+
+    ### TODO Find out arg possibilities
+    possibilities = []
+    #  last_word = line.split(&#39; &#39;)[-1]
+    last_word = line.rstrip(&#39; &#39;).split(&#39; &#39;)[-1]
+
+    if last_word.startswith(&#39;-&#39;):
+        for _arg, _triggers in get_arguments_triggers().items():
+            for _trigger in _triggers:
+                if _trigger.startswith(last_word):
+                    #  and _trigger != last_word
+                    if _trigger != last_word or not line.endswith(&#39; &#39;):
+                        possibilities.append(_trigger)
+        if not line.endswith(&#39; &#39;):
+            return possibilities
+
+    #  print()
+    #  print(last_word)
+    #  print(len(line.split(&#39; &#39;)[-1]))
+    #  print()
+
+    if last_word.startswith(&#39;-&#39;) and not last_word.endswith(&#39;-&#39;):
+        if line.endswith(&#39; &#39;) and last_word in trigger_args:
+            is_trigger = True
+        elif line.endswith(&#39; &#39;):
+            ### return empty list so we don&#39;t try to parse an incomplete line.
+            #  print(&#39;ABORT&#39;)
+            return []
+
     from meerschaum.utils.misc import get_connector_labels
+
+    if last_word.rstrip(&#39; &#39;) in trigger_args:
+        return get_connector_labels()
+
     for trigger, var in trigger_args.items():
         if trigger in line:
             ### check if any text has been entered for the key
             if line.rstrip(&#39; &#39;).endswith(trigger):
                 return get_connector_labels()
-            args = parse_line(line.rstrip(&#39; &#39;))
-            search_term = args[var] if var != &#39;connector_keys&#39; else args[var][0]
-            return get_connector_labels(search_term=search_term)
+
+            #  args = parse_line(line.rstrip(&#39; &#39;))
+            #  search_term = args[var] if var != &#39;connector_keys&#39; else args[var][0]
+            return get_connector_labels(search_term=last_word.rstrip(&#39; &#39;))
 
     return None
 
@@ -261,14 +297,17 @@ class Shell(cmd.Cmd):
         from meerschaum.utils.misc import remove_ansi
         from meerschaum.utils.formatting import CHARSET, ANSI, UNICODE, colored
         
-        self.intro = get_config(&#39;system&#39;, &#39;shell&#39;, CHARSET, &#39;intro&#39;, patch=patch)
-        self.intro += &#39;\n&#39; + &#39;&#39;.join(
-            [&#39; &#39;
-                for i in range(
-                    string_width(self.intro) - len(&#39;v&#39; + version)
-                )
-            ]
-        ) + &#39;v&#39; + version
+        if self.__dict__.get(&#39;intro&#39;, None) != &#39;&#39;:
+            self.intro = get_config(&#39;system&#39;, &#39;shell&#39;, CHARSET, &#39;intro&#39;, patch=patch)
+            self.intro += &#39;\n&#39; + &#39;&#39;.join(
+                [&#39; &#39;
+                    for i in range(
+                        string_width(self.intro) - len(&#39;v&#39; + version)
+                    )
+                ]
+            ) + &#39;v&#39; + version
+        else:
+            self.intro = &#34;&#34;
         self._prompt = get_config(&#39;system&#39;, &#39;shell&#39;, CHARSET, &#39;prompt&#39;, patch=patch)
         self.prompt = self._prompt
         self.ruler = get_config(&#39;system&#39;, &#39;shell&#39;, CHARSET, &#39;ruler&#39;, patch=patch)
@@ -392,6 +431,16 @@ class Shell(cmd.Cmd):
             readline.set_history_length(get_config(&#39;system&#39;, &#39;shell&#39;, &#39;max_history&#39;, patch=patch))
             readline.write_history_file(SHELL_HISTORY_PATH)
 
+        ### TODO Migrate to using entry for everything instead of replicating entry inside precmd.
+        #  from meerschaum.actions._entry import entry
+        #  from meerschaum.actions.arguments._parser import get_arguments_triggers
+        #  import shlex
+        #  _sysargs = shlex.split(line)
+        #  _avail_args = get_arguments_triggers()
+        #  for a, _triggers in _avail_args.items():
+            #  if a == &#39;help&#39;
+
+
         from meerschaum.actions.arguments import parse_line
         args = parse_line(line)
         if args[&#39;help&#39;]:
@@ -435,16 +484,23 @@ class Shell(cmd.Cmd):
         ### delete the first action
         ### e.g. &#39;show actions&#39; -&gt; [&#39;actions&#39;]
         del args[&#39;action&#39;][0]
-        #  if len(args[&#39;action&#39;]) == 0: args[&#39;action&#39;] = [&#39;&#39;]
 
         positional_only = (action not in self._actions)
         if positional_only:
             return original_line
 
+        from meerschaum.utils.packages import activate_venv, deactivate_venv
+        plugin_name = (
+            self._actions[action].__module__.split(&#39;.&#39;)[-1] if self._actions[action].__module__.startswith(&#39;plugins.&#39;)
+            else None
+        )
+
         ### execute the meerschaum action
         ### and print the response message in case of failure
         from meerschaum.utils.formatting import print_tuple
+        activate_venv(venv=plugin_name, debug=self.debug)
         response = func(**args)
+        deactivate_venv(venv=plugin_name, debug=self.debug)
         if isinstance(response, tuple):
             if not response[0] or self.debug:
                 print()
@@ -709,7 +765,7 @@ class Shell(cmd.Cmd):
 
         ### if sysargs are provided, skip printing the intro and execute instead
         if self._sysargs:
-            self.intro = None
+            self.intro = &#34;&#34;
             self.precmd(&#39; &#39;.join(self._sysargs))
 
     def postloop(self):
@@ -890,14 +946,17 @@ to the out of the box configuration.</p>
         from meerschaum.utils.misc import remove_ansi
         from meerschaum.utils.formatting import CHARSET, ANSI, UNICODE, colored
         
-        self.intro = get_config(&#39;system&#39;, &#39;shell&#39;, CHARSET, &#39;intro&#39;, patch=patch)
-        self.intro += &#39;\n&#39; + &#39;&#39;.join(
-            [&#39; &#39;
-                for i in range(
-                    string_width(self.intro) - len(&#39;v&#39; + version)
-                )
-            ]
-        ) + &#39;v&#39; + version
+        if self.__dict__.get(&#39;intro&#39;, None) != &#39;&#39;:
+            self.intro = get_config(&#39;system&#39;, &#39;shell&#39;, CHARSET, &#39;intro&#39;, patch=patch)
+            self.intro += &#39;\n&#39; + &#39;&#39;.join(
+                [&#39; &#39;
+                    for i in range(
+                        string_width(self.intro) - len(&#39;v&#39; + version)
+                    )
+                ]
+            ) + &#39;v&#39; + version
+        else:
+            self.intro = &#34;&#34;
         self._prompt = get_config(&#39;system&#39;, &#39;shell&#39;, CHARSET, &#39;prompt&#39;, patch=patch)
         self.prompt = self._prompt
         self.ruler = get_config(&#39;system&#39;, &#39;shell&#39;, CHARSET, &#39;ruler&#39;, patch=patch)
@@ -1021,6 +1080,16 @@ to the out of the box configuration.</p>
             readline.set_history_length(get_config(&#39;system&#39;, &#39;shell&#39;, &#39;max_history&#39;, patch=patch))
             readline.write_history_file(SHELL_HISTORY_PATH)
 
+        ### TODO Migrate to using entry for everything instead of replicating entry inside precmd.
+        #  from meerschaum.actions._entry import entry
+        #  from meerschaum.actions.arguments._parser import get_arguments_triggers
+        #  import shlex
+        #  _sysargs = shlex.split(line)
+        #  _avail_args = get_arguments_triggers()
+        #  for a, _triggers in _avail_args.items():
+            #  if a == &#39;help&#39;
+
+
         from meerschaum.actions.arguments import parse_line
         args = parse_line(line)
         if args[&#39;help&#39;]:
@@ -1064,16 +1133,23 @@ to the out of the box configuration.</p>
         ### delete the first action
         ### e.g. &#39;show actions&#39; -&gt; [&#39;actions&#39;]
         del args[&#39;action&#39;][0]
-        #  if len(args[&#39;action&#39;]) == 0: args[&#39;action&#39;] = [&#39;&#39;]
 
         positional_only = (action not in self._actions)
         if positional_only:
             return original_line
 
+        from meerschaum.utils.packages import activate_venv, deactivate_venv
+        plugin_name = (
+            self._actions[action].__module__.split(&#39;.&#39;)[-1] if self._actions[action].__module__.startswith(&#39;plugins.&#39;)
+            else None
+        )
+
         ### execute the meerschaum action
         ### and print the response message in case of failure
         from meerschaum.utils.formatting import print_tuple
+        activate_venv(venv=plugin_name, debug=self.debug)
         response = func(**args)
+        deactivate_venv(venv=plugin_name, debug=self.debug)
         if isinstance(response, tuple):
             if not response[0] or self.debug:
                 print()
@@ -1338,7 +1414,7 @@ to the out of the box configuration.</p>
 
         ### if sysargs are provided, skip printing the intro and execute instead
         if self._sysargs:
-            self.intro = None
+            self.intro = &#34;&#34;
             self.precmd(&#39; &#39;.join(self._sysargs))
 
     def postloop(self):
@@ -1746,14 +1822,17 @@ The default repository (mrsm.io) is loaded from the Meerschaum configuraton file
     from meerschaum.utils.misc import remove_ansi
     from meerschaum.utils.formatting import CHARSET, ANSI, UNICODE, colored
     
-    self.intro = get_config(&#39;system&#39;, &#39;shell&#39;, CHARSET, &#39;intro&#39;, patch=patch)
-    self.intro += &#39;\n&#39; + &#39;&#39;.join(
-        [&#39; &#39;
-            for i in range(
-                string_width(self.intro) - len(&#39;v&#39; + version)
-            )
-        ]
-    ) + &#39;v&#39; + version
+    if self.__dict__.get(&#39;intro&#39;, None) != &#39;&#39;:
+        self.intro = get_config(&#39;system&#39;, &#39;shell&#39;, CHARSET, &#39;intro&#39;, patch=patch)
+        self.intro += &#39;\n&#39; + &#39;&#39;.join(
+            [&#39; &#39;
+                for i in range(
+                    string_width(self.intro) - len(&#39;v&#39; + version)
+                )
+            ]
+        ) + &#39;v&#39; + version
+    else:
+        self.intro = &#34;&#34;
     self._prompt = get_config(&#39;system&#39;, &#39;shell&#39;, CHARSET, &#39;prompt&#39;, patch=patch)
     self.prompt = self._prompt
     self.ruler = get_config(&#39;system&#39;, &#39;shell&#39;, CHARSET, &#39;ruler&#39;, patch=patch)
@@ -1892,6 +1971,16 @@ assume the action is <code>bash</code></p></div>
         readline.set_history_length(get_config(&#39;system&#39;, &#39;shell&#39;, &#39;max_history&#39;, patch=patch))
         readline.write_history_file(SHELL_HISTORY_PATH)
 
+    ### TODO Migrate to using entry for everything instead of replicating entry inside precmd.
+    #  from meerschaum.actions._entry import entry
+    #  from meerschaum.actions.arguments._parser import get_arguments_triggers
+    #  import shlex
+    #  _sysargs = shlex.split(line)
+    #  _avail_args = get_arguments_triggers()
+    #  for a, _triggers in _avail_args.items():
+        #  if a == &#39;help&#39;
+
+
     from meerschaum.actions.arguments import parse_line
     args = parse_line(line)
     if args[&#39;help&#39;]:
@@ -1935,16 +2024,23 @@ assume the action is <code>bash</code></p></div>
     ### delete the first action
     ### e.g. &#39;show actions&#39; -&gt; [&#39;actions&#39;]
     del args[&#39;action&#39;][0]
-    #  if len(args[&#39;action&#39;]) == 0: args[&#39;action&#39;] = [&#39;&#39;]
 
     positional_only = (action not in self._actions)
     if positional_only:
         return original_line
 
+    from meerschaum.utils.packages import activate_venv, deactivate_venv
+    plugin_name = (
+        self._actions[action].__module__.split(&#39;.&#39;)[-1] if self._actions[action].__module__.startswith(&#39;plugins.&#39;)
+        else None
+    )
+
     ### execute the meerschaum action
     ### and print the response message in case of failure
     from meerschaum.utils.formatting import print_tuple
+    activate_venv(venv=plugin_name, debug=self.debug)
     response = func(**args)
+    deactivate_venv(venv=plugin_name, debug=self.debug)
     if isinstance(response, tuple):
         if not response[0] or self.debug:
             print()
@@ -1987,7 +2083,7 @@ to run hooks before the command loop begins. See
 
     ### if sysargs are provided, skip printing the intro and execute instead
     if self._sysargs:
-        self.intro = None
+        self.intro = &#34;&#34;
         self.precmd(&#39; &#39;.join(self._sysargs))</code></pre>
 </details>
 </dd>
