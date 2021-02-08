@@ -55,7 +55,9 @@ class Pipe:
     from ._fetch import fetch
     from ._data import get_data, get_backtrack_data, get_rowcount
     from ._register import register
-    from ._attributes import attributes, parameters, columns, get_columns
+    from ._attributes import (
+        attributes, parameters, columns, get_columns, get_id, id
+    )
     from ._show import show
     from ._edit import edit
     from ._sync import sync, get_sync_time, exists
@@ -155,12 +157,6 @@ class Pipe:
             else:
                 return None
         return self._connector
-
-    @property
-    def id(self):
-        if not ('_id' in self.__dict__ and self._id):
-            self._id = self.instance_connector.get_pipe_id(self)
-        return self._id
 
     @property
     def sync_time(self):

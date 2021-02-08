@@ -47,8 +47,8 @@ def register_plugin(
         return False, (
             "The administrator for this server has not allowed plugin registration.\n\n" +
             "Please contact the system administrator, or if you are running this server, " +
-            "open the configuration file with `edit config` and search for 'permissions'. " +
-            " Under the keys system:api:permissions:registration, you can toggle various registration types."
+            "open the configuration file with `edit config system` and search for 'permissions'. " +
+            " Under the keys api:permissions:registration, you can toggle various registration types."
         )
 
     import json, shutil, pathlib, os

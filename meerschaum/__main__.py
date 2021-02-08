@@ -8,7 +8,7 @@ mrsm CLI entrypoint
 """
 
 def main():
-    import sys
+    import sys, os
     sysargs = sys.argv[1:]
 
     ### Catch help flags.
@@ -21,15 +21,20 @@ def main():
         from meerschaum.actions.arguments._parse_arguments import parse_arguments
         from meerschaum.config._paths import set_root
         import pathlib
-        args = parse_arguments(sysargs)
-        config_dir_path = pathlib.Path(args['root_dir']).absolute()
-        if not config_dir_path.exists():
-            print(
-                f"Invalid config directory '{str(config_dir_path)}'.\n" +
-                "Please enter a valid path for `--config-dir`."
-            )
-            sys.exit(1)
-        set_root(config_dir_path)
+        from meerschaum.config.static import _static_config
+        env_var = _static_config()['config']['environment_root']
+        if env_var in os.environ:
+            print(f"WARNING: '{env_var}' is set, so --root-dir will be ignored.")
+        else:
+            args = parse_arguments(sysargs)
+            config_dir_path = pathlib.Path(args['root_dir']).absolute()
+            if not config_dir_path.exists():
+                print(
+                    f"Invalid config directory '{str(config_dir_path)}'.\n" +
+                    "Please enter a valid path for `--config-dir`."
+                )
+                sys.exit(1)
+            set_root(config_dir_path)
 
     from meerschaum.actions import entry, get_shell
 

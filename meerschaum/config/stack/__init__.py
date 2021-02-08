@@ -70,7 +70,7 @@ compose_header = """
 #          Any changes you make will be overwritten.         #
 #                                                            #
 # Instead, you can change this file's configuration with     #
-# `edit config` under the stack:docker-compose.yaml section. #
+# `edit config stack` under the docker-compose.yaml section. #
 #                                                            #
 ##############################################################
 """

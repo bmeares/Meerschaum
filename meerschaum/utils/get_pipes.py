@@ -6,6 +6,8 @@
 Return a dictionary (or list) of pipe objects. See documentation below for more information.
 """
 
+from __future__ import annotations
+
 from meerschaum.utils.typing import (
     Sequence, Optional, Union, Mapping, Any, InstanceConnector, PipesDict
 )
@@ -151,8 +153,8 @@ def get_pipes(
 
 def methods(
         method : str,
-        connector : 'Connector (API or SQL)',
-        **kw
+        connector : 'meerschaum.connectors.Connector',
+        **kw : Any
     ) -> list:
     """
     Return a list of tuples containing (connector_keys, metric_key, location_key)

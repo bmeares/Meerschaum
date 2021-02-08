@@ -14,4 +14,12 @@ def delete(
     """
     Call the Pipe's instance connector's delete_pipe method
     """
-    return self.instance_connector.delete_pipe(self, debug=debug, **kw)
+    result = self.instance_connector.delete_pipe(self, debug=debug, **kw)
+    if not isinstance(result, tuple):
+        return False, f"Received unexpected result from '{self.instance_connector}': {result}"
+    if result[0]:
+        to_delete = ['_id', '_attributes', '_parameters', '_columns']
+        for member in to_delete:
+            if member in self.__dict__:
+                del self.__dict__[member]
+    return result

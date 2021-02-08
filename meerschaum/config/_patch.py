@@ -6,16 +6,17 @@
 Functions for patching the configuration dictionary
 """
 import os
-from meerschaum.utils.yaml import yaml, _yaml
 from meerschaum.config._paths import PATCH_DIR_PATH, PERMANENT_PATCH_DIR_PATH
 from meerschaum.config._read_config import read_config
 patch_config = None
 if PATCH_DIR_PATH.exists():
+    from meerschaum.utils.yaml import yaml, _yaml
     if _yaml is not None:
         patch_config = read_config(directory=PATCH_DIR_PATH)
 
 permanent_patch_config = None
 if PERMANENT_PATCH_DIR_PATH.exists():
+    from meerschaum.utils.yaml import yaml, _yaml
     if _yaml is not None:
         permanent_patch_config = read_config(directory=PERMANENT_PATCH_DIR_PATH)
 else:

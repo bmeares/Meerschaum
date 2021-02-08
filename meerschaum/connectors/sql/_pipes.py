@@ -26,7 +26,7 @@ def register_pipe(
     from meerschaum.connectors.sql.tables import get_tables
     pipes = get_tables(mrsm_instance=self, debug=debug)['pipes']
 
-    if pipe.id is not None:
+    if pipe.get_id(debug=debug) is not None:
         return False, f"Pipe '{pipe}' is already registered"
 
     ### NOTE: if `parameters` is supplied in the Pipe constructor,
@@ -177,8 +177,11 @@ def fetch_pipes_keys(
 
     ### parse regular params
     _where = [
-        pipes.c[key] == val
-        for key, val in _params.items() if not isinstance(val, list)
+        pipes.c[key] == val 
+        for key, val in _params.items()
+        if (
+            not isinstance(val, list) and not isinstance(val, tuple)
+        )
     ]
     q = sqlalchemy.select(
         [pipes.c.connector_keys, pipes.c.metric_key, pipes.c.location_key]
@@ -186,7 +189,7 @@ def fetch_pipes_keys(
 
     ### parse IN params
     for c, vals in cols.items():
-        if vals:
+        if (isinstance(vals, list) or isinstance(vals, tuple)) and vals:
             q = q.where(pipes.c[c].in_(vals))
 
     ### execute the query and return a list of tuples
@@ -250,8 +253,8 @@ def create_indices(
     failures = 0
     for col, q in index_queries.items():
         if debug: dprint(f"Creating index on column '{col}' for Pipe '{pipe}'")
-        if not self.exec(q, silent=True, debug=debug):
-            warn(f"Failed to create index on column '{col}' for Pipe '{pipe}'")
+        if not self.exec(q, silent=debug, debug=debug):
+            #  warn(f"Failed to create index on column '{col}' for Pipe '{pipe}'")
             failures += 1
     return failures == 0
 
@@ -398,10 +401,12 @@ def get_pipe_id(
     pipes = get_tables(mrsm_instance=self, debug=debug)['pipes']
 
     query = sqlalchemy.select([pipes.c.pipe_id]).where(
-        pipes.c.connector_keys == pipe.connector_keys and
-        pipes.c.metric_key == pipe.metric_key and
-        pipes.c.location_key == pipe.location_key
-    )
+            pipes.c.connector_keys == pipe.connector_keys
+        ).where(
+            pipes.c.metric_key == pipe.metric_key
+        ).where(
+            pipes.c.location_key == pipe.location_key
+        )
     _id = self.value(query, debug=debug)
     if _id is not None:
         _id = int(_id)
@@ -420,6 +425,10 @@ def get_pipe_attributes(
     from meerschaum.utils.packages import attempt_import
     sqlalchemy = attempt_import('sqlalchemy')
     pipes = get_tables(mrsm_instance=self, debug=debug)['pipes']
+
+    if pipe.id is None:
+        return None
+
     try:
         q = sqlalchemy.select([pipes]).where(pipes.c.pipe_id == pipe.id)
         attributes = self.read(q, debug=debug).to_dict('records')[0]
@@ -504,33 +513,20 @@ def sync_pipe(
     if debug: dprint("Fetched data:\n" + str(df))
 
     ### if table does not exist, create it with indices
+    is_new = False
     if not pipe.exists(debug=debug):
-        if debug: dprint(f"Creating empty table for Pipe '{pipe}'...")
-        if debug: dprint("New table data types:\n" + f"{df.head(0).dtypes}")
-        ### create empty table
-        success = self.to_sql(
-            df.head(0),
-            if_exists = 'append',
-            name = str(pipe),
-            debug = debug
-        )
-        if success and debug: dprint(f"Successfully created table for Pipe '{pipe}'. Creating indices...")
-        elif not success:
-            msg = f"Failed to create table for Pipe '{pipe}'."
-            if debug: dprint(msg + " Exiting...")
-            return False, msg
-        ### build indices on Pipe's root table
-        if not self.create_indices(pipe, debug=debug):
-            if debug: dprint(f"Failed to create indices for Pipe '{pipe}'. Continuing...")
+        check_existing = False
+        is_new = True
 
     new_data_df = filter_existing(pipe, df, debug=debug) if check_existing else df
-    if debug: dprint(f"New unseen data:\n" + str(new_data_df))
+    if debug:
+        dprint(f"New unseen data:\n" + str(new_data_df))
 
     if_exists = kw.get('if_exists', 'append')
     if 'if_exists' in kw: kw.pop('if_exists')
 
     ### append new data to Pipe's table
-    return self.to_sql(
+    result = self.to_sql(
         new_data_df,
         name = str(pipe),
         if_exists = if_exists,
@@ -538,6 +534,11 @@ def sync_pipe(
         as_tuple = True,
         **kw
     )
+    if is_new:
+        if not self.create_indices(pipe, debug=debug):
+            if debug: dprint(f"Failed to create indices for Pipe '{pipe}'. Continuing...")
+    return result
+
 
 def filter_existing(pipe, df, debug : bool = False):
     """
@@ -707,6 +708,5 @@ def drop_pipe(
         success = self.exec(f"DROP VIEW {pipe_name}", silent=True, debug=debug) is not None
     
     msg = "Success" if success else f"Failed to drop pipe '{pipe}'."
-    if debug: dprint(msg)
     return success, msg
 

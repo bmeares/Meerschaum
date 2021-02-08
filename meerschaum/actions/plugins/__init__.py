@@ -71,9 +71,10 @@ def import_plugins() -> Optional['ModuleType']:
 def load_plugins(debug : bool = False, shell : bool = False):
     ### append the plugins modules
     from inspect import isfunction, getmembers
-    #  import meerschaum.actions as actions_mod
     from meerschaum.actions import __all__ as _all, modules
     from meerschaum.utils.packages import get_modules_from_package
+    from meerschaum.config._paths import PLUGINS_INIT_PATH
+    PLUGINS_INIT_PATH.touch()
     _plugins_names, plugins_modules = get_modules_from_package(
         import_plugins(),
         names = True,

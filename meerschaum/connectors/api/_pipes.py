@@ -128,16 +128,23 @@ def sync_pipe(
     """
     from meerschaum.utils.debug import dprint
     from meerschaum.utils.warnings import warn
+    from meerschaum.utils.misc import json_serialize_datetime
     import json
     if df is None:
         msg = f"DataFrame is None. Cannot sync pipe '{pipe}"
         return False, msg
 
     ### allow syncing dict or JSON without needing to import pandas (for IOT devices)
-    if isinstance(df, dict): json_str = json.dumps(df)
-    elif isinstance(df, str): json_str = df
-    else: json_str = df.to_json(date_format='iso', date_unit='us')
+    if isinstance(df, dict):
+        json_str = json.dumps(df, default=json_serialize_datetime)
+    elif isinstance(df, str):
+        json_str = df
+    else:
+        json_str = df.to_json(date_format='iso', date_unit='us')
 
+    ### Send columns in case the user has defined them locally.
+    if pipe.columns:
+        kw['columns'] = json.dumps(pipe.columns)
     r_url = pipe_r_url(pipe) + '/data'
     if debug: dprint(f"Posting data to {r_url}...")
     try:
@@ -151,8 +158,12 @@ def sync_pipe(
     except Exception as e:
         warn(str(e))
         return False, str(e)
+        
+    j = response.json()
+    if isinstance(j, dict) and 'detail' in j:
+        return False, j['detail']
 
-    return tuple(response.json())
+    return tuple(j)
 
 def delete_pipe(
         self,
@@ -162,7 +173,7 @@ def delete_pipe(
     """
     Delete a Pipe and drop its table.
     """
-    from meerschaum.utils.warning import error
+    from meerschaum.utils.warnings import error
     if pipe is None: error(f"Pipe cannot be None.")
     return self.do_action(
         ['delete', 'pipes'],
@@ -191,6 +202,9 @@ def get_pipe_data(
     except Exception as e:
         warn(str(e))
         return None
+    if not response:
+        if 'detail' in response.json():
+            return False, response.json()['detail']
     from meerschaum.utils.packages import import_pandas
     from meerschaum.utils.misc import parse_df_datetimes
     pd = import_pandas()
@@ -303,11 +317,13 @@ def pipe_exists(
     """
     Consult the API to see if a Pipe exists
     """
-    import json
     r_url = pipe_r_url(pipe)
     response = self.get(r_url + '/exists', debug=debug)
     if debug: dprint("Received response: " + str(response.text))
-    return json.loads(response.text)
+    j = response.json()
+    if isinstance(j, dict) and 'detail' in j:
+        return False, j['detail']
+    return j
 
 def create_metadata(
         self,
