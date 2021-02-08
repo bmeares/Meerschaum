@@ -190,7 +190,7 @@ def edit_file(
     except Exception as e: ### can't open with default editors
         if debug: dprint(e)
         if debug: dprint('Failed to open file with system editor. Falling back to pyvim...')
-        pyvim = attempt_import('pyvim' lazy=False)
+        pyvim = attempt_import('pyvim', lazy=False)
         run_python_package('pyvim', [path], venv='mrsm', debug=debug)
 
 def is_pipe_registered(
