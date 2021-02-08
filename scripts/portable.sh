@@ -16,10 +16,31 @@ tars["WINDOWS"]="windows.tar.zst"
 tars["DEBIAN"]="debian.tar.zst"
 tars["MACOS"]="macos.tar.gz"
 
+### Check if zstd is installed.
+v=`zstd -V`
+if [ "$?" != 0 ]; then
+  echo "Installing zstd..."
+  sudo apt update && sudo apt install zstd -y
+fi
+
+shopt -s extglob
+
+### Download and extract the files
 for os in "${!urls[@]}"; do
-  if [ ! -f "${tars[$key]}" ]; then
-    echo "${tars[$key]}"
-    wget -O "${tars[$key]}" "${urls[$key]}"
-    tar -I zstd -xvf "${tars[$key]}"
+  if [ ! -f "${tars[$os]}" ]; then
+    mkdir -p "${os}"
+    cd "${os}"
+    wget -O "${tars[$os]}" "${urls[$os]}"
+    tar -axvf "${tars[$os]}"
+    cd python
+    rm -rf $(ls | grep -v install) && mv install ..
+    cd ..
+    rm -rf python && mv install python
+    cd ..
   fi
 done
+
+cd "$PARENT"
+# cp -r 
+
+### Install Meerschaum into each directory

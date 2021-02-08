@@ -10,20 +10,27 @@ sqlite_pipe = Pipe(
     mrsm_instance = get_connector('sql', 'test', flavor='sqlite', database='test.db')
 )
 timescale_pipe = Pipe('test', 'test', 'timescale', mrsm_instance='sql:main')
-api_pipe = Pipe('test', 'test', 'test', mrsm_instance='api:local')
+api_pipe = Pipe('test', 'test', 'api', mrsm_instance='api:local')
 
-@pytest.mark.parametrize("pipe", [sqlite_pipe])
+@pytest.fixture(autouse=True)
+def run_before_and_after():
+    yield
 
-def test_register_pipe(pipe):
-    output = pipe.register()
-    if output[0] is False:
-        pipe.delete()
-        output = pipe.register()
-    assert output
-
-@pytest.mark.parametrize("pipe", [sqlite_pipe])
-def test_delete_pipe(pipe):
+@pytest.mark.parametrize("pipe", [sqlite_pipe, timescale_pipe, api_pipe])
+def test_register_and_delete(pipe):
     output = pipe.delete()
-    assert output[0]
+    assert pipe.register()
+    assert pipe.delete()
+    assert pipe.register()
 
-
+@pytest.mark.parametrize("pipe", [sqlite_pipe, timescale_pipe, api_pipe])
+def test_sync(pipe):
+    import datetime
+    pipe.columns = {'datetime' : 'dt', 'id' : 'id'}
+    assert pipe.drop()
+    d = {'dt' : [datetime.datetime.utcnow()], 'id' : [1]}
+    assert pipe.sync(d)
+    d2 = {'dt' : [datetime.datetime.utcnow()], 'id' : [1]}
+    assert pipe.sync(d2)
+    data = pipe.get_data()
+    assert len(data) == 2

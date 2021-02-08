@@ -100,8 +100,8 @@ def register_user(
         return False, (
             "The administrator for this server has not allowed user registration.\n\n" +
             "Please contact the system administrator, or if you are running this server, " +
-            "open the configuration file with `edit config` and search for 'permissions'. " +
-            " Under the keys system:api:permissions:registration, you can toggle various registration types."
+            "open the configuration file with `edit config system` and search for 'permissions'. " +
+            " Under the keys api:permissions:registration, you can toggle various registration types."
         )
     user = User(username, password, type=type, email=email, attributes=attributes)
     return get_connector().register_user(user, debug=debug)

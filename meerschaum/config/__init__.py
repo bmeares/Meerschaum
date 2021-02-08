@@ -162,6 +162,22 @@ if environment_config in os.environ:
             f"Skipping patching os environment into config..."
         )
 
+import os, pathlib
+environment_root_dir = _static_config()['config']['environment_root']
+if environment_root_dir in os.environ:
+    from meerschaum.config._paths import set_root
+    root_dir_path = pathlib.Path(os.environ[environment_root_dir]).absolute()
+    if not root_dir_path.exists():
+        print(
+            f"Invalid root directory '{str(root_dir_path)}' set for environment variable '{environment_root_dir}'.\n" +
+            "Please enter a valid path for {environment_root_dir}."
+        )
+        import sys
+        sys.exit(1)
+    set_root(root_dir_path)
+
+
+
 ### if interactive shell, print welcome header
 import sys
 __doc__ = f"Meerschaum v{__version__}"

@@ -37,13 +37,13 @@ def register_pipe(
     Register a new pipe.
     """
     from meerschaum.config import get_config
-    allow_pipes = get_config('system', 'api', 'permissions', 'registrations', 'pipes', patch=True)
+    allow_pipes = get_config('system', 'api', 'permissions', 'registration', 'pipes', patch=True)
     if not allow_pipes:
         return False, (
             "The administrator for this server has not allowed pipe registration.\n\n" +
             "Please contact the system administrator, or if you are running this server, " +
-            "open the configuration file with `edit config` and search for 'permissions'. " +
-            " Under the keys system:api:permissions:registration, you can toggle various registration types."
+            "open the configuration file with `edit config system` and search for 'permissions'. " +
+            " Under the keys api:permissions:registration, you can toggle various registration types."
         )
     pipe_object = get_pipe(pipe.connector_keys, pipe.metric_key, pipe.location_key)
     if is_pipe_registered(pipe_object, pipes(refresh=True)):
@@ -198,7 +198,8 @@ def sync_pipe(
         check_existing : bool = True,
         blocking : bool = True,
         force : bool = False,
-        workers : int = None,
+        workers : Optional[int] = None,
+        columns : Optional[str] = None,
         curr_user : 'meerschaum._internal.User.User' = fastapi.Depends(manager),
         debug : bool = False,
     ) -> tuple:
@@ -209,7 +210,9 @@ def sync_pipe(
     from meerschaum import Pipe
     import json
     p = get_pipe(connector_keys, metric_key, location_key)
-    if not is_pipe_registered(p, pipes(refresh=True)):
+    if not p.columns and columns is not None:
+        p.columns = json.loads(columns)
+    if not p.columns and not is_pipe_registered(p, pipes(refresh=True)):
         raise fastapi.HTTPException(
             status_code = 409,
             detail = "Pipe must be registered with the datetime column specified"
@@ -356,8 +359,8 @@ def get_rowcount(
         connector_keys : str,
         metric_key : str,
         location_key : str,
-        begin : Optional['datetime.datetime'] = None,
-        end : Optional['datetime.datetime'] = None,
+        begin : Optional[datetime.datetime] = None,
+        end : Optional[datetime.datetime] = None,
         params : Optional[Dict[str, Any]] = None,
         curr_user : 'meerschaum._internal.User.User' = fastapi.Depends(manager),
     ) -> int:

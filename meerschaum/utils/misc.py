@@ -601,9 +601,14 @@ def filter_unseen_df(
     """
     if old_df is None: return new_df
     old_cols = list(old_df.columns)
+    print('old_df:', old_df)
+    print('old_df.columns:', old_df.columns)
+    print('new_df:', new_df)
+    print('new_df.columns:', new_df.columns)
     try:
         new_df = new_df[old_cols]
     except Exception as e:
+        from meerschaum.utils.warnings import warn
         warn(f"Was not able to cast old columns onto new DataFrame. Are both DataFrames the same shape? Error:\n{e}")
         return None
 
@@ -829,4 +834,10 @@ def get_connector_labels(
     possibilities = [ c for c in conns if c.startswith(search_term) and c != (search_term if ignore_exact_match else None) ]
     return sorted(possibilities)
 
-
+def json_serialize_datetime(dt : datetime.datetime) -> str:
+    """
+    Serialize a datetime.datetime object into JSON (ISO format string).
+    """
+    import datetime
+    if isinstance(dt, datetime.datetime):
+        return dt.isoformat() + 'Z'

@@ -100,8 +100,6 @@ def __getattr__(name : str) -> Path:
     ### Create directories or touch files.
     if 'RESOURCES_PATH' in name or name == 'CONFIG_DIR_PATH':
         path.mkdir(parents=True, exist_ok=True)
-    elif name == 'PLUGINS_INIT_PATH':
-        path.touch()
     elif 'FILENAME' in name:
         path = str(path)
 

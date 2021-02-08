@@ -45,4 +45,7 @@ def do_action(
         return False, f"Invalid action '{action}'"
     if 'mrsm_instance' not in keywords:
         keywords['mrsm_instance'] = str(get_connector())
-    return actions[action](debug=keywords.get('debug', debug), **keywords)
+    _debug = keywords.get('debug', debug)
+    if 'debug' in keywords:
+        del keywords['debug']
+    return actions[action](debug=_debug, **keywords)
