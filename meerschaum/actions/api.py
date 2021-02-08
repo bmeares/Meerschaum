@@ -95,7 +95,8 @@ def _api_start(
     from meerschaum.config._paths import API_UVICORN_CONFIG_PATH
     from meerschaum.config import get_config
     import os
-    uvicorn = attempt_import('uvicorn')
+    ### Uvicorn must be installed on the host because of multiprocessing reasons.
+    uvicorn = attempt_import('uvicorn', venv=None)
 
     uvicorn_config = dict(api_config['uvicorn'])
     if port is None:
