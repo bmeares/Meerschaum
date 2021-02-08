@@ -73,7 +73,8 @@ def load_plugins(debug : bool = False, shell : bool = False):
     from inspect import isfunction, getmembers
     from meerschaum.actions import __all__ as _all, modules
     from meerschaum.utils.packages import get_modules_from_package
-    from meerschaum.config._paths import PLUGINS_INIT_PATH
+    from meerschaum.config._paths import PLUGINS_INIT_PATH, PLUGINS_RESOURCES_PATH
+    PLUGINS_RESOURCES_PATH.mkdir(parents=True, exist_ok=True)
     PLUGINS_INIT_PATH.touch()
     _plugins_names, plugins_modules = get_modules_from_package(
         import_plugins(),
