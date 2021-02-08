@@ -40,7 +40,8 @@ from meerschaum.utils.typing import SuccessTuple, Any, List
 
 def stack(
         action : List[str] = [],
-        sub_args : list = [],
+        sysargs : List[str] = [],
+        sub_args : List[str] = [],
         yes : bool = False,
         force : bool = False,
         debug : bool = False,
@@ -63,7 +64,7 @@ def stack(
     from meerschaum.utils.debug import dprint
     from meerschaum.utils.warnings import warn
     from meerschaum.utils.formatting import ANSI
-    import os
+    import os, sys
 
     bootstrap_question = (
         &#34;Bootstrap configuration?\n\n&#34;
@@ -92,7 +93,7 @@ def stack(
 
     compose_command = [&#39;up&#39;]
     ### default: alias stack as docker-compose
-    if action[0] != &#39;&#39;:
+    if len(action) &gt; 0 and action[0] != &#39;&#39;:
         compose_command = action
 
     ### if command is just `stack`, add --build
@@ -110,7 +111,10 @@ def stack(
     ### prepend settings before the docker-compose action
     settings_list = project_name_list + ansi_list + debug_list
 
-    cmd_list = [&#39;docker-compose&#39;] + settings_list + compose_command + sub_args
+    #  cmd_list = [&#39;docker-compose&#39;] + settings_list + compose_command + sub_args
+    cmd_list = [&#39;docker-compose&#39;] + settings_list + compose_command + (
+        sysargs[2:] if (len(sysargs) &gt; 2 and not sub_args) else sub_args
+    )
     if debug: dprint(cmd_list)
     call(cmd_list, cwd=STACK_COMPOSE_PATH.parent)
 
@@ -128,7 +132,7 @@ def stack(
 <h2 class="section-title" id="header-functions">Functions</h2>
 <dl>
 <dt id="meerschaum.actions.stack.stack"><code class="name flex">
-<span>def <span class="ident">stack</span></span>(<span>action: List[str] = [], sub_args: list = [], yes: bool = False, force: bool = False, debug: bool = False, **kw: Any) ‑> Tuple[bool, str]</span>
+<span>def <span class="ident">stack</span></span>(<span>action: List[str] = [], sysargs: List[str] = [], sub_args: List[str] = [], yes: bool = False, force: bool = False, debug: bool = False, **kw: Any) ‑> Tuple[bool, str]</span>
 </code></dt>
 <dd>
 <div class="desc"><p>Control the Meerschaum stack with Docker Compose.
@@ -141,7 +145,8 @@ Docker Compose command to run. E.g. 'config' will print Docker Compose configura
 </summary>
 <pre><code class="python">def stack(
         action : List[str] = [],
-        sub_args : list = [],
+        sysargs : List[str] = [],
+        sub_args : List[str] = [],
         yes : bool = False,
         force : bool = False,
         debug : bool = False,
@@ -164,7 +169,7 @@ Docker Compose command to run. E.g. 'config' will print Docker Compose configura
     from meerschaum.utils.debug import dprint
     from meerschaum.utils.warnings import warn
     from meerschaum.utils.formatting import ANSI
-    import os
+    import os, sys
 
     bootstrap_question = (
         &#34;Bootstrap configuration?\n\n&#34;
@@ -193,7 +198,7 @@ Docker Compose command to run. E.g. 'config' will print Docker Compose configura
 
     compose_command = [&#39;up&#39;]
     ### default: alias stack as docker-compose
-    if action[0] != &#39;&#39;:
+    if len(action) &gt; 0 and action[0] != &#39;&#39;:
         compose_command = action
 
     ### if command is just `stack`, add --build
@@ -211,7 +216,10 @@ Docker Compose command to run. E.g. 'config' will print Docker Compose configura
     ### prepend settings before the docker-compose action
     settings_list = project_name_list + ansi_list + debug_list
 
-    cmd_list = [&#39;docker-compose&#39;] + settings_list + compose_command + sub_args
+    #  cmd_list = [&#39;docker-compose&#39;] + settings_list + compose_command + sub_args
+    cmd_list = [&#39;docker-compose&#39;] + settings_list + compose_command + (
+        sysargs[2:] if (len(sysargs) &gt; 2 and not sub_args) else sub_args
+    )
     if debug: dprint(cmd_list)
     call(cmd_list, cwd=STACK_COMPOSE_PATH.parent)
 

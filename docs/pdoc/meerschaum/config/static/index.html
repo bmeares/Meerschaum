@@ -54,7 +54,32 @@ def _static_config():
                     &#39;connectors&#39; : &#39;/connectors&#39;,
                     &#39;version&#39; : &#39;/version&#39;,
                 }
-            }
+            },
+            &#39;config&#39; : {
+                &#39;default_filetype&#39; : &#39;json&#39;,
+                &#39;environment_key&#39; : &#39;MEERSCHAUM_CONFIG&#39;,
+                &#39;environment_root&#39; : &#39;MEERSCHAUM_ROOT_DIR&#39;,
+            },
+            &#39;system&#39; : {
+                &#39;arguments&#39; : {
+                    &#39;sub_decorators&#39; : (
+                        &#39;[&#39;,
+                        &#39;]&#39;
+                    ),
+                },
+            },
+            &#39;connectors&#39; : {
+                &#39;default_label&#39; : &#39;main&#39;,
+            },
+            &#39;users&#39; : {
+                &#39;password_hash&#39; : {
+                    &#39;schemes&#39; : [
+                        &#39;pbkdf2_sha256&#39;,
+                    ],
+                    &#39;default&#39; : &#39;pbkdf2_sha256&#39;,
+                    &#39;pbkdf2_sha256__default_rounds&#39; : 30000,
+                },
+            },
         }
     return static_config</code></pre>
 </details>

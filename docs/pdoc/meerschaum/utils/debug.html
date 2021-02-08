@@ -51,7 +51,7 @@ def dprint(
             from meerschaum.utils.formatting import CHARSET, ANSI, colored
         except ImportError:
             CHARSET, ANSI, colored = &#39;ascii&#39;, False, None
-        from meerschaum.config._paths import CONFIG_PATH, PERMANENT_PATCH_PATH
+        from meerschaum.config._paths import CONFIG_DIR_PATH, PERMANENT_PATCH_DIR_PATH
         from meerschaum.config import _config; cf = _config()
         _color = color
     else:
@@ -73,8 +73,8 @@ def dprint(
         try:
             debug_leader = cf[&#39;system&#39;][&#39;debug&#39;][CHARSET][&#39;icon&#39;] if cf is not None else &#39;&#39;
         except KeyError:
-            print(&#34;Failed to load config. Please delete the following files and restart Meerschaum:&#34;)
-            for p in [CONFIG_PATH, PERMANENT_PATCH_PATH]:
+            print(&#34;Failed to load config. Please delete the following directories and restart Meerschaum:&#34;)
+            for p in [CONFIG_DIR_PATH, PERMANENT_PATCH_DIR_PATH]:
                 print(&#39;  - &#39; + str(p))
             debug_leader = &#39;&#39;
             ### crash if we can&#39;t load the leader
@@ -129,7 +129,7 @@ def dprint(
             from meerschaum.utils.formatting import CHARSET, ANSI, colored
         except ImportError:
             CHARSET, ANSI, colored = &#39;ascii&#39;, False, None
-        from meerschaum.config._paths import CONFIG_PATH, PERMANENT_PATCH_PATH
+        from meerschaum.config._paths import CONFIG_DIR_PATH, PERMANENT_PATCH_DIR_PATH
         from meerschaum.config import _config; cf = _config()
         _color = color
     else:
@@ -151,8 +151,8 @@ def dprint(
         try:
             debug_leader = cf[&#39;system&#39;][&#39;debug&#39;][CHARSET][&#39;icon&#39;] if cf is not None else &#39;&#39;
         except KeyError:
-            print(&#34;Failed to load config. Please delete the following files and restart Meerschaum:&#34;)
-            for p in [CONFIG_PATH, PERMANENT_PATCH_PATH]:
+            print(&#34;Failed to load config. Please delete the following directories and restart Meerschaum:&#34;)
+            for p in [CONFIG_DIR_PATH, PERMANENT_PATCH_DIR_PATH]:
                 print(&#39;  - &#39; + str(p))
             debug_leader = &#39;&#39;
             ### crash if we can&#39;t load the leader

@@ -109,21 +109,23 @@ def _delete_config(
     &#34;&#34;&#34;
     Delete configuration files.
     &#34;&#34;&#34;
-    import os
+    import os, shutil
     from meerschaum.utils.prompt import yes_no
-    from meerschaum.config._paths import CONFIG_PATH, STACK_COMPOSE_PATH, DEFAULT_CONFIG_PATH
+    from meerschaum.config._paths import CONFIG_DIR_PATH, STACK_COMPOSE_PATH, DEFAULT_CONFIG_DIR_PATH
     from meerschaum.utils.debug import dprint
-    paths = [CONFIG_PATH, STACK_COMPOSE_PATH, DEFAULT_CONFIG_PATH]
+    paths = [CONFIG_DIR_PATH, STACK_COMPOSE_PATH, DEFAULT_CONFIG_DIR_PATH]
     answer = False
     if not yes:
         sep = &#39;\n&#39; + &#39;  - &#39;
-        answer = yes_no(f&#34;Delete files?{sep + sep.join([str(p) for p in paths])}\n&#34;, default=&#39;n&#39;)
+        answer = yes_no(f&#34;Delete files and directories?{sep + sep.join([str(p) for p in paths])}\n&#34;, default=&#39;n&#39;)
 
     if answer or force:
         for path in paths:
             if debug: dprint(f&#34;Removing {path}...&#34;)
             if os.path.isfile(path):
                 os.remove(path)
+            elif os.path.isdir(path):
+                shutil.rmtree(path)
     else:
         msg = &#34;Nothing deleted.&#34;
         if debug: dprint(msg)
@@ -208,7 +210,7 @@ def _delete_users(
     from meerschaum.utils.prompt import yes_no, prompt
     from meerschaum.utils.debug import dprint
     from meerschaum.utils.warnings import warn, error, info
-    from meerschaum._internal import User
+    from meerschaum._internal.User import User
     from meerschaum.connectors.api import APIConnector
     from meerschaum.utils.formatting import print_tuple
     repo_connector = parse_repo_keys(repository)

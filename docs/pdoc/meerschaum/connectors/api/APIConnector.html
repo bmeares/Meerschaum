@@ -336,7 +336,7 @@ def token(self):
     &#34;&#34;&#34;
     Delete a Pipe and drop its table.
     &#34;&#34;&#34;
-    from meerschaum.utils.warning import error
+    from meerschaum.utils.warnings import error
     if pipe is None: error(f&#34;Pipe cannot be None.&#34;)
     return self.do_action(
         [&#39;delete&#39;, &#39;pipes&#39;],
@@ -796,7 +796,7 @@ This is used by the main <code>get_pipes()</code> function for the 'api' method.
 </details>
 </dd>
 <dt id="meerschaum.connectors.api.APIConnector.APIConnector.get_pipe_data"><code class="name flex">
-<span>def <span class="ident">get_pipe_data</span></span>(<span>self, pipe: <a title="meerschaum.Pipe" href="../../Pipe/index.html">meerschaum.Pipe</a>, begin: Optional[datetime.datetime] = None, end: Optional[datetime.datetime] = None, debug: bool = False) ‑> pandas.DataFrame</span>
+<span>def <span class="ident">get_pipe_data</span></span>(<span>self, pipe: <a title="meerschaum.Pipe" href="../../Pipe/index.html">meerschaum.Pipe</a>, begin: Optional[datetime.datetime] = None, end: Optional[datetime.datetime] = None, params: Optional[Dict[str, Any]] = None, debug: bool = False) ‑> pandas.DataFrame</span>
 </code></dt>
 <dd>
 <div class="desc"><p>Fetch data from the API</p></div>
@@ -809,6 +809,7 @@ This is used by the main <code>get_pipes()</code> function for the 'api' method.
         pipe : meerschaum.Pipe,
         begin : Optional[datetime.datetime] = None,
         end : Optional[datetime.datetime] = None,
+        params : Optional[Dict[str, Any]] = None,
         debug : bool = False
     ) -&gt; pandas.DataFrame:
     &#34;&#34;&#34;
@@ -817,10 +818,13 @@ This is used by the main <code>get_pipes()</code> function for the 'api' method.
     from meerschaum.utils.warnings import warn
     r_url = pipe_r_url(pipe)
     try:
-        response = self.get(r_url + &#34;/data&#34;, params={&#39;begin&#39;: begin, &#39;end&#39;: end}, debug=debug)
+        response = self.get(r_url + &#34;/data&#34;, json=params, params={&#39;begin&#39;: begin, &#39;end&#39;: end}, debug=debug)
     except Exception as e:
         warn(str(e))
         return None
+    if not response:
+        if &#39;detail&#39; in response.json():
+            return False, response.json()[&#39;detail&#39;]
     from meerschaum.utils.packages import import_pandas
     from meerschaum.utils.misc import parse_df_datetimes
     pd = import_pandas()
@@ -865,10 +869,10 @@ This is used by the main <code>get_pipes()</code> function for the 'api' method.
 </details>
 </dd>
 <dt id="meerschaum.connectors.api.APIConnector.APIConnector.get_pipe_rowcount"><code class="name flex">
-<span>def <span class="ident">get_pipe_rowcount</span></span>(<span>self, pipe: "'<a title="meerschaum.Pipe" href="../../Pipe/index.html">meerschaum.Pipe</a>'", begin: "'datetime.datetime'" = None, end: "'datetime.datetime'" = None, debug: bool = False) ‑> int</span>
+<span>def <span class="ident">get_pipe_rowcount</span></span>(<span>self, pipe: "'<a title="meerschaum.Pipe" href="../../Pipe/index.html">meerschaum.Pipe</a>'", begin: "'datetime.datetime'" = None, end: "'datetime.datetime'" = None, params: Optional[Dict[str, Any]] = None, remote: bool = False, debug: bool = False) ‑> Optional[int]</span>
 </code></dt>
 <dd>
-<div class="desc"></div>
+<div class="desc"><p>Get a pipe's row couunt from the API.</p></div>
 <details class="source">
 <summary>
 <span>Expand source code</span>
@@ -878,9 +882,28 @@ This is used by the main <code>get_pipes()</code> function for the 'api' method.
         pipe : &#39;meerschaum.Pipe&#39;,
         begin : &#39;datetime.datetime&#39; = None,
         end : &#39;datetime.datetime&#39; = None,
+        params : Optional[Dict[str, Any]] = None,
+        remote : bool = False,
         debug : bool = False,
-    ) -&gt; int:
-    pass</code></pre>
+    ) -&gt; Optional[int]:
+    &#34;&#34;&#34;
+    Get a pipe&#39;s row couunt from the API.
+    &#34;&#34;&#34;
+    import json
+    r_url = pipe_r_url(pipe)
+    response = self.get(
+        r_url + &#34;/rowcount&#34;,
+        json = params,
+        params = {
+            &#39;begin&#39; : begin,
+            &#39;end&#39; : end,
+            &#39;remote&#39; : remote,
+        }
+    )
+    try:
+        return int(json.loads(response.text))
+    except:
+        return None</code></pre>
 </details>
 </dd>
 <dt id="meerschaum.connectors.api.APIConnector.APIConnector.get_plugin_attributes"><code class="name flex">
@@ -1209,11 +1232,13 @@ The name of the plugin to be installed.</p></div>
     &#34;&#34;&#34;
     Consult the API to see if a Pipe exists
     &#34;&#34;&#34;
-    import json
     r_url = pipe_r_url(pipe)
     response = self.get(r_url + &#39;/exists&#39;, debug=debug)
     if debug: dprint(&#34;Received response: &#34; + str(response.text))
-    return json.loads(response.text)</code></pre>
+    j = response.json()
+    if isinstance(j, dict) and &#39;detail&#39; in j:
+        return False, j[&#39;detail&#39;]
+    return j</code></pre>
 </details>
 </dd>
 <dt id="meerschaum.connectors.api.APIConnector.APIConnector.post"><code class="name flex">
@@ -1396,16 +1421,23 @@ NOTE: columns['datetime'] must be set for new Pipes.</p></div>
     &#34;&#34;&#34;
     from meerschaum.utils.debug import dprint
     from meerschaum.utils.warnings import warn
+    from meerschaum.utils.misc import json_serialize_datetime
     import json
     if df is None:
         msg = f&#34;DataFrame is None. Cannot sync pipe &#39;{pipe}&#34;
         return False, msg
 
     ### allow syncing dict or JSON without needing to import pandas (for IOT devices)
-    if isinstance(df, dict): json_str = json.dumps(df)
-    elif isinstance(df, str): json_str = df
-    else: json_str = df.to_json(date_format=&#39;iso&#39;, date_unit=&#39;us&#39;)
+    if isinstance(df, dict):
+        json_str = json.dumps(df, default=json_serialize_datetime)
+    elif isinstance(df, str):
+        json_str = df
+    else:
+        json_str = df.to_json(date_format=&#39;iso&#39;, date_unit=&#39;us&#39;)
 
+    ### Send columns in case the user has defined them locally.
+    if pipe.columns:
+        kw[&#39;columns&#39;] = json.dumps(pipe.columns)
     r_url = pipe_r_url(pipe) + &#39;/data&#39;
     if debug: dprint(f&#34;Posting data to {r_url}...&#34;)
     try:
@@ -1419,8 +1451,12 @@ NOTE: columns['datetime'] must be set for new Pipes.</p></div>
     except Exception as e:
         warn(str(e))
         return False, str(e)
+        
+    j = response.json()
+    if isinstance(j, dict) and &#39;detail&#39; in j:
+        return False, j[&#39;detail&#39;]
 
-    return tuple(response.json())</code></pre>
+    return tuple(j)</code></pre>
 </details>
 </dd>
 <dt id="meerschaum.connectors.api.APIConnector.APIConnector.wget"><code class="name flex">

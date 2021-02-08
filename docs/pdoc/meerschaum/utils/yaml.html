@@ -73,13 +73,13 @@ class yaml:
         from meerschaum.utils.misc import filter_keywords
         return _yaml.load(*args, **filter_keywords(_yaml.load, **kw))
 
-    def dump(*args, stream=None, **kw):
+    def dump(data, stream=None, **kw):
         from meerschaum.utils.misc import filter_keywords
         get_string = False
         if stream is None and _import_name == &#39;ruamel.yaml&#39;:
             stream = _lib.compat.StringIO()
             get_string = True
-        result = _yaml.dump(*args, stream=stream, **filter_keywords(_yaml.dump, **kw))
+        result = _yaml.dump(data, stream, **filter_keywords(_yaml.dump, **kw))
         if get_string:
             return stream.getvalue()
         return result</code></pre>
@@ -133,13 +133,13 @@ class yaml:
         from meerschaum.utils.misc import filter_keywords
         return _yaml.load(*args, **filter_keywords(_yaml.load, **kw))
 
-    def dump(*args, stream=None, **kw):
+    def dump(data, stream=None, **kw):
         from meerschaum.utils.misc import filter_keywords
         get_string = False
         if stream is None and _import_name == &#39;ruamel.yaml&#39;:
             stream = _lib.compat.StringIO()
             get_string = True
-        result = _yaml.dump(*args, stream=stream, **filter_keywords(_yaml.dump, **kw))
+        result = _yaml.dump(data, stream, **filter_keywords(_yaml.dump, **kw))
         if get_string:
             return stream.getvalue()
         return result</code></pre>
@@ -389,7 +389,7 @@ Defaults to False.</p></div>
 </details>
 </dd>
 <dt id="meerschaum.utils.yaml.yaml.dump"><code class="name flex">
-<span>def <span class="ident">dump</span></span>(<span>*args, stream=None, **kw)</span>
+<span>def <span class="ident">dump</span></span>(<span>data, stream=None, **kw)</span>
 </code></dt>
 <dd>
 <div class="desc"></div>
@@ -397,13 +397,13 @@ Defaults to False.</p></div>
 <summary>
 <span>Expand source code</span>
 </summary>
-<pre><code class="python">def dump(*args, stream=None, **kw):
+<pre><code class="python">def dump(data, stream=None, **kw):
     from meerschaum.utils.misc import filter_keywords
     get_string = False
     if stream is None and _import_name == &#39;ruamel.yaml&#39;:
         stream = _lib.compat.StringIO()
         get_string = True
-    result = _yaml.dump(*args, stream=stream, **filter_keywords(_yaml.dump, **kw))
+    result = _yaml.dump(data, stream, **filter_keywords(_yaml.dump, **kw))
     if get_string:
         return stream.getvalue()
     return result</code></pre>

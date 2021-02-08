@@ -129,7 +129,6 @@ def _complete_install_plugins(
         search_term = None
     else:
         search_term = action[0]
-        #  return []
     from meerschaum.connectors.parse import parse_repo_keys
     try:
         repo_connector = parse_repo_keys(repository)
@@ -142,6 +141,7 @@ def _complete_install_plugins(
 
 def _install_packages(
         action : List[str] = [],
+        sub_args : List[str] = [],
         debug : bool = False,
         **kw : Any
     ) -&gt; SuccessTuple:
@@ -155,14 +155,14 @@ def _install_packages(
         return False, f&#34;No packages to install&#34;
     from meerschaum.utils.warnings import info
     from meerschaum.utils.packages import pip_install
-    if pip_install(action, debug=debug):
+    if pip_install(*action, args=[&#39;--upgrade&#39;] + sub_args, debug=debug):
         return True, f&#34;Successfully installed packages to virtual environment &#39;mrsm&#39;:\n{action}&#34;
     return False, f&#34;Failed to install packages:\n{action}&#34;
 
 def _complete_install_packages(
 
     ) -&gt; List[str]:
-    pass
+    return []
 
 
 ### NOTE: This must be the final statement of the module.
@@ -185,7 +185,7 @@ install.__doc__ += _choices_docstring(&#39;install&#39;)</code></pre>
 <dd>
 <div class="desc"><p>Install Meerschaum plugins or Python packages.</p>
 <h2 id="options">Options</h2>
-<p><code><a title="meerschaum.actions.install.install" href="#meerschaum.actions.install.install">install()</a> [_install, _install_packages, _install_plugins, packages, plugins]</code></p></div>
+<p><code><a title="meerschaum.actions.install.install" href="#meerschaum.actions.install.install">install()</a> [packages, plugins]</code></p></div>
 <details class="source">
 <summary>
 <span>Expand source code</span>
