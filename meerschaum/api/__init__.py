@@ -13,9 +13,10 @@ from meerschaum.utils.packages import attempt_import
 from meerschaum.utils.get_pipes import get_pipes as get_pipes_sql
 import pathlib, os
 endpoints = _static_config()['api']['endpoints']
-fastapi = attempt_import('fastapi', lazy=True)
-starlette_reponses = attempt_import('starlette.responses', warn=False)
-python_multipart = attempt_import('multipart')
+aiofiles = attempt_import('aiofiles', lazy=False)
+fastapi = attempt_import('fastapi', lazy=False)
+starlette_reponses = attempt_import('starlette.responses', warn=False, lazy=False)
+python_multipart = attempt_import('multipart', lazy=False)
 
 fastapi_login = attempt_import('fastapi_login')
 LoginManager = fastapi_login.LoginManager
