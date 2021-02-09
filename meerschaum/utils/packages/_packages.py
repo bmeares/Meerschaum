@@ -16,8 +16,9 @@ packages dictionary is structured in the following schema:
 packages = {
     'required' : {
         #  'ruamel.yaml'       : 'ruamel.yaml',
+        'wheel' : 'wheel',
         'yaml'       : 'PyYAML>=5.3.1',
-        'virtualenv' : 'virtualenv',
+        #  'virtualenv' : 'virtualenv',
         'typing_extensions' : 'typing_extensions',
         'pygments'       : 'pygments',
         'colorama'       : 'colorama',
@@ -33,8 +34,7 @@ packages = {
         'pip'               : 'pip',
         'update_checker'    : 'update-checker',
         'semver'            : 'semver',
-        'wheel'             : 'wheel',
-        'virtualenv'        : 'virtualenv',
+        #  'virtualenv'        : 'virtualenv',
         'dateutil'          : 'python-dateutil',
         'requests'          : 'requests',
         'pyvim'             : 'pyvim',
@@ -75,6 +75,10 @@ packages = {
         'mkdocs_material'             : 'mkdocs-material',
         'mkdocs_autolinks_plugin'     : 'mkdocs-autolinks-plugin',
         'mkdocs_awesome_pages_plugin' : 'mkdocs-awesome-pages-plugin',
+    },
+    'portable' : {
+        'pyreadline' : 'pyreadline; platform_system == "Windows"',
+        'gnureadline' : 'gnureadline; platform_system != "Windows"',
     },
 }
 packages['sql'] = {

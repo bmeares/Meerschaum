@@ -26,10 +26,13 @@ def _static_config():
                     'version' : '/version',
                 }
             },
+            'environment' : {
+                'config' : 'MRSM_CONFIG',
+                'root' : 'MRSM_ROOT_DIR',
+                'runtime' : 'MRSM_RUNTIME',
+            },
             'config' : {
                 'default_filetype' : 'json',
-                'environment_key' : 'MEERSCHAUM_CONFIG',
-                'environment_root' : 'MEERSCHAUM_ROOT_DIR',
             },
             'system' : {
                 'arguments' : {

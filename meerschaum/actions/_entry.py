@@ -39,8 +39,8 @@ def _entry(sysargs=[]):
 
     del args['action'][0]
 
-    activate_venv(venv=plugin_name, debug=True)
+    activate_venv(venv=plugin_name)
     result = actions[main_action](**args)
-    deactivate_venv(venv=plugin_name, debug=True)
+    deactivate_venv(venv=plugin_name)
 
     return result

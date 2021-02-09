@@ -124,7 +124,8 @@ default_docker_compose_config = {
             ],
             'command' : 'api start',
             'environment' : [
-                'MEERSCHAUM_CONFIG=' + env_dict['MEERSCHAUM_API_CONFIG'],
+                'MRSM_CONFIG=' + env_dict['MEERSCHAUM_API_CONFIG'],
+                'MRSM_RUNTIME=docker',
             ],
             'restart' : 'always',
             'depends_on' : [

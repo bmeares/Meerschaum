@@ -102,7 +102,7 @@ def read_config(
     ### Write missing keys if necessary.
     if len(config_to_write) > 0 and write_missing:
         from meerschaum.config._edit import write_config
-        write_config(config_to_write, directory, debug=True)
+        write_config(config_to_write, directory)
 
     ### Check for duplicate files.
     ### Found help on StackOverflow:
