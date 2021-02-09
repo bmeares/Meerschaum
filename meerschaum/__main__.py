@@ -22,7 +22,7 @@ def main():
         from meerschaum.config._paths import set_root
         import pathlib
         from meerschaum.config.static import _static_config
-        env_var = _static_config()['config']['environment_root']
+        env_var = _static_config()['environment']['root']
         if env_var in os.environ:
             print(f"WARNING: '{env_var}' is set, so --root-dir will be ignored.")
         else:

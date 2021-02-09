@@ -140,18 +140,18 @@ if permanent_patch_config is not None and PERMANENT_PATCH_DIR_PATH.exists():
     if DEFAULT_CONFIG_DIR_PATH.exists():
         shutil.rmtree(DEFAULT_CONFIG_DIR_PATH)
 
-### If environment variable MEERSCHAUM_CONFIG is set, patch config before anything else.
-from meerschaum.utils.misc import string_to_dict
+### If environment variable MRSM_CONFIG is set, patch config before anything else.
 import os
-environment_config = _static_config()['config']['environment_key']
+environment_config = _static_config()['environment']['config']
 if environment_config in os.environ:
+    from meerschaum.utils.misc import string_to_dict
+    _patch = string_to_dict(str(os.environ[environment_config]))
     try:
+        ### TODO Test this!
         set_config(
             apply_patch_to_config(
-                _config(),
-                string_to_dict(
-                    str(os.environ[environment_config])
-                )
+                get_config(),
+                _patch
             )
         )
     except Exception as e:
@@ -163,18 +163,30 @@ if environment_config in os.environ:
         )
 
 import os, pathlib
-environment_root_dir = _static_config()['config']['environment_root']
+environment_root_dir = _static_config()['environment']['root']
 if environment_root_dir in os.environ:
     from meerschaum.config._paths import set_root
     root_dir_path = pathlib.Path(os.environ[environment_root_dir]).absolute()
     if not root_dir_path.exists():
         print(
             f"Invalid root directory '{str(root_dir_path)}' set for environment variable '{environment_root_dir}'.\n" +
-            "Please enter a valid path for {environment_root_dir}."
+            f"Please enter a valid path for {environment_root_dir}."
         )
         import sys
         sys.exit(1)
     set_root(root_dir_path)
+
+
+environment_runtime = _static_config()['environment']['runtime']
+if environment_runtime in os.environ:
+    if os.environ[environment_runtime] == 'portable':
+        import platform
+        from meerschaum.utils.packages import attempt_import
+        rl = attempt_import(
+            ("gnureadline" if platform.system() != 'Windows' else "pyreadline"),
+            lazy = False,
+            install = True
+        )
 
 
 

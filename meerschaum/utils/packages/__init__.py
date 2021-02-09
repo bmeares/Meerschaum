@@ -116,36 +116,48 @@ def activate_venv(
     if venv in active_venvs: return True
     if venv is None: return True
     if debug: from meerschaum.utils.debug import dprint
-    import sys, os
+    import sys, os, platform
     from meerschaum.config._paths import VIRTENV_RESOURCES_PATH
-    virtualenv = attempt_import(
-        'virtualenv',
-        install = True,
-        venv = None,
-        lazy = False,
-        #  precheck = False,
-        debug = debug
-    )
-    if virtualenv is None:
-        print(f"Failed to import virtualenv! Please ensure virtualenv is installed and restart Meerschaum.")
-        sys.exit(1)
+    _venv = attempt_import('venv', venv=None, lazy=False, install=False, warn=False)
+    #  virtualenv = attempt_import(
+        #  'virtualenv',
+        #  install = True,
+        #  venv = None,
+        #  lazy = False,
+        #  #  precheck = False,
+        #  debug = debug
+    #  )
+    #  if virtualenv is None:
+        #  print(f"Failed to import virtualenv! Please ensure virtualenv is installed and restart Meerschaum.")
+        #  sys.exit(1)
     venv_path = pathlib.Path(os.path.join(VIRTENV_RESOURCES_PATH, venv))
+    #  print(venv_path)
+    #  import traceback
+    #  traceback.print_stack()
     bin_path = pathlib.Path(
-        os.path.join(venv_path),
+        venv_path,
         ('bin' if platform.system() != 'Windows' else "Scripts")
     )
-    activate_this_path = pathlib.Path(os.path.join(bin_path, 'activate_this.py'))
+    if not venv_path.exists():
+        _venv.create(
+            venv_path,
+            system_site_packages = False,
+            with_pip = True,
+            symlinks = (platform.system() != 'Windows'),
+        )
+
+    #  activate_this_path = pathlib.Path(os.path.join(bin_path, 'activate_this.py'))
     old_cwd = pathlib.Path(os.getcwd())
     os.chdir(VIRTENV_RESOURCES_PATH)
-    if not activate_this_path.exists():
-        if debug: dprint(f"Creating virtual environment '{venv}'...", color=color)
-        virtualenv.cli_run([venv, '--download', '--system-site-packages'])
+    #  if not activate_this_path.exists():
+        #  if debug: dprint(f"Creating virtual environment '{venv}'...", color=color)
+        #  virtualenv.cli_run([venv, '--download', '--system-site-packages'])
     if debug: dprint(f"Activating virtual environment '{venv}'...", color=color)
-    try:
-        exec(open(activate_this_path).read(), {'__file__': activate_this_path})
-    except Exception as e:
-        warn(str(e))
-        return False
+    #  try:
+        #  exec(open(activate_this_path).read(), {'__file__': activate_this_path})
+    #  except Exception as e:
+        #  warn(str(e))
+        #  return False
     active_venvs.add(venv)
     os.chdir(old_cwd)
 
@@ -182,6 +194,7 @@ def pip_install(
         deactivate: bool = True,
         split : bool = True,
         check_update : bool = True,
+        check_wheel : bool = True,
         color : bool = True,
         debug: bool = False
     ) -> bool:
@@ -190,29 +203,48 @@ def pip_install(
     """
     try:
         from meerschaum.utils.formatting import ANSI, UNICODE
-        #  ANSI, UNICODE = False, False
     except ImportError:
         ANSI, UNICODE = False, False
+    if check_wheel:
+        try:
+            import wheel
+            have_wheel = True
+        except:
+            have_wheel = False
     _args = list(args)
     try:
         if venv is not None:
             activate_venv(venv=venv, color=color, debug=debug)
         import pip
+        have_pip = True
         if venv is not None and deactivate: deactivate_venv(venv=venv, debug=debug, color=color)
     except ImportError:
-        import ensurepip
+        have_pip = False
+    if not have_pip:
+        try:
+            import ensurepip
+        except:
+            import sys
+            print(
+                "Failed to import pip and ensurepip. Please install pip and restart Meerschaum.\n\n" +
+                "You can find instructions on installing pip here: https://pip.pypa.io/en/stable/installing/"
+            )
+            sys.exit(1)
         ensurepip.bootstrap(upgrade=True, )
         import pip
     if venv is not None:
         activate_venv(venv=venv, debug=debug, color=color)
         if '--ignore-installed' not in args and '-I' not in _args:
-            args += ['--ignore-installed']
+            _args += ['--ignore-installed']
+
     ### NOTE: Added pip to be checked on each install. Too much?
-    if 'install' not in _args:
-        _install = ['install']
-        if check_update and need_update(pip, debug=debug):
-            _install.append('pip')
-        _args = _install + _args
+    if check_update and need_update(pip, debug=debug):
+        _args.append('pip')
+    _args = ['install'] + _args
+
+    if check_wheel:
+        if not have_wheel:
+            _args.append('wheel')
 
     if not ANSI and '--no-color' not in _args:
         _args.append('--no-color')

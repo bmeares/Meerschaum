@@ -130,7 +130,7 @@ def _bootstrap_connectors(
         'Please choose a connector label.\n' +
         f"If you want to create a new connector, choose '{new_connector_label}' ({len(_label_choices)}).",
         _label_choices,
-        default = 'main'
+        default = new_connector_label
     )
     if _label == new_connector_label:
         while True:
@@ -178,14 +178,13 @@ def _bootstrap_connectors(
             if k in new_attributes:
                 continue
             try:
-                val = prompt(f"Value for {k}:", default=v)
+                val = prompt(f"Value for {k}:", default=str(v))
             except KeyboardInterrupt:
                 pass
             if is_int(val): val = int(val)
             new_attributes[k] = val
 
         if _clear: clear_screen(debug=debug)
-        conn = get_connector(_type, _label, **new_attributes)
         try:
             conn = get_connector(_type, _label, **new_attributes)
         except Exception as e:
