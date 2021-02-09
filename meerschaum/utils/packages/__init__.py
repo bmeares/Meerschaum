@@ -227,6 +227,8 @@ def pip_install(
         #  _args.append('--user')
     if venv is not None and '--target' not in _args and '-t' not in _args:
         _args += ['--target', venv_target_path(venv, debug=debug)]
+    elif '--target' not in _args and '-t' not in _args:
+        _args += ['--user']
     if '--progress-bar' in _args:
         _args.remove('--progress-bar')
     if UNICODE:
