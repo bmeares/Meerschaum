@@ -52,7 +52,8 @@ declare -A installers
 installers["WINDOWS_file"]="install.bat"
 installers["WINDOWS_text"]="@ECHO OFF
 cd ..
-python\python.exe -m pip install scripts/install[full] --no-warn-script-location"
+python\python.exe -m pip install scripts/install[full] --no-warn-script-location
+pause"
 installers["LINUX_file"]="install.sh"
 installers["LINUX_text"]='#!/usr/bin/env bash
 DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" >/dev/null 2>&1 && pwd )"
@@ -62,8 +63,7 @@ installers["MACOS_file"]="install.sh"
 installers["MACOS_text"]='#!/usr/bin/env bash
 DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" >/dev/null 2>&1 && pwd )"
 TERMINFO_DIRS=/usr/share/terminfo \
-"$DIR"/../python/bin/python3.9 -m pip install "$DIR"/install[full] --no-warn-script-location
-pause'
+"$DIR"/../python/bin/python3.9 -m pip install "$DIR"/install[full] --no-warn-script-location'
 
 
 ### Check if zstd is installed.
