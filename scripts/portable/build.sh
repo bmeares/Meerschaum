@@ -1,4 +1,4 @@
-#! /bin/bash
+#! /usr/bin/env bash
 
 DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" >/dev/null 2>&1 && pwd )"
 . "$DIR"/../config.sh
@@ -16,6 +16,11 @@ declare -A tars
 tars["WINDOWS"]="windows.tar.zst"
 tars["LINUX"]="debian.tar.zst"
 tars["MACOS"]="macos.tar.gz"
+
+declare -A taropts
+taropts["WINDOWS"]="-I zstd -xvf"
+taropts["LINUX"]="-I zstd -xvf"
+taropts["MACOS"]="-xvzf"
 
 declare -A sites
 sites["WINDOWS"]="Lib/site-packages"
@@ -41,7 +46,7 @@ for os in "${!tars[@]}"; do
   rm -rf "${os}"
   mkdir -p "${os}"
   mkdir -p "${os}/root"
-  tar -axvf "cache/${tars[$os]}" -C "${os}"
+  tar "${taropts[$os]}" "cache/${tars[$os]}" -C "${os}"
   cd "${os}/python"
   rm -rf $(ls | grep -v install) && mv install ../
   cd ../
