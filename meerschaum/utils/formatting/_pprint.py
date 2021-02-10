@@ -71,4 +71,4 @@ def pprint(
         func(*_args, **func_kw)
     except Exception as e:
         error_msg = e
-    if error_msg is not None: error(e)
+    if error_msg is not None: error(error_msg)

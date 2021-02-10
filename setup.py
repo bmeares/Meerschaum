@@ -6,12 +6,12 @@ import setuptools, sys
 from setuptools import setup
 from setuptools.command.install import install
 cx_Freeze, Executable = None, None
-if 'build_exe' in sys.argv or 'build_msi' in sys.argv or 'build_dmg' in sys.argv:
-    try:
-        import cx_Freeze
-        from cx_Freeze import setup, Executable
-    except ImportError:
-        cx_Freeze, Executable = None, None
+#  if 'build_exe' in sys.argv or 'build_msi' in sys.argv or 'build_dmg' in sys.argv:
+    #  try:
+        #  import cx_Freeze
+        #  from cx_Freeze import setup, Executable
+    #  except ImportError:
+        #  cx_Freeze, Executable = None, None
 
 ### read values from within the package
 exec(open('meerschaum/config/_version.py').read())
@@ -81,22 +81,22 @@ setup_kw_args = {
         "Topic :: Database",
     ],
 }
-if cx_Freeze is not None and Executable is not None:
-    setup_kw_args['options'] = {
-        'build_exe' : {
-            'packages' : setuptools.find_packages(),
-            'includes' : [
-                'pip', 'venv', 'os', 'sys', 'importlib', 'pathlib',
-            ],
-            'optimize' : 0,
-        },
-    }
-    setup_kw_args['executables'] = [
-        Executable(
-            "meerschaum/__main__.py",
-            target_name = 'mrsm',
-        )
-    ]
+#  if cx_Freeze is not None and Executable is not None:
+    #  setup_kw_args['options'] = {
+        #  'build_exe' : {
+            #  'packages' : setuptools.find_packages(),
+            #  'includes' : [
+                #  'pip', 'venv', 'os', 'sys', 'importlib', 'pathlib',
+            #  ],
+            #  'optimize' : 0,
+        #  },
+    #  }
+    #  setup_kw_args['executables'] = [
+        #  Executable(
+            #  "meerschaum/__main__.py",
+            #  target_name = 'mrsm',
+        #  )
+    #  ]
 
 
 setup(**setup_kw_args)
