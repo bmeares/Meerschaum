@@ -7,7 +7,7 @@ Implement the Connector fetch() method
 """
 
 from __future__ import annotations
-from meerschaum.utils.typing import Optional, Union
+from meerschaum.utils.typing import Optional, Union, Callable, Any
 
 def dateadd_str(
         flavor : str = 'postgresql',
@@ -93,10 +93,11 @@ def dateadd_str(
 
 def fetch(
         self,
-        pipe : 'meerschaum.Pipe',
+        pipe : meerschaum.Pipe.Pipe,
         begin : str = 'now',
+        chunk_hook : Optional[Callable[[pandas.DataFrame], Any]] = None,
         debug : bool = False,
-        **kw
+        **kw : Any
     ) -> Optional['pd.DataFrame']:
     """
     Execute the SQL definition and return a Pandas DataFrame.
@@ -164,7 +165,7 @@ def fetch(
     if datetime and da:
         meta_def += f"\nWHERE {datetime} > {da}"
 
-    df = self.read(meta_def, debug=debug)
+    df = self.read(meta_def, chunk_hook=chunk_hook, debug=debug)
     ### if sqlite, parse for datetimes
     if self.flavor == 'sqlite':
         from meerschaum.utils.misc import parse_df_datetimes

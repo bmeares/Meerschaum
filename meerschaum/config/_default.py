@@ -314,13 +314,14 @@ from meerschaum.config.stack import default_stack_config
 default_config['stack'] = default_stack_config
 
 default_header_comment = """
-##################################################################################
-#                                                                                #
-#  Edit the credentials below for the `main` connectors or add new connectors.   #
-#                                                                                #
-#  Connectors inherit from `default`, and flavor-dependent defaults are defined  #
-#  for SQL connectors (e.g. port 5432 for PostgreSQL).                           #
-#                                                                                #
-##################################################################################
+#####################################################################
+#                                                                   #
+#  Edit or add credentials for connectors.                          #
+#  You can read more about connectors at https://meerschaum.io.     #
+#                                                                   #
+#  Connectors inherit from `default`, and flavor-dependent defaults #
+#  are defined for SQL connectors (e.g. port 5432 for PostgreSQL).  #
+#                                                                   #
+#####################################################################
 
 """

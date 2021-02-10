@@ -59,7 +59,8 @@ def _pipes_lap(
                 force = force,
                 debug = debug,
                 min_seconds = min_seconds,
-                workers = workers
+                workers = workers,
+                **kw
             )
         except Exception as e:
             import traceback

@@ -25,6 +25,7 @@ def sync(
         workers : Optional[int] = None,
         callback : Callable[[Tuple[bool, str]], Any] = None,
         error_callback : Callable[[Exception], Any] = None,
+        sync_chunks : bool = False,
         debug : bool = False,
         **kw : Any
     ) -> SuccessTuple:
@@ -77,6 +78,10 @@ def sync(
         Callback function which expects an Exception as input.
         Only applies when blocking = False.
 
+    :param sync_chunks:
+        If possible, sync chunks in parallel.
+        Defaults to False.
+
     :param debug: Verbosity toggle. Defaults to False.
     :param kw: Catch-all for keyword arguments.
     """
@@ -90,7 +95,7 @@ def sync(
         'begin' : begin, 'end' : end, 'force' : force, 'retries' : retries,
         'min_seconds' : min_seconds, 'check_existing' : check_existing,
         'blocking' : blocking, 'workers' : workers, 'callback' : callback,
-        'error_callback' : error_callback,
+        'error_callback' : error_callback, 'sync_chunks' : (sync_chunks),
     })
 
     def _sync(
@@ -129,6 +134,10 @@ def sync(
             if p.connector is None:
                 return False, f"Cannot fetch data for pipe '{p}' without a connector."
             df = p.fetch(debug=debug, **kw)
+            if df is None:
+                return False, f"Unable to fetch data for pipe '{p}'."
+            if df is True:
+                return True, f"Pipe '{p}' is being synced in parallel."
 
         if debug: dprint("DataFrame to sync:\n" + f"{df}")
 

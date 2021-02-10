@@ -12,7 +12,8 @@ from meerschaum.utils.typing import Optional, List
 def sync_yaml_configs(
         config_path : pathlib.Path,
         keys : List[str],
-        sub_path : pathlib.Path
+        sub_path : pathlib.Path,
+        substitute : bool = True,
     ) -> None:
     """
     Synchronize sub-configuration with main configuration file.
@@ -54,8 +55,9 @@ def sync_yaml_configs(
     sub_header, sub_config = _read_config(sub_path)
 
     from meerschaum.config import get_config
-    c = get_config(*keys)
-    sub_config = search_and_substitute_config(sub_config)
+    c = get_config(*keys, substitute=substitute)
+    if substitute:
+        sub_config = search_and_substitute_config(sub_config)
 
     if c != sub_config:
         config_time = os.path.getmtime(config_path)

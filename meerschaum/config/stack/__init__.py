@@ -245,7 +245,12 @@ from meerschaum.config._paths import STACK_COMPOSE_FILENAME, STACK_ENV_FILENAME
 from meerschaum.config._paths import GRAFANA_DATASOURCE_PATH, GRAFANA_DASHBOARD_PATH
 from meerschaum.config._paths import MOSQUITTO_CONFIG_PATH
 from meerschaum.config._sync import sync_yaml_configs
-sync_yaml_configs(os.path.join(CONFIG_DIR_PATH, 'stack.yaml'), ['stack', STACK_COMPOSE_FILENAME], STACK_COMPOSE_PATH)
+sync_yaml_configs(
+    os.path.join(CONFIG_DIR_PATH, 'stack.yaml'),
+    ['stack', STACK_COMPOSE_FILENAME],
+    STACK_COMPOSE_PATH,
+    substitute = False,
+)
 
 def get_necessary_files():
     from meerschaum.config._paths import (
@@ -259,10 +264,10 @@ def get_necessary_files():
     from meerschaum.config import get_config, config
     return {
         #  STACK_ENV_PATH : config['stack'][STACK_ENV_FILENAME],
-        STACK_COMPOSE_PATH : (get_config('stack', STACK_COMPOSE_FILENAME), compose_header),
-        GRAFANA_DATASOURCE_PATH : get_config('stack', 'grafana', 'datasource'),
-        GRAFANA_DASHBOARD_PATH : get_config('stack', 'grafana', 'dashboard'),
-        MOSQUITTO_CONFIG_PATH : get_config('stack', 'mosquitto', 'mosquitto.conf', patch=True),
+        STACK_COMPOSE_PATH : (get_config('stack', STACK_COMPOSE_FILENAME, substitute=False), compose_header),
+        GRAFANA_DATASOURCE_PATH : get_config('stack', 'grafana', 'datasource', substitute=False),
+        GRAFANA_DASHBOARD_PATH : get_config('stack', 'grafana', 'dashboard', substitute=False),
+        MOSQUITTO_CONFIG_PATH : get_config('stack', 'mosquitto', 'mosquitto.conf', patch=True, substitute=False),
     }
 
 
