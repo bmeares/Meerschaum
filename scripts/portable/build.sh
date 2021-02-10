@@ -46,7 +46,7 @@ for os in "${!tars[@]}"; do
   rm -rf "${os}"
   mkdir -p "${os}"
   mkdir -p "${os}/root"
-  tar "${taropts[$os]}" "cache/${tars[$os]}" -C "${os}"
+  tar "${taropts[$os]}" "cache/${tars[$os]}" -C "${os}" || exit 1
   cd "${os}/python"
   rm -rf $(ls | grep -v install) && mv install ../
   cd ../
