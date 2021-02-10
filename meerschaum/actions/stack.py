@@ -72,7 +72,7 @@ def stack(
         sub_args.append('--build')
 
     ### define project name when starting containers
-    project_name_list = ['--project-name', get_config('stack', 'project_name', patch=True)]
+    project_name_list = ['--project-name', get_config('stack', 'project_name', patch=True, substitute=False)]
     
     ### disable ANSI if the user sets ANSI mode to False
     ansi_list = [] if ANSI else ['--no-ansi']

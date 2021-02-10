@@ -7,7 +7,7 @@ This module contains SQLConnector functions for executing SQL queries.
 
 from __future__ import annotations
 from meerschaum.utils.typing import (
-    Union, Mapping, SuccessTuple, Optional, Any, Sequence, Iterable
+    Union, Mapping, SuccessTuple, Optional, Any, Sequence, Iterable, Callable
 )
 
 from meerschaum.utils.debug import dprint
@@ -21,6 +21,7 @@ def read(
         query_or_table : str,
         params : Mapping[str, Any] = {},
         chunksize : int = -1,
+        chunk_hook : Optional[Callable[[pandas.DataFrame], Any]] = None,
         silent : bool = False,
         debug : bool = False,
         **kw : Any
@@ -74,13 +75,15 @@ def read(
 
     chunk_list = []
     for chunk in chunk_generator:
+        if chunk_hook is not None:
+            chunk_hook(chunk, chunksize=chunksize, debug=debug, **kw)
         chunk_list.append(chunk)
 
     ### if no chunks returned, read without chunks
     ### to get columns
     if len(chunk_list) == 0:
         df = self.pd.read_sql(
-            sqlalchemy.text(formatted_query),
+            formatted_query,
             self.engine
         )
     else:

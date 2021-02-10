@@ -93,7 +93,7 @@ def read_config(
         for mk in missing_keys:
             if mk in default_config:
                 _default_mk = (
-                    search_and_substitute_config(default_config[mk]) if substitute
+                    search_and_substitute_config({'default' : default_config})['default'][mk] if substitute
                     else default_config[mk]
                 )
                 config[mk] = _default_mk
@@ -139,7 +139,7 @@ def read_config(
                 with open(filepath, 'r') as f:
                     _config_key = filetype_loaders[_type](f)
                     config[key] = (
-                        search_and_substitute_config(_config_key) if substitute
+                        search_and_substitute_config({key : _config_key})[key] if substitute
                         else _config_key
                     )
                 break
@@ -204,6 +204,8 @@ def search_and_substitute_config(
         keys = hs[begin:end].split(delimiter)
 
         ### follow the pointers to the value
+        import traceback
+        traceback.print_stack()
         valid, value = get_config(*keys, substitute=False, as_tuple=True)
         if valid:
             ### pattern to search and replace

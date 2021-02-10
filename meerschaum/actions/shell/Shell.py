@@ -51,6 +51,9 @@ hidden_commands = {
     '_relative_run_script',
     'ipy',
 }
+reserved_completers = {
+    'instance', 'repo'
+}
 
 def _insert_shell_actions(
         shell : Optional['Shell'] = None,
@@ -69,27 +72,17 @@ def _insert_shell_actions(
     _shell = shell if shell is not None else shell_pkg.Shell
 
     for a, f in actions.items():
-        #  if keep_self:
-        #  setattr(_shell, 'do_' + a, f)
-        #  else:
         add_method_to_class(
             func = f,
             class_def = _shell,
             method_name = 'do_' + a,
-            #  keep_self = True,
         )
-        _completer = get_completer(a)
-        if _completer is None:
-            _completer = shell_pkg.default_action_completer
-        completer = _completer_wrapper(_completer)
-
-        setattr(_shell, 'complete_' + a, completer)
-        #  add_method_to_class(
-            #  func = completer,
-            #  class_def = _shell,
-            #  method_name = 'complete_' + a,
-            #  keep_self = True,
-        #  )
+        if a not in reserved_completers:
+            _completer = get_completer(a)
+            if _completer is None:
+                _completer = shell_pkg.default_action_completer
+            completer = _completer_wrapper(_completer)
+            setattr(_shell, 'complete_' + a, completer)
 
 def _completer_wrapper(
         target : Callable[[Any], List[str]]
@@ -286,7 +279,7 @@ class Shell(cmd.Cmd):
         self.doc_header = get_config('system', 'shell', CHARSET, 'doc_header', patch=patch)
         self.undoc_header = get_config('system', 'shell', CHARSET, 'undoc_header', patch=patch)
 
-        if instance is None:
+        if instance is None and self.__dict__.get('instance_keys', None) is None:
             ### create default instance and repository connectors
             self.instance_keys = remove_ansi(get_config('meerschaum', 'instance', patch=patch))
             ### self.instance is a stylized version of self.instance_keys
@@ -294,9 +287,10 @@ class Shell(cmd.Cmd):
         else:
             self.instance = instance
             self.instance_keys = remove_ansi(str(instance))
+        if self.__dict__.get('repo_keys', None) is None:
+            self.repo_keys = get_config('meerschaum', 'default_repository', patch=patch)
         ### this will be updated later in update_prompt ONLY IF {username} is in the prompt
         self.username = ''
-        self.repo_keys = get_config('meerschaum', 'default_repository', patch=patch)
 
         if ANSI:
             def apply_colors(attr, key):

@@ -53,7 +53,7 @@ def register_pipe(
         'connector_keys' : pipe.connector_keys,
         'metric_key'     : pipe.metric_key,
         'location_key'   : pipe.location_key,
-        'parameters'     : json.dumps(pipe.parameters),
+        'parameters'     : json.dumps(parameters),
     }
     query = sqlalchemy.insert(pipes).values(**values)
     result = self.exec(query, debug=debug)
@@ -448,14 +448,14 @@ def get_pipe_attributes(
 
 def sync_pipe(
         self,
-        pipe : 'meerschaum.Pipe',
-        df : 'pd.DataFrame' = None,
-        begin : 'datetime.datetime' = None,
-        end : 'datetime.datetime' = None,
+        pipe : meerschaum.Pipe.Pipe,
+        df : Union[pandas.DataFrame, str, Dict[Any, Any]] = None,
+        begin : Optional[datetime.datetime] = None,
+        end : Optional[datetime.datetime] = None,
         check_existing : bool = True,
         blocking : bool = True,
         debug : bool = False,
-        **kw
+        **kw : Any
     ) -> SuccessTuple:
     """
     Sync a pipe using a SQL Connection.
