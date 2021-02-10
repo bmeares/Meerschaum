@@ -47,11 +47,14 @@ if [ "$?" != 0 ]; then
   echo "zstd is not installed. Please install zstd and restart."
   exit 1
 fi
+g=$(tar --version | grep "GNU")
+if [ -z "$g" ] || [ "$?" != 0 ]; then
+  echo "GNU tar is not installed. Please install GNU tar and restart."
+fi
 
 ### Download archives.
 for os in "${systems[@]}"; do
   if [ ! -f "cache/${tars[$os]}" ]; then
-    # wget -O "cache/${tars[$os]}" "${urls[$os]}"
     curl -o "cache/${tars[$os]}" "${urls[$os]}"
   fi
 done
