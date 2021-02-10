@@ -238,7 +238,7 @@ def _show_data(
     except:
         backtrack_minutes = (
             1440 if (
-                begin is None and end is None and (action and action[0] != 'all')
+                begin is None and end is None and (not action or (action and action[0] != 'all'))
             ) else None
         )
 
