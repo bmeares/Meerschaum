@@ -7,6 +7,20 @@ mkdir -p "$PARENT/portable"
 cd "$PARENT/portable"
 mkdir -p "cache"
 
+declare -a supported_systems=("WINDOWS" "LINUX" "MACOS")
+declare -a systems=()
+if [ ! -z "$1" ]; then
+  for a in "$@"; do
+    if [[ ${supported_systems[*]} =~ "${a}" ]]; then
+      systems+=("$a")
+    else
+      echo "Unsupported system '$a'. Skipping..."
+    fi
+  done
+else
+  systems=("${supported_systems[@]}")
+fi
+
 declare -A urls
 urls["WINDOWS"]="https://github.com/indygreg/python-build-standalone/releases/download/20210103/cpython-3.9.1-x86_64-pc-windows-msvc-shared-pgo-20210103T1125.tar.zst"
 urls["LINUX"]="https://github.com/indygreg/python-build-standalone/releases/download/20210103/cpython-3.9.1-x86_64-unknown-linux-gnu-pgo-20210103T1125.tar.zst"
@@ -18,9 +32,9 @@ tars["LINUX"]="debian.tar.zst"
 tars["MACOS"]="macos.tar.gz"
 
 declare -A taropts
-taropts["WINDOWS"]="-I zstd -xvf"
-taropts["LINUX"]="-I zstd -xvf"
-taropts["MACOS"]="-xvzf"
+taropts["WINDOWS"]="-I zstd -xvf "
+taropts["LINUX"]="-I zstd -xvf "
+taropts["MACOS"]="-I zstd -xvf "
 
 declare -A sites
 sites["WINDOWS"]="Lib/site-packages"
@@ -35,18 +49,20 @@ if [ "$?" != 0 ]; then
 fi
 
 ### Download archives.
-for os in "${!urls[@]}"; do
+for os in "${systems[@]}"; do
   if [ ! -f "cache/${tars[$os]}" ]; then
-    wget -O "cache/${tars[$os]}" "${urls[$os]}"
+    # wget -O "cache/${tars[$os]}" "${urls[$os]}"
+    curl -o "cache/${tars[$os]}" "${urls[$os]}"
   fi
 done
 
 ### Download and extract the files
-for os in "${!tars[@]}"; do
+for os in "${systems[@]}"; do
   rm -rf "${os}"
   mkdir -p "${os}"
   mkdir -p "${os}/root"
-  tar "${taropts[$os]}" "cache/${tars[$os]}" -C "${os}" || exit 1
+  echo tar "${taropts[$os]}" "cache/${tars[$os]}" -C "${os}"
+  tar ${taropts[$os]}"cache/${tars[$os]}" -C "${os}" || exit 1
   cd "${os}/python"
   rm -rf $(ls | grep -v install) && mv install ../
   cd ../
@@ -54,7 +70,7 @@ for os in "${!tars[@]}"; do
   cd ../
 done
 
-for os in "${!sites[@]}"; do
+for os in "${systems[@]}"; do
   cp -r "$PARENT/scripts/portable/${os}/"* "${os}"
   mkdir -p "${os}/scripts/install"
   cp -r "$PARENT/meerschaum" "$PARENT/setup.py" "$PARENT/README.md" "${os}/scripts/install"
