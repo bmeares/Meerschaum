@@ -604,10 +604,6 @@ def filter_unseen_df(
     """
     if old_df is None: return new_df
     old_cols = list(old_df.columns)
-    print('old_df:', old_df)
-    print('old_df.columns:', old_df.columns)
-    print('new_df:', new_df)
-    print('new_df.columns:', new_df.columns)
     try:
         new_df = new_df[old_cols]
     except Exception as e:
