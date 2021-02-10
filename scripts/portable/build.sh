@@ -43,12 +43,14 @@ sites["MACOS"]="lib/python3.9/site-packages"
 
 ### Check if zstd is installed.
 v=$(zstd -V)
-if [ "$?" != 0 ]; then
+rc="$?"
+if [ "$rc" != 0 ]; then
   echo "zstd is not installed. Please install zstd and restart."
   exit 1
 fi
 g=$(tar --version | grep "GNU")
-if [ -z "$g" ] || [ "$?" != 0 ]; then
+rc="$?"
+if [ -z "$g" ] || [ "$rc" != 0 ]; then
   echo "GNU tar is not installed. Please install GNU tar and restart."
   exit 1
 fi
