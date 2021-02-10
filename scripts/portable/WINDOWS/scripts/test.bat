@@ -1,4 +1,0 @@
-@ECHO OFF
-
-PAUSE
-PAUSE
