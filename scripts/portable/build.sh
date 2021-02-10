@@ -50,6 +50,7 @@ fi
 g=$(tar --version | grep "GNU")
 if [ -z "$g" ] || [ "$?" != 0 ]; then
   echo "GNU tar is not installed. Please install GNU tar and restart."
+  exit 1
 fi
 
 ### Download archives.
