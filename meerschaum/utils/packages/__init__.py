@@ -892,4 +892,12 @@ def venv_target_path(venv : str, debug : bool = False) -> pathlib.Path:
         print(f"Target path for virtual environment '{venv}':\n" + str(target_path))
     return pathlib.Path(target_path)
 
-
+def package_venv(package : 'ModuleType') -> Optional[str]:
+    """
+    Inspect a package and return the virtual environment in which it presides.
+    """
+    import os
+    from meerschaum.config._paths import VIRTENV_RESOURCES_PATH
+    if str(VIRTENV_RESOURCES_PATH) not in package.__file__:
+        return None
+    return package.__file__.split(str(VIRTENV_RESOURCES_PATH))[1].split(os.path.sep)[1]

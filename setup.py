@@ -37,7 +37,7 @@ extras = {}
 for group in packages:
     extras[group] = [ install_name for import_name, install_name in packages[group].items() ]
 
-with open('README.md', 'r') as f:
+with open('README.md', 'r', encoding='utf-8') as f:
     readme = f.read()
 
 setup_kw_args = {

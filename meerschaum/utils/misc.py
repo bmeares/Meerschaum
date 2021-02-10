@@ -171,27 +171,29 @@ def parse_config_substitution(
     return leading_key[len(leading_key):][len():-1].split(delimeter)
 
 def edit_file(
-        path : 'pathlib.Path',
+        path : Union[pathlib.Path, str],
         default_editor : str = 'pyvim',
         debug : bool = False
-    ):
+    ) -> bool:
     """
-    Open a file for editing. Attempts to use the user's defined EDITOR,
-    otherwise uses pyvim.
+    Open a file for editing.
+
+    Attempt to launch the user's defined $EDITOR, otherwise use pyvim.
     """
     import os
     from subprocess import call
     from meerschaum.utils.debug import dprint
-    from meerschaum.utils.packages import run_python_package, attempt_import
+    from meerschaum.utils.packages import run_python_package, attempt_import, package_venv
     try:
         EDITOR = os.environ.get('EDITOR', default_editor)
         if debug: dprint(f"Opening file '{path}' with editor '{EDITOR}'")
-        call([EDITOR, path])
+        rc = call([EDITOR, path])
     except Exception as e: ### can't open with default editors
         if debug: dprint(e)
         if debug: dprint('Failed to open file with system editor. Falling back to pyvim...')
         pyvim = attempt_import('pyvim', lazy=False)
-        run_python_package('pyvim', [path], venv='mrsm', debug=debug)
+        rc = run_python_package('pyvim', [path], venv=package_venv(pyvim), debug=debug)
+    return rc == 0
 
 def is_pipe_registered(
         pipe : 'Pipe or MetaPipe',

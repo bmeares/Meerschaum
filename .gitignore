@@ -8,7 +8,7 @@
 .snakeviz/
 *.prof
 *.db
-portable/
+/portable/
 docs/pdoc/*
 docs/site/*
 
