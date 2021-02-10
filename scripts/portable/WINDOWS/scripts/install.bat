@@ -4,7 +4,7 @@ SET ROOT=%DIR%\..
 cd %ROOT%
 IF NOT EXIST .\scripts\_site-packages_original (
   ECHO Backing up site-packages...
-  .\python\python.exe -m pip install wheel -q
+  .\python\python.exe -m pip install wheel --no-warn-script-location -q
   xcopy .\python\Lib\site-packages\ .\scripts\_site-packages_original\ /E >NUL
 )
 
