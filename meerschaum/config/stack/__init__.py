@@ -264,7 +264,7 @@ def get_necessary_files():
     from meerschaum.config import get_config, config
     return {
         #  STACK_ENV_PATH : config['stack'][STACK_ENV_FILENAME],
-        STACK_COMPOSE_PATH : (get_config('stack', STACK_COMPOSE_FILENAME, substitute=False), compose_header),
+        STACK_COMPOSE_PATH : (get_config('stack', STACK_COMPOSE_FILENAME, substitute=True), compose_header),
         GRAFANA_DATASOURCE_PATH : get_config('stack', 'grafana', 'datasource', substitute=False),
         GRAFANA_DASHBOARD_PATH : get_config('stack', 'grafana', 'dashboard', substitute=False),
         MOSQUITTO_CONFIG_PATH : get_config('stack', 'mosquitto', 'mosquitto.conf', patch=True, substitute=False),

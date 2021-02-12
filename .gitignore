@@ -9,6 +9,7 @@
 *.prof
 *.db
 /portable/
+/test_root/
 docs/pdoc/*
 docs/site/*
 

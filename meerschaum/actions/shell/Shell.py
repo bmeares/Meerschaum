@@ -34,7 +34,6 @@ commands_to_remove = {
     'pyscript',
     #  'set',
     'py',
-    'shell',
     'shortcuts',
     'history',
     'load',
@@ -43,6 +42,7 @@ commands_to_remove = {
 hidden_commands = {
     #  'macro',
     #  'alias',
+    'sh',
     'pass',
     'exit',
     'quit',
@@ -355,7 +355,7 @@ class Shell(cmd.Cmd):
         Pass parsed arguments to custom actions
 
         Overrides `default`: if action does not exist,
-            assume the action is `bash`
+            assume the action is `shell`
         """
         ### make a backup of line for later
         import copy
@@ -440,10 +440,10 @@ class Shell(cmd.Cmd):
             func = getattr(self, 'do_' + action)
             #  func_param_kinds = inspect.signature(func).parameters.items()
         except AttributeError as ae:
-            ### if function is not found, default to `bash`
-            action = "bash"
-            args['action'].insert(0, "bash")
-            func = getattr(self, 'do_bash')
+            ### if function is not found, default to `shell`
+            action = "sh"
+            args['action'].insert(0, "sh")
+            func = getattr(self, 'do_sh')
             #  func_param_kinds = inspect.signature(func).parameters.items()
 
         ### delete the first action

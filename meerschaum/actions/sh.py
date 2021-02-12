@@ -9,28 +9,45 @@ NOTE: This action may be a huge security vulnerability
 
 from meerschaum.utils.typing import SuccessTuple, List, Any
 
-def bash(
+def sh(
         action : List[str] = [],
         sub_args : List[str] = [],
+        sysargs : List[str] = [],
         use_bash : bool = True,
         debug : bool = False,
         **kw : Any
     ) -> SuccessTuple:
     """
-    Launch a bash shell as a Meershaum action
+    Execute system commands.
     """
     import subprocess
-    import sys
+    import sys, os
     from meerschaum.utils.warnings import error
     from meerschaum.utils.debug import dprint
 
+    _shell = os.environ.get('SHELL', 'bash')
+
+    cmd_list = []
+
+    if len(sysargs) > 1:
+        if sysargs[0] == 'sh':
+            del sysargs[0]
+        elif sysargs[0].startswith('!'):
+            sysargs[0] = sysargs[0][1:]
+        cmd_list = sysargs
+    else:
+        cmd_list = action
+    if sub_args:
+        cmd_list += sub_args
+
+    command_list = cmd_list
     if use_bash:
         command_list = ["bash"]
         if len(action) == 0:
-            command_list += ["-c", " ".join(action + sub_args)]
+            command_list += ["-c", " ".join(cmd_list)]
     else:
-        command_list = action + sub_args
-        if len(action) == 0: command_list = 'bash'
+        #  command_list = action + sub_args
+        if len(action) == 0: command_list = _shell
 
     if debug:
         dprint(f'action  : {action}')
