@@ -65,7 +65,7 @@ def write_config(
     from meerschaum.utils.debug import dprint
     from meerschaum.utils.yaml import yaml
     from meerschaum.utils.misc import filter_keywords
-    import json, os
+    import json, os, pathlib
     if config_dict is None:
         from meerschaum.config import _config; cf = _config()
         config_dict = cf
@@ -90,6 +90,7 @@ def write_config(
             filetype = default_filetype
         filename = str(k) + '.' + str(filetype)
         filepath = os.path.join(directory, filename)
+        pathlib.Path(filepath).parent.mkdir(exist_ok=True)
         with open(filepath, 'w+') as f:
             try:
                 if k == 'meerschaum':
@@ -211,13 +212,13 @@ def write_default_config(
     """
     #  from meerschaum.utils.yaml import yaml
     import os
-    from meerschaum.config._paths import PATCH_PATH, DEFAULT_CONFIG_DIR_PATH
+    from meerschaum.config._paths import DEFAULT_CONFIG_DIR_PATH
     from meerschaum.config._default import default_config, default_header_comment
     #  from meerschaum.utils.debug import dprint
     #  if os.path.isfile(DEFAULT_CONFIG_PATH): os.remove(DEFAULT_CONFIG_PATH)
     #  if os.path.isfile(PATCH_PATH): os.remove(PATCH_PATH)
 
-    return write_config(default_config, directory=DEFAULT_CONFIG_PATH)
+    return write_config(default_config, directory=DEFAULT_CONFIG_DIR_PATH)
 
     #  config_copy = dict()
     #  config_copy['meerschaum'] = default_config['meerschaum'].copy()

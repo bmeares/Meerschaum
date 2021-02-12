@@ -168,7 +168,7 @@ def search_and_substitute_config(
         MRSM{meerschaum:connectors:main:host} => cf['meerschaum']['connectors']['main']['host']
     """
     import json
-    needle = leading_key
+    needle = leading_key + begin_key
     haystack = json.dumps(config)
     from meerschaum.config import get_config
 
@@ -187,7 +187,7 @@ def search_and_substitute_config(
         ### the first character of the keys
         ### MRSM{value1:value2}
         ###      ^
-        begin = hs.find(needle) + len(needle) + len(begin_key)
+        begin = hs.find(needle) + len(needle)
 
         ### number of characters to end of keys
         ### (really it's the index of the beginning of the end_key relative to the beginning
@@ -204,8 +204,6 @@ def search_and_substitute_config(
         keys = hs[begin:end].split(delimiter)
 
         ### follow the pointers to the value
-        import traceback
-        traceback.print_stack()
         valid, value = get_config(*keys, substitute=False, as_tuple=True)
         if valid:
             ### pattern to search and replace
