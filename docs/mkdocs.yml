@@ -5,11 +5,15 @@ theme:
     - navigation.sections
     - navigation.instant
     - navigation.expand
-    # - toc.integrate
+    - navigation.tabs
+    - toc.integrate
   favicon: assets/logo.ico
   logo: assets/logo_500x500.png
   name: material
-  # palette:
+  language: en
+  palette:
+    primary: deep orange
+    accent: amber
     # scheme: slate
 extra_css:
   - stylesheets/extra.css
@@ -27,6 +31,7 @@ plugins:
 repo_url: https://github.com/bmeares/Meerschaum
 edit_uri: ""
 markdown_extensions:
+  - meta
   - attr_list:
   - pymdownx.highlight:
       linenums: true

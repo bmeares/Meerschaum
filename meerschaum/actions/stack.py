@@ -31,6 +31,7 @@ def stack(
     #  from meerschaum.utils.packages import reload_package
     from meerschaum.utils.prompt import yes_no
     import meerschaum.config
+    from meerschaum.utils.packages import attempt_import, run_python_package
     from meerschaum.config import get_config
     from meerschaum.utils.debug import dprint
     from meerschaum.utils.warnings import warn
@@ -82,12 +83,13 @@ def stack(
     ### prepend settings before the docker-compose action
     settings_list = project_name_list + ansi_list + debug_list
 
-    #  cmd_list = ['docker-compose'] + settings_list + compose_command + sub_args
-    cmd_list = ['docker-compose'] + settings_list + compose_command + (
+    compose = attempt_import('compose', lazy=False)
+    cmd_list = settings_list + compose_command + (
         sysargs[2:] if (len(sysargs) > 2 and not sub_args) else sub_args
     )
     if debug: dprint(cmd_list)
-    call(cmd_list, cwd=STACK_COMPOSE_PATH.parent)
+    run_python_package('compose', args=cmd_list, cwd=STACK_COMPOSE_PATH.parent)
+    #  call(cmd_list, cwd=STACK_COMPOSE_PATH.parent)
 
     ### not sure why I decided to reload the config here...
     #  reload_package(meerschaum.config)

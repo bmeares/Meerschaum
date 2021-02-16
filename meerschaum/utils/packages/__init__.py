@@ -315,7 +315,8 @@ def pip_install(
 def run_python_package(
         package_name : str,
         args : list = [],
-        venv : str = None,
+        venv : Optional[str] = None,
+        cwd : Optional[str] = None,
         color : bool = False,
         debug : bool = False
     ) -> int:
@@ -326,6 +327,9 @@ def run_python_package(
     import sys, os
     from subprocess import call
     from meerschaum.config._paths import VIRTENV_RESOURCES_PATH
+    old_cwd = os.getcwd()
+    if cwd is not None:
+        os.chdir(cwd)
     executable = (
         sys.executable if venv is None
         else os.path.join(
@@ -337,7 +341,9 @@ def run_python_package(
     command = [executable, '-m', str(package_name)] + [str(a) for a in args]
     if debug:
         print(command, file=sys.stderr)
-    return call(command)
+    rc = call(command)
+    os.chdir(old_cwd)
+    return rc
 
 def attempt_import(
         *names: List[str],
