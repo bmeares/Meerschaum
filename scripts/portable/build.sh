@@ -62,7 +62,12 @@ for os in "${systems[@]}"; do
   fi
 done
 
-### Download and extract the files
+### Download other utilities.
+[ ! -f "cache/TarTool.zip" ] && \
+  curl -o "cache/TarTool.zip" "https://github.com/senthilrajasek/tartool/releases/download/1.0.0/TarTool.zip" && \
+  unzip -o "cache/TarTool.zip" "cache/TarTool"
+
+### Extract the files.
 for os in "${systems[@]}"; do
   rm -rf "${os}"
   mkdir -p "${os}"
