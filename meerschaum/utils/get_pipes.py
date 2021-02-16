@@ -161,6 +161,8 @@ def methods(
     based on the method of choosing keys.
     """
     from meerschaum.utils.warnings import error
+    from meerschaum.connectors.sql.tables import get_tables
+    tables = get_tables(connector)
 
     def _registered(
             connector_keys : list = [],
