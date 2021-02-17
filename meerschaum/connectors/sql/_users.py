@@ -34,9 +34,8 @@ def register_user(
     from meerschaum.connectors.sql.tables import get_tables
     tables = get_tables(mrsm_instance=self, debug=debug)
 
-    json = attempt_import('json')
+    import json
     bind_variables = {
-        'user_id' : old_id,
         'username' : user.username,
         'email' : user.email,
         'password_hash' : user.password_hash,
