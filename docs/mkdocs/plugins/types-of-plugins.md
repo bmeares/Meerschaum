@@ -4,8 +4,6 @@ Meerschaum plugins either **provide data** or **do actions**.
 
 Data plugins retrieve and parse data, then pass it on to Meerschaum for later analysis. There are two types of data plugins: [**fetch**](#fetch-plugins) and [**sync**](#sync-plugins) plugins.
 
-Action plugins extend the functionality of Meerschaum.
-
 ## Data Plugins
 
 ### Fetch Plugins
@@ -15,7 +13,7 @@ Fetch plugins are the most straightforward: they pull data from some data source
 !!! info ""
     The purpose of fetch plugins is to retrieve and parse data, then hand it off to Meerschaum for syncing.
 
-In case you're thinking of writing your own plugin, I recommend getting started with fetch plugins, as they're the simplest way to getting your data into Meerschaum for analysis. Check out [Writing Plugins](#writing-plugins) below for an in-depth walkthrough.
+In case you're thinking of writing your own plugin, I recommend getting started with fetch plugins, as they're the simplest way to getting your data into Meerschaum for analysis. Check out [Writing Plugins](/plugins/plugin-development/writing-plugins/) for an in-depth walk-through.
 
 ### Sync Plugins
 

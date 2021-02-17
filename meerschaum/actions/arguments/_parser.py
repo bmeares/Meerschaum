@@ -65,6 +65,15 @@ def parse_help(sysargs : Union[List[str], Dict[str, Any]]) -> None:
         doc = "No help available for '" + f"{args['action'][0]}" + "'."
     return print(textwrap.dedent(doc))
 
+def parse_version(sysargs : List[str]):
+    """
+    Print the Meerschaum version.
+    """
+    from meerschaum.config import __version__, __doc__
+    if '--nopretty' in sysargs:
+        return print(__version__)
+    return print(__doc__)
+
 def get_arguments_triggers() -> Dict[str, Tuple[str]]:
     """
     Return a dictionary of arguments and their triggers.
@@ -109,7 +118,7 @@ groups['actions'].add_argument(
 )
 groups['actions'].add_argument(
     '-A', '--sub-args', nargs=argparse.REMAINDER,
-    help=(
+    help = (
         "Provide a list of arguments for subprocesses. You can also type sub-arguments in [] instead." +
         " E.g. `stack -A='--version'`, `ls [-lh]`, `echo -A these are sub-arguments`"
     )
@@ -173,7 +182,7 @@ groups['misc'].add_argument(
     '--debug', action="store_true", help="Print debug statements (max verbosity)"
 )
 groups['misc'].add_argument(
-    '-V', '--version', action="version", version=doc
+    '-V', '--version', action="store_true", help="Print the Meerschaum version and exit. Has no effect from within the shell."
 )
 groups['misc'].add_argument(
     '--patch', action="store_true", help="Patch parameters instead of overwriting."

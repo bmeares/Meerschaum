@@ -37,7 +37,7 @@ hide:
   function copy_install_text(btn){
     var inp =document.createElement('input');
     document.body.appendChild(inp);
-    inp.value = "python -m pip install meerschaum";
+    inp.value = "pip install meerschaum";
     inp.select();
     document.execCommand('copy',false);
     inp.remove();
@@ -45,7 +45,7 @@ hide:
     btn.text = "Copied!";
     window.setTimeout(() => {
       btn.text = old_btn_text;
-    }, 3000);
+    }, 2000);
    }
 </script>
 ![Meerschaum Banner](banner_1920x320.png)
@@ -65,7 +65,7 @@ If you'd like to incorporate Meerschaum into your project, head over to [docs.me
 
 ## Support Meerschaum's Development
 <div class="grid-container">
-  <p style="text-align: left">I'm a full-time graduate student, and I work on Meerschaum in my free time. If you enjoy Meerschaum and want to support its development, you can <a href="https://www.buymeacoffee.com/bmeares">buy me a beer (or coffee)</a>.
+  <p style="text-align: left">I'm a full-time graduate student, and I work on Meerschaum in my free time. If you enjoy Meerschaum and want to support its development, feel free <a href="https://www.buymeacoffee.com/bmeares">buy me a beer (or coffee)</a>!
   </p>
   <script type="text/javascript" src="https://cdnjs.buymeacoffee.com/1.0.0/button.prod.min.js" data-name="bmc-button" data-slug="bmeares" data-color="#5F7FFF" data-emoji="🍺"  data-font="Cookie" data-text="Buy me a beer" data-outline-color="#000000" data-font-color="#ffffff" data-coffee-color="#FFDD00" ></script>
 </div>
