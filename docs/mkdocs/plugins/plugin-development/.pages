@@ -1,4 +1,3 @@
 nav:
-  - Plugin Development Quickstart: index.md
-  - writing-plugins.md
+  - Writing Your Own Plugins: index.md
   - ...

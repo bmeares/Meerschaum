@@ -46,6 +46,10 @@ with correct credentials, as well as a network connection and valid permissions.
 ...         'definition' : 'SELECT * FROM energy_table',
 ...     },
 ... }
+>>> 
+>>> ### Columns are a subset of attributes, so define columns
+>>> ### after defining attributes.
+>>> pipe.columns = { 'datetime' : 'time', 'id' : 'station_id' }
 >>> pipe.sync()
 ```
 

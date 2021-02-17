@@ -11,11 +11,6 @@ def main():
     import sys, os
     sysargs = sys.argv[1:]
 
-    ### Catch help flags.
-    if '--help' in sysargs or '-h' in sysargs:
-        from meerschaum.actions.arguments._parser import parse_help
-        return parse_help(sysargs)
-
     ### Check for a custom configuration directory.
     if '--root-dir' in sysargs:
         from meerschaum.actions.arguments._parse_arguments import parse_arguments
@@ -35,6 +30,15 @@ def main():
                 )
                 sys.exit(1)
             set_root(config_dir_path)
+
+    ### Catch help flags.
+    if '--help' in sysargs or '-h' in sysargs:
+        from meerschaum.actions.arguments._parser import parse_help
+        return parse_help(sysargs)
+
+    if '--version' in sysargs or '-V' in sysargs:
+        from meerschaum.actions.arguments._parser import parse_version
+        return parse_version(sysargs)
 
     from meerschaum.actions import entry, get_shell
 

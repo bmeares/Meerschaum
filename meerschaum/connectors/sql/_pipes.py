@@ -347,7 +347,7 @@ def get_pipe_data(
     from meerschaum.utils.debug import dprint
     from meerschaum.utils.misc import sql_item_name
     from meerschaum.connectors.sql._fetch import dateadd_str
-    query = f"SELECT * FROM {pipe}"
+    query = f"SELECT * FROM {sql_item_name(str(pipe), self.flavor)}"
     where = ""
 
     dt = sql_item_name(pipe.get_columns('datetime'), self.flavor)
@@ -653,6 +653,7 @@ def get_pipe_rowcount(
     """
     Return the number of rows between datetimes for a Pipe's instance cache or remote source
     """
+    from meerschaum.utils.misc import sql_item_name
     from meerschaum.connectors.sql._fetch import dateadd_str
     from meerschaum.utils.warnings import error, warn
     if remote:
@@ -664,7 +665,7 @@ def get_pipe_rowcount(
             error(msg)
             return None
     if 'datetime' not in pipe.columns: error(f"Pipe '{pipe}' must have a 'datetime' column declared (columns:datetime)")
-    src = f"SELECT * FROM {pipe}" if not remote else pipe.parameters['fetch']['definition']
+    src = f"SELECT * FROM {sql_item_name(pipe, self.flavor)}" if not remote else pipe.parameters['fetch']['definition']
     query = f"""
     WITH src AS ({src})
     SELECT COUNT({pipe.columns['datetime']})
