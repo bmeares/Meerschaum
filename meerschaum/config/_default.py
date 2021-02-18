@@ -8,11 +8,6 @@ The default configuration values to write to config.yaml.
 
 import sys, os, multiprocessing
 
-default_unicode, default_ansi = True, True
-import platform
-if platform.system() == 'Windows':
-    default_unicode, default_ansi = False, True
-
 from meerschaum.connectors import attributes as connector_attributes
 
 default_meerschaum_config = {
@@ -79,98 +74,6 @@ default_system_config = {
         'api' : {
         },
     },
-    ### control output colors and Unicode vs ASCII
-    'formatting'           : {
-        'unicode'          : default_unicode,
-        'ansi'             : default_ansi,
-        'emoji'            : {
-            'hand'         : '👋',
-            'error'        : '🛑',
-            'failure'      : '💢',
-            'success'      : '🎉',
-            'info'         : '💬',
-            'debug'        : '🐞',
-            'question'     : '❓',
-        },
-    },
-    'shell' : {
-        'ansi'             : {
-            'intro'        : {
-                #  'style'    : "bold bright_blue",
-                'color'    : [
-                    'bold',
-                    'bright blue',
-                ],
-            },
-            'close_message': {
-                #  'style'    : "bright_blue",
-                'color'    : [
-                    'bright blue',
-                ],
-            },
-            'doc_header': {
-                #  'style'    : "bright_blue",
-                'color'    : [
-                    'bright blue',
-                ],
-            },
-            'undoc_header': {
-                #  'style'    : "bright_blue",
-                'color'    : [
-                    'bright blue',
-                ],
-            },
-            'ruler': {
-                #  'style'    : "bright_blue",
-                'color'    : [
-                    'bold',
-                    'bright blue',
-                ],
-            },
-            'prompt': {
-                #  'style'    : "green",
-                'color'    : [
-                    'green',
-                ],
-            },
-            'instance' : {
-                #  'style'    : "cyan",
-                'color'    : [
-                    'cyan',
-                ],
-            },
-            'username' : {
-                #  'style'    : "white",
-                'color'    : [
-                    'white',
-                ],
-            },
-        },
-        'ascii'            : {
-            'intro'        : """       ___  ___  __   __   __
- |\/| |__  |__  |__) /__` /  ` |__|  /\  |  |  |\/|
- |  | |___ |___ |  \ .__/ \__, |  | /~~\ \__/  |  |\n""",
-            'prompt'       : '\n [ {username}@{instance} ] > ',
-            'ruler'        : '-',
-            'close_message': 'Thank you for using Meerschaum!',
-            'doc_header'   : 'Meerschaum actions (`help <action>` for usage):',
-            'undoc_header' : 'Unimplemented actions:',
-        },
-        'unicode'          : {
-            'intro'        : """
- █▄ ▄█ ██▀ ██▀ █▀▄ ▄▀▀ ▄▀▀ █▄█ ▄▀▄ █ █ █▄ ▄█
- █ ▀ █ █▄▄ █▄▄ █▀▄ ▄██ ▀▄▄ █ █ █▀█ ▀▄█ █ ▀ █\n""",
-            'prompt'       : '\n [ {username}@{instance} ] ➤ ',
-            'ruler'        : '─',
-            'close_message': ' MRSM{system:formatting:emoji:hand} Thank you for using Meerschaum! ',
-            'doc_header'   : 'Meerschaum actions (`help <action>` for usage):',
-            'undoc_header' : 'Unimplemented actions:',
-        },
-        'timeout'          : 60,
-        'max_history'      : 1000,
-        'clear_screen'     : True,
-        'cmd'              : 'cmd2',
-    },
     ### not to be confused with system_config['connectors']['api'], this is the configuration
     ### for the API server itself.
     'api' : {
@@ -192,102 +95,6 @@ default_system_config = {
         },
         'protocol'         : default_meerschaum_config['connectors']['api']['default']['protocol'],
     },
-    'warnings'             : {
-        'unicode'          : {
-            'icon'         : '⚠',
-        },
-        'ascii'            : {
-            'icon'         : 'WARNING',
-        },
-        'ansi'             : {
-            'color'        : [
-                'bold',
-                'yellow',
-            ],
-        },
-    },
-    'success'              : {
-        'unicode'          : {
-            'icon'         : 'MRSM{system:formatting:emoji:success}',
-        },
-        'ascii'            : {
-            'icon'         : '+',
-        },
-        'ansi'             : {
-            'color'        : [
-                'bold',
-                'bright green',
-            ],
-        },
-    },
-    'failure'              : {
-        'unicode'          : {
-            'icon'         : 'MRSM{system:formatting:emoji:failure}',
-        },
-        'ascii'            : {
-            'icon'         : '-',
-        },
-        'ansi'             : {
-            'color'        : [
-                'bold',
-                'red',
-                ],
-        },
-    },
-    'errors'               : {
-        'unicode'          : {
-            'icon'         : 'MRSM{system:formatting:emoji:error}',
-        },
-        'ascii'            : {
-            'icon'         : 'ERROR',
-        },
-        'ansi'             : {
-            'color'        : [
-                'bold',
-                'red',
-            ],
-        },
-    },
-    'info'                 : {
-        'unicode'          : {
-            'icon'         : 'MRSM{system:formatting:emoji:info}',
-        },
-        'ascii'            : {
-            'icon'         : 'INFO',
-        },
-        'ansi'             : {
-            'color'        : [
-                'bold',
-                'bright magenta',
-            ],
-        },
-    },
-    'question'             : {
-        'unicode'          : {
-            'icon'         : 'MRSM{system:formatting:emoji:question}',
-        },
-        'ascii'            : {
-            'icon'         : '',
-        },
-        'ansi'             : {
-            'color'        : [
-                'green',
-            ],
-        },
-    },
-    'debug'                : {
-        'unicode'          : {
-            'icon'       : 'MRSM{system:formatting:emoji:debug}',
-        },
-        'ascii'            : {
-            'icon'       : 'DEBUG',
-        },
-        'ansi'             : {
-            'color'        : [
-                'cyan',
-            ],
-        },
-    },
 }
 default_pipes_config       = {
     'parameters'           : {
@@ -302,10 +109,16 @@ default_experimental_config = {
     'venv' : True,
 }
 
+
+
 ### build default config dictionary
 default_config = dict()
 default_config['meerschaum'] = default_meerschaum_config
 default_config['system'] = default_system_config
+from meerschaum.config._formatting import default_formatting_config
+default_config['formatting'] = default_formatting_config
+from meerschaum.config._shell import default_shell_config
+default_config['shell'] = default_shell_config
 default_config['pipes'] = default_pipes_config
 default_config['plugins'] = default_plugins_config
 #  default_config['experimental'] = default_experimental_config

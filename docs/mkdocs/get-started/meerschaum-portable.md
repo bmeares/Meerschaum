@@ -5,21 +5,22 @@ Meerschaum Portable is a self-contained Meerschaum installation, running entirel
 
 !!! bug "Compatability Notice"
     Although Meerschaum Portable is extensively tested, you may still encounter problems, such as permissions issues on Mac OS. In case you cannot successfully extract Meerschaum Portable, consider following the directions for a normal install found on the [Getting Started](/get-started) page.
-    
-## Download the Archive
+
+## Installing Meerschaum Portable
+Installing Meerschaum Portable is pretty straightforward: download and extract the archive file, then execute `mrsm`. Follow the steps below for more information.
+
+### Download the Archive
 
 Download the appropriate archive for your operating system. For convenience, I recommend installing the Full version, though note that the extracted folder can grow to >1 GB in size!
 
 If you don't need all of Meerschaum's functionality and would rather save a bit of disk space, download the Minimal version. You can always install dependencies later with `mrsm upgrade packages`.
 
-| Windows                                                      | Linux                                                        | MacOS                                                        |
+| Windows 10 x64                                               | Linux x64                                                    | MacOS                                                        |
 | ------------------------------------------------------------ | ------------------------------------------------------------ | ------------------------------------------------------------ |
 | [Windows Full](https://meerschaum.io/files/mrsm-full-windows.zip) | [Linux Full](https://meerschaum.io/files/mrsm-full-linux.tar.gz) | [MacOS Full](https://meerschaum.io/files/mrsm-full-macos.tar.gz) |
 | [Windows Minimal](https://meerschaum.io/files/mrsm-minimal-windows.zip) | [Linux Minimal](https://meerschaum.io/files/mrsm-minimal-linux.tar.gz) | [MacOS Minimal](https://meerschaum.io/files/mrsm-minimal-macos.tar.gz) |
 
-
-
-## Extract the Archive
+### Extract the Archive
 
 After downloading the archive, move it to your desired location and extract its contents:
 
@@ -35,7 +36,7 @@ After downloading the archive, move it to your desired location and extract its 
 === "MacOS"
     Double-click the archive to open the Archive Utility, or use `tar` (see Linux instructions).
     
-## Launch Meerschaum Portable
+### Run the Script
 Inside the extracted folder, there is an executable called `mrsm` (`mrsm.bat` on Windows). Run this script by double-clicking (Windows and MacOS) or via a terminal window. The first time launching may take a bit, so be patient!
 
 ## Resetting Meerschaum Portable

@@ -6,7 +6,7 @@ theme:
     - navigation.instant
     - navigation.expand
     - navigation.tabs
-    - toc.integrate
+    # - toc.integrate
   favicon: assets/logo.ico
   logo: assets/logo_500x500.png
   name: material

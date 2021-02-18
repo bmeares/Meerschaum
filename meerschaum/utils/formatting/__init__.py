@@ -87,7 +87,7 @@ def _init():
     return success
 
 _colorama_init = False
-def colored(text : str, *colors, **kw):
+def colored(text : str, *colors, **kw) -> str:
     from meerschaum.utils.packages import attempt_import
     global _colorama_init
     _colorama_init = _init() if not _colorama_init else True
@@ -132,7 +132,7 @@ def get_console():
     #  console = None
     #  ANSI, UNICODE, CHARSET = False, False, 'ascii'
 
-def print_tuple(tup : tuple, skip_common : bool = True, common_only : bool = False):
+def print_tuple(tup : tuple, skip_common : bool = True, common_only : bool = False) -> None:
     """
     Print Meerschaum return tuple
     """
@@ -145,7 +145,7 @@ def print_tuple(tup : tuple, skip_common : bool = True, common_only : bool = Fal
         status = 'failure'
         tup = None, None
 
-    status_config = get_config('system', status, patch=True)
+    status_config = get_config('formatting', status, patch=True)
 
     msg = ' ' + status_config[CHARSET]['icon'] + ' ' + str(tup[1])
     if ANSI:
@@ -175,8 +175,8 @@ def __getattr__(name : str) -> str:
         if _attrs[name] is not None:
             return _attrs[name]
         from meerschaum.config import get_config
-        if name.lower() in get_config('system', 'formatting'):
-            _attrs[name] = get_config('system', 'formatting', name.lower())
+        if name.lower() in get_config('formatting'):
+            _attrs[name] = get_config('formatting', name.lower())
         elif name == 'CHARSET':
             _attrs[name] = 'unicode' if __getattr__('UNICODE') else 'ascii'
         return _attrs[name]

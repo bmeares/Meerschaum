@@ -1,6 +1,7 @@
 #! /usr/bin/env python
 # -*- coding: utf-8 -*-
 # vim:fenc=utf-8
+
 """
 Pipes are the primary metaphor of the Meerschaum system.
 You can interact with pipe data via `meerschaum.Pipe` objects.
@@ -55,6 +56,9 @@ with correct credentials, as well as a network connection and valid permissions.
 
 """
 
+from __future__ import annotations
+from meerschaum.utils.typing import Optional, Dict, Any
+
 class Pipe:
     from ._fetch import fetch
     from ._data import get_data, get_backtrack_data, get_rowcount
@@ -67,33 +71,38 @@ class Pipe:
     from ._sync import sync, get_sync_time, exists
     from ._delete import delete
     from ._drop import drop
+    from ._bootstrap import bootstrap
 
     def __init__(
         self,
         connector_keys : str,
         metric_key : str,
-        location_key : str = None,
-        parameters : dict = None,
-        mrsm_instance : str = None,
+        location_key : Optional[str] = None,
+        parameters : Optional[Dict[str, Any]] = None,
+        mrsm_instance : Optional[str] = None,
         debug : bool = False
     ):
         """
-        connector_keys : str
-            keys to get Meerschaum connector
-            e.g. 'sql:main'
+        :param connector_keys:
+            Keys for the pipe's source connector.
+            E.g. 'sql:main'
 
-        metric_key : str
-            standard Meerschaum metric key
+        :param metric_key:
+            Label for the pipe's contents.
+            E.g. 'weather'
 
-        location_key : str
-            standard Meerschaum location key
+        :param location_key:
+            Label for the pipe's location.
+            Defaults to None.
 
-        parameters : dict : {}
-            parameters dictionary to give the Pipe.
-            This dictionary is NOT stored in memory but rather is used for registration purposes.
+        :param parameters:
+            Optionally set a pipe's parameters from the constructor,
+            e.g. columns and other attributes.
+            Defaults to None.
 
-        mrsm_instance : str : None
-            connector_keys for the Meerschaum instance connector (SQL or API connector)
+        :param mrsm_instance:
+            Connector keys for the Meerschaum instance where the pipe resides.
+            Defaults to the preconfigured default instance.
         """
         if location_key in ('[None]', 'None'): location_key = None
         self.connector_keys = connector_keys
@@ -123,7 +132,7 @@ class Pipe:
     @property
     def meta(self):
         """
-        Simulate the MetaPipe model without importing FastAPI
+        Simulate the MetaPipe model without importing FastAPI.
         """
         refresh = False
         if '_meta' not in self.__dict__: refresh = True
@@ -142,6 +151,9 @@ class Pipe:
 
     @property
     def instance_connector(self):
+        """
+        Return the connector for the instance on which the pipe resides.
+        """
         if '_instance_connector' not in self.__dict__:
             from meerschaum.connectors.parse import parse_instance_keys
             conn = parse_instance_keys(self.instance_keys)
@@ -153,6 +165,9 @@ class Pipe:
 
     @property
     def connector(self):
+        """
+        Return the pipe's data source connector.
+        """
         if '_connector' not in self.__dict__:
             from meerschaum.connectors.parse import parse_instance_keys
             conn = parse_instance_keys(self.connector_keys)
@@ -164,15 +179,18 @@ class Pipe:
 
     @property
     def sync_time(self):
+        """
+        Convenience function to get the pipe's latest datetime.
+        """
         return self.get_sync_time()
 
     def __str__(self):
         """
         The Pipe's SQL table name. Converts the ':' in the connector_keys to an '_'.
         """
-        name = f"{self.connector_keys.replace(':', '_')}_{self.metric_key}"
+        name = f"{self.connector_keys.replace('_', '__').replace(':', '_')}_{self.metric_key.replace('_', '__')}"
         if self.location_key is not None:
-            name += f"_{self.location_key}"
+            name += f"_{self.location_key.replace('_', '__')}"
         return name
 
     def __repr__(self):
