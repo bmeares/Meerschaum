@@ -824,10 +824,14 @@ def get_connector_labels(
 
     _types = list(types)
     if len(_types) == 0:
-        _types = list(connectors.keys())
+        _types = list(connectors.keys()) + ['plugin']
 
     conns = []
     for t in _types:
+        if t == 'plugin':
+            from meerschaum.actions.plugins import get_data_plugins
+            conns += [f'{t}:' + m.__name__.split('.')[-1] for m in get_data_plugins()]
+            continue
         conns += [ f'{t}:{label}' for label in connectors.get(t, {}) if label != 'default' ]
 
     possibilities = [ c for c in conns if c.startswith(search_term) and c != (search_term if ignore_exact_match else None) ]

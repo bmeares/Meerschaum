@@ -1,5 +1,5 @@
 nav:
-  - index.md
+  - About Plugins: index.md
   - types-of-plugins.md
   - Plugin Development: plugin-development
   - ...

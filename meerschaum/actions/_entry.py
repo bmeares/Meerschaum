@@ -28,7 +28,7 @@ def _entry(sysargs=[]):
 
     ### if action does not exist, execute in bash
     if main_action not in actions:
-        main_action = 'bash'
+        main_action = 'sh'
         args['action'].insert(0, main_action)
 
     ### Check if the action is a plugin, and if so, activate virtual environment.

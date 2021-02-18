@@ -5,6 +5,7 @@
 """
 This module contains functions for printing elements.
 """
+
 from __future__ import annotations
 from meerschaum.utils.typing import SuccessTuple, Union, Sequence, Any, Optional
 
@@ -48,6 +49,7 @@ def _complete_show(
 
     options = {
         'connectors': _complete_show_connectors,
+        'config' : _complete_show_config,
     }
 
     if len(action) > 0 and action[0] in options:
@@ -78,6 +80,7 @@ def _show_help(**kw : Any) -> SuccessTuple:
 def _show_config(
         action : Sequence[str] = [],
         debug : bool = False,
+        nopretty : bool = False,
         **kw : Any
     ) -> SuccessTuple:
     """
@@ -86,6 +89,7 @@ def _show_config(
 
     E.g. `show config pipes` -> cf['pipes']
     """
+    import json
     from meerschaum.utils.formatting import pprint
     from meerschaum.config import get_config
     from meerschaum.config._paths import CONFIG_DIR_PATH
@@ -95,8 +99,22 @@ def _show_config(
     valid, config = get_config(*action, as_tuple=True, warn=False)
     if not valid:
         return False, f"Invalid configuration keys '{action}'."
-    pprint(config)
+    if nopretty:
+        print(json.dumps(config))
+    else:
+        pprint(config)
     return (True, "Success")
+
+def _complete_show_config(action : List[str] = [], **kw : Any):
+    from meerschaum.config._read_config import get_possible_keys
+    keys = get_possible_keys()
+    if len(action) == 0:
+        return keys
+    possibilities = []
+    for key in keys:
+        if key.startswith(action[0]) and action[0] != key:
+            possibilities.append(key)
+    return possibilities
 
 def _show_modules(**kw : Any) -> SuccessTuple:
     """

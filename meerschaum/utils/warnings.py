@@ -73,7 +73,7 @@ def warn(*args, stacklevel=2, stack=True, color : bool = True, **kw):
 
     if get_config is None and color:
         try:
-            warn_config = cf['system']['warnings']
+            warn_config = cf['formatting']['warnings']
         except:
             warn_config = {
                 'ansi' : {'color' : []},
@@ -81,7 +81,7 @@ def warn(*args, stacklevel=2, stack=True, color : bool = True, **kw):
                 'ascii' : {'icon' : ''},
             }
     elif color:
-        warn_config = get_config('system', 'warnings', patch=True)
+        warn_config = get_config('formatting', 'warnings', patch=True)
     a = list(args)
     a[0] = ' ' + (warn_config[CHARSET]['icon'] if color else '') + ' ' + str(a[0])
     if color:
@@ -160,7 +160,7 @@ def error(
     from meerschaum.config import get_config
     import types, sys, inspect
     rich = import_rich()
-    error_config = get_config('system', 'errors', patch=True)
+    error_config = get_config('formatting', 'errors', patch=True)
     message = ' ' + error_config[CHARSET]['icon'] + ' ' + str(message)
     exception = exception_with_traceback(message, exception_class, stacklevel=3)
     color_message = str(message)
@@ -193,7 +193,7 @@ def info(message : str, **kw):
     from meerschaum.utils.formatting import CHARSET, ANSI, colored
     from meerschaum.config import get_config
     import sys
-    info_config = get_config('system', 'info', patch=True)
+    info_config = get_config('formatting', 'info', patch=True)
     message = ' ' + info_config[CHARSET]['icon'] + ' ' + message
     if ANSI:
         message = colored(message, *info_config['ansi']['color'])

@@ -18,6 +18,7 @@ def pprint_pipes(pipes : dict):
     from meerschaum.utils.packages import attempt_import, import_rich
     from meerschaum.utils.misc import sorted_dict, replace_pipes_in_dict
     from meerschaum.utils.formatting import UNICODE, ANSI, pprint, colored
+    from meerschaum.config import get_config
     import copy
     #  rich = attempt_import('rich', warn=False)
     rich = import_rich('rich', warn=False)
@@ -30,11 +31,10 @@ def pprint_pipes(pipes : dict):
     styles = {'connector' : '', 'metric' : '', 'location' : '', 'key' : ''}
     guide_style, none_style = '', ''
     if UNICODE:
-        icons['connector'] = '🔌 '
-        icons['metric'] = '📊 '
-        icons['location'] = '📍 '
-        icons['key'] = '🔑 '
-        icons['info'] = '💡 '
+        icons['connector'] = get_config('formatting', 'emoji', 'connector', patch=True) + ' '
+        icons['metric'] = get_config('formatting', 'emoji', 'metric', patch=True) + ' '
+        icons['location'] = get_config('formatting', 'emoji', 'location', patch=True) + ' '
+        icons['key'] = get_config('formatting', 'emoji', 'key', patch=True) + ' '
     if ANSI:
         styles['connector'] = 'green'
         styles['metric'] = 'bright_blue'

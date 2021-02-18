@@ -11,10 +11,13 @@ from meerschaum.utils.typing import Union, SuccessTuple, Any, Callable, Optional
 import sys, inspect
 from meerschaum.utils.packages import attempt_import
 from meerschaum.config import __doc__, __version__ as version, get_config
-cmd = attempt_import(get_config('system', 'shell', 'cmd', patch=True), warn=False, lazy=False)
+cmd = attempt_import(get_config('shell', 'cmd', patch=True), warn=False, lazy=False)
 if cmd is None or isinstance(cmd, dict):
     cmd = attempt_import('cmd', lazy=False, warn=False)
-_clear_screen = get_config('system', 'shell', 'clear_screen', patch=True)
+prompt_toolkit = attempt_import('prompt_toolkit', lazy=False, warn=False, install=True)
+from meerschaum.actions.shell.ValidAutoSuggest import ValidAutoSuggest
+from meerschaum.actions.shell.ShellCompleter import ShellCompleter
+_clear_screen = get_config('shell', 'clear_screen', patch=True)
 from meerschaum.connectors.parse import parse_instance_keys
 from meerschaum.utils.misc import string_width
 ### readline is Unix-like only. Disable readline features for Windows
@@ -210,8 +213,14 @@ class Shell(cmd.Cmd):
             delattr(cmd.Cmd, '_macro_list')
         except AttributeError:
             pass
-        #  delattr(cmd.Cmd, 'do_alias')
-        #  delattr(cmd.Cmd, 'do_macro')
+
+        from meerschaum.config._paths import SHELL_HISTORY_PATH
+        self.session = prompt_toolkit.shortcuts.PromptSession(
+            history = prompt_toolkit.history.FileHistory(str(SHELL_HISTORY_PATH)),
+            auto_suggest = ValidAutoSuggest(),
+            completer = ShellCompleter(),
+            complete_while_typing = True,
+        )
 
         try: ### try cmd2 arguments first
             super().__init__(
@@ -256,13 +265,13 @@ class Shell(cmd.Cmd):
 
     def load_config(self, instance : str = None):
         """
-        Set attributes from the system configuration.
+        Set attributes from the shell configuration.
         """
         from meerschaum.utils.misc import remove_ansi
         from meerschaum.utils.formatting import CHARSET, ANSI, UNICODE, colored
         
         if self.__dict__.get('intro', None) != '':
-            self.intro = get_config('system', 'shell', CHARSET, 'intro', patch=patch)
+            self.intro = get_config('shell', CHARSET, 'intro', patch=patch)
             self.intro += '\n' + ''.join(
                 [' '
                     for i in range(
@@ -272,12 +281,12 @@ class Shell(cmd.Cmd):
             ) + 'v' + version
         else:
             self.intro = ""
-        self._prompt = get_config('system', 'shell', CHARSET, 'prompt', patch=patch)
+        self._prompt = get_config('shell', CHARSET, 'prompt', patch=patch)
         self.prompt = self._prompt
-        self.ruler = get_config('system', 'shell', CHARSET, 'ruler', patch=patch)
-        self.close_message = get_config('system', 'shell', CHARSET, 'close_message', patch=patch)
-        self.doc_header = get_config('system', 'shell', CHARSET, 'doc_header', patch=patch)
-        self.undoc_header = get_config('system', 'shell', CHARSET, 'undoc_header', patch=patch)
+        self.ruler = get_config('shell', CHARSET, 'ruler', patch=patch)
+        self.close_message = get_config('shell', CHARSET, 'close_message', patch=patch)
+        self.doc_header = get_config('shell', CHARSET, 'doc_header', patch=patch)
+        self.undoc_header = get_config('shell', CHARSET, 'undoc_header', patch=patch)
 
         if instance is None and self.__dict__.get('instance_keys', None) is None:
             ### create default instance and repository connectors
@@ -296,10 +305,10 @@ class Shell(cmd.Cmd):
             def apply_colors(attr, key):
                 return colored(
                     attr,
-                    *get_config('system', 'shell', 'ansi', key, 'color', patch=patch)
+                    *get_config('shell', 'ansi', key, 'color', patch=patch)
                 )
 
-            for attr_key in get_config('system', 'shell', 'ansi', patch=patch):
+            for attr_key in get_config('shell', 'ansi', patch=patch):
                 self.__dict__[attr_key] = apply_colors(self.__dict__[attr_key], attr_key)
 
         ### refresh actions
@@ -319,7 +328,7 @@ class Shell(cmd.Cmd):
         if '{instance}' in self._prompt:
             if instance is None: instance = self.instance_keys
             self.instance = instance
-            if ANSI: self.instance = colored(self.instance, *get_config('system', 'shell', 'ansi', 'instance', 'color', patch=True))
+            if ANSI: self.instance = colored(self.instance, *get_config('shell', 'ansi', 'instance', 'color', patch=True))
             prompt = prompt.replace('{instance}', self.instance)
             mask = mask.replace('{instance}', ''.join(['\0' for c in '{instance}']))
 
@@ -334,7 +343,7 @@ class Shell(cmd.Cmd):
                     username = str(e)
             self.username = (
                 username if not ANSI else
-                colored(username, *get_config('system', 'shell', 'ansi', 'username', 'color', patch=True))
+                colored(username, *get_config('shell', 'ansi', 'username', 'color', patch=True))
             )
             prompt = prompt.replace('{username}', self.username)
             mask = mask.replace('{username}', ''.join(['\0' for c in '{username}']))
@@ -343,7 +352,7 @@ class Shell(cmd.Cmd):
         for i, c in enumerate(mask):
             if c != '\0':
                 _c = c
-                if ANSI: _c = colored(_c, *get_config('system', 'shell', 'ansi', 'prompt', 'color', patch=True))
+                if ANSI: _c = colored(_c, *get_config('shell', 'ansi', 'prompt', 'color', patch=True))
                 remainder_prompt[i] = _c
         self.prompt = ''.join(remainder_prompt).replace('{username}', self.username).replace('{instance}', self.instance)
         ### flush stdout
@@ -391,10 +400,10 @@ class Shell(cmd.Cmd):
             return "help " + line[len(help_token):]
 
         ### first things first: save history BEFORE execution
-        from meerschaum.config._paths import SHELL_HISTORY_PATH
-        if readline:
-            readline.set_history_length(get_config('system', 'shell', 'max_history', patch=patch))
-            readline.write_history_file(SHELL_HISTORY_PATH)
+        #  from meerschaum.config._paths import SHELL_HISTORY_PATH
+        #  if readline:
+            #  readline.set_history_length(get_config('shell', 'max_history', patch=patch))
+            #  readline.write_history_file(SHELL_HISTORY_PATH)
 
         ### TODO Migrate to using entry for everything instead of replicating entry inside precmd.
         #  from meerschaum.actions._entry import entry
@@ -714,15 +723,18 @@ class Shell(cmd.Cmd):
 
     def preloop(self):
         import signal, os
-        from meerschaum.config._paths import SHELL_HISTORY_PATH
-        if SHELL_HISTORY_PATH.exists():
-            if readline:
-                readline.read_history_file(SHELL_HISTORY_PATH)
+        #  from meerschaum.config._paths import SHELL_HISTORY_PATH
+        #  if SHELL_HISTORY_PATH.exists():
+            #  if readline:
+                #  readline.read_history_file(SHELL_HISTORY_PATH)
         """
         Patch builtin cmdloop with my own input (defined below)
         """
         old_input = cmd.__builtins__['input']
-        cmd.__builtins__['input'] = input_with_sigint(old_input)
+        cmd.__builtins__['input'] = input_with_sigint(old_input, self.session)
+        #  sys.modules['readline'] = session
+        #  help(cmd)
+
         ### if the user specifies, clear the screen before initializing the shell
         if _clear_screen:
             from meerschaum.utils.formatting._shell import clear_screen
@@ -734,27 +746,36 @@ class Shell(cmd.Cmd):
             self.precmd(' '.join(self._sysargs))
 
     def postloop(self):
-        from meerschaum.config._paths import SHELL_HISTORY_PATH
-        if readline:
-            readline.set_history_length(get_config('system', 'shell', 'max_history', patch=patch))
-            readline.write_history_file(SHELL_HISTORY_PATH)
+        #  from meerschaum.config._paths import SHELL_HISTORY_PATH
+        #  if readline:
+            #  readline.set_history_length(get_config('shell', 'max_history', patch=patch))
+            #  readline.write_history_file(SHELL_HISTORY_PATH)
         print('\n' + self.close_message)
 
-def input_with_sigint(_input):
+def input_with_sigint(_input, session):
     """
-    Patch builtin input()
+    Replace built-in `input()` with prompt_toolkit.prompt.
     """
-    def _input_with_sigint(*args):
+
+    def _patched_input(*args):
+        _args = []
+        for a in args:
+            try:
+                _a = prompt_toolkit.formatted_text.ANSI(a)
+            except:
+                _a = a
+            _args.append(_a)
         try:
-            parsed = _input(*args)
+            parsed = session.prompt(*_args)
             ### clear screen on empty input
             ### NOTE: would it be better to do nothing instead?
             if len(parsed.strip()) == 0:
                 if _clear_screen:
                     from meerschaum.utils.formatting._shell import clear_screen
                     clear_screen()
-            return parsed
         except KeyboardInterrupt:
             print("^C")
             return "pass"
-    return _input_with_sigint
+        return parsed
+
+    return _patched_input

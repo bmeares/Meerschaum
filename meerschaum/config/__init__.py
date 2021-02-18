@@ -41,7 +41,7 @@ def set_config(cf : Dict[str, Any]) -> Dict[str, Any]:
 
 def get_config(
         *keys : str,
-        patch : bool = False,
+        patch : bool = True,
         substitute : bool = True,
         as_tuple : bool = False,
         warn : bool = True,
@@ -56,9 +56,8 @@ def get_config(
         List of strings to index.
 
     :param patch:
-        If invalid keys are detected and `patch` is True, rename the `config` directory
-        to `permanent_patch_config`, which preserves configuration across installs.
-        With the new config system, this is less necessary.
+        If True, patch missing default keys into the config directory.
+        Defaults to True.
         
     :param substitute:
         If True, subsitute 'MRSM{}' values.
@@ -68,17 +67,20 @@ def get_config(
         If True, return a tuple of type (success, value).
         Defaults to False.
 
-    E.g. get_config('system', 'shell') == config['system']['shell']
+    E.g. get_config('shell') == config['shell']
     """
     global config
+    import sys
 
     from meerschaum.utils.debug import dprint
     if debug: dprint(f"Indexing keys: {keys}")
 
     if len(keys) == 0:
+        if as_tuple:
+            return True, _config()
         return _config()
 
-    from meerschaum.config._read_config import read_config
+    from meerschaum.config._read_config import read_config, search_and_substitute_config
     if config is None:
         config = read_config(keys=[keys[0]], substitute=substitute)
 
@@ -95,24 +97,36 @@ def get_config(
                 invalid_keys = True
                 break
         if invalid_keys:
+            ### Check if the keys are in the default configuration.
+            from meerschaum.config._default import default_config
+            in_default = True
+            patched_default_config = search_and_substitute_config(default_config) if substitute else default_config
+            _c = patched_default_config
+            for k in keys:
+                try:
+                    _c = _c[k]
+                except:
+                    in_default = False
+            if in_default:
+                c = _c
+                invalid_keys = False
             from meerschaum.config._paths import PERMANENT_PATCH_DIR_PATH, CONFIG_DIR_PATH
             warning_msg = f"Invalid keys in config: {keys}"
-            debug_msg = f"Moving {CONFIG_DIR_PATH} to {PERMANENT_PATCH_DIR_PATH}. Restart Meerschaum to patch configuration with new defaults."
-            try:
-                if warn:
-                    from meerschaum.utils.warnings import warn as _warn
-                    _warn(warning_msg, stacklevel=3)
-            except:
-                if warn:
-                    print(f"Invalid keys in config: {keys}")
-            if patch:
-                import shutil, sys
+            if not in_default:
                 try:
-                    dprint(debug_msg, color=False)
+                    if warn:
+                        from meerschaum.utils.warnings import warn as _warn
+                        _warn(warning_msg, stacklevel=3)
                 except:
-                    print(debug_msg)
-                shutil.move(CONFIG_DIR_PATH, PERMANENT_PATCH_DIR_PATH)
+                    if warn:
+                        print(warning_msg)
                 sys.exit(1)
+            from meerschaum.config._patch import apply_patch_to_config
+            config = apply_patch_to_config(patched_default_config, config)
+            if patch:
+                from meerschaum.config._edit import write_config
+                print("Updating configuration, please wait...")
+                write_config(config, debug=debug)
     if as_tuple:
         return (not invalid_keys), c
     return c
@@ -190,7 +204,7 @@ if environment_runtime in os.environ:
 
 
 
-### if interactive shell, print welcome header
+### If interactive REPL, print welcome header.
 import sys
 __doc__ = f"Meerschaum v{__version__}"
 try:
@@ -200,12 +214,5 @@ except AttributeError:
     interactive = False
 if interactive:
     msg = __doc__
-    #  if config['system']['formatting']['ansi']:
-        #  try:
-            #  from more_termcolor import colored
-        #  except:
-            #  pass
-        #  else:
-            #  msg = colored(msg, 'bright blue', attrs=['bold'])
     print(msg, file=sys.stderr)
 

@@ -28,7 +28,7 @@ def apply_patch_to_config(
         patch : dict
     ):
     """
-    Patch the config dict with a new dict (cascade patching)
+    Patch the config dict with a new dict (cascade patching).
     """
     from meerschaum.utils.packages import attempt_import
     cascadict = attempt_import("cascadict", warn=True, install=True)

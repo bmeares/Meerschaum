@@ -190,7 +190,8 @@ def general_edit_config(
 
 def copy_default_to_config(debug : bool = False):
     """
-    Copy the default config file to the main config file
+    Copy the default config directory to the main config directory.
+    NOTE: This function is now depreciated in favor of the new patch system.
     """
     from meerschaum.config._paths import DEFAULT_CONFIG_DIR_PATH, CONFIG_DIR_PATH
     import shutil
@@ -208,7 +209,7 @@ def write_default_config(
         **kw
     ):
     """
-    Overwrite the existing default_config.yaml.
+    Write the default configuration files.
     """
     #  from meerschaum.utils.yaml import yaml
     import os

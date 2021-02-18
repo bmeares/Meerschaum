@@ -8,7 +8,7 @@ Functions for bootstrapping elements
 """
 
 from __future__ import annotations
-from meerschaum.utils.typing import Union, Any, Sequence, SuccessTuple, Optional
+from meerschaum.utils.typing import Union, Any, Sequence, SuccessTuple, Optional, Tuple
 
 def bootstrap(
         action : Sequence[str] = [],
@@ -39,6 +39,7 @@ def _bootstrap_pipes(
         metric_keys : Sequence[str] = [],
         location_keys : Optional[Sequence[Optional[str]]] = [],
         yes : bool = False,
+        force : bool = False,
         debug : bool = False,
         **kw : Any
     ) -> SuccessTuple:
@@ -46,25 +47,16 @@ def _bootstrap_pipes(
     Create a new pipe.
     If no keys are provided, guide the user through the steps required.
     """
+    from meerschaum import get_pipes
     from meerschaum.config import get_config
     from meerschaum.utils.warnings import info, warn, error
     from meerschaum.utils.debug import dprint
-    from meerschaum.utils.prompt import yes_no, prompt
+    from meerschaum.utils.prompt import yes_no, prompt, choose
     from meerschaum.connectors.parse import is_valid_connector_keys
+    from meerschaum.utils.misc import get_connector_labels
+    from meerschaum.utils.formatting._shell import clear_screen
 
-    def _get_connector_keys(ck : Optional[str]) -> str:
-        """
-        Check if the connector keys are valid. If not, prompt the user until they are.
-        """
-        while True:
-            if not is_valid_connector_keys(ck):
-                if yes or yes_no(
-                    f"Connector keys '{ck}' don't correspond with a registered connector. " + 
-                    "Would you like to add one now?"
-                ):
-                    pass
-            else:
-                return ck
+    _clear = get_config('shell', 'clear_screen', patch=True)
 
     if (
         len(connector_keys) > 0 and
@@ -79,9 +71,97 @@ def _bootstrap_pipes(
                 if len(location_keys) > 0 else ""
             )
         )
-        yes_no()
+        if not force:
+            if yes or not yes_no(
+                "Would you like to bootstrap pipes with these keys?\nExisting pipes will be deleted!",
+                default = 'n'
+            ):
+                return False, f"No pipes were bootstrapped."
+    else:
+        ### Get the connector.
+        new_label = 'New'
+        info(f"To create a pipe without explicitly using a connector, use the `register pipes` command.\n")
+        ck = choose(
+            f"Where are the data coming from?\n\n" +
+            f"Please type the keys of a connector from below,\n" +
+            f"or enter '{new_label}' to register a new connector.\n\n" +
+            f" {get_config('formatting', 'emoji', 'connector')} Connector:\n",
+            get_connector_labels() + [new_label],
+            numeric = False
+        )
+        if ck == new_label:
+            if _clear: clear_screen(debug=debug)
+            while True:
+                tup = _bootstrap_connectors([], yes=yes, force=force, debug=debug, return_keys=True, **kw)
+                if isinstance(tup[0], str):
+                    if _clear: clear_screen(debug=debug)
+                    ck = tup[0] + ':' + tup[1]
+                    break
+                warn(f"Please register a new connector or press CTRL+C to cancel.", stack=False)
+        connector_keys = [ck]
 
-    return (True, "Success")
+        ### Get the metric.
+        while True:
+            if _clear: clear_screen(debug=debug)
+            mk = prompt(
+                f"What kind of data is this?\n\n" +
+                f"The metric is the label for the contents of the pipe.\n" +
+                f"For example, 'weather' might be a metric for weather station data.\n\n" +
+                f" {get_config('formatting', 'emoji', 'metric')} Metric:"
+            )
+            if mk:
+                break
+            warn("Please enter a metric.", stack=False)
+        metric_keys = [mk]
+
+        ### Get the location
+        if _clear: clear_screen(debug=debug)
+        lk = prompt(
+            f"Where are the data located?\n\n" +
+            f"You have the option to create multiple pipes with same connector and\n" +
+            f"metric but different locations.\n\n" +
+            f"For example, you could create the pipes 'sql_remote_energy_home' and\n" +
+            f"'sql_remote_energy_work', which would share a connector ('sql:remote') and\n" +
+            f"metric ('energy'), but may come from different tables.\n\n" +
+            f"In most cases. you can omit the location.\n\n" +
+            f" {get_config('formatting', 'emoji', 'location')} Location (Empty to omit):"
+        )
+        lk = None if lk == '' else lk
+        location_keys = [lk]
+
+    if _clear: clear_screen(debug=debug)
+    _pipes = get_pipes(
+        connector_keys, metric_keys, location_keys,
+        method = 'explicit', as_list = True,
+        debug=debug, **kw
+    )
+    pipes = []
+    for p in _pipes:
+        if p.get_id() is not None and not force:
+            if not yes_no(f"Pipe '{p}' already exists. Delete pipe '{p}'?\nData will be lost!", default='n'):
+                info(f"Skipping bootstrapping pipe '{p}'...")
+                continue
+        pipes.append(p)
+
+    if len(pipes) == 0:
+        return False, "No pipes were bootstrapped."
+
+    success_dict = {}
+    successes, failures = 0, 0
+    for p in pipes:
+        tup = p.bootstrap(interactive=True, debug=debug)
+        success_dict[p] = tup
+        if tup[0]:
+            successes += 1
+        else:
+            failures += 1
+
+    msg = (
+        f"Finished bootstrapping {len(pipes)} pipe" + ("s" if len(pipes) != 1 else "") + "\n" +
+        f"    ({successes} succeeded, {failures} failed)."
+    )
+
+    return (successes > 0, msg)
 
 def _bootstrap_connectors(
         action : Sequence[str] = [],
@@ -89,8 +169,9 @@ def _bootstrap_connectors(
         yes : bool = False,
         force : bool = False,
         debug : bool = False,
+        return_keys : bool = False,
         **kw : Any
-    ) -> SuccessTuple:
+    ) -> Union[SuccessTuple, Tuple[str, str]]:
     """
     Prompt the user for the details necessary to create a Connector.
     """
@@ -105,7 +186,7 @@ def _bootstrap_connectors(
     from meerschaum.utils.warnings import warn, info
     from meerschaum.utils.misc import is_int
 
-    _clear = get_config('system', 'shell', 'clear_screen', patch=True)
+    _clear = get_config('shell', 'clear_screen', patch=True)
 
     if len(connector_keys) == 0:
         pass
@@ -113,7 +194,7 @@ def _bootstrap_connectors(
     _type = choose(
         (
             'Please choose a connector type.\n' +
-            'For more information on connectors, please visit https://docs.meerschaum.io/connectors'
+            'For more information on connectors, please visit https://meerschaum.io/reference/connectors'
         ),
         sorted(list(connectors)),
         default='sql'
@@ -126,87 +207,84 @@ def _bootstrap_connectors(
     )
     new_connector_label = 'New connector'
     _label_choices.append(new_connector_label)
-    _label = choose(
-        'Please choose a connector label.\n' +
-        f"If you want to create a new connector, choose '{new_connector_label}' ({len(_label_choices)}).",
-        _label_choices,
-        default = new_connector_label
-    )
-    if _label == new_connector_label:
-        while True:
-            _label = prompt(f"New label for '{_type}' connector:")
-            if _label in get_config('meerschaum', 'connectors', _type):
-                warn(f"Connector '{_type}:{_label}' already exists.", stack=False)
-                overwrite = yes_no(f"Do you want to overwrite connector '{_type}:{_label}'?", default='n')
-                if not overwrite and not force:
-                    return False, f"No changes made to connector configuration."
-            elif _label == "":
-                warn(f"Please enter a label.", stack=False)
+    while True:
+        _label = prompt(f"New label for '{_type}' connector:")
+        if _label in get_config('meerschaum', 'connectors', _type):
+            warn(f"Connector '{_type}:{_label}' already exists.", stack=False)
+            overwrite = yes_no(f"Do you want to overwrite connector '{_type}:{_label}'?", default='n')
+            if not overwrite and not force:
+                return False, f"No changes made to connector configuration."
             else:
                 break
-
-        new_attributes = {}
-        if 'flavors' in connector_attributes[_type]:
-            flavor = choose(
-                f"Flavor for connector '{_type}:{_label}':",
-                sorted(list(connector_attributes[_type]['flavors'])),
-                default = (
-                    'timescaledb' if 'timescaledb' in connector_attributes[_type]['flavors']
-                    else None
-                )
-            )
-            new_attributes['flavor'] = flavor
-            required = sorted(list(connector_attributes[_type]['flavors'][flavor]['requirements']))
-            default = connector_attributes[_type]['flavors'][flavor]['defaults']
+        elif _label == "":
+            warn(f"Please enter a label.", stack=False)
         else:
-            required = sorted(list(connector_attributes[_type]['required']))
-            default = connector_attributes[_type]['default']
-        info(
-            f"Please answer the following questions to configure the new connector '{_type}:{_label}'." + '\n' +
-            "Press Ctrl+C to skip."
+            break
+
+    new_attributes = {}
+    if 'flavors' in connector_attributes[_type]:
+        flavor = choose(
+            f"Flavor for connector '{_type}:{_label}':",
+            sorted(list(connector_attributes[_type]['flavors'])),
+            default = (
+                'timescaledb' if 'timescaledb' in connector_attributes[_type]['flavors']
+                else None
+            )
         )
-        for r in required:
-            try:
-                val = prompt(f"Value for '{r}':")
-            except KeyboardInterrupt:
-                continue
-            if is_int(val): val = int(val)
-            new_attributes[r] = val
-
-        for k, v in default.items():
-            ### skip already configured attributes, (e.g. flavor or from required)
-            if k in new_attributes:
-                continue
-            try:
-                val = prompt(f"Value for {k}:", default=str(v))
-            except KeyboardInterrupt:
-                pass
-            if is_int(val): val = int(val)
-            new_attributes[k] = val
-
-        if _clear: clear_screen(debug=debug)
+        new_attributes['flavor'] = flavor
+        required = sorted(list(connector_attributes[_type]['flavors'][flavor]['requirements']))
+        default = connector_attributes[_type]['flavors'][flavor]['defaults']
+    else:
+        required = sorted(list(connector_attributes[_type]['required']))
+        default = connector_attributes[_type]['default']
+    info(
+        f"Please answer the following questions to configure the new connector '{_type}:{_label}'." + '\n' +
+        "Press Ctrl+C to skip."
+    )
+    for r in required:
         try:
-            conn = get_connector(_type, _label, **new_attributes)
-        except Exception as e:
-            return False, f"Failed to bootstrap connector '{_type}:{_label}' with exception:\n{e}"
+            val = prompt(f"Value for '{r}':")
+        except KeyboardInterrupt:
+            continue
+        if is_int(val): val = int(val)
+        new_attributes[r] = val
 
-        pprint(new_attributes)
-        ok = (
-            yes_no(f"Are you ok with these new attributes for connector '{conn}'?", default='y')
-            if not yes
-            else yes
-        )
-        if not ok:
-            return False, "No changes made to connectors configuration."
-        
-        meerschaum_config = get_config('meerschaum')
-        if 'connectors' not in meerschaum_config:
-            meerschaum_config['connectors'] = {}
-        if _type not in meerschaum_config['connectors']:
-            meerschaum_config['connectors'][_type] = {}
-        meerschaum_config['connectors'][_type][_label] = new_attributes
-        write_config({'meerschaum' : meerschaum_config}, debug=debug)
-        return True, "Success"
+    for k, v in default.items():
+        ### skip already configured attributes, (e.g. flavor or from required)
+        if k in new_attributes:
+            continue
+        try:
+            val = prompt(f"Value for {k}:", default=str(v))
+        except KeyboardInterrupt:
+            pass
+        if is_int(val): val = int(val)
+        new_attributes[k] = val
+
+    if _clear: clear_screen(debug=debug)
+    try:
+        conn = get_connector(_type, _label, **new_attributes)
+    except Exception as e:
+        return False, f"Failed to bootstrap connector '{_type}:{_label}' with exception:\n{e}"
+
+    pprint(new_attributes)
+    ok = (
+        yes_no(f"Are you ok with these new attributes for connector '{conn}'?", default='y')
+        if not yes
+        else yes
+    )
+    if not ok:
+        return False, "No changes made to connectors configuration."
+    
+    meerschaum_config = get_config('meerschaum')
+    if 'connectors' not in meerschaum_config:
+        meerschaum_config['connectors'] = {}
+    if _type not in meerschaum_config['connectors']:
+        meerschaum_config['connectors'][_type] = {}
+    meerschaum_config['connectors'][_type][_label] = new_attributes
+    write_config({'meerschaum' : meerschaum_config}, debug=debug)
+    if return_keys:
+        return _type, _label
+    return True, "Success"
 
 def _bootstrap_config(
         action : Sequence[str] = [],

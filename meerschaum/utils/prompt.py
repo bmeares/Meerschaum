@@ -15,6 +15,7 @@ def prompt(
         default : Union[str, Tuple[str, str], None] = None,
         detect_password : bool = True,
         is_password : bool = False,
+        wrap_lines : bool = True,
         **kw : Any
     ) -> str:
     """
@@ -36,7 +37,7 @@ def prompt(
     from meerschaum.utils.formatting import colored, ANSI, CHARSET
     from meerschaum.config import get_config
     prompt_toolkit = attempt_import('prompt_toolkit')
-    question_config = get_config('system', 'question', patch=True)
+    question_config = get_config('formatting', 'question', patch=True)
 
     ### if a default is provided, append it to the question.
     default_answer = default
@@ -73,6 +74,7 @@ def prompt(
 
     answer = prompt_toolkit.prompt(
         prompt_toolkit.formatted_text.ANSI(question),
+        wrap_lines = wrap_lines,
         **kw
     )
     if answer == '' and default is not None:
@@ -182,9 +184,10 @@ def choose(
         if default in choices:
             _default = str(choices.index(default) + 1)
         question += '\n'
+        choices_digits = len(str(len(choices)))
         for i, c in enumerate(choices):
-            question += f"  {i + 1}. {c}\n"
-        default_tuple = (_default, default)
+            question += f"  {i + 1}. " + (" " * (choices_digits - len(str(i + 1)))) + f"{c}\n"
+        default_tuple = (_default, default) if default is not None else None
     else:
         default_tuple = default
         question += '\n'

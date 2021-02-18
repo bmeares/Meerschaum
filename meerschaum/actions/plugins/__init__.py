@@ -102,7 +102,7 @@ def get_plugins_names() -> Optional[List[str]]:
         warn(e, stacklevel=3)
     return names
 
-def get_plugins_modules() -> Optional[List[str]]:
+def get_plugins_modules() -> Optional[List['ModuleType']]:
     from meerschaum.utils.packages import get_modules_from_package
     from meerschaum.utils.warnings import warn, error
     try:
@@ -112,3 +112,19 @@ def get_plugins_modules() -> Optional[List[str]]:
         warn(e, stacklevel=3)
     return modules
 
+def get_data_plugins() -> List['ModuleType']:
+    """
+    Return plugins which contain `fetch()` or `sync()` functions.
+    """
+    import inspect
+    mods = get_plugins_modules()
+    data_names = {'sync', 'fetch'}
+    data_plugins = []
+    for m in mods:
+        for name, ob in inspect.getmembers(m):
+            if not inspect.isfunction(ob):
+                continue
+            if name not in data_names:
+                continue
+            data_plugins.append(m)
+    return data_plugins

@@ -120,10 +120,13 @@ def parse_line(line : str) -> dict:
     returns: dict of arguments
     """
     import shlex
-    args_list = shlex.split(line)
-    return parse_arguments(
-        shlex.split(line)
-    )
+    try:
+        args_list = shlex.split(line)
+        return parse_arguments(
+            shlex.split(line)
+        )
+    except:
+        return {'action' : [], 'text' : line,}
 
 def parse_synonyms(
         args_dict : dict
