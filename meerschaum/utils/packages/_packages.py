@@ -49,9 +49,10 @@ packages = {
         'pymysql'  : 'pymysql',
     },
     'cli' : {
-        'pgcli'   : 'pgcli',
-        'mycli'   : 'mycli',
-        'litecli' : 'litecli',
+        'pgcli'    : 'pgcli',
+        'mycli'    : 'mycli',
+        'litecli'  : 'litecli',
+        'mssqlcli' : 'mssqlcli',
     },
     'stack' : {
         'docker'  : 'docker',
