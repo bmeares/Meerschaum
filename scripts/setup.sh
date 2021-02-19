@@ -17,8 +17,8 @@ if [ -z "$is_experimental" ]; then
     esac
   done
 fi
-docker buildx ls > /dev/null 2>&1; rc="$?"
-if [[ "$?" != "0" ]]; then
+docker buildx ls ; rc="$?"
+if [[ "$rc" != "0" ]]; then
   echo "Installing docker buildx..."
   export DOCKER_BUILDKIT=1
   docker build --platform=local -o /tmp git://github.com/docker/buildx
