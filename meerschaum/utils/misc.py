@@ -844,3 +844,40 @@ def json_serialize_datetime(dt : datetime.datetime) -> str:
     import datetime
     if isinstance(dt, datetime.datetime):
         return dt.isoformat() + 'Z'
+
+def wget(
+        url : str,
+        dest : Optional[Union[str, pathlib.Path]] = None,
+        debug : bool = False,
+        **kw : Any
+    ) -> pathlib.Path:
+    """
+    Mimic wget with requests.
+    """
+    from meerschaum.utils.warnings import warn, error
+    from meerschaum.utils.debug import dprint
+    import os, pathlib, re, urllib.request
+    if debug: dprint(f"Downloading from '{url}'...")
+    try:
+        response = urllib.request.urlopen(url)
+    except Exception as e:
+        response = None
+    if response is None or response.code != 200:
+        error(f"Failed to download from '{url}'.")
+        d = response.headers.get('content-disposition', None)
+        fname = (
+            re.findall("filename=(.+)", d)[0].strip('"') if d is not None
+            else r_url.split('/')[-1]
+        )
+
+    if dest is None:
+        dest = pathlib.Path(os.path.join(os.getcwd(), fname))
+    elif isinstance(dest, str):
+        dest = pathlib.Path(dest)
+
+    with open(dest, 'wb') as f:
+        f.write(response.fp.read())
+
+    if debug: dprint(f"Downloaded file '{dest}'.")
+
+    return dest

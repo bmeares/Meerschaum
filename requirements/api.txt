@@ -1,0 +1,15 @@
+uvicorn
+websockets
+fastapi
+jinja2
+passlib
+fastapi-login
+python-multipart
+numpy
+pandas
+sqlalchemy
+databases
+aiosqlite
+asyncpg
+psycopg2-binary
+pymysql

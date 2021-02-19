@@ -34,6 +34,7 @@ def show(
         'arguments'  : _show_arguments,
         'data'       : _show_data,
         'plugins'    : _show_plugins,
+        'packages'   : _show_packages,
         'help'       : _show_help,
         'users'      : _show_users,
     }
@@ -50,6 +51,7 @@ def _complete_show(
     options = {
         'connectors': _complete_show_connectors,
         'config' : _complete_show_config,
+        'packages' : _complete_show_packages,
     }
 
     if len(action) > 0 and action[0] in options:
@@ -349,6 +351,48 @@ def _show_users(
         return False, f"Failed to get users from repository '{repository}'"
     print_options(users_list, header=f"Registered users for repository '{repo_connector}':")
     return True, "Success"
+
+def _show_packages(
+        action : List[str] = [],
+        nopretty : bool = False,
+        **kw : Any
+    ) -> SuccessTuple:
+    """
+    Show the packages in dependency groups, or as a list with --nopretty.
+    """
+    from meerschaum.utils.packages import packages
+    from meerschaum.utils.warnings import warn
+
+    if not nopretty:
+        from meerschaum.utils.formatting import pprint
+
+    def _print_packages(_packages):
+        for import_name, install_name in _packages.items():
+            print(install_name)
+
+    _print_func = pprint if not nopretty else _print_packages
+
+    key = 'full' if len(action) == 0 else action[0]
+
+    try:
+        _print_func(packages[key])
+    except KeyError:
+        warn(f"'{key}' is not a valid group.", stack=False)
+
+    return True, "Success"
+
+def _complete_show_packages(action : List[str] = [], **kw : Any) -> List[str]:
+    from meerschaum.utils.packages import packages
+    if len(action) == 0:
+        return sorted(list(packages.keys()))
+    possibilities = []
+
+    for key in packages:
+        if key.startswith(action[0]) and action[0] != key:
+            possibilities.append(key)
+
+    return possibilities
+
 
 ### NOTE: This must be the final statement of the module.
 ###       Any subactions added below these lines will not

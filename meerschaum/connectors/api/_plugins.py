@@ -69,7 +69,7 @@ def install_plugin(
     r_url = plugin_r_url(name)
     dest = pathlib.Path(os.path.join(PLUGINS_TEMP_RESOURCES_PATH, name + '.tar.gz'))
     if debug: dprint(f"Fetching from '{r_url}' to '{dest}'")
-    archive_path = self.wget(r_url, dest) 
+    archive_path = self.wget(r_url, dest, debug=debug) 
     plugin = Plugin(name, archive_path=archive_path)
     return plugin.install(debug=debug)
 

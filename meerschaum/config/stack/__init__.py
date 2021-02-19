@@ -115,7 +115,7 @@ default_docker_compose_config = {
             ],
         },
         'api' : {
-            'image' : 'bmeares/meerschaum:latest',
+            'image' : 'bmeares/meerschaum:api',
             'ports' : [f'{api_port}:{api_port}'],
             'hostname' : f'{api_host}',
             'networks' : [

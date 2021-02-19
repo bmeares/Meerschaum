@@ -1,51 +1,33 @@
-#! /bin/sh
-### Executed inside the image when building
+#! /usr/bin/env bash
 
-### set apt-get to noninteractive
-export DEBIAN_FRONTEND=noninteractive
+### Set up the development environment.
 
-### update system packages
-# apt-get update && apt-get upgrade -y
+is_experimental=$( cat /etc/docker/daemon.json | grep "experimental" | grep "true" )
+daemon_json="{
+  \"experimental\": true
+}"
 
-### install system packages
-# apt-get install\
-	# nano\
-	# -y\
-  # --no-install-recommends
+if [ -z "$is_experimental" ]; then
+  echo "Experimental mode is not enabled. Would you like to overwrite /etc/docker/daemon.json?"
+  select yn in "Y" "N"; do
+    case "$yn" in
+      Y ) echo "$daemon_json" | sudo tee /etc/docker/daemon.json && sudo systemctl restart docker
+        break ;;
+      N ) echo "Please enable experimental mode." && exit 1 ;;
+    esac
+  done
+fi
+docker buildx ls > /dev/null 2>&1; rc="$?"
+if [[ "$?" != "0" ]]; then
+  echo "Installing docker buildx..."
+  export DOCKER_BUILDKIT=1
+  docker build --platform=local -o /tmp git://github.com/docker/buildx
+  mkdir -p ~/.docker/cli-plugins
+  mv /tmp/buildx ~/.docker/cli-plugins/docker-buildx
+fi
+builder_name="multiarch_builder"
+[ -z "$(docker buildx ls | grep "$builder_name")" ] && docker buildx create --name "$builder_name" --use
+echo "Reset qemu architectures..."
+docker run --rm --privileged multiarch/qemu-user-static --reset -p yes
 
-### cleanup
-apt-get clean
-rm -rf /var/lib/apt/lists/*
 
-### ensure latest version of pip
-# pip install --no-cache-dir --upgrade pip
-
-### install pip packages
-# pip install --no-cache-dir --upgrade\
-  # sqlalchemy\
-  # pandas\
-  # pyyaml\
-  # lazy_import\
-  # pytz\
-  # numpy\
-  # python-dateutil\
-  # psycopg2-binary\
-  # six\
-  # uvicorn\
-  # databases\
-  # aiosqlite\
-  # graphene\
-  # asyncpg\
-  # cascadict\
-  # fastapi\
-  # pydantic\
-  # pprintpp\
-  # requests
-
-### we need to install pyyaml first because it's needed
-### for post-install
-# pip install --no-cache-dir --upgrade /src[full]
-
-### install dependencies (required and full)
-python setup.py egg_info
-pip install --no-cache-dir $(sed "s/[[][^]]*[]]//g" meerschaum.egg-info/requires.txt)

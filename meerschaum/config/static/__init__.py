@@ -41,6 +41,9 @@ def _static_config():
                         ']'
                     ),
                 },
+                'urls' : {
+                    'get-pip.py' : 'https://bootstrap.pypa.io/get-pip.py',
+                },
             },
             'connectors' : {
                 'default_label' : 'main',

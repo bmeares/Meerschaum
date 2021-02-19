@@ -29,7 +29,6 @@ def bootstrap(
         'config'     : _bootstrap_config,
         'stack'      : _bootstrap_stack,
         'connectors' : _bootstrap_connectors,
-        #  'grafana' : _bootstrap_grafana,
     }
     return choose_subaction(action, options, **kw)
 
