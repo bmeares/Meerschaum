@@ -118,8 +118,8 @@ def activate_venv(
     if debug: from meerschaum.utils.debug import dprint
     import sys, os, platform
     from meerschaum.config._paths import VIRTENV_RESOURCES_PATH
-    ensurepip = attempt_import('ensurepip', venv=None, color=False, lazy=False, install=True, warn=False, debug=debug)
     try:
+        import ensurepip
         import venv as _venv
         virtualenv = None
     except ImportError:
