@@ -848,6 +848,7 @@ def json_serialize_datetime(dt : datetime.datetime) -> str:
 def wget(
         url : str,
         dest : Optional[Union[str, pathlib.Path]] = None,
+        color : bool = True,
         debug : bool = False,
         **kw : Any
     ) -> pathlib.Path:
@@ -856,19 +857,32 @@ def wget(
     """
     from meerschaum.utils.warnings import warn, error
     from meerschaum.utils.debug import dprint
-    import os, pathlib, re, urllib.request
+    import sys, os, pathlib, re, urllib.request
+    if not color: dprint = print
     if debug: dprint(f"Downloading from '{url}'...")
     try:
         response = urllib.request.urlopen(url)
     except Exception as e:
-        response = None
+        import ssl
+        ssl._create_default_https_context = ssl._create_unverified_context
+        try:
+            response = urllib.request.urlopen(url)
+        except Exception as _e:
+            print(_e)
+            response = None
     if response is None or response.code != 200:
-        error(f"Failed to download from '{url}'.")
-        d = response.headers.get('content-disposition', None)
-        fname = (
-            re.findall("filename=(.+)", d)[0].strip('"') if d is not None
-            else r_url.split('/')[-1]
-        )
+        error_msg = f"Failed to download from '{url}'."
+        if color:
+            error(error_msg)
+        else:
+            print(error_msg)
+            sys.exit(1)
+
+    d = response.headers.get('content-disposition', None)
+    fname = (
+        re.findall("filename=(.+)", d)[0].strip('"') if d is not None
+        else r_url.split('/')[-1]
+    )
 
     if dest is None:
         dest = pathlib.Path(os.path.join(os.getcwd(), fname))

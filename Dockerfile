@@ -8,17 +8,8 @@ WORKDIR /src
 
 ### Layer 1: Install static dependencies.
 ### Does not rebuild cache.
-RUN python -m pip install wheel pip ; \
-    [ "$dep_group" != "minimal" ] && \
-      apt-get update && \
-      apt-get install -y --no-install-recommends \
-        gcc libpq-dev python3-dev python3-venv && \
-      apt-get clean && \
-      rm -rf /var/lib/apt/lists/* && \
-      python -m pip install --no-cache-dir --upgrade psycopg2 ; \
-    [ "$dep_group" != "minimal" ] && \
-      apt-get purge -y `apt-get -s purge python3-dev | grep '^ ' | tr -d '*'` ; \
-    exit 0
+COPY scripts/docker/image_setup.sh /setup/
+RUN /setup/image_setup.sh && rm -rf /setup/
 
 ### Layer 2: Install Python packages.
 ### Only rebuilds cache if dependencies have changed.
@@ -31,5 +22,12 @@ COPY setup.py README.md ./
 COPY meerschaum ./meerschaum
 RUN python -m pip install --no-cache-dir . && cd /root && rm -rf /src
 
-WORKDIR /root
-ENTRYPOINT ["python", "-m", "meerschaum"]
+### Start up Meerschaum to bootstrap its environment.
+WORKDIR /meerschaum
+RUN cd /meerschaum && [ "$dep_group" != "minimal" ] && \
+  python -m meerschaum show version || \
+  python -m meerschaum --version
+
+COPY scripts/docker/entrypoint.sh /entrypoint.sh
+
+ENTRYPOINT ["/entrypoint.sh"]

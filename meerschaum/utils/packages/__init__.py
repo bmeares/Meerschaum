@@ -118,6 +118,7 @@ def activate_venv(
     if debug: from meerschaum.utils.debug import dprint
     import sys, os, platform
     from meerschaum.config._paths import VIRTENV_RESOURCES_PATH
+    ensurepip = attempt_import('ensurepip', venv=None, color=False, lazy=False, install=True, warn=False, debug=debug)
     try:
         import venv as _venv
         virtualenv = None
@@ -205,9 +206,8 @@ def get_pip(debug : bool = False) -> bool:
     from meerschaum.config.static import _static_config
     url = _static_config()['system']['urls']['get-pip.py']
     dest = CACHE_RESOURCES_PATH / 'get-pip.py'
-    wget(url, dest, debug=debug)
     try:
-        wget(url, dest, debug=debug)
+        wget(url, dest, color=False, debug=debug)
     except Exception as e:
         print(f"Failed to fetch pip from '{url}'. Please install pip and restart Meerschaum.") 
         sys.exit(1)
@@ -228,6 +228,7 @@ def pip_install(
     """
     Install pip packages
     """
+    from meerschaum.config.static import _static_config
     try:
         from meerschaum.utils.formatting import ANSI, UNICODE
     except ImportError:
@@ -290,7 +291,13 @@ def pip_install(
         #  _args.append('--user')
     if venv is not None and '--target' not in _args and '-t' not in _args:
         _args += ['--target', venv_target_path(venv, debug=debug)]
-    elif '--target' not in _args and '-t' not in _args:
+    elif (
+        '--target' not in _args
+            and '-t' not in _args
+            and os.environ.get(
+                _static_config()['environment']['runtime'], None
+            ) != 'docker'
+    ):
         _args += ['--user']
     if '--progress-bar' in _args:
         _args.remove('--progress-bar')
@@ -781,7 +788,8 @@ def reload_package(
 
 
 def is_installed(
-        name: str
+        name: str,
+        venv : Optional[str] = None,
     ) -> bool:
     """
     Check whether a package is installed.
@@ -789,8 +797,25 @@ def is_installed(
         Name of the package in question
     """
     import importlib.util
-    return importlib.util.find_spec(name) is None
+    if venv is not None: activate_venv(venv=venv)
+    found = importlib.util.find_spec(name) is not None
+    if venv is None:
+        return found
+    mod = attempt_import(name, venv=venv)
+    found = (venv == package_venv(mod))
+    deactivate_venv(venv=venv)
+    return found
 
+def venv_contains_package(name : str, venv : str = None) -> bool:
+    """
+    Search the contents of a virtual environment for a package.
+    """
+    import os
+    if venv is None:
+        return is_installed(name, venv=venv)
+    vtp = venv_target_path(venv)
+    if not vtp.exists(): return False
+    return name in os.listdir(venv_target_path(venv))
 
 ### NOTE: this is at the bottom to avoid import problems
 #  from meerschaum.utils.packages._ImportHook import install
@@ -893,8 +918,6 @@ def venv_target_path(venv : str, debug : bool = False) -> pathlib.Path:
     """
     import os, sys, platform, pathlib
     from meerschaum.config._paths import VIRTENV_RESOURCES_PATH
-    #  from meerschaum.utils.warnings import error
-    #  if debug: from meerschaum.utils.debug import dprint
 
     venv_root_path = str(os.path.join(VIRTENV_RESOURCES_PATH, venv))
     target_path = venv_root_path
@@ -916,10 +939,6 @@ def venv_target_path(venv : str, debug : bool = False) -> pathlib.Path:
         target_path = os.path.join(target_path, 'site-packages')
     else:
         from meerschaum.config._paths import set_root
-        #  set_root(os.environ.get('MEERSCHAUM_ROOT_DIR', None))
-        #  print(os.environ.get('MEERSCHAUM_ROOT_DIR', 'NOTHING'))
-        #  print(target_path)
-        #  print(os.listdir(target_path))
         import traceback
         traceback.print_stack()
         print(f"Failed to find site-packages directory for virtual environment '{venv}'.")
@@ -938,3 +957,4 @@ def package_venv(package : 'ModuleType') -> Optional[str]:
     if str(VIRTENV_RESOURCES_PATH) not in package.__file__:
         return None
     return package.__file__.split(str(VIRTENV_RESOURCES_PATH))[1].split(os.path.sep)[1]
+

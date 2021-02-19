@@ -43,7 +43,7 @@ env_dict = {
     'MEERSCHAUM_DB_HOSTNAME' : f'{db_host}',
     'MEERSCHAUM_API_HOSTNAME' : f'{api_host}',
     'ALLOW_IP_RANGE' : '0.0.0.0/0',
-    'MEERSCHAUM_API_CONFIG_RESOURCES' : '/root/.config/meerschaum',
+    'MEERSCHAUM_API_CONFIG_RESOURCES' : '/meerschaum',
 }
 ### apply patch to host config to change hostname to the Docker service name
 env_dict['MEERSCHAUM_API_CONFIG'] = json.dumps(
@@ -76,7 +76,7 @@ compose_header = """
 """
 
 volumes = {
-    'meerschaum_api_config' : '/root/.config/meerschaum',
+    'meerschaum_api_config' : '/meerschaum',
     #  'meerschaum_api_config' : env_dict['MEERSCHAUM_API_CONFIG'],
     'meerschaum_db_data' : '/var/lib/postgresql/data',
     'grafana_storage' : '/var/lib/grafana',
@@ -125,7 +125,6 @@ default_docker_compose_config = {
             'command' : 'api start',
             'environment' : [
                 'MRSM_CONFIG=' + env_dict['MEERSCHAUM_API_CONFIG'],
-                'MRSM_RUNTIME=docker',
             ],
             'restart' : 'always',
             'depends_on' : [

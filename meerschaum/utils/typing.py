@@ -1,5 +1,19 @@
 from __future__ import annotations
-from typing import *
+try:
+    from typing import *
+except:
+    import urllib.request, sys
+    url = 'https://raw.githubusercontent.com/python/typing/master/src/typing.py'
+    response = urllib.request.urlopen(url)
+    if response.code != 200:
+        print(f"Could not download typing. Please install typing via pip or upgrade Python.")
+        sys.exit(1)
+    fname = 'typing_hotfix' 
+    with open(fname, 'w+') as f:
+        f.write(response.fp.read())
+    from typing_hotfix import *
+
+    
 SuccessTuple = Tuple[bool, str]
 InstanceConnector = Union[
     'meerschaum.connectors.sql.SQLConnector',
