@@ -15,31 +15,29 @@ packages dictionary is structured in the following schema:
 
 packages = {
     'required' : {
-        #  'ruamel.yaml'       : 'ruamel.yaml',
         'wheel' : 'wheel',
-        'yaml'       : 'PyYAML>=5.3.1',
-        #  'virtualenv' : 'virtualenv',
-        'typing_extensions' : 'typing_extensions',
-        'pygments'       : 'pygments',
-        'colorama'       : 'colorama',
-        'rich'           : 'rich>=9.8.0',
-        'more_termcolor' : 'more-termcolor',
-        'cascadict'         : 'cascadict',
+        'yaml' : 'PyYAML>=5.3.1',
+        'cascadict' : 'cascadict',
     },
+    'minimal' : {},
     'formatting' : {
-        'pprintpp'       : 'pprintpp',
-        'asciitree'      : 'asciitree',
+        'pprintpp'          : 'pprintpp',
+        'asciitree'         : 'asciitree',
+        'typing_extensions' : 'typing_extensions',
+        'pygments'          : 'pygments',
+        'colorama'          : 'colorama',
+        'rich'              : 'rich>=9.8.0',
+        'more_termcolor'    : 'more-termcolor',
+
     },
     '_required' : {
         'pip'               : 'pip',
         'update_checker'    : 'update-checker',
         'semver'            : 'semver',
-        #  'virtualenv'        : 'virtualenv',
         'dateutil'          : 'python-dateutil',
         'requests'          : 'requests',
         'pyvim'             : 'pyvim',
         'aiofiles'          : 'aiofiles',
-        'cmd2'              : 'cmd2',
         'packaging'         : 'packaging',
         'prompt_toolkit'    : 'prompt-toolkit',
     },
@@ -80,6 +78,11 @@ packages = {
         'pyreadline' : 'pyreadline; platform_system == "Windows"',
         'gnureadline' : 'gnureadline; platform_system != "Windows"',
     },
+    'extras' : {
+        'virtualenv' : 'virtualenv',
+        'cmd2' : 'cmd2',
+        'ruamel.yaml' : 'ruamel.yaml',
+    },
 }
 packages['sql'] = {
     'numpy'      : 'numpy',
@@ -105,7 +108,7 @@ all_packages = dict()
 for group, import_names in packages.items():
     all_packages.update(import_names)
 
-skip_groups = {'docs', 'build', 'cli', 'dev-tools', 'portable'}
+skip_groups = {'docs', 'build', 'cli', 'dev-tools', 'portable', 'extras'}
 full = list()
 _full = dict()
 for group, import_names in packages.items():

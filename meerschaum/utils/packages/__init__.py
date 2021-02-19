@@ -118,7 +118,12 @@ def activate_venv(
     if debug: from meerschaum.utils.debug import dprint
     import sys, os, platform
     from meerschaum.config._paths import VIRTENV_RESOURCES_PATH
-    _venv = attempt_import('venv', venv=None, lazy=False, install=False, warn=False)
+    try:
+        import venv as _venv
+        virtualenv = None
+    except ImportError:
+        _venv = None
+        virtualenv = attempt_import('venv', venv=None, lazy=False, install=False, warn=False)
     #  virtualenv = attempt_import(
         #  'virtualenv',
         #  install = True,
@@ -127,9 +132,9 @@ def activate_venv(
         #  #  precheck = False,
         #  debug = debug
     #  )
-    #  if virtualenv is None:
-        #  print(f"Failed to import virtualenv! Please ensure virtualenv is installed and restart Meerschaum.")
-        #  sys.exit(1)
+    if virtualenv is None and _venv is None:
+        print(f"Failed to import venv and virtualenv! Please install virtualenv via pip or python3-venv through your package manager, then restart Meerschaum.")
+        sys.exit(1)
     venv_path = pathlib.Path(os.path.join(VIRTENV_RESOURCES_PATH, venv))
     #  print(venv_path)
     #  import traceback
@@ -139,12 +144,15 @@ def activate_venv(
         ('bin' if platform.system() != 'Windows' else "Scripts")
     )
     if not venv_path.exists():
-        _venv.create(
-            venv_path,
-            system_site_packages = False,
-            with_pip = True,
-            symlinks = (platform.system() != 'Windows'),
-        )
+        if _venv is not None:
+            _venv.create(
+                venv_path,
+                system_site_packages = False,
+                with_pip = True,
+                symlinks = (platform.system() != 'Windows'),
+            )
+        else:
+            virtualenv.cli_run([venv, '--download', '--system-site-packages'])
 
     #  activate_this_path = pathlib.Path(os.path.join(bin_path, 'activate_this.py'))
     old_cwd = pathlib.Path(os.getcwd())
@@ -187,6 +195,25 @@ def venv_exec(code: str, venv: str = 'mrsm', debug: bool = False) -> bool:
     )
     return subprocess.call([executable, '-c', code]) == 0
 
+def get_pip(debug : bool = False) -> bool:
+    """
+    Download and run the get-pip.py script.
+    """
+    import sys, subprocess
+    from meerschaum.utils.misc import wget
+    from meerschaum.config._paths import CACHE_RESOURCES_PATH
+    from meerschaum.config.static import _static_config
+    url = _static_config()['system']['urls']['get-pip.py']
+    dest = CACHE_RESOURCES_PATH / 'get-pip.py'
+    wget(url, dest, debug=debug)
+    try:
+        wget(url, dest, debug=debug)
+    except Exception as e:
+        print(f"Failed to fetch pip from '{url}'. Please install pip and restart Meerschaum.") 
+        sys.exit(1)
+    cmd_list = [sys.executable, str(dest)] 
+    return subprocess.call(cmd_list) == 0
+
 def pip_install(
         *packages: List[str],
         args: List[str] = ['--upgrade'],
@@ -223,14 +250,18 @@ def pip_install(
     if not have_pip:
         try:
             import ensurepip
-        except:
-            import sys
-            print(
-                "Failed to import pip and ensurepip. Please install pip and restart Meerschaum.\n\n" +
-                "You can find instructions on installing pip here: https://pip.pypa.io/en/stable/installing/"
-            )
-            sys.exit(1)
-        ensurepip.bootstrap(upgrade=True, )
+        except ImportError:
+            ensurepip = None
+        if ensurepip is None:
+            if not get_pip(debug=debug):
+                import sys
+                print(
+                    "Failed to import pip and ensurepip. Please install pip and restart Meerschaum.\n\n" +
+                    "You can find instructions on installing pip here: https://pip.pypa.io/en/stable/installing/"
+                )
+                sys.exit(1)
+        else:
+            ensurepip.bootstrap(upgrade=True, )
         import pip
     if venv is not None:
         activate_venv(venv=venv, debug=debug, color=color)

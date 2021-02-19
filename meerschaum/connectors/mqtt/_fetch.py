@@ -28,10 +28,10 @@ def fetch(
         warn(f"Parameters for pipe {pipe} must include \"fetch\".")
         return None
     
-    instructions = pipe.parameters['fetch']
-    try:
-        topic = instructions['topic']
-    except KeyError:
+    instructions = pipe.parameters.get('fetch', {})
+
+    topic = instructions.get('topic', None)
+    if topic is None:
         warn(f"Missing topic from parameters for pipe {pipe}. Defaulting to \"#\" (all possible topics!).")
         topic = '#'
 

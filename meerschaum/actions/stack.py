@@ -69,8 +69,8 @@ def stack(
         compose_command = action
 
     ### if command is just `stack`, add --build
-    elif '--build' not in sub_args:
-        sub_args.append('--build')
+    #  elif '--build' not in sub_args:
+        #  sub_args.append('--build')
 
     ### define project name when starting containers
     project_name_list = ['--project-name', get_config('stack', 'project_name', patch=True, substitute=False)]
