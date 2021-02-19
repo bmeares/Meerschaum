@@ -36,7 +36,7 @@ def cli(
     if debug: dprint(f"Opening CLI '{cli_name}' for {self} (flavor '{self.flavor}')...")
 
     ### attempt an import to raise warnings if not installed
-    cli = attempt_import(cli_name, debug=debug)
+    cli = attempt_import(cli_name, lazy=False, debug=debug)
 
     ### open sqlalchemy engine URI or just database if sqlite
     cli_arg_str = self.DATABASE_URL

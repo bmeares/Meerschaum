@@ -130,9 +130,9 @@ default_docker_compose_config = {
             'depends_on' : [
                 'db',
             ],
-            'volumes' : [
-                str(ROOT_DIR_PATH) + ':' + volumes['meerschaum_api_config'],
-            ],
+            #  'volumes' : [
+                #  str(ROOT_DIR_PATH) + ':' + volumes['meerschaum_api_config'],
+            #  ],
         },
         'grafana' : {
             #  'image' : 'meerschaum-grafana:latest',

@@ -118,23 +118,17 @@ def activate_venv(
     if debug: from meerschaum.utils.debug import dprint
     import sys, os, platform
     from meerschaum.config._paths import VIRTENV_RESOURCES_PATH
-    try:
-        import ensurepip
-        import venv as _venv
-        virtualenv = None
-    except ImportError:
-        _venv = None
-        virtualenv = attempt_import('virtualenv', venv=None, lazy=False, install=False, warn=False)
-    #  virtualenv = attempt_import(
-        #  'virtualenv',
-        #  install = True,
-        #  venv = None,
-        #  lazy = False,
-        #  #  precheck = False,
-        #  debug = debug
-    #  )
+    _venv = None
+    virtualenv = attempt_import('virtualenv', venv=None, lazy=False, install=True, warn=False, debug=debug)
+    if virtualenv is None:
+        try:
+            import ensurepip
+            import venv as _venv
+            virtualenv = None
+        except ImportError:
+            _venv = None
     if virtualenv is None and _venv is None:
-        print(f"Failed to import venv and virtualenv! Please install virtualenv via pip or python3-venv through your package manager, then restart Meerschaum.")
+        print(f"Failed to import virtualenv! Please install virtualenv via pip then restart Meerschaum.")
         sys.exit(1)
     venv_path = pathlib.Path(os.path.join(VIRTENV_RESOURCES_PATH, venv))
     #  print(venv_path)
