@@ -485,14 +485,15 @@ def attempt_import(
         ### Check if package is a declared dependency.
         root_name = name.split('.')[0] if split else name
         install_name = all_packages.get(root_name, None)
-        if install_name is None and warn:
-            warn_function(
-                f"Package '{root_name}' is not declared in meerschaum.utils.packages.",
-                ImportWarning,
-                stacklevel = 3,
-                color = color
-            )
+        if install_name is None:
             install_name = root_name
+            if warn:
+                warn_function(
+                    f"Package '{root_name}' is not declared in meerschaum.utils.packages.",
+                    ImportWarning,
+                    stacklevel = 3,
+                    color = color
+                )
 
         ### Determine if the package exists.
         if precheck is False:
