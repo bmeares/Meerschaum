@@ -86,7 +86,7 @@ def _api_start(
         - `-w, --workers {number}`
             How many worker threads to run
     """
-    from meerschaum.utils.packages import attempt_import
+    from meerschaum.utils.packages import attempt_import, venv_contains_package, pip_install
     from meerschaum.utils.misc import is_int
     from meerschaum.api import sys_config as api_config, __version__
     from meerschaum.utils.formatting import pprint
@@ -95,8 +95,9 @@ def _api_start(
     from meerschaum.config._paths import API_UVICORN_CONFIG_PATH
     from meerschaum.config import get_config
     import os
+
     ### Uvicorn must be installed on the host because of multiprocessing reasons.
-    uvicorn = attempt_import('uvicorn', venv=None)
+    uvicorn = attempt_import('uvicorn', venv=None, lazy=False)
 
     uvicorn_config = dict(api_config['uvicorn'])
     if port is None:

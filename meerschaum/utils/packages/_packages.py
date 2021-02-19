@@ -103,6 +103,8 @@ packages['api'] = {
     'multipart'     : 'python-multipart',
 }
 packages['api'].update(packages['sql'])
+packages['api'].update(packages['_required'])
+packages['api'].update(packages['formatting'])
 
 all_packages = dict()
 for group, import_names in packages.items():

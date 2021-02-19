@@ -139,7 +139,7 @@ class SQLConnector(Connector):
     @property
     def db(self):
         from meerschaum.utils.packages import attempt_import
-        databases = attempt_import('databases')
+        databases = attempt_import('databases', lazy=False, install=True)
         if '_db' not in self.__dict__:
             self._db = databases.Database(self.DATABASE_URL)
         return self._db
