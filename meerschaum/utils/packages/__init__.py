@@ -124,7 +124,7 @@ def activate_venv(
         virtualenv = None
     except ImportError:
         _venv = None
-        virtualenv = attempt_import('venv', venv=None, lazy=False, install=False, warn=False)
+        virtualenv = attempt_import('virtualenv', venv=None, lazy=False, install=False, warn=False)
     #  virtualenv = attempt_import(
         #  'virtualenv',
         #  install = True,
