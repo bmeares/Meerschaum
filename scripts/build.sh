@@ -12,6 +12,9 @@ cd "$PARENT"
 ### Build documentation.
 ./scripts/docs.sh
 
+### Build the pip package for uploading to PyPI.
+python setup.py sdist
+
 ### Experimental features must be enabled and docker buildx must be installed.
 ### Run setup.sh to ensure everything is set up.
 
@@ -29,6 +32,4 @@ for t in "${tags[@]}"; do
 done
 # docker build --squash -t "$image" . || exit 1
 
-### Build the pip package for uploading to PyPI.
-python setup.py sdist
 
