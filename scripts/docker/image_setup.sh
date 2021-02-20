@@ -3,7 +3,7 @@
 python -m pip install wheel pip ;
 if [ "$dep_group" != "minimal" ]; then
   apt-get update && apt-get install -y --no-install-recommends \
-    g++ libpq-dev python3-dev python3-venv && \
+    g++ make libpq-dev python3-dev && \
   apt-get clean && \
   rm -rf /var/lib/apt/lists/*
 
