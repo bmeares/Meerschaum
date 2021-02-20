@@ -58,14 +58,13 @@ setup_kw_args = {
     'use_scm_version'               : {
         'root'                      : '.',
         'relative_to'               : __file__,
-        'write_to' : None,
-        'write_to_template' : None,
+        'write_to' : 'meerschaum/config/_version.py',
+        'write_to_template' : '__version__ = "{version}"',
     },
     'entry_points'                  : {
         'console_scripts'           : [
             'mrsm = meerschaum.__main__:main',
             'meerschaum = meerschaum.__main__:main',
-            'Meerschaum = meerschaum.__main__:main',
         ],
     },
     #  'cmdclass'                      : {
