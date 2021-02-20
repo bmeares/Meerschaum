@@ -28,10 +28,10 @@ def fetch(
         warn(f"Parameters for pipe {pipe} must include \"fetch\".")
         return None
     
-    instructions = pipe.parameters['fetch']
-    try:
-        topic = instructions['topic']
-    except KeyError:
+    instructions = pipe.parameters.get('fetch', {})
+
+    topic = instructions.get('topic', None)
+    if topic is None:
         warn(f"Missing topic from parameters for pipe {pipe}. Defaulting to \"#\" (all possible topics!).")
         topic = '#'
 
@@ -42,7 +42,8 @@ def fetch(
 
     ### callback is executed each time a message is published
     def _fetch_callback(msg : str):
-        from meerschaum.utils.misc import import_pandas, parse_df_datetimes, df_from_literal
+        from meerschaum.utils.packages import import_pandas
+        from meerschaum.utils.misc import parse_df_datetimes, df_from_literal
         pd = import_pandas()
 
         df = None

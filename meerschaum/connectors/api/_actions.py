@@ -6,8 +6,8 @@
 Functions to interact with /mrsm/actions
 """
 
-from meerschaum.utils.debug import dprint
-import requests, json, sys
+from __future__ import annotations
+from meerschaum.utils.typing import SuccessTuple
 
 def get_actions(
         self,
@@ -15,7 +15,8 @@ def get_actions(
     """
     Get available actions from the API server
     """
-    return self.get('/mrsm/actions')
+    from meerschaum.config.static import _static_config
+    return self.get(_static_config['api']['endpoints']['actions'])
 
 def do_action(
         self,
@@ -23,7 +24,7 @@ def do_action(
         sysargs : list = None,
         debug : bool = False,
         **kw
-    ) -> tuple:
+    ) -> SuccessTuple:
     """
     Execute a Meerschaum action remotely.
 
@@ -34,6 +35,9 @@ def do_action(
     
     Returns: tuple (succeeded : bool, message : str)
     """
+    import sys, json
+    from meerschaum.utils.debug import dprint
+    from meerschaum.config.static import _static_config
 
     if sysargs is not None and action[0] == '':
         from meerschaum.actions.arguments import parse_arguments
@@ -48,19 +52,24 @@ def do_action(
     del json_dict['action'][0]
     ### ensure 0 index exists (Meerschaum requirement)
     if len(json_dict['action']) == 0: json_dict['action'] = ['']
-    r_url = f'/mrsm/actions/{root_action}'
+    r_url = f"{_static_config()['api']['endpoints']['actions']}/{root_action}"
     
     if debug:
-        from pprintpp import pprint
+        from meerschaum.utils.formatting import pprint
         dprint(f"Sending data to '{self.url + r_url}':")
         pprint(json_dict, stream=sys.stderr)
 
-    response = self.post(r_url, json=json_dict)
+    response = self.post(r_url, json=json_dict, debug=debug)
     try:
         response_list = json.loads(response.text)
+        if isinstance(response_list, dict) and 'detail' in response_list:
+            return False, response_list['detail']
     except Exception as e:
         print(f"Invalid response: {response}")
         print(e)
         return False, response.text
     if debug: dprint(response)
-    return response_list[0], response_list[1]
+    try:
+        return response_list[0], response_list[1]
+    except:
+        return False, f"Failed to parse result from action '{root_action}'"

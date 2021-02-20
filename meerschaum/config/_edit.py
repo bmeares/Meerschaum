@@ -7,63 +7,125 @@ Functions for editing the configuration file
 """
 
 #  from meerschaum.utils.debug import dprint
+from __future__ import annotations
+from meerschaum.utils.typing import Optional, Any, SuccessTuple, Mapping, Dict, List
 import sys
 
 def edit_config(
-        params : dict = None,
+        keys : List[str] = [],
+        params : Optional[Mapping[str, Any]] = None,
         debug : bool = False,
-        **kw
-    ) -> tuple:
+        **kw : Any
+    ) -> SuccessTuple:
     """
     Edit the configuration file
 
-    params: patch to apply. Depreciated / replaced by --config (at least in this case)
+    :param params:
+        patch to apply. Depreciated / replaced by --config (at least in this case)
     """
-    import tempfile, os, importlib
-    import meerschaum.config
-    from meerschaum.config import config as cf
-    from meerschaum.config._paths import CONFIG_PATH
-    from meerschaum.utils.misc import reload_package, edit_file
+    from meerschaum.config._read_config import get_keyfile_path
+    from meerschaum.config._paths import CONFIG_DIR_PATH
+    from meerschaum.utils.packages import reload_package
+    from meerschaum.utils.misc import edit_file
     from meerschaum.utils.debug import dprint
 
-    if params is not None:
-        from meerschaum.utils import apply_patch_to_config
-        cf = apply_patch_to_config(cf, params)
-        if not write_config(cf, debug=debug):
-            return False, "Failed to update config!"
-    else:
-        edit_file(CONFIG_PATH, debug=debug)
+    for k in keys:
+        fp = get_keyfile_path(k, create_new=True)
+        edit_file(fp)
 
     if debug: dprint("Reloading configuration...")
-    reload_package(meerschaum.config, debug=debug, **kw)
-    reload_package(meerschaum.config, debug=debug, **kw)
+    reload_package('meerschaum', debug=debug, **kw)
+    reload_package('meerschaum', debug=debug, **kw)
 
     return (True, "Success")
 
 def write_config(
-        config_dict : dict = None,
+        config_dict : Optional[Dict[str, Any]] = None,
+        directory : Optional[Union[str, pathlib.Path]] = None,
         debug : bool = False,
-        **kw
+        **kw : Any
     ) -> bool:
-    from meerschaum.config._paths import CONFIG_PATH
-    from meerschaum.config import config
+    """
+    Write YAML and JSON files to the configuration directory.
+
+    :param config_dict:
+        A dictionary of keys to dictionaries of configuration.
+        Each key corresponds to a .yaml or .json config file.
+        Writing config to a directory with different keys
+        does not affect existing keys in that directory.
+
+    :param directory:
+        The directory to which the keys are written.
+    """
+    if directory is None:
+        from meerschaum.config._paths import CONFIG_DIR_PATH
+        directory = CONFIG_DIR_PATH
+    from meerschaum.config.static import _static_config
     from meerschaum.config._default import default_header_comment
     from meerschaum.utils.debug import dprint
-    import yaml
+    from meerschaum.utils.yaml import yaml
+    from meerschaum.utils.misc import filter_keywords
+    import json, os, pathlib
     if config_dict is None:
-        config_dict = config
+        from meerschaum.config import _config; cf = _config()
+        config_dict = cf
+    #  if debug:
+        #  from meerschaum.utils.formatting import pprint
+        #  print(f"Writing configuration to {directory}")
+        #  pprint(config_dict, stream=sys.stderr)
 
-    if debug:
-        from pprintpp import pprint
-        dprint(f"Writing configuration to {CONFIG_PATH:}")
-        pprint(config_dict, stream=sys.stderr)
-    with open(CONFIG_PATH, 'w') as f:
-        f.write(default_header_comment)
-        yaml.dump(config_dict, f, sort_keys=False)
+    default_filetype = _static_config()['config']['default_filetype']
+    filetype_dumpers = {
+        'yml' : yaml.dump,
+        'yaml' : yaml.dump,
+        'json' : json.dump,
+    }
+
+    for k, v in config_dict.items():
+        filetype = v.get('filetype', default_filetype)
+        if k == 'meerschaum':
+            filetype = 'yaml'
+        if not isinstance(filetype, str) or filetype not in filetype_dumpers:
+            print(f"Invalid filetype '{filetype}' for '{k}'. Assuming {default_filetype}...")
+            filetype = default_filetype
+        filename = str(k) + '.' + str(filetype)
+        filepath = os.path.join(directory, filename)
+        pathlib.Path(filepath).parent.mkdir(exist_ok=True)
+        with open(filepath, 'w+') as f:
+            try:
+                if k == 'meerschaum':
+                    f.write(default_header_comment)
+                filetype_dumpers[filetype](
+                    v, f,
+                    **filter_keywords(
+                        filetype_dumpers[filetype],
+                        sort_keys = False,
+                        indent = 2
+                    )
+                )
+                success = True
+            except Exception as e:
+                success = False
+                print(f"FAILED TO WRITE!")
+                print(e)
+                print(filter_keywords(
+                    filetype_dumpers[filetype],
+                    sort_keys=False,
+                    indent = 2
+                ))
+
+
+            if not success:
+                try:
+                    if os.path.exists(filepath):
+                        os.remove(filepath)
+                except Exception as e:
+                    print(f"Failed to write '{k}'")
+                return False
 
     return True
 
-def general_write_config(
+def general_write_yaml_config(
         files : dict = {},
         debug : bool = False
     ):
@@ -95,8 +157,9 @@ def general_write_config(
                 f.write(config)
             elif isinstance(config, dict):
                 if debug: dprint(f"Config is a dict. Writing to {path}...")
-                import yaml
-                yaml.dump(config, f)
+                #  import yaml
+                from meerschaum.utils.yaml import yaml
+                yaml.dump(config, stream=f, sort_keys=False)
 
     return True
 
@@ -127,15 +190,18 @@ def general_edit_config(
 
 def copy_default_to_config(debug : bool = False):
     """
-    Copy the default config file to the main config file
+    Copy the default config directory to the main config directory.
+    NOTE: This function is now depreciated in favor of the new patch system.
     """
-    from meerschaum.config._paths import DEFAULT_CONFIG_PATH, CONFIG_PATH
+    from meerschaum.config._paths import DEFAULT_CONFIG_DIR_PATH, CONFIG_DIR_PATH
     import shutil
     try:
-        shutil.copyfile(DEFAULT_CONFIG_PATH, CONFIG_PATH)
+        shutil.copytree(DEFAULT_CONFIG_DIR_PATH, CONFIG_DIR_PATH)
     except FileNotFoundError:
         write_default_config(debug=debug)
         return copy_default_to_config(debug=debug)
+    except Exception as e:
+        print("exception:", e)
     return True
 
 def write_default_config(
@@ -143,34 +209,34 @@ def write_default_config(
         **kw
     ):
     """
-    Overwrite the existing default_config.yaml.
+    Write the default configuration files.
     """
-    import yaml, os
-    from meerschaum.config._paths import PATCH_PATH, DEFAULT_CONFIG_PATH
+    #  from meerschaum.utils.yaml import yaml
+    import os
+    from meerschaum.config._paths import DEFAULT_CONFIG_DIR_PATH
     from meerschaum.config._default import default_config, default_header_comment
-    from meerschaum.utils.debug import dprint
-    if os.path.isfile(DEFAULT_CONFIG_PATH): os.remove(DEFAULT_CONFIG_PATH)
-    if os.path.isfile(PATCH_PATH): os.remove(PATCH_PATH)
-    if debug:
-        from pprintpp import pprint
-        pprint(default_config, stream=sys.stderr)
+    #  from meerschaum.utils.debug import dprint
+    #  if os.path.isfile(DEFAULT_CONFIG_PATH): os.remove(DEFAULT_CONFIG_PATH)
+    #  if os.path.isfile(PATCH_PATH): os.remove(PATCH_PATH)
 
-    config_copy = dict()
-    config_copy['meerschaum'] = default_config['meerschaum'].copy()
+    return write_config(default_config, directory=DEFAULT_CONFIG_DIR_PATH)
 
-    ### write meerschaum config first
-    if debug: dprint(f"Writing default Meerschaum configuration to {DEFAULT_CONFIG_PATH}...")
-    with open(DEFAULT_CONFIG_PATH, 'w') as f:
-        f.write(default_header_comment)
-        yaml.dump(config_copy, f, sort_keys=False)
-        f.write("\n\n")
+    #  config_copy = dict()
+    #  config_copy['meerschaum'] = default_config['meerschaum'].copy()
 
-    config_copy = default_config.copy()
-    del config_copy['meerschaum']
+    #  ### write meerschaum config first
+    #  if debug: dprint(f"Writing default Meerschaum configuration to {DEFAULT_CONFIG_PATH}...")
+    #  with open(DEFAULT_CONFIG_PATH, 'w') as f:
+        #  f.write(default_header_comment)
+        #  yaml.dump(config_copy, stream=f, sort_keys=False)
+        #  f.write("\n\n")
 
-    ### write the rest of the configuration
-    if debug: dprint(f"Writing remaining default configuration to {DEFAULT_CONFIG_PATH}...")
-    with open(DEFAULT_CONFIG_PATH, 'a+') as f:
-        yaml.dump(config_copy, f)
+    #  config_copy = default_config.copy()
+    #  del config_copy['meerschaum']
 
-    return True
+    #  ### write the rest of the configuration
+    #  if debug: dprint(f"Writing remaining default configuration to {DEFAULT_CONFIG_PATH}...")
+    #  with open(DEFAULT_CONFIG_PATH, 'a+') as f:
+        #  yaml.dump(config_copy, stream=f, sort_keys=False)
+
+    #  return True

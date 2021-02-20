@@ -5,6 +5,9 @@
 """
 Define file paths
 """
+
+from __future__ import annotations
+
 from pathlib import Path
 import os, platform
 try:
@@ -12,75 +15,93 @@ try:
 except ImportError:
     import importlib_resources as pkg_resources
 
-CONFIG_ROOT_PATH = Path(os.path.join(Path.home(), '.config', 'meerschaum'))
-if platform.system() == 'Windows':
-    CONFIG_ROOT_PATH = Path(os.path.join(os.environ['AppData'], 'Meerschaum'))
-
-### bootstrap the root
-CONFIG_ROOT_PATH.mkdir(parents=True, exist_ok=True)
-
 package_root_context_manager = pkg_resources.path('meerschaum', '__init__.py')
 with package_root_context_manager as file_path:
     PACKAGE_ROOT_PATH = Path(os.path.join(Path(file_path.parent.parent), 'meerschaum'))
 
-### file path of the resources package
-#  RESOURCES_PATH = Path(os.path.join(CONFIG_ROOT_PATH, 'config', 'resources'))
-RESOURCES_PATH = CONFIG_ROOT_PATH
+paths = {
+    'ROOT_DIR_PATH' : (
+        Path(os.path.join(Path.home(), '.config', 'meerschaum'))
+        if platform.system() != 'Windows'
+        else Path(os.path.join(os.environ['AppData'], 'Meerschaum'))
+    ),
+    'VIRTENV_RESOURCES_PATH' : ('{ROOT_DIR_PATH}', 'venvs'),
+    'CONFIG_DIR_PATH' : ('{ROOT_DIR_PATH}', 'config'),
+    'DEFAULT_CONFIG_DIR_PATH' : ('{ROOT_DIR_PATH}', 'default_config'),
+    'PATCH_DIR_PATH' : ('{ROOT_DIR_PATH}', 'patch_config'),
+    'PERMANENT_PATCH_DIR_PATH' : ('{ROOT_DIR_PATH}', 'permanent_patch_config'),
 
-CONFIG_FILENAME = "config.yaml"
-CONFIG_PATH = Path(os.path.join(RESOURCES_PATH, CONFIG_FILENAME))
+    'STACK_RESOURCES_PATH' : ('{ROOT_DIR_PATH}', 'stack'),
+    'STACK_COMPOSE_FILENAME' : 'docker-compose.yaml',
+    'STACK_COMPOSE_PATH' : ('{STACK_RESOURCES_PATH}', '{STACK_COMPOSE_FILENAME}'),
+    'STACK_ENV_FILENAME' : '.env',
+    'STACK_ENV_PATH' : ('{STACK_RESOURCES_PATH}', '{STACK_ENV_FILENAME}'),
 
-#  CONNECTORS_FILENAME = ""
-#  CONNECTORS_PATH = Path(os.path.join(RESOURCES_PATH, CONNECTORS_FILENAME))
+    'SHELL_RESOURCES_PATH' : ('{ROOT_DIR_PATH}', ),
+    'SHELL_HISTORY_PATH' : ('{SHELL_RESOURCES_PATH}', '.mrsm_history'),
 
-DEFAULT_CONFIG_FILENAME = "default_config.yaml"
-DEFAULT_CONFIG_PATH = Path(os.path.join(CONFIG_ROOT_PATH, DEFAULT_CONFIG_FILENAME))
+    'API_RESOURCES_PATH' : ('{PACKAGE_ROOT_PATH}', 'api', 'resources'),
+    'API_STATIC_PATH' : ('{API_RESOURCES_PATH}', 'static'),
+    'API_TEMPLATES_PATH' : ('{API_RESOURCES_PATH}', 'templates'),
+    'API_CONFIG_RESOURCES_PATH' : ('{ROOT_DIR_PATH}', 'api'),
+    'API_SECRET_KEY_PATH' : ('{API_CONFIG_RESOURCES_PATH}', '.api_secret_key'),
+    'API_UVICORN_RESOURCES_PATH' : ('{API_CONFIG_RESOURCES_PATH}', 'uvicorn'),
+    'API_UVICORN_CONFIG_PATH' : ('{API_UVICORN_RESOURCES_PATH}', '.thread_config.yaml'),
 
-PATCH_FILENAME = "patch.yaml"
-PATCH_PATH = Path(os.path.join(RESOURCES_PATH, PATCH_FILENAME))
+    'CACHE_RESOURCES_PATH' : ('{ROOT_DIR_PATH}', '.cache'),
+    'PIPES_CACHE_RESOURCES_PATH' : ('{ROOT_DIR_PATH}', 'pipes'),
+    'USERS_CACHE_RESOURCES_PATH' : ('{ROOT_DIR_PATH}', 'users'),
 
-PERMANENT_PATCH_FILENAME = "permanent_patch.yaml"
-PERMANENT_PATCH_PATH = Path(os.path.join(RESOURCES_PATH, PERMANENT_PATCH_FILENAME))
+    'PLUGINS_RESOURCES_PATH' : ('{ROOT_DIR_PATH}', 'plugins'),
+    'PLUGINS_ARCHIVES_RESOURCES_PATH' : ('{PLUGINS_RESOURCES_PATH}', '.archives'),
+    'PLUGINS_TEMP_RESOURCES_PATH' : ('{PLUGINS_RESOURCES_PATH}', '.tmp'),
+    'PLUGINS_INIT_PATH' : ('{PLUGINS_RESOURCES_PATH}', '__init__.py'),
 
-GRAFANA_RESOURCES_PATH = Path(os.path.join(CONFIG_ROOT_PATH, 'stack', 'grafana', 'resources'))
-GRAFANA_DATASOURCE_PATH = Path(os.path.join(GRAFANA_RESOURCES_PATH, 'provisioning', 'datasources', 'datasource.yaml'))
-GRAFANA_DASHBOARD_PATH = Path(os.path.join(GRAFANA_RESOURCES_PATH, 'provisioning', 'dashboards', 'dashboard.yaml'))
-#  GRAFANA_INI_PATH = Path(os.path.join(GRAFANA_RESOURCES_PATH, 'grafana.ini'))
+    'SQLITE_RESOURCES_PATH' : ('{ROOT_DIR_PATH}', 'sqlite'),
+    'SQLITE_DB_PATH' : ('{SQLITE_RESOURCES_PATH}', 'mrsm_local.db'),
 
-MOSQUITTO_RESOURCES_PATH = Path(os.path.join(CONFIG_ROOT_PATH, 'stack', 'mosquitto', 'resources'))
-MOSQUITTO_CONFIG_PATH = Path(os.path.join(MOSQUITTO_RESOURCES_PATH, 'mosquitto.conf'))
+    'GRAFANA_RESOURCES_PATH' : ('{STACK_RESOURCES_PATH}', 'grafana', 'resources'),
+    'GRAFANA_DATASOURCE_PATH' : ('{GRAFANA_RESOURCES_PATH}', 'provisioning', 'datasources', 'datasource.yaml'),
+    'GRAFANA_DASHBOARD_PATH' : ('{GRAFANA_RESOURCES_PATH}', 'provisioning', 'dashboards', 'dashboard.yaml'),
+    'MOSQUITTO_RESOURCES_PATH' : ('{STACK_RESOURCES_PATH}', 'mosquitto', 'resources'),
+    'MOSQUITTO_CONFIG_PATH' : ('{MOSQUITTO_RESOURCES_PATH}', 'mosquitto.conf'),
+}
 
-STACK_RESOURCES_PATH = Path(os.path.join(CONFIG_ROOT_PATH, 'stack'))
-STACK_COMPOSE_FILENAME = "docker-compose.yaml"
-STACK_COMPOSE_PATH = Path(os.path.join(STACK_RESOURCES_PATH, STACK_COMPOSE_FILENAME))
-STACK_ENV_FILENAME = ".env"
-STACK_ENV_PATH = Path(os.path.join(STACK_RESOURCES_PATH, STACK_ENV_FILENAME))
+def set_root(root : Union[Path, str]):
+    global paths
+    paths['ROOT_DIR_PATH'] = Path(root)
 
-#  SHELL_RESOURCES_PATH = Path(os.path.join(CONFIG_ROOT_PATH, 'actions', 'shell', 'resources'))
-SHELL_RESOURCES_PATH = RESOURCES_PATH
-SHELL_HISTORY_PATH = Path(os.path.join(SHELL_RESOURCES_PATH, '.mrsm_history'))
+def __getattr__(name : str) -> Path:
+    if name not in paths:
+        if name not in globals():
+            raise AttributeError(f"Could not import '{name}'.")
+        return globals()[name]
 
-API_RESOURCES_PATH = Path(os.path.join(PACKAGE_ROOT_PATH, 'api', 'resources'))
-API_STATIC_PATH = Path(os.path.join(API_RESOURCES_PATH, 'static'))
-API_TEMPLATES_PATH = Path(os.path.join(API_RESOURCES_PATH, 'templates'))
+    if isinstance(paths[name], tuple) or isinstance(paths[name], list):
+        ### recurse through paths to create resource directories.
+        #  parent = __getattr__(paths[name][0])
+        parts = []
+        for p in paths[name]:
+            if str(p).startswith('{') and str(p).endswith('}'):
+                parts.append(__getattr__(p[1:-1]))
+                #  parts.append(paths[p[1:-1]])
+            else:
+                parts.append(p)
+        #  print(parts)
+        #  parts = [
+            #  __getattr__(p[1:-1]) if (str(p).startswith('{') and str(p).endswith('}'))
+            #  else p for p in paths[name]
+        #  ]
+        path = Path(os.path.join(*parts))
+        #  path = Path(os.path.join(parent, *paths[name][1:]))
+    else:
+        path = Path(paths[name])
 
-API_UVICORN_RESOURCES_PATH = Path(os.path.join(RESOURCES_PATH, 'uvicorn'))
-API_UVICORN_CONFIG_PATH = Path(os.path.join(API_UVICORN_RESOURCES_PATH, '.thread_config.yaml'))
-
-PIPES_RESOURCES_PATH = Path(os.path.join(RESOURCES_PATH, 'pipes'))
-
-SPLITGRAPH_CONFIG_PATH = Path(os.path.join(Path.home(), '.splitgraph', '.sgconfig'))
-
-PLUGINS_RESOURCES_PATH = Path(os.path.join(RESOURCES_PATH, 'plugins'))
-PLUGINS_ARCHIVES_RESOURCES_PATH = Path(os.path.join(PLUGINS_RESOURCES_PATH, '.archives'))
-PLUGINS_TEMP_RESOURCES_PATH = Path(os.path.join(PLUGINS_RESOURCES_PATH, '.tmp'))
-PLUGINS_INIT_PATH = Path(os.path.join(PLUGINS_RESOURCES_PATH, '__init__.py'))
-PLUGINS_INIT_PATH.parent.mkdir(parents=True, exist_ok=True)
-PLUGINS_INIT_PATH.touch()
-
-
-### NOTE: This must be the bottom of the module
-paths_glob = dict(globals())
-for var, path in paths_glob.items():
-    if 'RESOURCES_PATH' in var:
+    ### Create directories or touch files.
+    if 'RESOURCES_PATH' in name or name == 'CONFIG_DIR_PATH':
         path.mkdir(parents=True, exist_ok=True)
+    elif 'FILENAME' in name:
+        path = str(path)
+
+    return path
+

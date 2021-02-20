@@ -6,6 +6,8 @@
 Register or fetch Pipes from the API
 """
 
+from __future__ import annotations
+from meerschaum.utils.typing import SuccessTuple, Union, Any, Optional, Mapping, List
 from meerschaum.utils.debug import dprint
 from meerschaum.utils.warnings import error
 
@@ -15,23 +17,24 @@ def pipe_r_url(
     """
     Generate a relative URL path from a Pipe's keys.
     """
+    from meerschaum.config.static import _static_config
     location_key = pipe.location_key
     if location_key is None: location_key = '[None]'
-    return f'/mrsm/pipes/{pipe.connector_keys}/{pipe.metric_key}/{location_key}'
+    return f"{_static_config()['api']['endpoints']['pipes']}/{pipe.connector_keys}/{pipe.metric_key}/{location_key}"
 
 def register_pipe(
         self,
-        pipe : 'meerschaum.Pipe',
+        pipe : meerschaum.Pipe,
         debug : bool = False
-    ) -> tuple:
+    ) -> SuccessTuple:
     """
     Submit a POST to the API to register a new Pipe object.
     Returns a tuple of (success_bool, response_dict)
     """
-
+    from meerschaum.config.static import _static_config
     ### NOTE: if `parameters` is supplied in the Pipe constructor,
     ###       then `pipe.parameters` will exist and not be fetched from the database.
-    response = self.post('/mrsm/pipes', json=pipe.meta)
+    response = self.post(_static_config()['api']['endpoints']['pipes'], json=pipe.meta, debug=debug)
     if debug: dprint(response.text)
     if isinstance(response.json(), list):
         response_tuple = response.__bool__(), response.json()[1]
@@ -43,21 +46,24 @@ def register_pipe(
 
 def edit_pipe(
         self,
-        pipe : 'meerschaum.Pipe',
+        pipe : meerschaum.Pipe,
         patch : bool = False,
-        debug : bool = False
-    ) -> tuple:
+        debug : bool = False,
+        **kw : Any
+    ) -> SuccessTuple:
     """
     Submit a PATCH to the API to edit an existing Pipe.
     Returns a tuple of (success_bool, response_dict)
     """
+    from meerschaum.config.static import _static_config
     if debug:
         from meerschaum.utils.debug import dprint
         dprint(f"patch: {patch}")
     response = self.patch(
-        '/mrsm/pipes',
+        _static_config()['api']['endpoints']['pipes'],
         json = pipe.meta,
-        params = {'patch' : patch}
+        params = {'patch' : patch},
+        debug = debug
     )
     return response.__bool__(), response.json()
 
@@ -69,7 +75,7 @@ def fetch_pipes_keys(
         params : dict = dict(),
         mrsm_instance : str = 'api',
         debug : bool = False
-    ) -> 'dict or list':
+    ) -> Union[List[str], Mapping[str, Any]]:
     """
     NOTE: This function no longer builds Pipes. Use the main `get_pipes()` function
           with the arguments `mrsm_instance = 'api' and `method = 'registered'` (default).
@@ -83,9 +89,10 @@ def fetch_pipes_keys(
     """
     from meerschaum.utils.debug import dprint
     from meerschaum.utils.warnings import error
+    from meerschaum.config.static import _static_config
     import json
 
-    r_url = '/mrsm/pipes/keys'
+    r_url = _static_config()['api']['endpoints']['pipes'] + '/keys'
     try:
         j = self.get(
             r_url,
@@ -95,11 +102,13 @@ def fetch_pipes_keys(
                 'location_keys' : json.dumps(location_keys),
                 'params' : json.dumps(params),
                 'debug' : debug,
-            }
+            },
+            debug=debug
         ).json()
     except Exception as e:
         error(str(e))
 
+    if 'detail' in j: error(j['detail'], stack=False)
     result = []
     for t in j:
         result.append( (t['connector_keys'], t['metric_key'], t['location_key']) )
@@ -107,11 +116,11 @@ def fetch_pipes_keys(
 
 def sync_pipe(
         self,
-        pipe : 'meerschaum.Pipe' = None,
-        df : 'pd.DataFrame' = None,
+        pipe : Optional[meerschaum.Pipe] = None,
+        df : Optional[pandas.DataFrame] = None,
         debug : bool = False,
-        **kw
-    ) -> tuple:
+        **kw : Any
+    ) -> SuccessTuple:
     """
     Append a pandas DataFrame to a Pipe.
     If Pipe does not exist, it is registered with supplied metadata
@@ -119,16 +128,23 @@ def sync_pipe(
     """
     from meerschaum.utils.debug import dprint
     from meerschaum.utils.warnings import warn
+    from meerschaum.utils.misc import json_serialize_datetime
     import json
     if df is None:
         msg = f"DataFrame is None. Cannot sync pipe '{pipe}"
         return False, msg
 
     ### allow syncing dict or JSON without needing to import pandas (for IOT devices)
-    if isinstance(df, dict): json_str = json.dumps(df)
-    elif isinstance(df, str): json_str = df
-    else: json_str = df.to_json(date_format='iso', date_unit='us')
+    if isinstance(df, dict):
+        json_str = json.dumps(df, default=json_serialize_datetime)
+    elif isinstance(df, str):
+        json_str = df
+    else:
+        json_str = df.to_json(date_format='iso', date_unit='us')
 
+    ### Send columns in case the user has defined them locally.
+    if pipe.columns:
+        kw['columns'] = json.dumps(pipe.columns)
     r_url = pipe_r_url(pipe) + '/data'
     if debug: dprint(f"Posting data to {r_url}...")
     try:
@@ -136,22 +152,29 @@ def sync_pipe(
             r_url,
             ### handles check_existing
             params = kw,
-            data = json_str
+            data = json_str,
+            debug = debug
         )
     except Exception as e:
         warn(str(e))
         return False, str(e)
+        
+    j = response.json()
+    if isinstance(j, dict) and 'detail' in j:
+        return False, j['detail']
 
-    return tuple(response.json())
+    return tuple(j)
 
 def delete_pipe(
         self,
-        pipe : 'mrsm.Pipe' = None,
+        pipe : Optional[meerscahum.Pipe] = None,
         debug : bool = None,        
-    ) -> tuple:
+    ) -> SuccessTuple:
     """
     Delete a Pipe and drop its table.
     """
+    from meerschaum.utils.warnings import error
+    if pipe is None: error(f"Pipe cannot be None.")
     return self.do_action(
         ['delete', 'pipes'],
         connector_keys = pipe.connector_keys,
@@ -163,22 +186,27 @@ def delete_pipe(
 
 def get_pipe_data(
         self,
-        pipe : 'meerschaum.Pipe',
-        begin : 'datetime.datetime' = None,
-        end : 'datetime.datetime' = None,
+        pipe : meerschaum.Pipe,
+        begin : Optional[datetime.datetime] = None,
+        end : Optional[datetime.datetime] = None,
+        params : Optional[Dict[str, Any]] = None,
         debug : bool = False
-    ) -> 'pd.DataFrame':
+    ) -> pandas.DataFrame:
     """
     Fetch data from the API
     """
     from meerschaum.utils.warnings import warn
     r_url = pipe_r_url(pipe)
     try:
-        response = self.get(r_url + "/data", params={'begin': begin, 'end': end})
+        response = self.get(r_url + "/data", json=params, params={'begin': begin, 'end': end}, debug=debug)
     except Exception as e:
         warn(str(e))
         return None
-    from meerschaum.utils.misc import import_pandas, parse_df_datetimes
+    if not response:
+        if 'detail' in response.json():
+            return False, response.json()['detail']
+    from meerschaum.utils.packages import import_pandas
+    from meerschaum.utils.misc import parse_df_datetimes
     pd = import_pandas()
     try:
         df = pd.read_json(response.text)
@@ -191,13 +219,13 @@ def get_pipe_data(
 
 def get_backtrack_data(
         self,
-        pipe : 'meerschaum.Pipe',
-        begin : 'datetime.datetime',
+        pipe : meerschaum.Pipe,
+        begin : datetime.datetime,
         backtrack_minutes : int = 0,
         debug : bool = False
-    ) -> 'pd.DataFrame':
+    ) -> pandas.DataFrame:
     """
-    Get a Pipe's backtrack data from the API
+    Get a Pipe's backtrack data from the API.
     """
     from meerschaum.utils.debug import dprint
     from meerschaum.utils.warnings import warn
@@ -208,12 +236,14 @@ def get_backtrack_data(
             params = {
                 'begin': begin,
                 'backtrack_minutes': backtrack_minutes,
-            }
+            },
+            debug = debug
         )
     except Exception as e:
         warn(f"Failed to parse backtrack data JSON for pipe '{pipe}'. Exception:\n" + str(e))
         return None
-    from meerschaum.utils.misc import import_pandas, parse_df_datetimes
+    from meerschaum.utils.packages import import_pandas
+    from meerschaum.utils.misc import parse_df_datetimes
     if debug: dprint(response.text)
     pd = import_pandas()
     try:
@@ -227,7 +257,7 @@ def get_backtrack_data(
 
 def get_pipe_id(
         self,
-        pipe : 'meerschuam.Pipe',
+        pipe : meerschuam.Pipe,
         debug : bool = False,
     ) -> int:
     """
@@ -236,7 +266,8 @@ def get_pipe_id(
     from meerschaum.utils.debug import dprint
     r_url = pipe_r_url(pipe)
     response = self.get(
-        r_url + '/id'
+        r_url + '/id',
+        debug = debug
     )
     if debug: dprint(response.text)
     try:
@@ -246,14 +277,14 @@ def get_pipe_id(
 
 def get_pipe_attributes(
         self,
-        pipe : 'meerschaum.Pipe',
+        pipe : meerschaum.Pipe,
         debug : bool = False,
-    ) -> dict:
+    ) -> Mapping[str, Any]:
     """
     Get a Pipe's attributes from the API
     """
     r_url = pipe_r_url(pipe)
-    response = self.get(r_url + '/attributes')
+    response = self.get(r_url + '/attributes', debug=debug)
     import json
     try:
         return json.loads(response.text)
@@ -265,13 +296,13 @@ def get_sync_time(
         pipe : 'meerschaum.Pipe',
         params : dict = None,
         debug : bool = False,
-    ) -> 'datetime.datetime':
+    ) -> datetime.datetime:
     """
     Get a Pipe's most recent datetime value from the API
     """
     import datetime, json
     r_url = pipe_r_url(pipe)
-    response = self.get(r_url + '/sync_time', json=params, params={'debug' : debug})
+    response = self.get(r_url + '/sync_time', json=params, params={'debug' : debug}, debug=debug)
     try:
         dt = datetime.datetime.fromisoformat(json.loads(response.text))
     except:
@@ -286,11 +317,13 @@ def pipe_exists(
     """
     Consult the API to see if a Pipe exists
     """
-    import json
     r_url = pipe_r_url(pipe)
-    response = self.get(r_url + '/exists')
+    response = self.get(r_url + '/exists', debug=debug)
     if debug: dprint("Received response: " + str(response.text))
-    return json.loads(response.text)
+    j = response.json()
+    if isinstance(j, dict) and 'detail' in j:
+        return False, j['detail']
+    return j
 
 def create_metadata(
         self,
@@ -299,8 +332,55 @@ def create_metadata(
     """
     Create Pipe metadata tables
     """
+    from meerschaum.config.static import _static_config
     import json
-    r_url = '/mrsm/metadata'
-    response = self.post(r_url)
+    r_url = _static_config()['api']['endpoints']['metadata']
+    response = self.post(r_url, debug=debug)
     if debug: dprint("Create metadata response: {response.text}")
     return json.loads(response.text)
+
+def get_pipe_rowcount(
+        self,
+        pipe : 'meerschaum.Pipe',
+        begin : 'datetime.datetime' = None,
+        end : 'datetime.datetime' = None,
+        params : Optional[Dict[str, Any]] = None,
+        remote : bool = False,
+        debug : bool = False,
+    ) -> Optional[int]:
+    """
+    Get a pipe's row couunt from the API.
+    """
+    import json
+    r_url = pipe_r_url(pipe)
+    response = self.get(
+        r_url + "/rowcount",
+        json = params,
+        params = {
+            'begin' : begin,
+            'end' : end,
+            'remote' : remote,
+        }
+    )
+    try:
+        return int(json.loads(response.text))
+    except:
+        return None
+
+def drop_pipe(
+        self,
+        pipe : meerschaum.Pipe,
+        debug : bool = False
+    ) -> SuccessTuple:
+    """
+    Drop a pipe's tables but maintain its registration.
+    """
+    return self.do_action(
+        ['drop', 'pipes'],
+        connector_keys = pipe.connector_keys,
+        metric_keys = pipe.metric_key,
+        location_keys = pipe.location_key,
+        force = True,
+        debug = debug
+    )
+

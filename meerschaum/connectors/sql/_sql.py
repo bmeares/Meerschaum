@@ -5,6 +5,11 @@
 This module contains SQLConnector functions for executing SQL queries.
 """
 
+from __future__ import annotations
+from meerschaum.utils.typing import (
+    Union, Mapping, SuccessTuple, Optional, Any, Sequence, Iterable, Callable
+)
+
 from meerschaum.utils.debug import dprint
 from meerschaum.utils.warnings import warn
 
@@ -14,15 +19,18 @@ bulk_flavors = {'postgresql', 'timescaledb'}
 def read(
         self,
         query_or_table : str,
+        params : Mapping[str, Any] = {},
         chunksize : int = -1,
+        chunk_hook : Optional[Callable[[pandas.DataFrame], Any]] = None,
+        silent : bool = False,
         debug : bool = False,
-        **kw
-    ) -> 'pd.DataFrame':
+        **kw : Any
+    ) -> Optional[pandas.DataFrame]:
     """
     Read a SQL query or table into a pandas dataframe.
     """
-    from meerschaum.utils.misc import attempt_import, sql_item_name
-    sqlparse = attempt_import("sqlparse")
+    from meerschaum.utils.misc import sql_item_name
+    from meerschaum.utils.packages import attempt_import
     sqlalchemy = attempt_import("sqlalchemy")
     chunksize = chunksize if chunksize != -1 else self.sys_config['chunksize']
     if debug:
@@ -31,38 +39,51 @@ def read(
         dprint(query_or_table)
         dprint(f"Fetching with chunksize: {chunksize}")
 
-    ### format with sqlalchemy
-    if ' ' not in query_or_table:
+    ### This might be sqlalchemy object or the string of a table name.
+    ### We check for spaces and quotes to see if it might be a weird table.
+    if (
+        ' ' not in str(query_or_table)
+        or (
+            ' ' in str(query_or_table)
+            and str(query_or_table).startswith('"')
+            and str(query_or_table).endswith('"')
+        )
+    ):
         if self.flavor in ('postgresql', 'timescaledb'):
-            query_or_table = sql_item_name(query_or_table, self.flavor)
+            query_or_table = sql_item_name(str(query_or_table), self.flavor)
         if debug: dprint(f"Reading from table {query_or_table}")
         formatted_query = str(sqlalchemy.text("SELECT * FROM " + str(query_or_table)))
     else:
-        formatted_query = str(sqlalchemy.text(query_or_table))
-    formatted_query = sqlparse.format(formatted_query)
+        try:
+            formatted_query = str(sqlalchemy.text(query_or_table))
+        except:
+            formatted_query = query_or_table
 
     try:
         chunk_generator = self.pd.read_sql(
             formatted_query,
             self.engine,
+            params = params,
             chunksize = chunksize
         )
     except Exception as e:
-        import inspect, pprintpp
+        import inspect
         if debug: dprint(f"Failed to execute query:\n\n{query_or_table}\n\n")
-        if debug: warn(str(e))
+        if not silent: warn(str(e))
 
         return None
 
     chunk_list = []
     for chunk in chunk_generator:
+        if chunk_hook is not None:
+            chunk_hook(chunk, chunksize=chunksize, debug=debug, **kw)
         chunk_list.append(chunk)
 
     ### if no chunks returned, read without chunks
     ### to get columns
     if len(chunk_list) == 0:
         df = self.pd.read_sql(
-            sqlalchemy.text(formatted_query),
+            formatted_query,
             self.engine
         )
     else:
@@ -78,77 +99,96 @@ def read(
 def value(
         self,
         query : str,
-        **kw
-    ):
+        *args : Any,
+        **kw : Any
+    ) -> Any:
     """
     Return a single value from a SQL query
-    (index a DataFrame a [0, 0])
+    (index a DataFrame at [0, 0])
     """
     try:
-        return self.read(query, **kw).iloc[0, 0]
+        return self.read(query, *args, **kw).iloc[0, 0]
     except:
         return None
+
+def execute(
+        self,
+        *args : Any,
+        **kw : Any
+    ) -> Optional[sqlalchemy.engine.result.resultProxy]:
+    return self.exec(*args, **kw)
 
 def exec(
         self,
         query : str,
-        debug : bool = False
-    ) -> 'resultProxy or None':
+        *args : Any,
+        silent : bool = False,
+        debug : bool = False,
+        **kw : Any
+    ) -> Optional[sqlalchemy.engine.result.resultProxy]:
     """
-    Execute SQL code and return success status. e.g. calling stored procedures
+    Execute SQL code and return success status. e.g. calling stored procedures.
+
+    Wrapper for self.engine.connect() and connection.execute().
+
+    If inserting data, please use bind variables to avoid SQL injection!
     """
-    from meerschaum.utils.misc import attempt_import
-    sqlparse = attempt_import("sqlparse")
-    query = sqlparse.format(query)
+    from meerschaum.utils.debug import dprint
+    from meerschaum.utils.packages import attempt_import
     sqlalchemy = attempt_import("sqlalchemy")
     if debug: dprint("Executing query:\n" + f"{query}")
     try:
         with self.engine.connect() as connection:
             result = connection.execute(
-                sqlalchemy.text(query).execution_options(
-                    autocommit = True
-                )
+                query,
+                *args,
+                **kw
             )
     except Exception as e:
-        #  import inspect, pprintpp
+        import inspect
 
-        #  print(f"Failed to execute query:\n\n{query}\n\n")
-        if debug: warn(str(e))
-        #  print(f"Stack:")
-        #  pprintpp.pprint(inspect.stack())
+        if debug: dprint(f"Failed to execute query:\n\n{query}\n\n")
+        if not silent: warn(str(e))
         result = None
 
     return result
 
 def to_sql(
         self,
-        df : 'pd.DataFrame',
+        df : pandas.DataFrame,
         name : str = None,
         index : bool = False,
         if_exists : str = 'replace',
         method : str = "",
         chunksize : int = -1,
+        silent : bool = False,
         debug : bool = False,
         as_tuple : bool = False,
         **kw
-    ):
+    ) -> Union[bool, SuccessTuple]:
     """
     Upload a DataFrame's contents to the SQL server
 
-    df : pandas.DataFrame
+    :param df:
         The DataFrame to be uploaded
-    name : str
+
+    :param name:
         The name of the table to be created
-    index : bool (False)
+
+    :param index:
         If True, creates the DataFrame's indices as columns (default False)
-    if_exists : str ('replace')
+
+    :param if_exists: str
         ['replace', 'append', 'fail']
         Drop and create the table ('replace') or append if it exists ('append') or raise Exception ('fail')
         (default 'replace')
-    method : str
+
+    :param method:
         None or multi. Details on pandas.to_sql
-    as_tuple : bool = False
+
+    :param as_tuple:
         If True, return a (success_bool, message) tuple instead of a bool
+
     **kw : keyword arguments
         Additional arguments will be passed to the DataFrame's `to_sql` function
     """
@@ -173,6 +213,14 @@ def to_sql(
         msg = f"Inserting {len(df)} rows with chunksize: {chunksize}..."
         print(msg, end="", flush=True)
 
+    ### filter out non-pandas args
+    import inspect
+    to_sql_params = inspect.signature(df.to_sql).parameters
+    to_sql_kw = dict()
+    for k, v in kw.items():
+        if k in to_sql_params:
+            to_sql_kw[k] = v
+
     try:
         df.to_sql(
             name = name,
@@ -181,11 +229,11 @@ def to_sql(
             if_exists = if_exists,
             method = method,
             chunksize = chunksize,
-            **kw
+            **to_sql_kw
         )
         success = True
     except Exception as e:
-        if debug: warn(str(e))
+        if not silent: warn(str(e))
         success, msg = None, str(e)
 
     end = time.time()
@@ -199,13 +247,16 @@ def to_sql(
     if as_tuple: return success, msg
     return success
 
-def psql_insert_copy(table, conn, keys, data_iter):
+def psql_insert_copy(
+        table : pandas.io.sql.SQLTable,
+        conn : Union[sqlalchemy.engine.Engine, sqlalchemy.engine.Connection],
+        keys : Sequence[str],
+        data_iter : Iterable[Any]
+    ) -> None:
     """
     Execute SQL statement inserting data
 
-    Parameters
-    ----------
-    table : pandas.io.sql.SQLTable
+    :param table : pandas.io.sql.SQLTable
     conn : sqlalchemy.engine.Engine or sqlalchemy.engine.Connection
     keys : list of str
         Column names
@@ -234,4 +285,3 @@ def psql_insert_copy(table, conn, keys, data_iter):
             table_name, columns
         )
         cur.copy_expert(sql=sql, file=s_buf)
-

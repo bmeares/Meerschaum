@@ -7,18 +7,26 @@
 This module contains functions for parsing arguments
 """
 
+from __future__ import annotations
+from meerschaum.utils.typing import List, Dict, Any, Optional
+
 from meerschaum.actions.arguments._parser import parser
 
-def parse_arguments(sysargs : list) -> dict:
+def parse_arguments(sysargs : List[str]) -> dict[str, Any]:
     """
     Parse a list of arguments into standard Meerschaum arguments.
+    Returns a dictionary of argument_name -> argument_value.
+
+    :param sysargs:
+        List of command-line arguments to process. Does not include the executable.
+        E.g. ['show', 'version', '--nopretty']
     """
-    from meerschaum.config import config as cf, get_config
     import copy
+    from meerschaum.config.static import _static_config
 
     sub_arguments = []
     sub_arg_indices = []
-    begin_decorator, end_decorator = get_config('system', 'arguments', 'sub_decorators', patch=True)
+    begin_decorator, end_decorator = _static_config()['system']['arguments']['sub_decorators']
     found_begin_decorator = False
     for i, word in enumerate(sysargs):
         is_sub_arg = False
@@ -47,32 +55,35 @@ def parse_arguments(sysargs : list) -> dict:
             sub_arg_indices.append(i)
 
     ### rebuild sysargs without sub_arguments
-    sysargs = [
+    filtered_sysargs = [
         word for i, word in enumerate(sysargs)
             if i not in sub_arg_indices
     ]
 
-    args, unknown = parser.parse_known_args(sysargs)
-    if unknown: print(f"Unknown arguments: {unknown}")
+    args, unknown = parser.parse_known_args(filtered_sysargs)
+    #  if unknown: print(f"Unknown arguments: {unknown}")
 
     ### if --config is not empty, cascade down config
     ### and update new values on existing keys / add new keys/values
     if args.config is not None:
         from meerschaum.config._patch import write_patch, apply_patch_to_config
         from meerschaum.config._paths import PATCH_PATH
-        from meerschaum.utils.misc import reload_package
+        from meerschaum.utils.packages import reload_package
         import os, meerschaum.config
         write_patch(args.config)
-        reload_package(meerschaum.config)
-        reload_package(meerschaum.config)
+        reload_package('meerschaum')
+        #  reload_package(meerschaum.config)
         ### clean up patch so it's not loaded next time
         os.remove(PATCH_PATH)
 
 
     args_dict = vars(args)
+    args_dict['sysargs'] = sysargs
     ### append decorated arguments to sub_arguments list
-    if 'sub_args' not in args_dict: args_dict['sub_args'] = []
-    if args_dict['sub_args'] is None: args_dict['sub_args'] = []
+    if 'sub_args' not in args_dict:
+        args_dict['sub_args'] = []
+    if args_dict['sub_args'] is None:
+        args_dict['sub_args'] = []
     sub_arguments = args_dict['sub_args'] + sub_arguments
     parsed_sub_arguments = []
     for sub_arg in sub_arguments:
@@ -92,7 +103,10 @@ def parse_arguments(sysargs : list) -> dict:
 
     ### location_key '[None]' or 'None' -> None
     if 'location_keys' in args_dict:
-        args_dict['location_keys'] = [ None if lk in ('[None]', 'None') else lk for lk in args_dict['location_keys'] ]
+        args_dict['location_keys'] = [
+            None if lk in ('[None]', 'None')
+            else lk for lk in args_dict['location_keys'] 
+        ]
 
     return parse_synonyms(args_dict)
 
@@ -106,10 +120,13 @@ def parse_line(line : str) -> dict:
     returns: dict of arguments
     """
     import shlex
-    args_list = shlex.split(line)
-    return parse_arguments(
-        shlex.split(line)
-    )
+    try:
+        args_list = shlex.split(line)
+        return parse_arguments(
+            shlex.split(line)
+        )
+    except:
+        return {'action' : [], 'text' : line,}
 
 def parse_synonyms(
         args_dict : dict

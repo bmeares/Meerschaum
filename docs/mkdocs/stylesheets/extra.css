@@ -1,0 +1,36 @@
+/* :root { */
+  /* --md-primary-fg-color: #5fbfce; */
+  /* --md-primary-fg-color--light: #5fbfce; */
+  /* --md-accent-fg-color: #5fbfce; */
+  /* --md-default-bg-color: #393939; */
+  /* --md-default-fg-color--dark:  #ffffff; */
+  /* --md-default-fg-color--light: var(--md-default-fg-color--dark); */
+  /* --md-default-fg-color: var(--md-default-fg-color--dark); */
+  /* --md-admonition-bg-color: #282828; */
+/* } */
+
+/* .md-main { */
+  /* background-color: #393939; */
+/* } */
+
+/* .md-typeset table:not([class]) { */
+  /* background-color: #323232; */
+/* } */
+
+/* .md-typeset a { */
+  /* [> color: #d6692f; <] */
+  /* [> color: #5fbfce; <] */
+  /* [> color: #f9c413; <] */
+/* } */
+
+.md-header {
+  background-color: #ce6d5f;
+}
+
+.md-tabs {
+  background-color: #ce6d5f;
+}
+
+.bmc-btn-text {
+  color: #ffffff;
+}

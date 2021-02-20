@@ -6,17 +6,31 @@
 Wrappers for requests.post
 """
 
-import requests
-
 def post(
         self,
         r_url : str,
+        headers : dict = {},
+        use_token : bool = True,
+        debug : bool = False,
         **kw
     ):
     """
     Wrapper for requests.post
     """
-    if 'auth' in kw:
-        print('Ignoring auth, using existing configuration')
-        del kw['auth']
-    return requests.post(self.url + r_url, auth=self.auth, **kw)
+    if debug: from meerschaum.utils.debug import dprint
+
+    if use_token:
+        if debug: dprint(f"Checking token...")
+        headers.update({ 'Authorization': f'Bearer {self.token}' })
+
+    if debug:
+        from meerschaum.utils.formatting import pprint
+        dprint(f"Sending POST request to {self.url + r_url}")
+        if headers: pprint(headers)
+        pprint(kw)
+
+    return self.session.post(
+        self.url + r_url,
+        headers = headers,
+        **kw
+    )
