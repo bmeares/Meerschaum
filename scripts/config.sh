@@ -6,8 +6,10 @@ PARENT="$(dirname "$DIR")"
 . "$DIR"/working_dir.sh
 
 export dockerhub_user="bmeares"
-export tag="latest"
-tags=("api" "minimal" "full")
+# export tag="latest"
+export latest_alias="api"
+export tags=( "api" "minimal" "full" )
+
 export base_name="meerschaum"
 export image="$dockerhub_user/$base_name"
 export python_image="python:3.7-slim-buster"

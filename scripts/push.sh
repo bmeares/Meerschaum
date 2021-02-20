@@ -17,7 +17,7 @@ if [[ -n $(git status --porcelain) ]]; then
 fi
 
 ### Publish to Docker Hub.
-docker push "$image"
+# docker push "$image"
 
 ### Publish to Python Package Index.
 cd "$PARENT"
