@@ -9,6 +9,7 @@ Edit a Pipe's parameters here.
 def edit(
         self,
         patch : bool = False,
+        interactive : bool = True,
         debug : bool = False,
         **kw
     ):
@@ -16,13 +17,16 @@ def edit(
     Edit a Pipe's configuration.
     If `patch` is True, update parameters by cascading rather than overwriting.
     """
-    from meerschaum.config._paths import PIPES_RESOURCES_PATH
+    if not interactive:
+        return self.instance_connector.edit_pipe(self, patch=patch, debug=debug, **kw)
+    from meerschaum.config._paths import PIPES_CACHE_RESOURCES_PATH
     from meerschaum.utils.misc import edit_file
     import pathlib, os
     parameters_filename = str(self) + '.yaml'
-    parameters_path = pathlib.Path(os.path.join(PIPES_RESOURCES_PATH, parameters_filename))
+    parameters_path = pathlib.Path(os.path.join(PIPES_CACHE_RESOURCES_PATH, parameters_filename))
     
-    import yaml
+    from meerschaum.utils.yaml import yaml
+    #  import yaml
 
     edit_header = "#######################################"
     for i in range(len(str(self))): edit_header += "#"
@@ -40,7 +44,7 @@ def edit(
     ### write parameters to yaml file
     with open(parameters_path, 'w') as f:
         f.write(edit_header)
-        yaml.dump(parameters, f)
+        yaml.dump(parameters, stream=f, sort_keys=False)
 
     ### only quit editing if yaml is valid
     editing = True
@@ -59,7 +63,7 @@ def edit(
     self.parameters = file_parameters
 
     if debug:
-        import pprintpp
-        pprintpp.pprint(self.parameters)
+        from meerschaum.utils.formatting import pprint
+        pprint(self.parameters)
 
-    return self.instance_connector.edit_pipe(self, patch=patch, debug=debug)
+    return self.instance_connector.edit_pipe(self, patch=patch, debug=debug, **kw)

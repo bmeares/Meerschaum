@@ -1,0 +1,5 @@
+- documentation
+- pytest
+- login html page
+- Meerschaum JS
+- rewrite API data to paginate

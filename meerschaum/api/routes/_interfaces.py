@@ -5,13 +5,13 @@
 """
 Create and get interfaces
 """
-#  from meerschaum.api import fast_api, endpoints, database, connector
+#  from meerschaum.api import app, endpoints, database, connector
 #  from meerschaum.api.models import Interface
 #  from meerschaum.api.tables import get_tables
 
 #  endpoint = endpoints['mrsm'] + '/interfaces'
 
-#  @fast_api.post(endpoint)
+#  @app.post(endpoint)
 #  async def register_interface(interface : Interface):
     #  """
     #  Register new Interface

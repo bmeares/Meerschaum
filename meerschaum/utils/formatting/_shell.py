@@ -17,33 +17,39 @@ def make_header(
     Example:
         'My\nheader' -> 'My\nheader\n──────'
     """
+
+    from meerschaum.utils.formatting import ANSI, UNICODE, colored
+    if not UNICODE: ruler = '-'
     words = message.split('\n')
     max_length = 0
     for w in words:
         length = len(w)
         if length > max_length:
             max_length = length
-    
+
     s = message + "\n"
     for i in range(max_length):
         s += ruler
     return s
 
 def clear_screen(debug : bool = False) -> bool:
-    from meerschaum.utils.formatting import ANSI
+    from meerschaum.utils.formatting import ANSI, get_console
     from meerschaum.utils.debug import dprint
+    print("", end="", flush=True)
     if debug:
         dprint("Skipping screen clear.")
         return True
     if ANSI:
-        clear_string = '\033c'
-        print(clear_string, end="", flush=True)
+        if get_console() is not None:
+            get_console().clear()
+            print("", end="", flush=True)
+            return True
+        clear_string, reset_string = '\033c', '\033[0m'
+        print(clear_string + reset_string, end="")
+        print("", end="", flush=True)
         return True
     ### ANSI support is disabled, try system level instead
     import platform, os
-    if platform.system() == 'Windows':
-        command = 'cls'
     command = 'clear' if platform.system() != "Windows" else "cls"
     rc = os.system(command)
     return rc == 0
-

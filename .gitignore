@@ -2,6 +2,16 @@
 *.yaml
 *.sqlite
 *.mrsm_history
+.pyinstaller
+.venv/
+.tuna/
+.snakeviz/
+*.prof
+*.db
+/portable/
+/test_root/
+docs/pdoc/*
+docs/site/*
 
 # Byte-compiled / optimized / DLL files
 __pycache__/
@@ -36,7 +46,7 @@ MANIFEST
 #  Usually these files are written by a python script from a template
 #  before PyInstaller builds the exe, so as to inject date/other infos into it.
 *.manifest
-*.spec
+#*.spec
 
 # Installer logs
 pip-log.txt
@@ -75,6 +85,8 @@ instance/
 
 # Sphinx documentation
 docs/_build/
+docs/_static
+docs/_templates
 
 # PyBuilder
 target/

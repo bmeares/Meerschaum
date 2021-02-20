@@ -3,30 +3,27 @@
 # vim:fenc=utf-8
 
 """
-Actions available to the mrsm CLI
+Default actions available to the mrsm CLI.
 """
 
-from meerschaum.utils.misc import add_method_to_class, get_modules_from_package
+from __future__ import annotations
+from meerschaum.utils.typing import Callable, Any, Optional, Union, List
+from meerschaum.utils.packages import get_modules_from_package
 from meerschaum.utils.warnings import enable_depreciation_warnings
 enable_depreciation_warnings(__name__)
+_shell = None
+_custom_actions = []
 
 ### build __all__ from other .py files in this package
 import sys
-__all__, modules = get_modules_from_package(sys.modules[__name__], names=True)
-
-### append the plugins modules
-from meerschaum.config._paths import RESOURCES_PATH, PLUGINS_RESOURCES_PATH, PLUGINS_ARCHIVES_RESOURCES_PATH
-if RESOURCES_PATH not in sys.path: sys.path.append(str(RESOURCES_PATH))
-import plugins
-_plugins_names, plugins_modules = get_modules_from_package(plugins, names=True, recursive=True)
-__all__ += _plugins_names
-modules += plugins_modules
-
+__all__, modules = get_modules_from_package(
+    sys.modules[__name__],
+    names = True,
+)
 
 ### build the actions dictionary by importing all
 ### functions that do not begin with '_' from all submodules
 from inspect import getmembers, isfunction
-import importlib
 actions = dict()
 for module in modules:
 
@@ -51,24 +48,79 @@ for module in modules:
                 (ob[0], ob[1])
                     for ob in getmembers(module)
                         if isfunction(ob[1])
+                            ### check that the function belongs to the module
                             and ob[0] == module.__name__.replace('_', '').split('.')[-1]
-                            and ob[0][0] != '_'            
+                            ### skip functions that start with '_'
+                            and ob[0][0] != '_'
             ]
         )
     )
 
-
+original_actions = actions.copy()
 from meerschaum.actions._entry import _entry as entry
-shell = None
-def get_shell():
+def get_shell(
+        sysargs : List[str] = [],
+        reload : bool = False,
+        debug : bool = False
+    ):
     """
     Lazy load the Shell
     """
-    global shell
-    if shell is None:
-        from meerschaum.actions.shell import Shell
-        for a, f in actions.items():
-            add_method_to_class(func=f, class_def=Shell, method_name='do_' + a)
+    global _shell
+    from meerschaum.utils.debug import dprint
+    import meerschaum.actions.shell as shell_pkg
 
-        shell = Shell(actions)
-    return shell
+    if _shell is None or reload:
+        if debug: dprint("Loading the shell...")
+
+        if _shell is None:
+            shell_pkg._insert_shell_actions()
+            _shell = shell_pkg.Shell(actions, sysargs=sysargs)
+        elif reload:
+            _shell.__init__()
+    return _shell
+
+def get_subactions(action : str) -> Dict[str, Callable[[Any], Any]]:
+    """
+    Return a dictionary of an action's subactions.
+    """
+    import importlib, inspect
+    subactions = {}
+    try:
+        action_module = importlib.import_module(f"meerschaum.actions.{action}")
+    except ImportError:
+        action_module = None
+    if action_module is not None:
+        for name, f in inspect.getmembers(action_module):
+            if not inspect.isfunction(f):
+                continue
+            if action + '_' in name and not name.lstrip('_').startswith('complete'):
+                _name = name.replace(action, '')
+                _name = _name.lstrip('_')
+                subactions[_name] = f
+    return subactions
+
+def get_completer(action : str) -> Optional[Callable[['Shell', str, str, int, int], List[str]]]:
+    """
+    Search for a custom completer function for an action.
+    """
+    import importlib, inspect
+    try:
+        action_module = importlib.import_module(f"meerschaum.actions.{action}")
+    except ImportError:
+        action_module = None
+    if action_module is not None:
+        for name, f in inspect.getmembers(action_module):
+            if not inspect.isfunction(f):
+                continue
+            if 'complete_' + action in name:
+                #  _name = name.replace('complete_' + action, '')
+                #  _name = _name.lstrip('_')
+                return f
+    return None
+
+
+from meerschaum.actions.plugins import make_action, load_plugins, import_plugins
+plugins = import_plugins()
+__pdoc__ = {'plugins' : False}
+load_plugins()

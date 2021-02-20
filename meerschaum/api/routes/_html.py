@@ -7,7 +7,7 @@ Routes which serve HTML
 """
 
 from meerschaum.api import (
-    fast_api,
+    app,
     endpoints,
     database,
     connector,

@@ -6,10 +6,10 @@
 ORM Model for Interfaces
 """
 
-from meerschaum.utils.misc import attempt_import
-pydantic = attempt_import('pydantic')
+#  from meerschaum.utils.misc import attempt_import
+#  pydantic = attempt_import('pydantic')
 
-class Interface(pydantic.BaseModel):
-    connector_keys : str
+#  class Interface(pydantic.BaseModel):
+    #  connector_keys : str
 
 

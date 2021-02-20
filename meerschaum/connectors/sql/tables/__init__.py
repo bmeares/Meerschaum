@@ -6,28 +6,36 @@
 Define SQLAlchemy tables
 """
 
-
-### this needs to be accessed through get_tables,
-### otherwise it will attempt to connect to the SQL server
-### before FastAPI and break things
-#  tables = dict()
+from __future__ import annotations
+from meerschaum.utils.typing import Optional, Dict, Union
 
 ### store a tables dict for each connector
 connector_tables = dict()
 
 def get_tables(
-        mrsm_instance : str = None,
-        debug : bool = None
-    ):
+        mrsm_instance : Optional[Union[str, meerschaum.connectors.Connector]] = None,
+        debug : Optional[bool] = None
+    ) -> Dict[str, sqlalchemy.Table]:
     """
     Substantiate and create sqlalchemy tables
     """
     from meerschaum.utils.debug import dprint
-    from meerschaum.utils.warnings import warn
-    from meerschaum.utils.misc import attempt_import, parse_instance_keys
+    from meerschaum.utils.formatting import pprint
+    from meerschaum.utils.warnings import warn, error
+    from meerschaum.connectors.parse import parse_instance_keys
+    from meerschaum.utils.packages import attempt_import
     from meerschaum import get_connector
 
-    sqlalchemy, sqlalchemy_dialects_postgresql = attempt_import('sqlalchemy', 'sqlalchemy.dialects.postgresql')
+    #  print('CREATE TABLES')
+    #  import traceback
+    #  traceback.print_stack()
+
+    sqlalchemy, sqlalchemy_dialects_postgresql = attempt_import(
+        'sqlalchemy',
+        'sqlalchemy.dialects.postgresql'
+    )
+    if not sqlalchemy:
+        error(f"Failed to import sqlalchemy. Is sqlalchemy installed?")
 
     if mrsm_instance is None:
         conn = get_connector(debug=debug)
@@ -51,29 +59,43 @@ def get_tables(
             params_type = sqlalchemy_dialects_postgresql.JSON
 
         _tables = {
-            'metrics' : sqlalchemy.Table(
-                'metrics',
+            #  'metrics' : sqlalchemy.Table(
+                #  'metrics',
+                #  conn.metadata,
+                #  sqlalchemy.Column('metric_id', sqlalchemy.Integer, primary_key=True),
+                #  sqlalchemy.Column('connector_keys', sqlalchemy.String, index=True),
+                #  sqlalchemy.Column('metric_key', sqlalchemy.String, index=True),
+                #  sqlalchemy.Column('metric_name', sqlalchemy.String)
+            #  ),
+            #  'locations' : sqlalchemy.Table(
+                #  'locations',
+                #  conn.metadata,
+                #  sqlalchemy.Column('location_id', sqlalchemy.Integer, primary_key=True),
+                #  sqlalchemy.Column('connector_keys', sqlalchemy.String, index=True),
+                #  sqlalchemy.Column('location_key', sqlalchemy.String, index=True),
+                #  sqlalchemy.Column('location_name', sqlalchemy.String)
+            #  ),
+            'users' : sqlalchemy.Table(
+                'users',
                 conn.metadata,
-                sqlalchemy.Column('metric_id', sqlalchemy.Integer, primary_key=True),
-                sqlalchemy.Column('connector_keys', sqlalchemy.String, index=True),
-                sqlalchemy.Column('metric_key', sqlalchemy.String, index=True),
-                sqlalchemy.Column('metric_name', sqlalchemy.String)
-            ),
-            'locations' : sqlalchemy.Table(
-                'locations',
-                conn.metadata,
-                sqlalchemy.Column('location_id', sqlalchemy.Integer, primary_key=True),
-                sqlalchemy.Column('connector_keys', sqlalchemy.String, index=True),
-                sqlalchemy.Column('location_key', sqlalchemy.String, index=True),
-                sqlalchemy.Column('location_name', sqlalchemy.String)
+                sqlalchemy.Column('user_id', sqlalchemy.Integer, primary_key=True),
+                sqlalchemy.Column('username', sqlalchemy.String, index=True, nullable=False),
+                sqlalchemy.Column('password_hash', sqlalchemy.String),
+                sqlalchemy.Column('email', sqlalchemy.String),
+                sqlalchemy.Column('user_type', sqlalchemy.String),
+                sqlalchemy.Column('attributes', params_type),
+                extend_existing = True,
             ),
             'plugins' : sqlalchemy.Table(
                 'plugins',
                 conn.metadata,
                 sqlalchemy.Column('plugin_id', sqlalchemy.Integer, primary_key=True),
                 sqlalchemy.Column('plugin_name', sqlalchemy.String, index=True, nullable=False),
+                sqlalchemy.Column('user_id', sqlalchemy.Integer, nullable=False),
+                #  sqlalchemy.Column('user_id', sqlalchemy.Integer, sqlalchemy.schema.ForeignKey("users.user_id"), nullable=False),
                 sqlalchemy.Column('version', sqlalchemy.String),
-                sqlalchemy.Column('attributes', params_type)
+                sqlalchemy.Column('attributes', params_type),
+                extend_existing = True,
             ),
         }
 
@@ -85,15 +107,17 @@ def get_tables(
             sqlalchemy.Column("metric_key", sqlalchemy.String, index=True, nullable=False),
             sqlalchemy.Column("location_key", sqlalchemy.String, index=True),
             sqlalchemy.Column("parameters", params_type),
-            sqlalchemy.UniqueConstraint('connector_keys', 'metric_key', 'location_key', name='pipe_index')
+            sqlalchemy.UniqueConstraint('connector_keys', 'metric_key', 'location_key', name='pipe_index'),
+            extend_existing = True,
         )
+
         try:
-            conn.metadata.create_all()
+            conn.metadata.create_all(bind=conn.engine)
         except Exception as e:
             warn(str(e))
 
         ### store the table dict for reuse (per connector)
         connector_tables[conn] = _tables
-    
+
     return connector_tables[conn]
 

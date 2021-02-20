@@ -6,10 +6,6 @@
 Functions to handle debug statements
 """
 
-import sys, logging, inspect
-logging.basicConfig(format='%(message)s')
-log = logging.getLogger(__name__)
-
 def dprint(
         msg : str,
         leader : bool = True,
@@ -17,23 +13,56 @@ def dprint(
         color : 'str or list' = None,
         attrs : list = [],
         **kw
-    ):
-    from meerschaum.utils.formatting import CHARSET, ANSI, colored
-    from meerschaum.config import config as cf
-    parent_globals = inspect.stack()[1][0].f_globals
+    ) -> None:
+    """
+    Print a debug message.
+    """
+    if not isinstance(color, bool):
+        try:
+            from meerschaum.utils.formatting import CHARSET, ANSI, colored
+        except ImportError:
+            CHARSET, ANSI, colored = 'ascii', False, None
+        from meerschaum.config._paths import CONFIG_DIR_PATH, PERMANENT_PATCH_DIR_PATH
+        from meerschaum.config import _config; cf = _config('formatting')
+        _color = color
+    else:
+        CHARSET, ANSI, colored, _color, cf = 'ascii', False, None, None, None
+    import logging, sys, inspect
+    logging.basicConfig(format='%(message)s')
+    log = logging.getLogger(__name__)
+
+    parent_frame = inspect.stack()[1][0]
+    parent_info = inspect.getframeinfo(parent_frame)
+    parent_lineno = parent_info.lineno
+    parent_globals = parent_frame.f_globals
     parent_package = parent_globals['__name__']
     msg = str(msg)
     premsg = ""
     if package:
-        premsg = parent_package + ':\n'
-    if leader:
-        debug_leader = cf['system']['debug'][CHARSET]['leader']
-        premsg = debug_leader + ' ' + premsg
+        premsg = parent_package + ':' + str(parent_lineno) + '\n'
+    if leader and cf is not None:
+        try:
+            debug_leader = cf['formatting']['debug'][CHARSET]['icon'] if cf is not None else ''
+        except KeyError:
+            print("Failed to load config. Please delete the following directories and restart Meerschaum:")
+            for p in [CONFIG_DIR_PATH, PERMANENT_PATCH_DIR_PATH]:
+                print('  - ' + str(p))
+            debug_leader = ''
+            ### crash if we can't load the leader
+            #  sys.exit(1)
+        premsg = ' ' + debug_leader + ' ' + premsg
     if ANSI:
-        if color is not None:
-            if isinstance(color, str):
-                color = [color]
+        if _color is not None:
+            if isinstance(_color, str):
+                _color = [_color]
         else:
-            color = cf['system']['debug']['ansi']['color']
-        premsg = colored(premsg, *color)
+            if cf is not None:
+                try:
+                    _color = cf['formatting']['debug']['ansi']['color'] if cf is not None else []
+                except KeyError:
+                    _color = []
+            else:
+                _color = []
+        if colored is not None:
+            premsg = colored(premsg, *_color)
     log.warning(premsg + msg, **kw)

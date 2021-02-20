@@ -3,8 +3,19 @@
 # vim:fenc=utf-8
 
 """
-Fetch connectors with get_connector
+Create connectors with `meerschaum.connectors.get_connector()`.
+For ease of use, you can also import from the root `meerschaum` module:
+```
+>>> from meerschaum import get_connector
+>>> conn = get_connector()
+```
 """
+
+from __future__ import annotations
+from meerschaum.utils.typing import Any, SuccessTuple, Union, Optional, Sequence, Mapping
+
+from meerschaum.connectors.Connector import Connector
+from meerschaum.connectors.sql._create_engine import flavor_configs as sql_flavor_configs
 
 ### store connectors partitioned by
 ### type, label for reuse
@@ -13,6 +24,31 @@ connectors = {
     'sql'    : dict(),
     'mqtt'   : dict(),
     'plugin' : dict(),
+}
+attributes = {
+    'api' : {
+        'required' : [
+            'host',
+        ],
+        'default' : {
+            'username' : 'mrsm',
+            'password' : 'mrsm',
+            'protocol' : 'http',
+            'port'     : 8000,
+        },
+    },
+    'sql' : {
+        'flavors' : sql_flavor_configs,
+    },
+    'mqtt' : {
+        'required' : [
+            'host',
+        ],
+        'default' : {
+            'port'     : 1883,
+            'keepalive': 60,
+        },
+    },
 }
 ### fill this with classes only on execution
 ### for lazy loading
@@ -23,39 +59,71 @@ def get_connector(
         label : str = None,
         refresh : bool = False,
         debug : bool = False,
-        **kw
+        **kw : Any
     ):
     """
     Return existing connector or create new connection and store for reuse.
 
-    type : str (default "sql")
-        Connector type (sql, api, etc.)
-    label : str (default "main")
-        Connector label (e.g. main)
-    refresh : bool (default False)
-        Refresh the Connector instance
-    kw : dict
-        Other arguments to pass to the Connector constructor.
-
     You can create new connectors if enough parameters are provided for the given type and flavor.
-    Example: flavor='sqlite', database='newdb'
+
+    For example, the following parameters would create a new SQLConnector that isn't in the configuration file.
+    
+    ```
+    >>> conn = get_connector(
+    ...     type = 'sql',
+    ...     label = 'newlabel',
+    ...     flavor = 'sqlite',
+    ...     database = '/file/path/to/database.db'
+    ... )
+    >>> 
+    ```
+
+    :param type:
+        Connector type (sql, api, etc.). Defaults to the type of the configured `instance_connector`.
+    
+    :param label:
+        Connector label (e.g. main). Defaults to `'main'`.
+
+    :param refresh:
+        Refresh the Connector instance / construct new object. Defaults to `False`.
+
+    :param kw:
+        Other arguments to pass to the Connector constructor.
+        If the Connector has already been constructed and new arguments are provided,
+        refresh is set to True and the old Connector is replaced.
+
     """
+    from meerschaum.connectors.parse import parse_instance_keys
+    from meerschaum.config import get_config
+    from meerschaum.config.static import _static_config
     if type is None and label is None:
-        from meerschaum.config import get_config
-        from meerschaum.utils.misc import parse_instance_keys
         default_instance_keys = get_config('meerschaum', 'instance', patch=True)
         ### recursive call to get_connector
         return parse_instance_keys(default_instance_keys)
 
     ### NOTE: the default instance connector may not be main.
     ### Only fall back to 'main' if the type is provided by the label is omitted.
-    if label is None: label = 'main'
+    label = label if label is not None else _static_config()['connectors']['default_label']
 
     global types, connectors
 
+    ### type might actually be a label. Check if so and raise a warning.
     if type not in connectors:
-        print(f"Cannot create Connector of type '{type}'")
-        return False        
+        possibilities, poss_msg = [], ""
+        for _type in get_config('meerschaum', 'connectors'):
+            if type in get_config('meerschaum', 'connectors', _type):
+                possibilities.append(f"{_type}:{type}")
+        if len(possibilities) > 0:
+            poss_msg = " Did you mean"
+            for poss in possibilities[:-1]:
+                poss_msg += f" '{poss}',"
+            if poss_msg.endswith(','): poss_msg = poss_msg[:-1]
+            if len(possibilities) > 1: poss_msg += " or"
+            poss_msg += f" '{possibilities[-1]}'?"
+
+        from meerschaum.utils.warnings import warn
+        warn(f"Cannot create Connector of type '{type}'." + poss_msg, stack=False)
+        return None
 
     if len(types) == 0:
         from meerschaum.connectors.sql import SQLConnector
@@ -63,9 +131,9 @@ def get_connector(
         from meerschaum.connectors.mqtt import MQTTConnector
         from meerschaum.connectors.plugin import PluginConnector
         types = {
-            'api'  : APIConnector,
-            'sql'  : SQLConnector,
-            'mqtt' : MQTTConnector,
+            'api'    : APIConnector,
+            'sql'    : SQLConnector,
+            'mqtt'   : MQTTConnector,
             'plugin' : PluginConnector,
         }
     
@@ -98,13 +166,12 @@ def get_connector(
             refresh = True
 
     ### only create an object if refresh is True (can be manually specified, otherwise determined above)
+    from meerschaum.utils.warnings import error
     import traceback
+    error_msg = None
     if refresh:
-        try:
-            conn = types[type](label=label, debug=debug, **kw)
-        except:
-            print(traceback.print_exc())
-            return False
+        ### will raise an error if configuration is incorrect / missing
+        conn = types[type](label=label, debug=debug, **kw)
         connectors[type][label] = conn
 
     return connectors[type][label]

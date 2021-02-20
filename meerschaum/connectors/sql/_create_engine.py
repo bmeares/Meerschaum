@@ -7,6 +7,7 @@ This module contains the logic that builds the sqlalchemy engine string.
 """
 
 from meerschaum.utils.debug import dprint
+from meerschaum.config._paths import SQLITE_DB_PATH
 
 ### determine driver and requirements from flavor
 default_requirements = {
@@ -63,7 +64,7 @@ flavor_configs = {
         'requirements' : {
         },
         'defaults'     : {
-            'database' : 'meerschaum_local',
+            'database' : SQLITE_DB_PATH,
         },
     },
 }
@@ -79,9 +80,13 @@ def create_engine(
 
     returns: sqlalchemy engine
     """
-    from meerschaum.utils.misc import attempt_import
+    from meerschaum.utils.packages import attempt_import
     sqlalchemy = attempt_import('sqlalchemy')
-    import importlib, urllib
+    import urllib
+    if self.flavor in ('timescaledb', 'postgresql'):
+        ### trigger install if not installed
+        psycopg2 = attempt_import('psycopg2', debug=self._debug, lazy=False)
+
     ### supplement missing values with defaults (e.g. port number)
     for a, value in flavor_configs[self.flavor]['defaults'].items():
         if a not in self.__dict__:
@@ -89,8 +94,9 @@ def create_engine(
 
     ### self.sys_config was deepcopied and can be updated safely
     if self.flavor == "sqlite":
-        engine_str = f"sqlite:///{self.database}.sqlite"
+        engine_str = f"sqlite:///{self.database}"
         self.sys_config['connect_args'].update({"check_same_thread" : False})
+        aiosqlite = attempt_import('aiosqlite', debug=self._debug, lazy=False)
     else:
         engine_str = (
             flavor_configs[self.flavor]['engine'] + "://" +
@@ -110,7 +116,7 @@ def create_engine(
         ### and splits it to separate the class name (QueuePool)
         ### from the module name (sqlalchemy.pool).
         poolclass    = getattr(
-            importlib.import_module(
+            attempt_import(
                 ".".join(self.sys_config['poolclass'].split('.')[:-1])
             ),
             self.sys_config['poolclass'].split('.')[-1]

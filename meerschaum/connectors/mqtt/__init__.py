@@ -3,7 +3,7 @@
 # vim:fenc=utf-8
 
 """
-Import the MQTT class definition
+Read data from MQTT topics.
 """
 
-from meerschaum.connectors.mqtt._MQTTConnector import MQTTConnector
+from meerschaum.connectors.mqtt.MQTTConnector import MQTTConnector

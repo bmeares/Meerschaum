@@ -1,20 +1,33 @@
-FROM python:3.8-slim-buster
+FROM python:3.7-slim-buster AS runtime
 MAINTAINER Bennett Meares <bennett.meares@gmail.com>
 
-RUN mkdir -p /src
+ARG dep_group=full
+ENV dep_group $dep_group
+
 WORKDIR /src
 
-# RUN apt-get update && \
-  # apt-get install gcc libpq-dev -y && \
-  # pip install pgcli \
-  # && apt-get purge gcc libpq-dev -y && \
-  # apt-get autoremove -y && \
-  # apt-get clean
+### Layer 1: Install static dependencies.
+### Does not rebuild cache.
+COPY scripts/docker/image_setup.sh /setup/
+RUN /setup/image_setup.sh && rm -rf /setup/
 
-COPY . .
-# RUN apt-get install unixodbc-dev postgresql-server-dev-12 -y
-# RUN pip install --no-cache-dir .[full,cli]
-RUN pip install --no-cache-dir .[full]
+### Layer 2: Install Python packages.
+### Only rebuilds cache if dependencies have changed.
+COPY requirements /requirements
+RUN python -m pip install -r /requirements/$dep_group.txt && rm -rf /requirements
 
-### default: launch into the mrsm shell
-ENTRYPOINT ["mrsm"]
+### Layer 3: Install Meerschaum.
+### Rebuilds every build.
+COPY setup.py README.md ./
+COPY meerschaum ./meerschaum
+RUN python -m pip install --no-cache-dir . && cd /root && rm -rf /src
+
+### Start up Meerschaum to bootstrap its environment.
+WORKDIR /meerschaum
+RUN cd /meerschaum && [ "$dep_group" != "minimal" ] && \
+  python -m meerschaum show version || \
+  python -m meerschaum --version
+
+COPY scripts/docker/entrypoint.sh /entrypoint.sh
+
+ENTRYPOINT ["/entrypoint.sh"]

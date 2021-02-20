@@ -6,4 +6,4 @@
 This package includes argument parsing utilities
 """
 
-from ._parse_arguments import parse_arguments, parse_line
+from meerschaum.actions.arguments._parse_arguments import parse_arguments, parse_line

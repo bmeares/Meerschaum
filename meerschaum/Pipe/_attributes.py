@@ -63,3 +63,16 @@ def get_columns(self, *args, error=True):
     if len(col_names) == 1:
         return col_names[0]
     return tuple(col_names)
+
+def get_id(self, **kw):
+    """
+    Fetch a pipe's ID from its instance connector.
+    """
+    return self.instance_connector.get_pipe_id(self, **kw)
+
+@property
+def id(self):
+    if not ('_id' in self.__dict__ and self._id):
+        self._id = self.get_id()
+    return self._id
+
