@@ -1,5 +1,5 @@
 .idea/
-*.yaml
+/* *.yaml */
 *.sqlite
 *.mrsm_history
 .pyinstaller
