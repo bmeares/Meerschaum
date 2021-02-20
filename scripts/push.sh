@@ -21,7 +21,7 @@ fi
 
 ### Publish to Python Package Index.
 cd "$PARENT"
-twine upload dist/*
+python -m twine upload dist/*
 
 ### Update documentation.
 cd "$PARENT/docs"

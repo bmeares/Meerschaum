@@ -1,6 +1,18 @@
 #! /usr/bin/env bash
 
-### Set up the development environment.
+DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" >/dev/null 2>&1 && pwd )"
+. "$DIR"/config.sh
+cd "$PARENT"
+
+### Install python packages.
+
+reqs_file="/tmp/mrsm_dev_setup_reqs.txt"
+python -m meerschaum show packages dev-tools --nopretty > "$reqs_file"
+python -m meerschaum show packages docs --nopretty >> "$reqs_file"
+python -m pip install -r "$reqs_file" || exit 1
+rm -f "$reqs_file"
+
+### Enable docker buildx.
 
 is_experimental=$( cat /etc/docker/daemon.json | grep "experimental" | grep "true" )
 daemon_json="{
@@ -25,6 +37,9 @@ if [[ "$rc" != "0" ]]; then
   mkdir -p ~/.docker/cli-plugins
   mv /tmp/buildx ~/.docker/cli-plugins/docker-buildx
 fi
+
+### Create and use builder.
+
 builder_name="multiarch_builder"
 [ -z "$(docker buildx ls | grep "$builder_name")" ] && docker buildx create --name "$builder_name" --use
 echo "Reset qemu architectures..."

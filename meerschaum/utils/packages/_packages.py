@@ -18,6 +18,7 @@ packages = {
         'wheel' : 'wheel',
         'yaml' : 'PyYAML>=5.3.1',
         'cascadict' : 'cascadict',
+        'virtualenv' : 'virtualenv',
     },
     'minimal' : {},
     'formatting' : {
@@ -63,10 +64,14 @@ packages = {
         'PyInstaller' : 'pyinstaller',
     },
     'dev-tools' : {
+        'twine' : 'twine',
         'tuna'     : 'tuna',
         'snakeviz' : 'snakeviz',
         'mypy' : 'mypy',
         'pytest' : 'pytest',
+    },
+    'setup' : {
+        'setuptools_scm' : 'setuptools_scm',
     },
     'docs' : {
         'mkdocs'                      : 'mkdocs',
@@ -80,7 +85,6 @@ packages = {
         'gnureadline' : 'gnureadline; platform_system != "Windows"',
     },
     'extras' : {
-        'virtualenv' : 'virtualenv',
         'cmd2' : 'cmd2',
         'ruamel.yaml' : 'ruamel.yaml',
     },
