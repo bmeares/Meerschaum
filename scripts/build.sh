@@ -22,7 +22,7 @@ done
 
 docker pull "$python_image"
 for t in "${tags[@]}"; do
-  docker buildx build --load --build-arg dep_group="$t" --platform "$platforms" -t "$image:$t" . || exit 1
+  docker buildx build --push --build-arg dep_group="$t" --platform "$platforms" -t "$image:$t" . || exit 1
 done
 docker tag "$image:api" "$image:latest"
 # docker build --squash -t "$image" . || exit 1
