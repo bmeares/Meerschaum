@@ -4,6 +4,8 @@ DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" >/dev/null 2>&1 && pwd )"
 . "$DIR"/config.sh
 cd "$PARENT"
 
+[ "$1" == "--push" ] && push="--push"
+
 ### Delete leftover files before building.
 ./scripts/clean.sh
 
@@ -22,9 +24,9 @@ done
 
 docker pull "$python_image"
 for t in "${tags[@]}"; do
-  docker buildx build --push --build-arg dep_group="$t" --platform "$platforms" -t "$image:$t" . || exit 1
+  [ "$latest_alias" == "$t" ] && tag_latest="-t $image:latest" || unset tag_latest
+  docker buildx build ${push:-} --build-arg dep_group="$t" --platform "$platforms" -t "$image:$t" ${tag_latest:-}  . || exit 1
 done
-docker tag "$image:api" "$image:latest"
 # docker build --squash -t "$image" . || exit 1
 
 ### Build the pip package for uploading to PyPI.
