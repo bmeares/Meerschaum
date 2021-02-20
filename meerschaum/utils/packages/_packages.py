@@ -15,6 +15,7 @@ packages dictionary is structured in the following schema:
 
 packages = {
     'required' : {
+        #  'setuptools' : 'setuptools',
         'wheel' : 'wheel',
         'yaml' : 'PyYAML>=5.3.1',
         'cascadict' : 'cascadict',
