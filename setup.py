@@ -54,13 +54,13 @@ setup_kw_args = {
     'packages'                      : setuptools.find_packages(),
     'install_requires'              : extras['required'],
     'extras_require'                : extras,
-    'setup_requires'                : extras['setup'],
-    'use_scm_version'               : {
-        'root'                      : '.',
-        'relative_to'               : __file__,
-        'write_to' : 'meerschaum/config/_version.py',
-        'write_to_template' : '__version__ = "{version}"',
-    },
+    #  'setup_requires'                : extras['setup'],
+    #  'use_scm_version'               : {
+        #  'root'                      : '.',
+        #  'relative_to'               : __file__,
+        #  'write_to' : 'meerschaum/config/_version.py',
+        #  'write_to_template' : '__version__ = "{version}"',
+    #  },
     'entry_points'                  : {
         'console_scripts'           : [
             'mrsm = meerschaum.__main__:main',
