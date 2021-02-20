@@ -1,6 +1,7 @@
 wheel
 PyYAML>=5.3.1
 cascadict
+virtualenv
 pprintpp
 asciitree
 typing_extensions
@@ -22,6 +23,7 @@ psycopg2-binary
 pymysql
 docker
 docker-compose
+setuptools_scm
 numpy
 pandas
 sqlalchemy
