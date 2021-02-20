@@ -13,7 +13,7 @@ cd "$PARENT"
 ./scripts/docs.sh
 
 ### Build the pip package for uploading to PyPI.
-python setup.py sdist
+python setup.py sdist bdist_wheel
 
 ### Experimental features must be enabled and docker buildx must be installed.
 ### Run setup.sh to ensure everything is set up.

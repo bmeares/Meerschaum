@@ -54,6 +54,13 @@ setup_kw_args = {
     'packages'                      : setuptools.find_packages(),
     'install_requires'              : extras['required'],
     'extras_require'                : extras,
+    'setup_requires'                : extras['setup'],
+    'use_scm_version'               : {
+        'root'                      : '.',
+        'relative_to'               : __file__,
+        'write_to' : None,
+        'write_to_template' : None,
+    },
     'entry_points'                  : {
         'console_scripts'           : [
             'mrsm = meerschaum.__main__:main',
