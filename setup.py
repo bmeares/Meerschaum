@@ -76,7 +76,7 @@ setup_kw_args = {
     'classifiers'                   : [
         "Development Status :: 4 - Beta",
         "Intended Audience :: System Administrators",
-        "License :: OSI Approved :: MIT License",
+        "License :: OSI Approved :: Apache Software License",
         "Operating System :: POSIX :: Linux",
         "Operating System :: Microsoft :: Windows",
         "Operating System :: MacOS",
