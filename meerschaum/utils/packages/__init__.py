@@ -7,7 +7,7 @@ Functions for managing packages and virtual environments reside here.
 """
 
 from __future__ import annotations
-from meerschaum.utils.typing import Any, List, SuccessTuple, Optional
+from meerschaum.utils.typing import Any, List, SuccessTuple, Optional, Union
 
 import importlib, importlib.util
 
@@ -284,6 +284,7 @@ def pip_install(
             and os.environ.get(
                 _static_config()['environment']['runtime'], None
             ) != 'docker'
+            and not inside_venv()
     ):
         _args += ['--user']
     if '--progress-bar' in _args:
@@ -946,3 +947,14 @@ def package_venv(package : 'ModuleType') -> Optional[str]:
         return None
     return package.__file__.split(str(VIRTENV_RESOURCES_PATH))[1].split(os.path.sep)[1]
 
+def inside_venv() -> bool:
+    """
+    Determine whether current Python interpreter is running inside a virtual environment.
+    """
+    import sys
+    return (
+        hasattr(sys, 'real_prefix') or (
+            hasattr(sys, 'base_prefix')
+                and sys.base_prefix != sys.prefix
+        )
+    )
