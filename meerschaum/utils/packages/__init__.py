@@ -131,9 +131,6 @@ def activate_venv(
         print(f"Failed to import virtualenv! Please install virtualenv via pip then restart Meerschaum.")
         sys.exit(1)
     venv_path = pathlib.Path(os.path.join(VIRTENV_RESOURCES_PATH, venv))
-    #  print(venv_path)
-    #  import traceback
-    #  traceback.print_stack()
     bin_path = pathlib.Path(
         venv_path,
         ('bin' if platform.system() != 'Windows' else "Scripts")
@@ -147,14 +144,10 @@ def activate_venv(
                 symlinks = (platform.system() != 'Windows'),
             )
         else:
-            virtualenv.cli_run([venv, '--download', '--system-site-packages'])
+            virtualenv.cli_run([str(venv_path), '--download', '--system-site-packages'])
 
-    #  activate_this_path = pathlib.Path(os.path.join(bin_path, 'activate_this.py'))
     old_cwd = pathlib.Path(os.getcwd())
     os.chdir(VIRTENV_RESOURCES_PATH)
-    #  if not activate_this_path.exists():
-        #  if debug: dprint(f"Creating virtual environment '{venv}'...", color=color)
-        #  virtualenv.cli_run([venv, '--download', '--system-site-packages'])
     if debug: dprint(f"Activating virtual environment '{venv}'...", color=color)
     #  try:
         #  exec(open(activate_this_path).read(), {'__file__': activate_this_path})

@@ -1,0 +1,40 @@
+name: buildx
+
+on:
+  workflow_dispatch:
+    inputs:
+      publish:
+        description: 'Publish the images to DockerHub.'
+        required: false
+        default: ""
+  # pull_request:
+    # branches: master
+  # push:
+    # branches: master
+    # tags:
+
+jobs:
+  buildx:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v2
+
+      - name: Install python3
+        uses: actions/setup-python@v2
+        with:
+          python-version: '3.7'
+
+      - name: Setup buildx
+        id: buildx
+        uses: crazy-max/ghaction-docker-buildx@v2
+        with:
+          buildx-version: latest
+          skip-cache: false
+          qemu-version: latest
+
+      - name: Log in to Dockerhub
+        run: echo "${{ secrets.DOCKER_PASSWORD }}" | docker login -u "${{ secrets.DOCKER_USERNAME }}" --password-stdin
+
+      - name: build platform images
+        run: ./scripts/docker/build.sh ${{ github.event.inputs.publish }}
