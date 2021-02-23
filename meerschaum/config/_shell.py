@@ -6,6 +6,9 @@
 Default configuration for the Meerschaum shell.
 """
 
+import platform
+default_cmd = 'cmd' if platform.system() != 'Windows' else 'cmd2'
+
 default_shell_config = {
     'ansi'             : {
         'intro'        : {
@@ -82,5 +85,5 @@ default_shell_config = {
     'timeout'          : 60,
     'max_history'      : 1000,
     'clear_screen'     : True,
-    'cmd'              : 'cmd',
+    'cmd'              : default_cmd,
 }

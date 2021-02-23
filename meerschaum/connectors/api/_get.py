@@ -7,7 +7,7 @@ Wrappers for requests.get
 """
 
 from __future__ import annotations
-from meerschaum.utils.typing import Optional, Any
+from meerschaum.utils.typing import Optional, Any, Dict, Union
 
 def get(
         self,

@@ -120,7 +120,9 @@ def get_config(
                 except:
                     if warn:
                         print(warning_msg)
-                sys.exit(1)
+                if as_tuple: return False, None
+                return None
+                #  sys.exit(1)
             from meerschaum.config._patch import apply_patch_to_config
             config = apply_patch_to_config(patched_default_config, config)
             if patch:
@@ -199,7 +201,8 @@ if environment_runtime in os.environ:
         rl = attempt_import(
             ("gnureadline" if platform.system() != 'Windows' else "pyreadline"),
             lazy = False,
-            install = True
+            install = True,
+            venv = None,
         )
 
 
