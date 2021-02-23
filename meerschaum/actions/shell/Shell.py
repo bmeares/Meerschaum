@@ -473,7 +473,13 @@ class Shell(cmd.Cmd):
         ### and print the response message in case of failure
         from meerschaum.utils.formatting import print_tuple
         activate_venv(venv=plugin_name, debug=self.debug)
-        response = func(**args)
+        try:
+            response = func(**args)
+        except Exception as e:
+            if self.debug or args.get('debug', False):
+                import traceback
+                traceback.print_exception(type(e), e, e.__traceback__)
+            response = False, f"Failed to execute '{func.__name__}' with exception:\n\n'{e}'.\n\nRun again with '--debug' to see a full stacktrace."
         deactivate_venv(venv=plugin_name, debug=self.debug)
         if isinstance(response, tuple):
             if not response[0] or self.debug:
