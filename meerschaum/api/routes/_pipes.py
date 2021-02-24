@@ -67,11 +67,11 @@ def edit_pipe(
         Otherwise overwrite the parameters (default)
     """
     from meerschaum.utils.debug import dprint
-    pipes(refresh=True)
-    if not is_pipe_registered(pipe, pipes()):
+    pipe_object = get_pipe(pipe.connector_keys, pipe.metric_key, pipe.location_key)
+    if not is_pipe_registered(pipe_object, pipes(refresh=True)):
         raise fastapi.HTTPException(status_code=404, detail="Pipe is not registered.")
 
-    results = get_connector().edit_pipe(pipe=pipe, patch=patch)
+    results = get_connector().edit_pipe(pipe=pipe_object, patch=patch)
 
     pipes(refresh=True)
     return results
