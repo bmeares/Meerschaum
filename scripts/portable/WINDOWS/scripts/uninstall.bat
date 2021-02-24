@@ -1,7 +1,7 @@
 @ECHO OFF
 SET DIR="%~dp0"
 SET ROOT=%DIR%\..
-cd %ROOT%
+CD %ROOT%
 
 IF NOT EXIST .\scripts\_site-packages_original (
   ECHO Not installed. Continuing...
@@ -13,6 +13,6 @@ IF NOT EXIST .\scripts\_site-packages_original (
   MOVE /Y .\scripts\site-packages .\python\Lib >NUL
 )
 
-cd %ROOT%
-rmdir /s /q root
-mkdir root
+CD %ROOT%
+RMDIR /s /q root
+MKDIR root

@@ -35,8 +35,8 @@ class ShellCompleter(Completer):
 
         action = document.text.split(' ')[0]
         possibilities = []
-        if action and f'complete_{action}' in get_shell().__dict__:
-            possibilities = get_shell().__dict__[f'complete_{action}'](document.text.split(' ')[-1], document.text, 0, 0)
+        if action and f'complete_{action}' in dir(get_shell()):
+            possibilities = getattr(get_shell(), f'complete_{action}')(document.text.split(' ')[-1], document.text, 0, 0)
 
         if possibilities:
             for suggestion in possibilities:

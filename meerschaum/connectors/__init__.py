@@ -31,8 +31,8 @@ attributes = {
             'host',
         ],
         'default' : {
-            'username' : 'mrsm',
-            'password' : 'mrsm',
+            #  'username' : 'mrsm',
+            #  'password' : 'mrsm',
             'protocol' : 'http',
             'port'     : 8000,
         },
