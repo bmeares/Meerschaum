@@ -25,6 +25,7 @@ declare -A urls
 urls["WINDOWS"]="https://github.com/indygreg/python-build-standalone/releases/download/20210103/cpython-3.9.1-x86_64-pc-windows-msvc-shared-pgo-20210103T1125.tar.zst"
 urls["LINUX"]="https://github.com/indygreg/python-build-standalone/releases/download/20210103/cpython-3.9.1-x86_64-unknown-linux-gnu-pgo-20210103T1125.tar.zst"
 urls["MACOS"]="https://github.com/indygreg/python-build-standalone/releases/download/20210103/cpython-3.9.1-x86_64-apple-darwin-pgo-20210103T1125.tar.zst"
+urls["get-pip.py"]="https://bootstrap.pypa.io/get-pip.py"
 
 declare -A tars
 tars["WINDOWS"]="windows.tar.zst"
@@ -61,6 +62,9 @@ for os in "${systems[@]}"; do
     curl -o "cache/${tars[$os]}" "${urls[$os]}"
   fi
 done
+if [ ! -f "cache/get-pip.py" ]; then
+  curl -o "cache/get-pip.py" "${urls["get-pip.py"]}"
+fi
 
 ### Download other utilities.
 [ ! -f "cache/TarTool.zip" ] && \

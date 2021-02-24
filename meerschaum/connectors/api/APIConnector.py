@@ -94,6 +94,9 @@ class APIConnector(Connector):
             expired = (self._expires < datetime.datetime.utcnow() + datetime.timedelta(minutes=1))
 
         if self._token is None or expired:
-            self.login()
+            tup = self.login()
+            if not tup[0]:
+                from meerschaum.utils.formatting import print_tuple
+                print_tuple(tup)
         return self._token
 

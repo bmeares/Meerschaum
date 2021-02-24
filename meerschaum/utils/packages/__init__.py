@@ -496,10 +496,11 @@ def attempt_import(
             if install:
                 ### NOTE: pip_install deactivates venv, so deactivate must be False.
                 if not pip_install(
-                    install_name,
+                    root_name,
                     venv = venv,
                     deactivate = False,
-                    split = split,
+                    split = False,
+                    #  split = split,
                     check_update = check_update,
                     color = color,
                     debug = debug
@@ -529,9 +530,10 @@ def attempt_import(
             if need_update(m, split=split, debug=debug):
                 if install:
                     if not pip_install(
-                        install_name,
+                        root_name,
                         venv = venv,
-                        split = split,
+                        split = False,
+                        #  split = split,
                         deactivate = False,
                         check_update = check_update,
                         color = color,

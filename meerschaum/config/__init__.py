@@ -197,14 +197,18 @@ environment_runtime = _static_config()['environment']['runtime']
 if environment_runtime in os.environ:
     if os.environ[environment_runtime] == 'portable':
         import platform
-        from meerschaum.utils.packages import attempt_import
-        rl = attempt_import(
-            ("gnureadline" if platform.system() != 'Windows' else "pyreadline"),
-            lazy = False,
-            install = True,
-            venv = None,
-        )
-
+        from meerschaum.utils.packages import attempt_import, pip_install
+        rl_name = ("gnureadline" if platform.system() != 'Windows' else "pyreadline"),
+        try:
+            rl = attempt_import(
+                rl_name,
+                lazy = False,
+                install = True,
+                venv = None,
+            )
+        except ImportError:
+            if not pip_install(rl_name, args=['--upgrade', '--ignore-installed'], venv=None):
+                print(f"Unable to import {rl_name}!")
 
 
 ### If interactive REPL, print welcome header.

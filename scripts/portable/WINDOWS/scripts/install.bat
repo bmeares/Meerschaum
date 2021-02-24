@@ -8,6 +8,11 @@ IF NOT EXIST .\scripts\_site-packages_original (
   xcopy .\python\Lib\site-packages\ .\scripts\_site-packages_original\ /E >NUL
 )
 
+ECHO Ensuring latest pip...
+CD %ROOT%
+.\python\python.exe -m pip uninstall pip setuptools -y
+.\python\python.exe ..\cache\get-pip.py
+
 ECHO Installing Meerschaum and dependencies (this might take awhile)...
 .\python\python.exe -m pip install scripts/install[full] --no-warn-script-location -q
 

@@ -470,7 +470,10 @@ async def retry_connect(
     from meerschaum.utils.debug import dprint
     from meerschaum import get_connector
     from meerschaum.connectors.sql import SQLConnector
+    from meerschaum.connectors.api import APIConnector
+    from meerschaum.utils.packages import attempt_import
     import time, sys
+    databases = attempt_import('databases')
 
     ### get default connector if None is provided
     if connector is None:
@@ -479,6 +482,10 @@ async def retry_connect(
     database = connector
     if isinstance(connector, SQLConnector):
         database = connector.db
+
+    ### TODO Wait for API Connector
+    if not isinstance(database, databases.Database):
+        return True
 
     retries = 0
     while retries < max_retries:

@@ -8,6 +8,12 @@ PAUSE
 ECHO Uninstalling site-packages...
 cd %DIR%
 CALL uninstall.bat
+
+ECHO Ensuring latest pip...
+CD %ROOT%
+.\python\python.exe -m pip uninstall pip setuptools -y
+.\python\python.exe ..\cache\get-pip.py
+
 cd %DIR%
 CALL compress.bat
 cd %DIR%
