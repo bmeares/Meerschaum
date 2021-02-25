@@ -59,25 +59,19 @@ fi
 ### Download archives.
 for os in "${systems[@]}"; do
   if [ ! -f "cache/${tars[$os]}" ]; then
-    curl -o "cache/${tars[$os]}" "${urls[$os]}"
+    wget -O "cache/${tars[$os]}" "${urls[$os]}"
   fi
 done
 if [ ! -f "cache/get-pip.py" ]; then
-  curl -o "cache/get-pip.py" "${urls["get-pip.py"]}"
+  wget -O "cache/get-pip.py" "${urls["get-pip.py"]}"
 fi
-
-### Download other utilities.
-[ ! -f "cache/TarTool.zip" ] && \
-  curl -o "cache/TarTool.zip" "https://github.com/senthilrajasek/tartool/releases/download/1.0.0/TarTool.zip" && \
-  unzip -o "cache/TarTool.zip" "cache/TarTool"
 
 ### Extract the files.
 for os in "${systems[@]}"; do
   rm -rf "${os}"
   mkdir -p "${os}"
   mkdir -p "${os}/root"
-  echo tar "${taropts[$os]}" "cache/${tars[$os]}" -C "${os}"
-  tar ${taropts[$os]}"cache/${tars[$os]}" -C "${os}" || exit 1
+  tar ${taropts[$os]} "cache/${tars[$os]}" -C "${os}" || exit 1
   cd "${os}/python"
   rm -rf $(ls | grep -v install) && mv install ../
   cd ../

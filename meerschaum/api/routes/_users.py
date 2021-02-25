@@ -159,3 +159,13 @@ def delete_user(
         return get_connector().delete_user(user, debug=debug)
 
     return False, f"Cannot delete user '{user}': Permission denied"
+
+@app.get(users_endpoint + '/{username}/password_hash')
+def get_user_password_hash(
+        username : str,
+        curr_user : 'meerschaum._internal.User.User' = fastapi.Depends(manager),
+    ) -> Union[str, SuccessTuple]:
+    """
+    Return a User's password_hash. If HTTPS
+    """
+    return False, "Not implemented"

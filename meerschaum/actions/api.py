@@ -94,6 +94,7 @@ def _api_start(
     from meerschaum.utils.warnings import error, warn
     from meerschaum.config._paths import API_UVICORN_CONFIG_PATH
     from meerschaum.config import get_config
+    from meerschaum.utils.connectors.parse import parse_connector_keys
     import os
 
     ### Uvicorn must be installed on the host because of multiprocessing reasons.
@@ -114,6 +115,9 @@ def _api_start(
 
     if mrsm_instance is None:
         mrsm_instance = get_config('meerschaum', 'api_instance', patch=True)
+
+    ### Check if the API instance connector is another API
+    #  instance_connector = parse_connector_keys(mrsm_instance, debug=debug)
 
     uvicorn_config['port'] = port
     uvicorn_config['reload'] = debug
