@@ -12,12 +12,11 @@ from __future__ import annotations
 import abc
 from meerschaum.utils.typing import Iterable, Optional, Any, Union
 
-class Connector:
+class Connector(metaclass=abc.ABCMeta):
     def __init__(
             self,
             type : Optional[str] = None,
             label : Optional[str] = None,
-            metaclass = abc.ABCMeta,
             **kw : Any
         ):
         """

@@ -456,7 +456,7 @@ def timed_input(
         signal.alarm(0) # cancel alarm
 
 async def retry_connect(
-        connector : Union[meerschaum.connectors.sql.SQLConnector, databases.Database, None] = None,
+        connector : Union[meerschaum.connectors.sql.SQLConnector, meerschaum.connectors.api.APIConnector, None] = None,
         max_retries : int = 40,
         retry_wait : int = 3,
         workers : int = 1,
@@ -469,40 +469,35 @@ async def retry_connect(
     from meerschaum.utils.warnings import warn, error, info
     from meerschaum.utils.debug import dprint
     from meerschaum import get_connector
-    from meerschaum.connectors.sql import SQLConnector
-    from meerschaum.connectors.api import APIConnector
     from meerschaum.utils.packages import attempt_import
+    from functools import partial
     import time, sys
-    databases = attempt_import('databases')
 
     ### get default connector if None is provided
     if connector is None:
         connector = get_connector()
 
-    database = connector
-    if isinstance(connector, SQLConnector):
-        database = connector.db
-
-    ### TODO Wait for API Connector
-    if not isinstance(database, databases.Database):
-        return True
+    if connector.type not in ('sql', 'api'):
+        return None
 
     retries = 0
     while retries < max_retries:
         if debug:
-            dprint(f"Trying to connect to the database")
+            dprint(f"Trying to connect to '{connector}'...")
             dprint(f"Attempt ({retries + 1} / {max_retries})")
-        try:
-            await database.connect()
-            connected = True
-
-        except Exception as e:
-            connected = False
+        if connector.type == 'sql':
+            try:
+                await connector.db.connect()
+                connected = True
+            except Exception as e:
+                print(e)
+                connected = False
+        elif connector.type == 'api':
+            connected = connector.login(debug=debug)[0]
 
         if connected:
             if debug: dprint("Connection established!")
             return True
-            break
 
         warn(f"Connection failed. Press [Enter] to retry or wait {retry_wait} seconds.", stack=False)
         info(

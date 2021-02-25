@@ -6,6 +6,7 @@
 Manage users via the API Connector.
 """
 
+from __future__ import annotations
 from meerschaum.utils.typing import Optional, Any, List, SuccessTuple
 
 def get_users(
