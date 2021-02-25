@@ -37,7 +37,7 @@ def api(
 
     boot_keywords = {'start', 'boot', 'init'}
     if action[0] in boot_keywords:
-        return _api_start(action=action, debug=debug, **kw)
+        return _api_start(action=action, mrsm_instance=mrsm_instance, debug=debug, **kw)
 
     from meerschaum.config import get_config
     from meerschaum.connectors import get_connector
@@ -94,7 +94,7 @@ def _api_start(
     from meerschaum.utils.warnings import error, warn
     from meerschaum.config._paths import API_UVICORN_CONFIG_PATH
     from meerschaum.config import get_config
-    from meerschaum.utils.connectors.parse import parse_connector_keys
+    from meerschaum.connectors.parse import parse_instance_keys
     import os
 
     ### Uvicorn must be installed on the host because of multiprocessing reasons.
@@ -117,7 +117,19 @@ def _api_start(
         mrsm_instance = get_config('meerschaum', 'api_instance', patch=True)
 
     ### Check if the API instance connector is another API
-    #  instance_connector = parse_connector_keys(mrsm_instance, debug=debug)
+    instance_connector = parse_instance_keys(mrsm_instance, debug=debug)
+    if instance_connector.type == 'api' and instance_connector.protocol != 'https':
+        allow_http_parent = get_config('system', 'api', 'permissions', 'chaining', 'insecure_parent_instance')
+        if not allow_http_parent:
+            return False, (
+                f"Chaining Meerschaum API instances over HTTP is disabled!\n\n" +
+                f"To use '{instance_connector}' as the Meerschaum instance for this API server, please do one of the following:\n\n" +
+                f"  - Ensure that '{instance_connector}' is available over HTTPS, and with `edit config`,\n" +
+                f"    change the `protocol` for '{instance_connector}' to 'https'.\n\n" +
+                f"  - Run `edit config system` and search for `permissions`.\n" +
+                f"    Under `api:permissions:chaining`, change the value of `insecure_parent_instance` to `true`,\n" +
+                f"    then restart the API process."
+            )
 
     uvicorn_config['port'] = port
     uvicorn_config['reload'] = debug
@@ -126,7 +138,8 @@ def _api_start(
     custom_keys = ['mrsm_instance']
 
     ### write config to a temporary file to communicate with uvicorn threads
-    from meerschaum.utils.yaml import yaml
+    import json
+    #  from meerschaum.utils.yaml import yaml
     try:
         if API_UVICORN_CONFIG_PATH.exists():
             if debug: dprint(f"Removing and writing Uvicorn config: ({API_UVICORN_CONFIG_PATH})")
@@ -135,13 +148,12 @@ def _api_start(
     except Exception as e:
         error(e)
     with open(API_UVICORN_CONFIG_PATH, 'w+') as f:
-        yaml.dump(uvicorn_config, stream=f)
+        json.dump(uvicorn_config, f)
 
     ### remove custom keys before calling uvicorn
     for k in custom_keys:
         del uvicorn_config[k]
 
-    from meerschaum.api import get_connector
     if debug:
         ### instantiate the SQL connector
         dprint(f"Connecting to Meerschaum instance: {mrsm_instance}")

@@ -37,7 +37,7 @@ def do_action(
             return False, (
                 "The administrator for this server has not allowed users to perform actions.\n\n" +
                 "Please contact the system administrator, or if you are running this server, " +
-                "open the configuration file with `edit config` and search for 'permissions'. " +
+                "open the configuration file with `edit config system` and search for 'permissions'. " +
                 " Under the keys system:api:permissions:actions, you can allow non-admin users to perform actions."
         )
 

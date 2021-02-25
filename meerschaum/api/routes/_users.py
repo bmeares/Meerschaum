@@ -14,7 +14,7 @@ from meerschaum.utils.typing import (
 from meerschaum.utils.packages import attempt_import
 from meerschaum.api import (
     fastapi, app, endpoints, get_connector, pipes, get_pipe,
-    get_pipes_sql, manager, debug
+    get_pipes_sql, manager, debug, check_allow_chaining, DISALLOW_CHAINING_MESSAGE
 )
 from meerschaum.api.tables import get_tables
 from starlette.responses import Response, JSONResponse
@@ -151,7 +151,7 @@ def delete_user(
         curr_user : 'meerschaum._internal.User.User' = fastapi.Depends(manager),
     ) -> SuccessTuple:
     """
-    Delete a user
+    Delete a user.
     """
     user = User(username)
     user_type = get_connector().get_user_type(curr_user, debug=debug)
@@ -159,6 +159,10 @@ def delete_user(
         return get_connector().delete_user(user, debug=debug)
 
     return False, f"Cannot delete user '{user}': Permission denied"
+
+###################################
+# Internal API Chaining functions #
+###################################
 
 @app.get(users_endpoint + '/{username}/password_hash')
 def get_user_password_hash(

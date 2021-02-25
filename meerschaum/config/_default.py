@@ -92,6 +92,10 @@ default_system_config = {
             'actions'      : {
                 'non_admin': False,
             },
+            'chaining' : {
+                'insecure_parent_instance' : False,
+                'child_apis' : False,
+            },
         },
         'protocol'         : default_meerschaum_config['connectors']['api']['default']['protocol'],
     },

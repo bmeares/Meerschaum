@@ -17,6 +17,7 @@ aiofiles = attempt_import('aiofiles', lazy=False)
 fastapi = attempt_import('fastapi', lazy=False)
 starlette_reponses = attempt_import('starlette.responses', warn=False, lazy=False)
 python_multipart = attempt_import('multipart', lazy=False)
+from meerschaum.api._chain import check_allow_chaining, DISALLOW_CHAINING_MESSAGE
 
 fastapi_login = attempt_import('fastapi_login')
 LoginManager = fastapi_login.LoginManager
@@ -42,11 +43,11 @@ uvicorn_config = None
 def get_uvicorn_config() -> dict:
     global uvicorn_config
     from meerschaum.config._paths import API_UVICORN_CONFIG_PATH
-    from meerschaum.utils.yaml import yaml
+    import json
     if uvicorn_config is None:
         try:
             with open(API_UVICORN_CONFIG_PATH, 'r') as f:
-                uvicorn_config = yaml.load(f)
+                uvicorn_config = json.load(f)
         except:
             uvicorn_config = dict()
 

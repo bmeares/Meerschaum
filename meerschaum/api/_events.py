@@ -14,23 +14,31 @@ async def startup():
     from meerschaum.utils.misc import retry_connect
     import sys, os
     conn = get_connector()
-    connected = await retry_connect(
-        get_connector(),
-        workers = get_uvicorn_config().get('workers', None),
-        debug = debug
-    )
+    try:
+        connected = await retry_connect(
+            get_connector(),
+            workers = get_uvicorn_config().get('workers', None),
+            debug = debug
+        )
+    except Exception as e:
+        print(e)
+        connected = False
     if not connected:
+        await shutdown()
         os._exit(1)
 
 @app.on_event("shutdown")
 async def shutdown():
+    import os
     from meerschaum.config._paths import API_UVICORN_CONFIG_PATH
     try:
-        dprint(f"Removing Uvicorn configuration ({API_UVICORN_CONFIG_PATH})")
+        if debug: dprint(f"Removing Uvicorn configuration ({API_UVICORN_CONFIG_PATH})")
         os.remove(API_UVICORN_CONFIG_PATH)
-    except:
+    except Exception as e:
         pass
-    dprint("Closing database connection...")
-    await get_connector().db.disconnect()
+        print(e)
+    if debug: dprint("Closing connection...")
+    if get_connector().type == 'sql':
+        await get_connector().db.disconnect()
 
 

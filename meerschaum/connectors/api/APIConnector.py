@@ -18,6 +18,7 @@ class APIConnector(Connector):
     from ._patch import patch
     from ._get import get, wget
     from ._actions import get_actions, do_action
+    from ._misc import get_mrsm_version
     from ._pipes import (
         register_pipe,
         fetch_pipes_keys,
