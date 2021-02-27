@@ -54,16 +54,13 @@ class SQLConnector(Connector):
     )
     
     def __init__(
-            self,
-            label : str = 'main',
-            flavor : str = None,
-            wait : bool = False,
-            debug : bool = False,
-            **kw
-        ):
-        """
-        Build the SQLConnector engine and connect to the database
-        """
+        self,
+        label : str = 'main',
+        flavor : str = None,
+        wait : bool = False,
+        debug : bool = False,
+        **kw
+    ):
         ### set __dict__ in base class
         super().__init__('sql', label=label, **kw)
         if 'flavor' in self.__dict__ and self.flavor == 'sqlite':

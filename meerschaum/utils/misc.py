@@ -473,7 +473,7 @@ async def retry_connect(
     from functools import partial
     import time, sys
 
-    ### get default connector if None is provided
+    ### Get default connector if None is provided.
     if connector is None:
         connector = get_connector()
 
@@ -481,6 +481,7 @@ async def retry_connect(
         return None
 
     retries = 0
+    connected, chaining_status = False, None
     while retries < max_retries:
         if debug:
             dprint(f"Trying to connect to '{connector}'...")
@@ -493,7 +494,20 @@ async def retry_connect(
                 print(e)
                 connected = False
         elif connector.type == 'api':
-            connected = connector.login(debug=debug)[0]
+            ### If the remote instance does not allow chaining, don't even try logging in.
+            if not isinstance(chaining_status, bool):
+                chaining_status = connector.get_chaining_status(debug=debug)
+                if chaining_status is False:
+                    warn(
+                        f"Meerschaum instance '{connector}' does not allow chaining " +
+                        "and cannot be used as the parent for this instance.",
+                        stack = False
+                    )
+                    return False
+                elif chaining_status is None:
+                    connected = False
+            if chaining_status:
+                connected = connector.login(debug=debug)[0]
 
         if connected:
             if debug: dprint("Connection established!")
@@ -501,7 +515,7 @@ async def retry_connect(
 
         warn(f"Connection failed. Press [Enter] to retry or wait {retry_wait} seconds.", stack=False)
         info(
-            f"To quit, press CTRL-C, then enter 'q' for each worker" +
+            f"To quit, press CTRL-C, then 'q' + Enter for each worker" +
             (f" ({workers})." if workers is not None else ".")
         )
         try:
@@ -511,6 +525,8 @@ async def retry_connect(
         except KeyboardInterrupt:
             return None
         retries += 1
+
+    return False
 
 def wait_for_connection(**kw):
     """

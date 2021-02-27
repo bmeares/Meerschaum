@@ -215,7 +215,7 @@ def get_password(
     from meerschaum.utils.warnings import warn
     while True:
         password = prompt(
-            f"Password" + (f" for user '{username}': " if username is not None else ": "),
+            f"Password" + (f" for user '{username}':" if username is not None else ":"),
             is_password = True,
             **kw
         )
@@ -227,7 +227,7 @@ def get_password(
             )
             continue
         _password = prompt(
-            f"Confirm password" + (f" for user '{username}': ") if username is not None else ": ",
+            f"Confirm password" + (f" for user '{username}':") if username is not None else ":",
             is_password = True,
             **kw
         )

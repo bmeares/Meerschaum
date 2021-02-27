@@ -78,27 +78,26 @@ def edit_pipe(
 
 @app.get(pipes_endpoint + '/keys')
 async def fetch_pipes_keys(
-        connector_keys : str = "",
-        metric_keys : str = "",
-        location_keys : str = "",
-        params : str = "",
+        connector_keys : str = "[]",
+        metric_keys : str = "[]",
+        location_keys : str = "[]",
+        params : str = "{}",
         curr_user : 'meerschaum._internal.User.User' = fastapi.Depends(manager),
         debug : bool = False
     ) -> list:
     """
     Get a list of tuples of all registered Pipes' keys.
     """
-    from meerschaum.utils.misc import string_to_dict
-    from meerschaum.utils.debug import dprint
     import json
 
-    return get_connector().fetch_pipes_keys(
+    keys = get_connector().fetch_pipes_keys(
         connector_keys = json.loads(connector_keys),
         metric_keys = json.loads(metric_keys),
         location_keys = json.loads(location_keys),
         params = json.loads(params),
         debug = debug
     )
+    return keys
 
 @app.get(pipes_endpoint)
 async def get_pipes(
@@ -271,24 +270,25 @@ def get_backtrack_data(
         backtrack_minutes : int = 0,
         orient : str = 'records',
         curr_user : 'meerschaum._internal.User.User' = fastapi.Depends(manager),
-    ) -> bool:
+    ) -> fastapi.Response:
     """
     Get a Pipe's data. Optionally set query boundaries
     """
-    return fastapi.Response(
-        content = get_pipe(
-            connector_keys,
-            metric_key,
-            location_key
-        ).get_backtrack_data(
+    pipe = get_pipe(connector_keys, metric_key, location_key)
+    df = pipe.get_backtrack_data(
             begin = begin,
             backtrack_minutes = backtrack_minutes,
             debug = debug
-        ).to_json(
-            date_format = 'iso',
-            orient = orient,
-            date_unit = 'us'
-        ),
+    )
+    if df is None:
+        return None
+    js = df.to_json(
+        date_format = 'iso',
+        orient = orient,
+        date_unit = 'us'
+    )
+    return fastapi.Response(
+        content = js,
         media_type = 'application/json'
     )
 

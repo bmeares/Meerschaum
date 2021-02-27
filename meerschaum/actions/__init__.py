@@ -119,6 +119,19 @@ def get_completer(action : str) -> Optional[Callable[['Shell', str, str, int, in
                 return f
     return None
 
+def _get_parent_plugin(stacklevel : int = 1) -> Optional[str]:
+    """
+    Return the name of the calling plugin.
+    If this function is called from outside a Meerschaum plugin, it will return None.
+    """
+    from meerschaum.config._paths import PLUGINS_RESOURCES_PATH
+    import inspect, re
+    parent_globals = inspect.stack()[stacklevel][0].f_globals
+    parent_file = parent_globals.get('__file__', '')
+    if str(PLUGINS_RESOURCES_PATH) not in parent_file:
+        return None
+    return parent_globals['__name__'].replace('plugins.', '').split('.')[0]
+
 
 from meerschaum.actions.plugins import make_action, load_plugins, import_plugins
 plugins = import_plugins()

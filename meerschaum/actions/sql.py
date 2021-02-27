@@ -84,11 +84,9 @@ def sql(
     ### guess the method from the structure of the query
     if 'select' in query.lower() or ' ' not in query:
         if method != 'read':
-            print("Method changed to 'read'")
             method = 'read'
     else:
         if method != 'exec':
-            print("Method changed to 'exec'")
             method = 'exec'
 
     result = getattr(conn, method)(query, debug=debug)

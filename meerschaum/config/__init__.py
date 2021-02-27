@@ -122,7 +122,7 @@ def get_config(
                         print(warning_msg)
                 if as_tuple: return False, None
                 return None
-                #  sys.exit(1)
+
             from meerschaum.config._patch import apply_patch_to_config
             config = apply_patch_to_config(patched_default_config, config)
             if patch:
@@ -132,6 +132,38 @@ def get_config(
     if as_tuple:
         return (not invalid_keys), c
     return c
+
+def get_plugin_config(*keys : str, **kw : Any) -> Optional[Any]:
+    """
+    Return the configuration for the calling plugin.
+    This function is only mean to be used from within a plugin.
+    """
+    from meerschaum.utils.warnings import warn, error
+    from meerschaum.actions import _get_parent_plugin
+    parent_plugin_name = _get_parent_plugin(2)
+    if parent_plugin_name is None:
+        error(f"You may only call `get_plugin_config()` from within a Meerschaum plugin.")
+    return get_config(*(['plugins', parent_plugin_name] + list(keys)), **kw)
+
+def write_plugin_config(
+        config_dict : Dict[str, Any],
+        **kw : Any
+    ):
+    """
+    Write a plugin's configuration dictionary.
+    """
+    from meerschaum.config._edit import write_config
+    from meerschaum.utils.warnings import warn, error
+    from meerschaum.actions import _get_parent_plugin
+    parent_plugin_name = _get_parent_plugin(2)
+    if parent_plugin_name is None:
+        error(f"You may only call `get_plugin_config()` from within a Meerschaum plugin.")
+    plugins_cf = get_config('plugins', warn=False)
+    if plugins_cf is None: plugins_cf = {}
+    plugins_cf.update({parent_plugin_name : config_dict})
+    cf = {'plugins' : plugins_cf}
+    return write_config(cf, **kw)
+
 
 ### If patches exist, apply to config.
 from meerschaum.config._paths import PERMANENT_PATCH_DIR_PATH

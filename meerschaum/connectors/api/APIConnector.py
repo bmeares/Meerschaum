@@ -18,7 +18,7 @@ class APIConnector(Connector):
     from ._patch import patch
     from ._get import get, wget
     from ._actions import get_actions, do_action
-    from ._misc import get_mrsm_version
+    from ._misc import get_mrsm_version, get_chaining_status
     from ._pipes import (
         register_pipe,
         fetch_pipes_keys,
@@ -43,11 +43,14 @@ class APIConnector(Connector):
         get_plugin_attributes,
     )
     from ._users import (
-        get_users, login,
-        edit_user,
-        get_user_id,
-        delete_user,
+        login,
         register_user,
+        get_user_id,
+        get_users,
+        edit_user,
+        delete_user,
+        get_user_password_hash,
+        get_user_type,
         get_user_attributes,
     )
 

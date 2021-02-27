@@ -195,7 +195,9 @@ def fetch_pipes_keys(
     ### execute the query and return a list of tuples
     try:
         if debug: dprint(q)
-        return self.engine.execute(q).fetchall()
+        rows = self.engine.execute(q).fetchall()
+        keys = [(r['connector_keys'], r['metric_key'], r['location_key']) for r in rows]
+        return keys
     except Exception as e:
         error(str(e))
 
