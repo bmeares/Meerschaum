@@ -9,12 +9,7 @@ cd "$PARENT"
 ### Experimental features must be enabled and docker buildx must be installed.
 ### Run setup.sh to ensure everything is set up.
 
-[ ! -d requirements ] && mkdir -p requirements
-for t in "${tags[@]}"; do
-  new_reqs=$(python -m meerschaum show packages "$t" --nopretty)
-  old_reqs=$(cat requirements/"$t".txt 2>/dev/null)
-  [ -z "$old_reqs" ] || [ "$new_reqs" != "$old_reqs" ] && echo "$new_reqs" > requirements/"$t".txt
-done
+./scripts/docker/update_requirements.sh
 
 docker pull "$python_image"
 for t in "${tags[@]}"; do

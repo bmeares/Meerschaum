@@ -87,6 +87,7 @@ packages = {
     'extras' : {
         'cmd2' : 'cmd2>=1.4.0',
         'ruamel.yaml' : 'ruamel.yaml>=0.16.12',
+        'pandasgui' : 'pandasgui>=0.2.9',      
     },
 }
 packages['sql'] = {

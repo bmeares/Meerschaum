@@ -182,8 +182,8 @@ def error(
     #  sys.tracebacklimit = 0
     #  help(sys.excepthook)
     #  if silent: raise SilentException(message)
-    if silent: sys.tracebacklimit = 0
-    else: sys.tracebacklimit = None
+    #  if silent: sys.tracebacklimit = 0
+    #  else: sys.tracebacklimit = None
     raise color_exception
 
 def info(message : str, **kw):

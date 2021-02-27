@@ -12,6 +12,7 @@ from meerschaum.config.static import _static_config
 from meerschaum.utils.packages import attempt_import
 from meerschaum.utils.get_pipes import get_pipes as get_pipes_sql
 import pathlib, os
+from meerschaum.config._paths import API_UVICORN_CONFIG_PATH
 endpoints = _static_config()['api']['endpoints']
 aiofiles = attempt_import('aiofiles', lazy=False)
 fastapi = attempt_import('fastapi', lazy=False)
@@ -42,13 +43,12 @@ manager = LoginManager(SECRET, tokenUrl=endpoints['login'])
 uvicorn_config = None
 def get_uvicorn_config() -> dict:
     global uvicorn_config
-    from meerschaum.config._paths import API_UVICORN_CONFIG_PATH
     import json
     if uvicorn_config is None:
         try:
             with open(API_UVICORN_CONFIG_PATH, 'r') as f:
                 uvicorn_config = json.load(f)
-        except:
+        except Exception as e:
             uvicorn_config = dict()
 
         if uvicorn_config is None: uvicorn_config = dict()
@@ -58,7 +58,7 @@ def get_uvicorn_config() -> dict:
             uvicorn_config['mrsm_instance'] = get_config('meerschaum', 'api_instance', patch=True)
     return uvicorn_config
 
-debug = get_uvicorn_config().get('debug', False)
+debug = get_uvicorn_config().get('debug', False) if API_UVICORN_CONFIG_PATH.exists() else False
 
 connector = None
 def get_connector(instance_keys : str = None):

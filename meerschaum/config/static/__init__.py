@@ -24,6 +24,7 @@ def _static_config():
                     'login' : '/login',
                     'connectors' : '/connectors',
                     'version' : '/version',
+                    'chaining' : '/chaining',
                 }
             },
             'environment' : {

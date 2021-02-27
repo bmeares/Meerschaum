@@ -27,6 +27,7 @@ users_endpoint = endpoints['users']
 
 from fastapi.security import OAuth2PasswordRequestForm
 from fastapi_login.exceptions import InvalidCredentialsException
+from fastapi import HTTPException
 
 @manager.user_loader
 def load_user(
@@ -168,8 +169,24 @@ def delete_user(
 def get_user_password_hash(
         username : str,
         curr_user : 'meerschaum._internal.User.User' = fastapi.Depends(manager),
-    ) -> Union[str, SuccessTuple]:
+    ) -> Union[str, HTTPException]:
     """
-    Return a User's password_hash. If HTTPS
+    If configured to allow chaining, return a user's password_hash.
     """
-    return False, "Not implemented"
+    if not check_allow_chaining():
+        raise HTTPException(status_code=403, detail=DISALLOW_CHAINING_MESSAGE)
+    return get_connector().get_user_password_hash(User(username), debug=debug)
+
+@app.get(users_endpoint + '/{username}/type')
+def get_user_type(
+        username : str,
+        curr_user : 'meerschaum._internal.User.User' = fastapi.Depends(manager),
+    ) -> Union[str, HTTPException]:
+    """
+    If configured to allow chaining, return a user's type.
+    """
+    if not check_allow_chaining():
+        raise HTTPException(status_code=403, detail=DISALLOW_CHAINING_MESSAGE)
+    return get_connector().get_user_type(User(username))
+
+

@@ -191,3 +191,40 @@ def get_user_attributes(
         attributes = None
     return attributes
 
+#############################
+# Chaining functions below. #
+#############################
+
+def get_user_password_hash(
+        self,
+        user : 'meerschaum._internal.User.User',
+        debug : bool = False,
+        **kw
+    ) -> Optional[str]:
+    """
+    If configured, get a user's password hash.
+    """
+    from meerschaum.config.static import _static_config
+    r_url = _static_config()['api']['endpoints']['users'] + '/' + user.username + '/password_hash'
+    response = self.get(r_url, debug=debug, **kw)
+    if not response:
+        return None
+    return response.json()
+
+def get_user_type(
+        self,
+        user : 'meerschaum._internal.User.User',
+        debug : bool = False,
+        **kw
+    ) -> Optional[str]:
+    """
+    If configured, get a user's type.
+    """
+    from meerschaum.config.static import _static_config
+    r_url = _static_config()['api']['endpoints']['users'] + '/' + user.username + '/type'
+    response = self.get(r_url, debug=debug, **kw)
+    if not response:
+        return None
+    return response.json()
+
+

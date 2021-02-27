@@ -12,6 +12,9 @@ cd "$PARENT"
 ### Build documentation.
 ./scripts/docs.sh
 
+### Update the requirements text files.
+./scripts/docker/update_requirements.sh
+
 ### Build the pip package for uploading to PyPI.
 python setup.py sdist bdist_wheel
 

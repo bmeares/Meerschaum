@@ -231,12 +231,12 @@ def methods(
             NotImplementedError
         )
 
-    methods = {
+    _methods = {
         'registered' : _registered,
         'explicit'   : _explicit,
         'all'        : _all,
         ### TODO implement 'all'
     }
-    if method not in methods:
+    if method not in _methods:
         error(f"Method '{method}' is not supported!", NotImplementedError)
-    return methods[method](**kw)
+    return _methods[method](**kw)

@@ -15,6 +15,7 @@ async def startup():
     import sys, os
     conn = get_connector()
     try:
+        from meerschaum.utils.warnings import warn
         connected = await retry_connect(
             get_connector(),
             workers = get_uvicorn_config().get('workers', None),
@@ -33,7 +34,8 @@ async def shutdown():
     from meerschaum.config._paths import API_UVICORN_CONFIG_PATH
     try:
         if debug: dprint(f"Removing Uvicorn configuration ({API_UVICORN_CONFIG_PATH})")
-        os.remove(API_UVICORN_CONFIG_PATH)
+        if API_UVICORN_CONFIG_PATH.exists():
+            os.remove(API_UVICORN_CONFIG_PATH)
     except Exception as e:
         pass
         print(e)

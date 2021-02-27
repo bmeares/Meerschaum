@@ -109,10 +109,7 @@ def fetch_pipes_keys(
         error(str(e))
 
     if 'detail' in j: error(j['detail'], stack=False)
-    result = []
-    for t in j:
-        result.append( (t['connector_keys'], t['metric_key'], t['location_key']) )
-    return result
+    return [tuple(r) for r in j]
 
 def sync_pipe(
         self,

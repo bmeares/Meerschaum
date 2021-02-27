@@ -108,10 +108,11 @@ def _completer_wrapper(
         if target.__name__ != 'default_action_completer':
             if len(args['action']) > 0:
                 del args['action'][0]
-        return target(
-            text=text, line=line, begin_index=begin_index, end_index=end_index,
-            **args
-        )
+        args['text'] = text
+        args['line'] = line
+        args['begin_index'] = begin_index
+        args['end_index'] = end_index
+        return target(**args)
 
     return wrapper
 
