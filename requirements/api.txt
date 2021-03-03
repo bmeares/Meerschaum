@@ -22,6 +22,7 @@ pyvim>=3.0.2
 aiofiles>=0.6.0
 packaging>=20.4
 prompt-toolkit>=3.0.11
+more-itertools>=8.7.0
 pprintpp>=0.4.0
 asciitree>=0.3.3
 typing_extensions>=3.7.4.3
