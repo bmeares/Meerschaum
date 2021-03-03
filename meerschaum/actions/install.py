@@ -131,7 +131,7 @@ def _install_packages(
     return False, f"Failed to install packages:\n{action}"
 
 def _complete_install_packages(
-
+        **kw
     ) -> List[str]:
     return []
 

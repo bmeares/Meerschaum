@@ -25,7 +25,10 @@ def _static_config():
                     'connectors' : '/connectors',
                     'version' : '/version',
                     'chaining' : '/chaining',
-                }
+                },
+                'oauth' : {
+                    'token_expires_minutes' : 15,
+                },
             },
             'environment' : {
                 'config' : 'MRSM_CONFIG',

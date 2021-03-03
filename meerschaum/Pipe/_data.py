@@ -15,7 +15,8 @@ def get_data(
         end : Optional[datetime.datetime] = None,
         refresh : bool = False,
         params : Optional[Dict[str, Any]] = None,
-        debug : bool = False
+        debug : bool = False,
+        **kw : Any
     ) -> Optional[pandas.DataFrame]:
     """
     Get data from the instance connector.
@@ -26,7 +27,8 @@ def get_data(
             begin = begin,
             end = end,
             params = params,
-            debug = debug
+            debug = debug,
+            **kw
         )
     ### TODO caching / sync logic
     return self._data
@@ -35,7 +37,8 @@ def get_backtrack_data(
         self,
         backtrack_minutes : int = 0,
         begin : 'datetime.datetime' = None,
-        debug : bool = False
+        debug : bool = False,
+        **kw : Any
     ) -> Optional['pd.DataFrame']:
     """
     Get the most recent data from the instance connector as a Pandas DataFrame.
@@ -52,10 +55,12 @@ def get_backtrack_data(
         E.g. begin = 02:00
 
         ```
+
         Search this region.           Ignore this, even if there's data.
         /  /  /  /  /  /  /  /  /  |
         -----|----------|----------|----------|----------|----------|
            00:00      01:00      02:00      03:00      04:00      05:00
+
         ```
 
     :param debug: Verbosity toggle.
@@ -64,7 +69,8 @@ def get_backtrack_data(
         pipe = self,
         begin = begin,
         backtrack_minutes = backtrack_minutes,
-        debug = debug
+        debug = debug,
+        **kw
     )
 
 ### NOTE: removed this

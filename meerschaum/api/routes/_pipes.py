@@ -214,7 +214,7 @@ def sync_pipe(
     if not p.columns and not is_pipe_registered(p, pipes(refresh=True)):
         raise fastapi.HTTPException(
             status_code = 409,
-            detail = "Pipe must be registered with the datetime column specified"
+            detail = "Pipe must be registered with the datetime column specified."
         )
 
     df = parse_df_datetimes(data)
@@ -248,6 +248,14 @@ def get_pipe_data(
             detail = "Pipe must be registered with the datetime column specified"
         )
 
+    #  chunks = p.get_data(
+        #  begin = begin,
+        #  end = end, 
+        #  params = params,
+        #  as_chunks = True,
+        #  debug = debug
+    #  )
+
     return fastapi.Response(
         content = p.get_data(
             begin = begin,
@@ -259,7 +267,8 @@ def get_pipe_data(
             orient = orient,
             date_unit = 'us',
         ),
-        media_type = 'application/json'
+        media_type = 'application/json',
+        #  headers = {'chunk' : chunk, 'max_chunk' : max_chunk},
     )
 @app.get(pipes_endpoint + '/{connector_keys}/{metric_key}/{location_key}/backtrack_data')
 def get_backtrack_data(
@@ -275,6 +284,11 @@ def get_backtrack_data(
     Get a Pipe's data. Optionally set query boundaries
     """
     pipe = get_pipe(connector_keys, metric_key, location_key)
+    if not pipe.get_columns('datetime', error=False):
+        raise HTTPException(
+            status_code = 400,
+            detail = f"Cannot fetch backtrackdata for pipe '{pipe}' without a datetime column.",
+        )
     df = pipe.get_backtrack_data(
             begin = begin,
             backtrack_minutes = backtrack_minutes,

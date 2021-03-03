@@ -30,7 +30,6 @@ packages = {
         'colorama'          : 'colorama>=0.4.3',
         'rich'              : 'rich>=9.8.0',
         'more_termcolor'    : 'more-termcolor>=1.1.3',
-
     },
     '_required' : {
         'pip'               : 'pip>=21.0.1',
@@ -42,6 +41,7 @@ packages = {
         'aiofiles'          : 'aiofiles>=0.6.0',
         'packaging'         : 'packaging>=20.4',
         'prompt_toolkit'    : 'prompt-toolkit>=3.0.11',
+        'more_itertools'    : 'more-itertools>=8.7.0',
     },
     'iot' : {
         'paho' : 'paho-mqtt>=1.5.1',
@@ -88,6 +88,7 @@ packages = {
         'cmd2' : 'cmd2>=1.4.0',
         'ruamel.yaml' : 'ruamel.yaml>=0.16.12',
         'pandasgui' : 'pandasgui>=0.2.9',      
+        'modin' : 'modin[ray]>=0.8.3'
     },
 }
 packages['sql'] = {

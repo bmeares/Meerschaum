@@ -28,6 +28,7 @@ users_endpoint = endpoints['users']
 from fastapi.security import OAuth2PasswordRequestForm
 from fastapi_login.exceptions import InvalidCredentialsException
 from fastapi import HTTPException
+from meerschaum.config.static import _static_config
 
 @manager.user_loader
 def load_user(
@@ -55,13 +56,19 @@ def login(
     if not correct_password:
         raise InvalidCredentialsException
 
-    expires = datetime.datetime.utcnow() + datetime.timedelta(minutes=15)
+    expires_minutes = _static_config()['api']['oauth']['token_expires_minutes']
+    expires_delta = datetime.timedelta(minutes=expires_minutes)
+    expires_dt = datetime.datetime.utcnow() + expires_delta
     access_token = manager.create_access_token(
         data = dict(sub=username),
-        expires_delta = datetime.timedelta(minutes=15)
+        expires = expires_delta
     )
     #  response.set_cookie(key="user_id", value=get_connector().get_user_id(user))
-    return {'access_token': access_token, 'token_type': 'bearer', 'expires' : expires}
+    return {
+        'access_token': access_token,
+        'token_type': 'bearer',
+        'expires' : expires_dt,
+    }
 
 @app.get(users_endpoint + "/me")
 def read_current_user(
