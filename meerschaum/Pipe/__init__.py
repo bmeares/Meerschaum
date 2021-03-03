@@ -79,6 +79,7 @@ class Pipe:
         metric_key : str,
         location_key : Optional[str] = None,
         parameters : Optional[Dict[str, Any]] = None,
+        columns : Optional[Dict[str, str]] = None,
         mrsm_instance : Optional[str] = None,
         debug : bool = False
     ):
@@ -100,6 +101,10 @@ class Pipe:
             e.g. columns and other attributes.
             Defaults to None.
 
+        :param columns:
+            Subset of parameters for ease of use.
+            Defaults to None.
+
         :param mrsm_instance:
             Connector keys for the Meerschaum instance where the pipe resides.
             Defaults to the preconfigured default instance.
@@ -112,6 +117,11 @@ class Pipe:
         ### only set parameters if values are provided
         if parameters is not None:
             self._parameters = parameters
+
+        if columns is not None:
+            if self.__dict__.get('_parameters', None) is None:
+                self._parameters = {}
+            self._parameters['columns'] = columns
 
         ### NOTE: The parameters dictionary is {} by default.
         ###       A Pipe may be registered without parameters, then edited,
@@ -188,9 +198,9 @@ class Pipe:
         """
         The Pipe's SQL table name. Converts the ':' in the connector_keys to an '_'.
         """
-        name = f"{self.connector_keys.replace('_', '__').replace(':', '_')}_{self.metric_key.replace('_', '__')}"
+        name = f"{self.connector_keys.replace(':', '_')}_{self.metric_key}"
         if self.location_key is not None:
-            name += f"_{self.location_key.replace('_', '__')}"
+            name += f"_{self.location_key}"
         return name
 
     def __repr__(self):

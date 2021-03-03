@@ -90,6 +90,9 @@ def sync(
     if (callback is not None or error_callback is not None) and blocking:
         warn("Callback functions are only executed when blocking = False. Ignoring...")
 
+    if not self.get_columns('datetime', error=False):
+        return False, f"Cannot sync pipe '{self}' without a datetime column."
+
     ### add the stated arguments back into kw
     kw.update({
         'begin' : begin, 'end' : end, 'force' : force, 'retries' : retries,
@@ -105,7 +108,8 @@ def sync(
         ### ensure that Pipe is registered
         if not p.id:
             register_tuple = p.register(debug=debug)
-            if not register_tuple[0]: return register_tuple
+            if not register_tuple[0]:
+                return register_tuple
 
         ### If connector is a plugin with a `sync()` method, return that instead.
         ### If the plugin does not have a `sync()` method but does have a `fetch()` method,
@@ -137,7 +141,7 @@ def sync(
             if df is None:
                 return False, f"Unable to fetch data for pipe '{p}'."
             if df is True:
-                return True, f"Pipe '{p}' is being synced in parallel."
+                return True, f"Pipe '{p}' was synced in parallel."
 
         if debug: dprint("DataFrame to sync:\n" + f"{df}")
 
@@ -189,7 +193,7 @@ def sync(
         thread.start()
     except Exception as e:
         return False, str(e)
-    return True, f"Spawned asyncronous sync for pipe '{self}'"
+    return True, f"Spawned asyncronous sync for pipe '{self}'."
 
 def get_sync_time(
         self,

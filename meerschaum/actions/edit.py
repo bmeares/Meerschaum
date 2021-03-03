@@ -99,20 +99,22 @@ def _edit_pipes(
     """
     from meerschaum import get_pipes
     from meerschaum.utils.prompt import prompt
-    from meerschaum.actions.shell.Shell import input_with_sigint
     from meerschaum.utils.misc import print_options
-    _input = input_with_sigint(input)
 
     pipes = get_pipes(debug=debug, as_list=True, **kw)
     print_options(pipes, header=f'Pipes to be edited:')
 
-    try:
-        prompt("Press [Enter] to begin editing the above pipes or [CTRL-C] to cancel: ", icon=False)
-    except KeyboardInterrupt:
-        return False, f"No pipes changed."
+    if len(pipes) > 1:
+        try:
+            prompt("Press [Enter] to begin editing the above {len(pipes)} pipes or [CTRL-C] to cancel:", icon=False)
+        except KeyboardInterrupt:
+            return False, f"No pipes changed."
 
     for p in pipes:
-        text = _input(f"Press [Enter] to edit '{p}' or [CTRL-C] to skip: ")
+        try:
+            text = prompt(f"Press [Enter] to edit '{p}' or [CTRL-C] to skip:", icon=False)
+        except KeyboardInterrupt:
+            continue
         ### 
         if text != 'pass':
             p.edit(debug=debug, **kw)

@@ -114,7 +114,8 @@ def fetch_pipes_keys(
 def sync_pipe(
         self,
         pipe : Optional[meerschaum.Pipe] = None,
-        df : Optional[pandas.DataFrame] = None,
+        df : Optional[Union[pandas.DataFrame, Dict[Any, Any], str]] = None,
+        chunksize : Optional[int] = None,
         debug : bool = False,
         **kw : Any
     ) -> SuccessTuple:
@@ -126,41 +127,103 @@ def sync_pipe(
     from meerschaum.utils.debug import dprint
     from meerschaum.utils.warnings import warn
     from meerschaum.utils.misc import json_serialize_datetime
-    import json
+    from meerschaum.config import get_config
+    from meerschaum.utils.packages import attempt_import
+    import json, time
+    begin = time.time()
+    more_itertools = attempt_import('more_itertools')
     if df is None:
         msg = f"DataFrame is None. Cannot sync pipe '{pipe}"
         return False, msg
 
-    ### allow syncing dict or JSON without needing to import pandas (for IOT devices)
-    if isinstance(df, dict):
-        json_str = json.dumps(df, default=json_serialize_datetime)
-    elif isinstance(df, str):
-        json_str = df
-    else:
-        json_str = df.to_json(date_format='iso', date_unit='us')
+    def get_json_str(c):
+        ### allow syncing dict or JSON without needing to import pandas (for IOT devices)
+        if isinstance(c, dict):
+            json_str = json.dumps(c, default=json_serialize_datetime)
+        else:
+            json_str = c.to_json(date_format='iso', date_unit='us')
+        return json_str
+
+    df = json.loads(df) if isinstance(df, str) else df
+
+    ### TODO Make separate chunksize for API?
+    chunksize : int = (
+        get_config('system', 'connectors', 'sql', 'chunksize') if chunksize is None
+        else chunksize
+    )
+    keys : list = list(df.keys())
+    chunks = []
+    if hasattr(df, 'index'):
+        rowcount = len(df)
+        chunks = [df.iloc[i] for i in more_itertools.chunked(df.index, chunksize)]
+    elif isinstance(df, dict):
+        ### `_chunks` is a dict of lists of dicts.
+        ### e.g. {'a' : [ {'a':[1, 2]}, {'a':[3, 4]} ] }
+        _chunks = {k:[] for k in keys}
+        rowcount = len(df[keys[0]])
+        for k in keys:
+            if len(df[k]) != rowcount:
+                return False, "Arrays must all be the same length."
+            chunk_iter = more_itertools.chunked(df[k], chunksize)
+            for l in chunk_iter:
+                _chunks[k].append({k:l})
+
+        ### `chunks` is a list of dicts (e.g. orient by rows in pandas JSON).
+        for k, l in _chunks.items():
+            for i, c in enumerate(l):
+                try:
+                    chunks[i].update(c)
+                except IndexError:
+                    chunks.append(c)
 
     ### Send columns in case the user has defined them locally.
     if pipe.columns:
         kw['columns'] = json.dumps(pipe.columns)
     r_url = pipe_r_url(pipe) + '/data'
-    if debug: dprint(f"Posting data to {r_url}...")
-    try:
-        response = self.post(
-            r_url,
-            ### handles check_existing
-            params = kw,
-            data = json_str,
-            debug = debug
-        )
-    except Exception as e:
-        warn(str(e))
-        return False, str(e)
-        
-    j = response.json()
-    if isinstance(j, dict) and 'detail' in j:
-        return False, j['detail']
 
-    return tuple(j)
+    for i, c in enumerate(chunks):
+        if debug: dprint(f"Posting chunk ({i + 1} / {chunksize}) to {r_url}...")
+        if debug: print(c)
+        json_str = get_json_str(c)
+
+        try:
+            response = self.post(
+                r_url,
+                ### handles check_existing
+                params = kw,
+                data = json_str,
+                debug = debug
+            )
+        except Exception as e:
+            warn(str(e))
+            return False, str(e)
+            
+        if not response:
+            return False, f"Failed to receive response. Response text: {response.text}"
+
+        try:
+            j = json.loads(response.text)
+        except Exception as e:
+            return False, str(e)
+
+        if isinstance(j, dict) and 'detail' in j:
+            return False, j['detail']
+
+        try:
+            j = tuple(j)
+        except:
+            return False, response.text
+
+        if debug: dprint("Received response: " + str(j))
+        if not j[0]:
+            return j
+
+    len_chunks = len(chunks)
+    return True, (
+        f"It took {round(time.time() - begin, 2)} seconds to sync {rowcount} row" +
+        ('s' if rowcount != 1 else '') + f" across {len_chunks} chunk" + ('s' if len_chunks != 1 else '') +
+        f" to '{pipe}'."
+    )
 
 def delete_pipe(
         self,
@@ -187,21 +250,31 @@ def get_pipe_data(
         begin : Optional[datetime.datetime] = None,
         end : Optional[datetime.datetime] = None,
         params : Optional[Dict[str, Any]] = None,
-        debug : bool = False
-    ) -> pandas.DataFrame:
+        as_chunks : bool = False,
+        debug : bool = False,
+        **kw: Any
+    ) -> Optional[pandas.DataFrame]:
     """
-    Fetch data from the API
+    Fetch data from the API.
     """
     from meerschaum.utils.warnings import warn
     r_url = pipe_r_url(pipe)
-    try:
-        response = self.get(r_url + "/data", json=params, params={'begin': begin, 'end': end}, debug=debug)
-    except Exception as e:
-        warn(str(e))
-        return None
-    if not response:
-        if 'detail' in response.json():
-            return False, response.json()['detail']
+    chunks_list = []
+    while True:
+        try:
+            response = self.get(
+                r_url + "/data",
+                json = params,
+                params = {'begin': begin, 'end': end},
+                debug = debug
+            )
+        except Exception as e:
+            warn(str(e))
+            return None
+        if not response:
+            if isinstance(response.json(), dict) and 'detail' in response.json():
+                return False, response.json()['detail']
+        break
     from meerschaum.utils.packages import import_pandas
     from meerschaum.utils.misc import parse_df_datetimes
     pd = import_pandas()
@@ -219,7 +292,8 @@ def get_backtrack_data(
         pipe : meerschaum.Pipe,
         begin : datetime.datetime,
         backtrack_minutes : int = 0,
-        debug : bool = False
+        debug : bool = False,
+        **kw : Any,
     ) -> pandas.DataFrame:
     """
     Get a Pipe's backtrack data from the API.
@@ -300,10 +374,16 @@ def get_sync_time(
     import datetime, json
     r_url = pipe_r_url(pipe)
     response = self.get(r_url + '/sync_time', json=params, params={'debug' : debug}, debug=debug)
-    try:
-        dt = datetime.datetime.fromisoformat(json.loads(response.text))
-    except:
-        df = None
+    if not response:
+        return None
+    j = response.json()
+    if j is None:
+        dt = None
+    else:
+        try:
+            dt = datetime.datetime.fromisoformat(json.loads(response.text))
+        except:
+            dt = None
     return dt
 
 def pipe_exists(

@@ -335,7 +335,8 @@ def get_pipe_data(
         begin : Union[datetime.datetime, str, None] = None,
         end : Union[datetime.datetime, str, None] = None,
         params : Optional[Dict[str, Any]] = None,
-        debug : bool = False
+        debug : bool = False,
+        **kw : Any
     ) -> Optional[pandas.DataFrame]:
     """
     Fetch data from a Pipe.
@@ -349,6 +350,9 @@ def get_pipe_data(
     from meerschaum.utils.debug import dprint
     from meerschaum.utils.misc import sql_item_name
     from meerschaum.connectors.sql._fetch import dateadd_str
+    from meerschaum.utils.packages import import_pandas
+    pd = import_pandas()
+
     query = f"SELECT * FROM {sql_item_name(str(pipe), self.flavor)}"
     where = ""
 
@@ -382,10 +386,13 @@ def get_pipe_data(
     query += "\nORDER BY " + dt + " DESC"
 
     if debug: dprint(f"Getting Pipe data with begin = '{begin}' and end = '{end}'")
-    df = self.read(query, debug=debug)
+    df = self.read(query, debug=debug, **kw)
     if self.flavor == 'sqlite':
         from meerschaum.utils.misc import parse_df_datetimes
-        return parse_df_datetimes(df, debug=debug)
+        ### NOTE: we have to consume the iterator here to ensure that datatimes are parsed correctly.
+        df = parse_df_datetimes(df, debug=debug) if isinstance(df, pd.DataFrame) else (
+            [parse_df_datetimes(c, debug=debug) for c in df]
+        )
     return df
 
 def get_pipe_id(
