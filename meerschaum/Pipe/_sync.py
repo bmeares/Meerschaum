@@ -90,7 +90,10 @@ def sync(
     if (callback is not None or error_callback is not None) and blocking:
         warn("Callback functions are only executed when blocking = False. Ignoring...")
 
-    if not self.get_columns('datetime', error=False):
+    if (
+          not self.connector_keys.startswith('plugin:')
+          and not self.get_columns('datetime', error=False)
+    ):
         return False, f"Cannot sync pipe '{self}' without a datetime column."
 
     ### add the stated arguments back into kw
