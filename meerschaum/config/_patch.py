@@ -46,6 +46,6 @@ def write_patch(
     from meerschaum.config._edit import write_config
     if debug:
         from meerschaum.utils.formatting import pprint
-        print(f"Writing configuration to {PATCH_PATH}:", file=sys.stderr)
+        print(f"Writing configuration to {PATCH_DIR_PATH}:", file=sys.stderr)
         pprint(patch, stream=sys.stderr)
     write_config(patch, directory=PATCH_DIR_PATH)

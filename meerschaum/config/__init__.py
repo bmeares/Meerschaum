@@ -127,6 +127,8 @@ def get_config(
             config = apply_patch_to_config(patched_default_config, config)
             if patch:
                 from meerschaum.config._edit import write_config
+                #  import traceback
+                #  traceback.print_stack()
                 print("Updating configuration, please wait...")
                 write_config(config, debug=debug)
     if as_tuple:

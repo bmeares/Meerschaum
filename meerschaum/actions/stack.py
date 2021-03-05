@@ -26,6 +26,7 @@ def stack(
         Docker Compose command to run. E.g. 'config' will print Docker Compose configuration
     """
     from subprocess import call
+    import meerschaum.config.stack
     from meerschaum.config.stack import get_necessary_files, write_stack
     from meerschaum.config._paths import STACK_COMPOSE_PATH
     #  from meerschaum.utils.packages import reload_package
