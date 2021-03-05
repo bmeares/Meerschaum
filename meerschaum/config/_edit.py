@@ -82,7 +82,10 @@ def write_config(
     }
 
     for k, v in config_dict.items():
-        filetype = v.get('filetype', default_filetype)
+        filetype = (
+            v.get('filetype', default_filetype) if isinstance(v, dict)
+            else default_filetype
+        )
         if k == 'meerschaum':
             filetype = 'yaml'
         if not isinstance(filetype, str) or filetype not in filetype_dumpers:

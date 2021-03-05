@@ -1,6 +1,6 @@
 #! /usr/bin/env bash
 
-python -m pip install wheel pip ;
+python -m pip install --upgrade wheel pip setuptools;
 if [ "$dep_group" != "minimal" ]; then
   apt-get update && apt-get install -y --no-install-recommends \
     g++ make libpq-dev libffi-dev python3-dev && \
@@ -8,6 +8,7 @@ if [ "$dep_group" != "minimal" ]; then
   rm -rf /var/lib/apt/lists/*
 
   python -m pip install --no-cache-dir --upgrade psycopg2 || exit 1
+  python -m pip install pandas || exit 1
 
 fi
 

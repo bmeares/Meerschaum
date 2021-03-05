@@ -133,24 +133,32 @@ def string_to_dict(
     """
     if params_string == "": return dict()
 
-    if str(params_string)[0] == '{':
+    if str(params_string).startswith('{'):
         import json
         return json.loads(params_string)
 
     import ast
     params_dict = dict()
     for param in params_string.split(","):
-        values = param.split(":")
+        _keys = param.split(":")
+        keys = _keys[:-1]
         try:
-            key = ast.literal_eval(values[0])
+            val = _keys[-1]
         except:
-            key = str(values[0])
+            val = str(_keys[-1])
 
-        for value in values[1:]:
+        c = params_dict
+        for _k in keys[:-1]:
             try:
-                params_dict[key] = ast.literal_eval(value)
+                k = ast.literal_eval(_k)
             except:
-                params_dict[key] = str(value)
+                k = str(_k)
+            if k not in c:
+                c[k] = {}
+            c = c[k]
+
+        c[keys[-1]] = val
+
     return params_dict
 
 def parse_config_substitution(

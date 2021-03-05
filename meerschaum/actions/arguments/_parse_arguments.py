@@ -67,14 +67,15 @@ def parse_arguments(sysargs : List[str]) -> dict[str, Any]:
     ### and update new values on existing keys / add new keys/values
     if args.config is not None:
         from meerschaum.config._patch import write_patch, apply_patch_to_config
-        from meerschaum.config._paths import PATCH_PATH
+        from meerschaum.config._paths import PATCH_DIR_PATH
         from meerschaum.utils.packages import reload_package
-        import os, meerschaum.config
+        import os, meerschaum.config, shutil
         write_patch(args.config)
         reload_package('meerschaum')
         #  reload_package(meerschaum.config)
         ### clean up patch so it's not loaded next time
-        os.remove(PATCH_PATH)
+        if PATCH_DIR_PATH.exists():
+            shutil.rmtree(PATCH_DIR_PATH)
 
 
     args_dict = vars(args)

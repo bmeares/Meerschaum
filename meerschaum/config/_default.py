@@ -16,7 +16,8 @@ default_meerschaum_config = {
     'default_repository' : 'api:mrsm',
     'connectors' : {
         'sql' : {
-            'default'      : connector_attributes['sql']['flavors']['timescaledb']['defaults'],
+            #  'default'      : connector_attributes['sql']['flavors']['timescaledb']['defaults'],
+            'default'      : {},
             'main'         : {
                 'username' : 'mrsm',
                 'password' : 'mrsm',
