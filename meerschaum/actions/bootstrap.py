@@ -39,6 +39,7 @@ def _bootstrap_pipes(
         location_keys : Optional[Sequence[Optional[str]]] = [],
         yes : bool = False,
         force : bool = False,
+        noask : bool = False,
         debug : bool = False,
         **kw : Any
     ) -> SuccessTuple:
@@ -71,9 +72,11 @@ def _bootstrap_pipes(
             )
         )
         if not force:
-            if yes or not yes_no(
+            if not yes_no(
                 "Would you like to bootstrap pipes with these keys?\nExisting pipes will be deleted!",
-                default = 'n'
+                default = 'n',
+                yes = yes,
+                noask = noask
             ):
                 return False, f"No pipes were bootstrapped."
     else:
@@ -167,6 +170,7 @@ def _bootstrap_connectors(
         connector_keys : Sequence[str] = [],
         yes : bool = False,
         force : bool = False,
+        noask : bool = False,
         debug : bool = False,
         return_keys : bool = False,
         **kw : Any
@@ -210,7 +214,7 @@ def _bootstrap_connectors(
         _label = prompt(f"New label for '{_type}' connector:")
         if _label in get_config('meerschaum', 'connectors', _type):
             warn(f"Connector '{_type}:{_label}' already exists.", stack=False)
-            overwrite = yes_no(f"Do you want to overwrite connector '{_type}:{_label}'?", default='n')
+            overwrite = yes_no(f"Do you want to overwrite connector '{_type}:{_label}'?", default='n', yes=yes, noask=noask)
             if not overwrite and not force:
                 return False, f"No changes made to connector configuration."
             else:
@@ -267,7 +271,7 @@ def _bootstrap_connectors(
 
     pprint(new_attributes)
     ok = (
-        yes_no(f"Are you ok with these new attributes for connector '{conn}'?", default='y')
+        yes_no(f"Are you ok with these new attributes for connector '{conn}'?", default='y', noask=noask, yes=yes)
         if not yes
         else yes
     )
@@ -325,6 +329,7 @@ def _bootstrap_config(
 def _bootstrap_stack(
         yes : bool = False,
         force : bool = False,
+        noask : bool = False,
         debug : bool = False,
         **kw : Any
     ) -> SuccessTuple:
@@ -335,11 +340,12 @@ def _bootstrap_stack(
     from meerschaum.config._paths import STACK_COMPOSE_PATH, STACK_ENV_PATH
     from meerschaum.config.stack import write_stack
     from meerschaum.utils.debug import dprint
-    answer = False
-    if not yes:
-        answer = yes_no(f"Delete {STACK_COMPOSE_PATH}?", default='n')
+    if force:
+        answer = True
+    else:
+        answer = yes_no(f"Delete {STACK_COMPOSE_PATH}?", default='n', yes=yes, noask=noask)
 
-    if answer or force:
+    if answer:
         if not write_stack(debug=debug):
             return False, "Failed to write stack configuration"
     else:
@@ -351,6 +357,7 @@ def _bootstrap_stack(
 def _bootstrap_grafana(
         yes : bool = False,
         force : bool = False,
+        noask : bool = False,
         debug : bool = False,
         **kw : Any
     ) -> SuccessTuple:
@@ -362,11 +369,12 @@ def _bootstrap_grafana(
     from meerschaum.config._edit import general_write_yaml_config
     from meerschaum.config import get_config
     from meerschaum.utils.debug import dprint
-    answer = False
-    if not yes:
-        answer = yes_no(f"Delete {GRAFANA_DATASOURCE_PATH} and {GRAFANA_DASHBOARD_PATH}?", default='n')
+    if force:
+        answer = True
+    else:
+        answer = yes_no(f"Delete {GRAFANA_DATASOURCE_PATH} and {GRAFANA_DASHBOARD_PATH}?", default='n', noask=noask, yes=yes)
 
-    if answer or force:
+    if answer:
         general_write_yaml_config(
             {
                 GRAFANA_DATASOURCE_PATH : get_config('stack', 'grafana', 'datasource', patch=True),

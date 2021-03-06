@@ -16,6 +16,7 @@ def prompt(
         detect_password : bool = True,
         is_password : bool = False,
         wrap_lines : bool = True,
+        noask : bool = False,
         **kw : Any
     ) -> str:
     """
@@ -32,11 +33,15 @@ def prompt(
 
     :param default:
         If the response is '', return the default value.
+
+    :param noask:
+        If True, only print the question and return the default answer.
     """
     from meerschaum.utils.packages import attempt_import
     from meerschaum.utils.formatting import colored, ANSI, CHARSET
     from meerschaum.config import get_config
-    prompt_toolkit = attempt_import('prompt_toolkit')
+    if not noask:
+        prompt_toolkit = attempt_import('prompt_toolkit')
     question_config = get_config('formatting', 'question', patch=True)
 
     ### if a default is provided, append it to the question.
@@ -72,11 +77,15 @@ def prompt(
         question += '\n' + other_lines
     question += ' '
 
-    answer = prompt_toolkit.prompt(
-        prompt_toolkit.formatted_text.ANSI(question),
-        wrap_lines = wrap_lines,
-        **kw
+    answer = (
+        prompt_toolkit.prompt(
+            prompt_toolkit.formatted_text.ANSI(question),
+            wrap_lines = wrap_lines,
+            **kw
+        ) if not noask else ''
     )
+    if noask:
+        print(question)
     if answer == '' and default is not None:
         return default_answer
     return answer
@@ -87,6 +96,8 @@ def yes_no(
         default : str = 'y',
         wrappers : Tuple[str, str] = ('[', ']'),
         icon : bool = True,
+        yes : bool = False,
+        noask : bool = False,
         interactive : bool = False,
         **kw : Any
     ) -> bool:
@@ -131,6 +142,8 @@ def yes_no(
             #  buttons = []
         #  )
 
+    default = options[0] if yes else default
+    noask = yes or noask
 
     ending = f" {wrappers[0]}" + "/".join(
         [
@@ -140,7 +153,7 @@ def yes_no(
     ) + f"{wrappers[1]}"
     while True:
         try:
-            answer = prompt(question + ending, icon=icon, detect_password=False)
+            answer = prompt(question + ending, icon=icon, detect_password=False, noask=noask)
             success = True
         except:
             success = False
@@ -163,6 +176,7 @@ def choose(
         numeric : bool = True,
         icon : bool = True,
         warn : bool = True,
+        noask : bool = False,
         **kw
     ) -> str:
     from meerschaum.utils.warnings import warn as _warn
@@ -195,13 +209,17 @@ def choose(
             question += f"  - {c}\n"
 
     while True:
-        answer = prompt(question, icon=icon, default=default_tuple, **kw)
-        if answer in _choices or answer == default:
+        answer = prompt(question, icon=icon, default=default_tuple, noask=noask, **kw)
+        if answer in _choices or answer == default or noask:
             break
         _warn(f"Please pick a valid choice.", stack=False)
 
     if numeric:
-        return choices[int(answer) - 1]
+        try:
+            return choices[int(answer) - 1]
+        except Exception as e:
+            _warn(f"Could not cast answer '{answer}' to an integer.", stacklevel=3)
+
     return answer
 
 def get_password(

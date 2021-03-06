@@ -123,6 +123,8 @@ def _edit_pipes(
 def _edit_users(
         action : List[str] = [],
         repository : str = None,
+        yes : bool = False,
+        noask : bool = False,
         debug : bool = False,
         **kw : Any
     ) -> SuccessTuple:
@@ -147,23 +149,23 @@ def _edit_users(
     def build_user(username : str):
         ### Change the password
         password = ''
-        if yes_no(f"Change the password for user '{username}'?", default='n'):
+        if yes_no(f"Change the password for user '{username}'?", default='n', yes=yes, noask=noask):
             password = get_password(username, minimum_length=7)
 
         ## Make an admin
         _type = None
-        if yes_no(f"Change the user type for user '{username}'?", default='n'):
-            is_admin = yes_no(f"Make user '{username}' an admin?", default='n')
+        if yes_no(f"Change the user type for user '{username}'?", default='n', yes=yes, noask=noask):
+            is_admin = yes_no(f"Make user '{username}' an admin?", default='n', yes=yes, noask=noask)
             _type = 'admin' if is_admin else None
 
         ### Change the email
         email = ''
-        if yes_no(f"Change the email for user '{username}'?", default='n'):
+        if yes_no(f"Change the email for user '{username}'?", default='n', yes=yes, noask=noask):
             email = get_email(username)
 
         ### Change the attributes
         attributes = None
-        if yes_no(f"Edit the attributes YAML file for user '{username}'?", default='n'):
+        if yes_no(f"Edit the attributes YAML file for user '{username}'?", default='n', yes=yes, noask=noask):
             attr_path = pathlib.Path(os.path.join(USERS_CACHE_RESOURCES_PATH, f'{username}.yaml'))
             try:
                 existing_attrs = repo_connector.get_user_attributes(User(username), debug=debug)

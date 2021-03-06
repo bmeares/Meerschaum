@@ -367,7 +367,10 @@ def run_python_package(
     command = [executable, '-m', str(package_name)] + [str(a) for a in args]
     if debug:
         print(command, file=sys.stderr)
-    rc = call(command)
+    try:
+        rc = call(command)
+    except KeyboardInterrupt:
+        rc = 1
     os.chdir(old_cwd)
     return rc
 

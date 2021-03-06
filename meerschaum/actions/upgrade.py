@@ -34,8 +34,9 @@ def upgrade(
 
 def _upgrade_meerschaum(
         action : List[str] = [],
-        yes : bool = True,
+        yes : bool = False,
         force : bool = False,
+        noask : bool = False,
         debug : bool = False,
         **kw : Any
     ) -> SuccessTuple:
@@ -64,9 +65,10 @@ def _upgrade_meerschaum(
             pass
 
     if is_stack_running:
-        answer = True or force
-        if not yes and not force:
-            answer = yes_no(f"Take down the stack?", default='y')
+        if force:
+            answer = True
+        else:
+            answer = yes_no(f"Take down the stack?", default='y', yes=yes, noask=noask)
 
         if answer:
             if debug: dprint("Taking stack down...")
@@ -92,6 +94,8 @@ def _upgrade_meerschaum(
 def _upgrade_packages(
         action : List[str] = [],
         yes : bool = False,
+        force : bool = False,
+        noask : bool = False,
         debug : bool = False,
         **kw : Any
     ) -> SuccessTuple:
@@ -134,7 +138,7 @@ def _upgrade_packages(
     to_install = [install_name for import_name, install_name in packages[group].items()]
 
     success, msg = False, f"Nothing installed."
-    if yes or yes_no(question):
+    if force or yes_no(question, noask=noask, yes=yes):
         success = pip_install(*to_install, debug=debug)
         msg = (
             f"Successfully installed {len(packages[group])} packages" if success
@@ -145,6 +149,8 @@ def _upgrade_packages(
 def _upgrade_plugins(
         action : List[str] = [],
         yes : bool = False,
+        force : bool = False,
+        noask : bool = False,
         debug : bool = False,
         **kw : Any
     ) -> SuccessTuple:
@@ -171,7 +177,7 @@ def _upgrade_plugins(
     if len(to_install) == 0:
         return False, "No plugins to upgrade."
     print_options(to_install, header="Plugins to Upgrade:")
-    if yes or yes_no(f"Upgrade {len(to_install)} plugins?"):
+    if force or yes_no(f"Upgrade {len(to_install)} plugins?", yes=yes, noask=noask):
         return actions['install'](action=['plugins'] + to_install, debug=debug, **kw)
     return False, "No plugins upgraded."
 
