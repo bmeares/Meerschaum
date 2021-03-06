@@ -83,17 +83,6 @@ class Connector(metaclass=abc.ABCMeta):
         ### add additional arguments or override configuration
         self.__dict__.update(kw)
 
-        ### handle custom pandas implementation (e.g. modin)
-        pandas = pandas if pandas is not None else connector_config['all']['pandas']
-        self._pandas_name = pandas
-
-    @property
-    def pd(self):
-        if '_pd' not in self.__dict__:
-            from meerschaum.utils.packages import attempt_import
-            self._pd = attempt_import(self._pandas_name)
-        return self._pd
-
     def verify_attributes(
             self,
             required_attributes : set = {
