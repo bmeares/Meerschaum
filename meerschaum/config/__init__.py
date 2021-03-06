@@ -196,21 +196,27 @@ environment_config = _static_config()['environment']['config']
 if environment_config in os.environ:
     from meerschaum.utils.misc import string_to_dict
     _patch = string_to_dict(str(os.environ[environment_config]))
-    try:
-        ### TODO Test this!
-        set_config(
-            apply_patch_to_config(
-                get_config(),
-                _patch
-            )
-        )
-    except Exception as e:
-        print(
-            f"Environment variable {environment_config} is set but cannot be parsed.\n"
-            f"Unset {environment_config} or change to JSON or simplified dictionary format (see --help, under params for formatting)\n"
-            f"{environment_config} is set to:\n{os.environ[environment_config]}\n"
-            f"Skipping patching os environment into config..."
-        )
+    error_msg = (
+        f"Environment variable {environment_config} is set but cannot be parsed.\n"
+        f"Unset {environment_config} or change to JSON or simplified dictionary format (see --help, under params for formatting)\n"
+        f"{environment_config} is set to:\n{os.environ[environment_config]}\n"
+        f"Skipping patching os environment into config..."
+    )
+
+    if not isinstance(_patch, dict):
+        print(error_msg)
+    else:
+        ### Load and patch config files.
+        for k in _patch:
+            try:
+                set_config(
+                    apply_patch_to_config(
+                        { k : get_config(k) },
+                        _patch
+                    )
+                )
+            except Exception as e:
+                print(error_msg)
 
 import os, pathlib
 environment_root_dir = _static_config()['environment']['root']

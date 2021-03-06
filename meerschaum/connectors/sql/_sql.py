@@ -82,7 +82,8 @@ def read(
     """
     if chunks is not None and chunks <= 0: return []
     from meerschaum.utils.misc import sql_item_name
-    from meerschaum.utils.packages import attempt_import
+    from meerschaum.utils.packages import attempt_import, import_pandas
+    pd = import_pandas()
     sqlalchemy = attempt_import("sqlalchemy")
     chunksize = chunksize if chunksize != -1 else self.sys_config.get('chunksize', None)
     if chunksize is None and as_iterator:
@@ -115,7 +116,7 @@ def read(
             formatted_query = query_or_table
 
     try:
-        chunk_generator = self.pd.read_sql(
+        chunk_generator = pd.read_sql(
             formatted_query,
             self.engine,
             params = params,
@@ -150,7 +151,7 @@ def read(
     ### to get columns
     if len(chunk_list) == 0:
         chunk_list.append(
-            self.pd.read_sql(
+            pd.read_sql(
                 formatted_query,
                 self.engine
             )
@@ -177,7 +178,7 @@ def read(
             c.reset_index(drop=True, inplace=True)
         return chunk_list
 
-    return self.pd.concat(chunk_list).reset_index(drop=True)
+    return pd.concat(chunk_list).reset_index(drop=True)
 
 def value(
         self,

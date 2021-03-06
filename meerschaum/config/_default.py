@@ -44,6 +44,8 @@ default_meerschaum_config = {
             },
             'mrsm'         : {
                 'host'     : 'mrsm.io',
+                'port'     : 443,
+                'protocol' : 'https',
             },
         },
         'mqtt' : {
