@@ -170,6 +170,9 @@ def __getattr__(name : str) -> str:
     """
     Lazily load module-level variables
     """
+    if name.startswith('__') and name.endswith('__'):
+        raise AttributeError("Cannot import dunders from this module.")
+
     global attrs
     if name in _attrs:
         if _attrs[name] is not None:
