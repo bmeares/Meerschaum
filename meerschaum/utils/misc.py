@@ -907,7 +907,7 @@ def wget(
     d = response.headers.get('content-disposition', None)
     fname = (
         re.findall("filename=(.+)", d)[0].strip('"') if d is not None
-        else r_url.split('/')[-1]
+        else url.split('/')[-1]
     )
 
     if dest is None:

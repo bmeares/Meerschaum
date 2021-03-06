@@ -141,7 +141,8 @@ class Plugin:
                 self.archive_path,
                 'r:gz'
             )
-        except:
+        except Exception as e:
+            warn(e)
             return False, f"Plugin '{self.name}' could not be downloaded"
 
         temp_dir = pathlib.Path(os.path.join(PLUGINS_TEMP_RESOURCES_PATH, self.name))

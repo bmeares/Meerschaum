@@ -76,7 +76,7 @@ compose_header = """
 """
 
 volumes = {
-    'meerschaum_api_config' : '/meerschaum',
+    'api_root' : '/meerschaum',
     #  'meerschaum_api_config' : env_dict['MEERSCHAUM_API_CONFIG'],
     'meerschaum_db_data' : '/var/lib/postgresql/data',
     'grafana_storage' : '/var/lib/grafana',
@@ -130,9 +130,10 @@ default_docker_compose_config = {
             'depends_on' : [
                 'db',
             ],
-            #  'volumes' : [
+            'volumes' : [
+                'api_root:' + volumes['api_root'],
                 #  str(ROOT_DIR_PATH) + ':' + volumes['meerschaum_api_config'],
-            #  ],
+            ],
         },
         'grafana' : {
             #  'image' : 'meerschaum-grafana:latest',
@@ -274,10 +275,10 @@ def get_necessary_files():
     from meerschaum.config import get_config, config
     return {
         #  STACK_ENV_PATH : config['stack'][STACK_ENV_FILENAME],
-        STACK_COMPOSE_PATH : (get_config('stack', STACK_COMPOSE_FILENAME, substitute=False), compose_header),
-        GRAFANA_DATASOURCE_PATH : get_config('stack', 'grafana', 'datasource', substitute=False),
-        GRAFANA_DASHBOARD_PATH : get_config('stack', 'grafana', 'dashboard', substitute=False),
-        MOSQUITTO_CONFIG_PATH : get_config('stack', 'mosquitto', 'mosquitto.conf', patch=True, substitute=False),
+        STACK_COMPOSE_PATH : (get_config('stack', STACK_COMPOSE_FILENAME, substitute=True), compose_header),
+        GRAFANA_DATASOURCE_PATH : get_config('stack', 'grafana', 'datasource', substitute=True),
+        GRAFANA_DASHBOARD_PATH : get_config('stack', 'grafana', 'dashboard', substitute=True),
+        MOSQUITTO_CONFIG_PATH : get_config('stack', 'mosquitto', 'mosquitto.conf', patch=True, substitute=True),
     }
 
 

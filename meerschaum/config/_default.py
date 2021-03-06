@@ -43,7 +43,7 @@ default_meerschaum_config = {
                 'host'     : 'localhost',
             },
             'mrsm'         : {
-                'host'     : 'mrsm.io',
+                'host'     : 'api.mrsm.io',
                 'port'     : 443,
                 'protocol' : 'https',
             },

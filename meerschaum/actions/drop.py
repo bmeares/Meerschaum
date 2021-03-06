@@ -27,6 +27,7 @@ def _drop_pipes(
         action : Sequence[str] = [],
         yes : bool = False,
         force : bool = False,
+        noask : bool = False,
         debug : bool = False,
         **kw : Any
     ) -> SuccessTuple:
@@ -44,9 +45,10 @@ def _drop_pipes(
     question = "Are you sure you want to drop these pipes' tables? Data will be lost and will need to be resynced.\n"
     for p in pipes:
         question += f" - {p}" + "\n"
-    answer = force
-    if not yes and not force:
-        answer = yes_no(question, default='n')
+    if force:
+        answer = True
+    else:
+        answer = yes_no(question, default='n', noask=noask, yes=yes)
     if not answer:
         return False, "No pipes dropped."
 

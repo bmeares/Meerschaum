@@ -31,6 +31,7 @@ def _delete_pipes(
         debug : bool = False,
         yes : bool = False,
         force : bool = False,
+        noask : bool = False,
         **kw
     ) -> SuccessTuple:
     """
@@ -47,8 +48,10 @@ def _delete_pipes(
     for p in pipes:
         question += f" - {p}" + "\n"
     answer = force
-    if not yes and not force:
-        answer = yes_no(question, default='n')
+    if force:
+        answer = True
+    else:
+        answer = yes_no(question, default='n', noask=noask, yes=yes)
     if not answer:
         return False, "No pipes deleted."
 
@@ -74,6 +77,7 @@ def _delete_pipes(
 def _delete_config(
         yes : bool = False,
         force : bool = False,
+        noask : bool = False,
         debug : bool = False,
         **kw : Any
     ) -> SuccessTuple:
@@ -85,10 +89,11 @@ def _delete_config(
     from meerschaum.config._paths import CONFIG_DIR_PATH, STACK_COMPOSE_PATH, DEFAULT_CONFIG_DIR_PATH
     from meerschaum.utils.debug import dprint
     paths = [CONFIG_DIR_PATH, STACK_COMPOSE_PATH, DEFAULT_CONFIG_DIR_PATH]
-    answer = False
-    if not yes:
+    if force:
+        answer = True
+    else:
         sep = '\n' + '  - '
-        answer = yes_no(f"Delete files and directories?{sep + sep.join([str(p) for p in paths])}\n", default='n')
+        answer = yes_no(f"Delete files and directories?{sep + sep.join([str(p) for p in paths])}\n", default='n', noask=noask, yes=yes)
 
     if answer or force:
         for path in paths:
@@ -108,6 +113,7 @@ def _delete_plugins(
         action : List[str] = [],
         yes : bool = False,
         force : bool = False,
+        noask : bool = False,
         debug : bool = False,
         **kw : Any
     ) -> SuccessTuple:
@@ -138,9 +144,10 @@ def _delete_plugins(
     question = "Are you sure you want to delete these plugins?\n"
     for plugin in modules_to_delete:
         question += f" - {plugin}" + "\n"
-    answer = force
-    if not yes and not force:
-        answer = yes_no(question, default='n')
+    if force:
+        answer = True
+    else:
+        answer = yes_no(question, default='n', yes=yes, noask=noask)
     if not answer:
         return False, "No plugins deleted."
 
@@ -169,6 +176,7 @@ def _delete_users(
         repository : str = None,
         yes : bool = False,
         force : bool = False,
+        noask : bool = False,
         shell : bool = False,
         debug : bool = False,
         **kw
@@ -203,9 +211,10 @@ def _delete_users(
     question = f"Are you sure you want to delete these users from Meerschaum instance '{repo_connector}'?\n"
     for username in registered_users:
         question += f" - {username}" + "\n"
-    answer = force
-    if not yes and not force:
-        answer = yes_no(question, default='n')
+    if force:
+        answer = True
+    else:
+        answer = yes_no(question, default='n', noask=noask, yes=yes)
     if not answer:
         return False, "No users deleted."
 
@@ -232,6 +241,7 @@ def _delete_connectors(
         connector_keys : List[str] = [],
         yes : bool = False,
         force : bool = False,
+        noask : bool = False,
         debug : bool = False,
         **kw : Any
     ) -> SuccessTuple:
@@ -260,9 +270,11 @@ def _delete_connectors(
             continue
 
         if not force:
-            if yes or not yes_no(
+            if not yes_no(
                 f"Are you sure you want to delete connector '{conn}' from the configuration file?",
-                default='n'
+                default = 'n',
+                yes = yes,
+                noask = noask,
             ):
                 info(f"Skipping connector '{conn}'...")
                 continue
@@ -273,7 +285,7 @@ def _delete_connectors(
     for c in to_delete:
         try:
             if c.flavor == 'sqlite':
-                if force or yes_no(f"Detected sqlite database '{c.database}'. Delete this file?", default='n'):
+                if force or yes_no(f"Detected sqlite database '{c.database}'. Delete this file?", default='n', noask=noask, yes=yes):
                     try:
                         os.remove(c.database)
                     except:

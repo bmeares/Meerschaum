@@ -19,13 +19,17 @@ def get_users(
     """
     from meerschaum.config.static import _static_config
     import json
-    return json.loads(
-        self.get(
-            f"{_static_config()['api']['endpoints']['users']}",
-            debug = debug,
-            use_token = False
-        ).text
+    response = self.get(
+        f"{_static_config()['api']['endpoints']['users']}",
+        debug = debug,
+        use_token = False
     )
+    if not response:
+        return []
+    try:
+        return response.json()
+    except:
+        return []
 
 def login(
         self,

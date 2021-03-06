@@ -117,6 +117,9 @@ groups['actions'].add_argument(
     '-f', '--force', action="store_true", help="Override safety checks"
 )
 groups['actions'].add_argument(
+    '--noask', action='store_true', help="Automatically choose the defaults answers to questions. Does not result in data loss.",
+)
+groups['actions'].add_argument(
     '-A', '--sub-args', nargs=argparse.REMAINDER,
     help = (
         "Provide a list of arguments for subprocesses. You can also type sub-arguments in [] instead." +

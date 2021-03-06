@@ -50,7 +50,7 @@ setup_kw_args = {
     'author'                        : 'Bennett Meares',
     'author_email'                  : 'bmeares@dava.consulting',
     'maintainer_email'              : 'bmeares@dava.consulting',
-    'license'                       : 'MIT',
+    'license'                       : 'http://www.apache.org/licenses/LICENSE-2.0',
     'packages'                      : setuptools.find_packages(),
     'install_requires'              : extras['required'],
     'extras_require'                : extras,

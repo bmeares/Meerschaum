@@ -14,6 +14,7 @@ def stack(
         sysargs : List[str] = [],
         sub_args : List[str] = [],
         yes : bool = False,
+        noask : bool = False,
         force : bool = False,
         debug : bool = False,
         **kw : Any
@@ -50,14 +51,14 @@ def stack(
     bootstrap = False
     for fp in get_necessary_files():
         if not os.path.isfile(fp):
-            if not yes and not force:
-                if yes_no(bootstrap_question):
+            if not force:
+                if yes_no(bootstrap_question, yes=yes, noask=noask):
                     bootstrap = True
                 else:
                     warn_message = "Cannot start stack without bootstrapping"
                     warn(warn_message)
                     return False, warn_message
-            else: ### yes or force is True
+            else: ### force is True
                 bootstrap = True
             break
     ### if bootstrap flag was set, create files
