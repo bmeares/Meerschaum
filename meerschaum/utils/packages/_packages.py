@@ -106,7 +106,7 @@ packages['api'] = {
     'fastapi'       : 'fastapi>=0.61.2',
     'jinja2'        : 'jinja2>=2.11.2',
     'passlib'       : 'passlib>=1.7.4',
-    'fastapi_login' : 'fastapi-login>=1.5.2',
+    'fastapi_login' : 'fastapi-login>=1.5.3',
     'multipart'     : 'python-multipart>=0.0.5',
 }
 packages['api'].update(packages['sql'])

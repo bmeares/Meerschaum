@@ -516,6 +516,7 @@ async def retry_connect(
                     connected = False
             if chaining_status:
                 connected = connector.login(debug=debug)[0]
+                if not connected: warn(f"Unable to login to '{connector}'!", stack=False)
 
         if connected:
             if debug: dprint("Connection established!")
