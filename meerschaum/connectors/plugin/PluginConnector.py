@@ -33,19 +33,20 @@ class PluginConnector(Connector):
             plugin = _plugin.replace('.py', '')
             if plugin == self.label:
                 self.resource_path = pathlib.Path(os.path.join(PLUGINS_RESOURCES_PATH, plugin))
+                break
         if not self.resource_path:
             error(f"Plugin '{self.label}' cannot be found. Is it installed?")
 
         self.fetch = None
         try:
-            exec(f'from {self.label} import fetch; self.fetch = fetch')
-        except:
+            exec(f'from plugins.{self.label} import fetch; self.fetch = fetch')
+        except Exception as e:
             pass
 
         self.sync = None
         try:
-            exec(f'from {self.label} import sync; self.sync = sync')
-        except:
+            exec(f'from plugins.{self.label} import sync; self.sync = sync')
+        except Exception as e:
             pass
 
         if self.fetch is None and self.sync is None:

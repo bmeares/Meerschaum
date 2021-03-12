@@ -131,9 +131,11 @@ def _api_start(
                 f"    then restart the API process."
             )
 
-    uvicorn_config['port'] = port
-    uvicorn_config['reload'] = debug
-    uvicorn_config['mrsm_instance'] = mrsm_instance
+    uvicorn_config.update({
+        'port' : port,
+        'reload' : debug,
+        'mrsm_instance' : mrsm_instance,
+    })
 
     custom_keys = ['mrsm_instance']
 
@@ -142,12 +144,14 @@ def _api_start(
     #  from meerschaum.utils.yaml import yaml
     try:
         if API_UVICORN_CONFIG_PATH.exists():
-            if debug: dprint(f"Removing and writing Uvicorn config: ({API_UVICORN_CONFIG_PATH})")
+            if debug: dprint(f"Removing API config file: ({API_UVICORN_CONFIG_PATH})")
             os.remove(API_UVICORN_CONFIG_PATH)
         assert(not API_UVICORN_CONFIG_PATH.exists())
     except Exception as e:
         error(e)
     with open(API_UVICORN_CONFIG_PATH, 'w+') as f:
+        if debug: dprint(f"Dumping API config file:")
+        pprint(uvicorn_config, stream=sys.stderr)
         json.dump(uvicorn_config, f)
 
     ### remove custom keys before calling uvicorn

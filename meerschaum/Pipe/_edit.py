@@ -9,7 +9,7 @@ Edit a Pipe's parameters here.
 def edit(
         self,
         patch : bool = False,
-        interactive : bool = True,
+        interactive : bool = False,
         debug : bool = False,
         **kw
     ):

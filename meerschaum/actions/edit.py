@@ -117,7 +117,7 @@ def _edit_pipes(
             continue
         ### 
         if text != 'pass':
-            p.edit(debug=debug, **kw)
+            p.edit(interactive=True, debug=debug, **kw)
     return (True, "Success")
 
 def _edit_users(

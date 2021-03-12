@@ -65,7 +65,15 @@ def edit_pipe(
         params = {'patch' : patch},
         debug = debug
     )
-    return response.__bool__(), response.json()
+    try:
+        j = response.json()
+    except Exception as e:
+        return False, str(e)
+
+    if isinstance(j, dict) and 'detail' in j:
+        return False, j['detail']
+
+    return tuple(j)
 
 def fetch_pipes_keys(
         self,
