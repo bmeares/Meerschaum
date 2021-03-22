@@ -130,8 +130,12 @@ default_config['pipes'] = default_pipes_config
 default_config['plugins'] = default_plugins_config
 #  default_config['experimental'] = default_experimental_config
 ### add configs from other packages
-import meerschaum.config.stack
-from meerschaum.config.stack import default_stack_config
+try:
+    import meerschaum.config.stack
+except:
+    pass
+finally:
+    from meerschaum.config.stack import default_stack_config
 default_config['stack'] = default_stack_config
 
 default_header_comment = """
