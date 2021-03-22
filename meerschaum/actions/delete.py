@@ -75,6 +75,7 @@ def _delete_pipes(
     return successes > 0, msg
 
 def _delete_config(
+        action : List[str] = [],
         yes : bool = False,
         force : bool = False,
         noask : bool = False,
@@ -87,13 +88,24 @@ def _delete_config(
     import os, shutil
     from meerschaum.utils.prompt import yes_no
     from meerschaum.config._paths import CONFIG_DIR_PATH, STACK_COMPOSE_PATH, DEFAULT_CONFIG_DIR_PATH
+    from meerschaum.config._read_config import get_possible_keys, get_keyfile_path
     from meerschaum.utils.debug import dprint
-    paths = [CONFIG_DIR_PATH, STACK_COMPOSE_PATH, DEFAULT_CONFIG_DIR_PATH]
-    if force:
+    paths = [p for p in [STACK_COMPOSE_PATH, DEFAULT_CONFIG_DIR_PATH] if p.exists()]
+    keys = get_possible_keys() if len(action) == 0 else action
+    for k in keys:
+        _p = get_keyfile_path(k, create_new=False)
+        if _p is not None:
+            paths.append(_p)
+
+    if force or not paths:
         answer = True
     else:
         sep = '\n' + '  - '
-        answer = yes_no(f"Delete files and directories?{sep + sep.join([str(p) for p in paths])}\n", default='n', noask=noask, yes=yes)
+        answer = yes_no(
+            f"Are you sure you want to delete the following configuration files?" +
+            f"{sep + sep.join([str(p) for p in paths])}\n",
+            default='n', noask=noask, yes=yes
+        )
 
     if answer or force:
         for path in paths:
@@ -102,12 +114,11 @@ def _delete_config(
                 os.remove(path)
             elif os.path.isdir(path):
                 shutil.rmtree(path)
+        success, msg = True, "Success"
     else:
-        msg = "Nothing deleted."
-        if debug: dprint(msg)
-        return False, msg
+        success, msg = False, "Nothing deleted."
     
-    return True, "Successfully deleted configuration files"
+    return success, msg
 
 def _delete_plugins(
         action : List[str] = [],

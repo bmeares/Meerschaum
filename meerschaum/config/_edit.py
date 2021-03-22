@@ -62,6 +62,7 @@ def write_config(
         directory = CONFIG_DIR_PATH
     from meerschaum.config.static import _static_config
     from meerschaum.config._default import default_header_comment
+    from meerschaum.config._patch import apply_patch_to_config
     from meerschaum.utils.debug import dprint
     from meerschaum.utils.yaml import yaml
     from meerschaum.utils.misc import filter_keywords
@@ -80,6 +81,10 @@ def write_config(
         'yaml' : yaml.dump,
         'json' : json.dump,
     }
+
+    symlinks_key = _static_config()['config']['symlinks_key']
+    symlinks = config_dict.pop(symlinks_key) if symlinks_key in config_dict else {}
+    config_dict = apply_patch_to_config(config_dict, symlinks)
 
     for k, v in config_dict.items():
         filetype = (
