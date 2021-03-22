@@ -20,8 +20,8 @@ def edit(
     options = {
         'config'  : _edit_config,
         'pipes'   : _edit_pipes,
-        'stack'   : _edit_stack,
-        'grafana' : _edit_grafana,
+        #  'stack'   : _edit_stack,
+        #  'grafana' : _edit_grafana,
         'users'   : _edit_users,
     }
     return choose_subaction(action, options, **kw)
@@ -45,9 +45,9 @@ def _complete_edit(
     from meerschaum.actions.shell import default_action_completer
     return default_action_completer(action=(['edit'] + action), **kw)
 
-def _edit_stack(*args, **kw) -> SuccessTuple:
-    from meerschaum.config.stack import edit_stack
-    return edit_stack(*args, **kw)
+#  def _edit_stack(*args, **kw) -> SuccessTuple:
+    #  from meerschaum.config.stack import edit_stack
+    #  return edit_stack(*args, **kw)
 
 def _edit_config(action : List[str] = [], **kw) -> SuccessTuple:
     """
@@ -85,9 +85,9 @@ def _complete_edit_config(action : List[str] = [], **kw : Any):
             possibilities.append(key)
     return possibilities
 
-def _edit_grafana(*args, **kw) -> SuccessTuple:
-    from meerschaum.config.stack.grafana import edit_grafana
-    return edit_grafana(*args, **kw)
+#  def _edit_grafana(*args, **kw) -> SuccessTuple:
+    #  from meerschaum.config.stack.grafana import edit_grafana
+    #  return edit_grafana(*args, **kw)
 
 def _edit_pipes(
         action : List[str] = [],

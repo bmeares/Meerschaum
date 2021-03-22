@@ -37,6 +37,7 @@ def _static_config():
             },
             'config' : {
                 'default_filetype' : 'json',
+                'symlinks_key' : '_symlinks',
             },
             'system' : {
                 'arguments' : {

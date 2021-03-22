@@ -53,11 +53,16 @@ env_dict['MEERSCHAUM_API_CONFIG'] = json.dumps(
                 'sql' : {
                     'main' : {
                         'host' : env_dict['MEERSCHAUM_DB_HOSTNAME'],
+                        'username' : 'MRSM{meerschaum:connectors:sql:main:username}',
+                        'password' : 'MRSM{meerschaum:connectors:sql:main:password}',
                     },
                 },
             },
         },
     },
+    #  {
+        #  'meerschaum' : 'MRSM{meerschaum}',
+    #  },
     separators = (',', ':'),
 )
 
@@ -91,7 +96,7 @@ networks = {
 }
 
 default_docker_compose_config = {
-    'version' : '3',
+    'version' : '3.2',
     'services': {
         'db' : {
             'environment' : [
@@ -131,8 +136,14 @@ default_docker_compose_config = {
                 'db',
             ],
             'volumes' : [
+                #  {
+                    #  'type' : 'volume',
+                    #  'source' : 'api_root',
+                    #  'target' : volumes['api_root'],
+                    #  'read'
+                #  },
                 'api_root:' + volumes['api_root'],
-                #  str(ROOT_DIR_PATH) + ':' + volumes['meerschaum_api_config'],
+                #  str(ROOT_DIR_PATH) + ':' + volumes['api_root'] + ':ro',
             ],
         },
         'grafana' : {
@@ -155,8 +166,8 @@ default_docker_compose_config = {
             ],
             'volumes' : [
                 'grafana_storage' + ':' + volumes['grafana_storage'],
-                f'{GRAFANA_DATASOURCE_PATH.parent}:/etc/grafana/provisioning/datasources',
-                f'{GRAFANA_DASHBOARD_PATH.parent}:/etc/grafana/provisioning/dashboards',
+                f'{GRAFANA_DATASOURCE_PATH.parent}:/etc/grafana/provisioning/datasources:ro',
+                f'{GRAFANA_DASHBOARD_PATH.parent}:/etc/grafana/provisioning/dashboards:ro',
                 #  f'{GRAFANA_INI_PATH}:/etc/grafana/grafana.ini',
             ],
             'environment' : [
@@ -244,25 +255,28 @@ from meerschaum.config._paths import CONFIG_DIR_PATH, STACK_ENV_PATH, STACK_COMP
 from meerschaum.config._paths import STACK_COMPOSE_FILENAME, STACK_ENV_FILENAME
 from meerschaum.config._paths import GRAFANA_DATASOURCE_PATH, GRAFANA_DASHBOARD_PATH
 from meerschaum.config._paths import MOSQUITTO_CONFIG_PATH
-from meerschaum.config._sync import sync_yaml_configs
-sync_yaml_configs(
-    CONFIG_DIR_PATH / 'stack.yaml',
-    ['stack', STACK_COMPOSE_FILENAME],
-    STACK_COMPOSE_PATH,
-    substitute = True,
-)
-sync_yaml_configs(
-    CONFIG_DIR_PATH / 'stack.yaml',
-    ['stack', 'grafana', 'datasource'],
-    GRAFANA_DATASOURCE_PATH,
-    substitute = True,
-)
-sync_yaml_configs(
-    CONFIG_DIR_PATH / 'stack.yaml',
-    ['stack', 'grafana', 'dashboard'],
-    GRAFANA_DASHBOARD_PATH,
-    substitute = True,
-)
+
+def _sync_stack_files():
+    from meerschaum.config._sync import sync_yaml_configs
+    sync_yaml_configs(
+        CONFIG_DIR_PATH / 'stack.yaml',
+        ['stack', STACK_COMPOSE_FILENAME],
+        STACK_COMPOSE_PATH,
+        substitute = True,
+    )
+    sync_yaml_configs(
+        CONFIG_DIR_PATH / 'stack.yaml',
+        ['stack', 'grafana', 'datasource'],
+        GRAFANA_DATASOURCE_PATH,
+        substitute = True,
+    )
+    sync_yaml_configs(
+        CONFIG_DIR_PATH / 'stack.yaml',
+        ['stack', 'grafana', 'dashboard'],
+        GRAFANA_DASHBOARD_PATH,
+        substitute = True,
+    )
+
 def get_necessary_files():
     from meerschaum.config._paths import (
         STACK_ENV_PATH,

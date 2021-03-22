@@ -18,14 +18,16 @@ import os, shutil
 
 ### apply config preprocessing (e.g. main to meta)
 config = None
-def _config(*keys : str, reload : bool = False) -> Dict[str, Any]:
+def _config(*keys : str, reload : bool = False, substitute : bool = True) -> Dict[str, Any]:
     """
     Read and process the configuration file.
     """
     global config
     if config is None or reload:
         from meerschaum.config._read_config import read_config
-        config = read_config(keys=keys)
+        from meerschaum.config._sync import sync_files
+        config = read_config(keys=keys, substitute=substitute)
+        sync_files(keys=[keys[0] if keys else None])
     return config
 
 def set_config(cf : Dict[str, Any]) -> Dict[str, Any]:
@@ -43,6 +45,7 @@ def get_config(
         *keys : str,
         patch : bool = True,
         substitute : bool = True,
+        sync_files : bool = True,
         as_tuple : bool = False,
         warn : bool = True,
         debug = False
@@ -58,6 +61,10 @@ def get_config(
     :param patch:
         If True, patch missing default keys into the config directory.
         Defaults to True.
+
+    :param sync_files:
+        If True, sync files if needed.
+        Defaults to True.
         
     :param substitute:
         If True, subsitute 'MRSM{}' values.
@@ -67,33 +74,78 @@ def get_config(
         If True, return a tuple of type (success, value).
         Defaults to False.
 
-    E.g. get_config('shell') == config['shell']
+    E.g. get_config('meerschaum', 'connectors') == config['meerschaum']['connectors']
     """
     global config
-    import sys
+    import sys, json
 
-    from meerschaum.utils.debug import dprint
-    if debug: dprint(f"Indexing keys: {keys}")
+    symlinks_key = _static_config()['config']['symlinks_key']
+    #  if config is None: config = {}
+    #  if symlinks_key not in config: config[symlinks_key] = {}
+    if debug:
+        from meerschaum.utils.debug import dprint
+        dprint(f"Indexing keys: {keys}")
 
     if len(keys) == 0:
         if as_tuple:
-            return True, _config()
-        return _config()
+            return True, _config(substitute=substitute)
+        return _config(substitute=substitute)
 
     from meerschaum.config._read_config import read_config, search_and_substitute_config
+    from meerschaum.config._patch import apply_patch_to_config
+    ### Invalidate the cache if it was read before with substitute=False
+    ### but there still exist substitutions.
+    if (
+        config is not None and substitute and keys[0] != symlinks_key
+        and 'MRSM{' in json.dumps(config.get(keys[0]))
+    ):
+        #  print(f'Invalidating cache: {keys}')
+        #  print(config.get(keys[0]))
+        #  print(f"Substituting values under key '{keys[0]}'...")
+        #  config.update(search_and_substitute_config({keys[0] : config[keys[0]]}))
+        _subbed = search_and_substitute_config({keys[0] : config[keys[0]]})
+        config[keys[0]] = _subbed[keys[0]]
+        if symlinks_key in _subbed:
+            if symlinks_key not in config: config[symlinks_key] = {}
+            config[symlinks_key][keys[0]] = _subbed
+        #  config[keys[0]] = apply_patch_to_config(
+            #  config[keys[0]],
+            #  search_and_substitute_config({keys[0] : config[keys[0]]})[keys[0]]
+        #  )
+        #  del config[keys[0]]
+
+    from meerschaum.config._sync import sync_files as _sync_files
     if config is None:
         config = read_config(keys=[keys[0]], substitute=substitute)
+        if sync_files:
+            _sync_files(keys=[keys[0]])
+    #  else:
+        #  config_cache = config.copy()
 
-    if keys[0] not in config:
-        config.update(read_config(keys=[keys[0]], substitute=substitute))
+    if keys[0] not in config and keys != symlinks_key:
+        single_key_config = read_config(keys=[keys[0]], substitute=substitute)
+        config[keys[0]] = single_key_config[keys[0]]
+        if symlinks_key in single_key_config and keys[0] in single_key_config[symlinks_key]:
+            if symlinks_key not in config: config[symlinks_key] = {}
+            config[symlinks_key][keys[0]] = single_key_config[symlinks_key][keys[0]]
 
+        if sync_files:
+            _sync_files(keys=[keys[0]])
+
+    ### Only cache substituted values.
+    #  if substitute:
+        #  del config
+        #  config = config_cache
+
+    #  c = config if config is not None else config_cache
     c = config
     invalid_keys = False
     if len(keys) > 0:
         for k in keys:
             try:
                 c = c[k]
-            except:
+            except Exception as e:
+                #  print(e)
                 invalid_keys = True
                 break
         if invalid_keys:
@@ -105,7 +157,8 @@ def get_config(
             for k in keys:
                 try:
                     _c = _c[k]
-                except:
+                except Exception as e:
+                    #  print(e)
                     in_default = False
             if in_default:
                 c = _c
@@ -123,9 +176,8 @@ def get_config(
                 if as_tuple: return False, None
                 return None
 
-            from meerschaum.config._patch import apply_patch_to_config
             config = apply_patch_to_config(patched_default_config, config)
-            if patch:
+            if patch and keys[0] != symlinks_key:
                 from meerschaum.config._edit import write_config
                 #  import traceback
                 #  traceback.print_stack()
