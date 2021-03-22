@@ -55,7 +55,7 @@ def sync_yaml_configs(
     sub_header, sub_config = _read_config(sub_path)
 
     from meerschaum.config import get_config
-    c = get_config(*keys, substitute=substitute)
+    c = get_config(*keys, substitute=substitute, sync_files=False)
     if substitute:
         sub_config = search_and_substitute_config(sub_config)
 
@@ -73,10 +73,45 @@ def sync_yaml_configs(
             f.write(new_header)
             f.write(new_config_text)
 
-        try:
-            reload_package('meerschaum')
-        except:
-            print("Restart Meerschaum to reload config.")
-            import sys
-            sys.exit(1)
+        #  try:
+            #  reload_package('meerschaum')
+        #  except:
+            #  print("Restart Meerschaum to reload config.")
+            #  import sys
+            #  sys.exit(1)
+
+def sync_files(keys : List[str] = []):
+    def _stack():
+        from meerschaum.config._paths import CONFIG_DIR_PATH, STACK_ENV_PATH, STACK_COMPOSE_PATH
+        from meerschaum.config._paths import STACK_COMPOSE_FILENAME, STACK_ENV_FILENAME
+        from meerschaum.config._paths import GRAFANA_DATASOURCE_PATH, GRAFANA_DASHBOARD_PATH
+        from meerschaum.config._paths import MOSQUITTO_CONFIG_PATH
+
+        sync_yaml_configs(
+            CONFIG_DIR_PATH / 'stack.yaml',
+            ['stack', STACK_COMPOSE_FILENAME],
+            STACK_COMPOSE_PATH,
+            substitute = True,
+        )
+        sync_yaml_configs(
+            CONFIG_DIR_PATH / 'stack.yaml',
+            ['stack', 'grafana', 'datasource'],
+            GRAFANA_DATASOURCE_PATH,
+            substitute = True,
+        )
+        sync_yaml_configs(
+            CONFIG_DIR_PATH / 'stack.yaml',
+            ['stack', 'grafana', 'dashboard'],
+            GRAFANA_DASHBOARD_PATH,
+            substitute = True,
+        )
+
+    key_functions = {
+        'stack' : _stack,
+    }
+    if keys is None:
+        keys = list(key_functions.keys())
+    for k in keys:
+        if k in key_functions:
+            key_functions[k]()
 

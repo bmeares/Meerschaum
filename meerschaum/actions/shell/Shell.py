@@ -257,6 +257,7 @@ class Shell(cmd.Cmd):
         self._actions['debug'] = self.do_debug
         self.debug = False
         self.load_config()
+        self.hidden_commands = []
         ### update hidden commands list (cmd2 only)
         try:
             for c in hidden_commands:
