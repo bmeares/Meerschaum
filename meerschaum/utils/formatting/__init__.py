@@ -134,22 +134,14 @@ def get_console():
 
 def print_tuple(tup : tuple, skip_common : bool = True, common_only : bool = False) -> None:
     """
-    Print Meerschaum return tuple
+    Print Meerschaum SuccessTuple.
     """
-    from meerschaum.utils.formatting import ANSI, CHARSET, colored
-    from meerschaum.config import get_config
 
     try:
         status = 'success' if tup[0] else 'failure'
     except TypeError:
         status = 'failure'
         tup = None, None
-
-    status_config = get_config('formatting', status, patch=True)
-
-    msg = ' ' + status_config[CHARSET]['icon'] + ' ' + str(tup[1])
-    if ANSI:
-        msg = colored(msg, *status_config['ansi']['color'])
 
     omit_messages = { 'Success', 'Succeeded', 'success', '', None }
 
@@ -163,6 +155,14 @@ def print_tuple(tup : tuple, skip_common : bool = True, common_only : bool = Fal
         do_print = tup[1] not in omit_messages
 
     if do_print:
+        from meerschaum.utils.formatting import ANSI, CHARSET, colored
+        from meerschaum.config import get_config
+        status_config = get_config('formatting', status, patch=True)
+
+        msg = ' ' + status_config[CHARSET]['icon'] + ' ' + str(tup[1])
+        if ANSI:
+            msg = colored(msg, *status_config['ansi']['color'])
+
         print(msg)
 
 

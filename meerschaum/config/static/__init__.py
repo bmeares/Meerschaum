@@ -32,6 +32,7 @@ def _static_config():
             },
             'environment' : {
                 'config' : 'MRSM_CONFIG',
+                'patch' : 'MRSM_PATCH',
                 'root' : 'MRSM_ROOT_DIR',
                 'runtime' : 'MRSM_RUNTIME',
             },

@@ -18,16 +18,20 @@ import os, shutil
 
 ### apply config preprocessing (e.g. main to meta)
 config = None
-def _config(*keys : str, reload : bool = False, substitute : bool = True) -> Dict[str, Any]:
+def _config(
+        *keys : str, reload : bool = False, substitute : bool = True,
+        sync_files : bool = True, write_missing : bool = True,
+    ) -> Dict[str, Any]:
     """
     Read and process the configuration file.
     """
     global config
     if config is None or reload:
         from meerschaum.config._read_config import read_config
-        from meerschaum.config._sync import sync_files
-        config = read_config(keys=keys, substitute=substitute)
-        sync_files(keys=[keys[0] if keys else None])
+        from meerschaum.config._sync import sync_files as _sync_files
+        config = read_config(keys=keys, substitute=substitute, write_missing=write_missing)
+        if sync_files:
+            _sync_files(keys=[keys[0] if keys else None])
     return config
 
 def set_config(cf : Dict[str, Any]) -> Dict[str, Any]:
@@ -46,6 +50,7 @@ def get_config(
         patch : bool = True,
         substitute : bool = True,
         sync_files : bool = True,
+        write_missing : bool = True,
         as_tuple : bool = False,
         warn : bool = True,
         debug = False
@@ -64,6 +69,10 @@ def get_config(
 
     :param sync_files:
         If True, sync files if needed.
+        Defaults to True.
+
+    :param write_missing:
+        If True, write default values when the main config files are missing.
         Defaults to True.
         
     :param substitute:
@@ -87,9 +96,10 @@ def get_config(
         dprint(f"Indexing keys: {keys}")
 
     if len(keys) == 0:
+        _rc = _config(substitute=substitute, sync_files=sync_files, write_missing=write_missing)
         if as_tuple:
-            return True, _config(substitute=substitute)
-        return _config(substitute=substitute)
+            return True, _rc 
+        return _rc
 
     from meerschaum.config._read_config import read_config, search_and_substitute_config
     from meerschaum.config._patch import apply_patch_to_config
@@ -116,21 +126,25 @@ def get_config(
 
     from meerschaum.config._sync import sync_files as _sync_files
     if config is None:
-        config = read_config(keys=[keys[0]], substitute=substitute)
+        config = read_config(keys=[keys[0]], substitute=substitute, write_missing=write_missing)
         if sync_files:
             _sync_files(keys=[keys[0]])
     #  else:
         #  config_cache = config.copy()
 
+    invalid_keys = False
     if keys[0] not in config and keys != symlinks_key:
-        single_key_config = read_config(keys=[keys[0]], substitute=substitute)
-        config[keys[0]] = single_key_config[keys[0]]
-        if symlinks_key in single_key_config and keys[0] in single_key_config[symlinks_key]:
-            if symlinks_key not in config: config[symlinks_key] = {}
-            config[symlinks_key][keys[0]] = single_key_config[symlinks_key][keys[0]]
+        single_key_config = read_config(keys=[keys[0]], substitute=substitute, write_missing=write_missing)
+        if keys[0] not in single_key_config:
+            invalid_keys = True
+        else:
+            config[keys[0]] = single_key_config.get(keys[0], None)
+            if symlinks_key in single_key_config and keys[0] in single_key_config[symlinks_key]:
+                if symlinks_key not in config: config[symlinks_key] = {}
+                config[symlinks_key][keys[0]] = single_key_config[symlinks_key][keys[0]]
 
-        if sync_files:
-            _sync_files(keys=[keys[0]])
+            if sync_files:
+                _sync_files(keys=[keys[0]])
 
     ### Only cache substituted values.
     #  if substitute:
@@ -139,7 +153,6 @@ def get_config(
 
     #  c = config if config is not None else config_cache
     c = config
-    invalid_keys = False
     if len(keys) > 0:
         for k in keys:
             try:
@@ -245,32 +258,41 @@ if permanent_patch_config is not None and PERMANENT_PATCH_DIR_PATH.exists():
 ### If environment variable MRSM_CONFIG is set, patch config before anything else.
 import os
 environment_config = _static_config()['environment']['config']
-if environment_config in os.environ:
-    from meerschaum.utils.misc import string_to_dict
-    _patch = string_to_dict(str(os.environ[environment_config]))
-    error_msg = (
-        f"Environment variable {environment_config} is set but cannot be parsed.\n"
-        f"Unset {environment_config} or change to JSON or simplified dictionary format (see --help, under params for formatting)\n"
-        f"{environment_config} is set to:\n{os.environ[environment_config]}\n"
-        f"Skipping patching os environment into config..."
-    )
+environment_patch = _static_config()['environment']['patch']
 
-    if not isinstance(_patch, dict):
-        print(error_msg)
-    else:
-        ### Load and patch config files.
-        for k in _patch:
-            try:
-                set_config(
-                    apply_patch_to_config(
-                        { k : get_config(k) },
-                        _patch
+def _apply_environment_config(env_var):
+    if env_var in os.environ:
+        from meerschaum.utils.misc import string_to_dict
+        try:
+            _patch = string_to_dict(str(os.environ[env_var]))
+        except:
+            _patch = None
+        error_msg = (
+            f"Environment variable {env_var} is set but cannot be parsed.\n"
+            f"Unset {env_var} or change to JSON or simplified dictionary format (see --help, under params for formatting)\n"
+            f"{env_var} is set to:\n{os.environ[env_var]}\n"
+            f"Skipping patching os environment into config..."
+        )
+
+        if not isinstance(_patch, dict):
+            print(error_msg)
+        else:
+            ### Load and patch config files.
+            for k in _patch:
+                try:
+                    _valid, _key_config = get_config(k, write_missing=False, as_tuple=True, warn=False)
+                    to_set = (
+                        apply_patch_to_config({k: _key_config}, _patch) if _valid
+                        else _patch
                     )
-                )
-            except Exception as e:
-                print(error_msg)
+                    set_config(to_set)
+                except Exception as e:
+                    print(e)
+                    print(error_msg)
+_apply_environment_config(environment_config)
+_apply_environment_config(environment_patch)
 
-import os, pathlib
+import pathlib
 environment_root_dir = _static_config()['environment']['root']
 if environment_root_dir in os.environ:
     from meerschaum.config._paths import set_root
