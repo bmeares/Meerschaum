@@ -150,8 +150,9 @@ def _api_start(
     except Exception as e:
         error(e)
     with open(API_UVICORN_CONFIG_PATH, 'w+') as f:
-        if debug: dprint(f"Dumping API config file:")
-        pprint(uvicorn_config, stream=sys.stderr)
+        if debug:
+            dprint(f"Dumping API config file:")
+            pprint(uvicorn_config, stream=sys.stderr)
         json.dump(uvicorn_config, f)
 
     ### remove custom keys before calling uvicorn
