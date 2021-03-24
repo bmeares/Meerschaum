@@ -70,10 +70,6 @@ def write_config(
     if config_dict is None:
         from meerschaum.config import _config; cf = _config()
         config_dict = cf
-    #  if debug:
-        #  from meerschaum.utils.formatting import pprint
-        #  print(f"Writing configuration to {directory}")
-        #  pprint(config_dict, stream=sys.stderr)
 
     default_filetype = _static_config()['config']['default_filetype']
     filetype_dumpers = {

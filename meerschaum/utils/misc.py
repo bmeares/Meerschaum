@@ -6,13 +6,15 @@ Miscellaneous functions go here
 """
 
 from __future__ import annotations
-from meerschaum.utils.typing import Union, Mapping, Any, Callable, Optional, ClassVar
+from meerschaum.utils.typing import (
+    Union, Mapping, Any, Callable, Optional, ClassVar, List, Dict, SuccessTuple
+)
 
 import sys
 
 def add_method_to_class(
         func : Callable[[Any], Any],
-        class_def : ClassVar[dict[Any, Any]],
+        class_def,
         method_name : Optional[str] = None,
         keep_self : Optional[bool] = None,
     ) -> Callable[[Any], Any]:
@@ -31,12 +33,6 @@ def add_method_to_class(
     from functools import wraps
 
     is_class = isinstance(class_def, type)
-    #  if is_class and not keep_self:
-        #  def _wrapper(self, *args, **kw):
-            #  return func(*args, **kw)
-    #  else:
-        #  def _wrapper(self, *args, **kw):
-            #  return func(self, *args, **kw)
     
     @wraps(func)
     def wrapper(self, *args, **kw):
@@ -54,22 +50,23 @@ def add_method_to_class(
     return func
 
 def choose_subaction(
-        action : list = [''],
-        options : dict = {},
+        action : List[str] = [],
+        options : Dict[str, Any] = {},
         **kw
-    ) -> tuple:
+    ) -> SuccessTuple:
     """
     Given a dictionary of options and the standard Meerschaum actions list,
     check if choice is valid and execute chosen function, else show available
     options and return False
 
-    action - list:
+    :param action:
         subactions (e.g. `show pipes` -> ['pipes'])
-    options - dict:
-        Available options to execute
+    
+    :param options:
+        Available options to execute.
         option (key) -> function (value)
         Functions must accept **kw keyword arguments
-        and return a tuple of success code and message
+        and return a tuple of success bool and message.
     """
     from meerschaum.utils.warnings import warn, info
     import inspect

@@ -7,7 +7,7 @@ Launch into a CLI environment to interact with the SQL Connector
 """
 
 flavor_clis = {
-    'postgres'    : 'pgcli',
+    'postgresql'  : 'pgcli',
     'timescaledb' : 'pgcli',
     'mysql'       : 'mycli',
     'mariadb'     : 'mycli',
