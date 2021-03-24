@@ -6,7 +6,7 @@ Import the config yaml file
 """
 
 from __future__ import annotations
-from meerschaum.utils.typing import Optional, Dict, Any, List, Tuple
+from meerschaum.utils.typing import Optional, Dict, Any, List, Tuple, Union
 
 def read_config(
         directory : Optional[Dict[str, Any]] = None,
@@ -47,7 +47,6 @@ def read_config(
     import sys, shutil, os, json, itertools
     from meerschaum.utils.packages import attempt_import
     from meerschaum.utils.yaml import yaml, _yaml
-    #  from meerschaum.config._edit import copy_default_to_config
     from meerschaum.config._paths import CONFIG_DIR_PATH
     from meerschaum.config.static import _static_config
     from meerschaum.config._patch import apply_patch_to_config
@@ -61,8 +60,8 @@ def read_config(
 
     ### Each key corresponds to a YAML or JSON file.
     symlinks_key = _static_config()['config']['symlinks_key']
-    config = {symlinks_key : {}}
-    config_to_write = {symlinks_key : {}}
+    config = {}
+    config_to_write = {}
 
     default_filetype = _static_config()['config']['default_filetype']
     filetype_loaders = {
@@ -98,16 +97,28 @@ def read_config(
                     search_and_substitute_config(default_config) if substitute
                     else default_config
                 )
+                #  print(substitute)
+                #  print(_default_dict.keys())
+                ### If default config contains symlinks, add them to the config to write.
                 try:
                     _default_symlinks = _default_dict[symlinks_key][mk]
                 except:
                     _default_symlinks = {}
                 config[mk] = _default_dict[mk]
                 if _default_symlinks:
+                    if symlinks_key not in config:
+                        config[symlinks_key] = {}
                     if mk not in config[symlinks_key]:
                         config[symlinks_key][mk] = {}
-                    config[symlinks_key][mk] = apply_patch_to_config(config[symlinks_key][mk], _default_symlinks)
+                    config[symlinks_key][mk] = apply_patch_to_config(
+                        config[symlinks_key][mk], 
+                        _default_symlinks
+                    )
+                    if symlinks_key not in config_to_write:
+                        config_to_write[symlinks_key] = {}
                     config_to_write[symlinks_key][mk] = config[symlinks_key][mk]
+
+                ### Write the default key.
                 config_to_write[mk] = config[mk]
 
     ### Write missing keys if necessary.
@@ -155,6 +166,8 @@ def read_config(
                     )
                     config[key] = _single_key_config[key]
                     if symlinks_key in _single_key_config and key in _single_key_config[symlinks_key]:
+                        if symlinks_key not in config:
+                            config[symlinks_key] = {}
                         config[symlinks_key][key] = _single_key_config[symlinks_key][key]
                 break
             except Exception as e:
@@ -174,6 +187,7 @@ def search_and_substitute_config(
         delimiter : str = ":",
         begin_key : str = "{",
         end_key : str = "}",
+        literal_key : str = '!',
         keep_symlinks : bool = True,
     ) -> Dict[str, Any]:
     """
@@ -194,6 +208,17 @@ def search_and_substitute_config(
         The string to end the keys list.
         Defaults to '}'.
 
+    :param literal_key:
+        The string to force an literal interpretation of a value.
+        When the string is isolated, a literal interpreation is assumed and the surrounding
+        quotes are replaced.
+
+        E.g. Suppose a:b:c produces a dictionary {'d': 1}.
+          - 'MRSM{a:b:c}'    => {'d': 1}        : isolated
+          - ' MRSM{a:b:c} '  => ' "{\'d\': 1}"' : not isolated
+          - ' MRSM{!a:b:c} ' => ' {"d": 1}'     : literal
+        Defaults to '!'.
+
     :param keep_symlinks:
         If True, include the symlinks under the top-level key '_symlinks' (never written to a file).
         Defaults to True.
@@ -206,11 +231,9 @@ def search_and_substitute_config(
     def _find_symlinks(d, _keys : List[str] = []):
         for k, v in d.items():
             if isinstance(v, dict):
-                _pattern = _find_symlinks(v, _keys + [k])
-                if _pattern is not None:
-                    _links.append(_pattern)
+                _find_symlinks(v, _keys + [k])
             elif (leading_key + begin_key) in str(v):
-                return _keys + [k], v
+                _links.append((_keys + [k], v))
 
     _find_symlinks(config)
 
@@ -225,8 +248,8 @@ def search_and_substitute_config(
     max_index = len(haystack) - len(buff)
 
     patterns = dict()
-    symlinks = dict()
     isolated_patterns = dict()
+    literal_patterns = dict()
 
     begin, end, floor = 0, 0, 0
     while needle in haystack[floor:]:
@@ -258,14 +281,26 @@ def search_and_substitute_config(
 
         ### advance the floor to find the next leading key
         floor += end + len(end_key)
-        keys = hs[begin:end].split(delimiter)
+        pattern_keys = hs[begin:end].split(delimiter)
 
-        ### follow the pointers to the value
-        valid, value = get_config(*keys, substitute=False, as_tuple=True)
+        ### Check for isolation key and empty keys (MRSM{}).
+        force_literal = False
+        keys = [k for k in pattern_keys]
+        if str(keys[0]).startswith(literal_key):
+            keys[0] = str(keys[0])[len(literal_key):]
+            force_literal = True
+        if len(keys) == 1 and keys[0] == '':
+            keys = []
+
+        ### Evaluate the parsed keys to extract the referenced value.
+        ### TODO This needs to be recursive for chaining symlinks together.
+        valid, value = get_config(
+            *keys, substitute=False, as_tuple=True, write_missing=False, sync_files=False
+        )
         if not valid: continue
 
         ### pattern to search and replace
-        pattern = leading_key + begin_key + delimiter.join(keys) + end_key
+        pattern = leading_key + begin_key + delimiter.join(pattern_keys) + end_key
 
         ### store patterns and values
         patterns[pattern] = value
@@ -273,17 +308,21 @@ def search_and_substitute_config(
         ### Determine whether the pattern occured inside a string or is an isolated, direct symlink.
         isolated_patterns[pattern] = (prior == '"' and after == '"')
 
+        literal_patterns[pattern] = force_literal
+
     ### replace the patterns with the values
     for pattern, value in patterns.items():
-        haystack = (
-            haystack.replace(json.dumps(pattern), json.dumps(value))
-            if isolated_patterns[pattern]
-            else haystack.replace(pattern, str(value))
-        )
+        if isolated_patterns[pattern]:
+            haystack = haystack.replace(json.dumps(pattern), json.dumps(value))
+        elif literal_patterns[pattern]:
+            haystack = haystack.replace(pattern, json.dumps(value).replace('"', '\\"').replace("'", "\\'"))
+        else:
+            haystack = haystack.replace(pattern, str(value))
 
     ### parse back into dict
     parsed_config = json.loads(haystack)
 
+    symlinks = dict()
     if keep_symlinks:
         ### Keep track of symlinks for writing back to a file.
         for _keys, _pattern in _links:
@@ -299,8 +338,6 @@ def search_and_substitute_config(
         if symlinks_key not in parsed_config:
             parsed_config[symlinks_key] = {}
         parsed_config[symlinks_key] = apply_patch_to_config(parsed_config[symlinks_key], symlinks)
-        #  import traceback
-        #  traceback.print_stack()
 
     return parsed_config
 
@@ -328,7 +365,7 @@ def get_keyfile_path(key : str, create_new : bool = False) -> Optional[pathlib.P
     try:
         return pathlib.Path(os.path.join(
             CONFIG_DIR_PATH,
-            read_config(keys=[key], with_filenames=True)[1][0]
+            read_config(keys=[key], with_filenames=True, write_missing=False)[1][0]
         ))
     except IndexError as e:
         if create_new:

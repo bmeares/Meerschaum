@@ -15,6 +15,7 @@ from meerschaum.config._paths import (
     ROOT_DIR_PATH,
 )
 from meerschaum.config._paths import STACK_COMPOSE_PATH, STACK_ENV_PATH
+from meerschaum.config._paths import STACK_COMPOSE_FILENAME, STACK_ENV_FILENAME
 
 db_port = "MRSM{meerschaum:connectors:sql:main:port}"
 
@@ -40,7 +41,8 @@ env_dict = {
     'POSTGRES_USER' : f'{db_user}',
     'POSTGRES_PASSWORD' : f'{db_pass}',
     'POSTGRES_DB' : f'{db_base}',
-    'MEERSCHAUM_DB_HOSTNAME' : f'{db_host}',
+    #  'MEERSCHAUM_DB_HOSTNAME' : f'{db_host}',
+    'MEERSCHAUM_DB_HOSTNAME' : 'MRSM{stack:' + str(STACK_COMPOSE_FILENAME) + ':services:db:hostname}',
     'MEERSCHAUM_API_HOSTNAME' : f'{api_host}',
     'ALLOW_IP_RANGE' : '0.0.0.0/0',
     'MEERSCHAUM_API_CONFIG_RESOURCES' : '/meerschaum',
@@ -48,24 +50,29 @@ env_dict = {
 ### apply patch to host config to change hostname to the Docker service name
 env_dict['MEERSCHAUM_API_CONFIG'] = json.dumps(
     {
+        'meerschaum' : 'MRSM{!meerschaum}',
+        'system' : 'MRSM{!system}',
+    },
+    separators = (',', ':'),
+).replace(
+    '"MRSM{!system}"', 'MRSM{!system}'
+).replace(
+    '"MRSM{!meerschaum}"', 'MRSM{!meerschaum}',
+)
+
+env_dict['MEERSCHAUM_API_PATCH'] = json.dumps(
+    {
         'meerschaum' : {
             'connectors' : {
                 'sql' : {
                     'main' : {
                         'host' : env_dict['MEERSCHAUM_DB_HOSTNAME'],
-                        'username' : 'MRSM{meerschaum:connectors:sql:main:username}',
-                        'password' : 'MRSM{meerschaum:connectors:sql:main:password}',
                     },
                 },
             },
         },
-    },
-    #  {
-        #  'meerschaum' : 'MRSM{meerschaum}',
-    #  },
-    separators = (',', ':'),
+    }
 )
-
 
 compose_header = """
 ##############################################################
@@ -111,7 +118,7 @@ default_docker_compose_config = {
             'ports' : [
                 f'{db_port}:{db_port}',
             ],
-            'hostname' : env_dict['MEERSCHAUM_DB_HOSTNAME'],
+            'hostname' : f'{db_host}',
             'volumes' : [
                 'meerschaum_db_data' + ':' + volumes['meerschaum_db_data'],
             ],
@@ -129,7 +136,8 @@ default_docker_compose_config = {
             ],
             'command' : 'api start',
             'environment' : [
-                'MRSM_CONFIG=' + env_dict['MEERSCHAUM_API_CONFIG'],
+                "MRSM_CONFIG=" + env_dict['MEERSCHAUM_API_CONFIG'],
+                "MRSM_PATCH=" + env_dict['MEERSCHAUM_API_PATCH'],
             ],
             'restart' : 'always',
             'depends_on' : [
@@ -252,7 +260,6 @@ default_stack_config['filetype'] = 'yaml'
 
 ### check if configs are in sync
 from meerschaum.config._paths import CONFIG_DIR_PATH, STACK_ENV_PATH, STACK_COMPOSE_PATH
-from meerschaum.config._paths import STACK_COMPOSE_FILENAME, STACK_ENV_FILENAME
 from meerschaum.config._paths import GRAFANA_DATASOURCE_PATH, GRAFANA_DASHBOARD_PATH
 from meerschaum.config._paths import MOSQUITTO_CONFIG_PATH
 
