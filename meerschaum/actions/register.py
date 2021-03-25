@@ -19,8 +19,6 @@ def register(
     from meerschaum.utils.misc import choose_subaction
     options = {
         'pipes'     : _register_pipes,
-        #  'metrics'   : _register_metrics,
-        #  'locations' : _register_locations,
         'plugins'   : _register_plugins,
         'users'     : _register_users,
     }
@@ -79,20 +77,13 @@ def _register_pipes(
 
     return success, message
 
-
-def _register_metrics(**kw):
-    pass
-
-def _register_locations(**kw):
-    pass
-
 def _register_plugins(
         action : List[str] = [],
         repository : Optional[str] = None,
         shell : bool = False,
         debug : bool = False,
         **kw
-    ) -> tuple:
+    ) -> SuccessTuple:
     from meerschaum.utils.debug import dprint
     from meerschaum.utils.misc import reload_plugins
     from meerschaum.connectors.parse import parse_repo_keys
@@ -146,12 +137,12 @@ def _register_plugins(
     return True, msg
 
 def _register_users(
-        action : list = [],
-        repository : str = None,
+        action : List[str] = [],
+        repository : Optional[str] = None,
         shell : bool = False,
         debug : bool = False,
         **kw : Any
-    ) -> tuple:
+    ) -> SuccessTuple:
     """
     Register a new user to a Meerschaum repository.
     By default, register to the public mrsm.io repository (or whatever is defined in config).

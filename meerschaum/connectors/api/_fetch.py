@@ -6,14 +6,15 @@
 Fetch Pipe data via the API connector
 """
 
+from __future__ import annotations
 import datetime
 
 def fetch(
         self,
-        pipe : 'meerschaum.Pipe',
+        pipe : meerschaum.Pipe,
         begin : str = 'now',
         debug : bool = False
-    ) -> 'pd.DataFrame':
+    ) -> pandas.DataFrame:
     """
     Get the Pipe data from the remote Pipe
     """

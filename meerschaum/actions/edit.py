@@ -96,17 +96,34 @@ def _edit_pipes(
     ) -> SuccessTuple:
     """
     Open and edit pipes' configuration files.
+
+    If 'definition' is specified, open a definition file (e.g. `.sql` for `sql` pipes).
+
+    Usage:
+        ```
+        ### Edit all pipes.
+        edit pipes
+
+        ### Edit a SQL definition for the pipe `sql_main_mymetric`.
+        edit pipes definition -c sql:main -m mymetric
+        ```
     """
     from meerschaum import get_pipes
     from meerschaum.utils.prompt import prompt
     from meerschaum.utils.misc import print_options
+
+    edit_definition = (len(action) > 0 and action[0] == 'definition')
 
     pipes = get_pipes(debug=debug, as_list=True, **kw)
     print_options(pipes, header=f'Pipes to be edited:')
 
     if len(pipes) > 1:
         try:
-            prompt("Press [Enter] to begin editing the above {len(pipes)} pipes or [CTRL-C] to cancel:", icon=False)
+            prompt(
+                f"Press [Enter] to begin editing the above {len(pipes)} pipe" +
+                ("s" if len(pipes) != 1 else "") +
+                " or [CTRL-C] to cancel:", icon=False
+            )
         except KeyboardInterrupt:
             return False, f"No pipes changed."
 
@@ -117,7 +134,10 @@ def _edit_pipes(
             continue
         ### 
         if text != 'pass':
-            p.edit(interactive=True, debug=debug, **kw)
+            if p.connector.type == 'sql':
+                p.edit_definition(debug=debug, **kw)
+            else:
+                p.edit(interactive=True, debug=debug, **kw)
     return (True, "Success")
 
 def _edit_users(
