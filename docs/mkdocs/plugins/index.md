@@ -4,25 +4,25 @@ Meerschaum gives you the ability to easily install and create plugins. Refer to 
 
 ## Installing Plugins
 
-To install plugins, run the `install plugins` command:
+To install plugins, run the `install plugins` command, followed by the names of the plugins you wish to install::
 ```bash
-mrsm install plugins testing
+mrsm install plugins noaa
 ```
 
 !!! info
-    Any Meerschaum API instance can act as a Meerschaum repository, and the default repository is the public `mrsm.io` repository. Follow the below steps to change your default repository to a private repository:
+    Any Meerschaum API instance can act as a Meerschaum repository, and the default repository is the public `api.mrsm.io` repository. Follow the  steps below to change your default repository to a private repository:
 
     1. Open your configuration file with `edit config`.
         ```
         mrsm edit config
         ```
-    2. Change value of `meerschaum:default_repository` to the [Connector Keys](#connector-keys) of your repository.
+    2. Change value of `meerschaum:default_repository` to the [Connector Keys](/reference/connectors) of your repository.
         ```yaml
         default_repository: api:myrepo
         ```
 
 ## Using Plugins
-How you use a plugin depends on whether it's a data or an action plugin, and sometimes plugins are both.
+How you use a plugin depends on it's [type](types-of-plugins): whether it's a [data](types-of-plugins/#data-plugins) or an [action](types-of-plugins/#action-plugins) plugin, and sometimes plugins can be both. 
 
 ## Publishing Plugins
 TODO

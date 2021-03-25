@@ -2,12 +2,15 @@
 The way Meerschaum operates between machines is via connectors. Connectors are collections of configuration attributes (e.g. username, host, etc.) that allow Meerschaum to send and retrieve data by implementing Meerschaum's interface to another protocol.
 
 ## Structure
-A connector is identified by two parts: its **type** and **label**, separated by a colon (`:`). For example, the connector `sql:local` refers to a connector with the type `sql` and the label `local`. By default, the connector `sql:local` is configured to use a direct database connection to `localhost`.
+A connector is identified by two parts: its **type** and **label**, separated by a colon (`:`). For example, the connector `sql:local` refers to a connector with the type `sql` and the label `local`.
+
+!!! tip ""
+    By default, the connector `sql:local` is configured to use a SQLite database on `localhost`.
 
 
 ### Type
 
-!!! tip
+!!! tip "Connectors give you options"
     A connector's type determines the protocol it uses and its required attributes. Different types of connectors are capable of different tasks and have varying levels of flexibility and performance.
 
 | Type     | Pros                                                         | Cons                                                         | Use Cases                                                    |

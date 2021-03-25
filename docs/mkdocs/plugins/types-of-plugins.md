@@ -1,10 +1,16 @@
 # Types of Plugins
 
-Meerschaum plugins either **provide data** or **do actions**.
+There are two main kinds of Meerschaum plugin: those which **provide data** and those that **perform actions**.
 
-Data plugins retrieve and parse data, then pass it on to Meerschaum for later analysis. There are two types of data plugins: [**fetch**](#fetch-plugins) and [**sync**](#sync-plugins) plugins.
+!!! info "¿Por qué no los dos?"
+    When writing Meershcaum plugins, developers may choose to use one or both functionalities. That means a plugin may both act as a connector as well as providing shell actions.
+
+See below for more information about the differences between [data](#data-plugins) and [action](#action-plugins) plugins.
+
 
 ## Data Plugins
+
+Data plugins retrieve and parse data, then pass it on to Meerschaum for later analysis. There are two types of data plugins: [**fetch**](#fetch-plugins) and [**sync**](#sync-plugins) plugins.
 
 ### Fetch Plugins
 
@@ -25,7 +31,7 @@ Ultimately, the goal of sync and fetch plugins is the same: retrieving data from
 
 Action plugins add additional actions to Meerschaum, such as built-in actions like `sync`, `bootstrap`, and `show`. The sky is the limit for actions ― the action function serves as an entry point from `mrsm`.
 
-For example, the `testing` plugin provides the `test` action, which is the command to execute Meerschaum's `pytest` tests.
+For example, the `color` plugin provides the `color` action, which is a convenience command to toggle the shell's Unicode and ANSI configuration.
 
 An action plugin can provide multiple actions, and because plugins are loaded last, there is potential for overwriting built-in actions and greatly extending Meerschaum.
 
