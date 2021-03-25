@@ -67,7 +67,7 @@ class Pipe:
         attributes, parameters, columns, get_columns, get_id, id
     )
     from ._show import show
-    from ._edit import edit
+    from ._edit import edit, edit_definition
     from ._sync import sync, get_sync_time, exists
     from ._delete import delete
     from ._drop import drop

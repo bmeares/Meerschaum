@@ -26,7 +26,6 @@ def edit(
     parameters_path = pathlib.Path(os.path.join(PIPES_CACHE_RESOURCES_PATH, parameters_filename))
     
     from meerschaum.utils.yaml import yaml
-    #  import yaml
 
     edit_header = "#######################################"
     for i in range(len(str(self))): edit_header += "#"
@@ -67,3 +66,13 @@ def edit(
         pprint(self.parameters)
 
     return self.instance_connector.edit_pipe(self, patch=patch, debug=debug, **kw)
+
+def edit_definition(
+        self,
+        debug : bool = False,
+        **kw : Any
+    ):
+    """
+    Edit a pipe's definition file and update 
+    """
+    pass

@@ -1,13 +1,13 @@
 # Quick Start
 Although you can customize Meerschaum to best fit your situation, if you're starting from scratch, the defaults work just fine. Read the guide below and follow the steps to install and use Meerschaum.
 
-***TL;DR*** If you already have a Python 3.7 environment set up, install Meerschaum via [`pip`](https://pip.pypa.io/en/stable/installing/):
+***TL;DR*** If you already have a Python 3.7+ environment set up, install Meerschaum via [`pip`](https://pip.pypa.io/en/stable/installing/):
 ```bash
 pip install meerschaum
 ```
 
 !!! question "Can I run Meerschaum without installing anything?"
-    If you can't install Python or just want to try Meerschaum, consider installing [Meerschaum Portable](meerschaum-portable).
+    If you can't install Python or just want to try Meerschaum, consider downloading [Meerschaum Portable](meerschaum-portable).
 
 ## Requirements
 

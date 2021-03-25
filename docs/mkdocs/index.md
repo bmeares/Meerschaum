@@ -55,6 +55,7 @@ hide:
 Here you can find usage information, helpful guides, and tutorials.
 
 If you'd like to incorporate Meerschaum into your project, head over to [docs.meerschaum.io](https://docs.meerschaum.io) for technical API documentation of the `meerschaum` package.
+
 <div class="grid-container center">
   <div class="grid-child">
     <p><a id="get-started-button" class="md-button md-button--primary" href="get-started" style="float: right;">Get Started</a></p>
@@ -62,6 +63,18 @@ If you'd like to incorporate Meerschaum into your project, head over to [docs.me
   <div class="grid-child" style="float: left;">
     <p><a id="pip-button" class="md-button" href="#" style="float: left; font-family: monospace" onclick="copy_install_text(this)">$ pip install meerschaum<span class="twemoji">
 </a></p>
+  </div>
+</div>
+
+<div class="grid-container">
+  <div class="grid-child">
+    <h2>What is Meerschaum?</h2>
+    <p>Meerschaum is a platform for quickly creating and managing time-series data streams called <b><a href="/references/pipes/">pipes</a></b>. With Meerschaum, you can have a data visualization stack running in minutes.</p>
+  </div>
+  <div class="grid-child">
+    <h2>Why Meerschaum?</h2>
+    <p>If you've worked with time-series data, you know the headaches that come with ETL. Meerschaum is a system that makes consolidating and syncing data easy.</p>
+    <p>Anytime you need to move time-series data from somewhere like a database, API, MQTT topic, or even CSV files (we've all done it at some point), you usually end up writing some scripts that silently break in a year. Meerschaum instead gives you better tools to define and sync your data streams. And don't worry — you can always incorporate Meerschaum into your existing scripts.</p>
   </div>
 </div>
 
