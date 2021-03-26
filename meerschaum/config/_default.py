@@ -12,7 +12,7 @@ from meerschaum.connectors import attributes as connector_attributes
 
 default_meerschaum_config = {
     'instance' : 'sql:main',
-    'api_instance' : 'sql:main',
+    'api_instance' : 'MRSM{meerschaum:instance}',
     'default_repository' : 'api:mrsm',
     'connectors' : {
         'sql' : {

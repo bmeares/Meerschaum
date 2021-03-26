@@ -23,6 +23,7 @@ def edit_config(
     :param params:
         patch to apply. Depreciated / replaced by --config (at least in this case)
     """
+    from meerschaum.config import get_config
     from meerschaum.config._read_config import get_keyfile_path
     from meerschaum.config._paths import CONFIG_DIR_PATH
     from meerschaum.utils.packages import reload_package
@@ -30,12 +31,13 @@ def edit_config(
     from meerschaum.utils.debug import dprint
 
     for k in keys:
-        fp = get_keyfile_path(k, create_new=True)
-        edit_file(fp)
+        ### If defined in default, create the config file.
+        get_config(k, write_missing=True, warn=False)
+        edit_file(get_keyfile_path(k, create_new=True))
 
     if debug: dprint("Reloading configuration...")
     reload_package('meerschaum', debug=debug, **kw)
-    reload_package('meerschaum', debug=debug, **kw)
+    #  reload_package('meerschaum', debug=debug, **kw)
 
     return (True, "Success")
 

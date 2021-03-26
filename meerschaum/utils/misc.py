@@ -545,9 +545,9 @@ def sql_item_name(s : str, flavor : str) -> str:
     """
     Parse SQL items depending on the flavor
     """
-    if flavor in {'timescaledb', 'postgresql'}: s = pg_capital(s)
+    if flavor in {'timescaledb', 'postgresql'}: s = pg_capital(str(s))
     elif flavor == 'sqlite': s = "\"" + str(s) + "\""
-    return s
+    return str(s)
 
 def pg_capital(s : str) -> str:
     """

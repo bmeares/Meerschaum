@@ -15,19 +15,18 @@ def bootstrap(
         **kw : Any
     ) -> SuccessTuple:
     """
-    Bootstrap an element (pipe, configuration).
+    Bootstrap an element (pipes, connectors, config).
 
     Command:
         `bootstrap {option}`
 
     Example:
-        `bootstrap config`
+        `bootstrap pipes`
     """
     from meerschaum.utils.misc import choose_subaction
     options = {
         'pipes'      : _bootstrap_pipes,
         'config'     : _bootstrap_config,
-        'stack'      : _bootstrap_stack,
         'connectors' : _bootstrap_connectors,
     }
     return choose_subaction(action, options, **kw)
@@ -57,6 +56,7 @@ def _bootstrap_pipes(
     from meerschaum.utils.formatting._shell import clear_screen
 
     _clear = get_config('shell', 'clear_screen', patch=True)
+    abort_tuple = (False, "No pipes were bootstrapped.")
 
     if (
         len(connector_keys) > 0 and
@@ -72,25 +72,32 @@ def _bootstrap_pipes(
             )
         )
         if not force:
-            if not yes_no(
-                "Would you like to bootstrap pipes with these keys?\nExisting pipes will be deleted!",
-                default = 'n',
-                yes = yes,
-                noask = noask
-            ):
-                return False, f"No pipes were bootstrapped."
+            try:
+                if not yes_no(
+                    "Would you like to bootstrap pipes with these keys?\nExisting pipes will be deleted!",
+                    default = 'n',
+                    yes = yes,
+                    noask = noask
+                ):
+                    return abort_tuple
+            except:
+                return abort_tuple
     else:
         ### Get the connector.
         new_label = 'New'
         info(f"To create a pipe without explicitly using a connector, use the `register pipes` command.\n")
-        ck = choose(
-            f"Where are the data coming from?\n\n" +
-            f"Please type the keys of a connector from below,\n" +
-            f"or enter '{new_label}' to register a new connector.\n\n" +
-            f" {get_config('formatting', 'emoji', 'connector')} Connector:\n",
-            get_connector_labels() + [new_label],
-            numeric = False
-        )
+        try:
+            ck = choose(
+                f"Where are the data coming from?\n\n" +
+                f"Please type the keys of a connector from below,\n" +
+                f"or enter '{new_label}' to register a new connector.\n\n" +
+                f" {get_config('formatting', 'emoji', 'connector')} Connector:\n",
+                get_connector_labels() + [new_label],
+                numeric = False
+            )
+        except:
+            return abort_tuple
+
         if ck == new_label:
             if _clear: clear_screen(debug=debug)
             while True:
@@ -105,12 +112,15 @@ def _bootstrap_pipes(
         ### Get the metric.
         while True:
             if _clear: clear_screen(debug=debug)
-            mk = prompt(
-                f"What kind of data is this?\n\n" +
-                f"The metric is the label for the contents of the pipe.\n" +
-                f"For example, 'weather' might be a metric for weather station data.\n\n" +
-                f" {get_config('formatting', 'emoji', 'metric')} Metric:"
-            )
+            try:
+                mk = prompt(
+                    f"What kind of data is this?\n\n" +
+                    f"The metric is the label for the contents of the pipe.\n" +
+                    f"For example, 'weather' might be a metric for weather station data.\n\n" +
+                    f" {get_config('formatting', 'emoji', 'metric')} Metric:"
+                )
+            except:
+                return abort_tuple
             if mk:
                 break
             warn("Please enter a metric.", stack=False)
@@ -118,16 +128,19 @@ def _bootstrap_pipes(
 
         ### Get the location
         if _clear: clear_screen(debug=debug)
-        lk = prompt(
-            f"Where are the data located?\n\n" +
-            f"You have the option to create multiple pipes with same connector and\n" +
-            f"metric but different locations.\n\n" +
-            f"For example, you could create the pipes 'sql_remote_energy_home' and\n" +
-            f"'sql_remote_energy_work', which would share a connector ('sql:remote') and\n" +
-            f"metric ('energy'), but may come from different tables.\n\n" +
-            f"In most cases. you can omit the location.\n\n" +
-            f" {get_config('formatting', 'emoji', 'location')} Location (Empty to omit):"
-        )
+        try:
+            lk = prompt(
+                f"Where are the data located?\n\n" +
+                f"You have the option to create multiple pipes with same connector and\n" +
+                f"metric but different locations.\n\n" +
+                f"For example, you could create the pipes 'sql_remote_energy_home' and\n" +
+                f"'sql_remote_energy_work', which would share a connector ('sql:remote') and\n" +
+                f"metric ('energy'), but may come from different tables.\n\n" +
+                f"In most cases. you can omit the location.\n\n" +
+                f" {get_config('formatting', 'emoji', 'location')} Location (Empty to omit):"
+            )
+        except:
+            return abort_tuple
         lk = None if lk == '' else lk
         location_keys = [lk]
 
@@ -140,18 +153,24 @@ def _bootstrap_pipes(
     pipes = []
     for p in _pipes:
         if p.get_id() is not None and not force:
-            if not yes_no(f"Pipe '{p}' already exists. Delete pipe '{p}'?\nData will be lost!", default='n'):
-                info(f"Skipping bootstrapping pipe '{p}'...")
-                continue
+            try:
+                if not yes_no(f"Pipe '{p}' already exists. Delete pipe '{p}'?\nData will be lost!", default='n'):
+                    info(f"Skipping bootstrapping pipe '{p}'...")
+                    continue
+            except:
+                return abort_tuple
         pipes.append(p)
 
     if len(pipes) == 0:
-        return False, "No pipes were bootstrapped."
+        return abort_tuple
 
     success_dict = {}
     successes, failures = 0, 0
     for p in pipes:
-        tup = p.bootstrap(interactive=True, debug=debug)
+        try:
+            tup = p.bootstrap(interactive=True, force=force, noask=noask, yes=yes, debug=debug)
+        except Exception as e:
+            tup = False, f"Failed to bootstrap pipe '{p}' with exception:\n" + str(e)
         success_dict[p] = tup
         if tup[0]:
             successes += 1
@@ -163,7 +182,7 @@ def _bootstrap_pipes(
         f"    ({successes} succeeded, {failures} failed)."
     )
 
-    return (successes > 0, msg)
+    return (successes > 0), msg
 
 def _bootstrap_connectors(
         action : Sequence[str] = [],
@@ -189,19 +208,24 @@ def _bootstrap_connectors(
     from meerschaum.utils.warnings import warn, info
     from meerschaum.utils.misc import is_int
 
+    abort_tuple = False, "No connectors bootstrapped."
     _clear = get_config('shell', 'clear_screen', patch=True)
 
     if len(connector_keys) == 0:
         pass
 
-    _type = choose(
-        (
-            'Please choose a connector type.\n' +
-            'For more information on connectors, please visit https://meerschaum.io/reference/connectors'
-        ),
-        sorted(list(connectors)),
-        default='sql'
-    )
+    try:
+        _type = choose(
+            (
+                'Please choose a connector type.\n' +
+                'For more information on connectors, please visit https://meerschaum.io/reference/connectors'
+            ),
+            sorted(list(connectors)),
+            default='sql'
+        )
+    except KeyboardInterrupt:
+        return abort_tuple
+
     if _clear: clear_screen(debug=debug)
 
     _label_choices = sorted(
@@ -211,7 +235,10 @@ def _bootstrap_connectors(
     new_connector_label = 'New connector'
     _label_choices.append(new_connector_label)
     while True:
-        _label = prompt(f"New label for '{_type}' connector:")
+        try:
+            _label = prompt(f"New label for '{_type}' connector:")
+        except KeyboardInterrupt:
+            return abort_tuple
         if _label in get_config('meerschaum', 'connectors', _type):
             warn(f"Connector '{_type}:{_label}' already exists.", stack=False)
             overwrite = yes_no(f"Do you want to overwrite connector '{_type}:{_label}'?", default='n', yes=yes, noask=noask)
@@ -226,14 +253,17 @@ def _bootstrap_connectors(
 
     new_attributes = {}
     if 'flavors' in connector_attributes[_type]:
-        flavor = choose(
-            f"Flavor for connector '{_type}:{_label}':",
-            sorted(list(connector_attributes[_type]['flavors'])),
-            default = (
-                'timescaledb' if 'timescaledb' in connector_attributes[_type]['flavors']
-                else None
+        try:
+            flavor = choose(
+                f"Flavor for connector '{_type}:{_label}':",
+                sorted(list(connector_attributes[_type]['flavors'])),
+                default = (
+                    'timescaledb' if 'timescaledb' in connector_attributes[_type]['flavors']
+                    else None
+                )
             )
-        )
+        except KeyboardInterrupt:
+            return abort_tuple
         new_attributes['flavor'] = flavor
         required = sorted(list(connector_attributes[_type]['flavors'][flavor]['requirements']))
         default = connector_attributes[_type]['flavors'][flavor]['defaults']
@@ -246,7 +276,7 @@ def _bootstrap_connectors(
     )
     for r in required:
         try:
-            val = prompt(f"Value for '{r}':")
+            val = prompt(f"Value for {r}:")
         except KeyboardInterrupt:
             continue
         if is_int(val): val = int(val)
@@ -259,7 +289,7 @@ def _bootstrap_connectors(
         try:
             val = prompt(f"Value for {k}:", default=str(v))
         except KeyboardInterrupt:
-            pass
+            continue
         if is_int(val): val = int(val)
         new_attributes[k] = val
 
@@ -270,11 +300,14 @@ def _bootstrap_connectors(
         return False, f"Failed to bootstrap connector '{_type}:{_label}' with exception:\n{e}"
 
     pprint(new_attributes)
-    ok = (
-        yes_no(f"Are you ok with these new attributes for connector '{conn}'?", default='y', noask=noask, yes=yes)
-        if not yes
-        else yes
-    )
+    try:
+        ok = (
+            yes_no(f"Are you ok with these new attributes for connector '{conn}'?", default='y', noask=noask, yes=yes)
+            if not yes
+            else yes
+        )
+    except:
+        ok = False
     if not ok:
         return False, "No changes made to connectors configuration."
     
@@ -299,94 +332,25 @@ def _bootstrap_config(
     """
     Delete and regenerate the default Meerschaum configuration.
     """
-    possible_config_funcs = {
-        'stack'   : _bootstrap_stack,
-        'grafana' : _bootstrap_grafana,
-    }
-    if len(action) > 0:
-        if action[0] in possible_config_funcs:
-            return possible_config_funcs[action[0]](**kw)
-
     from meerschaum.config._edit import write_default_config, write_config
     from meerschaum.config._default import default_config
 
     from meerschaum.actions import actions
     if not actions['delete'](['config'], debug=debug, yes=yes, force=force, **kw)[0]:
-        return False, "Aborting bootstrap"
+        return False, "Failed to delete configuration files."
 
     if not write_config(default_config, debug=debug, **kw):
-        return (False, "Failed to write default configuration")
+        return (False, "Failed to write default configuration.")
 
     if not write_default_config(debug=debug, **kw):
-        return (False, "Failed to write default configuration")
+        return (False, "Failed to write default configuration.")
 
     from meerschaum.config.stack import write_stack
     if not write_stack(debug=debug):
-        return False, "Failed to write stack"
+        return False, "Failed to write stack."
 
-    return (True, "Successfully bootstrapped configuration files")
+    return (True, "Successfully bootstrapped configuration files.")
 
-def _bootstrap_stack(
-        yes : bool = False,
-        force : bool = False,
-        noask : bool = False,
-        debug : bool = False,
-        **kw : Any
-    ) -> SuccessTuple:
-    """
-    Delete and regenerate the default Meerschaum stack configuration
-    """
-    from meerschaum.utils.prompt import yes_no
-    from meerschaum.config._paths import STACK_COMPOSE_PATH, STACK_ENV_PATH
-    from meerschaum.config.stack import write_stack
-    from meerschaum.utils.debug import dprint
-    if force:
-        answer = True
-    else:
-        answer = yes_no(f"Delete {STACK_COMPOSE_PATH}?", default='n', yes=yes, noask=noask)
-
-    if answer:
-        if not write_stack(debug=debug):
-            return False, "Failed to write stack configuration"
-    else:
-        msg = "No edits made"
-        if debug: dprint(msg)
-        return True, msg
-    return True, "Success"
-
-def _bootstrap_grafana(
-        yes : bool = False,
-        force : bool = False,
-        noask : bool = False,
-        debug : bool = False,
-        **kw : Any
-    ) -> SuccessTuple:
-    """
-    Delete and regenerate the default Meerschaum stack configuration
-    """
-    from meerschaum.utils.prompt import yes_no
-    from meerschaum.config._paths import GRAFANA_DATASOURCE_PATH, GRAFANA_DASHBOARD_PATH
-    from meerschaum.config._edit import general_write_yaml_config
-    from meerschaum.config import get_config
-    from meerschaum.utils.debug import dprint
-    if force:
-        answer = True
-    else:
-        answer = yes_no(f"Delete {GRAFANA_DATASOURCE_PATH} and {GRAFANA_DASHBOARD_PATH}?", default='n', noask=noask, yes=yes)
-
-    if answer:
-        general_write_yaml_config(
-            {
-                GRAFANA_DATASOURCE_PATH : get_config('stack', 'grafana', 'datasource', patch=True),
-                GRAFANA_DASHBOARD_PATH : get_config('stack', 'grafana', 'dashboard'),
-            },
-            debug=debug
-        )
-    else:
-        msg = "No edits made"
-        if debug: dprint(msg)
-        return True, msg
-    return True, "Success"
 
 ### NOTE: This must be the final statement of the module.
 ###       Any subactions added below these lines will not

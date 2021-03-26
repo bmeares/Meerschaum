@@ -94,6 +94,7 @@ packages = {
 packages['sql'] = {
     'numpy'      : 'numpy>=1.18.5',
     'pandas'     : 'pandas>=1.1.4',
+    'joblib'     : 'joblib>=0.17.0',
     'sqlalchemy' : 'sqlalchemy>=1.2.19',
     'databases'  : 'databases>=0.4.0',
     'aiosqlite'  : 'aiosqlite>=0.16.0',

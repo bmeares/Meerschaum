@@ -276,12 +276,12 @@ def get_pipe_data(
                 params = {'begin': begin, 'end': end},
                 debug = debug
             )
+            j = response.json()
         except Exception as e:
             warn(str(e))
             return None
-        if not response:
-            if isinstance(response.json(), dict) and 'detail' in response.json():
-                return False, response.json()['detail']
+        if isinstance(j, dict) and 'detail' in j:
+            return False, j['detail']
         break
     from meerschaum.utils.packages import import_pandas
     from meerschaum.utils.misc import parse_df_datetimes
@@ -292,7 +292,6 @@ def get_pipe_data(
         warn(str(e))
         return None
     df = parse_df_datetimes(pd.read_json(response.text), debug=debug)
-    #  if debug: dprint(df)
     return df
 
 def get_backtrack_data(

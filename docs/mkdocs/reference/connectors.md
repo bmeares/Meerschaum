@@ -22,13 +22,21 @@ A connector is identified by two parts: its **type** and **label**, separated by
 
 ## Instances and Repositories
 
-The terms **instance** and **repository** connector refer to subclasses of standard Meerschaum connectors. When connecting to a Meerschaum instance, you use a standard `sql` or `api` connector, which expects to be able to access internal Meerschaum methods, such as retrieving users and pipes' metadata.
+The terms **instance** and **repository** connectors refer to subclasses of standard Meerschaum connectors. When connecting to a Meerschaum instance, you use a standard `sql` or `api` connector, which expects to be able to access internal Meerschaum methods, such as retrieving users' and pipes' metadata.
+
+![Meerschaum Connectors Venn Diagram](connectors_venn_diagram.png){align=right}
 
 !!! info
+    Not all `sql` connections are instance connectors, but all `api` connectors are.
 
-​    Not all `sql` connections are instance connectors, but all `api` connectors are.
-
-A *
+Repository connectors are a subset of instance connectors and may only be `api` connectors. Consider the Venn diagram to the right to vizualize the different classes of connectors.
 
 ## Creating a Connector
-To create a new connector, run the command `bootstrap connector` and answer the following prompts. The new connector will be added to your configuration file (which may be accessed with `edit config`).
+To create a new connector (or redefine and existing one), run the command `bootstrap connector` and answer the following prompts. The new connector will be added to your configuration file (which may be accessed with `edit config`).
+
+## Deleting a Connector
+To delete a connector, run the command `delete connectors` with the `-c` connector keys flag:
+
+```bash
+delete connectors -c sql:myremoteconnector -y
+```

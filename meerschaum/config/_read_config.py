@@ -97,8 +97,6 @@ def read_config(
                     search_and_substitute_config(default_config) if substitute
                     else default_config
                 )
-                #  print(substitute)
-                #  print(_default_dict.keys())
                 ### If default config contains symlinks, add them to the config to write.
                 try:
                     _default_symlinks = _default_dict[symlinks_key][mk]

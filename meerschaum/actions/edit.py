@@ -20,8 +20,6 @@ def edit(
     options = {
         'config'  : _edit_config,
         'pipes'   : _edit_pipes,
-        #  'stack'   : _edit_stack,
-        #  'grafana' : _edit_grafana,
         'users'   : _edit_users,
     }
     return choose_subaction(action, options, **kw)
@@ -44,10 +42,6 @@ def _complete_edit(
 
     from meerschaum.actions.shell import default_action_completer
     return default_action_completer(action=(['edit'] + action), **kw)
-
-#  def _edit_stack(*args, **kw) -> SuccessTuple:
-    #  from meerschaum.config.stack import edit_stack
-    #  return edit_stack(*args, **kw)
 
 def _edit_config(action : List[str] = [], **kw) -> SuccessTuple:
     """
@@ -85,10 +79,6 @@ def _complete_edit_config(action : List[str] = [], **kw : Any):
             possibilities.append(key)
     return possibilities
 
-#  def _edit_grafana(*args, **kw) -> SuccessTuple:
-    #  from meerschaum.config.stack.grafana import edit_grafana
-    #  return edit_grafana(*args, **kw)
-
 def _edit_pipes(
         action : List[str] = [],
         debug : bool = False,
@@ -115,7 +105,8 @@ def _edit_pipes(
     edit_definition = (len(action) > 0 and action[0] == 'definition')
 
     pipes = get_pipes(debug=debug, as_list=True, **kw)
-    print_options(pipes, header=f'Pipes to be edited:')
+    if pipes: print_options(pipes, header=f'Pipes to be edited:')
+    else: return False, "No pipes to edit."
 
     if len(pipes) > 1:
         try:
@@ -130,14 +121,13 @@ def _edit_pipes(
     for p in pipes:
         try:
             text = prompt(f"Press [Enter] to edit '{p}' or [CTRL-C] to skip:", icon=False)
+            if text == 'pass': continue
         except KeyboardInterrupt:
             continue
-        ### 
-        if text != 'pass':
-            if p.connector.type == 'sql':
-                p.edit_definition(debug=debug, **kw)
-            else:
-                p.edit(interactive=True, debug=debug, **kw)
+        if edit_definition:
+            p.edit_definition(debug=debug, **kw)
+        else:
+            p.edit(interactive=True, debug=debug, **kw)
     return (True, "Success")
 
 def _edit_users(
@@ -190,7 +180,7 @@ def _edit_users(
             try:
                 existing_attrs = repo_connector.get_user_attributes(User(username), debug=debug)
                 with open(attr_path, 'w+') as f:
-                    yaml.dump(existing_attrs, stream=f)
+                    yaml.dump(existing_attrs, stream=f, sort_keys=False)
                 edit_file(attr_path)
                 with open(attr_path, 'r') as f:
                     attributes = yaml.load(f)
