@@ -1,6 +1,15 @@
 # Changelog
 This changelog was not introduced until v0.2.12, so many of the critical releases of Meerschaum have already been published.
 
+### v0.2.14
+- **Implemented `bootstrap pipes` action.**  
+  The `bootstrap pipes` wizard helps guide new users through creating connectors and pipes.
+- **Added `edit pipes definition` action.**  
+  Adding the word `definition` to the `edit pipes` command will now open a `.sql` file for pipes with `sql` connectors.
+- **Changed `api_instance` to symlink to `instance` by default.**
+- **Registering users applies to instances, not repositories.**  
+  The action `register users` now uses the value of `instance` instead of `default_repository`. For users to make accounts with `api.mrsm.io`, they will have to specify `-i api:mrsm`.
+
 ### v0.2.13
 - **Fixed symlink handling for nesting dictionaries.**  
   For example, the environment variables for the API service now contain clean references to the `meerschaum` and `system` keys.

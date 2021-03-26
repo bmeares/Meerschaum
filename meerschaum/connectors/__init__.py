@@ -29,6 +29,8 @@ attributes = {
     'api' : {
         'required' : [
             'host',
+            'username',
+            'password'
         ],
         'default' : {
             #  'username' : 'mrsm',

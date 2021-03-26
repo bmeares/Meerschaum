@@ -7,9 +7,6 @@ The PluginConnector imports fetch and sync methods from a Plugin (if possible) a
 allows Pipes to have connectors of type 'plugin'.
 """
 
-import sys
-from meerschaum.config._paths import PLUGINS_RESOURCES_PATH
-if PLUGINS_RESOURCES_PATH not in sys.path: sys.path.append(str(PLUGINS_RESOURCES_PATH))
 from meerschaum.connectors import Connector
 
 class PluginConnector(Connector):
@@ -26,8 +23,11 @@ class PluginConnector(Connector):
         """
         super().__init__('plugin', label=label, **kw)
 
-        import os, pathlib
+        import os, pathlib, sys
         from meerschaum.utils.warnings import error, warn
+        from meerschaum.config._paths import PLUGINS_RESOURCES_PATH
+        if PLUGINS_RESOURCES_PATH not in sys.path: sys.path.append(str(PLUGINS_RESOURCES_PATH))
+
         self.resource_path = None
         for _plugin in os.listdir(PLUGINS_RESOURCES_PATH):
             plugin = _plugin.replace('.py', '')

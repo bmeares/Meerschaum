@@ -125,13 +125,6 @@ def get_console():
         console = None
     return console
 
-#  try:
-    #  console = rich_console.Console()
-#  except:
-    #  warn(f"Failed to import rich. Ignoring color output...", stack=False)
-    #  console = None
-    #  ANSI, UNICODE, CHARSET = False, False, 'ascii'
-
 def print_tuple(tup : tuple, skip_common : bool = True, common_only : bool = False) -> None:
     """
     Print Meerschaum SuccessTuple.

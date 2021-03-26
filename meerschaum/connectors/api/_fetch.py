@@ -7,13 +7,16 @@ Fetch Pipe data via the API connector
 """
 
 from __future__ import annotations
+from meerschaum.utils.typing import Any, Optional
 import datetime
 
 def fetch(
         self,
         pipe : meerschaum.Pipe,
         begin : str = 'now',
-        debug : bool = False
+        end : Optional[datetime.datetime] = None,
+        debug : bool = False,
+        **kw : Any
     ) -> pandas.DataFrame:
     """
     Get the Pipe data from the remote Pipe
@@ -29,11 +32,11 @@ def fetch(
     instructions = pipe.parameters['fetch']
 
     if 'connector_keys' not in instructions:
-        warn(f"Missing connector_keys in fetch parameters for Pipe '{pipe}'")
+        warn(f"Missing connector_keys in fetch parameters for Pipe '{pipe}'", stack=False)
         return None
     remote_connector_keys = instructions['connector_keys']
     if 'metric_key' not in instructions:
-        warn(f"Missing metric_key in fetch parameters for Pipe '{pipe}'")
+        warn(f"Missing metric_key in fetch parameters for Pipe '{pipe}'", stack=False)
         return None
     remote_metric_key = instructions['metric_key']
     if 'location_key' not in instructions: remote_location_key = None
@@ -46,5 +49,5 @@ def fetch(
         remote_location_key,
         mrsm_instance = self
     )
-    return p.get_data(begin=begin, debug=debug)
+    return p.get_data(begin=begin, end=end, debug=debug)
 

@@ -138,24 +138,24 @@ def _register_plugins(
 
 def _register_users(
         action : List[str] = [],
-        repository : Optional[str] = None,
+        mrsm_instance : Optional[str] = None,
         shell : bool = False,
         debug : bool = False,
         **kw : Any
     ) -> SuccessTuple:
     """
-    Register a new user to a Meerschaum repository.
-    By default, register to the public mrsm.io repository (or whatever is defined in config).
+    Register a new user to a Meerschaum instance.
     """
     from meerschaum.config import get_config
     from meerschaum import get_connector
-    from meerschaum.connectors.parse import parse_repo_keys
+    from meerschaum.connectors.parse import parse_instance_keys
     from meerschaum.utils.debug import dprint
     from meerschaum.utils.warnings import warn, error, info
     from meerschaum._internal.User import User
     from meerschaum.utils.formatting import print_tuple
     from meerschaum.utils.prompt import prompt, get_password, get_email
-    repo_connector = parse_repo_keys(repository)
+    if mrsm_instance is None: mrsm_instance = get_connector('meerschaum', 'instance')
+    instance_connector = parse_instance_keys(mrsm_instance)
 
     if len(action) == 0 or action == ['']:
         return False, "No users to register."
@@ -164,7 +164,7 @@ def _register_users(
     nonregistered_users = []
     for username in action:
         user = User(username=username, password='')
-        user_id = repo_connector.get_user_id(user, debug=debug)
+        user_id = instance_connector.get_user_id(user, debug=debug)
         if user_id is not None:
             info(f"User '{user}' already exists. Skipping...")
             continue
@@ -182,8 +182,8 @@ def _register_users(
             return False, f"Aborted registering users {', '.join([str(u) for u in nonregistered_users if u not in successfully_registered_users])}"
         if len(email) == 0: email = None
         user = User(username, password, email=email)
-        info(f"Registering user '{user}' to Meerschaum repository '{repo_connector}'...")
-        result_tuple = repo_connector.register_user(user, debug=debug)
+        info(f"Registering user '{user}' to Meerschaum instance '{instance_connector}'...")
+        result_tuple = instance_connector.register_user(user, debug=debug)
         print_tuple(result_tuple)
         success[username] = result_tuple[0]
         if success[username]: successfully_registered_users.add(user)
