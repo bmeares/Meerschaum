@@ -7,6 +7,7 @@ fastapi-login>=1.5.3
 python-multipart>=0.0.5
 numpy>=1.18.5
 pandas>=1.1.4
+joblib>=0.17.0
 sqlalchemy>=1.2.19
 databases>=0.4.0
 aiosqlite>=0.16.0
