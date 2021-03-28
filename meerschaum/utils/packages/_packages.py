@@ -49,6 +49,7 @@ packages = {
     'drivers' : {
         'psycopg2' : 'psycopg2-binary>=2.8.6',
         'pymysql'  : 'PyMySQL>=0.10.1',
+        'aiomysql' : 'aiomysql>=0.0.21',
     },
     'cli' : {
         'pgcli'    : 'pgcli>=3.1.0',
