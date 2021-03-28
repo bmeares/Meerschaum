@@ -137,8 +137,11 @@ class SQLConnector(Connector):
     def db(self):
         from meerschaum.utils.packages import attempt_import
         databases = attempt_import('databases', lazy=False, install=True)
+        url = self.DATABASE_URL
+        if 'mysql' in url:
+            url = url.replace('+pymysql', '')
         if '_db' not in self.__dict__:
-            self._db = databases.Database(self.DATABASE_URL)
+            self._db = databases.Database(url)
         return self._db
 
     def __getstate__(self): return self.__dict__
