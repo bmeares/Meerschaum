@@ -1,6 +1,10 @@
 # Changelog
 This changelog was not introduced until v0.2.12, so many of the critical releases of Meerschaum have already been published.
 
+### v0.2.15
+- **MySQL/MariaDB bugfixes.**
+- **Added `aiomysql` as a driver dependency.**
+
 ### v0.2.14
 - **Implemented `bootstrap pipes` action.**  
   The `bootstrap pipes` wizard helps guide new users through creating connectors and pipes.
