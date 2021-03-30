@@ -6,28 +6,58 @@
 Synchronize a pipe's data with its source via its connector
 """
 
+from __future__ import annotations
+
 from meerschaum.utils.debug import dprint
 from meerschaum.utils.warnings import warn, error
 from meerschaum.utils.typing import (
-    Union, Optional, Callable, Any, Tuple, SuccessTuple, Mapping
+    Union, Optional, Callable, Any, Tuple, SuccessTuple, Mapping, Dict, List
 )
 
 def sync(
         self,
-        df : Optional['pd.DataFrame'] = None,
-        begin : Optional['datetime.datetime'] = None,
-        end : Optional['datetime.datetime'] = None,
+
+        df : Optional[
+            Union[
+                pandas.DataFrame,
+                Dict[str, List[Any]]
+            ]
+        ] = None,
+
+        begin : Optional[
+            datetime.datetime
+        ] = None,
+
+        end : Optional[
+            datetime.datetime
+        ] = None,
+
         force : bool = False,
+
         retries : int = 10,
+
         min_seconds : int = 1,
+
         check_existing : bool = True,
+
         blocking : bool = True,
+
         workers : Optional[int] = None,
-        callback : Callable[[Tuple[bool, str]], Any] = None,
-        error_callback : Callable[[Exception], Any] = None,
+
+        callback : Optional[
+            Callable[[Tuple[bool, str]], Any]
+        ] = None,
+
+        error_callback : Optional[
+            Callable[[Exception], Any]
+        ] = None,
+
         sync_chunks : bool = False,
+
         debug : bool = False,
+
         **kw : Any
+
     ) -> SuccessTuple:
     """
     Fetch new data from the source and update the pipe's table with new data.
@@ -83,6 +113,7 @@ def sync(
         Defaults to False.
 
     :param debug: Verbosity toggle. Defaults to False.
+
     :param kw: Catch-all for keyword arguments.
     """
     from meerschaum.utils.warnings import warn, error
