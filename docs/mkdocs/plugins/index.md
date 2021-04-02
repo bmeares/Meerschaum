@@ -4,9 +4,15 @@ Meerschaum gives you the ability to easily install and create plugins. Refer to 
 
 ## Installing Plugins
 
-To install plugins, run the `install plugins` command, followed by the names of the plugins you wish to install::
+To install plugins, run the `install plugins` command, followed by the names of the plugins you wish to install:
 ```bash
-mrsm install plugins noaa
+install plugins noaa
+```
+
+If you would like to install plugins from a private Meerschaum repository, you can specify from where you would like to download the plugin with the  `--repository` or  `-r` flag.  For example, to install the plugin   `example` from your private Meerschaum API `api:myapi`, you would execute:
+
+```bash
+install plugins example -r api:myapi
 ```
 
 !!! info
@@ -22,7 +28,11 @@ mrsm install plugins noaa
         ```
 
 ## Using Plugins
-How you use a plugin depends on it's [type](types-of-plugins): whether it's a [data](types-of-plugins/#data-plugins) or an [action](types-of-plugins/#action-plugins) plugin, and sometimes plugins can be both. 
+How you use a plugin depends on it's [type](types-of-plugins): whether it's a [data](types-of-plugins/#data-plugins) or an [action](types-of-plugins/#action-plugins) plugin, and sometimes plugins can be both.
+
+To use a data plugin (e.g. `noaa`), bootstrap a pipe and 
+
+
 
 ## Publishing Plugins
 TODO

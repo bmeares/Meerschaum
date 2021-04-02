@@ -6,7 +6,6 @@
 ## 🐞 Bugs
 - Reloading configuration copies 'sql:main' attributes into default.
 - `parameters` column in the `pipes` table is a string, not JSON.
-- `show users` needs to default to the instance connector, not repository.
 
 ## ✨ Features
 - Reuse packages across virtual environments

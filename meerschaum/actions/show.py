@@ -329,27 +329,26 @@ def _show_plugins(
     return True, "Success"
 
 def _show_users(
-        repository : Optional[str] = None,
+        mrsm_instance : Optional[str] = None,
         debug : bool = False,
         **kw : Any
     ) -> SuccessTuple:
     """
-    Show the registered users in a Meerschaum repository (default is mrsm.io).
+    Show the registered users in a Meerschaum instance (default is the current instance).
     """
     from meerschaum.config import get_config
-    from meerschaum.connectors.parse import parse_repo_keys
+    from meerschaum.connectors.parse import parse_instance_keys
     from meerschaum.utils.misc import print_options
-    repo_connector = parse_repo_keys(repository)
-    users_list = repo_connector.get_users(debug=debug)
+    instance_connector = parse_instance_keys(mrsm_instance)
+    users_list = instance_connector.get_users(debug=debug)
 
     try:
-        repo_connector = parse_repo_keys(repository)
-        users_list = repo_connector.get_users(debug=debug)
+        users_list = instance_connector.get_users(debug=debug)
     except Exception as e:
-        import traceback
-        traceback.print_stack()
-        return False, f"Failed to get users from repository '{repository}'"
-    print_options(users_list, header=f"Registered users for repository '{repo_connector}':")
+        #  import traceback
+        #  traceback.print_stack()
+        return False, f"Failed to get users from instance '{mrsm_instance}'"
+    print_options(users_list, header=f"Registered users for instance '{instance_connector}':")
     return True, "Success"
 
 def _show_packages(
