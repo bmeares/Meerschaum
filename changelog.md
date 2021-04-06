@@ -1,6 +1,10 @@
 # Changelog
 This changelog was not introduced until v0.2.12, so many of the critical releases of Meerschaum have already been published.
 
+### v0.2.17
+- **Added CockroachDB as a supported database flavor.**
+- **Dependency conflict resolution.**
+
 ### v0.2.16
 - **Hypertable improvements and bugfixes.**  
   When syncing a new pipe, if an `id` column is specified, create partitions for the number of unique `id` values.

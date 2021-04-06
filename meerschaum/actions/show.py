@@ -187,11 +187,11 @@ def _show_connectors(
             Show the connectors configuration and the attributes for the connector 'sql:main'.
     """
     from meerschaum.connectors import connectors
-    from meerschaum.config import config
+    from meerschaum.config import get_config
     from meerschaum.utils.formatting import make_header
     from meerschaum.utils.formatting import pprint
     print(make_header("\nConfigured connectors:"))
-    pprint(config['meerschaum']['connectors'])
+    pprint(get_config('meerschaum', 'connectors'))
     print(make_header("\nActive connectors:"))
     pprint(connectors)
 

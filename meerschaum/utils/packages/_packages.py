@@ -47,9 +47,10 @@ packages = {
         'paho' : 'paho-mqtt>=1.5.1',
     },
     'drivers' : {
-        'psycopg2' : 'psycopg2-binary>=2.8.6',
-        'pymysql'  : 'PyMySQL>=0.10.1',
-        'aiomysql' : 'aiomysql>=0.0.21',
+        'psycopg2'    : 'psycopg2-binary>=2.8.6',
+        'pymysql'     : 'PyMySQL>=0.9',
+        'aiomysql'    : 'aiomysql>=0.0.21',
+        'cockroachdb' : 'sqlalchemy-cockroachdb>=1.3.2',
     },
     'cli' : {
         'pgcli'    : 'pgcli>=3.1.0',

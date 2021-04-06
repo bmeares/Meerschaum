@@ -65,13 +65,15 @@ default_system_config = {
             'pandas'       : 'pandas',
         },
         'sql' : {
-            'method'       : 'multi',
             'chunksize'    : 900,
-            'pool_size'    : 5,
-            'max_overflow' : 10,
-            'pool_recycle' : 3600,
             'poolclass'    : 'sqlalchemy.pool.QueuePool',
-            'connect_args' : {},
+            'create_engine' : {
+                'method'       : 'multi',
+                'pool_size'    : 5,
+                'max_overflow' : 10,
+                'pool_recycle' : 3600,
+                'connect_args' : {},
+            },
         },
 
         'api' : {
