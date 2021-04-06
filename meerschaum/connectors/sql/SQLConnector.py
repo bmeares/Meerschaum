@@ -80,7 +80,7 @@ class SQLConnector(Connector):
         ### verify the flavor's requirements are met
         if self.flavor not in self.flavor_configs:
             error(f"Flavor '{self.flavor}' is not supported by Meerschaum SQLConnector")
-        self.verify_attributes(self.flavor_configs[self.flavor]['requirements'], debug=debug)
+        self.verify_attributes(self.flavor_configs[self.flavor].get('requirements', set()), debug=debug)
 
         self.wait = wait
         if self.wait:
