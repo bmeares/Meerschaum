@@ -68,7 +68,8 @@ class Connector(metaclass=abc.ABCMeta):
         if inherit_default:
             inherit_from = 'default'
             if self.type in conn_configs and inherit_from in conn_configs[self.type]:
-                self.__dict__.update(conn_configs[self.type][inherit_from])
+                _inherit_dict = conn_configs[self.type][inherit_from].copy()
+                self.__dict__.update(_inherit_dict)
 
         ### load user config into self.__dict__
         if self.type in conn_configs and self.label in conn_configs[self.type]:

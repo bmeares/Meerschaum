@@ -23,7 +23,7 @@ def edit_config(
     :param params:
         patch to apply. Depreciated / replaced by --config (at least in this case)
     """
-    from meerschaum.config import get_config
+    from meerschaum.config import get_config, config
     from meerschaum.config._read_config import get_keyfile_path
     from meerschaum.config._paths import CONFIG_DIR_PATH
     from meerschaum.utils.packages import reload_package
@@ -32,6 +32,7 @@ def edit_config(
 
     for k in keys:
         ### If defined in default, create the config file.
+        if isinstance(config, dict) and k in config: del config[k]
         get_config(k, write_missing=True, warn=False)
         edit_file(get_keyfile_path(k, create_new=True))
 

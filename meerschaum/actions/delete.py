@@ -184,7 +184,7 @@ def _delete_plugins(
 
 def _delete_users(
         action : List[str] = [],
-        repository : str = None,
+        mrsm_instance : Optional[str] = None,
         yes : bool = False,
         force : bool = False,
         noask : bool = False,
@@ -193,22 +193,22 @@ def _delete_users(
         **kw
     ) -> SuccessTuple:
     """
-    Delete plugins from a repository. Adequate permissions are required.
+    Delete users from a Meerschaum instance. Adequate permissions are required.
     """
     from meerschaum import get_connector
-    from meerschaum.connectors.parse import parse_repo_keys
+    from meerschaum.connectors.parse import parse_instance_keys
     from meerschaum.utils.prompt import yes_no, prompt
     from meerschaum.utils.debug import dprint
     from meerschaum.utils.warnings import warn, error, info
     from meerschaum._internal.User import User
     from meerschaum.connectors.api import APIConnector
     from meerschaum.utils.formatting import print_tuple
-    repo_connector = parse_repo_keys(repository)
+    instance_connector = parse_instance_keys(mrsm_instance)
 
     registered_users = []
     for username in action:
         user = User(username=username, password='')
-        user_id = repo_connector.get_user_id(user, debug=debug)
+        user_id = instance_connector.get_user_id(user, debug=debug)
         if user_id is None:
             info(f"User '{user}' does not exist. Skipping...")
             continue
@@ -219,7 +219,7 @@ def _delete_users(
         return False, "No users to delete."
 
     ### verify that the user absolutely wants to do this (skips on --force)
-    question = f"Are you sure you want to delete these users from Meerschaum instance '{repo_connector}'?\n"
+    question = f"Are you sure you want to delete these users from Meerschaum instance '{instance_connector}'?\n"
     for username in registered_users:
         question += f" - {username}" + "\n"
     if force:
@@ -231,8 +231,8 @@ def _delete_users(
 
     success = dict()
     for user in registered_users:
-        info(f"Deleting user '{user}' from Meerschaum repository '{repo_connector}'...")
-        result_tuple = repo_connector.delete_user(user, debug=debug)
+        info(f"Deleting user '{user}' from Meerschaum instance '{instance_connector}'...")
+        result_tuple = instance_connector.delete_user(user, debug=debug)
         print_tuple(result_tuple)
         success[username] = result_tuple[0]
 

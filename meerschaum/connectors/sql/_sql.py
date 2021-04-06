@@ -81,7 +81,7 @@ def read(
 
     """
     if chunks is not None and chunks <= 0: return []
-    from meerschaum.utils.misc import sql_item_name
+    from meerschaum.connectors.sql._tools import sql_item_name
     from meerschaum.utils.packages import attempt_import, import_pandas
     pd = import_pandas()
     sqlalchemy = attempt_import("sqlalchemy")
@@ -221,19 +221,19 @@ def exec(
     from meerschaum.utils.packages import attempt_import
     sqlalchemy = attempt_import("sqlalchemy")
     if debug: dprint("Executing query:\n" + f"{query}")
-    try:
-        with self.engine.connect() as connection:
-            result = connection.execute(
-                query,
-                *args,
-                **kw
-            )
-    except Exception as e:
-        import inspect
 
+    connection = self.engine.connect()
+    transaction = connection.begin()
+    try:
+        result = connection.execute(query, *args, **kw)
+        transaction.commit()
+    except Exception as e:
         if debug: dprint(f"Failed to execute query:\n\n{query}\n\n")
         if not silent: warn(str(e))
         result = None
+        transaction.rollback()
+    finally:
+        connection.close()
 
     return result
 
@@ -281,7 +281,7 @@ def to_sql(
     if name is None:
         error("Name must not be None to submit to the SQL server")
 
-    from meerschaum.utils.misc import sql_item_name
+    from meerschaum.connectors.sql._tools import sql_item_name
 
     ### resort to defaults if None
     if method == "":
@@ -349,7 +349,7 @@ def psql_insert_copy(
     import csv
     from io import StringIO
 
-    from meerschaum.utils.misc import sql_item_name
+    from meerschaum.connectors.sql._tools import sql_item_name
 
     # gets a DBAPI connection that can provide a cursor
     dbapi_conn = conn.connection

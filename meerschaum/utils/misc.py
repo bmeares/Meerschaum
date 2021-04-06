@@ -541,30 +541,6 @@ def wait_for_connection(**kw):
     import asyncio
     asyncio.run(retry_connect(**kw))
 
-def sql_item_name(s : str, flavor : str) -> str:
-    """
-    Parse SQL items depending on the flavor
-    """
-    if flavor in {'timescaledb', 'postgresql'}: s = pg_capital(str(s))
-    elif flavor == 'sqlite': s = "\"" + str(s) + "\""
-    return str(s)
-
-def pg_capital(s : str) -> str:
-    """
-    If string contains a capital letter, wrap it in double quotes
-
-    returns: string
-    """
-    if '"' in s: return s
-    needs_quotes = False
-    for c in str(s):
-        if c.isupper():
-            needs_quotes = True
-            break
-    if needs_quotes:
-        return '"' + s + '"'
-    return s
-
 def df_from_literal(
         pipe : 'meerschaum.Pipe' = None,
         literal : str = None,
@@ -669,31 +645,6 @@ def replace_pipes_in_dict(
     result = pipes.copy()
     change_dict(result, func)
     return result
-
-def build_where(parameters : dict):
-    """
-    Build the WHERE clause based on the input criteria
-    """
-    where = ""
-    leading_and = "\n    AND "
-    for key, value in parameters.items():
-        ### search across a list (i.e. IN syntax)
-        if isinstance(value, list):
-            where += f"{leading_and}{key} IN ("
-            for item in value:
-                where += f"'{item}', "
-            where = where[:-2] + ")"
-            continue
-
-        ### search a dictionary
-        elif isinstance(value, dict):
-            import json
-            where += (f"{leading_and}CAST({key} AS TEXT) = '" + json.dumps(value) + "'")
-            continue
-
-        where += f"{leading_and}{key} " + ("IS NULL" if value is None else f"= '{value}'")
-    if len(where) > 1: where = "\nWHERE\n    " + where[len(leading_and):]
-    return where
 
 def enforce_gevent_monkey_patch():
     """

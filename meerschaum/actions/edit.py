@@ -7,7 +7,7 @@ Functions for editing elements belong here.
 """
 
 from __future__ import annotations
-from meerschaum.utils.typing import List, Any, SuccessTuple
+from meerschaum.utils.typing import List, Any, SuccessTuple, Optional
 
 def edit(
         action : List[str] = [],
@@ -132,7 +132,7 @@ def _edit_pipes(
 
 def _edit_users(
         action : List[str] = [],
-        repository : str = None,
+        mrsm_instance : Optional[str] = None,
         yes : bool = False,
         noask : bool = False,
         debug : bool = False,
@@ -143,7 +143,7 @@ def _edit_users(
     """
     from meerschaum.config import get_config
     from meerschaum import get_connector
-    from meerschaum.connectors.parse import parse_repo_keys
+    from meerschaum.connectors.parse import parse_instance_keys
     from meerschaum.utils.debug import dprint
     from meerschaum.utils.warnings import warn, error, info
     from meerschaum._internal.User import User
@@ -154,7 +154,7 @@ def _edit_users(
     from meerschaum.config._paths import USERS_CACHE_RESOURCES_PATH
     from meerschaum.utils.yaml import yaml
     import os, pathlib
-    repo_connector = parse_repo_keys(repository)
+    instance_connector = parse_instance_keys(mrsm_instance)
 
     def build_user(username : str):
         ### Change the password
@@ -178,7 +178,7 @@ def _edit_users(
         if yes_no(f"Edit the attributes YAML file for user '{username}'?", default='n', yes=yes, noask=noask):
             attr_path = pathlib.Path(os.path.join(USERS_CACHE_RESOURCES_PATH, f'{username}.yaml'))
             try:
-                existing_attrs = repo_connector.get_user_attributes(User(username), debug=debug)
+                existing_attrs = instance_connector.get_user_attributes(User(username), debug=debug)
                 with open(attr_path, 'w+') as f:
                     yaml.dump(existing_attrs, stream=f, sort_keys=False)
                 edit_file(attr_path)
@@ -206,8 +206,8 @@ def _edit_users(
             print(e)
             info(f"Skipping editing user '{username}'...")
             continue
-        info(f"Editing user '{user}' on Meerschaum instance '{repo_connector}'...")
-        result_tuple = repo_connector.edit_user(user, debug=debug)
+        info(f"Editing user '{user}' on Meerschaum instance '{instance_connector}'...")
+        result_tuple = instance_connector.edit_user(user, debug=debug)
         print_tuple(result_tuple)
         success[username] = result_tuple[0]
 
