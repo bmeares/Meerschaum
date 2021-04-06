@@ -212,7 +212,7 @@ def create_indices(
     Create indices for a Pipe's datetime and ID columns.
     """
     from meerschaum.utils.debug import dprint
-    from meerschaum.utils.misc import sql_item_name
+    from meerschaum.connectors.sql._tools import sql_item_name, get_distinct_col_count
     from meerschaum.utils.warnings import warn
     index_queries = dict()
 
@@ -224,38 +224,54 @@ def create_indices(
         warn(f"Unable to create indices for pipe '{pipe}' without columns.")
         return False
 
+    _datetime = pipe.get_columns('datetime', error=False)
+    _datetime_name = sql_item_name(_datetime, self.flavor) if _datetime is not None else None
+    _id = pipe.get_columns('id', error=False)
+    _id_name = sql_item_name(_id, self.flavor) if _id is not None else None
+    _pipe_name = sql_item_name(str(pipe), self.flavor)
+
     ### create datetime index
-    if 'datetime' in pipe.columns and pipe.get_columns('datetime'):
+    if _datetime is not None:
         if self.flavor == 'timescaledb':
-            ## create hypertable
+            _id_count = (
+                get_distinct_col_count(_id, f"SELECT {_id_name} FROM {_pipe_name}", self)
+                if _id is not None else None
+            )
             dt_query = (
-                f"SELECT create_hypertable('{sql_item_name(str(pipe), self.flavor)}', " +
-                f"'{pipe.get_columns('datetime')}', migrate_data => true);"
+                f"SELECT create_hypertable('{_pipe_name}', " +
+                f"'{_datetime}', " + (f"'{_id}', {_id_count}, " if _id is not None else '') +
+                "migrate_data => true);"
             )
         elif self.flavor == 'postgresql':
-            dt_query = f"CREATE INDEX ON {sql_item_name(str(pipe), self.flavor)} ({sql_item_name(pipe.get_columns('datetime'), self.flavor)})"
+            dt_query = f"CREATE INDEX ON {_pipe_name} ({_datetime_name})"
         elif self.flavor in ('mysql', 'mariadb'):
-            dt_query = f"CREATE INDEX ON {sql_item_name(str(pipe), self.flavor)} ({sql_item_name(pipe.get_columns('datetime'), self.flavor)})"
+            dt_query = f"CREATE INDEX ON {_pipe_name} ({_datetime_name})"
         else: ### mssql, sqlite, etc.
-            dt_query = f"CREATE INDEX {pipe.get_columns('datetime').lower()}_index ON {pipe} ({sql_item_name(pipe.get_columns('datetime'), self.flavor)})"
+            dt_query = f"CREATE INDEX {_datetime.lower().strip()}_index ON {_pipe_name} ({_datetime_name})"
 
-        index_queries[pipe.get_columns('datetime')] = dt_query
+        index_queries[_datetime] = dt_query
 
     ### create id index
-    if 'id' in pipe.columns and pipe.get_columns('id', error=False):
-        if self.flavor in ('timescaledb', 'postgresql'):
-            id_query = f"CREATE INDEX ON {sql_item_name(str(pipe), self.flavor)} ({sql_item_name(pipe.get_columns('id'), self.flavor)})"
+    if _id_name is not None:
+        if self.flavor == 'timescaledb':
+            ### Already created indices via create_hypertable.
+            id_query = None
+            pass
+        elif self.flavor in ('postgresql'):
+            id_query = f"CREATE INDEX ON {_pipe_name} ({_id_name})"
         elif self.flavor in ('mysql', 'mariadb'):
-            id_query = f"CREATE INDEX ON {sql_item_name(str(pipe), self.flavor)} ({sql_item_name(pipe.get_columns('id'), self.flavor)})"
+            id_query = f"CREATE INDEX ON {_pipe_name} ({_id_name})"
         else: ### mssql, sqlite, etc.
-            id_query = f"CREATE INDEX {pipe.get_columns('id').lower()}_index ON {sql_item_name(str(pipe), self.flavor)} ({sql_item_name(pipe.get_columns('id'), self.flavor)})"
+            id_query = f"CREATE INDEX {_id.lower().strip()}_index ON {_pipe_name} ({_id_name})"
 
-        index_queries[pipe.get_columns('id')] = id_query
+        if id_query is not None:
+            index_queries[_id] = id_query
 
     failures = 0
     for col, q in index_queries.items():
-        if debug: dprint(f"Creating index on column '{col}' for Pipe '{pipe}'")
-        if not self.exec(q, silent=debug, debug=debug):
+        if debug: dprint(f"Creating index on column '{col}' for pipe '{pipe}'...")
+        index_result = self.exec(q, silent=debug, debug=debug)
+        if not index_result:
             #  warn(f"Failed to create index on column '{col}' for Pipe '{pipe}'")
             failures += 1
     return failures == 0
@@ -269,7 +285,7 @@ def delete_pipe(
     Delete a Pipe's registration and drop its table.
     """
     from meerschaum.utils.warnings import warn
-    from meerschaum.utils.misc import sql_item_name
+    from meerschaum.connectors.sql._tools import sql_item_name
     from meerschaum.utils.debug import dprint
     from meerschaum.utils.packages import attempt_import
     sqlalchemy = attempt_import('sqlalchemy')
@@ -305,7 +321,7 @@ def get_backtrack_data(
     from meerschaum.utils.warnings import error, warn
     if pipe is None: error(f"Pipe must be provided")
     from meerschaum.utils.debug import dprint
-    from meerschaum.connectors.sql._fetch import dateadd_str
+    from meerschaum.connectors.sql._tools import dateadd_str
     if begin is None: begin = pipe.sync_time
     da = dateadd_str(
         flavor = self.flavor,
@@ -315,7 +331,7 @@ def get_backtrack_data(
     )
 
     ### check for capitals
-    from meerschaum.utils.misc import sql_item_name
+    from meerschaum.connectors.sql._tools import sql_item_name
     table = sql_item_name(str(pipe), self.flavor)
     dt = sql_item_name(pipe.get_columns('datetime'), self.flavor)
 
@@ -348,8 +364,7 @@ def get_pipe_data(
         Upper bound for the query (inclusive)
     """
     from meerschaum.utils.debug import dprint
-    from meerschaum.utils.misc import sql_item_name
-    from meerschaum.connectors.sql._fetch import dateadd_str
+    from meerschaum.connectors.sql._tools import sql_item_name, dateadd_str
     from meerschaum.utils.packages import import_pandas
     pd = import_pandas()
 
@@ -594,7 +609,7 @@ def get_sync_time(
     """
     Get a Pipe's most recent datetime
     """
-    from meerschaum.utils.misc import sql_item_name, build_where
+    from meerschaum.connectors.sql._tools import sql_item_name, build_where
     from meerschaum.utils.warnings import warn
     table = sql_item_name(str(pipe), self.flavor)
     dt = sql_item_name(pipe.get_columns('datetime'), self.flavor)
@@ -634,7 +649,7 @@ def pipe_exists(
     """
     Check that a Pipe's table exists
     """
-    from meerschaum.utils.misc import sql_item_name
+    from meerschaum.connectors.sql._tools import sql_item_name
     from meerschaum.utils.debug import dprint
     ### default: select no rows. NOTE: this might not work for Oracle
     q = f"SELECT COUNT(*) FROM {pipe}"
@@ -662,8 +677,7 @@ def get_pipe_rowcount(
     """
     Return the number of rows between datetimes for a Pipe's instance cache or remote source
     """
-    from meerschaum.utils.misc import sql_item_name
-    from meerschaum.connectors.sql._fetch import dateadd_str
+    from meerschaum.connectors.sql._tools import dateadd_str, sql_item_name
     from meerschaum.utils.warnings import error, warn
     if remote:
         msg = f"'fetch:definition' must be an attribute of pipe '{pipe}' to get a remote rowcount"
@@ -711,7 +725,7 @@ def drop_pipe(
     if not pipe.exists(debug=debug):
         return True, f"Pipe '{pipe}' does not exist, so nothing was dropped."
 
-    from meerschaum.utils.misc import sql_item_name
+    from meerschaum.connectors.sql._tools import sql_item_name
     pipe_name = sql_item_name(str(pipe), self.flavor)
     success = self.exec(f"DROP TABLE {pipe_name}", silent=True, debug=debug) is not None
     if not success:

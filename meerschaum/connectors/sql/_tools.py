@@ -1,0 +1,178 @@
+#! /usr/bin/env python
+# -*- coding: utf-8 -*-
+# vim:fenc=utf-8
+
+"""
+Flavor-specific SQL tools.
+"""
+
+from __future__ import annotations
+from meerschaum.utils.typing import Optional, Dict, Any, Union
+
+def get_distinct_col_count(
+        col : str,
+        query : str,
+        connector : Optional[meerschaum.connectors.sql.SQLConnector] = None,
+        debug : bool = False
+    ) -> Optional[int]:
+    """
+    Returns the number of distinct items in a column of a SQL query.
+
+    :param col:
+        The column in the query to count.
+
+    :param query:
+        The SQL query to count from.
+
+    :param connector:
+        The SQLConnector to execute the query.
+    """
+    
+    if connector is None:
+        from meerschaum import get_connector
+        connector = get_connector()
+
+    _col_name = sql_item_name(col, connector.flavor)
+
+    _meta_query = f"""
+    WITH src AS ( {query} ),
+    dist AS ( SELECT DISTINCT {_col_name} FROM src )
+    SELECT COUNT(*) FROM dist"""
+
+    result = connector.value(_meta_query, debug=debug)
+    try:
+        return int(result)
+    except:
+        return None
+
+def sql_item_name(s : str, flavor : str) -> str:
+    """
+    Parse SQL items depending on the flavor
+    """
+    if flavor in {'timescaledb', 'postgresql'}: s = pg_capital(str(s))
+    elif flavor == 'sqlite': s = "\"" + str(s) + "\""
+    return str(s)
+
+def pg_capital(s : str) -> str:
+    """
+    If string contains a capital letter, wrap it in double quotes
+
+    returns: string
+    """
+    if '"' in s: return s
+    needs_quotes = False
+    for c in str(s):
+        if c.isupper():
+            needs_quotes = True
+            break
+    if needs_quotes:
+        return '"' + s + '"'
+    return s
+
+def build_where(parameters : Dict[str, Any]) -> str:
+    """
+    Build the WHERE clause based on the input criteria
+    """
+    where = ""
+    leading_and = "\n    AND "
+    for key, value in parameters.items():
+        ### search across a list (i.e. IN syntax)
+        if isinstance(value, list):
+            where += f"{leading_and}{key} IN ("
+            for item in value:
+                where += f"'{item}', "
+            where = where[:-2] + ")"
+            continue
+
+        ### search a dictionary
+        elif isinstance(value, dict):
+            import json
+            where += (f"{leading_and}CAST({key} AS TEXT) = '" + json.dumps(value) + "'")
+            continue
+
+        where += f"{leading_and}{key} " + ("IS NULL" if value is None else f"= '{value}'")
+    if len(where) > 1: where = "\nWHERE\n    " + where[len(leading_and):]
+    return where
+
+def dateadd_str(
+        flavor : str = 'postgresql',
+        datepart : str = 'day',
+        number : Union[int, float] = -1,
+        begin : Union[str, datetime.datetime] = 'now'
+    ) -> str:
+    """
+    Generate a DATEADD clause depending on database flavor.
+    This function is pretty fragile / complex, so I may depreciate
+    it in favor of a pure-Python or ORM solution.
+
+    :param flavor:
+        SQL database flavor, e.g. postgresql, sqlite.
+        Currently supported flavors:
+        - postgresql
+        - timescaledb
+        - mssql
+        - mysql
+        - mariadb
+        - sqlite
+        - oracle
+
+    :param datepart:
+        Which part of the date to modify. Supported values* (*AFAIK).
+        - year
+        - month
+        - day
+        - hour
+        - minute
+        - second
+
+    :param number:
+        How many units to add to the date part.
+
+    :param begin:
+        Base datetime to which to add dateparts.
+    """
+    from meerschaum.utils.debug import dprint
+    from meerschaum.utils.packages import attempt_import
+    import datetime
+    dateutil = attempt_import('dateutil')
+    if not begin: return None
+    begin_time = None
+    if not isinstance(begin, datetime.datetime):
+        try:
+            begin_time = dateutil.parser.parse(begin)
+        except Exception:
+            begin_time = None
+    else: begin_time = begin
+
+    da = ""
+    if flavor in ('postgresql', 'timescaledb'):
+        if begin == 'now':
+            begin = "CAST(NOW() AT TIME ZONE 'utc' AS TIMESTAMP)"
+        elif begin_time:
+            begin = f"CAST('{begin}' AS TIMESTAMP)"
+        da = begin + f" + INTERVAL '{number} {datepart}'"
+    elif flavor in ('mssql',):
+        if begin == 'now':
+            begin = "GETUTCDATE()"
+        elif begin_time:
+            begin = f"CAST('{begin}' AS DATETIME)"
+        da = f"DATEADD({datepart}, {number}, {begin})"
+    elif flavor in ('mysql', 'mariadb'):
+        if begin == 'now':
+            begin = "UTC_TIMESTAMP()"
+        elif begin_time:
+            begin = f'"{begin}"'
+        da = f"DATE_ADD({begin}, INTERVAL {number} {datepart})"
+    elif flavor == 'sqlite':
+        da = f"datetime('{begin}', '{number} {datepart}')"
+    elif flavor == 'oracle':
+        if begin == 'now':
+            begin = str(
+                datetime.datetime.utcnow().strftime('%Y:%m:%d %M:%S.%f')
+            )
+        elif begin_time:
+            begin = str(begin.strftime('%Y:%m:%d %M:%S.%f'))
+        dt_format = 'YYYY-MM-DD HH24:MI:SS.FF'
+        da = f"TO_TIMESTAMP('{begin}', '{dt_format}') + INTERVAL '{number}' {datepart}"
+    return da
+

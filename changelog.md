@@ -1,6 +1,12 @@
 # Changelog
 This changelog was not introduced until v0.2.12, so many of the critical releases of Meerschaum have already been published.
 
+### v0.2.16
+- **Hypertable improvements and bugfixes.**  
+  When syncing a new pipe, if an `id` column is specified, create partitions for the number of unique `id` values.
+- **Only use `api:mrsm` for plugins, resort to default `instance` for everything else.**
+- **Fix bug that mirrored changes to `main` under `default`.**
+
 ### v0.2.15
 - **MySQL/MariaDB bugfixes.**
 - **Added `aiomysql` as a driver dependency.**

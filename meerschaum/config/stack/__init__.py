@@ -26,7 +26,8 @@ db_pass = "MRSM{meerschaum:connectors:sql:main:password}"
 db_base = "MRSM{meerschaum:connectors:sql:main:database}"
 
 ### default localhost, db for docker network
-db_host = "db"
+db_hostname = "db"
+db_host = 'MRSM{stack:' + str(STACK_COMPOSE_FILENAME) + ':services:db:hostname}'
 
 api_port = "MRSM{meerschaum:connectors:api:main:port}"
 
@@ -41,8 +42,6 @@ env_dict = {
     'POSTGRES_USER' : f'{db_user}',
     'POSTGRES_PASSWORD' : f'{db_pass}',
     'POSTGRES_DB' : f'{db_base}',
-    #  'MEERSCHAUM_DB_HOSTNAME' : f'{db_host}',
-    'MEERSCHAUM_DB_HOSTNAME' : 'MRSM{stack:' + str(STACK_COMPOSE_FILENAME) + ':services:db:hostname}',
     'MEERSCHAUM_API_HOSTNAME' : f'{api_host}',
     'ALLOW_IP_RANGE' : '0.0.0.0/0',
     'MEERSCHAUM_API_CONFIG_RESOURCES' : '/meerschaum',
@@ -66,7 +65,7 @@ env_dict['MEERSCHAUM_API_PATCH'] = json.dumps(
             'connectors' : {
                 'sql' : {
                     'main' : {
-                        'host' : env_dict['MEERSCHAUM_DB_HOSTNAME'],
+                        'host' : db_host,
                     },
                 },
             },
@@ -118,7 +117,7 @@ default_docker_compose_config = {
             'ports' : [
                 f'{db_port}:{db_port}',
             ],
-            'hostname' : f'{db_host}',
+            'hostname' : f'{db_hostname}',
             'volumes' : [
                 'meerschaum_db_data' + ':' + volumes['meerschaum_db_data'],
             ],

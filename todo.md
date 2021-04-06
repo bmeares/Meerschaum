@@ -4,7 +4,6 @@
 - Add CockroachDB and others to supported flavors
 
 ## 🐞 Bugs
-- Reloading configuration copies 'sql:main' attributes into default.
 - `parameters` column in the `pipes` table is a string, not JSON.
 
 ## ✨ Features
