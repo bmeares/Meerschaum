@@ -65,6 +65,8 @@ paths = {
     'GRAFANA_DASHBOARD_PATH' : ('{GRAFANA_RESOURCES_PATH}', 'provisioning', 'dashboards', 'dashboard.yaml'),
     'MOSQUITTO_RESOURCES_PATH' : ('{STACK_RESOURCES_PATH}', 'mosquitto', 'resources'),
     'MOSQUITTO_CONFIG_PATH' : ('{MOSQUITTO_RESOURCES_PATH}', 'mosquitto.conf'),
+
+    'PORTABLE_CHECK_READLINE_PATH' : ('{SHELL_RESOURCES_PATH}', '.readline_attempted_install'),
 }
 
 def set_root(root : Union[Path, str]):

@@ -311,18 +311,21 @@ environment_runtime = _static_config()['environment']['runtime']
 if environment_runtime in os.environ:
     if os.environ[environment_runtime] == 'portable':
         import platform
+        from meerschaum.config._paths import PORTABLE_CHECK_READLINE_PATH
         from meerschaum.utils.packages import attempt_import, pip_install
-        rl_name = "gnureadline" if platform.system() != 'Windows' else "pyreadline"
-        try:
-            rl = attempt_import(
-                rl_name,
-                lazy = False,
-                install = True,
-                venv = None,
-            )
-        except ImportError:
-            if not pip_install(rl_name, args=['--upgrade', '--ignore-installed'], venv=None):
-                print(f"Unable to import {rl_name}!")
+        if not PORTABLE_CHECK_READLINE_PATH.exists():
+            rl_name = "gnureadline" if platform.system() != 'Windows' else "pyreadline"
+            try:
+                rl = attempt_import(
+                    rl_name,
+                    lazy = False,
+                    install = True,
+                    venv = None,
+                )
+            except ImportError:
+                if not pip_install(rl_name, args=['--upgrade', '--ignore-installed'], venv=None):
+                    print(f"Unable to import {rl_name}!")
+            PORTABLE_CHECK_READLINE_PATH.touch()
 
 
 ### If interactive REPL, print welcome header.

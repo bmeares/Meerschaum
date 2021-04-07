@@ -105,4 +105,11 @@ def get_rowcount(
     """
     connector = self.instance_connector
     if remote: connector = self.connector
-    return connector.get_pipe_rowcount(self, begin=begin, end=end, remote=remote, params=params, debug=debug)
+    try:
+        return connector.get_pipe_rowcount(self, begin=begin, end=end, remote=remote, params=params, debug=debug)
+    except AttributeError:
+        if remote:
+            return None
+    from meerschaum.utils.warnings import warn
+    warn(f"Failed to get a rowcount for pipe '{self}'.")
+    return None

@@ -17,7 +17,7 @@ default_requirements = {
     'database',
 }
 default_create_engine_args = {
-    'method',
+    #  'method',
     'pool_size',
     'max_overflow',
     'pool_recycle',
@@ -89,6 +89,7 @@ flavor_configs = {
             'port'     : 26257,
             'database' : 'defaultdb',
             'username' : 'root',
+            'password' : 'admin',
         },
     },
 }
@@ -105,6 +106,7 @@ def create_engine(
     returns: sqlalchemy engine
     """
     from meerschaum.utils.packages import attempt_import
+    from meerschaum.utils.warnings import error, warn
     sqlalchemy = attempt_import('sqlalchemy')
     import urllib
     if self.flavor in ('timescaledb', 'postgresql', 'cockroachdb'):
@@ -120,7 +122,6 @@ def create_engine(
 
     ### Verify that everything is in order.
     if self.flavor not in flavor_configs:
-        from meerschaum.utils.warnings import error
         error(f"Cannot create a connector with the flavor '{self.flavor}'.")
 
     _engine = flavor_configs[self.flavor].get('engine', None)
@@ -133,7 +134,10 @@ def create_engine(
     ### self.sys_config was deepcopied and can be updated safely
     if self.flavor == "sqlite":
         engine_str = f"sqlite:///{self.database}"
-        self.sys_config['connect_args'].update({"check_same_thread" : False})
+        if 'create_engine' not in self.sys_config: self.sys_config['create_engine'] = {}
+        if 'connect_args' not in self.sys_config['create_engine']:
+            self.sys_config['create_engine']['connect_args'] = {}
+        self.sys_config['create_engine']['connect_args'].update({"check_same_thread" : False})
         aiosqlite = attempt_import('aiosqlite', debug=self._debug, lazy=False)
     else:
         engine_str = (
@@ -142,13 +146,14 @@ def create_engine(
             "@" + _host + ((":" + str(_port)) if _port is not None else '') +
             (("/" + _database) if _database is not None else '')
         )
-    if debug: dprint(f"{engine_str}" + '\n' + f"{self.sys_config['connect_args']}")
+    if debug: dprint(f"{engine_str}" + '\n' + f"{self.sys_config.get('create_engine', {}).get('connect_args', {})}")
 
     _kw_copy = kw.copy()
-    _kw_copy.update(
-        { k: v for k, v in self.sys_config.get('create_engine', {}).items()
-            if k in flavor_configs[self.flavor]['create_engine'] }
-    )
+    _create_engine_args = {
+        k: v for k, v in self.sys_config.get('create_engine', {}).items()
+            if k in flavor_configs[self.flavor].get('create_engine', {})
+    }
+    _create_engine_args.update(_kw_copy)
 
     try:
         engine = sqlalchemy.create_engine(
@@ -164,7 +169,7 @@ def create_engine(
                 self.sys_config['poolclass'].split('.')[-1]
             ),
             echo         = debug,
-            **_kw_copy
+            **_create_engine_args
         )
     except Exception as e:
         warn(e)
