@@ -83,7 +83,7 @@ flavor_configs = {
     },
     'cockroachdb'      : {
         'engine'       : 'cockroachdb',
-        'create_engine' : {'pool_size', 'max_overflow', 'pool_recycle', 'connect_args'},
+        'create_engine' : {c for c in default_create_engine_args if c != 'method'},
         'requirements' : {'host'},
         'defaults'     : {
             'port'     : 26257,
