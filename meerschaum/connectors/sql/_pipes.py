@@ -392,8 +392,8 @@ def get_pipe_data(
         where += f"{dt} <= {end_da}"
 
     if params is not None:
-        from meerschaum.utils.misc import build_where
-        where += build_where(params).replace('WHERE', ('AND' if (begin is not None or end is not None) else ""))
+        from meerschaum.connectors.sql._tools import build_where
+        where += build_where(params, self).replace('WHERE', ('AND' if (begin is not None or end is not None) else ""))
 
     if len(where) > 0:
         query += "\nWHERE " + where
@@ -614,7 +614,7 @@ def get_sync_time(
     table = sql_item_name(str(pipe), self.flavor)
     dt = sql_item_name(pipe.get_columns('datetime'), self.flavor)
 
-    where = "" if params is None else build_where(params)
+    where = "" if params is None else build_where(params, self)
     q = f"SELECT {dt}\nFROM {table}{where}\nORDER BY {dt} DESC\nLIMIT 1"
     if self.flavor == 'mssql':
         q = f"SELECT TOP 1 {dt}\nFROM {table}{where}\nORDER BY {dt} DESC"
@@ -706,7 +706,7 @@ def get_pipe_rowcount(
         """
     if params is not None:
         from meerschaum.utils.misc import build_where
-        query += build_where(params).replace('WHERE', ('AND' if (begin is not None or end is not None) else "WHERE"))
+        query += build_where(params, self).replace('WHERE', ('AND' if (begin is not None or end is not None) else "WHERE"))
         
     result = self.value(query, debug=debug)
     try:

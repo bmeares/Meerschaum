@@ -49,7 +49,7 @@ def sql_item_name(s : str, flavor : str) -> str:
     """
     Parse SQL items depending on the flavor
     """
-    if flavor in {'timescaledb', 'postgresql'}: s = pg_capital(str(s))
+    if flavor in {'timescaledb', 'postgresql', 'cockroachdb'}: s = pg_capital(str(s))
     elif flavor == 'sqlite': s = "\"" + str(s) + "\""
     return str(s)
 
@@ -69,16 +69,23 @@ def pg_capital(s : str) -> str:
         return '"' + s + '"'
     return s
 
-def build_where(parameters : Dict[str, Any]) -> str:
+def build_where(
+        parameters : Dict[str, Any],
+        connector : Optional[meerschaum.connectors.sql.SQLConnector] = None
+    ) -> str:
     """
     Build the WHERE clause based on the input criteria
     """
+    if connector is None:
+        from meerschaum import get_connector
+        connector = get_connector()
     where = ""
     leading_and = "\n    AND "
     for key, value in parameters.items():
+        _key = sql_item_name(key, connector.flavor)
         ### search across a list (i.e. IN syntax)
         if isinstance(value, list):
-            where += f"{leading_and}{key} IN ("
+            where += f"{leading_and}{_key} IN ("
             for item in value:
                 where += f"'{item}', "
             where = where[:-2] + ")"
@@ -87,10 +94,10 @@ def build_where(parameters : Dict[str, Any]) -> str:
         ### search a dictionary
         elif isinstance(value, dict):
             import json
-            where += (f"{leading_and}CAST({key} AS TEXT) = '" + json.dumps(value) + "'")
+            where += (f"{leading_and}CAST({_key} AS TEXT) = '" + json.dumps(value) + "'")
             continue
 
-        where += f"{leading_and}{key} " + ("IS NULL" if value is None else f"= '{value}'")
+        where += f"{leading_and}{_key} " + ("IS NULL" if value is None else f"= '{value}'")
     if len(where) > 1: where = "\nWHERE\n    " + where[len(leading_and):]
     return where
 
@@ -110,6 +117,7 @@ def dateadd_str(
         Currently supported flavors:
         - postgresql
         - timescaledb
+        - cockroachdb
         - mssql
         - mysql
         - mariadb
@@ -145,7 +153,7 @@ def dateadd_str(
     else: begin_time = begin
 
     da = ""
-    if flavor in ('postgresql', 'timescaledb'):
+    if flavor in ('postgresql', 'timescaledb', 'cockroachdb'):
         if begin == 'now':
             begin = "CAST(NOW() AT TIME ZONE 'utc' AS TIMESTAMP)"
         elif begin_time:
