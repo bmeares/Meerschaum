@@ -492,8 +492,17 @@ async def retry_connect(
             dprint(f"Trying to connect to '{connector}'...")
             dprint(f"Attempt ({retries + 1} / {max_retries})")
         if connector.type == 'sql':
+            async def _connect(_connector):
+                _db = _connector.db
+                if _db is None:
+                    _connect_attempt = _connector.val("SELECT 1 AS connect_attempt")
+                    if _connect_attempt is None:
+                        raise Exception("Failed to connect.")
+                else:
+                    await _db.connect()
             try:
-                await connector.db.connect()
+                #  await connector.db.connect()
+                _connect(connector)
                 connected = True
             except Exception as e:
                 print(e)

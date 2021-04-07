@@ -247,7 +247,7 @@ def create_indices(
         elif self.flavor in ('mysql', 'mariadb'):
             dt_query = f"CREATE INDEX ON {_pipe_name} ({_datetime_name})"
         else: ### mssql, sqlite, etc.
-            dt_query = f"CREATE INDEX {_datetime.lower().strip()}_index ON {_pipe_name} ({_datetime_name})"
+            dt_query = f"CREATE INDEX {sql_item_name(_datetime + '_index', self.flavor)} ON {_pipe_name} ({_datetime_name})"
 
         index_queries[_datetime] = dt_query
 
@@ -262,7 +262,7 @@ def create_indices(
         elif self.flavor in ('mysql', 'mariadb'):
             id_query = f"CREATE INDEX ON {_pipe_name} ({_id_name})"
         else: ### mssql, sqlite, etc.
-            id_query = f"CREATE INDEX {_id.lower().strip()}_index ON {_pipe_name} ({_id_name})"
+            id_query = f"CREATE INDEX {sql_item_name(_id + '_index', self.flavor)} ON {_pipe_name} ({_id_name})"
 
         if id_query is not None:
             index_queries[_id] = id_query
@@ -652,16 +652,17 @@ def pipe_exists(
     from meerschaum.connectors.sql._tools import sql_item_name
     from meerschaum.utils.debug import dprint
     ### default: select no rows. NOTE: this might not work for Oracle
-    q = f"SELECT COUNT(*) FROM {pipe}"
+    _pipe_name = sql_item_name(str(pipe), self.flavor)
+    q = f"SELECT COUNT(*) FROM {_pipe_name} WHERE 1 = 0"
     if self.flavor in ('timescaledb', 'postgresql'):
-        q = f"SELECT to_regclass('{sql_item_name(str(pipe), self.flavor)}')"
+        q = f"SELECT to_regclass('{_pipe_name}')"
     elif self.flavor == 'mssql':
-        q = f"SELECT OBJECT_ID('{pipe}')"
+        q = f"SELECT OBJECT_ID('{_pipe_name}')"
     elif self.flavor in ('mysql', 'mariadb'):
-        q = f"SHOW TABLES LIKE '{pipe}'"
+        q = f"SHOW TABLES LIKE '{_pipe_name}'"
     elif self.flavor == 'sqlite':
         q = f"SELECT name FROM sqlite_master WHERE name='{pipe}'"
-    exists = self.value(q, debug=debug) is not None
+    exists = self.value(q, debug=debug, silent=True) is not None
     if debug: dprint(f"Pipe '{pipe}' " + ('exists.' if exists else 'does not exist.'))
     return exists
 
@@ -687,26 +688,34 @@ def get_pipe_rowcount(
         if 'definition' not in pipe.parameters['fetch']:
             error(msg)
             return None
-    if 'datetime' not in pipe.columns: error(f"Pipe '{pipe}' must have a 'datetime' column declared (columns:datetime)")
-    src = f"SELECT * FROM {sql_item_name(pipe, self.flavor)}" if not remote else pipe.parameters['fetch']['definition']
+    #  if 'datetime' not in pipe.columns: error(f"Pipe '{pipe}' must have a 'datetime' column declared (columns:datetime)")
+
+    _pipe_name = sql_item_name(str(pipe), self.flavor)
+    _datetime_name = sql_item_name(pipe.get_columns('datetime'), self.flavor)
+
+    src = f"SELECT {_datetime_name} FROM {_pipe_name}" if not remote else pipe.parameters['fetch']['definition']
     query = f"""
     WITH src AS ({src})
-    SELECT COUNT({pipe.columns['datetime']})
+    SELECT COUNT({_datetime_name})
     FROM src
     """
     if begin is not None or end is not None: query += "WHERE"
     if begin is not None:
         query += f"""
-        {pipe.columns['datetime']} > {dateadd_str(flavor=self.flavor, datepart='minute', number=(0), begin=begin)}
+        {_datetime_name} > {dateadd_str(flavor=self.flavor, datepart='minute', number=(0), begin=begin)}
         """
     if end is not None and begin is not None: query += "AND"
     if end is not None:
         query += f"""
-        {pipe.columns['datetime']} <= {dateadd_str(flavor=self.flavor, datepart='minute', number=(0), begin=end)}
+        {_datetime_name} <= {dateadd_str(flavor=self.flavor, datepart='minute', number=(0), begin=end)}
         """
     if params is not None:
-        from meerschaum.utils.misc import build_where
-        query += build_where(params, self).replace('WHERE', ('AND' if (begin is not None or end is not None) else "WHERE"))
+        from meerschaum.connectors.sql._tools import build_where
+        query += build_where(params, self).replace('WHERE', (
+            'AND' if (begin is not None or end is not None)
+                else 'WHERE'
+            )
+        )
         
     result = self.value(query, debug=debug)
     try:

@@ -6,6 +6,9 @@
 Interface with SQL servers using sqlalchemy.
 """
 
+from __future__ import annotations
+from meerschaum.utils.typing import Optional
+
 from meerschaum.connectors import Connector
 from meerschaum.utils.warnings import error
 
@@ -134,14 +137,20 @@ class SQLConnector(Connector):
         return self._metadata
 
     @property
-    def db(self):
+    def db(self) -> Optional[databases.Database]:
         from meerschaum.utils.packages import attempt_import
         databases = attempt_import('databases', lazy=False, install=True)
         url = self.DATABASE_URL
         if 'mysql' in url:
             url = url.replace('+pymysql', '')
         if '_db' not in self.__dict__:
-            self._db = databases.Database(url)
+            try:
+                self._db = databases.Database(url)
+            except KeyError:
+                ### Likely encountered an unsupported flavor.
+                from meerschaum.utils.warnings import warn
+                self._db = None
+                #  warn(f"Connector '{self}' doesn't appear supported by the databases module. If the flavor '{self.flavor}' is supported by SQLAlchemy, then the connector may work but won't be able to wait for a valid connection.", stack=False)
         return self._db
 
     def __getstate__(self): return self.__dict__

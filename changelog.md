@@ -2,8 +2,14 @@
 This changelog was not introduced until v0.2.12, so many of the critical releases of Meerschaum have already been published.
 
 ### v0.2.17
-- **Added CockroachDB as a supported database flavor.**
+- **Added CockroachDB as a supported database flavor.**  
+  CockroachDB may be a data source or a Meerschaum backend. There may be some performance tuning to do, but for now, it is functional. For example, I may implement bulk insert for CockroachDB like what is done for PostgreSQL and TimescaleDB.
+- **Only attempt to install readline once in Meerschaum portable.**  
+  The first Meerschaum portable launch will attempt to install readline, but even in case of failure, it won't try to reinstall during subsequent launches or reloads.
+- **Refactored SQLAlchemy configuration.**  
+  Under `system:connectors:sql`, the key `create_engine` has been added to house all the `sqlalchemy` configuration settings. **WARNING:** You might need to run `delete config system` to refresh this portion of the config file in case any old settings break things.
 - **Dependency conflict resolution.**
+- **As always, more bugfixes :)**
 
 ### v0.2.16
 - **Hypertable improvements and bugfixes.**  

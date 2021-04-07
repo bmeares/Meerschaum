@@ -33,6 +33,7 @@ def show(
         'connectors' : _show_connectors,
         'arguments'  : _show_arguments,
         'data'       : _show_data,
+        'rowcounts'  : _show_rowcounts,
         'plugins'    : _show_plugins,
         'packages'   : _show_packages,
         'help'       : _show_help,
@@ -294,8 +295,47 @@ def _show_data(
                 df.plot()
     return True, "Success"
 
+def _show_rowcounts(
+        action : Optional[List[str]] = None,
+        debug : bool = False,
+        **kw : Any
+    ) -> SuccessTuple:
+    """
+    Show the rowcounts for pipes.
+
+    To see remote rowcounts (execute `COUNT(*)` on the source server),
+    execute `show rowcounts remote`.
+    """
+    from meerschaum.utils.misc import print_options
+    from meerschaum.utils.pool import get_pool
+    from meerschaum import get_pipes
+
+    if action is None: action = []
+    remote = action and action[0] == 'remote'
+
+    pipes = get_pipes(as_list=True, debug=debug, **kw)
+    pool = get_pool()
+    def _get_rc(_pipe):
+        return _pipe.get_rowcount(remote=remote, debug=debug)
+
+    rowcounts = pool.map(_get_rc, pipes)
+
+    rc_dict = {}
+    for i, p in enumerate(pipes):
+        rc_dict[p] = rowcounts[i]
+
+    msgs = []
+    for p, rc in rc_dict.items():
+        msgs.append(f'{p}\n{rc}')
+
+    header = "Remote rowcounts:" if remote else "Pipe rowcounts:"
+
+    print_options(msgs, header=header, **kw)
+
+    return True, "Success"
+
 def _show_plugins(
-        action : Sequence[str] = [],
+        action : Optional[List[str]] = None,
         repository : Optional[str] = None,
         debug : bool = False,
         **kw : Any
@@ -309,6 +349,8 @@ def _show_plugins(
     from meerschaum.utils.warnings import info
     from meerschaum._internal.User import User
     repo_connector = parse_repo_keys(repository)
+
+    if action is None: action = []
 
     if action == [''] or len(action) == 0:
         _to_print = get_plugins_names()

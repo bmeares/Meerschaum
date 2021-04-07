@@ -125,7 +125,7 @@ def read(
     except Exception as e:
         import inspect
         if debug: dprint(f"Failed to execute query:\n\n{query_or_table}\n\n")
-        if not silent: warn(str(e))
+        if not silent: warn(str(e), stacklevel=3)
 
         return None
 
@@ -288,8 +288,9 @@ def to_sql(
         if self.flavor in bulk_flavors:
             method = psql_insert_copy
         else:
-            method = self.sys_config['method']
-    chunksize = chunksize if chunksize != -1 else self.sys_config['chunksize']
+            ### Should default to 'multi'.
+            method = self.sys_config.get('create_engine', {}).get('method', None)
+    chunksize = chunksize if chunksize != -1 else self.sys_config.get('chunksize', None)
 
     success, msg = False, "Default to_sql message"
     start = time.time()

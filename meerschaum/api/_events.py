@@ -43,6 +43,6 @@ async def shutdown():
     if get_connector().type == 'sql':
         try:
             await get_connector().db.disconnect()
-        except AssertionError:
+        except:
             pass
 

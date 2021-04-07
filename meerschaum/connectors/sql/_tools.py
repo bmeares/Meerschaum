@@ -62,9 +62,10 @@ def pg_capital(s : str) -> str:
     if '"' in s: return s
     needs_quotes = False
     for c in str(s):
-        if c.isupper():
-            needs_quotes = True
-            break
+        if ord(c) < ord('a') or ord(c) > ord('z'):
+            if not c.isdigit():
+                needs_quotes = True
+                break
     if needs_quotes:
         return '"' + s + '"'
     return s
