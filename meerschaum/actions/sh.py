@@ -7,12 +7,12 @@ NOTE: This action may be a huge security vulnerability
     if not handled appropriately!
 """
 
-from meerschaum.utils.typing import SuccessTuple, List, Any
+from meerschaum.utils.typing import SuccessTuple, List, Any, Optional
 
 def sh(
-        action : List[str] = [],
-        sub_args : List[str] = [],
-        sysargs : List[str] = [],
+        action : Optional[List[str]] = None,
+        sub_args : Optional[List[str]] = None,
+        sysargs : Optional[List[str]] = None,
         use_bash : bool = True,
         debug : bool = False,
         **kw : Any
@@ -24,6 +24,10 @@ def sh(
     import sys, os
     from meerschaum.utils.warnings import error
     from meerschaum.utils.debug import dprint
+
+    if action is None: action = []
+    if sub_args is None: sub_args = []
+    if sysargs is None: sysargs = []
 
     _shell = os.environ.get('SHELL', 'bash')
 

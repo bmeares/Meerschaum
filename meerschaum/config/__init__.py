@@ -133,8 +133,10 @@ def get_config(
         #  config_cache = config.copy()
 
     invalid_keys = False
-    if keys[0] not in config and keys != symlinks_key:
-        single_key_config = read_config(keys=[keys[0]], substitute=substitute, write_missing=write_missing)
+    if keys[0] not in config and keys[0] != symlinks_key:
+        single_key_config = read_config(
+            keys=[keys[0]], substitute=substitute, write_missing=write_missing
+        )
         if keys[0] not in single_key_config:
             invalid_keys = True
         else:

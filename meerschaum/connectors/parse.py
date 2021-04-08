@@ -66,7 +66,9 @@ def parse_connector_keys(
         if vals[0] not in connectors_config:
             return None
         type_config = get_config('meerschaum', 'connectors', _type)
-        default_config = type_config.get('default', None)
+
+        ### Forgetting to add `copy()` caused THE MOST frustrating bug to investigate.
+        default_config = type_config.get('default', None).copy()
         conn = type_config.get(_label, None)
         if default_config is not None and conn is not None:
             default_config.update(conn)

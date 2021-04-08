@@ -7,10 +7,10 @@ Reload the running Meerschaum instance.
 """
 
 from __future__ import annotations
-from meerschaum.utils.typing import Any, SuccessTuple, List
+from meerschaum.utils.typing import Any, SuccessTuple, List, Optional
 
 def reload(
-        action : List[str] = [],
+        action : Optional[List[str]] = None,
         **kw : Any
     ) -> SuccessTuple:
     """

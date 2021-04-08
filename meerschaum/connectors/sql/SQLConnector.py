@@ -18,6 +18,7 @@ class SQLConnector(Connector):
     """
     from ._create_engine import flavor_configs, create_engine
     from ._sql import read, value, exec, execute, to_sql
+    from ._tools import test_connection
     from ._fetch import fetch
     from ._cli import cli
     from ._pipes import (
@@ -61,6 +62,7 @@ class SQLConnector(Connector):
         label : str = 'main',
         flavor : str = None,
         wait : bool = False,
+        connect : bool = False,
         debug : bool = False,
         **kw
     ):
@@ -87,8 +89,13 @@ class SQLConnector(Connector):
 
         self.wait = wait
         if self.wait:
-            from meerschaum.utils.misc import wait_for_connection
-            wait_for_connection(connector=self.db, debug=debug)
+            from meerschaum.utils.misc import retry_connect
+            retry_connect(connector=self.db, debug=debug)
+
+        if connect:
+            if not self.test_connection(debug=debug):
+                from meerschaum.utils.warnings import warn
+                warn(f"Failed to connect with connector '{self}'!", stack=False)
 
         ### store the PID and thread at initialization so we can dispose of the Pool in child processes or threads
         import os; self._pid = os.getpid()

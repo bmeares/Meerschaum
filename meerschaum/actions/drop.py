@@ -6,10 +6,10 @@ Functions for dropping elements
 """
 
 from __future__ import annotations
-from meerschaum.utils.typing import SuccessTuple, Union, Any, Optional, Sequence
+from meerschaum.utils.typing import SuccessTuple, Union, Any, Optional, Sequence, List
 
 def drop(
-        action : Sequence[str] = [],
+        action : Optional[List[str]] = None,
         **kw : Any
     ) -> SuccessTuple:
     """
@@ -24,7 +24,7 @@ def drop(
     return choose_subaction(action, options, **kw)
 
 def _drop_pipes(
-        action : Sequence[str] = [],
+        action : Optional[List[str]] = None,
         yes : bool = False,
         force : bool = False,
         noask : bool = False,
@@ -76,7 +76,7 @@ def _drop_pipes(
     return successes > 0, msg
 
 def _drop_tables(
-        action : Sequence[str] = [],
+        action : Optional[List[str]] = None,
         **kw : Any
     ) -> SuccessTuple:
     """

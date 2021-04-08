@@ -6,10 +6,10 @@ Similar to the `bash` action, run Python commands from the Meerschaum shell
 """
 
 from __future__ import annotations
-from meerschaum.utils.typing import SuccessTuple, Any, List
+from meerschaum.utils.typing import SuccessTuple, Any, List, Optional
 
 def python(
-        action : List[str] = [],
+        action : Optional[List[str]] = None,
         debug : bool = False,
         **kw : Any
     ) -> SuccessTuple:
@@ -33,6 +33,8 @@ def python(
     import sys, subprocess
     from meerschaum.utils.debug import dprint
     from meerschaum.utils.warnings import warn, error
+
+    if action is None: action = []
 
     joined_actions = ['import meerschaum as mrsm']
     line = ""

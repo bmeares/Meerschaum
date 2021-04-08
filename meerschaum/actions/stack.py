@@ -7,12 +7,12 @@ Functions for running the Docker Compose stack
 """
 
 from __future__ import annotations
-from meerschaum.utils.typing import SuccessTuple, Any, List
+from meerschaum.utils.typing import SuccessTuple, Any, List, Optional
 
 def stack(
-        action : List[str] = [],
-        sysargs : List[str] = [],
-        sub_args : List[str] = [],
+        action : Optional[List[str]] = None,
+        sysargs : Optional[List[str]] = None,
+        sub_args : Optional[List[str]] = None,
         yes : bool = False,
         noask : bool = False,
         force : bool = False,
@@ -39,6 +39,10 @@ def stack(
     from meerschaum.utils.warnings import warn
     from meerschaum.utils.formatting import ANSI
     import os, sys
+
+    if action is None: action = []
+    if sysargs is None: sysargs = []
+    if sub_args is None: sub_args = []
 
     bootstrap_question = (
         "Bootstrap configuration?\n\n"
@@ -85,12 +89,12 @@ def stack(
     ### prepend settings before the docker-compose action
     settings_list = project_name_list + ansi_list + debug_list
 
-    compose = attempt_import('compose', lazy=False)
+    compose = attempt_import('compose', lazy=False, venv='mrsm')
     cmd_list = settings_list + compose_command + (
         sysargs[2:] if (len(sysargs) > 2 and not sub_args) else sub_args
     )
     if debug: dprint(cmd_list)
-    run_python_package('compose', args=cmd_list, cwd=STACK_COMPOSE_PATH.parent)
+    run_python_package('compose', args=cmd_list, cwd=STACK_COMPOSE_PATH.parent, venv='mrsm')
     #  call(cmd_list, cwd=STACK_COMPOSE_PATH.parent)
 
     ### not sure why I decided to reload the config here...

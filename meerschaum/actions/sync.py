@@ -9,10 +9,10 @@ NOTE: `sync` required a SQL connection and is not intended for client use
 """
 
 from __future__ import annotations
-from meerschaum.utils.typing import SuccessTuple, Any, List
+from meerschaum.utils.typing import SuccessTuple, Any, List, Optional
 
 def sync(
-        action : List[str] = [],
+        action : Optional[List[str]] = None,
         **kw : Any
     ) -> SuccessTuple:
     """
@@ -25,13 +25,13 @@ def sync(
     return choose_subaction(action, options, **kw)
 
 def _pipes_lap(
-        workers : int = None,
+        workers : Optional[int] = None,
         debug : bool = None,
         unblock : bool = False,
         force : bool = False,
         min_seconds : int = 1,
-        **kw
-    ) -> tuple:
+        **kw : Any
+    ) -> SuccessTuple:
     """
     Do a lap of syncing Pipes
     """
@@ -119,7 +119,7 @@ def _sync_pipes(
         loop : bool = False,
         min_seconds : int = 1,
         debug : bool = False,
-        **kw
+        **kw : Any
     ) -> SuccessTuple:
     """
     Fetch new data for Pipes

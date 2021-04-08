@@ -10,7 +10,7 @@ from __future__ import annotations
 from meerschaum.utils.typing import SuccessTuple, Any, List, Optional
 
 def register(
-        action : List[str] = [],
+        action : Optional[List[str]] = None,
         **kw : Any
     ) -> SuccessTuple:
     """
@@ -25,10 +25,10 @@ def register(
     return choose_subaction(action, options, **kw)
 
 def _register_pipes(
-        connector_keys : List[str] = [],
-        metric_keys : List[str] = [],
-        location_keys : List[str] = [],
-        params : dict = dict(),
+        connector_keys : Optional[List[str]] = None,
+        metric_keys : Optional[List[str]] = None,
+        location_keys : Optional[List[str]] = None,
+        params : Optional[Dict[str, Any]] = None,
         debug : bool = False,
         **kw : Any
     ) -> SuccessTuple:
@@ -39,6 +39,11 @@ def _register_pipes(
     from meerschaum import get_pipes, get_connector
     from meerschaum.utils.debug import dprint
     from meerschaum.utils.warnings import warn, info
+
+    if connector_keys is None: connector_keys = []
+    if metric_keys is None: metric_keys = []
+    if location_keys is None: location_keys = []
+    if params is None: params = {}
 
     if (
         len(connector_keys) == 0 or
@@ -78,11 +83,11 @@ def _register_pipes(
     return success, message
 
 def _register_plugins(
-        action : List[str] = [],
+        action : Optional[List[str]] = None,
         repository : Optional[str] = None,
         shell : bool = False,
         debug : bool = False,
-        **kw
+        **kw : Any
     ) -> SuccessTuple:
     from meerschaum.utils.debug import dprint
     from meerschaum.utils.misc import reload_plugins
@@ -92,6 +97,8 @@ def _register_plugins(
     from meerschaum._internal.Plugin import Plugin
     from meerschaum import get_connector
     from meerschaum.utils.formatting import print_tuple
+
+    if action is None: action = []
 
     reload_plugins(debug=debug)
 
@@ -137,7 +144,7 @@ def _register_plugins(
     return True, msg
 
 def _register_users(
-        action : List[str] = [],
+        action : Optional[List[str]] = None,
         mrsm_instance : Optional[str] = None,
         shell : bool = False,
         debug : bool = False,
@@ -157,7 +164,7 @@ def _register_users(
     if mrsm_instance is None: mrsm_instance = get_connector('meerschaum', 'instance')
     instance_connector = parse_instance_keys(mrsm_instance)
 
-    if len(action) == 0 or action == ['']:
+    if not action:
         return False, "No users to register."
 
     ### filter out existing users

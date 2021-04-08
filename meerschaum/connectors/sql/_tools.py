@@ -9,6 +9,28 @@ Flavor-specific SQL tools.
 from __future__ import annotations
 from meerschaum.utils.typing import Optional, Dict, Any, Union
 
+test_queries = {
+    'default' : 'SELECT 1',
+    'oracle' : 'SELECT 1 FROM DUAL',
+    'informix' : 'SELECT COUNT(*) FROM systables',
+    'hsqldb' : 'SELECT 1 FROM INFORMATION_SCHEMA.SYSTEM_USERS',
+}
+
+def test_connection(
+        self,
+        **kw : Any
+    ) -> Union[bool, None]:
+    """
+    Block until a connection to the SQL database is made.
+    """
+    import warnings
+    from meerschaum.utils.misc import retry_connect
+    _default_kw = {'max_retries' : 1, 'retry_wait' : 0, 'warn' : False,}
+    _default_kw.update(kw)
+    with warnings.catch_warnings():
+        warnings.filterwarnings('ignore', 'Could not')
+        return retry_connect(**_default_kw)
+
 def get_distinct_col_count(
         col : str,
         query : str,

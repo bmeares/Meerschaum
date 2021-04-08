@@ -8,10 +8,10 @@ Functions for bootstrapping elements
 """
 
 from __future__ import annotations
-from meerschaum.utils.typing import Union, Any, Sequence, SuccessTuple, Optional, Tuple
+from meerschaum.utils.typing import Union, Any, Sequence, SuccessTuple, Optional, Tuple, List
 
 def bootstrap(
-        action : Sequence[str] = [],
+        action : Optional[List[str]] = None,
         **kw : Any
     ) -> SuccessTuple:
     """
@@ -24,6 +24,7 @@ def bootstrap(
         `bootstrap pipes`
     """
     from meerschaum.utils.misc import choose_subaction
+    if action is None: action = []
     options = {
         'pipes'      : _bootstrap_pipes,
         'config'     : _bootstrap_config,
@@ -32,10 +33,10 @@ def bootstrap(
     return choose_subaction(action, options, **kw)
 
 def _bootstrap_pipes(
-        action : Sequence[str] = [],
-        connector_keys : Sequence[str] = [],
-        metric_keys : Sequence[str] = [],
-        location_keys : Optional[Sequence[Optional[str]]] = [],
+        action : Optional[List[str]] = None,
+        connector_keys : Optional[List[str]] = None,
+        metric_keys : Optional[List[str]] = None,
+        location_keys : Optional[List[Optional[str]]] = None,
         yes : bool = False,
         force : bool = False,
         noask : bool = False,
@@ -312,6 +313,7 @@ def _bootstrap_connectors(
         return False, "No changes made to connectors configuration."
     
     meerschaum_config = get_config('meerschaum')
+
     if 'connectors' not in meerschaum_config:
         meerschaum_config['connectors'] = {}
     if _type not in meerschaum_config['connectors']:
@@ -323,7 +325,7 @@ def _bootstrap_connectors(
     return True, "Success"
 
 def _bootstrap_config(
-        action : Sequence[str] = [],
+        action : Optional[List[str]] = None,
         yes : bool = False,
         force : bool = False,
         debug : bool = False,

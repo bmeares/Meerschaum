@@ -52,7 +52,7 @@ def main():
     return_tuple = entry(sysargs)
     if isinstance(return_tuple, tuple):
         from meerschaum.utils.formatting import print_tuple
-        print_tuple(return_tuple)
+        print_tuple(return_tuple, upper_padding=1)
 
     ### Final step: close global pools.
     from meerschaum.utils.pool import get_pools

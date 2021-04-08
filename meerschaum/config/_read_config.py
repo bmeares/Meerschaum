@@ -363,7 +363,7 @@ def get_keyfile_path(key : str, create_new : bool = False) -> Optional[pathlib.P
     try:
         return pathlib.Path(os.path.join(
             CONFIG_DIR_PATH,
-            read_config(keys=[key], with_filenames=True, write_missing=False)[1][0]
+            read_config(keys=[key], with_filenames=True, write_missing=False, substitute=False)[1][0]
         ))
     except IndexError as e:
         if create_new:

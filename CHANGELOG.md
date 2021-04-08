@@ -1,0 +1,1 @@
+docs/mkdocs/blog/changelog.md

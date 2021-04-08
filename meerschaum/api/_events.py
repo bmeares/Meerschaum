@@ -16,7 +16,7 @@ async def startup():
     conn = get_connector()
     try:
         from meerschaum.utils.warnings import warn
-        connected = await retry_connect(
+        connected = retry_connect(
             get_connector(),
             workers = get_uvicorn_config().get('workers', None),
             debug = debug

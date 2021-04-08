@@ -340,7 +340,7 @@ def pip_install(
 
 def run_python_package(
         package_name : str,
-        args : list = [],
+        args : Optional[List[str]] = None,
         venv : Optional[str] = None,
         cwd : Optional[str] = None,
         color : bool = False,
@@ -353,6 +353,7 @@ def run_python_package(
     import sys, os
     from subprocess import call
     from meerschaum.config._paths import VIRTENV_RESOURCES_PATH
+    if args is None: args = []
     old_cwd = os.getcwd()
     if cwd is not None:
         os.chdir(cwd)
@@ -599,7 +600,7 @@ def import_pandas() -> 'ModuleType':
         pandas_module_name = 'modin.pandas'
     return attempt_import(pandas_module_name)
 
-def import_rich(lazy: bool = True, **kw) -> 'ModuleType':
+def import_rich(lazy: bool = True, **kw : Any) -> 'ModuleType':
     """
     Quality of life function for importing rich.
     """
@@ -670,7 +671,7 @@ def get_modules_from_package(
 def import_children(
         package: Optional['ModuleType'] = None,
         package_name: Optional[str] = None,
-        types: List[str] = ['method', 'builtin', 'function', 'class', 'module'],
+        types : Optional[List[str]] = None,
         lazy: bool = True,
         recursive: bool = False,
         debug: bool = False
@@ -693,6 +694,9 @@ def import_children(
 
     """
     import sys, inspect
+
+    if types is None:
+        types = ['method', 'builtin', 'function', 'class', 'module'],
 
     ### if package_name and package are None, use parent
     if package is None and package_name is None:
@@ -800,7 +804,9 @@ def is_installed(
     deactivate_venv(venv=venv)
     return found
 
-def venv_contains_package(name : str, venv : str = None) -> bool:
+def venv_contains_package(
+        name : str, venv : Optional[str] = None
+    ) -> bool:
     """
     Search the contents of a virtual environment for a package.
     """
