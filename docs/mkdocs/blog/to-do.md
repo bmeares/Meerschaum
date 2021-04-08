@@ -1,10 +1,11 @@
 ## 📝 General
 - Documentation
 - More tests
-- Add CockroachDB and others to supported flavors
+- Add ~~CockroachDB~~ and others to supported flavors
 
 ## 🐞 Bugs
 - `parameters` column in the `pipes` table is a string, not JSON.
+- ~~`default` values are populated from the active instance.~~
 
 ## ✨ Features
 - Reuse packages across virtual environments

@@ -5,15 +5,16 @@
 Start the Meerschaum WebAPI with the `api` action.
 """
 
-import sys
+from __future__ import annotations
+from meerschaum.utils.typing import SuccessTuple, Optional, List, Any
 
 def api(
-        action : list = [],
-        sysargs : list = [],
+        action : Optional[List[str]] = None,
+        sysargs : Optional[List[str]] = None,
         debug : bool = False,
-        mrsm_instance : str = None,
-        **kw
-    ):
+        mrsm_instance : Optional[str] = None,
+        **kw : Any
+    ) -> SuccessTuple:
     """
     Send commands to a Meerschaum WebAPI instance or boot a new instance
 
@@ -31,6 +32,8 @@ def api(
     """
     from meerschaum.utils.warnings import warn, info
     from meerschaum.utils.formatting import print_tuple
+    if action is None: action = []
+    if sysargs is None: sysargs = []
     if len(action) == 0:
         info(api.__doc__)
         return False, "Please provide a command to excecute (see above)"
@@ -71,13 +74,13 @@ def api(
     return success, message
 
 def _api_start(
-        action : list = [''],
-        port : int = None,
-        workers : int = None,
-        mrsm_instance : str = None,
+        action : Optional[List[str]] = None,
+        port : Optional[int] = None,
+        workers : Optional[int] = None,
+        mrsm_instance : Optional[str] = None,
         debug : bool = False,
-        **kw
-    ):
+        **kw : Any
+    ) -> SuccessTuple:
     """
     Usage: `api start {options}`
     Options:
@@ -96,6 +99,8 @@ def _api_start(
     from meerschaum.config import get_config
     from meerschaum.connectors.parse import parse_instance_keys
     import os
+
+    if action is None: action = []
 
     ### Uvicorn must be installed on the host because of multiprocessing reasons.
     uvicorn = attempt_import('uvicorn', venv=None, lazy=False)
@@ -140,8 +145,7 @@ def _api_start(
     custom_keys = ['mrsm_instance']
 
     ### write config to a temporary file to communicate with uvicorn threads
-    import json
-    #  from meerschaum.utils.yaml import yaml
+    import json, sys
     try:
         if API_UVICORN_CONFIG_PATH.exists():
             if debug: dprint(f"Removing API config file: ({API_UVICORN_CONFIG_PATH})")
@@ -166,7 +170,10 @@ def _api_start(
         dprint(f"Starting Meerschaum API v{__version__} with the following configuration:")
         pprint(uvicorn_config, stream=sys.stderr)
 
-    uvicorn.run(**uvicorn_config)
+    try:
+        uvicorn.run(**uvicorn_config)
+    except KeyboardInterrupt:
+        pass
 
     return (True, "Success")
 

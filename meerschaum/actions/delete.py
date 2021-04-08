@@ -10,7 +10,7 @@ from __future__ import annotations
 from meerschaum.utils.typing import Any, SuccessTuple, Union, Optional, List
 
 def delete(
-        action : List[str] = [],
+        action : Optional[List[str]] = None,
         **kw : Any
     ) -> SuccessTuple:
     """
@@ -27,12 +27,33 @@ def delete(
     }
     return choose_subaction(action, options, **kw)
 
+def _complete_delete(
+        action : Optional[List[str]] = None,
+        **kw : Any
+    ) -> List[str]:
+    """
+    Override the default Meerschaum `complete_` function.
+    """
+    if action is None: action = []
+    options = {
+        'connectors': _complete_delete_connectors,
+    }
+
+    if len(action) > 0 and action[0] in options:
+        sub = action[0]
+        del action[0]
+        return options[sub](action=action, **kw)
+
+    from meerschaum.actions.shell import default_action_completer
+    return default_action_completer(action=(['delete'] + action), **kw)
+
+
 def _delete_pipes(
         debug : bool = False,
         yes : bool = False,
         force : bool = False,
         noask : bool = False,
-        **kw
+        **kw : Any
     ) -> SuccessTuple:
     """
     Drop pipes and delete their registrations.
@@ -75,7 +96,7 @@ def _delete_pipes(
     return successes > 0, msg
 
 def _delete_config(
-        action : List[str] = [],
+        action : Optional[List[str]] = None,
         yes : bool = False,
         force : bool = False,
         noask : bool = False,
@@ -91,6 +112,7 @@ def _delete_config(
     from meerschaum.config._read_config import get_possible_keys, get_keyfile_path
     from meerschaum.utils.debug import dprint
     paths = [p for p in [STACK_COMPOSE_PATH, DEFAULT_CONFIG_DIR_PATH] if p.exists()]
+    if action is None: action = []
     keys = get_possible_keys() if len(action) == 0 else action
     for k in keys:
         _p = get_keyfile_path(k, create_new=False)
@@ -121,7 +143,7 @@ def _delete_config(
     return success, msg
 
 def _delete_plugins(
-        action : List[str] = [],
+        action : Optional[List[str]] = None,
         yes : bool = False,
         force : bool = False,
         noask : bool = False,
@@ -138,6 +160,8 @@ def _delete_plugins(
     from meerschaum.utils.misc import reload_plugins
     from meerschaum.utils.prompt import yes_no
     import os, shutil
+
+    if action is None: action = []
 
     ### parse the provided plugins and link them to their modules
     modules_to_delete = dict()
@@ -183,7 +207,7 @@ def _delete_plugins(
     return True, "Success"
 
 def _delete_users(
-        action : List[str] = [],
+        action : Optional[List[str]] = None,
         mrsm_instance : Optional[str] = None,
         yes : bool = False,
         force : bool = False,
@@ -204,6 +228,8 @@ def _delete_users(
     from meerschaum.connectors.api import APIConnector
     from meerschaum.utils.formatting import print_tuple
     instance_connector = parse_instance_keys(mrsm_instance)
+
+    if action is None: action = []
 
     registered_users = []
     for username in action:
@@ -249,7 +275,8 @@ def _delete_users(
     return True, msg
 
 def _delete_connectors(
-        connector_keys : List[str] = [],
+        action : Optional[List[str]] = None,
+        connector_keys : Optional[List[str]] = None,
         yes : bool = False,
         force : bool = False,
         noask : bool = False,
@@ -269,11 +296,16 @@ def _delete_connectors(
     from meerschaum.utils.warnings import info, warn
     import os
 
-    if len(connector_keys) == 0:
-        return False, "No connector keys provided. Run again with `-c` to list connector keys."
+    if action is None: action = []
+    if connector_keys is None: connector_keys = []
+
+    _keys = list(set(action + connector_keys))
+
+    if not _keys:
+        return False, "No connectors to delete."
 
     to_delete = []
-    for ck in connector_keys:
+    for ck in _keys:
         try:
             conn = parse_connector_keys(ck, debug=debug)
         except:
@@ -306,10 +338,18 @@ def _delete_connectors(
         try:
             del cf['meerschaum']['connectors'][c.type][c.label]
         except:
-            warn(f"Failed to delete connector '{c}' from configuration. Skipping...")
+            warn(f"Failed to delete connector '{c}' from configuration. Skipping...", stack=False)
 
     write_config(cf, debug=debug)
     return True, "Success"
+
+def _complete_delete_connectors(action : Optional[List[str]] = None, **kw : Any) -> List[str]:
+    from meerschaum.config import get_config
+    from meerschaum.utils.misc import get_connector_labels
+    types = list(get_config('meerschaum', 'connectors').keys())
+    search_term = action[-1] if action else ''
+    return get_connector_labels(*types, search_term=search_term)
+
 
 ### NOTE: This must be the final statement of the module.
 ###       Any subactions added below these lines will not

@@ -57,7 +57,7 @@ def login(
         debug = debug
     )
     if response:
-        msg = f"Successfully logged into '{self}' as user '{login_data['username']}'"
+        msg = f"Successfully logged into '{self}' as user '{login_data['username']}'."
         self._token = json.loads(response.text)['access_token']
         self._expires = datetime.datetime.strptime(
             json.loads(response.text)['expires'], 
@@ -68,8 +68,8 @@ def login(
         if self.get_user_id(User(self.username, self.password), use_token=False, debug=debug) is None:
             msg = f"User '{self.username}' does not exist for '{self}'." + '\n'
         msg += (
-            f"Failed to log into '{self}' as user '{login_data['username']}'. " +
-            f"Please verify login details for connector '{self}' with `edit config`."
+            f"   Failed to log into '{self}' as user '{login_data['username']}'.\n" +
+            f"   Please verify login details for connector '{self}'."
         )
         warn(msg, stack=False)
 

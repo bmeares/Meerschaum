@@ -7,10 +7,10 @@ This module contains functions for printing elements.
 """
 
 from __future__ import annotations
-from meerschaum.utils.typing import SuccessTuple, Union, Sequence, Any, Optional
+from meerschaum.utils.typing import SuccessTuple, Union, Sequence, Any, Optional, List
 
 def show(
-        action : Sequence[str] = [],
+        action : Optional[List[str]] = None,
         **kw : Any
     ) -> SuccessTuple:
     """
@@ -42,12 +42,14 @@ def show(
     return choose_subaction(action, show_options, **kw)
 
 def _complete_show(
-        action : List[str] = [],
+        action : Optional[List[str]] = None,
         **kw : Any
     ) -> List[str]:
     """
     Override the default Meerschaum `complete_` function.
     """
+
+    if action is None: action = []
 
     options = {
         'connectors': _complete_show_connectors,
@@ -69,7 +71,9 @@ def _show_actions(**kw : Any) -> SuccessTuple:
     """
     from meerschaum.actions import actions
     from meerschaum.utils.misc import print_options
-    print_options(options=actions, name='actions', actions=False, **kw)
+    from meerschaum.actions.shell.Shell import hidden_commands
+    _actions = [ _a for _a in actions if _a not in hidden_commands ]
+    print_options(options=_actions, name='actions', actions=False, **kw)
     return True, "Success"
 
 def _show_help(**kw : Any) -> SuccessTuple:
@@ -81,7 +85,7 @@ def _show_help(**kw : Any) -> SuccessTuple:
     return True, "Success"
 
 def _show_config(
-        action : Sequence[str] = [],
+        action : Optional[List[str]] = None,
         debug : bool = False,
         nopretty : bool = False,
         **kw : Any
@@ -99,6 +103,8 @@ def _show_config(
     from meerschaum.utils.debug import dprint
     if debug: dprint(f"Configuration loaded from {CONFIG_DIR_PATH}")
 
+    if action is None: action = []
+
     valid, config = get_config(*action, as_tuple=True, warn=False)
     if not valid:
         return False, f"Invalid configuration keys '{action}'."
@@ -108,10 +114,10 @@ def _show_config(
         pprint(config)
     return (True, "Success")
 
-def _complete_show_config(action : List[str] = [], **kw : Any):
+def _complete_show_config(action : Optional[List[str]] = None, **kw : Any):
     from meerschaum.config._read_config import get_possible_keys
     keys = get_possible_keys()
-    if len(action) == 0:
+    if not action:
         return keys
     possibilities = []
     for key in keys:
@@ -173,7 +179,7 @@ def _show_version(nopretty : bool = False, **kw : Any) -> SuccessTuple:
     return (True, "Success")
 
 def _show_connectors(
-        action : Sequence[str] = [],
+        action : Optional[List[str]] = None,
         debug : bool = False,
         **kw : Any
     ) -> SuccessTuple:
@@ -205,7 +211,9 @@ def _show_connectors(
 
     return True, "Success"
 
-def _complete_show_connectors(action : List[str] = [], **kw : Any) -> List[str]:
+def _complete_show_connectors(
+        action : Optional[List[str]] = None, **kw : Any
+    ) -> List[str]:
     from meerschaum.utils.misc import get_connector_labels
     _text = action[0] if len(action) > 0 else ""
     return get_connector_labels(search_term=_text, ignore_exact_match=True)
@@ -221,7 +229,7 @@ def _show_arguments(
     return True, "Success"
 
 def _show_data(
-        action : Sequence[str] = [],
+        action : Optional[List[str]] = None,
         gui : bool = False,
         begin : Optional[datetime.datetime] = None,
         end : Optional[datetime.datetime] = None,
@@ -253,6 +261,9 @@ def _show_data(
     from meerschaum.utils.packages import attempt_import
     from meerschaum.utils.warnings import warn, info
     from meerschaum.utils.formatting import pprint
+
+    if action is None: action = []
+
     pipes = get_pipes(as_list=True, debug=debug, **kw)
     try:
         backtrack_minutes = float(action[0])
@@ -387,14 +398,14 @@ def _show_users(
     try:
         users_list = instance_connector.get_users(debug=debug)
     except Exception as e:
-        #  import traceback
-        #  traceback.print_stack()
         return False, f"Failed to get users from instance '{mrsm_instance}'"
+
     print_options(users_list, header=f"Registered users for instance '{instance_connector}':")
+
     return True, "Success"
 
 def _show_packages(
-        action : List[str] = [],
+        action : Optional[List[str]] = None,
         nopretty : bool = False,
         **kw : Any
     ) -> SuccessTuple:
@@ -403,6 +414,8 @@ def _show_packages(
     """
     from meerschaum.utils.packages import packages
     from meerschaum.utils.warnings import warn
+
+    if action is None: action = []
 
     if not nopretty:
         from meerschaum.utils.formatting import pprint
@@ -422,9 +435,11 @@ def _show_packages(
 
     return True, "Success"
 
-def _complete_show_packages(action : List[str] = [], **kw : Any) -> List[str]:
+def _complete_show_packages(
+        action : Optional[List[str]] = None, **kw : Any
+    ) -> List[str]:
     from meerschaum.utils.packages import packages
-    if len(action) == 0:
+    if not action:
         return sorted(list(packages.keys()))
     possibilities = []
 

@@ -50,7 +50,7 @@ def add_method_to_class(
     return func
 
 def choose_subaction(
-        action : List[str] = [],
+        action : Optional[List[str]] = None,
         options : Dict[str, Any] = {},
         **kw
     ) -> SuccessTuple:
@@ -70,6 +70,7 @@ def choose_subaction(
     """
     from meerschaum.utils.warnings import warn, info
     import inspect
+    if action is None: action = []
     parent_action = inspect.stack()[1][3]
     if len(action) == 0: action = ['']
     choice = action[0]
@@ -460,21 +461,26 @@ def timed_input(
     finally:
         signal.alarm(0) # cancel alarm
 
-async def retry_connect(
-        connector : Union[meerschaum.connectors.sql.SQLConnector, meerschaum.connectors.api.APIConnector, None] = None,
+def retry_connect(
+        connector : Union[
+            meerschaum.connectors.sql.SQLConnector,
+            meerschaum.connectors.api.APIConnector,
+            None
+        ] = None,
         max_retries : int = 40,
         retry_wait : int = 3,
         workers : int = 1,
+        warn : bool = True,
         debug : bool = False,
     ):
     """
     Keep trying to connect to the database.
-    Use wait_for_connection for non-async
     """
-    from meerschaum.utils.warnings import warn, error, info
+    from meerschaum.utils.warnings import warn as _warn, error, info
     from meerschaum.utils.debug import dprint
     from meerschaum import get_connector
     from meerschaum.utils.packages import attempt_import
+    from meerschaum.connectors.sql._tools import test_queries
     from functools import partial
     import time, sys
 
@@ -491,28 +497,28 @@ async def retry_connect(
         if debug:
             dprint(f"Trying to connect to '{connector}'...")
             dprint(f"Attempt ({retries + 1} / {max_retries})")
+
         if connector.type == 'sql':
-            async def _connect(_connector):
-                _db = _connector.db
-                if _db is None:
-                    _connect_attempt = _connector.val("SELECT 1 AS connect_attempt")
-                    if _connect_attempt is None:
-                        raise Exception("Failed to connect.")
-                else:
-                    await _db.connect()
+
+            def _connect(_connector):
+                ### Test queries like `SELECT 1`.
+                connect_query = test_queries.get(connector.flavor, test_queries['default'])
+                if _connector.exec(connect_query) is None:
+                    raise Exception("Failed to connect.")
+
             try:
-                #  await connector.db.connect()
                 _connect(connector)
                 connected = True
             except Exception as e:
                 print(e)
                 connected = False
+
         elif connector.type == 'api':
             ### If the remote instance does not allow chaining, don't even try logging in.
             if not isinstance(chaining_status, bool):
                 chaining_status = connector.get_chaining_status(debug=debug)
                 if chaining_status is False:
-                    warn(
+                    if warn: _warn(
                         f"Meerschaum instance '{connector}' does not allow chaining " +
                         "and cannot be used as the parent for this instance.",
                         stack = False
@@ -522,33 +528,29 @@ async def retry_connect(
                     connected = False
             if chaining_status:
                 connected = connector.login(debug=debug)[0]
-                if not connected: warn(f"Unable to login to '{connector}'!", stack=False)
+                if not connected and warn:
+                    _warn(f"Unable to login to '{connector}'!", stack=False)
 
         if connected:
             if debug: dprint("Connection established!")
             return True
 
-        warn(f"Connection failed. Press [Enter] to retry or wait {retry_wait} seconds.", stack=False)
-        info(
-            f"To quit, press CTRL-C, then 'q' + Enter for each worker" +
-            (f" ({workers})." if workers is not None else ".")
-        )
+        if warn:
+            _warn(f"Connection failed. Press [Enter] to retry or wait {retry_wait} seconds.", stack=False)
+            info(
+                f"To quit, press CTRL-C, then 'q' + Enter for each worker" +
+                (f" ({workers})." if workers is not None else ".")
+            )
         try:
-            text = timed_input(retry_wait)
-            if text in ('q', 'quit', 'pass', 'exit', 'stop'):
-                return None
+            if retry_wait > 0:
+                text = timed_input(retry_wait)
+                if text in ('q', 'quit', 'pass', 'exit', 'stop'):
+                    return None
         except KeyboardInterrupt:
             return None
         retries += 1
 
     return False
-
-def wait_for_connection(**kw):
-    """
-    Block until a connection to the SQL database is made.
-    """
-    import asyncio
-    asyncio.run(retry_connect(**kw))
 
 def df_from_literal(
         pipe : 'meerschaum.Pipe' = None,
@@ -818,7 +820,13 @@ def get_connector_labels(
             continue
         conns += [ f'{t}:{label}' for label in connectors.get(t, {}) if label != 'default' ]
 
-    possibilities = [ c for c in conns if c.startswith(search_term) and c != (search_term if ignore_exact_match else None) ]
+    possibilities = [
+        c for c in conns
+            if c.startswith(search_term)
+                and c != (
+                    search_term if ignore_exact_match else ''
+                )
+    ]
     return sorted(possibilities)
 
 def json_serialize_datetime(dt : datetime.datetime) -> str:

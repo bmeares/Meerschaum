@@ -7,7 +7,7 @@ Directly interact with the SQL server via Meerschaum actions
 """
 
 from __future__ import annotations
-from meerschaum.utils.typing import SuccessTuple, Any, List
+from meerschaum.utils.typing import SuccessTuple, Any, List, Optional
 
 exec_methods = {
     'read',
@@ -15,7 +15,7 @@ exec_methods = {
 }
 
 def sql(
-        action : List[str] = [],
+        action : Optional[List[str]] = None,
         gui : bool = False,
         debug : bool = False,
         **kw : Any
@@ -36,6 +36,8 @@ def sql(
         - `sql {label} exec [query]`
             Execute a query and print the success status
     """
+
+    if action is None: action = []
 
     ### input: `sql read` or `sql exec`
     if len(action) == 1 and action[0] in exec_methods:

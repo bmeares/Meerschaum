@@ -125,7 +125,13 @@ def get_console():
         console = None
     return console
 
-def print_tuple(tup : tuple, skip_common : bool = True, common_only : bool = False) -> None:
+def print_tuple(
+        tup : tuple,
+        skip_common : bool = True,
+        common_only : bool = False,
+        upper_padding : int = 0,
+        lower_padding : int = 0,
+    ) -> None:
     """
     Print Meerschaum SuccessTuple.
     """
@@ -156,7 +162,9 @@ def print_tuple(tup : tuple, skip_common : bool = True, common_only : bool = Fal
         if ANSI:
             msg = colored(msg, *status_config['ansi']['color'])
 
+        for i in range(upper_padding): print()
         print(msg)
+        for i in range(lower_padding): print()
 
 
 def __getattr__(name : str) -> str:

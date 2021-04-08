@@ -6,7 +6,7 @@ This module is the entry point for the interactive shell
 """
 
 from __future__ import annotations
-from meerschaum.utils.typing import Union, SuccessTuple, Any, Callable, Optional, List
+from meerschaum.utils.typing import Union, SuccessTuple, Any, Callable, Optional, List, Literal
 
 import sys, inspect
 from meerschaum.utils.packages import attempt_import
@@ -45,6 +45,7 @@ commands_to_remove = {
 hidden_commands = {
     #  'macro',
     #  'alias',
+    'os',
     'sh',
     'pass',
     'exit',
@@ -327,6 +328,7 @@ class Shell(cmd.Cmd):
         from meerschaum.utils.formatting import ANSI, colored
         prompt = self._prompt
         mask = prompt
+
         if '{instance}' in self._prompt:
             if instance is None: instance = self.instance_keys
             self.instance = instance
@@ -337,8 +339,10 @@ class Shell(cmd.Cmd):
         if '{username}' in self._prompt:
             if username is None:
                 from meerschaum.utils.misc import remove_ansi
-                try:
-                    username = parse_instance_keys(remove_ansi(self.instance_keys), construct=False)['username']
+                try:  
+                    username = parse_instance_keys(
+                        remove_ansi(self.instance_keys), construct=False
+                    )['username']
                 except KeyError:
                     username = '(no username)'
                 except Exception as e:
@@ -449,13 +453,11 @@ class Shell(cmd.Cmd):
 
         try:
             func = getattr(self, 'do_' + action)
-            #  func_param_kinds = inspect.signature(func).parameters.items()
         except AttributeError as ae:
             ### if function is not found, default to `shell`
             action = "sh"
             args['action'].insert(0, "sh")
             func = getattr(self, 'do_sh')
-            #  func_param_kinds = inspect.signature(func).parameters.items()
 
         ### delete the first action
         ### e.g. 'show actions' -> ['actions']
@@ -467,8 +469,8 @@ class Shell(cmd.Cmd):
 
         from meerschaum.utils.packages import activate_venv, deactivate_venv
         plugin_name = (
-            self._actions[action].__module__.split('.')[-1] if self._actions[action].__module__.startswith('plugins.')
-            else None
+            self._actions[action].__module__.split('.')[-1]
+            if self._actions[action].__module__.startswith('plugins.') else None
         )
 
         ### execute the meerschaum action
@@ -484,17 +486,10 @@ class Shell(cmd.Cmd):
             response = False, f"Failed to execute '{func.__name__}' with exception:\n\n'{e}'.\n\nRun again with '--debug' to see a full stacktrace."
         deactivate_venv(venv=plugin_name, debug=self.debug)
         if isinstance(response, tuple):
-            if not response[0] or self.debug:
-                print()
-                print_tuple(response, skip_common=self.debug)
-                print()
-
+            print_tuple(response, skip_common=(not self.debug), upper_padding=1, lower_padding=1)
         self.postcmd(False, "")
 
         return ""
-
-    #  def postcmd(stop : bool = False, line : str = ""):
-        #  pass
 
     def postcmd(self, stop : bool = False, line : str = ""):
         self.load_config(self.instance)
@@ -538,7 +533,7 @@ class Shell(cmd.Cmd):
 
     def do_instance(
             self,
-            action : list = [''],
+            action : Optional[List[str]] = None,
             debug : bool = False,
             **kw : Any
         ) -> SuccessTuple:
@@ -573,6 +568,7 @@ class Shell(cmd.Cmd):
         from meerschaum.utils.warnings import warn, info
         from meerschaum.utils.misc import remove_ansi
 
+        if action is None: action = []
         try:
             instance_keys = action[0]
         except:
@@ -588,6 +584,7 @@ class Shell(cmd.Cmd):
 
         self.update_prompt(instance=str(conn))
         info(f"Default instance for the current shell: {conn}")
+
         return True, "Success"
 
     def complete_instance(self, text, line, begin_index, end_index):
@@ -648,7 +645,7 @@ class Shell(cmd.Cmd):
     def complete_repo(self, *args) -> List[str]:
         return self.complete_instance(*args)
 
-    def do_help(self, line) -> List[str]:
+    def do_help(self, line : str) -> List[str]:
         """
         Show help for Meerschaum actions.
 
@@ -680,7 +677,7 @@ class Shell(cmd.Cmd):
         parse_help(args)
         return ""
 
-    def complete_help(self, text, line, begin_index, end_index):
+    def complete_help(self, text : str, line : str, begin_index : int, end_index : int):
         """
         Autocomplete the `help` command.
         """
@@ -716,7 +713,7 @@ class Shell(cmd.Cmd):
                 possibilities.append(name.replace('do_', ''))
         return possibilities
 
-    def do_exit(self, params) -> True:
+    def do_exit(self, params) -> Literal[True]:
         """
         Exit the Meerschaum shell.
         """

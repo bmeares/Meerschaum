@@ -10,7 +10,7 @@ from __future__ import annotations
 from meerschaum.utils.typing import SuccessTuple, Any, List
 
 def upgrade(
-        action : Sequence[str] = [],
+        action : Optional[List[str]] = None,
         **kw : Any
     ) -> SuccessTuple:
     """
@@ -33,7 +33,7 @@ def upgrade(
     return choose_subaction(action, options, **kw)
 
 def _upgrade_meerschaum(
-        action : List[str] = [],
+        action : Optional[List[str]] = None,
         yes : bool = False,
         force : bool = False,
         noask : bool = False,
@@ -52,6 +52,8 @@ def _upgrade_meerschaum(
     from meerschaum.actions import actions
     from meerschaum.utils.prompt import yes_no
     from meerschaum.utils.packages import pip_install, attempt_import
+
+    if action is None: action = []
 
     is_stack_running = False
     client = None
@@ -92,7 +94,7 @@ def _upgrade_meerschaum(
     return True, "Success"
 
 def _upgrade_packages(
-        action : List[str] = [],
+        action : Optional[List[str]] = None,
         yes : bool = False,
         force : bool = False,
         noask : bool = False,
@@ -117,6 +119,7 @@ def _upgrade_packages(
     from meerschaum.utils.prompt import yes_no
     from meerschaum.utils.formatting import make_header, pprint
     from meerschaum.utils.misc import print_options
+    if action is None: action = []
     if len(action) == 0:
         group = 'full'
     else:
@@ -147,7 +150,7 @@ def _upgrade_packages(
     return success, msg
 
 def _upgrade_plugins(
-        action : List[str] = [],
+        action : Optional[List[str]] = None,
         yes : bool = False,
         force : bool = False,
         noask : bool = False,
@@ -172,6 +175,8 @@ def _upgrade_plugins(
     from meerschaum.actions.plugins import get_plugins_names
     from meerschaum.utils.misc import print_options
     from meerschaum.utils.prompt import yes_no
+
+    if action is None: action = []
 
     to_install = get_plugins_names() if len(action) == 0 else action
     if len(to_install) == 0:

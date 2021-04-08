@@ -7,11 +7,11 @@ Open subprocesses and read their output
 """
 
 from __future__ import annotations
-from meerschaum.utils.typing import List, Any, SuccessTuple
+from meerschaum.utils.typing import List, Any, SuccessTuple, Optional
 
 def os(
-        action : List[str] = [],
-        sub_args : List[str] = [],
+        action : Optional[List[str]] = None,
+        sub_args : Optional[List[str]] = None,
         debug : bool = False,
         **kw : Any
     ) -> SuccessTuple:
@@ -23,6 +23,8 @@ def os(
     import subprocess
     import sys
     from meerschaum.utils.debug import dprint
+
+    if action is None: action = []
 
     ### determine system encoding
     encoding = sys.getdefaultencoding()

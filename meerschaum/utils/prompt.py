@@ -225,6 +225,7 @@ def choose(
 def get_password(
         username : Optional[str] = None,
         minimum_length : Optional[int] = None,
+        confirm : bool = True,
         **kw : Any
     ) -> str:
     """
@@ -244,6 +245,10 @@ def get_password(
                 stack = False
             )
             continue
+
+        if not confirm:
+            return password
+
         _password = prompt(
             f"Confirm password" + (f" for user '{username}':") if username is not None else ":",
             is_password = True,

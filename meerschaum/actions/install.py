@@ -10,7 +10,7 @@ from __future__ import annotations
 from meerschaum.utils.typing import List, Any, SuccessTuple, Optional
 
 def install(
-        action : List[str] = [],
+        action : Optional[List[str]] = None,
         **kw : Any
     ) -> SuccessTuple:
     """
@@ -24,12 +24,13 @@ def install(
     return choose_subaction(action, options, **kw)
 
 def _complete_install(
-        action : List[str] = [],
+        action : Optional[List[str]] = None,
         **kw : Any
     ) -> List[str]:
     """
     Override the default Meerschaum `complete_` function.
     """
+    if action is None: action = []
     options = {
         'plugins' : _complete_install_plugins,
         'packages': _complete_install_packages,
@@ -44,7 +45,7 @@ def _complete_install(
     return default_action_completer(action=(['install'] + action), **kw)
 
 def _install_plugins(
-        action : List[str] = [],
+        action : Optional[List[str]] = None,
         repository : Optional[str] = None,
         debug : bool = False,
         **kw : Any
@@ -73,7 +74,7 @@ def _install_plugins(
     from meerschaum._internal import Plugin
     from meerschaum.connectors.api import APIConnector
 
-    if action == [''] or len(action) == 0:
+    if not action:
         return False, "No plugins to install"
 
     repo_connector = parse_repo_keys(repository)
@@ -89,13 +90,14 @@ def _install_plugins(
     return True, "Success"
 
 def _complete_install_plugins(
-        action : List[str] = [],
+        action : Optional[List[str]] = None,
         repository : Optional[str] = None,
         **kw : Any
-    ):
+    ) -> List[str]:
     """
     Search for plugins to autocomplete command line text.
     """
+    if action is None: action = []
     if len(action) == 0:
         search_term = None
     else:
@@ -111,8 +113,8 @@ def _complete_install_plugins(
     return sorted(results)
 
 def _install_packages(
-        action : List[str] = [],
-        sub_args : List[str] = [],
+        action : Optional[List[str]] = None,
+        sub_args : Optional[List[str]] = None,
         debug : bool = False,
         **kw : Any
     ) -> SuccessTuple:
@@ -122,7 +124,7 @@ def _install_packages(
     Example:
         `install packages pandas numpy`
     """
-    if len(action) == 0:
+    if not action:
         return False, f"No packages to install"
     from meerschaum.utils.warnings import info
     from meerschaum.utils.packages import pip_install
@@ -131,7 +133,7 @@ def _install_packages(
     return False, f"Failed to install packages:\n{action}"
 
 def _complete_install_packages(
-        **kw
+        **kw : Any
     ) -> List[str]:
     return []
 

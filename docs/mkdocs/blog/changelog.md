@@ -1,6 +1,19 @@
 # Changelog
 This changelog was not introduced until v0.2.12, so many of the critical releases of Meerschaum have already been published.
 
+### v0.2.18
+- **Added `login` action.**  
+  To verify or correct login credentials for API instance, run the `login` action. The action will try to log in with your defined usernames and passwords, and if a connector is missing a username or password is incorrect, it will ask if you would like to try different login credentials, and upon success, it will ask if you would like to save the new credentials to the primary configuration file.
+  
+- **Critical bugfix.**  
+  Fixed bug where `default` values were being copied over from the active shell `instance`. I finally found, deep in the code, the missing `.copy()`.
+  
+- **Reset `api:mrsm` to default repository.**  
+  In my task to move everything to the preconfigured instance, I overstepped and made the default repository into the configured `instance`, which by default is a SQLConnector, so that broke things! In case you were affected by this change, you can simply reset the value of `default_repository` to `api:mrsm` (or your `api` server) to return to the desired behavior.
+  
+- **🧹 Housekeeping (refactoring)**.  
+  I removed nearly all instances of declaring mutable types as optional values, as well as additional `typing` hints. There may still be some additional cleaning to do, but now the functions are neat and tidy!
+
 ### v0.2.17
 - **Added CockroachDB as a supported database flavor.**  
   CockroachDB may be a data source or a Meerschaum backend. There may be some performance tuning to do, but for now, it is functional. For example, I may implement bulk insert for CockroachDB like what is done for PostgreSQL and TimescaleDB.

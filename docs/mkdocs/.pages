@@ -1,0 +1,6 @@
+nav:
+  - Home: index.md
+  - Get Started: get-started
+  - Plugins: plugins
+  - Reference: reference
+  - ...

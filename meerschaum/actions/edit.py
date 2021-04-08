@@ -10,7 +10,7 @@ from __future__ import annotations
 from meerschaum.utils.typing import List, Any, SuccessTuple, Optional
 
 def edit(
-        action : List[str] = [],
+        action : Optional[List[str]] = None,
         **kw : Any
     ) -> SuccessTuple:
     """
@@ -25,7 +25,7 @@ def edit(
     return choose_subaction(action, options, **kw)
 
 def _complete_edit(
-        action : List[str] = [],
+        action : Optional[List[str]] = None,
         **kw : Any
     ) -> List[str]:
     """
@@ -35,6 +35,8 @@ def _complete_edit(
         'config' : _complete_edit_config,
     }
 
+    if action is None: action = []
+
     if len(action) > 0 and action[0] in options:
         sub = action[0]
         del action[0]
@@ -43,7 +45,7 @@ def _complete_edit(
     from meerschaum.actions.shell import default_action_completer
     return default_action_completer(action=(['edit'] + action), **kw)
 
-def _edit_config(action : List[str] = [], **kw) -> SuccessTuple:
+def _edit_config(action : Optional[List[str]] = None, **kw : Any) -> SuccessTuple:
     """
     Edit Meerschaum configuration files.
 
@@ -64,14 +66,15 @@ def _edit_config(action : List[str] = [], **kw) -> SuccessTuple:
         ```
     """
     from meerschaum.config._edit import edit_config
+    if action is None: action = []
     if len(action) == 0:
         action.append('meerschaum')
     return edit_config(keys=action, **kw)
 
-def _complete_edit_config(action : List[str] = [], **kw : Any):
+def _complete_edit_config(action : Optional[List[str]] = None, **kw : Any) -> List[str]:
     from meerschaum.config._read_config import get_possible_keys
     keys = get_possible_keys()
-    if len(action) == 0:
+    if not action:
         return keys
     possibilities = []
     for key in keys:
@@ -80,7 +83,7 @@ def _complete_edit_config(action : List[str] = [], **kw : Any):
     return possibilities
 
 def _edit_pipes(
-        action : List[str] = [],
+        action : Optional[List[str]] = None,
         debug : bool = False,
         **kw : Any
     ) -> SuccessTuple:
@@ -101,6 +104,8 @@ def _edit_pipes(
     from meerschaum import get_pipes
     from meerschaum.utils.prompt import prompt
     from meerschaum.utils.misc import print_options
+
+    if action is None: action = []
 
     edit_definition = (len(action) > 0 and action[0] == 'definition')
 
@@ -131,7 +136,7 @@ def _edit_pipes(
     return (True, "Success")
 
 def _edit_users(
-        action : List[str] = [],
+        action : Optional[List[str]] = None,
         mrsm_instance : Optional[str] = None,
         yes : bool = False,
         noask : bool = False,
@@ -155,6 +160,8 @@ def _edit_users(
     from meerschaum.utils.yaml import yaml
     import os, pathlib
     instance_connector = parse_instance_keys(mrsm_instance)
+    
+    if action is None: action = []
 
     def build_user(username : str):
         ### Change the password
@@ -195,7 +202,7 @@ def _edit_users(
         ### Submit changes
         return User(username, password, email=email, type=_type, attributes=attributes)
 
-    if len(action) == 0 or action == ['']:
+    if not action:
         return False, "No users to edit."
 
     success = dict()
