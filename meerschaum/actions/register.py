@@ -40,10 +40,14 @@ def _register_pipes(
     from meerschaum.utils.debug import dprint
     from meerschaum.utils.warnings import warn, info
 
-    if connector_keys is None: connector_keys = []
-    if metric_keys is None: metric_keys = []
-    if location_keys is None: location_keys = []
-    if params is None: params = {}
+    if connector_keys is None:
+        connector_keys = []
+    if metric_keys is None:
+        metric_keys = []
+    if location_keys is None:
+        location_keys = []
+    if params is None:
+        params = {}
 
     if (
         len(connector_keys) == 0 or
@@ -70,7 +74,8 @@ def _register_pipes(
     success, message = True, "Success"
     failed_message = ""
     for p in pipes:
-        if debug: dprint(f"Registering pipe '{p}'...")
+        if debug:
+            dprint(f"Registering pipe '{p}'...")
         ss, msg = p.register(debug=debug)
         if not ss:
             warn(f"{msg}", stack=False)
@@ -90,7 +95,7 @@ def _register_plugins(
         **kw : Any
     ) -> SuccessTuple:
     from meerschaum.utils.debug import dprint
-    from meerschaum.utils.misc import reload_plugins
+    from meerschaum.actions.plugins import reload_plugins
     from meerschaum.connectors.parse import parse_repo_keys
     from meerschaum.config import get_config
     from meerschaum.utils.warnings import warn, error, info
@@ -98,15 +103,21 @@ def _register_plugins(
     from meerschaum import get_connector
     from meerschaum.utils.formatting import print_tuple
 
-    if action is None: action = []
+    if action is None:
+        action = []
 
     reload_plugins(debug=debug)
 
     repo_connector = parse_repo_keys(repository)
     if repo_connector.__dict__.get('type', None) != 'api':
-        return False, f"Can only upload plugins to the Meerschaum API. Connector '{repo_connector}' is of type '{repo_connector.get('type', type(repo_connector))}'."
+        return False, (
+            f"Can only upload plugins to the Meerschaum API." +
+            f"Connector '{repo_connector}' is of type " +
+            f"'{repo_connector.get('type', type(repo_connector))}'."
+        )
 
-    if len(action) == 0 or action == ['']: return False, "No plugins to register"
+    if len(action) == 0 or action == ['']:
+        return False, "No plugins to register."
 
     plugins_to_register = dict()
     from meerschaum.actions.plugins import get_plugins_names
@@ -127,8 +138,10 @@ def _register_plugins(
 
     total_success, total_fail = 0, 0
     for p, tup in successes.items():
-        if tup[0]: total_success += 1
-        else: total_fail += 1
+        if tup[0]:
+            total_success += 1
+        else:
+            total_fail += 1
 
     if debug:
         from meerschaum.utils.formatting import pprint
@@ -136,10 +149,9 @@ def _register_plugins(
         pprint(successes)
 
     msg = (
-        f"Finished registering {len(plugins_to_register)} plugins." + '\n' +
-        f"    ({total_success} succeeded, {total_fail} failed)"
+        f"Finished registering {len(plugins_to_register)} plugins" + '\n' +
+        f"    ({total_success} succeeded, {total_fail} failed)."
     )
-    if shell: info(msg)
     reload_plugins(debug=debug)
     return True, msg
 
@@ -161,7 +173,8 @@ def _register_users(
     from meerschaum._internal.User import User
     from meerschaum.utils.formatting import print_tuple
     from meerschaum.utils.prompt import prompt, get_password, get_email
-    if mrsm_instance is None: mrsm_instance = get_connector('meerschaum', 'instance')
+    if mrsm_instance is None:
+        mrsm_instance = get_config('meerschaum', 'instance')
     instance_connector = parse_instance_keys(mrsm_instance)
 
     if not action:
@@ -170,7 +183,7 @@ def _register_users(
     ### filter out existing users
     nonregistered_users = []
     for username in action:
-        user = User(username=username, password='')
+        user = User(username=username)
         user_id = instance_connector.get_user_id(user, debug=debug)
         if user_id is not None:
             info(f"User '{user}' already exists. Skipping...")
@@ -187,24 +200,27 @@ def _register_users(
             email = get_email(username, allow_omit=True)
         except Exception as e:
             return False, f"Aborted registering users {', '.join([str(u) for u in nonregistered_users if u not in successfully_registered_users])}"
-        if len(email) == 0: email = None
+        if len(email) == 0:
+            email = None
         user = User(username, password, email=email)
         info(f"Registering user '{user}' to Meerschaum instance '{instance_connector}'...")
         result_tuple = instance_connector.register_user(user, debug=debug)
         print_tuple(result_tuple)
         success[username] = result_tuple[0]
-        if success[username]: successfully_registered_users.add(user)
+        if success[username]:
+            successfully_registered_users.add(user)
 
     succeeded, failed = 0, 0
     for username, r in success.items():
-        if r: succeeded += 1
-        else: failed += 1
+        if r:
+            succeeded += 1
+        else:
+            failed += 1
 
     msg = (
         f"Finished registering {succeeded + failed} users." + '\n' +
         f"  ({succeeded} succeeded, {failed} failed)"
     )
-    if shell: info(msg)
     return True, msg
 
 ### NOTE: This must be the final statement of the module.
@@ -212,4 +228,3 @@ def _register_users(
 ###       be added to the `help` docstring.
 from meerschaum.utils.misc import choices_docstring as _choices_docstring
 register.__doc__ += _choices_docstring('register')
-

@@ -24,7 +24,8 @@ def bootstrap(
         `bootstrap pipes`
     """
     from meerschaum.utils.misc import choose_subaction
-    if action is None: action = []
+    if action is None:
+        action = []
     options = {
         'pipes'      : _bootstrap_pipes,
         'config'     : _bootstrap_config,
@@ -81,7 +82,7 @@ def _bootstrap_pipes(
                     noask = noask
                 ):
                     return abort_tuple
-            except:
+            except KeyboardInterrupt:
                 return abort_tuple
     else:
         ### Get the connector.
@@ -96,11 +97,12 @@ def _bootstrap_pipes(
                 get_connector_labels() + [new_label],
                 numeric = False
             )
-        except:
+        except KeyboardInterrupt:
             return abort_tuple
 
         if ck == new_label:
-            if _clear: clear_screen(debug=debug)
+            if _clear:
+                clear_screen(debug=debug)
             while True:
                 tup = _bootstrap_connectors([], yes=yes, force=force, debug=debug, return_keys=True, **kw)
                 if isinstance(tup[0], str):
@@ -112,7 +114,8 @@ def _bootstrap_pipes(
 
         ### Get the metric.
         while True:
-            if _clear: clear_screen(debug=debug)
+            if _clear:
+                clear_screen(debug=debug)
             try:
                 mk = prompt(
                     f"What kind of data is this?\n\n" +
@@ -120,7 +123,7 @@ def _bootstrap_pipes(
                     f"For example, 'weather' might be a metric for weather station data.\n\n" +
                     f" {get_config('formatting', 'emoji', 'metric')} Metric:"
                 )
-            except:
+            except KeyboardInterrupt:
                 return abort_tuple
             if mk:
                 break
@@ -128,7 +131,8 @@ def _bootstrap_pipes(
         metric_keys = [mk]
 
         ### Get the location
-        if _clear: clear_screen(debug=debug)
+        if _clear:
+            clear_screen(debug=debug)
         try:
             lk = prompt(
                 f"Where are the data located?\n\n" +
@@ -140,12 +144,13 @@ def _bootstrap_pipes(
                 f"In most cases. you can omit the location.\n\n" +
                 f" {get_config('formatting', 'emoji', 'location')} Location (Empty to omit):"
             )
-        except:
+        except KeyboardInterrupt:
             return abort_tuple
         lk = None if lk == '' else lk
         location_keys = [lk]
 
-    if _clear: clear_screen(debug=debug)
+    if _clear:
+        clear_screen(debug=debug)
     _pipes = get_pipes(
         connector_keys, metric_keys, location_keys,
         method = 'explicit', as_list = True,
@@ -158,7 +163,7 @@ def _bootstrap_pipes(
                 if not yes_no(f"Pipe '{p}' already exists. Delete pipe '{p}'?\nData will be lost!", default='n'):
                     info(f"Skipping bootstrapping pipe '{p}'...")
                     continue
-            except:
+            except KeyboardInterrupt:
                 return abort_tuple
         pipes.append(p)
 
@@ -227,7 +232,8 @@ def _bootstrap_connectors(
     except KeyboardInterrupt:
         return abort_tuple
 
-    if _clear: clear_screen(debug=debug)
+    if _clear:
+        clear_screen(debug=debug)
 
     _label_choices = sorted(
         [label for label in get_config('meerschaum', 'connectors', _type)
@@ -245,7 +251,6 @@ def _bootstrap_connectors(
             overwrite = yes_no(f"Do you want to overwrite connector '{_type}:{_label}'?", default='n', yes=yes, noask=noask)
             if not overwrite and not force:
                 return False, f"No changes made to connector configuration."
-            else:
                 break
         elif _label == "":
             warn(f"Please enter a label.", stack=False)
@@ -280,7 +285,8 @@ def _bootstrap_connectors(
             val = prompt(f"Value for {r}:")
         except KeyboardInterrupt:
             continue
-        if is_int(val): val = int(val)
+        if is_int(val):
+            val = int(val)
         new_attributes[r] = val
 
     for k, v in default.items():
@@ -294,7 +300,8 @@ def _bootstrap_connectors(
         if is_int(val): val = int(val)
         new_attributes[k] = val
 
-    if _clear: clear_screen(debug=debug)
+    if _clear:
+        clear_screen(debug=debug)
     try:
         conn = get_connector(_type, _label, **new_attributes)
     except Exception as e:
@@ -307,7 +314,7 @@ def _bootstrap_connectors(
             if not yes
             else yes
         )
-    except:
+    except KeyboardInterrupt:
         ok = False
     if not ok:
         return False, "No changes made to connectors configuration."

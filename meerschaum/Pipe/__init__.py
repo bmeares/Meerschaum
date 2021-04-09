@@ -109,7 +109,8 @@ class Pipe:
             Connector keys for the Meerschaum instance where the pipe resides.
             Defaults to the preconfigured default instance.
         """
-        if location_key in ('[None]', 'None'): location_key = None
+        if location_key in ('[None]', 'None'):
+            location_key = None
         self.connector_keys = connector_keys
         self.metric_key = metric_key
         self.location_key = location_key
@@ -135,22 +136,21 @@ class Pipe:
         else: ### NOTE: must be SQL or API Connector for this work
             self.instance_keys = mrsm_instance
 
-        ### TODO aggregations?
-        #  self._aggregations = dict()
-
-
     @property
     def meta(self):
         """
         Simulate the MetaPipe model without importing FastAPI.
         """
         refresh = False
-        if '_meta' not in self.__dict__: refresh = True
-        elif self.parameters != self._meta['parameters']: refresh = True
+        if '_meta' not in self.__dict__:
+            refresh = True
+        elif self.parameters != self._meta['parameters']:
+            refresh = True
 
         if refresh:
             parameters = self.parameters
-            if parameters is None: parameters = dict()
+            if parameters is None:
+                parameters = dict()
             self._meta = {
                 'connector_keys' : self.connector_keys,
                 'metric_key'     : self.metric_key,
@@ -224,4 +224,3 @@ class Pipe:
         Read the state (unpickling).
         """
         self.__init__(**_state)
-        

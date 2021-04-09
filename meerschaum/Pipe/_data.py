@@ -73,13 +73,6 @@ def get_backtrack_data(
         **kw
     )
 
-### NOTE: removed this
-#  @property
-#  def data(
-        #  self
-    #  ) -> 'pd.DataFrame':
-    #  return self.get_data()
-
 def get_rowcount(
         self,
         begin : Optional['datetime.datetime'] = None,
@@ -103,10 +96,11 @@ def get_rowcount(
 
     :param debug: Verbosity toggle.
     """
-    connector = self.instance_connector
-    if remote: connector = self.connector
+    connector = self.instance_connector if not remote else self.connector
     try:
-        return connector.get_pipe_rowcount(self, begin=begin, end=end, remote=remote, params=params, debug=debug)
+        return connector.get_pipe_rowcount(
+            self, begin=begin, end=end, remote=remote, params=params, debug=debug
+        )
     except AttributeError:
         if remote:
             return None

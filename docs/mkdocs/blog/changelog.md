@@ -1,5 +1,11 @@
-# Changelog
-This changelog was not introduced until v0.2.12, so many of the critical releases of Meerschaum have already been published.
+# Changelog and Release Notes
+This changelog was not introduced until v0.2.12, so many of the critical releases of Meerschaum have already been published. I've backlogged previous releases but haven't added all notes for all the versions.
+
+## 0.2.x Releases
+Version 0.2 improved greatly on 0.1, with a greater focus on the user experience, plugins, local performance, and a whole lot more. Read the release notes below for some of the highlights.
+
+### v0.2.19
+- **Refactoring and bugfixes**
 
 ### v0.2.18
 - **Added `login` action.**  
@@ -61,3 +67,50 @@ This changelog was not introduced until v0.2.12, so many of the critical release
 - **Bugfixes.**  
   Like always, this release includes miscellaneous bugfixes.
 
+### v0.2.11 (release notes before this point are back-logged)
+- **API Chaining**  
+  Set a Meerschaum API as a the parent source connector for a child Meerschaum API, as if it were a SQLConnector.
+
+### v0.2.10
+- **MRSM_CONFIG critical bugfix**  
+  The environment variable MRSM_CONFIG is patched on top of your existing configuration. MRSM_PATH is also a patch that is added after MRSM_CONFIG.
+  
+### v0.2.9
+- **API and SQL Chunking**  
+  Syncing data via an APIConnector or SQLConnector uploads the dictionary or DataFrame in chunks (defaults to a chunksize of 900). When calling `read()` with a SQLConnector, a `chunk_hook` callable may be passed, and if `as_chunks` is `True`, a list of DataFrames will be returned. If `as_iterator` is `True`, a dataframe iterator will be returned.
+
+### v0.2.8
+- **API Chaining introduction**  
+  Chaining is first released on v0.2.8, though it is finalized in 0.2.11.
+
+### v0.2.7
+- **Shell autocomplete bugfixes**
+
+### v0.2.6
+- **Miscellaneous bugfixes and dependency updates**
+
+### v0.2.1 — v0.2.5
+- **Shell improvements**  
+  Stability, autosuggest, and more.
+- **Virtual environments**  
+  Isolate dependencies via virtual environments. The primary entrypoint for virtual environments is `meerschaum.utils.packages.attempt_import()`.
+
+### v0.2.0
+- **Plugins**  
+  Introduced the plugin system, which allows users and developers to easily integrate any data source into Meerschaum. You can read more about plugins [here](/plugins).
+- **Repositories**  
+  Repositories are Meerschaum APIs that register and serve plugins. To register a plugin, you need a user login for that API instance.
+- **Users**  
+  A user account is required for most functions of the Meerschaum API (for security reasons). By default, user registration is disabled from the API side (but can be enabled with `edit config system` under `permissions`). You can register users on a direct SQL connection to a Meerschaum instance.
+- **Updated shell design**  
+  Added a new prompt, intro, and more shell design improvements.
+- **SQLite improvements**  
+  The connector `sql:local` may be used as as backend for cases such as when running on a low-powered device like a Raspberry Pi.
+
+## 0.1.x Releases
+
+Meerschaum's first point release focused on a lot, but mainly stability and improving important functionality, such as syncing.
+
+## 0.0.x Releases
+
+A lot was accomplished in the first 60 releases of Meerschaum. For the most part, the groundwork for core concepts like pipes, syncing, the config system, SQL and API connectors, bulk inserts, and more was laid.

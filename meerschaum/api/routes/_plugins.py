@@ -55,15 +55,15 @@ def register_plugin(
     from meerschaum.config._paths import PLUGINS_RESOURCES_PATH, PLUGINS_ARCHIVES_RESOURCES_PATH
     from meerschaum._internal.Plugin import Plugin
     get_tables()
-    if attributes is None: attributes = json.dumps(dict())
+    if attributes is None:
+        attributes = json.dumps(dict())
     attributes = json.loads(attributes)
 
     plugin = Plugin(name, version=version, attributes=attributes)
     plugin_user_id = get_connector().get_plugin_user_id(plugin)
     if plugin_user_id is not None and plugin_user_id != get_connector().get_user_id(curr_user):
-        return False, f"User '{curr_user.username}' cannot edit plugin '{plugin}'"
-    else:
-        plugin.user_id = get_connector().get_user_id(curr_user)
+        return False, f"User '{curr_user.username}' cannot edit plugin '{plugin}'."
+    plugin.user_id = get_connector().get_user_id(curr_user)
 
     success, msg = get_connector().register_plugin(plugin, make_archive=False, debug=debug)
 
@@ -89,7 +89,7 @@ def get_plugin(
     plugin = Plugin(name)
     if plugin.archive_path.exists():
         return FileResponse(plugin.archive_path, filename=f'{plugin.name}.tar.gz')
-    return False, f"Archive for plugin '{plugin}' could not be found"
+    return False, f"Archive for plugin '{plugin}' could not be found."
 
 @app.get(plugins_endpoint + '/{name}/attributes')
 def get_plugin_attributes(

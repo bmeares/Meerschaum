@@ -33,16 +33,17 @@ async def shutdown():
     import os
     from meerschaum.config._paths import API_UVICORN_CONFIG_PATH
     try:
-        if debug: dprint(f"Removing Uvicorn configuration ({API_UVICORN_CONFIG_PATH})")
+        if debug:
+            dprint(f"Removing Uvicorn configuration ({API_UVICORN_CONFIG_PATH})")
         if API_UVICORN_CONFIG_PATH.exists():
             os.remove(API_UVICORN_CONFIG_PATH)
     except Exception as e:
         pass
         print(e)
-    if debug: dprint("Closing connection...")
+    if debug:
+        dprint("Closing connection...")
     if get_connector().type == 'sql':
         try:
             await get_connector().db.disconnect()
-        except:
+        except Exception as e:
             pass
-

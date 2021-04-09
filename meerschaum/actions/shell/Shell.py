@@ -6,9 +6,8 @@ This module is the entry point for the interactive shell
 """
 
 from __future__ import annotations
-from meerschaum.utils.typing import Union, SuccessTuple, Any, Callable, Optional, List, Literal
+from meerschaum.utils.typing import Union, SuccessTuple, Any, Callable, Optional, List, Dict
 
-import sys, inspect
 from meerschaum.utils.packages import attempt_import
 from meerschaum.config import __doc__, __version__ as version, get_config
 cmd = attempt_import(get_config('shell', 'cmd', patch=True), warn=False, lazy=False)
@@ -18,7 +17,6 @@ prompt_toolkit = attempt_import('prompt_toolkit', lazy=False, warn=False, instal
 from meerschaum.actions.shell.ValidAutoSuggest import ValidAutoSuggest
 from meerschaum.actions.shell.ShellCompleter import ShellCompleter
 _clear_screen = get_config('shell', 'clear_screen', patch=True)
-from meerschaum.connectors.parse import parse_instance_keys
 from meerschaum.utils.misc import string_width
 ### readline is Unix-like only. Disable readline features for Windows
 try:
@@ -35,7 +33,6 @@ commands_to_remove = {
     'run_script',
     'shell',
     'pyscript',
-    #  'set',
     'py',
     'shortcuts',
     'history',
@@ -43,8 +40,6 @@ commands_to_remove = {
 }
 ### cmd2 only: hide commands
 hidden_commands = {
-    #  'macro',
-    #  'alias',
     'os',
     'sh',
     'pass',
@@ -60,7 +55,7 @@ reserved_completers = {
 }
 
 def _insert_shell_actions(
-        shell : Optional['Shell'] = None,
+        _shell : Optional['Shell'] = None,
         actions : Optional[Dict[str, Callable[[Any], SuccessTuple]]] = None,
         keep_self = False,
     ) -> None:
@@ -73,12 +68,12 @@ def _insert_shell_actions(
     if actions is None:
         from meerschaum.actions import actions
 
-    _shell = shell if shell is not None else shell_pkg.Shell
+    _shell_class = _shell if _shell is not None else shell_pkg.Shell
 
     for a, f in actions.items():
         add_method_to_class(
             func = f,
-            class_def = _shell,
+            class_def = _shell_class,
             method_name = 'do_' + a,
         )
         if a not in reserved_completers:
@@ -86,7 +81,7 @@ def _insert_shell_actions(
             if _completer is None:
                 _completer = shell_pkg.default_action_completer
             completer = _completer_wrapper(_completer)
-            setattr(_shell, 'complete_' + a, completer)
+            setattr(_shell_class, 'complete_' + a, completer)
 
 def _completer_wrapper(
         target : Callable[[Any], List[str]]
@@ -201,11 +196,19 @@ def _check_complete_keys(
     return None
 
 class Shell(cmd.Cmd):
-    def __init__(self, actions : dict = {}, sysargs : list = []):
+    def __init__(
+            self,
+            actions : Optional[Dict[str, Any]] = None,
+            sysargs : Optional[List[str]] = None
+        ):
         """
         Customize the CLI from configuration
         """
-        _insert_shell_actions(shell=self, keep_self=True)
+        if actions is None:
+            actions = []
+        if sysargs is None:
+            sysargs = []
+        _insert_shell_actions(_shell=self, keep_self=True)
         try:
             delattr(cmd.Cmd, '_alias_create')
             delattr(cmd.Cmd, '_alias_delete')
@@ -232,22 +235,18 @@ class Shell(cmd.Cmd):
                 persistent_history_file = None,
             )
             _init = True
-        except: ### fall back to default init (cmd)
+        except Exception as e:
+             ### fall back to default init (cmd)
             _init = False
         
         if not _init:
-            #  try:
             super().__init__()
-            #  except Exception as e:
-                #  print(e)
-                #  sys.exit(1)
 
         ### remove default commands from the Cmd class
         for command in commands_to_remove:
             try:
                 delattr(cmd.Cmd, f'do_{command}')
-                #  self.disable_command(command)
-            except:
+            except Exception as e:
                 pass
 
         ### NOTE: custom actions must be added to the self._actions dictionary
@@ -266,7 +265,7 @@ class Shell(cmd.Cmd):
         except Exception as e:
             pass
 
-    def load_config(self, instance : str = None):
+    def load_config(self, instance : Optional[str] = None):
         """
         Set attributes from the shell configuration.
         """
@@ -315,7 +314,7 @@ class Shell(cmd.Cmd):
                 self.__dict__[attr_key] = apply_colors(self.__dict__[attr_key], attr_key)
 
         ### refresh actions
-        _insert_shell_actions(shell=self, keep_self=True)
+        _insert_shell_actions(_shell=self, keep_self=True)
 
         ### replace {instance} in prompt with stylized instance string
         self.update_prompt()
@@ -323,8 +322,7 @@ class Shell(cmd.Cmd):
     def insert_actions(self):
         from meerschaum.actions import actions
 
-    def update_prompt(self, instance=None, username=None):
-        from meerschaum.config import get_config
+    def update_prompt(self, instance : Optional[str] = None, username : Optional[str] = None):
         from meerschaum.utils.formatting import ANSI, colored
         prompt = self._prompt
         mask = prompt
@@ -332,14 +330,20 @@ class Shell(cmd.Cmd):
         if '{instance}' in self._prompt:
             if instance is None: instance = self.instance_keys
             self.instance = instance
-            if ANSI: self.instance = colored(self.instance, *get_config('shell', 'ansi', 'instance', 'color', patch=True))
+            if ANSI:
+                self.instance = colored(
+                    self.instance, *get_config(
+                        'shell', 'ansi', 'instance', 'color'
+                    )
+                )
             prompt = prompt.replace('{instance}', self.instance)
             mask = mask.replace('{instance}', ''.join(['\0' for c in '{instance}']))
 
         if '{username}' in self._prompt:
             if username is None:
                 from meerschaum.utils.misc import remove_ansi
-                try:  
+                from meerschaum.connectors.parse import parse_instance_keys
+                try:
                     username = parse_instance_keys(
                         remove_ansi(self.instance_keys), construct=False
                     )['username']
@@ -349,7 +353,7 @@ class Shell(cmd.Cmd):
                     username = str(e)
             self.username = (
                 username if not ANSI else
-                colored(username, *get_config('shell', 'ansi', 'username', 'color', patch=True))
+                colored(username, *get_config('shell', 'ansi', 'username', 'color'))
             )
             prompt = prompt.replace('{username}', self.username)
             mask = mask.replace('{username}', ''.join(['\0' for c in '{username}']))
@@ -358,13 +362,17 @@ class Shell(cmd.Cmd):
         for i, c in enumerate(mask):
             if c != '\0':
                 _c = c
-                if ANSI: _c = colored(_c, *get_config('shell', 'ansi', 'prompt', 'color', patch=True))
+                if ANSI: _c = colored(_c, *get_config('shell', 'ansi', 'prompt', 'color'))
                 remainder_prompt[i] = _c
-        self.prompt = ''.join(remainder_prompt).replace('{username}', self.username).replace('{instance}', self.instance)
+        self.prompt = ''.join(remainder_prompt).replace(
+            '{username}', self.username
+        ).replace(
+            '{instance}', self.instance
+        )
         ### flush stdout
         print("", end="", flush=True)
 
-    def precmd(self, line):
+    def precmd(self, line : str):
         """
         Pass line string to parent actions.
         Pass parsed arguments to custom actions
@@ -405,25 +413,11 @@ class Shell(cmd.Cmd):
         if line.startswith(help_token):
             return "help " + line[len(help_token):]
 
-        ### first things first: save history BEFORE execution
-        #  from meerschaum.config._paths import SHELL_HISTORY_PATH
-        #  if readline:
-            #  readline.set_history_length(get_config('shell', 'max_history', patch=patch))
-            #  readline.write_history_file(SHELL_HISTORY_PATH)
-
         ### TODO Migrate to using entry for everything instead of replicating entry inside precmd.
-        #  from meerschaum.actions._entry import entry
-        #  from meerschaum.actions.arguments._parser import get_arguments_triggers
-        #  import shlex
-        #  _sysargs = shlex.split(line)
-        #  _avail_args = get_arguments_triggers()
-        #  for a, _triggers in _avail_args.items():
-            #  if a == 'help'
-
 
         from meerschaum.actions.arguments import parse_line
         args = parse_line(line)
-        if args['help']:
+        if args.get('help', False):
             from meerschaum.actions.arguments._parser import parse_help
             parse_help(args)
             return ""
@@ -434,7 +428,8 @@ class Shell(cmd.Cmd):
 
         ### if debug is not set on the command line,
         ### default to shell setting
-        if not args['debug']: args['debug'] = self.debug
+        if not args.get('debug', False):
+            args['debug'] = self.debug
 
         action = args['action'][0]
 
@@ -483,7 +478,10 @@ class Shell(cmd.Cmd):
             if self.debug or args.get('debug', False):
                 import traceback
                 traceback.print_exception(type(e), e, e.__traceback__)
-            response = False, f"Failed to execute '{func.__name__}' with exception:\n\n'{e}'.\n\nRun again with '--debug' to see a full stacktrace."
+            response = False, (
+                f"Failed to execute '{func.__name__}' with exception:\n\n" +
+                f"'{e}'.\n\nRun again with '--debug' to see a full stacktrace."
+            )
         deactivate_venv(venv=plugin_name, debug=self.debug)
         if isinstance(response, tuple):
             print_tuple(response, skip_common=(not self.debug), upper_padding=1, lower_padding=1)
@@ -500,15 +498,8 @@ class Shell(cmd.Cmd):
         """
         Do nothing.
         """
-        pass
 
-    #  def do_alias(self, line):
-        #  pass
-
-    #  def do_macro(self, line):
-        #  pass
-
-    def do_debug(self, action=[''], **kw):
+    def do_debug(self, action : Optional[List[str]] = None, **kw):
         """
         Toggle the shell's debug mode.
         If debug = on, append `--debug` to all commands.
@@ -519,15 +510,20 @@ class Shell(cmd.Cmd):
         from meerschaum.utils.warnings import info
         on_commands = {'on', 'true'}
         off_commands = {'off', 'false'}
+        if action is None:
+            action = []
         try:
             state = action[0]
         except IndexError:
             state = ''
         if state == '':
             self.debug = not self.debug
-        elif state.lower() in on_commands: self.debug = True
-        elif state.lower() in off_commands: self.debug = False
-        else: info(f"Unknown state '{state}'. Ignoring...")
+        elif state.lower() in on_commands:
+            self.debug = True
+        elif state.lower() in off_commands:
+            self.debug = False
+        else:
+            info(f"Unknown state '{state}'. Ignoring...")
 
         info(f"Debug mode is {'on' if self.debug else 'off'}.")
 
@@ -563,12 +559,12 @@ class Shell(cmd.Cmd):
           and be accessible to this machine over the network.
         """
         from meerschaum import get_connector
-        from meerschaum.config import get_config
         from meerschaum.connectors.parse import parse_instance_keys
         from meerschaum.utils.warnings import warn, info
         from meerschaum.utils.misc import remove_ansi
 
-        if action is None: action = []
+        if action is None:
+            action = []
         try:
             instance_keys = action[0]
         except:
@@ -587,7 +583,7 @@ class Shell(cmd.Cmd):
 
         return True, "Success"
 
-    def complete_instance(self, text, line, begin_index, end_index):
+    def complete_instance(self, text : str, line : str, begin_index : int, end_index : int):
         from meerschaum.utils.misc import get_connector_labels
         from meerschaum.actions.arguments._parse_arguments import parse_line
         args = parse_line(line)
@@ -596,7 +592,7 @@ class Shell(cmd.Cmd):
 
     def do_repo(
             self,
-            action : list = [''],
+            action : Optional[List[str]] = None,
             debug : bool = False,
             **kw : Any
         ) -> SuccessTuple:
@@ -623,15 +619,18 @@ class Shell(cmd.Cmd):
         Note that repositories are a subset of instances.
         """
         from meerschaum import get_connector
-        from meerschaum.config import get_config
         from meerschaum.connectors.parse import parse_repo_keys
         from meerschaum.utils.warnings import warn, info
+
+        if action is None:
+            action = []
 
         try:
             repo_keys = action[0]
         except:
             repo_keys = ''
-        if repo_keys == '': repo_keys = get_config('meerschaum', 'default_repository', patch=True)
+        if repo_keys == '':
+            repo_keys = get_config('meerschaum', 'default_repository', patch=True)
 
         conn = parse_repo_keys(repo_keys, debug=debug)
         if conn is None or not conn:
@@ -708,12 +707,15 @@ class Shell(cmd.Cmd):
         for name, f in inspect.getmembers(_Shell):
             if not inspect.isfunction(f):
                 continue
-            #  print(name)
-            if name.startswith(f'do_{action}') and name != f'do_{action}' and name.replace('do_', '') not in self.hidden_commands:
+            if (
+                name.startswith(f'do_{action}')
+                    and name != f'do_{action}'
+                    and name.replace('do_', '') not in self.hidden_commands
+            ):
                 possibilities.append(name.replace('do_', ''))
         return possibilities
 
-    def do_exit(self, params) -> Literal[True]:
+    def do_exit(self, params) -> 'Literal[True]':
         """
         Exit the Meerschaum shell.
         """
@@ -724,21 +726,14 @@ class Shell(cmd.Cmd):
         If the user specifies, clear the screen.
         """
         ### NOTE: The screen clearing is defined in the custom input below
-        pass
 
     def preloop(self):
-        import signal, os
-        #  from meerschaum.config._paths import SHELL_HISTORY_PATH
-        #  if SHELL_HISTORY_PATH.exists():
-            #  if readline:
-                #  readline.read_history_file(SHELL_HISTORY_PATH)
         """
         Patch builtin cmdloop with my own input (defined below)
         """
+        import signal, os
         old_input = cmd.__builtins__['input']
         cmd.__builtins__['input'] = input_with_sigint(old_input, self.session)
-        #  sys.modules['readline'] = session
-        #  help(cmd)
 
         ### if the user specifies, clear the screen before initializing the shell
         if _clear_screen:
@@ -751,10 +746,6 @@ class Shell(cmd.Cmd):
             self.precmd(' '.join(self._sysargs))
 
     def postloop(self):
-        #  from meerschaum.config._paths import SHELL_HISTORY_PATH
-        #  if readline:
-            #  readline.set_history_length(get_config('shell', 'max_history', patch=patch))
-            #  readline.write_history_file(SHELL_HISTORY_PATH)
         print('\n' + self.close_message)
 
 def input_with_sigint(_input, session):
@@ -767,7 +758,7 @@ def input_with_sigint(_input, session):
         for a in args:
             try:
                 _a = prompt_toolkit.formatted_text.ANSI(a)
-            except:
+            except Exception as e:
                 _a = a
             _args.append(_a)
         try:

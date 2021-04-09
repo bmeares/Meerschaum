@@ -34,13 +34,12 @@ def fetch(
     if 'connector_keys' not in instructions:
         warn(f"Missing connector_keys in fetch parameters for Pipe '{pipe}'", stack=False)
         return None
-    remote_connector_keys = instructions['connector_keys']
+    remote_connector_keys = instructions.get('connector_keys', None)
     if 'metric_key' not in instructions:
         warn(f"Missing metric_key in fetch parameters for Pipe '{pipe}'", stack=False)
         return None
-    remote_metric_key = instructions['metric_key']
-    if 'location_key' not in instructions: remote_location_key = None
-    else: remote_location_key = instructions['location_key']
+    remote_metric_key = instructions.get('metric_key', None)
+    remote_location_key = instructions.get('location_key', None)
 
     from meerschaum import Pipe
     p = Pipe(
@@ -50,4 +49,3 @@ def fetch(
         mrsm_instance = self
     )
     return p.get_data(begin=begin, end=end, debug=debug)
-

@@ -80,7 +80,8 @@ class SQLConnector(Connector):
         ### ensure flavor and label are set accordingly
         if 'flavor' not in self.__dict__ and flavor is None:
             raise Exception("Missing flavor. Update config.yaml or provide flavor as an argument")
-        elif 'flavor' not in self.__dict__: self.flavor = flavor
+        elif 'flavor' not in self.__dict__:
+            self.flavor = flavor
 
         ### verify the flavor's requirements are met
         if self.flavor not in self.flavor_configs:
@@ -97,15 +98,12 @@ class SQLConnector(Connector):
                 from meerschaum.utils.warnings import warn
                 warn(f"Failed to connect with connector '{self}'!", stack=False)
 
-        ### store the PID and thread at initialization so we can dispose of the Pool in child processes or threads
-        import os; self._pid = os.getpid()
-        import threading; self._thread_ident = threading.current_thread().ident
+        ### Store the PID and thread at initialization
+        ### so we can dispose of the Pool in child processes or threads.
+        import os, threading
+        self._pid = os.getpid()
+        self._thread_ident = threading.current_thread().ident
         self._debug = debug
-
-        ### create a sqlalchemy session for building ORM queries
-        #  self.Session = sqlalchemy_orm.sessionmaker()
-        #  self.Session.configure(bind=self.engine)
-        #  self.session = self.Session()
 
     @property
     def engine(self):
@@ -157,13 +155,13 @@ class SQLConnector(Connector):
                 ### Likely encountered an unsupported flavor.
                 from meerschaum.utils.warnings import warn
                 self._db = None
-                #  warn(f"Connector '{self}' doesn't appear supported by the databases module. If the flavor '{self.flavor}' is supported by SQLAlchemy, then the connector may work but won't be able to wait for a valid connection.", stack=False)
         return self._db
 
-    def __getstate__(self): return self.__dict__
-    def __setstate__(self, d): self.__dict__.update(d)
-    def __call__(self): return self
+    def __getstate__(self):
+        return self.__dict__
 
-    #  def __del__(self):
-        #  pass
-        #  self.session.close()
+    def __setstate__(self, d):
+        self.__dict__.update(d)
+
+    def __call__(self):
+        return self

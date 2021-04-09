@@ -24,13 +24,13 @@ def os(
     import sys
     from meerschaum.utils.debug import dprint
 
-    if action is None: action = []
+    if action is None:
+        action = []
 
     ### determine system encoding
     encoding = sys.getdefaultencoding()
 
     command_list = []
-    #  command_list = ["bash"]
 
     ### where to redirect stdout (default None)
     capture_stdout, capture_stderr = None, None

@@ -30,7 +30,8 @@ def _complete_install(
     """
     Override the default Meerschaum `complete_` function.
     """
-    if action is None: action = []
+    if action is None:
+        action = []
     options = {
         'plugins' : _complete_install_plugins,
         'packages': _complete_install_packages,
@@ -47,6 +48,7 @@ def _complete_install(
 def _install_plugins(
         action : Optional[List[str]] = None,
         repository : Optional[str] = None,
+        force : bool = False,
         debug : bool = False,
         **kw : Any
     ) -> SuccessTuple:
@@ -67,7 +69,7 @@ def _install_plugins(
     """
     from meerschaum.utils.debug import dprint
     from meerschaum.utils.warnings import info
-    from meerschaum.utils.misc import reload_plugins
+    from meerschaum.actions.plugins import reload_plugins
     from meerschaum.connectors.parse import parse_repo_keys
     import meerschaum.actions
     from meerschaum.utils.formatting import print_tuple
@@ -75,18 +77,18 @@ def _install_plugins(
     from meerschaum.connectors.api import APIConnector
 
     if not action:
-        return False, "No plugins to install"
+        return False, "No plugins to install."
 
     repo_connector = parse_repo_keys(repository)
 
     successes = dict()
     for name in action:
-        info(f"Installing plugin '{name}' from Meerschaum repository '{repo_connector}'")
-        success, msg = repo_connector.install_plugin(name, debug=debug)
+        info(f"Installing plugin '{name}' from Meerschaum repository '{repo_connector}'...")
+        success, msg = repo_connector.install_plugin(name, force=force, debug=debug)
         successes[name] = (success, msg)
         print_tuple((success, msg))
 
-    reload_plugins()
+    reload_plugins(debug=debug)
     return True, "Success"
 
 def _complete_install_plugins(
@@ -97,15 +99,23 @@ def _complete_install_plugins(
     """
     Search for plugins to autocomplete command line text.
     """
-    if action is None: action = []
+    from meerschaum.actions import get_shell
+    if action is None:
+        action = []
     if len(action) == 0:
         search_term = None
     else:
         search_term = action[0]
+
+    ### In case we're using the Shell (which we have to in order for _complete to work),
+    ### get the current repository.
+    if repository is None:
+        repository = get_shell().repo_keys
+
     from meerschaum.connectors.parse import parse_repo_keys
     try:
         repo_connector = parse_repo_keys(repository)
-    except:
+    except Exception as e:
         return []
     results = repo_connector.get_plugins(search_term=search_term)
     if len(results) == 1 and results[0] == search_term:
@@ -143,4 +153,3 @@ def _complete_install_packages(
 ###       be added to the `help` docstring.
 from meerschaum.utils.misc import choices_docstring as _choices_docstring
 install.__doc__ += _choices_docstring('install')
-

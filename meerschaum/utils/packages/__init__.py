@@ -9,11 +9,9 @@ Functions for managing packages and virtual environments reside here.
 from __future__ import annotations
 from meerschaum.utils.typing import Any, List, SuccessTuple, Optional, Union
 
-import importlib, importlib.util
-
+import importlib
 _import_module = importlib.import_module
 from meerschaum.utils.packages._packages import packages, all_packages
-import os, pathlib, sys, platform
 from meerschaum.utils.warnings import warn, error
 
 _import_hook_venv = None
@@ -27,20 +25,23 @@ def need_update(
     """
     Check if a Meerschaum dependency needs an update.
     """
-    if debug: from meerschaum.utils.debug import dprint
+    if debug:
+        from meerschaum.utils.debug import dprint
     import re
     root_name = package.__name__.split('.')[0] if split else package.__version__
     install_name = all_packages.get(root_name, root_name)
 
     _install_no_version = re.split('[=<>,! ]', install_name)[0]
-    if debug: dprint(f"_install_no_version: {_install_no_version}", color=color)
+    if debug:
+        dprint(f"_install_no_version: {_install_no_version}", color=color)
     required_version = install_name.replace(_install_no_version, '')
-    if debug: dprint(f"required_version: {required_version}", color=color)
+    if debug:
+        dprint(f"required_version: {required_version}", color=color)
     update_checker = attempt_import('update_checker', lazy=False, check_update=False)
     checker = update_checker.UpdateChecker()
     try:
         version = package.__version__
-    except:
+    except Exception as e:
         return False
 
     result = checker.check(_install_no_version, version)
@@ -67,7 +68,8 @@ def is_venv_active(
     """
     Check if a virtual environment is active
     """
-    if venv is None: return False
+    if venv is None:
+        return False
     if debug:
         from meerschaum.utils.debug import dprint
         dprint(f"Checking if virtual environment '{venv}' is active.", color=color)
@@ -81,28 +83,30 @@ def deactivate_venv(
     """
     Remove a virtual environment from sys.path (if it's been activated)
     """
+    import sys
     global active_venvs
-    if venv is None: return True
+
+    if venv is None:
+        return True
+
     if debug:
         from meerschaum.utils.debug import dprint
         dprint(f"Deactivating virtual environment '{venv}'...", color=color)
-    if venv in active_venvs: active_venvs.remove(venv)
-    #  indices, new_path = [], []
-    if sys.path is None: return False
+
+    if venv in active_venvs:
+        active_venvs.remove(venv)
+
+    if sys.path is None:
+        return False
+
     target = venv_target_path(venv, debug=debug)
     if str(target) in sys.path:
         sys.path.remove(str(target))
-    #  for i, p in enumerate(sys.path):
-        #  if f'venvs/{venv}/lib' not in str(p):
-            #  new_path.append(p)
-    #  sys.path = new_path
 
-    ### clear the import virtual environment override
-    #  uninstall_import_hook(venv, debug=debug)
+    if debug:
+        dprint(f'sys.path: {sys.path}', color=color)
 
-    if debug: dprint(f'sys.path: {sys.path}', color=color)
     return True
-
 
 def activate_venv(
         venv: str = 'mrsm',
@@ -113,13 +117,16 @@ def activate_venv(
     Create a virtual environment (if it doesn't exist) and add it to sys.path if necessary
     """
     global active_venvs
-    if venv in active_venvs: return True
-    if venv is None: return True
-    if debug: from meerschaum.utils.debug import dprint
-    import sys, os, platform
+    if venv in active_venvs or venv is None:
+        return True
+    if debug:
+        from meerschaum.utils.debug import dprint
+    import sys, os, platform, pathlib
     from meerschaum.config._paths import VIRTENV_RESOURCES_PATH
     _venv = None
-    virtualenv = attempt_import('virtualenv', venv=None, lazy=False, install=True, warn=False, debug=debug)
+    virtualenv = attempt_import(
+        'virtualenv', venv=None, lazy=False, install=True, warn=False, debug=debug
+    )
     if virtualenv is None:
         try:
             import ensurepip
@@ -148,12 +155,8 @@ def activate_venv(
 
     old_cwd = pathlib.Path(os.getcwd())
     os.chdir(VIRTENV_RESOURCES_PATH)
-    if debug: dprint(f"Activating virtual environment '{venv}'...", color=color)
-    #  try:
-        #  exec(open(activate_this_path).read(), {'__file__': activate_this_path})
-    #  except Exception as e:
-        #  warn(str(e))
-        #  return False
+    if debug:
+        dprint(f"Activating virtual environment '{venv}'...", color=color)
     active_venvs.add(venv)
     os.chdir(old_cwd)
 
@@ -171,7 +174,7 @@ def venv_exec(code: str, venv: str = 'mrsm', debug: bool = False) -> bool:
 
     Return True if the code successfully executes, False on failure.
     """
-    import subprocess, sys
+    import subprocess, sys, platform
     from meerschaum.config._paths import VIRTENV_RESOURCES_PATH
     executable = (
         sys.executable if venv is None
@@ -224,7 +227,7 @@ def pip_install(
         try:
             import wheel
             have_wheel = True
-        except:
+        except ImportError as e:
             have_wheel = False
     _args = list(args)
     try:
@@ -274,8 +277,6 @@ def pip_install(
     if '--disable-pip-version-check' not in _args:
         _args.append('--disable-pip-version-check')
 
-    #  if venv is not None and '--user' not in _args:
-        #  _args.append('--user')
     if venv is not None and '--target' not in _args and '-t' not in _args:
         _args += ['--target', venv_target_path(venv, debug=debug)]
     elif (
@@ -296,12 +297,9 @@ def pip_install(
     if debug:
         if '-v' not in _args or '-vv' not in _args or '-vvv' not in _args:
             pass
-            #  _args.append('-v')
     else:
         if '-q' not in _args or '-qq' not in _args or '-qqq' not in _args:
             pass
-            #  _args.append('-q')
-
 
     _packages = []
     for p in packages:
@@ -314,28 +312,13 @@ def pip_install(
         msg += f'\n  - {p}'
     print(msg)
 
-    #  _imap_args = []
-    #  for p in _packages:
-        #  _imap_args.append(('pip', _args + [p], venv, debug))
-    #  print(_imap_args)
-
-    #  from meerschaum.utils.pool import get_pool
-
-    #  from multiprocessing import cpu_count
-    #  pool = get_pool('ThreadPool', max(len(_imap_args), cpu_count()))
-    #  help(pool)
-    #  results = pool.starmap(run_python_package, _imap_args)
-    #  pool.join()
-    #  pool.close()
-    #  success = sum(results) == 0
-
-
     success = run_python_package('pip', _args + _packages, venv=venv, debug=debug, color=color) == 0
     if venv is not None and deactivate:
         deactivate_venv(venv=venv, debug=debug, color=color)
     msg = "Successfully installed packages." if success else "Failed to install packages."
     print(msg)
-    if debug: print('pip install returned:', success)
+    if debug:
+        print('pip install returned:', success)
     return success
 
 def run_python_package(
@@ -350,10 +333,11 @@ def run_python_package(
     Runs an installed python package.
     E.g. Translates to `/usr/bin/python -m [package]`
     """
-    import sys, os
+    import sys, os, platform
     from subprocess import call
     from meerschaum.config._paths import VIRTENV_RESOURCES_PATH
-    if args is None: args = []
+    if args is None:
+        args = []
     old_cwd = os.getcwd()
     if cwd is not None:
         os.chdir(cwd)
@@ -438,21 +422,25 @@ def attempt_import(
 
     """
 
+    import importlib.util
+
     ### to prevent recursion, check if parent Meerschaum package is being imported
     if names == ('meerschaum',):
         return _import_module('meerschaum')
 
     if venv == 'mrsm' and _import_hook_venv is not None:
-        if debug: f"Import hook for virtual environmnt '{_import_hook_venv}' is active."
+        if debug:
+            print(f"Import hook for virtual environment '{_import_hook_venv}' is active.")
         venv = _import_hook_venv
 
-    if venv is not None: activate_venv(venv=venv, color=color, debug=debug)
+    if venv is not None:
+        activate_venv(venv=venv, color=color, debug=debug)
     _warnings = _import_module('meerschaum.utils.warnings')
     warn_function = _warnings.warn
 
     def do_import(_name: str, **kw):
-        #  is_venv_active(venv, debug=debug)
-        if venv is not None: activate_venv(venv=venv, debug=debug)
+        if venv is not None:
+            activate_venv(venv=venv, debug=debug)
         ### determine the import method (lazy vs normal)
         from meerschaum.utils.misc import filter_keywords
         import_method = _import_module if not lazy else lazy_import
@@ -467,13 +455,15 @@ def attempt_import(
                     color = False,
                 )
             mod = None
-        if venv is not None: deactivate_venv(venv=venv, color=color, debug=debug)
+        if venv is not None:
+            deactivate_venv(venv=venv, color=color, debug=debug)
         return mod
 
     modules = []
     for name in names:
         ### Enforce virtual environment (something is deactivating in the loop so check each pass).
-        if venv is not None: activate_venv(debug=debug)
+        if venv is not None:
+            activate_venv(debug=debug)
         ### Check if package is a declared dependency.
         root_name = name.split('.')[0] if split else name
         install_name = all_packages.get(root_name, None)
@@ -537,7 +527,6 @@ def attempt_import(
                         root_name,
                         venv = venv,
                         split = False,
-                        #  split = split,
                         deactivate = False,
                         check_update = check_update,
                         color = color,
@@ -561,7 +550,8 @@ def attempt_import(
         deactivate_venv(venv=venv, debug=debug, color=color)
 
     modules = tuple(modules)
-    if len(modules) == 1: return modules[0]
+    if len(modules) == 1:
+        return modules[0]
     return modules
 
 def lazy_import(
@@ -637,9 +627,9 @@ def get_modules_from_package(
     _all = [
         basename(f)[:-3] if isfile(f) else basename(f)
         for f in module_names
-        if ((isfile(f) and f.endswith('.py')) or isdir(f))
-           and not f.endswith('__init__.py')
-           and not f.endswith('__pycache__')
+            if ((isfile(f) and f.endswith('.py')) or isdir(f))
+               and not f.endswith('__init__.py')
+               and not f.endswith('__pycache__')
     ]
 
     if debug:
@@ -657,8 +647,8 @@ def get_modules_from_package(
             m = lazy_import(module_name, debug=debug) if lazy else _import_module(module_name)
             modules.append(m)
         except Exception as e:
-            if debug: dprint(e)
-            pass
+            if debug:
+                dprint(e)
         finally:
             if modules_venvs:
                 deactivate_venv(module_name.split('.')[-1], debug=debug)
@@ -666,7 +656,6 @@ def get_modules_from_package(
         return _all, modules
 
     return modules
-
 
 def import_children(
         package: Optional['ModuleType'] = None,
@@ -696,7 +685,7 @@ def import_children(
     import sys, inspect
 
     if types is None:
-        types = ['method', 'builtin', 'function', 'class', 'module'],
+        types = ['method', 'builtin', 'function', 'class', 'module']
 
     ### if package_name and package are None, use parent
     if package is None and package_name is None:
@@ -737,7 +726,6 @@ def import_children(
     setattr(sys.modules[package_name], '__all__', _all)
     return members
 
-
 def reload_package(
         package: str,
         lazy: bool = False,
@@ -753,37 +741,9 @@ def reload_package(
     else:
         try:
             package_name = package.__name__
-        except:
+        except Exception as e:
             package_name = str(package)
     return pydoc.safeimport(package_name, forceload=1)
-    #  import os, types, importlib, sys
-    #  assert (hasattr(package, "__package__"))
-    #  fn = package.__file__
-    #  fn_dir = os.path.dirname(fn) + os.sep
-    #  module_visit = {fn}
-    #  del fn
-
-    #  def reload_recursive_ex(module):
-        #  import os, types, importlib
-        #  from meerschaum.utils.debug import dprint
-        #  ### forces import of lazily-imported modules
-        #  del sys.modules[module.__name__]
-        #  module = __import__(module.__name__)
-        #  module = _import_module(module.__name__)
-        #  _module = importlib.reload(module)
-        #  sys.modules[module.__name__] = _module
-
-        #  for module_child in get_modules_from_package(module, recursive=True, lazy=lazy):
-            #  if isinstance(module_child, types.ModuleType) and hasattr(module_child, '__name__'):
-                #  fn_child = getattr(module_child, "__file__", None)
-                #  if (fn_child is not None) and fn_child.startswith(fn_dir):
-                    #  if fn_child not in module_visit:
-                        #  if debug: dprint(f"reloading: {fn_child} from {module}")
-                        #  module_visit.add(fn_child)
-                        #  reload_recursive_ex(module_child)
-
-    #  return reload_recursive_ex(package)
-
 
 def is_installed(
         name: str,
@@ -795,7 +755,8 @@ def is_installed(
         Name of the package in question
     """
     import importlib.util
-    if venv is not None: activate_venv(venv=venv)
+    if venv is not None:
+        activate_venv(venv=venv)
     found = importlib.util.find_spec(name) is not None
     if venv is None:
         return found
@@ -814,103 +775,9 @@ def venv_contains_package(
     if venv is None:
         return is_installed(name, venv=venv)
     vtp = venv_target_path(venv)
-    if not vtp.exists(): return False
+    if not vtp.exists():
+        return False
     return name in os.listdir(venv_target_path(venv))
-
-### NOTE: this is at the bottom to avoid import problems
-#  from meerschaum.utils.packages._ImportHook import install
-
-from meerschaum.utils.warnings import warn
-from importlib.machinery import PathFinder
-
-
-class ImportHook(PathFinder):
-    def __init__(self, venv: str = None, debug: bool = False):
-        self.venv = venv
-        self.debug = debug
-
-    #  def __del__(self):
-    #  deactivate_venv(self.venv, debug=self.debug)
-
-    def create_module(self, spec):
-        print(spec)
-
-    def exec_module(self, module):
-        print(module)
-
-    def find_spec(self, fullname, path=None, target=None):
-        if self.venv is not None and self.venv not in active_venvs:
-            activate_venv(self.venv, debug=False)
-        result = super(ImportHook, self).find_spec(fullname, path, target)
-        #  try:
-        #  __import__(fullname)
-        #  except Exception as e:
-        #  print(str(e))
-        if result is None and path is None and target is None:
-            if not fullname in sys.builtin_module_names:
-                warn(fullname, stacklevel=3)
-                pip_install(fullname, venv=self.venv, debug=self.debug)
-            #  pass
-            #  #  attempt_import(fullname, debug=True, venv=self.venv, precheck=False)
-        #  if self.venv is not None:
-        #  deactivate_venv(self.venv, debug=False)
-        return result
-
-
-def install_import_hook(venv: str = 'mrsm', debug: bool = False) -> bool:
-    global _import_hook_venv
-    if debug:
-        from meerschaum.utils.debug import dprint
-    from meerschaum.utils.warnings import warn
-    if _import_hook_venv is not None and _import_hook_venv != venv:
-        if venv != 'mrsm':
-            warn(
-                f"Virtual environment '{_import_hook_venv}' was set as the import hook " +
-                f"but is being overwritten by '{venv}'.", stacklevel=4
-            )
-        else:
-            if debug:
-                dprint(f"_import_hook_venv is '{_import_hook_venv}', " +
-                       "attempted to install venv '{venv}'. " +
-                       "Uninstall import hook before installing '{venv}'."
-                       )
-            return False
-    if debug: dprint(f"Installing import hook for virtual environment '{venv}'...")
-    importlib.import_module = attempt_import
-    _import_hook_venv = venv
-    found_hook = False
-    for finder in sys.meta_path:
-        if isinstance(finder, ImportHook) and finder.venv == venv:
-            found_hook = True
-            break
-    if not found_hook:
-        sys.meta_path.insert(0, ImportHook(venv, debug=True))
-
-    return True
-
-
-def uninstall_import_hook(venv: str = 'mrsm', all_hooks: bool = False, debug: bool = False) -> bool:
-    global _import_hook_venv
-    if debug:
-        from meerschaum.utils.debug import dprint
-        dprint(f"Uninstalling import hook (was set to {_import_hook_venv})...")
-    importlib.import_module = _import_module
-    _import_hook_venv = None
-    return True
-    new_meta_path, to_delete = [], []
-    for finder in sys.meta_path:
-        if (
-                not isinstance(finder, ImportHook) or (
-                isinstance(finder, ImportHook) and not all_hooks and finder.venv != venv
-        )
-        ):
-            new_meta_path.append(finder)
-        else:
-            to_delete.append(finder)
-    sys.meta_path = new_meta_path
-    del to_delete[:]
-
-    return True
 
 def venv_target_path(venv : str, debug : bool = False) -> pathlib.Path:
     """

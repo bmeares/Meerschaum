@@ -32,13 +32,14 @@ def edit_config(
 
     for k in keys:
         ### If defined in default, create the config file.
-        if isinstance(config, dict) and k in config: del config[k]
+        if isinstance(config, dict) and k in config:
+            del config[k]
         get_config(k, write_missing=True, warn=False)
         edit_file(get_keyfile_path(k, create_new=True))
 
-    if debug: dprint("Reloading configuration...")
+    if debug:
+        dprint("Reloading configuration...")
     reload_package('meerschaum', debug=debug, **kw)
-    #  reload_package('meerschaum', debug=debug, **kw)
 
     return (True, "Success")
 
@@ -121,7 +122,6 @@ def write_config(
                     indent = 2
                 ))
 
-
             if not success:
                 try:
                     if os.path.exists(filepath):
@@ -187,9 +187,8 @@ def general_edit_config(
     from meerschaum.utils.debug import dprint
 
     file_to_edit = files[default]
-    if len(action) > 1:
-        if action[1] in files:
-            file_to_edit = files[action[1]]
+    if len(action) > 1 and action[1] in files:
+        file_to_edit = files[action[1]]
 
     edit_file(file_to_edit)
 
@@ -218,32 +217,7 @@ def write_default_config(
     """
     Write the default configuration files.
     """
-    #  from meerschaum.utils.yaml import yaml
     import os
     from meerschaum.config._paths import DEFAULT_CONFIG_DIR_PATH
     from meerschaum.config._default import default_config, default_header_comment
-    #  from meerschaum.utils.debug import dprint
-    #  if os.path.isfile(DEFAULT_CONFIG_PATH): os.remove(DEFAULT_CONFIG_PATH)
-    #  if os.path.isfile(PATCH_PATH): os.remove(PATCH_PATH)
-
     return write_config(default_config, directory=DEFAULT_CONFIG_DIR_PATH)
-
-    #  config_copy = dict()
-    #  config_copy['meerschaum'] = default_config['meerschaum'].copy()
-
-    #  ### write meerschaum config first
-    #  if debug: dprint(f"Writing default Meerschaum configuration to {DEFAULT_CONFIG_PATH}...")
-    #  with open(DEFAULT_CONFIG_PATH, 'w') as f:
-        #  f.write(default_header_comment)
-        #  yaml.dump(config_copy, stream=f, sort_keys=False)
-        #  f.write("\n\n")
-
-    #  config_copy = default_config.copy()
-    #  del config_copy['meerschaum']
-
-    #  ### write the rest of the configuration
-    #  if debug: dprint(f"Writing remaining default configuration to {DEFAULT_CONFIG_PATH}...")
-    #  with open(DEFAULT_CONFIG_PATH, 'a+') as f:
-        #  yaml.dump(config_copy, stream=f, sort_keys=False)
-
-    #  return True

@@ -51,10 +51,12 @@ def bootstrap(
             id_name = prompt(f"ID (empty to omit):", icon=False)
         except KeyBoardError:
             return False, f"Failed to bootstrap pipe '{self}':\n" + str(e)
-        if id_name == '': id_name = None
+        if id_name == '':
+            id_name = None
         break
 
-    if _clear: clear_screen(debug=debug)
+    if _clear:
+        clear_screen(debug=debug)
 
     _parameters = {
         'columns' : {
@@ -64,9 +66,23 @@ def bootstrap(
     }
 
     parameters_update_types = {
-        'sql'  : { 'fetch' : { 'definition' : None } },
-        'api'  : { 'fetch' : { 'connector_keys' : None, 'metric_key' : None, 'location_key' : None } },
-        'mqtt' : { 'fetch' : { 'topic' : '#', } },
+        'sql'  : {
+            'fetch' : {
+                'definition' : None,
+            },
+        },
+        'api'  : {
+            'fetch' : {
+                'connector_keys' : None,
+                'metric_key' : None,
+                'location_key' : None,
+            },
+        },
+        'mqtt' : {
+            'fetch' : {
+                'topic' : '#',
+            },
+        },
     }
 
     _parameters.update(parameters_update_types.get(self.connector.type, {}))
@@ -77,10 +93,13 @@ def bootstrap(
     if not register_tuple[0]:
         return register_tuple
 
-    if _clear: clear_screen(debug=debug)
+    if _clear:
+        clear_screen(debug=debug)
 
     try:
-        if yes_no(f"Would you like to edit the definition for pipe '{self}'?", yes=yes, noask=noask):
+        if yes_no(
+            f"Would you like to edit the definition for pipe '{self}'?", yes=yes, noask=noask
+        ):
             edit_tuple = self.edit_definition(debug=debug)
             if not edit_tuple[0]:
                 return edit_tuple

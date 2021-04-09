@@ -34,14 +34,16 @@ def cli(
 
     ### get CLI module to launch
     cli_name = flavor_clis[self.flavor]
-    if debug: dprint(f"Opening CLI '{cli_name}' for {self} (flavor '{self.flavor}')...")
+    if debug:
+        dprint(f"Opening CLI '{cli_name}' for {self} (flavor '{self.flavor}')...")
 
     ### attempt an import to raise warnings if not installed
     cli = attempt_import(cli_name, lazy=False, debug=debug)
 
     ### open sqlalchemy engine URI or just database if sqlite
     cli_arg_str = self.DATABASE_URL
-    if self.flavor == 'sqlite': cli_arg_str = str(self.database)
+    if self.flavor == 'sqlite':
+        cli_arg_str = str(self.database)
 
     ### run the module in a subprocess because it calls sys.exit(), and __main__ does not
     ### work for these CLIs (something to do with Click?)

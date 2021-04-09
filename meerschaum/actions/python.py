@@ -34,12 +34,14 @@ def python(
     from meerschaum.utils.debug import dprint
     from meerschaum.utils.warnings import warn, error
 
-    if action is None: action = []
+    if action is None:
+        action = []
 
     joined_actions = ['import meerschaum as mrsm']
     line = ""
     for i, a in enumerate(action):
-        if a == '': continue
+        if a == '':
+            continue
         line += a + " "
         if a.endswith(';') or i == len(action) - 1:
             joined_actions.append(line[:-1])
@@ -49,19 +51,12 @@ def python(
     #  joined_actions = ['import meerschaum as mrsm;'] + joined_actions
     if debug: dprint(joined_actions)
 
-    #  for a in joined_actions:
-
-    
-    #  end_with_semicolon = False
-    #  end_with_semicolon = joined_actions[-1].endswith(';')
     print_command = 'import sys; print("""'
     ps1 = ">>> "
     for i, a in enumerate(joined_actions):
         line = ps1 + f"{a}".replace(';', '\n')
         if '\n' not in line and i != len(joined_actions) - 1:
             line += "\n"
-        #  print(line)
-        #  print_command += line[len(ps1):]
         print_command += line
     print_command += '""")'
 
@@ -71,11 +66,12 @@ def python(
         if not a.endswith(';'): command += ';'
         command += ' '
 
-    #  if not end_with_semicolon:
-        #  command += ";"
-
     command += print_command
 
-    if debug: dprint(f"command:\n{command}")
+    if debug:
+        dprint(f"command:\n{command}")
     return_code = subprocess.call([sys.executable, '-i', '-c', command])
-    return return_code == 0, "Success" if return_code == 0 else f"Python interpreter returned {return_code}"
+    return return_code == 0, (
+        "Success" if return_code == 0
+        else f"Python interpreter returned {return_code}."
+    )

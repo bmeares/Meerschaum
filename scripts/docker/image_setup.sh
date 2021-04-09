@@ -13,7 +13,5 @@ if [ "$dep_group" != "minimal" ]; then
 fi
 
 if [ "$dep_group" != "minimal" ]; then
-  apt-get purge -y `apt-get -s purge python3-dev | grep '^ ' | tr -d '*'`
+  apt-get purge -y $(apt-get -s purge python3-dev | grep '^ ' | tr -d '*')
 fi
-
-

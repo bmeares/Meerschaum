@@ -1,4 +1,4 @@
-# !/bin/bash
+#!/bin/bash
 
 ### cd into the parent directory
 DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" >/dev/null 2>&1 && pwd )"
@@ -24,7 +24,4 @@ export publish_branch="master"
 export remote_docs_user="meerschaum"
 export remote_docs_host="docs.meerschaum.io"
 export remote_docs_dir="~/docs"
-
-# . parse_yaml.sh
-# eval $(parse_yaml config.yaml)
 

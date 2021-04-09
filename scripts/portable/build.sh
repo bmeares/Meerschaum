@@ -2,6 +2,7 @@
 
 DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" >/dev/null 2>&1 && pwd )"
 . "$DIR"/../config.sh
+shopt -s extglob
 
 mkdir -p "$PARENT/portable"
 cd "$PARENT/portable"
@@ -73,7 +74,7 @@ for os in "${systems[@]}"; do
   mkdir -p "${os}/root"
   tar ${taropts[$os]} "cache/${tars[$os]}" -C "${os}" || exit 1
   cd "${os}/python"
-  rm -rf $(ls | grep -v install) && mv install ../
+  rm -rf !(install) && mv install ../
   cd ../
   rm -rf python && mv install python
   cd ../

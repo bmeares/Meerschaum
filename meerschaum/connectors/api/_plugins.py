@@ -28,8 +28,7 @@ def register_plugin(
     Register a plugin and upload its archive.
     """
     import json
-    if make_archive: archive_path = plugin.make_tar(debug=debug)
-    else: archive_path = plugin.archive_path
+    archive_path = plugin.make_tar(debug=debug) if make_archive else plugin.archive_path
     file_pointer = open(archive_path, 'rb')
     files = {'archive' : file_pointer}
     metadata = {
@@ -46,7 +45,7 @@ def register_plugin(
 
     try:
         success, msg = json.loads(response.text)
-    except:
+    except Exception as e:
         return False, response.text
 
     return success, msg
@@ -54,6 +53,7 @@ def register_plugin(
 def install_plugin(
         self,
         name : str,
+        force : bool = False,
         debug : bool = False
     ) -> SuccessTuple:
     """
@@ -62,16 +62,32 @@ def install_plugin(
     :param name:
         The name of the plugin to be installed.
     """
-    import os, pathlib
+    import os, pathlib, json
     from meerschaum._internal.Plugin import Plugin
     from meerschaum.config._paths import PLUGINS_TEMP_RESOURCES_PATH
     from meerschaum.utils.debug import dprint
+    from meerschaum.utils.packages import attempt_import
+    binaryornot_check = attempt_import('binaryornot.check', lazy=False)
     r_url = plugin_r_url(name)
     dest = pathlib.Path(os.path.join(PLUGINS_TEMP_RESOURCES_PATH, name + '.tar.gz'))
-    if debug: dprint(f"Fetching from '{r_url}' to '{dest}'")
+    if debug:
+        dprint(f"Fetching from '{self.url + r_url}' to '{dest}'...")
     archive_path = self.wget(r_url, dest, debug=debug) 
+    is_binary = binaryornot_check.is_binary(str(archive_path))
+    if not is_binary:
+        fail_msg = f"Failed to download binary for plugin '{name}'."
+        try:
+            with open(archive_path, 'r') as f:
+                j = json.load(f)
+            if isinstance(j, list):
+                success, msg = tuple(j)
+            elif isinstance(j, dict) and 'detail' in j:
+                success, msg = False, fail_msg
+        except Exception as e:
+            success, msg = False, fail_msg
+        return success, msg
     plugin = Plugin(name, archive_path=archive_path)
-    return plugin.install(debug=debug)
+    return plugin.install(force=force, debug=debug)
 
 def get_plugins(
         self,
@@ -95,7 +111,6 @@ def get_plugins(
         debug = debug
     )
     if not response:
-        #  error(response.text)
         return []
     plugins = json.loads(response.text)
     if not isinstance(plugins, list):
@@ -122,4 +137,3 @@ def get_plugin_attributes(
         warn(attributes['detail'])
         return None
     return attributes
-

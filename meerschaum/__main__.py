@@ -60,7 +60,7 @@ def main():
         try:
             pool.close()
             pool.join()
-        except:
+        except Exception as e:
             pass
 
 if __name__ == "__main__":

@@ -79,9 +79,8 @@ def __getattr__(name : str) -> Path:
             raise AttributeError(f"Could not import '{name}'.")
         return globals()[name]
 
-    if isinstance(paths[name], tuple) or isinstance(paths[name], list):
+    if isinstance(paths[name], (list, tuple)):
         ### recurse through paths to create resource directories.
-        #  parent = __getattr__(paths[name][0])
         parts = []
         for p in paths[name]:
             if str(p).startswith('{') and str(p).endswith('}'):
@@ -89,13 +88,7 @@ def __getattr__(name : str) -> Path:
                 #  parts.append(paths[p[1:-1]])
             else:
                 parts.append(p)
-        #  print(parts)
-        #  parts = [
-            #  __getattr__(p[1:-1]) if (str(p).startswith('{') and str(p).endswith('}'))
-            #  else p for p in paths[name]
-        #  ]
         path = Path(os.path.join(*parts))
-        #  path = Path(os.path.join(parent, *paths[name][1:]))
     else:
         path = Path(paths[name])
 

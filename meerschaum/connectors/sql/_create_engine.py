@@ -134,7 +134,8 @@ def create_engine(
     ### self.sys_config was deepcopied and can be updated safely
     if self.flavor == "sqlite":
         engine_str = f"sqlite:///{self.database}"
-        if 'create_engine' not in self.sys_config: self.sys_config['create_engine'] = {}
+        if 'create_engine' not in self.sys_config:
+            self.sys_config['create_engine'] = {}
         if 'connect_args' not in self.sys_config['create_engine']:
             self.sys_config['create_engine']['connect_args'] = {}
         self.sys_config['create_engine']['connect_args'].update({"check_same_thread" : False})
@@ -146,7 +147,8 @@ def create_engine(
             "@" + _host + ((":" + str(_port)) if _port is not None else '') +
             (("/" + _database) if _database is not None else '')
         )
-    if debug: dprint(f"{engine_str}" + '\n' + f"{self.sys_config.get('create_engine', {}).get('connect_args', {})}")
+    if debug:
+        dprint(f"{engine_str}" + '\n' + f"{self.sys_config.get('create_engine', {}).get('connect_args', {})}")
 
     _kw_copy = kw.copy()
     _create_engine_args = {
@@ -176,6 +178,6 @@ def create_engine(
         warn("Failed to create connector '{self}'.", stack=False)
         engine = None
 
-    if include_uri: return engine, engine_str
+    if include_uri:
+        return engine, engine_str
     return engine
-

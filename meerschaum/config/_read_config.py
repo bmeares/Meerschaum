@@ -100,7 +100,7 @@ def read_config(
                 ### If default config contains symlinks, add them to the config to write.
                 try:
                     _default_symlinks = _default_dict[symlinks_key][mk]
-                except:
+                except Exception as e:
                     _default_symlinks = {}
                 config[mk] = _default_dict[mk]
                 if _default_symlinks:
@@ -295,7 +295,8 @@ def search_and_substitute_config(
         valid, value = get_config(
             *keys, substitute=False, as_tuple=True, write_missing=False, sync_files=False
         )
-        if not valid: continue
+        if not valid:
+            continue
 
         ### pattern to search and replace
         pattern = leading_key + begin_key + delimiter.join(pattern_keys) + end_key
@@ -326,7 +327,8 @@ def search_and_substitute_config(
         for _keys, _pattern in _links:
             s = symlinks
             for k in _keys[:-1]:
-                if k not in s: s[k] = {}
+                if k not in s:
+                    s[k] = {}
                 s = s[k]
             s[_keys[-1]] = _pattern
 
@@ -371,4 +373,3 @@ def get_keyfile_path(key : str, create_new : bool = False) -> Optional[pathlib.P
             default_filetype = _static_config()['config']['default_filetype']
             return pathlib.Path(os.path.join(CONFIG_DIR_PATH, key + '.' + default_filetype))
         return None
-

@@ -24,7 +24,7 @@ def sync_yaml_configs(
     import os, sys
     try:
         from meerschaum.utils.yaml import yaml, _yaml
-    except:
+    except Exception as e:
         return
     from meerschaum.config._patch import apply_patch_to_config
     import meerschaum.config
@@ -72,13 +72,6 @@ def sync_yaml_configs(
         with open(new_path, 'w+') as f:
             f.write(new_header)
             f.write(new_config_text)
-
-        #  try:
-            #  reload_package('meerschaum')
-        #  except:
-            #  print("Restart Meerschaum to reload config.")
-            #  import sys
-            #  sys.exit(1)
 
 def sync_files(keys : List[str] = []):
     def _stack():

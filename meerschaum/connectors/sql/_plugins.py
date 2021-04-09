@@ -46,7 +46,6 @@ def register_plugin(
         'version' : plugin.version,
         'attributes' : json.dumps(plugin.attributes),
         'user_id' : plugin.user_id,
-        #  'plugin_id' : old_id,
     }
 
     if old_id is None:
@@ -60,8 +59,8 @@ def register_plugin(
 
     result = self.exec(query, debug=debug)
     if result is None:
-        return False, f"Failed to register plugin '{plugin}'"
-    return True, f"Successfully registered plugin '{plugin}'"
+        return False, f"Failed to register plugin '{plugin}'."
+    return True, f"Successfully registered plugin '{plugin}'."
 
 def get_plugin_id(
         self,

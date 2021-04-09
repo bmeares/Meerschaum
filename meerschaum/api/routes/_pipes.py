@@ -21,7 +21,6 @@ from meerschaum.api import (
     debug
 )
 from meerschaum.api.models import MetaPipe
-from meerschaum.api.tables import get_tables
 from meerschaum.utils.packages import attempt_import
 from meerschaum.utils.misc import is_pipe_registered, round_time
 import meerschaum._internal.User
@@ -113,9 +112,12 @@ async def get_pipes(
     """
     from meerschaum.utils.misc import replace_pipes_in_dict
     kw = {'debug' : debug}
-    if connector_keys != "": kw['connector_keys'] = connector_keys
-    if metric_keys != "": kw['metric_keys'] = metric_keys
-    if location_keys != "": kw['location_keys'] = location_keys
+    if connector_keys != "":
+        kw['connector_keys'] = connector_keys
+    if metric_keys != "":
+        kw['metric_keys'] = metric_keys
+    if location_keys != "":
+        kw['location_keys'] = location_keys
     return replace_pipes_in_dict(get_pipes_sql(**kw), str)
 
 @app.get(pipes_endpoint + '/{connector_keys}')
@@ -149,7 +151,8 @@ async def get_pipes_by_connector_and_metric(
         raise fastapi.HTTPException(status_code=404, detail=f"connector_keys '{connector_keys}' not found.")
     if metric_key not in pipes()[connector_keys]:
         raise fastapi.HTTPException(status_code=404, detail=f"metric_key '{metric_key}' not found.")
-    if parent: return pipes()[connector_keys][metric_key][None]
+    if parent:
+        return pipes()[connector_keys][metric_key][None]
     return replace_pipes_in_dict(pipes()[connector_keys][metric_key], str)
 
 @app.get(pipes_endpoint + '/{connector_keys}/{metric_key}/{location_key}')
@@ -166,7 +169,8 @@ async def get_pipes_by_connector_and_metric_and_location(
         raise fastapi.HTTPException(status_code=404, detail=f"connector_keys '{connector_keys}' not found.")
     if metric_key not in pipes()[connector_keys]:
         raise fastapi.HTTPException(status_code=404, detail=f"metric_key '{metric_key}' not found.")
-    if location_key in ('[None]', 'None', 'null'): location_key = None
+    if location_key in ('[None]', 'None', 'null'):
+        location_key = None
     if location_key not in pipes()[connector_keys][metric_key]:
         raise fastapi.HTTPException(status_code=404, detail=f"location_key '{location_key}' not found.")
 
@@ -184,7 +188,8 @@ def get_sync_time(
     """
     Get a Pipe's latest datetime value.
     """
-    if location_key == '[None]': location_key = None
+    if location_key == '[None]':
+        location_key = None
     pipe = get_pipe(connector_keys, metric_key, location_key)
     if is_pipe_registered(pipe, pipes()):
         return pipe.get_sync_time(params=params, debug=debug)
@@ -360,8 +365,6 @@ def create_metadata(
     """
     Create Pipe metadata tables
     """
-    #  if curr_user.type != 'admin':
-        #  return False
     from meerschaum.connectors.sql.tables import get_tables
     try:
         tables = get_tables(mrsm_instance=get_connector())
@@ -387,4 +390,3 @@ def get_rowcount(
         end = end,
         params = params,
     )
-

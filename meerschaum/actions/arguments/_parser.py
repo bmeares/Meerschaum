@@ -23,7 +23,7 @@ def parse_datetime(dt_str : str) -> datetime.datetime:
             dt = datetime.datetime.utcnow()
         else:
             dt = dateutil_parser.parse(dt_str)
-    except:
+    except Exception as e:
         dt = None
     if dt is None:
         from meerschaum.utils.warnings import warn, error
@@ -59,7 +59,7 @@ def parse_help(sysargs : Union[List[str], Dict[str, Any]]) -> None:
 
     try:
         doc = actions[args['action'][0]].__doc__
-    except:
+    except Exception as e:
         doc = None
     if doc is None:
         doc = "No help available for '" + f"{args['action'][0]}" + "'."
@@ -69,7 +69,7 @@ def parse_version(sysargs : List[str]):
     """
     Print the Meerschaum version.
     """
-    from meerschaum.config import __version__, __doc__
+    from meerschaum.config import __version__
     if '--nopretty' in sysargs:
         return print(__version__)
     return print(__doc__)

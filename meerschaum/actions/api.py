@@ -32,8 +32,10 @@ def api(
     """
     from meerschaum.utils.warnings import warn, info
     from meerschaum.utils.formatting import print_tuple
-    if action is None: action = []
-    if sysargs is None: sysargs = []
+    if action is None:
+        action = []
+    if sysargs is None:
+        sysargs = []
     if len(action) == 0:
         info(api.__doc__)
         return False, "Please provide a command to excecute (see above)"
@@ -45,18 +47,21 @@ def api(
     from meerschaum.config import get_config
     from meerschaum.connectors import get_connector
     import requests
-    if debug: from meerschaum.utils.formatting import pprint
+    if debug:
+        from meerschaum.utils.formatting import pprint
     api_configs = get_config('meerschaum', 'connectors', 'api', patch=True)
 
     api_label = "main"
     args_to_send = list(sysargs)
     ### remove `api`
-    if 'api' in args_to_send: del args_to_send[0]
+    if 'api' in args_to_send:
+        del args_to_send[0]
     if action[0] in api_configs:
         api_label = action[0]
         ### remove label from actions
         del action[0]
-        if len(args_to_send) > 1: del args_to_send[0]
+        if len(args_to_send) > 1:
+            del args_to_send[0]
     kw['action'] = action
     kw['debug'] = debug
     kw['sysargs'] = args_to_send
@@ -66,7 +71,8 @@ def api(
     
     if mrsm_instance is not None and str(mrsm_instance) == str(api_conn):
         warn(f"Cannot send Meerschaum instance keys '{mrsm_instance}' to itself. Removing from arguments...")
-    elif mrsm_instance is not None: kw['mrsm_instance'] = str(mrsm_instance)
+    elif mrsm_instance is not None:
+        kw['mrsm_instance'] = str(mrsm_instance)
 
     success, message = api_conn.do_action(**kw)
     print_tuple((success, message), common_only=True)
@@ -100,7 +106,8 @@ def _api_start(
     from meerschaum.connectors.parse import parse_instance_keys
     import os
 
-    if action is None: action = []
+    if action is None:
+        action = []
 
     ### Uvicorn must be installed on the host because of multiprocessing reasons.
     uvicorn = attempt_import('uvicorn', venv=None, lazy=False)
@@ -176,4 +183,3 @@ def _api_start(
         pass
 
     return (True, "Success")
-

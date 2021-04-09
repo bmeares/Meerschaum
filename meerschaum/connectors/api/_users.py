@@ -28,7 +28,7 @@ def get_users(
         return []
     try:
         return response.json()
-    except:
+    except Exception as e:
         return []
 
 def login(
@@ -48,7 +48,7 @@ def login(
             'username' : self.username,
             'password' : self.password,
         }
-    except:
+    except AttributeError:
         return False, f"Please provide a username and password for '{self}' with `edit config`."
     response = self.post(
         _static_config()['api']['endpoints']['login'],
@@ -99,8 +99,7 @@ def edit_user(
             return False, _json['detail']
         success_tuple = tuple(_json)
     except:
-        if response.text: msg = response.text
-        else: msg = f"Failed to edit user '{user}'"
+        msg = response.text if response else f"Failed to edit user '{user}'."
         return False, msg
 
     return tuple(success_tuple)
@@ -128,9 +127,8 @@ def register_user(
         if isinstance(_json, dict) and 'detail' in _json:
             return False, _json['detail']
         success_tuple = tuple(_json)
-    except:
-        if response.text: msg = response.text
-        else: msg = f"Failed to register user '{user}'"
+    except Exception:
+        msg = response.text if response else f"Failed to register user '{user}'"
         return False, msg
 
     return tuple(success_tuple)
@@ -172,7 +170,7 @@ def delete_user(
         if isinstance(_json, dict) and 'detail' in _json:
             return False, _json['detail']
         success_tuple = tuple(_json)
-    except:
+    except Exception as e:
         success_tuple = False, f"Failed to delete user '{user.username}'"
     return success_tuple
 
@@ -230,5 +228,3 @@ def get_user_type(
     if not response:
         return None
     return response.json()
-
-

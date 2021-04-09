@@ -1,5 +1,4 @@
 FROM python:3.7-slim-buster AS runtime
-MAINTAINER Bennett Meares <bennett.meares@gmail.com>
 
 ARG dep_group=full
 ENV dep_group $dep_group
@@ -14,7 +13,7 @@ RUN /setup/image_setup.sh && rm -rf /setup/
 ### Layer 2: Install Python packages.
 ### Only rebuilds cache if dependencies have changed.
 COPY requirements /requirements
-RUN python -m pip install -r /requirements/$dep_group.txt && rm -rf /requirements
+RUN python -m pip install --no-cache-dir -r /requirements/$dep_group.txt && rm -rf /requirements
 
 ### Layer 3: Install Meerschaum.
 ### Rebuilds every build.

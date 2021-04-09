@@ -48,19 +48,12 @@ setup_kw_args = {
     'long_description_content_type' : 'text/markdown',
     'url'                           : 'https://meerschaum.io',
     'author'                        : 'Bennett Meares',
-    'author_email'                  : 'bmeares@dava.consulting',
-    'maintainer_email'              : 'bmeares@dava.consulting',
-    'license'                       : 'http://www.apache.org/licenses/LICENSE-2.0',
+    'author_email'                  : 'bennett.meares@gmail.com',
+    'maintainer_email'              : 'bennett.meares@gmail.com',
+    'license'                       : 'Apache Software License 2.0',
     'packages'                      : setuptools.find_packages(),
     'install_requires'              : extras['required'],
     'extras_require'                : extras,
-    #  'setup_requires'                : extras['setup'],
-    #  'use_scm_version'               : {
-        #  'root'                      : '.',
-        #  'relative_to'               : __file__,
-        #  'write_to' : 'meerschaum/config/_version.py',
-        #  'write_to_template' : '__version__ = "{version}"',
-    #  },
     'entry_points'                  : {
         'console_scripts'           : [
             'mrsm = meerschaum.__main__:main',
