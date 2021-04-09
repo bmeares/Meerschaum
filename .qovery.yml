@@ -1,0 +1,15 @@
+---
+application:
+  name: "meerschaum"
+  project: "Meerschaum"
+  organization: "QoveryCommunity"
+databases:
+- type: "POSTGRESQL"
+  name: "meerschaum"
+  version: "12"
+routers:
+- name: "main-meerschaum"
+  routes:
+  - application_name: "meerschaum"
+    paths:
+    - "/*"
