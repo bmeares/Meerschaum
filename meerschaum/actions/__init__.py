@@ -26,20 +26,16 @@ __all__, modules = get_modules_from_package(
 from inspect import getmembers, isfunction
 actions = dict()
 for module in modules:
-
-    """
-    A couple important things happening here:
-    1. Find all functions in all modules in `actions` package
-        (skip functions that begin with '_')
-    2. Add them as members to the Shell class
-        - Original definition : meerschaum.actions.shell.Shell
-        - New definition      : meerschaum.actions.Shell
-    3. Populate the actions dictionary with function names and functions
-
-    UPDATE:
-    Shell modifications have been deferred to get_shell in order to improve lazy loading.
-
-    """
+    ### A couple important things happening here:
+    ### 1. Find all functions in all modules in `actions` package
+    ###     (skip functions that begin with '_')
+    ### 2. Add them as members to the Shell class
+    ###     - Original definition : meerschaum.actions.shell.Shell
+    ###     - New definition      : meerschaum.actions.Shell
+    ### 3. Populate the actions dictionary with function names and functions
+    ###
+    ### UPDATE:
+    ### Shell modifications have been deferred to get_shell in order to improve lazy loading.
 
     actions.update(
         dict(
@@ -71,7 +67,8 @@ def get_shell(
     import meerschaum.actions.shell as shell_pkg
 
     if _shell is None or reload:
-        if debug: dprint("Loading the shell...")
+        if debug:
+            dprint("Loading the shell...")
 
         if _shell is None:
             shell_pkg._insert_shell_actions()
@@ -114,8 +111,6 @@ def get_completer(action : str) -> Optional[Callable[['Shell', str, str, int, in
             if not inspect.isfunction(f):
                 continue
             if 'complete_' + action in name:
-                #  _name = name.replace('complete_' + action, '')
-                #  _name = _name.lstrip('_')
                 return f
     return None
 

@@ -49,7 +49,8 @@ def _complete_show(
     Override the default Meerschaum `complete_` function.
     """
 
-    if action is None: action = []
+    if action is None:
+        action = []
 
     options = {
         'connectors': _complete_show_connectors,
@@ -101,9 +102,11 @@ def _show_config(
     from meerschaum.config import get_config
     from meerschaum.config._paths import CONFIG_DIR_PATH
     from meerschaum.utils.debug import dprint
-    if debug: dprint(f"Configuration loaded from {CONFIG_DIR_PATH}")
+    if debug:
+        dprint(f"Configuration loaded from {CONFIG_DIR_PATH}")
 
-    if action is None: action = []
+    if action is None:
+        action = []
 
     valid, config = get_config(*action, as_tuple=True, warn=False)
     if not valid:
@@ -202,6 +205,9 @@ def _show_connectors(
     print(make_header("\nActive connectors:"))
     pprint(connectors)
 
+    if action is None:
+        action = []
+
     from meerschaum.connectors.parse import parse_instance_keys
     if action != []:
         attr, keys = parse_instance_keys(action[0], construct=False, as_tuple=True, debug=debug)
@@ -215,7 +221,7 @@ def _complete_show_connectors(
         action : Optional[List[str]] = None, **kw : Any
     ) -> List[str]:
     from meerschaum.utils.misc import get_connector_labels
-    _text = action[0] if len(action) > 0 else ""
+    _text = action[0] if action else ""
     return get_connector_labels(search_term=_text, ignore_exact_match=True)
 
 def _show_arguments(
@@ -262,12 +268,13 @@ def _show_data(
     from meerschaum.utils.warnings import warn, info
     from meerschaum.utils.formatting import pprint
 
-    if action is None: action = []
+    if action is None:
+        action = []
 
     pipes = get_pipes(as_list=True, debug=debug, **kw)
     try:
         backtrack_minutes = float(action[0])
-    except:
+    except Exception as e:
         backtrack_minutes = (
             1440 if (
                 begin is None and end is None and (not action or (action and action[0] != 'all'))
@@ -280,7 +287,7 @@ def _show_data(
                 df = p.get_backtrack_data(backtrack_minutes=backtrack_minutes, debug=debug)
             else:
                 df = p.get_data(begin=begin, end=end, debug=debug)
-        except:
+        except Exception as e:
             df = None
         if df is None:
             warn(f"Failed to fetch data for pipe '{p}'.", stack=False)
@@ -302,7 +309,7 @@ def _show_data(
             pandasgui = attempt_import('pandasgui')
             try:
                 pandasgui.show(df)
-            except:
+            except Exception as e:
                 df.plot()
     return True, "Success"
 
@@ -321,7 +328,8 @@ def _show_rowcounts(
     from meerschaum.utils.pool import get_pool
     from meerschaum import get_pipes
 
-    if action is None: action = []
+    if action is None:
+        action = []
     remote = action and action[0] == 'remote'
 
     pipes = get_pipes(as_list=True, debug=debug, **kw)
@@ -361,7 +369,8 @@ def _show_plugins(
     from meerschaum._internal.User import User
     repo_connector = parse_repo_keys(repository)
 
-    if action is None: action = []
+    if action is None:
+        action = []
 
     if action == [''] or len(action) == 0:
         _to_print = get_plugins_names()
@@ -415,7 +424,8 @@ def _show_packages(
     from meerschaum.utils.packages import packages
     from meerschaum.utils.warnings import warn
 
-    if action is None: action = []
+    if action is None:
+        action = []
 
     if not nopretty:
         from meerschaum.utils.formatting import pprint

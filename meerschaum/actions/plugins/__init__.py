@@ -29,19 +29,21 @@ def make_action(
     ```
     """
     from meerschaum.actions import __all__ as _all, actions
-    global __all__, actions
-    #  import meerschaum.actions.shell as shell_pkg
     from meerschaum.utils.formatting import pprint
     from meerschaum.utils.misc import add_method_to_class
+
+    if debug:
+        from meerschaum.utils.debug import dprint
+        dprint(
+            f"Adding action '{function.__name__}' from plugin " +
+            f"'{function.__module__.split('.')[-1]}'..."
+        )
+
     if function.__name__ not in _all:
         _all.append(function.__name__)
     actions[function.__name__] = function
-    #  add_method_to_class(function, shell_pkg.Shell)
-    #  if shell and meerschaum.actions._shell is not None:
-        #  add_method_to_class(function, meerschaum.actions.get_shell(debug=debug), 'do_' + function.__name__)
     return function
 
-#  __path__ = None
 def import_plugins() -> Optional['ModuleType']:
     """
     Import the Meerschaum plugins directory.
@@ -71,11 +73,17 @@ def import_plugins() -> Optional['ModuleType']:
 
     return plugins
 
-def load_plugins(debug : bool = False, shell : bool = False):
+def load_plugins(debug : bool = False, shell : bool = False) -> None:
+    """
+    Import Meerschaum plugins and update the actions dictionary.
+    """
     ### append the plugins modules
     from inspect import isfunction, getmembers
     from meerschaum.actions import __all__ as _all, modules
     from meerschaum.utils.packages import get_modules_from_package
+    if debug:
+        from meerschaum.utils.debug import dprint
+
     _plugins_names, plugins_modules = get_modules_from_package(
         import_plugins(),
         names = True,
@@ -83,14 +91,31 @@ def load_plugins(debug : bool = False, shell : bool = False):
         modules_venvs = True
     )
     _all += _plugins_names
-    #  actions_mod.__all__ += _plugins_names
-    #  actions_mod.modules += plugins_modules
     modules += plugins_modules
     for module in plugins_modules:
         for name, func in getmembers(module):
-            if not isfunction(func): continue
+            if not isfunction(func):
+                continue
             if name == module.__name__.split('.')[-1]:
-                make_action(func, shell=shell, debug=debug)
+                make_action(func, **{'shell' : shell, 'debug' : debug})
+
+def reload_plugins(plugins : Optional[List[str]] = None, debug : bool = False) -> None:
+    """
+    Reload plugins back into memory.
+    """
+    import sys
+    if debug:
+        from meerschaum.utils.debug import dprint
+
+    if not plugins:
+        plugins = get_plugins_names()
+    for plugin_name in plugins:
+        if debug:
+            dprint(f"Reloading plugin '{plugin_name}'...")
+        mod_name = 'plugins.' + str(plugin_name)
+        if mod_name in sys.modules:
+            del sys.modules[mod_name]
+    load_plugins(debug=debug)
 
 def get_plugins_names() -> Optional[List[str]]:
     from meerschaum.utils.packages import get_modules_from_package

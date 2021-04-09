@@ -37,6 +37,7 @@ packages = {
         'semver'            : 'semver>=2.13.0',
         'dateutil'          : 'python-dateutil>=2.7.5',
         'requests'          : 'requests>=2.23.0',
+        'binaryornot'       : 'binaryornot>=0.4.4',
         'pyvim'             : 'pyvim>=3.0.2',
         'aiofiles'          : 'aiofiles>=0.6.0',
         'packaging'         : 'packaging>=20.4',

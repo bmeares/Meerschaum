@@ -35,7 +35,8 @@ def _complete_edit(
         'config' : _complete_edit_config,
     }
 
-    if action is None: action = []
+    if action is None:
+        action = []
 
     if len(action) > 0 and action[0] in options:
         sub = action[0]
@@ -66,7 +67,8 @@ def _edit_config(action : Optional[List[str]] = None, **kw : Any) -> SuccessTupl
         ```
     """
     from meerschaum.config._edit import edit_config
-    if action is None: action = []
+    if action is None:
+        action = []
     if len(action) == 0:
         action.append('meerschaum')
     return edit_config(keys=action, **kw)
@@ -105,13 +107,16 @@ def _edit_pipes(
     from meerschaum.utils.prompt import prompt
     from meerschaum.utils.misc import print_options
 
-    if action is None: action = []
+    if action is None:
+        action = []
 
     edit_definition = (len(action) > 0 and action[0] == 'definition')
 
     pipes = get_pipes(debug=debug, as_list=True, **kw)
-    if pipes: print_options(pipes, header=f'Pipes to be edited:')
-    else: return False, "No pipes to edit."
+    if pipes:
+        print_options(pipes, header=f'Pipes to be edited:')
+    else:
+        return False, "No pipes to edit."
 
     if len(pipes) > 1:
         try:
@@ -126,7 +131,8 @@ def _edit_pipes(
     for p in pipes:
         try:
             text = prompt(f"Press [Enter] to edit '{p}' or [CTRL-C] to skip:", icon=False)
-            if text == 'pass': continue
+            if text == 'pass':
+                continue
         except KeyboardInterrupt:
             continue
         if edit_definition:
@@ -161,7 +167,8 @@ def _edit_users(
     import os, pathlib
     instance_connector = parse_instance_keys(mrsm_instance)
     
-    if action is None: action = []
+    if action is None:
+        action = []
 
     def build_user(username : str):
         ### Change the password
@@ -220,8 +227,10 @@ def _edit_users(
 
     succeeded, failed = 0, 0
     for username, r in success.items():
-        if r: succeeded += 1
-        else: failed += 1
+        if r:
+            succeeded += 1
+        else:
+            failed += 1
 
     msg = (
         f"Finished editing {len(action)} users" + '\n' +
@@ -235,4 +244,3 @@ def _edit_users(
 ###       be added to the `help` docstring.
 from meerschaum.utils.misc import choices_docstring as _choices_docstring
 edit.__doc__ += _choices_docstring('edit')
-

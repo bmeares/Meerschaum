@@ -37,7 +37,8 @@ def sql(
             Execute a query and print the success status
     """
 
-    if action is None: action = []
+    if action is None:
+        action = []
 
     ### input: `sql read` or `sql exec`
     if len(action) == 1 and action[0] in exec_methods:
@@ -64,8 +65,10 @@ def sql(
         ### check if user specifies a label
         if a in get_config('meerschaum', 'connectors', 'sql', patch=True):
             label = a
-    if method is None: method = 'read'
-    if label is None: label = 'main'
+    if method is None:
+        method = 'read'
+    if label is None:
+        label = 'main'
 
     conn = get_connector(type='sql', label=label, debug=debug)
     if not conn:
@@ -80,7 +83,8 @@ def sql(
 
     ### input: `sql main`
     if query == label:
-        if debug: dprint(f"No query provided. Opening CLI on connector '{label}'")
+        if debug:
+            dprint(f"No query provided. Opening CLI on connector '{label}'")
         return conn.cli(debug=debug)
 
     ### guess the method from the structure of the query

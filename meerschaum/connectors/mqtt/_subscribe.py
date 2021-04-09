@@ -65,11 +65,15 @@ def subscribe(
 
     try:
         self.client.connect(self.host, self.port, self.keepalive)
-    except:
-        error("Failed to connect to MQTT broker " + '"{self.host}"' + " with connector: " + f"{self}")
+    except Exception as e:
+        error(
+            "Failed to connect to MQTT broker " +
+            '"{self.host}"' + " with connector: " + f"{self}"
+        )
 
     self.client.subscribe(topic)
-    if debug: dprint("Subscribed to " + f'"{topic}"' + ". Starting network loop...")
+    if debug:
+        dprint("Subscribed to " + f'"{topic}"' + ". Starting network loop...")
 
     ### start a new thread that fires callback when messages are received
     if not forever:

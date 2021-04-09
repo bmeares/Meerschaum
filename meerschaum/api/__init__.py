@@ -51,7 +51,8 @@ def get_uvicorn_config() -> dict:
         except Exception as e:
             uvicorn_config = dict()
 
-        if uvicorn_config is None: uvicorn_config = dict()
+        if uvicorn_config is None:
+            uvicorn_config = dict()
 
         ### Default: main SQL connector
         if 'mrsm_instance' not in uvicorn_config:
@@ -97,7 +98,8 @@ def get_pipe(connector_keys, metric_key, location_key, refresh=False):
     """
     from meerschaum.utils.misc import is_pipe_registered
     from meerschaum import Pipe
-    if location_key in ('[None]', 'None', 'null'): location_key = None
+    if location_key in ('[None]', 'None', 'null'):
+        location_key = None
     p = Pipe(connector_keys, metric_key, location_key, mrsm_instance=get_connector())
     if is_pipe_registered(p, pipes()):
         return pipes(refresh=refresh)[connector_keys][metric_key][location_key]
@@ -118,9 +120,6 @@ app = fastapi.FastAPI(title='Meerschaum API')
     'fastapi.middleware.wsgi'
 )
 jinja2 = attempt_import('jinja2')
-
-### TODO Add Django integration
-
 
 HTMLResponse = fastapi_responses.HTMLResponse
 Request = fastapi.Request

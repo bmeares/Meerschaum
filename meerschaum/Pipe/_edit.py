@@ -31,11 +31,13 @@ def edit(
     from meerschaum.utils.yaml import yaml
 
     edit_header = "#######################################"
-    for i in range(len(str(self))): edit_header += "#"
+    for i in range(len(str(self))):
+        edit_header += "#"
     edit_header += "\n"
     edit_header += f"# Edit the parameters for the Pipe '{self}' #"
     edit_header += "\n#######################################"
-    for i in range(len(str(self))): edit_header += "#"
+    for i in range(len(str(self))):
+        edit_header += "#"
     edit_header += "\n\n"
 
     from meerschaum.config import get_config
@@ -119,7 +121,8 @@ def edit_definition(
         definition_path = pathlib.Path(os.path.join(PIPES_CACHE_RESOURCES_PATH, definition_filename))
 
         sql_definition = _parameters['fetch'].get('definition', None)
-        if sql_definition is None: sql_definition = ''
+        if sql_definition is None:
+            sql_definition = ''
         sql_definition = textwrap.dedent(sql_definition).lstrip()
 
         try:
@@ -148,4 +151,3 @@ def edit_definition(
 
     locals()['_edit_' + str(self.connector.type)]()
     return self.edit(interactive=False, debug=debug, **kw)
-

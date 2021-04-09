@@ -11,7 +11,8 @@ def attributes(self):
     from meerschaum.utils.debug import dprint
     from meerschaum.utils.warnings import warn
     if '_attributes' not in self.__dict__:
-        if self.id is None: return None
+        if self.id is None:
+            return None
         self._attributes = self.instance_connector.get_pipe_attributes(self)
     return self._attributes
 
@@ -56,7 +57,7 @@ def get_columns(self, *args, error=True):
             col_name = self.columns[col]
             if col_name is None and error:
                 _error(f"Please define the name of the '{col}' column for Pipe '{self}'.")
-        except:
+        except Exception as e:
             col_name = None
         if col_name is None and error:
             _error(f"Missing '{col}'" + f" column for Pipe '{self}'.")
@@ -76,4 +77,3 @@ def id(self):
     if not ('_id' in self.__dict__ and self._id):
         self._id = self.get_id()
     return self._id
-

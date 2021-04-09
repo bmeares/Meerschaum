@@ -25,9 +25,12 @@ def sh(
     from meerschaum.utils.warnings import error
     from meerschaum.utils.debug import dprint
 
-    if action is None: action = []
-    if sub_args is None: sub_args = []
-    if sysargs is None: sysargs = []
+    if action is None:
+        action = []
+    if sub_args is None:
+        sub_args = []
+    if sysargs is None:
+        sysargs = []
 
     _shell = os.environ.get('SHELL', 'bash')
 
@@ -50,8 +53,8 @@ def sh(
         if len(action) == 0:
             command_list += ["-c", " ".join(cmd_list)]
     else:
-        #  command_list = action + sub_args
-        if len(action) == 0: command_list = _shell
+        if len(action) == 0:
+            command_list = _shell
 
     if debug:
         dprint(f'action  : {action}')

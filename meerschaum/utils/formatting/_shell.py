@@ -49,7 +49,7 @@ def clear_screen(debug : bool = False) -> bool:
         print("", end="", flush=True)
         return True
     ### ANSI support is disabled, try system level instead
-    import platform, os
+    import platform, subprocess
     command = 'clear' if platform.system() != "Windows" else "cls"
-    rc = os.system(command)
+    rc = subprocess.call(command, shell=False)
     return rc == 0

@@ -49,6 +49,8 @@ markdown_extensions:
   - pymdownx.tabbed
   - admonition
   - pymdownx.details
+  - pymdownx.tasklist:
+      custom_checkbox: true
   - toc:
       permalink: true
       slugify: !!python/name:pymdownx.slugs.uslugify

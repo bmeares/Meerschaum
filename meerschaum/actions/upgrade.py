@@ -53,7 +53,8 @@ def _upgrade_meerschaum(
     from meerschaum.utils.prompt import yes_no
     from meerschaum.utils.packages import pip_install, attempt_import
 
-    if action is None: action = []
+    if action is None:
+        action = []
 
     is_stack_running = False
     client = None
@@ -63,7 +64,7 @@ def _upgrade_meerschaum(
             client = docker.from_env()
             containers = client.containers.list()
             is_stack_running = len(containers) > 0
-        except:
+        except Exception as e:
             pass
 
     if is_stack_running:
@@ -84,12 +85,15 @@ def _upgrade_meerschaum(
         ('[' + ','.join(dependencies.split(',')) + ']') if dependencies else ''
     )
 
-    if debug: dprint('Upgrade meerschaum with dependencies: \"' + f'{dependencies}' + '\"')
+    if debug:
+        dprint('Upgrade meerschaum with dependencies: \"' + f'{dependencies}' + '\"')
     if not pip_install(install_name, venv=None, debug=debug):
         return False, f"Failed to upgrade Meerschaum via pip."
 
-    if debug: dprint("Pulling new Docker images...")
-    if client: actions['stack'](['pull'], debug=debug)
+    if debug:
+        dprint("Pulling new Docker images...")
+    if client:
+        actions['stack'](['pull'], debug=debug)
 
     return True, "Success"
 
@@ -119,7 +123,8 @@ def _upgrade_packages(
     from meerschaum.utils.prompt import yes_no
     from meerschaum.utils.formatting import make_header, pprint
     from meerschaum.utils.misc import print_options
-    if action is None: action = []
+    if action is None:
+        action = []
     if len(action) == 0:
         group = 'full'
     else:
@@ -176,7 +181,8 @@ def _upgrade_plugins(
     from meerschaum.utils.misc import print_options
     from meerschaum.utils.prompt import yes_no
 
-    if action is None: action = []
+    if action is None:
+        action = []
 
     to_install = get_plugins_names() if len(action) == 0 else action
     if len(to_install) == 0:

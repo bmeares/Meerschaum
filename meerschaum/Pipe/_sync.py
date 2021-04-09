@@ -8,8 +8,6 @@ Synchronize a pipe's data with its source via its connector
 
 from __future__ import annotations
 
-from meerschaum.utils.debug import dprint
-from meerschaum.utils.warnings import warn, error
 from meerschaum.utils.typing import (
     Union, Optional, Callable, Any, Tuple, SuccessTuple, Mapping, Dict, List
 )
@@ -116,6 +114,7 @@ def sync(
 
     :param kw: Catch-all for keyword arguments.
     """
+    from meerschaum.utils.debug import dprint
     from meerschaum.utils.warnings import warn, error
     import time
     if (callback is not None or error_callback is not None) and blocking:
@@ -163,7 +162,8 @@ def sync(
 
             except Exception as e:
                 msg = f"Failed to sync pipe '{p}' with exception: '" + str(e) + "'"
-                if debug: error(msg, silent=False)
+                if debug:
+                    error(msg, silent=False)
                 return False, msg
 
         ### default: fetch new data via the connector.
@@ -177,7 +177,8 @@ def sync(
             if df is True:
                 return True, f"Pipe '{p}' was synced in parallel."
 
-        if debug: dprint("DataFrame to sync:\n" + f"{df}")
+        if debug:
+            dprint("DataFrame to sync:\n" + f"{df}")
 
         ### if force, continue to sync until success
         return_tuple = False, f"Did not sync pipe '{p}'."
@@ -203,7 +204,8 @@ def sync(
                 )
         return return_tuple
 
-    if blocking: return _sync(self, df = df)
+    if blocking:
+        return _sync(self, df = df)
 
     ### TODO implement concurrent syncing (split DataFrame? mimic the functionality of modin?)
     from meerschaum.utils.threading import Thread

@@ -119,7 +119,7 @@ def is_valid_connector_keys(
     """
     try:
         success = parse_connector_keys(keys, construct=False) is not None
-    except:
+    except Exception as e:
         success = False
     return success
 

@@ -34,7 +34,8 @@ def _complete_delete(
     """
     Override the default Meerschaum `complete_` function.
     """
-    if action is None: action = []
+    if action is None:
+        action = []
     options = {
         'connectors': _complete_delete_connectors,
     }
@@ -46,7 +47,6 @@ def _complete_delete(
 
     from meerschaum.actions.shell import default_action_completer
     return default_action_completer(action=(['delete'] + action), **kw)
-
 
 def _delete_pipes(
         debug : bool = False,
@@ -112,7 +112,8 @@ def _delete_config(
     from meerschaum.config._read_config import get_possible_keys, get_keyfile_path
     from meerschaum.utils.debug import dprint
     paths = [p for p in [STACK_COMPOSE_PATH, DEFAULT_CONFIG_DIR_PATH] if p.exists()]
-    if action is None: action = []
+    if action is None:
+        action = []
     keys = get_possible_keys() if len(action) == 0 else action
     for k in keys:
         _p = get_keyfile_path(k, create_new=False)
@@ -131,7 +132,8 @@ def _delete_config(
 
     if answer or force:
         for path in paths:
-            if debug: dprint(f"Removing {path}...")
+            if debug:
+                dprint(f"Removing {path}...")
             if os.path.isfile(path):
                 os.remove(path)
             elif os.path.isdir(path):
@@ -157,16 +159,18 @@ def _delete_plugins(
     from meerschaum.actions.plugins import get_plugins_names, get_plugins_modules
     from meerschaum.config._paths import PLUGINS_RESOURCES_PATH
     from meerschaum.utils.warnings import warn, error, info
-    from meerschaum.utils.misc import reload_plugins
+    from meerschaum.actions.plugins import reload_plugins
     from meerschaum.utils.prompt import yes_no
     import os, shutil
 
-    if action is None: action = []
+    if action is None:
+        action = []
 
     ### parse the provided plugins and link them to their modules
     modules_to_delete = dict()
     for plugin in action:
-        if plugin not in get_plugins_names(): info(f"Plugin '{plugin}' is not installed. Ignoring...")
+        if plugin not in get_plugins_names():
+            info(f"Plugin '{plugin}' is not installed. Ignoring...")
         else:
             for m in get_plugins_modules():
                 if plugin == m.__name__.split('.')[-1]:
@@ -203,7 +207,7 @@ def _delete_plugins(
         except Exception as e:
             return False, f"Could not remove plugin '{name}'"
 
-    reload_plugins()
+    reload_plugins(debug=debug)
     return True, "Success"
 
 def _delete_users(
@@ -229,11 +233,12 @@ def _delete_users(
     from meerschaum.utils.formatting import print_tuple
     instance_connector = parse_instance_keys(mrsm_instance)
 
-    if action is None: action = []
+    if action is None:
+        action = []
 
     registered_users = []
     for username in action:
-        user = User(username=username, password='')
+        user = User(username=username)
         user_id = instance_connector.get_user_id(user, debug=debug)
         if user_id is None:
             info(f"User '{user}' does not exist. Skipping...")
@@ -264,14 +269,15 @@ def _delete_users(
 
     succeeded, failed = 0, 0
     for username, r in success.items():
-        if r: succeeded += 1
-        else: failed += 1
+        if r:
+            succeeded += 1
+        else:
+            failed += 1
 
     msg = (
         f"Finished deleting {len(action)} users." + '\n' +
         f"    ({succeeded} succeeded, {failed} failed)"
     )
-    if shell: info(msg)
     return True, msg
 
 def _delete_connectors(
@@ -291,13 +297,15 @@ def _delete_connectors(
     """
     from meerschaum.utils.prompt import yes_no, prompt
     from meerschaum.connectors.parse import parse_connector_keys
-    from meerschaum.config import _config; cf = _config()
+    from meerschaum.config import _config
     from meerschaum.config._edit import write_config
     from meerschaum.utils.warnings import info, warn
     import os
-
-    if action is None: action = []
-    if connector_keys is None: connector_keys = []
+    cf = _config()
+    if action is None:
+        action = []
+    if connector_keys is None:
+        connector_keys = []
 
     _keys = list(set(action + connector_keys))
 
@@ -308,7 +316,7 @@ def _delete_connectors(
     for ck in _keys:
         try:
             conn = parse_connector_keys(ck, debug=debug)
-        except:
+        except Exception as e:
             warn(f"Could not parse connector '{ck}'. Skipping...", stack=False)
             continue
 
@@ -331,13 +339,13 @@ def _delete_connectors(
                 if force or yes_no(f"Detected sqlite database '{c.database}'. Delete this file?", default='n', noask=noask, yes=yes):
                     try:
                         os.remove(c.database)
-                    except:
+                    except Exception as e:
                         warn(f"Failed to delete database file for connector '{c}'. Ignoring...", stack=False)
-        except:
+        except Exception as e:
             pass
         try:
             del cf['meerschaum']['connectors'][c.type][c.label]
-        except:
+        except Exception as e:
             warn(f"Failed to delete connector '{c}' from configuration. Skipping...", stack=False)
 
     write_config(cf, debug=debug)

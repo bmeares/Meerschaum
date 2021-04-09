@@ -134,7 +134,7 @@ default_config['plugins'] = default_plugins_config
 ### add configs from other packages
 try:
     import meerschaum.config.stack
-except:
+except ImportError as e:
     pass
 finally:
     from meerschaum.config.stack import default_stack_config

@@ -28,13 +28,15 @@ class User():
     def __init__(
         self,
         username : str,
-        password : str = '',
+        password : Optional[str] = None,
         type : Optional[str] = None,
         email : Optional[str] = None,
         attributes : Optional[Dict[str, Any]] = None,
         user_id : Optional[int] = None,
         repository : Optional[str] = None
     ):
+        if password is None:
+            password = ''
         self.password = password
         self.password_hash = get_pwd_context().encrypt(password)
         self.username = username

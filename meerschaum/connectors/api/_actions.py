@@ -41,7 +41,8 @@ def do_action(
 
     if sysargs is not None and action[0] == '':
         from meerschaum.actions.arguments import parse_arguments
-        if debug: dprint(f"Parsing sysargs:\n{sysargs}")
+        if debug:
+            dprint(f"Parsing sysargs:\n{sysargs}")
         json_dict = parse_arguments(sysargs)
     else:
         json_dict = kw
@@ -51,7 +52,8 @@ def do_action(
     root_action = json_dict['action'][0]
     del json_dict['action'][0]
     ### ensure 0 index exists (Meerschaum requirement)
-    if len(json_dict['action']) == 0: json_dict['action'] = ['']
+    if len(json_dict['action']) == 0:
+        json_dict['action'] = ['']
     r_url = f"{_static_config()['api']['endpoints']['actions']}/{root_action}"
     
     if debug:
@@ -68,8 +70,9 @@ def do_action(
         print(f"Invalid response: {response}")
         print(e)
         return False, response.text
-    if debug: dprint(response)
+    if debug:
+        dprint(response)
     try:
         return response_list[0], response_list[1]
-    except:
+    except Exception as e:
         return False, f"Failed to parse result from action '{root_action}'"

@@ -119,8 +119,10 @@ def get_connector(
             poss_msg = " Did you mean"
             for poss in possibilities[:-1]:
                 poss_msg += f" '{poss}',"
-            if poss_msg.endswith(','): poss_msg = poss_msg[:-1]
-            if len(possibilities) > 1: poss_msg += " or"
+            if poss_msg.endswith(','):
+                poss_msg = poss_msg[:-1]
+            if len(possibilities) > 1:
+                poss_msg += " or"
             poss_msg += f" '{possibilities[-1]}'?"
 
         from meerschaum.utils.warnings import warn
@@ -140,7 +142,8 @@ def get_connector(
         }
     
     ### always refresh MQTT Connectors NOTE: test this!
-    if type == 'mqtt': refresh = True
+    if type == 'mqtt':
+        refresh = True
 
     ### determine if we need to call the constructor
     if not refresh:

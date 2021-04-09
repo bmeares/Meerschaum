@@ -27,10 +27,10 @@ def get_connectors(type : str = None):
     for t in types:
         response_dict[t] = list(get_config('meerschaum', 'connectors', t))
         response_dict[t].remove('default')
-    if type is not None: return response_dict[type]
+    if type is not None:
+        return response_dict[type]
     return response_dict
 
 @app.get(endpoint + "/{type}")
 def get_connectors_by_type(type : str):
     return get_connectors(type)
-

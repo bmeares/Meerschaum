@@ -8,8 +8,6 @@ Register or fetch Pipes from the API
 
 from __future__ import annotations
 from meerschaum.utils.typing import SuccessTuple, Union, Any, Optional, Mapping, List
-from meerschaum.utils.debug import dprint
-from meerschaum.utils.warnings import error
 
 def pipe_r_url(
         pipe : 'meerschaum.Pipe'
@@ -19,7 +17,8 @@ def pipe_r_url(
     """
     from meerschaum.config.static import _static_config
     location_key = pipe.location_key
-    if location_key is None: location_key = '[None]'
+    if location_key is None:
+        location_key = '[None]'
     return f"{_static_config()['api']['endpoints']['pipes']}/{pipe.connector_keys}/{pipe.metric_key}/{location_key}"
 
 def register_pipe(
@@ -31,11 +30,13 @@ def register_pipe(
     Submit a POST to the API to register a new Pipe object.
     Returns a tuple of (success_bool, response_dict)
     """
+    from meerschaum.utils.debug import dprint
     from meerschaum.config.static import _static_config
     ### NOTE: if `parameters` is supplied in the Pipe constructor,
     ###       then `pipe.parameters` will exist and not be fetched from the database.
     response = self.post(_static_config()['api']['endpoints']['pipes'], json=pipe.meta, debug=debug)
-    if debug: dprint(response.text)
+    if debug:
+        dprint(response.text)
     if isinstance(response.json(), list):
         response_tuple = response.__bool__(), response.json()[1]
     elif 'detail' in response.json():
@@ -95,7 +96,6 @@ def fetch_pipes_keys(
         E.g. [ (connector_keys, metric_key, location_key) ]
         This is used by the main `get_pipes()` function for the 'api' method.
     """
-    from meerschaum.utils.debug import dprint
     from meerschaum.utils.warnings import error
     from meerschaum.config.static import _static_config
     import json
@@ -116,7 +116,8 @@ def fetch_pipes_keys(
     except Exception as e:
         error(str(e))
 
-    if 'detail' in j: error(j['detail'], stack=False)
+    if 'detail' in j:
+        error(j['detail'], stack=False)
     return [tuple(r) for r in j]
 
 def sync_pipe(
@@ -190,8 +191,9 @@ def sync_pipe(
     r_url = pipe_r_url(pipe) + '/data'
 
     for i, c in enumerate(chunks):
-        if debug: dprint(f"Posting chunk ({i + 1} / {chunksize}) to {r_url}...")
-        if debug: print(c)
+        if debug:
+            dprint(f"Posting chunk ({i + 1} / {chunksize}) to {r_url}...")
+            print(c)
         json_str = get_json_str(c)
 
         try:
@@ -219,10 +221,11 @@ def sync_pipe(
 
         try:
             j = tuple(j)
-        except:
+        except Exception as e:
             return False, response.text
 
-        if debug: dprint("Received response: " + str(j))
+        if debug:
+            dprint("Received response: " + str(j))
         if not j[0]:
             return j
 
@@ -242,7 +245,8 @@ def delete_pipe(
     Delete a Pipe and drop its table.
     """
     from meerschaum.utils.warnings import error
-    if pipe is None: error(f"Pipe cannot be None.")
+    if pipe is None:
+        error(f"Pipe cannot be None.")
     return self.do_action(
         ['delete', 'pipes'],
         connector_keys = pipe.connector_keys,
@@ -322,7 +326,8 @@ def get_backtrack_data(
         return None
     from meerschaum.utils.packages import import_pandas
     from meerschaum.utils.misc import parse_df_datetimes
-    if debug: dprint(response.text)
+    if debug:
+        dprint(response.text)
     pd = import_pandas()
     try:
         df = pd.read_json(response.text)
@@ -330,7 +335,6 @@ def get_backtrack_data(
         warn(str(e))
         return None
     df = parse_df_datetimes(pd.read_json(response.text), debug=debug)
-    #  if debug: dprint(df)
     return df
 
 def get_pipe_id(
@@ -347,10 +351,11 @@ def get_pipe_id(
         r_url + '/id',
         debug = debug
     )
-    if debug: dprint(response.text)
+    if debug:
+        dprint(response.text)
     try:
         return int(response.text)
-    except:
+    except Exception as e:
         return None
 
 def get_pipe_attributes(
@@ -366,7 +371,7 @@ def get_pipe_attributes(
     import json
     try:
         return json.loads(response.text)
-    except:
+    except Exception as e:
         return None
 
 def get_sync_time(
@@ -389,7 +394,7 @@ def get_sync_time(
     else:
         try:
             dt = datetime.datetime.fromisoformat(json.loads(response.text))
-        except:
+        except Exception as e:
             dt = None
     return dt
 
@@ -403,7 +408,8 @@ def pipe_exists(
     """
     r_url = pipe_r_url(pipe)
     response = self.get(r_url + '/exists', debug=debug)
-    if debug: dprint("Received response: " + str(response.text))
+    if debug:
+        dprint("Received response: " + str(response.text))
     j = response.json()
     if isinstance(j, dict) and 'detail' in j:
         return False, j['detail']
@@ -420,7 +426,8 @@ def create_metadata(
     import json
     r_url = _static_config()['api']['endpoints']['metadata']
     response = self.post(r_url, debug=debug)
-    if debug: dprint("Create metadata response: {response.text}")
+    if debug:
+        dprint("Create metadata response: {response.text}")
     return json.loads(response.text)
 
 def get_pipe_rowcount(
@@ -448,7 +455,7 @@ def get_pipe_rowcount(
     )
     try:
         return int(json.loads(response.text))
-    except:
+    except Exception as e:
         return None
 
 def drop_pipe(
@@ -467,4 +474,3 @@ def drop_pipe(
         force = True,
         debug = debug
     )
-

@@ -60,7 +60,7 @@ def translate_rich_to_termcolor(*colors) -> tuple:
     return tuple(_colors)
 
 def _init():
-    global attrs
+    global _attrs
     from meerschaum.utils.packages import attempt_import
     ### init colorama for Windows color output
     colorama, more_termcolor = attempt_import(
@@ -73,14 +73,11 @@ def _init():
     try:
         colorama.init()
         success = True
-    except:
-        #  warn(f"Failed to initialize colorama. Ignoring...", stack=False)
+    except Exception as e:
         _attrs['ANSI'], _attrs['UNICODE'], _attrs['CHARSET'] = False, False, 'ascii'
         success = False
 
     if more_termcolor is None:
-        #  warn(f"Failed to import more_termcolor. Ignoring color output...", stack=False)
-        #  colored = colored_fallback
         _attrs['ANSI'], _attrs['UNICODE'], _attrs['CHARSET'] = False, False, 'ascii'
         success = False
 
@@ -103,7 +100,7 @@ def colored(text : str, *colors, **kw) -> str:
     try:
         _colors = translate_rich_to_termcolor(*colors)
         colored_text = more_termcolor.colored(text, *_colors, **kw)
-    except:
+    except Exception as e:
         colored_text = None
 
     if colored_text is None:
@@ -121,7 +118,7 @@ def get_console():
     rich = import_rich()
     try:
         console = rich.console.Console()
-    except:
+    except Exception as e:
         console = None
     return console
 
@@ -162,10 +159,11 @@ def print_tuple(
         if ANSI:
             msg = colored(msg, *status_config['ansi']['color'])
 
-        for i in range(upper_padding): print()
+        for i in range(upper_padding):
+            print()
         print(msg)
-        for i in range(lower_padding): print()
-
+        for i in range(lower_padding):
+            print()
 
 def __getattr__(name : str) -> str:
     """
@@ -174,7 +172,7 @@ def __getattr__(name : str) -> str:
     if name.startswith('__') and name.endswith('__'):
         raise AttributeError("Cannot import dunders from this module.")
 
-    global attrs
+    global _attrs
     if name in _attrs:
         if _attrs[name] is not None:
             return _attrs[name]
@@ -195,4 +193,3 @@ def __getattr__(name : str) -> str:
         return globals()[name]
     except KeyError:
         raise AttributeError(f"Could not find '{name}'")
-

@@ -35,11 +35,13 @@ class MQTTConnector(Connector):
 
         ### default: 'tcp'. Can also be 'websockets'
         transport = 'tcp'
-        if 'transport' in self.__dict__: transport = self.transport
+        if 'transport' in self.__dict__:
+            transport = self.transport
 
         ### tell the broker to delete client information on disconnect
         clean_session = True
-        if 'clean_session' in self.__dict__: clean_session = self.clean_session
+        if 'clean_session' in self.__dict__:
+            clean_session = self.clean_session
 
         self.client = mqtt.Client(
             clean_session = clean_session,
@@ -54,5 +56,4 @@ class MQTTConnector(Connector):
         self._last_msgs = dict()
 
     def __del__(self):
-        #  self.client.loop_stop(force=True)
         self.client.disconnect()

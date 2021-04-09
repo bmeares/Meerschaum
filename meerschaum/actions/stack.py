@@ -40,9 +40,12 @@ def stack(
     from meerschaum.utils.formatting import ANSI
     import os, sys
 
-    if action is None: action = []
-    if sysargs is None: sysargs = []
-    if sub_args is None: sub_args = []
+    if action is None:
+        action = []
+    if sysargs is None:
+        sysargs = []
+    if sub_args is None:
+        sub_args = []
 
     bootstrap_question = (
         "Bootstrap configuration?\n\n"
@@ -74,10 +77,6 @@ def stack(
     if len(action) > 0 and action[0] != '':
         compose_command = action
 
-    ### if command is just `stack`, add --build
-    #  elif '--build' not in sub_args:
-        #  sub_args.append('--build')
-
     ### define project name when starting containers
     project_name_list = ['--project-name', get_config('stack', 'project_name', patch=True, substitute=True)]
     
@@ -93,12 +92,8 @@ def stack(
     cmd_list = settings_list + compose_command + (
         sysargs[2:] if (len(sysargs) > 2 and not sub_args) else sub_args
     )
-    if debug: dprint(cmd_list)
-    run_python_package('compose', args=cmd_list, cwd=STACK_COMPOSE_PATH.parent, venv='mrsm')
-    #  call(cmd_list, cwd=STACK_COMPOSE_PATH.parent)
+    if debug:
+        dprint(cmd_list)
+    rc = run_python_package('compose', args=cmd_list, cwd=STACK_COMPOSE_PATH.parent, venv='mrsm')
 
-    ### not sure why I decided to reload the config here...
-    #  reload_package(meerschaum.config)
-    #  reload_package(meerschaum.config)
-    return True, "Success"
-
+    return rc == 0, ("Success" if rc == 0 else f"Failed to execute commands: {cmd_list}")

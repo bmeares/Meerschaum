@@ -64,15 +64,17 @@ def get_distinct_col_count(
     result = connector.value(_meta_query, debug=debug)
     try:
         return int(result)
-    except:
+    except Exception as e:
         return None
 
 def sql_item_name(s : str, flavor : str) -> str:
     """
     Parse SQL items depending on the flavor
     """
-    if flavor in {'timescaledb', 'postgresql', 'cockroachdb'}: s = pg_capital(str(s))
-    elif flavor == 'sqlite': s = "\"" + str(s) + "\""
+    if flavor in {'timescaledb', 'postgresql', 'cockroachdb'}:
+        s = pg_capital(str(s))
+    elif flavor == 'sqlite':
+        s = "\"" + str(s) + "\""
     return str(s)
 
 def pg_capital(s : str) -> str:
@@ -81,7 +83,8 @@ def pg_capital(s : str) -> str:
 
     returns: string
     """
-    if '"' in s: return s
+    if '"' in s:
+        return s
     needs_quotes = False
     for c in str(s):
         if ord(c) < ord('a') or ord(c) > ord('z'):
@@ -121,7 +124,8 @@ def build_where(
             continue
 
         where += f"{leading_and}{_key} " + ("IS NULL" if value is None else f"= '{value}'")
-    if len(where) > 1: where = "\nWHERE\n    " + where[len(leading_and):]
+    if len(where) > 1:
+        where = "\nWHERE\n    " + where[len(leading_and):]
     return where
 
 def dateadd_str(
@@ -166,7 +170,8 @@ def dateadd_str(
     from meerschaum.utils.packages import attempt_import
     import datetime
     dateutil = attempt_import('dateutil')
-    if not begin: return None
+    if not begin:
+        return None
     begin_time = None
     if not isinstance(begin, datetime.datetime):
         try:
@@ -206,4 +211,3 @@ def dateadd_str(
         dt_format = 'YYYY-MM-DD HH24:MI:SS.FF'
         da = f"TO_TIMESTAMP('{begin}', '{dt_format}') + INTERVAL '{number}' {datepart}"
     return da
-

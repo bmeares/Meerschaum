@@ -48,8 +48,10 @@ def parse_arguments(sysargs : List[str]) -> dict[str, Any]:
         if is_sub_arg:
             ### remove decorators
             sa = word
-            if sa.startswith(begin_decorator): sa = sa[len(begin_decorator):]
-            if sa.endswith(end_decorator): sa = sa[:-1 *len(end_decorator)]
+            if sa.startswith(begin_decorator):
+                sa = sa[len(begin_decorator):]
+            if sa.endswith(end_decorator):
+                sa = sa[:-1 *len(end_decorator)]
             sub_arguments.append(sa)
             ### remove sub-argument from action list
             sub_arg_indices.append(i)
@@ -61,7 +63,6 @@ def parse_arguments(sysargs : List[str]) -> dict[str, Any]:
     ]
 
     args, unknown = parser.parse_known_args(filtered_sysargs)
-    #  if unknown: print(f"Unknown arguments: {unknown}")
 
     ### if --config is not empty, cascade down config
     ### and update new values on existing keys / add new keys/values
@@ -72,11 +73,9 @@ def parse_arguments(sysargs : List[str]) -> dict[str, Any]:
         import os, meerschaum.config, shutil
         write_patch(args.config)
         reload_package('meerschaum')
-        #  reload_package(meerschaum.config)
         ### clean up patch so it's not loaded next time
         if PATCH_DIR_PATH.exists():
             shutil.rmtree(PATCH_DIR_PATH)
-
 
     args_dict = vars(args)
     args_dict['sysargs'] = sysargs
@@ -126,7 +125,7 @@ def parse_line(line : str) -> dict:
         return parse_arguments(
             shlex.split(line)
         )
-    except:
+    except Exception as e:
         return {'action' : [], 'text' : line,}
 
 def parse_synonyms(
@@ -135,6 +134,8 @@ def parse_synonyms(
     """
     Check for synonyms (e.g. force = True -> yes = True)
     """
-    if args_dict['force']: args_dict['yes'] = True
-    if args_dict['async']: args_dict['unblock'] = True
+    if args_dict['force']:
+        args_dict['yes'] = True
+    if args_dict['async']:
+        args_dict['unblock'] = True
     return args_dict

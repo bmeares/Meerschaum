@@ -50,14 +50,15 @@ def fetch(
         ### first, try to parse JSON
         try:
             df = parse_df_datetimes(pd.read_json(msg))
-        except:
+        except Exception as e:
             pass
 
         ### if parsing JSON fails, see if we can parse it literally
         if df is None:
             df = df_from_literal(pipe, msg, debug=debug)
 
-        if debug: dprint(f"{df}")
+        if debug:
+            dprint(f"{df}")
         pipe.sync(df, debug=debug)
 
     ### optional: user may override callback

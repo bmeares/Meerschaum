@@ -1,6 +1,17 @@
 from __future__ import annotations
 try:
-    from typing import *
+    from typing import (
+        Tuple,
+        Optional,
+        Dict,
+        List,
+        Mapping,
+        Sequence,
+        Callable,
+        Union,
+        Any,
+        Iterable,
+    )
 except:
     import urllib.request, sys
     url = 'https://raw.githubusercontent.com/python/typing/master/src/typing.py'
@@ -19,9 +30,9 @@ InstanceConnector = Union[
     'meerschaum.connectors.sql.SQLConnector',
     'meerschaum.connectors.api.APIConnector'
 ]
-PipesDict = Mapping[
-    str, Mapping[                   ### connector_keys : metrics
-        str, Mapping[               ### metric_key     : locations
+PipesDict = Dict[
+    str, Dict[                           ### connector_keys : metrics
+        str, Dict[                       ### metric_key     : locations
             str, 'meerschaum.Pipe.Pipe'  ### location_key   : Pipe
         ]
     ]

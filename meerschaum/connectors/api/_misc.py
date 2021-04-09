@@ -39,7 +39,7 @@ def get_chaining_status(self, **kw) -> Optional[bool]:
         )
         if not response:
             return None
-    except:
+    except Exception as e:
         return None
 
     return response.json()

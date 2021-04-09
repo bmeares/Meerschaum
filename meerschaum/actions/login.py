@@ -27,8 +27,10 @@ def login(
     from meerschaum.utils.warnings import warn
     from meerschaum.utils.formatting._shell import clear_screen
     from meerschaum.utils.formatting import print_tuple
-    if action is None: action = []
-    if connector_keys is None: connector_keys = []
+    if action is None:
+        action = []
+    if connector_keys is None:
+        connector_keys = []
     _possible_keys = action + connector_keys
     _keys = []
     for k in _possible_keys:
@@ -54,7 +56,7 @@ def login(
     for k in _keys:
         try:
             _connectors.append(parse_instance_keys(k))
-        except:
+        except Exception as e:
             warn(f"Unable to build connector '{k}'. Is it registered?", stack=False)
 
     meerschaum_config = get_config('meerschaum')
@@ -111,4 +113,3 @@ def _complete_login(action : Optional[List[str]] = None, **kw : Any) -> List[str
     from meerschaum.utils.misc import get_connector_labels
     search_term = action[-1] if action else ''
     return get_connector_labels('api', search_term=search_term)
-

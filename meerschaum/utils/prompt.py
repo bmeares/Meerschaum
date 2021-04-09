@@ -131,17 +131,6 @@ def yes_no(
     from meerschaum.utils.formatting import ANSI, UNICODE
     from meerschaum.utils.packages import attempt_import
 
-    ### TODO interactive mode
-    #  word_mapping = { 'y' : 'Yes', 'n' : 'No' }
-    #  if ANSI and UNICODE and interactive:
-        #  prompt_toolkit = attempt_import('prompt_toolkit')
-        #  buttons = [
-            #  word_mapping.get(default, default)
-        #  ]
-        #  return prompt_toolkit.shortcuts.button_dialog(
-            #  buttons = []
-        #  )
-
     default = options[0] if yes else default
     noask = yes or noask
 
@@ -155,7 +144,7 @@ def yes_no(
         try:
             answer = prompt(question + ending, icon=icon, detect_password=False, noask=noask)
             success = True
-        except:
+        except KeyboardInterrupt:
             success = False
         
         if not success:
@@ -280,6 +269,4 @@ def get_email(username : Optional[str] = None, allow_omit : bool = True, **kw : 
         )
         if (allow_omit and email == '') or is_valid_email(email):
             return email
-        else:
-            warn(f"Invalid email! Please try again.", stack=False)
-
+        warn(f"Invalid email! Please try again.", stack=False)

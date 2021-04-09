@@ -7,14 +7,12 @@ Miscellaneous functions go here
 
 from __future__ import annotations
 from meerschaum.utils.typing import (
-    Union, Mapping, Any, Callable, Optional, ClassVar, List, Dict, SuccessTuple
+    Union, Mapping, Any, Callable, Optional, List, Dict, SuccessTuple
 )
-
-import sys
 
 def add_method_to_class(
         func : Callable[[Any], Any],
-        class_def,
+        class_def : 'Class',
         method_name : Optional[str] = None,
         keep_self : Optional[bool] = None,
     ) -> Callable[[Any], Any]:
@@ -70,14 +68,18 @@ def choose_subaction(
     """
     from meerschaum.utils.warnings import warn, info
     import inspect
-    if action is None: action = []
+    if action is None:
+        action = []
     parent_action = inspect.stack()[1][3]
-    if len(action) == 0: action = ['']
+    if len(action) == 0:
+        action = ['']
     choice = action[0]
 
     def valid_choice(_choice : str, _options : dict):
-        if _choice in _options: return _choice
-        if (_choice + 's') in options: return _choice + 's'
+        if _choice in _options:
+            return _choice
+        if (_choice + 's') in options:
+            return _choice + 's'
         return None
 
     parsed_choice = valid_choice(choice, options)
@@ -106,7 +108,7 @@ def is_int(s):
     """
     try:
         float(s)
-    except:
+    except Exception as e:
         return False
     
     return float(s).is_integer()
@@ -122,14 +124,15 @@ def get_options_functions():
 
 def string_to_dict(
         params_string : str
-    ) -> dict:
+    ) -> Dict[str, Any]:
     """
     Parse a string into a dictionary
 
     If the string begins with '{', parse as JSON. Else use simple parsing
 
     """
-    if params_string == "": return dict()
+    if params_string == "":
+        return dict()
 
     if str(params_string).startswith('{'):
         import json
@@ -142,14 +145,14 @@ def string_to_dict(
         keys = _keys[:-1]
         try:
             val = _keys[-1]
-        except:
+        except Exception as e:
             val = str(_keys[-1])
 
         c = params_dict
         for _k in keys[:-1]:
             try:
                 k = ast.literal_eval(_k)
-            except:
+            except Exception as e:
                 k = str(_k)
             if k not in c:
                 c[k] = {}
@@ -192,11 +195,13 @@ def edit_file(
     from meerschaum.utils.packages import run_python_package, attempt_import, package_venv
     try:
         EDITOR = os.environ.get('EDITOR', default_editor)
-        if debug: dprint(f"Opening file '{path}' with editor '{EDITOR}'")
+        if debug:
+            dprint(f"Opening file '{path}' with editor '{EDITOR}'")
         rc = call([EDITOR, path])
     except Exception as e: ### can't open with default editors
-        if debug: dprint(e)
-        if debug: dprint('Failed to open file with system editor. Falling back to pyvim...')
+        if debug:
+            dprint(e)
+            dprint('Failed to open file with system editor. Falling back to pyvim...')
         pyvim = attempt_import('pyvim', lazy=False)
         rc = run_python_package('pyvim', [path], venv=package_venv(pyvim), debug=debug)
     return rc == 0
@@ -266,22 +271,14 @@ def print_options(
     from meerschaum.actions import actions as _actions
 
     _options = []
-    for o in options: _options.append(str(o))
-    if header is None: _header = f"Available {name}:"
-    else: _header = header
+    for o in options:
+        _options.append(str(o))
+    _header = f"Available {name}" if header is None else header
 
     def _print_options_no_rich():
         if not nopretty:
             print()
             print(make_header(_header))
-            ### calculate underline length
-            #  underline_len = len(_header)
-            #  for o in _options:
-                #  if len(str(o)) + 4 > underline_len:
-                    #  underline_len = len(str(o)) + 4
-            #  ### print underline
-            #  for i in range(underline_len): print('-', end="")
-            #  print("\n", end="")
         ### print actions
         for option in sorted(_options):
             if not nopretty: print("  - ", end="")
@@ -322,14 +319,7 @@ def print_options(
 
     cols = Columns([
         o for o in sorted(_options)
-        #  Panel(
-            #  (o if not actions else (_actions[o].__doc__ if _actions[o].__doc__ is not None else '')),
-            #  title = (None if not actions else o),
-            #  expand = False,
-            #  box = box.SIMPLE,
-        #  ) for o in sorted(_options)
     ], expand=True, equal=True, title=header, padding=(0, 0))
-    #  rich.print(cols)
     rich.print(table)
 
 
@@ -348,7 +338,7 @@ def sorted_dict(d : dict) -> dict:
     """
     try:
         return {key: value for key, value in sorted(d.items(), key=lambda item: item[1])}
-    except:
+    except Exception as e:
         return d
 
 def flatten_pipes_dict(pipes_dict : dict) -> list:
@@ -373,7 +363,8 @@ def round_time(
     from:  http://stackoverflow.com/questions/3463930/how-to-round-the-minute-of-a-datetime-object-python
     """
     import datetime
-    if date_delta is None: date_delta = datetime.timedelta(minutes=1)
+    if date_delta is None:
+        date_delta = datetime.timedelta(minutes=1)
     round_to = date_delta.total_seconds()
     if dt is None:
         dt = datetime.datetime.utcnow()
@@ -406,12 +397,14 @@ def parse_df_datetimes(
 
     ### if df is a dict, build DataFrame
     if not isinstance(df, pd.DataFrame):
-        if debug: dprint(f"df is not a DataFrame. Casting to DataFrame...")
+        if debug:
+            dprint(f"df is not a DataFrame. Casting to DataFrame...")
         df = pd.DataFrame(df)
 
     ### skip parsing if DataFrame is empty
     if len(df) == 0:
-        if debug: dprint(f"df is empty. Returning original DataFrame without casting datetime columns...")
+        if debug:
+            dprint(f"df is empty. Returning original DataFrame without casting datetime columns...")
         return df
 
     ### apply regex to columns to determine which are ISO datetimes
@@ -422,7 +415,8 @@ def parse_df_datetimes(
 
     ### list of datetime column names
     datetimes = list(df.loc[:, dt_mask])
-    if debug: dprint("Converting columns to datetimes: " + str(datetimes))
+    if debug:
+        dprint("Converting columns to datetimes: " + str(datetimes))
 
     ### apply to_datetime
     df[datetimes] = df[datetimes].apply(pd.to_datetime)
@@ -482,7 +476,7 @@ def retry_connect(
     from meerschaum.utils.packages import attempt_import
     from meerschaum.connectors.sql._tools import test_queries
     from functools import partial
-    import time, sys
+    import time
 
     ### Get default connector if None is provided.
     if connector is None:
@@ -517,22 +511,24 @@ def retry_connect(
             ### If the remote instance does not allow chaining, don't even try logging in.
             if not isinstance(chaining_status, bool):
                 chaining_status = connector.get_chaining_status(debug=debug)
-                if chaining_status is False:
-                    if warn: _warn(
-                        f"Meerschaum instance '{connector}' does not allow chaining " +
-                        "and cannot be used as the parent for this instance.",
-                        stack = False
-                    )
+                if chaining_status is None:
+                    connected = None
+                elif chaining_status is False:
+                    if warn:
+                        _warn(
+                            f"Meerschaum instance '{connector}' does not allow chaining " +
+                            "and cannot be used as the parent for this instance.",
+                            stack = False
+                        )
                     return False
-                elif chaining_status is None:
-                    connected = False
             if chaining_status:
                 connected = connector.login(debug=debug)[0]
                 if not connected and warn:
                     _warn(f"Unable to login to '{connector}'!", stack=False)
 
         if connected:
-            if debug: dprint("Connection established!")
+            if debug:
+                dprint("Connection established!")
             return True
 
         if warn:
@@ -571,11 +567,12 @@ def df_from_literal(
 
     val = literal
     if isinstance(literal, str):
-        if debug: dprint(f"Received literal string: '{literal}'")
+        if debug:
+            dprint(f"Received literal string: '{literal}'")
         import ast
         try:
             val = ast.literal_eval(literal)
-        except:
+        except Exception as e:
             warn(
                 "Failed to parse value from string:\n" + f"{literal}" +
                 "\n\nWill cast as a string instead."\
@@ -613,7 +610,8 @@ def filter_unseen_df(
 
     Lastly, use the old DataFrame's columns for the new DataFrame, because order matters when checking equality.
     """
-    if old_df is None: return new_df
+    if old_df is None:
+        return new_df
     old_cols = list(old_df.columns)
     try:
         new_df = new_df[old_cols]
@@ -623,10 +621,12 @@ def filter_unseen_df(
         return None
 
     ### assume the old_df knows what it's doing, even if it's technically wrong.
-    if dtypes is None: dtypes = dict(old_df.dtypes)
+    if dtypes is None:
+        dtypes = dict(old_df.dtypes)
     new_df = new_df.astype(dtypes)
 
-    if len(old_df) == 0: return new_df
+    if len(old_df) == 0:
+        return new_df
 
     return new_df[~new_df.fillna(custom_nan).apply(tuple, 1).isin(old_df.fillna(custom_nan).apply(tuple, 1))].reset_index(drop=True)
 
@@ -667,15 +667,6 @@ def enforce_gevent_monkey_patch():
     if not socket.socket is gevent_socket.socket:
         gevent_monkey.patch_all()
 
-def reload_plugins(debug : bool = False):
-    """
-    Convenience method for reloading the actions package (which loads plugins)
-    """
-    from meerschaum.utils.packages import reload_package
-    from meerschaum.actions import get_shell
-    reload_package('meerschaum', debug=debug)
-    #  get_shell(reload=True)
-
 def is_valid_email(email : str) -> bool:
     """
     Check whether a string is a valid email
@@ -691,7 +682,8 @@ def string_width(string : str) -> int:
     found_newline = False
     width = 0
     for c in reversed(string):
-        if c == '\n' and found_newline: break
+        if c == '\n' and found_newline:
+            break
         elif c == '\n':
             found_newline = True
             continue
@@ -849,9 +841,11 @@ def wget(
     """
     from meerschaum.utils.warnings import warn, error
     from meerschaum.utils.debug import dprint
-    import sys, os, pathlib, re, urllib.request
-    if not color: dprint = print
-    if debug: dprint(f"Downloading from '{url}'...")
+    import os, pathlib, re, urllib.request
+    if not color:
+        dprint = print
+    if debug:
+        dprint(f"Downloading from '{url}'...")
     try:
         response = urllib.request.urlopen(url)
     except Exception as e:
@@ -868,6 +862,7 @@ def wget(
             error(error_msg)
         else:
             print(error_msg)
+            import sys
             sys.exit(1)
 
     d = response.headers.get('content-disposition', None)
@@ -884,6 +879,7 @@ def wget(
     with open(dest, 'wb') as f:
         f.write(response.fp.read())
 
-    if debug: dprint(f"Downloaded file '{dest}'.")
+    if debug:
+        dprint(f"Downloaded file '{dest}'.")
 
     return dest

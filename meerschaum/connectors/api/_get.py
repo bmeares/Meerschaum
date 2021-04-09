@@ -20,10 +20,12 @@ def get(
     """
     Wrapper for requests.get
     """
-    if debug: from meerschaum.utils.debug import dprint
+    if debug:
+        from meerschaum.utils.debug import dprint
 
     if use_token:
-        if debug: dprint(f"Checking login token.")
+        if debug:
+            dprint(f"Checking login token.")
         headers.update({ 'Authorization': f'Bearer {self.token}' })
 
     if debug:

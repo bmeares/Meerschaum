@@ -71,12 +71,10 @@ def _pipes_lap(
         print_tuple(return_tuple)
         return return_tuple
 
-    #  from meerschaum.utils.pool import get_pool
-    #  pool = get_pool('ThreadPool', workers=workers)
-
     from multiprocessing import cpu_count
     from multiprocessing.pool import ThreadPool as Pool
-    if workers is None: workers = cpu_count()
+    if workers is None:
+        workers = cpu_count()
     pool = Pool(workers)
 
     results = pool.map_async(sync_pipe, pipes)
@@ -99,11 +97,13 @@ def _pipes_lap(
 
     if len(failed_pipes) > 0:
         print("\n" + f"Failed to sync Pipes:")
-        for p in failed_pipes: print(f"  - {p}")
+        for p in failed_pipes:
+            print(f"  - {p}")
 
     if len(succeeded_pipes) > 0:
         success_msg = "\nSuccessfully synced Pipes:"
-        if unblock: success_msg = "\nSuccessfully spawned threads for Pipes:"
+        if unblock:
+            success_msg = "\nSuccessfully spawned threads for Pipes:"
         print(success_msg)
         for p in succeeded_pipes:
             print(f"  - {p}")
