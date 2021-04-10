@@ -34,6 +34,7 @@ class APIConnector(Connector):
         create_metadata,
         get_pipe_rowcount,
         drop_pipe,
+        get_pipe_columns_types,
     )
     from ._fetch import fetch
     from ._plugins import (

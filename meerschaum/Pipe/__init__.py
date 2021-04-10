@@ -24,7 +24,7 @@ with correct credentials, as well as a network connection and valid permissions.
 
 ```
 >>> from meerschaum import Pipe
->>> pipe = Pipe('sql:remote_server', 'energy')
+>>> pipe = Pipe('csv', 'energy')
 >>> 
 >>> ### Columns only need to be defined if you're creating a new pipe.
 >>> pipe.columns = { 'datetime' : 'time', 'id' : 'station_id' }
@@ -42,6 +42,7 @@ with correct credentials, as well as a network connection and valid permissions.
 ```
 >>> from meerschaum import Pipe
 >>> pipe = Pipe('sql:remote_server', 'energy')
+>>> 
 >>> pipe.attributes = {
 ...     'fetch' : {
 ...         'definition' : 'SELECT * FROM energy_table',
@@ -51,6 +52,7 @@ with correct credentials, as well as a network connection and valid permissions.
 >>> ### Columns are a subset of attributes, so define columns
 >>> ### after defining attributes.
 >>> pipe.columns = { 'datetime' : 'time', 'id' : 'station_id' }
+>>> 
 >>> pipe.sync()
 ```
 
@@ -64,7 +66,13 @@ class Pipe:
     from ._data import get_data, get_backtrack_data, get_rowcount
     from ._register import register
     from ._attributes import (
-        attributes, parameters, columns, get_columns, get_id, id
+        attributes,
+        parameters,
+        columns,
+        get_columns,
+        get_columns_types,
+        get_id,
+        id,
     )
     from ._show import show
     from ._edit import edit, edit_definition

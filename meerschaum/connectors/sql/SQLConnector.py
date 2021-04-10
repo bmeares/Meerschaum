@@ -36,6 +36,8 @@ class SQLConnector(Connector):
         pipe_exists,
         get_pipe_rowcount,
         drop_pipe,
+        get_pipe_table,
+        get_pipe_columns_types,
     )
     from ._plugins import (
         register_plugin,

@@ -347,7 +347,7 @@ def get_pipe_attributes(
     return get_pipe(connector_keys, metric_key, location_key).attributes
 
 @app.get(pipes_endpoint + '/{connector_keys}/{metric_key}/{location_key}/exists')
-def get_pipe_attributes(
+def get_pipe_exists(
         connector_keys : str,
         metric_key : str,
         location_key : str,
@@ -367,13 +367,13 @@ def create_metadata(
     """
     from meerschaum.connectors.sql.tables import get_tables
     try:
-        tables = get_tables(mrsm_instance=get_connector())
+        tables = get_tables(mrsm_instance=get_connector(), debug=debug)
     except Exception as e:
         raise fastapi.HTTPException(status_code=500, detail=str(e))
     return True
 
 @app.get(pipes_endpoint + '/{connector_keys}/{metric_key}/{location_key}/rowcount')
-def get_rowcount(
+def get_pipe_rowcount(
         connector_keys : str,
         metric_key : str,
         location_key : str,
@@ -389,4 +389,27 @@ def get_rowcount(
         begin = begin,
         end = end,
         params = params,
+        debug = debug
     )
+
+@app.get(pipes_endpoint + '/{connector_keys}/{metric_key}/{location_key}/columns/types')
+def get_pipe_columns_types(
+        connector_keys : str,
+        metric_key : str,
+        location_key : str,
+    ) -> dict:
+    """
+    Return a dictionary of a pipe's table's columns to their data types.
+
+    E.g. An example dictionary for a small table.
+
+    ```
+    >>> {
+    ...   'dt': 'TIMESTAMP WITHOUT TIMEZONE',
+    ...   'id': 'BIGINT',
+    ...   'val': 'DOUBLE PRECISION',
+    ... }
+    >>> 
+    ```
+    """
+    return get_pipe(connector_keys, metric_key, location_key).get_columns_types(debug=debug)

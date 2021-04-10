@@ -9,6 +9,7 @@ Pretty printing wrapper
 def pprint(
         *args,
         detect_password : bool = True,
+        nopretty : bool = False,
         **kw
     ):
     """
@@ -21,24 +22,26 @@ def pprint(
     from meerschaum.utils.warnings import error
     from meerschaum.utils.misc import replace_password, dict_from_od
     from collections import OrderedDict
-    import copy
+    import copy, json
     modify = True
-    pprintpp = attempt_import('pprintpp', warn=False)
-    rich = import_rich()
-    try:
-        _pprint = pprintpp.pprint
-    except:
-        import pprint
-        _pprint = pprint.pprint
-    try:
+    rich_pprint = None
+    if ANSI and not nopretty:
+        rich = import_rich()
         if rich is not None:
             rich_pretty = attempt_import('rich.pretty')
-        rich_pprint = rich_pretty.pprint
-    except:
-        rich_pprint = _pprint
+        if rich_pretty is not None:
+            rich_pprint = rich_pretty.pprint
+    elif not nopretty:
+        pprintpp = attempt_import('pprintpp', warn=False)
+        try:
+            _pprint = pprintpp.pprint
+        except Exception as e:
+            import pprint
+            _pprint = pprint.pprint
 
-    if ANSI: func = rich_pprint
-    else: func = _pprint
+    func = (
+        _pprint if rich_pprint is None else rich_pprint
+    ) if not nopretty else print
 
     try:
         args_copy = copy.deepcopy(args)
@@ -61,11 +64,22 @@ def pprint(
             c = a
             if isinstance(c, dict):
                 c = replace_password(c.copy())
+            if nopretty:
+                try:
+                    c = json.dumps(c)
+                    is_json = True
+                except Exception as e:
+                    is_json = False
+                if not is_json:
+                    try:
+                        c = str(c)
+                    except Exception as e:
+                        pass
             _args.append(c)
 
     ### filter out unsupported keywords
     from meerschaum.utils.misc import filter_keywords
-    func_kw = filter_keywords(func, **kw)
+    func_kw = filter_keywords(func, **kw) if not nopretty else {}
     error_msg = None
     try:
         func(*_args, **func_kw)

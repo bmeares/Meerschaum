@@ -428,7 +428,11 @@ def create_metadata(
     response = self.post(r_url, debug=debug)
     if debug:
         dprint("Create metadata response: {response.text}")
-    return json.loads(response.text)
+    try:
+        metadata_response = json.loads(response.text)
+    except Exception as e:
+        metadata_response = False
+    return False
 
 def get_pipe_rowcount(
         self,
@@ -451,7 +455,8 @@ def get_pipe_rowcount(
             'begin' : begin,
             'end' : end,
             'remote' : remote,
-        }
+        },
+        debug = debug
     )
     try:
         return int(json.loads(response.text))
@@ -474,3 +479,37 @@ def drop_pipe(
         force = True,
         debug = debug
     )
+
+def get_pipe_columns_types(
+        self,
+        pipe : meerschaum.Pipe,
+        debug : bool = False,
+    ) -> Optional[Dict[str, str]]:
+    """
+    Return a dictionary of a pipe's table's columns to their data types.
+
+    E.g. An example dictionary for a small table.
+
+    ```
+    >>> {
+    ...   'dt': 'TIMESTAMP WITHOUT TIMEZONE',
+    ...   'id': 'BIGINT',
+    ...   'val': 'DOUBLE PRECISION',
+    ... }
+    >>> 
+    ```
+    """
+    r_url = pipe_r_url(pipe) + '/columns/types'
+    response = self.get(
+        r_url,
+        debug = debug
+    )
+    j = response.json()
+    if isinstance(j, dict) and 'detail' in j and len(j.keys()) == 1:
+        from meerschaum.utils.warnings import warn
+        warn(j['detail'])
+        return None
+    elif not isinstance(j, dict):
+        warn(response.text)
+        return None
+    return j

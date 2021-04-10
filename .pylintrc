@@ -413,7 +413,7 @@ notes=FIXME,
 
 # List of additional names supposed to be defined in builtins. Remember that
 # you should avoid defining new builtins when possible.
-additional-builtins=
+additional-builtins=meerschaum,plugins,
 
 # Tells whether unused global variables should be treated as a violation.
 allow-global-unused-variables=yes
@@ -612,3 +612,5 @@ overgeneral-exceptions=BaseException,
 global-statement=no
 cyclic-import=no
 redefined-builtin=no
+import-outside-toplevel=no
+invalid-name=no
