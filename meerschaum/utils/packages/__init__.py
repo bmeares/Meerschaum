@@ -174,7 +174,7 @@ def venv_exec(code: str, venv: str = 'mrsm', debug: bool = False) -> bool:
 
     Return True if the code successfully executes, False on failure.
     """
-    import subprocess, sys, platform
+    import subprocess, sys, platform, os
     from meerschaum.config._paths import VIRTENV_RESOURCES_PATH
     executable = (
         sys.executable if venv is None

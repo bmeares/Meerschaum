@@ -33,6 +33,7 @@ def show(
         'connectors' : _show_connectors,
         'arguments'  : _show_arguments,
         'data'       : _show_data,
+        'columns'    : _show_columns,
         'rowcounts'  : _show_rowcounts,
         'plugins'    : _show_plugins,
         'packages'   : _show_packages,
@@ -134,7 +135,7 @@ def _show_modules(**kw : Any) -> SuccessTuple:
     """
     import sys
     from meerschaum.utils.formatting import pprint
-    pprint(list(sys.modules.keys()))
+    pprint(list(sys.modules.keys()), **kw)
     return (True, "Success")
 
 def _show_pipes(
@@ -183,6 +184,7 @@ def _show_version(nopretty : bool = False, **kw : Any) -> SuccessTuple:
 
 def _show_connectors(
         action : Optional[List[str]] = None,
+        nopretty : bool = False,
         debug : bool = False,
         **kw : Any
     ) -> SuccessTuple:
@@ -200,10 +202,12 @@ def _show_connectors(
     from meerschaum.config import get_config
     from meerschaum.utils.formatting import make_header
     from meerschaum.utils.formatting import pprint
-    print(make_header("\nConfigured connectors:"))
-    pprint(get_config('meerschaum', 'connectors'))
-    print(make_header("\nActive connectors:"))
-    pprint(connectors)
+    if not nopretty:
+        print(make_header("\nConfigured connectors:"))
+    pprint(get_config('meerschaum', 'connectors'), nopretty=nopretty)
+    if not nopretty:
+        print(make_header("\nActive connectors:"))
+        pprint(connectors, nopretty=nopretty)
 
     if action is None:
         action = []
@@ -212,8 +216,9 @@ def _show_connectors(
     if action != []:
         attr, keys = parse_instance_keys(action[0], construct=False, as_tuple=True, debug=debug)
         if attr:
-            print(make_header("\n" + f"Attributes for connector '{keys}':"))
-            pprint(attr)
+            if not nopretty:
+                print(make_header("\n" + f"Attributes for connector '{keys}':"))
+            pprint(attr, nopretty=nopretty)
 
     return True, "Success"
 
@@ -239,6 +244,7 @@ def _show_data(
         gui : bool = False,
         begin : Optional[datetime.datetime] = None,
         end : Optional[datetime.datetime] = None,
+        nopretty : bool = False,
         debug : bool = False,
         **kw : Any
     ) -> SuccessTuple:
@@ -262,7 +268,7 @@ def _show_data(
         - show data -m weather --gui
             Open an interactive pandasgui window for the last 1440 minutes of data for all pipes of metric 'weather'.
     """
-    import sys
+    import sys, json
     from meerschaum import get_pipes
     from meerschaum.utils.packages import attempt_import
     from meerschaum.utils.warnings import warn, info
@@ -303,14 +309,60 @@ def _show_data(
             )
         )
 
-        info(info_msg)
-        pprint(df, file=sys.stderr)
-        if gui:
+        if not nopretty:
+            info(info_msg)
+        else:
+            print(json.dumps(p.__getstate__()))
+            df = df.to_json(orient='columns')
+        pprint(df, file=sys.stderr, nopretty=nopretty)
+        if gui and not nopretty:
             pandasgui = attempt_import('pandasgui')
             try:
                 pandasgui.show(df)
             except Exception as e:
                 df.plot()
+    return True, "Success"
+
+def _show_columns(
+        action : Optional[List[str]] = None,
+        debug : bool = False,
+        nopretty : bool = False,
+        **kw : Any
+    ) -> SuccessTuple:
+    """
+    Show the registered and table columns for pipes.
+    """
+    import json
+    from meerschaum import get_pipes
+    from meerschaum.utils.formatting import pprint, print_tuple
+    from meerschaum.utils.formatting._shell import make_header
+    from meerschaum.utils.warnings import info
+    pipes = get_pipes(as_list=True, debug=debug, **kw)
+    for p in pipes:
+        _cols = p.columns
+        _cols_types = p.get_columns_types(debug=debug)
+        if not nopretty:
+            info(make_header(f"\nColumns for pipe '{p}':"), icon=False)
+        else:
+            print(json.dumps(p.__getstate__()))
+        if _cols:
+            if not nopretty:
+                print(f"\nRegistered columns:")
+            pprint(_cols, nopretty=nopretty)
+            print()
+        elif not nopretty:
+            print_tuple((False, f"No registered columns for pipe '{p}'."))
+        else:
+            print(json.dumps({}))
+        if _cols_types:
+            if not nopretty:
+                print(f"\nTable columns and types:")
+            pprint(_cols_types, nopretty=nopretty)
+        elif not nopretty:
+            print_tuple((False, f"No table columns for pipe '{p}'. Does the pipe exist?"))
+        else:
+            print(json.dumps({}))
+
     return True, "Success"
 
 def _show_rowcounts(
@@ -356,6 +408,7 @@ def _show_rowcounts(
 def _show_plugins(
         action : Optional[List[str]] = None,
         repository : Optional[str] = None,
+        nopretty : bool = False,
         debug : bool = False,
         **kw : Any
     ) -> SuccessTuple:
@@ -375,8 +428,9 @@ def _show_plugins(
     if action == [''] or len(action) == 0:
         _to_print = get_plugins_names()
         header = "Installed plugins:"
-        info(f"To see all installable plugins from repository '{repo_connector}', run `show plugins all`")
-        info("To see plugins created by a certain user, run `show plugins [username]`")
+        if not nopretty:
+            info(f"To see all installable plugins from repository '{repo_connector}', run `show plugins all`")
+            info("To see plugins created by a certain user, run `show plugins [username]`")
     elif action[0] in ('all'):
         _to_print = repo_connector.get_plugins(debug=debug)
         header = f"Available plugins from Meerschaum repository '{repo_connector}':"
@@ -386,7 +440,7 @@ def _show_plugins(
         _to_print = repo_connector.get_plugins(user_id=user_id, debug=debug)
         header = f"Plugins from user '{username}' at Meerschaum repository '{repo_connector}':"
 
-    print_options(_to_print, header=header, debug=debug, **kw)
+    print_options(_to_print, header=header, debug=debug, nopretty=nopretty, **kw)
 
     return True, "Success"
 

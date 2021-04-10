@@ -26,10 +26,6 @@ def get_tables(
     from meerschaum.utils.packages import attempt_import
     from meerschaum import get_connector
 
-    #  print('CREATE TABLES')
-    #  import traceback
-    #  traceback.print_stack()
-
     sqlalchemy, sqlalchemy_dialects_postgresql = attempt_import(
         'sqlalchemy',
         'sqlalchemy.dialects.postgresql'
@@ -59,22 +55,6 @@ def get_tables(
             params_type = sqlalchemy_dialects_postgresql.JSON
 
         _tables = {
-            #  'metrics' : sqlalchemy.Table(
-                #  'metrics',
-                #  conn.metadata,
-                #  sqlalchemy.Column('metric_id', sqlalchemy.Integer, primary_key=True),
-                #  sqlalchemy.Column('connector_keys', sqlalchemy.String, index=True),
-                #  sqlalchemy.Column('metric_key', sqlalchemy.String, index=True),
-                #  sqlalchemy.Column('metric_name', sqlalchemy.String)
-            #  ),
-            #  'locations' : sqlalchemy.Table(
-                #  'locations',
-                #  conn.metadata,
-                #  sqlalchemy.Column('location_id', sqlalchemy.Integer, primary_key=True),
-                #  sqlalchemy.Column('connector_keys', sqlalchemy.String, index=True),
-                #  sqlalchemy.Column('location_key', sqlalchemy.String, index=True),
-                #  sqlalchemy.Column('location_name', sqlalchemy.String)
-            #  ),
             'users' : sqlalchemy.Table(
                 'users',
                 conn.metadata,
@@ -92,7 +72,6 @@ def get_tables(
                 sqlalchemy.Column('plugin_id', sqlalchemy.Integer, primary_key=True),
                 sqlalchemy.Column('plugin_name', sqlalchemy.String, index=True, nullable=False),
                 sqlalchemy.Column('user_id', sqlalchemy.Integer, nullable=False),
-                #  sqlalchemy.Column('user_id', sqlalchemy.Integer, sqlalchemy.schema.ForeignKey("users.user_id"), nullable=False),
                 sqlalchemy.Column('version', sqlalchemy.String),
                 sqlalchemy.Column('attributes', params_type),
                 extend_existing = True,
@@ -107,7 +86,9 @@ def get_tables(
             sqlalchemy.Column("metric_key", sqlalchemy.String, index=True, nullable=False),
             sqlalchemy.Column("location_key", sqlalchemy.String, index=True),
             sqlalchemy.Column("parameters", params_type),
-            sqlalchemy.UniqueConstraint('connector_keys', 'metric_key', 'location_key', name='pipe_index'),
+            sqlalchemy.UniqueConstraint(
+                'connector_keys', 'metric_key', 'location_key', name='pipe_index'
+            ),
             extend_existing = True,
         )
 
@@ -120,4 +101,3 @@ def get_tables(
         connector_tables[conn] = _tables
 
     return connector_tables[conn]
-

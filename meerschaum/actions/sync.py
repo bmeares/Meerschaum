@@ -155,7 +155,6 @@ def _sync_pipes(
             ("s" if (len(success) + len(fail)) > 1 else "") + "\n" +
             f"    ({len(success)} succeeded, {len(fail)} failed)."
         )
-        info(msg)
         if min_seconds > 0 and loop:
             print(file=sys.stderr)
             info(f"Sleeping for {min_seconds} second" + ("s" if abs(min_seconds) != 1 else ""))

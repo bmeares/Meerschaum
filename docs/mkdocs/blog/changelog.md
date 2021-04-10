@@ -5,7 +5,8 @@ This changelog was not introduced until v0.2.12, so many of the critical release
 Version 0.2 improved greatly on 0.1, with a greater focus on the user experience, plugins, local performance, and a whole lot more. Read the release notes below for some of the highlights.
 
 ### v0.2.19
-- **Refactoring and bugfixes**
+- **Refactoring**  
+  A lot of code was cleaned up to conform with cleaner programming practices.
 
 ### v0.2.18
 - **Added `login` action.**  

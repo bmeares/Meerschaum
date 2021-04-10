@@ -38,7 +38,7 @@ def colored_fallback(*args, **kw):
 def translate_rich_to_termcolor(*colors) -> tuple:
     """
     Translate between rich and more_termcolor terminology.
-    This is probably prone to breaking
+    This is probably prone to breaking.
     """
     _colors = []
     for c in colors:

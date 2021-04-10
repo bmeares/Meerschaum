@@ -57,6 +57,13 @@ def _bootstrap_pipes(
     from meerschaum.utils.misc import get_connector_labels
     from meerschaum.utils.formatting._shell import clear_screen
 
+    if connector_keys is None:
+        connector_keys = []
+    if metric_keys is None:
+        metric_keys = []
+    if location_keys is None:
+        location_keys = []
+
     _clear = get_config('shell', 'clear_screen', patch=True)
     abort_tuple = (False, "No pipes were bootstrapped.")
 
@@ -191,8 +198,8 @@ def _bootstrap_pipes(
     return (successes > 0), msg
 
 def _bootstrap_connectors(
-        action : Sequence[str] = [],
-        connector_keys : Sequence[str] = [],
+        action : Optional[List[str]] = None,
+        connector_keys : Optional[List[str]] = None,
         yes : bool = False,
         force : bool = False,
         noask : bool = False,
@@ -216,6 +223,11 @@ def _bootstrap_connectors(
 
     abort_tuple = False, "No connectors bootstrapped."
     _clear = get_config('shell', 'clear_screen', patch=True)
+
+    if action is None:
+        action = []
+    if connector_keys is None:
+        connector_keys = []
 
     if len(connector_keys) == 0:
         pass
