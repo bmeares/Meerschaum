@@ -245,15 +245,24 @@ def pprint_pipe_columns(
         rich = import_rich()
         rich_table = attempt_import('rich.table')
 
+        table = rich_table.Table(title=f"Column types for pipe '{pipe}'")
+        table.add_column('Column')
+        table.add_column('Type', justify='right')
+
         info(make_header(f"\nColumns for pipe '{pipe}':"), icon=False)
         if _cols:
             pprint(_cols, nopretty=nopretty)
             print()
         else:
             print_tuple((False, f"No registered columns for pipe '{pipe}'."))
+
+        for c, t in _cols_types.items():
+            table.add_row(c, t)
+
         if _cols_types:
-            print(f"\nTable columns and types:")
-            pprint(_cols_types, nopretty=nopretty)
+            rich.print(table)
+            #  print(f"\nTable columns and types:")
+            #  pprint(_cols_types, nopretty=nopretty)
         else:
             print_tuple((False, f"No table columns for pipe '{pipe}'. Does the pipe exist?"))
 
