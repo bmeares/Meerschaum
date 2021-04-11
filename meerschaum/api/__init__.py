@@ -74,12 +74,16 @@ def get_connector(instance_keys : str = None):
 
         from meerschaum.connectors.parse import parse_instance_keys
         connector = parse_instance_keys(instance_keys, debug=debug)
-    if debug: dprint(f"API instance connector: {connector}")
+    if debug:
+        dprint(f"API instance connector: {connector}")
     return connector
 
 database = None
 def get_database(instance_keys : str = None):
-    #  if instance_keys is None
+    """
+    Return a databases object.
+    NOTE: Not used!
+    """
     global database
     if database is None:
         database = get_connector(instance_keys).db
@@ -87,6 +91,9 @@ def get_database(instance_keys : str = None):
 
 _pipes = None
 def pipes(refresh=False):
+    """
+    Return the pipes dictionary.
+    """
     global _pipes
     if _pipes is None or refresh:
         _pipes = get_pipes_sql(mrsm_instance=get_connector())
@@ -94,7 +101,7 @@ def pipes(refresh=False):
 
 def get_pipe(connector_keys, metric_key, location_key, refresh=False):
     """
-    Index the pipes dictionary or create a new Pipe object
+    Index the pipes dictionary or create a new Pipe object.
     """
     from meerschaum.utils.misc import is_pipe_registered
     from meerschaum import Pipe

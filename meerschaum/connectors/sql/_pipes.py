@@ -175,7 +175,8 @@ def fetch_pipes_keys(
     parameters = deepcopy(params)
     for col, vals in cols.items():
         ### Allow for IS NULL to be declared as a single-item list ([None]).
-        if vals == [None]: vals = None
+        if vals == [None]:
+            vals = None
         if vals not in [[], ['*']]:
             parameters[col] = vals
     cols = {k : v for k, v in cols.items() if v != [None]}

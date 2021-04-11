@@ -6,6 +6,9 @@
 Handle all things warnings and errors here
 """
 
+from __future__ import annotations
+from meerschaum.utils.typing import Any
+
 import warnings
 
 warnings.filterwarnings(
@@ -25,27 +28,24 @@ warnings.filterwarnings(
     category = RuntimeWarning
 )
 
-#  import sys
-class SilentException(Exception):
-    import inspect
-    def __init__(self, msg : str = ''):
-        try:
-            ln = sys.exc_info()[-1].tb_lineno
-        except AttributeError:
-            ln = inspect.currentframe().f_back.f_lineno
-            #  ln = inspect.currentframe().f_lineno
-        self.args = "{0.__name__} (line {1}): {2}".format(type(self), ln, msg),
-        #  self.args = msg
+#  class SilentException(Exception):
+    #  """
+    #  Raise a silent Exception.
+    #  """
+    #  import inspect
+    #  def __init__(self, msg : str = ''):
+        #  try:
+            #  ln = sys.exc_info()[-1].tb_lineno
+        #  except AttributeError:
+            #  ln = inspect.currentframe().f_back.f_lineno
+            #  #  ln = inspect.currentframe().f_lineno
+        #  self.args = "{0.__name__} (line {1}): {2}".format(type(self), ln, msg),
+        #  #  self.args = msg
 
-def excepthook(type, value, traceback):
-    print('exception')
-    print(type, value, traceback)
-
-#  sys._excepthook = sys.excepthook
-#  sys.excepthook = excepthook
-#  sys.__excepthook__ = excepthook
-
-def enable_depreciation_warnings(name):
+def enable_depreciation_warnings(name) -> None:
+    """
+    Enable depreciation warnings in the warnings module.
+    """
     import meerschaum.actions
     warnings.filterwarnings(
         "always",
@@ -53,7 +53,7 @@ def enable_depreciation_warnings(name):
         module = name
     )
 
-def warn(*args, stacklevel=2, stack=True, color : bool = True, **kw):
+def warn(*args, stacklevel=2, stack=True, color : bool = True, **kw) -> None:
     """
     Raise a warning with custom Meerschaum formatting
     """
@@ -65,8 +65,10 @@ def warn(*args, stacklevel=2, stack=True, color : bool = True, **kw):
             CHARSET = 'ascii'
             ANSI = False
         try:
-            from meerschaum.config import _config; cf = _config()
-            from meerschaum.config import get_config
+            from meerschaum.config import get_config as _get_config
+            from meerschaum.config import _config
+            cf = _config()
+            get_config = _get_config
         except ImportError:
             get_config = None
     import sys
@@ -74,7 +76,7 @@ def warn(*args, stacklevel=2, stack=True, color : bool = True, **kw):
     if get_config is None and color:
         try:
             warn_config = cf['formatting']['warnings']
-        except:
+        except KeyError:
             warn_config = {
                 'ansi' : {'color' : []},
                 'unicode' : {'icon' : ''},
@@ -90,7 +92,7 @@ def warn(*args, stacklevel=2, stack=True, color : bool = True, **kw):
     if stacklevel is None or not stack:
         print(a[0], file=sys.stderr)
     else:
-        return warnings.warn(*a, stacklevel=stacklevel, **kw)
+        warnings.warn(*a, stacklevel=stacklevel, **kw)
 
 def exception_with_traceback(
         message : str,
@@ -115,7 +117,8 @@ def exception_with_traceback(
 
     tbs, _tb = [], tb
     while True:
-        if _tb is None: break
+        if _tb is None:
+            break
         tbs.append(_tb)
         _tb = _tb.tb_next
 
@@ -169,9 +172,11 @@ def error(
         color_message = '\n' + colored(message, *error_config['ansi']['color'])
         color_exception = exception_with_traceback(color_message, exception_class, stacklevel=3)
     try:
-        trace = rich.traceback.Traceback.extract(exception_class, exception, exception.__traceback__)
+        trace = rich.traceback.Traceback.extract(
+            exception_class, exception, exception.__traceback__
+        )
         rtb = rich.traceback.Traceback(trace)
-    except:
+    except Exception as e:
         trace, rtb = None, None
     if trace is None or rtb is None:
         nopretty = True
@@ -200,5 +205,3 @@ def info(message : str, icon : bool = True, **kw):
         message = colored(message, *info_config['ansi']['color'])
     ### NOTE: There's a bug somewhere because I have to flush stdout every time.
     print(message, file=sys.stderr, flush=True)
-
-

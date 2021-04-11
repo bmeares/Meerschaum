@@ -53,6 +53,9 @@ class Plugin:
 
     @property
     def module(self) -> 'ModuleType':
+        """
+        Return a Plugin's Python module.
+        """
         if '_module' not in self.__dict__:
             from meerschaum.actions.plugins import get_plugins_modules
             for m in get_plugins_modules():
@@ -111,7 +114,8 @@ class Plugin:
                             good_file = False
                             break
                     if good_file:
-                        if debug: dprint(f"Adding '{fp}'...")
+                        if debug:
+                            dprint(f"Adding '{fp}'...")
                         tarf.add(fp)
 
         ### clean up and change back to old directory
@@ -342,6 +346,9 @@ class Plugin:
 
     @property
     def dependencies(self) -> List[str]:
+        """
+        If the Plugin has specified dependencies in a list called `required`, return the list.
+        """
         from meerschaum.utils.packages import activate_venv, deactivate_venv
         import inspect
         activate_venv(venv=self.name)

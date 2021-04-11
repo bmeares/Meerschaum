@@ -80,7 +80,8 @@ def read(
         Defaults to `False`.
 
     """
-    if chunks is not None and chunks <= 0: return []
+    if chunks is not None and chunks <= 0:
+        return []
     from meerschaum.connectors.sql._tools import sql_item_name
     from meerschaum.utils.packages import attempt_import, import_pandas
     pd = import_pandas()
@@ -107,7 +108,8 @@ def read(
         )
     ):
         query_or_table = sql_item_name(str(query_or_table), self.flavor)
-        if debug: dprint(f"Reading from table {query_or_table}")
+        if debug:
+            dprint(f"Reading from table {query_or_table}")
         formatted_query = str(sqlalchemy.text("SELECT * FROM " + str(query_or_table)))
     else:
         try:
@@ -124,8 +126,10 @@ def read(
         )
     except Exception as e:
         import inspect
-        if debug: dprint(f"Failed to execute query:\n\n{query_or_table}\n\n")
-        if not silent: warn(str(e), stacklevel=3)
+        if debug:
+            dprint(f"Failed to execute query:\n\n{query_or_table}\n\n")
+        if not silent:
+            warn(str(e), stacklevel=3)
 
         return None
 
@@ -217,10 +221,10 @@ def exec(
 
     If inserting data, please use bind variables to avoid SQL injection!
     """
-    from meerschaum.utils.debug import dprint
     from meerschaum.utils.packages import attempt_import
     sqlalchemy = attempt_import("sqlalchemy")
-    if debug: dprint("Executing query:\n" + f"{query}")
+    if debug:
+        dprint("Executing query:\n" + f"{query}")
 
     connection = self.engine.connect()
     transaction = connection.begin()
@@ -228,8 +232,10 @@ def exec(
         result = connection.execute(query, *args, **kw)
         transaction.commit()
     except Exception as e:
-        if debug: dprint(f"Failed to execute query:\n\n{query}\n\n")
-        if not silent: warn(str(e))
+        if debug:
+            dprint(f"Failed to execute query:\n\n{query}\n\n")
+        if not silent:
+            warn(str(e))
         result = None
         transaction.rollback()
     finally:
@@ -262,9 +268,10 @@ def to_sql(
     :param index:
         If True, creates the DataFrame's indices as columns (default False)
 
-    :param if_exists: str
+    :param if_exists:
         ['replace', 'append', 'fail']
-        Drop and create the table ('replace') or append if it exists ('append') or raise Exception ('fail')
+        Drop and create the table ('replace') or append if it exists
+        ('append') or raise Exception ('fail').
         (default 'replace')
 
     :param method:
@@ -318,7 +325,8 @@ def to_sql(
         )
         success = True
     except Exception as e:
-        if not silent: warn(str(e))
+        if not silent:
+            warn(str(e))
         success, msg = None, str(e)
 
     end = time.time()
@@ -329,7 +337,8 @@ def to_sql(
         print(f" done.", flush=True)
         dprint(msg)
 
-    if as_tuple: return success, msg
+    if as_tuple:
+        return success, msg
     return success
 
 def psql_insert_copy(
@@ -362,7 +371,10 @@ def psql_insert_copy(
 
         columns = ', '.join('"{}"'.format(k) for k in keys)
         if table.schema:
-            table_name = '{}.{}'.format(sql_item_name(table.schema, 'postgresql'), sql_item_name(table.name, 'postgresql'))
+            table_name = '{}.{}'.format(
+                sql_item_name(table.schema, 'postgresql'),
+                sql_item_name(table.name, 'postgresql')
+            )
         else:
             table_name = sql_item_name(table.name, 'postgresql')
 

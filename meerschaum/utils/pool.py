@@ -21,9 +21,15 @@ def get_pool(pool_class_name : str = 'ThreadPool', workers : int = None):
         global pools
         from meerschaum.utils.packages import attempt_import
         try:
-            Pool = getattr(attempt_import('multiprocessing.pool', warn=False, venv=None, lazy=False), pool_class_name)
-        except:
-            Pool = getattr(attempt_import('multiprocessing.pool', warn=False, venv=None, lazy=False), 'ThreadPool')
+            Pool = getattr(
+                attempt_import('multiprocessing.pool', warn=False, venv=None, lazy=False),
+                pool_class_name
+            )
+        except Exception as e:
+            Pool = getattr(
+                attempt_import('multiprocessing.pool', warn=False, venv=None, lazy=False),
+                'ThreadPool'
+            )
 
         if workers is None:
             from multiprocessing import cpu_count
@@ -36,7 +42,7 @@ def get_pool(pool_class_name : str = 'ThreadPool', workers : int = None):
     if pools[pool_class_name]._state not in ('RUN', 0):
         try:
             pools[pool_class_name].close()
-        except:
+        except Exception as e:
             pass
         del pools[pool_class_name]
         build_pool(workers)
@@ -45,8 +51,9 @@ def get_pool(pool_class_name : str = 'ThreadPool', workers : int = None):
 
 def get_pools():
     """
-    Return the global pools dictionary
+    Return the global pools dictionary.
     """
     global pools
-    if pools is None: pools = dict()
+    if pools is None:
+        pools = dict()
     return pools

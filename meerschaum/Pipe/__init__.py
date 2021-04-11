@@ -62,6 +62,29 @@ from __future__ import annotations
 from meerschaum.utils.typing import Optional, Dict, Any
 
 class Pipe:
+    """
+    Access Meerschaum pipes via Pipe objects.
+
+    Pipes are identified by the following:
+        1. Connector keys (e.g. `sql:main`)
+        2. Metric key (e.g. `weather`)
+        3. Location (optional; e.g. `None`)
+
+    A pipe's connector keys correspond to a data source, and when the pipe is synced,
+    its `fetch` definition is evaluated and executed to produce new data.
+
+    Alternatively, new data may be directly synced via `pipe.sync()`:
+
+    ```
+    >>> from meerschaum import Pipe
+    >>> pipe = Pipe('csv', 'weather')
+    >>> 
+    >>> import pandas as pd
+    >>> df = pd.read_csv('weather.csv')
+    >>> pipe.sync(df)
+    ```
+    """
+
     from ._fetch import fetch
     from ._data import get_data, get_backtrack_data, get_rowcount
     from ._register import register
@@ -152,7 +175,7 @@ class Pipe:
         refresh = False
         if '_meta' not in self.__dict__:
             refresh = True
-        elif self.parameters != self._meta['parameters']:
+        elif self.parameters != self.__dict__['_meta']['parameters']:
             refresh = True
 
         if refresh:

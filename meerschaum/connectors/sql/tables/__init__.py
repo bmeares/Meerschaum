@@ -47,7 +47,8 @@ def get_tables(
 
     global connector_tables
     if conn not in connector_tables:
-        if debug: dprint(f"Creating tables for connector '{conn}'")
+        if debug:
+            dprint(f"Creating tables for connector '{conn}'")
 
         params_type = sqlalchemy.String
         ### leverage PostgreSQL JSON data type

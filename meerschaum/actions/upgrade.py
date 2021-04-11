@@ -7,7 +7,7 @@ Upgrade your current Meerschaum environment
 """
 
 from __future__ import annotations
-from meerschaum.utils.typing import SuccessTuple, Any, List
+from meerschaum.utils.typing import SuccessTuple, Any, List, Optional
 
 def upgrade(
         action : Optional[List[str]] = None,
@@ -74,7 +74,8 @@ def _upgrade_meerschaum(
             answer = yes_no(f"Take down the stack?", default='y', yes=yes, noask=noask)
 
         if answer:
-            if debug: dprint("Taking stack down...")
+            if debug:
+                dprint("Taking stack down...")
             actions['stack'](['down'], debug=debug)
 
     dependencies = None
@@ -141,8 +142,10 @@ def _upgrade_packages(
 
     print(make_header("Packages to Upgrade:"))
     pprint(packages[group])
-    #  print_options(packages[group], header="Packages to Upgrade:")
-    question = f"Are you sure you want to upgrade {len(packages[group])} packages (dependency group '{group}')?"
+    question = (
+        f"Are you sure you want to upgrade {len(packages[group])} packages " +
+        f"(dependency group '{group}')?"
+    )
     to_install = [install_name for import_name, install_name in packages[group].items()]
 
     success, msg = False, f"Nothing installed."
@@ -164,7 +167,8 @@ def _upgrade_plugins(
     ) -> SuccessTuple:
     """
     Upgrade all installed plugins to the latest versions.
-    If no plugins are specified, attempt to upgrade all, otherwise only upgrade the specified plugins.
+    If no plugins are specified, attempt to upgrade all,
+    otherwise only upgrade the specified plugins.
 
     Examples:
     
