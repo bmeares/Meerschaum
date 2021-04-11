@@ -1,10 +1,9 @@
 <img src="https://meerschaum.io/assets/banner_1920x320.png" alt="Meerschaum banner">
 
-| PyPI                                                         | Repository                                                   | Miscellaneous                                                |
+| PyPI                                                         | Repository                                                   | License                                                      |
 | ------------------------------------------------------------ | ------------------------------------------------------------ | ------------------------------------------------------------ |
-| ![PyPI]( https://img.shields.io/pypi/v/meerschaum?color=%2300cc66&label=Version ) | ![GitHub repo size](https://img.shields.io/github/repo-size/bmeares/Meerschaum?label=Repo%20size) | ![Lines of code]( https://img.shields.io/tokei/lines/github/bmeares/Meerschaum?label=Total%20Lines ) |
-| ![PyPI - Python Version]( https://img.shields.io/pypi/pyversions/meerschaum?label=Python&logo=python&logoColor=%23ffffff ) | ![Coverity Scan](https://img.shields.io/coverity/scan/22932) | ![PyPI - License](https://img.shields.io/pypi/l/meerschaum?label=License) |
-|                                                              | [![CodeFactor](https://www.codefactor.io/repository/github/bmeares/meerschaum/badge)](https://www.codefactor.io/repository/github/bmeares/meerschaum) |                                                              |
+| ![PyPI]( https://img.shields.io/pypi/v/meerschaum?color=%2300cc66&label=Version ) | ![GitHub repo size](https://img.shields.io/github/repo-size/bmeares/Meerschaum?label=Repo%20size) | ![PyPI - License](https://img.shields.io/pypi/l/meerschaum?label=License) |
+| ![PyPI - Python Version]( https://img.shields.io/pypi/pyversions/meerschaum?label=Python&logo=python&logoColor=%23ffffff ) | ![Lines of code]( https://img.shields.io/tokei/lines/github/bmeares/Meerschaum?label=Total%20Lines ) |                                                              |
 
 
 # What is Meerschaum?
