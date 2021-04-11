@@ -171,6 +171,9 @@ disable=print-statement,
         too-many-instance-attributes,
         no-name-in-module,
         anomalous-backslash-in-string,
+        superfluous-parens,
+        too-many-arguments,
+        unnecessary-pass,
 
 # Enable the message, report, category or checker with the given id(s). You can
 # either give multiple identifier separated by comma (,) or put this option

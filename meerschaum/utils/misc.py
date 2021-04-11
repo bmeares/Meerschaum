@@ -7,7 +7,7 @@ Miscellaneous functions go here
 
 from __future__ import annotations
 from meerschaum.utils.typing import (
-    Union, Mapping, Any, Callable, Optional, List, Dict, SuccessTuple
+    Union, Mapping, Any, Callable, Optional, List, Dict, SuccessTuple, Iterable, PipesDict
 )
 
 def add_method_to_class(
@@ -49,7 +49,7 @@ def add_method_to_class(
 
 def choose_subaction(
         action : Optional[List[str]] = None,
-        options : Dict[str, Any] = {},
+        options : Optional[Dict[str, Any]] = None,
         **kw
     ) -> SuccessTuple:
     """
@@ -70,6 +70,8 @@ def choose_subaction(
     import inspect
     if action is None:
         action = []
+    if options is None:
+        options = {}
     parent_action = inspect.stack()[1][3]
     if len(action) == 0:
         action = ['']
@@ -95,16 +97,16 @@ def choose_subaction(
 
 def generate_password(
         length : int = 12
-    ):
+    ) -> str:
     """
     Generate a secure password of given length.
     """
     import secrets, string
     return ''.join((secrets.choice(string.ascii_letters) for i in range(length)))
 
-def is_int(s):
+def is_int(s : str) -> bool:
     """
-    Check if string is an int
+    Check if string is an int.
     """
     try:
         float(s)
@@ -207,7 +209,7 @@ def edit_file(
     return rc == 0
 
 def is_pipe_registered(
-        pipe : 'Pipe or MetaPipe',
+        pipe : Union['meerschaum.Pipe', 'meerschaum.Pipe.MetaPipe'],
         pipes : dict,
         debug : bool = False
     ):
@@ -239,6 +241,10 @@ def _get_subaction_names(action : str, globs : dict = None) -> List[str]:
     return subactions
 
 def choices_docstring(action : str, globs : Optional[Dict[str, Any]] = None) -> str:
+    """
+    Append the an action's available options to the module docstring.
+    This function is to be placed at the bottom of each action module.
+    """
     options_str = f"\n    Options:\n        `{action} "
     subactions = _get_subaction_names(action, globs=globs)
     options_str += "["
@@ -255,7 +261,7 @@ def choices_docstring(action : str, globs : Optional[Dict[str, Any]] = None) -> 
     return options_str
 
 def print_options(
-        options : dict = {},
+        options : Optional[Dict[str, Any]] = None,
         nopretty : bool = False,
         name : str = 'options',
         header : str = None,
@@ -270,6 +276,8 @@ def print_options(
     from meerschaum.utils.formatting import make_header
     from meerschaum.actions import actions as _actions
 
+    if options is None:
+        options = {}
     _options = []
     for o in options:
         _options.append(str(o))
@@ -289,7 +297,8 @@ def print_options(
 
     rich = import_rich()
     if rich is None or nopretty:
-        return _print_options_no_rich()
+        _print_options_no_rich()
+        return None
 
     from meerschaum.utils.formatting import pprint
     from meerschaum.utils.packages import attempt_import
@@ -322,12 +331,14 @@ def print_options(
         o for o in sorted(_options)
     ], expand=True, equal=True, title=header, padding=(0, 0))
     rich.print(table)
-
+    return None
 
 def iterate_chunks(iterable, chunksize : int, fillvalue : Optional[Any] = None):
     """
     Iterate over a list in chunks.
-    Found here: https://stackoverflow.com/questions/434287/what-is-the-most-pythonic-way-to-iterate-over-a-list-in-chunks
+    Found here:
+        https://stackoverflow.com/questions/
+        434287/what-is-the-most-pythonic-way-to-iterate-over-a-list-in-chunks
     """
     from itertools import zip_longest
     args = [iter(iterable)] * chunksize
@@ -361,7 +372,8 @@ def round_time(
     Round a datetime object to a multiple of a timedelta
     dt : datetime.datetime object, default now.
     dateDelta : timedelta object, we round to a multiple of this, default 1 minute.
-    from:  http://stackoverflow.com/questions/3463930/how-to-round-the-minute-of-a-datetime-object-python
+    Function found from:
+    http://stackoverflow.com/questions/3463930/how-to-round-the-minute-of-a-datetime-object-python
     """
     import datetime
     if date_delta is None:
@@ -435,11 +447,16 @@ def timed_input(
         icon : bool = False,
         **kw
     ) -> Optional[str]:
+    """
+    Accept user input only for a brief period of time.
+    """
     from meerschaum.utils.prompt import prompt as _prompt
     import signal
 
     class TimeoutExpired(Exception):
-        pass
+        """
+        Raise an exception when the timer runs out.
+        """
 
     def alarm_handler(signum, frame):
         raise TimeoutExpired
@@ -533,7 +550,10 @@ def retry_connect(
             return True
 
         if warn:
-            _warn(f"Connection failed. Press [Enter] to retry or wait {retry_wait} seconds.", stack=False)
+            _warn(
+                f"Connection failed. Press [Enter] to retry or wait {retry_wait} seconds.",
+                stack = False
+            )
             info(
                 f"To quit, press CTRL-C, then 'q' + Enter for each worker" +
                 (f" ({workers})." if workers is not None else ".")
@@ -550,7 +570,7 @@ def retry_connect(
     return False
 
 def df_from_literal(
-        pipe : 'meerschaum.Pipe' = None,
+        pipe : Optional['meerschaum.Pipe'] = None,
         literal : str = None,
         debug : bool = False
     ) -> 'pd.DataFrame':
@@ -603,13 +623,15 @@ def filter_unseen_df(
     without needing to define expicit columns or indices.
 
     The logic below is based off this StackOverflow question, with an index reset thrown on top:
-    https://stackoverflow.com/questions/48647534/python-pandas-find-difference-between-two-data-frames#48647840
+    https://stackoverflow.com/questions/
+    48647534/python-pandas-find-difference-between-two-data-frames#48647840
 
     Also, NaN apparently does not equal NaN, so I am temporarily replacing instances of NaN with a
     custom string, per this StackOverflow question:
     https://stackoverflow.com/questions/31833635/pandas-checking-for-nan-not-working-using-isin
 
-    Lastly, use the old DataFrame's columns for the new DataFrame, because order matters when checking equality.
+    Lastly, use the old DataFrame's columns for the new DataFrame,
+    because order matters when checking equality.
     """
     if old_df is None:
         return new_df
@@ -618,7 +640,10 @@ def filter_unseen_df(
         new_df = new_df[old_cols]
     except Exception as e:
         from meerschaum.utils.warnings import warn
-        warn(f"Was not able to cast old columns onto new DataFrame. Are both DataFrames the same shape? Error:\n{e}")
+        warn(
+            "Was not able to cast old columns onto new DataFrame. " +
+            f"Are both DataFrames the same shape? Error:\n{e}"
+        )
         return None
 
     ### assume the old_df knows what it's doing, even if it's technically wrong.
@@ -629,9 +654,11 @@ def filter_unseen_df(
     if len(old_df) == 0:
         return new_df
 
-    return new_df[~new_df.fillna(custom_nan).apply(tuple, 1).isin(old_df.fillna(custom_nan).apply(tuple, 1))].reset_index(drop=True)
+    return new_df[
+        ~new_df.fillna(custom_nan).apply(tuple, 1).isin(old_df.fillna(custom_nan).apply(tuple, 1))
+    ].reset_index(drop=True)
 
-def change_dict(d : dict, func : 'function'):
+def change_dict(d : Dict[Any, Any], func : 'function') -> None:
     """
     Originally was local, moving to global for multiprocessing debugging
     """
@@ -642,11 +669,11 @@ def change_dict(d : dict, func : 'function'):
             d[k] = func(v)
 
 def replace_pipes_in_dict(
-        pipes : dict = None,
+        pipes : Optional[PipesDict] = None,
         func : 'function' = str,
         debug : bool = False,
         **kw
-    ) -> dict:
+    ) -> PipesDict:
     """
     Replace the Pipes in a Pipes dict with the result of another function
     """
@@ -664,7 +691,9 @@ def enforce_gevent_monkey_patch():
     """
     from meerschaum.utils.packages import attempt_import
     import socket
-    gevent, gevent_socket, gevent_monkey = attempt_import('gevent', 'gevent.socket', 'gevent.monkey')
+    gevent, gevent_socket, gevent_monkey = attempt_import(
+        'gevent', 'gevent.socket', 'gevent.monkey'
+    )
     if not socket.socket is gevent_socket.socket:
         gevent_monkey.patch_all()
 
@@ -685,7 +714,7 @@ def string_width(string : str) -> int:
     for c in reversed(string):
         if c == '\n' and found_newline:
             break
-        elif c == '\n':
+        if c == '\n':
             found_newline = True
             continue
         if found_newline:
@@ -694,7 +723,7 @@ def string_width(string : str) -> int:
 
 def _pyinstaller_traverse_dir(
         directory : str,
-        ignore_patterns : list = ['.pyc', 'dist', 'build', '.git', '.log'],
+        ignore_patterns : Iterable[str] = ('.pyc', 'dist', 'build', '.git', '.log'),
         include_dotfiles : bool = False
     ) -> list:
     """
@@ -769,7 +798,7 @@ def filter_keywords(
             func_kw[k] = v
     return func_kw
 
-def dict_from_od(od : collections.OrderedDict) -> dict:
+def dict_from_od(od : collections.OrderedDict) -> Dict[Any, Any]:
     """
     Convert an ordered dict to a dict.
     Does not mutate the original OrderedDict.
@@ -822,13 +851,14 @@ def get_connector_labels(
     ]
     return sorted(possibilities)
 
-def json_serialize_datetime(dt : datetime.datetime) -> str:
+def json_serialize_datetime(dt : datetime.datetime) -> Optional[str]:
     """
     Serialize a datetime.datetime object into JSON (ISO format string).
     """
     import datetime
     if isinstance(dt, datetime.datetime):
         return dt.isoformat() + 'Z'
+    return None
 
 def wget(
         url : str,
