@@ -165,7 +165,8 @@ def activate_venv(
     target = venv_target_path(venv, debug=debug)
     if str(target) not in sys.path:
         sys.path.insert(0, str(target))
-    if debug: dprint(f'sys.path: {sys.path}', color=color)
+    if debug:
+        dprint(f'sys.path: {sys.path}', color=color)
     return True
 
 def venv_exec(code: str, venv: str = 'mrsm', debug: bool = False) -> bool:
@@ -235,7 +236,8 @@ def pip_install(
             activate_venv(venv=venv, color=color, debug=debug)
         import pip
         have_pip = True
-        if venv is not None and deactivate: deactivate_venv(venv=venv, debug=debug, color=color)
+        if venv is not None and deactivate:
+            deactivate_venv(venv=venv, debug=debug, color=color)
     except ImportError:
         have_pip = False
     if not have_pip:

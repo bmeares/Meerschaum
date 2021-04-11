@@ -7,7 +7,7 @@ Manage users via the SQL Connector
 """
 
 from __future__ import annotations
-from meerschaum.utils.typing import SuccessTuple, Optional, Any, Dict
+from meerschaum.utils.typing import SuccessTuple, Optional, Any, Dict, List
 
 def register_user(
         self,
@@ -23,7 +23,8 @@ def register_user(
     sqlalchemy = attempt_import('sqlalchemy')
 
     valid_tuple = valid_username(user.username)
-    if not valid_tuple[0]: return valid_tuple
+    if not valid_tuple[0]:
+        return valid_tuple
 
     old_id = self.get_user_id(user, debug=debug)
 
@@ -43,7 +44,7 @@ def register_user(
         'attributes' : json.dumps(user.attributes),
     }
     if old_id is not None:
-        return False, f"User '{username}' already exists."
+        return False, f"User '{user.username}' already exists."
     if old_id is None:
         query = (
             sqlalchemy.insert(tables['users']).
@@ -74,7 +75,8 @@ def valid_username(username : str) -> SuccessTuple:
         if not c.isalnum() and c not in acceptable_chars:
             fail_reasons.append(
                 (
-                    f"Usernames may only contain alphanumeric characters and the following special characters: "
+                    f"Usernames may only contain alphanumeric characters " +
+                    "and the following special characters: "
                     + str(list(acceptable_chars))
                 )
             )
@@ -104,11 +106,15 @@ def edit_user(
 
     user_id = user.user_id if user.user_id is not None else self.get_user_id(user, debug=debug)
     if user_id is None:
-        return False, f"User '{user.username}' does not exist. Register user '{user.username}' before editing."
+        return False, (
+            f"User '{user.username}' does not exist. " +
+            f"Register user '{user.username}' before editing."
+        )
 
     import json
     valid_tuple = valid_username(user.username)
-    if not valid_tuple[0]: return valid_tuple
+    if not valid_tuple[0]:
+        return valid_tuple
 
     bind_variables = {
         'user_id' : user_id,
@@ -133,6 +139,9 @@ def get_user_id(
         user : meerschaum._internal.User.User,
         debug : bool = False
     ) -> Optional[int]:
+    """
+    If a user is registered, return the user_id.
+    """
     ### ensure users table exists
     from meerschaum.utils.packages import attempt_import
     sqlalchemy = attempt_import('sqlalchemy')
@@ -145,7 +154,8 @@ def get_user_id(
     )
 
     result = self.value(query, debug=debug)
-    if result is not None: return int(result)
+    if result is not None:
+        return int(result)
     return None
 
 def get_user_attributes(
@@ -154,13 +164,13 @@ def get_user_attributes(
         debug : bool = False
     ) -> Optional[Dict[str, Any]]:
     ### ensure users table exists
+    from meerschaum.utils.warnings import warn
     from meerschaum.utils.packages import attempt_import
     sqlalchemy = attempt_import('sqlalchemy')
     from meerschaum.connectors.sql.tables import get_tables
     users = get_tables(mrsm_instance=self, debug=debug)['users']
 
-    if user.user_id is not None: user_id = user.user_id
-    else: user_id = self.get_user_id(user, debug=debug)
+    user_id = user.user_id if user.user_id is not None else self.get_user_id(user, debug=debug)
 
     query = (
         sqlalchemy.select([users.c.attributes]).
@@ -172,14 +182,14 @@ def get_user_attributes(
         try:
             result = dict(result)
             _parsed = True
-        except:
+        except Exception as e:
             _parsed = False
         if not _parsed:
             try:
                 import json
                 result = json.loads(result)
                 _parsed = True
-            except:
+            except Exception as e:
                 _parsed = False
         if not _parsed:
             warn(f"Received unexpected type for attributes: {result}")
@@ -190,6 +200,9 @@ def delete_user(
         user : meerschaum._internal.User.User,
         debug : bool = False
     ) -> SuccessTuple:
+    """
+    Delete a user's record from the users table.
+    """
     ### ensure users table exists
     from meerschaum.connectors.sql.tables import get_tables
     users = get_tables(mrsm_instance=self, debug=debug)['users']
@@ -197,8 +210,7 @@ def delete_user(
     from meerschaum.utils.packages import attempt_import
     sqlalchemy = attempt_import('sqlalchemy')
 
-    if user.user_id is not None: user_id = user.user_id
-    else: user_id = self.get_user_id(user, debug=debug)
+    user_id = user.user_id if user.user_id is not None else self.get_user_id(user, debug=debug)
 
     if user_id is None:
         return False, f"User '{user.username}' is not registered and cannot be deleted."
@@ -206,11 +218,13 @@ def delete_user(
     query = sqlalchemy.delete(users).where(users.c.user_id == user_id)
 
     result = self.exec(query, debug=debug)
-    if result is None: return False, f"Failed to delete user '{user}'"
+    if result is None:
+        return False, f"Failed to delete user '{user}'."
 
     query = sqlalchemy.delete(plugins).where(plugins.c.user_id == user_id)
     result = self.exec(query, debug=debug)
-    if result is None: return False, f"Failed to delete plugins of user '{user}'"
+    if result is None:
+        return False, f"Failed to delete plugins of user '{user}'."
 
     return True, f"Successfully deleted user '{user}'"
 
@@ -218,7 +232,10 @@ def get_users(
         self,
         debug : bool = False,
         **kw : Any
-    ) -> list:
+    ) -> List[str]:
+    """
+    Return a list of existing users.
+    """
     ### ensure users table exists
     from meerschaum.connectors.sql.tables import get_tables
     users = get_tables(mrsm_instance=self, debug=debug)['users']
@@ -234,9 +251,9 @@ def get_user_password_hash(
         user : meerschaum._internal.User.User,
         debug : bool = False,
         **kw : Any
-    ) -> str:
+    ) -> Optional[str]:
     """
-    Return a user's password hash
+    Return a user's password hash if the user exists, otherwise return None.
     """
     from meerschaum.utils.debug import dprint
     from meerschaum.connectors.sql.tables import get_tables
@@ -246,12 +263,15 @@ def get_user_password_hash(
 
     if user.user_id is not None:
         user_id = user.user_id
-        if debug: dprint(f"Already given user_id: {user_id}")
+        if debug:
+            dprint(f"Already given user_id: {user_id}")
     else:
-        if debug: dprint(f"Fetching user_id...")
+        if debug:
+            dprint(f"Fetching user_id...")
         user_id = self.get_user_id(user, debug=debug)
 
-    if user_id is None: return None
+    if user_id is None:
+        return None
 
     query = sqlalchemy.select([users.c.password_hash]).where(users.c.user_id == user_id)
 
@@ -264,17 +284,17 @@ def get_user_type(
         **kw : Any
     ) -> Optional[str]:
     """
-    Return a user's type
+    Return a user's type if the user exists, otherwise return None.
     """
     from meerschaum.connectors.sql.tables import get_tables
     users = get_tables(mrsm_instance=self, debug=debug)['users']
     from meerschaum.utils.packages import attempt_import
     sqlalchemy = attempt_import('sqlalchemy')
 
-    if user.user_id is not None: user_id = user.user_id
-    else: user_id = self.get_user_id(user, debug=debug)
+    user_id = user.user_id if user.user_id is not None else self.get_user_id(user, debug=debug)
 
-    if user_id is None: return None
+    if user_id is None:
+        return None
 
     query = sqlalchemy.select([users.c.user_type]).where(users.c.user_id == user_id)
 

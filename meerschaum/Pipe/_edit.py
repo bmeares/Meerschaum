@@ -84,7 +84,7 @@ def edit_definition(
     if self.connector.type not in ('sql', 'api'):
         return self.edit(interactive=True, debug=debug, **kw)
 
-    from meerschaum.utils.warnings import warn, info
+    from meerschaum.utils.warnings import info
     from meerschaum.utils.debug import dprint
 
     _parameters = self.parameters
@@ -105,7 +105,7 @@ def edit_definition(
         for k, v in _keys.items():
             try:
                 _keys[k] = prompt(k.capitalize().replace('_', ' ') + ':', icon=True, default=v)
-            except KeyBoardError:
+            except KeyboardInterrupt:
                 continue
             if _keys[k] in ('', 'None', '\'None\'', '[None]'):
                 _keys[k] = None
@@ -118,7 +118,7 @@ def edit_definition(
         from meerschaum.config._paths import PIPES_CACHE_RESOURCES_PATH
         from meerschaum.utils.misc import edit_file
         definition_filename = str(self) + '.sql'
-        definition_path = pathlib.Path(os.path.join(PIPES_CACHE_RESOURCES_PATH, definition_filename))
+        definition_path = PIPES_CACHE_RESOURCES_PATH / definition_filename
 
         sql_definition = _parameters['fetch'].get('definition', None)
         if sql_definition is None:
@@ -145,9 +145,11 @@ def edit_definition(
         if ' ' not in file_definition:
             return False, f"Invalid SQL definition for pipe '{self}'."
 
-        if debug: dprint("Read SQL definition:\n\n" + file_definition)
+        if debug:
+            dprint("Read SQL definition:\n\n" + file_definition)
         _parameters['fetch']['definition'] = file_definition
         self.parameters = _parameters
+        return True, "Success"
 
     locals()['_edit_' + str(self.connector.type)]()
     return self.edit(interactive=False, debug=debug, **kw)

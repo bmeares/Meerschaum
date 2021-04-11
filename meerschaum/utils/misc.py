@@ -281,7 +281,8 @@ def print_options(
             print(make_header(_header))
         ### print actions
         for option in sorted(_options):
-            if not nopretty: print("  - ", end="")
+            if not nopretty:
+                print("  - ", end="")
             print(option)
         if not nopretty:
             print()

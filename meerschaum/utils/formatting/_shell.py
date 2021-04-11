@@ -19,7 +19,8 @@ def make_header(
     """
 
     from meerschaum.utils.formatting import ANSI, UNICODE, colored
-    if not UNICODE: ruler = '-'
+    if not UNICODE:
+        ruler = '-'
     words = message.split('\n')
     max_length = 0
     for w in words:
@@ -33,6 +34,10 @@ def make_header(
     return s
 
 def clear_screen(debug : bool = False) -> bool:
+    """
+    Clear the terminal window of all text. If ANSI is enabled,
+    print the ANSI code for clearing. Otherwise, execute `clear` or `cls`.
+    """
     from meerschaum.utils.formatting import ANSI, get_console
     from meerschaum.utils.debug import dprint
     print("", end="", flush=True)

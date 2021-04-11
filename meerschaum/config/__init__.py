@@ -8,6 +8,7 @@ and if interactive, print the welcome message
 """
 
 from __future__ import annotations
+import os, shutil, sys, pathlib
 from meerschaum.utils.typing import Any, Dict, Optional, Union
 
 from meerschaum.config._version import __version__
@@ -24,7 +25,6 @@ from meerschaum.config._patch import (
     patch_config,
     apply_patch_to_config,
 )
-import os, shutil, sys, pathlib
 
 ### apply config preprocessing (e.g. main to meta)
 config = None
@@ -51,7 +51,7 @@ def set_config(cf : Dict[str, Any]) -> Dict[str, Any]:
     global config
     if not isinstance(cf, dict):
         from meerschaum.utils.warnings import error
-        error(f"Invalid value for config: {cf}", stacklevel=3)
+        error(f"Invalid value for config: {cf}")
     config = cf
     return config
 
@@ -84,7 +84,7 @@ def get_config(
     :param write_missing:
         If True, write default values when the main config files are missing.
         Defaults to True.
-        
+
     :param substitute:
         If True, subsitute 'MRSM{}' values.
         Defaults to True.
@@ -139,7 +139,8 @@ def get_config(
         else:
             config[keys[0]] = single_key_config.get(keys[0], None)
             if symlinks_key in single_key_config and keys[0] in single_key_config[symlinks_key]:
-                if symlinks_key not in config: config[symlinks_key] = {}
+                if symlinks_key not in config:
+                    config[symlinks_key] = {}
                 config[symlinks_key][keys[0]] = single_key_config[symlinks_key][keys[0]]
 
             if sync_files:
@@ -157,7 +158,10 @@ def get_config(
             ### Check if the keys are in the default configuration.
             from meerschaum.config._default import default_config
             in_default = True
-            patched_default_config = search_and_substitute_config(default_config) if substitute else default_config
+            patched_default_config = (
+                search_and_substitute_config(default_config)
+                if substitute else default_config
+            )
             _c = patched_default_config
             for k in keys:
                 try:
@@ -229,7 +233,10 @@ if patch_config is not None:
 
 ### if permanent_patch.yaml exists, apply patch to config, write config, and delete patch
 if permanent_patch_config is not None and PERMANENT_PATCH_DIR_PATH.exists():
-    print("Found permanent patch configuration. Updating main config and deleting permanent patch...")
+    print(
+        "Found permanent patch configuration. " +
+        "Updating main config and deleting permanent patch..."
+    )
     set_config(apply_patch_to_config(_config(), permanent_patch_config))
     write_config(_config())
     permanent_patch_config = None
@@ -251,7 +258,8 @@ def _apply_environment_config(env_var):
             _patch = None
         error_msg = (
             f"Environment variable {env_var} is set but cannot be parsed.\n"
-            f"Unset {env_var} or change to JSON or simplified dictionary format (see --help, under params for formatting)\n"
+            f"Unset {env_var} or change to JSON or simplified dictionary format " +
+            "(see --help, under params for formatting)\n" +
             f"{env_var} is set to:\n{os.environ[env_var]}\n"
             f"Skipping patching os environment into config..."
         )
@@ -282,7 +290,8 @@ if environment_root_dir in os.environ:
     root_dir_path = pathlib.Path(os.environ[environment_root_dir]).absolute()
     if not root_dir_path.exists():
         print(
-            f"Invalid root directory '{str(root_dir_path)}' set for environment variable '{environment_root_dir}'.\n" +
+            f"Invalid root directory '{str(root_dir_path)}' set for " +
+            f"environment variable '{environment_root_dir}'.\n" +
             f"Please enter a valid path for {environment_root_dir}."
         )
         sys.exit(1)

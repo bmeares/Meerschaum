@@ -6,7 +6,9 @@
 Formatting functions for printing pipes
 """
 
-def pprint_pipes(pipes : dict):
+from meerschaum.utils.typing import PipesDict
+
+def pprint_pipes(pipes : PipesDict) -> None:
     """
     Print a stylized tree of a Pipes dictionary.
     Supports ANSI and UNICODE global settings.
@@ -20,7 +22,6 @@ def pprint_pipes(pipes : dict):
     from meerschaum.utils.formatting import UNICODE, ANSI, pprint, colored
     from meerschaum.config import get_config
     import copy
-    #  rich = attempt_import('rich', warn=False)
     rich = import_rich('rich', warn=False)
     Text = None
     if rich is not None:
@@ -56,12 +57,16 @@ def pprint_pipes(pipes : dict):
         for conn_keys, metrics in pipes.items():
             _colored_conn_key = colored(icons['connector'] + conn_keys, styles['connector'])
             if Text is not None:
-                replace_dict['connector'][_colored_conn_key] = Text(conn_keys, style=styles['connector'])
+                replace_dict['connector'][_colored_conn_key] = (
+                    Text(conn_keys, style=styles['connector'])
+                )
             ascii_dict[_colored_conn_key] = {}
             for metric, locations in metrics.items():
                 _colored_metric_key = colored(icons['metric'] + metric, styles['metric'])
                 if Text is not None:
-                    replace_dict['metric'][_colored_metric_key] = Text(metric, style=styles['metric'])
+                    replace_dict['metric'][_colored_metric_key] = (
+                        Text(metric, style=styles['metric'])
+                    )
                 ascii_dict[_colored_conn_key][_colored_metric_key] = {}
                 for location, pipe in locations.items():
                     if location is None:
@@ -72,7 +77,9 @@ def pprint_pipes(pipes : dict):
                     _colored_location = colored(icons['location'] + str(location), _location_style)
                     _colored_location_key = _colored_location + pipe_addendum
                     if Text is not None:
-                        replace_dict['location'][_colored_location] = Text(str(location), style=_location_style)
+                        replace_dict['location'][_colored_location] = (
+                            Text(str(location), style=_location_style)
+                        )
                     ascii_dict[_colored_conn_key][_colored_metric_key][_colored_location_key] = {}
 
         tree = asciitree.LeftAligned()
@@ -133,7 +140,8 @@ def pprint_pipes(pipes : dict):
             else:
                 _col = replace_tree_text(tree(branch))
             cols.append(_col)
-        if len(output) > 0: tree_output = tree_output[:-2]
+        if len(output) > 0:
+            tree_output = tree_output[:-2]
         output += tree_output
 
         if rich is None:
@@ -196,8 +204,10 @@ def pprint_pipes(pipes : dict):
             )
             conn_trees[conn_keys].add(metric_trees[conn_keys][metric])
             for location, pipe in locations.items():
-                if location is None: _location = Text(str(location), style=none_style)
-                else: _location = Text(location, style=styles['location'])
+                _location_style = (
+                    Text(str(location), style=none_style) if location is None
+                    else Text(location, style=styles['location'])
+                )
                 _location = Text(icons['location']) + _location + Text("\n" + str(pipe) + "\n")
                 metric_trees[conn_keys][metric].add(_location)
 
@@ -207,4 +217,3 @@ def pprint_pipes(pipes : dict):
 
     columns = Columns(cols)
     rich.print(columns)
-

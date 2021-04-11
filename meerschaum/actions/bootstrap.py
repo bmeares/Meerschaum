@@ -309,7 +309,8 @@ def _bootstrap_connectors(
             val = prompt(f"Value for {k}:", default=str(v))
         except KeyboardInterrupt:
             continue
-        if is_int(val): val = int(val)
+        if is_int(val):
+            val = int(val)
         new_attributes[k] = val
 
     if _clear:
@@ -322,15 +323,18 @@ def _bootstrap_connectors(
     pprint(new_attributes)
     try:
         ok = (
-            yes_no(f"Are you ok with these new attributes for connector '{conn}'?", default='y', noask=noask, yes=yes)
-            if not yes
-            else yes
+            yes_no(
+                f"Are you ok with these new attributes for connector '{conn}'?",
+                default = 'y',
+                noask = noask,
+                yes = yes
+            ) if not yes else yes
         )
     except KeyboardInterrupt:
         ok = False
     if not ok:
         return False, "No changes made to connectors configuration."
-    
+
     meerschaum_config = get_config('meerschaum')
 
     if 'connectors' not in meerschaum_config:

@@ -30,14 +30,17 @@ def register_plugin(
     if old_id is not None:
         old_version = self.get_plugin_version(plugin, debug=debug)
         new_version = plugin.version
-        if old_version is None: old_version = ''
-        if new_version is None: new_version = ''
+        if old_version is None:
+            old_version = ''
+        if new_version is None:
+            new_version = ''
 
         ### verify that the new version is greater than the old
         from packaging import version as packaging_version
         if packaging_version.parse(old_version) >= packaging_version.parse(new_version):
             return False, (
-                f"Version '{new_version}' of plugin '{plugin}' must be greater than existing version '{old_version}'."
+                f"Version '{new_version}' of plugin '{plugin}' " +
+                f"must be greater than existing version '{old_version}'."
             )
 
     import json
@@ -67,6 +70,9 @@ def get_plugin_id(
         plugin : 'meerschaum._internal.Plugin.Plugin',
         debug : bool = False
     ) -> Optional[int]:
+    """
+    Return a plugin's id if it is registered, else return None.
+    """
     ### ensure plugins table exists
     from meerschaum.connectors.sql.tables import get_tables
     plugins = get_tables(mrsm_instance=self, debug=debug)['plugins']
@@ -77,14 +83,17 @@ def get_plugin_id(
     
     try:
         return int(self.value(query, debug=debug))
-    except:
+    except Exception as e:
         return None
 
 def get_plugin_version(
         self,
         plugin : 'meerschaum._internal.Plugin.Plugin',
         debug : bool = False
-    ) -> str:
+    ) -> Optional[str]:
+    """
+    Return a plugin's version if it exists.
+    """
     ### ensure plugins table exists
     from meerschaum.connectors.sql.tables import get_tables
     plugins = get_tables(mrsm_instance=self, debug=debug)['plugins']
@@ -100,6 +109,9 @@ def get_plugin_user_id(
         plugin : 'meerschaum._internal.Plugin.Plugin',
         debug : bool = False
     ) -> Optional[int]:
+    """
+    Return a plugin's user_id if it exists.
+    """
     ### ensure plugins table exists
     from meerschaum.connectors.sql.tables import get_tables
     plugins = get_tables(mrsm_instance=self, debug=debug)['plugins']
@@ -110,14 +122,17 @@ def get_plugin_user_id(
 
     try:
         return int(self.value(query, debug=debug))
-    except:
+    except Exception as e:
         return None
 
 def get_plugin_username(
         self,
         plugin : 'meerschaum._internal.Plugin.Plugin',
         debug : bool = False
-    ) -> str:
+    ) -> Optional[str]:
+    """
+    Return the username of a plugin's user_id, if it exists.
+    """
     ### ensure plugins table exists
     from meerschaum.connectors.sql.tables import get_tables
     plugins = get_tables(mrsm_instance=self, debug=debug)['plugins']
@@ -133,19 +148,16 @@ def get_plugin_username(
         )
     )
 
-    #  query = f"""
-    #  SELECT users.username
-    #  FROM plugins
-    #  INNER JOIN users ON users.user_id = plugins.user_id
-    #  WHERE plugin_name = %(plugin_name)s
-    #  """
     return self.value(query, debug=debug)
 
 def get_plugin_attributes(
         self,
         plugin : 'meerschaum._internal.Plugin.Plugin',
         debug : bool = False
-    ) -> Dict[str, Any]:
+    ) -> Optional[Dict[str, Any]]:
+    """
+    Return attributes for a plugin, if it exists.
+    """
     ### ensure plugins table exists
     from meerschaum.connectors.sql.tables import get_tables
     plugins = get_tables(mrsm_instance=self, debug=debug)['plugins']
@@ -163,6 +175,15 @@ def get_plugins(
         debug : bool = False,
         **kw : Any
     ) -> List[str]:
+    """
+    Return a list of all registered plugins.
+
+    :param user_id:
+        If specified, filter plugins by a specific `user_id`.
+
+    :param search_term:
+        If specified, add a `WHERE plugin_name LIKE '{search_term}%'` clause to filter the plugins.
+    """
     ### ensure plugins table exists
     from meerschaum.connectors.sql.tables import get_tables
     plugins = get_tables(mrsm_instance=self, debug=debug)['plugins']
@@ -174,13 +195,6 @@ def get_plugins(
         query = query.where(plugins.c.user_id == user_id)
     if search_term is not None:
         query = query.where(plugins.c.plugin_name.like(search_term + '%'))
-
-    #  q = f"""
-    #  SELECT plugin_name
-    #  FROM plugins
-    #  """ + ("""
-    #  WHERE user_id = %(user_id)s
-    #  """ if user_id is not None else "")
 
     return list(self.read(query, debug=debug)['plugin_name'])
 

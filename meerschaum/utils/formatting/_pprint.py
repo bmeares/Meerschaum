@@ -36,8 +36,8 @@ def pprint(
         try:
             _pprint = pprintpp.pprint
         except Exception as e:
-            import pprint
-            _pprint = pprint.pprint
+            import pprint as _pprint_module
+            _pprint = _pprint_module.pprint
 
     func = (
         _pprint if rich_pprint is None else rich_pprint
@@ -45,7 +45,7 @@ def pprint(
 
     try:
         args_copy = copy.deepcopy(args)
-    except:
+    except Exception as e:
         args_copy = args
         modify = False
     _args = []
@@ -85,4 +85,5 @@ def pprint(
         func(*_args, **func_kw)
     except Exception as e:
         error_msg = e
-    if error_msg is not None: error(error_msg)
+    if error_msg is not None:
+        error(error_msg)

@@ -6,24 +6,30 @@
 Functions to handle debug statements
 """
 
+from __future__ import annotations
+from meerschaum.utils.typing import Union, Optional, List
+
 def dprint(
         msg : str,
         leader : bool = True,
         package: bool = True,
-        color : 'str or list' = None,
-        attrs : list = [],
+        color : Optional[Union[str, List[str]]] = None,
+        attrs : Optional[List[str]] = None,
         **kw
     ) -> None:
     """
     Print a debug message.
     """
+    if attrs is None:
+        attrs = []
     if not isinstance(color, bool):
         try:
             from meerschaum.utils.formatting import CHARSET, ANSI, colored
         except ImportError:
             CHARSET, ANSI, colored = 'ascii', False, None
         from meerschaum.config._paths import CONFIG_DIR_PATH, PERMANENT_PATCH_DIR_PATH
-        from meerschaum.config import _config; cf = _config('formatting')
+        from meerschaum.config import _config
+        cf = _config('formatting')
         _color = color
     else:
         CHARSET, ANSI, colored, _color, cf = 'ascii', False, None, None, None
@@ -44,7 +50,10 @@ def dprint(
         try:
             debug_leader = cf['formatting']['debug'][CHARSET]['icon'] if cf is not None else ''
         except KeyError:
-            print("Failed to load config. Please delete the following directories and restart Meerschaum:")
+            print(
+                "Failed to load config. " +
+                "Please delete the following directories and restart Meerschaum:"
+            )
             for p in [CONFIG_DIR_PATH, PERMANENT_PATCH_DIR_PATH]:
                 print('  - ' + str(p))
             debug_leader = ''

@@ -49,7 +49,8 @@ def python(
 
     ### ensure meerschaum is imported
     #  joined_actions = ['import meerschaum as mrsm;'] + joined_actions
-    if debug: dprint(joined_actions)
+    if debug:
+        dprint(joined_actions)
 
     print_command = 'import sys; print("""'
     ps1 = ">>> "
@@ -63,7 +64,8 @@ def python(
     command = ""
     for a in joined_actions:
         command += a
-        if not a.endswith(';'): command += ';'
+        if not a.endswith(';'):
+            command += ';'
         command += ' '
 
     command += print_command

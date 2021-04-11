@@ -7,10 +7,11 @@ Define a custom Thread class with a callback method
 """
 import threading
 class Thread(threading.Thread):
-    def __init__(self, callback=None, error_callback=None, *args, **kw):
-        """
-        Wrapper for threading.Thread with optional callback and error_callback functions
-        """
+    """
+    Wrapper for threading.Thread with optional callback and error_callback functions
+    """
+
+    def __init__(self, *args, callback=None, error_callback=None, **kw):
         target = kw.pop('target')
         super().__init__(target=self.wrap_target_with_callback, *args, **kw)
         self.callback = callback
@@ -25,10 +26,11 @@ class Thread(threading.Thread):
         try:
             result = self.method(*args, **kw)
             success = True
-        except:
+        except Exception as e:
             success = False
             result = None
 
         cb = self.callback if success else self.error_callback
-        if cb is not None: cb(result)
+        if cb is not None:
+            cb(result)
 

@@ -8,12 +8,12 @@ Functions for editing the configuration file
 
 #  from meerschaum.utils.debug import dprint
 from __future__ import annotations
-from meerschaum.utils.typing import Optional, Any, SuccessTuple, Mapping, Dict, List
 import sys
+from meerschaum.utils.typing import Optional, Any, SuccessTuple, Mapping, Dict, List, Union
 
 def edit_config(
-        keys : List[str] = [],
-        params : Optional[Mapping[str, Any]] = None,
+        keys : Optional[List[str]] = None,
+        params : Optional[Dict[str, Any]] = None,
         debug : bool = False,
         **kw : Any
     ) -> SuccessTuple:
@@ -29,6 +29,9 @@ def edit_config(
     from meerschaum.utils.packages import reload_package
     from meerschaum.utils.misc import edit_file
     from meerschaum.utils.debug import dprint
+
+    if keys is None:
+        keys = []
 
     for k in keys:
         ### If defined in default, create the config file.
@@ -72,7 +75,8 @@ def write_config(
     from meerschaum.utils.misc import filter_keywords
     import json, os, pathlib
     if config_dict is None:
-        from meerschaum.config import _config; cf = _config()
+        from meerschaum.config import _config
+        cf = _config()
         config_dict = cf
 
     default_filetype = _static_config()['config']['default_filetype']
@@ -133,7 +137,7 @@ def write_config(
     return True
 
 def general_write_yaml_config(
-        files : dict = {},
+        files : Optional[Dict[str, pathlib.Path]] = None,
         debug : bool = False
     ):
     """
@@ -147,6 +151,9 @@ def general_write_yaml_config(
     from meerschaum.utils.debug import dprint
     from pathlib import Path
 
+    if files is None:
+        files = {}
+
     for fp, value in files.items():
         config = value
         header = None
@@ -157,22 +164,24 @@ def general_write_yaml_config(
         path.touch(exist_ok=True)
         with open(path, 'w+') as f:
             if header is not None:
-                if debug: dprint(f"Header detected, writing to {path}...")
+                if debug:
+                    dprint(f"Header detected, writing to {path}...")
                 f.write(header)
             if isinstance(config, str):
-                if debug: dprint(f"Config is a string. Writing to {path}...")
+                if debug:
+                    dprint(f"Config is a string. Writing to {path}...")
                 f.write(config)
             elif isinstance(config, dict):
-                if debug: dprint(f"Config is a dict. Writing to {path}...")
-                #  import yaml
+                if debug:
+                    dprint(f"Config is a dict. Writing to {path}...")
                 from meerschaum.utils.yaml import yaml
                 yaml.dump(config, stream=f, sort_keys=False)
 
     return True
 
 def general_edit_config(
-        action : list = [''],
-        files : dict = {},
+        action : Optional[List[str]] = None,
+        files : Optional[Dict[str, Union[str, pathlib.Path]]] = None,
         default : str = None,
         debug : bool = False
     ):
@@ -186,6 +195,10 @@ def general_edit_config(
     from meerschaum.utils.misc import edit_file
     from meerschaum.utils.debug import dprint
 
+    if files is None:
+        files = {}
+    if action is None:
+        action = []
     file_to_edit = files[default]
     if len(action) > 1 and action[1] in files:
         file_to_edit = files[action[1]]

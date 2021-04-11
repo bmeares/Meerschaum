@@ -328,7 +328,8 @@ class Shell(cmd.Cmd):
         mask = prompt
 
         if '{instance}' in self._prompt:
-            if instance is None: instance = self.instance_keys
+            if instance is None:
+                instance = self.instance_keys
             self.instance = instance
             if ANSI:
                 self.instance = colored(
@@ -362,7 +363,8 @@ class Shell(cmd.Cmd):
         for i, c in enumerate(mask):
             if c != '\0':
                 _c = c
-                if ANSI: _c = colored(_c, *get_config('shell', 'ansi', 'prompt', 'color'))
+                if ANSI:
+                    _c = colored(_c, *get_config('shell', 'ansi', 'prompt', 'color'))
                 remainder_prompt[i] = _c
         self.prompt = ''.join(remainder_prompt).replace(
             '{username}', self.username

@@ -70,7 +70,10 @@ def api(
     api_conn = get_connector(type='api', label=api_label)
     
     if mrsm_instance is not None and str(mrsm_instance) == str(api_conn):
-        warn(f"Cannot send Meerschaum instance keys '{mrsm_instance}' to itself. Removing from arguments...")
+        warn(
+            f"Cannot send Meerschaum instance keys '{mrsm_instance}' to itself. " +
+            "Removing from arguments..."
+        )
     elif mrsm_instance is not None:
         kw['mrsm_instance'] = str(mrsm_instance)
 
@@ -131,16 +134,21 @@ def _api_start(
     ### Check if the API instance connector is another API
     instance_connector = parse_instance_keys(mrsm_instance, debug=debug)
     if instance_connector.type == 'api' and instance_connector.protocol != 'https':
-        allow_http_parent = get_config('system', 'api', 'permissions', 'chaining', 'insecure_parent_instance')
+        allow_http_parent = get_config(
+            'system', 'api', 'permissions', 'chaining', 'insecure_parent_instance'
+        )
         if not allow_http_parent:
             return False, (
-                f"Chaining Meerschaum API instances over HTTP is disabled!\n\n" +
-                f"To use '{instance_connector}' as the Meerschaum instance for this API server, please do one of the following:\n\n" +
-                f"  - Ensure that '{instance_connector}' is available over HTTPS, and with `edit config`,\n" +
+                "Chaining Meerschaum API instances over HTTP is disabled!\n\n" +
+                f"To use '{instance_connector}' as the Meerschaum instance for this API server, " +
+                "please do one of the following:\n\n" +
+                f"  - Ensure that '{instance_connector}' is available over HTTPS, " +
+                "and with `edit config`,\n" +
                 f"    change the `protocol` for '{instance_connector}' to 'https'.\n\n" +
-                f"  - Run `edit config system` and search for `permissions`.\n" +
-                f"    Under `api:permissions:chaining`, change the value of `insecure_parent_instance` to `true`,\n" +
-                f"    then restart the API process."
+                "  - Run `edit config system` and search for `permissions`.\n" +
+                "    Under `api:permissions:chaining`, change the value of " +
+                "`insecure_parent_instance` to `true`,\n" +
+                "    then restart the API process."
             )
 
     uvicorn_config.update({
@@ -155,7 +163,8 @@ def _api_start(
     import json, sys
     try:
         if API_UVICORN_CONFIG_PATH.exists():
-            if debug: dprint(f"Removing API config file: ({API_UVICORN_CONFIG_PATH})")
+            if debug:
+                dprint(f"Removing API config file: ({API_UVICORN_CONFIG_PATH})")
             os.remove(API_UVICORN_CONFIG_PATH)
         assert(not API_UVICORN_CONFIG_PATH.exists())
     except Exception as e:

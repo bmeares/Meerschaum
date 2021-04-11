@@ -9,7 +9,7 @@ Return a dictionary (or list) of pipe objects. See documentation below for more 
 from __future__ import annotations
 
 from meerschaum.utils.typing import (
-    Sequence, Optional, Union, Mapping, Any, InstanceConnector, PipesDict
+    Sequence, Optional, Union, Mapping, Any, InstanceConnector, PipesDict, List, Dict, Tuple
 )
 
 def get_pipes(
@@ -23,7 +23,7 @@ def get_pipes(
         wait : bool = False,
         debug : bool = False,
         **kw : Any
-    ) -> Union[PipesDict, Sequence['meerschaum.Pipe']]:
+    ) -> Union[PipesDict, List['meerschaum.Pipe']]:
     """
     Return a dictionary (or list) of pipe objects.
     The pipes dictionary returned from `meerschaum.utils.get_pipes` has the following format:
@@ -155,7 +155,7 @@ def methods(
         method : str,
         connector : 'meerschaum.connectors.Connector',
         **kw : Any
-    ) -> list:
+    ) -> List[Tuple[str, str, str]]:
     """
     Return a list of tuples containing (connector_keys, metric_key, location_key)
     based on the method of choosing keys.
@@ -165,19 +165,28 @@ def methods(
     tables = get_tables(connector)
 
     def _registered(
-            connector_keys : list = [],
-            metric_keys : list = [],
-            location_keys : list = [],
-            params : dict = dict(),
+            connector_keys : Optional[List[str]] = None,
+            metric_keys : Optional[List[str]] = None,
+            location_keys : Optional[List[str]] = None,
+            params : Optional[Dict[str, Any]] = None,
             debug : bool = False,
             **kw
-        ) -> list:
+        ) -> List[Tuple[str, str, str]]:
         """
         Get keys from the pipes table or the API directly.
         Builds query or URL based on provided keys and parameters.
 
         Only works for SQL and API Connectors.
         """
+        if connector_keys is None:
+            connector_keys = []
+        if metric_keys is None:
+            metric_keys = []
+        if location_keys is None:
+            location_keys = []
+        if params is None:
+            params = {}
+
         return connector.fetch_pipes_keys(
             connector_keys = connector_keys,
             metric_keys = metric_keys,
@@ -187,21 +196,34 @@ def methods(
         )
 
     def _explicit(
-            connector_keys : list = [],
-            metric_keys : list = [],
-            location_keys : list = [],
-            params : dict = dict(),
+            connector_keys : Optional[List[str]] = None,
+            metric_keys : Optional[List[str]] = None,
+            location_keys : Optional[List[str]] = None,
+            params : Optional[Dict[str, Any]] = None,
             debug : bool = False,
             **kw
-        ) -> list:
+        ) -> List[Tuple[str, str, str]]:
         """
         Explicitly build Pipes based on provided keys.
         Raises an error if connector_keys or metric_keys is empty,
         and assumes location_keys = [None] if empty
         """
-        if not isinstance(connector_keys, list): connector_keys = [connector_keys]
-        if not isinstance(metric_keys, list): metric_keys = [metric_keys]
-        if not isinstance(location_keys, list): location_keys = [location_keys]
+
+        if connector_keys is None:
+            connector_keys = []
+        if metric_keys is None:
+            metric_keys = []
+        if location_keys is None:
+            location_keys = []
+        if params is None:
+            params = {}
+
+        if not isinstance(connector_keys, list):
+            connector_keys = [connector_keys]
+        if not isinstance(metric_keys, list):
+            metric_keys = [metric_keys]
+        if not isinstance(location_keys, list):
+            location_keys = [location_keys]
 
         missing_keys = []
         if len(connector_keys) == 0:
