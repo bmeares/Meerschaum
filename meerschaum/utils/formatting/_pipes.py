@@ -6,7 +6,8 @@
 Formatting functions for printing pipes
 """
 
-from meerschaum.utils.typing import PipesDict
+from __future__ import annotations
+from meerschaum.utils.typing import PipesDict, Dict
 
 def pprint_pipes(pipes : PipesDict) -> None:
     """
@@ -204,10 +205,10 @@ def pprint_pipes(pipes : PipesDict) -> None:
             )
             conn_trees[conn_keys].add(metric_trees[conn_keys][metric])
             for location, pipe in locations.items():
-                _location_style = (
-                    Text(str(location), style=none_style) if location is None
-                    else Text(location, style=styles['location'])
-                )
+                if location is None:
+                    _location = Text(str(location), style=none_style)
+                else:
+                    _location = Text(location, style=styles['location'])
                 _location = Text(icons['location']) + _location + Text("\n" + str(pipe) + "\n")
                 metric_trees[conn_keys][metric].add(_location)
 
@@ -217,3 +218,46 @@ def pprint_pipes(pipes : PipesDict) -> None:
 
     columns = Columns(cols)
     rich.print(columns)
+
+def pprint_pipe_columns(
+        pipe : meerschaum.Pipe,
+        nopretty : bool = False,
+        debug : bool = False,
+    ) -> None:
+    """
+    Pretty-print a pipe's columns.
+    """
+    import json
+    from meerschaum.utils.warnings import info
+    from meerschaum.utils.formatting import pprint, print_tuple
+    from meerschaum.utils.formatting._shell import make_header
+    from meerschaum.utils.packages import attempt_import, import_rich
+
+    _cols = pipe.columns
+    _cols_types = pipe.get_columns_types(debug=debug)
+
+    def _nopretty_print():
+        print(json.dumps(pipe.__getstate__()))
+        print(json.dumps(_cols))
+        print(json.dumps(_cols_types))
+
+    def _pretty_print():
+        rich = import_rich()
+        rich_table = attempt_import('rich.table')
+
+        info(make_header(f"\nColumns for pipe '{pipe}':"), icon=False)
+        if _cols:
+            pprint(_cols, nopretty=nopretty)
+            print()
+        else:
+            print_tuple((False, f"No registered columns for pipe '{pipe}'."))
+        if _cols_types:
+            print(f"\nTable columns and types:")
+            pprint(_cols_types, nopretty=nopretty)
+        else:
+            print_tuple((False, f"No table columns for pipe '{pipe}'. Does the pipe exist?"))
+
+    if nopretty:
+        _nopretty_print()
+    else:
+        _pretty_print()

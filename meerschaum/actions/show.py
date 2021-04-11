@@ -332,36 +332,11 @@ def _show_columns(
     """
     Show the registered and table columns for pipes.
     """
-    import json
     from meerschaum import get_pipes
-    from meerschaum.utils.formatting import pprint, print_tuple
-    from meerschaum.utils.formatting._shell import make_header
-    from meerschaum.utils.warnings import info
+    from meerschaum.utils.formatting._pipes import pprint_pipe_columns
     pipes = get_pipes(as_list=True, debug=debug, **kw)
     for p in pipes:
-        _cols = p.columns
-        _cols_types = p.get_columns_types(debug=debug)
-        if not nopretty:
-            info(make_header(f"\nColumns for pipe '{p}':"), icon=False)
-        else:
-            print(json.dumps(p.__getstate__()))
-        if _cols:
-            if not nopretty:
-                print(f"\nRegistered columns:")
-            pprint(_cols, nopretty=nopretty)
-            print()
-        elif not nopretty:
-            print_tuple((False, f"No registered columns for pipe '{p}'."))
-        else:
-            print(json.dumps({}))
-        if _cols_types:
-            if not nopretty:
-                print(f"\nTable columns and types:")
-            pprint(_cols_types, nopretty=nopretty)
-        elif not nopretty:
-            print_tuple((False, f"No table columns for pipe '{p}'. Does the pipe exist?"))
-        else:
-            print(json.dumps({}))
+        pprint_pipe_columns(p, nopretty=nopretty, debug=debug)
 
     return True, "Success"
 

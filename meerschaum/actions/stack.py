@@ -33,7 +33,7 @@ def stack(
     #  from meerschaum.utils.packages import reload_package
     from meerschaum.utils.prompt import yes_no
     import meerschaum.config
-    from meerschaum.utils.packages import attempt_import, run_python_package
+    from meerschaum.utils.packages import attempt_import, run_python_package, venv_contains_package
     from meerschaum.config import get_config
     from meerschaum.utils.debug import dprint
     from meerschaum.utils.warnings import warn
@@ -88,12 +88,18 @@ def stack(
     ### prepend settings before the docker-compose action
     settings_list = project_name_list + ansi_list + debug_list
 
-    compose = attempt_import('compose', lazy=False, venv='mrsm')
+    _compose_venv = 'mrsm'
+    compose = attempt_import('compose', lazy=False, venv=_compose_venv)
+    ### If docker-compose is installed globally, don't use the `mrsm` venv.
+    if not venv_contains_package('compose', _compose_venv):
+        _compose_venv = None
     cmd_list = settings_list + compose_command + (
         sysargs[2:] if (len(sysargs) > 2 and not sub_args) else sub_args
     )
     if debug:
         dprint(cmd_list)
-    rc = run_python_package('compose', args=cmd_list, cwd=STACK_COMPOSE_PATH.parent, venv='mrsm')
+    rc = run_python_package(
+        'compose', args=cmd_list, cwd=STACK_COMPOSE_PATH.parent, venv=_compose_venv
+    )
 
     return rc == 0, ("Success" if rc == 0 else f"Failed to execute commands: {cmd_list}")
