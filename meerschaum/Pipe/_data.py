@@ -13,13 +13,44 @@ def get_data(
         self,
         begin : Optional[datetime.datetime] = None,
         end : Optional[datetime.datetime] = None,
-        refresh : bool = False,
         params : Optional[Dict[str, Any]] = None,
+        refresh : bool = False,
         debug : bool = False,
         **kw : Any
     ) -> Optional[pandas.DataFrame]:
     """
-    Get data from the instance connector.
+    Get a pipe's data from the instance connector.
+
+    :param begin:
+        Lower bound datetime to begin searching for data (inclusive).
+        Translates to a `WHERE` clause like `WHERE datetime >= begin`.
+        Defaults to `None`.
+
+    :param end:
+        Upper bound datetime to stop searching for data (inclusive).
+        Translates to a `WHERE` clause like `WHERE datetime <= end`.
+        Defaults to `None`.
+
+    :param params:
+        Filter the retrieved data by a dictionary of parameters.
+        E.g. to retrieve data for only certain values of `id`,
+        the `params` dictionary would look like the following:
+        
+        ```
+        >>> params = {
+        ...   'id' : [1, 2, 3],
+        ... }
+        >>> 
+        ```
+
+    :param refresh:
+        If True, skip local cache and directly query the instance connector.
+        Currently has no effect (until caching features are merged into the stable release).
+        Defaults to `True`.
+
+    :param debug:
+        Verbosity toggle.
+        Defaults to `False`.
     """
     if refresh or True: ### TODO remove `or True`
         self._data = self.instance_connector.get_pipe_data(

@@ -39,6 +39,13 @@ After downloading the archive, move it to your desired location and extract its 
 ### Run the Script
 Inside the extracted folder, there is an executable called `mrsm` (`mrsm.bat` on Windows). Run this script by double-clicking (Windows and MacOS) or via a terminal window. The first time launching may take a bit, so be patient!
 
+### Upgrading Meerschaum Portable
+Oftentimes, Meerschaum Portable is a few versions behind the latest official release. To upgrade to the latest release, run the `upgrade meerschaum` command from within `mrsm`:
+
+```bash
+upgrade meerschaum
+```
+
 ## Resetting Meerschaum Portable
 To return Meerschaum Portable to its "factory" state, delete the folder called `root` inside the extracted directory. The `root` folder contains Meerschaum data and configuration files, so make sure you back up your data before deleting!
 
@@ -47,3 +54,6 @@ On Windows, run the included `uninstall.bat` script to uninstall Meerschaum. On 
 ```bash
 rm -rf mrsm/
 ```
+
+!!! warning "Keep Meerschaum Portable in its own folder."
+    On Windows, the script `uninstall.bat` deletes the parent folder of `mrsm.bat`. Therefore **do not** keep the contents of the `.zip` folder by themselves on your desktop, or `uninstall.bat` will delete your `Desktop` folder!

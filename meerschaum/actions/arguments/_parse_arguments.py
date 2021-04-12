@@ -134,8 +134,10 @@ def parse_synonyms(
     """
     Check for synonyms (e.g. force = True -> yes = True)
     """
-    if args_dict['force']:
+    if args_dict.get('force', None):
         args_dict['yes'] = True
-    if args_dict['async']:
+    if args_dict.get('async', None):
         args_dict['unblock'] = True
+    if args_dict.get('mrsm_instance', None):
+        args_dict['instance'] = args_dict['mrsm_instance']
     return args_dict

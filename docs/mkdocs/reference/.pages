@@ -1,4 +1,6 @@
 title: Reference
 nav:
   - Connectors: connectors.md
+  - Pipes: pipes.md
+  - Plugins: plugins
   - ...

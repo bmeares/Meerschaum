@@ -371,7 +371,7 @@ def get_pipe_data(
         **kw : Any
     ) -> Optional[pandas.DataFrame]:
     """
-    Fetch data from a Pipe.
+    Access a pipe's data from the SQL instance.
 
     :param begin:
         Lower bound for the query (inclusive)

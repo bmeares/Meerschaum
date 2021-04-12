@@ -62,3 +62,10 @@ python -m pip install --upgrade meerschaum
 
 That's it! You've got Meerschaum installed. Continue on for information on [bringing up a stack](starting-the-stack) and [creating your first pipes](bootstrapping-a-pipe).
 
+## Upgrading Meerschaum
+
+If you already have Meerschaum installed, run the following command to upgrade to the latest version:
+
+```bash
+mrsm upgrade meerschaum
+```

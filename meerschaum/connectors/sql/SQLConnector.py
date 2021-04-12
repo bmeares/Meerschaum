@@ -7,15 +7,20 @@ Interface with SQL servers using sqlalchemy.
 """
 
 from __future__ import annotations
-from meerschaum.utils.typing import Optional
+from meerschaum.utils.typing import Optional, Any
 
 from meerschaum.connectors import Connector
 from meerschaum.utils.warnings import error
 
 class SQLConnector(Connector):
     """
-    Create and utilize sqlalchemy engines
+    Connect to SQL databases via `sqlalchemy`.
+
+    SQLConnectors may be used as Meerschaum instance connectors.
+    Read more about connectors and instances at
+    https://meerschaum.io/reference/connectors/
     """
+
     from ._create_engine import flavor_configs, create_engine
     from ._sql import read, value, exec, execute, to_sql
     from ._tools import test_connection
@@ -62,12 +67,42 @@ class SQLConnector(Connector):
     def __init__(
         self,
         label : str = 'main',
-        flavor : str = None,
+        flavor : Optional[str] = None,
         wait : bool = False,
         connect : bool = False,
         debug : bool = False,
-        **kw
+        **kw : Any
     ):
+        """
+        :param label:
+            The identifying label for the connector.
+            E.g. for `sql:main`, 'main' is the label.
+            Defaults to 'main'.
+
+        :param flavor:
+            The database flavor.
+            E.g. 'sqlite', 'postgresql', 'cockroachdb', etc.
+            To see supported flavors, run the `bootstrap connectors` command.
+
+        :param wait:
+            If `True`, block until a database connection has been made.
+            Defaults to `False`.
+
+        :param connect:
+            If `True`, immediately attempt to connect the database and raise
+            a warning if the connection fails.
+            Defaults to `False`.
+
+        :param debug:
+            Verbosity toggle.
+            Defaults to `False`.
+
+        :param kw:
+            All other arguments will be passed to the connector's attributes.
+            Therefore, a connector may be made without being registered,
+            as long enough parameters are supplied to the constructor.
+        """
+
         ### set __dict__ in base class
         super().__init__('sql', label=label, **kw)
         if 'flavor' in self.__dict__ and self.flavor == 'sqlite':
@@ -85,6 +120,13 @@ class SQLConnector(Connector):
         elif 'flavor' not in self.__dict__:
             self.flavor = flavor
 
+        self._debug = debug
+        ### Store the PID and thread at initialization
+        ### so we can dispose of the Pool in child processes or threads.
+        import os, threading
+        self._pid = os.getpid()
+        self._thread_ident = threading.current_thread().ident
+
         ### verify the flavor's requirements are met
         if self.flavor not in self.flavor_configs:
             error(f"Flavor '{self.flavor}' is not supported by Meerschaum SQLConnector")
@@ -93,19 +135,12 @@ class SQLConnector(Connector):
         self.wait = wait
         if self.wait:
             from meerschaum.utils.misc import retry_connect
-            retry_connect(connector=self.db, debug=debug)
+            retry_connect(connector=self, debug=debug)
 
         if connect:
             if not self.test_connection(debug=debug):
                 from meerschaum.utils.warnings import warn
                 warn(f"Failed to connect with connector '{self}'!", stack=False)
-
-        ### Store the PID and thread at initialization
-        ### so we can dispose of the Pool in child processes or threads.
-        import os, threading
-        self._pid = os.getpid()
-        self._thread_ident = threading.current_thread().ident
-        self._debug = debug
 
     @property
     def engine(self):
