@@ -1,0 +1,4 @@
+nav:
+  - "Weather Data Plugin: NOAA": noaa-weather.md
+  - "CSV Files: OpenFEMA": fema-csv.md
+  - ...

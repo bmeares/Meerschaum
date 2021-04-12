@@ -59,7 +59,7 @@ with correct credentials, as well as a network connection and valid permissions.
 """
 
 from __future__ import annotations
-from meerschaum.utils.typing import Optional, Dict, Any
+from meerschaum.utils.typing import Optional, Dict, Any, Union, InstanceConnector
 
 class Pipe:
     """
@@ -111,7 +111,8 @@ class Pipe:
         location_key : Optional[str] = None,
         parameters : Optional[Dict[str, Any]] = None,
         columns : Optional[Dict[str, str]] = None,
-        mrsm_instance : Optional[str] = None,
+        mrsm_instance : Optional[Union[str, InstanceConnector]] = None,
+        instance : Optional[Union[str, InstanceConnector]] = None,
         debug : bool = False
     ):
         """
@@ -139,6 +140,9 @@ class Pipe:
         :param mrsm_instance:
             Connector keys for the Meerschaum instance where the pipe resides.
             Defaults to the preconfigured default instance.
+
+        :param instance:
+            Alias for `mrsm_instance`. If `mrsm_instance` is supplied, this value is ignored.
         """
         if location_key in ('[None]', 'None'):
             location_key = None
@@ -159,13 +163,14 @@ class Pipe:
         ###       A Pipe may be registered without parameters, then edited,
         ###       or a Pipe may be registered with parameters set in-memory first.
         from meerschaum.config import get_config
-        if mrsm_instance is None:
-            mrsm_instance = get_config('meerschaum', 'instance', patch=True)
-        if not isinstance(mrsm_instance, str):
-            self._instance_connector = mrsm_instance
-            self.instance_keys = mrsm_instance.type + ':' + mrsm_instance.label
+        _mrsm_instance = mrsm_instance if mrsm_instance is not None else instance
+        if _mrsm_instance is None:
+            _mrsm_instance = get_config('meerschaum', 'instance', patch=True)
+        if not isinstance(_mrsm_instance, str):
+            self._instance_connector = _mrsm_instance
+            self.instance_keys = str(_mrsm_instance)
         else: ### NOTE: must be SQL or API Connector for this work
-            self.instance_keys = mrsm_instance
+            self.instance_keys = _mrsm_instance
 
     @property
     def meta(self):

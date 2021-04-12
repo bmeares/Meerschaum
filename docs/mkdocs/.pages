@@ -1,6 +1,8 @@
 nav:
   - Home: index.md
   - Get Started: get-started
-  - Plugins: plugins
   - Reference: reference
+  - Tutorials: tutorials
+  - FAQ: faq.md
+  - Blog: blog
   - ...

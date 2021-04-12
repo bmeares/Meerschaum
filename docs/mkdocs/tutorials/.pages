@@ -1,0 +1,5 @@
+nav:
+  - Introduction: index.md
+  - Bootstrapping Pipes: bootstrapping-pipes
+  - Plugin Development: plugin-development
+  - ...

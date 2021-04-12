@@ -4,6 +4,14 @@ This changelog was not introduced until v0.2.12, so many of the critical release
 ## 0.2.x Releases
 Version 0.2 improved greatly on 0.1, with a greater focus on the user experience, plugins, local performance, and a whole lot more. Read the release notes below for some of the highlights.
 
+### v0.2.20
+- **Reformatted `show columns` to tables.**  
+  The action `show columns` now displays tables rather than dictionaries.
+- **SQLConnector bugfixes.**  
+  The `debug` flag was breaking functionality of `SQLConnector` objects, but now connectors are more robust and thread safe.
+- **Added `instance` as an alias to `mrsm_instance` when creating `Pipe` objects.**  
+  For convenience, when building `Pipes`, `instance` may be used in place of `mrsm_instance`.
+
 ### v0.2.19
 - **Added `show columns` action.**  
   The action `show columns` will now display a pipe's columns and data types.

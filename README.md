@@ -24,7 +24,7 @@ For a more thorough setup guide, visit the [Getting Started](https://meerschaum.
 ## TL;DR
 
 ```bash
-pip install -U meerschaum
+pip install -U --user meerschaum
 mrsm stack up -d
 mrsm bootstrap pipes
 ```
@@ -35,7 +35,7 @@ Please visit [meerschaum.io](https://meerschaum.io) for setup, usage, and troubl
 
 ## Plugins
 
-Meerschaum has a straightforward plugin system. For details on installing, using, and writing plugins, check out the [plugins documentation](https://meerschaum.io/plugins/) at [meerschaum.io](https://meerschaum.io).
+Meerschaum has a straightforward plugin system. For details on installing, using, and writing plugins, check out the [plugins documentation](https://meerschaum.io/reference/plugins/types-of-plugins) at [meerschaum.io](https://meerschaum.io).
 
 # Support Meerschaum's Development
 
