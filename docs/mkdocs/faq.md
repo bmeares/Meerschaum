@@ -18,7 +18,10 @@ Note that disabling ANSI may not completely elimate ANSI characters.
 ## Can I use Meerschaum in my scripts?
 Yes, although some commands like `bootstrap` and `edit` are interactive and not safe for scripting, most commands are scriptable.
 
-When executing Meerschaum actions in a script, it's a good idea to add `--nopretty` and `--noask` flags, as well as `--yes` or `--force` to agree to confirmation dialogues.
+When executing Meerschaum actions in a script, it's a good idea to add `--nopretty` and `--noask` flags, or `--yes` or `--force` to agree to confirmation dialogues.
+
+The flag `--noask` will choose the default values for questions (e.g. skipping deleting to prevent data loss) and `--yes` of `--force` will choose `yes` to agree to all dialogues.
+
 The `--nopretty` flag may not have 100% coverage, but in cases like `show pipes` or `show columns`, it will instead print JSON representations of the pipes and data (separated by newlines) rather than formatting them.
 
 If you are planning on integrating Meerschaum into your Python scripts, you can access actions directly via the `meerschaum.actions.actions` dictionary. Please consult [the Python package documentation](https://docs.meerschaumio) for more information. Also, you might want to consider making your script into a [Meerschaum action by writing an action plugin](/reference/plugins/types-of-plugins/#action-plugins).
