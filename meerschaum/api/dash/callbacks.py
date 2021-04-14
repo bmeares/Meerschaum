@@ -7,16 +7,70 @@ Define Dash callback functions.
 """
 
 from __future__ import annotations
-from dash.dependencies import Input, Output
+import shlex
+from dash.dependencies import Input, Output, State
 from meerschaum.utils.typing import List, Optional
 from meerschaum.api import get_connector
 from meerschaum.api.dash import (
-    dash_app, debug, pipes, _get_pipes, web_instance_keys, possible_instances
+    dash_app, debug, pipes, _get_pipes, web_instance_keys, possible_instances, get_web_connector
 )
 from meerschaum.utils.debug import dprint
 from meerschaum.utils.packages import attempt_import
 from meerschaum.utils.misc import string_to_dict, get_connector_labels
 html = attempt_import('dash_html_components', warn=False)
+
+keys_state = (
+    State('connector-keys-dropdown', 'value'),
+    State('metric-keys-dropdown', 'value'),
+    State('location-keys-dropdown', 'value'),
+    State('connector-keys-input', 'value'),
+    State('metric-keys-input', 'value'),
+    State('location-keys-input', 'value'),
+    State('pipes-filter-tabs', 'active_tab'),
+)
+
+def pipes_from_state(
+        connector_keys_dropdown_value,
+        metric_keys_dropdown_value,
+        location_keys_dropdown_value,
+        connector_keys_input_value,
+        metric_keys_input_value,
+        location_keys_input_value,
+        active_filter_tab,
+        **kw
+    ):
+    """
+    Return a pipes dictionary or list from get_pipes.
+    """
+    _filters = {
+        'ck' : locals()[f'connector_keys_{active_filter_tab}_value'],
+        'mk' : locals()[f'metric_keys_{active_filter_tab}_value'],
+        'lk' : locals()[f'location_keys_{active_filter_tab}_value'],
+    }
+
+    for k in _filters:
+        _filters[k] = [] if _filters[k] is None else _filters[k]
+        if not isinstance(_filters[k], list):
+            try:
+                _filters[k] = shlex.split(_filters[k])
+            except Exception as e:
+                print(e)
+                _filters[k] = []
+
+    return _get_pipes(_filters['ck'], _filters['mk'], _filters['lk'], **kw)
+
+@dash_app.callback(
+    Output('content-div-right', 'children'),
+    Input('show-pipes-button', 'n_clicks'),
+    *keys_state,
+)
+def show_pipes(n_clicks : Optional[int], *keys):
+    """
+    Display the currently selected pipes.
+    """
+    if not n_clicks:
+        return []
+    return [str(p) for p in pipes_from_state(*keys, as_list=True)]
 
 @dash_app.callback(
     Output(component_id='instance-select', component_property='value'),

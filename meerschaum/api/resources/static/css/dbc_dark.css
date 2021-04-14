@@ -46,6 +46,7 @@
 .form-control {
   background-color: var(--dark) !important;
   color: white;
+  border: 1px solid grey !important;
   /* background-color: var(--dark) !important; */
 }
 .form-control:focus {

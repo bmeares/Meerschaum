@@ -35,6 +35,11 @@ input_group_sizes = {
     'params' : 'sm',
 }
 
+show_pipes_button = dbc.Button(
+    "Show Pipes", id='show-pipes-button',
+    color='secondary', className='mr-1', style={'float' : 'right'}
+)
+
 dropdown_tab_content = dbc.Card(
     dbc.CardBody(
         [

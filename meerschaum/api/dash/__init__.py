@@ -29,10 +29,17 @@ dash_app = dash.Dash(
     external_stylesheets = stylesheets,
 )
 
-from meerschaum.api.dash.keys import keys_lists_content, text_tab_content, dropdown_tab_content
+from meerschaum.api.dash.keys import (
+    keys_lists_content, text_tab_content, dropdown_tab_content, show_pipes_button
+)
 
 web_instance_keys : Optional[str] = str(get_connector())
 possible_instances = get_connector_labels('sql', 'api')
+def get_web_connector():
+    """
+    Parse the web instance keys into a connector.
+    """
+    return parse_instance_keys(web_instance_keys, debug=debug)
 
 dash_app.layout = html.Div(
     id = 'main-div',
@@ -71,17 +78,38 @@ dash_app.layout = html.Div(
             ],
             color = 'dark',
             dark = True
-        ),
+        ), ### end nav-bar
         dbc.Row(
-            dbc.Col(
-                dbc.Tabs(
-                    [
-                        dbc.Tab(dropdown_tab_content, label='Filter'),
-                        dbc.Tab(text_tab_content, label='Text'),
-                    ]
+            id = 'content-row',
+            children = [
+                dbc.Col(
+                    children = [
+                        dbc.Tabs(
+                            id = 'pipes-filter-tabs',
+                            children = [
+                                dbc.Tab(
+                                    dropdown_tab_content, label='Filter',
+                                    id='pipes-filter-dropdown-tab',
+                                    tab_id='dropdown',
+                                ),
+                                dbc.Tab(
+                                    text_tab_content, label='Text',
+                                    id='pipes-filter-input-tab',
+                                    tab_id='input',
+                                ),
+                            ]
+                        ),
+                        html.Br(),
+                        show_pipes_button,
+                    ],
+                    id = 'content-col-left',
+                    width = {'size' : 6},
                 ),
-                width = {'size' : 6},
-            ),
+                dbc.Col(
+                    html.Div(id='content-div-right'),
+                    id = 'content-col-right',
+                ),
+            ],
             style = {'max-width' : '100%', 'padding' : '15px'},
         ),
         #  dcc.DatePickerRange(
@@ -91,12 +119,6 @@ dash_app.layout = html.Div(
 )
 
 import meerschaum.api.dash.callbacks
-def get_web_connector():
-    """
-    Parse the web instance keys into a connector.
-    """
-    return parse_instance_keys(web_instance_keys, debug=debug)
-
 
 fastapi_middleware_wsgi = attempt_import('fastapi.middleware.wsgi')
 app.mount('/dash', fastapi_middleware_wsgi.WSGIMiddleware(dash_app.server))
