@@ -9,7 +9,7 @@ Functions for managing packages and virtual environments reside here.
 from __future__ import annotations
 from meerschaum.utils.typing import Any, List, SuccessTuple, Optional, Union
 
-import importlib
+import os, importlib
 _import_module = importlib.import_module
 from meerschaum.utils.packages._packages import packages, all_packages
 from meerschaum.utils.warnings import warn, error

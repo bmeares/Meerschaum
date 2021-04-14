@@ -13,7 +13,10 @@ packages dictionary is structured in the following schema:
     }
 """
 
-packages = {
+from __future__ import annotations
+from meerschaum.utils.typing import Dict
+
+packages : Dict[str, Dict[str, str]] = {
     'required' : {
         #  'setuptools' : 'setuptools',
         'wheel' : 'wheel>=0.34.2',
@@ -105,13 +108,15 @@ packages['sql'] = {
 }
 packages['sql'].update(packages['drivers'])
 packages['api'] = {
-    'uvicorn'       : 'uvicorn>=0.12.2',
-    'websockets'    : 'websockets>=8.1',
-    'fastapi'       : 'fastapi>=0.61.2',
-    'jinja2'        : 'jinja2>=2.11.2',
-    'passlib'       : 'passlib>=1.7.4',
-    'fastapi_login' : 'fastapi-login>=1.5.3',
-    'multipart'     : 'python-multipart>=0.0.5',
+    'uvicorn'                   : 'uvicorn>=0.12.2',
+    'websockets'                : 'websockets>=8.1',
+    'fastapi'                   : 'fastapi>=0.61.2',
+    'jinja2'                    : 'jinja2>=2.11.2',
+    'passlib'                   : 'passlib>=1.7.4',
+    'fastapi_login'             : 'fastapi-login>=1.5.3',
+    'multipart'                 : 'python-multipart>=0.0.5',
+    'dash'                      : 'dash>=1.20.0',
+    'dash_bootstrap_components' : 'dash-bootstrap-components>=0.12.0',
 }
 packages['api'].update(packages['sql'])
 packages['api'].update(packages['_required'])

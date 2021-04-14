@@ -16,7 +16,7 @@ from meerschaum.api import (
     get_connector,
     pipes,
     get_pipe,
-    get_pipes_sql,
+    _get_pipes,
     manager,
     debug
 )
@@ -111,14 +111,14 @@ async def get_pipes(
     Get all registered Pipes with metadata, excluding parameters.
     """
     from meerschaum.utils.misc import replace_pipes_in_dict
-    kw = {'debug' : debug}
+    kw = {'debug' : debug, 'mrsm_instance' : get_connector()}
     if connector_keys != "":
         kw['connector_keys'] = connector_keys
     if metric_keys != "":
         kw['metric_keys'] = metric_keys
     if location_keys != "":
         kw['location_keys'] = location_keys
-    return replace_pipes_in_dict(get_pipes_sql(**kw), str)
+    return replace_pipes_in_dict(_get_pipes(**kw), str)
 
 @app.get(pipes_endpoint + '/{connector_keys}')
 async def get_pipes_by_connector(

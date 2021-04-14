@@ -1,0 +1,38 @@
+a {
+  color: var(--yellow);
+}
+.btn-link {
+  color: var(--light);
+}
+/* .dash-dropdown { */
+  /* color: #52575c; */
+  /* background-color: #222; */
+/* } */
+/* .dash-dropdown .Select-control { */
+  /* height: calc(1.5em + 0.75rem + 2px); */
+  /* font-size: 0.9375rem; */
+  /* font-weight: 400; */
+  /* line-height: 1.5; */
+  /* color: #fff; */
+  /* background-color: #222; */
+  /* background-clip: padding-box; */
+  /* border: 1px solid #444; */
+  /* border-radius: 0.25rem; */
+  /* transition: border-color 0.15s ease-in-out, box-shadow 0.15s ease-in-out; */
+/* } */
+
+/* @media (prefers-reduced-motion: reduce) { */
+  /* .dash-dropdown .Select-control { */
+    /* transition: none; */
+  /* } */
+/* } */
+
+/* .dash-dropdown .Select-control:hover { */
+  /* box-shadow: none; */
+/* } */
+
+/* .dash-dropdown .is-open > .Select-control { */
+  /* border-bottom-right-radius: 0; */
+  /* border-bottom-left-radius: 0; */
+  /* background-color: #222; */
+/* } */
