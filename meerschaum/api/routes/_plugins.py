@@ -16,7 +16,6 @@ from meerschaum.api import (
     get_connector,
     pipes,
     get_pipe,
-    get_pipes_sql,
     manager,
     debug,
 )

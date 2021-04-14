@@ -14,7 +14,7 @@ from meerschaum.utils.typing import (
 from meerschaum.utils.packages import attempt_import
 from meerschaum.api import (
     fastapi, app, endpoints, get_connector, pipes, get_pipe,
-    get_pipes_sql, manager, debug, check_allow_chaining, DISALLOW_CHAINING_MESSAGE
+    manager, debug, check_allow_chaining, DISALLOW_CHAINING_MESSAGE
 )
 from meerschaum.api.tables import get_tables
 from starlette.responses import Response, JSONResponse

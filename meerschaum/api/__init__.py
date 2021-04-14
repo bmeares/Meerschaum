@@ -5,13 +5,16 @@
 """
 Meerschaum API backend. Start an API instance with `api start`.
 """
+from __future__ import annotations
+import pathlib, os
+from meerschaum.utils.typing import Dict, Any, Optional
 
-__version__ = "0.0.14"
+__version__ = "0.1.0"
+
 from meerschaum.config import get_config
 from meerschaum.config.static import _static_config
 from meerschaum.utils.packages import attempt_import
-from meerschaum.utils.get_pipes import get_pipes as get_pipes_sql
-import pathlib, os
+from meerschaum.utils.get_pipes import get_pipes as _get_pipes
 from meerschaum.config._paths import API_UVICORN_CONFIG_PATH
 endpoints = _static_config()['api']['endpoints']
 aiofiles = attempt_import('aiofiles', lazy=False)
@@ -41,7 +44,10 @@ SECRET = generate_secret_key()
 manager = LoginManager(SECRET, tokenUrl=endpoints['login'])
 
 uvicorn_config = None
-def get_uvicorn_config() -> dict:
+def get_uvicorn_config() -> Dict[str, Any]:
+    """
+    Read the Uvicorn configuration JSON and return a dictionary.
+    """
     global uvicorn_config
     import json
     if uvicorn_config is None:
@@ -62,15 +68,15 @@ def get_uvicorn_config() -> dict:
 debug = get_uvicorn_config().get('debug', False) if API_UVICORN_CONFIG_PATH.exists() else False
 
 connector = None
-def get_connector(instance_keys : str = None):
+def get_connector(instance_keys : Optional[str] = None):
     """
-    Create the connector
+    Create the instance connector.
     """
     from meerschaum.utils.debug import dprint
     global connector
     if connector is None:
         if instance_keys is None:
-            instance_keys = get_uvicorn_config()['mrsm_instance']
+            instance_keys = get_uvicorn_config().get('mrsm_instance', None)
 
         from meerschaum.connectors.parse import parse_instance_keys
         connector = parse_instance_keys(instance_keys, debug=debug)
@@ -96,7 +102,7 @@ def pipes(refresh=False):
     """
     global _pipes
     if _pipes is None or refresh:
-        _pipes = get_pipes_sql(mrsm_instance=get_connector())
+        _pipes = _get_pipes(mrsm_instance=get_connector())
     return _pipes
 
 def get_pipe(connector_keys, metric_key, location_key, refresh=False):
@@ -119,12 +125,10 @@ app = fastapi.FastAPI(title='Meerschaum API')
     fastapi_responses,
     fastapi_templating,
     fastapi_staticfiles,
-    fastapi_middleware_wsgi
 ) = attempt_import(
     'fastapi.responses',
     'fastapi.templating',
     'fastapi.staticfiles',
-    'fastapi.middleware.wsgi'
 )
 jinja2 = attempt_import('jinja2')
 
@@ -133,9 +137,11 @@ Request = fastapi.Request
 
 from meerschaum.config._paths import API_RESOURCES_PATH, API_STATIC_PATH, API_TEMPLATES_PATH
 app.mount('/static', fastapi_staticfiles.StaticFiles(directory=str(API_STATIC_PATH)), name='static')
+#  from meerschaum.api.dash import dash_app
 templates = fastapi_templating.Jinja2Templates(directory=str(API_TEMPLATES_PATH))
 
 
 ### import WebAPI routes
 import meerschaum.api.routes as routes
 import meerschaum.api._events
+import meerschaum.api.dash

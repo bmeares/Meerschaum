@@ -1,0 +1,235 @@
+/*
+ *  This stylesheet defines the className dbc_dark which helps improve
+ *  the design of dark themed Bootstrap apps
+ *
+ */
+
+
+
+/*--------------------------------------------
+ * Note: DataTable
+
+ *     Current limitation - it's not possible to use style data conditional to
+ *     change the color of the text or background when using this className.
+ *     A work around is to use the CSS parameter in the table instead of the
+ *     dbc_light or dbc_dark class names.
+ *
+ *     The dbc_light and dbc_darklooks best with the following included in the
+ *     dataTable definition:
+ *
+ *          style_data_conditional=[
+ *              {
+ *                   "if": {"state": "active"},
+ *                   "border": ".5px solid ",
+ *                   "fontWeight" : 1000,
+ *               },
+ *               {"if": {"state": "selected"},
+ *                "fontWeight": 700,
+ *                },
+ *           ],
+ */
+
+
+
+/* ----------------------------------
+ *  Dropdown
+ *     Black background for a dark theme
+ */
+
+/* input box */
+.dbc_dark .Select-control {
+    /* background-color: black !important; */
+    background-color: var(--dark) !important;
+    color: white;
+}
+
+.form-control {
+  background-color: var(--dark) !important;
+  color: white;
+  /* background-color: var(--dark) !important; */
+}
+.form-control:focus {
+  background-color: var(--dark) !important;
+  color: white;
+}
+
+
+/* changes the text color of input box */
+.dbc_dark .Select-value-label {
+    color: white !important;
+}
+
+.dbc_dark .Select--single > .Select-control .Select-value, .Select-placeholder {
+    border: 1px solid grey !important;
+    border-radius: 4px !important;
+
+}
+
+/* dropdown menu options */
+.dbc_dark .VirtualizedSelectOption {
+    /* background-color: black; */
+    background-color: var(--dark);
+    color: white;
+ }
+
+/* dropdown menu hover effect */
+.dbc_dark .VirtualizedSelectFocusedOption {
+    /* background-color: black; */
+    background-color: var(--dark);
+    opacity: .7;
+}
+
+/* border on focus - default is blue
+ * shadow box around input box.  default is blue
+ */
+.dbc_dark .is-focused:not(.is-open) > .Select-control {
+  border-color: var(--primary) !important;
+ /* box-shadow: 0 0 0 0.2rem rgba(223, 105, 26, 0.25); /* lighter primary */
+  box-shadow: none !important;
+}
+
+
+/* primary  this colors the input box text and x  of multi */
+.dbc_dark .Select--multi .Select-value {
+  color: white;
+}
+
+/* ---------------------------------------
+ * textarea
+ */
+.dbc_dark textarea {
+    background-color : var(--dark) !important;
+    color: var(--light) !important;
+}
+
+/* ----------------------------------------
+ *  input boxes including editable fields in DataTable and the pagination buttons
+ */
+.dbc_dark input input.current-page {
+    background-color : var(--dark) !important;
+    color: var(--light) !important;
+}
+
+/* Use this classname for dcc.Input */
+.dbc_dark_input input {
+    background-color : var(--dark) !important;
+    color: var(--light) !important;
+}
+
+/* ---------------------------------------
+ * Datatable
+ */
+
+/* fixes margins so data isn't cut off at table edges */
+.dbc_dark .dash-table-container .row {
+    display : block !important;
+    margin: 0;
+}
+
+/* fixes  when the table dropdown doesn't drop down */
+/* NOTE: The dot before dbc_dark but I added it back in.. Did I break something? */
+.dbc_dark .Select-menu-outer {
+    display: block !important;
+}
+
+/*
+ *  sort arrow and delete icons in the DataTable header - changes pink color
+ *  these icons appear when the table is sortable and/or columns are deletable
+ */
+.dbc_dark .dash-table-container .dash-spreadsheet-container .dash-spreadsheet-inner table {
+    --accent: var(--primary) !important;
+    --hover: none !important;
+    --text-color: none !important;
+}
+
+/* pagination buttons - this removes the default pink hover */
+.dbc_dark .last-page:hover, .previous-page:hover, .first-page:hover, .next-page:hover{
+    color: var(--primary) !important;
+}
+
+/* table body */
+.dbc_dark .dash-spreadsheet td {
+    font-family:  var(--font-family-sans-serif);
+    background-color: var(--dark) !important;
+    color: var(--light) !important;
+    --border: var(--gray);
+    --border-width: .5px;
+}
+
+/*  table header */
+.dbc_dark .dash-spreadsheet .dash-header {
+    font-family:  var(--font-family-sans-serif);
+    background-color: var(--dark) !important;
+    opacity: 0.9;
+    color: var(--light) !important;
+    --accent: var(--primary) !important;
+    --border: var(--gray);
+}
+
+/* filter row in the header */
+.dbc_dark .dash-spreadsheet .dash-filter {
+    font-family:  var(--font-family-sans-serif);
+    background-color: var(--dark) !important;
+    color: var(--light) !important;
+    --border: var(--gray);
+}
+
+/* tooltips - makes text readable in dark themes */
+.dbc_dark .dash-table-tooltip {
+    color:black
+}
+
+
+/* row hover */
+.dbc_dark.dbc_row_hover .dash-spreadsheet td.dash-cell {
+    border-color: lightgrey !important;
+ }
+.dbc_dark.dbc_row_hover .dash-spreadsheet  tr:hover td.dash-cell {
+    border-color: lightgrey !important;
+    border-width: 1.5px !important;
+    background-color: var(--light) !important;
+    color: var(--dark) !important;
+}
+
+
+/*------------------------------------
+ * Sliders - makes the slider the "primary color"
+ */
+
+.dbc_dark .rc-slider-handle {
+  border: 0;
+  background-color: var(--primary)
+}
+
+.dbc_dark .rc-slider-rail {
+   background-color: #ededed;  /* grey */
+}
+
+.dbc_dark .rc-slider-track {
+  background-color: var(--primary)
+}
+
+.dbc_dark .rc-slider-dot {
+  border: 0;
+  background-color: #ededed; /* grey */
+}
+
+.dbc_dark .rc-slider-dot.rc-slider-dot-active {
+  background-color: var(--primary)
+}
+
+/* label color */
+.dbc_dark .rc-slider-mark-text {
+  color: grey
+}
+
+/* Makes the active label color different than default label color */
+.dbc_dark .rc-slider-mark-text.rc-slider-mark-text-active {
+  color: white
+}
+
+/* ADDED BELOW */
+.dbc_dark .custom-select {
+  background-color : var(--secondary) !important;
+  color: white;
+}

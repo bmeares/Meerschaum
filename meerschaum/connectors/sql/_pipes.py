@@ -128,7 +128,7 @@ def fetch_pipes_keys(
         connector_keys : Optional[List[str]] = None,
         metric_keys : Optional[List[str]] = None,
         location_keys : Optional[List[str]] = None,
-        params : Mapping[str, Any] = {},
+        params : Optional[Dict[str, Any]] = None,
         debug : bool = False
     ) -> Optional[List[Tuple[str, str, Optional[str]]]]:
     """
@@ -161,6 +161,15 @@ def fetch_pipes_keys(
         metric_keys = []
     if location_keys is None:
         location_keys = []
+    else:
+        location_keys = [
+            (lk if lk not in ('[None]', 'None', 'null') else None)
+                for lk in location_keys
+        ]
+
+
+    if params is None:
+        params = {}
 
     ### Add three primary keys to params dictionary
     ###   (separated for convenience of arguments).
@@ -209,8 +218,7 @@ def fetch_pipes_keys(
         if debug:
             dprint(q)
         rows = self.engine.execute(q).fetchall()
-        keys = [(r['connector_keys'], r['metric_key'], r['location_key']) for r in rows]
-        return keys
+        return [(row['connector_keys'], row['metric_key'], row['location_key']) for row in rows]
     except Exception as e:
         error(str(e))
 
