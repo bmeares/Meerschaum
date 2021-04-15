@@ -147,10 +147,11 @@ def _show_pipes(
     Print a stylized tree of available Meerschaum pipes.
     Respects global ANSI and UNICODE settings.
     """
+    import json
     from meerschaum import get_pipes
     from meerschaum.utils.misc import flatten_pipes_dict
-    pipes = get_pipes(debug=debug, **kw)
     from meerschaum.utils.formatting import ANSI, pprint_pipes
+    pipes = get_pipes(debug=debug, **kw)
 
     if len(pipes) == 0:
         return False, "No pipes to show."
@@ -163,7 +164,7 @@ def _show_pipes(
     else:
         pipes_list = flatten_pipes_dict(pipes)
         for p in pipes_list:
-            print(p)
+            print(json.dumps(p.__getstate__()))
 
     return (True, "Success")
 

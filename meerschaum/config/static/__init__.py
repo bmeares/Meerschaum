@@ -50,6 +50,15 @@ def _static_config():
                 'urls' : {
                     'get-pip.py' : 'https://bootstrap.pypa.io/get-pip.py',
                 },
+                'success' : {
+                    'ignore' : (
+                        'Success',
+                        'success'
+                        'Succeeded',
+                        '',
+                        None,
+                    ),
+                },
             },
             'connectors' : {
                 'default_label' : 'main',

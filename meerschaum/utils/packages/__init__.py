@@ -338,6 +338,7 @@ def run_python_package(
     import sys, os, platform
     from subprocess import call
     from meerschaum.config._paths import VIRTENV_RESOURCES_PATH
+    from meerschaum.utils.process import run_as_fg_process
     if args is None:
         args = []
     old_cwd = os.getcwd()
@@ -355,7 +356,7 @@ def run_python_package(
     if debug:
         print(command, file=sys.stderr)
     try:
-        rc = call(command)
+        rc = run_as_fg_process(command)
     except KeyboardInterrupt:
         rc = 1
     os.chdir(old_cwd)

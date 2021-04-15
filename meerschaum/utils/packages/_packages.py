@@ -117,6 +117,8 @@ packages['api'] = {
     'multipart'                 : 'python-multipart>=0.0.5',
     'dash'                      : 'dash>=1.20.0',
     'dash_bootstrap_components' : 'dash-bootstrap-components>=0.12.0',
+    'ansi2html'                 : 'ansi2html>=1.6.0',
+    #  'capturer'                  : 'capturer>=3.0; platform_system != "Windows"',
 }
 packages['api'].update(packages['sql'])
 packages['api'].update(packages['_required'])

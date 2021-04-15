@@ -7,16 +7,23 @@ Define Dash callback functions.
 """
 
 from __future__ import annotations
-import shlex
 from dash.dependencies import Input, Output, State
 from meerschaum.utils.typing import List, Optional
-from meerschaum.api import get_connector
+from meerschaum.api import get_connector as get_api_connector
 from meerschaum.api.dash import (
-    dash_app, debug, pipes, _get_pipes, web_instance_keys, possible_instances, get_web_connector
+    dash_app, debug, pipes, _get_pipes, web_state, get_web_connector
 )
+from meerschaum.connectors.parse import parse_instance_keys
+from meerschaum.api.dash.pipes import get_pipes_cards
+from meerschaum.api.dash.components import alert_from_success_tuple
+from meerschaum.api.dash.actions import execute_action
 from meerschaum.utils.debug import dprint
 from meerschaum.utils.packages import attempt_import
 from meerschaum.utils.misc import string_to_dict, get_connector_labels
+from meerschaum.actions import get_subactions, actions
+from meerschaum.actions.arguments._parser import get_arguments_triggers, parser
+dash = attempt_import('dash', lazy=False)
+dbc = attempt_import('dash_bootstrap_components', lazy=False)
 html = attempt_import('dash_html_components', warn=False)
 
 keys_state = (
@@ -26,68 +33,111 @@ keys_state = (
     State('connector-keys-input', 'value'),
     State('metric-keys-input', 'value'),
     State('location-keys-input', 'value'),
+    State('params-textarea', 'value'),
     State('pipes-filter-tabs', 'active_tab'),
+    State('action-dropdown', 'value'),
+    State('subaction-dropdown', 'value'),
+    State('flags-dropdown', 'value'),
+    State('instance-select', 'value'),
 )
 
-def pipes_from_state(
-        connector_keys_dropdown_value,
-        metric_keys_dropdown_value,
-        location_keys_dropdown_value,
-        connector_keys_input_value,
-        metric_keys_input_value,
-        location_keys_input_value,
-        active_filter_tab,
-        **kw
-    ):
-    """
-    Return a pipes dictionary or list from get_pipes.
-    """
-    _filters = {
-        'ck' : locals()[f'connector_keys_{active_filter_tab}_value'],
-        'mk' : locals()[f'metric_keys_{active_filter_tab}_value'],
-        'lk' : locals()[f'location_keys_{active_filter_tab}_value'],
-    }
+omit_flags = {
+    #  'help',
+    'loop',
+    #  'yes',
+    #  'noask',
+    #  'force',
+    'gui',
+    #  'version',
+    'shell',
+    'use_bash',
+}
+#  included_flags = {
+    #  ''
+#  }
+omit_actions = {
+    'api',
+    'sh',
+    'os',
+    'bootstrap',
+    'edit',
+    'sql',
+    'stack',
+    'python',
+    'clear',
+}
 
-    for k in _filters:
-        _filters[k] = [] if _filters[k] is None else _filters[k]
-        if not isinstance(_filters[k], list):
-            try:
-                _filters[k] = shlex.split(_filters[k])
-            except Exception as e:
-                print(e)
-                _filters[k] = []
 
-    return _get_pipes(_filters['ck'], _filters['mk'], _filters['lk'], **kw)
 
 @dash_app.callback(
     Output('content-div-right', 'children'),
+    Output('success-alert-div', 'children'),
+    Input('go-button', 'n_clicks'),
     Input('show-pipes-button', 'n_clicks'),
-    *keys_state,
+    *keys_state
 )
-def show_pipes(n_clicks : Optional[int], *keys):
+def update_content(*args):
     """
-    Display the currently selected pipes.
+    Determine which trigger is seeking to update the content div,
+    and execute the appropriate function.
     """
-    if not n_clicks:
-        return []
-    return [str(p) for p in pipes_from_state(*keys, as_list=True)]
+    ctx = dash.callback_context
+    if not ctx.triggered:
+        return [], []
+
+    ### NOTE: functions MUST return a list of content and a list of alerts
+    triggers = {
+        'go-button' : execute_action,
+        'show-pipes-button' : get_pipes_cards,
+    }
+
+    trigger = ctx.triggered[0]['prop_id'].split('.')[0]
+    return triggers[trigger](ctx.states)
 
 @dash_app.callback(
-    Output(component_id='instance-select', component_property='value'),
-    Output(component_id='instance-select', component_property='options'),
-    Input(component_id='instance-select', component_property='value'),
+    Output('action-dropdown', 'value'),
+    Output('subaction-dropdown', 'value'),
+    Output('action-dropdown', 'options'),
+    Output('subaction-dropdown', 'options'),
+    Output('flags-dropdown', 'options'),
+    Output('subaction-dropdown-div', 'hidden'),
+    Input('action-dropdown', 'value'),
+    Input('subaction-dropdown', 'value'),
 )
-def update_instance(instance_keys : Optional[List[str]]):
+def update_actions(action : str, subaction : str):
     """
-    Update the current instance connector.
+    Update the subactions dropdown to reflect options for the primary action.
     """
-    global web_instance_keys, possible_instances
-    options = [{'label' : i, 'value' : i} for i in possible_instances]
-    if not instance_keys:
-        return web_instance_keys, options
-    web_instance_keys = instance_keys
-    possible_instances = get_connector_labels('sql', 'api')
-    return web_instance_keys, options
+    if not action:
+        action, subaction = 'show', 'pipes'
+        trigger = None
+    _actions = sorted([a for a in actions if a not in omit_actions])
+    _subactions = sorted(get_subactions(action).keys())
+    if subaction is None:
+        subaction = _subactions[0] if _subactions else ''
+
+    flags_options = []
+    for a in parser._actions:
+        if a.nargs != 0 or a.dest in omit_flags:
+            continue
+        _op = {'value' : a.dest, 'title' : a.help}
+        for _trigger in a.option_strings:
+            if _trigger.startswith('--'):
+                _op['label'] = _trigger
+                break
+        if not _op.get('label', None):
+            _op['label'] = _op['value']
+        flags_options.append(_op)
+    flags_options = sorted(flags_options, key=lambda k: k['label'])
+
+    return (
+        action,
+        subaction,
+        [{'label' : a, 'value' : a} for a in _actions],
+        [{'label' : sa, 'value' : sa} for sa in _subactions],
+        flags_options,
+        len(_subactions) == 0,
+    )
 
 @dash_app.callback(
     Output(component_id='connector-keys-dropdown', component_property='options'),
@@ -96,18 +146,42 @@ def update_instance(instance_keys : Optional[List[str]]):
     Output(component_id='metric-keys-list', component_property='children'),
     Output(component_id='location-keys-dropdown', component_property='options'),
     Output(component_id='location-keys-list', component_property='children'),
+    Output(component_id='instance-select', component_property='value'),
+    Output(component_id='instance-select', component_property='options'),
+    Output(component_id='instance-alert-div', component_property='children'),
     Input(component_id='connector-keys-dropdown', component_property='value'),
     Input(component_id='metric-keys-dropdown', component_property='value'),
     Input(component_id='location-keys-dropdown', component_property='value'),
+    Input(component_id='instance-select', component_property='value'),
+    *keys_state
 )
 def update_keys_options(
         connector_keys : Optional[List[str]],
         metric_keys : Optional[List[str]],
         location_keys : Optional[List[str]],
+        instance_keys : Optional[str],
+        *keys
     ):
     """
     Update the keys dropdown menus' options.
     """
+    ctx = dash.callback_context
+
+    ### Update the instance first.
+    global web_state
+    if not instance_keys:
+        instance_keys = web_state['web_instance_keys']
+    instance_alerts = []
+    try:
+        parse_instance_keys(instance_keys)
+    except Exception as e:
+        instance_alerts += [alert_from_success_tuple((False, str(e)))]
+    else:
+        web_state['web_instance_keys'] = instance_keys
+    web_state['possible_instance_keys'] = get_connector_labels('sql', 'api')
+    instance_options = [{'label' : i, 'value' : i} for i in web_state['possible_instance_keys']]
+
+    ### Update the keys filters.
     if connector_keys is None:
         connector_keys = []
     if metric_keys is None:
@@ -131,11 +205,15 @@ def update_keys_options(
 
     from meerschaum.utils.get_pipes import methods
 
-    _all_keys = methods('registered', get_connector())
-    _keys = methods(
-        'registered', get_connector(),
-        connector_keys=_ck_filter, metric_keys=_mk_filter, location_keys=_lk_filter
-    )
+    try:
+        _all_keys = methods('registered', get_web_connector())
+        _keys = methods(
+            'registered', get_web_connector(),
+            connector_keys=_ck_filter, metric_keys=_mk_filter, location_keys=_lk_filter
+        )
+    except Exception as e:
+        instance_alerts += [alert_from_success_tuple((False, str(e)))]
+        _all_keys, _keys = [], []
     _connectors_options = []
     _metrics_options = []
     _locations_options = []
@@ -164,6 +242,9 @@ def update_keys_options(
         _metrics_datalist,
         _locations_options,
         _locations_datalist,
+        web_state['web_instance_keys'],
+        instance_options,
+        instance_alerts,
     )
 
 @dash_app.callback(

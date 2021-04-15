@@ -132,14 +132,14 @@ def print_tuple(
     """
     Print Meerschaum SuccessTuple.
     """
-
+    from meerschaum.config.static import _static_config
     try:
         status = 'success' if tup[0] else 'failure'
     except TypeError:
         status = 'failure'
         tup = None, None
 
-    omit_messages = { 'Success', 'Succeeded', 'success', '', None }
+    omit_messages = _static_config()['system']['success']['ignore']
 
     do_print = True
 

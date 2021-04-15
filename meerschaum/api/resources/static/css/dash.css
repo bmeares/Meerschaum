@@ -4,6 +4,19 @@ a {
 .btn-link {
   color: var(--light);
 }
+.content-div-right pre
+{
+  font-family: Consolas, Menlo, Monaco, Lucida Console, Liberation Mono, DejaVu Sans Mono, Bitstream Vera Sans Mono, Courier New, monospace, serif;
+  margin-bottom: 10px;
+  overflow: auto;
+  /* width: auto; */
+  width: 100ch;
+  padding: 5px;
+  width: 650px!ie7;
+  padding-bottom: 20px!ie7;
+  max-height: 600px;
+}
+
 /* .dash-dropdown { */
   /* color: #52575c; */
   /* background-color: #222; */

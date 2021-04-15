@@ -7,9 +7,17 @@ Build the Dash app to be hooked into FastAPI.
 """
 
 from __future__ import annotations
+from meerschaum.connectors import get_connector
 from meerschaum.utils.typing import List, Optional
-from meerschaum.config import __doc__ as doc
-from meerschaum.api import app, debug, _get_pipes, get_pipe, pipes, get_connector
+from meerschaum.config import __doc__ as doc, get_config
+from meerschaum.api import (
+    app as fastapi_app,
+    debug,
+    _get_pipes,
+    get_pipe as get_api_pipe,
+    pipes as api_pipes,
+    get_connector as get_api_connector,
+)
 from meerschaum.utils.packages import attempt_import
 from meerschaum.utils.misc import get_connector_labels
 from meerschaum.config import get_config
@@ -30,16 +38,21 @@ dash_app = dash.Dash(
 )
 
 from meerschaum.api.dash.keys import (
-    keys_lists_content, text_tab_content, dropdown_tab_content, show_pipes_button
+    keys_lists_content, text_tab_content, dropdown_tab_content
+)
+from meerschaum.api.dash.components import (
+    go_button, show_pipes_button, 
 )
 
-web_instance_keys : Optional[str] = str(get_connector())
-possible_instances = get_connector_labels('sql', 'api')
+web_state = {
+    'web_instance_keys' : str(parse_instance_keys(get_config('meerschaum', 'web_instance'))),
+    'possible_instance_keys' : get_connector_labels('sql', 'api')
+}
 def get_web_connector():
     """
     Parse the web instance keys into a connector.
     """
-    return parse_instance_keys(web_instance_keys, debug=debug)
+    return parse_instance_keys(web_state['web_instance_keys'], debug=debug)
 
 dash_app.layout = html.Div(
     id = 'main-div',
@@ -57,24 +70,43 @@ dash_app.layout = html.Div(
                             )),
                             dbc.Col(dbc.NavbarBrand("Meerschaum Web Interface", className="m1-2")),
                         ],
-                        align='center',
-                        no_gutters=True
+                        align = 'center',
+                        no_gutters = True
                     ),
-                    href='#',
+                    href = '#',
                 ),
                 dbc.NavbarToggler(id="navbar-toggler"),
-                dbc.Row(
-                    [
-                        dbc.Col(html.Div(className='dbc_dark', children=[dbc.Select(
-                            id = 'instance-select',
-                            bs_size = 'sm',
-                            options = [],
-                            className = 'dbc_dark',
-                        )])),
-                        dbc.Col(html.Pre(html.A(doc, href='/docs'))),
-                    ],
-                    className='navbar-nav ml-auto'
-                ),
+                dbc.Collapse(
+                    dbc.Row(
+                        [
+                            dbc.Col(
+                                html.Div(
+                                    className = 'dbc_dark',
+                                    children = [
+                                        dbc.Select(
+                                            id = 'instance-select',
+                                            bs_size = 'sm',
+                                            options = [],
+                                            className = 'dbc_dark',
+                                        )
+                                    ]
+                                ),
+                                #  width = {'size' : 2},
+                            ), ### end of instance column
+                            dbc.Col(
+                                html.Pre(html.A(doc, href='/docs')),
+                                #  width = {'order' : 'last'},
+                                style = {'padding-left' : '15px', 'margin-top' : '15px'},
+                            ),
+                        ],
+                        no_gutters = True,
+                        className = "ml-auto flex-nowrap mt-3 mt-md-0",
+                        align = 'center',
+                        #  className='navbar-nav ml-auto'
+                    ),
+                    id = 'navbar-collapse',
+                    navbar = True,
+                ), ### end of navbar-collapse
             ],
             color = 'dark',
             dark = True
@@ -99,14 +131,29 @@ dash_app.layout = html.Div(
                                 ),
                             ]
                         ),
-                        html.Br(),
+                        #  html.Br(),
+                        #  action_row,
+                        go_button,
                         show_pipes_button,
                     ],
                     id = 'content-col-left',
                     width = {'size' : 6},
                 ),
                 dbc.Col(
-                    html.Div(id='content-div-right'),
+                    children = [
+                        dbc.Col([
+                            ### Place alert divs here.
+                                html.Div(id='success-alert-div'),
+                                html.Div(id='instance-alert-div')
+                            ],
+                            width={'size' : 8, 'offset' : 2}
+                        ),
+                        html.Div(
+                            id = 'content-div-right',
+                            children = [],
+                        )
+                    ],
+                    width = {'size' : 6},
                     id = 'content-col-right',
                 ),
             ],
@@ -121,4 +168,4 @@ dash_app.layout = html.Div(
 import meerschaum.api.dash.callbacks
 
 fastapi_middleware_wsgi = attempt_import('fastapi.middleware.wsgi')
-app.mount('/dash', fastapi_middleware_wsgi.WSGIMiddleware(dash_app.server))
+fastapi_app.mount('/dash', fastapi_middleware_wsgi.WSGIMiddleware(dash_app.server))
