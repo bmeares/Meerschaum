@@ -10,6 +10,7 @@ from __future__ import annotations
 from meerschaum.connectors import get_connector
 from meerschaum.utils.typing import List, Optional
 from meerschaum.config import __doc__ as doc, get_config
+from meerschaum.config.static import _static_config
 from meerschaum.api import (
     app as fastapi_app,
     debug,
@@ -29,12 +30,16 @@ html = attempt_import('dash_html_components', warn=False)
 px = attempt_import('plotly.express', warn=False)
 daq = attempt_import('dash_daq', warn=False)
 
+### I know it's a bad idea to manipulate the static config, but it's necessary to read input.
+_static_config()['system']['prompt']['web'] = True
+
 stylesheets = ['/static/css/darkly.min.css', '/static/css/dbc_dark.css', '/static/css/dash.css']
 dash_app = dash.Dash(
     __name__,
     title = 'Meerschaum Web',
     requests_pathname_prefix = '/dash/',
     external_stylesheets = stylesheets,
+    update_title = None,
 )
 
 from meerschaum.api.dash.keys import (
@@ -44,20 +49,15 @@ from meerschaum.api.dash.components import (
     go_button, show_pipes_button, 
 )
 
-web_state = {
-    'web_instance_keys' : str(parse_instance_keys(get_config('meerschaum', 'web_instance'))),
-    'possible_instance_keys' : get_connector_labels('sql', 'api')
-}
-def get_web_connector():
-    """
-    Parse the web instance keys into a connector.
-    """
-    return parse_instance_keys(web_state['web_instance_keys'], debug=debug)
-
 dash_app.layout = html.Div(
     id = 'main-div',
     children = [
         keys_lists_content,
+        dcc.Interval(
+            id = 'check-input-interval',
+            interval = 1 * 1000,
+            n_intervals = 0,
+        ),
         dbc.Navbar(
             #  style = {'width' : 'auto'},
             children = [
@@ -86,7 +86,10 @@ dash_app.layout = html.Div(
                                         dbc.Select(
                                             id = 'instance-select',
                                             bs_size = 'sm',
-                                            options = [],
+                                            options = [
+                                                {'label' : i, 'value' : i}
+                                                for i in get_connector_labels('sql', 'api')
+                                            ],
                                             className = 'dbc_dark',
                                         )
                                     ]

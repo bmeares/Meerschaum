@@ -40,6 +40,7 @@ def prompt(
     from meerschaum.utils.packages import attempt_import
     from meerschaum.utils.formatting import colored, ANSI, CHARSET
     from meerschaum.config import get_config
+    from meerschaum.config.static import _static_config
     if not noask:
         prompt_toolkit = attempt_import('prompt_toolkit')
     question_config = get_config('formatting', 'question', patch=True)

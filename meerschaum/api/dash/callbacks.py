@@ -7,16 +7,19 @@ Define Dash callback functions.
 """
 
 from __future__ import annotations
+import textwrap
 from dash.dependencies import Input, Output, State
+from meerschaum.config import get_config
 from meerschaum.utils.typing import List, Optional
 from meerschaum.api import get_connector as get_api_connector
 from meerschaum.api.dash import (
-    dash_app, debug, pipes, _get_pipes, web_state, get_web_connector
+    dash_app, debug, pipes, _get_pipes
 )
+from meerschaum.api.dash.connectors import get_web_connector
 from meerschaum.connectors.parse import parse_instance_keys
 from meerschaum.api.dash.pipes import get_pipes_cards
 from meerschaum.api.dash.components import alert_from_success_tuple
-from meerschaum.api.dash.actions import execute_action
+from meerschaum.api.dash.actions import execute_action, check_input_interval
 from meerschaum.utils.debug import dprint
 from meerschaum.utils.packages import attempt_import
 from meerschaum.utils.misc import string_to_dict, get_connector_labels
@@ -37,18 +40,21 @@ keys_state = (
     State('pipes-filter-tabs', 'active_tab'),
     State('action-dropdown', 'value'),
     State('subaction-dropdown', 'value'),
+    State('subaction-dropdown-text', 'value'),
     State('flags-dropdown', 'value'),
     State('instance-select', 'value'),
+    State('content-div-right', 'children'),
+    State('success-alert-div', 'children'),
 )
 
 omit_flags = {
-    #  'help',
+    'help',
     'loop',
     #  'yes',
     #  'noask',
     #  'force',
     'gui',
-    #  'version',
+    'version',
     'shell',
     'use_bash',
 }
@@ -65,6 +71,7 @@ omit_actions = {
     'stack',
     'python',
     'clear',
+    'reload',
 }
 
 
@@ -74,6 +81,7 @@ omit_actions = {
     Output('success-alert-div', 'children'),
     Input('go-button', 'n_clicks'),
     Input('show-pipes-button', 'n_clicks'),
+    Input('check-input-interval', 'n_intervals'),
     *keys_state
 )
 def update_content(*args):
@@ -89,8 +97,11 @@ def update_content(*args):
     triggers = {
         'go-button' : execute_action,
         'show-pipes-button' : get_pipes_cards,
+        'check-input-interval' : check_input_interval,
     }
 
+    if len(ctx.triggered) > 1 and 'check-input-interval.n_intervals' in ctx.triggered:
+        ctx.triggered.remove('check-input-interval.n_intervals')
     trigger = ctx.triggered[0]['prop_id'].split('.')[0]
     return triggers[trigger](ctx.states)
 
@@ -111,8 +122,24 @@ def update_actions(action : str, subaction : str):
     if not action:
         action, subaction = 'show', 'pipes'
         trigger = None
-    _actions = sorted([a for a in actions if a not in omit_actions])
-    _subactions = sorted(get_subactions(action).keys())
+    _actions_options = sorted([
+        {
+            'label' : a,
+            'value' : a,
+            'title' : (textwrap.dedent(f.__doc__).lstrip() if f.__doc__ else 'No help available.'),
+        }
+        for a, f in actions.items() if a not in omit_actions
+    ], key=lambda k: k['label'])
+    _actions = [o['label'] for o in _actions_options]
+    _subactions_options = sorted([
+        {
+            'label' : sa,
+            'value' : sa,
+            'title' : (textwrap.dedent(f.__doc__).lstrip() if f.__doc__ else 'No help available.'),
+        }
+        for sa, f in get_subactions(action).items()
+    ], key=lambda k: k['label'])
+    _subactions = [o['label'] for o in _subactions_options]
     if subaction is None:
         subaction = _subactions[0] if _subactions else ''
 
@@ -133,8 +160,8 @@ def update_actions(action : str, subaction : str):
     return (
         action,
         subaction,
-        [{'label' : a, 'value' : a} for a in _actions],
-        [{'label' : sa, 'value' : sa} for sa in _subactions],
+        _actions_options,
+        _subactions_options,
         flags_options,
         len(_subactions) == 0,
     )
@@ -147,7 +174,6 @@ def update_actions(action : str, subaction : str):
     Output(component_id='location-keys-dropdown', component_property='options'),
     Output(component_id='location-keys-list', component_property='children'),
     Output(component_id='instance-select', component_property='value'),
-    Output(component_id='instance-select', component_property='options'),
     Output(component_id='instance-alert-div', component_property='children'),
     Input(component_id='connector-keys-dropdown', component_property='value'),
     Input(component_id='metric-keys-dropdown', component_property='value'),
@@ -168,18 +194,13 @@ def update_keys_options(
     ctx = dash.callback_context
 
     ### Update the instance first.
-    global web_state
     if not instance_keys:
-        instance_keys = web_state['web_instance_keys']
+        instance_keys = get_config('meerschaum', 'web_instance')
     instance_alerts = []
     try:
         parse_instance_keys(instance_keys)
     except Exception as e:
         instance_alerts += [alert_from_success_tuple((False, str(e)))]
-    else:
-        web_state['web_instance_keys'] = instance_keys
-    web_state['possible_instance_keys'] = get_connector_labels('sql', 'api')
-    instance_options = [{'label' : i, 'value' : i} for i in web_state['possible_instance_keys']]
 
     ### Update the keys filters.
     if connector_keys is None:
@@ -206,9 +227,9 @@ def update_keys_options(
     from meerschaum.utils.get_pipes import methods
 
     try:
-        _all_keys = methods('registered', get_web_connector())
+        _all_keys = methods('registered', get_web_connector(ctx.states))
         _keys = methods(
-            'registered', get_web_connector(),
+            'registered', get_web_connector(ctx.states),
             connector_keys=_ck_filter, metric_keys=_mk_filter, location_keys=_lk_filter
         )
     except Exception as e:
@@ -242,8 +263,7 @@ def update_keys_options(
         _metrics_datalist,
         _locations_options,
         _locations_datalist,
-        web_state['web_instance_keys'],
-        instance_options,
+        instance_keys,
         instance_alerts,
     )
 
@@ -288,6 +308,16 @@ def clear_params_textarea(val):
     return ''
 
 @dash_app.callback(
+    Output(component_id='subaction-dropdown-text', component_property='value'),
+    Input(component_id='clear-subaction-dropdown-text-button', component_property='n_clicks'),
+)
+def clear_subaction_dropdown_text(val):
+    """
+    Reset the connector key input box.
+    """
+    return ''
+
+@dash_app.callback(
     Output(component_id='params-textarea', component_property='valid'),
     Output(component_id='params-textarea', component_property='invalid'),
     Input(component_id='params-textarea', component_property='value'),
@@ -304,3 +334,15 @@ def validate_params_textarea(params_text : Optional[str]):
         print(e)
         return False, True
     return True, False
+
+@dash_app.callback(
+    Output('arguments-collapse', 'is_open'),
+    Input('show-arguments-collapse-button', 'n_clicks'),
+    State('arguments-collapse', 'is_open'),
+)
+def show_arguments_collapse(n_clicks : int, is_open : bool):
+    """
+    Show or hide the arguments Collapse.
+    """
+    return not is_open if n_clicks else is_open
+
