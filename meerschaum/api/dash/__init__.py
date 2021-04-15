@@ -46,7 +46,7 @@ from meerschaum.api.dash.keys import (
     keys_lists_content, text_tab_content, dropdown_tab_content
 )
 from meerschaum.api.dash.components import (
-    go_button, show_pipes_button, 
+    go_button, show_pipes_button, search_parameters_editor,
 )
 
 dash_app.layout = html.Div(
@@ -57,6 +57,7 @@ dash_app.layout = html.Div(
             id = 'check-input-interval',
             interval = 1 * 1000,
             n_intervals = 0,
+            disabled = True,
         ),
         dbc.Navbar(
             #  style = {'width' : 'auto'},
@@ -138,6 +139,7 @@ dash_app.layout = html.Div(
                         #  action_row,
                         go_button,
                         show_pipes_button,
+                        search_parameters_editor,
                     ],
                     id = 'content-col-left',
                     width = {'size' : 6},
