@@ -45,6 +45,7 @@ keys_state = (
     State('instance-select', 'value'),
     State('content-div-right', 'children'),
     State('success-alert-div', 'children'),
+    State('check-input-interval', 'disabled'),
 )
 
 omit_flags = {
@@ -79,6 +80,7 @@ omit_actions = {
 @dash_app.callback(
     Output('content-div-right', 'children'),
     Output('success-alert-div', 'children'),
+    Output('check-input-interval', 'disabled'),
     Input('go-button', 'n_clicks'),
     Input('show-pipes-button', 'n_clicks'),
     Input('check-input-interval', 'n_intervals'),
@@ -91,7 +93,7 @@ def update_content(*args):
     """
     ctx = dash.callback_context
     if not ctx.triggered:
-        return [], []
+        return [], [], True
 
     ### NOTE: functions MUST return a list of content and a list of alerts
     triggers = {
@@ -103,7 +105,14 @@ def update_content(*args):
     if len(ctx.triggered) > 1 and 'check-input-interval.n_intervals' in ctx.triggered:
         ctx.triggered.remove('check-input-interval.n_intervals')
     trigger = ctx.triggered[0]['prop_id'].split('.')[0]
-    return triggers[trigger](ctx.states)
+
+    check_input_interval_disabled = ctx.states['check-input-interval.disabled']
+    enable_check_input_interval = (
+        trigger == 'check-input-interval'
+        or (trigger == 'go-button' and check_input_interval_disabled)
+    )
+
+    return (*triggers[trigger](ctx.states), not enable_check_input_interval)
 
 @dash_app.callback(
     Output('action-dropdown', 'value'),
