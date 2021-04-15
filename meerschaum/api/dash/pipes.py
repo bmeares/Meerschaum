@@ -13,8 +13,9 @@ from meerschaum.utils.typing import List, Optional, Dict, Any, Tuple, Union
 from meerschaum.utils.misc import string_to_dict
 from meerschaum.utils.packages import attempt_import
 from meerschaum.api.dash import (
-    dash_app, debug, _get_pipes, web_state, get_web_connector
+    dash_app, debug, _get_pipes
 )
+from meerschaum.api.dash.connectors import get_web_connector
 from meerschaum.api.dash.components import alert_from_success_tuple
 dbc = attempt_import('dash_bootstrap_components', lazy=False)
 
@@ -66,7 +67,7 @@ def pipes_from_state(
         _pipes = _get_pipes(
             _ck, _mk, _lk,
             params = _params,
-            mrsm_instance = get_web_connector(), 
+            mrsm_instance = get_web_connector(state), 
             **kw
         )
     except Exception as e:

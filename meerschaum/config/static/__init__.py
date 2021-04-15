@@ -59,6 +59,9 @@ def _static_config():
                         None,
                     ),
                 },
+                'prompt' : {
+                    'web' : False,
+                },
             },
             'connectors' : {
                 'default_label' : 'main',

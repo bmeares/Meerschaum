@@ -37,6 +37,7 @@ PipesDict = Dict[
         ]
     ]
 ]
+WebState = Dict[str, str]
 #  from meerschaum.utils.packages import attempt_import
 ### trigger an install of typing_extensions, which is needed for rich
 #  typing_extensions = attempt_import('typing_extensions', lazy=False)
