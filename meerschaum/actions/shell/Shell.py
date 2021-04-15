@@ -66,7 +66,8 @@ def _insert_shell_actions(
     import meerschaum.actions.shell as shell_pkg
     from meerschaum.actions import get_completer
     if actions is None:
-        from meerschaum.actions import actions
+        from meerschaum.actions import actions as _actions
+        actions = _actions
 
     _shell_class = _shell if _shell is not None else shell_pkg.Shell
 
@@ -85,7 +86,7 @@ def _insert_shell_actions(
 
 def _completer_wrapper(
         target : Callable[[Any], List[str]]
-    ) -> Callable['meerschaum.actions.shell.Shell', str, str, int, int]:
+    ) -> Callable[['meerschaum.actions.shell.Shell', str, str, int, int], Any]:
     """
     Wrapper for `complete_` functions so they can instead use Meerschaum arguments.
     """
@@ -117,13 +118,15 @@ def default_action_completer(
         line : Optional[str] = None,
         begin_index : Optional[int] = None,
         end_index : Optional[int] = None,
-        action : List[str] = [],
+        action : Optional[List[str]] = None,
         **kw : Any
     ) -> List[str]:
     """
     Search for subactions by default. This may be overridden by each action.
     """
     from meerschaum.actions import get_subactions
+    if action is None:
+        action = []
     subactions = get_subactions(action[0]) if len(action) > 0 else {}
     sub = action[1] if len(action) > 1 else ''
     possibilities = []
@@ -164,11 +167,6 @@ def _check_complete_keys(
                         possibilities.append(_trigger)
         if not line.endswith(' '):
             return possibilities
-
-    #  print()
-    #  print(last_word)
-    #  print(len(line.split(' ')[-1]))
-    #  print()
 
     if last_word.startswith('-') and not last_word.endswith('-'):
         if line.endswith(' ') and last_word in trigger_args:

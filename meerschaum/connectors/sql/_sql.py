@@ -165,7 +165,7 @@ def read(
     if chunk_hook is not None and len(chunk_list) > len(chunk_hook_results):
         for c in chunk_list[len(chunk_hook_results):]:
             chunk_hook_results.append(
-                chunk_hook(chunk, chunksize=chunksize, debug=debug, **kw)
+                chunk_hook(c, chunksize=chunksize, debug=debug, **kw)
             )
 
     ### chunksize is not None so must iterate

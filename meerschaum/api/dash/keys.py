@@ -8,6 +8,7 @@ Define components for choosing keys.
 
 from __future__ import annotations
 from meerschaum.utils.packages import attempt_import
+from meerschaum.actions import actions
 dash = attempt_import('dash', lazy=False)
 dbc = attempt_import('dash_bootstrap_components', lazy=False)
 dcc = attempt_import('dash_core_components', warn=False)
@@ -26,6 +27,9 @@ widths = {
     'ck' : {'size' : 4},
     'mk' : {'size' : 4},
     'lk' : {'size' : 4},
+    'action' : {'size' : 4},
+    'subaction' : {'size' : 4},
+    'flags' : {'size' : 4},
     'params' : {'size' : 12},
 }
 input_group_sizes = {
@@ -35,63 +39,130 @@ input_group_sizes = {
     'params' : 'sm',
 }
 
-show_pipes_button = dbc.Button(
-    "Show Pipes", id='show-pipes-button',
-    color='secondary', className='mr-1', style={'float' : 'right'}
-)
+#  show_pipes_button = dbc.Button(
+    #  "Show Pipes", id='show-pipes-button',
+    #  color='secondary', className='mr-1', style={'float' : 'right'}
+#  )
 
-dropdown_tab_content = dbc.Card(
-    dbc.CardBody(
-        [
-            dbc.Row(
-                [
+action_dropdown_row = dbc.Row(
+    id = 'action-row',
+    children = [
+        dbc.Col(
+            dbc.InputGroup(
+                id = 'action-dropdown-group',
+                children = [
                     dbc.Col(
                         html.Div(
-                            [
-                                dcc.Dropdown(
-                                    id = 'connector-keys-dropdown',
-                                    options = [],
-                                    placeholder = placeholders['ck'],
-                                    multi = True,
-                                ),
-                            ],
+                            dcc.Dropdown(
+                                id = 'action-dropdown',
+                                options = [],
+                                clearable = False,
+                            ),
+                            id = 'action-dropdown-div',
+                            className = 'dbc_dark'
+                        ),
+                        width = widths['action']
+                    ),
+                    dbc.Col(
+                        html.Div(
+                            dcc.Dropdown(
+                                id = 'subaction-dropdown',
+                                options = [],
+                                clearable = False,
+                            ),
+                            id = 'subaction-dropdown-div',
+                            className = 'dbc_dark'
+                        ),
+                        width = widths['subaction']
+                    ),
+                    dbc.Col(
+                        html.Div(
+                            dcc.Dropdown(
+                                id = 'flags-dropdown',
+                                multi = True,
+                                placeholder = 'Additional flags',
+                                options = [],
+                            ),
+                            id = 'flags-dropdown-div',
                             className = 'dbc_dark',
                         ),
-                        width = widths['ck'],
-                    ),
-                    dbc.Col(
-                        html.Div(
-                            [
-                                dcc.Dropdown(
-                                    id = 'metric-keys-dropdown',
-                                    options = [],
-                                    placeholder = placeholders['mk'],
-                                    multi = True,
-                                ),
-                            ],
-                            className = 'dbc_dark'
-                        ),
-                        width = widths['mk'],
-                    ),
-                    dbc.Col(
-                        html.Div(
-                            [
-                                dcc.Dropdown(
-                                    id = 'location-keys-dropdown',
-                                    options = [],
-                                    placeholder = placeholders['lk'],
-                                    multi = True,
-                                ),
-                            ],
-                            className = 'dbc_dark'
-                        ),
-                        width = widths['lk'],
-                    ),
+                        width = widths['flags'],
+                    )
                 ]
-            )
-        ]
-    )
+            ),
+            ### Action buttons width
+            #  width = {'size' : 7, 'offset' : 4},
+        ),
+    ]
 )
+
+
+dropdown_keys_row = dbc.Row(
+    [
+        dbc.Col(
+            html.Div(
+                [
+                    dcc.Dropdown(
+                        id = 'connector-keys-dropdown',
+                        options = [],
+                        placeholder = placeholders['ck'],
+                        multi = True,
+                    ),
+                ],
+                className = 'dbc_dark',
+            ),
+            width = widths['ck'],
+        ),
+        dbc.Col(
+            html.Div(
+                [
+                    dcc.Dropdown(
+                        id = 'metric-keys-dropdown',
+                        options = [],
+                        placeholder = placeholders['mk'],
+                        multi = True,
+                    ),
+                ],
+                className = 'dbc_dark'
+            ),
+            width = widths['mk'],
+        ),
+        dbc.Col(
+            html.Div(
+                [
+                    dcc.Dropdown(
+                        id = 'location-keys-dropdown',
+                        options = [],
+                        placeholder = placeholders['lk'],
+                        multi = True,
+                    ),
+                ],
+                className = 'dbc_dark'
+            ),
+            width = widths['lk'],
+        ),
+    ] ### end of filters row children
+)
+dropdown_tab_content = html.Div([
+    dbc.Card(
+        dbc.CardBody(
+            [
+                #  html.P('Pipe Keys'),
+                dropdown_keys_row,
+            ], ### end of card children
+            className = 'card-text',
+        )
+    ),
+    html.Br(),
+    dbc.Card(
+        dbc.CardBody(
+            [
+                action_dropdown_row,
+            ],
+            className = 'card-text',
+        ),
+    ),
+])
 
 text_tab_content = dbc.Card(
     dbc.CardBody(

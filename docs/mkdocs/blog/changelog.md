@@ -1,6 +1,13 @@
 # Changelog and Release Notes
 This changelog was not introduced until v0.2.12, so many of the critical releases of Meerschaum have already been published. I've backlogged previous releases but haven't added all notes for all the versions.
 
+## 0.3.x Releases
+Version 0.3 introduced the web interface and continued the focus on the user experience. This is the current release cycle, so future features will be updated below.
+
+### v0.3.0
+- **Introduced the Web Interface.**  
+  Added the Meerschaum Web Interface, an interactive dashboard for managing Meerschaum instances. Although not a total replacement for the Meerschaum Shell, the Web Interface allows multiple users to share connectors without needing to remote into the same machine.
+
 ## 0.2.x Releases
 Version 0.2 improved greatly on 0.1, with a greater focus on the user experience, plugins, local performance, and a whole lot more. Read the release notes below for some of the highlights.
 
@@ -19,7 +26,6 @@ Version 0.2 improved greatly on 0.1, with a greater focus on the user experience
   When `docker-compose` is installed globally, skip using the virtual environment version.
 - **Refactoring / linting**  
   A lot of code was cleaned up to conform with cleaner programming practices.
-
 
 ### v0.2.18
 - **Added `login` action.**  
