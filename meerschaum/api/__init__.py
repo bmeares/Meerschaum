@@ -144,4 +144,5 @@ templates = fastapi_templating.Jinja2Templates(directory=str(API_TEMPLATES_PATH)
 ### import WebAPI routes
 import meerschaum.api.routes as routes
 import meerschaum.api._events
+import meerschaum.api._websockets
 import meerschaum.api.dash

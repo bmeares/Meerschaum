@@ -16,6 +16,7 @@ from meerschaum.api.dash import (
     dash_app, debug, pipes, _get_pipes
 )
 from meerschaum.api.dash.connectors import get_web_connector
+from meerschaum.api.dash.websockets import ws_url_from_href
 from meerschaum.connectors.parse import parse_instance_keys
 from meerschaum.api.dash.pipes import get_pipes_cards
 from meerschaum.api.dash.components import alert_from_success_tuple
@@ -36,7 +37,8 @@ keys_state = (
     State('connector-keys-input', 'value'),
     State('metric-keys-input', 'value'),
     State('location-keys-input', 'value'),
-    State('params-textarea', 'value'),
+    State('search-parameters-editor', 'value'),
+    #  State('params-textarea', 'value'),
     State('pipes-filter-tabs', 'active_tab'),
     State('action-dropdown', 'value'),
     State('subaction-dropdown', 'value'),
@@ -74,16 +76,23 @@ omit_actions = {
     'clear',
     'reload',
 }
-
+trigger_aliases = {
+    'keyboard' : 'go-button',
+}
 
 
 @dash_app.callback(
     Output('content-div-right', 'children'),
     Output('success-alert-div', 'children'),
     Output('check-input-interval', 'disabled'),
+    Output('ws', 'url'),
+    Input('keyboard', 'n_keydowns'),
     Input('go-button', 'n_clicks'),
     Input('show-pipes-button', 'n_clicks'),
     Input('check-input-interval', 'n_intervals'),
+    State('keyboard', 'keydown'),
+    State('location', 'href'),
+    State('ws', 'url'),
     *keys_state
 )
 def update_content(*args):
@@ -92,8 +101,14 @@ def update_content(*args):
     and execute the appropriate function.
     """
     ctx = dash.callback_context
+    ws_url = (
+        dash.no_update if ctx.states['ws.url']
+        else ws_url_from_href(ctx.states['location.href'])
+    )
+    #  ws_url = ws_url_from_href(ctx.states['location.href'])
+
     if not ctx.triggered:
-        return [], [], True
+        return [], [], True, ws_url
 
     ### NOTE: functions MUST return a list of content and a list of alerts
     triggers = {
@@ -105,14 +120,16 @@ def update_content(*args):
     if len(ctx.triggered) > 1 and 'check-input-interval.n_intervals' in ctx.triggered:
         ctx.triggered.remove('check-input-interval.n_intervals')
     trigger = ctx.triggered[0]['prop_id'].split('.')[0]
+    trigger = trigger_aliases[trigger] if trigger in trigger_aliases else trigger
 
     check_input_interval_disabled = ctx.states['check-input-interval.disabled']
     enable_check_input_interval = (
         trigger == 'check-input-interval'
         or (trigger == 'go-button' and check_input_interval_disabled)
     )
+    enable_check_input_interval = False
 
-    return (*triggers[trigger](ctx.states), not enable_check_input_interval)
+    return (*triggers[trigger](ctx.states), not enable_check_input_interval, ws_url)
 
 @dash_app.callback(
     Output('action-dropdown', 'value'),
@@ -306,15 +323,15 @@ def clear_location_keys_input(val):
     """
     return ''
 
-@dash_app.callback(
-    Output(component_id='params-textarea', component_property='value'),
-    Input(component_id='clear-params-textarea-button', component_property='n_clicks'),
-)
-def clear_params_textarea(val):
-    """
-    Reset the connector key input box.
-    """
-    return ''
+#  @dash_app.callback(
+    #  Output(component_id='params-textarea', component_property='value'),
+    #  Input(component_id='clear-params-textarea-button', component_property='n_clicks'),
+#  )
+#  def clear_params_textarea(val):
+    #  """
+    #  Reset the connector key input box.
+    #  """
+    #  return ''
 
 @dash_app.callback(
     Output(component_id='subaction-dropdown-text', component_property='value'),
@@ -326,23 +343,23 @@ def clear_subaction_dropdown_text(val):
     """
     return ''
 
-@dash_app.callback(
-    Output(component_id='params-textarea', component_property='valid'),
-    Output(component_id='params-textarea', component_property='invalid'),
-    Input(component_id='params-textarea', component_property='value'),
-)
-def validate_params_textarea(params_text : Optional[str]):
-    """
-    Check if the value in the params-textarea is a valid dictionary.
-    """
-    if not params_text:
-        return None, None
-    try:
-        d = string_to_dict(params_text)
-    except Exception as e:
-        print(e)
-        return False, True
-    return True, False
+#  @dash_app.callback(
+    #  Output(component_id='params-textarea', component_property='valid'),
+    #  Output(component_id='params-textarea', component_property='invalid'),
+    #  Input(component_id='params-textarea', component_property='value'),
+#  )
+#  def validate_params_textarea(params_text : Optional[str]):
+    #  """
+    #  Check if the value in the params-textarea is a valid dictionary.
+    #  """
+    #  if not params_text:
+        #  return None, None
+    #  try:
+        #  d = string_to_dict(params_text)
+    #  except Exception as e:
+        #  print(e)
+        #  return False, True
+    #  return True, False
 
 @dash_app.callback(
     Output('arguments-collapse', 'is_open'),
@@ -355,3 +372,35 @@ def show_arguments_collapse(n_clicks : int, is_open : bool):
     """
     return not is_open if n_clicks else is_open
 
+@dash_app.callback(
+    Output('ws', 'send'),
+    Input('test-button', 'n_clicks'),
+    State('ws', 'state'),
+    State('ws', 'message'),
+    State('ws', 'error'),
+    State('ws', 'protocols'),
+)
+def test(n_clicks : int, *states):
+    if not n_clicks:
+        return dash.no_update
+    #  print(states)
+    import datetime
+    print('send message')
+    return str(datetime.datetime.utcnow())
+
+@dash_app.callback(
+    Output('content-div-right', 'children'),
+    #  Output('ws', 'send'),
+    Input('ws', 'message'),
+    #  State('ws', 'url'),
+)
+def receive(message):
+    import json
+    if not message:
+        return dash.no_update
+    print('receive message')
+    return [json.dumps(message)]
+
+#  @dash_app.callback_connect
+#  def foo(client, connect):
+    #  print(client, connect, len(dash_app.clients))

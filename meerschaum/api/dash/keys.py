@@ -9,6 +9,7 @@ Define components for choosing keys.
 from __future__ import annotations
 from meerschaum.utils.packages import attempt_import
 from meerschaum.actions import actions
+from meerschaum.api.dash.components import search_parameters_editor
 dash = attempt_import('dash', lazy=False)
 dbc = attempt_import('dash_bootstrap_components', lazy=False)
 dcc = attempt_import('dash_core_components', warn=False)
@@ -312,20 +313,21 @@ text_tab_content = dbc.Card(
                 dbc.Col(
                     dbc.InputGroup(
                         [
-                            dbc.InputGroupAddon(
-                                dbc.Button(
-                                    'Clear',
-                                    id = 'clear-params-textarea-button',
-                                    color = 'link',
-                                    size = 'sm',
-                                ),
-                                addon_type = 'prepend',
-                            ),
-                            dbc.Textarea(
-                                id = 'params-textarea',
-                                placeholder = placeholders['params'],
-                                value = '',
-                            )
+                            #  dbc.InputGroupAddon(
+                                #  dbc.Button(
+                                    #  'Clear',
+                                    #  id = 'clear-params-textarea-button',
+                                    #  color = 'link',
+                                    #  size = 'sm',
+                                #  ),
+                                #  addon_type = 'prepend',
+                            #  ),
+                            search_parameters_editor,
+                            #  dbc.Textarea(
+                                #  id = 'params-textarea',
+                                #  placeholder = placeholders['params'],
+                                #  value = '',
+                            #  )
                         ],
                         size = input_group_sizes['params'],
                     )

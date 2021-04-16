@@ -24,6 +24,9 @@ from meerschaum.utils.misc import get_connector_labels
 from meerschaum.config import get_config
 from meerschaum.connectors.parse import parse_instance_keys
 dash = attempt_import('dash', lazy=False)
+#  dash = attempt_import('dash_devices', lazy=False, warn=False)
+dex = attempt_import('dash_extensions', lazy=False)
+enrich = attempt_import('dash_extensions.enrich', lazy=False)
 dbc = attempt_import('dash_bootstrap_components', lazy=False)
 dcc = attempt_import('dash_core_components', warn=False)
 html = attempt_import('dash_html_components', warn=False)
@@ -34,25 +37,36 @@ daq = attempt_import('dash_daq', warn=False)
 _static_config()['system']['prompt']['web'] = True
 
 stylesheets = ['/static/css/darkly.min.css', '/static/css/dbc_dark.css', '/static/css/dash.css']
-dash_app = dash.Dash(
+dash_app = enrich.DashProxy(
     __name__,
     title = 'Meerschaum Web',
     requests_pathname_prefix = '/dash/',
     external_stylesheets = stylesheets,
     update_title = None,
+    #  prevent_initial_callbacks = True,
+    transforms = [
+        enrich.TriggerTransform(),
+        enrich.MultiplexerTransform(),
+        enrich.ServersideOutputTransform(),
+        enrich.NoOutputTransform(),
+    ],
 )
 
 from meerschaum.api.dash.keys import (
     keys_lists_content, text_tab_content, dropdown_tab_content
 )
 from meerschaum.api.dash.components import (
-    go_button, show_pipes_button, search_parameters_editor,
+    go_button, show_pipes_button, search_parameters_editor, keyboard, websocket, location,
+    test_button,
 )
 
 dash_app.layout = html.Div(
     id = 'main-div',
     children = [
+        location,
+        websocket,
         keys_lists_content,
+        keyboard,
         dcc.Interval(
             id = 'check-input-interval',
             interval = 1 * 1000,
@@ -137,9 +151,11 @@ dash_app.layout = html.Div(
                         ),
                         #  html.Br(),
                         #  action_row,
+                        test_button,
                         go_button,
                         show_pipes_button,
-                        search_parameters_editor,
+                        html.Div(id='ws-div'),
+                        #  search_parameters_editor,
                     ],
                     id = 'content-col-left',
                     width = {'size' : 6},
