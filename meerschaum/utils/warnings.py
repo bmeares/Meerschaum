@@ -204,4 +204,4 @@ def info(message : str, icon : bool = True, **kw):
     if ANSI:
         message = colored(message, *info_config['ansi']['color'])
     ### NOTE: There's a bug somewhere because I have to flush stdout every time.
-    print(message, file=sys.stderr, flush=True)
+    print(message, flush=True)

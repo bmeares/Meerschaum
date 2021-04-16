@@ -36,7 +36,8 @@ def keys_from_state(
     }
     if state['pipes-filter-tabs.active_tab'] == 'input':
         try:
-            params = string_to_dict(state['params-textarea.value'])
+            #  params = string_to_dict(state['params-textarea.value'])
+            params = string_to_dict(state['search-parameters-editor.value'])
         except Exception as e:
             params = None
     else:

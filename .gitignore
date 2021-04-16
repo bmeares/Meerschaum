@@ -12,6 +12,7 @@
 /test_root/
 docs/pdoc/*
 docs/site/*
+file_system_store/
 
 # Byte-compiled / optimized / DLL files
 __pycache__/

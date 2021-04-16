@@ -25,6 +25,7 @@ def _static_config():
                     'connectors' : '/connectors',
                     'version' : '/version',
                     'chaining' : '/chaining',
+                    'websocket' : '/ws',
                 },
                 'oauth' : {
                     'token_expires_minutes' : 15,

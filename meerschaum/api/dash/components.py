@@ -14,6 +14,7 @@ from meerschaum.config.static import _static_config
 from meerschaum.utils.misc import remove_ansi
 dbc = attempt_import('dash_bootstrap_components', lazy=False)
 dcc = attempt_import('dash_core_components', warn=False)
+dex = attempt_import('dash_extensions', lazy=False)
 dash_ace = attempt_import('dash_ace', lazy=False)
 html = attempt_import('dash_html_components', warn=False)
 
@@ -21,15 +22,26 @@ component_ids = {
 
 }
 
-go_button = dbc.Button('Go', id='go-button', color='primary')
+keyboard = dex.Keyboard(
+    id = 'keyboard',
+    captureKeys = ['Enter'],
+)
+go_button = dbc.Button('Execute', id='go-button', color='primary')
+test_button = dbc.Button('Test', id='test-button', color='danger')
 show_pipes_button = dbc.Button('Get Pipes', id='show-pipes-button', color='secondary')
+location = dcc.Location(id='location', refresh=False)
+websocket = dex.WebSocket(id='ws', url="")
 
 search_parameters_editor = dash_ace.DashAceEditor(
     id = 'search-parameters-editor',
     theme = 'monokai',
     mode = 'json',
     tabSize = 2,
-    placeholder = '',
+    placeholder = (
+        'Additional search parameters. ' +
+        'Simple dictionary format or JSON accepted.'
+    ),
+    style = {'height' : 100},
 )
 
 def alert_from_success_tuple(success : SuccessTuple):

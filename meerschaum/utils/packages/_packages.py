@@ -118,6 +118,7 @@ packages['api'] = {
     'dash'                      : 'dash>=1.20.0',
     'dash_bootstrap_components' : 'dash-bootstrap-components>=0.12.0',
     'dash_ace'                  : 'dash-ace>=0.2.1',
+    'dash_extensions'           : 'dash-extensions>=0.0.51',
     'ansi2html'                 : 'ansi2html>=1.6.0',
     #  'capturer'                  : 'capturer>=3.0; platform_system != "Windows"',
 }
