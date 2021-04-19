@@ -39,6 +39,7 @@ def _pipes_lap(
     from meerschaum.utils.debug import dprint
     from meerschaum.utils.packages import attempt_import
     from meerschaum.utils.formatting import print_tuple
+    from meerschaum.utils.warnings import warn
     import time
     pipes = get_pipes(
         as_list = True,
@@ -77,13 +78,16 @@ def _pipes_lap(
         workers = cpu_count()
     pool = Pool(workers)
 
-    results = pool.map_async(sync_pipe, pipes)
-    results = results.get()
+    results = pool.map(sync_pipe, pipes)
+    #  results = pool.map_async(sync_pipe, pipes)
+    #  results = results.get()
     if results is None:
-        warn(f"Failed to fetch results from syncing Pipes.")
+        warn(f"Failed to fetch results from syncing pipes.")
         succeeded_pipes = []
         failed_pipes = pipes
-        results_dict = dict([(p, (False, f"Could not fetch sync result for Pipe '{p}'")) for p in pipes])
+        results_dict = {
+            p: (False, f"Could not fetch sync result for pipe '{p}'.") for p in pipes
+        }
     else:
         ### determine which Pipes failed to sync
         pipe_indices = [i for p, i in enumerate(pipes)]
@@ -93,7 +97,7 @@ def _pipes_lap(
         except TypeError:
             succeeded_pipes = []
             failed_pipes = [p for p in pipes]
-        results_dict = dict([(p, r) for p, r in zip(pipe_indices, results)])
+        results_dict = { p: r for p, r in zip(pipe_indices, results) }
 
     if len(failed_pipes) > 0:
         print("\n" + f"Failed to sync Pipes:")
@@ -124,11 +128,12 @@ def _sync_pipes(
     """
     Fetch new data for Pipes
     """
-    from meerschaum.utils.warnings import info
     from meerschaum.utils.debug import dprint
+    from meerschaum.utils.warnings import warn, info
     import time, sys
     run = True
     msg = ""
+    interrupt_warning_msg = "Syncing halted due to keyboard interrupt."
     cooldown = 2 * (min_seconds + 1)
     success = []
     while run:
@@ -142,23 +147,37 @@ def _sync_pipes(
         except Exception as e:
             import traceback
             traceback.print_exc()
-            from meerschaum.utils.warnings import warn
-            warn(f"Failed to sync all pipes. Waiting for {cooldown} seconds, then trying again.", stack=False)
+            warn(
+                f"Failed to sync all pipes. Waiting for {cooldown} seconds, then trying again.",
+                stack = False
+            )
             time.sleep(cooldown)
             cooldown = int(cooldown * 1.5)
             continue
+        except KeyboardInterrupt:
+            warn(interrupt_warning_msg, stack=False)
+            loop, run = False, False
         cooldown = 2 * (min_seconds + 1)
         lap_end = time.time()
-        print(file=sys.stderr)
+        print()
         msg = (
-            f"It took {round(lap_end - lap_begin, 2)} seconds to sync {len(success) + len(fail)} pipe" +
-            ("s" if (len(success) + len(fail)) > 1 else "") + "\n" +
+            f"It took {round(lap_end - lap_begin, 2)} seconds to sync " +
+            f"{len(success) + len(fail)} pipe" +
+                ("s" if (len(success) + len(fail)) > 1 else "") + "\n" +
             f"    ({len(success)} succeeded, {len(fail)} failed)."
         )
         if min_seconds > 0 and loop:
-            print(file=sys.stderr)
-            info(f"Sleeping for {min_seconds} second" + ("s" if abs(min_seconds) != 1 else ""))
-            time.sleep(min_seconds)
+            print()
+            info(
+                f"Sleeping for {min_seconds} second" +
+                ("s" if abs(min_seconds) != 1 else "")
+                + '.'
+            )
+            try:
+                time.sleep(min_seconds)
+            except KeyboardInterrupt:
+                loop, run = False, False
+                warn(interrupt_warning_msg, stack=False)
         run = loop
     return len(success) > 0, msg
 
