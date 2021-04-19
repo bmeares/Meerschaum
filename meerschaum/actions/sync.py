@@ -50,7 +50,7 @@ def _pipes_lap(
 
     def sync_pipe(p):
         """
-        Wrapper function for the Pool
+        Wrapper function for the Pool.
         """
         from meerschaum.utils.warnings import warn
         try:
@@ -72,13 +72,11 @@ def _pipes_lap(
         print_tuple(return_tuple)
         return return_tuple
 
-    from multiprocessing import cpu_count
-    from multiprocessing.pool import ThreadPool as Pool
-    if workers is None:
-        workers = cpu_count()
-    pool = Pool(workers)
+    from meerschaum.utils.pool import get_pool
 
-    results = pool.map(sync_pipe, pipes)
+    pool = get_pool(workers=workers)
+    results = pool.map(sync_pipe, pipes) if pool is not None else [sync_pipe(p) for p in pipes]
+
     #  results = pool.map_async(sync_pipe, pipes)
     #  results = results.get()
     if results is None:
@@ -151,9 +149,14 @@ def _sync_pipes(
                 f"Failed to sync all pipes. Waiting for {cooldown} seconds, then trying again.",
                 stack = False
             )
-            time.sleep(cooldown)
-            cooldown = int(cooldown * 1.5)
-            continue
+            try:
+                time.sleep(cooldown)
+            except KeyboardInterrupt:
+                warn(interrupt_warning_msg, stack=False)
+                loop, run = False, False
+            else:
+                cooldown = int(cooldown * 1.5)
+                continue
         except KeyboardInterrupt:
             warn(interrupt_warning_msg, stack=False)
             loop, run = False, False

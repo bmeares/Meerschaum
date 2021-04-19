@@ -343,6 +343,7 @@ def _show_columns(
 
 def _show_rowcounts(
         action : Optional[List[str]] = None,
+        workers : Optional[int] = None,
         debug : bool = False,
         **kw : Any
     ) -> SuccessTuple:
@@ -361,11 +362,11 @@ def _show_rowcounts(
     remote = action and action[0] == 'remote'
 
     pipes = get_pipes(as_list=True, debug=debug, **kw)
-    pool = get_pool()
+    pool = get_pool(workers=workers)
     def _get_rc(_pipe):
         return _pipe.get_rowcount(remote=remote, debug=debug)
 
-    rowcounts = pool.map(_get_rc, pipes)
+    rowcounts = pool.map(_get_rc, pipes) if pool is not None else [_get_rc(p) for p in pipes]
 
     rc_dict = {}
     for i, p in enumerate(pipes):
