@@ -3,13 +3,13 @@
 # vim:fenc=utf-8
 
 """
-Synchronize pipes' data with sources
+Synchronize pipes' data with sources.
 
 NOTE: `sync` required a SQL connection and is not intended for client use
 """
 
 from __future__ import annotations
-from meerschaum.utils.typing import SuccessTuple, Any, List, Optional
+from meerschaum.utils.typing import SuccessTuple, Any, List, Optional, Tuple
 
 def sync(
         action : Optional[List[str]] = None,
@@ -31,7 +31,7 @@ def _pipes_lap(
         force : bool = False,
         min_seconds : int = 1,
         **kw : Any
-    ) -> SuccessTuple:
+    ) -> Tuple[List[meerschaum.Pipe], List[meerschaum.Pipe]]:
     """
     Do a lap of syncing pipes.
     """
@@ -67,7 +67,7 @@ def _pipes_lap(
             import traceback
             traceback.print_exception(type(e), e, e.__traceback__)
             print("Error: " + str(e))
-            return_tuple = (False, f"Failed to sync Pipe '{p}' with exception:" + "\n" + str(e))
+            return_tuple = (False, f"Failed to sync pipe '{p}' with exception:" + "\n" + str(e))
 
         print_tuple(return_tuple)
         return return_tuple
@@ -131,7 +131,7 @@ def _sync_pipes(
     import time, sys
     run = True
     msg = ""
-    interrupt_warning_msg = "Syncing halted due to keyboard interrupt."
+    interrupt_warning_msg = "Syncing was interrupted due to a keyboard interrupt."
     cooldown = 2 * (min_seconds + 1)
     success = []
     while run:
@@ -160,6 +160,7 @@ def _sync_pipes(
         except KeyboardInterrupt:
             warn(interrupt_warning_msg, stack=False)
             loop, run = False, False
+            success, fail = None, None
         cooldown = 2 * (min_seconds + 1)
         lap_end = time.time()
         print()
@@ -168,7 +169,7 @@ def _sync_pipes(
             f"{len(success) + len(fail)} pipe" +
                 ("s" if (len(success) + len(fail)) > 1 else "") + "\n" +
             f"    ({len(success)} succeeded, {len(fail)} failed)."
-        )
+        ) if success is not None else "Syncing was aborted."
         if min_seconds > 0 and loop:
             print()
             info(
@@ -182,7 +183,7 @@ def _sync_pipes(
                 loop, run = False, False
                 warn(interrupt_warning_msg, stack=False)
         run = loop
-    return len(success) > 0, msg
+    return (len(success) > 0 if success else False), msg
 
 ### NOTE: This must be the final statement of the module.
 ###       Any subactions added below these lines will not
