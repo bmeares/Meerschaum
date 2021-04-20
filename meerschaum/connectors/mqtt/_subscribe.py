@@ -3,8 +3,11 @@
 # vim:fenc=utf-8
 
 """
-Subscribe to a MQTT stream
+Subscribe to a MQTT topic.
 """
+
+from __future__ import annotations
+from meerschaum.utils.typing import Optional, Any, Callable
 
 def subscribe(
         self,
@@ -61,7 +64,20 @@ def subscribe(
             return callback(message.payload.decode('utf-8'))
         dprint("Message on topic " + f'"{topic}"' + " has not changed since the last message. Skipping...")
 
+    def _subscribe_on_connect(client, userdata, flags, rc):
+        """
+        Subscribe to the topic when connecting (resubscribes in case of disconnect).
+        """
+        if rc > 0:
+            warn(f"Received return code {rc} from '{self.host}' on topic '{topic}'.")
+            if rc == 5:
+                warn(f"Are the credentials for '{self}' correct?", stack=False)
+        if debug:
+            dprint("Subscribed to " + f'"{topic}"' + ". Starting network loop...")
+        client.subscribe(topic)
+
     self.client.on_message = _parse_message
+    self.client.on_connect = _subscribe_on_connect
 
     try:
         self.client.connect(self.host, self.port, self.keepalive)
@@ -70,10 +86,6 @@ def subscribe(
             "Failed to connect to MQTT broker " +
             '"{self.host}"' + " with connector: " + f"{self}"
         )
-
-    self.client.subscribe(topic)
-    if debug:
-        dprint("Subscribed to " + f'"{topic}"' + ". Starting network loop...")
 
     ### start a new thread that fires callback when messages are received
     if not forever:
