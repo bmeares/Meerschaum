@@ -357,6 +357,8 @@ def run_python_package(
         print(command, file=sys.stderr)
     try:
         rc = run_as_fg_process(command)
+    except Exception as e:
+        rc = call(command)
     except KeyboardInterrupt:
         rc = 1
     os.chdir(old_cwd)
