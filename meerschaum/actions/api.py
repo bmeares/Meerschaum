@@ -112,6 +112,7 @@ def _api_start(
     )
     from meerschaum.config.static import _static_config
     from meerschaum.connectors.parse import parse_instance_keys
+    from meerschaum.utils.pool import get_pool
     import os
 
     if action is None:
@@ -133,8 +134,11 @@ def _api_start(
             if is_int(action[1]):
                 port = int(action[1])
 
-    if workers is not None:
-        uvicorn_config['workers'] = workers
+    pool = get_pool(workers=workers)
+    if pool is None:
+        workers = 1
+    
+    uvicorn_config['workers'] = workers
 
     uvicorn_config['debug'] = debug
 
