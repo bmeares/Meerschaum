@@ -140,4 +140,6 @@ def parse_synonyms(
         args_dict['unblock'] = True
     if args_dict.get('mrsm_instance', None):
         args_dict['instance'] = args_dict['mrsm_instance']
+    if args_dict.get('skip_check_existing', None):
+        args_dict['check_existing'] = False
     return args_dict

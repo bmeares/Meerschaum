@@ -20,6 +20,7 @@ with package_root_context_manager as file_path:
     PACKAGE_ROOT_PATH = Path(os.path.join(Path(file_path.parent.parent), 'meerschaum'))
 
 paths = {
+    'PACKAGE_ROOT_PATH' : PACKAGE_ROOT_PATH,
     'ROOT_DIR_PATH' : (
         Path(os.path.join(Path.home(), '.config', 'meerschaum'))
         if platform.system() != 'Windows'

@@ -31,50 +31,6 @@ def get_users(
     except Exception as e:
         return []
 
-def login(
-        self,
-        debug : bool = False,
-        **kw : Any
-    ) -> SuccessTuple:
-    """
-    Log in and set the session token.
-    """
-    from meerschaum.utils.warnings import warn, info, error
-    from meerschaum._internal.User import User
-    from meerschaum.config.static import _static_config
-    import json, datetime
-    try:
-        login_data = {
-            'username' : self.username,
-            'password' : self.password,
-        }
-    except AttributeError:
-        return False, f"Please provide a username and password for '{self}' with `edit config`."
-    response = self.post(
-        _static_config()['api']['endpoints']['login'],
-        data = login_data,
-        use_token = False,
-        debug = debug
-    )
-    if response:
-        msg = f"Successfully logged into '{self}' as user '{login_data['username']}'."
-        self._token = json.loads(response.text)['access_token']
-        self._expires = datetime.datetime.strptime(
-            json.loads(response.text)['expires'], 
-            '%Y-%m-%dT%H:%M:%S.%f'
-        )
-    else:
-        msg = ''
-        if self.get_user_id(User(self.username, self.password), use_token=False, debug=debug) is None:
-            msg = f"User '{self.username}' does not exist for '{self}'." + '\n'
-        msg += (
-            f"   Failed to log into '{self}' as user '{login_data['username']}'.\n" +
-            f"   Please verify login details for connector '{self}'."
-        )
-        warn(msg, stack=False)
-
-    return response.__bool__(), msg
-
 def edit_user(
         self,
         user : 'meerschaum._internal.User.User',

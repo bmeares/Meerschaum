@@ -525,7 +525,8 @@ def sync_pipe(
         If True, pull and diff with existing data from the pipe, defaults to True.
 
     :param blocking:
-        If True, wait for sync to finish and return its result, otherwise asyncronously sync. Defaults to True.
+        If True, wait for sync to finish and return its result, otherwise asyncronously sync.
+        Defaults to True.
 
     :param debug:
         Verbosity toggle. Defaults to False.
@@ -537,7 +538,7 @@ def sync_pipe(
     from meerschaum.utils.debug import dprint
     from meerschaum.utils.packages import import_pandas
     if df is None:
-        msg = f"DataFrame is None. Cannot sync Pipe '{pipe}'"
+        msg = f"DataFrame is None. Cannot sync pipe '{pipe}'."
         warn(msg)
         return False, msg
 

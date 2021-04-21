@@ -16,7 +16,7 @@ def sync(
         **kw : Any
     ) -> SuccessTuple:
     """
-    Sync elements
+    Fetch and sync data for pipes.
     """
     from meerschaum.utils.misc import choose_subaction
     options = {
@@ -54,7 +54,6 @@ def _pipes_lap(
         """
         from meerschaum.utils.warnings import warn
         try:
-            ### NOTE: skip check_existing flag
             return_tuple = p.sync(
                 blocking = (not unblock),
                 force = force,
@@ -124,7 +123,7 @@ def _sync_pipes(
         **kw : Any
     ) -> SuccessTuple:
     """
-    Fetch new data for pipes.
+    Fetch and sync new data for pipes.
     """
     from meerschaum.utils.debug import dprint
     from meerschaum.utils.warnings import warn, info

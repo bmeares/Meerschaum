@@ -148,7 +148,12 @@ def create_engine(
             (("/" + _database) if _database is not None else '')
         )
     if debug:
-        dprint(f"{engine_str}" + '\n' + f"{self.sys_config.get('create_engine', {}).get('connect_args', {})}")
+        dprint(
+            (
+                (engine_str.replace(':' + _password, ':' + ('*' * len(_password))))
+                    if _password is not None else engine_str
+            ) + '\n' + f"{self.sys_config.get('create_engine', {}).get('connect_args', {})}"
+        )
 
     _kw_copy = kw.copy()
     _create_engine_args = {

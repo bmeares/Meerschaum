@@ -9,7 +9,7 @@ Execute Meerschaum Actions via the API
 from __future__ import annotations
 from meerschaum.utils.typing import SuccessTuple
 
-from meerschaum.api import fastapi, app, endpoints, get_connector, debug, manager
+from meerschaum.api import fastapi, app, endpoints, get_api_connector, debug, manager
 from meerschaum.actions import actions
 import meerschaum._internal.User
 actions_endpoint = endpoints['actions']
@@ -44,7 +44,7 @@ def do_action(
     if action not in actions:
         return False, f"Invalid action '{action}'."
     if 'mrsm_instance' not in keywords:
-        keywords['mrsm_instance'] = str(get_connector())
+        keywords['mrsm_instance'] = str(get_api_connector())
     _debug = keywords.get('debug', debug)
     if 'debug' in keywords:
         del keywords['debug']

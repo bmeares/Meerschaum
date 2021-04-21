@@ -87,7 +87,9 @@ def _api_start(
         port : Optional[int] = None,
         workers : Optional[int] = None,
         mrsm_instance : Optional[str] = None,
+        no_dash : bool = False,
         debug : bool = False,
+        nopretty : bool = False,
         **kw : Any
     ) -> SuccessTuple:
     """
@@ -100,21 +102,29 @@ def _api_start(
     """
     from meerschaum.utils.packages import attempt_import, venv_contains_package, pip_install
     from meerschaum.utils.misc import is_int
-    from meerschaum.api import sys_config as api_config, __version__
-    from meerschaum.utils.formatting import pprint
+    from meerschaum.utils.formatting import pprint, ANSI
     from meerschaum.utils.debug import dprint
     from meerschaum.utils.warnings import error, warn
-    from meerschaum.config._paths import API_UVICORN_CONFIG_PATH
-    from meerschaum.config import get_config
+    from meerschaum.config import get_config, _config
+    from meerschaum.config._paths import (
+        API_UVICORN_CONFIG_PATH, CACHE_RESOURCES_PATH,
+        PACKAGE_ROOT_PATH,
+    )
+    from meerschaum.config.static import _static_config
     from meerschaum.connectors.parse import parse_instance_keys
     import os
 
     if action is None:
         action = []
 
+    old_cwd = os.getcwd()
+    os.chdir(CACHE_RESOURCES_PATH)
+
     ### Uvicorn must be installed on the host because of multiprocessing reasons.
     uvicorn = attempt_import('uvicorn', venv=None, lazy=False)
 
+    api_config = get_config('system', 'api')
+    cf = _config()
     uvicorn_config = dict(api_config['uvicorn'])
     if port is None:
         ### default
@@ -155,24 +165,30 @@ def _api_start(
         'port' : port,
         'reload' : debug,
         'mrsm_instance' : mrsm_instance,
+        'no_dash' : no_dash,
     })
+    if debug:
+        uvicorn_config['reload_dirs'] = [str(PACKAGE_ROOT_PATH)]
+    uvicorn_config['use_colors'] = (not nopretty) if nopretty else ANSI
 
-    custom_keys = ['mrsm_instance']
+    api_config['uvicorn'] = uvicorn_config
+    cf['system']['api']['uvicorn'] = uvicorn_config
+    from meerschaum.api import __version__
+
+    custom_keys = ['mrsm_instance', 'no_dash']
 
     ### write config to a temporary file to communicate with uvicorn threads
     import json, sys
     try:
-        if API_UVICORN_CONFIG_PATH.exists():
-            if debug:
-                dprint(f"Removing API config file: ({API_UVICORN_CONFIG_PATH})")
+        if API_UVICORN_CONFIG_PATH.exists() and not debug:
             os.remove(API_UVICORN_CONFIG_PATH)
-        assert(not API_UVICORN_CONFIG_PATH.exists())
+            assert(not API_UVICORN_CONFIG_PATH.exists())
     except Exception as e:
         error(e)
     with open(API_UVICORN_CONFIG_PATH, 'w+') as f:
         if debug:
-            dprint(f"Dumping API config file:")
-            pprint(uvicorn_config, stream=sys.stderr)
+            dprint(f"Dumping API config file:", nopretty=nopretty)
+            pprint(uvicorn_config, stream=sys.stderr, nopretty=nopretty)
         json.dump(uvicorn_config, f)
 
     ### remove custom keys before calling uvicorn
@@ -180,15 +196,18 @@ def _api_start(
         del uvicorn_config[k]
 
     if debug:
-        ### instantiate the SQL connector
-        dprint(f"Connecting to Meerschaum instance: {mrsm_instance}")
-
-        dprint(f"Starting Meerschaum API v{__version__} with the following configuration:")
-        pprint(uvicorn_config, stream=sys.stderr)
+        dprint(f"Connecting to Meerschaum instance: '{mrsm_instance}'.", nopretty=nopretty)
+        dprint(
+            f"Starting Meerschaum API v{__version__} with the following configuration:",
+            nopretty = nopretty
+        )
+        pprint(uvicorn_config, stream=sys.stderr, nopretty=nopretty)
 
     try:
         uvicorn.run(**uvicorn_config)
     except KeyboardInterrupt:
         pass
+
+    os.chdir(old_cwd)
 
     return (True, "Success")

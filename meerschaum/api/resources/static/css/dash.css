@@ -14,6 +14,18 @@ a {
   padding-bottom: 20px!ie7;
   max-height: 600px;
 }
+.codeblock {
+  background-color: var(--secondary) !important;
+  color: white !important;
+  display: block !important;
+  overflow-x: auto !important;
+  padding: 0.5em !important;
+
+}
+/* .dbc_dark code { */
+  /* color: var(--light) !important; */
+  /* background: var(--blue) !important; */
+/* } */
 
 
 /* .dash-dropdown { */

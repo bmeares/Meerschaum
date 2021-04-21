@@ -107,24 +107,30 @@ packages['sql'] = {
     'asyncpg'    : 'asyncpg>=0.21.0',
 }
 packages['sql'].update(packages['drivers'])
-packages['api'] = {
-    'uvicorn'                   : 'uvicorn>=0.12.2',
-    'websockets'                : 'websockets>=8.1',
-    'fastapi'                   : 'fastapi>=0.61.2',
-    'jinja2'                    : 'jinja2>=2.11.2',
-    'passlib'                   : 'passlib>=1.7.4',
-    'fastapi_login'             : 'fastapi-login>=1.5.3',
-    'multipart'                 : 'python-multipart>=0.0.5',
+packages['dash'] = {
     'dash'                      : 'dash>=1.20.0',
     'dash_bootstrap_components' : 'dash-bootstrap-components>=0.12.0',
     'dash_ace'                  : 'dash-ace>=0.2.1',
     'dash_extensions'           : 'dash-extensions>=0.0.51',
-    'ansi2html'                 : 'ansi2html>=1.6.0',
+    'dash_daq'                  : 'dash-daq>=0.5.0',
+
+}
+packages['api'] = {
+    'uvicorn'       : 'uvicorn[standard]>=0.13.4',
+    'websockets'    : 'websockets>=8.1',
+    'fastapi'       : 'fastapi>=0.61.2',
+    'fastapi_jwt_auth' : 'fastapi-jwt-auth>=0.5.0',
+    #  'jinja2'        : 'jinja2>=2.11.2',
+    'passlib'       : 'passlib>=1.7.4',
+    'fastapi_login' : 'fastapi-login>=1.5.3',
+    'multipart'     : 'python-multipart>=0.0.5',
+    #  'ansi2html'                 : 'ansi2html>=1.6.0',
     #  'capturer'                  : 'capturer>=3.0; platform_system != "Windows"',
 }
 packages['api'].update(packages['sql'])
 packages['api'].update(packages['_required'])
 packages['api'].update(packages['formatting'])
+packages['api'].update(packages['dash'])
 
 all_packages = dict()
 for group, import_names in packages.items():

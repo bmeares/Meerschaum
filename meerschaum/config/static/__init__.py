@@ -26,6 +26,7 @@ def _static_config():
                     'version' : '/version',
                     'chaining' : '/chaining',
                     'websocket' : '/ws',
+                    'dash' : '/dash',
                 },
                 'oauth' : {
                     'token_expires_minutes' : 15,

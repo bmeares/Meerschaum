@@ -13,9 +13,12 @@ from meerschaum.utils.packages import attempt_import
 from meerschaum.utils.misc import remove_ansi
 from meerschaum.actions import actions
 from meerschaum.api import debug
+from meerschaum.api.dash import running_jobs
 from meerschaum.api.dash.connectors import get_web_connector
 from meerschaum.api.dash.components import alert_from_success_tuple
 from meerschaum.api.dash.pipes import pipes_from_state, keys_from_state
+from meerschaum.api._websockets import websockets
+from meerschaum.utils.threading import Thread
 html = attempt_import('dash_html_components', warn=False)
 #  capturer = attempt_import('capturer', lazy=False) if platform.system() != 'Windows' else None
 capturer = None
@@ -25,16 +28,18 @@ def execute_action(state : WebState):
     Execute a Meerschaum action and capture its output.
     Format the output as an HTML `pre` object, and return a list of Alert objects.
     """
-    action, subaction, additional_subaction_text, flags = (
+    global running_jobs
+    action, subaction, subaction_hidden, additional_subaction_text, flags = (
         state['action-dropdown.value'],
         state['subaction-dropdown.value'],
+        state['subaction-dropdown-div.hidden'],
         state['subaction-dropdown-text.value'],
         state['flags-dropdown.value'],
     )
     if action is None:
         return [], []
-    if subaction is None:
-        subaction = []
+    if subaction is None or subaction_hidden:
+        subaction = None
     if additional_subaction_text is None:
         additional_subaction_text = ''
     if flags is None:
@@ -42,7 +47,8 @@ def execute_action(state : WebState):
 
     ### TODO add direct Input to parse if active_tab is 'text'
 
-    subactions = [subaction] + shlex.split(additional_subaction_text)
+    session_id = state['session-store.data'].get('session-id', None)
+    subactions = ([subaction] if subaction else []) + shlex.split(additional_subaction_text)
 
     keywords = {f : True for f in flags}
     keywords['debug'] = keywords.get('debug', debug)
@@ -84,7 +90,14 @@ def execute_action(state : WebState):
         text = cap.getvalue()
         return text, success_tuple
 
+    def use_thread():
+        thread = Thread(target=do_action, daemon=True)
+        running_jobs[session_id] = thread
+        thread.start()
+        return 'Started thread...', (True, 'Success')
+
     text, success_tuple = use_capture() if capturer is not None else use_stringio()
+    #  text, success_tuple = use_thread()
 
     return ([html.Pre(remove_ansi(text))], [alert_from_success_tuple(success_tuple)])
 

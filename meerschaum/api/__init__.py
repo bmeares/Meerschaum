@@ -9,7 +9,7 @@ from __future__ import annotations
 import pathlib, os
 from meerschaum.utils.typing import Dict, Any, Optional
 
-__version__ = "0.1.0"
+__version__ = "0.2.0"
 
 from meerschaum.config import get_config
 from meerschaum.config.static import _static_config
@@ -23,27 +23,10 @@ starlette_reponses = attempt_import('starlette.responses', warn=False, lazy=Fals
 python_multipart = attempt_import('multipart', lazy=False)
 from meerschaum.api._chain import check_allow_chaining, DISALLOW_CHAINING_MESSAGE
 
-fastapi_login = attempt_import('fastapi_login')
-LoginManager = fastapi_login.LoginManager
-def generate_secret_key():
-    """
-    Read or generate the keyfile
-    """
-    from meerschaum.config._paths import API_SECRET_KEY_PATH
-    if not API_SECRET_KEY_PATH.exists():
-        secret_key = os.urandom(24).hex()
-        with open(API_SECRET_KEY_PATH, 'w') as f:
-            f.write(secret_key)
-    else:
-        with open(API_SECRET_KEY_PATH, 'r') as f:
-            secret_key = f.read()
-
-    return secret_key
-
-SECRET = generate_secret_key()
-manager = LoginManager(SECRET, tokenUrl=endpoints['login'])
-
 uvicorn_config = None
+sys_config = get_config('system', 'api')
+permissions_config = get_config('system', 'api', 'permissions')
+
 def get_uvicorn_config() -> Dict[str, Any]:
     """
     Read the Uvicorn configuration JSON and return a dictionary.
@@ -55,7 +38,7 @@ def get_uvicorn_config() -> Dict[str, Any]:
             with open(API_UVICORN_CONFIG_PATH, 'r') as f:
                 uvicorn_config = json.load(f)
         except Exception as e:
-            uvicorn_config = dict()
+            uvicorn_config = sys_config.get('uvicorn', None)
 
         if uvicorn_config is None:
             uvicorn_config = dict()
@@ -66,9 +49,10 @@ def get_uvicorn_config() -> Dict[str, Any]:
     return uvicorn_config
 
 debug = get_uvicorn_config().get('debug', False) if API_UVICORN_CONFIG_PATH.exists() else False
+no_dash = get_uvicorn_config().get('no_dash', False)
 
 connector = None
-def get_connector(instance_keys : Optional[str] = None):
+def get_api_connector(instance_keys : Optional[str] = None):
     """
     Create the instance connector.
     """
@@ -92,7 +76,7 @@ def get_database(instance_keys : str = None):
     """
     global database
     if database is None:
-        database = get_connector(instance_keys).db
+        database = get_api_connector(instance_keys).db
     return database
 
 _pipes = None
@@ -102,7 +86,7 @@ def pipes(refresh=False):
     """
     global _pipes
     if _pipes is None or refresh:
-        _pipes = _get_pipes(mrsm_instance=get_connector())
+        _pipes = _get_pipes(mrsm_instance=get_api_connector())
     return _pipes
 
 def get_pipe(connector_keys, metric_key, location_key, refresh=False):
@@ -113,12 +97,11 @@ def get_pipe(connector_keys, metric_key, location_key, refresh=False):
     from meerschaum import Pipe
     if location_key in ('[None]', 'None', 'null'):
         location_key = None
-    p = Pipe(connector_keys, metric_key, location_key, mrsm_instance=get_connector())
+    p = Pipe(connector_keys, metric_key, location_key, mrsm_instance=get_api_connector())
     if is_pipe_registered(p, pipes()):
         return pipes(refresh=refresh)[connector_keys][metric_key][location_key]
     return p
 
-sys_config = get_config('system', 'api')
 app = fastapi.FastAPI(title='Meerschaum API')
 
 (
@@ -130,19 +113,20 @@ app = fastapi.FastAPI(title='Meerschaum API')
     'fastapi.templating',
     'fastapi.staticfiles',
 )
-jinja2 = attempt_import('jinja2')
+#  jinja2 = attempt_import('jinja2')
 
 HTMLResponse = fastapi_responses.HTMLResponse
 Request = fastapi.Request
 
 from meerschaum.config._paths import API_RESOURCES_PATH, API_STATIC_PATH, API_TEMPLATES_PATH
 app.mount('/static', fastapi_staticfiles.StaticFiles(directory=str(API_STATIC_PATH)), name='static')
-#  from meerschaum.api.dash import dash_app
-templates = fastapi_templating.Jinja2Templates(directory=str(API_TEMPLATES_PATH))
+#  templates = fastapi_templating.Jinja2Templates(directory=str(API_TEMPLATES_PATH))
 
 
-### import WebAPI routes
+### Import everything else within the API.
+from meerschaum.api._oauth2 import manager
 import meerschaum.api.routes as routes
 import meerschaum.api._events
 import meerschaum.api._websockets
-import meerschaum.api.dash
+if not no_dash:
+    import meerschaum.api.dash
