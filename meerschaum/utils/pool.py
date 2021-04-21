@@ -47,7 +47,10 @@ def get_pool(pool_class_name : str = 'ThreadPool', workers : int = None):
     if pool_class_name not in pools or pools.get(pool_class_name, None) is None:
         build_pool(workers)
 
-    if pools[pool_class_name]._state not in ('RUN', 0):
+    if (
+        pools[pool_class_name] is not None
+        and pools[pool_class_name]._state not in ('RUN', 0)
+    ):
         try:
             pools[pool_class_name].close()
         except Exception as e:
