@@ -6,12 +6,12 @@
 Global pools that are joined on exit.
 """
 
+from __future__ import annotations
+from meerschaum.utils.typing import Optional
+
 pools = None
 
-#  class DummyPool:
-
-
-def get_pool(pool_class_name : str = 'ThreadPool', workers : int = None):
+def get_pool(pool_class_name : str = 'ThreadPool', workers : Optional[int] = None):
     """
     If the requested pool does not exist, instantiate it here.
     Pools are joined and closed on exit.
