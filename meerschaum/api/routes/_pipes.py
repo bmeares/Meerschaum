@@ -13,7 +13,7 @@ from meerschaum.api import (
     fastapi,
     app,
     endpoints,
-    get_connector,
+    get_api_connector,
     pipes,
     get_pipe,
     _get_pipes,
@@ -41,14 +41,15 @@ def register_pipe(
         return False, (
             "The administrator for this server has not allowed pipe registration.\n\n" +
             "Please contact the system administrator, or if you are running this server, " +
-            "open the configuration file with `edit config system` and search for 'permissions'. " +
-            " Under the keys api:permissions:registration, you can toggle various registration types."
+            "open the configuration file with `edit config system` and search for 'permissions'." +
+            " Under the keys `api:permissions:registration`, " +
+            "you can toggle various registration types."
         )
     pipe_object = get_pipe(pipe.connector_keys, pipe.metric_key, pipe.location_key)
     if is_pipe_registered(pipe_object, pipes(refresh=True)):
         raise fastapi.HTTPException(status_code=409, detail="Pipe already registered")
     pipe_object.parameters = pipe.parameters
-    results = get_connector().register_pipe(pipe_object)
+    results = get_api_connector().register_pipe(pipe_object)
     pipes(refresh=True)
 
     return results
@@ -71,7 +72,7 @@ def edit_pipe(
     if not is_pipe_registered(pipe_object, pipes(refresh=True)):
         raise fastapi.HTTPException(status_code=404, detail="Pipe is not registered.")
 
-    results = get_connector().edit_pipe(pipe=pipe_object, patch=patch)
+    results = get_api_connector().edit_pipe(pipe=pipe_object, patch=patch)
 
     pipes(refresh=True)
     return results
@@ -90,7 +91,7 @@ async def fetch_pipes_keys(
     """
     import json
 
-    keys = get_connector().fetch_pipes_keys(
+    keys = get_api_connector().fetch_pipes_keys(
         connector_keys = json.loads(connector_keys),
         metric_keys = json.loads(metric_keys),
         location_keys = json.loads(location_keys),
@@ -111,7 +112,7 @@ async def get_pipes(
     Get all registered Pipes with metadata, excluding parameters.
     """
     from meerschaum.utils.misc import replace_pipes_in_dict
-    kw = {'debug' : debug, 'mrsm_instance' : get_connector()}
+    kw = {'debug' : debug, 'mrsm_instance' : get_api_connector()}
     if connector_keys != "":
         kw['connector_keys'] = connector_keys
     if metric_keys != "":
@@ -367,7 +368,7 @@ def create_metadata(
     """
     from meerschaum.connectors.sql.tables import get_tables
     try:
-        tables = get_tables(mrsm_instance=get_connector(), debug=debug)
+        tables = get_tables(mrsm_instance=get_api_connector(), debug=debug)
     except Exception as e:
         raise fastapi.HTTPException(status_code=500, detail=str(e))
     return True

@@ -6,18 +6,18 @@
 Declare FastAPI events in this module (startup, shutdown, etc)
 """
 
-from meerschaum.api import app, get_connector, get_uvicorn_config, debug
+from meerschaum.api import app, get_api_connector, get_uvicorn_config, debug
 from meerschaum.utils.debug import dprint
 
 @app.on_event("startup")
 async def startup():
     from meerschaum.utils.misc import retry_connect
     import sys, os
-    conn = get_connector()
+    conn = get_api_connector()
     try:
         from meerschaum.utils.warnings import warn
         connected = retry_connect(
-            get_connector(),
+            get_api_connector(),
             workers = get_uvicorn_config().get('workers', None),
             debug = debug
         )
@@ -33,17 +33,15 @@ async def shutdown():
     import os
     from meerschaum.config._paths import API_UVICORN_CONFIG_PATH
     try:
-        if debug:
-            dprint(f"Removing Uvicorn configuration ({API_UVICORN_CONFIG_PATH})")
-        if API_UVICORN_CONFIG_PATH.exists():
+        if API_UVICORN_CONFIG_PATH.exists() and not debug:
             os.remove(API_UVICORN_CONFIG_PATH)
     except Exception as e:
         pass
         print(e)
     if debug:
         dprint("Closing connection...")
-    if get_connector().type == 'sql':
+    if get_api_connector().type == 'sql':
         try:
-            await get_connector().db.disconnect()
+            await get_api_connector().db.disconnect()
         except Exception as e:
             pass

@@ -33,7 +33,7 @@ class User():
         email : Optional[str] = None,
         attributes : Optional[Dict[str, Any]] = None,
         user_id : Optional[int] = None,
-        repository : Optional[str] = None
+        instance : Optional[str] = None
     ):
         if password is None:
             password = ''
@@ -44,7 +44,7 @@ class User():
         self.type = type
         self._attributes = attributes
         self._user_id = user_id
-        self._repository_keys = repository
+        self._instance_keys = str(instance)
 
     def __repr__(self):
         return str(self)
@@ -59,11 +59,14 @@ class User():
         return self._attributes
 
     @property
-    def repository(self) -> meerschaum.connectors.Connector:
-        from meerschaum.connectors.parse import parse_repo_keys
-        if '_repository' not in self.__dict__:
-            self._repository = parse_repo_keys(self._repository_keys)
-        return self._repository
+    def instance_connector(self) -> meerschaum.connectors.Connector:
+        """
+        Return the instance connector for the user.
+        """
+        from meerschaum.connectors.parse import parse_instance_keys
+        if '_instance_connector' not in self.__dict__:
+            self._instance_connector = parse_instance_keys(self._instance_keys)
+        return self._instance_connector
 
     @property
     def user_id(self) -> int:
@@ -71,8 +74,6 @@ class User():
         NOTE: This causes recursion with the API,
               so don't try to get fancy with read-only attributes.
         """
-        #  if self._user_id is None:
-            #  self._user_id = self.repository.get_user_id(self)
         return self._user_id
 
     @user_id.setter

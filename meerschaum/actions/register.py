@@ -183,7 +183,7 @@ def _register_users(
     ### filter out existing users
     nonregistered_users = []
     for username in action:
-        user = User(username=username)
+        user = User(username=username, instance=instance_connector)
         user_id = instance_connector.get_user_id(user, debug=debug)
         if user_id is not None:
             info(f"User '{user}' already exists. Skipping...")
@@ -199,7 +199,15 @@ def _register_users(
             password = get_password(username, minimum_length=7)
             email = get_email(username, allow_omit=True)
         except Exception as e:
-            return False, f"Aborted registering users {', '.join([str(u) for u in nonregistered_users if u not in successfully_registered_users])}"
+            return False, (
+                "Aborted registering users " +
+                ', '.join(
+                    [
+                        str(u) for u in nonregistered_users
+                            if u not in successfully_registered_users
+                    ]
+                )
+            )
         if len(email) == 0:
             email = None
         user = User(username, password, email=email)
@@ -221,7 +229,7 @@ def _register_users(
         f"Finished registering {succeeded + failed} users." + '\n' +
         f"  ({succeeded} succeeded, {failed} failed)"
     )
-    return True, msg
+    return succeeded > 0, msg
 
 ### NOTE: This must be the final statement of the module.
 ###       Any subactions added below these lines will not

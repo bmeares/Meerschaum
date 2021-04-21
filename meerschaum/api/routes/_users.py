@@ -1,4 +1,4 @@
-#! /usr/bin/env python
+#, manager! /usr/bin/env python
 # -*- coding: utf-8 -*-
 # vim:fenc=utf-8
 
@@ -13,7 +13,7 @@ from meerschaum.utils.typing import (
 
 from meerschaum.utils.packages import attempt_import
 from meerschaum.api import (
-    fastapi, app, endpoints, get_connector, pipes, get_pipe,
+    fastapi, app, endpoints, get_api_connector, pipes, get_pipe,
     manager, debug, check_allow_chaining, DISALLOW_CHAINING_MESSAGE
 )
 from meerschaum.api.tables import get_tables
@@ -25,71 +25,29 @@ import meerschaum._internal.User
 sqlalchemy = attempt_import('sqlalchemy')
 users_endpoint = endpoints['users']
 
-from fastapi.security import OAuth2PasswordRequestForm
-from fastapi_login.exceptions import InvalidCredentialsException
 from fastapi import HTTPException
 from meerschaum.config.static import _static_config
-
-@manager.user_loader
-def load_user(
-        username: str
-    ) -> User:
-    return User(username, repository=get_connector())
-
-@app.post(endpoints['login'])
-def login(
-        response : Response,
-        data : OAuth2PasswordRequestForm = fastapi.Depends()
-        #  data : OAuth2PasswordRequestForm
-    ) -> JSONResponse:
-    """
-    Login and set the session token
-    """
-    username = data.username
-    password = data.password
-
-    from meerschaum._internal.User._User import get_pwd_context
-    user = User(username, password)
-    correct_password = get_pwd_context().verify(
-        password, get_connector().get_user_password_hash(user, debug=debug)
-    )
-    if not correct_password:
-        raise InvalidCredentialsException
-
-    expires_minutes = _static_config()['api']['oauth']['token_expires_minutes']
-    expires_delta = datetime.timedelta(minutes=expires_minutes)
-    expires_dt = datetime.datetime.utcnow() + expires_delta
-    access_token = manager.create_access_token(
-        data = dict(sub=username),
-        expires = expires_delta
-    )
-    #  response.set_cookie(key="user_id", value=get_connector().get_user_id(user))
-    return {
-        'access_token': access_token,
-        'token_type': 'bearer',
-        'expires' : expires_dt,
-    }
 
 @app.get(users_endpoint + "/me")
 def read_current_user(
         curr_user : 'meerschaum._internal.User.User' = fastapi.Depends(manager),
-    ) -> Mapping[str, Union[str, int]]:
+    ) -> Dict[str, Union[str, int]]:
     """
     Return attributes of the current User.
     """
     return {
         'username' : curr_user.username,
-        'user_id' : get_connector().get_user_id(curr_user),
-        'user_type' : get_connector().get_user_type(curr_user),
-        'attributes' : get_connector().get_user_attributes(curr_user),
+        'user_id' : get_api_connector().get_user_id(curr_user),
+        'user_type' : get_api_connector().get_user_type(curr_user),
+        'attributes' : get_api_connector().get_user_attributes(curr_user),
     }
 
 @app.get(users_endpoint)
-def get_users() -> Sequence[str]:
+def get_users() -> List[str]:
     """
     Return a list of registered users
     """
-    return get_connector().get_users(debug=debug)
+    return get_api_connector().get_users(debug=debug)
 
 @app.post(users_endpoint + "/{username}/register")
 def register_user(
@@ -100,7 +58,7 @@ def register_user(
         attributes : Optional[Dict[str, Any]] = None
     ) -> SuccessTuple:
     """
-    Register a new user
+    Register a new user.
     """
     from meerschaum.config import get_config
     allow_users = get_config('system', 'api', 'permissions', 'registration', 'users', patch=True)
@@ -109,10 +67,17 @@ def register_user(
             "The administrator for this server has not allowed user registration.\n\n" +
             "Please contact the system administrator, or if you are running this server, " +
             "open the configuration file with `edit config system` and search for 'permissions'. " +
-            " Under the keys api:permissions:registration, you can toggle various registration types."
+            " Under the keys api:permissions:registration, " +
+            "you can toggle various registration types."
+        )
+    if type == 'admin':
+        return False, (
+            "New users cannot be of type 'admin' when using the API connector. " +
+            "Register a normal user first, then edit the user from an authorized account, " +
+            "or use a SQL connector instead."
         )
     user = User(username, password, type=type, email=email, attributes=attributes)
-    return get_connector().register_user(user, debug=debug)
+    return get_api_connector().register_user(user, debug=debug)
 
 @app.post(users_endpoint + "/{username}/edit")
 def edit_user(
@@ -127,11 +92,11 @@ def edit_user(
     Edit an existing user
     """
     user = User(username, password, email=email, attributes=attributes)
-    user_type = get_connector().get_user_type(curr_user)
+    user_type = get_api_connector().get_user_type(curr_user)
     if user_type == 'admin' and type is not None:
         user.type = type
     if user_type == 'admin' or curr_user.username == user.username:
-        return get_connector().edit_user(user, debug=debug)
+        return get_api_connector().edit_user(user, debug=debug)
 
     return False, f"Cannot edit user '{user}': Permission denied"
 
@@ -142,7 +107,7 @@ def get_user_id(
     """
     Get a user's ID
     """
-    return get_connector().get_user_id(User(username), debug=debug)
+    return get_api_connector().get_user_id(User(username), debug=debug)
 
 @app.get(users_endpoint + "/{username}/attributes")
 def get_user_attributes(
@@ -151,7 +116,7 @@ def get_user_attributes(
     """
     Get a user's attributes.
     """
-    return get_connector().get_user_attributes(User(username), debug=debug)
+    return get_api_connector().get_user_attributes(User(username), debug=debug)
 
 @app.post(users_endpoint + "/{username}/delete")
 def delete_user(
@@ -162,9 +127,9 @@ def delete_user(
     Delete a user.
     """
     user = User(username)
-    user_type = get_connector().get_user_type(curr_user, debug=debug)
+    user_type = get_api_connector().get_user_type(curr_user, debug=debug)
     if user_type == 'admin' or curr_user.username == user.username:
-        return get_connector().delete_user(user, debug=debug)
+        return get_api_connector().delete_user(user, debug=debug)
 
     return False, f"Cannot delete user '{user}': Permission denied"
 
@@ -182,7 +147,7 @@ def get_user_password_hash(
     """
     if not check_allow_chaining():
         raise HTTPException(status_code=403, detail=DISALLOW_CHAINING_MESSAGE)
-    return get_connector().get_user_password_hash(User(username), debug=debug)
+    return get_api_connector().get_user_password_hash(User(username), debug=debug)
 
 @app.get(users_endpoint + '/{username}/type')
 def get_user_type(
@@ -194,6 +159,4 @@ def get_user_type(
     """
     if not check_allow_chaining():
         raise HTTPException(status_code=403, detail=DISALLOW_CHAINING_MESSAGE)
-    return get_connector().get_user_type(User(username))
-
-
+    return get_api_connector().get_user_type(User(username))

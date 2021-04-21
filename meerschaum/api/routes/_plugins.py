@@ -7,13 +7,13 @@ Routes for managing plugins
 """
 
 from __future__ import annotations
-from meerschaum.utils.typing import Optional, List
+from meerschaum.utils.typing import Optional, List, SuccessTuple, Union
 
 from meerschaum.api import (
     fastapi,
     app,
     endpoints,
-    get_connector,
+    get_api_connector,
     pipes,
     get_pipe,
     manager,
@@ -36,18 +36,19 @@ def register_plugin(
         attributes : str = None,
         archive : UploadFile = File(...),
         curr_user : 'meerschaum._internal.User.User' = fastapi.Depends(manager),
-    ) -> tuple:
+    ) -> SuccessTuple:
     """
-    Register a plugin and save its archive file
+    Register a plugin and save its archive file.
     """
     from meerschaum.config import get_config
-    allow_plugins = get_config('system', 'api', 'permissions', 'registration', 'plugins', patch=True)
+    allow_plugins = get_config('system', 'api', 'permissions', 'registration', 'plugins')
     if not allow_plugins:
         return False, (
             "The administrator for this server has not allowed plugin registration.\n\n" +
             "Please contact the system administrator, or if you are running this server, " +
             "open the configuration file with `edit config system` and search for 'permissions'. " +
-            " Under the keys api:permissions:registration, you can toggle various registration types."
+            " Under the keys `api:permissions:registration`, " +
+            "you can toggle various registration types."
         )
 
     import json, shutil, pathlib, os
@@ -55,16 +56,16 @@ def register_plugin(
     from meerschaum._internal.Plugin import Plugin
     get_tables()
     if attributes is None:
-        attributes = json.dumps(dict())
+        attributes = json.dumps({})
     attributes = json.loads(attributes)
 
     plugin = Plugin(name, version=version, attributes=attributes)
-    plugin_user_id = get_connector().get_plugin_user_id(plugin)
-    if plugin_user_id is not None and plugin_user_id != get_connector().get_user_id(curr_user):
+    plugin_user_id = get_api_connector().get_plugin_user_id(plugin)
+    if plugin_user_id is not None and plugin_user_id != get_api_connector().get_user_id(curr_user):
         return False, f"User '{curr_user.username}' cannot edit plugin '{plugin}'."
-    plugin.user_id = get_connector().get_user_id(curr_user)
+    plugin.user_id = get_api_connector().get_user_id(curr_user)
 
-    success, msg = get_connector().register_plugin(plugin, make_archive=False, debug=debug)
+    success, msg = get_api_connector().register_plugin(plugin, make_archive=False, debug=debug)
 
     ### TODO delete and install new version of plugin on success
     if success:
@@ -80,7 +81,7 @@ def register_plugin(
 @app.get(plugins_endpoint + '/{name}')
 def get_plugin(
         name : str
-    ) -> FileResponse:
+    ) -> Union[FileResponse, SuccessTuple]:
     """
     Download a plugin's archive file
     """
@@ -98,7 +99,7 @@ def get_plugin_attributes(
     Download a plugin's archive file
     """
     from meerschaum._internal.Plugin import Plugin
-    return get_connector().get_plugin_attributes(Plugin(name))
+    return get_api_connector().get_plugin_attributes(Plugin(name))
 
 @app.get(plugins_endpoint)
 def get_plugins(
@@ -108,4 +109,4 @@ def get_plugins(
     """
     Return a list of registered plugins
     """
-    return get_connector().get_plugins(user_id=user_id, search_term=search_term)
+    return get_api_connector().get_plugins(user_id=user_id, search_term=search_term)

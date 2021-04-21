@@ -3,27 +3,29 @@
 # vim:fenc=utf-8
 
 """
-Define Dash callback functions.
+Callbacks for the main dashboard.
 """
 
 from __future__ import annotations
-import textwrap
+import textwrap, json, datetime
 from dash.dependencies import Input, Output, State
+from dash.exceptions import PreventUpdate
 from meerschaum.config import get_config
-from meerschaum.utils.typing import List, Optional
-from meerschaum.api import get_connector as get_api_connector
-from meerschaum.api.dash import (
-    dash_app, debug, pipes, _get_pipes
-)
+from meerschaum.config.static import _static_config
+from meerschaum.utils.typing import List, Optional, Any
+from meerschaum.api import get_api_connector, endpoints
+from meerschaum.api.dash import dash_app, debug, pipes, _get_pipes, active_sessions
 from meerschaum.api.dash.connectors import get_web_connector
 from meerschaum.api.dash.websockets import ws_url_from_href
 from meerschaum.connectors.parse import parse_instance_keys
 from meerschaum.api.dash.pipes import get_pipes_cards
 from meerschaum.api.dash.components import alert_from_success_tuple
 from meerschaum.api.dash.actions import execute_action, check_input_interval
+import meerschaum.api.dash.pages as pages
+from meerschaum.utils.typing import Dict
 from meerschaum.utils.debug import dprint
 from meerschaum.utils.packages import attempt_import
-from meerschaum.utils.misc import string_to_dict, get_connector_labels
+from meerschaum.utils.misc import string_to_dict, get_connector_labels, json_serialize_datetime
 from meerschaum.actions import get_subactions, actions
 from meerschaum.actions.arguments._parser import get_arguments_triggers, parser
 dash = attempt_import('dash', lazy=False)
@@ -42,12 +44,14 @@ keys_state = (
     State('pipes-filter-tabs', 'active_tab'),
     State('action-dropdown', 'value'),
     State('subaction-dropdown', 'value'),
+    State('subaction-dropdown-div', 'hidden'),
     State('subaction-dropdown-text', 'value'),
     State('flags-dropdown', 'value'),
     State('instance-select', 'value'),
     State('content-div-right', 'children'),
     State('success-alert-div', 'children'),
     State('check-input-interval', 'disabled'),
+    State('session-store', 'data'),
 )
 
 omit_flags = {
@@ -79,7 +83,28 @@ omit_actions = {
 trigger_aliases = {
     'keyboard' : 'go-button',
 }
-
+_paths = {
+    'login' : pages.login.layout,
+    ''      : pages.dashboard.layout,
+}
+ 
+@dash_app.callback(
+    Output('page-layout-div', 'children'),
+    Input('location', 'pathname'),
+    State('session-store', 'data'),
+)
+def update_page_layout_div(pathname : str, session_store_data : Dict[str, Any]):
+    """
+    Route the user to the correct page.
+    """
+    dash_endpoint = endpoints['dash']
+    session_id = session_store_data.get('session-id', None) 
+    path = (
+        (pathname.rstrip('/') + '/').replace((dash_endpoint + '/'), '').rstrip('/')
+        if session_id in active_sessions else 'login'
+    )
+    layout = _paths.get(path, pages.error.layout)
+    return layout
 
 @dash_app.callback(
     Output('content-div-right', 'children'),
@@ -93,7 +118,8 @@ trigger_aliases = {
     State('keyboard', 'keydown'),
     State('location', 'href'),
     State('ws', 'url'),
-    *keys_state
+    *keys_state,
+    #  prevent_initial_call=True,
 )
 def update_content(*args):
     """
@@ -105,7 +131,6 @@ def update_content(*args):
         dash.no_update if ctx.states['ws.url']
         else ws_url_from_href(ctx.states['location.href'])
     )
-    #  ws_url = ws_url_from_href(ctx.states['location.href'])
 
     if not ctx.triggered:
         return [], [], True, ws_url
@@ -323,16 +348,6 @@ def clear_location_keys_input(val):
     """
     return ''
 
-#  @dash_app.callback(
-    #  Output(component_id='params-textarea', component_property='value'),
-    #  Input(component_id='clear-params-textarea-button', component_property='n_clicks'),
-#  )
-#  def clear_params_textarea(val):
-    #  """
-    #  Reset the connector key input box.
-    #  """
-    #  return ''
-
 @dash_app.callback(
     Output(component_id='subaction-dropdown-text', component_property='value'),
     Input(component_id='clear-subaction-dropdown-text-button', component_property='n_clicks'),
@@ -342,24 +357,6 @@ def clear_subaction_dropdown_text(val):
     Reset the connector key input box.
     """
     return ''
-
-#  @dash_app.callback(
-    #  Output(component_id='params-textarea', component_property='valid'),
-    #  Output(component_id='params-textarea', component_property='invalid'),
-    #  Input(component_id='params-textarea', component_property='value'),
-#  )
-#  def validate_params_textarea(params_text : Optional[str]):
-    #  """
-    #  Check if the value in the params-textarea is a valid dictionary.
-    #  """
-    #  if not params_text:
-        #  return None, None
-    #  try:
-        #  d = string_to_dict(params_text)
-    #  except Exception as e:
-        #  print(e)
-        #  return False, True
-    #  return True, False
 
 @dash_app.callback(
     Output('arguments-collapse', 'is_open'),
@@ -375,32 +372,35 @@ def show_arguments_collapse(n_clicks : int, is_open : bool):
 @dash_app.callback(
     Output('ws', 'send'),
     Input('test-button', 'n_clicks'),
+    Input('ws', 'url'),
     State('ws', 'state'),
     State('ws', 'message'),
     State('ws', 'error'),
     State('ws', 'protocols'),
+    State('session-store', 'data'),
 )
-def test(n_clicks : int, *states):
-    if not n_clicks:
-        return dash.no_update
-    #  print(states)
-    import datetime
-    print('send message')
-    return str(datetime.datetime.utcnow())
+def ws_send(n_clicks : int, url, *states):
+    """
+    Send an initial connection message over the websocket.
+    """
+    ctx = dash.callback_context
+    if not url:
+        raise PreventUpdate
+    session_id = ctx.states['session-store.data']['session-id']
+    return json.dumps({
+        'connect-time' : json_serialize_datetime(datetime.datetime.utcnow()),
+        'session-id' : session_id,
+    })
 
 @dash_app.callback(
     Output('content-div-right', 'children'),
-    #  Output('ws', 'send'),
     Input('ws', 'message'),
-    #  State('ws', 'url'),
 )
-def receive(message):
-    import json
+def ws_receive(message):
+    """
+    Display received messages.
+    """
     if not message:
-        return dash.no_update
-    print('receive message')
-    return [json.dumps(message)]
+        raise PreventUpdate
+    return html.Pre(message['data'])
 
-#  @dash_app.callback_connect
-#  def foo(client, connect):
-    #  print(client, connect, len(dash_app.clients))

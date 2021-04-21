@@ -6,17 +6,14 @@
 Default route
 """
 
+import starlette.responses
 from meerschaum.api import (
     app,
     endpoints,
-    database,
-    connector,
     HTMLResponse,
     Request,
-    templates
 )
 from meerschaum.utils.packages import attempt_import
-import starlette.responses
 RedirectResponse = starlette.responses.RedirectResponse
 
 @app.get(endpoints['index'], response_class=HTMLResponse)
@@ -24,5 +21,5 @@ def index(request : Request):
     """
     Meerschaum WebAPI index page
     """
-    return RedirectResponse(url='/docs')
-    #  return templates.TemplateResponse("index.html", {"request" : request})
+    dash_endpoint = endpoints['dash']
+    return RedirectResponse(url=dash_endpoint)

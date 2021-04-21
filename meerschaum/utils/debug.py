@@ -15,6 +15,7 @@ def dprint(
         package: bool = True,
         color : Optional[Union[str, List[str]]] = None,
         attrs : Optional[List[str]] = None,
+        nopretty : bool = False,
         **kw
     ) -> None:
     """
@@ -22,7 +23,7 @@ def dprint(
     """
     if attrs is None:
         attrs = []
-    if not isinstance(color, bool):
+    if not isinstance(color, bool) and not nopretty:
         try:
             from meerschaum.utils.formatting import CHARSET, ANSI, colored
         except ImportError:
@@ -33,6 +34,7 @@ def dprint(
         _color = color
     else:
         CHARSET, ANSI, colored, _color, cf = 'ascii', False, None, None, None
+
     import logging, sys, inspect
     logging.basicConfig(format='%(message)s')
     log = logging.getLogger(__name__)
@@ -65,7 +67,7 @@ def dprint(
             if isinstance(_color, str):
                 _color = [_color]
         else:
-            if cf is not None:
+            if cf is not None and not nopretty:
                 try:
                     _color = cf['formatting']['debug']['ansi']['color'] if cf is not None else []
                 except KeyError:
@@ -74,4 +76,5 @@ def dprint(
                 _color = []
         if colored is not None:
             premsg = colored(premsg, *_color)
-    log.warning(premsg + msg, **kw)
+    #  log.warning(premsg + msg, **kw)
+    print(premsg + msg)

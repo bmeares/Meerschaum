@@ -43,8 +43,8 @@ class APIConnector(Connector):
         get_plugins,
         get_plugin_attributes,
     )
+    from ._login import login, refresh
     from ._users import (
-        login,
         register_user,
         get_user_id,
         get_users,
@@ -94,14 +94,23 @@ class APIConnector(Connector):
     def token(self):
         import datetime
 
-        expired = True
-        if self._expires is not None:
-            expired = (self._expires < datetime.datetime.utcnow() + datetime.timedelta(minutes=1))
+        expired = (
+            True if self._expires is None else (
+                (self._expires < datetime.datetime.utcnow() + datetime.timedelta(minutes=1))
+            )
+        )
+
+        def _print_tup(_tup):
+            from meerschaum.utils.formatting import print_tuple
+            print_tuple(tup)
 
         if self._token is None or expired:
             tup = self.login()
             if not tup[0]:
-                from meerschaum.utils.formatting import print_tuple
-                print_tuple(tup)
+                _print_tup(tup)
+        elif expired:
+            tup = self.refresh()
+            if not tup[0]:
+                _print_tup(tup)
         return self._token
 

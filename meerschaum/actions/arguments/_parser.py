@@ -174,6 +174,14 @@ groups['sync'].add_argument(
     help="Sync chunks while fetching data instead of waiting until all have arrived. " +
     "Similar to --async. WARNING! This can be very dangerous when used with --async.",
 )
+groups['sync'].add_argument(
+    '--skip-check-existing', '--allow-duplicates', action='store_true',
+    help = (
+        "Skip checking for duplicate rows when syncing. " +
+        "This drastically improves performance when all rows to be synced are unique. " +
+        "For example, this setting is highly recommended for use with IoT devices."
+    )
+)
 
 ### API options
 groups['api'].add_argument(
@@ -181,7 +189,11 @@ groups['api'].add_argument(
 )
 groups['api'].add_argument(
     '-w', '--workers', type=int,
-    help="How many workers to run a concurrent action (e.g. running the API or syncing pipes)"
+    help = "How many workers to run a concurrent action (e.g. running the API or syncing pipes)"
+)
+groups['api'].add_argument(
+    '--no-dash', '--nodash', action='store_true',
+    help = 'When starting the API, do not start the Web interface.',
 )
 
 ### Plugins options

@@ -110,9 +110,11 @@ def sync(
         If possible, sync chunks in parallel.
         Defaults to False.
 
-    :param debug: Verbosity toggle. Defaults to False.
+    :param debug:
+        Verbosity toggle. Defaults to False.
 
-    :param kw: Catch-all for keyword arguments.
+    :param kw:
+        Catch-all for keyword arguments.
     """
     from meerschaum.utils.debug import dprint
     from meerschaum.utils.warnings import warn, error
