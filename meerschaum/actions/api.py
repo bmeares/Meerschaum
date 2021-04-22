@@ -137,6 +137,9 @@ def _api_start(
     pool = get_pool(workers=workers)
     if pool is None:
         workers = 1
+    else:
+        pool.close()
+        pool.join()
     
     uvicorn_config['workers'] = workers
 
