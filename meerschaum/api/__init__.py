@@ -55,7 +55,7 @@ no_dash = get_uvicorn_config().get('no_dash', False)
 ### NOTE: Disable dash unless version is at least 0.3.0.
 _include_dash = (
     (not no_dash)
-    and (packaging_version.parse(version) >= packaging_version.parse('0.3.0'))
+    and (packaging_version.parse(version) >= packaging_version.parse('0.3.0.rc1'))
 )
 
 connector = None
