@@ -12,6 +12,8 @@ from meerschaum.api import (
     endpoints,
     HTMLResponse,
     Request,
+    version,
+    _include_dash,
 )
 from meerschaum.utils.packages import attempt_import
 RedirectResponse = starlette.responses.RedirectResponse
@@ -21,5 +23,5 @@ def index(request : Request):
     """
     Meerschaum WebAPI index page
     """
-    dash_endpoint = endpoints['dash']
-    return RedirectResponse(url=dash_endpoint)
+    _url = endpoints['dash'] if _include_dash else '/docs'
+    return RedirectResponse(url=_url)

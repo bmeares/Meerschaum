@@ -8,7 +8,6 @@ Execute actions via the web interface.
 
 from __future__ import annotations
 import platform, sys, io, os, shlex, time
-from queue import Queue
 from meerschaum.utils.threading import Thread
 from meerschaum.utils.typing import SuccessTuple, Tuple, Dict, Any, WebState
 from meerschaum.utils.packages import attempt_import
@@ -140,7 +139,6 @@ def execute_action(state : WebState):
         return text, success_tuple
 
     def use_thread():
-        queue = Queue()
         action_thread = Thread(target=do_action)
         monitor_thread = Thread(target=monitor_and_send_stdout) 
         running_jobs[session_id] = action_thread

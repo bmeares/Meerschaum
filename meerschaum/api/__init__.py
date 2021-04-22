@@ -9,7 +9,8 @@ from __future__ import annotations
 import pathlib, os
 from meerschaum.utils.typing import Dict, Any, Optional
 
-__version__ = "0.2.0"
+from meerschaum import __version__ as version
+__version__ = version
 
 from meerschaum.config import get_config
 from meerschaum.config.static import _static_config
@@ -21,6 +22,7 @@ aiofiles = attempt_import('aiofiles', lazy=False)
 fastapi = attempt_import('fastapi', lazy=False)
 starlette_reponses = attempt_import('starlette.responses', warn=False, lazy=False)
 python_multipart = attempt_import('multipart', lazy=False)
+packaging_version = attempt_import('packaging.version')
 from meerschaum.api._chain import check_allow_chaining, DISALLOW_CHAINING_MESSAGE
 
 uvicorn_config = None
@@ -50,6 +52,11 @@ def get_uvicorn_config() -> Dict[str, Any]:
 
 debug = get_uvicorn_config().get('debug', False) if API_UVICORN_CONFIG_PATH.exists() else False
 no_dash = get_uvicorn_config().get('no_dash', False)
+### NOTE: Disable dash unless version is at least 0.3.0.
+_include_dash = (
+    (not no_dash)
+    and (packaging_version.parse(version) >= packaging_version.parse('0.3.0'))
+)
 
 connector = None
 def get_api_connector(instance_keys : Optional[str] = None):
@@ -128,5 +135,6 @@ from meerschaum.api._oauth2 import manager
 import meerschaum.api.routes as routes
 import meerschaum.api._events
 import meerschaum.api._websockets
-if not no_dash:
+
+if _include_dash:
     import meerschaum.api.dash
