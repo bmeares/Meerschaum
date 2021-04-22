@@ -30,7 +30,7 @@ def generate_secret_key() -> str:
     return secret_key
 
 SECRET = generate_secret_key()
-manager = LoginManager(SECRET, tokenUrl=endpoints['login'])
+manager = LoginManager(SECRET, token_url=endpoints['login'])
 
 
 #  fastapi_jwt_auth = attempt_import('fastapi_jwt_auth', lazy=False)

@@ -122,7 +122,7 @@ packages['api'] = {
     'fastapi_jwt_auth' : 'fastapi-jwt-auth>=0.5.0',
     #  'jinja2'        : 'jinja2>=2.11.2',
     'passlib'       : 'passlib>=1.7.4',
-    'fastapi_login' : 'fastapi-login>=1.5.3',
+    'fastapi_login' : 'fastapi-login>=1.6.0',
     'multipart'     : 'python-multipart>=0.0.5',
     #  'capturer'                  : 'capturer>=3.0; platform_system != "Windows"',
 }
