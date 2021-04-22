@@ -17,6 +17,7 @@ class Thread(threading.Thread):
         self.callback = callback
         self.error_callback = error_callback
         self.method = target
+        self._return = None
 
     def wrap_target_with_callback(self, *args, **kw):
         """
@@ -34,3 +35,15 @@ class Thread(threading.Thread):
         if cb is not None:
             cb(result)
 
+    def join(self):
+        """
+        Return the thread's return value upon joining.
+        """
+        threading.Thread.join(self)
+        return self._return
+
+    def run(self):
+        """
+        Set the return to the result of the target.
+        """
+        self._return = self._target(*self._args, **self._kwargs)

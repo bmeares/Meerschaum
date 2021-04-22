@@ -6,6 +6,8 @@
 Functions for interacting via WebSockets.
 """
 
+import asyncio, sys
+from meerschaum.api._websockets import websockets
 from meerschaum.config.static import _static_config
 
 def ws_url_from_href(href : str):
@@ -21,3 +23,15 @@ def ws_url_from_href(href : str):
         _static_config()['api']['endpoints']['websocket']
     )
 
+def ws_send(msg: str, session_id : str):
+    """
+    Send a string to a client over the websocket.
+    """
+    #  session_id = 'debug'
+    if session_id not in websockets:
+        return
+    async def do_send():
+        print(f"Sending message to '{session_id}':", len(msg), file=sys.stderr)
+        await websockets[session_id].send_text(msg)
+    asyncio.run(do_send())
+    #  print('Done!', file=sys.stderr)

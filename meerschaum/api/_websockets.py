@@ -35,7 +35,7 @@ async def websocket_endpoint(
     await websocket.send_text(join_msg)
     websockets[session_id] = websocket
     ### NOTE: remove the below statement!
-    #  websockets['debug'] = websocket
+    websockets['debug'] = websocket
     while True:
         try:
             data = await websocket.receive_text()

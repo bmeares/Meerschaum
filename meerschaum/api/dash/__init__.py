@@ -32,6 +32,9 @@ _static_config()['system']['prompt']['web'] = True
 
 active_sessions = set()
 running_jobs = {}
+running_monitors = {}
+stopped_jobs = {}
+stopped_monitors = {}
 
 stylesheets = ['/static/css/darkly.min.css', '/static/css/dbc_dark.css', '/static/css/dash.css']
 dash_app = enrich.DashProxy(

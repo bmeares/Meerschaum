@@ -113,7 +113,7 @@ packages['dash'] = {
     'dash_ace'                  : 'dash-ace>=0.2.1',
     'dash_extensions'           : 'dash-extensions>=0.0.51',
     'dash_daq'                  : 'dash-daq>=0.5.0',
-
+    'ansi2html'                 : 'ansi2html>=1.6.0',
 }
 packages['api'] = {
     'uvicorn'       : 'uvicorn[standard]>=0.13.4',
@@ -124,7 +124,6 @@ packages['api'] = {
     'passlib'       : 'passlib>=1.7.4',
     'fastapi_login' : 'fastapi-login>=1.5.3',
     'multipart'     : 'python-multipart>=0.0.5',
-    #  'ansi2html'                 : 'ansi2html>=1.6.0',
     #  'capturer'                  : 'capturer>=3.0; platform_system != "Windows"',
 }
 packages['api'].update(packages['sql'])
