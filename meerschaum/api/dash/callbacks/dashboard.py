@@ -7,7 +7,7 @@ Callbacks for the main dashboard.
 """
 
 from __future__ import annotations
-import textwrap, json, datetime
+import sys, textwrap, json, datetime
 from dash.dependencies import Input, Output, State
 from dash.exceptions import PreventUpdate
 from meerschaum.config import get_config
@@ -402,5 +402,28 @@ def ws_receive(message):
     """
     if not message:
         raise PreventUpdate
-    return html.Pre(message['data'])
+    print('Received message:', len(message['data']), file=sys.stderr)
+    return [html.Div(
+        [html.Pre(message['data'], id='console-pre')],
+        id = 'console-div',
+    )]
 
+dash_app.clientside_callback(
+    """
+    function(console_children, url){
+        console.log(console_children);
+        if (!console_children){
+            return console_children;
+        }
+        var ansi_up = new AnsiUp;
+        var html = ansi_up.ansi_to_html(console_children);
+        document.getElementById("console-div").innerHTML = (
+            "<pre id=\\"console-pre\\">" + html + "</pre>"
+        );
+        return url;
+    }
+    """,
+    Output('location', 'href'),
+    Input('console-pre', 'children'),
+    State('location', 'href'),
+)
