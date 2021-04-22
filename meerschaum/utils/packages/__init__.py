@@ -7,13 +7,13 @@ Functions for managing packages and virtual environments reside here.
 """
 
 from __future__ import annotations
+import importlib, os
 from meerschaum.utils.typing import Any, List, SuccessTuple, Optional, Union
 
-import os, importlib
-_import_module = importlib.import_module
 from meerschaum.utils.packages._packages import packages, all_packages
 from meerschaum.utils.warnings import warn, error
 
+_import_module = importlib.import_module
 _import_hook_venv = None
 active_venvs = set()
 def need_update(
@@ -220,9 +220,12 @@ def pip_install(
     Install pip packages
     """
     from meerschaum.config.static import _static_config
-    try:
-        from meerschaum.utils.formatting import ANSI, UNICODE
-    except ImportError:
+    if color:
+        try:
+            from meerschaum.utils.formatting import ANSI, UNICODE
+        except ImportError:
+            ANSI, UNICODE = False, False
+    else:
         ANSI, UNICODE = False, False
     if check_wheel:
         try:
@@ -824,7 +827,6 @@ def package_venv(package : 'ModuleType') -> Optional[str]:
     """
     Inspect a package and return the virtual environment in which it presides.
     """
-    import os
     from meerschaum.config._paths import VIRTENV_RESOURCES_PATH
     if str(VIRTENV_RESOURCES_PATH) not in package.__file__:
         return None
