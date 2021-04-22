@@ -2,7 +2,9 @@
 This changelog was not introduced until v0.2.12, so many of the critical releases of Meerschaum have already been published. I've backlogged previous releases but haven't added all notes for all the versions.
 
 ## 0.3.x Releases
-Version 0.3 introduced the web interface and continued the focus on the user experience. This is the current release cycle, so future features will be updated below.
+Version 0.3.0 introduced the web interface and continued the focus on the user experience. This is the current release cycle, so future features will be updated below.
+
+*NOTE*: The 0.3.x series is still being tested, so the current stable release is v0.2.21.
 
 ### v0.3.0
 - **Introduced the Web Interface.**  
@@ -10,6 +12,10 @@ Version 0.3 introduced the web interface and continued the focus on the user exp
 
 ## 0.2.x Releases
 Version 0.2 improved greatly on 0.1, with a greater focus on the user experience, plugins, local performance, and a whole lot more. Read the release notes below for some of the highlights.
+
+## v0.2.21
+- **Bugfixes and performance improvements.**
+  Improvements that were added to v0.3.0 release candidates were backported to the 0.2.x series prior to the release of v0.3.0. This release is essentially v0.3.0 with the Web Interface disabled.
 
 ### v0.2.20
 - **Reformatted `show columns` to tables.**  
