@@ -126,9 +126,10 @@ def execute_action(state : WebState):
         )
         os.environ['LINES'], os.environ['COLUMNS'] = '120', '100'
         stdout = sys.stdout
-        sys.stdout = cap
+        #  sys.stdout = cap
 
-        success_tuple = use_thread()
+        #  success_tuple = use_thread()
+        success_tuple = use_process()
         #  success_tuple = do_action()
 
 
@@ -137,6 +138,29 @@ def execute_action(state : WebState):
         text = cap.getvalue()
         #  print('got text:', text, file=sys.stderr)
         return text, success_tuple
+
+    def use_process():
+        from meerschaum.utils.packages import run_python_package
+        line_buffer = ''
+        def send_line(line : str):
+            nonlocal line_buffer
+            line_buffer += line
+            ws_send(line_buffer, session_id)
+        def do_process():
+            print('RUNNING PROCESS', [action] + subactions, file=sys.stderr)
+            run_python_package(
+                'meerschaum', [action] + subactions,
+                line_callback = send_line,
+                env = {'LINES' : '120', 'COLUMNS' : '100'},
+                foreground = False,
+                universal_newlines = True,
+                shell = True,
+            )
+            print('STOP PROCESS', file=sys.stderr)
+        action_thread = Thread(target=do_process)
+        running_jobs[session_id] = action_thread
+        action_thread.start()
+        return True, "Success"
 
     def use_thread():
         action_thread = Thread(target=do_action)

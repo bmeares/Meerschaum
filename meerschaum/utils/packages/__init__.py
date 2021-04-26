@@ -331,17 +331,37 @@ def run_python_package(
         args : Optional[List[str]] = None,
         venv : Optional[str] = None,
         cwd : Optional[str] = None,
-        color : bool = False,
-        debug : bool = False
+        foreground : bool = True,
+        debug : bool = False,
+        **kw : Any,
     ) -> int:
     """
     Runs an installed python package.
     E.g. Translates to `/usr/bin/python -m [package]`
+
+    :param package_name:
+        The Python module to be executed.
+
+    :param args:
+        Additional command line arguments to be appended after `-m [package]`.
+        Defaults to `None`.
+
+    :param venv:
+        If specified, execute the Python interpreter from a virtual environment.
+        Defaults to `None`.
+
+    :param cwd:
+        If specified, change directories before starting the process.
+        Defaults to `None`.
+
+    :param foreground:
+        If `True`, start the subprocess as a foreground process.
+        Defaults to `True`.
     """
-    import sys, os, platform
+    import sys, platform
     from subprocess import call
     from meerschaum.config._paths import VIRTENV_RESOURCES_PATH
-    from meerschaum.utils.process import run_as_fg_process
+    from meerschaum.utils.process import run_process
     if args is None:
         args = []
     old_cwd = os.getcwd()
@@ -359,7 +379,7 @@ def run_python_package(
     if debug:
         print(command, file=sys.stderr)
     try:
-        rc = run_as_fg_process(command)
+        rc = run_process(command, foreground=foreground, **kw)
     except Exception as e:
         rc = call(command)
     except KeyboardInterrupt:
