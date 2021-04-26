@@ -8,33 +8,39 @@ See `meerschaum.utils.pool` for multiprocessing and
 `meerschaum.utils.threading` for threads.
 """
 
-def run_as_fg_process(*args, **kwargs):
+from __future__ import annotations
+import os, signal, subprocess, sys, termios
+from meerschaum.utils.typing import Union, Optional, Any, Callable
+
+def run_process(
+        *args,
+        foreground : bool = False,
+        as_proc : bool = False,
+        line_callback : Optional[Callable[[str], Any]] = None,
+        **kw : Any
+    ) -> Union[int, object]:
     """
-    Found here:
-    https://stackoverflow.com/questions/23826695/
-    handling-keyboard-interrupt-when-using-subproccess
+    Original foreground solution found here:
+    https://stackoverflow.com
+    /questions/23826695/handling-keyboard-interrupt-when-using-subproccess
 
     the "correct" way of spawning a new subprocess:
     signals like C-c must only go
     to the child process, and not to this python.
 
-    the args are the same as subprocess.Popen
-
-    returns Popen().wait() value
-
     Some side-info about "how ctrl-c works":
     https://unix.stackexchange.com/a/149756/1321
-
-    fun fact: this function took a whole night
-              to be figured out.
     """
 
-    import os, signal, subprocess, sys, termios
+    if line_callback is not None:
+        kw['stdout'] = subprocess.PIPE
+        kw['stderr'] = subprocess.STDOUT
 
-    old_pgrp = os.tcgetpgrp(sys.stdin.fileno())
-    old_attr = termios.tcgetattr(sys.stdin.fileno())
+    user_preexec_fn = kw.get("preexec_fn", None)
 
-    user_preexec_fn = kwargs.pop("preexec_fn", None)
+    if foreground:
+        old_pgrp = os.tcgetpgrp(sys.stdin.fileno())
+        old_attr = termios.tcgetattr(sys.stdin.fileno())
 
     def new_pgid():
         if user_preexec_fn:
@@ -56,38 +62,52 @@ def run_as_fg_process(*args, **kwargs):
         # terminate then.
         # `os.kill(os.getpid(), signal.SIGSTOP)`
 
+    if foreground:
+        kw['preexec_fn'] = new_pgid
+
     try:
         # fork the child
-        child = subprocess.Popen(*args, preexec_fn=new_pgid, **kwargs)
+        child = subprocess.Popen(*args, **kw)
 
         # we can't set the process group id from the parent since the child
         # will already have exec'd. and we can't SIGSTOP it before exec,
         # see above.
         # `os.setpgid(child.pid, child.pid)`
 
-        # set the child's process group as new foreground
-        os.tcsetpgrp(sys.stdin.fileno(), child.pid)
-        # revive the child,
-        # because it may have been stopped due to SIGTTOU or
-        # SIGTTIN when it tried using stdout/stdin
-        # after setpgid was called, and before we made it
-        # forward process by tcsetpgrp.
-        os.kill(child.pid, signal.SIGCONT)
+        if foreground:
+            # set the child's process group as new foreground
+            os.tcsetpgrp(sys.stdin.fileno(), child.pid)
+            # revive the child,
+            # because it may have been stopped due to SIGTTOU or
+            # SIGTTIN when it tried using stdout/stdin
+            # after setpgid was called, and before we made it
+            # forward process by tcsetpgrp.
+            os.kill(child.pid, signal.SIGCONT)
 
         # wait for the child to terminate
-        ret = child.wait()
+        _ret = poll_process(child, line_callback) if line_callback is not None else child.wait()
+        ret = _ret if not as_proc else child
 
     finally:
-        # we have to mask SIGTTOU because tcsetpgrp
-        # raises SIGTTOU to all current background
-        # process group members (i.e. us) when switching tty's pgrp
-        # it we didn't do that, we'd get SIGSTOP'd
-        hdlr = signal.signal(signal.SIGTTOU, signal.SIG_IGN)
-        # make us tty's foreground again
-        os.tcsetpgrp(sys.stdin.fileno(), old_pgrp)
-        # now restore the handler
-        signal.signal(signal.SIGTTOU, hdlr)
-        # restore terminal attributes
-        termios.tcsetattr(sys.stdin.fileno(), termios.TCSADRAIN, old_attr)
+        if foreground:
+            # we have to mask SIGTTOU because tcsetpgrp
+            # raises SIGTTOU to all current background
+            # process group members (i.e. us) when switching tty's pgrp
+            # it we didn't do that, we'd get SIGSTOP'd
+            hdlr = signal.signal(signal.SIGTTOU, signal.SIG_IGN)
+            # make us tty's foreground again
+            os.tcsetpgrp(sys.stdin.fileno(), old_pgrp)
+            # now restore the handler
+            signal.signal(signal.SIGTTOU, hdlr)
+            # restore terminal attributes
+            termios.tcsetattr(sys.stdin.fileno(), termios.TCSADRAIN, old_attr)
 
     return ret
+
+def poll_process(proc, line_callback : Callable[[str], Any]) -> int:
+    """
+    Poll a process and execute a callback function for each line printed to the process's `stdout`.
+    """
+    while proc.poll() is None:
+        line_callback(proc.stdout.readline())
+    return proc.poll()

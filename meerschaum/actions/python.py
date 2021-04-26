@@ -33,7 +33,7 @@ def python(
     import sys, subprocess
     from meerschaum.utils.debug import dprint
     from meerschaum.utils.warnings import warn, error
-    from meerschaum.utils.process import run_as_fg_process
+    from meerschaum.utils.process import run_process
 
     if action is None:
         action = []
@@ -74,7 +74,7 @@ def python(
     if debug:
         dprint(f"command:\n{command}")
     try:
-        return_code = run_as_fg_process([sys.executable, '-i', '-c', command])
+        return_code = run_process([sys.executable, '-i', '-c', command], foreground=True)
     except KeyboardInterrupt:
         return_code = 1
     return return_code == 0, (
