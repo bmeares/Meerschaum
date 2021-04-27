@@ -12,6 +12,7 @@ Import all routes from other modules in package
 # from meerschaum.utils.packages import import_children
 # import_children()
 
+from meerschaum.api.routes._login import *
 from meerschaum.api.routes._actions import *
 from meerschaum.api.routes._connectors import *
 from meerschaum.api.routes._index import *
