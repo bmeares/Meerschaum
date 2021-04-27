@@ -52,7 +52,10 @@ def need_update(
         if debug:
             dprint(f"Available version: {result.available_version}", color=color)
             dprint(f"Required version: {required_version}", color=color)
-        return semver.match(result.available_version, required_version)
+        try:
+            return semver.match(required_version, result.available_version)
+        except Exception as e:
+            return False
 
     packaging_version = attempt_import('packaging.version')
     return (
