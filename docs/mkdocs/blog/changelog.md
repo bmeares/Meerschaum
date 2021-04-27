@@ -4,7 +4,7 @@ This changelog was not introduced until v0.2.12, so many of the critical release
 ## 0.3.x Releases
 Version 0.3.0 introduced the web interface and continued the focus on the user experience. This is the current release cycle, so future features will be updated below.
 
-*NOTE*: The 0.3.x series is still being tested, so the current stable release is v0.2.21.
+*NOTE*: The 0.3.x series is still being tested, so the current stable release is the latest 0.2.x version.
 
 ### v0.3.0
 - **Introduced the Web Interface.**  
