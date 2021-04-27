@@ -13,7 +13,11 @@ Version 0.3.0 introduced the web interface and continued the focus on the user e
 ## 0.2.x Releases
 Version 0.2 improved greatly on 0.1, with a greater focus on the user experience, plugins, local performance, and a whole lot more. Read the release notes below for some of the highlights.
 
-## v0.2.21
+### v0.2.22
+- **Critical bugfixes.**
+  Version 0.2.22 fixes some critical bugs that went unnoticed in v0.2.21 and is another backport from the 0.3.x branch.
+
+### v0.2.21
 - **Bugfixes and performance improvements.**
   Improvements that were added to v0.3.0 release candidates were backported to the 0.2.x series prior to the release of v0.3.0. This release is essentially v0.3.0 with the Web Interface disabled.
 
@@ -100,7 +104,6 @@ Version 0.2 improved greatly on 0.1, with a greater focus on the user experience
 ### v0.2.10
 - **MRSM_CONFIG critical bugfix**  
   The environment variable MRSM_CONFIG is patched on top of your existing configuration. MRSM_PATH is also a patch that is added after MRSM_CONFIG.
-  
 ### v0.2.9
 - **API and SQL Chunking**  
   Syncing data via an APIConnector or SQLConnector uploads the dictionary or DataFrame in chunks (defaults to a chunksize of 900). When calling `read()` with a SQLConnector, a `chunk_hook` callable may be passed, and if `as_chunks` is `True`, a list of DataFrames will be returned. If `as_iterator` is `True`, a dataframe iterator will be returned.
