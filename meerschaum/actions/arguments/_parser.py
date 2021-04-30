@@ -16,7 +16,8 @@ def parse_datetime(dt_str : str) -> datetime.datetime:
     Parse a string into a datetime.
     """
     from meerschaum.utils.packages import attempt_import
-    dateutil_parser, datetime = attempt_import('dateutil.parser', 'datetime')
+    import datetime
+    dateutil_parser = attempt_import('dateutil.parser')
 
     try:
         if dt_str.lower() == 'now':

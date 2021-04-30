@@ -18,9 +18,9 @@ def pprint(
     Does not mutate objects.
     """
     from meerschaum.utils.packages import attempt_import, import_rich
-    from meerschaum.utils.formatting import ANSI, UNICODE
+    from meerschaum.utils.formatting import ANSI, UNICODE, get_console
     from meerschaum.utils.warnings import error
-    from meerschaum.utils.misc import replace_password, dict_from_od
+    from meerschaum.utils.misc import replace_password, dict_from_od, filter_keywords
     from collections import OrderedDict
     import copy, json
     modify = True
@@ -30,7 +30,11 @@ def pprint(
         if rich is not None:
             rich_pretty = attempt_import('rich.pretty')
         if rich_pretty is not None:
-            rich_pprint = rich_pretty.pprint
+            def _rich_pprint(*args, **kw):
+                _console = get_console()
+                _kw = filter_keywords(_console.print, **kw)
+                _console.print(*args, **_kw)
+            rich_pprint = _rich_pprint
     elif not nopretty:
         pprintpp = attempt_import('pprintpp', warn=False)
         try:
@@ -78,7 +82,6 @@ def pprint(
             _args.append(c)
 
     ### filter out unsupported keywords
-    from meerschaum.utils.misc import filter_keywords
     func_kw = filter_keywords(func, **kw) if not nopretty else {}
     error_msg = None
     try:
