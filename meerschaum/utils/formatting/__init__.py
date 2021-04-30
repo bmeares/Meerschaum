@@ -112,12 +112,13 @@ def colored(text : str, *colors, **kw) -> str:
 console = None
 def get_console():
     global console
-    from meerschaum.utils.packages import import_rich
+    from meerschaum.utils.packages import import_rich, attempt_import
     if not __getattr__('ANSI') and not __getattr__('UNICODE'):
         return None
     rich = import_rich()
+    rich_console = attempt_import('rich.console')
     try:
-        console = rich.console.Console()
+        console = rich_console.Console(force_terminal=True, color_system='truecolor')
     except Exception as e:
         console = None
     return console

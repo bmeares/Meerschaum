@@ -8,6 +8,7 @@ Execute actions via the web interface.
 
 from __future__ import annotations
 import platform, sys, io, os, shlex, time
+from dash.exceptions import PreventUpdate
 from meerschaum.utils.threading import Thread
 from meerschaum.utils.typing import SuccessTuple, Tuple, Dict, Any, WebState
 from meerschaum.utils.packages import attempt_import
@@ -153,8 +154,9 @@ def execute_action(state : WebState):
                 line_callback = send_line,
                 env = {'LINES' : '120', 'COLUMNS' : '100'},
                 foreground = False,
+                #  foreground = True,
                 universal_newlines = True,
-                shell = True,
+                #  shell = True,
             )
             print('STOP PROCESS', file=sys.stderr)
         action_thread = Thread(target=do_process)
@@ -179,6 +181,7 @@ def execute_action(state : WebState):
     text, success_tuple = use_capture() if capturer is not None else use_stringio()
     #  text, success_tuple = use_thread()
 
+    raise PreventUpdate
     return (
         [
             html.Div(

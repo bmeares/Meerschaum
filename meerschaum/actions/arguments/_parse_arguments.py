@@ -129,8 +129,8 @@ def parse_line(line : str) -> dict:
         return {'action' : [], 'text' : line,}
 
 def parse_synonyms(
-        args_dict : dict
-    ) -> dict:
+        args_dict : Dict[str, Any]
+    ) -> Dict[str, Any]:
     """
     Check for synonyms (e.g. force = True -> yes = True)
     """
@@ -143,3 +143,32 @@ def parse_synonyms(
     if args_dict.get('skip_check_existing', None):
         args_dict['check_existing'] = False
     return args_dict
+
+def parse_dict_to_sysargs(
+        args_dict : Dict[str, Any]
+    ) -> List[str]:
+    """
+    Revert an arguments dictionary back to a command line list.
+    """
+    from meerschaum.actions.arguments._parser import get_arguments_triggers
+    sysargs = []
+    sysargs += args_dict.get('action', [])
+
+    triggers = get_arguments_triggers()
+
+    for a, t in triggers.items():
+        if a == 'action' or a not in args_dict:
+            continue
+        if isinstance(args_dict[a], bool):
+            if args_dict[a] is True:
+                sysargs += [t[0]]
+        else:
+            if (
+                isinstance(args_dict[a], list) or isinstance(args_dict[a], tuple)
+            ):
+                if len(args_dict[a]) > 0:
+                    sysargs += [t[0]] + list(args_dict[a])
+            else:
+                sysargs += [t[0], args_dict[a]]
+
+    return sysargs
