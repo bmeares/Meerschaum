@@ -133,32 +133,31 @@ def execute_action(state : WebState):
         success_tuple = use_process()
         #  success_tuple = do_action()
 
-
         #  sys.stdout = stdout
         os.environ['LINES'], os.environ['COLUMNS'] = LINES, COLUMNS
         text = cap.getvalue()
-        #  print('got text:', text, file=sys.stderr)
         return text, success_tuple
 
     def use_process():
         from meerschaum.utils.packages import run_python_package
+        from meerschaum.actions.arguments._parse_arguments import parse_dict_to_sysargs
         line_buffer = ''
         def send_line(line : str):
             nonlocal line_buffer
             line_buffer += line
             ws_send(line_buffer, session_id)
         def do_process():
-            print('RUNNING PROCESS', [action] + subactions, file=sys.stderr)
+            keywords['action'] = [action] + subactions
+            _sysargs = parse_dict_to_sysargs(keywords)
             run_python_package(
-                'meerschaum', [action] + subactions,
+                #  'meerschaum', [action] + subactions,
+                'meerschaum', _sysargs,
                 line_callback = send_line,
                 env = {'LINES' : '120', 'COLUMNS' : '100'},
                 foreground = False,
-                #  foreground = True,
                 universal_newlines = True,
-                #  shell = True,
+                debug = debug,
             )
-            print('STOP PROCESS', file=sys.stderr)
         action_thread = Thread(target=do_process)
         running_jobs[session_id] = action_thread
         action_thread.start()
@@ -179,9 +178,8 @@ def execute_action(state : WebState):
         return success_tuple
 
     text, success_tuple = use_capture() if capturer is not None else use_stringio()
-    #  text, success_tuple = use_thread()
 
-    raise PreventUpdate
+    #  raise PreventUpdate
     return (
         [
             html.Div(

@@ -150,6 +150,7 @@ def parse_dict_to_sysargs(
     """
     Revert an arguments dictionary back to a command line list.
     """
+    import json
     from meerschaum.actions.arguments._parser import get_arguments_triggers
     sysargs = []
     sysargs += args_dict.get('action', [])
@@ -159,6 +160,7 @@ def parse_dict_to_sysargs(
     for a, t in triggers.items():
         if a == 'action' or a not in args_dict:
             continue
+        ### add boolean flags
         if isinstance(args_dict[a], bool):
             if args_dict[a] is True:
                 sysargs += [t[0]]
@@ -168,7 +170,10 @@ def parse_dict_to_sysargs(
             ):
                 if len(args_dict[a]) > 0:
                     sysargs += [t[0]] + list(args_dict[a])
-            else:
+            elif isinstance(args_dict[a], dict):
+                if len(args_dict[a]) > 0:
+                    sysargs += [t[0], json.dumps(args_dict[a])]
+            elif args_dict[a] is not None:
                 sysargs += [t[0], args_dict[a]]
 
     return sysargs
