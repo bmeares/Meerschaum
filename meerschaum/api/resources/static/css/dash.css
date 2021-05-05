@@ -14,6 +14,10 @@ a {
   padding-bottom: 20px!ie7;
   max-height: 600px;
 }
+#console-div {
+  overflow-y: scroll;
+  max-height: 75vh;
+}
 .codeblock {
   background-color: var(--secondary) !important;
   color: white !important;

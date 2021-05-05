@@ -402,24 +402,25 @@ def ws_receive(message):
     """
     if not message:
         raise PreventUpdate
-    print('Received message:', len(message['data']), file=sys.stderr)
     return [html.Div(
         [html.Pre(message['data'], id='console-pre')],
         id = 'console-div',
+        #  className='pre-scrollable'
     )]
 
 dash_app.clientside_callback(
     """
     function(console_children, url){
-        console.log(console_children);
         if (!console_children){
             return console_children;
         }
         var ansi_up = new AnsiUp;
         var html = ansi_up.ansi_to_html(console_children);
-        document.getElementById("console-div").innerHTML = (
+        console_div = document.getElementById("console-div");
+        console_div.innerHTML = (
             "<pre id=\\"console-pre\\">" + html + "</pre>"
         );
+        console_div.scrollTop = console_div.scrollHeight;
         return url;
     }
     """,

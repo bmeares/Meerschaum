@@ -1,11 +1,11 @@
 # Types of Plugins
 
-There are two main kinds of Meerschaum plugin: those which **provide data** and those that **perform actions**.
+There are three main kinds of Meerschaum plugin: those which **provide data**, **perform actions**, or **extend the API**.
 
 !!! info "¿Por qué no los dos?"
     When writing Meershcaum plugins, developers may choose to use one or both functionalities. That means a plugin may both act as a connector as well as providing shell actions.
 
-See below for more information about the differences between [data](#data-plugins) and [action](#action-plugins) plugins.
+See below for more information about the differences between [data](#data-plugins), [action](#action-plugins), and [API](#api-plugins) plugins.
 
 
 ## Data Plugins
@@ -37,4 +37,6 @@ An action plugin can provide multiple actions, and because plugins are loaded la
 
 Actions are a blank slate, and I'm really excited to see the creativity the community comes up with!
 
+## API Plugins
 
+Plugins may also be used to extend the Meerschaum Web API by adding endpoints. For example, an API plugin may be written to integrate Meerschaum's web API functionality with an existing login system, such as Google SSO. Rather than writing an API backend from the ground up, Meerschaum API plugins allow you to directly connect web requests with your custom Meerschaum backend.
