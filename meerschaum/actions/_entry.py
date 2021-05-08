@@ -22,6 +22,9 @@ def _entry(sysargs=[]):
         import shlex
         sysargs = shlex.split(sysargs)
     args = parse_arguments(sysargs)
+    if args.get('trace', None):
+        from meerschaum.utils.misc import debug_trace
+        debug_trace()
     if len(args['action']) == 0:
         return get_shell().cmdloop()
     main_action = args['action'][0]
@@ -33,8 +36,9 @@ def _entry(sysargs=[]):
 
     ### Check if the action is a plugin, and if so, activate virtual environment.
     plugin_name = (
-        actions[main_action].__module__.split('.')[-1] if actions[main_action].__module__.startswith('plugins.')
-        else None
+        actions[main_action].__module__.split('.')[-1] if (
+            actions[main_action].__module__.startswith('plugins.')
+        ) else None
     )
 
     del args['action'][0]

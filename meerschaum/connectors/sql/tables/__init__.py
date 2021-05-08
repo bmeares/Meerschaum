@@ -14,6 +14,7 @@ connector_tables = dict()
 
 def get_tables(
         mrsm_instance : Optional[Union[str, meerschaum.connectors.Connector]] = None,
+        create : bool = True,
         debug : Optional[bool] = None
     ) -> Dict[str, sqlalchemy.Table]:
     """

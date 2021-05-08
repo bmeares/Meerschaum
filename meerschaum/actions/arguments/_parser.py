@@ -102,6 +102,7 @@ groups['pipes'] = parser.add_argument_group(title='Pipes options')
 groups['sync'] = parser.add_argument_group(title='Sync options')
 groups['api'] = parser.add_argument_group(title='API options')
 groups['plugins'] = parser.add_argument_group(title='Plugins options')
+groups['debug'] = parser.add_argument_group(title='Debugging options')
 groups['misc'] = parser.add_argument_group(title='Miscellaneous options')
 
 
@@ -203,10 +204,16 @@ groups['plugins'].add_argument(
     help="Meerschaum plugins repository to connect to. Specify an API label (default: 'mrsm')"
 )
 
-### Miscellaneous arguments
-groups['misc'].add_argument(
+### Debugging Arguments
+groups['debug'].add_argument(
     '--debug', action="store_true", help="Print debug statements (max verbosity)"
 )
+groups['debug'].add_argument(
+    '--trace', action="store_true",
+    help="Trace execution and open browser windows to visualize the stack."
+)
+
+### Miscellaneous arguments
 groups['misc'].add_argument(
     '-V', '--version', action="store_true",
     help="Print the Meerschaum version and exit. Has no effect from within the shell."

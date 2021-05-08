@@ -76,6 +76,8 @@ packages : Dict[str, Dict[str, str]] = {
         'snakeviz' : 'snakeviz>=2.1.0',
         'mypy' : 'mypy>=0.812',
         'pytest' : 'pytest>=6.2.2',
+        'heartrate' : 'heartrate>=0.2.1',
+        'pyheat' : 'py-heat>=0.0.6',
     },
     'setup' : {
     },
