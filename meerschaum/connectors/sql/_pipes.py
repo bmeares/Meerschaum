@@ -208,10 +208,13 @@ def fetch_pipes_keys(
         [pipes.c.connector_keys, pipes.c.metric_key, pipes.c.location_key]
     ).where(sqlalchemy.and_(*_where))
 
-    ### parse IN params
+    ### Parse IN params and add OR IS NULL if None in list.
     for c, vals in cols.items():
         if isinstance(vals, (list, tuple)) and vals:
-            q = q.where(pipes.c[c].in_(vals))
+            q = (
+                q.where(pipes.c[c].in_(vals)) if None not in vals
+                else q.where(sqlalchemy.or_(pipes.c[c].in_(vals), pipes.c[c].is_(None)))
+            )
 
     ### execute the query and return a list of tuples
     try:

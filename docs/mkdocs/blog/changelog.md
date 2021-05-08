@@ -9,6 +9,10 @@ Version 0.3.0 introduced the web interface and continued the focus on the user e
 ### v0.3.0
 - **Introduced the Web Interface.**  
   Added the Meerschaum Web Interface, an interactive dashboard for managing Meerschaum instances. Although not a total replacement for the Meerschaum Shell, the Web Interface allows multiple users to share connectors without needing to remote into the same machine.
+  
+- **Bugfixes**  
+
+  Small bugfixes like including the location `None` with other locations.
 
 ## 0.2.x Releases
 Version 0.2 improved greatly on 0.1, with a greater focus on the user experience, plugins, local performance, and a whole lot more. Read the release notes below for some of the highlights.
@@ -100,7 +104,6 @@ Version 0.2 improved greatly on 0.1, with a greater focus on the user experience
 ### v0.2.10
 - **MRSM_CONFIG critical bugfix**  
   The environment variable MRSM_CONFIG is patched on top of your existing configuration. MRSM_PATH is also a patch that is added after MRSM_CONFIG.
-  
 ### v0.2.9
 - **API and SQL Chunking**  
   Syncing data via an APIConnector or SQLConnector uploads the dictionary or DataFrame in chunks (defaults to a chunksize of 900). When calling `read()` with a SQLConnector, a `chunk_hook` callable may be passed, and if `as_chunks` is `True`, a list of DataFrames will be returned. If `as_iterator` is `True`, a dataframe iterator will be returned.
