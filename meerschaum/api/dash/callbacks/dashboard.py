@@ -64,6 +64,7 @@ omit_flags = {
     'version',
     'shell',
     'use_bash',
+    'trace',
 }
 #  included_flags = {
     #  ''

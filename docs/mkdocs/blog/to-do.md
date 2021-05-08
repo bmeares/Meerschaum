@@ -38,24 +38,24 @@ Below are some ongoing tasks I have planned for Meerschaum. This is not an exhau
 
 - **Web Interface**
     - [x] **Login html page**  
-      Request an OAUTH token via a pretty web page.
+      Request an OAuth2 token via a pretty web page.
     - [ ] **Meerschaum JS**  
       Interact with a Meerschaum API via web requests in Javascript.
-    - [ ] **Meerschaum web dashboard**  
+    - [x] **Meerschaum web dashboard**  
       Interact with a Meerschaum API via a web interface.
 
 - **Diagnostics**
-    - [   ] **Logging system**  
+    - [ ] **Logging system**  
       Emit log messages to a more universal bus, similar to Splunk / Logstash.
-    - [   ] **Diagnostic Grafana dashboards**  
+    - [ ] **Diagnostic Grafana dashboards**  
       Ship pre-configured diagnostic dashboards.
-    - [   ] **Monitoring daemon**  
+    - [ ] **Monitoring daemon**  
       Handle logging and other child processes with a persistent Meerschaum daemon.
 
 - **Plugins**
     - [ ] **Reuse packages across virtual environments**  
       In an attempt to save space, if a package is already installed in another virtual environment and satisfies the requirements for a plugin, attempt to use that version instead of installing a new version.
-      
+    
 - **Other System Features**
     - [   ] **Daemonize any process**  
       Allow any Meerschaum action to run in the background.

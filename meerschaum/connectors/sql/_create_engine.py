@@ -180,7 +180,7 @@ def create_engine(
         )
     except Exception as e:
         warn(e)
-        warn("Failed to create connector '{self}'.", stack=False)
+        warn(f"Failed to create connector '{self}'.", stack=False)
         engine = None
 
     if include_uri:
