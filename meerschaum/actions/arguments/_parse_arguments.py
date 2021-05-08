@@ -154,26 +154,32 @@ def parse_dict_to_sysargs(
     from meerschaum.actions.arguments._parser import get_arguments_triggers
     sysargs = []
     sysargs += args_dict.get('action', [])
+    allow_none_args = {'location_keys'}
 
     triggers = get_arguments_triggers()
 
     for a, t in triggers.items():
         if a == 'action' or a not in args_dict:
             continue
-        ### add boolean flags
+        ### Add boolean flags
         if isinstance(args_dict[a], bool):
             if args_dict[a] is True:
                 sysargs += [t[0]]
         else:
+            ### Add list flags
             if (
                 isinstance(args_dict[a], list) or isinstance(args_dict[a], tuple)
             ):
                 if len(args_dict[a]) > 0:
                     sysargs += [t[0]] + list(args_dict[a])
+
+            ### Add dict flags
             elif isinstance(args_dict[a], dict):
                 if len(args_dict[a]) > 0:
                     sysargs += [t[0], json.dumps(args_dict[a])]
-            elif args_dict[a] is not None:
+
+            ### Account for None and other values
+            elif (args_dict[a] is not None) or (args_dict[a] is None and a in allow_none_args):
                 sysargs += [t[0], args_dict[a]]
 
     return sysargs

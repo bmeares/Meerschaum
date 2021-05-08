@@ -119,7 +119,8 @@ def _api_start(
         action = []
 
     old_cwd = os.getcwd()
-    os.chdir(CACHE_RESOURCES_PATH)
+    if not debug:
+        os.chdir(CACHE_RESOURCES_PATH)
 
     ### Uvicorn must be installed on the host because of multiprocessing reasons.
     uvicorn = attempt_import('uvicorn', venv=None, lazy=False)

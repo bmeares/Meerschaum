@@ -56,7 +56,7 @@ keys_state = (
 
 omit_flags = {
     'help',
-    'loop',
+    #  'loop',
     #  'yes',
     #  'noask',
     #  'force',
@@ -296,7 +296,7 @@ def update_keys_options(
         for ck, mk, lk in keys:
             k = locals()[key_type]
             if k not in _seen_keys[key_type]:
-                _k = '[None]' if k in (None, '[None]', 'None', 'null') else k
+                _k = 'None' if k in (None, '[None]', 'None', 'null') else k
                 options.append({'label' : _k, 'value' : _k})
                 _seen_keys[key_type].add(k)
 

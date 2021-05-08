@@ -102,9 +102,6 @@ class Connector(metaclass=abc.ABCMeta):
         """
         from meerschaum.utils.warnings import error, warn
         from meerschaum.utils.debug import dprint
-        if debug:
-            dprint(f'required attributes: {required_attributes}')
-            dprint(f'attributes: {self.__dict__}')
         missing_attributes = set()
         for a in required_attributes:
             if a not in self.__dict__:
