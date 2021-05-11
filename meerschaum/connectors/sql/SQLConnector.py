@@ -46,6 +46,7 @@ class SQLConnector(Connector):
     )
     from ._plugins import (
         register_plugin,
+        delete_plugin,
         get_plugin_id,
         get_plugin_version,
         get_plugins,

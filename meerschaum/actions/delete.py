@@ -37,6 +37,7 @@ def _complete_delete(
     if action is None:
         action = []
     options = {
+        'connector': _complete_delete_connectors,
         'connectors': _complete_delete_connectors,
     }
 
@@ -146,6 +147,7 @@ def _delete_config(
 
 def _delete_plugins(
         action : Optional[List[str]] = None,
+        repository : Optional[str] = None,
         yes : bool = False,
         force : bool = False,
         noask : bool = False,
@@ -153,59 +155,33 @@ def _delete_plugins(
         **kw : Any
     ) -> SuccessTuple:
     """
-    Remove installed plugins. Does not affect repository registrations.
+    Delete plugins from a Meerschaum repository.
     """
-    import meerschaum.actions
-    from meerschaum.actions.plugins import get_plugins_names, get_plugins_modules
-    from meerschaum.config._paths import PLUGINS_RESOURCES_PATH
-    from meerschaum.utils.warnings import warn, error, info
+    from meerschaum.utils.warnings import info
     from meerschaum.actions.plugins import reload_plugins
+    from meerschaum.connectors.parse import parse_repo_keys
     from meerschaum.utils.prompt import yes_no
-    import os, shutil
+    from meerschaum.utils.formatting import print_tuple
+    repo_connector = parse_repo_keys(repository)
 
-    if action is None:
-        action = []
+    sep = '\n' + '  - '
+    answer = yes_no(
+        "Are you sure you want to delete the following plugins " +
+        f"from the repository '{repo_connector}'?\n" +
+        "THIS CANNOT BE UNDONE!\n" +
+        f"{sep + sep.join([str(p) for p in action])}\n",
+        default='n', noask=noask, yes=yes
+    ) if not force else True
 
-    ### parse the provided plugins and link them to their modules
-    modules_to_delete = dict()
-    for plugin in action:
-        if plugin not in get_plugins_names():
-            info(f"Plugin '{plugin}' is not installed. Ignoring...")
-        else:
-            for m in get_plugins_modules():
-                if plugin == m.__name__.split('.')[-1]:
-                    modules_to_delete[plugin] = m
-                    break
-    if len(modules_to_delete) == 0:
-        return False, "No plugins to delete."
-
-    ### verify that the user absolutely wants to do this (skips on --force)
-    question = "Are you sure you want to delete these plugins?\n"
-    for plugin in modules_to_delete:
-        question += f" - {plugin}" + "\n"
-    if force:
-        answer = True
-    else:
-        answer = yes_no(question, default='n', yes=yes, noask=noask)
     if not answer:
-        return False, "No plugins deleted."
+        return False, f"No plugins deleted."
 
-    ### delete the folders or files
-    for name, m in modules_to_delete.items():
-        ### __init__.py might be missing
-        if m.__file__ is None:
-            try:
-                shutil.rmtree(os.path.join(PLUGINS_RESOURCES_PATH, name))
-            except Exception as e:
-                return False, str(e)
-            continue
-        try:
-            if '__init__.py' in m.__file__:
-                shutil.rmtree(m.__file__.replace('__init__.py', ''))
-            else:
-                os.remove(m.__file__)
-        except Exception as e:
-            return False, f"Could not remove plugin '{name}'"
+    successes = dict()
+    for name in action:
+        info(f"Deleting plugin '{name}' from Meerschaum repository '{repo_connector}'...")
+        success, msg = repo_connector.delete_plugin(name, debug=debug)
+        successes[name] = (success, msg)
+        print_tuple((success, msg))
 
     reload_plugins(debug=debug)
     return True, "Success"

@@ -3,7 +3,7 @@
 # vim:fenc=utf-8
 
 """
-Install plugins
+Install plugins and pip packages.
 """
 
 from __future__ import annotations
@@ -33,7 +33,9 @@ def _complete_install(
     if action is None:
         action = []
     options = {
+        'plugin' : _complete_install_plugins,
         'plugins' : _complete_install_plugins,
+        'package': _complete_install_packages,
         'packages': _complete_install_packages,
     }
 
@@ -105,7 +107,11 @@ def _complete_install_plugins(
     if len(action) == 0:
         search_term = None
     else:
-        search_term = action[0]
+        search_term = action[-1]
+
+    ### Don't start searching unless a key has been pressed.
+    if search_term is None or len(search_term) == 0:
+        return []
 
     ### In case we're using the Shell (which we have to in order for _complete to work),
     ### get the current repository.

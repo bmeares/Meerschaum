@@ -14,6 +14,7 @@ required_attributes = {
 
 class APIConnector(Connector):
 
+    from ._delete import delete
     from ._post import post
     from ._patch import patch
     from ._get import get, wget
@@ -40,6 +41,7 @@ class APIConnector(Connector):
     from ._plugins import (
         register_plugin,
         install_plugin,
+        delete_plugin,
         get_plugins,
         get_plugin_attributes,
     )

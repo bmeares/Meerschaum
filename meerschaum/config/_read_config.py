@@ -126,7 +126,8 @@ def read_config(
 
     ### Check for duplicate files.
     ### Found help on StackOverflow:
-    ### https://stackoverflow.com/questions/26618688/python-iterate-over-a-list-of-files-finding-same-filenames-but-different-exten
+    ### https://stackoverflow.com/questions/26618688/python-iterate-over-a-list-
+    ### of-files-finding-same-filenames-but-different-exten
     keygroups = {
         key: list(value)
         for key, value in itertools.groupby(
@@ -139,7 +140,10 @@ def read_config(
         if len(v) > 1:
             if k + '.' + default_filetype in v:
                 fn = k + '.' + default_filetype
-            print(f"Found multiple config files named '{k}'. Will attempt to parse '{fn}' for key '{k}'.")
+            print(
+                f"Found multiple config files named '{k}'. " +
+                f"Will attempt to parse '{fn}' for key '{k}'."
+            )
         filekeys.append(fn)
 
     _seen_keys = []
@@ -150,7 +154,10 @@ def read_config(
         key = '.'.join(_parts[:-1])
         ### Check if we've seen this key before (e.g. test.yaml, test.yml, test.json).
         if key in _seen_keys:
-            print(f"Multiple files with the name '{key}' found in '{str(directory)}'. Reading from '{filename}'.")
+            print(
+                f"Multiple files with the name '{key}' found in '{str(directory)}'. " +
+                f"Reading from '{filename}'."
+            )
         if len(_parts) < 2 or _type not in filetype_loaders:
             print(f"Unknown file '{filename}' in '{str(directory)}'. Skipping...")
 
@@ -163,7 +170,10 @@ def read_config(
                         else {key : _config_key}
                     )
                     config[key] = _single_key_config[key]
-                    if symlinks_key in _single_key_config and key in _single_key_config[symlinks_key]:
+                    if (
+                        symlinks_key in _single_key_config
+                            and key in _single_key_config[symlinks_key]
+                    ):
                         if symlinks_key not in config:
                             config[symlinks_key] = {}
                         config[symlinks_key][key] = _single_key_config[symlinks_key][key]
