@@ -118,7 +118,7 @@ def get_user_attributes(
     """
     return get_api_connector().get_user_attributes(User(username), debug=debug)
 
-@app.post(users_endpoint + "/{username}/delete")
+@app.delete(users_endpoint + "/{username}")
 def delete_user(
         username : str,
         curr_user : 'meerschaum._internal.User.User' = fastapi.Depends(manager),
