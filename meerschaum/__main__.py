@@ -47,7 +47,7 @@ def main() -> None:
         parse_version(sysargs)
         return _exit()
 
-    if '-d' in sysargs or '--daemon' in sysargs:
+    if ('-d' in sysargs or '--daemon' in sysargs) and ('stack' not in sysargs):
         from meerschaum.utils.daemon import daemon_entry
         daemon_entry(sysargs)
         return _exit()
@@ -76,6 +76,9 @@ def _exit(return_code : int = 0) -> None:
     sys.exit(return_code)
 
 def _close_pools():
+    """
+    Close multiprocessing pools before exiting.
+    """
     ### Final step: close global pools.
     from meerschaum.utils.pool import get_pools
     for class_name, pool in get_pools().items():
