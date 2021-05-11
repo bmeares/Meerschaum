@@ -46,6 +46,7 @@ packages : Dict[str, Dict[str, str]] = {
         'packaging'         : 'packaging>=20.4',
         'prompt_toolkit'    : 'prompt-toolkit>=3.0.11',
         'more_itertools'    : 'more-itertools>=8.7.0',
+        'daemoniker'        : 'daemoniker>=0.2.3',
     },
     'iot' : {
         'paho' : 'paho-mqtt>=1.5.1',

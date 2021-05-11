@@ -5,7 +5,10 @@
 The entry point for launching Meerschaum actions.
 """
 
-def _entry(sysargs=[]):
+from __future__ import annotations
+from meerschaum.utils.typing import SuccessTuple, List, Optional
+
+def _entry(sysargs : Optional[List[str]] = None) -> SuccessTuple:
     """
     Parse arguments and launch a Meerschaum action.
     The `action` list removes the first element.
@@ -18,6 +21,8 @@ def _entry(sysargs=[]):
     from meerschaum.actions import actions, original_actions, get_shell
     from meerschaum.utils.packages import activate_venv, deactivate_venv
     import sys
+    if sysargs is None:
+        sysargs = []
     if not isinstance(sysargs, list):
         import shlex
         sysargs = shlex.split(sysargs)

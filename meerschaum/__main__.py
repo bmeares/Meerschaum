@@ -4,11 +4,15 @@
 # vim:fenc=utf-8
 
 """
-mrsm CLI entrypoint
+mrsm CLI entrypoint.
 """
 
-def main():
-    import sys, os
+import sys, os
+
+def main() -> None:
+    """
+    Main CLI entry point.
+    """
     sysargs = sys.argv[1:]
 
     ### Check for a custom configuration directory.
@@ -34,11 +38,19 @@ def main():
     ### Catch help flags.
     if '--help' in sysargs or '-h' in sysargs:
         from meerschaum.actions.arguments._parser import parse_help
-        return parse_help(sysargs)
+        parse_help(sysargs)
+        return _exit()
 
+    ### Catch version flags.
     if '--version' in sysargs or '-V' in sysargs:
         from meerschaum.actions.arguments._parser import parse_version
-        return parse_version(sysargs)
+        parse_version(sysargs)
+        return _exit()
+
+    if '-d' in sysargs or '--daemon' in sysargs:
+        from meerschaum.utils.daemon import daemon_entry
+        daemon_entry(sysargs)
+        return _exit()
 
     from meerschaum.actions import entry, get_shell
 
@@ -46,14 +58,24 @@ def main():
     if len(sysargs) == 0 or '--shell' in sysargs:
         if '--shell' in sysargs:
             sysargs.remove('--shell')
-        return get_shell(sysargs).cmdloop()
+        get_shell(sysargs).cmdloop()
+        return _exit()
 
     ### Print success or failure message.
     return_tuple = entry(sysargs)
+    rc = 0
     if isinstance(return_tuple, tuple):
         from meerschaum.utils.formatting import print_tuple
         print_tuple(return_tuple, upper_padding=1)
+        rc = 0 if (return_tuple[0] is True) else 1
 
+    return _exit(rc)
+
+def _exit(return_code : int = 0) -> None:
+    _close_pools()
+    sys.exit(return_code)
+
+def _close_pools():
     ### Final step: close global pools.
     from meerschaum.utils.pool import get_pools
     for class_name, pool in get_pools().items():

@@ -62,15 +62,24 @@ paths = {
     'SQLITE_DB_PATH' : ('{SQLITE_RESOURCES_PATH}', 'mrsm_local.db'),
 
     'GRAFANA_RESOURCES_PATH' : ('{STACK_RESOURCES_PATH}', 'grafana', 'resources'),
-    'GRAFANA_DATASOURCE_PATH' : ('{GRAFANA_RESOURCES_PATH}', 'provisioning', 'datasources', 'datasource.yaml'),
-    'GRAFANA_DASHBOARD_PATH' : ('{GRAFANA_RESOURCES_PATH}', 'provisioning', 'dashboards', 'dashboard.yaml'),
+    'GRAFANA_DATASOURCE_PATH' : (
+        '{GRAFANA_RESOURCES_PATH}', 'provisioning', 'datasources', 'datasource.yaml'
+    ),
+    'GRAFANA_DASHBOARD_PATH' : (
+        '{GRAFANA_RESOURCES_PATH}', 'provisioning', 'dashboards', 'dashboard.yaml'
+    ),
     'MOSQUITTO_RESOURCES_PATH' : ('{STACK_RESOURCES_PATH}', 'mosquitto', 'resources'),
     'MOSQUITTO_CONFIG_PATH' : ('{MOSQUITTO_RESOURCES_PATH}', 'mosquitto.conf'),
 
     'PORTABLE_CHECK_READLINE_PATH' : ('{SHELL_RESOURCES_PATH}', '.readline_attempted_install'),
+
+    'DAEMON_RESOURCES_PATH' : ('{ROOT_DIR_PATH}', '.daemons'),
 }
 
 def set_root(root : Union[Path, str]):
+    """
+    Modify the value of `ROOT_DIR_PATH`.
+    """
     global paths
     paths['ROOT_DIR_PATH'] = Path(root)
 

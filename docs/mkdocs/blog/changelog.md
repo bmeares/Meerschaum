@@ -13,6 +13,8 @@ Version 0.3.0 introduced the web interface and continued the focus on the user e
   Plugins and virtual environment `pip` packages may now be removed via the `uninstall` command.
 - **Delete plugin from repository**  
   The command `delete plugins` now deletes the archive file and database registration fo the plugin on the remote repository. This does not uninstall plugins, so deleted plugins may be re-registered if they are still installed on the client.
+- **Daemonize actions.**  
+  Actions may be run in the background with the `-d` or `--daemon` flags.
 - **Bugfixes and improvements**  
   Small bugfixes like including the location `None` with other locations and improvements like only searching for plugin auto-complete suggestions when the search term is at least 1 character long.
 
