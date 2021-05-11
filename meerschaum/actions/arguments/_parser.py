@@ -135,6 +135,14 @@ groups['actions'].add_argument(
         " E.g. `stack -A='--version'`, `ls [-lh]`, `echo -A these are sub-arguments`"
     )
 )
+groups['actions'].add_argument(
+    '-d', '--daemon', action='store_true',
+    help = "Run an action as a background daemon."
+)
+groups['actions'].add_argument(
+    '--keep-daemon-output', '--skip-daemon-cleanup', action='store_true',
+    help = "Preserve a daemon's output files for later inspection."
+)
 
 ### Pipes options
 groups['pipes'].add_argument(
