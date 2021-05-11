@@ -119,15 +119,15 @@ def delete_user(
     """
     from meerschaum.config.static import _static_config
     import json
-    r_url = f"{_static_config()['api']['endpoints']['users']}/{user.username}/delete"
-    response = self.post(r_url, debug=debug)
+    r_url = f"{_static_config()['api']['endpoints']['users']}/{user.username}"
+    response = self.delete(r_url, debug=debug)
     try:
         _json = json.loads(response.text)
         if isinstance(_json, dict) and 'detail' in _json:
             return False, _json['detail']
         success_tuple = tuple(_json)
     except Exception as e:
-        success_tuple = False, f"Failed to delete user '{user.username}'"
+        success_tuple = False, f"Failed to delete user '{user.username}'."
     return success_tuple
 
 def get_user_attributes(
