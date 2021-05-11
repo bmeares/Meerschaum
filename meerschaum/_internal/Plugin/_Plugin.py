@@ -129,6 +129,22 @@ class Plugin:
             dprint(f"Created archive '{self.archive_path}'.")
         return self.archive_path
 
+    def remove(
+            self,        
+            force : bool = False,
+            debug : bool = False
+        ) -> SuccessTuple:
+        """
+        Remove a plugin's archive file.
+        """
+        if not self.archive_path.exists():
+            return True, f"Archive file for plugin '{self}' does not exist."
+        try:
+            self.archive_path.unlink()
+        except Exception as e:
+            return False, f"Failed to remove plugin '{self}'\n{e}"
+        return True, "Success"
+
     def install(
             self,
             force : bool = False,

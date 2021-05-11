@@ -12,7 +12,7 @@ from meerschaum.utils.typing import Optional, Any, Dict, Union
 def get(
         self,
         r_url : str,
-        headers : Dict[str, str] = {},
+        headers : Optional[Dict[str, str]] = None,
         use_token : bool = True,
         debug : bool = False,
         **kw : Any
@@ -23,6 +23,9 @@ def get(
     if debug:
         from meerschaum.utils.debug import dprint
 
+    if headers is None:
+        headers = {}
+
     if use_token:
         if debug:
             dprint(f"Checking login token.")
@@ -31,7 +34,8 @@ def get(
     if debug:
         from meerschaum.utils.formatting import pprint
         dprint(f"Sending GET request to {self.url + r_url}.")
-        pprint(headers)
+        if headers:
+            pprint(headers)
         pprint(kw)
 
     return self.session.get(

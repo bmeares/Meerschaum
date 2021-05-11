@@ -9,10 +9,12 @@ Version 0.3.0 introduced the web interface and continued the focus on the user e
 ### v0.3.0
 - **Introduced the Web Interface.**  
   Added the Meerschaum Web Interface, an interactive dashboard for managing Meerschaum instances. Although not a total replacement for the Meerschaum Shell, the Web Interface allows multiple users to share connectors without needing to remote into the same machine.
-  
-- **Bugfixes**  
-
-  Small bugfixes like including the location `None` with other locations.
+- **Added `uninstall plugins` and `uninstall packages`.**  
+  Plugins and virtual environment `pip` packages may now be removed via the `uninstall` command.
+- **Delete plugin from repository**  
+  The command `delete plugins` now deletes the archive file and database registration fo the plugin on the remote repository. This does not uninstall plugins, so deleted plugins may be re-registered if they are still installed on the client.
+- **Bugfixes and improvements**  
+  Small bugfixes like including the location `None` with other locations and improvements like only searching for plugin auto-complete suggestions when the search term is at least 1 character long.
 
 ## 0.2.x Releases
 Version 0.2 improved greatly on 0.1, with a greater focus on the user experience, plugins, local performance, and a whole lot more. Read the release notes below for some of the highlights.

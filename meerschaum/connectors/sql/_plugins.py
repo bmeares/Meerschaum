@@ -16,7 +16,7 @@ def register_plugin(
         **kw : Any
     ) -> SuccessTuple:
     """
-    Register a new plugin
+    Register a new plugin to the plugins table.
     """
 
     from meerschaum.utils.warnings import warn, error
@@ -196,5 +196,36 @@ def get_plugins(
     if search_term is not None:
         query = query.where(plugins.c.plugin_name.like(search_term + '%'))
 
-    return list(self.read(query, debug=debug)['plugin_name'])
+    return [row['plugin_name'] for row in self.engine.execute(query).fetchall()]
+
+def delete_plugin(
+        self,
+        plugin : 'meerschaum._internal.Plugin.Plugin',
+        debug : bool = False,
+        **kw : Any
+    ) -> SuccessTuple:
+    """
+    Delete a plugin from the plugins table.
+    """
+
+    from meerschaum.utils.warnings import warn, error
+    from meerschaum.utils.packages import attempt_import
+    sqlalchemy = attempt_import('sqlalchemy')
+    from meerschaum.connectors.sql.tables import get_tables
+    plugins = get_tables(mrsm_instance=self, debug=debug)['plugins']
+
+    plugin_id = self.get_plugin_id(plugin, debug=debug)
+    if plugin_id is None:
+        return True, f"Plugin '{plugin}' was not registered."
+
+    bind_variables = {
+        'plugin_id' : plugin_id,
+    }
+
+    query = sqlalchemy.delete(plugins).where(plugins.c.plugin_id == plugin_id)
+    result = self.exec(query, debug=debug)
+    if result is None:
+        return False, f"Failed to delete plugin '{plugin}'."
+    return True, f"Successfully deleted plugin '{plugin}'."
+
 

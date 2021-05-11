@@ -6,19 +6,25 @@
 Wrappers for requests.post
 """
 
+from __future__ import annotations
+from meerschaum.utils.typing import Optional, Dict, Any
+
 def post(
         self,
         r_url : str,
-        headers : dict = {},
+        headers : Optional[Dict[str, Any]] = None,
         use_token : bool = True,
         debug : bool = False,
-        **kw
-    ):
+        **kw : Any
+    ) -> requests.Response:
     """
     Wrapper for requests.post
     """
     if debug:
         from meerschaum.utils.debug import dprint
+
+    if headers is None:
+        headers = {}
 
     if use_token:
         if debug:

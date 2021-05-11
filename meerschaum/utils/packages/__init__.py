@@ -210,12 +210,13 @@ def get_pip(debug : bool = False) -> bool:
 
 def pip_install(
         *packages: List[str],
-        args: List[str] = ['--upgrade'],
+        args: Optional[List[str]] = None,
         venv: str = 'mrsm',
         deactivate: bool = True,
         split : bool = True,
         check_update : bool = True,
         check_wheel : bool = True,
+        _uninstall : bool = False,
         color : bool = True,
         debug: bool = False
     ) -> bool:
@@ -223,6 +224,8 @@ def pip_install(
     Install pip packages
     """
     from meerschaum.config.static import _static_config
+    if args is None:
+        args = ['--upgrade'] if not _uninstall else []
     if color:
         try:
             from meerschaum.utils.formatting import ANSI, UNICODE
@@ -255,8 +258,10 @@ def pip_install(
             if not get_pip(debug=debug):
                 import sys
                 print(
-                    "Failed to import pip and ensurepip. Please install pip and restart Meerschaum.\n\n" +
-                    "You can find instructions on installing pip here: https://pip.pypa.io/en/stable/installing/"
+                    "Failed to import pip and ensurepip. " +
+                    "Please install pip and restart Meerschaum.\n\n" +
+                    "You can find instructions on installing pip here: " +
+                    "https://pip.pypa.io/en/stable/installing/"
                 )
                 sys.exit(1)
         else:
@@ -264,28 +269,27 @@ def pip_install(
         import pip
     if venv is not None:
         activate_venv(venv=venv, debug=debug, color=color)
-        if '--ignore-installed' not in args and '-I' not in _args:
+        if '--ignore-installed' not in args and '-I' not in _args and not _uninstall:
             _args += ['--ignore-installed']
 
-    ### NOTE: Added pip to be checked on each install. Too much?
-    if check_update and need_update(pip, debug=debug):
+    if check_update and need_update(pip, debug=debug) and not _uninstall:
         _args.append('pip')
-    _args = ['install'] + _args
+    _args = (['install'] if not _uninstall else ['uninstall']) + _args
 
-    if check_wheel:
+    if check_wheel and not _uninstall:
         if not have_wheel:
             _args.append('wheel')
 
     if not ANSI and '--no-color' not in _args:
         _args.append('--no-color')
 
-    if '--no-warn-conflicts' not in _args:
+    if '--no-warn-conflicts' not in _args and not _uninstall:
         _args.append('--no-warn-conflicts')
 
     if '--disable-pip-version-check' not in _args:
         _args.append('--disable-pip-version-check')
 
-    if venv is not None and '--target' not in _args and '-t' not in _args:
+    if venv is not None and '--target' not in _args and '-t' not in _args and not _uninstall:
         _args += ['--target', venv_target_path(venv, debug=debug)]
     elif (
         '--target' not in _args
@@ -294,13 +298,14 @@ def pip_install(
                 _static_config()['environment']['runtime'], None
             ) != 'docker'
             and not inside_venv()
+            and not _uninstall
     ):
         _args += ['--user']
     if '--progress-bar' in _args:
         _args.remove('--progress-bar')
-    if UNICODE:
+    if UNICODE and not _uninstall:
         _args += ['--progress-bar', 'pretty']
-    else:
+    elif not _uninstall:
         _args += ['--progress-bar', 'ascii']
     if debug:
         if '-v' not in _args or '-vv' not in _args or '-vvv' not in _args:
@@ -315,7 +320,7 @@ def pip_install(
         install_name = all_packages.get(root_name, root_name)
         _packages.append(install_name)
 
-    msg = f"Installing packages:"
+    msg = "Installing packages:" if not _uninstall else "Uninstalling packages:"
     for p in _packages:
         msg += f'\n  - {p}'
     print(msg)
@@ -323,11 +328,22 @@ def pip_install(
     success = run_python_package('pip', _args + _packages, venv=venv, debug=debug, color=color) == 0
     if venv is not None and deactivate:
         deactivate_venv(venv=venv, debug=debug, color=color)
-    msg = "Successfully installed packages." if success else "Failed to install packages."
+    msg = (
+        "Successfully " + ('un' if _uninstall else '') + "installed packages." if success 
+        else "Failed to " + ('un' if _uninstall else '') + "install packages."
+    )
     print(msg)
     if debug:
-        print('pip install returned:', success)
+        print('pip ' + ('un' if _uninstall else '') + 'install returned:', success)
     return success
+
+def pip_uninstall(
+        *args, **kw
+    ) -> bool:
+    """
+    Uninstall Python packages.
+    """
+    return pip_install(*args, _uninstall=True, **{k: v for k, v in kw.items() if k != '_uninstall'})
 
 def run_python_package(
         package_name : str,
@@ -610,7 +626,7 @@ def lazy_import(
         debug = debug
     )
 
-def import_pandas() -> 'ModuleType':
+def import_pandas(**kw) -> 'ModuleType':
     """
     Quality-of-life function to attempt to import the configured version of pandas
     """
@@ -619,7 +635,7 @@ def import_pandas() -> 'ModuleType':
     ### NOTE: modin does NOT currently work!
     if pandas_module_name == 'modin':
         pandas_module_name = 'modin.pandas'
-    return attempt_import(pandas_module_name)
+    return attempt_import(pandas_module_name, **kw)
 
 def import_rich(lazy: bool = True, **kw : Any) -> 'ModuleType':
     """
