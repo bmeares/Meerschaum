@@ -39,6 +39,7 @@ def show(
         'packages'   : _show_packages,
         'help'       : _show_help,
         'users'      : _show_users,
+        'jobs'       : _show_jobs,
     }
     return choose_subaction(action, show_options, **kw)
 
@@ -489,6 +490,31 @@ def _complete_show_packages(
             possibilities.append(key)
 
     return possibilities
+
+def _show_jobs(
+        action : Optional[List[str]] = None,
+        nopretty : bool = False,
+        **kw : Any
+    ) -> SuccessTuple:
+    """
+    Show the currently running and stopped jobs.
+    """
+    from meerschaum.utils.daemon import get_daemons
+    from meerschaum.utils.formatting._jobs import pprint_jobs
+    daemons = get_daemons()
+    if not daemons and not nopretty:
+        from meerschaum.utils.warnings import info
+        info('No running or stopped jobs.')
+        print(
+            f"    You can start a background job with `-d` or `--daemon`,\n" +
+            "    or run the command `start job` before action commands.\n\n" +
+            "    Examples:\n" +
+            "      - start api -d\n" +
+            "      - start job sync pipes --loop"
+        )
+        return True, "Success"
+    pprint_jobs(get_daemons(), nopretty=nopretty)
+    return True, "Success"
 
 
 ### NOTE: This must be the final statement of the module.

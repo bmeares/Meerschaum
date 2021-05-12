@@ -52,6 +52,11 @@ Below are some ongoing tasks I have planned for Meerschaum. This is not an exhau
     - [ ] **Monitoring daemon**  
       Handle logging and other child processes with a persistent Meerschaum daemon.
 
+- **Job management**  
+    - [x] **Run in the background with `-d` / `--daemon` flag**
+    - [ ] **Show jobs**  
+    The action`show jobs` will display running and stopped jobs.
+
 - **Plugins**
     - [ ] **Reuse packages across virtual environments**  
       In an attempt to save space, if a package is already installed in another virtual environment and satisfies the requirements for a plugin, attempt to use that version instead of installing a new version.

@@ -263,8 +263,9 @@ def choices_docstring(action : str, globs : Optional[Dict[str, Any]] = None) -> 
 def print_options(
         options : Optional[Dict[str, Any]] = None,
         nopretty : bool = False,
+        no_rich : bool = False,
         name : str = 'options',
-        header : str = None,
+        header : Optional[str] = None,
         actions : bool = False,
         num_cols : int = 8,
         **kw
@@ -296,7 +297,7 @@ def print_options(
             print()
 
     rich = import_rich()
-    if rich is None or nopretty:
+    if rich is None or nopretty or no_rich:
         _print_options_no_rich()
         return None
 
