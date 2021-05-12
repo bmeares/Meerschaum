@@ -451,40 +451,25 @@ class Shell(cmd.Cmd):
         except AttributeError as ae:
             ### if function is not found, default to `shell`
             action = "sh"
-            args['action'].insert(0, "sh")
-            func = getattr(self, 'do_sh')
-
-        ### delete the first action
-        ### e.g. 'show actions' -> ['actions']
-        del args['action'][0]
+            args['action'].insert(0, action)
+            func = getattr(self, f'do_{action}')
 
         positional_only = (action not in self._actions)
         if positional_only:
             return original_line
 
-        from meerschaum.utils.packages import activate_venv, deactivate_venv
-        plugin_name = (
-            self._actions[action].__module__.split('.')[-1]
-            if self._actions[action].__module__.startswith('plugins.') else None
+        from meerschaum.actions._entry import _entry_with_args
+        from meerschaum.utils.daemon import daemon_action
+        success_tuple = (
+            _entry_with_args(**args) if not args.get('daemon', None)
+            else daemon_action(**args)
         )
 
-        ### execute the meerschaum action
-        ### and print the response message in case of failure
         from meerschaum.utils.formatting import print_tuple
-        activate_venv(venv=plugin_name, debug=self.debug)
-        try:
-            response = func(**args)
-        except Exception as e:
-            if self.debug or args.get('debug', False):
-                import traceback
-                traceback.print_exception(type(e), e, e.__traceback__)
-            response = False, (
-                f"Failed to execute '{func.__name__}' with exception:\n\n" +
-                f"'{e}'.\n\nRun again with '--debug' to see a full stacktrace."
+        if isinstance(success_tuple, tuple):
+            print_tuple(
+                success_tuple, skip_common=(not self.debug), upper_padding=1, lower_padding=1
             )
-        deactivate_venv(venv=plugin_name, debug=self.debug)
-        if isinstance(response, tuple):
-            print_tuple(response, skip_common=(not self.debug), upper_padding=1, lower_padding=1)
         self.postcmd(False, "")
 
         return ""
