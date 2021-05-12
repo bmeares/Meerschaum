@@ -41,6 +41,7 @@ packages : Dict[str, Dict[str, str]] = {
         'dateutil'          : 'python-dateutil>=2.7.5',
         'requests'          : 'requests>=2.23.0',
         'binaryornot'       : 'binaryornot>=0.4.4',
+        'dill'              : 'dill>=0.3.3',
         'pyvim'             : 'pyvim>=3.0.2',
         'aiofiles'          : 'aiofiles>=0.6.0',
         'packaging'         : 'packaging>=20.4',

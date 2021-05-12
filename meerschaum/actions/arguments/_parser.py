@@ -140,7 +140,7 @@ groups['actions'].add_argument(
     help = "Run an action as a background daemon."
 )
 groups['actions'].add_argument(
-    '--keep-daemon-output', '--skip-daemon-cleanup', action='store_true',
+    '--keep-logs', '--keep-daemon-output', '--skip-daemon-cleanup', action='store_true',
     help = "Preserve a daemon's output files for later inspection."
 )
 

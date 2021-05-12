@@ -20,6 +20,7 @@ def start(
     from meerschaum.utils.misc import choose_subaction
     options = {
         'api' : _start_api,
+        'job' : _start_job,
     }
     return choose_subaction(action, options, **kw)
 
@@ -40,6 +41,18 @@ def _start_api(action : Optional[List[str]] = None, **kw):
     """
     from meerschaum.actions import actions
     return actions['api'](action=['start'], **kw)
+
+def _start_job(**kw) -> SuccessTuple:
+    """
+    Run a Meerschaum action as a background job.
+    You may also run a background job with the `-d` or `--daemon` flags.
+
+    Examples:
+        - `start job sync pipes --loop`
+        - `start api -d`
+    """
+    from meerschaum.utils.daemon import daemon_action
+    return daemon_action(**kw)
 
 
 ### NOTE: This must be the final statement of the module.

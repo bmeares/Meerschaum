@@ -15,8 +15,8 @@ def _entry(sysargs : Optional[List[str]] = None) -> SuccessTuple:
     The `action` list removes the first element.
 
     Examples of action:
-    'show actions' -> ['actions']
-    'show' -> []
+        'show actions' -> ['actions']
+        'show' -> []
     """
     from meerschaum.actions.arguments import parse_arguments
     if sysargs is None:
@@ -69,7 +69,7 @@ def _entry_with_args(**kw) -> SuccessTuple:
             import traceback
             traceback.print_exception(type(e), e, e.__traceback__)
         result = False, (
-            f"Failed to execute '{([main_action] + kw['action']).join(' ')}' with exception:\n\n" +
+            f"Failed to execute '{' '.join([main_action] + kw['action'])}' with exception:\n\n" +
             f"'{e}'.\n\nRun again with '--debug' to see a full stacktrace."
         )
 
