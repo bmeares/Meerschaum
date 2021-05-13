@@ -12,6 +12,7 @@ from meerschaum.utils.typing import Optional, Dict, Any, SuccessTuple, Callable,
 from meerschaum.config._paths import DAEMON_RESOURCES_PATH
 from meerschaum.utils.warnings import warn, error
 from meerschaum.utils.packages import attempt_import
+from meerschaum.utils.daemon._names import get_new_daemon_name
 daemoniker = attempt_import('daemoniker')
 dill = attempt_import('dill')
 
@@ -95,10 +96,11 @@ class Daemon(object):
                 )
             self.label = label
         if 'daemon_id' not in self.__dict__:
-            self.daemon_id = (
-                datetime.datetime.utcnow().isoformat() + ' ' + self.label +
-                ' ' + str(threading.current_thread().ident)
-            )
+            self.daemon_id = get_new_daemon_name()
+            #  self.daemon_id = (
+                #  datetime.datetime.utcnow().isoformat() + ' ' + self.label +
+                #  ' ' + str(threading.current_thread().ident)
+            #  )
         if '_properties' not in self.__dict__:
             self._properties = properties
         if self._properties is None:
@@ -262,8 +264,13 @@ class Daemon(object):
         Return the properties dictionary. If none was provided, attempt to
         read the properties JSON file.
         """
-        #  if not self._properties:
-        self._properties = self.read_properties()
+        _file_properties = self.read_properties()
+        if not self._properties:
+            self._properties = _file_properties
+        if self._properties is None:
+            self._properties = {}
+        if _file_properties is not None:
+            self._properties.update(_file_properties)
         return self._properties
 
     def write_properties(self) -> SuccessTuple:
