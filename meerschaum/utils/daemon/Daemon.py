@@ -10,13 +10,12 @@ from __future__ import annotations
 import pathlib, threading, json, shutil, datetime
 from meerschaum.utils.typing import Optional, Dict, Any, SuccessTuple, Callable, List
 from meerschaum.config._paths import DAEMON_RESOURCES_PATH
+from meerschaum.config._patch import apply_patch_to_config
 from meerschaum.utils.warnings import warn, error
 from meerschaum.utils.packages import attempt_import
 from meerschaum.utils.daemon._names import get_new_daemon_name
-daemoniker = attempt_import('daemoniker')
-dill = attempt_import('dill')
 
-class Daemon(object):
+class Daemon:
     """
     Manage running daemons via the Daemon class.
     """
@@ -75,7 +74,7 @@ class Daemon(object):
         _pickle = self.__dict__.get('_pickle', False)
         if daemon_id is not None:
             self.daemon_id = daemon_id
-            if not self.pickle_path.exists() and not target and not 'target' in self.__dict__:
+            if not self.pickle_path.exists() and not target and ('target' not in self.__dict__):
                 error(
                     f"Daemon '{self.daemon_id}' does not exist. "
                     + "Pass a target to create a new Daemon."
@@ -97,10 +96,6 @@ class Daemon(object):
             self.label = label
         if 'daemon_id' not in self.__dict__:
             self.daemon_id = get_new_daemon_name()
-            #  self.daemon_id = (
-                #  datetime.datetime.utcnow().isoformat() + ' ' + self.label +
-                #  ' ' + str(threading.current_thread().ident)
-            #  )
         if '_properties' not in self.__dict__:
             self._properties = properties
         if self._properties is None:
@@ -126,6 +121,8 @@ class Daemon(object):
             the last to finish will overwrite the output of the first.
             Defaults to `False`.
         """
+
+        daemoniker = attempt_import('daemoniker')
 
         began = datetime.datetime.utcnow()
         if self.properties is None:
@@ -176,7 +173,7 @@ class Daemon(object):
         sighandler.start()
 
         try:
-            result = self.func(*self.target_args, **self.target_kw)
+            result = self.target(*self.target_args, **self.target_kw)
         except Exception as e:
             warn(e, stacklevel=3)
             result = e
@@ -187,6 +184,16 @@ class Daemon(object):
         else:
             self.cleanup()
         return result
+
+    def run_process(self) -> SuccessTuple:
+        """
+        Run the daemon as a child process and continue executing the parent.
+        """
+        from meerschaum.utils.daemon import daemon_action
+        self.write_pickle()
+        return daemon_action(
+            action = ['start', 'job', self.daemon_id, '-f'],
+        )
 
     @property
     def path(self) -> pathlib.Path:
@@ -236,8 +243,11 @@ class Daemon(object):
         """
         if not self.properties_path.exists():
             return None
-        with open(self.properties_path, 'r') as file:
-            return json.load(file)
+        try:
+            with open(self.properties_path, 'r') as file:
+                return json.load(file)
+        except Exception as e:
+            return {}
 
     def read_pickle(self) -> Daemon:
         """
@@ -270,7 +280,7 @@ class Daemon(object):
         if self._properties is None:
             self._properties = {}
         if _file_properties is not None:
-            self._properties.update(_file_properties)
+            self._properties = apply_patch_to_config(self._properties, _file_properties)
         return self._properties
 
     def write_properties(self) -> SuccessTuple:
@@ -281,6 +291,7 @@ class Daemon(object):
         success, msg = False, f"No properties to write for daemon '{self.daemon_id}'."
         if self.properties is not None:
             try:
+                self.path.mkdir(parents=True, exist_ok=True)
                 with open(self.properties_path, 'w+') as properties_file:
                     json.dump(self.properties, properties_file)
                 success, msg = True, 'Success'
@@ -311,10 +322,10 @@ class Daemon(object):
             try:
                 shutil.rmtree(self.path)
             except Exception as e:
-                from meerschaum.utils.warnings import warn
                 warn(e)
 
     def __getstate__(self):
+        dill = attempt_import('dill')
         return {
             'target' : dill.dumps(self.target),
             'target_args' : self.target_args,
@@ -325,6 +336,7 @@ class Daemon(object):
         }
 
     def __setstate__(self, _state : Dict[str, Any]):
+        dill = attempt_import('dill')
         _state['target'] = dill.loads(_state['target'])
         self._pickle = True
         self.__init__(**_state) 

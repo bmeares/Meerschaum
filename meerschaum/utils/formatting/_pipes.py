@@ -20,7 +20,7 @@ def pprint_pipes(pipes : PipesDict) -> None:
     from meerschaum.utils.warnings import error
     from meerschaum.utils.packages import attempt_import, import_rich
     from meerschaum.utils.misc import sorted_dict, replace_pipes_in_dict
-    from meerschaum.utils.formatting import UNICODE, ANSI, pprint, colored
+    from meerschaum.utils.formatting import UNICODE, ANSI, pprint, colored, get_console
     from meerschaum.config import get_config
     import copy
     rich = import_rich('rich', warn=False)
@@ -151,7 +151,8 @@ def pprint_pipes(pipes : PipesDict) -> None:
         rich_columns = attempt_import('rich.columns')
         Columns = rich_columns.Columns
         columns = Columns(cols)
-        rich.print(columns)
+        #  rich.print(columns)
+        get_console().print(columns)
 
     if not UNICODE:
         return ascii_print_pipes()
@@ -217,7 +218,8 @@ def pprint_pipes(pipes : PipesDict) -> None:
         cols.append(t)
 
     columns = Columns(cols)
-    rich.print(columns)
+    #  rich.print(columns)
+    get_console().print(columns)
 
 def pprint_pipe_columns(
         pipe : meerschaum.Pipe,
@@ -229,7 +231,7 @@ def pprint_pipe_columns(
     """
     import json
     from meerschaum.utils.warnings import info
-    from meerschaum.utils.formatting import pprint, print_tuple
+    from meerschaum.utils.formatting import pprint, print_tuple, get_console
     from meerschaum.utils.formatting._shell import make_header
     from meerschaum.utils.packages import attempt_import, import_rich
 
@@ -260,7 +262,8 @@ def pprint_pipe_columns(
             table.add_row(c, t)
 
         if _cols_types:
-            rich.print(table)
+            #  rich.print(table)
+            get_console().print(table)
             #  print(f"\nTable columns and types:")
             #  pprint(_cols_types, nopretty=nopretty)
         else:

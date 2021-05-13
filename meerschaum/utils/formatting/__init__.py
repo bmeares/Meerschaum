@@ -111,6 +111,9 @@ def colored(text : str, *colors, **kw) -> str:
 
 console = None
 def get_console():
+    """
+    Return a `rich` console object for reuse.
+    """
     global console
     from meerschaum.utils.packages import import_rich, attempt_import
     if not __getattr__('ANSI') and not __getattr__('UNICODE'):
