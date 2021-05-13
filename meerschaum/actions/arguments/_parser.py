@@ -128,20 +128,25 @@ groups['actions'].add_argument(
     help="Automatically choose the defaults answers to questions. Does not result in data loss.",
 )
 groups['actions'].add_argument(
+    '-d', '--daemon', action='store_true',
+    help = "Run an action as a background daemon."
+)
+groups['actions'].add_argument(
+    '--keep-logs', '--keep-job', '--save-job', '--keep-daemon-output', '--skip-daemon-cleanup',
+    action='store_true', help="Preserve a job's output files for later inspection."
+)
+groups['actions'].add_argument(
+    '--name', '--job-name', type=str, help=(
+        "Assign a name to a job. If no name is provided, a random name will be assigned."
+    ),
+)
+groups['actions'].add_argument(
     '-A', '--sub-args', nargs=argparse.REMAINDER,
     help = (
         "Provide a list of arguments for subprocesses. " +
         "You can also type sub-arguments in [] instead." +
         " E.g. `stack -A='--version'`, `ls [-lh]`, `echo -A these are sub-arguments`"
     )
-)
-groups['actions'].add_argument(
-    '-d', '--daemon', action='store_true',
-    help = "Run an action as a background daemon."
-)
-groups['actions'].add_argument(
-    '--keep-logs', '--keep-daemon-output', '--skip-daemon-cleanup', action='store_true',
-    help = "Preserve a daemon's output files for later inspection."
 )
 
 ### Pipes options
@@ -267,4 +272,11 @@ groups['misc'].add_argument(
 groups['misc'].add_argument(
     '--use-bash', action='store_true',
     help="Execute non-implemented actions via `bash -c`. Default behavior is to execute directly."
+)
+groups['misc'].add_argument(
+    '--allow-shell-job', action='store_true',
+    help = (
+        "Allow shell commands to be run as background jobs. "
+        + "Default behavior is to only allow recognized actions."
+    )
 )

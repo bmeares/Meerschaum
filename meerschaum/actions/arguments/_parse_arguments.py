@@ -51,7 +51,7 @@ def parse_arguments(sysargs : List[str]) -> dict[str, Any]:
             if sa.startswith(begin_decorator):
                 sa = sa[len(begin_decorator):]
             if sa.endswith(end_decorator):
-                sa = sa[:-1 *len(end_decorator)]
+                sa = sa[:-1 * len(end_decorator)]
             sub_arguments.append(sa)
             ### remove sub-argument from action list
             sub_arg_indices.append(i)
@@ -79,6 +79,7 @@ def parse_arguments(sysargs : List[str]) -> dict[str, Any]:
 
     args_dict = vars(args)
     args_dict['sysargs'] = sysargs
+    args_dict['filtered_sysargs'] = filtered_sysargs
     ### append decorated arguments to sub_arguments list
     if 'sub_args' not in args_dict:
         args_dict['sub_args'] = []
@@ -92,6 +93,9 @@ def parse_arguments(sysargs : List[str]) -> dict[str, Any]:
         else:
             parsed_sub_arguments.append(sub_arg)
     args_dict['sub_args'] = parsed_sub_arguments
+    ### In case of empty subargs
+    if args_dict['sub_args'] == ['']:
+        args_dict['sub_args'] = []
 
     ### remove None (but not False) args
     none_args = []
