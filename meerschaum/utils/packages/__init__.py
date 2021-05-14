@@ -525,12 +525,16 @@ def attempt_import(
                     f"Package '{root_name}' is not declared in meerschaum.utils.packages.",
                     ImportWarning,
                     stacklevel = 3,
-                    color = color
+                    color = False
                 )
 
         ### Determine if the package exists.
         if precheck is False:
-            found_module = do_import(name, debug=debug, warn=False, venv=venv, color=color) is not None
+            found_module = (
+                do_import(
+                    name, debug=debug, warn=False, venv=venv, color=color
+                ) is not None
+            )
         else:
             try:
                 found_module = (importlib.util.find_spec(name) is not None)
@@ -554,7 +558,7 @@ def attempt_import(
                         f"Failed to install '{install_name}'.",
                         ImportWarning,
                         stacklevel = 3,
-                        color = color
+                        color = False, ### Color triggers a deactivate, so keep as False
                     )
             elif warn:
                 ### Raise a warning if we can't find the package and install = False.
@@ -563,7 +567,7 @@ def attempt_import(
                      f"\n\nSet install=True when calling attempt_import.\n"),
                     ImportWarning,
                     stacklevel = 3,
-                    color = color
+                    color = False,
                 )
 
         ### Do the import. Will be lazy if lazy=True.
@@ -589,13 +593,13 @@ def attempt_import(
                             "Try install via Meershaum with `install packages '{install_name}'`.",
                             ImportWarning,
                             stacklevel = 3,
-                            color = color
+                            color = False,
                         )
                 elif warn:
                     warn_function(
                         f"There's an update available for '{m.__name__}'.",
                         stack = False,
-                        color = color
+                        color = False,
                     )
     if venv is not None and deactivate:
         deactivate_venv(venv=venv, debug=debug, color=color)
