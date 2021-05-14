@@ -13,9 +13,9 @@ from meerschaum.utils.typing import (
 )
 
 def get_pipes(
-        connector_keys : Union[str, Sequence[str]] = [],
-        metric_keys : Union[str, Sequence[str]] = [],
-        location_keys : Union[str, Sequence[str]] = [],
+        connector_keys : Optional[Union[str, Sequence[str]]] = None,
+        metric_keys : Optional[Union[str, Sequence[str]]] = None,
+        location_keys : Optional[Union[str, Sequence[str]]] = None,
         params : Mapping[str, Any] = dict(),
         mrsm_instance : Union[str, InstanceConnector, None] = None,
         as_list : bool = False,
@@ -97,6 +97,13 @@ def get_pipes(
 
     from meerschaum.config import get_config
     from meerschaum.utils.warnings import error
+
+    if connector_keys is None:
+        connector_keys = []
+    if metric_keys is None:
+        metric_keys = []
+    if location_keys is None:
+        location_keys = []
 
     ### Get SQL or API connector (keys come from `connector.fetch_pipes_keys()`).
     ### If `wait`, wait until a connection is made
