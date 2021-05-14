@@ -12,7 +12,7 @@ from meerschaum.utils.typing import Optional, Dict, Any, SuccessTuple, Callable,
 from meerschaum.config._paths import DAEMON_RESOURCES_PATH
 from meerschaum.config._patch import apply_patch_to_config
 from meerschaum.utils.warnings import warn, error
-from meerschaum.utils.packages import attempt_import
+from meerschaum.utils.packages import attempt_import, venv_exec
 from meerschaum.utils.daemon._names import get_new_daemon_name
 
 class Daemon:
@@ -137,21 +137,7 @@ class Daemon:
                 'began' : began.isoformat(),
             },
         })
-        try:
-            self.path.mkdir(parents=True, exist_ok=False)
-            _already_exists = False
-        except FileExistsError:
-            _already_exists = True
-
-        if _already_exists and not allow_dirty_run:
-            error(
-                f"Daemon '{self.daemon_id}' already exists. " +
-                f"To allow this daemon to run, do one of the following:\n"
-                + "  - Execute `daemon.cleanup()`.\n"
-                + f"  - Delete the directory '{self.path}'.\n"
-                + "  - Pass `allow_dirty_run=True` to `daemon.run()`.\n"
-            )
-
+        self.mkdir_if_not_exists(allow_dirty_run)
         _write_properties_success_tuple = self.write_properties()
         if not _write_properties_success_tuple[0]:
             error(_write_properties_success_tuple[1])
@@ -185,15 +171,45 @@ class Daemon:
             self.cleanup()
         return result
 
-    def run_process(self) -> SuccessTuple:
+    def run_process(
+            self,
+            keep_daemon_output : bool = False,
+            allow_dirty_run : bool = False,
+            debug : bool = False,
+        ) -> SuccessTuple:
         """
         Run the daemon as a child process and continue executing the parent.
         """
-        from meerschaum.utils.daemon import daemon_action
-        self.write_pickle()
-        return daemon_action(
-            action = ['start', 'job', self.daemon_id, '-f'],
+        self.mkdir_if_not_exists(allow_dirty_run)
+        _write_pickle_success_tuple = self.write_pickle()
+        if not _write_pickle_success_tuple[0]:
+            return _write_pickle_success_tuple
+
+        _launch_daemon_code = (
+            "from meerschaum.utils.daemon import Daemon; "
+            + f"daemon = Daemon(daemon_id='{self.daemon_id}'); "
+            + f"daemon.run(keep_daemon_output={keep_daemon_output}, "
+            + f"allow_dirty_run=True)"
         )
+        _launch_success_bool = venv_exec(_launch_daemon_code, debug=debug)
+        msg = "Success" if _launch_success_bool else f"Failed to start daemon '{self.daemon_id}'."
+        return _launch_success_bool, msg
+
+    def mkdir_if_not_exists(self, allow_dirty_run : bool = False):
+        try:
+            self.path.mkdir(parents=True, exist_ok=False)
+            _already_exists = False
+        except FileExistsError:
+            _already_exists = True
+
+        if _already_exists and not allow_dirty_run:
+            error(
+                f"Daemon '{self.daemon_id}' already exists. " +
+                f"To allow this daemon to run, do one of the following:\n"
+                + "  - Execute `daemon.cleanup()`.\n"
+                + f"  - Delete the directory '{self.path}'.\n"
+                + "  - Pass `allow_dirty_run=True` to `daemon.run()`.\n"
+            )
 
     @property
     def path(self) -> pathlib.Path:
@@ -214,24 +230,49 @@ class Daemon:
         """
         Return the path for the stdout text file.
         """
-        return self.path / 'stdout.txt'
+        return self.log_path
+        #  return self.path / 'stdout.txt'
 
     @property
     def stderr_path(self):
         """
         Return the path for the stderr text file.
         """
-        return self.path / 'stderr.txt'
+        return self.log_path
+        #  return self.path / 'stderr.txt'
 
     @property
-    def pid_path(self):
+    def log_path(self):
+        """
+        Return the path for the output log file.
+        """
+        return self.path / 'output.log'
+
+    @property
+    def log_text(self) -> Optional[str]:
+        """
+        Read the log file and return its contents.
+        Returns `None` if the log file does not exist.
+        """
+        if not self.log_path.exists():
+            return None
+        try:
+            with open(self.log_path, 'r') as f:
+                text = f.read()
+        except Exception as e:
+            warn(e)
+            text = None
+        return text
+
+    @property
+    def pid_path(self) -> pathlib.Path:
         """
         Return the path for the pid file.
         """
         return self.path / 'process.pid'
 
     @property
-    def pickle_path(self):
+    def pickle_path(self) -> pathlib.Path:
         """
         Return the path for the pickle file.
         """
