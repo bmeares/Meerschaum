@@ -105,6 +105,13 @@ def get_pipes(
     if location_keys is None:
         location_keys = []
 
+    if isinstance(connector_keys, str):
+        connector_keys = [connector_keys]
+    if isinstance(metric_keys, str):
+        metric_keys = [metric_keys]
+    if isinstance(location_keys, str):
+        location_keys = [location_keys]
+
     ### Get SQL or API connector (keys come from `connector.fetch_pipes_keys()`).
     ### If `wait`, wait until a connection is made
     if mrsm_instance is None:
@@ -213,7 +220,7 @@ def methods(
         """
         Explicitly build Pipes based on provided keys.
         Raises an error if connector_keys or metric_keys is empty,
-        and assumes location_keys = [None] if empty
+        and assumes location_keys = [None] if empty.
         """
 
         if connector_keys is None:
