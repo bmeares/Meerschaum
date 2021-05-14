@@ -516,6 +516,13 @@ def _show_jobs(
     pprint_jobs(get_daemons(), nopretty=nopretty)
     return True, "Success"
 
+def _show_logs(
+
+    ) -> SuccessTuple:
+    """
+    Show the logs for jobs.
+    """
+
 
 ### NOTE: This must be the final statement of the module.
 ###       Any subactions added below these lines will not

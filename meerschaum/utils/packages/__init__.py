@@ -180,6 +180,7 @@ def venv_exec(code: str, venv: str = 'mrsm', debug: bool = False) -> bool:
     """
     import subprocess, sys, platform, os
     from meerschaum.config._paths import VIRTENV_RESOURCES_PATH
+    from meerschaum.utils.debug import dprint
     executable = (
         sys.executable if venv is None
         else os.path.join(
@@ -188,7 +189,10 @@ def venv_exec(code: str, venv: str = 'mrsm', debug: bool = False) -> bool:
             ), 'python'
         )
     )
-    return subprocess.call([executable, '-c', code]) == 0
+    cmd_list = [executable, '-c', code]
+    if debug:
+        dprint(str(cmd_list))
+    return subprocess.call(cmd_list) == 0
 
 def get_pip(debug : bool = False) -> bool:
     """
