@@ -61,6 +61,9 @@ paths = {
     'SQLITE_RESOURCES_PATH' : ('{ROOT_DIR_PATH}', 'sqlite'),
     'SQLITE_DB_PATH' : ('{SQLITE_RESOURCES_PATH}', 'mrsm_local.db'),
 
+    'DUCKDB_RESOURCES_PATH' : ('{ROOT_DIR_PATH}', 'duckdb'),
+    'DUCKDB_PATH' : ('{DUCKDB_RESOURCES_PATH}', 'duck.db'),
+
     'GRAFANA_RESOURCES_PATH' : ('{STACK_RESOURCES_PATH}', 'grafana', 'resources'),
     'GRAFANA_DATASOURCE_PATH' : (
         '{GRAFANA_RESOURCES_PATH}', 'provisioning', 'datasources', 'datasource.yaml'
