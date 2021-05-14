@@ -27,13 +27,7 @@ def daemon_entry(sysargs : Optional[List[str]] = None) -> SuccessTuple:
         sysargs,
         daemon_id = _args.get('name', None) if _args else None,
         label = (' '.join(sysargs) if sysargs else None),
-        keep_daemon_output = (
-            '--keep-daemon-output' in sysargs
-                or '--skip-daemon-cleanup' in sysargs
-                or '--keep-logs' in sysargs
-                or '--keep-job' in sysargs
-                or '--save-job' in sysargs
-        )
+        keep_daemon_output = ('--rm' not in sysargs)
     )
     if not isinstance(success_tuple, tuple):
         success_tuple = False, str(success_tuple)
@@ -93,4 +87,29 @@ def get_daemon_ids() -> List[str]:
     Return a list of daemon IDs.
     """
     return os.listdir(DAEMON_RESOURCES_PATH)
+
+def get_running_daemons(daemons : Optional[List[Daemon]] = None) -> List[Daemon]:
+    """
+    Return a list of currently running daemons.
+    """
+    if daemons is None:
+        daemons = get_daemons()
+    running_daemons = [
+        d for d in daemons
+            if d.properties is not None
+                and 'ended' not in d.properties.get('process', {})
+    ]
+
+def get_stopped_daemons(
+        daemons : Optional[List[Daemon]] = None,
+        running_daemons : Optional[List[Daemon]] = None,
+    ) -> List[Daemon]:
+    """
+    Return a list of stopped daemons.
+    """
+    if daemons is None:
+        daemons = get_daemons()
+
+
+    stopped_daemons = [d for d in daemons if d not in running_daemons]
 

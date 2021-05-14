@@ -334,6 +334,9 @@ def _complete_delete_connectors(action : Optional[List[str]] = None, **kw : Any)
     search_term = action[-1] if action else ''
     return get_connector_labels(*types, search_term=search_term)
 
+#  def _delete_job():
+    #  pass
+
 
 ### NOTE: This must be the final statement of the module.
 ###       Any subactions added below these lines will not
