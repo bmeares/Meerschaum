@@ -17,6 +17,7 @@ def pprint_jobs(
     """
     Pretty-print a list of Daemons.
     """
+    from meerschaum.utils.formatting import make_header
     
     running_daemons = [
         d for d in daemons
@@ -28,8 +29,31 @@ def pprint_jobs(
     def _nopretty_print():
         from meerschaum.utils.misc import print_options
         if running_daemons:
-            print_options(running_daemons, nopretty=nopretty, no_rich=True, header='Running jobs')
+            if not nopretty:
+                print('\n' + make_header('Running jobs'))
+            for d in stopped_daemons:
+                pprint_job(d, nopretty=nopretty)
+            #  print_options(running_daemons, nopretty=nopretty, no_rich=True, header='Running jobs')
         if stopped_daemons:
-            print_options(stopped_daemons, nopretty=nopretty, no_rich=True, header='Stopped jobs')
+            if not nopretty:
+                print('\n' + make_header('Stopped jobs'))
+            for d in stopped_daemons:
+                pprint_job(d, nopretty=nopretty)
+            #  print_options(stopped_daemons, nopretty=nopretty, no_rich=True, header='Stopped jobs')
 
     _nopretty_print()
+
+def pprint_job(
+        daemon : Daemon,
+        nopretty : bool = False,
+    ):
+    """
+    Pretty-print a single Daemon.
+    """
+    from meerschaum.utils.warnings import info
+    if not nopretty:
+        info(f"Command for job '{daemon.daemon_id}':")
+        print('\n' + daemon.label + '\n')
+    else:
+        print(daemon.daemon_id)
+

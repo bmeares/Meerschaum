@@ -104,7 +104,7 @@ class Daemon:
 
     def run(
             self,
-            keep_daemon_output : bool = False,
+            keep_daemon_output : bool = True,
             allow_dirty_run : bool = False,
         ) -> Any:
         """
@@ -112,8 +112,8 @@ class Daemon:
         NOTE: This WILL EXIT the parent process!
 
         :param keep_daemon_output:
-            If `True`, delete the daemon's output directory upon exiting.
-            Defaults to `False`.
+            If `False`, delete the daemon's output directory upon exiting.
+            Defaults to `True`.
 
         :param allow_dirty_run:
             If `True`, run the daemon, even if the `daemon_id` directory exists.
@@ -173,7 +173,7 @@ class Daemon:
 
     def run_process(
             self,
-            keep_daemon_output : bool = False,
+            keep_daemon_output : bool = True,
             allow_dirty_run : bool = False,
             debug : bool = False,
         ) -> SuccessTuple:

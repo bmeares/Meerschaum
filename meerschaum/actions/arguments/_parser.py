@@ -131,9 +131,12 @@ groups['actions'].add_argument(
     '-d', '--daemon', action='store_true',
     help = "Run an action as a background daemon."
 )
+#  groups['actions'].add_argument(
+    #  '--keep-logs', '--keep-job', '--save-job', '--keep-daemon-output', '--skip-daemon-cleanup',
+    #  action='store_true', help="Preserve a job's output files for later inspection."
+#  )
 groups['actions'].add_argument(
-    '--keep-logs', '--keep-job', '--save-job', '--keep-daemon-output', '--skip-daemon-cleanup',
-    action='store_true', help="Preserve a job's output files for later inspection."
+    '--rm', action='store_true', help="Delete a job once it has finished executing."
 )
 groups['actions'].add_argument(
     '--name', '--job-name', type=str, help=(
