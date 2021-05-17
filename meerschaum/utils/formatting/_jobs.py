@@ -8,7 +8,7 @@ Print jobs information.
 
 from __future__ import annotations
 from meerschaum.utils.typing import List, Optional, Any
-from meerschaum.utils.daemon import Daemon, get_daemons
+from meerschaum.utils.daemon import Daemon, get_daemons, get_running_daemons, get_stopped_daemons
 
 def pprint_jobs(
         daemons : List[Daemon],
@@ -19,19 +19,15 @@ def pprint_jobs(
     """
     from meerschaum.utils.formatting import make_header
     
-    running_daemons = [
-        d for d in daemons
-            if d.properties is not None
-                and 'ended' not in d.properties.get('process', {})
-    ]
-    stopped_daemons = [d for d in daemons if d not in running_daemons]
+    running_daemons = get_running_daemons(daemons)
+    stopped_daemons = get_stopped_daemons(daemons, running_daemons)
 
     def _nopretty_print():
         from meerschaum.utils.misc import print_options
         if running_daemons:
             if not nopretty:
                 print('\n' + make_header('Running jobs'))
-            for d in stopped_daemons:
+            for d in running_daemons:
                 pprint_job(d, nopretty=nopretty)
             #  print_options(running_daemons, nopretty=nopretty, no_rich=True, header='Running jobs')
         if stopped_daemons:

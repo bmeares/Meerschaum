@@ -94,10 +94,8 @@ def get_running_daemons(daemons : Optional[List[Daemon]] = None) -> List[Daemon]
     """
     if daemons is None:
         daemons = get_daemons()
-    running_daemons = [
-        d for d in daemons
-            if d.properties is not None
-                and 'ended' not in d.properties.get('process', {})
+    return [
+        d for d in daemons if d.pid_path.exists()
     ]
 
 def get_stopped_daemons(
@@ -109,7 +107,7 @@ def get_stopped_daemons(
     """
     if daemons is None:
         daemons = get_daemons()
+    if running_daemons is None:
+        running_daemons = get_running_daemons(daemons)
 
-
-    stopped_daemons = [d for d in daemons if d not in running_daemons]
-
+    return [d for d in daemons if d not in running_daemons]
