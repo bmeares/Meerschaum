@@ -334,8 +334,48 @@ def _complete_delete_connectors(action : Optional[List[str]] = None, **kw : Any)
     search_term = action[-1] if action else ''
     return get_connector_labels(*types, search_term=search_term)
 
-#  def _delete_job():
-    #  pass
+def _delete_jobs(
+        action : Optional[List[str]] = None,
+        noask : bool = False,
+        nopretty : bool = False,
+        force : bool = False,
+        **kw
+    ) -> SuccessTuple:
+    """
+    Remove a job's log files and delete the job's ID.
+
+    If the job is running, ask to kill the job first.
+    """
+    from meerschaum.utils.daemon import Daemon, get_daemons, get_daemon_ids
+    from meerschaum.utils.prompt import yes_no
+    from meerschaum.utils.formatting._jobs import pprint_jobs
+    daemons_ids = get_daemon_ids()
+    daemons = get_daemons()
+    if not action:
+        if not force:
+            pprint_jobs(daemons)
+            if not yes_no(
+                "Delete all jobs? This cannot be undone!",
+                noask=noask, yes=yes, default='n'
+            ):
+                return False, "No jobs were deleted."
+    else:
+        daemons = []
+        _daemons = [Daemon(a) for a in action]
+        for d in _daemons:
+            if not d.path.exists():
+                if not nopretty:
+                    warn("Daemon '{d.daemon_id}' does not exist. Skipping...", stack=False)
+                continue
+            daemons.append(d)
+    _to_delete = daemons
+    _are_running = [d for d in daemons if d.pid_path.exists()]
+    if _are_running:
+        pprint_jobs(_are_running)
+        if not force:
+            if not yes_no("", default='n', yes=yes, noask=noask):
+                pass
+
 
 
 ### NOTE: This must be the final statement of the module.
