@@ -3,7 +3,7 @@
 # vim:fenc=utf-8
 
 """
-Functions for deleting elements
+Functions for deleting elements.
 """
 
 from __future__ import annotations
@@ -35,14 +35,22 @@ def _complete_delete(
     """
     Override the default Meerschaum `complete_` function.
     """
+    from meerschaum.actions.start import _complete_start_jobs
+    from meerschaum.actions.edit import _complete_edit_config
     if action is None:
         action = []
     options = {
         'connector': _complete_delete_connectors,
         'connectors': _complete_delete_connectors,
+        'config' : _complete_edit_config,
+        'job' : _complete_start_jobs,
+        'jobs' : _complete_start_jobs,
     }
 
-    if len(action) > 0 and action[0] in options:
+    if (
+        len(action) > 0 and action[0] in options
+            and kw.get('line', '').split(' ')[-1] != action[0]
+    ):
         sub = action[0]
         del action[0]
         return options[sub](action=action, **kw)
@@ -67,7 +75,7 @@ def _delete_pipes(
     pipes = get_pipes(as_list=True, debug=debug, **kw)
     if len(pipes) == 0:
         return False, "No pipes to delete."
-    question = "Are you sure you want to delete these Pipes? THIS CANNOT BE UNDONE!\n"
+    question = "Are you sure you want to delete these pipes? This can't be undone!\n"
     for p in pipes:
         question += f" - {p}" + "\n"
     answer = force
@@ -328,11 +336,20 @@ def _delete_connectors(
     write_config(cf, debug=debug)
     return True, "Success"
 
-def _complete_delete_connectors(action : Optional[List[str]] = None, **kw : Any) -> List[str]:
+def _complete_delete_connectors(
+        action : Optional[List[str]] = None,
+        line : str = '',
+        **kw : Any
+    ) -> List[str]:
     from meerschaum.config import get_config
     from meerschaum.utils.misc import get_connector_labels
     types = list(get_config('meerschaum', 'connectors').keys())
-    search_term = action[-1] if action else ''
+    if line.split(' ')[-1] == '' or not action:
+        search_term = ''
+    else:
+        search_term = action[-1]
+
+    #  search_term = action[-1] if action or line.split(' ')[-1] == '' else ''
     return get_connector_labels(*types, search_term=search_term)
 
 def _delete_jobs(
@@ -354,9 +371,14 @@ def _delete_jobs(
     )
     from meerschaum.utils.prompt import yes_no
     from meerschaum.utils.formatting._jobs import pprint_jobs
+    from meerschaum.utils.formatting._shell import clear_screen
+    from meerschaum.utils.warnings import warn
     from meerschaum.utils.misc import items_str
     from meerschaum.actions import actions
     daemons = get_filtered_daemons(action, warn=(not nopretty))
+    if not daemons:
+        return False, "No jobs to delete."
+    _delete_all_jobs = False
     if not action:
         if not force:
             pprint_jobs(daemons)
@@ -365,6 +387,8 @@ def _delete_jobs(
                 noask=noask, yes=yes, default='n'
             ):
                 return False, "No jobs were deleted."
+            clear_screen(debug=debug)
+            _delete_all_jobs = True
     _running_daemons = get_running_daemons(daemons)
     _stopped_daemons = get_stopped_daemons(daemons, _running_daemons)
     _to_delete = _stopped_daemons
@@ -390,6 +414,7 @@ def _delete_jobs(
                 return False, (
                     f"Failed to kill running jobs. Please stop these jobs before deleting."
                 )
+            clear_screen(debug=debug)
             _to_delete += _running_daemons
         ### User decided not to kill running jobs.
         else:
@@ -397,6 +422,14 @@ def _delete_jobs(
 
     if not _to_delete:
         return False, "No jobs to delete."
+
+    if not force and not _delete_all_jobs:
+        pprint_jobs(_to_delete, nopretty=nopretty)
+        if not yes_no(
+            "Are you sure you want to delete these jobs?",
+            yes=yes, noask=noask, default='y',
+        ):
+            return False, "No jobs were deleted."
 
     _deleted = []
     for d in _to_delete:
@@ -406,7 +439,11 @@ def _delete_jobs(
             continue
         _deleted.append(d)
 
-    return len(_deleted) > 0, (f"Deleted jobs {items_str([d.daemon_id for d in _deleted])}.")
+    return (
+        len(_deleted) > 0,
+        ("Deleted job" + ("s" if len(_deleted) != 1 else '')
+            + f" {items_str([d.daemon_id for d in _deleted])}."),
+    )
 
 
 

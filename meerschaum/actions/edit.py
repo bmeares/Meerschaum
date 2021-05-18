@@ -38,7 +38,10 @@ def _complete_edit(
     if action is None:
         action = []
 
-    if len(action) > 0 and action[0] in options:
+    if (
+        len(action) > 0 and action[0] in options
+            and kw.get('line', '').split(' ')[-1] != action[0]
+    ):
         sub = action[0]
         del action[0]
         return options[sub](action=action, **kw)

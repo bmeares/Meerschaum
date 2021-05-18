@@ -40,15 +40,16 @@ def _complete_start(
         'jobs' : _complete_start_jobs,
     }
 
-    if len(action) > 0 and action[0] in options:
+    if (
+        len(action) > 0 and action[0] in options
+            and kw.get('line', '').split(' ')[-1] != action[0]
+    ):
         sub = action[0]
         del action[0]
         return options[sub](action=action, **kw)
 
     from meerschaum.actions.shell import default_action_completer
     return default_action_completer(action=(['start'] + action), **kw)
-
-
 
 def _start_api(action : Optional[List[str]] = None, **kw):
     """
@@ -158,8 +159,8 @@ def _start_jobs(
         ### Cannot find dameon_id
         else:
             msg = (
-                f"Unknown job" + ('s' if len(action) > 1 else '') + ' '
-                + items_str(action, and_str='or') + '.\n'
+                f"Unknown job" + ('s' if len(action) != 1 else '') + ' '
+                + items_str(action, and_str='or') + '.'
             )
             return False, msg
 
@@ -183,7 +184,7 @@ def _start_jobs(
                 #  return False, "Nothing to do. Provide action arguments or a job name to start."
             #  if not kw.get('nopretty', False):
                 #  clear_screen(debug=kw.get('debug', False))
-        names = [d.daemon_id for d in get_stopped_daemons()]
+        names = [d.daemon_id for d in _stopped_daemons]
 
     def _run_new_job(name : Optional[str] = None):
         kw['action'] = action
@@ -220,8 +221,9 @@ def _start_jobs(
         return False, "No jobs to start."
 
     ### Get user permission to clear logs.
-    if not kw.get('force', False):
-        pprint_jobs([Daemon(daemon_id=n) for n in names], nopretty=kw.get('nopretty', False))
+    _filtered_daemons = get_filtered_daemons(names)
+    if not kw.get('force', False) and _filtered_daemons:
+        pprint_jobs(_filtered_daemons, nopretty=kw.get('nopretty', False))
         if not yes_no(
             (
                 f"Would you like to overwrite the logs and run the job"
@@ -236,14 +238,14 @@ def _start_jobs(
 
 
     _successes, _failures = [], []
-    for name in names:
-        success_tuple, _name = _run_new_job(name) if new_job else _run_existing_job(name)
+    for _name in names:
+        success_tuple, __name = _run_new_job(_name) if new_job else _run_existing_job(_name)
         if success_tuple[0]:
             if kw.get('nopretty', False):
-                print_tuple(True, f"Successfully started job '{_name}'.")
-            _successes.append(name)
+                print_tuple(True, f"Successfully started job '{__name}'.")
+            _successes.append(_name)
         else:
-            _failures.append(name)
+            _failures.append(_name)
 
     msg = (
         (("Succesfully started job" + ("s" if len(_successes) > 1 else '')
@@ -254,15 +256,28 @@ def _start_jobs(
     )
     return len(_successes) > 0, msg
 
-def _complete_start_jobs(action : Optional[List[str]] = None, **kw) -> List[str]:
+def _complete_start_jobs(
+        action : Optional[List[str]] = None,
+        line : str = '',
+        **kw
+    ) -> List[str]:
     from meerschaum.utils.daemon import get_daemon_ids
     daemon_ids = get_daemon_ids()
     if not action:
         return daemon_ids
     possibilities = []
-    if action[-1] in daemon_ids:
-        return daemon_ids
+    #  if action[-1] in daemon_ids:
+        #  return daemon_ids
+    _line_end = line.split(' ')[-1]
     for daemon_id in daemon_ids:
+        #  if daemon_id.startswith(action[-1]) and (
+            #  daemon_id not in action or _line_end == ''
+        #  ):
+        if daemon_id in action:
+            continue
+        if _line_end == '':
+            possibilities.append(daemon_id)
+            continue
         if daemon_id.startswith(action[-1]):
             possibilities.append(daemon_id)
     return possibilities

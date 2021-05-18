@@ -37,6 +37,9 @@ def pprint_jobs(
                 pprint_job(d, nopretty=nopretty)
             #  print_options(stopped_daemons, nopretty=nopretty, no_rich=True, header='Stopped jobs')
 
+    def _pretty_print():
+        pass
+
     _nopretty_print()
 
 def pprint_job(

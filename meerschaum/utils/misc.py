@@ -89,7 +89,7 @@ def choose_subaction(
         warn(f"Cannot {parent_action} '{choice}'. Choose one:", stack=False)
         for option in sorted(options):
             print(f"  - {parent_action} {option}")
-        return (False, f"Invalid choice '{choice}'")
+        return (False, f"Invalid choice '{choice}'.")
     ### remove parent sub-action
     kw['action'] = list(action)
     del kw['action'][0]
