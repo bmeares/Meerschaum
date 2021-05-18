@@ -53,7 +53,6 @@ def parse_help(sysargs : Union[List[str], Dict[str, Any]]) -> None:
 
     ### Check for subactions.
     if len(args['action']) > 1:
-        subaction = get_subactions(args['action'][0])[args['action'][1]]
         try:
             subaction = get_subactions(args['action'][0])[args['action'][1]]
         except Exception as e:

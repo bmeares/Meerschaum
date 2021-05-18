@@ -504,6 +504,7 @@ def sync_pipe(
         df : Union[pandas.DataFrame, str, Dict[Any, Any]] = None,
         begin : Optional[datetime.datetime] = None,
         end : Optional[datetime.datetime] = None,
+        chunksize : Optional[int] = -1,
         check_existing : bool = True,
         blocking : bool = True,
         debug : bool = False,
@@ -516,13 +517,22 @@ def sync_pipe(
         The Meerschaum Pipe instance into which to sync the data.
 
     :param df:
-        An optional DataFrame to sync into the pipe, defaults to None.
+        An optional DataFrame to sync into the pipe.
+        Defaults to `None`.
 
     :param begin:
-        Optionally specify the earliest datetime to search for data, defaults to None.
+        Optionally specify the earliest datetime to search for data.
+        Defaults to `None`.
 
     :param end:
-        Optionally specify the latelst datetime to search for data, defaults to None.
+        Optionally specify the latest datetime to search for data.
+        Defaults to `None`.
+
+    :param chunksize:
+        Specify the number of rows to sync per chunk.
+        If -1, resort to system configuration (default is 900).
+        A `chunksize` of `None` will sync all rows in one transaction.
+        Defaults to -1.
 
     :param check_existing:
         If True, pull and diff with existing data from the pipe, defaults to True.
@@ -589,6 +599,7 @@ def sync_pipe(
         if_exists = if_exists,
         debug = debug,
         as_tuple = True,
+        chunksize = chunksize,
         **kw
     )
     if is_new:

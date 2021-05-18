@@ -50,6 +50,8 @@ def sync(
             Callable[[Exception], Any]
         ] = None,
 
+        chunksize : Optional[int] = -1,
+
         sync_chunks : bool = False,
 
         debug : bool = False,
@@ -106,6 +108,12 @@ def sync(
         Callback function which expects an Exception as input.
         Only applies when blocking = False.
 
+    :param chunksize:
+        Specify the number of rows to sync per chunk.
+        If -1, resort to system configuration (default is 900).
+        A `chunksize` of `None` will sync all rows in one transaction.
+        Defaults to -1.
+
     :param sync_chunks:
         If possible, sync chunks in parallel.
         Defaults to False.
@@ -134,6 +142,7 @@ def sync(
         'min_seconds' : min_seconds, 'check_existing' : check_existing,
         'blocking' : blocking, 'workers' : workers, 'callback' : callback,
         'error_callback' : error_callback, 'sync_chunks' : (sync_chunks),
+        'chunksize' : chunksize,
     })
 
     def _sync(

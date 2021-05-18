@@ -233,7 +233,7 @@ def exec(
         transaction.commit()
     except Exception as e:
         if debug:
-            dprint(f"Failed to execute query:\n\n{query}\n\n")
+            dprint(f"Failed to execute query:\n\n{query}\n\n{e}")
         if not silent:
             warn(str(e))
         result = None
