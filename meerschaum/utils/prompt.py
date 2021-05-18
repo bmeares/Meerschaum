@@ -21,9 +21,9 @@ def prompt(
     ) -> str:
     """
     Ask the user a question and return the answer.
-    Wrapper around prompt_toolkit.prompt() with modified behavior.
+    Wrapper around `prompt_toolkit.prompt()` with modified behavior.
     For example, an empty string returns default instead of printing it for the user to delete
-    (prompt_toolkit behavior).
+    (`prompt_toolkit` behavior).
 
     :param question:
         The question to print to the user.
@@ -33,6 +33,20 @@ def prompt(
 
     :param default:
         If the response is '', return the default value.
+
+    :param detect_password:
+        If `True`, set the input method to a censored password box if the word `password`
+        appears in the question.
+        Defaults to `True`.
+
+    :param is_password:
+        If `True`, set the input method to a censored password box.
+        May be overridden by `detect_password` unless `detect_password` is set to `False`.
+        Defaults to `False`.
+
+    :param wrap_lines:
+        If `True`, wrap the text across multiple lines.
+        Flag is passed onto `prompt_toolkit`.
 
     :param noask:
         If True, only print the question and return the default answer.

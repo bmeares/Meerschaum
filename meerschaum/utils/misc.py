@@ -937,3 +937,68 @@ def debug_trace(browser : bool = True):
     from meerschaum.utils.packages import attempt_import
     heartrate = attempt_import('heartrate')
     heartrate.trace(files=heartrate.files.all, browser=browser)
+
+def items_str(
+        items : List[Any],
+        quotes : bool = True,
+        quote_str : str = "'",
+        commas : bool = True,
+        comma_str : str = ',',
+        and_ : bool = True,
+        and_str : str = 'and',
+        oxford_comma : bool = True,
+        spaces : bool = True,
+        space_str = ' ',
+    ) -> 'str':
+    """
+    Return a formatted string if list items separated by commas.
+
+    :param quotes:
+        If `True`, wrap items in quotes.
+        Defaults to `True`.
+
+    :param quote_str:
+        If `quotes` is `True`, prepend and append each item with this string.
+        Defaults to "'" (single quote).
+
+    :param and_:
+        If `True`, include the word 'and' before the final item in the list.
+        Defaults to `True`.
+
+    :param and_str:
+        If `and_` is True, insert this string where 'and' normally would in and English list. 
+        Defaults to 'and'.
+
+    :param oxford_comma:
+        If `True`, include the Oxford Comma (comma before the final 'and').
+        Only applies when `and_` is `True`.
+        Defaults to `True`.
+
+    :param spaces:
+        If `True`, separate items with `space_str`
+        Defaults to `True`.
+
+    :param space_str:
+        If `spaces` is `True`, separate items with this string.
+        Defaults to ' '.
+    """
+    if not items:
+        return ''
+    
+    q = quote_str if quotes else ''
+    s = space_str if spaces else ''
+    a = and_str if and_ else ''
+    c = comma_str if commas else ''
+
+    if len(items) == 1:
+        return q + str(items[0]) + q
+
+    if len(items) == 2:
+        return q + str(items[0]) + q + s + a + s + q + str(items[1]) + q
+
+    sep = q + c + s + q
+    output = q + sep.join(str(i) for i in items[:-1]) + q
+    if oxford_comma:
+        output += c
+    output += s + a + (s if and_ else '') + q + str(items[-1]) + q
+    return output

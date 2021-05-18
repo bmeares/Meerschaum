@@ -102,7 +102,7 @@ class Daemon:
             self._properties = {}
         self._properties.update({'label' : self.label})
 
-    def run(
+    def _run_exit(
             self,
             keep_daemon_output : bool = True,
             allow_dirty_run : bool = False,
@@ -155,8 +155,7 @@ class Daemon:
                 strip_cmd_args = True
             )
 
-        sighandler = daemoniker.SignalHandler1(str(self.pid_path))
-        sighandler.start()
+        self.sighandler.start()
 
         try:
             result = self.target(*self.target_args, **self.target_kw)
@@ -171,7 +170,7 @@ class Daemon:
             self.cleanup()
         return result
 
-    def run_process(
+    def run(
             self,
             keep_daemon_output : bool = True,
             allow_dirty_run : bool = False,
@@ -179,6 +178,17 @@ class Daemon:
         ) -> SuccessTuple:
         """
         Run the daemon as a child process and continue executing the parent.
+
+        :param keep_daemon_output:
+            If `False`, delete the daemon's output directory upon exiting.
+            Defaults to `True`.
+
+        :param allow_dirty_run:
+            If `True`, run the daemon, even if the `daemon_id` directory exists.
+            This option is dangerous because if the same `daemon_id` runs twice,
+            the last to finish will overwrite the output of the first.
+            Defaults to `False`.
+
         """
         self.mkdir_if_not_exists(allow_dirty_run)
         _write_pickle_success_tuple = self.write_pickle()
@@ -188,14 +198,59 @@ class Daemon:
         _launch_daemon_code = (
             "from meerschaum.utils.daemon import Daemon; "
             + f"daemon = Daemon(daemon_id='{self.daemon_id}'); "
-            + f"daemon.run(keep_daemon_output={keep_daemon_output}, "
+            + f"daemon._run_exit(keep_daemon_output={keep_daemon_output}, "
             + f"allow_dirty_run=True)"
         )
         _launch_success_bool = venv_exec(_launch_daemon_code, debug=debug)
         msg = "Success" if _launch_success_bool else f"Failed to start daemon '{self.daemon_id}'."
         return _launch_success_bool, msg
 
+    def kill(self) -> SuccessTuple:
+        """
+        Forcibly terminate a running daemon.
+        Sends a SIGTERM signal to the process.
+        """
+        daemoniker = attempt_import('daemoniker')
+        try:
+            daemoniker.send(str(self.pid_path), daemoniker.SIGTERM)
+        except Exception as e:
+            return False, str(e)
+        return True, f"Successfully killed daemon '{self.daemon_id}'."
+
+    def quit(self) -> SuccessTuple:
+        """
+        Gracefully quit a running daemon.
+        Sends a SIGINT signal the to process.
+        """
+        daemoniker = attempt_import('daemoniker')
+        try:
+            daemoniker.send(str(self.pid_path), daemoniker.SIGINT)
+        except Exception as e:
+            return False, str(e)
+        return True, f"Successfully quit daemon '{self.daemon_id}'."
+
+    @property
+    def sighandler(self) -> Optional[daemoniker.SignalHandler1]:
+        """
+        Return the signal handler for the daemon.
+
+        If the process is not running, return `None`.
+        """
+        if not self.pid_path.exists():
+            return None
+
+        daemoniker = attempt_import('daemoniker')
+        if '_sighandler' not in self.__dict__:
+            self._sighandler = daemoniker.SignalHandler1(str(self.pid_path))
+        return self._sighandler
+
     def mkdir_if_not_exists(self, allow_dirty_run : bool = False):
+        """
+        Create the Daemon's directory.
+        
+        If `allow_dirty_run` is False and the directory already exists,
+        raise an error.
+        """
         try:
             self.path.mkdir(parents=True, exist_ok=False)
             _already_exists = False
@@ -208,7 +263,8 @@ class Daemon:
                 f"To allow this daemon to run, do one of the following:\n"
                 + "  - Execute `daemon.cleanup()`.\n"
                 + f"  - Delete the directory '{self.path}'.\n"
-                + "  - Pass `allow_dirty_run=True` to `daemon.run()`.\n"
+                + "  - Pass `allow_dirty_run=True` to `daemon.run()`.\n",
+                FileExistsError,
             )
 
     @property
@@ -258,6 +314,22 @@ class Daemon:
             return None
         try:
             with open(self.log_path, 'r') as f:
+                text = f.read()
+        except Exception as e:
+            warn(e)
+            text = None
+        return text
+
+    @property
+    def pid(self) -> str:
+        """
+        Read the PID file and return its contents.
+        Returns `None` if the PID file does not exist.
+        """
+        if not self.pid_path.exists():
+            return None
+        try:
+            with open(self.pid_path, 'r') as f:
                 text = f.read()
         except Exception as e:
             warn(e)

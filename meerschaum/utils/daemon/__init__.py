@@ -15,7 +15,6 @@ from meerschaum.utils.daemon.Daemon import Daemon
 def daemon_entry(sysargs : Optional[List[str]] = None) -> SuccessTuple:
     """
     Parse sysargs and execute a Meerschaum action as a daemon.
-    NOTE: The parent process WILL EXIT when this function is called!
     """
     from meerschaum.actions._entry import _entry as entry
     _args = None
@@ -68,7 +67,6 @@ def run_daemon(
     ) -> Any:
     """
     Execute a function as a daemon.
-    NOTE: This WILL EXIT the parent process!
     """
     daemon = Daemon(func, daemon_id=daemon_id, target_args=args, target_kw=kw, label=label)
     return daemon.run(
@@ -111,3 +109,33 @@ def get_stopped_daemons(
         running_daemons = get_running_daemons(daemons)
 
     return [d for d in daemons if d not in running_daemons]
+
+def get_filtered_daemons(
+        filter_list : Optional[List[str]] = None,
+        warn : bool = False,
+    ) -> List[Daemon]:
+    """
+    Return a list of `Daemons` filtered by a list of `daemon_ids`.
+    Only `Daemons` that exist are returned.
+
+    If `filter_list` is `None` or empty, return all `Daemons` (from `get_daemons()`).
+
+    :param filter_list:
+        List of `daemon_ids` to include. If `daemon_ids` is `None` or empty,
+        return all `Daemons`.
+
+    :param warn:
+        If `True`, raise warnings for non-existent `daemon_ids`.
+        Defaults to `True`.
+    """
+    if not filter_list:
+        return get_daemons()
+    from meerschaum.utils.warnings import warn as _warn
+    daemons = []
+    for d in [Daemon(daemon_id=d_id) for d_id in filter_list]:
+        if not d.path.exists():
+            if warn:
+                _warn(f"Daemon '{d.daemon_id}' does not exist.", stack=False)
+            continue
+        daemons.append(d)
+    return daemons

@@ -94,7 +94,6 @@ default_formatting_config = {
         },
         'ansi'            : {
             'color'       : [
-                'bold',
                 'bright magenta',
             ],
         },

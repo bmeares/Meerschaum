@@ -24,6 +24,7 @@ def delete(
         'plugins'    : _delete_plugins,
         'users'      : _delete_users,
         'connectors' : _delete_connectors,
+        'jobs'       : _delete_jobs,
     }
     return choose_subaction(action, options, **kw)
 
@@ -339,6 +340,8 @@ def _delete_jobs(
         noask : bool = False,
         nopretty : bool = False,
         force : bool = False,
+        yes : bool = False,
+        debug : bool = False,
         **kw
     ) -> SuccessTuple:
     """
@@ -346,11 +349,14 @@ def _delete_jobs(
 
     If the job is running, ask to kill the job first.
     """
-    from meerschaum.utils.daemon import Daemon, get_daemons, get_daemon_ids
+    from meerschaum.utils.daemon import (
+        Daemon, get_running_daemons, get_stopped_daemons, get_filtered_daemons,
+    )
     from meerschaum.utils.prompt import yes_no
     from meerschaum.utils.formatting._jobs import pprint_jobs
-    daemons_ids = get_daemon_ids()
-    daemons = get_daemons()
+    from meerschaum.utils.misc import items_str
+    from meerschaum.actions import actions
+    daemons = get_filtered_daemons(action, warn=(not nopretty))
     if not action:
         if not force:
             pprint_jobs(daemons)
@@ -359,22 +365,48 @@ def _delete_jobs(
                 noask=noask, yes=yes, default='n'
             ):
                 return False, "No jobs were deleted."
-    else:
-        daemons = []
-        _daemons = [Daemon(a) for a in action]
-        for d in _daemons:
-            if not d.path.exists():
-                if not nopretty:
-                    warn("Daemon '{d.daemon_id}' does not exist. Skipping...", stack=False)
-                continue
-            daemons.append(d)
-    _to_delete = daemons
-    _are_running = [d for d in daemons if d.pid_path.exists()]
-    if _are_running:
-        pprint_jobs(_are_running)
+    _running_daemons = get_running_daemons(daemons)
+    _stopped_daemons = get_stopped_daemons(daemons, _running_daemons)
+    _to_delete = _stopped_daemons
+    if _running_daemons:
         if not force:
-            if not yes_no("", default='n', yes=yes, noask=noask):
-                pass
+            pprint_jobs(_running_daemons, nopretty=nopretty)
+        if force or yes_no(
+            "The above jobs are still running. Stop these jobs?",
+            default='n', yes=yes, noask=noask
+        ):
+            actions['stop'](
+                action = (['jobs'] + [d.daemon_id for d in _running_daemons]),
+                nopretty = nopretty,
+                yes = yes,
+                force = force,
+                noask = noask,
+                debug = debug,
+            )
+            #  import time
+            #  time.sleep(1)
+            ### Ensure the running jobs are dead.
+            if get_running_daemons(daemons):
+                return False, (
+                    f"Failed to kill running jobs. Please stop these jobs before deleting."
+                )
+            _to_delete += _running_daemons
+        ### User decided not to kill running jobs.
+        else:
+            pass
+
+    if not _to_delete:
+        return False, "No jobs to delete."
+
+    _deleted = []
+    for d in _to_delete:
+        d.cleanup()
+        if d.path.exists() and not nopretty:
+            warn("Failed to delete job '{d.daemon_id}'.", stack=False)
+            continue
+        _deleted.append(d)
+
+    return len(_deleted) > 0, (f"Deleted jobs {items_str([d.daemon_id for d in _deleted])}.")
 
 
 

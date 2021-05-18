@@ -425,6 +425,7 @@ class Shell(cmd.Cmd):
         ### NOTE: pass `shell` flag in case actions need to distinguish between
         ###       being run on the command line and being run in the shell
         args['shell'] = True
+        args['line'] = line
 
         ### if debug is not set on the command line,
         ### default to shell setting
@@ -446,6 +447,7 @@ class Shell(cmd.Cmd):
             self.emptyline()
             return ""
 
+        ### If the action cannot be found, resort to executing a shell command.
         try:
             func = getattr(self, 'do_' + action)
         except AttributeError as ae:
@@ -454,16 +456,22 @@ class Shell(cmd.Cmd):
             args['action'].insert(0, action)
             func = getattr(self, f'do_{action}')
 
+        ### If the `--daemon` flag is present, prepend 'start job'.
+        if args.get('daemon', False):
+            args['action'] = ['start', 'jobs', action] + args['action']
+            action = 'start'
+
         positional_only = (action not in self._actions)
         if positional_only:
             return original_line
 
         from meerschaum.actions._entry import _entry_with_args
         from meerschaum.utils.daemon import daemon_action
-        success_tuple = (
-            _entry_with_args(**args) if not args.get('daemon', None)
-            else daemon_action(**args)
-        )
+        success_tuple = _entry_with_args(**args)
+        #  success_tuple = (
+            #  _entry_with_args(**args) if not args.get('daemon', None)
+            #  else daemon_action(**args)
+        #  )
 
         from meerschaum.utils.formatting import print_tuple
         if isinstance(success_tuple, tuple):
