@@ -40,6 +40,7 @@ def show(
         'help'       : _show_help,
         'users'      : _show_users,
         'jobs'       : _show_jobs,
+        'logs'       : _show_logs,
     }
     return choose_subaction(action, show_options, **kw)
 
@@ -517,11 +518,37 @@ def _show_jobs(
     return True, "Success"
 
 def _show_logs(
-
+        action : Optional[List[str]] = None,
+        nopretty : bool = False,
+        **kw
     ) -> SuccessTuple:
     """
     Show the logs for jobs.
     """
+    from meerschaum.utils.daemon import get_filtered_daemons
+    from meerschaum.utils.warnings import warn, info
+    daemons = get_filtered_daemons(action)
+
+    def _print_pretty_log_text(d):
+        log_text = d.log_text
+        if not log_text:
+            warn(f"No logs available for job '{d.daemon_id}'.", stack=False)
+            return
+        info(f"Logs for job '{d.daemon_id}':")
+        print()
+        print(log_text)
+        print()
+
+    def _print_nopretty_log_text(d):
+        log_text = d.log_text
+        print(d.daemon_id)
+        print(log_text)
+
+    _print_log_text = _print_pretty_log_text if not nopretty else _print_nopretty_log_text
+
+    for d in daemons:
+        _print_log_text(d)
+    return True, "Success"
 
 
 ### NOTE: This must be the final statement of the module.

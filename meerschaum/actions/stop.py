@@ -7,7 +7,7 @@ Stop running jobs that were started with `-d` or `start job`.
 """
 
 from __future__ import annotations
-from meerschaum.utils.typing import Optional, List, Dict, SuccessTuple
+from meerschaum.utils.typing import Optional, List, Dict, SuccessTuple, Any
 
 def stop(action : Optional[List[str]] = None, **kw) -> SuccessTuple:
     """
@@ -18,6 +18,33 @@ def stop(action : Optional[List[str]] = None, **kw) -> SuccessTuple:
         'jobs' : _stop_jobs,
     }
     return choose_subaction(action, options, **kw)
+
+def _complete_stop(
+        action : Optional[List[str]] = None,
+        **kw : Any
+    ) -> List[str]:
+    """
+    Override the default Meerschaum `complete_` function.
+    """
+    from meerschaum.actions.start import _complete_start_jobs
+    if action is None:
+        action = []
+
+    options = {
+        'job' : _complete_start_jobs,
+        'jobs' : _complete_start_jobs,
+    }
+
+    if (
+        len(action) > 0 and action[0] in options
+            and kw.get('line', '').split(' ')[-1] != action[0]
+    ):
+        sub = action[0]
+        del action[0]
+        return options[sub](action=action, **kw)
+
+    from meerschaum.actions.shell import default_action_completer
+    return default_action_completer(action=(['start'] + action), **kw)
 
 def _stop_jobs(
         action : Optional[List[str]] = None,
@@ -77,10 +104,10 @@ def _stop_jobs(
                 warn(f"Failed to kill job '{d.daemon_id}' (PID {d.pid}).")
 
     msg = (
-        (("Stopped job" + ("s" if len(_quit_daemons) > 1 else '') +
+        (("Stopped job" + ("s" if len(_quit_daemons) != 1 else '') +
             " '" + "', '".join([d.daemon_id for d in _quit_daemons]) + "'.")
             if _quit_daemons else '')
-        + (("\nKilled job" + ("s" if len(_kill_daemons) > 1 else '') +
+        + (("\nKilled job" + ("s" if len(_kill_daemons) != 1 else '') +
             " '" + "', '".join([d.daemon_id for d in _kill_daemons]) + "'.")
             if _kill_daemons else '')
     )

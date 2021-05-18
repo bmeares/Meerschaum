@@ -8,7 +8,7 @@ Manage running daemons via the Daemon class.
 
 from __future__ import annotations
 import pathlib, threading, json, shutil, datetime
-from meerschaum.utils.typing import Optional, Dict, Any, SuccessTuple, Callable, List
+from meerschaum.utils.typing import Optional, Dict, Any, SuccessTuple, Callable, List, Union
 from meerschaum.config._paths import DAEMON_RESOURCES_PATH
 from meerschaum.config._patch import apply_patch_to_config
 from meerschaum.utils.warnings import warn, error
@@ -205,29 +205,61 @@ class Daemon:
         msg = "Success" if _launch_success_bool else f"Failed to start daemon '{self.daemon_id}'."
         return _launch_success_bool, msg
 
-    def kill(self) -> SuccessTuple:
+    def kill(self, timeout : Optional[int] = 3) -> SuccessTuple:
         """
         Forcibly terminate a running daemon.
         Sends a SIGTERM signal to the process.
         """
         daemoniker = attempt_import('daemoniker')
-        try:
-            daemoniker.send(str(self.pid_path), daemoniker.SIGTERM)
-        except Exception as e:
-            return False, str(e)
-        return True, f"Successfully killed daemon '{self.daemon_id}'."
+        return self._send_signal(daemoniker.SIGTERM, timeout=timeout)
 
-    def quit(self) -> SuccessTuple:
+    def quit(self, timeout : Optional[int] = 3) -> SuccessTuple:
         """
         Gracefully quit a running daemon.
         Sends a SIGINT signal the to process.
         """
         daemoniker = attempt_import('daemoniker')
+        return self._send_signal(daemoniker.SIGINT, timeout=timeout)
+
+    def _send_signal(
+            self,
+            signal : daemoniker.DaemonikerSignal,
+            timeout : Optional[Union[float, int]] = 3,
+            check_timeout_interval : float = 0.1,
+        ):
+        """
+        Send a signal to the daemon process.
+
+        :param signal:
+            The signal the send to the daemon.
+            Examples include `daemoniker.SIGINT` and `daemoniker.SIGTERM`.
+
+        :param timeout:
+            The maximum number of seconds to wait for a process to terminate.
+            Defaults to 3.
+
+        :param check_timeout_interval:
+            The number of seconds to wait between checking if the process is still running.
+            Defaults to 0.1.
+        """
+        import time
+        daemoniker = attempt_import('daemoniker')
+
         try:
             daemoniker.send(str(self.pid_path), daemoniker.SIGINT)
         except Exception as e:
             return False, str(e)
-        return True, f"Successfully quit daemon '{self.daemon_id}'."
+        if timeout is None:
+            return True, f"Successfully sent '{signal}' to daemon '{self.daemon_id}'."
+        begin = time.time()
+        while (time.time() - begin) < timeout:
+            if not self.pid_path.exists():
+                return True, f"Successfully stopped daemon '{self.daemon_id}'."
+            time.sleep(check_timeout_interval)
+        return False, (
+            f"Failed to stop daemon '{self.daemon_id}' within {timeout} second"
+            + ('s' if timeout != 1 else '') + '.'
+        )
 
     @property
     def sighandler(self) -> Optional[daemoniker.SignalHandler1]:

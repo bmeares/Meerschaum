@@ -132,8 +132,13 @@ def get_filtered_daemons(
         return get_daemons()
     from meerschaum.utils.warnings import warn as _warn
     daemons = []
-    for d in [Daemon(daemon_id=d_id) for d_id in filter_list]:
-        if not d.path.exists():
+    for d_id in filter_list:
+        try:
+            d = Daemon(daemon_id=d_id)
+            _exists = d.path.exists()
+        except Exception as e:
+            _exists = False
+        if not _exists:
             if warn:
                 _warn(f"Daemon '{d.daemon_id}' does not exist.", stack=False)
             continue

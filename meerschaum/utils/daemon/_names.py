@@ -48,13 +48,15 @@ _bank : Dict[str, Dict[str, List[str]]] = {
         ],
         'plants' : [
             'tree', 'flower', 'vine', 'fern', 'palm', 'palmetto', 'oak', 'pine', 'rose', 'lily',
+            'ivy',
         ],
         'foods' : [
             'pizza', 'sushi', 'apple', 'banana', 'sandwich', 'burger', 'taco', 'bratwurst',
             'grape', 'coconut', 'bread', 'toast',
         ],
         'geographies' : [
-            'ocean', 'mountain', 'desert', 'forest', 'tundra', 'savanna', 'grassland',
+            'ocean', 'mountain', 'desert', 'forest', 'tundra', 'savanna', 'grassland', 'prairie',
+            'lake', 'city', 'river',
         ],
         'vehicles' : [
             'car', 'bike', 'boat', 'bus', 'trolley', 'tram', 'plane', 'skates', 'skateboard',
@@ -63,7 +65,7 @@ _bank : Dict[str, Dict[str, List[str]]] = {
         ],
         'clothing' : [
             'socks', 'shirt', 'dress', 'shoes', 'hat', 'glasses', 'pocket', 'shorts', 'pants',
-            'skirt', 'capris',
+            'skirt', 'capris', 'helmet',
         ],
         'instruments' : [
             'guitar', 'piano', 'trombone', 'drums', 'viola', 'violin', 'trumpet', 'bass',

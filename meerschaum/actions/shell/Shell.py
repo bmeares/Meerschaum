@@ -457,7 +457,7 @@ class Shell(cmd.Cmd):
             func = getattr(self, f'do_{action}')
 
         ### If the `--daemon` flag is present, prepend 'start job'.
-        if args.get('daemon', False):
+        if args.get('daemon', False) and 'stack' not in args['action']:
             args['action'] = ['start', 'jobs', action] + args['action']
             action = 'start'
 

@@ -32,7 +32,7 @@ Below are some ongoing tasks I have planned for Meerschaum. This is not an exhau
     - [ ] **New syncing algorithm**  
       I have been brainstorming a better way to detect differences between source and cache when syncing, so a future release of Meerschaum will be able to detect changes in past data.
     - [ ] **Local Pipe HD5 caching**  
-      When requesting data via `pipe.get_data()`, cache data locally and sync any changes.
+      When requesting data via `pipe.get_data()`, cache data locally and sync any changes. I am investigating using `duckdb` as a local cache database.
     - [ ] **Rewrite API data to paginate downstream**  
       When syncing upstream, Meerschaum defaults to sending `POST` requests for chunks. The chunking logic is mostly there, so I need to implement the same process in reverse.
 
@@ -56,12 +56,14 @@ Below are some ongoing tasks I have planned for Meerschaum. This is not an exhau
     - [x] **Run in the background with `-d` / `--daemon` flag**
     - [ ] **Show jobs**  
     The action`show jobs` will display running and stopped jobs.
+    - [ ] **Show logs**  
+    Display jobs' logs with `show logs`.
     - [x] **Start job**  
     The action `start job` can spawn a new job (like with `-d`) or restart a stopped job.
-    - [ ] **Stop job**  
+    - [x] **Stop job**  
     Cancel running jobs.
     - [ ] **Delete jobs**
-    Distinguish between `daemon.cleanup()` and `daemon.delete()`.
+    Remove jobs with `delete jobs`.
     - [ ] **Bootstrap job**  
     Guide the user through defining and running jobs.
 
