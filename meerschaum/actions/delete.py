@@ -167,7 +167,7 @@ def _delete_plugins(
     Delete plugins from a Meerschaum repository.
     """
     from meerschaum.utils.warnings import info
-    from meerschaum.actions.plugins import reload_plugins
+    from meerschaum.plugins import reload_plugins
     from meerschaum.connectors.parse import parse_repo_keys
     from meerschaum.utils.prompt import yes_no
     from meerschaum.utils.formatting import print_tuple

@@ -17,6 +17,8 @@ from meerschaum.config.static import _static_config
 from meerschaum.utils.packages import attempt_import
 from meerschaum.utils.get_pipes import get_pipes as _get_pipes
 from meerschaum.config._paths import API_UVICORN_CONFIG_PATH
+from meerschaum.plugins import _api_plugins
+from meerschaum.utils.warnings import warn
 endpoints = _static_config()['api']['endpoints']
 aiofiles = attempt_import('aiofiles', lazy=False)
 fastapi = attempt_import('fastapi', lazy=False)
@@ -136,5 +138,18 @@ import meerschaum.api.routes as routes
 import meerschaum.api._events
 import meerschaum.api._websockets
 
+### Skip importing the dash if `--no-dash` is provided.
 if _include_dash:
     import meerschaum.api.dash
+
+### Execute the API plugins functions.
+for module_name, functions_list in _api_plugins.items():
+    for function in functions_list:
+        try:
+            function(app)
+        except Exception as e:
+            warn(
+                f"Failed to load API plugin '{module_name.split('.')[-1]}' "
+                + f"when executing function '{function.__name__}' with exception:\n{e}",
+                stack=False
+            )
