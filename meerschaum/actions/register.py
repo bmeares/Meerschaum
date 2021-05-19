@@ -117,7 +117,7 @@ def _register_plugins(
         **kw : Any
     ) -> SuccessTuple:
     from meerschaum.utils.debug import dprint
-    from meerschaum.actions.plugins import reload_plugins
+    from meerschaum.plugins import reload_plugins, get_plugins_names
     from meerschaum.connectors.parse import parse_repo_keys
     from meerschaum.config import get_config
     from meerschaum.utils.warnings import warn, error, info
@@ -142,7 +142,6 @@ def _register_plugins(
         return False, "No plugins to register."
 
     plugins_to_register = dict()
-    from meerschaum.actions.plugins import get_plugins_names
     plugins_names = get_plugins_names()
     for p in action:
         if p not in plugins_names:

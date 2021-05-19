@@ -394,7 +394,7 @@ def _show_plugins(
     """
     Show the installed plugins.
     """
-    from meerschaum.actions.plugins import get_plugins_names
+    from meerschaum.plugins import get_plugins_names
     from meerschaum.utils.misc import print_options
     from meerschaum.connectors.parse import parse_repo_keys
     from meerschaum.utils.warnings import info

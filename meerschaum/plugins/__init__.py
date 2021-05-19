@@ -3,11 +3,13 @@
 # vim:fenc=utf-8
 
 """
-Handle plugins imports here.
+Expose plugin management APIs from the `meerschaum.plugins` module.
 """
 
 from __future__ import annotations
-from meerschaum.utils.typing import Callable, Any, Union, Optional
+from meerschaum.utils.typing import Callable, Any, Union, Optional, Dict
+
+_api_plugins : dict = {}
 
 def make_action(
         function : Callable[[Any], Any],
@@ -19,7 +21,7 @@ def make_action(
 
     Usage:
     ```
-    >>> from meerschaum.actions.plugins import make_action
+    >>> from meerschaum.plugins import make_action
     >>> 
     >>> @make_action
     ... def my_action(**kw):
@@ -42,6 +44,32 @@ def make_action(
     if function.__name__ not in _all:
         _all.append(function.__name__)
     actions[function.__name__] = function
+    return function
+
+def api_plugin(function) -> Callable[[Any], Any]:
+    """
+    Execute function when initializing the Meerschaum API module.
+    Useful for lazy-loading heavy plugins only when the API is started,
+    such as when editing the `meerschaum.api.app` FastAPI app.
+
+    The FastAPI app will be passed as the only parameter.
+
+    Usage:
+    ```
+    >>> from meerschaum.plugins import api_plugin
+    >>> 
+    >>> @api_plugin
+    >>> def initialize_plugin(app):
+    ...     @app.get('/my/new/path')
+    ...     def new_path():
+    ...         return {'message' : 'It works!'}
+    >>> 
+    ```
+    """
+    global _api_plugins
+    if function.__module__ not in _api_plugins:
+        _api_plugins[function.__module__] = []
+    _api_plugins[function.__module__].append(function)
     return function
 
 def import_plugins() -> Optional['ModuleType']:
@@ -79,7 +107,7 @@ def load_plugins(debug : bool = False, shell : bool = False) -> None:
     """
     ### append the plugins modules
     from inspect import isfunction, getmembers
-    from meerschaum.actions import __all__ as _all, modules
+    from meerschaum.actions import __all__ as _all, modules, make_action
     from meerschaum.utils.packages import get_modules_from_package
     if debug:
         from meerschaum.utils.debug import dprint

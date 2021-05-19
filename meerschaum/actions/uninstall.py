@@ -57,10 +57,9 @@ def _uninstall_plugins(
     Remove installed plugins. Does not affect repository registrations.
     """
     import meerschaum.actions
-    from meerschaum.actions.plugins import get_plugins_names, get_plugins_modules
+    from meerschaum.plugins import get_plugins_names, get_plugins_modules, reload_plugins
     from meerschaum.config._paths import PLUGINS_RESOURCES_PATH
     from meerschaum.utils.warnings import warn, error, info
-    from meerschaum.actions.plugins import reload_plugins
     from meerschaum.utils.prompt import yes_no
     import os, shutil
 
@@ -112,7 +111,7 @@ def _uninstall_plugins(
     return True, "Success"
 
 def _complete_uninstall_plugins(action : Optional[List[str]] = None, **kw) -> List[str]:
-    from meerschaum.actions.plugins import get_plugins_names
+    from meerschaum.plugins import get_plugins_names
     _plugin_names = get_plugins_names()
     return [name for name in _plugin_names if name not in action]
 

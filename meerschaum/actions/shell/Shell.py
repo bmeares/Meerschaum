@@ -432,6 +432,9 @@ class Shell(cmd.Cmd):
         if not args.get('debug', False):
             args['debug'] = self.debug
 
+        ### Make sure an action was provided.
+        if not args.get('action', None):
+            return ''
         action = args['action'][0]
 
         ### if no instance is provided, use current shell default,
