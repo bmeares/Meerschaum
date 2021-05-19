@@ -57,7 +57,7 @@ class Plugin:
         Return a Plugin's Python module.
         """
         if '_module' not in self.__dict__:
-            from meerschaum.actions.plugins import get_plugins_modules
+            from meerschaum.plugins import get_plugins_modules
             for m in get_plugins_modules():
                 if self.name == m.__name__.split('.')[-1]:
                     self._module = m
@@ -159,7 +159,7 @@ class Plugin:
         if debug:
             from meerschaum.utils.debug import dprint
         import tarfile, pathlib, shutil
-        from meerschaum.actions.plugins import reload_plugins
+        from meerschaum.plugins import reload_plugins
         old_cwd = os.getcwd()
         old_version = ''
         new_version = ''
