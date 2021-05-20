@@ -14,12 +14,14 @@ from meerschaum.utils.debug import dprint
 from meerschaum.utils.warnings import warn
 
 ### database flavors that can use bulk insert
-bulk_flavors = {'postgresql', 'timescaledb'}
+_bulk_flavors = {'postgresql', 'timescaledb'}
+### flavors that do not support chunks
+_disallow_chunks_flavors = {'duckdb'}
 
 def read(
         self,
         query_or_table : Union[str, sqlalchemy.Query],
-        params : Optional[Dict[str, Any], List[str]] = {},
+        params : Optional[Dict[str, Any], List[str]] = None,
         chunksize : Optional[int] = -1,
         chunk_hook : Optional[Callable[[pandas.DataFrame], Any]] = None,
         as_hook_results : bool = False,
@@ -88,9 +90,14 @@ def read(
     sqlalchemy = attempt_import("sqlalchemy")
     chunksize = chunksize if chunksize != -1 else self.sys_config.get('chunksize', None)
     if chunksize is None and as_iterator:
-        if not silent:
+        if not silent and self.flavor not in _disallow_chunks_flavors:
             warn(f"An iterator may only be generated if chunksize is not None. Falling back to a chunksize of 1000.", stacklevel=3)
         chunksize = 1000
+
+    ### NOTE: A bug in duckdb_engine does not allow for chunks.
+    if chunksize is not None and self.flavor in _disallow_chunks_flavors:
+        chunksize = None
+
     if debug:
         import time
         start = time.time()
@@ -183,6 +190,12 @@ def read(
         return chunk_list
 
     return pd.concat(chunk_list).reset_index(drop=True)
+
+def _read_duckdb(query : str, engine : sqlalchemy.Engine, ):
+    """
+    Implement the `pandas.read_sql()` method for duckdb.
+    """
+    pass
 
 def value(
         self,
@@ -292,7 +305,7 @@ def to_sql(
 
     ### resort to defaults if None
     if method == "":
-        if self.flavor in bulk_flavors:
+        if self.flavor in _bulk_flavors:
             method = psql_insert_copy
         else:
             ### Should default to 'multi'.

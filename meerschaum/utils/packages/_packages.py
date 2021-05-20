@@ -108,6 +108,7 @@ packages['sql'] = {
     'pandas'     : 'pandas>=1.1.4',
     'joblib'     : 'joblib>=0.17.0',
     'sqlalchemy' : 'sqlalchemy>=1.2.19',
+    'sqlalchemy_utils' : 'sqlalchemy-utils>=0.37.3',
     'databases'  : 'databases>=0.4.0',
     'aiosqlite'  : 'aiosqlite>=0.16.0',
     'asyncpg'    : 'asyncpg>=0.21.0',
