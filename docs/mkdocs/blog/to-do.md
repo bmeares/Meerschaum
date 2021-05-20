@@ -22,6 +22,8 @@ Below are some ongoing tasks I have planned for Meerschaum. This is not an exhau
 
 ## 🐞 Bugs
 - [ ] `parameters` column in the `pipes` table is a string, not JSON.
+- [ ] `instance` command does not work after reloading when closing a config file
+- [ ] `--name` flag is broken when spawning jobs
 - [x] ~~Reload plugins when installing updates.~~
 - [x] ~~When upgrading plugins, only install plugin if updates are available.~~
 - [x] ~~Remove `Literal` import from `typing` for compatibility with Python 3.7.~~
@@ -54,22 +56,28 @@ Below are some ongoing tasks I have planned for Meerschaum. This is not an exhau
 
 - **Job management**  
     - [x] **Run in the background with `-d` / `--daemon` flag**
+    - [ ] **Save and restart jobs**  
+      Like with `pm2`, add the ability to save the current state of running jobs to be started on system startup.
     - [ ] **Show jobs**  
-    The action`show jobs` will display running and stopped jobs.
+      The action`show jobs` will display running and stopped jobs.
     - [ ] **Show logs**  
-    Display jobs' logs with `show logs`.
+      Display jobs' logs with `show logs`.
     - [x] **Start job**  
-    The action `start job` can spawn a new job (like with `-d`) or restart a stopped job.
+      The action `start job` can spawn a new job (like with `-d`) or restart a stopped job.
     - [x] **Stop job**  
-    Cancel running jobs.
-    - [ ] **Delete jobs**
-    Remove jobs with `delete jobs`.
+      Cancel running jobs.
+    - [x] **Delete jobs**
+      Remove jobs with `delete jobs`.
     - [ ] **Bootstrap job**  
     Guide the user through defining and running jobs.
-
+    
 - **Plugins**
     - [ ] **Reuse packages across virtual environments**  
       In an attempt to save space, if a package is already installed in another virtual environment and satisfies the requirements for a plugin, attempt to use that version instead of installing a new version.
+      
+    - [x] **API Plugins**  
+    
+      Add the decorator `@api_plugin` to defer API plugin initialization (lazy loading).
     
 - **Other System Features**
     - [x] **Daemonize any process**  
@@ -78,3 +86,4 @@ Below are some ongoing tasks I have planned for Meerschaum. This is not an exhau
 ## 🔨 Refactoring
 - [ ] Consolidate SQL-specific functions to one package to make adding flavors easier.
 - [x] Add `typing` hinting to the Python package API.
+- [ ] Migrate `meerschaum.actions.shell` to `meerschaum._internal.shell`.

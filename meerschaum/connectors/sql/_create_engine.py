@@ -147,6 +147,10 @@ def create_engine(
 
     ### self.sys_config was deepcopied and can be updated safely
     if self.flavor in ("sqlite", "duckdb"):
+        ### The duckdb dialect might not be registered.
+        if self.flavor == 'duckdb':
+            sqlalchemy.engine.url.registry.register("duckdb", "duckdb_engine", "Dialect")
+
         engine_str = f"{_engine}:///{_database}"
         if 'create_engine' not in self.sys_config:
             self.sys_config['create_engine'] = {}
