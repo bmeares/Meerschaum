@@ -338,10 +338,11 @@ def get_backtrack_data(
         pipe : Optional[meerschaum.Pipe] = None,
         backtrack_minutes : int = 0,
         begin : Optional[datetime.datetime] = None,
+        chunksize : Optional[int] = -1,
         debug : bool = False
     ) -> Optional[pandas.DataFrame]:
     """
-    Get the most recent backtrack_minutes' worth of data from a Pipe
+    Get the most recent backtrack_minutes' worth of data from a Pipe.
     """
     from meerschaum.utils.warnings import error, warn
     if pipe is None:
@@ -364,7 +365,7 @@ def get_backtrack_data(
 
     query = f"SELECT * FROM {table}" + (f" WHERE {dt} > {da}" if da else "")
 
-    df = self.read(query, debug=debug)
+    df = self.read(query, chunksize=chunksize, debug=debug)
 
     if self.flavor == 'sqlite':
         from meerschaum.utils.misc import parse_df_datetimes
@@ -584,7 +585,7 @@ def sync_pipe(
         check_existing = False
         is_new = True
 
-    new_data_df = filter_existing(pipe, df, debug=debug) if check_existing else df
+    new_data_df = filter_existing(pipe, df, chunksize=chunksize, debug=debug) if check_existing else df
     if debug:
         dprint("New unseen data:\n" + str(new_data_df))
 
@@ -605,11 +606,11 @@ def sync_pipe(
     if is_new:
         if not self.create_indices(pipe, debug=debug):
             if debug:
-                dprint(f"Failed to create indices for Pipe '{pipe}'. Continuing...")
+                dprint(f"Failed to create indices for pipe '{pipe}'. Continuing...")
     return result
 
 
-def filter_existing(pipe, df, debug : bool = False):
+def filter_existing(pipe, df, chunksize : Optional[int] = -1, debug : bool = False):
     """
     Remove duplicate data from backtrack_data and a new dataframe
     """
@@ -631,15 +632,20 @@ def filter_existing(pipe, df, debug : bool = False):
         to = 'down'
     ) - datetime_pkg.timedelta(minutes=1)
     if debug:
-        dprint(f"Looking at data newer than '{begin}'")
+        dprint(f"Looking at data newer than '{begin}'.")
 
     ### backtrack_df is existing Pipe data that overlaps with the fetched df
     try:
         backtrack_minutes = pipe.parameters['fetch']['backtrack_minutes']
-    except:
+    except Exception as e:
         backtrack_minutes = 0
 
-    backtrack_df = pipe.get_backtrack_data(begin=begin, backtrack_minutes=backtrack_minutes, debug=debug)
+    backtrack_df = pipe.get_backtrack_data(
+        begin = begin,
+        backtrack_minutes = backtrack_minutes,
+        chunksize = chunksize,
+        debug = debug
+    )
     if debug:
         dprint("Existing data:\n" + str(backtrack_df))
 

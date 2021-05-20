@@ -37,27 +37,29 @@ def get_uvicorn_config() -> Dict[str, Any]:
     """
     global uvicorn_config
     import json
+    _uvicorn_config = uvicorn_config
     if uvicorn_config is None:
         try:
             with open(API_UVICORN_CONFIG_PATH, 'r') as f:
                 uvicorn_config = json.load(f)
+            _uvicorn_config = uvicorn_config
         except Exception as e:
-            uvicorn_config = sys_config.get('uvicorn', None)
+            _uvicorn_config = sys_config.get('uvicorn', None)
 
-        if uvicorn_config is None:
-            uvicorn_config = dict()
+        if _uvicorn_config is None:
+            _uvicorn_config = dict()
 
         ### Default: main SQL connector
-        if 'mrsm_instance' not in uvicorn_config:
-            uvicorn_config['mrsm_instance'] = get_config('meerschaum', 'api_instance', patch=True)
-    return uvicorn_config
+        if 'mrsm_instance' not in _uvicorn_config:
+            _uvicorn_config['mrsm_instance'] = get_config('meerschaum', 'api_instance', patch=True)
+    return _uvicorn_config
 
 debug = get_uvicorn_config().get('debug', False) if API_UVICORN_CONFIG_PATH.exists() else False
 no_dash = get_uvicorn_config().get('no_dash', False)
 ### NOTE: Disable dash unless version is at least 0.3.0.
 _include_dash = (
     (not no_dash)
-    and (packaging_version.parse(version) >= packaging_version.parse('0.3.0.rc1'))
+    and (packaging_version.parse(version) >= packaging_version.parse('0.3.0rc1'))
 )
 
 connector = None

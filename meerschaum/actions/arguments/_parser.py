@@ -187,6 +187,11 @@ groups['sync'].add_argument(
     '--end', type=parse_datetime, help="Specify an end datetime for syncing or displaying data."
 )
 groups['sync'].add_argument(
+    '--chunksize', type=int, help=(
+        "Specify the chunksize for syncing and retrieving data. Defaults to 900."
+    ),
+)
+groups['sync'].add_argument(
     '--sync-chunks', action='store_true',
     help="Sync chunks while fetching data instead of waiting until all have arrived. " +
     "Similar to --async. WARNING! This can be very dangerous when used with --async.",

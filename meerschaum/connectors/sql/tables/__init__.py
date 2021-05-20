@@ -12,6 +12,8 @@ from meerschaum.utils.typing import Optional, Dict, Union
 ### store a tables dict for each connector
 connector_tables = dict()
 
+_sequence_flavors = {'duckdb'}
+
 def get_tables(
         mrsm_instance : Optional[Union[str, meerschaum.connectors.Connector]] = None,
         create : bool = True,
@@ -50,7 +52,7 @@ def get_tables(
     global connector_tables
     if conn not in connector_tables:
         if debug:
-            dprint(f"Creating tables for connector '{conn}'")
+            dprint(f"Creating tables for connector '{conn}'.")
 
         id_type = sqlalchemy.Integer
         params_type = (
@@ -58,11 +60,28 @@ def get_tables(
             else sqlalchemy.String
         )
 
+        id_names = ('user_id', 'plugin_id', 'pipe_id')
+        sequences = {
+            k: sqlalchemy.Sequence(k + '_seq')
+                for k in id_names 
+        }
+        id_col_args = { k: [k, id_type] for k in id_names }
+        id_col_kw = { k: {'primary_key': True} for k in id_names }
+
+        if conn.flavor in _sequence_flavors:
+            for k, args in id_col_args.items():
+                args.append(sequences[k])
+            for k, kw in id_col_kw.items():
+                kw.update({'server_default': sequences[k].next_value()})
+
         _tables = {
             'users' : sqlalchemy.Table(
                 'users',
                 conn.metadata,
-                sqlalchemy.Column('user_id', id_type, sqlalchemy.Sequence('user_id_sequence'), primary_key=True),
+                sqlalchemy.Column(
+                    *id_col_args['user_id'],
+                    **id_col_kw['user_id'],
+                ),
                 sqlalchemy.Column('username', sqlalchemy.String, index=True, nullable=False),
                 sqlalchemy.Column('password_hash', sqlalchemy.String),
                 sqlalchemy.Column('email', sqlalchemy.String),
@@ -73,7 +92,10 @@ def get_tables(
             'plugins' : sqlalchemy.Table(
                 'plugins',
                 conn.metadata,
-                sqlalchemy.Column('plugin_id', id_type, sqlalchemy.Sequence('plugin_id_sequence'), primary_key=True),
+                sqlalchemy.Column(
+                    *id_col_args['plugin_id'],
+                    **id_col_kw['plugin_id'],
+                ),
                 sqlalchemy.Column('plugin_name', sqlalchemy.String, index=True, nullable=False),
                 sqlalchemy.Column('user_id', sqlalchemy.Integer, nullable=False),
                 sqlalchemy.Column('version', sqlalchemy.String),
@@ -85,7 +107,10 @@ def get_tables(
         _tables['pipes'] = sqlalchemy.Table(
             "pipes",
             conn.metadata,
-            sqlalchemy.Column("pipe_id", id_type, sqlalchemy.Sequence('pipe_id_sequence'), primary_key=True),
+            sqlalchemy.Column(
+                *id_col_args['pipe_id'],
+                **id_col_kw['pipe_id'],
+            ),
             sqlalchemy.Column("connector_keys", sqlalchemy.String, index=True, nullable=False),
             sqlalchemy.Column("metric_key", sqlalchemy.String, index=True, nullable=False),
             sqlalchemy.Column("location_key", sqlalchemy.String, index=True),

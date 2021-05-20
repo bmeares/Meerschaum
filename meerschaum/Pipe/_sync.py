@@ -73,7 +73,7 @@ def sync(
         Defaults to None.
 
     :param end:
-        Optionally specify the latelst datetime to search for data.
+        Optionally specify the latest datetime to search for data.
         Defaults to None.
 
     :param force:

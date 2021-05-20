@@ -9,7 +9,11 @@ See `meerschaum.utils.pool` for multiprocessing and
 """
 
 from __future__ import annotations
-import os, signal, subprocess, sys, termios
+import os, signal, subprocess, sys
+try:
+    import termios
+except ImportError:
+    termios = None
 from meerschaum.utils.typing import Union, Optional, Any, Callable
 
 def run_process(
@@ -40,7 +44,8 @@ def run_process(
 
     if foreground:
         old_pgrp = os.tcgetpgrp(sys.stdin.fileno())
-        old_attr = termios.tcgetattr(sys.stdin.fileno())
+        if termios:
+            old_attr = termios.tcgetattr(sys.stdin.fileno())
 
     def new_pgid():
         if user_preexec_fn:
@@ -100,7 +105,8 @@ def run_process(
             # now restore the handler
             signal.signal(signal.SIGTTOU, hdlr)
             # restore terminal attributes
-            termios.tcsetattr(sys.stdin.fileno(), termios.TCSADRAIN, old_attr)
+            if termios:
+                termios.tcsetattr(sys.stdin.fileno(), termios.TCSADRAIN, old_attr)
 
     return ret
 

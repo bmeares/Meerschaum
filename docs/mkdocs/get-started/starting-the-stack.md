@@ -2,15 +2,16 @@
 
 The Meerschaum stack is an integrated collection of services designed to help you start visualizing your data as quickly as possible.
 
-To bring up the stack, run the following command:
+To bring up the database and Grafana parts of the stack, run the following command:
 
 ```bash
-mrsm stack up -d
+mrsm stack up -d db grafana
 ```
 
 !!! note ""
     The `stack` command is a wrapper around a pre-configured [`docker-compose`](https://docs.docker.com/compose/) project. Don't worry if you don't have `docker-compose` installed; in case it's missing, Meerschaum will automatically install it within a virtual environment for its own use.
     
+
     Refer to the [`docker-compose` overview page](https://docs.docker.com/compose/reference/overview/) to see the available `stack` commands.
 
 ![Grafana pre-configured with Meerschaum](https://imgur.com/cYTfiFT.png){ align=right }

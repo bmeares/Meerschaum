@@ -145,6 +145,7 @@ def dateadd_str(
         - postgresql
         - timescaledb
         - cockroachdb
+        - duckdb
         - mssql
         - mysql
         - mariadb
@@ -178,12 +179,19 @@ def dateadd_str(
             begin_time = dateutil.parser.parse(begin)
         except Exception:
             begin_time = None
-    else: begin_time = begin
+    else:
+        begin_time = begin
 
     da = ""
     if flavor in ('postgresql', 'timescaledb', 'cockroachdb'):
         if begin == 'now':
             begin = "CAST(NOW() AT TIME ZONE 'utc' AS TIMESTAMP)"
+        elif begin_time:
+            begin = f"CAST('{begin}' AS TIMESTAMP)"
+        da = begin + f" + INTERVAL '{number} {datepart}'"
+    elif flavor == 'duckdb':
+        if begin == 'now':
+            begin = 'NOW()'
         elif begin_time:
             begin = f"CAST('{begin}' AS TIMESTAMP)"
         da = begin + f" + INTERVAL '{number} {datepart}'"

@@ -1,1 +1,1 @@
-docs/mkdocs/blog/changelog.md
+docs/mkdocs/news/changelog.md

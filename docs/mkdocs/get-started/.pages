@@ -1,7 +1,6 @@
 title: Get Started
 nav:
   - Installation: index.md
-  - Meerschaum Portable: meerschaum-portable.md
   - Starting the Stack: starting-the-stack.md
   - Bootstrap a Pipe: bootstrapping-a-pipe.md
   - ...

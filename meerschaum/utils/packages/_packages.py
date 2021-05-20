@@ -93,7 +93,7 @@ packages : Dict[str, Dict[str, str]] = {
         'mkdocs_awesome_pages_plugin' : 'mkdocs-awesome-pages-plugin>=2.5.0',
     },
     'portable' : {
-        'pyreadline' : 'pyreadline>=2.1; platform_system == "Windows"',
+        'pyreadline' : 'pyreadline3>=3.3; platform_system == "Windows"',
         'gnureadline' : 'gnureadline>=8.0.0; platform_system != "Windows"',
     },
     'extras' : {

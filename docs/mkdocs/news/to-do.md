@@ -1,4 +1,4 @@
-# Meerschaum To-Do List
+# To-Do / Wish List
 
 Below are some ongoing tasks I have planned for Meerschaum. This is not an exhaustive list, and if you would like to contribute a feature idea or point out a bug, please [start a discussion](https://github.com/bmeares/Meerschaum/discussions/categories/ideas) or [open an issue](https://github.com/bmeares/Meerschaum/issues) on the [GitHub repository](https://github.com/bmeares/Meerschaum).
 
