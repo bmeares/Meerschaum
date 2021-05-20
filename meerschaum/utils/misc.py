@@ -838,7 +838,7 @@ def get_connector_labels(
     conns = []
     for t in _types:
         if t == 'plugin':
-            from meerschaum.actions.plugins import get_data_plugins
+            from meerschaum.plugins import get_data_plugins
             conns += [f'{t}:' + m.__name__.split('.')[-1] for m in get_data_plugins()]
             continue
         conns += [ f'{t}:{label}' for label in connectors.get(t, {}) if label != 'default' ]

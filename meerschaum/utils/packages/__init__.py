@@ -128,7 +128,7 @@ def activate_venv(
     from meerschaum.config._paths import VIRTENV_RESOURCES_PATH
     _venv = None
     virtualenv = attempt_import(
-        'virtualenv', venv=None, lazy=False, install=True, warn=False, debug=debug
+        'virtualenv', venv=None, lazy=False, install=True, warn=False, debug=debug, color=False,
     )
     if virtualenv is None:
         try:
