@@ -235,7 +235,10 @@ def _delete_users(
         return False, "No users to delete."
 
     ### verify that the user absolutely wants to do this (skips on --force)
-    question = f"Are you sure you want to delete these users from Meerschaum instance '{instance_connector}'?\n"
+    question = (
+        "Are you sure you want to delete these users from Meerschaum instance "
+        + f"'{instance_connector}'?\n"
+    )
     for username in registered_users:
         question += f" - {username}" + "\n"
     if force:
@@ -278,14 +281,14 @@ def _delete_connectors(
     Delete configured connectors.
 
     Example:
-        `delete connectors -c sql:test`
+        `delete connectors sql:test`
     """
+    import os, pathlib
     from meerschaum.utils.prompt import yes_no, prompt
     from meerschaum.connectors.parse import parse_connector_keys
     from meerschaum.config import _config
     from meerschaum.config._edit import write_config
     from meerschaum.utils.warnings import info, warn
-    import os
     cf = _config()
     if action is None:
         action = []
@@ -320,12 +323,20 @@ def _delete_connectors(
         return False, "No changes made to the configuration file."
     for c in to_delete:
         try:
-            if c.flavor == 'sqlite':
-                if force or yes_no(f"Detected sqlite database '{c.database}'. Delete this file?", default='n', noask=noask, yes=yes):
-                    try:
-                        os.remove(c.database)
-                    except Exception as e:
-                        warn(f"Failed to delete database file for connector '{c}'. Ignoring...", stack=False)
+            ### Remove database files.
+            if c.flavor in ('sqlite', 'duckdb'):
+                if ':memory:' not in c.database and pathlib.Path(c.database).exists():
+                    if force or yes_no(
+                        f"Detected '{c.flavor}' database '{c.database}'. "
+                        + "Delete this file?", default='n', noask=noask, yes=yes
+                    ):
+                        try:
+                            os.remove(c.database)
+                        except Exception as e:
+                            warn(
+                                "Failed to delete database file for connector "
+                                + f"'{c}'. Ignoring...", stack=False
+                            )
         except Exception as e:
             pass
         try:

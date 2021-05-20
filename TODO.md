@@ -1,1 +1,1 @@
-docs/mkdocs/blog/to-do.md
+docs/mkdocs/news/to-do.md

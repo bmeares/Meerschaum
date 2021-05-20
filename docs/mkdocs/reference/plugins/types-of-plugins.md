@@ -2,8 +2,8 @@
 
 There are three main kinds of Meerschaum plugin: those which **provide data**, **perform actions**, or **extend the API**.
 
-!!! info "¿Por qué no los dos?"
-    When writing Meershcaum plugins, developers may choose to use one or both functionalities. That means a plugin may both act as a connector as well as providing shell actions.
+!!! info "¿Por qué no los tres?"
+    When writing Meershcaum plugins, developers may choose to use and of the three functionalities. That means a plugin may both act as a connector as well as providing shell actions.
 
 See below for more information about the differences between [data](#data-plugins), [action](#action-plugins), and [API](#api-plugins) plugins.
 

@@ -23,8 +23,8 @@ else
 fi
 
 declare -A urls
-urls["WINDOWS"]="https://github.com/indygreg/python-build-standalone/releases/download/20210103/cpython-3.9.1-x86_64-pc-windows-msvc-shared-pgo-20210103T1125.tar.zst"
-urls["LINUX"]="https://github.com/indygreg/python-build-standalone/releases/download/20210103/cpython-3.9.1-x86_64-unknown-linux-gnu-pgo-20210103T1125.tar.zst"
+urls["WINDOWS"]="https://github.com/indygreg/python-build-standalone/releases/download/20210506/cpython-3.9.5-x86_64-pc-windows-msvc-shared-pgo-20210506T0943.tar.zst"
+urls["LINUX"]="https://github.com/indygreg/python-build-standalone/releases/download/20210506/cpython-3.9.5-x86_64-unknown-linux-gnu-pgo+lto-20210506T0943.tar.zst"
 urls["MACOS"]="https://github.com/indygreg/python-build-standalone/releases/download/20210103/cpython-3.9.1-x86_64-apple-darwin-pgo-20210103T1125.tar.zst"
 urls["get-pip.py"]="https://bootstrap.pypa.io/get-pip.py"
 
@@ -34,6 +34,14 @@ tars["LINUX"]="debian.tar.zst"
 tars["MACOS"]="macos.tar.gz"
 
 declare -A taropts
+    #  _check_config_file_max = 20
+    #  while _check_config_file_counter < _check_config_file_max:
+        #  if API_UVICORN_CONFIG_PATH.exists():
+            #  break
+        #  time.sleep(0.1)
+    #  if not API_UVICORN_CONFIG_PATH.exists():
+        #  print("Uvicorn config file was not found!", file=sys.stderr)
+        #  os._exit(1)
 taropts["WINDOWS"]="-I zstd -xvf "
 taropts["LINUX"]="-I zstd -xvf "
 taropts["MACOS"]="-I zstd -xvf "
