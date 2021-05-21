@@ -52,7 +52,7 @@ def daemon_action(**kw) -> SuccessTuple:
             )
 
     sysargs = parse_dict_to_sysargs(kw)
-    rc = run_python_package('meerschaum', sysargs, debug=kw.get('debug', False))
+    rc = run_python_package('meerschaum', sysargs, debug=False)
     msg = "Success" if rc == 0 else f"Daemon for '{' '.join(sysargs)}' returned code: {rc}"
     return rc == 0, msg
 

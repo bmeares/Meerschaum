@@ -153,7 +153,7 @@ def _start_jobs(
 
         ### Determine the `names` list.
         if new_job:
-            names = [get_new_daemon_name()]
+            names = [(get_new_daemon_name() if not name else name)]
         elif not new_job and not name:
             names = _potential_jobs['known']
         ### Cannot find dameon_id
@@ -175,15 +175,6 @@ def _start_jobs(
         _stopped_daemons = get_stopped_daemons()
         if not _stopped_daemons:
             return False, "No jobs to start."
-        #  if not kw.get('force', False):
-            #  pprint_jobs(_stopped_daemons, nopretty=kw.get('nopretty', False))
-            #  if not yes_no(
-                #  "Would you like to start all stopped jobs?",
-                #  yes=kw.get('yes', False), noask=kw.get('noask', False), default='n'
-            #  ):
-                #  return False, "Nothing to do. Provide action arguments or a job name to start."
-            #  if not kw.get('nopretty', False):
-                #  clear_screen(debug=kw.get('debug', False))
         names = [d.daemon_id for d in _stopped_daemons]
 
     def _run_new_job(name : Optional[str] = None):
@@ -248,10 +239,10 @@ def _start_jobs(
             _failures.append(_name)
 
     msg = (
-        (("Succesfully started job" + ("s" if len(_successes) > 1 else '')
+        (("Successfully started job" + ("s" if len(_successes) != 1 else '')
             + f" {items_str(_successes)}." + ('\n' if _failures else ''))
             if _successes else '')
-        + ("Failed to start job" + ("s" if len(_failures) > 1 else '')
+        + ("Failed to start job" + ("s" if len(_failures) != 1 else '')
             + f" {items_str(_failures)}." if _failures else '')
     )
     return len(_successes) > 0, msg

@@ -48,6 +48,8 @@ packages : Dict[str, Dict[str, str]] = {
         'prompt_toolkit'    : 'prompt-toolkit>=3.0.11',
         'more_itertools'    : 'more-itertools>=8.7.0',
         'daemoniker'        : 'daemoniker>=0.2.3',
+        'watchgod'          : 'watchgod>=0.7',
+        'pygtail'           : 'pygtail>=0.11.1',
     },
     'iot' : {
         'paho' : 'paho-mqtt>=1.5.1',

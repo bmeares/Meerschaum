@@ -8,6 +8,7 @@ This module is the entry point for the interactive shell
 from __future__ import annotations
 from meerschaum.utils.typing import Union, SuccessTuple, Any, Callable, Optional, List, Dict
 
+import os
 from meerschaum.utils.packages import attempt_import
 from meerschaum.config import __doc__, __version__ as version, get_config
 cmd = attempt_import(get_config('shell', 'cmd', patch=True), warn=False, lazy=False)
@@ -18,11 +19,6 @@ from meerschaum.actions.shell.ValidAutoSuggest import ValidAutoSuggest
 from meerschaum.actions.shell.ShellCompleter import ShellCompleter
 _clear_screen = get_config('shell', 'clear_screen', patch=True)
 from meerschaum.utils.misc import string_width
-### readline is Unix-like only. Disable readline features for Windows
-try:
-    import readline
-except ImportError:
-    readline = None
 
 patch = True
 ### remove default cmd2 commands
@@ -380,6 +376,9 @@ class Shell(cmd.Cmd):
         Overrides `default`: if action does not exist,
             assume the action is `shell`
         """
+        ### Preserve the working directory.
+        old_cwd = os.getcwd()
+
         ### make a backup of line for later
         import copy
         original_line = copy.deepcopy(line)
@@ -461,7 +460,7 @@ class Shell(cmd.Cmd):
 
         ### If the `--daemon` flag is present, prepend 'start job'.
         if args.get('daemon', False) and 'stack' not in args['action']:
-            args['action'] = ['start', 'jobs', action] + args['action']
+            args['action'] = ['start', 'jobs'] + args['action']
             action = 'start'
 
         positional_only = (action not in self._actions)
@@ -482,6 +481,10 @@ class Shell(cmd.Cmd):
                 success_tuple, skip_common=(not self.debug), upper_padding=1, lower_padding=1
             )
         self.postcmd(False, "")
+
+        ### Restore the old working directory.
+        if old_cwd != os.getcwd():
+            os.chdir(old_cwd)
 
         return ""
 
