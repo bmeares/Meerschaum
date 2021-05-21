@@ -158,10 +158,14 @@ def activate_venv(
 
     old_cwd = pathlib.Path(os.getcwd())
     os.chdir(VIRTENV_RESOURCES_PATH)
-    if debug:
-        dprint(f"Activating virtual environment '{venv}'...", color=color)
-    active_venvs.add(venv)
-    os.chdir(old_cwd)
+    try:
+        if debug:
+            dprint(f"Activating virtual environment '{venv}'...", color=color)
+        active_venvs.add(venv)
+    except Exception:
+        pass
+    finally:
+        os.chdir(old_cwd)
 
     ### override built-in import with attempt_import
     #  install_import_hook(venv, debug=debug)

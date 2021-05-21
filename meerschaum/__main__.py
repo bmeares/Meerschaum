@@ -13,6 +13,7 @@ def main() -> None:
     """
     Main CLI entry point.
     """
+    old_cwd = os.getcwd()
     sysargs = sys.argv[1:]
 
     ### Check for a custom configuration directory.
@@ -39,18 +40,18 @@ def main() -> None:
     if '--help' in sysargs or '-h' in sysargs:
         from meerschaum.actions.arguments._parser import parse_help
         parse_help(sysargs)
-        return _exit()
+        return _exit(old_cwd=old_cwd)
 
     ### Catch version flags.
     if '--version' in sysargs or '-V' in sysargs:
         from meerschaum.actions.arguments._parser import parse_version
         parse_version(sysargs)
-        return _exit()
+        return _exit(old_cwd=old_cwd)
 
     if ('-d' in sysargs or '--daemon' in sysargs) and ('stack' not in sysargs):
         from meerschaum.utils.daemon import daemon_entry
         daemon_entry(sysargs)
-        return _exit()
+        return _exit(old_cwd=old_cwd)
 
     from meerschaum.actions import entry, get_shell
 
@@ -59,7 +60,7 @@ def main() -> None:
         if '--shell' in sysargs:
             sysargs.remove('--shell')
         get_shell(sysargs).cmdloop()
-        return _exit()
+        return _exit(old_cwd=old_cwd)
 
     ### Print success or failure message.
     return_tuple = entry(sysargs)
@@ -69,10 +70,13 @@ def main() -> None:
         print_tuple(return_tuple, upper_padding=1)
         rc = 0 if (return_tuple[0] is True) else 1
 
-    return _exit(rc)
+    return _exit(rc, old_cwd=old_cwd)
 
-def _exit(return_code : int = 0) -> None:
+def _exit(return_code : int = 0, old_cwd : str = None) -> None:
     _close_pools()
+    ### Restore the previous working directory.
+    if old_cwd is not None and old_cwd != os.getcwd():
+        os.chdir(old_cwd)
     sys.exit(return_code)
 
 def _close_pools():

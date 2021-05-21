@@ -189,7 +189,10 @@ def sync(
                 return True, f"Pipe '{p}' was synced in parallel."
 
         if debug:
-            dprint("DataFrame to sync:\n" + f"{df}")
+            dprint(
+                "DataFrame to sync:\n"
+                + (str(df)[:255] + '...' if len(str(df)) >= 256 else str(df))
+            )
 
         ### if force, continue to sync until success
         return_tuple = False, f"Did not sync pipe '{p}'."

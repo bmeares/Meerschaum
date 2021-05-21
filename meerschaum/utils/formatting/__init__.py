@@ -116,8 +116,8 @@ def get_console():
     """
     global console
     from meerschaum.utils.packages import import_rich, attempt_import
-    if not __getattr__('ANSI') and not __getattr__('UNICODE'):
-        return None
+    #  if not __getattr__('ANSI') and not __getattr__('UNICODE'):
+        #  return None
     rich = import_rich()
     rich_console = attempt_import('rich.console')
     try:

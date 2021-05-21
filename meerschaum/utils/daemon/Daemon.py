@@ -7,9 +7,9 @@ Manage running daemons via the Daemon class.
 """
 
 from __future__ import annotations
-import pathlib, threading, json, shutil, datetime
+import os, pathlib, threading, json, shutil, datetime
 from meerschaum.utils.typing import Optional, Dict, Any, SuccessTuple, Callable, List, Union
-from meerschaum.config._paths import DAEMON_RESOURCES_PATH
+from meerschaum.config._paths import DAEMON_RESOURCES_PATH, LOGS_RESOURCES_PATH
 from meerschaum.config._patch import apply_patch_to_config
 from meerschaum.utils.warnings import warn, error
 from meerschaum.utils.packages import attempt_import, venv_exec
@@ -334,7 +334,11 @@ class Daemon:
         """
         Return the path for the output log file.
         """
-        return self.path / 'output.log'
+        return LOGS_RESOURCES_PATH / (self.daemon_id + '.log')
+
+    @property
+    def log_offset_path(self):
+        return self.path / (self.daemon_id + '.log.offset')
 
     @property
     def log_text(self) -> Optional[str]:
@@ -459,13 +463,22 @@ class Daemon:
             traceback.print_exception(type(e), e, e.__traceback__)
         return success, msg
 
-    def cleanup(self):
+    def cleanup(self, keep_logs : bool = False):
         """
         Remove a daemon's directory after execution.
+
+        :param keep_logs:
+            If `True`, skip deleting the daemon's log file.
+            Defaults to `False`.
         """
         if self.path.exists():
             try:
                 shutil.rmtree(self.path)
+            except Exception as e:
+                warn(e)
+        if self.log_path.exists() and not keep_logs:
+            try:
+                os.remove(self.log_path)
             except Exception as e:
                 warn(e)
 

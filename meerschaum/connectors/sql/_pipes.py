@@ -592,6 +592,8 @@ def sync_pipe(
     if_exists = kw.get('if_exists', 'append')
     if 'if_exists' in kw:
         kw.pop('if_exists')
+    if 'name' in kw:
+        kw.pop('name')
 
     ### append new data to Pipe's table
     result = self.to_sql(

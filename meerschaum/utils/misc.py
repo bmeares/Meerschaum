@@ -301,7 +301,7 @@ def print_options(
         _print_options_no_rich()
         return None
 
-    from meerschaum.utils.formatting import pprint
+    from meerschaum.utils.formatting import pprint, get_console
     from meerschaum.utils.packages import attempt_import
     rich_columns = attempt_import('rich.columns')
     rich_panel = attempt_import('rich.panel')
@@ -331,7 +331,7 @@ def print_options(
     cols = Columns([
         o for o in sorted(_options)
     ], expand=True, equal=True, title=header, padding=(0, 0))
-    rich.print(table)
+    get_console().print(table)
     return None
 
 def iterate_chunks(iterable, chunksize : int, fillvalue : Optional[Any] = None):

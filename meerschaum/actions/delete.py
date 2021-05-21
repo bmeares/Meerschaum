@@ -398,12 +398,12 @@ def _delete_jobs(
                 noask=noask, yes=yes, default='n'
             ):
                 return False, "No jobs were deleted."
-            clear_screen(debug=debug)
             _delete_all_jobs = True
     _running_daemons = get_running_daemons(daemons)
     _stopped_daemons = get_stopped_daemons(daemons, _running_daemons)
     _to_delete = _stopped_daemons
     if _running_daemons:
+        clear_screen(debug=debug)
         if not force:
             pprint_jobs(_running_daemons, nopretty=nopretty)
         if force or yes_no(
@@ -425,7 +425,6 @@ def _delete_jobs(
                 return False, (
                     f"Failed to kill running jobs. Please stop these jobs before deleting."
                 )
-            clear_screen(debug=debug)
             _to_delete += _running_daemons
         ### User decided not to kill running jobs.
         else:

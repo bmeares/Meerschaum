@@ -77,6 +77,7 @@ paths = {
     'PORTABLE_CHECK_READLINE_PATH' : ('{SHELL_RESOURCES_PATH}', '.readline_attempted_install'),
 
     'DAEMON_RESOURCES_PATH' : ('{ROOT_DIR_PATH}', 'jobs'),
+    'LOGS_RESOURCES_PATH' : ('{ROOT_DIR_PATH}', 'logs'),
 }
 
 def set_root(root : Union[Path, str]):

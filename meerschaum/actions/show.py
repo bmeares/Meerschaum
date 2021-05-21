@@ -525,29 +525,82 @@ def _show_logs(
     """
     Show the logs for jobs.
     """
-    from meerschaum.utils.daemon import get_filtered_daemons
+    import os, pathlib
+    from meerschaum.utils.packages import attempt_import, import_rich
+    from meerschaum.utils.daemon import get_filtered_daemons, Daemon
     from meerschaum.utils.warnings import warn, info
+    from meerschaum.utils.formatting import get_console
+    from meerschaum.config._paths import LOGS_RESOURCES_PATH
+    colors = [
+        'cyan', 'magenta', 'orange3', 'green', 'blue', 'red', 'spring_green3',
+        'medium_purple3', 'medium_violet_red', 'slate_blue1', 'dark_red', 'steel_blue3',
+        'aquamarine1', 'dark_khaki', 'pink3', 'gold3', 'pale_green1',
+    ]
     daemons = get_filtered_daemons(action)
-
-    def _print_pretty_log_text(d):
-        log_text = d.log_text
-        if not log_text:
-            warn(f"No logs available for job '{d.daemon_id}'.", stack=False)
-            return
-        info(f"Logs for job '{d.daemon_id}':")
-        print()
-        print(log_text)
-        print()
-
-    def _print_nopretty_log_text(d):
-        log_text = d.log_text
-        print(d.daemon_id)
-        print(log_text)
-
-    _print_log_text = _print_pretty_log_text if not nopretty else _print_nopretty_log_text
-
+    _job_colors = {d.daemon_id: colors[i % len(colors)] for i, d in enumerate(daemons)}
+    _max_len_id = 0
     for d in daemons:
-        _print_log_text(d)
+        if len(d.daemon_id) > _max_len_id:
+            _max_len_id = len(d.daemon_id)
+    _buffer_len = max(15, _max_len_id + 2)
+    _buffer_spaces = {
+        d.daemon_id: ''.join([' ' for i in range(_buffer_len - len(d.daemon_id))])
+        for d in daemons
+    }
+
+    def _follow_pretty_print():
+        watchgod = attempt_import('watchgod')
+        pygtail = attempt_import('pygtail')
+        rich = import_rich()
+        rich_text = attempt_import('rich.text')
+        _watch_daemon_ids = set([d.daemon_id for d in daemons])
+        for changes in watchgod.watch(LOGS_RESOURCES_PATH):
+            for change in changes:
+                file_path_str = change[1]
+                if '.log' not in file_path_str:
+                    continue
+                file_path = pathlib.Path(file_path_str)
+                if not file_path.exists():
+                    continue
+                daemon_id = file_path.name.replace('.log', '')
+                if daemon_id not in _watch_daemon_ids:
+                    continue
+                daemon = Daemon(daemon_id=daemon_id)
+                for line in pygtail.Pygtail(file_path_str, offset_file=daemon.log_offset_path):
+                    text = rich_text.Text(daemon_id)
+                    text.append(
+                        _buffer_spaces[daemon_id] + '| '
+                        + (line[:-1] if line[-1] == '\n' else line)
+                    )
+                    text.stylize(
+                        _job_colors[daemon_id],
+                        0,
+                        len(daemon_id) + len(_buffer_spaces[daemon_id]) + 1
+                    )
+                    get_console().print(text)
+                    #  get_console().print(
+                        #  rich_text.Text(
+                            #  daemon_id,
+                            #  style = _job_colors[daemon_id]
+                        #  ),
+                        #  soft_wrap=False,
+                    #  )
+        #  for d in daemons:
+            #  if d.log_offset_path.exists():
+                #  try:
+                    #  os.remove(d.log_offset_path)
+                #  except Exception as e:
+                    #  warn(e)
+
+    def _print_nopretty_log_text():
+        for d in daemons:
+            log_text = d.log_text
+            print(d.daemon_id)
+            print(log_text)
+
+    _print_log_text = _follow_pretty_print if not nopretty else _print_nopretty_log_text
+    _print_log_text()
+
     return True, "Success"
 
 

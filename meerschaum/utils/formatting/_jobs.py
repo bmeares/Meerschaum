@@ -38,9 +38,31 @@ def pprint_jobs(
             #  print_options(stopped_daemons, nopretty=nopretty, no_rich=True, header='Stopped jobs')
 
     def _pretty_print():
-        pass
+        from meerschaum.utils.formatting import get_console, UNICODE, ANSI
+        from meerschaum.utils.packages import import_rich, attempt_import
+        rich = import_rich()
+        rich_table, rich_text = attempt_import('rich.table', 'rich.text')
+        from rich import box
+        table = rich_table.Table(
+            title = rich_text.Text('Jobs'),
+            box = (box.ROUNDED if UNICODE else box.ASCII),
+            show_lines = True,
+            show_header = ANSI,
+        )
+        table.add_column("Name", justify='right', style=('magenta' if ANSI else ''))
+        table.add_column("Command")
+        table.add_column("Status")
+        for d in running_daemons:
+            table.add_row(
+                d.daemon_id, d.label, rich_text.Text("running", style=('green' if ANSI else ''))
+            )
+        for d in stopped_daemons:
+            table.add_row(
+                d.daemon_id, d.label, rich_text.Text("stopped", style=('red' if ANSI else ''))
+            )
+        get_console().print(table)
 
-    _nopretty_print()
+    _nopretty_print() if nopretty else _pretty_print()
 
 def pprint_job(
         daemon : Daemon,
