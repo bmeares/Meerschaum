@@ -271,9 +271,17 @@ class Daemon:
         if not self.pid_path.exists():
             return None
 
+        def _quit(*args, **kw):
+            from meerschaum.__main__ import _exit
+            _exit()
         daemoniker = attempt_import('daemoniker')
         if '_sighandler' not in self.__dict__:
-            self._sighandler = daemoniker.SignalHandler1(str(self.pid_path))
+            self._sighandler = daemoniker.SignalHandler1(
+                str(self.pid_path),
+                sigint = _quit,
+                sigterm = _quit,
+                sigabrt = _quit,
+            )
         return self._sighandler
 
     def mkdir_if_not_exists(self, allow_dirty_run : bool = False):
@@ -370,7 +378,7 @@ class Daemon:
         except Exception as e:
             warn(e)
             text = None
-        return text.strip('\n') if text is not None else text
+        return text.rstrip('\n') if text is not None else text
 
     @property
     def pid_path(self) -> pathlib.Path:
@@ -503,8 +511,8 @@ class Daemon:
         return str(self)
 
     def __str__(self):
-        return str(self.daemon_id) + '\n    (' + str(self.label) + ')'
-        #  return self.daemon_id
+        #  return str(self.daemon_id) + '\n    (' + str(self.label) + ')'
+        return self.daemon_id
 
     def __eq__(self, other):
         if not isinstance(other, Daemon):
