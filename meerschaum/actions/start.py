@@ -214,11 +214,46 @@ def _start_jobs(
     ### Get user permission to clear logs.
     _filtered_daemons = get_filtered_daemons(names)
     if not kw.get('force', False) and _filtered_daemons:
+        _filtered_running_daemons = get_running_daemons(_filtered_daemons)
+        if _filtered_running_daemons:
+            pprint_jobs(_filtered_running_daemons)
+            if yes_no(
+                "The above jobs are still running. Do you want to first stop these jobs?",
+                default = 'n',
+                yes = kw.get('yes', False),
+                noask = kw.get('noask', False)
+            ):
+                stop_success_tuple = actions['stop'](
+                    action = ['jobs'] + [d.daemon_id for d in _filtered_running_daemons],
+                    force = True,
+                )
+                if not stop_success_tuple[0]:
+                    warn(
+                        "Failed to stop job" + ("s" if len(_filtered_running_daemons) != 1 else '')
+                        + items_str([d.daemon_id for d in _filtered_running_daemons])
+                        + ".",
+                        stack = False
+                    )
+                    for d in _filtered_running_daemons:
+                        names.remove(d.daemon_id)
+                        _filtered_daemons.remove(d)
+            else:
+                info(
+                    "Skipping already running job"
+                    + ("s" if len(_filtered_running_daemons) != 1 else '') + ' '
+                    + items_str([d.daemon_id for d in _filtered_running_daemons]) + '.'
+                )
+                for d in _filtered_running_daemons:
+                    names.remove(d.daemon_id)
+                    _filtered_daemons.remove(d)
+
+        if not _filtered_daemons:
+            return False, "No jobs to start."
         pprint_jobs(_filtered_daemons, nopretty=kw.get('nopretty', False))
         if not yes_no(
             (
                 f"Would you like to overwrite the logs and run the job"
-                + ("s" if len(names) > 1 else '') + " " + items_str(names) + "?"
+                + ("s" if len(names) != 1 else '') + " " + items_str(names) + "?"
             ),
             default = 'n',
             yes = kw.get('yes', False),

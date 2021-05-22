@@ -90,6 +90,17 @@ def stack(
 
     _compose_venv = 'mrsm'
     compose = attempt_import('compose', lazy=False, venv=_compose_venv)
+    docker = attempt_import('docker', warn=False)
+    try:
+        client = docker.from_env()
+    except Exception as e:
+        warn("Could not connect to Docker. Is the Docker service running?", stack=False)
+        print(
+            "To start the Docker service, run `sudo systemctl start docker` or `sudo dockerd`.\n"
+            + "On Windows or MacOS, make sure Docker Desktop is running.",
+            file = sys.stderr,
+        )
+        return False, "Failed to connect to the Docker engine."
     ### If docker-compose is installed globally, don't use the `mrsm` venv.
     if not venv_contains_package('compose', _compose_venv):
         _compose_venv = None

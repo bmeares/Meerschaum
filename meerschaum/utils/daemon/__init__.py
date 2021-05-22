@@ -140,7 +140,7 @@ def get_filtered_daemons(
             _exists = False
         if not _exists:
             if warn:
-                _warn(f"Daemon '{d.daemon_id}' does not exist.", stack=False)
+                _warn(f"Daemon '{d_id}' does not exist.", stack=False)
             continue
         daemons.append(d)
     return daemons

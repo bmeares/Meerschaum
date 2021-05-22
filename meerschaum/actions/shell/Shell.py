@@ -771,6 +771,9 @@ def input_with_sigint(_input, session):
         except KeyboardInterrupt:
             print("^C")
             return "pass"
+        #  except RuntimeError:
+            #  print("^C")
+            #  return "pass"
         return parsed
 
     return _patched_input
