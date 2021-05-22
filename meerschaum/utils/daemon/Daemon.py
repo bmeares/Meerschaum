@@ -370,7 +370,7 @@ class Daemon:
         except Exception as e:
             warn(e)
             text = None
-        return text
+        return text.strip('\n') if text is not None else text
 
     @property
     def pid_path(self) -> pathlib.Path:
