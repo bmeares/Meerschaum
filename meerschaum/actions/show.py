@@ -535,7 +535,7 @@ def _show_logs(
     """
     Show the logs for jobs.
     """
-    import os, pathlib, random
+    import os, pathlib, random, asyncio
     from meerschaum.utils.packages import attempt_import, import_rich
     from meerschaum.utils.daemon import get_filtered_daemons, Daemon
     from meerschaum.utils.warnings import warn, info
@@ -580,6 +580,7 @@ def _show_logs(
         return _job_colors[daemon_id]
 
     def _follow_pretty_print():
+        loop = asyncio.new_event_loop()
         watchgod = attempt_import('watchgod')
         pygtail = attempt_import('pygtail')
         rich = import_rich()
@@ -628,7 +629,7 @@ def _show_logs(
                 char_index = int(offset_lines[-1].rstrip('\n'))
                 new_offset_lines = [
                     offset_lines[0],
-                    str((char_index - backup_index) if char_index > backup_index else 0) + '\n'
+                    str((len(log_text) - backup_index) if char_index > backup_index else 0) + '\n'
                 ]
             with open(d.log_offset_path, 'w') as f:
                 f.writelines(new_offset_lines)
