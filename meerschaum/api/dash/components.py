@@ -26,9 +26,20 @@ keyboard = dex.Keyboard(
     id = 'keyboard',
     captureKeys = ['Enter'],
 )
-go_button = dbc.Button('Execute', id='go-button', color='primary')
-test_button = dbc.Button('Test', id='test-button', color='danger')
-show_pipes_button = dbc.Button('Get Pipes', id='show-pipes-button', color='secondary')
+go_button = dbc.Button('Execute', id='go-button', color='primary', style={'width': '100%'})
+test_button = dbc.Button('Test', id='test-button', color='danger', style={'display' : 'none'})
+get_items_menu = dbc.DropdownMenu(label='Get Items', id='get-items-menu', children=[
+    dbc.DropdownMenuItem("Pipes", id='get-pipes-button'),
+    dbc.DropdownMenuItem("Jobs", id='get-jobs-button'),
+], style={'width': '100%'})
+bottom_buttons_content = dbc.Card(
+    dbc.CardBody(
+        dbc.Row([
+            dbc.Col(go_button, width='2'),
+            dbc.Col(get_items_menu, width='2'),
+        ], no_gutters=False)
+    )
+)
 location = dcc.Location(id='location', refresh=False)
 websocket = dex.WebSocket(id='ws', url="")
 

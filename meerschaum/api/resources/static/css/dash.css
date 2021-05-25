@@ -26,6 +26,12 @@ a {
   padding: 0.5em !important;
 
 }
+.running-job {
+  color: green;
+}
+.stopped-job {
+  color: red;
+}
 /* .dbc_dark code { */
   /* color: var(--light) !important; */
   /* background: var(--blue) !important; */

@@ -19,6 +19,7 @@ from meerschaum.api.dash.connectors import get_web_connector
 from meerschaum.api.dash.websockets import ws_url_from_href
 from meerschaum.connectors.parse import parse_instance_keys
 from meerschaum.api.dash.pipes import get_pipes_cards
+from meerschaum.api.dash.jobs import get_jobs_cards
 from meerschaum.api.dash.components import alert_from_success_tuple
 from meerschaum.api.dash.actions import execute_action, check_input_interval
 import meerschaum.api.dash.pages as pages
@@ -114,7 +115,8 @@ def update_page_layout_div(pathname : str, session_store_data : Dict[str, Any]):
     Output('ws', 'url'),
     Input('keyboard', 'n_keydowns'),
     Input('go-button', 'n_clicks'),
-    Input('show-pipes-button', 'n_clicks'),
+    Input('get-pipes-button', 'n_clicks'),
+    Input('get-jobs-button', 'n_clicks'),
     Input('check-input-interval', 'n_intervals'),
     State('keyboard', 'keydown'),
     State('location', 'href'),
@@ -139,7 +141,8 @@ def update_content(*args):
     ### NOTE: functions MUST return a list of content and a list of alerts
     triggers = {
         'go-button' : execute_action,
-        'show-pipes-button' : get_pipes_cards,
+        'get-pipes-button' : get_pipes_cards,
+        'get-jobs-button' : get_jobs_cards,
         'check-input-interval' : check_input_interval,
     }
 

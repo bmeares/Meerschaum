@@ -20,7 +20,8 @@ px = attempt_import('plotly.express', warn=False)
 daq = attempt_import('dash_daq', warn=False)
 
 from meerschaum.api.dash.components import (
-    go_button, show_pipes_button, search_parameters_editor, keyboard, websocket, test_button,
+    go_button, search_parameters_editor, keyboard, websocket, test_button,
+    get_items_menu, bottom_buttons_content,
 )
 from meerschaum.api.dash.keys import (
     keys_lists_content, text_tab_content, dropdown_tab_content
@@ -110,17 +111,21 @@ layout = html.Div(
                                     tab_id='dropdown',
                                 ),
                                 dbc.Tab(
-                                    text_tab_content, label='Text',
+                                    text_tab_content,
+                                    label='Text',
                                     id='pipes-filter-input-tab',
                                     tab_id='input',
+                                    tab_style={"display": "none"},
                                 ),
                             ]
                         ),
-                        #  html.Br(),
+                        html.Br(),
+                        bottom_buttons_content,
                         #  action_row,
                         test_button,
-                        go_button,
-                        show_pipes_button,
+                        #  go_button,
+                        #  show_pipes_button,
+                        #  get_items_menu,
                         html.Div(id='ws-div'),
                         #  search_parameters_editor,
                     ],

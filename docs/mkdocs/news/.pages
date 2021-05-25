@@ -1,4 +1,5 @@
 nav:
+  - Technical Blog: index.md
   - Release Notes: changelog.md
   - To-Do / Wishlist: to-do.md
   - ...
