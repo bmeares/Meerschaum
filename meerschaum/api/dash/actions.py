@@ -121,10 +121,13 @@ def execute_action(state : WebState):
         #  return cap.get_text(), success_tuple
 
     def use_stringio():
-        LINES, COLUMNS = (
-            os.environ.get('LINES', str(os.get_terminal_size().lines)),
-            os.environ.get('COLUMNS', str(os.get_terminal_size().columns)),
-        )
+        try:
+            LINES, COLUMNS = (
+                os.environ.get('LINES', str(os.get_terminal_size().lines)),
+                os.environ.get('COLUMNS', str(os.get_terminal_size().columns)),
+            )
+        except OSError:
+            LINES, COLUMNS = '120', '100'
         os.environ['LINES'], os.environ['COLUMNS'] = '120', '100'
         stdout = sys.stdout
         #  sys.stdout = cap

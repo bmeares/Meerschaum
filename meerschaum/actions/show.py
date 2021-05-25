@@ -327,7 +327,7 @@ def _show_data(
         else:
             print(json.dumps(p.__getstate__()))
             df = df.to_json(orient='columns')
-        pprint(df, file=sys.stderr, nopretty=nopretty)
+        pprint(df, nopretty=nopretty)
         if gui and not nopretty:
             pandasgui = attempt_import('pandasgui')
             try:
@@ -513,17 +513,18 @@ def _show_jobs(
     from meerschaum.utils.daemon import get_filtered_daemons
     from meerschaum.utils.formatting._jobs import pprint_jobs
     daemons = get_filtered_daemons(action)
-    if not daemons and not nopretty:
-        from meerschaum.utils.warnings import info
-        info('No running or stopped jobs.')
-        print(
-            f"    You can start a background job with `-d` or `--daemon`,\n" +
-            "    or run the command `start job` before action commands.\n\n" +
-            "    Examples:\n" +
-            "      - start api -d\n" +
-            "      - start job sync pipes --loop"
-        )
-        return True, "Success"
+    if not daemons:
+        if not action and not nopretty:
+            from meerschaum.utils.warnings import info
+            info('No running or stopped jobs.')
+            print(
+                f"    You can start a background job with `-d` or `--daemon`,\n" +
+                "    or run the command `start job` before action commands.\n\n" +
+                "    Examples:\n" +
+                "      - start api -d\n" +
+                "      - start job sync pipes --loop"
+            )
+        return False, "No jobs to show."
     pprint_jobs(daemons, nopretty=nopretty)
     return True, "Success"
 
@@ -553,7 +554,7 @@ def _show_logs(
             for d in daemons
         }
 
-    def _build_job_colors(daemons) -> Dict[str, str]:
+    def _build_job_colors(daemons, _old_job_colors = None) -> Dict[str, str]:
         return {d.daemon_id: colors[i % len(colors)] for i, d in enumerate(daemons)}
 
     _buffer_spaces = _build_buffer_spaces(daemons)
@@ -580,7 +581,6 @@ def _show_logs(
         return _job_colors[daemon_id]
 
     def _follow_pretty_print():
-        loop = asyncio.new_event_loop()
         watchgod = attempt_import('watchgod')
         pygtail = attempt_import('pygtail')
         rich = import_rich()
@@ -639,20 +639,26 @@ def _show_logs(
             _seek_back_offset(d)
             _print_pygtail_lines(d)
 
-        for changes in watchgod.watch(LOGS_RESOURCES_PATH):
-            for change in changes:
-                file_path_str = change[1]
-                if '.log' not in file_path_str:
-                    continue
-                file_path = pathlib.Path(file_path_str)
-                if not file_path.exists():
-                    continue
-                daemon_id = file_path.name.replace('.log', '')
-                if daemon_id not in _watch_daemon_ids and action:
-                    continue
-                daemon = Daemon(daemon_id=daemon_id)
-                if daemon.log_path.exists():
-                    _print_pygtail_lines(daemon)
+        async def _watch_logs():
+            async for changes in watchgod.awatch(LOGS_RESOURCES_PATH):
+                for change in changes:
+                    file_path_str = change[1]
+                    if '.log' not in file_path_str:
+                        continue
+                    file_path = pathlib.Path(file_path_str)
+                    if not file_path.exists():
+                        continue
+                    daemon_id = file_path.name.replace('.log', '')
+                    if daemon_id not in _watch_daemon_ids and action:
+                        continue
+                    daemon = Daemon(daemon_id=daemon_id)
+                    if daemon.log_path.exists():
+                        _print_pygtail_lines(daemon)
+        loop = asyncio.new_event_loop()
+        try:
+            loop.run_until_complete(_watch_logs())
+        except KeyboardInterrupt:
+            pass
                 
     def _print_nopretty_log_text():
         for d in daemons:

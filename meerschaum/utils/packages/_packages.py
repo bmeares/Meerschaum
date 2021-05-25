@@ -93,6 +93,7 @@ packages : Dict[str, Dict[str, str]] = {
         'mkdocs_material'             : 'mkdocs-material>=6.2.5',
         'mkdocs_autolinks_plugin'     : 'mkdocs-autolinks-plugin>=0.2.0',
         'mkdocs_awesome_pages_plugin' : 'mkdocs-awesome-pages-plugin>=2.5.0',
+        'mkdocs_rss_plugin'           : 'mkdocs-rss-plugin>=0.16.1'
     },
     'portable' : {
         'pyreadline' : 'pyreadline3>=3.3; platform_system == "Windows"',

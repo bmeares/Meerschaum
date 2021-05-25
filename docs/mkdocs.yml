@@ -1,5 +1,7 @@
 site_name: Meerschaum Documentation
 site_url: https://meerschaum.io
+site_description: "Build your data pipes with Meerschaum, the data engineer's toolbox!"
+site_author: Bennett Meares
 theme:
   features:
     - navigation.sections
@@ -21,6 +23,7 @@ docs_dir: mkdocs
 plugins:
   - search
   - autolinks
+  - rss
   # - add-number
   # - pdf-export
   - awesome-pages:

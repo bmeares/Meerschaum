@@ -29,13 +29,11 @@ def pprint_jobs(
                 print('\n' + make_header('Running jobs'))
             for d in running_daemons:
                 pprint_job(d, nopretty=nopretty)
-            #  print_options(running_daemons, nopretty=nopretty, no_rich=True, header='Running jobs')
         if stopped_daemons:
             if not nopretty:
                 print('\n' + make_header('Stopped jobs'))
             for d in stopped_daemons:
                 pprint_job(d, nopretty=nopretty)
-            #  print_options(stopped_daemons, nopretty=nopretty, no_rich=True, header='Stopped jobs')
 
     def _pretty_print():
         from meerschaum.utils.formatting import get_console, UNICODE, ANSI
