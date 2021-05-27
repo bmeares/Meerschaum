@@ -1,9 +1,11 @@
 # Types of Plugins
 
+> This page introduces the different types of Meerschaum plugins. For technical information, consult the [Writing Your Own Plugins tutorial](/tutorials/plugin-development/writing-plugins/).
+
 There are three main kinds of Meerschaum plugin: those which **provide data**, **perform actions**, or **extend the API**.
 
 !!! info "¿Por qué no los tres?"
-    When writing Meershcaum plugins, developers may choose to use and of the three functionalities. That means a plugin may both act as a connector as well as providing shell actions.
+    When writing Meershcaum plugins, developers may choose to use any of the three functionalities. That means a plugin may act as a connector, provide shell actions, and add endpoints to the web API.
 
 See below for more information about the differences between [data](#data-plugins), [action](#action-plugins), and [API](#api-plugins) plugins.
 
@@ -19,7 +21,7 @@ Fetch plugins are the most straightforward: they pull data from some data source
 !!! info ""
     The purpose of fetch plugins is to retrieve and parse data, then hand it off to Meerschaum for syncing.
 
-In case you're thinking of writing your own plugin, I recommend getting started with fetch plugins, as they're the simplest way to getting your data into Meerschaum for analysis. Check out [Writing Plugins](/plugins/plugin-development/writing-plugins/) for an in-depth walk-through.
+In case you're thinking of writing your own plugin, I recommend getting started with fetch plugins, as they're the simplest way to getting your data into Meerschaum for analysis.
 
 ### Sync Plugins
 
@@ -29,7 +31,7 @@ Ultimately, the goal of sync and fetch plugins is the same: retrieving data from
 
 ## Action Plugins
 
-Action plugins add additional actions to Meerschaum, such as built-in actions like `sync`, `bootstrap`, and `show`. The sky is the limit for actions ― the action function serves as an entry point from `mrsm`.
+Action plugins add additional commands to Meerschaum, such as built-in actions like `sync`, `bootstrap`, and `show`. The sky is the limit for actions ― the action function serves as an entry point from `mrsm`.
 
 For example, the `color` plugin provides the `color` action, which is a convenience command to toggle the shell's Unicode and ANSI configuration.
 
