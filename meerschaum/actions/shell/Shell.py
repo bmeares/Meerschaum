@@ -199,7 +199,7 @@ class Shell(cmd.Cmd):
         Customize the CLI from configuration
         """
         if actions is None:
-            actions = []
+            actions = {}
         if sysargs is None:
             sysargs = []
         _insert_shell_actions(_shell=self, keep_self=True)
@@ -250,6 +250,7 @@ class Shell(cmd.Cmd):
         self._actions['repo'] = self.do_repo
         self._actions['debug'] = self.do_debug
         self.debug = False
+        self._reload = True
         self.load_config()
         self.hidden_commands = []
         ### update hidden commands list (cmd2 only)
@@ -304,7 +305,7 @@ class Shell(cmd.Cmd):
                     *get_config('shell', 'ansi', key, 'color', patch=patch)
                 )
 
-            for attr_key in get_config('shell', 'ansi', patch=patch):
+            for attr_key in get_config('shell', 'ansi'):
                 self.__dict__[attr_key] = apply_colors(self.__dict__[attr_key], attr_key)
 
         ### refresh actions
@@ -312,6 +313,8 @@ class Shell(cmd.Cmd):
 
         ### replace {instance} in prompt with stylized instance string
         self.update_prompt()
+        self._dict_backup = {k:v for k, v in self.__dict__.copy().items() if k != '_dict_backup'}
+        #  self._reload = False
 
     def insert_actions(self):
         from meerschaum.actions import actions
@@ -327,8 +330,8 @@ class Shell(cmd.Cmd):
             self.instance = instance
             if ANSI:
                 self.instance = colored(
-                    self.instance, *get_config(
-                        'shell', 'ansi', 'instance', 'color'
+                    self.instance, **get_config(
+                        'shell', 'ansi', 'instance', 'rich'
                     )
                 )
             prompt = prompt.replace('{instance}', self.instance)
@@ -348,7 +351,7 @@ class Shell(cmd.Cmd):
                     username = str(e)
             self.username = (
                 username if not ANSI else
-                colored(username, *get_config('shell', 'ansi', 'username', 'color'))
+                colored(username, **get_config('shell', 'ansi', 'username', 'rich'))
             )
             prompt = prompt.replace('{username}', self.username)
             mask = mask.replace('{username}', ''.join(['\0' for c in '{username}']))
@@ -358,7 +361,7 @@ class Shell(cmd.Cmd):
             if c != '\0':
                 _c = c
                 if ANSI:
-                    _c = colored(_c, *get_config('shell', 'ansi', 'prompt', 'color'))
+                    _c = colored(_c, **get_config('shell', 'ansi', 'prompt', 'rich'))
                 remainder_prompt[i] = _c
         self.prompt = ''.join(remainder_prompt).replace(
             '{username}', self.username
@@ -411,8 +414,6 @@ class Shell(cmd.Cmd):
         help_token = '?'
         if line.startswith(help_token):
             return "help " + line[len(help_token):]
-
-        ### TODO Migrate to using entry for everything instead of replicating entry inside precmd.
 
         from meerschaum.actions.arguments import parse_line
         args = parse_line(line)
@@ -469,18 +470,18 @@ class Shell(cmd.Cmd):
 
         from meerschaum.actions._entry import _entry_with_args
         from meerschaum.utils.daemon import daemon_action
-        success_tuple = _entry_with_args(**args)
-        #  success_tuple = (
-            #  _entry_with_args(**args) if not args.get('daemon', None)
-            #  else daemon_action(**args)
-        #  )
+
+        ### TODO: resolve the shell actions problem
+        success_tuple = (
+            _entry_with_args(**args) if action not in self._actions
+            else func(action=args['action'][1:], **{k:v for k, v in args.items() if k != 'action'})
+        )
 
         from meerschaum.utils.formatting import print_tuple
         if isinstance(success_tuple, tuple):
             print_tuple(
                 success_tuple, skip_common=(not self.debug), upper_padding=1, lower_padding=1
             )
-        self.postcmd(False, "")
 
         ### Restore the old working directory.
         if old_cwd != os.getcwd():
@@ -489,7 +490,20 @@ class Shell(cmd.Cmd):
         return ""
 
     def postcmd(self, stop : bool = False, line : str = ""):
-        self.load_config(self.instance)
+        _reload = self._reload
+        #  if not _reload:
+            #  for k, v in self.__dict__.items():
+                #  if k == '_dict_backup':
+                    #  continue
+                #  if (
+                    #  k not in self._dict_backup
+                        #  or self._dict_backup.get(k, None) != self.__dict__.get(k, None)
+                #  ):
+                    #  _reload = True
+        #  import traceback
+        #  traceback.print_stack()
+        if _reload:
+            self.load_config(self.instance)
         if stop:
             return True
 

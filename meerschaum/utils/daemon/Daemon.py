@@ -201,7 +201,7 @@ class Daemon:
             + f"daemon._run_exit(keep_daemon_output={keep_daemon_output}, "
             + f"allow_dirty_run=True)"
         )
-        _launch_success_bool = venv_exec(_launch_daemon_code, debug=debug)
+        _launch_success_bool = venv_exec(_launch_daemon_code, debug=debug, venv=None)
         msg = "Success" if _launch_success_bool else f"Failed to start daemon '{self.daemon_id}'."
         return _launch_success_bool, msg
 

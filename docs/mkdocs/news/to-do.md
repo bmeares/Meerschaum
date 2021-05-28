@@ -23,7 +23,8 @@ Below are some ongoing tasks I have planned for Meerschaum. This is not an exhau
 ## 🐞 Bugs
 - [ ] `parameters` column in the `pipes` table is a string, not JSON.
 - [ ] `instance` command does not work after reloading when closing a config file
-- [ ] `--name` flag is broken when spawning jobs
+- [x] Inconsistent web console colors (e.g. `show connectors` vs `show config`)
+- [x] ~~`--name` flag is broken when spawning jobs~~
 - [x] ~~Reload plugins when installing updates.~~
 - [x] ~~When upgrading plugins, only install plugin if updates are available.~~
 - [x] ~~Remove `Literal` import from `typing` for compatibility with Python 3.7.~~
@@ -58,9 +59,9 @@ Below are some ongoing tasks I have planned for Meerschaum. This is not an exhau
     - [x] **Run in the background with `-d` / `--daemon` flag**
     - [ ] **Save and restart jobs**  
       Like with `pm2`, add the ability to save the current state of running jobs to be started on system startup.
-    - [ ] **Show jobs**  
+    - [x] **Show jobs**  
       The action`show jobs` will display running and stopped jobs.
-    - [ ] **Show logs**  
+    - [x] **Show logs**  
       Display jobs' logs with `show logs`.
     - [x] **Start job**  
       The action `start job` can spawn a new job (like with `-d`) or restart a stopped job.

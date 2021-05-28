@@ -83,7 +83,7 @@ def prompt(
     other_lines = '' if len(lines) <= 1 else '\n'.join(lines[1:])
 
     if ANSI:
-        first_line = colored(first_line, *question_config['ansi']['color'])
+        first_line = colored(first_line, **question_config['ansi']['rich'])
 
     _icon = question_config[CHARSET]['icon']
     question = (' ' + _icon + ' ') if icon and len(_icon) > 0 else ''
@@ -124,7 +124,7 @@ def yes_no(
         The question to print to the user.
 
     :param options:
-        The y/n options. The first is always considered True.
+        The y/n options. The first is always considered `True`, and all options must be lower case.
         This behavior may be modifiable change in the future.
 
     :param default:
@@ -167,7 +167,7 @@ def yes_no(
         if answer == "":
             answer = default
 
-        if answer in options:
+        if answer.lower() in options:
             break
         warn('Please enter a valid reponse.', stack=False)
     

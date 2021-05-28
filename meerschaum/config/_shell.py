@@ -12,51 +12,67 @@ default_cmd = 'cmd' if platform.system() != 'Windows' else 'cmd2'
 default_shell_config = {
     'ansi'             : {
         'intro'        : {
-            #  'style'    : "bold bright_blue",
+            'rich'     : {
+                'style' : "bold bright_blue",
+            },
             'color'    : [
                 'bold',
                 'bright blue',
             ],
         },
         'close_message': {
-            #  'style'    : "bright_blue",
+            'rich' : {
+                'style' : 'bright_blue',
+            },
             'color'    : [
                 'bright blue',
             ],
         },
         'doc_header': {
-            #  'style'    : "bright_blue",
+            'rich' : {
+                'style' : 'bright_blue',
+            },
             'color'    : [
                 'bright blue',
             ],
         },
         'undoc_header': {
-            #  'style'    : "bright_blue",
+            'rich' : {
+                'style' : 'bright_blue',
+            },
             'color'    : [
                 'bright blue',
             ],
         },
         'ruler': {
-            #  'style'    : "bright_blue",
+            'rich' : {
+                'style' : 'bold bright_blue',
+            },
             'color'    : [
                 'bold',
                 'bright blue',
             ],
         },
         'prompt': {
-            #  'style'    : "green",
+            'rich' : {
+                'style' : 'green',
+            },
             'color'    : [
                 'green',
             ],
         },
         'instance' : {
-            #  'style'    : "cyan",
+            'rich' : {
+                'style' : 'cyan',
+            },
             'color'    : [
                 'cyan',
             ],
         },
         'username' : {
-            #  'style'    : "white",
+            'rich' : {
+                'style' : 'white',
+            },
             'color'    : [
                 'white',
             ],

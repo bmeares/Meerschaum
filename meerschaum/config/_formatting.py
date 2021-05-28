@@ -37,10 +37,13 @@ default_formatting_config = {
             'icon'        : 'WARNING',
         },
         'ansi'            : {
-            'color'       : [
-                'bold',
-                'yellow',
-            ],
+            'rich'        : {
+                'style'   : 'bold yellow',
+            },
+            #  'color'       : [
+                #  'bold',
+                #  'yellow',
+            #  ],
         },
     },
     'success'             : {
@@ -51,10 +54,13 @@ default_formatting_config = {
             'icon'        : '+',
         },
         'ansi'            : {
-            'color'       : [
-                'bold',
-                'bright green',
-            ],
+            'rich'        : {
+                'style'   : 'bold bright_green',
+            },
+            #  'color'       : [
+                #  'bold',
+                #  'bright green',
+            #  ],
         },
     },
     'failure'             : {
@@ -65,10 +71,13 @@ default_formatting_config = {
             'icon'        : '-',
         },
         'ansi'            : {
-            'color'       : [
-                'bold',
-                'red',
-            ],
+            'rich'        : {
+                'style'   : 'bold red',
+            },
+            #  'color'       : [
+                #  'bold',
+                #  'red',
+            #  ],
         },
     },
     'errors'              : {
@@ -79,10 +88,13 @@ default_formatting_config = {
             'icon'        : 'ERROR',
         },
         'ansi'            : {
-            'color'       : [
-                'bold',
-                'red',
-            ],
+            'rich'        : {
+                'style'   : 'bold red',
+            },
+            #  'color'       : [
+                #  'bold',
+                #  'red',
+            #  ],
         },
     },
     'info'                : {
@@ -93,9 +105,12 @@ default_formatting_config = {
             'icon'        : 'INFO',
         },
         'ansi'            : {
-            'color'       : [
-                'bright magenta',
-            ],
+            'rich'        : {
+                'style'   : 'bright_magenta',
+            },
+            #  'color'       : [
+                #  'bright magenta',
+            #  ],
         },
     },
     'question'            : {
@@ -106,9 +121,12 @@ default_formatting_config = {
             'icon'        : '',
         },
         'ansi'            : {
-            'color'       : [
-                'green',
-            ],
+            'rich'        : {
+                'style'   : 'green',
+            },
+            #  'color'       : [
+                #  'green',
+            #  ],
         },
     },
     'debug'               : {
@@ -119,9 +137,12 @@ default_formatting_config = {
             'icon'        : 'DEBUG',
         },
         'ansi'            : {
-            'color'       : [
-                'cyan',
-            ],
+            'rich'        : {
+                'style'   : 'cyan',
+            },
+            #  'color'       : [
+                #  'cyan',
+            #  ],
         },
     },
 

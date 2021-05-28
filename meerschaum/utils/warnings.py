@@ -88,7 +88,7 @@ def warn(*args, stacklevel=2, stack=True, color : bool = True, **kw) -> None:
     a[0] = ' ' + (warn_config[CHARSET]['icon'] if color else '') + ' ' + str(a[0])
     if color:
         if ANSI:
-            a[0] = colored(a[0], *warn_config['ansi']['color'])
+            a[0] = colored(a[0], **warn_config['ansi']['rich'])
     if stacklevel is None or not stack:
         print(a[0], file=sys.stderr)
     else:
@@ -169,7 +169,7 @@ def error(
     color_message = str(message)
     color_exception = exception_with_traceback(color_message, exception_class, stacklevel=3)
     if ANSI and not nopretty and not stack:
-        color_message = '\n' + colored(message, *error_config['ansi']['color'])
+        color_message = '\n' + colored(message, **error_config['ansi']['rich'])
         color_exception = exception_with_traceback(color_message, exception_class, stacklevel=3)
     try:
         trace = rich.traceback.Traceback.extract(
@@ -202,6 +202,6 @@ def info(message : str, icon : bool = True, **kw):
     if icon:
         message = ' ' + info_config[CHARSET]['icon'] + ' ' + message
     if ANSI:
-        message = colored(message, *info_config['ansi']['color'])
+        message = colored(message, **info_config['ansi']['rich'])
     ### NOTE: There's a bug somewhere because I have to flush stdout every time.
     print(message, flush=True)

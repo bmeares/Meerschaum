@@ -174,7 +174,7 @@ def _register_plugins(
         f"    ({total_success} succeeded, {total_fail} failed)."
     )
     reload_plugins(debug=debug)
-    return True, msg
+    return total_success > 0, msg
 
 def _complete_register_plugins(*args, **kw):
     from meerschaum.actions.uninstall import _complete_uninstall_plugins

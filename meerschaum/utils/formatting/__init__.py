@@ -59,6 +59,19 @@ def translate_rich_to_termcolor(*colors) -> tuple:
 
     return tuple(_colors)
 
+def rich_text_to_str(text) -> str:
+    """
+    Convert a `rich.text.Text` object to a string with ANSI in-tact.
+    """
+    _console = get_console()
+    if _console is None:
+        return str(text)
+    with console.capture() as cap:
+        console.print(text)
+    return cap.get()[:-1]
+
+#  def translate_termcolor_to_rich()
+
 def _init():
     global _attrs
     from meerschaum.utils.packages import attempt_import
@@ -85,9 +98,21 @@ def _init():
 
 _colorama_init = False
 def colored(text : str, *colors, **kw) -> str:
-    from meerschaum.utils.packages import attempt_import
+    """
+    Apply colors and rich styles to a string.
+    If a `style` keyword is provided, a `rich.text.Text` object will be parsed into a string.
+    Otherwise attempt to use the legacy `more_termcolor.colored` method.
+    """
+    from meerschaum.utils.packages import import_rich, attempt_import
+
+    if 'style' in kw:
+        rich = import_rich()
+        rich_text = attempt_import('rich.text')
+        return rich_text_to_str(rich_text.Text(text, **kw))
+
     global _colorama_init
     _colorama_init = _init() if not _colorama_init else True
+
     more_termcolor = attempt_import('more_termcolor', install=False, lazy=False)
     try:
         colored_text = more_termcolor.colored(text, *colors, **kw)
@@ -116,8 +141,6 @@ def get_console():
     """
     global console
     from meerschaum.utils.packages import import_rich, attempt_import
-    #  if not __getattr__('ANSI') and not __getattr__('UNICODE'):
-        #  return None
     rich = import_rich()
     rich_console = attempt_import('rich.console')
     try:
@@ -161,7 +184,7 @@ def print_tuple(
 
         msg = ' ' + status_config[CHARSET]['icon'] + ' ' + str(tup[1])
         if ANSI:
-            msg = colored(msg, *status_config['ansi']['color'])
+            msg = colored(msg, **status_config['ansi']['rich'])
 
         for i in range(upper_padding):
             print()

@@ -14,26 +14,57 @@ try:
     import termios
 except ImportError:
     termios = None
-from meerschaum.utils.typing import Union, Optional, Any, Callable
+from meerschaum.utils.typing import Union, Optional, Any, Callable, Dict
 
 def run_process(
         *args,
         foreground : bool = False,
         as_proc : bool = False,
         line_callback : Optional[Callable[[str], Any]] = None,
+        store_proc_dict : Optional[Dict[str, Any]] = None,
+        store_proc_key : str = 'child_process',
         **kw : Any
-    ) -> Union[int, object]:
+    ) -> Union[int, subprocess.Popen]:
     """
     Original foreground solution found here:
     https://stackoverflow.com
     /questions/23826695/handling-keyboard-interrupt-when-using-subproccess
 
-    the "correct" way of spawning a new subprocess:
-    signals like C-c must only go
-    to the child process, and not to this python.
 
-    Some side-info about "how ctrl-c works":
-    https://unix.stackexchange.com/a/149756/1321
+    :param args:
+        The sysargs to execute.
+
+    :param foreground:
+        If `True`, execute the process as a foreground process that passes Ctrl-C to children.
+        From the original post:
+            The "correct" way of spawning a new subprocess:
+            signals like C-c must only go
+            to the child process, and not to this python.
+
+            Some side-info about "how ctrl-c works":
+            https://unix.stackexchange.com/a/149756/1321
+        Defaults to `False`.
+
+    :param as_proc:
+        If `True`, return the `subprocess.Popen` object.
+        Defaults to `False`.
+
+    :param line_callback:
+        If provided, poll the process and execute the callback when `readline()` gets new text.
+        Defaults to `None`.
+
+    :param store_proc_dict:
+        If provided, store the `subprocess.Popen` object under the key `store_proc_key`.
+        Useful for accessing the process while it is polling in another thread.
+        Defaults to `None`.
+
+    :param store_proc_key:
+        If `store_proc_dict` is provided, store the process in the dictionary under this key.
+        Defaults to 'child_process'.
+
+    :param kw:
+        Additional keyword arguments to pass to `subprocess.Popen`.
+
     """
 
     if line_callback is not None:
@@ -90,6 +121,8 @@ def run_process(
             os.kill(child.pid, signal.SIGCONT)
 
         # wait for the child to terminate
+        if store_proc_dict is not None:
+            store_proc_dict[store_proc_key] = child
         _ret = poll_process(child, line_callback) if line_callback is not None else child.wait()
         ret = _ret if not as_proc else child
 
@@ -110,7 +143,11 @@ def run_process(
 
     return ret
 
-def poll_process(proc, line_callback : Callable[[str], Any]) -> int:
+def poll_process(
+        proc : subprocess.Popen,
+        line_callback : Callable[[str], Any],
+        control_dict : Optional[Dict[str, Any]] = None,
+    ) -> int:
     """
     Poll a process and execute a callback function for each line printed to the process's `stdout`.
     """
