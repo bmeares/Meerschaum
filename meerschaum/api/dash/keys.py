@@ -113,6 +113,7 @@ action_dropdown_row = html.Div(
                             multi = True,
                             placeholder = 'Optional flags',
                             options = [],
+                            value = ['yes'],
                         ),
                         id = 'flags-dropdown-div',
                         className = 'dbc_dark',

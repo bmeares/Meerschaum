@@ -198,7 +198,10 @@ def _start_jobs(
             return (False, f"Job '{name}' does not exist."), daemon.daemon_id
 
         daemon.cleanup()
-        _daemon_sysargs = daemon.properties['target']['args'][0]
+        try:
+            _daemon_sysargs = daemon.properties['target']['args'][0]
+        except KeyError:
+            return False, "Failed to get arguments for daemon '{dameon.daemon_id}'."
         _daemon_kw = parse_arguments(_daemon_sysargs)
         _daemon_kw['name'] = daemon.daemon_id
         _action_success_tuple = daemon_action(

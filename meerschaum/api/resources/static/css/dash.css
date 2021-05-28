@@ -16,7 +16,11 @@ a {
 }
 #console-div {
   overflow-y: scroll;
-  max-height: 75vh;
+  max-height: 85vh;
+  height: 85vh;
+  color: white;
+  background-color: black;
+  padding: 0.5em;
 }
 .codeblock {
   background-color: var(--secondary) !important;

@@ -20,8 +20,8 @@ from meerschaum.api.dash.websockets import ws_url_from_href
 from meerschaum.connectors.parse import parse_instance_keys
 from meerschaum.api.dash.pipes import get_pipes_cards
 from meerschaum.api.dash.jobs import get_jobs_cards
-from meerschaum.api.dash.components import alert_from_success_tuple
-from meerschaum.api.dash.actions import execute_action, check_input_interval
+from meerschaum.api.dash.components import alert_from_success_tuple, console_div
+from meerschaum.api.dash.actions import execute_action, check_input_interval, stop_action
 import meerschaum.api.dash.pages as pages
 from meerschaum.utils.typing import Dict
 from meerschaum.utils.debug import dprint
@@ -45,6 +45,7 @@ keys_state = (
     State('pipes-filter-tabs', 'active_tab'),
     State('action-dropdown', 'value'),
     State('subaction-dropdown', 'value'),
+    State('subaction-dropdown', 'options'),
     State('subaction-dropdown-div', 'hidden'),
     State('subaction-dropdown-text', 'value'),
     State('flags-dropdown', 'value'),
@@ -57,15 +58,12 @@ keys_state = (
 
 omit_flags = {
     'help',
-    #  'loop',
-    #  'yes',
-    #  'noask',
-    #  'force',
     'gui',
     'version',
     'shell',
     'use_bash',
     'trace',
+    'allow_shell_job',
 }
 #  included_flags = {
     #  ''
@@ -81,6 +79,8 @@ omit_actions = {
     'python',
     'clear',
     'reload',
+    'repo',
+    'instance',
 }
 trigger_aliases = {
     'keyboard' : 'go-button',
@@ -115,6 +115,7 @@ def update_page_layout_div(pathname : str, session_store_data : Dict[str, Any]):
     Output('ws', 'url'),
     Input('keyboard', 'n_keydowns'),
     Input('go-button', 'n_clicks'),
+    Input('cancel-button', 'n_clicks'),
     Input('get-pipes-button', 'n_clicks'),
     Input('get-jobs-button', 'n_clicks'),
     Input('check-input-interval', 'n_intervals'),
@@ -141,10 +142,14 @@ def update_content(*args):
     ### NOTE: functions MUST return a list of content and a list of alerts
     triggers = {
         'go-button' : execute_action,
+        'cancel-button' : stop_action,
         'get-pipes-button' : get_pipes_cards,
         'get-jobs-button' : get_jobs_cards,
         'check-input-interval' : check_input_interval,
     }
+    
+    ### NOTE: stop the running action if it exists
+    stop_action(ctx.states)
 
     if len(ctx.triggered) > 1 and 'check-input-interval.n_intervals' in ctx.triggered:
         ctx.triggered.remove('check-input-interval.n_intervals')
@@ -406,6 +411,8 @@ def ws_receive(message):
     """
     if not message:
         raise PreventUpdate
+    if not message.get('data', None):
+        return console_div
     return [html.Div(
         [html.Pre(message['data'], id='console-pre')],
         id = 'console-div',

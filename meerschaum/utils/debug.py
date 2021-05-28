@@ -69,12 +69,12 @@ def dprint(
         else:
             if cf is not None and not nopretty:
                 try:
-                    _color = cf['formatting']['debug']['ansi']['color'] if cf is not None else []
+                    _color = cf['formatting']['debug']['ansi']['rich'] if cf is not None else {}
                 except KeyError:
-                    _color = []
+                    _color = {}
             else:
                 _color = []
         if colored is not None:
-            premsg = colored(premsg, *_color)
+            premsg = colored(premsg, **_color)
     #  log.warning(premsg + msg, **kw)
     print(premsg + msg)

@@ -13,11 +13,11 @@ from meerschaum.utils.threading import Thread
 from meerschaum.utils.typing import SuccessTuple, Tuple, Dict, Any, WebState
 from meerschaum.utils.packages import attempt_import
 from meerschaum.utils.misc import remove_ansi
-from meerschaum.actions import actions
+from meerschaum.actions import actions, get_shell
 from meerschaum.api import debug
 from meerschaum.api.dash import running_jobs, stopped_jobs, running_monitors, stopped_monitors
 from meerschaum.api.dash.connectors import get_web_connector
-from meerschaum.api.dash.components import alert_from_success_tuple
+from meerschaum.api.dash.components import alert_from_success_tuple, console_div
 from meerschaum.api.dash.pipes import pipes_from_state, keys_from_state
 from meerschaum.api.dash.websockets import ws_send
 from meerschaum.api._websockets import websockets
@@ -31,9 +31,10 @@ def execute_action(state : WebState):
     Format the output as an HTML `pre` object, and return a list of Alert objects.
     """
     global running_jobs, stopped_jobs, running_monitors, stopped_monitors
-    action, subaction, subaction_hidden, additional_subaction_text, flags = (
+    action, subaction, subaction_options, subaction_hidden, additional_subaction_text, flags = (
         state['action-dropdown.value'],
         state['subaction-dropdown.value'],
+        state['subaction-dropdown.options'],
         state['subaction-dropdown-div.hidden'],
         state['subaction-dropdown-text.value'],
         state['flags-dropdown.value'],
@@ -42,6 +43,9 @@ def execute_action(state : WebState):
         return [], []
     if subaction is None or subaction_hidden:
         subaction = None
+    ### If the current value is not a member of the options, choose the first element (visible).
+    elif subaction not in [o['value'] for o in subaction_options]:
+        subaction = subaction_options[0]['value']
     if additional_subaction_text is None:
         additional_subaction_text = ''
     if flags is None:
@@ -152,22 +156,24 @@ def execute_action(state : WebState):
         def do_process():
             keywords['action'] = [action] + subactions
             _sysargs = parse_dict_to_sysargs(keywords)
-            run_python_package(
+            process = run_python_package(
                 #  'meerschaum', [action] + subactions,
                 'meerschaum', _sysargs,
                 line_callback = send_line,
                 env = {'LINES' : '120', 'COLUMNS' : '100'},
                 foreground = False,
                 universal_newlines = True,
+                ### Store the `subprocess.Popen` process in case we need to terminate it later.
+                store_proc_dict = running_jobs[session_id],
                 debug = debug,
             )
         action_thread = Thread(target=do_process)
-        running_jobs[session_id] = action_thread
+        running_jobs[session_id] = {'parent_thread': action_thread,}
         action_thread.start()
         return True, "Success"
 
     def use_thread():
-        action_thread = Thread(target=do_action)
+        action_thread = Thread(target=do_action, daemon=True)
         monitor_thread = Thread(target=monitor_and_send_stdout) 
         running_jobs[session_id] = action_thread
         running_monitors[session_id] = monitor_thread
@@ -199,3 +205,18 @@ def check_input_interval(state : WebState):
     """
     print('check for input')
     return (state['content-div-right.children'], state['success-alert-div.children'])
+
+def stop_action(state: WebState):
+    global running_jobs
+    session_id = state['session-store.data'].get('session-id', None)
+    thread = running_jobs.get(session_id, {}).get('parent_thread', None)
+    proc = running_jobs.get(session_id, {}).get('child_process', None)
+    if proc is not None and proc.poll() is None:
+        proc.terminate()
+        thread.join()
+    #  return [], []
+    success_tuple = True, "Success"
+    return (
+        [console_div],
+        [alert_from_success_tuple(success_tuple)]
+    )

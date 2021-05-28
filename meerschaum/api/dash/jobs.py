@@ -24,15 +24,19 @@ def get_jobs_cards(state):
     running_daemons = get_running_daemons(daemons)
     stopped_daemons = get_stopped_daemons(daemons, running_daemons)
     alert = alert_from_success_tuple(daemons)
-    return (
-        dbc.CardColumns([
+    cards = []
+    for d in running_daemons:
+        _footer = (
+            html.P(
+                "Started at" + dateutil_parser.parse(
+                    d.properties['process']['began']).strftime('%-H:%M on %b %-d')
+                + " (UTC)"
+            ) if (d.pid_path.exists() and d.properties.get('process', {}).get('began', None))
+            else html.P("No information available.")
+        )
+        cards.append(
             dbc.Card([
-                dbc.CardHeader(
-                    html.P(
-                        ("Running" if d.pid_path.exists() else "Stopped"),
-                        className=("running-job" if d.pid_path.exists() else "stopped-job"),
-                    ),
-                ),
+                dbc.CardHeader(html.P("Running", className="running-job")),
                 dbc.CardBody(
                     [
                         html.H4(d.daemon_id, className="card-title"),
@@ -43,21 +47,47 @@ def get_jobs_cards(state):
                     ], style={"max-width": "100%", "overflow": "auto", "height": "auto"}
                 ),
                 dbc.CardFooter(
-                    html.P(
-                        (
-                            ("Started at "
-                                + dateutil_parser.parse(
-                                    d.properties['process']['began']
-                                ).strftime('%-H:%M on %b %-d') + " (UTC)") if d.pid_path.exists()
-                            else ("Finished at "
-                                + dateutil_parser.parse(
-                                    d.properties['process']['ended']
-                                ).strftime('%-H:%M on %b %-d') + " (UTC)"
-                            )
-                        )
-                    ),
+                    _footer
                 ),
-            ]) for d in running_daemons + stopped_daemons
-        ]),
-        [alert]
-    )
+            ])
+        )
+
+
+    for d in stopped_daemons:
+        _header = dbc.CardHeader(
+            dbc.Row([
+                dbc.Col(html.P("Stopped", className='stopped-job')),
+            ])
+        )
+        _footer = (
+            html.P(
+                "Finished at" + dateutil_parser.parse(
+                    d.properties['process']['ended']).strftime('%-H:%M on %b %-d')
+                + " (UTC)"
+            ) if (not d.pid_path.exists() and d.properties.get('process', {}).get('ended', None))
+            else html.P("No information available.")
+        )
+        cards.append(
+            dbc.Card([
+                _header,
+                dbc.CardBody(
+                    [
+                        html.H4(d.daemon_id, className="card-title"),
+                        html.Div(
+                            html.P(
+                                d.label,
+                                className="card-text",
+                                style={"word-wrap": "break-word"}
+                            ),
+                            style={"white-space": "pre-wrap"},
+                        ),
+                    ], style={"max-width": "100%", "overflow": "auto", "height": "auto"}
+                ),
+                dbc.CardFooter(
+                    _footer
+                ),
+            ])
+        )
+
+    return dbc.CardColumns(children=cards), []
+

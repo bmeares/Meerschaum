@@ -21,7 +21,7 @@ daq = attempt_import('dash_daq', warn=False)
 
 from meerschaum.api.dash.components import (
     go_button, search_parameters_editor, keyboard, websocket, test_button,
-    get_items_menu, bottom_buttons_content,
+    get_items_menu, bottom_buttons_content, console_div
 )
 from meerschaum.api.dash.keys import (
     keys_lists_content, text_tab_content, dropdown_tab_content
@@ -143,7 +143,7 @@ layout = html.Div(
                         ),
                         html.Div(
                             id = 'content-div-right',
-                            children = [],
+                            children = [console_div],
                         )
                     ],
                     width = {'size' : 6},

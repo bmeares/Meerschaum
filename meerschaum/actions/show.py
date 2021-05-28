@@ -115,8 +115,8 @@ def _show_config(
     from meerschaum.config import get_config
     from meerschaum.config._paths import CONFIG_DIR_PATH
     from meerschaum.utils.debug import dprint
-    if debug:
-        dprint(f"Configuration loaded from {CONFIG_DIR_PATH}")
+    #  if debug:
+        #  dprint(f"Configuration loaded from {CONFIG_DIR_PATH}")
 
     if action is None:
         action = []
@@ -222,11 +222,8 @@ def _show_connectors(
         print(make_header("\nActive connectors:"))
         pprint(connectors, nopretty=nopretty)
 
-    if action is None:
-        action = []
-
     from meerschaum.connectors.parse import parse_instance_keys
-    if action != []:
+    if action:
         attr, keys = parse_instance_keys(action[0], construct=False, as_tuple=True, debug=debug)
         if attr:
             if not nopretty:
@@ -583,6 +580,7 @@ def _show_logs(
     def _follow_pretty_print():
         watchgod = attempt_import('watchgod')
         pygtail = attempt_import('pygtail')
+        #  nest_asyncio = attempt_import('nest_asyncio')
         rich = import_rich()
         rich_text = attempt_import('rich.text')
         _watch_daemon_ids = set([d.daemon_id for d in daemons])
@@ -603,10 +601,14 @@ def _show_logs(
             get_console().print(text)
 
         def _print_pygtail_lines(daemon):
+            if not daemon.log_path.exists():
+                return
             for line in pygtail.Pygtail(str(daemon.log_path), offset_file=daemon.log_offset_path):
                 _print_job_line(daemon, line)
 
         def _seek_back_offset(d) -> bool:
+            if not d.log_path.exists():
+                return False
             if not d.log_offset_path.exists():
                 pygtail.Pygtail(str(d.log_path), offset_file=d.log_offset_path).read()
             if not d.log_offset_path.exists():
@@ -639,8 +641,11 @@ def _show_logs(
             _seek_back_offset(d)
             _print_pygtail_lines(d)
 
+        _quit = False
         async def _watch_logs():
             async for changes in watchgod.awatch(LOGS_RESOURCES_PATH):
+                if _quit:
+                    return
                 for change in changes:
                     file_path_str = change[1]
                     if '.log' not in file_path_str:
@@ -655,11 +660,15 @@ def _show_logs(
                     if daemon.log_path.exists():
                         _print_pygtail_lines(daemon)
         loop = asyncio.new_event_loop()
+        #  nest_asyncio.apply(loop)
+        #  loop.run_until_complete(_watch_logs())
         try:
             loop.run_until_complete(_watch_logs())
         except KeyboardInterrupt:
-            pass
-                
+            _quit = True
+            #  print(loop.is_closed())
+            #  loop.close() if not loop.is_closed() else None
+
     def _print_nopretty_log_text():
         for d in daemons:
             log_text = d.log_text

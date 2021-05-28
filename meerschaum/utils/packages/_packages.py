@@ -50,6 +50,7 @@ packages : Dict[str, Dict[str, str]] = {
         'daemoniker'        : 'daemoniker>=0.2.3',
         'watchgod'          : 'watchgod>=0.7',
         'pygtail'           : 'pygtail>=0.11.1',
+        #  'nest_asyncio'      : 'nest-asyncio>=1.5.1',
     },
     'iot' : {
         'paho' : 'paho-mqtt>=1.5.1',

@@ -333,7 +333,7 @@ def pip_install(
         msg += f'\n  - {p}'
     print(msg)
 
-    success = run_python_package('pip', _args + _packages, venv=venv, debug=debug, color=color) == 0
+    success = run_python_package('pip', _args + _packages, venv=venv, debug=debug) == 0
     if venv is not None and deactivate:
         deactivate_venv(venv=venv, debug=debug, color=color)
     msg = (
@@ -361,7 +361,7 @@ def run_python_package(
         foreground : bool = True,
         debug : bool = False,
         **kw : Any,
-    ) -> int:
+    ) -> Union[int, subprocess.Popen]:
     """
     Runs an installed python package.
     E.g. Translates to `/usr/bin/python -m [package]`
@@ -384,11 +384,16 @@ def run_python_package(
     :param foreground:
         If `True`, start the subprocess as a foreground process.
         Defaults to `True`.
+
+    :param kw:
+        Additional keyword arguments to pass to `meerschaum.utils.process.run_process()`
+        and by extension `subprocess.Popen()`.
     """
     import sys, platform
     from subprocess import call
     from meerschaum.config._paths import VIRTENV_RESOURCES_PATH
     from meerschaum.utils.process import run_process
+    from meerschaum.utils.warnings import warn
     if args is None:
         args = []
     old_cwd = os.getcwd()
@@ -408,6 +413,8 @@ def run_python_package(
     try:
         rc = run_process(command, foreground=foreground, **kw)
     except Exception as e:
+        print(e)
+        warn(e)
         rc = call(command)
     except KeyboardInterrupt:
         rc = 1
