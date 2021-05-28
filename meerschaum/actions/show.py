@@ -39,6 +39,8 @@ def show(
         'packages'   : _show_packages,
         'help'       : _show_help,
         'users'      : _show_users,
+        'jobs'       : _show_jobs,
+        'logs'       : _show_logs,
     }
     return choose_subaction(action, show_options, **kw)
 
@@ -49,17 +51,27 @@ def _complete_show(
     """
     Override the default Meerschaum `complete_` function.
     """
+    from meerschaum.actions.start import _complete_start_jobs
 
     if action is None:
         action = []
 
     options = {
+        'connector': _complete_show_connectors,
         'connectors': _complete_show_connectors,
         'config' : _complete_show_config,
+        'package' : _complete_show_packages,
         'packages' : _complete_show_packages,
+        'job' : _complete_start_jobs,
+        'jobs' : _complete_start_jobs,
+        'log' : _complete_start_jobs,
+        'logs' : _complete_start_jobs,
     }
 
-    if len(action) > 0 and action[0] in options:
+    if (
+        len(action) > 0 and action[0] in options
+            and kw.get('line', '').split(' ')[-1] != action[0]
+    ):
         sub = action[0]
         del action[0]
         return options[sub](action=action, **kw)
@@ -103,8 +115,8 @@ def _show_config(
     from meerschaum.config import get_config
     from meerschaum.config._paths import CONFIG_DIR_PATH
     from meerschaum.utils.debug import dprint
-    if debug:
-        dprint(f"Configuration loaded from {CONFIG_DIR_PATH}")
+    #  if debug:
+        #  dprint(f"Configuration loaded from {CONFIG_DIR_PATH}")
 
     if action is None:
         action = []
@@ -210,11 +222,8 @@ def _show_connectors(
         print(make_header("\nActive connectors:"))
         pprint(connectors, nopretty=nopretty)
 
-    if action is None:
-        action = []
-
     from meerschaum.connectors.parse import parse_instance_keys
-    if action != []:
+    if action:
         attr, keys = parse_instance_keys(action[0], construct=False, as_tuple=True, debug=debug)
         if attr:
             if not nopretty:
@@ -315,7 +324,7 @@ def _show_data(
         else:
             print(json.dumps(p.__getstate__()))
             df = df.to_json(orient='columns')
-        pprint(df, file=sys.stderr, nopretty=nopretty)
+        pprint(df, nopretty=nopretty)
         if gui and not nopretty:
             pandasgui = attempt_import('pandasgui')
             try:
@@ -392,7 +401,7 @@ def _show_plugins(
     """
     Show the installed plugins.
     """
-    from meerschaum.actions.plugins import get_plugins_names
+    from meerschaum.plugins import get_plugins_names
     from meerschaum.utils.misc import print_options
     from meerschaum.connectors.parse import parse_repo_keys
     from meerschaum.utils.warnings import info
@@ -489,6 +498,187 @@ def _complete_show_packages(
             possibilities.append(key)
 
     return possibilities
+
+def _show_jobs(
+        action : Optional[List[str]] = None,
+        nopretty : bool = False,
+        **kw : Any
+    ) -> SuccessTuple:
+    """
+    Show the currently running and stopped jobs.
+    """
+    from meerschaum.utils.daemon import get_filtered_daemons
+    from meerschaum.utils.formatting._jobs import pprint_jobs
+    daemons = get_filtered_daemons(action)
+    if not daemons:
+        if not action and not nopretty:
+            from meerschaum.utils.warnings import info
+            info('No running or stopped jobs.')
+            print(
+                f"    You can start a background job with `-d` or `--daemon`,\n" +
+                "    or run the command `start job` before action commands.\n\n" +
+                "    Examples:\n" +
+                "      - start api -d\n" +
+                "      - start job sync pipes --loop"
+            )
+        return False, "No jobs to show."
+    pprint_jobs(daemons, nopretty=nopretty)
+    return True, "Success"
+
+def _show_logs(
+        action : Optional[List[str]] = None,
+        nopretty : bool = False,
+        **kw
+    ) -> SuccessTuple:
+    """
+    Show the logs for jobs.
+    """
+    import os, pathlib, random, asyncio
+    from meerschaum.utils.packages import attempt_import, import_rich
+    from meerschaum.utils.daemon import get_filtered_daemons, Daemon
+    from meerschaum.utils.warnings import warn, info
+    from meerschaum.utils.formatting import get_console, ANSI, UNICODE
+    from meerschaum.config._paths import LOGS_RESOURCES_PATH
+    from meerschaum.config import get_config
+    colors = get_config('jobs', 'logs', 'colors')
+    daemons = get_filtered_daemons(action)
+
+    def _build_buffer_spaces(daemons) -> Dict[str, str]:
+        _max_len_id = max([len(d.daemon_id) for d in daemons]) if daemons else 0
+        _buffer_len = max(get_config('jobs', 'logs', 'min_buffer_len'), _max_len_id + 2)
+        return {
+            d.daemon_id: ''.join([' ' for i in range(_buffer_len - len(d.daemon_id))])
+            for d in daemons
+        }
+
+    def _build_job_colors(daemons, _old_job_colors = None) -> Dict[str, str]:
+        return {d.daemon_id: colors[i % len(colors)] for i, d in enumerate(daemons)}
+
+    _buffer_spaces = _build_buffer_spaces(daemons)
+    _job_colors = _build_job_colors(daemons)
+
+    def _get_buffer_spaces(daemon_id):
+        nonlocal _buffer_spaces, daemons
+        if daemon_id not in _buffer_spaces:
+            d = Daemon(daemon_id=daemon_id)
+            if d not in daemons:
+                #  daemons.append(Daemon(daemon_id=daemon_id))
+                daemons = get_filtered_daemons(action)
+            _buffer_spaces = _build_buffer_spaces(daemons)
+        return _buffer_spaces[daemon_id]
+
+    def _get_job_colors(daemon_id):
+        nonlocal _job_colors, daemons
+        if daemon_id not in _job_colors:
+            d = Daemon(daemon_id=daemon_id)
+            if d not in daemons:
+                daemons = get_filtered_daemons(action)
+                #  daemons.append(Daemon(daemon_id=daemon_id))
+            _job_colors = _build_job_colors(daemons)
+        return _job_colors[daemon_id]
+
+    def _follow_pretty_print():
+        watchgod = attempt_import('watchgod')
+        pygtail = attempt_import('pygtail')
+        #  nest_asyncio = attempt_import('nest_asyncio')
+        rich = import_rich()
+        rich_text = attempt_import('rich.text')
+        _watch_daemon_ids = set([d.daemon_id for d in daemons])
+        info("Watching log files...") if ANSI else print('Watching log files...')
+
+        def _print_job_line(daemon, line):
+            text = rich_text.Text(daemon.daemon_id)
+            text.append(
+                _get_buffer_spaces(daemon.daemon_id) + '| '
+                + (line[:-1] if line[-1] == '\n' else line)
+            )
+            if ANSI:
+                text.stylize(
+                    _get_job_colors(daemon.daemon_id),
+                    0,
+                    len(daemon.daemon_id) + len(_get_buffer_spaces(daemon.daemon_id)) + 1
+                )
+            get_console().print(text)
+
+        def _print_pygtail_lines(daemon):
+            if not daemon.log_path.exists():
+                return
+            for line in pygtail.Pygtail(str(daemon.log_path), offset_file=daemon.log_offset_path):
+                _print_job_line(daemon, line)
+
+        def _seek_back_offset(d) -> bool:
+            if not d.log_path.exists():
+                return False
+            if not d.log_offset_path.exists():
+                pygtail.Pygtail(str(d.log_path), offset_file=d.log_offset_path).read()
+            if not d.log_offset_path.exists():
+                return False
+            log_text = d.log_text
+            if log_text is None:
+                return False
+            lines_to_show = get_config('jobs', 'logs', 'lines_to_show')
+            begin_index, end_index = 0, len(log_text)
+            backup_index = 0
+            for i in range(lines_to_show):
+                nl_index = log_text.rfind('\n', begin_index, end_index)
+                if nl_index == -1:
+                    break
+                end_index = nl_index
+            backup_index = ((len(log_text) - nl_index) - 1) if end_index not in (-1, 0) else 0
+
+            with open(d.log_offset_path, 'r') as f:
+                offset_lines = f.readlines()
+                char_index = int(offset_lines[-1].rstrip('\n'))
+                new_offset_lines = [
+                    offset_lines[0],
+                    str((len(log_text) - backup_index) if char_index > backup_index else 0) + '\n'
+                ]
+            with open(d.log_offset_path, 'w') as f:
+                f.writelines(new_offset_lines)
+            return True
+
+        for d in daemons:
+            _seek_back_offset(d)
+            _print_pygtail_lines(d)
+
+        _quit = False
+        async def _watch_logs():
+            async for changes in watchgod.awatch(LOGS_RESOURCES_PATH):
+                if _quit:
+                    return
+                for change in changes:
+                    file_path_str = change[1]
+                    if '.log' not in file_path_str:
+                        continue
+                    file_path = pathlib.Path(file_path_str)
+                    if not file_path.exists():
+                        continue
+                    daemon_id = file_path.name.replace('.log', '')
+                    if daemon_id not in _watch_daemon_ids and action:
+                        continue
+                    daemon = Daemon(daemon_id=daemon_id)
+                    if daemon.log_path.exists():
+                        _print_pygtail_lines(daemon)
+        loop = asyncio.new_event_loop()
+        #  nest_asyncio.apply(loop)
+        #  loop.run_until_complete(_watch_logs())
+        try:
+            loop.run_until_complete(_watch_logs())
+        except KeyboardInterrupt:
+            _quit = True
+            #  print(loop.is_closed())
+            #  loop.close() if not loop.is_closed() else None
+
+    def _print_nopretty_log_text():
+        for d in daemons:
+            log_text = d.log_text
+            print(d.daemon_id)
+            print(log_text)
+
+    _print_log_text = _follow_pretty_print if not nopretty else _print_nopretty_log_text
+    _print_log_text()
+
+    return True, "Success"
 
 
 ### NOTE: This must be the final statement of the module.

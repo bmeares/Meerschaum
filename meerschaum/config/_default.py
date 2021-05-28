@@ -131,6 +131,8 @@ from meerschaum.config._shell import default_shell_config
 default_config['shell'] = default_shell_config
 default_config['pipes'] = default_pipes_config
 default_config['plugins'] = default_plugins_config
+from meerschaum.config._jobs import default_jobs_config
+default_config['jobs'] = default_jobs_config
 #  default_config['experimental'] = default_experimental_config
 ### add configs from other packages
 try:

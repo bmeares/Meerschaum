@@ -16,7 +16,8 @@ def parse_datetime(dt_str : str) -> datetime.datetime:
     Parse a string into a datetime.
     """
     from meerschaum.utils.packages import attempt_import
-    dateutil_parser, datetime = attempt_import('dateutil.parser', 'datetime')
+    import datetime
+    dateutil_parser = attempt_import('dateutil.parser')
 
     try:
         if dt_str.lower() == 'now':
@@ -52,7 +53,6 @@ def parse_help(sysargs : Union[List[str], Dict[str, Any]]) -> None:
 
     ### Check for subactions.
     if len(args['action']) > 1:
-        subaction = get_subactions(args['action'][0])[args['action'][1]]
         try:
             subaction = get_subactions(args['action'][0])[args['action'][1]]
         except Exception as e:
@@ -88,6 +88,24 @@ def get_arguments_triggers() -> Dict[str, Tuple[str]]:
         triggers[_a.dest] = tuple(_a.option_strings)
     return triggers
 
+def add_plugin_argument(*args, **kwargs) -> None:
+    """
+    Add argparse arguments under the 'Plugins options' group.
+    Takes the same parameters as the regular argparse `add_argument()` function.
+    """
+    global groups
+    from meerschaum.actions import _get_parent_plugin
+    from meerschaum.utils.warnings import warn, error
+    _parent_plugin_name = _get_parent_plugin(2)
+    if _parent_plugin_name is None:
+        error(f"You may only call `add_plugin_argument()` from within a Meerschaum plugin.")
+    group_key = 'plugin_' + _parent_plugin_name
+    if group_key not in groups:
+        groups[group_key] = parser.add_argument_group(
+            title=f"Plugin '{_parent_plugin_name}' options"
+        )
+    groups[group_key].add_argument(*args, **kwargs)
+
 parser = argparse.ArgumentParser(
     prog = 'mrsm',
     description = "Create and Build Pipes with Meerschaum",
@@ -101,6 +119,7 @@ groups['pipes'] = parser.add_argument_group(title='Pipes options')
 groups['sync'] = parser.add_argument_group(title='Sync options')
 groups['api'] = parser.add_argument_group(title='API options')
 groups['plugins'] = parser.add_argument_group(title='Plugins options')
+groups['debug'] = parser.add_argument_group(title='Debugging options')
 groups['misc'] = parser.add_argument_group(title='Miscellaneous options')
 
 
@@ -124,6 +143,22 @@ groups['actions'].add_argument(
 groups['actions'].add_argument(
     '--noask', action='store_true',
     help="Automatically choose the defaults answers to questions. Does not result in data loss.",
+)
+groups['actions'].add_argument(
+    '-d', '--daemon', action='store_true',
+    help = "Run an action as a background daemon."
+)
+#  groups['actions'].add_argument(
+    #  '--keep-logs', '--keep-job', '--save-job', '--keep-daemon-output', '--skip-daemon-cleanup',
+    #  action='store_true', help="Preserve a job's output files for later inspection."
+#  )
+groups['actions'].add_argument(
+    '--rm', action='store_true', help="Delete a job once it has finished executing."
+)
+groups['actions'].add_argument(
+    '--name', '--job-name', type=str, help=(
+        "Assign a name to a job. If no name is provided, a random name will be assigned."
+    ),
 )
 groups['actions'].add_argument(
     '-A', '--sub-args', nargs=argparse.REMAINDER,
@@ -170,6 +205,11 @@ groups['sync'].add_argument(
     '--end', type=parse_datetime, help="Specify an end datetime for syncing or displaying data."
 )
 groups['sync'].add_argument(
+    '--chunksize', type=int, help=(
+        "Specify the chunksize for syncing and retrieving data. Defaults to 900."
+    ),
+)
+groups['sync'].add_argument(
     '--sync-chunks', action='store_true',
     help="Sync chunks while fetching data instead of waiting until all have arrived. " +
     "Similar to --async. WARNING! This can be very dangerous when used with --async.",
@@ -202,10 +242,16 @@ groups['plugins'].add_argument(
     help="Meerschaum plugins repository to connect to. Specify an API label (default: 'mrsm')"
 )
 
-### Miscellaneous arguments
-groups['misc'].add_argument(
+### Debugging Arguments
+groups['debug'].add_argument(
     '--debug', action="store_true", help="Print debug statements (max verbosity)"
 )
+groups['debug'].add_argument(
+    '--trace', action="store_true",
+    help="Trace execution and open browser windows to visualize the stack."
+)
+
+### Miscellaneous arguments
 groups['misc'].add_argument(
     '-V', '--version', action="store_true",
     help="Print the Meerschaum version and exit. Has no effect from within the shell."
@@ -251,4 +297,11 @@ groups['misc'].add_argument(
 groups['misc'].add_argument(
     '--use-bash', action='store_true',
     help="Execute non-implemented actions via `bash -c`. Default behavior is to execute directly."
+)
+groups['misc'].add_argument(
+    '--allow-shell-job', action='store_true',
+    help = (
+        "Allow shell commands to be run as background jobs. "
+        + "Default behavior is to only allow recognized actions."
+    )
 )

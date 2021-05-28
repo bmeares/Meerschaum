@@ -124,7 +124,7 @@ def sync_pipe(
         self,
         pipe : Optional[meerschaum.Pipe] = None,
         df : Optional[Union[pandas.DataFrame, Dict[Any, Any], str]] = None,
-        chunksize : Optional[int] = None,
+        chunksize : Optional[int] = -1,
         debug : bool = False,
         **kw : Any
     ) -> SuccessTuple:
@@ -156,15 +156,15 @@ def sync_pipe(
     df = json.loads(df) if isinstance(df, str) else df
 
     ### TODO Make separate chunksize for API?
-    chunksize : int = (
-        get_config('system', 'connectors', 'sql', 'chunksize') if chunksize is None
+    _chunksize : Optional[int] = (1 if chunksize is None else (
+        get_config('system', 'connectors', 'sql', 'chunksize') if chunksize == -1
         else chunksize
-    )
+    ))
     keys : list = list(df.keys())
     chunks = []
     if hasattr(df, 'index'):
         rowcount = len(df)
-        chunks = [df.iloc[i] for i in more_itertools.chunked(df.index, chunksize)]
+        chunks = [df.iloc[i] for i in more_itertools.chunked(df.index, _chunksize)]
     elif isinstance(df, dict):
         ### `_chunks` is a dict of lists of dicts.
         ### e.g. {'a' : [ {'a':[1, 2]}, {'a':[3, 4]} ] }
@@ -173,7 +173,7 @@ def sync_pipe(
         for k in keys:
             if len(df[k]) != rowcount:
                 return False, "Arrays must all be the same length."
-            chunk_iter = more_itertools.chunked(df[k], chunksize)
+            chunk_iter = more_itertools.chunked(df[k], _chunksize)
             for l in chunk_iter:
                 _chunks[k].append({k:l})
 
@@ -192,7 +192,7 @@ def sync_pipe(
 
     for i, c in enumerate(chunks):
         if debug:
-            dprint(f"Posting chunk ({i + 1} / {chunksize}) to {r_url}...")
+            dprint(f"Posting chunk ({i + 1} / {_chunksize}) to {r_url}...")
             print(c)
         json_str = get_json_str(c)
 

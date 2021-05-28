@@ -20,7 +20,7 @@ def pprint_pipes(pipes : PipesDict) -> None:
     from meerschaum.utils.warnings import error
     from meerschaum.utils.packages import attempt_import, import_rich
     from meerschaum.utils.misc import sorted_dict, replace_pipes_in_dict
-    from meerschaum.utils.formatting import UNICODE, ANSI, pprint, colored
+    from meerschaum.utils.formatting import UNICODE, ANSI, pprint, colored, get_console
     from meerschaum.config import get_config
     import copy
     rich = import_rich('rich', warn=False)
@@ -56,14 +56,14 @@ def pprint_pipes(pipes : PipesDict) -> None:
             return {str(pipe) : {}}
         ascii_dict, replace_dict = {}, {'connector' : {}, 'metric' : {}, 'location' : {}}
         for conn_keys, metrics in pipes.items():
-            _colored_conn_key = colored(icons['connector'] + conn_keys, styles['connector'])
+            _colored_conn_key = colored(icons['connector'] + conn_keys, style=styles['connector'])
             if Text is not None:
                 replace_dict['connector'][_colored_conn_key] = (
                     Text(conn_keys, style=styles['connector'])
                 )
             ascii_dict[_colored_conn_key] = {}
             for metric, locations in metrics.items():
-                _colored_metric_key = colored(icons['metric'] + metric, styles['metric'])
+                _colored_metric_key = colored(icons['metric'] + metric, style=styles['metric'])
                 if Text is not None:
                     replace_dict['metric'][_colored_metric_key] = (
                         Text(metric, style=styles['metric'])
@@ -75,7 +75,9 @@ def pprint_pipes(pipes : PipesDict) -> None:
                     else:
                         _location_style = styles['location']
                     pipe_addendum = '\n         ' + str(pipe)
-                    _colored_location = colored(icons['location'] + str(location), _location_style)
+                    _colored_location = colored(
+                        icons['location'] + str(location), style=_location_style
+                    )
                     _colored_location_key = _colored_location + pipe_addendum
                     if Text is not None:
                         replace_dict['location'][_colored_location] = (
@@ -93,19 +95,19 @@ def pprint_pipes(pipes : PipesDict) -> None:
             (Text("     ") if Text is not None else "     ") +
             (
                 Text("Key", style='underline') if Text is not None else
-                colored("Key", 'underline')
+                colored("Key", style='underline')
             ) + (Text('\n\n  ') if Text is not None else '\n\n  ') +
             (
                 Text("Connector", style=styles['connector']) if Text is not None else
-                colored("Connector", styles['connector'])
+                colored("Connector", style=styles['connector'])
             ) + (Text('\n   +-- ') if Text is not None else '\n   +-- ') +
             (
                 Text("Metric", style=styles['metric']) if Text is not None else
-                colored("Metric", styles['metric'])
+                colored("Metric", style=styles['metric'])
             ) + (Text('\n       +-- ') if Text is not None else '\n       +-- ') +
             (
                 Text("Location", style=styles['location']) if Text is not None else
-                colored("Location", styles['location'])
+                colored("Location", style=styles['location'])
             ) + (Text('\n\n') if Text is not None else '\n\n')
         )
 
@@ -151,7 +153,8 @@ def pprint_pipes(pipes : PipesDict) -> None:
         rich_columns = attempt_import('rich.columns')
         Columns = rich_columns.Columns
         columns = Columns(cols)
-        rich.print(columns)
+        #  rich.print(columns)
+        get_console().print(columns)
 
     if not UNICODE:
         return ascii_print_pipes()
@@ -217,7 +220,8 @@ def pprint_pipes(pipes : PipesDict) -> None:
         cols.append(t)
 
     columns = Columns(cols)
-    rich.print(columns)
+    #  rich.print(columns)
+    get_console().print(columns)
 
 def pprint_pipe_columns(
         pipe : meerschaum.Pipe,
@@ -229,7 +233,7 @@ def pprint_pipe_columns(
     """
     import json
     from meerschaum.utils.warnings import info
-    from meerschaum.utils.formatting import pprint, print_tuple
+    from meerschaum.utils.formatting import pprint, print_tuple, get_console
     from meerschaum.utils.formatting._shell import make_header
     from meerschaum.utils.packages import attempt_import, import_rich
 
@@ -260,7 +264,8 @@ def pprint_pipe_columns(
             table.add_row(c, t)
 
         if _cols_types:
-            rich.print(table)
+            #  rich.print(table)
+            get_console().print(table)
             #  print(f"\nTable columns and types:")
             #  pprint(_cols_types, nopretty=nopretty)
         else:

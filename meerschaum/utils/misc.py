@@ -89,7 +89,7 @@ def choose_subaction(
         warn(f"Cannot {parent_action} '{choice}'. Choose one:", stack=False)
         for option in sorted(options):
             print(f"  - {parent_action} {option}")
-        return (False, f"Invalid choice '{choice}'")
+        return (False, f"Invalid choice '{choice}'.")
     ### remove parent sub-action
     kw['action'] = list(action)
     del kw['action'][0]
@@ -263,8 +263,9 @@ def choices_docstring(action : str, globs : Optional[Dict[str, Any]] = None) -> 
 def print_options(
         options : Optional[Dict[str, Any]] = None,
         nopretty : bool = False,
+        no_rich : bool = False,
         name : str = 'options',
-        header : str = None,
+        header : Optional[str] = None,
         actions : bool = False,
         num_cols : int = 8,
         **kw
@@ -296,11 +297,11 @@ def print_options(
             print()
 
     rich = import_rich()
-    if rich is None or nopretty:
+    if rich is None or nopretty or no_rich:
         _print_options_no_rich()
         return None
 
-    from meerschaum.utils.formatting import pprint
+    from meerschaum.utils.formatting import pprint, get_console
     from meerschaum.utils.packages import attempt_import
     rich_columns = attempt_import('rich.columns')
     rich_panel = attempt_import('rich.panel')
@@ -330,7 +331,7 @@ def print_options(
     cols = Columns([
         o for o in sorted(_options)
     ], expand=True, equal=True, title=header, padding=(0, 0))
-    rich.print(table)
+    get_console().print(table)
     return None
 
 def iterate_chunks(iterable, chunksize : int, fillvalue : Optional[Any] = None):
@@ -837,7 +838,7 @@ def get_connector_labels(
     conns = []
     for t in _types:
         if t == 'plugin':
-            from meerschaum.actions.plugins import get_data_plugins
+            from meerschaum.plugins import get_data_plugins
             conns += [f'{t}:' + m.__name__.split('.')[-1] for m in get_data_plugins()]
             continue
         conns += [ f'{t}:{label}' for label in connectors.get(t, {}) if label != 'default' ]
@@ -931,3 +932,73 @@ def async_wrap(func):
         pfunc = partial(func, *args, **kwargs)
         return await loop.run_in_executor(executor, pfunc)
     return run 
+
+def debug_trace(browser : bool = True):
+    from meerschaum.utils.packages import attempt_import
+    heartrate = attempt_import('heartrate')
+    heartrate.trace(files=heartrate.files.all, browser=browser)
+
+def items_str(
+        items : List[Any],
+        quotes : bool = True,
+        quote_str : str = "'",
+        commas : bool = True,
+        comma_str : str = ',',
+        and_ : bool = True,
+        and_str : str = 'and',
+        oxford_comma : bool = True,
+        spaces : bool = True,
+        space_str = ' ',
+    ) -> 'str':
+    """
+    Return a formatted string if list items separated by commas.
+
+    :param quotes:
+        If `True`, wrap items in quotes.
+        Defaults to `True`.
+
+    :param quote_str:
+        If `quotes` is `True`, prepend and append each item with this string.
+        Defaults to "'" (single quote).
+
+    :param and_:
+        If `True`, include the word 'and' before the final item in the list.
+        Defaults to `True`.
+
+    :param and_str:
+        If `and_` is True, insert this string where 'and' normally would in and English list. 
+        Defaults to 'and'.
+
+    :param oxford_comma:
+        If `True`, include the Oxford Comma (comma before the final 'and').
+        Only applies when `and_` is `True`.
+        Defaults to `True`.
+
+    :param spaces:
+        If `True`, separate items with `space_str`
+        Defaults to `True`.
+
+    :param space_str:
+        If `spaces` is `True`, separate items with this string.
+        Defaults to ' '.
+    """
+    if not items:
+        return ''
+    
+    q = quote_str if quotes else ''
+    s = space_str if spaces else ''
+    a = and_str if and_ else ''
+    c = comma_str if commas else ''
+
+    if len(items) == 1:
+        return q + str(items[0]) + q
+
+    if len(items) == 2:
+        return q + str(items[0]) + q + s + a + s + q + str(items[1]) + q
+
+    sep = q + c + s + q
+    output = q + sep.join(str(i) for i in items[:-1]) + q
+    if oxford_comma:
+        output += c
+    output += s + a + (s if and_ else '') + q + str(items[-1]) + q
+    return output

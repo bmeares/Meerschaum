@@ -8,6 +8,7 @@ This module is the entry point for the interactive shell
 from __future__ import annotations
 from meerschaum.utils.typing import Union, SuccessTuple, Any, Callable, Optional, List, Dict
 
+import os
 from meerschaum.utils.packages import attempt_import
 from meerschaum.config import __doc__, __version__ as version, get_config
 cmd = attempt_import(get_config('shell', 'cmd', patch=True), warn=False, lazy=False)
@@ -18,11 +19,6 @@ from meerschaum.actions.shell.ValidAutoSuggest import ValidAutoSuggest
 from meerschaum.actions.shell.ShellCompleter import ShellCompleter
 _clear_screen = get_config('shell', 'clear_screen', patch=True)
 from meerschaum.utils.misc import string_width
-### readline is Unix-like only. Disable readline features for Windows
-try:
-    import readline
-except ImportError:
-    readline = None
 
 patch = True
 ### remove default cmd2 commands
@@ -203,7 +199,7 @@ class Shell(cmd.Cmd):
         Customize the CLI from configuration
         """
         if actions is None:
-            actions = []
+            actions = {}
         if sysargs is None:
             sysargs = []
         _insert_shell_actions(_shell=self, keep_self=True)
@@ -254,6 +250,7 @@ class Shell(cmd.Cmd):
         self._actions['repo'] = self.do_repo
         self._actions['debug'] = self.do_debug
         self.debug = False
+        self._reload = True
         self.load_config()
         self.hidden_commands = []
         ### update hidden commands list (cmd2 only)
@@ -308,7 +305,7 @@ class Shell(cmd.Cmd):
                     *get_config('shell', 'ansi', key, 'color', patch=patch)
                 )
 
-            for attr_key in get_config('shell', 'ansi', patch=patch):
+            for attr_key in get_config('shell', 'ansi'):
                 self.__dict__[attr_key] = apply_colors(self.__dict__[attr_key], attr_key)
 
         ### refresh actions
@@ -316,6 +313,8 @@ class Shell(cmd.Cmd):
 
         ### replace {instance} in prompt with stylized instance string
         self.update_prompt()
+        self._dict_backup = {k:v for k, v in self.__dict__.copy().items() if k != '_dict_backup'}
+        #  self._reload = False
 
     def insert_actions(self):
         from meerschaum.actions import actions
@@ -331,8 +330,8 @@ class Shell(cmd.Cmd):
             self.instance = instance
             if ANSI:
                 self.instance = colored(
-                    self.instance, *get_config(
-                        'shell', 'ansi', 'instance', 'color'
+                    self.instance, **get_config(
+                        'shell', 'ansi', 'instance', 'rich'
                     )
                 )
             prompt = prompt.replace('{instance}', self.instance)
@@ -352,7 +351,7 @@ class Shell(cmd.Cmd):
                     username = str(e)
             self.username = (
                 username if not ANSI else
-                colored(username, *get_config('shell', 'ansi', 'username', 'color'))
+                colored(username, **get_config('shell', 'ansi', 'username', 'rich'))
             )
             prompt = prompt.replace('{username}', self.username)
             mask = mask.replace('{username}', ''.join(['\0' for c in '{username}']))
@@ -362,7 +361,7 @@ class Shell(cmd.Cmd):
             if c != '\0':
                 _c = c
                 if ANSI:
-                    _c = colored(_c, *get_config('shell', 'ansi', 'prompt', 'color'))
+                    _c = colored(_c, **get_config('shell', 'ansi', 'prompt', 'rich'))
                 remainder_prompt[i] = _c
         self.prompt = ''.join(remainder_prompt).replace(
             '{username}', self.username
@@ -380,6 +379,9 @@ class Shell(cmd.Cmd):
         Overrides `default`: if action does not exist,
             assume the action is `shell`
         """
+        ### Preserve the working directory.
+        old_cwd = os.getcwd()
+
         ### make a backup of line for later
         import copy
         original_line = copy.deepcopy(line)
@@ -413,8 +415,6 @@ class Shell(cmd.Cmd):
         if line.startswith(help_token):
             return "help " + line[len(help_token):]
 
-        ### TODO Migrate to using entry for everything instead of replicating entry inside precmd.
-
         from meerschaum.actions.arguments import parse_line
         args = parse_line(line)
         if args.get('help', False):
@@ -425,12 +425,16 @@ class Shell(cmd.Cmd):
         ### NOTE: pass `shell` flag in case actions need to distinguish between
         ###       being run on the command line and being run in the shell
         args['shell'] = True
+        args['line'] = line
 
         ### if debug is not set on the command line,
         ### default to shell setting
         if not args.get('debug', False):
             args['debug'] = self.debug
 
+        ### Make sure an action was provided.
+        if not args.get('action', None):
+            return ''
         action = args['action'][0]
 
         ### if no instance is provided, use current shell default,
@@ -446,51 +450,60 @@ class Shell(cmd.Cmd):
             self.emptyline()
             return ""
 
+        ### If the action cannot be found, resort to executing a shell command.
         try:
             func = getattr(self, 'do_' + action)
         except AttributeError as ae:
             ### if function is not found, default to `shell`
             action = "sh"
-            args['action'].insert(0, "sh")
-            func = getattr(self, 'do_sh')
+            args['action'].insert(0, action)
+            func = getattr(self, f'do_{action}')
 
-        ### delete the first action
-        ### e.g. 'show actions' -> ['actions']
-        del args['action'][0]
+        ### If the `--daemon` flag is present, prepend 'start job'.
+        if args.get('daemon', False) and 'stack' not in args['action']:
+            args['action'] = ['start', 'jobs'] + args['action']
+            action = 'start'
 
         positional_only = (action not in self._actions)
         if positional_only:
             return original_line
 
-        from meerschaum.utils.packages import activate_venv, deactivate_venv
-        plugin_name = (
-            self._actions[action].__module__.split('.')[-1]
-            if self._actions[action].__module__.startswith('plugins.') else None
+        from meerschaum.actions._entry import _entry_with_args
+        from meerschaum.utils.daemon import daemon_action
+
+        ### TODO: resolve the shell actions problem
+        success_tuple = (
+            _entry_with_args(**args) if action not in self._actions
+            else func(action=args['action'][1:], **{k:v for k, v in args.items() if k != 'action'})
         )
 
-        ### execute the meerschaum action
-        ### and print the response message in case of failure
         from meerschaum.utils.formatting import print_tuple
-        activate_venv(venv=plugin_name, debug=self.debug)
-        try:
-            response = func(**args)
-        except Exception as e:
-            if self.debug or args.get('debug', False):
-                import traceback
-                traceback.print_exception(type(e), e, e.__traceback__)
-            response = False, (
-                f"Failed to execute '{func.__name__}' with exception:\n\n" +
-                f"'{e}'.\n\nRun again with '--debug' to see a full stacktrace."
+        if isinstance(success_tuple, tuple):
+            print_tuple(
+                success_tuple, skip_common=(not self.debug), upper_padding=1, lower_padding=1
             )
-        deactivate_venv(venv=plugin_name, debug=self.debug)
-        if isinstance(response, tuple):
-            print_tuple(response, skip_common=(not self.debug), upper_padding=1, lower_padding=1)
-        self.postcmd(False, "")
+
+        ### Restore the old working directory.
+        if old_cwd != os.getcwd():
+            os.chdir(old_cwd)
 
         return ""
 
     def postcmd(self, stop : bool = False, line : str = ""):
-        self.load_config(self.instance)
+        _reload = self._reload
+        #  if not _reload:
+            #  for k, v in self.__dict__.items():
+                #  if k == '_dict_backup':
+                    #  continue
+                #  if (
+                    #  k not in self._dict_backup
+                        #  or self._dict_backup.get(k, None) != self.__dict__.get(k, None)
+                #  ):
+                    #  _reload = True
+        #  import traceback
+        #  traceback.print_stack()
+        if _reload:
+            self.load_config(self.instance)
         if stop:
             return True
 
@@ -772,6 +785,9 @@ def input_with_sigint(_input, session):
         except KeyboardInterrupt:
             print("^C")
             return "pass"
+        #  except RuntimeError:
+            #  print("^C")
+            #  return "pass"
         return parsed
 
     return _patched_input

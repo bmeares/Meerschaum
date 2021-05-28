@@ -1,10 +1,10 @@
-# Installing Meerschaum Portable
+# Meerschaum Portable
 Sometimes, it's not worth the hassle setting up a complete Python environment. If you're using a non-administrative account or just want to test out Meerschaum, Meerschaum Portable might be right for you.
 
 Meerschaum Portable is a self-contained Meerschaum installation, running entirely within one directory. Download and extract the archive, and you can have Meerschaum running in seconds.
 
 !!! bug "Compatability Notice"
-    Although Meerschaum Portable is extensively tested, you may still encounter problems, such as permissions issues on Mac OS. In case you cannot successfully extract Meerschaum Portable, consider following the directions for a normal install found on the [Getting Started](/get-started) page.
+    Although Meerschaum Portable has been well tested, you may still encounter problems, such as permissions issues on Mac OS. In case you cannot successfully extract Meerschaum Portable, consider following the directions for a normal install found on the [Getting Started](/get-started) page.
 
 ## Installing Meerschaum Portable
 Installing Meerschaum Portable is pretty straightforward: download and extract the archive file, then execute `mrsm`. Follow the steps below for more information.

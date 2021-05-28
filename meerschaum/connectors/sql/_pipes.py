@@ -208,10 +208,13 @@ def fetch_pipes_keys(
         [pipes.c.connector_keys, pipes.c.metric_key, pipes.c.location_key]
     ).where(sqlalchemy.and_(*_where))
 
-    ### parse IN params
+    ### Parse IN params and add OR IS NULL if None in list.
     for c, vals in cols.items():
         if isinstance(vals, (list, tuple)) and vals:
-            q = q.where(pipes.c[c].in_(vals))
+            q = (
+                q.where(pipes.c[c].in_(vals)) if None not in vals
+                else q.where(sqlalchemy.or_(pipes.c[c].in_(vals), pipes.c[c].is_(None)))
+            )
 
     ### execute the query and return a list of tuples
     try:
@@ -335,10 +338,11 @@ def get_backtrack_data(
         pipe : Optional[meerschaum.Pipe] = None,
         backtrack_minutes : int = 0,
         begin : Optional[datetime.datetime] = None,
+        chunksize : Optional[int] = -1,
         debug : bool = False
     ) -> Optional[pandas.DataFrame]:
     """
-    Get the most recent backtrack_minutes' worth of data from a Pipe
+    Get the most recent backtrack_minutes' worth of data from a Pipe.
     """
     from meerschaum.utils.warnings import error, warn
     if pipe is None:
@@ -361,7 +365,7 @@ def get_backtrack_data(
 
     query = f"SELECT * FROM {table}" + (f" WHERE {dt} > {da}" if da else "")
 
-    df = self.read(query, debug=debug)
+    df = self.read(query, chunksize=chunksize, debug=debug)
 
     if self.flavor == 'sqlite':
         from meerschaum.utils.misc import parse_df_datetimes
@@ -501,6 +505,7 @@ def sync_pipe(
         df : Union[pandas.DataFrame, str, Dict[Any, Any]] = None,
         begin : Optional[datetime.datetime] = None,
         end : Optional[datetime.datetime] = None,
+        chunksize : Optional[int] = -1,
         check_existing : bool = True,
         blocking : bool = True,
         debug : bool = False,
@@ -513,13 +518,22 @@ def sync_pipe(
         The Meerschaum Pipe instance into which to sync the data.
 
     :param df:
-        An optional DataFrame to sync into the pipe, defaults to None.
+        An optional DataFrame to sync into the pipe.
+        Defaults to `None`.
 
     :param begin:
-        Optionally specify the earliest datetime to search for data, defaults to None.
+        Optionally specify the earliest datetime to search for data.
+        Defaults to `None`.
 
     :param end:
-        Optionally specify the latelst datetime to search for data, defaults to None.
+        Optionally specify the latest datetime to search for data.
+        Defaults to `None`.
+
+    :param chunksize:
+        Specify the number of rows to sync per chunk.
+        If -1, resort to system configuration (default is 900).
+        A `chunksize` of `None` will sync all rows in one transaction.
+        Defaults to -1.
 
     :param check_existing:
         If True, pull and diff with existing data from the pipe, defaults to True.
@@ -571,13 +585,15 @@ def sync_pipe(
         check_existing = False
         is_new = True
 
-    new_data_df = filter_existing(pipe, df, debug=debug) if check_existing else df
+    new_data_df = filter_existing(pipe, df, chunksize=chunksize, debug=debug) if check_existing else df
     if debug:
         dprint("New unseen data:\n" + str(new_data_df))
 
     if_exists = kw.get('if_exists', 'append')
     if 'if_exists' in kw:
         kw.pop('if_exists')
+    if 'name' in kw:
+        kw.pop('name')
 
     ### append new data to Pipe's table
     result = self.to_sql(
@@ -586,16 +602,17 @@ def sync_pipe(
         if_exists = if_exists,
         debug = debug,
         as_tuple = True,
+        chunksize = chunksize,
         **kw
     )
     if is_new:
         if not self.create_indices(pipe, debug=debug):
             if debug:
-                dprint(f"Failed to create indices for Pipe '{pipe}'. Continuing...")
+                dprint(f"Failed to create indices for pipe '{pipe}'. Continuing...")
     return result
 
 
-def filter_existing(pipe, df, debug : bool = False):
+def filter_existing(pipe, df, chunksize : Optional[int] = -1, debug : bool = False):
     """
     Remove duplicate data from backtrack_data and a new dataframe
     """
@@ -617,15 +634,20 @@ def filter_existing(pipe, df, debug : bool = False):
         to = 'down'
     ) - datetime_pkg.timedelta(minutes=1)
     if debug:
-        dprint(f"Looking at data newer than '{begin}'")
+        dprint(f"Looking at data newer than '{begin}'.")
 
     ### backtrack_df is existing Pipe data that overlaps with the fetched df
     try:
         backtrack_minutes = pipe.parameters['fetch']['backtrack_minutes']
-    except:
+    except Exception as e:
         backtrack_minutes = 0
 
-    backtrack_df = pipe.get_backtrack_data(begin=begin, backtrack_minutes=backtrack_minutes, debug=debug)
+    backtrack_df = pipe.get_backtrack_data(
+        begin = begin,
+        backtrack_minutes = backtrack_minutes,
+        chunksize = chunksize,
+        debug = debug
+    )
     if debug:
         dprint("Existing data:\n" + str(backtrack_df))
 

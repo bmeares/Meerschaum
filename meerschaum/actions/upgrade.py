@@ -181,7 +181,7 @@ def _upgrade_plugins(
 
     """
     from meerschaum.actions import actions
-    from meerschaum.actions.plugins import get_plugins_names
+    from meerschaum.plugins import get_plugins_names
     from meerschaum.utils.misc import print_options
     from meerschaum.utils.prompt import yes_no
 

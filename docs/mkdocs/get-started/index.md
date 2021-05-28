@@ -7,7 +7,7 @@ pip install meerschaum
 ```
 
 !!! question "Can I run Meerschaum without installing anything?"
-    If you can't install Python or just want to try Meerschaum, consider downloading [Meerschaum Portable](meerschaum-portable).
+    If you can't install Python or just want to try Meerschaum, consider downloading [Meerschaum Portable](/reference/meerschaum-portable).
 
 ## Requirements
 
@@ -20,9 +20,9 @@ Meerschaum comes with the `stack` command which leverages [Docker Compose](https
 
 The [stack](starting-the-stack) is only needed for back-end server installations and is optional, so you can skip this step for any of the following reasons:
 
-- You only need to use Meerschaum as a client for an existing Meerschaum instance.
-- You want a minimal install with SQLite instead of a dedicated database like TimescaleDB.
-- You're instaling Meerschaum on an IoT device (like a Raspberry Pi).
+- You only need to use Meerschaum as a client for an existing database or Meerschaum instance.
+- You want a minimal install with SQLite / duckdb instead of a dedicated database like TimescaleDB.
+- You're installing Meerschaum on an IoT device (like a Raspberry Pi).
 - You don't want to / can't install Docker.
 
 

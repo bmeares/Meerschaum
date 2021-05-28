@@ -3,7 +3,7 @@
 # vim:fenc=utf-8
 
 """
-Functions for deleting elements
+Functions for deleting elements.
 """
 
 from __future__ import annotations
@@ -24,6 +24,7 @@ def delete(
         'plugins'    : _delete_plugins,
         'users'      : _delete_users,
         'connectors' : _delete_connectors,
+        'jobs'       : _delete_jobs,
     }
     return choose_subaction(action, options, **kw)
 
@@ -34,13 +35,22 @@ def _complete_delete(
     """
     Override the default Meerschaum `complete_` function.
     """
+    from meerschaum.actions.start import _complete_start_jobs
+    from meerschaum.actions.edit import _complete_edit_config
     if action is None:
         action = []
     options = {
+        'connector': _complete_delete_connectors,
         'connectors': _complete_delete_connectors,
+        'config' : _complete_edit_config,
+        'job' : _complete_start_jobs,
+        'jobs' : _complete_start_jobs,
     }
 
-    if len(action) > 0 and action[0] in options:
+    if (
+        len(action) > 0 and action[0] in options
+            and kw.get('line', '').split(' ')[-1] != action[0]
+    ):
         sub = action[0]
         del action[0]
         return options[sub](action=action, **kw)
@@ -65,7 +75,7 @@ def _delete_pipes(
     pipes = get_pipes(as_list=True, debug=debug, **kw)
     if len(pipes) == 0:
         return False, "No pipes to delete."
-    question = "Are you sure you want to delete these Pipes? THIS CANNOT BE UNDONE!\n"
+    question = "Are you sure you want to delete these pipes? This can't be undone!\n"
     for p in pipes:
         question += f" - {p}" + "\n"
     answer = force
@@ -146,6 +156,7 @@ def _delete_config(
 
 def _delete_plugins(
         action : Optional[List[str]] = None,
+        repository : Optional[str] = None,
         yes : bool = False,
         force : bool = False,
         noask : bool = False,
@@ -153,59 +164,33 @@ def _delete_plugins(
         **kw : Any
     ) -> SuccessTuple:
     """
-    Remove installed plugins. Does not affect repository registrations.
+    Delete plugins from a Meerschaum repository.
     """
-    import meerschaum.actions
-    from meerschaum.actions.plugins import get_plugins_names, get_plugins_modules
-    from meerschaum.config._paths import PLUGINS_RESOURCES_PATH
-    from meerschaum.utils.warnings import warn, error, info
-    from meerschaum.actions.plugins import reload_plugins
+    from meerschaum.utils.warnings import info
+    from meerschaum.plugins import reload_plugins
+    from meerschaum.connectors.parse import parse_repo_keys
     from meerschaum.utils.prompt import yes_no
-    import os, shutil
+    from meerschaum.utils.formatting import print_tuple
+    repo_connector = parse_repo_keys(repository)
 
-    if action is None:
-        action = []
+    sep = '\n' + '  - '
+    answer = yes_no(
+        "Are you sure you want to delete the following plugins " +
+        f"from the repository '{repo_connector}'?\n" +
+        "THIS CANNOT BE UNDONE!\n" +
+        f"{sep + sep.join([str(p) for p in action])}\n",
+        default='n', noask=noask, yes=yes
+    ) if not force else True
 
-    ### parse the provided plugins and link them to their modules
-    modules_to_delete = dict()
-    for plugin in action:
-        if plugin not in get_plugins_names():
-            info(f"Plugin '{plugin}' is not installed. Ignoring...")
-        else:
-            for m in get_plugins_modules():
-                if plugin == m.__name__.split('.')[-1]:
-                    modules_to_delete[plugin] = m
-                    break
-    if len(modules_to_delete) == 0:
-        return False, "No plugins to delete."
-
-    ### verify that the user absolutely wants to do this (skips on --force)
-    question = "Are you sure you want to delete these plugins?\n"
-    for plugin in modules_to_delete:
-        question += f" - {plugin}" + "\n"
-    if force:
-        answer = True
-    else:
-        answer = yes_no(question, default='n', yes=yes, noask=noask)
     if not answer:
-        return False, "No plugins deleted."
+        return False, f"No plugins deleted."
 
-    ### delete the folders or files
-    for name, m in modules_to_delete.items():
-        ### __init__.py might be missing
-        if m.__file__ is None:
-            try:
-                shutil.rmtree(os.path.join(PLUGINS_RESOURCES_PATH, name))
-            except Exception as e:
-                return False, str(e)
-            continue
-        try:
-            if '__init__.py' in m.__file__:
-                shutil.rmtree(m.__file__.replace('__init__.py', ''))
-            else:
-                os.remove(m.__file__)
-        except Exception as e:
-            return False, f"Could not remove plugin '{name}'"
+    successes = dict()
+    for name in action:
+        info(f"Deleting plugin '{name}' from Meerschaum repository '{repo_connector}'...")
+        success, msg = repo_connector.delete_plugin(name, debug=debug)
+        successes[name] = (success, msg)
+        print_tuple((success, msg))
 
     reload_plugins(debug=debug)
     return True, "Success"
@@ -250,7 +235,10 @@ def _delete_users(
         return False, "No users to delete."
 
     ### verify that the user absolutely wants to do this (skips on --force)
-    question = f"Are you sure you want to delete these users from Meerschaum instance '{instance_connector}'?\n"
+    question = (
+        "Are you sure you want to delete these users from Meerschaum instance "
+        + f"'{instance_connector}'?\n"
+    )
     for username in registered_users:
         question += f" - {username}" + "\n"
     if force:
@@ -293,14 +281,14 @@ def _delete_connectors(
     Delete configured connectors.
 
     Example:
-        `delete connectors -c sql:test`
+        `delete connectors sql:test`
     """
+    import os, pathlib
     from meerschaum.utils.prompt import yes_no, prompt
     from meerschaum.connectors.parse import parse_connector_keys
     from meerschaum.config import _config
     from meerschaum.config._edit import write_config
     from meerschaum.utils.warnings import info, warn
-    import os
     cf = _config()
     if action is None:
         action = []
@@ -335,12 +323,20 @@ def _delete_connectors(
         return False, "No changes made to the configuration file."
     for c in to_delete:
         try:
-            if c.flavor == 'sqlite':
-                if force or yes_no(f"Detected sqlite database '{c.database}'. Delete this file?", default='n', noask=noask, yes=yes):
-                    try:
-                        os.remove(c.database)
-                    except Exception as e:
-                        warn(f"Failed to delete database file for connector '{c}'. Ignoring...", stack=False)
+            ### Remove database files.
+            if c.flavor in ('sqlite', 'duckdb'):
+                if ':memory:' not in c.database and pathlib.Path(c.database).exists():
+                    if force or yes_no(
+                        f"Detected '{c.flavor}' database '{c.database}'. "
+                        + "Delete this file?", default='n', noask=noask, yes=yes
+                    ):
+                        try:
+                            os.remove(c.database)
+                        except Exception as e:
+                            warn(
+                                "Failed to delete database file for connector "
+                                + f"'{c}'. Ignoring...", stack=False
+                            )
         except Exception as e:
             pass
         try:
@@ -351,12 +347,114 @@ def _delete_connectors(
     write_config(cf, debug=debug)
     return True, "Success"
 
-def _complete_delete_connectors(action : Optional[List[str]] = None, **kw : Any) -> List[str]:
+def _complete_delete_connectors(
+        action : Optional[List[str]] = None,
+        line : str = '',
+        **kw : Any
+    ) -> List[str]:
     from meerschaum.config import get_config
     from meerschaum.utils.misc import get_connector_labels
     types = list(get_config('meerschaum', 'connectors').keys())
-    search_term = action[-1] if action else ''
+    if line.split(' ')[-1] == '' or not action:
+        search_term = ''
+    else:
+        search_term = action[-1]
+
+    #  search_term = action[-1] if action or line.split(' ')[-1] == '' else ''
     return get_connector_labels(*types, search_term=search_term)
+
+def _delete_jobs(
+        action : Optional[List[str]] = None,
+        noask : bool = False,
+        nopretty : bool = False,
+        force : bool = False,
+        yes : bool = False,
+        debug : bool = False,
+        **kw
+    ) -> SuccessTuple:
+    """
+    Remove a job's log files and delete the job's ID.
+
+    If the job is running, ask to kill the job first.
+    """
+    from meerschaum.utils.daemon import (
+        Daemon, get_running_daemons, get_stopped_daemons, get_filtered_daemons,
+    )
+    from meerschaum.utils.prompt import yes_no
+    from meerschaum.utils.formatting._jobs import pprint_jobs
+    from meerschaum.utils.formatting._shell import clear_screen
+    from meerschaum.utils.warnings import warn
+    from meerschaum.utils.misc import items_str
+    from meerschaum.actions import actions
+    daemons = get_filtered_daemons(action, warn=(not nopretty))
+    if not daemons:
+        return False, "No jobs to delete."
+    _delete_all_jobs = False
+    if not action:
+        if not force:
+            pprint_jobs(daemons)
+            if not yes_no(
+                "Delete all jobs? This cannot be undone!",
+                noask=noask, yes=yes, default='n'
+            ):
+                return False, "No jobs were deleted."
+            _delete_all_jobs = True
+    _running_daemons = get_running_daemons(daemons)
+    _stopped_daemons = get_stopped_daemons(daemons, _running_daemons)
+    _to_delete = _stopped_daemons
+    if _running_daemons:
+        clear_screen(debug=debug)
+        if not force:
+            pprint_jobs(_running_daemons, nopretty=nopretty)
+        if force or yes_no(
+            "The above jobs are still running. Stop these jobs?",
+            default='n', yes=yes, noask=noask
+        ):
+            actions['stop'](
+                action = (['jobs'] + [d.daemon_id for d in _running_daemons]),
+                nopretty = nopretty,
+                yes = yes,
+                force = force,
+                noask = noask,
+                debug = debug,
+            )
+            #  import time
+            #  time.sleep(1)
+            ### Ensure the running jobs are dead.
+            if get_running_daemons(daemons):
+                return False, (
+                    f"Failed to kill running jobs. Please stop these jobs before deleting."
+                )
+            _to_delete += _running_daemons
+        ### User decided not to kill running jobs.
+        else:
+            pass
+
+    if not _to_delete:
+        return False, "No jobs to delete."
+
+    if not force and not _delete_all_jobs:
+        pprint_jobs(_to_delete, nopretty=nopretty)
+        if not yes_no(
+            "Are you sure you want to delete these jobs?",
+            yes=yes, noask=noask, default='y',
+        ):
+            return False, "No jobs were deleted."
+
+    _deleted = []
+    for d in _to_delete:
+        d.cleanup()
+        if d.path.exists() and not nopretty:
+            warn("Failed to delete job '{d.daemon_id}'.", stack=False)
+            continue
+        _deleted.append(d)
+
+    return (
+        len(_deleted) > 0,
+        ("Deleted job" + ("s" if len(_deleted) != 1 else '')
+            + f" {items_str([d.daemon_id for d in _deleted])}."),
+    )
+
 
 
 ### NOTE: This must be the final statement of the module.

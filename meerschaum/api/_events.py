@@ -3,19 +3,19 @@
 # vim:fenc=utf-8
 
 """
-Declare FastAPI events in this module (startup, shutdown, etc)
+Declare FastAPI events in this module (startup, shutdown, etc.).
 """
 
+import sys, os, time
 from meerschaum.api import app, get_api_connector, get_uvicorn_config, debug
 from meerschaum.utils.debug import dprint
+from meerschaum.utils.misc import retry_connect
+from meerschaum.config._paths import API_UVICORN_CONFIG_PATH
 
 @app.on_event("startup")
 async def startup():
-    from meerschaum.utils.misc import retry_connect
-    import sys, os
     conn = get_api_connector()
     try:
-        from meerschaum.utils.warnings import warn
         connected = retry_connect(
             get_api_connector(),
             workers = get_uvicorn_config().get('workers', None),
@@ -30,8 +30,6 @@ async def startup():
 
 @app.on_event("shutdown")
 async def shutdown():
-    import os
-    from meerschaum.config._paths import API_UVICORN_CONFIG_PATH
     try:
         if API_UVICORN_CONFIG_PATH.exists() and not debug:
             os.remove(API_UVICORN_CONFIG_PATH)

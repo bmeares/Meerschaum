@@ -51,7 +51,7 @@ def parse_arguments(sysargs : List[str]) -> dict[str, Any]:
             if sa.startswith(begin_decorator):
                 sa = sa[len(begin_decorator):]
             if sa.endswith(end_decorator):
-                sa = sa[:-1 *len(end_decorator)]
+                sa = sa[:-1 * len(end_decorator)]
             sub_arguments.append(sa)
             ### remove sub-argument from action list
             sub_arg_indices.append(i)
@@ -79,6 +79,7 @@ def parse_arguments(sysargs : List[str]) -> dict[str, Any]:
 
     args_dict = vars(args)
     args_dict['sysargs'] = sysargs
+    args_dict['filtered_sysargs'] = filtered_sysargs
     ### append decorated arguments to sub_arguments list
     if 'sub_args' not in args_dict:
         args_dict['sub_args'] = []
@@ -92,6 +93,9 @@ def parse_arguments(sysargs : List[str]) -> dict[str, Any]:
         else:
             parsed_sub_arguments.append(sub_arg)
     args_dict['sub_args'] = parsed_sub_arguments
+    ### In case of empty subargs
+    if args_dict['sub_args'] == ['']:
+        args_dict['sub_args'] = []
 
     ### remove None (but not False) args
     none_args = []
@@ -129,8 +133,8 @@ def parse_line(line : str) -> dict:
         return {'action' : [], 'text' : line,}
 
 def parse_synonyms(
-        args_dict : dict
-    ) -> dict:
+        args_dict : Dict[str, Any]
+    ) -> Dict[str, Any]:
     """
     Check for synonyms (e.g. force = True -> yes = True)
     """
@@ -143,3 +147,43 @@ def parse_synonyms(
     if args_dict.get('skip_check_existing', None):
         args_dict['check_existing'] = False
     return args_dict
+
+def parse_dict_to_sysargs(
+        args_dict : Dict[str, Any]
+    ) -> List[str]:
+    """
+    Revert an arguments dictionary back to a command line list.
+    """
+    import json
+    from meerschaum.actions.arguments._parser import get_arguments_triggers
+    sysargs = []
+    sysargs += args_dict.get('action', [])
+    allow_none_args = {'location_keys'}
+
+    triggers = get_arguments_triggers()
+
+    for a, t in triggers.items():
+        if a == 'action' or a not in args_dict:
+            continue
+        ### Add boolean flags
+        if isinstance(args_dict[a], bool):
+            if args_dict[a] is True:
+                sysargs += [t[0]]
+        else:
+            ### Add list flags
+            if (
+                isinstance(args_dict[a], list) or isinstance(args_dict[a], tuple)
+            ):
+                if len(args_dict[a]) > 0:
+                    sysargs += [t[0]] + list(args_dict[a])
+
+            ### Add dict flags
+            elif isinstance(args_dict[a], dict):
+                if len(args_dict[a]) > 0:
+                    sysargs += [t[0], json.dumps(args_dict[a])]
+
+            ### Account for None and other values
+            elif (args_dict[a] is not None) or (args_dict[a] is None and a in allow_none_args):
+                sysargs += [t[0], args_dict[a]]
+
+    return sysargs

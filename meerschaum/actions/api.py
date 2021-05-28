@@ -93,12 +93,18 @@ def _api_start(
         **kw : Any
     ) -> SuccessTuple:
     """
-    Usage: `api start {options}`
+    Start the API server.
+
+    Usage:
+        `api start {options}`
+
     Options:
         - `-p, --port {number}`
-            Port to listen to
+            Port to bind the API server to.
+
         - `-w, --workers {number}`
-            How many worker threads to run
+            How many worker threads to run.
+            Defaults to the number of CPU cores or 1 on Android.
     """
     from meerschaum.utils.packages import attempt_import, venv_contains_package, pip_install
     from meerschaum.utils.misc import is_int
@@ -119,7 +125,8 @@ def _api_start(
         action = []
 
     old_cwd = os.getcwd()
-    os.chdir(CACHE_RESOURCES_PATH)
+    if not debug:
+        os.chdir(CACHE_RESOURCES_PATH)
 
     ### Uvicorn must be installed on the host because of multiprocessing reasons.
     uvicorn = attempt_import('uvicorn', venv=None, lazy=False)

@@ -14,7 +14,7 @@ rm -f "$reqs_file"
 
 ### Enable docker buildx.
 
-is_experimental=$( grep -q "experimental" /etc/docker/daemon.json | grep "true" )
+is_experimental=$( grep "experimental" /etc/docker/daemon.json | grep "true" )
 daemon_json="{
   \"experimental\": true
 }"

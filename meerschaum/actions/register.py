@@ -24,6 +24,28 @@ def register(
     }
     return choose_subaction(action, options, **kw)
 
+def _complete_register(
+        action : Optional[List[str]] = None,
+        **kw : Any
+    ) -> List[str]:
+    """
+    Override the default Meerschaum `complete_` function.
+    """
+    if action is None:
+        action = []
+    options = {
+        'plugin' : _complete_register_plugins,
+        'plugins' : _complete_register_plugins,
+    }
+
+    if len(action) > 0 and action[0] in options:
+        sub = action[0]
+        del action[0]
+        return options[sub](action=action, **kw)
+
+    from meerschaum.actions.shell import default_action_completer
+    return default_action_completer(action=(['register'] + action), **kw)
+
 def _register_pipes(
         connector_keys : Optional[List[str]] = None,
         metric_keys : Optional[List[str]] = None,
@@ -95,7 +117,7 @@ def _register_plugins(
         **kw : Any
     ) -> SuccessTuple:
     from meerschaum.utils.debug import dprint
-    from meerschaum.actions.plugins import reload_plugins
+    from meerschaum.plugins import reload_plugins, get_plugins_names
     from meerschaum.connectors.parse import parse_repo_keys
     from meerschaum.config import get_config
     from meerschaum.utils.warnings import warn, error, info
@@ -120,7 +142,6 @@ def _register_plugins(
         return False, "No plugins to register."
 
     plugins_to_register = dict()
-    from meerschaum.actions.plugins import get_plugins_names
     plugins_names = get_plugins_names()
     for p in action:
         if p not in plugins_names:
@@ -153,7 +174,11 @@ def _register_plugins(
         f"    ({total_success} succeeded, {total_fail} failed)."
     )
     reload_plugins(debug=debug)
-    return True, msg
+    return total_success > 0, msg
+
+def _complete_register_plugins(*args, **kw):
+    from meerschaum.actions.uninstall import _complete_uninstall_plugins
+    return _complete_uninstall_plugins(*args, **kw)
 
 def _register_users(
         action : Optional[List[str]] = None,

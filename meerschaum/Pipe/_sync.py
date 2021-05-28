@@ -50,6 +50,8 @@ def sync(
             Callable[[Exception], Any]
         ] = None,
 
+        chunksize : Optional[int] = -1,
+
         sync_chunks : bool = False,
 
         debug : bool = False,
@@ -71,7 +73,7 @@ def sync(
         Defaults to None.
 
     :param end:
-        Optionally specify the latelst datetime to search for data.
+        Optionally specify the latest datetime to search for data.
         Defaults to None.
 
     :param force:
@@ -106,6 +108,12 @@ def sync(
         Callback function which expects an Exception as input.
         Only applies when blocking = False.
 
+    :param chunksize:
+        Specify the number of rows to sync per chunk.
+        If -1, resort to system configuration (default is 900).
+        A `chunksize` of `None` will sync all rows in one transaction.
+        Defaults to -1.
+
     :param sync_chunks:
         If possible, sync chunks in parallel.
         Defaults to False.
@@ -134,6 +142,7 @@ def sync(
         'min_seconds' : min_seconds, 'check_existing' : check_existing,
         'blocking' : blocking, 'workers' : workers, 'callback' : callback,
         'error_callback' : error_callback, 'sync_chunks' : (sync_chunks),
+        'chunksize' : chunksize,
     })
 
     def _sync(
@@ -180,7 +189,10 @@ def sync(
                 return True, f"Pipe '{p}' was synced in parallel."
 
         if debug:
-            dprint("DataFrame to sync:\n" + f"{df}")
+            dprint(
+                "DataFrame to sync:\n"
+                + (str(df)[:255] + '...' if len(str(df)) >= 256 else str(df))
+            )
 
         ### if force, continue to sync until success
         return_tuple = False, f"Did not sync pipe '{p}'."

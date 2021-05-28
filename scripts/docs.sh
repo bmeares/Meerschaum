@@ -11,7 +11,7 @@ cd "$PARENT"
 # source ~/.config/meerschaum/venvs/mrsm/bin/activate
 
 ### Build technical documentation.
-python -m pdoc --html --output-dir docs/pdoc meerschaum --force
+python -m pdoc --html --output-dir docs/pdoc meerschaum -f
 
 ### Build general documentation.
 cd "$PARENT"/docs
