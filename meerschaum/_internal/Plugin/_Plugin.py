@@ -57,7 +57,7 @@ class Plugin:
         Return a Plugin's Python module.
         """
         if '_module' not in self.__dict__:
-            from meerschaum.actions.plugins import get_plugins_modules
+            from meerschaum.plugins import get_plugins_modules
             for m in get_plugins_modules():
                 if self.name == m.__name__.split('.')[-1]:
                     self._module = m
@@ -129,6 +129,22 @@ class Plugin:
             dprint(f"Created archive '{self.archive_path}'.")
         return self.archive_path
 
+    def remove(
+            self,        
+            force : bool = False,
+            debug : bool = False
+        ) -> SuccessTuple:
+        """
+        Remove a plugin's archive file.
+        """
+        if not self.archive_path.exists():
+            return True, f"Archive file for plugin '{self}' does not exist."
+        try:
+            self.archive_path.unlink()
+        except Exception as e:
+            return False, f"Failed to remove plugin '{self}'\n{e}"
+        return True, "Success"
+
     def install(
             self,
             force : bool = False,
@@ -143,7 +159,7 @@ class Plugin:
         if debug:
             from meerschaum.utils.debug import dprint
         import tarfile, pathlib, shutil
-        from meerschaum.actions.plugins import reload_plugins
+        from meerschaum.plugins import reload_plugins
         old_cwd = os.getcwd()
         old_version = ''
         new_version = ''

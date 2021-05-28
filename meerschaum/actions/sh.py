@@ -12,7 +12,7 @@ from meerschaum.utils.typing import SuccessTuple, List, Any, Optional
 def sh(
         action : Optional[List[str]] = None,
         sub_args : Optional[List[str]] = None,
-        sysargs : Optional[List[str]] = None,
+        filtered_sysargs : Optional[List[str]] = None,
         use_bash : bool = True,
         debug : bool = False,
         **kw : Any
@@ -29,21 +29,18 @@ def sh(
         action = []
     if sub_args is None:
         sub_args = []
-    if sysargs is None:
-        sysargs = []
+    if filtered_sysargs is None:
+        filtered_sysargs = []
 
     _shell = os.environ.get('SHELL', 'bash')
 
-    cmd_list = []
+    if action:
+        if action[0].startswith('!'):
+            action[0] = action[0][1:]
+        elif action[0] == 'sh':
+            action = action[1:]
+    cmd_list = action
 
-    if len(sysargs) > 1:
-        if sysargs[0] == 'sh':
-            del sysargs[0]
-        elif sysargs[0].startswith('!'):
-            sysargs[0] = sysargs[0][1:]
-        cmd_list = sysargs
-    else:
-        cmd_list = action
     if sub_args:
         cmd_list += sub_args
 

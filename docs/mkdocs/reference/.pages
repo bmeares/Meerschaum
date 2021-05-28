@@ -2,5 +2,6 @@ title: Reference
 nav:
   - Pipes: pipes.md
   - Connectors: connectors.md
+  - Meerschaum Portable: meerschaum-portable.md
   - Plugins: plugins
   - ...

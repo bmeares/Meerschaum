@@ -12,8 +12,11 @@ from meerschaum.utils.typing import Optional, Dict, Union
 ### store a tables dict for each connector
 connector_tables = dict()
 
+_sequence_flavors = {'duckdb'}
+
 def get_tables(
         mrsm_instance : Optional[Union[str, meerschaum.connectors.Connector]] = None,
+        create : bool = True,
         debug : Optional[bool] = None
     ) -> Dict[str, sqlalchemy.Table]:
     """
@@ -26,9 +29,10 @@ def get_tables(
     from meerschaum.utils.packages import attempt_import
     from meerschaum import get_connector
 
-    sqlalchemy, sqlalchemy_dialects_postgresql = attempt_import(
+    sqlalchemy, sqlalchemy_dialects_postgresql, sqlalchemy_utils = attempt_import(
         'sqlalchemy',
-        'sqlalchemy.dialects.postgresql'
+        'sqlalchemy.dialects.postgresql',
+        'sqlalchemy_utils',
     )
     if not sqlalchemy:
         error(f"Failed to import sqlalchemy. Is sqlalchemy installed?")
@@ -48,18 +52,36 @@ def get_tables(
     global connector_tables
     if conn not in connector_tables:
         if debug:
-            dprint(f"Creating tables for connector '{conn}'")
+            dprint(f"Creating tables for connector '{conn}'.")
 
-        params_type = sqlalchemy.String
-        ### leverage PostgreSQL JSON data type
-        if conn.flavor in ('postgresql', 'timescaledb'):
-            params_type = sqlalchemy_dialects_postgresql.JSON
+        id_type = sqlalchemy.Integer
+        params_type = (
+            sqlalchemy_utils.types.json.JSONType if conn.flavor not in ('duckdb')
+            else sqlalchemy.String
+        )
+
+        id_names = ('user_id', 'plugin_id', 'pipe_id')
+        sequences = {
+            k: sqlalchemy.Sequence(k + '_seq')
+                for k in id_names 
+        }
+        id_col_args = { k: [k, id_type] for k in id_names }
+        id_col_kw = { k: {'primary_key': True} for k in id_names }
+
+        if conn.flavor in _sequence_flavors:
+            for k, args in id_col_args.items():
+                args.append(sequences[k])
+            for k, kw in id_col_kw.items():
+                kw.update({'server_default': sequences[k].next_value()})
 
         _tables = {
             'users' : sqlalchemy.Table(
                 'users',
                 conn.metadata,
-                sqlalchemy.Column('user_id', sqlalchemy.Integer, primary_key=True),
+                sqlalchemy.Column(
+                    *id_col_args['user_id'],
+                    **id_col_kw['user_id'],
+                ),
                 sqlalchemy.Column('username', sqlalchemy.String, index=True, nullable=False),
                 sqlalchemy.Column('password_hash', sqlalchemy.String),
                 sqlalchemy.Column('email', sqlalchemy.String),
@@ -70,7 +92,10 @@ def get_tables(
             'plugins' : sqlalchemy.Table(
                 'plugins',
                 conn.metadata,
-                sqlalchemy.Column('plugin_id', sqlalchemy.Integer, primary_key=True),
+                sqlalchemy.Column(
+                    *id_col_args['plugin_id'],
+                    **id_col_kw['plugin_id'],
+                ),
                 sqlalchemy.Column('plugin_name', sqlalchemy.String, index=True, nullable=False),
                 sqlalchemy.Column('user_id', sqlalchemy.Integer, nullable=False),
                 sqlalchemy.Column('version', sqlalchemy.String),
@@ -82,20 +107,25 @@ def get_tables(
         _tables['pipes'] = sqlalchemy.Table(
             "pipes",
             conn.metadata,
-            sqlalchemy.Column("pipe_id", sqlalchemy.Integer, primary_key=True),
+            sqlalchemy.Column(
+                *id_col_args['pipe_id'],
+                **id_col_kw['pipe_id'],
+            ),
             sqlalchemy.Column("connector_keys", sqlalchemy.String, index=True, nullable=False),
             sqlalchemy.Column("metric_key", sqlalchemy.String, index=True, nullable=False),
             sqlalchemy.Column("location_key", sqlalchemy.String, index=True),
             sqlalchemy.Column("parameters", params_type),
-            sqlalchemy.UniqueConstraint(
-                'connector_keys', 'metric_key', 'location_key', name='pipe_index'
-            ),
+            #  sqlalchemy.UniqueConstraint(
+                #  'connector_keys', 'metric_key', 'location_key', name='pipe_index'
+            #  ),
             extend_existing = True,
         )
 
         try:
             conn.metadata.create_all(bind=conn.engine)
         except Exception as e:
+            #  import traceback
+            #  traceback.print_exception(type(e), e, e.__traceback__)
             warn(str(e))
 
         ### store the table dict for reuse (per connector)

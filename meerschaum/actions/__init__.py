@@ -54,6 +54,7 @@ for module in modules:
 
 original_actions = actions.copy()
 from meerschaum.actions._entry import _entry as entry
+
 def get_shell(
         sysargs : List[str] = [],
         reload : bool = False,
@@ -127,8 +128,9 @@ def _get_parent_plugin(stacklevel : int = 1) -> Optional[str]:
         return None
     return parent_globals['__name__'].replace('plugins.', '').split('.')[0]
 
-
-from meerschaum.actions.plugins import make_action, load_plugins, import_plugins
-plugins = import_plugins()
+import meerschaum.plugins
+plugins = meerschaum.plugins.import_plugins()
+### Instruct pdoc to skip the `meerschaum.actions.plugins` subdirectory.
 __pdoc__ = {'plugins' : False}
-load_plugins()
+make_action = meerschaum.plugins.make_action
+meerschaum.plugins.load_plugins()

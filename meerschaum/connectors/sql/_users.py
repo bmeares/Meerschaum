@@ -110,6 +110,7 @@ def edit_user(
             f"User '{user.username}' does not exist. " +
             f"Register user '{user.username}' before editing."
         )
+    user.user_id = user_id
 
     import json
     valid_tuple = valid_username(user.username)
@@ -126,13 +127,15 @@ def edit_user(
         bind_variables['email'] = user.email
     if user.attributes is not None and user.attributes != {}:
         bind_variables['attributes'] = json.dumps(user.attributes)
+    if user.type != '':
+        bind_variables['user_type'] = user.type
 
     query = sqlalchemy.update(users).values(**bind_variables).where(users.c.user_id == user_id)
 
     result = self.exec(query, debug=debug)
     if result is None:
-        return False, f"Failed to edit user '{user}'"
-    return True, f"Successfully edited user '{user}'"
+        return False, f"Failed to edit user '{user}'."
+    return True, f"Successfully edited user '{user}'."
 
 def get_user_id(
         self,

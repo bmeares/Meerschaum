@@ -39,7 +39,7 @@ def register_plugin(
     try:
         response = self.post(r_url, files=files, params=metadata, debug=debug)
     except Exception as e:
-        return False, f"Failed to register plugin '{plugin}'"
+        return False, f"Failed to register plugin '{plugin}'."
     finally:
         file_pointer.close()
 
@@ -137,3 +137,26 @@ def get_plugin_attributes(
         warn(attributes['detail'])
         return None
     return attributes
+
+def delete_plugin(
+        self,
+        plugin : meerschaum._internal.Plugin.Plugin,
+        debug : bool = False
+    ) -> SuccessTuple:
+    """
+    Delete a plugin from an API repository.
+    """
+    import json
+    r_url = plugin_r_url(plugin)
+    try:
+        response = self.delete(r_url, debug=debug)
+    except Exception as e:
+        return False, f"Failed to delete plugin '{plugin}'."
+
+    try:
+        success, msg = json.loads(response.text)
+    except Exception as e:
+        return False, response.text
+
+    return success, msg
+

@@ -7,7 +7,7 @@ This module contains the logic that builds the sqlalchemy engine string.
 """
 
 from meerschaum.utils.debug import dprint
-from meerschaum.config._paths import SQLITE_DB_PATH
+from meerschaum.config._paths import SQLITE_DB_PATH, DUCKDB_PATH
 
 ### determine driver and requirements from flavor
 default_requirements = {
@@ -81,6 +81,14 @@ flavor_configs = {
             'database' : SQLITE_DB_PATH,
         },
     },
+    'duckdb' : {
+        'engine' : 'duckdb',
+        'create_engine' : {},
+        'requirements' : '',
+        'defaults' : {
+            'database' : DUCKDB_PATH,
+        },
+    },
     'cockroachdb'      : {
         'engine'       : 'cockroachdb',
         'create_engine' : {c for c in default_create_engine_args if c != 'method'},
@@ -93,6 +101,15 @@ flavor_configs = {
         },
     },
 }
+install_flavor_drivers = {
+    'sqlite' : ['aiosqlite'],
+    'duckdb' : ['duckdb', 'duckdb_engine'],
+    'mysql' : ['pymysql'],
+    'timescaledb' : ['psycopg2'],
+    'postgresql' : ['psycopg2'],
+    'cockroachdb' : ['psycopg2', 'cockroachdb'],
+}
+
 
 def create_engine(
         self,
@@ -109,11 +126,8 @@ def create_engine(
     from meerschaum.utils.warnings import error, warn
     sqlalchemy = attempt_import('sqlalchemy')
     import urllib
-    if self.flavor in ('timescaledb', 'postgresql', 'cockroachdb'):
-        ### trigger install if not installed
-        psycopg2 = attempt_import('psycopg2', debug=self._debug, lazy=False)
-    if self.flavor == 'cockroachdb':
-        cockroachdb = attempt_import('cockroachdb', debug=self._debug, lazy=False)
+    if self.flavor in install_flavor_drivers:
+        attempt_import(*install_flavor_drivers[self.flavor], debug=self._debug, lazy=False)
 
     ### supplement missing values with defaults (e.g. port number)
     for a, value in flavor_configs[self.flavor]['defaults'].items():
@@ -132,14 +146,17 @@ def create_engine(
     _database = self.__dict__.get('database', None)
 
     ### self.sys_config was deepcopied and can be updated safely
-    if self.flavor == "sqlite":
-        engine_str = f"sqlite:///{self.database}"
+    if self.flavor in ("sqlite", "duckdb"):
+        ### The duckdb dialect might not be registered.
+        if self.flavor == 'duckdb':
+            sqlalchemy.engine.url.registry.register("duckdb", "duckdb_engine", "Dialect")
+
+        engine_str = f"{_engine}:///{_database}"
         if 'create_engine' not in self.sys_config:
             self.sys_config['create_engine'] = {}
         if 'connect_args' not in self.sys_config['create_engine']:
             self.sys_config['create_engine']['connect_args'] = {}
         self.sys_config['create_engine']['connect_args'].update({"check_same_thread" : False})
-        aiosqlite = attempt_import('aiosqlite', debug=self._debug, lazy=False)
     else:
         engine_str = (
             _engine + "://" + (_username if _username is not None else '') +
@@ -180,7 +197,7 @@ def create_engine(
         )
     except Exception as e:
         warn(e)
-        warn("Failed to create connector '{self}'.", stack=False)
+        warn(f"Failed to create connector '{self}'.", stack=False)
         engine = None
 
     if include_uri:

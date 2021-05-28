@@ -128,7 +128,7 @@ def activate_venv(
     from meerschaum.config._paths import VIRTENV_RESOURCES_PATH
     _venv = None
     virtualenv = attempt_import(
-        'virtualenv', venv=None, lazy=False, install=True, warn=False, debug=debug
+        'virtualenv', venv=None, lazy=False, install=True, warn=False, debug=debug, color=False,
     )
     if virtualenv is None:
         try:
@@ -158,10 +158,14 @@ def activate_venv(
 
     old_cwd = pathlib.Path(os.getcwd())
     os.chdir(VIRTENV_RESOURCES_PATH)
-    if debug:
-        dprint(f"Activating virtual environment '{venv}'...", color=color)
-    active_venvs.add(venv)
-    os.chdir(old_cwd)
+    try:
+        if debug:
+            dprint(f"Activating virtual environment '{venv}'...", color=color)
+        active_venvs.add(venv)
+    except Exception:
+        pass
+    finally:
+        os.chdir(old_cwd)
 
     ### override built-in import with attempt_import
     #  install_import_hook(venv, debug=debug)
@@ -180,6 +184,7 @@ def venv_exec(code: str, venv: str = 'mrsm', debug: bool = False) -> bool:
     """
     import subprocess, sys, platform, os
     from meerschaum.config._paths import VIRTENV_RESOURCES_PATH
+    from meerschaum.utils.debug import dprint
     executable = (
         sys.executable if venv is None
         else os.path.join(
@@ -188,7 +193,10 @@ def venv_exec(code: str, venv: str = 'mrsm', debug: bool = False) -> bool:
             ), 'python'
         )
     )
-    return subprocess.call([executable, '-c', code]) == 0
+    cmd_list = [executable, '-c', code]
+    if debug:
+        dprint(str(cmd_list))
+    return subprocess.call(cmd_list) == 0
 
 def get_pip(debug : bool = False) -> bool:
     """
@@ -210,12 +218,13 @@ def get_pip(debug : bool = False) -> bool:
 
 def pip_install(
         *packages: List[str],
-        args: List[str] = ['--upgrade'],
+        args: Optional[List[str]] = None,
         venv: str = 'mrsm',
         deactivate: bool = True,
         split : bool = True,
         check_update : bool = True,
         check_wheel : bool = True,
+        _uninstall : bool = False,
         color : bool = True,
         debug: bool = False
     ) -> bool:
@@ -223,6 +232,8 @@ def pip_install(
     Install pip packages
     """
     from meerschaum.config.static import _static_config
+    if args is None:
+        args = ['--upgrade'] if not _uninstall else []
     if color:
         try:
             from meerschaum.utils.formatting import ANSI, UNICODE
@@ -255,8 +266,10 @@ def pip_install(
             if not get_pip(debug=debug):
                 import sys
                 print(
-                    "Failed to import pip and ensurepip. Please install pip and restart Meerschaum.\n\n" +
-                    "You can find instructions on installing pip here: https://pip.pypa.io/en/stable/installing/"
+                    "Failed to import pip and ensurepip. " +
+                    "Please install pip and restart Meerschaum.\n\n" +
+                    "You can find instructions on installing pip here: " +
+                    "https://pip.pypa.io/en/stable/installing/"
                 )
                 sys.exit(1)
         else:
@@ -264,28 +277,27 @@ def pip_install(
         import pip
     if venv is not None:
         activate_venv(venv=venv, debug=debug, color=color)
-        if '--ignore-installed' not in args and '-I' not in _args:
+        if '--ignore-installed' not in args and '-I' not in _args and not _uninstall:
             _args += ['--ignore-installed']
 
-    ### NOTE: Added pip to be checked on each install. Too much?
-    if check_update and need_update(pip, debug=debug):
+    if check_update and need_update(pip, debug=debug) and not _uninstall:
         _args.append('pip')
-    _args = ['install'] + _args
+    _args = (['install'] if not _uninstall else ['uninstall']) + _args
 
-    if check_wheel:
+    if check_wheel and not _uninstall:
         if not have_wheel:
             _args.append('wheel')
 
     if not ANSI and '--no-color' not in _args:
         _args.append('--no-color')
 
-    if '--no-warn-conflicts' not in _args:
+    if '--no-warn-conflicts' not in _args and not _uninstall:
         _args.append('--no-warn-conflicts')
 
     if '--disable-pip-version-check' not in _args:
         _args.append('--disable-pip-version-check')
 
-    if venv is not None and '--target' not in _args and '-t' not in _args:
+    if venv is not None and '--target' not in _args and '-t' not in _args and not _uninstall:
         _args += ['--target', venv_target_path(venv, debug=debug)]
     elif (
         '--target' not in _args
@@ -294,13 +306,14 @@ def pip_install(
                 _static_config()['environment']['runtime'], None
             ) != 'docker'
             and not inside_venv()
+            and not _uninstall
     ):
         _args += ['--user']
     if '--progress-bar' in _args:
         _args.remove('--progress-bar')
-    if UNICODE:
+    if UNICODE and not _uninstall:
         _args += ['--progress-bar', 'pretty']
-    else:
+    elif not _uninstall:
         _args += ['--progress-bar', 'ascii']
     if debug:
         if '-v' not in _args or '-vv' not in _args or '-vvv' not in _args:
@@ -315,19 +328,30 @@ def pip_install(
         install_name = all_packages.get(root_name, root_name)
         _packages.append(install_name)
 
-    msg = f"Installing packages:"
+    msg = "Installing packages:" if not _uninstall else "Uninstalling packages:"
     for p in _packages:
         msg += f'\n  - {p}'
     print(msg)
 
-    success = run_python_package('pip', _args + _packages, venv=venv, debug=debug, color=color) == 0
+    success = run_python_package('pip', _args + _packages, venv=venv, debug=debug) == 0
     if venv is not None and deactivate:
         deactivate_venv(venv=venv, debug=debug, color=color)
-    msg = "Successfully installed packages." if success else "Failed to install packages."
+    msg = (
+        "Successfully " + ('un' if _uninstall else '') + "installed packages." if success 
+        else "Failed to " + ('un' if _uninstall else '') + "install packages."
+    )
     print(msg)
     if debug:
-        print('pip install returned:', success)
+        print('pip ' + ('un' if _uninstall else '') + 'install returned:', success)
     return success
+
+def pip_uninstall(
+        *args, **kw
+    ) -> bool:
+    """
+    Uninstall Python packages.
+    """
+    return pip_install(*args, _uninstall=True, **{k: v for k, v in kw.items() if k != '_uninstall'})
 
 def run_python_package(
         package_name : str,
@@ -337,7 +361,7 @@ def run_python_package(
         foreground : bool = True,
         debug : bool = False,
         **kw : Any,
-    ) -> int:
+    ) -> Union[int, subprocess.Popen]:
     """
     Runs an installed python package.
     E.g. Translates to `/usr/bin/python -m [package]`
@@ -360,11 +384,16 @@ def run_python_package(
     :param foreground:
         If `True`, start the subprocess as a foreground process.
         Defaults to `True`.
+
+    :param kw:
+        Additional keyword arguments to pass to `meerschaum.utils.process.run_process()`
+        and by extension `subprocess.Popen()`.
     """
     import sys, platform
     from subprocess import call
     from meerschaum.config._paths import VIRTENV_RESOURCES_PATH
     from meerschaum.utils.process import run_process
+    from meerschaum.utils.warnings import warn
     if args is None:
         args = []
     old_cwd = os.getcwd()
@@ -384,6 +413,8 @@ def run_python_package(
     try:
         rc = run_process(command, foreground=foreground, **kw)
     except Exception as e:
+        print(e)
+        warn(e)
         rc = call(command)
     except KeyboardInterrupt:
         rc = 1
@@ -505,12 +536,16 @@ def attempt_import(
                     f"Package '{root_name}' is not declared in meerschaum.utils.packages.",
                     ImportWarning,
                     stacklevel = 3,
-                    color = color
+                    color = False
                 )
 
         ### Determine if the package exists.
         if precheck is False:
-            found_module = do_import(name, debug=debug, warn=False, venv=venv, color=color) is not None
+            found_module = (
+                do_import(
+                    name, debug=debug, warn=False, venv=venv, color=color
+                ) is not None
+            )
         else:
             try:
                 found_module = (importlib.util.find_spec(name) is not None)
@@ -534,7 +569,7 @@ def attempt_import(
                         f"Failed to install '{install_name}'.",
                         ImportWarning,
                         stacklevel = 3,
-                        color = color
+                        color = False, ### Color triggers a deactivate, so keep as False
                     )
             elif warn:
                 ### Raise a warning if we can't find the package and install = False.
@@ -543,7 +578,7 @@ def attempt_import(
                      f"\n\nSet install=True when calling attempt_import.\n"),
                     ImportWarning,
                     stacklevel = 3,
-                    color = color
+                    color = False,
                 )
 
         ### Do the import. Will be lazy if lazy=True.
@@ -569,13 +604,13 @@ def attempt_import(
                             "Try install via Meershaum with `install packages '{install_name}'`.",
                             ImportWarning,
                             stacklevel = 3,
-                            color = color
+                            color = False,
                         )
                 elif warn:
                     warn_function(
                         f"There's an update available for '{m.__name__}'.",
                         stack = False,
-                        color = color
+                        color = False,
                     )
     if venv is not None and deactivate:
         deactivate_venv(venv=venv, debug=debug, color=color)
@@ -610,7 +645,7 @@ def lazy_import(
         debug = debug
     )
 
-def import_pandas() -> 'ModuleType':
+def import_pandas(**kw) -> 'ModuleType':
     """
     Quality-of-life function to attempt to import the configured version of pandas
     """
@@ -619,7 +654,7 @@ def import_pandas() -> 'ModuleType':
     ### NOTE: modin does NOT currently work!
     if pandas_module_name == 'modin':
         pandas_module_name = 'modin.pandas'
-    return attempt_import(pandas_module_name)
+    return attempt_import(pandas_module_name, **kw)
 
 def import_rich(lazy: bool = True, **kw : Any) -> 'ModuleType':
     """

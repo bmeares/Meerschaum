@@ -14,6 +14,14 @@ a {
   padding-bottom: 20px!ie7;
   max-height: 600px;
 }
+#console-div {
+  overflow-y: scroll;
+  max-height: 85vh;
+  height: 85vh;
+  color: white;
+  background-color: black;
+  padding: 0.5em;
+}
 .codeblock {
   background-color: var(--secondary) !important;
   color: white !important;
@@ -21,6 +29,12 @@ a {
   overflow-x: auto !important;
   padding: 0.5em !important;
 
+}
+.running-job {
+  color: green;
+}
+.stopped-job {
+  color: red;
 }
 /* .dbc_dark code { */
   /* color: var(--light) !important; */

@@ -38,7 +38,10 @@ def _complete_edit(
     if action is None:
         action = []
 
-    if len(action) > 0 and action[0] in options:
+    if (
+        len(action) > 0 and action[0] in options
+            and kw.get('line', '').split(' ')[-1] != action[0]
+    ):
         sub = action[0]
         del action[0]
         return options[sub](action=action, **kw)
@@ -177,9 +180,11 @@ def _edit_users(
             password = get_password(username, minimum_length=7)
 
         ## Make an admin
-        _type = None
+        _type = ''
         if yes_no(f"Change the user type for user '{username}'?", default='n', yes=yes, noask=noask):
-            is_admin = yes_no(f"Make user '{username}' an admin?", default='n', yes=yes, noask=noask)
+            is_admin = yes_no(
+                f"Make user '{username}' an admin?", default='n', yes=yes, noask=noask
+            )
             _type = 'admin' if is_admin else None
 
         ### Change the email
@@ -189,7 +194,10 @@ def _edit_users(
 
         ### Change the attributes
         attributes = None
-        if yes_no(f"Edit the attributes YAML file for user '{username}'?", default='n', yes=yes, noask=noask):
+        if yes_no(
+                f"Edit the attributes YAML file for user '{username}'?",
+                default='n', yes=yes, noask=noask
+        ):
             attr_path = pathlib.Path(os.path.join(USERS_CACHE_RESOURCES_PATH, f'{username}.yaml'))
             try:
                 existing_attrs = instance_connector.get_user_attributes(User(username), debug=debug)

@@ -17,6 +17,8 @@ from meerschaum.config.static import _static_config
 from meerschaum.utils.packages import attempt_import
 from meerschaum.utils.get_pipes import get_pipes as _get_pipes
 from meerschaum.config._paths import API_UVICORN_CONFIG_PATH
+from meerschaum.plugins import _api_plugins
+from meerschaum.utils.warnings import warn
 endpoints = _static_config()['api']['endpoints']
 aiofiles = attempt_import('aiofiles', lazy=False)
 fastapi = attempt_import('fastapi', lazy=False)
@@ -35,27 +37,29 @@ def get_uvicorn_config() -> Dict[str, Any]:
     """
     global uvicorn_config
     import json
+    _uvicorn_config = uvicorn_config
     if uvicorn_config is None:
         try:
             with open(API_UVICORN_CONFIG_PATH, 'r') as f:
                 uvicorn_config = json.load(f)
+            _uvicorn_config = uvicorn_config
         except Exception as e:
-            uvicorn_config = sys_config.get('uvicorn', None)
+            _uvicorn_config = sys_config.get('uvicorn', None)
 
-        if uvicorn_config is None:
-            uvicorn_config = dict()
+        if _uvicorn_config is None:
+            _uvicorn_config = dict()
 
         ### Default: main SQL connector
-        if 'mrsm_instance' not in uvicorn_config:
-            uvicorn_config['mrsm_instance'] = get_config('meerschaum', 'api_instance', patch=True)
-    return uvicorn_config
+        if 'mrsm_instance' not in _uvicorn_config:
+            _uvicorn_config['mrsm_instance'] = get_config('meerschaum', 'api_instance', patch=True)
+    return _uvicorn_config
 
 debug = get_uvicorn_config().get('debug', False) if API_UVICORN_CONFIG_PATH.exists() else False
 no_dash = get_uvicorn_config().get('no_dash', False)
 ### NOTE: Disable dash unless version is at least 0.3.0.
 _include_dash = (
     (not no_dash)
-    and (packaging_version.parse(version) >= packaging_version.parse('0.3.0.rc1'))
+    and (packaging_version.parse(version) >= packaging_version.parse('0.3.0rc1'))
 )
 
 connector = None
@@ -136,5 +140,18 @@ import meerschaum.api.routes as routes
 import meerschaum.api._events
 import meerschaum.api._websockets
 
+### Skip importing the dash if `--no-dash` is provided.
 if _include_dash:
     import meerschaum.api.dash
+
+### Execute the API plugins functions.
+for module_name, functions_list in _api_plugins.items():
+    for function in functions_list:
+        try:
+            function(app)
+        except Exception as e:
+            warn(
+                f"Failed to load API plugin '{module_name.split('.')[-1]}' "
+                + f"when executing function '{function.__name__}' with exception:\n{e}",
+                stack=False
+            )

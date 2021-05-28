@@ -13,7 +13,9 @@ def fetch(
         self,
         pipe : meerschaum.Pipe.Pipe,
         begin : str = 'now',
+        end : Optional[Union[datetime.datetime, str]] = None,
         chunk_hook : Optional[Callable[[pandas.DataFrame], Any]] = None,
+        chunksize : Optional[int] = -1,
         debug : bool = False,
         **kw : Any
     ) -> Optional['pd.DataFrame']:
@@ -27,6 +29,10 @@ def fetch(
     :param begin:
         Most recent datatime to search for data.
         If `backtrack_minutes` is provided, subtract `backtrack_minutes`.
+
+    :param end:
+        The latest datetime to search for data.
+        If `end` is `None`, perform an unbounded search.
 
     :param pipe:
         Below are the various pipe parameters available to pipe.fetch.
@@ -77,13 +83,24 @@ def fetch(
         btm = 0
         if 'backtrack_minutes' in instructions:
             btm = instructions['backtrack_minutes']
-        da = dateadd_str(flavor=self.flavor, datepart='minute', number=(-1 * btm), begin=begin)
+        begin_da = dateadd_str(
+            flavor=self.flavor, datepart='minute', number=(-1 * btm), begin=begin,
+        )
+        end_da = dateadd_str(
+            flavor=self.flavor, datepart='minute', number=1, begin=end,
+        ) if end else None
 
     meta_def = f"WITH definition AS ({definition}) SELECT DISTINCT * FROM definition"
-    if datetime and da:
-        meta_def += f"\nWHERE {datetime} > {da}"
+    if datetime and (begin_da or end_da):
+        meta_def += "\nWHERE "
+        if begin_da:
+            meta_def += f"{datetime} >= {begin_da}"
+        if begin_da and end_da:
+            meta_def += " AND "
+        if end_da:
+            meta_def += f"{datetime} <= {end_da}"
 
-    df = self.read(meta_def, chunk_hook=chunk_hook, debug=debug)
+    df = self.read(meta_def, chunk_hook=chunk_hook, chunksize=chunksize, debug=debug)
     ### if sqlite, parse for datetimes
     if self.flavor == 'sqlite':
         from meerschaum.utils.misc import parse_df_datetimes

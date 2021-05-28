@@ -36,7 +36,9 @@ running_monitors = {}
 stopped_jobs = {}
 stopped_monitors = {}
 
-stylesheets = ['/static/css/darkly.min.css', '/static/css/dbc_dark.css', '/static/css/dash.css']
+stylesheets = [
+    '/static/css/darkly.min.css', '/static/css/dbc_dark.css', '/static/css/dash.css',
+]
 dash_app = enrich.DashProxy(
     __name__,
     title = 'Meerschaum Web',

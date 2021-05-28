@@ -21,9 +21,9 @@ def prompt(
     ) -> str:
     """
     Ask the user a question and return the answer.
-    Wrapper around prompt_toolkit.prompt() with modified behavior.
+    Wrapper around `prompt_toolkit.prompt()` with modified behavior.
     For example, an empty string returns default instead of printing it for the user to delete
-    (prompt_toolkit behavior).
+    (`prompt_toolkit` behavior).
 
     :param question:
         The question to print to the user.
@@ -33,6 +33,20 @@ def prompt(
 
     :param default:
         If the response is '', return the default value.
+
+    :param detect_password:
+        If `True`, set the input method to a censored password box if the word `password`
+        appears in the question.
+        Defaults to `True`.
+
+    :param is_password:
+        If `True`, set the input method to a censored password box.
+        May be overridden by `detect_password` unless `detect_password` is set to `False`.
+        Defaults to `False`.
+
+    :param wrap_lines:
+        If `True`, wrap the text across multiple lines.
+        Flag is passed onto `prompt_toolkit`.
 
     :param noask:
         If True, only print the question and return the default answer.
@@ -69,7 +83,7 @@ def prompt(
     other_lines = '' if len(lines) <= 1 else '\n'.join(lines[1:])
 
     if ANSI:
-        first_line = colored(first_line, *question_config['ansi']['color'])
+        first_line = colored(first_line, **question_config['ansi']['rich'])
 
     _icon = question_config[CHARSET]['icon']
     question = (' ' + _icon + ' ') if icon and len(_icon) > 0 else ''
@@ -110,7 +124,7 @@ def yes_no(
         The question to print to the user.
 
     :param options:
-        The y/n options. The first is always considered True.
+        The y/n options. The first is always considered `True`, and all options must be lower case.
         This behavior may be modifiable change in the future.
 
     :param default:
@@ -153,7 +167,7 @@ def yes_no(
         if answer == "":
             answer = default
 
-        if answer in options:
+        if answer.lower() in options:
             break
         warn('Please enter a valid reponse.', stack=False)
     

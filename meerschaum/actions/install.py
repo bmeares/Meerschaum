@@ -3,7 +3,7 @@
 # vim:fenc=utf-8
 
 """
-Install plugins
+Install plugins and pip packages.
 """
 
 from __future__ import annotations
@@ -33,7 +33,9 @@ def _complete_install(
     if action is None:
         action = []
     options = {
+        'plugin' : _complete_install_plugins,
         'plugins' : _complete_install_plugins,
+        'package': _complete_install_packages,
         'packages': _complete_install_packages,
     }
 
@@ -69,7 +71,7 @@ def _install_plugins(
     """
     from meerschaum.utils.debug import dprint
     from meerschaum.utils.warnings import info
-    from meerschaum.actions.plugins import reload_plugins
+    from meerschaum.plugins import reload_plugins
     from meerschaum.connectors.parse import parse_repo_keys
     import meerschaum.actions
     from meerschaum.utils.formatting import print_tuple
@@ -105,7 +107,11 @@ def _complete_install_plugins(
     if len(action) == 0:
         search_term = None
     else:
-        search_term = action[0]
+        search_term = action[-1]
+
+    ### Don't start searching unless a key has been pressed.
+    if search_term is None or len(search_term) == 0:
+        return []
 
     ### In case we're using the Shell (which we have to in order for _complete to work),
     ### get the current repository.
@@ -138,9 +144,16 @@ def _install_packages(
         return False, f"No packages to install"
     from meerschaum.utils.warnings import info
     from meerschaum.utils.packages import pip_install
+    from meerschaum.utils.misc import items_str
     if pip_install(*action, args=['--upgrade'] + sub_args, debug=debug):
-        return True, f"Successfully installed packages to virtual environment 'mrsm':\n{action}"
-    return False, f"Failed to install packages:\n{action}"
+        return True, (
+            "Successfully installed package" + ("s" if len(action) != 1 else '')
+            + f" {items_str(action)}"
+            + " into the Meerschaum virtual environment."
+        )
+    return False, (
+        f"Failed to install package" + ("s" if len(action) != 1 else '') + f" {items_str(action)}."
+    )
 
 def _complete_install_packages(
         **kw : Any

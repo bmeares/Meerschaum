@@ -13,6 +13,7 @@
 docs/pdoc/*
 docs/site/*
 file_system_store/
+include/
 
 # Byte-compiled / optimized / DLL files
 __pycache__/
