@@ -1,4 +1,3 @@
 # Feature Showcase
 
-TEX
 

@@ -201,15 +201,22 @@ def value(
         self,
         query : str,
         *args : Any,
+        use_pandas : bool = False,
         **kw : Any
     ) -> Any:
     """
     Return a single value from a SQL query
     (index a DataFrame at [0, 0])
     """
+    if use_pandas:
+        try:
+            return self.read(query, *args, **kw).iloc[0, 0]
+        except Exception as e:
+            return None
     try:
-        return self.read(query, *args, **kw).iloc[0, 0]
-    except:
+        result = self.exec(query, *args, **kw)
+        return result.first()[0]
+    except Exception as e:
         return None
 
 def execute(

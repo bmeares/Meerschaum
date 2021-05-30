@@ -141,7 +141,7 @@ def _install_packages(
         `install packages pandas numpy`
     """
     if not action:
-        return False, f"No packages to install"
+        return False, f"No packages to install."
     from meerschaum.utils.warnings import info
     from meerschaum.utils.packages import pip_install
     from meerschaum.utils.misc import items_str

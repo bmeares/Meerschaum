@@ -138,9 +138,12 @@ def activate_venv(
         except ImportError:
             _venv = None
     if virtualenv is None and _venv is None:
-        print(f"Failed to import virtualenv! Please install virtualenv via pip then restart Meerschaum.")
+        print(
+            "Failed to import virtualenv! "
+            + "Please install virtualenv via pip then restart Meerschaum."
+        )
         sys.exit(1)
-    venv_path = pathlib.Path(os.path.join(VIRTENV_RESOURCES_PATH, venv))
+    venv_path = VIRTENV_RESOURCES_PATH / venv
     bin_path = pathlib.Path(
         venv_path,
         ('bin' if platform.system() != 'Windows' else "Scripts")
@@ -174,6 +177,7 @@ def activate_venv(
         sys.path.insert(0, str(target))
     if debug:
         dprint(f'sys.path: {sys.path}', color=color)
+    #  print(sys.path)
     return True
 
 def venv_exec(code: str, venv: str = 'mrsm', debug: bool = False) -> bool:
@@ -221,7 +225,7 @@ def pip_install(
         args: Optional[List[str]] = None,
         venv: str = 'mrsm',
         deactivate: bool = True,
-        split : bool = True,
+        split : bool = False,
         check_update : bool = True,
         check_wheel : bool = True,
         _uninstall : bool = False,
@@ -358,7 +362,7 @@ def run_python_package(
         args : Optional[List[str]] = None,
         venv : Optional[str] = None,
         cwd : Optional[str] = None,
-        foreground : bool = True,
+        foreground : bool = False,
         debug : bool = False,
         **kw : Any,
     ) -> Union[int, subprocess.Popen]:
@@ -383,7 +387,7 @@ def run_python_package(
 
     :param foreground:
         If `True`, start the subprocess as a foreground process.
-        Defaults to `True`.
+        Defaults to `False`.
 
     :param kw:
         Additional keyword arguments to pass to `meerschaum.utils.process.run_process()`
@@ -408,13 +412,14 @@ def run_python_package(
         )
     )
     command = [executable, '-m', str(package_name)] + [str(a) for a in args]
+    import traceback
     if debug:
         print(command, file=sys.stderr)
     try:
         rc = run_process(command, foreground=foreground, **kw)
     except Exception as e:
-        print(e)
-        warn(e)
+        print(traceback.format_exc(e))
+        warn(e, color=False)
         rc = call(command)
     except KeyboardInterrupt:
         rc = 1
@@ -645,18 +650,27 @@ def lazy_import(
         debug = debug
     )
 
-def import_pandas(**kw) -> 'ModuleType':
+def import_pandas(deactivate : bool = False, debug : bool = False, lazy : bool = False,  **kw) -> 'ModuleType':
     """
-    Quality-of-life function to attempt to import the configured version of pandas
+    Quality-of-life function to attempt to import the configured version of pandas.
     """
+    import sys
     from meerschaum.config import get_config
     pandas_module_name = get_config('system', 'connectors', 'all', 'pandas', patch=True)
     ### NOTE: modin does NOT currently work!
     if pandas_module_name == 'modin':
         pandas_module_name = 'modin.pandas'
-    return attempt_import(pandas_module_name, **kw)
 
-def import_rich(lazy: bool = True, **kw : Any) -> 'ModuleType':
+    activate_venv(venv='mrsm', debug=debug)
+    pd = attempt_import(pandas_module_name, deactivate=deactivate, debug=debug, lazy=lazy, **kw)
+    if deactivate:
+        deactivate_venv(venv='mrsm', debug=debug)
+    return pd
+
+def import_rich(
+        lazy: bool = True, deactivate : bool = False, debug : bool = False,
+        **kw : Any
+    ) -> 'ModuleType':
     """
     Quality of life function for importing rich.
     """
@@ -664,10 +678,15 @@ def import_rich(lazy: bool = True, **kw : Any) -> 'ModuleType':
     if not ANSI and not UNICODE:
         return None
 
+    activate_venv(venv='mrsm', debug=debug)
+
     ## need typing_extensions for `from rich import box`
-    typing_extensions = attempt_import('typing_extensions', lazy=False)
-    pygments = attempt_import('pygments', lazy=False)
-    return attempt_import('rich', lazy=lazy, **kw)
+    typing_extensions = attempt_import('typing_extensions', deactivate=deactivate, lazy=False)
+    pygments = attempt_import('pygments', deactivate=deactivate, lazy=False)
+    rich = attempt_import('rich', lazy=lazy, deactivate=deactivate, **kw)
+    if deactivate:
+        deactivate_venv(venv='mrsm', debug=debug)
+    return rich
 
 def get_modules_from_package(
         package: 'package',
