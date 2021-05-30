@@ -484,17 +484,17 @@ def get_pipe_attributes(
 
     try:
         q = sqlalchemy.select([pipes]).where(pipes.c.pipe_id == pipe.id)
-        attributes = self.read(q, debug=debug).to_dict('records')[0]
+        attributes = dict(self.exec(q, debug=debug).first())
     except Exception as e:
         warn(e)
         return None
 
     ### handle non-PostgreSQL databases (text vs JSON)
-    if not isinstance(attributes['parameters'], dict):
+    if not isinstance(attributes.get('parameters', None), dict):
         try:
             import json
             attributes['parameters'] = json.loads(attributes['parameters'])
-        except:
+        except Exception as e:
             attributes['parameters'] = dict()
 
     return attributes
@@ -666,6 +666,7 @@ def get_sync_time(
     """
     from meerschaum.connectors.sql._tools import sql_item_name, build_where
     from meerschaum.utils.warnings import warn
+    import datetime
     table = sql_item_name(str(pipe), self.flavor)
     dt = sql_item_name(pipe.get_columns('datetime'), self.flavor)
 
@@ -678,13 +679,18 @@ def get_sync_time(
         import datetime
         db_time = self.value(q, silent=True, debug=debug)
 
-        ### sqlite returns str
+        ### No datetime could be found.
         if db_time is None:
             return None
+        ### sqlite returns str.
         elif isinstance(db_time, str):
             from meerschaum.utils.packages import attempt_import
             dateutil_parser = attempt_import('dateutil.parser')
             st = dateutil_parser.parse(db_time)
+        ### Do nothing if a datetime object is returned.
+        elif isinstance(db_time, datetime.datetime):
+            st = db_time
+        ### Convert pandas timestamp to Python datetime.
         else:
             st = db_time.to_pydatetime()
 
