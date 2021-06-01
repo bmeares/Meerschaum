@@ -1,17 +1,14 @@
 ---
 hide:
-
   - toc
 ---
 <style>
   .md-main__inner {
     margin-top: 0;
   }
+@media screen and (min-width: 76.1875em) {
   .md-sidebar {
     display: none;
-  }
-  .test {
-    align: center;
   }
   .grid-container {
     display: grid;
@@ -22,17 +19,40 @@ hide:
   }
   .grid-child {
   }
-  .center {
-    text-align: center;
-  }
   #pip-button {
-    width: 73%;
+    width: 20em;
     font-size: 1.1rem;
+    float: left;
+    cursor: pointer;
   }
   #get-started-button {
     font-size: 1.1rem;
-    width: 73%;
+    width: 20em;
+    cursor: pointer;
   }
+}
+@media screen and (max-width: 76.1875em) {
+  #pip-button {
+    font-size: 1.0rem;
+    width: 20em;
+    cursor: pointer;
+  }
+  #get-started-button {
+    font-size: 1.0rem;
+    width: 20em;
+    cursor: pointer;
+    margin-bottom: 20px;
+  }
+}
+  .test {
+    align: center;
+  }
+
+.center {
+    text-align: center;
+  }
+
+
 </style>
 <script type="text/javascript">
   function copy_install_text(btn){
@@ -47,6 +67,7 @@ hide:
     window.setTimeout(() => {
       btn.text = old_btn_text;
     }, 2000);
+    return false;
    }
 </script>
 <!-- <script src="https://platform.linkedin.com/badges/js/profile.js" async defer type="text/javascript"></script> -->
@@ -58,11 +79,11 @@ If you'd like to incorporate Meerschaum into your project, head over to [docs.me
 
 <div class="grid-container center">
   <div class="grid-child">
-    <p><a id="get-started-button" class="md-button md-button--primary" href="get-started" style="float: right;">Get Started</a></p>
+    <a id="get-started-button" class="md-button md-button--primary" href="get-started">Get Started</a>
   </div>
-  <div class="grid-child" style="float: left;">
-    <p><a id="pip-button" class="md-button" href="#" style="float: left; font-family: monospace" onclick="copy_install_text(this)">$ pip install meerschaum<span class="twemoji">
-</a></p>
+  <div class="grid-child" >
+    <a id="pip-button" class="md-button" href="#!" style="font-family: monospace" onclick="copy_install_text(this)">$ pip install meerschaum<span class="twemoji">
+</a>
   </div>
 </div>
 
