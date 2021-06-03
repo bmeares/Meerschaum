@@ -450,6 +450,11 @@ class Shell(cmd.Cmd):
             self.emptyline()
             return ""
 
+        ### If the `--daemon` flag is present, prepend 'start job'.
+        if args.get('daemon', False) and 'stack' not in args['action']:
+            args['action'] = ['start', 'jobs'] + args['action']
+            action = 'start'
+
         ### If the action cannot be found, resort to executing a shell command.
         try:
             func = getattr(self, 'do_' + action)
@@ -458,11 +463,6 @@ class Shell(cmd.Cmd):
             action = "sh"
             args['action'].insert(0, action)
             func = getattr(self, f'do_{action}')
-
-        ### If the `--daemon` flag is present, prepend 'start job'.
-        if args.get('daemon', False) and 'stack' not in args['action']:
-            args['action'] = ['start', 'jobs'] + args['action']
-            action = 'start'
 
         positional_only = (action not in self._actions)
         if positional_only:
