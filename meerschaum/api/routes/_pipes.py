@@ -241,13 +241,27 @@ def get_pipe_data(
         location_key : str,
         begin : datetime.datetime = None,
         end : datetime.datetime = None,
-        params : Optional[Dict[str, Any]] = None,
+        params : Optional[str] = None,
         orient : str = 'records',
         curr_user : 'meerschaum._internal.User.User' = fastapi.Depends(manager),
     ) -> str:
     """
-    Get a Pipe's data. Optionally set query boundaries
+    Get a Pipe's data. Optionally set query boundaries.
     """
+    _params = {}
+    if params is not None:
+        import json
+        try:
+            _params = json.loads(params)
+        except Exception as e:
+            _params = None
+
+    if not isinstance(_params, dict):
+        raise fastapi.HTTPException(
+            status_code = 409,
+            detail = "Params must be a valid JSON-encoded dictionary.",
+        )
+
     p = get_pipe(connector_keys, metric_key, location_key)
     if not is_pipe_registered(p, pipes(refresh=True)):
         raise fastapi.HTTPException(
@@ -267,7 +281,7 @@ def get_pipe_data(
         content = p.get_data(
             begin = begin,
             end = end,
-            params = params, 
+            params = _params, 
             debug = debug
         ).to_json(
             date_format = 'iso',
