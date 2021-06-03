@@ -31,13 +31,63 @@ Data are added
 
 ### Turn-key Visualization Stack
 
-Meerschaum comes with a [pre-configured data visualization stack](/get-started/starting-the-stack/). You can delpoy Grafana and a database in seconds, and additional services may be easily added with `mrsm edit config stack`.
+Meerschaum comes with a [pre-configured data visualization stack](/get-started/starting-the-stack/). You can deploy Grafana and a database in seconds, and additional services may be easily added with `mrsm edit config stack`.
 
 <asciinema-player src="/assets/casts/stack.cast" autoplay="true" loop="true" size="small" preload="true" rows="10"></asciinema-player>
 
 ![Example Grafana Dashboard](grafana-dashboard.png)
 
-### Integrated with Pandas
+### Pandas Integration
+
+If you use [pandas](https://pandas.pydata.org/), Meerschaum lets you tap into your datastreams as DataFrames.
+
+```python
+>>> import meerschaum as mrsm
+>>> 
+>>> weather_pipe = mrsm.Pipe('plugin:noaa', 'weather')
+>>> 
+>>> ### Optionally filter by datetime or other parameters.
+>>> df = weather_pipe.get_data(
+...   begin = '2020-01-01',
+...   end = '2021-01-01',
+...   params = {'station': ['KATL', 'KCEU']},
+... )
+>>> 
+```
+
+You can create new pipes on any instance (database) from a DataFrame and index column names.
+
+```python
+>>> import meerschaum as mrsm, pandas as pd
+>>> df = pd.read_csv('data.csv')
+>>> csv_pipe = mrsm.Pipe(
+...   'csv', 'weather',
+...   instance='sql:local', 
+...   columns={'datetime': 'timestamp', 'id': 'station'},
+... )
+>>> csv_pipe.sync(df)
+```
+
+!!! question "What are instances?"
+    A Meerschaum instance is a connector to a database or API that itself contains Meerschaum pipes. [Connectors](/reference/connectors/), such as database connections, are represented in the format `type:label`.
+    
+    The instance `sql:local` defaults to a built-in SQLite database.
+
+You can also forego pipes and access tables directly.
+
+```python
+>>> import meerschaum as mrsm, pandas as pd
+>>> 
+>>> conn = mrsm.get_connector()
+>>> df = pd.read_csv('data.csv')
+>>> 
+>>> ### Wrapper around `df.to_sql()`.
+>>> conn.to_sql(df, chunksize=1000)
+>>> 
+>>> ### Directly access the `sqlalchemy` engine.
+>>> print(conn.engine)
+Engine(postgresql://mrsm:***@localhost:5432/meerschaum)
+```
 
 ### SQL CLI
 
@@ -49,10 +99,17 @@ For certain flavors, Meerschaum is integrated with tools from the [dbcli](https:
 
 The `sql` command also lets you read from tables or execute queries on any of your databases directly from the command line.
 
-
-
+<asciinema-player src="/assets/casts/sql-shell.cast" autoplay="true" loop="true" size="small" preload="true"></asciinema-player>
 
 ## Background Jobs
+
+Some actions need to run continuously, such as running the API or syncing pipes in a loop. Rather than relying on `systemd` or `cron`, you can use the built-in jobs system.
+
+All Meerschaum actions may be executed as background jobs by adding `-d` or `--daemon` flags or by prefacing the command with `start job`. A specific label may be assigned to a job with `--name`.
+
+You can monitor the status of jobs with `show logs`, which will follow the logs of running jobs.
+
+<asciinema-player src="/assets/casts/jobs.cast" autoplay="true" loop="true" size="small" preload="true"></asciinema-player>
 
 ## Plugins
 

@@ -129,7 +129,7 @@ def sql(
     sqlalchemy_engine_result = attempt_import('sqlalchemy.engine.result')
     if 'sqlalchemy' in str(type(result)):
         if not nopretty:
-            print_tuple(f"Successfully executed query:\n\n{query}")
+            print_tuple((True, f"Successfully executed query:\n\n{query}"))
     else:
         if not nopretty:
             pprint(result)
