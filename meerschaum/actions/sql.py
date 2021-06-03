@@ -31,10 +31,33 @@ def sql(
             Launch an interactive CLI. If {label} is omitted, use 'main'.
 
         - `sql {label} read [query / table]`
-            Read a table or query as a pandas DataFrame and print the result
+            Read a table or query as a pandas DataFrame and print the result.
         
         - `sql {label} exec [query]`
-            Execute a query and print the success status
+            Execute a query and print the success status.
+
+    Examples:
+        - `sql`
+            Open an interactive CLI for `sql:main`.
+
+        - `sql local`
+            Open an interactive CLI for `sql:local`.
+        
+        - `sql table`
+            Read from `table` on `sql:main`
+              (translates to `SELECT * FROM table`).
+
+        - `sql local table`
+            Read from `table` on `sql:local`.
+
+        - `sql local read table`
+            Read from `table` on `sql:local`.
+
+        - `sql "SELECT * FROM table WHERE id = 1"`
+            Execute the above query on `sql:main` and print the results.
+
+        - `sql local exec "INSERT INTO table (id) VALUES (1)"
+            Execute the above query on `sql:local`.
     """
 
     if action is None:
@@ -42,14 +65,15 @@ def sql(
 
     ### input: `sql read` or `sql exec`
     if len(action) == 1 and action[0] in exec_methods:
-        print(sql.__doc__)
-        return (False, 'Query must not be empty')
+        import textwrap
+        print(textwrap.dedent(sql.__doc__))
+        return (False, 'Query must not be empty.')
 
     from meerschaum.connectors import get_connector
 
     ### input: `sql`
     if len(action) == 0:
-        return get_connector().cli(debug=debug) 
+        return get_connector('sql').cli(debug=debug) 
 
     from meerschaum.config import get_config
     from meerschaum.utils.debug import dprint

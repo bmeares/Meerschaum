@@ -14,12 +14,31 @@ def sync_yaml_configs(
         keys : List[str],
         sub_path : pathlib.Path,
         substitute : bool = True,
+        permissions : Optional[int] = None,
     ) -> None:
     """
     Synchronize sub-configuration with main configuration file.
 
     NOTE: This function might need refactoring to work better with the new
     `read_config` system.
+
+    :param config_path:
+        Not sure if this is necessary.
+
+    :param keys:
+        The config keys to read via `get_config()`.
+
+    :param sub_path:
+        The derivative file to write.
+
+    :param substitute:
+        If `True`, parse `MRSM{}` syntax and substitute values.
+        See `get_config()` for more information.
+        Defaults to `True`.
+
+    :param permissions:
+        If not `None`, set permissions of the derivative file.
+        Defaults to `None`.
     """
     import os, sys
     try:
@@ -72,9 +91,12 @@ def sync_yaml_configs(
         with open(new_path, 'w+') as f:
             f.write(new_header)
             f.write(new_config_text)
+    if permissions is not None:
+        os.chmod(new_path, permissions)
 
 def sync_files(keys : List[str] = []):
     def _stack():
+        import os
         from meerschaum.config._paths import CONFIG_DIR_PATH, STACK_ENV_PATH, STACK_COMPOSE_PATH
         from meerschaum.config._paths import STACK_COMPOSE_FILENAME, STACK_ENV_FILENAME
         from meerschaum.config._paths import GRAFANA_DATASOURCE_PATH, GRAFANA_DASHBOARD_PATH
@@ -98,6 +120,7 @@ def sync_files(keys : List[str] = []):
             GRAFANA_DASHBOARD_PATH,
             substitute = True,
         )
+
 
     key_functions = {
         'stack' : _stack,

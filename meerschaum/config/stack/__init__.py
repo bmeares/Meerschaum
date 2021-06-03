@@ -178,8 +178,9 @@ default_docker_compose_config = {
             ],
             'volumes' : [
                 'grafana_storage' + ':' + volumes['grafana_storage'],
-                f'{GRAFANA_DATASOURCE_PATH.parent}:/etc/grafana/provisioning/datasources:ro',
-                f'{GRAFANA_DASHBOARD_PATH.parent}:/etc/grafana/provisioning/dashboards:ro',
+                ### NOTE: Mount with the 'z' option for SELinux
+                f'{GRAFANA_DATASOURCE_PATH.parent}:/etc/grafana/provisioning/datasources:z,ro',
+                f'{GRAFANA_DASHBOARD_PATH.parent}:/etc/grafana/provisioning/dashboards:z,ro',
                 #  f'{GRAFANA_INI_PATH}:/etc/grafana/grafana.ini',
             ],
             'environment' : [
