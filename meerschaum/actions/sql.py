@@ -17,6 +17,7 @@ exec_methods = {
 def sql(
         action : Optional[List[str]] = None,
         gui : bool = False,
+        nopretty : bool = False,
         debug : bool = False,
         **kw : Any
     ):
@@ -121,14 +122,19 @@ def sql(
 
     result = getattr(conn, method)(query, debug=debug)
     if result is False:
-        return (False, "Failed to execute query!")
+        return (False, f"Failed to execute query:\n\n{query}")
     
     from meerschaum.utils.packages import attempt_import
+    from meerschaum.utils.formatting import print_tuple, pprint
     sqlalchemy_engine_result = attempt_import('sqlalchemy.engine.result')
-    if isinstance(result, sqlalchemy_engine_result.ResultProxy):
-        print("Success")
+    if 'sqlalchemy' in str(type(result)):
+        if not nopretty:
+            print_tuple(f"Successfully executed query:\n\n{query}")
     else:
-        print(result)
+        if not nopretty:
+            pprint(result)
+        else:
+            print(result.to_json(date_format='iso', orient='split', index=False, date_unit='us'))
         if gui:
             pandasgui = attempt_import('pandasgui')
             pandasgui.show(result)
