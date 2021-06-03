@@ -43,10 +43,14 @@ Meerschaum comes with a [pre-configured data visualization stack](/get-started/s
 
 The `sql` command lets you quickly interact with your databases.
 
-
 <asciinema-player src="/assets/casts/sql-cli.cast" autoplay="true" loop="true" size="small" preload="true"></asciinema-player>
 
 For certain flavors, Meerschaum is integrated with tools from the [dbcli](https://www.dbcli.com/) project that let you drop into an interactive SQL database environment.
+
+The `sql` command also lets you read from tables or execute queries on any of your databases directly from the command line.
+
+
+
 
 ## Background Jobs
 
