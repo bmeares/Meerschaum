@@ -1,3 +1,6 @@
+<link rel="stylesheet" type="text/css" href="/assets/css/asciinema-player.css" />
+<script src="/assets/js/asciinema-player.js"></script>
+
 # Feature Showcase
 
 The goal behind Meerschaum is to be *The Data Engineer's Toolbox*: to offer features that help you:
@@ -18,7 +21,7 @@ With Meerschaum, your datastreams are called [pipes](/reference/pipes/). Pipes a
 ## Bootstrapping
 The [bootstrap command](/get-started/bootstrapping-a-pipe/) walks you through the steps for creating a new pipe and makes adding datastreams straightforward.
 
-<video autoplay loop muted height="450"><source type="video/webm" src="/assets/videos/bootstrap-pipe.webm"></video>
+<asciinema-player src="/assets/casts/bootstrap.cast" autoplay="true" loop="true" preload="true"></asciinema-player>
 
 ## Syncing Service
 
@@ -30,7 +33,7 @@ Bar
 
 ## Turn-key Visualization Stack
 
-Foo bar
+<asciinema-player src="/assets/casts/stack.cast" autoplay="true" loop="true" size="big" preload="true" rows="25"></asciinema-player>
 
 ## Background Jobs
 
