@@ -50,7 +50,8 @@ def fetch(
             pipe.parameters['backtrack_minutes'] : Union[int, float]
                 How many minutes before `begin` to search for data.
 
-    :param debug: Verbosity toggle.
+    :param debug:
+        Verbosity toggle.
     """
     from meerschaum.utils.debug import dprint
     from meerschaum.utils.warnings import warn, error
@@ -61,24 +62,24 @@ def fetch(
         warn(f"Parameters for '{pipe}' must include 'columns' and 'fetch'", stack=False)
         return None
 
-    datetime = None
+    dt_name = None
     if 'datetime' not in pipe.columns:
-        warn(f"Missing datetime column for '{pipe}'. Will select all data instead")
+        warn(f"Missing datetime column for '{pipe}'. Will select all data instead.")
     else:
-        datetime = sql_item_name(pipe.get_columns('datetime'), self.flavor)
+        dt_name = sql_item_name(pipe.get_columns('datetime'), self.flavor)
 
     instructions = pipe.parameters['fetch']
 
     try:
         definition = instructions['definition']
     except KeyError:
-        error("Cannot fetch without a definition", KeyError)
+        error("Cannot fetch without a definition.", KeyError)
 
     if 'order by' in definition.lower() and 'over' not in definition.lower():
         error("Cannot fetch with an ORDER clause in the definition")
 
     da = None
-    if datetime:
+    if dt_name:
         ### default: do not backtrack
         btm = 0
         if 'backtrack_minutes' in instructions:
@@ -90,15 +91,19 @@ def fetch(
             flavor=self.flavor, datepart='minute', number=1, begin=end,
         ) if end else None
 
-    meta_def = f"WITH definition AS ({definition}) SELECT DISTINCT * FROM definition"
-    if datetime and (begin_da or end_da):
-        meta_def += "\nWHERE "
+    meta_def = (
+        _simple_fetch_query(pipe) if not pipe.columns.get('id', None)
+        else _join_fetch_query(pipe, debug=debug, **kw)
+    )
+
+    if dt_name and (begin_da or end_da):
+        meta_def += "\n" + ("AND" if 'where' in meta_def.lower() else "WHERE") + " "
         if begin_da:
-            meta_def += f"{datetime} >= {begin_da}"
+            meta_def += f"definition.{dt_name} >= {begin_da}"
         if begin_da and end_da:
             meta_def += " AND "
         if end_da:
-            meta_def += f"{datetime} <= {end_da}"
+            meta_def += f"definition.{dt_name} <= {end_da}"
 
     df = self.read(meta_def, chunk_hook=chunk_hook, chunksize=chunksize, debug=debug)
     ### if sqlite, parse for datetimes
@@ -106,3 +111,60 @@ def fetch(
         from meerschaum.utils.misc import parse_df_datetimes
         df = parse_df_datetimes(df, debug=debug)
     return df
+
+def _simple_fetch_query(pipe, debug: bool=False, **kw) -> str:
+    """
+    Build a fetch query from a pipe's definition.
+    """
+    definition = pipe.parameters['fetch']['definition']
+    return f"WITH definition AS ({definition}) SELECT DISTINCT * FROM definition"
+
+def _join_fetch_query(
+        pipe,
+        debug: bool=False,
+        new_ids: bool=True,
+        **kw
+    ) -> str:
+    """
+    Build a fetch query based on the datetime and ID indices.
+    """
+    if not pipe.exists(debug=debug):
+        return _simple_fetch_query(pipe, debug=debug, **kw)
+
+    from meerschaum.connectors.sql._tools import sql_item_name, dateadd_str
+    pipe_name = sql_item_name(str(pipe), pipe.connector.flavor)
+    sync_times_table = str(pipe) + "_sync_times"
+    sync_times_name = sql_item_name(sync_times_table, pipe.connector.flavor)
+    id_name = sql_item_name(pipe.columns['id'], pipe.connector.flavor)
+    dt_name = sql_item_name(pipe.columns['datetime'], pipe.connector.flavor)
+    cols_types = pipe.get_columns_types(debug=debug)
+    sync_times_query = f"""
+    SELECT {id_name}, MAX({dt_name}) AS {dt_name}
+    FROM {pipe_name}
+    GROUP BY {id_name}
+    """
+    sync_times = pipe.connector.read(sync_times_query, debug=debug, silent=True)
+    _sync_times_q = f",\n{sync_times_name} AS ("
+    for _id, _st in sync_times.itertuples(index=False):
+        _sync_times_q += (
+            f"SELECT CAST('{_id}' AS " + cols_types[pipe.columns['id']] + f") AS {id_name}, "
+            + dateadd_str(
+                flavor=pipe.connector.flavor,
+                begin=_st,
+                datepart='minute',
+                number=pipe.parameters.get('backtrack_minutes', 0)
+            ) + " AS " + dt_name + "\nUNION ALL\n"
+        )
+    _sync_times_q = _sync_times_q[:(-1 * len('UNION ALL\n'))] + ")"
+
+    definition = pipe.parameters['fetch']['definition']
+    query = f"""
+    WITH definition AS ({definition}){_sync_times_q}
+    SELECT definition.*
+    FROM definition
+    LEFT OUTER JOIN {sync_times_name} AS st
+      ON st.{id_name} = definition.{id_name}
+    WHERE definition.{dt_name} > st.{dt_name}
+    """ + (f"  OR st.{id_name} IS NULL" if new_ids else "")
+    return query
+

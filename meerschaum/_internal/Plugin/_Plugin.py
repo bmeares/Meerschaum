@@ -13,6 +13,7 @@ from meerschaum.utils.typing import (
     Optional,
     Any,
     SuccessTuple,
+    Union,
 )
 from meerschaum.config._paths import (
     PLUGINS_RESOURCES_PATH,
@@ -52,27 +53,29 @@ class Plugin:
             self.archive_path = archive_path
 
     @property
-    def module(self) -> 'ModuleType':
+    def module(self):
         """
         Return a Plugin's Python module.
         """
         if '_module' not in self.__dict__:
-            from meerschaum.plugins import get_plugins_modules
-            for m in get_plugins_modules():
-                if self.name == m.__name__.split('.')[-1]:
-                    self._module = m
-                    break
-        if '_module' not in self.__dict__:
-            return None
+            from meerschaum.plugins import import_plugins
+            self._module = import_plugins(str(self))
+            #  from meerschaum.plugins import get_plugins_modules
+            #  for m in get_plugins_modules():
+                #  if self.name == m.__name__.split('.')[-1]:
+                    #  self._module = m
+                    #  break
+        #  if '_module' not in self.__dict__:
+            #  return None
         return self._module
 
     @property
-    def __file__(self) -> str:
+    def __file__(self) -> Union[str, None]:
         if self.module is None:
             return None
         return self.module.__file__
 
-    def make_tar(self, debug : bool = False) -> str:
+    def make_tar(self, debug : bool = False) -> pathlib.Path:
         """
         Compress the plugin's source files into a `.tar.gz` archive and return the archive's path.
         """
@@ -82,6 +85,9 @@ class Plugin:
         old_cwd = os.getcwd()
         os.chdir(PLUGINS_RESOURCES_PATH)
 
+        if self.__file__ is None:
+            from meerschaum.utils.warnings import error
+            error(f"Could not find file for plugin '{self}'.")
         if '__init__.py' in self.__file__:
             path = self.__file__.replace('__init__.py', '')
             is_dir = True

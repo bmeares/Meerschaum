@@ -93,7 +93,7 @@ def add_plugin_argument(*args, **kwargs) -> None:
     Add argparse arguments under the 'Plugins options' group.
     Takes the same parameters as the regular argparse `add_argument()` function.
     """
-    global groups
+    global groups, _seen_plugin_args
     from meerschaum.actions import _get_parent_plugin
     from meerschaum.utils.warnings import warn, error
     _parent_plugin_name = _get_parent_plugin(2)
@@ -104,14 +104,21 @@ def add_plugin_argument(*args, **kwargs) -> None:
         groups[group_key] = parser.add_argument_group(
             title=f"Plugin '{_parent_plugin_name}' options"
         )
-    groups[group_key].add_argument(*args, **kwargs)
+        _seen_plugin_args[group_key] = set()
+    try:
+        if str(args) not in _seen_plugin_args[group_key]:
+            groups[group_key].add_argument(*args, **kwargs)
+            _seen_plugin_args[group_key].add(str(args))
+    except Exception as e:
+        warn(e)
 
 parser = argparse.ArgumentParser(
     prog = 'mrsm',
-    description = "Create and Build Pipes with Meerschaum",
+    description = "Create and Build Pipes with Meerschaum.",
     usage = "mrsm [action with optional arguments] {options}",
     add_help = False,
 )
+_seen_plugin_args: Dict[str, List[str]] = {}
 
 groups = dict()
 groups['actions'] = parser.add_argument_group(title='Actions options')

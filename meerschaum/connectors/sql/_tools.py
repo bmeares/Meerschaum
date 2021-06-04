@@ -52,7 +52,7 @@ def get_distinct_col_count(
     
     if connector is None:
         from meerschaum import get_connector
-        connector = get_connector()
+        connector = get_connector('sql')
 
     _col_name = sql_item_name(col, connector.flavor)
 
@@ -104,7 +104,7 @@ def build_where(
     """
     if connector is None:
         from meerschaum import get_connector
-        connector = get_connector()
+        connector = get_connector('sql')
     where = ""
     leading_and = "\n    AND "
     for key, value in parameters.items():
@@ -219,3 +219,30 @@ def dateadd_str(
         dt_format = 'YYYY-MM-DD HH24:MI:SS.FF'
         da = f"TO_TIMESTAMP('{begin}', '{dt_format}') + INTERVAL '{number}' {datepart}"
     return da
+
+def table_exists(
+        table: str,
+        connector : Optional[meerschaum.connectors.sql.SQLConnector] = None,
+        debug: bool = False,
+    ) -> bool:
+    """
+    Check if a table exists.
+    """
+    if connector is None:
+        from meerschaum import get_connector
+        connector = get_connector('sql')
+
+    table_name = sql_item_name(table, connector.flavor)
+    ### default: select no rows. NOTE: this might not work for Oracle
+    q = f"SELECT COUNT(*) FROM {table_name} WHERE 1 = 0"
+    if connector.flavor in ('timescaledb', 'postgresql'):
+        q = f"SELECT to_regclass('{table_name}')"
+    elif connector.flavor == 'mssql':
+        q = f"SELECT OBJECT_ID('{table_name}')"
+    elif connector.flavor in ('mysql', 'mariadb'):
+        q = f"SHOW TABLES LIKE '{table_name}'"
+    elif connector.flavor == 'sqlite':
+        q = f"SELECT name FROM sqlite_master WHERE name='{table}'"
+    exists = connector.value(q, debug=debug, silent=True) is not None
+    return exists
+
