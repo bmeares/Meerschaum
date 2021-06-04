@@ -7,7 +7,8 @@ Expose plugin management APIs from the `meerschaum.plugins` module.
 """
 
 from __future__ import annotations
-from meerschaum.utils.typing import Callable, Any, Union, Optional, Dict
+from meerschaum.utils.typing import Callable, Any, Union, Optional, Dict, List
+from meerschaum.actions.arguments._parser import add_plugin_argument
 
 _api_plugins : dict = {}
 
@@ -72,9 +73,16 @@ def api_plugin(function) -> Callable[[Any], Any]:
     _api_plugins[function.__module__].append(function)
     return function
 
-def import_plugins() -> Optional['ModuleType']:
+def import_plugins(plugins_to_import: Union[str, List[str], None] = None) -> Union[
+        'ModuleType', Tuple['ModuleType', None]
+    ]:
     """
     Import the Meerschaum plugins directory.
+
+    :param plugins_to_import:
+        If provided, only import the specified plugins.
+        Otherwise import the entire plugins module. May be a string, list, or `None`.
+        Defaults to `None`.
     """
     global __path__
     import sys
@@ -84,20 +92,32 @@ def import_plugins() -> Optional['ModuleType']:
     PLUGINS_RESOURCES_PATH.mkdir(parents=True, exist_ok=True)
     PLUGINS_INIT_PATH.touch()
 
+    if isinstance(plugins_to_import, str):
+        plugins_to_import = [plugins_to_import]
+
     from meerschaum.utils.warnings import error, warn
     if str(PLUGINS_RESOURCES_PATH.parent) not in sys.path:
         sys.path.insert(0, str(PLUGINS_RESOURCES_PATH.parent))
     if str(PLUGINS_RESOURCES_PATH.parent) not in __path__:
         __path__.append(str(PLUGINS_RESOURCES_PATH.parent))
-    try:
-        import plugins
-    except ImportError:
-        plugins = None
+
+    if not plugins_to_import:
+        try:
+            import plugins
+        except ImportError:
+            plugins = None
+    else:
+        from meerschaum.utils.packages import attempt_import
+        plugins = attempt_import(
+            *[('plugins.' + p) for p in plugins_to_import],
+            install=False, warn=False, lazy=False, venv=None,
+        )
 
     if plugins is None:
         warn(f"Failed to import plugins.", stacklevel=3)
 
-    sys.path.remove(str(PLUGINS_RESOURCES_PATH.parent))
+    if str(PLUGINS_RESOURCES_PATH.parent) in sys.path:
+        sys.path.remove(str(PLUGINS_RESOURCES_PATH.parent))
 
     return plugins
 

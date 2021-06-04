@@ -30,7 +30,7 @@ def fetch(
             activate_venv(self.connector.label, debug=debug)
         df = self.connector.fetch(
             self,
-            begin = self.sync_time if begin is None else begin,
+            begin = begin,
             end = end,
             chunk_hook = (self.sync if sync_chunks else None),
             debug = debug,

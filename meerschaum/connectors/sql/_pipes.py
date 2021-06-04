@@ -709,23 +709,12 @@ def pipe_exists(
         debug : bool = False
     ) -> bool:
     """
-    Check that a Pipe's table exists
+    Check that a Pipe's table exists.
     """
-    from meerschaum.connectors.sql._tools import sql_item_name
-    from meerschaum.utils.debug import dprint
-    ### default: select no rows. NOTE: this might not work for Oracle
-    _pipe_name = sql_item_name(str(pipe), self.flavor)
-    q = f"SELECT COUNT(*) FROM {_pipe_name} WHERE 1 = 0"
-    if self.flavor in ('timescaledb', 'postgresql'):
-        q = f"SELECT to_regclass('{_pipe_name}')"
-    elif self.flavor == 'mssql':
-        q = f"SELECT OBJECT_ID('{_pipe_name}')"
-    elif self.flavor in ('mysql', 'mariadb'):
-        q = f"SHOW TABLES LIKE '{_pipe_name}'"
-    elif self.flavor == 'sqlite':
-        q = f"SELECT name FROM sqlite_master WHERE name='{pipe}'"
-    exists = self.value(q, debug=debug, silent=True) is not None
+    from meerschaum.connectors.sql._tools import table_exists
+    exists = table_exists(str(pipe), self, debug=debug)
     if debug:
+        from meerschaum.utils.debug import dprint
         dprint(f"Pipe '{pipe}' " + ('exists.' if exists else 'does not exist.'))
     return exists
 
