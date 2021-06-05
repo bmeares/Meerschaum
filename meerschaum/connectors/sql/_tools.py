@@ -222,7 +222,7 @@ def dateadd_str(
 
 def table_exists(
         table: str,
-        connector : Optional[meerschaum.connectors.sql.SQLConnector] = None,
+        connector: Optional[meerschaum.connectors.sql.SQLConnector] = None,
         debug: bool = False,
     ) -> bool:
     """
@@ -245,4 +245,28 @@ def table_exists(
         q = f"SELECT name FROM sqlite_master WHERE name='{table}'"
     exists = connector.value(q, debug=debug, silent=True) is not None
     return exists
+
+def get_sqlalchemy_table(
+        table: str,
+        connector: Optional[meerschaum.connectors.sql.SQLConnector] = None,
+        debug: bool = False,
+    ) -> sqlalchemy.Table:
+    """
+    Return a sqlalchemy Table bound to a SQLConnector's engine.
+    """
+    if connector is None:
+        from meerschaum import get_connector
+        connector = get_connector('sql')
+
+    from meerschaum.connectors.sql.tables import get_tables
+    from meerschaum.utils.packages import attempt_import
+    tables = get_tables(mrsm_instance=connector, debug=debug)
+    sqlalchemy = attempt_import('sqlalchemy')
+    if str(table) not in tables:
+        tables[str(table)] = sqlalchemy.Table(
+            str(table),
+            connector.metadata,
+            autoload_with = connector.engine
+        )
+    return tables[str(table)]
 
