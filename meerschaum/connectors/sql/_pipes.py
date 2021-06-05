@@ -807,17 +807,8 @@ def get_pipe_table(
     """
     Return a sqlalchemy Table for a Pipe bound to this SQLConnector's engine.
     """
-    from meerschaum.connectors.sql.tables import get_tables
-    from meerschaum.utils.packages import attempt_import
-    tables = get_tables(mrsm_instance=self, debug=debug)
-    sqlalchemy = attempt_import('sqlalchemy')
-    if str(pipe) not in tables:
-        tables[str(pipe)] = sqlalchemy.Table(
-            str(pipe),
-            self.metadata,
-            autoload_with = self.engine
-        )
-    return tables[str(pipe)]
+    from meerschaum.connectors.sql._tools import get_sqlalchemy_table
+    return get_sqlalchemy_table(str(pipe), connector=self, debug=debug)
 
 def get_pipe_columns_types(
         self,
