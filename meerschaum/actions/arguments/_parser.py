@@ -118,7 +118,7 @@ parser = argparse.ArgumentParser(
     usage = "mrsm [action with optional arguments] {options}",
     add_help = False,
 )
-_seen_plugin_args: Dict[str, List[str]] = {}
+_seen_plugin_args = {}
 
 groups = dict()
 groups['actions'] = parser.add_argument_group(title='Actions options')
