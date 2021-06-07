@@ -132,28 +132,34 @@ def _join_fetch_query(
         return _simple_fetch_query(pipe, debug=debug, **kw)
 
     from meerschaum.connectors.sql._tools import sql_item_name, dateadd_str
-    pipe_name = sql_item_name(str(pipe), pipe.connector.flavor)
+    pipe_instance_name = sql_item_name(str(pipe), pipe.instance_connector.flavor)
+    pipe_remote_name = sql_item_name(str(pipe), pipe.connector.flavor)
     sync_times_table = str(pipe) + "_sync_times"
-    sync_times_name = sql_item_name(sync_times_table, pipe.connector.flavor)
-    id_name = sql_item_name(pipe.columns['id'], pipe.connector.flavor)
-    dt_name = sql_item_name(pipe.columns['datetime'], pipe.connector.flavor)
+    sync_times_instance_name = sql_item_name(sync_times_table, pipe.instance_connector.flavor)
+    sync_times_remote_name = sql_item_name(sync_times_table, pipe.connector.flavor)
+    id_instance_name = sql_item_name(pipe.columns['id'], pipe.instance_connector.flavor)
+    id_remote_name = sql_item_name(pipe.columns['id'], pipe.connector.flavor)
+    dt_instance_name = sql_item_name(pipe.columns['datetime'], pipe.connector.flavor)
+    dt_remote_name = sql_item_name(pipe.columns['datetime'], pipe.instance_connector.flavor)
     cols_types = pipe.get_columns_types(debug=debug)
     sync_times_query = f"""
-    SELECT {id_name}, MAX({dt_name}) AS {dt_name}
-    FROM {pipe_name}
-    GROUP BY {id_name}
+    SELECT {id_instance_name}, MAX({dt_instance_name}) AS {dt_instance_name}
+    FROM {pipe_instance_name}
+    GROUP BY {id_instance_name}
     """
-    sync_times = pipe.instance_connector.read(sync_times_query, debug=debug, silent=True)
-    _sync_times_q = f",\n{sync_times_name} AS ("
+    sync_times = pipe.instance_connector.read(sync_times_query, debug=debug, silent=False)
+    if sync_times is None:
+        return _simple_fetch_query(pipe, debug=debug, **kw)
+    _sync_times_q = f",\n{sync_times_remote_name} AS ("
     for _id, _st in sync_times.itertuples(index=False):
         _sync_times_q += (
-            f"SELECT CAST('{_id}' AS " + cols_types[pipe.columns['id']] + f") AS {id_name}, "
+            f"SELECT CAST('{_id}' AS " + cols_types[pipe.columns['id']] + f") AS {id_remote_name}, "
             + dateadd_str(
                 flavor=pipe.instance_connector.flavor,
                 begin=_st,
                 datepart='minute',
                 number=pipe.parameters.get('backtrack_minutes', 0)
-            ) + " AS " + dt_name + "\nUNION ALL\n"
+            ) + " AS " + dt_remote_name + "\nUNION ALL\n"
         )
     _sync_times_q = _sync_times_q[:(-1 * len('UNION ALL\n'))] + ")"
 
@@ -162,9 +168,9 @@ def _join_fetch_query(
     WITH definition AS ({definition}){_sync_times_q}
     SELECT definition.*
     FROM definition
-    LEFT OUTER JOIN {sync_times_name} AS st
-      ON st.{id_name} = definition.{id_name}
-    WHERE definition.{dt_name} > st.{dt_name}
-    """ + (f"  OR st.{id_name} IS NULL" if new_ids else "")
+    LEFT OUTER JOIN {sync_times_remote_name} AS st
+      ON st.{id_remote_name} = definition.{id_remote_name}
+    WHERE definition.{dt_remote_name} > st.{dt_remote_name}
+    """ + (f"  OR st.{id_remote_name} IS NULL" if new_ids else "")
     return query
 
