@@ -9,10 +9,12 @@ Implement the Connector fetch() method
 from __future__ import annotations
 from meerschaum.utils.typing import Optional, Union, Callable, Any
 
+### NOTE: begin is set in pipe.sync().
+
 def fetch(
         self,
         pipe : meerschaum.Pipe.Pipe,
-        begin : str = 'now',
+        begin : Optional[Union[datetime.datetime, str]] = None,
         end : Optional[Union[datetime.datetime, str]] = None,
         chunk_hook : Optional[Callable[[pandas.DataFrame], Any]] = None,
         chunksize : Optional[int] = -1,
