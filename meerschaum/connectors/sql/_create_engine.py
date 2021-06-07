@@ -46,6 +46,7 @@ flavor_configs = {
         'requirements' : default_requirements,
         'defaults'     : {
             'port'     : 1433,
+            'driver'   : 'ODBC+Driver+17+for+SQL+Server',
         },
     },
     'mysql'            : {
@@ -144,6 +145,7 @@ def create_engine(
     _host = self.__dict__.get('host', None)
     _port = self.__dict__.get('port', None)
     _database = self.__dict__.get('database', None)
+    _driver = self.__dict__.get('driver', None)
 
     ### self.sys_config was deepcopied and can be updated safely
     if self.flavor in ("sqlite", "duckdb"):
@@ -163,6 +165,7 @@ def create_engine(
             ((":" + urllib.parse.quote_plus(_password)) if _password is not None else '') +
             "@" + _host + ((":" + str(_port)) if _port is not None else '') +
             (("/" + _database) if _database is not None else '')
+            + (("?driver=" + _driver) if _driver is not None else '')
         )
     if debug:
         dprint(
