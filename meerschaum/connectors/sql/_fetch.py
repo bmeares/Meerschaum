@@ -143,13 +143,13 @@ def _join_fetch_query(
     FROM {pipe_name}
     GROUP BY {id_name}
     """
-    sync_times = pipe.connector.read(sync_times_query, debug=debug, silent=True)
+    sync_times = pipe.instance_connector.read(sync_times_query, debug=debug, silent=True)
     _sync_times_q = f",\n{sync_times_name} AS ("
     for _id, _st in sync_times.itertuples(index=False):
         _sync_times_q += (
             f"SELECT CAST('{_id}' AS " + cols_types[pipe.columns['id']] + f") AS {id_name}, "
             + dateadd_str(
-                flavor=pipe.connector.flavor,
+                flavor=pipe.instance_connector.flavor,
                 begin=_st,
                 datepart='minute',
                 number=pipe.parameters.get('backtrack_minutes', 0)
