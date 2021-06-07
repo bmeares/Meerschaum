@@ -93,10 +93,11 @@ def fetch(
             flavor=self.flavor, datepart='minute', number=1, begin=end,
         ) if end else None
 
-    meta_def = (
-        _simple_fetch_query(pipe) if not pipe.columns.get('id', None)
-        else _join_fetch_query(pipe, debug=debug, **kw)
-    )
+    meta_def = _simple_fetch_query(pipe, debug=debug, **kw)
+    #  meta_def = (
+        #  _simple_fetch_query(pipe) if not pipe.columns.get('id', None)
+        #  else _join_fetch_query(pipe, debug=debug, **kw)
+    #  )
 
     if dt_name and (begin_da or end_da):
         meta_def += "\n" + ("AND" if 'where' in meta_def.lower() else "WHERE") + " "
@@ -160,7 +161,7 @@ def _join_fetch_query(
                 flavor=pipe.connector.flavor,
                 begin=_st,
                 datepart='minute',
-                number=pipe.parameters.get('backtrack_minutes', 0)
+                number=pipe.parameters.get('fetch', {}).get('backtrack_minutes', 0)
             ) + " AS " + dt_remote_name + "\nUNION ALL\n"
         )
     _sync_times_q = _sync_times_q[:(-1 * len('UNION ALL\n'))] + ")"
