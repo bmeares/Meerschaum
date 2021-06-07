@@ -155,7 +155,7 @@ def _join_fetch_query(
         _sync_times_q += (
             f"SELECT CAST('{_id}' AS " + cols_types[pipe.columns['id']] + f") AS {id_remote_name}, "
             + dateadd_str(
-                flavor=pipe.instance_connector.flavor,
+                flavor=pipe.connector.flavor,
                 begin=_st,
                 datepart='minute',
                 number=pipe.parameters.get('backtrack_minutes', 0)
