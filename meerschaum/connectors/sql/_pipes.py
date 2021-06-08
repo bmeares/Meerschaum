@@ -93,7 +93,8 @@ def edit_pipe(
         from meerschaum import Pipe
         from meerschaum.config._patch import apply_patch_to_config
         original_parameters = Pipe(
-            pipe.connector_keys, pipe.metric_key, pipe.location_key
+            pipe.connector_keys, pipe.metric_key, pipe.location_key,
+            mrsm_instance=pipe.instance_keys
         ).parameters
         parameters = apply_patch_to_config(
             original_parameters,
@@ -108,7 +109,10 @@ def edit_pipe(
     sqlalchemy = attempt_import('sqlalchemy')
 
     values = {
-        'parameters' : json.dumps(parameters),
+        'parameters' : (
+            json.dumps(parameters) if self.flavor not in ('postgresql', 'timescaledb')
+            else parameters
+        ),
     }
     q = sqlalchemy.update(pipes).values(**values).where(
         pipes.c.pipe_id == pipe.id
@@ -117,10 +121,10 @@ def edit_pipe(
     result = self.exec(q, debug=debug)
     message = (
         f"Successfully edited pipe '{pipe}'."
-        if result is not None else f"Failed to edit pipe '{pipe}'"
+        if result is not None else f"Failed to edit pipe '{pipe}'."
     )
     if result is None:
-        message = f"Failed to edit pipe '{pipe}'"
+        message = f"Failed to edit pipe '{pipe}'."
     return (result is not None), message
 
 def fetch_pipes_keys(
@@ -249,6 +253,7 @@ def create_indices(
         warn(f"Unable to create indices for pipe '{pipe}' without columns.")
         return False
 
+    _cols_types = pipe.get_columns_types(debug=debug)
     _datetime = pipe.get_columns('datetime', error=False)
     _datetime_name = sql_item_name(_datetime, self.flavor) if _datetime is not None else None
     _id = pipe.get_columns('id', error=False)
@@ -272,6 +277,7 @@ def create_indices(
         elif self.flavor in ('mysql', 'mariadb'):
             dt_query = f"CREATE INDEX ON {_pipe_name} ({_datetime_name})"
         else: ### mssql, sqlite, etc.
+            #  if self.flavor == 'mssql'
             dt_query = f"CREATE INDEX {sql_item_name(_datetime + '_index', self.flavor)} ON {_pipe_name} ({_datetime_name})"
 
         index_queries[_datetime] = dt_query
@@ -296,7 +302,7 @@ def create_indices(
     for col, q in index_queries.items():
         if debug:
             dprint(f"Creating index on column '{col}' for pipe '{pipe}'...")
-        index_result = self.exec(q, silent=debug, debug=debug)
+        index_result = self.exec(q, debug=debug)
         if not index_result:
             failures += 1
     return failures == 0
@@ -458,7 +464,8 @@ def get_pipe_id(
     ).where(
         pipes.c.metric_key == pipe.metric_key
     ).where(
-        pipes.c.location_key == pipe.location_key
+        (pipes.c.location_key == pipe.location_key) if pipe.location_key is not None
+        else (pipes.c.location_key.is_(None))
     )
     _id = self.value(query, debug=debug)
     if _id is not None:
@@ -484,7 +491,7 @@ def get_pipe_attributes(
 
     try:
         q = sqlalchemy.select([pipes]).where(pipes.c.pipe_id == pipe.id)
-        attributes = dict(self.exec(q, debug=debug).first())
+        attributes = dict(self.exec(q, silent=True, debug=debug).first())
     except Exception as e:
         warn(e)
         return None
