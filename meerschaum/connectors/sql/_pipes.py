@@ -329,7 +329,7 @@ def delete_pipe(
 
     q = sqlalchemy.delete(pipes).where(pipes.c.pipe_id == pipe.id)
     if not self.exec(q, debug=debug):
-        return False, f"Failed to delete registration for '{pipe}'"
+        return False, f"Failed to delete registration for '{pipe}'."
 
     return True, "Success"
 

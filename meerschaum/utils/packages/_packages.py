@@ -62,6 +62,7 @@ packages : Dict[str, Dict[str, str]] = {
         'cockroachdb'   : 'sqlalchemy-cockroachdb>=1.3.2',
         'duckdb'        : 'duckdb>=0.2.6',
         'duckdb_engine' : 'duckdb-engine>=0.1.3',
+        'pyodbc'        : 'pyodbc>=4.0.30',
     },
     'cli' : {
         'pgcli'    : 'pgcli>=3.1.0',

@@ -13,6 +13,7 @@ from meerschaum.utils.typing import Optional, Dict, Union
 connector_tables = dict()
 
 _sequence_flavors = {'duckdb'}
+_skip_index_names_flavors = {'mssql'}
 
 def get_tables(
         mrsm_instance : Optional[Union[str, meerschaum.connectors.Connector]] = None,
@@ -67,6 +68,7 @@ def get_tables(
         }
         id_col_args = { k: [k, id_type] for k in id_names }
         id_col_kw = { k: {'primary_key': True} for k in id_names }
+        index_names = conn.flavor not in _skip_index_names_flavors
 
         if conn.flavor in _sequence_flavors:
             for k, args in id_col_args.items():
@@ -82,7 +84,7 @@ def get_tables(
                     *id_col_args['user_id'],
                     **id_col_kw['user_id'],
                 ),
-                sqlalchemy.Column('username', sqlalchemy.String, index=True, nullable=False),
+                sqlalchemy.Column('username', sqlalchemy.String, index=index_names, nullable=False),
                 sqlalchemy.Column('password_hash', sqlalchemy.String),
                 sqlalchemy.Column('email', sqlalchemy.String),
                 sqlalchemy.Column('user_type', sqlalchemy.String),
@@ -96,10 +98,11 @@ def get_tables(
                     *id_col_args['plugin_id'],
                     **id_col_kw['plugin_id'],
                 ),
-                sqlalchemy.Column('plugin_name', sqlalchemy.String, index=True, nullable=False),
+                sqlalchemy.Column('plugin_name', sqlalchemy.String, index=index_names, nullable=False),
                 sqlalchemy.Column('user_id', sqlalchemy.Integer, nullable=False),
                 sqlalchemy.Column('version', sqlalchemy.String),
                 sqlalchemy.Column('attributes', params_type),
+                sqlalchemy.ForeignKeyConstraint(['user_id'], ['users.user_id']),
                 extend_existing = True,
             ),
         }
@@ -111,9 +114,11 @@ def get_tables(
                 *id_col_args['pipe_id'],
                 **id_col_kw['pipe_id'],
             ),
-            sqlalchemy.Column("connector_keys", sqlalchemy.String, index=True, nullable=False),
-            sqlalchemy.Column("metric_key", sqlalchemy.String, index=True, nullable=False),
-            sqlalchemy.Column("location_key", sqlalchemy.String, index=True),
+            sqlalchemy.Column(
+                "connector_keys", sqlalchemy.String, index=index_names, nullable=False
+            ),
+            sqlalchemy.Column("metric_key", sqlalchemy.String, index=index_names, nullable=False),
+            sqlalchemy.Column("location_key", sqlalchemy.String, index=index_names),
             sqlalchemy.Column("parameters", params_type),
             #  sqlalchemy.UniqueConstraint(
                 #  'connector_keys', 'metric_key', 'location_key', name='pipe_index'
