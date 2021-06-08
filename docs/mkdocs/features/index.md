@@ -27,6 +27,10 @@ The [bootstrap command](/get-started/bootstrapping-a-pipe/) walks you through th
 
 Data are added
 
+![Meerschaum fetching algorithm](fetch.png)
+
+### Instances
+
 ## Data Analysis Tools
 
 ### Turn-key Visualization Stack
@@ -83,11 +87,52 @@ You can also forego pipes and access tables directly.
 >>> 
 >>> ### Wrapper around `df.to_sql()`.
 >>> conn.to_sql(df, chunksize=1000)
+```
+
+Read a table or query into a Pandas DataFrame with `conn.read()`:
+
+```python
+>>> import meerschaum as mrsm
+>>> mrsm.get_connector().read('table')
+   id            datetime
+0   1 2021-06-06 12:00:00
+```
+
+
+### SQLAlchemy Integration
+
+If you're already using [SQLAlchemy](https://www.sqlalchemy.org/), Meerschaum can fit neatly into your workflow.
+
+```python
+>>> import meerschaum as mrsm
+>>> from meerschaum.connectors.sql._tools import get_sqlalchemy_table
+>>> conn = mrsm.get_connector()
 >>> 
 >>> ### Directly access the `sqlalchemy` engine.
 >>> print(conn.engine)
 Engine(postgresql://mrsm:***@localhost:5432/meerschaum)
+>>> 
+>>> table = get_sqlalchemy_table('table', connector=conn)
+>>> query = sqlalchemy.insert(table).values({'foo': 1, 'bar': 2})
+>>> 
+>>> conn.exec(query)
+<sqlalchemy.engine.cursor.LegacyCursorResult object at 0x7fbe992e4190>
 ```
+
+You can select a single value with `conn.value()`:
+
+```python
+>>> import meerschaum as mrsm
+>>> conn = mrsm.get_connector()
+>>> query = ("SELECT datetime "
+...          "FROM table "
+...          "WHERE id = 1 "
+...          "ORDER BY datetime DESC "
+...          "LIMIT 1")
+>>> conn.value(query)
+datetime.datetime(2021, 6, 6, 12, 0)
+```
+
 
 ### SQL CLI
 
@@ -118,9 +163,5 @@ You can monitor the status of jobs with `show logs`, which will follow the logs 
 ### Meerschaum Shell
 
 ### Web Dashboard
-
-
-
-## Scalable Design
 
 ## Ongoing Research
