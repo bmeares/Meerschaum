@@ -109,6 +109,7 @@ install_flavor_drivers = {
     'timescaledb' : ['psycopg2'],
     'postgresql' : ['psycopg2'],
     'cockroachdb' : ['psycopg2', 'cockroachdb'],
+    'mssql': ['pyodbc'],
 }
 
 

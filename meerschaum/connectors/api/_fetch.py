@@ -41,7 +41,7 @@ def fetch(
     remote_metric_key = instructions.get('metric_key', None)
     remote_location_key = instructions.get('location_key', None)
     if begin is None:
-        begin = self.sync_time
+        begin = pipe.sync_time
 
     from meerschaum import Pipe
     p = Pipe(
