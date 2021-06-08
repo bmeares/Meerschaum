@@ -137,9 +137,10 @@ def sync(
         return False, f"Cannot sync pipe '{self}' without a datetime column."
 
     ### add the stated arguments back into kw
+    ### NOTE: Setting begin to the sync time; might need to tweak how this works for multiplexing.
     kw.update({
-        'begin' : begin, 'end' : end, 'force' : force, 'retries' : retries,
-        'min_seconds' : min_seconds, 'check_existing' : check_existing,
+        'begin' : (begin if begin is not None else self.sync_time), 'end' : end, 'force' : force,
+        'retries' : retries, 'min_seconds' : min_seconds, 'check_existing' : check_existing,
         'blocking' : blocking, 'workers' : workers, 'callback' : callback,
         'error_callback' : error_callback, 'sync_chunks' : (sync_chunks),
         'chunksize' : chunksize,
