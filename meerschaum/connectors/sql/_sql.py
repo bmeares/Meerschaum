@@ -7,7 +7,8 @@ This module contains SQLConnector functions for executing SQL queries.
 
 from __future__ import annotations
 from meerschaum.utils.typing import (
-    Union, Mapping, List, Dict, SuccessTuple, Optional, Any, Sequence, Iterable, Callable
+    Union, Mapping, List, Dict, SuccessTuple, Optional, Any, Sequence, Iterable, Callable,
+    Tuple
 )
 
 from meerschaum.utils.debug import dprint
@@ -205,19 +206,37 @@ def value(
         **kw : Any
     ) -> Any:
     """
-    Return a single value from a SQL query
-    (index a DataFrame at [0, 0])
+    Return a single value from a SQL query.
     """
+    from meerschaum.utils.warnings import warn
     if use_pandas:
         try:
             return self.read(query, *args, **kw).iloc[0, 0]
         except Exception as e:
+            #  warn(e)
             return None
+
+    _close = kw.get('close', True)
+    _commit = kw.get('commit', (self.flavor != 'mssql'))
     try:
-        result = self.exec(query, *args, **kw)
-        return result.first()[0]
+        result, connection = self.exec(
+            query,
+            *args,
+            with_connection=True,
+            close=False,
+            commit=_commit,
+            **kw
+        )
+        _val = result.first()[0] if result is not None else None
     except Exception as e:
+        #  warn(e)
         return None
+    if _close:
+        try:
+            connection.close()
+        except Exception as e:
+            warn("Failed to close connection with exception:\n" + str(e))
+    return _val
 
 def execute(
         self,
@@ -228,12 +247,21 @@ def execute(
 
 def exec(
         self,
-        query : str,
-        *args : Any,
-        silent : bool = False,
-        debug : bool = False,
-        **kw : Any
-    ) -> Optional[sqlalchemy.engine.result.resultProxy]:
+        query: str,
+        *args: Any,
+        silent: bool = False,
+        debug: bool = False,
+        commit: Optional[bool] = None,
+        close: Optional[bool] = None,
+        with_connection: bool = False,
+        **kw: Any
+    ) -> Union[
+        sqlalchemy.engine.result.resultProxy,
+        sqlalchemy.engine.cursor.LegacyCursorResult,
+        Tuple[sqlalchemy.engine.result.resultProxy, sqlalchemy.engine.base.Connection],
+        Tuple[sqlalchemy.engine.cursor.LegacyCursorResult, sqlalchemy.engine.base.Connection],
+        None
+    ]:
     """
     Execute SQL code and return success status. e.g. calling stored procedures.
 
@@ -246,11 +274,20 @@ def exec(
     if debug:
         dprint("Executing query:\n" + f"{query}")
 
+    _close = close if close is not None else (
+        True if self.flavor != 'mssql' else False
+    )
+    _commit = commit if commit is not None else (
+        True if (self.flavor != 'mssql' or 'select' not in str(query).lower())
+        else False
+    )
+
     connection = self.engine.connect()
     transaction = connection.begin()
     try:
         result = connection.execute(query, *args, **kw)
-        transaction.commit()
+        if _commit:
+            transaction.commit()
     except Exception as e:
         if debug:
             dprint(f"Failed to execute query:\n\n{query}\n\n{e}")
@@ -259,7 +296,11 @@ def exec(
         result = None
         transaction.rollback()
     finally:
-        connection.close()
+        if _close:
+            connection.close()
+
+    if with_connection:
+        return result, connection
 
     return result
 
@@ -309,14 +350,15 @@ def to_sql(
         error("Name must not be None to submit to the SQL server")
 
     from meerschaum.connectors.sql._tools import sql_item_name
+    from meerschaum.connectors.sql._create_engine import flavor_configs
 
     ### resort to defaults if None
     if method == "":
         if self.flavor in _bulk_flavors:
             method = psql_insert_copy
         else:
-            ### Should default to 'multi'.
-            method = self.sys_config.get('create_engine', {}).get('method', None)
+            ### Should resolve to 'multi' or `None`.
+            method = flavor_configs.get(self.flavor, {}).get('to_sql', {}).get('method', None)
     chunksize = chunksize if chunksize != -1 else self.sys_config.get('chunksize', None)
 
     success, msg = False, "Default to_sql message"

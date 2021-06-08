@@ -21,24 +21,26 @@ Below are some ongoing tasks I have planned for Meerschaum. This is not an exhau
         * [ ] InfluxDB
 
 ## 🐞 Bugs
-- [ ] `parameters` column in the `pipes` table is a string, not JSON.
-- [ ] `instance` command does not work after reloading when closing a config file
-- [x] Inconsistent web console colors (e.g. `show connectors` vs `show config`)
+- [x] ~~`parameters` column in the `pipes` table is a string, not JSON.~~
+- [x] ~~`instance` command does not work after reloading when closing a config file~~
+- [x] ~~Inconsistent web console colors (e.g. `show connectors` vs `show config`)~~
 - [x] ~~`--name` flag is broken when spawning jobs~~
 - [x] ~~Reload plugins when installing updates.~~
 - [x] ~~When upgrading plugins, only install plugin if updates are available.~~
 - [x] ~~Remove `Literal` import from `typing` for compatibility with Python 3.7.~~
 - [x] ~~`default` values are populated from the active instance.~~
+- [x] ~~Microsoft SQL autocommit breaks fetching values from `sqlalchemy`~~
 
 ## ✨ Features
 - **Syncing**
+    
     - [ ] **New syncing algorithm**  
       I have been brainstorming a better way to detect differences between source and cache when syncing, so a future release of Meerschaum will be able to detect changes in past data.
     - [ ] **Local Pipe HD5 caching**  
       When requesting data via `pipe.get_data()`, cache data locally and sync any changes. I am investigating using `duckdb` as a local cache database.
     - [ ] **Rewrite API data to paginate downstream**  
       When syncing upstream, Meerschaum defaults to sending `POST` requests for chunks. The chunking logic is mostly there, so I need to implement the same process in reverse.
-
+    
 - **Web Interface**
     - [x] **Login html page**  
       Request an OAuth2 token via a pretty web page.

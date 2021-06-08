@@ -68,7 +68,7 @@ packages : Dict[str, Dict[str, str]] = {
         'pgcli'    : 'pgcli>=3.1.0',
         'mycli'    : 'mycli>=1.23.2',
         'litecli'  : 'litecli>=1.5.0',
-        'mssqlcli' : 'mssqlcli>=1.0.4',
+        'mssqlcli' : 'mssql-cli>=1.0.0',
     },
     'stack' : {
         'docker'  : 'docker>=4.3.1',

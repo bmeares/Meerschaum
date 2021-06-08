@@ -18,6 +18,7 @@ def get_pipes(
         location_keys : Optional[Union[str, Sequence[str]]] = None,
         params : Mapping[str, Any] = dict(),
         mrsm_instance : Union[str, InstanceConnector, None] = None,
+        instance : Union[str, InstanceConnector, None] = None,
         as_list : bool = False,
         method : str = 'registered',
         wait : bool = False,
@@ -114,6 +115,8 @@ def get_pipes(
 
     ### Get SQL or API connector (keys come from `connector.fetch_pipes_keys()`).
     ### If `wait`, wait until a connection is made
+    if mrsm_instance is None:
+        mrsm_instance = instance
     if mrsm_instance is None:
         mrsm_instance = get_config('meerschaum', 'instance', patch=True)
     if isinstance(mrsm_instance, str):

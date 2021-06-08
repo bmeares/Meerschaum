@@ -16,17 +16,22 @@ default_requirements = {
     'host',
     'database',
 }
+
+### NOTE: These are defined in the `system.json` config file and so this dictionary's values
+### will all be overwritten if applicable.
 default_create_engine_args = {
-    #  'method',
-    'pool_size',
-    'max_overflow',
-    'pool_recycle',
-    'connect_args',
+    #  'method': 'multi',
+    'pool_size': 5,
+    'max_overflow': 10,
+    'pool_recycle': 3600,
+    'connect_args': {},
 }
 flavor_configs = {
     'timescaledb'      : {
         'engine'       : 'postgresql',
         'create_engine' : default_create_engine_args,
+        'omit_create_engine': {'method',},
+        'to_sql' : {},
         'requirements' : default_requirements,
         'defaults'     : {
             'port'     : 5432,
@@ -35,6 +40,8 @@ flavor_configs = {
     'postgresql'         : {
         'engine'       : 'postgresql',
         'create_engine' : default_create_engine_args,
+        'omit_create_engine': {'method',},
+        'to_sql' : {},
         'requirements' : default_requirements,
         'defaults'     : {
             'port'     : 5432,
@@ -42,7 +49,13 @@ flavor_configs = {
     },
     'mssql'            : {
         'engine'       : 'mssql+pyodbc',
-        'create_engine' : default_create_engine_args,
+        'create_engine' : {
+            'fast_executemany': True,
+        },
+        'omit_create_engine': {'method',},
+        'to_sql': {
+            'method': None,
+        },
         'requirements' : default_requirements,
         'defaults'     : {
             'port'     : 1433,
@@ -52,6 +65,10 @@ flavor_configs = {
     'mysql'            : {
         'engine'       : 'mysql+pymysql',
         'create_engine' : default_create_engine_args,
+        'omit_create_engine': {'method',},
+        'to_sql': {
+            'method': 'multi',
+        },
         'requirements' : default_requirements,
         'defaults'     : {
             'port'     : 3306,
@@ -60,6 +77,10 @@ flavor_configs = {
     'mariadb'          : {
         'engine'       : 'mysql+pymysql',
         'create_engine' : default_create_engine_args,
+        'omit_create_engine': {'method',},
+        'to_sql': {
+            'method': 'multi',
+        },
         'requirements' : default_requirements,
         'defaults'     : {
             'port'     : 3306,
@@ -68,6 +89,10 @@ flavor_configs = {
     'oracle'           : {
         'engine'       : 'oracle+cx_oracle',
         'create_engine' : default_create_engine_args,
+        'omit_create_engine': {'method',},
+        'to_sql': {
+            'method': 'multi',
+        },
         'requirements' : default_requirements,
         'defaults'     : {
             'port'     : 1521,
@@ -76,6 +101,10 @@ flavor_configs = {
     'sqlite'           : {
         'engine'       : 'sqlite',
         'create_engine' : default_create_engine_args,
+        'omit_create_engine': {'method',},
+        'to_sql': {
+            'method': 'multi',
+        },
         'requirements' : {
         },
         'defaults'     : {
@@ -85,6 +114,10 @@ flavor_configs = {
     'duckdb' : {
         'engine' : 'duckdb',
         'create_engine' : {},
+        'omit_create_engine': {'ALL',},
+        'to_sql': {
+            'method': 'multi',
+        },
         'requirements' : '',
         'defaults' : {
             'database' : DUCKDB_PATH,
@@ -92,7 +125,11 @@ flavor_configs = {
     },
     'cockroachdb'      : {
         'engine'       : 'cockroachdb',
-        'create_engine' : {c for c in default_create_engine_args if c != 'method'},
+        'omit_create_engine': {'method',},
+        'create_engine': default_create_engine_args,
+        'to_sql': {
+            'method': 'multi',
+        },
         'requirements' : {'host'},
         'defaults'     : {
             'port'     : 26257,
@@ -177,11 +214,28 @@ def create_engine(
         )
 
     _kw_copy = kw.copy()
-    _create_engine_args = {
-        k: v for k, v in self.sys_config.get('create_engine', {}).items()
-            if k in flavor_configs[self.flavor].get('create_engine', {})
-    }
-    _create_engine_args.update(_kw_copy)
+    #  _create_engine_args = {
+        #  k: v for k, v in self.sys_config.get('create_engine', {}).items()
+            #  if k in flavor_configs[self.flavor].get('create_engine', {})
+    #  }
+
+    ### NOTE: Order of inheritance:
+    ###       1. Defaults
+    ###       2. System configuration
+    ###       3. Connector configuration
+    ###       4. Keyword arguments
+    _create_engine_args = flavor_configs.get(self.flavor, {}).get('create_engine', {})
+    def _apply_create_engine_args(update):
+        if 'ALL' not in flavor_configs[self.flavor].get('omit_create_engine', {}):
+            _create_engine_args.update(
+                { k: v for k, v in update.items()
+                    if 'omit_create_engine' not in flavor_configs[self.flavor]
+                        or k not in flavor_configs[self.flavor].get('omit_create_engine')
+                }
+            )
+    _apply_create_engine_args(self.sys_config.get('create_engine', {}))
+    _apply_create_engine_args(self.__dict__.get('create_engine', {}))
+    _apply_create_engine_args(_kw_copy)
 
     try:
         engine = sqlalchemy.create_engine(

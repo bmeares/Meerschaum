@@ -6,6 +6,9 @@
 Launch into a CLI environment to interact with the SQL Connector
 """
 
+from __future__ import annotations
+from meerschaum.utils.typing import SuccessTuple
+
 flavor_clis = {
     'postgresql'  : 'pgcli',
     'timescaledb' : 'pgcli',
@@ -14,13 +17,16 @@ flavor_clis = {
     'mariadb'     : 'mycli',
     'percona'     : 'mycli',
     'sqlite'      : 'litecli',
-    'mssql'       : 'mssqlcli', ### NOTE: Not added as a dependency due to dependency problems
+    'mssql'       : 'mssqlcli',
+}
+cli_deps = {
+    'pgcli': ['pgspecial', 'pendulum'],
 }
 
 def cli(
         self,
         debug : bool = False
-    ):
+    ) -> SuccessTuple:
     """
     Launch an interactive CLI for the SQLConnector's flavor
     """
@@ -32,22 +38,43 @@ def cli(
     if self.flavor not in flavor_clis:
         return False, f"No CLI available for flavor '{self.flavor}'."
 
-    ### get CLI module to launch
     cli_name = flavor_clis[self.flavor]
-    if debug:
-        dprint(f"Opening CLI '{cli_name}' for {self} (flavor '{self.flavor}')...")
 
-    ### attempt an import to raise warnings if not installed
+    ### Install the CLI package and any dependencies.
     cli = attempt_import(cli_name, lazy=False, debug=debug)
+    if cli_name in cli_deps:
+        for dep in cli_deps[cli_name]:
+            locals()[dep] = attempt_import(dep, lazy=False, warn=False, debug=debug)
 
-    ### open sqlalchemy engine URI or just database if sqlite
+    ### NOTE: The `DATABASE_URL` property must be initialized first in case the database is not
+    ### yet defined (e.g. 'sql:local').
     cli_arg_str = self.DATABASE_URL
     if self.flavor == 'sqlite':
         cli_arg_str = str(self.database)
 
-    ### run the module in a subprocess because it calls sys.exit(), and __main__ does not
-    ### work for these CLIs (something to do with Click?)
+    ### Define the script to execute to launch the CLI.
+    ### The `mssqlcli` script is manually written to avoid telemetry
+    ### and because `main.cli()` is not defined.
     launch_cli = f"from {cli_name} import main; main.cli(['{cli_arg_str}'])"
+    if self.flavor == 'mssql':
+        launch_cli = (
+            "from mssqlcli.mssqlclioptionsparser import create_parser; "
+            + "from mssqlcli.mssql_cli import MssqlCli; "
+            + "ms_parser = create_parser(); "
+            + f"ms_options = ms_parser.parse_args(['-S', '{self.host}', '-d', '{self.database}', "
+            + f"'-U', '{self.username}', '-P', '{self.password}']); "
+            + "ms_object = MssqlCli(ms_options)\n"
+            + "try:\n"
+            + "    ms_object.connect_to_database()\n"
+            + "    ms_object.run()\n"
+            + "finally:\n"
+            + "    ms_object.shutdown()"
+        )
 
-    success = venv_exec(launch_cli, debug=debug)
-    return success, f"CLI exited with response: {success}"
+    try:
+        exec(launch_cli)
+        success, msg = True, 'Success'
+    except Exception as e:
+        success, msg = False, str(e)
+
+    return success, msg
