@@ -74,6 +74,9 @@ def edit(
 
 def edit_definition(
         self,
+        yes: bool = False,
+        noask: bool = False,
+        force: bool = False,
         debug : bool = False,
         **kw : Any
     ) -> SuccessTuple:
@@ -84,15 +87,18 @@ def edit_definition(
     if self.connector.type not in ('sql', 'api'):
         return self.edit(interactive=True, debug=debug, **kw)
 
-    from meerschaum.utils.warnings import info
+    import json
+    from meerschaum.utils.warnings import info, warn
     from meerschaum.utils.debug import dprint
+    from meerschaum.config._patch import apply_patch_to_config
+    from meerschaum.utils.misc import edit_file
 
     _parameters = self.parameters
     if 'fetch' not in _parameters:
         _parameters['fetch'] = {}
 
     def _edit_api():
-        from meerschaum.utils.prompt import prompt
+        from meerschaum.utils.prompt import prompt, yes_no
         info(
             f"Please enter the keys of the source pipe from '{self.connector}'.\n" +
             "Type 'None' for None, or empty when there is no default. Press [CTRL+C] to skip."
@@ -110,8 +116,49 @@ def edit_definition(
             if _keys[k] in ('', 'None', '\'None\'', '[None]'):
                 _keys[k] = None
 
-        _parameters['fetch'].update(_keys)
+        _parameters['fetch'] = apply_patch_to_config(_parameters['fetch'], _keys)
+
+        info("You may optionally specify additional filter parameters as JSON.")
+        print("  Parameters are translated into a 'WHERE x AND y' clause, and lists are IN clauses.")
+        print("  For example, the following JSON would correspond to 'WHERE x = 1 AND y IN (2, 3)':")
+        print(json.dumps({'x': 1, 'y': [2, 3]}, indent=2, separators=(',', ': ')))
+        if force or yes_no(
+            "Would you like to add additional filter parameters?",
+            yes=yes, noask=noask
+        ):
+            from meerschaum.config._paths import PIPES_CACHE_RESOURCES_PATH
+            definition_filename = str(self) + '.json'
+            definition_path = PIPES_CACHE_RESOURCES_PATH / definition_filename
+            try:
+                definition_path.touch()
+                with open(definition_path, 'w+') as f:
+                    json.dump(_parameters.get('fetch', {}).get('params', {}), f, indent=2)
+            except Exception as e:
+                return False, f"Failed writing file '{definition_path}':\n" + str(e)
+
+            _params = None
+            while True:
+                edit_file(definition_path)
+                try:
+                    with open(definition_path, 'r') as f:
+                        _params = json.load(f)
+                except Exception as e:
+                    warn(f'Failed to read parameters JSON:\n{e}', stack=False)
+                    if force or yes_no(
+                        "Would you like to try again?\n  "
+                        + "If not, the parameters JSON file will be ignored.",
+                        noask=noask, yes=yes
+                    ):
+                        continue
+                    _params = None
+                break
+            if _params is not None:
+                if 'fetch' not in _parameters:
+                    _parameters['fetch'] = {}
+                _parameters['fetch']['params'] = _params
+
         self.parameters = _parameters
+        return True, "Success"
 
     def _edit_sql():
         import pathlib, os, textwrap

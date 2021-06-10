@@ -143,6 +143,7 @@ install_flavor_drivers = {
     'sqlite' : ['aiosqlite'],
     'duckdb' : ['duckdb', 'duckdb_engine'],
     'mysql' : ['pymysql'],
+    'mariadb' : ['pymysql'],
     'timescaledb' : ['psycopg2'],
     'postgresql' : ['psycopg2'],
     'cockroachdb' : ['psycopg2', 'cockroachdb'],

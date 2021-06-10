@@ -51,7 +51,7 @@ setup_kw_args = {
     'author_email'                  : 'bennett.meares@gmail.com',
     'maintainer_email'              : 'bennett.meares@gmail.com',
     'license'                       : 'Apache Software License 2.0',
-    'packages'                      : setuptools.find_packages(),
+    'packages'                      : setuptools.find_packages(exclude=['*tests*']),
     'install_requires'              : extras['required'],
     'extras_require'                : extras,
     'entry_points'                  : {

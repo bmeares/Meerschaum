@@ -1,0 +1,46 @@
+version: '3.2'
+volumes:
+  timescaledb_volume:
+  mssql_volume:
+  mariadb_volume:
+  cockroachdb_volume:
+services:
+  timescaledb:
+    environment:
+      - TIMESCALEDB_TELEMETRY=off
+      - POSTGRES_DB=testdb
+      - POSTGRES_USER=test
+      - POSTGRES_PASSWORD=test1234
+      - ALLOW_IP_RANGE=0.0.0.0/0
+    ports:
+      - 5439:5432
+    volumes:
+      - timescaledb_volume:/var/lib/postgresql/data:z
+    image: timescale/timescaledb:latest-pg13-oss
+  mssql:
+    environment:
+      - ACCEPT_EULA=Y
+      - SA_PASSWORD=supersecureSECRETPASSWORD123!
+    ports:
+      - 1439:1433
+    image: mcr.microsoft.com/mssql/server:2017-latest
+    volumes:
+      - mssql_volume:/var/opt/mssql:z
+  mariadb:
+    environment:
+      - MARIADB_ROOT_PASSWORD=my-secret-pw
+      - MARIADB_USER=test
+      - MARIADB_PASSWORD=test1234
+      - MARIADB_DATABASE=testdb
+    image: mariadb
+    ports:
+      - 3309:3306
+    volumes:
+      - mariadb_volume:/var/lib/mysql:z
+  cockroachdb:
+    image: cockroachdb/cockroach:v21.1.2
+    ports:
+      - 26259:26257
+    command: start-single-node --insecure
+    volumes:
+      - cockroachdb_volume:/cockroach/cockroach-data:z

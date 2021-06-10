@@ -7,7 +7,7 @@ Fetch Pipe data via the API connector
 """
 
 from __future__ import annotations
-from meerschaum.utils.typing import Any, Optional
+from meerschaum.utils.typing import Any, Optional, Dict
 import datetime
 
 def fetch(
@@ -15,15 +15,17 @@ def fetch(
         pipe : meerschaum.Pipe,
         begin : Optional[datetime.datetime] = None,
         end : Optional[datetime.datetime] = None,
+        params: Optional[Dict, Any] = None,
         debug : bool = False,
         **kw : Any
     ) -> pandas.DataFrame:
     """
-    Get the Pipe data from the remote Pipe
+    Get the Pipe data from the remote Pipe.
     """
     from meerschaum.utils.debug import dprint
     from meerschaum.utils.warnings import warn, error
     from meerschaum.config.static import _static_config
+    from meerschaum.config._patch import apply_patch_to_config
 
     if 'fetch' not in pipe.parameters:
         warn(f"Missing 'fetch' parameters for Pipe '{pipe}'.", stack=False)
@@ -43,6 +45,9 @@ def fetch(
     if begin is None:
         begin = pipe.sync_time
 
+    _params = params.copy() if params is not None else {}
+    _params = apply_patch_to_config(_params, instructions.get('params', {}))
+
     from meerschaum import Pipe
     p = Pipe(
         remote_connector_keys,
@@ -50,4 +55,8 @@ def fetch(
         remote_location_key,
         mrsm_instance = self
     )
-    return p.get_data(begin=begin, end=end, debug=debug)
+    return p.get_data(
+        begin=begin, end=end,
+        params=_params,
+        debug=debug
+    )
