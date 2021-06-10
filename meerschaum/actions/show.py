@@ -254,6 +254,7 @@ def _show_data(
         gui : bool = False,
         begin : Optional[datetime.datetime] = None,
         end : Optional[datetime.datetime] = None,
+        params: Optional[Dict[str, Any]] = None,
         chunksize : Optional[int] = -1,
         nopretty : bool = False,
         debug : bool = False,
@@ -288,7 +289,7 @@ def _show_data(
     if action is None:
         action = []
 
-    pipes = get_pipes(as_list=True, debug=debug, **kw)
+    pipes = get_pipes(as_list=True, params=params, debug=debug, **kw)
     try:
         backtrack_minutes = float(action[0])
     except Exception as e:
@@ -304,11 +305,13 @@ def _show_data(
                 df = p.get_backtrack_data(
                     backtrack_minutes=backtrack_minutes,
                     chunksize=chunksize,
+                    params=params,
                     debug=debug
                 )
             else:
                 df = p.get_data(
                     begin=begin, end=end, debug=debug, chunksize=chunksize,
+                    params=params,
                 )
         except Exception as e:
             import traceback
