@@ -84,10 +84,10 @@ def get_tables(
                     *id_col_args['user_id'],
                     **id_col_kw['user_id'],
                 ),
-                sqlalchemy.Column('username', sqlalchemy.String, index=index_names, nullable=False),
-                sqlalchemy.Column('password_hash', sqlalchemy.String),
-                sqlalchemy.Column('email', sqlalchemy.String),
-                sqlalchemy.Column('user_type', sqlalchemy.String),
+                sqlalchemy.Column('username', sqlalchemy.String(256), index=index_names, nullable=False),
+                sqlalchemy.Column('password_hash', sqlalchemy.String(1024)),
+                sqlalchemy.Column('email', sqlalchemy.String(256)),
+                sqlalchemy.Column('user_type', sqlalchemy.String(256)),
                 sqlalchemy.Column('attributes', params_type),
                 extend_existing = True,
             ),
@@ -98,9 +98,9 @@ def get_tables(
                     *id_col_args['plugin_id'],
                     **id_col_kw['plugin_id'],
                 ),
-                sqlalchemy.Column('plugin_name', sqlalchemy.String, index=index_names, nullable=False),
+                sqlalchemy.Column('plugin_name', sqlalchemy.String(256), index=index_names, nullable=False),
                 sqlalchemy.Column('user_id', sqlalchemy.Integer, nullable=False),
-                sqlalchemy.Column('version', sqlalchemy.String),
+                sqlalchemy.Column('version', sqlalchemy.String(256)),
                 sqlalchemy.Column('attributes', params_type),
                 sqlalchemy.ForeignKeyConstraint(['user_id'], ['users.user_id']),
                 extend_existing = True,
@@ -115,10 +115,10 @@ def get_tables(
                 **id_col_kw['pipe_id'],
             ),
             sqlalchemy.Column(
-                "connector_keys", sqlalchemy.String, index=index_names, nullable=False
+                "connector_keys", sqlalchemy.String(256), index=index_names, nullable=False
             ),
-            sqlalchemy.Column("metric_key", sqlalchemy.String, index=index_names, nullable=False),
-            sqlalchemy.Column("location_key", sqlalchemy.String, index=index_names),
+            sqlalchemy.Column("metric_key", sqlalchemy.String(256), index=index_names, nullable=False),
+            sqlalchemy.Column("location_key", sqlalchemy.String(256), index=index_names),
             sqlalchemy.Column("parameters", params_type),
             #  sqlalchemy.UniqueConstraint(
                 #  'connector_keys', 'metric_key', 'location_key', name='pipe_index'

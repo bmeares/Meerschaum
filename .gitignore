@@ -10,6 +10,7 @@
 *.db
 /portable/
 /test_root/
+/tests/data/
 docs/pdoc/*
 docs/site/*
 file_system_store/

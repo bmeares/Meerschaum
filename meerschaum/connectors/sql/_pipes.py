@@ -390,7 +390,7 @@ def get_backtrack_data(
     query = (
         f"SELECT * FROM {table}\n"
         + (build_where(params, self) if params else '')
-        + ((("AND" if params else "WHERE") + f" {dt} >= {da}") if da else "")
+        + (((" AND " if params else " WHERE ") + f"{dt} >= {da}") if da else "")
     )
 
     df = self.read(query, chunksize=chunksize, debug=debug)
