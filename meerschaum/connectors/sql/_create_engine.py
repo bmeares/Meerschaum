@@ -166,7 +166,12 @@ def create_engine(
     sqlalchemy = attempt_import('sqlalchemy')
     import urllib
     if self.flavor in install_flavor_drivers:
-        attempt_import(*install_flavor_drivers[self.flavor], debug=self._debug, lazy=False)
+        attempt_import(
+            *install_flavor_drivers[self.flavor],
+            debug=self._debug,
+            lazy=False,
+            warn=False
+        )
 
     ### supplement missing values with defaults (e.g. port number)
     for a, value in flavor_configs[self.flavor]['defaults'].items():
