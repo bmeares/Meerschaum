@@ -113,6 +113,7 @@ class Pipe:
         columns : Optional[Dict[str, str]] = None,
         mrsm_instance : Optional[Union[str, InstanceConnector]] = None,
         instance : Optional[Union[str, InstanceConnector]] = None,
+        cache: bool = False,
         debug : bool = False
     ):
         """
@@ -143,6 +144,12 @@ class Pipe:
 
         :param instance:
             Alias for `mrsm_instance`. If `mrsm_instance` is supplied, this value is ignored.
+
+        :param cache:
+            If `True`, cache fetched data into a local database file.
+            Experimental features must be enabled.
+            You can enable experimental caching under `system:experimental:cache`.
+            Defaults to `False`.
         """
         if location_key in ('[None]', 'None'):
             location_key = None
@@ -171,6 +178,8 @@ class Pipe:
             self.instance_keys = str(_mrsm_instance)
         else: ### NOTE: must be SQL or API Connector for this work
             self.instance_keys = _mrsm_instance
+
+        self._cache = cache and get_config('system', 'experimental', 'cache')
 
     @property
     def meta(self):
@@ -222,6 +231,61 @@ class Pipe:
             else:
                 return None
         return self._connector
+
+    @property
+    def cache_connector(self) -> Union['meerschaum.connectors.sql.SQLConnector', None]:
+        """
+        Return the pipe's local cache connector.
+        """
+        if not self._cache:
+            return None
+
+        if '_cache_connector' not in self.__dict__:
+            from meerschaum.connectors import get_connector
+            from meerschaum.config._paths import DUCKDB_RESOURCES_PATH, SQLITE_RESOURCES_PATH
+            _resources_path = SQLITE_RESOURCES_PATH
+            self._cache_connector = get_connector(
+                'sql', '_cache_' + str(self),
+                flavor='sqlite',
+                database=str(_resources_path / ('_cache_' + str(self) + '.db')),
+            )
+
+        return self._cache_connector
+
+    @property
+    def cache_pipe(self) -> Union['meerschaum.Pipe', None]:
+        """
+        Return the pipe's cache sub-pipe.
+        """
+        if self.cache_connector is None:
+            return None
+        if '_cache_pipe' not in self.__dict__:
+            from meerschaum import Pipe
+            from meerschaum.config._patch import apply_patch_to_config
+            from meerschaum.connectors.sql._tools import sql_item_name
+            _parameters = self.parameters.copy()
+            _fetch_patch = {
+                'fetch': ({
+                    'definition': (
+                        f"SELECT * FROM {sql_item_name(str(self), self.instance_connector.flavor)}"
+                    ),
+                }) if self.instance_connector.type == 'sql' else ({
+                    'connector_keys': self.connector_keys,
+                    'metric_key': self.metric_key,
+                    'location_key': self.location_key,
+                })
+            }
+            _parameters = apply_patch_to_config(_parameters, _fetch_patch)
+            self._cache_pipe = Pipe(
+                self.instance_keys,
+                (self.connector_keys + '_' + self.metric_key + '_cache'),
+                self.location_key,
+                mrsm_instance=self.cache_connector,
+                parameters=_parameters,
+                cache=False,
+            )
+
+        return self._cache_pipe
 
     @property
     def sync_time(self):

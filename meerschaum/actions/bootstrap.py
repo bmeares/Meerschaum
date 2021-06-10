@@ -111,11 +111,16 @@ def _bootstrap_pipes(
             if _clear:
                 clear_screen(debug=debug)
             while True:
-                tup = _bootstrap_connectors([], yes=yes, force=force, debug=debug, return_keys=True, **kw)
+                tup = _bootstrap_connectors(
+                    [], yes=yes, force=force, debug=debug, return_keys=True, **kw
+                )
                 if isinstance(tup[0], str):
-                    if _clear: clear_screen(debug=debug)
+                    if _clear:
+                        clear_screen(debug=debug)
                     ck = tup[0] + ':' + tup[1]
                     break
+                elif isinstance(tup[0], bool) and not tup[0]:
+                    return abort_tuple
                 warn(f"Please register a new connector or press CTRL+C to cancel.", stack=False)
         connector_keys = [ck]
 

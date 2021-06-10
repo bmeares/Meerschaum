@@ -169,7 +169,10 @@ def sync(
                     return_tuple = p.connector.sync(p, debug=debug, **kw)
                     deactivate_venv(p.connector.label, debug=debug)
                     if not isinstance(return_tuple, tuple):
-                        return_tuple = False, f"Plugin '{p.connector.label}' returned non-tuple value: {return_tuple}"
+                        return_tuple = (
+                            False,
+                            f"Plugin '{p.connector.label}' returned non-tuple value: {return_tuple}"
+                        )
                     return return_tuple
 
             except Exception as e:
@@ -217,6 +220,14 @@ def sync(
                     f"Unable to sync pipe '{p}' within {retries} attempt" +
                         ("s" if retries != 1 else "") + "!"
                 )
+        ### Finished syncing. Handle caching.
+        if self.cache_pipe is not None:
+            if debug:
+                dprint(f"Caching retrieved dataframe.")
+                _sync_cache_tuple = self.cache_pipe.sync(df, debug=debug, **kw)
+                if not _sync_cache_tuple[0]:
+                    warn(f"Failed to sync local cache for pipe '{self}'.")
+
         return return_tuple
 
     if blocking:

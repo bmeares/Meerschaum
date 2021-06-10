@@ -229,6 +229,12 @@ groups['sync'].add_argument(
         "For example, this setting is highly recommended for use with IoT devices."
     )
 )
+groups['sync'].add_argument(
+    '--cache', action='store_true',
+    help = (
+        "When syncing or viewing a pipe's data, sync to a local database for later analysis."
+    )
+)
 
 ### API options
 groups['api'].add_argument(

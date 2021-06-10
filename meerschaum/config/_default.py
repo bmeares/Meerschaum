@@ -105,6 +105,12 @@ default_system_config = {
         },
         'protocol'         : default_meerschaum_config['connectors']['api']['default']['protocol'],
     },
+    'experimental': {
+        'fetch': False,
+        'cache': True,
+        'space': False,
+        'join_fetch': False,
+    },
 }
 default_pipes_config       = {
     'parameters'           : {

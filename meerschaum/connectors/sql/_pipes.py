@@ -242,6 +242,7 @@ def create_indices(
     from meerschaum.utils.debug import dprint
     from meerschaum.connectors.sql._tools import sql_item_name, get_distinct_col_count
     from meerschaum.utils.warnings import warn
+    from meerschaum.config import get_config
     index_queries = dict()
 
     if debug:
@@ -259,17 +260,22 @@ def create_indices(
     _id = pipe.get_columns('id', error=False)
     _id_name = sql_item_name(_id, self.flavor) if _id is not None else None
     _pipe_name = sql_item_name(str(pipe), self.flavor)
+    _create_space_partition = get_config('system', 'experimental', 'space')
 
     ### create datetime index
     if _datetime is not None:
         if self.flavor == 'timescaledb':
             _id_count = (
                 get_distinct_col_count(_id, f"SELECT {_id_name} FROM {_pipe_name}", self)
-                if _id is not None else None
+                if (_id is not None and _create_space_partition) else None
             )
             dt_query = (
                 f"SELECT create_hypertable('{_pipe_name}', " +
-                f"'{_datetime}', " + (f"'{_id}', {_id_count}, " if _id is not None else '') +
+                f"'{_datetime}', "
+                + (
+                    f"'{_id}', {_id_count}, " if (_id is not None and _create_space_partition)
+                    else ''
+                ) +
                 "migrate_data => true);"
             )
         elif self.flavor == 'postgresql':
@@ -277,8 +283,10 @@ def create_indices(
         elif self.flavor in ('mysql', 'mariadb'):
             dt_query = f"CREATE INDEX ON {_pipe_name} ({_datetime_name})"
         else: ### mssql, sqlite, etc.
-            #  if self.flavor == 'mssql'
-            dt_query = f"CREATE INDEX {sql_item_name(_datetime + '_index', self.flavor)} ON {_pipe_name} ({_datetime_name})"
+            dt_query = (
+                f"CREATE INDEX {sql_item_name(_datetime + '_index', self.flavor)} "
+                + f"ON {_pipe_name} ({_datetime_name})"
+            )
 
         index_queries[_datetime] = dt_query
 
@@ -286,14 +294,23 @@ def create_indices(
     if _id_name is not None:
         if self.flavor == 'timescaledb':
             ### Already created indices via create_hypertable.
-            id_query = None
+            id_query = (
+                None if (_id is not None and _create_space_partition)
+                else (
+                    f"CREATE INDEX ON {_pipe_name} ({_id_name})" if _id is not None
+                    else None
+                )
+            )
             pass
         elif self.flavor in ('postgresql'):
             id_query = f"CREATE INDEX ON {_pipe_name} ({_id_name})"
         elif self.flavor in ('mysql', 'mariadb'):
             id_query = f"CREATE INDEX ON {_pipe_name} ({_id_name})"
         else: ### mssql, sqlite, etc.
-            id_query = f"CREATE INDEX {sql_item_name(_id + '_index', self.flavor)} ON {_pipe_name} ({_id_name})"
+            id_query = (
+                f"CREATE INDEX {sql_item_name(_id + '_index', self.flavor)} "
+                + f"ON {_pipe_name} ({_id_name})"
+            )
 
         if id_query is not None:
             index_queries[_id] = id_query
@@ -592,7 +609,10 @@ def sync_pipe(
         check_existing = False
         is_new = True
 
-    new_data_df = filter_existing(pipe, df, chunksize=chunksize, debug=debug) if check_existing else df
+    new_data_df = (
+        filter_existing(pipe, df, chunksize=chunksize, debug=debug) if check_existing
+        else df
+    )
     if debug:
         dprint("New unseen data:\n" + str(new_data_df))
 

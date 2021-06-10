@@ -254,6 +254,7 @@ def _show_data(
         gui : bool = False,
         begin : Optional[datetime.datetime] = None,
         end : Optional[datetime.datetime] = None,
+        chunksize : Optional[int] = -1,
         nopretty : bool = False,
         debug : bool = False,
         **kw : Any
@@ -300,19 +301,30 @@ def _show_data(
     for p in pipes:
         try:
             if backtrack_minutes is not None:
-                df = p.get_backtrack_data(backtrack_minutes=backtrack_minutes, debug=debug)
+                df = p.get_backtrack_data(
+                    backtrack_minutes=backtrack_minutes,
+                    chunksize=chunksize,
+                    debug=debug
+                )
             else:
-                df = p.get_data(begin=begin, end=end, debug=debug)
+                df = p.get_data(
+                    begin=begin, end=end, debug=debug, chunksize=chunksize,
+                )
         except Exception as e:
+            import traceback
+            print(traceback.format_exc())
             df = None
         if df is None:
             warn(f"Failed to fetch data for pipe '{p}'.", stack=False)
             continue
 
         info_msg = (
-            f"Last {backtrack_minutes} minutes of data for pipe '{p}':"
-            if backtrack_minutes is not None else
             (
+                f"Last {backtrack_minutes} minute"
+                + ('s' if backtrack_minutes != 1 else '')
+                + f" of data for pipe '{p}':"
+            ) if backtrack_minutes is not None
+            else (
                 f"Data for pipe '{p}'" +
                     (f" from {begin}" if begin is not None else '') +
                     (f" to {end}" if end is not None else '') + ':'

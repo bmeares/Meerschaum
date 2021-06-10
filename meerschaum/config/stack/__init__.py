@@ -117,6 +117,7 @@ default_docker_compose_config = {
                 'POSTGRES_PASSWORD=' + env_dict['POSTGRES_PASSWORD'],
                 'ALLOW_IP_RANGE=' + env_dict['ALLOW_IP_RANGE'],
             ],
+            'command': 'postgres -c max_connections=1000 -c shared_buffers=1024MB',
             'restart' : 'always',
             'image' : 'timescale/timescaledb:' + env_dict['TIMESCALEDB_VERSION'],
             'ports' : [
@@ -126,6 +127,7 @@ default_docker_compose_config = {
             'volumes' : [
                 'meerschaum_db_data' + ':' + volumes['meerschaum_db_data'],
             ],
+            'shm_size': '1024m',
             'networks' : [
                 'backend',
             ],

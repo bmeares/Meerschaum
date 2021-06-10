@@ -58,6 +58,7 @@ def fetch(
     from meerschaum.utils.debug import dprint
     from meerschaum.utils.warnings import warn, error
     from meerschaum.connectors.sql._tools import sql_item_name, dateadd_str
+    from meerschaum.config import get_config
     import datetime
 
     if 'columns' not in pipe.parameters or 'fetch' not in pipe.parameters:
@@ -93,14 +94,19 @@ def fetch(
             flavor=self.flavor, datepart='minute', number=1, begin=end,
         ) if end else None
 
-    meta_def = _simple_fetch_query(pipe, debug=debug, **kw)
-    #  meta_def = (
-        #  _simple_fetch_query(pipe) if not pipe.columns.get('id', None)
-        #  else _join_fetch_query(pipe, debug=debug, **kw)
-    #  )
+    #  meta_def = _simple_fetch_query(pipe, debug=debug, **kw)
+    meta_def = (
+        _simple_fetch_query(pipe) if (
+            (not pipe.columns.get('id', None))
+            or (not get_config('system', 'experimental', 'join_fetch'))
+        ) else _join_fetch_query(pipe, debug=debug, **kw)
+    )
 
     if dt_name and (begin_da or end_da):
-        meta_def += "\n" + ("AND" if 'where' in meta_def.lower() else "WHERE") + " "
+        meta_def += "\n" + (
+            "AND" if 'where' in meta_def.lower()[meta_def.lower().rfind('select'):]
+            else "WHERE"
+        ) + " "
         if begin_da:
             meta_def += f"definition.{dt_name} >= {begin_da}"
         if begin_da and end_da:
