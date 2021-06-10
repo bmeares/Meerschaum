@@ -146,12 +146,13 @@ def string_to_dict(
         _keys = param.split(":")
         keys = _keys[:-1]
         try:
-            val = _keys[-1]
+            val = ast.literal_eval(_keys[-1])
         except Exception as e:
             val = str(_keys[-1])
 
         c = params_dict
         for _k in keys[:-1]:
+            #  print(_k)
             try:
                 k = ast.literal_eval(_k)
             except Exception as e:

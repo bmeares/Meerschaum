@@ -7,7 +7,7 @@ Register or fetch Pipes from the API
 """
 
 from __future__ import annotations
-from meerschaum.utils.typing import SuccessTuple, Union, Any, Optional, Mapping, List
+from meerschaum.utils.typing import SuccessTuple, Union, Any, Optional, Mapping, List, Dict
 
 def pipe_r_url(
         pipe : 'meerschaum.Pipe'
@@ -19,7 +19,10 @@ def pipe_r_url(
     location_key = pipe.location_key
     if location_key is None:
         location_key = '[None]'
-    return f"{_static_config()['api']['endpoints']['pipes']}/{pipe.connector_keys}/{pipe.metric_key}/{location_key}"
+    return (
+        f"{_static_config()['api']['endpoints']['pipes']}/"
+        + f"{pipe.connector_keys}/{pipe.metric_key}/{location_key}"
+    )
 
 def register_pipe(
         self,
@@ -81,7 +84,7 @@ def fetch_pipes_keys(
         connector_keys : list = [],
         metric_keys : list = [],
         location_keys : list = [],
-        params : dict = dict(),
+        params : Optional[Dict[str, Any]] = None,
         mrsm_instance : str = 'api',
         debug : bool = False
     ) -> Union[List[str], Mapping[str, Any]]:
@@ -269,6 +272,7 @@ def get_pipe_data(
     """
     Fetch data from the API.
     """
+    import json
     from meerschaum.utils.warnings import warn
     r_url = pipe_r_url(pipe)
     chunks_list = []
@@ -276,8 +280,7 @@ def get_pipe_data(
         try:
             response = self.get(
                 r_url + "/data",
-                json = params,
-                params = {'begin': begin, 'end': end},
+                params = {'begin': begin, 'end': end, 'params': json.dumps(params)},
                 debug = debug
             )
             j = response.json()
@@ -409,6 +412,7 @@ def pipe_exists(
     """
     Consult the API to see if a Pipe exists
     """
+    from meerschaum.utils.debug import dprint
     r_url = pipe_r_url(pipe)
     response = self.get(r_url + '/exists', debug=debug)
     if debug:
@@ -425,6 +429,7 @@ def create_metadata(
     """
     Create Pipe metadata tables
     """
+    from meerschaum.utils.debug import dprint
     from meerschaum.config.static import _static_config
     import json
     r_url = _static_config()['api']['endpoints']['metadata']
