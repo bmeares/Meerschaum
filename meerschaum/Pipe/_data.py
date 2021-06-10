@@ -14,7 +14,7 @@ def get_data(
         begin : Optional[datetime.datetime] = None,
         end : Optional[datetime.datetime] = None,
         params : Optional[Dict[str, Any]] = None,
-        refresh : bool = False,
+        fresh: bool = False,
         debug : bool = False,
         **kw : Any
     ) -> Optional[pandas.DataFrame]:
@@ -43,7 +43,7 @@ def get_data(
         >>> 
         ```
 
-    :param refresh:
+    :param fresh:
         If True, skip local cache and directly query the instance connector.
         Currently has no effect (until caching features are merged into the stable release).
         Defaults to `True`.
@@ -52,22 +52,33 @@ def get_data(
         Verbosity toggle.
         Defaults to `False`.
     """
-    if refresh or True: ### TODO remove `or True`
-        self._data = self.instance_connector.get_pipe_data(
-            pipe = self,
-            begin = begin,
-            end = end,
-            params = params,
-            debug = debug,
-            **kw
-        )
-    ### TODO caching / sync logic
-    return self._data
+    from meerschaum.utils.warnings import warn
+    kw.update({'begin': begin, 'end': end, 'params': params,})
+
+    if not self.exists(debug=debug):
+        return None
+
+    if self.cache_pipe is not None:
+        if not fresh:
+            _sync_cache_tuple = self.cache_pipe.sync(debug=debug, **kw)
+            if not _sync_cache_tuple[0]:
+                warn(f"Failed to sync cache for pipe '{self}':\n" + _sync_cache_tuple[1])
+                fresh = True
+            else: ### Successfully synced cache.
+                return self.cache_pipe.get_data(debug=debug, fresh=True, **kw)
+
+    ### If `fresh` or the syncing failed, directly pull from the instance connector.
+    return self.instance_connector.get_pipe_data(
+        pipe = self,
+        debug = debug,
+        **kw
+    )
 
 def get_backtrack_data(
         self,
         backtrack_minutes : int = 0,
         begin : 'datetime.datetime' = None,
+        fresh: bool = False,
         debug : bool = False,
         **kw : Any
     ) -> Optional['pd.DataFrame']:
@@ -94,12 +105,30 @@ def get_backtrack_data(
 
         ```
 
-    :param debug: Verbosity toggle.
+    :param fresh:
+        Ignore local cache and pull directly from the instance connector.
+
+    :param debug:
+        Verbosity toggle.
     """
+    from meerschaum.utils.warnings import warn
+    kw.update({'backtrack_minutes': backtrack_minutes, 'begin': begin,})
+
+    if not self.exists(debug=debug):
+        return None
+
+    if self.cache_pipe is not None:
+        if not fresh:
+            _sync_cache_tuple = self.cache_pipe.sync(debug=debug, **kw)
+            if not _sync_cache_tuple[0]:
+                warn(f"Failed to sync cache for pipe '{self}':\n" + _sync_cache_tuple[1])
+                fresh = True
+            else: ### Successfully synced cache.
+                return self.cache_pipe.get_backtrack_data(debug=debug, fresh=True, **kw)
+
+    ### If `fresh` or the syncing failed, directly pull from the instance connector.
     return self.instance_connector.get_backtrack_data(
         pipe = self,
-        begin = begin,
-        backtrack_minutes = backtrack_minutes,
         debug = debug,
         **kw
     )
@@ -113,7 +142,7 @@ def get_rowcount(
         debug : bool = False
     ) -> Optional[int]:
     """
-    Get a Pipe's cached or remote rowcount.
+    Get a Pipe's instance or remote rowcount.
 
     :param begin:
         Count rows where datetime > begin.
@@ -125,7 +154,8 @@ def get_rowcount(
         Count rows from a pipe's remote source.
         NOTE: This is experimental!
 
-    :param debug: Verbosity toggle.
+    :param debug:
+        Verbosity toggle.
     """
     connector = self.instance_connector if not remote else self.connector
     try:

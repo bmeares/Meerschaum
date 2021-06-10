@@ -98,6 +98,7 @@ def get_pipes(
 
     from meerschaum.config import get_config
     from meerschaum.utils.warnings import error
+    from meerschaum.utils.misc import filter_keywords
 
     if connector_keys is None:
         connector_keys = []
@@ -156,12 +157,17 @@ def get_pipes(
     pipes = dict()
     for ck, mk, lk in result:
         if ck not in pipes:
-            pipes[ck] = dict()
+            pipes[ck] = {}
 
         if mk not in pipes[ck]:
-            pipes[ck][mk] = dict()
+            pipes[ck][mk] = {}
 
-        pipes[ck][mk][lk] = Pipe(ck, mk, lk, mrsm_instance=connector, debug=debug)
+        pipes[ck][mk][lk] = Pipe(
+            ck, mk, lk,
+            mrsm_instance=connector,
+            debug=debug,
+            **filter_keywords(Pipe, **kw)
+        )
 
     if not as_list:
         return pipes

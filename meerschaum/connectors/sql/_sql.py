@@ -283,7 +283,7 @@ def exec(
     )
 
     connection = self.engine.connect()
-    transaction = connection.begin()
+    transaction = connection.begin() if _commit else None
     try:
         result = connection.execute(query, *args, **kw)
         if _commit:
@@ -294,7 +294,8 @@ def exec(
         if not silent:
             warn(str(e))
         result = None
-        transaction.rollback()
+        if _commit:
+            transaction.rollback()
     finally:
         if _close:
             connection.close()
@@ -358,7 +359,7 @@ def to_sql(
             method = psql_insert_copy
         else:
             ### Should resolve to 'multi' or `None`.
-            method = flavor_configs.get(self.flavor, {}).get('to_sql', {}).get('method', None)
+            method = flavor_configs.get(self.flavor, {}).get('to_sql', {}).get('method', 'multi')
     chunksize = chunksize if chunksize != -1 else self.sys_config.get('chunksize', None)
 
     success, msg = False, "Default to_sql message"

@@ -130,7 +130,7 @@ def sync_pipe(
     ) -> SuccessTuple:
     """
     Append a pandas DataFrame to a Pipe.
-    If Pipe does not exist, it is registered with supplied metadata
+    If Pipe does not exist, it is registered with supplied metadata.
         NOTE: columns['datetime'] must be set for new Pipes.
     """
     from meerschaum.utils.debug import dprint
@@ -142,16 +142,15 @@ def sync_pipe(
     begin = time.time()
     more_itertools = attempt_import('more_itertools')
     if df is None:
-        msg = f"DataFrame is None. Cannot sync pipe '{pipe}"
+        msg = f"DataFrame is `None`. Cannot sync pipe '{pipe}'."
         return False, msg
 
     def get_json_str(c):
         ### allow syncing dict or JSON without needing to import pandas (for IOT devices)
-        if isinstance(c, dict):
-            json_str = json.dumps(c, default=json_serialize_datetime)
-        else:
-            json_str = c.to_json(date_format='iso', date_unit='us')
-        return json_str
+        return (
+            json.dumps(c, default=json_serialize_datetime) if isinstance(c, dict)
+            else c.to_json(date_format='iso', date_unit='us')
+        )
 
     df = json.loads(df) if isinstance(df, str) else df
 
@@ -231,8 +230,9 @@ def sync_pipe(
 
     len_chunks = len(chunks)
     return True, (
-        f"It took {round(time.time() - begin, 2)} seconds to sync {rowcount} row" +
-        ('s' if rowcount != 1 else '') + f" across {len_chunks} chunk" + ('s' if len_chunks != 1 else '') +
+        f"It took {round(time.time() - begin, 2)} seconds to sync {rowcount} row"
+        + ('s' if rowcount != 1 else '')
+        + f" across {len_chunks} chunk" + ('s' if len_chunks != 1 else '') +
         f" to '{pipe}'."
     )
 

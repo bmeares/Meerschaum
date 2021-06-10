@@ -17,4 +17,9 @@ def drop(
     """
     Call the Pipe's instance connector's drop_pipe method
     """
+    from meerschaum.utils.warnings import warn
+    if self.cache_pipe is not None:
+        _drop_cache_tuple = self.cache_pipe.drop(debug=debug, **kw)
+        if not _drop_cache_tuple[0]:
+            warn(_drop_cache_tuple[1])
     return self.instance_connector.drop_pipe(self, debug=debug, **kw)
