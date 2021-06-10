@@ -100,7 +100,7 @@ def build_where(
         connector : Optional[meerschaum.connectors.sql.SQLConnector] = None
     ) -> str:
     """
-    Build the WHERE clause based on the input criteria
+    Build the WHERE clause based on the input criteria.
     """
     if connector is None:
         from meerschaum import get_connector

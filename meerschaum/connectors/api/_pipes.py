@@ -303,12 +303,14 @@ def get_backtrack_data(
         pipe : meerschaum.Pipe,
         begin : datetime.datetime,
         backtrack_minutes : int = 0,
+        params: Optional[Dict[str, Any]] = None,
         debug : bool = False,
         **kw : Any,
     ) -> pandas.DataFrame:
     """
     Get a Pipe's backtrack data from the API.
     """
+    import json
     from meerschaum.utils.debug import dprint
     from meerschaum.utils.warnings import warn
     r_url = pipe_r_url(pipe)
@@ -318,6 +320,7 @@ def get_backtrack_data(
             params = {
                 'begin': begin,
                 'backtrack_minutes': backtrack_minutes,
+                'params': json.dumps(params),
             },
             debug = debug
         )

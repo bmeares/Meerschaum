@@ -206,7 +206,7 @@ def fetch_pipes_keys(
     _where = [
         pipes.c[key] == val 
         for key, val in _params.items()
-            if not isinstance(val, (list, tuple))
+            if not isinstance(val, (list, tuple)) and key in pipes.c
     ]
     q = sqlalchemy.select(
         [pipes.c.connector_keys, pipes.c.metric_key, pipes.c.location_key]
@@ -214,7 +214,7 @@ def fetch_pipes_keys(
 
     ### Parse IN params and add OR IS NULL if None in list.
     for c, vals in cols.items():
-        if isinstance(vals, (list, tuple)) and vals:
+        if isinstance(vals, (list, tuple)) and vals and c in pipes.c:
             q = (
                 q.where(pipes.c[c].in_(vals)) if None not in vals
                 else q.where(sqlalchemy.or_(pipes.c[c].in_(vals), pipes.c[c].is_(None)))
@@ -361,6 +361,7 @@ def get_backtrack_data(
         pipe : Optional[meerschaum.Pipe] = None,
         backtrack_minutes : int = 0,
         begin : Optional[datetime.datetime] = None,
+        params: Optional[Dict[str, Any]] = None,
         chunksize : Optional[int] = -1,
         debug : bool = False
     ) -> Optional[pandas.DataFrame]:
@@ -382,11 +383,15 @@ def get_backtrack_data(
     )
 
     ### check for capitals
-    from meerschaum.connectors.sql._tools import sql_item_name
+    from meerschaum.connectors.sql._tools import sql_item_name, build_where
     table = sql_item_name(str(pipe), self.flavor)
     dt = sql_item_name(pipe.get_columns('datetime'), self.flavor)
 
-    query = f"SELECT * FROM {table}" + (f" WHERE {dt} > {da}" if da else "")
+    query = (
+        f"SELECT * FROM {table}\n"
+        + (build_where(params, self) if params else '')
+        + ((("AND" if params else "WHERE") + f" {dt} >= {da}") if da else "")
+    )
 
     df = self.read(query, chunksize=chunksize, debug=debug)
 
@@ -444,7 +449,9 @@ def get_pipe_data(
 
     if params is not None:
         from meerschaum.connectors.sql._tools import build_where
-        where += build_where(params, self).replace('WHERE', ('AND' if (begin is not None or end is not None) else ""))
+        where += build_where(params, self).replace(
+            'WHERE', ('AND' if (begin is not None or end is not None) else "")
+        )
 
     if len(where) > 0:
         query += "\nWHERE " + where
@@ -685,7 +692,7 @@ def filter_existing(pipe, df, chunksize : Optional[int] = -1, debug : bool = Fal
 def get_sync_time(
         self,
         pipe : 'meerschaum.Pipe',
-        params : dict = None,
+        params : Optional[Dict[str, Any]] = None,
         debug : bool = False,
     ) -> 'datetime.datetime':
     """

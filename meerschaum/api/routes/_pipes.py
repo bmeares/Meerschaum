@@ -298,12 +298,21 @@ def get_backtrack_data(
         location_key : str,
         begin : datetime.datetime = None,
         backtrack_minutes : int = 0,
+        params : Optional[str] = None,
         orient : str = 'records',
         curr_user : 'meerschaum._internal.User.User' = fastapi.Depends(manager),
     ) -> fastapi.Response:
     """
     Get a Pipe's data. Optionally set query boundaries
     """
+    _params = {}
+    if params is not None:
+        import json
+        try:
+            _params = json.loads(params)
+        except Exception as e:
+            _params = None
+
     pipe = get_pipe(connector_keys, metric_key, location_key)
     if not pipe.get_columns('datetime', error=False):
         raise HTTPException(
@@ -311,9 +320,10 @@ def get_backtrack_data(
             detail = f"Cannot fetch backtrackdata for pipe '{pipe}' without a datetime column.",
         )
     df = pipe.get_backtrack_data(
-            begin = begin,
-            backtrack_minutes = backtrack_minutes,
-            debug = debug
+        begin = begin,
+        backtrack_minutes = backtrack_minutes,
+        params = _params,
+        debug = debug
     )
     if df is None:
         return None
