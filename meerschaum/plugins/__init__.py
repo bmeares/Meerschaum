@@ -8,7 +8,6 @@ Expose plugin management APIs from the `meerschaum.plugins` module.
 
 from __future__ import annotations
 from meerschaum.utils.typing import Callable, Any, Union, Optional, Dict, List
-from meerschaum.actions.arguments._parser import add_plugin_argument
 
 _api_plugins : dict = {}
 
@@ -204,3 +203,5 @@ def get_data_plugins() -> List['ModuleType']:
                 continue
             data_plugins.append(m)
     return data_plugins
+
+from meerschaum.actions.arguments._parser import add_plugin_argument
