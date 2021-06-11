@@ -1,7 +1,10 @@
 title: Reference
 nav:
-  - Pipes: pipes.md
+  - Pipes: pipes
   - Connectors: connectors.md
-  - Meerschaum Portable: meerschaum-portable.md
-  - Plugins: plugins
+  - Stack: stack.md
+  - Background Jobs: background-jobs.md
+  - Data Analysis Tools: data-analysis-tools.md
   - ...
+  - Plugins: plugins
+  - Portable: meerschaum-portable.md

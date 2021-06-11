@@ -1,12 +1,13 @@
 <link rel="stylesheet" type="text/css" href="/assets/css/asciinema-player.css" />
 <script src="/assets/js/asciinema-player.js"></script>
-# Bootstrap a Pipe
+
+# Bootstrapping
 
 The `bootstrap pipes` action includes a setup wizard to guide you through the process of creating new pipes. In this tutorial, we'll be looking at the prompts you'll encounter to help you better understand what each question is asking.
 
 ??? example "Watch an Example"
     The below example demonstrates how to create a pipe from an existing SQL database table.
-    
+
     In this case, the remote table is called `weather_table` and has a datetime column `timestamp` and ID column `station`. The pipe has the definition `SELECT * FROM weather_table`.
     <asciinema-player src="/assets/casts/bootstrap.cast"></asciinema-player>
 
@@ -18,7 +19,7 @@ mrsm bootstrap pipe --shell
 
 !!! summary ""
     The `--shell` flag launches an interactive Meerschaum shell after executing the provided action. You can open the Meershaum shell with the `mrsm` command or execute actions on the command line.
-    
+
 
 
 ## Keys

@@ -1,9 +1,7 @@
 nav:
   - Home: index.md
-  - Features: features
+#  - Features: features
   - Get Started: get-started
   - Reference: reference
-  - Tutorials: tutorials
   - FAQ: faq.md
   - News: news
-  - ...

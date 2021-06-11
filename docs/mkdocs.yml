@@ -4,11 +4,12 @@ site_description: "Build your data pipes with Meerschaum, the data engineer's to
 site_author: Bennett Meares
 theme:
   features:
-    - navigation.sections
-    - navigation.instant
-    - navigation.expand
+    # - navigation.sections
+    # - navigation.instant
+    # - navigation.expand
     - navigation.tabs
-    # - toc.integrate
+    - navigation.top
+    - toc.integrate
   favicon: assets/logo.ico
   logo: assets/logo_500x500.png
   name: material

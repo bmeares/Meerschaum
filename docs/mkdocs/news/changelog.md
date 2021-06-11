@@ -1,3 +1,8 @@
+---
+hide:
+  - toc
+---
+
 # Changelog and Release Notes
 This changelog was not introduced until v0.2.12, so many of the critical releases of Meerschaum have already been published. I've backlogged previous releases but haven't added all notes for all the versions.
 
@@ -7,22 +12,22 @@ Version 0.3.0 introduced the web interface and continued the focus on the user e
 ### v0.3.0
 - **Introduced the Web Interface.**  
   Added the Meerschaum Web Interface, an interactive dashboard for managing Meerschaum instances. Although not a total replacement for the Meerschaum Shell, the Web Interface allows multiple users to share connectors without needing to remote into the same machine.
-  
+
 - **Background jobs**  
   Actions may be run in the background with the `-d` or `--daemon` flags or with the action `start job`. To assign a name to a job, pass the flag `--name`.
-  
+
 - **Added `duckdb` as a database flavor**  
   The `duckdb` database flavor is a single file, similar to `sqlite`. Future releases may use `duckdb` as the cache store for local pipes' data.
 
 - **Added `uninstall plugins` and `uninstall packages`.**  
   Plugins and virtual environment `pip` packages may now be removed via the `uninstall` command.
-  
+
 - **Delete plugin from repository**  
   The command `delete plugins` now deletes the archive file and database registration of the plugin on the remote repository. This does not uninstall plugins, so deleted plugins may be re-registered if they are still installed on the client.
-  
+
 - **Bound syncing with `--begin` and `--end`**  
   When performing a sync, you can specify `--begin` and `--end` to bound the search for retrieving data.
-  
+
 - **Bugfixes and improvements**  
   Small bugfixes like including the location `None` with other locations and improvements like only searching for plugin auto-complete suggestions when the search term is at least 1 character long.
 
@@ -56,13 +61,13 @@ Version 0.2 improved greatly on 0.1, with a greater focus on the user experience
 ### v0.2.18
 - **Added `login` action.**  
   To verify or correct login credentials for API instance, run the `login` action. The action will try to log in with your defined usernames and passwords, and if a connector is missing a username or password is incorrect, it will ask if you would like to try different login credentials, and upon success, it will ask if you would like to save the new credentials to the primary configuration file.
-  
+
 - **Critical bugfix.**  
   Fixed bug where `default` values were being copied over from the active shell `instance`. I finally found, deep in the code, the missing `.copy()`.
-  
+
 - **Reset `api:mrsm` to default repository.**  
   In my task to move everything to the preconfigured instance, I overstepped and made the default repository into the configured `instance`, which by default is a SQLConnector, so that broke things! In case you were affected by this change, you can simply reset the value of `default_repository` to `api:mrsm` (or your `api` server) to return to the desired behavior.
-  
+
 - **🧹 Housekeeping (refactoring)**.  
   I removed nearly all instances of declaring mutable types as optional values, as well as additional `typing` hints. There may still be some additional cleaning to do, but now the functions are neat and tidy!
 

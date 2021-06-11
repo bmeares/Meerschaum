@@ -1,6 +1,5 @@
 title: Get Started
 nav:
-  - Installation: index.md
-  - Starting the Stack: starting-the-stack.md
-  - Bootstrap a Pipe: bootstrapping-a-pipe.md
+  - Setup: index.md
+  - Build a pipe: bootstrap.md
   - ...
