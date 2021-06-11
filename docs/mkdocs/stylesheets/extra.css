@@ -34,3 +34,7 @@
 .bmc-btn-text {
   color: #ffffff;
 }
+
+.md-grid {
+  max-width: 1440px;
+}

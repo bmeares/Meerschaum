@@ -1,5 +1,6 @@
 ---
 hide:
+  - navigation
   - toc
 ---
 <style>
@@ -52,6 +53,9 @@ hide:
     text-align: center;
   }
 
+h1 {
+  display: none;
+}
 
 </style>
 <script type="text/javascript">
@@ -70,10 +74,14 @@ hide:
     return false;
    }
 </script>
+
+<link rel="stylesheet" type="text/css" href="/assets/css/asciinema-player.css" />
+<script src="/assets/js/asciinema-player.js"></script>
+
 <!-- <script src="https://platform.linkedin.com/badges/js/profile.js" async defer type="text/javascript"></script> -->
 ![Meerschaum Banner](banner_1920x320.png)
-# Welcome to Meerschaum!
-Here you can find usage information, helpful guides, and tutorials.
+
+<!-- # Welcome to the Meerschaum Documentation Home Page -->
 
 If you'd like to incorporate Meerschaum into your project, head over to [docs.meerschaum.io](https://docs.meerschaum.io) for technical API documentation of the `meerschaum` package.
 
@@ -91,17 +99,28 @@ If you'd like to incorporate Meerschaum into your project, head over to [docs.me
   <div class="grid-child">
     <h2>What is Meerschaum?</h2>
     <p>Meerschaum is a platform for quickly creating and managing time-series data streams called <b><a href="/reference/pipes/">pipes</a></b>. With Meerschaum, you can have a data visualization stack running in minutes.</p>
-    <div style="text-align: center">
-      <iframe width="480" height="270" src="https://www.youtube.com/embed/wncA_vaIois" title="YouTube video player" frameborder="0" allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture" allowfullscreen></iframe>
-    </div>
-  </div>
-  <div class="grid-child">
     <h2>Why Meerschaum?</h2>
     <p>If you've worked with time-series data, you know the headaches that come with ETL. Meerschaum is a system that makes consolidating and syncing data easy.</p>
-    <p>Anytime you need to move time-series data from somewhere like a database, API, MQTT topic, or even CSV files (we've all done it at some point), you usually end up writing some scripts that silently break in a year.</p>
     <p>Meerschaum instead gives you better tools to define and sync your data streams. And don't worry — you can always incorporate Meerschaum into your existing scripts.</p>
   </div>
+  <div class="grid-child">
+    <br>
+    <asciinema-player src="/assets/casts/jobs.cast" autoplay="true" loop="true" size="small" preload="true"></asciinema-player>
+    <!-- <div style="text-align: center">
+      <iframe width="480" height="270" src="https://www.youtube.com/embed/wncA_vaIois" title="YouTube video player" frameborder="0" allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture" allowfullscreen></iframe>
+    </div> -->
+  </div>
 </div>
+
+<!-- <div class="grid-container">
+  <div class="grid-child">
+
+
+  </div>
+  <div class="grid-child">
+
+  </div>
+</div> -->
 
 ## Support Meerschaum's Development
 <div class="grid-container">
@@ -120,6 +139,3 @@ If you'd like to incorporate Meerschaum into your project, head over to [docs.me
     </div>
   </div>
 </div>
-
-
-

@@ -1,6 +1,6 @@
 # Types of Plugins
 
-> This page introduces the different types of Meerschaum plugins. For technical information, consult the [Writing Your Own Plugins tutorial](/tutorials/plugin-development/writing-plugins/).
+> This page introduces the different types of Meerschaum plugins. For technical information, consult the [Writing Your Own Plugins tutorial](/reference/plugins/writing-plugins/).
 
 There are three main kinds of Meerschaum plugin: those which **provide data**, **perform actions**, or **extend the API**.
 

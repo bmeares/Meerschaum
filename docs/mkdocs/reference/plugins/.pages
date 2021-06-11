@@ -1,3 +1,4 @@
 nav:
   - "Types of Plugins": types-of-plugins.md
-  - "Installing and Using Plugins": using-plugins.md
+  - "Installation and Use": using-plugins.md
+  - "Writing Your Own": writing-plugins.md

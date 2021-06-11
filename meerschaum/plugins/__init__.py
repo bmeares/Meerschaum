@@ -73,7 +73,10 @@ def api_plugin(function) -> Callable[[Any], Any]:
     _api_plugins[function.__module__].append(function)
     return function
 
-def import_plugins(plugins_to_import: Union[str, List[str], None] = None) -> Union[
+def import_plugins(
+        plugins_to_import: Union[str, List[str], None] = None,
+        warn: bool = True,
+    ) -> Union[
         'ModuleType', Tuple['ModuleType', None]
     ]:
     """
@@ -95,7 +98,7 @@ def import_plugins(plugins_to_import: Union[str, List[str], None] = None) -> Uni
     if isinstance(plugins_to_import, str):
         plugins_to_import = [plugins_to_import]
 
-    from meerschaum.utils.warnings import error, warn
+    from meerschaum.utils.warnings import error, warn as _warn
     if str(PLUGINS_RESOURCES_PATH.parent) not in sys.path:
         sys.path.insert(0, str(PLUGINS_RESOURCES_PATH.parent))
     if str(PLUGINS_RESOURCES_PATH.parent) not in __path__:
@@ -113,8 +116,8 @@ def import_plugins(plugins_to_import: Union[str, List[str], None] = None) -> Uni
             install=False, warn=False, lazy=False, venv=None,
         )
 
-    if plugins is None:
-        warn(f"Failed to import plugins.", stacklevel=3)
+    if plugins is None and warn:
+        _warn(f"Failed to import plugins.", stacklevel=3)
 
     if str(PLUGINS_RESOURCES_PATH.parent) in sys.path:
         sys.path.remove(str(PLUGINS_RESOURCES_PATH.parent))

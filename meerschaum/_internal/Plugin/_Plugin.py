@@ -37,13 +37,7 @@ class Plugin:
         self.name = name
         self.attributes = attributes
         self.user_id = user_id
-        if version is None:
-            try:
-                self.version = self.module.__version__
-            except Exception as e:
-                self.version = None
-        else:
-            self.version = version
+        self._version = version
 
         if archive_path is None:
             self.archive_path = pathlib.Path(
@@ -53,20 +47,25 @@ class Plugin:
             self.archive_path = archive_path
 
     @property
+    def version(self):
+        """
+        Return the plugin's version string.
+        """
+        if self._version is None:
+            try:
+                self._version = self.module.__version__
+            except Exception as e:
+                self._version = None
+        return self._version
+
+    @property
     def module(self):
         """
         Return a Plugin's Python module.
         """
-        if '_module' not in self.__dict__:
+        if '_module' not in self.__dict__ or self._module is None:
             from meerschaum.plugins import import_plugins
-            self._module = import_plugins(str(self))
-            #  from meerschaum.plugins import get_plugins_modules
-            #  for m in get_plugins_modules():
-                #  if self.name == m.__name__.split('.')[-1]:
-                    #  self._module = m
-                    #  break
-        #  if '_module' not in self.__dict__:
-            #  return None
+            self._module = import_plugins(str(self), warn=False)
         return self._module
 
     @property
