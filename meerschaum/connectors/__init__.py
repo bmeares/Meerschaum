@@ -13,6 +13,7 @@ For ease of use, you can also import from the root `meerschaum` module:
 
 from __future__ import annotations
 from meerschaum.utils.typing import Any, SuccessTuple, Union, Optional, Sequence, Mapping
+from meerschaum.utils.threading import Lock, RLock
 
 from meerschaum.connectors.Connector import Connector
 from meerschaum.connectors.sql._create_engine import flavor_configs as sql_flavor_configs
@@ -24,6 +25,10 @@ connectors = {
     'sql'    : dict(),
     'mqtt'   : dict(),
     'plugin' : dict(),
+}
+_locks = {
+    'connectors': Lock(),
+    'types': Lock(),
 }
 attributes = {
     'api' : {
@@ -134,12 +139,15 @@ def get_connector(
         from meerschaum.connectors.api import APIConnector
         from meerschaum.connectors.mqtt import MQTTConnector
         from meerschaum.connectors.plugin import PluginConnector
+        from meerschaum.utils.warnings import warn
+        _locks['types'].acquire()
         types = {
             'api'    : APIConnector,
             'sql'    : SQLConnector,
             'mqtt'   : MQTTConnector,
             'plugin' : PluginConnector,
         }
+        _locks['types'].release()
     
     ### always refresh MQTT Connectors NOTE: test this!
     if type == 'mqtt':
@@ -158,13 +166,16 @@ def get_connector(
                     )
                 elif connectors[type][label].__dict__[attribute] != value:
                     warning_message = (
-                        f"Mismatched values for attribute '{attribute}' in connector '{connectors[type][label]}'.\n" +
+                        f"Mismatched values for attribute '{attribute}' in connector "
+                        + f"'{connectors[type][label]}'.\n" +
                         f"  - Keyword value: '{value}'\n" +
                         f"  - Existing value: '{connectors[type][label].__dict__[attribute]}'\n"
                     )
             if warning_message is not None:
-                from meerschaum.utils.warnings import warn
-                warning_message += f"\nSetting `refresh` to True and recreating connector with type: '{type}' and label '{label}'"
+                warning_message += (
+                    "\nSetting `refresh` to True and recreating connector with type:"
+                    + f" '{type}' and label '{label}'."
+                )
                 refresh = True
                 warn(warning_message)
         else: ### connector doesn't yet exist
@@ -175,8 +186,17 @@ def get_connector(
     import traceback
     error_msg = None
     if refresh:
-        ### will raise an error if configuration is incorrect / missing
-        conn = types[type](label=label, debug=debug, **kw)
-        connectors[type][label] = conn
+        _locks['connectors'].acquire()
+        try:
+            ### will raise an error if configuration is incorrect / missing
+            conn = types[type](label=label, debug=debug, **kw)
+            connectors[type][label] = conn
+        except Exception as e:
+            warn(e, stack=False)
+            conn = None
+        finally:
+            _locks['connectors'].release()
+        if conn is None:
+            return None
 
     return connectors[type][label]

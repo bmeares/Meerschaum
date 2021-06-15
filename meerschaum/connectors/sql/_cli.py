@@ -41,7 +41,7 @@ def cli(
     cli_name = flavor_clis[self.flavor]
 
     ### Install the CLI package and any dependencies.
-    cli = attempt_import(cli_name, lazy=False, debug=debug)
+    cli, cli_main = attempt_import(cli_name, (cli_name + '.main'), lazy=False, debug=debug)
     if cli_name in cli_deps:
         for dep in cli_deps[cli_name]:
             locals()[dep] = attempt_import(dep, lazy=False, warn=False, debug=debug)
@@ -55,15 +55,16 @@ def cli(
     ### Define the script to execute to launch the CLI.
     ### The `mssqlcli` script is manually written to avoid telemetry
     ### and because `main.cli()` is not defined.
-    launch_cli = f"from {cli_name} import main; main.cli(['{cli_arg_str}'])"
+    launch_cli = f"cli_main.cli(['{cli_arg_str}'])"
     if self.flavor == 'mssql':
         launch_cli = (
-            "from mssqlcli.mssqlclioptionsparser import create_parser; "
-            + "from mssqlcli.mssql_cli import MssqlCli; "
-            + "ms_parser = create_parser(); "
-            + f"ms_options = ms_parser.parse_args(['-S', '{self.host}', '-d', '{self.database}', "
-            + f"'-U', '{self.username}', '-P', '{self.password}']); "
-            + "ms_object = MssqlCli(ms_options)\n"
+            "mssqlclioptionsparser, mssql_cli = attempt_import("
+            + "'mssqlcli.mssqlclioptionsparser', 'mssqlcli.mssql_cli', lazy=False)\n"
+            + "ms_parser = mssqlclioptionsparser.create_parser()\n"
+            + f"ms_options = ms_parser.parse_args(['--server', 'tcp:{self.host},{self.port}', "
+            + f"'--database', '{self.database}', "
+            + f"'--username', '{self.username}', '--password', '{self.password}'])\n"
+            + "ms_object = mssql_cli.MssqlCli(ms_options)\n"
             + "try:\n"
             + "    ms_object.connect_to_database()\n"
             + "    ms_object.run()\n"
@@ -72,6 +73,8 @@ def cli(
         )
 
     try:
+        if debug:
+            dprint(f'Launching CLI:\n{launch_cli}')
         exec(launch_cli)
         success, msg = True, 'Success'
     except Exception as e:

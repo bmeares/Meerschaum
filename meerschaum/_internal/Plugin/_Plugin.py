@@ -235,7 +235,7 @@ class Plugin:
         success, abort = None, None
         if is_same_version and not force:
             success, msg = True, (
-                f"Plugin '{self}' is up-to-date (version {old_version}).\n\n" +
+                f"Plugin '{self}' is up-to-date (version {old_version}).\n" +
                 "    Install again with `-f` or `--force` to reinstall."
             )
             abort = True
@@ -267,8 +267,8 @@ class Plugin:
                 success, msg = True, success_msg
         else:
             success, msg = False, (
-                f"Your Existing version '{old_version}' is higher than attempted version " +
-                f"'{new_version}'."
+                f"Your installed version of plugin '{self}' ({old_version}) is higher than "
+                + f"attempted version {new_version}."
             )
 
         shutil.rmtree(temp_dir)

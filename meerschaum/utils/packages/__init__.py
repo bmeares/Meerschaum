@@ -9,6 +9,7 @@ Functions for managing packages and virtual environments reside here.
 from __future__ import annotations
 import importlib, os
 from meerschaum.utils.typing import Any, List, SuccessTuple, Optional, Union
+from meerschaum.utils.threading import Lock, RLock
 
 from meerschaum.utils.packages._packages import packages, all_packages
 from meerschaum.utils.warnings import warn, error
@@ -16,6 +17,10 @@ from meerschaum.utils.warnings import warn, error
 _import_module = importlib.import_module
 _import_hook_venv = None
 active_venvs = set()
+_locks = {
+    'active_venvs': RLock(),
+    'sys.path': RLock(),
+}
 def need_update(
         package : 'ModuleType',
         split : bool = True,
@@ -84,7 +89,7 @@ def deactivate_venv(
         debug: bool = False
     ) -> bool:
     """
-    Remove a virtual environment from sys.path (if it's been activated)
+    Remove a virtual environment from sys.path (if it's been activated).
     """
     import sys
     global active_venvs
@@ -97,14 +102,18 @@ def deactivate_venv(
         dprint(f"Deactivating virtual environment '{venv}'...", color=color)
 
     if venv in active_venvs:
+        _locks['active_venvs'].acquire()
         active_venvs.remove(venv)
+        _locks['active_venvs'].release()
 
     if sys.path is None:
         return False
 
     target = venv_target_path(venv, debug=debug)
+    #  _locks['sys.path'].acquire()
     if str(target) in sys.path:
         sys.path.remove(str(target))
+    #  _locks['sys.path'].release()
 
     if debug:
         dprint(f'sys.path: {sys.path}', color=color)
@@ -117,7 +126,7 @@ def activate_venv(
         debug: bool = False
     ) -> bool:
     """
-    Create a virtual environment (if it doesn't exist) and add it to sys.path if necessary
+    Create a virtual environment (if it doesn't exist) and add it to sys.path if necessary.
     """
     global active_venvs
     if venv in active_venvs or venv is None:
@@ -164,10 +173,12 @@ def activate_venv(
     try:
         if debug:
             dprint(f"Activating virtual environment '{venv}'...", color=color)
+        _locks['active_venvs'].acquire()
         active_venvs.add(venv)
     except Exception:
         pass
     finally:
+        _locks['active_venvs'].release()
         os.chdir(old_cwd)
 
     ### override built-in import with attempt_import
@@ -501,6 +512,7 @@ def attempt_import(
         venv = _import_hook_venv
 
     if venv is not None:
+        _locks['sys.path'].acquire()
         activate_venv(venv=venv, color=color, debug=debug)
     _warnings = _import_module('meerschaum.utils.warnings')
     warn_function = _warnings.warn
@@ -617,8 +629,10 @@ def attempt_import(
                         stack = False,
                         color = False,
                     )
-    if venv is not None and deactivate:
-        deactivate_venv(venv=venv, debug=debug, color=color)
+    if venv is not None:
+        _locks['sys.path'].release()
+        if deactivate:
+            deactivate_venv(venv=venv, debug=debug, color=color)
 
     modules = tuple(modules)
     if len(modules) == 1:

@@ -1,7 +1,8 @@
 nav:
   - Home: index.md
-#  - Features: features
+  - Features: features
   - Get Started: get-started
   - Reference: reference
+  - Package Docs: https://docs.meerschaum.io
   - FAQ: faq.md
   - News: news

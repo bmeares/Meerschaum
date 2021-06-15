@@ -57,7 +57,7 @@ def fetch(
     """
     from meerschaum.utils.debug import dprint
     from meerschaum.utils.warnings import warn, error
-    from meerschaum.connectors.sql._tools import sql_item_name, dateadd_str
+    from meerschaum.connectors.sql.tools import sql_item_name, dateadd_str
     from meerschaum.config import get_config
     import datetime
 
@@ -140,7 +140,7 @@ def _join_fetch_query(
     if not pipe.exists(debug=debug):
         return _simple_fetch_query(pipe, debug=debug, **kw)
 
-    from meerschaum.connectors.sql._tools import sql_item_name, dateadd_str
+    from meerschaum.connectors.sql.tools import sql_item_name, dateadd_str
     pipe_instance_name = sql_item_name(str(pipe), pipe.instance_connector.flavor)
     pipe_remote_name = sql_item_name(str(pipe), pipe.connector.flavor)
     sync_times_table = str(pipe) + "_sync_times"

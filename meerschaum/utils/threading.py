@@ -3,9 +3,12 @@
 # vim:fenc=utf-8
 
 """
-Define a custom Thread class with a callback method
+Define a custom Thread class with a callback method.
 """
 import threading
+Lock = threading.Lock
+RLock = threading.RLock
+
 class Thread(threading.Thread):
     """
     Wrapper for threading.Thread with optional callback and error_callback functions
