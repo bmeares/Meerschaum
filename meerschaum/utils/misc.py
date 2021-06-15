@@ -494,7 +494,7 @@ def retry_connect(
     from meerschaum.utils.debug import dprint
     from meerschaum import get_connector
     from meerschaum.utils.packages import attempt_import
-    from meerschaum.connectors.sql._tools import test_queries
+    from meerschaum.connectors.sql.tools import test_queries
     from functools import partial
     import time
 

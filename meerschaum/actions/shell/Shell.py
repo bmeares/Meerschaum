@@ -219,6 +219,7 @@ class Shell(cmd.Cmd):
             auto_suggest = ValidAutoSuggest(),
             completer = ShellCompleter(),
             complete_while_typing = True,
+            reserve_space_for_menu = False,
         )
 
         try: ### try cmd2 arguments first
@@ -766,7 +767,7 @@ def input_with_sigint(_input, session):
     Replace built-in `input()` with prompt_toolkit.prompt.
     """
 
-    def _patched_input(*args):
+    def _patched_prompt(*args):
         _args = []
         for a in args:
             try:
@@ -790,4 +791,4 @@ def input_with_sigint(_input, session):
             #  return "pass"
         return parsed
 
-    return _patched_input
+    return _patched_prompt

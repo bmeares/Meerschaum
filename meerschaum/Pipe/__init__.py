@@ -262,7 +262,7 @@ class Pipe:
         if '_cache_pipe' not in self.__dict__:
             from meerschaum import Pipe
             from meerschaum.config._patch import apply_patch_to_config
-            from meerschaum.connectors.sql._tools import sql_item_name
+            from meerschaum.connectors.sql.tools import sql_item_name
             _parameters = self.parameters.copy()
             _fetch_patch = {
                 'fetch': ({
@@ -302,6 +302,26 @@ class Pipe:
         if self.location_key is not None:
             name += f"_{self.location_key}"
         return name
+
+    def __eq__(self, other):
+        try:
+            return (
+                type(self) == type(other)
+                and self.connector_keys == other.connector_keys
+                and self.metric_key == other.metric_key
+                and self.location_key == other.location_key
+                and self.instance_keys == other.instance_keys
+            )
+        except Exception as e:
+            return False
+
+    def __hash__(self):
+        return hash(
+            str(self.connector_keys)
+            + str(self.metric_key)
+            + str(self.location_key)
+            + str(self.instance_keys)
+        )
 
     def __repr__(self):
         return str(self)

@@ -37,12 +37,14 @@ Below is a list of common questions and issues you may encounter. If you have su
     If you are planning on integrating Meerschaum into your Python scripts, you can access actions directly via the `meerschaum.actions.actions` dictionary. Please consult [the Python package documentation](https://docs.meerschaumio) for more information. Also, you might want to consider making your script into a [Meerschaum action by writing an action plugin](/reference/plugins/types-of-plugins/#action-plugins).
 
 ??? faq "Connectors don't work for `<database flavor>`!"
-    Although Connectors *should* work with any database flavor supported by `sqlalchemy` Engines, it is difficult to test against many database flavors. When bugs are encountered, please open an issue and describe your configuration!
+    Although Connectors *should* work with any database flavor supported by `sqlalchemy` Engines, it is difficult to test against many database flavors. When bugs are encountered, please [open an issue](https://github.com/bmeares/Meerschaum/issues) and describe your configuration!
 
     In cases like Microsoft SQL server or Oracle SQL, make sure you have the appropriate drivers installed:
 
       - [Microsoft SQL Server](https://docs.microsoft.com/en-us/sql/connect/odbc/linux-mac/installing-the-microsoft-odbc-driver-for-sql-server?view=sql-server-ver15)
       - [Oracle SQL](https://docs.oracle.com/en/database/oracle/oracle-database/19/cwlin/installing-odbc-drivers-for-linux-x86-64.html)
+
+    Additionally, for Meerschaum to install `pyodbc`, you may need `g++` and `gcc` installed:
 
 ??? faq "How do I completely uninstall Meerschaum?"
     - Take down your stack and delete its data with `mrsm stack down -v`.

@@ -240,7 +240,7 @@ def create_indices(
     Create indices for a Pipe's datetime and ID columns.
     """
     from meerschaum.utils.debug import dprint
-    from meerschaum.connectors.sql._tools import sql_item_name, get_distinct_col_count
+    from meerschaum.connectors.sql.tools import sql_item_name, get_distinct_col_count
     from meerschaum.utils.warnings import warn
     from meerschaum.config import get_config
     index_queries = dict()
@@ -333,7 +333,7 @@ def delete_pipe(
     Delete a Pipe's registration and drop its table.
     """
     from meerschaum.utils.warnings import warn
-    from meerschaum.connectors.sql._tools import sql_item_name
+    from meerschaum.connectors.sql.tools import sql_item_name
     from meerschaum.utils.debug import dprint
     from meerschaum.utils.packages import attempt_import
     sqlalchemy = attempt_import('sqlalchemy')
@@ -372,7 +372,7 @@ def get_backtrack_data(
     if pipe is None:
         error("Pipe must be provided.")
     from meerschaum.utils.debug import dprint
-    from meerschaum.connectors.sql._tools import dateadd_str
+    from meerschaum.connectors.sql.tools import dateadd_str
     if begin is None:
         begin = pipe.sync_time
     da = dateadd_str(
@@ -383,7 +383,7 @@ def get_backtrack_data(
     )
 
     ### check for capitals
-    from meerschaum.connectors.sql._tools import sql_item_name, build_where
+    from meerschaum.connectors.sql.tools import sql_item_name, build_where
     table = sql_item_name(str(pipe), self.flavor)
     dt = sql_item_name(pipe.get_columns('datetime'), self.flavor)
 
@@ -420,7 +420,7 @@ def get_pipe_data(
         Upper bound for the query (inclusive)
     """
     from meerschaum.utils.debug import dprint
-    from meerschaum.connectors.sql._tools import sql_item_name, dateadd_str
+    from meerschaum.connectors.sql.tools import sql_item_name, dateadd_str
     from meerschaum.utils.packages import import_pandas
     pd = import_pandas()
 
@@ -448,7 +448,7 @@ def get_pipe_data(
         where += f"{dt} <= {end_da}"
 
     if params is not None:
-        from meerschaum.connectors.sql._tools import build_where
+        from meerschaum.connectors.sql.tools import build_where
         where += build_where(params, self).replace(
             'WHERE', ('AND' if (begin is not None or end is not None) else "")
         )
@@ -698,7 +698,7 @@ def get_sync_time(
     """
     Get a Pipe's most recent datetime
     """
-    from meerschaum.connectors.sql._tools import sql_item_name, build_where
+    from meerschaum.connectors.sql.tools import sql_item_name, build_where
     from meerschaum.utils.warnings import warn
     import datetime
     table = sql_item_name(str(pipe), self.flavor)
@@ -745,7 +745,7 @@ def pipe_exists(
     """
     Check that a Pipe's table exists.
     """
-    from meerschaum.connectors.sql._tools import table_exists
+    from meerschaum.connectors.sql.tools import table_exists
     exists = table_exists(str(pipe), self, debug=debug)
     if debug:
         from meerschaum.utils.debug import dprint
@@ -764,7 +764,7 @@ def get_pipe_rowcount(
     """
     Return the number of rows between datetimes for a Pipe's instance cache or remote source
     """
-    from meerschaum.connectors.sql._tools import dateadd_str, sql_item_name
+    from meerschaum.connectors.sql.tools import dateadd_str, sql_item_name
     from meerschaum.utils.warnings import error, warn
     if remote:
         msg = f"'fetch:definition' must be an attribute of pipe '{pipe}' to get a remote rowcount"
@@ -800,7 +800,7 @@ def get_pipe_rowcount(
         {_datetime_name} <= {dateadd_str(flavor=self.flavor, datepart='minute', number=(0), begin=end)}
         """
     if params is not None:
-        from meerschaum.connectors.sql._tools import build_where
+        from meerschaum.connectors.sql.tools import build_where
         query += build_where(params, self).replace('WHERE', (
             'AND' if (begin is not None or end is not None)
                 else 'WHERE'
@@ -824,7 +824,7 @@ def drop_pipe(
     if not pipe.exists(debug=debug):
         return True, f"Pipe '{pipe}' does not exist, so nothing was dropped."
 
-    from meerschaum.connectors.sql._tools import sql_item_name
+    from meerschaum.connectors.sql.tools import sql_item_name
     pipe_name = sql_item_name(str(pipe), self.flavor)
     success = self.exec(f"DROP TABLE {pipe_name}", silent=True, debug=debug) is not None
     if not success:
@@ -841,7 +841,7 @@ def get_pipe_table(
     """
     Return a sqlalchemy Table for a Pipe bound to this SQLConnector's engine.
     """
-    from meerschaum.connectors.sql._tools import get_sqlalchemy_table
+    from meerschaum.connectors.sql.tools import get_sqlalchemy_table
     return get_sqlalchemy_table(str(pipe), connector=self, debug=debug)
 
 def get_pipe_columns_types(

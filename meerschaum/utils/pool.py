@@ -8,8 +8,12 @@ Global pools that are joined on exit.
 
 from __future__ import annotations
 from meerschaum.utils.typing import Optional
+from meerschaum.utils.threading import Lock, RLock
 
 pools = None
+_locks = {
+    'pools': Lock(),
+}
 
 def get_pool(pool_class_name : str = 'ThreadPool', workers : Optional[int] = None):
     """
@@ -17,6 +21,7 @@ def get_pool(pool_class_name : str = 'ThreadPool', workers : Optional[int] = Non
     Pools are joined and closed on exit.
     """
     global pools
+    _locks['pools'].acquire()
     if pools is None:
         pools = dict()
 
@@ -58,6 +63,7 @@ def get_pool(pool_class_name : str = 'ThreadPool', workers : Optional[int] = Non
         del pools[pool_class_name]
         build_pool(workers)
 
+    _locks['pools'].release()
     return pools[pool_class_name]
 
 def get_pools():
@@ -66,5 +72,7 @@ def get_pools():
     """
     global pools
     if pools is None:
+        _locks['pools'].acquire()
         pools = dict()
+        _locks['pools'].release()
     return pools

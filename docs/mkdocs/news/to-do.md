@@ -17,10 +17,13 @@ Below are some ongoing tasks I have planned for Meerschaum. This is not an exhau
 - **Add more databases to supported flavors**
     * *Relational databases*
         * [x] CockroachDB
+        * [x] MSSQL
     * *NoSQL databases*
         * [ ] InfluxDB
 
 ## 🐞 Bugs
+- [x] Add locks to connectors to avoid concurrency issues.
+- [x] Disable `prompt_toolkit` newlines in shell prompt.
 - [x] ~~`parameters` column in the `pipes` table is a string, not JSON.~~
 - [x] ~~`instance` command does not work after reloading when closing a config file~~
 - [x] ~~Inconsistent web console colors (e.g. `show connectors` vs `show config`)~~
@@ -33,14 +36,14 @@ Below are some ongoing tasks I have planned for Meerschaum. This is not an exhau
 
 ## ✨ Features
 - **Syncing**
-    
+
     - [ ] **New syncing algorithm**  
       I have been brainstorming a better way to detect differences between source and cache when syncing, so a future release of Meerschaum will be able to detect changes in past data.
     - [ ] **Local Pipe HD5 caching**  
       When requesting data via `pipe.get_data()`, cache data locally and sync any changes. I am investigating using `duckdb` as a local cache database.
     - [ ] **Rewrite API data to paginate downstream**  
       When syncing upstream, Meerschaum defaults to sending `POST` requests for chunks. The chunking logic is mostly there, so I need to implement the same process in reverse.
-    
+
 - **Web Interface**
     - [x] **Login html page**  
       Request an OAuth2 token via a pretty web page.
@@ -50,7 +53,7 @@ Below are some ongoing tasks I have planned for Meerschaum. This is not an exhau
       Interact with a Meerschaum API via a web interface.
 
 - **Diagnostics**
-    - [ ] **Logging system**  
+    - [x] **Logging system**  
       Emit log messages to a more universal bus, similar to Splunk / Logstash.
     - [ ] **Diagnostic Grafana dashboards**  
       Ship pre-configured diagnostic dashboards.
@@ -73,15 +76,15 @@ Below are some ongoing tasks I have planned for Meerschaum. This is not an exhau
       Remove jobs with `delete jobs`.
     - [ ] **Bootstrap job**  
     Guide the user through defining and running jobs.
-    
+
 - **Plugins**
     - [ ] **Reuse packages across virtual environments**  
       In an attempt to save space, if a package is already installed in another virtual environment and satisfies the requirements for a plugin, attempt to use that version instead of installing a new version.
-      
+
     - [x] **API Plugins**  
-    
+
       Add the decorator `@api_plugin` to defer API plugin initialization (lazy loading).
-    
+
 - **Other System Features**
     - [x] **Daemonize any process**  
       Allow any Meerschaum action to run in the background.
