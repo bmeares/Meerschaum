@@ -102,18 +102,18 @@ def deactivate_venv(
         dprint(f"Deactivating virtual environment '{venv}'...", color=color)
 
     if venv in active_venvs:
-        #  _locks['active_venvs'].acquire()
+        _locks['active_venvs'].acquire()
         active_venvs.remove(venv)
-        #  _locks['active_venvs'].release()
+        _locks['active_venvs'].release()
 
     if sys.path is None:
         return False
 
     target = venv_target_path(venv, debug=debug)
-    #  _locks['sys.path'].acquire()
+    _locks['sys.path'].acquire()
     if str(target) in sys.path:
         sys.path.remove(str(target))
-    #  _locks['sys.path'].release()
+    _locks['sys.path'].release()
 
     if debug:
         dprint(f'sys.path: {sys.path}', color=color)
@@ -173,12 +173,12 @@ def activate_venv(
     try:
         if debug:
             dprint(f"Activating virtual environment '{venv}'...", color=color)
-        #  _locks['active_venvs'].acquire()
+        _locks['active_venvs'].acquire()
         active_venvs.add(venv)
     except Exception:
         pass
     finally:
-        #  _locks['active_venvs'].release()
+        _locks['active_venvs'].release()
         os.chdir(old_cwd)
 
     ### override built-in import with attempt_import
@@ -512,7 +512,7 @@ def attempt_import(
         venv = _import_hook_venv
 
     if venv is not None:
-        #  _locks['sys.path'].acquire()
+        _locks['sys.path'].acquire()
         activate_venv(venv=venv, color=color, debug=debug)
     _warnings = _import_module('meerschaum.utils.warnings')
     warn_function = _warnings.warn
@@ -630,7 +630,7 @@ def attempt_import(
                         color = False,
                     )
     if venv is not None:
-        #  _locks['sys.path'].release()
+        _locks['sys.path'].release()
         if deactivate:
             deactivate_venv(venv=venv, debug=debug, color=color)
 

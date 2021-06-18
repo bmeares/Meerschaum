@@ -140,14 +140,14 @@ def get_connector(
         from meerschaum.connectors.mqtt import MQTTConnector
         from meerschaum.connectors.plugin import PluginConnector
         from meerschaum.utils.warnings import warn
-        #  _locks['types'].acquire()
+        _locks['types'].acquire()
         types = {
             'api'    : APIConnector,
             'sql'    : SQLConnector,
             'mqtt'   : MQTTConnector,
             'plugin' : PluginConnector,
         }
-        #  _locks['types'].release()
+        _locks['types'].release()
     
     ### always refresh MQTT Connectors NOTE: test this!
     if type == 'mqtt':
@@ -186,7 +186,7 @@ def get_connector(
     import traceback
     error_msg = None
     if refresh:
-        #  _locks['connectors'].acquire()
+        _locks['connectors'].acquire()
         try:
             ### will raise an error if configuration is incorrect / missing
             conn = types[type](label=label, debug=debug, **kw)
@@ -195,8 +195,7 @@ def get_connector(
             warn(e, stack=False)
             conn = None
         finally:
-            #  _locks['connectors'].release()
-            pass
+            _locks['connectors'].release()
         if conn is None:
             return None
 
