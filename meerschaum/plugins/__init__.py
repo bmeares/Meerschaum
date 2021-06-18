@@ -73,7 +73,7 @@ def api_plugin(function) -> Callable[[Any], Any]:
     ```
     """
     global _api_plugins
-    _locks['_api_plugins'].acquire()
+    #  _locks['_api_plugins'].acquire()
     try:
         if function.__module__ not in _api_plugins:
             _api_plugins[function.__module__] = []
@@ -82,7 +82,8 @@ def api_plugin(function) -> Callable[[Any], Any]:
         from meerschaum.utils.warnings import warn
         warn(e)
     finally:
-        _locks['_api_plugins'].release()
+        #  _locks['_api_plugins'].release()
+        pass
     return function
 
 def import_plugins(
@@ -107,8 +108,8 @@ def import_plugins(
     PLUGINS_RESOURCES_PATH.mkdir(parents=True, exist_ok=True)
     PLUGINS_INIT_PATH.touch()
 
-    _locks['__path__'].acquire()
-    _locks['sys.path'].acquire()
+    #  _locks['__path__'].acquire()
+    #  _locks['sys.path'].acquire()
 
     if isinstance(plugins_to_import, str):
         plugins_to_import = [plugins_to_import]
@@ -137,8 +138,8 @@ def import_plugins(
     if str(PLUGINS_RESOURCES_PATH.parent) in sys.path:
         sys.path.remove(str(PLUGINS_RESOURCES_PATH.parent))
 
-    _locks['__path__'].release()
-    _locks['sys.path'].release()
+    #  _locks['__path__'].release()
+    #  _locks['sys.path'].release()
 
     return plugins
 

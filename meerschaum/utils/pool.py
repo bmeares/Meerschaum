@@ -21,7 +21,7 @@ def get_pool(pool_class_name : str = 'ThreadPool', workers : Optional[int] = Non
     Pools are joined and closed on exit.
     """
     global pools
-    _locks['pools'].acquire()
+    #  _locks['pools'].acquire()
     if pools is None:
         pools = dict()
 
@@ -63,7 +63,7 @@ def get_pool(pool_class_name : str = 'ThreadPool', workers : Optional[int] = Non
         del pools[pool_class_name]
         build_pool(workers)
 
-    _locks['pools'].release()
+    #  _locks['pools'].release()
     return pools[pool_class_name]
 
 def get_pools():
@@ -72,7 +72,7 @@ def get_pools():
     """
     global pools
     if pools is None:
-        _locks['pools'].acquire()
+        #  _locks['pools'].acquire()
         pools = dict()
-        _locks['pools'].release()
+        #  _locks['pools'].release()
     return pools
