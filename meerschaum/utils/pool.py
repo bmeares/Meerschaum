@@ -12,7 +12,7 @@ from meerschaum.utils.threading import Lock, RLock
 
 pools = None
 _locks = {
-    'pools': Lock(),
+    'pools': RLock(),
 }
 
 def get_pool(pool_class_name : str = 'ThreadPool', workers : Optional[int] = None):
