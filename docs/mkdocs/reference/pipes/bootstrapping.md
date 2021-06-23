@@ -65,27 +65,11 @@ For a pipe with an `api` connector, you will be prompted for the connector, metr
 
 For other types of connectors (like `mqtt` and `plugin`), your editor will open the pipe's attributes YAML file. Metadata needed for extracting data will fall under the `fetch:` key (for example, `mqtt` needs a `topic`. Plugin pipes should not require anything specific).
 
-## Syncing
+## The first sync
 
-If you provided a definition and the correct index column names, you will be asked if you would like to sync new data into the pipe. When bootstrapping a new pipe, the definition will be executed, and the table will be created and indexed.
+If you provided a definition and the correct index column names, you will be asked if you would like to sync new data into the pipe. When bootstrapping a new pipe, the definition will be executed, and the table will be created and indexed. Check out the [syncing reference page]() for more information on how the syncing process works.
 
-### Troubleshooting
 
-In case the sync fails, you can correct the problem by editing the pipe's attributes with the command `edit pipes`. You may also bootstrap an existing pipe to wipe everything and start the process again from the top.
-
-!!! tip "Try before you sync"
-    When writing the definition for a `sql` pipe, it's a good idea to first test the SQL query before going through the hassle of bootstrapping a pipe. You can open an interactive SQL session with the `sql <label>` command or in the Python REPL with the `python` command and the following code:
-    ```python
-    >>> import meerschaum as mrsm
-    >>> conn = mrsm.get_connector('sql', '<label>')
-    >>> query = """
-    ... SELECT * FROM my_table
-    ... WHERE foo = 'bar'
-    ... """
-    >>> df = conn.read(query)
-    >>> df
-    ```
-
-## Deleting Data
+## Dropping tables
 
 If you want to drop a pipe's table without losing metadata, you can later execute the command `drop pipes`. The command `delete pipes` will drop pipes and remote registration information.
