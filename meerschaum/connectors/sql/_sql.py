@@ -312,7 +312,7 @@ def to_sql(
         index : bool = False,
         if_exists : str = 'replace',
         method : str = "",
-        chunksize : int = -1,
+        chunksize : Optional[int] = -1,
         silent : bool = False,
         debug : bool = False,
         as_tuple : bool = False,
