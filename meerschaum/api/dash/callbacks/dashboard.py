@@ -86,9 +86,11 @@ trigger_aliases = {
     'keyboard' : 'go-button',
 }
 _paths = {
-    'login' : pages.login.layout,
-    ''      : pages.dashboard.layout,
+    'login'   : pages.login.layout,
+    ''        : pages.dashboard.layout,
+    'plugins' : pages.plugins.layout,
 }
+#  _required_login = {'', }
  
 @dash_app.callback(
     Output('page-layout-div', 'children'),
@@ -103,7 +105,7 @@ def update_page_layout_div(pathname : str, session_store_data : Dict[str, Any]):
     session_id = session_store_data.get('session-id', None) 
     path = (
         (pathname.rstrip('/') + '/').replace((dash_endpoint + '/'), '').rstrip('/')
-        if session_id in active_sessions else 'login'
+        if (session_id in active_sessions) else 'login'
     )
     layout = _paths.get(path, pages.error.layout)
     return layout

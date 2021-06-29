@@ -135,7 +135,7 @@ def get_plugin_attributes(
         error(response.text)
     elif not response and 'detail' in attributes:
         warn(attributes['detail'])
-        return None
+        return {}
     return attributes
 
 def delete_plugin(
