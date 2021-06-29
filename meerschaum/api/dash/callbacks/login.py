@@ -7,6 +7,8 @@ Callbacks for the login page.
 """
 
 from __future__ import annotations
+from meerschaum.utils.packages import attempt_import
+dash = attempt_import('dash', lazy=False)
 import uuid
 from meerschaum.utils.typing import Optional
 from dash.exceptions import PreventUpdate
@@ -14,11 +16,9 @@ from dash.dependencies import Input, Output, State
 from meerschaum.api import endpoints
 from meerschaum.api.dash import dash_app, debug, pipes, _get_pipes, active_sessions
 from meerschaum.api.dash.connectors import get_web_connector
-from meerschaum.utils.packages import attempt_import
 from meerschaum.api.routes._login import login
 from fastapi_login.exceptions import InvalidCredentialsException
 from fastapi.exceptions import HTTPException
-dash = attempt_import('dash', lazy=False)
 dbc = attempt_import('dash_bootstrap_components', lazy=False)
 html = attempt_import('dash_html_components', warn=False)
 

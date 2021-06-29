@@ -17,6 +17,7 @@ from meerschaum.api import (
     get_pipe as get_api_pipe,
     pipes as api_pipes,
     get_api_connector,
+    endpoints,
 )
 from meerschaum.utils.packages import attempt_import
 from meerschaum.connectors.parse import parse_instance_keys
@@ -28,7 +29,7 @@ dcc = attempt_import('dash_core_components', warn=False)
 from meerschaum.api.dash.components import location
 
 ### I know it's a bad idea to manipulate the static config, but it's necessary to read input.
-_static_config()['system']['prompt']['web'] = True
+#  _static_config()['system']['prompt']['web'] = True
 
 active_sessions = set()
 running_jobs = {}
@@ -42,7 +43,7 @@ stylesheets = [
 dash_app = enrich.DashProxy(
     __name__,
     title = 'Meerschaum Web',
-    requests_pathname_prefix = '/dash/',
+    requests_pathname_prefix = endpoints['dash'] + '/',
     external_stylesheets = stylesheets,
     update_title = None,
     #  prevent_initial_callbacks = True,
@@ -65,4 +66,4 @@ import meerschaum.api.dash.pages as pages
 import meerschaum.api.dash.callbacks as callbacks
 
 fastapi_middleware_wsgi = attempt_import('fastapi.middleware.wsgi')
-fastapi_app.mount('/dash', fastapi_middleware_wsgi.WSGIMiddleware(dash_app.server))
+fastapi_app.mount(endpoints['dash'], fastapi_middleware_wsgi.WSGIMiddleware(dash_app.server))

@@ -114,6 +114,8 @@ def _register_plugins(
         repository : Optional[str] = None,
         shell : bool = False,
         debug : bool = False,
+        yes: bool = False,
+        force: bool = False,
         **kw : Any
     ) -> SuccessTuple:
     from meerschaum.utils.debug import dprint
@@ -124,6 +126,7 @@ def _register_plugins(
     from meerschaum._internal.Plugin import Plugin
     from meerschaum import get_connector
     from meerschaum.utils.formatting import print_tuple
+    from meerschaum.utils.prompt import prompt, yes_no
 
     if action is None:
         action = []
@@ -145,13 +148,31 @@ def _register_plugins(
     plugins_names = get_plugins_names()
     for p in action:
         if p not in plugins_names:
-            warn(f"Plugin '{p}' is not installed and cannot be registered. Ignoring...", stack=False)
+            warn(
+                f"Plugin '{p}' is not installed and cannot be registered. Ignoring...",
+                stack=False
+            )
         else:
             plugins_to_register[p] = Plugin(p)
 
     successes = dict()
 
     for name, plugin in plugins_to_register.items():
+        desc = None
+        if yes_no(
+            f"Would you like to add a description to plugin '{name}'?",
+            default='n',
+            yes=yes
+        ):
+            info('Press (Esc + Enter) to submit the description, (CTRL + C) to omit.')
+            try:
+                desc = prompt('', multiline=True, icon=False)
+            except KeyboardInterrupt:
+                desc = None
+            if desc == '':
+                desc = None
+        if desc is not None:
+            plugin.attributes = {'description': desc}
         info(f"Registering plugin '{plugin}' to Meerschaum API '{repo_connector}'..." + '\n')
         success, msg = repo_connector.register_plugin(plugin, debug=debug)
         print_tuple((success, msg + '\n'))

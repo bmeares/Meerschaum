@@ -86,10 +86,16 @@ def _close_pools():
     ### Final step: close global pools.
     from meerschaum.utils.pool import get_pools
     for class_name, pool in get_pools().items():
+        #  try:
+            #  pool.shutdown()
+        #  except Exception as e:
+            #  print(e)
         try:
             pool.close()
-            pool.join()
+            pool.terminate()
+            #  pool.join()
         except Exception as e:
+            print(e)
             pass
 
 if __name__ == "__main__":

@@ -154,19 +154,25 @@ def get_plugin_attributes(
         self,
         plugin : 'meerschaum._internal.Plugin.Plugin',
         debug : bool = False
-    ) -> Optional[Dict[str, Any]]:
+    ) -> Dict[str, Any]:
     """
     Return attributes for a plugin, if it exists.
     """
     ### ensure plugins table exists
     from meerschaum.connectors.sql.tables import get_tables
+    import json
     plugins = get_tables(mrsm_instance=self, debug=debug)['plugins']
     from meerschaum.utils.packages import attempt_import
     sqlalchemy = attempt_import('sqlalchemy')
 
     query = sqlalchemy.select([plugins.c.attributes]).where(plugins.c.plugin_name == plugin.name)
 
-    return self.value(query, debug=debug)
+    _attr = self.value(query, debug=debug)
+    if isinstance(_attr, str):
+        _attr = json.loads(_attr)
+    elif _attr is None:
+        _attr = {}
+    return _attr
 
 def get_plugins(
         self,
