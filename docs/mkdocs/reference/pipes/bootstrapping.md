@@ -67,7 +67,7 @@ For other types of connectors (like `mqtt` and `plugin`), your editor will open 
 
 ## The first sync
 
-If you provided a definition and the correct index column names, you will be asked if you would like to sync new data into the pipe. When bootstrapping a new pipe, the definition will be executed, and the table will be created and indexed. Check out the [syncing reference page]() for more information on how the syncing process works.
+If you provided a definition and the correct index column names, you will be asked if you would like to sync new data into the pipe. When bootstrapping a new pipe, the definition will be executed, and the table will be created and indexed. Check out the [syncing reference page](/reference/pipes/syncing) for more information on how the syncing process works.
 
 
 ## Dropping tables
