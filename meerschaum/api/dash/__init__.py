@@ -31,7 +31,7 @@ from meerschaum.api.dash.components import location
 ### I know it's a bad idea to manipulate the static config, but it's necessary to read input.
 #  _static_config()['system']['prompt']['web'] = True
 
-active_sessions = set()
+active_sessions = {}
 running_jobs = {}
 running_monitors = {}
 stopped_jobs = {}

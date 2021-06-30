@@ -56,14 +56,15 @@ def login_button_click(
     When the user submits the login form, check the login.
     On successful login, set the session id.
     """
+    global active_sessions
     form_class = 'form-control'
     ctx = dash.callback_context
     if not username or not password or not ctx.triggered:
         return {}, form_class, dash.no_update
     try:
         token_dict = login({'username' : username, 'password' : password})
-        session_data = {'session-id': str(uuid.uuid4()), 'username': username}
-        active_sessions.add(session_data['session-id'])
+        session_data = {'session-id': str(uuid.uuid4())}
+        active_sessions[session_data['session-id']] = {'username': username}
     except HTTPException:
         form_class += ' is-invalid'
         session_data = None

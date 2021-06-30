@@ -12,6 +12,7 @@ from meerschaum.utils.typing import Optional, Any, List, SuccessTuple, Dict
 def register_plugin(
         self,
         plugin : 'meerschaum._internal.Plugin.Plugin',
+        force: bool = False,
         debug : bool = False,
         **kw : Any
     ) -> SuccessTuple:
@@ -27,7 +28,8 @@ def register_plugin(
 
     old_id = self.get_plugin_id(plugin, debug=debug)
 
-    if old_id is not None:
+    ### Check for version conflict. May be overridden with `--force`.
+    if old_id is not None and not force:
         old_version = self.get_plugin_version(plugin, debug=debug)
         new_version = plugin.version
         if old_version is None:

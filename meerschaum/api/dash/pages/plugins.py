@@ -20,53 +20,26 @@ search_box = dbc.Input(
     type="text"
 )
 
-def build_cards_div(search_term: Optional[str] = None):
-    """
-    Build the cards div.
-    """
-    cards = []
-    for plugin_name in sorted(get_api_connector().get_plugins(search_term=search_term)):
-        plugin = Plugin(plugin_name)
-        desc = get_api_connector().get_plugin_attributes(plugin).get(
-            'description', 'No description provided.'
-        )
-        paragraph_list = []
-        for line in desc.split('\n'):
-            paragraph_list.append(line)
-            paragraph_list.append(html.Br())
-
-        card_body_children = [
-            html.H4(plugin_name)] + paragraph_list + [
-            html.A('⬇️ Download source', href=(endpoints['plugins'] + '/' + plugin_name)),
-            dbc.Button('Edit description', size="sm", color="link")
-        ]
-        username = None
-        if get_api_connector().get_plugin_username(plugin) == username and username is not None:
-            pass
-        card_children = [
-            dbc.CardBody(card_body_children)
-        ]
-        cards.append(
-            dbc.Card(card_children)
-        )
-    return dbc.CardColumns(cards)
-
 layout = dbc.Container([
     html.Div([
         html.Br(),
         html.Div(
             dbc.Container([
-                html.H2('Plugins'),
+                html.H3('Plugins'),
                 html.P('Plugins extend the functionality of Meerschaum.'),
                 html.A(
                     'To find out more, check out the plugins documentation.',
-                    href='https://meerschaum.io/reference/plugins/using-plugins/'
+                    href='https://meerschaum.io/reference/plugins/using-plugins/',
+                    rel="noreferrer noopener",
+                    target="_blank",
                 ),
             ]),
-        className='jumbotron'
+            className='page-header',
+            style={'background-color': 'var(--dark)', 'padding': '1em'},
         ),
+        html.Br(),
         search_box,
         html.Br(),
-        html.Div(build_cards_div(), id='plugins-cards-div'),
+        html.Div([], id='plugins-cards-div'),
     ])
 ])

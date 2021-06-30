@@ -36,6 +36,18 @@ a {
 .stopped-job {
   color: red;
 }
+.plugin-description {
+  border: 0px solid transparent !important;
+  outline: none !important;
+  margin: 0px;
+  padding: 0px;
+  display: block;
+
+}
+.plugin-description:focus, .plugin-description:active {
+  outline: 0px solid transparent !important;
+  border-color: transparent;
+}
 /* .dbc_dark code { */
   /* color: var(--light) !important; */
   /* background: var(--blue) !important; */
