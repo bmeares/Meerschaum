@@ -143,7 +143,7 @@ def get_plugin_username(
     query = (
         sqlalchemy.select([users.c.username]).
         where(
-            users.c.users_id == plugins.c.user_id
+            users.c.user_id == plugins.c.user_id
             and plugins.c.plugin_name == plugin.name
         )
     )
