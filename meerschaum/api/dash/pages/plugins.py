@@ -35,11 +35,19 @@ def build_cards_div(search_term: Optional[str] = None):
             paragraph_list.append(line)
             paragraph_list.append(html.Br())
 
+        card_body_children = [
+            html.H4(plugin_name)] + paragraph_list + [
+            html.A('⬇️ Download source', href=(endpoints['plugins'] + '/' + plugin_name)),
+            dbc.Button('Edit description', size="sm", color="link")
+        ]
+        username = None
+        if get_api_connector().get_plugin_username(plugin) == username and username is not None:
+            pass
+        card_children = [
+            dbc.CardBody(card_body_children)
+        ]
         cards.append(
-            dbc.Card(dbc.CardBody([
-                html.H4(plugin_name)] + paragraph_list + [
-                html.A('⬇️ Download source', href=(endpoints['plugins'] + '/' + plugin_name))
-            ]))
+            dbc.Card(card_children)
         )
     return dbc.CardColumns(cards)
 
