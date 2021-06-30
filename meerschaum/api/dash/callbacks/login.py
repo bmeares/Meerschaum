@@ -62,7 +62,7 @@ def login_button_click(
         return {}, form_class, dash.no_update
     try:
         token_dict = login({'username' : username, 'password' : password})
-        session_data = {'session-id': str(uuid.uuid4())}
+        session_data = {'session-id': str(uuid.uuid4()), 'username': username}
         active_sessions.add(session_data['session-id'])
     except HTTPException:
         form_class += ' is-invalid'
