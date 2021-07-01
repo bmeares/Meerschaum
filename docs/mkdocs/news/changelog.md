@@ -9,6 +9,18 @@ This changelog was not introduced until v0.2.12, so many of the critical release
 ## 0.3.x Releases
 Version 0.3.0 introduced the web interface and continued the focus on the user experience. This is the current release cycle, so future features will be updated below.
 
+### v0.3.1 – v0.3.11
+- **Improved Microsoft SQL Server support.**
+- **Added plugins page to the dashboard.**  
+  Although somewhat hidden away, the path `/dash/plugins` will show the plugins hosted on the API repository. If the user is logged in, the descriptions of plugins belonging to that user become editable.
+- **Added locks to resolve race conditions with threading.**
+- **Added `--params` when searching for data and backtracked data.**
+- **Fixed the `--params` flag for API pipes.**
+- **Added experimental multiplexed fetching feature**  
+  To enable this feature, run `mrsm edit config system` and under the `experimental` section, set `fetch` to `true`.
+- **Bugfixes and stability improvements**
+
+
 ### v0.3.0
 - **Introduced the Web Interface.**  
   Added the Meerschaum Web Interface, an interactive dashboard for managing Meerschaum instances. Although not a total replacement for the Meerschaum Shell, the Web Interface allows multiple users to share connectors without needing to remote into the same machine.

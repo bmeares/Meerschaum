@@ -49,8 +49,9 @@ def edit_plugin_description(
     if n_clicks is None:
         raise PreventUpdate
     ctx = dash.callback_context
-    print(json.loads(ctx.triggered[0]['prop_id']))
-    plugin_name = json.loads(ctx.triggered[0]['prop_id'])['index']
+    prop_id = ctx.triggered[0]['prop_id']
+    j = '.'.join(prop_id.split('.')[:-1])
+    plugin_name = json.loads(j)['index']
     if not is_plugin_owner(plugin_name, session_data):
         success, msg = (
             False,
@@ -59,8 +60,10 @@ def edit_plugin_description(
         )
     else:
         plugin = Plugin(plugin_name)
+        plugin.user_id = get_api_connector().get_plugin_user_id(plugin, debug=debug)
         plugin.attributes = get_api_connector().get_plugin_attributes(plugin, debug=debug)
         plugin.attributes.update({'description': description})
+        print(f"{description=}")
         success, _msg = get_api_connector().register_plugin(plugin, debug=debug, force=True)
         msg = _msg if not success else "Successfully updated description."
     return [alert_from_success_tuple((success, msg))]
@@ -99,7 +102,7 @@ def build_cards_div(
             #  paragraph_list.append(line)
             #  paragraph_list.append(html.Br())
         desc_textarea_kw = dict(
-            value=desc, readOnly=True, debounce=True, className='plugin-description',
+            value=desc, readOnly=True, debounce=False, className='plugin-description',
             draggable=False, wrap='overflow',
             id={'type': 'description-textarea', 'index': plugin_name},
         )
