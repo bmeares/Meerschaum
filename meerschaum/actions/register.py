@@ -159,12 +159,23 @@ def _register_plugins(
 
     for name, plugin in plugins_to_register.items():
         desc = None
+        plugin.attributes = repo_connector.get_plugin_attributes(plugin, debug=debug)
+        if plugin.attributes is None:
+            plugin.attributes = {}
+        question = f"Would you like to add a description to plugin '{name}'?"
+        if plugin.attributes.get('description', None):
+            info(f"Found existing description for plugin '{plugin}':")
+            print(plugin.attributes['description'])
+            question = (
+                "Would you like to overwrite this description?\n"
+                + "To edit the existing text, visit /dash/plugins for this repository."
+            )
         if yes_no(
-            f"Would you like to add a description to plugin '{name}'?",
+            question,
             default='n',
             yes=yes
         ):
-            info('Press (Esc + Enter) to submit the description, (CTRL + C) to omit.')
+            info('Press (Esc + Enter) to submit the description, (CTRL + C) to cancel.')
             try:
                 desc = prompt('', multiline=True, icon=False)
             except KeyboardInterrupt:

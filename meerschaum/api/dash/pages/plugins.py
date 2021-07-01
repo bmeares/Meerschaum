@@ -38,6 +38,7 @@ layout = dbc.Container([
             style={'background-color': 'var(--dark)', 'padding': '1em'},
         ),
         html.Br(),
+        #  html.Div([], id='edit-alert-div'),
         search_box,
         html.Br(),
         html.Div([], id='plugins-cards-div'),
