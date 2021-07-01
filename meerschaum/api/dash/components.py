@@ -63,7 +63,7 @@ search_parameters_editor = dash_ace.DashAceEditor(
     style = {'height' : 100},
 )
 
-def alert_from_success_tuple(success : SuccessTuple):
+def alert_from_success_tuple(success : SuccessTuple) -> dbc.Alert:
     """
     Return an Alert from a SuccessTuple.
     """
