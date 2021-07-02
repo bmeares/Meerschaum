@@ -36,7 +36,7 @@ You can use Meerschaum from its web interface. From within a `mrsm` shell, type 
 
 ## Web API
 
-1. Visit the address of the server mentioned above, and add `/docs`, e.g. [http://localhost:8000/docs]:
+1. Visit the address of the server mentioned above, and add `/docs`, e.g. [http://localhost:8000/docs](http://localhost:8000/docs):
 
     <img src="/assets/screenshots/api-docs.png"/>
 
