@@ -1,8 +1,8 @@
 <img src="https://meerschaum.io/assets/banner_1920x320.png" alt="Meerschaum banner">
 
-| PyPI                                                         | Repository                                                   | License                                                      |
+| PyPI                                                         | GitHub                                                       | License                                                      |
 | ------------------------------------------------------------ | ------------------------------------------------------------ | ------------------------------------------------------------ |
-| ![PyPI]( https://img.shields.io/pypi/v/meerschaum?color=%2300cc66&label=Version ) | ![GitHub repo size](https://img.shields.io/github/repo-size/bmeares/Meerschaum?label=Repo%20size) | ![PyPI - License](https://img.shields.io/pypi/l/meerschaum?label=License) |
+| ![PyPI]( https://img.shields.io/pypi/v/meerschaum?color=%2300cc66&label=Version ) | ![GitHub Repo stars](https://img.shields.io/github/stars/bmeares/Meerschaum?style=social) | ![PyPI - License](https://img.shields.io/pypi/l/meerschaum?label=License) |
 | ![PyPI - Python Version]( https://img.shields.io/pypi/pyversions/meerschaum?label=Python&logo=python&logoColor=%23ffffff ) | ![Lines of code]( https://img.shields.io/tokei/lines/github/bmeares/Meerschaum?label=Total%20Lines ) |                                                              |
 
 
@@ -15,7 +15,7 @@ The power of the Meerschaum system comes from projects like [pandas](https://pan
 
 If you've worked with time-series data, you know the headaches that come with ETL. Meerschaum is a system that makes consolidating and syncing data easy.
 
-Anytime you need to move time-series data from somewhere like a database, API, MQTT topic, or even CSV files (we've all done it at some point), you usually end up writing some scripts that silently break in a year. Meerschaum instead gives you better tools to define and sync your data streams. And don't worry — you can always incorporate Meerschaum into your existing scripts.
+Meerschaum instead gives you better tools to define and sync your data streams. And don't worry — you can always incorporate Meerschaum into your existing scripts.
 
 # Quick Start
 
@@ -25,7 +25,7 @@ For a more thorough setup guide, visit the [Getting Started](https://meerschaum.
 
 ```bash
 pip install -U --user meerschaum
-mrsm stack up -d
+mrsm stack up -d db grafana
 mrsm bootstrap pipes
 ```
 
@@ -35,7 +35,9 @@ Please visit [meerschaum.io](https://meerschaum.io) for setup, usage, and troubl
 
 ## Plugins
 
-Meerschaum has a straightforward plugin system. For details on installing, using, and writing plugins, check out the [plugins documentation](https://meerschaum.io/reference/plugins/types-of-plugins) at [meerschaum.io](https://meerschaum.io).
+Here is the [list of community plugins](https://meerschaum.io/reference/plugins/list-of-plugins/).
+
+For details on installing, using, and writing plugins, check out the [plugins documentation](https://meerschaum.io/reference/plugins/types-of-plugins) at [meerschaum.io](https://meerschaum.io).
 
 # Support Meerschaum's Development
 
