@@ -26,8 +26,8 @@ class PluginConnector(Connector):
         import os, pathlib, sys
         from meerschaum.utils.warnings import error, warn
         from meerschaum.config._paths import PLUGINS_RESOURCES_PATH
-        if PLUGINS_RESOURCES_PATH not in sys.path:
-            sys.path.append(str(PLUGINS_RESOURCES_PATH))
+        if str(PLUGINS_RESOURCES_PATH.parent) not in sys.path:
+            sys.path.append(str(PLUGINS_RESOURCES_PATH.parent))
 
         self.resource_path = None
         for _plugin in os.listdir(PLUGINS_RESOURCES_PATH):
@@ -42,6 +42,7 @@ class PluginConnector(Connector):
         try:
             exec(f'from plugins.{self.label} import fetch; self.fetch = fetch')
         except Exception as e:
+            print(sys.path)
             pass
 
         self.sync = None
