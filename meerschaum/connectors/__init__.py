@@ -182,7 +182,7 @@ def get_connector(
             refresh = True
 
     ### only create an object if refresh is True (can be manually specified, otherwise determined above)
-    from meerschaum.utils.warnings import error
+    from meerschaum.utils.warnings import error, warn
     import traceback
     error_msg = None
     if refresh:
