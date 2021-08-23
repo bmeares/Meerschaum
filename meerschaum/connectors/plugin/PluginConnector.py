@@ -42,7 +42,6 @@ class PluginConnector(Connector):
         try:
             exec(f'from plugins.{self.label} import fetch; self.fetch = fetch')
         except Exception as e:
-            print(sys.path)
             pass
 
         self.sync = None
