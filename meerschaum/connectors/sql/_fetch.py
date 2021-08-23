@@ -49,7 +49,7 @@ def fetch(
             pipe.parameters['fetch']['definition'] : str
                 Raw SQL query to execute to generate the pandas DataFrame.
 
-            pipe.parameters['backtrack_minutes'] : Union[int, float]
+            pipe.parameters['fetch']['backtrack_minutes'] : Union[int, float]
                 How many minutes before `begin` to search for data.
 
     :param debug:
