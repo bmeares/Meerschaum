@@ -15,6 +15,17 @@ test_queries = {
     'informix' : 'SELECT COUNT(*) FROM systables',
     'hsqldb' : 'SELECT 1 FROM INFORMATION_SCHEMA.SYSTEM_USERS',
 }
+table_wrappers = {
+    'timescaledb': ('"', '"'),
+    'duckdb': ('"', '"'),
+    'postgresql': ('"', '"'),
+    'sqlite': ('"', '"'),
+    'mysql': ('`', '`'),
+    'mariadb': ('`', '`'),
+    'mssql': ('[', ']'),
+    'cockroachdb': ('"', '"'),
+    'oracle': ('"', '"'),
+}
 
 def test_connection(
         self,
@@ -69,13 +80,12 @@ def get_distinct_col_count(
 
 def sql_item_name(s : str, flavor : str) -> str:
     """
-    Parse SQL items depending on the flavor
+    Parse SQL items depending on the flavor.
     """
-    if flavor in {'timescaledb', 'postgresql', 'cockroachdb'}:
-        s = pg_capital(str(s))
-    elif flavor == 'sqlite':
-        s = "\"" + str(s) + "\""
-    return str(s)
+    if flavor not in table_wrappers:
+        raise Exception(f"Invalid flavor '{flavor}'.")
+
+    return table_wrappers[flavor][0] + str(s) + table_wrappers[flavor][1]
 
 def pg_capital(s : str) -> str:
     """
