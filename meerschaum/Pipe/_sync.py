@@ -260,6 +260,7 @@ def sync(
 def get_sync_time(
         self,
         params : Optional[Mapping[str, Any]] = None,
+        newest: bool = True,
         debug : bool = False
     ) -> Optional['datetime.datetime']:
     """
@@ -270,7 +271,12 @@ def get_sync_time(
         E.g. params = None returns the latest possible datetime,
         but params = { 'a' : 1 } returns the latest datetime 'WHERE a = 1'.
 
-    :param debug: Verbosity toggle.
+    :param newest:
+        If `True`, get the most recent datetime (honoring `params`).
+        If `False`, get the oldest datetime (ASC instead of DESC).
+
+    :param debug:
+        Verbosity toggle.
     """
     from meerschaum.utils.warnings import error, warn
     if self.columns is None:
@@ -291,7 +297,10 @@ def get_sync_time(
         return None
 
     return self.instance_connector.get_sync_time(
-        self, params = params, debug = debug
+        self,
+        params = params,
+        newest = newest,
+        debug = debug,
     )
 
 def exists(

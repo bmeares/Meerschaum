@@ -383,15 +383,32 @@ def get_pipe_attributes(
 def get_sync_time(
         self,
         pipe : 'meerschaum.Pipe',
-        params : dict = None,
+        params : Optional[Dict[str, Any]] = None,
+        newest: bool = True,
         debug : bool = False,
     ) -> datetime.datetime:
     """
-    Get a Pipe's most recent datetime value from the API
+    Get a Pipe's most recent datetime value from the API.
+
+    :param pipe:
+        The pipe to select from.
+
+    :param params:
+        Optional params dictionary to build the WHERE clause.
+
+    :param newest:
+        If `True`, get the most recent datetime (honoring `params`).
+        If `False`, get the oldest datetime (ASC instead of DESC).
+
     """
     import datetime, json
     r_url = pipe_r_url(pipe)
-    response = self.get(r_url + '/sync_time', json=params, params={'debug' : debug}, debug=debug)
+    response = self.get(
+        r_url + '/sync_time',
+        json = params,
+        params = {'newest': newest, 'debug': debug},
+        debug = debug
+    )
     if not response:
         return None
     j = response.json()
