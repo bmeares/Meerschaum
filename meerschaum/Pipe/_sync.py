@@ -54,6 +54,8 @@ def sync(
 
         sync_chunks : bool = False,
 
+        deactivate_plugin_venv: bool = True,
+
         debug : bool = False,
 
         **kw : Any
@@ -118,6 +120,10 @@ def sync(
         If possible, sync chunks in parallel.
         Defaults to False.
 
+    :param deactivate_plugin_venv:
+        If `True`, deactivate a plugin's virtual environment after syncing.
+        Defaults to `True`.
+
     :param debug:
         Verbosity toggle. Defaults to False.
 
@@ -167,7 +173,8 @@ def sync(
                     from meerschaum.utils.packages import activate_venv, deactivate_venv
                     activate_venv(p.connector.label, debug=debug)
                     return_tuple = p.connector.sync(p, debug=debug, **kw)
-                    deactivate_venv(p.connector.label, debug=debug)
+                    if deactivate_plugin_venv:
+                        deactivate_venv(p.connector.label, debug=debug)
                     if not isinstance(return_tuple, tuple):
                         return_tuple = (
                             False,
