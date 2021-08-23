@@ -12,7 +12,7 @@ export tags=( "api" "minimal" )
 
 export base_name="meerschaum"
 export image="$dockerhub_user/$base_name"
-export python_image="python:3.7-slim-buster"
+export python_image="python:3.9-slim-bullseye"
 export platforms="linux/amd64"
 # export platforms="linux/amd64,linux/arm64"
 # export platforms="linux/amd64,linux/arm64,linux/arm/v7"
