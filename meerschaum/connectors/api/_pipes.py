@@ -128,6 +128,7 @@ def sync_pipe(
         pipe : Optional[meerschaum.Pipe] = None,
         df : Optional[Union[pandas.DataFrame, Dict[Any, Any], str]] = None,
         chunksize : Optional[int] = -1,
+        #  with_new_df: bool = False,
         debug : bool = False,
         **kw : Any
     ) -> SuccessTuple:
@@ -201,7 +202,7 @@ def sync_pipe(
         try:
             response = self.post(
                 r_url,
-                ### handles check_existing
+                ### handles check_existing, with_new_df
                 params = kw,
                 data = json_str,
                 debug = debug
@@ -221,6 +222,14 @@ def sync_pipe(
         if isinstance(j, dict) and 'detail' in j:
             return False, j['detail']
 
+        if kw.get('with_new_df', False):
+            from meerschaum.utils.packages import import_pandas
+            pd = import_pandas()
+            try:
+                j, new_df = j[0], pd.read_json(j[1])
+            except Exception as e:
+                return False, response.text
+
         try:
             j = tuple(j)
         except Exception as e:
@@ -232,12 +241,16 @@ def sync_pipe(
             return j
 
     len_chunks = len(chunks)
-    return True, (
+
+    success_tuple = True, (
         f"It took {round(time.time() - begin, 2)} seconds to sync {rowcount} row"
         + ('s' if rowcount != 1 else '')
         + f" across {len_chunks} chunk" + ('s' if len_chunks != 1 else '') +
         f" to '{pipe}'."
     )
+    if kw.get('with_new_df', False):
+        return success_tuple, new_df
+    return success_tuple
 
 def delete_pipe(
         self,

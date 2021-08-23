@@ -204,6 +204,7 @@ def sync_pipe(
         data : dict = {},
         check_existing : bool = True,
         blocking : bool = True,
+        with_new_df: bool = False,
         force : bool = False,
         workers : Optional[int] = None,
         columns : Optional[str] = None,
@@ -226,14 +227,22 @@ def sync_pipe(
         )
 
     df = parse_df_datetimes(data)
-    return p.sync(
+    result = list(p.sync(
         df,
         debug = debug,
         check_existing = check_existing,
         blocking = blocking,
+        with_new_df = with_new_df,
         force = force,
         workers = workers
-    )
+    ))
+    if with_new_df and hasattr(result[1], 'index'):
+        result[1] = result[1].to_json(
+            date_format = 'iso',
+            orient = 'records',
+            date_unit = 'us',
+        )
+    return result
 
 @app.get(pipes_endpoint + '/{connector_keys}/{metric_key}/{location_key}/data')
 def get_pipe_data(
@@ -250,6 +259,8 @@ def get_pipe_data(
     Get a Pipe's data. Optionally set query boundaries.
     """
     _params = {}
+    if params == 'null':
+        params = None
     if params is not None:
         import json
         try:

@@ -539,6 +539,7 @@ def sync_pipe(
         chunksize : Optional[int] = -1,
         check_existing : bool = True,
         blocking : bool = True,
+        with_new_df: bool = False,
         debug : bool = False,
         **kw : Any
     ) -> SuccessTuple:
@@ -572,6 +573,10 @@ def sync_pipe(
     :param blocking:
         If True, wait for sync to finish and return its result, otherwise asyncronously sync.
         Defaults to True.
+
+    :param with_new_df:
+        If `True`, return the SQLAlchemy result and the filtered dataframe.
+        Defaults to `False`.
 
     :param debug:
         Verbosity toggle. Defaults to False.
@@ -643,6 +648,8 @@ def sync_pipe(
         if not self.create_indices(pipe, debug=debug):
             if debug:
                 dprint(f"Failed to create indices for pipe '{pipe}'. Continuing...")
+    if with_new_df:
+        return result, new_data_df
     return result
 
 

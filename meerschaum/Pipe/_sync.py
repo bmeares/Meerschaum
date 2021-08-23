@@ -56,6 +56,8 @@ def sync(
 
         deactivate_plugin_venv: bool = True,
 
+        with_new_df: bool = False,
+
         debug : bool = False,
 
         **kw : Any
@@ -124,6 +126,10 @@ def sync(
         If `True`, deactivate a plugin's virtual environment after syncing.
         Defaults to `True`.
 
+    :param with_new_df:
+        If `True`, attempt to return a dataframe alongside the success tuple.
+        Defaults to `False`.
+
     :param debug:
         Verbosity toggle. Defaults to False.
 
@@ -145,11 +151,11 @@ def sync(
     ### add the stated arguments back into kw
     ### NOTE: Setting begin to the sync time; might need to tweak how this works for multiplexing.
     kw.update({
-        'begin' : (begin if begin is not None else self.sync_time), 'end' : end, 'force' : force,
+        'begin' : (begin if begin is not None else self.get_sync_time(debug=debug)), 'end' : end, 'force' : force,
         'retries' : retries, 'min_seconds' : min_seconds, 'check_existing' : check_existing,
         'blocking' : blocking, 'workers' : workers, 'callback' : callback,
         'error_callback' : error_callback, 'sync_chunks' : (sync_chunks),
-        'chunksize' : chunksize,
+        'chunksize' : chunksize, 'with_new_df': with_new_df,
     })
 
     def _sync(
