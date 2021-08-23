@@ -1,4 +1,4 @@
-FROM python:3.7-slim-buster AS runtime
+FROM python:3.9-slim-bullseye AS runtime
 
 ARG dep_group=full
 ENV dep_group $dep_group
