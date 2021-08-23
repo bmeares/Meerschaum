@@ -693,21 +693,32 @@ def get_sync_time(
         self,
         pipe : 'meerschaum.Pipe',
         params : Optional[Dict[str, Any]] = None,
+        newest: bool = True,
         debug : bool = False,
     ) -> 'datetime.datetime':
     """
-    Get a Pipe's most recent datetime
+    Get a Pipe's most recent datetime.
+
+    :param pipe:
+        The pipe to select on.
+
+    :param params:
+        Optional params dictionary to build the WHERE clause.
+
+    :param newest:
+        If `True`, get the most recent datetime (honoring `params`).
+        If `False`, get the oldest datetime (ASC instead of DESC).
     """
     from meerschaum.connectors.sql.tools import sql_item_name, build_where
     from meerschaum.utils.warnings import warn
     import datetime
     table = sql_item_name(str(pipe), self.flavor)
     dt = sql_item_name(pipe.get_columns('datetime'), self.flavor)
-
+    ASC_or_DESC = "DESC" if newest else "ASC"
     where = "" if params is None else build_where(params, self)
-    q = f"SELECT {dt}\nFROM {table}{where}\nORDER BY {dt} DESC\nLIMIT 1"
+    q = f"SELECT {dt}\nFROM {table}{where}\nORDER BY {dt} {ASC_or_DESC}\nLIMIT 1"
     if self.flavor == 'mssql':
-        q = f"SELECT TOP 1 {dt}\nFROM {table}{where}\nORDER BY {dt} DESC"
+        q = f"SELECT TOP 1 {dt}\nFROM {table}{where}\nORDER BY {dt} {ASC_or_DESC}"
     try:
         from meerschaum.utils.misc import round_time
         import datetime

@@ -183,6 +183,7 @@ def get_sync_time(
         metric_key : str,
         location_key : str,
         params : dict = None,
+        newest: bool = True,
         debug : bool = False,
         curr_user : 'meerschaum._internal.User.User' = fastapi.Depends(manager),
     ) -> 'datetime.datetime':
@@ -193,7 +194,7 @@ def get_sync_time(
         location_key = None
     pipe = get_pipe(connector_keys, metric_key, location_key)
     if is_pipe_registered(pipe, pipes()):
-        return pipe.get_sync_time(params=params, debug=debug)
+        return pipe.get_sync_time(params=params, newest=newest, debug=debug)
 
 @app.post(pipes_endpoint + '/{connector_keys}/{metric_key}/{location_key}/data')
 def sync_pipe(
