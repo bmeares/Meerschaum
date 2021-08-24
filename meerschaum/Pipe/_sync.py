@@ -56,8 +56,6 @@ def sync(
 
         deactivate_plugin_venv: bool = True,
 
-        with_new_df: bool = False,
-
         debug : bool = False,
 
         **kw : Any
@@ -126,10 +124,6 @@ def sync(
         If `True`, deactivate a plugin's virtual environment after syncing.
         Defaults to `True`.
 
-    :param with_new_df:
-        If `True`, attempt to return a dataframe alongside the success tuple.
-        Defaults to `False`.
-
     :param debug:
         Verbosity toggle. Defaults to False.
 
@@ -155,7 +149,7 @@ def sync(
         'retries' : retries, 'min_seconds' : min_seconds, 'check_existing' : check_existing,
         'blocking' : blocking, 'workers' : workers, 'callback' : callback,
         'error_callback' : error_callback, 'sync_chunks' : (sync_chunks),
-        'chunksize' : chunksize, 'with_new_df': with_new_df,
+        'chunksize' : chunksize,
     })
 
     def _sync(
