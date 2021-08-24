@@ -539,7 +539,6 @@ def sync_pipe(
         chunksize : Optional[int] = -1,
         check_existing : bool = True,
         blocking : bool = True,
-        with_new_df: bool = False,
         debug : bool = False,
         **kw : Any
     ) -> SuccessTuple:
@@ -574,10 +573,6 @@ def sync_pipe(
         If True, wait for sync to finish and return its result, otherwise asyncronously sync.
         Defaults to True.
 
-    :param with_new_df:
-        If `True`, return the SQLAlchemy result and the filtered dataframe.
-        Defaults to `False`.
-
     :param debug:
         Verbosity toggle. Defaults to False.
 
@@ -587,6 +582,7 @@ def sync_pipe(
     from meerschaum.utils.warnings import warn
     from meerschaum.utils.debug import dprint
     from meerschaum.utils.packages import import_pandas
+    from meerschaum.utils.misc import parse_df_datetimes
     if df is None:
         msg = f"DataFrame is None. Cannot sync pipe '{pipe}'."
         warn(msg)
@@ -595,9 +591,9 @@ def sync_pipe(
     ## allow syncing for JSON or dict as well as DataFrame
     pd = import_pandas()
     if isinstance(df, dict):
-        df = pd.DataFrame(df)
+        df = parse_df_datetimes(df, debug=debug)
     elif isinstance(df, str):
-        df = pd.read_json(df)
+        df = parse_df_datetimes(pd.read_json(df, debug=debug))
 
     ### if Pipe is not registered
     if not pipe.id:
@@ -622,7 +618,7 @@ def sync_pipe(
         is_new = True
 
     new_data_df = (
-        filter_existing(pipe, df, chunksize=chunksize, debug=debug) if check_existing
+        filter_existing(pipe, df, chunksize=chunksize, debug=debug, **kw) if check_existing
         else df
     )
     if debug:
@@ -648,12 +644,17 @@ def sync_pipe(
         if not self.create_indices(pipe, debug=debug):
             if debug:
                 dprint(f"Failed to create indices for pipe '{pipe}'. Continuing...")
-    if with_new_df:
-        return result, new_data_df
     return result
 
 
-def filter_existing(pipe, df, chunksize : Optional[int] = -1, debug : bool = False):
+def filter_existing(
+        pipe,
+        df: 'pd.DataFrame',
+        chunksize: Optional[int] = -1,
+        params: Optional[Dict[str, Any]] = None,
+        debug: bool = False,
+        **kw
+    ):
     """
     Remove duplicate data from backtrack_data and a new dataframe
     """
@@ -670,12 +671,29 @@ def filter_existing(pipe, df, chunksize : Optional[int] = -1, debug : bool = Fal
         min_dt = pipe.get_sync_time(debug=debug)
     if min_dt in (np.nan, None):
         min_dt = None
+    ### If `min_dt` is None, use `datetime.utcnow()`.
     begin = round_time(
         min_dt,
         to = 'down'
     ) - datetime_pkg.timedelta(minutes=1)
+
+    ### end is the newest data in the new dataframe
+    try:
+        max_dt = df[pipe.get_columns('datetime')].max().to_pydatetime()
+    except:
+        max_dt = None
+    if max_dt in (np.nan, None):
+        max_dt = None
+    ### If `max_dt` is `None`, unbound the search.
+    end = (
+        round_time(
+            max_dt,
+            to = 'down'
+        ) + datetime_pkg.timedelta(minutes=1)
+    ) if max_dt is not None else None
+
     if debug:
-        dprint(f"Looking at data newer than '{begin}'.")
+        dprint(f"Looking at data between '{begin}' and '{end}'.")
 
     ### backtrack_df is existing Pipe data that overlaps with the fetched df
     try:
@@ -683,11 +701,13 @@ def filter_existing(pipe, df, chunksize : Optional[int] = -1, debug : bool = Fal
     except Exception as e:
         backtrack_minutes = 0
 
-    backtrack_df = pipe.get_backtrack_data(
+    backtrack_df = pipe.get_data(
         begin = begin,
-        backtrack_minutes = backtrack_minutes,
+        end = end,
         chunksize = chunksize,
-        debug = debug
+        params = params,
+        debug = debug,
+        **kw
     )
     if debug:
         dprint("Existing data:\n" + str(backtrack_df))
