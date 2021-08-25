@@ -374,7 +374,7 @@ def get_backtrack_data(
     from meerschaum.utils.debug import dprint
     from meerschaum.connectors.sql.tools import dateadd_str
     if begin is None:
-        begin = pipe.sync_time
+        begin = pipe.get_sync_time(debug=debug)
     da = dateadd_str(
         flavor = self.flavor,
         datepart = 'minute',
@@ -618,7 +618,7 @@ def sync_pipe(
         is_new = True
 
     new_data_df = (
-        filter_existing(pipe, df, chunksize=chunksize, debug=debug, **kw) if check_existing
+        pipe.filter_existing(df, chunksize=chunksize, debug=debug, **kw) if check_existing
         else df
     )
     if debug:
@@ -646,75 +646,6 @@ def sync_pipe(
                 dprint(f"Failed to create indices for pipe '{pipe}'. Continuing...")
     return result
 
-
-def filter_existing(
-        pipe,
-        df: 'pd.DataFrame',
-        chunksize: Optional[int] = -1,
-        params: Optional[Dict[str, Any]] = None,
-        debug: bool = False,
-        **kw
-    ):
-    """
-    Remove duplicate data from backtrack_data and a new dataframe
-    """
-    from meerschaum.utils.warnings import warn
-    from meerschaum.utils.debug import dprint
-    from meerschaum.utils.misc import round_time
-    from meerschaum.utils.packages import attempt_import
-    np = attempt_import('numpy')
-    import datetime as datetime_pkg
-    ### begin is the oldest data in the new dataframe
-    try:
-        min_dt = df[pipe.get_columns('datetime')].min().to_pydatetime()
-    except:
-        min_dt = pipe.get_sync_time(debug=debug)
-    if min_dt in (np.nan, None):
-        min_dt = None
-    ### If `min_dt` is None, use `datetime.utcnow()`.
-    begin = round_time(
-        min_dt,
-        to = 'down'
-    ) - datetime_pkg.timedelta(minutes=1)
-
-    ### end is the newest data in the new dataframe
-    try:
-        max_dt = df[pipe.get_columns('datetime')].max().to_pydatetime()
-    except:
-        max_dt = None
-    if max_dt in (np.nan, None):
-        max_dt = None
-    ### If `max_dt` is `None`, unbound the search.
-    end = (
-        round_time(
-            max_dt,
-            to = 'down'
-        ) + datetime_pkg.timedelta(minutes=1)
-    ) if max_dt is not None else None
-
-    if debug:
-        dprint(f"Looking at data between '{begin}' and '{end}'.")
-
-    ### backtrack_df is existing Pipe data that overlaps with the fetched df
-    try:
-        backtrack_minutes = pipe.parameters['fetch']['backtrack_minutes']
-    except Exception as e:
-        backtrack_minutes = 0
-
-    backtrack_df = pipe.get_data(
-        begin = begin,
-        end = end,
-        chunksize = chunksize,
-        params = params,
-        debug = debug,
-        **kw
-    )
-    if debug:
-        dprint("Existing data:\n" + str(backtrack_df))
-
-    ### remove data we've already seen before
-    from meerschaum.utils.misc import filter_unseen_df
-    return filter_unseen_df(backtrack_df, df, debug=debug)
 
 def get_sync_time(
         self,

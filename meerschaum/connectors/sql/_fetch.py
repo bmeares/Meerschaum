@@ -162,7 +162,9 @@ def _join_fetch_query(
     _sync_times_q = f",\n{sync_times_remote_name} AS ("
     for _id, _st in sync_times.itertuples(index=False):
         _sync_times_q += (
-            f"SELECT CAST('{_id}' AS " + cols_types[pipe.columns['id']] + f") AS {id_remote_name}, "
+            f"SELECT CAST('{_id}' AS "
+            + sql_item_name(cols_types[pipe.columns['id']], pipe.connector.flavor)
+            + f") AS {id_remote_name}, "
             + dateadd_str(
                 flavor=pipe.connector.flavor,
                 begin=_st,

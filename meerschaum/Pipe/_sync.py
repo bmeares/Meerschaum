@@ -319,3 +319,81 @@ def exists(
     """
     ### TODO test against views
     return self.instance_connector.pipe_exists(pipe=self, debug=debug)
+
+
+def filter_existing(
+        self,
+        df: 'pd.DataFrame',
+        chunksize: Optional[int] = -1,
+        params: Optional[Dict[str, Any]] = None,
+        debug: bool = False,
+        **kw
+    ):
+    """
+    Remove duplicate data from backtrack_data and a new dataframe
+    """
+    from meerschaum.utils.warnings import warn
+    from meerschaum.utils.debug import dprint
+    from meerschaum.utils.misc import round_time
+    from meerschaum.utils.packages import attempt_import
+    np = attempt_import('numpy')
+    import datetime as datetime_pkg
+    ### begin is the oldest data in the new dataframe
+    try:
+        min_dt = df[self.get_columns('datetime')].min().to_pydatetime()
+    except Exception as e:
+        #  warn(e)
+        min_dt = self.get_sync_time(debug=debug)
+    if min_dt in (np.nan, None):
+        min_dt = None
+    ### If `min_dt` is None, use `datetime.utcnow()`.
+    begin = round_time(
+        min_dt,
+        to = 'down'
+    ) - datetime_pkg.timedelta(minutes=1)
+
+    ### end is the newest data in the new dataframe
+    try:
+        max_dt = df[self.get_columns('datetime')].max().to_pydatetime()
+    except Exception as e:
+        #  warn(e)
+        max_dt = None
+    if max_dt in (np.nan, None):
+        max_dt = None
+
+    if max_dt is not None and min_dt > max_dt:
+        warn(f"Detected minimum datetime greater than maximum datetime.")
+
+    ### If `max_dt` is `None`, unbound the search.
+    end = (
+        round_time(
+            max_dt,
+            to = 'down'
+        ) + datetime_pkg.timedelta(minutes=1)
+    ) if max_dt is not None else None
+
+    if debug:
+        dprint(f"Looking at data between '{begin}' and '{end}'.")
+
+    ### backtrack_df is existing Pipe data that overlaps with the fetched df
+    try:
+        backtrack_minutes = self.parameters['fetch']['backtrack_minutes']
+    except Exception as e:
+        backtrack_minutes = 0
+
+    backtrack_df = self.get_data(
+        begin = begin,
+        end = end,
+        chunksize = chunksize,
+        params = params,
+        debug = debug,
+        **kw
+    )
+    if debug:
+        dprint("Existing data:\n" + str(backtrack_df))
+
+    ### remove data we've already seen before
+    from meerschaum.utils.misc import filter_unseen_df
+    return filter_unseen_df(backtrack_df, df, debug=debug)
+
+
