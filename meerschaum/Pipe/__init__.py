@@ -99,7 +99,7 @@ class Pipe:
     )
     from ._show import show
     from ._edit import edit, edit_definition
-    from ._sync import sync, get_sync_time, exists
+    from ._sync import sync, get_sync_time, exists, filter_existing
     from ._delete import delete
     from ._drop import drop
     from ._bootstrap import bootstrap
