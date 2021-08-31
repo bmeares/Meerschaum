@@ -132,7 +132,7 @@ If you'd like to incorporate Meerschaum into your project, head over to [docs.me
     </div>
   </div>
   <div class="grid-child">
-    <p>If you're looking to use Meerschaum in your business and would like some help, you can commission me for my consulting services.</p><p>Additionally, in case you're hiring a remote data engineer, I'm open to offers. Reach out on <a href="https://linkedin.com/in/bennettmeares">LinkedIn</a> to get in touch.</p>
+    <p>If you're looking to use Meerschaum in your business and would like some help, you can commission me for my consulting services. Reach out on <a href="https://linkedin.com/in/bennettmeares">LinkedIn</a> to get in touch.</p>
     <div style="display: flex; justify-content: center;">
       <!-- <div class="badge-base LI-profile-badge" data-locale="en_US" data-size="medium" data-theme="light" data-type="HORIZONTAL" data-vanity="bennettmeares" data-version="v1"><a class="badge-base__link LI-simple-link" href="https://www.linkedin.com/in/bennettmeares?trk=profile-badge">Bennett Meares</a></div> -->
 

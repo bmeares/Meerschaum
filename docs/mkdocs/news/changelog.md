@@ -9,6 +9,18 @@ This changelog was not introduced until v0.2.12, so many of the critical release
 ## 0.3.x Releases
 Version 0.3.0 introduced the web interface and continued the focus on the user experience. This is the current release cycle, so future features will be updated below.
 
+### v0.3.12 — v0.3.19
+- **Mostly small bugfixes.**  
+  Docker-compose fixes, `params` in `get_pipe_rowcount()`, unique index names for pipes.
+- **Added `newest` flag to `pipe.get_sync_time()`.**  
+  Setting `newest=False` will return the oldest time instead of the newest.
+- **Migrated `filter_existing` to a member of `Pipe`.**  
+  Although the current implementation for APIConnectors offloads filtering to the SQLConnector, soon filtering will take place locally to save bandwidth.
+- **Updated Docker base image.**  
+  Bumped base image from Python 3.7 on Debian Buster Slim to Python 3.9 on Debian Bullseye Slim. Also removed ARM images for the sake of passing builds and reducing build times (e.g. DuckDB fails to compile with QEMU).
+- **Improved DuckDB support.**  
+  `sql:memory` is now the default in-memory DuckDB instance.
+
 ### v0.3.1 – v0.3.11
 - **Improved Microsoft SQL Server support.**
 - **Added plugins page to the dashboard.**  

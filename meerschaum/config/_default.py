@@ -30,6 +30,10 @@ default_meerschaum_config = {
             'local'        : {
                 'flavor'   : 'sqlite',
             },
+            'memory': {
+                'flavor'   : 'duckdb',
+                'database' : ':memory:',
+            },
             #  'mrsm'         : {
                 #  'host'     : 'mrsm.io',
             #  },
