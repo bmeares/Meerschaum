@@ -284,7 +284,7 @@ def create_indices(
             dt_query = f"CREATE INDEX ON {_pipe_name} ({_datetime_name})"
         else: ### mssql, sqlite, etc.
             dt_query = (
-                f"CREATE INDEX {sql_item_name(_datetime + '_index', self.flavor)} "
+                f"CREATE INDEX {sql_item_name(str(pipe) + _datetime + '_index', self.flavor)} "
                 + f"ON {_pipe_name} ({_datetime_name})"
             )
 
@@ -308,7 +308,7 @@ def create_indices(
             id_query = f"CREATE INDEX ON {_pipe_name} ({_id_name})"
         else: ### mssql, sqlite, etc.
             id_query = (
-                f"CREATE INDEX {sql_item_name(_id + '_index', self.flavor)} "
+                f"CREATE INDEX {sql_item_name(str(pipe) + _id + '_index', self.flavor)} "
                 + f"ON {_pipe_name} ({_id_name})"
             )
 
