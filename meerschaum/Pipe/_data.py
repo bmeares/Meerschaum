@@ -157,14 +157,15 @@ def get_rowcount(
     :param debug:
         Verbosity toggle.
     """
+    from meerschaum.utils.warnings import warn
     connector = self.instance_connector if not remote else self.connector
     try:
         return connector.get_pipe_rowcount(
             self, begin=begin, end=end, remote=remote, params=params, debug=debug
         )
-    except AttributeError:
+    except AttributeError as e:
+        warn(e)
         if remote:
             return None
-    from meerschaum.utils.warnings import warn
     warn(f"Failed to get a rowcount for pipe '{self}'.")
     return None

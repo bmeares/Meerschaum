@@ -745,10 +745,17 @@ def get_pipe_rowcount(
             return None
 
     _pipe_name = sql_item_name(str(pipe), self.flavor)
-    _datetime_name = sql_item_name(pipe.get_columns('datetime'), self.flavor)
+    _datetime_name = sql_item_name(pipe.get_columns('datetime'), pipe.instance_connector.flavor if not remote else pipe.connector.flavor)
+    _cols_names = [
+        sql_item_name(col, pipe.instance_connector.flavor if not remote else pipe.connector.flavor)
+        for col in set(
+            [(pipe.get_columns('datetime'))]
+            + ([] if params is None else list(params.keys()))
+        )
+    ]
 
     src = (
-        f"SELECT {_datetime_name} FROM {_pipe_name}"
+        f"SELECT {', '.join(_cols_names)} FROM {_pipe_name}"
         if not remote else pipe.parameters['fetch']['definition']
     )
     query = f"""
