@@ -142,8 +142,8 @@ default_docker_compose_config = {
             ],
             'command' : 'api start',
             'environment' : [
-                "MRSM_CONFIG=" + env_dict['MEERSCHAUM_API_CONFIG'],
-                "MRSM_PATCH=" + env_dict['MEERSCHAUM_API_PATCH'],
+                "MRSM_CONFIG='" + env_dict['MEERSCHAUM_API_CONFIG'] + "'",
+                "MRSM_PATCH='" + env_dict['MEERSCHAUM_API_PATCH'] + "'",
             ],
             'restart' : 'always',
             'depends_on' : [
@@ -303,11 +303,13 @@ def get_necessary_files():
 def write_stack(
         debug : bool = False 
     ):
-    from meerschaum.config._edit import general_write_yaml_config
     """
     Write Docker Compose configuration files
     """
-    return general_write_yaml_config(get_necessary_files(), debug=debug)
+    from meerschaum.config._edit import general_write_yaml_config
+    from meerschaum.config._sync import sync_files
+    general_write_yaml_config(get_necessary_files(), debug=debug)
+    return sync_files(['stack'])
    
 def edit_stack(
         action : Optional[List[str]] = None,

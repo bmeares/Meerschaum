@@ -7,14 +7,15 @@ Synchronize across config files
 """
 
 from __future__ import annotations
-from meerschaum.utils.typing import Optional, List
+from meerschaum.utils.typing import Optional, List, Tuple
 
 def sync_yaml_configs(
-        config_path : pathlib.Path,
-        keys : List[str],
-        sub_path : pathlib.Path,
-        substitute : bool = True,
-        permissions : Optional[int] = None,
+        config_path: pathlib.Path,
+        keys: List[str],
+        sub_path: pathlib.Path,
+        substitute: bool = True,
+        permissions: Optional[int] = None,
+        replace_tuples: Optional[List[Tuple[str, str]]] = None,
     ) -> None:
     """
     Synchronize sub-configuration with main configuration file.
@@ -38,6 +39,11 @@ def sync_yaml_configs(
 
     :param permissions:
         If not `None`, set permissions of the derivative file.
+        Defaults to `None`.
+
+    :param replace_tuples:
+        If provided, iterate through a list of tuples,
+        replacing the old string (index 0) with the new string (index 1).
         Defaults to `None`.
     """
     import os, sys
@@ -84,6 +90,9 @@ def sync_yaml_configs(
 
         sub_config = c
         new_config_text = yaml.dump(c, sort_keys=False)
+        if replace_tuples:
+            for replace_tuple in replace_tuples:
+                new_config_text = new_config_text.replace(replace_tuple[0], replace_tuple[1])
         new_header = sub_header
         new_path = sub_path
 
@@ -94,7 +103,9 @@ def sync_yaml_configs(
     if permissions is not None:
         os.chmod(new_path, permissions)
 
-def sync_files(keys : List[str] = []):
+def sync_files(keys: Optional[List[str]] = None):
+    if keys is None:
+        keys = []
     def _stack():
         import os
         from meerschaum.config._paths import CONFIG_DIR_PATH, STACK_ENV_PATH, STACK_COMPOSE_PATH
@@ -107,6 +118,7 @@ def sync_files(keys : List[str] = []):
             ['stack', STACK_COMPOSE_FILENAME],
             STACK_COMPOSE_PATH,
             substitute = True,
+            replace_tuples = [('$', '$$')],
         )
         sync_yaml_configs(
             CONFIG_DIR_PATH / 'stack.yaml',
