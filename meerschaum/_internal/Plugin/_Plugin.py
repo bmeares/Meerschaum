@@ -15,6 +15,7 @@ from meerschaum.utils.typing import (
     SuccessTuple,
     Union,
 )
+from meerschaum.config import get_config
 from meerschaum.config._paths import (
     PLUGINS_RESOURCES_PATH,
     PLUGINS_ARCHIVES_RESOURCES_PATH,
@@ -30,7 +31,8 @@ class Plugin:
         version : Optional[str] = None,
         user_id : Optional[int] = None,
         attributes : Optional[Dict[str, Any]] = None,
-        archive_path : Optional[pathlib.Path] = None
+        archive_path : Optional[pathlib.Path] = None,
+        repo_connector: Optional['meerschaum.connectors.api.APIConnector'] = None,
     ):
         if attributes is None:
             attributes = {}
@@ -45,6 +47,11 @@ class Plugin:
             )
         else:
             self.archive_path = archive_path
+
+        self.repo_connector = repo_connector
+        if repo_connector is None:
+            from meerschaum.connectors.parse import parse_repo_keys
+            self.repo_connector = parse_repo_keys(get_config('meerschaum', 'default_repository'))
 
     @property
     def version(self):
@@ -285,7 +292,7 @@ class Plugin:
             return success, msg
 
         ### attempt to install dependencies
-        if not self.install_dependencies(debug=debug):
+        if not self.install_dependencies(force=force, debug=debug):
             return False, f"Failed to install dependencies for plugin '{self}'."
 
         ### handling success tuple, bool, or other (typically None)
@@ -365,33 +372,80 @@ class Plugin:
             return False, f"Setup for Plugin '{self.name}' returned None."
         return False, f"Unknown return value from setup for Plugin '{self.name}': {return_tuple}"
 
-    @property
-    def dependencies(self) -> List[str]:
+    def get_dependencies(
+            self,
+            debug: bool = False,
+        ) -> List[str]:
         """
         If the Plugin has specified dependencies in a list called `required`, return the list.
+
+        NOTE: Dependecies which start with 'plugin:' are Meerschaum plugins, not pip packages. 
         """
         from meerschaum.utils.packages import activate_venv, deactivate_venv
         import inspect
-        activate_venv(venv=self.name)
+        activate_venv(venv=self.name, debug=debug)
         required = []
         for name, val in inspect.getmembers(self.module):
             if name == 'required':
                 required = val
                 break
-        deactivate_venv(venv=self.name)
+        deactivate_venv(venv=self.name, debug=debug)
         return required
 
-    def install_dependencies(self, debug : bool = False) -> bool:
+    def install_dependencies(
+            self,
+            force: bool = False,
+            debug: bool = False,
+        ) -> bool:
         """
         If specified, install dependencies.
+
+        NOTE: Dependencies that start with 'plugin:' will be installed as Meerschaum plugins
+        from the same repository as this Plugin.
         """
         from meerschaum.utils.packages import pip_install
         from meerschaum.utils.debug import dprint
-        _deps = self.dependencies
-        if _deps:
-            if debug:
-                dprint(f"Installing dependencies: {_deps}")
-            return pip_install(*_deps, venv=self.name, debug=debug)
+        from meerschaum.utils.warnings import warn, info
+        _deps = self.get_dependencies(debug=debug)
+        if not _deps:
+            return True
+
+        packages, plugins = [], []
+        for _d in _deps:
+            if _d.startswith('plugin:'):
+                plugins.append(_d[len('plugin:'):])
+            else:
+                packages.append(_d)
+
+        ### Attempt pip packages installation.
+        if not pip_install(*packages, venv=self.name, debug=debug):
+            return False
+
+        ### Attempt plugins installation.
+        ### NOTE: Currently there is no logic to relove circular dependencies!
+        for _plugin in plugins:
+            if _plugin == self.name:
+                warn(f"Plugin '{self.name}' cannot depend on itself! Skipping...")
+                continue
+            _success, _msg = self.repo_connector.install_plugin(_plugin, debug=debug, force=force)
+            if not _success:
+                warn(
+                    f"Failed to install required plugin '{_plugin}' for plugin '{self.name}':\n"
+                    + _msg,
+                    stack = False,
+                )
+                if not force:
+                    warn(
+                        "Try installing with the `--force` flag to continue anyway",
+                        stack = False,
+                    )
+                    return False
+                info(
+                    "Continuing with installation despite the failure "
+                    + "(careful, things might be broken!)",
+                    icon = False
+                )
+
         return True
 
     def __str__(self):

@@ -122,13 +122,14 @@ def import_plugins(
     if not plugins_to_import:
         try:
             import plugins
-        except ImportError:
+        except ImportError as e:
+            warn(e)
             plugins = None
     else:
         from meerschaum.utils.packages import attempt_import
         plugins = attempt_import(
             *[('plugins.' + p) for p in plugins_to_import],
-            install=False, warn=False, lazy=False, venv=None,
+            install=False, warn=True, lazy=False, venv=None,
         )
 
     if plugins is None and warn:
