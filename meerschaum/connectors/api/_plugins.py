@@ -86,7 +86,7 @@ def install_plugin(
         except Exception as e:
             success, msg = False, fail_msg
         return success, msg
-    plugin = Plugin(name, archive_path=archive_path)
+    plugin = Plugin(name, archive_path=archive_path, repo_connector=self)
     return plugin.install(force=force, debug=debug)
 
 def get_plugins(

@@ -548,7 +548,7 @@ def attempt_import(
         install_name = all_packages.get(root_name, None)
         if install_name is None:
             install_name = root_name
-            if warn:
+            if warn and root_name != 'plugins':
                 warn_function(
                     f"Package '{root_name}' is not declared in meerschaum.utils.packages.",
                     ImportWarning,
