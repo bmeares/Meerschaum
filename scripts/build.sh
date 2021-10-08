@@ -16,5 +16,5 @@ cd "$PARENT"
 ./scripts/docker/update_requirements.sh
 
 ### Build the pip package for uploading to PyPI.
-python setup.py sdist bdist_wheel
+python setup.py sdist bdist_wheel bdist_rpm
 
