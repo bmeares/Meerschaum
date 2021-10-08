@@ -8,8 +8,8 @@ Login page for the Web interface.
 
 from __future__ import annotations
 import json
-import dash_core_components as dcc
-import dash_html_components as html
+from meerschaum.utils.packages import import_html, import_dcc
+html, dcc = import_html(), import_dcc()
 import dash_bootstrap_components as dbc
 from meerschaum.api import permissions_config, endpoints
 from meerschaum.config import get_config

@@ -6,8 +6,17 @@ hide:
 # Changelog and Release Notes
 This changelog was not introduced until v0.2.12, so many of the critical releases of Meerschaum have already been published. I've backlogged previous releases but haven't added all notes for all the versions.
 
+## 0.4.x Releases
+This is the current release cycle, so future features will be updated below.
+
+### 0.4.0
+- **Allow for other plugins to be specified as dependencies.**  
+  Other plugins from the same repository may be specified in the `required` list.
+- **Added warnings for broken plugins.**  
+  When plugins fail to be imported, warnings are thrown to help authors identify the problem.
+
 ## 0.3.x Releases
-Version 0.3.0 introduced the web interface and continued the focus on the user experience. This is the current release cycle, so future features will be updated below.
+Version 0.3.0 introduced the web interface and added more robust SQL support for various flavors, including MSSQL and DuckDB.
 
 ### v0.3.12 — v0.3.19
 - **Mostly small bugfixes.**  

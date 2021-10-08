@@ -7,7 +7,7 @@ Functions for managing packages and virtual environments reside here.
 """
 
 from __future__ import annotations
-import importlib, os
+import importlib, os, pathlib
 from meerschaum.utils.typing import Any, List, SuccessTuple, Optional, Union
 from meerschaum.utils.threading import Lock, RLock
 
@@ -21,52 +21,148 @@ _locks = {
     'active_venvs': RLock(),
     'sys.path': RLock(),
 }
+
+def import_module(name: str, venv: Optional[str] = None) -> Union['ModuleType', None]:
+    """
+    Manually import a module from a virtual environment (or the base environment).
+    """
+    if venv is None:
+        return _import_module(name)
+    venv_path = pathlib.Path(venv_target_path(venv))
+    mod_path = venv_path
+    for _dir in name.split('.')[:-1]:
+        mod_path = mod_path / _dir
+
+    possible_end_module_filename = name.split('.')[-1] + '.py'
+    mod_path = (
+        (mod_path / possible_end_module_filename)
+        if possible_end_module_filename in os.listdir(mod_path)
+        else (
+            mod_path / name.split('.')[-1] / '__init__.py'
+        )
+    )
+
+    spec = importlib.util.spec_from_file_location(name, str(mod_path))
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    return mod
+
 def need_update(
-        package : 'ModuleType',
-        split : bool = True,
-        color : bool = True,
-        debug : bool = False,
+        package: 'ModuleType',
+        check_pypi: bool = False,
+        split: bool = True,
+        color: bool = True,
+        debug: bool = False,
     ) -> bool:
     """
     Check if a Meerschaum dependency needs an update.
+    Returns a bool for whether or not a package needs to be updated.
+
+    :param package:
+        The module of the package to be updated.
+
+    :param check_pypi:
+        If `True`, check pypi.org for updates.
+        Defaults to `False`.
+
+    :param split:
+        If `True`, split the module's name on periods to detrive the root name.
+        DEfaults to `True`.
+
+    :param color:
+        If `True`, format debug output.
+        Defaults to `True`.
+
+    :param debug:
+        Verbosity toggle.
     """
     if debug:
         from meerschaum.utils.debug import dprint
     import re
-    root_name = package.__name__.split('.')[0] if split else package.__version__
+    root_name = package.__name__.split('.')[0] if split else package.__name__
     install_name = all_packages.get(root_name, root_name)
 
     _install_no_version = re.split('[=<>,! ]', install_name)[0]
     if debug:
         dprint(f"_install_no_version: {_install_no_version}", color=color)
     required_version = install_name.replace(_install_no_version, '')
+
+    ### No minimum version was specified, and we're not going to check PyPI.
+    if not required_version and not check_pypi:
+        return False
+
     if debug:
         dprint(f"required_version: {required_version}", color=color)
-    update_checker = attempt_import('update_checker', lazy=False, check_update=False)
-    checker = update_checker.UpdateChecker()
+
     try:
         version = package.__version__
     except Exception as e:
+        if debug:
+            dprint("No version could be determined from the installed package.", color=color)
         return False
 
-    result = checker.check(_install_no_version, version)
-    if result is None:
-        return False
+    packaging_version = attempt_import('packaging.version', check_update=False, lazy=False)
+
+    ### Get semver if necessary
     if required_version:
-        semver = attempt_import('semver')
+        semver = attempt_import('semver', check_update=False, lazy=False)
+        try:
+            match = semver.match
+        except:
+            ### Something funky is going on with semver.
+            match = None
+        if match is None:
+            error("Please reinstall the package `semver`.")
+
+
+    if check_pypi:
+        ### Check PyPI for updates
+        update_checker = attempt_import('update_checker', lazy=False, check_update=False)
+        checker = update_checker.UpdateChecker()
+        result = checker.check(_install_no_version, version)
+    else:
+        ### Skip PyPI and assume we can't be sure.
+        result = None
+
+    ### Compare PyPI's version with our own.
+    if result is not None:
         if debug:
             dprint(f"Available version: {result.available_version}", color=color)
             dprint(f"Required version: {required_version}", color=color)
-        try:
-            return semver.match(required_version, result.available_version)
-        except Exception as e:
-            return False
 
-    packaging_version = attempt_import('packaging.version')
-    return (
-        packaging_version.parse(result.available_version) > 
-        packaging_version.parse(version)
-    )
+        ### We have a result from PyPI and a stated required version.
+        if required_version:
+            try:
+                return match(result.available_version, required_version)
+            except Exception as e:
+                if debug:
+                    dprint(f"Failed to match versions with exception:\n{e}", color=color)
+                return False
+
+        ### If `check_pypi` and we don't have a required version, check if PyPI's version
+        ### is newer than the installed version.
+        else:
+            return (
+                packaging_version.parse(result.available_version) > 
+                packaging_version.parse(version)
+            )
+
+    ### We might be depending on a prerelease.
+    ### Sanity check that the required version is not greater than the installed version.
+    try:
+        return not match(version, required_version) if required_version else False
+    except Exception as e:
+        if debug:
+            dprint(e)
+    try:
+        return (
+            packaging_version.parse(version) > 
+            packaging_version.parse(required_version)
+        )
+    except Exception as e:
+        if debug:
+            dprint(e)
+        return False
 
 def is_venv_active(
         venv: str = 'mrsm',
@@ -133,11 +229,12 @@ def activate_venv(
         return True
     if debug:
         from meerschaum.utils.debug import dprint
-    import sys, os, platform, pathlib
+    import sys, os, platform
     from meerschaum.config._paths import VIRTENV_RESOURCES_PATH
     _venv = None
     virtualenv = attempt_import(
         'virtualenv', venv=None, lazy=False, install=True, warn=False, debug=debug, color=False,
+        check_update=False,
     )
     if virtualenv is None:
         try:
@@ -237,7 +334,8 @@ def pip_install(
         venv: str = 'mrsm',
         deactivate: bool = True,
         split : bool = False,
-        check_update : bool = True,
+        check_update: bool = True,
+        check_pypi: bool = True,
         check_wheel : bool = True,
         _uninstall : bool = False,
         color : bool = True,
@@ -295,7 +393,7 @@ def pip_install(
         if '--ignore-installed' not in args and '-I' not in _args and not _uninstall:
             _args += ['--ignore-installed']
 
-    if check_update and need_update(pip, debug=debug) and not _uninstall:
+    if check_update and need_update(pip, check_pypi=check_pypi, debug=debug) and not _uninstall:
         _args.append('pip')
     _args = (['install'] if not _uninstall else ['uninstall']) + _args
 
@@ -445,7 +543,8 @@ def attempt_import(
         venv: str = 'mrsm',
         precheck: bool = True,
         split: bool = True,
-        check_update : bool = False,
+        check_update: bool = True,
+        check_pypi: bool = False,
         deactivate : bool = True,
         color : bool = True,
         debug: bool = False
@@ -494,10 +593,14 @@ def attempt_import(
         Defaults to True.
 
     :param check_update:
-        If True, check PyPI for the most recent version.
-        If `install` is True, install updates if available.
-        Defaults to False.
+        If `True` and `install` is `True`, install updates if the required minimum version
+        does not match.
+        Defaults to `False`.
 
+    :param check_pypi:
+        If `True` and `check_update` is `True`, check PyPI when determining whether
+        an update is required.
+        Defaults to `False`.
     """
 
     import importlib.util
@@ -517,7 +620,7 @@ def attempt_import(
     _warnings = _import_module('meerschaum.utils.warnings')
     warn_function = _warnings.warn
 
-    def do_import(_name: str, **kw):
+    def do_import(_name: str, **kw) -> Union['ModuleType', None]:
         if venv is not None:
             activate_venv(venv=venv, debug=debug)
         ### determine the import method (lazy vs normal)
@@ -560,7 +663,8 @@ def attempt_import(
         if precheck is False:
             found_module = (
                 do_import(
-                    name, debug=debug, warn=False, venv=venv, color=color
+                    name, debug=debug, warn=False, venv=venv, color=color,
+                    check_update=check_update, check_pypi=check_pypi,
                 ) is not None
             )
         else:
@@ -604,7 +708,7 @@ def attempt_import(
 
         ### Check for updates (skip this by default)
         if check_update:
-            if need_update(m, split=split, debug=debug):
+            if need_update(m, split=split, check_pypi=check_pypi, debug=debug):
                 if install:
                     if not pip_install(
                         root_name,
@@ -642,14 +746,16 @@ def attempt_import(
 def lazy_import(
         name: str,
         local_name: str = None,
-        venv : Optional[str] = None,
-        warn : bool = True, 
-        deactivate : bool = True,
+        venv: Optional[str] = None,
+        warn: bool = True, 
+        deactivate: bool = True,
+        check_update: bool = False,
+        check_pypi: bool = False,
         debug : bool = False
     ) -> meerschaum.utils.packages.lazy_loader.LazyLoader:
     """
     Lazily import a package
-    Uses the tensorflow LazyLoader implementation (Apache 2.0 License)
+    Based off the tensorflow LazyLoader implementation (Apache 2.0 License)
     """
     from meerschaum.utils.packages.lazy_loader import LazyLoader
     if local_name is None:
@@ -661,6 +767,8 @@ def lazy_import(
         venv = venv,
         warn = warn,
         deactivate = deactivate,
+        check_pypi = check_pypi,
+        check_update = check_update,
         debug = debug
     )
 
@@ -701,6 +809,38 @@ def import_rich(
     if deactivate:
         deactivate_venv(venv='mrsm', debug=debug)
     return rich
+
+def _dash_less_than_2(**kw) -> bool:
+    """
+    Return a bool denoting whether the installed version of Dash is less than 2.0.0.
+    """
+    dash = attempt_import('dash')
+    if dash is None:
+        return None
+    packaging_version = attempt_import('packaging.version', **kw)
+    less_than_2 = (
+        packaging_version.parse(dash.__version__) < 
+        packaging_version.parse('2.0.0')
+    )
+
+def import_dcc(warn=False, **kw) -> 'ModuleType':
+    """
+    Import Dash Core Components (`dcc`).
+    """
+    return (
+        attempt_import('dash_core_components', warn=warn, **kw)
+        if _dash_less_than_2(warn=warn, **kw) else attempt_import('dash.dcc', warn=warn, **kw)
+    )
+
+def import_html(warn=False, **kw) -> 'ModuleType':
+    """
+    Import Dash HTML Components (`html`).
+    """
+    return (
+        attempt_import('dash_html_components', warn=warn, **kw)
+        if _dash_less_than_2(warn=warn, **kw) else attempt_import('dash.html', warn=warn, **kw)
+    )
+
 
 def get_modules_from_package(
         package: 'package',
@@ -882,7 +1022,7 @@ def venv_target_path(venv : str, debug : bool = False) -> pathlib.Path:
     """
     Return a virtual environment's site-package path.
     """
-    import os, sys, platform, pathlib
+    import os, sys, platform
     from meerschaum.config._paths import VIRTENV_RESOURCES_PATH
 
     venv_root_path = str(os.path.join(VIRTENV_RESOURCES_PATH, venv))

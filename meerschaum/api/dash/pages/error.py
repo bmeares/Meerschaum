@@ -6,8 +6,8 @@
 Layout for the error page.
 """
 
-import dash_core_components as dcc
-import dash_html_components as html
+from meerschaum.utils.packages import import_html, import_dcc
+html, dcc = import_html(), import_dcc()
 import dash_bootstrap_components as dbc
 from meerschaum.api import endpoints
 

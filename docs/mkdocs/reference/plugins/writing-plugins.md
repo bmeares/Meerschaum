@@ -24,29 +24,29 @@ To create your plugin, follow these steps:
 1. Navigate to the Meerschaum plugins directory.
 
     === "Linux / Mac OS"
-        
+
         ```console
         ~/.config/meerschaum/plugins/
         ```
 
     === "Windows"
-    
+
         ```DOS
         %AppData%\Meerschaum\plugins\
         ```
-    
+
     === "Meerschaum Portable"
-    
+
         ```console
         root/plugins/
         ```
-    
+
 2. Create your package file. You may either create a `<plugin_name>.py` file or `<plugin_name>/__init__.py` directory and file (in case your plugin needs sub-modules).
 
 3. *(Optional)* Define your plugin's `__version__` string.
 
-    !!! info
-        You must increment your `__version__` to publish changes to a repository. You may omit `__version__` for the initial release, but subsequent releases need the version defined.
+    !!! info "Specify the version number"
+        You must increment your `__version__` (according to [SemVer](https://semver.org/)) to publish changes to a repository. You may omit `__version__` for the initial release, but subsequent releases need the version defined.
 
     ```python
     __version__ = '0.0.1'
@@ -54,8 +54,11 @@ To create your plugin, follow these steps:
 
 4. *(Optional)* Define your required dependencies. Your plugin will be run from a virtual environment and therefore may not be able to import packages that aren't declared.
 
+    !!! tip "Depend on other plugins"
+        Dependencies that start with `plugin:` will be treated as other Meerschaum plugins in the same repository.
+
     ```python
-    required = ['rich>=9.8.0', 'pandas']
+    required = ['rich>=9.8.0', 'pandas', 'plugin:foo']
     ```
 
 5. Write your functions. Special functions are `#!python fetch()`, `#!python sync()`, and `#!python <package_name>()`, and you can use the `#!python @make_action` decorator to designate additional functions as actions. Below is more information on these functions.
@@ -81,17 +84,17 @@ Below is an example of what a typical fetch plugin may look like:
 ??? example "Fetch Plugin Example"
     ```python
     ### ~/.config/meerschaum/plugins/example.py
-    
+
     __version__ = '0.0.1'
-    
+
     required = ['requests', 'pandas']
-    
+
     def fetch(pipe, **kw):
         ### Define columns if undefined.
         if pipe.columns is None:
             pipe.columns = { 'datetime' : 'dt_col' }
             pipe.edit(interactive=False)
-    
+
         ### Do something here to build a dictionary of lists or DataFrame
         import pandas as pd
         import requests
@@ -115,14 +118,14 @@ Sometimes Meerschaum's built-in syncing process isn't enough for your needs. You
 ??? example "Sync Plugin Example"
     ```python
     ### ~/.config/meerschaum/plugins/example.py
-    
+
     from __future__ import annotations
     from typing import Tuple, Any, Optional, Mapping
-    
+
     __version__ = '0.0.1'
-    
+
     required = ['requests', 'pandas']
-    
+
     def sync(
             pipe : meerschaum.Pipe,
             begin : Optional[datetime.datetime] = None,
@@ -133,41 +136,41 @@ Sometimes Meerschaum's built-in syncing process isn't enough for your needs. You
         """
         An example `sync` plugin.
         Returns a tuple of (success, message) [bool, str].
-    
+
         :param pipe:
             The pipe to be synced.
-    
+
         :param begin:
             The datetime to start searching for data (specified with `--begin`).
             Defaults to `None`.
-    
+
         :param end:
             The datetime to stop searching for data (specified with `--end`).
             Defaults to `None`.
-    
+
         :param kw:
             Additional keyword arguments you might find useful.
         """
-    
+
         ### Get data from somewhere. You decide how!
         import pandas as pd
         import requests
-    
+
         url = "https://api.example.com/json"
         params = {} if params is None else params
         if begin is not None:
             params['begin'] = begin.isoformat()
         if end is not None:
             params['end'] = end.isoformat()
-    
+
         try:
             df = pd.read_json(requests.get(url, params=params).text)
         except:
             df = None
-    
+
         if df is None:
             return False, f"Failed to sync data from {url} with params: {params}"
-    
+
         return pipe.sync(df)
     ```
 
@@ -190,11 +193,11 @@ def example(**kw):
 	"""
 	This the help string for the new action `example`.
 	"""
-	
+
 	### An action returns a tuple of success and message.
 	### If the success bool is `True` and the message is 'Success',
 	### nothing will be printed.
-	
+
 	return True, "Hello, World!"
 ```
 
@@ -210,7 +213,7 @@ from meerschaum.plugins import make_action
 @make_action
 def myaction(**kw):
 	return True, "This action is called 'myaction'"
-  
+
 @make_action
 def anotheraction(**kw):
 	return True, "This action is called 'anotheraction'"
@@ -230,7 +233,7 @@ def init_plugin(app):
 	"""
 	This function is executed immediately after the `app` is initialized.
 	"""
-	
+
 	@app.get('/my/new/path')
 	def new_path():
 		return {'message': 'Hello, World!'}
@@ -306,4 +309,3 @@ Generally, using built-in or custom arguments mentioned above should cover almos
     | `sub_args`         | `Optional[List[str]] = None` | `['-l', '-a', -h']`              | The `sub_args` keyword corresponds to items in `sysargs` enclosed in square brackets (`[]`). |
     | `filtered_sysargs` | `List[str]`                  | `['ls']`                         | `filtered_sysargs` contains the values of `sysargs` without `sub_args`. |
     | `shell`            | `Bool`                       | `True`, `False`                  | The `shell` boolean indicates whether or not an action was executed from within the Meerschaum shell. |
-

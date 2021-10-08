@@ -7,7 +7,7 @@ Callbacks for the login page.
 """
 
 from __future__ import annotations
-from meerschaum.utils.packages import attempt_import
+from meerschaum.utils.packages import attempt_import, import_html, import_dcc
 dash = attempt_import('dash', lazy=False)
 import uuid
 from meerschaum.utils.typing import Optional
@@ -20,7 +20,7 @@ from meerschaum.api.routes._login import login
 from fastapi_login.exceptions import InvalidCredentialsException
 from fastapi.exceptions import HTTPException
 dbc = attempt_import('dash_bootstrap_components', lazy=False)
-html = attempt_import('dash_html_components', warn=False)
+html, dcc = import_html(), import_dcc()
 
 @dash_app.callback(
     Output('user-registration-disabled-collapse', 'is_open'),

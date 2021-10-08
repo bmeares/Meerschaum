@@ -7,13 +7,12 @@ Define components for choosing keys.
 """
 
 from __future__ import annotations
-from meerschaum.utils.packages import attempt_import
+from meerschaum.utils.packages import attempt_import, import_html, import_dcc
 from meerschaum.actions import actions
 from meerschaum.api.dash.components import search_parameters_editor
 dash = attempt_import('dash', lazy=False)
 dbc = attempt_import('dash_bootstrap_components', lazy=False)
-dcc = attempt_import('dash_core_components', warn=False)
-html = attempt_import('dash_html_components', warn=False)
+html, dcc = import_html(), import_dcc()
 
 placeholders = {
     'ck' : 'Connectors',
@@ -81,15 +80,15 @@ action_dropdown_row = html.Div(
                     html.Div(
                         dbc.InputGroup(
                             children = [
-                                dbc.InputGroupAddon(
+                                #  dbc.InputGroupAddon(
                                     dbc.Button(
                                         'Clear',
                                         color = 'link',
                                         id = 'clear-subaction-dropdown-text-button',
                                         size = 'sm',
                                     ),
-                                    addon_type = 'prepend',
-                                ),
+                                    #  addon_type = 'prepend',
+                                #  ),
                                 dbc.Input(
                                     id = 'subaction-dropdown-text',
                                     placeholder = 'Action arguments',
@@ -237,15 +236,15 @@ text_tab_content = dbc.Card(
                     dbc.Col(html.Div(className='dbc_dark', children=[
                         dbc.InputGroup(
                             [
-                                dbc.InputGroupAddon(
+                                #  dbc.InputGroupAddon(
                                     dbc.Button(
                                         'Clear',
                                         id = 'clear-connector-keys-input-button',
                                         color = 'link',
                                         size = 'sm',
                                     ),
-                                    addon_type = 'prepend',
-                                ),
+                                    #  addon_type = 'prepend',
+                                #  ),
                                 dbc.Input(
                                     id = 'connector-keys-input',
                                     placeholder = placeholders['ck'],
@@ -262,15 +261,15 @@ text_tab_content = dbc.Card(
                     dbc.Col(
                         dbc.InputGroup(
                             [
-                                dbc.InputGroupAddon(
+                                #  dbc.InputGroupAddon(
                                     dbc.Button(
                                         'Clear',
                                         id = 'clear-metric-keys-input-button',
                                         color = 'link',
                                         size = 'sm',
                                     ),
-                                    addon_type = 'prepend',
-                                ),
+                                    #  addon_type = 'prepend',
+                                #  ),
                                 dbc.Input(
                                     id = 'metric-keys-input',
                                     placeholder = placeholders['mk'],
@@ -286,15 +285,15 @@ text_tab_content = dbc.Card(
                     dbc.Col(
                         dbc.InputGroup(
                             [
-                                dbc.InputGroupAddon(
+                                #  dbc.InputGroupAddon(
                                     dbc.Button(
                                         'Clear',
                                         id = 'clear-location-keys-input-button',
                                         color = 'link',
                                         size = 'sm',
                                     ),
-                                    addon_type = 'prepend',
-                                ),
+                                    #  addon_type = 'prepend',
+                                #  ),
                                 dbc.Input(
                                     id = 'location-keys-input',
                                     placeholder = placeholders['lk'],

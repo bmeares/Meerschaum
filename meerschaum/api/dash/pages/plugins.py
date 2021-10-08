@@ -7,8 +7,8 @@ View the available plugins hosted by this API instance.
 """
 
 from __future__ import annotations
-import dash_core_components as dcc
-import dash_html_components as html
+from meerschaum.utils.packages import import_html, import_dcc
+html, dcc = import_html(), import_dcc()
 import dash_bootstrap_components as dbc
 from meerschaum.api import get_api_connector, endpoints
 from meerschaum._internal.Plugin import Plugin
