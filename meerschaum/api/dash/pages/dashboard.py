@@ -9,13 +9,12 @@ The main dashboard layout.
 import uuid
 from meerschaum.config import __doc__ as doc, get_config
 from meerschaum.utils.misc import get_connector_labels
-from meerschaum.utils.packages import attempt_import
+from meerschaum.utils.packages import attempt_import, import_html, import_dcc
 from meerschaum.api import endpoints
 dex = attempt_import('dash_extensions', lazy=False)
-enrich = attempt_import('dash_extensions.enrich', lazy=False)
+#  enrich = attempt_import('dash_extensions.enrich', lazy=False)
 dbc = attempt_import('dash_bootstrap_components', lazy=False)
-dcc = attempt_import('dash_core_components', warn=False)
-html = attempt_import('dash_html_components', warn=False)
+html, dcc = import_html(), import_dcc()
 px = attempt_import('plotly.express', warn=False)
 daq = attempt_import('dash_daq', warn=False)
 
@@ -54,7 +53,7 @@ layout = html.Div(
                             )),
                         ],
                         align = 'center',
-                        no_gutters = True
+                        #  no_gutters = True
                     ),
                     href = '#',
                 ),
@@ -68,7 +67,7 @@ layout = html.Div(
                                     children = [
                                         dbc.Select(
                                             id = 'instance-select',
-                                            bs_size = 'sm',
+                                            size = 'sm',
                                             options = [
                                                 {'label' : i, 'value' : i}
                                                 for i in get_connector_labels('sql', 'api')
@@ -85,7 +84,7 @@ layout = html.Div(
                                 style = {'padding-left' : '15px', 'margin-top' : '15px'},
                             ),
                         ],
-                        no_gutters = True,
+                        #  no_gutters = True,
                         className = "ml-auto flex-nowrap mt-3 mt-md-0",
                         align = 'center',
                         #  className='navbar-nav ml-auto'

@@ -21,10 +21,8 @@ from __future__ import absolute_import
 from __future__ import division
 from __future__ import print_function
 
-import importlib
-import types
-
-
+from meerschaum.utils.typing import Optional
+import importlib, types
 
 class LazyLoader(types.ModuleType):
     """Lazily import a module, mainly to avoid pulling in large dependencies.
@@ -36,13 +34,15 @@ class LazyLoader(types.ModuleType):
     # The lint error here is incorrect.
     def __init__(
         self,
-        local_name,
+        local_name: str,
         parent_module_globals,
-        name,
-        venv : str = None,
-        warn : bool = True,
-        deactivate : bool = True,
-        debug : bool = False
+        name: str,
+        venv: str = None,
+        warn: bool = True,
+        deactivate: bool = True,
+        check_update: bool = False,
+        check_pypi: bool = False,
+        debug: bool = False,
     ):
         self._warn = warn
         self._deactivate = deactivate
@@ -50,6 +50,8 @@ class LazyLoader(types.ModuleType):
         self._venv = venv
         self._local_name = local_name
         self._parent_module_globals = parent_module_globals
+        self._check_update = check_update
+        self._check_pypi = check_pypi
 
         super(LazyLoader, self).__init__(name)
 
@@ -62,7 +64,9 @@ class LazyLoader(types.ModuleType):
             lazy = False,
             warn = self._warn,
             deactivate = self._deactivate,
-            debug = self._debug
+            check_update = self._check_update,
+            check_pypi = self._check_pypi,
+            debug = self._debug,
         )
         #  module = importlib.import_module(self.__name__)
         self._parent_module_globals[self._local_name] = module

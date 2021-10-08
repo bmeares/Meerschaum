@@ -70,7 +70,11 @@ def _entry_with_args(**kw) -> SuccessTuple:
             traceback.print_exception(type(e), e, e.__traceback__)
         result = False, (
             f"Failed to execute '{' '.join([main_action] + kw['action'])}' with exception:\n\n" +
-            f"'{e}'.\n\nRun again with '--debug' to see a full stacktrace."
+            f"'{e}'."
+            + (
+                "\n\nRun again with '--debug' to see a full stacktrace."
+                if not kw.get('debug', False) else ''
+            )
         )
 
     deactivate_venv(venv=plugin_name, debug=kw.get('debug', False))

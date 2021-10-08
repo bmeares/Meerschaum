@@ -14,7 +14,7 @@ from meerschaum.api import endpoints, get_api_connector, app, debug, manager
 from meerschaum._internal.User import User
 from meerschaum.config.static import _static_config
 
-@manager.user_loader
+@manager.user_loader()
 def load_user(
         username: str
     ) -> User:

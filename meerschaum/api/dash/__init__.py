@@ -19,13 +19,16 @@ from meerschaum.api import (
     get_api_connector,
     endpoints,
 )
-from meerschaum.utils.packages import attempt_import
+from meerschaum.utils.packages import attempt_import, import_dcc, import_html
 from meerschaum.connectors.parse import parse_instance_keys
 dash = attempt_import('dash', lazy=False)
-enrich = attempt_import('dash_extensions.enrich', lazy=False)
+import warnings
+### Suppress the depreciation warnings from importing enrich.
+with warnings.catch_warnings():
+    warnings.simplefilter("ignore")
+    enrich = attempt_import('dash_extensions.enrich', lazy=False)
 #  multipage = attempt_import('dash_extensions.multipage', lazy=False)
-html = attempt_import('dash_html_components', warn=False)
-dcc = attempt_import('dash_core_components', warn=False)
+html, dcc = import_html(), import_dcc()
 from meerschaum.api.dash.components import location
 
 ### I know it's a bad idea to manipulate the static config, but it's necessary to read input.
@@ -55,6 +58,15 @@ dash_app = enrich.DashProxy(
         #  enrich.NoOutputTransform(),
     ],
 )
+#  dash_app = dash.Dash(
+    #  __name__,
+    #  title = 'Meerschaum Web',
+    #  requests_pathname_prefix = endpoints['dash'] + '/',
+    #  external_stylesheets = stylesheets,
+    #  update_title = None,
+    #  #  prevent_initial_callbacks = True,
+    #  suppress_callback_exceptions = True,
+#  )
 
 dash_app.layout = html.Div([
     location,

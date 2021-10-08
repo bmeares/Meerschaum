@@ -9,10 +9,10 @@ Functions for interacting with jobs via the web interface.
 from __future__ import annotations
 from dash.dependencies import Input, Output, State
 from meerschaum.utils.typing import List, Optional, Dict, Any, Tuple, Union
-from meerschaum.utils.packages import attempt_import
+from meerschaum.utils.packages import attempt_import, import_html, import_dcc
 from meerschaum.api.dash.components import alert_from_success_tuple
 dbc = attempt_import('dash_bootstrap_components', lazy=False)
-html = attempt_import('dash_html_components', warn=False)
+html, dcc = import_html(), import_dcc()
 dateutil_parser = attempt_import('dateutil.parser')
 from meerschaum.utils.daemon import get_daemons, get_running_daemons, get_stopped_daemons
 

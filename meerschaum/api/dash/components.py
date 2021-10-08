@@ -8,16 +8,15 @@ Custom components are defined here.
 
 from __future__ import annotations
 from dash.dependencies import Input, Output, State
-from meerschaum.utils.packages import attempt_import
+from meerschaum.utils.packages import attempt_import, import_dcc, import_html
 from meerschaum.utils.typing import SuccessTuple
 from meerschaum.config.static import _static_config
 from meerschaum.utils.misc import remove_ansi
 from meerschaum.actions import get_shell
 dbc = attempt_import('dash_bootstrap_components', lazy=False)
-dcc = attempt_import('dash_core_components', warn=False)
+html, dcc = import_html(), import_dcc()
 dex = attempt_import('dash_extensions', lazy=False)
 dash_ace = attempt_import('dash_ace', lazy=False)
-html = attempt_import('dash_html_components', warn=False)
 
 component_ids = {
 
@@ -43,7 +42,9 @@ bottom_buttons_content = dbc.Card(
             dbc.Col(go_button, width='2'),
             dbc.Col(cancel_button, width='2'),
             dbc.Col(get_items_menu, width='2'),
-        ], no_gutters=False)
+        ],
+        #  no_gutters=False
+        )
     )
 )
 console_div = html.Div(id='console-div', children=[html.Pre(get_shell().intro, id='console-pre')])

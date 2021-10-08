@@ -89,6 +89,7 @@ _paths = {
     'login'   : pages.login.layout,
     ''        : pages.dashboard.layout,
     'plugins' : pages.plugins.layout,
+    'register' : pages.register.layout,
 }
 _required_login = {''}
  

@@ -120,8 +120,8 @@ packages['sql'] = {
 }
 packages['sql'].update(packages['drivers'])
 packages['dash'] = {
-    'dash'                      : 'dash>=1.20.0',
-    'dash_bootstrap_components' : 'dash-bootstrap-components>=0.12.0',
+    'dash'                      : 'dash>=2.0.0',
+    'dash_bootstrap_components' : 'dash-bootstrap-components>=1.0.0-b3',
     'dash_ace'                  : 'dash-ace>=0.2.1',
     'dash_extensions'           : 'dash-extensions>=0.0.51',
     'dash_daq'                  : 'dash-daq>=0.5.0',

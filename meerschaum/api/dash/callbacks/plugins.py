@@ -11,12 +11,11 @@ from meerschaum.utils.typing import Optional, Dict, Any
 from meerschaum.api.dash import dash_app, debug, active_sessions
 from meerschaum.api import get_api_connector, endpoints
 from meerschaum._internal.Plugin import Plugin
-from meerschaum.utils.packages import attempt_import
+from meerschaum.utils.packages import attempt_import, import_dcc, import_html
 dash = attempt_import('dash', lazy=False)
 from dash.exceptions import PreventUpdate
 from dash.dependencies import Input, Output, State, ALL, MATCH
-import dash_core_components as dcc
-import dash_html_components as html
+html, dcc = import_html(), import_dcc()
 import dash_bootstrap_components as dbc
 from meerschaum.api.dash.components import alert_from_success_tuple
 from dash.exceptions import PreventUpdate
