@@ -15,6 +15,11 @@ cmd = attempt_import(get_config('shell', 'cmd', patch=True), warn=False, lazy=Fa
 if cmd is None or isinstance(cmd, dict):
     cmd = attempt_import('cmd', lazy=False, warn=False)
 prompt_toolkit = attempt_import('prompt_toolkit', lazy=False, warn=False, install=True)
+prompt_toolkit_shortcuts, prompt_toolkit_history, prompt_toolkit_formatted_text = (
+    attempt_import('prompt_toolkit.shortcuts', lazy=False, warn=False, install=True),
+    attempt_import('prompt_toolkit.history', lazy=False, warn=False, install=True),
+    attempt_import('prompt_toolkit.formatted_text', lazy=False, warn=False, install=True),
+)
 from meerschaum.actions.shell.ValidAutoSuggest import ValidAutoSuggest
 from meerschaum.actions.shell.ShellCompleter import ShellCompleter
 _clear_screen = get_config('shell', 'clear_screen', patch=True)
@@ -214,8 +219,8 @@ class Shell(cmd.Cmd):
             pass
 
         from meerschaum.config._paths import SHELL_HISTORY_PATH
-        self.session = prompt_toolkit.shortcuts.PromptSession(
-            history = prompt_toolkit.history.FileHistory(str(SHELL_HISTORY_PATH)),
+        self.session = prompt_toolkit_shortcuts.PromptSession(
+            history = prompt_toolkit_history.FileHistory(str(SHELL_HISTORY_PATH)),
             auto_suggest = ValidAutoSuggest(),
             completer = ShellCompleter(),
             complete_while_typing = True,
@@ -771,7 +776,7 @@ def input_with_sigint(_input, session):
         _args = []
         for a in args:
             try:
-                _a = prompt_toolkit.formatted_text.ANSI(a)
+                _a = prompt_toolkit_formatted_text.ANSI(a)
             except Exception as e:
                 _a = a
             _args.append(_a)
