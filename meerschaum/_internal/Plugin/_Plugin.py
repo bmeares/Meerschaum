@@ -222,7 +222,7 @@ class Plugin:
             lines = f.readlines()
         global _tmpversion
         for l in lines:
-            if '__version__' in l:
+            if '__version__=' in l.replace(' ', ''):
                 _l = l.replace('__version__', '_tmpversion')
                 exec(_l, globals())
                 new_version = _tmpversion
