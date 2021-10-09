@@ -12,16 +12,16 @@ from meerschaum.utils.typing import Optional
 from meerschaum.utils.packages import attempt_import
 prompt_toolkit_auto_suggest, prompt_toolkit_document, prompt_toolkit_buffer = (
     attempt_import('prompt_toolkit.auto_suggest'),
-    attempt_import('prompt_toolkit.auto_document'),
-    attempt_import('prompt_toolkit.auto_buffer'),
+    attempt_import('prompt_toolkit.document'),
+    attempt_import('prompt_toolkit.buffer'),
 )
 from meerschaum.actions import get_shell
 
 class ValidAutoSuggest(prompt_toolkit_auto_suggest.AutoSuggest):
     def get_suggestion(
         self,
-        buffer : prompt_toolkit_buffer.Buffer,
-        document : prompt_toolkit_document.Document,
+        buffer: prompt_toolkit_buffer.Buffer,
+        document: prompt_toolkit_document.Document,
     ) -> Optional[prompt_toolkit_auto_suggest.Suggestion]:
         """
         Only return valid commands from history.
