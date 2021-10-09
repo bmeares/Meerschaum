@@ -186,7 +186,11 @@ def determine_version(
     if _version_line is not None:
         if _version_directly_set:
             _l = _version_line.replace('__version__', '_tmpversion')
-            exec(_l, globals())
+            try:
+                exec(_l, globals())
+            except Exception as e:
+                ### The version could not be parsed.
+                return None
             _version = _tmpversion
         else:
             _version_module_name = _version_line.split(' ')[1]
@@ -724,7 +728,7 @@ def attempt_import(
         venv: str = 'mrsm',
         precheck: bool = True,
         split: bool = True,
-        check_update: bool = True,
+        check_update: bool = False,
         check_pypi: bool = False,
         deactivate: bool = True,
         color: bool = True,
