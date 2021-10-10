@@ -37,52 +37,36 @@ class LazyLoader(types.ModuleType):
         local_name: str,
         parent_module_globals,
         name: str,
-        venv: str = None,
-        warn: bool = True,
-        deactivate: bool = True,
-        check_update: bool = False,
-        check_pypi: bool = False,
-        debug: bool = False,
+        **kw
     ):
-        self._warn = warn
-        self._deactivate = deactivate
-        self._debug = debug
-        self._venv = venv
         self._local_name = local_name
         self._parent_module_globals = parent_module_globals
-        self._check_update = check_update
-        self._check_pypi = check_pypi
-
+        kw['lazy'] = False
+        self._attempt_import_kw = kw
+        self._module = None
         super(LazyLoader, self).__init__(name)
 
     def _load(self):
         """Load the module and insert it into the parent's globals."""
+        if self._module is not None:
+            return self._module
+
         from meerschaum.utils.packages import attempt_import
-        module = attempt_import(
-            self.__name__,
-            venv = self._venv,
-            lazy = False,
-            warn = self._warn,
-            deactivate = self._deactivate,
-            check_update = self._check_update,
-            check_pypi = self._check_pypi,
-            debug = self._debug,
-        )
-        #  module = importlib.import_module(self.__name__)
-        self._parent_module_globals[self._local_name] = module
+        self._module = attempt_import(self.__name__, **self._attempt_import_kw)
+        self._parent_module_globals[self._local_name] = self._module
 
         # Update this object's dict so that if someone keeps a reference to the
         #   LazyLoader, lookups are efficient (__getattr__ is only called on lookups
         #   that fail).
-        self.__dict__.update(module.__dict__)
+        self.__dict__.update(self._module.__dict__)
 
-        return module
+        return self._module
 
     def __getattr__(self, item):
-        module = self._load()
+        module = self._load() if self._module is None else self._module
         return getattr(module, item)
 
     def __dir__(self):
-        module = self._load()
+        module = self._load() if self._module is None else self._module
         return dir(module)
 

@@ -43,6 +43,10 @@ def import_module(
             return _import_module(name)
         except ModuleNotFoundError:
             return None
+    import sys
+    _previously_imported = name in sys.modules
+    if _previously_imported and not check_update:
+        return sys.modules[name]
     if debug:
         from meerschaum.utils.debug import dprint
     from meerschaum.utils.warnings import warn as warn_function
@@ -82,7 +86,7 @@ def import_module(
 
     ### Check for updates before importing.
     _version = (
-        determine_version(pathlib.Path(root_spec.origin), name=root_name, debug=debug)
+        determine_version(pathlib.Path(root_spec.origin), name=root_name, venv=venv, debug=debug)
         if root_spec.origin is not None else None
     )
     #  print(root_name, _version, mod_path, root_path)
@@ -135,9 +139,13 @@ def import_module(
             mod = None
         return mod
 
+    if _previously_imported:
+        return sys.modules[name]
+
     if venv is not None:
         activate_venv(venv)
     mod = importlib.util.module_from_spec(spec)
+    sys.modules[name] = mod
     spec.loader.exec_module(mod)
     mod = _import_module(name)
     if deactivate and venv is not None:
@@ -148,77 +156,80 @@ def import_module(
 def determine_version(
         path: pathlib.Path,
         name: Optional[str] = None,
+        venv: Optional[str] = None,
+        search_for_metadata: bool = True,
+        warn: bool = False,
         debug: bool = False,
     ) -> Union[str, None]:
     """
-    Determine the `__version__` string without importing a module.
-    NOTE: This can only determine the __version__ of the package root!
+    Determine a module's `__version__` string from its filepath.
+    
+    First it searches for pip metadata, then it attempts to import the module in a subprocess.
 
     :param path:
         The file path of the module.
+
+    :param name:
+        The name of the module. If ommitted, it will be determined from the file path.
+        Defaults to `None`.
+
+    :param venv:
+        The virtual environment of the Python interpreter to use if importing is necessary.
+        Defaults to `None`.
+
+    :param search_for_metadata:
+        If `True`, search the pip site_packages directory (assumed to be the parent)
+        for the corresponding dist-info directory.
+        Defaults to `True`.
+
+    :param warn:
+        If `True`, raise a warning if the module fails to import in the subprocess.
+        Defaults to `False`.
     """
+    import re
     if debug:
         from meerschaum.utils.debug import dprint
+    from meerschaum.utils.warnings import warn as warn_function
     if name is None:
         name = path.parent.stem if path.stem == '__init__' else path.stem
-    spec = importlib.util.spec_from_file_location(name, str(path))
-    _version_directly_set = False
-    _version_imported_as = False
-    _version_line = None
-    with open(path, 'r') as f:
-        for line in f.readlines():
-            #  print(line, end='')
-
-            ### Check if __version__ was directly set.
-            if '__version__=' in line.replace(' ', ''):
-                _version_line = line
-                _version_directly_set = True
-
-            ### Check if __version__ was imported from somewhere else.
-            elif ('from' in line and 'import' in line and '__version__' in line):
-                _version_line = line
-                _version_directly_set = False
-                _version_imported_as = ('as__version__' in line.replace(' ', ''))
-
-    ### If we've found a line where __version__ is set,
-    ### determine whether it's set directly or imported.
     _version = None
-    if _version_line is not None:
-        if _version_directly_set:
-            _l = _version_line.replace('__version__', '_tmpversion')
-            try:
-                exec(_l, globals())
-            except Exception as e:
-                ### The version could not be parsed.
-                return None
-            _version = _tmpversion
-        else:
-            _version_module_name = _version_line.split(' ')[1]
-            _version_sub_dirs = _version_module_name.split('.')[1:]
-            _version_module_path = pathlib.Path(
-                (path.parent if path.stem == '__init__' else path)
-            )
-            for _dir in _version_sub_dirs[:-1]:
-                _version_module_path = _version_module_path / _dir
-            possible_end_module_filename = _version_module_name.split('.')[-1] + '.py'
-            try:
-                _version_module_path = (
-                    (_version_module_path / possible_end_module_filename)
-                    if possible_end_module_filename in os.listdir(_version_module_path)
-                    else (
-                        _version_module_path / _version_module_name.split('.')[-1] / '__init__.py'
-                    )
-                )
-            except Exception as e:
-                _version_module_path = None
+    is_dir = path.stem == '__init__'
+    module_parent_dir = path.parent.parent if is_dir else path.parent
+    installed_dir_name = re.split(
+        f'[<>=\[]', all_packages.get(name, name)
+    )[0].replace('-', '_').lower()
 
-            if debug:
-                dprint(f"_version_module_path: {_version_module_path}", color=False)
-            if _version_module_path is None:
-                return None
+    ### First, check if a dist-info directory exists.
+    if search_for_metadata:
+        for filename in os.listdir(module_parent_dir):
+            path = module_parent_dir / filename
+            if (
+                not path.is_dir() or
+                not filename.lower().startswith(installed_dir_name.replace('-', '_')) or
+                not filename.endswith('.dist-info')
+            ):
+                continue
+            _version = filename[(len(name) + 1):(-1 * (len('dist-info') + 1))]
+            break
 
-            return determine_version(_version_module_path, name=_version_module_name, debug=debug)
+    if _version is not None:
+        return _version
 
+    ### Not a pip package, so let's try importing the module directly (in a subprocess).
+    code = (
+        f"import os; os.chdir('{str(module_parent_dir)}'); "
+        + f"from {name} import __version__; print(__version__ , end='')"
+    )
+    exit_code, stdout_bytes, stderr_bytes = venv_exec(
+        code, venv=venv, with_extras=True, debug=debug
+    )
+    stdout, stderr = stdout_bytes.decode('utf-8'), stderr_bytes.decode('utf-8')
+    if exit_code != 0 and warn:
+        warn_function(
+            f"Failed to import module '{name}' with the following exception:\n{stderr}",
+            stack = False
+        )
+    _version = stdout.split('\n')[-1] if exit_code == 0 else None
     return _version
 
 
@@ -470,14 +481,29 @@ def activate_venv(
         sys.path.insert(0, str(target))
     if debug:
         dprint(f'sys.path: {sys.path}', color=color)
-    #  print(sys.path)
     return True
 
-def venv_exec(code: str, venv: str = 'mrsm', debug: bool = False) -> bool:
+def venv_exec(
+        code: str,
+        venv: str = 'mrsm',
+        with_extras: bool = False,
+        debug: bool = False,
+    ) -> Union[bool, Tuple[int, bytes, bytes]]:
     """
     Execute Python code in a subprocess via a virtual environment's interpeter.
+    Return `True` if the code successfully executes, `False` on failure.
 
-    Return True if the code successfully executes, False on failure.
+    :param code:
+        The Python code to excecute.
+
+    :param venv:
+        The virtual environment to use to get the path for the Python executable.
+        If `venv` is `None`, use the default `sys.executable` path.
+        Defaults to 'mrsm'.
+
+    :param with_extras:
+        If `True`, return a tuple of the exit code, stdout bytes, and stderr bytes.
+        Defaults to `False`.
     """
     import subprocess, sys, platform, os
     from meerschaum.config._paths import VIRTENV_RESOURCES_PATH
@@ -493,7 +519,13 @@ def venv_exec(code: str, venv: str = 'mrsm', debug: bool = False) -> bool:
     cmd_list = [executable, '-c', code]
     if debug:
         dprint(str(cmd_list))
-    return subprocess.call(cmd_list) == 0
+    if not with_extras:
+        return subprocess.call(cmd_list) == 0
+
+    process = subprocess.Popen(cmd_list, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+    stdout, stderr = process.communicate()
+    exit_code = process.returncode
+    return exit_code, stdout, stderr
 
 def get_pip(debug : bool = False) -> bool:
     """
@@ -814,6 +846,8 @@ def attempt_import(
         try:
             mod = import_method(_name, **(filter_keywords(import_method, **kw)))
         except Exception as e:
+            import traceback
+            traceback.print_exception(type(e), e, e.__traceback__)
             if warn:
                 warn_function(
                     f"Failed to import module '{_name}'.\nException:\n{e}",
@@ -849,13 +883,13 @@ def attempt_import(
             found_module = (
                 do_import(
                     name, debug=debug, warn=False, venv=venv, color=color,
-                    check_update=False, check_pypi=False, deactivate=False,
+                    check_update=False, check_pypi=False, deactivate=False, split=split,
                 ) is not None
             )
         else:
             found_module = (
                 venv_contains_package(name, venv=venv, debug=debug)
-                or is_installed(name, venv=None)
+                or is_installed(name, venv=None, deactivate=False)
             )
 
         if not found_module:
@@ -890,7 +924,7 @@ def attempt_import(
         ### Do the import. Will be lazy if lazy=True.
         m = do_import(
             name, debug=debug, warn=warn, venv=venv, color=color,
-            check_update=check_update, check_pypi=check_pypi, install=install,
+            check_update=check_update, check_pypi=check_pypi, install=install, split=split,
         )
         modules.append(m)
 
@@ -907,12 +941,7 @@ def attempt_import(
 def lazy_import(
         name: str,
         local_name: str = None,
-        venv: Optional[str] = None,
-        warn: bool = True, 
-        deactivate: bool = True,
-        check_update: bool = False,
-        check_pypi: bool = False,
-        debug : bool = False
+        **kw
     ) -> meerschaum.utils.packages.lazy_loader.LazyLoader:
     """
     Lazily import a package
@@ -925,12 +954,7 @@ def lazy_import(
         local_name,
         globals(),
         name,
-        venv = venv,
-        warn = warn,
-        deactivate = deactivate,
-        check_pypi = check_pypi,
-        check_update = check_update,
-        debug = debug
+        **kw
     )
 
 def import_pandas(deactivate : bool = False, debug : bool = False, lazy : bool = False,  **kw) -> 'ModuleType':
@@ -1147,7 +1171,8 @@ def reload_package(
 
 def is_installed(
         name: str,
-        venv : Optional[str] = None,
+        venv: Optional[str] = None,
+        deactivate: bool = True,
     ) -> bool:
     """
     Check whether a package is installed.
@@ -1157,16 +1182,20 @@ def is_installed(
     import importlib.util
     if venv is not None:
         activate_venv(venv=venv)
-    found = importlib.util.find_spec(name) is not None
+    try:
+        found = importlib.util.find_spec(name) is not None
+    except ModuleNotFoundError:
+        found = False
     if venv is None:
         return found
     mod = attempt_import(name, venv=venv)
     found = (venv == package_venv(mod))
-    deactivate_venv(venv=venv)
+    if deactivate:
+        deactivate_venv(venv=venv)
     return found
 
 def venv_contains_package(
-        name: str, venv: Optional[str] = None, debug: bool = False,
+        name: str, venv: Optional[str] = None, split: debug = True, debug: bool = False,
     ) -> bool:
     """
     Search the contents of a virtual environment for a package.
@@ -1177,7 +1206,7 @@ def venv_contains_package(
     vtp = venv_target_path(venv)
     if not vtp.exists():
         return False
-    return name.split('.')[0] in os.listdir(vtp)
+    return (name.split('.')[0] if split else name) in os.listdir(vtp)
 
 def venv_target_path(venv : str, debug : bool = False) -> pathlib.Path:
     """
