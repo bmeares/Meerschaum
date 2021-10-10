@@ -10,7 +10,7 @@ from __future__ import annotations
 from meerschaum.utils.typing import Union, Any, Sequence, SuccessTuple, Optional, Tuple, List
 
 def copy(
-        action : Optional[List[str]] = None,
+        action: Optional[List[str]] = None,
         **kw : Any
     ) -> SuccessTuple:
     """

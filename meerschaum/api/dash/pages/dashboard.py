@@ -72,7 +72,7 @@ layout = html.Div(
                                                 {'label' : i, 'value' : i}
                                                 for i in get_connector_labels('sql', 'api')
                                             ],
-                                            className = 'dbc_dark',
+                                            className = 'dbc_dark custom-select custom-select-sm',
                                         )
                                     ]
                                 ),

@@ -57,6 +57,7 @@ action_dropdown_row = html.Div(
                         dbc.Select(
                             id = 'action-dropdown',
                             options = [],
+                            className = 'custom-select'
                             #  clearable = False,
                             #  style = {'height' : '150px'},
                         ),
@@ -70,6 +71,7 @@ action_dropdown_row = html.Div(
                         dbc.Select(
                             id = 'subaction-dropdown',
                             options = [],
+                            className = 'custom-select'
                         ),
                         id = 'subaction-dropdown-div',
                         className = 'dbc_dark'

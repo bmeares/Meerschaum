@@ -25,13 +25,16 @@ import os, pathlib
 _tmpversion = None
 
 class Plugin:
+    """
+    Handle packaging of Meerschaum plugins.
+    """
     def __init__(
         self,
-        name : str,
-        version : Optional[str] = None,
-        user_id : Optional[int] = None,
-        attributes : Optional[Dict[str, Any]] = None,
-        archive_path : Optional[pathlib.Path] = None,
+        name: str,
+        version: Optional[str] = None,
+        user_id: Optional[int] = None,
+        attributes: Optional[Dict[str, Any]] = None,
+        archive_path: Optional[pathlib.Path] = None,
         repo_connector: Optional['meerschaum.connectors.api.APIConnector'] = None,
     ):
         if attributes is None:
@@ -172,6 +175,7 @@ class Plugin:
             from meerschaum.utils.debug import dprint
         import tarfile, pathlib, shutil
         from meerschaum.plugins import reload_plugins
+        from meerschaum.utils.packages import attempt_import, determine_version
         old_cwd = os.getcwd()
         old_version = ''
         new_version = ''
@@ -218,19 +222,21 @@ class Plugin:
         fpath = pathlib.Path(os.path.join(temp_dir, files[0]))
         if is_dir:
             fpath = pathlib.Path(os.path.join(fpath, '__init__.py'))
-        with open(fpath, 'r') as f:
-            lines = f.readlines()
-        global _tmpversion
-        for l in lines:
-            if '__version__=' in l.replace(' ', ''):
-                _l = l.replace('__version__', '_tmpversion')
-                exec(_l, globals())
-                new_version = _tmpversion
-                if debug:
-                    dprint(f"Attempting to install plugin '{self}' version '{new_version}'...")
-                break
 
-        from meerschaum.utils.packages import attempt_import
+        new_version = determine_version(fpath, name=self.name, search_for_metadata=False, warn=True)
+
+        #  with open(fpath, 'r') as f:
+            #  lines = f.readlines()
+        #  global _tmpversion
+        #  for l in lines:
+            #  if '__version__=' in l.replace(' ', ''):
+                #  _l = l.replace('__version__', '_tmpversion')
+                #  exec(_l, globals())
+                #  new_version = _tmpversion
+                #  if debug:
+                    #  dprint(f"Attempting to install plugin '{self}' version '{new_version}'...")
+                #  break
+
         packaging_version = attempt_import('packaging.version')
         is_new_version = (
             packaging_version.parse(old_version) < packaging_version.parse(new_version)
