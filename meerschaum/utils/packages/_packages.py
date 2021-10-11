@@ -21,7 +21,7 @@ packages : Dict[str, Dict[str, str]] = {
         #  'setuptools' : 'setuptools',
         'wheel' : 'wheel>=0.34.2',
         'yaml' : 'PyYAML>=5.3.1',
-        'cascadict' : 'cascadict>=0.8.4',
+        #  'cascadict' : 'cascadict>=0.8.4',
         'virtualenv' : 'virtualenv>=20.1.0',
     },
     'minimal' : {},
