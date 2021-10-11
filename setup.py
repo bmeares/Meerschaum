@@ -6,12 +6,6 @@ import setuptools, sys
 from setuptools import setup
 from setuptools.command.install import install
 cx_Freeze, Executable = None, None
-#  if 'build_exe' in sys.argv or 'build_msi' in sys.argv or 'build_dmg' in sys.argv:
-    #  try:
-        #  import cx_Freeze
-        #  from cx_Freeze import setup, Executable
-    #  except ImportError:
-        #  cx_Freeze, Executable = None, None
 
 ### read values from within the package
 exec(open('meerschaum/config/_version.py').read())
@@ -21,16 +15,11 @@ class PostInstallCommand(install):
     """Post-installation for installation mode."""
     def run(self):
         install.run(self)
-        from meerschaum.config._edit import write_default_config
-        from meerschaum.config._paths import CONFIG_DIR_PATH, PERMANENT_PATCH_DIR_PATH
-        import os, shutil
-
-        if CONFIG_DIR_PATH.exists():
-            print(f"Found existing configuration in '{CONFIG_DIR_PATH}'")
-            print(f"Moving to '{PERMANENT_PATCH_PATH}' and patching default configuration with existing configuration")
-            shutil.move(CONFIG_DIR_PATH, PERMANENT_PATCH_DIR_PATH)
-        else:
-            print(f"Configuration not found: '{CONFIG_DIR_PATH}'")
+        from meerschaum.actions import actions
+        try:
+            actions['verify'](['packages'], debug=False)
+        except Exception as e:
+            pass
 
 extras = {}
 ### NOTE: package dependencies are defined in meerschaum.utils.packages._packages
@@ -60,9 +49,9 @@ setup_kw_args = {
             'meerschaum = meerschaum.__main__:main',
         ],
     },
-    #  'cmdclass'                      : {
-        #  'install'                   : PostInstallCommand,
-    #  },
+    'cmdclass'                      : {
+        'install'                   : PostInstallCommand,
+    },
     'zip_safe'                      : True,
     'package_data'                  : {'' : ['*.html', '*.css', '*.js', '*.png', '*.ico']},
     'python_requires'               : '>=3.7',
@@ -80,22 +69,5 @@ setup_kw_args = {
         "Topic :: Database",
     ],
 }
-#  if cx_Freeze is not None and Executable is not None:
-    #  setup_kw_args['options'] = {
-        #  'build_exe' : {
-            #  'packages' : setuptools.find_packages(),
-            #  'includes' : [
-                #  'pip', 'venv', 'os', 'sys', 'importlib', 'pathlib',
-            #  ],
-            #  'optimize' : 0,
-        #  },
-    #  }
-    #  setup_kw_args['executables'] = [
-        #  Executable(
-            #  "meerschaum/__main__.py",
-            #  target_name = 'mrsm',
-        #  )
-    #  ]
-
 
 setup(**setup_kw_args)

@@ -39,11 +39,10 @@ def pprint_jobs(
         from meerschaum.utils.formatting import get_console, UNICODE, ANSI
         from meerschaum.utils.packages import import_rich, attempt_import
         rich = import_rich()
-        rich_table, rich_text = attempt_import('rich.table', 'rich.text')
-        from rich import box
+        rich_table, rich_text, rich_box = attempt_import('rich.table', 'rich.text', 'rich.box')
         table = rich_table.Table(
             title = rich_text.Text('Jobs'),
-            box = (box.ROUNDED if UNICODE else box.ASCII),
+            box = (rich_box.ROUNDED if UNICODE else rich_box.ASCII),
             show_lines = True,
             show_header = ANSI,
         )

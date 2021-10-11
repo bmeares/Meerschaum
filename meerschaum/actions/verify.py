@@ -29,6 +29,13 @@ def _verify_pipes(**kw) -> SuccessTuple:
     """
     Verify the contents of pipes.
     """
+    from meerschaum.utils.debug import dprint
+    from meerschaum.utils.warnings import info
+    from meerschaum import get_pipes
+    pipes = get_pipes(as_list=True, **kw)
+    for pipe in pipes:
+        info(f"Verifying the contents of pipe '{pipe}'.")
+        #  success, msg = pipe.verify()
     return False, "Not implemented."
 
 def _verify_packages(

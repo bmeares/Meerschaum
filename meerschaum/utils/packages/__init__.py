@@ -1195,7 +1195,7 @@ def is_installed(
     return found
 
 def venv_contains_package(
-        name: str, venv: Optional[str] = None, split: debug = True, debug: bool = False,
+        name: str, venv: Optional[str] = None, split: bool = True, debug: bool = False,
     ) -> bool:
     """
     Search the contents of a virtual environment for a package.
@@ -1203,7 +1203,10 @@ def venv_contains_package(
     import os
     if venv is None:
         return is_installed(name, venv=venv)
-    vtp = venv_target_path(venv)
+    try:
+        vtp = venv_target_path(venv)
+    except FileNotFoundError:
+        return False
     if not vtp.exists():
         return False
     return (name.split('.')[0] if split else name) in os.listdir(vtp)
