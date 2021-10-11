@@ -95,7 +95,7 @@ default_system_config = {
         },
         'permissions':       {
             'registration' : {
-                'users'    : False,
+                'users'    : True,
                 'pipes'    : True,
                 'plugins'  : True,
             },

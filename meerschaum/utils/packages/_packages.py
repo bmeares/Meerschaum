@@ -31,7 +31,7 @@ packages : Dict[str, Dict[str, str]] = {
         'typing_extensions' : 'typing_extensions>=3.7.4.3',
         'pygments'          : 'pygments>=2.7.2',
         'colorama'          : 'colorama>=0.4.3',
-        'rich'              : 'rich>=9.8.0',
+        'rich'              : 'rich>=10.12.0',
         'more_termcolor'    : 'more-termcolor>=1.1.3',
     },
     '_required' : {
@@ -48,6 +48,7 @@ packages : Dict[str, Dict[str, str]] = {
         'prompt_toolkit'    : 'prompt-toolkit>=3.0.11',
         'more_itertools'    : 'more-itertools>=8.7.0',
         'daemoniker'        : 'daemoniker>=0.2.3',
+        'psutil'            : 'psutil>=5.8.0',
         'watchgod'          : 'watchgod>=0.7',
         'pygtail'           : 'pygtail>=0.11.1',
         #  'nest_asyncio'      : 'nest-asyncio>=1.5.1',

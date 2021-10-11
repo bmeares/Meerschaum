@@ -52,7 +52,20 @@ layout = dbc.Container([
                 ],
             ),
             #  form = True,
-        )
+        ),
+        html.Br(),
+        dbc.Row([
+            dbc.Col([
+                html.Button(
+                    children = 'Sign Up',
+                    n_clicks = 0,
+                    type = 'submit',
+                    id = 'register-button',
+                    className = 'btn btn-primary btn-lg'
+                ),
+            ]),
+        ]),
+
     ])
 
 

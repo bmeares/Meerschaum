@@ -90,24 +90,21 @@ def _stop_jobs(
         if quit_success_tuple[0]:
             _quit_daemons.append(d)
             continue
+        #  if not nopretty:
+            #  warn(f"Failed to gracefully quit job '{d.daemon_id}'.", stack=False)
+
+        kill_success_tuple = d.kill()
+        if kill_success_tuple[0]:
+            _kill_daemons.append(d)
+            continue
         if not nopretty:
-            warn(f"Failed to gracefully quit job '{d.daemon_id}'.", stack=False)
-        if force or yes_no(
-            f"Would you like to forcibly kill job '{d.daemon_id}'?.",
-            default='y', noask=noask, yes=yes,
-        ):
-            kill_success_tuple = d.kill()
-            if kill_success_tuple[0]:
-                _kill_daemons.append(d)
-                continue
-            if not nopretty:
-                warn(f"Failed to kill job '{d.daemon_id}' (PID {d.pid}).", stack=False)
+            warn(f"Failed to kill job '{d.daemon_id}' (PID {d.pid}).", stack=False)
 
     msg = (
         (("Stopped job" + ("s" if len(_quit_daemons) != 1 else '') +
             " '" + "', '".join([d.daemon_id for d in _quit_daemons]) + "'.")
             if _quit_daemons else '')
-        + (("\nKilled job" + ("s" if len(_kill_daemons) != 1 else '') +
+        + (("Killed job" + ("s" if len(_kill_daemons) != 1 else '') +
             " '" + "', '".join([d.daemon_id for d in _kill_daemons]) + "'.")
             if _kill_daemons else '')
     )

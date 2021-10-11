@@ -6,12 +6,16 @@
 Callbacks for the registration page.
 """
 
-from meerschaum.api import get_api_connector
+from meerschaum.api import get_api_connector, endpoints
 from meerschaum.api.dash import dash_app, debug, active_sessions
 from dash.dependencies import Input, Output, State, ALL, MATCH
 from dash.exceptions import PreventUpdate
 from meerschaum._internal.User import User
 from meerschaum.config.static import _static_config
+from meerschaum.utils.packages import attempt_import
+dash = attempt_import('dash')
+from fastapi.exceptions import HTTPException
+import uuid
 
 @dash_app.callback(
     [Output("username-input", "valid"), Output("username-input", "invalid")],
@@ -44,9 +48,46 @@ def validate_password(password):
     [Input("email-input", "value")],
 )
 def validate_email(email):
-    print(f"EMAIL: {email}")
     if not email:
         raise PreventUpdate
     from meerschaum.utils.misc import is_valid_email
     valid = is_valid_email(email) is not None
     return valid, not valid
+
+@dash_app.callback(
+    Output('session-store', 'data'),
+    Output('username-input', 'className'),
+    Output('location', 'pathname'),
+    Input('username-input', 'n_submit'),
+    Input('password-input', 'n_submit'),
+    Input('register-button', 'n_clicks'),
+    State("username-input", "value"),
+    State("password-input", "value"),
+    State("email-input", "value"),
+)
+def register_button_click(
+        username_submit,
+        password_submit,
+        n_clicks, username, password, email
+    ):
+    if not n_clicks:
+        raise PreventUpdate
+    form_class = 'form-control'
+    from meerschaum.api.routes._login import login
+    conn = get_api_connector()
+    user = User(username, password, email=email, instance=conn)
+    user_id = conn.get_user_id(user, debug=debug)
+    if user_id is not None:
+        return {}, form_class, dash.no_update
+    success, msg = conn.register_user(user, debug=debug)
+    if not success:
+        form_class += ' is-invalid'
+        return {}, form_class, dash.no_update
+    try:
+        token_dict = login({'username' : username, 'password' : password})
+        session_data = {'session-id': str(uuid.uuid4())}
+        active_sessions[session_data['session-id']] = {'username': username}
+    except HTTPException:
+        form_class += ' is-invalid'
+        session_data = None
+    return session_data, form_class, (dash.no_update if not session_data else endpoints['dash'])

@@ -14,6 +14,7 @@ from meerschaum.config._patch import apply_patch_to_config
 from meerschaum.utils.warnings import warn, error
 from meerschaum.utils.packages import attempt_import, venv_exec
 from meerschaum.utils.daemon._names import get_new_daemon_name
+daemoniker, psutil = attempt_import('daemoniker', 'psutil')
 
 class Daemon:
     """
@@ -101,6 +102,8 @@ class Daemon:
         if self._properties is None:
             self._properties = {}
         self._properties.update({'label' : self.label})
+        ### Instantiate the process and if it doesn't exist, make sure the PID is removed.
+        self.process
 
     def _run_exit(
             self,
@@ -210,15 +213,27 @@ class Daemon:
         Forcibly terminate a running daemon.
         Sends a SIGTERM signal to the process.
         """
-        daemoniker = attempt_import('daemoniker')
-        return self._send_signal(daemoniker.SIGTERM, timeout=timeout)
+        success, msg = self._send_signal(daemoniker.SIGTERM, timeout=timeout)
+        if success:
+            return success, msg
+        process = self.process
+        if process is None or not process.is_running():
+            return True, "Process has already stopped."
+        try:
+            p.terminate()
+            p.kill()
+            p.wait(timeout=10)
+        except Exception as e:
+            return False, f"Failed to kill job {self} with exception: {e}"
+        return True, "Success"
+
 
     def quit(self, timeout : Optional[int] = 3) -> SuccessTuple:
         """
         Gracefully quit a running daemon.
         Sends a SIGINT signal the to process.
         """
-        daemoniker = attempt_import('daemoniker')
+        daemoniker, psutil = attempt_import('daemoniker', 'psutil')
         return self._send_signal(daemoniker.SIGINT, timeout=timeout)
 
     def _send_signal(
@@ -306,6 +321,23 @@ class Daemon:
                 + "  - Pass `allow_dirty_run=True` to `daemon.run()`.\n",
                 FileExistsError,
             )
+
+    @property
+    def process(self) -> Union[psutil.Process, None]:
+        """
+        Return the Process object from psutil.
+        """
+        pid = self.pid
+        if pid is None:
+            return None
+        if not '_process' in self.__dict__ or self._process.pid != int(pid):
+            try:
+                self._process = psutil.Process(int(pid))
+            except Exception as e:
+                if self.pid_path.exists():
+                    self.pid_path.unlink()
+                return None
+        return self._process
 
     @property
     def path(self) -> pathlib.Path:
@@ -511,7 +543,6 @@ class Daemon:
         return str(self)
 
     def __str__(self):
-        #  return str(self.daemon_id) + '\n    (' + str(self.label) + ')'
         return self.daemon_id
 
     def __eq__(self, other):

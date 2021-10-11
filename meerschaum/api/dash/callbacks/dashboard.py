@@ -105,13 +105,9 @@ def update_page_layout_div(pathname : str, session_store_data : Dict[str, Any]):
     dash_endpoint = endpoints['dash']
     session_id = session_store_data.get('session-id', None) 
     _path = (pathname.rstrip('/') + '/').replace((dash_endpoint + '/'), '').rstrip('/')
-    print(f'{_path=}')
-    print(f'{session_id=}')
-    print(f'{active_sessions=}')
     path = _path if _path not in _required_login else (
         _path if session_id in active_sessions else 'login'
     )
-    print(f'{path=}')
     layout = _paths.get(path, pages.error.layout)
     return layout
 
