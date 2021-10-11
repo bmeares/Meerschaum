@@ -14,7 +14,6 @@ from meerschaum.config._patch import apply_patch_to_config
 from meerschaum.utils.warnings import warn, error
 from meerschaum.utils.packages import attempt_import, venv_exec
 from meerschaum.utils.daemon._names import get_new_daemon_name
-daemoniker, psutil = attempt_import('daemoniker', 'psutil')
 
 class Daemon:
     """
@@ -213,6 +212,7 @@ class Daemon:
         Forcibly terminate a running daemon.
         Sends a SIGTERM signal to the process.
         """
+        daemoniker, psutil = attempt_import('daemoniker', 'psutil')
         success, msg = self._send_signal(daemoniker.SIGTERM, timeout=timeout)
         if success:
             return success, msg
@@ -323,10 +323,11 @@ class Daemon:
             )
 
     @property
-    def process(self) -> Union[psutil.Process, None]:
+    def process(self) -> Union['psutil.Process', None]:
         """
         Return the Process object from psutil.
         """
+        psutil = attempt_import('psutil')
         pid = self.pid
         if pid is None:
             return None
