@@ -27,12 +27,8 @@ import warnings
 with warnings.catch_warnings():
     warnings.simplefilter("ignore")
     enrich = attempt_import('dash_extensions.enrich', lazy=False)
-#  multipage = attempt_import('dash_extensions.multipage', lazy=False)
 html, dcc = import_html(), import_dcc()
 from meerschaum.api.dash.components import location
-
-### I know it's a bad idea to manipulate the static config, but it's necessary to read input.
-#  _static_config()['system']['prompt']['web'] = True
 
 active_sessions = {}
 running_jobs = {}
@@ -42,12 +38,15 @@ stopped_monitors = {}
 
 stylesheets = [
     '/static/css/darkly.min.css', '/static/css/dbc_dark.css', '/static/css/dash.css',
+    #  '/static/js/node_modules/xterm/css/xterm.css',
 ]
+scripts = ['/static/js/node_modules/xterm/lib/xterm.js']
 dash_app = enrich.DashProxy(
     __name__,
     title = 'Meerschaum Web',
     requests_pathname_prefix = endpoints['dash'] + '/',
     external_stylesheets = stylesheets,
+    #  external_scripts = scripts,
     update_title = None,
     #  prevent_initial_callbacks = True,
     suppress_callback_exceptions = True,
@@ -58,15 +57,6 @@ dash_app = enrich.DashProxy(
         #  enrich.NoOutputTransform(),
     ],
 )
-#  dash_app = dash.Dash(
-    #  __name__,
-    #  title = 'Meerschaum Web',
-    #  requests_pathname_prefix = endpoints['dash'] + '/',
-    #  external_stylesheets = stylesheets,
-    #  update_title = None,
-    #  #  prevent_initial_callbacks = True,
-    #  suppress_callback_exceptions = True,
-#  )
 
 dash_app.layout = html.Div([
     location,

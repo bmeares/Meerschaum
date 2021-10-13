@@ -157,7 +157,6 @@ def execute_action(state : WebState):
             keywords['action'] = [action] + subactions
             _sysargs = parse_dict_to_sysargs(keywords)
             process = run_python_package(
-                #  'meerschaum', [action] + subactions,
                 'meerschaum', _sysargs,
                 line_callback = send_line,
                 env = {'LINES' : '120', 'COLUMNS' : '100'},

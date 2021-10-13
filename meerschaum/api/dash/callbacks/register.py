@@ -58,12 +58,12 @@ def validate_email(email):
     Output('session-store', 'data'),
     Output('username-input', 'className'),
     Output('location', 'pathname'),
-    Input('username-input', 'n_submit'),
-    Input('password-input', 'n_submit'),
+    Input('register-username-input', 'n_submit'),
+    Input('register-password-input', 'n_submit'),
     Input('register-button', 'n_clicks'),
-    State("username-input", "value"),
-    State("password-input", "value"),
-    State("email-input", "value"),
+    State("register-username-input", "value"),
+    State("register-password-input", "value"),
+    State("register-email-input", "value"),
 )
 def register_button_click(
         username_submit,

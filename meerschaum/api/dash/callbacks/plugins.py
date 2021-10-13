@@ -17,7 +17,7 @@ from dash.exceptions import PreventUpdate
 from dash.dependencies import Input, Output, State, ALL, MATCH
 html, dcc = import_html(), import_dcc()
 import dash_bootstrap_components as dbc
-from meerschaum.api.dash.components import alert_from_success_tuple
+from meerschaum.api.dash.components import alert_from_success_tuple, build_cards_grid
 from dash.exceptions import PreventUpdate
 import json
 
@@ -137,5 +137,5 @@ def build_cards_div(
         cards.append(
             dbc.Card(card_children, id=plugin_name + '_card', className='plugn-card')
         )
-    return dbc.CardColumns(cards)
+    return build_cards_grid(cards, num_columns=3)
 

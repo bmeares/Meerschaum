@@ -48,6 +48,9 @@ a {
   outline: 0px solid transparent !important;
   border-color: transparent;
 }
+.job-card-text {
+  font-family: Consolas, Menlo, Monaco, Lucida Console, Liberation Mono, DejaVu Sans Mono, Bitstream Vera Sans Mono, Courier New, monospace, serif;
+}
 /* .dbc_dark code { */
   /* color: var(--light) !important; */
   /* background: var(--blue) !important; */

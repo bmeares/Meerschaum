@@ -10,7 +10,7 @@ from __future__ import annotations
 from dash.dependencies import Input, Output, State
 from meerschaum.utils.typing import List, Optional, Dict, Any, Tuple, Union
 from meerschaum.utils.packages import attempt_import, import_html, import_dcc
-from meerschaum.api.dash.components import alert_from_success_tuple
+from meerschaum.api.dash.components import alert_from_success_tuple, build_cards_grid
 dbc = attempt_import('dash_bootstrap_components', lazy=False)
 html, dcc = import_html(), import_dcc()
 dateutil_parser = attempt_import('dateutil.parser')
@@ -28,7 +28,7 @@ def get_jobs_cards(state):
     for d in running_daemons:
         _footer = (
             html.P(
-                "Started at" + dateutil_parser.parse(
+                "Started at " + dateutil_parser.parse(
                     d.properties['process']['began']).strftime('%-H:%M on %b %-d')
                 + " (UTC)"
             ) if (d.pid_path.exists() and d.properties.get('process', {}).get('began', None))
@@ -41,7 +41,7 @@ def get_jobs_cards(state):
                     [
                         html.H4(d.daemon_id, className="card-title"),
                         html.Div(
-                            html.P(d.label, className="card-text", style={"word-wrap": "break-word"}),
+                            html.P(d.label, className="card-text job-card-text", style={"word-wrap": "break-word"}),
                             style={"white-space": "pre-wrap"},
                         ),
                     ], style={"max-width": "100%", "overflow": "auto", "height": "auto"}
@@ -61,7 +61,7 @@ def get_jobs_cards(state):
         )
         _footer = (
             html.P(
-                "Finished at" + dateutil_parser.parse(
+                "Finished at " + dateutil_parser.parse(
                     d.properties['process']['ended']).strftime('%-H:%M on %b %-d')
                 + " (UTC)"
             ) if (not d.pid_path.exists() and d.properties.get('process', {}).get('ended', None))
@@ -76,7 +76,7 @@ def get_jobs_cards(state):
                         html.Div(
                             html.P(
                                 d.label,
-                                className="card-text",
+                                className="card-text job-card-text",
                                 style={"word-wrap": "break-word"}
                             ),
                             style={"white-space": "pre-wrap"},
@@ -89,5 +89,5 @@ def get_jobs_cards(state):
             ])
         )
 
-    return dbc.CardColumns(children=cards), []
+    return build_cards_grid(cards, num_columns=3), []
 

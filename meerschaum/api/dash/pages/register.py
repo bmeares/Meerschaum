@@ -18,8 +18,8 @@ layout = dbc.Container([
             [
                 dbc.Col([
                     #  dbc.FormGroup([
-                        dbc.Label("Username", html_for='username-input'),
-                        dbc.Input(id="username-input", type="text", placeholder="Enter username"),
+                        dbc.Label("Username", html_for='register-username-input'),
+                        dbc.Input(id="register-username-input", type="text", placeholder="Enter username"),
                         dbc.FormFeedback("Username is available.", type="valid"),
                         dbc.FormFeedback("Username is unavailable.", type="invalid"),
                     #  ]),
@@ -28,9 +28,9 @@ layout = dbc.Container([
                 ),
                 dbc.Col([
                     #  dbc.FormGroup([
-                        dbc.Label("Password", html_for='password-input'),
+                        dbc.Label("Password", html_for='register-password-input'),
                         dbc.Input(
-                            id="password-input", type="password", value="",
+                            id="register-password-input", type="password", value="",
                             placeholder='Enter password'
                         ),
                         dbc.FormFeedback("Password is acceptable.", type="valid"),
@@ -41,11 +41,12 @@ layout = dbc.Container([
             ],
             #  form = True,
         ),
+        html.Br(),
         dbc.Row(
             dbc.Col([
                 #  dbc.FormGroup([
-                    dbc.Label("Email", html_for="email-input"),
-                    dbc.Input(id="email-input", type="email", placeholder="Optional"),
+                    dbc.Label("Email", html_for="register-email-input"),
+                    dbc.Input(id="register-email-input", type="email", placeholder="Optional"),
                 #  ]),
                 dbc.FormFeedback("", type="valid"),
                 dbc.FormFeedback("", type="invalid"),
