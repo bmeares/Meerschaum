@@ -9,7 +9,7 @@ Custom components are defined here.
 from __future__ import annotations
 from dash.dependencies import Input, Output, State
 from meerschaum.utils.packages import attempt_import, import_dcc, import_html
-from meerschaum.utils.typing import SuccessTuple
+from meerschaum.utils.typing import SuccessTuple, List
 from meerschaum.config.static import _static_config
 from meerschaum.utils.misc import remove_ansi
 from meerschaum.actions import get_shell
@@ -64,6 +64,13 @@ search_parameters_editor = dash_ace.DashAceEditor(
     style = {'height' : 100},
 )
 
+sidebar = dbc.Offcanvas(
+    children=[
+    
+    ],
+    title='Pages',
+)
+
 def alert_from_success_tuple(success : SuccessTuple) -> dbc.Alert:
     """
     Return an Alert from a SuccessTuple.
@@ -78,4 +85,23 @@ def alert_from_success_tuple(success : SuccessTuple) -> dbc.Alert:
             color = 'success' if success[0] else 'danger',
         )
     )
+
+def build_cards_grid(cards: List[dbc.Card], num_columns: int = 3) -> html.Div:
+    """
+    Because `CardColumns` were removed in Bootstrap 5, this function recreates a similar effect.
+    """
+    num_columns = 3
+    rows_childrens = []
+    for i, card in enumerate(cards):
+        if i % num_columns == 0:
+            rows_childrens.append([])
+        rows_childrens[-1].append(dbc.Col(card))
+    for i in range((len(cards) + 1) % num_columns):
+        rows_childrens[-1].append(dbc.Col())
+    _rows = [dbc.Row(children) for children in rows_childrens]
+    rows = []
+    for r in _rows:
+        rows.append(r)
+        rows.append(html.Br())
+    return html.Div(rows)
 

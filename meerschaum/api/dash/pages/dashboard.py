@@ -38,6 +38,7 @@ layout = html.Div(
             n_intervals = 0,
             disabled = True,
         ),
+        html.P('', id='line-buffer', style={'hidden': True}),
         dbc.Navbar(
             children = [
                 html.A(
@@ -143,7 +144,8 @@ layout = html.Div(
                         html.Div(
                             id = 'content-div-right',
                             children = [console_div],
-                        )
+                        ),
+                        html.Div(id='terminal'),
                     ],
                     width = {'size' : 6},
                     id = 'content-col-right',

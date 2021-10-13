@@ -81,6 +81,8 @@ omit_actions = {
     'reload',
     'repo',
     'instance',
+    'debug'
+    'login',
 }
 trigger_aliases = {
     'keyboard' : 'go-button',
@@ -391,7 +393,7 @@ def show_arguments_collapse(n_clicks : int, is_open : bool):
     State('ws', 'protocols'),
     State('session-store', 'data'),
 )
-def ws_send(n_clicks : int, url, *states):
+def ws_send(n_clicks: int, url, *states):
     """
     Send an initial connection message over the websocket.
     """
@@ -400,8 +402,8 @@ def ws_send(n_clicks : int, url, *states):
         raise PreventUpdate
     session_id = ctx.states['session-store.data']['session-id']
     return json.dumps({
-        'connect-time' : json_serialize_datetime(datetime.datetime.utcnow()),
-        'session-id' : session_id,
+        'connect-time': json_serialize_datetime(datetime.datetime.utcnow()),
+        'session-id': session_id,
     })
 
 @dash_app.callback(
@@ -419,7 +421,6 @@ def ws_receive(message):
     return [html.Div(
         [html.Pre(message['data'], id='console-pre')],
         id = 'console-div',
-        #  className='pre-scrollable'
     )]
 
 dash_app.clientside_callback(
@@ -442,3 +443,15 @@ dash_app.clientside_callback(
     Input('console-pre', 'children'),
     State('location', 'href'),
 )
+
+#  dash_app.clientside_callback(
+    #  """
+    #  function(line_buffer){
+        #  var term = new Terminal();
+        #  term.open(document.getElementById('terminal'));
+        #  term.write('Hello from \x1B[1;3;31mxterm.js\x1B[0m $ ')
+    #  }
+    #  """,
+    #  Output('location', 'href'),
+    #  Input('line-buffer', 'value'),
+#  )

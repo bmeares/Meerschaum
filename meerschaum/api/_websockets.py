@@ -28,14 +28,15 @@ async def websocket_endpoint(
     """
     global websockets
     await websocket.accept()
-    initial_data = await websocket.receive_json()
-    session_id = initial_data['session-id']
+    try:
+        initial_data = await websocket.receive_json()
+    except Exception as e:
+        initial_data = {'session-id': None}
+    session_id = initial_data.get('session-id', None)
     now = datetime.datetime.utcnow()
     join_msg = ""
     await websocket.send_text(join_msg)
     websockets[session_id] = websocket
-    ### NOTE: remove the below statement!
-    websockets['debug'] = websocket
     while True:
         try:
             data = await websocket.receive_text()

@@ -10,7 +10,7 @@ import asyncio, sys
 from meerschaum.api._websockets import websockets
 from meerschaum.config.static import _static_config
 
-def ws_url_from_href(href : str):
+def ws_url_from_href(href : str) -> str:
     """
     Generate the websocket URL from the webpage href.
     """
@@ -23,7 +23,7 @@ def ws_url_from_href(href : str):
         _static_config()['api']['endpoints']['websocket']
     )
 
-def ws_send(msg: str, session_id : str):
+def ws_send(msg: str, session_id: str) -> None:
     """
     Send a string to a client over the websocket.
     """
