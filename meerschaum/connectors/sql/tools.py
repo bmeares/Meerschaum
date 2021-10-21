@@ -179,11 +179,13 @@ def dateadd_str(
     """
     from meerschaum.utils.debug import dprint
     from meerschaum.utils.packages import attempt_import
+    from meerschaum.utils.warnings import error
     import datetime
     dateutil = attempt_import('dateutil')
     if not begin:
         return None
     begin_time = None
+    ### Sanity check: make sure `begin` is a valid datetime before we inject anything.
     if not isinstance(begin, datetime.datetime):
         try:
             begin_time = dateutil.parser.parse(begin)
@@ -191,6 +193,9 @@ def dateadd_str(
             begin_time = None
     else:
         begin_time = begin
+
+    if begin_time is None and str(begin).lower() != 'now':
+        error(f"Invalid datetime: '{begin}'")
 
     da = ""
     if flavor in ('postgresql', 'timescaledb', 'cockroachdb'):
