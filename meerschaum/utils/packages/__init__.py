@@ -1003,7 +1003,7 @@ def _dash_less_than_2(**kw) -> bool:
     if dash is None:
         return None
     packaging_version = attempt_import('packaging.version', **kw)
-    less_than_2 = (
+    return (
         packaging_version.parse(dash.__version__) < 
         packaging_version.parse('2.0.0')
     )

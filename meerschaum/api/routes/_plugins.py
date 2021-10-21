@@ -30,7 +30,7 @@ FileResponse = starlette_responses.FileResponse
 sqlalchemy = attempt_import('sqlalchemy')
 plugins_endpoint = endpoints['plugins']
 
-@app.post(plugins_endpoint + '/{name}')
+@app.post(plugins_endpoint + '/{name}', tags=['Plugins'])
 def register_plugin(
         name : str,
         version : str = None,
@@ -78,7 +78,7 @@ def register_plugin(
 
     return success, msg
 
-@app.get(plugins_endpoint + '/{name}')
+@app.get(plugins_endpoint + '/{name}', tags=['Plugins'])
 def get_plugin(
         name : str
     ) -> Union[FileResponse, SuccessTuple]:
@@ -90,7 +90,7 @@ def get_plugin(
         return FileResponse(plugin.archive_path, filename=f'{plugin.name}.tar.gz')
     return False, f"Archive for plugin '{plugin}' could not be found."
 
-@app.get(plugins_endpoint + '/{name}/attributes')
+@app.get(plugins_endpoint + '/{name}/attributes', tags=['Plugins'])
 def get_plugin_attributes(
         name : str
     ) -> dict:
@@ -99,7 +99,7 @@ def get_plugin_attributes(
     """
     return get_api_connector().get_plugin_attributes(Plugin(name))
 
-@app.get(plugins_endpoint)
+@app.get(plugins_endpoint, tags=['Plugins'])
 def get_plugins(
         user_id : Optional[int] = None,
         search_term : Optional[str] = None,
@@ -109,7 +109,7 @@ def get_plugins(
     """
     return get_api_connector().get_plugins(user_id=user_id, search_term=search_term)
 
-@app.delete(plugins_endpoint + '/{name}')
+@app.delete(plugins_endpoint + '/{name}', tags=['Plugins'])
 def delete_plugin(
         name : str,
         curr_user : 'meerschaum._internal.User.User' = fastapi.Depends(manager),

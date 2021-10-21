@@ -14,14 +14,14 @@ from meerschaum.actions import actions
 import meerschaum._internal.User
 actions_endpoint = endpoints['actions']
 
-@app.get(actions_endpoint)
+@app.get(actions_endpoint, tags=['Actions'])
 def get_actions() -> list:
     """
     Return a list of available actions
     """
     return list(actions)
 
-@app.post(actions_endpoint + "/{action}")
+@app.post(actions_endpoint + "/{action}", tags=['Actions'])
 def do_action(
         action : str,
         keywords : dict = fastapi.Body(...),

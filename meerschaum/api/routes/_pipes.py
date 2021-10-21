@@ -27,7 +27,7 @@ import meerschaum._internal.User
 import datetime
 pipes_endpoint = endpoints['pipes']
 
-@app.post(pipes_endpoint)
+@app.post(pipes_endpoint, tags=['Pipes'])
 def register_pipe(
         pipe : MetaPipe,
         curr_user : 'meerschaum._internal.User.User' = fastapi.Depends(manager),
@@ -54,7 +54,7 @@ def register_pipe(
 
     return results
 
-@app.patch(pipes_endpoint)
+@app.patch(pipes_endpoint, tags=['Pipes'])
 def edit_pipe(
         pipe : MetaPipe,
         patch : bool = False,
@@ -77,7 +77,7 @@ def edit_pipe(
     pipes(refresh=True)
     return results
 
-@app.get(pipes_endpoint + '/keys')
+@app.get(pipes_endpoint + '/keys', tags=['Pipes'])
 async def fetch_pipes_keys(
         connector_keys : str = "[]",
         metric_keys : str = "[]",
@@ -100,7 +100,7 @@ async def fetch_pipes_keys(
     )
     return keys
 
-@app.get(pipes_endpoint)
+@app.get(pipes_endpoint, tags=['Pipes'])
 async def get_pipes(
         connector_keys : str = "",
         metric_keys : str = "",
@@ -121,7 +121,7 @@ async def get_pipes(
         kw['location_keys'] = location_keys
     return replace_pipes_in_dict(_get_pipes(**kw), str)
 
-@app.get(pipes_endpoint + '/{connector_keys}')
+@app.get(pipes_endpoint + '/{connector_keys}', tags=['Pipes'])
 async def get_pipes_by_connector(
         connector_keys : str,
         curr_user : 'meerschaum._internal.User.User' = fastapi.Depends(manager),
@@ -134,7 +134,7 @@ async def get_pipes_by_connector(
         raise fastapi.HTTPException(status_code=404, detail=f"connector_keys '{connector_keys}' not found.")
     return replace_pipes_in_dict(pipes()[connector_keys], str)
 
-@app.get(pipes_endpoint + '/{connector_keys}/{metric_key}')
+@app.get(pipes_endpoint + '/{connector_keys}/{metric_key}', tags=['Pipes'])
 async def get_pipes_by_connector_and_metric(
         connector_keys : str,
         metric_key : str,
@@ -156,7 +156,7 @@ async def get_pipes_by_connector_and_metric(
         return pipes()[connector_keys][metric_key][None]
     return replace_pipes_in_dict(pipes()[connector_keys][metric_key], str)
 
-@app.get(pipes_endpoint + '/{connector_keys}/{metric_key}/{location_key}')
+@app.get(pipes_endpoint + '/{connector_keys}/{metric_key}/{location_key}', tags=['Pipes'])
 async def get_pipes_by_connector_and_metric_and_location(
         connector_keys : str,
         metric_key : str,
@@ -177,7 +177,7 @@ async def get_pipes_by_connector_and_metric_and_location(
 
     return str(pipes()[connector_keys][metric_key][location_key])
 
-@app.get(pipes_endpoint + '/{connector_keys}/{metric_key}/{location_key}/sync_time')
+@app.get(pipes_endpoint + '/{connector_keys}/{metric_key}/{location_key}/sync_time', tags=['Pipes'])
 def get_sync_time(
         connector_keys : str,
         metric_key : str,
@@ -196,7 +196,7 @@ def get_sync_time(
     if is_pipe_registered(pipe, pipes()):
         return pipe.get_sync_time(params=params, newest=newest, debug=debug)
 
-@app.post(pipes_endpoint + '/{connector_keys}/{metric_key}/{location_key}/data')
+@app.post(pipes_endpoint + '/{connector_keys}/{metric_key}/{location_key}/data', tags=['Pipes'])
 def sync_pipe(
         connector_keys : str,
         metric_key : str,
@@ -236,7 +236,7 @@ def sync_pipe(
     ))
     return result
 
-@app.get(pipes_endpoint + '/{connector_keys}/{metric_key}/{location_key}/data')
+@app.get(pipes_endpoint + '/{connector_keys}/{metric_key}/{location_key}/data', tags=['Pipes'])
 def get_pipe_data(
         connector_keys : str,
         metric_key : str,
@@ -295,7 +295,7 @@ def get_pipe_data(
         media_type = 'application/json',
         #  headers = {'chunk' : chunk, 'max_chunk' : max_chunk},
     )
-@app.get(pipes_endpoint + '/{connector_keys}/{metric_key}/{location_key}/backtrack_data')
+@app.get(pipes_endpoint + '/{connector_keys}/{metric_key}/{location_key}/backtrack_data', tags=['Pipes'])
 def get_backtrack_data(
         connector_keys : str,
         metric_key : str,
@@ -341,7 +341,7 @@ def get_backtrack_data(
         media_type = 'application/json'
     )
 
-@app.get(pipes_endpoint + '/{connector_keys}/{metric_key}/{location_key}/id')
+@app.get(pipes_endpoint + '/{connector_keys}/{metric_key}/{location_key}/id', tags=['Pipes'])
 def get_pipe_id(
         connector_keys : str,
         metric_key : str,
@@ -363,7 +363,7 @@ def get_pipe_id(
         raise fastapi.HTTPException(status_code=404, detail=str(e))
     return pipe_id
 
-@app.get(pipes_endpoint + '/{connector_keys}/{metric_key}/{location_key}/attributes')
+@app.get(pipes_endpoint + '/{connector_keys}/{metric_key}/{location_key}/attributes', tags=['Pipes'])
 def get_pipe_attributes(
         connector_keys : str,
         metric_key : str,
@@ -375,7 +375,7 @@ def get_pipe_attributes(
     """
     return get_pipe(connector_keys, metric_key, location_key).attributes
 
-@app.get(pipes_endpoint + '/{connector_keys}/{metric_key}/{location_key}/exists')
+@app.get(pipes_endpoint + '/{connector_keys}/{metric_key}/{location_key}/exists', tags=['Pipes'])
 def get_pipe_exists(
         connector_keys : str,
         metric_key : str,
@@ -387,7 +387,7 @@ def get_pipe_exists(
     """
     return get_pipe(connector_keys, metric_key, location_key).exists()
 
-@app.post(endpoints['metadata'])
+@app.post(endpoints['metadata'], tags=['Pipes'])
 def create_metadata(
         curr_user : 'meerschaum._internal.User.User' = fastapi.Depends(manager),
     ) -> bool:
@@ -401,7 +401,7 @@ def create_metadata(
         raise fastapi.HTTPException(status_code=500, detail=str(e))
     return True
 
-@app.get(pipes_endpoint + '/{connector_keys}/{metric_key}/{location_key}/rowcount')
+@app.get(pipes_endpoint + '/{connector_keys}/{metric_key}/{location_key}/rowcount', tags=['Pipes'])
 def get_pipe_rowcount(
         connector_keys : str,
         metric_key : str,
@@ -421,7 +421,7 @@ def get_pipe_rowcount(
         debug = debug
     )
 
-@app.get(pipes_endpoint + '/{connector_keys}/{metric_key}/{location_key}/columns/types')
+@app.get(pipes_endpoint + '/{connector_keys}/{metric_key}/{location_key}/columns/types', tags=['Pipes'])
 def get_pipe_columns_types(
         connector_keys : str,
         metric_key : str,
