@@ -12,7 +12,7 @@ from meerschaum.utils.typing import Optional, Dict, List, Union
 
 endpoint = endpoints['connectors']
 
-@app.get(endpoint)
+@app.get(endpoint, tags=['Connectors'])
 def get_connectors(type : Optional[str] = None) -> Union[Dict[str, List[str]], List[str]]:
     """
     Return the keys of the registered connectors.
@@ -40,7 +40,7 @@ def get_connectors(type : Optional[str] = None) -> Union[Dict[str, List[str]], L
         return response_dict[type]
     return response_dict
 
-@app.get(endpoint + "/{type}")
+@app.get(endpoint + "/{type}", tags=['Connectors'])
 def get_connectors_by_type(type : str):
     """
     Convenience method for `get_connectors()`.

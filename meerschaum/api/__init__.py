@@ -11,6 +11,9 @@ from meerschaum.utils.typing import Dict, Any, Optional
 
 from meerschaum import __version__ as version
 __version__ = version
+__doc__ = """
+The Meerschaum Web API lets you access and control your data over the Internet.
+"""
 
 from meerschaum.config import get_config
 from meerschaum.config.static import _static_config
@@ -113,7 +116,41 @@ def get_pipe(connector_keys, metric_key, location_key, refresh=False):
         return pipes(refresh=refresh)[connector_keys][metric_key][location_key]
     return p
 
-app = fastapi.FastAPI(title='Meerschaum API')
+app = fastapi.FastAPI(
+    title = 'Meerschaum API',
+    description = __doc__,
+    version = __version__,
+    contact = {
+        'name': 'Bennett Meares',
+        'url': 'https://meerschaum.io',
+    },
+    license_info = {
+        'name': 'Apache 2.0',
+        'url': 'https://www.apache.org/licenses/LICENSE-2.0.html',
+    },
+    open_api_tags = [{
+            'name': 'Pipes',
+            'description': 'Access pipes by indexing their keys.',
+        }, {
+            'name': 'Actions',
+            'description': 'Perform actions via the API.',
+        }, {
+            'name': 'Connectors',
+            'description': 'Get information about the registered connectors.'
+        }, {
+            'name': 'Users',
+            'description': 'Access, register, and delete users.',
+        }, {
+            'name': 'Plugins',
+            'description': 'Access, register, and delete plugins.',
+        }, {
+            'name': 'Misc',
+            'description': 'Miscellaneous endpoints.',
+        }, {
+            'name': 'Version',
+            'description': 'Version information.'
+    }],
+)
 
 (
     fastapi_responses,

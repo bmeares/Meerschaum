@@ -28,7 +28,7 @@ users_endpoint = endpoints['users']
 from fastapi import HTTPException
 from meerschaum.config.static import _static_config
 
-@app.get(users_endpoint + "/me")
+@app.get(users_endpoint + "/me", tags=['Users'])
 def read_current_user(
         curr_user : 'meerschaum._internal.User.User' = fastapi.Depends(manager),
     ) -> Dict[str, Union[str, int]]:
@@ -42,14 +42,14 @@ def read_current_user(
         'attributes' : get_api_connector().get_user_attributes(curr_user),
     }
 
-@app.get(users_endpoint)
+@app.get(users_endpoint, tags=['Users'])
 def get_users() -> List[str]:
     """
     Return a list of registered users
     """
     return get_api_connector().get_users(debug=debug)
 
-@app.post(users_endpoint + "/{username}/register")
+@app.post(users_endpoint + "/{username}/register", tags=['Users'])
 def register_user(
         username : str,
         password : str,
@@ -79,7 +79,7 @@ def register_user(
     user = User(username, password, type=type, email=email, attributes=attributes)
     return get_api_connector().register_user(user, debug=debug)
 
-@app.post(users_endpoint + "/{username}/edit")
+@app.post(users_endpoint + "/{username}/edit", tags=['Users'])
 def edit_user(
         username : str,
         password : str,
@@ -100,7 +100,7 @@ def edit_user(
 
     return False, f"Cannot edit user '{user}': Permission denied"
 
-@app.get(users_endpoint + "/{username}/id")
+@app.get(users_endpoint + "/{username}/id", tags=['Users'])
 def get_user_id(
         username : str,
     ) -> Optional[int]:
@@ -109,7 +109,7 @@ def get_user_id(
     """
     return get_api_connector().get_user_id(User(username), debug=debug)
 
-@app.get(users_endpoint + "/{username}/attributes")
+@app.get(users_endpoint + "/{username}/attributes", tags=['Users'])
 def get_user_attributes(
         username : str,
     ) -> Optional[Dict[str, Any]]:
@@ -118,7 +118,7 @@ def get_user_attributes(
     """
     return get_api_connector().get_user_attributes(User(username), debug=debug)
 
-@app.delete(users_endpoint + "/{username}")
+@app.delete(users_endpoint + "/{username}", tags=['Users'])
 def delete_user(
         username : str,
         curr_user : 'meerschaum._internal.User.User' = fastapi.Depends(manager),
@@ -137,7 +137,7 @@ def delete_user(
 # Internal API Chaining functions #
 ###################################
 
-@app.get(users_endpoint + '/{username}/password_hash')
+@app.get(users_endpoint + '/{username}/password_hash', tags=['Users'])
 def get_user_password_hash(
         username : str,
         curr_user : 'meerschaum._internal.User.User' = fastapi.Depends(manager),
@@ -149,7 +149,7 @@ def get_user_password_hash(
         raise HTTPException(status_code=403, detail=DISALLOW_CHAINING_MESSAGE)
     return get_api_connector().get_user_password_hash(User(username), debug=debug)
 
-@app.get(users_endpoint + '/{username}/type')
+@app.get(users_endpoint + '/{username}/type', tags=['Users'])
 def get_user_type(
         username : str,
         curr_user : 'meerschaum._internal.User.User' = fastapi.Depends(manager),

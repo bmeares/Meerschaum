@@ -23,7 +23,7 @@ def load_user(
     """
     return User(username, instance=get_api_connector())
 
-@app.post(endpoints['login'])
+@app.post(endpoints['login'], tags=['Users'])
 def login(
         data : OAuth2PasswordRequestForm = fastapi.Depends()
     ) -> JSONResponse:

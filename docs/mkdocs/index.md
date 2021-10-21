@@ -83,7 +83,9 @@ h1 {
 
 <!-- # Welcome to the Meerschaum Documentation Home Page -->
 
-If you'd like to incorporate Meerschaum into your project, head over to [docs.meerschaum.io](https://docs.meerschaum.io) for technical API documentation of the `meerschaum` package.
+<!-- If you'd like to incorporate Meerschaum into your project, head over to [docs.meerschaum.io](https://docs.meerschaum.io) for technical API documentation of the `meerschaum` package. -->
+
+<p style="text-align:center; color:#666666; font-size: 1.2em"><i>Out-of-the-box ETL, easy to learn, and a pleasure to use!</i></p>
 
 <div class="grid-container center">
   <div class="grid-child">
