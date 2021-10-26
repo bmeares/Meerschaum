@@ -8,7 +8,7 @@ Functions for interacting with jobs via the web interface.
 
 from __future__ import annotations
 from dash.dependencies import Input, Output, State
-from meerschaum.utils.typing import List, Optional, Dict, Any, Tuple, Union
+from meerschaum.utils.typing import List, Optional, Dict, Any, Tuple, Union, WebState
 from meerschaum.utils.packages import attempt_import, import_html, import_dcc
 from meerschaum.api.dash.components import alert_from_success_tuple, build_cards_grid
 dbc = attempt_import('dash_bootstrap_components', lazy=False)
@@ -16,9 +16,9 @@ html, dcc = import_html(), import_dcc()
 dateutil_parser = attempt_import('dateutil.parser')
 from meerschaum.utils.daemon import get_daemons, get_running_daemons, get_stopped_daemons
 
-def get_jobs_cards(state):
+def get_jobs_cards(state: WebState):
     """
-    Build cards for jobs.
+    Build cards and alerts lists for jobs.
     """
     daemons = get_daemons()
     running_daemons = get_running_daemons(daemons)
@@ -89,5 +89,5 @@ def get_jobs_cards(state):
             ])
         )
 
-    return build_cards_grid(cards, num_columns=3), []
+    return cards, []
 

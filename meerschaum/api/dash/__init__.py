@@ -37,7 +37,9 @@ stopped_jobs = {}
 stopped_monitors = {}
 
 stylesheets = [
-    '/static/css/darkly.min.css', '/static/css/dbc_dark.css', '/static/css/dash.css',
+    '/static/css/bootstrap.min.css',
+    '/static/css/dbc_dark.css',
+    '/static/css/dash.css',
     #  '/static/js/node_modules/xterm/css/xterm.css',
 ]
 scripts = ['/static/js/node_modules/xterm/lib/xterm.js']

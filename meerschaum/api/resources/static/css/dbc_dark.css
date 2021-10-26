@@ -39,18 +39,18 @@
 /* input box */
 .dbc_dark .Select-control {
     /* background-color: black !important; */
-    background-color: var(--dark) !important;
+    background-color: var(--bs-dark) !important;
     color: white;
 }
 
 .form-control {
-  background-color: var(--dark) !important;
+  background-color: var(--bs-dark) !important;
   color: white;
   border: 1px solid grey !important;
   /* background-color: var(--dark) !important; */
 }
 .form-control:focus {
-  background-color: var(--dark) !important;
+  background-color: var(--bs-dark) !important;
   color: white;
 }
 
@@ -69,14 +69,14 @@
 /* dropdown menu options */
 .dbc_dark .VirtualizedSelectOption {
     /* background-color: black; */
-    background-color: var(--dark);
+    background-color: var(--bs-dark);
     color: white;
  }
 
 /* dropdown menu hover effect */
 .dbc_dark .VirtualizedSelectFocusedOption {
     /* background-color: black; */
-    background-color: var(--dark);
+    background-color: var(--bs-dark);
     opacity: .7;
 }
 
@@ -84,7 +84,7 @@
  * shadow box around input box.  default is blue
  */
 .dbc_dark .is-focused:not(.is-open) > .Select-control {
-  border-color: var(--primary) !important;
+  border-color: var(--bs-primary) !important;
  /* box-shadow: 0 0 0 0.2rem rgba(223, 105, 26, 0.25); /* lighter primary */
   box-shadow: none !important;
 }
@@ -99,22 +99,22 @@
  * textarea
  */
 .dbc_dark textarea {
-    background-color : var(--dark) !important;
-    color: var(--light) !important;
+    background-color : var(--bs-dark) !important;
+    color: var(--bs-light) !important;
 }
 
 /* ----------------------------------------
  *  input boxes including editable fields in DataTable and the pagination buttons
  */
 .dbc_dark input input.current-page {
-    background-color : var(--dark) !important;
-    color: var(--light) !important;
+    background-color : var(--bs-dark) !important;
+    color: var(--bs-light) !important;
 }
 
 /* Use this classname for dcc.Input */
 .dbc_dark_input input {
-    background-color : var(--dark) !important;
-    color: var(--light) !important;
+    background-color : var(--bs-dark) !important;
+    color: var(--bs-light) !important;
 }
 
 /* ---------------------------------------
@@ -138,41 +138,41 @@
  *  these icons appear when the table is sortable and/or columns are deletable
  */
 .dbc_dark .dash-table-container .dash-spreadsheet-container .dash-spreadsheet-inner table {
-    --accent: var(--primary) !important;
+    --accent: var(--bs-primary) !important;
     --hover: none !important;
     --text-color: none !important;
 }
 
 /* pagination buttons - this removes the default pink hover */
 .dbc_dark .last-page:hover, .previous-page:hover, .first-page:hover, .next-page:hover{
-    color: var(--primary) !important;
+    color: var(--bs-primary) !important;
 }
 
 /* table body */
 .dbc_dark .dash-spreadsheet td {
     font-family:  var(--font-family-sans-serif);
-    background-color: var(--dark) !important;
-    color: var(--light) !important;
-    --border: var(--gray);
+    background-color: var(--bs-dark) !important;
+    color: var(--bs-light) !important;
+    --border: var(--bs-gray);
     --border-width: .5px;
 }
 
 /*  table header */
 .dbc_dark .dash-spreadsheet .dash-header {
     font-family:  var(--font-family-sans-serif);
-    background-color: var(--dark) !important;
+    background-color: var(--bs-dark) !important;
     opacity: 0.9;
-    color: var(--light) !important;
-    --accent: var(--primary) !important;
-    --border: var(--gray);
+    color: var(--bs-light) !important;
+    --accent: var(--bs-primary) !important;
+    --border: var(--bs-gray);
 }
 
 /* filter row in the header */
 .dbc_dark .dash-spreadsheet .dash-filter {
     font-family:  var(--font-family-sans-serif);
-    background-color: var(--dark) !important;
-    color: var(--light) !important;
-    --border: var(--gray);
+    background-color: var(--bs-dark) !important;
+    color: var(--bs-light) !important;
+    --border: var(--bs-gray);
 }
 
 /* tooltips - makes text readable in dark themes */
@@ -188,8 +188,8 @@
 .dbc_dark.dbc_row_hover .dash-spreadsheet  tr:hover td.dash-cell {
     border-color: lightgrey !important;
     border-width: 1.5px !important;
-    background-color: var(--light) !important;
-    color: var(--dark) !important;
+    background-color: var(--bs-light) !important;
+    color: var(--bs-dark) !important;
 }
 
 
@@ -199,7 +199,7 @@
 
 .dbc_dark .rc-slider-handle {
   border: 0;
-  background-color: var(--primary)
+  background-color: var(--bs-primary)
 }
 
 .dbc_dark .rc-slider-rail {
@@ -207,7 +207,7 @@
 }
 
 .dbc_dark .rc-slider-track {
-  background-color: var(--primary)
+  background-color: var(--bs-primary)
 }
 
 .dbc_dark .rc-slider-dot {
@@ -216,7 +216,7 @@
 }
 
 .dbc_dark .rc-slider-dot.rc-slider-dot-active {
-  background-color: var(--primary)
+  background-color: var(--bs-primary)
 }
 
 /* label color */
@@ -226,12 +226,18 @@
 
 /* Makes the active label color different than default label color */
 .dbc_dark .rc-slider-mark-text.rc-slider-mark-text-active {
-  color: white
+  color: white;
 }
 
 /* ADDED BELOW */
 .dbc_dark .custom-select {
-  background-color : var(--secondary) !important;
+  background-color : var(--bs-secondary) !important;
   color: white;
 }
+
+#instance-select {
+  background-color : var(--bs-secondary) !important;
+  color: white;
+}
+
 

@@ -11,13 +11,16 @@ import shlex
 from dash.dependencies import Input, Output, State
 from meerschaum.utils.typing import List, Optional, Dict, Any, Tuple, Union
 from meerschaum.utils.misc import string_to_dict
-from meerschaum.utils.packages import attempt_import
+from meerschaum.utils.packages import attempt_import, import_dcc, import_html
 from meerschaum.api.dash import (
     dash_app, debug, _get_pipes
 )
+from meerschaum.api import endpoints
 from meerschaum.api.dash.connectors import get_web_connector
 from meerschaum.api.dash.components import alert_from_success_tuple
+import json
 dbc = attempt_import('dash_bootstrap_components', lazy=False)
+html, dcc = import_html(), import_dcc()
 
 def keys_from_state(
         state : Dict[str, Any],
@@ -81,9 +84,42 @@ def get_pipes_cards(*keys):
         - pipes as a list of cards
         - alert list
     """
+    cards = []
     _pipes = pipes_from_state(*keys, as_list=True)
-    alert = alert_from_success_tuple(_pipes)
+    alerts = [alert_from_success_tuple(_pipes)]
     if not isinstance(_pipes, list):
         _pipes = []
-    return ([dbc.Card(str(p)) for p in _pipes], [alert])
+    for p in _pipes:
+        #  newest_time = p.get_sync_time(newest=True, debug=debug)
+        #  oldest_time = p.get_sync_time(newest=False, debug=debug)
+        #  if newest_time is not None and newest_time == oldest_time:
+            #  newest_time = p.get_sync_time(newest=True, round_down=False, debug=debug)
+            #  oldest_time = p.get_sync_time(newest=False, round_down=False, debug=debug)
+
+        #  date_text = (html.Pre(f'Date range:\n{newest_time}\n{oldest_time}')
+        #  if newest_time is not None and oldest_time is not None
+        #  else html.P('No date information available.'))
+
+        footer_children = dbc.Button(
+            'Download data',
+            size = 'sm',
+            color = 'link',
+            id = {'type': 'pipe-download-csv-button', 'index': json.dumps(p.meta)},
+        )
+        card_body_children = [
+            html.H4(str(p), className='card-title'),
+            html.Div(dbc.Accordion([
+                dbc.AccordionItem('Overview', title='Overview'),
+                dbc.AccordionItem('Columns go here', title='Columns'),
+            ], flush=True, start_collapsed=True))
+
+        ]
+        cards.append(
+            dbc.Card(children=[
+                #  dbc.CardHeader(),
+                dbc.CardBody(children=card_body_children),
+                dbc.CardFooter(children=footer_children),
+            ])
+        )
+    return cards, alerts
 

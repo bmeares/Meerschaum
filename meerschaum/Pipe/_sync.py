@@ -268,6 +268,7 @@ def get_sync_time(
         self,
         params : Optional[Mapping[str, Any]] = None,
         newest: bool = True,
+        round_down: bool = True,
         debug : bool = False
     ) -> Optional['datetime.datetime']:
     """
@@ -307,6 +308,7 @@ def get_sync_time(
         self,
         params = params,
         newest = newest,
+        round_down = round_down,
         debug = debug,
     )
 

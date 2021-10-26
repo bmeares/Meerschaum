@@ -652,6 +652,7 @@ def get_sync_time(
         pipe : 'meerschaum.Pipe',
         params : Optional[Dict[str, Any]] = None,
         newest: bool = True,
+        round_down: bool = True,
         debug : bool = False,
     ) -> 'datetime.datetime':
     """
@@ -666,6 +667,10 @@ def get_sync_time(
     :param newest:
         If `True`, get the most recent datetime (honoring `params`).
         If `False`, get the oldest datetime (ASC instead of DESC).
+
+    :param round_down:
+        If `True`, round the resulting datetime value down to the nearest minute.
+        Defaults to `True`.
     """
     from meerschaum.connectors.sql.tools import sql_item_name, build_where
     from meerschaum.utils.warnings import warn
@@ -698,7 +703,10 @@ def get_sync_time(
             st = db_time.to_pydatetime()
 
         ### round down to smooth timestamp
-        sync_time = round_time(st, date_delta=datetime.timedelta(minutes=1), to='down')
+        sync_time = (
+            round_time(st, date_delta=datetime.timedelta(minutes=1), to='down')
+            if round_down else st
+        )
 
     except Exception as e:
         sync_time = None
