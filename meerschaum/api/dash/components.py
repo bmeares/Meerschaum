@@ -13,6 +13,9 @@ from meerschaum.utils.typing import SuccessTuple, List
 from meerschaum.config.static import _static_config
 from meerschaum.utils.misc import remove_ansi
 from meerschaum.actions import get_shell
+from meerschaum.api import endpoints
+from meerschaum.utils.misc import get_connector_labels
+from meerschaum.config import __doc__ as doc
 dbc = attempt_import('dash_bootstrap_components', lazy=False)
 html, dcc = import_html(), import_dcc()
 dex = attempt_import('dash_extensions', lazy=False)
@@ -32,16 +35,17 @@ get_items_menu = dbc.DropdownMenu(
     label='Get Items', id='get-items-menu', children=[
         dbc.DropdownMenuItem("Pipes", id='get-pipes-button'),
         dbc.DropdownMenuItem("Jobs", id='get-jobs-button'),
-    ],
-    style={'width': '100%'}
+        dbc.DropdownMenuItem("Plugins", id='get-plugins-button'),
+        dbc.DropdownMenuItem("Users", id='get-users-button'),
+    ], style={'width': '100%'}, menu_variant='dark', toggle_style={'width': '100%'},
 )
 cancel_button = dbc.Button('Cancel', id='cancel-button', color='danger', style={'width': '100%'})
 bottom_buttons_content = dbc.Card(
     dbc.CardBody(
         dbc.Row([
-            dbc.Col(go_button, width='2'),
-            dbc.Col(cancel_button, width='2'),
-            dbc.Col(get_items_menu, width='2'),
+            dbc.Col(go_button, lg=2, md=3),
+            dbc.Col(cancel_button, lg=2, md=3),
+            dbc.Col(get_items_menu, lg=2, md=3),
         ],
         #  no_gutters=False
         )
@@ -71,6 +75,90 @@ sidebar = dbc.Offcanvas(
     title='Pages',
 )
 
+download_dataframe = dcc.Download(id='download-dataframe-csv')
+
+instance_select = dbc.Select(
+    id = 'instance-select',
+    size = 'sm',
+    options = [
+        {'label': i, 'value': i}
+        for i in get_connector_labels('sql', 'api')
+    ],
+    class_name = 'dbc_dark custom-select custom-select-sm',
+)
+
+
+navbar = dbc.Navbar(
+    [
+        dbc.Row(
+            [
+                dbc.Col(html.Img(src=endpoints['dash'] + "/assets/logo_48x48.png", style = {'padding': '0.5em'}), width='auto', align='start'),
+                dbc.Col(dbc.NavbarBrand("Meerschaum Web Console", class_name='ms-2'), align='start', width=2),
+                dbc.Col(md=True, lg=True, sm=False),
+                dbc.Col(html.Center(instance_select), sm=2, md=2, lg=1, align='end', class_name='d-flex justify-content-center text-center'),
+                dbc.Col(html.Pre(html.A(doc, href='/docs')), width='auto', align='end'),
+            ],
+            #  align = 'center',
+            style = {'width': '100%'},
+            justify = 'around',
+        ),
+    ],
+    color = 'dark', dark=True
+)
+
+
+
+old_navbar =  dbc.Navbar(
+    children = [
+        dbc.Row(
+            [
+                dbc.Col(html.Img(
+                    src = endpoints['dash'] + "/assets/logo_48x48.png",
+                    style = {'padding' : '0.5em'}
+                )),
+                dbc.Col(dbc.NavbarBrand(
+                    "Meerschaum Web Console",
+                    className = "ms-2"
+                )),
+            ],
+            align = 'center',
+            className = 'g-0',
+        ),
+        dbc.NavbarToggler(id="navbar-toggler"),
+        dbc.Collapse(
+            dbc.Row(
+                [
+                    dbc.Col(
+                        html.Div(
+                            className = 'dbc_dark',
+                            children = [
+                                instance_select,
+                            ]
+                        ),
+                        #  width = {'size' : 2},
+                    ), ### end of instance column
+                    dbc.Col(
+                        html.Pre(html.A(doc, href='/docs')),
+                        #  width = {'order' : 'last'},
+                        style = {'padding-left' : '15px', 'margin-top' : '15px'},
+                    ),
+                ],
+                #  no_gutters = True,
+                className = "ml-auto flex-nowrap mt-3 mt-md-0",
+                align = 'center',
+                #  className='navbar-nav ml-auto'
+            ),
+            id = 'navbar-collapse',
+            navbar = True,
+            is_open = False,
+        ), ### end of navbar-collapse
+    ],
+    color = 'dark',
+    dark = True
+) ### end nav-bar
+
+
+
 def alert_from_success_tuple(success : SuccessTuple) -> dbc.Alert:
     """
     Return an Alert from a SuccessTuple.
@@ -95,11 +183,11 @@ def build_cards_grid(cards: List[dbc.Card], num_columns: int = 3) -> html.Div:
     for i, card in enumerate(cards):
         if i % num_columns == 0:
             rows_childrens.append([])
-        rows_childrens[-1].append(dbc.Col(card))
+        rows_childrens[-1].append(dbc.Col(card, sm=12, lg=int(12/num_columns)))
     ### Append mising columns to keep the grid shape.
     if rows_childrens and len(rows_childrens[-1]) != num_columns:
         for i in range(num_columns - len(rows_childrens[-1])):
-            rows_childrens[-1].append(dbc.Col())
+            rows_childrens[-1].append(dbc.Col(sm=12, lg=int(12/num_columns)))
     _rows = [dbc.Row(children) for children in rows_childrens]
     rows = []
     for r in _rows:

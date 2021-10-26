@@ -201,6 +201,7 @@ class Pipe:
                 'metric_key'     : self.metric_key,
                 'location_key'   : self.location_key,
                 'parameters'     : parameters,
+                'instance'       : self.instance_keys,
             }
         return self._meta
 

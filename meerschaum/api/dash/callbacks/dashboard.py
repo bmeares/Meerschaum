@@ -8,7 +8,7 @@ Callbacks for the main dashboard.
 
 from __future__ import annotations
 import sys, textwrap, json, datetime
-from dash.dependencies import Input, Output, State
+from dash.dependencies import Input, Output, State, ALL
 from dash.exceptions import PreventUpdate
 from meerschaum.config import get_config
 from meerschaum.config.static import _static_config
@@ -20,18 +20,24 @@ from meerschaum.api.dash.websockets import ws_url_from_href
 from meerschaum.connectors.parse import parse_instance_keys
 from meerschaum.api.dash.pipes import get_pipes_cards
 from meerschaum.api.dash.jobs import get_jobs_cards
-from meerschaum.api.dash.components import alert_from_success_tuple, console_div
+from meerschaum.api.dash.plugins import get_plugins_cards
+from meerschaum.api.dash.users import get_users_cards
+from meerschaum.api.dash.components import alert_from_success_tuple, console_div, build_cards_grid
 from meerschaum.api.dash.actions import execute_action, check_input_interval, stop_action
 import meerschaum.api.dash.pages as pages
 from meerschaum.utils.typing import Dict
 from meerschaum.utils.debug import dprint
-from meerschaum.utils.packages import attempt_import
-from meerschaum.utils.misc import string_to_dict, get_connector_labels, json_serialize_datetime
+from meerschaum.utils.packages import attempt_import, import_html, import_dcc
+from meerschaum.utils.misc import (
+    string_to_dict, get_connector_labels, json_serialize_datetime, filter_keywords
+)
 from meerschaum.actions import get_subactions, actions
 from meerschaum.actions.arguments._parser import get_arguments_triggers, parser
+import meerschaum as mrsm
+import json
 dash = attempt_import('dash', lazy=False)
 dbc = attempt_import('dash_bootstrap_components', lazy=False)
-html = attempt_import('dash_html_components', warn=False)
+dcc, html = import_dcc(), import_html()
 
 keys_state = (
     State('connector-keys-dropdown', 'value'),
@@ -81,7 +87,7 @@ omit_actions = {
     'reload',
     'repo',
     'instance',
-    'debug'
+    'debug',
     'login',
 }
 trigger_aliases = {
@@ -105,7 +111,10 @@ def update_page_layout_div(pathname : str, session_store_data : Dict[str, Any]):
     Route the user to the correct page.
     """
     dash_endpoint = endpoints['dash']
-    session_id = session_store_data.get('session-id', None) 
+    try:
+        session_id = session_store_data.get('session-id', None) 
+    except AttributeError:
+        session_id = None
     _path = (pathname.rstrip('/') + '/').replace((dash_endpoint + '/'), '').rstrip('/')
     path = _path if _path not in _required_login else (
         _path if session_id in active_sessions else 'login'
@@ -123,10 +132,13 @@ def update_page_layout_div(pathname : str, session_store_data : Dict[str, Any]):
     Input('cancel-button', 'n_clicks'),
     Input('get-pipes-button', 'n_clicks'),
     Input('get-jobs-button', 'n_clicks'),
+    Input('get-plugins-button', 'n_clicks'),
+    Input('get-users-button', 'n_clicks'),
     Input('check-input-interval', 'n_intervals'),
     State('keyboard', 'keydown'),
     State('location', 'href'),
     State('ws', 'url'),
+    State('session-store', 'data'),
     *keys_state,
     #  prevent_initial_call=True,
 )
@@ -144,12 +156,16 @@ def update_content(*args):
     if not ctx.triggered:
         return [], [], True, ws_url
 
+    session_data = args[-1]
+
     ### NOTE: functions MUST return a list of content and a list of alerts
     triggers = {
         'go-button' : execute_action,
         'cancel-button' : stop_action,
         'get-pipes-button' : get_pipes_cards,
         'get-jobs-button' : get_jobs_cards,
+        'get-plugins-button' : get_plugins_cards,
+        'get-users-button' : get_users_cards,
         'check-input-interval' : check_input_interval,
     }
     
@@ -168,7 +184,13 @@ def update_content(*args):
     )
     enable_check_input_interval = False
 
-    return (*triggers[trigger](ctx.states), not enable_check_input_interval, ws_url)
+    content, alerts = triggers[trigger](
+        ctx.states,
+        **filter_keywords(triggers[trigger], session_data=session_data)
+    )
+    if trigger.startswith('get-') and trigger.endswith('-button'):
+        content = build_cards_grid(content, num_columns=3)
+    return content, alerts, not enable_check_input_interval, ws_url
 
 @dash_app.callback(
     Output('action-dropdown', 'value'),
@@ -260,7 +282,8 @@ def update_keys_options(
 
     ### Update the instance first.
     if not instance_keys:
-        instance_keys = get_config('meerschaum', 'web_instance')
+        #  instance_keys = get_config('meerschaum', 'web_instance')
+        instance_keys = str(get_api_connector())
     instance_alerts = []
     try:
         parse_instance_keys(instance_keys)
@@ -455,3 +478,26 @@ dash_app.clientside_callback(
     #  Output('location', 'href'),
     #  Input('line-buffer', 'value'),
 #  )
+
+@dash_app.callback(
+    Output("download-dataframe-csv", "data"),
+    Input({'type': 'pipe-download-csv-button', 'index': ALL}, 'n_clicks'),
+    prevent_initial_call = True,
+)
+def download_pipe_csv(n_clicks):
+    if not n_clicks:
+        raise PreventUpdate
+    ctx = dash.callback_context.triggered
+    if ctx[0]['value'] is None:
+        raise PreventUpdate
+    ### I know this looks confusing and feels like a hack.
+    ### Because Dash JSON-ifies the ID dictionary and we are including a JSON-ified dictionary,
+    ### we have to do some crazy parsing to get the pipe's meta-dict bac out of it
+    try:
+        meta = json.loads(json.loads(ctx[0]['prop_id'].split('.n_clicks')[0])['index'])
+    except Exception as e:
+        raise PreventUpdate
+    pipe = mrsm.Pipe(**meta)
+    filename = str(pipe) + '.csv'
+    df = pipe.get_data(debug=debug)
+    return dcc.send_data_frame(df.to_csv, filename)

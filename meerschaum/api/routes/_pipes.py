@@ -26,6 +26,8 @@ from meerschaum.utils.misc import is_pipe_registered, round_time
 import meerschaum._internal.User
 import datetime
 pipes_endpoint = endpoints['pipes']
+from fastapi.responses import StreamingResponse
+import io
 
 @app.post(pipes_endpoint, tags=['Pipes'])
 def register_pipe(
@@ -184,6 +186,7 @@ def get_sync_time(
         location_key : str,
         params : dict = None,
         newest: bool = True,
+        round_down: bool = True,
         debug : bool = False,
         curr_user : 'meerschaum._internal.User.User' = fastapi.Depends(manager),
     ) -> 'datetime.datetime':
@@ -295,6 +298,7 @@ def get_pipe_data(
         media_type = 'application/json',
         #  headers = {'chunk' : chunk, 'max_chunk' : max_chunk},
     )
+
 @app.get(pipes_endpoint + '/{connector_keys}/{metric_key}/{location_key}/backtrack_data', tags=['Pipes'])
 def get_backtrack_data(
         connector_keys : str,
@@ -340,6 +344,56 @@ def get_backtrack_data(
         content = js,
         media_type = 'application/json'
     )
+
+
+@app.get(pipes_endpoint + '/{connector_keys}/{metric_key}/{location_key}/csv', tags=['Pipes'])
+def get_pipe_csv(
+        connector_keys: str,
+        metric_key: str,
+        location_key: str,
+        begin: datetime.datetime = None,
+        end: datetime.datetime = None,
+        params: Optional[str] = None,
+        curr_user : 'meerschaum._internal.User.User' = fastapi.Depends(manager),
+    ) -> str:
+    """
+    Get a Pipe's data. Optionally set query boundaries.
+    """
+    _params = {}
+    if params == 'null':
+        params = None
+    if params is not None:
+        import json
+        try:
+            _params = json.loads(params)
+        except Exception as e:
+            _params = None
+
+    if not isinstance(_params, dict):
+        raise fastapi.HTTPException(
+            status_code = 409,
+            detail = "Params must be a valid JSON-encoded dictionary.",
+        )
+
+    p = get_pipe(connector_keys, metric_key, location_key)
+    if not is_pipe_registered(p, pipes(refresh=True)):
+        raise fastapi.HTTPException(
+            status_code = 409,
+            detail = "Pipe must be registered with the datetime column specified."
+        )
+
+    if begin is None:
+        begin = p.get_sync_time(round_down=False, newest=False)
+    if end is None:
+        end = p.get_sync_time(round_down=False, newest=True)
+
+    filename = str(p) + '-' + str(begin.timestamp()) + '-' + str(end.timestamp()) + '.csv'
+    df = p.get_data(begin=begin, end=end, params=_params, debug=debug)
+    stream = io.StringIO()
+    df.to_csv(stream, index=False)
+    response = StreamingResponse(iter([stream.getvalue()]), media_type='text/csv')
+    response.headers["Content-Disposition"] = f"attachment; filename={filename}"
+    return response
 
 @app.get(pipes_endpoint + '/{connector_keys}/{metric_key}/{location_key}/id', tags=['Pipes'])
 def get_pipe_id(

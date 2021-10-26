@@ -10,7 +10,7 @@ from __future__ import annotations
 from meerschaum.utils.typing import WebState, Union, Optional
 from meerschaum.connectors.parse import parse_instance_keys
 from meerschaum.config import get_config
-from meerschaum.api import debug
+from meerschaum.api import debug, get_api_connector
 
 def get_web_connector(state : WebState) -> Union[
         meerschaum.connectors.api.APIConnector,
@@ -20,7 +20,7 @@ def get_web_connector(state : WebState) -> Union[
     Parse the web instance keys into a connector.
     """
     instance_keys = (
-        get_config('meerschaum', 'web_instance')
+        str(get_api_connector())
         if not state.get('instance-select.value', None)
         else state['instance-select.value']
     )

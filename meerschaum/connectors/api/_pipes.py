@@ -387,6 +387,7 @@ def get_sync_time(
         pipe : 'meerschaum.Pipe',
         params : Optional[Dict[str, Any]] = None,
         newest: bool = True,
+        round_down: bool = True,
         debug : bool = False,
     ) -> datetime.datetime:
     """
@@ -401,14 +402,18 @@ def get_sync_time(
     :param newest:
         If `True`, get the most recent datetime (honoring `params`).
         If `False`, get the oldest datetime (ASC instead of DESC).
+        Defaults to `True`.
 
+    :param round_down:
+        If `True`, round the resulting datetime value down to the nearest minute.
+        Defaults to `True`.
     """
     import datetime, json
     r_url = pipe_r_url(pipe)
     response = self.get(
         r_url + '/sync_time',
         json = params,
-        params = {'newest': newest, 'debug': debug},
+        params = {'newest': newest, 'debug': debug, 'round_down': round_down},
         debug = debug
     )
     if not response:
