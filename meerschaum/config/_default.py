@@ -100,7 +100,7 @@ default_system_config = {
                 'plugins'  : True,
             },
             'actions'      : {
-                'non_admin': False,
+                'non_admin': True,
             },
             'chaining' : {
                 'insecure_parent_instance' : False,

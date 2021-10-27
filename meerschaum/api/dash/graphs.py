@@ -9,8 +9,10 @@ Functions for building graphs of pipes' data.
 from __future__ import annotations
 from meerschaum.utils.typing import WebState, List
 from meerschaum.api import debug
-from meerschaum.utils.packages import attempt_import, import_dcc, import_html
+from meerschaum.utils.packages import attempt_import, import_dcc, import_html, import_pandas
 import plotly.express as px
+pd = import_pandas()
+px = attempt_import('plotly.express', warn=False)
 dbc = attempt_import('dash_bootstrap_components')
 html, dcc = import_html(), import_dcc()
 

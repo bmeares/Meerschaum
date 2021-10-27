@@ -698,6 +698,9 @@ def get_sync_time(
         ### Do nothing if a datetime object is returned.
         elif isinstance(db_time, datetime.datetime):
             st = db_time
+        ### Sometimes the datetime is actually a date.
+        elif isinstance(db_time, datetime.date):
+            st = datetime.datetime.combine(db_time, datetime.datetime.min.time())
         ### Convert pandas timestamp to Python datetime.
         else:
             st = db_time.to_pydatetime()

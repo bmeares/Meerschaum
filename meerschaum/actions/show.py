@@ -547,6 +547,14 @@ def _show_logs(
     ) -> SuccessTuple:
     """
     Show the logs for jobs.
+
+    You may specify jobs to only print certain logs.
+    To print the entire log file, add the `--nopretty` flag.
+
+    Usage:
+        `show logs`
+        `show logs --nopretty`
+        `show logs myjob myotherjob`
     """
     import os, pathlib, random, asyncio
     from meerschaum.utils.packages import attempt_import, import_rich
@@ -675,14 +683,10 @@ def _show_logs(
                     if daemon.log_path.exists():
                         _print_pygtail_lines(daemon)
         loop = asyncio.new_event_loop()
-        #  nest_asyncio.apply(loop)
-        #  loop.run_until_complete(_watch_logs())
         try:
             loop.run_until_complete(_watch_logs())
         except KeyboardInterrupt:
             _quit = True
-            #  print(loop.is_closed())
-            #  loop.close() if not loop.is_closed() else None
 
     def _print_nopretty_log_text():
         for d in daemons:

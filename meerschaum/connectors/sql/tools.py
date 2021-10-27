@@ -184,6 +184,7 @@ def dateadd_str(
     dateutil = attempt_import('dateutil')
     if not begin:
         return None
+    _original_begin = begin
     begin_time = None
     ### Sanity check: make sure `begin` is a valid datetime before we inject anything.
     if not isinstance(begin, datetime.datetime):
@@ -194,43 +195,42 @@ def dateadd_str(
     else:
         begin_time = begin
 
-    if begin_time is None and str(begin).lower() != 'now':
-        error(f"Invalid datetime: '{begin}'")
+    ### Unable to parse into a datetime.
+    if begin_time is None:
+        ### Throw an error if any of these banned symbols are included in the `begin` string.
+        banned_symbols = [';', '--', 'drop', 'create', 'alter', 'delete', 'commit']
+        for symbol in banned_symbols:
+            if symbol in str(begin).lower():
+                error(f"Invalid datetime: '{begin}'")
+    ### If begin is a valid datetime, wrap it in quotes.
+    else:
+        begin = f"'{begin}'"
 
     da = ""
     if flavor in ('postgresql', 'timescaledb', 'cockroachdb'):
-        if begin == 'now':
-            begin = "CAST(NOW() AT TIME ZONE 'utc' AS TIMESTAMP)"
-        elif begin_time:
-            begin = f"CAST('{begin}' AS TIMESTAMP)"
-        da = begin + f" + INTERVAL '{number} {datepart}'"
+        begin = (
+            f"CAST({begin} AS TIMESTAMP)" if begin != 'now'
+            else "CAST(NOW() AT TIME ZONE 'utc' AS TIMESTAMP)"
+        )
+        da = begin + (f" + INTERVAL '{number} {datepart}'" if number != 0 else '')
     elif flavor == 'duckdb':
-        if begin == 'now':
-            begin = 'NOW()'
-        elif begin_time:
-            begin = f"CAST('{begin}' AS TIMESTAMP)"
-        da = begin + f" + INTERVAL '{number} {datepart}'"
+        begin = f"CAST({begin} AS TIMESTAMP)" if begin != 'now' else 'NOW()'
+        da = begin + (f" + INTERVAL '{number} {datepart}'" if number != 0 else '')
     elif flavor in ('mssql',):
-        if begin == 'now':
-            begin = "GETUTCDATE()"
-        elif begin_time:
-            begin = f"CAST('{begin}' AS DATETIME)"
-        da = f"DATEADD({datepart}, {number}, {begin})"
+        begin = f"CAST({begin} AS DATETIME)" if begin != 'now' else 'GETUTCDATE()'
+        da = f"DATEADD({datepart}, {number}, {begin})" if number != 0 else begin
     elif flavor in ('mysql', 'mariadb'):
-        if begin == 'now':
-            begin = "UTC_TIMESTAMP()"
-        elif begin_time:
-            begin = f'"{begin}"'
-        da = f"DATE_ADD({begin}, INTERVAL {number} {datepart})"
+        begin = f"CAST({begin} AS DATETIME(6))" if begin != 'now' else 'UTC_TIMESTAMP(6)'
+        da = (f"DATE_ADD({begin}, INTERVAL {number} {datepart})" if number != 0 else begin)
     elif flavor == 'sqlite':
-        da = f"datetime('{begin}', '{number} {datepart}')"
+        da = f"datetime({begin}, '{number} {datepart}')"
     elif flavor == 'oracle':
         if begin == 'now':
             begin = str(
                 datetime.datetime.utcnow().strftime('%Y:%m:%d %M:%S.%f')
             )
         elif begin_time:
-            begin = str(begin.strftime('%Y:%m:%d %M:%S.%f'))
+            begin = str(begin_time.strftime('%Y:%m:%d %M:%S.%f'))
         dt_format = 'YYYY-MM-DD HH24:MI:SS.FF'
         da = f"TO_TIMESTAMP('{begin}', '{dt_format}') + INTERVAL '{number}' {datepart}"
     return da

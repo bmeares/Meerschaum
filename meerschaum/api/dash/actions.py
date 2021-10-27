@@ -15,15 +15,18 @@ from meerschaum.utils.packages import attempt_import, import_html, import_dcc
 from meerschaum.utils.misc import remove_ansi
 from meerschaum.actions import actions, get_shell
 from meerschaum.api import debug
-from meerschaum.api.dash import running_jobs, stopped_jobs, running_monitors, stopped_monitors
+from meerschaum.api.dash import (
+    running_jobs, stopped_jobs, running_monitors, stopped_monitors, active_sessions
+)
+from meerschaum.api import get_api_connector
 from meerschaum.api.dash.connectors import get_web_connector
 from meerschaum.api.dash.components import alert_from_success_tuple, console_div
 from meerschaum.api.dash.pipes import pipes_from_state, keys_from_state
 from meerschaum.api.dash.websockets import ws_send
 from meerschaum.api._websockets import websockets
 html, dcc = import_html(), import_dcc()
-#  capturer = attempt_import('capturer', lazy=False) if platform.system() != 'Windows' else None
-capturer = None
+from meerschaum.config import get_config
+from meerschaum._internal.User import User
 
 def execute_action(state : WebState):
     """
@@ -54,6 +57,35 @@ def execute_action(state : WebState):
     ### TODO add direct Input to parse if active_tab is 'text'
 
     session_id = state['session-store.data'].get('session-id', None)
+
+    ### Check if actions are permitted by non-admin users.
+    permissions = get_config('system', 'api', 'permissions')
+    allow_non_admin = permissions.get('actions', {}).get('non_admin', False)
+    if not allow_non_admin:
+        username = active_sessions.get(session_id, {}).get('username', None)
+        user = User(username, instance=get_api_connector())
+        user_type = get_api_connector().get_user_type(user, debug=debug)
+        if user_type != 'admin':
+            msg = (
+                f"User '{username}' is not authorized to perform actions on this instance.\n\n"
+                + "To allow non-administrator users to execute actions,\n"
+                + "  run the command `mrsm edit config system`.\n\n"
+                + "Under the keys `api:permissions:actions`, set the value of \n"
+                + "  `non_admin` to `true`."
+            )
+            return (
+                [
+                    html.Div(
+                        html.Pre(msg, id='console-pre'),
+                        id = 'console-div'
+                    ),
+                ],
+                [alert_from_success_tuple(
+                    (False, "Actions are not allowed on this Meerschaum instance.")
+                )]
+            )
+
+    
     subactions = ([subaction] if subaction else []) + shlex.split(additional_subaction_text)
 
     keywords = {f : True for f in flags}
@@ -117,13 +149,6 @@ def execute_action(state : WebState):
             ### So we don't overwhelm the client.
             time.sleep(0.01)
 
-    def use_capture() -> Tuple[str, SuccessTuple]:
-        return use_stringio()
-        #  cap = capturer.CaptureOutput()
-        #  with capturer.CaptureOutput() as cap:
-            #  success_tuple = do_action()
-        #  return cap.get_text(), success_tuple
-
     def use_stringio():
         try:
             LINES, COLUMNS = (
@@ -185,9 +210,8 @@ def execute_action(state : WebState):
         #  monitor_thread.join()
         return success_tuple
 
-    text, success_tuple = use_capture() if capturer is not None else use_stringio()
+    text, success_tuple = use_stringio()
 
-    #  raise PreventUpdate
     return (
         [
             html.Div(
