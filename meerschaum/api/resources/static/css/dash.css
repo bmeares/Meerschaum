@@ -57,4 +57,8 @@ a {
 #get-items-menu {
   width: 100%;
 }
-
+#instance-select {
+  background-color : var(--bs-secondary) !important;
+  color: white;
+  margin-bottom: 15px;
+}

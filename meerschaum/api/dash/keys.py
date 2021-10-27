@@ -136,8 +136,9 @@ action_dropdown_row = html.Div(
                                     color = 'link',
                                     size = 'md',
                                     outline = True,
+                                    style = {'display': 'none'},
                                 ),
-                                html.Br(),
+                                #  html.Br(),
                                 dbc.Collapse(
                                     children = [
                                         dbc.Button(

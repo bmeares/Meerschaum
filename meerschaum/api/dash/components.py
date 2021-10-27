@@ -33,18 +33,22 @@ go_button = dbc.Button('Execute', id='go-button', color='primary', style={'width
 test_button = dbc.Button('Test', id='test-button', color='danger', style={'display' : 'none'})
 get_items_menu = dbc.DropdownMenu(
     label='Get Items', id='get-items-menu', children=[
-        dbc.DropdownMenuItem("Pipes", id='get-pipes-button'),
+        #  dbc.DropdownMenuItem("Pipes", id='get-pipes-button'),
+        dbc.DropdownMenuItem("Graphs", id='get-graphs-button'),
         dbc.DropdownMenuItem("Jobs", id='get-jobs-button'),
         dbc.DropdownMenuItem("Plugins", id='get-plugins-button'),
         dbc.DropdownMenuItem("Users", id='get-users-button'),
     ], style={'width': '100%'}, menu_variant='dark', toggle_style={'width': '100%'},
 )
+show_pipes_button = dbc.Button('Show Pipes', id='get-pipes-button', color='info', style={'width': '100%'})
 cancel_button = dbc.Button('Cancel', id='cancel-button', color='danger', style={'width': '100%'})
 bottom_buttons_content = dbc.Card(
     dbc.CardBody(
         dbc.Row([
             dbc.Col(go_button, lg=2, md=3),
             dbc.Col(cancel_button, lg=2, md=3),
+            dbc.Col(show_pipes_button, lg=2, md=3),
+            dbc.Col(lg=True, md=False),
             dbc.Col(get_items_menu, lg=2, md=3),
         ],
         #  no_gutters=False
@@ -92,8 +96,8 @@ navbar = dbc.Navbar(
     [
         dbc.Row(
             [
-                dbc.Col(html.Img(src=endpoints['dash'] + "/assets/logo_48x48.png", style = {'padding': '0.5em'}), width='auto', align='start'),
-                dbc.Col(dbc.NavbarBrand("Meerschaum Web Console", class_name='ms-2'), align='start', width=2),
+                dbc.Col(html.Img(src=endpoints['dash'] + "/assets/logo_48x48.png", style = {'padding': '0.5em', 'padding-left': '2em'}), width='auto', align='start'),
+                dbc.Col(dbc.NavbarBrand("Meerschaum Web Console", class_name='ms-2', style={'margin-top': '10px', 'display': 'inline-block'}), align='start', width=2),
                 dbc.Col(md=True, lg=True, sm=False),
                 dbc.Col(html.Center(instance_select), sm=2, md=2, lg=1, align='end', class_name='d-flex justify-content-center text-center'),
                 dbc.Col(html.Pre(html.A(doc, href='/docs')), width='auto', align='end'),
@@ -105,57 +109,6 @@ navbar = dbc.Navbar(
     ],
     color = 'dark', dark=True
 )
-
-
-
-old_navbar =  dbc.Navbar(
-    children = [
-        dbc.Row(
-            [
-                dbc.Col(html.Img(
-                    src = endpoints['dash'] + "/assets/logo_48x48.png",
-                    style = {'padding' : '0.5em'}
-                )),
-                dbc.Col(dbc.NavbarBrand(
-                    "Meerschaum Web Console",
-                    className = "ms-2"
-                )),
-            ],
-            align = 'center',
-            className = 'g-0',
-        ),
-        dbc.NavbarToggler(id="navbar-toggler"),
-        dbc.Collapse(
-            dbc.Row(
-                [
-                    dbc.Col(
-                        html.Div(
-                            className = 'dbc_dark',
-                            children = [
-                                instance_select,
-                            ]
-                        ),
-                        #  width = {'size' : 2},
-                    ), ### end of instance column
-                    dbc.Col(
-                        html.Pre(html.A(doc, href='/docs')),
-                        #  width = {'order' : 'last'},
-                        style = {'padding-left' : '15px', 'margin-top' : '15px'},
-                    ),
-                ],
-                #  no_gutters = True,
-                className = "ml-auto flex-nowrap mt-3 mt-md-0",
-                align = 'center',
-                #  className='navbar-nav ml-auto'
-            ),
-            id = 'navbar-collapse',
-            navbar = True,
-            is_open = False,
-        ), ### end of navbar-collapse
-    ],
-    color = 'dark',
-    dark = True
-) ### end nav-bar
 
 
 
@@ -178,7 +131,6 @@ def build_cards_grid(cards: List[dbc.Card], num_columns: int = 3) -> html.Div:
     """
     Because `CardColumns` were removed in Bootstrap 5, this function recreates a similar effect.
     """
-    num_columns = 3
     rows_childrens = []
     for i, card in enumerate(cards):
         if i % num_columns == 0:
