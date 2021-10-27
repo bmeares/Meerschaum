@@ -71,6 +71,7 @@ def fetch(
     else:
         dt_name = sql_item_name(pipe.get_columns('datetime'), self.flavor)
 
+
     instructions = pipe.parameters['fetch']
 
     try:
@@ -103,16 +104,17 @@ def fetch(
     )
 
     if dt_name and (begin_da or end_da):
+        definition_dt_name = dateadd_str(self.flavor, 'minute', 0, f"definition.{dt_name}")
         meta_def += "\n" + (
             "AND" if 'where' in meta_def.lower()[meta_def.lower().rfind('select'):]
             else "WHERE"
         ) + " "
         if begin_da:
-            meta_def += f"definition.{dt_name} >= {begin_da}"
+            meta_def += f"{definition_dt_name} >= {begin_da}"
         if begin_da and end_da:
             meta_def += " AND "
         if end_da:
-            meta_def += f"definition.{dt_name} <= {end_da}"
+            meta_def += f"{definition_dt_name} <= {end_da}"
 
     df = self.read(meta_def, chunk_hook=chunk_hook, chunksize=chunksize, debug=debug)
     ### if sqlite, parse for datetimes

@@ -9,12 +9,13 @@ The main dashboard layout.
 import uuid
 from meerschaum.config import __doc__ as doc, get_config
 from meerschaum.utils.misc import get_connector_labels
-from meerschaum.utils.packages import attempt_import, import_html, import_dcc
+from meerschaum.utils.packages import attempt_import, import_html, import_dcc, import_pandas
 from meerschaum.api import endpoints
 dex = attempt_import('dash_extensions', lazy=False)
 #  enrich = attempt_import('dash_extensions.enrich', lazy=False)
 dbc = attempt_import('dash_bootstrap_components', lazy=False)
 html, dcc = import_html(), import_dcc()
+pd = import_pandas()
 px = attempt_import('plotly.express', warn=False)
 daq = attempt_import('dash_daq', warn=False)
 
