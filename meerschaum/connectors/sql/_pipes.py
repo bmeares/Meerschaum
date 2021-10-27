@@ -853,6 +853,8 @@ def get_pipe_columns_types(
         for col in pipe_table.columns:
             table_columns[str(col.name)] = str(col.type)
     except Exception as e:
+        import traceback
+        traceback.print_exc()
         from meerschaum.utils.warnings import warn
         warn(e)
         table_columns = None

@@ -8,7 +8,7 @@ Callbacks for the main dashboard.
 
 from __future__ import annotations
 import sys, textwrap, json, datetime
-from dash.dependencies import Input, Output, State, ALL
+from dash.dependencies import Input, Output, State, ALL, MATCH
 from dash.exceptions import PreventUpdate
 from meerschaum.config import get_config
 from meerschaum.config.static import _static_config
@@ -18,10 +18,11 @@ from meerschaum.api.dash import dash_app, debug, pipes, _get_pipes, active_sessi
 from meerschaum.api.dash.connectors import get_web_connector
 from meerschaum.api.dash.websockets import ws_url_from_href
 from meerschaum.connectors.parse import parse_instance_keys
-from meerschaum.api.dash.pipes import get_pipes_cards
+from meerschaum.api.dash.pipes import get_pipes_cards, pipe_from_ctx, accordion_items_from_pipe
 from meerschaum.api.dash.jobs import get_jobs_cards
 from meerschaum.api.dash.plugins import get_plugins_cards
 from meerschaum.api.dash.users import get_users_cards
+from meerschaum.api.dash.graphs import get_graphs_cards
 from meerschaum.api.dash.components import alert_from_success_tuple, console_div, build_cards_grid
 from meerschaum.api.dash.actions import execute_action, check_input_interval, stop_action
 import meerschaum.api.dash.pages as pages
@@ -134,6 +135,7 @@ def update_page_layout_div(pathname : str, session_store_data : Dict[str, Any]):
     Input('get-jobs-button', 'n_clicks'),
     Input('get-plugins-button', 'n_clicks'),
     Input('get-users-button', 'n_clicks'),
+    Input('get-graphs-button', 'n_clicks'),
     Input('check-input-interval', 'n_intervals'),
     State('keyboard', 'keydown'),
     State('location', 'href'),
@@ -166,7 +168,13 @@ def update_content(*args):
         'get-jobs-button' : get_jobs_cards,
         'get-plugins-button' : get_plugins_cards,
         'get-users-button' : get_users_cards,
+        'get-graphs-button' : get_graphs_cards,
         'check-input-interval' : check_input_interval,
+    }
+    ### Defaults to 3 if not in dict.
+    trigger_num_cols = {
+        'get-graphs-button': 1,
+        'get-pipes-button': 1,
     }
     
     ### NOTE: stop the running action if it exists
@@ -189,7 +197,7 @@ def update_content(*args):
         **filter_keywords(triggers[trigger], session_data=session_data)
     )
     if trigger.startswith('get-') and trigger.endswith('-button'):
-        content = build_cards_grid(content, num_columns=3)
+        content = build_cards_grid(content, num_columns=trigger_num_cols.get(trigger, 3))
     return content, alerts, not enable_check_input_interval, ws_url
 
 @dash_app.callback(
@@ -256,10 +264,13 @@ def update_actions(action : str, subaction : str):
 @dash_app.callback(
     Output(component_id='connector-keys-dropdown', component_property='options'),
     Output(component_id='connector-keys-list', component_property='children'),
+    Output(component_id='connector-keys-dropdown', component_property='value'),
     Output(component_id='metric-keys-dropdown', component_property='options'),
     Output(component_id='metric-keys-list', component_property='children'),
+    Output(component_id='metric-keys-dropdown', component_property='value'),
     Output(component_id='location-keys-dropdown', component_property='options'),
     Output(component_id='location-keys-list', component_property='children'),
+    Output(component_id='location-keys-dropdown', component_property='value'),
     Output(component_id='instance-select', component_property='value'),
     Output(component_id='instance-alert-div', component_property='children'),
     Input(component_id='connector-keys-dropdown', component_property='value'),
@@ -340,17 +351,22 @@ def update_keys_options(
     add_options(_connectors_options, _all_keys if _ck_alone else _keys, 'ck')
     add_options(_metrics_options, _all_keys if _mk_alone else _keys, 'mk')
     add_options(_locations_options, _all_keys if _lk_alone else _keys, 'lk')
-        
+    connector_keys = [ck for ck in connector_keys if ck in [_ck['value'] for _ck in _connectors_options]]
+    metric_keys = [mk for mk in metric_keys if mk in [_mk['value'] for _mk in _metrics_options]]
+    location_keys = [lk for lk in location_keys if lk in [_lk['value'] for _lk in _locations_options]]
     _connectors_datalist = [html.Option(value=o['value']) for o in _connectors_options]
     _metrics_datalist = [html.Option(value=o['value']) for o in _metrics_options]
     _locations_datalist = [html.Option(value=o['value']) for o in _locations_options]
     return (
         _connectors_options,
         _connectors_datalist,
+        connector_keys,
         _metrics_options,
         _metrics_datalist,
+        metric_keys,
         _locations_options,
         _locations_datalist,
+        location_keys,
         instance_keys,
         instance_alerts,
     )
@@ -490,14 +506,34 @@ def download_pipe_csv(n_clicks):
     ctx = dash.callback_context.triggered
     if ctx[0]['value'] is None:
         raise PreventUpdate
-    ### I know this looks confusing and feels like a hack.
-    ### Because Dash JSON-ifies the ID dictionary and we are including a JSON-ified dictionary,
-    ### we have to do some crazy parsing to get the pipe's meta-dict bac out of it
-    try:
-        meta = json.loads(json.loads(ctx[0]['prop_id'].split('.n_clicks')[0])['index'])
-    except Exception as e:
+    pipe = pipe_from_ctx(ctx, 'n_clicks')
+    if pipe is None:
         raise PreventUpdate
-    pipe = mrsm.Pipe(**meta)
     filename = str(pipe) + '.csv'
-    df = pipe.get_data(debug=debug)
-    return dcc.send_data_frame(df.to_csv, filename)
+    try:
+        df = pipe.get_data(debug=debug)
+    except Exception as e:
+        df = None
+    if df is not None:
+        return dcc.send_data_frame(df.to_csv, filename)
+    raise PreventUpdate
+
+
+@dash_app.callback(
+    Output({'type': 'pipe-accordion', 'index': MATCH}, 'children'),
+    Input({'type': 'pipe-accordion', 'index': MATCH}, 'active_item'),
+)
+def update_pipe_accordion(item):
+    if item is None:
+        raise PreventUpdate
+
+    ctx = dash.callback_context.triggered
+    if ctx[0]['value'] is None:
+        raise PreventUpdate
+    pipe = pipe_from_ctx(ctx, 'active_item')
+    if pipe is None:
+        raise PreventUpdate
+
+    return accordion_items_from_pipe(pipe, active_items=[item])
+
+

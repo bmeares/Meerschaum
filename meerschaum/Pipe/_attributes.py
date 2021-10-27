@@ -7,7 +7,7 @@ Fetch and manipulate Pipes' attributes
 """
 
 from __future__ import annotations
-from meerschaum.utils.typing import Tuple, Dict, SuccessTuple, Any
+from meerschaum.utils.typing import Tuple, Dict, SuccessTuple, Any, Union, Optional
 
 @property
 def attributes(self) -> Optional[Dict[str, Any]]:
@@ -50,7 +50,7 @@ def columns(self, columns : Dict[str, str]) -> None:
 
 def get_columns(self, *args : str, error : bool = True) -> Tuple[str]:
     """
-    Check if the requested columns are defined
+    Check if the requested columns are defined.
     """
     from meerschaum.utils.warnings import error as _error, warn
     if not args:
@@ -99,3 +99,63 @@ def id(self) -> Optional[int]:
     if not ('_id' in self.__dict__ and self._id):
         self._id = self.get_id()
     return self._id
+
+def get_val_column(self, debug: bool = False) -> Union[str, None]:
+    """
+    Return the name of the value of column.
+    If not is set in the `columns` dictionary, return the first numeric column that is not
+    an ID or datetime column.
+    If none may be found, return `None`.
+    """
+    from meerschaum.utils.debug import dprint
+    if debug:
+        dprint('Attempting to determine the value column...')
+    try:
+        val_name = self.get_columns('value')
+    except Exception as e:
+        val_name = None
+    if val_name is not None:
+        if debug:
+            dprint(f"Value column: {val_name}")
+        return val_name
+
+    cols = self.columns
+    if cols is None:
+        if debug:
+            dprint('No columns could be determined. Returning...')
+        return None
+    try:
+        dt_name = self.get_columns('datetime')
+    except Exception as e:
+        dt_name = None
+    try:
+        id_name = self.get_columns('id')
+    except Exception as e:
+        id_name = None
+
+    if debug:
+        dprint(f"dt_name: {dt_name}")
+        dprint(f"id_name: {id_name}")
+
+    cols_types = self.get_columns_types(debug=debug)
+    if debug:
+        dprint(f"cols_types: {cols_types}")
+    if dt_name is not None:
+        cols_types.pop(dt_name, None)
+    if id_name is not None:
+        cols_types.pop(id_name, None)
+
+    candidates = []
+    candidate_keywords = {'float', 'double', 'precision', 'int', 'numeric',}
+    for search_term in candidate_keywords:
+        for col, typ in cols_types.items():
+            if search_term in typ.lower():
+                candidates.append(col)
+                break
+    if not candidates:
+        if debug:
+            dprint(f"No value column could be determined.")
+        return None
+
+    return candidates[0]
+

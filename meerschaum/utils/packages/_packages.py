@@ -33,6 +33,7 @@ packages : Dict[str, Dict[str, str]] = {
         'colorama'          : 'colorama>=0.4.3',
         'rich'              : 'rich>=10.12.0',
         'more_termcolor'    : 'more-termcolor>=1.1.3',
+        'humanfriendly'     : 'humanfriendly>=10.0',
     },
     '_required' : {
         'pip'               : 'pip>=21.0.1',
@@ -122,7 +123,7 @@ packages['sql'] = {
 packages['sql'].update(packages['drivers'])
 packages['dash'] = {
     'dash'                      : 'dash>=2.0.0',
-    'dash_bootstrap_components' : 'dash-bootstrap-components>=1.0.0-b3',
+    'dash_bootstrap_components' : 'dash-bootstrap-components>=1.0.1rc1',
     'dash_ace'                  : 'dash-ace>=0.2.1',
     'dash_extensions'           : 'dash-extensions>=0.0.51',
     'dash_daq'                  : 'dash-daq>=0.5.0',

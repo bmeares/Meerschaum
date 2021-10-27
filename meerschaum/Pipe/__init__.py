@@ -96,6 +96,7 @@ class Pipe:
         get_columns_types,
         get_id,
         id,
+        get_val_column,
     )
     from ._show import show
     from ._edit import edit, edit_definition
@@ -189,18 +190,18 @@ class Pipe:
         refresh = False
         if '_meta' not in self.__dict__:
             refresh = True
-        elif self.parameters != self.__dict__['_meta']['parameters']:
-            refresh = True
+        #  elif self.parameters != self.__dict__['_meta']['parameters']:
+            #  refresh = True
 
         if refresh:
-            parameters = self.parameters
-            if parameters is None:
-                parameters = dict()
+            #  parameters = self.parameters
+            #  if parameters is None:
+                #  parameters = dict()
             self._meta = {
                 'connector_keys' : self.connector_keys,
                 'metric_key'     : self.metric_key,
                 'location_key'   : self.location_key,
-                'parameters'     : parameters,
+                #  'parameters'     : parameters,
                 'instance'       : self.instance_keys,
             }
         return self._meta
