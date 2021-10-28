@@ -26,7 +26,7 @@ class yaml:
 
     try:
         _lib = _import_module(_import_name)
-    except:
+    except (ImportError, ModuleNotFoundError):
         _lib = attempt_import(_import_name, split=False, lazy=False, install=True)
     if _import_name == 'ruamel.yaml':
         _yaml = _lib.YAML()

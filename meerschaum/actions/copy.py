@@ -14,7 +14,7 @@ def copy(
         **kw : Any
     ) -> SuccessTuple:
     """
-    Copy pipes' attributes and make new pipes.
+    Copy items' attributes into new items.
 
     Command:
         `copy {option}`
@@ -27,8 +27,36 @@ def copy(
         action = []
     options = {
         'pipes'      : _copy_pipes,
+        'connectors' : _copy_connectors,
     }
     return choose_subaction(action, options, **kw)
+
+def _complete_copy(
+        action : Optional[List[str]] = None,
+        **kw : Any
+    ) -> List[str]:
+    """
+    Override the default Meerschaum `complete_` function.
+    """
+    from meerschaum.actions.start import _complete_start_jobs
+    from meerschaum.actions.edit import _complete_edit_config
+    if action is None:
+        action = []
+    options = {
+        'connector': _complete_copy_connectors,
+        'connectors': _complete_copy_connectors,
+    }
+
+    if (
+        len(action) > 0 and action[0] in options
+            and kw.get('line', '').split(' ')[-1] != action[0]
+    ):
+        sub = action[0]
+        del action[0]
+        return options[sub](action=action, **kw)
+
+    from meerschaum.actions.shell import default_action_completer
+    return default_action_completer(action=(['copy'] + action), **kw)
 
 def _copy_pipes(
         yes: bool = False,
@@ -90,6 +118,68 @@ def _copy_pipes(
     )
 
     return successes > 0, msg
+
+def _copy_connectors(
+        action: Optional[List[str]] = None,
+        connector_keys: Optional[List[str]] = None,
+        nopretty: bool = False,
+        yes: bool = False,
+        force: bool = False,
+        noask: bool = False,
+        debug: bool = False,
+        **kw
+    ) -> SuccessTuple:
+    """
+    Create a new connector from an existing one.
+    """
+    import os, pathlib
+    from meerschaum.utils.prompt import yes_no, prompt
+    from meerschaum.connectors.parse import parse_connector_keys
+    from meerschaum.config import _config, get_config
+    from meerschaum.config._edit import write_config
+    from meerschaum.utils.warnings import info, warn
+    from meerschaum.utils.formatting import pprint
+    cf = _config()
+    if action is None:
+        action = []
+    if connector_keys is None:
+        connector_keys = []
+
+    _keys = list(set(action + connector_keys))
+
+    if not _keys:
+        return False, "No connectors to copy."
+
+    for ck in _keys:
+        try:
+            conn = parse_connector_keys(ck)
+        except Exception as e:
+            warn(f"Unable to parse connector '{ck}'. Skipping...", stack=False)
+            continue
+
+        attrs = get_config('meerschaum', 'connectors', conn.type, conn.label)
+        pprint(attrs, nopretty=nopretty)
+
+        asking = True
+        #  while asking:
+            #  new_ck = prompt("Please enter a new label for the new connector ():")
+
+
+    return False, "Not implemented."
+
+def _complete_copy_connectors(
+        action : Optional[List[str]] = None,
+        line : str = '',
+        **kw : Any
+    ) -> List[str]:
+    from meerschaum.config import get_config
+    from meerschaum.utils.misc import get_connector_labels
+    types = list(get_config('meerschaum', 'connectors').keys())
+    if line.split(' ')[-1] == '' or not action:
+        search_term = ''
+    else:
+        search_term = action[-1]
+    return get_connector_labels(*types, search_term=search_term)
 
 
 ### NOTE: This must be the final statement of the module.

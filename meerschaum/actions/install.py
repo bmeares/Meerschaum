@@ -100,7 +100,9 @@ def _complete_install_plugins(
     ) -> List[str]:
     """
     Search for plugins to autocomplete command line text.
+    NOTE: Disabled for the time being so we don't interrupt the user typing.
     """
+    return []
     from meerschaum.actions import get_shell
     if action is None:
         action = []

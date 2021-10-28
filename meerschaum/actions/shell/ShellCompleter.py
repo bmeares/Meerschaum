@@ -12,7 +12,7 @@ from meerschaum.utils.typing import Optional
 from meerschaum.actions import get_shell, get_completer
 from meerschaum.actions.arguments import parse_line
 
-from meerschaum.utils.packages import attempt_import
+from meerschaum.utils.packages import attempt_import, ensure_readline
 prompt_toolkit = attempt_import('prompt_toolkit', lazy=False, install=True)
 
 class ShellCompleter(Completer):
@@ -27,7 +27,12 @@ class ShellCompleter(Completer):
         shell_actions = [a[3:] for a in dir(get_shell()) if a.startswith('do_')]
         yielded = []
         for i, a in enumerate(shell_actions):
-            poss = get_shell().complete(document.text, i)
+            ensure_readline()
+            try:
+                poss = get_shell().complete(document.text, i)
+            ### Having issues with readline on portable Windows.
+            except ModuleNotFoundError:
+                poss = False
             if not poss:
                 break
             yield Completion(poss, start_position=(-1 * len(poss)))
