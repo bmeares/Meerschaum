@@ -87,6 +87,8 @@ def _init():
         colorama.init()
         success = True
     except Exception as e:
+        import traceback
+        traceback.print_exc()
         _attrs['ANSI'], _attrs['UNICODE'], _attrs['CHARSET'] = False, False, 'ascii'
         success = False
 
@@ -111,6 +113,7 @@ def colored(text : str, *colors, **kw) -> str:
         return rich_text_to_str(rich_text.Text(text, **kw))
 
     global _colorama_init
+    _init()
     _colorama_init = _init() if not _colorama_init else True
 
     more_termcolor = attempt_import('more_termcolor', install=False, lazy=False)

@@ -307,7 +307,7 @@ def print_options(
     rich_columns = attempt_import('rich.columns')
     rich_panel = attempt_import('rich.panel')
     rich_table = attempt_import('rich.table')
-    from rich import box
+    box = attempt_import('rich.box')
     Panel = rich_panel.Panel
     Columns = rich_columns.Columns
     Table = rich_table.Table
@@ -1003,3 +1003,4 @@ def items_str(
         output += c
     output += s + a + (s if and_ else '') + q + str(items[-1]) + q
     return output
+

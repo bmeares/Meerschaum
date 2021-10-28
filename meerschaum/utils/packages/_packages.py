@@ -100,7 +100,7 @@ packages : Dict[str, Dict[str, str]] = {
         'mkdocs_rss_plugin'           : 'mkdocs-rss-plugin>=0.16.1'
     },
     'portable' : {
-        'pyreadline' : 'pyreadline3>=3.3; platform_system == "Windows"',
+        'pyreadline3' : 'pyreadline3>=3.3; platform_system == "Windows"',
         'gnureadline' : 'gnureadline>=8.0.0; platform_system != "Windows"',
     },
     'extras' : {

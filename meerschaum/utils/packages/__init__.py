@@ -215,9 +215,13 @@ def determine_version(
     if _version is not None:
         return _version
 
+    ### This is kind of a hack. Normally pathlib handles escaped slashes on Windows,
+    ### but because we're passing this to a subprocess, we need to re-escape the slashes.
+    module_parent_dir_str = str(module_parent_dir).replace('\\', '\\\\')
+
     ### Not a pip package, so let's try importing the module directly (in a subprocess).
     code = (
-        f"import os; os.chdir('{str(module_parent_dir)}'); "
+        f"import os; os.chdir('{module_parent_dir_str}'); "
         + f"from {name} import __version__; print(__version__ , end='')"
     )
     exit_code, stdout_bytes, stderr_bytes = venv_exec(
@@ -412,6 +416,8 @@ def deactivate_venv(
 
     return True
 
+
+tried_virtualenv = False
 def activate_venv(
         venv: str = 'mrsm',
         color : bool = True,
@@ -420,7 +426,7 @@ def activate_venv(
     """
     Create a virtual environment (if it doesn't exist) and add it to sys.path if necessary.
     """
-    global active_venvs
+    global active_venvs, tried_virtualenv
     if venv in active_venvs or venv is None:
         return True
     if debug:
@@ -429,9 +435,10 @@ def activate_venv(
     from meerschaum.config._paths import VIRTENV_RESOURCES_PATH
     _venv = None
     virtualenv = attempt_import(
-        'virtualenv', venv=None, lazy=False, install=True, warn=False, debug=debug, color=False,
-        check_update=False,
+        'virtualenv', venv=None, lazy=False, install=(not tried_virtualenv), warn=False,
+        check_update=False, color=False, debug=debug,
     )
+    tried_virtualenv = True
     if virtualenv is None:
         try:
             import ensurepip
@@ -627,7 +634,7 @@ def pip_install(
     if '--disable-pip-version-check' not in _args:
         _args.append('--disable-pip-version-check')
 
-    if venv is not None and '--target' not in _args and '-t' not in _args and not _uninstall:
+    if '--target' not in _args and '-t' not in _args and not _uninstall:
         _args += ['--target', venv_target_path(venv, debug=debug)]
     elif (
         '--target' not in _args
@@ -846,9 +853,9 @@ def attempt_import(
         try:
             mod = import_method(_name, **(filter_keywords(import_method, **kw)))
         except Exception as e:
-            import traceback
-            traceback.print_exception(type(e), e, e.__traceback__)
             if warn:
+                import traceback
+                traceback.print_exception(type(e), e, e.__traceback__)
                 warn_function(
                     f"Failed to import module '{_name}'.\nException:\n{e}",
                     ImportWarning,
@@ -1211,11 +1218,22 @@ def venv_contains_package(
         return False
     return (name.split('.')[0] if split else name) in os.listdir(vtp)
 
-def venv_target_path(venv : str, debug : bool = False) -> pathlib.Path:
+def venv_target_path(venv: Union[str, None], debug: bool = False) -> pathlib.Path:
     """
     Return a virtual environment's site-package path.
     """
-    import os, sys, platform
+    import os, sys, platform, pathlib
+
+    ### Check sys.path for a user-writable site-packages directory.
+    if venv is None:
+        for path_str in sys.path:
+            if 'site-packages' not in path_str:
+                continue
+            path = pathlib.Path(path_str)
+            if os.access(path, os.W_OK):
+                return path
+        return None
+
     from meerschaum.config._paths import VIRTENV_RESOURCES_PATH
 
     venv_root_path = str(os.path.join(VIRTENV_RESOURCES_PATH, venv))
@@ -1267,3 +1285,32 @@ def inside_venv() -> bool:
                 and sys.base_prefix != sys.prefix
         )
     )
+
+def ensure_readline() -> 'ModuleType':
+    """
+    Make sure that the `readline` package is able to be imported.
+    """
+    import sys
+    try:
+        import readline
+    except ImportError:
+        readline = None
+
+    if readline is None:
+        import platform
+        from meerschaum.utils.packages import attempt_import, pip_install
+        rl_name = "gnureadline" if platform.system() != 'Windows' else "pyreadline3"
+        try:
+            rl = attempt_import(
+                rl_name,
+                lazy = False,
+                install = True,
+                venv = None,
+            )
+        except (ImportError, ModuleNotFoundError):
+            if not pip_install(rl_name, args=['--upgrade', '--ignore-installed'], venv=None):
+                print(f"Unable to import {rl_name}!", file=sys.stderr)
+                sys.exit(1)
+
+    sys.modules['readline'] = readline
+    return readline

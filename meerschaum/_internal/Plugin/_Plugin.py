@@ -238,12 +238,15 @@ class Plugin:
                 #  break
 
         packaging_version = attempt_import('packaging.version')
-        is_new_version = (
-            packaging_version.parse(old_version) < packaging_version.parse(new_version)
-        )
-        is_same_version = (
-            packaging_version.parse(old_version) == packaging_version.parse(new_version)
-        )
+        try:
+            is_new_version = (
+                packaging_version.parse(old_version) < packaging_version.parse(new_version)
+            )
+            is_same_version = (
+                packaging_version.parse(old_version) == packaging_version.parse(new_version)
+            )
+        except Exception as e:
+            is_new_version, is_same_version = True, False
         success_msg = f"Successfully installed plugin '{self}'."
         success, abort = None, None
         if is_same_version and not force:

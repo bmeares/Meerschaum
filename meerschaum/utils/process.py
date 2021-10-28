@@ -9,7 +9,7 @@ See `meerschaum.utils.pool` for multiprocessing and
 """
 
 from __future__ import annotations
-import os, signal, subprocess, sys
+import os, signal, subprocess, sys, platform
 try:
     import termios
 except ImportError:
@@ -66,6 +66,8 @@ def run_process(
         Additional keyword arguments to pass to `subprocess.Popen`.
 
     """
+    if platform.system() == 'Windows':
+        foreground = False
 
     if line_callback is not None:
         kw['stdout'] = subprocess.PIPE
@@ -74,7 +76,10 @@ def run_process(
     user_preexec_fn = kw.get("preexec_fn", None)
 
     if foreground:
-        old_pgrp = os.tcgetpgrp(sys.stdin.fileno())
+        try:
+            old_pgrp = os.tcgetpgrp(sys.stdin.fileno())
+        except Exception as e:
+            pass
         if termios:
             old_attr = termios.tcgetattr(sys.stdin.fileno())
 
@@ -112,7 +117,10 @@ def run_process(
 
         if foreground:
             # set the child's process group as new foreground
-            os.tcsetpgrp(sys.stdin.fileno(), child.pid)
+            try:
+                os.tcsetpgrp(sys.stdin.fileno(), child.pid)
+            except Exception as e:
+                pass
             # revive the child,
             # because it may have been stopped due to SIGTTOU or
             # SIGTTIN when it tried using stdout/stdin
@@ -134,7 +142,10 @@ def run_process(
             # it we didn't do that, we'd get SIGSTOP'd
             hdlr = signal.signal(signal.SIGTTOU, signal.SIG_IGN)
             # make us tty's foreground again
-            os.tcsetpgrp(sys.stdin.fileno(), old_pgrp)
+            try:
+                os.tcsetpgrp(sys.stdin.fileno(), old_pgrp)
+            except Exception as e:
+                pass
             # now restore the handler
             signal.signal(signal.SIGTTOU, hdlr)
             # restore terminal attributes

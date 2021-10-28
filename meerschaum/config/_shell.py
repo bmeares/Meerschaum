@@ -6,8 +6,9 @@
 Default configuration for the Meerschaum shell.
 """
 
-import platform
-default_cmd = 'cmd' if platform.system() != 'Windows' else 'cmd2'
+#  import platform
+#  default_cmd = 'cmd' if platform.system() != 'Windows' else 'cmd2'
+default_cmd = 'cmd'
 
 default_shell_config = {
     'ansi'             : {

@@ -359,8 +359,6 @@ def _complete_delete_connectors(
         search_term = ''
     else:
         search_term = action[-1]
-
-    #  search_term = action[-1] if action or line.split(' ')[-1] == '' else ''
     return get_connector_labels(*types, search_term=search_term)
 
 def _delete_jobs(

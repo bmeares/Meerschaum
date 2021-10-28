@@ -9,11 +9,29 @@ This changelog was not introduced until v0.2.12, so many of the critical release
 ## 0.4.x Releases
 This is the current release cycle, so future features will be updated below.
 
-### 0.4.0
+### v0.4.1 — v0.4.7
+- **Added features to the Web Console.**  
+  Features such as the `Show Pipes` button and others were added to give the Web Console better functionality.
+- **Migrated the Web Console to Bootstrap 5.**  
+  Many components needed to be modified or rewritten, but ultimately the move to Bootstrap 5 is worth it in the long run.
+- **Updated to work on Python 3.10.**  
+  This included creating a standalone internal module for `cascadict` since the original project is no longer maintained.
+- **Tighter security.**  
+  Better enforcement of datetimes in `dateadd_str()` and denying users access to actions if the permissions setting does not allow non-admins to perform actions.
+- **Bugfixes for broken dependencies.**  
+  In addition to migrating to Bootstrap 5, components like `PyYAML` and `fastapi-login` changed their function signatures which broke things.
+
+### v0.4.0
 - **Allow for other plugins to be specified as dependencies.**  
   Other plugins from the same repository may be specified in the `required` list.
 - **Added warnings for broken plugins.**  
   When plugins fail to be imported, warnings are thrown to help authors identify the problem.
+- **Added registration to the Web Console.**  
+  New users may create accounts by clicking the *No account?* link on the login page.
+- **Added the `verify` action.**  
+  For now, `verify packages` ensures that the installed dependencies meet the stated requirements for the installed version of Meerschaum.
+- **Fixed "ghost" background jobs.**  
+  Ensure that jobs are *actually* running before marking them as so.
 
 ## 0.3.x Releases
 Version 0.3.0 introduced the web interface and added more robust SQL support for various flavors, including MSSQL and DuckDB.
