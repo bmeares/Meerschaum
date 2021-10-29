@@ -270,6 +270,7 @@ def need_update(
     """
     if debug:
         from meerschaum.utils.debug import dprint
+    from meerschaum.utils.warnings import warn
     import re
     root_name = (
         package.__name__.split('.')[0] if split else package.__name__
@@ -311,8 +312,11 @@ def need_update(
             ### Something funky is going on with semver.
             match = None
         if match is None:
-            error("Please reinstall the package `semver`.")
-
+            warn(
+                f"Unable to import `semver.match`. "
+                + "Please reinstall `semver` if possible (e.g. `upgrade packages`)."
+            )
+            return False
 
     if check_pypi:
         ### Check PyPI for updates
