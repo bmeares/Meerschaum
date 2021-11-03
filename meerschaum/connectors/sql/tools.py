@@ -32,15 +32,18 @@ def test_connection(
         **kw : Any
     ) -> Union[bool, None]:
     """
-    Block until a connection to the SQL database is made.
+    Test if a successful connection to the database may be made.
     """
     import warnings
     from meerschaum.utils.misc import retry_connect
-    _default_kw = {'max_retries' : 1, 'retry_wait' : 0, 'warn' : False,}
+    _default_kw = {'max_retries' : 1, 'retry_wait' : 0, 'warn': False, 'connector': self}
     _default_kw.update(kw)
     with warnings.catch_warnings():
         warnings.filterwarnings('ignore', 'Could not')
-        return retry_connect(**_default_kw)
+        try:
+            return retry_connect(**_default_kw)
+        except Exception as e:
+            return False
 
 def get_distinct_col_count(
         col : str,

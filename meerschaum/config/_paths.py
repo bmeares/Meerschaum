@@ -80,7 +80,7 @@ paths = {
     'LOGS_RESOURCES_PATH' : ('{ROOT_DIR_PATH}', 'logs'),
 }
 
-def set_root(root : Union[Path, str]):
+def set_root(root: Union[Path, str]):
     """
     Modify the value of `ROOT_DIR_PATH`.
     """

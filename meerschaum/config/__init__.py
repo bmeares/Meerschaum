@@ -292,7 +292,8 @@ if environment_root_dir in os.environ:
         print(
             f"Invalid root directory '{str(root_dir_path)}' set for " +
             f"environment variable '{environment_root_dir}'.\n" +
-            f"Please enter a valid path for {environment_root_dir}."
+            f"Please enter a valid path for {environment_root_dir}.",
+            file = sys.stderr,
         )
         sys.exit(1)
     set_root(root_dir_path)

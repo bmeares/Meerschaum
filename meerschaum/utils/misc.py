@@ -136,8 +136,19 @@ def string_to_dict(
     if params_string == "":
         return dict()
 
+    import json
+
+    ### Kind of a weird edge case.
+    ### In the generated compose file, there is some weird escaping happening,
+    ### so the string to be parsed starts and ends with a single quote.
+    if (
+        isinstance(params_string, str)
+        and len(params_string) > 4
+        and params_string[1] == "{"
+        and params_string[-2] == "}"
+    ):
+        return json.loads(params_string[1:-1])
     if str(params_string).startswith('{'):
-        import json
         return json.loads(params_string)
 
     import ast
@@ -152,7 +163,6 @@ def string_to_dict(
 
         c = params_dict
         for _k in keys[:-1]:
-            #  print(_k)
             try:
                 k = ast.literal_eval(_k)
             except Exception as e:
@@ -524,7 +534,7 @@ def retry_connect(
                 _connect(connector)
                 connected = True
             except Exception as e:
-                print(e)
+                print(e) if warn else None
                 connected = False
 
         elif connector.type == 'api':
@@ -542,7 +552,7 @@ def retry_connect(
                         )
                     return False
             if chaining_status:
-                connected = connector.login(debug=debug)[0]
+                connected = connector.login(warn=warn, debug=debug)[0]
                 if not connected and warn:
                     _warn(f"Unable to login to '{connector}'!", stack=False)
 

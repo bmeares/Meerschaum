@@ -1259,10 +1259,12 @@ def venv_target_path(venv: Union[str, None], debug: bool = False) -> pathlib.Pat
     if 'site-packages' in os.listdir(target_path): ### Windows
         target_path = os.path.join(target_path, 'site-packages')
     else:
-        from meerschaum.config._paths import set_root
         import traceback
         traceback.print_stack()
         print(f"Failed to find site-packages directory for virtual environment '{venv}'.")
+        print("This may be because you are using a different Python version.")
+        print("Try deleting the following directory and restarting Meerschaum:")
+        print(VIRTENV_RESOURCES_PATH)
         sys.exit(1)
 
     if debug:
