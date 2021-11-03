@@ -9,6 +9,16 @@ This changelog was not introduced until v0.2.12, so many of the critical release
 ## 0.4.x Releases
 This is the current release cycle, so future features will be updated below.
 
+### v0.4.10
+- **Fixed parsing issue with the Docker build.**  
+  There is a strange edge case where multiple levels of JSON-encoding needed to be escaped, and this scenario has been accounted for.
+- **Enforce `MRSM_CONFIG` and `MRSM_PATCH` in the Web Console actions.**  
+  The Docker version of the API uses environment variables to manage instances, so this information is passed along to children threads.
+- **Added the bottom toolbar to the interactive shell.**  
+   The includes the current instance, repo, and connection status.
+- **Delayed imports when changing instances.**  
+   This postpones trying to connect to an instance until as late as possible.
+
 ### v0.4.1 — v0.4.7
 - **Added features to the Web Console.**  
   Features such as the `Show Pipes` button and others were added to give the Web Console better functionality.

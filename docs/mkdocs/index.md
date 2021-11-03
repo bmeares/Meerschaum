@@ -127,7 +127,7 @@ h1 {
 ## Support Meerschaum's Development
 <div class="grid-container">
   <div class="grid-child">
-    <p style="text-align: left">I'm a full-time graduate student, and I work on Meerschaum in my free time. If you enjoy Meerschaum and want to support its development, feel free <a href="https://www.buymeacoffee.com/bmeares">buy me a beer (or coffee)</a>!
+    <p style="text-align: left">I work on Meerschaum in my free time, so if you enjoy the project and want to support its development, feel free to <a href="https://www.buymeacoffee.com/bmeares">buy me a beer (or coffee)</a>!
     </p>
     <div class="center">
       <!-- <script type="text/javascript" src="https://cdnjs.buymeacoffee.com/1.0.0/button.prod.min.js" data-name="bmc-button" data-slug="bmeares" data-color="#5F7FFF" data-emoji="🍺"  data-font="Cookie" data-text="Buy me a beer" data-outline-color="#000000" data-font-color="#ffffff" data-coffee-color="#FFDD00" ></script> -->
