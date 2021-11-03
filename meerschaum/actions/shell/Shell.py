@@ -15,10 +15,16 @@ cmd = attempt_import(get_config('shell', 'cmd', patch=True), warn=False, lazy=Fa
 if cmd is None or isinstance(cmd, dict):
     cmd = attempt_import('cmd', lazy=False, warn=False)
 prompt_toolkit = attempt_import('prompt_toolkit', lazy=False, warn=False, install=True)
-prompt_toolkit_shortcuts, prompt_toolkit_history, prompt_toolkit_formatted_text = (
+(
+    prompt_toolkit_shortcuts,
+    prompt_toolkit_history,
+    prompt_toolkit_formatted_text,
+    prompt_toolkit_styles,
+) = (
     attempt_import('prompt_toolkit.shortcuts', lazy=False, warn=False, install=True),
     attempt_import('prompt_toolkit.history', lazy=False, warn=False, install=True),
     attempt_import('prompt_toolkit.formatted_text', lazy=False, warn=False, install=True),
+    attempt_import('prompt_toolkit.styles', lazy=False, warn=False, install=True),
 )
 from meerschaum.actions.shell.ValidAutoSuggest import ValidAutoSuggest
 from meerschaum.actions.shell.ShellCompleter import ShellCompleter
@@ -477,11 +483,13 @@ class Shell(cmd.Cmd):
         from meerschaum.actions._entry import _entry_with_args
         from meerschaum.utils.daemon import daemon_action
 
-        ### TODO: resolve the shell actions problem
-        success_tuple = (
-            _entry_with_args(**args) if action not in self._actions
-            else func(action=args['action'][1:], **{k:v for k, v in args.items() if k != 'action'})
-        )
+        try:
+            success_tuple = (
+                _entry_with_args(**args) if action not in self._actions
+                else func(action=args['action'][1:], **{k:v for k, v in args.items() if k != 'action'})
+            )
+        except Exception as e:
+            success_tuple = False, str(e)
 
         from meerschaum.utils.formatting import print_tuple
         if isinstance(success_tuple, tuple):
@@ -590,15 +598,19 @@ class Shell(cmd.Cmd):
             instance_keys = ''
         if instance_keys == '':
             instance_keys = get_config('meerschaum', 'instance', patch=True)
+        if ':' not in instance_keys:
+            instance_keys += ':main'
 
-        conn = parse_instance_keys(instance_keys, debug=debug)
-        if conn is None or not conn:
-            conn = get_connector(debug=debug)
+        conn_attrs = parse_instance_keys(instance_keys, construct=False, debug=debug)
+        if conn_attrs is None or not conn_attrs:
+            conn_keys = str(get_connector(debug=debug))
+        else:
+            conn_keys = instance_keys
 
-        self.instance_keys = remove_ansi(str(conn))
+        self.instance_keys = conn_keys
 
-        self.update_prompt(instance=str(conn))
-        info(f"Default instance for the current shell: {conn}")
+        self.update_prompt(instance=conn_keys)
+        info(f"Default instance for the current shell: {conn_keys}")
 
         return True, "Success"
 
@@ -752,7 +764,7 @@ class Shell(cmd.Cmd):
         """
         import signal, os
         old_input = cmd.__builtins__['input']
-        cmd.__builtins__['input'] = input_with_sigint(old_input, self.session)
+        cmd.__builtins__['input'] = input_with_sigint(old_input, self.session, shell=self)
 
         ### if the user specifies, clear the screen before initializing the shell
         if _clear_screen:
@@ -767,10 +779,36 @@ class Shell(cmd.Cmd):
     def postloop(self):
         print('\n' + self.close_message)
 
-def input_with_sigint(_input, session):
+def input_with_sigint(_input, session, shell: Optional[Shell] = None):
     """
     Replace built-in `input()` with prompt_toolkit.prompt.
     """
+    from meerschaum.utils.formatting import ANSI, colored
+    from meerschaum.connectors import is_connected
+    from meerschaum.utils.misc import remove_ansi
+    if shell is None:
+        from meerschaum.actions import get_shell
+        shell = get_shell()
+
+    style = prompt_toolkit_styles.Style.from_dict({
+        'bottom-toolbar': '#373f5b',
+    })
+    def bottom_toolbar():
+        size = os.get_terminal_size()
+        num_cols, num_lines = size.columns, size.lines
+        left = (
+            ' ' + colored('Instance:', 'on white') + ' ' + colored(shell.instance_keys, 'on cyan')
+            + '   '
+            + colored('Repo:', 'on white') + ' ' + colored(shell.repo_keys, 'on magenta')
+        )
+        connected = is_connected(shell.instance_keys)
+        right = (
+            colored('Connected', 'on green') if connected else colored('Disconnected', 'on red')
+        ) + ' '
+        buffer_size = num_cols - (len(remove_ansi(left)) + len(remove_ansi(right)))
+        buffer = (' ' * buffer_size) if buffer_size > 0 else '\n '
+        text = left + buffer + right
+        return prompt_toolkit_formatted_text.ANSI(text)
 
     def _patched_prompt(*args):
         _args = []
@@ -781,7 +819,7 @@ def input_with_sigint(_input, session):
                 _a = a
             _args.append(_a)
         try:
-            parsed = session.prompt(*_args)
+            parsed = session.prompt(*_args, bottom_toolbar=bottom_toolbar, style=style)
             ### clear screen on empty input
             ### NOTE: would it be better to do nothing instead?
             if len(parsed.strip()) == 0:

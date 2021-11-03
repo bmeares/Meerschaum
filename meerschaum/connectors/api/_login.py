@@ -11,13 +11,14 @@ from meerschaum.utils.typing import SuccessTuple, Any
 
 def login(
         self,
-        debug : bool = False,
+        debug: bool = False,
+        warn: bool = True,
         **kw : Any
     ) -> SuccessTuple:
     """
     Log in and set the session token.
     """
-    from meerschaum.utils.warnings import warn, info, error
+    from meerschaum.utils.warnings import warn as _warn, info, error
     from meerschaum._internal.User import User
     from meerschaum.config.static import _static_config
     import json, datetime
@@ -41,7 +42,7 @@ def login(
             json.loads(response.text)['expires'], 
             '%Y-%m-%dT%H:%M:%S.%f'
         )
-    else:
+    elif warn:
         msg = (
             '' if self.get_user_id(
                 User(self.username, self.password),
@@ -53,9 +54,26 @@ def login(
             f"   Failed to log into '{self}' as user '{login_data['username']}'.\n" +
             f"   Please verify login details for connector '{self}'."
         )
-        warn(msg, stack=False)
+        _warn(msg, stack=False)
 
     return response.__bool__(), msg
+
+
+def test_connection(
+        self,
+        **kw : Any
+    ) -> Union[bool, None]:
+    """
+    Test if a successful connection to the API may be made.
+    """
+    from meerschaum.utils.misc import retry_connect
+    _default_kw = {'max_retries': 1, 'retry_wait': 0, 'warn': False, 'connector': self}
+    _default_kw.update(kw)
+    try:
+        return retry_connect(**_default_kw)
+    except Exception as e:
+        return False
+
 
 def refresh(
         self,
@@ -64,5 +82,6 @@ def refresh(
     ):
     """
     Refresh the access token.
+    NOTE: Not implemented!
     """
     pass

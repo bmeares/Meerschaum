@@ -45,7 +45,7 @@ class APIConnector(Connector):
         get_plugins,
         get_plugin_attributes,
     )
-    from ._login import login, refresh
+    from ._login import login, refresh, test_connection
     from ._users import (
         register_user,
         get_user_id,

@@ -200,3 +200,37 @@ def get_connector(
             return None
 
     return connectors[type][label]
+
+def is_connected(keys: str, **kw) -> bool:
+    """
+    Check if the connector keys correspond to an active connection.
+    If the connector has not been created, it will immediately return `False`.
+    If the connector exists but cannot communicate with the source, return `False`.
+    NOTE: Only works with instance connectors (`SQLConnectors` and `APIConnectors`).
+    Keyword arguments are passed to `meerschaum.utils.misc.retry_connect`.
+
+    :param keys:
+        The keys to the connector.
+    """
+    import warnings
+    from meerschaum.utils.warnings import error, warn
+    if ':' not in keys:
+        warn(f"Invalid connector keys '{keys}'")
+
+    try:
+        typ, label = keys.split(':')
+    except Exception as e:
+        return False
+    if typ not in ('sql', 'api'):
+        return False
+    if not (label in connectors.get(typ, {})):
+        return False
+
+    from meerschaum.connectors.parse import parse_instance_keys
+    conn = parse_instance_keys(keys)
+    try:
+        with warnings.catch_warnings():
+            warnings.filterwarnings('ignore')
+            return conn.test_connection(**kw)
+    except Exception as e:
+        return False

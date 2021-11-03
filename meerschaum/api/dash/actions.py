@@ -28,7 +28,7 @@ html, dcc = import_html(), import_dcc()
 from meerschaum.config import get_config
 from meerschaum._internal.User import User
 
-def execute_action(state : WebState):
+def execute_action(state: WebState):
     """
     Execute a Meerschaum action and capture its output.
     Format the output as an HTML `pre` object, and return a list of Alert objects.
@@ -181,10 +181,19 @@ def execute_action(state : WebState):
         def do_process():
             keywords['action'] = [action] + subactions
             _sysargs = parse_dict_to_sysargs(keywords)
+
+            ### Don't forget to pass the existing environment
+            ### in case MRSM_CONFIG and MRSM_PATCH are set.
+            try:
+                _env = os.environ.copy()
+            except Exception as e:
+                _env = {}
+            _env.update({'LINES': '120', 'COLUMNS': '100'})
+
             process = run_python_package(
                 'meerschaum', _sysargs,
                 line_callback = send_line,
-                env = {'LINES' : '120', 'COLUMNS' : '100'},
+                env = _env,
                 foreground = False,
                 universal_newlines = True,
                 ### Store the `subprocess.Popen` process in case we need to terminate it later.
