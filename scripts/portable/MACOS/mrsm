@@ -3,7 +3,7 @@
 DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" >/dev/null 2>&1 && pwd )"
 cd "$DIR"
 TERMINFO_DIRS=/usr/share/terminfo \
-MRSM_ROOT_DIR=root \
+MRSM_ROOT_DIR="$DIR"/root \
 MRSM_RUNTIME=portable \
 ./python/bin/python3.9 -m meerschaum $@
 
