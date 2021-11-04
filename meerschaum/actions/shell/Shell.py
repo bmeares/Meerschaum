@@ -822,6 +822,7 @@ def input_with_sigint(_input, session, shell: Optional[Shell] = None):
         connected = (
             is_connected(shell.instance_keys) if shell._update_bottom_toolbar else last_connected
         )
+        last_connected = connected
         connected_str = (('dis' if not connected else '') + 'connected')
         connection_text = (
             get_config(
@@ -842,7 +843,7 @@ def input_with_sigint(_input, session, shell: Optional[Shell] = None):
             num_cols - (len(remove_ansi(left)) + len(remove_ansi(right)) + (2 if ANSI else 0))
         )
         buffer = (' ' * buffer_size) if buffer_size > 0 else '\n '
-        text = '\n' + left + buffer + right
+        text = left + buffer + right
         shell._old_bottom_toolbar =  prompt_toolkit_formatted_text.ANSI(text)
         shell._update_bottom_toolbar = False
         return shell._old_bottom_toolbar
