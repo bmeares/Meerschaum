@@ -5,6 +5,6 @@ ROOT="$DIR/../"
 
 cd "$ROOT/.."
 echo "Compressing files, please wait..."
-tar --exclude='LINUX/scripts' --transform "s/LINUX/mrsm/" -czvf mrsm.tar.gz LINUX
+tar --exclude='LINUX/scripts' --transform "s/LINUX/mrsm/" -czf mrsm.tar.gz LINUX
 mv mrsm.tar.gz "$ROOT/scripts/"
 echo "Created mrsm.tar.gz"

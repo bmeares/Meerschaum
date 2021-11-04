@@ -70,12 +70,36 @@ default_shell_config = {
                 'cyan',
             ],
         },
+        'repo' : {
+            'rich': {
+                'style': 'magenta',
+            },
+            'color': [
+                'magenta',
+            ],
+        },
         'username' : {
             'rich' : {
                 'style' : 'white',
             },
             'color'    : [
                 'white',
+            ],
+        },
+        'connected' : {
+            'rich' : {
+                'style' : 'green',
+            },
+            'color'    : [
+                'green',
+            ],
+        },
+        'disconnected' : {
+            'rich' : {
+                'style' : 'red',
+            },
+            'color'    : [
+                'red',
             ],
         },
     },

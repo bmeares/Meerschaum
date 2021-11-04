@@ -1,11 +1,17 @@
 @ECHO OFF
 SET DIR="%~dp0"
 SET ROOT=%DIR%\..
-cd %ROOT%
+SET MRSM_ROOT_DIR_REL=%ROOT%\root\
+CD %MRSM_ROOT_DIR_REL%
+SET MRSM_ROOT_ROOT_DIR=%CD%
+
+
+CD %ROOT%
 IF NOT EXIST .\scripts\_site-packages_original (
   ECHO Backing up site-packages...
+  MD .\scripts\_site-packages_original
   .\python\python.exe -m pip install wheel --no-warn-script-location -q
-  xcopy .\python\Lib\site-packages\ .\scripts\_site-packages_original\ /E >NUL
+  XCOPY .\python\Lib\site-packages .\scripts\_site-packages_original /E >NUL
 )
 
 ECHO Ensuring latest pip...

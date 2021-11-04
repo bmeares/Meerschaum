@@ -45,9 +45,9 @@ declare -A taropts
     #  if not API_UVICORN_CONFIG_PATH.exists():
         #  print("Uvicorn config file was not found!", file=sys.stderr)
         #  os._exit(1)
-taropts["WINDOWS"]="-I zstd -xvf "
-taropts["LINUX"]="-I zstd -xvf "
-taropts["MACOS"]="-I zstd -xvf "
+taropts["WINDOWS"]="-I zstd -xf "
+taropts["LINUX"]="-I zstd -xf "
+taropts["MACOS"]="-I zstd -xf "
 
 declare -A sites
 sites["WINDOWS"]="Lib/site-packages"

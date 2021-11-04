@@ -13,6 +13,7 @@ if [ ! -d "./scripts/_site-packages_original" ]; then
 fi
 
 echo "Installing Meerschaum and dependencies (this might take awhile)..."
+MRSM_ROOT_DIR="$ROOT"/root/ \
 TERMINFO_DIRS=/etc/terminfo:/lib/terminfo:/usr/share/terminfo \
 ./python/bin/python3.9 -m pip install "$DIR"/install[full] --no-warn-script-location -q
 
