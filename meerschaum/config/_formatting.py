@@ -28,6 +28,8 @@ default_formatting_config = {
         'location'        : '📍',
         'key'             : '🔑',
         'idea'            : '💡',
+        'connected'       : '🟢',
+        'disconnected'    : '🔴',
     },
     'warnings'            : {
         'unicode'         : {
@@ -40,10 +42,6 @@ default_formatting_config = {
             'rich'        : {
                 'style'   : 'bold yellow',
             },
-            #  'color'       : [
-                #  'bold',
-                #  'yellow',
-            #  ],
         },
     },
     'success'             : {
@@ -57,10 +55,6 @@ default_formatting_config = {
             'rich'        : {
                 'style'   : 'bold bright_green',
             },
-            #  'color'       : [
-                #  'bold',
-                #  'bright green',
-            #  ],
         },
     },
     'failure'             : {
@@ -74,10 +68,6 @@ default_formatting_config = {
             'rich'        : {
                 'style'   : 'bold red',
             },
-            #  'color'       : [
-                #  'bold',
-                #  'red',
-            #  ],
         },
     },
     'errors'              : {
@@ -91,10 +81,6 @@ default_formatting_config = {
             'rich'        : {
                 'style'   : 'bold red',
             },
-            #  'color'       : [
-                #  'bold',
-                #  'red',
-            #  ],
         },
     },
     'info'                : {
@@ -108,9 +94,6 @@ default_formatting_config = {
             'rich'        : {
                 'style'   : 'bright_magenta',
             },
-            #  'color'       : [
-                #  'bright magenta',
-            #  ],
         },
     },
     'question'            : {
@@ -124,9 +107,6 @@ default_formatting_config = {
             'rich'        : {
                 'style'   : 'green',
             },
-            #  'color'       : [
-                #  'green',
-            #  ],
         },
     },
     'debug'               : {
@@ -140,10 +120,32 @@ default_formatting_config = {
             'rich'        : {
                 'style'   : 'cyan',
             },
-            #  'color'       : [
-                #  'cyan',
-            #  ],
         },
     },
-
+    'connected'           : {
+        'unicode'         : {
+            'icon'        : 'MRSM{formatting:emoji:connected}',
+        },
+        'ascii'           : {
+            'icon'        : '',
+        },
+        'ansi'            : {
+            'rich'        : {
+                'style'   : 'green',
+            },
+        },
+    },
+    'disconnected'           : {
+        'unicode'         : {
+            'icon'        : 'MRSM{formatting:emoji:disconnected}',
+        },
+        'ascii'           : {
+            'icon'        : '',
+        },
+        'ansi'            : {
+            'rich'        : {
+                'style'   : 'red',
+            },
+        },
+    },
 }

@@ -14,6 +14,7 @@ from meerschaum.config import __doc__, __version__ as version, get_config
 cmd = attempt_import(get_config('shell', 'cmd', patch=True), warn=False, lazy=False)
 if cmd is None or isinstance(cmd, dict):
     cmd = attempt_import('cmd', lazy=False, warn=False)
+_old_input = cmd.__builtins__['input']
 prompt_toolkit = attempt_import('prompt_toolkit', lazy=False, warn=False, install=True)
 (
     prompt_toolkit_shortcuts,
@@ -261,6 +262,8 @@ class Shell(cmd.Cmd):
         self._actions['instance'] = self.do_instance
         self._actions['repo'] = self.do_repo
         self._actions['debug'] = self.do_debug
+        self._update_bottom_toolbar = True
+        self._old_bottom_toolbar = ''
         self.debug = False
         self._reload = True
         self.load_config()
@@ -318,6 +321,8 @@ class Shell(cmd.Cmd):
                 )
 
             for attr_key in get_config('shell', 'ansi'):
+                if attr_key not in self.__dict__:
+                    continue
                 self.__dict__[attr_key] = apply_colors(self.__dict__[attr_key], attr_key)
 
         ### refresh actions
@@ -333,8 +338,10 @@ class Shell(cmd.Cmd):
 
     def update_prompt(self, instance : Optional[str] = None, username : Optional[str] = None):
         from meerschaum.utils.formatting import ANSI, colored
+        cmd.__builtins__['input'] = input_with_sigint(_old_input, self.session, shell=self)
         prompt = self._prompt
         mask = prompt
+        self._update_bottom_toolbar = True
 
         if '{instance}' in self._prompt:
             if instance is None:
@@ -763,8 +770,7 @@ class Shell(cmd.Cmd):
         Patch builtin cmdloop with my own input (defined below)
         """
         import signal, os
-        old_input = cmd.__builtins__['input']
-        cmd.__builtins__['input'] = input_with_sigint(old_input, self.session, shell=self)
+        cmd.__builtins__['input'] = input_with_sigint(_old_input, self.session, shell=self)
 
         ### if the user specifies, clear the screen before initializing the shell
         if _clear_screen:
@@ -783,32 +789,63 @@ def input_with_sigint(_input, session, shell: Optional[Shell] = None):
     """
     Replace built-in `input()` with prompt_toolkit.prompt.
     """
-    from meerschaum.utils.formatting import ANSI, colored
+    from meerschaum.utils.formatting import CHARSET, ANSI, UNICODE, colored
     from meerschaum.connectors import is_connected
     from meerschaum.utils.misc import remove_ansi
+    import platform
     if shell is None:
         from meerschaum.actions import get_shell
         shell = get_shell()
 
     style = prompt_toolkit_styles.Style.from_dict({
-        'bottom-toolbar': '#373f5b',
+        'bottom-toolbar': 'black',
     })
+    last_connected = False
     def bottom_toolbar():
+        nonlocal last_connected
+        if not shell._update_bottom_toolbar and platform.system() == 'Windows':
+            return shell._old_bottom_toolbar
         size = os.get_terminal_size()
         num_cols, num_lines = size.columns, size.lines
-        left = (
-            ' ' + colored('Instance:', 'on white') + ' ' + colored(shell.instance_keys, 'on cyan')
-            + '   '
-            + colored('Repo:', 'on white') + ' ' + colored(shell.repo_keys, 'on magenta')
+
+        instance_colored = (
+            colored(
+                shell.instance_keys, 'on ' + get_config(
+                    'shell', 'ansi', 'instance', 'rich', 'style'
+                )
+            ) if ANSI else colored(shell.instance_keys, 'on white')
         )
-        connected = is_connected(shell.instance_keys)
-        right = (
-            colored('Connected', 'on green') if connected else colored('Disconnected', 'on red')
-        ) + ' '
-        buffer_size = num_cols - (len(remove_ansi(left)) + len(remove_ansi(right)))
+        repo_colored = (
+            colored(shell.repo_keys, 'on ' + get_config('shell', 'ansi', 'repo', 'rich', 'style'))
+            if ANSI else colored(shell.repo_keys, 'on white')
+        )
+        connected = (
+            is_connected(shell.instance_keys) if shell._update_bottom_toolbar else last_connected
+        )
+        connected_str = (('dis' if not connected else '') + 'connected')
+        connection_text = (
+            get_config(
+                'formatting', connected_str, CHARSET, 'icon'
+            ) + ' ' + (
+                colored(connected_str.capitalize(), 'on ' + get_config(
+                    'formatting', connected_str, 'ansi', 'rich', 'style'
+                ) + '  ') if ANSI else (colored(connected_str.capitalize(), 'on white') + ' ')
+            )
+        )
+
+        left = (
+            colored(' Instance: ', 'on white') + instance_colored
+            + colored('   Repo: ', 'on white') + repo_colored
+        )
+        right = connection_text
+        buffer_size = (
+            num_cols - (len(remove_ansi(left)) + len(remove_ansi(right)) + (2 if ANSI else 0))
+        )
         buffer = (' ' * buffer_size) if buffer_size > 0 else '\n '
-        text = left + buffer + right
-        return prompt_toolkit_formatted_text.ANSI(text)
+        text = '\n' + left + buffer + right
+        shell._old_bottom_toolbar =  prompt_toolkit_formatted_text.ANSI(text)
+        shell._update_bottom_toolbar = False
+        return shell._old_bottom_toolbar
 
     def _patched_prompt(*args):
         _args = []
