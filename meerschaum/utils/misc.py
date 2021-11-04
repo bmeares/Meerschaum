@@ -491,11 +491,12 @@ def retry_connect(
             meerschaum.connectors.api.APIConnector,
             None
         ] = None,
-        max_retries : int = 40,
-        retry_wait : int = 3,
-        workers : int = 1,
-        warn : bool = True,
-        debug : bool = False,
+        max_retries: int = 40,
+        retry_wait: int = 3,
+        workers: int = 1,
+        warn: bool = True,
+        debug: bool = False,
+        enforce_chaining: bool = True,
     ):
     """
     Keep trying to connect to the database.
@@ -544,13 +545,17 @@ def retry_connect(
                 if chaining_status is None:
                     connected = None
                 elif chaining_status is False:
-                    if warn:
-                        _warn(
-                            f"Meerschaum instance '{connector}' does not allow chaining " +
-                            "and cannot be used as the parent for this instance.",
-                            stack = False
-                        )
-                    return False
+                    if enforce_chaining:
+                        if warn:
+                            _warn(
+                                f"Meerschaum instance '{connector}' does not allow chaining " +
+                                "and cannot be used as the parent for this instance.",
+                                stack = False
+                            )
+                        return False
+                    else:
+                        ### Allow is the option to ignore chaining status.
+                        chaining_status = True
             if chaining_status:
                 connected = connector.login(warn=warn, debug=debug)[0]
                 if not connected and warn:

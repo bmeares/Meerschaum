@@ -67,7 +67,9 @@ def test_connection(
     Test if a successful connection to the API may be made.
     """
     from meerschaum.utils.misc import retry_connect
-    _default_kw = {'max_retries': 1, 'retry_wait': 0, 'warn': False, 'connector': self}
+    _default_kw = {
+        'max_retries': 1, 'retry_wait': 0, 'warn': False, 'connector': self, 'enforce_chaining': False
+    }
     _default_kw.update(kw)
     try:
         return retry_connect(**_default_kw)
