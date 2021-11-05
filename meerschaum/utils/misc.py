@@ -300,10 +300,6 @@ def print_options(
 
     if num_cols is None:
         num_cols = 8
-    #  if adjust_cols and _options:
-        #  size = os.get_terminal_size()
-        #  cols, rows = size.columns, size.rows
-        #  line_len = 4 + sum([len(o) for o in _options[0:min((num_cols - 1), len())]]) + (3 * (1 - num_cols))
 
     def _print_options_no_rich():
         if not nopretty:
@@ -321,6 +317,18 @@ def print_options(
     if rich is None or nopretty or no_rich:
         _print_options_no_rich()
         return None
+
+    ### Prevent too many options from being truncated on small terminals.
+    if adjust_cols and _options:
+        size = os.get_terminal_size()
+        _cols, _lines = size.columns, size.lines
+        while num_cols > 1:
+            cell_len = int(((_cols - 4) - (3 * (num_cols - 1))) / num_cols)
+            num_too_big = sum([(1 if string_width(o) > cell_len else 0) for o in _options])
+            if num_too_big > int(len(_options) / 3):
+                num_cols -= 1
+                continue
+            break
 
     from meerschaum.utils.formatting import pprint, get_console
     from meerschaum.utils.packages import attempt_import
@@ -732,21 +740,33 @@ def is_valid_email(email : str) -> bool:
     regex = '^[a-z0-9]+[\._]?[a-z0-9]+[@]\w+[.]\w{2,3}$'
     return re.search(regex, email)
 
-def string_width(string : str) -> int:
+def string_width(string: str, widest: bool = True) -> int:
     """
-    Calculate the width of a string after its last newline
+    Calculate the width of a string, either by its widest or last line.
     """
-    found_newline = False
-    width = 0
-    for c in reversed(string):
-        if c == '\n' and found_newline:
-            break
-        if c == '\n':
-            found_newline = True
-            continue
-        if found_newline:
-            width += 1
-    return width
+    def _widest():
+        words = string.split('\n')
+        max_length = 0
+        for w in words:
+            length = len(w)
+            if length > max_length:
+                max_length = length
+        return max_length
+
+    def _last():
+        found_newline = False
+        width = 0
+        for c in reversed(string):
+            if c == '\n' and found_newline:
+                break
+            if c == '\n':
+                found_newline = True
+                continue
+            if found_newline:
+                width += 1
+        return width
+
+    return _widest() if widest else _last()
 
 def _pyinstaller_traverse_dir(
         directory : str,
@@ -852,7 +872,7 @@ def get_connector_labels(
         ignore_exact_match = True,
     ) -> List[str]:
     """
-    Read connector lables from config.
+    Read connector labels from config.
     """
     from meerschaum.config import get_config
     connectors = get_config('meerschaum', 'connectors')

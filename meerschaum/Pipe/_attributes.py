@@ -138,6 +138,8 @@ def get_val_column(self, debug: bool = False) -> Union[str, None]:
         dprint(f"id_name: {id_name}")
 
     cols_types = self.get_columns_types(debug=debug)
+    if cols_types is None:
+        return None
     if debug:
         dprint(f"cols_types: {cols_types}")
     if dt_name is not None:
