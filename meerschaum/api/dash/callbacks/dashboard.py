@@ -90,6 +90,7 @@ omit_actions = {
     'instance',
     'debug',
     'login',
+    'copy',
 }
 trigger_aliases = {
     'keyboard' : 'go-button',

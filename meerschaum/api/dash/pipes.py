@@ -196,7 +196,7 @@ def accordion_items_from_pipe(
                 (newest_time - oldest_time) if newest_time is not None and oldest_time is not None
                 else None
             )
-            rowcount = pipe.get_rowcount(debug=True)
+            rowcount = pipe.get_rowcount(debug=debug)
         except Exception as e:
             oldest_time = None
             newest_time = None
