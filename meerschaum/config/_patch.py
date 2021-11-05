@@ -5,7 +5,7 @@
 """
 Functions for patching the configuration dictionary
 """
-import os
+import os, sys
 from meerschaum.config._paths import PATCH_DIR_PATH, PERMANENT_PATCH_DIR_PATH
 from meerschaum.config._read_config import read_config
 patch_config = None
@@ -24,8 +24,8 @@ else:
 
 
 def apply_patch_to_config(
-        config : dict,
-        patch : dict
+        config: dict,
+        patch: dict
     ):
     """
     Patch the config dict with a new dict (cascade patching).
@@ -36,8 +36,8 @@ def apply_patch_to_config(
     return new.copy_flat()
 
 def write_patch(
-        patch : dict,
-        debug : bool = False
+        patch: dict,
+        debug: bool = False
     ):
     """
     Write patch dict to yaml

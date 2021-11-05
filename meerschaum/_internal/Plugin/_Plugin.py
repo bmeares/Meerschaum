@@ -80,6 +80,8 @@ class Plugin:
 
     @property
     def __file__(self) -> Union[str, None]:
+        if '_module' not in self.__dict__:
+            return None
         if self.module is None:
             return None
         return self.module.__file__

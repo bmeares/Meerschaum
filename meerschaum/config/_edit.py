@@ -47,9 +47,9 @@ def edit_config(
     return (True, "Success")
 
 def write_config(
-        config_dict : Optional[Dict[str, Any]] = None,
-        directory : Optional[Union[str, pathlib.Path]] = None,
-        debug : bool = False,
+        config_dict: Optional[Dict[str, Any]] = None,
+        directory: Optional[Union[str, pathlib.Path]] = None,
+        debug: bool = False,
         **kw : Any
     ) -> bool:
     """

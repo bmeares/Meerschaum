@@ -272,21 +272,24 @@ def choices_docstring(action : str, globs : Optional[Dict[str, Any]] = None) -> 
     return options_str
 
 def print_options(
-        options : Optional[Dict[str, Any]] = None,
-        nopretty : bool = False,
-        no_rich : bool = False,
-        name : str = 'options',
-        header : Optional[str] = None,
-        actions : bool = False,
-        num_cols : int = 8,
+        options: Optional[Dict[str, Any]] = None,
+        nopretty: bool = False,
+        no_rich: bool = False,
+        name: str = 'options',
+        header: Optional[str] = None,
+        actions: bool = False,
+        num_cols: Optional[int] = None,
+        adjust_cols: bool = True,
         **kw
     ) -> None:
     """
     Show available options from an iterable
     """
+    import os
     from meerschaum.utils.packages import import_rich
     from meerschaum.utils.formatting import make_header
     from meerschaum.actions import actions as _actions
+
 
     if options is None:
         options = {}
@@ -294,6 +297,13 @@ def print_options(
     for o in options:
         _options.append(str(o))
     _header = f"Available {name}" if header is None else header
+
+    if num_cols is None:
+        num_cols = 8
+    #  if adjust_cols and _options:
+        #  size = os.get_terminal_size()
+        #  cols, rows = size.columns, size.rows
+        #  line_len = 4 + sum([len(o) for o in _options[0:min((num_cols - 1), len())]]) + (3 * (1 - num_cols))
 
     def _print_options_no_rich():
         if not nopretty:
