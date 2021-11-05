@@ -96,6 +96,11 @@ def get_config(
     E.g. get_config('meerschaum', 'connectors') == config['meerschaum']['connectors']
     """
     global config
+    #  try:
+        #  print("CONFIG PLUGINS:")
+        #  print(config.get('plugins'))
+    #  except:
+        #  pass
     import json
 
     symlinks_key = _static_config()['config']['symlinks_key']
@@ -184,13 +189,20 @@ def get_config(
                     return False, None
                 return None
 
+            ### Don't write keys that we haven't yet loaded into memory.
+            not_loaded_keys = [k for k in patched_default_config if k not in config]
+            for k in not_loaded_keys:
+                patched_default_config.pop(k, None)
             config = apply_patch_to_config(patched_default_config, config)
             if patch and keys[0] != symlinks_key:
                 print("Updating configuration, please wait...")
+                from meerschaum.utils.formatting import pprint
+                pprint(config)
                 write_config(config, debug=debug)
     if as_tuple:
         return (not invalid_keys), c
     return c
+
 
 def get_plugin_config(*keys : str, **kw : Any) -> Optional[Any]:
     """
@@ -204,8 +216,9 @@ def get_plugin_config(*keys : str, **kw : Any) -> Optional[Any]:
         error(f"You may only call `get_plugin_config()` from within a Meerschaum plugin.")
     return get_config(*(['plugins', parent_plugin_name] + list(keys)), **kw)
 
+
 def write_plugin_config(
-        config_dict : Dict[str, Any],
+        config_dict: Dict[str, Any],
         **kw : Any
     ):
     """
@@ -219,7 +232,7 @@ def write_plugin_config(
     plugins_cf = get_config('plugins', warn=False)
     if plugins_cf is None:
         plugins_cf = {}
-    plugins_cf.update({parent_plugin_name : config_dict})
+    plugins_cf.update({parent_plugin_name: config_dict})
     cf = {'plugins' : plugins_cf}
     return write_config(cf, **kw)
 

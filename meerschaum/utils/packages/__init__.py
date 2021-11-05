@@ -461,7 +461,7 @@ def activate_venv(
         venv_path,
         ('bin' if platform.system() != 'Windows' else "Scripts")
     )
-    if not venv_path.exists():
+    if not venv_path.exists() or not venv_exists(venv, debug=debug):
         if _venv is not None:
             _venv.create(
                 venv_path,
@@ -485,8 +485,6 @@ def activate_venv(
         _locks['active_venvs'].release()
         os.chdir(old_cwd)
 
-    ### override built-in import with attempt_import
-    #  install_import_hook(venv, debug=debug)
     target = venv_target_path(venv, debug=debug)
     if str(target) not in sys.path:
         sys.path.insert(0, str(target))
@@ -1205,6 +1203,7 @@ def is_installed(
         deactivate_venv(venv=venv)
     return found
 
+
 def venv_contains_package(
         name: str, venv: Optional[str] = None, split: bool = True, debug: bool = False,
     ) -> bool:
@@ -1215,16 +1214,37 @@ def venv_contains_package(
     if venv is None:
         return is_installed(name, venv=venv)
     try:
-        vtp = venv_target_path(venv)
+        vtp = venv_target_path(venv, debug=debug)
     except FileNotFoundError:
         return False
     if not vtp.exists():
         return False
     return (name.split('.')[0] if split else name) in os.listdir(vtp)
 
-def venv_target_path(venv: Union[str, None], debug: bool = False) -> pathlib.Path:
+
+def venv_exists(venv: Union[str, None], debug: bool = False) -> bool:
+    """
+    Determine whether a virtual environment has been created.
+    """
+    import os, sys, platform, pathlib
+    target_path = venv_target_path(venv, allow_nonexistent=True, debug=debug)
+    return target_path.exists()
+
+
+def venv_target_path(
+        venv: Union[str, None],
+        allow_nonexistent: bool = False,
+        debug: bool = False,
+    ) -> pathlib.Path:
     """
     Return a virtual environment's site-package path.
+
+    :param venv:
+        The virtual environment for which a path should be returned.
+
+    :param allow_nonexistent:
+        If `True`, return a path even if it does not exist.
+        Defaults to `False`.
     """
     import os, sys, platform, pathlib
 
@@ -1245,7 +1265,7 @@ def venv_target_path(venv: Union[str, None], debug: bool = False) -> pathlib.Pat
 
     ### Ensure 'lib' or 'Lib' exists.
     lib = 'lib' if platform.system() != 'Windows' else 'Lib'
-    if lib not in os.listdir(venv_root_path):
+    if not allow_nonexistent and lib not in os.listdir(venv_root_path):
         print(f"Failed to find lib directory for virtual environment '{venv}'.")
         sys.exit(1)
     target_path = os.path.join(target_path, lib)
@@ -1256,7 +1276,7 @@ def venv_target_path(venv: Union[str, None], debug: bool = False) -> pathlib.Pat
         target_path = os.path.join(target_path, python_folder)
 
     ### Ensure 'site-packages' exists.
-    if 'site-packages' in os.listdir(target_path): ### Windows
+    if allow_nonexistent or 'site-packages' in os.listdir(target_path): ### Windows
         target_path = os.path.join(target_path, 'site-packages')
     else:
         import traceback
