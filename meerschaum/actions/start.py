@@ -177,7 +177,7 @@ def _start_jobs(
             return False, "No jobs to start."
         names = [d.daemon_id for d in _stopped_daemons]
 
-    def _run_new_job(name : Optional[str] = None):
+    def _run_new_job(name: Optional[str] = None):
         kw['action'] = action
         if not name:
             name = get_new_daemon_name()
@@ -185,7 +185,7 @@ def _start_jobs(
         _action_success_tuple = daemon_action(daemon_id=name, **kw)
         return _action_success_tuple, name
 
-    def _run_existing_job(name : Optional[str] = None):
+    def _run_existing_job(name: Optional[str] = None):
         daemon = Daemon(daemon_id=name)
 
         if not daemon.path.exists():
@@ -269,12 +269,9 @@ def _start_jobs(
     _successes, _failures = [], []
     for _name in names:
         success_tuple, __name = _run_new_job(_name) if new_job else _run_existing_job(_name)
-        if success_tuple[0]:
-            if kw.get('nopretty', False):
-                print_tuple(True, f"Successfully started job '{__name}'.")
-            _successes.append(_name)
-        else:
-            _failures.append(_name)
+        if not kw.get('nopretty', False):
+            print_tuple(success_tuple)
+        _successes.append(_name) if success_tuple[0] else _failures.append(_name)
 
     msg = (
         (("Successfully started job" + ("s" if len(_successes) != 1 else '')

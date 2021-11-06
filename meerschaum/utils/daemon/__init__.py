@@ -12,7 +12,7 @@ from meerschaum.utils.typing import SuccessTuple, List, Optional, Callable, Any,
 from meerschaum.config._paths import DAEMON_RESOURCES_PATH
 from meerschaum.utils.daemon.Daemon import Daemon
 
-def daemon_entry(sysargs : Optional[List[str]] = None) -> SuccessTuple:
+def daemon_entry(sysargs: Optional[List[str]] = None) -> SuccessTuple:
     """
     Parse sysargs and execute a Meerschaum action as a daemon.
     """
@@ -45,10 +45,11 @@ def daemon_action(**kw) -> SuccessTuple:
     kw['shell'] = False
 
     if kw.get('action', None) and kw.get('action')[0] not in actions:
-        if not kw.get('allow_shell_job'):
+        if not kw.get('allow_shell_job') and not kw.get('force'):
             return False, (
                 f"Action '{kw.get('action')[0]}' isn't recognized.\n\n"
-                + "Pass `--allow-shell-job` to enable shell commands to run as Meerschaum jobs."
+                + "  Include `--allow-shell-job`, `--force`, or `-f`\n  " 
+                + "to enable shell commands to run as Meerschaum jobs."
             )
 
     sysargs = parse_dict_to_sysargs(kw)

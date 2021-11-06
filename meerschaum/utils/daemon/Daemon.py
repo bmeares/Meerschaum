@@ -38,12 +38,12 @@ class Daemon:
 
     def __init__(
         self,
-        target : Optional[Callable[[Any], Any]] = None,
-        target_args : Optional[List[str]] = None,
-        target_kw : Optional[Dict[str, Any]] = None,
-        daemon_id : Optional[str] = None,
-        label : Optional[str] = None,
-        properties : Optional[Dict[str, Any]] = None,
+        target: Optional[Callable[[Any], Any]] = None,
+        target_args: Optional[List[str]] = None,
+        target_kw: Optional[Dict[str, Any]] = None,
+        daemon_id: Optional[str] = None,
+        label: Optional[str] = None,
+        properties: Optional[Dict[str, Any]] = None,
     ):
         """
         :param target:
