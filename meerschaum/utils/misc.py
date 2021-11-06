@@ -320,8 +320,7 @@ def print_options(
 
     ### Prevent too many options from being truncated on small terminals.
     if adjust_cols and _options:
-        size = os.get_terminal_size()
-        _cols, _lines = size.columns, size.lines
+        _cols, _lines = get_cols_lines()
         while num_cols > 1:
             cell_len = int(((_cols - 4) - (3 * (num_cols - 1))) / num_cols)
             num_too_big = sum([(1 if string_width(o) > cell_len else 0) for o in _options])
@@ -362,6 +361,24 @@ def print_options(
     ], expand=True, equal=True, title=header, padding=(0, 0))
     get_console().print(table)
     return None
+
+
+def get_cols_lines(default_cols: int = 100, default_lines: int = 120) -> Tuple[int, int]:
+    """
+    Return a tuple of the current terminal dimensions.
+    If they cannot be determined, return the default values (100 columns and 120 lines).
+    """
+    import os
+    try:
+        size = os.get_terminal_size()
+        _cols, _lines = size.columns, size.lines
+    except Exception as e:
+        _cols, _lines = (
+            int(os.environ.get('COLUMNS', str(default_cols))),
+            int(os.environ.get('LINES', str(default_lines))),
+        )
+    return _cols, _lines
+
 
 def iterate_chunks(iterable, chunksize : int, fillvalue : Optional[Any] = None):
     """
