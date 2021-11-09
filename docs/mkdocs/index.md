@@ -107,7 +107,7 @@ h1 {
   </div>
   <div class="grid-child">
     <br>
-    <asciinema-player src="/assets/casts/jobs.cast" autoplay="true" loop="true" size="small" preload="true"></asciinema-player>
+    <asciinema-player src="/assets/casts/demo.cast" autoplay="true" loop="true" size="small" preload="true"></asciinema-player>
     <!-- <div style="text-align: center">
       <iframe width="480" height="270" src="https://www.youtube.com/embed/wncA_vaIois" title="YouTube video player" frameborder="0" allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture" allowfullscreen></iframe>
     </div> -->

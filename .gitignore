@@ -8,6 +8,7 @@
 .snakeviz/
 *.prof
 *.db
+scratch/
 /portable/
 /test_root/
 /tests/data/

@@ -9,13 +9,23 @@ This changelog was not introduced until v0.2.12, so many of the critical release
 ## 0.4.x Releases
 This is the current release cycle, so future features will be updated below.
 
-### v0.4.10
+### v0.4.11 — v0.4.15
+- **Change the number of columns when printing items.**  
+  Depending on the lengths of items and size of the terminal, the number of columns is reduced until most items are not truncated.
+- **Allow shell jobs with the `-f` flag.**  
+  In addition to `--allow-shell-job`, the `--force` flag permits non-Meerschaum commands to be run. If these flags are absent, a more informative error message is printed.
+- **Redesigned the bottom toolbar.**  
+  The bottom toolbar now uses a black background with white text. Although this technically still prints ANSI when the global ANSI configuration is false, it still does toggle color.
+- **More bugfixes.**  
+  A warning when installing plugins has been addressed, and other virtual environment and portable bugs have been fixed.
+
+### v0.4.8 — v0.4.10
+- **Added the bottom toolbar to the interactive shell.**  
+   The includes the current instance, repo, and connection status.
 - **Fixed parsing issue with the Docker build.**  
   There is a strange edge case where multiple levels of JSON-encoding needed to be escaped, and this scenario has been accounted for.
 - **Enforce `MRSM_CONFIG` and `MRSM_PATCH` in the Web Console actions.**  
   The Docker version of the API uses environment variables to manage instances, so this information is passed along to children threads.
-- **Added the bottom toolbar to the interactive shell.**  
-   The includes the current instance, repo, and connection status.
 - **Delayed imports when changing instances.**  
    This postpones trying to connect to an instance until as late as possible.
 
