@@ -8,6 +8,9 @@ hide:
 
 Below is a list of common questions and issues you may encounter. If you have suggestions, please join the [FAQ Suggestions discussion on the GitHub repository](https://github.com/bmeares/Meerschaum/discussions/46)!
 
+??? faq "How do I upgrade to the latest version?"
+    You can install the latest version of Meerschaum with `pip install --upgrade meerschaum` or the command `mrsm upgrade mrsm`, which installs the latest version from PyPI and pulls the latest Docker images.
+
 ??? faq "`mrsm` doesn't work!"
     You can invoke `mrsm` directly with `python -m meerschaum`. Check that your `PATH` includes scripts installed by `pip`, such as `~/.local/bin`.
 
