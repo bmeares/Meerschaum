@@ -193,7 +193,9 @@ def _upgrade_plugins(
         return False, "No plugins to upgrade."
     print_options(to_install, header="Plugins to Upgrade:")
     if force or yes_no(f"Upgrade {len(to_install)} plugins?", yes=yes, noask=noask):
-        return actions['install'](action=['plugins'] + to_install, debug=debug, **kw)
+        return actions['install'](
+            action=['plugins'] + to_install, debug=debug, force=force, noask=noask, yes=yes, **kw
+        )
     return False, "No plugins upgraded."
 
 ### NOTE: This must be the final statement of the module.

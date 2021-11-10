@@ -28,7 +28,7 @@ def login(
             'password' : self.password,
         }
     except AttributeError:
-        return False, f"Please provide a username and password for '{self}' with `edit config`."
+        return False, f"Please login with the command `login {self}`."
     response = self.post(
         _static_config()['api']['endpoints']['login'],
         data = login_data,
