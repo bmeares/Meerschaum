@@ -27,8 +27,8 @@ connectors = {
     'plugin' : dict(),
 }
 _locks = {
-    'connectors': Lock(),
-    'types': Lock(),
+    'connectors': RLock(),
+    'types': RLock(),
 }
 attributes = {
     'api' : {

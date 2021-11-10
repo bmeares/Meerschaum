@@ -145,16 +145,16 @@ def sync(
     ### add the stated arguments back into kw
     ### NOTE: Setting begin to the sync time; might need to tweak how this works for multiplexing.
     kw.update({
-        'begin' : (begin if begin is not None else self.get_sync_time(debug=debug)), 'end' : end, 'force' : force,
-        'retries' : retries, 'min_seconds' : min_seconds, 'check_existing' : check_existing,
-        'blocking' : blocking, 'workers' : workers, 'callback' : callback,
-        'error_callback' : error_callback, 'sync_chunks' : (sync_chunks),
-        'chunksize' : chunksize,
+        'begin': (begin if begin is not None else self.get_sync_time(debug=debug)), 'end': end,
+        'force': force, 'retries': retries, 'min_seconds': min_seconds,
+        'check_existing': check_existing, 'blocking': blocking, 'workers': workers,
+        'callback': callback, 'error_callback': error_callback, 'sync_chunks': (sync_chunks),
+        'chunksize': chunksize,
     })
 
     def _sync(
-        p : 'meerschaum.Pipe',
-        df : Optional['pandas.DataFrame'] = None
+        p: 'meerschaum.Pipe',
+        df: Optional['pandas.DataFrame'] = None
     ) -> SuccessTuple:
         ### ensure that Pipe is registered
         if not p.id:

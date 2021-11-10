@@ -96,7 +96,7 @@ class Plugin:
         old_cwd = os.getcwd()
         os.chdir(PLUGINS_RESOURCES_PATH)
 
-        if self.__file__ is None:
+        if self.module is None and self.__file__ is None:
             from meerschaum.utils.warnings import error
             error(f"Could not find file for plugin '{self}'.")
         if '__init__.py' in self.__file__:
@@ -164,8 +164,8 @@ class Plugin:
 
     def install(
             self,
-            force : bool = False,
-            debug : bool = False
+            force: bool = False,
+            debug: bool = False
         ) -> SuccessTuple:
         """
         Extract a plugin's tar archive to the plugins directory.
@@ -184,7 +184,7 @@ class Plugin:
         if not self.archive_path.exists():
             return False, f"Missing archive file for plugin '{self}'."
         is_installed = None
-        if self.__file__ is not None:
+        if self.module is not None:
             is_installed = True
             try:
                 old_version = self.module.__version__
@@ -226,18 +226,6 @@ class Plugin:
             fpath = pathlib.Path(os.path.join(fpath, '__init__.py'))
 
         new_version = determine_version(fpath, name=self.name, search_for_metadata=False, warn=True)
-
-        #  with open(fpath, 'r') as f:
-            #  lines = f.readlines()
-        #  global _tmpversion
-        #  for l in lines:
-            #  if '__version__=' in l.replace(' ', ''):
-                #  _l = l.replace('__version__', '_tmpversion')
-                #  exec(_l, globals())
-                #  new_version = _tmpversion
-                #  if debug:
-                    #  dprint(f"Attempting to install plugin '{self}' version '{new_version}'...")
-                #  break
 
         packaging_version = attempt_import('packaging.version')
         try:
@@ -338,7 +326,7 @@ class Plugin:
 
     def setup(self, *args : str, debug : bool = False, **kw : Any) -> SuccessTuple:
         """
-        If exists, run the plugin's setup() function.
+        If exists, run the plugin's `setup()` function.
         """
         from meerschaum.utils.packages import activate_venv, deactivate_venv
         from meerschaum.utils.debug import dprint
