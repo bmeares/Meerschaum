@@ -61,15 +61,23 @@ To create your plugin, follow these steps:
     required = ['rich>=9.8.0', 'pandas', 'plugin:foo']
     ```
 
-5. Write your functions. Special functions are `#!python fetch()`, `#!python sync()`, and `#!python <package_name>()`, and you can use the `#!python @make_action` decorator to designate additional functions as actions. Below is more information on these functions.
+5. Write your functions. Special functions are `#!python fetch()`, `#!python sync()`, `#!python register()`, and `#!python <package_name>()`, and you can use the `#!python @make_action` decorator to designate additional functions as actions. Below is more information on these functions.
 
     !!! warning "Don't forget keyword arguments!"
         You must include a `**kwargs` argument to capture optional arguments. You may find the supplied arguments useful for your implementation (e.g. `begin` and `end` `#!python datetime.datetime` objects). For fetch and sync plugins, you need a `pipe` positional argument for the `#!python meerschaum.Pipe` object being synced.
 
+## Functions
 
-## Fetch Plugins
+Plugins are just modules with functions. This section explains the roles of the following special functions:
 
-> **Difficulty:** Easy
+- [`#!python fetch()`](#fetch)
+- [`#!python sync()`](#sync)
+- [`#!python @make_action`](#make_action)
+- [`#!python @api_plugin`](#api_plugin)
+- [`#!python setup()`](#setup)
+- [`#!python register()`](#register)
+
+### `#!python fetch()`
 
 If your data source isn't very complicated, you can leverage Meerschaum's built-in syncing functionality by writing a [fetch plugin](/reference/plugins/types-of-plugins/#fetch-plugins). You might want to write a fetch plugin for the following reasons:
 
@@ -106,9 +114,7 @@ Below is an example of what a typical fetch plugin may look like:
         return df
     ```
 
-## Sync Plugins
-
-> **Difficulty:** Medium
+### `#!python sync()`
 
 Sometimes Meerschaum's built-in syncing process isn't enough for your needs. You can override the syncing process with your own `#!python sync()` method. Sync plugins have much more freedom than fetch plugins, so what you come up with may differ from the following example. In any case, below is a simple `#!python sync()` plugin.
 
@@ -174,9 +180,7 @@ Sometimes Meerschaum's built-in syncing process isn't enough for your needs. You
         return pipe.sync(df)
     ```
 
-## Action Plugins
-
-> **Difficulty:** Easy
+### `#!python @make_action`
 
 Your plugin may extend Meerschaum by providing additional actions. Action plugins are like regular Python scripts but come with two advantages:
 
@@ -201,7 +205,7 @@ def example(**kw):
 	return True, "Hello, World!"
 ```
 
-### Multiple Actions
+#### Multiple Actions
 
 Action plugins can create any number of actions. To make a function into an action, use the `#!python @make_action` decorator.
 
@@ -219,7 +223,7 @@ def anotheraction(**kw):
 	return True, "This action is called 'anotheraction'"
 ```
 
-## API Plugins
+### `#!python @api_plugin`
 
 Meerschaum plugins may also extend the web API by accessing the [`fastapi`](https://fastapi.tiangolo.com/) app. To delay importing the app until the API is actually initialized, use the `#!python @api_plugin` decorator to define an intialization function. The only required argument for your function should be a variable for the `fastapi` app.
 
@@ -238,6 +242,27 @@ def init_plugin(app):
 	def new_path():
 		return {'message': 'Hello, World!'}
 ```
+
+### `#!python setup()`
+
+When your plugin is first installed, its `required` list will be installed, but in case you need to do any extra setup upon installation, you can write a `#!python setup()` function which returns a tuple of a boolean and a message.
+
+Below is a snippet from the `apex` plugin which initializes a Selenium WebDriver.
+
+??? example "Setup function example"
+
+    ```python
+    def setup(**kw):
+        global geckodriver_location
+        try:
+            from webdriver_manager.firefox import GeckoDriverManager
+            geckodriver_location = GeckoDriverManager().install()
+        except Exception as e:
+            return False, str(e)
+        return True, "Success"
+    ```
+
+### `#!python register()`
 
 ## Keyword Arguments
 

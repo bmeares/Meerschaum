@@ -24,7 +24,7 @@ docs_dir: mkdocs
 plugins:
   - search
   - autolinks
-  - rss
+#  - rss
   # - add-number
   # - pdf-export
   - awesome-pages:
