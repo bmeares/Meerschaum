@@ -146,10 +146,14 @@ install_flavor_drivers = {
     'mariadb' : ['pymysql'],
     'timescaledb' : ['psycopg2'],
     'postgresql' : ['psycopg2'],
-    'cockroachdb' : ['psycopg2', 'cockroachdb'],
+    'cockroachdb' : ['psycopg2', 'sqlalchemy_cockroachdb', 'sqlalchemy_cockroachdb.psycopg2'],
     'mssql': ['pyodbc'],
 }
 
+flavor_dialects = {
+    'cockroachdb': ('cockroachdb', 'sqlalchemy_cockroachdb.psycopg2', 'CockroachDBDialect_psycopg2'),
+    'duckdb': ('duckdb', 'duckdb_engine', 'Dialect'),
+}
 
 def create_engine(
         self,
@@ -169,9 +173,9 @@ def create_engine(
     if self.flavor in install_flavor_drivers:
         attempt_import(
             *install_flavor_drivers[self.flavor],
-            debug=self._debug,
-            lazy=False,
-            warn=False
+            debug = debug,
+            lazy = False,
+            warn = False
         )
 
     ### supplement missing values with defaults (e.g. port number)
@@ -191,11 +195,16 @@ def create_engine(
     _database = self.__dict__.get('database', None)
     _driver = self.__dict__.get('driver', None)
 
+    ### Handle registering specific dialects (due to installing in virtual environments).
+    if self.flavor in flavor_dialects:
+        #  sqlalchemy.engine.url.registry.register(*flavor_dialects[self.flavor])
+        sqlalchemy.dialects.registry.register(*flavor_dialects[self.flavor])
+
     ### self.sys_config was deepcopied and can be updated safely
     if self.flavor in ("sqlite", "duckdb"):
         ### The duckdb dialect might not be registered.
-        if self.flavor == 'duckdb':
-            sqlalchemy.engine.url.registry.register("duckdb", "duckdb_engine", "Dialect")
+        #  if self.flavor == 'duckdb':
+            #  sqlalchemy.engine.url.registry.register("duckdb", "duckdb_engine", "Dialect")
 
         engine_str = f"{_engine}:///{_database}"
         if 'create_engine' not in self.sys_config:
@@ -204,6 +213,9 @@ def create_engine(
             self.sys_config['create_engine']['connect_args'] = {}
         self.sys_config['create_engine']['connect_args'].update({"check_same_thread" : False})
     else:
+        ### Handle 
+        #  if self.flavor == 'cockroachdb':
+            #  sqlalchemy.engine.url.registry.register('cockroachdb', 'sqlalchemy_cockroachdb', 'Dialect')
         engine_str = (
             _engine + "://" + (_username if _username is not None else '') +
             ((":" + urllib.parse.quote_plus(_password)) if _password is not None else '') +
@@ -260,6 +272,8 @@ def create_engine(
             **_create_engine_args
         )
     except Exception as e:
+        #  import traceback
+        #  traceback.print_exc(e)
         warn(e)
         warn(f"Failed to create connector '{self}'.", stack=False)
         engine = None
