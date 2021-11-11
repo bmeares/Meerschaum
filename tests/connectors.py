@@ -15,7 +15,7 @@ conns = {
         port=3309, host='localhost',
     ),
     'mssql': get_connector('sql', 'test_mssql',
-        flavor='timescaledb', username='sa', password='supersecureSECRETPASSWORD123!',
+        flavor='mssql', username='sa', password='supersecureSECRETPASSWORD123!',
         database='master', port=1439, host='localhost',
     ),
     'cockroachdb': get_connector('sql', 'cockroachdb_test',
