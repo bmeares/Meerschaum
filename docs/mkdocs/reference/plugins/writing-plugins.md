@@ -273,7 +273,7 @@ Below is a snippet from the `apex` plugin which initializes a Selenium WebDriver
 The `register()` function is called whenever a new pipe is created with your plugin as its connector. This function returns a dictionary which will become your pipe's attributes. For example, if you already know the column names of your data stream, your `register()` function could be this one line:
 
 ```python
-def register():
+def register(pipe):
     return {'columns': {'datetime': 'timestamp', 'id': 'station'}}
 ```
 
