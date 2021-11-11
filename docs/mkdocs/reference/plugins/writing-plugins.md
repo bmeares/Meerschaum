@@ -70,16 +70,22 @@ To create your plugin, follow these steps:
 
 Plugins are just modules with functions. This section explains the roles of the following special functions:
 
-- [`#!python fetch()`](#fetch)
-- [`#!python sync()`](#sync)
-- [`#!python @make_action`](#make_action)
-- [`#!python @api_plugin`](#api_plugin)
-- [`#!python setup()`](#setup)
-- [`#!python register()`](#register)
+- [**`#!python fetch()`**](#fetch)  
+  Return a DataFrame (which is later passed into `#!python Pipe.sync()` by the command `sync pipes`).
+- [**`#!python sync()`**](#sync)  
+  Override the default `sync` behavior for certain pipes.
+- [**`#!python @make_action`**](#make_action)  
+  Create new commands.
+- [**`#!python @api_plugin`**](#api_plugin)  
+  Create new FastAPI endpoints.
+- [**`#!python setup()`**](#setup)  
+  Executed upon plugin installation.
+- [**`#!python register()`**](#register)  
+  Executed when new pipes are registered to set their attributes.
 
 ### `#!python fetch()`
 
-If your data source isn't very complicated, you can leverage Meerschaum's built-in syncing functionality by writing a [fetch plugin](/reference/plugins/types-of-plugins/#fetch-plugins). You might want to write a fetch plugin for the following reasons:
+If your data source isn't too complicated, you can leverage Meerschaum's built-in syncing functionality by writing a [fetch plugin](/reference/plugins/types-of-plugins/#fetch-plugins). You might want to write a fetch plugin for the following reasons:
 
 - Your source consists of a single stream of data.
 - You are parsing your own data files.
@@ -108,9 +114,9 @@ Below is an example of what a typical fetch plugin may look like:
         import requests
         url = "https://api.example.com/json"
         try:
-        	df = pd.read_json(requests.get(url).text)
+        	 df = pd.read_json(requests.get(url).text)
         except:
-            df = None
+          df = None
         return df
     ```
 
@@ -194,15 +200,15 @@ For example, let's write the plugin `example.py` which will provide the action `
 ### ~/.config/meerschaum/plugins/example.py
 
 def example(**kw):
-	"""
-	This the help string for the new action `example`.
-	"""
+  	"""
+  	This the help string for the new action `example`.
+  	"""
 
-	### An action returns a tuple of success and message.
-	### If the success bool is `True` and the message is 'Success',
-	### nothing will be printed.
+  	### An action returns a tuple of success and message.
+  	### If the success bool is `True` and the message is 'Success',
+  	### nothing will be printed.
 
-	return True, "Hello, World!"
+  	return True, "Hello, World!"
 ```
 
 #### Multiple Actions
@@ -216,11 +222,11 @@ from meerschaum.plugins import make_action
 
 @make_action
 def myaction(**kw):
-	return True, "This action is called 'myaction'"
+    return True, "This action is called 'myaction'"
 
 @make_action
 def anotheraction(**kw):
-	return True, "This action is called 'anotheraction'"
+    return True, "This action is called 'anotheraction'"
 ```
 
 ### `#!python @api_plugin`
@@ -234,13 +240,13 @@ from meerschaum.plugins import api_plugin
 
 @api_plugin
 def init_plugin(app):
-	"""
-	This function is executed immediately after the `app` is initialized.
-	"""
+    """
+    This function is executed immediately after the `app` is initialized.
+    """
 
-	@app.get('/my/new/path')
-	def new_path():
-		return {'message': 'Hello, World!'}
+    @app.get('/my/new/path')
+    def new_path():
+        return {'message': 'Hello, World!'}
 ```
 
 ### `#!python setup()`
@@ -263,6 +269,29 @@ Below is a snippet from the `apex` plugin which initializes a Selenium WebDriver
     ```
 
 ### `#!python register()`
+
+The `register()` function is called whenever a new pipe is created with your plugin as its connector. This function returns a dictionary which will become your pipe's attributes. For example, if you already know the column names of your data stream, your `register()` function could be this one line:
+
+```python
+def register():
+    return {'columns': {'datetime': 'timestamp', 'id': 'station'}}
+```
+
+The below example is the `register()` function from the [`noaa` plugin](/reference/plugins/list-of-plugins/#noaa):
+
+??? example "Register function example"
+
+    ```python
+    def register(pipe: 'meerschaum.Pipe') -> Dict[str, Any]:
+        """
+        Prompt the user for stations when registering new pipes.
+        """
+        stations = ask_for_stations(pipe)
+        return {
+            'columns': {'datetime': 'timestamp', 'id': 'station',},
+            'noaa': {'stations': stations,},
+        }
+    ```
 
 ## Keyword Arguments
 
