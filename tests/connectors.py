@@ -4,6 +4,9 @@
 
 import pathlib
 from meerschaum import get_connector
+from meerschaum.config._paths import ROOT_DIR_PATH
+data_path = ROOT_DIR_PATH / 'data'
+data_path.mkdir(exist_ok=True)
 
 conns = {
     'timescaledb': get_connector('sql', 'test_timescaledb',
@@ -22,11 +25,11 @@ conns = {
         flavor='cockroachdb', host='localhost', port=26259,
     ),
     'sqlite':  get_connector('sql', 'test_sqlite',
-        database=str(pathlib.Path(__file__).parent.parent / 'data' / 'test_sqlite.db'),
+        database=str(data_path / 'test_sqlite.db'),
         flavor='sqlite',
     ),
     'duckdb': get_connector('sql', 'test_duckdb',
-        database=str(pathlib.Path(__file__).parent.parent / 'data' / 'test_duckdb.db'),
+        database=str(data_path / 'test_duckdb.db'),
         flavor='duckdb',
     ),
     'api': get_connector('api', 'test_timescaledb_api',

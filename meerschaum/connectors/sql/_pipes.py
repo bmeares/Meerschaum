@@ -257,8 +257,10 @@ def create_indices(
     _cols_types = pipe.get_columns_types(debug=debug)
     _datetime = pipe.get_columns('datetime', error=False)
     _datetime_name = sql_item_name(_datetime, self.flavor) if _datetime is not None else None
+    _datetime_index_name = sql_item_name(str(pipe) + '_' + _datetime + '_index', self.flavor)
     _id = pipe.get_columns('id', error=False)
     _id_name = sql_item_name(_id, self.flavor) if _id is not None else None
+    _id_index_name = sql_item_name(str(pipe) + '_' + _id + '_index', self.flavor)
     _pipe_name = sql_item_name(str(pipe), self.flavor)
     _create_space_partition = get_config('system', 'experimental', 'space')
 
@@ -278,13 +280,9 @@ def create_indices(
                 ) +
                 "migrate_data => true);"
             )
-        elif self.flavor == 'postgresql':
-            dt_query = f"CREATE INDEX ON {_pipe_name} ({_datetime_name})"
-        elif self.flavor in ('mysql', 'mariadb'):
-            dt_query = f"CREATE INDEX ON {_pipe_name} ({_datetime_name})"
         else: ### mssql, sqlite, etc.
             dt_query = (
-                f"CREATE INDEX {sql_item_name(str(pipe) + _datetime + '_index', self.flavor)} "
+                f"CREATE INDEX {_datetime_index_name} "
                 + f"ON {_pipe_name} ({_datetime_name})"
             )
 
@@ -297,20 +295,13 @@ def create_indices(
             id_query = (
                 None if (_id is not None and _create_space_partition)
                 else (
-                    f"CREATE INDEX ON {_pipe_name} ({_id_name})" if _id is not None
+                    f"CREATE INDEX {_id_index_name} ON {_pipe_name} ({_id_name})" if _id is not None
                     else None
                 )
             )
             pass
-        elif self.flavor in ('postgresql'):
-            id_query = f"CREATE INDEX ON {_pipe_name} ({_id_name})"
-        elif self.flavor in ('mysql', 'mariadb'):
-            id_query = f"CREATE INDEX ON {_pipe_name} ({_id_name})"
         else: ### mssql, sqlite, etc.
-            id_query = (
-                f"CREATE INDEX {sql_item_name(str(pipe) + _id + '_index', self.flavor)} "
-                + f"ON {_pipe_name} ({_id_name})"
-            )
+            id_query = f"CREATE INDEX {_id_index_name} ON {_pipe_name} ({_id_name})"
 
         if id_query is not None:
             index_queries[_id] = id_query
@@ -319,8 +310,11 @@ def create_indices(
     for col, q in index_queries.items():
         if debug:
             dprint(f"Creating index on column '{col}' for pipe '{pipe}'...")
-        index_result = self.exec(q, debug=debug)
-        if not index_result:
+        try:
+            index_result = self.exec(q, debug=debug)
+        except Exception as e:
+            index_result = None
+        if index_result is None or index_result is False:
             failures += 1
     return failures == 0
 
