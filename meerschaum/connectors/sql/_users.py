@@ -16,7 +16,7 @@ def register_user(
         **kw : Any
     ) -> SuccessTuple:
     """
-    Register a new user
+    Register a new user.
     """
     from meerschaum.utils.warnings import warn, error, info
     from meerschaum.utils.packages import attempt_import

@@ -258,7 +258,7 @@ def table_exists(
     elif connector.flavor == 'mssql':
         q = f"SELECT OBJECT_ID('{table_name}')"
     elif connector.flavor in ('mysql', 'mariadb'):
-        q = f"SHOW TABLES LIKE '{table_name}'"
+        q = f"SHOW TABLES LIKE '{table}'"
     elif connector.flavor == 'sqlite':
         q = f"SELECT name FROM sqlite_master WHERE name='{table}'"
     exists = connector.value(q, debug=debug, silent=True) is not None

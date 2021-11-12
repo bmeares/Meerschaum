@@ -38,7 +38,8 @@ class User():
         if password is None:
             password = ''
         self.password = password
-        self.password_hash = get_pwd_context().encrypt(password)
+        #  self.password_hash = get_pwd_context().encrypt(password)
+        self.password_hash = get_pwd_context().hash(password)
         self.username = username
         self.email = email
         self.type = type

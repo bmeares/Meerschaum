@@ -16,9 +16,9 @@ remote_pipes = {}
 for _label, instance in conns.items():
     all_pipes[_label], stress_pipes[_label], remote_pipes[_label] = [], [], []
     stress_pipe = Pipe(
-            'plugin:stress', 'test',
-            mrsm_instance=instance,
-            columns={'datetime': 'datetime', 'id': 'id'}
+        'plugin:stress', 'test',
+        mrsm_instance = instance,
+        columns = {'datetime': 'datetime', 'id': 'id'},
     )
     all_pipes[_label].append(stress_pipe)
     stress_pipes[_label].append(stress_pipe)
