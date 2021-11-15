@@ -13,7 +13,15 @@ def register(
     """
     Send a POST to the Meerschaum API to register a new Pipe.
     """
-    if self.connector.type == 'plugin' and self.connector.register is not None:
+    import warnings
+    with warnings.catch_warnings():
+        warnings.simplefilter('ignore')
+        try:
+            _conn = self.connector
+        except Exception as e:
+            _conn = None
+
+    if _conn is not None and _conn.type == 'plugin' and _conn.register is not None:
         params = self.connector.register(self)
         params = {} if params is None else params
         if not isinstance(params, dict):

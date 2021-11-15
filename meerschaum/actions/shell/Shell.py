@@ -275,6 +275,7 @@ class Shell(cmd.Cmd):
         except Exception as e:
             pass
 
+
     def load_config(self, instance : Optional[str] = None):
         """
         Set attributes from the shell configuration.
@@ -446,6 +447,12 @@ class Shell(cmd.Cmd):
         args['shell'] = True
         args['line'] = line
 
+        from meerschaum.utils.packages import import_rich, attempt_import
+        rich = import_rich()
+        rich_progress = attempt_import('rich.progress')
+        _progress = rich_progress.Progress(transient=True)
+        args['_progress'] = _progress
+
         ### if debug is not set on the command line,
         ### default to shell setting
         if not args.get('debug', False):
@@ -491,10 +498,11 @@ class Shell(cmd.Cmd):
         from meerschaum.utils.daemon import daemon_action
 
         try:
-            success_tuple = (
-                _entry_with_args(**args) if action not in self._actions
-                else func(action=args['action'][1:], **{k:v for k, v in args.items() if k != 'action'})
-            )
+            with _progress:
+                success_tuple = (
+                    _entry_with_args(**args) if action not in self._actions
+                    else func(action=args['action'][1:], **{k:v for k, v in args.items() if k != 'action'})
+                )
         except Exception as e:
             success_tuple = False, str(e)
 

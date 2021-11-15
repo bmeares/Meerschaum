@@ -27,7 +27,7 @@ def register_pipe(
     pipes = get_tables(mrsm_instance=self, debug=debug)['pipes']
 
     if pipe.get_id(debug=debug) is not None:
-        return False, f"Pipe '{pipe}' is already registered"
+        return False, f"Pipe '{pipe}' is already registered."
 
     ### NOTE: if `parameters` is supplied in the Pipe constructor,
     ###       then `pipe.parameters` will exist and not be fetched from the database.
@@ -59,8 +59,8 @@ def register_pipe(
     query = sqlalchemy.insert(pipes).values(**values)
     result = self.exec(query, debug=debug)
     if result is None:
-        return False, f"Failed to register pipe '{pipe}'"
-    return True, f"Successfully registered pipe '{pipe}'"
+        return False, f"Failed to register pipe '{pipe}'."
+    return True, f"Successfully registered pipe '{pipe}'."
 
 def edit_pipe(
         self,

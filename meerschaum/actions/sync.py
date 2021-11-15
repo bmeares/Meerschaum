@@ -30,6 +30,7 @@ def _pipes_lap(
         unblock : bool = False,
         force : bool = False,
         min_seconds : int = 1,
+        _progress: Optional['rich.progress.Progress'] = None,
         **kw : Any
     ) -> Tuple[List[meerschaum.Pipe], List[meerschaum.Pipe]]:
     """
@@ -37,10 +38,12 @@ def _pipes_lap(
     """
     from meerschaum import get_pipes
     from meerschaum.utils.debug import dprint
-    from meerschaum.utils.packages import attempt_import
+    from meerschaum.utils.packages import attempt_import, import_rich
     from meerschaum.utils.formatting import print_tuple
     from meerschaum.utils.warnings import warn
     import time
+    rich = import_rich()
+    rich_progress = attempt_import('rich.progress')
     pipes = get_pipes(
         as_list = True,
         method = 'registered',
@@ -48,20 +51,27 @@ def _pipes_lap(
         **kw
     )
 
+
     def sync_pipe(p):
         """
         Wrapper function for the Pool.
         """
-        from meerschaum.utils.warnings import warn
         try:
+            task = _progress.add_task("[red]Testing...", total=100)
+            _progress.update(task, advance=10)
             return_tuple = p.sync(
                 blocking = (not unblock),
                 force = force,
                 debug = debug,
                 min_seconds = min_seconds,
                 workers = workers,
+                _progress = _progress,
+                _task = task,
                 **kw
             )
+            _progress.update(task, advance=10)
+            time.sleep(1)
+            _progress.update(task, advance=10)
         except Exception as e:
             import traceback
             traceback.print_exception(type(e), e, e.__traceback__)
@@ -73,11 +83,19 @@ def _pipes_lap(
 
     from meerschaum.utils.pool import get_pool
 
+    #  try:
+        #  from concurrent.futures import ThreadPoolExecutor
+    #  except Exception as e:
+        #  ThreadPoolExecutor = None
+
+    #  if ThreadPoolExecutor is not None:
+        #  with progress:
+            #  with ThreadPoolExecutor(max_workers=4) as pool:
+                #  pass
+
     pool = get_pool(workers=workers)
     results = pool.map(sync_pipe, pipes) if pool is not None else [sync_pipe(p) for p in pipes]
 
-    #  results = pool.map_async(sync_pipe, pipes)
-    #  results = results.get()
     if results is None:
         warn(f"Failed to fetch results from syncing pipes.")
         succeeded_pipes = []
@@ -134,7 +152,7 @@ def _sync_pipes(
     cooldown = 2 * (min_seconds + 1)
     success = []
     while run:
-        lap_begin = time.time()
+        lap_begin = time.perf_counter()
         try:
             success, fail = _pipes_lap(
                 min_seconds = min_seconds,
@@ -148,6 +166,7 @@ def _sync_pipes(
                 f"Failed to sync all pipes. Waiting for {cooldown} seconds, then trying again.",
                 stack = False
             )
+            success, fail = None, None
             try:
                 time.sleep(cooldown)
             except KeyboardInterrupt:
@@ -161,7 +180,7 @@ def _sync_pipes(
             loop, run = False, False
             success, fail = None, None
         cooldown = 2 * (min_seconds + 1)
-        lap_end = time.time()
+        lap_end = time.perf_counter()
         print()
         msg = (
             f"It took {round(lap_end - lap_begin, 2)} seconds to sync " +

@@ -9,6 +9,7 @@ Handle all things warnings and errors here
 from __future__ import annotations
 from meerschaum.utils.typing import Any
 
+import sys
 import warnings
 
 warnings.filterwarnings(
@@ -27,6 +28,7 @@ warnings.filterwarnings(
     "ignore",
     category = RuntimeWarning
 )
+
 
 #  class SilentException(Exception):
     #  """
@@ -57,6 +59,11 @@ def warn(*args, stacklevel=2, stack=True, color : bool = True, **kw) -> None:
     """
     Raise a warning with custom Meerschaum formatting
     """
+    if stacklevel is None:
+        stacklevel = 1
+        stack = False
+    _old_sw = warnings.showwarning
+
     get_config = None
     if color:
         try:
@@ -71,7 +78,6 @@ def warn(*args, stacklevel=2, stack=True, color : bool = True, **kw) -> None:
             get_config = _get_config
         except ImportError:
             get_config = None
-    import sys
 
     if get_config is None and color:
         try:
@@ -89,10 +95,16 @@ def warn(*args, stacklevel=2, stack=True, color : bool = True, **kw) -> None:
     if color:
         if ANSI:
             a[0] = colored(a[0], **warn_config['ansi']['rich'])
-    if stacklevel is None or not stack:
-        print(a[0], file=sys.stderr)
-    else:
-        warnings.warn(*a, stacklevel=stacklevel, **kw)
+
+    ### Optionally omit the warning location.
+    def _no_stack_sw(message, category, filename, lineno, file=None, line=None):
+        sys.stderr.write(str(message) + '\n')
+
+    if not stack:
+        warnings.showwarning = _no_stack_sw
+    warnings.warn(*a, stacklevel=stacklevel, **kw)
+    if not stack:
+        warnings.showwarning = _old_sw
 
 def exception_with_traceback(
         message : str,
@@ -104,7 +116,7 @@ def exception_with_traceback(
     Traceback construction help found here:
     https://stackoverflow.com/questions/27138440/how-to-create-a-traceback-object
     """
-    import sys, types
+    import types
     tb, depth = None, 0
     while True:
         try:
@@ -161,7 +173,7 @@ def error(
     from meerschaum.utils.formatting import CHARSET, ANSI, colored, pprint, get_console
     from meerschaum.utils.packages import import_rich
     from meerschaum.config import get_config
-    import types, sys, inspect
+    import types, inspect
     rich = import_rich()
     error_config = get_config('formatting', 'errors', patch=True)
     message = ' ' + error_config[CHARSET]['icon'] + ' ' + str(message)
@@ -197,7 +209,6 @@ def info(message : str, icon : bool = True, **kw):
     """
     from meerschaum.utils.formatting import CHARSET, ANSI, colored
     from meerschaum.config import get_config
-    import sys
     info_config = get_config('formatting', 'info', patch=True)
     if icon:
         message = ' ' + info_config[CHARSET]['icon'] + ' ' + message

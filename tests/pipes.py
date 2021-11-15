@@ -18,7 +18,16 @@ for _label, instance in conns.items():
     stress_pipe = Pipe(
         'plugin:stress', 'test',
         mrsm_instance = instance,
-        columns = {'datetime': 'datetime', 'id': 'id'},
+        parameters = {
+            'columns': {
+                'datetime': 'datetime' ,
+                'id': 'id',
+            },
+            'fetch': {
+                'rows': 100,
+                'id': 3,
+            },
+        },
     )
     all_pipes[_label].append(stress_pipe)
     stress_pipes[_label].append(stress_pipe)
