@@ -58,6 +58,9 @@ def sync(
 
         debug : bool = False,
 
+        _progress: Optional['rich.progress.Progress'] = None,
+        _task: Optional['rich.progress.Task'] = None,
+
         **kw : Any
 
     ) -> SuccessTuple:
@@ -149,8 +152,11 @@ def sync(
         'force': force, 'retries': retries, 'min_seconds': min_seconds,
         'check_existing': check_existing, 'blocking': blocking, 'workers': workers,
         'callback': callback, 'error_callback': error_callback, 'sync_chunks': (sync_chunks),
-        'chunksize': chunksize,
+        'chunksize': chunksize, '_progress': _progress, '_task': _task,
     })
+
+    if _progress and _task:
+        _progress.update(_task, advance=5)
 
     def _sync(
         p: 'meerschaum.Pipe',
@@ -210,6 +216,8 @@ def sync(
         run = True
         _retries = 1
         while run:
+            if _progress and _task:
+                _progress.update(_task, advance=50)
             return_tuple = p.instance_connector.sync_pipe(
                 pipe = p,
                 df = df,

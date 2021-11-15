@@ -23,50 +23,65 @@ def test_register_and_delete(flavor: str):
         output = pipe.delete()
         pipe.columns = cols
         assert pipe.columns is not None
-        assert pipe.register(debug=debug)
-        assert pipe.delete(debug=debug)
-        assert pipe.register(debug=debug)
+        success, msg = pipe.register(debug=debug)
+        assert success, msg
+        success, msg = pipe.delete(debug=debug)
+        assert success, msg
+        pipe.columns = cols
+        success, msg = pipe.register(debug=debug)
+        assert success, msg
         assert pipe.columns is not None
 
 @pytest.mark.parametrize("flavor", list(all_pipes.keys()))
 def test_drop_and_sync(flavor: str):
     pipes = all_pipes[flavor]
     for pipe in pipes:
-        pipe = Pipe(**pipe.meta)
-        #  pipe.drop()
-        #  assert pipe.exists(debug=debug) is False
+        pipe.drop()
+        assert pipe.exists(debug=debug) is False
+        assert pipe.columns is not None
         now1 = datetime.datetime(2021, 1, 1, 12, 0)
         data = {'datetime' : [now1], 'id' : [1], 'val': [1]}
-        assert pipe.sync(data, debug=debug)
+        success, msg = pipe.sync(data, debug=debug)
+        assert success, msg
         assert pipe.exists(debug=debug)
         now2 = datetime.datetime(2021, 1, 1, 12, 1)
         data = {'datetime' : [now2], 'id' : [1], 'val': [1]}
-        assert pipe.sync(data, debug=debug)
+        success, msg = pipe.sync(data, debug=debug)
+        assert success, msg
         assert pipe.exists(debug=debug)
-        #  data = p.get_data(debug=debug)
-        #  assert data is not None
-        #  assert len(data) == 2
+        data = pipe.get_data(debug=debug)
+        assert data is not None
+        assert len(data) == 2
 
-#  def test_drop_and_sync_duplicate():
-    #  for _label, pipes in all_pipes.items():
-        #  for p in pipes:
-            #  assert p.drop()
-            #  now1 = datetime.datetime.utcnow()
-            #  d = {'datetime' : [now1], 'id' : [1], 'val': [1]}
-            #  assert p.sync(d)
-            #  d = {'datetime' : [now1], 'id' : [1], 'val': [1]}
-            #  assert p.sync(d)
-            #  data = p.get_data()
-            #  assert len(data) == 1
+@pytest.mark.parametrize("flavor", list(all_pipes.keys()))
+def test_drop_and_sync_duplicate(flavor: str):
+    pipes = all_pipes[flavor]
+    for pipe in pipes:
+        pipe.drop(debug=debug)
+        now1 = datetime.datetime(2021, 1, 1, 12, 0)
+        d = {'datetime' : [now1], 'id' : [1], 'val': [1]}
+        assert pipe.sync(d, debug=debug)
+        d = {'datetime' : [now1], 'id' : [1], 'val': [1]}
+        assert pipe.sync(d, debug=debug)
+        data = pipe.get_data(debug=debug)
+        assert data is not None
+        assert len(data) == 1
 
-#  def test_drop_and_sync_stress():
-    #  for _label, pipes in stress_pipes.items():
-        #  for p in pipes:
-            #  assert p.drop()
-            #  assert p.sync()
 
-#  def test_drop_and_sync_remote():
-    #  for _label, pipes in remote_pipes.items():
-        #  for p in pipes:
-            #  assert p.drop()
-            #  assert p.sync()
+@pytest.mark.parametrize("flavor", list(stress_pipes.keys()))
+def test_drop_and_sync_stress(flavor: str):
+    pipes = stress_pipes[flavor]
+    for pipe in pipes:
+        pipe.drop(debug=debug)
+        success, msg = pipe.sync(debug=debug)
+        assert success, msg
+
+
+@pytest.mark.parametrize("flavor", list(remote_pipes.keys()))
+def test_drop_and_sync_remote(flavor: str):
+    pipes = remote_pipes[flavor]
+    for pipe in pipes:
+        pipe.drop(debug=debug)
+        success, msg = pipe.sync(debug=debug)
+        assert success, msg
+
