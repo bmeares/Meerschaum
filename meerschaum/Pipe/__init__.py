@@ -318,11 +318,13 @@ class Pipe:
             return False
 
     def __hash__(self):
+        ### Using an esoteric separator to avoid collisions.
+        sep = "[\"']"
         return hash(
-            str(self.connector_keys)
-            + str(self.metric_key)
-            + str(self.location_key)
-            + str(self.instance_keys)
+            str(self.connector_keys) + sep
+            + str(self.metric_key) + sep
+            + str(self.location_key) + sep
+            + str(self.instance_keys) + sep
         )
 
     def __repr__(self):

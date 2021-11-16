@@ -12,8 +12,8 @@ from __future__ import annotations
 from meerschaum.utils.typing import SuccessTuple, Any, List, Optional, Tuple
 
 def sync(
-        action : Optional[List[str]] = None,
-        **kw : Any
+        action: Optional[List[str]] = None,
+        **kw: Any
     ) -> SuccessTuple:
     """
     Fetch and sync data for pipes.
@@ -37,64 +37,116 @@ def _pipes_lap(
     Do a lap of syncing pipes.
     """
     from meerschaum import get_pipes
-    from meerschaum.utils.debug import dprint
+    from meerschaum.utils.debug import dprint, _checkpoint
     from meerschaum.utils.packages import attempt_import, import_rich
-    from meerschaum.utils.formatting import print_tuple
+    from meerschaum.utils.formatting import print_tuple, ANSI, UNICODE, get_console
+    from meerschaum.utils.formatting._shell import clear_screen, flush_with_newlines
     from meerschaum.utils.warnings import warn
-    import time
-    rich = import_rich()
-    rich_progress = attempt_import('rich.progress')
+    from meerschaum.utils.threading import Lock, RLock
+    from meerschaum.utils.misc import print_options, get_cols_lines
+    from meerschaum.utils.pool import get_pool_executor
+    import contextlib
+    import time, os
+    rich_table, rich_text, rich_box = attempt_import('rich.table', 'rich.text', 'rich.box')
+    locks = {'remaining_count': Lock(), 'results_dict': Lock(), }
     pipes = get_pipes(
         as_list = True,
         method = 'registered',
         debug = debug,
         **kw
     )
+    results_dict = {}
 
+    def _task_label(count: int):
+        return f"[cyan]Syncing {count} pipe{'s' if count != 1 else ''}..."
+
+    remaining_count = len(pipes)
+    _task = (
+        _progress.add_task(_task_label(remaining_count), start=True, total=remaining_count)
+    ) if _progress is not None else None
+
+
+    def _print_progress_table():
+        ### Print the results in a table.
+        cols, lines = get_cols_lines()
+        table = rich_table.Table(
+            title = rich_text.Text('Synced Pipes'),
+            box = (rich_box.ROUNDED if UNICODE else rich_box.ASCII),
+            show_lines = True,
+            show_header = ANSI,
+        )
+        table.add_column("Pipe", justify='right', style=('magenta' if ANSI else ''))
+        table.add_column("Message")
+        table.add_column("Status")
+        statuses = {
+            True: rich_text.Text('Success', style=('green' if ANSI else '')),
+            False: rich_text.Text('Fail', style=('red' if ANSI else '')),
+            None: rich_text.Text('In-progress', style=('yellow' if ANSI else '')),
+        }
+        rows = []
+        items = []
+        Text = rich_text.Text
+        for pipe in pipes:
+            status = statuses[results_dict.get(pipe, (None, ""))[0]]
+            message = results_dict.get(pipe, (None, f"Syncing pipe '{pipe}'..."))[1]
+            row = (str(pipe), message, status)
+            item = Text(str(pipe) + "\n" + message + "\n") + status
+            items.append(item)
+            rows.append(row)
+            table.add_row(str(pipe), message, status)
+        clear_screen(debug=debug)
+        #  print_options(items, header='Synced Pipes')
+        get_console().print(table)
 
     def sync_pipe(p):
         """
         Wrapper function for the Pool.
         """
         try:
-            task = _progress.add_task("[red]Testing...", total=100)
-            _progress.update(task, advance=10)
             return_tuple = p.sync(
                 blocking = (not unblock),
                 force = force,
                 debug = debug,
                 min_seconds = min_seconds,
                 workers = workers,
-                _progress = _progress,
-                _task = task,
+                #  _progress = _progress,
+                #  _task = _task,
                 **kw
             )
-            _progress.update(task, advance=10)
-            time.sleep(1)
-            _progress.update(task, advance=10)
         except Exception as e:
             import traceback
             traceback.print_exception(type(e), e, e.__traceback__)
             print("Error: " + str(e))
             return_tuple = (False, f"Failed to sync pipe '{p}' with exception:" + "\n" + str(e))
 
-        print_tuple(return_tuple)
+        locks['results_dict'].acquire()
+        nonlocal results_dict
+        results_dict[p] = return_tuple
+        locks['results_dict'].release()
+
+        _print_progress_table()
+        #  print_tuple(return_tuple, _progress=_progress)
+        _checkpoint(_progress=_progress, _task=_task)
+        if _progress is not None:
+            locks['remaining_count'].acquire()
+            nonlocal remaining_count
+            remaining_count -= 1
+            _progress.update(_task, description=_task_label(remaining_count))
+            locks['remaining_count'].release()
         return return_tuple
 
-    from meerschaum.utils.pool import get_pool
+    pool = get_pool_executor(workers=workers)
+    cm = contextlib.nullcontext() if pool is None else pool
+    with cm:
+        for pipe in pipes:
+            _print_progress_table()
+            pool.submit(sync_pipe, pipe)
+        
+    #  clear_screen(debug=debug)
+    _print_progress_table()
 
-    #  try:
-        #  from concurrent.futures import ThreadPoolExecutor
-    #  except Exception as e:
-        #  ThreadPoolExecutor = None
-
-    #  if ThreadPoolExecutor is not None:
-        #  with progress:
-            #  with ThreadPoolExecutor(max_workers=4) as pool:
-                #  pass
-
-    pool = get_pool(workers=workers)
-    results = pool.map(sync_pipe, pipes) if pool is not None else [sync_pipe(p) for p in pipes]
+    results = list(results_dict)
+    #  results = pool.map(sync_pipe, pipes) if pool is not None else [sync_pipe(p) for p in pipes]
 
     if results is None:
         warn(f"Failed to fetch results from syncing pipes.")
@@ -105,27 +157,28 @@ def _pipes_lap(
         }
     else:
         ### Determine which pipes failed to sync.
-        pipe_indices = [i for p, i in enumerate(pipes)]
+        results_dict = { p: r for p, r in zip(pipes, results) }
         try:
-            succeeded_pipes = [pipe_indices[i] for i, r in enumerate(results) if r[0]]
-            failed_pipes = [pipe_indices[i] for i, r in enumerate(results) if not r[0]]
+            succeeded_pipes, failed_pipes = [], []
+            for pipe, result in results_dict.items():
+                (succeeded_pipes if result[0] else failed_pipes).append(pipe)
         except TypeError:
             succeeded_pipes = []
             failed_pipes = [p for p in pipes]
-        results_dict = { p: r for p, r in zip(pipe_indices, results) }
 
-    if len(failed_pipes) > 0:
-        print("\n" + f"Failed to sync pipes:")
-        for p in failed_pipes:
-            print(f"  - {p}")
 
-    if len(succeeded_pipes) > 0:
-        success_msg = "\nSuccessfully synced pipes:"
-        if unblock:
-            success_msg = "\nSuccessfully spawned threads for pipes:"
-        print(success_msg)
-        for p in succeeded_pipes:
-            print(f"  - {p}")
+    #  if len(failed_pipes) > 0:
+        #  print("\n" + f"Failed to sync pipes:")
+        #  for p in failed_pipes:
+            #  print(f"  - {p}")
+
+    #  if len(succeeded_pipes) > 0:
+        #  success_msg = "\nSuccessfully synced pipes:"
+        #  if unblock:
+            #  success_msg = "\nSuccessfully spawned threads for pipes:"
+        #  print(success_msg)
+        #  for p in succeeded_pipes:
+            #  print(f"  - {p}")
 
     if debug:
         from meerschaum.utils.formatting import pprint
@@ -135,16 +188,19 @@ def _pipes_lap(
     return succeeded_pipes, failed_pipes
 
 def _sync_pipes(
-        loop : bool = False,
-        min_seconds : int = 1,
-        debug : bool = False,
-        **kw : Any
+        loop: bool = False,
+        min_seconds: int = 1,
+        shell: bool = False,
+        debug: bool = False,
+        **kw: Any
     ) -> SuccessTuple:
     """
     Fetch and sync new data for pipes.
     """
     from meerschaum.utils.debug import dprint
     from meerschaum.utils.warnings import warn, info
+    from meerschaum.utils.formatting._shell import progress
+    import contextlib
     import time, sys
     run = True
     msg = ""
@@ -152,13 +208,19 @@ def _sync_pipes(
     cooldown = 2 * (min_seconds + 1)
     success = []
     while run:
+        _progress = progress() if shell else None
+        cm = _progress if _progress is not None else contextlib.nullcontext()
+
         lap_begin = time.perf_counter()
+
         try:
-            success, fail = _pipes_lap(
-                min_seconds = min_seconds,
-                debug = debug,
-                **kw
-            )
+            with cm:
+                success, fail = _pipes_lap(
+                    min_seconds = min_seconds,
+                    _progress = _progress,
+                    debug = debug,
+                    **kw
+                )
         except Exception as e:
             import traceback
             traceback.print_exc()

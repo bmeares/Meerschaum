@@ -20,6 +20,7 @@ def register_user(
     """
     from meerschaum.utils.warnings import warn, error, info
     from meerschaum.utils.packages import attempt_import
+    from meerschaum.connectors.sql.tools import json_flavors
     sqlalchemy = attempt_import('sqlalchemy')
 
     valid_tuple = valid_username(user.username)
@@ -41,7 +42,9 @@ def register_user(
         'email' : user.email,
         'password_hash' : user.password_hash,
         'user_type' : user.type,
-        'attributes' : json.dumps(user.attributes),
+        'attributes' : (
+            json.dumps(user.attributes) if self.flavor not in json_flavors else user.attributes
+        ),
     }
     if old_id is not None:
         return False, f"User '{user.username}' already exists."
@@ -53,12 +56,12 @@ def register_user(
 
     result = self.exec(query, debug=debug)
     if result is None:
-        return False, f"Failed to register user '{user}'"
-    return True, f"Successfully registered user '{user}'"
+        return False, f"Failed to register user '{user}'."
+    return True, f"Successfully registered user '{user}'."
 
 def valid_username(username : str) -> SuccessTuple:
     """
-    Verify that a given username is valid
+    Verify that a given username is valid.
     """
     fail_reasons = []
 
@@ -102,6 +105,7 @@ def edit_user(
     from meerschaum.utils.packages import attempt_import
     sqlalchemy = attempt_import('sqlalchemy')
     from meerschaum.connectors.sql.tables import get_tables
+    from meerschaum.connectors.sql.tools import json_flavors
     users = get_tables(mrsm_instance=self, debug=debug)['users']
 
     user_id = user.user_id if user.user_id is not None else self.get_user_id(user, debug=debug)
@@ -126,7 +130,10 @@ def edit_user(
     if user.email != '':
         bind_variables['email'] = user.email
     if user.attributes is not None and user.attributes != {}:
-        bind_variables['attributes'] = json.dumps(user.attributes)
+        bind_variables['attributes'] = (
+            json.dumps(user.attributes) if self.flavor not in json_flavors
+            else user.attributes
+        )
     if user.type != '':
         bind_variables['user_type'] = user.type
 

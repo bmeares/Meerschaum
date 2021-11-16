@@ -35,7 +35,7 @@ def register(
 
     if not self.parameters:
         self.parameters = {
-            'columns' : self.columns,
+            'columns': self.columns,
         }
 
     return self.instance_connector.register_pipe(self, debug=debug)

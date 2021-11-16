@@ -447,11 +447,6 @@ class Shell(cmd.Cmd):
         args['shell'] = True
         args['line'] = line
 
-        from meerschaum.utils.packages import import_rich, attempt_import
-        rich = import_rich()
-        rich_progress = attempt_import('rich.progress')
-        _progress = rich_progress.Progress(transient=True)
-        args['_progress'] = _progress
 
         ### if debug is not set on the command line,
         ### default to shell setting
@@ -497,12 +492,17 @@ class Shell(cmd.Cmd):
         from meerschaum.actions._entry import _entry_with_args
         from meerschaum.utils.daemon import daemon_action
 
-        try:
-            with _progress:
-                success_tuple = (
-                    _entry_with_args(**args) if action not in self._actions
-                    else func(action=args['action'][1:], **{k:v for k, v in args.items() if k != 'action'})
+        def do_func():
+            return (
+                _entry_with_args(**args) if action not in self._actions
+                else func(
+                    action=args['action'][1:],
+                    **{k:v for k, v in args.items() if k != 'action'}
                 )
+            )
+
+        try:
+            success_tuple = do_func()
         except Exception as e:
             success_tuple = False, str(e)
 

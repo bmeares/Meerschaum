@@ -6,6 +6,8 @@
 Utilities for formatting output text
 """
 
+from __future__ import annotations
+from meerschaum.utils.typing import Optional
 from meerschaum.utils.formatting._shell import make_header
 from meerschaum.utils.formatting._pprint import pprint
 from meerschaum.utils.formatting._pipes import pprint_pipes
@@ -153,11 +155,12 @@ def get_console():
     return console
 
 def print_tuple(
-        tup : tuple,
-        skip_common : bool = True,
-        common_only : bool = False,
-        upper_padding : int = 0,
-        lower_padding : int = 0,
+        tup: tuple,
+        skip_common: bool = True,
+        common_only: bool = False,
+        upper_padding: int = 0,
+        lower_padding: int = 0,
+        _progress: Optional['rich.progress.Progress'] = None,
     ) -> None:
     """
     Print Meerschaum SuccessTuple.
@@ -189,11 +192,8 @@ def print_tuple(
         if ANSI:
             msg = colored(msg, **status_config['ansi']['rich'])
 
-        for i in range(upper_padding):
-            print()
+        msg = ('\n' * upper_padding) + msg + ('\n' * lower_padding)
         print(msg)
-        for i in range(lower_padding):
-            print()
 
 def __getattr__(name : str) -> str:
     """

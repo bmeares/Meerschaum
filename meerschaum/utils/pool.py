@@ -89,3 +89,18 @@ def get_pools():
         pools = dict()
         _locks['pools'].release()
     return pools
+
+
+def get_pool_executor(workers: Optional[int] = None):
+    """
+    Return a `ThreadPoolExecutor` object.
+    """
+    try:
+        from multiprocessing import cpu_count
+        from concurrent.futures import ThreadPoolExecutor
+        workers = cpu_count() if workers is None else workers
+    except Exception as e:
+        ThreadPoolExecutor = None
+
+    return ThreadPoolExecutor(max_workers=workers) if ThreadPoolExecutor is not None else None
+
