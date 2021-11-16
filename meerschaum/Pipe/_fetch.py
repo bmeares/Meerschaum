@@ -28,7 +28,7 @@ def fetch(
         warn(f"No `fetch()` function defined for connector '{self.connector}'")
         return None
 
-    from meerschaum.utils.debug import dprint
+    from meerschaum.utils.debug import dprint, _checkpoint
     if self.connector.type == 'plugin':
         from meerschaum.utils.packages import activate_venv, deactivate_venv
         activate_venv(self.connector.label, debug=debug)

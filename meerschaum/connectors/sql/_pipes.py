@@ -21,6 +21,7 @@ def register_pipe(
     """
     from meerschaum.utils.debug import dprint
     from meerschaum.utils.packages import attempt_import
+    from meerschaum.connectors.sql.tools import json_flavors
 
     ### ensure pipes table exists
     from meerschaum.connectors.sql.tables import get_tables
@@ -54,7 +55,9 @@ def register_pipe(
         'connector_keys' : pipe.connector_keys,
         'metric_key'     : pipe.metric_key,
         'location_key'   : pipe.location_key,
-        'parameters'     : json.dumps(parameters),
+        'parameters'     : (
+            json.dumps(parameters) if self.flavor not in json_flavors else parameters
+        ),
     }
     query = sqlalchemy.insert(pipes).values(**values)
     result = self.exec(query, debug=debug)
@@ -65,8 +68,8 @@ def register_pipe(
 def edit_pipe(
         self,
         pipe : meerschaum.Pipe = None,
-        patch : bool = False,
-        debug : bool = False,
+        patch: bool = False,
+        debug: bool = False,
         **kw : Any
     ) -> SuccessTuple:
     """
@@ -87,6 +90,7 @@ def edit_pipe(
 
     from meerschaum.utils.debug import dprint
     from meerschaum.utils.packages import attempt_import
+    from meerschaum.connectors.sql.tools import json_flavors
     if not patch:
         parameters = pipe.parameters
     else:
@@ -110,7 +114,7 @@ def edit_pipe(
 
     values = {
         'parameters' : (
-            json.dumps(parameters) if self.flavor not in ('postgresql', 'timescaledb')
+            json.dumps(parameters) if self.flavor not in json_flavors
             else parameters
         ),
     }
@@ -257,10 +261,10 @@ def create_indices(
     _cols_types = pipe.get_columns_types(debug=debug)
     _datetime = pipe.get_columns('datetime', error=False)
     _datetime_name = sql_item_name(_datetime, self.flavor) if _datetime is not None else None
-    _datetime_index_name = sql_item_name(str(pipe) + '_' + _datetime + '_index', self.flavor)
+    _datetime_index_name = sql_item_name(str(pipe) + '_' + _datetime + '_index', self.flavor) if _datetime is not None else None
     _id = pipe.get_columns('id', error=False)
     _id_name = sql_item_name(_id, self.flavor) if _id is not None else None
-    _id_index_name = sql_item_name(str(pipe) + '_' + _id + '_index', self.flavor)
+    _id_index_name = sql_item_name(str(pipe) + '_' + _id + '_index', self.flavor) if _id is not None else None
     _pipe_name = sql_item_name(str(pipe), self.flavor)
     _create_space_partition = get_config('system', 'experimental', 'space')
 
@@ -338,7 +342,7 @@ def delete_pipe(
         return drop_tuple
 
     if not pipe.id:
-        return False, f"Pipe '{pipe}' is not registered"
+        return False, f"Pipe '{pipe}' is not registered."
 
     ### ensure pipes table exists
     from meerschaum.connectors.sql.tables import get_tables
@@ -518,7 +522,10 @@ def get_pipe_attributes(
     if not isinstance(attributes.get('parameters', None), dict):
         try:
             import json
-            attributes['parameters'] = json.loads(attributes['parameters'])
+            parameters = json.loads(attributes['parameters'])
+            if isinstance(parameters, str) and parameters[0] == '{':
+                parameters = json.loads(parameters)
+            attributes['parameters'] = parameters
         except Exception as e:
             attributes['parameters'] = dict()
 

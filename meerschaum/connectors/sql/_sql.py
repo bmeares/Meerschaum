@@ -307,15 +307,15 @@ def exec(
 
 def to_sql(
         self,
-        df : pandas.DataFrame,
-        name : str = None,
-        index : bool = False,
-        if_exists : str = 'replace',
-        method : str = "",
-        chunksize : Optional[int] = -1,
-        silent : bool = False,
-        debug : bool = False,
-        as_tuple : bool = False,
+        df: pandas.DataFrame,
+        name: str = None,
+        index: bool = False,
+        if_exists: str = 'replace',
+        method: str = "",
+        chunksize: Optional[int] = -1,
+        silent: bool = False,
+        debug: bool = False,
+        as_tuple: bool = False,
         **kw
     ) -> Union[bool, SuccessTuple]:
     """
@@ -340,7 +340,8 @@ def to_sql(
         None or multi. Details on pandas.to_sql
 
     :param as_tuple:
-        If True, return a (success_bool, message) tuple instead of a bool
+        If `True`, return a (success_bool, message) tuple instead of a bool.
+        Defaults to `False`.
 
     **kw : keyword arguments
         Additional arguments will be passed to the DataFrame's `to_sql` function
@@ -363,7 +364,7 @@ def to_sql(
     chunksize = chunksize if chunksize != -1 else self.sys_config.get('chunksize', None)
 
     success, msg = False, "Default to_sql message"
-    start = time.time()
+    start = time.perf_counter()
     if debug:
         msg = f"Inserting {len(df)} rows with chunksize: {chunksize}..."
         print(msg, end="", flush=True)
@@ -392,7 +393,7 @@ def to_sql(
             warn(str(e))
         success, msg = None, str(e)
 
-    end = time.time()
+    end = time.perf_counter()
     if success:
         msg = f"It took {round(end - start, 2)} seconds to sync {len(df)} rows to {name}."
 

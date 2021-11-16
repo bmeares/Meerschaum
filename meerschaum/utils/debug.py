@@ -16,6 +16,8 @@ def dprint(
         color : Optional[Union[str, List[str]]] = None,
         attrs : Optional[List[str]] = None,
         nopretty : bool = False,
+        _progress: Optional['rich.progress.Progress'] = None,
+        _task: Optional[int] = None,
         **kw
     ) -> None:
     """
@@ -77,4 +79,20 @@ def dprint(
         if colored is not None:
             premsg = colored(premsg, **_color)
     #  log.warning(premsg + msg, **kw)
-    print(premsg + msg)
+    _print = _progress.console.log if _progress is not None else print
+    _print(premsg + msg)
+
+
+def _checkpoint(
+        _progress: Optional['rich.progress.Progress'] = None,
+        _task: Optional[int] = None,
+        _total: Optional[int] = None,
+        **kw
+    ) -> None:
+    """
+    If the `_progress` and `_task` objects are provided, increment the task by one step.
+    If `_total` is provided, update the total instead.
+    """
+    if _progress is not None and _task is not None:
+        _kw = {'total': _total} if _total is not None else {'advance': 1}
+        _progress.update(_task, **_kw)

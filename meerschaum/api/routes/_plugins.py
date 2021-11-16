@@ -32,9 +32,9 @@ plugins_endpoint = endpoints['plugins']
 
 @app.post(plugins_endpoint + '/{name}', tags=['Plugins'])
 def register_plugin(
-        name : str,
-        version : str = None,
-        attributes : str = None,
+        name: str,
+        version: str = None,
+        attributes: str = None,
         archive : UploadFile = File(...),
         curr_user : 'meerschaum._internal.User.User' = fastapi.Depends(manager),
     ) -> SuccessTuple:
@@ -57,6 +57,11 @@ def register_plugin(
     if attributes is None:
         attributes = json.dumps({})
     attributes = json.loads(attributes)
+    if isinstance(attributes, str) and attributes[0] == '{':
+        try:
+            attributes = json.loads(attributes)
+        except Exception as e:
+            pass
 
     plugin = Plugin(name, version=version, attributes=attributes)
     plugin_user_id = get_api_connector().get_plugin_user_id(plugin)

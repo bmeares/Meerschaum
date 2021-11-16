@@ -58,9 +58,6 @@ def sync(
 
         debug : bool = False,
 
-        _progress: Optional['rich.progress.Progress'] = None,
-        _task: Optional['rich.progress.Task'] = None,
-
         **kw : Any
 
     ) -> SuccessTuple:
@@ -133,11 +130,13 @@ def sync(
     :param kw:
         Catch-all for keyword arguments.
     """
-    from meerschaum.utils.debug import dprint
+    from meerschaum.utils.debug import dprint, _checkpoint
     from meerschaum.utils.warnings import warn, error
     import time
     if (callback is not None or error_callback is not None) and blocking:
         warn("Callback functions are only executed when blocking = False. Ignoring...")
+
+    _checkpoint(_total=2, **kw)
 
     if (
           not self.connector_keys.startswith('plugin:')
@@ -152,11 +151,9 @@ def sync(
         'force': force, 'retries': retries, 'min_seconds': min_seconds,
         'check_existing': check_existing, 'blocking': blocking, 'workers': workers,
         'callback': callback, 'error_callback': error_callback, 'sync_chunks': (sync_chunks),
-        'chunksize': chunksize, '_progress': _progress, '_task': _task,
+        'chunksize': chunksize,
     })
 
-    if _progress and _task:
-        _progress.update(_task, advance=5)
 
     def _sync(
         p: 'meerschaum.Pipe',
@@ -205,10 +202,13 @@ def sync(
             if df is True:
                 return True, f"Pipe '{p}' was synced in parallel."
 
+        ### CHECKPOINT: Retrieved the DataFrame.
+        _checkpoint(**kw)
         if debug:
             dprint(
                 "DataFrame to sync:\n"
-                + (str(df)[:255] + '...' if len(str(df)) >= 256 else str(df))
+                + (str(df)[:255] + '...' if len(str(df)) >= 256 else str(df)),
+                **kw
             )
 
         ### if force, continue to sync until success
@@ -216,8 +216,6 @@ def sync(
         run = True
         _retries = 1
         while run:
-            if _progress and _task:
-                _progress.update(_task, advance=50)
             return_tuple = p.instance_connector.sync_pipe(
                 pipe = p,
                 df = df,
@@ -227,18 +225,20 @@ def sync(
             _retries += 1
             run = (not return_tuple[0]) and force and _retries <= retries
             if run and debug:
-                dprint(f"Syncing failed for pipe '{p}'. Attempt ( {_retries} / {retries} )")
-                dprint(f"Sleeping for {min_seconds} seconds...")
+                dprint(f"Syncing failed for pipe '{p}'. Attempt ( {_retries} / {retries} )", **kw)
+                dprint(f"Sleeping for {min_seconds} seconds...", **kw)
                 time.sleep(min_seconds)
             if _retries > retries:
                 warn(
                     f"Unable to sync pipe '{p}' within {retries} attempt" +
                         ("s" if retries != 1 else "") + "!"
                 )
-        ### Finished syncing. Handle caching.
+
+        ### CHECKPOINT: Finished syncing. Handle caching.
+        _checkpoint(**kw)
         if self.cache_pipe is not None:
             if debug:
-                dprint(f"Caching retrieved dataframe.")
+                dprint(f"Caching retrieved dataframe.", **kw)
                 _sync_cache_tuple = self.cache_pipe.sync(df, debug=debug, **kw)
                 if not _sync_cache_tuple[0]:
                     warn(f"Failed to sync local cache for pipe '{self}'.")
@@ -251,9 +251,9 @@ def sync(
     ### TODO implement concurrent syncing (split DataFrame? mimic the functionality of modin?)
     from meerschaum.utils.threading import Thread
     def default_callback(result_tuple : SuccessTuple):
-        dprint(f"Asynchronous result from Pipe '{self}': {result_tuple}")
+        dprint(f"Asynchronous result from Pipe '{self}': {result_tuple}", **kw)
     def default_error_callback(x : Exception):
-        dprint(f"Error received for Pipe '{self}': {x}")
+        dprint(f"Error received for Pipe '{self}': {x}", **kw)
     if callback is None and debug:
         callback = default_callback
     if error_callback is None and debug:
@@ -383,7 +383,7 @@ def filter_existing(
     ) if max_dt is not None else None
 
     if debug:
-        dprint(f"Looking at data between '{begin}' and '{end}'.")
+        dprint(f"Looking at data between '{begin}' and '{end}'.", **kw)
 
     ### backtrack_df is existing Pipe data that overlaps with the fetched df
     try:
@@ -400,7 +400,7 @@ def filter_existing(
         **kw
     )
     if debug:
-        dprint("Existing data:\n" + str(backtrack_df))
+        dprint("Existing data:\n" + str(backtrack_df), **kw)
 
     ### remove data we've already seen before
     from meerschaum.utils.misc import filter_unseen_df

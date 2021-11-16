@@ -27,6 +27,8 @@ table_wrappers = {
     'oracle': ('"', '"'),
 }
 
+json_flavors = {'postgresql', 'timescaledb',}
+
 def test_connection(
         self,
         **kw : Any

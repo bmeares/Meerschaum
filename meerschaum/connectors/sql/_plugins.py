@@ -23,6 +23,7 @@ def register_plugin(
     from meerschaum.utils.warnings import warn, error
     from meerschaum.utils.packages import attempt_import
     sqlalchemy = attempt_import('sqlalchemy')
+    from meerschaum.connectors.sql.tools import json_flavors
     from meerschaum.connectors.sql.tables import get_tables
     plugins = get_tables(mrsm_instance=self, debug=debug)['plugins']
 
@@ -49,7 +50,9 @@ def register_plugin(
     bind_variables = {
         'plugin_name' : plugin.name,
         'version' : plugin.version,
-        'attributes' : json.dumps(plugin.attributes),
+        'attributes' : (
+            json.dumps(plugin.attributes) if self.flavor not in json_flavors else plugin.attributes
+        ),
         'user_id' : plugin.user_id,
     }
 
@@ -235,5 +238,4 @@ def delete_plugin(
     if result is None:
         return False, f"Failed to delete plugin '{plugin}'."
     return True, f"Successfully deleted plugin '{plugin}'."
-
 

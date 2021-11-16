@@ -57,7 +57,7 @@ def get_tables(
 
         id_type = sqlalchemy.Integer
         params_type = (
-            sqlalchemy_utils.types.json.JSONType if conn.flavor not in ('duckdb')
+            sqlalchemy_utils.types.json.JSONType if conn.flavor not in ('duckdb',)
             else sqlalchemy.String
         )
 

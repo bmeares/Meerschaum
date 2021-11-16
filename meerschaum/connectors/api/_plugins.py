@@ -130,7 +130,12 @@ def get_plugin_attributes(
     from meerschaum.config.static import _static_config
     r_url = plugin_r_url(plugin) + '/attributes'
     response = self.get(r_url, use_token=False, debug=debug)
-    attributes = json.loads(response.text)
+    attributes = response.json()
+    if isinstance(attributes, str) and attributes and attributes[0] == '{':
+        try:
+            attributes = json.loads(attributes)
+        except Exception as e:
+            pass
     if not isinstance(attributes, dict):
         error(response.text)
     elif not response and 'detail' in attributes:
