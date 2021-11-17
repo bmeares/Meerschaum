@@ -165,7 +165,8 @@ def read(
         chunk_list.append(
             pd.read_sql(
                 formatted_query,
-                self.engine
+                self.engine,
+                params = params, 
             )
         )
 

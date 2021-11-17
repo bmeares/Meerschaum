@@ -345,7 +345,8 @@ def print_options(
             box = box.SIMPLE,
             show_header = False,
             show_footer = False,
-            title_style = ''
+            title_style = '',
+            expand = True,
         )
     else:
         table = Table.grid(padding=(0, 2))

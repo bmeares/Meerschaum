@@ -74,7 +74,7 @@ def flush_with_newlines(debug: bool = False) -> None:
     sys.stderr.write('\n' * lines)
 
 
-def progress():
+def progress(transient: bool = True, **kw):
     """
     Return a `rich.progress.Progress` object.
     """
@@ -87,6 +87,16 @@ def progress():
         rich_progress.TimeElapsedColumn(),
         rich_progress.TextColumn(''),
         rich_progress.BarColumn(bar_width=None,),
-        transient=True,
+        transient = transient,
+        **kw
     )
+
+def live(**kw):
+    """
+    Return a `rich.progress.Progress` object.
+    """
+    from meerschaum.utils.packages import import_rich, attempt_import
+    rich = import_rich()
+    rich_live = attempt_import('rich.live')
+    return rich_live.Live(**kw)
 

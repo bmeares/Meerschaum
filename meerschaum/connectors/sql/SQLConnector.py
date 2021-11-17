@@ -127,6 +127,8 @@ class SQLConnector(Connector):
         import os, threading
         self._pid = os.getpid()
         self._thread_ident = threading.current_thread().ident
+        self._sessions = {}
+        self._locks = {'_sessions': threading.RLock(), }
 
         ### verify the flavor's requirements are met
         if self.flavor not in self.flavor_configs:
@@ -142,6 +144,19 @@ class SQLConnector(Connector):
             if not self.test_connection(debug=debug):
                 from meerschaum.utils.warnings import warn
                 warn(f"Failed to connect with connector '{self}'!", stack=False)
+
+    @property
+    def Session(self):
+        if '_Session' not in self.__dict__:
+            if self.engine is None:
+                return None
+
+            from meerschaum.utils.packages import attempt_import
+            sqlalchemy_orm = attempt_import('sqlalchemy.orm')
+            session_factory = sqlalchemy_orm.sessionmaker(self.engine)
+            self._Session = sqlalchemy_orm.scoped_session(session_factory)
+
+        return self._Session
 
     @property
     def engine(self):
@@ -163,6 +178,7 @@ class SQLConnector(Connector):
 
         ### handle different threads
         if not same_thread:
+            #  print('different thread!')
             pass
 
         return self._engine
