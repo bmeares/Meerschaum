@@ -24,7 +24,7 @@ def sync(
     }
     return choose_subaction(action, options, **kw)
 
-def _pipes_lap(
+async def _pipes_lap(
         workers : Optional[int] = None,
         debug : bool = None,
         unblock : bool = False,
@@ -46,9 +46,11 @@ def _pipes_lap(
     from meerschaum.utils.threading import Lock, RLock, Thread
     from meerschaum.utils.misc import print_options, get_cols_lines
     from meerschaum.utils.pool import get_pool_executor, get_pool
+    import queue
     import multiprocessing
     import contextlib
     import time, os
+    import asyncio
     rich_table, rich_text, rich_box = attempt_import(
         'rich.table', 'rich.text', 'rich.box',
     )
@@ -59,7 +61,9 @@ def _pipes_lap(
         debug = debug,
         **kw
     )
-    pipes_queue = [pipe for pipe in pipes]
+    #  pipes_queue = queue.Queue()
+    pipes_queue = asyncio.Queue()
+    [pipes_queue.put_nowait(pipe) for pipe in pipes]
     results_dict = {}
     pipes_threads = {}
 
@@ -102,6 +106,27 @@ def _pipes_lap(
             table.add_row(str(pipe), message, status)
         return table
 
+    async def worker():
+        nonlocal results_dict, pipes_queue
+        while True:
+            try:
+                pipe = await pipes_queue.get()
+            except Exception:
+                return
+            return_tuple = sync_pipe(pipe)
+            locks['results_dict'].acquire()
+            results_dict[pipe] = return_tuple
+            locks['results_dict'].release()
+
+            #  print_tuple(return_tuple, _progress=_progress)
+            _checkpoint(_progress=_progress, _task=_task)
+            if _progress is not None:
+                locks['remaining_count'].acquire()
+                nonlocal remaining_count
+                remaining_count -= 1
+                locks['remaining_count'].release()
+            pipes_queue.task_done()
+
     def sync_pipe(p):
         """
         Wrapper function for the Pool.
@@ -113,8 +138,6 @@ def _pipes_lap(
                 debug = debug,
                 min_seconds = min_seconds,
                 workers = workers,
-                #  _progress = _progress,
-                #  _task = _task,
                 **kw
             )
         except Exception as e:
@@ -123,52 +146,33 @@ def _pipes_lap(
             print("Error: " + str(e))
             return_tuple = (False, f"Failed to sync pipe '{p}' with exception:" + "\n" + str(e))
 
-        locks['results_dict'].acquire()
-        nonlocal results_dict, pipes_queue
-        results_dict[p] = return_tuple
-        locks['results_dict'].release()
-
-        print_tuple(return_tuple, _progress=_progress)
-        _checkpoint(_progress=_progress, _task=_task)
-        if _progress is not None:
-            locks['remaining_count'].acquire()
-            nonlocal remaining_count
-            remaining_count -= 1
-            _progress.update(_task, description=_task_label(remaining_count))
-            locks['remaining_count'].release()
-
-        ### Start the next pipe in the queue.
-        locks['pipes_threads'].acquire()
-        next_pipe = pipes_queue[0] if pipes_queue else None
-        if next_pipe:
-            pipes_threads[next_pipe] = Thread(target=sync_pipe, args=(next_pipe,))
-            pipes_threads[next_pipe].start()
-            pipes_queue = pipes_queue[1:]
-        locks['pipes_threads'].release()
-
         return return_tuple
 
-    pool = get_pool(workers=workers)
+    #  pool = get_pool(workers=workers)
     #  cm = contextlib.nullcontext() if pool is None else pool
         
     #  results = pool.map(sync_pipe, pipes) if pool is not None else [sync_pipe(p) for p in pipes]
+    from meerschaum.utils.misc import debug_trace
+    #  debug_trace()
     if workers is None:
         workers = multiprocessing.cpu_count()
-    for pipe in pipes[:min(len(pipes), workers)]:
-        pipes_threads[pipe] = Thread(target=sync_pipe, args=(pipe,))
-        pipes_threads[pipe].start()
+    tasks = [asyncio.create_task(worker()) for _ in range(min(workers, len(pipes)))]
+    #  worker_threads = [Thread(target=worker) for _ in range(min(workers, len(pipes)))]
+    #  for worker_thread in worker_threads:
+        #  worker_thread.start()
+    #  for pipe in pipes[:min(len(pipes), workers)]:
+        #  pipes_threads[pipe] = Thread(target=sync_pipe, args=(pipe,))
+        #  pipes_threads[pipe].start()
 
-    ### Threads are running. Print progress.
-    while pipes_queue:
-        print(_progress.completed)
-        time.sleep(0.1)
-    ### Close out the final threads.
-    for pipe, thread in pipes_threads.items():
-        thread.join()
+    await pipes_queue.join()
+    for task in tasks:
+        task.cancel()
+    await asyncio.gather(*tasks, return_exceptions=True)
+
     #  flush_with_newlines(debug=debug) 
     #  get_console().print(_generate_progress_table())
-    _checkpoint(_progress=_progress, _task=_task)
-    results = [results_dict[pipe] for pipe in pipes]
+    #  _checkpoint(_progress=_progress, _task=_task)
+    results = [results_dict[pipe] for pipe in pipes] if len(results_dict) == len(pipes) else None
 
     if results is None:
         warn(f"Failed to fetch results from syncing pipes.")
@@ -221,6 +225,7 @@ def _sync_pipes(
     from meerschaum.utils.formatting._shell import progress, live
     import contextlib
     import time, sys
+    import asyncio
     run = True
     msg = ""
     interrupt_warning_msg = "Syncing was interrupted due to a keyboard interrupt."
@@ -235,13 +240,13 @@ def _sync_pipes(
 
         try:
             with cm:
-                success, fail = _pipes_lap(
+                success, fail = asyncio.run(_pipes_lap(
                     min_seconds = min_seconds,
                     _progress = _progress,
                     #  _live = _live,
                     debug = debug,
                     **kw
-                )
+                ))
         except Exception as e:
             import traceback
             traceback.print_exc()
@@ -268,7 +273,7 @@ def _sync_pipes(
         msg = (
             f"It took {round(lap_end - lap_begin, 2)} seconds to sync " +
             f"{len(success) + len(fail)} pipe" +
-                ("s" if (len(success) + len(fail)) > 1 else "") + "\n" +
+                ("s" if (len(success) + len(fail)) != 1 else "") + "\n" +
             f"    ({len(success)} succeeded, {len(fail)} failed)."
         ) if success is not None else "Syncing was aborted."
         if min_seconds > 0 and loop:

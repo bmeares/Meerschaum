@@ -997,7 +997,7 @@ def async_wrap(func):
         return await loop.run_in_executor(executor, pfunc)
     return run 
 
-def debug_trace(browser : bool = True):
+def debug_trace(browser: bool = True):
     from meerschaum.utils.packages import attempt_import
     heartrate = attempt_import('heartrate')
     heartrate.trace(files=heartrate.files.all, browser=browser)

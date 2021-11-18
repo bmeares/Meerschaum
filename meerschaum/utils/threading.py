@@ -11,7 +11,7 @@ RLock = threading.RLock
 
 class Thread(threading.Thread):
     """
-    Wrapper for threading.Thread with optional callback and error_callback functions
+    Wrapper for threading.Thread with optional callback and error_callback functions.
     """
 
     def __init__(self, *args, callback=None, error_callback=None, **kw):
@@ -50,3 +50,23 @@ class Thread(threading.Thread):
         Set the return to the result of the target.
         """
         self._return = self._target(*self._args, **self._kwargs)
+
+
+class Worker(threading.Thread):
+    """
+    Wrapper for `threading.Thread` for working with `queue.Queue` objects.
+    """
+
+    def __init__(self, queue, *args, timeout: int = 3, **kw):
+        self.queue = queue
+        self.timeout = timeout
+        super().__init__(*args, **kw)
+
+    def run(self):
+        while True:
+            try:
+                item = self.queue.get(timeout=self.timeout)
+            except queue.Empty:
+                return None
+
+            self.queue.task_done()
