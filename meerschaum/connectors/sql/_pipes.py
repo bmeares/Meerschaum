@@ -500,7 +500,7 @@ def get_pipe_attributes(
         debug : bool = False
     ) -> Optional[Mapping[Any, Any]]:
     """
-    Get a Pipe's attributes dictionary
+    Get a Pipe's attributes dictionary.
     """
     from meerschaum.utils.warnings import warn
     from meerschaum.connectors.sql.tables import get_tables

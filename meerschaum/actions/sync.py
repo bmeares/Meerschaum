@@ -24,7 +24,7 @@ def sync(
     }
     return choose_subaction(action, options, **kw)
 
-async def _pipes_lap(
+def _pipes_lap(
         workers : Optional[int] = None,
         debug : bool = None,
         unblock : bool = False,
@@ -61,9 +61,8 @@ async def _pipes_lap(
         debug = debug,
         **kw
     )
-    #  pipes_queue = queue.Queue()
-    pipes_queue = asyncio.Queue()
-    [pipes_queue.put_nowait(pipe) for pipe in pipes]
+    pipes_queue = queue.Queue()
+    [pipes_queue.put(pipe) for pipe in pipes]
     results_dict = {}
     pipes_threads = {}
 
@@ -106,11 +105,11 @@ async def _pipes_lap(
             table.add_row(str(pipe), message, status)
         return table
 
-    async def worker():
+    def worker():
         nonlocal results_dict, pipes_queue
         while True:
             try:
-                pipe = await pipes_queue.get()
+                pipe = pipes_queue.get()
             except Exception:
                 return
             return_tuple = sync_pipe(pipe)
@@ -148,31 +147,18 @@ async def _pipes_lap(
 
         return return_tuple
 
-    #  pool = get_pool(workers=workers)
-    #  cm = contextlib.nullcontext() if pool is None else pool
-        
-    #  results = pool.map(sync_pipe, pipes) if pool is not None else [sync_pipe(p) for p in pipes]
-    from meerschaum.utils.misc import debug_trace
-    #  debug_trace()
-    if workers is None:
-        workers = multiprocessing.cpu_count()
-    tasks = [asyncio.create_task(worker()) for _ in range(min(workers, len(pipes)))]
+    pool = get_pool(workers=workers)
+
+    results = pool.map(sync_pipe, pipes) if pool is not None else [sync_pipe(p) for p in pipes]
+    #  if workers is None:
+        #  workers = multiprocessing.cpu_count()
     #  worker_threads = [Thread(target=worker) for _ in range(min(workers, len(pipes)))]
     #  for worker_thread in worker_threads:
         #  worker_thread.start()
-    #  for pipe in pipes[:min(len(pipes), workers)]:
-        #  pipes_threads[pipe] = Thread(target=sync_pipe, args=(pipe,))
-        #  pipes_threads[pipe].start()
 
-    await pipes_queue.join()
-    for task in tasks:
-        task.cancel()
-    await asyncio.gather(*tasks, return_exceptions=True)
+    #  pipes_queue.join()
 
-    #  flush_with_newlines(debug=debug) 
-    #  get_console().print(_generate_progress_table())
-    #  _checkpoint(_progress=_progress, _task=_task)
-    results = [results_dict[pipe] for pipe in pipes] if len(results_dict) == len(pipes) else None
+    #  results = [results_dict[pipe] for pipe in pipes] if len(results_dict) == len(pipes) else None
 
     if results is None:
         warn(f"Failed to fetch results from syncing pipes.")
@@ -240,13 +226,13 @@ def _sync_pipes(
 
         try:
             with cm:
-                success, fail = asyncio.run(_pipes_lap(
+                success, fail = _pipes_lap(
                     min_seconds = min_seconds,
                     _progress = _progress,
                     #  _live = _live,
                     debug = debug,
                     **kw
-                ))
+                )
         except Exception as e:
             import traceback
             traceback.print_exc()
