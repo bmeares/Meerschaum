@@ -34,6 +34,7 @@ def python(
     from meerschaum.utils.debug import dprint
     from meerschaum.utils.warnings import warn, error
     from meerschaum.utils.process import run_process
+    from meerschaum.config import __version__ as _version
 
     if action is None:
         action = []

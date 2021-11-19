@@ -101,7 +101,7 @@ def read(
 
     if debug:
         import time
-        start = time.time()
+        start = time.perf_counter()
         dprint(query_or_table)
         dprint(f"Fetching with chunksize: {chunksize}")
 
@@ -126,13 +126,12 @@ def read(
             formatted_query = query_or_table
 
     try:
-        with self.engine.begin() as connection:
-            chunk_generator = pd.read_sql(
-                formatted_query,
-                connection,
-                params = params,
-                chunksize = chunksize
-            )
+        chunk_generator = pd.read_sql(
+            formatted_query,
+            self.engine,
+            params = params,
+            chunksize = chunksize
+        )
     except Exception as e:
         import inspect
         if debug:
@@ -163,14 +162,13 @@ def read(
     ### If no chunks returned, read without chunks
     ### to get columns
     if len(chunk_list) == 0:
-        with self.engine.begin() as connection:
-            chunk_list.append(
-                pd.read_sql(
-                    formatted_query,
-                    connection,
-                    params = params, 
-                )
+        chunk_list.append(
+            pd.read_sql(
+                formatted_query,
+                self.engine,
+                params = params, 
             )
+        )
 
     ### call the hook on any missed chunks.
     if chunk_hook is not None and len(chunk_list) > len(chunk_hook_results):
@@ -181,7 +179,7 @@ def read(
 
     ### chunksize is not None so must iterate
     if debug:
-        end = time.time()
+        end = time.perf_counter()
         dprint(f"Fetched {len(chunk_list)} chunks in {round(end - start, 2)} seconds.")
 
     if as_hook_results:
@@ -203,10 +201,10 @@ def _read_duckdb(query : str, engine : sqlalchemy.Engine, ):
 
 def value(
         self,
-        query : str,
-        *args : Any,
-        use_pandas : bool = False,
-        **kw : Any
+        query: str,
+        *args: Any,
+        use_pandas: bool = False,
+        **kw: Any
     ) -> Any:
     """
     Return a single value from a SQL query.
@@ -230,9 +228,10 @@ def value(
             commit=_commit,
             **kw
         )
-        _val = result.first()[0] if result is not None else None
+        first = result.first() if result is not None else None
+        _val = first[0] if first is not None else None
     except Exception as e:
-        #  warn(e)
+        warn(e)
         return None
     if _close:
         try:
@@ -259,11 +258,11 @@ def exec(
         with_connection: bool = False,
         **kw: Any
     ) -> Union[
-        sqlalchemy.engine.result.resultProxy,
-        sqlalchemy.engine.cursor.LegacyCursorResult,
-        Tuple[sqlalchemy.engine.result.resultProxy, sqlalchemy.engine.base.Connection],
-        Tuple[sqlalchemy.engine.cursor.LegacyCursorResult, sqlalchemy.engine.base.Connection],
-        None
+            sqlalchemy.engine.result.resultProxy,
+            sqlalchemy.engine.cursor.LegacyCursorResult,
+            Tuple[sqlalchemy.engine.result.resultProxy, sqlalchemy.engine.base.Connection],
+            Tuple[sqlalchemy.engine.cursor.LegacyCursorResult, sqlalchemy.engine.base.Connection],
+            None
     ]:
     """
     Execute SQL code and return success status. e.g. calling stored procedures.
@@ -285,33 +284,33 @@ def exec(
         else False
     )
 
-    with self.engine.begin() as connection:
-        try:
-            result = connection.execute(query, *args, **kw)
-        except Exception as e:
-            if debug:
-                dprint(f"Failed to execute query:\n\n{query}\n\n{e}")
-            if not silent:
-                warn(str(e))
+    #  with self.engine.connect() as connection:
+        #  try:
+            #  result = connection.execute(query, *args, **kw)
+        #  except Exception as e:
+            #  if debug:
+                #  dprint(f"Failed to execute query:\n\n{query}\n\n{e}")
+            #  if not silent:
+                #  warn(str(e))
 
 
-    #  connection = self.engine.connect()
-    #  transaction = connection.begin() if _commit else None
-    #  try:
-        #  result = connection.execute(query, *args, **kw)
-        #  if _commit:
-            #  transaction.commit()
-    #  except Exception as e:
-        #  if debug:
-            #  dprint(f"Failed to execute query:\n\n{query}\n\n{e}")
-        #  if not silent:
-            #  warn(str(e))
-        #  result = None
-        #  if _commit:
-            #  transaction.rollback()
-    #  finally:
-        #  if _close:
-            #  connection.close()
+    connection = self.engine.connect()
+    transaction = connection.begin() if _commit else None
+    try:
+        result = connection.execute(query, *args, **kw)
+        if _commit:
+            transaction.commit()
+    except Exception as e:
+        if debug:
+            dprint(f"Failed to execute query:\n\n{query}\n\n{e}")
+        if not silent:
+            warn(str(e))
+        result = None
+        if _commit:
+            transaction.rollback()
+    finally:
+        if _close:
+            connection.close()
 
         if with_connection:
             return result, connection
@@ -391,16 +390,15 @@ def to_sql(
             to_sql_kw[k] = v
 
     try:
-        with self.engine.begin() as connection:
-            df.to_sql(
-                name = name,
-                con = connection,
-                index = index,
-                if_exists = if_exists,
-                method = method,
-                chunksize = chunksize,
-                **to_sql_kw
-            )
+        df.to_sql(
+            name = name,
+            con = self.engine,
+            index = index,
+            if_exists = if_exists,
+            method = method,
+            chunksize = chunksize,
+            **to_sql_kw
+        )
         success = True
     except Exception as e:
         if not silent:

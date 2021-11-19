@@ -192,7 +192,7 @@ def sync(
                 return False, msg
 
         ### default: fetch new data via the connector.
-        ### If new data is provided, skip fetching
+        ### If new data is provided, skip fetching.
         if df is None:
             if p.connector is None:
                 return False, f"Cannot fetch data for pipe '{p}' without a connector."
