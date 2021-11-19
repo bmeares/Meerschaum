@@ -8,6 +8,7 @@ Define a custom Thread class with a callback method.
 import threading
 Lock = threading.Lock
 RLock = threading.RLock
+Event = threading.Event
 
 class Thread(threading.Thread):
     """

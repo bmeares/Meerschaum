@@ -496,8 +496,8 @@ def get_pipe_id(
 
 def get_pipe_attributes(
         self,
-        pipe : meerschaum.Pipe,
-        debug : bool = False
+        pipe: meerschaum.Pipe,
+        debug: bool = False,
     ) -> Optional[Mapping[Any, Any]]:
     """
     Get a Pipe's attributes dictionary.
@@ -508,13 +508,15 @@ def get_pipe_attributes(
     sqlalchemy = attempt_import('sqlalchemy')
     pipes = get_tables(mrsm_instance=self, debug=debug)['pipes']
 
-    if pipe.id is None:
+    if pipe.get_id(debug=debug) is None:
         return None
 
     try:
         q = sqlalchemy.select([pipes]).where(pipes.c.pipe_id == pipe.id)
         attributes = dict(self.exec(q, silent=True, debug=debug).first())
     except Exception as e:
+        import traceback
+        traceback.print_exc()
         warn(e)
         return None
 
