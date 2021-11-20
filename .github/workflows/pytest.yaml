@@ -15,6 +15,10 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v2
+      - name: Setup dev tooks
+        env:
+          MRSM_SKIP_DOCKER_EXPERIMENTAL: 1
+        run: ./scripts/setup.sh
       - name: pytest
         env:
           COMPOSE_INTERACTIVE_NO_CLI: 1
