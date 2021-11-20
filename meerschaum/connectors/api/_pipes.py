@@ -26,18 +26,23 @@ def pipe_r_url(
 
 def register_pipe(
         self,
-        pipe : meerschaum.Pipe,
-        debug : bool = False
+        pipe: meerschaum.Pipe,
+        debug: bool = False
     ) -> SuccessTuple:
     """
     Submit a POST to the API to register a new Pipe object.
-    Returns a tuple of (success_bool, response_dict)
+    Returns a tuple of (success_bool, response_dict).
     """
     from meerschaum.utils.debug import dprint
     from meerschaum.config.static import _static_config
     ### NOTE: if `parameters` is supplied in the Pipe constructor,
     ###       then `pipe.parameters` will exist and not be fetched from the database.
-    response = self.post(_static_config()['api']['endpoints']['pipes'], json=pipe.meta, debug=debug)
+    r_url = pipe_r_url(pipe)
+    response = self.post(
+        r_url + '/register',
+        json = pipe.parameters,
+        debug = debug,
+    )
     if debug:
         dprint(response.text)
     if isinstance(response.json(), list):
@@ -48,45 +53,47 @@ def register_pipe(
         response_tuple = response.__bool__(), response.text
     return response_tuple
 
+
 def edit_pipe(
         self,
-        pipe : meerschaum.Pipe,
-        patch : bool = False,
-        debug : bool = False,
-        **kw : Any
+        pipe: meerschaum.Pipe,
+        patch: bool = False,
+        debug: bool = False,
     ) -> SuccessTuple:
     """
-    Submit a PATCH to the API to edit an existing Pipe.
-    Returns a tuple of (success_bool, response_dict)
+    Submit a PATCH to the API to edit an existing Pipe object.
+    Returns a tuple of (success_bool, response_dict).
     """
+    from meerschaum.utils.debug import dprint
     from meerschaum.config.static import _static_config
-    if debug:
-        from meerschaum.utils.debug import dprint
-        dprint(f"patch: {patch}")
+    ### NOTE: if `parameters` is supplied in the Pipe constructor,
+    ###       then `pipe.parameters` will exist and not be fetched from the database.
+    r_url = pipe_r_url(pipe)
     response = self.patch(
-        _static_config()['api']['endpoints']['pipes'],
-        json = pipe.meta,
-        params = {'patch' : patch},
-        debug = debug
+        r_url + '/edit',
+        params = {'patch': patch,},
+        json = pipe.parameters,
+        debug = debug,
     )
-    try:
-        j = response.json()
-    except Exception as e:
-        return False, str(e)
+    if debug:
+        dprint(response.text)
+    if isinstance(response.json(), list):
+        response_tuple = response.__bool__(), response.json()[1]
+    elif 'detail' in response.json():
+        response_tuple = response.__bool__(), response.json()['detail']
+    else:
+        response_tuple = response.__bool__(), response.text
+    return response_tuple
 
-    if isinstance(j, dict) and 'detail' in j:
-        return False, j['detail']
-
-    return tuple(j)
 
 def fetch_pipes_keys(
         self,
-        connector_keys : list = [],
-        metric_keys : list = [],
-        location_keys : list = [],
-        params : Optional[Dict[str, Any]] = None,
-        mrsm_instance : str = 'api',
-        debug : bool = False
+        connector_keys: Optional[List[str]] = None,
+        metric_keys: Optional[List[str]] = None,
+        location_keys: Optional[List[str]] = None,
+        params: Optional[Dict[str, Any]] = None,
+        mrsm_instance: str = 'api',
+        debug: bool = False
     ) -> Union[List[str], Mapping[str, Any]]:
     """
     NOTE: This function no longer builds Pipes. Use the main `get_pipes()` function
@@ -102,17 +109,22 @@ def fetch_pipes_keys(
     from meerschaum.utils.warnings import error
     from meerschaum.config.static import _static_config
     import json
+    if connector_keys is None:
+        connector_keys = []
+    if metric_keys is None:
+        metric_keys = []
+    if location_keys is None:
+        location_keys = []
 
     r_url = _static_config()['api']['endpoints']['pipes'] + '/keys'
     try:
         j = self.get(
             r_url,
             params = {
-                'connector_keys' : json.dumps(connector_keys),
-                'metric_keys' : json.dumps(metric_keys),
-                'location_keys' : json.dumps(location_keys),
-                'params' : json.dumps(params),
-                'debug' : debug,
+                'connector_keys': json.dumps(connector_keys),
+                'metric_keys': json.dumps(metric_keys),
+                'location_keys': json.dumps(location_keys),
+                'params': json.dumps(params),
             },
             debug=debug
         ).json()
@@ -241,25 +253,34 @@ def sync_pipe(
     )
     return success_tuple
 
+
 def delete_pipe(
         self,
-        pipe : Optional[meerscahum.Pipe] = None,
-        debug : bool = None,        
+        pipe: Optional[meerscahum.Pipe] = None,
+        debug: bool = None,        
     ) -> SuccessTuple:
     """
     Delete a Pipe and drop its table.
     """
     from meerschaum.utils.warnings import error
+    from meerschaum.utils.debug import dprint
     if pipe is None:
         error(f"Pipe cannot be None.")
-    return self.do_action(
-        ['delete', 'pipes'],
-        connector_keys = pipe.connector_keys,
-        metric_keys = pipe.metric_key,
-        location_keys = pipe.location_key,
-        force = True,
-        debug = debug
+    r_url = pipe_r_url(pipe)
+    response = self.delete(
+        r_url + '/delete',
+        debug = debug,
     )
+    if debug:
+        dprint(response.text)
+    if isinstance(response.json(), list):
+        response_tuple = response.__bool__(), response.json()[1]
+    elif 'detail' in response.json():
+        response_tuple = response.__bool__(), response.json()['detail']
+    else:
+        response_tuple = response.__bool__(), response.text
+    return response_tuple
+
 
 def get_pipe_data(
         self,
