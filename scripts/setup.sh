@@ -14,20 +14,21 @@ rm -f "$reqs_file"
 
 ### Enable docker buildx.
 
-is_experimental=$( grep "experimental" /etc/docker/daemon.json | grep "true" )
-daemon_json="{
-  \"experimental\": true
-}"
-
-if [ -z "$is_experimental" ]; then
-  echo "Experimental mode is not enabled. Would you like to overwrite /etc/docker/daemon.json?"
-  select yn in "Y" "N"; do
-    case "$yn" in
-      Y ) echo "$daemon_json" | sudo tee /etc/docker/daemon.json && sudo systemctl restart docker
-        break ;;
-      N ) echo "Please enable experimental mode." && exit 1 ;;
-    esac
-  done
+if [ "$MRSM_SKIP_DOCKER_EXPERIMENTAL" != "1" ]; then
+  is_experimental=$( grep "experimental" /etc/docker/daemon.json | grep "true" )
+  daemon_json="{
+    \"experimental\": true
+  }"
+  if [ -z "$is_experimental" ]; then
+    echo "Experimental mode is not enabled. Would you like to overwrite /etc/docker/daemon.json?"
+    select yn in "Y" "N"; do
+      case "$yn" in
+        Y ) echo "$daemon_json" | sudo tee /etc/docker/daemon.json && sudo systemctl restart docker
+          break ;;
+        N ) echo "Please enable experimental mode." && exit 1 ;;
+      esac
+    done
+  fi
 fi
 docker buildx ls ; rc="$?"
 if [[ "$rc" != "0" ]]; then
