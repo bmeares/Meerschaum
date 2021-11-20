@@ -16,7 +16,7 @@ services:
       - 5439:5432
     volumes:
       - timescaledb_volume:/var/lib/postgresql/data:z
-    image: timescale/timescaledb:latest-pg13-oss
+    image: timescale/timescaledb:latest-pg14-oss
   mssql:
     environment:
       - ACCEPT_EULA=Y
