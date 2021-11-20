@@ -16,9 +16,9 @@ _sequence_flavors = {'duckdb'}
 _skip_index_names_flavors = {'mssql'}
 
 def get_tables(
-        mrsm_instance : Optional[Union[str, meerschaum.connectors.Connector]] = None,
-        create : bool = True,
-        debug : Optional[bool] = None
+        mrsm_instance: Optional[Union[str, meerschaum.connectors.Connector]] = None,
+        create: bool = True,
+        debug: Optional[bool] = None
     ) -> Dict[str, sqlalchemy.Table]:
     """
     Substantiate and create sqlalchemy tables
@@ -84,7 +84,7 @@ def get_tables(
                     *id_col_args['user_id'],
                     **id_col_kw['user_id'],
                 ),
-                sqlalchemy.Column('username', sqlalchemy.String(256), index=index_names, nullable=False, unique=True,),
+                sqlalchemy.Column('username', sqlalchemy.String(256), index=index_names, nullable=False,),
                 sqlalchemy.Column('password_hash', sqlalchemy.String(1024)),
                 sqlalchemy.Column('email', sqlalchemy.String(256)),
                 sqlalchemy.Column('user_type', sqlalchemy.String(256)),
@@ -98,7 +98,7 @@ def get_tables(
                     *id_col_args['plugin_id'],
                     **id_col_kw['plugin_id'],
                 ),
-                sqlalchemy.Column('plugin_name', sqlalchemy.String(256), index=index_names, nullable=False, unique=True,),
+                sqlalchemy.Column('plugin_name', sqlalchemy.String(256), index=index_names, nullable=False,),
                 sqlalchemy.Column('user_id', sqlalchemy.Integer, nullable=False),
                 sqlalchemy.Column('version', sqlalchemy.String(256)),
                 sqlalchemy.Column('attributes', params_type),
@@ -120,9 +120,9 @@ def get_tables(
             sqlalchemy.Column("metric_key", sqlalchemy.String(256), index=index_names, nullable=False),
             sqlalchemy.Column("location_key", sqlalchemy.String(256), index=index_names),
             sqlalchemy.Column("parameters", params_type),
-            sqlalchemy.UniqueConstraint(
-                'connector_keys', 'metric_key', 'location_key', name='pipe_index'
-            ),
+            #  sqlalchemy.UniqueConstraint(
+                #  'connector_keys', 'metric_key', 'location_key', name='pipe_index'
+            #  ),
             extend_existing = True,
         )
 
