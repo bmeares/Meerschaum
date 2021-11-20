@@ -33,7 +33,7 @@ sleep 4
 
 
 ### Execute the pytest tests.
-MRSM_ROOT_DIR="$test_root" python -m pytest --ignore=portable/ --ignore=test_root/ --ignore=tests/data/
+MRSM_ROOT_DIR="$test_root" python -m pytest --ignore=portable/ --ignore=test_root/ --ignore=tests/data/; rc="$?"
 
 ### Cleanup
 if [ "$2" == "rm" ]; then
@@ -42,3 +42,5 @@ if [ "$2" == "rm" ]; then
   cd ../
   MRSM_ROOT_DIR="$test_root" python -m meerschaum delete job test_api -f -y
 fi
+
+exit "$rc"

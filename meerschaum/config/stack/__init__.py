@@ -43,7 +43,7 @@ mqtt_host = "meerschaum_mqtt"
 
 env_dict = {
     'COMPOSE_PROJECT_NAME' : 'meerschaum_stack',
-    'TIMESCALEDB_VERSION' : 'latest-pg13-oss',
+    'TIMESCALEDB_VERSION' : 'latest-pg14-oss',
     'POSTGRES_USER' : f'{db_user}',
     'POSTGRES_PASSWORD' : f'{db_pass}',
     'POSTGRES_DB' : f'{db_base}',
