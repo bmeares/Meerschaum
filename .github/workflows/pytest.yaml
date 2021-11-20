@@ -1,0 +1,21 @@
+name: pytest
+
+on:
+  workflow_dispatch:
+    inputs:
+      publish:
+        description: 'Run the pytest script.'
+        required: false
+        default: ""
+  # push:
+    # branches: [ main ]
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v2
+      - name: pytest
+        env:
+          COMPOSE_INTERACTIVE_NO_CLI: 1
+        run: ./scripts/test.sh db
