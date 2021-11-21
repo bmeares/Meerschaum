@@ -13,9 +13,9 @@ from meerschaum.utils.formatting._pprint import pprint
 from meerschaum.utils.formatting._pipes import pprint_pipes
 
 _attrs = {
-    'ANSI' : None,
-    'UNICODE' : None,
-    'CHARSET' : None,
+    'ANSI': None,
+    'UNICODE': None,
+    'CHARSET': None,
 }
 __all__ = sorted([
     'ANSI', 'CHARSET', 'UNICODE',
@@ -72,7 +72,6 @@ def rich_text_to_str(text) -> str:
         console.print(text)
     return cap.get()[:-1]
 
-#  def translate_termcolor_to_rich()
 
 def _init():
     global _attrs
@@ -197,7 +196,7 @@ def print_tuple(
 
 def __getattr__(name : str) -> str:
     """
-    Lazily load module-level variables
+    Lazily load module-level variables.
     """
     if name.startswith('__') and name.endswith('__'):
         raise AttributeError("Cannot import dunders from this module.")

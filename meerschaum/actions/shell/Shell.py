@@ -800,6 +800,7 @@ def input_with_sigint(_input, session, shell: Optional[Shell] = None):
     from meerschaum.utils.formatting import CHARSET, ANSI, UNICODE, colored
     from meerschaum.connectors import is_connected
     from meerschaum.utils.misc import remove_ansi
+    from meerschaum.config import get_config
     import platform
     if shell is None:
         from meerschaum.actions import get_shell
@@ -811,6 +812,8 @@ def input_with_sigint(_input, session, shell: Optional[Shell] = None):
     last_connected = False
     def bottom_toolbar():
         nonlocal last_connected
+        if not get_config('shell', 'bottom_toolbar', 'enabled'):
+            return None
         if not shell._update_bottom_toolbar and platform.system() == 'Windows':
             return shell._old_bottom_toolbar
         size = os.get_terminal_size()

@@ -228,7 +228,7 @@ def _sync_pipes(
         lap_end = time.perf_counter()
         print()
 
-        if success is not None:
+        if success is not None and not loop:
             clear_screen(debug=debug)
         if fail is not None and len(fail) > 0:
             print_options(

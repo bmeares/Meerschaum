@@ -128,7 +128,7 @@ def _simple_fetch_query(pipe, debug: bool=False, **kw) -> str:
     Build a fetch query from a pipe's definition.
     """
     definition = pipe.parameters['fetch']['definition']
-    return f"WITH definition AS ({definition}) SELECT DISTINCT * FROM definition"
+    return f"WITH definition AS ({definition}) SELECT * FROM definition"
 
 def _join_fetch_query(
         pipe,
