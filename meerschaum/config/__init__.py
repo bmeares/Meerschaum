@@ -196,8 +196,6 @@ def get_config(
             config = apply_patch_to_config(patched_default_config, config)
             if patch and keys[0] != symlinks_key:
                 print("Updating configuration, please wait...")
-                from meerschaum.utils.formatting import pprint
-                pprint(config)
                 write_config(config, debug=debug)
     if as_tuple:
         return (not invalid_keys), c
