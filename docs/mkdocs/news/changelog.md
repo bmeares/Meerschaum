@@ -6,8 +6,30 @@ hide:
 # Changelog and Release Notes
 This changelog was not introduced until v0.2.12, so many of the critical releases of Meerschaum have already been published. I've backlogged previous releases but haven't added all notes for all the versions.
 
-## 0.4.x Releases
+## 0.5.x Releases
 This is the current release cycle, so future features will be updated below.
+
+### v0.5.0
+- **New syncing engine.**  
+  The `sync pipes` command reduces concurrency issues while nearly halving syncing times for large batches of pipes.
+- **Syncing progress bar.**  
+  The `sync pipes` command displays a progress bar (only in the shell) to track the number of completed pipes.
+- **Bumped default TimescaleDB image to PostgreSQL 14.**  
+  You can continue using PostgreSQL 13 if you already have an existing database.
+- **Changed API endpoints.**  
+  An endpoint for deleting pipes was added, and the editing and registration endpoints were changed to match the connector, metric, location path scheme.
+- **Redesigned test suite.**  
+  The `pytest` environment now checks syncing, registration, deletion, etc. for pipes and users with many database flavors.
+- **Cleanup and small bugfixes.**  
+  As a result of the updated testing suite, issues with several database flavors as well as the API have been resolved.
+
+## 0.4.x Releases
+The 0.4.x series dramatically updated Meerschaum, such as ensuring compatibility with Python 3.10, migrating to Bootstrap 5, and implementing useful features like the redesigned web console and the shell toolbar.
+
+### v0.4.16 — v0.4.18
+- **Rewritten API \`register()\` methods.**
+- **MySQL / MariaDB and CockroachDB fixes.**
+- **Additional tests.**
 
 ### v0.4.11 — v0.4.15
 - **Change the number of columns when printing items.**  
