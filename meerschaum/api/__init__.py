@@ -3,7 +3,7 @@
 # vim:fenc=utf-8
 
 """
-Meerschaum API backend. Start an API instance with `api start`.
+Meerschaum API backend. Start an API instance with `start api`.
 """
 from __future__ import annotations
 import pathlib, os
