@@ -10,6 +10,8 @@ cx_Freeze, Executable = None, None
 ### read values from within the package
 exec(open('meerschaum/config/_version.py').read())
 exec(open('meerschaum/utils/packages/_packages.py').read())
+exec(open('meerschaum/config/static/__init__.py').read())
+setup_cf = _static_config()['setup']
 
 class PostInstallCommand(install):
     """Post-installation for installation mode."""
@@ -30,16 +32,16 @@ with open('README.md', 'r', encoding='utf-8') as f:
     readme = f.read()
 
 setup_kw_args = {
-    'name'                          : 'meerschaum',
+    'name'                          : setup_cf['name'],
     'version'                       : __version__,
-    'description'                   : 'Create and Manage Pipes with Meerschaum',
+    'description'                   : setup_cf['description'],
     'long_description'              : readme,
     'long_description_content_type' : 'text/markdown',
-    'url'                           : 'https://meerschaum.io',
-    'author'                        : 'Bennett Meares',
-    'author_email'                  : 'bennett.meares@gmail.com',
-    'maintainer_email'              : 'bennett.meares@gmail.com',
-    'license'                       : 'Apache Software License 2.0',
+    'url'                           : setup_cf['url'],
+    'author'                        : setup_cf['author'],
+    'author_email'                  : setup_cf['author_email'],
+    'maintainer_email'              : setup_cf['maintainer_email'],
+    'license'                       : setup_cf['license'],
     'packages'                      : setuptools.find_packages(exclude=['*tests*']),
     'install_requires'              : extras['required'],
     'extras_require'                : extras,

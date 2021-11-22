@@ -79,5 +79,15 @@ def _static_config():
                 'min_username_length': 5,
                 'min_password_length': 5,
             },
+            'setup': {
+                'name': 'meerschaum',
+                'formal_name': 'Meerschaum',
+                'description': 'Sync Time-Series Pipes with Meerschaum',
+                'url': 'https://meerschaum.io',
+                'author': 'Bennett Meares',
+                'author_email': 'bennett.meares@gmail.com',
+                'maintainer_email': 'bennett.meares@gmail.com',
+                'license': 'Apache Software License 2.0',
+            },
         }
     return static_config

@@ -103,6 +103,9 @@ packages : Dict[str, Dict[str, str]] = {
         'pyreadline3' : 'pyreadline3>=3.3; platform_system == "Windows"',
         'gnureadline' : 'gnureadline>=8.0.0; platform_system != "Windows"',
     },
+    'gui' : {
+        'toga' : 'toga>=0.3.0.dev29',
+    },
     'extras' : {
         'cmd2' : 'cmd2>=1.4.0',
         'ruamel.yaml' : 'ruamel.yaml>=0.16.12',

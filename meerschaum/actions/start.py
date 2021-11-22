@@ -19,8 +19,9 @@ def start(
 
     from meerschaum.utils.misc import choose_subaction
     options = {
-        'api' : _start_api,
-        'jobs' : _start_jobs,
+        'api': _start_api,
+        'jobs': _start_jobs,
+        'gui': _start_gui,
     }
     return choose_subaction(action, options, **kw)
 
@@ -283,8 +284,8 @@ def _start_jobs(
     return len(_successes) > 0, msg
 
 def _complete_start_jobs(
-        action : Optional[List[str]] = None,
-        line : str = '',
+        action: Optional[List[str]] = None,
+        line: str = '',
         **kw
     ) -> List[str]:
     from meerschaum.utils.daemon import get_daemon_ids
@@ -292,13 +293,8 @@ def _complete_start_jobs(
     if not action:
         return daemon_ids
     possibilities = []
-    #  if action[-1] in daemon_ids:
-        #  return daemon_ids
     _line_end = line.split(' ')[-1]
     for daemon_id in daemon_ids:
-        #  if daemon_id.startswith(action[-1]) and (
-            #  daemon_id not in action or _line_end == ''
-        #  ):
         if daemon_id in action:
             continue
         if _line_end == '':
@@ -307,6 +303,21 @@ def _complete_start_jobs(
         if daemon_id.startswith(action[-1]):
             possibilities.append(daemon_id)
     return possibilities
+
+
+def _start_gui(**kw) -> SuccessTuple:
+    """
+    Start the Meerschaum GUI application.
+    """
+    try:
+        from meerschaum.gui import app
+        app.main_loop()
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        print(e)
+        return False, str(e)
+    return True, "Success"
 
 
 ### NOTE: This must be the final statement of the module.
