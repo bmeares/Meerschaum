@@ -842,8 +842,8 @@ def replace_password(d : dict) -> dict:
     return _d
 
 def filter_keywords(
-        func : Callable[[Any], Any],
-        **kw : Any
+        func: Callable[[Any], Any],
+        **kw: Any
     ) -> Mapping[str, Any]:
     """
     Filter out unsupported keywords.

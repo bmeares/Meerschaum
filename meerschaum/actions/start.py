@@ -310,7 +310,8 @@ def _start_gui(**kw) -> SuccessTuple:
     Start the Meerschaum GUI application.
     """
     try:
-        from meerschaum.gui import app
+        from meerschaum.gui import build_app
+        app = build_app(**kw)
         app.main_loop()
     except Exception as e:
         import traceback
