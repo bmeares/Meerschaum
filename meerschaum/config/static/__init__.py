@@ -82,6 +82,7 @@ def _static_config():
             'setup': {
                 'name': 'meerschaum',
                 'formal_name': 'Meerschaum',
+                'app_id': 'io.meerschaum',
                 'description': 'Sync Time-Series Pipes with Meerschaum',
                 'url': 'https://meerschaum.io',
                 'author': 'Bennett Meares',
