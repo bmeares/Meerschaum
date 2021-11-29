@@ -8,6 +8,8 @@ Build the web console virtual terminal using Tornado and xterm.js.
 
 from __future__ import annotations
 import os
+import platform
+import sys
 from meerschaum.utils.packages import attempt_import
 from meerschaum.api import app as fastapi_app, endpoints
 from meerschaum.api.term.TermPageHandler import TermPageHandler
@@ -18,7 +20,9 @@ tornado, terminado, tornado_xstatic, uvicorn = attempt_import(
 )
 STATIC_DIR = os.path.join(os.path.dirname(terminado.__file__), "_static")
 
-term_manager = terminado.UniqueTermManager(shell_command=['bash'])
+commands = [sys.executable, '-m', 'meerschaum']
+
+term_manager = terminado.UniqueTermManager(shell_command=commands)
 handlers = [
     (
         r"/websocket",
