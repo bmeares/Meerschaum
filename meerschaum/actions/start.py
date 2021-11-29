@@ -68,6 +68,18 @@ def _start_api(action : Optional[List[str]] = None, **kw):
             Defaults to the number of CPU cores or 1 on Android.
     """
     from meerschaum.actions import actions
+    from meerschaum.api.term import tornado_app, tornado, term_manager
+    tornado_app.listen(8765, 'localhost')
+    loop = tornado.ioloop.IOLoop.instance()
+    #  loop.add_callback(webbrowser.open, url)
+    try:
+        loop.start()
+    except KeyboardInterrupt:
+        print(" Shutting down on SIGINT")
+    finally:
+        term_manager.shutdown()
+        loop.close()
+    return True, "Success"
     return actions['api'](action=['start'], **kw)
 
 def _start_jobs(

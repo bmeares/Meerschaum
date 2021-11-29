@@ -12,48 +12,49 @@ def _static_config():
     global static_config
     if static_config is None:
         static_config = {
-            'api' : {
-                'endpoints' : {
-                    'index' : '/',
-                    'favicon' : '/favicon.ico',
-                    'plugins' : '/plugins',
-                    'pipes' : '/pipes',
-                    'metadata' : '/metadata',
-                    'actions' : '/actions',
-                    'users' : '/users',
-                    'login' : '/login',
-                    'connectors' : '/connectors',
-                    'version' : '/version',
-                    'chaining' : '/chaining',
-                    'websocket' : '/ws',
-                    'dash' : '/dash',
+            'api': {
+                'endpoints': {
+                    'index': '/',
+                    'favicon': '/favicon.ico',
+                    'plugins': '/plugins',
+                    'pipes': '/pipes',
+                    'metadata': '/metadata',
+                    'actions': '/actions',
+                    'users': '/users',
+                    'login': '/login',
+                    'connectors': '/connectors',
+                    'version': '/version',
+                    'chaining': '/chaining',
+                    'websocket': '/ws',
+                    'dash': '/dash',
+                    'term': '/term',
                 },
-                'oauth' : {
-                    'token_expires_minutes' : 15,
+                'oauth': {
+                    'token_expires_minutes': 15,
                 },
             },
-            'environment' : {
-                'config' : 'MRSM_CONFIG',
-                'patch' : 'MRSM_PATCH',
-                'root' : 'MRSM_ROOT_DIR',
-                'runtime' : 'MRSM_RUNTIME',
+            'environment': {
+                'config': 'MRSM_CONFIG',
+                'patch': 'MRSM_PATCH',
+                'root': 'MRSM_ROOT_DIR',
+                'runtime': 'MRSM_RUNTIME',
             },
-            'config' : {
-                'default_filetype' : 'json',
-                'symlinks_key' : '_symlinks',
+            'config': {
+                'default_filetype': 'json',
+                'symlinks_key': '_symlinks',
             },
-            'system' : {
-                'arguments' : {
-                    'sub_decorators' : (
+            'system': {
+                'arguments': {
+                    'sub_decorators': (
                         '[',
                         ']'
                     ),
                 },
-                'urls' : {
-                    'get-pip.py' : 'https://bootstrap.pypa.io/get-pip.py',
+                'urls': {
+                    'get-pip.py': 'https://bootstrap.pypa.io/get-pip.py',
                 },
-                'success' : {
-                    'ignore' : (
+                'success': {
+                    'ignore': (
                         'Success',
                         'success'
                         'Succeeded',
@@ -61,20 +62,20 @@ def _static_config():
                         None,
                     ),
                 },
-                'prompt' : {
-                    'web' : False,
+                'prompt': {
+                    'web': False,
                 },
             },
-            'connectors' : {
-                'default_label' : 'main',
+            'connectors': {
+                'default_label': 'main',
             },
-            'users' : {
-                'password_hash' : {
-                    'schemes' : [
+            'users': {
+                'password_hash': {
+                    'schemes': [
                         'pbkdf2_sha256',
                     ],
-                    'default' : 'pbkdf2_sha256',
-                    'pbkdf2_sha256__default_rounds' : 30000,
+                    'default': 'pbkdf2_sha256',
+                    'pbkdf2_sha256__default_rounds': 30000,
                 },
                 'min_username_length': 5,
                 'min_password_length': 5,

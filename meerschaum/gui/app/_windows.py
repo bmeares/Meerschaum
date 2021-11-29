@@ -19,7 +19,7 @@ def get_main_window(self) -> toga.window.Window:
         mrsm_instance=self._instance, debug=self._debug, **self._kw
     )
 
-    left_box = toga.Box(children=[
+    self.left_box = toga.Box(children=[
         toga.Box(children=[
             toga.Selection(items=get_connector_labels('sql', 'api'), style=toga.style.Pack(flex=1)),
             self.tree,
@@ -27,11 +27,12 @@ def get_main_window(self) -> toga.window.Window:
         ], style=toga.style.Pack(flex=1, padding=10, direction='column', width=200))
 
     ])
-    right_box = toga.Box(children=[
-        toga.Label("Foo!"),
+    self.label = toga.Label("foo!")
+    self.right_box = toga.Box(children=[
+        self.label,
     ])
 
-    main_box = toga.Box(children=[left_box, right_box])
+    main_box = toga.Box(children=[self.left_box, self.right_box])
     main_window.content = main_box
     self._windows['main_window'] = main_window
     return self._windows['main_window']
