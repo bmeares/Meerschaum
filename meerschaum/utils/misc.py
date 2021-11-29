@@ -1067,3 +1067,16 @@ def items_str(
     output += s + a + (s if and_ else '') + q + str(items[-1]) + q
     return output
 
+
+def is_docker_available():
+    """
+    Check if we can connect to the Docker engine.
+    """
+    import subprocess
+    try:
+        has_docker = subprocess.call(
+            ['docker', 'ps'], stdout=subprocess.DEVNULL, stderr=subprocess.STDOUT
+        ) == 0
+    except Exception as e:
+        has_docker = False
+    return has_docker
