@@ -30,9 +30,9 @@ def build_pipes_tree(self, **kw) -> toga.Tree:
         on_select = self._pipes_tree_on_select_handler,
     )
     for ck in pipes:
-        ck_root = tree.data.append(None, pipes=(icons['connector'] + '  ' + ck + '  '))
+        ck_root = tree.data.append(None, pipes=(icons['connector'] + '  ' + ck))
         for mk in pipes[ck]:
-            mk_root = tree.data.append(ck_root, pipes=(icons['metric'] + '  ' + mk + '  '))
+            mk_root = tree.data.append(ck_root, pipes=(icons['metric'] + '  ' + mk))
 
             for lk in pipes[ck][mk]:
                 _lk = lk if lk is not None else "None"
@@ -42,7 +42,11 @@ def build_pipes_tree(self, **kw) -> toga.Tree:
 
 def _pipes_tree_on_select_handler(
         self,
-        widget: toga.Widget, node:
-        toga.sources.tree_source.Node,
+        widget: toga.Widget,
+        node: toga.sources.tree_source.Node,
     ):
-    print(widget, node)
+    print(node.__dict__)
+    print(node._children)
+    print(self.right_box.__dict__)
+    self.right_box._children = [toga.Label("memes")]
+    #  self.label.text = 'memes'

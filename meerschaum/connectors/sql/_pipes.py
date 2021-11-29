@@ -214,7 +214,7 @@ def fetch_pipes_keys(
     ]
     q = sqlalchemy.select(
         [pipes.c.connector_keys, pipes.c.metric_key, pipes.c.location_key]
-    ).where(sqlalchemy.and_(*_where))
+    ).where(sqlalchemy.and_(True, *_where))
 
     ### Parse IN params and add OR IS NULL if None in list.
     for c, vals in cols.items():
