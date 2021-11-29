@@ -693,13 +693,15 @@ def pip_uninstall(
     return pip_install(*args, _uninstall=True, **{k: v for k, v in kw.items() if k != '_uninstall'})
 
 def run_python_package(
-        package_name : str,
-        args : Optional[List[str]] = None,
-        venv : Optional[str] = None,
-        cwd : Optional[str] = None,
-        foreground : bool = False,
-        debug : bool = False,
-        **kw : Any,
+        package_name: str,
+        args: Optional[List[str]] = None,
+        venv: Optional[str] = None,
+        cwd: Optional[str] = None,
+        foreground: bool = False,
+        as_proc: bool = False,
+        capture_output: bool = False,
+        debug: bool = False,
+        **kw: Any,
     ) -> Union[int, subprocess.Popen]:
     """
     Runs an installed python package.
@@ -729,7 +731,7 @@ def run_python_package(
         and by extension `subprocess.Popen()`.
     """
     import sys, platform
-    from subprocess import call
+    import subprocess
     from meerschaum.config._paths import VIRTENV_RESOURCES_PATH
     from meerschaum.utils.process import run_process
     from meerschaum.utils.warnings import warn
@@ -751,15 +753,21 @@ def run_python_package(
     if debug:
         print(command, file=sys.stderr)
     try:
-        rc = run_process(command, foreground=foreground, **kw)
+        to_return = run_process(
+            command, foreground=foreground, as_proc=as_proc, capture_output=capture_output, **kw
+        )
     except Exception as e:
         print(traceback.format_exc(e))
         warn(e, color=False)
-        rc = call(command)
+        stdout, stderr = (
+            (None, None) if not capture_output else (subprocess.PIPE, subprocess.PIPE)
+        )
+        proc = subprocess.Popen(command, stdout=stdout, stderr=stderr)
+        to_return = proc if as_proc else proc.wait()
     except KeyboardInterrupt:
-        rc = 1
+        to_return = 1 if not as_proc else None
     os.chdir(old_cwd)
-    return rc
+    return to_return
 
 def attempt_import(
         *names: List[str],

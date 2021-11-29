@@ -18,17 +18,17 @@ from meerschaum.utils.typing import Union, Optional, Any, Callable, Dict
 
 def run_process(
         *args,
-        foreground : bool = False,
-        as_proc : bool = False,
-        line_callback : Optional[Callable[[str], Any]] = None,
-        store_proc_dict : Optional[Dict[str, Any]] = None,
-        store_proc_key : str = 'child_process',
-        **kw : Any
+        foreground: bool = False,
+        as_proc: bool = False,
+        line_callback: Optional[Callable[[str], Any]] = None,
+        store_proc_dict: Optional[Dict[str, Any]] = None,
+        store_proc_key: str = 'child_process',
+        capture_output: bool = False,
+        **kw: Any
     ) -> Union[int, subprocess.Popen]:
     """
     Original foreground solution found here:
-    https://stackoverflow.com
-    /questions/23826695/handling-keyboard-interrupt-when-using-subproccess
+    https://stackoverflow.com/questions/23826695/handling-keyboard-interrupt-when-using-subproccess
 
 
     :param args:
@@ -108,6 +108,9 @@ def run_process(
 
     try:
         # fork the child
+        stdout, stderr = (None, None) if not capture_output else (subprocess.PIPE, subprocess.PIPE)
+        kw['stdout'] = stdout
+        kw['stderr'] = stderr
         child = subprocess.Popen(*args, **kw)
 
         # we can't set the process group id from the parent since the child

@@ -10,27 +10,31 @@ from __future__ import annotations
 from meerschaum.utils.typing import SuccessTuple, Any, List, Optional
 
 def stack(
-        action : Optional[List[str]] = None,
-        sysargs : Optional[List[str]] = None,
-        sub_args : Optional[List[str]] = None,
-        yes : bool = False,
-        noask : bool = False,
-        force : bool = False,
-        debug : bool = False,
-        **kw : Any
+        action: Optional[List[str]] = None,
+        sysargs: Optional[List[str]] = None,
+        sub_args: Optional[List[str]] = None,
+        yes: bool = False,
+        noask: bool = False,
+        force: bool = False,
+        debug: bool = False,
+        _capture_output: bool = False,
+        **kw: Any
     ) -> SuccessTuple:
     """
     Control the Meerschaum stack with Docker Compose.
     Usage: `stack {command}`
     
-    command : action[0] : default 'up'
+    Command: action[0]: default 'up'
         Docker Compose command to run. E.g. 'config' will print Docker Compose configuration
     """
-    from subprocess import call
+    import subprocess
+    import contextlib
+    import io
+    import os
+    import sys
     import meerschaum.config.stack
     from meerschaum.config.stack import get_necessary_files, write_stack
     from meerschaum.config._paths import STACK_COMPOSE_PATH
-    #  from meerschaum.utils.packages import reload_package
     from meerschaum.utils.prompt import yes_no
     import meerschaum.config
     from meerschaum.utils.packages import attempt_import, run_python_package, venv_contains_package
@@ -38,7 +42,7 @@ def stack(
     from meerschaum.utils.debug import dprint
     from meerschaum.utils.warnings import warn
     from meerschaum.utils.formatting import ANSI
-    import os, sys
+    from meerschaum.utils.misc import is_docker_available
 
     if action is None:
         action = []
@@ -58,15 +62,7 @@ def stack(
     bootstrap = False
     for fp in get_necessary_files():
         if not os.path.isfile(fp):
-            if not force:
-                if yes_no(bootstrap_question, yes=yes, noask=noask):
-                    bootstrap = True
-                else:
-                    warn_message = "Cannot start stack without bootstrapping"
-                    warn(warn_message)
-                    return False, warn_message
-            else: ### force is True
-                bootstrap = True
+            bootstrap = True
             break
     ### if bootstrap flag was set, create files
     if bootstrap:
@@ -78,22 +74,18 @@ def stack(
         compose_command = action
 
     ### define project name when starting containers
-    project_name_list = ['--project-name', get_config('stack', 'project_name', patch=True, substitute=True)]
+    project_name_list = ['--project-name', get_config(
+        'stack', 'project_name', patch=True, substitute=True)
+    ]
     
     ### disable ANSI if the user sets ANSI mode to False
     ansi_list = [] if ANSI else ['--no-ansi']
-
-    debug_list = ['--log-level', 'DEBUG'] if debug else []
+    ### Debug list used to include --log-level DEBUG, but the flag is not supported on Windows (?)
+    debug_list = []
 
     ### prepend settings before the docker-compose action
     settings_list = project_name_list + ansi_list + debug_list
-
-    _compose_venv = 'mrsm'
-    compose = attempt_import('compose', lazy=False, venv=_compose_venv)
-    docker = attempt_import('docker', warn=False)
-    try:
-        client = docker.from_env()
-    except Exception as e:
+    if not is_docker_available():
         warn("Could not connect to Docker. Is the Docker service running?", stack=False)
         print(
             "To start the Docker service, run `sudo systemctl start docker` or `sudo dockerd`.\n"
@@ -101,16 +93,48 @@ def stack(
             file = sys.stderr,
         )
         return False, "Failed to connect to the Docker engine."
-    ### If docker-compose is installed globally, don't use the `mrsm` venv.
-    if not venv_contains_package('compose', _compose_venv):
-        _compose_venv = None
-    cmd_list = settings_list + compose_command + (
+
+    try:
+        has_builtin_compose = subprocess.call(
+            ['docker', 'compose'], stdout=subprocess.DEVNULL, stderr=subprocess.STDOUT
+        ) == 0
+    except Exception as e:
+        has_builtin_compose = False
+
+    if not has_builtin_compose:
+        _compose_venv = 'mrsm'
+        compose = attempt_import('compose', lazy=False, venv=_compose_venv)
+
+        ### If docker-compose is installed globally, don't use the `mrsm` venv.
+        if not venv_contains_package('compose', _compose_venv):
+            _compose_venv = None
+
+    cmd_list = [_arg for _arg in settings_list + compose_command + (
         sysargs[2:] if (len(sysargs) > 2 and not sub_args) else sub_args
-    )
+    ) if _arg != '--debug']
     if debug:
         dprint(cmd_list)
-    rc = run_python_package(
-        'compose', args=cmd_list, cwd=STACK_COMPOSE_PATH.parent, venv=_compose_venv
-    )
 
-    return rc == 0, ("Success" if rc == 0 else f"Failed to execute commands: {cmd_list}")
+    stdout = None if not _capture_output else subprocess.PIPE
+    stderr = stdout
+    proc = subprocess.Popen(
+        ['docker', 'compose'] + cmd_list, cwd=STACK_COMPOSE_PATH.parent,
+        stdout=stdout, stderr=stderr,
+    ) if has_builtin_compose else run_python_package(
+        'compose', args=cmd_list, cwd=STACK_COMPOSE_PATH.parent, venv=_compose_venv,
+        capture_output=_capture_output, as_proc=True,
+    )
+    try:
+        rc = proc.wait() if proc is not None else 1
+    except KeyboardInterrupt:
+        rc = 0
+    if _capture_output and proc is not None:
+        captured_stdout, captured_stderr = proc.communicate()
+        captured_stdout = captured_stdout.decode()
+        captured_stderr = captured_stderr.decode()
+    success = rc == 0
+    msg = (
+        "Success" if success else f"Failed to execute commands:\n{cmd_list}"
+    ) if not _capture_output else captured_stdout
+
+    return success, msg

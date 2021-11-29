@@ -70,7 +70,7 @@ packages : Dict[str, Dict[str, str]] = {
         'mssqlcli'                   : 'mssql-cli>=1.0.0',
     },
     'stack': {
-        'docker'                     : 'docker>=4.3.1',
+        #  'docker'                     : 'docker>=4.3.1',
         'compose'                    : 'docker-compose>=1.27.4',
     },
     'build': {
@@ -152,7 +152,7 @@ all_packages = dict()
 for group, import_names in packages.items():
     all_packages.update(import_names)
 
-skip_groups = {'docs', 'build', 'cli', 'dev-tools', 'portable', 'extras'}
+skip_groups = {'docs', 'build', 'cli', 'dev-tools', 'portable', 'extras', 'stack'}
 full = list()
 _full = dict()
 for group, import_names in packages.items():

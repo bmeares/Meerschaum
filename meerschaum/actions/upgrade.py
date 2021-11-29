@@ -48,26 +48,30 @@ def _upgrade_meerschaum(
         `upgrade meerschaum`
         `upgrade meerschaum full`
     """
+    import subprocess
+    import json
     from meerschaum.utils.debug import dprint
+    from meerschaum.utils.warnings import info
     from meerschaum.actions import actions
     from meerschaum.utils.prompt import yes_no
     from meerschaum.utils.packages import pip_install, attempt_import
+    from meerschaum.utils.misc import is_docker_available
 
     if action is None:
         action = []
 
     is_stack_running = False
-    client = None
-    docker = attempt_import('docker', warn=False)
-    if docker:
-        try:
-            client = docker.from_env()
-            containers = client.containers.list()
-            is_stack_running = len(containers) > 0
-        except Exception as e:
-            pass
+    try:
+        success, msg = actions['stack'](
+            ['ps', '-q'], _capture_output=True, debug=debug
+        )
+        if msg.endswith('\n'):
+            msg = msg[:-1]
+        containers = msg.split('\n')
+    except Exception as e:
+        containers = []
 
-    if is_stack_running:
+    if containers:
         if force:
             answer = True
         else:
@@ -75,7 +79,7 @@ def _upgrade_meerschaum(
 
         if answer:
             if debug:
-                dprint("Taking stack down...")
+                info("Taking stack down...")
             actions['stack'](['down'], debug=debug)
 
     dependencies = None
@@ -93,7 +97,7 @@ def _upgrade_meerschaum(
 
     if debug:
         dprint("Pulling new Docker images...")
-    if client:
+    if is_docker_available():
         actions['stack'](['pull'], debug=debug)
 
     return True, "Success"
