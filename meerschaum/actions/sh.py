@@ -10,12 +10,12 @@ NOTE: This action may be a huge security vulnerability
 from meerschaum.utils.typing import SuccessTuple, List, Any, Optional
 
 def sh(
-        action : Optional[List[str]] = None,
-        sub_args : Optional[List[str]] = None,
-        filtered_sysargs : Optional[List[str]] = None,
-        use_bash : bool = True,
-        debug : bool = False,
-        **kw : Any
+        action: Optional[List[str]] = None,
+        sub_args: Optional[List[str]] = None,
+        filtered_sysargs: Optional[List[str]] = None,
+        use_bash: bool = True,
+        debug: bool = False,
+        **kw: Any
     ) -> SuccessTuple:
     """
     Execute system commands.
@@ -67,7 +67,9 @@ def sh(
     except FileNotFoundError:
         msg = f"Invalid commands: '{command_list}'"
         return False, msg
+    except KeyboardInterrupt:
+        return True, "Success"
 
     if exit_code != 0:
         return (False, f"Returned exit code: {exit_code}")
-    return (True, "Success")
+    return True, "Success"
