@@ -45,8 +45,6 @@ def _pipes_tree_on_select_handler(
         widget: toga.Widget,
         node: toga.sources.tree_source.Node,
     ):
-    print(node.__dict__)
-    print(node._children)
-    print(self.right_box.__dict__)
-    self.right_box._children = [toga.Label("memes")]
+    pass
+    #  self.right_box._children = [toga.Label("memes")]
     #  self.label.text = 'memes'

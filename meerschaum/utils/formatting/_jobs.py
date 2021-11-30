@@ -11,8 +11,8 @@ from meerschaum.utils.typing import List, Optional, Any
 from meerschaum.utils.daemon import Daemon, get_daemons, get_running_daemons, get_stopped_daemons
 
 def pprint_jobs(
-        daemons : List[Daemon],
-        nopretty : bool = False,
+        daemons: List[Daemon],
+        nopretty: bool = False,
     ):
     """
     Pretty-print a list of Daemons.
@@ -50,6 +50,9 @@ def pprint_jobs(
         table.add_column("Command")
         table.add_column("Status")
         for d in running_daemons:
+            ### Skip hidden jobs.
+            if d.hidden:
+                pass
             table.add_row(
                 d.daemon_id, d.label, rich_text.Text("running", style=('green' if ANSI else ''))
             )
@@ -62,12 +65,14 @@ def pprint_jobs(
     _nopretty_print() if nopretty else _pretty_print()
 
 def pprint_job(
-        daemon : Daemon,
-        nopretty : bool = False,
+        daemon: Daemon,
+        nopretty: bool = False,
     ):
     """
     Pretty-print a single Daemon.
     """
+    if daemon.hidden:
+        return
     from meerschaum.utils.warnings import info
     if not nopretty:
         info(f"Command for job '{daemon.daemon_id}':")

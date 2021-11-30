@@ -18,6 +18,7 @@ def get_main_window(self) -> toga.window.Window:
     self.tree = self.build_pipes_tree(
         mrsm_instance=self._instance, debug=self._debug, **self._kw
     )
+    sub_menu = toga.Group("Sub Menu", parent=toga.Group.COMMANDS, order=2)
 
     self.left_box = toga.Box(children=[
         toga.Box(children=[
@@ -28,9 +29,11 @@ def get_main_window(self) -> toga.window.Window:
 
     ])
     self.label = toga.Label("foo!")
+    self.webview = toga.WebView(url='http://localhost:8765', style=toga.style.Pack(flex=1))
     self.right_box = toga.Box(children=[
-        self.label,
-    ])
+        self.webview,
+        #  self.label,
+    ], style=toga.style.Pack(flex=1))
 
     main_box = toga.Box(children=[self.left_box, self.right_box])
     main_window.content = main_box
