@@ -149,12 +149,11 @@ class Daemon:
             error(_write_pickle_success_tuple[1])
 
         with daemoniker.Daemonizer() as (is_setup, daemonizer):
-            is_parent, self = daemonizer(
+            is_parent = daemonizer(
                 str(self.pid_path),
-                self,
                 stdout_goto = str(self.stdout_path),
                 stderr_goto = str(self.stderr_path),
-                strip_cmd_args = True
+                strip_cmd_args = True,
             )
 
         self.sighandler.start()
@@ -174,9 +173,9 @@ class Daemon:
 
     def run(
             self,
-            keep_daemon_output : bool = True,
-            allow_dirty_run : bool = False,
-            debug : bool = False,
+            keep_daemon_output: bool = True,
+            allow_dirty_run: bool = False,
+            debug: bool = False,
         ) -> SuccessTuple:
         """
         Run the daemon as a child process and continue executing the parent.
@@ -207,7 +206,7 @@ class Daemon:
         msg = "Success" if _launch_success_bool else f"Failed to start daemon '{self.daemon_id}'."
         return _launch_success_bool, msg
 
-    def kill(self, timeout : Optional[int] = 3) -> SuccessTuple:
+    def kill(self, timeout: Optional[int] = 3) -> SuccessTuple:
         """
         Forcibly terminate a running daemon.
         Sends a SIGTERM signal to the process.
@@ -228,7 +227,7 @@ class Daemon:
         return True, "Success"
 
 
-    def quit(self, timeout : Optional[int] = 3) -> SuccessTuple:
+    def quit(self, timeout: Optional[int] = 3) -> SuccessTuple:
         """
         Gracefully quit a running daemon.
         Sends a SIGINT signal the to process.
@@ -303,7 +302,7 @@ class Daemon:
         """
         Create the Daemon's directory.
         
-        If `allow_dirty_run` is False and the directory already exists,
+        If `allow_dirty_run` is `False` and the directory already exists,
         raise an error.
         """
         try:
@@ -325,7 +324,8 @@ class Daemon:
     @property
     def process(self) -> Union['psutil.Process', None]:
         """
-        Return the Process object from psutil.
+        Return the `psutil.Process` object.
+        If the job is not running, return `None`.
         """
         psutil = attempt_import('psutil')
         pid = self.pid
@@ -360,7 +360,6 @@ class Daemon:
         Return the path for the stdout text file.
         """
         return self.log_path
-        #  return self.path / 'stdout.txt'
 
     @property
     def stderr_path(self):
@@ -368,7 +367,6 @@ class Daemon:
         Return the path for the stderr text file.
         """
         return self.log_path
-        #  return self.path / 'stderr.txt'
 
     @property
     def log_path(self):
@@ -473,6 +471,15 @@ class Daemon:
             self._properties = apply_patch_to_config(self._properties, _file_properties)
         return self._properties
 
+
+    @property
+    def hidden(self) -> bool:
+        """
+        Return whether a daemon is visible to the user (for printing jobs).
+        """
+        return self.daemon_id.startswith('_') or self.daemon_id.startswith('.')
+
+
     def write_properties(self) -> SuccessTuple:
         """
         Write the properties dictionary to the properties JSON file
@@ -504,7 +511,7 @@ class Daemon:
             traceback.print_exception(type(e), e, e.__traceback__)
         return success, msg
 
-    def cleanup(self, keep_logs : bool = False):
+    def cleanup(self, keep_logs: bool = False):
         """
         Remove a daemon's directory after execution.
 

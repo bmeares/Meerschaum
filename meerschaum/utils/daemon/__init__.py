@@ -58,12 +58,12 @@ def daemon_action(**kw) -> SuccessTuple:
     return rc == 0, msg
 
 def run_daemon(
-        func : Callable[[Any], Any],
+        func: Callable[[Any], Any],
         *args,
-        daemon_id : Optional[str] = None,
-        keep_daemon_output : bool = False,
-        allow_dirty_run : bool = False,
-        label : Optional[str] = None,
+        daemon_id: Optional[str] = None,
+        keep_daemon_output: bool = False,
+        allow_dirty_run: bool = False,
+        label: Optional[str] = None,
         **kw
     ) -> Any:
     """
@@ -130,7 +130,8 @@ def get_filtered_daemons(
         Defaults to `True`.
     """
     if not filter_list:
-        return get_daemons()
+        daemons = get_daemons()
+        return [d for d in daemons if not d.hidden]
     from meerschaum.utils.warnings import warn as _warn
     daemons = []
     for d_id in filter_list:
@@ -143,5 +144,7 @@ def get_filtered_daemons(
             if warn:
                 _warn(f"Daemon '{d_id}' does not exist.", stack=False)
             continue
+        if d.hidden:
+            pass
         daemons.append(d)
     return daemons

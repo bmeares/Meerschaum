@@ -68,18 +68,6 @@ def _start_api(action : Optional[List[str]] = None, **kw):
             Defaults to the number of CPU cores or 1 on Android.
     """
     from meerschaum.actions import actions
-    from meerschaum.api.term import tornado_app, tornado, term_manager
-    tornado_app.listen(8765, 'localhost')
-    loop = tornado.ioloop.IOLoop.instance()
-    #  loop.add_callback(webbrowser.open, url)
-    try:
-        loop.start()
-    except KeyboardInterrupt:
-        print(" Shutting down on SIGINT")
-    finally:
-        term_manager.shutdown()
-        loop.close()
-    return True, "Success"
     return actions['api'](action=['start'], **kw)
 
 def _start_jobs(
@@ -321,6 +309,40 @@ def _start_gui(**kw) -> SuccessTuple:
     """
     Start the Meerschaum GUI application.
     """
+    from meerschaum.utils.daemon import Daemon
+    from meerschaum.utils.warnings import warn
+
+    success, msg = True, "Success"
+
+    import sys
+    print(sys.argv)
+    import os
+    print(os.path.exists(sys.argv[0]))
+
+    def start_tornado():
+        from meerschaum.api.term import tornado_app, tornado, term_manager
+        tornado_app.listen(8765, 'localhost')
+        loop = tornado.ioloop.IOLoop.instance()
+        try:
+            loop.start()
+        except KeyboardInterrupt:
+            pass
+        finally:
+            term_manager.shutdown()
+            loop.close()
+
+    daemon = Daemon(
+        start_tornado,
+        daemon_id = '.tornado_server',
+        label = 'Meerschaum Web Terminal Service',
+    )
+    success, msg = daemon.kill()
+    if not success:
+        warn(msg, stack=False)
+    success, msg = daemon.run(keep_daemon_output=False, allow_dirty_run=True)
+    if not success:
+        warn(msg, stack=False)
+
     try:
         from meerschaum.gui import build_app
         app = build_app(**kw)
@@ -328,9 +350,10 @@ def _start_gui(**kw) -> SuccessTuple:
     except Exception as e:
         import traceback
         traceback.print_exc()
-        print(e)
-        return False, str(e)
-    return True, "Success"
+        success, msg = False, str(e)
+    finally:
+        daemon.quit()
+    return success, msg
 
 
 ### NOTE: This must be the final statement of the module.
