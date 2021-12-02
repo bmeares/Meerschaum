@@ -1080,3 +1080,24 @@ def is_docker_available():
     except Exception as e:
         has_docker = False
     return has_docker
+
+
+def is_port_in_use(port: int):
+    import socket
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+        return s.connect_ex(('localhost', port)) == 0
+
+
+def find_open_ports():
+    """
+    
+
+    Found from StackExchange here:
+    https://codereview.stackexchange.com/questions/116450/find-available-ports-on-localhost
+    """
+    for port in range(1, 8081):
+        with closing(socket.socket(socket.AF_INET, socket.SOCK_STREAM)) as sock:
+            res = sock.connect_ex(('localhost', port))
+            if res == 0:
+                yield port
+
