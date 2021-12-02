@@ -146,7 +146,10 @@ def import_module(
         activate_venv(venv)
     mod = importlib.util.module_from_spec(spec)
     sys.modules[name] = mod
-    spec.loader.exec_module(mod)
+    try:
+        spec.loader.exec_module(mod)
+    except Exception as e:
+        pass
     mod = _import_module(name)
     if deactivate and venv is not None:
         deactivate_venv(venv)
