@@ -22,6 +22,7 @@ def start(
         'api': _start_api,
         'jobs': _start_jobs,
         'gui': _start_gui,
+        'webterm': _start_webterm,
     }
     return choose_subaction(action, options, **kw)
 
@@ -305,7 +306,7 @@ def _complete_start_jobs(
     return possibilities
 
 
-def _start_gui(**kw) -> SuccessTuple:
+def _start_gui(port: Optional[int] = 8765, **kw) -> SuccessTuple:
     """
     Start the Meerschaum GUI application.
     """
@@ -313,8 +314,13 @@ def _start_gui(**kw) -> SuccessTuple:
     from meerschaum.utils.process import run_process
     from meerschaum.utils.packages import venv_exec
     from meerschaum.utils.warnings import warn
+    from meerschaum.utils.networking import find_open_ports
 
     success, msg = True, "Success"
+
+    #  ports = find_open_ports()
+    #  print(list(ports))
+    #  return False, 'testing'
 
     start_tornado_code = (
         "from meerschaum.api.term import tornado_app, tornado, term_manager\n"
@@ -342,6 +348,28 @@ def _start_gui(**kw) -> SuccessTuple:
     finally:
         process.kill()
     return success, msg
+
+
+def _start_webterm(**kw) -> SuccessTuple:
+    """
+    Start the Meerschaum Web Terminal (Tornado server).
+    """
+    from meerschaum.api.term import tornado_app, tornado, term_manager
+    tornado_app.listen(8765, 'localhost')
+    loop = tornado.ioloop.IOLoop.instance()
+    try:
+        loop.start()
+    except KeyboardInterrupt:
+        pass
+    finally:
+        term_manager.shutdown()
+        loop.close()
+
+    #  process = venv_exec(start_tornado_code, as_proc=True, venv=None)
+    #  process.wait()
+    return True, "Success"
+
+
 
 
 ### NOTE: This must be the final statement of the module.
