@@ -496,6 +496,7 @@ def venv_exec(
         code: str,
         venv: str = 'mrsm',
         with_extras: bool = False,
+        as_proc: bool = False,
         debug: bool = False,
     ) -> Union[bool, Tuple[int, bytes, bytes]]:
     """
@@ -513,6 +514,10 @@ def venv_exec(
     :param with_extras:
         If `True`, return a tuple of the exit code, stdout bytes, and stderr bytes.
         Defaults to `False`.
+
+    :param as_proc:
+        If `True`, return the `subprocess.Popen` object instead of executing.
+        Defaults to `False`.
     """
     import subprocess, sys, platform, os
     from meerschaum.config._paths import VIRTENV_RESOURCES_PATH
@@ -528,10 +533,12 @@ def venv_exec(
     cmd_list = [executable, '-c', code]
     if debug:
         dprint(str(cmd_list))
-    if not with_extras:
+    if not with_extras and not as_proc:
         return subprocess.call(cmd_list) == 0
 
     process = subprocess.Popen(cmd_list, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+    if as_proc:
+        return process
     stdout, stderr = process.communicate()
     exit_code = process.returncode
     return exit_code, stdout, stderr

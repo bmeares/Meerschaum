@@ -310,38 +310,26 @@ def _start_gui(**kw) -> SuccessTuple:
     Start the Meerschaum GUI application.
     """
     from meerschaum.utils.daemon import Daemon
+    from meerschaum.utils.process import run_process
+    from meerschaum.utils.packages import venv_exec
     from meerschaum.utils.warnings import warn
 
     success, msg = True, "Success"
 
-    import sys
-    print(sys.argv)
-    import os
-    print(os.path.exists(sys.argv[0]))
-
-    def start_tornado():
-        from meerschaum.api.term import tornado_app, tornado, term_manager
-        tornado_app.listen(8765, 'localhost')
-        loop = tornado.ioloop.IOLoop.instance()
-        try:
-            loop.start()
-        except KeyboardInterrupt:
-            pass
-        finally:
-            term_manager.shutdown()
-            loop.close()
-
-    daemon = Daemon(
-        start_tornado,
-        daemon_id = '.tornado_server',
-        label = 'Meerschaum Web Terminal Service',
+    start_tornado_code = (
+        "from meerschaum.api.term import tornado_app, tornado, term_manager\n"
+        "tornado_app.listen(8765, 'localhost')\n"
+        "loop = tornado.ioloop.IOLoop.instance();\n"
+        "try:\n"
+        "    loop.start()\n"
+        "except KeyboardInterrupt:\n"
+        "    pass\n"
+        "finally:\n"
+        "    term_manager.shutdown()\n"
+        "    loop.close()\n"
     )
-    success, msg = daemon.kill()
-    if not success:
-        warn(msg, stack=False)
-    success, msg = daemon.run(keep_daemon_output=False, allow_dirty_run=True)
-    if not success:
-        warn(msg, stack=False)
+
+    process = venv_exec(start_tornado_code, as_proc=True, venv=None)
 
     try:
         from meerschaum.gui import build_app
@@ -352,7 +340,7 @@ def _start_gui(**kw) -> SuccessTuple:
         traceback.print_exc()
         success, msg = False, str(e)
     finally:
-        daemon.quit()
+        process.kill()
     return success, msg
 
 
