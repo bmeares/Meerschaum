@@ -365,8 +365,6 @@ def _start_webterm(**kw) -> SuccessTuple:
         term_manager.shutdown()
         loop.close()
 
-    #  process = venv_exec(start_tornado_code, as_proc=True, venv=None)
-    #  process.wait()
     return True, "Success"
 
 
