@@ -37,6 +37,16 @@ def get_main_window(self) -> toga.window.Window:
 
     main_box = toga.Box(children=[self.left_box, self.right_box])
     main_window.content = main_box
+
+    from meerschaum.config._paths import PACKAGE_ROOT_PATH
+    icon_path = PACKAGE_ROOT_PATH / 'api' / 'dash' / 'assets' / 'logo_500x500.png'
+    command = toga.Command(_open_webterm, label='Open Terminal', icon=icon_path, tooltip=_open_webterm.__doc__)
+    #  main_window.toolbar.add(command)
     self._windows['main_window'] = main_window
     return self._windows['main_window']
 
+def _open_webterm():
+    """
+    Foo bar
+    """
+    pass
