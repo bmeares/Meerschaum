@@ -338,8 +338,8 @@ def _start_gui(port: Optional[int] = 8765, **kw) -> SuccessTuple:
     process = venv_exec(start_tornado_code, as_proc=True, venv=None)
 
     try:
-        from meerschaum.gui import build_app
-        app = build_app(**kw)
+        from meerschaum.gui import get_app
+        app = get_app(**kw)
         app.main_loop()
     except Exception as e:
         import traceback

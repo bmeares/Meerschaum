@@ -8,7 +8,7 @@ Interact with Meerschaum Pipes via the GUI.
 
 from meerschaum.gui.app import toga
 
-def build_pipes_tree(self, **kw) -> toga.Tree:
+def build_pipes_tree(**kw) -> toga.Tree:
     """
     Retrieve pipes and return a `toga.Tree` object.
     """
@@ -27,7 +27,7 @@ def build_pipes_tree(self, **kw) -> toga.Tree:
     tree = toga.Tree(
         headings = ["Pipes"],
         style = toga.style.Pack(flex=1, padding=10, direction='column'),
-        on_select = self._pipes_tree_on_select_handler,
+        on_select = _pipes_tree_on_select_handler,
     )
     for ck in pipes:
         ck_root = tree.data.append(None, pipes=(icons['connector'] + '  ' + ck))
@@ -41,7 +41,6 @@ def build_pipes_tree(self, **kw) -> toga.Tree:
 
 
 def _pipes_tree_on_select_handler(
-        self,
         widget: toga.Widget,
         node: toga.sources.tree_source.Node,
     ):
