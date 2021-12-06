@@ -59,6 +59,7 @@ def get_uvicorn_config() -> Dict[str, Any]:
 
 debug = get_uvicorn_config().get('debug', False) if API_UVICORN_CONFIG_PATH.exists() else False
 no_dash = get_uvicorn_config().get('no_dash', False)
+no_auth = get_uvicorn_config().get('no_auth', False)
 ### NOTE: Disable dash unless version is at least 0.3.0.
 _include_dash = (
     (not no_dash)
