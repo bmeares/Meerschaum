@@ -31,7 +31,7 @@ async def startup():
 @app.on_event("shutdown")
 async def shutdown():
     try:
-        if API_UVICORN_CONFIG_PATH.exists() and not debug:
+        if API_UVICORN_CONFIG_PATH.exists():
             os.remove(API_UVICORN_CONFIG_PATH)
     except Exception as e:
         pass

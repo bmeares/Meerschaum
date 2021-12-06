@@ -10,7 +10,7 @@ import fastapi, datetime
 from fastapi_login.exceptions import InvalidCredentialsException
 from fastapi.security import OAuth2PasswordRequestForm
 from starlette.responses import Response, JSONResponse
-from meerschaum.api import endpoints, get_api_connector, app, debug, manager
+from meerschaum.api import endpoints, get_api_connector, app, debug, manager, no_auth
 from meerschaum._internal.User import User
 from meerschaum.config.static import _static_config
 
@@ -33,11 +33,11 @@ def login(
     username, password = (
         (data['username'], data['password']) if isinstance(data, dict)
         else (data.username, data.password)
-    )
+    ) if not no_auth else ('no-auth', 'no-auth')
 
     from meerschaum._internal.User._User import get_pwd_context
     user = User(username, password)
-    correct_password = get_pwd_context().verify(
+    correct_password = no_auth or get_pwd_context().verify(
         password, get_api_connector().get_user_password_hash(user, debug=debug)
     )
     if not correct_password:

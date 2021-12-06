@@ -79,9 +79,9 @@ def parse_connector_keys(
     return conn
 
 def parse_instance_keys(
-        keys : str,
-        construct : bool = True,
-        as_tuple : bool = False,
+        keys: Optional[str],
+        construct: bool = True,
+        as_tuple: bool = False,
         **kw
     ):
     """

@@ -7,13 +7,13 @@ Callbacks for the main dashboard.
 """
 
 from __future__ import annotations
-import sys, textwrap, json, datetime
+import sys, textwrap, json, datetime, uuid
 from dash.dependencies import Input, Output, State, ALL, MATCH
 from dash.exceptions import PreventUpdate
 from meerschaum.config import get_config
 from meerschaum.config.static import _static_config
 from meerschaum.utils.typing import List, Optional, Any
-from meerschaum.api import get_api_connector, endpoints
+from meerschaum.api import get_api_connector, endpoints, no_auth
 from meerschaum.api.dash import dash_app, debug, pipes, _get_pipes, active_sessions
 from meerschaum.api.dash.connectors import get_web_connector
 from meerschaum.api.dash.websockets import ws_url_from_href
@@ -105,6 +105,7 @@ _required_login = {''}
  
 @dash_app.callback(
     Output('page-layout-div', 'children'),
+    Output('session-store', 'data'),
     Input('location', 'pathname'),
     State('session-store', 'data'),
 )
@@ -117,12 +118,17 @@ def update_page_layout_div(pathname : str, session_store_data : Dict[str, Any]):
         session_id = session_store_data.get('session-id', None) 
     except AttributeError:
         session_id = None
+    ### Bypass login if `--no-auth` is specified.
+    if session_id is None and no_auth:
+        session_store_data['session-id'] = str(uuid.uuid4())
+        active_sessions[session_store_data['session-id']] = {'username': 'no-auth'}
+
     _path = (pathname.rstrip('/') + '/').replace((dash_endpoint + '/'), '').rstrip('/')
-    path = _path if _path not in _required_login else (
+    path = _path if no_auth or _path not in _required_login else (
         _path if session_id in active_sessions else 'login'
     )
     layout = _paths.get(path, pages.error.layout)
-    return layout
+    return layout, session_store_data
 
 @dash_app.callback(
     Output('content-div-right', 'children'),

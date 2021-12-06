@@ -306,15 +306,25 @@ def _complete_start_jobs(
     return possibilities
 
 
-def _start_gui(port: Optional[int] = 8765, **kw) -> SuccessTuple:
+def _start_gui(
+        action: Optional[List[str]] = None,
+        mrsm_instance: Optional[str] = None,
+        port: Optional[int] = 8765,
+        debug: bool = False,
+        **kw
+    ) -> SuccessTuple:
     """
     Start the Meerschaum GUI application.
     """
     from meerschaum.utils.daemon import Daemon
     from meerschaum.utils.process import run_process
-    from meerschaum.utils.packages import venv_exec
+    from meerschaum.utils.packages import venv_exec, run_python_package, attempt_import
     from meerschaum.utils.warnings import warn
     from meerschaum.utils.networking import find_open_ports
+    from meerschaum.connectors.parse import parse_instance_keys
+    requests = attempt_import('requests')
+    import json
+    import time
 
     success, msg = True, "Success"
 
@@ -325,7 +335,7 @@ def _start_gui(port: Optional[int] = 8765, **kw) -> SuccessTuple:
     start_tornado_code = (
         "from meerschaum.api.term import tornado_app, tornado, term_manager\n"
         "tornado_app.listen(8765, 'localhost')\n"
-        "loop = tornado.ioloop.IOLoop.instance();\n"
+        "loop = tornado.ioloop.IOLoop.instance()\n"
         "try:\n"
         "    loop.start()\n"
         "except KeyboardInterrupt:\n"
@@ -334,13 +344,45 @@ def _start_gui(port: Optional[int] = 8765, **kw) -> SuccessTuple:
         "    term_manager.shutdown()\n"
         "    loop.close()\n"
     )
+    api_kw = {
+        'action': ['api'],
+        'no_auth': True,
+        'port': port,
+        'mrsm_instance': str(parse_instance_keys(mrsm_instance)),
+        'debug': debug,
+        'host': '127.0.0.1',
+    }
+    api_kw_str = json.dumps(json.dumps(api_kw))
+    start_tornado_code = (
+        "from meerschaum.actions import actions; "
+        "import json; "
+        f"actions['start'](**json.loads({api_kw_str}))"
+    )
+    if debug:
+        print(start_tornado_code)
+    base_url = 'http://' + api_kw['host'] + ':' + str(api_kw['port'])
 
-    process = venv_exec(start_tornado_code, as_proc=True, venv=None)
+    process = venv_exec(start_tornado_code, as_proc=True, venv=None, debug=debug)
+    starting_up = True
+    while starting_up:
+        time.sleep(0.1)
+        try:
+            version = requests.get(base_url + '/version').json()
+            print('version', version)
+            break
+        except Exception as e:
+            continue
+    #  process = run_python_package('meerschaum', ['start', 'api', '--port', str(port), '--no-auth', '--mrsm_instance', str(parse_instance_keys(mrsm_instance))], as_proc=True)
 
     try:
-        from meerschaum.gui import get_app
-        app = get_app(**kw)
-        app.main_loop()
+        #  from meerschaum.gui import get_app, build_app
+        #  app = get_app(**kw)
+        #  app.main_loop()
+        #  from meerschaum.api import app as fastapi_app
+        #  from meerschaum.api.dash import dash_app
+        import webview
+        webview.create_window('Foo', f'http://127.0.0.1:{port}', height=720, width=1280)
+        webview.start(debug=debug)
     except Exception as e:
         import traceback
         traceback.print_exc()

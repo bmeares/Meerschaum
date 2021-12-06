@@ -108,9 +108,14 @@ def run_process(
 
     try:
         # fork the child
-        stdout, stderr = (None, None) if not capture_output else (subprocess.PIPE, subprocess.PIPE)
-        kw['stdout'] = stdout
-        kw['stderr'] = stderr
+        #  stdout, stderr = (
+            #  (sys.stdout, sys.stderr) if not capture_output
+            #  else (subprocess.PIPE, subprocess.PIPE)
+        #  )
+        if capture_output:
+            kw['stdout'] = subprocess.PIPE
+            kw['stderr'] = subprocess.PIPE
+
         child = subprocess.Popen(*args, **kw)
 
         # we can't set the process group id from the parent since the child
@@ -166,5 +171,6 @@ def poll_process(
     Poll a process and execute a callback function for each line printed to the process's `stdout`.
     """
     while proc.poll() is None:
-        line_callback(proc.stdout.readline())
+        line = proc.stdout.readline()
+        line_callback(line)
     return proc.poll()

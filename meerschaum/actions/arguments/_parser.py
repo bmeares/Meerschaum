@@ -132,7 +132,7 @@ groups['misc'] = parser.add_argument_group(title='Miscellaneous options')
 
 ### Actions options
 groups['actions'].add_argument(
-    'action', nargs='*', help="Actions list to execute. E.g. `api start`"
+    'action', nargs='*', help="Actions list to execute. E.g. `start api`"
 )
 groups['actions'].add_argument(
     '-h', '--help', action='store_true', help="Print a help message for an action."
@@ -241,12 +241,19 @@ groups['api'].add_argument(
     '-p', '--port', type=int, help="The port on which to run the Web API server"
 )
 groups['api'].add_argument(
+    '--host', type=int, help="The host address to bind to for the API server. Defaults to '0.0.0.0'."
+)
+groups['api'].add_argument(
     '-w', '--workers', type=int,
     help = "How many workers to run a concurrent action (e.g. running the API or syncing pipes)"
 )
 groups['api'].add_argument(
     '--no-dash', '--nodash', action='store_true',
     help = 'When starting the API, do not start the Web interface.',
+)
+groups['api'].add_argument(
+    '--no-auth', '--noauth', action='store_true',
+    help = 'When starting the API, do not require authentication. WARNING: This is dangerous!',
 )
 
 ### Plugins options

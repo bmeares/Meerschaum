@@ -16,7 +16,7 @@ def api(
         **kw : Any
     ) -> SuccessTuple:
     """
-    Send commands to a Meerschaum WebAPI instance or boot a new instance
+    Send commands to a Meerschaum WebAPI instance.
 
     Usage: `api [commands] {options}`
     Examples:
@@ -38,7 +38,7 @@ def api(
         sysargs = []
     if len(action) == 0:
         info(api.__doc__)
-        return False, "Please provide a command to excecute (see above)"
+        return False, "Please provide a command to excecute (see above)."
 
     boot_keywords = {'start', 'boot', 'init'}
     if action[0] in boot_keywords:
@@ -83,14 +83,16 @@ def api(
     return success, message
 
 def _api_start(
-        action : Optional[List[str]] = None,
-        port : Optional[int] = None,
-        workers : Optional[int] = None,
-        mrsm_instance : Optional[str] = None,
-        no_dash : bool = False,
-        debug : bool = False,
-        nopretty : bool = False,
-        **kw : Any
+        action: Optional[List[str]] = None,
+        host: Optionsl[str] = None,
+        port: Optional[int] = None,
+        workers: Optional[int] = None,
+        mrsm_instance: Optional[str] = None,
+        no_dash: bool = False,
+        no_auth: bool = False,
+        debug: bool = False,
+        nopretty: bool = False,
+        **kw: Any
     ) -> SuccessTuple:
     """
     Start the API server.
@@ -101,6 +103,10 @@ def _api_start(
     Options:
         - `-p, --port {number}`
             Port to bind the API server to.
+
+        - `--host {address}`
+            The address to bind to.
+            Defaults to '0.0.0.0'.
 
         - `-w, --workers {number}`
             How many worker threads to run.
@@ -133,13 +139,16 @@ def _api_start(
 
     api_config = get_config('system', 'api')
     cf = _config()
-    uvicorn_config = dict(api_config['uvicorn'])
+    uvicorn_config = api_config['uvicorn'].copy()
     if port is None:
         ### default
         port = uvicorn_config['port']
         if len(action) > 1:
             if is_int(action[1]):
                 port = int(action[1])
+
+    if host is None:
+        host = uvicorn_config['host']
 
     pool = get_pool(workers=workers)
     if pool is None:
@@ -176,10 +185,12 @@ def _api_start(
             )
 
     uvicorn_config.update({
-        'port' : port,
-        'reload' : debug,
-        'mrsm_instance' : mrsm_instance,
-        'no_dash' : no_dash,
+        'port': port,
+        'host': host,
+        'reload': debug,
+        'mrsm_instance': mrsm_instance,
+        'no_dash': no_dash,
+        'no_auth': no_auth,
     })
     if debug:
         uvicorn_config['reload_dirs'] = [str(PACKAGE_ROOT_PATH)]
@@ -189,7 +200,7 @@ def _api_start(
     cf['system']['api']['uvicorn'] = uvicorn_config
     from meerschaum.api import __version__
 
-    custom_keys = ['mrsm_instance', 'no_dash']
+    custom_keys = ['mrsm_instance', 'no_dash', 'no_auth']
 
     ### write config to a temporary file to communicate with uvicorn threads
     import json, sys

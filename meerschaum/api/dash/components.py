@@ -32,24 +32,29 @@ keyboard = dex.Keyboard(
 go_button = dbc.Button('Execute', id='go-button', color='primary', style={'width': '100%'})
 test_button = dbc.Button('Test', id='test-button', color='danger', style={'display' : 'none'})
 get_items_menu = dbc.DropdownMenu(
-    label='Get Items', id='get-items-menu', children=[
+    label='More', id='get-items-menu', children=[
         #  dbc.DropdownMenuItem("Pipes", id='get-pipes-button'),
         dbc.DropdownMenuItem("Graphs", id='get-graphs-button'),
         dbc.DropdownMenuItem("Jobs", id='get-jobs-button'),
         dbc.DropdownMenuItem("Plugins", id='get-plugins-button'),
         dbc.DropdownMenuItem("Users", id='get-users-button'),
-    ], style={'width': '100%'}, menu_variant='dark', toggle_style={'width': '100%'},
+    ],
+    style={'width': '100%', 'font-size': '0.5em'},
+    menu_variant='dark',
+    toggle_style={'width': '100%'},
+    color='secondary',
+    size='sm',
 )
 show_pipes_button = dbc.Button('Show Pipes', id='get-pipes-button', color='info', style={'width': '100%'})
 cancel_button = dbc.Button('Cancel', id='cancel-button', color='danger', style={'width': '100%'})
 bottom_buttons_content = dbc.Card(
     dbc.CardBody(
         dbc.Row([
-            dbc.Col(go_button, lg=2, md=3),
-            dbc.Col(cancel_button, lg=2, md=3),
-            dbc.Col(show_pipes_button, lg=2, md=3),
+            dbc.Col(go_button, lg=3, md=3),
+            dbc.Col(cancel_button, lg=3, md=3),
+            dbc.Col(show_pipes_button, lg=3, md=3),
             dbc.Col(lg=True, md=False),
-            dbc.Col(get_items_menu, lg=2, md=3),
+            dbc.Col(get_items_menu, lg=2, md=2),
         ],
         #  no_gutters=False
         )
