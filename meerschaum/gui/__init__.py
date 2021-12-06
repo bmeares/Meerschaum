@@ -10,10 +10,25 @@ from meerschaum.config.static import _static_config
 from meerschaum.utils.packages import attempt_import
 from meerschaum.config import __version__
 from meerschaum.config._paths import PACKAGE_ROOT_PATH
+from meerschaum.utils.threading import Lock
 
 from meerschaum.gui.app import MeerschaumApp
 
 icon_path = PACKAGE_ROOT_PATH / 'api' / 'dash' / 'assets' / 'logo_500x500.png'
+
+locks = {'app': Lock()}
+_app = None
+
+def get_app(**kw) -> MeerschaumApp:
+    """
+    Instantiate and return the main app.
+    """
+    global _app
+    if _app is None:
+        locks['app'].acquire()
+        _app = build_app(**kw)
+        locks['app'].release()
+    return _app
 
 def build_app(**kw) -> MeerschaumApp:
     """
