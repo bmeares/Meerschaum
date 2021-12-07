@@ -184,7 +184,7 @@ class Plugin:
         if not self.archive_path.exists():
             return False, f"Missing archive file for plugin '{self}'."
         is_installed = None
-        if self.module is not None:
+        if '_module' in self.__dict__ and self._module is not None:
             is_installed = True
             try:
                 old_version = self.module.__version__
