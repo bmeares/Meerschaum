@@ -9,6 +9,16 @@ This changelog was not introduced until v0.2.12, so many of the critical release
 ## 0.5.x Releases
 This is the current release cycle, so future features will be updated below.
 
+### v0.5.1
+- **Added the experimental commands `start gui` and `start webterm`.**  
+  The desktop GUI will be rewritten in the future, but for now it starts a webview for the web console. The webterm is an instance of `xterm` (not `xterm.js`, having issues) and will eventually replace the current web console "terminal" output. The desktop GUI will also be replaced and will include the webterm once I can get it working on Windows.
+- **Isolated API processes.**  
+  Meerschaum API workers refer to the environment variable `MRSM_SERVER_ID` to determine the location of the configuration file. This results in the ability to run multiple instances of the API concurrently (at last)!
+- **Fixed plugin installation bug.**  
+  When installing plugins, the expected behavior of checking if it's already installed occurs.
+- **Replaced `semver.match()` with `semver.VersionInfo.match()`.**  
+  This change resolves depreciation warnings when building the package.
+
 ### v0.5.0
 - **New syncing engine.**  
   The `sync pipes` command reduces concurrency issues while nearly halving syncing times for large batches of pipes.
