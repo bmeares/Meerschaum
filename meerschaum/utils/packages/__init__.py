@@ -500,6 +500,7 @@ def venv_exec(
         venv: str = 'mrsm',
         with_extras: bool = False,
         as_proc: bool = False,
+        capture_output: bool = True,
         debug: bool = False,
     ) -> Union[bool, Tuple[int, bytes, bytes]]:
     """
@@ -524,6 +525,7 @@ def venv_exec(
     """
     import subprocess, sys, platform, os
     from meerschaum.config._paths import VIRTENV_RESOURCES_PATH
+    from meerschaum.utils.process import run_process
     from meerschaum.utils.debug import dprint
     executable = (
         sys.executable if venv is None
@@ -539,7 +541,8 @@ def venv_exec(
     if not with_extras and not as_proc:
         return subprocess.call(cmd_list) == 0
 
-    process = subprocess.Popen(cmd_list, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+    stdout, stderr = (None, None) if not capture_output else (subprocess.PIPE, subprocess.PIPE)
+    process = subprocess.Popen(cmd_list, stdout=stdout, stderr=stderr)
     if as_proc:
         return process
     stdout, stderr = process.communicate()

@@ -309,7 +309,7 @@ def _complete_start_jobs(
 def _start_gui(
         action: Optional[List[str]] = None,
         mrsm_instance: Optional[str] = None,
-        port: Optional[int] = 8765,
+        port: Optional[int] = None,
         debug: bool = False,
         **kw
     ) -> SuccessTuple:
@@ -320,13 +320,18 @@ def _start_gui(
     from meerschaum.utils.process import run_process
     from meerschaum.utils.packages import venv_exec, run_python_package, attempt_import
     from meerschaum.utils.warnings import warn
-    from meerschaum.utils.networking import find_open_ports
+    from meerschaum.utils.debug import dprint
+    from meerschaum.utils.networking import find_open_ports, is_port_in_use
     from meerschaum.connectors.parse import parse_instance_keys
     requests = attempt_import('requests')
     import json
     import time
 
     success, msg = True, "Success"
+    if port is None:
+        port = next(find_open_ports(8765, 9000))
+    elif is_port_in_use(port):
+        return False, f"Port '{port}' is already in use."
 
     #  ports = find_open_ports()
     #  print(list(ports))
@@ -362,15 +367,18 @@ def _start_gui(
         print(start_tornado_code)
     base_url = 'http://' + api_kw['host'] + ':' + str(api_kw['port'])
 
-    process = venv_exec(start_tornado_code, as_proc=True, venv=None, debug=debug)
+    process = venv_exec(
+        start_tornado_code, as_proc=True, venv=None, debug=debug, capture_output=(not debug)
+    )
     starting_up = True
     while starting_up:
         time.sleep(0.1)
         try:
             version = requests.get(base_url + '/version').json()
-            print('version', version)
             break
         except Exception as e:
+            if debug:
+                dprint(e)
             continue
     #  process = run_python_package('meerschaum', ['start', 'api', '--port', str(port), '--no-auth', '--mrsm_instance', str(parse_instance_keys(mrsm_instance))], as_proc=True)
 

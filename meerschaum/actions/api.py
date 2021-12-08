@@ -119,23 +119,23 @@ def _api_start(
     from meerschaum.utils.warnings import error, warn
     from meerschaum.config import get_config, _config
     from meerschaum.config._paths import (
-        API_UVICORN_CONFIG_PATH, CACHE_RESOURCES_PATH,
+        API_UVICORN_RESOURCES_PATH, API_UVICORN_CONFIG_PATH, CACHE_RESOURCES_PATH,
         PACKAGE_ROOT_PATH,
     )
-    from meerschaum.config.static import _static_config
+    from meerschaum.config.static import _static_config, SERVER_ID
     from meerschaum.connectors.parse import parse_instance_keys
     from meerschaum.utils.pool import get_pool
+    import shutil
     import os
 
     if action is None:
         action = []
 
-    old_cwd = os.getcwd()
-    if not debug:
-        os.chdir(CACHE_RESOURCES_PATH)
-
     ### Uvicorn must be installed on the host because of multiprocessing reasons.
     uvicorn = attempt_import('uvicorn', venv=None, lazy=False)
+
+    uvicorn_config_path = API_UVICORN_RESOURCES_PATH / SERVER_ID / '.config.json'
+    uvicorn_env_path = API_UVICORN_RESOURCES_PATH / SERVER_ID / '.env'
 
     api_config = get_config('system', 'api')
     cf = _config()
@@ -158,7 +158,6 @@ def _api_start(
         pool.join()
     
     uvicorn_config['workers'] = workers
-
     uvicorn_config['debug'] = debug
 
     if mrsm_instance is None:
@@ -188,6 +187,7 @@ def _api_start(
         'port': port,
         'host': host,
         'reload': debug,
+        'env_file': str(uvicorn_env_path),
         'mrsm_instance': mrsm_instance,
         'no_dash': no_dash,
         'no_auth': no_auth,
@@ -198,41 +198,40 @@ def _api_start(
 
     api_config['uvicorn'] = uvicorn_config
     cf['system']['api']['uvicorn'] = uvicorn_config
-    from meerschaum.api import __version__
 
     custom_keys = ['mrsm_instance', 'no_dash', 'no_auth']
 
     ### write config to a temporary file to communicate with uvicorn threads
     import json, sys
     try:
-        if API_UVICORN_CONFIG_PATH.exists() and not debug:
-            os.remove(API_UVICORN_CONFIG_PATH)
-            assert(not API_UVICORN_CONFIG_PATH.exists())
+        if uvicorn_config_path.exists():
+            os.remove(uvicorn_config_path)
+            assert(not uvicorn_config_path.exists())
     except Exception as e:
         error(e)
-    with open(API_UVICORN_CONFIG_PATH, 'w+') as f:
+    uvicorn_config_path.parent.mkdir()
+    with open(uvicorn_config_path, 'w+') as f:
         if debug:
-            dprint(f"Dumping API config file:", nopretty=nopretty)
+            dprint(f"Dumping API config file to '{uvicorn_config_path}'", nopretty=nopretty)
             pprint(uvicorn_config, stream=sys.stderr, nopretty=nopretty)
         json.dump(uvicorn_config, f)
+
+    with open(uvicorn_env_path, 'w+') as f:
+        if debug:
+            dprint(f"Writing ENV file to '{uvicorn_env_path}'.")
+        f.write(f"MRSM_SERVER_ID={SERVER_ID}")
 
     ### remove custom keys before calling uvicorn
     for k in custom_keys:
         del uvicorn_config[k]
-
-    if debug:
-        dprint(f"Connecting to Meerschaum instance: '{mrsm_instance}'.", nopretty=nopretty)
-        dprint(
-            f"Starting Meerschaum API v{__version__} with the following configuration:",
-            nopretty = nopretty
-        )
-        pprint(uvicorn_config, stream=sys.stderr, nopretty=nopretty)
 
     try:
         uvicorn.run(**uvicorn_config)
     except KeyboardInterrupt:
         pass
 
-    os.chdir(old_cwd)
+    ### Cleanup
+    if uvicorn_config_path.parent.exists():
+        shutil.rmtree(uvicorn_config_path.parent)
 
     return (True, "Success")

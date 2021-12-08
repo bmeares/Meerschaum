@@ -6,6 +6,9 @@
 Insert non-user-editable configuration files here.
 """
 
+import os
+import uuid
+SERVER_ID = os.environ.get('MRSM_SERVER_ID', str(uuid.uuid4()))
 static_config = None
 
 def _static_config():
