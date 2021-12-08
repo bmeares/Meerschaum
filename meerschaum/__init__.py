@@ -14,5 +14,4 @@ from meerschaum.connectors import get_connector
 
 __pdoc__ = {
     'gui': False,
-    '_internal': True,
 }
