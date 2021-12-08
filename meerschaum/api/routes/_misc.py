@@ -7,7 +7,7 @@ Miscellaneous routes
 """
 
 import os
-from meerschaum.api import app, endpoints, check_allow_chaining
+from meerschaum.api import app, endpoints, check_allow_chaining, SERVER_ID, debug
 from starlette.responses import FileResponse
 
 @app.get(endpoints['favicon'], tags=['Misc'])
@@ -21,3 +21,14 @@ def get_chaining_status() -> bool:
     Return whether this API instance allows chaining.
     """
     return check_allow_chaining()
+
+if debug:
+    @app.get('/id', tags=['Misc'])
+    def get_ids() -> str:
+        """
+        Return the server and process IDs.
+        """
+        return {
+            'server': SERVER_ID,
+            'process': os.getpid(),
+        }

@@ -19,7 +19,7 @@ from meerschaum.config import get_config
 from meerschaum.config.static import _static_config
 from meerschaum.utils.packages import attempt_import
 from meerschaum.utils.get_pipes import get_pipes as _get_pipes
-from meerschaum.config._paths import API_UVICORN_CONFIG_PATH
+from meerschaum.config._paths import API_UVICORN_CONFIG_PATH, API_UVICORN_RESOURCES_PATH
 from meerschaum.plugins import _api_plugins
 from meerschaum.utils.warnings import warn
 endpoints = _static_config()['api']['endpoints']
@@ -29,6 +29,8 @@ starlette_reponses = attempt_import('starlette.responses', warn=False, lazy=Fals
 python_multipart = attempt_import('multipart', lazy=False)
 packaging_version = attempt_import('packaging.version')
 from meerschaum.api._chain import check_allow_chaining, DISALLOW_CHAINING_MESSAGE
+from meerschaum.config.static import SERVER_ID
+uvicorn_config_path = API_UVICORN_RESOURCES_PATH / SERVER_ID / '.config.json'
 
 uvicorn_config = None
 sys_config = get_config('system', 'api')
@@ -43,10 +45,11 @@ def get_uvicorn_config() -> Dict[str, Any]:
     _uvicorn_config = uvicorn_config
     if uvicorn_config is None:
         try:
-            with open(API_UVICORN_CONFIG_PATH, 'r') as f:
+            with open(uvicorn_config_path, 'r') as f:
                 uvicorn_config = json.load(f)
             _uvicorn_config = uvicorn_config
         except Exception as e:
+            raise
             _uvicorn_config = sys_config.get('uvicorn', None)
 
         if _uvicorn_config is None:
@@ -57,14 +60,10 @@ def get_uvicorn_config() -> Dict[str, Any]:
             _uvicorn_config['mrsm_instance'] = get_config('meerschaum', 'api_instance', patch=True)
     return _uvicorn_config
 
-debug = get_uvicorn_config().get('debug', False) if API_UVICORN_CONFIG_PATH.exists() else False
+debug = get_uvicorn_config().get('debug', False)
 no_dash = get_uvicorn_config().get('no_dash', False)
 no_auth = get_uvicorn_config().get('no_auth', False)
-### NOTE: Disable dash unless version is at least 0.3.0.
-_include_dash = (
-    (not no_dash)
-    and (packaging_version.parse(version) >= packaging_version.parse('0.3.0rc1'))
-)
+_include_dash = (not no_dash)
 
 connector = None
 def get_api_connector(instance_keys : Optional[str] = None):
