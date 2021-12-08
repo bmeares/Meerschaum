@@ -31,6 +31,7 @@ def _static_config():
                     'websocket': '/ws',
                     'dash': '/dash',
                     'term': '/term',
+                    'info': '/info',
                 },
                 'oauth': {
                     'token_expires_minutes': 15,

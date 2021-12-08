@@ -45,7 +45,7 @@ def read_current_user(
 @app.get(users_endpoint, tags=['Users'])
 def get_users() -> List[str]:
     """
-    Return a list of registered users
+    Return a list of registered users.
     """
     return get_api_connector().get_users(debug=debug)
 

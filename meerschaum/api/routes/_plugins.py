@@ -85,7 +85,7 @@ def register_plugin(
 
 @app.get(plugins_endpoint + '/{name}', tags=['Plugins'])
 def get_plugin(
-        name : str
+        name: str
     ) -> Union[FileResponse, SuccessTuple]:
     """
     Download a plugin's archive file
