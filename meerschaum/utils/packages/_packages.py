@@ -152,7 +152,7 @@ all_packages = dict()
 for group, import_names in packages.items():
     all_packages.update(import_names)
 
-skip_groups = {'docs', 'build', 'cli', 'dev-tools', 'portable', 'extras', 'stack'}
+skip_groups = {'docs', 'build', 'cli', 'dev-tools', 'portable', 'extras', 'stack', 'gui'}
 full = list()
 _full = dict()
 for group, import_names in packages.items():
