@@ -20,9 +20,9 @@ def plugin_r_url(
 
 def register_plugin(
         self,
-        plugin : meerschaum._internal.Plugin.Plugin,
-        make_archive : bool = True,
-        debug : bool = False
+        plugin: meerschaum._internal.Plugin.Plugin,
+        make_archive: bool = True,
+        debug: bool = False,
     ) -> SuccessTuple:
     """
     Register a plugin and upload its archive.
@@ -30,9 +30,9 @@ def register_plugin(
     import json
     archive_path = plugin.make_tar(debug=debug) if make_archive else plugin.archive_path
     file_pointer = open(archive_path, 'rb')
-    files = {'archive' : file_pointer}
+    files = {'archive': file_pointer}
     metadata = {
-        'version' : plugin.version,
+        'version': plugin.version,
         'attributes': json.dumps(plugin.attributes),
     }
     r_url = plugin_r_url(plugin)
@@ -52,9 +52,9 @@ def register_plugin(
 
 def install_plugin(
         self,
-        name : str,
-        force : bool = False,
-        debug : bool = False
+        name: str,
+        force: bool = False,
+        debug: bool = False
     ) -> SuccessTuple:
     """
     Download and attempt to install a plugin from the API.
