@@ -49,7 +49,6 @@ def get_uvicorn_config() -> Dict[str, Any]:
                 uvicorn_config = json.load(f)
             _uvicorn_config = uvicorn_config
         except Exception as e:
-            raise
             _uvicorn_config = sys_config.get('uvicorn', None)
 
         if _uvicorn_config is None:
