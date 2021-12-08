@@ -310,7 +310,7 @@ def need_update(
     if required_version:
         semver = attempt_import('semver', check_update=False, lazy=False)
         try:
-            match = semver.match
+            match = semver.VersionInfo.match
         except Exception as e:
             ### Something funky is going on with semver.
             match = None
