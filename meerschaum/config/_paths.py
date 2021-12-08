@@ -87,7 +87,7 @@ def set_root(root: Union[Path, str]):
     global paths
     paths['ROOT_DIR_PATH'] = Path(root)
 
-def __getattr__(name : str) -> Path:
+def __getattr__(name: str) -> Path:
     if name not in paths:
         if name not in globals():
             raise AttributeError(f"Could not import '{name}'.")
