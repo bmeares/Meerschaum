@@ -23,3 +23,4 @@ def get_meerschaum_version():
     """
     from meerschaum import __version__ as version
     return version
+

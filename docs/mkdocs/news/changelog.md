@@ -18,6 +18,8 @@ This is the current release cycle, so future features will be updated below.
   When installing plugins, the expected behavior of checking if it's already installed occurs.
 - **Replaced `semver.match()` with `semver.VersionInfo.match()`.**  
   This change resolves depreciation warnings when building the package.
+- **Added the `/info` endpoint to the API.**  
+  This allows users to scrape tidbits of information about instances. The current dictionary returns the version and numbers of pipes, plugins, and users. More information will be added to this endpoint in future releases.
 
 ### v0.5.0
 - **New syncing engine.**  
