@@ -9,7 +9,7 @@ This changelog was not introduced until v0.2.12, so many of the critical release
 ## 0.5.x Releases
 This is the current release cycle, so future features will be updated below.
 
-### v0.5.1
+### v0.5.1 – v0.5.2
 - **Added the experimental commands `start gui` and `start webterm`.**  
   The desktop GUI will be rewritten in the future, but for now it starts a webview for the web console. The webterm is an instance of `xterm` (not `xterm.js`, having issues) and will eventually replace the current web console "terminal" output. The desktop GUI will also be replaced and will include the webterm once I can get it working on Windows.
 - **Isolated API processes.**  
