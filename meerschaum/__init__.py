@@ -12,4 +12,7 @@ from meerschaum.Pipe import Pipe
 from meerschaum.utils import get_pipes
 from meerschaum.connectors import get_connector
 
-
+__pdoc__ = {
+    'gui': False,
+    '_internal': True,
+}
