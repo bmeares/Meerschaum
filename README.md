@@ -1,9 +1,9 @@
 <img src="https://meerschaum.io/assets/banner_1920x320.png" alt="Meerschaum banner">
 
-| PyPI                                                         | GitHub                                                       | License                                                      |
-| ------------------------------------------------------------ | ------------------------------------------------------------ | ------------------------------------------------------------ |
-| ![PyPI]( https://img.shields.io/pypi/v/meerschaum?color=%2300cc66&label=Version ) | ![GitHub Repo stars](https://img.shields.io/github/stars/bmeares/Meerschaum?style=social) | ![PyPI - License](https://img.shields.io/pypi/l/meerschaum?label=License) |
-| ![PyPI - Python Version]( https://img.shields.io/pypi/pyversions/meerschaum?label=Python&logo=python&logoColor=%23ffffff ) | ![Lines of code]( https://img.shields.io/tokei/lines/github/bmeares/Meerschaum?label=Total%20Lines ) |                                                              |
+| PyPI | GitHub | License | Stats |
+|---|---|---|---|
+| ![PyPI]( https://img.shields.io/pypi/v/meerschaum?color=%2300cc66&label=Version ) | ![GitHub Repo stars](https://img.shields.io/github/stars/bmeares/Meerschaum?style=social) | ![PyPI - License](https://img.shields.io/pypi/l/meerschaum?label=Core%20License) | ![Number of plugins]( https://img.shields.io/badge/dynamic/json?color=3098c1&label=Public%20Plugins&query=num_plugins&url=https%3A%2F%2Fapi.mrsm.io%2Finfo ) |
+| ![PyPI - Python Version]( https://img.shields.io/pypi/pyversions/meerschaum?label=Python&logo=python&logoColor=%23ffffff ) | ![Lines of code]( https://img.shields.io/tokei/lines/github/bmeares/Meerschaum?label=Total%20Lines ) | ![Plugins - License]( https://img.shields.io/badge/Plugins%20License-You%20decide!-success ) | ![Number of registered users]( https://img.shields.io/badge/dynamic/json?color=3098c1&label=Registered%20Users&query=num_users&url=https%3A%2F%2Fapi.mrsm.io%2Finfo ) |
 
 
 # What is Meerschaum?
