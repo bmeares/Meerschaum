@@ -172,6 +172,14 @@ app.mount('/static', fastapi_staticfiles.StaticFiles(directory=str(API_STATIC_PA
 #  templates = fastapi_templating.Jinja2Templates(directory=str(API_TEMPLATES_PATH))
 
 
+def __getattr__(name: str):
+    ucf = get_uvicorn_config()
+    if name in ucf:
+        return ucf[name]
+    if name in globals():
+        return globals()[name]
+    raise AttributeError(f"Could not import '{name}'.")
+
 ### Import everything else within the API.
 from meerschaum.api._oauth2 import manager
 import meerschaum.api.routes as routes
