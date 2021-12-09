@@ -21,6 +21,7 @@ from meerschaum.api import (
 )
 from meerschaum.utils.packages import attempt_import, import_dcc, import_html
 from meerschaum.connectors.parse import parse_instance_keys
+flask_compress = attempt_import('flask_compress', lazy=False)
 dash = attempt_import('dash', lazy=False)
 import warnings
 ### Suppress the depreciation warnings from importing enrich.

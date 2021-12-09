@@ -203,7 +203,7 @@ def error(
     #  else: sys.tracebacklimit = None
     raise color_exception
 
-def info(message : str, icon : bool = True, **kw):
+def info(message: str, icon: bool = True, **kw):
     """
     Print an informative message
     """
@@ -213,6 +213,10 @@ def info(message : str, icon : bool = True, **kw):
     if icon:
         message = ' ' + info_config[CHARSET]['icon'] + ' ' + message
     if ANSI:
-        message = colored(message, **info_config['ansi']['rich'])
+        lines = message.split('\n')
+        message = (
+            colored(lines[0], **info_config['ansi']['rich'])
+            + ('\n' + '\n'.join(lines[1:]) if len(lines) > 1 else '')
+        )
     ### NOTE: There's a bug somewhere because I have to flush stdout every time.
     print(message, flush=True)

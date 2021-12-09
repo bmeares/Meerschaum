@@ -10,17 +10,9 @@ from __future__ import annotations
 
 from pathlib import Path
 import os, platform
-try:
-    import importlib.resources as pkg_resources
-except ImportError:
-    import importlib_resources as pkg_resources
-
-package_root_context_manager = pkg_resources.path('meerschaum', '__init__.py')
-with package_root_context_manager as file_path:
-    PACKAGE_ROOT_PATH = Path(os.path.join(Path(file_path.parent.parent), 'meerschaum'))
 
 paths = {
-    'PACKAGE_ROOT_PATH' : PACKAGE_ROOT_PATH,
+    'PACKAGE_ROOT_PATH' : str(Path(__file__).parent.parent),
     'ROOT_DIR_PATH' : (
         Path(os.path.join(Path.home(), '.config', 'meerschaum'))
         if platform.system() != 'Windows'

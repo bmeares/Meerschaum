@@ -59,7 +59,7 @@ packages : Dict[str, Dict[str, str]] = {
         'pymysql'                    : 'PyMySQL>=0.9',
         'aiomysql'                   : 'aiomysql>=0.0.21',
         'sqlalchemy_cockroachdb'     : 'sqlalchemy-cockroachdb>=1.4.2',
-        'duckdb'                     : 'duckdb>=0.2.6',
+        'duckdb'                     : 'duckdb>=0.3.2.dev579',
         'duckdb_engine'              : 'duckdb-engine>=0.1.3',
         #  'pyodbc'        : 'pyodbc>=4.0.30', ### Not included due to Docker image issues.
     },
@@ -134,6 +134,7 @@ packages['dash'] = {
     'dash_extensions'                : 'dash-extensions>=0.0.51',
     'dash_daq'                       : 'dash-daq>=0.5.0',
     'ansi2html'                      : 'ansi2html>=1.6.0',
+    'flask_compress'                 : 'Flask-Compress>=1.10.1',
 }
 packages['api'] = {
     'uvicorn'                        : 'uvicorn[standard]>=0.13.4',
