@@ -323,16 +323,22 @@ def _start_gui(
     from meerschaum.utils.debug import dprint
     from meerschaum.utils.networking import find_open_ports, is_port_in_use
     from meerschaum.connectors.parse import parse_instance_keys
+    from meerschaum._internal.term.tools import is_webterm_running
     webview = attempt_import('webview')
     requests = attempt_import('requests')
     import json
     import time
 
     success, msg = True, "Success"
+    host = '127.0.0.1'
     if port is None:
-        port = next(find_open_ports(8765, 9000))
-    elif is_port_in_use(port):
-        return False, f"Port '{port}' is already in use."
+        port = 8765
+    #  elif is_port_in_use(port):
+        #  return False, f"Port '{port}' is already in use."
+
+    if not is_webterm_running(host, port):
+        port = next(find_open_ports(port, 9000))
+
 
     api_kw = {
         'action': ['webterm'],
@@ -340,7 +346,7 @@ def _start_gui(
         'port': port,
         'mrsm_instance': str(parse_instance_keys(mrsm_instance)),
         'debug': debug,
-        'host': '127.0.0.1',
+        'host': host,
     }
     api_kw_str = json.dumps(json.dumps(api_kw))
     start_tornado_code = (
@@ -384,19 +390,58 @@ def _start_gui(
     return success, msg
 
 
-def _start_webterm(**kw) -> SuccessTuple:
+def _start_webterm(
+        port: Optional[int] = None,
+        host: Optional[str] = None,
+        force: bool = False,
+        nopretty: bool = False,
+        **kw
+    ) -> SuccessTuple:
     """
-    Start the Meerschaum Web Terminal (Tornado server).
+    Start the Meerschaum Web Terminal.
+
+    Options:
+        - `-p`, `--port`
+            The port to which the webterm binds.
+            Defaults to 8765, and `--force` will choose the next available port.
+
+        - `--host`
+            The host interface to which the webterm binds.
+            Defaults to '127.0.0.1'.
     """
     from meerschaum._internal.term import tornado_app, tornado, term_manager, tornado_ioloop
-    tornado_app.listen(8765, 'localhost')
+    from meerschaum._internal.term.tools import is_webterm_running
+    from meerschaum.utils.networking import find_open_ports, is_port_in_use
+    from meerschaum.utils.packages import attempt_import
+    from meerschaum.utils.warnings import info
+
+    if host is None:
+        host = '127.0.0.1'
+    if port is None:
+        port = 8765
+
+    if is_webterm_running(host, port):
+        if force:
+            port = next(find_open_ports(port + 1, 9000))
+        else:
+            return False, (
+                f"The webterm is already running at http://{host}:{port}\n\n"
+                + "    Include `-f` to start another server on a new port\n"
+                + "    or specify a different port with `-p`."
+            )
+
+    if not nopretty:
+        info(f"Starting the webterm at http://{host}:{port} ...\n    Press CTRL+C to quit.")
+    tornado_app.listen(port, host)
     loop = tornado_ioloop.IOLoop.instance()
     try:
         loop.start()
     except KeyboardInterrupt:
-        pass
-    finally:
+        if not nopretty:
+            print()
+            info("Shutting down webterm...")
         term_manager.shutdown()
+    finally:
         loop.close()
 
     return True, "Success"

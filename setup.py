@@ -2,7 +2,7 @@
 # -*- coding: utf-8 -*-
 # vim:fenc=utf-8
 
-import setuptools, sys
+import setuptools, sys, platform
 from setuptools import setup
 from setuptools.command.install import install
 cx_Freeze, Executable = None, None
@@ -51,9 +51,9 @@ setup_kw_args = {
             'meerschaum = meerschaum.__main__:main',
         ],
     },
-    'cmdclass'                      : {
-        'install'                   : PostInstallCommand,
-    },
+    #  'cmdclass'                      : {
+        #  'install'                   : PostInstallCommand,
+    #  },
     'zip_safe'                      : True,
     'package_data'                  : {'' : ['*.html', '*.css', '*.js', '*.png', '*.ico']},
     'python_requires'               : '>=3.7',
