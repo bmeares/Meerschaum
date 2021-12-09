@@ -323,6 +323,7 @@ def _start_gui(
     from meerschaum.utils.debug import dprint
     from meerschaum.utils.networking import find_open_ports, is_port_in_use
     from meerschaum.connectors.parse import parse_instance_keys
+    webview = attempt_import('webview')
     requests = attempt_import('requests')
     import json
     import time
@@ -333,24 +334,8 @@ def _start_gui(
     elif is_port_in_use(port):
         return False, f"Port '{port}' is already in use."
 
-    #  ports = find_open_ports()
-    #  print(list(ports))
-    #  return False, 'testing'
-
-    start_tornado_code = (
-        "from meerschaum.api.term import tornado_app, tornado, term_manager\n"
-        "tornado_app.listen(8765, 'localhost')\n"
-        "loop = tornado.ioloop.IOLoop.instance()\n"
-        "try:\n"
-        "    loop.start()\n"
-        "except KeyboardInterrupt:\n"
-        "    pass\n"
-        "finally:\n"
-        "    term_manager.shutdown()\n"
-        "    loop.close()\n"
-    )
     api_kw = {
-        'action': ['api'],
+        'action': ['webterm'],
         'no_auth': True,
         'port': port,
         'mrsm_instance': str(parse_instance_keys(mrsm_instance)),
@@ -370,26 +355,25 @@ def _start_gui(
     process = venv_exec(
         start_tornado_code, as_proc=True, venv=None, debug=debug, capture_output=(not debug)
     )
+    timeout = 10
+    start = time.perf_counter()
     starting_up = True
     while starting_up:
+        starting_up = (time.perf_counter() - start) < timeout
         time.sleep(0.1)
         try:
-            version = requests.get(base_url + '/version').json()
-            break
+            request = requests.get(base_url)
+            if request:
+                break
         except Exception as e:
             if debug:
                 dprint(e)
             continue
-    #  process = run_python_package('meerschaum', ['start', 'api', '--port', str(port), '--no-auth', '--mrsm_instance', str(parse_instance_keys(mrsm_instance))], as_proc=True)
+    if starting_up is False:
+        return False, f"The webterm failed to start within {timeout} seconds."
 
     try:
-        #  from meerschaum.gui import get_app, build_app
-        #  app = get_app(**kw)
-        #  app.main_loop()
-        #  from meerschaum.api import app as fastapi_app
-        #  from meerschaum.api.dash import dash_app
-        import webview
-        webview.create_window('Foo', f'http://127.0.0.1:{port}', height=720, width=1280)
+        webview.create_window('Meerschaum Shell', f'http://127.0.0.1:{port}', height=650, width=1000)
         webview.start(debug=debug)
     except Exception as e:
         import traceback
@@ -404,9 +388,9 @@ def _start_webterm(**kw) -> SuccessTuple:
     """
     Start the Meerschaum Web Terminal (Tornado server).
     """
-    from meerschaum.api.term import tornado_app, tornado, term_manager
+    from meerschaum._internal.term import tornado_app, tornado, term_manager, tornado_ioloop
     tornado_app.listen(8765, 'localhost')
-    loop = tornado.ioloop.IOLoop.instance()
+    loop = tornado_ioloop.IOLoop.instance()
     try:
         loop.start()
     except KeyboardInterrupt:

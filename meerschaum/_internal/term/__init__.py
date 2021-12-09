@@ -11,13 +11,20 @@ import os
 import platform
 import sys
 from meerschaum.utils.packages import attempt_import
-from meerschaum.api import app as fastapi_app, endpoints
-from meerschaum.api.term.TermPageHandler import TermPageHandler
+from meerschaum._internal.term.TermPageHandler import TermPageHandler
 from meerschaum.config._paths import API_TEMPLATES_PATH
 
-tornado, terminado, tornado_xstatic, uvicorn = attempt_import(
-    'tornado', 'terminado', 'tornado_xstatic', 'uvicorn', lazy=False,
+tornado, tornado_ioloop, terminado, tornado_xstatic = attempt_import(
+    'tornado', 'tornado.ioloop', 'terminado', 'tornado_xstatic', lazy=False, venv=None,
 )
+try:
+    from xstatic.pkg import termjs
+except ImportError:
+    from meerschaum.utils.packages import pip_install
+    if not pip_install('XStatic-term.js', venv=None):
+        raise ImportError("Failed to install and import Xterm.js.")
+    from xstatic.pkg import termjs
+
 STATIC_DIR = os.path.join(os.path.dirname(terminado.__file__), "_static")
 
 commands = [sys.executable, '-m', 'meerschaum']
@@ -46,8 +53,3 @@ tornado_app = tornado.web.Application(
     xstatic_url = tornado_xstatic.url_maker('/xstatic/')
 )
 
-
-
-#  fastapi_app.add_middleware(tornado_app)
-#  fastapi_middleware_wsgi = attempt_import('fastapi.middleware.wsgi')
-#  fastapi_app.mount(endpoints['term'], fastapi_middleware_wsgi.WSGIMiddleware(tornado_app))

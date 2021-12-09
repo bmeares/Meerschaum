@@ -187,7 +187,6 @@ import meerschaum.api._websockets
 ### Skip importing the dash if `--no-dash` is provided.
 if _include_dash:
     import meerschaum.api.dash
-    import meerschaum.api.term
 
 ### Execute the API plugins functions.
 for module_name, functions_list in _api_plugins.items():
