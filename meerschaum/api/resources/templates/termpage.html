@@ -1,23 +1,22 @@
 <!DOCTYPE html>
 <head>
-<meta charset="UTF-8"> 
-<title>pyxterm</title>
-<!--
-  pyxterm: Basic Python socket implementation for term.js
-
-  Example template
-  Modified by: R. Saravanan <sarava@sarava.net> 2014
-  Original Copyright (c) 2012-2013, Christopher Jeffrey (MIT License)
--->
+<meta charset="UTF-8">
+<title>Meerschaum Shell</title>
 <style>
   html {
-    background: #555;
+    background: #000;
   }
 
   h1 {
     margin-bottom: 20px;
     font: 20px/1.5 sans-serif;
   }
+
+  .terminal {
+    font-size: 16px !important;
+  }
+
+
 </style>
 <script src="{{ xstatic('termjs', 'term.js') }}"></script>
 <script src="{{ static('terminado.js') }}"></script>
@@ -30,7 +29,7 @@ window.onload = function() {
 
     var protocol = (window.location.protocol.indexOf("https") === 0) ? "wss" : "ws";
     var ws_url = protocol+"://"+window.location.host+ "{{ws_url_path}}";
-    
+
     function calculate_size(element) {
         var rows = Math.max(2, Math.floor(element.innerHeight/termRowHeight)-1);
         var cols = Math.max(3, Math.floor(element.innerWidth/termColWidth)-1);
@@ -41,8 +40,8 @@ window.onload = function() {
 
     size = calculate_size(window);
     var terminal = make_terminal(document.body, size, ws_url);
-    
-    window.onresize = function() { 
+
+    window.onresize = function() {
       var geom = calculate_size(window);
       terminal.term.resize(geom.cols, geom.rows);
       terminal.socket.send(JSON.stringify(["set_size", geom.rows, geom.cols,
@@ -53,7 +52,7 @@ window.onload = function() {
 </head>
 <body>
 <!-- test size: 25x80 -->
-<pre id="dummy-screen" style="visibility:hidden; border: white solid 5px; font-family: &quot;DejaVu Sans Mono&quot;, &quot;Liberation Mono&quot;, monospace; font-size: 11px;">0
+<pre id="dummy-screen" style="visibility:hidden; border: white solid 5px; font-family: &quot;DejaVu Sans Mono&quot;, &quot;Liberation Mono&quot;, monospace; font-size: 16px;">0
 1
 2
 3

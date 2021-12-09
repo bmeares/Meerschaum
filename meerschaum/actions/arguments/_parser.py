@@ -241,7 +241,7 @@ groups['api'].add_argument(
     '-p', '--port', type=int, help="The port on which to run the Web API server"
 )
 groups['api'].add_argument(
-    '--host', type=int, help="The host address to bind to for the API server. Defaults to '0.0.0.0'."
+    '--host', type=str, help="The host address to bind to for the API server. Defaults to '0.0.0.0'."
 )
 groups['api'].add_argument(
     '-w', '--workers', type=int,
