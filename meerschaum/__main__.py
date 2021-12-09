@@ -9,12 +9,11 @@ mrsm CLI entrypoint.
 
 import sys, os
 
-def main() -> None:
+def main(sysargs: list) -> None:
     """
     Main CLI entry point.
     """
     old_cwd = os.getcwd()
-    sysargs = sys.argv[1:]
 
     ### Check for a custom configuration directory.
     if '--root-dir' in sysargs:
@@ -99,4 +98,4 @@ def _close_pools():
             pass
 
 if __name__ == "__main__":
-    main()
+    main(sys.argv[1:])

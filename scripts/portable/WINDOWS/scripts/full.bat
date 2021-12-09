@@ -6,15 +6,15 @@ ECHO About to create a full Meerschaum portable archive.
 
 PAUSE
 
-cd %DIR%
+PUSHD %DIR%
 CALL install.bat
-cd %DIR%
+PUSHD %DIR%
 CALL compress.bat
-cd %DIR%
+PUSHD %DIR%
 CALL uninstall.bat
-cd %DIR%
+PUSHD %DIR%
 IF EXIST mrsm-full-windows.zip (
-  del /q /f mrsm-full-windows.zip
+  DEL /q /f mrsm-full-windows.zip
 )
 REN mrsm.zip mrsm-full-windows.zip
 ECHO Created file mrsm-full-windows.zip

@@ -7,10 +7,10 @@ ECHO Please run this after generating the files from Unix with scripts/portable/
 
 PAUSE
 
-cd %DIR%
+PUSHD %DIR%
 ECHO | CALL minimal.bat
 
-cd %DIR%
+PUSHD %DIR%
 ECHO | CALL full.bat
 
 ECHO Finished creating archives.
