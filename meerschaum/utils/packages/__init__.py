@@ -473,7 +473,11 @@ def activate_venv(
                 symlinks = (platform.system() != 'Windows'),
             )
         else:
-            virtualenv.cli_run([str(venv_path), '--download', '--system-site-packages'])
+            try:
+                virtualenv.cli_run([str(venv_path), '--download', '--system-site-packages'])
+            except Exception as e:
+                import traceback
+                traceback.print_exc()
 
     old_cwd = pathlib.Path(os.getcwd())
     os.chdir(VIRTENV_RESOURCES_PATH)

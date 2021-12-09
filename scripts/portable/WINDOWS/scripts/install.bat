@@ -2,11 +2,11 @@
 SET DIR="%~dp0"
 SET ROOT=%DIR%\..
 SET MRSM_ROOT_DIR_REL=%ROOT%\root\
-CD %MRSM_ROOT_DIR_REL%
+PUSHD %MRSM_ROOT_DIR_REL%
 SET MRSM_ROOT_ROOT_DIR=%CD%
 
 
-CD %ROOT%
+PUSHD %ROOT%
 IF NOT EXIST .\scripts\_site-packages_original (
   ECHO Backing up site-packages...
   MD .\scripts\_site-packages_original
@@ -15,7 +15,7 @@ IF NOT EXIST .\scripts\_site-packages_original (
 )
 
 ECHO Ensuring latest pip...
-CD %ROOT%
+PUSHD %ROOT%
 .\python\python.exe -m pip uninstall pip setuptools -y
 .\python\python.exe ..\cache\get-pip.py
 

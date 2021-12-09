@@ -37,14 +37,6 @@ tars["LINUX"]="debian.tar.zst"
 tars["MACOS"]="macos.tar.gz"
 
 declare -A taropts
-    #  _check_config_file_max = 20
-    #  while _check_config_file_counter < _check_config_file_max:
-        #  if API_UVICORN_CONFIG_PATH.exists():
-            #  break
-        #  time.sleep(0.1)
-    #  if not API_UVICORN_CONFIG_PATH.exists():
-        #  print("Uvicorn config file was not found!", file=sys.stderr)
-        #  os._exit(1)
 taropts["WINDOWS"]="-I zstd -xf "
 taropts["LINUX"]="-I zstd -xf "
 taropts["MACOS"]="-I zstd -xf "

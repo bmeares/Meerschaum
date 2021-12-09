@@ -1,7 +1,7 @@
 @ECHO OFF
 
 SET DIR="%~dp0"
-cd %DIR%
+PUSHD %DIR%
 SET bsdtar="%WINDIR%"\System32\tar.exe
 
 IF NOT EXIST %bsdtar% (

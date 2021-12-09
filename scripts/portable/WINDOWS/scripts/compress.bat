@@ -9,15 +9,15 @@ IF NOT EXIST %gittar% (
   EXIT
 )
 
-CD "%ROOT%"\scripts
+PUSHD "%ROOT%"\scripts
 ROBOCOPY .\compress\ .\_compress\ /E >NUL
 
-cd %ROOT%\..
+PUSHD %ROOT%\..
 ECHO Compressing files, please wait...
 %gittar% --exclude='./scripts' -czf ./WINDOWS/scripts/_compress/mrsm.tar.gz -C WINDOWS .
 ECHO Done creating tar archive.
 
-CD "%ROOT%"\scripts
+PUSHD "%ROOT%"\scripts
 ECHO Creating ZIP archive...
 powershell Compress-Archive -Path .\_compress\* -DestinationPath .\mrsm.zip -CompressionLevel NoCompression -Force
 RMDIR .\_compress /s /q
