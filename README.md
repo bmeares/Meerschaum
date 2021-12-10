@@ -17,7 +17,9 @@ If you've worked with time-series data, you know the headaches that come with ET
 
 Meerschaum instead gives you better tools to define and sync your data streams. And don't worry — you can always incorporate Meerschaum into your existing scripts.
 
-# Quick Start
+<img src="https://meerschaum.io/files/images/show_pipes.png" alt="Show pipes screenshot" height="250px"> <img src="https://meerschaum.io/files/images/sync_pipes.png" alt="Sync pipes screenshot" height="250px">
+
+# Installation
 
 For a more thorough setup guide, visit the [Getting Started](https://meerschaum.io/get-started/) page at [meerschaum.io](https://meerschaum.io).
 
@@ -41,4 +43,6 @@ For details on installing, using, and writing plugins, check out the [plugins do
 
 # Support Meerschaum's Development
 
-I'm a full-time graduate student, and I work on Meerschaum in my free time. If you enjoy Meerschaum and want to support its development, you can [buy me a beer (or coffee)](https://www.buymeacoffee.com/bmeares).
+For consulting services and to support Meerschaum's development, please considering sponsoring me on [GitHub sponsors](https://github.com/sponsors/bmeares).
+
+Additionally, you can always [buy me a coffee☕](https://www.buymeacoffee.com/bmeares)!
