@@ -9,10 +9,12 @@ mrsm CLI entrypoint.
 
 import sys, os
 
-def main(sysargs: list) -> None:
+def main(sysargs: list = None) -> None:
     """
     Main CLI entry point.
     """
+    if sysargs is None:
+        sysargs = sys.argv[1:]
     old_cwd = os.getcwd()
 
     ### Check for a custom configuration directory.
