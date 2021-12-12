@@ -219,8 +219,9 @@ def make_exe():
         # If no argument passed, the default `PythonInterpreterConfig` is used.
         config=python_config,
     )
-    exe.add_python_resources(exe.pip_install(["--upgrade", "wheel", "setuptools", "pip"]))
-    for resource in exe.pip_install([".[full]"]):
+    #exe.add_python_resources(exe.pip_install(["--upgrade", "wheel", "setuptools", "pip"]))
+    # exe.add_python_resources(exe.pip_install(["--upgrade", "--pre", "wheel", "setuptools", "pip", "pythonnet; platform_system == \"Windows\"", ".[full]"]))
+    for resource in exe.pip_install(["--upgrade", "--pre", "wheel", "setuptools", "pip", "pythonnet; platform_system == \"Windows\"", ".[full]"]):
         resource.add_location = 'filesystem-relative:lib'
         exe.add_python_resource(resource)
 
@@ -296,10 +297,11 @@ def make_install(exe):
     return files
 
 def make_msi(exe):
+    icon_path = 'docs\\mkdocs\\assets\\logo_3000x3000.png'
     # See the full docs for more. But this will convert your Python executable
     # into a `WiXMSIBuilder` Starlark type, which will be converted to a Windows
     # .msi installer when it is built.
-    return exe.to_wix_msi_builder(
+    builder = exe.to_wix_msi_builder(
         # Simple identifier of your app.
         "meerschaum",
         # The name of your application.
@@ -309,6 +311,8 @@ def make_msi(exe):
         # The author/manufacturer of your application.
         "Bennett Meares"
     )
+    builder.product_icon_path = icon_path
+    return builder
 
 
 # Dynamically enable automatic code signing.
