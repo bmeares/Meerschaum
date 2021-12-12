@@ -19,7 +19,6 @@ Meerschaum instead gives you better tools to define and sync your data streams. 
 
 <img src="https://meerschaum.io/files/images/show_pipes.png" alt="Show pipes screenshot">
 <br>
-<br>
 <img src="https://meerschaum.io/files/images/sync_pipes.png" alt="Sync pipes screenshot">
 
 # Installation
