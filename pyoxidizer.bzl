@@ -219,7 +219,7 @@ def make_exe():
         # If no argument passed, the default `PythonInterpreterConfig` is used.
         config=python_config,
     )
-    for resource in exe.pip_install([".[full]"]):
+    for resource in exe.pip_install(["wheel", "setuptools", ".[full]"]):
         resource.add_location = 'filesystem-relative:lib'
         exe.add_python_resource(resource)
 
