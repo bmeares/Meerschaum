@@ -6,6 +6,10 @@
 | ![PyPI - Python Version]( https://img.shields.io/pypi/pyversions/meerschaum?label=Python&logo=python&logoColor=%23ffffff ) | ![Lines of code]( https://img.shields.io/tokei/lines/github/bmeares/Meerschaum?label=Total%20Lines ) | ![Plugins - License]( https://img.shields.io/badge/Plugins%20License-You%20decide!-success ) | ![Number of registered users]( https://img.shields.io/badge/dynamic/json?color=3098c1&label=Registered%20Users&query=num_users&url=https%3A%2F%2Fapi.mrsm.io%2Finfo ) |
 
 
+<img src="https://meerschaum.io/files/images/show_pipes.png" alt="Show pipes screenshot" height="400px">
+<br>
+<img src="https://meerschaum.io/files/images/sync_pipes.png" alt="Sync pipes screenshot" height="400px">
+
 # What is Meerschaum?
 Meerschaum is a platform for quickly creating and managing time-series data streams called **pipes**. With Meerschaum, you can have a data visualization stack running in minutes.
 
@@ -16,10 +20,6 @@ The power of the Meerschaum system comes from projects like [pandas](https://pan
 If you've worked with time-series data, you know the headaches that come with ETL. Meerschaum is a system that makes consolidating and syncing data easy.
 
 Meerschaum instead gives you better tools to define and sync your data streams. And don't worry — you can always incorporate Meerschaum into your existing scripts.
-
-<img src="https://meerschaum.io/files/images/show_pipes.png" alt="Show pipes screenshot">
-<br>
-<img src="https://meerschaum.io/files/images/sync_pipes.png" alt="Sync pipes screenshot">
 
 # Installation
 
