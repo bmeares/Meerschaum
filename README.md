@@ -17,7 +17,10 @@ If you've worked with time-series data, you know the headaches that come with ET
 
 Meerschaum instead gives you better tools to define and sync your data streams. And don't worry — you can always incorporate Meerschaum into your existing scripts.
 
-<img src="https://meerschaum.io/files/images/show_pipes.png" alt="Show pipes screenshot" height="250px"> <img src="https://meerschaum.io/files/images/sync_pipes.png" alt="Sync pipes screenshot" height="250px">
+<img src="https://meerschaum.io/files/images/show_pipes.png" alt="Show pipes screenshot">
+<br>
+<br>
+<img src="https://meerschaum.io/files/images/sync_pipes.png" alt="Sync pipes screenshot">
 
 # Installation
 
