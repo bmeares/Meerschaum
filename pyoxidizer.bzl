@@ -297,7 +297,7 @@ def make_install(exe):
     return files
 
 def make_msi(exe):
-    icon_path = 'docs\\mkdocs\\assets\\logo_3000x3000.png'
+    icon_path = 'C:\\Users\\bmeares\\Meerschaum\\docs\\mkdocs\\assets\\logo_3000x3000.png'
     # See the full docs for more. But this will convert your Python executable
     # into a `WiXMSIBuilder` Starlark type, which will be converted to a Windows
     # .msi installer when it is built.
