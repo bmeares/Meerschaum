@@ -780,7 +780,8 @@ def run_python_package(
             command, foreground=foreground, as_proc=as_proc, capture_output=capture_output, **kw
         )
     except Exception as e:
-        print(traceback.format_exc(e))
+        ### For some weird reason, the traceback here breaks the tests (???).
+        #  print(traceback.format_exc(e))
         warn(e, color=False)
         stdout, stderr = (
             (None, None) if not capture_output else (subprocess.PIPE, subprocess.PIPE)
