@@ -12,8 +12,8 @@ from meerschaum.utils.threading import Lock, RLock
 
 _api_plugins : dict = {}
 _locks = {
-    '_api_plugins': Lock(),
-    '__path__': Lock(),
+    '_api_plugins': RLock(),
+    '__path__': RLock(),
     'sys.path': RLock(),
 }
 
@@ -101,6 +101,7 @@ def import_plugins(
     """
     global __path__
     import sys
+    import importlib
     from meerschaum.config._paths import (
         PLUGINS_RESOURCES_PATH, PLUGINS_ARCHIVES_RESOURCES_PATH, PLUGINS_INIT_PATH
     )
@@ -121,16 +122,13 @@ def import_plugins(
 
     if not plugins_to_import:
         try:
-            import plugins
+            plugins = importlib.import_module('plugins')
         except ImportError as e:
             warn(e)
             plugins = None
     else:
         from meerschaum.utils.packages import attempt_import
-        plugins = attempt_import(
-            *[('plugins.' + p) for p in plugins_to_import],
-            install=False, warn=True, lazy=False, venv=None,
-        )
+        plugins = [importlib.import_module(f'plugins.{p}') for p in plugins_to_import]
 
     if plugins is None and warn:
         _warn(f"Failed to import plugins.", stacklevel=3)
@@ -141,9 +139,11 @@ def import_plugins(
     _locks['__path__'].release()
     _locks['sys.path'].release()
 
+    if isinstance(plugins, list):
+        return (plugins[0] if len(plugins) == 1 else tuple(plugins))
     return plugins
 
-def load_plugins(debug : bool = False, shell : bool = False) -> None:
+def load_plugins(debug: bool = False, shell: bool = False) -> None:
     """
     Import Meerschaum plugins and update the actions dictionary.
     """
@@ -161,15 +161,22 @@ def load_plugins(debug : bool = False, shell : bool = False) -> None:
         modules_venvs = True
     )
     _all += _plugins_names
-    modules += plugins_modules
+    ### I'm appending here to keep from redefining the modules list.
+    new_modules = [mod for mod in modules if not mod.__name__.startswith('plugins.')] + plugins_modules
+    n_mods = len(modules)
+    for mod in new_modules:
+        modules.append(mod)
+    for i in range(n_mods):
+        modules.pop(0)
+
     for module in plugins_modules:
         for name, func in getmembers(module):
             if not isfunction(func):
                 continue
             if name == module.__name__.split('.')[-1]:
-                make_action(func, **{'shell' : shell, 'debug' : debug})
+                make_action(func, **{'shell': shell, 'debug': debug})
 
-def reload_plugins(plugins : Optional[List[str]] = None, debug : bool = False) -> None:
+def reload_plugins(plugins: Optional[List[str]] = None, debug: bool = False) -> None:
     """
     Reload plugins back into memory.
     """

@@ -9,11 +9,11 @@ from __future__ import annotations
 from meerschaum.utils.typing import SuccessTuple, Optional, List, Any
 
 def api(
-        action : Optional[List[str]] = None,
-        sysargs : Optional[List[str]] = None,
-        debug : bool = False,
-        mrsm_instance : Optional[str] = None,
-        **kw : Any
+        action: Optional[List[str]] = None,
+        sysargs: Optional[List[str]] = None,
+        debug: bool = False,
+        mrsm_instance: Optional[str] = None,
+        **kw: Any
     ) -> SuccessTuple:
     """
     Send commands to a Meerschaum WebAPI instance.
@@ -32,6 +32,7 @@ def api(
     """
     from meerschaum.utils.warnings import warn, info
     from meerschaum.utils.formatting import print_tuple
+    from meerschaum.utils.packages import attempt_import
     if action is None:
         action = []
     if sysargs is None:
@@ -46,7 +47,7 @@ def api(
 
     from meerschaum.config import get_config
     from meerschaum.connectors import get_connector
-    import requests
+    requests = attempt_import('requests')
     if debug:
         from meerschaum.utils.formatting import pprint
     api_configs = get_config('meerschaum', 'connectors', 'api', patch=True)
@@ -92,6 +93,7 @@ def _api_start(
         no_auth: bool = False,
         debug: bool = False,
         nopretty: bool = False,
+        production: bool = False,
         **kw: Any
     ) -> SuccessTuple:
     """
@@ -111,8 +113,14 @@ def _api_start(
         - `-w, --workers {number}`
             How many worker threads to run.
             Defaults to the number of CPU cores or 1 on Android.
+
+        - `--production, --gunicorn`
+            Start the API server with Gunicorn instead of Uvicorn.
+            Useful for production deployments.
     """
-    from meerschaum.utils.packages import attempt_import, venv_contains_package, pip_install
+    from meerschaum.utils.packages import (
+        attempt_import, venv_contains_package, pip_install, run_python_package
+    )
     from meerschaum.utils.misc import is_int
     from meerschaum.utils.formatting import pprint, ANSI
     from meerschaum.utils.debug import dprint
@@ -139,7 +147,7 @@ def _api_start(
 
     api_config = get_config('system', 'api')
     cf = _config()
-    uvicorn_config = api_config['uvicorn'].copy()
+    uvicorn_config = api_config['uvicorn']
     if port is None:
         ### default
         port = uvicorn_config['port']
@@ -216,19 +224,47 @@ def _api_start(
             pprint(uvicorn_config, stream=sys.stderr, nopretty=nopretty)
         json.dump(uvicorn_config, f)
 
+    env_dict = {
+        _static_config()['environment']['id']: SERVER_ID,
+        _static_config()['environment']['runtime']: 'api',
+        _static_config()['environment']['config']: {'system': {'api': {'uvicorn': uvicorn_config}}},
+    }
+    env_text = ''
+    for key, val in env_dict.items():
+        value = json.dumps(json.dumps(val)) if isinstance(val, dict) else val
+        env_text += f"{key}={value}\n"
     with open(uvicorn_env_path, 'w+') as f:
         if debug:
             dprint(f"Writing ENV file to '{uvicorn_env_path}'.")
-        f.write(f"MRSM_SERVER_ID={SERVER_ID}")
+        f.write(env_text)
 
     ### remove custom keys before calling uvicorn
-    for k in custom_keys:
-        del uvicorn_config[k]
 
-    try:
-        uvicorn.run(**uvicorn_config)
-    except KeyboardInterrupt:
-        pass
+    def _run_uvicorn():
+        try:
+            uvicorn.run(**{k: v for k, v in uvicorn_config.items() if k not in custom_keys})
+        except KeyboardInterrupt:
+            pass
+
+    def _run_gunicorn():
+        gunicorn = attempt_import('gunicorn', check_update=True)
+        gunicorn_args = [
+            'meerschaum.api:app', '--worker-class', 'uvicorn.workers.UvicornWorker',
+            '--bind', host + f':{port}',
+        ]
+        for key, val in env_dict.items():
+            gunicorn_args += ['--env', key + '=' + json.dumps(val)]
+        if workers is not None:
+            gunicorn_args += ['--workers', str(workers)]
+        if debug:
+            gunicorn_args += ['--log-level=debug', '--enable-stdio-inheritance', '--reload']
+        try:
+            run_python_package('gunicorn', gunicorn_args, debug=debug, venv='mrsm')
+        except KeyboardInterrupt:
+            pass
+
+
+    _run_uvicorn() if not production else _run_gunicorn()
 
     ### Cleanup
     if uvicorn_config_path.parent.exists():

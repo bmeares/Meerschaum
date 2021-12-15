@@ -42,6 +42,7 @@ def _static_config():
                 'patch': 'MRSM_PATCH',
                 'root': 'MRSM_ROOT_DIR',
                 'runtime': 'MRSM_RUNTIME',
+                'id': 'MRSM_SERVER_ID',
             },
             'config': {
                 'default_filetype': 'json',
