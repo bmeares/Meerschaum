@@ -334,28 +334,29 @@ def exists(
 def filter_existing(
         self,
         df: 'pd.DataFrame',
+        begin: Optional[datetime.datetime] = None,
+        end: Optional[datetime.datetime] = None,
         chunksize: Optional[int] = -1,
         params: Optional[Dict[str, Any]] = None,
         debug: bool = False,
         **kw
     ):
     """
-    Remove duplicate data from backtrack_data and a new dataframe
+    Remove duplicate data from backtrack_data and a new dataframe.
     """
     from meerschaum.utils.warnings import warn
     from meerschaum.utils.debug import dprint
     from meerschaum.utils.misc import round_time
     from meerschaum.utils.packages import attempt_import
-    np = attempt_import('numpy')
     import datetime as datetime_pkg
     ### begin is the oldest data in the new dataframe
     try:
-        min_dt = df[self.get_columns('datetime')].min().to_pydatetime()
+        min_dt = df[self.get_columns('datetime')].min(skipna=True).to_pydatetime()
     except Exception as e:
-        #  warn(e)
         min_dt = self.get_sync_time(debug=debug)
-    if min_dt in (np.nan, None):
-        min_dt = None
+    if not isinstance(min_dt, datetime_pkg.datetime) or str(min_dt) == 'NaT':
+        ### min_dt might be None, a user-supplied value, or the sync time.
+        min_dt = begin
     ### If `min_dt` is None, use `datetime.utcnow()`.
     begin = round_time(
         min_dt,
@@ -364,11 +365,10 @@ def filter_existing(
 
     ### end is the newest data in the new dataframe
     try:
-        max_dt = df[self.get_columns('datetime')].max().to_pydatetime()
+        max_dt = df[self.get_columns('datetime')].max(skipna=True).to_pydatetime()
     except Exception as e:
-        #  warn(e)
-        max_dt = None
-    if max_dt in (np.nan, None):
+        max_dt = end
+    if not isinstance(max_dt, datetime_pkg.datetime) or str(max_dt) == 'NaT':
         max_dt = None
 
     if max_dt is not None and min_dt > max_dt:
@@ -380,7 +380,9 @@ def filter_existing(
             max_dt,
             to = 'down'
         ) + datetime_pkg.timedelta(minutes=1)
-    ) if max_dt is not None else None
+    ) if max_dt is not None else end
+    if begin is not None and end is not None and begin > end:
+        begin = end - datetime_pkg.timedelta(minutes=1)
 
     if debug:
         dprint(f"Looking at data between '{begin}' and '{end}'.", **kw)

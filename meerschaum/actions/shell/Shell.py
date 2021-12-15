@@ -122,12 +122,12 @@ def _completer_wrapper(
     return wrapper
 
 def default_action_completer(
-        text : Optional[str] = None,
-        line : Optional[str] = None,
-        begin_index : Optional[int] = None,
-        end_index : Optional[int] = None,
-        action : Optional[List[str]] = None,
-        **kw : Any
+        text: Optional[str] = None,
+        line: Optional[str] = None,
+        begin_index: Optional[int] = None,
+        end_index: Optional[int] = None,
+        action: Optional[List[str]] = None,
+        **kw: Any
     ) -> List[str]:
     """
     Search for subactions by default. This may be overridden by each action.
@@ -143,9 +143,7 @@ def default_action_completer(
             possibilities.append(sa)
     return sorted(possibilities)
 
-def _check_complete_keys(
-        line : str
-    ) -> Optional[List[str]]:
+def _check_complete_keys(line: str) -> Optional[List[str]]:
     from meerschaum.actions.arguments._parser import parser, get_arguments_triggers
     from meerschaum.actions.arguments._parse_arguments import parse_line
 

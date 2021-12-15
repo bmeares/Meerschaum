@@ -140,7 +140,7 @@ default_docker_compose_config = {
                 'frontend',
                 'backend',
             ],
-            'command' : 'api start',
+            'command' : 'start api --production',
             'environment' : [
                 "MRSM_CONFIG='" + env_dict['MEERSCHAUM_API_CONFIG'] + "'",
                 "MRSM_PATCH='" + env_dict['MEERSCHAUM_API_PATCH'] + "'",

@@ -144,7 +144,7 @@ def _register_plugins(
     if len(action) == 0 or action == ['']:
         return False, "No plugins to register."
 
-    plugins_to_register = dict()
+    plugins_to_register = {}
     plugins_names = get_plugins_names()
     for p in action:
         if p not in plugins_names:

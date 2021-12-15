@@ -224,8 +224,9 @@ def determine_version(
 
     ### Not a pip package, so let's try importing the module directly (in a subprocess).
     code = (
-        f"import os; os.chdir('{module_parent_dir_str}'); "
-        + f"from {name} import __version__; print(__version__ , end='')"
+        f"import os, importlib; os.chdir('{module_parent_dir_str}'); "
+        + f"module = importlib.import_module('{name}'); "
+        + f"print(module.__version__ , end='')"
     )
     exit_code, stdout_bytes, stderr_bytes = venv_exec(
         code, venv=venv, with_extras=True, debug=debug
@@ -339,7 +340,7 @@ def need_update(
         ### We have a result from PyPI and a stated required version.
         if required_version:
             try:
-                return match(result.available_version, required_version)
+                return semver.VersionInfo.parse(result.available_version).match(required_version)
             except Exception as e:
                 if debug:
                     dprint(f"Failed to match versions with exception:\n{e}", color=color)
@@ -356,8 +357,13 @@ def need_update(
     ### We might be depending on a prerelease.
     ### Sanity check that the required version is not greater than the installed version.
     try:
-        return not match(version, required_version) if required_version else False
+        return (
+            (not semver.VersionInfo.parse(version).match(required_version))
+            if required_version else False
+        )
     except Exception as e:
+        import traceback
+        traceback.print_exc()
         if debug:
             dprint(e)
         return False
@@ -585,7 +591,7 @@ def pip_install(
         debug: bool = False
     ) -> bool:
     """
-    Install pip packages
+    Install pip packages.
     """
     from meerschaum.config.static import _static_config
     if args is None:
@@ -1191,7 +1197,7 @@ def reload_package(
         **kw: Any
     ) -> 'ModuleType':
     """
-    Recursively load a package's subpackages, even if they were not previously loaded
+    Recursively load a package's subpackages, even if they were not previously loaded.
     """
     import pydoc
     if isinstance(package, str):

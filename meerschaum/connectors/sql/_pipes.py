@@ -535,15 +535,15 @@ def get_pipe_attributes(
 
 def sync_pipe(
         self,
-        pipe : meerschaum.Pipe.Pipe,
-        df : Union[pandas.DataFrame, str, Dict[Any, Any]] = None,
-        begin : Optional[datetime.datetime] = None,
-        end : Optional[datetime.datetime] = None,
-        chunksize : Optional[int] = -1,
-        check_existing : bool = True,
-        blocking : bool = True,
-        debug : bool = False,
-        **kw : Any
+        pipe: meerschaum.Pipe.Pipe,
+        df: Union[pandas.DataFrame, str, Dict[Any, Any]] = None,
+        begin: Optional[datetime.datetime] = None,
+        end: Optional[datetime.datetime] = None,
+        chunksize: Optional[int] = -1,
+        check_existing: bool = True,
+        blocking: bool = True,
+        debug: bool = False,
+        **kw: Any
     ) -> SuccessTuple:
     """
     Sync a pipe using a SQL Connection.
@@ -621,8 +621,9 @@ def sync_pipe(
         is_new = True
 
     new_data_df = (
-        pipe.filter_existing(df, chunksize=chunksize, debug=debug, **kw) if check_existing
-        else df
+        pipe.filter_existing(
+            df, chunksize=chunksize, begin=begin, end=end, debug=debug, **kw
+        ) if check_existing else df
     )
     if debug:
         dprint("New unseen data:\n" + str(new_data_df))
