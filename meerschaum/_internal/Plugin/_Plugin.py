@@ -222,7 +222,9 @@ class Plugin:
         if is_dir:
             fpath = pathlib.Path(os.path.join(fpath, '__init__.py'))
 
-        new_version = determine_version(fpath, name=self.name, search_for_metadata=False, warn=True)
+        new_version = determine_version(
+            fpath, name=self.name, search_for_metadata=False, warn=True, debug=debug
+        )
 
         packaging_version = attempt_import('packaging.version')
         try:

@@ -10,6 +10,7 @@ import sys, os, time
 from meerschaum.api import app, get_api_connector, get_uvicorn_config, debug, uvicorn_config_path
 from meerschaum.utils.debug import dprint
 from meerschaum.utils.misc import retry_connect
+from meerschaum.utils.threading import Thread
 
 @app.on_event("startup")
 async def startup():
@@ -32,3 +33,4 @@ async def shutdown():
         dprint("Closing connection...")
     if get_api_connector().type == 'sql':
         get_api_connector().engine.dispose()
+

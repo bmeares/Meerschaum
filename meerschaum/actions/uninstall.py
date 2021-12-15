@@ -10,8 +10,8 @@ from __future__ import annotations
 from meerschaum.utils.typing import List, Any, SuccessTuple, Optional
 
 def uninstall(
-        action : Optional[List[str]] = None,
-        **kw : Any
+        action: Optional[List[str]] = None,
+        **kw: Any
     ) -> SuccessTuple:
     """
     Uninstall Meerschaum plugins or Python packages.
@@ -24,8 +24,8 @@ def uninstall(
     return choose_subaction(action, options, **kw)
 
 def _complete_uninstall(
-        action : Optional[List[str]] = None,
-        **kw : Any
+        action: Optional[List[str]] = None,
+        **kw: Any
     ) -> List[str]:
     """
     Override the default Meerschaum `complete_` function.
@@ -37,7 +37,10 @@ def _complete_uninstall(
         'plugins': _complete_uninstall_plugins,
     }
 
-    if len(action) > 0 and action[0] in options:
+    if (
+        len(action) > 0 and action[0] in options
+            and kw.get('line', '').split(' ')[-1] != action[0]
+    ):
         sub = action[0]
         del action[0]
         return options[sub](action=action, **kw)
@@ -110,10 +113,18 @@ def _uninstall_plugins(
     reload_plugins(debug=debug)
     return True, "Success"
 
-def _complete_uninstall_plugins(action : Optional[List[str]] = None, **kw) -> List[str]:
+
+def _complete_uninstall_plugins(action: Optional[List[str]] = None, **kw) -> List[str]:
     from meerschaum.plugins import get_plugins_names
     _plugin_names = get_plugins_names()
-    return [name for name in _plugin_names if name not in action]
+    if not action:
+        return _plugin_names
+    possibilities = []
+    for name in _plugin_names:
+        if name.startswith(action[0]) and action[0] != name:
+            possibilities.append(name)
+    return possibilities
+
 
 def _uninstall_packages(
         action : Optional[List[str]] = None,

@@ -255,6 +255,10 @@ groups['api'].add_argument(
     '--no-auth', '--noauth', action='store_true',
     help = 'When starting the API, do not require authentication. WARNING: This is dangerous!',
 )
+groups['api'].add_argument(
+    '--production', '--gunicorn', action='store_true',
+    help = 'Start the API with the Gunicorn process manager.'
+)
 
 ### Plugins options
 groups['plugins'].add_argument(
