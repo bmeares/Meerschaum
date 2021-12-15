@@ -140,7 +140,9 @@ def _api_start(
         action = []
 
     ### Uvicorn must be installed on the host because of multiprocessing reasons.
-    uvicorn = attempt_import('uvicorn', venv=None, lazy=False)
+    uvicorn, gunicorn = attempt_import(
+        'uvicorn', 'gunicorn', venv=None, lazy=False, check_update=True
+    )
 
     uvicorn_config_path = API_UVICORN_RESOURCES_PATH / SERVER_ID / '.config.json'
     uvicorn_env_path = API_UVICORN_RESOURCES_PATH / SERVER_ID / '.env'
@@ -247,7 +249,6 @@ def _api_start(
             pass
 
     def _run_gunicorn():
-        gunicorn = attempt_import('gunicorn', check_update=True)
         gunicorn_args = [
             'meerschaum.api:app', '--worker-class', 'uvicorn.workers.UvicornWorker',
             '--bind', host + f':{port}',
