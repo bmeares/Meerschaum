@@ -9,10 +9,24 @@ This changelog was not introduced until v0.2.12, so many of the critical release
 ## 0.5.x Releases
 This is the current release cycle, so future features will be updated below.
 
-### v0.5.3
+### v0.5.6
+- **Added support for `gunicorn`.**  
+  Gunicorn may be used to manage API processes with the `--production` or `--gunicorn` flags. The `--production` flag is not default in the Docker image of the API server.
+- **Updated `bootstrap pipes` flow.**  
+  The interactive bootstrapping wizard now makes use of the new `register()` plugins API as well as asking for the `value` column.
+- **Fixed edge cases in `Pipe.filter_existing()`.**  
+  Better enforcement of `NaT` as well as `--begin` and `--end` now reduces edge-case bugs and unexpected behavior.
+- **Re-introduced the `full` Docker image.**  
+  Inclusion of the `start gui` command led to the full version of the Docker image requiring GTK and dependencies. Now you can forward the GUI with `docker run -e DISPLAY -v /tmp/.X11-unix:/tmp/.X11-unix bmeares/meerschaum:full start gui`
+- **Fixed plugin installation bug (again).**
+- **Allow for plugins with hyphens in the name.**
+- **Lots of refactoring and tiny bugfixes.**
+
+### v0.5.3 – v0.5.5
 - **Refactored the `start gui` and `start webterm` commands.**  
   The `start gui` command opens a window which displays the webterm. This terminal will be integrated into the dashboard later.
-
+- **Began work on the desktop build.**  
+  Work on building with PyOxidizer began on these releases.
 
 ### v0.5.1 – v0.5.2
 - **Added the experimental commands `start gui` and `start webterm`.**  
