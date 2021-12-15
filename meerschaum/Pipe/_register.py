@@ -8,10 +8,10 @@ Register a Pipe object
 
 def register(
         self,
-        debug : bool = False
+        debug: bool = False
     ):
     """
-    Send a POST to the Meerschaum API to register a new Pipe.
+    Register a new Pipe along with its attributes.
     """
     import warnings
     with warnings.catch_warnings():

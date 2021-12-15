@@ -41,12 +41,13 @@ def show(
         'users'      : _show_users,
         'jobs'       : _show_jobs,
         'logs'       : _show_logs,
+        'gui'        : _show_gui,
     }
     return choose_subaction(action, show_options, **kw)
 
 def _complete_show(
-        action : Optional[List[str]] = None,
-        **kw : Any
+        action: Optional[List[str]] = None,
+        **kw: Any
     ) -> List[str]:
     """
     Override the default Meerschaum `complete_` function.
@@ -57,15 +58,15 @@ def _complete_show(
         action = []
 
     options = {
-        'connector': _complete_show_connectors,
+        'connector' : _complete_show_connectors,
         'connectors': _complete_show_connectors,
-        'config' : _complete_show_config,
-        'package' : _complete_show_packages,
-        'packages' : _complete_show_packages,
-        'job' : _complete_start_jobs,
-        'jobs' : _complete_start_jobs,
-        'log' : _complete_start_jobs,
-        'logs' : _complete_start_jobs,
+        'config'    : _complete_show_config,
+        'package'   : _complete_show_packages,
+        'packages'  : _complete_show_packages,
+        'job'       : _complete_start_jobs,
+        'jobs'      : _complete_start_jobs,
+        'log'       : _complete_start_jobs,
+        'logs'      : _complete_start_jobs,
     }
 
     if (
@@ -501,7 +502,8 @@ def _show_packages(
     return True, "Success"
 
 def _complete_show_packages(
-        action : Optional[List[str]] = None, **kw : Any
+        action: Optional[List[str]] = None,
+        **kw: Any
     ) -> List[str]:
     from meerschaum.utils.packages import packages
     if not action:
@@ -698,6 +700,15 @@ def _show_logs(
     _print_log_text()
 
     return True, "Success"
+
+
+def _show_gui(**kw) -> SuccessTuple:
+    """
+    Start the Meerschaum GUI application.
+    """
+    from meerschaum.actions import actions
+    kw.pop('action', None)
+    return actions['start'](['gui'], **kw)
 
 
 ### NOTE: This must be the final statement of the module.

@@ -212,6 +212,7 @@ def _sync_pipes(
                 stack = False
             )
             success, fail = None, None
+            results_dict = {}
             try:
                 time.sleep(cooldown)
             except KeyboardInterrupt:

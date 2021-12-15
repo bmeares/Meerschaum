@@ -138,6 +138,7 @@ packages['dash'] = {
 }
 packages['api'] = {
     'uvicorn'                        : 'uvicorn[standard]>=0.13.4',
+    'gunicorn'                       : 'gunicorn>=20.1.0',
     'websockets'                     : 'websockets>=8.1',
     'fastapi'                        : 'fastapi>=0.61.2',
     'fastapi_jwt_auth'               : 'fastapi-jwt-auth>=0.5.0',

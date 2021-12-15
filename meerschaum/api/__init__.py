@@ -32,6 +32,7 @@ from meerschaum.api._chain import check_allow_chaining, DISALLOW_CHAINING_MESSAG
 from meerschaum.config.static import SERVER_ID
 uvicorn_config_path = API_UVICORN_RESOURCES_PATH / SERVER_ID / '.config.json'
 
+uvicorn_workers = attempt_import('uvicorn.workers', venv=None)
 uvicorn_config = None
 sys_config = get_config('system', 'api')
 permissions_config = get_config('system', 'api', 'permissions')
@@ -42,6 +43,9 @@ def get_uvicorn_config() -> Dict[str, Any]:
     """
     global uvicorn_config
     import json
+    runtime = os.environ.get(_static_config()['environment']['runtime'], None)
+    if runtime == 'api':
+        return get_config('system', 'api', 'uvicorn')
     _uvicorn_config = uvicorn_config
     if uvicorn_config is None:
         try:
@@ -169,6 +173,7 @@ from meerschaum.config._paths import API_RESOURCES_PATH, API_STATIC_PATH, API_TE
 app.mount('/static', fastapi_staticfiles.StaticFiles(directory=str(API_STATIC_PATH)), name='static')
 #  templates = fastapi_templating.Jinja2Templates(directory=str(API_TEMPLATES_PATH))
 
+_custom_kwargs = {'mrsm_instance'}
 
 def __getattr__(name: str):
     ucf = get_uvicorn_config()

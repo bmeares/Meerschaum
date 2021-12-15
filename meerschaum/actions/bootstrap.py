@@ -11,8 +11,8 @@ from __future__ import annotations
 from meerschaum.utils.typing import Union, Any, Sequence, SuccessTuple, Optional, Tuple, List
 
 def bootstrap(
-        action : Optional[List[str]] = None,
-        **kw : Any
+        action: Optional[List[str]] = None,
+        **kw: Any
     ) -> SuccessTuple:
     """
     Bootstrap an element (pipes, connectors, config).
@@ -34,15 +34,17 @@ def bootstrap(
     return choose_subaction(action, options, **kw)
 
 def _bootstrap_pipes(
-        action : Optional[List[str]] = None,
-        connector_keys : Optional[List[str]] = None,
-        metric_keys : Optional[List[str]] = None,
-        location_keys : Optional[List[Optional[str]]] = None,
-        yes : bool = False,
-        force : bool = False,
-        noask : bool = False,
-        debug : bool = False,
-        **kw : Any
+        action: Optional[List[str]] = None,
+        connector_keys: Optional[List[str]] = None,
+        metric_keys: Optional[List[str]] = None,
+        location_keys: Optional[List[Optional[str]]] = None,
+        yes: bool = False,
+        force: bool = False,
+        noask: bool = False,
+        debug: bool = False,
+        mrsm_instance: Optional[str] = None,
+        shell: bool = False,
+        **kw: Any
     ) -> SuccessTuple:
     """
     Create a new pipe.
@@ -53,9 +55,11 @@ def _bootstrap_pipes(
     from meerschaum.utils.warnings import info, warn, error
     from meerschaum.utils.debug import dprint
     from meerschaum.utils.prompt import yes_no, prompt, choose
-    from meerschaum.connectors.parse import is_valid_connector_keys
+    from meerschaum.connectors.parse import is_valid_connector_keys, parse_instance_keys
     from meerschaum.utils.misc import get_connector_labels
     from meerschaum.utils.formatting._shell import clear_screen
+
+    instance_connector = parse_instance_keys(mrsm_instance)
 
     if connector_keys is None:
         connector_keys = []
@@ -83,7 +87,8 @@ def _bootstrap_pipes(
         if not force:
             try:
                 if not yes_no(
-                    "Would you like to bootstrap pipes with these keys?\nExisting pipes will be deleted!",
+                    ("Would you like to bootstrap pipes with these keys?\n"
+                    + "Existing pipes will be deleted!"),
                     default = 'n',
                     yes = yes,
                     noask = noask
@@ -94,12 +99,15 @@ def _bootstrap_pipes(
     else:
         ### Get the connector.
         new_label = 'New'
-        info(f"To create a pipe without explicitly using a connector, use the `register pipes` command.\n")
+        info(
+            f"To create a pipe without explicitly using a connector, "
+            + "use the `register pipes` command.\n"
+        )
         try:
             ck = choose(
                 f"Where are the data coming from?\n\n" +
-                f"Please type the keys of a connector from below,\n" +
-                f"or enter '{new_label}' to register a new connector.\n\n" +
+                f"    Please type the keys of a connector from below,\n" +
+                f"    or enter '{new_label}' to register a new connector.\n\n" +
                 f" {get_config('formatting', 'emoji', 'connector')} Connector:\n",
                 get_connector_labels() + [new_label],
                 numeric = False
@@ -131,8 +139,8 @@ def _bootstrap_pipes(
             try:
                 mk = prompt(
                     f"What kind of data is this?\n\n" +
-                    f"The metric is the label for the contents of the pipe.\n" +
-                    f"For example, 'weather' might be a metric for weather station data.\n\n" +
+                    f"    The metric is the label for the contents of the pipe.\n" +
+                    f"    For example, 'weather' might be a metric for weather station data.\n\n" +
                     f" {get_config('formatting', 'emoji', 'metric')} Metric:"
                 )
             except KeyboardInterrupt:
@@ -147,14 +155,14 @@ def _bootstrap_pipes(
             clear_screen(debug=debug)
         try:
             lk = prompt(
-                f"Where are the data located?\n\n" +
-                f"You have the option to create multiple pipes with same connector and\n" +
-                f"metric but different locations.\n\n" +
-                f"For example, you could create the pipes 'sql_remote_energy_home' and\n" +
-                f"'sql_remote_energy_work', which would share a connector ('sql:remote') and\n" +
-                f"metric ('energy'), but may come from different tables.\n\n" +
-                f"In most cases. you can omit the location.\n\n" +
-                f" {get_config('formatting', 'emoji', 'location')} Location (Empty to omit):"
+                f"Where are the data located?\n\n"
+                + f"    You can build pipes that share a connector and metric\n"
+                + f"    but are in different locations.\n\n"
+                + f"    For example, you could create the pipes 'sql_mydb_energy_home' and\n"
+                + f"    'sql_mydb_energy_work', which would share a connector (sql:mydb) and\n"
+                + f"    metric (energy), but may come from different tables.\n\n"
+                + f"    In most cases. you can omit the location.\n\n"
+                + f" {get_config('formatting', 'emoji', 'location')} Location (Empty to omit):"
             )
         except KeyboardInterrupt:
             return abort_tuple
@@ -165,14 +173,20 @@ def _bootstrap_pipes(
         clear_screen(debug=debug)
     _pipes = get_pipes(
         connector_keys, metric_keys, location_keys,
-        method = 'explicit', as_list = True,
-        debug=debug, **kw
+        method = 'explicit',
+        as_list = True,
+        debug = debug,
+        mrsm_instance = instance_connector,
+        **kw
     )
     pipes = []
     for p in _pipes:
-        if p.get_id() is not None and not force:
+        if p.get_id(debug=debug) is not None and not force:
             try:
-                if not yes_no(f"Pipe '{p}' already exists. Delete pipe '{p}'?\nData will be lost!", default='n'):
+                if not yes_no(
+                    f"Pipe '{p}' already exists. Delete pipe '{p}'?\n    Data will be lost!",
+                    default='n'
+                ):
                     info(f"Skipping bootstrapping pipe '{p}'...")
                     continue
             except KeyboardInterrupt:
@@ -186,8 +200,12 @@ def _bootstrap_pipes(
     successes, failures = 0, 0
     for p in pipes:
         try:
-            tup = p.bootstrap(interactive=True, force=force, noask=noask, yes=yes, debug=debug)
+            tup = p.bootstrap(
+                interactive=True, force=force, noask=noask, yes=yes, shell=shell, debug=debug
+            )
         except Exception as e:
+            import traceback
+            traceback.print_exc()
             tup = False, f"Failed to bootstrap pipe '{p}' with exception:\n" + str(e)
         success_dict[p] = tup
         if tup[0]:
