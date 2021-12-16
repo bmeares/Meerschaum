@@ -93,7 +93,7 @@ def bootstrap(
 
 def _get_parameters(pipe, debug: bool = False) -> Dict[str, str]:
     from meerschaum.utils.prompt import prompt, yes_no
-    from meerschaum.utils.warnings import warn
+    from meerschaum.utils.warnings import warn, info
     from meerschaum.config._patch import apply_patch_to_config
     _types_defaults = {
         'sql'  : {

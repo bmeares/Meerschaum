@@ -10,6 +10,9 @@
 | ![PyPI]( https://img.shields.io/pypi/v/meerschaum?color=%2300cc66&label=Version ) | ![GitHub Repo stars](https://img.shields.io/github/stars/bmeares/Meerschaum?style=social) | ![PyPI - License](https://img.shields.io/pypi/l/meerschaum?label=Core%20License) | ![Number of plugins]( https://img.shields.io/badge/dynamic/json?color=3098c1&label=Public%20Plugins&query=num_plugins&url=https%3A%2F%2Fapi.mrsm.io%2Finfo ) |
 | ![PyPI - Python Version]( https://img.shields.io/pypi/pyversions/meerschaum?label=Python&logo=python&logoColor=%23ffffff ) | ![Lines of code]( https://img.shields.io/tokei/lines/github/bmeares/Meerschaum?label=Total%20Lines ) | ![Plugins - License]( https://img.shields.io/badge/Plugins%20License-You%20decide!-success ) | ![Number of registered users]( https://img.shields.io/badge/dynamic/json?color=3098c1&label=Registered%20Users&query=num_users&url=https%3A%2F%2Fapi.mrsm.io%2Finfo ) |
 
+<p align="center">
+<img src="https://meerschaum.io/files/images/demo.gif" alt="Meerschaum demo" height="450px">
+</p>
 
 # What is Meerschaum?
 Meerschaum is a platform for quickly creating and managing time-series data streams called **pipes**. With Meerschaum, you can have a data visualization stack running in minutes.
@@ -22,7 +25,7 @@ If you've worked with time-series data, you know the headaches that come with ET
 
 Meerschaum instead gives you better tools to define and sync your data streams. And don't worry — you can always incorporate Meerschaum into your existing scripts.
 
-# Quick Start
+# Installation
 
 For a more thorough setup guide, visit the [Getting Started](https://meerschaum.io/get-started/) page at [meerschaum.io](https://meerschaum.io).
 
@@ -46,5 +49,8 @@ For details on installing, using, and writing plugins, check out the [plugins do
 
 # Support Meerschaum's Development
 
-I'm a full-time graduate student, and I work on Meerschaum in my free time. If you enjoy Meerschaum and want to support its development, you can [buy me a beer (or coffee)](https://www.buymeacoffee.com/bmeares).
+For consulting services and to support Meerschaum's development, please considering sponsoring me on [GitHub sponsors](https://github.com/sponsors/bmeares).
+
+Additionally, you can always [buy me a coffee☕](https://www.buymeacoffee.com/bmeares)!
+
 """

@@ -132,6 +132,7 @@ def sync(
     """
     from meerschaum.utils.debug import dprint, _checkpoint
     from meerschaum.utils.warnings import warn, error
+    import datetime
     import time
     if (callback is not None or error_callback is not None) and blocking:
         warn("Callback functions are only executed when blocking = False. Ignoring...")
@@ -144,13 +145,13 @@ def sync(
     ):
         return False, f"Cannot sync pipe '{self}' without a datetime column."
 
-    ### add the stated arguments back into kw
-    ### NOTE: Setting begin to the sync time; might need to tweak how this works for multiplexing.
+    ### NOTE: Setting begin to the sync time for Simple Sync.
+    ### TODO: Add flag for specifying syncing method.
+    begin = self.get_sync_time(debug=debug) if begin is None else begin
     kw.update({
-        'begin': (begin if begin is not None else self.get_sync_time(debug=debug)), 'end': end,
-        'force': force, 'retries': retries, 'min_seconds': min_seconds,
+        'begin': begin, 'end': end, 'force': force, 'retries': retries, 'min_seconds': min_seconds,
         'check_existing': check_existing, 'blocking': blocking, 'workers': workers,
-        'callback': callback, 'error_callback': error_callback, 'sync_chunks': (sync_chunks),
+        'callback': callback, 'error_callback': error_callback, 'sync_chunks': sync_chunks,
         'chunksize': chunksize,
     })
 
@@ -159,8 +160,9 @@ def sync(
         p: 'meerschaum.Pipe',
         df: Optional['pandas.DataFrame'] = None
     ) -> SuccessTuple:
-        ### ensure that Pipe is registered
-        if not p.id:
+        ### Ensure that Pipe is registered.
+        if p.get_id(debug=debug) is None:
+            ### NOTE: This may trigger an interactive session for plugins!
             register_tuple = p.register(debug=debug)
             if not register_tuple[0]:
                 return register_tuple

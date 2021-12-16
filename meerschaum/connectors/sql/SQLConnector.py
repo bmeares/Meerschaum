@@ -163,7 +163,7 @@ class SQLConnector(Connector):
         import os, threading
         ### build the sqlalchemy engine
         if '_engine' not in self.__dict__:
-            self._engine = self.create_engine(debug=self._debug)
+            self._engine = self.create_engine()
 
         same_process = os.getpid() == self._pid
         same_thread = threading.current_thread().ident == self._thread_ident

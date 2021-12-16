@@ -107,7 +107,7 @@ def _pipes_lap(
                 debug = debug,
                 min_seconds = min_seconds,
                 workers = workers,
-                **kw
+                **{k: v for k, v in kw.items() if k != 'blocking'}
             )
         except Exception as e:
             import traceback

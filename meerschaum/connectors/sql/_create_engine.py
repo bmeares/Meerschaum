@@ -232,10 +232,6 @@ def create_engine(
         )
 
     _kw_copy = kw.copy()
-    #  _create_engine_args = {
-        #  k: v for k, v in self.sys_config.get('create_engine', {}).items()
-            #  if k in flavor_configs[self.flavor].get('create_engine', {})
-    #  }
 
     ### NOTE: Order of inheritance:
     ###       1. Defaults
