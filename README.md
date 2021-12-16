@@ -6,7 +6,7 @@
 | ![PyPI - Python Version]( https://img.shields.io/pypi/pyversions/meerschaum?label=Python&logo=python&logoColor=%23ffffff ) | ![Lines of code]( https://img.shields.io/tokei/lines/github/bmeares/Meerschaum?label=Total%20Lines ) | ![Plugins - License]( https://img.shields.io/badge/Plugins%20License-You%20decide!-success ) | ![Number of registered users]( https://img.shields.io/badge/dynamic/json?color=3098c1&label=Registered%20Users&query=num_users&url=https%3A%2F%2Fapi.mrsm.io%2Finfo ) |
 
 <p align="center">
-<img src="https://meerschaum.io/files/images/show_pipes.png" alt="Show pipes screenshot" height="361px" width="519">
+<img src="https://meerschaum.io/files/images/demo.gif" alt="Meerschaum demo" height="450px">
 </p>
 
 # What is Meerschaum?
