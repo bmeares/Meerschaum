@@ -1364,6 +1364,7 @@ def ensure_readline() -> 'ModuleType':
                 lazy = False,
                 install = True,
                 venv = None,
+                warn = False,
             )
         except (ImportError, ModuleNotFoundError):
             if not pip_install(rl_name, args=['--upgrade', '--ignore-installed'], venv=None):

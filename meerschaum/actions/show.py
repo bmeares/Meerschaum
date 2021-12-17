@@ -560,10 +560,10 @@ def _show_logs(
     """
     import os, pathlib, random, asyncio
     from meerschaum.utils.packages import attempt_import, import_rich
-    from meerschaum.utils.daemon import get_filtered_daemons, Daemon
+    from meerschaum.utils.daemon import get_filtered_daemons, Daemon, Log
     from meerschaum.utils.warnings import warn, info
     from meerschaum.utils.formatting import get_console, ANSI, UNICODE
-    from meerschaum.utils.misc import get_last_n_lines
+    from meerschaum.utils.misc import tail
     from meerschaum.config._paths import LOGS_RESOURCES_PATH
     from meerschaum.config import get_config
     colors = get_config('jobs', 'logs', 'colors')
@@ -624,17 +624,18 @@ def _show_logs(
                 )
             get_console().print(text)
 
+
         def _print_log_lines(daemon):
             if not daemon.log_path.exists():
                 return
-            for line in get_last_n_lines(str(daemon.log_path), 25):
+            for line in Log(daemon.log_path, offset_file_path=daemon.log_offset_path):
                 _print_job_line(daemon, line)
 
         def _seek_back_offset(d) -> bool:
             if not d.log_path.exists():
                 return False
             if not d.log_offset_path.exists():
-                pygtail.Pygtail(str(d.log_path), offset_file=d.log_offset_path).read()
+                Log(d.log_path, offset_file_path=d.log_offset_path).read()
             if not d.log_offset_path.exists():
                 return False
             log_text = d.log_text
@@ -662,7 +663,7 @@ def _show_logs(
             return True
 
         for d in daemons:
-            #  _seek_back_offset(d)
+            _seek_back_offset(d)
             _print_log_lines(d)
 
         _quit = False

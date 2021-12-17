@@ -49,7 +49,6 @@ packages : Dict[str, Dict[str, str]] = {
         'daemoniker'                 : 'daemoniker>=0.2.3',
         'psutil'                     : 'psutil>=5.8.0',
         'watchgod'                   : 'watchgod>=0.7',
-        'pygtail'                    : 'pygtail>=0.11.1',
     },
     'iot': {
         'paho': 'paho-mqtt>=1.5.1',
@@ -70,7 +69,6 @@ packages : Dict[str, Dict[str, str]] = {
         'mssqlcli'                   : 'mssql-cli>=1.0.0',
     },
     'stack': {
-        #  'docker'                     : 'docker>=4.3.1',
         'compose'                    : 'docker-compose>=1.27.4',
     },
     'build': {
@@ -90,15 +88,9 @@ packages : Dict[str, Dict[str, str]] = {
     },
     'docs': {
         'mkdocs'                     : 'mkdocs>=1.1.2',
-        'pdoc'                       : 'pdoc3>=0.9.2',
         'mkdocs_material'            : 'mkdocs-material>=6.2.5',
         'mkdocs_autolinks_plugin'    : 'mkdocs-autolinks-plugin>=0.2.0',
         'mkdocs_awesome_pages_plugin': 'mkdocs-awesome-pages-plugin>=2.5.0',
-        'mkdocs_rss_plugin'          : 'mkdocs-rss-plugin>=0.16.1'
-    },
-    'portable': {
-        'pyreadline3'                : 'pyreadline3>=3.3; platform_system == "Windows"',
-        'gnureadline'                : 'gnureadline>=8.0.0; platform_system != "Windows"',
     },
     'gui': {
         'toga'                       : 'toga>=0.3.0.dev29',
