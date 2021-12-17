@@ -563,6 +563,7 @@ def _show_logs(
     from meerschaum.utils.daemon import get_filtered_daemons, Daemon
     from meerschaum.utils.warnings import warn, info
     from meerschaum.utils.formatting import get_console, ANSI, UNICODE
+    from meerschaum.utils.misc import get_last_n_lines
     from meerschaum.config._paths import LOGS_RESOURCES_PATH
     from meerschaum.config import get_config
     colors = get_config('jobs', 'logs', 'colors')
@@ -604,8 +605,6 @@ def _show_logs(
 
     def _follow_pretty_print():
         watchgod = attempt_import('watchgod')
-        pygtail = attempt_import('pygtail')
-        #  nest_asyncio = attempt_import('nest_asyncio')
         rich = import_rich()
         rich_text = attempt_import('rich.text')
         _watch_daemon_ids = set([d.daemon_id for d in daemons])
@@ -625,10 +624,10 @@ def _show_logs(
                 )
             get_console().print(text)
 
-        def _print_pygtail_lines(daemon):
+        def _print_log_lines(daemon):
             if not daemon.log_path.exists():
                 return
-            for line in pygtail.Pygtail(str(daemon.log_path), offset_file=daemon.log_offset_path):
+            for line in get_last_n_lines(str(daemon.log_path), 25):
                 _print_job_line(daemon, line)
 
         def _seek_back_offset(d) -> bool:
@@ -663,8 +662,8 @@ def _show_logs(
             return True
 
         for d in daemons:
-            _seek_back_offset(d)
-            _print_pygtail_lines(d)
+            #  _seek_back_offset(d)
+            _print_log_lines(d)
 
         _quit = False
         async def _watch_logs():
@@ -683,7 +682,7 @@ def _show_logs(
                         continue
                     daemon = Daemon(daemon_id=daemon_id)
                     if daemon.log_path.exists():
-                        _print_pygtail_lines(daemon)
+                        _print_log_lines(daemon)
         loop = asyncio.new_event_loop()
         try:
             loop.run_until_complete(_watch_logs())
