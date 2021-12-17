@@ -2,13 +2,6 @@
 
 Thanks to the authors of the following projects for their incredible work!
 
-**pyinstaller**
-
-*PyInstaller bundles a Python application and all its dependencies into a single package.*
-  - Hartmut Goebel, Giovanni Bajo, David Vierra, David Cortesi, Martin Zibricky
-  - http://www.pyinstaller.org/
-  - License: GPLv2-or-later with a special exception which allows to use PyInstaller to build and distribute non-free programs (including commercial ones)
-
 **aiofiles**
 
 *File support for asyncio.*
