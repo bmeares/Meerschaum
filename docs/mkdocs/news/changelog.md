@@ -9,10 +9,7 @@ This changelog was not introduced until v0.2.12, so many of the critical release
 ## 0.5.x Releases
 This is the current release cycle, so future features will be updated below.
 
-### v0.5.7
-- **Bugfixes for v0.5.6**
-
-### v0.5.6
+### v0.5.6 — v0.5.8
 - **Added support for `gunicorn`.**  
   Gunicorn may be used to manage API processes with the `--production` or `--gunicorn` flags. The `--production` flag is not default in the Docker image of the API server.
 - **Updated `bootstrap pipes` flow.**  
@@ -21,6 +18,8 @@ This is the current release cycle, so future features will be updated below.
   Better enforcement of `NaT` as well as `--begin` and `--end` now reduces edge-case bugs and unexpected behavior.
 - **Re-introduced the `full` Docker image.**  
   Inclusion of the `start gui` command led to the full version of the Docker image requiring GTK and dependencies. Now you can forward the GUI with `docker run -e DISPLAY -v /tmp/.X11-unix:/tmp/.X11-unix bmeares/meerschaum:full start gui`
+- **Added `ACKNOWLEDGEMENTS.md` to the root directory.**  
+  Only dynamic dependencies with BSD, LGPL, MIT, and Apache licenses remain.
 - **Fixed plugin installation bug (again).**
 - **Allow for plugins with hyphens in the name.**
 - **Lots of refactoring and tiny bugfixes.**

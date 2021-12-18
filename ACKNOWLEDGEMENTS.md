@@ -2,6 +2,44 @@
 
 Thanks to the authors of the following projects for their incredible work!
 
+**Flask-Compress**
+
+*Compress responses in your Flask app with gzip, deflate or brotli.*
+  - Thomas Mansencal
+  - thomas.mansencal@gmail.com
+  - https://github.com/colour-science/flask-compress
+  - License: MIT
+
+**PyMySQL**
+
+*Pure Python MySQL Driver*
+  - yutaka.matsubara
+  - yutaka.matsubara@gmail.com
+  - https://github.com/PyMySQL/PyMySQL/
+  - License: "MIT"
+
+**PyYAML**
+
+*YAML parser and emitter for Python*
+  - Kirill Simonov
+  - xi@resolvent.net
+  - https://pyyaml.org/
+  - License: MIT
+
+**XStatic**
+
+*XStatic base package with minimal support code*
+  - Thomas Waldmann
+  - tw@waldmann-edv.de
+  - https://github.com/xstatic-py/xstatic
+  - License: MIT license
+
+**XStatic-term.js**
+
+*term.js 0.0.7 (XStatic packaging standard)*
+  - https://github.com/chjj/term.js
+  - License: (same as term.js)
+
 **aiofiles**
 
 *File support for asyncio.*
@@ -55,9 +93,6 @@ Thanks to the authors of the following projects for their incredible work!
   - https://github.com/audreyr/binaryornot
   - License: BSD
 
-**cmd2**
-
-
 **colorama**
 
 *Cross-platform colored terminal text.*
@@ -65,21 +100,6 @@ Thanks to the authors of the following projects for their incredible work!
   - tartley@tartley.com
   - https://github.com/tartley/colorama
   - License: BSD
-
-**docker-compose**
-
-*Multi-container orchestration for Docker*
-  - Docker, Inc.
-  - https://www.docker.com/
-  - License: Apache License 2.0
-
-**cx-Freeze**
-
-*Create standalone executables from Python scripts*
-  - Anthony Tuininga
-  - anthony.tuininga@gmail.com
-  - https://marcelotduarte.github.io/cx_Freeze
-  - License: Python Software Foundation License
 
 **daemoniker**
 
@@ -136,14 +156,6 @@ Thanks to the authors of the following projects for their incredible work!
   - https://github.com/encode/databases
   - License: BSD
 
-**python-dateutil**
-
-*Extensions to the standard Python datetime module*
-  - Gustavo Niemeyer
-  - gustavo@niemeyer.net
-  - https://github.com/dateutil/dateutil
-  - License: Dual License
-
 **dill**
 
 *serialize all of python*
@@ -185,14 +197,6 @@ Thanks to the authors of the following projects for their incredible work!
   - https://github.com/MushroomMaula/fastapi_login
 
 
-**Flask-Compress**
-
-*Compress responses in your Flask app with gzip, deflate or brotli.*
-  - Thomas Mansencal
-  - thomas.mansencal@gmail.com
-  - https://github.com/colour-science/flask-compress
-  - License: MIT
-
 **gunicorn**
 
 *WSGI HTTP Server for UNIX*
@@ -200,9 +204,6 @@ Thanks to the authors of the following projects for their incredible work!
   - benoitc@e-engura.com
   - https://gunicorn.org
   - License: MIT
-
-**heartrate**
-
 
 **humanfriendly**
 
@@ -220,24 +221,6 @@ Thanks to the authors of the following projects for their incredible work!
   - https://joblib.readthedocs.io
   - License: BSD
 
-**litecli**
-
-
-**mkdocs**
-
-
-**mkdocs-autolinks-plugin**
-
-
-**mkdocs-awesome-pages-plugin**
-
-
-**mkdocs-material**
-
-
-**modin**
-
-
 **more-itertools**
 
 *More routines for operating on iterables, beyond itertools*
@@ -253,32 +236,6 @@ Thanks to the authors of the following projects for their incredible work!
   - giladbrn@gmail.com
   - https://github.com/giladbarnea/more_termcolor
   - License: MIT
-
-**mssql-cli**
-
-*CLI for SQL Server Database. With auto-completion and syntax highlighting.*
-  - Microsoft Corporation
-  - sqlcli@microsoft.com
-  - https://github.com/dbcli/mssql-cli
-  - License: BSD-3
-
-**python-multipart**
-
-*A streaming multipart parser for Python*
-  - Andrew Dunham
-  - http://github.com/andrew-d/python-multipart
-  - License: Apache
-
-**mycli**
-
-*CLI for MySQL Database. With auto-completion and syntax highlighting.*
-  - Mycli Core Team
-  - mycli-dev@googlegroups.com
-  - http://mycli.net
-
-
-**mypy**
-
 
 **numpy**
 
@@ -311,23 +268,12 @@ Thanks to the authors of the following projects for their incredible work!
   - https://pandas.pydata.org
   - License: BSD-3-Clause
 
-**pandasgui**
-
-
 **passlib**
 
 *comprehensive password hashing framework supporting over 30 schemes*
   - Eli Collins
   - elic@assurancetechnologies.com
   - https://passlib.readthedocs.io
-  - License: BSD
-
-**pgcli**
-
-*CLI for Postgres Database. With auto-completion and syntax highlighting.*
-  - Pgcli Core Team
-  - pgcli-dev@googlegroups.com
-  - http://pgcli.com
   - License: BSD
 
 **pip**
@@ -350,8 +296,8 @@ Thanks to the authors of the following projects for their incredible work!
 
 *Library for building powerful interactive command lines in Python*
   - Jonathan Slenders
-  - https://github.com/jonathanslenders/python-prompt-toolkit
-  - License: BSD-3-Clause
+  - https://github.com/prompt-toolkit/python-prompt-toolkit
+
 
 **psutil**
 
@@ -377,19 +323,20 @@ Thanks to the authors of the following projects for their incredible work!
   - https://pygments.org/
   - License: BSD License
 
-**py-heat**
+**python-dateutil**
 
+*Extensions to the standard Python datetime module*
+  - Gustavo Niemeyer
+  - gustavo@niemeyer.net
+  - https://github.com/dateutil/dateutil
+  - License: Dual License
 
-**PyMySQL**
+**python-multipart**
 
-*Pure Python MySQL Driver*
-  - yutaka.matsubara
-  - yutaka.matsubara@gmail.com
-  - https://github.com/PyMySQL/PyMySQL/
-  - License: "MIT"
-
-**pytest**
-
+*A streaming multipart parser for Python*
+  - Andrew Dunham
+  - http://github.com/andrew-d/python-multipart
+  - License: Apache
 
 **pyvim**
 
@@ -397,6 +344,14 @@ Thanks to the authors of the following projects for their incredible work!
   - Jonathan Slenders
   - https://github.com/jonathanslenders/pyvim
   - License: LICENSE
+
+**pywebview**
+
+*Build GUI for your Python program with JavaScript, HTML, and CSS.*
+  - Roman Sirokov
+  - roman@flowrl.com
+  - https://github.com/r0x0r/pywebview
+  - License: New BSD license
 
 **requests**
 
@@ -414,9 +369,6 @@ Thanks to the authors of the following projects for their incredible work!
   - https://github.com/willmcgugan/rich
   - License: MIT
 
-**ruamel.yaml**
-
-
 **semver**
 
 *Python helper for Semantic Versioning (http://semver.org/)*
@@ -424,9 +376,6 @@ Thanks to the authors of the following projects for their incredible work!
   - k-bx@k-bx.com
   - https://github.com/python-semver/python-semver
   - License: BSD
-
-**snakeviz**
-
 
 **SQLAlchemy**
 
@@ -484,12 +433,6 @@ Thanks to the authors of the following projects for their incredible work!
   - https://www.github.com/takluyver/tornado_xstatic
 
 
-**tuna**
-
-
-**twine**
-
-
 **typing_extensions**
 
 *Backported and Experimental Type Hints for Python 3.6+*
@@ -536,40 +479,10 @@ Thanks to the authors of the following projects for their incredible work!
   - https://github.com/aaugustin/websockets
   - License: BSD
 
-**pywebview**
-
-*Build GUI for your Python program with JavaScript, HTML, and CSS.*
-  - Roman Sirokov
-  - roman@flowrl.com
-  - https://github.com/r0x0r/pywebview
-  - License: New BSD license
-
 **wheel**
 
 *A built-package format for Python*
   - Daniel Holth
   - dholth@fastmail.fm
   - https://github.com/pypa/wheel
-  - License: MIT
-
-**XStatic**
-
-*XStatic base package with minimal support code*
-  - Thomas Waldmann
-  - tw@waldmann-edv.de
-  - https://github.com/xstatic-py/xstatic
-  - License: MIT license
-
-**XStatic-term.js**
-
-*term.js 0.0.7 (XStatic packaging standard)*
-  - https://github.com/chjj/term.js
-  - License: (same as term.js)
-
-**PyYAML**
-
-*YAML parser and emitter for Python*
-  - Kirill Simonov
-  - xi@resolvent.net
-  - https://pyyaml.org/
   - License: MIT
