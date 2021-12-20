@@ -67,12 +67,12 @@ class SQLConnector(Connector):
     
     def __init__(
         self,
-        label : str = 'main',
-        flavor : Optional[str] = None,
-        wait : bool = False,
-        connect : bool = False,
-        debug : bool = False,
-        **kw : Any
+        label: str = 'main',
+        flavor: Optional[str] = None,
+        wait: bool = False,
+        connect: bool = False,
+        debug: bool = False,
+        **kw: Any
     ):
         """
         :param label:

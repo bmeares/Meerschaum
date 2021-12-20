@@ -29,9 +29,10 @@ def _pipes_lap(
         debug: bool = None,
         unblock: bool = False,
         force: bool = False,
-        min_seconds : int = 1,
+        min_seconds: int = 1,
+        mrsm_instance: Optional[str] = None,
         _progress: Optional['rich.progress.Progress'] = None,
-        **kw : Any
+        **kw: Any
     ) -> Tuple[List[meerschaum.Pipe], List[meerschaum.Pipe]]:
     """
     Do a lap of syncing pipes.
@@ -44,6 +45,7 @@ def _pipes_lap(
     from meerschaum.utils.threading import Lock, RLock, Thread, Event
     from meerschaum.utils.misc import print_options, get_cols_lines
     from meerschaum.utils.pool import get_pool_executor, get_pool
+    from meerschaum.connectors.parse import parse_instance_keys
     import queue
     import multiprocessing
     import contextlib
@@ -56,16 +58,36 @@ def _pipes_lap(
         as_list = True,
         method = 'registered',
         debug = debug,
+        mrsm_instance = mrsm_instance,
         **kw
     )
     remaining_count = len(pipes)
-    conns = pipes[0].instance_connector.engine.pool.size() if pipes else 0
+    instance_connector = parse_instance_keys(mrsm_instance, debug=debug)
+    conns = (
+        instance_connector.engine.pool.size() if instance_connector.type == 'sql'
+        else len(pipes)
+    )
     cores = multiprocessing.cpu_count()
     pipes_queue = queue.Queue(remaining_count)
     [pipes_queue.put_nowait(pipe) for pipe in pipes]
     stop_event = Event()
     results_dict = {}
     pipes_threads = {}
+    ### Cap the number workers to the pool size or 1 if working in-memory.
+    if workers is None:
+        workers = (
+            1 if instance_connector.type == 'sql' and instance_connector.database == ':memory:'
+            else min(cores, (conns if conns != 0 else cores))
+        )
+    if workers > conns and conns != 0 and instance_connector.type == 'sql':
+        warn(
+            f"Using more workers ({workers}) than the available pool of database connections "
+            + "may lead to concurrency issues.\n    You can change the pool size with "
+            + "`edit config system` under the keys connectors:sql:create_engine:pool_size,\n    "
+            + "and a size of 0 will not limit the number of connections.",
+            stack = False,
+        )
+
 
     def _task_label(count: int):
         return f"[cyan]Syncing {count} pipe{'s' if count != 1 else ''}..."
@@ -117,16 +139,6 @@ def _pipes_lap(
 
         return return_tuple
 
-    if workers is None:
-        workers = min(cores, (conns if conns != 0 else cores))
-    if workers > conns and conns != 0:
-        warn(
-            f"Using more workers ({workers}) than the available pool of database connections "
-            + "may lead to concurrency issues.\n    You can change the pool size with "
-            + "`edit config system` under the keys connectors:sql:create_engine:pool_size,\n    "
-            + "and a size of 0 will not limit the number of connections.",
-            stack = False,
-        )
     worker_threads = [Thread(target=worker_fn) for _ in range(min(workers, len(pipes)))]
     for worker_thread in worker_threads:
         worker_thread.daemon = True

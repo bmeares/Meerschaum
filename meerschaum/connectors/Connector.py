@@ -61,8 +61,8 @@ class Connector(metaclass=abc.ABCMeta):
         self.type, self.label = type, label
 
         from meerschaum.config import get_config
-        conn_configs = get_config('meerschaum', 'connectors')
-        connector_config = get_config('system', 'connectors')
+        conn_configs = get_config('meerschaum', 'connectors').copy()
+        connector_config = get_config('system', 'connectors').copy()
 
         ### inherit attributes from 'default' if exists
         if inherit_default:
