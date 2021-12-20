@@ -31,7 +31,7 @@ default_meerschaum_config = {
                 'flavor'   : 'sqlite',
             },
             'memory': {
-                'flavor'   : 'duckdb',
+                'flavor'   : 'sqlite',
                 'database' : ':memory:',
             },
             #  'mrsm'         : {
