@@ -1,8 +1,3 @@
----
-hide:
-  - toc
----
-
 # Changelog and Release Notes
 This changelog was not introduced until v0.2.12, so many of the critical releases of Meerschaum have already been published. I've backlogged previous releases but haven't added all notes for all the versions.
 
