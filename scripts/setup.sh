@@ -14,6 +14,9 @@ python -m pip install -r "$reqs_file" || exit 1
 python -m pip install pdoc3 || exit 1
 rm -f "$reqs_file"
 
+### Install Meerschaum plugins.
+python -m meerschaum install plugin thanks
+
 ### Enable docker buildx.
 
 if [ "$MRSM_SKIP_DOCKER_EXPERIMENTAL" != "1" ]; then

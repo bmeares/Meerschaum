@@ -125,7 +125,6 @@ packages['dash'] = {
     'dash_ace'                       : 'dash-ace>=0.2.1',
     'dash_extensions'                : 'dash-extensions>=0.0.51',
     'dash_daq'                       : 'dash-daq>=0.5.0',
-    'ansi2html'                      : 'ansi2html>=1.6.0',
     'flask_compress'                 : 'Flask-Compress>=1.10.1',
 }
 packages['api'] = {
