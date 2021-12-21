@@ -10,15 +10,23 @@
 </p>
 
 # What is Meerschaum?
-Meerschaum is a platform for quickly creating and managing time-series data streams called **pipes**. With Meerschaum, you can have a data visualization stack running in minutes.
+Meerschaum is a tool for quickly synchronizing time-series data streams called **pipes**. With Meerschaum, you can have a data visualization stack running in minutes.
 
-The power of the Meerschaum system comes from projects like [pandas](https://pandas.pydata.org/), [sqlalchemy](https://www.sqlalchemy.org/), [fastapi](https://fastapi.tiangolo.com/), and more.
+The power of the Meerschaum system comes from projects like [pandas](https://pandas.pydata.org/), [sqlalchemy](https://www.sqlalchemy.org/), [fastapi](https://fastapi.tiangolo.com/), and [more](https://meerschaum.io/news/acknowledgements/).
 
 # Why Meerschaum?
 
-If you've worked with time-series data, you know the headaches that come with ETL. Meerschaum is a system that makes consolidating and syncing data easy.
+If you've worked with time-series data, you know the headaches that come with ETL.
+Data engineering often gets in analysts' way, and when work needs to get done, every minute spent on pipe-lining is time taken away from real analysis.
 
-Meerschaum instead gives you better tools to define and sync your data streams. And don't worry — you can always incorporate Meerschaum into your existing scripts.
+Rather than copy / pasting your ETL scripts, simply build pipes with Meerschaum! [Meerschaum gives you the tools to design your data streams how you like](https://towardsdatascience.com/easy-time-series-etl-for-data-scientists-with-meerschaum-5aade339b398) ― and don't worry — you can always incorporate Meerschaum into your existing systems!
+
+## Features
+
+- ✨ Integrate with **Pandas**, **Grafana**, and other popular [**data analysis tools**](https://meerschaum.io/reference/data-analysis-tools/).
+- ⚡️ **Synchronization engine** concurrently updates many time-series data streams.
+- 📊 One-click deploy a [**TimescaleDB** and **Grafana** stack](https://meerschaum.io/reference/stack/) for prototyping.
+- 🔌 [**Plugin system**](https://meerschaum.io/reference/plugins/writing-plugins/) for easily adapting new data sources.
 
 # Installation
 
