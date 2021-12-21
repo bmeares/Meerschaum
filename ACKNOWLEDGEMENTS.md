@@ -4,7 +4,7 @@ Meerschaum is built with the help of many incredible open source libraries. In t
 
 I've included a list of the dynamic dependencies below to credit the open source projects which power Meerschaum. Many thanks to the authors of these projects for their amazing work!
 
-###aiofiles
+### aiofiles
 
 *File support for asyncio.*
 
@@ -12,7 +12,7 @@ I've included a list of the dynamic dependencies below to credit the open source
   - [tinchester@gmail.com](mailto:tinchester@gmail.com)
   - License: Apache-2.0
 
-###aiomysql
+### aiomysql
 
 *MySQL driver for asyncio.*
 
@@ -21,7 +21,7 @@ I've included a list of the dynamic dependencies below to credit the open source
   - [https://github.com/aio-libs/aiomysql](https://github.com/aio-libs/aiomysql)
   - License: MIT
 
-###aiosqlite
+### aiosqlite
 
 *asyncio bridge to the standard sqlite3 module*
 
@@ -30,7 +30,7 @@ I've included a list of the dynamic dependencies below to credit the open source
   - [https://aiosqlite.omnilib.dev](https://aiosqlite.omnilib.dev)
 
 
-###asciitree
+### asciitree
 
 *Draws ASCII trees.*
 
@@ -39,7 +39,7 @@ I've included a list of the dynamic dependencies below to credit the open source
   - [http://github.com/mbr/asciitree](http://github.com/mbr/asciitree)
   - License: MIT
 
-###asyncpg
+### asyncpg
 
 *An asyncio PostgreSQL driver*
 
@@ -48,7 +48,7 @@ I've included a list of the dynamic dependencies below to credit the open source
   - [https://github.com/MagicStack/asyncpg](https://github.com/MagicStack/asyncpg)
   - License: Apache License, Version 2.0
 
-###binaryornot
+### binaryornot
 
 *Ultra-lightweight pure Python package to check if a file is binary or text.*
 
@@ -57,7 +57,7 @@ I've included a list of the dynamic dependencies below to credit the open source
   - [https://github.com/audreyr/binaryornot](https://github.com/audreyr/binaryornot)
   - License: BSD
 
-###colorama
+### colorama
 
 *Cross-platform colored terminal text.*
 
@@ -66,7 +66,7 @@ I've included a list of the dynamic dependencies below to credit the open source
   - [https://github.com/tartley/colorama](https://github.com/tartley/colorama)
   - License: BSD
 
-###daemoniker
+### daemoniker
 
 *Cross-platform daemonization tools.*
 
@@ -75,7 +75,7 @@ I've included a list of the dynamic dependencies below to credit the open source
   - [https://github.com/Muterra/py_daemoniker](https://github.com/Muterra/py_daemoniker)
   - License: LGPL
 
-###dash
+### dash
 
 *A Python framework for building reactive web-apps. Developed by Plotly.*
 
@@ -84,7 +84,7 @@ I've included a list of the dynamic dependencies below to credit the open source
   - [https://plotly.com/dash](https://plotly.com/dash)
   - License: MIT
 
-###dash-ace
+### dash-ace
 
 *Dash Ace Editor Component*
 
@@ -93,7 +93,7 @@ I've included a list of the dynamic dependencies below to credit the open source
   - [https://github.com/reasoned-ai/dash-ace](https://github.com/reasoned-ai/dash-ace)
   - License: MIT
 
-###dash-bootstrap-components
+### dash-bootstrap-components
 
 *Bootstrap themed components for use in Plotly Dash*
 
@@ -102,7 +102,7 @@ I've included a list of the dynamic dependencies below to credit the open source
   - [https://dash-bootstrap-components.opensource.faculty.ai/](https://dash-bootstrap-components.opensource.faculty.ai/)
   - License: Apache Software License
 
-###dash-daq
+### dash-daq
 
 *DAQ components for Dash*
 
@@ -111,7 +111,7 @@ I've included a list of the dynamic dependencies below to credit the open source
   - [http://github.com/plotly/dash-daq](http://github.com/plotly/dash-daq)
 
 
-###dash-extensions
+### dash-extensions
 
 *Extensions for Plotly Dash.*
 
@@ -119,7 +119,7 @@ I've included a list of the dynamic dependencies below to credit the open source
   - [https://github.com/thedirtyfew/dash-extensions/](https://github.com/thedirtyfew/dash-extensions/)
   - License: MIT
 
-###databases
+### databases
 
 *Async database support for Python.*
 
@@ -128,7 +128,7 @@ I've included a list of the dynamic dependencies below to credit the open source
   - [https://github.com/encode/databases](https://github.com/encode/databases)
   - License: BSD
 
-###dill
+### dill
 
 *serialize all of python*
 
@@ -136,20 +136,20 @@ I've included a list of the dynamic dependencies below to credit the open source
   - [https://github.com/uqfoundation/dill](https://github.com/uqfoundation/dill)
   - License: 3-clause BSD
 
-###duckdb
+### duckdb
 
 *DuckDB embedded database*
 
   - [https://www.duckdb.org](https://www.duckdb.org)
   - License: MIT
 
-###duckdb-engine
+### duckdb-engine
   - Elliana
   - [me@mause.me](mailto:me@mause.me)
   - [https://github.com/Mause/duckdb_engine](https://github.com/Mause/duckdb_engine)
   - License: MIT
 
-###fastapi
+### fastapi
 
 *FastAPI framework, high performance, easy to learn, fast to code, ready for production*
 
@@ -158,7 +158,7 @@ I've included a list of the dynamic dependencies below to credit the open source
   - [https://github.com/tiangolo/fastapi](https://github.com/tiangolo/fastapi)
 
 
-###fastapi-jwt-auth
+### fastapi-jwt-auth
 
 *FastAPI extension that provides JWT Auth support (secure, easy to use and lightweight)*
 
@@ -167,13 +167,13 @@ I've included a list of the dynamic dependencies below to credit the open source
   - [https://github.com/IndominusByte/fastapi-jwt-auth](https://github.com/IndominusByte/fastapi-jwt-auth)
 
 
-###fastapi-login
+### fastapi-login
   - Max Rausch-Dupont
   - [maxrd79@gmail.com](mailto:maxrd79@gmail.com)
   - [https://github.com/MushroomMaula/fastapi_login](https://github.com/MushroomMaula/fastapi_login)
 
 
-###Flask-Compress
+### Flask-Compress
 
 *Compress responses in your Flask app with gzip, deflate or brotli.*
 
@@ -182,7 +182,7 @@ I've included a list of the dynamic dependencies below to credit the open source
   - [https://github.com/colour-science/flask-compress](https://github.com/colour-science/flask-compress)
   - License: MIT
 
-###gunicorn
+### gunicorn
 
 *WSGI HTTP Server for UNIX*
 
@@ -191,7 +191,7 @@ I've included a list of the dynamic dependencies below to credit the open source
   - [https://gunicorn.org](https://gunicorn.org)
   - License: MIT
 
-###humanfriendly
+### humanfriendly
 
 *Human friendly output for text interfaces using Python*
 
@@ -200,7 +200,7 @@ I've included a list of the dynamic dependencies below to credit the open source
   - [https://humanfriendly.readthedocs.io](https://humanfriendly.readthedocs.io)
   - License: MIT
 
-###joblib
+### joblib
 
 *Lightweight pipelining with Python functions*
 
@@ -209,7 +209,7 @@ I've included a list of the dynamic dependencies below to credit the open source
   - [https://joblib.readthedocs.io](https://joblib.readthedocs.io)
   - License: BSD
 
-###more-itertools
+### more-itertools
 
 *More routines for operating on iterables, beyond itertools*
 
@@ -218,7 +218,7 @@ I've included a list of the dynamic dependencies below to credit the open source
   - [https://github.com/more-itertools/more-itertools](https://github.com/more-itertools/more-itertools)
   - License: MIT
 
-###more-termcolor
+### more-termcolor
 
 *All colors, with support for nested colors, convenience methods and full original termcolor compatability.*
 
@@ -227,7 +227,7 @@ I've included a list of the dynamic dependencies below to credit the open source
   - [https://github.com/giladbarnea/more_termcolor](https://github.com/giladbarnea/more_termcolor)
   - License: MIT
 
-###numpy
+### numpy
 
 *NumPy is the fundamental package for array computing with Python.*
 
@@ -235,7 +235,7 @@ I've included a list of the dynamic dependencies below to credit the open source
   - [https://www.numpy.org](https://www.numpy.org)
   - License: BSD
 
-###packaging
+### packaging
 
 *Core utilities for Python packages*
 
@@ -244,7 +244,7 @@ I've included a list of the dynamic dependencies below to credit the open source
   - [https://github.com/pypa/packaging](https://github.com/pypa/packaging)
   - License: BSD-2-Clause or Apache-2.0
 
-###paho-mqtt
+### paho-mqtt
 
 *MQTT version 5.0/3.1.1 client class*
 
@@ -253,7 +253,7 @@ I've included a list of the dynamic dependencies below to credit the open source
   - [http://eclipse.org/paho](http://eclipse.org/paho)
   - License: Eclipse Public License v2.0 / Eclipse Distribution License v1.0
 
-###pandas
+### pandas
 
 *Powerful data structures for data analysis, time series, and statistics*
 
@@ -262,7 +262,7 @@ I've included a list of the dynamic dependencies below to credit the open source
   - [https://pandas.pydata.org](https://pandas.pydata.org)
   - License: BSD-3-Clause
 
-###passlib
+### passlib
 
 *comprehensive password hashing framework supporting over 30 schemes*
 
@@ -271,7 +271,7 @@ I've included a list of the dynamic dependencies below to credit the open source
   - [https://passlib.readthedocs.io](https://passlib.readthedocs.io)
   - License: BSD
 
-###pip
+### pip
 
 *The PyPA recommended tool for installing Python packages.*
 
@@ -280,7 +280,7 @@ I've included a list of the dynamic dependencies below to credit the open source
   - [https://pip.pypa.io/](https://pip.pypa.io/)
   - License: MIT
 
-###pprintpp
+### pprintpp
 
 *A drop-in replacement for pprint that's actually pretty*
 
@@ -289,7 +289,7 @@ I've included a list of the dynamic dependencies below to credit the open source
   - [https://github.com/wolever/pprintpp](https://github.com/wolever/pprintpp)
   - License: BSD
 
-###prompt-toolkit
+### prompt-toolkit
 
 *Library for building powerful interactive command lines in Python*
 
@@ -297,7 +297,7 @@ I've included a list of the dynamic dependencies below to credit the open source
   - [https://github.com/prompt-toolkit/python-prompt-toolkit](https://github.com/prompt-toolkit/python-prompt-toolkit)
 
 
-###psutil
+### psutil
 
 *Cross-platform lib for process and system monitoring in Python.*
 
@@ -306,7 +306,7 @@ I've included a list of the dynamic dependencies below to credit the open source
   - [https://github.com/giampaolo/psutil](https://github.com/giampaolo/psutil)
   - License: BSD
 
-###psycopg2-binary
+### psycopg2-binary
 
 *psycopg2 - Python-PostgreSQL Database Adapter*
 
@@ -315,7 +315,7 @@ I've included a list of the dynamic dependencies below to credit the open source
   - [https://psycopg.org/](https://psycopg.org/)
   - License: LGPL with exceptions
 
-###Pygments
+### Pygments
 
 *Pygments is a syntax highlighting package written in Python.*
 
@@ -324,7 +324,7 @@ I've included a list of the dynamic dependencies below to credit the open source
   - [https://pygments.org/](https://pygments.org/)
   - License: BSD License
 
-###PyMySQL
+### PyMySQL
 
 *Pure Python MySQL Driver*
 
@@ -333,7 +333,7 @@ I've included a list of the dynamic dependencies below to credit the open source
   - [https://github.com/PyMySQL/PyMySQL/](https://github.com/PyMySQL/PyMySQL/)
   - License: "MIT"
 
-###python-dateutil
+### python-dateutil
 
 *Extensions to the standard Python datetime module*
 
@@ -342,7 +342,7 @@ I've included a list of the dynamic dependencies below to credit the open source
   - [https://github.com/dateutil/dateutil](https://github.com/dateutil/dateutil)
   - License: Dual License
 
-###python-multipart
+### python-multipart
 
 *A streaming multipart parser for Python*
 
@@ -350,7 +350,7 @@ I've included a list of the dynamic dependencies below to credit the open source
   - [http://github.com/andrew-d/python-multipart](http://github.com/andrew-d/python-multipart)
   - License: Apache
 
-###pyvim
+### pyvim
 
 *Pure Python Vi Implementation*
 
@@ -358,7 +358,7 @@ I've included a list of the dynamic dependencies below to credit the open source
   - [https://github.com/jonathanslenders/pyvim](https://github.com/jonathanslenders/pyvim)
   - License: LICENSE
 
-###pywebview
+### pywebview
 
 *Build GUI for your Python program with JavaScript, HTML, and CSS.*
 
@@ -367,7 +367,7 @@ I've included a list of the dynamic dependencies below to credit the open source
   - [https://github.com/r0x0r/pywebview](https://github.com/r0x0r/pywebview)
   - License: New BSD license
 
-###PyYAML
+### PyYAML
 
 *YAML parser and emitter for Python*
 
@@ -376,7 +376,7 @@ I've included a list of the dynamic dependencies below to credit the open source
   - [https://pyyaml.org/](https://pyyaml.org/)
   - License: MIT
 
-###requests
+### requests
 
 *Python HTTP for Humans.*
 
@@ -385,7 +385,7 @@ I've included a list of the dynamic dependencies below to credit the open source
   - [https://requests.readthedocs.io](https://requests.readthedocs.io)
   - License: Apache 2.0
 
-###rich
+### rich
 
 *Render rich text, tables, progress bars, syntax highlighting, markdown and more to the terminal*
 
@@ -394,7 +394,7 @@ I've included a list of the dynamic dependencies below to credit the open source
   - [https://github.com/willmcgugan/rich](https://github.com/willmcgugan/rich)
   - License: MIT
 
-###semver
+### semver
 
 *Python helper for Semantic Versioning (http://semver.org/)*
 
@@ -403,7 +403,7 @@ I've included a list of the dynamic dependencies below to credit the open source
   - [https://github.com/python-semver/python-semver](https://github.com/python-semver/python-semver)
   - License: BSD
 
-###SQLAlchemy
+### SQLAlchemy
 
 *Database Abstraction Library*
 
@@ -412,7 +412,7 @@ I've included a list of the dynamic dependencies below to credit the open source
   - [https://www.sqlalchemy.org](https://www.sqlalchemy.org)
   - License: MIT
 
-###sqlalchemy-cockroachdb
+### sqlalchemy-cockroachdb
 
 *CockroachDB dialect for SQLAlchemy*
 
@@ -421,7 +421,7 @@ I've included a list of the dynamic dependencies below to credit the open source
   - [https://github.com/cockroachdb/sqlalchemy-cockroachdb](https://github.com/cockroachdb/sqlalchemy-cockroachdb)
   - License: http://www.apache.org/licenses/LICENSE-2.0
 
-###SQLAlchemy-Utils
+### SQLAlchemy-Utils
 
 *Various utility functions for SQLAlchemy.*
 
@@ -430,7 +430,7 @@ I've included a list of the dynamic dependencies below to credit the open source
   - [https://github.com/kvesteri/sqlalchemy-utils](https://github.com/kvesteri/sqlalchemy-utils)
   - License: BSD
 
-###terminado
+### terminado
 
 *Tornado websocket backend for the Xterm.js Javascript terminal emulator library.*
 
@@ -439,7 +439,7 @@ I've included a list of the dynamic dependencies below to credit the open source
   - [https://github.com/jupyter/terminado](https://github.com/jupyter/terminado)
 
 
-###toga
+### toga
 
 *A Python native, OS native GUI toolkit.*
 
@@ -448,7 +448,7 @@ I've included a list of the dynamic dependencies below to credit the open source
   - [https://beeware.org/project/projects/libraries/toga/](https://beeware.org/project/projects/libraries/toga/)
   - License: New BSD
 
-###tornado
+### tornado
 
 *Tornado is a Python web framework and asynchronous networking library, originally developed at FriendFeed.*
 
@@ -457,7 +457,7 @@ I've included a list of the dynamic dependencies below to credit the open source
   - [http://www.tornadoweb.org/](http://www.tornadoweb.org/)
   - License: http://www.apache.org/licenses/LICENSE-2.0
 
-###tornado_xstatic
+### tornado_xstatic
 
 *Utilities for using XStatic in Tornado applications*
 
@@ -466,14 +466,14 @@ I've included a list of the dynamic dependencies below to credit the open source
   - [https://www.github.com/takluyver/tornado_xstatic](https://www.github.com/takluyver/tornado_xstatic)
 
 
-###typing_extensions
+### typing_extensions
 
 *Backported and Experimental Type Hints for Python 3.6+*
 
   - ["Guido van Rossum, Jukka Lehtosalo, Łukasz Langa, Michael Lee" <levkivskyi@gmail.com>](mailto:"Guido van Rossum, Jukka Lehtosalo, Łukasz Langa, Michael Lee" <levkivskyi@gmail.com>)
 
 
-###update-checker
+### update-checker
 
 *A python module that will check for package updates.*
 
@@ -482,7 +482,7 @@ I've included a list of the dynamic dependencies below to credit the open source
   - [https://github.com/bboe/update_checker](https://github.com/bboe/update_checker)
   - License: Simplified BSD License
 
-###uvicorn
+### uvicorn
 
 *The lightning-fast ASGI server.*
 
@@ -491,7 +491,7 @@ I've included a list of the dynamic dependencies below to credit the open source
   - [https://www.uvicorn.org/](https://www.uvicorn.org/)
   - License: BSD
 
-###virtualenv
+### virtualenv
 
 *Virtual Python Environment builder*
 
@@ -500,7 +500,7 @@ I've included a list of the dynamic dependencies below to credit the open source
   - [https://virtualenv.pypa.io/](https://virtualenv.pypa.io/)
   - License: MIT
 
-###watchgod
+### watchgod
 
 *Simple, modern file watching and code reload in python.*
 
@@ -509,7 +509,7 @@ I've included a list of the dynamic dependencies below to credit the open source
   - [https://github.com/samuelcolvin/watchgod](https://github.com/samuelcolvin/watchgod)
   - License: MIT
 
-###websockets
+### websockets
 
 *An implementation of the WebSocket Protocol (RFC 6455 & 7692)*
 
@@ -518,7 +518,7 @@ I've included a list of the dynamic dependencies below to credit the open source
   - [https://github.com/aaugustin/websockets](https://github.com/aaugustin/websockets)
   - License: BSD
 
-###wheel
+### wheel
 
 *A built-package format for Python*
 
@@ -527,7 +527,7 @@ I've included a list of the dynamic dependencies below to credit the open source
   - [https://github.com/pypa/wheel](https://github.com/pypa/wheel)
   - License: MIT
 
-###XStatic
+### XStatic
 
 *XStatic base package with minimal support code*
 
@@ -536,7 +536,7 @@ I've included a list of the dynamic dependencies below to credit the open source
   - [https://github.com/xstatic-py/xstatic](https://github.com/xstatic-py/xstatic)
   - License: MIT license
 
-###XStatic-term.js
+### XStatic-term.js
 
 *term.js 0.0.7 (XStatic packaging standard)*
 
