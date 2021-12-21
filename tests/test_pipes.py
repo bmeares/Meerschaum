@@ -99,7 +99,7 @@ def test_drop_and_sync_remote(flavor: str):
 
 @pytest.mark.parametrize("flavor", list(all_pipes.keys()))
 def test_sync_engine(flavor: str):
-    pipes = all_pipes[flavor]
+    pipes = stress_pipes[flavor]
     mrsm_instance = str(pipes[0].instance_connector)
     success, msg = actions['drop'](
         ['pipes'],
