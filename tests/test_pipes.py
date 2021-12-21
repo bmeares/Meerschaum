@@ -9,6 +9,7 @@ from tests.pipes import all_pipes, stress_pipes, remote_pipes
 from tests.connectors import conns
 from tests.test_users import test_register_user
 from meerschaum import Pipe
+from meerschaum.actions import actions
 
 @pytest.fixture(autouse=True)
 def run_before_and_after(flavor: str):
@@ -95,4 +96,27 @@ def test_drop_and_sync_remote(flavor: str):
             assert success, msg
         success, msg = pipe.sync(debug=debug)
         assert success, msg
+
+@pytest.mark.parametrize("flavor", list(all_pipes.keys()))
+def test_sync_engine(flavor: str):
+    pipes = all_pipes[flavor]
+    mrsm_instance = str(pipes[0].instance_connector)
+    success, msg = actions['drop'](
+        ['pipes'],
+        connector_keys = [p.connector_keys for p in pipes],
+        metric_keys = [p.metric_key for p in pipes],
+        location_keys = [p.location_key for p in pipes],
+        mrsm_instance = mrsm_instance,
+        yes = True,
+    )
+    assert success, msg
+
+    success, msg = actions['sync'](
+        ['pipes'],
+        connector_keys = [p.connector_keys for p in pipes],
+        metric_keys = [p.metric_key for p in pipes],
+        location_keys = [p.location_key for p in pipes],
+        mrsm_instance = mrsm_instance,
+    )
+    assert success, msg
 
