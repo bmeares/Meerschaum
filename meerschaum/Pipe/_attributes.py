@@ -7,7 +7,7 @@ Fetch and manipulate Pipes' attributes
 """
 
 from __future__ import annotations
-from meerschaum.utils.typing import Tuple, Dict, SuccessTuple, Any, Union, Optional
+from meerschaum.utils.typing import Tuple, Dict, SuccessTuple, Any, Union, Optional, List
 
 @property
 def attributes(self) -> Optional[Dict[str, Any]]:
@@ -161,3 +161,9 @@ def get_val_column(self, debug: bool = False) -> Union[str, None]:
 
     return candidates[0]
 
+
+@property
+def parents(self) -> List[meerschaum.Pipe]:
+    """
+    Return a list of pipes on which this pipe depends.
+    """
