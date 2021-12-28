@@ -96,21 +96,37 @@ def _get_parameters(pipe, debug: bool = False) -> Dict[str, str]:
     from meerschaum.utils.warnings import warn, info
     from meerschaum.config._patch import apply_patch_to_config
     _types_defaults = {
-        'sql'  : {
-            'fetch' : {
-                'definition' : None,
+        'sql': {
+            'fetch': {
+                'definition': None,
             },
+            'parents': [
+                {
+                    'connector_keys': None,
+                    'metric_key': None,
+                    'location_key': None,
+                    'instance': None,
+                },
+            ],
         },
-        'api'  : {
-            'fetch' : {
-                'connector_keys' : None,
-                'metric_key' : None,
-                'location_key' : None,
+        'api': {
+            'fetch': {
+                'connector_keys': None,
+                'metric_key': None,
+                'location_key': None,
             },
+            'parents': [
+                {
+                    'connector_keys': None,
+                    'metric_key': None,
+                    'location_key': None,
+                    'instance': None,
+                },
+            ],
         },
-        'mqtt' : {
-            'fetch' : {
-                'topic' : '#',
+        'mqtt': {
+            'fetch': {
+                'topic': '#',
             },
         },
     }

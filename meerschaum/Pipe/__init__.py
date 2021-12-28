@@ -107,15 +107,15 @@ class Pipe:
 
     def __init__(
         self,
-        connector_keys : str,
-        metric_key : str,
-        location_key : Optional[str] = None,
-        parameters : Optional[Dict[str, Any]] = None,
-        columns : Optional[Dict[str, str]] = None,
-        mrsm_instance : Optional[Union[str, InstanceConnector]] = None,
-        instance : Optional[Union[str, InstanceConnector]] = None,
+        connector_keys: str,
+        metric_key: str,
+        location_key: Optional[str] = None,
+        parameters: Optional[Dict[str, Any]] = None,
+        columns: Optional[Dict[str, str]] = None,
+        mrsm_instance: Optional[Union[str, InstanceConnector]] = None,
+        instance: Optional[Union[str, InstanceConnector]] = None,
         cache: bool = False,
-        debug : bool = False
+        debug: bool = False
     ):
         """
         :param connector_keys:
