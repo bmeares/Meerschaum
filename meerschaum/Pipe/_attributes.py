@@ -167,3 +167,24 @@ def parents(self) -> List[meerschaum.Pipe]:
     """
     Return a list of pipes on which this pipe depends.
     """
+    if 'parents' not in self.parameters:
+        return []
+    from meerschaum.utils.warnings import warn
+    from collections import Iterable
+    _parents_keys = self.parameters['parents']
+    if not isinstance(_parents_keys, Iterable):
+        warn(
+            f"Please ensure the parents for pipe '{self}' are defined as a list of keys.",
+            stacklevel = 4
+        )
+        return []
+    from meerschaum import Pipe
+    _parents = []
+    for keys in _parents_keys:
+        try:
+            p = Pipe(**keys)
+        except Exception as e:
+            warn(f"Unable to build parent with keys '{keys}' for pipe '{self}':\n{e}")
+            continue
+        _parents.append(p)
+    return _parents

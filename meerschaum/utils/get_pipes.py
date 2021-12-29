@@ -175,9 +175,9 @@ def get_pipes(
     return flatten_pipes_dict(pipes)
 
 def methods(
-        method : str,
-        connector : 'meerschaum.connectors.Connector',
-        **kw : Any
+        method: str,
+        connector: 'meerschaum.connectors.Connector',
+        **kw: Any
     ) -> List[Tuple[str, str, str]]:
     """
     Return a list of tuples containing (connector_keys, metric_key, location_key)
