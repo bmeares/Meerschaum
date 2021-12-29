@@ -97,6 +97,7 @@ class Pipe:
         get_id,
         id,
         get_val_column,
+        parents,
     )
     from ._show import show
     from ._edit import edit, edit_definition

@@ -401,7 +401,7 @@ def sorted_dict(d : dict) -> dict:
     except Exception as e:
         return d
 
-def flatten_pipes_dict(pipes_dict : dict) -> list:
+def flatten_pipes_dict(pipes_dict: PipesDict) -> List[Pipe]:
     """
     Convert the standard pipes dictionary into a list
     """
@@ -885,8 +885,8 @@ def remove_ansi(s : str) -> str:
     return re.compile(r'\x1B(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~])').sub('', s)
 
 def get_connector_labels(
-        *types : str,
-        search_term : str = '',
+        *types: str,
+        search_term: str = '',
         ignore_exact_match = True,
     ) -> List[str]:
     """
