@@ -163,14 +163,22 @@ def run_process(
     return ret
 
 def poll_process(
-        proc : subprocess.Popen,
-        line_callback : Callable[[str], Any],
-        control_dict : Optional[Dict[str, Any]] = None,
+        proc: subprocess.Popen,
+        line_callback: Callable[[str], Any],
+        timeout_seconds: Union[int, float, None] = None,
     ) -> int:
     """
     Poll a process and execute a callback function for each line printed to the process's `stdout`.
     """
+    from meerschaum.utils.threading import Timer
+    if timeout_seconds is not None:
+        watchdog_thread = Timer(timeout_seconds, proc.terminate)
+        watchdog_thread.daemon = True
+        watchdog_thread.start()
+
     while proc.poll() is None:
         line = proc.stdout.readline()
         line_callback(line)
+    if timeout_seconds is not None:
+        watchdog_thread.cancel()
     return proc.poll()
