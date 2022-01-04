@@ -5,10 +5,15 @@
 """
 Define a custom Thread class with a callback method.
 """
+
+from __future__ import annotations
+from meerschaum.utils.typing import Optional
+
 import threading
 Lock = threading.Lock
 RLock = threading.RLock
 Event = threading.Event
+Timer = threading.Timer
 
 class Thread(threading.Thread):
     """
@@ -33,17 +38,18 @@ class Thread(threading.Thread):
             success = True
         except Exception as e:
             success = False
-            result = None
+            result = e
 
         cb = self.callback if success else self.error_callback
         if cb is not None:
             cb(result)
+        return result
 
-    def join(self):
+    def join(self, timeout: Optional[float] = None):
         """
         Return the thread's return value upon joining.
         """
-        threading.Thread.join(self)
+        threading.Thread.join(self, timeout=timeout)
         return self._return
 
     def run(self):

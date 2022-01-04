@@ -196,7 +196,13 @@ groups['pipes'].add_argument(
 
 ### Sync options
 groups['sync'].add_argument(
-    '--min-seconds', type=int, help="The minimum number of seconds between syncing laps"
+    '--min-seconds', '--cooldown', type=int, help=(
+        "The minimum number of seconds between syncing laps. Defaults to 1."
+    )
+)
+groups['sync'].add_argument(
+    '--timeout-seconds', '--timeout', type=int,
+    help="The maximum number of seconds before cancelling a pipe's syncing job. Defaults to 300."
 )
 groups['sync'].add_argument(
     '--unblock', action="store_true", help="Run the action asynchronously, if possible.",
