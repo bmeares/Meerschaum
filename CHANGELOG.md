@@ -4,9 +4,13 @@ This changelog was not introduced until v0.2.12, so many of the critical release
 ## 0.5.x Releases
 This is the current release cycle, so future features will be updated below.
 
+### v0.5.9
+- **Stable interim release.**
+  This release includes minor fixes and is intended to be a stable release while development continues on new features.
+
 ### v0.5.6 — v0.5.8
 - **Added support for `gunicorn`.**  
-  Gunicorn may be used to manage API processes with the `--production` or `--gunicorn` flags. The `--production` flag is not default in the Docker image of the API server.
+  Gunicorn may be used to manage API processes with the `--production` or `--gunicorn` flags. The `--production` flag is now default in the Docker image of the API server.
 - **Updated `bootstrap pipes` flow.**  
   The interactive bootstrapping wizard now makes use of the new `register()` plugins API as well as asking for the `value` column.
 - **Fixed edge cases in `Pipe.filter_existing()`.**  
