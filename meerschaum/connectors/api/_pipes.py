@@ -516,10 +516,11 @@ def get_pipe_rowcount(
     except Exception as e:
         return None
 
+
 def drop_pipe(
         self,
-        pipe : meerschaum.Pipe,
-        debug : bool = False
+        pipe: meerschaum.Pipe,
+        debug: bool = False
     ) -> SuccessTuple:
     """
     Drop a pipe's tables but maintain its registration.
@@ -532,6 +533,32 @@ def drop_pipe(
         force = True,
         debug = debug
     )
+
+
+def clear_pipe(
+        self,
+        pipe: meerschaum.Pipe,
+        force: bool = False,
+        debug: bool = False,
+        **kw
+    ) -> SuccessTuple:
+    """
+    Drop a pipe's tables but maintain its registration.
+    """
+    kw.pop('metric_keys', None)
+    kw.pop('connector_keys', None)
+    kw.pop('location_keys', None)
+    kw.pop('action', None)
+    return self.do_action(
+        ['clear', 'pipes'],
+        connector_keys = pipe.connector_keys,
+        metric_keys = pipe.metric_key,
+        location_keys = pipe.location_key,
+        force = True,
+        debug = debug,
+        **kw
+    )
+
 
 def get_pipe_columns_types(
         self,

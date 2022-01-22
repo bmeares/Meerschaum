@@ -13,17 +13,17 @@ from meerschaum.utils.typing import (
 )
 
 def get_pipes(
-        connector_keys : Optional[Union[str, Sequence[str]]] = None,
-        metric_keys : Optional[Union[str, Sequence[str]]] = None,
-        location_keys : Optional[Union[str, Sequence[str]]] = None,
-        params : Mapping[str, Any] = dict(),
-        mrsm_instance : Union[str, InstanceConnector, None] = None,
-        instance : Union[str, InstanceConnector, None] = None,
-        as_list : bool = False,
-        method : str = 'registered',
-        wait : bool = False,
-        debug : bool = False,
-        **kw : Any
+        connector_keys: Optional[Union[str, List[str]]] = None,
+        metric_keys: Optional[Union[str, List[str]]] = None,
+        location_keys: Optional[Union[str, List[str]]] = None,
+        params: Optional[Dict[str, Any]] = None,
+        mrsm_instance: Union[str, InstanceConnector, None] = None,
+        instance: Union[str, InstanceConnector, None] = None,
+        as_list: bool = False,
+        method: str = 'registered',
+        wait: bool = False,
+        debug: bool = False,
+        **kw: Any
     ) -> Union[PipesDict, List['meerschaum.Pipe']]:
     """
     Return a dictionary (or list) of pipe objects.
@@ -106,6 +106,8 @@ def get_pipes(
         metric_keys = []
     if location_keys is None:
         location_keys = []
+    if params is None:
+        params = {}
 
     if isinstance(connector_keys, str):
         connector_keys = [connector_keys]

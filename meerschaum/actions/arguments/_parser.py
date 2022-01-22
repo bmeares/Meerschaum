@@ -3,13 +3,34 @@
 # vim:fenc=utf-8
 
 """
-This module creates the argparse Parser
+This module creates the argparse Parser.
 """
 
 from __future__ import annotations
+import sys
 import argparse, json
 from meerschaum.utils.typing import Union, Dict, List, Any, Tuple
 from meerschaum.utils.misc import string_to_dict
+
+
+_original_argparse_error = argparse.ArgumentParser.error
+_original_argparse_parse_known_args = argparse.ArgumentParser.parse_known_args
+def _new_argparse_error(self, message):
+    raise argparse.ArgumentError(message)
+
+class ArgumentParser(argparse.ArgumentParser):
+    """
+    Override the built-in `argparse` error handling.
+    """
+
+    def parse_known_args(self, *args, exit_on_error: bool = False, **kw):
+        _error_bkp = self.error
+        if not exit_on_error:
+            self.error = _new_argparse_error
+        result = _original_argparse_parse_known_args(self, *args, **kw)
+        self.error = _error_bkp
+        return result
+
 
 def parse_datetime(dt_str : str) -> datetime.datetime:
     """
@@ -112,7 +133,7 @@ def add_plugin_argument(*args, **kwargs) -> None:
     except Exception as e:
         warn(e)
 
-parser = argparse.ArgumentParser(
+parser = ArgumentParser(
     prog = 'mrsm',
     description = "Create and Build Pipes with Meerschaum.",
     usage = "mrsm [action with optional arguments] {options}",
@@ -196,7 +217,13 @@ groups['pipes'].add_argument(
 
 ### Sync options
 groups['sync'].add_argument(
-    '--min-seconds', type=int, help="The minimum number of seconds between syncing laps"
+    '--min-seconds', '--cooldown', type=float, help=(
+        "The minimum number of seconds between syncing laps. Defaults to 1."
+    )
+)
+groups['sync'].add_argument(
+    '--timeout-seconds', '--timeout', type=float,
+    help="The maximum number of seconds before cancelling a pipe's syncing job. Defaults to 300."
 )
 groups['sync'].add_argument(
     '--unblock', action="store_true", help="Run the action asynchronously, if possible.",

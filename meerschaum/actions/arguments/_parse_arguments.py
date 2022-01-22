@@ -12,7 +12,7 @@ from meerschaum.utils.typing import List, Dict, Any, Optional
 
 from meerschaum.actions.arguments._parser import parser
 
-def parse_arguments(sysargs : List[str]) -> dict[str, Any]:
+def parse_arguments(sysargs: List[str]) -> Dict[str, Any]:
     """
     Parse a list of arguments into standard Meerschaum arguments.
     Returns a dictionary of argument_name -> argument_value.
@@ -62,22 +62,25 @@ def parse_arguments(sysargs : List[str]) -> dict[str, Any]:
             if i not in sub_arg_indices
     ]
 
-    args, unknown = parser.parse_known_args(filtered_sysargs)
+    try:
+        args, unknown = parser.parse_known_args(filtered_sysargs, exit_on_error=False)
+        args_dict = vars(args)
+    except Exception as e:
+        args_dict, unknown = {'action': [], 'sysargs': sysargs, 'text': ' '.join(sysargs)}, []
 
     ### if --config is not empty, cascade down config
     ### and update new values on existing keys / add new keys/values
-    if args.config is not None:
+    if args_dict.get('config', None) is not None:
         from meerschaum.config._patch import write_patch, apply_patch_to_config
         from meerschaum.config._paths import PATCH_DIR_PATH
         from meerschaum.utils.packages import reload_package
         import os, meerschaum.config, shutil
-        write_patch(args.config)
+        write_patch(args_dict['config'])
         reload_package('meerschaum')
         ### clean up patch so it's not loaded next time
         if PATCH_DIR_PATH.exists():
             shutil.rmtree(PATCH_DIR_PATH)
 
-    args_dict = vars(args)
     args_dict['sysargs'] = sysargs
     args_dict['filtered_sysargs'] = filtered_sysargs
     ### append decorated arguments to sub_arguments list
@@ -130,7 +133,7 @@ def parse_line(line : str) -> dict:
             shlex.split(line)
         )
     except Exception as e:
-        return {'action' : [], 'text' : line,}
+        return {'action': [], 'text': line,}
 
 def parse_synonyms(
         args_dict : Dict[str, Any]

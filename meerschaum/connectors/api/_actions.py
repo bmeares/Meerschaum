@@ -7,7 +7,7 @@ Functions to interact with /mrsm/actions
 """
 
 from __future__ import annotations
-from meerschaum.utils.typing import SuccessTuple
+from meerschaum.utils.typing import SuccessTuple, Optional, List
 
 def get_actions(
         self,
@@ -20,9 +20,9 @@ def get_actions(
 
 def do_action(
         self,
-        action : list = [''],
-        sysargs : list = None,
-        debug : bool = False,
+        action: Optional[List[str]] = None,
+        sysargs: Optional[List[str]] = None,
+        debug: bool = False,
         **kw
     ) -> SuccessTuple:
     """
@@ -38,8 +38,11 @@ def do_action(
     import sys, json
     from meerschaum.utils.debug import dprint
     from meerschaum.config.static import _static_config
+    from meerschaum.utils.misc import json_serialize_datetime
+    if action is None:
+        action = []
 
-    if sysargs is not None and action[0] == '':
+    if sysargs is not None and action and action[0] == '':
         from meerschaum.actions.arguments import parse_arguments
         if debug:
             dprint(f"Parsing sysargs:\n{sysargs}")
@@ -51,9 +54,9 @@ def do_action(
 
     root_action = json_dict['action'][0]
     del json_dict['action'][0]
-    ### ensure 0 index exists (Meerschaum requirement)
-    if len(json_dict['action']) == 0:
-        json_dict['action'] = ['']
+    ### ensure 0 index exists
+    #  if len(json_dict['action']) == 0:
+        #  json_dict['action'] = ['']
     r_url = f"{_static_config()['api']['endpoints']['actions']}/{root_action}"
     
     if debug:
@@ -61,7 +64,11 @@ def do_action(
         dprint(f"Sending data to '{self.url + r_url}':")
         pprint(json_dict, stream=sys.stderr)
 
-    response = self.post(r_url, json=json_dict, debug=debug)
+    response = self.post(
+        r_url,
+        data = json.dumps(json_dict, default=json_serialize_datetime),
+        debug = debug,
+    )
     try:
         response_list = json.loads(response.text)
         if isinstance(response_list, dict) and 'detail' in response_list:
