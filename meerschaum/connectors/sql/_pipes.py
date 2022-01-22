@@ -356,12 +356,12 @@ def delete_pipe(
 
 def get_backtrack_data(
         self,
-        pipe : Optional[meerschaum.Pipe] = None,
-        backtrack_minutes : int = 0,
-        begin : Optional[datetime.datetime] = None,
+        pipe: Optional[meerschaum.Pipe] = None,
+        backtrack_minutes: int = 0,
+        begin: Optional[datetime.datetime] = None,
         params: Optional[Dict[str, Any]] = None,
-        chunksize : Optional[int] = -1,
-        debug : bool = False
+        chunksize: Optional[int] = -1,
+        debug: bool = False
     ) -> Optional[pandas.DataFrame]:
     """
     Get the most recent backtrack_minutes' worth of data from a Pipe.
@@ -738,12 +738,12 @@ def pipe_exists(
 
 def get_pipe_rowcount(
         self,
-        pipe : 'meerschaum.Pipe',
-        begin : 'datetime.datetime' = None,
-        end : 'datetime.datetime' = None,
-        remote : bool = False,
-        params : Optional[Dict[str, Any]] = None,
-        debug : bool = False
+        pipe: 'meerschaum.Pipe',
+        begin: 'datetime.datetime' = None,
+        end: 'datetime.datetime' = None,
+        remote: bool = False,
+        params: Optional[Dict[str, Any]] = None,
+        debug: bool = False
     ) -> int:
     """
     Return the number of rows between datetimes for a Pipe's instance cache or remote source
@@ -751,7 +751,7 @@ def get_pipe_rowcount(
     from meerschaum.connectors.sql.tools import dateadd_str, sql_item_name
     from meerschaum.utils.warnings import error, warn
     if remote:
-        msg = f"'fetch:definition' must be an attribute of pipe '{pipe}' to get a remote rowcount"
+        msg = f"'fetch:definition' must be an attribute of pipe '{pipe}' to get a remote rowcount."
         if 'fetch' not in pipe.parameters:
             error(msg)
             return None
@@ -782,13 +782,13 @@ def get_pipe_rowcount(
         query += "WHERE"
     if begin is not None:
         query += f"""
-        {_datetime_name} > {dateadd_str(flavor=self.flavor, datepart='minute', number=(0), begin=begin)}
+        {_datetime_name} >= {dateadd_str(flavor=self.flavor, datepart='minute', number=(0), begin=begin)}
         """
     if end is not None and begin is not None:
         query += "AND"
     if end is not None:
         query += f"""
-        {_datetime_name} <= {dateadd_str(flavor=self.flavor, datepart='minute', number=(0), begin=end)}
+        {_datetime_name} < {dateadd_str(flavor=self.flavor, datepart='minute', number=(0), begin=end)}
         """
     if params is not None:
         from meerschaum.connectors.sql.tools import build_where
@@ -804,10 +804,12 @@ def get_pipe_rowcount(
     except Exception as e:
         return None
 
+
 def drop_pipe(
         self,
-        pipe : meerschaum.Pipe,
-        debug : bool = False
+        pipe: meerschaum.Pipe,
+        debug: bool = False,
+        **kw
     ) -> SuccessTuple:
     """
     Drop a pipe's tables but maintain its registration.
@@ -824,10 +826,45 @@ def drop_pipe(
     msg = "Success" if success else f"Failed to drop pipe '{pipe}'."
     return success, msg
 
+
+def clear_pipe(
+        self,
+        pipe: meerschaum.Pipe,
+        begin: Optional[datetime.datetime] = None,
+        end: Optional[datetime.datetime] = None,
+        params: Optional[Dict[str, Any]] = None,
+        debug: bool = False,
+        **kw
+    ) -> SuccessTuple:
+    """
+    Delete a pipe's data within a bounded or unbounded interval without dropping the table.
+    """
+    if not pipe.exists(debug=debug):
+        return True, f"Pipe '{pipe}' does not exist, so nothing was cleared."
+
+    from meerschaum.connectors.sql.tools import sql_item_name, build_where, dateadd_str
+    pipe_name = sql_item_name(str(pipe), self.flavor)
+    dt_name = sql_item_name(pipe.get_columns('datetime'), self.flavor)
+    clear_query = (
+        f"DELETE FROM {pipe_name}\nWHERE 1 = 1\n"
+        + ('  AND ' + build_where(params, self, with_where=False) if params is not None else '')
+        + (
+            f'  AND {dt_name} >= ' + dateadd_str(self.flavor, 'day', 0, begin)
+            if begin is not None else ''
+        ) + (
+            f'  AND {dt_name} < ' + dateadd_str(self.flavor, 'day', 0, end)
+            if end is not None else ''
+        )
+    )
+    success = self.exec(clear_query, silent=True, debug=debug) is not None
+    msg = "Success" if success else f"Failed to clear pipe '{pipe}'."
+    return success, msg
+
+
 def get_pipe_table(
         self,
-        pipe : meerschaum.Pipe,
-        debug : bool = False,
+        pipe: meerschaum.Pipe,
+        debug: bool = False,
     ) -> sqlalchemy.Table:
     """
     Return a sqlalchemy Table for a Pipe bound to this SQLConnector's engine.

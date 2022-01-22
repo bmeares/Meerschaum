@@ -104,6 +104,7 @@ class Pipe:
     from ._sync import sync, get_sync_time, exists, filter_existing
     from ._delete import delete
     from ._drop import drop
+    from ._clear import clear
     from ._bootstrap import bootstrap
 
     def __init__(

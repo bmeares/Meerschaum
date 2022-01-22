@@ -36,7 +36,10 @@ Below are some ongoing tasks I have planned for Meerschaum. This is not an exhau
 
 ## ✨ Features
 - **Syncing**
-
+    - [x] **Timeouts**  
+      Allow for `--timeout-seconds` to kill long-running syncing processes.
+    - [ ] **Parents**  
+      Build a dependency graph and sync pipes' ancestors first.
     - [ ] **New syncing algorithm**  
       I have been brainstorming a better way to detect differences between source and cache when syncing, so a future release of Meerschaum will be able to detect changes in past data.
     - [x] **Local Pipe HD5 caching**  
@@ -82,12 +85,15 @@ Below are some ongoing tasks I have planned for Meerschaum. This is not an exhau
       In an attempt to save space, if a package is already installed in another virtual environment and satisfies the requirements for a plugin, attempt to use that version instead of installing a new version.
 
     - [x] **API Plugins**  
-
       Add the decorator `@api_plugin` to defer API plugin initialization (lazy loading).
 
 - **Other System Features**
     - [x] **Daemonize any process**  
       Allow any Meerschaum action to run in the background.
+    - [x] **GUI terminal**  
+      Add a `pywebview` and `term.js` terminal for desktop usage.
+    - [x] **Clear pipe intervals**  
+      Add `clear pipes` to delete rows of a pipe within an interval.
 
 ## 🔨 Refactoring
 - [ ] Consolidate SQL-specific functions to one package to make adding flavors easier.

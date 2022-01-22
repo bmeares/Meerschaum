@@ -13,13 +13,13 @@ from meerschaum.utils.typing import Optional, Union, Callable, Any
 
 def fetch(
         self,
-        pipe : meerschaum.Pipe.Pipe,
-        begin : Optional[Union[datetime.datetime, str]] = None,
-        end : Optional[Union[datetime.datetime, str]] = None,
-        chunk_hook : Optional[Callable[[pandas.DataFrame], Any]] = None,
-        chunksize : Optional[int] = -1,
-        debug : bool = False,
-        **kw : Any
+        pipe: meerschaum.Pipe.Pipe,
+        begin: Optional[Union[datetime.datetime, str]] = None,
+        end: Optional[Union[datetime.datetime, str]] = None,
+        chunk_hook: Optional[Callable[[pandas.DataFrame], Any]] = None,
+        chunksize: Optional[int] = -1,
+        debug: bool = False,
+        **kw: Any
     ) -> Optional['pd.DataFrame']:
     """
     Execute the SQL definition and return a Pandas DataFrame.
@@ -82,6 +82,8 @@ def fetch(
     if 'order by' in definition.lower() and 'over' not in definition.lower():
         error("Cannot fetch with an ORDER clause in the definition")
 
+    begin = begin if begin is not None else pipe.get_sync_time(debug=debug)
+        
     da = None
     if dt_name:
         ### default: do not backtrack
@@ -90,12 +92,11 @@ def fetch(
             btm = instructions['backtrack_minutes']
         begin_da = dateadd_str(
             flavor=self.flavor, datepart='minute', number=(-1 * btm), begin=begin,
-        )
+        ) if begin else None
         end_da = dateadd_str(
             flavor=self.flavor, datepart='minute', number=1, begin=end,
         ) if end else None
 
-    #  meta_def = _simple_fetch_query(pipe, debug=debug, **kw)
     meta_def = (
         _simple_fetch_query(pipe) if (
             (not pipe.columns.get('id', None))
@@ -132,8 +133,8 @@ def _simple_fetch_query(pipe, debug: bool=False, **kw) -> str:
 
 def _join_fetch_query(
         pipe,
-        debug: bool=False,
-        new_ids: bool=True,
+        debug: bool = False,
+        new_ids: bool = True,
         **kw
     ) -> str:
     """
