@@ -24,12 +24,12 @@ def drop(
     return choose_subaction(action, options, **kw)
 
 def _drop_pipes(
-        action : Optional[List[str]] = None,
-        yes : bool = False,
-        force : bool = False,
-        noask : bool = False,
-        debug : bool = False,
-        **kw : Any
+        action: Optional[List[str]] = None,
+        yes: bool = False,
+        force: bool = False,
+        noask: bool = False,
+        debug: bool = False,
+        **kw: Any
     ) -> SuccessTuple:
     """
     Drop pipes' tables but keep pipe metadata registration.

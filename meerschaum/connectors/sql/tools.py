@@ -10,144 +10,42 @@ from __future__ import annotations
 from meerschaum.utils.typing import Optional, Dict, Any, Union
 
 test_queries = {
-    'default' : 'SELECT 1',
-    'oracle' : 'SELECT 1 FROM DUAL',
-    'informix' : 'SELECT COUNT(*) FROM systables',
-    'hsqldb' : 'SELECT 1 FROM INFORMATION_SCHEMA.SYSTEM_USERS',
+    'default'    : 'SELECT 1',
+    'oracle'     : 'SELECT 1 FROM DUAL',
+    'informix'   : 'SELECT COUNT(*) FROM systables',
+    'hsqldb'     : 'SELECT 1 FROM INFORMATION_SCHEMA.SYSTEM_USERS',
+}
+### `table_name` is the escaped name of the table.
+### `table` is the unescaped name of the table.
+exists_queries = {
+    'default'    : "SELECT COUNT(*) FROM {table_name} WHERE 1 = 0",
+    'timescaledb': "SELECT to_regclass('{table_name}')",
+    'postgresql' : "SELECT to_regclass('{table_name}')",
+    'mssql'      : "SELECT OBJECT_ID('{table_name}')",
+    'mysql'      : "SHOW TABLES LIKE '{table}'",
+    'mariadb'    : "SHOW TABLES LIKE '{table}'",
+    'sqlite'     : "SELECT name FROM sqlite_master WHERE name='{table}'",
 }
 table_wrappers = {
+    'default'    : ('"', '"'),
     'timescaledb': ('"', '"'),
-    'duckdb': ('"', '"'),
-    'postgresql': ('"', '"'),
-    'sqlite': ('"', '"'),
-    'mysql': ('`', '`'),
-    'mariadb': ('`', '`'),
-    'mssql': ('[', ']'),
+    'duckdb'     : ('"', '"'),
+    'postgresql' : ('"', '"'),
+    'sqlite'     : ('"', '"'),
+    'mysql'      : ('`', '`'),
+    'mariadb'    : ('`', '`'),
+    'mssql'      : ('[', ']'),
     'cockroachdb': ('"', '"'),
-    'oracle': ('"', '"'),
+    'oracle'     : ('"', '"'),
 }
-
 json_flavors = {'postgresql', 'timescaledb',}
 
-def test_connection(
-        self,
-        **kw : Any
-    ) -> Union[bool, None]:
-    """
-    Test if a successful connection to the database may be made.
-    """
-    import warnings
-    from meerschaum.utils.misc import retry_connect
-    _default_kw = {'max_retries' : 1, 'retry_wait' : 0, 'warn': False, 'connector': self}
-    _default_kw.update(kw)
-    with warnings.catch_warnings():
-        warnings.filterwarnings('ignore', 'Could not')
-        try:
-            return retry_connect(**_default_kw)
-        except Exception as e:
-            return False
-
-def get_distinct_col_count(
-        col : str,
-        query : str,
-        connector : Optional[meerschaum.connectors.sql.SQLConnector] = None,
-        debug : bool = False
-    ) -> Optional[int]:
-    """
-    Returns the number of distinct items in a column of a SQL query.
-
-    :param col:
-        The column in the query to count.
-
-    :param query:
-        The SQL query to count from.
-
-    :param connector:
-        The SQLConnector to execute the query.
-    """
-    
-    if connector is None:
-        from meerschaum import get_connector
-        connector = get_connector('sql')
-
-    _col_name = sql_item_name(col, connector.flavor)
-
-    _meta_query = f"""
-    WITH src AS ( {query} ),
-    dist AS ( SELECT DISTINCT {_col_name} FROM src )
-    SELECT COUNT(*) FROM dist"""
-
-    result = connector.value(_meta_query, debug=debug)
-    try:
-        return int(result)
-    except Exception as e:
-        return None
-
-def sql_item_name(s : str, flavor : str) -> str:
-    """
-    Parse SQL items depending on the flavor.
-    """
-    if flavor not in table_wrappers:
-        raise Exception(f"Invalid flavor '{flavor}'.")
-
-    return table_wrappers[flavor][0] + str(s) + table_wrappers[flavor][1]
-
-def pg_capital(s : str) -> str:
-    """
-    If string contains a capital letter, wrap it in double quotes
-
-    returns: string
-    """
-    if '"' in s:
-        return s
-    needs_quotes = False
-    for c in str(s):
-        if ord(c) < ord('a') or ord(c) > ord('z'):
-            if not c.isdigit():
-                needs_quotes = True
-                break
-    if needs_quotes:
-        return '"' + s + '"'
-    return s
-
-def build_where(
-        parameters : Dict[str, Any],
-        connector : Optional[meerschaum.connectors.sql.SQLConnector] = None
-    ) -> str:
-    """
-    Build the WHERE clause based on the input criteria.
-    """
-    if connector is None:
-        from meerschaum import get_connector
-        connector = get_connector('sql')
-    where = ""
-    leading_and = "\n    AND "
-    for key, value in parameters.items():
-        _key = sql_item_name(key, connector.flavor)
-        ### search across a list (i.e. IN syntax)
-        if isinstance(value, list):
-            where += f"{leading_and}{_key} IN ("
-            for item in value:
-                where += f"'{item}', "
-            where = where[:-2] + ")"
-            continue
-
-        ### search a dictionary
-        elif isinstance(value, dict):
-            import json
-            where += (f"{leading_and}CAST({_key} AS TEXT) = '" + json.dumps(value) + "'")
-            continue
-
-        where += f"{leading_and}{_key} " + ("IS NULL" if value is None else f"= '{value}'")
-    if len(where) > 1:
-        where = "\nWHERE\n    " + where[len(leading_and):]
-    return where
 
 def dateadd_str(
-        flavor : str = 'postgresql',
-        datepart : str = 'day',
-        number : Union[int, float] = -1,
-        begin : Union[str, datetime.datetime] = 'now'
+        flavor: str = 'postgresql',
+        datepart: str = 'day',
+        number: Union[int, float] = -1,
+        begin: Union[str, datetime.datetime] = 'now'
     ) -> str:
     """
     Generate a DATEADD clause depending on database flavor.
@@ -240,6 +138,136 @@ def dateadd_str(
         da = f"TO_TIMESTAMP('{begin}', '{dt_format}') + INTERVAL '{number}' {datepart}"
     return da
 
+
+def test_connection(
+        self,
+        **kw: Any
+    ) -> Union[bool, None]:
+    """
+    Test if a successful connection to the database may be made.
+    """
+    import warnings
+    from meerschaum.utils.misc import retry_connect
+    _default_kw = {'max_retries': 1, 'retry_wait': 0, 'warn': False, 'connector': self}
+    _default_kw.update(kw)
+    with warnings.catch_warnings():
+        warnings.filterwarnings('ignore', 'Could not')
+        try:
+            return retry_connect(**_default_kw)
+        except Exception as e:
+            return False
+
+
+def get_distinct_col_count(
+        col: str,
+        query: str,
+        connector: Optional[meerschaum.connectors.sql.SQLConnector] = None,
+        debug: bool = False
+    ) -> Optional[int]:
+    """
+    Returns the number of distinct items in a column of a SQL query.
+
+    :param col:
+        The column in the query to count.
+
+    :param query:
+        The SQL query to count from.
+
+    :param connector:
+        The SQLConnector to execute the query.
+    """
+    
+    if connector is None:
+        from meerschaum import get_connector
+        connector = get_connector('sql')
+
+    _col_name = sql_item_name(col, connector.flavor)
+
+    _meta_query = f"""
+    WITH src AS ( {query} ),
+    dist AS ( SELECT DISTINCT {_col_name} FROM src )
+    SELECT COUNT(*) FROM dist"""
+
+    result = connector.value(_meta_query, debug=debug)
+    try:
+        return int(result)
+    except Exception as e:
+        return None
+
+
+def sql_item_name(item: str, flavor: str) -> str:
+    """
+    Parse SQL items depending on the flavor.
+    """
+    wrappers = table_wrappers.get(flavor, table_wrappers['default'])
+    return wrappers[0] + str(item) + wrappers[1]
+
+
+def pg_capital(s: str) -> str:
+    """
+    If string contains a capital letter, wrap it in double quotes
+
+    returns: string
+    """
+    if '"' in s:
+        return s
+    needs_quotes = False
+    for c in str(s):
+        if ord(c) < ord('a') or ord(c) > ord('z'):
+            if not c.isdigit():
+                needs_quotes = True
+                break
+    if needs_quotes:
+        return '"' + s + '"'
+    return s
+
+
+def build_where(
+        parameters: Dict[str, Any],
+        connector: Optional[meerschaum.connectors.sql.SQLConnector] = None,
+        with_where: bool = True,
+    ) -> str:
+    """
+    Build the WHERE clause based on the input criteria.
+
+    :param parameters:
+        The keywords dictionary to convert into a WHERE clause.
+
+    :param connector:
+        The Meerschaum SQLConnector that will be executing the query.
+        The connector is used to extract the SQL dialect.
+
+    :param with_where:
+        If `True`, include the leading 'WHERE'.
+        Defaults to `True`.
+    """
+    if connector is None:
+        from meerschaum import get_connector
+        connector = get_connector('sql')
+    where = ""
+    leading_and = "\n    AND "
+    for key, value in parameters.items():
+        _key = sql_item_name(key, connector.flavor)
+        ### search across a list (i.e. IN syntax)
+        if isinstance(value, list):
+            where += f"{leading_and}{_key} IN ("
+            for item in value:
+                where += f"'{item}', "
+            where = where[:-2] + ")"
+            continue
+
+        ### search a dictionary
+        elif isinstance(value, dict):
+            import json
+            where += (f"{leading_and}CAST({_key} AS TEXT) = '" + json.dumps(value) + "'")
+            continue
+
+        where += f"{leading_and}{_key} " + ("IS NULL" if value is None else f"= '{value}'")
+    if len(where) > 1:
+        where = ("\nWHERE\n    " if with_where else '') + where[len(leading_and):]
+    return where
+
+
 def table_exists(
         table: str,
         connector: Optional[meerschaum.connectors.sql.SQLConnector] = None,
@@ -253,16 +281,9 @@ def table_exists(
         connector = get_connector('sql')
 
     table_name = sql_item_name(table, connector.flavor)
-    ### default: select no rows. NOTE: this might not work for Oracle
-    q = f"SELECT COUNT(*) FROM {table_name} WHERE 1 = 0"
-    if connector.flavor in ('timescaledb', 'postgresql'):
-        q = f"SELECT to_regclass('{table_name}')"
-    elif connector.flavor == 'mssql':
-        q = f"SELECT OBJECT_ID('{table_name}')"
-    elif connector.flavor in ('mysql', 'mariadb'):
-        q = f"SHOW TABLES LIKE '{table}'"
-    elif connector.flavor == 'sqlite':
-        q = f"SELECT name FROM sqlite_master WHERE name='{table}'"
+    q = exists_queries.get(connector.flavor, exists_queries['default']).format(
+        table=table, table_name=table_name,
+    )
     exists = connector.value(q, debug=debug, silent=True) is not None
     return exists
 

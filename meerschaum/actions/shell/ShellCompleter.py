@@ -10,7 +10,6 @@ from __future__ import annotations
 from prompt_toolkit.completion import Completer, Completion
 from meerschaum.utils.typing import Optional
 from meerschaum.actions import get_shell, get_completer
-from meerschaum.actions.arguments import parse_line
 
 from meerschaum.utils.packages import attempt_import, ensure_readline
 prompt_toolkit = attempt_import('prompt_toolkit', lazy=False, install=True)

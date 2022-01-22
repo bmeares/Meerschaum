@@ -4,7 +4,17 @@ This changelog was not introduced until v0.2.12, so many of the critical release
 ## 0.5.x Releases
 This is the current release cycle, so future features will be updated below.
 
-### v0.5.6 — v0.5.8
+### v0.5.10
+- **Added the `clear pipes` command.**  
+  Users may now delete specific rows within a pipe using `pipe.clear()`. This new method includes support for the `--begin`, `--end`, and `--params` flags.
+- **Changed the default behavior of `--begin`.**  
+  The `--begin` flag is now only included when the user specifies and no longer defaults to the sync time.
+- **Added ``--timeout-seconds`.**  
+  The flags `--timeout-seconds` and `--timeout` make the syncing engine sync each pipe in a separate subprocess and will kill the process if the sync exceeds the number of provided seconds.
+- **Fixed shell argparse bug.**  
+  When editing command line arguments within the shell, edge cases no longer cause the shell to exit.
+
+### v0.5.6 — v0.5.9
 - **Added support for `gunicorn`.**  
   Gunicorn may be used to manage API processes with the `--production` or `--gunicorn` flags. The `--production` flag is not default in the Docker image of the API server.
 - **Updated `bootstrap pipes` flow.**  

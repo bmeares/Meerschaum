@@ -11,12 +11,12 @@ from meerschaum.utils.typing import Optional, Any
 
 def fetch(
         self,
-        begin : Optional[datetime.datetime] = None,
-        end : Optional[datetime.datetime] = None,
-        sync_chunks : bool = False,
+        begin: Optional[datetime.datetime] = None,
+        end: Optional[datetime.datetime] = None,
+        sync_chunks: bool = False,
         deactivate_plugin_venv: bool = True,
-        debug : bool = False,
-        **kw : Any
+        debug: bool = False,
+        **kw: Any
     ) -> 'pd.DataFrame or None':
     """
     Fetch a Pipe's latest data from its connector.
