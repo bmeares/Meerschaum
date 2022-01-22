@@ -12,12 +12,12 @@ import datetime
 
 def fetch(
         self,
-        pipe : meerschaum.Pipe,
-        begin : Optional[datetime.datetime] = None,
-        end : Optional[datetime.datetime] = None,
+        pipe: meerschaum.Pipe,
+        begin: Optional[datetime.datetime] = None,
+        end: Optional[datetime.datetime] = None,
         params: Optional[Dict, Any] = None,
-        debug : bool = False,
-        **kw : Any
+        debug: bool = False,
+        **kw: Any
     ) -> pandas.DataFrame:
     """
     Get the Pipe data from the remote Pipe.
@@ -55,6 +55,7 @@ def fetch(
         remote_location_key,
         mrsm_instance = self
     )
+    begin = begin if begin is not None else p.get_sync_time(debug=debug)
     return p.get_data(
         begin=begin, end=end,
         params=_params,

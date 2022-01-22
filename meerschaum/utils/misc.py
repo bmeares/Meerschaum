@@ -412,9 +412,9 @@ def flatten_pipes_dict(pipes_dict: PipesDict) -> List[Pipe]:
     return pipes_list
 
 def round_time(
-        dt : 'datetime.datetime' = None,
-        date_delta : 'datetime.timedelta' = None,
-        to : 'str' = 'down'
+        dt: 'datetime.datetime' = None,
+        date_delta: 'datetime.timedelta' = None,
+        to: 'str' = 'down'
     ) -> 'datetime.datetime':
     """
     Round a datetime object to a multiple of a timedelta
@@ -916,14 +916,17 @@ def get_connector_labels(
     ]
     return sorted(possibilities)
 
-def json_serialize_datetime(dt : datetime.datetime) -> Optional[str]:
+
+def json_serialize_datetime(dt: datetime.datetime) -> Optional[str]:
     """
     Serialize a datetime.datetime object into JSON (ISO format string).
     """
     import datetime
+
     if isinstance(dt, datetime.datetime):
         return dt.isoformat() + 'Z'
     return None
+
 
 def wget(
         url : str,

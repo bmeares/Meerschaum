@@ -20,7 +20,7 @@ def sync(
     """
     from meerschaum.utils.misc import choose_subaction
     options = {
-        'pipes'   : _sync_pipes,
+        'pipes': _sync_pipes,
     }
     return choose_subaction(action, options, **kw)
 
@@ -31,7 +31,7 @@ def _pipes_lap(
         force: bool = False,
         min_seconds: int = 1,
         mrsm_instance: Optional[str] = None,
-        timeout_seconds: int = 300,
+        timeout_seconds: Optional[int] = None,
         _progress: Optional['rich.progress.Progress'] = None,
         **kw: Any
     ) -> Tuple[List[meerschaum.Pipe], List[meerschaum.Pipe]]:
@@ -51,26 +51,35 @@ def _pipes_lap(
     import multiprocessing
     import contextlib
     import time, os
+    from meerschaum.utils.packages import venv_exec
+    from meerschaum.utils.process import poll_process
+    import json
+    import sys
+    dill = attempt_import('dill')
+
     rich_table, rich_text, rich_box = attempt_import(
         'rich.table', 'rich.text', 'rich.box',
     )
     all_kw = kw.copy()
     all_kw.update({'workers': workers, 'debug': debug, 'unblock': unblock, 'force': force,
         'min_seconds': min_seconds, 'timeout_seconds': timeout_seconds,
-        'mrsm_instance': mrsm_instance, '_progress': _progress,})
+        'mrsm_instance': mrsm_instance,})
+    locks = {'remaining_count': Lock(), 'results_dict': Lock(), 'pipes_threads': Lock(),}
     pipes = get_pipes(
-        as_list = True,
-        method = 'registered',
-        debug = debug,
-        mrsm_instance = mrsm_instance,
-        **kw
+        as_list=True, method='registered', debug=debug, mrsm_instance=mrsm_instance, **kw
     )
+    remaining_count = len(pipes)
     instance_connector = parse_instance_keys(mrsm_instance, debug=debug)
     conns = (
         instance_connector.engine.pool.size() if instance_connector.type == 'sql'
         else len(pipes)
     )
     cores = multiprocessing.cpu_count()
+    pipes_queue = queue.Queue(remaining_count)
+    [pipes_queue.put_nowait(pipe) for pipe in pipes]
+    stop_event = Event()
+    results_dict = {}
+
     ### Cap the number workers to the pool size or 1 if working in-memory.
     if workers is None:
         workers = (
@@ -95,143 +104,98 @@ def _pipes_lap(
     ) if _progress is not None else None
 
 
-    def worker_fn(
-            results_dict,
-            pipes_queue,
-            stop_event,
-            results_dict_lock,
-            remaining_count_lock,
-            timeout_seconds,
-            remaining_count,
-        ):
-        #  nonlocal results_dict, pipes_queue
-        print('inside worker')
+    def worker_fn():
+        nonlocal results_dict, pipes_queue
         while not stop_event.is_set():
-            print(pipes_queue)
             try:
                 pipe = pipes_queue.get_nowait()
-                print(pipe)
             except queue.Empty:
-                print('queue is empty')
                 return
-            try:
-                from meerschaum.utils.threading import Thread
-                _syncing_thread = Thread(target=sync_pipe, error_callback=foo, args=(pipe,))
-                _syncing_thread.start()
-                return_tuple = _syncing_thread.join(timeout=timeout_seconds)
-                if return_tuple is None:
-                    return_tuple = False, (
-                        "Failed to sync pipe '{pipe}' within {timeout_seconds} second"
-                        + ('s' if timeout_seconds != 1 else '')
-                    )
-            except Exception as e:
-                return_tuple = False, str(e)
-                print(e)
-            #  return_tuple = sync_pipe(pipe)
-            results_dict_lock.acquire()
+            return_tuple = sync_pipe(pipe)
+            locks['results_dict'].acquire()
             results_dict[pipe] = return_tuple
-            results_dict_lock.release()
+            locks['results_dict'].release()
 
             print_tuple(return_tuple, _progress=_progress)
             _checkpoint(_progress=_progress, _task=_task)
             if _progress is not None:
-                remaining_count_lock.acquire()
-                #  nonlocal remaining_count
-                remaining_count.value -= 1
-                remaining_count_lock.release()
+                locks['remaining_count'].acquire()
+                nonlocal remaining_count
+                remaining_count -= 1
+                locks['remaining_count'].release()
             pipes_queue.task_done()
 
-    def sync_pipe(p, **kw):
+    sync_function_source = dill.source.getsource(_wrap_sync_pipe)
+    fence_begin, fence_end = '<MRSM_RESULT>', '</MRSM_RESULT>'
+
+    def sync_pipe(p):
         """
         Wrapper function for handling exceptions.
         """
-        try:
-            return_tuple = p.sync(
-                blocking = (not unblock),
-                force = force,
-                debug = debug,
-                min_seconds = min_seconds,
-                workers = workers,
-                **{k: v for k, v in kw.items() if k != 'blocking'}
+        ### If no timeout is specified, handle syncing in the current thread.
+        if timeout_seconds is None:
+            return _wrap_sync_pipe(p, **all_kw)
+        _success_tuple = False, "Nothing returned."
+        def write_line(line):
+            nonlocal _success_tuple
+            decoded = line.decode('utf-8')
+            begin_index, end_index = decoded.find(fence_begin), decoded.find(fence_end)
+
+            ### Found the beginning of the return value.
+            ### Don't write the parsed success tuple message.
+            if begin_index >= 0:
+                _success_tuple = tuple(json.loads(
+                    decoded[begin_index + len(fence_begin):end_index]
+                ))
+                return
+            sys.stdout.buffer.write(line)
+
+        def timeout_handler(p, *args, **kw):
+            success, msg = False, (
+                f"Failed to sync pipe '{p}' within {timeout_seconds} second"
+                + ('s' if timeout_seconds != 1 else '') + '.'
             )
-        except Exception as e:
-            import traceback
-            traceback.print_exception(type(e), e, e.__traceback__)
-            print("Error: " + str(e))
-            return_tuple = (False, f"Failed to sync pipe '{p}' with exception:" + "\n" + str(e))
+            write_line((fence_begin + json.dumps((success, msg)) + fence_end).encode('utf-8'))
 
-        return return_tuple
-
-    #  worker_threads = [Thread(target=worker_fn) for _ in range(min(workers, len(pipes)))]
-    #  for worker_thread in worker_threads:
-        #  worker_thread.start()
-
-    from meerschaum.utils.packages import venv_exec
-    from meerschaum.utils.process import poll_process
-    import json
-    import sys
-    dill = attempt_import('dill')
-    def write_line(line):
-        sys.stdout.buffer.write(line)
-    
-    sync_function_source = dill.source.getsource(_wrap_sync_pipe)
-    for p in pipes:
         src = sync_function_source + '\n\n' + (
             "import meerschaum as mrsm\n"
             + "import json\n"
             + f"pipe = mrsm.Pipe(**json.loads({json.dumps(json.dumps(p.meta))}))\n"
-            + f"_wrap_sync_pipe(pipe, **json.loads({json.dumps(json.dumps(all_kw))}))"
+            + f"""print(
+                    '{fence_begin}'
+                    + json.dumps(
+                        _wrap_sync_pipe(
+                            pipe,
+                            **json.loads({json.dumps(json.dumps(all_kw))})
+                        )
+                    )
+                    + '{fence_end}'
+            )"""
         )
         if debug:
             dprint(src)
+
         proc = venv_exec(src, venv=None, as_proc=True, debug=debug)
-        poll_process(proc, write_line, timeout_seconds)
+        poll_process(
+            proc, write_line, timeout_seconds,
+            timeout_handler, (p,)
+        )
+        return _success_tuple
 
-    return pipes, [], {pipes[0]: (False, "Testing")}
-
-    manager = multiprocessing.Manager()
-    with manager:
-        results_dict = manager.dict()
-        #  pipes_queue = multiprocessing.JoinableQueue(remaining_count.value)
-        remaining_count = manager.Value('i', len(pipes))
-        pipes_queue = manager.Queue(remaining_count.value)
-        [pipes_queue.put_nowait(pipe) for pipe in pipes]
-        stop_event = manager.Event()
-        locks = {
-            'results_dict': manager.Lock(),
-            'remaining_count': manager.Lock(),
-        }
-
-        worker_procs = [
-            multiprocessing.Process(
-                target = worker_fn,
-                args = (
-                    results_dict,
-                    pipes_queue,
-                    stop_event,
-                    locks['results_dict'],
-                    locks['remaining_count'],
-                    timeout_seconds,
-                    remaining_count,
-                )
-            ) for _ in range(min(workers, len(pipes)))
-        ]
-        for worker_proc in worker_procs:
-            worker_proc.start()
+    worker_threads = [Thread(target=worker_fn) for _ in range(min(workers, len(pipes)))]
+    for worker_thread in worker_threads:
+        worker_thread.start()
 
     try:
-        while any([w.is_alive() for w in worker_procs]):
+        while any([t.is_alive() for t in worker_threads]):
             time.sleep(0.1)
     except KeyboardInterrupt:
         stop_event.set()
         raise
 
-    print('joining...')
     pipes_queue.join()
-    #  print('joined queue.')
-    for worker_proc in worker_procs:
-        worker_proc.join()
-    print('Done joining.')
+    for worker_thread in worker_threads:
+        worker_thread.join()
 
     results = [results_dict[pipe] for pipe in pipes] if len(results_dict) == len(pipes) else None
 
@@ -319,7 +283,7 @@ def _sync_pipes(
         lap_end = time.perf_counter()
         print()
 
-        if success is not None and not loop:
+        if success is not None and not loop and shell:
             clear_screen(debug=debug)
         if fail is not None and len(fail) > 0:
             print_options(

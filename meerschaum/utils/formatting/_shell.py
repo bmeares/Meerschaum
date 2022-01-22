@@ -40,6 +40,9 @@ def clear_screen(debug: bool = False) -> bool:
     """
     from meerschaum.utils.formatting import ANSI, get_console
     from meerschaum.utils.debug import dprint
+    from meerschaum.config import get_config
+    if not get_config('shell', 'clear_screen'):
+        return True
     print("", end="", flush=True)
     if debug:
         dprint("Skipping screen clear.")

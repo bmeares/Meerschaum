@@ -170,7 +170,6 @@ def parents(self) -> List[meerschaum.Pipe]:
     if 'parents' not in self.parameters:
         return []
     from meerschaum.utils.warnings import warn
-    #  from collections import Iterable
     _parents_keys = self.parameters['parents']
     if not isinstance(_parents_keys, list):
         warn(

@@ -2,14 +2,15 @@
 # -*- coding: utf-8 -*-
 # vim:fenc=utf-8
 """
-Functions for clearing elements
+Functions for clearing pipes.
 """
 
+from __future__ import annotations
 from meerschaum.utils.typing import List, SuccessTuple, Any, Optional
 
 def clear(
-        action : Optional[List[str]] = None,
-        **kw : Any
+        action: Optional[List[str]] = None,
+        **kw: Any
     ) -> SuccessTuple:
     """
     Clear pipes of their data, or clear the screen.
@@ -25,13 +26,82 @@ def clear(
     return choose_subaction(action, options, **kw)
 
 def _clear_pipes(
-        action : Optional[List[str]] = None,
-        **kw : Any
+        action: Optional[List[str]] = None,
+        begin: Optional[datetime.datetime] = None,
+        end: Optional[datetime.datetime] = None,
+        connector_keys: Optional[List[str]] = None,
+        metric_keys: Optional[List[str]] = None,
+        mrsm_instance: Optional[str] = None,
+        location_keys: Optional[List[str]] = None,
+        force: bool = False,
+        debug: bool = False,
+        **kw: Any
     ) -> SuccessTuple:
     """
     Clear pipes' data without dropping any tables.
     """
-    return False, "Not implemented"
+    from meerschaum import get_pipes
+    from meerschaum.utils.formatting import print_tuple
+    
+    successes = {}
+    fails = {}
+
+    pipes = get_pipes(
+        as_list=True, connector_keys=connector_keys, metric_keys=metric_keys,
+        location_keys=location_keys, mrsm_instance=mrsm_instance, debug=debug, **kw
+    )
+
+    if not force:
+        if not _ask_with_rowcounts(pipes, begin=begin, end=end, debug=debug, **kw):
+            return False, "No rows were deleted."
+
+    for pipe in pipes:
+        success, msg = pipe.clear(begin=begin, end=end, debug=debug, **kw)
+        print_tuple((success, msg))
+        (successes if success else fails)[pipe] = msg
+
+    success = len(successes) > 0
+    msg = (
+        f"Finished clearing {len(pipes)} pipe" + ('s' if len(pipes) != 1 else '')
+        + f'\n    ({len(successes)} succeeded, {len(fails)} failed).'
+    )
+
+    return success, msg
+
+
+def _ask_with_rowcounts(
+        pipes: List[meerschaum.Pipe],
+        begin: Optional[datetime.datetime] = None,
+        end: Optional[datetime.datetime] = None,
+        yes: bool = False,
+        nopretty: bool = False,
+        noask: bool = False,
+        debug: bool = False,
+        **kw
+    ) -> bool:
+    """
+    Count all of the pipes' rowcounts and confirm with the user that these rows need to be deleted.
+    """
+    from meerschaum.utils.prompt import yes_no
+    from meerschaum.utils.misc import print_options
+    pipes_rowcounts = {p: p.get_rowcount(begin=begin, end=end, debug=debug) for p in pipes} 
+    print_options(
+        [str(p) + f'\n{rc}\n' for p, rc in pipes_rowcounts.items()],
+        header='Number of Rows to be Deleted'
+    )
+    total_num_rows = sum([rc for p, rc in pipes_rowcounts.items()])
+    question = (
+        f"Are you sure you want to delete {total_num_rows} rows across {len(pipes)} pipe"
+        + ('s' if len(pipes) != 1 else '')
+        + " in the following range?\n"
+    )
+    range_text = (
+        (f"\n    Newer than (>=) {begin}" if begin is not None else '')
+        + ("\n    Older than (<)" + (' ' if begin else '') + f" {end}" if end is not None else '')
+    ) if (begin is not None or end is not None) else '\n    Unbounded (delete all rows)!'
+    question += range_text + '\n\n'
+
+    return yes_no(question, yes=yes, nopretty=nopretty, noask=noask, default='n')
 
 ### NOTE: This must be the final statement of the module.
 ###       Any subactions added below these lines will not

@@ -14,52 +14,22 @@ from meerschaum.utils.typing import (
 
 def sync(
         self,
-
-        df : Optional[
-            Union[
-                pandas.DataFrame,
-                Dict[str, List[Any]]
-            ]
-        ] = None,
-
-        begin : Optional[
-            datetime.datetime
-        ] = None,
-
-        end : Optional[
-            datetime.datetime
-        ] = None,
-
-        force : bool = False,
-
-        retries : int = 10,
-
-        min_seconds : int = 1,
-
-        check_existing : bool = True,
-
-        blocking : bool = True,
-
-        workers : Optional[int] = None,
-
-        callback : Optional[
-            Callable[[Tuple[bool, str]], Any]
-        ] = None,
-
-        error_callback : Optional[
-            Callable[[Exception], Any]
-        ] = None,
-
-        chunksize : Optional[int] = -1,
-
-        sync_chunks : bool = False,
-
+        df: Optional[Union[pandas.DataFrame, Dict[str, List[Any]]]] = None,
+        begin: Optional[datetime.datetime] = None,
+        end: Optional[datetime.datetime] = None,
+        force: bool = False,
+        retries: int = 10,
+        min_seconds: int = 1,
+        check_existing: bool = True,
+        blocking: bool = True,
+        workers: Optional[int] = None,
+        callback: Optional[Callable[[Tuple[bool, str]], Any]] = None,
+        error_callback: Optional[Callable[[Exception], Any]] = None,
+        chunksize: Optional[int] = -1,
+        sync_chunks: bool = False,
         deactivate_plugin_venv: bool = True,
-
-        debug : bool = False,
-
-        **kw : Any
-
+        debug: bool = False,
+        **kw: Any
     ) -> SuccessTuple:
     """
     Fetch new data from the source and update the pipe's table with new data.
@@ -147,7 +117,7 @@ def sync(
 
     ### NOTE: Setting begin to the sync time for Simple Sync.
     ### TODO: Add flag for specifying syncing method.
-    begin = self.get_sync_time(debug=debug) if begin is None else begin
+    begin = _determine_begin(self, begin, debug=debug)
     kw.update({
         'begin': begin, 'end': end, 'force': force, 'retries': retries, 'min_seconds': min_seconds,
         'check_existing': check_existing, 'blocking': blocking, 'workers': workers,
@@ -274,6 +244,21 @@ def sync(
         return False, str(e)
     return True, f"Spawned asyncronous sync for pipe '{self}'."
 
+
+def _determine_begin(
+        pipe: meerschaum.Pipe,
+        begin: Optional[datetime.datetime] = None,
+        debug: bool = False,
+    ) -> Union[datetime.datetime, None]:
+    ### Datetime has already been provided.
+    if begin is not None:
+        return begin
+    ### Only manipulate the datetime for SQL or API pipes.
+    if not pipe.instance_connector.type in ('sql', 'api'):
+        return begin
+
+    return pipe.get_sync_time(debug=debug)
+
 def get_sync_time(
         self,
         params : Optional[Mapping[str, Any]] = None,
@@ -322,6 +307,7 @@ def get_sync_time(
         debug = debug,
     )
 
+
 def exists(
         self,
         debug : bool = False
@@ -349,28 +335,30 @@ def filter_existing(
     from meerschaum.utils.warnings import warn
     from meerschaum.utils.debug import dprint
     from meerschaum.utils.misc import round_time
-    from meerschaum.utils.packages import attempt_import
-    import datetime as datetime_pkg
+    from meerschaum.utils.packages import attempt_import, import_pandas
+    import datetime
+    pd = import_pandas()
     ### begin is the oldest data in the new dataframe
     try:
-        min_dt = df[self.get_columns('datetime')].min(skipna=True).to_pydatetime()
+        min_dt = pd.to_datetime(df[self.get_columns('datetime')].min(skipna=True)).to_pydatetime()
     except Exception as e:
-        min_dt = self.get_sync_time(debug=debug)
-    if not isinstance(min_dt, datetime_pkg.datetime) or str(min_dt) == 'NaT':
+        ### NOTE: This will fetch the entire pipe!
+        min_dt = self.get_sync_time(newest=False, debug=debug)
+    if not isinstance(min_dt, datetime.datetime) or str(min_dt) == 'NaT':
         ### min_dt might be None, a user-supplied value, or the sync time.
         min_dt = begin
     ### If `min_dt` is None, use `datetime.utcnow()`.
     begin = round_time(
         min_dt,
         to = 'down'
-    ) - datetime_pkg.timedelta(minutes=1)
+    ) - datetime.timedelta(minutes=1)
 
     ### end is the newest data in the new dataframe
     try:
-        max_dt = df[self.get_columns('datetime')].max(skipna=True).to_pydatetime()
+        max_dt = pd.to_datetime(df[self.get_columns('datetime')].max(skipna=True)).to_pydatetime()
     except Exception as e:
         max_dt = end
-    if not isinstance(max_dt, datetime_pkg.datetime) or str(max_dt) == 'NaT':
+    if not isinstance(max_dt, datetime.datetime) or str(max_dt) == 'NaT':
         max_dt = None
 
     if max_dt is not None and min_dt > max_dt:
@@ -381,10 +369,10 @@ def filter_existing(
         round_time(
             max_dt,
             to = 'down'
-        ) + datetime_pkg.timedelta(minutes=1)
+        ) + datetime.timedelta(minutes=1)
     ) if max_dt is not None else end
     if begin is not None and end is not None and begin > end:
-        begin = end - datetime_pkg.timedelta(minutes=1)
+        begin = end - datetime.timedelta(minutes=1)
 
     if debug:
         dprint(f"Looking at data between '{begin}' and '{end}'.", **kw)
@@ -409,5 +397,3 @@ def filter_existing(
     ### remove data we've already seen before
     from meerschaum.utils.misc import filter_unseen_df
     return filter_unseen_df(backtrack_df, df, debug=debug)
-
-
