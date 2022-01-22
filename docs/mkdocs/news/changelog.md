@@ -9,7 +9,7 @@ This is the current release cycle, so future features will be updated below.
   Users may now delete specific rows within a pipe using `pipe.clear()`. This new method includes support for the `--begin`, `--end`, and `--params` flags.
 - **Changed the default behavior of `--begin`.**  
   The `--begin` flag is now only included when the user specifies and no longer defaults to the sync time.
-- **Added ``--timeout-seconds`.**  
+- **Added `--timeout-seconds`.**  
   The flags `--timeout-seconds` and `--timeout` make the syncing engine sync each pipe in a separate subprocess and will kill the process if the sync exceeds the number of provided seconds.
 - **Fixed shell argparse bug.**  
   When editing command line arguments within the shell, edge cases no longer cause the shell to exit.
