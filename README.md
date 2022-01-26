@@ -9,30 +9,46 @@
 <img src="https://meerschaum.io/files/images/demo.gif" alt="Meerschaum demo" height="450px">
 </p>
 
-# What is Meerschaum?
+## What is Meerschaum?
 Meerschaum is a tool for quickly synchronizing time-series data streams called **pipes**. With Meerschaum, you can have a data visualization stack running in minutes.
 
 The power of the Meerschaum system comes from projects like [pandas](https://pandas.pydata.org/), [sqlalchemy](https://www.sqlalchemy.org/), [fastapi](https://fastapi.tiangolo.com/), and [more](https://meerschaum.io/news/acknowledgements/).
 
-# Why Meerschaum?
+## Why Meerschaum?
 
 If you've worked with time-series data, you know the headaches that come with ETL.
-Data engineering often gets in analysts' way, and when work needs to get done, every minute spent on pipe-lining is time taken away from real analysis.
+Data engineering often gets in analysts' way, and when work needs to get done, every minute spent on pipelining is time taken away from real analysis.
 
 Rather than copy / pasting your ETL scripts, simply build pipes with Meerschaum! [Meerschaum gives you the tools to design your data streams how you like](https://towardsdatascience.com/easy-time-series-etl-for-data-scientists-with-meerschaum-5aade339b398) ― and don't worry — you can always incorporate Meerschaum into your existing systems!
 
 ## Features
 
-- ✨ Integrate with **Pandas**, **Grafana**, and other popular [**data analysis tools**](https://meerschaum.io/reference/data-analysis-tools/).
-- ⚡️ **Synchronization engine** concurrently updates many time-series data streams.
-- 📊 One-click deploy a [**TimescaleDB** and **Grafana** stack](https://meerschaum.io/reference/stack/) for prototyping.
-- 🔌 [**Plugin system**](https://meerschaum.io/reference/plugins/writing-plugins/) for easily adapting new data sources.
+- 📊 **Built for Data Scientists and Analysts**  
+  - Integrate with Pandas, Grafana and other popular [data analysis tools](https://meerschaum.io/reference/data-analysis-tools/).
+  - Persist your dataframes and always get the latest data.
+- ⚡️ **Production-Ready, Batteries Included**  
+  - [Synchronization engine](https://meerschaum.io/reference/pipes/syncing/) concurrently updates many time-series data streams.
+  - One-click deploy a [TimescaleDB and Grafana stack](https://meerschaum.io/reference/stack/) for prototyping.
+  - Serve data to your entire organization through the power of `uvicorn`, `gunicorn`, `FastAPI`
+- 🔌 **Easily Expandable**  
+  -  Ingest any data source with the [plugin system](https://meerschaum.io/reference/plugins/writing-plugins/). Just return a DataFrame, and Meerschaum handles the rest.
+  - [Add any function as a command](https://meerschaum.io/reference/plugins/types-of-plugins/#action-plugins) to the Meerschaum system.
+  - Include Meerschaum in your projects with its [easy-to-use Python API](https://docs.meerschaum.io).
+- ✨ **Tailored for Your Experience**  
+  - Rich CLI makes managing your data streams surprisingly enjoyable!
+  - Web dashboard for those who prefer a more graphical experience.
+  - Manage your database connections with [Meerschaum connectors](https://meerschaum.io/reference/connectors/)
+  - Utility commands with sensible syntax let you control many pipes with grace.
+- 📾 **Portable from the Start**  
+  - The environment variable `$MRSM_ROOT_DIR` lets you emulate multiple installations and group together your [instances](https://meerschaum.io/reference/connectors/#instances-and-repositories).
+  - No dependencies required; anything needed will be installed into a virtual environment.
+  - Required packages for plugins
 
-# Installation
+## Installation
 
 For a more thorough setup guide, visit the [Getting Started](https://meerschaum.io/get-started/) page at [meerschaum.io](https://meerschaum.io).
 
-## TL;DR
+### TL;DR
 
 ```bash
 pip install -U --user meerschaum
@@ -50,7 +66,7 @@ Here is the [list of community plugins](https://meerschaum.io/reference/plugins/
 
 For details on installing, using, and writing plugins, check out the [plugins documentation](https://meerschaum.io/reference/plugins/types-of-plugins) at [meerschaum.io](https://meerschaum.io).
 
-# Support Meerschaum's Development
+## Support Meerschaum's Development
 
 For consulting services and to support Meerschaum's development, please considering sponsoring me on [GitHub sponsors](https://github.com/sponsors/bmeares).
 
