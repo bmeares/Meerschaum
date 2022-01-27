@@ -91,6 +91,7 @@ packages : Dict[str, Dict[str, str]] = {
         'mkdocs_material'            : 'mkdocs-material>=6.2.5',
         'mkdocs_autolinks_plugin'    : 'mkdocs-autolinks-plugin>=0.2.0',
         'mkdocs_awesome_pages_plugin': 'mkdocs-awesome-pages-plugin>=2.5.0',
+        'mkdocs_section_index'       : 'mkdocs-section-index>=0.3.3',
     },
     'gui': {
         'toga'                       : 'toga>=0.3.0.dev29',

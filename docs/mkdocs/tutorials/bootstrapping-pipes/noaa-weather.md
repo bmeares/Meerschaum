@@ -1,2 +1,0 @@
-# Weather Data Plugin: NOAA
-

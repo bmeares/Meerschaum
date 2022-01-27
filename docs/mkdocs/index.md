@@ -60,7 +60,7 @@ h1 {
 </style>
 <script type="text/javascript">
   function copy_install_text(btn){
-    var inp =document.createElement('input');
+    var inp = document.createElement('input');
     document.body.appendChild(inp);
     inp.value = "pip install meerschaum";
     inp.select();
@@ -104,25 +104,32 @@ h1 {
     <h2>Why Meerschaum?</h2>
     <p>If you've worked with time-series data, you know the headaches that come with ETL. Meerschaum is a system that makes consolidating and syncing data easy.</p>
     <p>Meerschaum instead gives you better tools to define and sync your data streams. And don't worry — you can always incorporate Meerschaum into your existing scripts.</p>
+
   </div>
   <div class="grid-child">
     <br>
     <asciinema-player src="/assets/casts/demo.cast" autoplay="true" loop="true" size="small" preload="true"></asciinema-player>
-    <!-- <div style="text-align: center">
-      <iframe width="480" height="270" src="https://www.youtube.com/embed/wncA_vaIois" title="YouTube video player" frameborder="0" allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture" allowfullscreen></iframe>
-    </div> -->
   </div>
 </div>
 
-<!-- <div class="grid-container">
+<h2> Video Tutorials</h2>
+
+<div class="grid-container">
   <div class="grid-child">
 
+    <div style="text-align: center">
+      <iframe width="672" height="378" src="https://www.youtube.com/embed/videoseries?list=PLJaQLBuU44n3bNEJd1ZpvaOLh9P-m21mo" title="YouTube video player" frameborder="0" allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture" allowfullscreen></iframe>
+    </div>
 
   </div>
   <div class="grid-child">
 
+    <div style="text-align: center">
+      <iframe width="672" height="378" src="https://www.youtube.com/embed/wncA_vaIois?start=1345" title="YouTube video player" frameborder="0" allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture" allowfullscreen></iframe>
+    </div>
+
   </div>
-</div> -->
+</div>
 
 ## Support Meerschaum's Development
 <div class="grid-container">
