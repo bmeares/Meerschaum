@@ -29,6 +29,7 @@ plugins:
   # - pdf-export
   - awesome-pages:
       collapse_single_pages: true
+  # - section-index
   # - mkdocstrings
   # - enumerate-headings:
       # toc_depth: 3

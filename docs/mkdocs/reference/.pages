@@ -1,5 +1,6 @@
 title: Reference
 nav:
+  - index.md
   - Pipes: pipes
   - Connectors: connectors.md
   - Stack: stack.md

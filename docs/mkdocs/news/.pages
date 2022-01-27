@@ -1,4 +1,5 @@
 nav:
   - Release Notes: changelog.md
+  - Blog: blog.md
   - To-Do / Wishlist: to-do.md
   - ...
