@@ -1,4 +1,4 @@
-# Acknowledgements
+# 🤗 Acknowledgements
 
 Meerschaum is built with the help of many incredible open source libraries. In the spirit of open source, I've chosen to release the project under the permissive [Apache 2.0 license](https://www.apache.org/licenses/LICENSE-2.0.html).
 
