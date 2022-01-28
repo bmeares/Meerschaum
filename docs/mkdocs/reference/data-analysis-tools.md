@@ -1,9 +1,9 @@
 <link rel="stylesheet" type="text/css" href="/assets/css/asciinema-player.css" />
 <script src="/assets/js/asciinema-player.js"></script>
 
-# Data Analysis Tools
+# 🔧 Data Analysis Tools
 
-## Visualization Stack
+## 📈 Visualization Stack
 
 Meerschaum comes with a [pre-configured data visualization stack](/reference/stack/) so that you can spend your time on analysis rather than configuring servers.
 
@@ -11,7 +11,7 @@ Meerschaum comes with a [pre-configured data visualization stack](/reference/sta
 
 <img src="/assets/screenshots/grafana-dashboard.png" alt="Example Grafana Dashboard" width="85%" style="display: block; margin-left: auto; margin-right: auto;">
 
-## Pandas Integration
+## 🐼 Pandas Integration
 
 If you use [pandas](https://pandas.pydata.org/), Meerschaum lets you tap into your datastreams as DataFrames.
 
@@ -69,7 +69,7 @@ Read a table or query into a Pandas DataFrame with `conn.read()`:
 ```
 
 
-## SQLAlchemy Integration
+## 🧙‍♂️ SQLAlchemy Integration
 
 If you're already using [SQLAlchemy](https://www.sqlalchemy.org/), Meerschaum can fit neatly into your workflow.
 
@@ -104,7 +104,7 @@ datetime.datetime(2021, 6, 6, 12, 0)
 ```
 
 
-## SQL CLI
+## ⌨️ SQL CLI
 
 The `sql` command lets you quickly interact with your databases.
 

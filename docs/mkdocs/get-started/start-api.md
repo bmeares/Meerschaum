@@ -1,4 +1,4 @@
-# Meerschaum Web Console
+# 🖥️ Meerschaum Web Console
 
 You can use Meerschaum from its web interface. From within a `mrsm` shell, type to commands below to see how:
 

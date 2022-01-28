@@ -1,9 +1,9 @@
 <link rel="stylesheet" type="text/css" href="/assets/css/asciinema-player.css" />
 <script src="/assets/js/asciinema-player.js"></script>
 
-# Setup
+# 🛠️ Setup
 
-## Install from [PyPI](https://pypi.org/project/meerschaum/)
+## 🐍 Install from [PyPI](https://pypi.org/project/meerschaum/)
 
 ```bash
 python -m pip install --upgrade meerschaum
@@ -17,7 +17,7 @@ python -m pip install --upgrade meerschaum
     python -m pip install --upgrade meerschaum[full]
     ```
 
-## Choose a database
+## 🗄️ Choose a Database
 
 1. **Pre-configured DB**  
 
@@ -47,7 +47,7 @@ python -m pip install --upgrade meerschaum
     ??? example "Watch an example"
         <asciinema-player src="/assets/casts/bootstrap-connector.cast" size="small" preload="true"></asciinema-player>
 
-## Connect to your instance
+## ⚡ Connect to Your Instance
 
 ![Meerschaum instance prompt](/assets/screenshots/prompt.png){ align=left } Open the Meerschaum shell with `mrsm` or `python -m meerschaum`.
 

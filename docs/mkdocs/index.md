@@ -131,20 +131,17 @@ h1 {
   </div>
 </div>
 
-## Support Meerschaum's Development
 <div class="grid-container">
   <div class="grid-child">
-    <p style="text-align: left">I work on Meerschaum in my free time, so if you enjoy the project and want to support its development, feel free to <a href="https://www.buymeacoffee.com/bmeares">buy me a beer (or coffee)</a>!
+  <h2>Support the Project</h2>
+    <p style="text-align: left">I work on Meerschaum in my free time, so if you enjoy the project and want to support its development, feel free to <a href="https://www.buymeacoffee.com/bmeares">buy me a coffee</a>! You can also support the project on my <a href="https://github.com/sponsors/bmeares">GitHub Sponsors page</a>.
     </p>
     <div class="center">
       <!-- <script type="text/javascript" src="https://cdnjs.buymeacoffee.com/1.0.0/button.prod.min.js" data-name="bmc-button" data-slug="bmeares" data-color="#5F7FFF" data-emoji="🍺"  data-font="Cookie" data-text="Buy me a beer" data-outline-color="#000000" data-font-color="#ffffff" data-coffee-color="#FFDD00" ></script> -->
     </div>
   </div>
   <div class="grid-child">
-    <p>If you're looking to use Meerschaum in your business and would like some help, you can commission me for my consulting services. Reach out on <a href="https://linkedin.com/in/bennettmeares">LinkedIn</a> to get in touch.</p>
-    <div style="display: flex; justify-content: center;">
-      <!-- <div class="badge-base LI-profile-badge" data-locale="en_US" data-size="medium" data-theme="light" data-type="HORIZONTAL" data-vanity="bennettmeares" data-version="v1"><a class="badge-base__link LI-simple-link" href="https://www.linkedin.com/in/bennettmeares?trk=profile-badge">Bennett Meares</a></div> -->
-
-    </div>
+    <h2>Consulting Services</h2>
+    <p>If you're looking to recruit my skills, you can hire my consulting services. Reach out on <a href="https://linkedin.com/in/bennettmeares">LinkedIn</a> to get in touch, or you can commission my help at my <a href="https://github.com/sponsors/bmeares">GitHub Sponsors page</a>.</p>
   </div>
 </div>

@@ -1,11 +1,11 @@
 title: Reference
 nav:
   - index.md
-  - Pipes: pipes
-  - Connectors: connectors.md
-  - Stack: stack.md
-  - Background Jobs: background-jobs.md
-  - Data Analysis Tools: data-analysis-tools.md
+  - "🚰 Pipes": pipes
+  - "🔌 Connectors": connectors.md
+  - "🥞 Stack": stack.md
+  - "👷 Background Jobs": background-jobs.md
+  - "🔧 Data Analysis Tools": data-analysis-tools.md
   - ...
-  - Plugins: plugins
-  - Portable: meerschaum-portable.md
+  - "➕ Plugins": plugins
+  - "💼 Portable": meerschaum-portable.md

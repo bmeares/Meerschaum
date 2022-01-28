@@ -24,6 +24,12 @@ The `apex` plugin connects to Apex Clearing's API so you may extract your transa
 
 [GitHub](https://github.com/bmeares/apex) | [Source](https://api.mrsm.io/plugins/apex)
 
+### `covid`
+
+The `covid` plugin fetches county-level COVID-19 data from various state health departments as well as the New York Times. It depends on other plugins: `US-covid`, `TX-covid`, `GA-covid`, `CA-covid`, and `CO-covid`.
+
+[GitHub](https://github.com/bmeares/covid) | [Source](https://api.mrsm.io/plugins/covid)
+
 ### `noaa`
 
 The `noaa` plugin reads weather station data from the [NOAA Weather API](https://www.weather.gov/documentation/services-web-api).
@@ -45,6 +51,18 @@ The `sense` plugin fetches environment readings from the Raspberry Pi Sense HAT.
 The `color` plugin provides a shortcut to inverting the ANSI and Unicode configuration settings.
 
 [Source](https://api.mrsm.io/plugins/color)
+
+### `syncx`
+
+The plugin `syncx` contains implementations of the experimental syncing methods I describe in my [master's thesis](https://meerschaum.io/files/pdf/thesis.pdf) ([abstract](https://meerschaum.io/files/pdf/abstract.pdf)).
+
+[GitHub](https://github.com/bmeares/syncx) | [Source](https://api.mrsm.io/plugins/syncx)
+
+### `thanks`
+
+The `thanks` plugin generates the [acknowledgments page](/news/acknowledgements/) from PyPI metadata for optional Meerschaum dependencies.
+
+[Source](https://api.mrsm.io/plugins/thanks)
 
 ## API Plugins
 
