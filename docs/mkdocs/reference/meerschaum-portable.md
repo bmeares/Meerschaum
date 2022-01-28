@@ -1,4 +1,4 @@
-# Meerschaum Portable
+# 💼 Meerschaum Portable
 Sometimes, it's not worth the hassle setting up a complete Python environment. If you're using a non-administrative account or just want to test out Meerschaum, Meerschaum Portable might be right for you.
 
 Meerschaum Portable is a self-contained Meerschaum installation, running entirely within one directory. Download and extract the archive, and you can have Meerschaum running in seconds.

@@ -1,13 +1,13 @@
 <link rel="stylesheet" type="text/css" href="/assets/css/asciinema-player.css" />
 <script src="/assets/js/asciinema-player.js"></script>
 
-# Meerschaum Stack
+# 🥞 Meerschaum Stack
 
 The Meerschaum stack is an integrated collection of services designed to help you start visualizing your data as quickly as possible.
 
 The `stack` command wraps [Docker Compose](https://docs.docker.com/compose/) to create a full-stack Meerschaum installation ― services such as a database instance, API server, and pre-configured Grafana instance.
 
-## Requirements
+## 🗒️ Requirements
 
 You need [Docker](https://www.docker.com/get-started) installed to run the stack. To install Docker, follow [this guide](https://docs.docker.com/engine/install/) or do the following:
 
@@ -28,7 +28,7 @@ You need [Docker](https://www.docker.com/get-started) installed to run the stack
     ```
 
 
-## Starting the Stack
+## 🟢 Starting the Stack
 
 Run the following command to bring up a database and Grafana:
 
@@ -50,7 +50,7 @@ mrsm stack up -d db grafana
 
     Open a web browser and navigate to [http://localhost:3000](http://localhost:3000) where you can log into Grafana with username `admin`, password `admin`.
 
-## Stopping the Stack
+## 🛑 Stopping the Stack
 
 If you want to stop all the services in the stack, run the stack command with `down`:
 
@@ -74,7 +74,7 @@ mrsm stack down -v
     docker volume rm mrsm_grafana_storage
     ```
 
-## Editing the Stack
+## 📝 Editing the Stack
 
 Certain parameters like the main database username and password are linked from the [connectors](/reference/connectors/) configuration, which may be accessed with `mrsm edit config`.
 

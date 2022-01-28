@@ -1,5 +1,6 @@
 nav:
-  - Release Notes: changelog.md
-  - Blog: blog.md
-  - To-Do / Wishlist: to-do.md
+  - "📢 Announcements": announcements.md
+  - "🪵 Changelog": changelog.md
+  - "🌠 To-Do / Wish List": to-do.md
+  - "🤗 Acknowledgements": acknowledgements.md
   - ...

@@ -1,0 +1,5 @@
+nav:
+  - index.md
+  - "🥾 Bootstrapping": bootstrapping.md
+  - "📥 Syncing": syncing.md
+  - ...

@@ -17,14 +17,14 @@
   }
 }
 </style>
-# Syncing
+# 📥 Syncing
 
 Meerschaum efficiently syncs immutable time-series data, such as IoT sensor data streams. The syncing process consists of three basic stages, similar to ETL: **fetch**, **filter**, and **insert**.
 
 !!! abstract "Want to read more?"
     I wrote my [master's thesis](https://meerschaum.io/files/pdf/thesis.pdf) on comparing different fetch strategies and came across some intriguing results. [Here are the presentation slides](https://meerschaum.io/files/pdf/slides.pdf) which summarize my findings.
 
-??? example "Watch an example"
+??? example "🎦 Watch an example"
     <asciinema-player src="/assets/casts/sync-pipes.cast" preload="true" rows="37"></asciinema-player>
 
 ## Stages

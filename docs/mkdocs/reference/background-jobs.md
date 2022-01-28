@@ -1,7 +1,7 @@
 <link rel="stylesheet" type="text/css" href="/assets/css/asciinema-player.css" />
 <script src="/assets/js/asciinema-player.js"></script>
 
-# Background Jobs
+# 👷 Background Jobs
 
 Some actions need to run continuously, such as running the API or syncing pipes in a loop. Rather than relying on `systemd` or `cron`, you can use the built-in jobs system.
 

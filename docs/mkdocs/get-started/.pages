@@ -1,6 +1,6 @@
 title: Get Started
 nav:
-  - Setup: index.md
-  - Building a Pipe: bootstrap.md
-  - Web Console: start-api.md
+  - "🛠️ Setup": index.md
+  - "🏗️ Building a Pipe": bootstrap.md
+  - "🖥️ Web Console": start-api.md
   - ...

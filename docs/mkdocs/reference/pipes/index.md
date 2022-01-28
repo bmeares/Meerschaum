@@ -1,12 +1,12 @@
-# Hierarchy
+# 🚰 Pipes
 
 A Meerschaum pipe represents a data stream into a table and the necessary parameters to sync new data.
 
 Pipes are identified by three primary components in a hierarchy:
 
-1. Connector
-2. Metric
-3. Location
+1. 🔌 **Connector** (data source)
+2. 📊 **Metric** (label)
+3. 📍 **Location** (optional tag)
 
 ![Pipes hierarchy](/assets/screenshots/weather_pipes.png)
 
@@ -24,7 +24,7 @@ For example, the screenshot mentioned above may be created by any of these comma
 ```bash
 show pipes -c plugin:noaa
 show pipes -m weather
-show pipes -l clemson atlanta chareleston
+show pipes -l clemson atlanta charleston
 ```
 
 ​

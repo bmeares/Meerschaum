@@ -1,7 +1,7 @@
 <link rel="stylesheet" type="text/css" href="/assets/css/asciinema-player.css" />
 <script src="/assets/js/asciinema-player.js"></script>
 
-# Building a pipe
+# 🏗️ Building a Pipe
 
 Pipes fetch and sync data from [connectors](/reference/connectors/). For this example, we will be using the connector `plugin:noaa` from the [data plugin](/reference/plugins/types-of-plugins/#data-plugins) `noaa`. Type the commands below to bootstrap an example pipe.
 
@@ -37,41 +37,17 @@ See the [bootstrapping reference page](/reference/pipes/bootstrapping/) for furt
 
         > The plugin will ask for weather stations. Enter `KATL` for Atlanta.
 
-4. Sync new data  
+!!! success "Success! Now what?"
 
-    ```bash
-    sync pipes
-    ```
+    Well done, you've built your first pipe! Here are some useful commands to manage your pipe:
 
-5. Sync pipes with the metric `weather`
-
-    ```bash
-    sync pipes -m weather
-    ```
-
-6. Sync continuously
-
-    ```bash
-    sync pipes --loop
-    ```
-
-7. Sync continuously in the background
-
-    ```bash
-    sync pipes --loop -d
-    show jobs
-    ```
-
-8. Monitor the background job
-
-    ```bash
-    show logs
-    ```
-
-9. Delete the background job
-
-    ```bash
-    delete jobs
-    ```
+    | Command                           | Description                                                                                        |
+    |-----------------------------------|----------------------------------------------------------------------------------------------------|
+    | `show pipes`                      | Print the pipes on this instance.                                                                  |
+    | `show data`                       | Print a preview of the contents of your pipes.                                                     |
+    | `sync pipes`                      | Sync new rows into your pipes.                                                                     |
+    | `sync pipes -m weather --loop -d` | Continuously (`--loop`) sync new rows into weather pipes (`-m`), and run in the background (`-d`). |
+    | `show jobs`                       | Print the background jobs (created with `-d`).                                                     |
+    | `stop jobs`                       | Stop the running background jobs.                                                                  |
 
 <asciinema-player src="/assets/casts/bootstrap-noaa.cast" size="small" preload="true"></asciinema-player>

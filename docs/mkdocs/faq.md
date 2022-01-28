@@ -4,7 +4,7 @@ hide:
   - toc
 ---
 
-# Frequently Asked Questions
+# 🤔 Frequently Asked Questions
 
 Below is a list of common questions and issues you may encounter. If you have suggestions, please join the [FAQ Suggestions discussion on the GitHub repository](https://github.com/bmeares/Meerschaum/discussions/46)!
 
