@@ -117,16 +117,16 @@ h1 {
 <div class="grid-container">
   <div class="grid-child">
 
-    <div style="text-align: center">
-      <iframe width="672" height="378" src="https://www.youtube.com/embed/videoseries?list=PLJaQLBuU44n3bNEJd1ZpvaOLh9P-m21mo" title="YouTube video player" frameborder="0" allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture" allowfullscreen></iframe>
-    </div>
+  <div style="text-align: center">
+    <iframe width="672" height="378" src="https://www.youtube.com/embed/iOhPn4RjImQ" title="YouTube video player" frameborder="0" allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture" allowfullscreen></iframe>
+  </div>
 
   </div>
   <div class="grid-child">
 
-    <div style="text-align: center">
-      <iframe width="672" height="378" src="https://www.youtube.com/embed/wncA_vaIois?start=1345" title="YouTube video player" frameborder="0" allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture" allowfullscreen></iframe>
-    </div>
+  <div style="text-align: center">
+    <iframe width="672" height="378" src="https://www.youtube.com/embed/videoseries?list=PLJaQLBuU44n3bNEJd1ZpvaOLh9P-m21mo" title="YouTube video player" frameborder="0" allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture" allowfullscreen></iframe>
+  </div>
 
   </div>
 </div>
