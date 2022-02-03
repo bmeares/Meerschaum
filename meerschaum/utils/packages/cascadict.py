@@ -19,18 +19,6 @@ class CascaDictError(Exception):
 class CascaDict(collections.abc.MutableMapping):
     
     def __init__(self, *args, **kwargs):
-        """ Same as :class:`dict` with one extra keyword.
-        
-        :param ancestor: Reference to CascaDict object which should serve as ancestor. 
-            There are several ways to initialize CascaDict from previous CascaDict::
-            
-                >>> a = CascaDict()
-                >>> #Following initializations are equivalent:
-                >>> b = CascaDict(ancestor=a)
-                >>> c = a.cascade()
-
-                
-        """
         self.final_dict = dict()
         
         #assign ancestor and remove it from kwargs if necessary
