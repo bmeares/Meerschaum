@@ -73,8 +73,18 @@ paths = {
 }
 
 def set_root(root: Union[Path, str]):
-    """
-    Modify the value of `ROOT_DIR_PATH`.
+    """Modify the value of `ROOT_DIR_PATH`.
+
+    Parameters
+    ----------
+    root: Union[Path :
+        
+    str] :
+        
+
+    Returns
+    -------
+
     """
     global paths
     paths['ROOT_DIR_PATH'] = Path(root)

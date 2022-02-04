@@ -17,11 +17,26 @@ def edit_config(
         debug : bool = False,
         **kw : Any
     ) -> SuccessTuple:
-    """
-    Edit the configuration file
+    """Edit the configuration file
 
-    :param params:
+    Parameters
+    ----------
+    params :
         patch to apply. Depreciated / replaced by --config (at least in this case)
+    keys : Optional[List[str]] :
+         (Default value = None)
+    params : Optional[Dict[str :
+        
+    Any]] :
+         (Default value = None)
+    debug : bool :
+         (Default value = False)
+    **kw : Any :
+        
+
+    Returns
+    -------
+
     """
     from meerschaum.config import get_config, config
     from meerschaum.config._read_config import get_keyfile_path
@@ -52,17 +67,33 @@ def write_config(
         debug: bool = False,
         **kw : Any
     ) -> bool:
-    """
-    Write YAML and JSON files to the configuration directory.
+    """Write YAML and JSON files to the configuration directory.
 
-    :param config_dict:
+    Parameters
+    ----------
+    config_dict :
         A dictionary of keys to dictionaries of configuration.
         Each key corresponds to a .yaml or .json config file.
         Writing config to a directory with different keys
         does not affect existing keys in that directory.
-
-    :param directory:
+    directory :
         The directory to which the keys are written.
+    config_dict: Optional[Dict[str :
+        
+    Any]] :
+         (Default value = None)
+    directory: Optional[Union[str :
+        
+    pathlib.Path]] :
+         (Default value = None)
+    debug: bool :
+         (Default value = False)
+    **kw : Any :
+        
+
+    Returns
+    -------
+
     """
     if directory is None:
         from meerschaum.config._paths import CONFIG_DIR_PATH
@@ -140,12 +171,24 @@ def general_write_yaml_config(
         files : Optional[Dict[str, pathlib.Path]] = None,
         debug : bool = False
     ):
-    """
-    Write configuration dictionaries to file paths with optional headers.
-
+    """Write configuration dictionaries to file paths with optional headers.
+    
     files : dict
         Dictionary of paths -> dict or tuple of format (dict, header).
         If item is a tuple, the header will be written at the top of the file.
+
+    Parameters
+    ----------
+    files : Optional[Dict[str :
+        
+    pathlib.Path]] :
+         (Default value = None)
+    debug : bool :
+         (Default value = False)
+
+    Returns
+    -------
+
     """
 
     from meerschaum.utils.debug import dprint
@@ -185,8 +228,26 @@ def general_edit_config(
         default : str = None,
         debug : bool = False
     ):
-    """
-    Edit any config files
+    """Edit any config files
+
+    Parameters
+    ----------
+    action : Optional[List[str]] :
+         (Default value = None)
+    files : Optional[Dict[str :
+        
+    Union[str :
+        
+    pathlib.Path]]] :
+         (Default value = None)
+    default : str :
+         (Default value = None)
+    debug : bool :
+         (Default value = False)
+
+    Returns
+    -------
+
     """
     if default is None:
         raise Exception("Provide a default choice for which file to edit")
@@ -208,9 +269,17 @@ def general_edit_config(
     return True, "Success"
 
 def copy_default_to_config(debug : bool = False):
-    """
-    Copy the default config directory to the main config directory.
+    """Copy the default config directory to the main config directory.
     NOTE: This function is now depreciated in favor of the new patch system.
+
+    Parameters
+    ----------
+    debug : bool :
+         (Default value = False)
+
+    Returns
+    -------
+
     """
     from meerschaum.config._paths import DEFAULT_CONFIG_DIR_PATH, CONFIG_DIR_PATH
     import shutil
@@ -227,8 +296,18 @@ def write_default_config(
         debug : bool = False,
         **kw
     ):
-    """
-    Write the default configuration files.
+    """Write the default configuration files.
+
+    Parameters
+    ----------
+    debug : bool :
+         (Default value = False)
+    **kw :
+        
+
+    Returns
+    -------
+
     """
     import os
     from meerschaum.config._paths import DEFAULT_CONFIG_DIR_PATH

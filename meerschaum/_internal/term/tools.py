@@ -9,8 +9,18 @@ Utility functions regarding the webterm.
 from __future__ import annotations
 
 def is_webterm_running(host: str, port: int) -> int:
-    """
-    Determine whether the webterm service is running on a given host and port.
+    """Determine whether the webterm service is running on a given host and port.
+
+    Parameters
+    ----------
+    host: str :
+        
+    port: int :
+        
+
+    Returns
+    -------
+
     """
     from meerschaum.utils.networking import find_open_ports, is_port_in_use
     from meerschaum.utils.packages import attempt_import

@@ -21,7 +21,30 @@ def fetch(
     """
     Fetch a Pipe's latest data from its connector.
 
-    returns : pd.DataFrame of newest unseen data
+    Parameters
+    ----------
+    begin: Optional[datetime.datetime], default None:
+        If provided, only fetch data newer than or equal to `begin`.
+
+    end: Optional[datetime.datetime], default None:
+        If provided, only fetch data older than or equal to `end`.
+
+    sync_chunks: bool, default False
+        If `True` and the pipe's connector is of type `'sql'`, begin syncing chunks while fetching
+        loads chunks into memory.
+
+    deactivate_plugin_venv: bool, default True
+        If `True` and the pipe's connector is of type `'plugin'`, deactivate the plugin's
+        virtual environment after retrieving the dataframe.
+        Not intended for general use.
+
+    debug: bool, default False
+        Verbosity toggle.
+
+    Returns
+    -------
+    A `pd.DataFrame` of the newest unseen data.
+
     """
     if 'fetch' not in dir(self.connector):
         from meerschaum.utils.warnings import warn

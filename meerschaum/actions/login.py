@@ -10,12 +10,12 @@ from __future__ import annotations
 from meerschaum.utils.typing import SuccessTuple, Optional, List, Any
 
 def login(
-        action : Optional[List[str]] = None,
-        connector_keys : Optional[List[str]] = None,
-        yes : bool = False,
-        noask : bool = False,
-        debug : bool = False,
-        **kw : Any
+        action: Optional[List[str]] = None,
+        connector_keys: Optional[List[str]] = None,
+        yes: bool = False,
+        noask: bool = False,
+        debug: bool = False,
+        **kw: Any
     ) -> SuccessTuple:
     """
     Log into a Meerschaum API instance.
@@ -109,7 +109,7 @@ def login(
 
     return successes > 0, msg
 
-def _complete_login(action : Optional[List[str]] = None, **kw : Any) -> List[str]:
+def _complete_login(action: Optional[List[str]] = None, **kw: Any) -> List[str]:
     from meerschaum.utils.misc import get_connector_labels
     search_term = action[-1] if action else ''
     return get_connector_labels('api', search_term=search_term)

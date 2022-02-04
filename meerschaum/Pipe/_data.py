@@ -11,46 +11,44 @@ from meerschaum.utils.typing import Optional, Dict, Any
 
 def get_data(
         self,
-        begin : Optional[datetime.datetime] = None,
-        end : Optional[datetime.datetime] = None,
-        params : Optional[Dict[str, Any]] = None,
+        begin: Optional[datetime.datetime] = None,
+        end: Optional[datetime.datetime] = None,
+        params: Optional[Dict[str, Any]] = None,
         fresh: bool = False,
-        debug : bool = False,
-        **kw : Any
+        debug: bool = False,
+        **kw: Any
     ) -> Optional[pandas.DataFrame]:
     """
     Get a pipe's data from the instance connector.
 
-    :param begin:
+    Parameters
+    ----------
+    begin: Optional[datetime.datetime], default None
         Lower bound datetime to begin searching for data (inclusive).
         Translates to a `WHERE` clause like `WHERE datetime >= begin`.
         Defaults to `None`.
 
-    :param end:
+    end: Optional[datetime.datetime], default None
         Upper bound datetime to stop searching for data (inclusive).
         Translates to a `WHERE` clause like `WHERE datetime <= end`.
         Defaults to `None`.
 
-    :param params:
+    params: Optional[Dict[str, Any]], default None
         Filter the retrieved data by a dictionary of parameters.
-        E.g. to retrieve data for only certain values of `id`,
-        the `params` dictionary would look like the following:
-        
-        ```
-        >>> params = {
-        ...   'id' : [1, 2, 3],
-        ... }
-        >>> 
-        ```
+        See `meerschaum.connectors.sql.tools.build_where` for more details. 
 
-    :param fresh:
-        If True, skip local cache and directly query the instance connector.
-        Currently has no effect (until caching features are merged into the stable release).
+    fresh: bool, default True
+        If `True`, skip local cache and directly query the instance connector.
         Defaults to `True`.
 
-    :param debug:
+    debug: bool, default False
         Verbosity toggle.
         Defaults to `False`.
+
+    Returns
+    -------
+    A `pd.DataFrame` for the pipe's data corresponding to the provided parameters.
+
     """
     from meerschaum.utils.warnings import warn
     kw.update({'begin': begin, 'end': end, 'params': params,})
@@ -76,8 +74,8 @@ def get_data(
 
 def get_backtrack_data(
         self,
-        backtrack_minutes : int = 0,
-        begin : 'datetime.datetime' = None,
+        backtrack_minutes: int = 0,
+        begin: Optional['datetime.datetime'] = None,
         fresh: bool = False,
         debug : bool = False,
         **kw : Any
@@ -85,31 +83,39 @@ def get_backtrack_data(
     """
     Get the most recent data from the instance connector as a Pandas DataFrame.
 
-    :param backtrack_minutes:
+    Parameters
+    ----------
+    backtrack_minutes: int, default 0
         How many minutes from `begin` to select from.
         Defaults to 0. This may return a few rows due to a rounding quirk.
-
-    :param begin:
-        The starting point from which to search for data.
-        If begin is None (default), use the most recent observed datetime
+    begin: Optional[datetime.datetime], default None
+        The starting point to search for data.
+        If begin is `None` (default), use the most recent observed datetime
         (AKA sync_time).
+        
+        
+    ```
+    E.g. begin = 02:00
 
-        E.g. begin = 02:00
+    Search this region.           Ignore this, even if there's data.
+    /  /  /  /  /  /  /  /  /  |
+    -----|----------|----------|----------|----------|----------|
+    00:00      01:00      02:00      03:00      04:00      05:00
 
-        ```
+    ```
 
-        Search this region.           Ignore this, even if there's data.
-        /  /  /  /  /  /  /  /  /  |
-        -----|----------|----------|----------|----------|----------|
-           00:00      01:00      02:00      03:00      04:00      05:00
+    fresh: bool, default False
+        If `True`, Ignore local cache and pull directly from the instance connector.
+        Only comes into effect if a pipe was created with `cache=True`.
 
-        ```
-
-    :param fresh:
-        Ignore local cache and pull directly from the instance connector.
-
-    :param debug:
+    debug: bool default False
         Verbosity toggle.
+
+    Returns
+    -------
+    A `pd.DataFrame` for the pipe's data corresponding to the provided parameters. Backtrack data
+    is a convenient way to get a pipe's data "backtracked" from the most recent datetime.
+
     """
     from meerschaum.utils.warnings import warn
     kw.update({'backtrack_minutes': backtrack_minutes, 'begin': begin,})
@@ -135,27 +141,35 @@ def get_backtrack_data(
 
 def get_rowcount(
         self,
-        begin : Optional['datetime.datetime'] = None,
-        end : Optional['datetime.datetime'] = None,
-        remote : bool = False,
-        params : Optional[Dict[str, Any]] = None,
-        debug : bool = False
-    ) -> Optional[int]:
+        begin: Optional['datetime.datetime'] = None,
+        end: Optional['datetime.datetime'] = None,
+        remote: bool = False,
+        params: Optional[Dict[str, Any]] = None,
+        debug: bool = False
+    ) -> Union[int, None]:
     """
     Get a Pipe's instance or remote rowcount.
 
-    :param begin:
+    Parameters
+    ----------
+    begin: Optional[datetime.datetime], default None
         Count rows where datetime > begin.
 
-    :param end:
+    end: Optional[datetime.datetime], default None
         Count rows where datetime <= end.
 
-    :param remote:
+    remote: bool, default False
         Count rows from a pipe's remote source.
-        NOTE: This is experimental!
+        **NOTE**: This is experimental!
 
-    :param debug:
+    debug: bool, default False
         Verbosity toggle.
+
+    Returns
+    -------
+    An `int` of the number of rows in the pipe corresponding to the provided parameters.
+    `None` is returned if the pipe does not exist.
+
     """
     from meerschaum.utils.warnings import warn
     connector = self.instance_connector if not remote else self.connector

@@ -17,34 +17,48 @@ def sync_yaml_configs(
         permissions: Optional[int] = None,
         replace_tuples: Optional[List[Tuple[str, str]]] = None,
     ) -> None:
-    """
-    Synchronize sub-configuration with main configuration file.
-
+    """Synchronize sub-configuration with main configuration file.
+    
     NOTE: This function might need refactoring to work better with the new
     `read_config` system.
 
-    :param config_path:
+    Parameters
+    ----------
+    config_path :
         Not sure if this is necessary.
-
-    :param keys:
+    keys :
         The config keys to read via `get_config()`.
-
-    :param sub_path:
+    sub_path :
         The derivative file to write.
-
-    :param substitute:
+    substitute :
         If `True`, parse `MRSM{}` syntax and substitute values.
         See `get_config()` for more information.
         Defaults to `True`.
-
-    :param permissions:
+    permissions :
         If not `None`, set permissions of the derivative file.
         Defaults to `None`.
-
-    :param replace_tuples:
+    replace_tuples :
         If provided, iterate through a list of tuples,
         replacing the old string (index 0) with the new string (index 1).
         Defaults to `None`.
+    config_path: pathlib.Path :
+        
+    keys: List[str] :
+        
+    sub_path: pathlib.Path :
+        
+    substitute: bool :
+         (Default value = True)
+    permissions: Optional[int] :
+         (Default value = None)
+    replace_tuples: Optional[List[Tuple[str :
+        
+    str]]] :
+         (Default value = None)
+
+    Returns
+    -------
+
     """
     import os, sys
     try:
@@ -59,8 +73,16 @@ def sync_yaml_configs(
         return
 
     def _read_config(path):
-        """
-        Read YAML file with header comment
+        """Read YAML file with header comment
+
+        Parameters
+        ----------
+        path :
+            
+
+        Returns
+        -------
+
         """
         header_comment = ""
         with open(path, 'r') as f:

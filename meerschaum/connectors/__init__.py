@@ -62,19 +62,45 @@ attributes = {
 types = dict()
 
 def get_connector(
-        type : str = None,
-        label : str = None,
-        refresh : bool = False,
-        debug : bool = False,
-        **kw : Any
+        type: str = None,
+        label: str = None,
+        refresh: bool = False,
+        debug: bool = False,
+        **kw: Any
     ):
     """
     Return existing connector or create new connection and store for reuse.
-
-    You can create new connectors if enough parameters are provided for the given type and flavor.
-
-    For example, the following parameters would create a new SQLConnector that isn't in the configuration file.
     
+    You can create new connectors if enough parameters are provided for the given type and flavor.
+    
+
+    Parameters
+    ----------
+    type: Optional[str], default None
+        Connector type (sql, api, etc.).
+        Defaults to the type of the configured `instance_connector`.
+
+    label: Optional[str], default None
+        Connector label (e.g. main). Defaults to `'main'`.
+
+    refresh: bool, default False
+        Refresh the Connector instance / construct new object. Defaults to `False`.
+
+    kw: Any
+        Other arguments to pass to the Connector constructor.
+        If the Connector has already been constructed and new arguments are provided,
+        `refresh` is set to `True` and the old Connector is replaced.
+
+    Returns
+    -------
+    A new Meerschaum connector (e.g. `meerschaum.connectors.api.APIConnector`,
+    `meerschaum.connectors.sql.SQLConnector`).
+    
+    Examples
+    --------
+    The following parameters would create a new
+    `meerschaum.connectors.sql.SQLConnector` that isn't in the configuration file.
+
     ```
     >>> conn = get_connector(
     ...     type = 'sql',
@@ -82,22 +108,8 @@ def get_connector(
     ...     flavor = 'sqlite',
     ...     database = '/file/path/to/database.db'
     ... )
-    >>> 
+    >>>
     ```
-
-    :param type:
-        Connector type (sql, api, etc.). Defaults to the type of the configured `instance_connector`.
-    
-    :param label:
-        Connector label (e.g. main). Defaults to `'main'`.
-
-    :param refresh:
-        Refresh the Connector instance / construct new object. Defaults to `False`.
-
-    :param kw:
-        Other arguments to pass to the Connector constructor.
-        If the Connector has already been constructed and new arguments are provided,
-        refresh is set to True and the old Connector is replaced.
 
     """
     from meerschaum.connectors.parse import parse_instance_keys
@@ -206,11 +218,19 @@ def is_connected(keys: str, **kw) -> bool:
     Check if the connector keys correspond to an active connection.
     If the connector has not been created, it will immediately return `False`.
     If the connector exists but cannot communicate with the source, return `False`.
-    NOTE: Only works with instance connectors (`SQLConnectors` and `APIConnectors`).
+    
+    **NOTE:** Only works with instance connectors (`SQLConnectors` and `APIConnectors`).
     Keyword arguments are passed to `meerschaum.utils.misc.retry_connect`.
 
-    :param keys:
-        The keys to the connector.
+    Parameters
+    ----------
+    keys:
+        The keys to the connector (e.g. `'sql:main'`).
+        
+    Returns
+    -------
+    A `bool` corresponding to whether a successful connection may be made.
+
     """
     import warnings
     from meerschaum.utils.warnings import error, warn

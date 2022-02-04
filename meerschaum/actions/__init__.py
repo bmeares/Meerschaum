@@ -60,8 +60,20 @@ def get_shell(
         reload : bool = False,
         debug : bool = False
     ):
-    """
-    Lazy load the Shell
+    """Lazy load the Shell
+
+    Parameters
+    ----------
+    sysargs : List[str] :
+         (Default value = [])
+    reload : bool :
+         (Default value = False)
+    debug : bool :
+         (Default value = False)
+
+    Returns
+    -------
+
     """
     global _shell
     from meerschaum.utils.debug import dprint
@@ -80,7 +92,17 @@ def get_shell(
 
 def get_subactions(action : str) -> Dict[str, Callable[[Any], Any]]:
     """
-    Return a dictionary of an action's subactions.
+
+    Parameters
+    ----------
+    action : str :
+        
+
+    Returns
+    -------
+    type
+        
+
     """
     import importlib, inspect
     subactions = {}
@@ -99,8 +121,16 @@ def get_subactions(action : str) -> Dict[str, Callable[[Any], Any]]:
     return subactions
 
 def get_completer(action : str) -> Optional[Callable[['Shell', str, str, int, int], List[str]]]:
-    """
-    Search for a custom completer function for an action.
+    """Search for a custom completer function for an action.
+
+    Parameters
+    ----------
+    action : str :
+        
+
+    Returns
+    -------
+
     """
     import importlib, inspect
     try:
@@ -117,8 +147,17 @@ def get_completer(action : str) -> Optional[Callable[['Shell', str, str, int, in
 
 def _get_parent_plugin(stacklevel : int = 1) -> Optional[str]:
     """
-    Return the name of the calling plugin.
-    If this function is called from outside a Meerschaum plugin, it will return None.
+
+    Parameters
+    ----------
+    stacklevel : int :
+         (Default value = 1)
+
+    Returns
+    -------
+    type
+        If this function is called from outside a Meerschaum plugin, it will return None.
+
     """
     from meerschaum.config._paths import PLUGINS_RESOURCES_PATH
     import inspect, re
@@ -133,7 +172,7 @@ from meerschaum.plugins import import_plugins, make_action, load_plugins
 plugins = import_plugins()
 #  plugins = meerschaum.plugins.import_plugins()
 ### Instruct pdoc to skip the `meerschaum.actions.plugins` subdirectory.
-__pdoc__ = {'plugins' : False}
+__pdoc__ = {'plugins' : False, 'arguments': False}
 #  make_action = meerschaum.plugins.make_action
 #  meerschaum.plugins.load_plugins()
 load_plugins()

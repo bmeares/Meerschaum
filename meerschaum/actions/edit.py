@@ -10,8 +10,8 @@ from __future__ import annotations
 from meerschaum.utils.typing import List, Any, SuccessTuple, Optional
 
 def edit(
-        action : Optional[List[str]] = None,
-        **kw : Any
+        action: Optional[List[str]] = None,
+        **kw: Any
     ) -> SuccessTuple:
     """
     Edit an existing element.
@@ -25,14 +25,14 @@ def edit(
     return choose_subaction(action, options, **kw)
 
 def _complete_edit(
-        action : Optional[List[str]] = None,
-        **kw : Any
+        action: Optional[List[str]] = None,
+        **kw: Any
     ) -> List[str]:
     """
     Override the default Meerschaum `complete_` function.
     """
     options = {
-        'config' : _complete_edit_config,
+        'config': _complete_edit_config,
     }
 
     if action is None:
@@ -52,21 +52,21 @@ def _complete_edit(
 def _edit_config(action : Optional[List[str]] = None, **kw : Any) -> SuccessTuple:
     """
     Edit Meerschaum configuration files.
-
+    
     Specify a specific configuration key to edit.
     Defaults to editing `meerschaum` configuration (connectors, instance, etc.).
-
+    
     Examples:
         ```
         ### Edit the main 'meerschaum' configuration.
         edit config
-
+    
         ### Edit 'system' configuration.
         edit config system
-
+    
         ### Create a new configuration file called 'myconfig'.
         edit config myconfig
-
+    
         ```
     """
     from meerschaum.config._edit import edit_config
@@ -76,7 +76,7 @@ def _edit_config(action : Optional[List[str]] = None, **kw : Any) -> SuccessTupl
         action.append('meerschaum')
     return edit_config(keys=action, **kw)
 
-def _complete_edit_config(action : Optional[List[str]] = None, **kw : Any) -> List[str]:
+def _complete_edit_config(action: Optional[List[str]] = None, **kw : Any) -> List[str]:
     from meerschaum.config._read_config import get_possible_keys
     keys = get_possible_keys()
     if not action:
@@ -88,20 +88,20 @@ def _complete_edit_config(action : Optional[List[str]] = None, **kw : Any) -> Li
     return possibilities
 
 def _edit_pipes(
-        action : Optional[List[str]] = None,
-        debug : bool = False,
-        **kw : Any
+        action: Optional[List[str]] = None,
+        debug: bool = False,
+        **kw: Any
     ) -> SuccessTuple:
     """
     Open and edit pipes' configuration files.
-
-    If 'definition' is specified, open a definition file (e.g. `.sql` for `sql` pipes).
-
+    
+    If `fetch:definition` is specified, open a definition file (e.g. `.sql` for `sql` pipes).
+    
     Usage:
         ```
         ### Edit all pipes.
         edit pipes
-
+    
         ### Edit a SQL definition for the pipe `sql_main_mymetric`.
         edit pipes definition -c sql:main -m mymetric
         ```
@@ -145,12 +145,12 @@ def _edit_pipes(
     return (True, "Success")
 
 def _edit_users(
-        action : Optional[List[str]] = None,
-        mrsm_instance : Optional[str] = None,
-        yes : bool = False,
-        noask : bool = False,
-        debug : bool = False,
-        **kw : Any
+        action: Optional[List[str]] = None,
+        mrsm_instance: Optional[str] = None,
+        yes: bool = False,
+        noask: bool = False,
+        debug: bool = False,
+        **kw: Any
     ) -> SuccessTuple:
     """
     Edit users' registration information.

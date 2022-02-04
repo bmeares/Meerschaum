@@ -16,17 +16,30 @@ def add_method_to_class(
         method_name : Optional[str] = None,
         keep_self : Optional[bool] = None,
     ) -> Callable[[Any], Any]:
-    """
-    Add function `func` to class `class_def`.
+    """Add function `func` to class `class_def`.
 
-    :param func:
+    Parameters
+    ----------
+    func :
         Function to be added as a method of the class
-
-    :param class_def:
+    class_def :
         Class we are modifying
-
-    :param method_name:
+    method_name :
         New name of the method. None will use func.__name__ (default).
+    func : Callable[[Any] :
+        
+    Any] :
+        
+    class_: 'Class' :
+        
+    method_name : Optional[str] :
+         (Default value = None)
+    keep_self : Optional[bool] :
+         (Default value = None)
+
+    Returns
+    -------
+
     """
     from functools import wraps
 
@@ -52,19 +65,31 @@ def choose_subaction(
         options : Optional[Dict[str, Any]] = None,
         **kw
     ) -> SuccessTuple:
-    """
-    Given a dictionary of options and the standard Meerschaum actions list,
+    """Given a dictionary of options and the standard Meerschaum actions list,
     check if choice is valid and execute chosen function, else show available
     options and return False
 
-    :param action:
+    Parameters
+    ----------
+    action :
         subactions (e.g. `show pipes` -> ['pipes'])
-    
-    :param options:
+    options :
         Available options to execute.
         option (key) -> function (value)
         Functions must accept **kw keyword arguments
         and return a tuple of success bool and message.
+    action : Optional[List[str]] :
+         (Default value = None)
+    options : Optional[Dict[str :
+        
+    Any]] :
+         (Default value = None)
+    **kw :
+        
+
+    Returns
+    -------
+
     """
     from meerschaum.utils.warnings import warn, info
     import inspect
@@ -98,15 +123,31 @@ def choose_subaction(
 def generate_password(
         length : int = 12
     ) -> str:
-    """
-    Generate a secure password of given length.
+    """Generate a secure password of given length.
+
+    Parameters
+    ----------
+    length : int :
+         (Default value = 12)
+
+    Returns
+    -------
+
     """
     import secrets, string
     return ''.join((secrets.choice(string.ascii_letters) for i in range(length)))
 
 def is_int(s : str) -> bool:
-    """
-    Check if string is an int.
+    """Check if string is an int.
+
+    Parameters
+    ----------
+    s : str :
+        
+
+    Returns
+    -------
+
     """
     try:
         float(s)
@@ -116,9 +157,7 @@ def is_int(s : str) -> bool:
     return float(s).is_integer()
 
 def get_options_functions():
-    """
-    Get options functions from parent module
-    """
+    """Get options functions from parent module"""
     import inspect
     parent_globals = inspect.stack()[1][0].f_globals
     parent_package = parent_globals['__name__']
@@ -127,10 +166,17 @@ def get_options_functions():
 def string_to_dict(
         params_string : str
     ) -> Dict[str, Any]:
-    """
-    Parse a string into a dictionary
-
+    """Parse a string into a dictionary
+    
     If the string begins with '{', parse as JSON. Else use simple parsing
+
+    Parameters
+    ----------
+    params_string : str :
+        
+
+    Returns
+    -------
 
     """
     if params_string == "":
@@ -182,10 +228,26 @@ def parse_config_substitution(
         end_key : str = '}',
         delimeter : str = ':'
     ):
-    """
-    Parse Meerschaum substitution syntax
+    """Parse Meerschaum substitution syntax
     E.g. MRSM{value1:value2} => ['value1', 'value2']
     NOTE: Not currently used. See `search_and_substitute_config` in `meerschaum.config._read_yaml`.
+
+    Parameters
+    ----------
+    value : str :
+        
+    leading_key : str :
+         (Default value = 'MRSM')
+    begin_key : str :
+         (Default value = '{')
+    end_key : str :
+         (Default value = '}')
+    delimeter : str :
+         (Default value = ':')
+
+    Returns
+    -------
+
     """
     if not value.beginswith(leading_key):
         return value
@@ -197,10 +259,24 @@ def edit_file(
         default_editor : str = 'pyvim',
         debug : bool = False
     ) -> bool:
-    """
-    Open a file for editing.
-
+    """Open a file for editing.
+    
     Attempt to launch the user's defined $EDITOR, otherwise use pyvim.
+
+    Parameters
+    ----------
+    path : Union[pathlib.Path :
+        
+    str] :
+        
+    default_editor : str :
+         (Default value = 'pyvim')
+    debug : bool :
+         (Default value = False)
+
+    Returns
+    -------
+
     """
     import os
     from subprocess import call
@@ -224,8 +300,22 @@ def is_pipe_registered(
         pipes : dict,
         debug : bool = False
     ):
-    """
-    Check if a Pipe or MetaPipe is inside the pipes dictionary.
+    """Check if a Pipe or MetaPipe is inside the pipes dictionary.
+
+    Parameters
+    ----------
+    pipe : Union['meerschaum.Pipe' :
+        
+    'meerschaum.Pipe.MetaPipe'] :
+        
+    pipes : dict :
+        
+    debug : bool :
+         (Default value = False)
+
+    Returns
+    -------
+
     """
     from meerschaum.utils.debug import dprint
     ck, mk, lk = pipe.connector_keys, pipe.metric_key, pipe.location_key
@@ -235,11 +325,21 @@ def is_pipe_registered(
     return ck in pipes and mk in pipes[ck] and lk in pipes[ck][mk]
 
 def _get_subaction_names(action : str, globs : dict = None) -> List[str]:
-    """
-    NOTE: Don't use this function. You should use `meerschaum.actions.get_subactions()` instead.
+    """NOTE: Don't use this function. You should use `meerschaum.actions.get_subactions()` instead.
     This only exists for internal use.
 
-    Return a list of function pointers to all subactions for a given action.
+    Parameters
+    ----------
+    action : str :
+        
+    globs : dict :
+         (Default value = None)
+
+    Returns
+    -------
+    type
+        
+
     """
     if globs is None:
         import importlib
@@ -252,9 +352,21 @@ def _get_subaction_names(action : str, globs : dict = None) -> List[str]:
     return subactions
 
 def choices_docstring(action : str, globs : Optional[Dict[str, Any]] = None) -> str:
-    """
-    Append the an action's available options to the module docstring.
+    """Append the an action's available options to the module docstring.
     This function is to be placed at the bottom of each action module.
+
+    Parameters
+    ----------
+    action : str :
+        
+    globs : Optional[Dict[str :
+        
+    Any]] :
+         (Default value = None)
+
+    Returns
+    -------
+
     """
     options_str = f"\n    Options:\n        `{action} "
     subactions = _get_subaction_names(action, globs=globs)
@@ -282,8 +394,34 @@ def print_options(
         adjust_cols: bool = True,
         **kw
     ) -> None:
-    """
-    Show available options from an iterable
+    """Show available options from an iterable
+
+    Parameters
+    ----------
+    options: Optional[Dict[str :
+        
+    Any]] :
+         (Default value = None)
+    nopretty: bool :
+         (Default value = False)
+    no_rich: bool :
+         (Default value = False)
+    name: str :
+         (Default value = 'options')
+    header: Optional[str] :
+         (Default value = None)
+    actions: bool :
+         (Default value = False)
+    num_cols: Optional[int] :
+         (Default value = None)
+    adjust_cols: bool :
+         (Default value = True)
+    **kw :
+        
+
+    Returns
+    -------
+
     """
     import os
     from meerschaum.utils.packages import import_rich
@@ -366,8 +504,19 @@ def print_options(
 
 def get_cols_lines(default_cols: int = 100, default_lines: int = 120) -> Tuple[int, int]:
     """
-    Return a tuple of the current terminal dimensions.
-    If they cannot be determined, return the default values (100 columns and 120 lines).
+
+    Parameters
+    ----------
+    default_cols: int :
+         (Default value = 100)
+    default_lines: int :
+         (Default value = 120)
+
+    Returns
+    -------
+    type
+        If they cannot be determined, return the default values (100 columns and 120 lines).
+
     """
     import os
     try:
@@ -382,19 +531,39 @@ def get_cols_lines(default_cols: int = 100, default_lines: int = 120) -> Tuple[i
 
 
 def iterate_chunks(iterable, chunksize : int, fillvalue : Optional[Any] = None):
-    """
-    Iterate over a list in chunks.
+    """Iterate over a list in chunks.
     Found here:
         https://stackoverflow.com/questions/
         434287/what-is-the-most-pythonic-way-to-iterate-over-a-list-in-chunks
+
+    Parameters
+    ----------
+    iterable :
+        
+    chunksize : int :
+        
+    fillvalue : Optional[Any] :
+         (Default value = None)
+
+    Returns
+    -------
+
     """
     from itertools import zip_longest
     args = [iter(iterable)] * chunksize
     return zip_longest(*args, fillvalue=fillvalue)
 
 def sorted_dict(d : dict) -> dict:
-    """
-    Sort a dictionary's keys and values and return a new dictionary
+    """Sort a dictionary's keys and values and return a new dictionary
+
+    Parameters
+    ----------
+    d : dict :
+        
+
+    Returns
+    -------
+
     """
     try:
         return {key: value for key, value in sorted(d.items(), key=lambda item: item[1])}
@@ -402,8 +571,16 @@ def sorted_dict(d : dict) -> dict:
         return d
 
 def flatten_pipes_dict(pipes_dict: PipesDict) -> List[Pipe]:
-    """
-    Convert the standard pipes dictionary into a list
+    """Convert the standard pipes dictionary into a list
+
+    Parameters
+    ----------
+    pipes_dict: PipesDict :
+        
+
+    Returns
+    -------
+
     """
     pipes_list = []
     for ck in pipes_dict.values():
@@ -416,12 +593,24 @@ def round_time(
         date_delta: 'datetime.timedelta' = None,
         to: 'str' = 'down'
     ) -> 'datetime.datetime':
-    """
-    Round a datetime object to a multiple of a timedelta
+    """Round a datetime object to a multiple of a timedelta
     dt : datetime.datetime object, default now.
     dateDelta : timedelta object, we round to a multiple of this, default 1 minute.
     Function found from:
     http://stackoverflow.com/questions/3463930/how-to-round-the-minute-of-a-datetime-object-python
+
+    Parameters
+    ----------
+    dt: 'datetime.datetime' :
+         (Default value = None)
+    date_delta: 'datetime.timedelta' :
+         (Default value = None)
+    to: 'str' :
+         (Default value = 'down')
+
+    Returns
+    -------
+
     """
     import datetime
     if date_delta is None:
@@ -448,8 +637,18 @@ def parse_df_datetimes(
         df : 'pd.DataFrame',
         debug : bool = False
     ) -> 'pd.DataFrame':
-    """
-    Parse a pandas DataFrame for datetime columns and cast as datetimes
+    """Parse a pandas DataFrame for datetime columns and cast as datetimes
+
+    Parameters
+    ----------
+    df : 'pd.DataFrame' :
+        
+    debug : bool :
+         (Default value = False)
+
+    Returns
+    -------
+
     """
     from meerschaum.utils.packages import import_pandas
     ### import pandas (or pandas replacement)
@@ -495,16 +694,30 @@ def timed_input(
         icon : bool = False,
         **kw
     ) -> Optional[str]:
-    """
-    Accept user input only for a brief period of time.
+    """Accept user input only for a brief period of time.
+
+    Parameters
+    ----------
+    seconds : int :
+         (Default value = 10)
+    timeout_message : str :
+         (Default value = "")
+    prompt : str :
+         (Default value = "")
+    icon : bool :
+         (Default value = False)
+    **kw :
+        
+
+    Returns
+    -------
+
     """
     from meerschaum.utils.prompt import prompt as _prompt
     import signal
 
     class TimeoutExpired(Exception):
-        """
-        Raise an exception when the timer runs out.
-        """
+        """ """
 
     def alarm_handler(signum, frame):
         raise TimeoutExpired
@@ -534,8 +747,32 @@ def retry_connect(
         debug: bool = False,
         enforce_chaining: bool = True,
     ):
-    """
-    Keep trying to connect to the database.
+    """Keep trying to connect to the database.
+
+    Parameters
+    ----------
+    connector : Union[meerschaum.connectors.sql.SQLConnector :
+        
+    meerschaum.connectors.api.APIConnector :
+        
+    None] :
+         (Default value = None)
+    max_retries: int :
+         (Default value = 40)
+    retry_wait: int :
+         (Default value = 3)
+    workers: int :
+         (Default value = 1)
+    warn: bool :
+         (Default value = True)
+    debug: bool :
+         (Default value = False)
+    enforce_chaining: bool :
+         (Default value = True)
+
+    Returns
+    -------
+
     """
     from meerschaum.utils.warnings import warn as _warn, error, info
     from meerschaum.utils.debug import dprint
@@ -627,8 +864,20 @@ def df_from_literal(
         literal : str = None,
         debug : bool = False
     ) -> 'pd.DataFrame':
-    """
-    Parse a literal (if nessary), and use a Pipe's column names to generate a DataFrame.
+    """Parse a literal (if nessary), and use a Pipe's column names to generate a DataFrame.
+
+    Parameters
+    ----------
+    pipe : Optional['meerschaum.Pipe'] :
+         (Default value = None)
+    literal : str :
+         (Default value = None)
+    debug : bool :
+         (Default value = False)
+
+    Returns
+    -------
+
     """
     from meerschaum.utils.packages import import_pandas
     from meerschaum.utils.warnings import error, warn
@@ -668,23 +917,39 @@ def filter_unseen_df(
         custom_nan : str = 'mrsm_NaN',
         debug : bool = False,
     ) -> 'pd.DataFrame':
-    """
-    Left join two DataFrames to find the newest unseen data.
-
+    """Left join two DataFrames to find the newest unseen data.
+    
     I have scoured the web for the best way to do this.
     My intuition was to join on datetime and id, but the code below accounts for values as well
     without needing to define expicit columns or indices.
-
+    
     The logic below is based off this StackOverflow question, with an index reset thrown on top:
     https://stackoverflow.com/questions/
     48647534/python-pandas-find-difference-between-two-data-frames#48647840
-
+    
     Also, NaN apparently does not equal NaN, so I am temporarily replacing instances of NaN with a
     custom string, per this StackOverflow question:
     https://stackoverflow.com/questions/31833635/pandas-checking-for-nan-not-working-using-isin
-
+    
     Lastly, use the old DataFrame's columns for the new DataFrame,
     because order matters when checking equality.
+
+    Parameters
+    ----------
+    old_df : 'pd.DataFrame' :
+        
+    new_df : 'pd.DataFrame' :
+        
+    dtypes : dict :
+         (Default value = None)
+    custom_nan : str :
+         (Default value = 'mrsm_NaN')
+    debug : bool :
+         (Default value = False)
+
+    Returns
+    -------
+
     """
     if old_df is None:
         return new_df
@@ -712,8 +977,20 @@ def filter_unseen_df(
     ].reset_index(drop=True)
 
 def change_dict(d : Dict[Any, Any], func : 'function') -> None:
-    """
-    Originally was local, moving to global for multiprocessing debugging
+    """Originally was local, moving to global for multiprocessing debugging
+
+    Parameters
+    ----------
+    d : Dict[Any :
+        
+    Any] :
+        
+    func : 'function' :
+        
+
+    Returns
+    -------
+
     """
     for k, v in d.items():
         if isinstance(v, dict):
@@ -727,8 +1004,22 @@ def replace_pipes_in_dict(
         debug : bool = False,
         **kw
     ) -> PipesDict:
-    """
-    Replace the Pipes in a Pipes dict with the result of another function
+    """Replace the Pipes in a Pipes dict with the result of another function
+
+    Parameters
+    ----------
+    pipes : Optional[PipesDict] :
+         (Default value = None)
+    func : 'function' :
+         (Default value = str)
+    debug : bool :
+         (Default value = False)
+    **kw :
+        
+
+    Returns
+    -------
+
     """
     if pipes is None:
         from meerschaum import get_pipes
@@ -739,9 +1030,7 @@ def replace_pipes_in_dict(
     return result
 
 def enforce_gevent_monkey_patch():
-    """
-    Check if gevent monkey patching is enabled, and if not, then apply patching
-    """
+    """Check if gevent monkey patching is enabled, and if not, then apply patching"""
     from meerschaum.utils.packages import attempt_import
     import socket
     gevent, gevent_socket, gevent_monkey = attempt_import(
@@ -751,16 +1040,34 @@ def enforce_gevent_monkey_patch():
         gevent_monkey.patch_all()
 
 def is_valid_email(email : str) -> bool:
-    """
-    Check whether a string is a valid email
+    """Check whether a string is a valid email
+
+    Parameters
+    ----------
+    email : str :
+        
+
+    Returns
+    -------
+
     """
     import re
     regex = '^[a-z0-9]+[\._]?[a-z0-9]+[@]\w+[.]\w{2,3}$'
     return re.search(regex, email)
 
 def string_width(string: str, widest: bool = True) -> int:
-    """
-    Calculate the width of a string, either by its widest or last line.
+    """Calculate the width of a string, either by its widest or last line.
+
+    Parameters
+    ----------
+    string: str :
+        
+    widest: bool :
+         (Default value = True)
+
+    Returns
+    -------
+
     """
     def _widest():
         words = string.split('\n')
@@ -791,8 +1098,28 @@ def _pyinstaller_traverse_dir(
         ignore_patterns : Iterable[str] = ('.pyc', 'dist', 'build', '.git', '.log'),
         include_dotfiles : bool = False
     ) -> list:
-    """
-    Recursively traverse a directory and return a list of its contents.
+    """Recursively traverse a directory and return a list of its contents.
+
+    Parameters
+    ----------
+    directory : str :
+        
+    ignore_patterns : Iterable[str] :
+         (Default value = ('.pyc')
+    'dist' :
+        
+    'build' :
+        
+    '.git' :
+        
+    '.log') :
+        
+    include_dotfiles : bool :
+         (Default value = False)
+
+    Returns
+    -------
+
     """
     import os, pathlib
     paths = []
@@ -830,8 +1157,16 @@ def _pyinstaller_traverse_dir(
     return paths
 
 def replace_password(d : dict) -> dict:
-    """
-    Recursively replace passwords in a dictionary.
+    """Recursively replace passwords in a dictionary.
+
+    Parameters
+    ----------
+    d : dict :
+        
+
+    Returns
+    -------
+
     """
     _d = d.copy()
     for k, v in d.items():
@@ -845,11 +1180,22 @@ def filter_keywords(
         func: Callable[[Any], Any],
         **kw: Any
     ) -> Mapping[str, Any]:
-    """
-    Filter out unsupported keywords.
+    """Filter out unsupported keywords.
 
-    :param func:
+    Parameters
+    ----------
+    func :
         The function to inspect.
+    func: Callable[[Any] :
+        
+    Any] :
+        
+    **kw: Any :
+        
+
+    Returns
+    -------
+
     """
     import inspect
     func_params = inspect.signature(func).parameters
@@ -864,9 +1210,17 @@ def filter_keywords(
     return func_kw
 
 def dict_from_od(od : collections.OrderedDict) -> Dict[Any, Any]:
-    """
-    Convert an ordered dict to a dict.
+    """Convert an ordered dict to a dict.
     Does not mutate the original OrderedDict.
+
+    Parameters
+    ----------
+    od : collections.OrderedDict :
+        
+
+    Returns
+    -------
+
     """
     from collections import OrderedDict
     _d = dict(od)
@@ -878,8 +1232,16 @@ def dict_from_od(od : collections.OrderedDict) -> Dict[Any, Any]:
     return _d
 
 def remove_ansi(s : str) -> str:
-    """
-    Remove ANSI escape characters from a string.
+    """Remove ANSI escape characters from a string.
+
+    Parameters
+    ----------
+    s : str :
+        
+
+    Returns
+    -------
+
     """
     import re
     return re.compile(r'\x1B(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~])').sub('', s)
@@ -889,8 +1251,20 @@ def get_connector_labels(
         search_term: str = '',
         ignore_exact_match = True,
     ) -> List[str]:
-    """
-    Read connector labels from config.
+    """Read connector labels from config.
+
+    Parameters
+    ----------
+    *types: str :
+        
+    search_term: str :
+         (Default value = '')
+    ignore_exact_match :
+         (Default value = True)
+
+    Returns
+    -------
+
     """
     from meerschaum.config import get_config
     connectors = get_config('meerschaum', 'connectors')
@@ -918,8 +1292,16 @@ def get_connector_labels(
 
 
 def json_serialize_datetime(dt: datetime.datetime) -> Optional[str]:
-    """
-    Serialize a datetime.datetime object into JSON (ISO format string).
+    """Serialize a datetime.datetime object into JSON (ISO format string).
+
+    Parameters
+    ----------
+    dt: datetime.datetime :
+        
+
+    Returns
+    -------
+
     """
     import datetime
 
@@ -935,8 +1317,26 @@ def wget(
         debug : bool = False,
         **kw : Any
     ) -> pathlib.Path:
-    """
-    Mimic wget with requests.
+    """Mimic wget with requests.
+
+    Parameters
+    ----------
+    url : str :
+        
+    dest : Optional[Union[str :
+        
+    pathlib.Path]] :
+         (Default value = None)
+    color : bool :
+         (Default value = True)
+    debug : bool :
+         (Default value = False)
+    **kw : Any :
+        
+
+    Returns
+    -------
+
     """
     from meerschaum.utils.warnings import warn, error
     from meerschaum.utils.debug import dprint
@@ -984,10 +1384,18 @@ def wget(
     return dest
 
 def async_wrap(func):
-    """
-    Run a synchronous function as async.
+    """Run a synchronous function as async.
     Found at
     https://dev.to/0xbf/turn-sync-function-to-async-python-tips-58nn
+
+    Parameters
+    ----------
+    func :
+        
+
+    Returns
+    -------
+
     """
     import asyncio
     from functools import wraps, partial
@@ -1017,37 +1425,56 @@ def items_str(
         spaces : bool = True,
         space_str = ' ',
     ) -> 'str':
-    """
-    Return a formatted string if list items separated by commas.
+    """Return a formatted string if list items separated by commas.
 
-    :param quotes:
+    Parameters
+    ----------
+    quotes :
         If `True`, wrap items in quotes.
         Defaults to `True`.
-
-    :param quote_str:
+    quote_str :
         If `quotes` is `True`, prepend and append each item with this string.
         Defaults to "'" (single quote).
-
-    :param and_:
+    and_ :
         If `True`, include the word 'and' before the final item in the list.
         Defaults to `True`.
-
-    :param and_str:
-        If `and_` is True, insert this string where 'and' normally would in and English list. 
+    and_str :
+        If `and_` is True, insert this string where 'and' normally would in and English list.
         Defaults to 'and'.
-
-    :param oxford_comma:
+    oxford_comma :
         If `True`, include the Oxford Comma (comma before the final 'and').
         Only applies when `and_` is `True`.
         Defaults to `True`.
-
-    :param spaces:
+    spaces :
         If `True`, separate items with `space_str`
         Defaults to `True`.
-
-    :param space_str:
+    space_str :
         If `spaces` is `True`, separate items with this string.
         Defaults to ' '.
+    items : List[Any] :
+        
+    quotes : bool :
+         (Default value = True)
+    quote_str : str :
+         (Default value = "'")
+    commas : bool :
+         (Default value = True)
+    comma_str : str :
+         (Default value = ')
+    ' :
+        
+    and_ : bool :
+         (Default value = True)
+    and_str : str :
+         (Default value = 'and')
+    oxford_comma : bool :
+         (Default value = True)
+    spaces : bool :
+         (Default value = True)
+
+    Returns
+    -------
+
     """
     if not items:
         return ''
@@ -1072,9 +1499,7 @@ def items_str(
 
 
 def is_docker_available():
-    """
-    Check if we can connect to the Docker engine.
-    """
+    """Check if we can connect to the Docker engine."""
     import subprocess
     try:
         has_docker = subprocess.call(
@@ -1086,9 +1511,19 @@ def is_docker_available():
 
 
 def get_last_n_lines(file_name: str, N: int):
-    """
-    Found at this page:
+    """Found at this page:
     https://thispointer.com/python-get-last-n-lines-of-a-text-file-like-tail-command/
+
+    Parameters
+    ----------
+    file_name: str :
+        
+    N: int :
+        
+
+    Returns
+    -------
+
     """
     import os
     # Create an empty list to keep the track of last N lines
@@ -1129,13 +1564,25 @@ def get_last_n_lines(file_name: str, N: int):
 
 
 def tail(f, n, offset=None):
-    """
-    Found here:
+    """Found here:
     https://stackoverflow.com/a/692616/9699829
-
+    
     Reads n lines from f with an offset of offset lines.  The return
     value is a tuple in the form ``(lines, has_more)`` where `has_more` is
     an indicator that is `True` if there are more lines in the file.
+
+    Parameters
+    ----------
+    f :
+        
+    n :
+        
+    offset :
+         (Default value = None)
+
+    Returns
+    -------
+
     """
     avg_line_length = 74
     to_read = n + (offset or 0)

@@ -64,21 +64,22 @@ from meerschaum.utils.typing import Optional, Dict, Any, Union, InstanceConnecto
 class Pipe:
     """
     Access Meerschaum pipes via Pipe objects.
-
+    
     Pipes are identified by the following:
-        1. Connector keys (e.g. `sql:main`)
-        2. Metric key (e.g. `weather`)
-        3. Location (optional; e.g. `None`)
 
+    1. Connector keys (e.g. `'sql:main'`)
+    2. Metric key (e.g. `'weather'`)
+    3. Location (optional; e.g. `None`)
+    
     A pipe's connector keys correspond to a data source, and when the pipe is synced,
     its `fetch` definition is evaluated and executed to produce new data.
-
+    
     Alternatively, new data may be directly synced via `pipe.sync()`:
-
+    
     ```
     >>> from meerschaum import Pipe
     >>> pipe = Pipe('csv', 'weather')
-    >>> 
+    >>>
     >>> import pandas as pd
     >>> df = pd.read_csv('weather.csv')
     >>> pipe.sync(df)
@@ -120,35 +121,36 @@ class Pipe:
         debug: bool = False
     ):
         """
-        :param connector_keys:
-            Keys for the pipe's source connector.
-            E.g. 'sql:main'
+        Parameters
+        ----------
 
-        :param metric_key:
-            Label for the pipe's contents.
-            E.g. 'weather'
+        connector_keys: str
+            Keys for the pipe's source connector, e.g. `'sql:main'`.
 
-        :param location_key:
-            Label for the pipe's location.
-            Defaults to None.
+        metric_key: str
+            Label for the pipe's contents, e.g. `'weather'`.
 
-        :param parameters:
+        location_key: str, default None
+            Label for the pipe's location. Defaults to `None`.
+
+        parameters: Optional[Dict[str, Any]], default None
             Optionally set a pipe's parameters from the constructor,
             e.g. columns and other attributes.
-            Defaults to None.
+            Defaults to `None`.
 
-        :param columns:
+        columns: Optional[Dict[str, str]], default None
             Subset of parameters for ease of use.
-            Defaults to None.
+            If `parameters` is provided, `columns` has not effect.
+            Defaults to `None`.
 
-        :param mrsm_instance:
-            Connector keys for the Meerschaum instance where the pipe resides.
-            Defaults to the preconfigured default instance.
+        mrsm_instance: Optional[Union[str, InstanceConnector]], default None
+            Connector for the Meerschaum instance where the pipe resides.
+            Defaults to the preconfigured default instance (`'sql:main'`).
 
-        :param instance:
+        instance: Optional[Union[str, InstanceConnector]], default None
             Alias for `mrsm_instance`. If `mrsm_instance` is supplied, this value is ignored.
 
-        :param cache:
+        cache: bool, default False
             If `True`, cache fetched data into a local database file.
             Experimental features must be enabled.
             You can enable experimental caching under `system:experimental:cache`.
@@ -186,9 +188,7 @@ class Pipe:
 
     @property
     def meta(self):
-        """
-        Simulate the MetaPipe model without importing FastAPI.
-        """
+        """Simulate the MetaPipe model without importing FastAPI."""
         refresh = False
         if '_meta' not in self.__dict__:
             refresh = True
@@ -209,9 +209,11 @@ class Pipe:
         return self._meta
 
     @property
-    def instance_connector(self):
+    def instance_connector(self) -> Union[InstanceConnector, None]:
         """
-        Return the connector for the instance on which the pipe resides.
+        The connector to where this pipe resides.
+        May either be of type `'sql'` (`meerschaum.connectors.sql.SQLConnector` or of type `'api'`
+        (`meerschaum.connectors.api.APIConnector`).
         """
         if '_instance_connector' not in self.__dict__:
             from meerschaum.connectors.parse import parse_instance_keys
@@ -223,9 +225,10 @@ class Pipe:
         return self._instance_connector
 
     @property
-    def connector(self):
+    def connector(self) -> Union[meerschaum.connectors.Connector, None]:
         """
-        Return the pipe's data source connector.
+        The connector to the data source.
+        May be of type `'sql'`, `'api`', `'mqtt'`, or `'plugin'`.
         """
         if '_connector' not in self.__dict__:
             from meerschaum.connectors.parse import parse_instance_keys
@@ -237,9 +240,10 @@ class Pipe:
         return self._connector
 
     @property
-    def cache_connector(self) -> Union['meerschaum.connectors.sql.SQLConnector', None]:
+    def cache_connector(self) -> Union[meerschaum.connectors.sql.SQLConnector, None]:
         """
-        Return the pipe's local cache connector.
+        If the pipe was created with `cache=True`, return the connector to the pipe's
+        SQLite database for caching.
         """
         if not self._cache:
             return None
@@ -257,9 +261,10 @@ class Pipe:
         return self._cache_connector
 
     @property
-    def cache_pipe(self) -> Union['meerschaum.Pipe', None]:
+    def cache_pipe(self) -> Union['meerschaum.Pipe.Pipe', None]:
         """
-        Return the pipe's cache sub-pipe.
+        If the pipe was created with `cache=True`, return another `meerschaum.Pipe.Pipe` used to
+        manage the local data.
         """
         if self.cache_connector is None:
             return None
@@ -292,15 +297,16 @@ class Pipe:
         return self._cache_pipe
 
     @property
-    def sync_time(self):
+    def sync_time(self) -> Union[datetime.datetime, None]:
         """
         Convenience function to get the pipe's latest datetime.
+        Use `meerschaum.Pipe.Pipe.get_sync_time()` instead.
         """
         return self.get_sync_time()
 
     def __str__(self):
         """
-        The Pipe's SQL table name. Converts the ':' in the connector_keys to an '_'.
+        The Pipe's SQL table name. Converts the `':'` in the `connector_keys` to an `'_'`.
         """
         name = f"{self.connector_keys.replace(':', '_')}_{self.metric_key}"
         if self.location_key is not None:

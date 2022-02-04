@@ -66,9 +66,7 @@ def get_terminal_window(**kw):
 
 
 def _open_webterm():
-    """
-    Foo bar
-    """
+    """Foo bar"""
 
 def show_test_window(button):
     from meerschaum.gui import get_app

@@ -35,8 +35,34 @@ def import_module(
         debug: bool = False,
         deactivate: bool = True,
     ) -> Union['ModuleType', None]:
-    """
-    Manually import a module from a virtual environment (or the base environment).
+    """Manually import a module from a virtual environment (or the base environment).
+
+    Parameters
+    ----------
+    name: str :
+        
+    venv: Optional[str] :
+         (Default value = None)
+    check_update: bool :
+         (Default value = True)
+    check_pypi: bool :
+         (Default value = False)
+    install: bool :
+         (Default value = True)
+    split: bool :
+         (Default value = True)
+    warn: bool :
+         (Default value = True)
+    color: bool :
+         (Default value = True)
+    debug: bool :
+         (Default value = False)
+    deactivate: bool :
+         (Default value = True)
+
+    Returns
+    -------
+
     """
     if venv is None:
         try:
@@ -164,30 +190,43 @@ def determine_version(
         warn: bool = False,
         debug: bool = False,
     ) -> Union[str, None]:
-    """
-    Determine a module's `__version__` string from its filepath.
+    """Determine a module's `__version__` string from its filepath.
     
     First it searches for pip metadata, then it attempts to import the module in a subprocess.
 
-    :param path:
+    Parameters
+    ----------
+    path :
         The file path of the module.
-
-    :param name:
+    name :
         The name of the module. If ommitted, it will be determined from the file path.
         Defaults to `None`.
-
-    :param venv:
+    venv :
         The virtual environment of the Python interpreter to use if importing is necessary.
         Defaults to `None`.
-
-    :param search_for_metadata:
+    search_for_metadata :
         If `True`, search the pip site_packages directory (assumed to be the parent)
         for the corresponding dist-info directory.
         Defaults to `True`.
-
-    :param warn:
+    warn :
         If `True`, raise a warning if the module fails to import in the subprocess.
         Defaults to `False`.
+    path: pathlib.Path :
+        
+    name: Optional[str] :
+         (Default value = None)
+    venv: Optional[str] :
+         (Default value = None)
+    search_for_metadata: bool :
+         (Default value = True)
+    warn: bool :
+         (Default value = False)
+    debug: bool :
+         (Default value = False)
+
+    Returns
+    -------
+
     """
     import re
     if debug:
@@ -250,27 +289,42 @@ def need_update(
         color: bool = True,
         debug: bool = False,
     ) -> bool:
-    """
-    Check if a Meerschaum dependency needs an update.
+    """Check if a Meerschaum dependency needs an update.
     Returns a bool for whether or not a package needs to be updated.
 
-    :param package:
+    Parameters
+    ----------
+    package :
         The module of the package to be updated.
-
-    :param check_pypi:
+    check_pypi :
         If `True`, check pypi.org for updates.
         Defaults to `False`.
-
-    :param split:
+    split :
         If `True`, split the module's name on periods to detrive the root name.
         DEfaults to `True`.
-
-    :param color:
+    color :
         If `True`, format debug output.
         Defaults to `True`.
-
-    :param debug:
+    debug :
         Verbosity toggle.
+    package: 'ModuleType' :
+        
+    name: Optional[str] :
+         (Default value = None)
+    version: Optional[str] :
+         (Default value = None)
+    check_pypi: bool :
+         (Default value = False)
+    split: bool :
+         (Default value = True)
+    color: bool :
+         (Default value = True)
+    debug: bool :
+         (Default value = False)
+
+    Returns
+    -------
+
     """
     if debug:
         from meerschaum.utils.debug import dprint
@@ -382,8 +436,20 @@ def is_venv_active(
         color : bool = True,
         debug: bool = False
     ) -> bool:
-    """
-    Check if a virtual environment is active
+    """Check if a virtual environment is active
+
+    Parameters
+    ----------
+    venv: str :
+         (Default value = 'mrsm')
+    color : bool :
+         (Default value = True)
+    debug: bool :
+         (Default value = False)
+
+    Returns
+    -------
+
     """
     if venv is None:
         return False
@@ -397,8 +463,20 @@ def deactivate_venv(
         color : bool = True,
         debug: bool = False
     ) -> bool:
-    """
-    Remove a virtual environment from sys.path (if it's been activated).
+    """Remove a virtual environment from sys.path (if it's been activated).
+
+    Parameters
+    ----------
+    venv: str :
+         (Default value = 'mrsm')
+    color : bool :
+         (Default value = True)
+    debug: bool :
+         (Default value = False)
+
+    Returns
+    -------
+
     """
     import sys
     global active_venvs
@@ -436,8 +514,20 @@ def activate_venv(
         color : bool = True,
         debug: bool = False
     ) -> bool:
-    """
-    Create a virtual environment (if it doesn't exist) and add it to sys.path if necessary.
+    """Create a virtual environment (if it doesn't exist) and add it to sys.path if necessary.
+
+    Parameters
+    ----------
+    venv: str :
+         (Default value = 'mrsm')
+    color : bool :
+         (Default value = True)
+    debug: bool :
+         (Default value = False)
+
+    Returns
+    -------
+
     """
     global active_venvs, tried_virtualenv
     if venv in active_venvs or venv is None:
@@ -513,25 +603,39 @@ def venv_exec(
         capture_output: bool = True,
         debug: bool = False,
     ) -> Union[bool, Tuple[int, bytes, bytes]]:
-    """
-    Execute Python code in a subprocess via a virtual environment's interpeter.
+    """Execute Python code in a subprocess via a virtual environment's interpeter.
     Return `True` if the code successfully executes, `False` on failure.
 
-    :param code:
+    Parameters
+    ----------
+    code :
         The Python code to excecute.
-
-    :param venv:
+    venv :
         The virtual environment to use to get the path for the Python executable.
         If `venv` is `None`, use the default `sys.executable` path.
         Defaults to 'mrsm'.
-
-    :param with_extras:
+    with_extras :
         If `True`, return a tuple of the exit code, stdout bytes, and stderr bytes.
         Defaults to `False`.
-
-    :param as_proc:
+    as_proc :
         If `True`, return the `subprocess.Popen` object instead of executing.
         Defaults to `False`.
+    code: str :
+        
+    venv: str :
+         (Default value = 'mrsm')
+    with_extras: bool :
+         (Default value = False)
+    as_proc: bool :
+         (Default value = False)
+    capture_output: bool :
+         (Default value = True)
+    debug: bool :
+         (Default value = False)
+
+    Returns
+    -------
+
     """
     import subprocess, sys, platform, os
     from meerschaum.config._paths import VIRTENV_RESOURCES_PATH
@@ -560,8 +664,16 @@ def venv_exec(
     return exit_code, stdout, stderr
 
 def get_pip(debug : bool = False) -> bool:
-    """
-    Download and run the get-pip.py script.
+    """Download and run the get-pip.py script.
+
+    Parameters
+    ----------
+    debug : bool :
+         (Default value = False)
+
+    Returns
+    -------
+
     """
     import sys, subprocess
     from meerschaum.utils.misc import wget
@@ -590,8 +702,36 @@ def pip_install(
         color : bool = True,
         debug: bool = False
     ) -> bool:
-    """
-    Install pip packages.
+    """Install pip packages.
+
+    Parameters
+    ----------
+    *packages: List[str] :
+        
+    args: Optional[List[str]] :
+         (Default value = None)
+    venv: str :
+         (Default value = 'mrsm')
+    deactivate: bool :
+         (Default value = True)
+    split : bool :
+         (Default value = False)
+    check_update: bool :
+         (Default value = True)
+    check_pypi: bool :
+         (Default value = True)
+    check_wheel : bool :
+         (Default value = True)
+    _uninstall : bool :
+         (Default value = False)
+    color : bool :
+         (Default value = True)
+    debug: bool :
+         (Default value = False)
+
+    Returns
+    -------
+
     """
     from meerschaum.config.static import _static_config
     if args is None:
@@ -710,8 +850,18 @@ def pip_install(
 def pip_uninstall(
         *args, **kw
     ) -> bool:
-    """
-    Uninstall Python packages.
+    """Uninstall Python packages.
+
+    Parameters
+    ----------
+    *args :
+        
+    **kw :
+        
+
+    Returns
+    -------
+
     """
     return pip_install(*args, _uninstall=True, **{k: v for k, v in kw.items() if k != '_uninstall'})
 
@@ -726,32 +876,50 @@ def run_python_package(
         debug: bool = False,
         **kw: Any,
     ) -> Union[int, subprocess.Popen]:
-    """
-    Runs an installed python package.
+    """Runs an installed python package.
     E.g. Translates to `/usr/bin/python -m [package]`
 
-    :param package_name:
+    Parameters
+    ----------
+    package_name :
         The Python module to be executed.
-
-    :param args:
+    args :
         Additional command line arguments to be appended after `-m [package]`.
         Defaults to `None`.
-
-    :param venv:
+    venv :
         If specified, execute the Python interpreter from a virtual environment.
         Defaults to `None`.
-
-    :param cwd:
+    cwd :
         If specified, change directories before starting the process.
         Defaults to `None`.
-
-    :param foreground:
+    foreground :
         If `True`, start the subprocess as a foreground process.
         Defaults to `False`.
-
-    :param kw:
+    kw :
         Additional keyword arguments to pass to `meerschaum.utils.process.run_process()`
         and by extension `subprocess.Popen()`.
+    package_name: str :
+        
+    args: Optional[List[str]] :
+         (Default value = None)
+    venv: Optional[str] :
+         (Default value = None)
+    cwd: Optional[str] :
+         (Default value = None)
+    foreground: bool :
+         (Default value = False)
+    as_proc: bool :
+         (Default value = False)
+    capture_output: bool :
+         (Default value = False)
+    debug: bool :
+         (Default value = False)
+    **kw: Any :
+        
+
+    Returns
+    -------
+
     """
     import sys, platform
     import subprocess
@@ -807,58 +975,79 @@ def attempt_import(
         color: bool = True,
         debug: bool = False
     ) -> Union['ModuleType', Tuple['ModuleType']]:
-    """
-    Raise a warning if packages are not installed; otherwise import and return modules.
+    """Raise a warning if packages are not installed; otherwise import and return modules.
     If lazy = True, return lazy-imported modules.
-
+    
     Returns tuple of modules if multiple names are provided, else returns one module.
-
+    
     Examples:
-
+    
         ```
-        >>> pandas, sqlalchemy = attempt_import('pandas', 'sqlalchemy')
-        >>> pandas = attempt_import('pandas')
-
+    
         ```
 
-    :param names:
+    Parameters
+    ----------
+    names :
         The packages to be imported.
-
-    :param lazy:
+    lazy :
         If True, lazily load packages.
         Defaults to False.
-
-    :param warn:
+    warn :
         If True, raise a warning if a package cannot be imported.
         Defaults to True.
-
-    :param install:
+    install :
         If True, attempt to install a missing package into the designated virtual environment.
         If `check_update` is True, install updates if available.
         Defaults to True.
-
-    :param venv:
+    venv :
         The virtual environment in which to search for packages and to install packages into.
         Defaults to 'mrsm'.
-
-    :param precheck:
+    precheck :
         If True, attempt to find module before importing (necessary for checking if modules exist
         and retaining lazy imports), otherwise assume lazy is False.
-        Defaults to True.        
-
-    :param split:
+        Defaults to True.
+    split :
         If True, split packages' names on '.'.
         Defaults to True.
-
-    :param check_update:
+    check_update :
         If `True` and `install` is `True`, install updates if the required minimum version
         does not match.
         Defaults to `False`.
-
-    :param check_pypi:
+    check_pypi :
         If `True` and `check_update` is `True`, check PyPI when determining whether
         an update is required.
         Defaults to `False`.
+    *names: List[str] :
+        
+    lazy: bool :
+         (Default value = True)
+    warn: bool :
+         (Default value = True)
+    install: bool :
+         (Default value = True)
+    venv: str :
+         (Default value = 'mrsm')
+    precheck: bool :
+         (Default value = True)
+    split: bool :
+         (Default value = True)
+    check_update: bool :
+         (Default value = False)
+    check_pypi: bool :
+         (Default value = False)
+    deactivate: bool :
+         (Default value = True)
+    color: bool :
+         (Default value = True)
+    debug: bool :
+         (Default value = False)
+
+    Returns
+    -------
+
+    >>> pandas, sqlalchemy = attempt_import('pandas', 'sqlalchemy')
+        >>> pandas = attempt_import('pandas')
     """
 
     import importlib.util
@@ -984,9 +1173,21 @@ def lazy_import(
         local_name: str = None,
         **kw
     ) -> meerschaum.utils.packages.lazy_loader.LazyLoader:
-    """
-    Lazily import a package
+    """Lazily import a package
     Based off the tensorflow LazyLoader implementation (Apache 2.0 License)
+
+    Parameters
+    ----------
+    name: str :
+        
+    local_name: str :
+         (Default value = None)
+    **kw :
+        
+
+    Returns
+    -------
+
     """
     from meerschaum.utils.packages.lazy_loader import LazyLoader
     if local_name is None:
@@ -999,8 +1200,22 @@ def lazy_import(
     )
 
 def import_pandas(deactivate : bool = False, debug : bool = False, lazy : bool = False,  **kw) -> 'ModuleType':
-    """
-    Quality-of-life function to attempt to import the configured version of pandas.
+    """Quality-of-life function to attempt to import the configured version of pandas.
+
+    Parameters
+    ----------
+    deactivate : bool :
+         (Default value = False)
+    debug : bool :
+         (Default value = False)
+    lazy : bool :
+         (Default value = False)
+    **kw :
+        
+
+    Returns
+    -------
+
     """
     import sys
     from meerschaum.config import get_config
@@ -1019,8 +1234,22 @@ def import_rich(
         lazy: bool = True, deactivate : bool = False, debug : bool = False,
         **kw : Any
     ) -> 'ModuleType':
-    """
-    Quality of life function for importing rich.
+    """Quality of life function for importing rich.
+
+    Parameters
+    ----------
+    lazy: bool :
+         (Default value = True)
+    deactivate : bool :
+         (Default value = False)
+    debug : bool :
+         (Default value = False)
+    **kw : Any :
+        
+
+    Returns
+    -------
+
     """
     from meerschaum.utils.formatting import ANSI, UNICODE
     if not ANSI and not UNICODE:
@@ -1038,7 +1267,17 @@ def import_rich(
 
 def _dash_less_than_2(**kw) -> bool:
     """
-    Return a bool denoting whether the installed version of Dash is less than 2.0.0.
+
+    Parameters
+    ----------
+    **kw :
+        
+
+    Returns
+    -------
+    type
+        
+
     """
     dash = attempt_import('dash')
     if dash is None:
@@ -1050,8 +1289,18 @@ def _dash_less_than_2(**kw) -> bool:
     )
 
 def import_dcc(warn=False, **kw) -> 'ModuleType':
-    """
-    Import Dash Core Components (`dcc`).
+    """Import Dash Core Components (`dcc`).
+
+    Parameters
+    ----------
+    warn :
+         (Default value = False)
+    **kw :
+        
+
+    Returns
+    -------
+
     """
     return (
         attempt_import('dash_core_components', warn=warn, **kw)
@@ -1059,8 +1308,18 @@ def import_dcc(warn=False, **kw) -> 'ModuleType':
     )
 
 def import_html(warn=False, **kw) -> 'ModuleType':
-    """
-    Import Dash HTML Components (`html`).
+    """Import Dash HTML Components (`html`).
+
+    Parameters
+    ----------
+    warn :
+         (Default value = False)
+    **kw :
+        
+
+    Returns
+    -------
+
     """
     return (
         attempt_import('dash_html_components', warn=warn, **kw)
@@ -1076,13 +1335,31 @@ def get_modules_from_package(
         modules_venvs: bool = False,
         debug: bool = False
     ):
-    """
-    Find and import all modules in a package.
-
+    """Find and import all modules in a package.
+    
     Returns: either list of modules or tuple of lists
-
+    
     names = False (default) : modules
     names = True            : (__all__, modules)
+
+    Parameters
+    ----------
+    package: 'package' :
+        
+    names: bool :
+         (Default value = False)
+    recursive: bool :
+         (Default value = False)
+    lazy: bool :
+         (Default value = False)
+    modules_venvs: bool :
+         (Default value = False)
+    debug: bool :
+         (Default value = False)
+
+    Returns
+    -------
+
     """
     from os.path import dirname, join, isfile, isdir, basename
     import glob
@@ -1130,21 +1407,35 @@ def import_children(
         recursive: bool = False,
         debug: bool = False
     ) -> List['ModuleType']:
-    """
-    Import all functions in a package to its __init__.
+    """Import all functions in a package to its __init__.
     Returns of list of modules.
 
-    :param package:
+    Parameters
+    ----------
+    package :
         Package to import its functions into.
         If None (default), use parent.
-
-    :param package_name:
+    package_name :
         Name of package to import its functions into
         If None (default), use parent.
-
-    :param types:
+    types :
         Types of members to return.
         Default : ['method', 'builtin', 'class', 'function', 'package', 'module']
+    package: Optional['ModuleType'] :
+         (Default value = None)
+    package_name: Optional[str] :
+         (Default value = None)
+    types : Optional[List[str]] :
+         (Default value = None)
+    lazy: bool :
+         (Default value = True)
+    recursive: bool :
+         (Default value = False)
+    debug: bool :
+         (Default value = False)
+
+    Returns
+    -------
 
     """
     import sys, inspect
@@ -1197,8 +1488,22 @@ def reload_package(
         debug: bool = False,
         **kw: Any
     ) -> 'ModuleType':
-    """
-    Recursively load a package's subpackages, even if they were not previously loaded.
+    """Recursively load a package's subpackages, even if they were not previously loaded.
+
+    Parameters
+    ----------
+    package: str :
+        
+    lazy: bool :
+         (Default value = False)
+    debug: bool :
+         (Default value = False)
+    **kw: Any :
+        
+
+    Returns
+    -------
+
     """
     import pydoc
     if isinstance(package, str):
@@ -1215,17 +1520,29 @@ def is_installed(
         venv: Optional[str] = None,
         deactivate: bool = True,
     ) -> bool:
-    """
-    Check whether a package is installed.
+    """Check whether a package is installed.
     name : str
         Name of the package in question
+
+    Parameters
+    ----------
+    name: str :
+        
+    venv: Optional[str] :
+         (Default value = None)
+    deactivate: bool :
+         (Default value = True)
+
+    Returns
+    -------
+
     """
     import importlib.util
     if venv is not None:
         activate_venv(venv=venv)
     try:
         found = importlib.util.find_spec(name) is not None
-    except ModuleNotFoundError:
+    except (ModuleNotFoundError, ValueError):
         found = False
     if venv is None:
         return found
@@ -1239,8 +1556,22 @@ def is_installed(
 def venv_contains_package(
         name: str, venv: Optional[str] = None, split: bool = True, debug: bool = False,
     ) -> bool:
-    """
-    Search the contents of a virtual environment for a package.
+    """Search the contents of a virtual environment for a package.
+
+    Parameters
+    ----------
+    name: str :
+        
+    venv: Optional[str] :
+         (Default value = None)
+    split: bool :
+         (Default value = True)
+    debug: bool :
+         (Default value = False)
+
+    Returns
+    -------
+
     """
     import os
     if venv is None:
@@ -1255,8 +1586,20 @@ def venv_contains_package(
 
 
 def venv_exists(venv: Union[str, None], debug: bool = False) -> bool:
-    """
-    Determine whether a virtual environment has been created.
+    """Determine whether a virtual environment has been created.
+
+    Parameters
+    ----------
+    venv: Union[str :
+        
+    None] :
+        
+    debug: bool :
+         (Default value = False)
+
+    Returns
+    -------
+
     """
     import os, sys, platform, pathlib
     target_path = venv_target_path(venv, allow_nonexistent=True, debug=debug)
@@ -1268,15 +1611,27 @@ def venv_target_path(
         allow_nonexistent: bool = False,
         debug: bool = False,
     ) -> pathlib.Path:
-    """
-    Return a virtual environment's site-package path.
+    """Return a virtual environment's site-package path.
 
-    :param venv:
+    Parameters
+    ----------
+    venv :
         The virtual environment for which a path should be returned.
-
-    :param allow_nonexistent:
+    allow_nonexistent :
         If `True`, return a path even if it does not exist.
         Defaults to `False`.
+    venv: Union[str :
+        
+    None] :
+        
+    allow_nonexistent: bool :
+         (Default value = False)
+    debug: bool :
+         (Default value = False)
+
+    Returns
+    -------
+
     """
     import os, sys, platform, pathlib
 
@@ -1324,8 +1679,16 @@ def venv_target_path(
     return pathlib.Path(target_path)
 
 def package_venv(package : 'ModuleType') -> Optional[str]:
-    """
-    Inspect a package and return the virtual environment in which it presides.
+    """Inspect a package and return the virtual environment in which it presides.
+
+    Parameters
+    ----------
+    package : 'ModuleType' :
+        
+
+    Returns
+    -------
+
     """
     from meerschaum.config._paths import VIRTENV_RESOURCES_PATH
     if str(VIRTENV_RESOURCES_PATH) not in package.__file__:
@@ -1333,9 +1696,7 @@ def package_venv(package : 'ModuleType') -> Optional[str]:
     return package.__file__.split(str(VIRTENV_RESOURCES_PATH))[1].split(os.path.sep)[1]
 
 def inside_venv() -> bool:
-    """
-    Determine whether current Python interpreter is running inside a virtual environment.
-    """
+    """Determine whether current Python interpreter is running inside a virtual environment."""
     import sys
     return (
         hasattr(sys, 'real_prefix') or (
@@ -1345,9 +1706,7 @@ def inside_venv() -> bool:
     )
 
 def ensure_readline() -> 'ModuleType':
-    """
-    Make sure that the `readline` package is able to be imported.
-    """
+    """Make sure that the `readline` package is able to be imported."""
     import sys
     try:
         import readline

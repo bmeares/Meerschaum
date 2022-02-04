@@ -15,34 +15,47 @@ def read_config(
         substitute : bool = True,
         with_filenames : bool = False,
     ) -> Union[Dict[str, Any], Tuple[Dict[str, Any], List[str]]]:
-    """
-    Read the configuration directory.
+    """Read the configuration directory.
 
-    :param directory:
+    Parameters
+    ----------
+    directory :
         The directory with configuration files (.json and .yaml).
-
-    :param keys:
+    keys :
         Which configuration files to read.
-
-    :param write_missing:
+    write_missing :
         If a keyfile does not exist but is defined in the default configuration,
         write the file to disk.
         Defaults to True.
-
-    :param substitute:
+    substitute :
         Replace `MRSM{}` syntax with configuration values.
         Defaults to True.
-
-    :param with_filename:
+    with_filename :
         If True, return a tuple of the configuration dictionary with a list of read filenames.
         Defaults to False.
-
+        
         Example:
         ```
-        >>> read_config(keys='meerschaum', with_filename=True)
-        >>> ({...}, ['meerschaum.yaml'])
-
+        
         ```
+    directory : Optional[Dict[str :
+        
+    Any]] :
+         (Default value = None)
+    keys : Optional[List[str]] :
+         (Default value = None)
+    write_missing : bool :
+         (Default value = True)
+    substitute : bool :
+         (Default value = True)
+    with_filenames : bool :
+         (Default value = False)
+
+    Returns
+    -------
+
+    >>> read_config(keys='meerschaum', with_filename=True)
+        >>> ({...}, ['meerschaum.yaml'])
     """
     import sys, shutil, os, json, itertools
     from meerschaum.utils.packages import attempt_import
@@ -200,41 +213,55 @@ def search_and_substitute_config(
         literal_key : str = '!',
         keep_symlinks : bool = True,
     ) -> Dict[str, Any]:
-    """
-    Search the config for Meerschaum substitution syntax and substite with value of keys.
+    """Search the config for Meerschaum substitution syntax and substite with value of keys.
 
-    :param config:
+    Parameters
+    ----------
+    config :
         The Meerschaum configuration dictionary to search through.
-
-    :param leading_key:
+    leading_key :
         The string with which to start the search.
         Defaults to 'MRSM'.
-
-    :param begin_key:
+    begin_key :
         The string to start the keys list.
         Defaults to '{'.
-
-    :param end_key:
+    end_key :
         The string to end the keys list.
         Defaults to '}'.
-
-    :param literal_key:
+    literal_key :
         The string to force an literal interpretation of a value.
         When the string is isolated, a literal interpreation is assumed and the surrounding
         quotes are replaced.
-
+        
         E.g. Suppose a:b:c produces a dictionary {'d': 1}.
-          - 'MRSM{a:b:c}'    => {'d': 1}        : isolated
-          - ' MRSM{a:b:c} '  => ' "{\'d\': 1}"' : not isolated
-          - ' MRSM{!a:b:c} ' => ' {"d": 1}'     : literal
+        - 'MRSM{a:b:c}'    => {'d': 1}        : isolated
+        - ' MRSM{a:b:c} '  => ' "{\'d\': 1}"' : not isolated
+        - ' MRSM{!a:b:c} ' => ' {"d": 1}'     : literal
         Defaults to '!'.
-
-    :param keep_symlinks:
+    keep_symlinks :
         If True, include the symlinks under the top-level key '_symlinks' (never written to a file).
         Defaults to True.
-
-    Example:
+        
+        Example:
         MRSM{meerschaum:connectors:main:host} => cf['meerschaum']['connectors']['main']['host']
+    config : dict :
+        
+    leading_key : str :
+         (Default value = "MRSM")
+    delimiter : str :
+         (Default value = ":")
+    begin_key : str :
+         (Default value = "{")
+    end_key : str :
+         (Default value = "}")
+    literal_key : str :
+         (Default value = '!')
+    keep_symlinks : bool :
+         (Default value = True)
+
+    Returns
+    -------
+
     """
 
     _links = []
@@ -354,9 +381,7 @@ def search_and_substitute_config(
     return parsed_config
 
 def get_possible_keys() -> List[str]:
-    """
-    Return a list of possible configuration keys.
-    """
+    """ """
     import os
     from meerschaum.config._paths import CONFIG_DIR_PATH
     from meerschaum.config._default import default_config
@@ -368,8 +393,18 @@ def get_possible_keys() -> List[str]:
     return sorted(list(keys))
 
 def get_keyfile_path(key : str, create_new : bool = False) -> Optional[pathlib.Path]:
-    """
-    Determine a key's file path.
+    """Determine a key's file path.
+
+    Parameters
+    ----------
+    key : str :
+        
+    create_new : bool :
+         (Default value = False)
+
+    Returns
+    -------
+
     """
     import os, pathlib
     from meerschaum.config._paths import CONFIG_DIR_PATH

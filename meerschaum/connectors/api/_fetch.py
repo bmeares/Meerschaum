@@ -19,8 +19,28 @@ def fetch(
         debug: bool = False,
         **kw: Any
     ) -> pandas.DataFrame:
-    """
-    Get the Pipe data from the remote Pipe.
+    """Get the Pipe data from the remote Pipe.
+
+    Parameters
+    ----------
+    pipe: meerschaum.Pipe :
+        
+    begin: Optional[datetime.datetime] :
+         (Default value = None)
+    end: Optional[datetime.datetime] :
+         (Default value = None)
+    params: Optional[Dict :
+        
+    Any] :
+         (Default value = None)
+    debug: bool :
+         (Default value = False)
+    **kw: Any :
+        
+
+    Returns
+    -------
+
     """
     from meerschaum.utils.debug import dprint
     from meerschaum.utils.warnings import warn, error

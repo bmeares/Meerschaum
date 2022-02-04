@@ -63,7 +63,6 @@ def edit_plugin_description(
         plugin.user_id = get_api_connector().get_plugin_user_id(plugin, debug=debug)
         plugin.attributes = get_api_connector().get_plugin_attributes(plugin, debug=debug)
         plugin.attributes.update({'description': description})
-        print(f"{description=}")
         success, _msg = get_api_connector().register_plugin(plugin, debug=debug, force=True)
         msg = _msg if not success else "Successfully updated description."
     return [alert_from_success_tuple((success, msg))]

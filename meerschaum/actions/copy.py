@@ -14,13 +14,14 @@ def copy(
         **kw : Any
     ) -> SuccessTuple:
     """
-    Copy items' attributes into new items.
-
+    Duplicate connectors or pipes.
+    
     Command:
-        `copy {option}`
-
+        `copy {pipes, connectors}`
+    
     Example:
         `copy pipes`
+
     """
     from meerschaum.utils.misc import choose_subaction
     if action is None:
@@ -37,6 +38,7 @@ def _complete_copy(
     ) -> List[str]:
     """
     Override the default Meerschaum `complete_` function.
+
     """
     from meerschaum.actions.start import _complete_start_jobs
     from meerschaum.actions.edit import _complete_edit_config
@@ -67,6 +69,7 @@ def _copy_pipes(
     ) -> SuccessTuple:
     """
     Copy pipes' attributes and make new pipes.
+
     """
     from meerschaum import get_pipes, Pipe
     from meerschaum.utils.prompt import prompt, yes_no
@@ -131,6 +134,7 @@ def _copy_connectors(
     ) -> SuccessTuple:
     """
     Create a new connector from an existing one.
+
     """
     import os, pathlib
     from meerschaum.utils.prompt import yes_no, prompt

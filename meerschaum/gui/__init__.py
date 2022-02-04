@@ -20,8 +20,16 @@ locks = {'app': Lock()}
 _app = None
 
 def get_app(**kw) -> MeerschaumApp:
-    """
-    Instantiate and return the main app.
+    """Instantiate and return the main app.
+
+    Parameters
+    ----------
+    **kw :
+        
+
+    Returns
+    -------
+
     """
     global _app
     if _app is None:
@@ -31,8 +39,16 @@ def get_app(**kw) -> MeerschaumApp:
     return _app
 
 def build_app(**kw) -> MeerschaumApp:
-    """
-    Construct and return an instance of the GUI application.
+    """Construct and return an instance of the GUI application.
+
+    Parameters
+    ----------
+    **kw :
+        
+
+    Returns
+    -------
+
     """
     _kw = dict(
         formal_name = _static_config()['setup']['formal_name'],

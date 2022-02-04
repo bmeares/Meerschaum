@@ -16,9 +16,7 @@ Event = threading.Event
 Timer = threading.Timer
 
 class Thread(threading.Thread):
-    """
-    Wrapper for threading.Thread with optional callback and error_callback functions.
-    """
+    """Wrapper for threading.Thread with optional callback and error_callback functions."""
 
     def __init__(self, *args, callback=None, error_callback=None, **kw):
         target = kw.pop('target')
@@ -29,9 +27,19 @@ class Thread(threading.Thread):
         self._return = None
 
     def wrap_target_with_callback(self, *args, **kw):
-        """
-        Wrap the designated target function with a try-except.
+        """Wrap the designated target function with a try-except.
         Captures the output and executes either the callback or error_callback.
+
+        Parameters
+        ----------
+        *args :
+            
+        **kw :
+            
+
+        Returns
+        -------
+
         """
         try:
             result = self.method(*args, **kw)
@@ -47,22 +55,28 @@ class Thread(threading.Thread):
 
     def join(self, timeout: Optional[float] = None):
         """
-        Return the thread's return value upon joining.
+
+        Parameters
+        ----------
+        timeout: Optional[float] :
+             (Default value = None)
+
+        Returns
+        -------
+        type
+            
+
         """
         threading.Thread.join(self, timeout=timeout)
         return self._return
 
     def run(self):
-        """
-        Set the return to the result of the target.
-        """
+        """Set the return to the result of the target."""
         self._return = self._target(*self._args, **self._kwargs)
 
 
 class Worker(threading.Thread):
-    """
-    Wrapper for `threading.Thread` for working with `queue.Queue` objects.
-    """
+    """Wrapper for `threading.Thread` for working with `queue.Queue` objects."""
 
     def __init__(self, queue, *args, timeout: int = 3, **kw):
         self.queue = queue

@@ -10,13 +10,21 @@ from __future__ import annotations
 from meerschaum.utils.typing import SuccessTuple, List, Optional
 
 def _entry(sysargs : Optional[List[str]] = None) -> SuccessTuple:
-    """
-    Parse arguments and launch a Meerschaum action.
+    """Parse arguments and launch a Meerschaum action.
     The `action` list removes the first element.
-
+    
     Examples of action:
         'show actions' -> ['actions']
         'show' -> []
+
+    Parameters
+    ----------
+    sysargs : Optional[List[str]] :
+         (Default value = None)
+
+    Returns
+    -------
+
     """
     from meerschaum.actions.arguments import parse_arguments
     if sysargs is None:
@@ -28,9 +36,17 @@ def _entry(sysargs : Optional[List[str]] = None) -> SuccessTuple:
     return _entry_with_args(**args)
 
 def _entry_with_args(**kw) -> SuccessTuple:
-    """
-    Execute a Meerschaum action with keyword arguments.
+    """Execute a Meerschaum action with keyword arguments.
     Use `_entry()` for parsing sysargs before executing.
+
+    Parameters
+    ----------
+    **kw :
+        
+
+    Returns
+    -------
+
     """
     from meerschaum.actions import actions, original_actions, get_shell
     from meerschaum.utils.packages import activate_venv, deactivate_venv

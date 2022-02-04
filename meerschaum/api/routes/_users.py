@@ -33,7 +33,7 @@ def read_current_user(
         curr_user : 'meerschaum._internal.User.User' = fastapi.Depends(manager),
     ) -> Dict[str, Union[str, int]]:
     """
-    Return attributes of the current User.
+    Get information about the currently logged-in user.
     """
     return {
         'username' : curr_user.username,
@@ -45,17 +45,17 @@ def read_current_user(
 @app.get(users_endpoint, tags=['Users'])
 def get_users() -> List[str]:
     """
-    Return a list of registered users.
+    Get a list of the registered users.
     """
     return get_api_connector().get_users(debug=debug)
 
 @app.post(users_endpoint + "/{username}/register", tags=['Users'])
 def register_user(
-        username : str,
-        password : str,
-        type : Optional[str] = None,
-        email : Optional[str] = None,
-        attributes : Optional[Dict[str, Any]] = None
+        username: str,
+        password: str,
+        type: Optional[str] = None,
+        email: Optional[str] = None,
+        attributes: Optional[Dict[str, Any]] = None
     ) -> SuccessTuple:
     """
     Register a new user.
@@ -81,15 +81,15 @@ def register_user(
 
 @app.post(users_endpoint + "/{username}/edit", tags=['Users'])
 def edit_user(
-        username : str,
-        password : str,
-        type : Optional[str] = None,
-        email : Optional[str] = None,
-        attributes : Optional[Dict[str, Any]] = None,
-        curr_user : 'meerschaum._internal.User.User' = fastapi.Depends(manager),
+        username: str,
+        password: str,
+        type: Optional[str] = None,
+        email: Optional[str] = None,
+        attributes: Optional[Dict[str, Any]] = None,
+        curr_user: 'meerschaum._internal.User.User' = fastapi.Depends(manager),
     ) -> SuccessTuple:
     """
-    Edit an existing user
+    Edit an existing user.
     """
     user = User(username, password, email=email, attributes=attributes)
     user_type = get_api_connector().get_user_type(curr_user)
@@ -103,16 +103,16 @@ def edit_user(
 @app.get(users_endpoint + "/{username}/id", tags=['Users'])
 def get_user_id(
         username : str,
-    ) -> Optional[int]:
+    ) -> Union[int, None]:
     """
-    Get a user's ID
+    Get a user's ID.
     """
     return get_api_connector().get_user_id(User(username), debug=debug)
 
 @app.get(users_endpoint + "/{username}/attributes", tags=['Users'])
 def get_user_attributes(
         username : str,
-    ) -> Optional[Dict[str, Any]]:
+    ) -> Union[Dict[str, Any], None]:
     """
     Get a user's attributes.
     """
@@ -139,8 +139,8 @@ def delete_user(
 
 @app.get(users_endpoint + '/{username}/password_hash', tags=['Users'])
 def get_user_password_hash(
-        username : str,
-        curr_user : 'meerschaum._internal.User.User' = fastapi.Depends(manager),
+        username: str,
+        curr_user: 'meerschaum._internal.User.User' = fastapi.Depends(manager),
     ) -> Union[str, HTTPException]:
     """
     If configured to allow chaining, return a user's password_hash.

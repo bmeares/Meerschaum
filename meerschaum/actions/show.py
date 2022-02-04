@@ -13,12 +13,11 @@ def show(
         action : Optional[List[str]] = None,
         **kw : Any
     ) -> SuccessTuple:
-    """
-    Show elements of a certain type.
-
+    """Show elements of a certain type.
+    
     Command:
         `show {option}`
-
+    
     Example:
         `show pipes`
     """
@@ -80,9 +79,9 @@ def _complete_show(
     from meerschaum.actions.shell import default_action_completer
     return default_action_completer(action=(['show'] + action), **kw)
 
-def _show_actions(**kw : Any) -> SuccessTuple:
+def _show_actions(**kw: Any) -> SuccessTuple:
     """
-    Show available actions
+    Show available actions.
     """
     from meerschaum.actions import actions
     from meerschaum.utils.misc import print_options
@@ -91,33 +90,32 @@ def _show_actions(**kw : Any) -> SuccessTuple:
     print_options(options=_actions, name='actions', actions=False, **kw)
     return True, "Success"
 
-def _show_help(**kw : Any) -> SuccessTuple:
+def _show_help(**kw: Any) -> SuccessTuple:
     """
-    Print the --help menu from argparse
+    Print the --help menu from `argparse`.
     """
     from meerschaum.actions.arguments._parser import parser
     print(parser.format_help())
     return True, "Success"
 
 def _show_config(
-        action : Optional[List[str]] = None,
-        debug : bool = False,
-        nopretty : bool = False,
-        **kw : Any
+        action: Optional[List[str]] = None,
+        debug: bool = False,
+        nopretty: bool = False,
+        **kw: Any
     ) -> SuccessTuple:
     """
     Show the configuration dictionary.
-    Sub-actions defined in the action list are index in the config dictionary.
-
-    E.g. `show config pipes` -> cf['pipes']
+    Sub-actions defined in the action list are recursive indices in the config dictionary.
+    
+    Example:
+        `show config pipes` -> cf['pipes']
     """
     import json
     from meerschaum.utils.formatting import pprint
     from meerschaum.config import get_config
     from meerschaum.config._paths import CONFIG_DIR_PATH
     from meerschaum.utils.debug import dprint
-    #  if debug:
-        #  dprint(f"Configuration loaded from {CONFIG_DIR_PATH}")
 
     if action is None:
         action = []
@@ -131,7 +129,7 @@ def _show_config(
         pprint(config)
     return (True, "Success")
 
-def _complete_show_config(action : Optional[List[str]] = None, **kw : Any):
+def _complete_show_config(action: Optional[List[str]] = None, **kw : Any):
     from meerschaum.config._read_config import get_possible_keys
     keys = get_possible_keys()
     if not action:
@@ -142,9 +140,9 @@ def _complete_show_config(action : Optional[List[str]] = None, **kw : Any):
             possibilities.append(key)
     return possibilities
 
-def _show_modules(**kw : Any) -> SuccessTuple:
+def _show_modules(**kw: Any) -> SuccessTuple:
     """
-    Show the currently imported modules
+    Show the currently imported modules.
     """
     import sys
     from meerschaum.utils.formatting import pprint
@@ -152,9 +150,9 @@ def _show_modules(**kw : Any) -> SuccessTuple:
     return (True, "Success")
 
 def _show_pipes(
-        nopretty : bool = False,
-        debug : bool = False,
-        **kw : Any
+        nopretty: bool = False,
+        debug: bool = False,
+        **kw: Any
     ) -> SuccessTuple:
     """
     Print a stylized tree of available Meerschaum pipes.
@@ -181,9 +179,13 @@ def _show_pipes(
 
     return (True, "Success")
 
-def _show_version(nopretty : bool = False, **kw : Any) -> SuccessTuple:
+def _show_version(nopretty: bool = False, **kw : Any) -> SuccessTuple:
     """
     Show the Meerschaum doc string.
+
+    Examples:
+        - `show version`
+        - `show version --nopretty`
     """
     from meerschaum import __version__ as version
     _print = print
@@ -197,18 +199,18 @@ def _show_version(nopretty : bool = False, **kw : Any) -> SuccessTuple:
     return (True, "Success")
 
 def _show_connectors(
-        action : Optional[List[str]] = None,
-        nopretty : bool = False,
-        debug : bool = False,
-        **kw : Any
+        action: Optional[List[str]] = None,
+        nopretty: bool = False,
+        debug: bool = False,
+        **kw: Any
     ) -> SuccessTuple:
     """
     Show connectors configuration and, if requested, specific connector attributes.
-
+    
     Examples:
         `show connectors`
             Display the connectors configuration.
-
+    
         `show connectors sql:main`
             Show the connectors configuration and the attributes for the connector 'sql:main'.
     """
@@ -234,14 +236,14 @@ def _show_connectors(
     return True, "Success"
 
 def _complete_show_connectors(
-        action : Optional[List[str]] = None, **kw : Any
+        action: Optional[List[str]] = None, **kw: Any
     ) -> List[str]:
     from meerschaum.utils.misc import get_connector_labels
     _text = action[0] if action else ""
     return get_connector_labels(search_term=_text, ignore_exact_match=True)
 
 def _show_arguments(
-        **kw : Any
+        **kw: Any
     ) -> SuccessTuple:
     """
     Show the parsed keyword arguments.
@@ -251,35 +253,37 @@ def _show_arguments(
     return True, "Success"
 
 def _show_data(
-        action : Optional[List[str]] = None,
-        gui : bool = False,
-        begin : Optional[datetime.datetime] = None,
-        end : Optional[datetime.datetime] = None,
+        action: Optional[List[str]] = None,
+        gui: bool = False,
+        begin: Optional[datetime.datetime] = None,
+        end: Optional[datetime.datetime] = None,
         params: Optional[Dict[str, Any]] = None,
-        chunksize : Optional[int] = -1,
-        nopretty : bool = False,
-        debug : bool = False,
-        **kw : Any
+        chunksize: Optional[int] = -1,
+        nopretty: bool = False,
+        debug: bool = False,
+        **kw: Any
     ) -> SuccessTuple:
     """
     Show pipes data as Pandas DataFrames.
-
+    
     Usage:
         - Use --gui to open an interactive window.
-
+    
         - `show data all` to grab all data for the chosen Pipes.
           WARNING: This may be dangerous!
-
+    
         - `show data 60` to grab the last 60 (or any number) minutes of data for all pipes.
-
+    
         - `show data --begin 2020-01-01 --end 2021-01-01` to specify date rangers.
-          NOTE: You must specify to at least the day, otherwise the date parser will assume you mean today's date.
-
+          **NOTE:** You must specify to at least the day, otherwise the date parser will assume
+          you mean today's date.
+    
         - Regular pipes parameters (-c, -m, -l, etc.)
-
+    
     Examples:
         - show data -m weather --gui
-            Open an interactive pandasgui window for the last 1440 minutes of data for all pipes of metric 'weather'.
+            Open an interactive pandasgui window for the last 1440 minutes of data
+            for all pipes of metric 'weather'.
     """
     import sys, json
     from meerschaum import get_pipes
@@ -350,10 +354,10 @@ def _show_data(
     return True, "Success"
 
 def _show_columns(
-        action : Optional[List[str]] = None,
-        debug : bool = False,
-        nopretty : bool = False,
-        **kw : Any
+        action: Optional[List[str]] = None,
+        debug: bool = False,
+        nopretty: bool = False,
+        **kw: Any
     ) -> SuccessTuple:
     """
     Show the registered and table columns for pipes.
@@ -367,14 +371,14 @@ def _show_columns(
     return True, "Success"
 
 def _show_rowcounts(
-        action : Optional[List[str]] = None,
-        workers : Optional[int] = None,
-        debug : bool = False,
-        **kw : Any
+        action: Optional[List[str]] = None,
+        workers: Optional[int] = None,
+        debug: bool = False,
+        **kw: Any
     ) -> SuccessTuple:
     """
     Show the rowcounts for pipes.
-
+    
     To see remote rowcounts (execute `COUNT(*)` on the source server),
     execute `show rowcounts remote`.
     """
@@ -408,11 +412,11 @@ def _show_rowcounts(
     return True, "Success"
 
 def _show_plugins(
-        action : Optional[List[str]] = None,
-        repository : Optional[str] = None,
-        nopretty : bool = False,
-        debug : bool = False,
-        **kw : Any
+        action: Optional[List[str]] = None,
+        repository: Optional[str] = None,
+        nopretty: bool = False,
+        debug: bool = False,
+        **kw: Any
     ) -> SuccessTuple:
     """
     Show the installed plugins.
@@ -447,9 +451,9 @@ def _show_plugins(
     return True, "Success"
 
 def _show_users(
-        mrsm_instance : Optional[str] = None,
-        debug : bool = False,
-        **kw : Any
+        mrsm_instance: Optional[str] = None,
+        debug: bool = False,
+        **kw: Any
     ) -> SuccessTuple:
     """
     Show the registered users in a Meerschaum instance (default is the current instance).
@@ -470,12 +474,12 @@ def _show_users(
     return True, "Success"
 
 def _show_packages(
-        action : Optional[List[str]] = None,
-        nopretty : bool = False,
-        **kw : Any
+        action: Optional[List[str]] = None,
+        nopretty: bool = False,
+        **kw: Any
     ) -> SuccessTuple:
     """
-    Show the packages in dependency groups, or as a list with --nopretty.
+    Show the packages in dependency groups, or as a list with `--nopretty`.
     """
     from meerschaum.utils.packages import packages
     from meerschaum.utils.warnings import warn
@@ -517,9 +521,9 @@ def _complete_show_packages(
     return possibilities
 
 def _show_jobs(
-        action : Optional[List[str]] = None,
-        nopretty : bool = False,
-        **kw : Any
+        action: Optional[List[str]] = None,
+        nopretty: bool = False,
+        **kw: Any
     ) -> SuccessTuple:
     """
     Show the currently running and stopped jobs.
@@ -543,16 +547,16 @@ def _show_jobs(
     return True, "Success"
 
 def _show_logs(
-        action : Optional[List[str]] = None,
-        nopretty : bool = False,
+        action: Optional[List[str]] = None,
+        nopretty: bool = False,
         **kw
     ) -> SuccessTuple:
     """
     Show the logs for jobs.
-
+    
     You may specify jobs to only print certain logs.
     To print the entire log file, add the `--nopretty` flag.
-
+    
     Usage:
         `show logs`
         `show logs --nopretty`

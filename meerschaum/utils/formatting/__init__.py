@@ -38,9 +38,17 @@ def colored_fallback(*args, **kw):
     return ' '.join(args)
 
 def translate_rich_to_termcolor(*colors) -> tuple:
-    """
-    Translate between rich and more_termcolor terminology.
+    """Translate between rich and more_termcolor terminology.
     This is probably prone to breaking.
+
+    Parameters
+    ----------
+    *colors :
+        
+
+    Returns
+    -------
+
     """
     _colors = []
     for c in colors:
@@ -62,8 +70,16 @@ def translate_rich_to_termcolor(*colors) -> tuple:
     return tuple(_colors)
 
 def rich_text_to_str(text) -> str:
-    """
-    Convert a `rich.text.Text` object to a string with ANSI in-tact.
+    """Convert a `rich.text.Text` object to a string with ANSI in-tact.
+
+    Parameters
+    ----------
+    text :
+        
+
+    Returns
+    -------
+
     """
     _console = get_console()
     if _console is None:
@@ -101,10 +117,22 @@ def _init():
 
 _colorama_init = False
 def colored(text : str, *colors, **kw) -> str:
-    """
-    Apply colors and rich styles to a string.
+    """Apply colors and rich styles to a string.
     If a `style` keyword is provided, a `rich.text.Text` object will be parsed into a string.
     Otherwise attempt to use the legacy `more_termcolor.colored` method.
+
+    Parameters
+    ----------
+    text : str :
+        
+    *colors :
+        
+    **kw :
+        
+
+    Returns
+    -------
+
     """
     from meerschaum.utils.packages import import_rich, attempt_import
 
@@ -140,9 +168,7 @@ def colored(text : str, *colors, **kw) -> str:
 
 console = None
 def get_console():
-    """
-    Return a `rich` console object for reuse.
-    """
+    """ """
     global console
     from meerschaum.utils.packages import import_rich, attempt_import
     rich = import_rich()
@@ -161,8 +187,26 @@ def print_tuple(
         lower_padding: int = 0,
         _progress: Optional['rich.progress.Progress'] = None,
     ) -> None:
-    """
-    Print Meerschaum SuccessTuple.
+    """Print Meerschaum SuccessTuple.
+
+    Parameters
+    ----------
+    tup: tuple :
+        
+    skip_common: bool :
+         (Default value = True)
+    common_only: bool :
+         (Default value = False)
+    upper_padding: int :
+         (Default value = 0)
+    lower_padding: int :
+         (Default value = 0)
+    _progress: Optional['rich.progress.Progress'] :
+         (Default value = None)
+
+    Returns
+    -------
+
     """
     from meerschaum.config.static import _static_config
     try:

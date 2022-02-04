@@ -21,7 +21,7 @@ RedirectResponse = starlette.responses.RedirectResponse
 @app.get(endpoints['index'], response_class=HTMLResponse)
 def index(request : Request):
     """
-    Meerschaum WebAPI index page
+    Meerschaum WebAPI index page.
     """
     _url = endpoints['dash'] if _include_dash else '/docs'
     return RedirectResponse(url=_url)

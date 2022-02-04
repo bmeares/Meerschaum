@@ -10,11 +10,11 @@ from __future__ import annotations
 from meerschaum.utils.typing import SuccessTuple, Optional, List, Any
 
 def start(
-        action : Optional[List[str]] = None,
-        **kw : Any,
+        action: Optional[List[str]] = None,
+        **kw: Any,
     ) -> SuccessTuple:
     """
-    Start subsystems (API server, logging daemon, etc.).
+    Start subsystems (API server, background job, etc.).
     """
 
     from meerschaum.utils.misc import choose_subaction
@@ -27,8 +27,8 @@ def start(
     return choose_subaction(action, options, **kw)
 
 def _complete_start(
-        action : Optional[List[str]] = None,
-        **kw : Any
+        action: Optional[List[str]] = None,
+        **kw: Any
     ) -> List[str]:
     """
     Override the default Meerschaum `complete_` function.
@@ -53,17 +53,17 @@ def _complete_start(
     from meerschaum.actions.shell import default_action_completer
     return default_action_completer(action=(['start'] + action), **kw)
 
-def _start_api(action : Optional[List[str]] = None, **kw):
+def _start_api(action: Optional[List[str]] = None, **kw):
     """
     Start the API server.
-
+    
     Usage:
         `start api {options}`
-
+    
     Options:
         - `-p, --port {number}`
             Port to bind the API server to.
-
+    
         - `-w, --workers {number}`
             How many worker threads to run.
             Defaults to the number of CPU cores or 1 on Android.
@@ -72,35 +72,35 @@ def _start_api(action : Optional[List[str]] = None, **kw):
     return actions['api'](action=['start'], **kw)
 
 def _start_jobs(
-        action : Optional[List[str]] = None,
-        name : Optional[str] = None,
+        action: Optional[List[str]] = None,
+        name: Optional[str] = None,
         **kw
     ) -> SuccessTuple:
     """
     Run a Meerschaum action as a background job.
-
+    
     To create a new job, pass the command arguments after `start job`.
     To start a stopped job, pass the job name after `start job`.
-
+    
     You may also run a background job with the `-d` or `--daemon` flags.
-
+    
     Examples:
-
+    
         Create new jobs:
-
+    
           - `start job sync pipes --loop`
                 Run the action `sync pipes --loop` as a background job.
                 Generates a random name; e.g. 'happy_seal'.
-          
+    
           - `start api --daemon --name api_server`
                 Run the action `start api` as a background job, and assign the job
                 the name 'api_server'.
-
+    
         Start stopped jobs:
-
+    
           - `start job happy_seal`
                 Start the job 'happy_seal'.
-
+    
           - `start job --name happy_seal`
                 Start the job 'happy_seal' but via the `--name` flag.
                 This only applies when no text follows the words 'start job'.
@@ -333,8 +333,6 @@ def _start_gui(
     host = '127.0.0.1'
     if port is None:
         port = 8765
-    #  elif is_port_in_use(port):
-        #  return False, f"Port '{port}' is already in use."
 
     if not is_webterm_running(host, port):
         port = next(find_open_ports(port, 9000))
@@ -399,12 +397,12 @@ def _start_webterm(
     ) -> SuccessTuple:
     """
     Start the Meerschaum Web Terminal.
-
+    
     Options:
         - `-p`, `--port`
             The port to which the webterm binds.
             Defaults to 8765, and `--force` will choose the next available port.
-
+    
         - `--host`
             The host interface to which the webterm binds.
             Defaults to '127.0.0.1'.
@@ -445,8 +443,6 @@ def _start_webterm(
         loop.close()
 
     return True, "Success"
-
-
 
 
 ### NOTE: This must be the final statement of the module.

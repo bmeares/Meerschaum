@@ -13,8 +13,20 @@ def select_pipes(
         force: bool = False,
         debug: bool = False,
     ) -> List[Pipe]:
-    """
-    Prompt the user for the keys to identify a list of pipes.
+    """Prompt the user for the keys to identify a list of pipes.
+
+    Parameters
+    ----------
+    yes: bool :
+         (Default value = False)
+    force: bool :
+         (Default value = False)
+    debug: bool :
+         (Default value = False)
+
+    Returns
+    -------
+
     """
     from meerschaum.utils.misc import get_connector_labels
     from meerschaum.utils.prompt import prompt, choose, yes_no

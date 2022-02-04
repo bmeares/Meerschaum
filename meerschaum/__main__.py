@@ -22,8 +22,16 @@ limitations under the License.
 import sys, os
 
 def main(sysargs: list = None) -> None:
-    """
-    Main CLI entry point.
+    """Main CLI entry point.
+
+    Parameters
+    ----------
+    sysargs: list :
+         (Default value = None)
+
+    Returns
+    -------
+
     """
     if sysargs is None:
         sysargs = sys.argv[1:]
@@ -93,9 +101,7 @@ def _exit(return_code : int = 0, old_cwd : str = None) -> None:
     sys.exit(return_code)
 
 def _close_pools():
-    """
-    Close multiprocessing pools before exiting.
-    """
+    """Close multiprocessing pools before exiting."""
     ### Final step: close global pools.
     from meerschaum.utils.pool import get_pools
     for class_name, pool in get_pools().items():

@@ -10,12 +10,20 @@ from __future__ import annotations
 from meerschaum.utils.typing import PipesDict, Dict
 
 def pprint_pipes(pipes : PipesDict) -> None:
-    """
-    Print a stylized tree of a Pipes dictionary.
+    """Print a stylized tree of a Pipes dictionary.
     Supports ANSI and UNICODE global settings.
-
+    
     This code is pretty unreadable. Just a warning. But it's thoroughly tested,
     so things *shouldn't* break.
+
+    Parameters
+    ----------
+    pipes : PipesDict :
+        
+
+    Returns
+    -------
+
     """
     from meerschaum.utils.warnings import error
     from meerschaum.utils.packages import attempt_import, import_rich
@@ -47,9 +55,15 @@ def pprint_pipes(pipes : PipesDict) -> None:
     print()
 
     def ascii_print_pipes():
-        """
-        Print the dictionary with no unicode allowed. Also works in case rich fails to import
+        """Print the dictionary with no unicode allowed. Also works in case rich fails to import
         (though rich should auto-install when `attempt_import()` is called).
+
+        Parameters
+        ----------
+
+        Returns
+        -------
+
         """
         asciitree = attempt_import('asciitree')
         def _replace_pipe_ascii_tree(pipe):
@@ -115,9 +129,17 @@ def pprint_pipes(pipes : PipesDict) -> None:
         cols.append(key_str)
 
         def replace_tree_text(tree_str : str) -> Text:
-            """
-            Replace the colored words with stylized Text instead.
+            """Replace the colored words with stylized Text instead.
             Is not executed if ANSI and UNICODE are disabled.
+
+            Parameters
+            ----------
+            tree_str : str :
+                
+
+            Returns
+            -------
+
             """
             tree_text = Text(tree_str) if Text is not None else None
             for k, v in replace_dict.items():
@@ -228,8 +250,20 @@ def pprint_pipe_columns(
         nopretty : bool = False,
         debug : bool = False,
     ) -> None:
-    """
-    Pretty-print a pipe's columns.
+    """Pretty-print a pipe's columns.
+
+    Parameters
+    ----------
+    pipe : meerschaum.Pipe :
+        
+    nopretty : bool :
+         (Default value = False)
+    debug : bool :
+         (Default value = False)
+
+    Returns
+    -------
+
     """
     import json
     from meerschaum.utils.warnings import info

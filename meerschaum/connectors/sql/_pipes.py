@@ -12,8 +12,8 @@ from meerschaum.utils.typing import (
 
 def register_pipe(
         self,
-        pipe : meerschaum.Pipe,
-        debug : bool = False,
+        pipe: meerschaum.Pipe,
+        debug: bool = False,
     ) -> SuccessTuple:
     """
     Register a new pipe.
@@ -73,16 +73,17 @@ def edit_pipe(
         **kw : Any
     ) -> SuccessTuple:
     """
-    Edit a Pipe's parameters.
+    Persist a Pipe's parameters to its database.
 
-    :param pipe:
+    Parameters
+    ----------
+    pipe: meerschaum.Pipe.Pipe, default None
         The pipe to be edited.
-
-    :param patch:
-        If patch is True, update the existing parameters by cascading.
+    patch: bool, default False
+        If patch is `True`, update the existing parameters by cascading.
         Otherwise overwrite the parameters (default).
-
-    :param debug: Verbosity toggle.
+    debug: bool, default False
+        Verbosity toggle.
     """
 
     if pipe.id is None:
@@ -133,29 +134,28 @@ def edit_pipe(
 
 def fetch_pipes_keys(
         self,
-        connector_keys : Optional[List[str]] = None,
-        metric_keys : Optional[List[str]] = None,
-        location_keys : Optional[List[str]] = None,
-        params : Optional[Dict[str, Any]] = None,
-        debug : bool = False
+        connector_keys: Optional[List[str]] = None,
+        metric_keys: Optional[List[str]] = None,
+        location_keys: Optional[List[str]] = None,
+        params: Optional[Dict[str, Any]] = None,
+        debug: bool = False
     ) -> Optional[List[Tuple[str, str, Optional[str]]]]:
     """
     Return a list of tuples corresponding to the parameters provided.
 
-    :param connector_keys:
+    Parameters
+    ----------
+    connector_keys: Optional[List[str]], default None
         List of connector_keys to search by.
-
-    :param metric_keys:
+    metric_keys: Optional[List[str]], default None
         List of metric_keys to search by.
-
-    :param location_keys:
+    location_keys: Optional[List[str]], default None
         List of location_keys to search by.
-
-    :param params:
+    params: Optional[Dict[str, Any]], default None
         Dictionary of additional parameters to search by.
-        E.g. --params pipe_id:1
-
-    :param debug: Verbosity toggle.
+        E.g. `--params pipe_id:1`
+    debug: bool, default False
+        Verbosity toggle.
     """
     from meerschaum.utils.warnings import error
     from meerschaum.utils.debug import dprint
@@ -324,8 +324,8 @@ def create_indices(
 
 def delete_pipe(
         self,
-        pipe : meerschaum.Pipe,
-        debug : bool = False,
+        pipe: meerschaum.Pipe,
+        debug: bool = False,
     ) -> SuccessTuple:
     """
     Delete a Pipe's registration and drop its table.
@@ -365,6 +365,33 @@ def get_backtrack_data(
     ) -> Optional[pandas.DataFrame]:
     """
     Get the most recent backtrack_minutes' worth of data from a Pipe.
+
+    Parameters
+    ----------
+    pipe: meerschaum.Pipe.Pipe:
+        The pipe to get data from.
+
+    backtrack_minutes: int, default 0
+        How far into the past to look for data.
+
+    begin: Optional[datetime.datetime], default None
+        Where to start traversing from. Defaults to `None`, which uses the
+        `meerschaum.Pipe.Pipe.get_sync_time` value.
+
+    params: Optional[Dict[str, Any]], default None
+        Additional parameters to filter by.
+        See `meerschaum.connectors.sql.build_where`.
+
+    chunksize: Optional[int], default -1
+        The size of dataframe chunks to load into memory.
+
+    debug: bool, default False
+        Verbosity toggle.
+
+    Returns
+    -------
+    A `pd.DataFrame` of backtracked data.
+
     """
     from meerschaum.utils.warnings import error, warn
     if pipe is None:
@@ -401,21 +428,41 @@ def get_backtrack_data(
 
 def get_pipe_data(
         self,
-        pipe : Optional[meerschaum.Pipe] = None,
-        begin : Union[datetime.datetime, str, None] = None,
-        end : Union[datetime.datetime, str, None] = None,
-        params : Optional[Dict[str, Any]] = None,
-        debug : bool = False,
-        **kw : Any
+        pipe: Optional[meerschaum.Pipe] = None,
+        begin: Union[datetime.datetime, str, None] = None,
+        end: Union[datetime.datetime, str, None] = None,
+        params: Optional[Dict[str, Any]] = None,
+        debug: bool = False,
+        **kw: Any
     ) -> Optional[pandas.DataFrame]:
     """
     Access a pipe's data from the SQL instance.
 
-    :param begin:
-        Lower bound for the query (inclusive)
+    Parameters
+    ----------
+    pipe: meerschaum.Pipe.Pipe:
+        The pipe to get data from.
 
-    :param end:
-        Upper bound for the query (inclusive)
+    begin: Optional[datetime.datetime], default None
+        If provided, get rows newer than or equal to this value.
+
+    end: Optional[datetime.datetime], default None
+        If provided, get rows older than or equal to this value.
+
+    params: Optional[Dict[str, Any]], default None
+        Additional parameters to filter by.
+        See `meerschaum.connectors.sql.build_where`.
+
+    chunksize: Optional[int], default -1
+        The size of dataframe chunks to load into memory.
+
+    debug: bool, default False
+        Verbosity toggle.
+
+    Returns
+    -------
+    A `pd.DataFrame` of the pipe's data.
+
     """
     from meerschaum.utils.debug import dprint
     from meerschaum.connectors.sql.tools import sql_item_name, dateadd_str
@@ -469,8 +516,8 @@ def get_pipe_data(
 
 def get_pipe_id(
         self,
-        pipe : meerschaum.Pipe,
-        debug : bool = False,
+        pipe: meerschaum.Pipe,
+        debug: bool = False,
     ) -> int:
     """
     Get a Pipe's ID from the pipes table.
@@ -536,7 +583,7 @@ def get_pipe_attributes(
 def sync_pipe(
         self,
         pipe: meerschaum.Pipe.Pipe,
-        df: Union[pandas.DataFrame, str, Dict[Any, Any]] = None,
+        df: Union[pandas.DataFrame, str, Dict[Any, Any], None] = None,
         begin: Optional[datetime.datetime] = None,
         end: Optional[datetime.datetime] = None,
         chunksize: Optional[int] = -1,
@@ -546,41 +593,47 @@ def sync_pipe(
         **kw: Any
     ) -> SuccessTuple:
     """
-    Sync a pipe using a SQL Connection.
+    Sync a pipe using a database connection.
 
-    :param pipe:
+    Parameters
+    ----------
+    pipe: Meerschaum.Pipe.Pipe
         The Meerschaum Pipe instance into which to sync the data.
 
-    :param df:
-        An optional DataFrame to sync into the pipe.
+    df: Union[pandas.DataFrame, str, Dict[Any, Any]]
+        An optional DataFrame or equivalent to sync into the pipe.
         Defaults to `None`.
 
-    :param begin:
+    begin: Optional[datetime.datetime], default None
         Optionally specify the earliest datetime to search for data.
         Defaults to `None`.
 
-    :param end:
+    end: Optional[datetime.datetime], default None
         Optionally specify the latest datetime to search for data.
         Defaults to `None`.
 
-    :param chunksize:
+    chunksize: Optional[int], default -1
         Specify the number of rows to sync per chunk.
-        If -1, resort to system configuration (default is 900).
+        If `-1`, resort to system configuration (default is `900`).
         A `chunksize` of `None` will sync all rows in one transaction.
-        Defaults to -1.
+        Defaults to `-1`.
 
-    :param check_existing:
-        If True, pull and diff with existing data from the pipe, defaults to True.
+    check_existing: bool, default True
+        If `True`, pull and diff with existing data from the pipe. Defaults to `True`.
 
-    :param blocking:
-        If True, wait for sync to finish and return its result, otherwise asyncronously sync.
-        Defaults to True.
+    blocking: bool, default True
+        If `True`, wait for sync to finish and return its result, otherwise asyncronously sync.
+        Defaults to `True`.
 
-    :param debug:
+    debug: bool, default False
         Verbosity toggle. Defaults to False.
 
-    :param kw:
+    kw: Any
         Catch-all for keyword arguments.
+
+    Returns
+    -------
+    A `SuccessTuple` of success (`bool`) and message (`str`).
     """
     from meerschaum.utils.warnings import warn
     from meerschaum.utils.debug import dprint
@@ -653,28 +706,34 @@ def sync_pipe(
 
 def get_sync_time(
         self,
-        pipe : 'meerschaum.Pipe',
-        params : Optional[Dict[str, Any]] = None,
+        pipe: 'meerschaum.Pipe',
+        params: Optional[Dict[str, Any]] = None,
         newest: bool = True,
         round_down: bool = True,
-        debug : bool = False,
+        debug: bool = False,
     ) -> 'datetime.datetime':
-    """
-    Get a Pipe's most recent datetime.
+    """Get a Pipe's most recent datetime.
 
-    :param pipe:
-        The pipe to select on.
+    Parameters
+    ----------
+    pipe: meerschaum.Pipe.Pipe
+        The pipe to get the sync time for.
 
-    :param params:
-        Optional params dictionary to build the WHERE clause.
+    params: Optional[Dict[str, Any]], default None
+        Optional params dictionary to build the `WHERE` clause.
+        See `meerschaum.connectors.sql.tools.build_where`.
 
-    :param newest:
+    newest: bool, default True
         If `True`, get the most recent datetime (honoring `params`).
         If `False`, get the oldest datetime (ASC instead of DESC).
 
-    :param round_down:
+    round_down: bool, default True
         If `True`, round the resulting datetime value down to the nearest minute.
         Defaults to `True`.
+
+    Returns
+    -------
+    A `datetime.datetime` object if the pipe exists, otherwise `None`.
     """
     from meerschaum.connectors.sql.tools import sql_item_name, build_where
     from meerschaum.utils.warnings import warn
@@ -728,6 +787,19 @@ def pipe_exists(
     ) -> bool:
     """
     Check that a Pipe's table exists.
+
+    Parameters
+    ----------
+    pipe: meerschaum.Pipe.Pipe:
+        The pipe to check.
+        
+    debug: bool:, default False
+        Verbosity toggle.
+
+    Returns
+    -------
+    A `bool` corresponding to whether a pipe's table exists.
+
     """
     from meerschaum.connectors.sql.tools import table_exists
     exists = table_exists(str(pipe), self, debug=debug)
@@ -738,15 +810,40 @@ def pipe_exists(
 
 def get_pipe_rowcount(
         self,
-        pipe: 'meerschaum.Pipe',
-        begin: 'datetime.datetime' = None,
-        end: 'datetime.datetime' = None,
+        pipe: meerschaum.Pipe.Pipe,
+        begin: Optional[datetime.datetime] = None,
+        end: Optional[datetime.datetime] = None,
         remote: bool = False,
         params: Optional[Dict[str, Any]] = None,
         debug: bool = False
     ) -> int:
     """
-    Return the number of rows between datetimes for a Pipe's instance cache or remote source
+    Get the rowcount for a pipe in accordance with given parameters.
+
+    Parameters
+    ----------
+    pipe: meerschaum.Pipe.Pipe
+        The pipe to query with.
+        
+    begin: Optional[datetime.datetime], default None
+        The beginning datetime value.
+
+    end: Optional[datetime.datetime], default None
+        The beginning datetime value.
+
+    remote: bool, default False
+        If `True`, get the rowcount for the remote table.
+
+    params: Optional[Dict[str, Any]], default None
+        See `meerschaum.connectors.sql.tools.build_where`.
+
+    debug: bool, default False
+        Verbosity toggle.
+
+    Returns
+    -------
+    An `int` for the number of rows if the `pipe` exists, otherwise `None`.
+
     """
     from meerschaum.connectors.sql.tools import dateadd_str, sql_item_name
     from meerschaum.utils.warnings import error, warn
@@ -813,6 +910,12 @@ def drop_pipe(
     ) -> SuccessTuple:
     """
     Drop a pipe's tables but maintain its registration.
+
+    Parameters
+    ----------
+    pipe: meerschaum.Pipe.Pipe
+        The pipe to drop.
+        
     """
     if not pipe.exists(debug=debug):
         return True, f"Pipe '{pipe}' does not exist, so nothing was dropped."
@@ -838,6 +941,21 @@ def clear_pipe(
     ) -> SuccessTuple:
     """
     Delete a pipe's data within a bounded or unbounded interval without dropping the table.
+
+    Parameters
+    ----------
+    pipe: meerschaum.Pipe.Pipe
+        The pipe to clear.
+        
+    begin: Optional[datetime.datetime], default None
+        Beginning datetime. Inclusive.
+
+    end: Optional[datetime.datetime], default None
+         Ending datetime. Exclusive.
+
+    params: Optional[Dict[str, Any]], default None
+         See `meerschaum.connectors.sql.tools.build_where`.
+
     """
     if not pipe.exists(debug=debug):
         return True, f"Pipe '{pipe}' does not exist, so nothing was cleared."
@@ -867,29 +985,48 @@ def get_pipe_table(
         debug: bool = False,
     ) -> sqlalchemy.Table:
     """
-    Return a sqlalchemy Table for a Pipe bound to this SQLConnector's engine.
+    Return the `sqlalchemy.Table` object for a `meerschaum.Pipe.Pipe`.
+
+    Parameters
+    ----------
+    pipe: meerschaum.Pipe.Pipe:
+        The pipe in question.
+        
+
+    Returns
+    -------
+    A `sqlalchemy.Table` object. 
+
     """
     from meerschaum.connectors.sql.tools import get_sqlalchemy_table
     return get_sqlalchemy_table(str(pipe), connector=self, debug=debug)
 
 def get_pipe_columns_types(
         self,
-        pipe : meerschaum.Pipe,
-        debug : bool = False,
+        pipe: meerschaum.Pipe,
+        debug: bool = False,
     ) -> Optional[Dict[str, str]]:
     """
-    Return a dictionary of a pipe's table's columns to their data types.
+    Get the pipe's columns and types.
 
-    E.g. An example dictionary for a small table.
+    Parameters
+    ----------
+    pipe: meerschaum.Pipe:
+        The pipe to get the columns for.
+        
+    Returns
+    -------
+    A dictionary of columns names (`str`) and types (`str`).
 
-    ```
-    >>> {
-    ...   'dt': 'TIMESTAMP WITHOUT TIMEZONE',
-    ...   'id': 'BIGINT',
-    ...   'val': 'DOUBLE PRECISION',
-    ... }
+    Examples
+    --------
+    >>> conn.get_pipe_columns_types(pipe)
+    {
+      'dt': 'TIMESTAMP WITHOUT TIMEZONE',
+      'id': 'BIGINT',
+      'val': 'DOUBLE PRECISION',
+    }
     >>> 
-    ```
     """
     table_columns = {}
     try:

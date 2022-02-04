@@ -21,66 +21,77 @@ _disallow_chunks_flavors = {'duckdb'}
 
 def read(
         self,
-        query_or_table : Union[str, sqlalchemy.Query],
-        params : Optional[Dict[str, Any], List[str]] = None,
-        chunksize : Optional[int] = -1,
-        chunk_hook : Optional[Callable[[pandas.DataFrame], Any]] = None,
-        as_hook_results : bool = False,
-        chunks : Optional[int] = None,
-        as_chunks : bool = False,
+        query_or_table: Union[str, sqlalchemy.Query],
+        params: Optional[Dict[str, Any], List[str]] = None,
+        chunksize: Optional[int] = -1,
+        chunk_hook: Optional[Callable[[pandas.DataFrame], Any]] = None,
+        as_hook_results: bool = False,
+        chunks: Optional[int] = None,
+        as_chunks: bool = False,
         as_iterator: bool = False,
-        silent : bool = False,
-        debug : bool = False,
-        **kw : Any
-    ) -> Optional[
-            Union[
-                pandas.DataFrame,
-                List[pandas.DataFrame],
-                List[Any],
-            ]
-        ]:
+        silent: bool = False,
+        debug: bool = False,
+        **kw: Any
+    ) -> Union[
+        pandas.DataFrame,
+        List[pandas.DataFrame],
+        List[Any],
+        None,
+    ]:
     """
     Read a SQL query or table into a pandas dataframe.
 
-    :param query_or_table:
+    Parameters
+    ----------
+    query_or_table: Union[str, sqlalchemy.Query]
         The SQL query (sqlalchemy Query or string) or name of the table from which to select.
 
-    :param params:
+    params: Optional[Dict[str, Any]], default None
         `List` or `Dict` of parameters to pass to `pandas.read_sql()`.
         See the pandas documentaion for more information:
         https://pandas.pydata.org/pandas-docs/stable/reference/api/pandas.read_sql.html
 
-    :param chunksize:
+    chunksize: Optional[int], default -1
         How many chunks to read at a time. `None` will read everything in one large chunk.
         Defaults to system configuration.
 
-    :param chunk_hook:
-        Hook function to execute once per chunk.
-        NOTE: `as_iterator` MUST be False (default).
-        E.g. Write and reading chunks intermittently. See `--sync-chunks` for an example.
+        **NOTE:** DuckDB does not allow for chunking.
 
-    :param as_hook_results:
+    chunk_hook: Optional[Callable[[pandas.DataFrame], Any]], default None
+        Hook function to execute once per chunk, e.g. writing and reading chunks intermittently.
+        See `--sync-chunks` for an example.
+        **NOTE:** `as_iterator` MUST be False (default).
+
+    as_hook_results: bool, default False
         If `True`, return a `List` of the outputs of the hook function.
         Only applicable if `chunk_hook` is not None.
-        NOTE: `as_iterator` MUST be False (default).
-        Defaults to False.
 
-    :param chunks:
-        How many chunks to retrieve and return into a single dataframe.
+        **NOTE:** `as_iterator` MUST be `False` (default).
 
-    :param as_chunks:
+    chunks: Optional[int], default None
+        Limit the number of chunks to read into memory, i.e. how many chunks to retrieve and
+        return into a single dataframe.
+        For example, to limit the returned dataframe to 100,000 rows,
+        you could specify a `chunksize` of `1000` and `chunks` of `100`.
+
+    as_chunks: bool, default False
         If `True`, return a list of DataFrames. Otherwise return a single DataFrame.
-        Defaults to False.
+        Defaults to `False`.
 
-    :param as_iterator:
+    as_iterator: bool, default False
         If `True`, return the pandas DataFrame iterator.
-        `chunksize` must not be None (falls back to 1000 if so),
-            and hooks are not called in this case.
-        Defaults to False.
+        `chunksize` must not be `None` (falls back to 1000 if so),
+        and hooks are not called in this case.
+        Defaults to `False`.
 
-    :param silent:
+    silent: bool, default False
         If `True`, don't raise warnings in case of errors.
         Defaults to `False`.
+
+    Returns
+    -------
+    A `pd.DataFrame` (default case), or an iterator, or a list of dataframes / iterators,
+    or `None` if something breaks.
 
     """
     if chunks is not None and chunks <= 0:
@@ -193,11 +204,11 @@ def read(
 
     return pd.concat(chunk_list).reset_index(drop=True)
 
-def _read_duckdb(query : str, engine : sqlalchemy.Engine, ):
+def _read_duckdb(query: str, engine: sqlalchemy.Engine, ):
     """
     Implement the `pandas.read_sql()` method for duckdb.
     """
-    pass
+    raise NotImplementedError
 
 def value(
         self,
@@ -207,7 +218,28 @@ def value(
         **kw: Any
     ) -> Any:
     """
-    Return a single value from a SQL query.
+    Execute the provided query and return the first value.
+
+    Parameters
+    ----------
+    query: str
+        The SQL query to execute.
+        
+    *args: Any
+        The arguments passed to `meerschaum.connectors.sql.SQLConnector.exec`
+        if `use_pandas` is `False` (default) or to `meerschaum.connectors.sql.SQLConnector.read`.
+        
+    use_pandas: bool, default False
+        If `True`, use `meerschaum.connectors.SQLConnector.read`, otherwise use
+        `meerschaum.connectors.sql.SQLConnector.exec` (default).
+
+    **kw: Any
+        See `args`.
+
+    Returns
+    -------
+    Any value returned from the query.
+
     """
     from meerschaum.utils.warnings import warn
     if use_pandas:
@@ -240,12 +272,17 @@ def value(
             warn("Failed to close connection with exception:\n" + str(e))
     return _val
 
+
 def execute(
         self,
         *args : Any,
         **kw : Any
     ) -> Optional[sqlalchemy.engine.result.resultProxy]:
+    """
+    An alias for `meerschaum.connectors.sql.SQLConnector.exec`.
+    """
     return self.exec(*args, **kw)
+
 
 def exec(
         self,
@@ -265,11 +302,39 @@ def exec(
             None
     ]:
     """
-    Execute SQL code and return success status. e.g. calling stored procedures.
-
-    Wrapper for self.engine.connect() and connection.execute().
-
+    Execute SQL code and return the `sqlalchemy` result, e.g. when calling stored procedures.
+    
     If inserting data, please use bind variables to avoid SQL injection!
+
+    Parameters
+    ----------
+    query: str
+        The query to execute.
+
+    *args: Any
+        Arguments passed to `sqlalchemy.engine.execute`.
+        
+    silent: bool, default False
+        If `True`, suppress warnings.
+
+    commit: Optional[bool], default None
+        If `True`, commit the changes after execution.
+        Causes issues with flavors like `'mssql'`.
+
+    close: Optional[bool], default None
+        If `True`, close the connection after execution.
+        Causes issues with flavors like `'mssql'`.
+
+    with_connection: bool, default False
+        If `True`, return a tuple including the connection object.
+    
+    **kw: Any :
+    See `args`.
+
+    Returns
+    -------
+    The `sqlalchemy` result object, or a tuple with the connection if `with_connection` is provided.
+
     """
     from meerschaum.utils.packages import attempt_import
     sqlalchemy = attempt_import("sqlalchemy")
@@ -283,16 +348,6 @@ def exec(
         True if (self.flavor != 'mssql' or 'select' not in str(query).lower())
         else False
     )
-
-    #  with self.engine.connect() as connection:
-        #  try:
-            #  result = connection.execute(query, *args, **kw)
-        #  except Exception as e:
-            #  if debug:
-                #  dprint(f"Failed to execute query:\n\n{query}\n\n{e}")
-            #  if not silent:
-                #  warn(str(e))
-
 
     connection = self.engine.connect()
     transaction = connection.begin() if _commit else None
@@ -317,6 +372,7 @@ def exec(
 
     return result
 
+
 def to_sql(
         self,
         df: pandas.DataFrame,
@@ -331,32 +387,37 @@ def to_sql(
         **kw
     ) -> Union[bool, SuccessTuple]:
     """
-    Upload a DataFrame's contents to the SQL server
+    Upload a DataFrame's contents to the SQL server.
 
-    :param df:
-        The DataFrame to be uploaded
+    Parameters
+    ----------
+    df: pd.DataFrame
+        The DataFrame to be uploaded.
 
-    :param name:
-        The name of the table to be created
+    name: str
+        The name of the table to be created.
 
-    :param index:
-        If True, creates the DataFrame's indices as columns (default False)
+    index: bool, default False
+        If True, creates the DataFrame's indices as columns.
 
-    :param if_exists:
-        ['replace', 'append', 'fail']
+    if_exists: str, default 'replace'
         Drop and create the table ('replace') or append if it exists
         ('append') or raise Exception ('fail').
-        (default 'replace')
+        Options are ['replace', 'append', 'fail'].
 
-    :param method:
-        None or multi. Details on pandas.to_sql
+    method: str, default ''
+        None or multi. Details on pandas.to_sql.
 
-    :param as_tuple:
-        If `True`, return a (success_bool, message) tuple instead of a bool.
+    as_tuple: bool, default False
+        If `True`, return a (success_bool, message) tuple instead of a `bool`.
         Defaults to `False`.
-
-    **kw : keyword arguments
+        
+    kw: Any
         Additional arguments will be passed to the DataFrame's `to_sql` function
+
+    Returns
+    -------
+    Either a `bool` or a `SuccessTuple` (depends on `as_tuple`).
     """
     import time
     from meerschaum.utils.warnings import error
@@ -418,19 +479,36 @@ def to_sql(
     return success
 
 def psql_insert_copy(
-        table : pandas.io.sql.SQLTable,
-        conn : Union[sqlalchemy.engine.Engine, sqlalchemy.engine.Connection],
-        keys : Sequence[str],
-        data_iter : Iterable[Any]
+        table: pandas.io.sql.SQLTable,
+        conn: Union[sqlalchemy.engine.Engine, sqlalchemy.engine.Connection],
+        keys: Sequence[str],
+        data_iter: Iterable[Any]
     ) -> None:
     """
-    Execute SQL statement inserting data
+    Execute SQL statement inserting data for PostgreSQL.
 
-    :param table : pandas.io.sql.SQLTable
-    conn : sqlalchemy.engine.Engine or sqlalchemy.engine.Connection
-    keys : list of str
+    Parameters
+    ----------
+    table :
+        pandas.io.sql.SQLTable
+        conn : sqlalchemy.engine.Engine or sqlalchemy.engine.Connection
+        keys : list of str
         Column names
-    data_iter : Iterable that iterates the values to be inserted
+        data_iter : Iterable that iterates the values to be inserted
+    table : pandas.io.sql.SQLTable :
+        
+    conn : Union[sqlalchemy.engine.Engine :
+        
+    sqlalchemy.engine.Connection] :
+        
+    keys : Sequence[str] :
+        
+    data_iter : Iterable[Any] :
+        
+
+    Returns
+    -------
+    None
     """
     import csv
     from io import StringIO

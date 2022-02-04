@@ -22,6 +22,28 @@ def bootstrap(
     Prompt the user to create a pipe's requirements all from one method.
     This method shouldn't be used in any automated scripts because it interactively
     prompts the user and therefore may hang.
+
+    Parameters
+    ----------
+    debug: bool, default False:
+        Verbosity toggle.
+
+    yes: bool, default False:
+        Print the questions and automatically agree.
+
+    force: bool, default False:
+        Skip the questions and agree anyway.
+
+    noask: bool, default False:
+        Print the questions but go with the default answer.
+
+    shell: bool, default False:
+        Used to determine if we are in the interactive shell.
+        
+    Returns
+    -------
+    A `SuccessTuple` corresponding to the success of this procedure.
+
     """
 
     from meerschaum.utils.warnings import warn, info, error

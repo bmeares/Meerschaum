@@ -12,10 +12,24 @@ def pprint(
         nopretty : bool = False,
         **kw
     ):
-    """
-    Pretty print an object according to the configured ANSI and UNICODE settings.
+    """Pretty print an object according to the configured ANSI and UNICODE settings.
     If detect_password is True (default), search and replace passwords with '*' characters.
     Does not mutate objects.
+
+    Parameters
+    ----------
+    *args :
+        
+    detect_password : bool :
+         (Default value = True)
+    nopretty : bool :
+         (Default value = False)
+    **kw :
+        
+
+    Returns
+    -------
+
     """
     from meerschaum.utils.packages import attempt_import, import_rich
     from meerschaum.utils.formatting import ANSI, UNICODE, get_console

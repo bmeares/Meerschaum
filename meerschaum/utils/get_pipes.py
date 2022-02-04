@@ -25,11 +25,88 @@ def get_pipes(
         debug: bool = False,
         **kw: Any
     ) -> Union[PipesDict, List['meerschaum.Pipe']]:
-    """
-    Return a dictionary (or list) of pipe objects.
+    """Return a dictionary (or list) of pipe objects.
     The pipes dictionary returned from `meerschaum.utils.get_pipes` has the following format:
-
+    
     ```
+    
+    **NOTE:** If a pipe does not have a `location` key, it must be referenced as `None`.
+    E.g. The pipe `sql:main_weather` would look like this:
+    
+    ```
+
+    Parameters
+    ----------
+    connector_keys :
+        String or list of connector keys.
+        If parameter is omitted or is '*', fetch all connector_keys.
+    metric_keys :
+        String or list of metric keys.
+        See connector_keys for formatting
+    location_keys :
+        String or list of location keys.
+        See connector_keys for formatting
+    params :
+        Dictionary of additional parameters to search by.
+        Params are parsed into a SQL WHERE clause.
+        E.g. { 'a' : 1, 'b' : 2 } equates to 'WHERE a = 1 AND b = 2'
+    mrsm_instance :
+        Connector keys for the Meerschaum instance of the pipes.
+        Must be of SQLConnector or APIConnector and point to a valid
+        Meerschaum instance.
+    as_list :
+        If True, return pipes in a list instead of a hierarchical dictionary.
+        False : { connector_keys : { metric_key : { location_key : Pipe } } }
+        True  : [ Pipe ]
+        Defaults to False.
+    method :
+        registered', 'explicit', 'all']
+        
+        If 'registered' (default), create pipes based on registered keys in the connector's pipes table
+        (API or SQL connector, depends on mrsm_instance).
+        
+        If 'explicit', create pipes from provided connector_keys, metric_keys, and location_keys
+        instead of consulting the pipes table. Useful for creating non-existent pipes.
+        
+        If 'all', create pipes from predefined metrics and locations. Required connector_keys.
+        **NOTE:** Not implemented!
+    wait :
+        Wait for a connection before getting Pipes. Should only be true for cases where the
+        database might not be running (like the API).
+    connector_keys: Optional[Union[str :
+        
+    List[str]]] :
+         (Default value = None)
+    metric_keys: Optional[Union[str :
+        
+    location_keys: Optional[Union[str :
+        
+    params: Optional[Dict[str :
+        
+    Any]] :
+         (Default value = None)
+    mrsm_instance: Union[str :
+        
+    InstanceConnector :
+        
+    None] :
+         (Default value = None)
+    instance: Union[str :
+        
+    as_list: bool :
+         (Default value = False)
+    method: str :
+         (Default value = 'registered')
+    wait: bool :
+         (Default value = False)
+    debug: bool :
+         (Default value = False)
+    **kw: Any :
+        
+
+    Returns
+    -------
+
     >>> pipes = {
     ...     <connector_keys> : {
     ...         <metric> : {
@@ -41,59 +118,11 @@ def get_pipes(
     ...         },
     ...     },
     ... },
-    >>> 
+    >>>
     ```
-
-    **NOTE:** If a pipe does not have a `location` key, it must be referenced as `None`.
-    E.g. The pipe `sql:main_weather` would look like this:
-
-    ```
+    
     >>> pipes['sql:main']['weather'][None]
     ```
-
-    :param connector_keys:
-        String or list of connector keys.
-        If parameter is omitted or is '*', fetch all connector_keys.
-
-    :param metric_keys:
-        String or list of metric keys.
-        See connector_keys for formatting
-
-    :param location_keys:
-        String or list of location keys.
-        See connector_keys for formatting
-
-    :param params:
-        Dictionary of additional parameters to search by.
-        Params are parsed into a SQL WHERE clause.
-        E.g. { 'a' : 1, 'b' : 2 } equates to 'WHERE a = 1 AND b = 2'
-
-    :param mrsm_instance:
-        Connector keys for the Meerschaum instance of the pipes.
-        Must be of SQLConnector or APIConnector and point to a valid
-        Meerschaum instance.
-
-    :param as_list:
-        If True, return pipes in a list instead of a hierarchical dictionary.
-        False : { connector_keys : { metric_key : { location_key : Pipe } } }
-        True  : [ Pipe ]
-        Defaults to False.
-
-    :param method:
-        ['registered', 'explicit', 'all']
-
-    If 'registered' (default), create pipes based on registered keys in the connector's pipes table
-    (API or SQL connector, depends on mrsm_instance).
-    
-    If 'explicit', create pipes from provided connector_keys, metric_keys, and location_keys
-    instead of consulting the pipes table. Useful for creating non-existent pipes.
-    
-    If 'all', create pipes from predefined metrics and locations. Required connector_keys.
-    **NOTE:** Not implemented!
-
-    :param wait:
-        Wait for a connection before getting Pipes. Should only be true for cases where the
-        database might not be running (like the API).
     """
 
     from meerschaum.config import get_config
@@ -182,8 +211,21 @@ def methods(
         **kw: Any
     ) -> List[Tuple[str, str, str]]:
     """
-    Return a list of tuples containing (connector_keys, metric_key, location_key)
-    based on the method of choosing keys.
+
+    Parameters
+    ----------
+    method: str :
+        
+    connector: 'meerschaum.connectors.Connector' :
+        
+    **kw: Any :
+        
+
+    Returns
+    -------
+    type
+        based on the method of choosing keys.
+
     """
     from meerschaum.utils.warnings import error
     from meerschaum.connectors.sql.tables import get_tables
@@ -197,11 +239,31 @@ def methods(
             debug : bool = False,
             **kw
         ) -> List[Tuple[str, str, str]]:
-        """
-        Get keys from the pipes table or the API directly.
+        """Get keys from the pipes table or the API directly.
         Builds query or URL based on provided keys and parameters.
-
+        
         Only works for SQL and API Connectors.
+
+        Parameters
+        ----------
+        connector_keys : Optional[List[str]] :
+             (Default value = None)
+        metric_keys : Optional[List[str]] :
+             (Default value = None)
+        location_keys : Optional[List[str]] :
+             (Default value = None)
+        params : Optional[Dict[str :
+            
+        Any]] :
+             (Default value = None)
+        debug : bool :
+             (Default value = False)
+        **kw :
+            
+
+        Returns
+        -------
+
         """
         if connector_keys is None:
             connector_keys = []
@@ -228,10 +290,30 @@ def methods(
             debug : bool = False,
             **kw
         ) -> List[Tuple[str, str, str]]:
-        """
-        Explicitly build Pipes based on provided keys.
+        """Explicitly build Pipes based on provided keys.
         Raises an error if connector_keys or metric_keys is empty,
         and assumes location_keys = [None] if empty.
+
+        Parameters
+        ----------
+        connector_keys : Optional[List[str]] :
+             (Default value = None)
+        metric_keys : Optional[List[str]] :
+             (Default value = None)
+        location_keys : Optional[List[str]] :
+             (Default value = None)
+        params : Optional[Dict[str :
+            
+        Any]] :
+             (Default value = None)
+        debug : bool :
+             (Default value = False)
+        **kw :
+            
+
+        Returns
+        -------
+
         """
 
         if connector_keys is None:
@@ -269,9 +351,17 @@ def methods(
         return result
 
     def _all(**kw):
-        """
-        Fetch all available metrics and locations and create every combination.
+        """Fetch all available metrics and locations and create every combination.
         Connector keys are required.
+
+        Parameters
+        ----------
+        **kw :
+            
+
+        Returns
+        -------
+
         """
         error(
             "Need to implement metrics and locations logic in SQL and API.",

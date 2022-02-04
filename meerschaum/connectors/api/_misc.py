@@ -11,7 +11,17 @@ from meerschaum.utils.typing import Optional
 
 def get_mrsm_version(self, **kw) -> Optional[str]:
     """
-    Return the API server's version.
+
+    Parameters
+    ----------
+    **kw :
+        
+
+    Returns
+    -------
+    type
+        
+
     """
     from meerschaum.config.static import _static_config
     try:
@@ -28,7 +38,17 @@ def get_mrsm_version(self, **kw) -> Optional[str]:
 
 def get_chaining_status(self, **kw) -> Optional[bool]:
     """
-    Return the API server's chaining status.
+
+    Parameters
+    ----------
+    **kw :
+        
+
+    Returns
+    -------
+    type
+        
+
     """
     from meerschaum.config.static import _static_config
     try:

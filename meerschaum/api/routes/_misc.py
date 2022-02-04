@@ -19,19 +19,14 @@ def get_favicon() -> FileResponse:
     from meerschaum.config._paths import API_STATIC_PATH
     return FileResponse(os.path.join(API_STATIC_PATH, 'ico', 'logo.ico'))
 
+
 @app.get(endpoints['chaining'], tags=['Misc'])
 def get_chaining_status() -> bool:
-    """
-    Return whether this API instance allows chaining.
-    """
     return check_allow_chaining()
 
 
 @app.get(endpoints['info'], tags=['Misc'])
 def get_instance_info() -> Dict[str, str]:
-    """
-    Return a dictionary of configuration information.
-    """
     from meerschaum import __version__ as version
     num_plugins = len(get_api_connector().get_plugins(debug=debug))
     num_users = len(get_api_connector().get_users(debug=debug))
@@ -46,9 +41,6 @@ def get_instance_info() -> Dict[str, str]:
 if debug:
     @app.get('/id', tags=['Misc'])
     def get_ids() -> str:
-        """
-        Return the server and process IDs.
-        """
         return {
             'server': SERVER_ID,
             'process': os.getpid(),

@@ -10,12 +10,25 @@ from meerschaum.utils.typing import SuccessTuple
 
 def show(
         self,
-        nopretty : bool = False,
-        debug : bool = False,
+        nopretty: bool = False,
+        debug: bool = False,
         **kw
     ) -> SuccessTuple:
     """
     Show attributes of a Pipe.
+
+    Parameters
+    ----------
+    nopretty: bool, default False
+        If `True`, simply print the JSON of the pipe's attributes.
+
+    debug: bool, default False
+        Verbosity toggle.
+
+    Returns
+    -------
+    A `SuccessTuple` of success, message.
+
     """
     import json
     from meerschaum.utils.formatting import pprint, make_header

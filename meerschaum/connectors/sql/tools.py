@@ -48,37 +48,60 @@ def dateadd_str(
         begin: Union[str, datetime.datetime] = 'now'
     ) -> str:
     """
-    Generate a DATEADD clause depending on database flavor.
-    This function is pretty fragile / complex, so I may depreciate
-    it in favor of a pure-Python or ORM solution.
+    Generate a `DATEADD` clause depending on database flavor.
 
-    :param flavor:
-        SQL database flavor, e.g. postgresql, sqlite.
+    Parameters
+    ----------
+    flavor: str, default `'postgresql'`
+        SQL database flavor, e.g. `'postgresql'`, `'sqlite'`.
+
         Currently supported flavors:
-        - postgresql
-        - timescaledb
-        - cockroachdb
-        - duckdb
-        - mssql
-        - mysql
-        - mariadb
-        - sqlite
-        - oracle
 
-    :param datepart:
-        Which part of the date to modify. Supported values* (*AFAIK).
-        - year
-        - month
-        - day
-        - hour
-        - minute
-        - second
+        - `'postgresql'`
+        - `'timescaledb'`
+        - `'cockroachdb'`
+        - `'duckdb'`
+        - `'mssql'`
+        - `'mysql'`
+        - `'mariadb'`
+        - `'sqlite'`
+        - `'oracle'`
 
-    :param number:
+    datepart: str, default `'day'`
+        Which part of the date to modify. Supported values:
+
+        - `'year'`
+        - `'month'`
+        - `'day'`
+        - `'hour'`
+        - `'minute'`
+        - `'second'`
+
+    number: Union[int, float], default `-1`
         How many units to add to the date part.
 
-    :param begin:
+    begin: Union[str, datetime.datetime], default `'now'`
         Base datetime to which to add dateparts.
+
+    Returns
+    -------
+    The appropriate `DATEADD` string for the corresponding database flavor.
+
+    Examples
+    --------
+    >>> dateadd_str(
+    ...     flavor = 'mssql',
+    ...     begin = datetime.datetime(2022, 1, 1, 0, 0),
+    ...     number = 1,
+    ... )
+    "DATEADD(day, 1, CAST('2022-01-01 00:00:00' AS DATETIME))"
+    >>> dateadd_str(
+    ...     flavor = 'postgresql',
+    ...     begin = datetime.datetime(2022, 1, 1, 0, 0),
+    ...     number = 1,
+    ... )
+    "CAST('2022-01-01 00:00:00' AS TIMESTAMP) + INTERVAL '1 day'"
+
     """
     from meerschaum.utils.debug import dprint
     from meerschaum.utils.packages import attempt_import
@@ -145,6 +168,16 @@ def test_connection(
     ) -> Union[bool, None]:
     """
     Test if a successful connection to the database may be made.
+
+    Parameters
+    ----------
+    **kw:
+        The keyword arguments are passed to `meerschaum.utils.misc.retry_connect`.
+
+    Returns
+    -------
+    `True` if a connection is made, otherwise `False` or `None` in case of failure.
+
     """
     import warnings
     from meerschaum.utils.misc import retry_connect
@@ -167,14 +200,24 @@ def get_distinct_col_count(
     """
     Returns the number of distinct items in a column of a SQL query.
 
-    :param col:
+    Parameters
+    ----------
+    col: str:
         The column in the query to count.
 
-    :param query:
+    query: str:
         The SQL query to count from.
 
-    :param connector:
+    connector: Optional[meerschaum.connectors.sql.SQLConnector], default None:
         The SQLConnector to execute the query.
+
+    debug: bool, default False:
+        Verbosity toggle.
+
+    Returns
+    -------
+    An `int` of the number of columns in the query or `None` if the query fails.
+
     """
     
     if connector is None:
@@ -198,6 +241,26 @@ def get_distinct_col_count(
 def sql_item_name(item: str, flavor: str) -> str:
     """
     Parse SQL items depending on the flavor.
+
+    Parameters
+    ----------
+    item: str :
+        The database item (table, view, etc.) in need of quotes.
+        
+    flavor: str :
+        The database flavor (`'postgresql'`, `'mssql'`, `'sqllite'`, etc.).
+
+    Returns
+    -------
+    A `str` which contains the input `item` wrapped in the corresponding escape characters.
+    
+    Examples
+    --------
+    >>> sql_item_name('table', 'sqlite')
+    '"table"'
+    >>> sql_item_name('table', 'mssql')
+    "[table]"
+
     """
     wrappers = table_wrappers.get(flavor, table_wrappers['default'])
     return wrappers[0] + str(item) + wrappers[1]
@@ -206,8 +269,23 @@ def sql_item_name(item: str, flavor: str) -> str:
 def pg_capital(s: str) -> str:
     """
     If string contains a capital letter, wrap it in double quotes
+    
+    Parameters
+    ----------
+    s: str :
+    The string to be escaped.
 
-    returns: string
+    Returns
+    -------
+    The input string wrapped in quotes only if it needs them.
+
+    Examples
+    --------
+    >>> pg_capital("My Table")
+    '"My Table"'
+    >>> pg_capital('my_table')
+    'my_table'
+
     """
     if '"' in s:
         return s
@@ -223,23 +301,37 @@ def pg_capital(s: str) -> str:
 
 
 def build_where(
-        parameters: Dict[str, Any],
+        params: Dict[str, Any],
         connector: Optional[meerschaum.connectors.sql.SQLConnector] = None,
         with_where: bool = True,
     ) -> str:
     """
-    Build the WHERE clause based on the input criteria.
+    Build the `WHERE` clause based on the input criteria.
 
-    :param parameters:
+    Parameters
+    ----------
+    params: Dict[str, Any]:
         The keywords dictionary to convert into a WHERE clause.
 
-    :param connector:
+    connector: Optional[meerschaum.connectors.sql.SQLConnector], default None:
         The Meerschaum SQLConnector that will be executing the query.
         The connector is used to extract the SQL dialect.
 
-    :param with_where:
-        If `True`, include the leading 'WHERE'.
-        Defaults to `True`.
+    with_where: bool, default True:
+        If `True`, include the leading `'WHERE'` string.
+
+    Returns
+    -------
+    A `str` of the `WHERE` clause from the input `params` dictionary for the connector's flavor.
+
+    Examples
+    --------
+    ```
+    >>> print(build_where({'foo': [1, 2, 3]}))
+    
+    WHERE
+        "foo" IN ('1', '2', '3')
+    ```
     """
     if connector is None:
         from meerschaum import get_connector
@@ -273,8 +365,23 @@ def table_exists(
         connector: Optional[meerschaum.connectors.sql.SQLConnector] = None,
         debug: bool = False,
     ) -> bool:
-    """
-    Check if a table exists.
+    """Check if a table exists.
+
+    Parameters
+    ----------
+    table: str:
+        The name of the table in question.
+        
+    connector: Optional[meerschaum.connectors.sql.SQLConnector] :
+        The connector to the database which holds the table.
+
+    debug: bool, default False :
+        Verbosity toggle.
+
+    Returns
+    -------
+    A `bool` indicating whether or not the table exists on the database.
+
     """
     if connector is None:
         from meerschaum import get_connector
@@ -293,7 +400,22 @@ def get_sqlalchemy_table(
         debug: bool = False,
     ) -> sqlalchemy.Table:
     """
-    Return a sqlalchemy Table bound to a SQLConnector's engine.
+
+    Parameters
+    ----------
+    table: str :
+        The name of the table on the database. Does not need to be escaped.
+        
+    connector: Optional[meerschaum.connectors.sql.SQLConnector], default None:
+        The connector to the database which holds the table. 
+
+    debug: bool, default False:
+        Verbosity toggle.
+
+    Returns
+    -------
+    A `sqlalchemy.Table` object for the table. 
+
     """
     if connector is None:
         from meerschaum import get_connector

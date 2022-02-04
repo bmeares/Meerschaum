@@ -10,11 +10,15 @@ from __future__ import annotations
 from meerschaum.utils.typing import Any, SuccessTuple, Union, Optional, List
 
 def delete(
-        action : Optional[List[str]] = None,
-        **kw : Any
+        action: Optional[List[str]] = None,
+        **kw: Any
     ) -> SuccessTuple:
     """
     Delete an element.
+
+    Command:
+        `delete {config, pipes, plugins, users, connectors, jobs}`
+
     """
     from meerschaum.utils.misc import choose_subaction
     from meerschaum.utils.debug import dprint
@@ -29,11 +33,12 @@ def delete(
     return choose_subaction(action, options, **kw)
 
 def _complete_delete(
-        action : Optional[List[str]] = None,
-        **kw : Any
+        action: Optional[List[str]] = None,
+        **kw: Any
     ) -> List[str]:
     """
     Override the default Meerschaum `complete_` function.
+
     """
     from meerschaum.actions.start import _complete_start_jobs
     from meerschaum.actions.edit import _complete_edit_config
@@ -59,14 +64,15 @@ def _complete_delete(
     return default_action_completer(action=(['delete'] + action), **kw)
 
 def _delete_pipes(
-        debug : bool = False,
-        yes : bool = False,
-        force : bool = False,
-        noask : bool = False,
-        **kw : Any
+        debug: bool = False,
+        yes: bool = False,
+        force: bool = False,
+        noask: bool = False,
+        **kw: Any
     ) -> SuccessTuple:
     """
     Drop pipes and delete their registrations.
+
     """
     from meerschaum import get_pipes
     from meerschaum.utils.prompt import yes_no
@@ -106,15 +112,16 @@ def _delete_pipes(
     return successes > 0, msg
 
 def _delete_config(
-        action : Optional[List[str]] = None,
-        yes : bool = False,
-        force : bool = False,
-        noask : bool = False,
-        debug : bool = False,
-        **kw : Any
+        action: Optional[List[str]] = None,
+        yes: bool = False,
+        force: bool = False,
+        noask: bool = False,
+        debug: bool = False,
+        **kw: Any
     ) -> SuccessTuple:
     """
     Delete configuration files.
+
     """
     import os, shutil
     from meerschaum.utils.prompt import yes_no
@@ -155,16 +162,17 @@ def _delete_config(
     return success, msg
 
 def _delete_plugins(
-        action : Optional[List[str]] = None,
-        repository : Optional[str] = None,
-        yes : bool = False,
-        force : bool = False,
-        noask : bool = False,
-        debug : bool = False,
-        **kw : Any
+        action: Optional[List[str]] = None,
+        repository: Optional[str] = None,
+        yes: bool = False,
+        force: bool = False,
+        noask: bool = False,
+        debug: bool = False,
+        **kw: Any
     ) -> SuccessTuple:
     """
     Delete plugins from a Meerschaum repository.
+
     """
     from meerschaum.utils.warnings import info
     from meerschaum.plugins import reload_plugins
@@ -196,17 +204,18 @@ def _delete_plugins(
     return True, "Success"
 
 def _delete_users(
-        action : Optional[List[str]] = None,
-        mrsm_instance : Optional[str] = None,
-        yes : bool = False,
-        force : bool = False,
-        noask : bool = False,
-        shell : bool = False,
-        debug : bool = False,
+        action: Optional[List[str]] = None,
+        mrsm_instance: Optional[str] = None,
+        yes: bool = False,
+        force: bool = False,
+        noask: bool = False,
+        shell: bool = False,
+        debug: bool = False,
         **kw
     ) -> SuccessTuple:
     """
     Delete users from a Meerschaum instance. Adequate permissions are required.
+
     """
     from meerschaum import get_connector
     from meerschaum.connectors.parse import parse_instance_keys
@@ -269,19 +278,20 @@ def _delete_users(
     return True, msg
 
 def _delete_connectors(
-        action : Optional[List[str]] = None,
-        connector_keys : Optional[List[str]] = None,
-        yes : bool = False,
-        force : bool = False,
-        noask : bool = False,
-        debug : bool = False,
-        **kw : Any
+        action: Optional[List[str]] = None,
+        connector_keys: Optional[List[str]] = None,
+        yes: bool = False,
+        force: bool = False,
+        noask: bool = False,
+        debug: bool = False,
+        **kw: Any
     ) -> SuccessTuple:
     """
     Delete configured connectors.
-
+    
     Example:
         `delete connectors sql:test`
+
     """
     import os, pathlib
     from meerschaum.utils.prompt import yes_no, prompt
@@ -348,9 +358,9 @@ def _delete_connectors(
     return True, "Success"
 
 def _complete_delete_connectors(
-        action : Optional[List[str]] = None,
-        line : str = '',
-        **kw : Any
+        action: Optional[List[str]] = None,
+        line: str = '',
+        **kw: Any
     ) -> List[str]:
     from meerschaum.config import get_config
     from meerschaum.utils.misc import get_connector_labels
@@ -372,8 +382,9 @@ def _delete_jobs(
     ) -> SuccessTuple:
     """
     Remove a job's log files and delete the job's ID.
-
+    
     If the job is running, ask to kill the job first.
+
     """
     from meerschaum.utils.daemon import (
         Daemon, get_running_daemons, get_stopped_daemons, get_filtered_daemons,

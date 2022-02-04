@@ -161,10 +161,22 @@ def create_engine(
         debug : bool = False,
         **kw
     ) -> 'sqlalchemy.engine.Engine':
-    """
-    Create a sqlalchemy engine by building the engine string.
-
+    """Create a sqlalchemy engine by building the engine string.
+    
     returns: sqlalchemy engine
+
+    Parameters
+    ----------
+    include_uri : bool :
+         (Default value = False)
+    debug : bool :
+         (Default value = False)
+    **kw :
+        
+
+    Returns
+    -------
+
     """
     from meerschaum.utils.packages import attempt_import
     from meerschaum.utils.warnings import error, warn

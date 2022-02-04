@@ -33,72 +33,78 @@ def sync(
     ) -> SuccessTuple:
     """
     Fetch new data from the source and update the pipe's table with new data.
-
+    
     Get new remote data via fetch, get existing data in the same time period,
     and merge the two, only keeping the unseen data.
 
-    :param df:
-        An optional DataFrame to sync into the pipe. Defaults to None.
+    Parameters
+    ----------
+    df: Union[None, pd.DataFrame, Dict[str, List[Any]]], default None
+        An optional DataFrame to sync into the pipe. Defaults to `None`.
 
-    :param begin:
+    begin: Optional[datetime.datetime], default None
         Optionally specify the earliest datetime to search for data.
-        Defaults to None.
+        Defaults to `None`.
 
-    :param end:
+    end: Optional[datetime.datetime], default None
         Optionally specify the latest datetime to search for data.
-        Defaults to None.
+        Defaults to `None`.
 
-    :param force:
-        If True, keep trying to sync untul `retries` attempts.
-        Defaults to False.
+    force: bool, default False
+        If `True`, keep trying to sync untul `retries` attempts.
+        Defaults to `False`.
 
-    :param retries:
-        If force, how many attempts to try syncing before declaring failure.
-        Defaults to 10.
+    retries: int, default 10
+        If `force`, how many attempts to try syncing before declaring failure.
+        Defaults to `10`.
 
-    :param min_seconds:
-        If force, how many seconds to sleep between retries. Defaults to 1.
+    min_seconds: Union[int, float], default 1
+        If `force`, how many seconds to sleep between retries. Defaults to `1`.
 
-    :param check_existing:
-        If True, pull and diff with existing data from the pipe.
-        Defaults to True.
+    check_existing: bool, default True
+        If `True`, pull and diff with existing data from the pipe.
+        Defaults to `True`.
 
-    :param blocking:
-        If True, wait for sync to finish and return its result, otherwise
-        asyncronously sync (oxymoron?) and return success. Defaults to True.
+    blocking: bool, default True
+        If `True`, wait for sync to finish and return its result, otherwise
+        asyncronously sync (oxymoron?) and return success. Defaults to `True`.
+        Only intended for specific scenarios.
 
-    :param workers:
+    workers: Optional[int], default None
         No use directly within `Pipe.sync()`. Instead is passed on to
-        instance connectors' `sync_pipe()` methods (e.g. PluginConnector).
-        Defaults to None.
+        instance connectors' `sync_pipe()` methods
+        (e.g. `meerschaum.connectors.plugin.PluginConnector`).
+        Defaults to `None`.
 
-    :param callback:
+    callback: Optional[Callable[[Tuple[bool, str]], Any]], default None
         Callback function which expects a SuccessTuple as input.
-        Only applies when blocking = False.
+        Only applies when `blocking=False`.
 
-    :param error_callback:
+    error_callback: Optional[Callable[[Exception], Any]], default None
         Callback function which expects an Exception as input.
-        Only applies when blocking = False.
+        Only applies when `blocking=False`.
 
-    :param chunksize:
+    chunksize: int, default -1
         Specify the number of rows to sync per chunk.
-        If -1, resort to system configuration (default is 900).
+        If `-1`, resort to system configuration (default is `900`).
         A `chunksize` of `None` will sync all rows in one transaction.
-        Defaults to -1.
+        Defaults to `-1`.
 
-    :param sync_chunks:
-        If possible, sync chunks in parallel.
-        Defaults to False.
+    sync_chunks: bool, default False
+        If possible, sync chunks while fetching them into memory.
+        Defaults to `False`.
 
-    :param deactivate_plugin_venv:
+    deactivate_plugin_venv: bool, default True
         If `True`, deactivate a plugin's virtual environment after syncing.
         Defaults to `True`.
 
-    :param debug:
+    debug: bool, default False
         Verbosity toggle. Defaults to False.
 
-    :param kw:
-        Catch-all for keyword arguments.
+    Returns
+    -------
+    A `SuccessTuple` of success (`bool`) and message (`str`).
+
     """
     from meerschaum.utils.debug import dprint, _checkpoint
     from meerschaum.utils.warnings import warn, error
@@ -261,25 +267,34 @@ def _determine_begin(
 
 def get_sync_time(
         self,
-        params : Optional[Mapping[str, Any]] = None,
+        params : Optional[Dict[str, Any]] = None,
         newest: bool = True,
         round_down: bool = True,
         debug : bool = False
-    ) -> Optional['datetime.datetime']:
+    ) -> Union['datetime.datetime', None]:
     """
     Get the most recent datetime value for a Pipe.
 
-    :param params:
+    Parameters
+    ----------
+    params: Optional[Dict[str, Any]], default None
         Dictionary to build a WHERE clause for a specific column.
-        E.g. params = None returns the latest possible datetime,
-        but params = { 'a' : 1 } returns the latest datetime 'WHERE a = 1'.
+        See `meerschaum.connectors.sql.tools.build_where`.
 
-    :param newest:
+    newest: bool, default True
         If `True`, get the most recent datetime (honoring `params`).
-        If `False`, get the oldest datetime (ASC instead of DESC).
+        If `False`, get the oldest datetime (`ASC` instead of `DESC`).
 
-    :param debug:
+    round_down: bool, default True
+        If `True`, round down the sync time to the nearest minute.
+
+    debug: bool, default False
         Verbosity toggle.
+
+    Returns
+    -------
+    A `datetime.datetime` object if the pipe exists, otherwise `None`.
+
     """
     from meerschaum.utils.warnings import error, warn
     if self.columns is None:
@@ -313,7 +328,17 @@ def exists(
         debug : bool = False
     ) -> bool:
     """
-    See if a Pipe's table or view exists.
+    See if a Pipe's table exists.
+
+    Parameters
+    ----------
+    debug: bool, default False
+        Verbosity toggle.
+
+    Returns
+    -------
+    A `bool` corresponding to whether a pipe's underlying table exists.
+
     """
     ### TODO test against views
     return self.instance_connector.pipe_exists(pipe=self, debug=debug)
@@ -328,9 +353,34 @@ def filter_existing(
         params: Optional[Dict[str, Any]] = None,
         debug: bool = False,
         **kw
-    ):
+    ) -> 'pd.DataFrame':
     """
-    Remove duplicate data from backtrack_data and a new dataframe.
+    Inspect a dataframe and filter out rows which already exist in the pipe.
+
+    Parameters
+    ----------
+    df: 'pd.DataFrame'
+        The dataframe to inspect and filter.
+        
+    begin: Optional[datetime.datetime], default None
+        If provided, use this boundary when searching for existing data.
+
+    end: Optional[datetime.datetime], default
+        If provided, use this boundary when searching for existing data.
+
+    chunksize: Optional[int], default -1
+        The `chunksize` used when fetching existing data.
+
+    params: Optional[Dict[str, Any]], default None
+        If provided, use this filter when searching for existing data. 
+
+    debug: bool, default False
+        Verbosity toggle.
+
+    Returns
+    -------
+    A `pd.DataFrame` with existing rows removed.
+
     """
     from meerschaum.utils.warnings import warn
     from meerschaum.utils.debug import dprint

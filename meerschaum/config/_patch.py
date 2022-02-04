@@ -27,8 +27,18 @@ def apply_patch_to_config(
         config: dict,
         patch: dict
     ):
-    """
-    Patch the config dict with a new dict (cascade patching).
+    """Patch the config dict with a new dict (cascade patching).
+
+    Parameters
+    ----------
+    config: dict :
+        
+    patch: dict :
+        
+
+    Returns
+    -------
+
     """
     from meerschaum.utils.packages import cascadict
     base = cascadict.CascaDict(config)
@@ -39,8 +49,18 @@ def write_patch(
         patch: dict,
         debug: bool = False
     ):
-    """
-    Write patch dict to yaml
+    """Write patch dict to yaml
+
+    Parameters
+    ----------
+    patch: dict :
+        
+    debug: bool :
+         (Default value = False)
+
+    Returns
+    -------
+
     """
     from meerschaum.config._edit import write_config
     if debug:

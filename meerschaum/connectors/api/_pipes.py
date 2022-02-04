@@ -12,8 +12,16 @@ from meerschaum.utils.typing import SuccessTuple, Union, Any, Optional, Mapping,
 def pipe_r_url(
         pipe : 'meerschaum.Pipe'
     ) -> str:
-    """
-    Generate a relative URL path from a Pipe's keys.
+    """Generate a relative URL path from a Pipe's keys.
+
+    Parameters
+    ----------
+    pipe : 'meerschaum.Pipe' :
+        
+
+    Returns
+    -------
+
     """
     from meerschaum.config.static import _static_config
     location_key = pipe.location_key
@@ -29,9 +37,19 @@ def register_pipe(
         pipe: meerschaum.Pipe,
         debug: bool = False
     ) -> SuccessTuple:
-    """
-    Submit a POST to the API to register a new Pipe object.
+    """Submit a POST to the API to register a new Pipe object.
     Returns a tuple of (success_bool, response_dict).
+
+    Parameters
+    ----------
+    pipe: meerschaum.Pipe :
+        
+    debug: bool :
+         (Default value = False)
+
+    Returns
+    -------
+
     """
     from meerschaum.utils.debug import dprint
     from meerschaum.config.static import _static_config
@@ -60,9 +78,21 @@ def edit_pipe(
         patch: bool = False,
         debug: bool = False,
     ) -> SuccessTuple:
-    """
-    Submit a PATCH to the API to edit an existing Pipe object.
+    """Submit a PATCH to the API to edit an existing Pipe object.
     Returns a tuple of (success_bool, response_dict).
+
+    Parameters
+    ----------
+    pipe: meerschaum.Pipe :
+        
+    patch: bool :
+         (Default value = False)
+    debug: bool :
+         (Default value = False)
+
+    Returns
+    -------
+
     """
     from meerschaum.utils.debug import dprint
     from meerschaum.config.static import _static_config
@@ -95,16 +125,36 @@ def fetch_pipes_keys(
         mrsm_instance: str = 'api',
         debug: bool = False
     ) -> Union[List[str], Mapping[str, Any]]:
-    """
-    NOTE: This function no longer builds Pipes. Use the main `get_pipes()` function
+    """NOTE: This function no longer builds Pipes. Use the main `get_pipes()` function
           with the arguments `mrsm_instance = 'api' and `method = 'registered'` (default).
-
+    
     Fetch registered Pipes' keys from the API.
-
+    
     keys_only : bool : True
         If True, only return a list of tuples of the keys
         E.g. [ (connector_keys, metric_key, location_key) ]
         This is used by the main `get_pipes()` function for the 'api' method.
+
+    Parameters
+    ----------
+    connector_keys: Optional[List[str]] :
+         (Default value = None)
+    metric_keys: Optional[List[str]] :
+         (Default value = None)
+    location_keys: Optional[List[str]] :
+         (Default value = None)
+    params: Optional[Dict[str :
+        
+    Any]] :
+         (Default value = None)
+    mrsm_instance: str :
+         (Default value = 'api')
+    debug: bool :
+         (Default value = False)
+
+    Returns
+    -------
+
     """
     from meerschaum.utils.warnings import error
     from meerschaum.config.static import _static_config
@@ -143,10 +193,32 @@ def sync_pipe(
         debug : bool = False,
         **kw : Any
     ) -> SuccessTuple:
-    """
-    Append a pandas DataFrame to a Pipe.
+    """Append a pandas DataFrame to a Pipe.
     If Pipe does not exist, it is registered with supplied metadata.
         NOTE: columns['datetime'] must be set for new Pipes.
+
+    Parameters
+    ----------
+    pipe : Optional[meerschaum.Pipe] :
+         (Default value = None)
+    df : Optional[Union[pandas.DataFrame :
+        
+    Dict[Any :
+        
+    Any] :
+        
+    str]] :
+         (Default value = None)
+    chunksize : Optional[int] :
+         (Default value = -1)
+    debug : bool :
+         (Default value = False)
+    **kw : Any :
+        
+
+    Returns
+    -------
+
     """
     from meerschaum.utils.debug import dprint
     from meerschaum.utils.warnings import warn
@@ -259,8 +331,18 @@ def delete_pipe(
         pipe: Optional[meerscahum.Pipe] = None,
         debug: bool = None,        
     ) -> SuccessTuple:
-    """
-    Delete a Pipe and drop its table.
+    """Delete a Pipe and drop its table.
+
+    Parameters
+    ----------
+    pipe: Optional[meerscahum.Pipe] :
+         (Default value = None)
+    debug: bool :
+         (Default value = None)
+
+    Returns
+    -------
+
     """
     from meerschaum.utils.warnings import error
     from meerschaum.utils.debug import dprint
@@ -292,8 +374,30 @@ def get_pipe_data(
         debug : bool = False,
         **kw: Any
     ) -> Optional[pandas.DataFrame]:
-    """
-    Fetch data from the API.
+    """Fetch data from the API.
+
+    Parameters
+    ----------
+    pipe : meerschaum.Pipe :
+        
+    begin : Optional[datetime.datetime] :
+         (Default value = None)
+    end : Optional[datetime.datetime] :
+         (Default value = None)
+    params : Optional[Dict[str :
+        
+    Any]] :
+         (Default value = None)
+    as_chunks : bool :
+         (Default value = False)
+    debug : bool :
+         (Default value = False)
+    **kw: Any :
+        
+
+    Returns
+    -------
+
     """
     import json
     from meerschaum.utils.warnings import warn
@@ -333,8 +437,28 @@ def get_backtrack_data(
         debug : bool = False,
         **kw : Any,
     ) -> pandas.DataFrame:
-    """
-    Get a Pipe's backtrack data from the API.
+    """Get a Pipe's backtrack data from the API.
+
+    Parameters
+    ----------
+    pipe : meerschaum.Pipe :
+        
+    begin : datetime.datetime :
+        
+    backtrack_minutes : int :
+         (Default value = 0)
+    params: Optional[Dict[str :
+        
+    Any]] :
+         (Default value = None)
+    debug : bool :
+         (Default value = False)
+    **kw : Any :
+        
+
+    Returns
+    -------
+
     """
     import json
     from meerschaum.utils.debug import dprint
@@ -371,8 +495,18 @@ def get_pipe_id(
         pipe : meerschuam.Pipe,
         debug : bool = False,
     ) -> int:
-    """
-    Get a Pipe's ID from the API
+    """Get a Pipe's ID from the API
+
+    Parameters
+    ----------
+    pipe : meerschuam.Pipe :
+        
+    debug : bool :
+         (Default value = False)
+
+    Returns
+    -------
+
     """
     from meerschaum.utils.debug import dprint
     r_url = pipe_r_url(pipe)
@@ -392,8 +526,18 @@ def get_pipe_attributes(
         pipe : meerschaum.Pipe,
         debug : bool = False,
     ) -> Mapping[str, Any]:
-    """
-    Get a Pipe's attributes from the API
+    """Get a Pipe's attributes from the API
+
+    Parameters
+    ----------
+    pipe : meerschaum.Pipe :
+        
+    debug : bool :
+         (Default value = False)
+
+    Returns
+    -------
+
     """
     r_url = pipe_r_url(pipe)
     response = self.get(r_url + '/attributes', debug=debug)
@@ -411,23 +555,37 @@ def get_sync_time(
         round_down: bool = True,
         debug : bool = False,
     ) -> datetime.datetime:
-    """
-    Get a Pipe's most recent datetime value from the API.
+    """Get a Pipe's most recent datetime value from the API.
 
-    :param pipe:
+    Parameters
+    ----------
+    pipe :
         The pipe to select from.
-
-    :param params:
+    params :
         Optional params dictionary to build the WHERE clause.
-
-    :param newest:
+    newest :
         If `True`, get the most recent datetime (honoring `params`).
         If `False`, get the oldest datetime (ASC instead of DESC).
         Defaults to `True`.
-
-    :param round_down:
+    round_down :
         If `True`, round the resulting datetime value down to the nearest minute.
         Defaults to `True`.
+    pipe : 'meerschaum.Pipe' :
+        
+    params : Optional[Dict[str :
+        
+    Any]] :
+         (Default value = None)
+    newest: bool :
+         (Default value = True)
+    round_down: bool :
+         (Default value = True)
+    debug : bool :
+         (Default value = False)
+
+    Returns
+    -------
+
     """
     import datetime, json
     r_url = pipe_r_url(pipe)
@@ -454,8 +612,18 @@ def pipe_exists(
         pipe : 'meerschaum.Pipe',
         debug : bool = False
     ) -> bool:
-    """
-    Consult the API to see if a Pipe exists
+    """Consult the API to see if a Pipe exists
+
+    Parameters
+    ----------
+    pipe : 'meerschaum.Pipe' :
+        
+    debug : bool :
+         (Default value = False)
+
+    Returns
+    -------
+
     """
     from meerschaum.utils.debug import dprint
     r_url = pipe_r_url(pipe)
@@ -471,8 +639,16 @@ def create_metadata(
         self,
         debug : bool = False
     ) -> bool:
-    """
-    Create Pipe metadata tables
+    """Create Pipe metadata tables
+
+    Parameters
+    ----------
+    debug : bool :
+         (Default value = False)
+
+    Returns
+    -------
+
     """
     from meerschaum.utils.debug import dprint
     from meerschaum.config.static import _static_config
@@ -496,8 +672,28 @@ def get_pipe_rowcount(
         remote : bool = False,
         debug : bool = False,
     ) -> Optional[int]:
-    """
-    Get a pipe's row couunt from the API.
+    """Get a pipe's row couunt from the API.
+
+    Parameters
+    ----------
+    pipe : 'meerschaum.Pipe' :
+        
+    begin : 'datetime.datetime' :
+         (Default value = None)
+    end : 'datetime.datetime' :
+         (Default value = None)
+    params : Optional[Dict[str :
+        
+    Any]] :
+         (Default value = None)
+    remote : bool :
+         (Default value = False)
+    debug : bool :
+         (Default value = False)
+
+    Returns
+    -------
+
     """
     import json
     r_url = pipe_r_url(pipe)
@@ -522,8 +718,18 @@ def drop_pipe(
         pipe: meerschaum.Pipe,
         debug: bool = False
     ) -> SuccessTuple:
-    """
-    Drop a pipe's tables but maintain its registration.
+    """Drop a pipe's tables but maintain its registration.
+
+    Parameters
+    ----------
+    pipe: meerschaum.Pipe :
+        
+    debug: bool :
+         (Default value = False)
+
+    Returns
+    -------
+
     """
     return self.do_action(
         ['drop', 'pipes'],
@@ -542,8 +748,22 @@ def clear_pipe(
         debug: bool = False,
         **kw
     ) -> SuccessTuple:
-    """
-    Drop a pipe's tables but maintain its registration.
+    """Drop a pipe's tables but maintain its registration.
+
+    Parameters
+    ----------
+    pipe: meerschaum.Pipe :
+        
+    force: bool :
+         (Default value = False)
+    debug: bool :
+         (Default value = False)
+    **kw :
+        
+
+    Returns
+    -------
+
     """
     kw.pop('metric_keys', None)
     kw.pop('connector_keys', None)
@@ -566,17 +786,27 @@ def get_pipe_columns_types(
         debug : bool = False,
     ) -> Optional[Dict[str, str]]:
     """
-    Return a dictionary of a pipe's table's columns to their data types.
 
-    E.g. An example dictionary for a small table.
+    Parameters
+    ----------
+    pipe : meerschaum.Pipe :
+        
+    debug : bool :
+         (Default value = False)
 
-    ```
+    Returns
+    -------
+    type
+        E.g. An example dictionary for a small table.
+        
+        ```
+
     >>> {
     ...   'dt': 'TIMESTAMP WITHOUT TIMEZONE',
     ...   'id': 'BIGINT',
     ...   'val': 'DOUBLE PRECISION',
     ... }
-    >>> 
+    >>>
     ```
     """
     r_url = pipe_r_url(pipe) + '/columns/types'

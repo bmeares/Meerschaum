@@ -17,9 +17,7 @@ _locks = {
 }
 
 def _initializer():
-    """
-    Ignore keyboard interrupt in workers.
-    """
+    """Ignore keyboard interrupt in workers."""
     signal.signal(signal.SIGINT, signal.SIG_IGN)
 
 def get_pool(
@@ -28,9 +26,25 @@ def get_pool(
         initializer: Optional[Callable[[None], None]] = None,
         initargs: Optional[List[Any]] = None,
     ):
-    """
-    If the requested pool does not exist, instantiate it here.
+    """If the requested pool does not exist, instantiate it here.
     Pools are joined and closed on exit.
+
+    Parameters
+    ----------
+    pool_class_name: str :
+         (Default value = 'ThreadPool')
+    workers: Optional[int] :
+         (Default value = None)
+    initializer: Optional[Callable[[None] :
+        
+    None]] :
+         (Default value = None)
+    initargs: Optional[List[Any]] :
+         (Default value = None)
+
+    Returns
+    -------
+
     """
     global pools
     _locks['pools'].acquire()
@@ -80,9 +94,7 @@ def get_pool(
     return pools[pool_class_name]
 
 def get_pools():
-    """
-    Return the global pools dictionary.
-    """
+    """ """
     global pools
     if pools is None:
         _locks['pools'].acquire()
@@ -93,7 +105,17 @@ def get_pools():
 
 def get_pool_executor(workers: Optional[int] = None):
     """
-    Return a `ThreadPoolExecutor` object.
+
+    Parameters
+    ----------
+    workers: Optional[int] :
+         (Default value = None)
+
+    Returns
+    -------
+    type
+        
+
     """
     try:
         from multiprocessing import cpu_count

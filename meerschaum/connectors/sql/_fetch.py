@@ -21,39 +21,59 @@ def fetch(
         debug: bool = False,
         **kw: Any
     ) -> Optional['pd.DataFrame']:
-    """
-    Execute the SQL definition and return a Pandas DataFrame.
-
+    """Execute the SQL definition and return a Pandas DataFrame.
+    
     If pipe.columns['datetime'] and
         pipe.parameters['fetch']['backtrack_minutes'] are provided,
         append a `WHERE dt > begin` subquery.
 
-    :param begin:
+    Parameters
+    ----------
+    begin :
         Most recent datatime to search for data.
         If `backtrack_minutes` is provided, subtract `backtrack_minutes`.
-
-    :param end:
+    end :
         The latest datetime to search for data.
         If `end` is `None`, perform an unbounded search.
-
-    :param pipe:
+    pipe :
         Below are the various pipe parameters available to pipe.fetch.
-
+        
         pipe.columns['datetime'] : str
-            Name of the datetime column for the remote table.
-
+        Name of the datetime column for the remote table.
+        
         pipe.parameters['fetch'] : dict
-            Parameters necessary to execute a query.
-            See pipe.parameters['fetch'].
-
-            pipe.parameters['fetch']['definition'] : str
-                Raw SQL query to execute to generate the pandas DataFrame.
-
-            pipe.parameters['fetch']['backtrack_minutes'] : Union[int, float]
-                How many minutes before `begin` to search for data.
-
-    :param debug:
+        Parameters necessary to execute a query.
+        See pipe.parameters['fetch'].
+        
+        pipe.parameters['fetch']['definition'] : str
+        Raw SQL query to execute to generate the pandas DataFrame.
+        
+        pipe.parameters['fetch']['backtrack_minutes'] : Union[int, float]
+        How many minutes before `begin` to search for data.
+    debug :
         Verbosity toggle.
+    pipe: meerschaum.Pipe.Pipe :
+        
+    begin: Optional[Union[datetime.datetime :
+        
+    str]] :
+         (Default value = None)
+    end: Optional[Union[datetime.datetime :
+        
+    chunk_hook: Optional[Callable[[pandas.DataFrame] :
+        
+    Any]] :
+         (Default value = None)
+    chunksize: Optional[int] :
+         (Default value = -1)
+    debug: bool :
+         (Default value = False)
+    **kw: Any :
+        
+
+    Returns
+    -------
+
     """
     from meerschaum.utils.debug import dprint
     from meerschaum.utils.warnings import warn, error
@@ -125,8 +145,20 @@ def fetch(
     return df
 
 def _simple_fetch_query(pipe, debug: bool=False, **kw) -> str:
-    """
-    Build a fetch query from a pipe's definition.
+    """Build a fetch query from a pipe's definition.
+
+    Parameters
+    ----------
+    pipe :
+        
+    debug: bool :
+         (Default value = False)
+    **kw :
+        
+
+    Returns
+    -------
+
     """
     definition = pipe.parameters['fetch']['definition']
     return f"WITH definition AS ({definition}) SELECT * FROM definition"
@@ -137,8 +169,22 @@ def _join_fetch_query(
         new_ids: bool = True,
         **kw
     ) -> str:
-    """
-    Build a fetch query based on the datetime and ID indices.
+    """Build a fetch query based on the datetime and ID indices.
+
+    Parameters
+    ----------
+    pipe :
+        
+    debug: bool :
+         (Default value = False)
+    new_ids: bool :
+         (Default value = True)
+    **kw :
+        
+
+    Returns
+    -------
+
     """
     if not pipe.exists(debug=debug):
         return _simple_fetch_query(pipe, debug=debug, **kw)

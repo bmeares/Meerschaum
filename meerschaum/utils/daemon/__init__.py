@@ -14,8 +14,16 @@ from meerschaum.utils.daemon.Daemon import Daemon
 from meerschaum.utils.daemon.Log import Log
 
 def daemon_entry(sysargs: Optional[List[str]] = None) -> SuccessTuple:
-    """
-    Parse sysargs and execute a Meerschaum action as a daemon.
+    """Parse sysargs and execute a Meerschaum action as a daemon.
+
+    Parameters
+    ----------
+    sysargs: Optional[List[str]] :
+         (Default value = None)
+
+    Returns
+    -------
+
     """
     from meerschaum.actions._entry import _entry as entry
     _args = None
@@ -34,8 +42,16 @@ def daemon_entry(sysargs: Optional[List[str]] = None) -> SuccessTuple:
     return success_tuple
 
 def daemon_action(**kw) -> SuccessTuple:
-    """
-    Execute a Meerschaum action as a daemon.
+    """Execute a Meerschaum action as a daemon.
+
+    Parameters
+    ----------
+    **kw :
+        
+
+    Returns
+    -------
+
     """
     from meerschaum.utils.packages import run_python_package
     from meerschaum.utils.threading import Thread
@@ -67,8 +83,30 @@ def run_daemon(
         label: Optional[str] = None,
         **kw
     ) -> Any:
-    """
-    Execute a function as a daemon.
+    """Execute a function as a daemon.
+
+    Parameters
+    ----------
+    func: Callable[[Any] :
+        
+    Any] :
+        
+    *args :
+        
+    daemon_id: Optional[str] :
+         (Default value = None)
+    keep_daemon_output: bool :
+         (Default value = False)
+    allow_dirty_run: bool :
+         (Default value = False)
+    label: Optional[str] :
+         (Default value = None)
+    **kw :
+        
+
+    Returns
+    -------
+
     """
     daemon = Daemon(func, daemon_id=daemon_id, target_args=args, target_kw=kw, label=label)
     return daemon.run(
@@ -77,20 +115,26 @@ def run_daemon(
     )
 
 def get_daemons() -> List[Daemon]:
-    """
-    Return a list of daemons.
-    """
+    """ """
     return [Daemon(daemon_id=d_id) for d_id in get_daemon_ids()]
 
 def get_daemon_ids() -> List[str]:
-    """
-    Return a list of daemon IDs.
-    """
+    """ """
     return os.listdir(DAEMON_RESOURCES_PATH)
 
 def get_running_daemons(daemons : Optional[List[Daemon]] = None) -> List[Daemon]:
     """
-    Return a list of currently running daemons.
+
+    Parameters
+    ----------
+    daemons : Optional[List[Daemon]] :
+         (Default value = None)
+
+    Returns
+    -------
+    type
+        
+
     """
     if daemons is None:
         daemons = get_daemons()
@@ -103,7 +147,19 @@ def get_stopped_daemons(
         running_daemons : Optional[List[Daemon]] = None,
     ) -> List[Daemon]:
     """
-    Return a list of stopped daemons.
+
+    Parameters
+    ----------
+    daemons : Optional[List[Daemon]] :
+         (Default value = None)
+    running_daemons : Optional[List[Daemon]] :
+         (Default value = None)
+
+    Returns
+    -------
+    type
+        
+
     """
     if daemons is None:
         daemons = get_daemons()
@@ -116,19 +172,27 @@ def get_filtered_daemons(
         filter_list : Optional[List[str]] = None,
         warn : bool = False,
     ) -> List[Daemon]:
-    """
-    Return a list of `Daemons` filtered by a list of `daemon_ids`.
+    """Return a list of `Daemons` filtered by a list of `daemon_ids`.
     Only `Daemons` that exist are returned.
-
+    
     If `filter_list` is `None` or empty, return all `Daemons` (from `get_daemons()`).
 
-    :param filter_list:
+    Parameters
+    ----------
+    filter_list :
         List of `daemon_ids` to include. If `daemon_ids` is `None` or empty,
         return all `Daemons`.
-
-    :param warn:
+    warn :
         If `True`, raise warnings for non-existent `daemon_ids`.
         Defaults to `True`.
+    filter_list : Optional[List[str]] :
+         (Default value = None)
+    warn : bool :
+         (Default value = False)
+
+    Returns
+    -------
+
     """
     if not filter_list:
         daemons = get_daemons()

@@ -15,8 +15,20 @@ def login(
         warn: bool = True,
         **kw : Any
     ) -> SuccessTuple:
-    """
-    Log in and set the session token.
+    """Log in and set the session token.
+
+    Parameters
+    ----------
+    debug: bool :
+         (Default value = False)
+    warn: bool :
+         (Default value = True)
+    **kw : Any :
+        
+
+    Returns
+    -------
+
     """
     from meerschaum.utils.warnings import warn as _warn, info, error
     from meerschaum._internal.User import User
@@ -63,8 +75,16 @@ def test_connection(
         self,
         **kw : Any
     ) -> Union[bool, None]:
-    """
-    Test if a successful connection to the API may be made.
+    """Test if a successful connection to the API may be made.
+
+    Parameters
+    ----------
+    **kw : Any :
+        
+
+    Returns
+    -------
+
     """
     from meerschaum.utils.misc import retry_connect
     _default_kw = {
@@ -82,8 +102,18 @@ def refresh(
         debug : bool = False,
         **kw : Any,
     ):
-    """
-    Refresh the access token.
+    """Refresh the access token.
     NOTE: Not implemented!
+
+    Parameters
+    ----------
+    debug : bool :
+         (Default value = False)
+    **kw : Any :
+        
+
+    Returns
+    -------
+
     """
     pass

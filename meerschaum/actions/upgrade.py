@@ -10,15 +10,15 @@ from __future__ import annotations
 from meerschaum.utils.typing import SuccessTuple, Any, List, Optional
 
 def upgrade(
-        action : Optional[List[str]] = None,
-        **kw : Any
+        action: Optional[List[str]] = None,
+        **kw: Any
     ) -> SuccessTuple:
     """
-    Upgrade Meerschaum or dependencies.
-
+    Upgrade Meerschaum, plugins, or packages.
+    
     Command:
         `upgrade {option}`
-
+    
     Example:
         `upgrade meerschaum`
     """
@@ -33,20 +33,21 @@ def upgrade(
     return choose_subaction(action, options, **kw)
 
 def _upgrade_meerschaum(
-        action : Optional[List[str]] = None,
-        yes : bool = False,
-        force : bool = False,
-        noask : bool = False,
-        debug : bool = False,
-        **kw : Any
+        action: Optional[List[str]] = None,
+        yes: bool = False,
+        force: bool = False,
+        noask: bool = False,
+        debug: bool = False,
+        **kw: Any
     ) -> SuccessTuple:
     """
     Upgrade the current Meerschaum instance.
-    Optionally specify dependency versions.
-
+    Optionally specify dependency groups.
+    
     Examples:
-        `upgrade meerschaum`
-        `upgrade meerschaum full`
+        - `upgrade meerschaum`
+        - `upgrade meerschaum full`
+
     """
     import subprocess
     import json
@@ -102,23 +103,24 @@ def _upgrade_meerschaum(
 
     return True, "Success"
 
+
 def _upgrade_packages(
-        action : Optional[List[str]] = None,
-        yes : bool = False,
-        force : bool = False,
-        noask : bool = False,
-        debug : bool = False,
-        **kw : Any
+        action: Optional[List[str]] = None,
+        yes: bool = False,
+        force: bool = False,
+        noask: bool = False,
+        debug: bool = False,
+        **kw: Any
     ) -> SuccessTuple:
     """
     Upgrade and install dependencies.
     If provided, upgrade only a dependency group, otherwise default to `full`.
-
+    
     Examples:
         ```
         upgrade packages
         ```
-
+    
         ```
         upgrade packages docs
         ```
@@ -162,18 +164,18 @@ def _upgrade_packages(
     return success, msg
 
 def _upgrade_plugins(
-        action : Optional[List[str]] = None,
-        yes : bool = False,
-        force : bool = False,
-        noask : bool = False,
-        debug : bool = False,
-        **kw : Any
+        action: Optional[List[str]] = None,
+        yes: bool = False,
+        force: bool = False,
+        noask: bool = False,
+        debug: bool = False,
+        **kw: Any
     ) -> SuccessTuple:
     """
     Upgrade all installed plugins to the latest versions.
     If no plugins are specified, attempt to upgrade all,
     otherwise only upgrade the specified plugins.
-
+    
     Examples:
     
     ```
@@ -182,7 +184,6 @@ def _upgrade_plugins(
     ```
     upgrade plugins testing
     ```
-
     """
     from meerschaum.actions import actions
     from meerschaum.plugins import get_plugins_names

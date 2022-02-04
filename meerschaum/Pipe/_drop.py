@@ -11,11 +11,21 @@ from meerschaum.utils.typing import SuccessTuple, Any
 
 def drop(
         self,
-        debug : bool = False,
+        debug: bool = False,
         **kw : Any
     ) -> SuccessTuple:
     """
-    Call the Pipe's instance connector's drop_pipe method
+    Call the Pipe's instance connector's `drop_pipe()` method
+
+    Parameters
+    ----------
+    debug: bool, default False:
+        Verbosity toggle.
+
+    Returns
+    -------
+    A `SuccessTuple` of success, message.
+
     """
     from meerschaum.utils.warnings import warn
     if self.cache_pipe is not None:

@@ -17,8 +17,26 @@ def get(
         debug : bool = False,
         **kw : Any
     ) -> requests.Reponse:
-    """
-    Wrapper for requests.get
+    """Wrapper for requests.get
+
+    Parameters
+    ----------
+    r_url : str :
+        
+    headers : Optional[Dict[str :
+        
+    str]] :
+         (Default value = None)
+    use_token : bool :
+         (Default value = True)
+    debug : bool :
+         (Default value = False)
+    **kw : Any :
+        
+
+    Returns
+    -------
+
     """
     if debug:
         from meerschaum.utils.debug import dprint
@@ -50,8 +68,22 @@ def wget(
         dest : Optional[Union[str, pathlib.Path]] = None,
         **kw : Any
     ) -> pathlib.Path:
-    """
-    Mimic wget with requests.
+    """Mimic wget with requests.
+
+    Parameters
+    ----------
+    r_url : str :
+        
+    dest : Optional[Union[str :
+        
+    pathlib.Path]] :
+         (Default value = None)
+    **kw : Any :
+        
+
+    Returns
+    -------
+
     """
     from meerschaum.utils.misc import wget
     return wget(self.url + r_url, dest=dest, **kw)

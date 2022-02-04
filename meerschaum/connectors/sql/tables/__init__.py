@@ -7,7 +7,7 @@ Define SQLAlchemy tables
 """
 
 from __future__ import annotations
-from meerschaum.utils.typing import Optional, Dict, Union
+from meerschaum.utils.typing import Optional, Dict, Union, InstanceConnector
 
 ### store a tables dict for each connector
 connector_tables = dict()
@@ -16,12 +16,29 @@ _sequence_flavors = {'duckdb'}
 _skip_index_names_flavors = {'mssql'}
 
 def get_tables(
-        mrsm_instance: Optional[Union[str, meerschaum.connectors.Connector]] = None,
+        mrsm_instance: Optional[Union[str, InstanceConnector]] = None,
         create: bool = True,
         debug: Optional[bool] = None
-    ) -> Dict[str, sqlalchemy.Table]:
+    ) -> Union[Dict[str, sqlalchemy.Table], bool]:
     """
-    Substantiate and create sqlalchemy tables
+    Create tables on the database and return the `sqlalchemy` tables.
+
+    Parameters
+    ----------
+    mrsm_instance: Optional[Union[str, InstanceConnector]], default None
+        The connector on which the tables reside.
+
+    create: bool, default True:
+        If `True`, create the tables if they don't exist.
+
+    debug: Optional[bool], default None:
+        Verbosity Toggle.
+
+    Returns
+    -------
+    A dictionary of `sqlalchemy.Table` objects if the connector is a `SQLConnector`.
+    Otherwise just a bool for `APIConnector` objects.
+
     """
     from meerschaum.utils.debug import dprint
     from meerschaum.utils.formatting import pprint

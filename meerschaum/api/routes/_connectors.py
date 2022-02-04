@@ -17,7 +17,9 @@ def get_connectors(type : Optional[str] = None) -> Union[Dict[str, List[str]], L
     """
     Return the keys of the registered connectors.
 
-    :params type:
+    Parameters
+    ----------
+    type:
         If a `type` is specified, return the list of connectors that belong to that type.
         Otherwise, return a dictionary of types that map to lists of labels.
         Defaults to `None`.

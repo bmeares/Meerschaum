@@ -10,11 +10,13 @@ from __future__ import annotations
 from meerschaum.utils.typing import SuccessTuple, Any, List, Optional
 
 def register(
-        action : Optional[List[str]] = None,
-        **kw : Any
+        action: Optional[List[str]] = None,
+        **kw: Any
     ) -> SuccessTuple:
     """
-    Register new elements.
+    Register new items (pipes, plugins, users).
+
+    Pipes and users reside on instances (`-i`), and plugins reside on repositories (`-r`).
     """
     from meerschaum.utils.misc import choose_subaction
     options = {
@@ -25,8 +27,8 @@ def register(
     return choose_subaction(action, options, **kw)
 
 def _complete_register(
-        action : Optional[List[str]] = None,
-        **kw : Any
+        action: Optional[List[str]] = None,
+        **kw: Any
     ) -> List[str]:
     """
     Override the default Meerschaum `complete_` function.
@@ -47,16 +49,19 @@ def _complete_register(
     return default_action_completer(action=(['register'] + action), **kw)
 
 def _register_pipes(
-        connector_keys : Optional[List[str]] = None,
-        metric_keys : Optional[List[str]] = None,
-        location_keys : Optional[List[str]] = None,
-        params : Optional[Dict[str, Any]] = None,
-        debug : bool = False,
-        **kw : Any
+        connector_keys: Optional[List[str]] = None,
+        metric_keys: Optional[List[str]] = None,
+        location_keys: Optional[List[str]] = None,
+        params: Optional[Dict[str, Any]] = None,
+        debug: bool = False,
+        **kw: Any
     ) -> SuccessTuple:
     """
     Create and register Pipe objects.
-    Required: connector_keys and metric_keys. If location_keys is empty, assume [None]
+
+    Required:
+        `connector_keys` and `metric_keys`.
+        If `location_keys` is empty, assume [`None`].
     """
     from meerschaum import get_pipes, get_connector
     from meerschaum.utils.debug import dprint
@@ -110,13 +115,13 @@ def _register_pipes(
     return success, message
 
 def _register_plugins(
-        action : Optional[List[str]] = None,
-        repository : Optional[str] = None,
-        shell : bool = False,
-        debug : bool = False,
+        action: Optional[List[str]] = None,
+        repository: Optional[str] = None,
+        shell: bool = False,
+        debug: bool = False,
         yes: bool = False,
         force: bool = False,
-        **kw : Any
+        **kw: Any
     ) -> SuccessTuple:
     from meerschaum.utils.debug import dprint
     from meerschaum.plugins import reload_plugins, get_plugins_names
@@ -213,11 +218,11 @@ def _complete_register_plugins(*args, **kw):
     return _complete_uninstall_plugins(*args, **kw)
 
 def _register_users(
-        action : Optional[List[str]] = None,
-        mrsm_instance : Optional[str] = None,
-        shell : bool = False,
-        debug : bool = False,
-        **kw : Any
+        action: Optional[List[str]] = None,
+        mrsm_instance: Optional[str] = None,
+        shell: bool = False,
+        debug: bool = False,
+        **kw: Any
     ) -> SuccessTuple:
     """
     Register a new user to a Meerschaum instance.

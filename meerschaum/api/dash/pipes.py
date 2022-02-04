@@ -26,11 +26,8 @@ humanfriendly = attempt_import('humanfriendly')
 
 def pipe_from_ctx(ctx, trigger_property: str = 'n_clicks') -> Union[mrsm.Pipe, None]:
     """
-    Return a pipe object from a dynamic object with an index of a pipe's meta dictionary.
-
-    :param trigger_property:
-        The property of the calling object.
-        Defaults to 'n_clicks'.
+    Return a `meerschaum.Pipe.Pipe` object from a dynamic object with an
+    index of a pipe's meta dictionary.
     """
     try:
         ### I know this looks confusing and feels like a hack.
@@ -81,12 +78,9 @@ def keys_from_state(
     return tuple(keys)
 
 def pipes_from_state(
-        state : Dict[str, Any],
+        state: Dict[str, Any],
         **kw
     ):
-    """
-    Return a pipes dictionary or list from get_pipes.
-    """
     _ck, _mk, _lk, _params = keys_from_state(state, with_params=True)
     try:
         _pipes = _get_pipes(

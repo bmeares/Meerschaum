@@ -15,7 +15,19 @@ def get_users(
         **kw : Any
     ) -> List[str]:
     """
-    Return a list of registered users.
+
+    Parameters
+    ----------
+    debug : bool :
+         (Default value = False)
+    **kw : Any :
+        
+
+    Returns
+    -------
+    type
+        
+
     """
     from meerschaum.config.static import _static_config
     import json
@@ -37,8 +49,20 @@ def edit_user(
         debug : bool = False,
         **kw : Any
     ) -> SuccessTuple:
-    """
-    Edit an existing user.
+    """Edit an existing user.
+
+    Parameters
+    ----------
+    user : 'meerschaum._internal.User.User' :
+        
+    debug : bool :
+         (Default value = False)
+    **kw : Any :
+        
+
+    Returns
+    -------
+
     """
     import json
     from meerschaum.config.static import _static_config
@@ -66,8 +90,20 @@ def register_user(
         debug : bool = False,
         **kw : Any
     ) -> SuccessTuple:
-    """
-    Register a new user.
+    """Register a new user.
+
+    Parameters
+    ----------
+    user : 'meerschaum._internal.User.User' :
+        
+    debug : bool :
+         (Default value = False)
+    **kw : Any :
+        
+
+    Returns
+    -------
+
     """
     import json
     from meerschaum.config.static import _static_config
@@ -95,8 +131,20 @@ def get_user_id(
         debug : bool = False,
         **kw
     ) -> Optional[int]:
-    """
-    Get a user's ID.
+    """Get a user's ID.
+
+    Parameters
+    ----------
+    user : 'meerschaum._internal.User.User' :
+        
+    debug : bool :
+         (Default value = False)
+    **kw :
+        
+
+    Returns
+    -------
+
     """
     from meerschaum.config.static import _static_config
     import json
@@ -114,8 +162,20 @@ def delete_user(
         debug : bool = False,
         **kw
     ) -> SuccessTuple:
-    """
-    Delete a user.
+    """Delete a user.
+
+    Parameters
+    ----------
+    user : 'meerschaum._internal.User.User' :
+        
+    debug : bool :
+         (Default value = False)
+    **kw :
+        
+
+    Returns
+    -------
+
     """
     from meerschaum.config.static import _static_config
     import json
@@ -136,8 +196,20 @@ def get_user_attributes(
         debug : bool = False,
         **kw
     ) -> int:
-    """
-    Get a user's attributes.
+    """Get a user's attributes.
+
+    Parameters
+    ----------
+    user : 'meerschaum._internal.User.User' :
+        
+    debug : bool :
+         (Default value = False)
+    **kw :
+        
+
+    Returns
+    -------
+
     """
     from meerschaum.config.static import _static_config
     import json
@@ -159,8 +231,20 @@ def get_user_password_hash(
         debug : bool = False,
         **kw
     ) -> Optional[str]:
-    """
-    If configured, get a user's password hash.
+    """If configured, get a user's password hash.
+
+    Parameters
+    ----------
+    user : 'meerschaum._internal.User.User' :
+        
+    debug : bool :
+         (Default value = False)
+    **kw :
+        
+
+    Returns
+    -------
+
     """
     from meerschaum.config.static import _static_config
     r_url = _static_config()['api']['endpoints']['users'] + '/' + user.username + '/password_hash'
@@ -175,8 +259,20 @@ def get_user_type(
         debug : bool = False,
         **kw
     ) -> Optional[str]:
-    """
-    If configured, get a user's type.
+    """If configured, get a user's type.
+
+    Parameters
+    ----------
+    user : 'meerschaum._internal.User.User' :
+        
+    debug : bool :
+         (Default value = False)
+    **kw :
+        
+
+    Returns
+    -------
+
     """
     from meerschaum.config.static import _static_config
     r_url = _static_config()['api']['endpoints']['users'] + '/' + user.username + '/type'

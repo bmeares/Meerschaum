@@ -45,8 +45,16 @@ warnings.filterwarnings(
         #  #  self.args = msg
 
 def enable_depreciation_warnings(name) -> None:
-    """
-    Enable depreciation warnings in the warnings module.
+    """Enable depreciation warnings in the warnings module.
+
+    Parameters
+    ----------
+    name :
+        
+
+    Returns
+    -------
+
     """
     import meerschaum.actions
     warnings.filterwarnings(
@@ -57,7 +65,23 @@ def enable_depreciation_warnings(name) -> None:
 
 def warn(*args, stacklevel=2, stack=True, color : bool = True, **kw) -> None:
     """
-    Raise a warning with custom Meerschaum formatting
+
+    Parameters
+    ----------
+    *args :
+        
+    stacklevel :
+         (Default value = 2)
+    stack :
+         (Default value = True)
+    color : bool :
+         (Default value = True)
+    **kw :
+        
+
+    Returns
+    -------
+
     """
     if stacklevel is None:
         stacklevel = 1
@@ -112,9 +136,23 @@ def exception_with_traceback(
         stacklevel = 1,
         tb_type = 'single'
     ):
-    """
-    Traceback construction help found here:
+    """Traceback construction help found here:
     https://stackoverflow.com/questions/27138440/how-to-create-a-traceback-object
+
+    Parameters
+    ----------
+    message : str :
+        
+    exception_class :
+         (Default value = Exception)
+    stacklevel :
+         (Default value = 1)
+    tb_type :
+         (Default value = 'single')
+
+    Returns
+    -------
+
     """
     import types
     tb, depth = None, 0
@@ -168,7 +206,23 @@ def error(
         stack : bool = True,
     ):
     """
-    Raise an error with custom Meerschaum formatting
+
+    Parameters
+    ----------
+    message : str :
+        
+    exception_class :
+         (Default value = Exception)
+    nopretty : bool :
+         (Default value = False)
+    silent : bool :
+         (Default value = True)
+    stack : bool :
+         (Default value = True)
+
+    Returns
+    -------
+
     """
     from meerschaum.utils.formatting import CHARSET, ANSI, colored, pprint, get_console
     from meerschaum.utils.packages import import_rich
@@ -204,8 +258,20 @@ def error(
     raise color_exception
 
 def info(message: str, icon: bool = True, **kw):
-    """
-    Print an informative message
+    """Print an informative message
+
+    Parameters
+    ----------
+    message: str :
+        
+    icon: bool :
+         (Default value = True)
+    **kw :
+        
+
+    Returns
+    -------
+
     """
     from meerschaum.utils.formatting import CHARSET, ANSI, colored
     from meerschaum.config import get_config

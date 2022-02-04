@@ -25,18 +25,30 @@ def make_action(
     ) -> Callable[[Any], Any]:
     """
     Make a function a Meerschaum action. Useful for plugins that are adding multiple actions.
+    
+    Parameters
+    ----------
+    function: Callable[[Any], Any]
+        The function to become a Meerschaum action. Must accept all keyword arguments.
+        
+    shell: bool, default False
+        Not used.
+        
+    Returns
+    -------
+    Another function (this is a decorator function).
 
-    Usage:
-    ```
+    Examples
+    --------
     >>> from meerschaum.plugins import make_action
-    >>> 
+    >>>
     >>> @make_action
     ... def my_action(**kw):
     ...     print('foo')
     ...     return True, "Success"
-    >>> 
-    ```
+    >>>
     """
+
     from meerschaum.actions import __all__ as _all, actions
     from meerschaum.utils.formatting import pprint
     from meerschaum.utils.misc import add_method_to_class
@@ -53,26 +65,36 @@ def make_action(
     actions[function.__name__] = function
     return function
 
-def api_plugin(function) -> Callable[[Any], Any]:
+
+def api_plugin(function: Callable[[Any], Any]) -> Callable[[Any], Any]:
     """
-    Execute function when initializing the Meerschaum API module.
+    Execute the function when initializing the Meerschaum API module.
     Useful for lazy-loading heavy plugins only when the API is started,
     such as when editing the `meerschaum.api.app` FastAPI app.
-
+    
     The FastAPI app will be passed as the only parameter.
+    
+    Parameters
+    ----------
+    function: Callable[[Any, Any]]
+        The function to be called before starting the Meerschaum API.
+        
+    Returns
+    -------
+    Another function (decorator function).
 
-    Usage:
-    ```
+    Examples
+    --------
     >>> from meerschaum.plugins import api_plugin
-    >>> 
+    >>>
     >>> @api_plugin
     >>> def initialize_plugin(app):
     ...     @app.get('/my/new/path')
     ...     def new_path():
     ...         return {'message' : 'It works!'}
-    >>> 
-    ```
+    >>>
     """
+
     global _api_plugins
     _locks['_api_plugins'].acquire()
     try:
@@ -86,6 +108,7 @@ def api_plugin(function) -> Callable[[Any], Any]:
         _locks['_api_plugins'].release()
     return function
 
+
 def import_plugins(
         plugins_to_import: Union[str, List[str], None] = None,
         warn: bool = True,
@@ -95,10 +118,17 @@ def import_plugins(
     """
     Import the Meerschaum plugins directory.
 
-    :param plugins_to_import:
+    Parameters
+    ----------
+    plugins_to_import: Union[str, List[str], None]
         If provided, only import the specified plugins.
         Otherwise import the entire plugins module. May be a string, list, or `None`.
         Defaults to `None`.
+
+    Returns
+    -------
+    A module of list of modules, depening on the number of plugins provided.
+
     """
     global __path__
     import sys
@@ -147,6 +177,7 @@ def import_plugins(
 def load_plugins(debug: bool = False, shell: bool = False) -> None:
     """
     Import Meerschaum plugins and update the actions dictionary.
+
     """
     ### append the plugins modules
     from inspect import isfunction, getmembers
@@ -180,6 +211,12 @@ def load_plugins(debug: bool = False, shell: bool = False) -> None:
 def reload_plugins(plugins: Optional[List[str]] = None, debug: bool = False) -> None:
     """
     Reload plugins back into memory.
+
+    Parameters
+    ----------
+    plugins: Optional[List[str]], default None
+        The plugins to reload. `None` will reload all plugins.
+
     """
     import sys
     if debug:
@@ -195,7 +232,11 @@ def reload_plugins(plugins: Optional[List[str]] = None, debug: bool = False) -> 
             del sys.modules[mod_name]
     load_plugins(debug=debug)
 
-def get_plugins_names() -> Optional[List[str]]:
+
+def get_plugins_names() -> Union[List[str], None]:
+    """
+    Return a list of installed plugins, or `None` if things break.
+    """
     from meerschaum.utils.packages import get_modules_from_package
     from meerschaum.utils.warnings import warn, error
     try:
@@ -205,7 +246,10 @@ def get_plugins_names() -> Optional[List[str]]:
         warn(e, stacklevel=3)
     return names
 
-def get_plugins_modules() -> Optional[List['ModuleType']]:
+def get_plugins_modules() -> Union[List['ModuleType'], None]:
+    """
+    Return a list of modules for the installed plugins, or `None` if things break.
+    """
     from meerschaum.utils.packages import get_modules_from_package
     from meerschaum.utils.warnings import warn, error
     try:
@@ -215,9 +259,10 @@ def get_plugins_modules() -> Optional[List['ModuleType']]:
         warn(e, stacklevel=3)
     return modules
 
+
 def get_data_plugins() -> List['ModuleType']:
     """
-    Return plugins which contain `fetch()` or `sync()` functions.
+    Only return the modules of plugins with either `fetch()` or `sync()` functions.
     """
     import inspect
     mods = get_plugins_modules()
