@@ -11,14 +11,27 @@ from meerschaum.utils.typing import Any, SuccessTuple
 
 def edit(
         self,
-        patch : bool = False,
-        interactive : bool = False,
-        debug : bool = False,
-        **kw : Any
+        patch: bool = False,
+        interactive: bool = False,
+        debug: bool = False,
+        **kw: Any
     ) -> SuccessTuple:
     """
     Edit a Pipe's configuration.
-    If `patch` is True, update parameters by cascading rather than overwriting.
+
+    Parameters
+    ----------
+    patch: bool, default False
+        If `patch` is True, update parameters by cascading rather than overwriting.
+    interactive: bool, default False
+        If `True`, open an editor for the user to make changes to the pipe's YAML file.
+    debug: bool, default False
+        Verbosity toggle.
+
+    Returns
+    -------
+    A `SuccessTuple` of success, message.
+
     """
     if not interactive:
         return self.instance_connector.edit_pipe(self, patch=patch, debug=debug, **kw)
@@ -82,7 +95,12 @@ def edit_definition(
     ) -> SuccessTuple:
     """
     Edit a pipe's definition file and update its configuration.
-    NOTE: This function is interactive and should not be used in automated scripts!
+    **NOTE:** This function is interactive and should not be used in automated scripts!
+
+    Returns
+    -------
+    A `SuccessTuple` of success, message.
+
     """
     if self.connector.type not in ('sql', 'api'):
         return self.edit(interactive=True, debug=debug, **kw)

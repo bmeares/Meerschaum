@@ -40,6 +40,28 @@ def register_plugin(
     ) -> SuccessTuple:
     """
     Register a plugin and save its archive file.
+
+    Parameters
+    ----------
+    name: str :
+        The name of the plugin.
+        
+    version: str, default None
+        The version of the plugin.
+
+    attributes: str, default None
+        JSON-encoded string of the attributes dictionary.
+
+    archive: UploadFile :
+        The archive file of the plugin.
+
+    curr_user: 'meerschaum._internal.User.User'
+        The logged-in user.
+
+    Returns
+    -------
+    A `SuccessTuple` of success, message.
+
     """
     from meerschaum.config import get_config
     allow_plugins = get_config('system', 'api', 'permissions', 'registration', 'plugins')
@@ -88,7 +110,7 @@ def get_plugin(
         name: str
     ) -> Union[FileResponse, SuccessTuple]:
     """
-    Download a plugin's archive file
+    Download a plugin's archive file.
     """
     plugin = Plugin(name)
     if plugin.archive_path.exists():
@@ -110,7 +132,19 @@ def get_plugins(
         search_term : Optional[str] = None,
     ) -> List[str]:
     """
-    Return a list of registered plugins.
+    Get a list of plugins.
+
+    Parameters
+    ----------
+    user_id: Optional[int], default None
+        The `user_id` to search by.
+
+    search_term : Optional[str], default None
+        Search for plugins with this search term.
+
+    Returns
+    -------
+    A list of strings.
     """
     return get_api_connector().get_plugins(user_id=user_id, search_term=search_term)
 

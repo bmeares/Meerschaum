@@ -10,8 +10,8 @@ from __future__ import annotations
 from meerschaum.utils.typing import List, Any, SuccessTuple, Optional
 
 def install(
-        action : Optional[List[str]] = None,
-        **kw : Any
+        action: Optional[List[str]] = None,
+        **kw: Any
     ) -> SuccessTuple:
     """
     Install Meerschaum plugins or Python packages.
@@ -24,8 +24,8 @@ def install(
     return choose_subaction(action, options, **kw)
 
 def _complete_install(
-        action : Optional[List[str]] = None,
-        **kw : Any
+        action: Optional[List[str]] = None,
+        **kw: Any
     ) -> List[str]:
     """
     Override the default Meerschaum `complete_` function.
@@ -48,26 +48,26 @@ def _complete_install(
     return default_action_completer(action=(['install'] + action), **kw)
 
 def _install_plugins(
-        action : Optional[List[str]] = None,
-        repository : Optional[str] = None,
-        force : bool = False,
-        debug : bool = False,
-        **kw : Any
+        action: Optional[List[str]] = None,
+        repository: Optional[str] = None,
+        force: bool = False,
+        debug: bool = False,
+        **kw: Any
     ) -> SuccessTuple:
     """
     Install a plugin.
-
+    
     By default, install from the main Meerschaum repository (mrsm.io).
     Use a private repository by specifying the API label after the plugin.
     NOTE: the --instance flag is ignored!
-
+    
     Usage:
         install plugins [plugin]
-
+    
     Examples:
-        install plugins noaa
-        install plugins noaa --repo mrsm  (mrsm is the default instance)
-        install plugins noaa --repo mycustominstance
+        - install plugins noaa
+        - install plugins noaa --repo mrsm  (mrsm is the default instance)
+        - install plugins noaa --repo mycustominstance
     """
     from meerschaum.utils.debug import dprint
     from meerschaum.utils.warnings import info
@@ -94,9 +94,9 @@ def _install_plugins(
     return True, "Success"
 
 def _complete_install_plugins(
-        action : Optional[List[str]] = None,
-        repository : Optional[str] = None,
-        **kw : Any
+        action: Optional[List[str]] = None,
+        repository: Optional[str] = None,
+        **kw: Any
     ) -> List[str]:
     """
     Search for plugins to autocomplete command line text.
@@ -131,14 +131,14 @@ def _complete_install_plugins(
     return sorted(results)
 
 def _install_packages(
-        action : Optional[List[str]] = None,
-        sub_args : Optional[List[str]] = None,
-        debug : bool = False,
-        **kw : Any
+        action: Optional[List[str]] = None,
+        sub_args: Optional[List[str]] = None,
+        debug: bool = False,
+        **kw: Any
     ) -> SuccessTuple:
     """
     Install PyPI packages into the Meerschaum virtual environment.
-
+    
     Example:
         `install packages pandas numpy`
     """

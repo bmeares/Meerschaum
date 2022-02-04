@@ -9,8 +9,16 @@ Interact with Meerschaum Pipes via the GUI.
 from meerschaum.gui.app import toga
 
 def build_pipes_tree(**kw) -> toga.Tree:
-    """
-    Retrieve pipes and return a `toga.Tree` object.
+    """Retrieve pipes and return a `toga.Tree` object.
+
+    Parameters
+    ----------
+    **kw :
+        
+
+    Returns
+    -------
+
     """
     from meerschaum.utils.formatting import ANSI, CHARSET, UNICODE
     from meerschaum.config import get_config

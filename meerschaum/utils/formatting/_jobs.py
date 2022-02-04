@@ -14,8 +14,18 @@ def pprint_jobs(
         daemons: List[Daemon],
         nopretty: bool = False,
     ):
-    """
-    Pretty-print a list of Daemons.
+    """Pretty-print a list of Daemons.
+
+    Parameters
+    ----------
+    daemons: List[Daemon] :
+        
+    nopretty: bool :
+         (Default value = False)
+
+    Returns
+    -------
+
     """
     from meerschaum.utils.formatting import make_header
     
@@ -68,8 +78,18 @@ def pprint_job(
         daemon: Daemon,
         nopretty: bool = False,
     ):
-    """
-    Pretty-print a single Daemon.
+    """Pretty-print a single Daemon.
+
+    Parameters
+    ----------
+    daemon: Daemon :
+        
+    nopretty: bool :
+         (Default value = False)
+
+    Returns
+    -------
+
     """
     if daemon.hidden:
         return

@@ -11,6 +11,10 @@ from meerschaum.utils.typing import Tuple, Dict, SuccessTuple, Any, Union, Optio
 
 @property
 def attributes(self) -> Optional[Dict[str, Any]]:
+    """
+    Return a dictionary of a pipe's keys and parameters.
+    Is a superset of `meerschaum.Pipe.Pipe.parameters`.
+    """
     from meerschaum.utils.debug import dprint
     from meerschaum.utils.warnings import warn
     if '_attributes' not in self.__dict__:
@@ -19,20 +23,33 @@ def attributes(self) -> Optional[Dict[str, Any]]:
         self._attributes = self.instance_connector.get_pipe_attributes(self)
     return self._attributes
 
+
 @property
 def parameters(self) -> Optional[Dict[str, Any]]:
+    """
+    Return the parameters dictionary of the pipe.
+    """
     if '_parameters' not in self.__dict__:
         if not self.attributes:
             return None
         self._parameters = self.attributes['parameters']
     return self._parameters
 
+
 @parameters.setter
 def parameters(self, parameters : Dict[str, Any]) -> None:
+    """
+    Set the parameters dictionary of the in-memory pipe.
+    Call `meerschaum.Pipe.Pipe.edit` to persist changes.
+    """
     self._parameters = parameters
 
+
 @property
-def columns(self):
+def columns(self) -> Union[Dict[str, str], None]:
+    """
+    If defined, return the `columns` dictionary defined in `meerschaum.Pipe.Pipe.parameters`.
+    """
     if not self.parameters:
         if '_columns' in self.__dict__:
             return self._columns
@@ -43,14 +60,39 @@ def columns(self):
 
 @columns.setter
 def columns(self, columns : Dict[str, str]) -> None:
+    """
+    Override the columns dictionary of the in-memory pipe.
+    Call `meerschaum.Pipe.Pipe.edit` to persist changes.
+    """
     if not self.parameters:
         self._columns = columns
     else:
         self._parameters['columns'] = columns
 
-def get_columns(self, *args : str, error : bool = True) -> Tuple[str]:
+def get_columns(self, *args: str, error : bool = True) -> Tuple[str]:
     """
     Check if the requested columns are defined.
+
+    Parameters
+    ----------
+    *args : str :
+        The column names to be retrieved.
+        
+    error : bool, default True:
+        If `True`, raise an `Exception` if the specified column is not defined.
+
+    Returns
+    -------
+    A tuple of the same size of `args`.
+
+    Examples
+    --------
+    >>> pipe = mrsm.Pipe('test', 'test')
+    >>> pipe.columns = {'datetime': 'dt', 'id': 'id'}
+    >>> pipe.get_columns('datetime', 'id')
+    ('dt', 'id')
+    >>> pipe.get_columns('value')
+    Exception:  🛑 Missing 'value' column for Pipe 'test_test'.
     """
     from meerschaum.utils.warnings import error as _error, warn
     if not args:
@@ -71,41 +113,62 @@ def get_columns(self, *args : str, error : bool = True) -> Tuple[str]:
         return col_names[0]
     return tuple(col_names)
 
-def get_columns_types(self, debug : bool = False) -> Optional[Dict[str, str]]:
+def get_columns_types(self, debug : bool = False) -> Union[Dict[str, str], None]:
     """
-    Return a dictionary of a pipe's table's columns to their data types.
+    Get a dictionary of a pipe's column names and their types.
 
-    E.g. An example dictionary for a small table.
+    Parameters
+    ----------
+    debug : bool, default False:
+        Verbosity toggle.
 
-    ```
-    >>> {
-    ...   'dt': 'TIMESTAMP WITHOUT TIMEZONE',
-    ...   'id': 'BIGINT',
-    ...   'val': 'DOUBLE PRECISION',
-    ... }
-    >>> 
-    ```
+    Returns
+    -------
+    A dictionary of column names (`str`) to column types (`str`).
+
+    Examples
+    --------
+    >>> pipe.get_columns_types()
+    {
+      'dt': 'TIMESTAMP WITHOUT TIMEZONE',
+      'id': 'BIGINT',
+      'val': 'DOUBLE PRECISION',
+    }
+    >>>
     """
     return self.instance_connector.get_pipe_columns_types(self, debug=debug)
 
-def get_id(self, **kw : Any) -> Optional[int]:
+def get_id(self, **kw : Any) -> Union[int, None]:
     """
     Fetch a pipe's ID from its instance connector.
+    If the pipe does not exist, return `None`.
     """
     return self.instance_connector.get_pipe_id(self, **kw)
 
 @property
-def id(self) -> Optional[int]:
+def id(self) -> Union[int, None]:
+    """
+    Fetch and cache a pipe's ID.
+    """
     if not ('_id' in self.__dict__ and self._id):
         self._id = self.get_id()
     return self._id
 
 def get_val_column(self, debug: bool = False) -> Union[str, None]:
     """
-    Return the name of the value of column.
-    If not is set in the `columns` dictionary, return the first numeric column that is not
+    Return the name of the value column if it's defined, otherwise make an educated guess.
+    If not set in the `columns` dictionary, return the first numeric column that is not
     an ID or datetime column.
     If none may be found, return `None`.
+
+    Parameters
+    ----------
+    debug: bool, default False:
+        Verbosity toggle.
+
+    Returns
+    -------
+    Either a string or `None`.
     """
     from meerschaum.utils.debug import dprint
     if debug:
@@ -163,9 +226,12 @@ def get_val_column(self, debug: bool = False) -> Union[str, None]:
 
 
 @property
-def parents(self) -> List[meerschaum.Pipe]:
+def parents(self) -> List[meerschaum.Pipe.Pipe]:
     """
-    Return a list of pipes on which this pipe depends.
+    Return a list of `meerschaum.Pipe.Pipe` objects.
+    These pipes will be synced before this pipe.
+
+    NOTE: Not yet in use!
     """
     if 'parents' not in self.parameters:
         return []

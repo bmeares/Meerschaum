@@ -20,8 +20,8 @@ def stop(action : Optional[List[str]] = None, **kw) -> SuccessTuple:
     return choose_subaction(action, options, **kw)
 
 def _complete_stop(
-        action : Optional[List[str]] = None,
-        **kw : Any
+        action: Optional[List[str]] = None,
+        **kw: Any
     ) -> List[str]:
     """
     Override the default Meerschaum `complete_` function.
@@ -47,16 +47,16 @@ def _complete_stop(
     return default_action_completer(action=(['start'] + action), **kw)
 
 def _stop_jobs(
-        action : Optional[List[str]] = None,
-        noask : bool = False,
-        force : bool = False,
-        yes : bool = False,
-        nopretty : bool = False,
+        action: Optional[List[str]] = None,
+        noask: bool = False,
+        force: bool = False,
+        yes: bool = False,
+        nopretty: bool = False,
         **kw
     ) -> SuccessTuple:
     """
     Stop running jobs that were started with `-d` or `start job`.
-
+    
     To see running processes, run `show jobs`.
     """
     from meerschaum.utils.formatting._jobs import pprint_jobs
@@ -90,8 +90,6 @@ def _stop_jobs(
         if quit_success_tuple[0]:
             _quit_daemons.append(d)
             continue
-        #  if not nopretty:
-            #  warn(f"Failed to gracefully quit job '{d.daemon_id}'.", stack=False)
 
         kill_success_tuple = d.kill()
         if kill_success_tuple[0]:

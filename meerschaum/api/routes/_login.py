@@ -19,13 +19,13 @@ def load_user(
         username: str
     ) -> User:
     """
-    Create the User object from the username.
+    Create the `meerschaum._internal.User.User` object from the username.
     """
     return User(username, instance=get_api_connector())
 
 @app.post(endpoints['login'], tags=['Users'])
 def login(
-        data : OAuth2PasswordRequestForm = fastapi.Depends()
+        data: OAuth2PasswordRequestForm = fastapi.Depends()
     ) -> JSONResponse:
     """
     Login and set the session token.

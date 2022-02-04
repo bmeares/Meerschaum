@@ -6,12 +6,24 @@
 Register a Pipe object
 """
 
+from meerschaum.utils.typing import SuccessTuple
+
 def register(
         self,
         debug: bool = False
     ):
     """
     Register a new Pipe along with its attributes.
+
+    Parameters
+    ----------
+    debug: bool, default False
+        Verbosity toggle.
+
+    Returns
+    -------
+    A `SuccessTuple` of success, message.
+
     """
     import warnings
     with warnings.catch_warnings():

@@ -14,6 +14,13 @@ def clear(
     ) -> SuccessTuple:
     """
     Clear pipes of their data, or clear the screen.
+
+    Usage:
+    - clear
+        - Clear the screen.
+    - clear pipes --begin 2022-01-01
+        - For all pipes, remove rows newer than or equal to `2022-01-01 00:00:00`.
+
     """
     from meerschaum.utils.misc import choose_subaction
     if not action:
@@ -39,6 +46,7 @@ def _clear_pipes(
     ) -> SuccessTuple:
     """
     Clear pipes' data without dropping any tables.
+
     """
     from meerschaum import get_pipes
     from meerschaum.utils.formatting import print_tuple
@@ -81,6 +89,7 @@ def _ask_with_rowcounts(
     ) -> bool:
     """
     Count all of the pipes' rowcounts and confirm with the user that these rows need to be deleted.
+
     """
     from meerschaum.utils.prompt import yes_no
     from meerschaum.utils.misc import print_options

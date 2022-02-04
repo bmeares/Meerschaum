@@ -23,8 +23,18 @@ class ValidAutoSuggest(prompt_toolkit_auto_suggest.AutoSuggest):
         buffer: prompt_toolkit_buffer.Buffer,
         document: prompt_toolkit_document.Document,
     ) -> Optional[prompt_toolkit_auto_suggest.Suggestion]:
-        """
-        Only return valid commands from history.
+        """Only return valid commands from history.
+
+        Parameters
+        ----------
+        buffer: prompt_toolkit_buffer.Buffer :
+            
+        document: prompt_toolkit_document.Document :
+            
+
+        Returns
+        -------
+
         """
         history = buffer.history
         text = document.text.rsplit("\n", 1)[-1]

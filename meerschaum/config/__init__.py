@@ -46,7 +46,7 @@ def _config(
 
 def set_config(cf : Dict[str, Any]) -> Dict[str, Any]:
     """
-    Set the configuration dictionary to a dictionary
+    Set the configuration dictionary to a dictionary.
     """
     global config
     if not isinstance(cf, dict):
@@ -56,51 +56,57 @@ def set_config(cf : Dict[str, Any]) -> Dict[str, Any]:
     return config
 
 def get_config(
-        *keys : str,
-        patch : bool = True,
-        substitute : bool = True,
-        sync_files : bool = True,
-        write_missing : bool = True,
-        as_tuple : bool = False,
-        warn : bool = True,
-        debug = False
+        *keys: str,
+        patch: bool = True,
+        substitute: bool = True,
+        sync_files: bool = True,
+        write_missing: bool = True,
+        as_tuple: bool = False,
+        warn: bool = True,
+        debug: bool = False
     ) -> Any:
     """
     Return the Meerschaum configuration dictionary.
     If positional arguments are provided, index by the keys.
     Raises a warning if invalid keys are provided.
 
-    :param keys:
+    Parameters
+    ----------
+    keys: str:
         List of strings to index.
 
-    :param patch:
-        If True, patch missing default keys into the config directory.
-        Defaults to True.
+    patch: bool, default True
+        If `True`, patch missing default keys into the config directory.
+        Defaults to `True`.
 
-    :param sync_files:
-        If True, sync files if needed.
-        Defaults to True.
+    sync_files: bool, default True
+        If `True`, sync files if needed.
+        Defaults to `True`.
 
-    :param write_missing:
-        If True, write default values when the main config files are missing.
-        Defaults to True.
+    write_missing: bool, default True
+        If `True`, write default values when the main config files are missing.
+        Defaults to `True`.
 
-    :param substitute:
-        If True, subsitute 'MRSM{}' values.
-        Defaults to True.
+    substitute: bool, default True
+        If `True`, subsitute 'MRSM{}' values.
+        Defaults to `True`.
 
-    :param as_tuple:
-        If True, return a tuple of type (success, value).
-        Defaults to False.
+    as_tuple: bool, default False
+        If `True`, return a tuple of type (success, value).
+        Defaults to `False`.
+        
+    Returns
+    -------
+    The value in the configuration directorym indexed by the provided keys.
 
-    E.g. get_config('meerschaum', 'connectors') == config['meerschaum']['connectors']
+    Examples
+    --------
+    >>> get_config('meerschaum', 'intance')
+    'sql:main'
+    >>> get_config('does', 'not', 'exist')
+    UserWarning:  ⚠️ Invalid keys in config: ('does', 'not', 'exist')
     """
     global config
-    #  try:
-        #  print("CONFIG PLUGINS:")
-        #  print(config.get('plugins'))
-    #  except:
-        #  pass
     import json
 
     symlinks_key = _static_config()['config']['symlinks_key']
@@ -204,8 +210,8 @@ def get_config(
 
 def get_plugin_config(*keys : str, **kw : Any) -> Optional[Any]:
     """
-    Return the configuration for the calling plugin.
-    This function is only mean to be used from within a plugin.
+    This may only be called from within a Meerschaum plugin.
+    See `meerschaum.config.get_config` for arguments.
     """
     from meerschaum.utils.warnings import warn, error
     from meerschaum.actions import _get_parent_plugin

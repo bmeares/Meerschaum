@@ -25,9 +25,7 @@ import os, pathlib
 _tmpversion = None
 
 class Plugin:
-    """
-    Handle packaging of Meerschaum plugins.
-    """
+    """Handle packaging of Meerschaum plugins."""
     def __init__(
         self,
         name: str,
@@ -58,9 +56,7 @@ class Plugin:
 
     @property
     def version(self):
-        """
-        Return the plugin's version string.
-        """
+        """ """
         if self._version is None:
             try:
                 self._version = self.module.__version__
@@ -70,9 +66,7 @@ class Plugin:
 
     @property
     def module(self):
-        """
-        Return a Plugin's Python module.
-        """
+        """ """
         if '_module' not in self.__dict__ or self._module is None:
             from meerschaum.plugins import import_plugins
             self._module = import_plugins(str(self), warn=False)
@@ -87,8 +81,16 @@ class Plugin:
         return self.module.__file__
 
     def make_tar(self, debug : bool = False) -> pathlib.Path:
-        """
-        Compress the plugin's source files into a `.tar.gz` archive and return the archive's path.
+        """Compress the plugin's source files into a `.tar.gz` archive and return the archive's path.
+
+        Parameters
+        ----------
+        debug : bool :
+             (Default value = False)
+
+        Returns
+        -------
+
         """
         import tarfile
         from meerschaum.utils.debug import dprint
@@ -151,8 +153,18 @@ class Plugin:
             force : bool = False,
             debug : bool = False
         ) -> SuccessTuple:
-        """
-        Remove a plugin's archive file.
+        """Remove a plugin's archive file.
+
+        Parameters
+        ----------
+        force : bool :
+             (Default value = False)
+        debug : bool :
+             (Default value = False)
+
+        Returns
+        -------
+
         """
         if not self.archive_path.exists():
             return True, f"Archive file for plugin '{self}' does not exist."
@@ -167,10 +179,20 @@ class Plugin:
             force: bool = False,
             debug: bool = False
         ) -> SuccessTuple:
-        """
-        Extract a plugin's tar archive to the plugins directory.
+        """Extract a plugin's tar archive to the plugins directory.
         This function checks if the plugin is already installed and if the version is equal or
         greater than the existing installation.
+
+        Parameters
+        ----------
+        force: bool :
+             (Default value = False)
+        debug: bool :
+             (Default value = False)
+
+        Returns
+        -------
+
         """
         from meerschaum.utils.warnings import warn, error
         if debug:
@@ -324,8 +346,20 @@ class Plugin:
         return success, msg
 
     def setup(self, *args : str, debug : bool = False, **kw : Any) -> SuccessTuple:
-        """
-        If exists, run the plugin's `setup()` function.
+        """If exists, run the plugin's `setup()` function.
+
+        Parameters
+        ----------
+        *args : str :
+            
+        debug : bool :
+             (Default value = False)
+        **kw : Any :
+            
+
+        Returns
+        -------
+
         """
         from meerschaum.utils.packages import activate_venv, deactivate_venv
         from meerschaum.utils.debug import dprint
@@ -374,10 +408,18 @@ class Plugin:
             self,
             debug: bool = False,
         ) -> List[str]:
-        """
-        If the Plugin has specified dependencies in a list called `required`, return the list.
+        """If the Plugin has specified dependencies in a list called `required`, return the list.
+        
+        NOTE: Dependecies which start with 'plugin:' are Meerschaum plugins, not pip packages.
 
-        NOTE: Dependecies which start with 'plugin:' are Meerschaum plugins, not pip packages. 
+        Parameters
+        ----------
+        debug: bool :
+             (Default value = False)
+
+        Returns
+        -------
+
         """
         from meerschaum.utils.packages import activate_venv, deactivate_venv
         import inspect
@@ -395,11 +437,21 @@ class Plugin:
             force: bool = False,
             debug: bool = False,
         ) -> bool:
-        """
-        If specified, install dependencies.
-
+        """If specified, install dependencies.
+        
         NOTE: Dependencies that start with 'plugin:' will be installed as Meerschaum plugins
         from the same repository as this Plugin.
+
+        Parameters
+        ----------
+        force: bool :
+             (Default value = False)
+        debug: bool :
+             (Default value = False)
+
+        Returns
+        -------
+
         """
         from meerschaum.utils.packages import pip_install
         from meerschaum.utils.debug import dprint

@@ -12,8 +12,18 @@ from meerschaum.utils.typing import Union, Any, Optional, SuccessTuple, Mapping,
 def plugin_r_url(
         plugin : Union[meerschaum._internal.Plugin.Plugin, str]
     ) -> str:
-    """
-    Generate a relative URL path from a Plugin.
+    """Generate a relative URL path from a Plugin.
+
+    Parameters
+    ----------
+    plugin : Union[meerschaum._internal.Plugin.Plugin :
+        
+    str] :
+        
+
+    Returns
+    -------
+
     """
     from meerschaum.config.static import _static_config
     return f"{_static_config()['api']['endpoints']['plugins']}/{plugin}"
@@ -24,8 +34,20 @@ def register_plugin(
         make_archive: bool = True,
         debug: bool = False,
     ) -> SuccessTuple:
-    """
-    Register a plugin and upload its archive.
+    """Register a plugin and upload its archive.
+
+    Parameters
+    ----------
+    plugin: meerschaum._internal.Plugin.Plugin :
+        
+    make_archive: bool :
+         (Default value = True)
+    debug: bool :
+         (Default value = False)
+
+    Returns
+    -------
+
     """
     import json
     archive_path = plugin.make_tar(debug=debug) if make_archive else plugin.archive_path
@@ -56,11 +78,22 @@ def install_plugin(
         force: bool = False,
         debug: bool = False
     ) -> SuccessTuple:
-    """
-    Download and attempt to install a plugin from the API.
+    """Download and attempt to install a plugin from the API.
 
-    :param name:
+    Parameters
+    ----------
+    name :
         The name of the plugin to be installed.
+    name: str :
+        
+    force: bool :
+         (Default value = False)
+    debug: bool :
+         (Default value = False)
+
+    Returns
+    -------
+
     """
     import os, pathlib, json
     from meerschaum._internal.Plugin import Plugin
@@ -95,11 +128,22 @@ def get_plugins(
         search_term : Optional[str] = None,
         debug : bool = False
     ) -> Sequence[str]:
-    """
-    Return a list of registered plugin names.
+    """Return a list of registered plugin names.
 
-    :param user_id:
+    Parameters
+    ----------
+    user_id :
         If specified, return all plugins from a certain user.
+    user_id : Optional[int] :
+         (Default value = None)
+    search_term : Optional[str] :
+         (Default value = None)
+    debug : bool :
+         (Default value = False)
+
+    Returns
+    -------
+
     """
     import json
     from meerschaum.utils.warnings import warn, error
@@ -123,7 +167,19 @@ def get_plugin_attributes(
         debug : bool = False
     ) -> Mapping[str, Any]:
     """
-    Return attributes of a registered plugin.
+
+    Parameters
+    ----------
+    plugin : meerschaum._internal.Plugin.Plugin :
+        
+    debug : bool :
+         (Default value = False)
+
+    Returns
+    -------
+    type
+        
+
     """
     import json
     from meerschaum.utils.warnings import warn, error
@@ -148,8 +204,18 @@ def delete_plugin(
         plugin : meerschaum._internal.Plugin.Plugin,
         debug : bool = False
     ) -> SuccessTuple:
-    """
-    Delete a plugin from an API repository.
+    """Delete a plugin from an API repository.
+
+    Parameters
+    ----------
+    plugin : meerschaum._internal.Plugin.Plugin :
+        
+    debug : bool :
+         (Default value = False)
+
+    Returns
+    -------
+
     """
     import json
     r_url = plugin_r_url(plugin)

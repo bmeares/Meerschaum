@@ -32,6 +32,18 @@ def execute_action(state: WebState):
     """
     Execute a Meerschaum action and capture its output.
     Format the output as an HTML `pre` object, and return a list of Alert objects.
+
+    Parameters
+    ----------
+    state: WebState :
+        The state of the dashboard.
+
+    Returns
+    -------
+    A tuple of lists.
+    The first list contains the children of the output div.
+    The second contains alerts.
+
     """
     global running_jobs, stopped_jobs, running_monitors, stopped_monitors
     action, subaction, subaction_options, subaction_hidden, additional_subaction_text, flags = (
@@ -239,11 +251,33 @@ def execute_action(state: WebState):
 def check_input_interval(state : WebState):
     """
     Regularly check if the executing action is blocking on input.
+
+    Parameters
+    ----------
+    state : WebState :
+        The state of the dashboard.    
+
+    Returns
+    -------
+    A tuple of children and alerts.
+
     """
     print('check for input')
     return (state['content-div-right.children'], state['success-alert-div.children'])
 
 def stop_action(state: WebState):
+    """
+    Kill a running action.
+
+    Parameters
+    ----------
+    state: WebState:
+        The state of the dashboard.
+
+    Returns
+    -------
+    A tuple of children and alerts.
+    """
     global running_jobs
     session_id = state['session-store.data'].get('session-id', None)
     thread = running_jobs.get(session_id, {}).get('parent_thread', None)

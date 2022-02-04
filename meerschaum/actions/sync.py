@@ -17,6 +17,16 @@ def sync(
     ) -> SuccessTuple:
     """
     Fetch and sync data for pipes.
+
+    Usage:
+        - `--loop`
+            - Sync indefinitely.
+        - `--min-seconds 10`
+            - Wait 10 seconds between laps.
+        - `--async`, `--unblock``
+            - Spin up background threads for each pipe.
+        - `--debug`
+            - Print verbose messages.
     """
     from meerschaum.utils.misc import choose_subaction
     options = {
@@ -229,6 +239,16 @@ def _sync_pipes(
     ) -> SuccessTuple:
     """
     Fetch and sync new data for pipes.
+
+    Usage:
+        - `--loop`
+            - Sync indefinitely.
+        - `--min-seconds 10`
+            - Wait 10 seconds between laps.
+        - `--async`, `--unblock``
+            - Spin up background threads for each pipe.
+        - `--debug`
+            - Print verbose messages.
     """
     from meerschaum.utils.debug import dprint
     from meerschaum.utils.warnings import warn, info

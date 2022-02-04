@@ -18,9 +18,7 @@ It is highly encouraged that you serve this API over HTTPS! Sensitive data like 
 password hashes will be shared between APIs."""
 
 def check_allow_chaining() -> bool:
-    """
-    Consult the configuration to see if 
-    """
+    """Consult the configuration to see if"""
     from meerschaum.config import get_config
     return get_config('system', 'api', 'permissions', 'chaining', 'child_apis')
 

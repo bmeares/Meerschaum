@@ -10,12 +10,22 @@ def make_header(
         message : str,
         ruler : str = '─',
     ) -> str:
-    """
-    Format a message string with a ruler.
+    """Format a message string with a ruler.
     Length of the ruler is the length of the longest word
-
+    
     Example:
         'My\nheader' -> 'My\nheader\n──────'
+
+    Parameters
+    ----------
+    message : str :
+        
+    ruler : str :
+         (Default value = '─')
+
+    Returns
+    -------
+
     """
 
     from meerschaum.utils.formatting import ANSI, UNICODE, colored
@@ -34,9 +44,17 @@ def make_header(
     return s
 
 def clear_screen(debug: bool = False) -> bool:
-    """
-    Clear the terminal window of all text. If ANSI is enabled,
+    """Clear the terminal window of all text. If ANSI is enabled,
     print the ANSI code for clearing. Otherwise, execute `clear` or `cls`.
+
+    Parameters
+    ----------
+    debug: bool :
+         (Default value = False)
+
+    Returns
+    -------
+
     """
     from meerschaum.utils.formatting import ANSI, get_console
     from meerschaum.utils.debug import dprint
@@ -64,8 +82,16 @@ def clear_screen(debug: bool = False) -> bool:
 
 
 def flush_with_newlines(debug: bool = False) -> None:
-    """
-    Print newlines such that the entire terminal is cleared and new text will show up at the bottom.
+    """Print newlines such that the entire terminal is cleared and new text will show up at the bottom.
+
+    Parameters
+    ----------
+    debug: bool :
+         (Default value = False)
+
+    Returns
+    -------
+
     """
     import sys
     from meerschaum.utils.misc import get_cols_lines
@@ -79,7 +105,19 @@ def flush_with_newlines(debug: bool = False) -> None:
 
 def progress(transient: bool = True, **kw):
     """
-    Return a `rich.progress.Progress` object.
+
+    Parameters
+    ----------
+    transient: bool :
+         (Default value = True)
+    **kw :
+        
+
+    Returns
+    -------
+    type
+        
+
     """
     from meerschaum.utils.packages import import_rich, attempt_import
     rich = import_rich()
@@ -96,7 +134,17 @@ def progress(transient: bool = True, **kw):
 
 def live(**kw):
     """
-    Return a `rich.progress.Progress` object.
+
+    Parameters
+    ----------
+    **kw :
+        
+
+    Returns
+    -------
+    type
+        
+
     """
     from meerschaum.utils.packages import import_rich, attempt_import
     rich = import_rich()

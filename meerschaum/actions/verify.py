@@ -38,6 +38,7 @@ def _verify_pipes(**kw) -> SuccessTuple:
         #  success, msg = pipe.verify()
     return False, "Not implemented."
 
+
 def _verify_packages(
         debug: bool = False,
         **kw

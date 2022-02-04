@@ -9,8 +9,8 @@ from __future__ import annotations
 from meerschaum.utils.typing import SuccessTuple, Union, Any, Optional, Sequence, List
 
 def drop(
-        action : Optional[List[str]] = None,
-        **kw : Any
+        action: Optional[List[str]] = None,
+        **kw: Any
     ) -> SuccessTuple:
     """
     Drop pipe data (maintaining registration) or tables.
@@ -76,8 +76,8 @@ def _drop_pipes(
     return successes > 0, msg
 
 def _drop_tables(
-        action : Optional[List[str]] = None,
-        **kw : Any
+        action: Optional[List[str]] = None,
+        **kw: Any
     ) -> SuccessTuple:
     """
     Drop SQL tables. WARNING: This is very dangerous!

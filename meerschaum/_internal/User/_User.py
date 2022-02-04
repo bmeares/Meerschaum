@@ -61,9 +61,7 @@ class User():
 
     @property
     def instance_connector(self) -> meerschaum.connectors.Connector:
-        """
-        Return the instance connector for the user.
-        """
+        """ """
         from meerschaum.connectors.parse import parse_instance_keys
         if '_instance_connector' not in self.__dict__:
             self._instance_connector = parse_instance_keys(self._instance_keys)
@@ -71,9 +69,15 @@ class User():
 
     @property
     def user_id(self) -> int:
-        """
-        NOTE: This causes recursion with the API,
+        """NOTE: This causes recursion with the API,
               so don't try to get fancy with read-only attributes.
+
+        Parameters
+        ----------
+
+        Returns
+        -------
+
         """
         return self._user_id
 

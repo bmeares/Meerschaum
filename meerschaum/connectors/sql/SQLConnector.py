@@ -15,10 +15,11 @@ from meerschaum.utils.warnings import error
 class SQLConnector(Connector):
     """
     Connect to SQL databases via `sqlalchemy`.
-
+    
     SQLConnectors may be used as Meerschaum instance connectors.
     Read more about connectors and instances at
     https://meerschaum.io/reference/connectors/
+
     """
 
     from ._create_engine import flavor_configs, create_engine
@@ -76,30 +77,32 @@ class SQLConnector(Connector):
         **kw: Any
     ):
         """
-        :param label:
+        Parameters
+        ----------
+        label: str, default 'main'
             The identifying label for the connector.
             E.g. for `sql:main`, 'main' is the label.
             Defaults to 'main'.
 
-        :param flavor:
-            The database flavor.
-            E.g. 'sqlite', 'postgresql', 'cockroachdb', etc.
+        flavor: Optional[str], default None
+            The database flavor, e.g.
+            `'sqlite'`, `'postgresql'`, `'cockroachdb'`, etc.
             To see supported flavors, run the `bootstrap connectors` command.
 
-        :param wait:
+        wait: bool, default False
             If `True`, block until a database connection has been made.
             Defaults to `False`.
 
-        :param connect:
+        connect: bool, default False
             If `True`, immediately attempt to connect the database and raise
             a warning if the connection fails.
             Defaults to `False`.
 
-        :param debug:
+        debug: bool, default False
             Verbosity toggle.
             Defaults to `False`.
 
-        :param kw:
+        kw: Any
             All other arguments will be passed to the connector's attributes.
             Therefore, a connector may be made without being registered,
             as long enough parameters are supplied to the constructor.

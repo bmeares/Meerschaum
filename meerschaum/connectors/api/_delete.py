@@ -17,8 +17,26 @@ def delete(
         debug : bool = False,
         **kw : Ahy,
     ) -> requests.Response:
-    """
-    Wrapper for requests.delete
+    """Wrapper for requests.delete
+
+    Parameters
+    ----------
+    r_url : str :
+        
+    headers : Optional[Dict[str :
+        
+    Any]] :
+         (Default value = None)
+    use_token : bool :
+         (Default value = True)
+    debug : bool :
+         (Default value = False)
+    **kw : Ahy :
+        
+
+    Returns
+    -------
+
     """
     if debug:
         from meerschaum.utils.debug import dprint

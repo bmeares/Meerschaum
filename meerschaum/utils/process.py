@@ -26,44 +26,59 @@ def run_process(
         capture_output: bool = False,
         **kw: Any
     ) -> Union[int, subprocess.Popen]:
-    """
-    Original foreground solution found here:
+    """Original foreground solution found here:
     https://stackoverflow.com/questions/23826695/handling-keyboard-interrupt-when-using-subproccess
 
-
-    :param args:
+    Parameters
+    ----------
+    args :
         The sysargs to execute.
-
-    :param foreground:
+    foreground :
         If `True`, execute the process as a foreground process that passes Ctrl-C to children.
         From the original post:
-            The "correct" way of spawning a new subprocess:
-            signals like C-c must only go
-            to the child process, and not to this python.
-
-            Some side-info about "how ctrl-c works":
-            https://unix.stackexchange.com/a/149756/1321
+        The "correct" way of spawning a new subprocess:
+        signals like C-c must only go
+        to the child process, and not to this python.
+        
+        Some side-info about "how ctrl-c works":
+        https://unix.stackexchange.com/a/149756/1321
         Defaults to `False`.
-
-    :param as_proc:
+    as_proc :
         If `True`, return the `subprocess.Popen` object.
         Defaults to `False`.
-
-    :param line_callback:
+    line_callback :
         If provided, poll the process and execute the callback when `readline()` gets new text.
         Defaults to `None`.
-
-    :param store_proc_dict:
+    store_proc_dict :
         If provided, store the `subprocess.Popen` object under the key `store_proc_key`.
         Useful for accessing the process while it is polling in another thread.
         Defaults to `None`.
-
-    :param store_proc_key:
+    store_proc_key :
         If `store_proc_dict` is provided, store the process in the dictionary under this key.
         Defaults to 'child_process'.
-
-    :param kw:
+    kw :
         Additional keyword arguments to pass to `subprocess.Popen`.
+    *args :
+        
+    foreground: bool :
+         (Default value = False)
+    as_proc: bool :
+         (Default value = False)
+    line_callback: Optional[Callable[[str] :
+        
+    Any]] :
+         (Default value = None)
+    store_proc_dict: Optional[Dict[str :
+        
+    store_proc_key: str :
+         (Default value = 'child_process')
+    capture_output: bool :
+         (Default value = False)
+    **kw: Any :
+        
+
+    Returns
+    -------
 
     """
     if platform.system() == 'Windows':
@@ -170,8 +185,34 @@ def poll_process(
         timeout_callback_args: Optional[Tuple[Any]] = None,
         timeout_callback_kwargs: Optional[Dict[str, Any]] = None,
     ) -> int:
-    """
-    Poll a process and execute a callback function for each line printed to the process's `stdout`.
+    """Poll a process and execute a callback function for each line printed to the process's `stdout`.
+
+    Parameters
+    ----------
+    proc: subprocess.Popen :
+        
+    line_callback: Callable[[bytes] :
+        
+    Any] :
+        
+    timeout_seconds: Union[int :
+        
+    float :
+        
+    None] :
+         (Default value = None)
+    timeout_callback: Optional[Callable[[Any] :
+        
+    Any]] :
+         (Default value = None)
+    timeout_callback_args: Optional[Tuple[Any]] :
+         (Default value = None)
+    timeout_callback_kwargs: Optional[Dict[str :
+        
+
+    Returns
+    -------
+
     """
     from meerschaum.utils.threading import Timer
 

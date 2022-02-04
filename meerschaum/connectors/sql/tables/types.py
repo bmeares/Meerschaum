@@ -16,9 +16,10 @@ BINARY = sqlalchemy.types.BINARY
 psqlUUID = sqlalchemy_dialects_postgresql.UUID
 
 class UUID(sqlalchemy.types.TypeDecorator):
-    """Platform-independent GUID type.
-
-    Uses Postgresql's UUID type, otherwise uses
+    """
+    Platform-independent GUID type.
+    
+    Uses PostgreSQL's UUID type, otherwise uses
     BINARY(16), to store UUID.
 
     """

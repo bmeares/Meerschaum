@@ -18,23 +18,41 @@ def subscribe(
         debug : bool = False,
         **kw
     ):
-    """
-    Subscribe to an MQTT topic and execute a callback function.
-
+    """Subscribe to an MQTT topic and execute a callback function.
+    
     topic : str : '#'
         MQTT topic to subscribe to. Default is all available topics.
         (WARNING: this may have unexpected results!)
-
+    
     callback : function
         Callback function must take only one string parameter.
-
+    
     skip_duplicates : bool : True
         If True, only execute the callback function if the message value is different from the last
         one received.
-
+    
     forever : bool : False
         If `forever` is True, block the main thread in a loop. Otherwise spin up a new thread
         for the duration of the main thread.
+
+    Parameters
+    ----------
+    topic : str :
+         (Default value = '#')
+    callback : 'function' :
+         (Default value = None)
+    skip_duplicates :
+         (Default value = True)
+    forever : bool :
+         (Default value = False)
+    debug : bool :
+         (Default value = False)
+    **kw :
+        
+
+    Returns
+    -------
+
     """
     from meerschaum.utils.warnings import error, warn
     from meerschaum.utils.debug import dprint
@@ -48,9 +66,21 @@ def subscribe(
 
     ### decode the payload and execute the callback function with the string as the only parameter
     def _parse_message(client, userdata, message):
-        """
-        Parse the payload (assuming it's a UTF-8 string. May add options to this later)
+        """Parse the payload (assuming it's a UTF-8 string. May add options to this later)
         and if skip_duplicates is True, check for a change in the payload.
+
+        Parameters
+        ----------
+        client :
+            
+        userdata :
+            
+        message :
+            
+
+        Returns
+        -------
+
         """
         execute_callback = True
         if skip_duplicates:
@@ -65,8 +95,22 @@ def subscribe(
         dprint("Message on topic " + f'"{topic}"' + " has not changed since the last message. Skipping...")
 
     def _subscribe_on_connect(client, userdata, flags, rc):
-        """
-        Subscribe to the topic when connecting (resubscribes in case of disconnect).
+        """Subscribe to the topic when connecting (resubscribes in case of disconnect).
+
+        Parameters
+        ----------
+        client :
+            
+        userdata :
+            
+        flags :
+            
+        rc :
+            
+
+        Returns
+        -------
+
         """
         if rc > 0:
             warn(f"Received return code {rc} from '{self.host}' on topic '{topic}'.")

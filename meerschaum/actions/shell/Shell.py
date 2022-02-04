@@ -93,7 +93,7 @@ def _insert_shell_actions(
             setattr(_shell_class, 'complete_' + a, completer)
 
 def _completer_wrapper(
-        target : Callable[[Any], List[str]]
+        target: Callable[[Any], List[str]]
     ) -> Callable[['meerschaum.actions.shell.Shell', str, str, int, int], Any]:
     """
     Wrapper for `complete_` functions so they can instead use Meerschaum arguments.
@@ -120,6 +120,7 @@ def _completer_wrapper(
         return target(**args)
 
     return wrapper
+
 
 def default_action_completer(
         text: Optional[str] = None,
@@ -199,6 +200,7 @@ def _check_complete_keys(line: str) -> Optional[List[str]]:
 
     return None
 
+
 class Shell(cmd.Cmd):
     def __init__(
             self,
@@ -274,7 +276,7 @@ class Shell(cmd.Cmd):
             pass
 
 
-    def load_config(self, instance : Optional[str] = None):
+    def load_config(self, instance: Optional[str] = None):
         """
         Set attributes from the shell configuration.
         """
@@ -393,9 +395,8 @@ class Shell(cmd.Cmd):
         """
         Pass line string to parent actions.
         Pass parsed arguments to custom actions
-
-        Overrides `default`: if action does not exist,
-            assume the action is `shell`
+        
+        Overrides `default`. If an action does not exist, assume the action is `shell`
         """
         ### Preserve the working directory.
         old_cwd = os.getcwd()
@@ -539,13 +540,14 @@ class Shell(cmd.Cmd):
         Do nothing.
         """
 
-    def do_debug(self, action : Optional[List[str]] = None, **kw):
+    def do_debug(self, action: Optional[List[str]] = None, **kw):
         """
         Toggle the shell's debug mode.
         If debug = on, append `--debug` to all commands.
-
-        Command: `debug {on/true | off/false}`
-        Ommitting on / off will toggle the existing value.
+        
+        Command:
+            `debug {on/true | off/false}`
+            Ommitting on / off will toggle the existing value.
         """
         from meerschaum.utils.warnings import info
         on_commands = {'on', 'true'}
@@ -577,26 +579,27 @@ class Shell(cmd.Cmd):
         Temporarily set a default Meerschaum instance for the duration of the shell.
         The default instance is loaded from the Meerschaum configuraton file
           (at keys 'meerschaum:instance').
-
+        
         You can change the default instance with `edit config`.
-
+        
         Usage:
             instance {instance keys}
-
+        
         Examples:
             ```
             ### reset to default instance
             instance
-
+        
             ### set the instance to 'api:main'
             instance api
-
+        
             ### set the instance to a non-default connector
             instance api:myremoteinstance
             ```
-
+        
         Note that instances must be configured, be either API or SQL connections,
           and be accessible to this machine over the network.
+
         """
         from meerschaum import get_connector
         from meerschaum.connectors.parse import parse_instance_keys
@@ -644,22 +647,22 @@ class Shell(cmd.Cmd):
         Temporarily set a default Meerschaum repository for the duration of the shell.
         The default repository (mrsm.io) is loaded from the Meerschaum configuraton file
           (at keys 'meerschaum:default_repository').
-
+        
         You can change the default repository with `edit config`.
-
+        
         Usage:
             repo {API label}
-
+        
         Examples:
             ### reset to default repository
             repo
-
+        
             ### set the repo to 'api:main'
             repository api
-
+        
             ### set the repository to a non-default repo
             repo myremoterepo
-
+        
         Note that repositories are a subset of instances.
         """
         from meerschaum import get_connector
@@ -691,9 +694,9 @@ class Shell(cmd.Cmd):
     def do_help(self, line : str) -> List[str]:
         """
         Show help for Meerschaum actions.
-
+        
         You can also view help for actions and subactions with `--help`.
-
+        
         Examples:
         ```
         help show
@@ -759,7 +762,7 @@ class Shell(cmd.Cmd):
                 possibilities.append(name.replace('do_', ''))
         return possibilities
 
-    def do_exit(self, params) -> 'Literal[True]':
+    def do_exit(self, params) -> True:
         """
         Exit the Meerschaum shell.
         """
@@ -768,12 +771,13 @@ class Shell(cmd.Cmd):
     def emptyline(self):
         """
         If the user specifies, clear the screen.
+
+        **NOTE:** The screen clearing is defined in the custom input below
         """
-        ### NOTE: The screen clearing is defined in the custom input below
 
     def preloop(self):
         """
-        Patch builtin cmdloop with my own input (defined below)
+        Patch builtin cmdloop with my own input (defined below).
         """
         import signal, os
         cmd.__builtins__['input'] = input_with_sigint(_old_input, self.session, shell=self)

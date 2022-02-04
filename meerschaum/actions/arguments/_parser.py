@@ -19,9 +19,7 @@ def _new_argparse_error(self, message):
     raise argparse.ArgumentError(message)
 
 class ArgumentParser(argparse.ArgumentParser):
-    """
-    Override the built-in `argparse` error handling.
-    """
+    """Override the built-in `argparse` error handling."""
 
     def parse_known_args(self, *args, exit_on_error: bool = False, **kw):
         _error_bkp = self.error
@@ -33,8 +31,16 @@ class ArgumentParser(argparse.ArgumentParser):
 
 
 def parse_datetime(dt_str : str) -> datetime.datetime:
-    """
-    Parse a string into a datetime.
+    """Parse a string into a datetime.
+
+    Parameters
+    ----------
+    dt_str : str :
+        
+
+    Returns
+    -------
+
     """
     from meerschaum.utils.packages import attempt_import
     import datetime
@@ -53,8 +59,20 @@ def parse_datetime(dt_str : str) -> datetime.datetime:
     return dt
 
 def parse_help(sysargs : Union[List[str], Dict[str, Any]]) -> None:
-    """
-    Parse the `--help` flag to determine which help message to print.
+    """Parse the `--help` flag to determine which help message to print.
+
+    Parameters
+    ----------
+    sysargs : Union[List[str] :
+        
+    Dict[str :
+        
+    Any]] :
+        
+
+    Returns
+    -------
+
     """
     from meerschaum.actions.arguments._parse_arguments import parse_arguments, parse_line
     from meerschaum.actions import actions, get_subactions
@@ -90,8 +108,16 @@ def parse_help(sysargs : Union[List[str], Dict[str, Any]]) -> None:
     return print(textwrap.dedent(doc))
 
 def parse_version(sysargs : List[str]):
-    """
-    Print the Meerschaum version.
+    """Print the Meerschaum version.
+
+    Parameters
+    ----------
+    sysargs : List[str] :
+        
+
+    Returns
+    -------
+
     """
     from meerschaum.config import __version__ as version
     from meerschaum.config import __doc__ as doc
@@ -100,9 +126,7 @@ def parse_version(sysargs : List[str]):
     return print(doc)
 
 def get_arguments_triggers() -> Dict[str, Tuple[str]]:
-    """
-    Return a dictionary of arguments and their triggers.
-    """
+    """ """
     triggers = {}
     _actions = parser._actions
     for _a in _actions:
@@ -110,9 +134,19 @@ def get_arguments_triggers() -> Dict[str, Tuple[str]]:
     return triggers
 
 def add_plugin_argument(*args, **kwargs) -> None:
-    """
-    Add argparse arguments under the 'Plugins options' group.
+    """Add argparse arguments under the 'Plugins options' group.
     Takes the same parameters as the regular argparse `add_argument()` function.
+
+    Parameters
+    ----------
+    *args :
+        
+    **kwargs :
+        
+
+    Returns
+    -------
+
     """
     global groups, _seen_plugin_args
     from meerschaum.actions import _get_parent_plugin

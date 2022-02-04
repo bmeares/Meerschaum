@@ -13,13 +13,20 @@ from meerschaum.utils.typing import List, Dict, Any, Optional
 from meerschaum.actions.arguments._parser import parser
 
 def parse_arguments(sysargs: List[str]) -> Dict[str, Any]:
-    """
-    Parse a list of arguments into standard Meerschaum arguments.
+    """Parse a list of arguments into standard Meerschaum arguments.
     Returns a dictionary of argument_name -> argument_value.
 
-    :param sysargs:
+    Parameters
+    ----------
+    sysargs :
         List of command-line arguments to process. Does not include the executable.
         E.g. ['show', 'version', '--nopretty']
+    sysargs: List[str] :
+        
+
+    Returns
+    -------
+
     """
     import copy
     from meerschaum.config.static import _static_config
@@ -118,13 +125,21 @@ def parse_arguments(sysargs: List[str]) -> Dict[str, Any]:
     return parse_synonyms(args_dict)
 
 def parse_line(line : str) -> dict:
-    """
-    Parse a line of text into standard Meerschaum arguments.
-
+    """Parse a line of text into standard Meerschaum arguments.
+    
     line: str
         Line of text to be parsed
-
+    
     returns: dict of arguments
+
+    Parameters
+    ----------
+    line : str :
+        
+
+    Returns
+    -------
+
     """
     import shlex
     try:
@@ -138,8 +153,18 @@ def parse_line(line : str) -> dict:
 def parse_synonyms(
         args_dict : Dict[str, Any]
     ) -> Dict[str, Any]:
-    """
-    Check for synonyms (e.g. force = True -> yes = True)
+    """Check for synonyms (e.g. force = True -> yes = True)
+
+    Parameters
+    ----------
+    args_dict : Dict[str :
+        
+    Any] :
+        
+
+    Returns
+    -------
+
     """
     if args_dict.get('force', None):
         args_dict['yes'] = True
@@ -154,8 +179,18 @@ def parse_synonyms(
 def parse_dict_to_sysargs(
         args_dict : Dict[str, Any]
     ) -> List[str]:
-    """
-    Revert an arguments dictionary back to a command line list.
+    """Revert an arguments dictionary back to a command line list.
+
+    Parameters
+    ----------
+    args_dict : Dict[str :
+        
+    Any] :
+        
+
+    Returns
+    -------
+
     """
     import json
     from meerschaum.actions.arguments._parser import get_arguments_triggers

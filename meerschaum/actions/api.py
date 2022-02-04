@@ -17,18 +17,22 @@ def api(
     ) -> SuccessTuple:
     """
     Send commands to a Meerschaum WebAPI instance.
+    
+    Usage:
+        `api [commands] {options}`
 
-    Usage: `api [commands] {options}`
     Examples:
         - `api [start, boot, init]`
-            - start the API server
+            - Start the API server
+            - **NOTE:** The command `start api` also starts the server.
         - `api show config`
-            - execute `show config` on the `main` api instance
+            - Execute `show config` on the `main` api instance
         - `api main show config`
-            - see above
+            - See above
     
     If command is `start`, launch the Meerschaum WebAPI. If command is an api connector label,
         connect to that label. Otherwise connect to `main` api connector.
+
     """
     from meerschaum.utils.warnings import warn, info
     from meerschaum.utils.formatting import print_tuple
@@ -96,27 +100,55 @@ def _api_start(
         production: bool = False,
         **kw: Any
     ) -> SuccessTuple:
-    """
-    Start the API server.
-
+    """Start the API server.
+    
     Usage:
         `api start {options}`
-
+    
     Options:
         - `-p, --port {number}`
             Port to bind the API server to.
-
+    
         - `--host {address}`
             The address to bind to.
             Defaults to '0.0.0.0'.
-
+    
         - `-w, --workers {number}`
             How many worker threads to run.
             Defaults to the number of CPU cores or 1 on Android.
-
+    
         - `--production, --gunicorn`
             Start the API server with Gunicorn instead of Uvicorn.
             Useful for production deployments.
+
+    Parameters
+    ----------
+    action: Optional[List[str]] :
+         (Default value = None)
+    host: Optionsl[str] :
+         (Default value = None)
+    port: Optional[int] :
+         (Default value = None)
+    workers: Optional[int] :
+         (Default value = None)
+    mrsm_instance: Optional[str] :
+         (Default value = None)
+    no_dash: bool :
+         (Default value = False)
+    no_auth: bool :
+         (Default value = False)
+    debug: bool :
+         (Default value = False)
+    nopretty: bool :
+         (Default value = False)
+    production: bool :
+         (Default value = False)
+    **kw: Any :
+        
+
+    Returns
+    -------
+
     """
     from meerschaum.utils.packages import (
         attempt_import, venv_contains_package, pip_install, run_python_package

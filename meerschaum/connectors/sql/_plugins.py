@@ -16,8 +16,22 @@ def register_plugin(
         debug : bool = False,
         **kw : Any
     ) -> SuccessTuple:
-    """
-    Register a new plugin to the plugins table.
+    """Register a new plugin to the plugins table.
+
+    Parameters
+    ----------
+    plugin : 'meerschaum._internal.Plugin.Plugin' :
+        
+    force: bool :
+         (Default value = False)
+    debug : bool :
+         (Default value = False)
+    **kw : Any :
+        
+
+    Returns
+    -------
+
     """
 
     from meerschaum.utils.warnings import warn, error
@@ -76,7 +90,19 @@ def get_plugin_id(
         debug : bool = False
     ) -> Optional[int]:
     """
-    Return a plugin's id if it is registered, else return None.
+
+    Parameters
+    ----------
+    plugin : 'meerschaum._internal.Plugin.Plugin' :
+        
+    debug : bool :
+         (Default value = False)
+
+    Returns
+    -------
+    type
+        
+
     """
     ### ensure plugins table exists
     from meerschaum.connectors.sql.tables import get_tables
@@ -97,7 +123,19 @@ def get_plugin_version(
         debug : bool = False
     ) -> Optional[str]:
     """
-    Return a plugin's version if it exists.
+
+    Parameters
+    ----------
+    plugin : 'meerschaum._internal.Plugin.Plugin' :
+        
+    debug : bool :
+         (Default value = False)
+
+    Returns
+    -------
+    type
+        
+
     """
     ### ensure plugins table exists
     from meerschaum.connectors.sql.tables import get_tables
@@ -115,7 +153,19 @@ def get_plugin_user_id(
         debug : bool = False
     ) -> Optional[int]:
     """
-    Return a plugin's user_id if it exists.
+
+    Parameters
+    ----------
+    plugin : 'meerschaum._internal.Plugin.Plugin' :
+        
+    debug : bool :
+         (Default value = False)
+
+    Returns
+    -------
+    type
+        
+
     """
     ### ensure plugins table exists
     from meerschaum.connectors.sql.tables import get_tables
@@ -136,7 +186,19 @@ def get_plugin_username(
         debug : bool = False
     ) -> Optional[str]:
     """
-    Return the username of a plugin's user_id, if it exists.
+
+    Parameters
+    ----------
+    plugin : 'meerschaum._internal.Plugin.Plugin' :
+        
+    debug : bool :
+         (Default value = False)
+
+    Returns
+    -------
+    type
+        
+
     """
     ### ensure plugins table exists
     from meerschaum.connectors.sql.tables import get_tables
@@ -161,7 +223,19 @@ def get_plugin_attributes(
         debug : bool = False
     ) -> Dict[str, Any]:
     """
-    Return attributes for a plugin, if it exists.
+
+    Parameters
+    ----------
+    plugin : 'meerschaum._internal.Plugin.Plugin' :
+        
+    debug : bool :
+         (Default value = False)
+
+    Returns
+    -------
+    type
+        
+
     """
     ### ensure plugins table exists
     from meerschaum.connectors.sql.tables import get_tables
@@ -186,14 +260,26 @@ def get_plugins(
         debug : bool = False,
         **kw : Any
     ) -> List[str]:
-    """
-    Return a list of all registered plugins.
+    """Return a list of all registered plugins.
 
-    :param user_id:
+    Parameters
+    ----------
+    user_id :
         If specified, filter plugins by a specific `user_id`.
-
-    :param search_term:
+    search_term :
         If specified, add a `WHERE plugin_name LIKE '{search_term}%'` clause to filter the plugins.
+    user_id : Optional[int] :
+         (Default value = None)
+    search_term : Optional[str] :
+         (Default value = None)
+    debug : bool :
+         (Default value = False)
+    **kw : Any :
+        
+
+    Returns
+    -------
+
     """
     ### ensure plugins table exists
     from meerschaum.connectors.sql.tables import get_tables
@@ -215,8 +301,20 @@ def delete_plugin(
         debug : bool = False,
         **kw : Any
     ) -> SuccessTuple:
-    """
-    Delete a plugin from the plugins table.
+    """Delete a plugin from the plugins table.
+
+    Parameters
+    ----------
+    plugin : 'meerschaum._internal.Plugin.Plugin' :
+        
+    debug : bool :
+         (Default value = False)
+    **kw : Any :
+        
+
+    Returns
+    -------
+
     """
 
     from meerschaum.utils.warnings import warn, error

@@ -9,22 +9,23 @@ from __future__ import annotations
 from meerschaum.utils.typing import SuccessTuple, Any, List, Optional
 
 def python(
-        action : Optional[List[str]] = None,
-        debug : bool = False,
-        **kw : Any
+        action: Optional[List[str]] = None,
+        debug: bool = False,
+        **kw: Any
     ) -> SuccessTuple:
     """
     Launch a Python interpreter with Meerschaum imported. Commands are optional.
     Note that quotes must be escaped and commands must be separated by semicolons
-
+    
     Usage:
         `python {commands}`
-
+    
     Example:
         `python print(\\'Hello, World!\\'); pipes = mrsm.get_pipes()`
-
+    
         ```
         Hello, World!
+
         >>> import meerschaum as mrsm
         >>> print('Hello, World!')
         >>> pipes = mrsm.get_pipes()

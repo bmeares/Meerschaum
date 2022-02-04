@@ -27,8 +27,16 @@ def cli(
         self,
         debug : bool = False
     ) -> SuccessTuple:
-    """
-    Launch an interactive CLI for the SQLConnector's flavor
+    """Launch an interactive CLI for the SQLConnector's flavor
+
+    Parameters
+    ----------
+    debug : bool :
+         (Default value = False)
+
+    Returns
+    -------
+
     """
     from meerschaum.utils.packages import venv_exec, attempt_import
     from meerschaum.utils.debug import dprint

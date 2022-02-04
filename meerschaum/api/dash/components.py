@@ -117,9 +117,9 @@ navbar = dbc.Navbar(
 
 
 
-def alert_from_success_tuple(success : SuccessTuple) -> dbc.Alert:
+def alert_from_success_tuple(success: SuccessTuple) -> dbc.Alert:
     """
-    Return an Alert from a SuccessTuple.
+    Return a `dbc.Alert` from a `SuccessTuple`.
     """
     return dbc.Alert('', is_open=False) if not isinstance(success, tuple) else (
         dbc.Alert(

@@ -16,9 +16,6 @@ dcc, html = import_dcc(), import_html()
 dbc = attempt_import('dash_bootstrap_components', lazy=False)
 
 def get_users_cards(state: WebState) -> Tuple[List[dbc.Card], List[SuccessTuple]]:
-    """
-    Return cards and alerts lists for users.
-    """
     cards, alerts = [], [] 
     conn = get_web_connector(state)
     usernames = conn.get_users(debug=debug)

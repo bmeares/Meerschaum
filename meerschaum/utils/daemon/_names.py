@@ -88,7 +88,17 @@ for category, items in _bank['nouns'].items():
 
 def generate_random_name(seperator : str = '_'):
     """
-    Return a random combination of names.
+
+    Parameters
+    ----------
+    seperator : str :
+         (Default value = '_')
+
+    Returns
+    -------
+    type
+        
+
     """
     while True:
         adjective_category = random.choice(list(_bank['adjectives'].keys()))
@@ -104,9 +114,15 @@ def generate_random_name(seperator : str = '_'):
 
 def get_new_daemon_name():
     """
-    Return a new random Daemon name.
 
-    Validates that generated names are unique, up to ~6000 maximum possibilities.
+    Parameters
+    ----------
+
+    Returns
+    -------
+    type
+        Validates that generated names are unique, up to ~6000 maximum possibilities.
+
     """
     existing_names = os.listdir(DAEMON_RESOURCES_PATH)
     while True:

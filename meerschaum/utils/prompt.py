@@ -19,38 +19,59 @@ def prompt(
         noask: bool = False,
         **kw: Any
     ) -> str:
-    """
-    Ask the user a question and return the answer.
+    """Ask the user a question and return the answer.
     Wrapper around `prompt_toolkit.prompt()` with modified behavior.
     For example, an empty string returns default instead of printing it for the user to delete
     (`prompt_toolkit` behavior).
 
-    :param question:
+    Parameters
+    ----------
+    question :
         The question to print to the user.
-
-    :param icon:
+    icon :
         If True, prepend the configured icon.
-
-    :param default:
+    default :
         If the response is '', return the default value.
-
-    :param detect_password:
+    detect_password :
         If `True`, set the input method to a censored password box if the word `password`
         appears in the question.
         Defaults to `True`.
-
-    :param is_password:
+    is_password :
         If `True`, set the input method to a censored password box.
         May be overridden by `detect_password` unless `detect_password` is set to `False`.
         Defaults to `False`.
-
-    :param wrap_lines:
+    wrap_lines :
         If `True`, wrap the text across multiple lines.
         Flag is passed onto `prompt_toolkit`.
-
-    :param noask:
+    noask :
         If `True`, only print the question and return the default answer.
         Defaults to `False`.
+    question: str :
+        
+    icon: bool :
+         (Default value = True)
+    default: Union[str :
+        
+    Tuple[str :
+        
+    str] :
+        
+    None] :
+         (Default value = None)
+    detect_password: bool :
+         (Default value = True)
+    is_password: bool :
+         (Default value = False)
+    wrap_lines: bool :
+         (Default value = True)
+    noask: bool :
+         (Default value = False)
+    **kw: Any :
+        
+
+    Returns
+    -------
+
     """
     from meerschaum.utils.packages import attempt_import
     from meerschaum.utils.formatting import colored, ANSI, CHARSET
@@ -117,31 +138,55 @@ def yes_no(
         interactive: bool = False,
         **kw : Any
     ) -> bool:
-    """
-    Print a question and prompt the user with a yes / no input.
+    """Print a question and prompt the user with a yes / no input.
     Returns True for 'yes', False for 'no'.
 
-    :param question:
+    Parameters
+    ----------
+    question :
         The question to print to the user.
-
-    :param options:
+    options :
         The y/n options. The first is always considered `True`, and all options must be lower case.
         This behavior may be modifiable change in the future.
-
-    :param default:
+    default :
         The default option. Is represented with a capital to distinguish that it's the default.\
         E.g. [y/N] would return False by default.
-
-    :param wrappers:
+    wrappers :
         Text to print around the '[y/n]' options.
         Defaults to ('[', ']').
-
-    :param icon:
+    icon :
         If True, prepend the configured question icon.
-
-    :param interactive:
+    interactive :
         Not implemented. Was planning on using prompt_toolkit, but for some reason
         I can't figure out how to make the default selection 'No'.
+    question: str :
+         (Default value = '')
+    options: Tuple[str :
+        
+    str] :
+         (Default value = ('[')
+    'n') :
+        
+    default: str :
+         (Default value = 'y')
+    wrappers: Tuple[str :
+        
+    ']') :
+        
+    icon: bool :
+         (Default value = True)
+    yes: bool :
+         (Default value = False)
+    noask: bool :
+         (Default value = False)
+    interactive: bool :
+         (Default value = False)
+    **kw : Any :
+        
+
+    Returns
+    -------
+
     """
     from meerschaum.utils.warnings import error, warn
     from meerschaum.utils.formatting import ANSI, UNICODE
@@ -186,44 +231,63 @@ def choose(
         noask: bool = False,
         **kw
     ) -> Union[str, Tuple[str], None]:
-    """
-    Present a list of options and return the user's choice.
+    """Present a list of options and return the user's choice.
 
-    :param question:
+    Parameters
+    ----------
+    question :
         The question to be printed.
-
-    :param choices:
+    choices :
         A list of options.
-
-    :param default:
+    default :
         If the user declines to enter a choice, return this value.
         Defaults to `None`.
-
-    :param numeric:
+    numeric :
         If `True`, number the items in the list and ask for a number as input.
         If `False`, require the user to type the complete string.
         Defaults to `True`.
-
-    :param multiple:
+    multiple :
         If `True`, allow the user to choose multiple answers separated by `delimiter`.
         Defaults to `False`.
-
-    :param delimiter:
+    delimiter :
         If `multiple`, separate answers by this string. Raise a warning if this string is contained
         in any of the choices.
         Defaults to ','.
-
-    :param icon:
+    icon :
         If `True`, include the question icon.
         Defaults to `True`.
-
-    :param warn:
+    warn :
         If `True`, raise warnings when invalid input is entered.
         Defaults to `True`.
-
-    :param noask:
+    noask :
         If `True`, skip printing the question and return the default value.
         Defaults to `False`.
+    question: str :
+        
+    choices: List[str] :
+        
+    default: Optional[str] :
+         (Default value = None)
+    numeric: bool :
+         (Default value = True)
+    multiple: bool :
+         (Default value = False)
+    delimiter: str :
+         (Default value = ')
+    ' :
+        
+    icon: bool :
+         (Default value = True)
+    warn: bool :
+         (Default value = True)
+    noask: bool :
+         (Default value = False)
+    **kw :
+        
+
+    Returns
+    -------
+
     """
     from meerschaum.utils.warnings import warn as _warn
 
@@ -383,8 +447,22 @@ def get_password(
         confirm: bool = True,
         **kw: Any
     ) -> str:
-    """
-    Prompt the user for a password.
+    """Prompt the user for a password.
+
+    Parameters
+    ----------
+    username: Optional[str] :
+         (Default value = None)
+    minimum_length: Optional[int] :
+         (Default value = None)
+    confirm: bool :
+         (Default value = True)
+    **kw: Any :
+        
+
+    Returns
+    -------
+
     """
     from meerschaum.utils.warnings import warn
     while True:
@@ -416,14 +494,24 @@ def get_password(
             return password
 
 def get_email(username: Optional[str] = None, allow_omit: bool = True, **kw: Any) -> str:
-    """
-    Prompt the user for an email and enforce that it's valid.
+    """Prompt the user for an email and enforce that it's valid.
 
-    :param username:
+    Parameters
+    ----------
+    username :
         Include an optional username to print.
-
-    :param allow_omit:
+    allow_omit :
         Allow the user to omit the email.
+    username: Optional[str] :
+         (Default value = None)
+    allow_omit: bool :
+         (Default value = True)
+    **kw: Any :
+        
+
+    Returns
+    -------
+
     """
     from meerschaum.utils.warnings import warn
     from meerschaum.utils.misc import is_valid_email

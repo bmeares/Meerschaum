@@ -112,6 +112,19 @@ _required_login = {''}
 def update_page_layout_div(pathname : str, session_store_data : Dict[str, Any]):
     """
     Route the user to the correct page.
+
+    Parameters
+    ----------
+    pathname : str :
+        The path in the browser.
+        
+    session_store_data: Dict[str, Any]:
+        The stored session data.
+
+    Returns
+    -------
+    A tuple of the page layout and new session store data.
+
     """
     dash_endpoint = endpoints['dash']
     try:

@@ -55,8 +55,20 @@ def edit_grafana(
         debug : bool = False,
         **kw
     ):
-    """
-    Open Grafana configuration files for editing
+    """Open Grafana configuration files for editing
+
+    Parameters
+    ----------
+    action : list :
+         (Default value = [''])
+    debug : bool :
+         (Default value = False)
+    **kw :
+        
+
+    Returns
+    -------
+
     """
 
     from meerschaum.config._edit import general_edit_config

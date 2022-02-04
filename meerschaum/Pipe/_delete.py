@@ -6,13 +6,25 @@
 Delete a Pipe's contents and registration
 """
 
+from meerschaum.utils.typing import SuccessTuple
+
 def delete(
         self,
-        debug : bool = False,
+        debug: bool = False,
         **kw
-    ) -> tuple:
+    ) -> SuccessTuple:
     """
-    Call the Pipe's instance connector's delete_pipe method
+    Call the Pipe's instance connector's `delete_pipe()` method.
+
+    Parameters
+    ----------
+    debug : bool, default False:
+        Verbosity toggle.
+
+    Returns
+    -------
+    A `SuccessTuple` of success (`bool`), message (`str`).
+
     """
     import os, pathlib
     from meerschaum.utils.warnings import warn

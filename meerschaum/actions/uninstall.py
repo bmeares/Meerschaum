@@ -49,12 +49,12 @@ def _complete_uninstall(
     return default_action_completer(action=(['uninstall'] + action), **kw)
 
 def _uninstall_plugins(
-        action : Optional[List[str]] = None,
-        yes : bool = False,
-        force : bool = False,
-        noask : bool = False,
-        debug : bool = False,
-        **kw : Any
+        action: Optional[List[str]] = None,
+        yes: bool = False,
+        force: bool = False,
+        noask: bool = False,
+        debug: bool = False,
+        **kw: Any
     ) -> SuccessTuple:
     """
     Remove installed plugins. Does not affect repository registrations.
@@ -127,17 +127,17 @@ def _complete_uninstall_plugins(action: Optional[List[str]] = None, **kw) -> Lis
 
 
 def _uninstall_packages(
-        action : Optional[List[str]] = None,
-        sub_args : Optional[List[str]] = None,
-        yes : bool = False,
-        force : bool = False,
-        noask : bool = False,
-        debug : bool = False,
-        **kw : Any
+        action: Optional[List[str]] = None,
+        sub_args: Optional[List[str]] = None,
+        yes: bool = False,
+        force: bool = False,
+        noask: bool = False,
+        debug: bool = False,
+        **kw: Any
     ) -> SuccessTuple:
     """
     Uninstall PyPI packages from the Meerschaum virtual environment.
-
+    
     Example:
         `uninstall packages pandas numpy`
     """

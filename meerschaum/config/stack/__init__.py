@@ -303,8 +303,16 @@ def get_necessary_files():
 def write_stack(
         debug : bool = False 
     ):
-    """
-    Write Docker Compose configuration files
+    """Write Docker Compose configuration files
+
+    Parameters
+    ----------
+    debug : bool :
+         (Default value = False)
+
+    Returns
+    -------
+
     """
     from meerschaum.config._edit import general_write_yaml_config
     from meerschaum.config._sync import sync_files
@@ -316,8 +324,20 @@ def edit_stack(
         debug : bool = False,
         **kw
     ):
-    """
-    Open docker-compose.yaml or .env for editing
+    """Open docker-compose.yaml or .env for editing
+
+    Parameters
+    ----------
+    action : Optional[List[str]] :
+         (Default value = None)
+    debug : bool :
+         (Default value = False)
+    **kw :
+        
+
+    Returns
+    -------
+
     """
     from meerschaum.config._edit import general_edit_config
     if action is None:

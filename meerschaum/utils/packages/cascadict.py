@@ -134,10 +134,17 @@ class CascaDict(collections.abc.MutableMapping):
     
     @classmethod
     def new_cascadict(cls, dict):
-        """ Helper constructor for automatically cascading new CascaDict from object,
+        """Helper constructor for automatically cascading new CascaDict from object,
         regardless if it's another :class:`CascaDict` or simple :class:`dict`.
-        
-        :param dict: :class:`CascaDict` or  :class:`dict` object which will be cascaded.
+
+        Parameters
+        ----------
+        dict :
+            class:`CascaDict` or  :class:`dict` object which will be cascaded.
+
+        Returns
+        -------
+
         """
         if isinstance(dict, CascaDict):
             return dict.cascade()
@@ -185,33 +192,52 @@ class CascaDict(collections.abc.MutableMapping):
     
     def cascade(self, *args, **kwargs):
         """Create new empty :class:`CascaDict` cascading from this one.
+
+        Parameters
+        ----------
+        *args :
+            
+        **kwargs :
+            
+
+        Returns
+        -------
+
         """
         kwargs['ancestor'] = self
         return CascaDict(*args, **kwargs)
     
     def get_ancestor(self):
-        """ Return :class:`CascaDict` from which is current :class:`CascaDict` cascaded.
-        """
+        """ """
         return self._ancestor or self #self ancestor must not be none
     
     def get_root(self):
-        """ Returns root ancestor for given CascaDict.
-        """
+        """Returns root ancestor for given CascaDict."""
         temp = self
         while not temp.is_root():
             temp = temp.get_ancestor()
         return temp
     
     def is_root(self):
-        """ Returns :const:`True` if CascaDict has no ancestors (is root of the ancestor tree).
-        """
+        """Returns :const:`True` if CascaDict has no ancestors (is root of the ancestor tree)."""
         return (self._ancestor is self)
         
     def get_cascaded(self, key, default=[None,]):
-        """ Get item. If key is contained also in ancestors, 
+        """Get item. If key is contained also in ancestors,
             a list of items from all ancestor for given key is retuned, sorted from top to bottom.
-        :param key:
-        :param default:    Default value to be returned when no key is found.
+
+        Parameters
+        ----------
+        key :
+            param default:    Default value to be returned when no key is found.
+        default :
+             (Default value = [None)
+        ] :
+            
+
+        Returns
+        -------
+
         """
         temp_dict = self
         tempval = []
@@ -233,8 +259,20 @@ class CascaDict(collections.abc.MutableMapping):
         return self.__contains__(k)
     
     def copy_flat(self, level='top', recursive=True):
-        """ Return flat copy (:class:`dict`) of the :class:`CascaDict`.
+        """
+
+        Parameters
+        ----------
+        level :
+             (Default value = 'top')
+        recursive :
+             (Default value = True)
+
+        Returns
+        -------
+        type
             Wrapper function for :func:`__flatten__`
+
         """
         return self.__flatten__(level=level, recursive=recursive)
             

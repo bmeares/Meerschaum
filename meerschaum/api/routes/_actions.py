@@ -16,9 +16,6 @@ actions_endpoint = endpoints['actions']
 
 @app.get(actions_endpoint, tags=['Actions'])
 def get_actions() -> list:
-    """
-    Return a list of available actions
-    """
     return list(actions)
 
 @app.post(actions_endpoint + "/{action}", tags=['Actions'])
@@ -29,6 +26,22 @@ def do_action(
     ) -> SuccessTuple:
     """
     Perform a Meerschaum action (if permissions allow it).
+
+    Parameters
+    ----------
+    action: str :
+        The action to perform.
+        
+    keywords: dict :
+        The keywords dictionary to pass to the action.
+
+    curr_user: 'meerschaum._internal.User.User' :
+         (Default value = fastapi.Depends(manager))
+
+    Returns
+    -------
+    A `SuccessTuple` of success, message.
+
     """
     if curr_user.type != 'admin':
         from meerschaum.config import get_config

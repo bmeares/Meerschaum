@@ -12,9 +12,7 @@ from meerschaum.utils.typing import SuccessTuple, Optional, List
 def get_actions(
         self,
     ) -> list:
-    """
-    Get available actions from the API server
-    """
+    """Get available actions from the API server"""
     from meerschaum.config.static import _static_config
     return self.get(_static_config['api']['endpoints']['actions'])
 
@@ -25,15 +23,29 @@ def do_action(
         debug: bool = False,
         **kw
     ) -> SuccessTuple:
-    """
-    Execute a Meerschaum action remotely.
-
+    """Execute a Meerschaum action remotely.
+    
     If sysargs is provided, parse those instead. Otherwise infer everything from keyword arguments.
     
     NOTE: The first index of `action` should NOT be removed!
     Example: action = ['show', 'config']
     
     Returns: tuple (succeeded : bool, message : str)
+
+    Parameters
+    ----------
+    action: Optional[List[str]] :
+         (Default value = None)
+    sysargs: Optional[List[str]] :
+         (Default value = None)
+    debug: bool :
+         (Default value = False)
+    **kw :
+        
+
+    Returns
+    -------
+
     """
     import sys, json
     from meerschaum.utils.debug import dprint

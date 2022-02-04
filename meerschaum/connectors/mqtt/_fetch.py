@@ -15,11 +15,25 @@ def fetch(
         debug : bool = False,
         **kw
     ) -> 'None':
-    """
-    Subscribe to a topic, parse the JSON when messages come in, and send data to Pipe.
-
+    """Subscribe to a topic, parse the JSON when messages come in, and send data to Pipe.
+    
     Unlike other fetch functions, MQTT fetch depends on callbacks and calls pipe.sync() directly,
     rather than being a subroutine like SQL or API.
+
+    Parameters
+    ----------
+    pipe : 'meerschaum.Pipe' :
+        
+    callback : 'function' :
+         (Default value = None)
+    debug : bool :
+         (Default value = False)
+    **kw :
+        
+
+    Returns
+    -------
+
     """
     from meerschaum.utils.warnings import warn, error
     from meerschaum.utils.debug import dprint

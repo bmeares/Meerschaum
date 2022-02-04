@@ -38,9 +38,7 @@ sys_config = get_config('system', 'api')
 permissions_config = get_config('system', 'api', 'permissions')
 
 def get_uvicorn_config() -> Dict[str, Any]:
-    """
-    Read the Uvicorn configuration JSON and return a dictionary.
-    """
+    """Read the Uvicorn configuration JSON and return a dictionary."""
     global uvicorn_config
     import json
     runtime = os.environ.get(_static_config()['environment']['runtime'], None)
@@ -70,8 +68,16 @@ _include_dash = (not no_dash)
 
 connector = None
 def get_api_connector(instance_keys : Optional[str] = None):
-    """
-    Create the instance connector.
+    """Create the instance connector.
+
+    Parameters
+    ----------
+    instance_keys : Optional[str] :
+         (Default value = None)
+
+    Returns
+    -------
+
     """
     from meerschaum.utils.debug import dprint
     global connector
@@ -88,8 +94,17 @@ def get_api_connector(instance_keys : Optional[str] = None):
 database = None
 def get_database(instance_keys : str = None):
     """
-    Return a databases object.
-    NOTE: Not used!
+
+    Parameters
+    ----------
+    instance_keys : str :
+         (Default value = None)
+
+    Returns
+    -------
+    type
+        NOTE: Not used!
+
     """
     global database
     if database is None:
@@ -99,7 +114,17 @@ def get_database(instance_keys : str = None):
 _pipes = None
 def pipes(refresh=False):
     """
-    Return the pipes dictionary.
+
+    Parameters
+    ----------
+    refresh :
+         (Default value = False)
+
+    Returns
+    -------
+    type
+        
+
     """
     global _pipes
     if _pipes is None or refresh:
@@ -107,8 +132,22 @@ def pipes(refresh=False):
     return _pipes
 
 def get_pipe(connector_keys, metric_key, location_key, refresh=False):
-    """
-    Index the pipes dictionary or create a new Pipe object.
+    """Index the pipes dictionary or create a new Pipe object.
+
+    Parameters
+    ----------
+    connector_keys :
+        
+    metric_key :
+        
+    location_key :
+        
+    refresh :
+         (Default value = False)
+
+    Returns
+    -------
+
     """
     from meerschaum.utils.misc import is_pipe_registered
     from meerschaum import Pipe

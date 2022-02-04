@@ -10,10 +10,10 @@ from __future__ import annotations
 from meerschaum.utils.typing import List, Any, SuccessTuple, Optional
 
 def os(
-        action : Optional[List[str]] = None,
-        sub_args : Optional[List[str]] = None,
-        debug : bool = False,
-        **kw : Any
+        action: Optional[List[str]] = None,
+        sub_args: Optional[List[str]] = None,
+        debug: bool = False,
+        **kw: Any
     ) -> SuccessTuple:
     """
     Launch a subprocess and read its output to stdout.

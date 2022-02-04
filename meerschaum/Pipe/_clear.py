@@ -18,6 +18,34 @@ def clear(
     ) -> SuccessTuple:
     """
     Call the Pipe's instance connector's `clear_pipe` method.
+
+    Parameters
+    ----------
+    begin: Optional[datetime.datetime], default None:
+        If provided, only remove rows newer than this datetime value.
+
+    end: Optional[datetime.datetime], default None:
+        If provided, only remove rows older than this datetime column (not including end).
+
+    debug: bool, default False:
+        Verbositity toggle.
+
+    Returns
+    -------
+    A `SuccessTuple` corresponding to whether this procedure completed successfully.
+
+    Examples
+    --------
+    >>> pipe = mrsm.Pipe('test', 'test', columns={'datetime': 'dt'}, instance='sql:local')
+    >>> pipe.sync({'dt': [datetime.datetime(2020, 1, 1, 0, 0)]})
+    >>> pipe.sync({'dt': [datetime.datetime(2021, 1, 1, 0, 0)]})
+    >>> pipe.sync({'dt': [datetime.datetime(2022, 1, 1, 0, 0)]})
+    >>> 
+    >>> pipe.clear(begin=datetime.datetime(2021, 1, 1, 0, 0))
+    >>> pipe.get_data()
+              dt
+    0 2020-01-01
+
     """
     from meerschaum.utils.warnings import warn
     if self.cache_pipe is not None:

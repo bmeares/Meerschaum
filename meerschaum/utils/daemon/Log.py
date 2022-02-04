@@ -32,9 +32,7 @@ class Log:
 
 
     def next(self):
-        """
-        Update the offset and return the next line.
-        """
+        """Update the offset and return the next line."""
         try:
             line = self._get_next_line()
         except StopIteration:
@@ -58,24 +56,18 @@ class Log:
 
 
     def read(self) -> Union[str, None]:
-        """
-        Read and return the unread lines as a string.
-        """
+        """Read and return the unread lines as a string."""
         lines = self.readlines()
         return ''.join(lines)
 
 
     def readlines(self) -> List[str]:
-        """
-        Read and return the unread lines as a list of strings.
-        """
+        """Read and return the unread lines as a list of strings."""
         return [line for line in self]
 
 
     def _file_handle(self):
-        """
-        Set the cursor the the offset and return a handle to the file.
-        """
+        """Set the cursor the the offset and return a handle to the file."""
         import gzip
         if not self._handle or self._handle.closed:
             self._handle = (

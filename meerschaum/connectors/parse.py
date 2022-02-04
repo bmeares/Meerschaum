@@ -29,19 +29,40 @@ def parse_connector_keys(
             None
         ]
     ):
-    """
-    Convenience function for parsing connector keys and returning Connector objects.
+    """Convenience function for parsing connector keys and returning Connector objects.
 
-    :param keys:
+    Parameters
+    ----------
+    keys :
         Keys are split by a colon (':') into type and label. If the label is omitted,
         (e.g. 'sql'), pass it along to `meerschaum.connectors.get_connector` to parse.
-
-    :param construct:
+    construct :
         If True, return a Connector. Otherwise return the configuration dictionary for a Connector.
         **NOTE:** This may include passwords, so be careful.
-
-    :param as_tuple:
+    as_tuple :
         If True, return a tuple of (conn, keys). `conn` may be a dict or connector.
+    keys : str :
+        
+    construct : bool :
+         (Default value = True)
+    as_tuple : bool :
+         (Default value = False)
+    **kw : Any) -> (Union[meerschaum.connectors.Connector :
+        
+    Dict[str :
+        
+    Any] :
+        
+    Tuple[Union[meerschaum.connectors.Connector :
+        
+    None] :
+        
+    str] :
+        
+
+    Returns
+    -------
+
     """
     from meerschaum.connectors import get_connector
     from meerschaum.config import get_config
@@ -84,8 +105,22 @@ def parse_instance_keys(
         as_tuple: bool = False,
         **kw
     ):
-    """
-    Parse the Meerschaum instance value into a Connector object.
+    """Parse the Meerschaum instance value into a Connector object.
+
+    Parameters
+    ----------
+    keys: Optional[str] :
+        
+    construct: bool :
+         (Default value = True)
+    as_tuple: bool :
+         (Default value = False)
+    **kw :
+        
+
+    Returns
+    -------
+
     """
     from meerschaum.utils.warnings import warn
     from meerschaum.config import get_config
@@ -99,8 +134,18 @@ def parse_instance_keys(
     return parse_connector_keys(keys, construct=construct, as_tuple=as_tuple, **kw)
 
 def parse_repo_keys(keys : str = None, **kw):
-    """
-    Parse the Meerschaum repository value into a Connector object
+    """Parse the Meerschaum repository value into a Connector object
+
+    Parameters
+    ----------
+    keys : str :
+         (Default value = None)
+    **kw :
+        
+
+    Returns
+    -------
+
     """
     from meerschaum.config import get_config
     if keys is None:
@@ -114,8 +159,16 @@ def parse_repo_keys(keys : str = None, **kw):
 def is_valid_connector_keys(
         keys : str
     ) -> bool:
-    """
-    Verify a connector_keys string references a valid connector.
+    """Verify a connector_keys string references a valid connector.
+
+    Parameters
+    ----------
+    keys : str :
+        
+
+    Returns
+    -------
+
     """
     try:
         success = parse_connector_keys(keys, construct=False) is not None

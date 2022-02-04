@@ -11,7 +11,7 @@ from meerschaum.api import app, endpoints
 @app.get(endpoints['version'], tags=['Version'])
 def get_api_version():
     """
-    Get the Meerschaum API version
+    Get the Meerschaum API version.
     """
     from meerschaum.api import __version__ as version
     return version
@@ -19,7 +19,7 @@ def get_api_version():
 @app.get(endpoints['version'] + "/mrsm", tags=['Version'])
 def get_meerschaum_version():
     """
-    Get the Meerschaum instance version
+    Get the Meerschaum instance version.
     """
     from meerschaum import __version__ as version
     return version

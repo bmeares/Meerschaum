@@ -38,9 +38,7 @@ class MeerschaumApp(toga.App):
         self._kw = kw
 
     def startup(self) -> None:
-        """
-        Entrypoint for the GUI application.
-        """
+        """Entrypoint for the GUI application."""
         self.main_window = get_main_window(instance=self._instance, debug=self._debug, **self._kw)
         for k, w in self._windows.items():
             if k == 'main':

@@ -20,26 +20,30 @@ class Connector(metaclass=abc.ABCMeta):
             **kw : Any
         ):
         """
-        type : str
+        Parameters
+        ----------
+        type: str
             The type of the connection. Used as a key in config.yaml to get attributes.
             Supported values are 'sql', 'api', 'mqtt', 'plugin'.
 
-        label : str
+        label: str
             The label for the connection. Used as a key within config.yaml
 
-        pandas : str
+        pandas: str
             Custom pandas implementation name.
-            May change to modin.pandas soon.
+            E.g. May change to modin.pandas.
+            **NOTE:** This is experimental!
 
-        If config.yaml is set for the given type and label, the hierarchy looks like so:
+        Run `mrsm edit config` and to edit connectors in the YAML file:
+
+        ```
         meerschaum:
             connections:
                 {type}:
                     {label}:
                         ### attributes go here
+        ```
 
-        Read config.yaml for attributes partitioned by connection type and connection label.
-        Example: type="sql", label="main"
         """
         self._original_dict = self.__dict__.copy()
         self._set_attributes(type=type, label=label, **kw)
@@ -49,11 +53,11 @@ class Connector(metaclass=abc.ABCMeta):
 
     def _set_attributes(
             self,
-            type : Optional[str] = None,
-            label : str = "main",
-            pandas : Optional[str] = None,
-            inherit_default : bool = True,
-            **kw : Any
+            type: Optional[str] = None,
+            label: str = "main",
+            pandas: Optional[str] = None,
+            inherit_default: bool = True,
+            **kw: Any
         ):
         from meerschaum.utils.warnings import error
         if label == 'default':
@@ -86,22 +90,35 @@ class Connector(metaclass=abc.ABCMeta):
 
     def verify_attributes(
             self,
-            required_attributes : set = {
-                'label'
-            },
-            debug : bool = False
-        ):
+            required_attributes: Optional[List[str]] = None,
+            debug: bool = False
+        ) -> None:
         """
         Ensure that the required attributes have been met.
         
-        required_attributes : set
-            Attributes to be verified.
-
         The Connector base class checks the minimum requirements.
         Child classes may enforce additional requirements.
+
+        Parameters
+        ----------
+        required_attributes: Optional[List[str]], default None
+            Attributes to be verified. If `None`, default to `['label']`.
+
+        debug: bool, default False
+            Verbosity toggle.
+
+        Returns
+        -------
+        Don't return anything.
+
+        Raises
+        ------
+        An error if any of the required attributes are missing.
         """
         from meerschaum.utils.warnings import error, warn
         from meerschaum.utils.debug import dprint
+        if required_attributes is None:
+            required_attributes = ['label']
         missing_attributes = set()
         for a in required_attributes:
             if a not in self.__dict__:
@@ -117,14 +134,17 @@ class Connector(metaclass=abc.ABCMeta):
 
     def fetch(
             self,
-            instructions : dict
+            instructions: dict
         ) -> 'pd.DataFrame':
         """
         Abstract method for all Connectors.
         In addition to specialized functionality, all Connectors must be able to fetch data
         based on criteria provided in the instructions dictionary.
+        
+        Returns
+        -------
+        A pandas (or pandas derivative) DataFrame.
 
-        Returns pandas (or pandas derivative) DataFrame
         """
         from meerschaum.utils.warnings import error
         error("fetch() must be implemented in children classes", NotImplementedError)

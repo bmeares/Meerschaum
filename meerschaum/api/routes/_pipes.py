@@ -103,7 +103,7 @@ def edit_pipe(
         curr_user: 'meerschaum._internal.User.User' = fastapi.Depends(manager),
     ):
     """
-    Register a new pipe.
+    Edit an existing pipe.
     """
     from meerschaum.config import get_config
     allow_pipes = get_config('system', 'api', 'permissions', 'registration', 'pipes', patch=True)
@@ -126,29 +126,6 @@ def edit_pipe(
 
     return results
 
-
-#  @app.patch(pipes_endpoint, tags=['Pipes'])
-#  def edit_pipe(
-        #  pipe: MetaPipe,
-        #  patch: bool = False,
-        #  curr_user: 'meerschaum._internal.User.User' = fastapi.Depends(manager),
-    #  ):
-    #  """
-    #  Edit a Pipe's parameters.
-    #  patch : bool : False
-        #  If patch is True, update the existing parameters by cascading.
-        #  Otherwise overwrite the parameters (default)
-    #  """
-    #  from meerschaum.utils.debug import dprint
-    #  pipe_object = get_pipe(pipe.connector_keys, pipe.metric_key, pipe.location_key)
-    #  pipe_object.parameters = pipe.parameters
-    #  if not is_pipe_registered(pipe_object, pipes(refresh=True)):
-        #  raise fastapi.HTTPException(status_code=404, detail="Pipe is not registered.")
-
-    #  results = get_api_connector().edit_pipe(pipe=pipe_object, patch=patch)
-
-    #  pipes(refresh=True)
-    #  return results
 
 @app.get(pipes_endpoint + '/keys', tags=['Pipes'])
 async def fetch_pipes_keys(
@@ -215,8 +192,10 @@ async def get_pipes_by_connector_and_metric(
     """
     Get all registered Pipes by connector_keys and metric_key with metadata, excluding parameters.
 
-    parent : bool (default False)
-        Return the parent Pipe (location_key is None)
+    Parameters
+    ----------
+    parent: bool, default False
+        Return the parent Pipe (`location_key` is `None`)
     """
     from meerschaum.utils.misc import replace_pipes_in_dict
     if connector_keys not in pipes():
@@ -261,6 +240,7 @@ def get_sync_time(
     ) -> 'datetime.datetime':
     """
     Get a Pipe's latest datetime value.
+    See `meerschaum.Pipe.Pipe.get_sync_time`.
     """
     if location_key == '[None]':
         location_key = None
@@ -284,6 +264,7 @@ def sync_pipe(
     ) -> tuple:
     """
     Add data to an existing Pipe.
+    See `meerschaum.Pipe.Pipe.sync`.
     """
     from meerschaum.utils.misc import parse_df_datetimes
     from meerschaum import Pipe
@@ -312,14 +293,14 @@ def sync_pipe(
 
 @app.get(pipes_endpoint + '/{connector_keys}/{metric_key}/{location_key}/data', tags=['Pipes'])
 def get_pipe_data(
-        connector_keys : str,
-        metric_key : str,
-        location_key : str,
-        begin : datetime.datetime = None,
-        end : datetime.datetime = None,
-        params : Optional[str] = None,
-        orient : str = 'records',
-        curr_user : 'meerschaum._internal.User.User' = fastapi.Depends(manager),
+        connector_keys: str,
+        metric_key: str,
+        location_key: str,
+        begin: datetime.datetime = None,
+        end: datetime.datetime = None,
+        params: Optional[str] = None,
+        orient: str = 'records',
+        curr_user: 'meerschaum._internal.User.User' = fastapi.Depends(manager),
     ) -> str:
     """
     Get a Pipe's data. Optionally set query boundaries.
@@ -382,7 +363,7 @@ def get_backtrack_data(
         curr_user : 'meerschaum._internal.User.User' = fastapi.Depends(manager),
     ) -> fastapi.Response:
     """
-    Get a Pipe's data. Optionally set query boundaries
+    Get a Pipe's backtrack data. Optionally set query boundaries.
     """
     _params = {}
     if params is not None:
@@ -425,10 +406,10 @@ def get_pipe_csv(
         begin: datetime.datetime = None,
         end: datetime.datetime = None,
         params: Optional[str] = None,
-        curr_user : 'meerschaum._internal.User.User' = fastapi.Depends(manager),
+        curr_user: 'meerschaum._internal.User.User' = fastapi.Depends(manager),
     ) -> str:
     """
-    Get a Pipe's data. Optionally set query boundaries.
+    Get a Pipe's data as a CSV file. Optionally set query boundaries.
     """
     _params = {}
     if params == 'null':
@@ -466,15 +447,16 @@ def get_pipe_csv(
     response.headers["Content-Disposition"] = f"attachment; filename={filename}"
     return response
 
+
 @app.get(pipes_endpoint + '/{connector_keys}/{metric_key}/{location_key}/id', tags=['Pipes'])
 def get_pipe_id(
-        connector_keys : str,
-        metric_key : str,
-        location_key : str,
-        curr_user : 'meerschaum._internal.User.User' = fastapi.Depends(manager),
+        connector_keys: str,
+        metric_key: str,
+        location_key: str,
+        curr_user: 'meerschaum._internal.User.User' = fastapi.Depends(manager),
     ) -> int:
     """
-    Get a Pipe's ID
+    Get a Pipe's ID.
     """
     try:
         pipe_id = int(
@@ -488,7 +470,10 @@ def get_pipe_id(
         raise fastapi.HTTPException(status_code=404, detail=str(e))
     return pipe_id
 
-@app.get(pipes_endpoint + '/{connector_keys}/{metric_key}/{location_key}/attributes', tags=['Pipes'])
+@app.get(
+    pipes_endpoint + '/{connector_keys}/{metric_key}/{location_key}/attributes',
+    tags = ['Pipes']
+)
 def get_pipe_attributes(
         connector_keys : str,
         metric_key : str,
@@ -496,7 +481,22 @@ def get_pipe_attributes(
         curr_user : 'meerschaum._internal.User.User' = fastapi.Depends(manager),
     ) -> dict:
     """
-    Get a Pipe's attributes
+    Get a Pipe's attributes.
+
+    Parameters
+    ----------
+    connector_keys : str :
+        
+    metric_key : str :
+        
+    location_key : str :
+        
+    curr_user : 'meerschaum._internal.User.User' :
+         (Default value = fastapi.Depends(manager))
+
+    Returns
+    -------
+
     """
     return get_pipe(connector_keys, metric_key, location_key).attributes
 
@@ -507,8 +507,22 @@ def get_pipe_exists(
         location_key : str,
         curr_user : 'meerschaum._internal.User.User' = fastapi.Depends(manager),
     ) -> dict:
-    """
-    Determine if a Pipe exists or not
+    """Determine if a Pipe exists or not
+
+    Parameters
+    ----------
+    connector_keys : str :
+        
+    metric_key : str :
+        
+    location_key : str :
+        
+    curr_user : 'meerschaum._internal.User.User' :
+         (Default value = fastapi.Depends(manager))
+
+    Returns
+    -------
+
     """
     return get_pipe(connector_keys, metric_key, location_key).exists()
 
@@ -516,8 +530,16 @@ def get_pipe_exists(
 def create_metadata(
         curr_user : 'meerschaum._internal.User.User' = fastapi.Depends(manager),
     ) -> bool:
-    """
-    Create Pipe metadata tables
+    """Create Pipe metadata tables
+
+    Parameters
+    ----------
+    curr_user : 'meerschaum._internal.User.User' :
+         (Default value = fastapi.Depends(manager))
+
+    Returns
+    -------
+
     """
     from meerschaum.connectors.sql.tables import get_tables
     try:
@@ -537,7 +559,31 @@ def get_pipe_rowcount(
         curr_user : 'meerschaum._internal.User.User' = fastapi.Depends(manager),
     ) -> int:
     """
-    Return a Pipe's row count
+
+    Parameters
+    ----------
+    connector_keys : str :
+        
+    metric_key : str :
+        
+    location_key : str :
+        
+    begin : Optional[datetime.datetime] :
+         (Default value = None)
+    end : Optional[datetime.datetime] :
+         (Default value = None)
+    params : Optional[Dict[str :
+        
+    Any]] :
+         (Default value = None)
+    curr_user : 'meerschaum._internal.User.User' :
+         (Default value = fastapi.Depends(manager))
+
+    Returns
+    -------
+    type
+        
+
     """
     return get_pipe(connector_keys, metric_key, location_key).get_rowcount(
         begin = begin,
@@ -553,17 +599,14 @@ def get_pipe_columns_types(
         location_key : str,
     ) -> dict:
     """
-    Return a dictionary of a pipe's table's columns to their data types.
-
-    E.g. An example dictionary for a small table.
+    Returm a dictionary of column names and types.
 
     ```
-    >>> {
-    ...   'dt': 'TIMESTAMP WITHOUT TIMEZONE',
-    ...   'id': 'BIGINT',
-    ...   'val': 'DOUBLE PRECISION',
-    ... }
-    >>> 
+    {
+        "dt": "TIMESTAMP WITHOUT TIMEZONE",
+        "id": "BIGINT",
+        "val": "DOUBLE PRECISION",
+    }
     ```
     """
     return get_pipe(connector_keys, metric_key, location_key).get_columns_types(debug=debug)

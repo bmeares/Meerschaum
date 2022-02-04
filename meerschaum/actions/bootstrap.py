@@ -16,12 +16,10 @@ def bootstrap(
     ) -> SuccessTuple:
     """
     Bootstrap an element (pipes, connectors, config).
-
-    Command:
-        `bootstrap {option}`
-
+    
     Example:
         `bootstrap pipes`
+
     """
     from meerschaum.utils.misc import choose_subaction
     if action is None:
@@ -49,6 +47,7 @@ def _bootstrap_pipes(
     """
     Create a new pipe.
     If no keys are provided, guide the user through the steps required.
+
     """
     from meerschaum import get_pipes
     from meerschaum.config import get_config
@@ -232,6 +231,7 @@ def _bootstrap_connectors(
     ) -> Union[SuccessTuple, Tuple[str, str]]:
     """
     Prompt the user for the details necessary to create a Connector.
+
     """
     from meerschaum.connectors.parse import is_valid_connector_keys
     from meerschaum.connectors import connectors, get_connector
@@ -379,6 +379,7 @@ def _bootstrap_config(
     ) -> SuccessTuple:
     """
     Delete and regenerate the default Meerschaum configuration.
+
     """
     from meerschaum.config._edit import write_default_config, write_config
     from meerschaum.config._default import default_config

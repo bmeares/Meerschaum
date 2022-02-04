@@ -20,8 +20,34 @@ def dprint(
         _task: Optional[int] = None,
         **kw
     ) -> None:
-    """
-    Print a debug message.
+    """Print a debug message.
+
+    Parameters
+    ----------
+    msg : str :
+        
+    leader : bool :
+         (Default value = True)
+    package: bool :
+         (Default value = True)
+    color : Optional[Union[str :
+        
+    List[str]]] :
+         (Default value = None)
+    attrs : Optional[List[str]] :
+         (Default value = None)
+    nopretty : bool :
+         (Default value = False)
+    _progress: Optional['rich.progress.Progress'] :
+         (Default value = None)
+    _task: Optional[int] :
+         (Default value = None)
+    **kw :
+        
+
+    Returns
+    -------
+
     """
     if attrs is None:
         attrs = []
@@ -89,9 +115,23 @@ def _checkpoint(
         _total: Optional[int] = None,
         **kw
     ) -> None:
-    """
-    If the `_progress` and `_task` objects are provided, increment the task by one step.
+    """If the `_progress` and `_task` objects are provided, increment the task by one step.
     If `_total` is provided, update the total instead.
+
+    Parameters
+    ----------
+    _progress: Optional['rich.progress.Progress'] :
+         (Default value = None)
+    _task: Optional[int] :
+         (Default value = None)
+    _total: Optional[int] :
+         (Default value = None)
+    **kw :
+        
+
+    Returns
+    -------
+
     """
     if _progress is not None and _task is not None:
         _kw = {'total': _total} if _total is not None else {'advance': 1}
