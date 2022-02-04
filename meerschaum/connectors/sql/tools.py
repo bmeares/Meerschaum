@@ -338,7 +338,7 @@ def build_where(
         connector = get_connector('sql')
     where = ""
     leading_and = "\n    AND "
-    for key, value in parameters.items():
+    for key, value in params.items():
         _key = sql_item_name(key, connector.flavor)
         ### search across a list (i.e. IN syntax)
         if isinstance(value, list):

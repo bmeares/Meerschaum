@@ -16,7 +16,7 @@ _locks = {
     '__path__': RLock(),
     'sys.path': RLock(),
 }
-__pdoc__ = {'venvs': False, 'data': False, 'stack': False,}
+__pdoc__ = {'venvs': False, 'data': False, 'stack': False, 'plugins': False}
 
 def make_action(
         function : Callable[[Any], Any],
