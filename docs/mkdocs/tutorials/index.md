@@ -4,6 +4,14 @@ Are you more of a visual learner? Check out these video tutorials below where I 
 
 ## Learning Meerschaum
 
+### Episode 3: Fetch Plugins
+
+<div style="text-align: center">
+  <iframe width="672" height="378" src="https://www.youtube.com/embed/rHfGOZFDQsU" title="YouTube video player" frameborder="0" allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture" allowfullscreen></iframe>
+</div>
+
+>In today's episode, we're stepping up to the challenge and building our data stream with a SINGLE LINE of code — thanks to the power of Pandas and Meerschaum plugins!
+
 ### Episode 2: Instances
 
 <div style="text-align: center">
