@@ -4,7 +4,15 @@ Are you more of a visual learner? Check out these video tutorials below where I 
 
 ## Learning Meerschaum
 
-### Episode 3: Fetch Plugins
+### Episode 4: A Closer Look at Data Plugins
+
+<div style="text-align: center">
+  <iframe width="672" height="378" src="https://www.youtube.com/embed/t9tFD4afSD4" title="YouTube video player" frameborder="0" allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture" allowfullscreen></iframe>
+</div>
+
+>Last week, we took our first steps with plugins and built a minimalist pipeline, but today, we're going all in on learning what's really possible with the power of data plugins!
+
+### Episode 3: Intro to Fetch Plugins
 
 <div style="text-align: center">
   <iframe width="672" height="378" src="https://www.youtube.com/embed/rHfGOZFDQsU" title="YouTube video player" frameborder="0" allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture" allowfullscreen></iframe>
@@ -12,7 +20,7 @@ Are you more of a visual learner? Check out these video tutorials below where I 
 
 >In today's episode, we're stepping up to the challenge and building our data stream with a SINGLE LINE of code — thanks to the power of Pandas and Meerschaum plugins!
 
-### Episode 2: Instances
+### Episode 2: Intro to Instances
 
 <div style="text-align: center">
   <iframe width="672" height="378" src="https://www.youtube.com/embed/iOhPn4RjImQ" title="YouTube video player" frameborder="0" allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture" allowfullscreen></iframe>
