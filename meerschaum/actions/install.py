@@ -20,6 +20,7 @@ def install(
     options = {
         'plugins'  : _install_plugins,
         'packages' : _install_packages,
+        'required' : _install_required,
     }
     return choose_subaction(action, options, **kw)
 
@@ -37,6 +38,7 @@ def _complete_install(
         'plugins' : _complete_install_plugins,
         'package': _complete_install_packages,
         'packages': _complete_install_packages,
+        'required': _complete_install_required,
     }
 
     if len(action) > 0 and action[0] in options:
@@ -161,6 +163,54 @@ def _complete_install_packages(
         **kw : Any
     ) -> List[str]:
     return []
+
+
+def _install_required(
+        action: Optional[List[str]] = None,
+        repository: Optional[str] = None,
+        force: bool = False,
+        debug: bool = False,
+        **kw
+    ) -> SuccessTuple:
+    """
+    Install the required packages for Meerschaum plugins.
+    Each plugin's packages will be installed into its virtual environment.
+
+    Example:
+        `install required noaa covid`
+    """
+    from meerschaum._internal.Plugin import Plugin
+    from meerschaum.utils.warnings import warn
+    from meerschaum.connectors.parse import parse_repo_keys
+    from meerschaum.utils.formatting import print_tuple
+    repo_connector = parse_repo_keys(repository)
+
+    success_count = 0
+    fail_count = 0
+
+    for plugin_name in action:
+        plugin = Plugin(plugin_name, repo_connector=repo_connector)
+        if not plugin.is_installed():
+            warn(f"Plugin '{plugin}' is not installed. Skipping...", stack=False)
+            continue
+        success = plugin.install_dependencies(force=force, debug=debug)
+        if not success:
+            warn(f"Failed to install required packages for plugin '{plugin}'.", stack=False)
+            fail_count += 1
+        else:
+            success_count += 1
+
+    success = success_count > 0
+    msg = (
+        f"Installed packages for {success_count + fail_count} plugins\n    "
+        + f"({success_count} succeeded, {fail_count} failed)."
+    )
+    return success, msg
+
+
+def _complete_install_required(*args, **kw) -> List[str]:
+    from meerschaum.actions.uninstall import _complete_uninstall_plugins
+    return _complete_uninstall_plugins(*args, **kw)
 
 
 ### NOTE: This must be the final statement of the module.

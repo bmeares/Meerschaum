@@ -56,7 +56,9 @@ class Plugin:
 
     @property
     def version(self):
-        """ """
+        """
+        Return the plugin's module version is defined (__version__) if it's defined.
+        """
         if self._version is None:
             try:
                 self._version = self.module.__version__
@@ -80,16 +82,37 @@ class Plugin:
             return None
         return self.module.__file__
 
-    def make_tar(self, debug : bool = False) -> pathlib.Path:
-        """Compress the plugin's source files into a `.tar.gz` archive and return the archive's path.
 
-        Parameters
-        ----------
-        debug : bool :
-             (Default value = False)
+    def is_installed(self) -> bool:
+        """
+        Check whether a plugin is correctly installed.
+
+        NOTE: This plugin will import the plugin's module.
 
         Returns
         -------
+        A `bool` indicating whether a plugin exists and is successfully imported.
+        """
+        try:
+            _installed = (
+                self.module is not None and self.__file__ is not None
+            )
+        except ModuleNotFoundError as e:
+            _installed = False
+        return _installed
+
+    def make_tar(self, debug: bool = False) -> pathlib.Path:
+        """
+        Compress the plugin's source files into a `.tar.gz` archive and return the archive's path.
+
+        Parameters
+        ----------
+        debug: bool, default False
+            Verbosity toggle.
+
+        Returns
+        -------
+        A `pathlib.Path` to the archive file's path.
 
         """
         import tarfile
@@ -98,7 +121,7 @@ class Plugin:
         old_cwd = os.getcwd()
         os.chdir(PLUGINS_RESOURCES_PATH)
 
-        if self.module is None and self.__file__ is None:
+        if not self.is_installed():
             from meerschaum.utils.warnings import error
             error(f"Could not find file for plugin '{self}'.")
         if '__init__.py' in self.__file__:
@@ -179,19 +202,23 @@ class Plugin:
             force: bool = False,
             debug: bool = False
         ) -> SuccessTuple:
-        """Extract a plugin's tar archive to the plugins directory.
+        """
+        Extract a plugin's tar archive to the plugins directory.
+        
         This function checks if the plugin is already installed and if the version is equal or
         greater than the existing installation.
 
         Parameters
         ----------
-        force: bool :
-             (Default value = False)
-        debug: bool :
-             (Default value = False)
+        force: bool, default False
+            If `True`, continue with installation, even if required plugins fail to install.
+
+        debug: bool, default False
+            Verbosity toggle.
 
         Returns
         -------
+        A `SuccessTuple` of success (bool) and a message (str).
 
         """
         from meerschaum.utils.warnings import warn, error
@@ -205,9 +232,7 @@ class Plugin:
         new_version = ''
         if not self.archive_path.exists():
             return False, f"Missing archive file for plugin '{self}'."
-        is_installed = None
         if self.version is not None:
-            is_installed = True
             old_version = self.version
             if debug:
                 dprint(f"Found existing version '{old_version}' for plugin '{self}'.")
@@ -346,19 +371,23 @@ class Plugin:
         return success, msg
 
     def setup(self, *args : str, debug : bool = False, **kw : Any) -> SuccessTuple:
-        """If exists, run the plugin's `setup()` function.
+        """
+        If exists, run the plugin's `setup()` function.
 
         Parameters
         ----------
-        *args : str :
+        *args: str
+            The positional arguments passed to the `setup()` function.
             
-        debug : bool :
-             (Default value = False)
-        **kw : Any :
-            
+        debug: bool, default False
+            Verbosity toggle.
+
+        **kw: Any
+            The keyword arguments passed to the `setup()` function.
 
         Returns
         -------
+        A `SuccessTuple` indicating success.
 
         """
         from meerschaum.utils.packages import activate_venv, deactivate_venv
@@ -408,17 +437,19 @@ class Plugin:
             self,
             debug: bool = False,
         ) -> List[str]:
-        """If the Plugin has specified dependencies in a list called `required`, return the list.
+        """
+        If the Plugin has specified dependencies in a list called `required`, return the list.
         
         NOTE: Dependecies which start with 'plugin:' are Meerschaum plugins, not pip packages.
 
         Parameters
         ----------
-        debug: bool :
-             (Default value = False)
+        debug: bool, default False
+            Verbosity toggle.
 
         Returns
         -------
+        A list of required packages (str).
 
         """
         from meerschaum.utils.packages import activate_venv, deactivate_venv
@@ -437,20 +468,24 @@ class Plugin:
             force: bool = False,
             debug: bool = False,
         ) -> bool:
-        """If specified, install dependencies.
+        """
+        If specified, install dependencies.
         
         NOTE: Dependencies that start with 'plugin:' will be installed as Meerschaum plugins
         from the same repository as this Plugin.
 
         Parameters
         ----------
-        force: bool :
-             (Default value = False)
-        debug: bool :
-             (Default value = False)
+        force: bool, default False
+            If `True`, continue with the installation, even if some
+            required packages fail to install.
+
+        debug: bool, default False
+            Verbosity toggle.
 
         Returns
         -------
+        A bool indicating success.
 
         """
         from meerschaum.utils.packages import pip_install
