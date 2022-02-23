@@ -4,13 +4,13 @@ Below are some ongoing tasks I have planned for Meerschaum. This is not an exhau
 
 ## 📝 General
 - **Documentation**
-    * [ ] Tutorials
+    * [x] Tutorials
     * [x] FAQs
     * [ ] How-To's
     * [x] Reference concepts
 - **Videos**
-    * [ ] Tutorial series
-    * [ ] Usage and demonstration
+    * [x] Tutorial series
+    * [x] Usage and demonstration
 - **Tests**
     * [ ] More coverage
     * [x] Syncing
@@ -99,3 +99,4 @@ Below are some ongoing tasks I have planned for Meerschaum. This is not an exhau
 - [ ] Consolidate SQL-specific functions to one package to make adding flavors easier.
 - [x] Add `typing` hinting to the Python package API.
 - [ ] Migrate `meerschaum.actions.shell` to `meerschaum._internal.shell`.
+- [x] Rewrite docstrings from reST- to numpy-style.

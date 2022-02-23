@@ -4,6 +4,12 @@ This changelog was not introduced until v0.2.12, so many of the critical release
 ## 0.5.x Releases
 This is the current release cycle, so future features will be updated below.
 
+### v0.5.11
+- **Added the `install required` command.**  
+  When developing plugins, run the command `install required` to install the packages in the plugin's `required` list into its virtual environment.
+- **Migrated docstrings.**  
+   To improve legibility, most docstrings have been rewritten from reST to numpy. This will make browsing [docs.meerschaum.io](https://docs.meerschaum.io) easier.
+
 ### v0.5.10
 - **Added the `clear pipes` command.**  
   Users may now delete specific rows within a pipe using `pipe.clear()`. This new method includes support for the `--begin`, `--end`, and `--params` flags.
