@@ -72,3 +72,6 @@ extra:
     link: https://discord.gg/8U8qMUjvcc
   - icon: fontawesome/solid/beer
     link: https://www.buymeacoffee.com/bmeares
+  analytics:
+    provider: google
+    property: G-CVXCQBW9NY
