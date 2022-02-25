@@ -12,8 +12,8 @@ from meerschaum.utils.typing import Optional, Dict, Union, InstanceConnector
 ### store a tables dict for each connector
 connector_tables = dict()
 
-_sequence_flavors = {'duckdb'}
-_skip_index_names_flavors = {'mssql'}
+_sequence_flavors = {'duckdb', 'oracle'}
+_skip_index_names_flavors = {'mssql',}
 
 def get_tables(
         mrsm_instance: Optional[Union[str, InstanceConnector]] = None,

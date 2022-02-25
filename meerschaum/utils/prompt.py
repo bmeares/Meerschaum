@@ -19,58 +19,41 @@ def prompt(
         noask: bool = False,
         **kw: Any
     ) -> str:
-    """Ask the user a question and return the answer.
+    """
+    Ask the user a question and return the answer.
     Wrapper around `prompt_toolkit.prompt()` with modified behavior.
     For example, an empty string returns default instead of printing it for the user to delete
     (`prompt_toolkit` behavior).
 
     Parameters
     ----------
-    question :
+    question: str
         The question to print to the user.
-    icon :
+
+    icon: bool, default True
         If True, prepend the configured icon.
-    default :
+
+    default: Union[str, Tuple[str, str], None], default None
         If the response is '', return the default value.
-    detect_password :
+
+    detect_password: bool, default True
         If `True`, set the input method to a censored password box if the word `password`
         appears in the question.
-        Defaults to `True`.
-    is_password :
+
+    is_password: default False
         If `True`, set the input method to a censored password box.
         May be overridden by `detect_password` unless `detect_password` is set to `False`.
-        Defaults to `False`.
-    wrap_lines :
+
+    wrap_lines: bool, default True
         If `True`, wrap the text across multiple lines.
         Flag is passed onto `prompt_toolkit`.
-    noask :
+
+    noask: bool, default False
         If `True`, only print the question and return the default answer.
-        Defaults to `False`.
-    question: str :
-        
-    icon: bool :
-         (Default value = True)
-    default: Union[str :
-        
-    Tuple[str :
-        
-    str] :
-        
-    None] :
-         (Default value = None)
-    detect_password: bool :
-         (Default value = True)
-    is_password: bool :
-         (Default value = False)
-    wrap_lines: bool :
-         (Default value = True)
-    noask: bool :
-         (Default value = False)
-    **kw: Any :
-        
 
     Returns
     -------
+    A `str` of the input provided by the user.
 
     """
     from meerschaum.utils.packages import attempt_import
@@ -91,9 +74,6 @@ def prompt(
         else:
             question += f"{default}"
         question += ")"
-    #  if not question.endswith(': '):
-        #  if question.endswith(':'): question += " "
-        #  else: question += ": "
 
     ### detect password
     if (detect_password and 'password' in question.lower()) or is_password:
@@ -127,6 +107,7 @@ def prompt(
         return default_answer
     return answer
 
+
 def yes_no(
         question: str = '',
         options: Tuple[str, str] = ('y', 'n'),
@@ -135,58 +116,45 @@ def yes_no(
         icon: bool = True,
         yes: bool = False,
         noask: bool = False,
-        interactive: bool = False,
         **kw : Any
     ) -> bool:
-    """Print a question and prompt the user with a yes / no input.
-    Returns True for 'yes', False for 'no'.
+    """
+    Print a question and prompt the user with a yes / no input.
+    Returns `True` for `'yes'`, False for `'no'`.
 
     Parameters
     ----------
-    question :
+    question: str, default ''
         The question to print to the user.
-    options :
-        The y/n options. The first is always considered `True`, and all options must be lower case.
-        This behavior may be modifiable change in the future.
-    default :
-        The default option. Is represented with a capital to distinguish that it's the default.\
-        E.g. [y/N] would return False by default.
-    wrappers :
+
+    options: Tuple[str, str], default ('y', 'n')
+        The `y/n` options. The first is considered `True`, and all options must be lower case.
+
+    default: str, default y
+        The default option. Is represented with a capital to distinguish that it's the default.
+
+    wrappers: Tuple[str, str], default ('[', ']')
         Text to print around the '[y/n]' options.
-        Defaults to ('[', ']').
-    icon :
+
+    icon: bool, default True
         If True, prepend the configured question icon.
-    interactive :
-        Not implemented. Was planning on using prompt_toolkit, but for some reason
-        I can't figure out how to make the default selection 'No'.
-    question: str :
-         (Default value = '')
-    options: Tuple[str :
-        
-    str] :
-         (Default value = ('[')
-    'n') :
-        
-    default: str :
-         (Default value = 'y')
-    wrappers: Tuple[str :
-        
-    ']') :
-        
-    icon: bool :
-         (Default value = True)
-    yes: bool :
-         (Default value = False)
-    noask: bool :
-         (Default value = False)
-    interactive: bool :
-         (Default value = False)
-    **kw : Any :
-        
 
     Returns
     -------
+    A bool indicating the user's choice.
 
+    Examples
+    --------
+    ```python-repl
+    >>> yes_no("Do you like me?", default='y')
+     ❓ Do you like me? [Y/n]
+    True
+    >>> yes_no("Cats or dogs?", options=('cats', 'dogs'))
+     ❓ Cats or dogs? [cats/dogs]
+     Please enter a valid response.
+     ❓ Cats or dogs? [cats/dogs] dogs
+    False
+    ```
     """
     from meerschaum.utils.warnings import error, warn
     from meerschaum.utils.formatting import ANSI, UNICODE
@@ -231,62 +199,43 @@ def choose(
         noask: bool = False,
         **kw
     ) -> Union[str, Tuple[str], None]:
-    """Present a list of options and return the user's choice.
+    """
+    Present a list of options and return the user's choice.
 
     Parameters
     ----------
-    question :
+    question: str
         The question to be printed.
-    choices :
+
+    choices: List[str]
         A list of options.
-    default :
+
+    default: Optional[str], default None
         If the user declines to enter a choice, return this value.
-        Defaults to `None`.
-    numeric :
+
+    numeric: bool, default True
         If `True`, number the items in the list and ask for a number as input.
         If `False`, require the user to type the complete string.
-        Defaults to `True`.
-    multiple :
+
+    multiple: bool, default False
         If `True`, allow the user to choose multiple answers separated by `delimiter`.
-        Defaults to `False`.
-    delimiter :
+
+    delimiter: str, default ','
         If `multiple`, separate answers by this string. Raise a warning if this string is contained
         in any of the choices.
-        Defaults to ','.
-    icon :
+
+    icon: bool, default True
         If `True`, include the question icon.
-        Defaults to `True`.
-    warn :
+
+    warn: bool, default True
         If `True`, raise warnings when invalid input is entered.
-        Defaults to `True`.
-    noask :
+
+    noask: bool, default False
         If `True`, skip printing the question and return the default value.
-        Defaults to `False`.
-    question: str :
-        
-    choices: List[str] :
-        
-    default: Optional[str] :
-         (Default value = None)
-    numeric: bool :
-         (Default value = True)
-    multiple: bool :
-         (Default value = False)
-    delimiter: str :
-         (Default value = ')
-    ' :
-        
-    icon: bool :
-         (Default value = True)
-    warn: bool :
-         (Default value = True)
-    noask: bool :
-         (Default value = False)
-    **kw :
-        
 
     Returns
     -------
+    A string for a single answer or a tuple of strings if `multiple` is `True`.
 
     """
     from meerschaum.utils.warnings import warn as _warn
@@ -447,21 +396,32 @@ def get_password(
         confirm: bool = True,
         **kw: Any
     ) -> str:
-    """Prompt the user for a password.
+    """
+    Prompt the user for a password.
 
     Parameters
     ----------
-    username: Optional[str] :
-         (Default value = None)
-    minimum_length: Optional[int] :
-         (Default value = None)
-    confirm: bool :
-         (Default value = True)
-    **kw: Any :
-        
+    username: Optional[str], default None
+        If provided, print the username when asking for a password.
+
+    minimum_length: Optional[int], default None
+        If provided, enforce a password of at least this length.
+
+    confirm: bool, default True
+        If `True`, prompt the user for a password twice.
 
     Returns
     -------
+    The password string (censored from terminal output when typing).
+
+    Examples
+    --------
+    ```python-repl
+    >>> get_password()
+     ❓ Password: *******
+     ❓ Confirm password: *******
+    'hunter2'
+    ```
 
     """
     from meerschaum.utils.warnings import warn
@@ -483,7 +443,7 @@ def get_password(
             return password
 
         _password = prompt(
-            f"Confirm password" + (f" for user '{username}':") if username is not None else ":",
+            f"Confirm password" + (f" for user '{username}':" if username is not None else ":"),
             is_password = True,
             **kw
         )
@@ -493,32 +453,39 @@ def get_password(
         else:
             return password
 
+
 def get_email(username: Optional[str] = None, allow_omit: bool = True, **kw: Any) -> str:
-    """Prompt the user for an email and enforce that it's valid.
+    """
+    Prompt the user for an email and enforce that it's valid.
 
     Parameters
     ----------
-    username :
-        Include an optional username to print.
-    allow_omit :
-        Allow the user to omit the email.
-    username: Optional[str] :
-         (Default value = None)
-    allow_omit: bool :
-         (Default value = True)
-    **kw: Any :
-        
+    username: Optional[str], default None
+        If provided, print the username in the prompt.
+
+    allow_omit: bool, default True
+        If `True`, allow the user to omit the email.
 
     Returns
     -------
+    The provided email string.
 
+    Examples
+    --------
+    ```python-repl
+    >>> get_email()
+     ❓ Email (empty to omit): foo@foo
+     Invalid email! Please try again.
+     ❓ Email (empty to omit): foo@foo.com
+    'foo@foo.com'
+    ```
     """
     from meerschaum.utils.warnings import warn
     from meerschaum.utils.misc import is_valid_email
     while True:
         email = prompt(
-            f"Email for user" + (f" '{username}'" if username is not None else "") +
-            (" (empty to omit): " if allow_omit else ": "),
+            f"Email" + (f" for user '{username}'" if username is not None else "") +
+            (" (empty to omit):" if allow_omit else ": "),
             **kw
         )
         if (allow_omit and email == '') or is_valid_email(email):

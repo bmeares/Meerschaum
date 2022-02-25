@@ -879,13 +879,13 @@ def get_pipe_rowcount(
         query += "WHERE"
     if begin is not None:
         query += f"""
-        {_datetime_name} >= {dateadd_str(flavor=self.flavor, datepart='minute', number=(0), begin=begin)}
+        {_datetime_name} >= {dateadd_str(self.flavor, datepart='minute', number=0, begin=begin)}
         """
     if end is not None and begin is not None:
         query += "AND"
     if end is not None:
         query += f"""
-        {_datetime_name} < {dateadd_str(flavor=self.flavor, datepart='minute', number=(0), begin=end)}
+        {_datetime_name} < {dateadd_str(self.flavor, datepart='minute', number=0, begin=end)}
         """
     if params is not None:
         from meerschaum.connectors.sql.tools import build_where

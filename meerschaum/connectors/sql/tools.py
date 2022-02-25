@@ -44,7 +44,7 @@ json_flavors = {'postgresql', 'timescaledb',}
 def dateadd_str(
         flavor: str = 'postgresql',
         datepart: str = 'day',
-        number: Union[int, float] = -1,
+        number: Union[int, float] = 0,
         begin: Union[str, datetime.datetime] = 'now'
     ) -> str:
     """
@@ -77,7 +77,7 @@ def dateadd_str(
         - `'minute'`
         - `'second'`
 
-    number: Union[int, float], default `-1`
+    number: Union[int, float], default `0`
         How many units to add to the date part.
 
     begin: Union[str, datetime.datetime], default `'now'`
@@ -139,26 +139,36 @@ def dateadd_str(
             else "CAST(NOW() AT TIME ZONE 'utc' AS TIMESTAMP)"
         )
         da = begin + (f" + INTERVAL '{number} {datepart}'" if number != 0 else '')
+
     elif flavor == 'duckdb':
         begin = f"CAST({begin} AS TIMESTAMP)" if begin != 'now' else 'NOW()'
         da = begin + (f" + INTERVAL '{number} {datepart}'" if number != 0 else '')
+
     elif flavor in ('mssql',):
+        if begin_time and begin_time.microsecond != 0:
+            begin = begin[:-4] + "'"
         begin = f"CAST({begin} AS DATETIME)" if begin != 'now' else 'GETUTCDATE()'
         da = f"DATEADD({datepart}, {number}, {begin})" if number != 0 else begin
+
     elif flavor in ('mysql', 'mariadb'):
         begin = f"CAST({begin} AS DATETIME(6))" if begin != 'now' else 'UTC_TIMESTAMP(6)'
         da = (f"DATE_ADD({begin}, INTERVAL {number} {datepart})" if number != 0 else begin)
+
     elif flavor == 'sqlite':
         da = f"datetime({begin}, '{number} {datepart}')"
+
     elif flavor == 'oracle':
         if begin == 'now':
             begin = str(
                 datetime.datetime.utcnow().strftime('%Y:%m:%d %M:%S.%f')
             )
         elif begin_time:
-            begin = str(begin_time.strftime('%Y:%m:%d %M:%S.%f'))
+            begin = str(begin_time.strftime('%Y-%m-%d %H:%M:%S.%f'))
         dt_format = 'YYYY-MM-DD HH24:MI:SS.FF'
-        da = f"TO_TIMESTAMP('{begin}', '{dt_format}') + INTERVAL '{number}' {datepart}"
+        da = (
+            f"TO_TIMESTAMP('{begin}', '{dt_format}')"
+            + (f" + INTERVAL '{number}' {datepart}" if number != 0 else "")
+        )
     return da
 
 

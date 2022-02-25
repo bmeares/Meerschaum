@@ -4,6 +4,7 @@ volumes:
   mssql_volume:
   mariadb_volume:
   cockroachdb_volume:
+  oracle_volume:
 services:
   timescaledb:
     environment:
@@ -44,3 +45,10 @@ services:
     command: start-single-node --insecure
     volumes:
       - cockroachdb_volume:/cockroach/cockroach-data:z
+  oracle:
+    image: konnecteam/docker-oracle-12c:sequelize
+    ports:
+      - 1521:1521
+    volumes:
+      - oracle_volume:/u01/app/oracle
+

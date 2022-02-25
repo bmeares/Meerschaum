@@ -148,6 +148,7 @@ install_flavor_drivers = {
     'postgresql' : ['psycopg2'],
     'cockroachdb' : ['psycopg2', 'sqlalchemy_cockroachdb', 'sqlalchemy_cockroachdb.psycopg2'],
     'mssql': ['pyodbc'],
+    'oracle': ['cx_Oracle'],
 }
 
 flavor_dialects = {
