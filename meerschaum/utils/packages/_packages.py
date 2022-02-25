@@ -51,7 +51,7 @@ packages : Dict[str, Dict[str, str]] = {
         'watchgod'                   : 'watchgod>=0.7',
     },
     'iot': {
-        'paho': 'paho-mqtt>=1.5.1',
+        'paho'                       : 'paho-mqtt>=1.5.1',
     },
     'drivers': {
         'psycopg2'                   : 'psycopg2-binary>=2.8.6',
@@ -60,7 +60,10 @@ packages : Dict[str, Dict[str, str]] = {
         'sqlalchemy_cockroachdb'     : 'sqlalchemy-cockroachdb>=1.4.2',
         'duckdb'                     : 'duckdb>=0.3.2.dev579',
         'duckdb_engine'              : 'duckdb-engine>=0.1.3',
-        #  'pyodbc'        : 'pyodbc>=4.0.30', ### Not included due to Docker image issues.
+    },
+    '_drivers': {
+        'pyodbc'                     : 'pyodbc>=4.0.30',
+        'cx_Oracle'                  : 'cx_Oracle>=8.3.0',
     },
     'cli': {
         'pgcli'                      : 'pgcli>=3.1.0',
@@ -147,7 +150,7 @@ all_packages = dict()
 for group, import_names in packages.items():
     all_packages.update(import_names)
 
-skip_groups = {'docs', 'build', 'cli', 'dev-tools', 'portable', 'extras', 'stack'}
+skip_groups = {'docs', 'build', 'cli', 'dev-tools', 'portable', 'extras', 'stack', '_drivers'}
 full = list()
 _full = dict()
 for group, import_names in packages.items():
