@@ -108,6 +108,7 @@ def test_sync_engine(flavor: str):
         location_keys = [p.location_key for p in pipes],
         mrsm_instance = mrsm_instance,
         yes = True,
+        #  debug = True,
     )
     assert success, msg
 
@@ -117,6 +118,7 @@ def test_sync_engine(flavor: str):
         metric_keys = [p.metric_key for p in pipes],
         location_keys = [p.location_key for p in pipes],
         mrsm_instance = mrsm_instance,
+        #  debug = True,
     )
     assert success, msg
 
