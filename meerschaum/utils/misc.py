@@ -1632,3 +1632,52 @@ def tail(f, n, offset=None):
                    len(lines) > to_read or pos > 0
         avg_line_length *= 1.3
 
+
+def truncate_string_sections(item: str, delimeter: str = '_', max_len: int = 128) -> str:
+    """
+    Remove characters from each section of a string until the length is within the limit.
+
+    Parameters
+    ----------
+    item: str
+        The item name to be truncated.
+
+    delimeter: str, default '_'
+        Split `item` by this string into several sections.
+
+    max_len: int, default 128
+        The max acceptable length of the truncated version of `item`.
+
+    Returns
+    -------
+    The truncated string.
+
+    Examples
+    --------
+    >>> truncate_string_sections('abc_def_ghi', max_len=10)
+    'ab_de_gh'
+
+    """
+    if len(item) < max_len:
+        return item
+
+    def _shorten(s: str) -> str:
+        return s[:-1] if len(s) > 1 else s
+
+    sections = list(enumerate(item.split('_')))
+    sorted_sections = sorted(sections, key=lambda x: (-1 * len(x[1])))
+    available_chars = max_len - len(sections)
+
+    _sections = [(i, s) for i, s in sorted_sections]
+    _sections_len = sum([len(s) for i, s in _sections])
+    _old_sections_len = _sections_len
+    while _sections_len > available_chars:
+        _sections = [(i, _shorten(s)) for i, s in _sections]
+        _old_sections_len = _sections_len
+        _sections_len = sum([len(s) for i, s in _sections])
+        if _old_sections_len == _sections_len:
+            raise Exception(f"String could not be truncated: '{item}'")
+
+    new_sections = sorted(_sections, key=lambda x: x[0])
+    return delimeter.join([s for i, s in new_sections])
+

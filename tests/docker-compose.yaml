@@ -48,7 +48,7 @@ services:
   oracle:
     image: konnecteam/docker-oracle-12c:sequelize
     ports:
-      - 1521:1521
+      - 1529:1521
     volumes:
       - oracle_volume:/u01/app/oracle
 

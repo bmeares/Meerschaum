@@ -237,8 +237,8 @@ def fetch_pipes_keys(
 
 def create_indices(
         self,
-        pipe : meerschaum.Pipe,
-        debug : bool = False
+        pipe: meerschaum.Pipe,
+        debug: bool = False
     ) -> bool:
     """
     Create indices for a Pipe's datetime and ID columns.
@@ -261,10 +261,16 @@ def create_indices(
     _cols_types = pipe.get_columns_types(debug=debug)
     _datetime = pipe.get_columns('datetime', error=False)
     _datetime_name = sql_item_name(_datetime, self.flavor) if _datetime is not None else None
-    _datetime_index_name = sql_item_name(str(pipe) + '_' + _datetime + '_index', self.flavor) if _datetime is not None else None
+    _datetime_index_name = (
+        sql_item_name(str(pipe) + '_' + _datetime + '_index', self.flavor)
+        if _datetime is not None else None
+    )
     _id = pipe.get_columns('id', error=False)
     _id_name = sql_item_name(_id, self.flavor) if _id is not None else None
-    _id_index_name = sql_item_name(str(pipe) + '_' + _id + '_index', self.flavor) if _id is not None else None
+    _id_index_name = (
+        sql_item_name(str(pipe) + '_' + _id + '_index', self.flavor)
+        if _id is not None else None
+    )
     _pipe_name = sql_item_name(str(pipe), self.flavor)
     _create_space_partition = get_config('system', 'experimental', 'space')
 

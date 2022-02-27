@@ -91,7 +91,7 @@ flavor_configs = {
         'create_engine' : default_create_engine_args,
         'omit_create_engine': {'method',},
         'to_sql': {
-            'method': 'multi',
+            'method': None,
         },
         'requirements' : default_requirements,
         'defaults'     : {

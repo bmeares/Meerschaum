@@ -38,6 +38,17 @@ table_wrappers = {
     'cockroachdb': ('"', '"'),
     'oracle'     : ('"', '"'),
 }
+max_name_lens = {
+    'default'    : 64,
+    'mssql'      : 128,
+    'oracle'     : 30,
+    'postgresql' : 64,
+    'timescaledb': 64,
+    'cockroachdb': 64,
+    'sqlite'     : 1024, ### Probably more, but 1024 seems more than reasonable.
+    'mysql'      : 64,
+    'mariadb'    : 64,
+}
 json_flavors = {'postgresql', 'timescaledb',}
 
 
@@ -165,8 +176,9 @@ def dateadd_str(
         elif begin_time:
             begin = str(begin_time.strftime('%Y-%m-%d %H:%M:%S.%f'))
         dt_format = 'YYYY-MM-DD HH24:MI:SS.FF'
+        _begin = f"'{begin}'" if begin_time else begin
         da = (
-            f"TO_TIMESTAMP('{begin}', '{dt_format}')"
+            f"TO_TIMESTAMP({_begin}, '{dt_format}')"
             + (f" + INTERVAL '{number}' {datepart}" if number != 0 else "")
         )
     return da
@@ -273,7 +285,8 @@ def sql_item_name(item: str, flavor: str) -> str:
 
     """
     wrappers = table_wrappers.get(flavor, table_wrappers['default'])
-    return wrappers[0] + str(item) + wrappers[1]
+    item = item if flavor != 'oracle' else oracle_capital(item)
+    return wrappers[0] + truncate_item_name(str(item), flavor) + wrappers[1]
 
 
 def pg_capital(s: str) -> str:
@@ -308,6 +321,35 @@ def pg_capital(s: str) -> str:
     if needs_quotes:
         return '"' + s + '"'
     return s
+
+
+def oracle_capital(s: str) -> str:
+    """
+    Capitalize the string of an item on an Oracle database.
+    """
+    return s.upper()
+
+
+def truncate_item_name(item: str, flavor: str) -> str:
+    """
+    Truncate item names to stay within the database flavor's character limit.
+
+    Parameters
+    ----------
+    item: str
+        The database item being referenced. This string is the "canonical" name internally.
+
+    flavor: str
+        The flavor of the database on which `item` resides.
+
+    Returns
+    -------
+    The truncated string.
+    """
+    from meerschaum.utils.misc import truncate_string_sections
+    return truncate_string_sections(
+        item, max_len=max_name_lens.get(flavor, max_name_lens['default'])
+    )
 
 
 def build_where(

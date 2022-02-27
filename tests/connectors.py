@@ -26,6 +26,7 @@ conns = {
     ),
     'oracle': get_connector('sql', 'oracle_test',
         flavor='oracle', host='localhost', database='xe', username='system', password='oracle',
+        port=1529,
     ),
     'sqlite':  get_connector('sql', 'test_sqlite',
         database=str(data_path / 'test_sqlite.db'),
