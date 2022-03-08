@@ -58,7 +58,7 @@ packages : Dict[str, Dict[str, str]] = {
         'pymysql'                    : 'PyMySQL>=0.9',
         'aiomysql'                   : 'aiomysql>=0.0.21',
         'sqlalchemy_cockroachdb'     : 'sqlalchemy-cockroachdb>=1.4.2',
-        'duckdb'                     : 'duckdb>=0.3.2.dev579',
+        'duckdb'                     : 'duckdb>=0.3.2',
         'duckdb_engine'              : 'duckdb-engine>=0.1.3',
     },
     '_drivers': {
@@ -132,10 +132,10 @@ packages['dash'] = {
     'flask_compress'                 : 'Flask-Compress>=1.10.1',
 }
 packages['api'] = {
-    'uvicorn'                        : 'uvicorn[standard]>=0.13.4',
+    'uvicorn'                        : 'uvicorn[standard]>=0.17.5',
     'gunicorn'                       : 'gunicorn>=20.1.0',
     'websockets'                     : 'websockets>=8.1',
-    'fastapi'                        : 'fastapi>=0.61.2',
+    'fastapi'                        : 'fastapi>=0.75.0',
     'fastapi_jwt_auth'               : 'fastapi-jwt-auth>=0.5.0',
     'passlib'                        : 'passlib>=1.7.4',
     'fastapi_login'                  : 'fastapi-login>=1.7.2',

@@ -19,12 +19,12 @@ test_queries = {
 ### `table` is the unescaped name of the table.
 exists_queries = {
     'default'    : "SELECT COUNT(*) FROM {table_name} WHERE 1 = 0",
-    'timescaledb': "SELECT to_regclass('{table_name}')",
-    'postgresql' : "SELECT to_regclass('{table_name}')",
-    'mssql'      : "SELECT OBJECT_ID('{table_name}')",
-    'mysql'      : "SHOW TABLES LIKE '{table}'",
-    'mariadb'    : "SHOW TABLES LIKE '{table}'",
-    'sqlite'     : "SELECT name FROM sqlite_master WHERE name='{table}'",
+    #  'timescaledb': "SELECT to_regclass('{table_name}')",
+    #  'postgresql' : "SELECT to_regclass('{table_name}')",
+    #  'mssql'      : "SELECT OBJECT_ID('{table_name}')",
+    #  'mysql'      : "SHOW TABLES LIKE '{table}'",
+    #  'mariadb'    : "SHOW TABLES LIKE '{table}'",
+    #  'sqlite'     : "SELECT name FROM sqlite_master WHERE name='{table}'",
 }
 table_wrappers = {
     'default'    : ('"', '"'),
@@ -443,7 +443,7 @@ def table_exists(
     q = exists_queries.get(connector.flavor, exists_queries['default']).format(
         table=table, table_name=table_name,
     )
-    exists = connector.value(q, debug=debug, silent=True) is not None
+    exists = connector.exec(q, debug=debug, silent=True) is not None
     return exists
 
 def get_sqlalchemy_table(

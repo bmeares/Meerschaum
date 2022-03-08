@@ -70,6 +70,9 @@ def _static_config():
                 'prompt': {
                     'web': False,
                 },
+                'fetch_pipes_keys': {
+                    'negation_prefix': '_',
+                },
             },
             'connectors': {
                 'default_label': 'main',

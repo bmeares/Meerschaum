@@ -26,6 +26,7 @@ def test_dateadd_str(flavor: str):
     dt_str = dateadd_str(conn.flavor, begin=dt, number=td_advance.days)
     q = f"SELECT {dt_str}" + ('' if conn.flavor != 'oracle' else ' FROM DUAL')
     dt_val = conn.value(q)
+    assert dt_val is not None
     if conn.flavor == 'sqlite':
         dt_val = dateutil.parser.parse(dt_val)
     assert ((dt + td_advance) - dt_val) <= td_margin

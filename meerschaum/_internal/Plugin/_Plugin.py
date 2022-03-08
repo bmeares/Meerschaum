@@ -370,7 +370,7 @@ class Plugin:
 
         return success, msg
 
-    def setup(self, *args : str, debug : bool = False, **kw : Any) -> SuccessTuple:
+    def setup(self, *args: str, debug: bool = False, **kw: Any) -> Union[SuccessTuple, bool]:
         """
         If exists, run the plugin's `setup()` function.
 
@@ -387,7 +387,7 @@ class Plugin:
 
         Returns
         -------
-        A `SuccessTuple` indicating success.
+        A `SuccessTuple` or `bool` indicating success.
 
         """
         from meerschaum.utils.packages import activate_venv, deactivate_venv

@@ -120,7 +120,7 @@ def register_user(
             return False, _json['detail']
         success_tuple = tuple(_json)
     except Exception:
-        msg = response.text if response else f"Failed to register user '{user}'"
+        msg = response.text if response else f"Failed to register user '{user}'."
         return False, msg
 
     return tuple(success_tuple)

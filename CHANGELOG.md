@@ -4,6 +4,18 @@ This changelog was not introduced until v0.2.12, so many of the critical release
 ## 0.5.x Releases
 This is the current release cycle, so future features will be updated below.
 
+### v0.5.13
+- **Key negation when selecting pipes.**  
+  Prefix connector, metric, or location with `_` to select pipes that do NOT have that key.
+- **Added the `setup plugins` command.**  
+  Run the command `setup plugins` followed by a list of plugins to execute their `setup()` functions.
+- **Renamed pipes' keys methods function.**  
+  The function `meerschaum.utils.get_pipes.methods()` is renamed to `meerschaum.utils.get_pipes.fetch_pipes_keys()`.
+- **Improved stability for DuckDB.**
+- **Bumped depdenencies.**  
+  DuckDB, FastAPI, and Uvicorn have been updated to their latest stable versions.
+
+
 ### v0.5.11 — v0.5.12
 - **Improved Oracle support.**  
   Oracle SQL has been fully integrated into the testing suite, and critical bugs have been addressed.

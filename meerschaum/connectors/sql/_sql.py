@@ -232,6 +232,7 @@ def value(
     use_pandas: bool, default False
         If `True`, use `meerschaum.connectors.SQLConnector.read`, otherwise use
         `meerschaum.connectors.sql.SQLConnector.exec` (default).
+        **NOTE:** This is always `True` for DuckDB.
 
     **kw: Any
         See `args`.
@@ -242,6 +243,8 @@ def value(
 
     """
     from meerschaum.utils.warnings import warn
+    if self.flavor == 'duckdb':
+        use_pandas = True
     if use_pandas:
         try:
             return self.read(query, *args, **kw).iloc[0, 0]

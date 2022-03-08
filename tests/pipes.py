@@ -40,7 +40,10 @@ for _label, instance in conns.items():
             parameters={
                 'columns': {'datetime': 'datetime', 'id': 'id'},
                 'fetch': ({
-                    'definition': 'SELECT * FROM plugin_stress_test'
+                    'definition': (
+                        'SELECT * FROM ' +
+                        ('plugin_stress_test' if conn.flavor != 'oracle' else 'PLUGIN_STRESS_TEST')
+                    )
                 } if conn.type == 'sql' else {
                     'connector_keys': 'plugin:stress',
                     'metric_key': 'test',

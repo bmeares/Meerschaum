@@ -158,9 +158,18 @@ class Pipe:
         """
         if location_key in ('[None]', 'None'):
             location_key = None
+
+        from meerschaum.utils.warnings import error
+        from meerschaum.config.static import _static_config
+        negation_prefix = _static_config()['system']['fetch_pipes_keys']['negation_prefix']
+        for k in (connector_keys, metric_key, location_key):
+            if str(k).startswith(negation_prefix):
+                error(f"A pipe's keys cannot start with the prefix '{negation_prefix}'.")
+
         self.connector_keys = connector_keys
         self.metric_key = metric_key
         self.location_key = location_key
+        
 
         ### only set parameters if values are provided
         if parameters is not None:
