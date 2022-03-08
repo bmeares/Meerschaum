@@ -132,6 +132,7 @@ def edit_pipe(
         message = f"Failed to edit pipe '{pipe}'."
     return (result is not None), message
 
+
 def fetch_pipes_keys(
         self,
         connector_keys: Optional[List[str]] = None,
@@ -147,19 +148,24 @@ def fetch_pipes_keys(
     ----------
     connector_keys: Optional[List[str]], default None
         List of connector_keys to search by.
+
     metric_keys: Optional[List[str]], default None
         List of metric_keys to search by.
+
     location_keys: Optional[List[str]], default None
         List of location_keys to search by.
+
     params: Optional[Dict[str, Any]], default None
         Dictionary of additional parameters to search by.
         E.g. `--params pipe_id:1`
+
     debug: bool, default False
         Verbosity toggle.
     """
     from meerschaum.utils.warnings import error
     from meerschaum.utils.debug import dprint
     from meerschaum.utils.packages import attempt_import
+    from meerschaum.config.static import _static_config
     sqlalchemy = attempt_import('sqlalchemy')
     import json
 
@@ -196,7 +202,7 @@ def fetch_pipes_keys(
             vals = None
         if vals not in [[], ['*']]:
             parameters[col] = vals
-    cols = {k : v for k, v in cols.items() if v != [None]}
+    cols = {k: v for k, v in cols.items() if v != [None]}
 
     from meerschaum.connectors.sql.tables import get_tables
     pipes = get_tables(mrsm_instance=self, debug=debug)['pipes']
@@ -206,9 +212,11 @@ def fetch_pipes_keys(
         _v = json.dumps(v) if isinstance(v, dict) else v
         _params[k] = _v
 
-    ### parse regular params
+    ### Parse regular params.
+    ### If a param begins with '_', negate it instead.
+    negation_prefix = _static_config()['system']['fetch_pipes_keys']['negation_prefix']
     _where = [
-        pipes.c[key] == val 
+        ((pipes.c[key] == val) if not str(val).startswith(negation_prefix) else (pipes.c[key] != key))
         for key, val in _params.items()
             if not isinstance(val, (list, tuple)) and key in pipes.c
     ]
@@ -218,11 +226,21 @@ def fetch_pipes_keys(
 
     ### Parse IN params and add OR IS NULL if None in list.
     for c, vals in cols.items():
-        if isinstance(vals, (list, tuple)) and vals and c in pipes.c:
-            q = (
-                q.where(pipes.c[c].in_(vals)) if None not in vals
-                else q.where(sqlalchemy.or_(pipes.c[c].in_(vals), pipes.c[c].is_(None)))
-            )
+        if not isinstance(vals, (list, tuple)) or not vals or not c in pipes.c:
+            continue
+        _in_vals, _ex_vals = [], []
+        for v in vals:
+            if str(v).startswith(negation_prefix):
+                _ex_vals.append(str(v)[len(negation_prefix):])
+            else:
+                _in_vals.append(v)
+        ### Include params (positive)
+        q = (
+            q.where(pipes.c[c].in_(_in_vals)) if None not in _in_vals
+            else q.where(sqlalchemy.or_(pipes.c[c].in_(_in_vals), pipes.c[c].is_(None)))
+        ) if _in_vals else q
+        ### Exclude params (negative)
+        q = q.where(pipes.c[c].not_in(_ex_vals)) if _ex_vals else q
 
     ### execute the query and return a list of tuples
     try:
@@ -540,7 +558,7 @@ def get_pipe_id(
         pipes.c.metric_key == pipe.metric_key
     ).where(
         (pipes.c.location_key == pipe.location_key) if pipe.location_key is not None
-        else (pipes.c.location_key.is_(None))
+        else pipes.c.location_key.is_(None)
     )
     _id = self.value(query, debug=debug)
     if _id is not None:
