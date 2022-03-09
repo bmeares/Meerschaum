@@ -19,9 +19,11 @@ _locks = {
 __pdoc__ = {'venvs': False, 'data': False, 'stack': False, 'plugins': False}
 
 def make_action(
-        function : Callable[[Any], Any],
-        shell : bool = False,
-        debug : bool = False
+        function: Callable[[Any], Any],
+        shell: bool = False,
+        activate: bool = True,
+        deactivate: bool = True,
+        debug: bool = False
     ) -> Callable[[Any], Any]:
     """
     Make a function a Meerschaum action. Useful for plugins that are adding multiple actions.
@@ -52,6 +54,20 @@ def make_action(
     from meerschaum.actions import __all__ as _all, actions
     from meerschaum.utils.formatting import pprint
     from meerschaum.utils.misc import add_method_to_class
+    package_name = function.__globals__['__name__']
+    plugin_name = (
+        package_name.split('plugins.')[-1]
+        if package_name.startswith('plugins.') else None
+    )
+
+    def _new_action_venv_wrapper(*args, debug: bool = False, **kw):
+        from meerschaum.utils.packages import activate_venv, deactivate_venv
+        if plugin_name and activate:
+            activate_venv(plugin_name, debug=debug)
+        result = function(*args, debug=debug, **kw)
+        if plugin_name and deactivate:
+            deactivate_venv(plugin_name, debug=debug)
+        return result
 
     if debug:
         from meerschaum.utils.debug import dprint
@@ -62,7 +78,7 @@ def make_action(
 
     if function.__name__ not in _all:
         _all.append(function.__name__)
-    actions[function.__name__] = function
+    actions[function.__name__] = _new_action_venv_wrapper
     return function
 
 

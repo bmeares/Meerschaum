@@ -2,7 +2,7 @@
 # vim:fenc=utf-8
 
 """
-This module is the entry point for the interactive shell
+This module is the entry point for the interactive shell.
 """
 
 from __future__ import annotations

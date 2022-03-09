@@ -1494,8 +1494,6 @@ def venv_target_path(
         print(VIRTENV_RESOURCES_PATH)
         sys.exit(1)
 
-    if debug:
-        print(f"Target path for virtual environment '{venv}':\n" + str(target_path))
     return pathlib.Path(target_path)
 
 
