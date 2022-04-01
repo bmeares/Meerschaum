@@ -55,7 +55,7 @@ def register_user(
         'password_hash' : user.password_hash,
         'user_type' : user.type,
         'attributes' : (
-            json.dumps(user.attributes) if self.flavor not in json_flavors else user.attributes
+            json.dumps(user.attributes) if self.flavor in ('duckdb',) else user.attributes
         ),
     }
     if old_id is not None:
@@ -163,7 +163,7 @@ def edit_user(
         bind_variables['email'] = user.email
     if user.attributes is not None and user.attributes != {}:
         bind_variables['attributes'] = (
-            json.dumps(user.attributes) if self.flavor not in json_flavors
+            json.dumps(user.attributes) if self.flavor in ('duckdb',)
             else user.attributes
         )
     if user.type != '':
