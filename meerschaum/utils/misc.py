@@ -1689,3 +1689,33 @@ def truncate_string_sections(item: str, delimeter: str = '_', max_len: int = 128
     new_sections = sorted(_sections, key=lambda x: x[0])
     return delimeter.join([s for i, s in new_sections])
 
+
+def separate_negation_values(
+        vals: List[str],
+        negation_prefix: Optional[str] = None,
+    ) -> Tuple[List[str], List[str]]:
+    """
+    Separate the negated values from the positive ones.
+    Return two lists: positive and negative values.
+
+    Parameters
+    ----------
+    vals: List[str]
+        A list of strings to parse.
+
+    negation_prefix: Optional[str], default None
+        Include values that start with this string in the second list.
+        If `None`, use the system default (`_`).
+    """
+    if negation_prefix is None:
+        from meerschaum.config.static import _static_config
+        negation_prefix = _static_config()['system']['fetch_pipes_keys']['negation_prefix']
+    _in_vals, _ex_vals = [], []
+    for v in vals:
+        if str(v).startswith(negation_prefix):
+            _ex_vals.append(str(v)[len(negation_prefix):])
+        else:
+            _in_vals.append(v)
+
+    return _in_vals, _ex_vals
+

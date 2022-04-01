@@ -156,9 +156,9 @@ class Pipe:
         from meerschaum.utils.warnings import error
         from meerschaum.config.static import _static_config
         negation_prefix = _static_config()['system']['fetch_pipes_keys']['negation_prefix']
-        for k in (connector_keys, metric_key, location_key):
+        for k in (connector_keys, metric_key, location_key, *(tags or [])):
             if str(k).startswith(negation_prefix):
-                error(f"A pipe's keys cannot start with the prefix '{negation_prefix}'.")
+                error(f"A pipe's keys and tags cannot start with the prefix '{negation_prefix}'.")
 
         self.connector_keys = connector_keys
         self.metric_key = metric_key

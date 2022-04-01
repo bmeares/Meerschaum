@@ -90,6 +90,12 @@ def tags(self, tags: List[str, str]) -> None:
     Override the tags list of the in-memory pipe.
     Call `meerschaum.Pipe.Pipe.edit` to persist changes.
     """
+    from meerschaum.utils.warnings import error
+    from meerschaum.config.static import _static_config
+    negation_prefix = _static_config()['system']['fetch_pipes_keys']['negation_prefix']
+    for t in tags:
+        if t.startswith(negation_prefix):
+            error(f"Tags cannot begin with '{negation_prefix}'.")
     if not self.parameters:
         self._tags = tags
     else:

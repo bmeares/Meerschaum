@@ -132,6 +132,7 @@ async def fetch_pipes_keys(
         connector_keys: str = "[]",
         metric_keys: str = "[]",
         location_keys: str = "[]",
+        tags: str = "[]",
         params: str = "{}",
         curr_user: 'meerschaum._internal.User.User' = fastapi.Depends(manager),
     ) -> list:
@@ -144,6 +145,7 @@ async def fetch_pipes_keys(
         connector_keys = json.loads(connector_keys),
         metric_keys = json.loads(metric_keys),
         location_keys = json.loads(location_keys),
+        tags = json.loads(tags),
         params = json.loads(params),
     )
     return keys
