@@ -24,15 +24,12 @@ with correct credentials, as well as a network connection and valid permissions.
 
 ```
 >>> from meerschaum import Pipe
->>> pipe = Pipe('csv', 'energy')
->>> 
 >>> ### Columns only need to be defined if you're creating a new pipe.
->>> pipe.columns = { 'datetime' : 'time', 'id' : 'station_id' }
+>>> pipe = Pipe('csv', 'energy', columns={'datetime': 'time', 'id': 'station_id'})
 >>> 
 >>> ### Create a Pandas DataFrame somehow,
 >>> ### or you can use a dictionary of lists instead.
 >>> df = pd.read_csv('data.csv')
->>> 
 >>> pipe.sync(df)
 ```
 
@@ -41,17 +38,12 @@ with correct credentials, as well as a network connection and valid permissions.
 
 ```
 >>> from meerschaum import Pipe
->>> pipe = Pipe('sql:remote_server', 'energy')
->>> 
->>> pipe.attributes = {
-...     'fetch' : {
-...         'definition' : 'SELECT * FROM energy_table',
+>>> pipe = Pipe('sql:remote_server', 'energy', parameters={
+...     'fetch': {
+...         'definition': 'SELECT * FROM energy_table',
 ...     },
-... }
->>> 
->>> ### Columns are a subset of attributes, so define columns
->>> ### after defining attributes.
->>> pipe.columns = { 'datetime' : 'time', 'id' : 'station_id' }
+...     'columns': {'datetime': 'time', 'id': 'station_id'}
+... })
 >>> 
 >>> pipe.sync()
 ```
@@ -95,6 +87,7 @@ class Pipe:
         columns,
         get_columns,
         get_columns_types,
+        tags,
         get_id,
         id,
         get_val_column,
@@ -115,6 +108,7 @@ class Pipe:
         location_key: Optional[str] = None,
         parameters: Optional[Dict[str, Any]] = None,
         columns: Optional[Dict[str, str]] = None,
+        tags: Optional[List[str]] = None,
         mrsm_instance: Optional[Union[str, InstanceConnector]] = None,
         instance: Optional[Union[str, InstanceConnector]] = None,
         cache: bool = False,
@@ -180,6 +174,11 @@ class Pipe:
                 self._parameters = {}
             self._parameters['columns'] = columns
 
+        if tags is not None:
+            if self.__dict__.get('_parameters', None) is None:
+                self._parameters = {}
+            self._parameters['tags'] = tags
+
         ### NOTE: The parameters dictionary is {} by default.
         ###       A Pipe may be registered without parameters, then edited,
         ###       or a Pipe may be registered with parameters set in-memory first.
@@ -241,7 +240,13 @@ class Pipe:
         """
         if '_connector' not in self.__dict__:
             from meerschaum.connectors.parse import parse_instance_keys
-            conn = parse_instance_keys(self.connector_keys)
+            import warnings
+            with warnings.catch_warnings():
+                warnings.simplefilter('ignore')
+                try:
+                    conn = parse_instance_keys(self.connector_keys)
+                except Exception as e:
+                    conn = None
             if conn:
                 self._connector = conn
             else:
@@ -306,7 +311,7 @@ class Pipe:
         return self._cache_pipe
 
     @property
-    def sync_time(self) -> Union[datetime.datetime, None]:
+    def sync_time(self) -> Union['datetime.datetime', None]:
         """
         Convenience function to get the pipe's latest datetime.
         Use `meerschaum.Pipe.Pipe.get_sync_time()` instead.
@@ -325,7 +330,7 @@ class Pipe:
     def __eq__(self, other):
         try:
             return (
-                type(self) == type(other)
+                isinstance(self, type(other))
                 and self.connector_keys == other.connector_keys
                 and self.metric_key == other.metric_key
                 and self.location_key == other.location_key

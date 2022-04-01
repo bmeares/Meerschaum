@@ -102,7 +102,7 @@ def edit_definition(
     A `SuccessTuple` of success, message.
 
     """
-    if self.connector.type not in ('sql', 'api'):
+    if (self.connector is None) or self.connector.type not in ('sql', 'api'):
         return self.edit(interactive=True, debug=debug, **kw)
 
     import json

@@ -58,8 +58,9 @@ def columns(self) -> Union[Dict[str, str], None]:
         return None
     return self.parameters['columns']
 
+
 @columns.setter
-def columns(self, columns : Dict[str, str]) -> None:
+def columns(self, columns: Dict[str, str]) -> None:
     """
     Override the columns dictionary of the in-memory pipe.
     Call `meerschaum.Pipe.Pipe.edit` to persist changes.
@@ -68,6 +69,32 @@ def columns(self, columns : Dict[str, str]) -> None:
         self._columns = columns
     else:
         self._parameters['columns'] = columns
+
+@property
+def tags(self) -> Union[List[str], None]:
+    """
+    If defined, return the `tags` list defined in `meerschaum.Pipe.Pipe.parameters`.
+    """
+    if not self.parameters:
+        if '_tags' in self.__dict__:
+            return self._tags
+        return None
+    if 'tags' not in self.parameters:
+        return None
+    return self.parameters['tags']
+
+
+@tags.setter
+def tags(self, tags: List[str, str]) -> None:
+    """
+    Override the tags list of the in-memory pipe.
+    Call `meerschaum.Pipe.Pipe.edit` to persist changes.
+    """
+    if not self.parameters:
+        self._tags = tags
+    else:
+        self._parameters['tags'] = tags
+
 
 def get_columns(self, *args: str, error : bool = True) -> Tuple[str]:
     """

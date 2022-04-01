@@ -248,6 +248,9 @@ groups['pipes'].add_argument(
         "If label is omitted, use the configured default interface (usually 'sql:main')"
     )
 )
+groups['pipes'].add_argument(
+    '-t', '--tags', nargs='+', help="Only include pipes with these tags.",
+)
 
 ### Sync options
 groups['sync'].add_argument(

@@ -609,9 +609,17 @@ def round_time(
     datetime.datetime(2022, 1, 1, 12, 16)
     >>> round_time(datetime.datetime(2022, 1, 1, 12, 15, 57, 200), datetime.timedelta(hours=1))
     datetime.datetime(2022, 1, 1, 12, 0)
-    >>> round_time(datetime.datetime(2022, 1, 1, 12, 15, 57, 200), datetime.timedelta(hours=1), to='closest')
+    >>> round_time(
+    ...   datetime.datetime(2022, 1, 1, 12, 15, 57, 200),
+    ...   datetime.timedelta(hours=1),
+    ...   to='closest'
+    ... )
     datetime.datetime(2022, 1, 1, 12, 0)
-    >>> round_time(datetime.datetime(2022, 1, 1, 12, 45, 57, 200), datetime.timedelta(hours=1), to='closest')
+    >>> round_time(
+    ...   datetime.datetime(2022, 1, 1, 12, 45, 57, 200),
+    ...   datetime.timedelta(hours=1),
+    ...   to='closest'
+    ... )
     datetime.datetime(2022, 1, 1, 13, 0)
 
     """
@@ -1081,7 +1089,7 @@ def enforce_gevent_monkey_patch():
     if not socket.socket is gevent_socket.socket:
         gevent_monkey.patch_all()
 
-def is_valid_email(email: str) -> Union[re.Match, None]:
+def is_valid_email(email: str) -> Union['re.Match', None]:
     """
     Check whether a string is a valid email.
 
@@ -1152,7 +1160,7 @@ def _pyinstaller_traverse_dir(
     paths = []
     _directory = pathlib.Path(directory)
 
-    def _found_pattern(name : str):
+    def _found_pattern(name: str):
         for pattern in ignore_patterns:
             if pattern.replace('/', os.path.sep) in str(name):
                 return True
