@@ -167,6 +167,7 @@ def fetch_pipes_keys(
     from meerschaum.utils.warnings import error
     from meerschaum.utils.debug import dprint
     from meerschaum.utils.packages import attempt_import
+    from meerschaum.utils.misc import separate_negation_values
     from meerschaum.config.static import _static_config
     sqlalchemy = attempt_import('sqlalchemy')
     import json
@@ -184,7 +185,6 @@ def fetch_pipes_keys(
         ]
     if tags is None:
         tags = []
-
 
     if params is None:
         params = {}
@@ -216,12 +216,14 @@ def fetch_pipes_keys(
         _v = json.dumps(v) if isinstance(v, dict) else v
         _params[k] = _v
 
+    negation_prefix = _static_config()['system']['fetch_pipes_keys']['negation_prefix']
     ### Parse regular params.
     ### If a param begins with '_', negate it instead.
-    negation_prefix = _static_config()['system']['fetch_pipes_keys']['negation_prefix']
     _where = [
-        ((pipes.c[key] == val) if not str(val).startswith(negation_prefix) else (pipes.c[key] != key))
-        for key, val in _params.items()
+        (
+            (pipes.c[key] == val) if not str(val).startswith(negation_prefix)
+            else (pipes.c[key] != key)
+        ) for key, val in _params.items()
             if not isinstance(val, (list, tuple)) and key in pipes.c
     ]
     q = sqlalchemy.select(
@@ -233,12 +235,7 @@ def fetch_pipes_keys(
     for c, vals in cols.items():
         if not isinstance(vals, (list, tuple)) or not vals or not c in pipes.c:
             continue
-        _in_vals, _ex_vals = [], []
-        for v in vals:
-            if str(v).startswith(negation_prefix):
-                _ex_vals.append(str(v)[len(negation_prefix):])
-            else:
-                _in_vals.append(v)
+        _in_vals, _ex_vals = separate_negation_values(vals)
         ### Include params (positive)
         q = (
             q.where(pipes.c[c].in_(_in_vals)) if None not in _in_vals
@@ -247,14 +244,26 @@ def fetch_pipes_keys(
         ### Exclude params (negative)
         q = q.where(pipes.c[c].not_in(_ex_vals)) if _ex_vals else q
 
-    for t in tags:
-        q = q.where(
+    ### Finally, parse tags.
+    _in_tags, _ex_tags = separate_negation_values(tags)
+    ors = []
+    for nt in _in_tags:
+        ors.append(
             sqlalchemy.cast(
                 pipes.c['parameters'],
                 sqlalchemy.String,
-            #  ).like(f'%"tags":%"{t}"%')
-            ).like('%')
+            ).like(f'%"tags":%"{nt}"%')
         )
+    q = q.where(sqlalchemy.and_(sqlalchemy.or_(*ors).self_group()))
+    ors = []
+    for xt in _ex_tags:
+        ors.append(
+            sqlalchemy.cast(
+                pipes.c['parameters'],
+                sqlalchemy.String,
+            ).not_like(f'%"tags":%"{xt}"%')
+        )
+    q = q.where(sqlalchemy.and_(sqlalchemy.or_(*ors).self_group()))
 
     ### execute the query and return a list of tuples
     try:
@@ -267,13 +276,19 @@ def fetch_pipes_keys(
         ### Make 100% sure that the tags are correct.
         keys = []
         for row in rows:
+            ktup = (row['connector_keys'], row['metric_key'], row['location_key'])
             _actual_tags = (
                 json.loads(row['parameters']) if isinstance(row['parameters'], str)
                 else row['parameters']
-            )['tags']
-            for t in tags:
-                if t in _actual_tags:
-                    keys.append(row)
+            ).get('tags', [])
+            for nt in _in_tags:
+                if nt in _actual_tags:
+                    keys.append(ktup)
+            for xt in _ex_tags:
+                if xt in _actual_tags:
+                    keys.remove(ktup)
+                else:
+                    keys.append(ktup)
         return keys
 
     except Exception as e:

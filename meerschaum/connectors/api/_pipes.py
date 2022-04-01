@@ -121,39 +121,38 @@ def fetch_pipes_keys(
         connector_keys: Optional[List[str]] = None,
         metric_keys: Optional[List[str]] = None,
         location_keys: Optional[List[str]] = None,
+        tags: Optional[List[str]] = None,
         params: Optional[Dict[str, Any]] = None,
-        mrsm_instance: str = 'api',
         debug: bool = False
-    ) -> Union[List[str], Mapping[str, Any]]:
-    """NOTE: This function no longer builds Pipes. Use the main `get_pipes()` function
-          with the arguments `mrsm_instance = 'api' and `method = 'registered'` (default).
-    
+    ) -> Union[List[Tuple[str, str, Union[str, None]]]]:
+    """
     Fetch registered Pipes' keys from the API.
     
-    keys_only : bool : True
-        If True, only return a list of tuples of the keys
-        E.g. [ (connector_keys, metric_key, location_key) ]
-        This is used by the main `get_pipes()` function for the 'api' method.
-
     Parameters
     ----------
-    connector_keys: Optional[List[str]] :
-         (Default value = None)
-    metric_keys: Optional[List[str]] :
-         (Default value = None)
-    location_keys: Optional[List[str]] :
-         (Default value = None)
-    params: Optional[Dict[str :
-        
-    Any]] :
-         (Default value = None)
-    mrsm_instance: str :
-         (Default value = 'api')
-    debug: bool :
-         (Default value = False)
+    connector_keys: Optional[List[str]], default None
+        The connector keys for the query.
+
+    metric_keys: Optional[List[str]], default None
+        The metric keys for the query.
+
+    location_keys: Optional[List[str]], default None
+        The location keys for the query.
+
+    tags: Optional[List[str]], default None
+        A list of tags for the query.
+
+    params: Optional[Dict[str, Any]], default None
+        A parameters dictionary for filtering against the `pipes` table
+        (e.g. `{'connector_keys': 'plugin:foo'}`).
+        Not recommeded to be used.
+
+    debug: bool, default False
+        Verbosity toggle.
 
     Returns
     -------
+    A list of tuples containing pipes' keys.
 
     """
     from meerschaum.utils.warnings import error
@@ -165,6 +164,8 @@ def fetch_pipes_keys(
         metric_keys = []
     if location_keys is None:
         location_keys = []
+    if tags is None:
+        tags = []
 
     r_url = _static_config()['api']['endpoints']['pipes'] + '/keys'
     try:
@@ -174,6 +175,7 @@ def fetch_pipes_keys(
                 'connector_keys': json.dumps(connector_keys),
                 'metric_keys': json.dumps(metric_keys),
                 'location_keys': json.dumps(location_keys),
+                'tags': json.dumps(tags),
                 'params': json.dumps(params),
             },
             debug=debug
@@ -185,13 +187,14 @@ def fetch_pipes_keys(
         error(j['detail'], stack=False)
     return [tuple(r) for r in j]
 
+
 def sync_pipe(
         self,
-        pipe : Optional[meerschaum.Pipe] = None,
-        df : Optional[Union[pandas.DataFrame, Dict[Any, Any], str]] = None,
-        chunksize : Optional[int] = -1,
-        debug : bool = False,
-        **kw : Any
+        pipe: Optional[meerschaum.Pipe] = None,
+        df: Optional[Union[pandas.DataFrame, Dict[Any, Any], str]] = None,
+        chunksize: Optional[int] = -1,
+        debug: bool = False,
+        **kw: Any
     ) -> SuccessTuple:
     """Append a pandas DataFrame to a Pipe.
     If Pipe does not exist, it is registered with supplied metadata.

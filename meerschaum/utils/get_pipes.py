@@ -18,6 +18,7 @@ def get_pipes(
         connector_keys: Union[str, List[str], None] = None,
         metric_keys: Union[str, List[str], None] = None,
         location_keys: Union[str, List[str], None] = None,
+        tags: Optional[List[str], None] = None,
         params: Optional[Dict[str, Any]] = None,
         mrsm_instance: Union[str, InstanceConnector, None] = None,
         instance: Union[str, InstanceConnector, None] = None,
@@ -42,6 +43,9 @@ def get_pipes(
 
     location_keys: Union[str, List[str], None], default None
         String or list of location keys. See `connector_keys` for formatting.
+
+    tags: Optional[List[str]], default None
+         If provided, only include pipes with these tags.
 
     params: Optional[Dict[str, Any]], default None
         Dictionary of additional parameters to search by.
@@ -117,6 +121,8 @@ def get_pipes(
         location_keys = []
     if params is None:
         params = {}
+    if tags is None:
+        tags = []
 
     if isinstance(connector_keys, str):
         connector_keys = [connector_keys]
@@ -156,6 +162,7 @@ def get_pipes(
         connector_keys = connector_keys,
         metric_keys = metric_keys,
         location_keys = location_keys,
+        tags = tags,
         params = params,
         debug = debug
     )
@@ -237,6 +244,7 @@ def fetch_pipes_keys(
             connector_keys: Optional[List[str]] = None,
             metric_keys: Optional[List[str]] = None,
             location_keys: Optional[List[str]] = None,
+            tags: Optional[List[str]] = None,
             params: Optional[Dict[str, Any]] = None,
             debug: bool = False,
             **kw
@@ -255,11 +263,14 @@ def fetch_pipes_keys(
             location_keys = []
         if params is None:
             params = {}
+        if tags is None:
+            tags = []
 
         return connector.fetch_pipes_keys(
             connector_keys = connector_keys,
             metric_keys = metric_keys,
             location_keys = location_keys,
+            tags = tags,
             params = params,
             debug = debug
         )
