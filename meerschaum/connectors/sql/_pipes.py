@@ -47,7 +47,7 @@ def register_pipe(
 
     ### ensure `parameters` is a dictionary
     if parameters is None:
-        parameters = dict()
+        parameters = {}
 
     import json
     sqlalchemy = attempt_import('sqlalchemy')
@@ -56,7 +56,8 @@ def register_pipe(
         'metric_key'     : pipe.metric_key,
         'location_key'   : pipe.location_key,
         'parameters'     : (
-            json.dumps(parameters) if self.flavor not in json_flavors else parameters
+            parameters
+            #  json.dumps(parameters) if self.flavor not in json_flavors else parameters
         ),
     }
     query = sqlalchemy.insert(pipes).values(**values)
@@ -138,6 +139,7 @@ def fetch_pipes_keys(
         connector_keys: Optional[List[str]] = None,
         metric_keys: Optional[List[str]] = None,
         location_keys: Optional[List[str]] = None,
+        tags: Optional[List[str]] = None,
         params: Optional[Dict[str, Any]] = None,
         debug: bool = False
     ) -> Optional[List[Tuple[str, str, Optional[str]]]]:
@@ -180,6 +182,8 @@ def fetch_pipes_keys(
             (lk if lk not in ('[None]', 'None', 'null') else None)
                 for lk in location_keys
         ]
+    if tags is None:
+        tags = []
 
 
     if params is None:
@@ -188,9 +192,9 @@ def fetch_pipes_keys(
     ### Add three primary keys to params dictionary
     ###   (separated for convenience of arguments).
     cols = {
-        'connector_keys' : connector_keys,
-        'metric_key' : metric_keys,
-        'location_key' : location_keys,
+        'connector_keys': connector_keys,
+        'metric_key': metric_keys,
+        'location_key': location_keys,
     }
 
     ### Make deep copy so we don't mutate this somewhere else.
@@ -222,6 +226,7 @@ def fetch_pipes_keys(
     ]
     q = sqlalchemy.select(
         [pipes.c.connector_keys, pipes.c.metric_key, pipes.c.location_key]
+        + ([pipes.c.parameters] if tags else [])
     ).where(sqlalchemy.and_(True, *_where))
 
     ### Parse IN params and add OR IS NULL if None in list.
@@ -242,12 +247,35 @@ def fetch_pipes_keys(
         ### Exclude params (negative)
         q = q.where(pipes.c[c].not_in(_ex_vals)) if _ex_vals else q
 
+    for t in tags:
+        q = q.where(
+            sqlalchemy.cast(
+                pipes.c['parameters'],
+                sqlalchemy.String,
+            #  ).like(f'%"tags":%"{t}"%')
+            ).like('%')
+        )
+
     ### execute the query and return a list of tuples
     try:
         if debug:
-            dprint(q)
+            dprint(q.compile(compile_kwargs={'literal_binds': True}))
         rows = self.engine.execute(q).fetchall()
-        return [(row['connector_keys'], row['metric_key'], row['location_key']) for row in rows]
+        _keys = [(row['connector_keys'], row['metric_key'], row['location_key']) for row in rows]
+        if not tags:
+            return _keys
+        ### Make 100% sure that the tags are correct.
+        keys = []
+        for row in rows:
+            _actual_tags = (
+                json.loads(row['parameters']) if isinstance(row['parameters'], str)
+                else row['parameters']
+            )['tags']
+            for t in tags:
+                if t in _actual_tags:
+                    keys.append(row)
+        return keys
+
     except Exception as e:
         error(str(e))
 

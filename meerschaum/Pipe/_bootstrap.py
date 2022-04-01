@@ -152,9 +152,13 @@ def _get_parameters(pipe, debug: bool = False) -> Dict[str, str]:
             },
         },
     }
-    _parameters = _types_defaults.get(pipe.connector.type, {})
+    try:
+        conn_type = pipe.connector.type
+    except Exception as e:
+        conn_type = None
+    _parameters = _types_defaults.get(conn_type, {})
 
-    if pipe.connector.type == 'plugin':
+    if conn_type == 'plugin':
         if pipe.connector.register is not None:
             _params = pipe.connector.register(pipe)
             if not isinstance(_params, dict):

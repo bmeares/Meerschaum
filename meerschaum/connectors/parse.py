@@ -74,7 +74,7 @@ def parse_connector_keys(
     vals = str(keys).split(':')
     _type = vals[0]
     _label = vals[1] if len(vals) > 1 else _static_config()['connectors']['default_label']
-    _get_connector_kw = {'type' : _type, 'label' : _label}
+    _get_connector_kw = {'type': _type, 'label': _label}
     _get_connector_kw.update(kw)
 
     if construct:
