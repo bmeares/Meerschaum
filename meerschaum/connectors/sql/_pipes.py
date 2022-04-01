@@ -56,7 +56,7 @@ def register_pipe(
         'metric_key'     : pipe.metric_key,
         'location_key'   : pipe.location_key,
         'parameters'     : (
-            parameters
+            json.dumps(parameters) if self.flavor in ('duckdb',) else parameters
             #  json.dumps(parameters) if self.flavor not in json_flavors else parameters
         ),
     }
@@ -116,8 +116,9 @@ def edit_pipe(
 
     values = {
         'parameters' : (
-            json.dumps(parameters) if self.flavor not in json_flavors
-            else parameters
+            #  json.dumps(parameters) if self.flavor not in json_flavors
+            #  else parameters
+            json.dumps(parameters) if self.flavor in ('duckdb',) else parameters
         ),
     }
     q = sqlalchemy.update(pipes).values(**values).where(
@@ -254,7 +255,7 @@ def fetch_pipes_keys(
                 sqlalchemy.String,
             ).like(f'%"tags":%"{nt}"%')
         )
-    q = q.where(sqlalchemy.and_(sqlalchemy.or_(*ors).self_group()))
+    q = q.where(sqlalchemy.and_(sqlalchemy.or_(*ors).self_group())) if ors else q
     ors = []
     for xt in _ex_tags:
         ors.append(
@@ -263,7 +264,7 @@ def fetch_pipes_keys(
                 sqlalchemy.String,
             ).not_like(f'%"tags":%"{xt}"%')
         )
-    q = q.where(sqlalchemy.and_(sqlalchemy.or_(*ors).self_group()))
+    q = q.where(sqlalchemy.and_(sqlalchemy.or_(*ors).self_group())) if ors else q
 
     ### execute the query and return a list of tuples
     try:
@@ -827,7 +828,10 @@ def get_sync_time(
             st = dateutil_parser.parse(db_time)
         ### Do nothing if a datetime object is returned.
         elif isinstance(db_time, datetime.datetime):
-            st = db_time
+            if hasattr(db_time, 'to_pydatetime'):
+                st = db_time.to_pydatetime()
+            else:
+                st = db_time
         ### Sometimes the datetime is actually a date.
         elif isinstance(db_time, datetime.date):
             st = datetime.datetime.combine(db_time, datetime.datetime.min.time())
