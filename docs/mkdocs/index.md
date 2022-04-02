@@ -11,15 +11,6 @@ hide:
   .md-sidebar {
     display: none;
   }
-  .grid-container {
-    display: grid;
-    grid-template-columns: 1fr 1fr;
-    grid-gap: 20px;
-    max-width: 100%;
-    margin: auto;
-  }
-  .grid-child {
-  }
   #pip-button {
     width: 20em;
     font-size: 1.1rem;
@@ -76,6 +67,7 @@ h1 {
 </script>
 
 <link rel="stylesheet" type="text/css" href="/assets/css/asciinema-player.css" />
+<link rel="stylesheet" type="text/css" href="/assets/css/grid.css" />
 <script src="/assets/js/asciinema-player.js"></script>
 
 <!-- <script src="https://platform.linkedin.com/badges/js/profile.js" async defer type="text/javascript"></script> -->

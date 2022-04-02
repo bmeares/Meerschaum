@@ -37,7 +37,7 @@ Below is a list of common questions and issues you may encounter. If you have su
 
     The `--nopretty` flag may not have 100% coverage, but in cases like `show pipes` or `show columns`, it will instead print JSON representations of the pipes and data (separated by newlines) rather than formatting them.
 
-    If you are planning on integrating Meerschaum into your Python scripts, you can access actions directly via the `meerschaum.actions.actions` dictionary. Please consult [the Python package documentation](https://docs.meerschaumio) for more information. Also, you might want to consider making your script into a [Meerschaum action by writing an action plugin](/reference/plugins/types-of-plugins/#action-plugins).
+    If you are planning on integrating Meerschaum into your Python scripts, you can access actions directly via the `meerschaum.actions.actions` dictionary. Please consult [the Python package documentation](https://docs.meerschaum.io) for more information. Also, you might want to consider making your script into a [Meerschaum action by writing an action plugin](/reference/plugins/types-of-plugins/#action-plugins).
 
 ??? faq "Connectors don't work for `<database flavor>`!"
     Although Connectors *should* work with any database flavor supported by `sqlalchemy` Engines, it is difficult to test against many database flavors. When bugs are encountered, please [open an issue](https://github.com/bmeares/Meerschaum/issues) and describe your configuration!

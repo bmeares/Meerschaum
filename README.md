@@ -39,7 +39,7 @@ Rather than copy / pasting your ETL scripts, simply build pipes with Meerschaum!
   - Web dashboard for those who prefer a more graphical experience.
   - Manage your database connections with [Meerschaum connectors](https://meerschaum.io/reference/connectors/)
   - Utility commands with sensible syntax let you control many pipes with grace.
-- 📾 **Portable from the Start**  
+- 💼 **Portable from the Start**  
   - The environment variable `$MRSM_ROOT_DIR` lets you emulate multiple installations and group together your [instances](https://meerschaum.io/reference/connectors/#instances-and-repositories).
   - No dependencies required; anything needed will be installed into a virtual environment.
   - Required packages for plugins

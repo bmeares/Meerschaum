@@ -65,11 +65,11 @@ For a pipe with an `api` connector, you will be prompted for the connector, metr
 
 For other types of connectors (like `mqtt` and `plugin`), your editor will open the pipe's attributes YAML file. Metadata needed for extracting data will fall under the `fetch:` key (for example, `mqtt` needs a `topic`. Plugin pipes should not require anything specific).
 
-## 📥 The first sync
+## 📥 The First Sync
 
 If you provided a definition and the correct index column names, you will be asked if you would like to sync new data into the pipe. When bootstrapping a new pipe, the definition will be executed, and the table will be created and indexed. Check out the [syncing reference page](/reference/pipes/syncing) for more information on how the syncing process works.
 
 
-## ⤵️ Dropping tables
+## ⤵️ Dropping Tables
 
 If you want to drop a pipe's table without losing metadata, you can later execute the command `drop pipes`. The command `delete pipes` will drop pipes and remote registration information.

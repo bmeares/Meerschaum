@@ -1,0 +1,11 @@
+@media screen and (min-width: 76.1875em) {
+  .grid-container {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    grid-gap: 20px;
+    max-width: 100%;
+    margin: auto;
+  }
+  .grid-child {
+  }
+}
