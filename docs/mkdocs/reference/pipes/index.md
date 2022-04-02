@@ -15,9 +15,11 @@ In the above screenshot, three pipes are represented according to their keys (yo
 The three keys of any pipe are labels that represent the pipe's connector, metric, and location. Below are brief descriptions of what these keys mean, and you can read about these keys when you [bootstrap a pipe](bootstrapping/).
 
 
-## Interacting with Pipes
+## Selecting Your Pipes
 
-As you add new data streams, the number of pipes you maintain can quickly grow. To filter by these keys, use the arguments `-c`, `-m`, and `-l` (connector, metric, and location).
+As you add new data streams, the number of pipes you maintain can quickly grow. The commands which manage your pipes (e.g. `show pipes`, `drop pipes`, `delete pipes`, etc.).
+
+To filter by these keys, use the arguments `-c`, `-m`, and `-l` (connector, metric, and location).
 
 For example, the screenshot mentioned above may be created by any of these commands, or any combination of the three:
 
