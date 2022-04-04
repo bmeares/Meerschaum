@@ -29,17 +29,16 @@ See the [bootstrapping reference page](/reference/pipes/bootstrapping/) for furt
 
     2. Enter `timestamp` for the datetime and `station` for the ID.
 
-    3. Answer `y` to edit the definition.  
-
-        > Vim or your editor will open the pipe's properties file. Press `:q` and `[Enter]` to quit editing.
-
-    4. Answer `y` to sync the pipe.  
-
         > The plugin will ask for weather stations. Enter `KATL` for Atlanta.
+
+    3. Answer `y` to sync the pipe.
+
 
 !!! success "Success! Now what?"
 
-    Well done, you've built your first pipe! Here are some useful commands to manage your pipe:
+    Well done, you've built your first pipe! Check out [all of the commands](/reference/actions) you have at your disposal.
+
+    For now, here are some useful commands to manage your pipe:
 
     | Command                           | Description                                                                                        |
     |-----------------------------------|----------------------------------------------------------------------------------------------------|
