@@ -22,6 +22,17 @@ from meerschaum.api import (
 from meerschaum.utils.packages import attempt_import, import_dcc, import_html
 from meerschaum.connectors.parse import parse_instance_keys
 flask_compress = attempt_import('flask_compress', lazy=False)
+import pkg_resources
+from collections import namedtuple
+_pkg_resources_get_distribution = pkg_resources.get_distribution
+_Dist = namedtuple('_Dist', ['version'])
+def _get_distribution(dist):
+    """Hack for flask-compress.
+    """
+    if dist == 'flask-compress':
+        return _Dist(flask_compress.__version__)
+    return _pkg_resources_get_distribution(dist)
+pkg_resources.get_distribution = _get_distribution
 dash = attempt_import('dash', lazy=False)
 import warnings
 ### Suppress the depreciation warnings from importing enrich.
