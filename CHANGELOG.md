@@ -3,13 +3,15 @@
 ## 0.5.x Releases
 This is the current release cycle, so future features will be updated below.
 
-### v0.5.14  
+### v0.5.14 – v0.5.15  
   - **Added tags.**  
     Pipes may be grouped together pipes. Check the docs for more information.
   - **Tags may be negated.**  
     Like the key negation added in v0.5.13, you can choose to ignore tags by prefacing them with `_`.
   - **Bugfixes for DuckDB**
   - **Updated documentation.**
+  - **Fixed issue with `flask-compress`.**  
+  When starting the API for the first time, missing `flask-compress` will not crash the server.
 
 ### v0.5.13
 - **Key negation when selecting pipes.**  
