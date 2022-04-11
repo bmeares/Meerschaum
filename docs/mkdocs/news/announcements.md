@@ -1,5 +1,10 @@
 # 📢 Announcements
 
+## Interviewed with Console!
+> *11 April 2022*
+
+I was recently featured in [Console #100](https://console.substack.com/p/console-100), the weekly open source newsletter! I am so grateful to have been interviewed about the development process behind Meerschaum — check out the article linked above to read the story of how Meerschaum got its start.
+
 ## New Video Series and Now Available for Consulting!
 > *28 January 2022*
 
