@@ -487,7 +487,6 @@ class Plugin:
         A `SuccessTuple` or `bool` indicating success.
 
         """
-        from meerschaum.utils.packages import activate_venv, deactivate_venv
         from meerschaum.utils.debug import dprint
         import inspect
         _setup = None
@@ -516,9 +515,9 @@ class Plugin:
         if debug:
             dprint(f"Running setup for plugin '{self}'...")
         try:
-            activate_venv(venv=self.name, debug=debug)
+            self.activate_venv(debug=debug)
             return_tuple = _setup(*args, **_kw)
-            deactivate_venv(venv=self.name, debug=debug)
+            self.deactivate_venv(debug=debug)
         except Exception as e:
             return False, str(e)
 
@@ -537,7 +536,8 @@ class Plugin:
         """
         If the Plugin has specified dependencies in a list called `required`, return the list.
         
-        **NOTE:** Dependecies which start with 'plugin:' are Meerschaum plugins, not pip packages.
+        **NOTE:** Dependecies which start with `'plugin:'` are Meerschaum plugins, not pip packages.
+        Meerschaum plugins may also specify connector keys for a repo after `'@'`.
 
         Parameters
         ----------
@@ -546,19 +546,79 @@ class Plugin:
 
         Returns
         -------
-        A list of required packages (str).
+        A list of required packages and plugins (str).
 
         """
-        from meerschaum.utils.packages import activate_venv, deactivate_venv
         import inspect
-        activate_venv(venv=self.name, debug=debug)
+        self.activate_venv(debug=debug)
         required = []
         for name, val in inspect.getmembers(self.module):
             if name == 'required':
                 required = val
                 break
-        deactivate_venv(venv=self.name, debug=debug)
+        self.deactivate_venv(debug=debug)
         return required
+
+
+    def get_required_plugins(self, debug: bool=False) -> List[meerschaum.plugins.Plugin]:
+        """
+        Return a list of required Plugin objects.
+        """
+        from meerschaum.utils.warnings import warn
+        from meerschaum.config.static import _static_config
+        from meerschaum.connectors.parse import parse_repo_keys
+        plugins = []
+        _deps = self.get_dependencies(debug=debug)
+        sep = _static_config()['plugins']['repo_separator']
+        plugin_names = [
+            _d[len('plugin:'):] for _d in _deps
+            if _d.startswith('plugin:') and len(_d) > len('plugin:')
+        ]
+        for _plugin_name in plugin_names:
+            if sep in _plugin_name:
+                try:
+                    _plugin_name, _repo_keys = _plugin_name.split(sep)
+                    _rc = parse_repo_keys(_repo_keys)
+                except Exception as e:
+                    warn(
+                        f"Invalid repo keys for required plugin '{_plugin_name}'.\n    "
+                        + f"Will try to use '{self.repo_connector}' instead.",
+                        stack = False,
+                    )
+                    _rc = self.repo_connector
+            else:
+                _rc = self.repo_connector
+            plugins.append(Plugin(_plugin_name, repo_connector=_rc))
+        return plugins
+
+
+    def get_required_packages(debug: bool=False) -> List[str]:
+        """
+        Return the required package names (excluding plugins).
+        """
+        _deps = self.get_dependencies(debug=debug)
+        return [_d for _d in _deps if not _d.startswith('plugin:')]
+
+
+    def activate_venv(self, debug: bool = False) -> bool:
+        """
+        Activate the virtual environments for the plugin and its dependencies.
+        """
+        from meerschaum.utils.packages import activate_venv
+        for plugin in self.get_required_plugins(debug=debug):
+            activate_venv(plugin.name, debug=debug)
+        return activate_venv(self.name, debug=debug)
+
+
+    def deactivate_venv(self, debug: bool = False) -> bool:
+        """
+        Deactivate the virtual environments for the plugin and its dependencies.
+        """
+        from meerschaum.utils.packages import deactivate_venv
+        success = deactivate_venv(self.name, debug=debug)
+        for plugin in self.get_required_plugins(debug=debug):
+            deactivate_venv(plugin.name, debug=debug)
+        return success
 
 
     def install_dependencies(
@@ -597,27 +657,8 @@ class Plugin:
         if not _deps:
             return True
 
-        plugin_repo_separator = _static_config()['plugins']['repo_separator']
-        packages, plugins = [], []
-        for _d in _deps:
-            if _d.startswith('plugin:'):
-                _plugin_name = _d[len('plugin:'):]
-                if plugin_repo_separator in _plugin_name:
-                    try:
-                        _plugin_name, _repo_keys = _plugin_name.split(plugin_repo_separator)
-                        _rc = parse_repo_keys(_repo_keys)
-                    except Exception as e:
-                        warn(
-                            f"Invalid repo keys for required plugin '{_plugin_name}'.\n    "
-                            + f"Will try to use '{self.repo_connector}' instead.",
-                            stack = False,
-                        )
-                        _rc = self.repo_connector
-                else:
-                    _rc = self.repo_connector
-                plugins.append((_plugin_name, _rc))
-            else:
-                packages.append(_d)
+        packages = self.get_required_packages(debug=debug)
+        plugins = self.get_required_plugins(debug=debug)
 
         ### Attempt pip packages installation.
         if packages and not pip_install(*packages, venv=self.name, debug=debug):
@@ -625,14 +666,16 @@ class Plugin:
 
         ### Attempt plugins installation.
         ### NOTE: Currently there is no logic to resolve circular dependencies!
-        for _plugin, _rc in plugins:
-            if _plugin == self.name:
+        for _plugin in plugins:
+            if _plugin.name == self.name:
                 warn(f"Plugin '{self.name}' cannot depend on itself! Skipping...", stack=False)
                 continue
-            _success, _msg = _rc.install_plugin(_plugin, debug=debug, force=force)
+            _success, _msg = _plugin.repo_connector.install_plugin(
+                _plugin.name, debug=debug, force=force
+            )
             if not _success:
                 warn(
-                    f"Failed to install required plugin '{_plugin}' from '{_rc}' "
+                    f"Failed to install required plugin '{_plugin}' from '{_plugin.repo_connector}' "
                     + f"for plugin '{self.name}':\n"
                     + _msg,
                     stack = False,

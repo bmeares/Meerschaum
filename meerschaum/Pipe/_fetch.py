@@ -53,8 +53,10 @@ def fetch(
 
     from meerschaum.utils.debug import dprint, _checkpoint
     if self.connector.type == 'plugin':
+        from meerschaum.plugins import Plugin
         from meerschaum.utils.packages import activate_venv, deactivate_venv
-        activate_venv(self.connector.label, debug=debug)
+        connector_plugin = Plugin(self.connector.label)
+        connector_plugin.activate_venv(debug=debug)
     
     _chunk_hook = kw.pop('chunk_hook') if 'chunk_hook' in kw else None
 
@@ -70,7 +72,7 @@ def fetch(
         **kw
     )
     if self.connector.type == 'plugin' and deactivate_plugin_venv:
-        deactivate_venv(self.connector.label, debug=debug)
+        connector_plugin.deactivate_venv(debug=debug)
     ### Return True if we're syncing in parallel, else continue as usual.
     if sync_chunks:
         return True
