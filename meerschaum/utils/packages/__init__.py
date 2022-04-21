@@ -757,6 +757,7 @@ def pip_install(
     A bool indicating success.
 
     """
+    from meerschaum.config._paths import VIRTENV_RESOURCES_PATH
     from meerschaum.config.static import _static_config
     if args is None:
         args = ['--upgrade'] if not _uninstall else []
@@ -805,6 +806,9 @@ def pip_install(
         activate_venv(venv=venv, debug=debug, color=color)
         if '--ignore-installed' not in args and '-I' not in _args and not _uninstall:
             _args += ['--ignore-installed']
+        if '--cache-dir' not in args and not _uninstall:
+            cache_dir_path = VIRTENV_RESOURCES_PATH / venv / 'cache'
+            _args += ['--cache-dir', str(cache_dir_path)]
 
     if check_update and need_update(pip, check_pypi=check_pypi, debug=debug) and not _uninstall:
         _args.append('pip')
@@ -816,6 +820,12 @@ def pip_install(
 
     if not ANSI and '--no-color' not in _args:
         _args.append('--no-color')
+
+    if '--isolated' not in _args:
+        _args.append('--isolated')
+
+    if '--no-input' not in _args:
+        _args.append('--no-input')
 
     if '--no-warn-conflicts' not in _args and not _uninstall:
         _args.append('--no-warn-conflicts')

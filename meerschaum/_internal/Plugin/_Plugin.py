@@ -19,9 +19,10 @@ from meerschaum.config import get_config
 from meerschaum.config._paths import (
     PLUGINS_RESOURCES_PATH,
     PLUGINS_ARCHIVES_RESOURCES_PATH,
-    PLUGINS_TEMP_RESOURCES_PATH
+    PLUGINS_TEMP_RESOURCES_PATH,
+    VIRTENV_RESOURCES_PATH,
 )
-import os, pathlib
+import os, pathlib, shutil
 _tmpversion = None
 
 class Plugin:
@@ -33,6 +34,7 @@ class Plugin:
         user_id: Optional[int] = None,
         attributes: Optional[Dict[str, Any]] = None,
         archive_path: Optional[pathlib.Path] = None,
+        venv_path: Optional[pathlib.Path] = None,
         repo_connector: Optional['meerschaum.connectors.api.APIConnector'] = None,
     ):
         if attributes is None:
@@ -41,13 +43,17 @@ class Plugin:
         self.attributes = attributes
         self.user_id = user_id
         self._version = version
-
-        if archive_path is None:
-            self.archive_path = pathlib.Path(
-                os.path.join(PLUGINS_ARCHIVES_RESOURCES_PATH, f'{self.name}.tar.gz')
-            )
-        else:
-            self.archive_path = archive_path
+        self.archive_path = (
+            archive_path if archive_path is not None
+            else PLUGINS_ARCHIVES_RESOURCES_PATH / f"{self.name}.tar.gz"
+        )
+        self.venv_path = (
+            venv_path if venv_path is not None
+            else VIRTENV_RESOURCES_PATH / self.name
+        )
+        print(self.venv_path)
+        print(self.venv_path.exists())
+        input()
 
         self.repo_connector = repo_connector
         if repo_connector is None:
@@ -57,7 +63,7 @@ class Plugin:
     @property
     def version(self):
         """
-        Return the plugin's module version is defined (__version__) if it's defined.
+        Return the plugin's module version is defined (`__version__`) if it's defined.
         """
         if self._version is None:
             try:
@@ -70,17 +76,29 @@ class Plugin:
     def module(self):
         """ """
         if '_module' not in self.__dict__ or self._module is None:
+            if self.__file__ is None:
+                return None
             from meerschaum.plugins import import_plugins
             self._module = import_plugins(str(self), warn=False)
         return self._module
 
     @property
     def __file__(self) -> Union[str, None]:
-        if '_module' not in self.__dict__:
-            return None
-        if self.module is None:
-            return None
-        return self.module.__file__
+        if '_module' in self.__dict__:
+            return self.module.__file__
+        potential_dir = PLUGINS_RESOURCES_PATH / self.name
+        if (
+            potential_dir.exists()
+            and potential_dir.is_dir()
+            and (potential_dir / '__init__.py').exists()
+        ):
+            return str(potential_dir)
+
+        potential_file = PLUGINS_RESOURCES_PATH / (self.name + '.py')
+        if potential_file.exists() and not potential_file.is_dir():
+            return str(potential_file)
+
+        return None
 
 
     def is_installed(self) -> bool:
@@ -93,6 +111,8 @@ class Plugin:
         -------
         A `bool` indicating whether a plugin exists and is successfully imported.
         """
+        if not self.__file__:
+            return False
         try:
             _installed = (
                 self.module is not None and self.__file__ is not None
@@ -100,6 +120,7 @@ class Plugin:
         except ModuleNotFoundError as e:
             _installed = False
         return _installed
+
 
     def make_tar(self, debug: bool = False) -> pathlib.Path:
         """
@@ -121,7 +142,7 @@ class Plugin:
         old_cwd = os.getcwd()
         os.chdir(PLUGINS_RESOURCES_PATH)
 
-        if not self.is_installed():
+        if not self.__file__:
             from meerschaum.utils.warnings import error
             error(f"Could not find file for plugin '{self}'.")
         if '__init__.py' in self.__file__:
@@ -171,31 +192,6 @@ class Plugin:
             dprint(f"Created archive '{self.archive_path}'.")
         return self.archive_path
 
-    def remove(
-            self,        
-            force : bool = False,
-            debug : bool = False
-        ) -> SuccessTuple:
-        """Remove a plugin's archive file.
-
-        Parameters
-        ----------
-        force : bool :
-             (Default value = False)
-        debug : bool :
-             (Default value = False)
-
-        Returns
-        -------
-
-        """
-        if not self.archive_path.exists():
-            return True, f"Archive file for plugin '{self}' does not exist."
-        try:
-            self.archive_path.unlink()
-        except Exception as e:
-            return False, f"Failed to remove plugin '{self}'\n{e}"
-        return True, "Success"
 
     def install(
             self,
@@ -224,7 +220,7 @@ class Plugin:
         from meerschaum.utils.warnings import warn, error
         if debug:
             from meerschaum.utils.debug import dprint
-        import tarfile, pathlib, shutil
+        import tarfile
         from meerschaum.plugins import reload_plugins
         from meerschaum.utils.packages import attempt_import, determine_version
         old_cwd = os.getcwd()
@@ -369,6 +365,83 @@ class Plugin:
             )
 
         return success, msg
+
+
+    def remove_archive(
+            self,        
+            debug: bool = False
+        ) -> SuccessTuple:
+        """Remove a plugin's archive file."""
+        if not self.archive_path.exists():
+            return True, f"Archive file for plugin '{self}' does not exist."
+        try:
+            self.archive_path.unlink()
+        except Exception as e:
+            return False, f"Failed to remove archive for plugin '{self}':\n{e}"
+        return True, "Success"
+
+
+    def remove_venv(
+            self,        
+            debug: bool = False
+        ) -> SuccessTuple:
+        """Remove a plugin's virtual environment."""
+        if not self.venv_path.exists():
+            return True, f"Virtual environment for plugin '{self}' does not exist."
+        try:
+            shutil.rmtree(self.venv_path)
+        except Exception as e:
+            return False, f"Failed to remove virtual environment for plugin '{self}':\n{e}"
+        return True, "Success"
+
+
+    def uninstall(self, debug: bool = False) -> SuccessTuple:
+        """
+        Remove a plugin, its virtual environment, and archive file.
+        """
+        from meerschaum.utils.warnings import warn, info
+        warnings_thrown_count: int = 0
+        max_warnings: int = 3
+
+        if not self.is_installed():
+            info(
+                f"Plugin '{self.name}' doesn't seem to be installed.\n    "
+                + "Checking for artifacts...",
+                stack = False,
+            )
+        else:
+            try:
+                if '__init__.py' in self.__file__:
+                    shutil.rmtree(self.__file__.replace('__init__.py', ''))
+                else:
+                    os.remove(self.__file__)
+            except Exception as e:
+                warn(f"Could not remove source files of plugin '{self.name}'.", stack=False)
+                warnings_thrown_count += 1
+            else:
+                info(f"Removed source files for plugin '{self.name}'.")
+
+        if self.archive_path.exists():
+            success, msg = self.remove_archive(debug=debug)
+            if not success:
+                warn(msg, stack=False)
+                warnings_thrown_count += 1
+            else:
+                info(f"Removed archive files for plugin '{self.name}'.")
+        if self.venv_path.exists():
+            success, msg = self.remove_venv(debug=debug)
+            if not success:
+                warn(msg, stack=False)
+                warnings_thrown_count += 1
+            else:
+                info(f"Removed virtual environment from plugin '{self.name}'.")
+
+        success = warnings_thrown_count < max_warnings
+        return success, (
+            f"Successfully uninstalled plugin '{self}'." if success
+            else f"Failed to uninstall plugin '{self}'."
+        )
+
 
     def setup(self, *args: str, debug: bool = False, **kw: Any) -> Union[SuccessTuple, bool]:
         """
