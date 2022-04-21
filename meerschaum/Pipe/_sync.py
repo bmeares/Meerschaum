@@ -152,10 +152,12 @@ def sync(
             try:
                 if p.connector.type == 'plugin' and p.connector.sync is not None:
                     from meerschaum.utils.packages import activate_venv, deactivate_venv
-                    activate_venv(p.connector.label, debug=debug)
+                    from meerschaum.plugins import Plugin
+                    connector_plugin = Plugin(p.connector.label)
+                    connector_plugin.deactivate_venv(debug=debug)
                     return_tuple = p.connector.sync(p, debug=debug, **kw)
                     if deactivate_plugin_venv:
-                        deactivate_venv(p.connector.label, debug=debug)
+                        connector_plugin.deactivate_venv(debug=debug)
                     if not isinstance(return_tuple, tuple):
                         return_tuple = (
                             False,
