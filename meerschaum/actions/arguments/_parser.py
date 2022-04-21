@@ -133,40 +133,6 @@ def get_arguments_triggers() -> Dict[str, Tuple[str]]:
         triggers[_a.dest] = tuple(_a.option_strings)
     return triggers
 
-def add_plugin_argument(*args, **kwargs) -> None:
-    """Add argparse arguments under the 'Plugins options' group.
-    Takes the same parameters as the regular argparse `add_argument()` function.
-
-    Parameters
-    ----------
-    *args :
-        
-    **kwargs :
-        
-
-    Returns
-    -------
-
-    """
-    global groups, _seen_plugin_args
-    from meerschaum.actions import _get_parent_plugin
-    from meerschaum.utils.warnings import warn, error
-    _parent_plugin_name = _get_parent_plugin(2)
-    if _parent_plugin_name is None:
-        error(f"You may only call `add_plugin_argument()` from within a Meerschaum plugin.")
-    group_key = 'plugin_' + _parent_plugin_name
-    if group_key not in groups:
-        groups[group_key] = parser.add_argument_group(
-            title=f"Plugin '{_parent_plugin_name}' options"
-        )
-        _seen_plugin_args[group_key] = set()
-    try:
-        if str(args) not in _seen_plugin_args[group_key]:
-            groups[group_key].add_argument(*args, **kwargs)
-            _seen_plugin_args[group_key].add(str(args))
-    except Exception as e:
-        warn(e)
-
 parser = ArgumentParser(
     prog = 'mrsm',
     description = "Create and Build Pipes with Meerschaum.",
@@ -175,7 +141,7 @@ parser = ArgumentParser(
 )
 _seen_plugin_args = {}
 
-groups = dict()
+groups = {}
 groups['actions'] = parser.add_argument_group(title='Actions options')
 groups['pipes'] = parser.add_argument_group(title='Pipes options')
 groups['sync'] = parser.add_argument_group(title='Sync options')

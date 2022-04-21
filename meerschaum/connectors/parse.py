@@ -10,10 +10,10 @@ from __future__ import annotations
 from meerschaum.utils.typing import Mapping, Any, SuccessTuple, Union, Optional, Dict
 
 def parse_connector_keys(
-        keys : str,
-        construct : bool = True,
-        as_tuple : bool = False,
-        **kw : Any
+        keys: str,
+        construct: bool = True,
+        as_tuple: bool = False,
+        **kw:  Any
     ) -> (
         Union[
             meerschaum.connectors.Connector,
@@ -29,39 +29,25 @@ def parse_connector_keys(
             None
         ]
     ):
-    """Convenience function for parsing connector keys and returning Connector objects.
+    """
+    Convenience function for parsing connector keys and returning Connector objects.
 
     Parameters
     ----------
-    keys :
-        Keys are split by a colon (':') into type and label. If the label is omitted,
+    keys: str
+        Keys are split by a colon (`':'`) into type and label. If the label is omitted,
         (e.g. 'sql'), pass it along to `meerschaum.connectors.get_connector` to parse.
-    construct :
+
+    construct: bool, default True
         If True, return a Connector. Otherwise return the configuration dictionary for a Connector.
         **NOTE:** This may include passwords, so be careful.
-    as_tuple :
+
+    as_tuple: bool, default False
         If True, return a tuple of (conn, keys). `conn` may be a dict or connector.
-    keys : str :
-        
-    construct : bool :
-         (Default value = True)
-    as_tuple : bool :
-         (Default value = False)
-    **kw : Any) -> (Union[meerschaum.connectors.Connector :
-        
-    Dict[str :
-        
-    Any] :
-        
-    Tuple[Union[meerschaum.connectors.Connector :
-        
-    None] :
-        
-    str] :
-        
 
     Returns
     -------
+    A connector or dictionary of attributes. If `as_tuple`, also return the connector's keys.
 
     """
     from meerschaum.connectors import get_connector
@@ -99,28 +85,15 @@ def parse_connector_keys(
         return conn, _type + ':' + _label
     return conn
 
+
 def parse_instance_keys(
         keys: Optional[str],
         construct: bool = True,
         as_tuple: bool = False,
         **kw
     ):
-    """Parse the Meerschaum instance value into a Connector object.
-
-    Parameters
-    ----------
-    keys: Optional[str] :
-        
-    construct: bool :
-         (Default value = True)
-    as_tuple: bool :
-         (Default value = False)
-    **kw :
-        
-
-    Returns
-    -------
-
+    """
+    Parse the Meerschaum instance value into a Connector object.
     """
     from meerschaum.utils.warnings import warn
     from meerschaum.config import get_config
@@ -133,20 +106,8 @@ def parse_instance_keys(
     
     return parse_connector_keys(keys, construct=construct, as_tuple=as_tuple, **kw)
 
-def parse_repo_keys(keys : str = None, **kw):
-    """Parse the Meerschaum repository value into a Connector object
-
-    Parameters
-    ----------
-    keys : str :
-         (Default value = None)
-    **kw :
-        
-
-    Returns
-    -------
-
-    """
+def parse_repo_keys(keys: Optional[str] = None, **kw):
+    """Parse the Meerschaum repository value into an APIConnector."""
     from meerschaum.config import get_config
     if keys is None:
         keys = get_config('meerschaum', 'default_repository', patch=True)

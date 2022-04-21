@@ -150,24 +150,11 @@ def parse_line(line : str) -> dict:
     except Exception as e:
         return {'action': [], 'text': line,}
 
+
 def parse_synonyms(
         args_dict : Dict[str, Any]
     ) -> Dict[str, Any]:
-    """Check for synonyms (e.g. force = True -> yes = True)
-
-    Parameters
-    ----------
-    args_dict : Dict[str :
-        
-    Any] :
-        
-
-    Returns
-    -------
-
-    """
-    if args_dict.get('force', None):
-        args_dict['yes'] = True
+    """Check for synonyms (e.g. `async` = `True` -> `unblock` = `True`)"""
     if args_dict.get('async', None):
         args_dict['unblock'] = True
     if args_dict.get('mrsm_instance', None):
@@ -176,22 +163,11 @@ def parse_synonyms(
         args_dict['check_existing'] = False
     return args_dict
 
+
 def parse_dict_to_sysargs(
         args_dict : Dict[str, Any]
     ) -> List[str]:
-    """Revert an arguments dictionary back to a command line list.
-
-    Parameters
-    ----------
-    args_dict : Dict[str :
-        
-    Any] :
-        
-
-    Returns
-    -------
-
-    """
+    """Revert an arguments dictionary back to a command line list."""
     import json
     from meerschaum.actions.arguments._parser import get_arguments_triggers
     sysargs = []

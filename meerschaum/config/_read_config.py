@@ -9,53 +9,37 @@ from __future__ import annotations
 from meerschaum.utils.typing import Optional, Dict, Any, List, Tuple, Union
 
 def read_config(
-        directory : Optional[Dict[str, Any]] = None,
-        keys : Optional[List[str]] = None,
+        directory: Optional[str] = None,
+        keys: Optional[List[str]] = None,
         write_missing : bool = True,
         substitute : bool = True,
         with_filenames : bool = False,
     ) -> Union[Dict[str, Any], Tuple[Dict[str, Any], List[str]]]:
-    """Read the configuration directory.
+    """
+    Read the configuration directory.
 
     Parameters
     ----------
-    directory :
+    directory: Optional[str], default None
         The directory with configuration files (.json and .yaml).
-    keys :
+
+    keys: Optional[List[str]], default None
         Which configuration files to read.
-    write_missing :
+
+    write_missing: bool, default True
         If a keyfile does not exist but is defined in the default configuration,
         write the file to disk.
-        Defaults to True.
-    substitute :
+
+    substitute: bool, default True
         Replace `MRSM{}` syntax with configuration values.
-        Defaults to True.
-    with_filename :
-        If True, return a tuple of the configuration dictionary with a list of read filenames.
-        Defaults to False.
-        
-        Example:
-        ```
-        
-        ```
-    directory : Optional[Dict[str :
-        
-    Any]] :
-         (Default value = None)
-    keys : Optional[List[str]] :
-         (Default value = None)
-    write_missing : bool :
-         (Default value = True)
-    substitute : bool :
-         (Default value = True)
-    with_filenames : bool :
-         (Default value = False)
 
-    Returns
-    -------
-
-    >>> read_config(keys='meerschaum', with_filename=True)
-        >>> ({...}, ['meerschaum.yaml'])
+    with_filename: bool, default False
+        If `True`, return a tuple of the configuration dictionary with a list of read filenames.
+        
+    Examples
+    --------
+    >>> read_config(keys=['meerschaum'], with_filename=True)
+    >>> ({...}, ['meerschaum.yaml'])
     """
     import sys, shutil, os, json, itertools
     from meerschaum.utils.packages import attempt_import
@@ -179,8 +163,8 @@ def read_config(
                 with open(filepath, 'r') as f:
                     _config_key = filetype_loaders[_type](f)
                     _single_key_config = (
-                        search_and_substitute_config({key : _config_key}) if substitute
-                        else {key : _config_key}
+                        search_and_substitute_config({key: _config_key}) if substitute
+                        else {key: _config_key}
                     )
                     config[key] = _single_key_config[key]
                     if (

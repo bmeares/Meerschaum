@@ -74,10 +74,6 @@ def _uninstall_plugins(
         action = []
 
     plugins_to_uninstall = []
-    #  import pathlib
-    #  path = pathlib.Path('/home/bmeares/.config/meerschaum/venvs/foo')
-    #  print(path)
-    #  print(path.exists())
     potential_plugins = [Plugin(pl, repo_connector=repo_connector) for pl in action]
     for plugin in potential_plugins:
         if force or plugin.is_installed():

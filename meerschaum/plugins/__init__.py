@@ -9,6 +9,7 @@ Expose plugin management APIs from the `meerschaum.plugins` module.
 from __future__ import annotations
 from meerschaum.utils.typing import Callable, Any, Union, Optional, Dict, List
 from meerschaum.utils.threading import Lock, RLock
+from meerschaum._internal.Plugin._Plugin import Plugin
 
 _api_plugins : dict = {}
 _locks = {
@@ -293,4 +294,32 @@ def get_data_plugins() -> List['ModuleType']:
             data_plugins.append(m)
     return data_plugins
 
-from meerschaum.actions.arguments._parser import add_plugin_argument
+def add_plugin_argument(*args, **kwargs) -> None:
+    """
+    Add argparse arguments under the 'Plugins options' group.
+    Takes the same parameters as the regular argparse `add_argument()` function.
+
+    Examples
+    --------
+    >>> add_plugin_argument('--foo', type=int, help="This is my help text!")
+    >>> 
+    """
+    from meerschaum.actions._parser import groups, _seen_plugin_args
+    from meerschaum.actions import _get_parent_plugin
+    from meerschaum.utils.warnings import warn, error
+    _parent_plugin_name = _get_parent_plugin(2)
+    if _parent_plugin_name is None:
+        error(f"You may only call `add_plugin_argument()` from within a Meerschaum plugin.")
+    group_key = 'plugin_' + _parent_plugin_name
+    if group_key not in groups:
+        groups[group_key] = parser.add_argument_group(
+            title=f"Plugin '{_parent_plugin_name}' options"
+        )
+        _seen_plugin_args[group_key] = set()
+    try:
+        if str(args) not in _seen_plugin_args[group_key]:
+            groups[group_key].add_argument(*args, **kwargs)
+            _seen_plugin_args[group_key].add(str(args))
+    except Exception as e:
+        warn(e)
+

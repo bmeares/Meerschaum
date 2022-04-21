@@ -88,6 +88,9 @@ def _static_config():
                 'min_username_length': 5,
                 'min_password_length': 5,
             },
+            'plugins': {
+                'repo_separator': '@',
+            },
             'setup': {
                 'name': 'meerschaum',
                 'formal_name': 'Meerschaum',

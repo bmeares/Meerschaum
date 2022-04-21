@@ -120,6 +120,7 @@ def _register_plugins(
         shell: bool = False,
         debug: bool = False,
         yes: bool = False,
+        noask: bool = False,
         force: bool = False,
         **kw: Any
     ) -> SuccessTuple:
@@ -160,7 +161,7 @@ def _register_plugins(
         else:
             plugins_to_register[p] = Plugin(p)
 
-    successes = dict()
+    successes = {}
 
     for name, plugin in plugins_to_register.items():
         desc = None
@@ -175,7 +176,7 @@ def _register_plugins(
                 "Would you like to overwrite this description?\n"
                 + "To edit the existing text, visit /dash/plugins for this repository."
             )
-        if yes_no(
+        if not noask and not force and yes_no(
             question,
             default='n',
             yes=yes
