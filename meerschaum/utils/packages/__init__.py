@@ -23,7 +23,7 @@ _locks = {
 }
 _checked_for_updates = set()
 
-def import_module(
+def manually_import_module(
         name: str,
         venv: Optional[str] = None,
         check_update: bool = True,
@@ -268,10 +268,14 @@ def determine_version(
     module_parent_dir_str = str(module_parent_dir).replace('\\', '\\\\')
 
     ### Not a pip package, so let's try importing the module directly (in a subprocess).
+    _no_version_str = 'no-version'
     code = (
         f"import os, importlib; os.chdir('{module_parent_dir_str}'); "
-        + f"module = importlib.import_module('{name}'); "
-        + f"print(module.__version__ , end='')"
+        + f"module = importlib.import_module('{name}');\n"
+        + "try:\n"
+        + "  print(module.__version__ , end='')\n"
+        + "except:\n"
+        + f"  print('{_no_version_str}')"
     )
     exit_code, stdout_bytes, stderr_bytes = venv_exec(
         code, venv=venv, with_extras=True, debug=debug
@@ -283,6 +287,8 @@ def determine_version(
             stack = False
         )
     _version = stdout.split('\n')[-1] if exit_code == 0 else None
+    ### If `__version__` doesn't exist, return `None`.
+    _version = _version if _version != _no_version_str else None
     return _version
 
 
@@ -550,23 +556,24 @@ def activate_venv(
         from meerschaum.utils.debug import dprint
     import sys, os, platform
     from meerschaum.config._paths import VIRTENV_RESOURCES_PATH
-    _venv = None
-    virtualenv = attempt_import(
-        'virtualenv', venv=None, lazy=False, install=(not tried_virtualenv), warn=False,
-        check_update=False, color=False, debug=debug,
-    )
-    tried_virtualenv = True
-    if virtualenv is None:
-        try:
-            import ensurepip
-            import venv as _venv
-            virtualenv = None
-        except ImportError:
-            _venv = None
+    try:
+        import ensurepip
+        import venv as _venv
+        virtualenv = None
+    except ImportError:
+        _venv = None
+        virtualenv = None
+
+    if _venv is None:
+        virtualenv = attempt_import(
+            'virtualenv', venv=None, lazy=False, install=(not tried_virtualenv), warn=False,
+            check_update=False, color=False, debug=debug,
+        )
+        tried_virtualenv = True
     if virtualenv is None and _venv is None:
         print(
-            "Failed to import virtualenv! "
-            + "Please install virtualenv via pip then restart Meerschaum."
+            "Failed to import `venv` or `virtualenv`! "
+            + "Please install `virtualenv` via pip then restart Meerschaum."
         )
         sys.exit(1)
     venv_path = VIRTENV_RESOURCES_PATH / venv
@@ -1063,7 +1070,10 @@ def attempt_import(
             activate_venv(venv=venv, debug=debug)
         ### determine the import method (lazy vs normal)
         from meerschaum.utils.misc import filter_keywords
-        import_method = (import_module if check_update else _import_module) if not lazy else lazy_import
+        import_method = (
+            (manually_import_module if check_update else _import_module)
+            if not lazy else lazy_import
+        )
         try:
             mod = import_method(_name, **(filter_keywords(import_method, **kw)))
         except Exception as e:

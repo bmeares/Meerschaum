@@ -10,21 +10,9 @@ from __future__ import annotations
 from meerschaum.utils.typing import Union, Any, Optional, SuccessTuple, Mapping, Sequence
 
 def plugin_r_url(
-        plugin : Union[meerschaum._internal.Plugin.Plugin, str]
+        plugin: Union[meerschaum._internal.Plugin.Plugin, str]
     ) -> str:
-    """Generate a relative URL path from a Plugin.
-
-    Parameters
-    ----------
-    plugin : Union[meerschaum._internal.Plugin.Plugin :
-        
-    str] :
-        
-
-    Returns
-    -------
-
-    """
+    """Generate a relative URL path from a Plugin."""
     from meerschaum.config.static import _static_config
     return f"{_static_config()['api']['endpoints']['plugins']}/{plugin}"
 
@@ -34,21 +22,7 @@ def register_plugin(
         make_archive: bool = True,
         debug: bool = False,
     ) -> SuccessTuple:
-    """Register a plugin and upload its archive.
-
-    Parameters
-    ----------
-    plugin: meerschaum._internal.Plugin.Plugin :
-        
-    make_archive: bool :
-         (Default value = True)
-    debug: bool :
-         (Default value = False)
-
-    Returns
-    -------
-
-    """
+    """Register a plugin and upload its archive."""
     import json
     archive_path = plugin.make_tar(debug=debug) if make_archive else plugin.archive_path
     file_pointer = open(archive_path, 'rb')
@@ -78,23 +52,7 @@ def install_plugin(
         force: bool = False,
         debug: bool = False
     ) -> SuccessTuple:
-    """Download and attempt to install a plugin from the API.
-
-    Parameters
-    ----------
-    name :
-        The name of the plugin to be installed.
-    name: str :
-        
-    force: bool :
-         (Default value = False)
-    debug: bool :
-         (Default value = False)
-
-    Returns
-    -------
-
-    """
+    """Download and attempt to install a plugin from the API."""
     import os, pathlib, json
     from meerschaum._internal.Plugin import Plugin
     from meerschaum.config._paths import PLUGINS_TEMP_RESOURCES_PATH

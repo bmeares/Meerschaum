@@ -14,32 +14,22 @@ import json
 from meerschaum.config._paths import (
     GRAFANA_DATASOURCE_PATH,
     GRAFANA_DASHBOARD_PATH,
-    MOSQUITTO_CONFIG_PATH,
     ROOT_DIR_PATH,
 )
 from meerschaum.config._paths import STACK_COMPOSE_FILENAME, STACK_ENV_FILENAME
 from meerschaum.config._paths import CONFIG_DIR_PATH, STACK_ENV_PATH, STACK_COMPOSE_PATH
 from meerschaum.config._paths import GRAFANA_DATASOURCE_PATH, GRAFANA_DASHBOARD_PATH
-from meerschaum.config._paths import MOSQUITTO_CONFIG_PATH
 
 db_port = "MRSM{meerschaum:connectors:sql:main:port}"
-
 db_user = "MRSM{meerschaum:connectors:sql:main:username}"
-
 db_pass = "MRSM{meerschaum:connectors:sql:main:password}"
-
 db_base = "MRSM{meerschaum:connectors:sql:main:database}"
 
 ### default localhost, db for docker network
 db_hostname = "db"
 db_host = 'MRSM{stack:' + str(STACK_COMPOSE_FILENAME) + ':services:db:hostname}'
-
 api_port = "MRSM{meerschaum:connectors:api:main:port}"
-
 api_host = "meerschaum_api"
-
-mqtt_port = "MRSM{meerschaum:connectors:mqtt:main:port}"
-mqtt_host = "meerschaum_mqtt"
 
 env_dict = {
     'COMPOSE_PROJECT_NAME' : 'meerschaum_stack',
@@ -93,13 +83,8 @@ compose_header = """
 
 volumes = {
     'api_root' : '/meerschaum',
-    #  'meerschaum_api_config' : env_dict['MEERSCHAUM_API_CONFIG'],
     'meerschaum_db_data' : '/var/lib/postgresql/data',
     'grafana_storage' : '/var/lib/grafana',
-    #  'portainer_data' : '/data',
-    'mosquitto.conf' : '/mosquitto/config/mosquitto.conf',
-    #  'splitgraph_data' : '/var/lib/splitgraph/objects',
-    #  'splitgraph_metadata' : '/var/lib/postgresql/data',
 }
 networks = {
     'frontend' : None,
@@ -150,23 +135,11 @@ default_docker_compose_config = {
                 'db',
             ],
             'volumes' : [
-                #  {
-                    #  'type' : 'volume',
-                    #  'source' : 'api_root',
-                    #  'target' : volumes['api_root'],
-                    #  'read'
-                #  },
                 'api_root:' + volumes['api_root'],
-                #  str(ROOT_DIR_PATH) + ':' + volumes['api_root'] + ':ro',
             ],
         },
         'grafana' : {
-            #  'image' : 'meerschaum-grafana:latest',
             'image' : 'grafana/grafana:latest',
-            #  'build' : {
-                #  'dockerfile' : 'Dockerfile-grafana',
-                #  'context' : './dockerfiles/grafana',
-            #  },
             'ports' : [
                 '3000:3000',
             ],
@@ -180,10 +153,9 @@ default_docker_compose_config = {
             ],
             'volumes' : [
                 'grafana_storage' + ':' + volumes['grafana_storage'],
-                ### NOTE: Mount with the 'z' option for SELinux
+                ### NOTE: Mount with the 'z' option for SELinux.
                 f'{GRAFANA_DATASOURCE_PATH.parent}:/etc/grafana/provisioning/datasources:z,ro',
                 f'{GRAFANA_DASHBOARD_PATH.parent}:/etc/grafana/provisioning/dashboards:z,ro',
-                #  f'{GRAFANA_INI_PATH}:/etc/grafana/grafana.ini',
             ],
             'environment' : [
                 'GF_SECURITY_ALLOW_EMBEDDING=true',
@@ -192,60 +164,6 @@ default_docker_compose_config = {
                 'GF_AUTH_ANONYMOUS_ORGANIZATION=public',
             ],
         },
-        #  'portainer' : {
-            #  'image' : 'portainer/portainer',
-            #  'command' : '-H unix:///var/run/docker.sock',
-            #  'restart' : 'always',
-            #  'ports' : [
-                #  '9000:9000',
-                #  '8001:8000',
-            #  ],
-            #  'volumes' : [
-                #  '/var/run/docker.sock:/var/run/docker.sock',
-                #  'portainer_data:' + volumes['portainer_data'],
-            #  ],
-        #  },
-        'mosquitto' : {
-            'image' : 'eclipse-mosquitto',
-            'hostname' : mqtt_host,
-            'ports' : [
-                ### TODO figure out how to handle tcp vs websockets config
-                f'{mqtt_port}:1883',
-                '9001:9001',
-            ],
-            'restart' : 'always',
-            'networks' : [
-                'frontend',
-            ],
-            #  'volumes' : [
-                #  str(MOSQUITTO_CONFIG_PATH) + ':' + volumes['mosquitto.conf'],
-            #  ],
-
-        },
-        #  'splitgraph' : {
-            #  'image'  : 'splitgraph/engine',
-            #  'ports' : [
-                #  '0.0.0.0:5433:5432',
-            #  ],
-            #  'environment' : [
-                #  'POSTGRES_USER=' + 'sgr',
-                #  'POSTGRES_PASSWORD=' + 'supersecure',
-                #  'POSTGRES_DB=splitgraph',
-                #  'SG_LOGLEVEL=INFO',
-                #  'SG_CONFIG_FILE=/.sgconfig',
-            #  ],
-            #  'expose' : [
-                #  5432,
-            #  ],
-            #  'volumes' : [
-                #  'splitgraph_data:' + volumes['splitgraph_data'],
-                #  'splitgraph_metadata:' + volumes['splitgraph_metadata'],
-                #  str(SPLITGRAPH_CONFIG_PATH) + ':/.sgconfig',
-            #  ],
-            #  'networks' : [
-                #  'backend',
-            #  ],
-        #  },
     },
 }
 default_docker_compose_config['networks'] = networks
@@ -253,16 +171,13 @@ default_docker_compose_config['volumes'] = {}
 for key in volumes:
     default_docker_compose_config['volumes'][key] = None
 
-default_stack_config = dict()
+default_stack_config = {}
 ### compose project name (prepends to all services)
 default_stack_config['project_name'] = 'mrsm'
 compose_filename = os.path.split(STACK_COMPOSE_PATH)[1]
 default_stack_config[compose_filename] = default_docker_compose_config
-#  default_stack_config['.env'] = env_text
 from meerschaum.config.stack.grafana import default_grafana_config
 default_stack_config['grafana'] = default_grafana_config
-from meerschaum.config.stack.mosquitto import default_mosquitto_config
-default_stack_config['mosquitto'] = default_mosquitto_config
 default_stack_config['filetype'] = 'yaml'
 
 ### check if configs are in sync
@@ -296,7 +211,6 @@ def get_necessary_files():
         ),
         GRAFANA_DATASOURCE_PATH : get_config('stack', 'grafana', 'datasource', substitute=True),
         GRAFANA_DASHBOARD_PATH : get_config('stack', 'grafana', 'dashboard', substitute=True),
-        MOSQUITTO_CONFIG_PATH : get_config('stack', 'mosquitto', 'mosquitto.conf', substitute=True),
     }
 
 

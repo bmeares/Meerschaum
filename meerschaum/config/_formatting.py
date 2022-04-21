@@ -19,7 +19,7 @@ default_formatting_config = {
         'error'           : '🛑',
         'failure'         : '💢',
         'success'         : '🎉',
-        'warning'         : '⚠️',
+        'warning'         : '🔔',
         'info'            : '💬',
         'debug'           : '🐞',
         'question'        : '❓',

@@ -7,4 +7,5 @@ This package includes argument parsing utilities.
 """
 
 from meerschaum.actions.arguments._parse_arguments import parse_arguments, parse_line
-from meerschaum.actions.arguments._parser import parser, add_plugin_argument
+from meerschaum.actions.arguments._parser import parser
+from meerschaum.plugins import add_plugin_argument

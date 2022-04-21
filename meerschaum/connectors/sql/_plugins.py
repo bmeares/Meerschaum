@@ -53,8 +53,11 @@ def register_plugin(
             new_version = ''
 
         ### verify that the new version is greater than the old
-        from packaging import version as packaging_version
-        if packaging_version.parse(old_version) >= packaging_version.parse(new_version):
+        packaging_version = attempt_import('packaging.version')
+        if (
+            old_version and new_version
+            and packaging_version.parse(old_version) >= packaging_version.parse(new_version)
+        ):
             return False, (
                 f"Version '{new_version}' of plugin '{plugin}' " +
                 f"must be greater than existing version '{old_version}'."

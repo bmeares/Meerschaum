@@ -44,7 +44,10 @@ class yaml:
         from meerschaum.utils.packages import attempt_import
         packaging_version = attempt_import('packaging.version')
         _args = list(args)
-        if _import_name == 'yaml' and packaging_version.parse(_yaml.__version__) >= packaging_version.parse('6.0'):
+        if (
+            _import_name == 'yaml'
+            and packaging_version.parse(_yaml.__version__) >= packaging_version.parse('6.0')
+        ):
             _args += [_yaml.Loader]
         return _yaml.load(*_args, **filter_keywords(_yaml.load, **kw))
 

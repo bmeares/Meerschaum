@@ -167,7 +167,7 @@ def delete_plugin(
         return False, f"User '{curr_user.username}' cannot delete plugin '{plugin}'."
     plugin.user_id = curr_user_id
 
-    _remove_success = plugin.remove()
+    _remove_success = plugin.remove_archive(debug=debug)
     if not _remove_success[0]:
         return _remove_success
 

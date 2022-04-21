@@ -24,6 +24,7 @@ from meerschaum.config._paths import (
 )
 import os, pathlib, shutil
 _tmpversion = None
+_installation_queue = []
 
 class Plugin:
     """Handle packaging of Meerschaum plugins."""
@@ -36,7 +37,18 @@ class Plugin:
         archive_path: Optional[pathlib.Path] = None,
         venv_path: Optional[pathlib.Path] = None,
         repo_connector: Optional['meerschaum.connectors.api.APIConnector'] = None,
+        repo: Union['meerschaum.connectors.api.APIConnector', str, None] = None,
     ):
+        from meerschaum.utils.warnings import error
+        from meerschaum.config.static import _static_config
+        sep = _static_config()['plugins']['repo_separator']
+        _repo = None
+        if sep in name:
+            try:
+                name, _repo = name.split(sep)
+            except Exception as e:
+                error(f"Invalid plugin name: '{name}'")
+
         if attributes is None:
             attributes = {}
         self.name = name
@@ -51,14 +63,13 @@ class Plugin:
             venv_path if venv_path is not None
             else VIRTENV_RESOURCES_PATH / self.name
         )
-        print(self.venv_path)
-        print(self.venv_path.exists())
-        input()
-
-        self.repo_connector = repo_connector
         if repo_connector is None:
             from meerschaum.connectors.parse import parse_repo_keys
-            self.repo_connector = parse_repo_keys(get_config('meerschaum', 'default_repository'))
+            repo_keys = str(repo) if repo is not None else None
+            if _repo is not None and repo_keys != _repo:
+                error(f"Received inconsistent repos: '{_repo}' and '{repo_keys}'.")
+            repo_connector = parse_repo_keys(repo_keys)
+        self.repo_connector = repo_connector
 
     @property
     def version(self):
@@ -74,7 +85,9 @@ class Plugin:
 
     @property
     def module(self):
-        """ """
+        """
+        Return the Python module of the underlying plugin.
+        """
         if '_module' not in self.__dict__ or self._module is None:
             if self.__file__ is None:
                 return None
@@ -84,6 +97,9 @@ class Plugin:
 
     @property
     def __file__(self) -> Union[str, None]:
+        """
+        Return the file path (str) of the plugin if it exists, otherwise `None`.
+        """
         if '_module' in self.__dict__:
             return self.module.__file__
         potential_dir = PLUGINS_RESOURCES_PATH / self.name
@@ -101,11 +117,16 @@ class Plugin:
         return None
 
 
-    def is_installed(self) -> bool:
+    def is_installed(self, try_import: bool = True) -> bool:
         """
         Check whether a plugin is correctly installed.
+        **NOTE:** This plugin will import the plugin's module.
+        Set `try_import` to `False` to avoid importing.
 
-        NOTE: This plugin will import the plugin's module.
+        Parameters
+        ----------
+        try_import: bool, default True
+            If `True`, attempt importing the plugin's module.            
 
         Returns
         -------
@@ -116,7 +137,7 @@ class Plugin:
         try:
             _installed = (
                 self.module is not None and self.__file__ is not None
-            )
+            ) if try_import else (self.__file__ is not None)
         except ModuleNotFoundError as e:
             _installed = False
         return _installed
@@ -207,7 +228,7 @@ class Plugin:
         Parameters
         ----------
         force: bool, default False
-            If `True`, continue with installation, even if required plugins fail to install.
+            If `True`, continue with installation, even if required packages fail to install.
 
         debug: bool, default False
             Verbosity toggle.
@@ -217,6 +238,10 @@ class Plugin:
         A `SuccessTuple` of success (bool) and a message (str).
 
         """
+        global _installation_queue
+        if self.full_name in _installation_queue:
+            return True, "Already installing plugin '{self}'."
+        _installation_queue.append(self.full_name)
         from meerschaum.utils.warnings import warn, error
         if debug:
             from meerschaum.utils.debug import dprint
@@ -268,13 +293,19 @@ class Plugin:
         new_version = determine_version(
             fpath, name=self.name, search_for_metadata=False, warn=True, debug=debug
         )
+        if not new_version:
+            warn(
+                f"No `__version__` defined for plugin '{self}'. "
+                + "Assuming new version...",
+                stack = False,
+            )
 
         packaging_version = attempt_import('packaging.version')
         try:
-            is_new_version = (
+            is_new_version = (not new_version and not old_version) or (
                 packaging_version.parse(old_version) < packaging_version.parse(new_version)
             )
-            is_same_version = (
+            is_same_version = new_version and old_version and (
                 packaging_version.parse(old_version) == packaging_version.parse(new_version)
             )
         except Exception as e:
@@ -421,13 +452,6 @@ class Plugin:
             else:
                 info(f"Removed source files for plugin '{self.name}'.")
 
-        if self.archive_path.exists():
-            success, msg = self.remove_archive(debug=debug)
-            if not success:
-                warn(msg, stack=False)
-                warnings_thrown_count += 1
-            else:
-                info(f"Removed archive files for plugin '{self.name}'.")
         if self.venv_path.exists():
             success, msg = self.remove_venv(debug=debug)
             if not success:
@@ -513,7 +537,7 @@ class Plugin:
         """
         If the Plugin has specified dependencies in a list called `required`, return the list.
         
-        NOTE: Dependecies which start with 'plugin:' are Meerschaum plugins, not pip packages.
+        **NOTE:** Dependecies which start with 'plugin:' are Meerschaum plugins, not pip packages.
 
         Parameters
         ----------
@@ -536,6 +560,7 @@ class Plugin:
         deactivate_venv(venv=self.name, debug=debug)
         return required
 
+
     def install_dependencies(
             self,
             force: bool = False,
@@ -544,8 +569,10 @@ class Plugin:
         """
         If specified, install dependencies.
         
-        NOTE: Dependencies that start with 'plugin:' will be installed as Meerschaum plugins
-        from the same repository as this Plugin.
+        **NOTE:** Dependencies that start with `'plugin:'` will be installed as
+        Meerschaum plugins from the same repository as this Plugin.
+        To install from a different repository, add the repo keys after `'@'`
+        (e.g. `'plugin:foo@api:bar'`).
 
         Parameters
         ----------
@@ -564,53 +591,81 @@ class Plugin:
         from meerschaum.utils.packages import pip_install
         from meerschaum.utils.debug import dprint
         from meerschaum.utils.warnings import warn, info
+        from meerschaum.connectors.parse import parse_repo_keys
+        from meerschaum.config.static import _static_config
         _deps = self.get_dependencies(debug=debug)
         if not _deps:
             return True
 
+        plugin_repo_separator = _static_config()['plugins']['repo_separator']
         packages, plugins = [], []
         for _d in _deps:
             if _d.startswith('plugin:'):
-                plugins.append(_d[len('plugin:'):])
+                _plugin_name = _d[len('plugin:'):]
+                if plugin_repo_separator in _plugin_name:
+                    try:
+                        _plugin_name, _repo_keys = _plugin_name.split(plugin_repo_separator)
+                        _rc = parse_repo_keys(_repo_keys)
+                    except Exception as e:
+                        warn(
+                            f"Invalid repo keys for required plugin '{_plugin_name}'.\n    "
+                            + f"Will try to use '{self.repo_connector}' instead.",
+                            stack = False,
+                        )
+                        _rc = self.repo_connector
+                else:
+                    _rc = self.repo_connector
+                plugins.append((_plugin_name, _rc))
             else:
                 packages.append(_d)
 
         ### Attempt pip packages installation.
-        if not pip_install(*packages, venv=self.name, debug=debug):
+        if packages and not pip_install(*packages, venv=self.name, debug=debug):
             return False
 
         ### Attempt plugins installation.
-        ### NOTE: Currently there is no logic to relove circular dependencies!
-        for _plugin in plugins:
+        ### NOTE: Currently there is no logic to resolve circular dependencies!
+        for _plugin, _rc in plugins:
             if _plugin == self.name:
-                warn(f"Plugin '{self.name}' cannot depend on itself! Skipping...")
+                warn(f"Plugin '{self.name}' cannot depend on itself! Skipping...", stack=False)
                 continue
-            _success, _msg = self.repo_connector.install_plugin(_plugin, debug=debug, force=force)
+            _success, _msg = _rc.install_plugin(_plugin, debug=debug, force=force)
             if not _success:
                 warn(
-                    f"Failed to install required plugin '{_plugin}' for plugin '{self.name}':\n"
+                    f"Failed to install required plugin '{_plugin}' from '{_rc}' "
+                    + f"for plugin '{self.name}':\n"
                     + _msg,
                     stack = False,
                 )
                 if not force:
                     warn(
-                        "Try installing with the `--force` flag to continue anyway",
+                        "Try installing with the `--force` flag to continue anyway.",
                         stack = False,
                     )
                     return False
                 info(
                     "Continuing with installation despite the failure "
-                    + "(careful, things might be broken!)",
+                    + "(careful, things might be broken!)...",
                     icon = False
                 )
 
         return True
 
+
+    @property
+    def full_name(self) -> str:
+        """
+        Include the repo keys with the plugin's name.
+        """
+        from meerschaum.config.static import _static_config
+        sep = _static_config()['plugins']['repo_separator']
+        return self.name + sep + str(self.repo_connector)
+
     def __str__(self):
         return self.name
 
     def __repr__(self):
-        return str(self)
+        return f"Plugin('{self.name}', repo='{self.repo_connector}')"
 
     def __del__(self):
         pass
