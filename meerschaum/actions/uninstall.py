@@ -50,6 +50,7 @@ def _complete_uninstall(
 
 def _uninstall_plugins(
         action: Optional[List[str]] = None,
+        repository: Optional[str] = None,
         yes: bool = False,
         force: bool = False,
         noask: bool = False,
@@ -64,34 +65,56 @@ def _uninstall_plugins(
     from meerschaum.config._paths import PLUGINS_RESOURCES_PATH
     from meerschaum.utils.warnings import warn, error, info
     from meerschaum.utils.prompt import yes_no
+    from meerschaum.connectors.parse import parse_repo_keys
+    from meerschaum._internal.Plugin import Plugin
     import os, shutil
+    repo_connector = parse_repo_keys(repository)
 
     if action is None:
         action = []
 
-    ### parse the provided plugins and link them to their modules
-    modules_to_delete = dict()
-    for plugin in action:
-        if plugin not in get_plugins_names():
-            info(f"Plugin '{plugin}' is not installed. Ignoring...")
+    plugins_to_uninstall = []
+    #  import pathlib
+    #  path = pathlib.Path('/home/bmeares/.config/meerschaum/venvs/foo')
+    #  print(path)
+    #  print(path.exists())
+    potential_plugins = [Plugin(pl, repo_connector=repo_connector) for pl in action]
+    for plugin in potential_plugins:
+        if force or plugin.is_installed():
+            plugins_to_uninstall.append(plugin)
         else:
-            for m in get_plugins_modules():
-                if plugin == m.__name__.split('.')[-1]:
-                    modules_to_delete[plugin] = m
-                    break
-    if len(modules_to_delete) == 0:
+            warn(f"Plugin '{plugin}' is not installed. Add `--force` to try anyway.", stack=False)
+
+    if not plugins_to_uninstall:
         return False, "No plugins to uninstall."
 
     ### verify that the user absolutely wants to do this (skips on --force)
     question = "Are you sure you want to remove these plugins?\n"
-    for plugin in modules_to_delete:
+    for plugin in plugins_to_uninstall:
         question += f" - {plugin}" + "\n"
     if force:
         answer = True
     else:
         answer = yes_no(question, default='n', yes=yes, noask=noask)
     if not answer:
-        return False, "No plugins uninstalled."
+        return False, "No plugins were uninstalled."
+
+    success_count, fail_count = 0, 0
+    for plugin in plugins_to_uninstall:
+        success, msg = plugin.uninstall(debug=debug)
+        if not success:
+            warn(msg, stack=False)
+            fail_count += 1
+        else:
+            success_count += 1
+
+    success = success_count > 0
+    msg = (
+        f"Done uninstalling {success_count + fail_count} plugins\n    "
+        + f"({success_count} succeeded, {fail_count} failed)."
+    )
+    return success, msg
+
 
     ### delete the folders or files
     for name, m in modules_to_delete.items():

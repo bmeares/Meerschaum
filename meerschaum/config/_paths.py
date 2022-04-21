@@ -10,6 +10,7 @@ from __future__ import annotations
 
 from pathlib import Path
 import os, platform
+from meerschaum.utils.typing import Union
 
 paths = {
     'PACKAGE_ROOT_PATH' : str(Path(__file__).parent.parent),
