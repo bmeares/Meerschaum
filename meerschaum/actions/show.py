@@ -421,7 +421,7 @@ def _show_plugins(
     """
     Show the installed plugins.
     """
-    from meerschaum.plugins import get_plugins_names
+    from meerschaum.plugins import import_plugins, get_plugins_names
     from meerschaum.utils.misc import print_options
     from meerschaum.connectors.parse import parse_repo_keys
     from meerschaum.utils.warnings import info
@@ -435,7 +435,10 @@ def _show_plugins(
         _to_print = get_plugins_names()
         header = "Installed plugins:"
         if not nopretty:
-            info(f"To see all installable plugins from repository '{repo_connector}', run `show plugins all`")
+            info(
+                f"To see all installable plugins from repository '{repo_connector}', "
+                + "run `show plugins all`"
+            )
             info("To see plugins created by a certain user, run `show plugins [username]`")
     elif action[0] in ('all'):
         _to_print = repo_connector.get_plugins(debug=debug)

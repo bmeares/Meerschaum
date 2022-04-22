@@ -151,7 +151,6 @@ def sync(
         if df is None:
             try:
                 if p.connector.type == 'plugin' and p.connector.sync is not None:
-                    from meerschaum.utils.packages import activate_venv, deactivate_venv
                     from meerschaum.plugins import Plugin
                     connector_plugin = Plugin(p.connector.label)
                     connector_plugin.deactivate_venv(debug=debug)

@@ -168,11 +168,11 @@ def _get_parent_plugin(stacklevel : int = 1) -> Optional[str]:
     return parent_globals['__name__'].replace('plugins.', '').split('.')[0]
 
 #  import meerschaum.plugins
-from meerschaum.plugins import import_plugins, make_action, load_plugins
-plugins = import_plugins()
-#  plugins = meerschaum.plugins.import_plugins()
+import meerschaum.plugins
+meerschaum.plugins.load_plugins()
+make_action = meerschaum.plugins.make_action
+#  from meerschaum.plugins import import_plugins, make_action, load_plugins
+#  plugins = import_plugins()
 ### Instruct pdoc to skip the `meerschaum.actions.plugins` subdirectory.
 __pdoc__ = {'plugins' : False, 'arguments': False}
-#  make_action = meerschaum.plugins.make_action
-#  meerschaum.plugins.load_plugins()
-load_plugins()
+meerschaum.plugins.load_plugins()

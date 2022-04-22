@@ -7,11 +7,11 @@ Expose plugin management APIs from the `meerschaum.plugins` module.
 """
 
 from __future__ import annotations
-from meerschaum.utils.typing import Callable, Any, Union, Optional, Dict, List
+from meerschaum.utils.typing import Callable, Any, Union, Optional, Dict, List, Tuple
 from meerschaum.utils.threading import Lock, RLock
-from meerschaum._internal.Plugin._Plugin import Plugin
+from meerschaum.plugins._Plugin import Plugin
 
-_api_plugins : dict = {}
+_api_plugins: Dict[str, List['function']] = {}
 _locks = {
     '_api_plugins': RLock(),
     '__path__': RLock(),
@@ -60,14 +60,14 @@ def make_action(
         package_name.split('plugins.')[-1]
         if package_name.startswith('plugins.') else None
     )
+    plugin = Plugin(plugin_name) if plugin_name else None
 
     def _new_action_venv_wrapper(*args, debug: bool = False, **kw):
-        from meerschaum.utils.packages import activate_venv, deactivate_venv
         if plugin_name and activate:
-            activate_venv(plugin_name, debug=debug)
+            plugin.activate_venv(debug=debug)
         result = function(*args, debug=debug, **kw)
         if plugin_name and deactivate:
-            deactivate_venv(plugin_name, debug=debug)
+            plugin.deactivate_venv(debug=debug)
         return result
 
     if debug:
@@ -111,8 +111,6 @@ def api_plugin(function: Callable[[Any], Any]) -> Callable[[Any], Any]:
     ...         return {'message' : 'It works!'}
     >>>
     """
-
-    global _api_plugins
     _locks['_api_plugins'].acquire()
     try:
         if function.__module__ not in _api_plugins:
@@ -127,7 +125,7 @@ def api_plugin(function: Callable[[Any], Any]) -> Callable[[Any], Any]:
 
 
 def import_plugins(
-        plugins_to_import: Union[str, List[str], None] = None,
+        *plugins_to_import: Union[str, List[str], None],
         warn: bool = True,
     ) -> Union[
         'ModuleType', Tuple['ModuleType', None]
@@ -147,26 +145,23 @@ def import_plugins(
     A module of list of modules, depening on the number of plugins provided.
 
     """
-    global __path__
     import sys
     import importlib
+    from meerschaum.utils.misc import flatten_list
+    from meerschaum.utils.warnings import error, warn as _warn
     from meerschaum.config._paths import (
         PLUGINS_RESOURCES_PATH, PLUGINS_ARCHIVES_RESOURCES_PATH, PLUGINS_INIT_PATH
     )
     PLUGINS_RESOURCES_PATH.mkdir(parents=True, exist_ok=True)
     PLUGINS_INIT_PATH.touch()
+    plugins_to_import = list(plugins_to_import)
 
-    _locks['__path__'].acquire()
-    _locks['sys.path'].acquire()
-
-    if isinstance(plugins_to_import, str):
-        plugins_to_import = [plugins_to_import]
-
-    from meerschaum.utils.warnings import error, warn as _warn
     if str(PLUGINS_RESOURCES_PATH.parent) not in sys.path:
-        sys.path.insert(0, str(PLUGINS_RESOURCES_PATH.parent))
+        with _locks['sys.path']:
+            sys.path.insert(0, str(PLUGINS_RESOURCES_PATH.parent))
     if str(PLUGINS_RESOURCES_PATH.parent) not in __path__:
-        __path__.append(str(PLUGINS_RESOURCES_PATH.parent))
+        with _locks['__path__']:
+            __path__.append(str(PLUGINS_RESOURCES_PATH.parent))
 
     if not plugins_to_import:
         try:
@@ -176,29 +171,26 @@ def import_plugins(
             plugins = None
     else:
         from meerschaum.utils.packages import attempt_import
-        plugins = [importlib.import_module(f'plugins.{p}') for p in plugins_to_import]
+        plugins = [importlib.import_module(f'plugins.{p}') for p in flatten_list(plugins_to_import)]
 
     if plugins is None and warn:
         _warn(f"Failed to import plugins.", stacklevel=3)
 
     if str(PLUGINS_RESOURCES_PATH.parent) in sys.path:
-        sys.path.remove(str(PLUGINS_RESOURCES_PATH.parent))
-
-    _locks['__path__'].release()
-    _locks['sys.path'].release()
+        with _locks['sys.path']:
+            sys.path.remove(str(PLUGINS_RESOURCES_PATH.parent))
 
     if isinstance(plugins, list):
         return (plugins[0] if len(plugins) == 1 else tuple(plugins))
     return plugins
 
+
 def load_plugins(debug: bool = False, shell: bool = False) -> None:
     """
     Import Meerschaum plugins and update the actions dictionary.
-
     """
-    ### append the plugins modules
     from inspect import isfunction, getmembers
-    from meerschaum.actions import __all__ as _all, modules, make_action
+    from meerschaum.actions import __all__ as _all, modules
     from meerschaum.utils.packages import get_modules_from_package
     if debug:
         from meerschaum.utils.debug import dprint
@@ -211,7 +203,10 @@ def load_plugins(debug: bool = False, shell: bool = False) -> None:
     )
     _all += _plugins_names
     ### I'm appending here to keep from redefining the modules list.
-    new_modules = [mod for mod in modules if not mod.__name__.startswith('plugins.')] + plugins_modules
+    new_modules = (
+        [mod for mod in modules if not mod.__name__.startswith('plugins.')]
+        + plugins_modules
+    )
     n_mods = len(modules)
     for mod in new_modules:
         modules.append(mod)
@@ -250,32 +245,40 @@ def reload_plugins(plugins: Optional[List[str]] = None, debug: bool = False) -> 
     load_plugins(debug=debug)
 
 
-def get_plugins_names() -> Union[List[str], None]:
+def get_plugins(*to_load) -> Union[Tuple[Plugin], Plugin]:
     """
-    Return a list of installed plugins, or `None` if things break.
+    Return a list of `Plugin` objects.
     """
     from meerschaum.utils.packages import get_modules_from_package
-    from meerschaum.utils.warnings import warn, error
-    try:
-        names = get_modules_from_package(import_plugins(), names=True, recursive=True)[0]
-    except Exception as e:
-        names = None
-        warn(e, stacklevel=3)
-    return names
+    from meerschaum.config._paths import PLUGINS_RESOURCES_PATH
+    import os
+    _plugins = [
+        Plugin(name) for name in (
+            to_load or [
+                (
+                    name if (PLUGINS_RESOURCES_PATH / name).is_dir()
+                    else name[:-3]
+                ) for name in os.listdir(PLUGINS_RESOURCES_PATH) if name != '__init__.py'
+            ]
+        )
+    ]
+    plugins = tuple(plugin for plugin in _plugins if plugin.is_installed())
+    if len(to_load) == 1:
+        return plugins[0]
+    return plugins
 
-def get_plugins_modules() -> Union[List['ModuleType'], None]:
+
+def get_plugins_names(*to_load) -> List[str]:
+    """
+    Return a list of installed plugins.
+    """
+    return [plugin.name for plugin in get_plugins(*to_load)]
+
+def get_plugins_modules(*to_load) -> List['ModuleType']:
     """
     Return a list of modules for the installed plugins, or `None` if things break.
     """
-    from meerschaum.utils.packages import get_modules_from_package
-    from meerschaum.utils.warnings import warn, error
-    try:
-        modules = get_modules_from_package(import_plugins(), recursive=True)
-    except Exception as e:
-        modules = None
-        warn(e, stacklevel=3)
-    return modules
-
+    return [plugin.module for plugin in get_plugins(*to_load)]
 
 def get_data_plugins() -> List['ModuleType']:
     """

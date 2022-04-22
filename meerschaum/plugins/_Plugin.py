@@ -7,6 +7,7 @@ Plugin metadata class
 """
 
 from __future__ import annotations
+import os, pathlib, shutil
 from meerschaum.utils.typing import (
     Dict,
     List,
@@ -22,9 +23,8 @@ from meerschaum.config._paths import (
     PLUGINS_TEMP_RESOURCES_PATH,
     VIRTENV_RESOURCES_PATH,
 )
-import os, pathlib, shutil
 _tmpversion = None
-_installation_queue = []
+_ongoing_installations = set()
 
 class Plugin:
     """Handle packaging of Meerschaum plugins."""
@@ -88,7 +88,7 @@ class Plugin:
         """
         Return the Python module of the underlying plugin.
         """
-        if '_module' not in self.__dict__ or self._module is None:
+        if '_module' not in self.__dict__ or self.__dict__.get('_module', None) is None:
             if self.__file__ is None:
                 return None
             from meerschaum.plugins import import_plugins
@@ -173,11 +173,6 @@ class Plugin:
             path = self.__file__
             is_dir = False
 
-        tarf = tarfile.open(
-            self.archive_path,
-            'w:gz'
-        )
-
         patterns_to_ignore = {
             '.pyc',
             '__pycache__/',
@@ -186,24 +181,24 @@ class Plugin:
             '.git',
         }
 
-        if not is_dir:
-            tarf.add(f"{self.name}.py")
-        else:
-            for root, dirs, files in os.walk(self.name):
-                for f in files:
-                    good_file = True
-                    fp = os.path.join(root, f)
-                    for pattern in patterns_to_ignore:
-                        if pattern in str(fp) or f.startswith('.'):
-                            good_file = False
-                            break
-                    if good_file:
-                        if debug:
-                            dprint(f"Adding '{fp}'...")
-                        tarf.add(fp)
+        with tarfile.open(self.archive_path, 'w:gz') as tarf:
+            if not is_dir:
+                tarf.add(f"{self.name}.py")
+            else:
+                for root, dirs, files in os.walk(self.name):
+                    for f in files:
+                        good_file = True
+                        fp = os.path.join(root, f)
+                        for pattern in patterns_to_ignore:
+                            if pattern in str(fp) or f.startswith('.'):
+                                good_file = False
+                                break
+                        if good_file:
+                            if debug:
+                                dprint(f"Adding '{fp}'...")
+                            tarf.add(fp)
 
         ### clean up and change back to old directory
-        tarf.close()
         os.chdir(old_cwd)
 
         ### change to 775 to avoid permissions issues with the API in a Docker container
@@ -238,10 +233,9 @@ class Plugin:
         A `SuccessTuple` of success (bool) and a message (str).
 
         """
-        global _installation_queue
-        if self.full_name in _installation_queue:
+        if self.full_name in _ongoing_installations:
             return True, "Already installing plugin '{self}'."
-        _installation_queue.append(self.full_name)
+        _ongoing_installations.add(self.full_name)
         from meerschaum.utils.warnings import warn, error
         if debug:
             from meerschaum.utils.debug import dprint
@@ -251,6 +245,9 @@ class Plugin:
         old_cwd = os.getcwd()
         old_version = ''
         new_version = ''
+        temp_dir = PLUGINS_TEMP_RESOURCES_PATH / self.name
+        temp_dir.mkdir(exist_ok=True)
+
         if not self.archive_path.exists():
             return False, f"Missing archive file for plugin '{self}'."
         if self.version is not None:
@@ -258,23 +255,14 @@ class Plugin:
             if debug:
                 dprint(f"Found existing version '{old_version}' for plugin '{self}'.")
         try:
-            tarf = tarfile.open(
-                self.archive_path,
-                'r:gz'
-            )
+            with tarfile.open(self.archive_path, 'r:gz') as tarf:
+                tarf.extractall(temp_dir)
         except Exception as e:
             warn(e)
-            return False, f"Plugin '{self.name}' could not be downloaded."
-
-        temp_dir = pathlib.Path(os.path.join(PLUGINS_TEMP_RESOURCES_PATH, self.name))
-        temp_dir.mkdir(exist_ok=True)
+            return False, f"Failed to extract plugin '{self.name}'."
 
         if debug:
             dprint(f"Extracting '{self.archive_path}' to '{temp_dir}'...")
-        try:
-            tarf.extractall(temp_dir)
-        except Exception as e:
-            success, msg = False, f"Failed to extract plugin '{self}'."
 
         ### search for version information
         files = os.listdir(temp_dir)
@@ -286,9 +274,9 @@ class Plugin:
         else:
             error(f"Unknown format encountered for plugin '{self}'.")
 
-        fpath = pathlib.Path(os.path.join(temp_dir, files[0]))
+        fpath = temp_dir / files[0]
         if is_dir:
-            fpath = pathlib.Path(os.path.join(fpath, '__init__.py'))
+            fpath = fpath / '__init__.py'
 
         new_version = determine_version(
             fpath, name=self.name, search_for_metadata=False, warn=True, debug=debug
@@ -351,7 +339,6 @@ class Plugin:
             )
 
         shutil.rmtree(temp_dir)
-        tarf.close()
         os.chdir(old_cwd)
 
         ### Reload the plugin's module.
@@ -361,10 +348,12 @@ class Plugin:
 
         ### if we've already failed, return here
         if not success or abort:
+            _ongoing_installations.remove(self.full_name)
             return success, msg
 
         ### attempt to install dependencies
         if not self.install_dependencies(force=force, debug=debug):
+            _ongoing_installations.remove(self.full_name)
             return False, f"Failed to install dependencies for plugin '{self}'."
 
         ### handling success tuple, bool, or other (typically None)
@@ -395,6 +384,7 @@ class Plugin:
                 f"of type '{type(setup_tuple)}': {setup_tuple}"
             )
 
+        _ongoing_installations.remove(self.full_name)
         return success, msg
 
 
@@ -550,13 +540,13 @@ class Plugin:
 
         """
         import inspect
-        self.activate_venv(debug=debug)
+        self.activate_venv(dependencies=False, debug=debug)
         required = []
         for name, val in inspect.getmembers(self.module):
             if name == 'required':
                 required = val
                 break
-        self.deactivate_venv(debug=debug)
+        self.deactivate_venv(dependencies=False, debug=debug)
         return required
 
 
@@ -592,7 +582,7 @@ class Plugin:
         return plugins
 
 
-    def get_required_packages(debug: bool=False) -> List[str]:
+    def get_required_packages(self, debug: bool=False) -> List[str]:
         """
         Return the required package names (excluding plugins).
         """
@@ -600,24 +590,44 @@ class Plugin:
         return [_d for _d in _deps if not _d.startswith('plugin:')]
 
 
-    def activate_venv(self, debug: bool = False) -> bool:
+    def activate_venv(self, dependencies: bool=True, debug: bool=False) -> bool:
         """
         Activate the virtual environments for the plugin and its dependencies.
+
+        Parameters
+        ----------
+        dependencies: bool, default True
+            If `True`, activate the virtual environments for required plugins.
+
+        Returns
+        -------
+        A bool indicating success.
         """
         from meerschaum.utils.packages import activate_venv
-        for plugin in self.get_required_plugins(debug=debug):
-            activate_venv(plugin.name, debug=debug)
+        if dependencies:
+            for plugin in self.get_required_plugins(debug=debug):
+                activate_venv(plugin.name, debug=debug)
         return activate_venv(self.name, debug=debug)
 
 
-    def deactivate_venv(self, debug: bool = False) -> bool:
+    def deactivate_venv(self, dependencies: bool=True, debug: bool = False) -> bool:
         """
         Deactivate the virtual environments for the plugin and its dependencies.
+
+        Parameters
+        ----------
+        dependencies: bool, default True
+            If `True`, deactivate the virtual environments for required plugins.
+
+        Returns
+        -------
+        A bool indicating success.
         """
         from meerschaum.utils.packages import deactivate_venv
         success = deactivate_venv(self.name, debug=debug)
-        for plugin in self.get_required_plugins(debug=debug):
-            deactivate_venv(plugin.name, debug=debug)
+        if dependencies:
+            for plugin in self.get_required_plugins(debug=debug):
+                deactivate_venv(plugin.name, debug=debug)
         return success
 
 
@@ -648,7 +658,7 @@ class Plugin:
         A bool indicating success.
 
         """
-        from meerschaum.utils.packages import pip_install
+        from meerschaum.utils.packages import pip_install, venv_contains_package
         from meerschaum.utils.debug import dprint
         from meerschaum.utils.warnings import warn, info
         from meerschaum.connectors.parse import parse_repo_keys
@@ -657,15 +667,7 @@ class Plugin:
         if not _deps:
             return True
 
-        packages = self.get_required_packages(debug=debug)
         plugins = self.get_required_plugins(debug=debug)
-
-        ### Attempt pip packages installation.
-        if packages and not pip_install(*packages, venv=self.name, debug=debug):
-            return False
-
-        ### Attempt plugins installation.
-        ### NOTE: Currently there is no logic to resolve circular dependencies!
         for _plugin in plugins:
             if _plugin.name == self.name:
                 warn(f"Plugin '{self.name}' cannot depend on itself! Skipping...", stack=False)
@@ -675,9 +677,8 @@ class Plugin:
             )
             if not _success:
                 warn(
-                    f"Failed to install required plugin '{_plugin}' from '{_plugin.repo_connector}' "
-                    + f"for plugin '{self.name}':\n"
-                    + _msg,
+                    f"Failed to install required plugin '{_plugin}' from '{_plugin.repo_connector}'"
+                    + f" for plugin '{self.name}':\n" + _msg,
                     stack = False,
                 )
                 if not force:
@@ -691,6 +692,22 @@ class Plugin:
                     + "(careful, things might be broken!)...",
                     icon = False
                 )
+
+
+        ### Don't reinstall packages that are already included in required plugins.
+        packages = []
+        _packages = self.get_required_packages(debug=debug)
+        accounted_for_packages = set()
+        for package_name in _packages:
+            for plugin in plugins:
+                if venv_contains_package(package_name, plugin.name):
+                    accounted_for_packages.add(package_name)
+                    break
+        packages = [pkg for pkg in _packages if pkg not in accounted_for_packages]
+
+        ### Attempt pip packages installation.
+        if packages and not pip_install(*packages, venv=self.name, debug=debug):
+            return False
 
         return True
 
