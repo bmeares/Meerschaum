@@ -1719,3 +1719,14 @@ def separate_negation_values(
 
     return _in_vals, _ex_vals
 
+
+def flatten_list(list_: List[Any]) -> List[Any]:
+    """
+    Recursively flatten a list.
+    """
+    for item in list_:
+        if isinstance(item, list):
+            yield from flatten_list(item)
+        else:
+            yield item
+

@@ -38,27 +38,15 @@ def _entry(sysargs : Optional[List[str]] = None) -> SuccessTuple:
 def _entry_with_args(**kw) -> SuccessTuple:
     """Execute a Meerschaum action with keyword arguments.
     Use `_entry()` for parsing sysargs before executing.
-
-    Parameters
-    ----------
-    **kw :
-        
-
-    Returns
-    -------
-
     """
+    from meerschaum.plugins import Plugin
     from meerschaum.actions import actions, original_actions, get_shell
-    from meerschaum.utils.packages import activate_venv, deactivate_venv
     import sys
     if kw.get('trace', None):
         from meerschaum.utils.misc import debug_trace
         debug_trace()
     if len(kw.get('action', [])) == 0:
         return get_shell().cmdloop()
-    #  if kw.get('daemon', False):
-        #  from meerschaum.utils.daemon import daemon_action
-        #  return daemon_action(**kw)
 
     main_action = kw['action'][0]
 
@@ -73,10 +61,12 @@ def _entry_with_args(**kw) -> SuccessTuple:
             actions[main_action].__module__.startswith('plugins.')
         ) else None
     )
+    plugin = Plugin(plugin_name) if plugin_name else None
 
     del kw['action'][0]
 
-    activate_venv(venv=plugin_name, debug=kw.get('debug', False))
+    if plugin is not None:
+        plugin.activate_venv(debug=kw.get('debug', False))
 
     try:
         result = actions[main_action](**kw)
@@ -93,7 +83,8 @@ def _entry_with_args(**kw) -> SuccessTuple:
             )
         )
 
-    deactivate_venv(venv=plugin_name, debug=kw.get('debug', False))
+    if plugin is not None:
+        plugin.deactivate_venv(debug=kw.get('debug', False))
 
     return result
 

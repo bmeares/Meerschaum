@@ -3,7 +3,7 @@
 # vim:fenc=utf-8
 
 """
-Import the Plugin class
+Import the Plugin class.
 """
 
-from meerschaum._internal.Plugin._Plugin import Plugin
+from meerschaum.plugins import Plugin
