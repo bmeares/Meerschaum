@@ -20,7 +20,6 @@ packages : Dict[str, Dict[str, str]] = {
     'required' : {
         'wheel'                      : 'wheel>=0.34.2',
         'yaml'                       : 'PyYAML>=5.3.1',
-        'virtualenv'                 : 'virtualenv>=20.1.0',
     },
     'minimal' : {},
     'formatting' : {
@@ -48,14 +47,15 @@ packages : Dict[str, Dict[str, str]] = {
         'more_itertools'             : 'more-itertools>=8.7.0',
         'daemoniker'                 : 'daemoniker>=0.2.3',
         'psutil'                     : 'psutil>=5.8.0',
-        'watchgod'                   : 'watchgod>=0.7',
+        'watchgod'                   : 'watchgod>=0.7.0',
+        'virtualenv'                 : 'virtualenv>=20.1.0',
     },
     'iot': {
         'paho'                       : 'paho-mqtt>=1.5.1',
     },
     'drivers': {
         'psycopg2'                   : 'psycopg2-binary>=2.8.6',
-        'pymysql'                    : 'PyMySQL>=0.9',
+        'pymysql'                    : 'PyMySQL>=0.9.0',
         'aiomysql'                   : 'aiomysql>=0.0.21',
         'sqlalchemy_cockroachdb'     : 'sqlalchemy-cockroachdb>=1.4.2',
         'duckdb'                     : 'duckdb>=0.3.2',
@@ -101,8 +101,8 @@ packages : Dict[str, Dict[str, str]] = {
     'gui': {
         'toga'                       : 'toga>=0.3.0.dev29',
         'terminado'                  : 'terminado>=0.12.1',
-        'tornado'                    : 'tornado>=6.1',
-        'tornado_xstatic'            : 'tornado-xstatic>=0.2',
+        'tornado'                    : 'tornado>=6.1.0',
+        'tornado_xstatic'            : 'tornado-xstatic>=0.2.0',
         'xstatic'                    : 'XStatic>=1.0.2',
         'xstatic.pkg.termjs'         : 'XStatic-term.js>=0.0.7.0',
         'webview'                    : 'pywebview>=3.5',
@@ -129,14 +129,14 @@ packages['dash'] = {
     'dash'                           : 'dash>=2.0.0',
     'dash_bootstrap_components'      : 'dash-bootstrap-components>=1.0.1rc1',
     'dash_ace'                       : 'dash-ace>=0.2.1',
-    'dash_extensions'                : 'dash-extensions>=0.0.51',
+    'dash_extensions'                : 'dash-extensions<0.1.0',
     'dash_daq'                       : 'dash-daq>=0.5.0',
     'flask_compress'                 : 'Flask-Compress>=1.10.1',
 }
 packages['api'] = {
     'uvicorn'                        : 'uvicorn[standard]>=0.17.5',
     'gunicorn'                       : 'gunicorn>=20.1.0',
-    'websockets'                     : 'websockets>=8.1',
+    'websockets'                     : 'websockets>=8.1.0',
     'fastapi'                        : 'fastapi>=0.75.0',
     'fastapi_jwt_auth'               : 'fastapi-jwt-auth>=0.5.0',
     'passlib'                        : 'passlib>=1.7.4',

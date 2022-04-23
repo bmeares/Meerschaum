@@ -18,7 +18,7 @@ from meerschaum.utils.misc import get_connector_labels
 from meerschaum.config import __doc__ as doc
 dbc = attempt_import('dash_bootstrap_components', lazy=False)
 html, dcc = import_html(), import_dcc()
-dex = attempt_import('dash_extensions', lazy=False)
+dex = attempt_import('dash_extensions', lazy=False, check_update=True)
 dash_ace = attempt_import('dash_ace', lazy=False)
 
 component_ids = {

@@ -8,11 +8,10 @@ Functions for managing packages and virtual environments reside here.
 
 from __future__ import annotations
 import importlib, os, pathlib
-from meerschaum.utils.typing import Any, List, SuccessTuple, Optional, Union
+from meerschaum.utils.typing import Any, List, SuccessTuple, Optional, Union, Tuple
 from meerschaum.utils.threading import Lock, RLock
 
 from meerschaum.utils.packages._packages import packages, all_packages
-from meerschaum.utils.warnings import warn, error
 
 _import_module = importlib.import_module
 _import_hook_venv = None
@@ -121,14 +120,11 @@ def manually_import_module(
         else importlib.util.spec_from_file_location(root_name, str(root_path))
     )
 
-
     ### Check for updates before importing.
     _version = (
         determine_version(pathlib.Path(root_spec.origin), name=root_name, venv=venv, debug=debug)
         if root_spec.origin is not None else None
     )
-    #  print(root_name, _version, mod_path, root_path)
-    #  input()
 
     if debug:
         dprint(f'root_name: {root_name}', color=color)
@@ -232,9 +228,10 @@ def determine_version(
     Returns
     -------
     The package's version string if available or `None`.
+    If multiple versions are found, it will trigger an import in a subprocess.
 
     """
-    import re
+    import re, os
     if debug:
         from meerschaum.utils.debug import dprint
     from meerschaum.utils.warnings import warn as warn_function
@@ -248,6 +245,7 @@ def determine_version(
     )[0].replace('-', '_').lower()
 
     ### First, check if a dist-info directory exists.
+    _found_versions = []
     if search_for_metadata:
         for filename in os.listdir(module_parent_dir):
             path = module_parent_dir / filename
@@ -257,11 +255,11 @@ def determine_version(
                 not filename.endswith('.dist-info')
             ):
                 continue
-            _version = filename[(len(name) + 1):(-1 * (len('dist-info') + 1))]
-            break
+            _v = filename[(len(name) + 1):(-1 * (len('dist-info') + 1))]
+            _found_versions.append(_v)
 
-    if _version is not None:
-        return _version
+    if len(_found_versions) == 1:
+        return _found_versions[0]
 
     ### This is kind of a hack. Normally pathlib handles escaped slashes on Windows,
     ### but because we're passing this to a subprocess, we need to re-escape the slashes.
@@ -335,7 +333,7 @@ def need_update(
     """
     if debug:
         from meerschaum.utils.debug import dprint
-    from meerschaum.utils.warnings import warn
+    from meerschaum.utils.warnings import warn as warn_function
     import re
     root_name = (
         package.__name__.split('.')[0] if split else package.__name__
@@ -372,12 +370,12 @@ def need_update(
     if required_version:
         semver = attempt_import('semver', check_update=False, lazy=False)
         try:
-            match = semver.VersionInfo.match
+            _match = semver.VersionInfo.match
         except Exception as e:
             ### Something funky is going on with semver.
-            match = None
-        if match is None:
-            warn(
+            _match = None
+        if _match is None:
+            warn_function(
                 f"Unable to import `semver.match`. "
                 + "Please reinstall `semver` if possible (e.g. `upgrade packages`)."
             )
@@ -495,8 +493,6 @@ def deactivate_venv(
 
     """
     import sys
-    global active_venvs
-
     if venv is None:
         return True
 
@@ -505,18 +501,16 @@ def deactivate_venv(
         dprint(f"Deactivating virtual environment '{venv}'...", color=color)
 
     if venv in active_venvs:
-        _locks['active_venvs'].acquire()
-        active_venvs.remove(venv)
-        _locks['active_venvs'].release()
+        with _locks['active_venvs']:
+            active_venvs.remove(venv)
 
     if sys.path is None:
         return False
 
     target = venv_target_path(venv, debug=debug)
-    _locks['sys.path'].acquire()
-    if str(target) in sys.path:
-        sys.path.remove(str(target))
-    _locks['sys.path'].release()
+    with _locks['sys.path']:
+        if str(target) in sys.path:
+            sys.path.remove(str(target))
 
     if debug:
         dprint(f'sys.path: {sys.path}', color=color)
@@ -549,12 +543,12 @@ def activate_venv(
     A bool indicating whether the virtual environment was successfully activated.
 
     """
-    global active_venvs, tried_virtualenv
+    global tried_virtualenv
     if venv in active_venvs or venv is None:
         return True
     if debug:
         from meerschaum.utils.debug import dprint
-    import sys, os, platform
+    import sys, platform, os
     from meerschaum.config._paths import VIRTENV_RESOURCES_PATH
     try:
         import ensurepip
@@ -598,16 +592,15 @@ def activate_venv(
 
     old_cwd = pathlib.Path(os.getcwd())
     os.chdir(VIRTENV_RESOURCES_PATH)
-    try:
-        if debug:
-            dprint(f"Activating virtual environment '{venv}'...", color=color)
-        _locks['active_venvs'].acquire()
-        active_venvs.add(venv)
-    except Exception:
-        pass
-    finally:
-        _locks['active_venvs'].release()
-        os.chdir(old_cwd)
+    with _locks['active_venvs']:
+        try:
+            if debug:
+                dprint(f"Activating virtual environment '{venv}'...", color=color)
+            active_venvs.add(venv)
+        except Exception:
+            pass
+        finally:
+            os.chdir(old_cwd)
 
     target = venv_target_path(venv, debug=debug)
     if str(target) not in sys.path:
@@ -649,7 +642,8 @@ def venv_exec(
 
     Returns
     -------
-    By default, return a bool indicating success. If `as_proc` is `True`, return a `subprocess.Popen` object.
+    By default, return a bool indicating success.
+    If `as_proc` is `True`, return a `subprocess.Popen` object.
     If `with_extras` is `True`, return a tuple of the exit code, stdout bytes, and stderr bytes.
 
     """
@@ -1521,6 +1515,7 @@ def package_venv(package: 'ModuleType') -> Union[str, None]:
     """
     Inspect a package and return the virtual environment in which it presides.
     """
+    import os
     from meerschaum.config._paths import VIRTENV_RESOURCES_PATH
     if str(VIRTENV_RESOURCES_PATH) not in package.__file__:
         return None

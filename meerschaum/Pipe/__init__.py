@@ -51,7 +51,7 @@ with correct credentials, as well as a network connection and valid permissions.
 """
 
 from __future__ import annotations
-from meerschaum.utils.typing import Optional, Dict, Any, Union, InstanceConnector
+from meerschaum.utils.typing import Optional, Dict, Any, Union, InstanceConnector, List
 
 class Pipe:
     """
@@ -103,16 +103,17 @@ class Pipe:
 
     def __init__(
         self,
-        connector_keys: str,
-        metric_key: str,
-        location_key: Optional[str] = None,
+        connector: str,
+        metric: str,
+        location: Optional[str] = None,
         parameters: Optional[Dict[str, Any]] = None,
         columns: Optional[Dict[str, str]] = None,
         tags: Optional[List[str]] = None,
         mrsm_instance: Optional[Union[str, InstanceConnector]] = None,
         instance: Optional[Union[str, InstanceConnector]] = None,
         cache: bool = False,
-        debug: bool = False
+        debug: bool = False,
+        location_key: Optional[str] = None,
     ):
         """
         Parameters
@@ -156,14 +157,14 @@ class Pipe:
         from meerschaum.utils.warnings import error
         from meerschaum.config.static import _static_config
         negation_prefix = _static_config()['system']['fetch_pipes_keys']['negation_prefix']
-        for k in (connector_keys, metric_key, location_key, *(tags or [])):
+        for k in (connector, metric, location, *(tags or [])):
             if str(k).startswith(negation_prefix):
                 error(f"A pipe's keys and tags cannot start with the prefix '{negation_prefix}'.")
 
-        self.connector_keys = connector_keys
-        self.metric_key = metric_key
-        self.location_key = location_key
-        
+        self.connector_keys = str(connector)
+        self.connector_key = self.connector_keys ### Alias
+        self.metric_key = metric
+        self.location_key = location
 
         ### only set parameters if values are provided
         if parameters is not None:
@@ -200,18 +201,12 @@ class Pipe:
         refresh = False
         if '_meta' not in self.__dict__:
             refresh = True
-        #  elif self.parameters != self.__dict__['_meta']['parameters']:
-            #  refresh = True
 
         if refresh:
-            #  parameters = self.parameters
-            #  if parameters is None:
-                #  parameters = dict()
             self._meta = {
                 'connector_keys' : self.connector_keys,
                 'metric_key'     : self.metric_key,
                 'location_key'   : self.location_key,
-                #  'parameters'     : parameters,
                 'instance'       : self.instance_keys,
             }
         return self._meta
