@@ -158,7 +158,7 @@ def _upgrade_packages(
     if force or yes_no(question, noask=noask, yes=yes):
         success = pip_install(*to_install, debug=debug)
         msg = (
-            f"Successfully installed {len(packages[group])} packages" if success
+            f"Successfully installed {len(packages[group])} packages." if success
             else f"Failed to install packages in dependency group '{group}'."
         )
     return success, msg
