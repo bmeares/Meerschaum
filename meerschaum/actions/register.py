@@ -45,7 +45,7 @@ def _complete_register(
         del action[0]
         return options[sub](action=action, **kw)
 
-    from meerschaum.actions.shell import default_action_completer
+    from meerschaum._internal.shell import default_action_completer
     return default_action_completer(action=(['register'] + action), **kw)
 
 def _register_pipes(
@@ -129,7 +129,7 @@ def _register_plugins(
     from meerschaum.connectors.parse import parse_repo_keys
     from meerschaum.config import get_config
     from meerschaum.utils.warnings import warn, error, info
-    from meerschaum._internal.Plugin import Plugin
+    from meerschaum.core import Plugin
     from meerschaum import get_connector
     from meerschaum.utils.formatting import print_tuple
     from meerschaum.utils.prompt import prompt, yes_no
@@ -234,7 +234,7 @@ def _register_users(
     from meerschaum.connectors.parse import parse_instance_keys
     from meerschaum.utils.debug import dprint
     from meerschaum.utils.warnings import warn, error, info
-    from meerschaum._internal.User import User
+    from meerschaum.core import User
     from meerschaum.utils.formatting import print_tuple
     from meerschaum.utils.prompt import prompt, get_password, get_email
     if mrsm_instance is None:

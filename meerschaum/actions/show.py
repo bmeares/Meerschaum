@@ -76,7 +76,7 @@ def _complete_show(
         del action[0]
         return options[sub](action=action, **kw)
 
-    from meerschaum.actions.shell import default_action_completer
+    from meerschaum._internal.shell import default_action_completer
     return default_action_completer(action=(['show'] + action), **kw)
 
 def _show_actions(**kw: Any) -> SuccessTuple:
@@ -85,7 +85,7 @@ def _show_actions(**kw: Any) -> SuccessTuple:
     """
     from meerschaum.actions import actions
     from meerschaum.utils.misc import print_options
-    from meerschaum.actions.shell.Shell import hidden_commands
+    from meerschaum._internal.shell.Shell import hidden_commands
     _actions = [ _a for _a in actions if _a not in hidden_commands ]
     print_options(options=_actions, name='actions', actions=False, **kw)
     return True, "Success"
@@ -425,7 +425,7 @@ def _show_plugins(
     from meerschaum.utils.misc import print_options
     from meerschaum.connectors.parse import parse_repo_keys
     from meerschaum.utils.warnings import info
-    from meerschaum._internal.User import User
+    from meerschaum.core import User
     repo_connector = parse_repo_keys(repository)
 
     if action is None:

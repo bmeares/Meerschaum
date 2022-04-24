@@ -211,8 +211,8 @@ class Pipe:
     def instance_connector(self) -> Union[InstanceConnector, None]:
         """
         The connector to where this pipe resides.
-        May either be of type `'sql'` (`meerschaum.connectors.sql.SQLConnector` or of type `'api'`
-        (`meerschaum.connectors.api.APIConnector`).
+        May either be of type `meerschaum.connectors.sql.SQLConnector` or
+        `meerschaum.connectors.api.APIConnector`.
         """
         if '_instance_connector' not in self.__dict__:
             from meerschaum.connectors.parse import parse_instance_keys
@@ -276,7 +276,7 @@ class Pipe:
         if '_cache_pipe' not in self.__dict__:
             from meerschaum import Pipe
             from meerschaum.config._patch import apply_patch_to_config
-            from meerschaum.connectors.sql.tools import sql_item_name
+            from meerschaum.utils.sql import sql_item_name
             _parameters = self.parameters.copy()
             _fetch_patch = {
                 'fetch': ({

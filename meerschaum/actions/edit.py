@@ -46,7 +46,7 @@ def _complete_edit(
         del action[0]
         return options[sub](action=action, **kw)
 
-    from meerschaum.actions.shell import default_action_completer
+    from meerschaum._internal.shell import default_action_completer
     return default_action_completer(action=(['edit'] + action), **kw)
 
 def _edit_config(action : Optional[List[str]] = None, **kw : Any) -> SuccessTuple:
@@ -160,7 +160,7 @@ def _edit_users(
     from meerschaum.connectors.parse import parse_instance_keys
     from meerschaum.utils.debug import dprint
     from meerschaum.utils.warnings import warn, error, info
-    from meerschaum._internal.User import User
+    from meerschaum.User import User
     from meerschaum.connectors.api import APIConnector
     from meerschaum.utils.formatting import print_tuple
     from meerschaum.utils.prompt import prompt, yes_no, get_password, get_email

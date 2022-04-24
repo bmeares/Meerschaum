@@ -27,8 +27,8 @@ prompt_toolkit = attempt_import('prompt_toolkit', lazy=False, warn=False, instal
     attempt_import('prompt_toolkit.formatted_text', lazy=False, warn=False, install=True),
     attempt_import('prompt_toolkit.styles', lazy=False, warn=False, install=True),
 )
-from meerschaum.actions.shell.ValidAutoSuggest import ValidAutoSuggest
-from meerschaum.actions.shell.ShellCompleter import ShellCompleter
+from meerschaum._internal.shell.ValidAutoSuggest import ValidAutoSuggest
+from meerschaum._internal.shell.ShellCompleter import ShellCompleter
 _clear_screen = get_config('shell', 'clear_screen', patch=True)
 from meerschaum.utils.misc import string_width
 
@@ -63,15 +63,15 @@ reserved_completers = {
 }
 
 def _insert_shell_actions(
-        _shell : Optional['Shell'] = None,
-        actions : Optional[Dict[str, Callable[[Any], SuccessTuple]]] = None,
-        keep_self = False,
+        _shell: Optional['Shell'] = None,
+        actions: Optional[Dict[str, Callable[[Any], SuccessTuple]]] = None,
+        keep_self: bool = False,
     ) -> None:
     """
     Update the Shell with Meerschaum actions.
     """
     from meerschaum.utils.misc import add_method_to_class
-    import meerschaum.actions.shell as shell_pkg
+    import meerschaum._internal.shell as shell_pkg
     from meerschaum.actions import get_completer
     if actions is None:
         from meerschaum.actions import actions as _actions
@@ -94,7 +94,7 @@ def _insert_shell_actions(
 
 def _completer_wrapper(
         target: Callable[[Any], List[str]]
-    ) -> Callable[['meerschaum.actions.shell.Shell', str, str, int, int], Any]:
+    ) -> Callable[['meerschaum._internal.shell.Shell', str, str, int, int], Any]:
     """
     Wrapper for `complete_` functions so they can instead use Meerschaum arguments.
     """
@@ -730,7 +730,7 @@ class Shell(cmd.Cmd):
         import inspect
         from meerschaum.actions.arguments._parse_arguments import parse_line
         from meerschaum.actions import get_subactions
-        from meerschaum.actions.shell import Shell as _Shell
+        from meerschaum._internal.shell import Shell as _Shell
         args = parse_line(line)
         if len(args['action']) > 0 and args['action'][0] == 'help':
             ### remove 'help'

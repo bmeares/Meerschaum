@@ -96,7 +96,7 @@ def read(
     """
     if chunks is not None and chunks <= 0:
         return []
-    from meerschaum.connectors.sql.tools import sql_item_name
+    from meerschaum.utils.sql import sql_item_name
     from meerschaum.utils.packages import attempt_import, import_pandas
     pd = import_pandas()
     sqlalchemy = attempt_import("sqlalchemy")
@@ -427,7 +427,7 @@ def to_sql(
     if name is None:
         error("Name must not be None to submit to the SQL server")
 
-    from meerschaum.connectors.sql.tools import sql_item_name
+    from meerschaum.utils.sql import sql_item_name
     from meerschaum.connectors.sql._create_engine import flavor_configs
 
     ### resort to defaults if None
@@ -516,7 +516,7 @@ def psql_insert_copy(
     import csv
     from io import StringIO
 
-    from meerschaum.connectors.sql.tools import sql_item_name
+    from meerschaum.utils.sql import sql_item_name
 
     # gets a DBAPI connection that can provide a cursor
     dbapi_conn = conn.connection

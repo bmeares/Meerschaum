@@ -10,7 +10,7 @@ from meerschaum.api import get_api_connector, endpoints
 from meerschaum.api.dash import dash_app, debug, active_sessions
 from dash.dependencies import Input, Output, State, ALL, MATCH
 from dash.exceptions import PreventUpdate
-from meerschaum._internal.User import User
+from meerschaum.core import User
 from meerschaum.config.static import _static_config
 from meerschaum.utils.packages import attempt_import
 dash = attempt_import('dash')

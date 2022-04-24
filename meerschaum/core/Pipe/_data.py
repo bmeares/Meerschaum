@@ -35,7 +35,7 @@ def get_data(
 
     params: Optional[Dict[str, Any]], default None
         Filter the retrieved data by a dictionary of parameters.
-        See `meerschaum.connectors.sql.tools.build_where` for more details. 
+        See `meerschaum.utils.sql.build_where` for more details. 
 
     fresh: bool, default True
         If `True`, skip local cache and directly query the instance connector.

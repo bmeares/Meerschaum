@@ -27,18 +27,17 @@ def get_pwd_context():
 class User():
     def __init__(
         self,
-        username : str,
-        password : Optional[str] = None,
-        type : Optional[str] = None,
-        email : Optional[str] = None,
-        attributes : Optional[Dict[str, Any]] = None,
-        user_id : Optional[int] = None,
-        instance : Optional[str] = None
+        username: str,
+        password: Optional[str] = None,
+        type: Optional[str] = None,
+        email: Optional[str] = None,
+        attributes: Optional[Dict[str, Any]] = None,
+        user_id: Optional[int] = None,
+        instance: Optional[str] = None
     ):
         if password is None:
             password = ''
         self.password = password
-        #  self.password_hash = get_pwd_context().encrypt(password)
         self.password_hash = get_pwd_context().hash(password)
         self.username = username
         self.email = email
@@ -56,7 +55,7 @@ class User():
     @property
     def attributes(self) -> Dict[str, Any]:
         if self._attributes is None:
-            self._attributes = dict()
+            self._attributes = {}
         return self._attributes
 
     @property
@@ -71,13 +70,6 @@ class User():
     def user_id(self) -> int:
         """NOTE: This causes recursion with the API,
               so don't try to get fancy with read-only attributes.
-
-        Parameters
-        ----------
-
-        Returns
-        -------
-
         """
         return self._user_id
 

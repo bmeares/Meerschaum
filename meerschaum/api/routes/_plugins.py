@@ -22,8 +22,8 @@ from meerschaum.api import (
 from meerschaum.api.tables import get_tables
 from fastapi import FastAPI, File, UploadFile
 from meerschaum.utils.packages import attempt_import
-import meerschaum._internal.User
-from meerschaum._internal.Plugin import Plugin
+import meerschaum.core
+from meerschaum.core import Plugin
 starlette_responses = attempt_import('starlette.responses', warn=False)
 FileResponse = starlette_responses.FileResponse
 
@@ -36,7 +36,7 @@ def register_plugin(
         version: str = None,
         attributes: str = None,
         archive : UploadFile = File(...),
-        curr_user : 'meerschaum._internal.User.User' = fastapi.Depends(manager),
+        curr_user : 'meerschaum.core.User' = fastapi.Depends(manager),
     ) -> SuccessTuple:
     """
     Register a plugin and save its archive file.
@@ -55,7 +55,7 @@ def register_plugin(
     archive: UploadFile :
         The archive file of the plugin.
 
-    curr_user: 'meerschaum._internal.User.User'
+    curr_user: 'meerschaum.core.User'
         The logged-in user.
 
     Returns
@@ -117,6 +117,7 @@ def get_plugin(
         return FileResponse(plugin.archive_path, filename=f'{plugin.name}.tar.gz')
     return False, f"Archive for plugin '{plugin}' could not be found."
 
+
 @app.get(plugins_endpoint + '/{name}/attributes', tags=['Plugins'])
 def get_plugin_attributes(
         name : str
@@ -151,7 +152,7 @@ def get_plugins(
 @app.delete(plugins_endpoint + '/{name}', tags=['Plugins'])
 def delete_plugin(
         name : str,
-        curr_user : 'meerschaum._internal.User.User' = fastapi.Depends(manager),
+        curr_user : 'meerschaum.core.User' = fastapi.Depends(manager),
     ) -> SuccessTuple:
     """
     Delete a plugin and its archive file from the repository.

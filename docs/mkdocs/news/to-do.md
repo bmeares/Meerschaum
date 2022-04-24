@@ -98,5 +98,7 @@ Below are some ongoing tasks I have planned for Meerschaum. This is not an exhau
 ## 🔨 Refactoring
 - [ ] Consolidate SQL-specific functions to one package to make adding flavors easier.
 - [x] Add `typing` hinting to the Python package API.
-- [ ] Migrate `meerschaum.actions.shell` to `meerschaum._internal.shell`.
+- [x] Migrate `meerschaum.actions.shell` to `meerschaum._internal.shell`.
+- [x] Migrate `Plugin` and `Pipe` to `core`.
 - [x] Rewrite docstrings from reST- to numpy-style.
+- [x] Fix pydoc formatting.

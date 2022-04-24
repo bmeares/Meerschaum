@@ -18,10 +18,10 @@ from meerschaum.api import (
 )
 from meerschaum.api.tables import get_tables
 from starlette.responses import Response, JSONResponse
-from meerschaum._internal.User import User
+from meerschaum.core import User
 import os, pathlib, datetime
 
-import meerschaum._internal.User
+import meerschaum.core
 sqlalchemy = attempt_import('sqlalchemy')
 users_endpoint = endpoints['users']
 
@@ -30,7 +30,7 @@ from meerschaum.config.static import _static_config
 
 @app.get(users_endpoint + "/me", tags=['Users'])
 def read_current_user(
-        curr_user : 'meerschaum._internal.User.User' = fastapi.Depends(manager),
+        curr_user: 'meerschaum.core.User' = fastapi.Depends(manager),
     ) -> Dict[str, Union[str, int]]:
     """
     Get information about the currently logged-in user.
@@ -86,7 +86,7 @@ def edit_user(
         type: Optional[str] = None,
         email: Optional[str] = None,
         attributes: Optional[Dict[str, Any]] = None,
-        curr_user: 'meerschaum._internal.User.User' = fastapi.Depends(manager),
+        curr_user: 'meerschaum.core.User' = fastapi.Depends(manager),
     ) -> SuccessTuple:
     """
     Edit an existing user.
@@ -120,8 +120,8 @@ def get_user_attributes(
 
 @app.delete(users_endpoint + "/{username}", tags=['Users'])
 def delete_user(
-        username : str,
-        curr_user : 'meerschaum._internal.User.User' = fastapi.Depends(manager),
+        username: str,
+        curr_user: 'meerschaum.core.User' = fastapi.Depends(manager),
     ) -> SuccessTuple:
     """
     Delete a user.
@@ -140,7 +140,7 @@ def delete_user(
 @app.get(users_endpoint + '/{username}/password_hash', tags=['Users'])
 def get_user_password_hash(
         username: str,
-        curr_user: 'meerschaum._internal.User.User' = fastapi.Depends(manager),
+        curr_user: 'meerschaum.core.User' = fastapi.Depends(manager),
     ) -> Union[str, HTTPException]:
     """
     If configured to allow chaining, return a user's password_hash.
@@ -152,7 +152,7 @@ def get_user_password_hash(
 @app.get(users_endpoint + '/{username}/type', tags=['Users'])
 def get_user_type(
         username : str,
-        curr_user : 'meerschaum._internal.User.User' = fastapi.Depends(manager),
+        curr_user : 'meerschaum.core.User' = fastapi.Depends(manager),
     ) -> Union[str, HTTPException]:
     """
     If configured to allow chaining, return a user's type.

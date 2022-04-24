@@ -11,7 +11,7 @@ from meerschaum.utils.typing import SuccessTuple
 
 from meerschaum.api import fastapi, app, endpoints, get_api_connector, debug, manager
 from meerschaum.actions import actions
-import meerschaum._internal.User
+import meerschaum.core
 actions_endpoint = endpoints['actions']
 
 @app.get(actions_endpoint, tags=['Actions'])
@@ -22,7 +22,7 @@ def get_actions() -> list:
 def do_action(
         action: str,
         keywords: dict = fastapi.Body(...),
-        curr_user: 'meerschaum._internal.User.User' = fastapi.Depends(manager),
+        curr_user: 'meerschaum.core.User' = fastapi.Depends(manager),
     ) -> SuccessTuple:
     """
     Perform a Meerschaum action (if permissions allow it).
@@ -34,9 +34,6 @@ def do_action(
         
     keywords: dict :
         The keywords dictionary to pass to the action.
-
-    curr_user: 'meerschaum._internal.User.User' :
-         (Default value = fastapi.Depends(manager))
 
     Returns
     -------

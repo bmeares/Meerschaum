@@ -3,12 +3,10 @@
 Below is a brief description of the Meerschaum internal modules. For further information, please visit [docs.meerschaum.io](https://docs.meerschaum.io/).
 
 - `_internal`  
-  Internal modules, such as `Plugin` and `User` implementations are defined here. Modules within `_internal` are not intended for public API use.
+  Internal modules, such as `docs`, `gui`, and `term` implementations are defined here. Modules within `_internal` are not intended for public API use.
 
 - `actions`  
-  Default actions such as `show` and `bootstrap` are implemented as sub-modules and may be accessed from the `meerschaum.actions.actions` dictionary. Plugins are loaded into `actions.plugins` on startup, and actions from plugins are added to the actions dictionary.
-
-  Additionally, command-line arguments and the shell implementation are defined as sub-modules.
+  Default actions such as `show` and `bootstrap` are implemented as sub-modules and may be accessed from the `meerschaum.actions.actions` dictionary. Actions from plugins are added to the actions dictionary.
 
 - `api`  
   The `fastapi` app and `dash` web app are defined here.
@@ -23,11 +21,11 @@ Below is a brief description of the Meerschaum internal modules. For further inf
     - `APIConnector`: Interact with pipes via web requests.
     - `PluginConnector`: Wrapper for plugins' `fetch()` or `sync()` methods.
 
-- `Pipe`  
-  The `Pipe` class methods are defined here. Most of the methods are wrapper of instance connector methods.
+- `core`
+  Primary class definitions reside here, such as `Pipe` and `User`.
 
 - `plugins`  
-  Public plugins API functions such as `@make_action` and `@api_plugin` are defined here.
+  Public plugins API functions such as `@make_action` and `@api_plugin` as well as the `Plugin` class are defined here.
 
 - `utils`  
   The `utils` module is a parent for many useful tools, such as custom implementations for daemons, threads, processes, packages, typing, prompts, warnings, and more.

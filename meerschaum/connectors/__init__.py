@@ -16,7 +16,11 @@ from meerschaum.utils.typing import Any, SuccessTuple, Union, Optional, Sequence
 from meerschaum.utils.threading import Lock, RLock
 
 from meerschaum.connectors.Connector import Connector
+from meerschaum.connectors.sql.SQLConnector import SQLConnector
+from meerschaum.connectors.api.APIConnector import APIConnector
 from meerschaum.connectors.sql._create_engine import flavor_configs as sql_flavor_configs
+
+__all__ = ("Connector", "SQLConnector", "APIConnector", "get_connector", "is_connected")
 
 ### store connectors partitioned by
 ### type, label for reuse

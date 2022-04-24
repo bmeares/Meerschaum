@@ -11,7 +11,7 @@ from meerschaum.utils.typing import List, Tuple, SuccessTuple
 from meerschaum.utils.packages import attempt_import, import_dcc, import_html
 html, dcc = import_html(), import_dcc()
 import dash_bootstrap_components as dbc
-from meerschaum._internal.Plugin import Plugin
+from meerschaum.core import Plugin
 from meerschaum.api.dash import dash_app, debug, active_sessions
 from meerschaum.api import get_api_connector, endpoints
 

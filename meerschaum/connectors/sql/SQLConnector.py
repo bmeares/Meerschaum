@@ -24,7 +24,7 @@ class SQLConnector(Connector):
 
     from ._create_engine import flavor_configs, create_engine
     from ._sql import read, value, exec, execute, to_sql
-    from .tools import test_connection
+    from meerschaum.utils.sql import test_connection
     from ._fetch import fetch
     from ._cli import cli
     from ._pipes import (

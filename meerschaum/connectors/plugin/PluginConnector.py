@@ -24,20 +24,9 @@ class PluginConnector(Connector):
         super().__init__('plugin', label=label, **kw)
 
         import os, pathlib, sys
-        from meerschaum._internal.Plugin import Plugin
+        from meerschaum.core import Plugin
         from meerschaum.utils.warnings import error, warn
-        #  from meerschaum.config._paths import PLUGINS_RESOURCES_PATH
-        #  if str(PLUGINS_RESOURCES_PATH.parent) not in sys.path:
-            #  sys.path.append(str(PLUGINS_RESOURCES_PATH.parent))
         self._plugin = Plugin(self.label)
-
-        #  self.resource_path = None
-        #  for _plugin in os.listdir(PLUGINS_RESOURCES_PATH):
-            #  plugin = _plugin.replace('.py', '')
-            #  if plugin == self.label:
-                #  self.resource_path = pathlib.Path(os.path.join(PLUGINS_RESOURCES_PATH, plugin))
-                #  break
-        #  if not self.resource_path:
         if self._plugin.module is None:
             error(f"Plugin '{self.label}' cannot be found. Is it installed?")
 
