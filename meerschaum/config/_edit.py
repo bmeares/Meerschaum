@@ -63,7 +63,7 @@ def edit_config(
 
 def write_config(
         config_dict: Optional[Dict[str, Any]] = None,
-        directory: Optional[Union[str, pathlib.Path]] = None,
+        directory: Union[str, pathlib.Path, None] = None,
         debug: bool = False,
         **kw : Any
     ) -> bool:
@@ -71,28 +71,20 @@ def write_config(
 
     Parameters
     ----------
-    config_dict :
+    config_dict: Optional[Dict[str, Any]], default None
         A dictionary of keys to dictionaries of configuration.
         Each key corresponds to a .yaml or .json config file.
         Writing config to a directory with different keys
         does not affect existing keys in that directory.
-    directory :
+        If not provided, use the currently loaded config dictionary.
+
+    directory: Union[str, pathlib.Path, None], default None
         The directory to which the keys are written.
-    config_dict: Optional[Dict[str :
-        
-    Any]] :
-         (Default value = None)
-    directory: Optional[Union[str :
-        
-    pathlib.Path]] :
-         (Default value = None)
-    debug: bool :
-         (Default value = False)
-    **kw : Any :
-        
+        If not provided, use the default config path (`~/.config/meerschaum/config/`).
 
     Returns
     -------
+    A bool indicating success.
 
     """
     if directory is None:

@@ -17,7 +17,13 @@ _locks = {
     '__path__': RLock(),
     'sys.path': RLock(),
 }
-__pdoc__ = {'venvs': False, 'data': False, 'stack': False, 'plugins': False}
+__all__ = (
+    "Plugin", "make_action", "api_plugin", "import_plugins",
+    "reload_plugins", "get_plugins", "get_data_plugins", "add_plugin_argument",
+)
+__pdoc__ = {
+    'venvs': False, 'data': False, 'stack': False, 'plugins': False,
+}
 
 def make_action(
         function: Callable[[Any], Any],
@@ -201,7 +207,7 @@ def load_plugins(debug: bool = False, shell: bool = False) -> None:
         recursive = True,
         modules_venvs = True
     )
-    _all += _plugins_names
+    #  _all += _plugins_names
     ### I'm appending here to keep from redefining the modules list.
     new_modules = (
         [mod for mod in modules if not mod.__name__.startswith('plugins.')]
@@ -280,21 +286,22 @@ def get_plugins_modules(*to_load) -> List['ModuleType']:
     """
     return [plugin.module for plugin in get_plugins(*to_load)]
 
-def get_data_plugins() -> List['ModuleType']:
+def get_data_plugins() -> List[Plugin]:
     """
     Only return the modules of plugins with either `fetch()` or `sync()` functions.
     """
     import inspect
+    plugins = get_plugins()
     mods = get_plugins_modules()
     data_names = {'sync', 'fetch'}
     data_plugins = []
-    for m in mods:
-        for name, ob in inspect.getmembers(m):
+    for plugin in plugins:
+        for name, ob in inspect.getmembers(plugin.module):
             if not inspect.isfunction(ob):
                 continue
             if name not in data_names:
                 continue
-            data_plugins.append(m)
+            data_plugins.append(plugin)
     return data_plugins
 
 def add_plugin_argument(*args, **kwargs) -> None:
@@ -307,7 +314,7 @@ def add_plugin_argument(*args, **kwargs) -> None:
     >>> add_plugin_argument('--foo', type=int, help="This is my help text!")
     >>> 
     """
-    from meerschaum.actions._parser import groups, _seen_plugin_args
+    from meerschaum.actions.arguments._parser import groups, _seen_plugin_args, parser
     from meerschaum.actions import _get_parent_plugin
     from meerschaum.utils.warnings import warn, error
     _parent_plugin_name = _get_parent_plugin(2)

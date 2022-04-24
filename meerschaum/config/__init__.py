@@ -12,7 +12,7 @@ import os, shutil, sys, pathlib
 from meerschaum.utils.typing import Any, Dict, Optional, Union
 
 from meerschaum.config._version import __version__
-from meerschaum.config._edit import write_config
+from meerschaum.config._edit import edit_config, write_config
 from meerschaum.config.static import _static_config
 
 from meerschaum.config._paths import (
@@ -25,12 +25,14 @@ from meerschaum.config._patch import (
     patch_config,
     apply_patch_to_config,
 )
+__all__ = ('get_plugin_config', 'write_plugin_config', 'get_config', 'write_config', 'set_config',)
+__pdoc__ = {'static': False, 'resources': False, 'stack': False, }
 
 ### apply config preprocessing (e.g. main to meta)
 config = None
 def _config(
-        *keys : str, reload : bool = False, substitute : bool = True,
-        sync_files : bool = True, write_missing : bool = True,
+        *keys: str, reload: bool = False, substitute: bool = True,
+        sync_files: bool = True, write_missing: bool = True,
     ) -> Dict[str, Any]:
     """
     Read and process the configuration file.
@@ -44,9 +46,9 @@ def _config(
             _sync_files(keys=[keys[0] if keys else None])
     return config
 
-def set_config(cf : Dict[str, Any]) -> Dict[str, Any]:
+def set_config(cf: Dict[str, Any]) -> Dict[str, Any]:
     """
-    Set the configuration dictionary to a dictionary.
+    Set the configuration dictionary.
     """
     global config
     if not isinstance(cf, dict):

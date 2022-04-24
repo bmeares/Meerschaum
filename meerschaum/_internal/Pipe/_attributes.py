@@ -13,7 +13,7 @@ from meerschaum.utils.typing import Tuple, Dict, SuccessTuple, Any, Union, Optio
 def attributes(self) -> Optional[Dict[str, Any]]:
     """
     Return a dictionary of a pipe's keys and parameters.
-    Is a superset of `meerschaum.Pipe.Pipe.parameters`.
+    Is a superset of `meerschaum.Pipe.parameters`.
     """
     from meerschaum.utils.debug import dprint
     from meerschaum.utils.warnings import warn
@@ -40,7 +40,7 @@ def parameters(self) -> Optional[Dict[str, Any]]:
 def parameters(self, parameters : Dict[str, Any]) -> None:
     """
     Set the parameters dictionary of the in-memory pipe.
-    Call `meerschaum.Pipe.Pipe.edit` to persist changes.
+    Call `meerschaum.Pipe.edit` to persist changes.
     """
     self._parameters = parameters
 
@@ -48,7 +48,7 @@ def parameters(self, parameters : Dict[str, Any]) -> None:
 @property
 def columns(self) -> Union[Dict[str, str], None]:
     """
-    If defined, return the `columns` dictionary defined in `meerschaum.Pipe.Pipe.parameters`.
+    If defined, return the `columns` dictionary defined in `meerschaum.Pipe.parameters`.
     """
     if not self.parameters:
         if '_columns' in self.__dict__:
@@ -63,7 +63,7 @@ def columns(self) -> Union[Dict[str, str], None]:
 def columns(self, columns: Dict[str, str]) -> None:
     """
     Override the columns dictionary of the in-memory pipe.
-    Call `meerschaum.Pipe.Pipe.edit` to persist changes.
+    Call `meerschaum.Pipe.edit` to persist changes.
     """
     if not self.parameters:
         self._columns = columns
@@ -73,7 +73,7 @@ def columns(self, columns: Dict[str, str]) -> None:
 @property
 def tags(self) -> Union[List[str], None]:
     """
-    If defined, return the `tags` list defined in `meerschaum.Pipe.Pipe.parameters`.
+    If defined, return the `tags` list defined in `meerschaum.Pipe.parameters`.
     """
     if not self.parameters:
         if '_tags' in self.__dict__:
@@ -88,7 +88,7 @@ def tags(self) -> Union[List[str], None]:
 def tags(self, tags: List[str, str]) -> None:
     """
     Override the tags list of the in-memory pipe.
-    Call `meerschaum.Pipe.Pipe.edit` to persist changes.
+    Call `meerschaum.Pipe.edit` to persist changes.
     """
     from meerschaum.utils.warnings import error
     from meerschaum.config.static import _static_config
@@ -259,9 +259,9 @@ def get_val_column(self, debug: bool = False) -> Union[str, None]:
 
 
 @property
-def parents(self) -> List[meerschaum.Pipe.Pipe]:
+def parents(self) -> List[meerschaum.Pipe]:
     """
-    Return a list of `meerschaum.Pipe.Pipe` objects.
+    Return a list of `meerschaum.Pipe` objects.
     These pipes will be synced before this pipe.
 
     NOTE: Not yet in use!

@@ -92,6 +92,7 @@ packages : Dict[str, Dict[str, str]] = {
     'docs': {
         'mkdocs'                     : 'mkdocs>=1.1.2',
         'mkdocs_material'            : 'mkdocs-material>=6.2.5',
+        'mkdocs_material_extensions' : 'mkdocs-material-extensions>=1.0.3',
         'mkdocs_autolinks_plugin'    : 'mkdocs-autolinks-plugin>=0.2.0',
         'mkdocs_awesome_pages_plugin': 'mkdocs-awesome-pages-plugin>=2.5.0',
         'mkdocs_section_index'       : 'mkdocs-section-index>=0.3.3',

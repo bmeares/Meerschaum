@@ -21,10 +21,10 @@ from meerschaum.connectors.sql._create_engine import flavor_configs as sql_flavo
 ### store connectors partitioned by
 ### type, label for reuse
 connectors = {
-    'api'    : dict(),
-    'sql'    : dict(),
-    'mqtt'   : dict(),
-    'plugin' : dict(),
+    'api'    : {},
+    'sql'    : {},
+    'mqtt'   : {},
+    'plugin' : {},
 }
 _locks = {
     'connectors': RLock(),
@@ -57,9 +57,8 @@ attributes = {
         },
     },
 }
-### fill this with classes only on execution
-### for lazy loading
-types = dict()
+### Fill this with objects only when connectors are first referenced.
+types = {}
 
 def get_connector(
         type: str = None,

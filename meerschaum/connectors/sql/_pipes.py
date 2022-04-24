@@ -78,7 +78,7 @@ def edit_pipe(
 
     Parameters
     ----------
-    pipe: meerschaum.Pipe.Pipe, default None
+    pipe: meerschaum.Pipe, default None
         The pipe to be edited.
     patch: bool, default False
         If patch is `True`, update the existing parameters by cascading.
@@ -436,7 +436,7 @@ def get_backtrack_data(
 
     Parameters
     ----------
-    pipe: meerschaum.Pipe.Pipe:
+    pipe: meerschaum.Pipe:
         The pipe to get data from.
 
     backtrack_minutes: int, default 0
@@ -444,7 +444,7 @@ def get_backtrack_data(
 
     begin: Optional[datetime.datetime], default None
         Where to start traversing from. Defaults to `None`, which uses the
-        `meerschaum.Pipe.Pipe.get_sync_time` value.
+        `meerschaum.Pipe.get_sync_time` value.
 
     params: Optional[Dict[str, Any]], default None
         Additional parameters to filter by.
@@ -508,7 +508,7 @@ def get_pipe_data(
 
     Parameters
     ----------
-    pipe: meerschaum.Pipe.Pipe:
+    pipe: meerschaum.Pipe:
         The pipe to get data from.
 
     begin: Optional[datetime.datetime], default None
@@ -650,7 +650,7 @@ def get_pipe_attributes(
 
 def sync_pipe(
         self,
-        pipe: meerschaum.Pipe.Pipe,
+        pipe: meerschaum.Pipe,
         df: Union[pandas.DataFrame, str, Dict[Any, Any], None] = None,
         begin: Optional[datetime.datetime] = None,
         end: Optional[datetime.datetime] = None,
@@ -665,7 +665,7 @@ def sync_pipe(
 
     Parameters
     ----------
-    pipe: Meerschaum.Pipe.Pipe
+    pipe: meerschaum.Pipe
         The Meerschaum Pipe instance into which to sync the data.
 
     df: Union[pandas.DataFrame, str, Dict[Any, Any]]
@@ -784,7 +784,7 @@ def get_sync_time(
 
     Parameters
     ----------
-    pipe: meerschaum.Pipe.Pipe
+    pipe: meerschaum.Pipe
         The pipe to get the sync time for.
 
     params: Optional[Dict[str, Any]], default None
@@ -861,7 +861,7 @@ def pipe_exists(
 
     Parameters
     ----------
-    pipe: meerschaum.Pipe.Pipe:
+    pipe: meerschaum.Pipe:
         The pipe to check.
         
     debug: bool:, default False
@@ -881,7 +881,7 @@ def pipe_exists(
 
 def get_pipe_rowcount(
         self,
-        pipe: meerschaum.Pipe.Pipe,
+        pipe: meerschaum.Pipe,
         begin: Optional[datetime.datetime] = None,
         end: Optional[datetime.datetime] = None,
         remote: bool = False,
@@ -893,7 +893,7 @@ def get_pipe_rowcount(
 
     Parameters
     ----------
-    pipe: meerschaum.Pipe.Pipe
+    pipe: meerschaum.Pipe
         The pipe to query with.
         
     begin: Optional[datetime.datetime], default None
@@ -984,7 +984,7 @@ def drop_pipe(
 
     Parameters
     ----------
-    pipe: meerschaum.Pipe.Pipe
+    pipe: meerschaum.Pipe
         The pipe to drop.
         
     """
@@ -1015,7 +1015,7 @@ def clear_pipe(
 
     Parameters
     ----------
-    pipe: meerschaum.Pipe.Pipe
+    pipe: meerschaum.Pipe
         The pipe to clear.
         
     begin: Optional[datetime.datetime], default None
@@ -1056,11 +1056,11 @@ def get_pipe_table(
         debug: bool = False,
     ) -> sqlalchemy.Table:
     """
-    Return the `sqlalchemy.Table` object for a `meerschaum.Pipe.Pipe`.
+    Return the `sqlalchemy.Table` object for a `meerschaum.Pipe`.
 
     Parameters
     ----------
-    pipe: meerschaum.Pipe.Pipe:
+    pipe: meerschaum.Pipe:
         The pipe in question.
         
 

@@ -26,7 +26,7 @@ humanfriendly = attempt_import('humanfriendly')
 
 def pipe_from_ctx(ctx, trigger_property: str = 'n_clicks') -> Union[mrsm.Pipe, None]:
     """
-    Return a `meerschaum.Pipe.Pipe` object from a dynamic object with an
+    Return a `meerschaum.Pipe` object from a dynamic object with an
     index of a pipe's meta dictionary.
     """
     try:

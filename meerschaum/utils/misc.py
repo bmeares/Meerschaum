@@ -277,7 +277,7 @@ def edit_file(
     return rc == 0
 
 def is_pipe_registered(
-        pipe: 'meerschaum.Pipe.Pipe',
+        pipe: 'meerschaum.Pipe',
         pipes: PipesDict,
         debug: bool = False
     ) -> bool:
@@ -286,7 +286,7 @@ def is_pipe_registered(
 
     Parameters
     ----------
-    pipe: meerschaum.Pipe.Pipe
+    pipe: meerschaum.Pipe
         The pipe to see if it's in the dictionary.
         
     pipes: PipesDict
@@ -1317,7 +1317,8 @@ def get_connector_labels(
     Parameters
     ----------
     *types: str
-        The connector types. If none are provided, use the defined types (`'sql'` and `'api'`) and `'plugin'`.
+        The connector types.
+        If none are provided, use the defined types (`'sql'` and `'api'`) and `'plugin'`.
 
     search_term: str, default ''
         A filter on the connectors' labels.
@@ -1341,7 +1342,10 @@ def get_connector_labels(
     for t in _types:
         if t == 'plugin':
             from meerschaum.plugins import get_data_plugins
-            conns += [f'{t}:' + m.__name__.split('.')[-1] for m in get_data_plugins()]
+            conns += [
+                f'{t}:' + plugin.module.__name__.split('.')[-1]
+                for plugin in get_data_plugins()
+            ]
             continue
         conns += [ f'{t}:{label}' for label in connectors.get(t, {}) if label != 'default' ]
 
@@ -1355,7 +1359,7 @@ def get_connector_labels(
     return sorted(possibilities)
 
 
-def json_serialize_datetime(dt: datetime.datetime) -> Optional[str]:
+def json_serialize_datetime(dt: 'datetime.datetime') -> Union[str, None]:
     """
     Serialize a datetime.datetime object into JSON (ISO format string).
     
@@ -1375,11 +1379,11 @@ def json_serialize_datetime(dt: datetime.datetime) -> Optional[str]:
 
 def wget(
         url: str,
-        dest: Optional[Union[str, pathlib.Path]] = None,
+        dest: Optional[Union[str, 'pathlib.Path']] = None,
         color: bool = True,
         debug: bool = False,
         **kw: Any
-    ) -> pathlib.Path:
+    ) -> 'pathlib.Path':
     """
     Mimic `wget` with `requests`.
 
