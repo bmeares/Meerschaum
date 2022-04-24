@@ -9,7 +9,7 @@ Define different windows for the GUI application.
 from __future__ import annotations
 from meerschaum.utils.typing import List, Dict, Optional
 
-from meerschaum.gui.app import toga
+from meerschaum._internal.gui.app import toga
 
 def get_windows(**kw) -> Dict[str, toga.window.Window]:
     return {
@@ -21,7 +21,7 @@ def get_windows(**kw) -> Dict[str, toga.window.Window]:
 def get_main_window(instance: Optional[str], debug: bool = False, **kw) -> toga.window.Window:
     from meerschaum.config.static import _static_config
     from meerschaum.utils.misc import get_connector_labels
-    from meerschaum.gui.app.pipes import build_pipes_tree
+    from meerschaum._internal.gui.app.pipes import build_pipes_tree
 
     main_window = toga.MainWindow(title=_static_config()['setup']['formal_name'], size=(1280, 720))
     tree = build_pipes_tree(mrsm_instance=instance, debug=debug, **kw)
@@ -69,5 +69,5 @@ def _open_webterm():
     """Foo bar"""
 
 def show_test_window(button):
-    from meerschaum.gui import get_app
+    from meerschaum._internal.gui import get_app
     get_app()._windows['terminal'].show()

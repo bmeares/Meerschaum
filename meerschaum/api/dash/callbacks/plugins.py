@@ -10,7 +10,7 @@ from __future__ import annotations
 from meerschaum.utils.typing import Optional, Dict, Any
 from meerschaum.api.dash import dash_app, debug, active_sessions
 from meerschaum.api import get_api_connector, endpoints
-from meerschaum._internal.Plugin import Plugin
+from meerschaum.core import Plugin
 from meerschaum.utils.packages import attempt_import, import_dcc, import_html
 dash = attempt_import('dash', lazy=False)
 from dash.exceptions import PreventUpdate

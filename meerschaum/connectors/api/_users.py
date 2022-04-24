@@ -11,23 +11,11 @@ from meerschaum.utils.typing import Optional, Any, List, SuccessTuple
 
 def get_users(
         self,
-        debug : bool = False,
+        debug: bool = False,
         **kw : Any
     ) -> List[str]:
     """
-
-    Parameters
-    ----------
-    debug : bool :
-         (Default value = False)
-    **kw : Any :
-        
-
-    Returns
-    -------
-    type
-        
-
+    Return a list of registered usernames.
     """
     from meerschaum.config.static import _static_config
     import json
@@ -45,25 +33,11 @@ def get_users(
 
 def edit_user(
         self,
-        user : 'meerschaum._internal.User.User',
-        debug : bool = False,
-        **kw : Any
+        user: 'meerschaum.core.User',
+        debug: bool = False,
+        **kw: Any
     ) -> SuccessTuple:
-    """Edit an existing user.
-
-    Parameters
-    ----------
-    user : 'meerschaum._internal.User.User' :
-        
-    debug : bool :
-         (Default value = False)
-    **kw : Any :
-        
-
-    Returns
-    -------
-
-    """
+    """Edit an existing user."""
     import json
     from meerschaum.config.static import _static_config
     r_url = f"{_static_config()['api']['endpoints']['users']}/{user.username}/edit"
@@ -78,7 +52,7 @@ def edit_user(
         if isinstance(_json, dict) and 'detail' in _json:
             return False, _json['detail']
         success_tuple = tuple(_json)
-    except:
+    except Exception as e:
         msg = response.text if response else f"Failed to edit user '{user}'."
         return False, msg
 
@@ -86,32 +60,18 @@ def edit_user(
 
 def register_user(
         self,
-        user : 'meerschaum._internal.User.User',
-        debug : bool = False,
-        **kw : Any
+        user: 'meerschaum.core.User',
+        debug: bool = False,
+        **kw: Any
     ) -> SuccessTuple:
-    """Register a new user.
-
-    Parameters
-    ----------
-    user : 'meerschaum._internal.User.User' :
-        
-    debug : bool :
-         (Default value = False)
-    **kw : Any :
-        
-
-    Returns
-    -------
-
-    """
+    """Register a new user."""
     import json
     from meerschaum.config.static import _static_config
     r_url = f"{_static_config()['api']['endpoints']['users']}/{user.username}/register"
     params = {
-        'password' : user.password,
-        'email' : user.email,
-        'attributes' : user.attributes,
+        'password'  : user.password,
+        'email'     : user.email,
+        'attributes': user.attributes,
     }
     response = self.post(r_url, json=user.attributes, params=params, debug=debug)
     try:
@@ -127,25 +87,11 @@ def register_user(
     
 def get_user_id(
         self,
-        user : 'meerschaum._internal.User.User',
-        debug : bool = False,
-        **kw
+        user: 'meerschaum.core.User',
+        debug: bool = False,
+        **kw: Any
     ) -> Optional[int]:
-    """Get a user's ID.
-
-    Parameters
-    ----------
-    user : 'meerschaum._internal.User.User' :
-        
-    debug : bool :
-         (Default value = False)
-    **kw :
-        
-
-    Returns
-    -------
-
-    """
+    """Get a user's ID."""
     from meerschaum.config.static import _static_config
     import json
     r_url = f"{_static_config()['api']['endpoints']['users']}/{user.username}/id"
@@ -158,25 +104,11 @@ def get_user_id(
 
 def delete_user(
         self,
-        user : 'meerschaum._internal.User.User',
-        debug : bool = False,
-        **kw
+        user: 'meerschaum.core.User',
+        debug: bool = False,
+        **kw: Any
     ) -> SuccessTuple:
-    """Delete a user.
-
-    Parameters
-    ----------
-    user : 'meerschaum._internal.User.User' :
-        
-    debug : bool :
-         (Default value = False)
-    **kw :
-        
-
-    Returns
-    -------
-
-    """
+    """Delete a user."""
     from meerschaum.config.static import _static_config
     import json
     r_url = f"{_static_config()['api']['endpoints']['users']}/{user.username}"
@@ -192,25 +124,11 @@ def delete_user(
 
 def get_user_attributes(
         self,
-        user : 'meerschaum._internal.User.User',
-        debug : bool = False,
+        user: 'meerschaum.core.User',
+        debug: bool = False,
         **kw
     ) -> int:
-    """Get a user's attributes.
-
-    Parameters
-    ----------
-    user : 'meerschaum._internal.User.User' :
-        
-    debug : bool :
-         (Default value = False)
-    **kw :
-        
-
-    Returns
-    -------
-
-    """
+    """Get a user's attributes."""
     from meerschaum.config.static import _static_config
     import json
     r_url = f"{_static_config()['api']['endpoints']['users']}/{user.username}/attributes"
@@ -227,25 +145,11 @@ def get_user_attributes(
 
 def get_user_password_hash(
         self,
-        user : 'meerschaum._internal.User.User',
-        debug : bool = False,
-        **kw
+        user: 'meerschaum.core.User',
+        debug: bool = False,
+        **kw: Any
     ) -> Optional[str]:
-    """If configured, get a user's password hash.
-
-    Parameters
-    ----------
-    user : 'meerschaum._internal.User.User' :
-        
-    debug : bool :
-         (Default value = False)
-    **kw :
-        
-
-    Returns
-    -------
-
-    """
+    """If configured, get a user's password hash."""
     from meerschaum.config.static import _static_config
     r_url = _static_config()['api']['endpoints']['users'] + '/' + user.username + '/password_hash'
     response = self.get(r_url, debug=debug, **kw)
@@ -255,25 +159,11 @@ def get_user_password_hash(
 
 def get_user_type(
         self,
-        user : 'meerschaum._internal.User.User',
-        debug : bool = False,
-        **kw
+        user: 'meerschaum.core.User',
+        debug: bool = False,
+        **kw: Any
     ) -> Optional[str]:
-    """If configured, get a user's type.
-
-    Parameters
-    ----------
-    user : 'meerschaum._internal.User.User' :
-        
-    debug : bool :
-         (Default value = False)
-    **kw :
-        
-
-    Returns
-    -------
-
-    """
+    """If configured, get a user's type."""
     from meerschaum.config.static import _static_config
     r_url = _static_config()['api']['endpoints']['users'] + '/' + user.username + '/type'
     response = self.get(r_url, debug=debug, **kw)

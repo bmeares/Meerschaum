@@ -280,7 +280,7 @@ def get_sync_time(
     ----------
     params: Optional[Dict[str, Any]], default None
         Dictionary to build a WHERE clause for a specific column.
-        See `meerschaum.connectors.sql.tools.build_where`.
+        See `meerschaum.utils.sql.build_where`.
 
     newest: bool, default True
         If `True`, get the most recent datetime (honoring `params`).

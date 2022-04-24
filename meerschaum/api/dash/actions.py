@@ -26,7 +26,7 @@ from meerschaum.api.dash.websockets import ws_send
 from meerschaum.api._websockets import websockets
 html, dcc = import_html(), import_dcc()
 from meerschaum.config import get_config
-from meerschaum._internal.User import User
+from meerschaum.core import User
 
 def execute_action(state: WebState):
     """

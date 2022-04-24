@@ -11,7 +11,7 @@ import datetime
 from tests import debug
 from tests.pipes import all_pipes, stress_pipes, remote_pipes
 from tests.connectors import conns
-from meerschaum._internal.User import User
+from meerschaum.core import User
 
 @pytest.mark.parametrize("flavor", list(all_pipes.keys()))
 def test_register_user(flavor: str):

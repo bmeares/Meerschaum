@@ -7,37 +7,23 @@ Log into the API instance or refresh the token.
 """
 
 from __future__ import annotations
-from meerschaum.utils.typing import SuccessTuple, Any
+from meerschaum.utils.typing import SuccessTuple, Any, Union
 
 def login(
         self,
         debug: bool = False,
         warn: bool = True,
-        **kw : Any
+        **kw: Any
     ) -> SuccessTuple:
-    """Log in and set the session token.
-
-    Parameters
-    ----------
-    debug: bool :
-         (Default value = False)
-    warn: bool :
-         (Default value = True)
-    **kw : Any :
-        
-
-    Returns
-    -------
-
-    """
+    """Log in and set the session token."""
     from meerschaum.utils.warnings import warn as _warn, info, error
-    from meerschaum._internal.User import User
+    from meerschaum.core import User
     from meerschaum.config.static import _static_config
     import json, datetime
     try:
         login_data = {
-            'username' : self.username,
-            'password' : self.password,
+            'username': self.username,
+            'password': self.password,
         }
     except AttributeError:
         return False, f"Please login with the command `login {self}`."
@@ -73,22 +59,13 @@ def login(
 
 def test_connection(
         self,
-        **kw : Any
+        **kw: Any
     ) -> Union[bool, None]:
-    """Test if a successful connection to the API may be made.
-
-    Parameters
-    ----------
-    **kw : Any :
-        
-
-    Returns
-    -------
-
-    """
+    """Test if a successful connection to the API may be made."""
     from meerschaum.utils.misc import retry_connect
     _default_kw = {
-        'max_retries': 1, 'retry_wait': 0, 'warn': False, 'connector': self, 'enforce_chaining': False
+        'max_retries': 1, 'retry_wait': 0, 'warn': False,
+        'connector': self, 'enforce_chaining': False
     }
     _default_kw.update(kw)
     try:
@@ -97,23 +74,3 @@ def test_connection(
         return False
 
 
-def refresh(
-        self,
-        debug : bool = False,
-        **kw : Any,
-    ):
-    """Refresh the access token.
-    NOTE: Not implemented!
-
-    Parameters
-    ----------
-    debug : bool :
-         (Default value = False)
-    **kw : Any :
-        
-
-    Returns
-    -------
-
-    """
-    pass

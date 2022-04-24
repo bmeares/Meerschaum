@@ -33,8 +33,8 @@ for module in modules:
     ### 1. Find all functions in all modules in `actions` package
     ###     (skip functions that begin with '_')
     ### 2. Add them as members to the Shell class
-    ###     - Original definition : meerschaum.actions.shell.Shell
-    ###     - New definition      : meerschaum.actions.Shell
+    ###     - Original definition : meerschaum._internal.shell.Shell
+    ###     - New definition      : meerschaum._internal.Shell
     ### 3. Populate the actions dictionary with function names and functions
     ###
     ### UPDATE:
@@ -66,7 +66,7 @@ def get_shell(
     """Initialize and return the Meerschaum shell object."""
     global _shell
     from meerschaum.utils.debug import dprint
-    import meerschaum.actions.shell as shell_pkg
+    import meerschaum._internal.shell as shell_pkg
     if sysargs is None:
         sysargs = []
 
@@ -108,7 +108,9 @@ def get_subactions(action: str) -> Dict[str, Callable[[Any], Any]]:
     return subactions
 
 
-def get_completer(action : str) -> Optional[Callable[['Shell', str, str, int, int], List[str]]]:
+def get_completer(action: str) -> Union[
+        Callable[['meerschaum._internal.shell.Shell', str, str, int, int], List[str]], None
+    ]:
     """Search for a custom completer function for an action."""
     import importlib, inspect
     try:

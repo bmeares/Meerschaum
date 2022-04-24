@@ -7,32 +7,18 @@ Manage users via the SQL Connector
 """
 
 from __future__ import annotations
-from meerschaum.utils.typing import SuccessTuple, Optional, Any, Dict, List
+from meerschaum.utils.typing import SuccessTuple, Optional, Any, Dict, List, Union
 
 def register_user(
         self,
-        user : meerschaum._internal.User.User,
-        debug : bool = False,
-        **kw : Any
+        user: meerschaum.core.User,
+        debug: bool = False,
+        **kw: Any
     ) -> SuccessTuple:
-    """Register a new user.
-
-    Parameters
-    ----------
-    user : meerschaum._internal.User.User :
-        
-    debug : bool :
-         (Default value = False)
-    **kw : Any :
-        
-
-    Returns
-    -------
-
-    """
+    """Register a new user."""
     from meerschaum.utils.warnings import warn, error, info
     from meerschaum.utils.packages import attempt_import
-    from meerschaum.connectors.sql.tools import json_flavors
+    from meerschaum.utils.sql import json_flavors
     sqlalchemy = attempt_import('sqlalchemy')
 
     valid_tuple = valid_username(user.username)
@@ -71,18 +57,8 @@ def register_user(
         return False, f"Failed to register user '{user}'."
     return True, f"Successfully registered user '{user}'."
 
-def valid_username(username : str) -> SuccessTuple:
-    """Verify that a given username is valid.
-
-    Parameters
-    ----------
-    username : str :
-        
-
-    Returns
-    -------
-
-    """
+def valid_username(username: str) -> SuccessTuple:
+    """Verify that a given username is valid."""
     fail_reasons = []
 
     min_length = 4
@@ -115,29 +91,15 @@ def valid_username(username : str) -> SuccessTuple:
 
 def edit_user(
         self,
-        user : meerschaum._internal.User.User,
+        user: meerschaum.core.User,
         debug : bool = False,
         **kw : Any
     ) -> SuccessTuple:
-    """Update an existing user's metadata.
-
-    Parameters
-    ----------
-    user : meerschaum._internal.User.User :
-        
-    debug : bool :
-         (Default value = False)
-    **kw : Any :
-        
-
-    Returns
-    -------
-
-    """
+    """Update an existing user's metadata."""
     from meerschaum.utils.packages import attempt_import
     sqlalchemy = attempt_import('sqlalchemy')
     from meerschaum.connectors.sql.tables import get_tables
-    from meerschaum.connectors.sql.tools import json_flavors
+    from meerschaum.utils.sql import json_flavors
     users = get_tables(mrsm_instance=self, debug=debug)['users']
 
     user_id = user.user_id if user.user_id is not None else self.get_user_id(user, debug=debug)
@@ -178,22 +140,10 @@ def edit_user(
 
 def get_user_id(
         self,
-        user : meerschaum._internal.User.User,
+        user: meerschaum.core.User,
         debug : bool = False
     ) -> Optional[int]:
-    """If a user is registered, return the user_id.
-
-    Parameters
-    ----------
-    user : meerschaum._internal.User.User :
-        
-    debug : bool :
-         (Default value = False)
-
-    Returns
-    -------
-
-    """
+    """If a user is registered, return the `user_id`."""
     ### ensure users table exists
     from meerschaum.utils.packages import attempt_import
     sqlalchemy = attempt_import('sqlalchemy')
@@ -212,9 +162,12 @@ def get_user_id(
 
 def get_user_attributes(
         self,
-        user : meerschaum._internal.User.User,
-        debug : bool = False
-    ) -> Optional[Dict[str, Any]]:
+        user: meerschaum.core.User,
+        debug: bool = False
+    ) -> Union[Dict[str, Any], None]:
+    """
+    Return the user's attributes.
+    """
     ### ensure users table exists
     from meerschaum.utils.warnings import warn
     from meerschaum.utils.packages import attempt_import
@@ -249,22 +202,10 @@ def get_user_attributes(
 
 def delete_user(
         self,
-        user : meerschaum._internal.User.User,
-        debug : bool = False
+        user: meerschaum.core.User,
+        debug: bool = False
     ) -> SuccessTuple:
-    """Delete a user's record from the users table.
-
-    Parameters
-    ----------
-    user : meerschaum._internal.User.User :
-        
-    debug : bool :
-         (Default value = False)
-
-    Returns
-    -------
-
-    """
+    """Delete a user's record from the users table."""
     ### ensure users table exists
     from meerschaum.connectors.sql.tables import get_tables
     users = get_tables(mrsm_instance=self, debug=debug)['users']
@@ -322,26 +263,13 @@ def get_users(
 
 def get_user_password_hash(
         self,
-        user : meerschaum._internal.User.User,
-        debug : bool = False,
-        **kw : Any
+        user: meerschaum.core.User,
+        debug: bool = False,
+        **kw: Any
     ) -> Optional[str]:
     """
-
-    Parameters
-    ----------
-    user : meerschaum._internal.User.User :
-        
-    debug : bool :
-         (Default value = False)
-    **kw : Any :
-        
-
-    Returns
-    -------
-    type
-        
-
+    Return the password has for a user.
+    **NOTE**: This may be dangerous and is only allowed if the security settings explicity allow it.
     """
     from meerschaum.utils.debug import dprint
     from meerschaum.connectors.sql.tables import get_tables
@@ -367,26 +295,12 @@ def get_user_password_hash(
 
 def get_user_type(
         self,
-        user : meerschaum._internal.User.User,
-        debug : bool = False,
-        **kw : Any
+        user: meerschaum.core.User,
+        debug: bool = False,
+        **kw: Any
     ) -> Optional[str]:
     """
-
-    Parameters
-    ----------
-    user : meerschaum._internal.User.User :
-        
-    debug : bool :
-         (Default value = False)
-    **kw : Any :
-        
-
-    Returns
-    -------
-    type
-        
-
+    Return the user's type.
     """
     from meerschaum.connectors.sql.tables import get_tables
     users = get_tables(mrsm_instance=self, debug=debug)['users']

@@ -3,7 +3,7 @@
 # vim:fenc=utf-8
 
 """
-Register Pipes via the Meerschaum API
+Register Pipes via the Meerschaum API.
 """
 
 from __future__ import annotations
@@ -23,11 +23,12 @@ from meerschaum.api import (
 from meerschaum.api.models import MetaPipe
 from meerschaum.utils.packages import attempt_import
 from meerschaum.utils.misc import is_pipe_registered, round_time
-import meerschaum._internal.User
+import meerschaum.core.User
 import datetime
 pipes_endpoint = endpoints['pipes']
 from fastapi.responses import StreamingResponse
 import io
+
 
 @app.post(pipes_endpoint + '/{connector_keys}/{metric_key}/{location_key}/register', tags=['Pipes'])
 def register_pipe(
@@ -35,7 +36,7 @@ def register_pipe(
         metric_key: str,
         location_key: str,
         parameters: dict,
-        curr_user: 'meerschaum._internal.User.User' = fastapi.Depends(manager),
+        curr_user: 'meerschaum.core.User' = fastapi.Depends(manager),
     ):
     """
     Register a new pipe.
@@ -67,7 +68,7 @@ def delete_pipe(
         connector_keys: str,
         metric_key: str,
         location_key: str,
-        curr_user: 'meerschaum._internal.User.User' = fastapi.Depends(manager),
+        curr_user: 'meerschaum.core.User' = fastapi.Depends(manager),
     ):
     """
     Delete a Pipe, dropping its table.
@@ -100,7 +101,7 @@ def edit_pipe(
         location_key: str,
         parameters: dict,
         patch: bool = False,
-        curr_user: 'meerschaum._internal.User.User' = fastapi.Depends(manager),
+        curr_user: 'meerschaum.core.User' = fastapi.Depends(manager),
     ):
     """
     Edit an existing pipe.
@@ -134,7 +135,7 @@ async def fetch_pipes_keys(
         location_keys: str = "[]",
         tags: str = "[]",
         params: str = "{}",
-        curr_user: 'meerschaum._internal.User.User' = fastapi.Depends(manager),
+        curr_user: 'meerschaum.core.User' = fastapi.Depends(manager),
     ) -> list:
     """
     Get a list of tuples of all registered Pipes' keys.
@@ -150,12 +151,13 @@ async def fetch_pipes_keys(
     )
     return keys
 
+
 @app.get(pipes_endpoint, tags=['Pipes'])
 async def get_pipes(
         connector_keys : str = "",
         metric_keys : str = "",
         location_keys : str = "",
-        curr_user : 'meerschaum._internal.User.User' = fastapi.Depends(manager),
+        curr_user : 'meerschaum.core.User' = fastapi.Depends(manager),
         debug : bool = False
     ) -> dict:
     """
@@ -174,14 +176,16 @@ async def get_pipes(
 @app.get(pipes_endpoint + '/{connector_keys}', tags=['Pipes'])
 async def get_pipes_by_connector(
         connector_keys: str,
-        curr_user: 'meerschaum._internal.User.User' = fastapi.Depends(manager),
+        curr_user: 'meerschaum.core.User' = fastapi.Depends(manager),
     ) -> dict:
     """
     Get all registered Pipes by connector_keys with metadata, excluding parameters.
     """
     from meerschaum.utils.misc import replace_pipes_in_dict
     if connector_keys not in pipes():
-        raise fastapi.HTTPException(status_code=404, detail=f"connector_keys '{connector_keys}' not found.")
+        raise fastapi.HTTPException(
+            status_code=404, detail=f"connector_keys '{connector_keys}' not found."
+        )
     return replace_pipes_in_dict(pipes()[connector_keys], str)
 
 @app.get(pipes_endpoint + '/{connector_keys}/{metric_key}', tags=['Pipes'])
@@ -189,7 +193,7 @@ async def get_pipes_by_connector_and_metric(
         connector_keys: str,
         metric_key: str,
         parent: bool = False,
-        curr_user: 'meerschaum._internal.User.User' = fastapi.Depends(manager),
+        curr_user: 'meerschaum.core.User' = fastapi.Depends(manager),
     ):
     """
     Get all registered Pipes by connector_keys and metric_key with metadata, excluding parameters.
@@ -201,33 +205,41 @@ async def get_pipes_by_connector_and_metric(
     """
     from meerschaum.utils.misc import replace_pipes_in_dict
     if connector_keys not in pipes():
-        raise fastapi.HTTPException(status_code=404, detail=f"connector_keys '{connector_keys}' not found.")
+        raise fastapi.HTTPException(
+            status_code=404, detail=f"connector_keys '{connector_keys}' not found."
+        )
     if metric_key not in pipes()[connector_keys]:
         raise fastapi.HTTPException(status_code=404, detail=f"metric_key '{metric_key}' not found.")
     if parent:
         return pipes()[connector_keys][metric_key][None]
     return replace_pipes_in_dict(pipes()[connector_keys][metric_key], str)
 
+
 @app.get(pipes_endpoint + '/{connector_keys}/{metric_key}/{location_key}', tags=['Pipes'])
 async def get_pipes_by_connector_and_metric_and_location(
         connector_keys: str,
         metric_key: str,
         location_key: str,
-        curr_user: 'meerschaum._internal.User.User' = fastapi.Depends(manager),
+        curr_user: 'meerschaum.core.User' = fastapi.Depends(manager),
     ):
     """
     Get a specific Pipe with metadata, excluding parameters.
     """
     if connector_keys not in pipes():
-        raise fastapi.HTTPException(status_code=404, detail=f"connector_keys '{connector_keys}' not found.")
+        raise fastapi.HTTPException(
+            status_code=404, detail=f"connector_keys '{connector_keys}' not found."
+        )
     if metric_key not in pipes()[connector_keys]:
         raise fastapi.HTTPException(status_code=404, detail=f"metric_key '{metric_key}' not found.")
     if location_key in ('[None]', 'None', 'null'):
         location_key = None
     if location_key not in pipes()[connector_keys][metric_key]:
-        raise fastapi.HTTPException(status_code=404, detail=f"location_key '{location_key}' not found.")
+        raise fastapi.HTTPException(
+            status_code=404, detail=f"location_key '{location_key}' not found."
+        )
 
     return str(pipes()[connector_keys][metric_key][location_key])
+
 
 @app.get(pipes_endpoint + '/{connector_keys}/{metric_key}/{location_key}/sync_time', tags=['Pipes'])
 def get_sync_time(
@@ -238,7 +250,7 @@ def get_sync_time(
         newest: bool = True,
         round_down: bool = True,
         debug: bool = False,
-        curr_user: 'meerschaum._internal.User.User' = fastapi.Depends(manager),
+        curr_user: 'meerschaum.core.User' = fastapi.Depends(manager),
     ) -> 'datetime.datetime':
     """
     Get a Pipe's latest datetime value.
@@ -261,7 +273,7 @@ def sync_pipe(
         force: bool = False,
         workers: Optional[int] = None,
         columns: Optional[str] = None,
-        curr_user: 'meerschaum._internal.User.User' = fastapi.Depends(manager),
+        curr_user: 'meerschaum.core.User' = fastapi.Depends(manager),
         debug: bool = False,
     ) -> tuple:
     """
@@ -293,6 +305,7 @@ def sync_pipe(
     ))
     return result
 
+
 @app.get(pipes_endpoint + '/{connector_keys}/{metric_key}/{location_key}/data', tags=['Pipes'])
 def get_pipe_data(
         connector_keys: str,
@@ -302,7 +315,7 @@ def get_pipe_data(
         end: datetime.datetime = None,
         params: Optional[str] = None,
         orient: str = 'records',
-        curr_user: 'meerschaum._internal.User.User' = fastapi.Depends(manager),
+        curr_user: 'meerschaum.core.User' = fastapi.Depends(manager),
     ) -> str:
     """
     Get a Pipe's data. Optionally set query boundaries.
@@ -353,16 +366,20 @@ def get_pipe_data(
         #  headers = {'chunk' : chunk, 'max_chunk' : max_chunk},
     )
 
-@app.get(pipes_endpoint + '/{connector_keys}/{metric_key}/{location_key}/backtrack_data', tags=['Pipes'])
+
+@app.get(
+    pipes_endpoint + '/{connector_keys}/{metric_key}/{location_key}/backtrack_data',
+    tags=['Pipes']
+)
 def get_backtrack_data(
-        connector_keys : str,
-        metric_key : str,
-        location_key : str,
-        begin : datetime.datetime = None,
-        backtrack_minutes : int = 0,
-        params : Optional[str] = None,
-        orient : str = 'records',
-        curr_user : 'meerschaum._internal.User.User' = fastapi.Depends(manager),
+        connector_keys: str,
+        metric_key: str,
+        location_key: str,
+        begin: datetime.datetime = None,
+        backtrack_minutes: int = 0,
+        params: Optional[str] = None,
+        orient: str = 'records',
+        curr_user : 'meerschaum.core.User' = fastapi.Depends(manager),
     ) -> fastapi.Response:
     """
     Get a Pipe's backtrack data. Optionally set query boundaries.
@@ -377,7 +394,7 @@ def get_backtrack_data(
 
     pipe = get_pipe(connector_keys, metric_key, location_key)
     if not pipe.get_columns('datetime', error=False):
-        raise HTTPException(
+        raise fastapi.HTTPException(
             status_code = 400,
             detail = f"Cannot fetch backtrackdata for pipe '{pipe}' without a datetime column.",
         )
@@ -408,7 +425,7 @@ def get_pipe_csv(
         begin: datetime.datetime = None,
         end: datetime.datetime = None,
         params: Optional[str] = None,
-        curr_user: 'meerschaum._internal.User.User' = fastapi.Depends(manager),
+        curr_user: 'meerschaum.core.User' = fastapi.Depends(manager),
     ) -> str:
     """
     Get a Pipe's data as a CSV file. Optionally set query boundaries.
@@ -455,7 +472,7 @@ def get_pipe_id(
         connector_keys: str,
         metric_key: str,
         location_key: str,
-        curr_user: 'meerschaum._internal.User.User' = fastapi.Depends(manager),
+        curr_user: 'meerschaum.core.User' = fastapi.Depends(manager),
     ) -> int:
     """
     Get a Pipe's ID.
@@ -472,6 +489,7 @@ def get_pipe_id(
         raise fastapi.HTTPException(status_code=404, detail=str(e))
     return pipe_id
 
+
 @app.get(
     pipes_endpoint + '/{connector_keys}/{metric_key}/{location_key}/attributes',
     tags = ['Pipes']
@@ -480,69 +498,28 @@ def get_pipe_attributes(
         connector_keys : str,
         metric_key : str,
         location_key : str,
-        curr_user : 'meerschaum._internal.User.User' = fastapi.Depends(manager),
+        curr_user : 'meerschaum.core.User' = fastapi.Depends(manager),
     ) -> dict:
-    """
-    Get a Pipe's attributes.
-
-    Parameters
-    ----------
-    connector_keys : str :
-        
-    metric_key : str :
-        
-    location_key : str :
-        
-    curr_user : 'meerschaum._internal.User.User' :
-         (Default value = fastapi.Depends(manager))
-
-    Returns
-    -------
-
-    """
+    """Get a Pipe's attributes."""
     return get_pipe(connector_keys, metric_key, location_key).attributes
+
 
 @app.get(pipes_endpoint + '/{connector_keys}/{metric_key}/{location_key}/exists', tags=['Pipes'])
 def get_pipe_exists(
-        connector_keys : str,
-        metric_key : str,
-        location_key : str,
-        curr_user : 'meerschaum._internal.User.User' = fastapi.Depends(manager),
+        connector_keys: str,
+        metric_key: str,
+        location_key: str,
+        curr_user: 'meerschaum.core.User' = fastapi.Depends(manager),
     ) -> dict:
-    """Determine if a Pipe exists or not
-
-    Parameters
-    ----------
-    connector_keys : str :
-        
-    metric_key : str :
-        
-    location_key : str :
-        
-    curr_user : 'meerschaum._internal.User.User' :
-         (Default value = fastapi.Depends(manager))
-
-    Returns
-    -------
-
-    """
+    """Determine whether a Pipe exists."""
     return get_pipe(connector_keys, metric_key, location_key).exists()
+
 
 @app.post(endpoints['metadata'], tags=['Pipes'])
 def create_metadata(
-        curr_user : 'meerschaum._internal.User.User' = fastapi.Depends(manager),
+        curr_user : 'meerschaum.core.User' = fastapi.Depends(manager),
     ) -> bool:
-    """Create Pipe metadata tables
-
-    Parameters
-    ----------
-    curr_user : 'meerschaum._internal.User.User' :
-         (Default value = fastapi.Depends(manager))
-
-    Returns
-    -------
-
-    """
+    """Create Pipe metadata tables"""
     from meerschaum.connectors.sql.tables import get_tables
     try:
         tables = get_tables(mrsm_instance=get_api_connector(), debug=debug)
@@ -550,42 +527,19 @@ def create_metadata(
         raise fastapi.HTTPException(status_code=500, detail=str(e))
     return True
 
+
 @app.get(pipes_endpoint + '/{connector_keys}/{metric_key}/{location_key}/rowcount', tags=['Pipes'])
 def get_pipe_rowcount(
-        connector_keys : str,
-        metric_key : str,
-        location_key : str,
-        begin : Optional[datetime.datetime] = None,
-        end : Optional[datetime.datetime] = None,
-        params : Optional[Dict[str, Any]] = None,
-        curr_user : 'meerschaum._internal.User.User' = fastapi.Depends(manager),
+        connector_keys: str,
+        metric_key: str,
+        location_key: str,
+        begin: Optional[datetime.datetime] = None,
+        end: Optional[datetime.datetime] = None,
+        params: Optional[Dict[str, Any]] = None,
+        curr_user: 'meerschaum.core.User' = fastapi.Depends(manager),
     ) -> int:
     """
-
-    Parameters
-    ----------
-    connector_keys : str :
-        
-    metric_key : str :
-        
-    location_key : str :
-        
-    begin : Optional[datetime.datetime] :
-         (Default value = None)
-    end : Optional[datetime.datetime] :
-         (Default value = None)
-    params : Optional[Dict[str :
-        
-    Any]] :
-         (Default value = None)
-    curr_user : 'meerschaum._internal.User.User' :
-         (Default value = fastapi.Depends(manager))
-
-    Returns
-    -------
-    type
-        
-
+    Return a pipe's rowcount.
     """
     return get_pipe(connector_keys, metric_key, location_key).get_rowcount(
         begin = begin,
@@ -594,7 +548,11 @@ def get_pipe_rowcount(
         debug = debug
     )
 
-@app.get(pipes_endpoint + '/{connector_keys}/{metric_key}/{location_key}/columns/types', tags=['Pipes'])
+
+@app.get(
+    pipes_endpoint + '/{connector_keys}/{metric_key}/{location_key}/columns/types',
+    tags=['Pipes']
+)
 def get_pipe_columns_types(
         connector_keys : str,
         metric_key : str,

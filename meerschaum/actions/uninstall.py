@@ -45,7 +45,7 @@ def _complete_uninstall(
         del action[0]
         return options[sub](action=action, **kw)
 
-    from meerschaum.actions.shell import default_action_completer
+    from meerschaum._internal.shell import default_action_completer
     return default_action_completer(action=(['uninstall'] + action), **kw)
 
 def _uninstall_plugins(
@@ -66,7 +66,7 @@ def _uninstall_plugins(
     from meerschaum.utils.warnings import warn, error, info
     from meerschaum.utils.prompt import yes_no
     from meerschaum.connectors.parse import parse_repo_keys
-    from meerschaum._internal.Plugin import Plugin
+    from meerschaum.core import Plugin
     import os, shutil
     repo_connector = parse_repo_keys(repository)
 

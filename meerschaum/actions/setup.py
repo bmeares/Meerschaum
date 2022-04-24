@@ -45,7 +45,7 @@ def _complete_setup(
         del action[0]
         return options[sub](action=action, **kw)
 
-    from meerschaum.actions.shell import default_action_completer
+    from meerschaum._internal.shell import default_action_completer
     return default_action_completer(action=(['setup'] + action), **kw)
 
 
@@ -60,7 +60,7 @@ def _setup_plugins(
     Example:
         `setup plugins noaa covid`
     """
-    from meerschaum._internal.Plugin import Plugin
+    from meerschaum.core import Plugin
     from meerschaum.utils.warnings import warn
     from meerschaum.connectors.parse import parse_repo_keys
     from meerschaum.utils.formatting import print_tuple

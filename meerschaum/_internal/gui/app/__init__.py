@@ -12,7 +12,7 @@ from meerschaum.utils.typing import Optional, List, Dict, Any
 from meerschaum.utils.packages import attempt_import
 toga = attempt_import('toga', lazy=False, venv=None)
 
-from meerschaum.gui.app._windows import get_windows, get_main_window
+from meerschaum._internal.gui.app._windows import get_windows, get_main_window
 
 class MeerschaumApp(toga.App):
 

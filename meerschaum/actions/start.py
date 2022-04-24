@@ -50,8 +50,9 @@ def _complete_start(
         del action[0]
         return options[sub](action=action, **kw)
 
-    from meerschaum.actions.shell import default_action_completer
+    from meerschaum._internal.shell import default_action_completer
     return default_action_completer(action=(['start'] + action), **kw)
+
 
 def _start_api(action: Optional[List[str]] = None, **kw):
     """

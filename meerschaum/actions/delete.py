@@ -60,7 +60,7 @@ def _complete_delete(
         del action[0]
         return options[sub](action=action, **kw)
 
-    from meerschaum.actions.shell import default_action_completer
+    from meerschaum._internal.shell import default_action_completer
     return default_action_completer(action=(['delete'] + action), **kw)
 
 def _delete_pipes(
@@ -222,7 +222,7 @@ def _delete_users(
     from meerschaum.utils.prompt import yes_no, prompt
     from meerschaum.utils.debug import dprint
     from meerschaum.utils.warnings import warn, error, info
-    from meerschaum._internal.User import User
+    from meerschaum.core import User
     from meerschaum.connectors.api import APIConnector
     from meerschaum.utils.formatting import print_tuple
     instance_connector = parse_instance_keys(mrsm_instance)

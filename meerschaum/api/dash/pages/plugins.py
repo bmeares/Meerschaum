@@ -11,7 +11,7 @@ from meerschaum.utils.packages import import_html, import_dcc
 html, dcc = import_html(), import_dcc()
 import dash_bootstrap_components as dbc
 from meerschaum.api import get_api_connector, endpoints
-from meerschaum._internal.Plugin import Plugin
+from meerschaum.core import Plugin
 from meerschaum.utils.typing import Optional
 
 search_box = dbc.Input(

@@ -10,7 +10,7 @@ from __future__ import annotations
 from meerschaum.utils.typing import Union, Any, Optional, SuccessTuple, Mapping, Sequence
 
 def plugin_r_url(
-        plugin: Union[meerschaum._internal.Plugin.Plugin, str]
+        plugin: Union[meerschaum.core.Plugin, str]
     ) -> str:
     """Generate a relative URL path from a Plugin."""
     from meerschaum.config.static import _static_config
@@ -18,7 +18,7 @@ def plugin_r_url(
 
 def register_plugin(
         self,
-        plugin: meerschaum._internal.Plugin.Plugin,
+        plugin: meerschaum.core.Plugin,
         make_archive: bool = True,
         debug: bool = False,
     ) -> SuccessTuple:
@@ -54,7 +54,7 @@ def install_plugin(
     ) -> SuccessTuple:
     """Download and attempt to install a plugin from the API."""
     import os, pathlib, json
-    from meerschaum._internal.Plugin import Plugin
+    from meerschaum.core import Plugin
     from meerschaum.config._paths import PLUGINS_TEMP_RESOURCES_PATH
     from meerschaum.utils.debug import dprint
     from meerschaum.utils.packages import attempt_import
@@ -121,23 +121,11 @@ def get_plugins(
 
 def get_plugin_attributes(
         self,
-        plugin : meerschaum._internal.Plugin.Plugin,
-        debug : bool = False
+        plugin: meerschaum.core.Plugin,
+        debug: bool = False
     ) -> Mapping[str, Any]:
     """
-
-    Parameters
-    ----------
-    plugin : meerschaum._internal.Plugin.Plugin :
-        
-    debug : bool :
-         (Default value = False)
-
-    Returns
-    -------
-    type
-        
-
+    Return a plugin's attributes.
     """
     import json
     from meerschaum.utils.warnings import warn, error
@@ -159,22 +147,10 @@ def get_plugin_attributes(
 
 def delete_plugin(
         self,
-        plugin : meerschaum._internal.Plugin.Plugin,
-        debug : bool = False
+        plugin: meerschaum.core.Plugin,
+        debug: bool = False
     ) -> SuccessTuple:
-    """Delete a plugin from an API repository.
-
-    Parameters
-    ----------
-    plugin : meerschaum._internal.Plugin.Plugin :
-        
-    debug : bool :
-         (Default value = False)
-
-    Returns
-    -------
-
-    """
+    """Delete a plugin from an API repository."""
     import json
     r_url = plugin_r_url(plugin)
     try:

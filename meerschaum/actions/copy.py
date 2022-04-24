@@ -57,7 +57,7 @@ def _complete_copy(
         del action[0]
         return options[sub](action=action, **kw)
 
-    from meerschaum.actions.shell import default_action_completer
+    from meerschaum._internal.shell import default_action_completer
     return default_action_completer(action=(['copy'] + action), **kw)
 
 def _copy_pipes(
