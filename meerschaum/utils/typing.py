@@ -33,7 +33,7 @@ InstanceConnector = Union[
 PipesDict = Dict[
     str, Dict[                           ### connector_keys : metrics
         str, Dict[                       ### metric_key     : locations
-            str, 'meerschaum.Pipe.Pipe'  ### location_key   : Pipe
+            str, 'meerschaum.Pipe'       ### location_key   : Pipe
         ]
     ]
 ]

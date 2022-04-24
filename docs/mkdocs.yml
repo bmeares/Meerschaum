@@ -59,7 +59,7 @@ markdown_extensions:
       custom_checkbox: true
   - toc:
       permalink: true
-      slugify: !!python/name:pymdownx.slugs.uslugify
+      slugify: !!python/object/apply:pymdownx.slugs.slugify {kwds: {case: lower}}
       toc_depth: 2
 
 extra:
@@ -70,7 +70,7 @@ extra:
     link: https://www.linkedin.com/in/bennettmeares/
   - icon: fontawesome/brands/discord
     link: https://discord.gg/8U8qMUjvcc
-  - icon: fontawesome/solid/beer
+  - icon: material/coffee
     link: https://www.buymeacoffee.com/bmeares
   analytics:
     provider: google

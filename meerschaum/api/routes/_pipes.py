@@ -242,7 +242,7 @@ def get_sync_time(
     ) -> 'datetime.datetime':
     """
     Get a Pipe's latest datetime value.
-    See `meerschaum.Pipe.Pipe.get_sync_time`.
+    See `meerschaum.Pipe.get_sync_time`.
     """
     if location_key == '[None]':
         location_key = None
@@ -266,7 +266,7 @@ def sync_pipe(
     ) -> tuple:
     """
     Add data to an existing Pipe.
-    See `meerschaum.Pipe.Pipe.sync`.
+    See `meerschaum.Pipe.sync`.
     """
     from meerschaum.utils.misc import parse_df_datetimes
     from meerschaum import Pipe

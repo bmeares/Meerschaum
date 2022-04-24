@@ -118,25 +118,23 @@ class Pipe:
         """
         Parameters
         ----------
-
-        connector_keys: str
+        connector: str
             Keys for the pipe's source connector, e.g. `'sql:main'`.
 
-        metric_key: str
+        metric: str
             Label for the pipe's contents, e.g. `'weather'`.
 
-        location_key: str, default None
+        location: str, default None
             Label for the pipe's location. Defaults to `None`.
 
         parameters: Optional[Dict[str, Any]], default None
             Optionally set a pipe's parameters from the constructor,
             e.g. columns and other attributes.
-            Defaults to `None`.
+            You can edit these parameters with `edit pipes`.
 
         columns: Optional[Dict[str, str]], default None
             Subset of parameters for ease of use.
-            If `parameters` is provided, `columns` has not effect.
-            Defaults to `None`.
+            If `parameters` is also provided, this dictionary is added under the `'columns'` key.
 
         mrsm_instance: Optional[Union[str, InstanceConnector]], default None
             Connector for the Meerschaum instance where the pipe resides.
@@ -147,8 +145,6 @@ class Pipe:
 
         cache: bool, default False
             If `True`, cache fetched data into a local database file.
-            Experimental features must be enabled.
-            You can enable experimental caching under `system:experimental:cache`.
             Defaults to `False`.
         """
         if location_key in ('[None]', 'None'):
@@ -270,9 +266,9 @@ class Pipe:
         return self._cache_connector
 
     @property
-    def cache_pipe(self) -> Union['meerschaum.Pipe.Pipe', None]:
+    def cache_pipe(self) -> Union['meerschaum.Pipe', None]:
         """
-        If the pipe was created with `cache=True`, return another `meerschaum.Pipe.Pipe` used to
+        If the pipe was created with `cache=True`, return another `meerschaum.Pipe` used to
         manage the local data.
         """
         if self.cache_connector is None:
@@ -309,7 +305,7 @@ class Pipe:
     def sync_time(self) -> Union['datetime.datetime', None]:
         """
         Convenience function to get the pipe's latest datetime.
-        Use `meerschaum.Pipe.Pipe.get_sync_time()` instead.
+        Use `meerschaum.Pipe.get_sync_time()` instead.
         """
         return self.get_sync_time()
 

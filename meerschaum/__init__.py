@@ -20,10 +20,15 @@ limitations under the License.
 
 from meerschaum.config import __version__
 from meerschaum._internal.docs import index as __doc__
-from meerschaum.Pipe import Pipe
+from meerschaum._internal.Pipe import Pipe
 from meerschaum.utils import get_pipes
 from meerschaum.connectors import get_connector
+from meerschaum.plugins import Plugin
 
 __pdoc__ = {
     'gui': False,
 }
+
+__all__ = (
+    "Pipe", "get_pipes", "get_connector", "Plugin",
+)

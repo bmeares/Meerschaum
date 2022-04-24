@@ -13,66 +13,44 @@ from meerschaum.utils.typing import Optional, Union, Callable, Any
 
 def fetch(
         self,
-        pipe: meerschaum.Pipe.Pipe,
-        begin: Optional[Union[datetime.datetime, str]] = None,
-        end: Optional[Union[datetime.datetime, str]] = None,
-        chunk_hook: Optional[Callable[[pandas.DataFrame], Any]] = None,
+        pipe: meerschaum.Pipe,
+        begin: Union[datetime.datetime, str, None] = None,
+        end: Union[datetime.datetime, str, None] = None,
+        chunk_hook: Optional[Callable[[pd.DataFrame], Any]] = None,
         chunksize: Optional[int] = -1,
         debug: bool = False,
         **kw: Any
-    ) -> Optional['pd.DataFrame']:
+    ) -> Union['pd.DataFrame', None]:
     """Execute the SQL definition and return a Pandas DataFrame.
-    
-    If pipe.columns['datetime'] and
-        pipe.parameters['fetch']['backtrack_minutes'] are provided,
-        append a `WHERE dt > begin` subquery.
 
     Parameters
     ----------
-    begin :
+    pipe: meerschaum.Pipe
+        The pipe object which contains the `fetch` metadata.
+        
+        - pipe.columns['datetime']: str
+            - Name of the datetime column for the remote table.
+        - pipe.parameters['fetch']: Dict[str, Any]
+            - Parameters necessary to execute a query.
+        - pipe.parameters['fetch']['definition']: str
+            - Raw SQL query to execute to generate the pandas DataFrame.
+        - pipe.parameters['fetch']['backtrack_minutes']: Union[int, float]
+            - How many minutes before `begin` to search for data (*optional*).
+
+    begin: Union[datetime.datetime, str, None], default None
         Most recent datatime to search for data.
         If `backtrack_minutes` is provided, subtract `backtrack_minutes`.
-    end :
-        The latest datetime to search for data.
-        If `end` is `None`, perform an unbounded search.
-    pipe :
-        Below are the various pipe parameters available to pipe.fetch.
-        
-        pipe.columns['datetime'] : str
-        Name of the datetime column for the remote table.
-        
-        pipe.parameters['fetch'] : dict
-        Parameters necessary to execute a query.
-        See pipe.parameters['fetch'].
-        
-        pipe.parameters['fetch']['definition'] : str
-        Raw SQL query to execute to generate the pandas DataFrame.
-        
-        pipe.parameters['fetch']['backtrack_minutes'] : Union[int, float]
-        How many minutes before `begin` to search for data.
-    debug :
-        Verbosity toggle.
-    pipe: meerschaum.Pipe.Pipe :
-        
-    begin: Optional[Union[datetime.datetime :
-        
-    str]] :
-         (Default value = None)
-    end: Optional[Union[datetime.datetime :
-        
-    chunk_hook: Optional[Callable[[pandas.DataFrame] :
-        
-    Any]] :
-         (Default value = None)
-    chunksize: Optional[int] :
-         (Default value = -1)
-    debug: bool :
-         (Default value = False)
-    **kw: Any :
-        
 
+    end: Union[datetime.datetime, str, None], default None
+        The latest datetime to search for data.
+        If `end` is `None`, do not bound 
+
+    debug: bool, default False
+        Verbosity toggle.
+       
     Returns
     -------
+    A pandas DataFrame or `None`.
 
     """
     from meerschaum.utils.debug import dprint

@@ -27,9 +27,9 @@ def get_pipes(
         wait: bool = False,
         debug: bool = False,
         **kw: Any
-    ) -> Union[PipesDict, List['meerschaum.Pipe.Pipe']]:
+    ) -> Union[PipesDict, List['meerschaum.Pipe']]:
     """
-    Return a dictionary or list of `meerschaum.Pipe.Pipe` objects.
+    Return a dictionary or list of `meerschaum.Pipe` objects.
 
     Parameters
     ----------
@@ -76,14 +76,14 @@ def get_pipes(
         database might not be running (like the API).
 
     **kw: Any:
-        Keyword arguments to pass to the `meerschaum.Pipe.Pipe` constructor.
+        Keyword arguments to pass to the `meerschaum.Pipe` constructor.
         
 
     Returns
     -------
-    A dictionary of dictionaries and `meerschaum.Pipe.Pipe` objects
+    A dictionary of dictionaries and `meerschaum.Pipe` objects
     in the connector, metric, location hierarchy.
-    If `as_list` is `True`, return a list of `meerschaum.Pipe.Pipe` objects.
+    If `as_list` is `True`, return a list of `meerschaum.Pipe` objects.
 
     Examples
     --------
