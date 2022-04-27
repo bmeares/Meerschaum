@@ -7,7 +7,7 @@ Miscellaneous functions go here
 
 from __future__ import annotations
 from meerschaum.utils.typing import (
-    Union, Mapping, Any, Callable, Optional, List, Dict, SuccessTuple, Iterable, PipesDict
+    Union, Mapping, Any, Callable, Optional, List, Dict, SuccessTuple, Iterable, PipesDict, Tuple
 )
 
 def add_method_to_class(
@@ -397,7 +397,7 @@ def print_options(
     """
     import os
     from meerschaum.utils.packages import import_rich
-    from meerschaum.utils.formatting import make_header
+    from meerschaum.utils.formatting import make_header, highlight_pipes
     from meerschaum.actions import actions as _actions
 
 
@@ -444,6 +444,7 @@ def print_options(
     rich_columns = attempt_import('rich.columns')
     rich_panel = attempt_import('rich.panel')
     rich_table = attempt_import('rich.table')
+    Text = attempt_import('rich.text').Text
     box = attempt_import('rich.box')
     Panel = rich_panel.Panel
     Columns = rich_columns.Columns
@@ -463,13 +464,14 @@ def print_options(
     for i in range(num_cols):
         table.add_column()
 
-    chunks = iterate_chunks(sorted(_options), num_cols, fillvalue='')
+    chunks = iterate_chunks(
+        [Text.from_ansi(highlight_pipes(o)) for o in sorted(_options)],
+        num_cols,
+        fillvalue=''
+    )
     for c in chunks:
         table.add_row(*c)
 
-    cols = Columns([
-        o for o in sorted(_options)
-    ], expand=True, equal=True, title=header, padding=(0, 0))
     get_console().print(table)
     return None
 

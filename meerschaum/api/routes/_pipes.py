@@ -54,7 +54,7 @@ def register_pipe(
     pipe_object = get_pipe(connector_keys, metric_key, location_key)
     if is_pipe_registered(pipe_object, pipes(refresh=True)):
         raise fastapi.HTTPException(
-            status_code=409, detail=f"Pipe '{pipe_object}' already registered."
+            status_code=409, detail=f"{pipe_object} already registered."
         )
     pipe_object.parameters = parameters
     results = get_api_connector().register_pipe(pipe_object, debug=debug)
@@ -86,7 +86,7 @@ def delete_pipe(
     pipe_object = get_pipe(connector_keys, metric_key, location_key)
     if not is_pipe_registered(pipe_object, pipes(refresh=True)):
         raise fastapi.HTTPException(
-            status_code=409, detail=f"Pipe '{pipe_object}' is not registered."
+            status_code=409, detail=f"{pipe_object} is not registered."
         )
     results = get_api_connector().delete_pipe(pipe_object, debug=debug)
     pipes(refresh=True)
@@ -119,7 +119,7 @@ def edit_pipe(
     pipe_object = get_pipe(connector_keys, metric_key, location_key)
     if not is_pipe_registered(pipe_object, pipes(refresh=True)):
         raise fastapi.HTTPException(
-            status_code=409, detail=f"Pipe '{pipe_object}' is not registered."
+            status_code=409, detail=f"{pipe_object} is not registered."
         )
     pipe_object.parameters = parameters
     results = get_api_connector().edit_pipe(pipe_object, patch=patch, debug=debug)
@@ -396,7 +396,7 @@ def get_backtrack_data(
     if not pipe.get_columns('datetime', error=False):
         raise fastapi.HTTPException(
             status_code = 400,
-            detail = f"Cannot fetch backtrackdata for pipe '{pipe}' without a datetime column.",
+            detail = f"Cannot fetch backtrackdata for {pipe} without a datetime column.",
         )
     df = pipe.get_backtrack_data(
         begin = begin,

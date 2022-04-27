@@ -123,21 +123,7 @@ def fetch(
     return df
 
 def _simple_fetch_query(pipe, debug: bool=False, **kw) -> str:
-    """Build a fetch query from a pipe's definition.
-
-    Parameters
-    ----------
-    pipe :
-        
-    debug: bool :
-         (Default value = False)
-    **kw :
-        
-
-    Returns
-    -------
-
-    """
+    """Build a fetch query from a pipe's definition."""
     definition = pipe.parameters['fetch']['definition']
     return f"WITH definition AS ({definition}) SELECT * FROM definition"
 
@@ -147,30 +133,14 @@ def _join_fetch_query(
         new_ids: bool = True,
         **kw
     ) -> str:
-    """Build a fetch query based on the datetime and ID indices.
-
-    Parameters
-    ----------
-    pipe :
-        
-    debug: bool :
-         (Default value = False)
-    new_ids: bool :
-         (Default value = True)
-    **kw :
-        
-
-    Returns
-    -------
-
-    """
+    """Build a fetch query based on the datetime and ID indices."""
     if not pipe.exists(debug=debug):
         return _simple_fetch_query(pipe, debug=debug, **kw)
 
     from meerschaum.utils.sql import sql_item_name, dateadd_str
-    pipe_instance_name = sql_item_name(str(pipe), pipe.instance_connector.flavor)
-    pipe_remote_name = sql_item_name(str(pipe), pipe.connector.flavor)
-    sync_times_table = str(pipe) + "_sync_times"
+    pipe_instance_name = sql_item_name(pipe.target, pipe.instance_connector.flavor)
+    #  pipe_remote_name = sql_item_name(pipe.target, pipe.connector.flavor)
+    sync_times_table = pipe.target + "_sync_times"
     sync_times_instance_name = sql_item_name(sync_times_table, pipe.instance_connector.flavor)
     sync_times_remote_name = sql_item_name(sync_times_table, pipe.connector.flavor)
     id_instance_name = sql_item_name(pipe.columns['id'], pipe.instance_connector.flavor)

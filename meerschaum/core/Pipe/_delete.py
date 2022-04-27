@@ -36,7 +36,7 @@ def delete(
         try:
             os.remove(_cache_db_path)
         except Exception as e:
-            warn(f"Could not delete cache file '{_cache_db_path}' for pipe '{self}':\n{e}")
+            warn(f"Could not delete cache file '{_cache_db_path}' for {self}:\n{e}")
     result = self.instance_connector.delete_pipe(self, debug=debug, **kw)
     if not isinstance(result, tuple):
         return False, f"Received unexpected result from '{self.instance_connector}': {result}"

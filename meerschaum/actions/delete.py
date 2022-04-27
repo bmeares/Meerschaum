@@ -76,14 +76,15 @@ def _delete_pipes(
     """
     from meerschaum import get_pipes
     from meerschaum.utils.prompt import yes_no
-    from meerschaum.utils.formatting import pprint
+    from meerschaum.utils.formatting import pprint, highlight_pipes
     from meerschaum.utils.warnings import warn
     pipes = get_pipes(as_list=True, debug=debug, **kw)
     if len(pipes) == 0:
         return False, "No pipes to delete."
     question = "Are you sure you want to delete these pipes? This can't be undone!\n"
     for p in pipes:
-        question += f" - {p}" + "\n"
+        question += f"    - {p}" + "\n"
+    question = highlight_pipes(question)
     answer = force
     if force:
         answer = True
@@ -193,7 +194,7 @@ def _delete_plugins(
     if not answer:
         return False, f"No plugins deleted."
 
-    successes = dict()
+    successes = {}
     for name in action:
         info(f"Deleting plugin '{name}' from Meerschaum repository '{repo_connector}'...")
         success, msg = repo_connector.delete_plugin(name, debug=debug)
@@ -257,7 +258,7 @@ def _delete_users(
     if not answer:
         return False, "No users deleted."
 
-    success = dict()
+    success = {}
     for user in registered_users:
         info(f"Deleting user '{user}' from Meerschaum instance '{instance_connector}'...")
         result_tuple = instance_connector.delete_user(user, debug=debug)

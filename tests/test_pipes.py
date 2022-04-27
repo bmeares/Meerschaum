@@ -126,3 +126,8 @@ def test_sync_engine(flavor: str):
     )
     assert success, msg
 
+
+@oytest.mark.parametrize("flavor", list(all_pipes.keys()))
+def test_target(flavor: str):
+
+

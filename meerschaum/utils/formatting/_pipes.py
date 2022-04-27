@@ -7,28 +7,15 @@ Formatting functions for printing pipes
 """
 
 from __future__ import annotations
-from meerschaum.utils.typing import PipesDict, Dict
+from meerschaum.utils.typing import PipesDict, Dict, Union, Optional
 
-def pprint_pipes(pipes : PipesDict) -> None:
+def pprint_pipes(pipes: PipesDict) -> None:
     """Print a stylized tree of a Pipes dictionary.
-    Supports ANSI and UNICODE global settings.
-    
-    This code is pretty unreadable. Just a warning. But it's thoroughly tested,
-    so things *shouldn't* break.
-
-    Parameters
-    ----------
-    pipes : PipesDict :
-        
-
-    Returns
-    -------
-
-    """
+    Supports ANSI and UNICODE global settings."""
     from meerschaum.utils.warnings import error
     from meerschaum.utils.packages import attempt_import, import_rich
     from meerschaum.utils.misc import sorted_dict, replace_pipes_in_dict
-    from meerschaum.utils.formatting import UNICODE, ANSI, pprint, colored, get_console
+    from meerschaum.utils.formatting import UNICODE, ANSI, CHARSET, pprint, colored, get_console
     from meerschaum.config import get_config
     import copy
     rich = import_rich('rich', warn=False)
@@ -37,38 +24,17 @@ def pprint_pipes(pipes : PipesDict) -> None:
         rich_text = attempt_import('rich.text')
         Text = rich_text.Text
 
-    icons = {'connector' : '', 'metric' : '', 'location' : '', 'key' : ''}
-    styles = {'connector' : '', 'metric' : '', 'location' : '', 'key' : ''}
-    guide_style, none_style = '', ''
-    if UNICODE:
-        icons['connector'] = get_config('formatting', 'emoji', 'connector', patch=True) + ' '
-        icons['metric'] = get_config('formatting', 'emoji', 'metric', patch=True) + ' '
-        icons['location'] = get_config('formatting', 'emoji', 'location', patch=True) + ' '
-        icons['key'] = get_config('formatting', 'emoji', 'key', patch=True) + ' '
-    if ANSI:
-        styles['connector'] = 'green'
-        styles['metric'] = 'bright_blue'
-        styles['location'] = 'magenta'
-        guide_style = 'dim'
-        none_style = 'black on magenta'
-
+    icons = get_config('formatting', 'pipes', CHARSET, 'icons')
+    styles = get_config('formatting', 'pipes', 'ansi', 'styles')
+    if not ANSI:
+        styles = {k: '' for k in styles}
     print()
 
     def ascii_print_pipes():
         """Print the dictionary with no unicode allowed. Also works in case rich fails to import
-        (though rich should auto-install when `attempt_import()` is called).
-
-        Parameters
-        ----------
-
-        Returns
-        -------
-
-        """
+        (though rich should auto-install when `attempt_import()` is called)."""
         asciitree = attempt_import('asciitree')
-        def _replace_pipe_ascii_tree(pipe):
-            return {str(pipe) : {}}
-        ascii_dict, replace_dict = {}, {'connector' : {}, 'metric' : {}, 'location' : {}}
+        ascii_dict, replace_dict = {}, {'connector': {}, 'metric': {}, 'location': {}}
         for conn_keys, metrics in pipes.items():
             _colored_conn_key = colored(icons['connector'] + conn_keys, style=styles['connector'])
             if Text is not None:
@@ -84,11 +50,8 @@ def pprint_pipes(pipes : PipesDict) -> None:
                     )
                 ascii_dict[_colored_conn_key][_colored_metric_key] = {}
                 for location, pipe in locations.items():
-                    if location is None:
-                        _location_style = none_style
-                    else:
-                        _location_style = styles['location']
-                    pipe_addendum = '\n         ' + str(pipe)
+                    _location_style = styles[('none' if location is None else 'location')]
+                    pipe_addendum = '\n         ' + pipe.__repr__() + '\n'
                     _colored_location = colored(
                         icons['location'] + str(location), style=_location_style
                     )
@@ -130,17 +93,7 @@ def pprint_pipes(pipes : PipesDict) -> None:
 
         def replace_tree_text(tree_str : str) -> Text:
             """Replace the colored words with stylized Text instead.
-            Is not executed if ANSI and UNICODE are disabled.
-
-            Parameters
-            ----------
-            tree_str : str :
-                
-
-            Returns
-            -------
-
-            """
+            Is not executed if ANSI and UNICODE are disabled."""
             tree_text = Text(tree_str) if Text is not None else None
             for k, v in replace_dict.items():
                 for _colored, _text in v.items():
@@ -175,7 +128,6 @@ def pprint_pipes(pipes : PipesDict) -> None:
         rich_columns = attempt_import('rich.columns')
         Columns = rich_columns.Columns
         columns = Columns(cols)
-        #  rich.print(columns)
         get_console().print(columns)
 
     if not UNICODE:
@@ -202,8 +154,8 @@ def pprint_pipes(pipes : PipesDict) -> None:
             Text(icons['metric'] + "Metric", style=styles['metric']) + Text("\n\n") +
             Text(icons['location'] + "Location", style=styles['location']) + Text("\n")
         ),
-        title = Text(icons['key'] + "Keys", style=guide_style),
-        border_style = guide_style,
+        title = Text(icons['key'] + "Keys", style=styles['guide']),
+        border_style = styles['guide'],
         expand = True
     )
 
@@ -219,7 +171,7 @@ def pprint_pipes(pipes : PipesDict) -> None:
             ),
             guide_style = styles['connector']
         )
-        metric_trees[conn_keys] = dict()
+        metric_trees[conn_keys] = {}
         for metric, locations in metrics.items():
             metric_trees[conn_keys][metric] = Tree(
                 Text(
@@ -230,11 +182,15 @@ def pprint_pipes(pipes : PipesDict) -> None:
             )
             conn_trees[conn_keys].add(metric_trees[conn_keys][metric])
             for location, pipe in locations.items():
-                if location is None:
-                    _location = Text(str(location), style=none_style)
-                else:
-                    _location = Text(location, style=styles['location'])
-                _location = Text(icons['location']) + _location + Text("\n" + str(pipe) + "\n")
+                _location = (
+                    Text(str(location), style=styles['none']) if location is None
+                    else Text(location, style=styles['location'])
+                )
+                _location = (
+                    Text(icons['location'])
+                    + _location + Text('\n')
+                    + pipe_repr(pipe, as_rich_text=True) + Text('\n')
+                )
                 metric_trees[conn_keys][metric].add(_location)
 
     cols += [key_panel]
@@ -242,29 +198,14 @@ def pprint_pipes(pipes : PipesDict) -> None:
         cols.append(t)
 
     columns = Columns(cols)
-    #  rich.print(columns)
     get_console().print(columns)
 
 def pprint_pipe_columns(
-        pipe : meerschaum.Pipe,
-        nopretty : bool = False,
-        debug : bool = False,
+        pipe: meerschaum.Pipe,
+        nopretty: bool = False,
+        debug: bool = False,
     ) -> None:
-    """Pretty-print a pipe's columns.
-
-    Parameters
-    ----------
-    pipe : meerschaum.Pipe :
-        
-    nopretty : bool :
-         (Default value = False)
-    debug : bool :
-         (Default value = False)
-
-    Returns
-    -------
-
-    """
+    """Pretty-print a pipe's columns."""
     import json
     from meerschaum.utils.warnings import info
     from meerschaum.utils.formatting import pprint, print_tuple, get_console
@@ -283,29 +224,104 @@ def pprint_pipe_columns(
         rich = import_rich()
         rich_table = attempt_import('rich.table')
 
-        table = rich_table.Table(title=f"Column types for pipe '{pipe}'")
+        table = rich_table.Table(title=f"Column types for {pipe}")
         table.add_column('Column')
         table.add_column('Type', justify='right')
 
-        info(make_header(f"\nColumns for pipe '{pipe}':"), icon=False)
+        info(make_header(f"\nColumns for {pipe}:"), icon=False)
         if _cols:
             pprint(_cols, nopretty=nopretty)
             print()
         else:
-            print_tuple((False, f"No registered columns for pipe '{pipe}'."))
+            print_tuple((False, f"No registered columns for {pipe}."))
 
         for c, t in _cols_types.items():
             table.add_row(c, t)
 
         if _cols_types:
-            #  rich.print(table)
             get_console().print(table)
-            #  print(f"\nTable columns and types:")
-            #  pprint(_cols_types, nopretty=nopretty)
         else:
-            print_tuple((False, f"No table columns for pipe '{pipe}'. Does the pipe exist?"))
+            print_tuple((False, f"No table columns for {pipe}. Does the pipe exist?"))
 
     if nopretty:
         _nopretty_print()
     else:
         _pretty_print()
+
+
+def pipe_repr(
+        pipe: 'meerschaum.Pipe',
+        as_rich_text: bool=False,
+        ansi: Optional[bool] = None,
+    ) -> Union[str, 'rich.text.Text']:
+    """
+    Return a formatted string for representing a `meerschaum.Pipe`.
+    """
+    from meerschaum.config import get_config
+    from meerschaum.utils.formatting import UNICODE, ANSI, CHARSET, colored, rich_text_to_str
+    from meerschaum.utils.packages import import_rich, attempt_import
+    rich = import_rich()
+    Text = attempt_import('rich.text').Text
+
+    styles = get_config('formatting', 'pipes', '__repr__', 'ansi', 'styles')
+    if not ANSI or (ansi is False):
+        styles = {k: '' for k in styles}
+    _pipe_style_prefix, _pipe_style_suffix = (
+        (("[" + styles['Pipe'] + "]"), ("[/" + styles['Pipe'] + "]")) if styles['Pipe']
+        else ('', '')
+    )
+    text_obj = (
+        Text.from_markup(_pipe_style_prefix + "Pipe(" + _pipe_style_suffix)
+        + colored(("'" + pipe.connector_keys + "'"), style=styles['connector'], as_rich_text=True)
+        + Text.from_markup(_pipe_style_prefix + ", " + _pipe_style_suffix)
+        + colored(("'" + pipe.metric_key + "'"), style=styles['metric'], as_rich_text=True)
+        + (
+            (
+                colored(', ', style=styles['punctuation'], as_rich_text=True)
+                + colored(
+                    ("'" + pipe.location_key + "'"),
+                    style=styles['location'], as_rich_text=True
+                )
+            ) if pipe.location_key is not None
+            else colored('', style='', as_rich_text=True)
+        ) + (
+            ( ### Add the `instance=` argument.
+                colored(', instance=', style=styles['punctuation'], as_rich_text=True)
+                + colored(
+                    ("'" + pipe.instance_keys + "'"),
+                    style=styles['instance'], as_rich_text=True
+                )
+            ) if pipe.instance_keys != get_config('meerschaum', 'instance')
+            else colored('', style='', as_rich_text=True)
+        )
+        + Text.from_markup(_pipe_style_prefix + ")" + _pipe_style_suffix)
+    )
+    if as_rich_text:
+        return text_obj
+    return rich_text_to_str(text_obj)
+
+
+def highlight_pipes(message: str) -> str:
+    """
+    Add syntax highlighting to an info message containing stringified `meerschaum.Pipe` objects.
+    """
+    if 'Pipe(' not in message or ')' not in message:
+        return message
+    from meerschaum import Pipe
+    segments = message.split('Pipe(')
+    msg = ''
+    _d = {}
+    for i, segment in enumerate(segments):
+        if ')' in segment:
+            paren_index = segment.find(')') + 1
+            code = "_d['pipe'] = Pipe(" + segment[:paren_index]
+            try:
+                exec(code)
+                _to_add = pipe_repr(_d['pipe']) + segment[paren_index:]
+            except Exception as e:
+                _to_add = 'Pipe(' + segment
+            msg += _to_add
+            continue
+        msg += segment
+    return msg
+

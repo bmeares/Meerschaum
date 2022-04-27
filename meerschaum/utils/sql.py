@@ -450,8 +450,9 @@ def get_sqlalchemy_table(
         table: str,
         connector: Optional[meerschaum.connectors.sql.SQLConnector] = None,
         debug: bool = False,
-    ) -> sqlalchemy.Table:
+    ) -> 'sqlalchemy.Table':
     """
+    Construct a SQLAlchemy table from its name.
 
     Parameters
     ----------

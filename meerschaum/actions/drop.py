@@ -42,9 +42,13 @@ def _drop_pipes(
     pipes = get_pipes(as_list=True, debug=debug, **kw)
     if len(pipes) == 0:
         return False, "No pipes to drop."
-    question = "Are you sure you want to drop these pipes' tables? Data will be lost and will need to be resynced.\n"
+    question = (
+        "Are you sure you want to drop these tables?\n    "
+        + "Data will be lost and will need to be resynced.\n\n"
+    )
     for p in pipes:
-        question += f" - {p}" + "\n"
+        question += f"    - {p.target}" + "\n"
+    question += '\n'
     if force:
         answer = True
     else:
@@ -70,8 +74,8 @@ def _drop_pipes(
         pprint(success_dict)
 
     msg = (
-        f"Finished dropping {len(pipes)} pipes.\n" + 
-        f"    ({successes} succeeded, {fails} failed)"
+        f"Finished dropping {len(pipes)} pipes\n" + 
+        f"    ({successes} succeeded, {fails} failed)."
     )
     return successes > 0, msg
 

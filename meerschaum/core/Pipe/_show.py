@@ -31,10 +31,13 @@ def show(
 
     """
     import json
-    from meerschaum.utils.formatting import pprint, make_header
+    from meerschaum.utils.formatting import pprint, make_header, ANSI, highlight_pipes, fill_ansi
     from meerschaum.utils.warnings import info
     if not nopretty:
-        print(make_header(f"Attributes for pipe '{self}':"))
+        _to_print = f"Attributes for {self}:"
+        if ANSI:
+            _to_print = fill_ansi(highlight_pipes(make_header(_to_print)), 'magenta')
+        print(_to_print)
         pprint(self.attributes)
     else:
         print(json.dumps(self.attributes))

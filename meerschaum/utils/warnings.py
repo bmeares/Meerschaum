@@ -7,7 +7,7 @@ Handle all things warnings and errors here
 """
 
 from __future__ import annotations
-from meerschaum.utils.typing import Any
+from meerschaum.utils.typing import Any, Union
 
 import sys
 import warnings
@@ -30,32 +30,8 @@ warnings.filterwarnings(
 )
 
 
-#  class SilentException(Exception):
-    #  """
-    #  Raise a silent Exception.
-    #  """
-    #  import inspect
-    #  def __init__(self, msg : str = ''):
-        #  try:
-            #  ln = sys.exc_info()[-1].tb_lineno
-        #  except AttributeError:
-            #  ln = inspect.currentframe().f_back.f_lineno
-            #  #  ln = inspect.currentframe().f_lineno
-        #  self.args = "{0.__name__} (line {1}): {2}".format(type(self), ln, msg),
-        #  #  self.args = msg
-
 def enable_depreciation_warnings(name) -> None:
-    """Enable depreciation warnings in the warnings module.
-
-    Parameters
-    ----------
-    name :
-        
-
-    Returns
-    -------
-
-    """
+    """Enable depreciation warnings in the warnings module."""
     import meerschaum.actions
     warnings.filterwarnings(
         "always",
@@ -65,23 +41,8 @@ def enable_depreciation_warnings(name) -> None:
 
 def warn(*args, stacklevel=2, stack=True, color : bool = True, **kw) -> None:
     """
-
-    Parameters
-    ----------
-    *args :
-        
-    stacklevel :
-         (Default value = 2)
-    stack :
-         (Default value = True)
-    color : bool :
-         (Default value = True)
-    **kw :
-        
-
-    Returns
-    -------
-
+    Print a stylized warning message.
+    May be captured by `warnings.filterwarnings()`.
     """
     if stacklevel is None:
         stacklevel = 1
@@ -91,7 +52,9 @@ def warn(*args, stacklevel=2, stack=True, color : bool = True, **kw) -> None:
     get_config = None
     if color:
         try:
-            from meerschaum.utils.formatting import CHARSET, ANSI, colored
+            from meerschaum.utils.formatting import (
+                CHARSET, ANSI, colored, fill_ansi, highlight_pipes
+            )
         except ImportError:
             CHARSET = 'ascii'
             ANSI = False
@@ -118,7 +81,7 @@ def warn(*args, stacklevel=2, stack=True, color : bool = True, **kw) -> None:
     a[0] = ' ' + (warn_config[CHARSET]['icon'] if color else '') + ' ' + str(a[0])
     if color:
         if ANSI:
-            a[0] = colored(a[0], **warn_config['ansi']['rich'])
+            a[0] = fill_ansi(highlight_pipes(a[0]), **warn_config['ansi']['rich'])
 
     ### Optionally omit the warning location.
     def _no_stack_sw(message, category, filename, lineno, file=None, line=None):
@@ -131,28 +94,13 @@ def warn(*args, stacklevel=2, stack=True, color : bool = True, **kw) -> None:
         warnings.showwarning = _old_sw
 
 def exception_with_traceback(
-        message : str,
+        message: str,
         exception_class = Exception, 
         stacklevel = 1,
         tb_type = 'single'
     ):
     """Traceback construction help found here:
     https://stackoverflow.com/questions/27138440/how-to-create-a-traceback-object
-
-    Parameters
-    ----------
-    message : str :
-        
-    exception_class :
-         (Default value = Exception)
-    stacklevel :
-         (Default value = 1)
-    tb_type :
-         (Default value = 'single')
-
-    Returns
-    -------
-
     """
     import types
     tb, depth = None, 0
@@ -198,33 +146,20 @@ def exception_with_traceback(
         return exception_class(message).with_traceback(tbs[-3])
     return exception_class(message).with_traceback(tbs[first_mrsm_after_main])
 
+
 def error(
-        message : str,
+        message: str,
         exception_class = Exception,
-        nopretty : bool = False,
-        silent : bool = True,
-        stack : bool = True,
+        nopretty: bool = False,
+        silent: bool = True,
+        stack: bool = True,
     ):
     """
-
-    Parameters
-    ----------
-    message : str :
-        
-    exception_class :
-         (Default value = Exception)
-    nopretty : bool :
-         (Default value = False)
-    silent : bool :
-         (Default value = True)
-    stack : bool :
-         (Default value = True)
-
-    Returns
-    -------
-
+    Raise an exception with supressed traceback.
     """
-    from meerschaum.utils.formatting import CHARSET, ANSI, colored, pprint, get_console
+    from meerschaum.utils.formatting import (
+        CHARSET, ANSI, get_console, fill_ansi, highlight_pipes
+    )
     from meerschaum.utils.packages import import_rich
     from meerschaum.config import get_config
     import types, inspect
@@ -234,8 +169,8 @@ def error(
     exception = exception_with_traceback(message, exception_class, stacklevel=3)
     color_message = str(message)
     color_exception = exception_with_traceback(color_message, exception_class, stacklevel=3)
-    if ANSI and not nopretty and not stack:
-        color_message = '\n' + colored(message, **error_config['ansi']['rich'])
+    if ANSI and not nopretty:
+        color_message = '\n' + fill_ansi(highlight_pipes(message), **error_config['ansi']['rich'])
         color_exception = exception_with_traceback(color_message, exception_class, stacklevel=3)
     try:
         trace = rich.traceback.Traceback.extract(
@@ -250,39 +185,23 @@ def error(
         if get_console() is not None:
             get_console().print(rtb)
     frame = sys._getframe(len(inspect.stack()) - 1)
-    #  sys.tracebacklimit = 0
-    #  help(sys.excepthook)
-    #  if silent: raise SilentException(message)
-    #  if silent: sys.tracebacklimit = 0
-    #  else: sys.tracebacklimit = None
     raise color_exception
 
+
 def info(message: str, icon: bool = True, **kw):
-    """Print an informative message
-
-    Parameters
-    ----------
-    message: str :
-        
-    icon: bool :
-         (Default value = True)
-    **kw :
-        
-
-    Returns
-    -------
-
-    """
-    from meerschaum.utils.formatting import CHARSET, ANSI, colored
+    """Print an informative message."""
+    from meerschaum.utils.packages import import_rich, attempt_import
+    from meerschaum.utils.formatting import (
+        CHARSET, ANSI, highlight_pipes, fill_ansi,
+    )
     from meerschaum.config import get_config
     info_config = get_config('formatting', 'info', patch=True)
     if icon:
         message = ' ' + info_config[CHARSET]['icon'] + ' ' + message
     if ANSI:
+        message = highlight_pipes(message)
         lines = message.split('\n')
-        message = (
-            colored(lines[0], **info_config['ansi']['rich'])
-            + ('\n' + '\n'.join(lines[1:]) if len(lines) > 1 else '')
+        message = fill_ansi(lines[0], **info_config['ansi']['rich']) + (
+            '\n' + '\n'.join(lines[1:]) if len(lines) > 1 else ''
         )
-    ### NOTE: There's a bug somewhere because I have to flush stdout every time.
-    print(message, flush=True)
+    print(message)

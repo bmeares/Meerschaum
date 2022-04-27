@@ -7,16 +7,19 @@ Functions for building graphs of pipes' data.
 """
 
 from __future__ import annotations
-from meerschaum.utils.typing import WebState, List
+from meerschaum.utils.typing import WebState, List, Optional
 from meerschaum.api import debug
 from meerschaum.utils.packages import attempt_import, import_dcc, import_html, import_pandas
-import plotly.express as px
+#  import plotly.express as px
 pd = import_pandas()
 px = attempt_import('plotly.express', warn=False)
 dbc = attempt_import('dash_bootstrap_components')
 html, dcc = import_html(), import_dcc()
 
 def get_graphs_cards(state: Optional[WebState]):
+    """
+    Return a tuple of lists containing cards and alerts.
+    """
     from meerschaum.api.dash.pipes import pipes_from_state
     pipes = pipes_from_state(state, as_list=True)
     cards, alerts = [], []
@@ -37,9 +40,12 @@ def get_graphs_cards(state: Optional[WebState]):
                 graph = dcc.Graph(figure=fig)
                 body = graph
             except Exception as e:
-                body = html.P(f"Unable to create graph for pipe '{pipe}'. Please check that the columns are correctly set.")
+                body = html.P(
+                    f"Unable to create graph for {pipe}. "
+                    + "Please check that the columns are correctly set."
+                )
         else:
-            body = html.H4(f"Missing columns for pipe '{pipe}'")
+            body = html.H4(f"Missing columns for {pipe}.")
         card = dbc.Card([
             #  dbc.CardHeader(html.H4(str(pipe))),
             dbc.CardBody(body),

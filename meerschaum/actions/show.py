@@ -323,17 +323,17 @@ def _show_data(
             print(traceback.format_exc())
             df = None
         if df is None:
-            warn(f"Failed to fetch data for pipe '{p}'.", stack=False)
+            warn(f"Failed to fetch data for {p}.", stack=False)
             continue
 
         info_msg = (
             (
                 f"Last {backtrack_minutes} minute"
                 + ('s' if backtrack_minutes != 1 else '')
-                + f" of data for pipe '{p}':"
+                + f" of data for {p}:"
             ) if backtrack_minutes is not None
             else (
-                f"Data for pipe '{p}'" +
+                f"Data for {p}" +
                     (f" from {begin}" if begin is not None else '') +
                     (f" to {end}" if end is not None else '') + ':'
             )
