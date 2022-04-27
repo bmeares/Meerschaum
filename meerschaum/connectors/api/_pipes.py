@@ -232,7 +232,7 @@ def sync_pipe(
     begin = time.time()
     more_itertools = attempt_import('more_itertools')
     if df is None:
-        msg = f"DataFrame is `None`. Cannot sync pipe '{pipe}'."
+        msg = f"DataFrame is `None`. Cannot sync {pipe}."
         return False, msg
 
     def get_json_str(c):
@@ -324,14 +324,14 @@ def sync_pipe(
         f"It took {round(time.time() - begin, 2)} seconds to sync {rowcount} row"
         + ('s' if rowcount != 1 else '')
         + f" across {len_chunks} chunk" + ('s' if len_chunks != 1 else '') +
-        f" to '{pipe}'."
+        f" to {pipe}."
     )
     return success_tuple
 
 
 def delete_pipe(
         self,
-        pipe: Optional[meerscahum.Pipe] = None,
+        pipe: Optional[meerschaum.Pipe] = None,
         debug: bool = None,        
     ) -> SuccessTuple:
     """Delete a Pipe and drop its table.
@@ -478,7 +478,7 @@ def get_backtrack_data(
             debug = debug
         )
     except Exception as e:
-        warn(f"Failed to parse backtrack data JSON for pipe '{pipe}'. Exception:\n" + str(e))
+        warn(f"Failed to parse backtrack data JSON for {pipe}. Exception:\n" + str(e))
         return None
     from meerschaum.utils.packages import import_pandas
     from meerschaum.utils.misc import parse_df_datetimes

@@ -81,7 +81,7 @@ Below are some ongoing tasks I have planned for Meerschaum. This is not an exhau
     Guide the user through defining and running jobs.
 
 - **Plugins**
-    - [ ] **Reuse packages across virtual environments**  
+    - [x] **Reuse packages across virtual environments**  
       In an attempt to save space, if a package is already installed in another virtual environment and satisfies the requirements for a plugin, attempt to use that version instead of installing a new version.
 
     - [x] **API Plugins**  
@@ -96,7 +96,7 @@ Below are some ongoing tasks I have planned for Meerschaum. This is not an exhau
       Add `clear pipes` to delete rows of a pipe within an interval.
 
 ## 🔨 Refactoring
-- [ ] Consolidate SQL-specific functions to one package to make adding flavors easier.
+- [x] Consolidate SQL-specific functions to one package to make adding flavors easier.
 - [x] Add `typing` hinting to the Python package API.
 - [x] Migrate `meerschaum.actions.shell` to `meerschaum._internal.shell`.
 - [x] Migrate `Plugin` and `Pipe` to `core`.

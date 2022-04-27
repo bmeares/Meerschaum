@@ -85,7 +85,7 @@ def tags(self) -> Union[List[str], None]:
 
 
 @tags.setter
-def tags(self, tags: List[str, str]) -> None:
+def tags(self, _tags: List[str, str]) -> None:
     """
     Override the tags list of the in-memory pipe.
     Call `meerschaum.Pipe.edit` to persist changes.
@@ -93,13 +93,13 @@ def tags(self, tags: List[str, str]) -> None:
     from meerschaum.utils.warnings import error
     from meerschaum.config.static import _static_config
     negation_prefix = _static_config()['system']['fetch_pipes_keys']['negation_prefix']
-    for t in tags:
+    for t in _tags:
         if t.startswith(negation_prefix):
             error(f"Tags cannot begin with '{negation_prefix}'.")
     if not self.parameters:
-        self._tags = tags
+        self._tags = _tags
     else:
-        self._parameters['tags'] = tags
+        self._parameters['tags'] = _tags
 
 
 def get_columns(self, *args: str, error : bool = True) -> Tuple[str]:
@@ -125,7 +125,7 @@ def get_columns(self, *args: str, error : bool = True) -> Tuple[str]:
     >>> pipe.get_columns('datetime', 'id')
     ('dt', 'id')
     >>> pipe.get_columns('value')
-    Exception:  🛑 Missing 'value' column for Pipe 'test_test'.
+    Exception:  🛑 Missing 'value' column for Pipe('test', 'test').
     """
     from meerschaum.utils.warnings import error as _error, warn
     if not args:
@@ -136,17 +136,17 @@ def get_columns(self, *args: str, error : bool = True) -> Tuple[str]:
         try:
             col_name = self.columns[col]
             if col_name is None and error:
-                _error(f"Please define the name of the '{col}' column for Pipe '{self}'.")
+                _error(f"Please define the name of the '{col}' column for {self}.")
         except Exception as e:
             col_name = None
         if col_name is None and error:
-            _error(f"Missing '{col}'" + f" column for Pipe '{self}'.")
+            _error(f"Missing '{col}'" + f" column for {self}.")
         col_names.append(col_name)
     if len(col_names) == 1:
         return col_names[0]
     return tuple(col_names)
 
-def get_columns_types(self, debug : bool = False) -> Union[Dict[str, str], None]:
+def get_columns_types(self, debug: bool = False) -> Union[Dict[str, str], None]:
     """
     Get a dictionary of a pipe's column names and their types.
 
@@ -171,7 +171,7 @@ def get_columns_types(self, debug : bool = False) -> Union[Dict[str, str], None]
     """
     return self.instance_connector.get_pipe_columns_types(self, debug=debug)
 
-def get_id(self, **kw : Any) -> Union[int, None]:
+def get_id(self, **kw: Any) -> Union[int, None]:
     """
     Fetch a pipe's ID from its instance connector.
     If the pipe does not exist, return `None`.
@@ -272,7 +272,7 @@ def parents(self) -> List[meerschaum.Pipe]:
     _parents_keys = self.parameters['parents']
     if not isinstance(_parents_keys, list):
         warn(
-            f"Please ensure the parents for pipe '{self}' are defined as a list of keys.",
+            f"Please ensure the parents for {self} are defined as a list of keys.",
             stacklevel = 4
         )
         return []
@@ -282,7 +282,56 @@ def parents(self) -> List[meerschaum.Pipe]:
         try:
             p = Pipe(**keys)
         except Exception as e:
-            warn(f"Unable to build parent with keys '{keys}' for pipe '{self}':\n{e}")
+            warn(f"Unable to build parent with keys '{keys}' for {self}:\n{e}")
             continue
         _parents.append(p)
     return _parents
+
+
+@property
+def target(self) -> str:
+    """
+    The target table name.
+    You can set the target name under on of the following keys
+    (checked in this order):
+      - `target`
+      - `target_name`
+      - `target_table`
+      - `target_table_name`
+    """
+    _target_key = '_target'
+    if _target_key not in self.__dict__:
+        if not self.parameters:
+            self.__dict__[_target_key] = self._target_legacy()
+        else:
+            potential_keys = ('target', 'target_name', 'target_table', 'target_table_name')
+            for k in potential_keys:
+                if k in self.parameters:
+                    self.__dict__[_target_key] = self.parameters[k]
+                    break
+    return self.__dict__.get(_target_key, self._target_legacy())
+
+
+def _target_legacy(self) -> str:
+    """
+    The old method of determining a pipe's table name by joining the keys with underscores.
+    **NOTE:** Converts the `':'` in the `connector_keys` to an `'_'`.
+    """
+    name = f"{self.connector_keys.replace(':', '_')}_{self.metric_key}"
+    if self.location_key is not None:
+        name += f"_{self.location_key}"
+    return name
+
+
+@target.setter
+def target(self, _target: str) -> None:
+    """
+    Override the target of the in-memory pipe.
+    Call `meerschaum.Pipe.edit` to persist changes.
+    """
+    if not self.parameters:
+        self._target = _target
+    else:
+        self._parameters['target'] = _target
+
+

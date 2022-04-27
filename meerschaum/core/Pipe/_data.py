@@ -60,7 +60,7 @@ def get_data(
         if not fresh:
             _sync_cache_tuple = self.cache_pipe.sync(debug=debug, **kw)
             if not _sync_cache_tuple[0]:
-                warn(f"Failed to sync cache for pipe '{self}':\n" + _sync_cache_tuple[1])
+                warn(f"Failed to sync cache for {self}:\n" + _sync_cache_tuple[1])
                 fresh = True
             else: ### Successfully synced cache.
                 return self.cache_pipe.get_data(debug=debug, fresh=True, **kw)
@@ -127,7 +127,7 @@ def get_backtrack_data(
         if not fresh:
             _sync_cache_tuple = self.cache_pipe.sync(debug=debug, **kw)
             if not _sync_cache_tuple[0]:
-                warn(f"Failed to sync cache for pipe '{self}':\n" + _sync_cache_tuple[1])
+                warn(f"Failed to sync cache for {self}:\n" + _sync_cache_tuple[1])
                 fresh = True
             else: ### Successfully synced cache.
                 return self.cache_pipe.get_backtrack_data(debug=debug, fresh=True, **kw)
@@ -181,5 +181,5 @@ def get_rowcount(
         warn(e)
         if remote:
             return None
-    warn(f"Failed to get a rowcount for pipe '{self}'.")
+    warn(f"Failed to get a rowcount for {self}.")
     return None

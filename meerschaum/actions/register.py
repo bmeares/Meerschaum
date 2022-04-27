@@ -102,7 +102,7 @@ def _register_pipes(
     failed_message = ""
     for p in pipes:
         if debug:
-            dprint(f"Registering pipe '{p}'...")
+            dprint(f"Registering {p}...")
         ss, msg = p.register(debug=debug)
         if not ss:
             warn(f"{msg}", stack=False)

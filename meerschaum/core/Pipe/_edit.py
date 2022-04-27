@@ -47,7 +47,7 @@ def edit(
     for i in range(len(str(self))):
         edit_header += "#"
     edit_header += "\n"
-    edit_header += f"# Edit the parameters for the Pipe '{self}' #"
+    edit_header += f"# Edit the parameters for {self} #"
     edit_header += "\n#######################################"
     for i in range(len(str(self))):
         edit_header += "#"
@@ -205,10 +205,10 @@ def edit_definition(
             return False, f"Failed reading file '{definition_path}':\n" + str(e)
 
         if sql_definition == file_definition:
-            return False, f"No changes made to definition for pipe '{self}'."
+            return False, f"No changes made to definition for {self}."
 
         if ' ' not in file_definition:
-            return False, f"Invalid SQL definition for pipe '{self}'."
+            return False, f"Invalid SQL definition for {self}."
 
         if debug:
             dprint("Read SQL definition:\n\n" + file_definition)

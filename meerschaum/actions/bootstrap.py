@@ -183,10 +183,10 @@ def _bootstrap_pipes(
         if p.get_id(debug=debug) is not None and not force:
             try:
                 if not yes_no(
-                    f"Pipe '{p}' already exists. Delete pipe '{p}'?\n    Data will be lost!",
+                    f"{p} already exists. Delete {p}?\n    Data will be lost!",
                     default='n'
                 ):
-                    info(f"Skipping bootstrapping pipe '{p}'...")
+                    info(f"Skipping bootstrapping {p}...")
                     continue
             except KeyboardInterrupt:
                 return abort_tuple
@@ -205,7 +205,7 @@ def _bootstrap_pipes(
         except Exception as e:
             import traceback
             traceback.print_exc()
-            tup = False, f"Failed to bootstrap pipe '{p}' with exception:\n" + str(e)
+            tup = False, f"Failed to bootstrap {p} with exception:\n" + str(e)
         success_dict[p] = tup
         if tup[0]:
             successes += 1
@@ -312,8 +312,8 @@ def _bootstrap_connectors(
         required = sorted(list(connector_attributes[_type]['required']))
         default = connector_attributes[_type]['default']
     info(
-        f"Please answer the following questions to configure the new connector '{_type}:{_label}'." + '\n' +
-        "Press Ctrl+C to skip."
+        f"Please answer the following questions to configure the new connector '{_type}:{_label}'."
+        + '\n' + "Press [Ctrl + C] to skip."
     )
     for r in required:
         try:

@@ -10,7 +10,7 @@ from __future__ import annotations
 from meerschaum.utils.typing import Optional, Dict, Union, InstanceConnector
 
 ### store a tables dict for each connector
-connector_tables = dict()
+connector_tables = {}
 
 _sequence_flavors = {'duckdb', 'oracle'}
 _skip_index_names_flavors = {'mssql',}
@@ -19,7 +19,7 @@ def get_tables(
         mrsm_instance: Optional[Union[str, InstanceConnector]] = None,
         create: bool = True,
         debug: Optional[bool] = None
-    ) -> Union[Dict[str, sqlalchemy.Table], bool]:
+    ) -> Union[Dict[str, 'sqlalchemy.Table'], bool]:
     """
     Create tables on the database and return the `sqlalchemy` tables.
 
@@ -42,7 +42,7 @@ def get_tables(
     """
     from meerschaum.utils.debug import dprint
     from meerschaum.utils.formatting import pprint
-    from meerschaum.utils.warnings import warn, error
+    from meerschaum.utils.warnings import error
     from meerschaum.connectors.parse import parse_instance_keys
     from meerschaum.utils.packages import attempt_import
     from meerschaum import get_connector
@@ -65,9 +65,10 @@ def get_tables(
     ### kind of a hack. Create the tables remotely
     from meerschaum.connectors.api import APIConnector
     if isinstance(conn, APIConnector):
-        return conn.create_metadata(debug=debug)
+        if create:
+            return conn.create_metadata(debug=debug)
+        return {}
 
-    global connector_tables
     if conn not in connector_tables:
         if debug:
             dprint(f"Creating tables for connector '{conn}'.")
@@ -101,7 +102,9 @@ def get_tables(
                     *id_col_args['user_id'],
                     **id_col_kw['user_id'],
                 ),
-                sqlalchemy.Column('username', sqlalchemy.String(256), index=index_names, nullable=False,),
+                sqlalchemy.Column(
+                    'username', sqlalchemy.String(256), index=index_names, nullable=False,
+                ),
                 sqlalchemy.Column('password_hash', sqlalchemy.String(1024)),
                 sqlalchemy.Column('email', sqlalchemy.String(256)),
                 sqlalchemy.Column('user_type', sqlalchemy.String(256)),
@@ -115,7 +118,9 @@ def get_tables(
                     *id_col_args['plugin_id'],
                     **id_col_kw['plugin_id'],
                 ),
-                sqlalchemy.Column('plugin_name', sqlalchemy.String(256), index=index_names, nullable=False,),
+                sqlalchemy.Column(
+                    'plugin_name', sqlalchemy.String(256), index=index_names, nullable=False,
+                ),
                 sqlalchemy.Column('user_id', sqlalchemy.Integer, nullable=False),
                 sqlalchemy.Column('version', sqlalchemy.String(256)),
                 sqlalchemy.Column('attributes', params_type),
@@ -134,23 +139,36 @@ def get_tables(
             sqlalchemy.Column(
                 "connector_keys", sqlalchemy.String(256), index=index_names, nullable=False
             ),
-            sqlalchemy.Column("metric_key", sqlalchemy.String(256), index=index_names, nullable=False),
+            sqlalchemy.Column(
+                "metric_key", sqlalchemy.String(256), index=index_names, nullable=False
+            ),
             sqlalchemy.Column("location_key", sqlalchemy.String(256), index=index_names),
             sqlalchemy.Column("parameters", params_type),
-            #  sqlalchemy.UniqueConstraint(
-                #  'connector_keys', 'metric_key', 'location_key', name='pipe_index'
-            #  ),
             extend_existing = True,
         )
 
-        try:
-            conn.metadata.create_all(bind=conn.engine)
-        except Exception as e:
-            #  import traceback
-            #  traceback.print_exception(type(e), e, e.__traceback__)
-            warn(str(e))
-
         ### store the table dict for reuse (per connector)
         connector_tables[conn] = _tables
+        if create:
+            create_tables(conn, tables=_tables)
 
     return connector_tables[conn]
+
+
+def create_tables(
+        conn: 'meerschaum.connectors.SQLConnector',
+        tables: Optional[Dict[str, 'sqlalchemy.Table']],
+    ) -> bool:
+    """
+    Create the tables on the database.
+    """
+    from meerschaum.utils.warnings import warn
+    _tables = tables if tables is not None else get_tables(conn)
+    try:
+        conn.metadata.create_all(bind=conn.engine)
+    except Exception as e:
+        warn(str(e))
+        return False
+    return True
+
+

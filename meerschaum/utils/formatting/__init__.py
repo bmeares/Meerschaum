@@ -7,10 +7,10 @@ Utilities for formatting output text
 """
 
 from __future__ import annotations
-from meerschaum.utils.typing import Optional
+from meerschaum.utils.typing import Optional, Union, Any
 from meerschaum.utils.formatting._shell import make_header
 from meerschaum.utils.formatting._pprint import pprint
-from meerschaum.utils.formatting._pipes import pprint_pipes
+from meerschaum.utils.formatting._pipes import pprint_pipes, highlight_pipes
 
 _attrs = {
     'ANSI': None,
@@ -23,6 +23,11 @@ __all__ = sorted([
     'translate_rich_to_termcolor',
     'get_console',
     'print_tuple',
+    'fill_ansi',
+    'pprint',
+    'highlight_pipes',
+    'pprint_pipes',
+    'make_header',
 ])
 __pdoc__ = {}
 
@@ -69,18 +74,8 @@ def translate_rich_to_termcolor(*colors) -> tuple:
 
     return tuple(_colors)
 
-def rich_text_to_str(text) -> str:
-    """Convert a `rich.text.Text` object to a string with ANSI in-tact.
-
-    Parameters
-    ----------
-    text :
-        
-
-    Returns
-    -------
-
-    """
+def rich_text_to_str(text: 'rich.text.Text') -> str:
+    """Convert a `rich.text.Text` object to a string with ANSI in-tact."""
     _console = get_console()
     if _console is None:
         return str(text)
@@ -90,7 +85,6 @@ def rich_text_to_str(text) -> str:
 
 
 def _init():
-    global _attrs
     from meerschaum.utils.packages import attempt_import
     ### init colorama for Windows color output
     colorama, more_termcolor = attempt_import(
@@ -116,22 +110,34 @@ def _init():
     return success
 
 _colorama_init = False
-def colored(text : str, *colors, **kw) -> str:
+def colored(text: str, *colors, as_rich_text: bool=False, **kw) -> Union[str, 'rich.text.Text']:
     """Apply colors and rich styles to a string.
     If a `style` keyword is provided, a `rich.text.Text` object will be parsed into a string.
     Otherwise attempt to use the legacy `more_termcolor.colored` method.
 
     Parameters
     ----------
-    text : str :
+    text: str
+        The string to apply formatting to.
         
-    *colors :
+    *colors:
+        A list of colors to pass to `more_termcolor.colored()`.
+        Has no effect if `style` is provided.
+
+    style: str, default None
+        If provided, pass to `rich` for processing.
+
+    as_rich_text: bool, default False
+        If `True`, return a `rich.Text` object.
+        `style` must be provided.
         
-    **kw :
+    **kw:
+        Keyword arguments to pass to `rich.text.Text` or `more_termcolor`.
         
 
     Returns
     -------
+    An ANSI-formatted string or a `rich.text.Text` object if `as_rich_text` is `True`.
 
     """
     from meerschaum.utils.packages import import_rich, attempt_import
@@ -139,7 +145,10 @@ def colored(text : str, *colors, **kw) -> str:
     if 'style' in kw:
         rich = import_rich()
         rich_text = attempt_import('rich.text')
-        return rich_text_to_str(rich_text.Text(text, **kw))
+        text_obj = rich_text.Text(text, **kw)
+        if as_rich_text:
+            return text_obj
+        return rich_text_to_str(text_obj)
 
     global _colorama_init
     _init()
@@ -187,27 +196,7 @@ def print_tuple(
         lower_padding: int = 0,
         _progress: Optional['rich.progress.Progress'] = None,
     ) -> None:
-    """Print Meerschaum SuccessTuple.
-
-    Parameters
-    ----------
-    tup: tuple :
-        
-    skip_common: bool :
-         (Default value = True)
-    common_only: bool :
-         (Default value = False)
-    upper_padding: int :
-         (Default value = 0)
-    lower_padding: int :
-         (Default value = 0)
-    _progress: Optional['rich.progress.Progress'] :
-         (Default value = None)
-
-    Returns
-    -------
-
-    """
+    """Print `meerschaum.utils.typing.SuccessTuple`."""
     from meerschaum.config.static import _static_config
     try:
         status = 'success' if tup[0] else 'failure'
@@ -227,25 +216,66 @@ def print_tuple(
         do_print = tup[1] not in omit_messages
 
     if do_print:
-        from meerschaum.utils.formatting import ANSI, CHARSET, colored
+        ANSI, CHARSET = __getattr__('ANSI'), __getattr__('CHARSET')
         from meerschaum.config import get_config
         status_config = get_config('formatting', status, patch=True)
 
         msg = ' ' + status_config[CHARSET]['icon'] + ' ' + str(tup[1])
         if ANSI:
-            msg = colored(msg, **status_config['ansi']['rich'])
+            msg = fill_ansi(highlight_pipes(msg), **status_config['ansi']['rich'])
 
         msg = ('\n' * upper_padding) + msg + ('\n' * lower_padding)
         print(msg)
 
-def __getattr__(name : str) -> str:
+
+def fill_ansi(string: str, style: str = '') -> str:
+    """
+    Fill in non-formatted segments of ANSI text.
+
+    Parameters
+    ----------
+    string: str
+        A string which contains ANSI escape codes.
+
+    style: str
+        Style arguments to pass to `rich.text.Text`.
+
+    Returns
+    -------
+    A string with ANSI styling applied to the segments which don't yet have a style applied.
+    """
+    from meerschaum.utils.packages import import_rich, attempt_import
+    from meerschaum.utils.misc import iterate_chunks
+    rich = import_rich()
+    Text = attempt_import('rich.text').Text
+    msg = Text.from_ansi(string)
+    plain_indices = []
+    for left_span, right_span in iterate_chunks(msg.spans, 2, fillvalue=len(msg)):
+        left = left_span.end
+        right = right_span.start if not isinstance(right_span, int) else right_span
+        if left != right:
+            plain_indices.append((left, right))
+    if msg.spans:
+        if msg.spans[0].start != 0:
+            plain_indices = [(0, msg.spans[0].start)] + plain_indices
+        if plain_indices and msg.spans[-1].end != len(msg) and plain_indices[-1][1] != len(msg):
+            plain_indices.append((msg.spans[-1].end, len(msg)))
+
+    if plain_indices:
+        for left, right in plain_indices:
+            msg.stylize(style, left, right)
+    else:
+        msg = Text(str(msg), style)
+
+    return rich_text_to_str(msg)
+
+def __getattr__(name: str) -> str:
     """
     Lazily load module-level variables.
     """
     if name.startswith('__') and name.endswith('__'):
         raise AttributeError("Cannot import dunders from this module.")
 
-    global _attrs
     if name in _attrs:
         if _attrs[name] is not None:
             return _attrs[name]

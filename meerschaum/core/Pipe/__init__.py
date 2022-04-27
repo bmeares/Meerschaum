@@ -52,6 +52,8 @@ with correct credentials, as well as a network connection and valid permissions.
 
 from __future__ import annotations
 from meerschaum.utils.typing import Optional, Dict, Any, Union, InstanceConnector, List
+from meerschaum.utils.formatting._pipes import pipe_repr
+from meerschaum.config import get_config
 
 class Pipe:
     """
@@ -92,6 +94,8 @@ class Pipe:
         id,
         get_val_column,
         parents,
+        target,
+        _target_legacy,
     )
     from ._show import show
     from ._edit import edit, edit_definition
@@ -103,16 +107,19 @@ class Pipe:
 
     def __init__(
         self,
-        connector: str,
-        metric: str,
+        connector: str = '',
+        metric: str = '',
         location: Optional[str] = None,
         parameters: Optional[Dict[str, Any]] = None,
         columns: Optional[Dict[str, str]] = None,
         tags: Optional[List[str]] = None,
+        target: Optional[str] = None,
         mrsm_instance: Optional[Union[str, InstanceConnector]] = None,
         instance: Optional[Union[str, InstanceConnector]] = None,
         cache: bool = False,
         debug: bool = False,
+        connector_keys: Optional[str] = None,
+        metric_key: Optional[str] = None,
         location_key: Optional[str] = None,
     ):
         """
@@ -136,6 +143,10 @@ class Pipe:
             Subset of parameters for ease of use.
             If `parameters` is also provided, this dictionary is added under the `'columns'` key.
 
+        tags: Optional[List[str]], default None
+            A list of strings to be added under the `'tags'` key of `parameters`.
+            You can select pipes with certain tags using `--tags`.
+
         mrsm_instance: Optional[Union[str, InstanceConnector]], default None
             Connector for the Meerschaum instance where the pipe resides.
             Defaults to the preconfigured default instance (`'sql:main'`).
@@ -147,10 +158,20 @@ class Pipe:
             If `True`, cache fetched data into a local database file.
             Defaults to `False`.
         """
-        if location_key in ('[None]', 'None'):
-            location_key = None
-
         from meerschaum.utils.warnings import error
+        if (not connector and not connector_keys) or (not metric and not metric_key):
+            error(
+                "Please provide strings for the connector and metric\n    "
+                + "(first two positional arguments)."
+            )
+
+        ### Fall back to legacy `location_key` just in case.
+        if not location:
+            location = location_key
+
+        if location in ('[None]', 'None'):
+            location = None
+
         from meerschaum.config.static import _static_config
         negation_prefix = _static_config()['system']['fetch_pipes_keys']['negation_prefix']
         for k in (connector, metric, location, *(tags or [])):
@@ -176,10 +197,15 @@ class Pipe:
                 self._parameters = {}
             self._parameters['tags'] = tags
 
+        if target is not None:
+            if self.__dict__.get('_parameters', None) is None:
+                self._parameters = {}
+            self._parameters['target'] = target
+
         ### NOTE: The parameters dictionary is {} by default.
         ###       A Pipe may be registered without parameters, then edited,
         ###       or a Pipe may be registered with parameters set in-memory first.
-        from meerschaum.config import get_config
+        #  from meerschaum.config import get_config
         _mrsm_instance = mrsm_instance if mrsm_instance is not None else instance
         if _mrsm_instance is None:
             _mrsm_instance = get_config('meerschaum', 'instance', patch=True)
@@ -244,6 +270,7 @@ class Pipe:
                 return None
         return self._connector
 
+
     @property
     def cache_connector(self) -> Union[meerschaum.connectors.sql.SQLConnector, None]:
         """
@@ -265,6 +292,7 @@ class Pipe:
 
         return self._cache_connector
 
+
     @property
     def cache_pipe(self) -> Union['meerschaum.Pipe', None]:
         """
@@ -274,7 +302,6 @@ class Pipe:
         if self.cache_connector is None:
             return None
         if '_cache_pipe' not in self.__dict__:
-            from meerschaum import Pipe
             from meerschaum.config._patch import apply_patch_to_config
             from meerschaum.utils.sql import sql_item_name
             _parameters = self.parameters.copy()
@@ -309,14 +336,9 @@ class Pipe:
         """
         return self.get_sync_time()
 
-    def __str__(self):
-        """
-        The Pipe's SQL table name. Converts the `':'` in the `connector_keys` to an `'_'`.
-        """
-        name = f"{self.connector_keys.replace(':', '_')}_{self.metric_key}"
-        if self.location_key is not None:
-            name += f"_{self.location_key}"
-        return name
+    def __str__(self, ansi: bool=False):
+        return pipe_repr(self, ansi=ansi)
+
 
     def __eq__(self, other):
         try:
@@ -340,24 +362,26 @@ class Pipe:
             + str(self.instance_keys) + sep
         )
 
-    def __repr__(self):
-        return str(self)
+    def __repr__(self, **kw) -> str:
+        return pipe_repr(self, **kw)
 
-    def __getstate__(self):
+    def __getstate__(self) -> Dict[str, Any]:
         """
         Define the state dictionary (pickling).
         """
-        state = {
-            'connector_keys' : self.connector_keys,
-            'metric_key' : self.metric_key,
-            'location_key' : self.location_key,
-            'parameters' : self.parameters,
-            'mrsm_instance' :  self.instance_keys,
+        return {
+            'connector_keys': self.connector_keys,
+            'metric_key': self.metric_key,
+            'location_key': self.location_key,
+            'parameters': self.parameters,
+            'mrsm_instance': self.instance_keys,
         }
-        return state
 
-    def __setstate__(self, _state : dict):
+    def __setstate__(self, _state: Dict[str, Any]):
         """
         Read the state (unpickling).
         """
-        self.__init__(**_state)
+        connector_keys = _state.pop('connector_keys')
+        metric_key = _state.pop('metric_key')
+        location_key = _state.pop('location_key')
+        self.__init__(connector_keys, metric_key, location_key, **_state)

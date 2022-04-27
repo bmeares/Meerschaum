@@ -79,35 +79,37 @@ def _copy_pipes(
     pipes = get_pipes(as_list=True, **kw)
     successes = 0
     for p in pipes:
-        ck = prompt(f"Connector keys for copy of pipe '{p}':", default=p.connector_keys)
-        mk = prompt(f"Metric key for copy of pipe '{p}':", default=p.metric_key)
-        lk = prompt(f"Location key for copy of pipe '{p}' (empty to omit):")
-        if lk == '':
+        ck = prompt(f"Connector keys for copy of {p}:", default=p.connector_keys)
+        mk = prompt(f"Metric key for copy of {p}:", default=p.metric_key)
+        lk = prompt(f"Location key for copy of {p} ('None' to omit):", default=str(p.location_key))
+        if lk in ('', 'None', '[None]'):
             lk = None
         _new_pipe = Pipe(
             ck, mk, lk,
             parameters=p.parameters.copy(),
         )
-        instance_keys = prompt(f"Meerschaum instance to store new pipe '{_new_pipe}':", default=p.instance_keys)
+        instance_keys = prompt(
+            f"Meerschaum instance to store the new {_new_pipe}:",
+            default=p.instance_keys
+        )
         _new_pipe.instance_keys = instance_keys
-        if _new_pipe.id is not None:
-            warn(f"New pipe '{_new_pipe}' already exists. Skipping...", stack=False)
+        if _new_pipe.get_id(debug=debug) is not None:
+            warn(f"New {_new_pipe} already exists. Skipping...", stack=False)
             continue
         _register_success_tuple = _new_pipe.register(debug=debug)
         if not _register_success_tuple[0]:
-            warn(f"Failed to register new pipe '{_new_pipe}'.", stack=False)
+            warn(f"Failed to register new {_new_pipe}.", stack=False)
             continue
 
         clear_screen(debug=debug)
         successes += 1
         print_tuple(
-            (True, f"Successfully copied attributes of pipe '{p}' "
-                + f"({p.instance_keys}) into '{_new_pipe}' ({_new_pipe.instance_keys}).")
+            (True, f"Successfully copied attributes of {p} " + f" into {_new_pipe}.")
         )
         if (
             force or yes_no(
                 (
-                    f"Do you want to copy data from pipe '{p}' into new pipe '{_new_pipe}'?\n\n"
+                    f"Do you want to copy data from {p} into {_new_pipe}?\n\n"
                     + "If you specified `--begin`, `--end` or `--params`, data will be filtered."
                 ),
                     noask=noask, yes=yes

@@ -28,7 +28,7 @@ def register_pipe(
     pipes = get_tables(mrsm_instance=self, debug=debug)['pipes']
 
     if pipe.get_id(debug=debug) is not None:
-        return False, f"Pipe '{pipe}' is already registered."
+        return False, f"{pipe} is already registered."
 
     ### NOTE: if `parameters` is supplied in the Pipe constructor,
     ###       then `pipe.parameters` will exist and not be fetched from the database.
@@ -63,8 +63,8 @@ def register_pipe(
     query = sqlalchemy.insert(pipes).values(**values)
     result = self.exec(query, debug=debug)
     if result is None:
-        return False, f"Failed to register pipe '{pipe}'."
-    return True, f"Successfully registered pipe '{pipe}'."
+        return False, f"Failed to register {pipe}."
+    return True, f"Successfully registered {pipe}."
 
 def edit_pipe(
         self,
@@ -88,7 +88,7 @@ def edit_pipe(
     """
 
     if pipe.id is None:
-        return False, f"pipe '{pipe}' is not registered and cannot be edited."
+        return False, f"{pipe} is not registered and cannot be edited."
 
     from meerschaum.utils.debug import dprint
     from meerschaum.utils.packages import attempt_import
@@ -127,11 +127,11 @@ def edit_pipe(
 
     result = self.exec(q, debug=debug)
     message = (
-        f"Successfully edited pipe '{pipe}'."
-        if result is not None else f"Failed to edit pipe '{pipe}'."
+        f"Successfully edited {pipe.__repr__()}."
+        if result is not None else f"Failed to edit {pipe.__repr__()}."
     )
     if result is None:
-        message = f"Failed to edit pipe '{pipe}'."
+        message = f"Failed to edit {pipe.__repr__()}."
     return (result is not None), message
 
 
@@ -267,35 +267,34 @@ def fetch_pipes_keys(
     q = q.where(sqlalchemy.and_(sqlalchemy.or_(*ors).self_group())) if ors else q
 
     ### execute the query and return a list of tuples
+    if debug:
+        dprint(q.compile(compile_kwargs={'literal_binds': True}))
     try:
-        if debug:
-            dprint(q.compile(compile_kwargs={'literal_binds': True}))
         rows = self.engine.execute(q).fetchall()
-        _keys = [(row['connector_keys'], row['metric_key'], row['location_key']) for row in rows]
-        if not tags:
-            return _keys
-        ### Make 100% sure that the tags are correct.
-        keys = []
-        for row in rows:
-            ktup = (row['connector_keys'], row['metric_key'], row['location_key'])
-            _actual_tags = (
-                json.loads(row['parameters']) if isinstance(row['parameters'], str)
-                else row['parameters']
-            ).get('tags', [])
-            for nt in _in_tags:
-                if nt in _actual_tags:
-                    keys.append(ktup)
-            for xt in _ex_tags:
-                if xt in _actual_tags:
-                    keys.remove(ktup)
-                else:
-                    keys.append(ktup)
-        return keys
-
     except Exception as e:
         error(str(e))
 
-    return None
+    _keys = [(row['connector_keys'], row['metric_key'], row['location_key']) for row in rows]
+    if not tags:
+        return _keys
+    ### Make 100% sure that the tags are correct.
+    keys = []
+    for row in rows:
+        ktup = (row['connector_keys'], row['metric_key'], row['location_key'])
+        _actual_tags = (
+            json.loads(row['parameters']) if isinstance(row['parameters'], str)
+            else row['parameters']
+        ).get('tags', [])
+        for nt in _in_tags:
+            if nt in _actual_tags:
+                keys.append(ktup)
+        for xt in _ex_tags:
+            if xt in _actual_tags:
+                keys.remove(ktup)
+            else:
+                keys.append(ktup)
+    return keys
+
 
 def create_indices(
         self,
@@ -312,28 +311,28 @@ def create_indices(
     index_queries = dict()
 
     if debug:
-        dprint(f"Creating indices for Pipe '{pipe}'...")
+        dprint(f"Creating indices for {pipe}...")
     if (
         pipe.columns is None or
         pipe.columns.get('datetime', None) is None
     ):
-        warn(f"Unable to create indices for pipe '{pipe}' without columns.")
+        warn(f"Unable to create indices for {pipe} without columns.")
         return False
 
     _cols_types = pipe.get_columns_types(debug=debug)
     _datetime = pipe.get_columns('datetime', error=False)
     _datetime_name = sql_item_name(_datetime, self.flavor) if _datetime is not None else None
     _datetime_index_name = (
-        sql_item_name(str(pipe) + '_' + _datetime + '_index', self.flavor)
+        sql_item_name(pipe.target + '_' + _datetime + '_index', self.flavor)
         if _datetime is not None else None
     )
     _id = pipe.get_columns('id', error=False)
     _id_name = sql_item_name(_id, self.flavor) if _id is not None else None
     _id_index_name = (
-        sql_item_name(str(pipe) + '_' + _id + '_index', self.flavor)
+        sql_item_name(pipe.target + '_' + _id + '_index', self.flavor)
         if _id is not None else None
     )
-    _pipe_name = sql_item_name(str(pipe), self.flavor)
+    _pipe_name = sql_item_name(pipe.target, self.flavor)
     _create_space_partition = get_config('system', 'experimental', 'space')
 
     ### create datetime index
@@ -381,7 +380,7 @@ def create_indices(
     failures = 0
     for col, q in index_queries.items():
         if debug:
-            dprint(f"Creating index on column '{col}' for pipe '{pipe}'...")
+            dprint(f"Creating index on column '{col}' for {pipe}...")
         try:
             index_result = self.exec(q, debug=debug)
         except Exception as e:
@@ -410,7 +409,7 @@ def delete_pipe(
         return drop_tuple
 
     if not pipe.id:
-        return False, f"Pipe '{pipe}' is not registered."
+        return False, f"{pipe} is not registered."
 
     ### ensure pipes table exists
     from meerschaum.connectors.sql.tables import get_tables
@@ -477,7 +476,7 @@ def get_backtrack_data(
 
     ### check for capitals
     from meerschaum.utils.sql import sql_item_name, build_where
-    table = sql_item_name(str(pipe), self.flavor)
+    table = sql_item_name(pipe.target, self.flavor)
     dt = sql_item_name(pipe.get_columns('datetime'), self.flavor)
 
     query = (
@@ -537,7 +536,7 @@ def get_pipe_data(
     from meerschaum.utils.packages import import_pandas
     pd = import_pandas()
 
-    query = f"SELECT * FROM {sql_item_name(str(pipe), self.flavor)}"
+    query = f"SELECT * FROM {sql_item_name(pipe.target, self.flavor)}"
     where = ""
 
     dt = sql_item_name(pipe.get_columns('datetime'), self.flavor)
@@ -572,11 +571,11 @@ def get_pipe_data(
     query += "\nORDER BY " + dt + " DESC"
 
     if debug:
-        dprint(f"Getting Pipe data with begin = '{begin}' and end = '{end}'")
+        dprint(f"Getting pipe data with begin = '{begin}' and end = '{end}'")
     df = self.read(query, debug=debug, **kw)
     if self.flavor == 'sqlite':
         from meerschaum.utils.misc import parse_df_datetimes
-        ### NOTE: we have to consume the iterator here to ensure that datatimes are parsed correctly.
+        ### NOTE: We have to consume the iterator here to ensure that datatimes are parsed correctly
         df = parse_df_datetimes(df, debug=debug) if isinstance(df, pd.DataFrame) else (
             [parse_df_datetimes(c, debug=debug) for c in df]
         )
@@ -708,7 +707,7 @@ def sync_pipe(
     from meerschaum.utils.packages import import_pandas
     from meerschaum.utils.misc import parse_df_datetimes
     if df is None:
-        msg = f"DataFrame is None. Cannot sync pipe '{pipe}'."
+        msg = f"DataFrame is None. Cannot sync {pipe}."
         warn(msg)
         return False, msg
 
@@ -758,7 +757,7 @@ def sync_pipe(
     ### append new data to Pipe's table
     result = self.to_sql(
         new_data_df,
-        name = str(pipe),
+        name = pipe.target,
         if_exists = if_exists,
         debug = debug,
         as_tuple = True,
@@ -768,7 +767,7 @@ def sync_pipe(
     if is_new:
         if not self.create_indices(pipe, debug=debug):
             if debug:
-                dprint(f"Failed to create indices for pipe '{pipe}'. Continuing...")
+                dprint(f"Failed to create indices for {pipe}. Continuing...")
     return result
 
 
@@ -806,7 +805,7 @@ def get_sync_time(
     from meerschaum.utils.sql import sql_item_name, build_where
     from meerschaum.utils.warnings import warn
     import datetime
-    table = sql_item_name(str(pipe), self.flavor)
+    table = sql_item_name(pipe.target, self.flavor)
     dt = sql_item_name(pipe.get_columns('datetime'), self.flavor)
     ASC_or_DESC = "DESC" if newest else "ASC"
     where = "" if params is None else build_where(params, self)
@@ -822,7 +821,7 @@ def get_sync_time(
         if db_time is None:
             return None
         ### sqlite returns str.
-        elif isinstance(db_time, str):
+        if isinstance(db_time, str):
             from meerschaum.utils.packages import attempt_import
             dateutil_parser = attempt_import('dateutil.parser')
             st = dateutil_parser.parse(db_time)
@@ -873,10 +872,10 @@ def pipe_exists(
 
     """
     from meerschaum.utils.sql import table_exists
-    exists = table_exists(str(pipe), self, debug=debug)
+    exists = table_exists(pipe.target, self, debug=debug)
     if debug:
         from meerschaum.utils.debug import dprint
-        dprint(f"Pipe '{pipe}' " + ('exists.' if exists else 'does not exist.'))
+        dprint(f"{pipe} " + ('exists.' if exists else 'does not exist.'))
     return exists
 
 def get_pipe_rowcount(
@@ -919,7 +918,7 @@ def get_pipe_rowcount(
     from meerschaum.utils.sql import dateadd_str, sql_item_name
     from meerschaum.utils.warnings import error, warn
     if remote:
-        msg = f"'fetch:definition' must be an attribute of pipe '{pipe}' to get a remote rowcount."
+        msg = f"'fetch:definition' must be an attribute of {pipe} to get a remote rowcount."
         if 'fetch' not in pipe.parameters:
             error(msg)
             return None
@@ -927,7 +926,7 @@ def get_pipe_rowcount(
             error(msg)
             return None
 
-    _pipe_name = sql_item_name(str(pipe), self.flavor)
+    _pipe_name = sql_item_name(pipe.target, self.flavor)
     _datetime_name = sql_item_name(pipe.get_columns('datetime'), pipe.instance_connector.flavor if not remote else pipe.connector.flavor)
     _cols_names = [
         sql_item_name(col, pipe.instance_connector.flavor if not remote else pipe.connector.flavor)
@@ -989,15 +988,15 @@ def drop_pipe(
         
     """
     if not pipe.exists(debug=debug):
-        return True, f"Pipe '{pipe}' does not exist, so nothing was dropped."
+        return True, f"{pipe} does not exist, so nothing was dropped."
 
     from meerschaum.utils.sql import sql_item_name
-    pipe_name = sql_item_name(str(pipe), self.flavor)
+    pipe_name = sql_item_name(pipe.target, self.flavor)
     success = self.exec(f"DROP TABLE {pipe_name}", silent=True, debug=debug) is not None
     if not success:
         success = self.exec(f"DROP VIEW {pipe_name}", silent=True, debug=debug) is not None
     
-    msg = "Success" if success else f"Failed to drop pipe '{pipe}'."
+    msg = "Success" if success else f"Failed to drop {pipe}."
     return success, msg
 
 
@@ -1029,10 +1028,10 @@ def clear_pipe(
 
     """
     if not pipe.exists(debug=debug):
-        return True, f"Pipe '{pipe}' does not exist, so nothing was cleared."
+        return True, f"{pipe} does not exist, so nothing was cleared."
 
     from meerschaum.utils.sql import sql_item_name, build_where, dateadd_str
-    pipe_name = sql_item_name(str(pipe), self.flavor)
+    pipe_name = sql_item_name(pipe.target, self.flavor)
     dt_name = sql_item_name(pipe.get_columns('datetime'), self.flavor)
     clear_query = (
         f"DELETE FROM {pipe_name}\nWHERE 1 = 1\n"
@@ -1046,7 +1045,7 @@ def clear_pipe(
         )
     )
     success = self.exec(clear_query, silent=True, debug=debug) is not None
-    msg = "Success" if success else f"Failed to clear pipe '{pipe}'."
+    msg = "Success" if success else f"Failed to clear {pipe}."
     return success, msg
 
 
@@ -1070,7 +1069,7 @@ def get_pipe_table(
 
     """
     from meerschaum.utils.sql import get_sqlalchemy_table
-    return get_sqlalchemy_table(str(pipe), connector=self, debug=debug)
+    return get_sqlalchemy_table(pipe.target, connector=self, debug=debug)
 
 def get_pipe_columns_types(
         self,

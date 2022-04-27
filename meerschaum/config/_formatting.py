@@ -12,139 +12,179 @@ if platform.system() == 'Windows':
     default_unicode, default_ansi = False, True
 
 default_formatting_config = {
-    'unicode'             : default_unicode,
-    'ansi'                : default_ansi,
-    'emoji'               : {
-        'hand'            : '👋',
-        'error'           : '🛑',
-        'failure'         : '💢',
-        'success'         : '🎉',
-        'warning'         : '🔔',
-        'info'            : '💬',
-        'debug'           : '🐞',
-        'question'        : '❓',
-        'connector'       : '🔌',
-        'metric'          : '📊',
-        'location'        : '📍',
-        'key'             : '🔑',
-        'idea'            : '💡',
-        'connected'       : '🟢',
-        'disconnected'    : '🔴',
+    'unicode'              : default_unicode,
+    'ansi'                 : default_ansi,
+    'emoji'                : {
+        'hand'             : '👋',
+        'error'            : '🛑',
+        'failure'          : '💢',
+        'success'          : '🎉',
+        'warning'          : '🔔',
+        'info'             : '💬',
+        'debug'            : '🐞',
+        'question'         : '❓',
+        'connector'        : '🔌',
+        'metric'           : '📊',
+        'location'         : '📍',
+        'key'              : '🔑',
+        'idea'             : '💡',
+        'connected'        : '🟢',
+        'disconnected'     : '🔴',
     },
-    'warnings'            : {
-        'unicode'         : {
-            'icon'        : 'MRSM{formatting:emoji:warning}',
+    'pipes'                : {
+        'unicode'          : {
+            'icons'        : {
+                'connector': 'MRSM{formatting:emoji:connector} ',
+                'metric'   : 'MRSM{formatting:emoji:metric} ',
+                'location' : 'MRSM{formatting:emoji:location} ',
+                'key'      : 'MRSM{formatting:emoji:key} ',
+            },
         },
-        'ascii'           : {
-            'icon'        : 'WARNING',
+        'ascii'            : {
+            'icons'        : {
+                'connector': '',
+                'metric'   : '',
+                'location' : '',
+                'key'      : '',
+            },
         },
-        'ansi'            : {
-            'rich'        : {
-                'style'   : 'bold yellow',
+        'ansi'             : {
+            'styles'       : {
+                'connector': 'green',
+                'metric'   : 'bright_blue',
+                'location' : 'magenta',
+                'key'      : '',
+                'guide'    : 'dim',
+                'none'     : 'black on magenta',
+            },
+        },
+        '__repr__'         : {
+            'ansi'         : {
+                'styles'   : {
+                    'Pipe': 'bold white',
+                    'punctuation': 'white',
+                    'connector': 'MRSM{formatting:pipes:ansi:styles:connector}',
+                    'metric': 'MRSM{formatting:pipes:ansi:styles:metric}',
+                    'location': 'MRSM{formatting:pipes:ansi:styles:location}',
+                    'instance': '#d177a4',
+                },
             },
         },
     },
-    'success'             : {
-        'unicode'         : {
-            'icon'        : 'MRSM{formatting:emoji:success}',
+    'warnings'             : {
+        'unicode'          : {
+            'icon'         : 'MRSM{formatting:emoji:warning}',
         },
-        'ascii'           : {
-            'icon'        : '+',
+        'ascii'            : {
+            'icon'         : 'WARNING',
         },
-        'ansi'            : {
-            'rich'        : {
-                'style'   : 'bold bright_green',
+        'ansi'             : {
+            'rich'         : {
+                'style'    : 'bold yellow',
             },
         },
     },
-    'failure'             : {
-        'unicode'         : {
-            'icon'        : 'MRSM{formatting:emoji:failure}',
+    'success'              : {
+        'unicode'          : {
+            'icon'         : 'MRSM{formatting:emoji:success}',
         },
-        'ascii'           : {
-            'icon'        : '-',
+        'ascii'            : {
+            'icon'         : '+',
         },
-        'ansi'            : {
-            'rich'        : {
-                'style'   : 'bold red',
+        'ansi'             : {
+            'rich'         : {
+                'style'    : 'bold bright_green',
             },
         },
     },
-    'errors'              : {
-        'unicode'         : {
-            'icon'        : 'MRSM{formatting:emoji:error}',
+    'failure'              : {
+        'unicode'          : {
+            'icon'         : 'MRSM{formatting:emoji:failure}',
         },
-        'ascii'           : {
-            'icon'        : 'ERROR',
+        'ascii'            : {
+            'icon'         : '-',
         },
-        'ansi'            : {
-            'rich'        : {
-                'style'   : 'bold red',
+        'ansi'             : {
+            'rich'         : {
+                'style'    : 'bold red',
             },
         },
     },
-    'info'                : {
-        'unicode'         : {
-            'icon'        : 'MRSM{formatting:emoji:info}',
+    'errors'               : {
+        'unicode'          : {
+            'icon'         : 'MRSM{formatting:emoji:error}',
         },
-        'ascii'           : {
-            'icon'        : 'INFO',
+        'ascii'            : {
+            'icon'         : 'ERROR',
         },
-        'ansi'            : {
-            'rich'        : {
-                'style'   : 'bright_magenta',
+        'ansi'             : {
+            'rich'         : {
+                'style'    : 'bold red',
             },
         },
     },
-    'question'            : {
-        'unicode'         : {
-            'icon'        : 'MRSM{formatting:emoji:question}',
+    'info'                 : {
+        'unicode'          : {
+            'icon'         : 'MRSM{formatting:emoji:info}',
         },
-        'ascii'           : {
-            'icon'        : '',
+        'ascii'            : {
+            'icon'         : 'INFO',
         },
-        'ansi'            : {
-            'rich'        : {
-                'style'   : 'green',
+        'ansi'             : {
+            'rich'         : {
+                'style'    : 'bright_magenta',
             },
         },
     },
-    'debug'               : {
-        'unicode'         : {
-            'icon'        : 'MRSM{formatting:emoji:debug}',
+    'question'             : {
+        'unicode'          : {
+            'icon'         : 'MRSM{formatting:emoji:question}',
         },
-        'ascii'           : {
-            'icon'        : 'DEBUG',
+        'ascii'            : {
+            'icon'         : '',
         },
-        'ansi'            : {
-            'rich'        : {
-                'style'   : 'cyan',
+        'ansi'             : {
+            'rich'         : {
+                'style'    : 'green',
             },
         },
     },
-    'connected'           : {
-        'unicode'         : {
-            'icon'        : 'MRSM{formatting:emoji:connected}',
+    'debug'                : {
+        'unicode'          : {
+            'icon'         : 'MRSM{formatting:emoji:debug}',
         },
-        'ascii'           : {
-            'icon'        : '',
+        'ascii'            : {
+            'icon'         : 'DEBUG',
         },
-        'ansi'            : {
-            'rich'        : {
-                'style'   : 'green',
+        'ansi'             : {
+            'rich'         : {
+                'style'    : 'cyan',
             },
         },
     },
-    'disconnected'           : {
-        'unicode'         : {
-            'icon'        : 'MRSM{formatting:emoji:disconnected}',
+    'connected'            : {
+        'unicode'          : {
+            'icon'         : 'MRSM{formatting:emoji:connected}',
         },
-        'ascii'           : {
-            'icon'        : '',
+        'ascii'            : {
+            'icon'         : '',
         },
-        'ansi'            : {
-            'rich'        : {
-                'style'   : 'red',
+        'ansi'             : {
+            'rich'         : {
+                'style'    : 'green',
+            },
+        },
+    },
+    'disconnected'         : {
+        'unicode'          : {
+            'icon'         : 'MRSM{formatting:emoji:disconnected}',
+        },
+        'ascii'            : {
+            'icon'         : '',
+        },
+        'ansi'             : {
+            'rich'         : {
+                'style'    : 'red',
             },
         },
     },

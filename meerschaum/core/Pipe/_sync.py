@@ -119,7 +119,7 @@ def sync(
           not self.connector_keys.startswith('plugin:')
           and not self.get_columns('datetime', error=False)
     ):
-        return False, f"Cannot sync pipe '{self}' without a datetime column."
+        return False, f"Cannot sync {self} without a datetime column."
 
     ### NOTE: Setting begin to the sync time for Simple Sync.
     ### TODO: Add flag for specifying syncing method.
@@ -165,7 +165,7 @@ def sync(
                     return return_tuple
 
             except Exception as e:
-                msg = f"Failed to sync pipe '{p}' with exception: '" + str(e) + "'"
+                msg = f"Failed to sync {p} with exception: '" + str(e) + "'"
                 if debug:
                     error(msg, silent=False)
                 return False, msg
@@ -174,12 +174,12 @@ def sync(
         ### If new data is provided, skip fetching.
         if df is None:
             if p.connector is None:
-                return False, f"Cannot fetch data for pipe '{p}' without a connector."
+                return False, f"Cannot fetch data for {p} without a connector."
             df = p.fetch(debug=debug, **kw)
             if df is None:
-                return False, f"Unable to fetch data for pipe '{p}'."
+                return False, f"Unable to fetch data for {p}."
             if df is True:
-                return True, f"Pipe '{p}' was synced in parallel."
+                return True, f"{p} was synced in parallel."
 
         ### CHECKPOINT: Retrieved the DataFrame.
         _checkpoint(**kw)
@@ -191,7 +191,7 @@ def sync(
             )
 
         ### if force, continue to sync until success
-        return_tuple = False, f"Did not sync pipe '{p}'."
+        return_tuple = False, f"Did not sync {p}."
         run = True
         _retries = 1
         while run:
@@ -204,12 +204,12 @@ def sync(
             _retries += 1
             run = (not return_tuple[0]) and force and _retries <= retries
             if run and debug:
-                dprint(f"Syncing failed for pipe '{p}'. Attempt ( {_retries} / {retries} )", **kw)
+                dprint(f"Syncing failed for {p}. Attempt ( {_retries} / {retries} )", **kw)
                 dprint(f"Sleeping for {min_seconds} seconds...", **kw)
                 time.sleep(min_seconds)
             if _retries > retries:
                 warn(
-                    f"Unable to sync pipe '{p}' within {retries} attempt" +
+                    f"Unable to sync {p} within {retries} attempt" +
                         ("s" if retries != 1 else "") + "!"
                 )
 
@@ -220,7 +220,7 @@ def sync(
                 dprint(f"Caching retrieved dataframe.", **kw)
                 _sync_cache_tuple = self.cache_pipe.sync(df, debug=debug, **kw)
                 if not _sync_cache_tuple[0]:
-                    warn(f"Failed to sync local cache for pipe '{self}'.")
+                    warn(f"Failed to sync local cache for {self}.")
 
         return return_tuple
 
@@ -230,9 +230,9 @@ def sync(
     ### TODO implement concurrent syncing (split DataFrame? mimic the functionality of modin?)
     from meerschaum.utils.threading import Thread
     def default_callback(result_tuple : SuccessTuple):
-        dprint(f"Asynchronous result from Pipe '{self}': {result_tuple}", **kw)
+        dprint(f"Asynchronous result from {self}: {result_tuple}", **kw)
     def default_error_callback(x : Exception):
-        dprint(f"Error received for Pipe '{self}': {x}", **kw)
+        dprint(f"Error received for {self}: {x}", **kw)
     if callback is None and debug:
         callback = default_callback
     if error_callback is None and debug:
@@ -249,7 +249,7 @@ def sync(
         thread.start()
     except Exception as e:
         return False, str(e)
-    return True, f"Spawned asyncronous sync for pipe '{self}'."
+    return True, f"Spawned asyncronous sync for {self}."
 
 
 def _determine_begin(
@@ -300,17 +300,17 @@ def get_sync_time(
     from meerschaum.utils.warnings import error, warn
     if self.columns is None:
         warn(
-            f"No columns found for Pipe '{self}'. " +
+            f"No columns found for {self}. " +
             "Pipe might not be registered or is missing columns in parameters."
         )
         return None
 
     if 'datetime' not in self.columns:
         warn(
-            f"'datetime' must be declared in parameters:columns for Pipe '{self}'.\n\n" +
-            f"You can add parameters for this Pipe with the following command:\n\n" +
-            f"mrsm edit pipes -C {self.connector_keys} -M " +
-            f"{self.metric_key} -L " +
+            f"'datetime' must be declared in parameters:columns for {self}.\n\n" +
+            f"You can add parameters for this pipe with the following command:\n\n" +
+            f"mrsm edit pipes -c {self.connector_keys} -m " +
+            f"{self.metric_key} -l " +
             (f"[None]" if self.location_key is None else f"{self.location_key}")
         )
         return None

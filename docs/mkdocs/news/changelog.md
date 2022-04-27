@@ -1,7 +1,57 @@
 # 🪵 Changelog
 
-## 0.5.x Releases
+## 0.6.x Releases
 This is the current release cycle, so future features will be updated below.
+
+### v0.6.0 – v0.6.2: **Robust Plugins**
+
+  #### Potentially Breaking Changes
+  - **Renamed `meerschaum.connectors.sql.tools` to [`meerschaum.utils.sql`](https://docs.meerschaum.io/utils/sql.html).**  
+    A dummy module was created at the old import path, but this will be removed in future releases.
+  - **Migrated to `meerschaum.core`.**  
+    Important class definitions (e.g. `User`) have been migrated from `meerschaum._internal` to `meerschaum.core`. You can still import `meerschaum.core.Pipe` as `mrsm.Pipe`, however.
+  - **Moved `meerschaum.actions.shell` to `meerschaum._internal.shell`.**  
+    Finally marked it off the to-do list!
+  - **`Pipe.__str__()` and `Pipe.__repr__()` now return stylized strings.**  
+    This should make reading logs significantly more pleasant. You can add syntax highlighting back to strings containing `Pipe()` with `meerschaum.utils.formatting.highlight_pipes()`.
+
+
+  #### New Features
+  - **Plugins**  
+    Exposed the [`meerschaum.Plugin`](https://docs.meerschaum.io/#meerschaum.Plugin) class, which will make cross-pollinating between plugins simpler.
+  - **Uninstall procedure**  
+    `Plugins` now ship with a proper `uninstall()` method.
+  - **Sharing dependencies**  
+    Plugins may now import dependencies from a required plugin's virtual environment. E.g. if plugin `foo` requires `plugin:bar`, and `bar` requires `pandas`, then `foo` will be able to import `pandas`.
+  - **Allow other repos for required plugins.**  
+    You can now specify the keys of a required plugin's repo following `@`, e.g. `foo` may require `plugin:bar@api:main`.
+  - **Isolate package cache.**  
+    Each virtual environment now uses an isolated cache folder.
+  - **Handle multiple versions of packages in `determine_version()`**  
+    When verifying packages, if multiple `dist-info` directories are found in a virtual environment, import the package in a subprocess to determine its `__version__`.
+  - **Specify a target table.**  
+    Setting `Pipe.target` or `Pipe.parameters['target']`
+
+
+  #### Bugfixes
+  - **Circular dependency resolver**  
+    Multiple plugins may now depend on each other without entering a recursive loop.
+  - **Held back `dash_extensions` due to breaking API changes.**  
+    Future releases will migrate to `dash_extensions>1.0.0`.
+  - **Fixed [`meerschaum.plugins.add_plugin_argument()`](https://docs.meerschaum.io/plugins/index.html#meerschaum.plugins.add_plugin_argument).**  
+    Refactoring broke something awhile back; more plugins-focused tests are needed.
+  - **Fixed an issue with `fontawesome` and `mkdocs-material`.**
+  - **Fixed pickling issue with `mrsm.Pipe`.**
+
+
+  #### Documentation
+  - **`pdoc` changes.**  
+    Added `__pdoc__` and `__all__` to public modules to simplify the [package docs](https://docs.meerschaum.io).
+  - **Lots of cleanup.**  
+    Almost all of the docstrings have been edited.
+
+## 0.5.x Releases
+
 
 ### v0.5.14 – v0.5.15  
   - **Added tags.**  

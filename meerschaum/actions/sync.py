@@ -162,7 +162,7 @@ def _pipes_lap(
 
         def timeout_handler(p, *args, **kw):
             success, msg = False, (
-                f"Failed to sync pipe '{p}' within {timeout_seconds} second"
+                f"Failed to sync {p} within {timeout_seconds} second"
                 + ('s' if timeout_seconds != 1 else '') + '.'
             )
             write_line((fence_begin + json.dumps((success, msg)) + fence_end).encode('utf-8'))
@@ -214,7 +214,7 @@ def _pipes_lap(
         succeeded_pipes = []
         failed_pipes = pipes
         results_dict = {
-            p: (results_dict.get(p, (False, f"Could not fetch sync result for pipe '{p}'.")))
+            p: (results_dict.get(p, (False, f"Could not fetch sync result for {p}.")))
             for p in pipes
         }
     else:
@@ -373,7 +373,7 @@ def _wrap_sync_pipe(
         import traceback
         traceback.print_exception(type(e), e, e.__traceback__)
         print("Error: " + str(e))
-        return_tuple = (False, f"Failed to sync pipe '{pipe}' with exception:" + "\n" + str(e))
+        return_tuple = (False, f"Failed to sync {pipe} with exception:" + "\n" + str(e))
 
     return return_tuple
 

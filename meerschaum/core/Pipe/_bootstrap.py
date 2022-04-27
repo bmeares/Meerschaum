@@ -69,11 +69,11 @@ def bootstrap(
     pprint(self.parameters)
     try:
         prompt(
-            f"\n    Press [Enter] to register pipe '{self}' with the above configuration:",
+            f"\n    Press [Enter] to register {self} with the above configuration:",
             icon = False
         )
     except KeyboardInterrupt as e:
-        return False, f"Aborting bootstrapping pipe '{self}'."
+        return False, f"Aborting bootstrapping {self}."
     register_tuple = self.instance_connector.register_pipe(self, debug=debug)
     if not register_tuple[0]:
         return register_tuple
@@ -83,14 +83,13 @@ def bootstrap(
 
     try:
         if yes_no(
-            f"Would you like to edit the definition for pipe '{self}'?", yes=yes, noask=noask
+            f"Would you like to edit the definition for {self}?", yes=yes, noask=noask
         ):
             edit_tuple = self.edit_definition(debug=debug)
             if not edit_tuple[0]:
                 return edit_tuple
 
-        if yes_no(f"Would you like to try syncing pipe '{self}' now?", yes=yes, noask=noask):
-            #  sync_tuple = self.sync(debug=debug)
+        if yes_no(f"Would you like to try syncing {self} now?", yes=yes, noask=noask):
             sync_tuple = actions['sync'](
                 ['pipes'],
                 connector_keys = [self.connector_keys],
@@ -103,12 +102,13 @@ def bootstrap(
             if not sync_tuple[0]:
                 return sync_tuple
     except Exception as e:
-        return False, f"Failed to bootstrap pipe '{self}':\n" + str(e)
+        return False, f"Failed to bootstrap {self}:\n" + str(e)
 
-    print_tuple((True, f"Finished bootstrapping pipe '{self}'!"))
+    print_tuple((True, f"Finished bootstrapping {self}!"))
     info(
-        f"You can edit this pipe later with `edit pipes` or set the definition with `edit pipes definition`.\n" +
-        "    To sync data into your pipe, run `sync pipes`."
+        f"You can edit this pipe later with `edit pipes` "
+        + "or set the definition with `edit pipes definition`.\n"
+        + "    To sync data into your pipe, run `sync pipes`."
     )
 
     return True, "Success"
@@ -124,24 +124,24 @@ def _get_parameters(pipe, debug: bool = False) -> Dict[str, str]:
             },
             'parents': [
                 {
-                    'connector_keys': None,
-                    'metric_key': None,
-                    'location_key': None,
+                    'connector': None,
+                    'metric': None,
+                    'location': None,
                     'instance': None,
                 },
             ],
         },
         'api': {
             'fetch': {
-                'connector_keys': None,
-                'metric_key': None,
-                'location_key': None,
+                'connector': None,
+                'metric': None,
+                'location': None,
             },
             'parents': [
                 {
-                    'connector_keys': None,
-                    'metric_key': None,
-                    'location_key': None,
+                    'connector': None,
+                    'metric': None,
+                    'location': None,
                     'instance': None,
                 },
             ],
@@ -173,12 +173,12 @@ def _get_parameters(pipe, debug: bool = False) -> Dict[str, str]:
     if _parameters.get('columns', {}).get('datetime', None) is not None:
         return _parameters
 
-    info(f"Please enter column names for the pipe '{pipe}':")
+    info(f"Please enter column names for {pipe}:")
     while True:
         try:
             datetime_name = prompt(f"Datetime column:", icon=False)
         except KeyboardInterrupt:
-            return False, "Failed to bootstrap pipe '{self}':\n" + str(e)
+            return False, "Cancelled bootstrapping {pipe}."
         if datetime_name == '':
             warn(f"Please enter a datetime column.", stack=False)
             continue
@@ -186,14 +186,14 @@ def _get_parameters(pipe, debug: bool = False) -> Dict[str, str]:
         try:
             id_name = prompt(f"ID column (empty to omit):", icon=False)
         except KeyboardInterrupt:
-            return False, f"Failed to bootstrap pipe '{self}':\n" + str(e)
+            return False, f"Cancelled bootstrapping {pipe}."
         if id_name == '':
             id_name = None
 
         try:
             value_name = prompt(f"Value column (empty to omit):", icon=False)
         except KeyboardInterrupt:
-            return False, f"Failed to bootstrap pipe '{self}':\n" + str(e)
+            return False, f"Cancelled bootstrapping {pipe}."
         if value_name == '':
             value_name = None
 
