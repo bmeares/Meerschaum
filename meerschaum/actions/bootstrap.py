@@ -183,7 +183,7 @@ def _bootstrap_pipes(
         if p.get_id(debug=debug) is not None and not force:
             try:
                 if not yes_no(
-                    f"{p} already exists. Delete {p}?\n    Data will be lost!",
+                    f"{p} already exists.\n\n    Delete {p}?\n    Data will be lost!",
                     default='n'
                 ):
                     info(f"Skipping bootstrapping {p}...")
