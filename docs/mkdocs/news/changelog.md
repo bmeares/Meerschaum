@@ -3,7 +3,7 @@
 ## 0.6.x Releases
 This is the current release cycle, so future features will be updated below.
 
-### v0.6.0 – v0.6.2: **Robust Plugins**
+### v0.6.0 – v0.6.2: **Robust Plugins and Beautiful Pipes**
 
   #### Potentially Breaking Changes
   - **Renamed `meerschaum.connectors.sql.tools` to [`meerschaum.utils.sql`](https://docs.meerschaum.io/utils/sql.html).**  
@@ -52,6 +52,7 @@ This is the current release cycle, so future features will be updated below.
 
 ## 0.5.x Releases
 
+The 0.5.x series tied up many loose ends and brought in new features, such as fulling integrating Oracle SQL, rewriting most of the doctrings, and adding tags and key negation. It also added the `clear pipes` command and introduced the GUI and webterm.
 
 ### v0.5.14 – v0.5.15  
   - **Added tags.**  

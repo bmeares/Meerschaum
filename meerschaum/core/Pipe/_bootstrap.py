@@ -116,7 +116,10 @@ def bootstrap(
 def _get_parameters(pipe, debug: bool = False) -> Dict[str, str]:
     from meerschaum.utils.prompt import prompt, yes_no
     from meerschaum.utils.warnings import warn, info
+    from meerschaum.config import get_config
     from meerschaum.config._patch import apply_patch_to_config
+    from meerschaum.utils.formatting._shell import clear_screen
+    _clear = get_config('shell', 'clear_screen', patch=True)
     _types_defaults = {
         'sql': {
             'fetch': {
@@ -169,14 +172,13 @@ def _get_parameters(pipe, debug: bool = False) -> Dict[str, str]:
             else:
                 _parameters = apply_patch_to_config(_parameters, _params)
                 
-    ### If the plugin's `register()` function returns a valid dictionary, skip the rest below.
-    if _parameters.get('columns', {}).get('datetime', None) is not None:
-        return _parameters
+    ### If the plugin's `register()` function returns columns, skip asking for columns.
+    ask_for_cols = _parameters.get('columns', {}).get('datetime', None) is None
 
     info(f"Please enter column names for {pipe}:")
     while True:
         try:
-            datetime_name = prompt(f"Datetime column:", icon=False)
+            datetime_name = _prompt(f"Datetime column:", icon=False) if ask_for_cols else None
         except KeyboardInterrupt:
             return False, "Cancelled bootstrapping {pipe}."
         if datetime_name == '':
@@ -184,14 +186,17 @@ def _get_parameters(pipe, debug: bool = False) -> Dict[str, str]:
             continue
 
         try:
-            id_name = prompt(f"ID column (empty to omit):", icon=False)
+            id_name = prompt(f"ID column (empty to omit):", icon=False) if ask_for_cols else None
         except KeyboardInterrupt:
             return False, f"Cancelled bootstrapping {pipe}."
         if id_name == '':
             id_name = None
 
         try:
-            value_name = prompt(f"Value column (empty to omit):", icon=False)
+            value_name = (
+                prompt(f"Value column (empty to omit):", icon=False)
+                if ask_for_cols else None
+            )
         except KeyboardInterrupt:
             return False, f"Cancelled bootstrapping {pipe}."
         if value_name == '':
@@ -204,6 +209,26 @@ def _get_parameters(pipe, debug: bool = False) -> Dict[str, str]:
         'id': id_name,
         'value': value_name,
     }
+
+
+    ### Ask to change the target.
+    if _clear:
+        clear_screen(debug=debug)
+    info(
+        f"You have the option to change the target table name for {pipe}.\n    "
+        + "To keep the default, press [Enter].\n"
+    )
+    _parameters['target'] = prompt(f"Target table name for {pipe}:", default=pipe.target)
+
+    if _clear:
+        clear_screen(debug=debug)
+
+    ### Ask for tags.
+    try:
+        info("In addition to the key flags (-c, -m, -l), you can select pipes with `--tags` (-t).")
+        _parameters['tags'] = prompt("Tags for {pipe} (empty to omit):")
+    except Exception as e:
+        _parameters['tags'] = []
 
     return _parameters
 

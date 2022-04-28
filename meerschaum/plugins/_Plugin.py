@@ -706,9 +706,25 @@ class Plugin:
         packages = [pkg for pkg in _packages if pkg not in accounted_for_packages]
 
         ### Attempt pip packages installation.
-        if packages and not pip_install(*packages, venv=self.name, debug=debug):
-            return False
-
+        if packages:
+            for package in packages:
+                if not pip_install(package, venv=self.name, debug=debug):
+                    warn(
+                        f"Failed to install required package '{package}'"
+                        + f" for plugin '{self.name}'.",
+                        stack = False,
+                    )
+                    if not force:
+                        warn(
+                            "Try installing with the `--force` flag to continue anyway.",
+                            stack = False,
+                        )
+                        return False
+                    info(
+                        "Continuing with installation despite the failure "
+                        + "(careful, things might be broken!)...",
+                        icon = False
+                    )
         return True
 
 

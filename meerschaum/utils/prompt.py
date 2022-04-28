@@ -57,7 +57,7 @@ def prompt(
 
     """
     from meerschaum.utils.packages import attempt_import
-    from meerschaum.utils.formatting import colored, ANSI, CHARSET
+    from meerschaum.utils.formatting import colored, ANSI, CHARSET, highlight_pipes, fill_ansi
     from meerschaum.config import get_config
     from meerschaum.config.static import _static_config
     if not noask:
@@ -85,7 +85,8 @@ def prompt(
     other_lines = '' if len(lines) <= 1 else '\n'.join(lines[1:])
 
     if ANSI:
-        first_line = colored(first_line, **question_config['ansi']['rich'])
+        first_line = fill_ansi(highlight_pipes(first_line), **question_config['ansi']['rich'])
+        other_lines = highlight_pipes(other_lines)
 
     _icon = question_config[CHARSET]['icon']
     question = (' ' + _icon + ' ') if icon and len(_icon) > 0 else ''
@@ -239,6 +240,7 @@ def choose(
 
     """
     from meerschaum.utils.warnings import warn as _warn
+    from meerschaum.utils.packages import attempt_import
 
     ### Handle empty choices.
     if len(choices) == 0:
@@ -329,6 +331,10 @@ def choose(
         question += '\n'
         for c in choices:
             question += f"  - {c}\n"
+
+    if 'completer' not in kw:
+        WordCompleter = attempt_import('prompt_toolkit.completion').WordCompleter
+        kw['completer'] = WordCompleter(choices, sentence=True)
 
     valid = False
     while not valid:

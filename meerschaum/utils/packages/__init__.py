@@ -811,8 +811,9 @@ def pip_install(
             cache_dir_path = VIRTENV_RESOURCES_PATH / venv / 'cache'
             _args += ['--cache-dir', str(cache_dir_path)]
 
-    if check_update and need_update(pip, check_pypi=check_pypi, debug=debug) and not _uninstall:
-        _args.append('pip')
+    if 'pip' not in ' '.join(_args):
+        if check_update and need_update(pip, check_pypi=check_pypi, debug=debug) and not _uninstall:
+            _args.append(all_packages['pip'])
     _args = (['install'] if not _uninstall else ['uninstall']) + _args
 
     if check_wheel and not _uninstall:

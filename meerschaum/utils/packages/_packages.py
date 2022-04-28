@@ -16,13 +16,13 @@ packages dictionary is structured in the following schema:
 from __future__ import annotations
 from meerschaum.utils.typing import Dict
 
-packages : Dict[str, Dict[str, str]] = {
-    'required' : {
+packages: Dict[str, Dict[str, str]] = {
+    'required': {
         'wheel'                      : 'wheel>=0.34.2',
         'yaml'                       : 'PyYAML>=5.3.1',
     },
-    'minimal' : {},
-    'formatting' : {
+    'minimal': {},
+    'formatting': {
         'pprintpp'                   : 'pprintpp>=0.4.0',
         'asciitree'                  : 'asciitree>=0.3.3',
         'typing_extensions'          : 'typing_extensions>=3.7.4.3',
@@ -149,13 +149,13 @@ packages['api'].update(packages['_required'])
 packages['api'].update(packages['formatting'])
 packages['api'].update(packages['dash'])
 
-all_packages = dict()
+all_packages = {}
 for group, import_names in packages.items():
     all_packages.update(import_names)
 
 skip_groups = {'docs', 'build', 'cli', 'dev-tools', 'portable', 'extras', 'stack', '_drivers'}
-full = list()
-_full = dict()
+full = []
+_full = {}
 for group, import_names in packages.items():
     ### omit 'cli' and 'docs' from 'full'
     if group in skip_groups:

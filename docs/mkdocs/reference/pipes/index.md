@@ -38,6 +38,10 @@ In addition to filtering by the above keys, you can also select a custom group o
 show pipes --tags foo bar
 ```
 
+### Key Negation
+
+You can select pipes which *don't* have a certain key by prefacing the key with an underscore (`'_'`).
+
 ## Parameters
 
 Every pipe has a parameters dictionary where you can store and retrieve metadata.
