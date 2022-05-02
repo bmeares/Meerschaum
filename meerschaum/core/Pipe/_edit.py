@@ -43,15 +43,9 @@ def edit(
     
     from meerschaum.utils.yaml import yaml
 
-    edit_header = "#######################################"
-    for i in range(len(str(self))):
-        edit_header += "#"
-    edit_header += "\n"
-    edit_header += f"# Edit the parameters for {self} #"
-    edit_header += "\n#######################################"
-    for i in range(len(str(self))):
-        edit_header += "#"
-    edit_header += "\n\n"
+    edit_text = f"Edit the parameters for {self}"
+    edit_top = '#' * (len(edit_text) + 4)
+    edit_header = edit_top + f'\n# {edit_text} #\n' + edit_top + '\n\n'
 
     from meerschaum.config import get_config
     parameters = dict(get_config('pipes', 'parameters', patch=True))

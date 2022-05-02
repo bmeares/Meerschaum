@@ -18,9 +18,10 @@ def edit(
     """
     from meerschaum.utils.misc import choose_subaction
     options = {
-        'config'  : _edit_config,
-        'pipes'   : _edit_pipes,
-        'users'   : _edit_users,
+        'config'    : _edit_config,
+        'pipes'     : _edit_pipes,
+        'definition': _edit_definition,
+        'users'     : _edit_users,
     }
     return choose_subaction(action, options, **kw)
 
@@ -133,7 +134,7 @@ def _edit_pipes(
 
     for p in pipes:
         try:
-            text = prompt(f"Press [Enter] to edit '{p}' or [CTRL-C] to skip:", icon=False)
+            text = prompt(f"Press [Enter] to edit {p} or [CTRL-C] to skip:", icon=False)
             if text == 'pass':
                 continue
         except KeyboardInterrupt:
@@ -143,6 +144,18 @@ def _edit_pipes(
         else:
             p.edit(interactive=True, debug=debug, **kw)
     return (True, "Success")
+
+
+def _edit_definition(
+        action: Optional[List[str]] = None,
+        **kw
+    ) -> SuccessTuple:
+    """
+    Edit pipes' definitions.
+    Alias for `edit pipes definition`.
+    """
+    return _edit_pipes(['definition'], **kw)
+
 
 def _edit_users(
         action: Optional[List[str]] = None,

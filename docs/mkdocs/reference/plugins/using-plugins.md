@@ -1,4 +1,4 @@
-# Installing and Using Plugins
+# ⚙️ Installing and Using Plugins
 
 Meerschaum gives you the ability to easily install and create plugins. Refer to the guide below on how to install, write, and publish plugins.
 
