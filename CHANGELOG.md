@@ -6,6 +6,7 @@ This is the current release cycle, so future features will be updated below.
 ### v0.6.0 – v0.6.2: **Robust Plugins and Beautiful Pipes**
 
   **Potentially Breaking Changes**
+
   - **Renamed `meerschaum.connectors.sql.tools` to [`meerschaum.utils.sql`](https://docs.meerschaum.io/utils/sql.html).**  
     A dummy module was created at the old import path, but this will be removed in future releases.
   - **Migrated to `meerschaum.core`.**  
@@ -17,6 +18,7 @@ This is the current release cycle, so future features will be updated below.
 
 
   **New Features**
+
   - **Plugins**  
     Exposed the [`meerschaum.Plugin`](https://docs.meerschaum.io/#meerschaum.Plugin) class, which will make cross-pollinating between plugins simpler.
   - **Uninstall procedure**  
@@ -34,6 +36,7 @@ This is the current release cycle, so future features will be updated below.
 
 
   **Bugfixes**
+
   - **Circular dependency resolver**  
     Multiple plugins may now depend on each other without entering a recursive loop.
   - **Held back `dash_extensions` due to breaking API changes.**  
@@ -44,7 +47,8 @@ This is the current release cycle, so future features will be updated below.
   - **Fixed pickling issue with `mrsm.Pipe`.**
 
 
-  #### Documentation
+  **Documentation**
+  
   - **`pdoc` changes.**  
     Added `__pdoc__` and `__all__` to public modules to simplify the [package docs](https://docs.meerschaum.io).
   - **Lots of cleanup.**  
