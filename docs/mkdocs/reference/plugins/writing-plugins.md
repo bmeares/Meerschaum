@@ -1,22 +1,22 @@
-# Writing Your Own Plugins
+# ✍️ Writing Your Own Plugins
 
 > This tutorial explains how to extend Meerschaum with plugins. For general information, consult the [Types of Plugins reference page](/reference/plugins/types-of-plugins/).
 
 Meerschaum's plugin system is designed to be simple so you can get your plugins working quickly. Plugins are Python packages defined in the Meerschaum configuration `plugins` directory and are imported at startup.
 
 !!! warning "Performance Warning"
-    To get the best performance and user experience, try to keep module-level code to a minimum ― especially imports. Plugins are loaded at startup, and those tiny delays add up!
+    To get the best performance and user experience, try to keep module-level code to a minimum ― especially heavy imports. Plugins are loaded at startup, and those tiny delays add up!
     ```python hl_lines="2"
     ### BAD - DON'T DO THIS
     import pandas as pd
     def fetch(pipe, **kw):
-    	return None
+    	  return None
     ```
     ``` python hl_lines="3"
     ### GOOD - DO THIS INSTEAD
     def fetch(pipe, **kw):
-    	import pandas as pd
-    	return None
+    	  import pandas as pd
+    	  return None
     ```
 
 To create your plugin, follow these steps:

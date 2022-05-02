@@ -154,13 +154,13 @@ def _bootstrap_pipes(
             clear_screen(debug=debug)
         try:
             lk = prompt(
-                f"Where are the data located?\n\n"
-                + f"    You can build pipes that share a connector and metric\n"
-                + f"    but are in different locations.\n\n"
-                + f"    For example, you could create the pipes 'sql_mydb_energy_home' and\n"
-                + f"    'sql_mydb_energy_work', which would share a connector (sql:mydb) and\n"
-                + f"    metric (energy), but may come from different tables.\n\n"
-                + f"    In most cases. you can omit the location.\n\n"
+                "Where are the data located?\n\n"
+                + "    You can build pipes that share a connector and metric\n"
+                + "    but are in different locations.\n\n"
+                + f"    For example, you could create Pipe('{ck}', '{mk}', 'home') and\n"
+                + f"    Pipe('{ck}', '{mk}', 'work'), which would share a connector\n"
+                + "    and metric, but may come from different tables.\n\n"
+                + "    In most cases. you can omit the location.\n\n"
                 + f" {get_config('formatting', 'emoji', 'location')} Location (Empty to omit):"
             )
         except KeyboardInterrupt:

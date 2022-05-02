@@ -7,7 +7,7 @@ Attempt to create a pipe's requirements in one method.
 """
 
 from __future__ import annotations
-from meerschaum.utils.typing import SuccessTuple, Optional, Dict
+from meerschaum.utils.typing import SuccessTuple, Optional, Dict, Any
 
 def bootstrap(
         self,
@@ -113,7 +113,8 @@ def bootstrap(
 
     return True, "Success"
 
-def _get_parameters(pipe, debug: bool = False) -> Dict[str, str]:
+
+def _get_parameters(pipe, debug: bool = False) -> Dict[str, Any]:
     from meerschaum.utils.prompt import prompt, yes_no
     from meerschaum.utils.warnings import warn, info
     from meerschaum.config import get_config
@@ -171,45 +172,11 @@ def _get_parameters(pipe, debug: bool = False) -> Dict[str, str]:
                 )
             else:
                 _parameters = apply_patch_to_config(_parameters, _params)
-                
+     
     ### If the plugin's `register()` function returns columns, skip asking for columns.
     ask_for_cols = _parameters.get('columns', {}).get('datetime', None) is None
-
-    info(f"Please enter column names for {pipe}:")
-    while True:
-        try:
-            datetime_name = _prompt(f"Datetime column:", icon=False) if ask_for_cols else None
-        except KeyboardInterrupt:
-            return False, "Cancelled bootstrapping {pipe}."
-        if datetime_name == '':
-            warn(f"Please enter a datetime column.", stack=False)
-            continue
-
-        try:
-            id_name = prompt(f"ID column (empty to omit):", icon=False) if ask_for_cols else None
-        except KeyboardInterrupt:
-            return False, f"Cancelled bootstrapping {pipe}."
-        if id_name == '':
-            id_name = None
-
-        try:
-            value_name = (
-                prompt(f"Value column (empty to omit):", icon=False)
-                if ask_for_cols else None
-            )
-        except KeyboardInterrupt:
-            return False, f"Cancelled bootstrapping {pipe}."
-        if value_name == '':
-            value_name = None
-
-        break
-
-    _parameters['columns'] = {
-        'datetime': datetime_name,
-        'id': id_name,
-        'value': value_name,
-    }
-
+    if ask_for_cols:
+        _parameters['columns'] = _ask_for_columns(pipe, debug=debug)
 
     ### Ask to change the target.
     if _clear:
@@ -225,10 +192,56 @@ def _get_parameters(pipe, debug: bool = False) -> Dict[str, str]:
 
     ### Ask for tags.
     try:
-        info("In addition to the key flags (-c, -m, -l), you can select pipes with `--tags` (-t).")
-        _parameters['tags'] = prompt("Tags for {pipe} (empty to omit):")
+        info(
+            "In addition to the key flags (-c, -m, -l), you can select pipes with `--tags` (-t).\n"
+            + "    Separate tags with commas (e.g. tag1,tag2).\n"
+        )
+        _parameters['tags'] = [
+            t.strip() for t in prompt(f"Tags for {pipe} (empty to omit):").split(',') if t
+        ]
     except Exception as e:
         _parameters['tags'] = []
 
     return _parameters
+
+
+def _ask_for_columns(pipe, debug: bool=False) -> Dict[str, str]:
+    """
+    Prompt the user for the column names.
+    """
+    from meerschaum.utils.warnings import info, warn
+    from meerschaum.utils.prompt import prompt
+
+    info(f"Please enter column names for {pipe}:")
+    while True:
+        try:
+            datetime_name = prompt(f"Datetime column:", icon=False)
+        except KeyboardInterrupt:
+            return False, f"Cancelled bootstrapping {pipe}."
+        if datetime_name == '':
+            warn(f"Please enter a datetime column.", stack=False)
+            continue
+
+        try:
+            id_name = prompt(f"ID column (empty to omit):", icon=False)
+        except KeyboardInterrupt:
+            return False, f"Cancelled bootstrapping {pipe}."
+        if id_name == '':
+            id_name = None
+
+        try:
+            value_name = prompt(f"Value column (empty to omit):", icon=False)
+        except KeyboardInterrupt:
+            return False, f"Cancelled bootstrapping {pipe}."
+        if value_name == '':
+            value_name = None
+
+        break
+
+    return {
+        'datetime': datetime_name,
+        'id': id_name,
+        'value': value_name,
+    }
+
 

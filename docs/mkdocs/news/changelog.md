@@ -30,7 +30,7 @@ This is the current release cycle, so future features will be updated below.
   - **Handle multiple versions of packages in `determine_version()`**  
     When verifying packages, if multiple `dist-info` directories are found in a virtual environment, import the package in a subprocess to determine its `__version__`.
   - **Specify a target table.**  
-    Setting `Pipe.target` or `Pipe.parameters['target']`
+    `Pipe.target` (`Pipe.parameters['target']`) now governs the name of the underlying SQL table.
 
 
   #### Bugfixes

@@ -169,6 +169,12 @@ class Pipe:
         if not location:
             location = location_key
 
+        if not connector:
+            connector = connector_keys
+
+        if not metric:
+            metric = metric_key
+
         if location in ('[None]', 'None'):
             location = None
 

@@ -9,7 +9,9 @@ Pipes are identified by three primary components in a hierarchy:
 2. 📊 **Metric** (label)
 3. 📍 **Location** (optional tag)
 
-![Pipes hierarchy](/assets/screenshots/weather_pipes.png)
+<p align="center">
+<img src="/assets/screenshots/weather_pipes.png" alt="Pipes hierarchy"/>
+</p>
 
 In the above screenshot, three pipes are represented according to their keys (you can see this view with `show pipes`). The three pipes share a connector (`plugin:noaa`) and metric (`weather`) but have different locations.
 
