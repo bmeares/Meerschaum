@@ -233,13 +233,23 @@ if _include_dash:
     import meerschaum.api.dash
 
 ### Execute the API plugins functions.
+import meerschaum as mrsm
 for module_name, functions_list in _api_plugins.items():
+    plugin_name = module_name.split('.')[-1] if module_name.startswith('plugins.') else None
+    plugin = mrsm.Plugin(plugin_name) if plugin_name else None
+
+    if plugin is not None:
+        plugin.activate_venv(debug=debug)
+
     for function in functions_list:
         try:
             function(app)
         except Exception as e:
+            import traceback
+            traceback.print_exc()
             warn(
-                f"Failed to load API plugin '{module_name.split('.')[-1]}' "
+                f"Failed to load API plugin '{plugin}' "
                 + f"when executing function '{function.__name__}' with exception:\n{e}",
-                stack=False
+                stack=False,
             )
+

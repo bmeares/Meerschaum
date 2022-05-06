@@ -82,4 +82,6 @@ import meerschaum.api.dash.pages as pages
 import meerschaum.api.dash.callbacks as callbacks
 
 fastapi_middleware_wsgi = attempt_import('fastapi.middleware.wsgi')
-fastapi_app.mount(endpoints['dash'], fastapi_middleware_wsgi.WSGIMiddleware(dash_app.server))
+fastapi_app.mount(
+    endpoints['dash'], fastapi_middleware_wsgi.WSGIMiddleware(dash_app.server)
+)

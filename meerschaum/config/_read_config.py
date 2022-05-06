@@ -178,7 +178,7 @@ def read_config(
             except Exception as e:
                 print(f"Unable to parse {filename}!")
                 import traceback
-                traceback.print_exception(e)
+                traceback.print_exc()
                 #  print(e)
                 input(f"Press [Enter] to open '{filename}' and fix formatting errors.")
                 from meerschaum.utils.misc import edit_file
