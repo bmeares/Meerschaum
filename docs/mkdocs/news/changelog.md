@@ -5,7 +5,8 @@ This is the current release cycle, so future features will be updated below.
 
 ### v0.6.0 – v0.6.2: **Robust Plugins and Beautiful Pipes**
 
-  #### Potentially Breaking Changes
+  **Potentially Breaking Changes**
+
   - **Renamed `meerschaum.connectors.sql.tools` to [`meerschaum.utils.sql`](https://docs.meerschaum.io/utils/sql.html).**  
     A dummy module was created at the old import path, but this will be removed in future releases.
   - **Migrated to `meerschaum.core`.**  
@@ -16,7 +17,8 @@ This is the current release cycle, so future features will be updated below.
     This should make reading logs significantly more pleasant. You can add syntax highlighting back to strings containing `Pipe()` with `meerschaum.utils.formatting.highlight_pipes()`.
 
 
-  #### New Features
+  **New Features**
+
   - **Plugins**  
     Exposed the [`meerschaum.Plugin`](https://docs.meerschaum.io/#meerschaum.Plugin) class, which will make cross-pollinating between plugins simpler.
   - **Uninstall procedure**  
@@ -30,10 +32,11 @@ This is the current release cycle, so future features will be updated below.
   - **Handle multiple versions of packages in `determine_version()`**  
     When verifying packages, if multiple `dist-info` directories are found in a virtual environment, import the package in a subprocess to determine its `__version__`.
   - **Specify a target table.**  
-    Setting `Pipe.target` or `Pipe.parameters['target']`
+    `Pipe.target` (`Pipe.parameters['target']`) now governs the name of the underlying SQL table.
 
 
-  #### Bugfixes
+  **Bugfixes**
+
   - **Circular dependency resolver**  
     Multiple plugins may now depend on each other without entering a recursive loop.
   - **Held back `dash_extensions` due to breaking API changes.**  
@@ -44,7 +47,8 @@ This is the current release cycle, so future features will be updated below.
   - **Fixed pickling issue with `mrsm.Pipe`.**
 
 
-  #### Documentation
+  **Documentation**
+  
   - **`pdoc` changes.**  
     Added `__pdoc__` and `__all__` to public modules to simplify the [package docs](https://docs.meerschaum.io).
   - **Lots of cleanup.**  

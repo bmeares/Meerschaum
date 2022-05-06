@@ -1,4 +1,4 @@
-# List of Meerschaum Plugins
+# 📜 List of Meerschaum Plugins
 
 This page contains a list of plugins available on the [public Meerschaum repository](https://api.mrsm.io/dash/plugins). To install a plugin, run the command `mrsm install plugin <name>`.
 

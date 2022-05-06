@@ -122,8 +122,8 @@ def get_pipes_cards(*keys):
             id = {'type': 'pipe-download-csv-button', 'index': json.dumps(p.meta)},
         )
         card_body_children = [
-            #  html.H4(str(p), className='card-title'),
-            html.P(str(p)),
+            html.H5(html.B(str(p)), className='card-title'),
+            #  html.P(str(p)),
             html.Div(dbc.Accordion(accordion_items_from_pipe(p), flush=True,
                 start_collapsed=True,
                 id={'type': 'pipe-accordion', 'index': json.dumps(p.meta)},
@@ -201,7 +201,9 @@ def accordion_items_from_pipe(
         if rowcount is not None:
             stats_rows.append(html.Tr([html.Td("Row-count"), html.Td(f"{rowcount}")]))
         if interval is not None:
-            stats_rows.append(html.Tr([html.Td("Timespan"), html.Td(humanfriendly.format_timespan(interval))]))
+            stats_rows.append(
+                html.Tr([html.Td("Timespan"), html.Td(humanfriendly.format_timespan(interval))])
+            )
         if oldest_time is not None:
             stats_rows.append(html.Tr([html.Td("Oldest time"), html.Td(str(oldest_time))]))
         if newest_time is not None:
@@ -214,7 +216,9 @@ def accordion_items_from_pipe(
         try:
             columns_header = [html.Thead(html.Tr([html.Th("Column"), html.Th("Type")]))]
             columns_types = pipe.get_columns_types(debug=debug)
-            columns_rows = [html.Tr([html.Td(col), html.Td(typ)]) for col, typ in columns_types.items()]
+            columns_rows = [
+                html.Tr([html.Td(col), html.Td(typ)]) for col, typ in columns_types.items()
+            ]
             columns_body = [html.Tbody(columns_rows)]
             columns_table = dbc.Table(columns_header + columns_body, bordered=False, hover=True)
         except Exception as e:

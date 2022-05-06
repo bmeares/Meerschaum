@@ -115,8 +115,8 @@ I've included a list of the dynamic dependencies below to credit the open source
 
 *Extensions for Plotly Dash.*
 
-  - Emil Eriksen <emil.h.eriksen@gmail.com>
-  - [https://github.com/thedirtyfew/dash-extensions/](https://github.com/thedirtyfew/dash-extensions/)
+  - emher
+  - [emil.h.eriksen@gmail.com](mailto:emil.h.eriksen@gmail.com)
   - License: MIT
 
 ### databases
