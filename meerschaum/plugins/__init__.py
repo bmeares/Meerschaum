@@ -11,7 +11,7 @@ from meerschaum.utils.typing import Callable, Any, Union, Optional, Dict, List, 
 from meerschaum.utils.threading import Lock, RLock
 from meerschaum.plugins._Plugin import Plugin
 
-_api_plugins: Dict[str, List['function']] = {}
+_api_plugins: Dict[str, List[Callable[['fastapi.App'], Any]]] = {}
 _locks = {
     '_api_plugins': RLock(),
     '__path__': RLock(),
@@ -117,16 +117,14 @@ def api_plugin(function: Callable[[Any], Any]) -> Callable[[Any], Any]:
     ...         return {'message' : 'It works!'}
     >>>
     """
-    _locks['_api_plugins'].acquire()
-    try:
-        if function.__module__ not in _api_plugins:
-            _api_plugins[function.__module__] = []
-        _api_plugins[function.__module__].append(function)
-    except Exception as e:
-        from meerschaum.utils.warnings import warn
-        warn(e)
-    finally:
-        _locks['_api_plugins'].release()
+    with _locks['_api_plugins']:
+        try:
+            if function.__module__ not in _api_plugins:
+                _api_plugins[function.__module__] = []
+            _api_plugins[function.__module__].append(function)
+        except Exception as e:
+            from meerschaum.utils.warnings import warn
+            warn(e)
     return function
 
 

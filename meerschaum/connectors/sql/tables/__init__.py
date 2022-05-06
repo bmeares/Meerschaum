@@ -47,10 +47,11 @@ def get_tables(
     from meerschaum.utils.packages import attempt_import
     from meerschaum import get_connector
 
-    sqlalchemy, sqlalchemy_dialects_postgresql, sqlalchemy_utils = attempt_import(
+    sqlalchemy, sqlalchemy_dialects_postgresql, sqlalchemy_utils_types_json = attempt_import(
         'sqlalchemy',
         'sqlalchemy.dialects.postgresql',
-        'sqlalchemy_utils',
+        'sqlalchemy_utils.types.json',
+        lazy = False
     )
     if not sqlalchemy:
         error(f"Failed to import sqlalchemy. Is sqlalchemy installed?")
@@ -75,7 +76,7 @@ def get_tables(
 
         id_type = sqlalchemy.Integer
         params_type = (
-            sqlalchemy_utils.types.json.JSONType if conn.flavor not in ('duckdb',)
+            sqlalchemy_utils_types_json.JSONType if conn.flavor not in ('duckdb',)
             else sqlalchemy.String
         )
 

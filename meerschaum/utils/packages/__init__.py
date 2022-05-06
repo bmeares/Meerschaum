@@ -23,7 +23,7 @@ _locks = {
 _checked_for_updates = set()
 
 def manually_import_module(
-        name: str,
+        import_name: str,
         venv: Optional[str] = None,
         check_update: bool = True,
         check_pypi: bool = False,
@@ -39,7 +39,7 @@ def manually_import_module(
 
     Parameters
     ----------
-    name: str
+    import_name: str
         The name of the module.
         
     venv: Optional[str], default None
@@ -55,7 +55,7 @@ def manually_import_module(
         If `True`, install the package if it's not installed or needs an update.
 
     split: bool, default True
-        If `True`, split `name` on periods to get the package name.
+        If `True`, split `import_name` on periods to get the package name.
 
     warn: bool, default True
         If `True`, raise a warning if the package cannot be imported.
@@ -75,23 +75,24 @@ def manually_import_module(
     The specified module or `None` if it can't be imported.
 
     """
-    if venv is None:
-        try:
-            return _import_module(name)
-        except ModuleNotFoundError:
-            return None
+    #  if venv is None:
+        #  try:
+            #  return _import_module(name)
+        #  except ModuleNotFoundError:
+            #  return None
     import sys
-    _previously_imported = name in sys.modules
+    _previously_imported = import_name in sys.modules
     if _previously_imported and not check_update:
-        return sys.modules[name]
+        return sys.modules[import_name]
     if debug:
         from meerschaum.utils.debug import dprint
     from meerschaum.utils.warnings import warn as warn_function
-    root_name = name.split('.')[0] if split else name
+    import warnings
+    root_name = import_name.split('.')[0] if split else import_name
     install_name = all_packages.get(root_name, root_name)
-    venv_path = pathlib.Path(venv_target_path(venv))
+    venv_path = venv_target_path(venv)
     mod_path = venv_path
-    for _dir in name.split('.')[:-1]:
+    for _dir in import_name.split('.')[:-1]:
         mod_path = mod_path / _dir
     root_path = venv_path / root_name
     root_path = (
@@ -99,21 +100,21 @@ def manually_import_module(
         else venv_path / (root_name + '.py')
     )
 
-    possible_end_module_filename = name.split('.')[-1] + '.py'
+    possible_end_module_filename = import_name.split('.')[-1] + '.py'
     try:
         mod_path = (
             (mod_path / possible_end_module_filename)
             if possible_end_module_filename in os.listdir(mod_path)
             else (
-                mod_path / name.split('.')[-1] / '__init__.py'
+                mod_path / import_name.split('.')[-1] / '__init__.py'
             )
         )
     except Exception as e:
         mod_path = None
 
     spec = (
-        importlib.util.find_spec(name) if mod_path is None or not mod_path.exists()
-        else importlib.util.spec_from_file_location(name, str(mod_path))
+        importlib.util.find_spec(import_name) if mod_path is None or not mod_path.exists()
+        else importlib.util.spec_from_file_location(import_name, str(mod_path))
     )
     root_spec = (
         importlib.util.find_spec(root_name) if not root_path.exists()
@@ -122,8 +123,10 @@ def manually_import_module(
 
     ### Check for updates before importing.
     _version = (
-        determine_version(pathlib.Path(root_spec.origin), name=root_name, venv=venv, debug=debug)
-        if root_spec.origin is not None else None
+        determine_version(
+            pathlib.Path(root_spec.origin),
+            import_name=root_name, venv=venv, debug=debug
+        ) if root_spec.origin is not None else None
     )
 
     if debug:
@@ -133,7 +136,7 @@ def manually_import_module(
             dprint(f'_version: {_version}', color=color)
         if check_update:
             if need_update(
-                None, name=name, version=_version, split=split,
+                None, import_name=root_name, version=_version, split=split,
                 check_pypi=check_pypi, debug=debug
             ):
                 if install:
@@ -149,7 +152,7 @@ def manually_import_module(
                         warn_function(
                             f"There's an update available for '{install_name}', " +
                             "but it failed to install. " +
-                            "Try install via Meershaum with `install packages '{install_name}'`.",
+                            "Try install via Meerschaum with `install packages '{install_name}'`.",
                             ImportWarning,
                             stacklevel = 3,
                             color = False,
@@ -161,30 +164,40 @@ def manually_import_module(
                         color = False,
                     )
                 spec = (
-                    importlib.util.find_spec(name) if mod_path is None or not mod_path.exists()
-                    else importlib.util.spec_from_file_location(name, str(mod_path))
+                    importlib.util.find_spec(import_name)
+                    if mod_path is None or not mod_path.exists()
+                    else importlib.util.spec_from_file_location(import_name, str(mod_path))
                 )
 
 
     if spec is None:
         try:
-            mod = _import_module(name)
+            mod = _import_module(import_name)
         except Exception as e:
             mod = None
         return mod
 
-    if _previously_imported:
-        return sys.modules[name]
+    #  if _previously_imported:
+        #  return sys.modules[import_name]
 
     if venv is not None:
         activate_venv(venv)
     mod = importlib.util.module_from_spec(spec)
-    sys.modules[name] = mod
+    old_sys_mod = sys.modules.get(import_name, None)
+    sys.modules[import_name] = mod
+
     try:
-        spec.loader.exec_module(mod)
+        with warnings.catch_warnings():
+            warnings.filterwarnings('ignore', 'The NumPy')
+            spec.loader.exec_module(mod)
     except Exception as e:
         pass
-    mod = _import_module(name)
+    mod = _import_module(import_name)
+    if old_sys_mod is not None:
+        sys.modules[import_name] = old_sys_mod
+    else:
+        del sys.modules[import_name]
+    
     if deactivate and venv is not None:
         deactivate_venv(venv)
     return mod
@@ -192,7 +205,7 @@ def manually_import_module(
 
 def determine_version(
         path: pathlib.Path,
-        name: Optional[str] = None,
+        import_name: Optional[str] = None,
         venv: Optional[str] = None,
         search_for_metadata: bool = True,
         warn: bool = False,
@@ -208,8 +221,8 @@ def determine_version(
     path: pathlib.Path
         The file path of the module.
 
-    name: Optional[str], default None
-        The name of the module. If ommitted, it will be determined from the file path.
+    import_name: Optional[str], default None
+        The name of the module. If omitted, it will be determined from the file path.
         Defaults to `None`.
 
     venv: Optional[str], default None
@@ -235,13 +248,13 @@ def determine_version(
     if debug:
         from meerschaum.utils.debug import dprint
     from meerschaum.utils.warnings import warn as warn_function
-    if name is None:
-        name = path.parent.stem if path.stem == '__init__' else path.stem
+    if import_name is None:
+        import_name = path.parent.stem if path.stem == '__init__' else path.stem
     _version = None
     is_dir = path.stem == '__init__'
     module_parent_dir = path.parent.parent if is_dir else path.parent
     installed_dir_name = re.split(
-        f'[<>=\[]', all_packages.get(name, name)
+        f'[<>=\[]', all_packages.get(import_name, import_name)
     )[0].replace('-', '_').lower()
 
     ### First, check if a dist-info directory exists.
@@ -255,7 +268,7 @@ def determine_version(
                 not filename.endswith('.dist-info')
             ):
                 continue
-            _v = filename[(len(name) + 1):(-1 * (len('dist-info') + 1))]
+            _v = filename.replace('.dist-info', '').split("-")[-1]
             _found_versions.append(_v)
 
     if len(_found_versions) == 1:
@@ -269,7 +282,7 @@ def determine_version(
     _no_version_str = 'no-version'
     code = (
         f"import os, importlib; os.chdir('{module_parent_dir_str}'); "
-        + f"module = importlib.import_module('{name}');\n"
+        + f"module = importlib.import_module('{import_name}');\n"
         + "try:\n"
         + "  print(module.__version__ , end='')\n"
         + "except:\n"
@@ -281,7 +294,7 @@ def determine_version(
     stdout, stderr = stdout_bytes.decode('utf-8'), stderr_bytes.decode('utf-8')
     if exit_code != 0 and warn:
         warn_function(
-            f"Failed to import module '{name}' with the following exception:\n{stderr}",
+            f"Failed to import module '{import_name}' with the following exception:\n{stderr}",
             stack = False
         )
     _version = stdout.split('\n')[-1] if exit_code == 0 else None
@@ -292,7 +305,8 @@ def determine_version(
 
 def need_update(
         package: 'ModuleType',
-        name: Optional[str] = None,
+        install_name: Optional[str] = None,
+        import_name: Optional[str] = None,
         version: Optional[str] = None,
         check_pypi: bool = False,
         split: bool = True,
@@ -307,6 +321,13 @@ def need_update(
     ----------
     package: 'ModuleType'
         The module of the package to be updated.
+
+    install_name: Optional[str], default None
+        If provided, use this string to determine the required version.
+        Otherwise use the install name defined in `meerschaum.utils.packages._packages`.
+
+    import_name:
+        If provided, override the package's `__name__` string.
 
     version: Optional[str], default None
         If specified, override the package's `__version__` string.
@@ -337,10 +358,10 @@ def need_update(
     import re
     root_name = (
         package.__name__.split('.')[0] if split else package.__name__
-    ) if name is None else (
-        name.split('.')[0] if split else name
+    ) if import_name is None else (
+        import_name.split('.')[0] if split else import_name
     )
-    install_name = all_packages.get(root_name, root_name)
+    install_name = all_packages.get(root_name, root_name) if install_name is None else install_name
     if install_name in _checked_for_updates:
         return False
     _checked_for_updates.add(install_name)
@@ -358,29 +379,30 @@ def need_update(
         dprint(f"required_version: {required_version}", color=color)
 
     try:
-        version = package.__version__ if version is None else version
+        version = (
+            determine_version(
+                pathlib.Path(package.__file__),
+                import_name=root_name, warn=False, debug=debug
+            )
+            if version is None else version
+        )
     except Exception as e:
         if debug:
             dprint("No version could be determined from the installed package.", color=color)
         return False
+    split_version = version.split('.')
+    if len(split_version) == 2:
+        version = '.'.join(split_version) + '.0'
+    elif 'dev' in split_version[-1]:
+        version = '.'.join(split_version[:-1]) + '-' + split_version[-1]
+    elif len(split_version) > 3:
+        version = '.'.join(split_version[:3])
 
     packaging_version = attempt_import('packaging.version', check_update=False, lazy=False)
 
     ### Get semver if necessary
     if required_version:
         semver = attempt_import('semver', check_update=False, lazy=False)
-        try:
-            _match = semver.VersionInfo.match
-        except Exception as e:
-            ### Something funky is going on with semver.
-            _match = None
-        if _match is None:
-            warn_function(
-                f"Unable to import `semver.match`. "
-                + "Please reinstall `semver` if possible (e.g. `upgrade packages`)."
-            )
-            return False
-
     if check_pypi:
         ### Check PyPI for updates
         update_checker = attempt_import('update_checker', lazy=False, check_update=False)
@@ -399,7 +421,7 @@ def need_update(
         ### We have a result from PyPI and a stated required version.
         if required_version:
             try:
-                return semver.VersionInfo.parse(result.available_version).match(required_version)
+                return semver.Version.parse(result.available_version).match(required_version)
             except Exception as e:
                 if debug:
                     dprint(f"Failed to match versions with exception:\n{e}", color=color)
@@ -417,10 +439,11 @@ def need_update(
     ### Sanity check that the required version is not greater than the installed version.
     try:
         return (
-            (not semver.VersionInfo.parse(version).match(required_version))
+            (not semver.Version.parse(version).match(required_version))
             if required_version else False
         )
     except Exception as e:
+        print(f"Unable to parse version ({version}) for package '{import_name}'.")
         import traceback
         traceback.print_exc()
         if debug:
@@ -435,6 +458,8 @@ def need_update(
         if debug:
             dprint(e)
         return False
+    return False
+
 
 def is_venv_active(
         venv: str = 'mrsm',

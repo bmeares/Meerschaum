@@ -292,7 +292,7 @@ def _api_start(
         if debug:
             gunicorn_args += ['--log-level=debug', '--enable-stdio-inheritance', '--reload']
         try:
-            run_python_package('gunicorn', gunicorn_args, debug=debug, venv='mrsm')
+            run_python_package('gunicorn', gunicorn_args, debug=debug, venv=None)
         except KeyboardInterrupt:
             pass
 
