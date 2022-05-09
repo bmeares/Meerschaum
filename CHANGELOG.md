@@ -3,7 +3,7 @@
 ## 0.6.x Releases
 This is the current release cycle, so future features will be updated below.
 
-### v0.6.3
+### v0.6.3: **Durable Venvs**
 
   - **Improved durability of the virtual environments.**  
     The function [`meerschaum.utils.packages.manually_import_module()`](https://docs.meerschaum.io/utils/packages/index.html#meerschaum.utils.packages.manually_import_module) behaves as expected, allowing you to import different versions of modules. More work needs to be done to see if reintroducing import hooks would be beneficial.
