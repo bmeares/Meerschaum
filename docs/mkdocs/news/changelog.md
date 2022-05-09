@@ -3,7 +3,7 @@
 ## 0.6.x Releases
 This is the current release cycle, so future features will be updated below.
 
-### v0.6.3: **Durable Venvs**
+### v0.6.3 – v0.6.4: **Durable Venvs**
 
   - **Improved durability of the virtual environments.**  
     The function [`meerschaum.utils.packages.manually_import_module()`](https://docs.meerschaum.io/utils/packages/index.html#meerschaum.utils.packages.manually_import_module) behaves as expected, allowing you to import different versions of modules. More work needs to be done to see if reintroducing import hooks would be beneficial.
@@ -15,6 +15,10 @@ This is the current release cycle, so future features will be updated below.
     Rather than a long UUID, each instance of the API server will have a randomly generated ID of six letters. Keep in mind it is randomly generated, so please excuse any randomly generated words.
   - **Removed version enforcement for uvicorn and gunicorn.**  
     Uvicorn has a lot of hidden imports, and using our home-brewed import system breaks things. Instead, we now use the default [`attempt_import`](https://docs.meerschaum.io/utils/packages/index.html#meerschaum.utils.packages.attempt_import) behavior of `check_update=False`.
+  - **Reintroduced `verify packages` to `setup.py`.**  
+    Upgrading Meerschaum will check if the virtual environment packages satisfy their required versions.
+  - **Moved `pkg_resources` patch from the module-level.**  
+    In v0.6.3, the monkey-patching for `flask-compress` happened at the module level, but this was quickly moved to a lazy patch in v0.6.4.
   - **Bumped several dependencies.**
 
 ### v0.6.0 – v0.6.2: **Robust Plugins and Beautiful Pipes**

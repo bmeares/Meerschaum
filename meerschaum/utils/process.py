@@ -31,9 +31,10 @@ def run_process(
 
     Parameters
     ----------
-    args :
+    *args:
         The sysargs to execute.
-    foreground :
+
+    foreground: bool, default False
         If `True`, execute the process as a foreground process that passes Ctrl-C to children.
         From the original post:
         The "correct" way of spawning a new subprocess:
@@ -42,44 +43,26 @@ def run_process(
         
         Some side-info about "how ctrl-c works":
         https://unix.stackexchange.com/a/149756/1321
-        Defaults to `False`.
-    as_proc :
+
+    as_proc: bool, default False
         If `True`, return the `subprocess.Popen` object.
-        Defaults to `False`.
-    line_callback :
+
+    line_callback: Optional[Callable[[str], Any]], default None
         If provided, poll the process and execute the callback when `readline()` gets new text.
-        Defaults to `None`.
-    store_proc_dict :
+
+    store_proc_dict: Optional[Dict[str, Any]], default None
         If provided, store the `subprocess.Popen` object under the key `store_proc_key`.
         Useful for accessing the process while it is polling in another thread.
-        Defaults to `None`.
-    store_proc_key :
+
+    store_proc_key: str, default 'child_process'
         If `store_proc_dict` is provided, store the process in the dictionary under this key.
-        Defaults to 'child_process'.
-    kw :
+
+    kw: Any
         Additional keyword arguments to pass to `subprocess.Popen`.
-    *args :
-        
-    foreground: bool :
-         (Default value = False)
-    as_proc: bool :
-         (Default value = False)
-    line_callback: Optional[Callable[[str] :
-        
-    Any]] :
-         (Default value = None)
-    store_proc_dict: Optional[Dict[str :
-        
-    store_proc_key: str :
-         (Default value = 'child_process')
-    capture_output: bool :
-         (Default value = False)
-    **kw: Any :
-        
 
     Returns
     -------
-
+    Either an int for the return code or a `subprocess.Popen` object.
     """
     if platform.system() == 'Windows':
         foreground = False
