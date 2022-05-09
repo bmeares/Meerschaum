@@ -7,7 +7,7 @@ Functions for managing packages and virtual environments reside here.
 """
 
 from __future__ import annotations
-import importlib, os, pathlib, pkg_resources
+import importlib, os, pathlib
 from meerschaum.utils.typing import Any, List, SuccessTuple, Optional, Union, Tuple
 from meerschaum.utils.threading import Lock, RLock
 from meerschaum.utils.packages._packages import packages, all_packages
@@ -18,9 +18,9 @@ active_venvs = set()
 _locks = {
     'active_venvs': RLock(),
     'sys.path': RLock(),
+    '_pkg_resources_get_distribution': RLock(),
 }
 _checked_for_updates = set()
-_pkg_resources_get_distribution = pkg_resources.get_distribution
 
 def manually_import_module(
         import_name: str,
@@ -195,6 +195,16 @@ def manually_import_module(
     return mod
 
 
+def _import_to_install_name(import_name: str) -> str:
+    """
+    Try to translate an import name to an installation name.
+    """
+    import re
+    return re.split(
+        f'[<>=\[]', all_packages.get(import_name, import_name)
+    )[0].replace('-', '_').lower()
+
+
 def determine_version(
         path: pathlib.Path,
         import_name: Optional[str] = None,
@@ -245,24 +255,28 @@ def determine_version(
     _version = None
     is_dir = path.stem == '__init__'
     module_parent_dir = path.parent.parent if is_dir else path.parent
-    installed_dir_name = re.split(
-        f'[<>=\[]', all_packages.get(import_name, import_name)
-    )[0].replace('-', '_').lower()
+    #  print("MODULE PARENT DIR")
+    #  print(module_parent_dir)
+
+    installed_dir_name = _import_to_install_name(import_name)
 
     ### First, check if a dist-info directory exists.
     _found_versions = []
     if search_for_metadata:
         for filename in os.listdir(module_parent_dir):
             path = module_parent_dir / filename
+            #  print(f"Examining {path = }")
             if (
                 not path.is_dir() or
                 not filename.lower().startswith(installed_dir_name.replace('-', '_')) or
                 not filename.endswith('.dist-info')
             ):
+                #  print(f"skipping {path}")
                 continue
             _v = filename.replace('.dist-info', '').split("-")[-1]
             _found_versions.append(_v)
 
+    #  print(f"FOUND VERSIONS: {_found_versions}")
     if len(_found_versions) == 1:
         return _found_versions[0]
 
@@ -278,21 +292,67 @@ def determine_version(
         + "try:\n"
         + "  print(module.__version__ , end='')\n"
         + "except:\n"
-        + f"  print('{_no_version_str}')"
+        + f"  print('{_no_version_str}', end='')"
     )
     exit_code, stdout_bytes, stderr_bytes = venv_exec(
         code, venv=venv, with_extras=True, debug=debug
     )
     stdout, stderr = stdout_bytes.decode('utf-8'), stderr_bytes.decode('utf-8')
-    if exit_code != 0 and warn:
+    _version = stdout.split('\n')[-1] if exit_code == 0 else None
+    _version = _version if _version != _no_version_str else None
+
+    if _version is None:
+        _version = _get_package_metadata(import_name, venv).get('version', None)
+    if _version is None and warn:
         warn_function(
-            f"Failed to import module '{import_name}' with the following exception:\n{stderr}",
+            f"Failed to determine a version for '{import_name}':\n{stderr}",
             stack = False
         )
-    _version = stdout.split('\n')[-1] if exit_code == 0 else None
+
     ### If `__version__` doesn't exist, return `None`.
-    _version = _version if _version != _no_version_str else None
     return _version
+
+
+def _get_package_metadata(import_name: str, venv: Optional[str]) -> Dict[str, str]:
+    """
+    Get a package's metadata from pip.
+    This is useful for getting a version when no `__version__` is defined
+    and multiple versions are installed.
+
+    Parameters
+    ----------
+    import_name: str
+        The package's import or installation name.
+
+    venv: Optional[str]
+        The virtual environment which contains the package.
+
+    Returns
+    -------
+    A dictionary of metadata from pip.
+    """
+    import re
+    from meerschaum.config._paths import VIRTENV_RESOURCES_PATH
+    install_name = _import_to_install_name(import_name)
+    _args = ['show', install_name]
+    if venv is not None:
+        cache_dir_path = VIRTENV_RESOURCES_PATH / venv / 'cache'
+        _args += ['--cache-dir', str(cache_dir_path)]
+    proc = run_python_package(
+        'pip', _args,
+        capture_output=True, as_proc=True, venv=venv, universal_newlines=True,
+    )
+    outs, errs = proc.communicate()
+    lines = outs.split('\n')
+    meta = {}
+    for line in lines:
+        vals = line.split(": ")
+        if len(vals) != 2:
+            continue
+        k, v = vals[0].lower(), vals[1]
+        if v and 'UNKNOWN' not in v:
+            meta[k] = v
+    return meta
 
 
 def need_update(
@@ -1588,12 +1648,16 @@ def ensure_readline() -> 'ModuleType':
     sys.modules['readline'] = readline
     return readline
 
+_pkg_resources_get_distribution = None
 def _monkey_patch_get_distribution(_dist: str = 'flask-compress', _version: str = '1.12') -> None:
     """
     Monkey patch `pkg_resources.get_distribution` to allow for importing `flask_compress`.
     """
     import pkg_resources
     from collections import namedtuple
+    global _pkg_resources_get_distribution
+    with locks['_pkg_resources_get_distribution']:
+        _pkg_resources_get_distribution = pkg_resources.get_distribution
     _Dist = namedtuple('_Dist', ['version'])
     def _get_distribution(dist):
         """Hack for flask-compress."""

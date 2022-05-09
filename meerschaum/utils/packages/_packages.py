@@ -106,7 +106,7 @@ packages: Dict[str, Dict[str, str]] = {
         'tornado'                    : 'tornado>=6.1.0',
         'tornado_xstatic'            : 'tornado-xstatic>=0.2.0',
         'xstatic'                    : 'XStatic>=1.0.2',
-        'xstatic.pkg.termjs'         : 'XStatic-term.js>=0.0.7.0',
+        'xstatic.pkg.termjs'         : 'XStatic-term.js>=0.0.7',
         'webview'                    : 'pywebview>=3.6.3',
     },
     'extras': {
