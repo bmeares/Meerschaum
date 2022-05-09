@@ -1656,7 +1656,7 @@ def _monkey_patch_get_distribution(_dist: str = 'flask-compress', _version: str 
     import pkg_resources
     from collections import namedtuple
     global _pkg_resources_get_distribution
-    with locks['_pkg_resources_get_distribution']:
+    with _locks['_pkg_resources_get_distribution']:
         _pkg_resources_get_distribution = pkg_resources.get_distribution
     _Dist = namedtuple('_Dist', ['version'])
     def _get_distribution(dist):
