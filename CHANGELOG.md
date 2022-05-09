@@ -19,6 +19,8 @@ This is the current release cycle, so future features will be updated below.
     Upgrading Meerschaum will check if the virtual environment packages satisfy their required versions.
   - **Moved `pkg_resources` patch from the module-level.**  
     In v0.6.3, the monkey-patching for `flask-compress` happened at the module level, but this was quickly moved to a lazy patch in v0.6.4.
+  - **Bugfixes**  
+    Versions 0.6.3 and 0.6.4 were yanked due to some unforeseen broken features.
   - **Bumped several dependencies.**
 
 ### v0.6.0 – v0.6.2: **Robust Plugins and Beautiful Pipes**
