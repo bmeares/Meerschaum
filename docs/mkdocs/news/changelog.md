@@ -3,6 +3,20 @@
 ## 0.6.x Releases
 This is the current release cycle, so future features will be updated below.
 
+### v0.6.3: **Durable Venvs**
+
+  - **Improved durability of the virtual environments.**  
+    The function [`meerschaum.utils.packages.manually_import_module()`](https://docs.meerschaum.io/utils/packages/index.html#meerschaum.utils.packages.manually_import_module) behaves as expected, allowing you to import different versions of modules. More work needs to be done to see if reintroducing import hooks would be beneficial.
+  - **Activate plugin virtual environments for API plugins.**  
+    If a plugin uses the [`@api_plugin` decorator](https://docs.meerschaum.io/plugins/index.html#meerschaum.plugins.api_plugin), its virtual environment will be activated before starting the API server. This could potentially cause problems if you have many API plugins with conflicting dependencies, but this could be mitigated by isolating environments with `MRSM_ROOT_DIR`.
+  - **Changed `name` to `import_name` for `determine_version()`.**  
+    The first argument in [`meerschaum.utils.packages.determine_version()`](https://docs.meerschaum.io/utils/packages/index.html#meerschaum.utils.packages.determine_version) has been renamed from `name` to the less-ambiguous `import_name`.
+  - **Shortened the IDs for API environments.**  
+    Rather than a long UUID, each instance of the API server will have a randomly generated ID of six letters. Keep in mind it is randomly generated, so please excuse any randomly generated words.
+  - **Removed version enforcement for uvicorn and gunicorn.**  
+    Uvicorn has a lot of hidden imports, and using our home-brewed import system breaks things. Instead, we now use the default [`attempt_import`](https://docs.meerschaum.io/utils/packages/index.html#meerschaum.utils.packages.attempt_import) behavior of `check_update=False`.
+  - **Bumped several dependencies.**
+
 ### v0.6.0 – v0.6.2: **Robust Plugins and Beautiful Pipes**
 
   **Potentially Breaking Changes**
@@ -48,7 +62,7 @@ This is the current release cycle, so future features will be updated below.
 
 
   **Documentation**
-  
+
   - **`pdoc` changes.**  
     Added `__pdoc__` and `__all__` to public modules to simplify the [package docs](https://docs.meerschaum.io).
   - **Lots of cleanup.**  
@@ -76,7 +90,7 @@ The 0.5.x series tied up many loose ends and brought in new features, such as fu
 - **Renamed pipes' keys methods function.**  
   The function `meerschaum.utils.get_pipes.methods()` is renamed to `meerschaum.utils.get_pipes.fetch_pipes_keys()`.
 - **Improved stability for DuckDB.**
-- **Bumped depdenencies.**  
+- **Bumped dependencies.**  
   DuckDB, FastAPI, and Uvicorn have been updated to their latest stable versions.
 
 

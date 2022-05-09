@@ -279,7 +279,7 @@ class Plugin:
             fpath = fpath / '__init__.py'
 
         new_version = determine_version(
-            fpath, name=self.name, search_for_metadata=False, warn=True, debug=debug
+            fpath, import_name=self.name, search_for_metadata=False, warn=True, debug=debug
         )
         if not new_version:
             warn(

@@ -7,10 +7,9 @@ Functions for managing packages and virtual environments reside here.
 """
 
 from __future__ import annotations
-import importlib, os, pathlib
+import importlib, os, pathlib, pkg_resources
 from meerschaum.utils.typing import Any, List, SuccessTuple, Optional, Union, Tuple
 from meerschaum.utils.threading import Lock, RLock
-
 from meerschaum.utils.packages._packages import packages, all_packages
 
 _import_module = importlib.import_module
@@ -21,6 +20,7 @@ _locks = {
     'sys.path': RLock(),
 }
 _checked_for_updates = set()
+_pkg_resources_get_distribution = pkg_resources.get_distribution
 
 def manually_import_module(
         import_name: str,
@@ -75,11 +75,6 @@ def manually_import_module(
     The specified module or `None` if it can't be imported.
 
     """
-    #  if venv is None:
-        #  try:
-            #  return _import_module(name)
-        #  except ModuleNotFoundError:
-            #  return None
     import sys
     _previously_imported = import_name in sys.modules
     if _previously_imported and not check_update:
@@ -176,9 +171,6 @@ def manually_import_module(
         except Exception as e:
             mod = None
         return mod
-
-    #  if _previously_imported:
-        #  return sys.modules[import_name]
 
     if venv is not None:
         activate_venv(venv)
@@ -442,6 +434,14 @@ def need_update(
             (not semver.Version.parse(version).match(required_version))
             if required_version else False
         )
+    except AttributeError:
+        pip_install('semver', venv='mrsm')
+        semver = manually_import_module('semver', venv='mrsm')
+        return (
+            (not semver.Version.parse(version).match(required_version))
+            if required_version else False
+        )
+
     except Exception as e:
         print(f"Unable to parse version ({version}) for package '{import_name}'.")
         import traceback
@@ -1587,3 +1587,18 @@ def ensure_readline() -> 'ModuleType':
 
     sys.modules['readline'] = readline
     return readline
+
+def _monkey_patch_get_distribution(_dist: str = 'flask-compress', _version: str = '1.12') -> None:
+    """
+    Monkey patch `pkg_resources.get_distribution` to allow for importing `flask_compress`.
+    """
+    import pkg_resources
+    from collections import namedtuple
+    _Dist = namedtuple('_Dist', ['version'])
+    def _get_distribution(dist):
+        """Hack for flask-compress."""
+        if dist == _dist:
+            return _Dist(_version)
+        return _pkg_resources_get_distribution(dist)
+    pkg_resources.get_distribution = _get_distribution
+
