@@ -172,8 +172,9 @@ def _api_start(
         action = []
 
     ### Uvicorn must be installed on the host because of multiprocessing reasons.
+    ### `check_update` must be False, because otherwise Uvicorn's hidden imports will break things.
     uvicorn, gunicorn = attempt_import(
-        'uvicorn', 'gunicorn', venv=None, lazy=False, check_update=True
+        'uvicorn', 'gunicorn', venv=None, lazy=False, check_update=False,
     )
 
     uvicorn_config_path = API_UVICORN_RESOURCES_PATH / SERVER_ID / '.config.json'

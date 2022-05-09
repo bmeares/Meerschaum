@@ -8,7 +8,8 @@ Insert non-user-editable configuration files here.
 
 import os
 import uuid
-SERVER_ID = os.environ.get('MRSM_SERVER_ID', str(uuid.uuid4()))
+from meerschaum.utils.misc import generate_password
+SERVER_ID = os.environ.get('MRSM_SERVER_ID', generate_password(6))
 static_config = None
 
 def _static_config():

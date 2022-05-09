@@ -248,7 +248,12 @@ def fill_ansi(string: str, style: str = '') -> str:
     from meerschaum.utils.misc import iterate_chunks
     rich = import_rich()
     Text = attempt_import('rich.text').Text
-    msg = Text.from_ansi(string)
+    try:
+        msg = Text.from_ansi(string)
+    except AttributeError as e:
+        import traceback
+        traceback.print_stack()
+        msg = ''
     plain_indices = []
     for left_span, right_span in iterate_chunks(msg.spans, 2, fillvalue=len(msg)):
         left = left_span.end

@@ -28,7 +28,7 @@ packages: Dict[str, Dict[str, str]] = {
         'typing_extensions'          : 'typing_extensions>=4.2.0',
         'pygments'                   : 'pygments>=2.7.2',
         'colorama'                   : 'colorama>=0.4.3',
-        'rich'                       : 'rich>=10.12.0',
+        'rich'                       : 'rich>=12.4.1',
         'more_termcolor'             : 'more-termcolor>=1.1.3',
         'humanfriendly'              : 'humanfriendly>=10.0.0',
     },
@@ -98,6 +98,7 @@ packages: Dict[str, Dict[str, str]] = {
         'mkdocs_section_index'       : 'mkdocs-section-index>=0.3.3',
         'mkdocs_linkcheck'           : 'mkdocs-linkcheck>=1.0.6',
         'mkdocs_redirects'           : 'mkdocs-redirects>=1.0.4',
+        'jinja2'                     : 'jinja2==3.0.3',
     },
     'gui': {
         'toga'                       : 'toga>=0.3.0-dev29',
@@ -112,7 +113,8 @@ packages: Dict[str, Dict[str, str]] = {
         'cmd2'                       : 'cmd2>=1.4.0',
         'ruamel.yaml'                : 'ruamel.yaml>=0.16.12',
         'pandasgui'                  : 'pandasgui>=0.2.9',      
-        'modin'                      : 'modin[ray]>=0.8.3'
+        'modin'                      : 'modin[ray]>=0.8.3',
+        'nanoid'                     : 'nanoid>=2.0.0',
     },
 }
 packages['sql'] = {
