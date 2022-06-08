@@ -354,7 +354,7 @@ def filter_existing(
         params: Optional[Dict[str, Any]] = None,
         debug: bool = False,
         **kw
-    ) -> 'pd.DataFrame':
+    ) -> Tuple['pd.DataFrame', Union['pd.DataFrame', None]]:
     """
     Inspect a dataframe and filter out rows which already exist in the pipe.
 
@@ -445,6 +445,20 @@ def filter_existing(
     if debug:
         dprint("Existing data:\n" + str(backtrack_df), **kw)
 
-    ### remove data we've already seen before
+    ### Detect changes between the old target and new source dataframes.
     from meerschaum.utils.misc import filter_unseen_df
-    return filter_unseen_df(backtrack_df, df, debug=debug)
+    delta_df = filter_unseen_df(backtrack_df, df, debug=debug)
+
+    ### If we know the primary key column, separate the new and changed rows.
+    if self.columns.get('id', None) is not None:
+        id_col = self.columns['id']
+        ### Determine which rows are completely new.
+        unseen_df = delta_df[~delta_df[id_col].isin(backtrack_df[id_col])]
+
+        ### Rows that have already been inserted but values have changed.
+        update_df = delta_df[delta_df[id_col].isin(backtrack_df[id_col])]
+    else:
+        unseen_df = delta_df
+        update_df = None
+
+    return unseen_df, update_df, delta_df

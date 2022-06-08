@@ -706,6 +706,7 @@ def sync_pipe(
     from meerschaum.utils.debug import dprint
     from meerschaum.utils.packages import import_pandas
     from meerschaum.utils.misc import parse_df_datetimes
+    from meerschaum import Pipe
     if df is None:
         msg = f"DataFrame is None. Cannot sync {pipe}."
         warn(msg)
@@ -740,13 +741,37 @@ def sync_pipe(
         check_existing = False
         is_new = True
 
-    new_data_df = (
+    unseen_df, update_df, delta_df = (
         pipe.filter_existing(
             df, chunksize=chunksize, begin=begin, end=end, debug=debug, **kw
-        ) if check_existing else df
+        ) if check_existing else (df, None, df)
     )
     if debug:
-        dprint("New unseen data:\n" + str(new_data_df))
+        dprint("Delta data :\n" + str(delta))
+        dprint("Unseen data:\n" + str(unseen_df))
+        dprint("Update data:\n" + str(update_df)) if update_df is not None else None
+
+    if update_df is not None:
+        #  self.clear_pipe(pipe, params={})
+        temp_target = '_' + pipe.target
+        self.to_sql(
+            update_df,
+            name = temp_target,
+            if_exists='replace',
+            chunksize=chunksize,
+            debug=debug,
+            **kw
+        )
+        temp_pipe = Pipe(
+            '_' + pipe.connector_keys, pipe.metric_key, pipe.location_key,
+            instance = pipe.instance_keys,
+            columns = pipe.columns,
+            target = temp_target,
+        )
+
+        self.exec(apply_update_)
+        
+        temp_pipe.drop(debug=debug)
 
     if_exists = kw.get('if_exists', 'append')
     if 'if_exists' in kw:
