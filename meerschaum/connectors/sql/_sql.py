@@ -387,6 +387,7 @@ def to_sql(
         silent: bool = False,
         debug: bool = False,
         as_tuple: bool = False,
+        as_dict: bool = False,
         **kw
     ) -> Union[bool, SuccessTuple]:
     """
@@ -414,6 +415,11 @@ def to_sql(
     as_tuple: bool, default False
         If `True`, return a (success_bool, message) tuple instead of a `bool`.
         Defaults to `False`.
+
+    as_dict: bool, default False
+        If `True`, return a dictionary of transaction information.
+        The keys are `success`, `msg`, `start`, `end`, `duration`, `num_rows`, `chunksize`,
+        `method`, and `target`.
         
     kw: Any
         Additional arguments will be passed to the DataFrame's `to_sql` function
@@ -430,6 +436,7 @@ def to_sql(
     from meerschaum.utils.sql import sql_item_name
     from meerschaum.connectors.sql._create_engine import flavor_configs
 
+    stats = {'target': name, }
     ### resort to defaults if None
     if method == "":
         if self.flavor in _bulk_flavors:
@@ -437,21 +444,35 @@ def to_sql(
         else:
             ### Should resolve to 'multi' or `None`.
             method = flavor_configs.get(self.flavor, {}).get('to_sql', {}).get('method', 'multi')
+    stats['method'] = method.__name__ if hasattr(method, '__name__') else str(method)
     chunksize = chunksize if chunksize != -1 else self.sys_config.get('chunksize', None)
+    stats['chunksize'] = chunksize
 
     success, msg = False, "Default to_sql message"
     start = time.perf_counter()
     if debug:
         msg = f"Inserting {len(df)} rows with chunksize: {chunksize}..."
         print(msg, end="", flush=True)
+    stats['num_rows'] = len(df)
 
     ### filter out non-pandas args
     import inspect
     to_sql_params = inspect.signature(df.to_sql).parameters
-    to_sql_kw = dict()
+    to_sql_kw = {}
     for k, v in kw.items():
         if k in to_sql_params:
             to_sql_kw[k] = v
+
+    if self.flavor == 'oracle':
+        #  _name = name
+        #  name = sql_item_name(name, 'oracle')
+
+        ### For some reason 'replace' doesn't work properly in pandas,
+        ### so try dropping first.
+        if if_exists == 'replace':
+            success = self.exec("DROP TABLE " + name) is not None
+            if not success:
+                warn(f"Unable to drop {name}")
 
     try:
         df.to_sql(
@@ -472,13 +493,20 @@ def to_sql(
     end = time.perf_counter()
     if success:
         msg = f"It took {round(end - start, 2)} seconds to sync {len(df)} rows to {name}."
+    stats['start'] = start
+    stats['end'] = end
+    stats['duration'] = end - start
 
     if debug:
         print(f" done.", flush=True)
         dprint(msg)
 
+    stats['success'] = success
+    stats['msg'] = msg
     if as_tuple:
         return success, msg
+    if as_dict:
+        return stats
     return success
 
 def psql_insert_copy(

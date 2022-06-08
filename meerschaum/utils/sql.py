@@ -28,17 +28,50 @@ exists_queries = {
 }
 update_queries = {
     'default': """
-    
+    UPDATE {target_table_name} AS f
+    {sets_subquery_none}
+    FROM {target_table_name} AS t
+    INNER JOIN (SELECT DISTINCT * FROM {patch_table_name}) AS p
+        ON {and_subquery_t}
+    WHERE
+        {and_subquery_f}
+    """,
+    'mysql': """
+    UPDATE {target_table_name} AS f
+    INNER JOIN (SELECT DISTINCT * FROM {patch_table_name}) AS p
+        ON {and_subquery_f}
+    {sets_subquery_f}
+    WHERE
+        {and_subquery_f}
+    """,
+    'mariadb': """
+    UPDATE {target_table_name} AS f
+    INNER JOIN (SELECT DISTINCT * FROM {patch_table_name}) AS p
+        ON {and_subquery_f}
+    {sets_subquery_f}
+    WHERE
+        {and_subquery_f}
     """,
     'mssql': """
-    
-MERGE {target} t
-USING {patch} p
-ON t.id = p."id"
-WHEN MATCHED THEN
-    UPDATE
-    SET {} = S."bar";
-
+    MERGE {target_table_name} t
+        USING (SELECT DISTINCT * FROM {patch_table_name}) p
+        ON {and_subquery_t}
+    WHEN MATCHED THEN
+        UPDATE
+        {sets_subquery_none};
+    """,
+    'oracle': """
+    MERGE INTO {target_table_name} t
+        USING (SELECT DISTINCT * FROM {patch_table_name}) p
+        ON (
+            {and_subquery_t}
+        )
+    WHEN MATCHED THEN
+        UPDATE
+        {sets_subquery_none}
+        WHERE (
+            {and_subquery_t}
+        )
     """,
 }
 table_wrappers = {
@@ -342,7 +375,9 @@ def oracle_capital(s: str) -> str:
     """
     Capitalize the string of an item on an Oracle database.
     """
-    return s.upper()
+    #  return s
+    #  return s.upper()
+    return s.upper() if s[0].isalpha() else s
 
 
 def truncate_item_name(item: str, flavor: str) -> str:
@@ -502,14 +537,46 @@ def get_sqlalchemy_table(
     return tables[str(table)]
 
 
-def update_join_query(
-        target_table: str,
-        patch_table: str,
-        #  connector: Optional[meerschaum.connectors.sql.SQLConnector],
-        flavor: str,
-        debug: bool=False
+def update_query(
+        target: str,
+        patch: str,
+        connector: meerschaum.connectors.sql.SQLConnector,
+        join_cols: List[str],
+        debug: bool = False,
     ) -> str:
     """
-    Build an `UPDATE` query that joins.
+    Build a `MERGE` or `UPDATE` query to apply a patch to target table.
     """
+    base_query = update_queries.get(connector.flavor, update_queries['default'])
+    target_table = get_sqlalchemy_table(target, connector)
+    value_cols = [c for c in target_table.columns if c.name not in join_cols]
+
+    def sets_subquery(l_prefix: str, r_prefix: str):
+        return 'SET ' + ', '.join([
+            (
+                l_prefix + sql_item_name(c.name, connector.flavor)
+                + ' = ' + 'CAST(' + r_prefix
+                + sql_item_name(c.name, connector.flavor) + ' AS ' + str(c.type).replace('_', ' ')
+                + ')'
+            ) for c in value_cols
+        ])
+
+    def and_subquery(l_prefix: str, r_prefix: str):
+        return '\nAND\n'.join([
+            (
+                l_prefix + sql_item_name(c, connector.flavor)
+                + ' = '
+                + r_prefix + sql_item_name(c, connector.flavor)
+            ) for c in join_cols
+        ])
+    query = base_query.format(
+        sets_subquery_none = sets_subquery('', 'p.'),
+        sets_subquery_f = sets_subquery('f.', 'p.'),
+        and_subquery_f = and_subquery('p.', 'f.'),
+        and_subquery_t = and_subquery('p.', 't.'),
+        target_table_name = sql_item_name(target, connector.flavor),
+        patch_table_name = sql_item_name(patch, connector.flavor),
+    )
+    return query
+
     

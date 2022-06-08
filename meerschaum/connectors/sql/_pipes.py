@@ -199,8 +199,7 @@ def fetch_pipes_keys(
     }
 
     ### Make deep copy so we don't mutate this somewhere else.
-    from copy import deepcopy
-    parameters = deepcopy(params)
+    parameters = params.copy()
     for col, vals in cols.items():
         ### Allow for IS NULL to be declared as a single-item list ([None]).
         if vals == [None]:
@@ -265,6 +264,11 @@ def fetch_pipes_keys(
             ).not_like(f'%"tags":%"{xt}"%')
         )
     q = q.where(sqlalchemy.and_(sqlalchemy.or_(*ors).self_group())) if ors else q
+    q = q.order_by(
+        sqlalchemy.asc(pipes.c['connector_keys']),
+        sqlalchemy.asc(pipes.c['metric_key']),
+        sqlalchemy.nullsfirst(sqlalchemy.asc(pipes.c['location_key'])),
+    )
 
     ### execute the query and return a list of tuples
     if debug:
@@ -706,11 +710,15 @@ def sync_pipe(
     from meerschaum.utils.debug import dprint
     from meerschaum.utils.packages import import_pandas
     from meerschaum.utils.misc import parse_df_datetimes
+    from meerschaum.utils.sql import update_query
     from meerschaum import Pipe
+    import time
     if df is None:
         msg = f"DataFrame is None. Cannot sync {pipe}."
         warn(msg)
         return False, msg
+
+    start = time.perf_counter()
 
     ## allow syncing for JSON or dict as well as DataFrame
     pd = import_pandas()
@@ -747,31 +755,42 @@ def sync_pipe(
         ) if check_existing else (df, None, df)
     )
     if debug:
-        dprint("Delta data :\n" + str(delta))
+        dprint("Delta data :\n" + str(delta_df))
         dprint("Unseen data:\n" + str(unseen_df))
         dprint("Update data:\n" + str(update_df)) if update_df is not None else None
 
-    if update_df is not None:
-        #  self.clear_pipe(pipe, params={})
+    if update_df is not None and not update_df.empty:
         temp_target = '_' + pipe.target
         self.to_sql(
             update_df,
             name = temp_target,
-            if_exists='replace',
-            chunksize=chunksize,
-            debug=debug,
+            if_exists = 'append',
+            chunksize = chunksize,
+            debug = debug,
             **kw
         )
         temp_pipe = Pipe(
-            '_' + pipe.connector_keys, pipe.metric_key, pipe.location_key,
+            pipe.connector_keys + '_', pipe.metric_key, pipe.location_key,
             instance = pipe.instance_keys,
             columns = pipe.columns,
             target = temp_target,
         )
 
-        self.exec(apply_update_)
-        
-        temp_pipe.drop(debug=debug)
+        success = (
+            self.exec(
+                update_query(
+                    pipe.target,
+                    temp_target,
+                    self,
+                    pipe.get_columns('id', 'datetime'),
+                    debug = debug
+                ), debug=debug) is not None
+        )
+        if success:
+            #  temp_pipe.drop(debug=debug)
+            pass
+        else:
+            warn(f"Failed to apply changes to {pipe}.", stack=False)
 
     if_exists = kw.get('if_exists', 'append')
     if 'if_exists' in kw:
@@ -780,12 +799,12 @@ def sync_pipe(
         kw.pop('name')
 
     ### append new data to Pipe's table
-    result = self.to_sql(
-        new_data_df,
+    stats = self.to_sql(
+        unseen_df,
         name = pipe.target,
         if_exists = if_exists,
         debug = debug,
-        as_tuple = True,
+        as_dict = True,
         chunksize = chunksize,
         **kw
     )
@@ -793,7 +812,18 @@ def sync_pipe(
         if not self.create_indices(pipe, debug=debug):
             if debug:
                 dprint(f"Failed to create indices for {pipe}. Continuing...")
-    return result
+
+    end = time.perf_counter()
+    success = stats['success']
+    if not success:
+        return success, stats['msg']
+    msg = (
+        f"It took {round(end-start, 2)} seconds to update {pipe} using method {stats['method']} "
+        + f"and chunksize {stats['chunksize']}.\n"
+        + f"Inserted {len(unseen_df)} rows, "
+        + f"updated {len(update_df) if update_df is not None else 0} rows."
+    )
+    return success, msg
 
 
 def get_sync_time(
