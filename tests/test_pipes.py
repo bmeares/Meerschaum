@@ -127,7 +127,34 @@ def test_sync_engine(flavor: str):
     assert success, msg
 
 
-#  @oytest.mark.parametrize("flavor", list(all_pipes.keys()))
-#  def test_target(flavor: str):
-
+@pytest.mark.parametrize("flavor", list(all_pipes.keys()))
+def test_target_mutable(flavor: str):
+    conn = conns[flavor]
+    if conn.type != 'sql':
+        return
+    target = 'FooBar!'
+    pipe = Pipe('foo', 'bar', target=target, instance=conn, columns={'datetime': 'dt', 'id': 'id'})
+    pipe.drop(debug=debug)
+    assert not pipe.exists(debug=debug)
+    success, msg = pipe.sync(
+        {'dt': [datetime.datetime(2022, 6, 8)], 'id': [1], 'vl': [10]},
+        debug = debug
+    )
+    df = conn.read(target)
+    assert len(df) == 1
+    success, msg = pipe.sync(
+        {'dt': [datetime.datetime(2022, 6, 8)], 'id': [1], 'vl': [10]},
+        debug = debug
+    )
+    df = conn.read(target)
+    assert len(df) == 1
+    success, msg = pipe.sync(
+        {'dt': [datetime.datetime(2022, 6, 8)], 'id': [1], 'vl': [100]},
+        debug = debug
+    )
+    df = conn.read(target)
+    assert len(df) == 2
+    pipe.drop()
+    result = conn.read(target, silent=True)
+    assert result is None
 

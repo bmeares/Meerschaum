@@ -153,7 +153,7 @@ def sync(
                 if p.connector.type == 'plugin' and p.connector.sync is not None:
                     from meerschaum.plugins import Plugin
                     connector_plugin = Plugin(p.connector.label)
-                    connector_plugin.deactivate_venv(debug=debug)
+                    connector_plugin.activate_venv(debug=debug)
                     return_tuple = p.connector.sync(p, debug=debug, **kw)
                     if deactivate_plugin_venv:
                         connector_plugin.deactivate_venv(debug=debug)
@@ -172,7 +172,7 @@ def sync(
 
         ### default: fetch new data via the connector.
         ### If new data is provided, skip fetching.
-        if df is None:
+        #  if df is None:
             if p.connector is None:
                 return False, f"Cannot fetch data for {p} without a connector."
             df = p.fetch(debug=debug, **kw)
@@ -449,16 +449,40 @@ def filter_existing(
     from meerschaum.utils.misc import filter_unseen_df
     delta_df = filter_unseen_df(backtrack_df, df, debug=debug)
 
-    ### If we know the primary key column, separate the new and changed rows.
-    if self.columns.get('id', None) is not None:
-        id_col = self.columns['id']
-        ### Determine which rows are completely new.
-        unseen_df = delta_df[~delta_df[id_col].isin(backtrack_df[id_col])]
+    ### Separate new rows from changed ones.
+    dt_col = self.columns['datetime']
+    id_col = self.columns.get('id', None)
+    from meerschaum.utils.sql import sql_item_name
+    dt_col_name = sql_item_name(id_col, 'duckdb')
+    id_col_name = sql_item_name(id_col, 'duckdb')
+    import duckdb
 
-        ### Rows that have already been inserted but values have changed.
-        update_df = delta_df[delta_df[id_col].isin(backtrack_df[id_col])]
-    else:
-        unseen_df = delta_df
-        update_df = None
+    joined_df = pd.merge(
+        delta_df,
+        backtrack_df,
+        how='left',
+        on=[dt_col, id_col],
+        indicator=True,
+        suffixes=('', '_old'),
+    )
+
+    ### Determine which rows are completely new.
+    new_rows_mask = joined_df.where(joined_df)
+    cols = list(backtrack_df.columns)
+
+    unseen_df = (
+        joined_df
+        .where(new_rows_mask)
+        .dropna(how='all')[cols]
+        .reset_index(drop=True)
+    )
+
+    ### Rows that have already been inserted but values have changed.
+    update_df = (
+        joined_df
+        .where(~new_rows_mask)
+        .dropna(how='all')[cols]
+        .reset_index(drop=True)
+    )
 
     return unseen_df, update_df, delta_df
