@@ -955,27 +955,13 @@ def df_from_literal(
 def filter_unseen_df(
         old_df: 'pd.DataFrame',
         new_df: 'pd.DataFrame',
+        primary_key_col: Optional[str] = None,
         dtypes: Optional[Dict[str, Any]] = None,
         custom_nan: str = 'mrsm_NaN',
         debug: bool = False,
     ) -> 'pd.DataFrame':
     """
     Left join two DataFrames to find the newest unseen data.
-    
-    I have scoured the web for the best way to do this.
-    My intuition was to join on datetime and id, but the code below accounts for values as well
-    without needing to define expicit columns or indices.
-    
-    The logic below is based off this StackOverflow question, with an index reset thrown on top:
-    https://stackoverflow.com/questions/
-    48647534/python-pandas-find-difference-between-two-data-frames#48647840
-    
-    Also, NaN apparently does not equal NaN, so I am temporarily replacing instances of NaN with a
-    custom string, per this StackOverflow question:
-    https://stackoverflow.com/questions/31833635/pandas-checking-for-nan-not-working-using-isin
-    
-    Lastly, use the old DataFrame's columns for the new DataFrame,
-    because order matters when checking equality.
 
     Parameters
     ----------
@@ -1015,6 +1001,7 @@ def filter_unseen_df(
         return new_df
     old_cols = list(old_df.columns)
     try:
+        ### Order matters when checking equality.
         new_df = new_df[old_cols]
     except Exception as e:
         from meerschaum.utils.warnings import warn

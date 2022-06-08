@@ -26,6 +26,21 @@ exists_queries = {
     #  'mariadb'    : "SHOW TABLES LIKE '{table}'",
     #  'sqlite'     : "SELECT name FROM sqlite_master WHERE name='{table}'",
 }
+update_queries = {
+    'default': """
+    
+    """,
+    'mssql': """
+    
+MERGE {target} t
+USING {patch} p
+ON t.id = p."id"
+WHEN MATCHED THEN
+    UPDATE
+    SET {} = S."bar";
+
+    """,
+}
 table_wrappers = {
     'default'    : ('"', '"'),
     'timescaledb': ('"', '"'),
@@ -486,3 +501,15 @@ def get_sqlalchemy_table(
         )
     return tables[str(table)]
 
+
+def update_join_query(
+        target_table: str,
+        patch_table: str,
+        #  connector: Optional[meerschaum.connectors.sql.SQLConnector],
+        flavor: str,
+        debug: bool=False
+    ) -> str:
+    """
+    Build an `UPDATE` query that joins.
+    """
+    
