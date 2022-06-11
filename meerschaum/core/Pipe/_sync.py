@@ -467,7 +467,7 @@ def filter_existing(
     )
 
     ### Determine which rows are completely new.
-    new_rows_mask = joined_df.where(joined_df)
+    new_rows_mask = (joined_df['_merge'] == 'left_only')
     cols = list(backtrack_df.columns)
 
     unseen_df = (
