@@ -205,7 +205,6 @@ def load_plugins(debug: bool = False, shell: bool = False) -> None:
         recursive = True,
         modules_venvs = True
     )
-    #  _all += _plugins_names
     ### I'm appending here to keep from redefining the modules list.
     new_modules = (
         [mod for mod in modules if not mod.__name__.startswith('plugins.')]
