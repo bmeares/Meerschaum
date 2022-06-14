@@ -36,6 +36,7 @@ packages: Dict[str, Dict[str, str]] = {
         'pip'                        : 'pip>=21.0.1',
         'update_checker'             : 'update-checker>=0.18.0',
         'semver'                     : 'semver>=3.0.0-dev3',
+        'pathspec'                   : 'pathspec>=0.9.0',
         'dateutil'                   : 'python-dateutil>=2.7.5',
         'requests'                   : 'requests>=2.23.0',
         'binaryornot'                : 'binaryornot>=0.4.4',
