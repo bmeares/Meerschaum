@@ -636,7 +636,6 @@ def activate_venv(
     import sys, platform, os
     from meerschaum.config._paths import VIRTENV_RESOURCES_PATH
     try:
-        import ensurepip
         import venv as _venv
         virtualenv = None
     except ImportError:
