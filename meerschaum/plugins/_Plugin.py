@@ -108,7 +108,7 @@ class Plugin:
             and potential_dir.is_dir()
             and (potential_dir / '__init__.py').exists()
         ):
-            return str(potential_dir)
+            return str(potential_dir / '__init__.py')
 
         potential_file = PLUGINS_RESOURCES_PATH / (self.name + '.py')
         if potential_file.exists() and not potential_file.is_dir():
@@ -157,8 +157,10 @@ class Plugin:
         A `pathlib.Path` to the archive file's path.
 
         """
-        import tarfile
+        import tarfile, pathlib, subprocess, fnmatch
         from meerschaum.utils.debug import dprint
+        from meerschaum.utils.packages import attempt_import
+        pathspec = attempt_import('pathspec', debug=debug)
 
         old_cwd = os.getcwd()
         os.chdir(PLUGINS_RESOURCES_PATH)
@@ -166,20 +168,36 @@ class Plugin:
         if not self.__file__:
             from meerschaum.utils.warnings import error
             error(f"Could not find file for plugin '{self}'.")
-        if '__init__.py' in self.__file__:
+        if '__init__.py' in self.__file__ or os.path.isdir(self.__file__):
             path = self.__file__.replace('__init__.py', '')
             is_dir = True
         else:
             path = self.__file__
             is_dir = False
 
-        patterns_to_ignore = {
+        default_patterns_to_ignore = [
             '.pyc',
             '__pycache__/',
             'eggs/',
             '__pypackages__/',
             '.git',
-        }
+        ]
+
+        def parse_gitignore() -> 'Set[str]':
+            gitignore_path = pathlib.Path(path) / '.gitignore'
+            if not gitignore_path.exists():
+                return set()
+            with open(gitignore_path, 'r') as f:
+                gitignore_text = f.read()
+            return set(pathspec.PathSpec.from_lines(
+                pathspec.patterns.GitWildMatchPattern,
+                default_patterns_to_ignore + gitignore_text.splitlines()
+            ).match_tree(path))
+
+        patterns_to_ignore = parse_gitignore() if is_dir else set()
+
+        if debug:
+            dprint(f"Patterns to ignore:\n{patterns_to_ignore}")
 
         with tarfile.open(self.archive_path, 'w:gz') as tarf:
             if not is_dir:

@@ -1,7 +1,27 @@
 # 🪵 Changelog
 
-## 0.6.x Releases
+## 1.0.x Releases
 This is the current release cycle, so future features will be updated below.
+
+### v1.0.0: **Mutable at Last**
+
+**What's New**
+
+  - **Inserts and Updates**  
+    An additional layer of processing separates new rows from updates rows. If you specify an `id` column, it uses this column and the `datetime` column to determine which rows have changed. Therefore a primary key is not required, as long as the `datetime` and `id` columns together emulate a composite primary key.
+
+    Meerschaum will insert new rows as before as well as creating a temporary table (same name as the pipe's target but with a leading underscore). The syncing engine then issues the appropriate `MERGE` or `UPDATE` query to update all of the rows in a batch.
+  - **Plugins respect `.gitignore`**  
+    When publishing a plugin that is contained in a git repository, Meerschaum will parse your `.gitignore` file to determine which files to omit.
+
+**Bugfixes**
+
+  - **Plugin packaging**  
+    A breaking bug in the process of packaging and publishing Meerschaum plugins has been patched.
+
+## 0.6.x Releases
+
+The 0.6.x series brought a lot of polish to the package, namely through refactoring and changing some legacy features to a meet expected behaviors.
 
 ### v0.6.3 – v0.6.4: **Durable Venvs**
 
