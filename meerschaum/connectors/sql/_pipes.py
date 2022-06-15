@@ -1042,15 +1042,21 @@ def drop_pipe(
         The pipe to drop.
         
     """
-    if not pipe.exists(debug=debug):
-        return True, f"{pipe} does not exist, so nothing was dropped."
+    from meerschaum.utils.sql import table_exists, sql_item_name
+    success = True
+    target, temp_target = pipe.target, '_' + pipe.target
+    target_name, temp_name = (
+        sql_item_name(target, self.flavor),
+        sql_item_name(temp_target, self.flavor),
+    )
+    if table_exists(target):
+        success = self.exec(f"DROP TABLE {target_name}", silent=True, debug=debug) is not None
+    if table_exists(temp_target):
+        success = (
+            success
+            and self.exec(f"DROP TABLE {temp_name}", silent=True, debug=debug) is not None
+        )
 
-    from meerschaum.utils.sql import sql_item_name
-    pipe_name = sql_item_name(pipe.target, self.flavor)
-    success = self.exec(f"DROP TABLE {pipe_name}", silent=True, debug=debug) is not None
-    if not success:
-        success = self.exec(f"DROP VIEW {pipe_name}", silent=True, debug=debug) is not None
-    
     msg = "Success" if success else f"Failed to drop {pipe}."
     return success, msg
 
