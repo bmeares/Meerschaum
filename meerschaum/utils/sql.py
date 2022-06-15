@@ -552,7 +552,7 @@ def update_query(
     value_cols = [c for c in target_table.columns if c.name not in join_cols]
 
     def sets_subquery(l_prefix: str, r_prefix: str):
-        return 'SET ' + ', '.join([
+        return 'SET ' + ',\n'.join([
             (
                 l_prefix + sql_item_name(c.name, connector.flavor)
                 + ' = ' + 'CAST(' + r_prefix
