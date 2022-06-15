@@ -452,10 +452,6 @@ def filter_existing(
     ### Separate new rows from changed ones.
     dt_col = self.columns['datetime']
     id_col = self.columns.get('id', None)
-    from meerschaum.utils.sql import sql_item_name
-    dt_col_name = sql_item_name(id_col, 'duckdb')
-    id_col_name = sql_item_name(id_col, 'duckdb')
-    import duckdb
 
     joined_df = pd.merge(
         delta_df,
