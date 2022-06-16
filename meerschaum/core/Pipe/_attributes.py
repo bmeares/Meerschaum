@@ -109,12 +109,12 @@ def dtypes(self) -> Union[Dict[str, Any], None]:
     """
     If defined, return the `dtypes` dictionary defined in `meerschaum.Pipe.parameters`.
     """
-    if not self.parameters:
+    if self.parameters is None or self.parameters.get('dtypes', None) is None:
         if '_dtypes' in self.__dict__:
             return self._dtypes
-        return None
-    if 'dtypes' not in self.parameters:
-        return None
+        self._dtypes = self.infer_dtypes(persist=False)
+        return self._dtypes
+
     return self.parameters['dtypes']
 
 

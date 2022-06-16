@@ -24,6 +24,7 @@ def read(
         self,
         query_or_table: Union[str, sqlalchemy.Query],
         params: Optional[Dict[str, Any], List[str]] = None,
+        dtype: Optional[Dict[str, Any]] = None,
         chunksize: Optional[int] = -1,
         chunk_hook: Optional[Callable[[pandas.DataFrame], Any]] = None,
         as_hook_results: bool = False,
@@ -49,8 +50,13 @@ def read(
 
     params: Optional[Dict[str, Any]], default None
         `List` or `Dict` of parameters to pass to `pandas.read_sql()`.
-        See the pandas documentaion for more information:
+        See the pandas documentation for more information:
         https://pandas.pydata.org/pandas-docs/stable/reference/api/pandas.read_sql.html
+
+    dtype: Optional[Dict[str, Any]], default None
+        A dictionary of data types to pass to `pandas.read_sql()`.
+        See the pandas documentation for more information:
+        https://pandas.pydata.org/pandas-docs/stable/reference/api/pandas.read_sql_query.html
 
     chunksize: Optional[int], default -1
         How many chunks to read at a time. `None` will read everything in one large chunk.
@@ -145,15 +151,16 @@ def read(
     else:
         try:
             formatted_query = str(sqlalchemy.text(query_or_table))
-        except:
+        except Exception as e:
             formatted_query = query_or_table
 
     try:
-        chunk_generator = pd.read_sql(
+        chunk_generator = pd.read_sql_query(
             formatted_query,
             self.engine,
             params = params,
-            chunksize = chunksize
+            chunksize = chunksize,
+            dtype = dtype,
         )
     except Exception as e:
         import inspect
@@ -186,10 +193,11 @@ def read(
     ### to get columns
     if len(chunk_list) == 0:
         chunk_list.append(
-            pd.read_sql(
+            pd.read_sql_query(
                 formatted_query,
                 self.engine,
                 params = params, 
+                dtype = dtype,
             )
         )
 
@@ -216,11 +224,13 @@ def read(
 
     return pd.concat(chunk_list).reset_index(drop=True)
 
+
 def _read_duckdb(query: str, engine: sqlalchemy.Engine, ):
     """
     Implement the `pandas.read_sql()` method for duckdb.
     """
     raise NotImplementedError
+
 
 def value(
         self,
@@ -254,7 +264,6 @@ def value(
     Any value returned from the query.
 
     """
-    from meerschaum.utils.warnings import warn
     if self.flavor == 'duckdb':
         use_pandas = True
     if use_pandas:
@@ -278,7 +287,7 @@ def value(
         first = result.first() if result is not None else None
         _val = first[0] if first is not None else None
     except Exception as e:
-        warn(e)
+        warn(e, stacklevel=3)
         return None
     if _close:
         try:
@@ -356,12 +365,9 @@ def exec(
     if debug:
         dprint("Executing query:\n" + f"{query}")
 
-    _close = close if close is not None else (
-        True if self.flavor != 'mssql' else False
-    )
+    _close = close if close is not None else (self.flavor != 'mssql')
     _commit = commit if commit is not None else (
-        True if (self.flavor != 'mssql' or 'select' not in str(query).lower())
-        else False
+        (self.flavor != 'mssql' or 'select' not in str(query).lower())
     )
 
     connection = self.engine.connect()

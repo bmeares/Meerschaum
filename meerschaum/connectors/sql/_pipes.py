@@ -580,7 +580,15 @@ def get_pipe_data(
 
     if debug:
         dprint(f"Getting pipe data with begin = '{begin}' and end = '{end}'")
-    df = self.read(query, debug=debug, **kw)
+    kw['dtype'] = pipe.dtypes
+    if self.flavor == 'sqlite':
+        if 'datetime' not in kw['dtype'][pipe.get_columns('datetime')]:
+            kw['dtype'][pipe.get_columns('datetime')] = 'datetime64[ns]'
+    df = self.read(
+        query,
+        debug = debug,
+        **kw
+    )
     if self.flavor == 'sqlite':
         from meerschaum.utils.misc import parse_df_datetimes
         ### NOTE: We have to consume the iterator here to ensure that datatimes are parsed correctly
@@ -615,6 +623,7 @@ def get_pipe_id(
     if _id is not None:
         _id = int(_id)
     return _id
+
 
 def get_pipe_attributes(
         self,

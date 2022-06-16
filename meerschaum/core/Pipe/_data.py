@@ -3,7 +3,7 @@
 # vim:fenc=utf-8
 
 """
-Functions for getting Pipe data
+Retrieve Pipes' data from instances.
 """
 
 from __future__ import annotations
@@ -63,14 +63,21 @@ def get_data(
                 warn(f"Failed to sync cache for {self}:\n" + _sync_cache_tuple[1])
                 fresh = True
             else: ### Successfully synced cache.
-                return self.cache_pipe.get_data(debug=debug, fresh=True, **kw)
+                return self.enforce_dtypes(
+                    self.cache_pipe.get_data(debug=debug, fresh=True, **kw),
+                    debug = debug,
+                )
 
     ### If `fresh` or the syncing failed, directly pull from the instance connector.
-    return self.instance_connector.get_pipe_data(
-        pipe = self,
+    return self.enforce_dtypes(
+        self.instance_connector.get_pipe_data(
+            pipe = self,
+            debug = debug,
+            **kw
+        ),
         debug = debug,
-        **kw
     )
+
 
 def get_backtrack_data(
         self,
@@ -130,13 +137,19 @@ def get_backtrack_data(
                 warn(f"Failed to sync cache for {self}:\n" + _sync_cache_tuple[1])
                 fresh = True
             else: ### Successfully synced cache.
-                return self.cache_pipe.get_backtrack_data(debug=debug, fresh=True, **kw)
+                return self.enforce_dtypes(
+                    self.cache_pipe.get_backtrack_data(debug=debug, fresh=True, **kw),
+                    debug = debug,
+                )
 
     ### If `fresh` or the syncing failed, directly pull from the instance connector.
-    return self.instance_connector.get_backtrack_data(
-        pipe = self,
+    return self.enforce_dtypes(
+        self.instance_connector.get_backtrack_data(
+            pipe = self,
+            debug = debug,
+            **kw
+        ),
         debug = debug,
-        **kw
     )
 
 

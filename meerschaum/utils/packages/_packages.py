@@ -120,7 +120,7 @@ packages: Dict[str, Dict[str, str]] = {
 }
 packages['sql'] = {
     'numpy'                          : 'numpy>=1.18.5',
-    'pandas'                         : 'pandas>=1.1.4',
+    'pandas'                         : 'pandas>=1.3.0',
     'joblib'                         : 'joblib>=0.17.0',
     'sqlalchemy'                     : 'sqlalchemy>=1.4.17',
     'sqlalchemy_utils'               : 'sqlalchemy-utils>=0.38.2',
