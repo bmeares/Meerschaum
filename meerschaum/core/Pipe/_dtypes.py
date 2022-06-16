@@ -15,53 +15,113 @@ def enforce_dtypes(self, df: 'pd.DataFrame', debug: bool=False) -> 'pd.DataFrame
     If the pipe does not exist and dtypes are not set, return the dataframe.
 
     """
+    from meerschaum.utils.debug import dprint
     from meerschaum.utils.warnings import warn
-    if not self.dtypes:
+    from meerschaum.utils.formatting import pprint
+    if df is None:
+        if debug:
+            dprint(
+                f"Received None instead of a DataFrame.\n"
+                + "    Skipping dtype enforcement..."
+            )
+        return df
 
-        ### No underlying table and no dtypes: do nothing.
-        if not self.exists(debug=debug):
-            return df
-        
-        inferred_dtypes = self.infer_dtypes(debug=debug)
-        if not inferred_dtypes:
-            return df
-        self.dtypes = inferred_dtypes
-        self.edit(interactive=False, debug=debug)
+    if not self.dtypes:
+        if debug:
+            dprint(
+                f"Could not find dtypes for {self}.\n"
+                + "    Skipping dtype enforcement..."
+            )
+        return df
+
+    df_dtypes = {c: t.name for c, t in dict(df.dtypes).items()}
+    if debug:
+        dprint(f"Data types for {self}:")
+        pprint(self.dtypes)
+        dprint(f"Data types for incoming DataFrame:")
+        pprint(df_dtypes)
+    if df_dtypes == self.dtypes:
+        if debug:
+            dprint(f"Data types already match. Skipping enforcement...")
+        return df
 
     common_dtypes = {}
-    df_dtypes = dict(df.dtypes)
+    common_diff_dtypes = {}
     for d, t in self.dtypes.items():
         if d in df_dtypes:
             common_dtypes[d] = t
+            if t != df_dtypes[d]:
+                common_diff_dtypes[d] = df_dtypes[d]
+
+    if debug:
+        dprint(f"Common columns with different dtypes:")
+        pprint(common_diff_dtypes)
+
+    detected_dt_cols = {}
+    for d, t in common_diff_dtypes.items():
+        if 'datetime' in t and 'datetime' in common_dtypes[d]:
+            df_dtypes[d] = t
+            detected_dt_cols[d] = (common_dtypes[d], common_diff_dtypes[d])
+    for d in detected_dt_cols:
+        del common_diff_dtypes[d]
+
+    if debug:
+        dprint(f"Common columns with different dtypes (after dates):")
+        pprint(common_diff_dtypes)
+
+    if df_dtypes == self.dtypes:
+        if debug:
+            dprint(
+                "The incoming DataFrame has mostly the same types as {self}, skipping enforcement."
+                + f"The only detected difference was in the following datetime columns.\n"
+                + "    Timezone information may be stripped."
+            )
+            pprint(detected_dt_cols)
+        return df
+
     if len(common_dtypes) == len(df_dtypes):
-        return df[list(common_dtypes.keys())].astype(self.dtypes)
+
+        if len(common_diff_dtypes) > int(len(common_dtypes)/2):
+            if debug:
+                dprint(f"Enforcing data types for {self} on incoming DataFrame...")
+            try:
+                return df[list(common_dtypes.keys())].astype(self.dtypes)
+            except Exception as e:
+                warn(f"Encountered an error when enforcing data types for {self}:\n{e}")
+                return df
     
-    warn(
-        f"Incoming dataframe does not have the same columns as {self}.\n"
-        + f"    Got {df_dtypes},\n"
-        + f"    but {self} has {self.dtypes}."
-    )
     new_df = df.copy()
-    for d, t in common_dtypes.items():
-        new_df[d] = new_df[d].astype(t)
-    return new_df[common_dtypes]
+    for d in common_diff_dtypes:
+        t = common_dtypes[d]
+        if debug:
+            dprint(f"Casting column {d} to dtype {t}.")
+        try:
+            new_df[d] = new_df[d].astype(t)
+        except Exception as e:
+            warn(f"Encountered an error when casting column {d} to type {t}:\n{e}")
+    return new_df
 
 
-def infer_dtypes(self, update: bool=True, debug: bool=False) -> Dict[str, Any]:
+def infer_dtypes(self, persist: bool=False, debug: bool=False) -> Dict[str, Any]:
     """
     If `dtypes` is not set in `meerschaum.Pipe.parameters`,
     infer the data types from the underlying table if it exists.
 
     Parameters
     ----------
-    update: bool, default True
-        If `True`, set
+    persist: bool, default False
+        If `True`, persist the inferred data types to `meerschaum.Pipe.parameters`.
+
+    Returns
+    -------
+    A dictionary of strings containing the pandas data types for this Pipe.
     """
-    if self.dtypes:
-        return self.dtypes
     if not self.exists(debug=debug):
         return {}
     from meerschaum.utils.sql import get_pd_type
-    sample_df = self.get_backtrack_data(0, debug=debug)
     columns_types = self.get_columns_types(debug=debug)
-    return {c: get_pd_type(t) for c, t in columns_types.items()}
+    dtypes = {c: get_pd_type(t) for c, t in columns_types.items()}
+    if persist:
+        self.dtypes = dtypes
+        self.edit(interactive=False, debug=debug)
+    return dtypes

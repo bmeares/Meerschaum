@@ -184,6 +184,7 @@ def sync(
         ### CHECKPOINT: Retrieved the DataFrame.
         _checkpoint(**kw)
         if debug:
+            df = self.enforce_dtypes(df, debug=debug)
             dprint(
                 "DataFrame to sync:\n"
                 + (str(df)[:255] + '...' if len(str(df)) >= 256 else str(df)),
