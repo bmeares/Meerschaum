@@ -150,6 +150,15 @@ def sync(
         ### If a DataFrame is provided, continue as expected.
         if df is None:
             try:
+                if p.connector is None:
+                    msg = f"{p} does not have a valid connector."
+                    if p.connector_keys.startswith('plugin:'):
+                        msg += f"\n    Perhaps {p.connector_keys} has a syntax error?"
+                    return False, msg
+            except Exception as e:
+                return False, f"Unable to create the connector for {p}."
+
+            try:
                 if p.connector.type == 'plugin' and p.connector.sync is not None:
                     from meerschaum.plugins import Plugin
                     connector_plugin = Plugin(p.connector.label)

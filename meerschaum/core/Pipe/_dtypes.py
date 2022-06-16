@@ -18,6 +18,7 @@ def enforce_dtypes(self, df: 'pd.DataFrame', debug: bool=False) -> 'pd.DataFrame
     from meerschaum.utils.debug import dprint
     from meerschaum.utils.warnings import warn
     from meerschaum.utils.formatting import pprint
+    from meerschaum.config.static import _static_config
     if df is None:
         if debug:
             dprint(
@@ -35,6 +36,11 @@ def enforce_dtypes(self, df: 'pd.DataFrame', debug: bool=False) -> 'pd.DataFrame
         return df
 
     df_dtypes = {c: t.name for c, t in dict(df.dtypes).items()}
+    if len(df_dtypes) == 0:
+        if debug:
+            dprint("Incoming DataFrame has no columns. Skipping enforcement...")
+        return df
+
     if debug:
         dprint(f"Data types for {self}:")
         pprint(self.dtypes)
@@ -80,8 +86,10 @@ def enforce_dtypes(self, df: 'pd.DataFrame', debug: bool=False) -> 'pd.DataFrame
         return df
 
     if len(common_dtypes) == len(df_dtypes):
-
-        if len(common_diff_dtypes) > int(len(common_dtypes)/2):
+        min_ratio = _static_config()['pipes']['dtypes']['min_ratio_columns_changed_for_full_astype']
+        if (
+            len(common_diff_dtypes) >= int(len(common_dtypes) * min_ratio)
+        ):
             if debug:
                 dprint(f"Enforcing data types for {self} on incoming DataFrame...")
             try:
