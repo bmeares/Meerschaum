@@ -38,6 +38,7 @@ setup_kw_args = {
     'long_description'              : readme,
     'long_description_content_type' : 'text/markdown',
     'url'                           : setup_cf['url'],
+    'project_urls'                  : setup_cf['project_urls'],
     'author'                        : setup_cf['author'],
     'author_email'                  : setup_cf['author_email'],
     'maintainer_email'              : setup_cf['maintainer_email'],
