@@ -266,6 +266,7 @@ def _determine_begin(
 
     return pipe.get_sync_time(debug=debug)
 
+
 def get_sync_time(
         self,
         params : Optional[Dict[str, Any]] = None,
@@ -341,7 +342,6 @@ def exists(
     A `bool` corresponding to whether a pipe's underlying table exists.
 
     """
-    ### TODO test against views
     return self.instance_connector.pipe_exists(pipe=self, debug=debug)
 
 

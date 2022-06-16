@@ -169,6 +169,7 @@ def fetch_pipes_keys(
     from meerschaum.utils.debug import dprint
     from meerschaum.utils.packages import attempt_import
     from meerschaum.utils.misc import separate_negation_values
+    from meerschaum.utils.sql import OMIT_NULLSFIRST_FLAVORS
     from meerschaum.config.static import _static_config
     sqlalchemy = attempt_import('sqlalchemy')
     import json
@@ -264,10 +265,13 @@ def fetch_pipes_keys(
             ).not_like(f'%"tags":%"{xt}"%')
         )
     q = q.where(sqlalchemy.and_(sqlalchemy.or_(*ors).self_group())) if ors else q
+    loc_asc = sqlalchemy.asc(pipes.c['location_key'])
+    if self.flavor not in OMIT_NULLSFIRST_FLAVORS:
+        loc_asc = sqlalchemy.nullsfirst(loc_asc)
     q = q.order_by(
         sqlalchemy.asc(pipes.c['connector_keys']),
         sqlalchemy.asc(pipes.c['metric_key']),
-        sqlalchemy.nullsfirst(sqlalchemy.asc(pipes.c['location_key'])),
+        loc_asc,
     )
 
     ### execute the query and return a list of tuples

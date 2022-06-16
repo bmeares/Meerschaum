@@ -999,6 +999,8 @@ def filter_unseen_df(
     """
     if old_df is None:
         return new_df
+    from meerschaum.utils.packages import import_pandas
+    pd = import_pandas(debug=debug)
     old_cols = list(old_df.columns)
     try:
         ### Order matters when checking equality.
@@ -1020,7 +1022,7 @@ def filter_unseen_df(
         return new_df
 
     return new_df[
-        ~new_df.fillna(custom_nan).apply(tuple, 1).isin(old_df.fillna(custom_nan).apply(tuple, 1))
+        ~new_df.fillna(pd.NA).apply(tuple, 1).isin(old_df.fillna(pd.NA).apply(tuple, 1))
     ].reset_index(drop=True)
 
 

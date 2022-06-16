@@ -7,7 +7,7 @@ This module contains SQLConnector functions for executing SQL queries.
 
 from __future__ import annotations
 from meerschaum.utils.typing import (
-    Union, Mapping, List, Dict, SuccessTuple, Optional, Any, Sequence, Iterable, Callable,
+    Union, Mapping, List, Dict, SuccessTuple, Optional, Any, Iterable, Callable,
     Tuple
 )
 
@@ -18,6 +18,7 @@ from meerschaum.utils.warnings import warn
 _bulk_flavors = {'postgresql', 'timescaledb'}
 ### flavors that do not support chunks
 _disallow_chunks_flavors = {'duckdb'}
+_max_chunks_flavors = {'sqlite': 1000,}
 
 def read(
         self,
@@ -103,8 +104,19 @@ def read(
     chunksize = chunksize if chunksize != -1 else self.sys_config.get('chunksize', None)
     if chunksize is None and as_iterator:
         if not silent and self.flavor not in _disallow_chunks_flavors:
-            warn(f"An iterator may only be generated if chunksize is not None. Falling back to a chunksize of 1000.", stacklevel=3)
+            warn(
+                f"An iterator may only be generated if chunksize is not None.\n"
+                + "Falling back to a chunksize of 1000.", stacklevel=3,
+            )
         chunksize = 1000
+    if chunksize is not None and self.flavor in _max_chunks_flavors:
+        if chunksize > _max_chunks_flavors[self.flavor]:
+            warn(
+                f"The specified chunksize of {chunksize} exceeds the maximum of "
+                + f" {_max_chunks_flavors[self.flavor]} for flavor '{self.flavor}'.\n"
+                + f"    Falling back to a chunksize of {_max_chunks_flavors[self.flavor]}.",
+                stacklevel = 3,
+            )
 
     ### NOTE: A bug in duckdb_engine does not allow for chunks.
     if chunksize is not None and self.flavor in _disallow_chunks_flavors:
@@ -512,7 +524,7 @@ def to_sql(
 def psql_insert_copy(
         table: pandas.io.sql.SQLTable,
         conn: Union[sqlalchemy.engine.Engine, sqlalchemy.engine.Connection],
-        keys: Sequence[str],
+        keys: List[str],
         data_iter: Iterable[Any]
     ) -> None:
     """
@@ -520,22 +532,15 @@ def psql_insert_copy(
 
     Parameters
     ----------
-    table :
-        pandas.io.sql.SQLTable
-        conn : sqlalchemy.engine.Engine or sqlalchemy.engine.Connection
-        keys : list of str
+    table: pandas.io.sql.SQLTable
+    
+    conn: Union[sqlalchemy.engine.Engine, sqlalchemy.engine.Connection]
+    
+    keys: List[str]
         Column names
-        data_iter : Iterable that iterates the values to be inserted
-    table : pandas.io.sql.SQLTable :
-        
-    conn : Union[sqlalchemy.engine.Engine :
-        
-    sqlalchemy.engine.Connection] :
-        
-    keys : Sequence[str] :
-        
-    data_iter : Iterable[Any] :
-        
+    
+    data_iter: Iterable[Any]
+        Iterable that iterates the values to be inserted
 
     Returns
     -------
@@ -546,7 +551,10 @@ def psql_insert_copy(
 
     from meerschaum.utils.sql import sql_item_name
 
-    # gets a DBAPI connection that can provide a cursor
+    data_iter = (
+        (item if item is not None else r'\N' for item in row) for row in data_iter
+    )
+
     dbapi_conn = conn.connection
     with dbapi_conn.cursor() as cur:
         s_buf = StringIO()
@@ -554,16 +562,15 @@ def psql_insert_copy(
         writer.writerows(data_iter)
         s_buf.seek(0)
 
-        columns = ', '.join('"{}"'.format(k) for k in keys)
-        if table.schema:
-            table_name = '{}.{}'.format(
-                sql_item_name(table.schema, 'postgresql'),
-                sql_item_name(table.name, 'postgresql')
+        columns = ', '.join(f'"{k}"' for k in keys)
+        table_name = (
+            sql_item_name(table.name, 'postgresql')
+            if not table.schema else (
+                sql_item_name(table.schema, 'postgresql')
+                + '.'
+                + sql_item_name(table.name, 'postgresql')
             )
-        else:
-            table_name = sql_item_name(table.name, 'postgresql')
-
-        sql = 'COPY {} ({}) FROM STDIN WITH CSV'.format(
-            table_name, columns
         )
+
+        sql = f"COPY {table_name} ({columns}) FROM STDIN WITH CSV NULL '\\N'"
         cur.copy_expert(sql=sql, file=s_buf)
