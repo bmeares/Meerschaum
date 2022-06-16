@@ -65,14 +65,12 @@ default_meerschaum_config = {
 default_system_config = {
     'connectors' : {
         'all' : {
-            ### pandas implementation
-            ### (change to modin.pandas when to_sql works)
-            'pandas'       : 'pandas',
+            'pandas'           : 'pandas',
         },
         'sql' : {
-            'chunksize'    : 900,
-            'poolclass'    : 'sqlalchemy.pool.QueuePool',
-            'create_engine' : {
+            'chunksize'        : 1000000,
+            'poolclass'        : 'sqlalchemy.pool.QueuePool',
+            'create_engine'    : {
                 'method'       : 'multi',
                 'pool_size'    : 5,
                 'max_overflow' : 10,

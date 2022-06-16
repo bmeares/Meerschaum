@@ -87,6 +87,7 @@ class Pipe:
         attributes,
         parameters,
         columns,
+        dtypes,
         get_columns,
         get_columns_types,
         tags,
@@ -104,6 +105,7 @@ class Pipe:
     from ._drop import drop
     from ._clear import clear
     from ._bootstrap import bootstrap
+    from ._dtypes import enforce_dtypes, infer_dtypes
 
     def __init__(
         self,
@@ -114,8 +116,9 @@ class Pipe:
         columns: Optional[Dict[str, str]] = None,
         tags: Optional[List[str]] = None,
         target: Optional[str] = None,
-        mrsm_instance: Optional[Union[str, InstanceConnector]] = None,
+        dtypes: Optional[Dict[str, str]] = None,
         instance: Optional[Union[str, InstanceConnector]] = None,
+        mrsm_instance: Optional[Union[str, InstanceConnector]] = None,
         cache: bool = False,
         debug: bool = False,
         connector_keys: Optional[str] = None,
@@ -140,12 +143,16 @@ class Pipe:
             You can edit these parameters with `edit pipes`.
 
         columns: Optional[Dict[str, str]], default None
-            Subset of parameters for ease of use.
+            Set the `columns` dictionary of `parameters`.
             If `parameters` is also provided, this dictionary is added under the `'columns'` key.
 
         tags: Optional[List[str]], default None
             A list of strings to be added under the `'tags'` key of `parameters`.
             You can select pipes with certain tags using `--tags`.
+
+        dtypes: Optional[Dict[str, str]], default None
+            Set the `dtypes` dictionary of `parameters`.
+            If `parameters` is also provided, this dictionary is added under the `'dtypes'` key.
 
         mrsm_instance: Optional[Union[str, InstanceConnector]], default None
             Connector for the Meerschaum instance where the pipe resides.
@@ -207,6 +214,12 @@ class Pipe:
             if self.__dict__.get('_parameters', None) is None:
                 self._parameters = {}
             self._parameters['target'] = target
+
+        if dtypes is not None:
+            if self.__dict__.get('_parameters', None) is None:
+                self._parameters = {}
+            self._parameters['dtypes'] = dtypes
+
 
         ### NOTE: The parameters dictionary is {} by default.
         ###       A Pipe may be registered without parameters, then edited,

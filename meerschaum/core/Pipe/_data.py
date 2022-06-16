@@ -7,7 +7,7 @@ Functions for getting Pipe data
 """
 
 from __future__ import annotations
-from meerschaum.utils.typing import Optional, Dict, Any
+from meerschaum.utils.typing import Optional, Dict, Any, Union
 
 def get_data(
         self,
@@ -17,7 +17,7 @@ def get_data(
         fresh: bool = False,
         debug: bool = False,
         **kw: Any
-    ) -> Optional[pandas.DataFrame]:
+    ) -> Union['pd.DataFrame', None]:
     """
     Get a pipe's data from the instance connector.
 
@@ -138,6 +138,7 @@ def get_backtrack_data(
         debug = debug,
         **kw
     )
+
 
 def get_rowcount(
         self,

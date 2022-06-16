@@ -98,6 +98,30 @@ max_name_lens = {
     'mariadb'    : 64,
 }
 json_flavors = {'postgresql', 'timescaledb',}
+OMIT_NULLSFIRST_FLAVORS = {'mariadb', 'mysql',}
+DB_TO_PD_DTYPES = {
+    'FLOAT': 'float64',
+    'DOUBLE_PRECISION': 'float64',
+    'DOUBLE': 'float64',
+    'BIGINT': 'Int64',
+    'TIMESTAMP': 'datetime64[ns]',
+    'DATE': 'datetime64[ns]',
+    'DATETIME': 'datetime64[ns]',
+    'TEXT': 'str',
+    'CLOB': 'str',
+    'BOOL': 'bool',
+    'BOOLEAN': 'bool',
+    'BOOLEAN()': 'bool',
+    'substrings': {
+        'CHAR': 'str',
+        'TIMESTAMP': 'datetime64[ns]',
+        'DATE': 'datetime64[ns]',
+        'DOUBLE': 'float64',
+        'INT': 'Int64',
+        'BOOL': 'bool',
+    },
+    'default': 'object',
+}
 
 
 def dateadd_str(
@@ -580,3 +604,24 @@ def update_query(
     return query
 
     
+def get_pd_type(db_type: str) -> str:
+    """
+    Parse a database type to a pandas data type.
+
+    Parameters
+    ----------
+    db_type: str
+        The database type, e.g. `DATETIME`, `BIGINT`, etc.
+
+    Returns
+    -------
+    The equivalent datatype for a pandas DataFrame.
+    """
+    pd_type = DB_TO_PD_DTYPES.get(db_type.upper(), None)
+    if pd_type is not None:
+        return pd_type
+    for db_t, pd_t in DB_TO_PD_DTYPES['substrings'].items():
+        if db_t in db_type.upper():
+            return pd_t
+    return DB_TO_PD_DTYPES['default']
+
