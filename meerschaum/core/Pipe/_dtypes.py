@@ -19,6 +19,7 @@ def enforce_dtypes(self, df: 'pd.DataFrame', debug: bool=False) -> 'pd.DataFrame
     from meerschaum.utils.warnings import warn
     from meerschaum.utils.formatting import pprint
     from meerschaum.config.static import _static_config
+    from meerschaum.utils.packages import import_pandas
     if df is None:
         if debug:
             dprint(
@@ -34,6 +35,14 @@ def enforce_dtypes(self, df: 'pd.DataFrame', debug: bool=False) -> 'pd.DataFrame
                 + "    Skipping dtype enforcement..."
             )
         return df
+
+    if not hasattr(df, 'dtypes'):
+        pd = import_pandas(debug=debug)
+        try:
+            df = pd.DataFrame(df)
+        except Exception as e:
+            warn(f"Unable to cast incoming data as a DataFrame...")
+            return df
 
     df_dtypes = {c: t.name for c, t in dict(df.dtypes).items()}
     if len(df_dtypes) == 0:
