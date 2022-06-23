@@ -12,9 +12,12 @@ from meerschaum.utils.typing import (
     Union, Optional, Callable, Any, Tuple, SuccessTuple, Mapping, Dict, List
 )
 
+class InferFetch:
+    pass
+
 def sync(
         self,
-        df: Optional[Union[pandas.DataFrame, Dict[str, List[Any]]]] = None,
+        df: Union[pd.DataFrame, Dict[str, List[Any]], InferFetch] = InferFetch,
         begin: Optional[datetime.datetime] = None,
         end: Optional[datetime.datetime] = None,
         force: bool = False,
@@ -134,8 +137,14 @@ def sync(
 
     def _sync(
         p: 'meerschaum.Pipe',
-        df: Optional['pandas.DataFrame'] = None
+        df: Union['pd.DataFrame', Dict[str, List[Any]], InferFetch] = InferFetch,
     ) -> SuccessTuple:
+        if df is None:
+            return (
+                False,
+                f"You passed `None` instead of data into `sync()` for {p}.\n"
+                + "Omit the DataFrame to infer fetching.",
+            )
         ### Ensure that Pipe is registered.
         if p.get_id(debug=debug) is None:
             ### NOTE: This may trigger an interactive session for plugins!
@@ -146,9 +155,9 @@ def sync(
         ### If connector is a plugin with a `sync()` method, return that instead.
         ### If the plugin does not have a `sync()` method but does have a `fetch()` method,
         ### use that instead.
-        ### NOTE: The DataFrame must be None for the plugin sync method to apply.
+        ### NOTE: The DataFrame must be omitted for the plugin sync method to apply.
         ### If a DataFrame is provided, continue as expected.
-        if df is None:
+        if df is InferFetch:
             try:
                 if p.connector is None:
                     msg = f"{p} does not have a valid connector."
@@ -188,7 +197,7 @@ def sync(
             if df is None:
                 return False, f"Unable to fetch data for {p}."
             if df is True:
-                return True, f"{p} was synced in parallel."
+                return True, f"{p} is being synced in parallel."
 
         ### CHECKPOINT: Retrieved the DataFrame.
         _checkpoint(**kw)
