@@ -63,7 +63,7 @@ def make_action(
     from meerschaum.utils.misc import add_method_to_class
     package_name = function.__globals__['__name__']
     plugin_name = (
-        package_name.split('plugins.')[-1]
+        package_name.split('.')[1]
         if package_name.startswith('plugins.') else None
     )
     plugin = Plugin(plugin_name) if plugin_name else None
