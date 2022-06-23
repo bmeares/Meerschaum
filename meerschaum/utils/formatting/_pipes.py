@@ -315,7 +315,7 @@ def highlight_pipes(message: str) -> str:
     msg = ''
     _d = {}
     for i, segment in enumerate(segments):
-        if ')' in segment:
+        if ',' in segment and ')' in segment:
             paren_index = segment.find(')') + 1
             code = "_d['pipe'] = Pipe(" + segment[:paren_index]
             try:
