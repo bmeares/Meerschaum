@@ -800,8 +800,7 @@ def sync_pipe(
                 ), debug=debug) is not None
         )
         if success:
-            #  temp_pipe.drop(debug=debug)
-            pass
+            temp_pipe.drop(debug=debug)
         else:
             warn(f"Failed to apply changes to {pipe}.", stack=False)
 
@@ -1062,9 +1061,9 @@ def drop_pipe(
         sql_item_name(target, self.flavor),
         sql_item_name(temp_target, self.flavor),
     )
-    if table_exists(target):
+    if table_exists(target, self, debug=debug):
         success = self.exec(f"DROP TABLE {target_name}", silent=True, debug=debug) is not None
-    if table_exists(temp_target):
+    if table_exists(temp_target, self, debug=debug):
         success = (
             success
             and self.exec(f"DROP TABLE {temp_name}", silent=True, debug=debug) is not None
