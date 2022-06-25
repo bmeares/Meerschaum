@@ -105,6 +105,8 @@ DB_TO_PD_DTYPES = {
     'DOUBLE': 'float64',
     'BIGINT': 'Int64',
     'TIMESTAMP': 'datetime64[ns]',
+    'TIMESTAMP WITH TIMEZONE': 'datetime64[ns, UTC]',
+    'TIMESTAMPTZ': 'datetime64[ns, UTC]',
     'DATE': 'datetime64[ns]',
     'DATETIME': 'datetime64[ns]',
     'TEXT': 'object',
@@ -121,6 +123,15 @@ DB_TO_PD_DTYPES = {
         'BOOL': 'bool',
     },
     'default': 'object',
+}
+### MySQL doesn't allow for casting as BIGINT, so this is a workaround.
+DB_FLAVORS_CAST_DTYPES = {
+    'mariadb': {
+        'BIGINT': 'DOUBLE',
+    },
+    'mysql': {
+        'BIGINT': 'DOUBLE',
+    },
 }
 
 
@@ -573,16 +584,24 @@ def update_query(
     """
     base_query = update_queries.get(connector.flavor, update_queries['default'])
     target_table = get_sqlalchemy_table(target, connector)
-    value_cols = [c for c in target_table.columns if c.name not in join_cols]
+    value_cols = []
+    for c in target_table.columns:
+        c_name, c_type = c.name, str(c.type)
+        if c_type in join_cols:
+            continue
+        if connector.flavor in DB_FLAVORS_CAST_DTYPES:
+            c_type = DB_FLAVORS_CAST_DTYPES[connector.flavor].get(c_type, c_type)
+        value_cols.append((c_name, c_type))
 
     def sets_subquery(l_prefix: str, r_prefix: str):
         return 'SET ' + ',\n'.join([
             (
-                l_prefix + sql_item_name(c.name, connector.flavor)
+                l_prefix + sql_item_name(c_name, connector.flavor)
                 + ' = ' + 'CAST(' + r_prefix
-                + sql_item_name(c.name, connector.flavor) + ' AS ' + str(c.type).replace('_', ' ')
+                + sql_item_name(c_name, connector.flavor) + ' AS '
+                + c_type.replace('_', ' ')
                 + ')'
-            ) for c in value_cols
+            ) for c_name, c_type in value_cols
         ])
 
     def and_subquery(l_prefix: str, r_prefix: str):

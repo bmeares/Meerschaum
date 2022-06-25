@@ -582,7 +582,7 @@ def get_pipe_data(
         dprint(f"Getting pipe data with begin = '{begin}' and end = '{end}'")
     kw['dtype'] = pipe.dtypes
     if self.flavor == 'sqlite':
-        if 'datetime' not in kw['dtype'][pipe.get_columns('datetime')]:
+        if 'datetime' not in kw['dtype'].get(pipe.get_columns('datetime'), 'object'):
             kw['dtype'][pipe.get_columns('datetime')] = 'datetime64[ns]'
     df = self.read(
         query,
