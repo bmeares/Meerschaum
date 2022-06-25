@@ -952,6 +952,7 @@ def df_from_literal(
     pd = import_pandas()
     return pd.DataFrame({dt_name : [now], val_name : [val]})
 
+
 def filter_unseen_df(
         old_df: 'pd.DataFrame',
         new_df: 'pd.DataFrame',
@@ -1016,7 +1017,20 @@ def filter_unseen_df(
     ### assume the old_df knows what it's doing, even if it's technically wrong.
     if dtypes is None:
         dtypes = dict(old_df.dtypes)
-    new_df = new_df.astype(dtypes)
+    try:
+        new_df = new_df.astype(dtypes)
+        cast_cols = False
+    except Exception as e:
+        warn(
+            f"Was not able to cast the new DataFrame to the given dtypes.\n{e}"
+        )
+        cast_cols = True
+    if cast_cols:
+        for col, dtype in dtypes.items():
+            try:
+                new_df[col] = new_df[col].astype(dtype)
+            except Exception as e:
+                warn(f"Was not able to cast column '{col}' to dtype '{dtype}'.\n{e}")
 
     if len(old_df) == 0:
         return new_df
