@@ -466,7 +466,7 @@ def filter_existing(
 
     ### Detect changes between the old target and new source dataframes.
     from meerschaum.utils.misc import filter_unseen_df
-    delta_df = filter_unseen_df(backtrack_df, df, debug=debug)
+    delta_df = filter_unseen_df(backtrack_df, df, dtypes=self.dtypes, debug=debug)
 
     ### Separate new rows from changed ones.
     dt_col = self.columns['datetime']
