@@ -153,7 +153,7 @@ def test_target_mutable(flavor: str):
         debug = debug
     )
     df = conn.read(target)
-    assert len(df) == 2
+    assert len(df) == 1
     pipe.drop()
     result = conn.read(target, silent=True)
     assert result is None
