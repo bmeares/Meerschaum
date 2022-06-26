@@ -105,6 +105,7 @@ def read(
         return []
     from meerschaum.utils.sql import sql_item_name
     from meerschaum.utils.packages import attempt_import, import_pandas
+    import warnings
     pd = import_pandas()
     sqlalchemy = attempt_import("sqlalchemy")
     chunksize = chunksize if chunksize != -1 else self.sys_config.get('chunksize', None)
@@ -155,13 +156,15 @@ def read(
             formatted_query = query_or_table
 
     try:
-        chunk_generator = pd.read_sql_query(
-            formatted_query,
-            self.engine,
-            params = params,
-            chunksize = chunksize,
-            dtype = dtype,
-        )
+        with warnings.catch_warnings():
+            warnings.filterwarnings('ignore', 'case sensitivity issues')
+            chunk_generator = pd.read_sql_query(
+                formatted_query,
+                self.engine,
+                params = params,
+                chunksize = chunksize,
+                dtype = dtype,
+            )
     except Exception as e:
         import inspect
         if debug:
@@ -192,14 +195,16 @@ def read(
     ### If no chunks returned, read without chunks
     ### to get columns
     if len(chunk_list) == 0:
-        chunk_list.append(
-            pd.read_sql_query(
-                formatted_query,
-                self.engine,
-                params = params, 
-                dtype = dtype,
+        with warnings.catch_warnings():
+            warnings.filterwarnings('ignore', 'case sensitivity issues')
+            chunk_list.append(
+                pd.read_sql_query(
+                    formatted_query,
+                    self.engine,
+                    params = params, 
+                    dtype = dtype,
+                )
             )
-        )
 
     ### call the hook on any missed chunks.
     if chunk_hook is not None and len(chunk_list) > len(chunk_hook_results):
@@ -448,10 +453,11 @@ def to_sql(
     """
     import time
     from meerschaum.utils.warnings import error
+    import warnings
     if name is None:
         error("Name must not be None to submit to the SQL server")
 
-    from meerschaum.utils.sql import sql_item_name
+    from meerschaum.utils.sql import sql_item_name, table_exists
     from meerschaum.connectors.sql._create_engine import flavor_configs
 
     stats = {'target': name, }
@@ -482,26 +488,25 @@ def to_sql(
             to_sql_kw[k] = v
 
     if self.flavor == 'oracle':
-        #  _name = name
-        #  name = sql_item_name(name, 'oracle')
-
         ### For some reason 'replace' doesn't work properly in pandas,
         ### so try dropping first.
-        if if_exists == 'replace':
-            success = self.exec("DROP TABLE " + name) is not None
+        if if_exists == 'replace' and table_exists(name, self, debug=debug):
+            success = self.exec("DROP TABLE " + sql_item_name(name, 'oracle')) is not None
             if not success:
                 warn(f"Unable to drop {name}")
 
     try:
-        df.to_sql(
-            name = name,
-            con = self.engine,
-            index = index,
-            if_exists = if_exists,
-            method = method,
-            chunksize = chunksize,
-            **to_sql_kw
-        )
+        with warnings.catch_warnings():
+            warnings.filterwarnings('ignore', 'case sensitivity issues')
+            df.to_sql(
+                name = name,
+                con = self.engine,
+                index = index,
+                if_exists = if_exists,
+                method = method,
+                chunksize = chunksize,
+                **to_sql_kw
+            )
         success = True
     except Exception as e:
         if not silent:

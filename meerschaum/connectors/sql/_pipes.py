@@ -634,6 +634,7 @@ def get_pipe_attributes(
     Get a Pipe's attributes dictionary.
     """
     from meerschaum.utils.warnings import warn
+    from meerschaum.utils.debug import dprint
     from meerschaum.connectors.sql.tables import get_tables
     from meerschaum.utils.packages import attempt_import
     sqlalchemy = attempt_import('sqlalchemy')
@@ -644,11 +645,18 @@ def get_pipe_attributes(
 
     try:
         q = sqlalchemy.select([pipes]).where(pipes.c.pipe_id == pipe.id)
-        attributes = dict(self.exec(q, silent=True, debug=debug).first())
+        if debug:
+            dprint(q)
+        attributes = (
+            dict(self.exec(q, silent=True, debug=debug).first())
+            if self.flavor != 'duckdb'
+            else self.read(q, debug=debug).to_dict(orient='records')[0]
+        )
     except Exception as e:
         import traceback
         traceback.print_exc()
         warn(e)
+        print(pipe)
         return None
 
     ### handle non-PostgreSQL databases (text vs JSON)
@@ -810,7 +818,7 @@ def sync_pipe(
     if 'name' in kw:
         kw.pop('name')
 
-    ### append new data to Pipe's table
+    ### Insert new data into Pipe's table.
     stats = self.to_sql(
         unseen_df,
         name = pipe.target,
@@ -879,6 +887,13 @@ def get_sync_time(
     q = f"SELECT {dt}\nFROM {table}{where}\nORDER BY {dt} {ASC_or_DESC}\nLIMIT 1"
     if self.flavor == 'mssql':
         q = f"SELECT TOP 1 {dt}\nFROM {table}{where}\nORDER BY {dt} {ASC_or_DESC}"
+    elif self.flavor == 'oracle':
+        q = (
+            "SELECT * FROM (\n"
+            + f"    SELECT {dt}\nFROM {table}{where}\n    ORDER BY {dt} {ASC_or_DESC}\n"
+            + ") WHERE ROWNUM = 1"
+        )
+
     try:
         from meerschaum.utils.misc import round_time
         import datetime
