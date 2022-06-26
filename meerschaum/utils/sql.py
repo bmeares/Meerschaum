@@ -98,7 +98,7 @@ max_name_lens = {
     'mariadb'    : 64,
 }
 json_flavors = {'postgresql', 'timescaledb',}
-OMIT_NULLSFIRST_FLAVORS = {'mariadb', 'mysql',}
+OMIT_NULLSFIRST_FLAVORS = {'mariadb', 'mysql', 'mssql'}
 DB_TO_PD_DTYPES = {
     'FLOAT': 'float64',
     'DOUBLE_PRECISION': 'float64',
@@ -367,14 +367,18 @@ def sql_item_name(item: str, flavor: str) -> str:
     "[table]"
 
     """
-    wrappers = table_wrappers.get(flavor, table_wrappers['default'])
-    item = item if flavor != 'oracle' else oracle_capital(item)
-    return wrappers[0] + truncate_item_name(str(item), flavor) + wrappers[1]
+    truncated_item = truncate_item_name(str(item), flavor)
+    if flavor == 'oracle':
+        truncated_item = pg_capital(truncated_item)
+        wrappers = ('', '')
+    else:
+        wrappers = table_wrappers.get(flavor, table_wrappers['default'])
+    return wrappers[0] + truncated_item + wrappers[1]
 
 
 def pg_capital(s: str) -> str:
     """
-    If string contains a capital letter, wrap it in double quotes
+    If string contains a capital letter, wrap it in double quotes.
     
     Parameters
     ----------
@@ -398,7 +402,7 @@ def pg_capital(s: str) -> str:
     needs_quotes = False
     for c in str(s):
         if ord(c) < ord('a') or ord(c) > ord('z'):
-            if not c.isdigit():
+            if not c.isdigit() and c != '_':
                 needs_quotes = True
                 break
     if needs_quotes:
@@ -410,9 +414,9 @@ def oracle_capital(s: str) -> str:
     """
     Capitalize the string of an item on an Oracle database.
     """
-    #  return s
+    return s
     #  return s.upper()
-    return s.upper() if s[0].isalpha() else s
+    #  return s.upper() if s[0].isalpha() else s
 
 
 def truncate_item_name(item: str, flavor: str) -> str:
@@ -587,7 +591,7 @@ def update_query(
     value_cols = []
     for c in target_table.columns:
         c_name, c_type = c.name, str(c.type)
-        if c_type in join_cols:
+        if c_name in join_cols:
             continue
         if connector.flavor in DB_FLAVORS_CAST_DTYPES:
             c_type = DB_FLAVORS_CAST_DTYPES[connector.flavor].get(c_type, c_type)
