@@ -770,6 +770,8 @@ def sync_pipe(
         check_existing = False
         is_new = True
 
+    if not isinstance(df, pd.DataFrame):
+        df = pipe.enforce_dtypes(df, debug=debug)
     unseen_df, update_df, delta_df = (
         pipe.filter_existing(
             df, chunksize=chunksize, begin=begin, end=end, debug=debug, **kw

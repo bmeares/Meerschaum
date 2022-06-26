@@ -408,6 +408,8 @@ def filter_existing(
     from meerschaum.utils.packages import attempt_import, import_pandas
     import datetime
     pd = import_pandas()
+    if not isinstance(df, pd.DataFrame):
+        df = self.enforce_dtypes(df, debug=debug)
     ### begin is the oldest data in the new dataframe
     try:
         min_dt = pd.to_datetime(df[self.get_columns('datetime')].min(skipna=True)).to_pydatetime()
@@ -471,12 +473,13 @@ def filter_existing(
     ### Separate new rows from changed ones.
     dt_col = self.columns['datetime']
     id_col = self.columns.get('id', None)
+    on_cols = [dt_col] + ([id_col] if id_col is not None else [])
 
     joined_df = pd.merge(
         delta_df,
         backtrack_df,
         how='left',
-        on=[dt_col, id_col],
+        on=on_cols,
         indicator=True,
         suffixes=('', '_old'),
     )
