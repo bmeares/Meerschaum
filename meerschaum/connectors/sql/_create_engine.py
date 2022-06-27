@@ -140,19 +140,22 @@ flavor_configs = {
     },
 }
 install_flavor_drivers = {
-    'sqlite' : ['aiosqlite'],
-    'duckdb' : ['duckdb', 'duckdb_engine'],
-    'mysql' : ['pymysql'],
-    'mariadb' : ['pymysql'],
-    'timescaledb' : ['psycopg2'],
-    'postgresql' : ['psycopg2'],
-    'cockroachdb' : ['psycopg2', 'sqlalchemy_cockroachdb', 'sqlalchemy_cockroachdb.psycopg2'],
+    'sqlite': ['aiosqlite'],
+    'duckdb': ['duckdb', 'duckdb_engine'],
+    'mysql': ['pymysql'],
+    'mariadb': ['pymysql'],
+    'timescaledb': ['psycopg2'],
+    'postgresql': ['psycopg2'],
+    'cockroachdb': ['psycopg2', 'sqlalchemy_cockroachdb', 'sqlalchemy_cockroachdb.psycopg2'],
     'mssql': ['pyodbc'],
     'oracle': ['cx_Oracle'],
 }
+require_patching_flavors = {'cockroachdb': [('sqlalchemy-cockroachdb', 'sqlalchemy_cockroachdb')]}
 
 flavor_dialects = {
-    'cockroachdb': ('cockroachdb', 'sqlalchemy_cockroachdb.psycopg2', 'CockroachDBDialect_psycopg2'),
+    'cockroachdb': (
+        'cockroachdb', 'sqlalchemy_cockroachdb.psycopg2', 'CockroachDBDialect_psycopg2'
+    ),
     'duckdb': ('duckdb', 'duckdb_engine', 'Dialect'),
 }
 
@@ -183,13 +186,22 @@ def create_engine(
     from meerschaum.utils.warnings import error, warn
     sqlalchemy = attempt_import('sqlalchemy')
     import urllib
+    ### Install and patch required drivers.
     if self.flavor in install_flavor_drivers:
-        attempt_import(
-            *install_flavor_drivers[self.flavor],
-            debug = debug,
-            lazy = False,
-            warn = False
-        )
+        attempt_import(*install_flavor_drivers[self.flavor], debug=debug, lazy=False, warn=False)
+    if self.flavor in require_patching_flavors:
+        from meerschaum.utils.packages import determine_version, _monkey_patch_get_distribution
+        import pathlib
+        for install_name, import_name in require_patching_flavors[self.flavor]:
+            pkg = attempt_import(
+                import_name,
+                debug = debug,
+                lazy = False,
+                warn = False
+            )
+            _monkey_patch_get_distribution(
+                install_name, determine_version(pathlib.Path(pkg.__file__), venv='mrsm')
+            )
 
     ### supplement missing values with defaults (e.g. port number)
     for a, value in flavor_configs[self.flavor]['defaults'].items():

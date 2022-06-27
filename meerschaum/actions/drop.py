@@ -54,7 +54,7 @@ def _drop_pipes(
     else:
         answer = yes_no(question, default='n', noask=noask, yes=yes)
     if not answer:
-        return False, "No pipes dropped."
+        return False, "No pipes were dropped."
 
     success_dict = {}
     successes, fails = 0, 0

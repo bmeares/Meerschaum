@@ -952,30 +952,17 @@ def df_from_literal(
     pd = import_pandas()
     return pd.DataFrame({dt_name : [now], val_name : [val]})
 
+
 def filter_unseen_df(
         old_df: 'pd.DataFrame',
         new_df: 'pd.DataFrame',
+        primary_key_col: Optional[str] = None,
         dtypes: Optional[Dict[str, Any]] = None,
         custom_nan: str = 'mrsm_NaN',
         debug: bool = False,
     ) -> 'pd.DataFrame':
     """
     Left join two DataFrames to find the newest unseen data.
-    
-    I have scoured the web for the best way to do this.
-    My intuition was to join on datetime and id, but the code below accounts for values as well
-    without needing to define expicit columns or indices.
-    
-    The logic below is based off this StackOverflow question, with an index reset thrown on top:
-    https://stackoverflow.com/questions/
-    48647534/python-pandas-find-difference-between-two-data-frames#48647840
-    
-    Also, NaN apparently does not equal NaN, so I am temporarily replacing instances of NaN with a
-    custom string, per this StackOverflow question:
-    https://stackoverflow.com/questions/31833635/pandas-checking-for-nan-not-working-using-isin
-    
-    Lastly, use the old DataFrame's columns for the new DataFrame,
-    because order matters when checking equality.
 
     Parameters
     ----------
@@ -1013,8 +1000,11 @@ def filter_unseen_df(
     """
     if old_df is None:
         return new_df
+    from meerschaum.utils.packages import import_pandas
+    pd = import_pandas(debug=debug)
     old_cols = list(old_df.columns)
     try:
+        ### Order matters when checking equality.
         new_df = new_df[old_cols]
     except Exception as e:
         from meerschaum.utils.warnings import warn
@@ -1027,13 +1017,26 @@ def filter_unseen_df(
     ### assume the old_df knows what it's doing, even if it's technically wrong.
     if dtypes is None:
         dtypes = dict(old_df.dtypes)
-    new_df = new_df.astype(dtypes)
+    try:
+        new_df = new_df.astype(dtypes)
+        cast_cols = False
+    except Exception as e:
+        warn(
+            f"Was not able to cast the new DataFrame to the given dtypes.\n{e}"
+        )
+        cast_cols = True
+    if cast_cols:
+        for col, dtype in dtypes.items():
+            try:
+                new_df[col] = new_df[col].astype(dtype)
+            except Exception as e:
+                warn(f"Was not able to cast column '{col}' to dtype '{dtype}'.\n{e}")
 
     if len(old_df) == 0:
         return new_df
 
     return new_df[
-        ~new_df.fillna(custom_nan).apply(tuple, 1).isin(old_df.fillna(custom_nan).apply(tuple, 1))
+        ~new_df.fillna(pd.NA).apply(tuple, 1).isin(old_df.fillna(pd.NA).apply(tuple, 1))
     ].reset_index(drop=True)
 
 
@@ -1382,6 +1385,7 @@ def json_serialize_datetime(dt: 'datetime.datetime') -> Union[str, None]:
 def wget(
         url: str,
         dest: Optional[Union[str, 'pathlib.Path']] = None,
+        headers: Optional[Dict[str, Any]] = None,
         color: bool = True,
         debug: bool = False,
         **kw: Any
@@ -1412,17 +1416,20 @@ def wget(
     from meerschaum.utils.warnings import warn, error
     from meerschaum.utils.debug import dprint
     import os, pathlib, re, urllib.request
+    if headers is None:
+        headers = {}
+    request = urllib.request.Request(url, headers=headers)
     if not color:
         dprint = print
     if debug:
         dprint(f"Downloading from '{url}'...")
     try:
-        response = urllib.request.urlopen(url)
+        response = urllib.request.urlopen(request)
     except Exception as e:
         import ssl
         ssl._create_default_https_context = ssl._create_unverified_context
         try:
-            response = urllib.request.urlopen(url)
+            response = urllib.request.urlopen(request)
         except Exception as _e:
             print(_e)
             response = None

@@ -14,7 +14,7 @@ from meerschaum.utils.typing import Optional, Union, Callable, Any
 def fetch(
         self,
         pipe: meerschaum.Pipe,
-        begin: Union[datetime.datetime, str, None] = None,
+        begin: Union[datetime.datetime, str, None] = '',
         end: Union[datetime.datetime, str, None] = None,
         chunk_hook: Optional[Callable[[pd.DataFrame], Any]] = None,
         chunksize: Optional[int] = -1,
@@ -80,7 +80,10 @@ def fetch(
     if 'order by' in definition.lower() and 'over' not in definition.lower():
         error("Cannot fetch with an ORDER clause in the definition")
 
-    begin = begin if begin is not None else pipe.get_sync_time(debug=debug)
+    begin = (
+        begin if not (isinstance(begin, str) and begin == '')
+        else pipe.get_sync_time(debug=debug)
+    )
         
     da = None
     if dt_name:

@@ -212,33 +212,36 @@ def pprint_pipe_columns(
     from meerschaum.utils.formatting._shell import make_header
     from meerschaum.utils.packages import attempt_import, import_rich
 
-    _cols = pipe.columns
-    _cols_types = pipe.get_columns_types(debug=debug)
+    exists = pipe.exists(debug=debug)
+    _cols = pipe.columns if exists else {}
+    _cols_types = pipe.get_columns_types(debug=debug) if exists else {}
 
     def _nopretty_print():
         print(json.dumps(pipe.__getstate__()))
         print(json.dumps(_cols))
         print(json.dumps(_cols_types))
+        print(json.dumps(pipe.dtypes))
 
     def _pretty_print():
         rich = import_rich()
         rich_table = attempt_import('rich.table')
 
-        table = rich_table.Table(title=f"Column types for {pipe}")
+        table = rich_table.Table(title=f"Data Types for {pipe}")
         table.add_column('Column')
-        table.add_column('Type', justify='right')
+        table.add_column('DB Type', justify='right')
+        table.add_column('PD Type', justify='left')
 
-        info(make_header(f"\nColumns for {pipe}:"), icon=False)
+        info(make_header(f"\nIndex Columns for {pipe}:"), icon=False)
         if _cols:
             pprint(_cols, nopretty=nopretty)
             print()
         else:
             print_tuple((False, f"No registered columns for {pipe}."))
 
-        for c, t in _cols_types.items():
-            table.add_row(c, t)
+        for c, t in pipe.dtypes.items():
+            table.add_row(c, _cols_types.get(c, None), t)
 
-        if _cols_types:
+        if pipe.dtypes:
             get_console().print(table)
         else:
             print_tuple((False, f"No table columns for {pipe}. Does the pipe exist?"))
@@ -312,7 +315,7 @@ def highlight_pipes(message: str) -> str:
     msg = ''
     _d = {}
     for i, segment in enumerate(segments):
-        if ')' in segment:
+        if ',' in segment and ')' in segment:
             paren_index = segment.find(')') + 1
             code = "_d['pipe'] = Pipe(" + segment[:paren_index]
             try:

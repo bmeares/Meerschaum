@@ -27,7 +27,7 @@ def get_mrsm_version(self, **kw) -> Optional[str]:
     try:
         j = self.get(
             _static_config()['api']['endpoints']['version'] + '/mrsm',
-            use_token = False,
+            use_token = True,
             **kw
         ).json()
     except Exception as e:
@@ -54,7 +54,7 @@ def get_chaining_status(self, **kw) -> Optional[bool]:
     try:
         response = self.get(
             _static_config()['api']['endpoints']['chaining'],
-            use_token = False,
+            use_token = True,
             **kw
         )
         if not response:

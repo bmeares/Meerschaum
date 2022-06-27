@@ -11,7 +11,7 @@ from meerschaum.utils.typing import Optional, Any
 
 def fetch(
         self,
-        begin: Optional[datetime.datetime] = None,
+        begin: Optional[datetime.datetime, str] = '',
         end: Optional[datetime.datetime] = None,
         sync_chunks: bool = False,
         deactivate_plugin_venv: bool = True,
@@ -23,7 +23,7 @@ def fetch(
 
     Parameters
     ----------
-    begin: Optional[datetime.datetime], default None:
+    begin: Optional[datetime.datetime, str], default '':
         If provided, only fetch data newer than or equal to `begin`.
 
     end: Optional[datetime.datetime], default None:

@@ -7,12 +7,13 @@ Clear pipe data within a bounded or unbounded interval.
 """
 
 from __future__ import annotations
-from meerschaum.utils.typing import SuccessTuple, Any
+from meerschaum.utils.typing import SuccessTuple, Any, Optional, Dict
 
 def clear(
         self,
         begin: Optional[datetime.datetime] = None,
         end: Optional[datetime.datetime] = None,
+        params: Optional[Dict[str, Any]] = None,
         debug: bool = False,
         **kw: Any
     ) -> SuccessTuple:
@@ -26,6 +27,9 @@ def clear(
 
     end: Optional[datetime.datetime], default None:
         If provided, only remove rows older than this datetime column (not including end).
+
+    params: Optional[Dict[str, Any]], default None
+         See `meerschaum.utils.sql.build_where`.
 
     debug: bool, default False:
         Verbositity toggle.
@@ -52,4 +56,8 @@ def clear(
         success, msg = self.cache_pipe.clear(begin=begin, end=end, debug=debug, **kw)
         if not success:
             warn(msg)
-    return self.instance_connector.clear_pipe(self, begin=begin, end=end, debug=debug, **kw)
+    return self.instance_connector.clear_pipe(
+        self,
+        begin=begin, end=end, params=params, debug=debug,
+        **kw
+    )

@@ -57,7 +57,7 @@ def _entry_with_args(**kw) -> SuccessTuple:
 
     ### Check if the action is a plugin, and if so, activate virtual environment.
     plugin_name = (
-        actions[main_action].__module__.split('.')[-1] if (
+        actions[main_action].__module__.split('.')[1] if (
             actions[main_action].__module__.startswith('plugins.')
         ) else None
     )

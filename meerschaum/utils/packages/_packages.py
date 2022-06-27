@@ -36,6 +36,7 @@ packages: Dict[str, Dict[str, str]] = {
         'pip'                        : 'pip>=21.0.1',
         'update_checker'             : 'update-checker>=0.18.0',
         'semver'                     : 'semver>=3.0.0-dev3',
+        'pathspec'                   : 'pathspec>=0.9.0',
         'dateutil'                   : 'python-dateutil>=2.7.5',
         'requests'                   : 'requests>=2.23.0',
         'binaryornot'                : 'binaryornot>=0.4.4',
@@ -119,7 +120,7 @@ packages: Dict[str, Dict[str, str]] = {
 }
 packages['sql'] = {
     'numpy'                          : 'numpy>=1.18.5',
-    'pandas'                         : 'pandas>=1.1.4',
+    'pandas'                         : 'pandas>=1.3.0',
     'joblib'                         : 'joblib>=0.17.0',
     'sqlalchemy'                     : 'sqlalchemy>=1.4.17',
     'sqlalchemy_utils'               : 'sqlalchemy-utils>=0.38.2',

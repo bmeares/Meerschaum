@@ -18,7 +18,9 @@ from meerschaum.api import (
     get_pipe,
     manager,
     debug,
+    private, no_auth,
 )
+import fastapi
 from meerschaum.api.tables import get_tables
 from fastapi import FastAPI, File, UploadFile
 from meerschaum.utils.packages import attempt_import
@@ -36,7 +38,9 @@ def register_plugin(
         version: str = None,
         attributes: str = None,
         archive : UploadFile = File(...),
-        curr_user : 'meerschaum.core.User' = fastapi.Depends(manager),
+        curr_user = (
+            fastapi.Depends(manager) if not no_auth else None
+        ),
     ) -> SuccessTuple:
     """
     Register a plugin and save its archive file.
@@ -86,11 +90,14 @@ def register_plugin(
             pass
 
     plugin = Plugin(name, version=version, attributes=attributes)
-    plugin_user_id = get_api_connector().get_plugin_user_id(plugin)
-    curr_user_id = get_api_connector().get_user_id(curr_user)
-    if plugin_user_id is not None and plugin_user_id != curr_user_id:
-        return False, f"User '{curr_user.username}' cannot edit plugin '{plugin}'."
-    plugin.user_id = curr_user_id
+    if curr_user is not None:
+        plugin_user_id = get_api_connector().get_plugin_user_id(plugin)
+        curr_user_id = get_api_connector().get_user_id(curr_user) if curr_user is not None else -1
+        if plugin_user_id is not None and plugin_user_id != curr_user_id:
+            return False, f"User '{curr_user.username}' cannot edit plugin '{plugin}'."
+        plugin.user_id = curr_user_id
+    else:
+        plugin.user_id = -1
 
     success, msg = get_api_connector().register_plugin(plugin, make_archive=False, debug=debug)
 
@@ -107,7 +114,10 @@ def register_plugin(
 
 @app.get(plugins_endpoint + '/{name}', tags=['Plugins'])
 def get_plugin(
-        name: str
+        name: str,
+        curr_user = (
+            fastapi.Depends(manager) if private else None
+        ),
     ) -> Union[FileResponse, SuccessTuple]:
     """
     Download a plugin's archive file.
@@ -120,7 +130,10 @@ def get_plugin(
 
 @app.get(plugins_endpoint + '/{name}/attributes', tags=['Plugins'])
 def get_plugin_attributes(
-        name : str
+        name : str,
+        curr_user = (
+            fastapi.Depends(manager) if private else None
+        ),
     ) -> dict:
     """
     Get a plugin's attributes.
@@ -131,6 +144,9 @@ def get_plugin_attributes(
 def get_plugins(
         user_id : Optional[int] = None,
         search_term : Optional[str] = None,
+        curr_user = (
+            fastapi.Depends(manager) if private else None
+        ),
     ) -> List[str]:
     """
     Get a list of plugins.
@@ -152,7 +168,9 @@ def get_plugins(
 @app.delete(plugins_endpoint + '/{name}', tags=['Plugins'])
 def delete_plugin(
         name : str,
-        curr_user : 'meerschaum.core.User' = fastapi.Depends(manager),
+        curr_user = (
+            fastapi.Depends(manager) if private else None
+        ),
     ) -> SuccessTuple:
     """
     Delete a plugin and its archive file from the repository.
@@ -163,9 +181,12 @@ def delete_plugin(
     if plugin_user_id is None:
         return False, f"Plugin '{plugin}' is not registered."
 
-    curr_user_id = get_api_connector().get_user_id(curr_user)
-    if plugin_user_id != curr_user_id:
-        return False, f"User '{curr_user.username}' cannot delete plugin '{plugin}'."
+    if curr_user is not None:
+        curr_user_id = get_api_connector().get_user_id(curr_user)
+        if plugin_user_id != curr_user_id:
+            return False, f"User '{curr_user.username}' cannot delete plugin '{plugin}'."
+    else:
+        curr_user_id = -1
     plugin.user_id = curr_user_id
 
     _remove_success = plugin.remove_archive(debug=debug)

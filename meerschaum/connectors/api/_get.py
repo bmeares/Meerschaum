@@ -17,27 +17,7 @@ def get(
         debug : bool = False,
         **kw : Any
     ) -> requests.Reponse:
-    """Wrapper for requests.get
-
-    Parameters
-    ----------
-    r_url : str :
-        
-    headers : Optional[Dict[str :
-        
-    str]] :
-         (Default value = None)
-    use_token : bool :
-         (Default value = True)
-    debug : bool :
-         (Default value = False)
-    **kw : Any :
-        
-
-    Returns
-    -------
-
-    """
+    """Wrapper for `requests.get`."""
     if debug:
         from meerschaum.utils.debug import dprint
 
@@ -66,24 +46,19 @@ def wget(
         self,
         r_url : str,
         dest : Optional[Union[str, pathlib.Path]] = None,
+        headers: Optional[Dict[str, Any]] = None,
+        use_token: bool = True,
+        debug: bool = False,
         **kw : Any
     ) -> pathlib.Path:
     """Mimic wget with requests.
-
-    Parameters
-    ----------
-    r_url : str :
-        
-    dest : Optional[Union[str :
-        
-    pathlib.Path]] :
-         (Default value = None)
-    **kw : Any :
-        
-
-    Returns
-    -------
-
     """
     from meerschaum.utils.misc import wget
-    return wget(self.url + r_url, dest=dest, **kw)
+    from meerschaum.utils.debug import dprint
+    if headers is None:
+        headers = {}
+    if use_token:
+        if debug:
+            dprint(f"Checking login token.")
+        headers.update({ 'Authorization': f'Bearer {self.token}' })
+    return wget(self.url + r_url, dest=dest, headers=headers, **kw)

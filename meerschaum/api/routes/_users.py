@@ -14,7 +14,8 @@ from meerschaum.utils.typing import (
 from meerschaum.utils.packages import attempt_import
 from meerschaum.api import (
     fastapi, app, endpoints, get_api_connector, pipes, get_pipe,
-    manager, debug, check_allow_chaining, DISALLOW_CHAINING_MESSAGE
+    manager, debug, check_allow_chaining, DISALLOW_CHAINING_MESSAGE,
+    no_auth, private,
 )
 from meerschaum.api.tables import get_tables
 from starlette.responses import Response, JSONResponse
@@ -25,25 +26,43 @@ import meerschaum.core
 sqlalchemy = attempt_import('sqlalchemy')
 users_endpoint = endpoints['users']
 
+import fastapi
 from fastapi import HTTPException
 from meerschaum.config.static import _static_config
 
 @app.get(users_endpoint + "/me", tags=['Users'])
 def read_current_user(
-        curr_user: 'meerschaum.core.User' = fastapi.Depends(manager),
+        curr_user = (
+            fastapi.Depends(manager) if not no_auth else None
+        ),
     ) -> Dict[str, Union[str, int]]:
     """
     Get information about the currently logged-in user.
     """
     return {
-        'username' : curr_user.username,
-        'user_id' : get_api_connector().get_user_id(curr_user),
-        'user_type' : get_api_connector().get_user_type(curr_user),
-        'attributes' : get_api_connector().get_user_attributes(curr_user),
+        'username': (
+            curr_user.username if curr_user is not None else 'no_auth'
+        ),
+        'user_id': (
+            get_api_connector().get_user_id(curr_user)
+            if curr_user is not None else -1
+        ),
+        'user_type': (
+            get_api_connector().get_user_type(curr_user)
+            if curr_user is not None else 'admin'
+        ),
+        'attributes': (
+            get_api_connector().get_user_attributes(curr_user)
+            if curr_user is not None else {}
+        ),
     }
 
 @app.get(users_endpoint, tags=['Users'])
-def get_users() -> List[str]:
+def get_users(
+        curr_user = (
+            fastapi.Depends(manager) if private else None
+        ),
+    ) -> List[str]:
     """
     Get a list of the registered users.
     """
@@ -55,7 +74,10 @@ def register_user(
         password: str,
         type: Optional[str] = None,
         email: Optional[str] = None,
-        attributes: Optional[Dict[str, Any]] = None
+        attributes: Optional[Dict[str, Any]] = None,
+        curr_user = (
+            fastapi.Depends(manager) if private else None
+        ),
     ) -> SuccessTuple:
     """
     Register a new user.
@@ -86,13 +108,15 @@ def edit_user(
         type: Optional[str] = None,
         email: Optional[str] = None,
         attributes: Optional[Dict[str, Any]] = None,
-        curr_user: 'meerschaum.core.User' = fastapi.Depends(manager),
+        curr_user = (
+            fastapi.Depends(manager) if not no_auth else None
+        ),
     ) -> SuccessTuple:
     """
     Edit an existing user.
     """
     user = User(username, password, email=email, attributes=attributes)
-    user_type = get_api_connector().get_user_type(curr_user)
+    user_type = get_api_connector().get_user_type(curr_user) if curr_user is not None else 'admin'
     if user_type == 'admin' and type is not None:
         user.type = type
     if user_type == 'admin' or curr_user.username == user.username:
@@ -103,6 +127,9 @@ def edit_user(
 @app.get(users_endpoint + "/{username}/id", tags=['Users'])
 def get_user_id(
         username : str,
+        curr_user = (
+            fastapi.Depends(manager) if not no_auth else None
+        ),
     ) -> Union[int, None]:
     """
     Get a user's ID.
@@ -112,6 +139,9 @@ def get_user_id(
 @app.get(users_endpoint + "/{username}/attributes", tags=['Users'])
 def get_user_attributes(
         username : str,
+        curr_user = (
+            fastapi.Depends(manager) if private else None
+        ),
     ) -> Union[Dict[str, Any], None]:
     """
     Get a user's attributes.
@@ -121,13 +151,18 @@ def get_user_attributes(
 @app.delete(users_endpoint + "/{username}", tags=['Users'])
 def delete_user(
         username: str,
-        curr_user: 'meerschaum.core.User' = fastapi.Depends(manager),
+        curr_user = (
+            fastapi.Depends(manager) if not no_auth else None
+        ),
     ) -> SuccessTuple:
     """
     Delete a user.
     """
     user = User(username)
-    user_type = get_api_connector().get_user_type(curr_user, debug=debug)
+    user_type = (
+        get_api_connector().get_user_type(curr_user, debug=debug)
+        if curr_user is not None else 'admin'
+    )
     if user_type == 'admin' or curr_user.username == user.username:
         return get_api_connector().delete_user(user, debug=debug)
 
@@ -140,7 +175,9 @@ def delete_user(
 @app.get(users_endpoint + '/{username}/password_hash', tags=['Users'])
 def get_user_password_hash(
         username: str,
-        curr_user: 'meerschaum.core.User' = fastapi.Depends(manager),
+        curr_user = (
+            fastapi.Depends(manager) if not no_auth else None
+        ),
     ) -> Union[str, HTTPException]:
     """
     If configured to allow chaining, return a user's password_hash.
@@ -152,7 +189,9 @@ def get_user_password_hash(
 @app.get(users_endpoint + '/{username}/type', tags=['Users'])
 def get_user_type(
         username : str,
-        curr_user : 'meerschaum.core.User' = fastapi.Depends(manager),
+        curr_user = (
+            fastapi.Depends(manager) if not no_auth else None
+        ),
     ) -> Union[str, HTTPException]:
     """
     If configured to allow chaining, return a user's type.

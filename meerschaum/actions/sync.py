@@ -57,6 +57,7 @@ def _pipes_lap(
     from meerschaum.utils.misc import print_options, get_cols_lines
     from meerschaum.utils.pool import get_pool_executor, get_pool
     from meerschaum.connectors.parse import parse_instance_keys
+    from meerschaum import Plugin
     import queue
     import multiprocessing
     import contextlib
@@ -115,24 +116,20 @@ def _pipes_lap(
 
 
     def worker_fn():
-        nonlocal results_dict, pipes_queue
         while not stop_event.is_set():
             try:
                 pipe = pipes_queue.get_nowait()
             except queue.Empty:
                 return
             return_tuple = sync_pipe(pipe)
-            locks['results_dict'].acquire()
             results_dict[pipe] = return_tuple
-            locks['results_dict'].release()
 
             print_tuple(return_tuple, _progress=_progress)
             _checkpoint(_progress=_progress, _task=_task)
             if _progress is not None:
-                locks['remaining_count'].acquire()
                 nonlocal remaining_count
-                remaining_count -= 1
-                locks['remaining_count'].release()
+                with locks['remaining_count']:
+                    remaining_count -= 1
             pipes_queue.task_done()
 
     sync_function_source = dill.source.getsource(_wrap_sync_pipe)
@@ -206,6 +203,12 @@ def _pipes_lap(
     pipes_queue.join()
     for worker_thread in worker_threads:
         worker_thread.join()
+    for pipe in pipes:
+        try:
+            if pipe.connector.type == 'plugin':
+                Plugin(pipe.connector.label).deactivate_venv(debug=debug)
+        except Exception as e:
+            pass
 
     results = [results_dict[pipe] for pipe in pipes] if len(results_dict) == len(pipes) else None
 
@@ -367,6 +370,7 @@ def _wrap_sync_pipe(
             debug = debug,
             min_seconds = min_seconds,
             workers = workers,
+            deactivate_plugin_venv=False,
             **{k: v for k, v in kw.items() if k != 'blocking'}
         )
     except Exception as e:

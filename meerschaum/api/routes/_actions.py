@@ -7,22 +7,30 @@ Execute Meerschaum Actions via the API
 """
 
 from __future__ import annotations
-from meerschaum.utils.typing import SuccessTuple
+from meerschaum.utils.typing import SuccessTuple, Union
 
-from meerschaum.api import fastapi, app, endpoints, get_api_connector, debug, manager
+from meerschaum.api import (
+    fastapi, app, endpoints, get_api_connector, debug, manager, private, no_auth
+)
 from meerschaum.actions import actions
 import meerschaum.core
 actions_endpoint = endpoints['actions']
 
 @app.get(actions_endpoint, tags=['Actions'])
-def get_actions() -> list:
+def get_actions(
+        curr_user = (
+            fastapi.Depends(manager) if private else None
+        ),
+    ) -> list:
     return list(actions)
 
 @app.post(actions_endpoint + "/{action}", tags=['Actions'])
 def do_action(
         action: str,
         keywords: dict = fastapi.Body(...),
-        curr_user: 'meerschaum.core.User' = fastapi.Depends(manager),
+        curr_user = (
+            fastapi.Depends(manager) if not no_auth else None
+        ),
     ) -> SuccessTuple:
     """
     Perform a Meerschaum action (if permissions allow it).
@@ -40,7 +48,7 @@ def do_action(
     A `SuccessTuple` of success, message.
 
     """
-    if curr_user.type != 'admin':
+    if curr_user is not None and curr_user.type != 'admin':
         from meerschaum.config import get_config
         allow_non_admin = get_config(
             'system', 'api', 'permissions', 'actions', 'non_admin', patch=True
