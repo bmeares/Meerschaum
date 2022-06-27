@@ -1385,6 +1385,7 @@ def json_serialize_datetime(dt: 'datetime.datetime') -> Union[str, None]:
 def wget(
         url: str,
         dest: Optional[Union[str, 'pathlib.Path']] = None,
+        headers: Optional[Dict[str, Any]] = None,
         color: bool = True,
         debug: bool = False,
         **kw: Any
@@ -1415,17 +1416,20 @@ def wget(
     from meerschaum.utils.warnings import warn, error
     from meerschaum.utils.debug import dprint
     import os, pathlib, re, urllib.request
+    if headers is None:
+        headers = {}
+    request = urllib.request.Request(url, headers=headers)
     if not color:
         dprint = print
     if debug:
         dprint(f"Downloading from '{url}'...")
     try:
-        response = urllib.request.urlopen(url)
+        response = urllib.request.urlopen(request)
     except Exception as e:
         import ssl
         ssl._create_default_https_context = ssl._create_unverified_context
         try:
-            response = urllib.request.urlopen(url)
+            response = urllib.request.urlopen(request)
         except Exception as _e:
             print(_e)
             response = None

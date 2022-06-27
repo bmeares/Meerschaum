@@ -42,13 +42,6 @@ def login(
         )
     elif warn:
         msg = (
-            '' if self.get_user_id(
-                User(self.username, self.password),
-                use_token = False,
-                debug = debug
-            ) is not None else f"User '{self.username}' does not exist for '{self}'." + '\n'
-        )
-        msg += (
             f"   Failed to log into '{self}' as user '{login_data['username']}'.\n" +
             f"   Please verify login details for connector '{self}'."
         )

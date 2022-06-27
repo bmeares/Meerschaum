@@ -17,7 +17,12 @@ class InferFetch:
 
 def sync(
         self,
-        df: Union[pd.DataFrame, Dict[str, List[Any]], InferFetch] = InferFetch,
+        df: Union[
+            pd.DataFrame,
+            Dict[str, List[Any]],
+            List[Dict[str, Any]],
+            InferFetch
+        ] = InferFetch,
         begin: Optional[datetime.datetime] = None,
         end: Optional[datetime.datetime] = None,
         force: bool = False,

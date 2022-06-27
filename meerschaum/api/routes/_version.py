@@ -6,10 +6,16 @@
 Return version information
 """
 
-from meerschaum.api import app, endpoints
+import fastapi
+from meerschaum.api import app, endpoints, private, manager
+from meerschaum.utils.typing import Union
 
 @app.get(endpoints['version'], tags=['Version'])
-def get_api_version():
+def get_api_version(
+        curr_user = (
+            fastapi.Depends(manager) if private else None
+        ),
+    ):
     """
     Get the Meerschaum API version.
     """
@@ -17,7 +23,11 @@ def get_api_version():
     return version
 
 @app.get(endpoints['version'] + "/mrsm", tags=['Version'])
-def get_meerschaum_version():
+def get_meerschaum_version(
+        curr_user = (
+            fastapi.Depends(manager) if private else None
+        ),
+    ):
     """
     Get the Meerschaum instance version.
     """

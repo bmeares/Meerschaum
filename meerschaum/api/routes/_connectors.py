@@ -6,14 +6,20 @@
 Get the currently registered connectors.
 """
 
+import fastapi
 from fastapi import Body, HTTPException
-from meerschaum.api import app, endpoints
+from meerschaum.api import app, endpoints, private, no_auth, manager
 from meerschaum.utils.typing import Optional, Dict, List, Union
 
 endpoint = endpoints['connectors']
 
 @app.get(endpoint, tags=['Connectors'])
-def get_connectors(type : Optional[str] = None) -> Union[Dict[str, List[str]], List[str]]:
+def get_connectors(
+        type : Optional[str] = None,
+        curr_user = (
+            fastapi.Depends(manager) if not no_auth else None
+        ),
+    ) -> Union[Dict[str, List[str]], List[str]]:
     """
     Return the keys of the registered connectors.
 
@@ -34,7 +40,7 @@ def get_connectors(type : Optional[str] = None) -> Union[Dict[str, List[str]], L
         for t in get_config('meerschaum', 'connectors'):
             types.append(t)
 
-    response_dict = dict()
+    response_dict = {}
     for t in types:
         response_dict[t] = list(get_config('meerschaum', 'connectors', t))
         response_dict[t].remove('default')
@@ -43,7 +49,12 @@ def get_connectors(type : Optional[str] = None) -> Union[Dict[str, List[str]], L
     return response_dict
 
 @app.get(endpoint + "/{type}", tags=['Connectors'])
-def get_connectors_by_type(type : str):
+def get_connectors_by_type(
+        type : str,
+        curr_user = (
+            fastapi.Depends(manager) if not no_auth else None
+        ),
+    ):
     """
     Convenience method for `get_connectors()`.
     """

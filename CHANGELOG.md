@@ -8,16 +8,61 @@ This is the current release cycle, so future features will be updated below.
 **What's New**
 
   - **Inserts and Updates**  
-    An additional layer of processing separates new rows from updates rows. If you specify an `id` column, it uses this column and the `datetime` column to determine which rows have changed. Therefore a primary key is not required, as long as the `datetime` and `id` columns together emulate a composite primary key.
+    An additional layer of processing separates new rows from updated rows. Meerschaum uses your `datetime` and `id` columns (if you specified an `id` column) to determine which rows have changed. Therefore a primary key is not required, as long as the `datetime` column is unique or the `datetime` and `id` columns together emulate a composite primary key.
 
     Meerschaum will insert new rows as before as well as creating a temporary table (same name as the pipe's target but with a leading underscore). The syncing engine then issues the appropriate `MERGE` or `UPDATE` query to update all of the rows in a batch.
+
+    For example, the following lines of code will result in a table with only 1 row:
+
+    ```python
+    >>> import meerschaum as mrsm
+    >>> pipe = mrsm.Pipe('foo', 'bar', columns={'datetime': 'dt', 'id': 'id'})
+    >>>
+    >>> ### Insert the first row.
+    >>> pipe.sync([{'dt': '2022-06-26', 'id': 1, 'value': 10}])
+    >>>
+    >>> ### Duplicate row, no change.
+    >>> pipe.sync([{'dt': '2022-06-26', 'id': 1, 'value': 10}])
+    >>>
+    >>> ### Update the value columns of the first row.
+    >>> pipe.sync([{'dt': '2022-06-26', 'id': 1, 'value': 100}])
+    ```
+
+  - **Data Type Enforcement.**  
+    Incoming DataFrames will be cast to the pipe's existing data types, and if you want total control, you can manually specify the Pandas data types for as many columns as you like under the `dtypes` key of `Pipe.parameters`, e.g.:
+    ```yaml
+    columns:
+      datetime: timestamp_utc
+      id: station_id
+    dtypes:
+      timestamp_utc: 'datetime64[ns]'
+      station_id: 'Int64'
+      station_name: 'object'
+    ```
+  - **Allow for `NULL` in `INT` columns.**  
+    Before pandas v1.3.0, including a null value in an int column would cast it to a float. Now `pd.NA` has been added and is leveraged in Meerschaum's data type inference system.
   - **Plugins respect `.gitignore`**  
     When publishing a plugin that is contained in a git repository, Meerschaum will parse your `.gitignore` file to determine which files to omit.
+  - **Private API Mode.**  
+    Require authentication on all API endpoints with `start api --private`.
+  - **No Authentication API Mode.**  
+    Adding `--no-auth` will disable all authentication on all API endpoints, including the web console.
 
 **Bugfixes**
 
   - **Plugin packaging**  
     A breaking bug in the process of packaging and publishing Meerschaum plugins has been patched.
+
+  - **Correct object names in Oracle SQL.**  
+    Oracle has finally been brought up to speed with other flavors.
+  - **Multi-module plugins fix.**  
+    A small but important fix for multi-module plugins has been applied for their virtual environments.
+  - **Improved virtual environment handling for Debian systems.**  
+    If `venv` is not available, Meerschaum now better handles falling back to `virtualenv`.
+  - **Allow for syncing lists of dicts.**  
+    In addition to syncing a dict of lists, `Pipe.sync()` now supports a list of dicts.
+  - **Allow for `begin` to equal `None` for `Pipe.fetch()`.**  
+    The behavior of determining `begin` from `Pipe.get_sync_time()` only takes place when `begin` is omitted, not when it is `None`. Now `begin=None` will not add a lower bound to the query.
 
 ## 0.6.x Releases
 

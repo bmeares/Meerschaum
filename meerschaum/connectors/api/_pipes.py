@@ -7,7 +7,7 @@ Register or fetch Pipes from the API
 """
 
 from __future__ import annotations
-from meerschaum.utils.typing import SuccessTuple, Union, Any, Optional, Mapping, List, Dict
+from meerschaum.utils.typing import SuccessTuple, Union, Any, Optional, Mapping, List, Dict, Tuple
 
 def pipe_r_url(
         pipe : 'meerschaum.Pipe'
@@ -822,7 +822,7 @@ def get_pipe_columns_types(
         from meerschaum.utils.warnings import warn
         warn(j['detail'])
         return None
-    elif not isinstance(j, dict):
+    if not isinstance(j, dict):
         warn(response.text)
         return None
     return j

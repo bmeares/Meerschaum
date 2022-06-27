@@ -134,7 +134,10 @@ def infer_dtypes(self, persist: bool=False, debug: bool=False) -> Dict[str, Any]
     A dictionary of strings containing the pandas data types for this Pipe.
     """
     if not self.exists(debug=debug):
-        return {}
+        dtypes = {}
+        if 'datetime' in self.columns:
+            dtypes[self.columns['datetime']] = 'datetime64[ns]'
+        return dtypes
     from meerschaum.utils.sql import get_pd_type
     columns_types = self.get_columns_types(debug=debug)
     dtypes = {c: get_pd_type(t) for c, t in columns_types.items()}
