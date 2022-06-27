@@ -92,12 +92,25 @@ def _static_config():
             'plugins': {
                 'repo_separator': '@',
             },
+            'pipes': {
+                'dtypes': {
+                    'min_ratio_columns_changed_for_full_astype': 0.5,
+                },
+            },
             'setup': {
                 'name': 'meerschaum',
                 'formal_name': 'Meerschaum',
                 'app_id': 'io.meerschaum',
                 'description': 'Sync Time-Series Pipes with Meerschaum',
                 'url': 'https://meerschaum.io',
+                'project_urls': {
+                    'Documentation': 'https://docs.meerschaum.io',
+                    'Changelog': 'https://meerschaum.io/news/changelog',
+                    'GitHub': 'https://github.com/bmeares/Meerschaum',
+                    'Homepage': 'https://meerschaum.io',
+                    'Donate': 'https://github.com/sponsors/bmeares',
+                    'Discord': 'https://discord.gg/8U8qMUjvcc',
+                },
                 'author': 'Bennett Meares',
                 'author_email': 'bennett.meares@gmail.com',
                 'maintainer_email': 'bennett.meares@gmail.com',

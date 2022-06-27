@@ -26,6 +26,54 @@ exists_queries = {
     #  'mariadb'    : "SHOW TABLES LIKE '{table}'",
     #  'sqlite'     : "SELECT name FROM sqlite_master WHERE name='{table}'",
 }
+update_queries = {
+    'default': """
+    UPDATE {target_table_name} AS f
+    {sets_subquery_none}
+    FROM {target_table_name} AS t
+    INNER JOIN (SELECT DISTINCT * FROM {patch_table_name}) AS p
+        ON {and_subquery_t}
+    WHERE
+        {and_subquery_f}
+    """,
+    'mysql': """
+    UPDATE {target_table_name} AS f
+    INNER JOIN (SELECT DISTINCT * FROM {patch_table_name}) AS p
+        ON {and_subquery_f}
+    {sets_subquery_f}
+    WHERE
+        {and_subquery_f}
+    """,
+    'mariadb': """
+    UPDATE {target_table_name} AS f
+    INNER JOIN (SELECT DISTINCT * FROM {patch_table_name}) AS p
+        ON {and_subquery_f}
+    {sets_subquery_f}
+    WHERE
+        {and_subquery_f}
+    """,
+    'mssql': """
+    MERGE {target_table_name} t
+        USING (SELECT DISTINCT * FROM {patch_table_name}) p
+        ON {and_subquery_t}
+    WHEN MATCHED THEN
+        UPDATE
+        {sets_subquery_none};
+    """,
+    'oracle': """
+    MERGE INTO {target_table_name} t
+        USING (SELECT DISTINCT * FROM {patch_table_name}) p
+        ON (
+            {and_subquery_t}
+        )
+    WHEN MATCHED THEN
+        UPDATE
+        {sets_subquery_none}
+        WHERE (
+            {and_subquery_t}
+        )
+    """,
+}
 table_wrappers = {
     'default'    : ('"', '"'),
     'timescaledb': ('"', '"'),
@@ -50,6 +98,41 @@ max_name_lens = {
     'mariadb'    : 64,
 }
 json_flavors = {'postgresql', 'timescaledb',}
+OMIT_NULLSFIRST_FLAVORS = {'mariadb', 'mysql', 'mssql'}
+DB_TO_PD_DTYPES = {
+    'FLOAT': 'float64',
+    'DOUBLE_PRECISION': 'float64',
+    'DOUBLE': 'float64',
+    'BIGINT': 'Int64',
+    'TIMESTAMP': 'datetime64[ns]',
+    'TIMESTAMP WITH TIMEZONE': 'datetime64[ns, UTC]',
+    'TIMESTAMPTZ': 'datetime64[ns, UTC]',
+    'DATE': 'datetime64[ns]',
+    'DATETIME': 'datetime64[ns]',
+    'TEXT': 'object',
+    'CLOB': 'object',
+    'BOOL': 'bool',
+    'BOOLEAN': 'bool',
+    'BOOLEAN()': 'bool',
+    'substrings': {
+        'CHAR': 'str',
+        'TIMESTAMP': 'datetime64[ns]',
+        'DATE': 'datetime64[ns]',
+        'DOUBLE': 'float64',
+        'INT': 'Int64',
+        'BOOL': 'bool',
+    },
+    'default': 'object',
+}
+### MySQL doesn't allow for casting as BIGINT, so this is a workaround.
+DB_FLAVORS_CAST_DTYPES = {
+    'mariadb': {
+        'BIGINT': 'DOUBLE',
+    },
+    'mysql': {
+        'BIGINT': 'DOUBLE',
+    },
+}
 
 
 def dateadd_str(
@@ -284,14 +367,18 @@ def sql_item_name(item: str, flavor: str) -> str:
     "[table]"
 
     """
-    wrappers = table_wrappers.get(flavor, table_wrappers['default'])
-    item = item if flavor != 'oracle' else oracle_capital(item)
-    return wrappers[0] + truncate_item_name(str(item), flavor) + wrappers[1]
+    truncated_item = truncate_item_name(str(item), flavor)
+    if flavor == 'oracle':
+        truncated_item = pg_capital(truncated_item)
+        wrappers = ('', '')
+    else:
+        wrappers = table_wrappers.get(flavor, table_wrappers['default'])
+    return wrappers[0] + truncated_item + wrappers[1]
 
 
 def pg_capital(s: str) -> str:
     """
-    If string contains a capital letter, wrap it in double quotes
+    If string contains a capital letter, wrap it in double quotes.
     
     Parameters
     ----------
@@ -315,7 +402,7 @@ def pg_capital(s: str) -> str:
     needs_quotes = False
     for c in str(s):
         if ord(c) < ord('a') or ord(c) > ord('z'):
-            if not c.isdigit():
+            if not c.isdigit() and c != '_':
                 needs_quotes = True
                 break
     if needs_quotes:
@@ -327,7 +414,9 @@ def oracle_capital(s: str) -> str:
     """
     Capitalize the string of an item on an Oracle database.
     """
-    return s.upper()
+    return s
+    #  return s.upper()
+    #  return s.upper() if s[0].isalpha() else s
 
 
 def truncate_item_name(item: str, flavor: str) -> str:
@@ -485,4 +574,77 @@ def get_sqlalchemy_table(
             autoload_with = connector.engine
         )
     return tables[str(table)]
+
+
+def update_query(
+        target: str,
+        patch: str,
+        connector: meerschaum.connectors.sql.SQLConnector,
+        join_cols: List[str],
+        debug: bool = False,
+    ) -> str:
+    """
+    Build a `MERGE` or `UPDATE` query to apply a patch to target table.
+    """
+    base_query = update_queries.get(connector.flavor, update_queries['default'])
+    target_table = get_sqlalchemy_table(target, connector)
+    value_cols = []
+    for c in target_table.columns:
+        c_name, c_type = c.name, str(c.type)
+        if c_name in join_cols:
+            continue
+        if connector.flavor in DB_FLAVORS_CAST_DTYPES:
+            c_type = DB_FLAVORS_CAST_DTYPES[connector.flavor].get(c_type, c_type)
+        value_cols.append((c_name, c_type))
+
+    def sets_subquery(l_prefix: str, r_prefix: str):
+        return 'SET ' + ',\n'.join([
+            (
+                l_prefix + sql_item_name(c_name, connector.flavor)
+                + ' = ' + 'CAST(' + r_prefix
+                + sql_item_name(c_name, connector.flavor) + ' AS '
+                + c_type.replace('_', ' ')
+                + ')'
+            ) for c_name, c_type in value_cols
+        ])
+
+    def and_subquery(l_prefix: str, r_prefix: str):
+        return '\nAND\n'.join([
+            (
+                l_prefix + sql_item_name(c, connector.flavor)
+                + ' = '
+                + r_prefix + sql_item_name(c, connector.flavor)
+            ) for c in join_cols
+        ])
+    query = base_query.format(
+        sets_subquery_none = sets_subquery('', 'p.'),
+        sets_subquery_f = sets_subquery('f.', 'p.'),
+        and_subquery_f = and_subquery('p.', 'f.'),
+        and_subquery_t = and_subquery('p.', 't.'),
+        target_table_name = sql_item_name(target, connector.flavor),
+        patch_table_name = sql_item_name(patch, connector.flavor),
+    )
+    return query
+
+    
+def get_pd_type(db_type: str) -> str:
+    """
+    Parse a database type to a pandas data type.
+
+    Parameters
+    ----------
+    db_type: str
+        The database type, e.g. `DATETIME`, `BIGINT`, etc.
+
+    Returns
+    -------
+    The equivalent datatype for a pandas DataFrame.
+    """
+    pd_type = DB_TO_PD_DTYPES.get(db_type.upper(), None)
+    if pd_type is not None:
+        return pd_type
+    for db_t, pd_t in DB_TO_PD_DTYPES['substrings'].items():
+        if db_t in db_type.upper():
+            return pd_t
+    return DB_TO_PD_DTYPES['default']
 

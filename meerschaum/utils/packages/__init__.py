@@ -172,8 +172,7 @@ def manually_import_module(
             mod = None
         return mod
 
-    if venv is not None:
-        activate_venv(venv)
+    activate_venv(venv)
     mod = importlib.util.module_from_spec(spec)
     old_sys_mod = sys.modules.get(import_name, None)
     sys.modules[import_name] = mod
@@ -255,8 +254,6 @@ def determine_version(
     _version = None
     is_dir = path.stem == '__init__'
     module_parent_dir = path.parent.parent if is_dir else path.parent
-    #  print("MODULE PARENT DIR")
-    #  print(module_parent_dir)
 
     installed_dir_name = _import_to_install_name(import_name)
 
@@ -265,18 +262,15 @@ def determine_version(
     if search_for_metadata:
         for filename in os.listdir(module_parent_dir):
             path = module_parent_dir / filename
-            #  print(f"Examining {path = }")
             if (
                 not path.is_dir() or
                 not filename.lower().startswith(installed_dir_name.replace('-', '_')) or
                 not filename.endswith('.dist-info')
             ):
-                #  print(f"skipping {path}")
                 continue
             _v = filename.replace('.dist-info', '').split("-")[-1]
             _found_versions.append(_v)
 
-    #  print(f"FOUND VERSIONS: {_found_versions}")
     if len(_found_versions) == 1:
         return _found_versions[0]
 
@@ -545,8 +539,6 @@ def is_venv_active(
     A bool indicating whether the virtual environment `venv` is active.
 
     """
-    if venv is None:
-        return False
     if debug:
         from meerschaum.utils.debug import dprint
         dprint(f"Checking if virtual environment '{venv}' is active.", color=color)
@@ -604,8 +596,93 @@ def deactivate_venv(
 
 
 tried_virtualenv = False
+def init_venv(venv: str='mrsm', debug: bool=False) -> bool:
+    """
+    Initialize the virtual environment.
+
+    Parameters
+    ----------
+    venv: str:
+        The name of the virtual environment to create.
+
+    Returns
+    -------
+    A `bool` indicating success.
+    """
+    if venv_exists(venv, debug=debug):
+        return True
+    import sys, platform, os, pathlib
+    from meerschaum.config._paths import VIRTENV_RESOURCES_PATH
+    global tried_virtualenv
+    try:
+        import venv as _venv
+        virtualenv = None
+    except ImportError:
+        _venv = None
+        virtualenv = None
+
+    venv_path = VIRTENV_RESOURCES_PATH / venv
+    bin_path = pathlib.Path(
+        venv_path,
+        ('bin' if platform.system() != 'Windows' else "Scripts")
+    )
+    _venv_success = False
+    if _venv is not None:
+        import io
+        from contextlib import redirect_stdout
+        f = io.StringIO()
+        with redirect_stdout(f):
+            _venv_success = run_python_package(
+                'venv',
+                [str(venv_path)] + (
+                    ['--symlinks'] if platform.system() != 'Windows' else []
+                ),
+                venv=None, debug=debug
+            ) == 0
+        if not _venv_success:
+            print("Please install python3-venv! Falling back to virtualenv...")
+        if not venv_exists(venv, debug=debug):
+            _venv = None
+    if not _venv_success:
+        virtualenv = attempt_import(
+            'virtualenv', venv=None, lazy=False, install=(not tried_virtualenv), warn=False,
+            check_update=False, color=False, debug=debug,
+        )
+        if virtualenv is None:
+            print(
+                "Failed to import `venv` or `virtualenv`! "
+                + "Please install `virtualenv` via pip then restart Meerschaum."
+            )
+            #  sys.exit(1)
+            return False
+
+        tried_virtualenv = True
+        try:
+            python_folder = (
+                'python' + str(sys.version_info.major) + '.' + str(sys.version_info.minor)
+            )
+            dist_packages_path = (
+                VIRTENV_RESOURCES_PATH /
+                venv / 'local' / 'lib' / python_folder / 'dist-packages'
+            )
+            local_bin_path = VIRTENV_RESOURCES_PATH / venv / 'local' / 'bin'
+            bin_path = VIRTENV_RESOURCES_PATH / venv / 'bin'
+            vtp = venv_target_path(venv=venv, allow_nonexistent=True, debug=debug)
+            virtualenv.cli_run([str(venv_path)])
+            if dist_packages_path.exists():
+                import shutil
+                shutil.move(dist_packages_path, vtp)
+                shutil.move(local_bin_path, bin_path)
+
+        except Exception as e:
+            import traceback
+            traceback.print_exc()
+            return False
+    return True
+
+
 def activate_venv(
-        venv: str = 'mrsm',
+        venv: Optional[str] = 'mrsm',
         color : bool = True,
         debug: bool = False
     ) -> bool:
@@ -614,7 +691,7 @@ def activate_venv(
 
     Parameters
     ----------
-    venv: str, default 'mrsm'
+    venv: Optional[str], default 'mrsm'
         The virtual environment to activate.
 
     color: bool, default True
@@ -628,64 +705,20 @@ def activate_venv(
     A bool indicating whether the virtual environment was successfully activated.
 
     """
-    global tried_virtualenv
-    if venv in active_venvs or venv is None:
+    if venv in active_venvs:
         return True
-    if debug:
-        from meerschaum.utils.debug import dprint
     import sys, platform, os
     from meerschaum.config._paths import VIRTENV_RESOURCES_PATH
-    try:
-        import ensurepip
-        import venv as _venv
-        virtualenv = None
-    except ImportError:
-        _venv = None
-        virtualenv = None
-
-    if _venv is None:
-        virtualenv = attempt_import(
-            'virtualenv', venv=None, lazy=False, install=(not tried_virtualenv), warn=False,
-            check_update=False, color=False, debug=debug,
-        )
-        tried_virtualenv = True
-    if virtualenv is None and _venv is None:
-        print(
-            "Failed to import `venv` or `virtualenv`! "
-            + "Please install `virtualenv` via pip then restart Meerschaum."
-        )
-        sys.exit(1)
-    venv_path = VIRTENV_RESOURCES_PATH / venv
-    bin_path = pathlib.Path(
-        venv_path,
-        ('bin' if platform.system() != 'Windows' else "Scripts")
-    )
-    if not venv_path.exists() or not venv_exists(venv, debug=debug):
-        if _venv is not None:
-            _venv.create(
-                venv_path,
-                system_site_packages = False,
-                with_pip = True,
-                symlinks = (platform.system() != 'Windows'),
-            )
-        else:
-            try:
-                virtualenv.cli_run([str(venv_path), '--download', '--system-site-packages'])
-            except Exception as e:
-                import traceback
-                traceback.print_exc()
-
-    old_cwd = pathlib.Path(os.getcwd())
-    os.chdir(VIRTENV_RESOURCES_PATH)
+    if debug:
+        from meerschaum.utils.debug import dprint
+    #  old_cwd = pathlib.Path(os.getcwd())
+    #  os.chdir(VIRTENV_RESOURCES_PATH)
+    if venv is not None:
+        init_venv(venv=venv, debug=debug)
     with _locks['active_venvs']:
-        try:
-            if debug:
-                dprint(f"Activating virtual environment '{venv}'...", color=color)
-            active_venvs.add(venv)
-        except Exception:
-            pass
-        finally:
-            os.chdir(old_cwd)
+        if debug:
+            dprint(f"Activating virtual environment '{venv}'...", color=color)
+        active_venvs.add(venv)
 
     target = venv_target_path(venv, debug=debug)
     if str(target) not in sys.path:
@@ -693,6 +726,22 @@ def activate_venv(
     if debug:
         dprint(f'sys.path: {sys.path}', color=color)
     return True
+
+
+def venv_executable(venv: Optional[str]=None) -> str:
+    """
+    The Python interpreter executable for a given virtual environment.
+    """
+    from meerschaum.config._paths import VIRTENV_RESOURCES_PATH
+    import sys, platform, os
+    return (
+        sys.executable if venv is None
+        else os.path.join(
+            VIRTENV_RESOURCES_PATH, venv, (
+                'bin' if platform.system() != 'Windows' else 'Scripts'
+            ), 'python'
+        )
+    )
 
 
 def venv_exec(
@@ -732,18 +781,10 @@ def venv_exec(
     If `with_extras` is `True`, return a tuple of the exit code, stdout bytes, and stderr bytes.
 
     """
-    import subprocess, sys, platform, os
-    from meerschaum.config._paths import VIRTENV_RESOURCES_PATH
+    import subprocess
     from meerschaum.utils.process import run_process
     from meerschaum.utils.debug import dprint
-    executable = (
-        sys.executable if venv is None
-        else os.path.join(
-            VIRTENV_RESOURCES_PATH, venv, (
-                'bin' if platform.system() != 'Windows' else 'Scripts'
-            ), 'python'
-        )
-    )
+    executable = venv_executable(venv=venv)
     cmd_list = [executable, '-c', code]
     if debug:
         dprint(str(cmd_list))
@@ -758,7 +799,7 @@ def venv_exec(
     exit_code = process.returncode
     return exit_code, stdout, stderr
 
-def get_pip(debug: bool = False) -> bool:
+def get_pip(venv: Optional[str]=None, debug: bool=False) -> bool:
     """
     Download and run the get-pip.py script.
 
@@ -783,13 +824,13 @@ def get_pip(debug: bool = False) -> bool:
     except Exception as e:
         print(f"Failed to fetch pip from '{url}'. Please install pip and restart Meerschaum.") 
         sys.exit(1)
-    cmd_list = [sys.executable, str(dest)] 
+    cmd_list = [venv_executable(venv=venv), str(dest)] 
     return subprocess.call(cmd_list) == 0
 
 def pip_install(
         *packages: List[str],
         args: Optional[List[str]] = None,
-        venv: str = 'mrsm',
+        venv: Optional[str] = 'mrsm',
         deactivate: bool = True,
         split : bool = False,
         check_update: bool = True,
@@ -861,35 +902,20 @@ def pip_install(
         except ImportError as e:
             have_wheel = False
     _args = list(args)
-    try:
-        if venv is not None:
-            activate_venv(venv=venv, color=color, debug=debug)
-        import pip
-        have_pip = True
-        if venv is not None and deactivate:
-            deactivate_venv(venv=venv, debug=debug, color=color)
-    except ImportError:
-        have_pip = False
+    have_pip = venv_contains_package('pip', venv=venv, debug=debug)
+    import sys
     if not have_pip:
-        try:
-            import ensurepip
-        except ImportError:
-            ensurepip = None
-        if ensurepip is None:
-            if not get_pip(debug=debug):
-                import sys
-                print(
-                    "Failed to import pip and ensurepip. " +
-                    "Please install pip and restart Meerschaum.\n\n" +
-                    "You can find instructions on installing pip here: " +
-                    "https://pip.pypa.io/en/stable/installing/"
-                )
-                sys.exit(1)
-        else:
-            ensurepip.bootstrap(upgrade=True, )
-        import pip
+        if not get_pip(venv=venv, debug=debug):
+            import sys
+            print(
+                "Failed to import pip and ensurepip. " +
+                "Please install pip and restart Meerschaum.\n\n" +
+                "You can find instructions on installing pip here: " +
+                "https://pip.pypa.io/en/stable/installing/"
+            )
+            sys.exit(1)
+    activate_venv(venv=venv, debug=debug, color=color)
     if venv is not None:
-        activate_venv(venv=venv, debug=debug, color=color)
         if '--ignore-installed' not in args and '-I' not in _args and not _uninstall:
             _args += ['--ignore-installed']
         if '--cache-dir' not in args and not _uninstall:
@@ -897,8 +923,10 @@ def pip_install(
             _args += ['--cache-dir', str(cache_dir_path)]
 
     if 'pip' not in ' '.join(_args):
-        if check_update and need_update(pip, check_pypi=check_pypi, debug=debug) and not _uninstall:
-            _args.append(all_packages['pip'])
+        if check_update and not _uninstall:
+            pip = attempt_import('pip', venv=venv, install=False, debug=debug, lazy=False)
+            if need_update(pip, check_pypi=check_pypi, debug=debug):
+                _args.append(all_packages['pip'])
     _args = (['install'] if not _uninstall else ['uninstall']) + _args
 
     if check_wheel and not _uninstall:
@@ -921,7 +949,8 @@ def pip_install(
         _args.append('--disable-pip-version-check')
 
     if '--target' not in _args and '-t' not in _args and not _uninstall:
-        _args += ['--target', venv_target_path(venv, debug=debug)]
+        if venv is not None:
+            _args += ['--target', venv_target_path(venv, debug=debug)]
     elif (
         '--target' not in _args
             and '-t' not in _args
@@ -951,7 +980,7 @@ def pip_install(
     print(msg)
 
     success = run_python_package('pip', _args + _packages, venv=venv, debug=debug) == 0
-    if venv is not None and deactivate:
+    if deactivate:
         deactivate_venv(venv=venv, debug=debug, color=color)
     msg = (
         "Successfully " + ('un' if _uninstall else '') + "installed packages." if success 
@@ -961,6 +990,7 @@ def pip_install(
     if debug:
         print('pip ' + ('un' if _uninstall else '') + 'install returned:', success)
     return success
+
 
 def pip_uninstall(
         *args, **kw
@@ -1032,14 +1062,7 @@ def run_python_package(
     old_cwd = os.getcwd()
     if cwd is not None:
         os.chdir(cwd)
-    executable = (
-        sys.executable if venv is None
-        else os.path.join(
-            VIRTENV_RESOURCES_PATH, venv, (
-                'bin' if platform.system() != 'Windows' else 'Scripts'
-            ), ('python' + ('.exe' if platform.system() == 'Windows' else ''))
-        )
-    )
+    executable = venv_executable(venv=venv)
     command = [executable, '-m', str(package_name)] + [str(a) for a in args]
     import traceback
     if debug:
@@ -1068,7 +1091,7 @@ def attempt_import(
         lazy: bool = True,
         warn: bool = True,
         install: bool = True,
-        venv: str = 'mrsm',
+        venv: Optional[str] = 'mrsm',
         precheck: bool = True,
         split: bool = True,
         check_update: bool = False,
@@ -1098,7 +1121,7 @@ def attempt_import(
         If `True`, attempt to install a missing package into the designated virtual environment.
         If `check_update` is True, install updates if available.
 
-    venv: str, default 'mrsm'
+    venv: Optional[str], default 'mrsm'
         The virtual environment in which to search for packages and to install packages into.
 
     precheck: bool, default True
@@ -1139,15 +1162,13 @@ def attempt_import(
             print(f"Import hook for virtual environment '{_import_hook_venv}' is active.")
         venv = _import_hook_venv
 
-    if venv is not None:
-        _locks['sys.path'].acquire()
-        activate_venv(venv=venv, color=color, debug=debug)
+    _locks['sys.path'].acquire()
+    activate_venv(venv=venv, color=color, debug=debug)
     _warnings = _import_module('meerschaum.utils.warnings')
     warn_function = _warnings.warn
 
     def do_import(_name: str, **kw) -> Union['ModuleType', None]:
-        if venv is not None:
-            activate_venv(venv=venv, debug=debug)
+        activate_venv(venv=venv, debug=debug)
         ### determine the import method (lazy vs normal)
         from meerschaum.utils.misc import filter_keywords
         import_method = (
@@ -1167,15 +1188,13 @@ def attempt_import(
                     color = False,
                 )
             mod = None
-        if venv is not None:
-            deactivate_venv(venv=venv, color=color, debug=debug)
+        deactivate_venv(venv=venv, color=color, debug=debug)
         return mod
 
     modules = []
     for name in names:
         ### Enforce virtual environment (something is deactivating in the loop so check each pass).
-        if venv is not None:
-            activate_venv(debug=debug)
+        activate_venv(debug=debug)
         ### Check if package is a declared dependency.
         root_name = name.split('.')[0] if split else name
         install_name = all_packages.get(root_name, None)
@@ -1239,15 +1258,15 @@ def attempt_import(
         )
         modules.append(m)
 
-    if venv is not None:
-        _locks['sys.path'].release()
-        if deactivate:
-            deactivate_venv(venv=venv, debug=debug, color=color)
+    _locks['sys.path'].release()
+    if deactivate:
+        deactivate_venv(venv=venv, debug=debug, color=color)
 
     modules = tuple(modules)
     if len(modules) == 1:
         return modules[0]
     return modules
+
 
 def lazy_import(
         name: str,
@@ -1485,13 +1504,13 @@ def is_installed(
         name: str,
         venv: Optional[str] = None,
         deactivate: bool = True,
+        debug: bool = False,
     ) -> bool:
     """
     Check whether a package is installed.
     """
     import importlib.util
-    if venv is not None:
-        activate_venv(venv=venv)
+    activate_venv(venv=venv)
     try:
         found = importlib.util.find_spec(name) is not None
     except (ModuleNotFoundError, ValueError):
@@ -1503,6 +1522,7 @@ def is_installed(
     if deactivate:
         deactivate_venv(venv=venv)
     return found
+    #  return venv_contains_package(name, venv=venv, debug=debug)
 
 
 def venv_contains_package(
@@ -1512,12 +1532,7 @@ def venv_contains_package(
     Search the contents of a virtual environment for a package.
     """
     import os
-    if venv is None:
-        return is_installed(name, venv=venv)
-    try:
-        vtp = venv_target_path(venv, debug=debug)
-    except FileNotFoundError:
-        return False
+    vtp = venv_target_path(venv, debug=debug, allow_nonexistent=True)
     if not vtp.exists():
         return False
     return (name.split('.')[0] if split else name) in os.listdir(vtp)
@@ -1527,7 +1542,6 @@ def venv_exists(venv: Union[str, None], debug: bool = False) -> bool:
     """
     Determine whether a virtual environment has been created.
     """
-    import os, sys, platform, pathlib
     target_path = venv_target_path(venv, allow_nonexistent=True, debug=debug)
     return target_path.exists()
 
@@ -1557,34 +1571,46 @@ def venv_target_path(
 
     ### Check sys.path for a user-writable site-packages directory.
     if venv is None:
-        for path_str in sys.path:
-            if 'site-packages' not in path_str:
-                continue
-            path = pathlib.Path(path_str)
-            if os.access(path, os.W_OK):
-                return path
-        return None
+        proc = run_python_package(
+            'site', ['--user-site'],
+            as_proc=True, capture_output=True, debug=debug, universal_newlines=True,
+        )
+        outs, errs = proc.communicate()
+        lines = outs.split('\n')
+        path = pathlib.Path(lines[0])
+        return path
 
     from meerschaum.config._paths import VIRTENV_RESOURCES_PATH
 
-    venv_root_path = str(os.path.join(VIRTENV_RESOURCES_PATH, venv))
+    venv_root_path = VIRTENV_RESOURCES_PATH / venv
     target_path = venv_root_path
 
     ### Ensure 'lib' or 'Lib' exists.
     lib = 'lib' if platform.system() != 'Windows' else 'Lib'
-    if not allow_nonexistent and lib not in os.listdir(venv_root_path):
-        print(f"Failed to find lib directory for virtual environment '{venv}'.")
-        sys.exit(1)
-    target_path = os.path.join(target_path, lib)
+    if not allow_nonexistent:
+        if not venv_root_path.exists() or lib not in os.listdir(venv_root_path):
+            print(f"Failed to find lib directory for virtual environment '{venv}'.")
+            import traceback
+            traceback.print_stack()
+            sys.exit(1)
+    target_path = target_path / lib
 
     ### Check if a 'python3.x' folder exists.
     python_folder = 'python' + str(sys.version_info.major) + '.' + str(sys.version_info.minor)
-    if python_folder in os.listdir(target_path): ### Linux
-        target_path = os.path.join(target_path, python_folder)
+    if target_path.exists():
+        target_path = (
+            (target_path / python_folder) if python_folder in os.listdir(target_path)
+            else target_path
+        )
+    else:
+        target_path = (
+            (target_path / python_folder) if platform.system() != 'Windows'
+            else target_path
+        )
 
     ### Ensure 'site-packages' exists.
     if allow_nonexistent or 'site-packages' in os.listdir(target_path): ### Windows
-        target_path = os.path.join(target_path, 'site-packages')
+        target_path = target_path / 'site-packages'
     else:
         import traceback
         traceback.print_stack()
@@ -1594,7 +1620,7 @@ def venv_target_path(
         print(VIRTENV_RESOURCES_PATH)
         sys.exit(1)
 
-    return pathlib.Path(target_path)
+    return target_path
 
 
 def package_venv(package: 'ModuleType') -> Union[str, None]:
@@ -1630,7 +1656,6 @@ def ensure_readline() -> 'ModuleType':
 
     if readline is None:
         import platform
-        from meerschaum.utils.packages import attempt_import, pip_install
         rl_name = "gnureadline" if platform.system() != 'Windows' else "pyreadline3"
         try:
             rl = attempt_import(
@@ -1649,7 +1674,8 @@ def ensure_readline() -> 'ModuleType':
     return readline
 
 _pkg_resources_get_distribution = None
-def _monkey_patch_get_distribution(_dist: str = 'flask-compress', _version: str = '1.12') -> None:
+_custom_distributions = {}
+def _monkey_patch_get_distribution(_dist: str, _version: str) -> None:
     """
     Monkey patch `pkg_resources.get_distribution` to allow for importing `flask_compress`.
     """
@@ -1658,11 +1684,12 @@ def _monkey_patch_get_distribution(_dist: str = 'flask-compress', _version: str 
     global _pkg_resources_get_distribution
     with _locks['_pkg_resources_get_distribution']:
         _pkg_resources_get_distribution = pkg_resources.get_distribution
+    _custom_distributions[_dist] = _version
     _Dist = namedtuple('_Dist', ['version'])
     def _get_distribution(dist):
         """Hack for flask-compress."""
-        if dist == _dist:
-            return _Dist(_version)
+        if dist in _custom_distributions:
+            return _Dist(_custom_distributions[dist])
         return _pkg_resources_get_distribution(dist)
     pkg_resources.get_distribution = _get_distribution
 

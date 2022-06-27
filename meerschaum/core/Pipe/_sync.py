@@ -12,9 +12,17 @@ from meerschaum.utils.typing import (
     Union, Optional, Callable, Any, Tuple, SuccessTuple, Mapping, Dict, List
 )
 
+class InferFetch:
+    pass
+
 def sync(
         self,
-        df: Optional[Union[pandas.DataFrame, Dict[str, List[Any]]]] = None,
+        df: Union[
+            pd.DataFrame,
+            Dict[str, List[Any]],
+            List[Dict[str, Any]],
+            InferFetch
+        ] = InferFetch,
         begin: Optional[datetime.datetime] = None,
         end: Optional[datetime.datetime] = None,
         force: bool = False,
@@ -134,8 +142,14 @@ def sync(
 
     def _sync(
         p: 'meerschaum.Pipe',
-        df: Optional['pandas.DataFrame'] = None
+        df: Union['pd.DataFrame', Dict[str, List[Any]], InferFetch] = InferFetch,
     ) -> SuccessTuple:
+        if df is None:
+            return (
+                False,
+                f"You passed `None` instead of data into `sync()` for {p}.\n"
+                + "Omit the DataFrame to infer fetching.",
+            )
         ### Ensure that Pipe is registered.
         if p.get_id(debug=debug) is None:
             ### NOTE: This may trigger an interactive session for plugins!
@@ -146,14 +160,23 @@ def sync(
         ### If connector is a plugin with a `sync()` method, return that instead.
         ### If the plugin does not have a `sync()` method but does have a `fetch()` method,
         ### use that instead.
-        ### NOTE: The DataFrame must be None for the plugin sync method to apply.
+        ### NOTE: The DataFrame must be omitted for the plugin sync method to apply.
         ### If a DataFrame is provided, continue as expected.
-        if df is None:
+        if df is InferFetch:
+            try:
+                if p.connector is None:
+                    msg = f"{p} does not have a valid connector."
+                    if p.connector_keys.startswith('plugin:'):
+                        msg += f"\n    Perhaps {p.connector_keys} has a syntax error?"
+                    return False, msg
+            except Exception as e:
+                return False, f"Unable to create the connector for {p}."
+
             try:
                 if p.connector.type == 'plugin' and p.connector.sync is not None:
                     from meerschaum.plugins import Plugin
                     connector_plugin = Plugin(p.connector.label)
-                    connector_plugin.deactivate_venv(debug=debug)
+                    connector_plugin.activate_venv(debug=debug)
                     return_tuple = p.connector.sync(p, debug=debug, **kw)
                     if deactivate_plugin_venv:
                         connector_plugin.deactivate_venv(debug=debug)
@@ -172,18 +195,19 @@ def sync(
 
         ### default: fetch new data via the connector.
         ### If new data is provided, skip fetching.
-        if df is None:
+        #  if df is None:
             if p.connector is None:
                 return False, f"Cannot fetch data for {p} without a connector."
             df = p.fetch(debug=debug, **kw)
             if df is None:
                 return False, f"Unable to fetch data for {p}."
             if df is True:
-                return True, f"{p} was synced in parallel."
+                return True, f"{p} is being synced in parallel."
 
         ### CHECKPOINT: Retrieved the DataFrame.
         _checkpoint(**kw)
         if debug:
+            df = self.enforce_dtypes(df, debug=debug)
             dprint(
                 "DataFrame to sync:\n"
                 + (str(df)[:255] + '...' if len(str(df)) >= 256 else str(df)),
@@ -266,6 +290,7 @@ def _determine_begin(
 
     return pipe.get_sync_time(debug=debug)
 
+
 def get_sync_time(
         self,
         params : Optional[Dict[str, Any]] = None,
@@ -341,7 +366,6 @@ def exists(
     A `bool` corresponding to whether a pipe's underlying table exists.
 
     """
-    ### TODO test against views
     return self.instance_connector.pipe_exists(pipe=self, debug=debug)
 
 
@@ -354,7 +378,7 @@ def filter_existing(
         params: Optional[Dict[str, Any]] = None,
         debug: bool = False,
         **kw
-    ) -> 'pd.DataFrame':
+    ) -> Tuple['pd.DataFrame', Union['pd.DataFrame', None]]:
     """
     Inspect a dataframe and filter out rows which already exist in the pipe.
 
@@ -389,6 +413,8 @@ def filter_existing(
     from meerschaum.utils.packages import attempt_import, import_pandas
     import datetime
     pd = import_pandas()
+    if not isinstance(df, pd.DataFrame):
+        df = self.enforce_dtypes(df, debug=debug)
     ### begin is the oldest data in the new dataframe
     try:
         min_dt = pd.to_datetime(df[self.get_columns('datetime')].min(skipna=True)).to_pydatetime()
@@ -445,6 +471,41 @@ def filter_existing(
     if debug:
         dprint("Existing data:\n" + str(backtrack_df), **kw)
 
-    ### remove data we've already seen before
+    ### Detect changes between the old target and new source dataframes.
     from meerschaum.utils.misc import filter_unseen_df
-    return filter_unseen_df(backtrack_df, df, debug=debug)
+    delta_df = filter_unseen_df(backtrack_df, df, dtypes=self.dtypes, debug=debug)
+
+    ### Separate new rows from changed ones.
+    dt_col = self.columns['datetime']
+    id_col = self.columns.get('id', None)
+    on_cols = [dt_col] + ([id_col] if id_col is not None else [])
+
+    joined_df = pd.merge(
+        delta_df,
+        backtrack_df,
+        how='left',
+        on=on_cols,
+        indicator=True,
+        suffixes=('', '_old'),
+    )
+
+    ### Determine which rows are completely new.
+    new_rows_mask = (joined_df['_merge'] == 'left_only')
+    cols = list(backtrack_df.columns)
+
+    unseen_df = (
+        joined_df
+        .where(new_rows_mask)
+        .dropna(how='all')[cols]
+        .reset_index(drop=True)
+    )
+
+    ### Rows that have already been inserted but values have changed.
+    update_df = (
+        joined_df
+        .where(~new_rows_mask)
+        .dropna(how='all')[cols]
+        .reset_index(drop=True)
+    )
+
+    return unseen_df, update_df, delta_df

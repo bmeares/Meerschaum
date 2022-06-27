@@ -89,65 +89,37 @@ def api(
 
 def _api_start(
         action: Optional[List[str]] = None,
-        host: Optionsl[str] = None,
+        host: Optional[str] = None,
         port: Optional[int] = None,
         workers: Optional[int] = None,
         mrsm_instance: Optional[str] = None,
         no_dash: bool = False,
         no_auth: bool = False,
+        private: bool = False,
         debug: bool = False,
         nopretty: bool = False,
         production: bool = False,
         **kw: Any
     ) -> SuccessTuple:
     """Start the API server.
-    
-    Usage:
-        `api start {options}`
-    
-    Options:
-        - `-p, --port {number}`
-            Port to bind the API server to.
-    
-        - `--host {address}`
-            The address to bind to.
-            Defaults to '0.0.0.0'.
-    
-        - `-w, --workers {number}`
-            How many worker threads to run.
-            Defaults to the number of CPU cores or 1 on Android.
-    
-        - `--production, --gunicorn`
-            Start the API server with Gunicorn instead of Uvicorn.
-            Useful for production deployments.
-
+   
     Parameters
     ----------
-    action: Optional[List[str]] :
-         (Default value = None)
-    host: Optionsl[str] :
-         (Default value = None)
-    port: Optional[int] :
-         (Default value = None)
-    workers: Optional[int] :
-         (Default value = None)
-    mrsm_instance: Optional[str] :
-         (Default value = None)
-    no_dash: bool :
-         (Default value = False)
-    no_auth: bool :
-         (Default value = False)
-    debug: bool :
-         (Default value = False)
-    nopretty: bool :
-         (Default value = False)
-    production: bool :
-         (Default value = False)
-    **kw: Any :
-        
+    port: Optional[int], default None
+        Port to bind the API server to.
+        If `None`, use 8000.
 
-    Returns
-    -------
+    host: Optional[str], defailt None
+        The address to bind to.
+        If `None, use '0.0.0.0'.
+
+    workers: Optional[int], default None
+        How many worker threads to run.
+        If `None`, defaults to the number of CPU cores or 1 on Android.
+
+    production: bool, default False
+        Start the API server with Gunicorn instead of Uvicorn.
+        Useful for production deployments.
 
     """
     from meerschaum.utils.packages import (
@@ -234,6 +206,7 @@ def _api_start(
         'mrsm_instance': mrsm_instance,
         'no_dash': no_dash,
         'no_auth': no_auth,
+        'private': private,
     })
     if debug:
         uvicorn_config['reload_dirs'] = [str(PACKAGE_ROOT_PATH)]
@@ -242,7 +215,7 @@ def _api_start(
     api_config['uvicorn'] = uvicorn_config
     cf['system']['api']['uvicorn'] = uvicorn_config
 
-    custom_keys = ['mrsm_instance', 'no_dash', 'no_auth']
+    custom_keys = ['mrsm_instance', 'no_dash', 'no_auth', 'private']
 
     ### write config to a temporary file to communicate with uvicorn threads
     import json, sys

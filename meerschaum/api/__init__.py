@@ -64,6 +64,7 @@ def get_uvicorn_config() -> Dict[str, Any]:
 debug = get_uvicorn_config().get('debug', False)
 no_dash = get_uvicorn_config().get('no_dash', False)
 no_auth = get_uvicorn_config().get('no_auth', False)
+private = get_uvicorn_config().get('private', False)
 _include_dash = (not no_dash)
 
 connector = None

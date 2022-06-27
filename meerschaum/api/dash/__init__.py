@@ -24,7 +24,7 @@ from meerschaum.utils.packages import (
 )
 from meerschaum.connectors.parse import parse_instance_keys
 flask_compress = attempt_import('flask_compress', lazy=False)
-_monkey_patch_get_distribution('flask_compress', flask_compress.__version__)
+_monkey_patch_get_distribution('flask-compress', flask_compress.__version__)
 dash = attempt_import('dash', lazy=False)
 import warnings
 ### Suppress the depreciation warnings from importing enrich.

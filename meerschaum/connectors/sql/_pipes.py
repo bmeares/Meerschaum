@@ -169,6 +169,7 @@ def fetch_pipes_keys(
     from meerschaum.utils.debug import dprint
     from meerschaum.utils.packages import attempt_import
     from meerschaum.utils.misc import separate_negation_values
+    from meerschaum.utils.sql import OMIT_NULLSFIRST_FLAVORS
     from meerschaum.config.static import _static_config
     sqlalchemy = attempt_import('sqlalchemy')
     import json
@@ -199,8 +200,7 @@ def fetch_pipes_keys(
     }
 
     ### Make deep copy so we don't mutate this somewhere else.
-    from copy import deepcopy
-    parameters = deepcopy(params)
+    parameters = params.copy()
     for col, vals in cols.items():
         ### Allow for IS NULL to be declared as a single-item list ([None]).
         if vals == [None]:
@@ -265,6 +265,14 @@ def fetch_pipes_keys(
             ).not_like(f'%"tags":%"{xt}"%')
         )
     q = q.where(sqlalchemy.and_(sqlalchemy.or_(*ors).self_group())) if ors else q
+    loc_asc = sqlalchemy.asc(pipes.c['location_key'])
+    if self.flavor not in OMIT_NULLSFIRST_FLAVORS:
+        loc_asc = sqlalchemy.nullsfirst(loc_asc)
+    q = q.order_by(
+        sqlalchemy.asc(pipes.c['connector_keys']),
+        sqlalchemy.asc(pipes.c['metric_key']),
+        loc_asc,
+    )
 
     ### execute the query and return a list of tuples
     if debug:
@@ -572,7 +580,15 @@ def get_pipe_data(
 
     if debug:
         dprint(f"Getting pipe data with begin = '{begin}' and end = '{end}'")
-    df = self.read(query, debug=debug, **kw)
+    kw['dtype'] = pipe.dtypes
+    if self.flavor == 'sqlite':
+        if 'datetime' not in kw['dtype'].get(pipe.get_columns('datetime'), 'object'):
+            kw['dtype'][pipe.get_columns('datetime')] = 'datetime64[ns]'
+    df = self.read(
+        query,
+        debug = debug,
+        **kw
+    )
     if self.flavor == 'sqlite':
         from meerschaum.utils.misc import parse_df_datetimes
         ### NOTE: We have to consume the iterator here to ensure that datatimes are parsed correctly
@@ -608,6 +624,7 @@ def get_pipe_id(
         _id = int(_id)
     return _id
 
+
 def get_pipe_attributes(
         self,
         pipe: meerschaum.Pipe,
@@ -617,6 +634,7 @@ def get_pipe_attributes(
     Get a Pipe's attributes dictionary.
     """
     from meerschaum.utils.warnings import warn
+    from meerschaum.utils.debug import dprint
     from meerschaum.connectors.sql.tables import get_tables
     from meerschaum.utils.packages import attempt_import
     sqlalchemy = attempt_import('sqlalchemy')
@@ -627,11 +645,18 @@ def get_pipe_attributes(
 
     try:
         q = sqlalchemy.select([pipes]).where(pipes.c.pipe_id == pipe.id)
-        attributes = dict(self.exec(q, silent=True, debug=debug).first())
+        if debug:
+            dprint(q)
+        attributes = (
+            dict(self.exec(q, silent=True, debug=debug).first())
+            if self.flavor != 'duckdb'
+            else self.read(q, debug=debug).to_dict(orient='records')[0]
+        )
     except Exception as e:
         import traceback
         traceback.print_exc()
         warn(e)
+        print(pipe)
         return None
 
     ### handle non-PostgreSQL databases (text vs JSON)
@@ -706,10 +731,15 @@ def sync_pipe(
     from meerschaum.utils.debug import dprint
     from meerschaum.utils.packages import import_pandas
     from meerschaum.utils.misc import parse_df_datetimes
+    from meerschaum.utils.sql import update_query
+    from meerschaum import Pipe
+    import time
     if df is None:
         msg = f"DataFrame is None. Cannot sync {pipe}."
         warn(msg)
         return False, msg
+
+    start = time.perf_counter()
 
     ## allow syncing for JSON or dict as well as DataFrame
     pd = import_pandas()
@@ -740,13 +770,49 @@ def sync_pipe(
         check_existing = False
         is_new = True
 
-    new_data_df = (
+    if not isinstance(df, pd.DataFrame):
+        df = pipe.enforce_dtypes(df, debug=debug)
+    unseen_df, update_df, delta_df = (
         pipe.filter_existing(
             df, chunksize=chunksize, begin=begin, end=end, debug=debug, **kw
-        ) if check_existing else df
+        ) if check_existing else (df, None, df)
     )
     if debug:
-        dprint("New unseen data:\n" + str(new_data_df))
+        dprint("Delta data :\n" + str(delta_df))
+        dprint("Unseen data:\n" + str(unseen_df))
+        dprint("Update data:\n" + str(update_df)) if update_df is not None else None
+
+    if update_df is not None and not update_df.empty:
+        temp_target = '_' + pipe.target
+        self.to_sql(
+            update_df,
+            name = temp_target,
+            if_exists = 'append',
+            chunksize = chunksize,
+            debug = debug,
+            **kw
+        )
+        temp_pipe = Pipe(
+            pipe.connector_keys + '_', pipe.metric_key, pipe.location_key,
+            instance = pipe.instance_keys,
+            columns = pipe.columns,
+            target = temp_target,
+        )
+
+        success = (
+            self.exec(
+                update_query(
+                    pipe.target,
+                    temp_target,
+                    self,
+                    pipe.get_columns('id', 'datetime'),
+                    debug = debug
+                ), debug=debug) is not None
+        )
+        if success:
+            temp_pipe.drop(debug=debug)
+        else:
+            warn(f"Failed to apply changes to {pipe}.", stack=False)
 
     if_exists = kw.get('if_exists', 'append')
     if 'if_exists' in kw:
@@ -754,13 +820,13 @@ def sync_pipe(
     if 'name' in kw:
         kw.pop('name')
 
-    ### append new data to Pipe's table
-    result = self.to_sql(
-        new_data_df,
+    ### Insert new data into Pipe's table.
+    stats = self.to_sql(
+        unseen_df,
         name = pipe.target,
         if_exists = if_exists,
         debug = debug,
-        as_tuple = True,
+        as_dict = True,
         chunksize = chunksize,
         **kw
     )
@@ -768,7 +834,18 @@ def sync_pipe(
         if not self.create_indices(pipe, debug=debug):
             if debug:
                 dprint(f"Failed to create indices for {pipe}. Continuing...")
-    return result
+
+    end = time.perf_counter()
+    success = stats['success']
+    if not success:
+        return success, stats['msg']
+    msg = (
+        f"It took {round(end-start, 2)} seconds to update {pipe} using method {stats['method']} "
+        + f"and chunksize {stats['chunksize']}.\n"
+        + f"Inserted {len(unseen_df)} rows, "
+        + f"updated {len(update_df) if update_df is not None else 0} rows."
+    )
+    return success, msg
 
 
 def get_sync_time(
@@ -812,6 +889,13 @@ def get_sync_time(
     q = f"SELECT {dt}\nFROM {table}{where}\nORDER BY {dt} {ASC_or_DESC}\nLIMIT 1"
     if self.flavor == 'mssql':
         q = f"SELECT TOP 1 {dt}\nFROM {table}{where}\nORDER BY {dt} {ASC_or_DESC}"
+    elif self.flavor == 'oracle':
+        q = (
+            "SELECT * FROM (\n"
+            + f"    SELECT {dt}\nFROM {table}{where}\n    ORDER BY {dt} {ASC_or_DESC}\n"
+            + ") WHERE ROWNUM = 1"
+        )
+
     try:
         from meerschaum.utils.misc import round_time
         import datetime
@@ -987,15 +1071,21 @@ def drop_pipe(
         The pipe to drop.
         
     """
-    if not pipe.exists(debug=debug):
-        return True, f"{pipe} does not exist, so nothing was dropped."
+    from meerschaum.utils.sql import table_exists, sql_item_name
+    success = True
+    target, temp_target = pipe.target, '_' + pipe.target
+    target_name, temp_name = (
+        sql_item_name(target, self.flavor),
+        sql_item_name(temp_target, self.flavor),
+    )
+    if table_exists(target, self, debug=debug):
+        success = self.exec(f"DROP TABLE {target_name}", silent=True, debug=debug) is not None
+    if table_exists(temp_target, self, debug=debug):
+        success = (
+            success
+            and self.exec(f"DROP TABLE {temp_name}", silent=True, debug=debug) is not None
+        )
 
-    from meerschaum.utils.sql import sql_item_name
-    pipe_name = sql_item_name(pipe.target, self.flavor)
-    success = self.exec(f"DROP TABLE {pipe_name}", silent=True, debug=debug) is not None
-    if not success:
-        success = self.exec(f"DROP VIEW {pipe_name}", silent=True, debug=debug) is not None
-    
     msg = "Success" if success else f"Failed to drop {pipe}."
     return success, msg
 

@@ -7,7 +7,7 @@ This module contains SQLConnector functions for executing SQL queries.
 
 from __future__ import annotations
 from meerschaum.utils.typing import (
-    Union, Mapping, List, Dict, SuccessTuple, Optional, Any, Sequence, Iterable, Callable,
+    Union, Mapping, List, Dict, SuccessTuple, Optional, Any, Iterable, Callable,
     Tuple
 )
 
@@ -18,11 +18,13 @@ from meerschaum.utils.warnings import warn
 _bulk_flavors = {'postgresql', 'timescaledb'}
 ### flavors that do not support chunks
 _disallow_chunks_flavors = {'duckdb'}
+_max_chunks_flavors = {'sqlite': 1000,}
 
 def read(
         self,
         query_or_table: Union[str, sqlalchemy.Query],
         params: Optional[Dict[str, Any], List[str]] = None,
+        dtype: Optional[Dict[str, Any]] = None,
         chunksize: Optional[int] = -1,
         chunk_hook: Optional[Callable[[pandas.DataFrame], Any]] = None,
         as_hook_results: bool = False,
@@ -48,8 +50,13 @@ def read(
 
     params: Optional[Dict[str, Any]], default None
         `List` or `Dict` of parameters to pass to `pandas.read_sql()`.
-        See the pandas documentaion for more information:
+        See the pandas documentation for more information:
         https://pandas.pydata.org/pandas-docs/stable/reference/api/pandas.read_sql.html
+
+    dtype: Optional[Dict[str, Any]], default None
+        A dictionary of data types to pass to `pandas.read_sql()`.
+        See the pandas documentation for more information:
+        https://pandas.pydata.org/pandas-docs/stable/reference/api/pandas.read_sql_query.html
 
     chunksize: Optional[int], default -1
         How many chunks to read at a time. `None` will read everything in one large chunk.
@@ -98,13 +105,25 @@ def read(
         return []
     from meerschaum.utils.sql import sql_item_name
     from meerschaum.utils.packages import attempt_import, import_pandas
+    import warnings
     pd = import_pandas()
     sqlalchemy = attempt_import("sqlalchemy")
     chunksize = chunksize if chunksize != -1 else self.sys_config.get('chunksize', None)
     if chunksize is None and as_iterator:
         if not silent and self.flavor not in _disallow_chunks_flavors:
-            warn(f"An iterator may only be generated if chunksize is not None. Falling back to a chunksize of 1000.", stacklevel=3)
+            warn(
+                f"An iterator may only be generated if chunksize is not None.\n"
+                + "Falling back to a chunksize of 1000.", stacklevel=3,
+            )
         chunksize = 1000
+    if chunksize is not None and self.flavor in _max_chunks_flavors:
+        if chunksize > _max_chunks_flavors[self.flavor]:
+            warn(
+                f"The specified chunksize of {chunksize} exceeds the maximum of "
+                + f" {_max_chunks_flavors[self.flavor]} for flavor '{self.flavor}'.\n"
+                + f"    Falling back to a chunksize of {_max_chunks_flavors[self.flavor]}.",
+                stacklevel = 3,
+            )
 
     ### NOTE: A bug in duckdb_engine does not allow for chunks.
     if chunksize is not None and self.flavor in _disallow_chunks_flavors:
@@ -133,16 +152,19 @@ def read(
     else:
         try:
             formatted_query = str(sqlalchemy.text(query_or_table))
-        except:
+        except Exception as e:
             formatted_query = query_or_table
 
     try:
-        chunk_generator = pd.read_sql(
-            formatted_query,
-            self.engine,
-            params = params,
-            chunksize = chunksize
-        )
+        with warnings.catch_warnings():
+            warnings.filterwarnings('ignore', 'case sensitivity issues')
+            chunk_generator = pd.read_sql_query(
+                formatted_query,
+                self.engine,
+                params = params,
+                chunksize = chunksize,
+                dtype = dtype,
+            )
     except Exception as e:
         import inspect
         if debug:
@@ -173,13 +195,16 @@ def read(
     ### If no chunks returned, read without chunks
     ### to get columns
     if len(chunk_list) == 0:
-        chunk_list.append(
-            pd.read_sql(
-                formatted_query,
-                self.engine,
-                params = params, 
+        with warnings.catch_warnings():
+            warnings.filterwarnings('ignore', 'case sensitivity issues')
+            chunk_list.append(
+                pd.read_sql_query(
+                    formatted_query,
+                    self.engine,
+                    params = params, 
+                    dtype = dtype,
+                )
             )
-        )
 
     ### call the hook on any missed chunks.
     if chunk_hook is not None and len(chunk_list) > len(chunk_hook_results):
@@ -204,11 +229,13 @@ def read(
 
     return pd.concat(chunk_list).reset_index(drop=True)
 
+
 def _read_duckdb(query: str, engine: sqlalchemy.Engine, ):
     """
     Implement the `pandas.read_sql()` method for duckdb.
     """
     raise NotImplementedError
+
 
 def value(
         self,
@@ -242,7 +269,6 @@ def value(
     Any value returned from the query.
 
     """
-    from meerschaum.utils.warnings import warn
     if self.flavor == 'duckdb':
         use_pandas = True
     if use_pandas:
@@ -266,7 +292,7 @@ def value(
         first = result.first() if result is not None else None
         _val = first[0] if first is not None else None
     except Exception as e:
-        warn(e)
+        warn(e, stacklevel=3)
         return None
     if _close:
         try:
@@ -344,12 +370,9 @@ def exec(
     if debug:
         dprint("Executing query:\n" + f"{query}")
 
-    _close = close if close is not None else (
-        True if self.flavor != 'mssql' else False
-    )
+    _close = close if close is not None else (self.flavor != 'mssql')
     _commit = commit if commit is not None else (
-        True if (self.flavor != 'mssql' or 'select' not in str(query).lower())
-        else False
+        (self.flavor != 'mssql' or 'select' not in str(query).lower())
     )
 
     connection = self.engine.connect()
@@ -387,6 +410,7 @@ def to_sql(
         silent: bool = False,
         debug: bool = False,
         as_tuple: bool = False,
+        as_dict: bool = False,
         **kw
     ) -> Union[bool, SuccessTuple]:
     """
@@ -414,6 +438,11 @@ def to_sql(
     as_tuple: bool, default False
         If `True`, return a (success_bool, message) tuple instead of a `bool`.
         Defaults to `False`.
+
+    as_dict: bool, default False
+        If `True`, return a dictionary of transaction information.
+        The keys are `success`, `msg`, `start`, `end`, `duration`, `num_rows`, `chunksize`,
+        `method`, and `target`.
         
     kw: Any
         Additional arguments will be passed to the DataFrame's `to_sql` function
@@ -424,12 +453,14 @@ def to_sql(
     """
     import time
     from meerschaum.utils.warnings import error
+    import warnings
     if name is None:
         error("Name must not be None to submit to the SQL server")
 
-    from meerschaum.utils.sql import sql_item_name
+    from meerschaum.utils.sql import sql_item_name, table_exists
     from meerschaum.connectors.sql._create_engine import flavor_configs
 
+    stats = {'target': name, }
     ### resort to defaults if None
     if method == "":
         if self.flavor in _bulk_flavors:
@@ -437,32 +468,45 @@ def to_sql(
         else:
             ### Should resolve to 'multi' or `None`.
             method = flavor_configs.get(self.flavor, {}).get('to_sql', {}).get('method', 'multi')
+    stats['method'] = method.__name__ if hasattr(method, '__name__') else str(method)
     chunksize = chunksize if chunksize != -1 else self.sys_config.get('chunksize', None)
+    stats['chunksize'] = chunksize
 
     success, msg = False, "Default to_sql message"
     start = time.perf_counter()
     if debug:
         msg = f"Inserting {len(df)} rows with chunksize: {chunksize}..."
         print(msg, end="", flush=True)
+    stats['num_rows'] = len(df)
 
     ### filter out non-pandas args
     import inspect
     to_sql_params = inspect.signature(df.to_sql).parameters
-    to_sql_kw = dict()
+    to_sql_kw = {}
     for k, v in kw.items():
         if k in to_sql_params:
             to_sql_kw[k] = v
 
+    if self.flavor == 'oracle':
+        ### For some reason 'replace' doesn't work properly in pandas,
+        ### so try dropping first.
+        if if_exists == 'replace' and table_exists(name, self, debug=debug):
+            success = self.exec("DROP TABLE " + sql_item_name(name, 'oracle')) is not None
+            if not success:
+                warn(f"Unable to drop {name}")
+
     try:
-        df.to_sql(
-            name = name,
-            con = self.engine,
-            index = index,
-            if_exists = if_exists,
-            method = method,
-            chunksize = chunksize,
-            **to_sql_kw
-        )
+        with warnings.catch_warnings():
+            warnings.filterwarnings('ignore', 'case sensitivity issues')
+            df.to_sql(
+                name = name,
+                con = self.engine,
+                index = index,
+                if_exists = if_exists,
+                method = method,
+                chunksize = chunksize,
+                **to_sql_kw
+            )
         success = True
     except Exception as e:
         if not silent:
@@ -472,19 +516,26 @@ def to_sql(
     end = time.perf_counter()
     if success:
         msg = f"It took {round(end - start, 2)} seconds to sync {len(df)} rows to {name}."
+    stats['start'] = start
+    stats['end'] = end
+    stats['duration'] = end - start
 
     if debug:
         print(f" done.", flush=True)
         dprint(msg)
 
+    stats['success'] = success
+    stats['msg'] = msg
     if as_tuple:
         return success, msg
+    if as_dict:
+        return stats
     return success
 
 def psql_insert_copy(
         table: pandas.io.sql.SQLTable,
         conn: Union[sqlalchemy.engine.Engine, sqlalchemy.engine.Connection],
-        keys: Sequence[str],
+        keys: List[str],
         data_iter: Iterable[Any]
     ) -> None:
     """
@@ -492,22 +543,15 @@ def psql_insert_copy(
 
     Parameters
     ----------
-    table :
-        pandas.io.sql.SQLTable
-        conn : sqlalchemy.engine.Engine or sqlalchemy.engine.Connection
-        keys : list of str
+    table: pandas.io.sql.SQLTable
+    
+    conn: Union[sqlalchemy.engine.Engine, sqlalchemy.engine.Connection]
+    
+    keys: List[str]
         Column names
-        data_iter : Iterable that iterates the values to be inserted
-    table : pandas.io.sql.SQLTable :
-        
-    conn : Union[sqlalchemy.engine.Engine :
-        
-    sqlalchemy.engine.Connection] :
-        
-    keys : Sequence[str] :
-        
-    data_iter : Iterable[Any] :
-        
+    
+    data_iter: Iterable[Any]
+        Iterable that iterates the values to be inserted
 
     Returns
     -------
@@ -518,7 +562,10 @@ def psql_insert_copy(
 
     from meerschaum.utils.sql import sql_item_name
 
-    # gets a DBAPI connection that can provide a cursor
+    data_iter = (
+        (item if item is not None else r'\N' for item in row) for row in data_iter
+    )
+
     dbapi_conn = conn.connection
     with dbapi_conn.cursor() as cur:
         s_buf = StringIO()
@@ -526,16 +573,15 @@ def psql_insert_copy(
         writer.writerows(data_iter)
         s_buf.seek(0)
 
-        columns = ', '.join('"{}"'.format(k) for k in keys)
-        if table.schema:
-            table_name = '{}.{}'.format(
-                sql_item_name(table.schema, 'postgresql'),
-                sql_item_name(table.name, 'postgresql')
+        columns = ', '.join(f'"{k}"' for k in keys)
+        table_name = (
+            sql_item_name(table.name, 'postgresql')
+            if not table.schema else (
+                sql_item_name(table.schema, 'postgresql')
+                + '.'
+                + sql_item_name(table.name, 'postgresql')
             )
-        else:
-            table_name = sql_item_name(table.name, 'postgresql')
-
-        sql = 'COPY {} ({}) FROM STDIN WITH CSV'.format(
-            table_name, columns
         )
+
+        sql = f"COPY {table_name} ({columns}) FROM STDIN WITH CSV NULL '\\N'"
         cur.copy_expert(sql=sql, file=s_buf)

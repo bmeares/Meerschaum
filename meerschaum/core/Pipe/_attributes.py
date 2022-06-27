@@ -10,10 +10,13 @@ from __future__ import annotations
 from meerschaum.utils.typing import Tuple, Dict, SuccessTuple, Any, Union, Optional, List
 
 @property
-def attributes(self) -> Optional[Dict[str, Any]]:
+def attributes(self) -> Union[Dict[str, Any], None]:
     """
     Return a dictionary of a pipe's keys and parameters.
-    Is a superset of `meerschaum.Pipe.parameters`.
+    Is a superset of `meerschaum.Pipe.parameters` and
+    **ONLY** returns a dictionary if the pipe is registered.
+    An unregistered pipe may still set its parameters.
+    Use `meerschaum.Pipe.meta` to retrieve keys from unregistered pipes.
     """
     from meerschaum.utils.debug import dprint
     from meerschaum.utils.warnings import warn
@@ -100,6 +103,31 @@ def tags(self, _tags: List[str, str]) -> None:
         self._tags = _tags
     else:
         self._parameters['tags'] = _tags
+
+@property
+def dtypes(self) -> Union[Dict[str, Any], None]:
+    """
+    If defined, return the `dtypes` dictionary defined in `meerschaum.Pipe.parameters`.
+    """
+    if self.parameters is None or self.parameters.get('dtypes', None) is None:
+        if '_dtypes' in self.__dict__:
+            return self._dtypes
+        self._dtypes = self.infer_dtypes(persist=False)
+        return self._dtypes
+
+    return self.parameters['dtypes']
+
+
+@dtypes.setter
+def dtypes(self, _dtypes: Dict[str, Any]) -> None:
+    """
+    Override the columns dictionary of the in-memory pipe.
+    Call `meerschaum.Pipe.edit` to persist changes.
+    """
+    if not self.parameters:
+        self._dtypes = _dtypes
+    else:
+        self._parameters['dtypes'] = _dtypes
 
 
 def get_columns(self, *args: str, error : bool = True) -> Tuple[str]:
