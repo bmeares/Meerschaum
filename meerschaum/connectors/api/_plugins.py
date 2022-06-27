@@ -109,7 +109,7 @@ def get_plugins(
     response = self.get(
         _static_config()['api']['endpoints']['plugins'],
         params = {'user_id' : user_id, 'search_term' : search_term},
-        use_token = False,
+        use_token = True,
         debug = debug
     )
     if not response:
@@ -131,7 +131,7 @@ def get_plugin_attributes(
     from meerschaum.utils.warnings import warn, error
     from meerschaum.config.static import _static_config
     r_url = plugin_r_url(plugin) + '/attributes'
-    response = self.get(r_url, use_token=False, debug=debug)
+    response = self.get(r_url, use_token=True, debug=debug)
     attributes = response.json()
     if isinstance(attributes, str) and attributes and attributes[0] == '{':
         try:

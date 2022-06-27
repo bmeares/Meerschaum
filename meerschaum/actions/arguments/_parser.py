@@ -282,6 +282,10 @@ groups['api'].add_argument(
     help = 'When starting the API, do not start the Web interface.',
 )
 groups['api'].add_argument(
+    '--private', '--private-mode', action='store_true',
+    help = 'Require authentication for all endpoints.',
+)
+groups['api'].add_argument(
     '--no-auth', '--noauth', action='store_true',
     help = 'When starting the API, do not require authentication. WARNING: This is dangerous!',
 )

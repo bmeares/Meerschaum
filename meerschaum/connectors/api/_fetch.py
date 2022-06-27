@@ -13,35 +13,13 @@ import datetime
 def fetch(
         self,
         pipe: meerschaum.Pipe,
-        begin: Optional[datetime.datetime] = None,
+        begin: Optional[datetime.datetime, str] = '',
         end: Optional[datetime.datetime] = None,
         params: Optional[Dict, Any] = None,
         debug: bool = False,
         **kw: Any
     ) -> pandas.DataFrame:
-    """Get the Pipe data from the remote Pipe.
-
-    Parameters
-    ----------
-    pipe: meerschaum.Pipe :
-        
-    begin: Optional[datetime.datetime] :
-         (Default value = None)
-    end: Optional[datetime.datetime] :
-         (Default value = None)
-    params: Optional[Dict :
-        
-    Any] :
-         (Default value = None)
-    debug: bool :
-         (Default value = False)
-    **kw: Any :
-        
-
-    Returns
-    -------
-
-    """
+    """Get the Pipe data from the remote Pipe."""
     from meerschaum.utils.debug import dprint
     from meerschaum.utils.warnings import warn, error
     from meerschaum.config.static import _static_config
@@ -75,7 +53,11 @@ def fetch(
         remote_location_key,
         mrsm_instance = self
     )
-    begin = begin if begin is not None else p.get_sync_time(debug=debug)
+    begin = (
+        begin if not (isinstance(begin, str) and begin == '')
+        else pipe.get_sync_time(debug=debug)
+    )
+
     return p.get_data(
         begin=begin, end=end,
         params=_params,

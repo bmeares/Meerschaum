@@ -22,7 +22,7 @@ def get_users(
     response = self.get(
         f"{_static_config()['api']['endpoints']['users']}",
         debug = debug,
-        use_token = False
+        use_token = True,
     )
     if not response:
         return []
