@@ -8,7 +8,7 @@ Functions for managing packages and virtual environments reside here.
 
 from __future__ import annotations
 import importlib, os, pathlib
-from meerschaum.utils.typing import Any, List, SuccessTuple, Optional, Union, Tuple
+from meerschaum.utils.typing import Any, List, SuccessTuple, Optional, Union, Tuple, Dict
 from meerschaum.utils.threading import Lock, RLock
 from meerschaum.utils.packages._packages import packages, all_packages
 
