@@ -3,6 +3,14 @@
 ## 1.0.x Releases
 This is the current release cycle, so future features will be updated below.
 
+### v1.0.1
+
+- **Added `citus` as an official database flavor.**  
+  Citus is a distributed database built on PostgreSQL. When an `id` column is provided, Meerschaum will call `create_distributed_table()` on the pipe's ID index. Citus has also been added to the official test suite.
+- **Changed `end` datetimes to be exclusive.**  
+  The `end` parameter now generates `<` instead of `<=`. This shouldn't be a major breaking change but is important to be aware of.
+- **Bumped `rich` to v12.4.4.**
+
 ### v1.0.0: **Mutable at Last**
 
 **What's New**
