@@ -30,7 +30,7 @@ def get_data(
 
     end: Optional[datetime.datetime], default None
         Upper bound datetime to stop searching for data (inclusive).
-        Translates to a `WHERE` clause like `WHERE datetime <= end`.
+        Translates to a `WHERE` clause like `WHERE datetime < end`.
         Defaults to `None`.
 
     params: Optional[Dict[str, Any]], default None
@@ -170,7 +170,7 @@ def get_rowcount(
         Count rows where datetime > begin.
 
     end: Optional[datetime.datetime], default None
-        Count rows where datetime <= end.
+        Count rows where datetime < end.
 
     remote: bool, default False
         Count rows from a pipe's remote source.

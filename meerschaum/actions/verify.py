@@ -73,7 +73,7 @@ def _verify_packages(
 
 
     ### Verify the plugins dependencies.
-    return True, "Verified {len(base_packages) + len(venv_packages)} packages."
+    return True, f"Verified {len(base_packages) + len(venv_packages)} packages."
 
 ### NOTE: This must be the final statement of the module.
 ###       Any subactions added below these lines will not

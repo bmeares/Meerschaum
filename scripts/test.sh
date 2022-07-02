@@ -33,7 +33,8 @@ sleep 4
 
 
 ### Execute the pytest tests.
-MRSM_ROOT_DIR="$test_root" python -m pytest --ignore=portable/ --ignore=test_root/ --ignore=tests/data/; rc="$?"
+MRSM_ROOT_DIR="$test_root" python -m pytest \
+  --ignore=portable/ --ignore=test_root/ --ignore=tests/data/ --ignore=docs/; rc="$?"
 
 ### Cleanup
 if [ "$2" == "rm" ]; then

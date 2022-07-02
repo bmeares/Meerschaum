@@ -379,6 +379,13 @@ def create_indices(
                 )
             )
             pass
+        elif self.flavor == 'citus':
+            id_query = [(
+                f"CREATE INDEX {_id_index_name} "
+                + f"ON {_pipe_name} ({_id_name});"
+            ), (
+                f"SELECT create_distributed_table('{_pipe_name}', '{_id}');"
+            )]
         else: ### mssql, sqlite, etc.
             id_query = f"CREATE INDEX {_id_index_name} ON {_pipe_name} ({_id_name})"
 
@@ -389,12 +396,14 @@ def create_indices(
     for col, q in index_queries.items():
         if debug:
             dprint(f"Creating index on column '{col}' for {pipe}...")
-        try:
-            index_result = self.exec(q, debug=debug)
-        except Exception as e:
-            index_result = None
-        if index_result is None or index_result is False:
-            failures += 1
+        queries = [q] if isinstance(q, str) else q
+        for q in queries:
+            try:
+                index_result = self.exec(q, debug=debug)
+            except Exception as e:
+                index_result = None
+            if index_result is None or index_result is False:
+                failures += 1
     return failures == 0
 
 def delete_pipe(
@@ -565,7 +574,7 @@ def get_pipe_data(
             number = 0,
             begin = end
         )
-        where += f"{dt} <= {end_da}"
+        where += f"{dt} < {end_da}"
 
     if params is not None:
         from meerschaum.utils.sql import build_where

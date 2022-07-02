@@ -5,6 +5,7 @@ volumes:
   mariadb_volume:
   cockroachdb_volume:
   oracle_volume:
+  citus_healthcheck_volume:
 services:
   timescaledb:
     environment:
@@ -51,4 +52,31 @@ services:
       - 1529:1521
     volumes:
       - oracle_volume:/u01/app/oracle
-
+  citus_master:
+    image: "citusdata/citus:11.0.2"
+    ports:
+      - 5499:5432
+    labels: ["com.citusdata.role=Master"]
+    environment: &CITUS_AUTH
+      POSTGRES_DB: testdb
+      POSTGRES_USER: test
+      PGUSER: test
+      POSTGRES_PASSWORD: test1234
+      PGPASSWORD: test1234
+      POSTGRES_HOST_AUTH_METHOD: "${POSTGRES_HOST_AUTH_METHOD:-trust}"
+      CITUS_HOST: citus_master
+  citus_worker:
+    image: "citusdata/citus:11.0.2"
+    labels: ["com.citusdata.role=Worker"]
+    depends_on: [citus_manager]
+    command: "/wait-for-manager.sh"
+    environment: *CITUS_AUTH
+    volumes:
+      - citus_healthcheck_volume:/healthcheck
+  citus_manager:
+    image: "citusdata/membership-manager:0.3.0"
+    volumes:
+      - "${DOCKER_SOCK:-/var/run/docker.sock}:/var/run/docker.sock"
+      - citus_healthcheck_volume:/healthcheck
+    depends_on: [citus_master]
+    environment: *CITUS_AUTH

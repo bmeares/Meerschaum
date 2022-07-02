@@ -19,12 +19,6 @@ test_queries = {
 ### `table` is the unescaped name of the table.
 exists_queries = {
     'default'    : "SELECT COUNT(*) FROM {table_name} WHERE 1 = 0",
-    #  'timescaledb': "SELECT to_regclass('{table_name}')",
-    #  'postgresql' : "SELECT to_regclass('{table_name}')",
-    #  'mssql'      : "SELECT OBJECT_ID('{table_name}')",
-    #  'mysql'      : "SHOW TABLES LIKE '{table}'",
-    #  'mariadb'    : "SHOW TABLES LIKE '{table}'",
-    #  'sqlite'     : "SELECT name FROM sqlite_master WHERE name='{table}'",
 }
 update_queries = {
     'default': """
@@ -77,6 +71,7 @@ update_queries = {
 table_wrappers = {
     'default'    : ('"', '"'),
     'timescaledb': ('"', '"'),
+    'citus'      : ('"', '"'),
     'duckdb'     : ('"', '"'),
     'postgresql' : ('"', '"'),
     'sqlite'     : ('"', '"'),
@@ -92,12 +87,13 @@ max_name_lens = {
     'oracle'     : 30,
     'postgresql' : 64,
     'timescaledb': 64,
+    'citus'      : 64,
     'cockroachdb': 64,
     'sqlite'     : 1024, ### Probably more, but 1024 seems more than reasonable.
     'mysql'      : 64,
     'mariadb'    : 64,
 }
-json_flavors = {'postgresql', 'timescaledb',}
+json_flavors = {'postgresql', 'timescaledb', 'citus'}
 OMIT_NULLSFIRST_FLAVORS = {'mariadb', 'mysql', 'mssql'}
 DB_TO_PD_DTYPES = {
     'FLOAT': 'float64',
@@ -153,6 +149,7 @@ def dateadd_str(
 
         - `'postgresql'`
         - `'timescaledb'`
+        - `'citus'`
         - `'cockroachdb'`
         - `'duckdb'`
         - `'mssql'`
@@ -227,7 +224,7 @@ def dateadd_str(
         begin = f"'{begin}'"
 
     da = ""
-    if flavor in ('postgresql', 'timescaledb', 'cockroachdb'):
+    if flavor in ('postgresql', 'timescaledb', 'cockroachdb', 'citus'):
         begin = (
             f"CAST({begin} AS TIMESTAMP)" if begin != 'now'
             else "CAST(NOW() AT TIME ZONE 'utc' AS TIMESTAMP)"

@@ -28,7 +28,7 @@ packages: Dict[str, Dict[str, str]] = {
         'typing_extensions'          : 'typing_extensions>=4.2.0',
         'pygments'                   : 'pygments>=2.7.2',
         'colorama'                   : 'colorama>=0.4.3',
-        'rich'                       : 'rich>=12.4.1',
+        'rich'                       : 'rich>=12.4.4',
         'more_termcolor'             : 'more-termcolor>=1.1.3',
         'humanfriendly'              : 'humanfriendly>=10.0.0',
     },

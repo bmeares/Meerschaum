@@ -13,6 +13,7 @@ flavor_clis = {
     'postgresql'  : 'pgcli',
     'timescaledb' : 'pgcli',
     'cockroachdb' : 'pgcli',
+    'citus'       : 'pgcli',
     'mysql'       : 'mycli',
     'mariadb'     : 'mycli',
     'percona'     : 'mycli',
