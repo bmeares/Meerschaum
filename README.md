@@ -18,12 +18,14 @@ Meerschaum is a tool for quickly synchronizing time-series data streams called *
 
 ## Why Meerschaum?
 
+Two words: *incremental updates*. Fetch the data you need, and Meerschaum will handle the rest.
+
 If you've worked with time-series data, you know the headaches that come with ETL.
 Data engineering often gets in analysts' way, and when work needs to get done, every minute spent on pipelining is time taken away from real analysis.
 
 Rather than copy / pasting your ETL scripts, simply build pipes with Meerschaum! [Meerschaum gives you the tools to design your data streams how you like](https://towardsdatascience.com/easy-time-series-etl-for-data-scientists-with-meerschaum-5aade339b398) ― and don't worry — you can always incorporate Meerschaum into your existing systems!
 
-#### Want to Learn More?
+### Want to Learn More?
 
 You can find a wealth of information at [meerschaum.io](https://meerschaum.io)!
 
@@ -33,6 +35,116 @@ Additionally, below are several articles published about Meerschaum:
 - [*A Data Scientist's Guide to Fetching COVID-19 Data in 2022*](https://towardsdatascience.com/a-data-scientists-guide-to-fetching-covid-19-data-in-2022-d952b4697) (Towards Data Science)
 - [*Time-Series ETL with Meerschaum*](https://towardsdatascience.com/easy-time-series-etl-for-data-scientists-with-meerschaum-5aade339b398) (Towards Data Science)
 - [*How I automatically extract my M1 Finance transactions*](https://bmeares.medium.com/how-i-automatically-extract-my-m1-finance-transactions-b43cef857bc7)
+
+## Installation
+
+For a more thorough setup guide, visit the [Getting Started](https://meerschaum.io/get-started/) page at [meerschaum.io](https://meerschaum.io).
+
+### TL;DR
+
+```bash
+pip install -U --user meerschaum
+mrsm stack up -d db grafana
+mrsm bootstrap pipes
+```
+
+## Usage
+
+Please visit [meerschaum.io](https://meerschaum.io) for setup, usage, and troubleshooting information. You can find technical documentation at [docs.meerschaum.io](https://docs.meerschaum.io), and here is a complete list of the [Meerschaum actions](https://meerschaum.io/reference/actions/).
+
+### CLI
+```bash
+### Install the NOAA weather plugin.
+mrsm install plugin noaa
+
+### Register a new pipe to the built-in SQLite DB.
+### You can instead run `bootstrap pipe` for a wizard.
+### Enter 'KATL' for Atlanta when prompted.
+mrsm register pipe -c plugin:noaa -m weather -l atl -i sql:local
+
+### Pull data and create the table "plugin_noaa_weather_atl".
+mrsm sync pipes -l atl
+```
+
+### Python API
+
+```python
+import meerschaum as mrsm
+pipe = mrsm.Pipe(
+    'foo', 'bar',              ### Connector and metric labels.
+    target   = 'MyTableName!', ### Table name. Defaults to 'foo_bar'.
+    instance = 'sql:local',    ### Built-in SQLite DB. Defaults to 'sql:main'.
+    columns  = {
+        'datetime': 'dt',      ### Column for the datetime index.
+        'id'      : 'id',      ### Column for the ID index (optional).
+    },
+)
+### Pass a DataFrame to create the table and indices.
+pipe.sync([{'dt': '2022-07-01', 'id': 1, 'val': 10}])
+
+### Duplicate rows are ignored.
+pipe.sync([{'dt': '2022-07-01', 'id': 1, 'val': 10}])
+assert len(pipe.get_data()) == 1
+
+### Rows with existing keys (datetime and/or id) are updated.
+pipe.sync([{'dt': '2022-07-01', 'id': 1, 'val': 100}])
+assert len(pipe.get_data()) == 1
+
+### Translates to this query for SQLite:
+### 
+### SELECT *
+### FROM "MyTableName!"
+### WHERE "dt" >= datetime('2022-01-01', '0 minute')
+###   AND "dt" <  datetime('2023-01-01', '0 minute')
+###   AND "id" IN ('1')
+print(pipe.get_data(
+    begin  = '2022-01-01',
+    end    = '2023-01-01',
+    params = {'id': [1]},
+))
+          dt  id  val
+0 2022-07-01   1  100
+
+### Drop the table and remove the pipe's metadata.
+pipe.delete()
+```
+
+### Simple Plugin
+
+```python
+# ~/.config/plugins/example.py
+
+__version__ = '1.0.0'
+required = ['requests']
+
+def register(pipe, **kw):
+    return {
+        'columns': {
+            'datetime': 'dt',
+            'id'      : 'id',
+        },
+    }
+
+def fetch(pipe, **kw):
+    import requests, datetime, random
+    response = requests.get('http://date.jsontest.com/')
+    
+    ### The fetched JSON has the following shape:
+    ### {
+    ###     "date": "07-01-2022",
+    ###     "milliseconds_since_epoch": 1656718801566,
+    ###     "time": "11:40:01 PM"
+    ### }
+    data = response.json()
+    timestamp = datetime.datetime(int(str(data['milliseconds_since_epoch'])[:-3]))
+    
+    ### You may also return a Pandas DataFrame.
+    return [{
+        "dt"   : timestamp,
+        "id"   : random.randint(1, 4),
+        "value": random.uniform(1, 100),
+    }]
+```
 
 ## Features
 
@@ -50,81 +162,12 @@ Additionally, below are several articles published about Meerschaum:
 - ✨ **Tailored for Your Experience**  
   - Rich CLI makes managing your data streams surprisingly enjoyable!
   - Web dashboard for those who prefer a more graphical experience.
-  - Manage your database connections with [Meerschaum connectors](https://meerschaum.io/reference/connectors/)
+  - Manage your database connections with [Meerschaum connectors](https://meerschaum.io/reference/connectors/).
   - Utility commands with sensible syntax let you control many pipes with grace.
 - 💼 **Portable from the Start**  
   - The environment variable `$MRSM_ROOT_DIR` lets you emulate multiple installations and group together your [instances](https://meerschaum.io/reference/connectors/#instances-and-repositories).
   - No dependencies required; anything needed will be installed into a virtual environment.
   - [Specify required packages for your plugins](https://meerschaum.io/reference/plugins/writing-plugins/), and users will get those packages in a virtual environment.
-
-## Installation
-
-For a more thorough setup guide, visit the [Getting Started](https://meerschaum.io/get-started/) page at [meerschaum.io](https://meerschaum.io).
-
-### TL;DR
-
-```bash
-pip install -U --user meerschaum
-mrsm stack up -d db grafana
-mrsm bootstrap pipes
-```
-
-## Usage Documentation
-
-Please visit [meerschaum.io](https://meerschaum.io) for setup, usage, and troubleshooting information. You can find technical documentation at [docs.meerschaum.io](https://docs.meerschaum.io), and here is a complete list of the [Meerschaum actions](https://meerschaum.io/reference/actions/).
-
-```python
->>> import meerschaum as mrsm
->>> pipe = mrsm.Pipe("plugin:noaa", "weather")
->>> df = pipe.get_data(begin='2022-02-02')
->>> df[['timestamp', 'station', 'temperature (wmoUnit:degC)']]
-               timestamp station  temperature (wmoUnit:degC)
-0    2022-03-29 09:54:00    KCEU                         8.3
-1    2022-03-29 09:52:00    KATL                        10.6
-2    2022-03-29 09:52:00    KCLT                         7.2
-3    2022-03-29 08:54:00    KCEU                         8.3
-4    2022-03-29 08:52:00    KATL                        11.1
-...                  ...     ...                         ...
-1626 2022-02-02 01:52:00    KATL                        10.0
-1627 2022-02-02 01:52:00    KCLT                         7.8
-1628 2022-02-02 00:54:00    KCEU                         8.3
-1629 2022-02-02 00:52:00    KATL                        10.0
-1630 2022-02-02 00:52:00    KCLT                         8.3
-
-[1631 rows x 3 columns]
->>>
-```
-
-## Plugins
-
-Here is the [list of community plugins](https://meerschaum.io/reference/plugins/list-of-plugins/) and the [public plugins repository](https://api.mrsm.io/dash/plugins).
-
-For details on installing, using, and writing plugins, check out the [plugins documentation](https://meerschaum.io/reference/plugins/types-of-plugins) at [meerschaum.io](https://meerschaum.io).
-
-#### Example Plugin
-
-```python
-# ~/.config/meerschaum/plugins/example.py
-__version__ = '0.0.1'
-required = []
-
-def register(pipe, **kw):
-    return {
-        'columns': {
-            'datetime': 'dt',
-            'id': 'id',
-            'value': 'val',
-        }
-    }
-
-def fetch(pipe, **kw):
-    import datetime, random
-    return {
-        'dt': [datetime.datetime.utcnow()],
-        'id': [1],
-        'val': [random.randint(0, 100)],
-    }
-```
 
 ## Support Meerschaum's Development
 

@@ -116,7 +116,7 @@ def fetch(
         if begin_da and end_da:
             meta_def += " AND "
         if end_da:
-            meta_def += f"{definition_dt_name} <= {end_da}"
+            meta_def += f"{definition_dt_name} < {end_da}"
 
     df = self.read(meta_def, chunk_hook=chunk_hook, chunksize=chunksize, debug=debug)
     ### if sqlite, parse for datetimes

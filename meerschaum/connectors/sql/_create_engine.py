@@ -47,6 +47,16 @@ flavor_configs = {
             'port'     : 5432,
         },
     },
+    'citus'            : {
+        'engine'       : 'postgresql',
+        'create_engine' : default_create_engine_args,
+        'omit_create_engine': {'method',},
+        'to_sql' : {},
+        'requirements' : default_requirements,
+        'defaults'     : {
+            'port'     : 5432,
+        },
+    },
     'mssql'            : {
         'engine'       : 'mssql+pyodbc',
         'create_engine' : {
@@ -146,6 +156,7 @@ install_flavor_drivers = {
     'mariadb': ['pymysql'],
     'timescaledb': ['psycopg2'],
     'postgresql': ['psycopg2'],
+    'citus': ['psycopg2'],
     'cockroachdb': ['psycopg2', 'sqlalchemy_cockroachdb', 'sqlalchemy_cockroachdb.psycopg2'],
     'mssql': ['pyodbc'],
     'oracle': ['cx_Oracle'],

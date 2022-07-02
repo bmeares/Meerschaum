@@ -94,7 +94,7 @@ def make_exe():
 
     # Attempt to add resources relative to the built binary when
     # `resources_location` fails.
-    # policy.resources_location_fallback = "filesystem-relative:prefix"
+    policy.resources_location_fallback = "filesystem-relative:prefix"
 
     # Clear out a fallback resource location.
     # policy.resources_location_fallback = None
@@ -139,7 +139,7 @@ def make_exe():
 
     # Let Python choose which memory allocator to use. (This will likely
     # use the malloc()/free() linked into the program.
-    # python_config.allocator_backend = "default"
+    python_config.allocator_backend = "default"
 
     # Enable the use of a custom allocator backend with the "raw" memory domain.
     # python_config.allocator_raw = True
@@ -190,18 +190,18 @@ def make_exe():
     # python_config.write_modules_directory_env = "/tmp/oxidized/loaded_modules"
 
     # Evaluate a string as Python code when the interpreter starts.
-    # python_config.run_command = (
-      # "import sys, os, pathlib; "
-      # + "root_path = pathlib.Path(sys.argv[0]).parent / 'root'; "
-      # + "root_path.mkdir(exist_ok=True); "
-      # + "from meerschaum.__main__ import main; "
-      # + "os.environ['MRSM_ROOT_DIR'] = str(root_path); "
-      # + "os.environ['MRSM_RUNTIME'] = 'desktop'; "
-      # + "main(sys.argv[1:])"
-    # )
+    python_config.run_command = (
+      "import sys, os, pathlib; "
+      + "root_path = pathlib.Path(sys.argv[0]).parent / 'root'; "
+      + "root_path.mkdir(exist_ok=True); "
+      + "from meerschaum.__main__ import main; "
+      + "os.environ['MRSM_ROOT_DIR'] = str(root_path); "
+      + "os.environ['MRSM_RUNTIME'] = 'desktop'; "
+      + "main(sys.argv[1:])"
+    )
 
     # Run a Python module as __main__ when the interpreter starts.
-    python_config.run_module = "meerschaum"
+    #python_config.run_module = "meerschaum"
 
     # Run a Python file when the interpreter starts.
     # python_config.run_filename = "/path/to/file"
@@ -221,7 +221,12 @@ def make_exe():
     )
     #exe.add_python_resources(exe.pip_install(["--upgrade", "wheel", "setuptools", "pip"]))
     # exe.add_python_resources(exe.pip_install(["--upgrade", "--pre", "wheel", "setuptools", "pip", "pythonnet; platform_system == \"Windows\"", ".[full]"]))
-    for resource in exe.pip_install(["--upgrade", "--pre", "wheel", "setuptools", "pip", "pythonnet; platform_system == \"Windows\"", ".[full]"]):
+    for resource in exe.pip_install(
+        [
+            "--upgrade", "--pre", "wheel", "setuptools", "pip", "pythonnet; platform_system == \"Windows\"",
+            ".[minimal]"
+        # ".[full]"
+    ]):
         resource.add_location = 'filesystem-relative:lib'
         exe.add_python_resource(resource)
 
@@ -307,7 +312,7 @@ def make_msi(exe):
         # The name of your application.
         "Meerschaum",
         # The version of your application.
-        "0.5.3",
+        "1.0.1",
         # The author/manufacturer of your application.
         "Bennett Meares"
     )
