@@ -63,7 +63,7 @@ mrsm install plugin noaa
 mrsm register pipe -c plugin:noaa -m weather -l atl -i sql:local
 
 ### Pull data and create the table "plugin_noaa_weather_atl".
-mrsm sync pipes -l atl
+mrsm sync pipes -l atl -i sql:local
 ```
 
 ### Python API
