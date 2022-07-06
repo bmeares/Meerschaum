@@ -1,5 +1,43 @@
 # 📢 Announcements
 
+## At Long Last: v1.0.0 is here!
+> *27 June 2022*
+
+It's been almost 2 years since I started Meerschaum, and the project has come an incredibly long way in that time. And now we've arrived at the culmination of all that hard work ― I have officially published **v1.0.0: Mutable at Last!**
+
+For a full breakdown of features, check out the [changelog](/news/changelog), but here are some of the highlights:
+
+- **Mutable data**  
+  Meerschaum now handles mutable data! When rows with existing `datetime` and/or `id` values are inserted, Meerschaum will issue an `UPDATE` or `MERGE` query to update your table.
+
+  ```python
+  >>> import meerschaum as mrsm
+  >>> pipe = mrsm.Pipe('foo', 'bar', columns={'datetime': 'dt', 'id': 'id'})
+  >>>
+  >>> ### Insert the first row.
+  >>> pipe.sync([{'dt': '2022-06-26', 'id': 1, 'value': 10}])
+  >>>
+  >>> ### Duplicate row, no change.
+  >>> pipe.sync([{'dt': '2022-06-26', 'id': 1, 'value': 10}])
+  >>>
+  >>> ### Update the value columns of the first row.
+  >>> pipe.sync([{'dt': '2022-06-26', 'id': 1, 'value': 100}])
+  ```
+
+- **Data Type Enforcement**  
+  Data types are automatically inferred when a pipe is created, and all incoming dataframes will be cast to these types. You may also manually specify the data types for certain columns:
+
+  ```yaml
+  columns:
+    datetime: timestamp_utc
+    id: station_id
+  dtypes:
+    timestamp_utc: 'datetime64[ns]'
+    station_id: 'Int64'
+    station_name: 'object'
+
+  ```
+
 ## Interviewed with Console!
 > *11 April 2022*
 
