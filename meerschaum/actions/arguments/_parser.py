@@ -180,6 +180,7 @@ groups['actions'].add_argument(
     #  '--keep-logs', '--keep-job', '--save-job', '--keep-daemon-output', '--skip-daemon-cleanup',
     #  action='store_true', help="Preserve a job's output files for later inspection."
 #  )
+
 groups['actions'].add_argument(
     '--rm', action='store_true', help="Delete a job once it has finished executing."
 )
@@ -187,6 +188,14 @@ groups['actions'].add_argument(
     '--name', '--job-name', type=str, help=(
         "Assign a name to a job. If no name is provided, a random name will be assigned."
     ),
+)
+groups['actions'].add_argument(
+    '-s', '--schedule', '--cron', type=str,
+    help = (
+        "Continue executing the action according to a schedule (e.g. 'every 1 seconds'). \n"
+        + "Often used with `-d`. See this page for scheduling syntax:\n "
+        + "https://red-engine.readthedocs.io/en/stable/condition_syntax/index.html"
+    )
 )
 groups['actions'].add_argument(
     '-A', '--sub-args', nargs=argparse.REMAINDER,

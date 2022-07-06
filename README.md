@@ -91,17 +91,17 @@ pipe.sync([{'dt': '2022-07-01', 'id': 1, 'val': 100}])
 assert len(pipe.get_data()) == 1
 
 ### Translates to this query for SQLite:
-### 
+###
 ### SELECT *
 ### FROM "MyTableName!"
 ### WHERE "dt" >= datetime('2022-01-01', '0 minute')
 ###   AND "dt" <  datetime('2023-01-01', '0 minute')
 ###   AND "id" IN ('1')
-print(pipe.get_data(
+df = pipe.get_data(
     begin  = '2022-01-01',
     end    = '2023-01-01',
     params = {'id': [1]},
-))
+)
           dt  id  val
 0 2022-07-01   1  100
 
@@ -128,7 +128,7 @@ def register(pipe, **kw):
 def fetch(pipe, **kw):
     import requests, datetime, random
     response = requests.get('http://date.jsontest.com/')
-    
+
     ### The fetched JSON has the following shape:
     ### {
     ###     "date": "07-01-2022",
@@ -137,7 +137,7 @@ def fetch(pipe, **kw):
     ### }
     data = response.json()
     timestamp = datetime.datetime(int(str(data['milliseconds_since_epoch'])[:-3]))
-    
+
     ### You may also return a Pandas DataFrame.
     return [{
         "dt"   : timestamp,

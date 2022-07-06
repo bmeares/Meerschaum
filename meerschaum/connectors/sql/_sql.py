@@ -108,7 +108,8 @@ def read(
     import warnings
     pd = import_pandas()
     sqlalchemy = attempt_import("sqlalchemy")
-    chunksize = chunksize if chunksize != -1 else self.sys_config.get('chunksize', None)
+    default_chunksize = self.sys_config.get('chunksize', None)
+    chunksize = chunksize if chunksize != -1 else default_chunksize
     if chunksize is None and as_iterator:
         if not silent and self.flavor not in _disallow_chunks_flavors:
             warn(
@@ -118,12 +119,14 @@ def read(
         chunksize = 1000
     if chunksize is not None and self.flavor in _max_chunks_flavors:
         if chunksize > _max_chunks_flavors[self.flavor]:
-            warn(
-                f"The specified chunksize of {chunksize} exceeds the maximum of "
-                + f" {_max_chunks_flavors[self.flavor]} for flavor '{self.flavor}'.\n"
-                + f"    Falling back to a chunksize of {_max_chunks_flavors[self.flavor]}.",
-                stacklevel = 3,
-            )
+            if chunksize != default_chunksize:
+                warn(
+                    f"The specified chunksize of {chunksize} exceeds the maximum of "
+                    + f"{_max_chunks_flavors[self.flavor]} for flavor '{self.flavor}'.\n"
+                    + f"    Falling back to a chunksize of {_max_chunks_flavors[self.flavor]}.",
+                    stacklevel = 3,
+                )
+            chunksize = _max_chunks_flavors[self.flavor]
 
     ### NOTE: A bug in duckdb_engine does not allow for chunks.
     if chunksize is not None and self.flavor in _disallow_chunks_flavors:

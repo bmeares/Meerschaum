@@ -271,6 +271,15 @@ I've included a list of the dynamic dependencies below to credit the open source
   - [https://passlib.readthedocs.io](https://passlib.readthedocs.io)
   - License: BSD
 
+### pathspec
+
+*Utility library for gitignore style pattern matching of file paths.*
+
+  - Caleb P. Burns
+  - [cpburnz@gmail.com](mailto:cpburnz@gmail.com)
+  - [https://github.com/cpburnz/python-path-specification](https://github.com/cpburnz/python-path-specification)
+  - License: MPL 2.0
+
 ### pip
 
 *The PyPA recommended tool for installing Python packages.*
@@ -409,7 +418,7 @@ I've included a list of the dynamic dependencies below to credit the open source
 
   - Mike Bayer
   - [mike_mp@zzzcomputing.com](mailto:mike_mp@zzzcomputing.com)
-  - [https://www.sqlalchemy.org](https://www.sqlalchemy.org)
+  - [http://www.sqlalchemy.org](http://www.sqlalchemy.org)
   - License: MIT
 
 ### sqlalchemy-cockroachdb

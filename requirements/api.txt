@@ -37,6 +37,7 @@ daemoniker>=0.2.3
 psutil>=5.8.0
 watchgod>=0.7.0
 virtualenv>=20.1.0
+redengine>=2.0.1
 pprintpp>=0.4.0
 asciitree>=0.3.3
 typing_extensions>=4.2.0

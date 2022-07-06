@@ -50,6 +50,7 @@ packages: Dict[str, Dict[str, str]] = {
         'psutil'                     : 'psutil>=5.8.0',
         'watchgod'                   : 'watchgod>=0.7.0',
         'virtualenv'                 : 'virtualenv>=20.1.0',
+        'redengine'                  : 'redengine>=2.0.1',
     },
     'iot': {
         'paho'                       : 'paho-mqtt>=1.5.1',

@@ -7,7 +7,7 @@ Flavor-specific SQL tools.
 """
 
 from __future__ import annotations
-from meerschaum.utils.typing import Optional, Dict, Any, Union
+from meerschaum.utils.typing import Optional, Dict, Any, Union, List
 
 test_queries = {
     'default'    : 'SELECT 1',
@@ -583,9 +583,12 @@ def update_query(
     """
     Build a `MERGE` or `UPDATE` query to apply a patch to target table.
     """
+    from meerschaum.utils.debug import dprint
     base_query = update_queries.get(connector.flavor, update_queries['default'])
     target_table = get_sqlalchemy_table(target, connector)
     value_cols = []
+    if debug:
+        dprint(f"{target_table.columns=}")
     for c in target_table.columns:
         c_name, c_type = c.name, str(c.type)
         if c_name in join_cols:
@@ -593,6 +596,8 @@ def update_query(
         if connector.flavor in DB_FLAVORS_CAST_DTYPES:
             c_type = DB_FLAVORS_CAST_DTYPES[connector.flavor].get(c_type, c_type)
         value_cols.append((c_name, c_type))
+    if debug:
+        dprint(f"{value_cols=}")
 
     def sets_subquery(l_prefix: str, r_prefix: str):
         return 'SET ' + ',\n'.join([

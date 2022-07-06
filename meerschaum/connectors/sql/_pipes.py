@@ -758,7 +758,7 @@ def sync_pipe(
         df = parse_df_datetimes(pd.read_json(df, debug=debug))
 
     ### if Pipe is not registered
-    if not pipe.id:
+    if not pipe.get_id(debug=debug):
         register_tuple = pipe.register(debug=debug)
         if not register_tuple[0]:
             return register_tuple
@@ -808,13 +808,18 @@ def sync_pipe(
             target = temp_target,
         )
 
+        join_cols = []
+        if 'datetime' in pipe.columns:
+            join_cols.append(pipe.columns['datetime'])
+        if 'id' in pipe.columns:
+            join_cols.append(pipe.columns['id'])
         success = (
             self.exec(
                 update_query(
                     pipe.target,
                     temp_target,
                     self,
-                    pipe.get_columns('id', 'datetime'),
+                    join_cols,
                     debug = debug
                 ), debug=debug) is not None
         )

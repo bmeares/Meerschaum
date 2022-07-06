@@ -59,7 +59,7 @@ setup_kw_args = {
     'package_data'                  : {'' : ['*.html', '*.css', '*.js', '*.png', '*.ico']},
     'python_requires'               : '>=3.7',
     'classifiers'                   : [
-        "Development Status :: 4 - Beta",
+        "Development Status :: 5 - Production/Stable",
         "Intended Audience :: System Administrators",
         "License :: OSI Approved :: Apache Software License",
         "Operating System :: POSIX :: Linux",

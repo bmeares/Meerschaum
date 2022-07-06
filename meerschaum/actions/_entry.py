@@ -9,7 +9,7 @@ The entry point for launching Meerschaum actions.
 from __future__ import annotations
 from meerschaum.utils.typing import SuccessTuple, List, Optional
 
-def _entry(sysargs : Optional[List[str]] = None) -> SuccessTuple:
+def _entry(sysargs: Optional[List[str]] = None) -> SuccessTuple:
     """Parse arguments and launch a Meerschaum action.
     The `action` list removes the first element.
     
@@ -24,6 +24,7 @@ def _entry(sysargs : Optional[List[str]] = None) -> SuccessTuple:
 
     Returns
     -------
+    A `SuccessTuple` indicating success. If `schedule` is provided, this will never return.
 
     """
     from meerschaum.actions.arguments import parse_arguments
@@ -33,6 +34,9 @@ def _entry(sysargs : Optional[List[str]] = None) -> SuccessTuple:
         import shlex
         sysargs = shlex.split(sysargs)
     args = parse_arguments(sysargs)
+    if args.get('schedule', None):
+        from meerschaum.utils.schedule import schedule_function
+        return schedule_function(_entry_with_args, args['schedule'], **args)
     return _entry_with_args(**args)
 
 def _entry_with_args(**kw) -> SuccessTuple:

@@ -3,6 +3,22 @@
 ## 1.0.x Releases
 This is the current release cycle, so future features will be updated below.
 
+### v1.0.2
+
+- **Allow `id` column to be omitted.**  
+  When generating the `UPDATE` query, the `id` column may now be omitted (*NOTE:* the datetime column will be assumed to be the primary key in this scenario).
+- **Added `--schedule` (`-s` or `--cron`).**  
+  The `--schedule` flag (`-s`) now lets you schedule any command to be executed regulary, not unlike crontab. This can come in handy with `--daemon` (`-d`), e.g.:
+
+  ```bash
+  mrsm sync pipes -c plugin:foo -s hourly -d
+  ```
+
+  Here is more information on the [scheduling syntax](https://red-engine.readthedocs.io/en/stable/condition_syntax/execution.html).
+
+- **Fixed an issue with SQLite.**  
+  An issue where the value columns not loading in SQLite has been addressed.
+
 ### v1.0.1
 
 - **Added `citus` as an official database flavor.**  
