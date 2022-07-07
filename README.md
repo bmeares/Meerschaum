@@ -102,8 +102,10 @@ df = pipe.get_data(
     end    = '2023-01-01',
     params = {'id': [1]},
 )
-          dt  id  val
-0 2022-07-01   1  100
+
+### Shape of the DataFrame:
+###           dt  id  val
+### 0 2022-07-01   1  100
 
 ### Drop the table and remove the pipe's metadata.
 pipe.delete()
@@ -136,7 +138,9 @@ def fetch(pipe, **kw):
     ###     "time": "11:40:01 PM"
     ### }
     data = response.json()
-    timestamp = datetime.datetime(int(str(data['milliseconds_since_epoch'])[:-3]))
+    timestamp = datetime.datetime.fromtimestamp(
+        int(str(data['milliseconds_since_epoch'])[:-3])
+    )
 
     ### You may also return a Pandas DataFrame.
     return [{
