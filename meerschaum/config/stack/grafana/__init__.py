@@ -17,7 +17,7 @@ default_datasource = {
             'type' : 'postgres',
             'jsonData' : {
                 'sslmode' : 'disable',
-                'postgresVersion' : 1300,
+                'postgresVersion' : 1400,
                 'timescaledb' : True,
             },
             'user' : db_user,
@@ -46,30 +46,16 @@ default_dashboard = {
 }
 
 ### build config dictionary
-default_grafana_config = dict()
+default_grafana_config = {}
 default_grafana_config['dashboard'] = default_dashboard
 default_grafana_config['datasource'] = default_datasource
 
 def edit_grafana(
-        action : list = [''],
-        debug : bool = False,
+        action: list = [''],
+        debug: bool = False,
         **kw
     ):
-    """Open Grafana configuration files for editing
-
-    Parameters
-    ----------
-    action : list :
-         (Default value = [''])
-    debug : bool :
-         (Default value = False)
-    **kw :
-        
-
-    Returns
-    -------
-
-    """
+    """Open Grafana configuration files for editing."""
 
     from meerschaum.config._edit import general_edit_config
     from meerschaum.config._paths import GRAFANA_DATASOURCE_PATH, GRAFANA_DASHBOARD_PATH

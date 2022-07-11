@@ -89,32 +89,33 @@ def read_config(
     if len(missing_keys) > 0:
         from meerschaum.config._default import default_config
         for mk in missing_keys:
-            if mk in default_config:
-                _default_dict = (
-                    search_and_substitute_config(default_config) if substitute
-                    else default_config
+            if mk not in default_config:
+                continue
+            _default_dict = (
+                search_and_substitute_config(default_config) if substitute
+                else default_config
+            )
+            ### If default config contains symlinks, add them to the config to write.
+            try:
+                _default_symlinks = _default_dict[symlinks_key][mk]
+            except Exception as e:
+                _default_symlinks = {}
+            config[mk] = _default_dict[mk]
+            if _default_symlinks:
+                if symlinks_key not in config:
+                    config[symlinks_key] = {}
+                if mk not in config[symlinks_key]:
+                    config[symlinks_key][mk] = {}
+                config[symlinks_key][mk] = apply_patch_to_config(
+                    config[symlinks_key][mk], 
+                    _default_symlinks
                 )
-                ### If default config contains symlinks, add them to the config to write.
-                try:
-                    _default_symlinks = _default_dict[symlinks_key][mk]
-                except Exception as e:
-                    _default_symlinks = {}
-                config[mk] = _default_dict[mk]
-                if _default_symlinks:
-                    if symlinks_key not in config:
-                        config[symlinks_key] = {}
-                    if mk not in config[symlinks_key]:
-                        config[symlinks_key][mk] = {}
-                    config[symlinks_key][mk] = apply_patch_to_config(
-                        config[symlinks_key][mk], 
-                        _default_symlinks
-                    )
-                    if symlinks_key not in config_to_write:
-                        config_to_write[symlinks_key] = {}
-                    config_to_write[symlinks_key][mk] = config[symlinks_key][mk]
+                if symlinks_key not in config_to_write:
+                    config_to_write[symlinks_key] = {}
+                config_to_write[symlinks_key][mk] = config[symlinks_key][mk]
 
-                ### Write the default key.
-                config_to_write[mk] = config[mk]
+            ### Write the default key.
+            config_to_write[mk] = config[mk]
 
     ### Write missing keys if necessary.
     if len(config_to_write) > 0 and write_missing:
@@ -368,31 +369,32 @@ def get_possible_keys() -> List[str]:
     return sorted(list(keys))
 
 
-def get_keyfile_path(key : str, create_new : bool = False) -> Optional[pathlib.Path]:
-    """Determine a key's file path.
-
-    Parameters
-    ----------
-    key : str :
-        
-    create_new : bool :
-         (Default value = False)
-
-    Returns
-    -------
-
-    """
+def get_keyfile_path(
+        key: str,
+        create_new: bool = False,
+        directory: Union[pathlib.Path, str, None] = None,
+    ) -> Union[pathlib.Path, None]:
+    """Determine a key's file path."""
     import os, pathlib
-    from meerschaum.config._paths import CONFIG_DIR_PATH
+    if directory is None:
+        from meerschaum.config._paths import CONFIG_DIR_PATH
+        directory = CONFIG_DIR_PATH
 
     try:
-        return pathlib.Path(os.path.join(
-            CONFIG_DIR_PATH,
-            read_config(keys=[key], with_filenames=True, write_missing=False, substitute=False)[1][0]
-        ))
+        return pathlib.Path(
+            os.path.join(
+                directory,
+                read_config(
+                    keys=[key],
+                    with_filenames=True,
+                    write_missing=False,
+                    substitute=False,
+                )[1][0]
+            )
+        )
     except IndexError as e:
         if create_new:
             from meerschaum.config.static import _static_config
             default_filetype = _static_config()['config']['default_filetype']
-            return pathlib.Path(os.path.join(CONFIG_DIR_PATH, key + '.' + default_filetype))
+            return pathlib.Path(os.path.join(directory, key + '.' + default_filetype))
         return None
