@@ -130,7 +130,7 @@ default_experimental_config = {
 
 
 ### build default config dictionary
-default_config = dict()
+default_config = {}
 default_config['meerschaum'] = default_meerschaum_config
 default_config['system'] = default_system_config
 from meerschaum.config._formatting import default_formatting_config

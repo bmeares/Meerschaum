@@ -189,30 +189,31 @@ def read_config(
     return config
 
 def search_and_substitute_config(
-        config : dict,
-        leading_key : str = "MRSM",
-        delimiter : str = ":",
-        begin_key : str = "{",
-        end_key : str = "}",
-        literal_key : str = '!',
-        keep_symlinks : bool = True,
+        config: Dict[str, Any],
+        leading_key: str = "MRSM",
+        delimiter: str = ":",
+        begin_key: str = "{",
+        end_key: str = "}",
+        literal_key: str = '!',
+        keep_symlinks: bool = True,
     ) -> Dict[str, Any]:
     """Search the config for Meerschaum substitution syntax and substite with value of keys.
 
     Parameters
     ----------
-    config :
+    config: Dict[str, Any]
         The Meerschaum configuration dictionary to search through.
-    leading_key :
+
+    leading_key: str, default 'MRSM'
         The string with which to start the search.
-        Defaults to 'MRSM'.
-    begin_key :
+
+    begin_key: str, default '{'
         The string to start the keys list.
-        Defaults to '{'.
-    end_key :
+
+    end_key: str, default '}'
         The string to end the keys list.
-        Defaults to '}'.
-    literal_key :
+
+    literal_key: str, default '!'
         The string to force an literal interpretation of a value.
         When the string is isolated, a literal interpreation is assumed and the surrounding
         quotes are replaced.
@@ -221,31 +222,16 @@ def search_and_substitute_config(
         - 'MRSM{a:b:c}'    => {'d': 1}        : isolated
         - ' MRSM{a:b:c} '  => ' "{\'d\': 1}"' : not isolated
         - ' MRSM{!a:b:c} ' => ' {"d": 1}'     : literal
-        Defaults to '!'.
+
     keep_symlinks :
         If True, include the symlinks under the top-level key '_symlinks' (never written to a file).
         Defaults to True.
         
         Example:
+
+        ```
         MRSM{meerschaum:connectors:main:host} => cf['meerschaum']['connectors']['main']['host']
-    config : dict :
-        
-    leading_key : str :
-         (Default value = "MRSM")
-    delimiter : str :
-         (Default value = ":")
-    begin_key : str :
-         (Default value = "{")
-    end_key : str :
-         (Default value = "}")
-    literal_key : str :
-         (Default value = '!')
-    keep_symlinks : bool :
-         (Default value = True)
-
-    Returns
-    -------
-
+        ``` 
     """
 
     _links = []
@@ -268,9 +254,9 @@ def search_and_substitute_config(
     buff = str(needle)
     max_index = len(haystack) - len(buff)
 
-    patterns = dict()
-    isolated_patterns = dict()
-    literal_patterns = dict()
+    patterns = {}
+    isolated_patterns = {}
+    literal_patterns = {}
 
     begin, end, floor = 0, 0, 0
     while needle in haystack[floor:]:
@@ -337,14 +323,16 @@ def search_and_substitute_config(
         if isolated_patterns[pattern]:
             haystack = haystack.replace(json.dumps(pattern), json.dumps(value))
         elif literal_patterns[pattern]:
-            haystack = haystack.replace(pattern, json.dumps(value).replace('"', '\\"').replace("'", "\\'"))
+            haystack = haystack.replace(
+                pattern, json.dumps(value).replace('"', '\\"').replace("'", "\\'")
+            )
         else:
             haystack = haystack.replace(pattern, str(value))
 
     ### parse back into dict
     parsed_config = json.loads(haystack)
 
-    symlinks = dict()
+    symlinks = {}
     if keep_symlinks:
         ### Keep track of symlinks for writing back to a file.
         for _keys, _pattern in _links:
@@ -364,8 +352,11 @@ def search_and_substitute_config(
 
     return parsed_config
 
+
 def get_possible_keys() -> List[str]:
-    """ """
+    """
+    Return a list of possible top-level keys.
+    """
     import os
     from meerschaum.config._paths import CONFIG_DIR_PATH
     from meerschaum.config._default import default_config
@@ -375,6 +366,7 @@ def get_possible_keys() -> List[str]:
     for filename in os.listdir(CONFIG_DIR_PATH):
         keys.add('.'.join(filename.split('.')[:-1]))
     return sorted(list(keys))
+
 
 def get_keyfile_path(key : str, create_new : bool = False) -> Optional[pathlib.Path]:
     """Determine a key's file path.
