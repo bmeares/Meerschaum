@@ -33,7 +33,7 @@ def stack(
     import os
     import sys
     import meerschaum.config.stack
-    from meerschaum.config.stack import get_necessary_files, write_stack
+    from meerschaum.config.stack import NECESSARY_FILES, write_stack
     from meerschaum.config._paths import STACK_COMPOSE_PATH
     from meerschaum.utils.prompt import yes_no
     import meerschaum.config
@@ -51,17 +51,9 @@ def stack(
     if sub_args is None:
         sub_args = []
 
-    bootstrap_question = (
-        "Bootstrap configuration?\n\n"
-        "The following files will be overwritten:"
-    )
-    for f in get_necessary_files():
-        bootstrap_question += "\n  - " + str(f)
-    bootstrap_question += "\n"
-
     bootstrap = False
-    for fp in get_necessary_files():
-        if not os.path.isfile(fp):
+    for path in NECESSARY_FILES:
+        if not path.exists():
             bootstrap = True
             break
     ### if bootstrap flag was set, create files

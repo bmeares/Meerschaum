@@ -203,6 +203,7 @@ def _sync_stack_files():
         substitute = True,
     )
 
+NECESSARY_FILES = [STACK_COMPOSE_PATH, GRAFANA_DATASOURCE_PATH, GRAFANA_DASHBOARD_PATH]
 def get_necessary_files():
     from meerschaum.config import get_config
     return {
@@ -215,19 +216,9 @@ def get_necessary_files():
 
 
 def write_stack(
-        debug : bool = False 
+        debug: bool = False 
     ):
-    """Write Docker Compose configuration files
-
-    Parameters
-    ----------
-    debug : bool :
-         (Default value = False)
-
-    Returns
-    -------
-
-    """
+    """Write Docker Compose configuration files."""
     from meerschaum.config._edit import general_write_yaml_config
     from meerschaum.config._sync import sync_files
     general_write_yaml_config(get_necessary_files(), debug=debug)

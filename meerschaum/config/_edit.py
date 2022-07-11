@@ -17,27 +17,7 @@ def edit_config(
         debug : bool = False,
         **kw : Any
     ) -> SuccessTuple:
-    """Edit the configuration file
-
-    Parameters
-    ----------
-    params :
-        patch to apply. Depreciated / replaced by --config (at least in this case)
-    keys : Optional[List[str]] :
-         (Default value = None)
-    params : Optional[Dict[str :
-        
-    Any]] :
-         (Default value = None)
-    debug : bool :
-         (Default value = False)
-    **kw : Any :
-        
-
-    Returns
-    -------
-
-    """
+    """Edit the configuration files."""
     from meerschaum.config import get_config, config
     from meerschaum.config._read_config import get_keyfile_path
     from meerschaum.config._paths import CONFIG_DIR_PATH
@@ -60,6 +40,7 @@ def edit_config(
     reload_package('meerschaum', debug=debug, **kw)
 
     return (True, "Success")
+
 
 def write_config(
         config_dict: Optional[Dict[str, Any]] = None,
@@ -93,6 +74,7 @@ def write_config(
     from meerschaum.config.static import _static_config
     from meerschaum.config._default import default_header_comment
     from meerschaum.config._patch import apply_patch_to_config
+    from meerschaum.config._read_config import get_keyfile_path
     from meerschaum.utils.debug import dprint
     from meerschaum.utils.yaml import yaml
     from meerschaum.utils.misc import filter_keywords
@@ -113,16 +95,22 @@ def write_config(
     symlinks = config_dict.pop(symlinks_key) if symlinks_key in config_dict else {}
     config_dict = apply_patch_to_config(config_dict, symlinks)
 
-    for k, v in config_dict.items():
-        filetype = (
-            v.get('filetype', default_filetype) if isinstance(v, dict)
-            else default_filetype
-        )
+    def determine_filetype(k, v):
         if k == 'meerschaum':
-            filetype = 'yaml'
+            return 'yaml'
+        if isinstance(v, dict) and 'filetype' in v:
+            return v['filetype']
+        path = get_keyfile_path(k, create_new=False, directory=directory)
+        if path is None:
+            return default_filetype
+        filetype = path.suffix[1:]
         if not isinstance(filetype, str) or filetype not in filetype_dumpers:
             print(f"Invalid filetype '{filetype}' for '{k}'. Assuming {default_filetype}...")
             filetype = default_filetype
+        return filetype
+
+    for k, v in config_dict.items():
+        filetype = determine_filetype(k, v)        
         filename = str(k) + '.' + str(filetype)
         filepath = os.path.join(directory, filename)
         pathlib.Path(filepath).parent.mkdir(exist_ok=True)
@@ -263,15 +251,6 @@ def general_edit_config(
 def copy_default_to_config(debug : bool = False):
     """Copy the default config directory to the main config directory.
     NOTE: This function is now depreciated in favor of the new patch system.
-
-    Parameters
-    ----------
-    debug : bool :
-         (Default value = False)
-
-    Returns
-    -------
-
     """
     from meerschaum.config._paths import DEFAULT_CONFIG_DIR_PATH, CONFIG_DIR_PATH
     import shutil
@@ -288,19 +267,7 @@ def write_default_config(
         debug : bool = False,
         **kw
     ):
-    """Write the default configuration files.
-
-    Parameters
-    ----------
-    debug : bool :
-         (Default value = False)
-    **kw :
-        
-
-    Returns
-    -------
-
-    """
+    """Write the default configuration files."""
     import os
     from meerschaum.config._paths import DEFAULT_CONFIG_DIR_PATH
     from meerschaum.config._default import default_config, default_header_comment

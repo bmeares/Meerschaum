@@ -14,6 +14,7 @@ from meerschaum.utils.typing import Any, Dict, Optional, Union
 from meerschaum.config._version import __version__
 from meerschaum.config._edit import edit_config, write_config
 from meerschaum.config.static import _static_config
+from meerschaum.config._read_config import read_config
 
 from meerschaum.config._paths import (
     PERMANENT_PATCH_DIR_PATH,
@@ -39,7 +40,6 @@ def _config(
     """
     global config
     if config is None or reload:
-        from meerschaum.config._read_config import read_config
         from meerschaum.config._sync import sync_files as _sync_files
         config = read_config(keys=keys, substitute=substitute, write_missing=write_missing)
         if sync_files:
@@ -122,7 +122,7 @@ def get_config(
             return True, _rc 
         return _rc
 
-    from meerschaum.config._read_config import read_config, search_and_substitute_config
+    from meerschaum.config._read_config import search_and_substitute_config
     ### Invalidate the cache if it was read before with substitute=False
     ### but there still exist substitutions.
     if (
@@ -138,7 +138,12 @@ def get_config(
         if symlinks_key in _subbed:
             if symlinks_key not in config:
                 config[symlinks_key] = {}
-            config[symlinks_key][keys[0]] = _subbed
+            if keys[0] not in config[symlinks_key]:
+                config[symlinks_key][keys[0]] = {}
+            config[symlinks_key][keys[0]] = apply_patch_to_config(
+                _subbed,
+                config[symlinks_key][keys[0]]
+            )
 
     from meerschaum.config._sync import sync_files as _sync_files
     if config is None:
@@ -177,7 +182,7 @@ def get_config(
             in_default = True
             patched_default_config = (
                 search_and_substitute_config(default_config)
-                if substitute else default_config
+                if substitute else default_config.copy()
             )
             _c = patched_default_config
             for k in keys:
@@ -193,7 +198,7 @@ def get_config(
                 try:
                     if warn:
                         import traceback
-                        traceback.print_stack()
+                        #  traceback.print_stack()
                         from meerschaum.utils.warnings import warn as _warn
                         _warn(warning_msg, stacklevel=3, color=False)
                 except Exception as e:
@@ -304,7 +309,6 @@ _apply_environment_config(environment_patch)
     #  set_root(root_dir_path)
 
 from meerschaum.config._paths import PATCH_DIR_PATH, PERMANENT_PATCH_DIR_PATH
-from meerschaum.config._read_config import read_config
 patch_config = None
 if PATCH_DIR_PATH.exists():
     from meerschaum.utils.yaml import yaml, _yaml
