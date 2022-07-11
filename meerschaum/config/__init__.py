@@ -21,8 +21,8 @@ from meerschaum.config._paths import (
     DEFAULT_CONFIG_DIR_PATH,
 )
 from meerschaum.config._patch import (
-    permanent_patch_config,
-    patch_config,
+    #  permanent_patch_config,
+    #  patch_config,
     apply_patch_to_config,
 )
 __all__ = ('get_plugin_config', 'write_plugin_config', 'get_config', 'write_config', 'set_config',)
@@ -99,14 +99,14 @@ def get_config(
         
     Returns
     -------
-    The value in the configuration directorym indexed by the provided keys.
+    The value in the configuration directory, indexed by the provided keys.
 
     Examples
     --------
     >>> get_config('meerschaum', 'intance')
     'sql:main'
     >>> get_config('does', 'not', 'exist')
-    UserWarning:  ⚠️ Invalid keys in config: ('does', 'not', 'exist')
+    UserWarning: Invalid keys in config: ('does', 'not', 'exist')
     """
     global config
     import json
@@ -129,7 +129,11 @@ def get_config(
         config is not None and substitute and keys[0] != symlinks_key
         and 'MRSM{' in json.dumps(config.get(keys[0]))
     ):
-        _subbed = search_and_substitute_config({keys[0] : config[keys[0]]})
+        try:
+            _subbed = search_and_substitute_config({keys[0]: config[keys[0]]})
+        except Exception as e:
+            import traceback
+            traceback.print_exc()
         config[keys[0]] = _subbed[keys[0]]
         if symlinks_key in _subbed:
             if symlinks_key not in config:
@@ -188,8 +192,10 @@ def get_config(
             if not in_default:
                 try:
                     if warn:
+                        import traceback
+                        traceback.print_stack()
                         from meerschaum.utils.warnings import warn as _warn
-                        _warn(warning_msg, stacklevel=3)
+                        _warn(warning_msg, stacklevel=3, color=False)
                 except Exception as e:
                     if warn:
                         print(warning_msg)
@@ -204,7 +210,8 @@ def get_config(
             config = apply_patch_to_config(patched_default_config, config)
             if patch and keys[0] != symlinks_key:
                 print("Updating configuration, please wait...")
-                write_config(config, debug=debug)
+                if write_missing:
+                    write_config(config, debug=debug)
     if as_tuple:
         return (not invalid_keys), c
     return c
@@ -242,27 +249,6 @@ def write_plugin_config(
     cf = {'plugins' : plugins_cf}
     return write_config(cf, **kw)
 
-
-### If patches exist, apply to config.
-if patch_config is not None:
-    from meerschaum.config._paths import PATCH_DIR_PATH
-    set_config(apply_patch_to_config(_config(), patch_config))
-    if PATCH_DIR_PATH.exists():
-        shutil.rmtree(PATCH_DIR_PATH)
-
-### if permanent_patch.yaml exists, apply patch to config, write config, and delete patch
-if permanent_patch_config is not None and PERMANENT_PATCH_DIR_PATH.exists():
-    print(
-        "Found permanent patch configuration. " +
-        "Updating main config and deleting permanent patch..."
-    )
-    set_config(apply_patch_to_config(_config(), permanent_patch_config))
-    write_config(_config())
-    permanent_patch_config = None
-    if PERMANENT_PATCH_DIR_PATH.exists():
-        shutil.rmtree(PERMANENT_PATCH_DIR_PATH)
-    if DEFAULT_CONFIG_DIR_PATH.exists():
-        shutil.rmtree(DEFAULT_CONFIG_DIR_PATH)
 
 ### If environment variable MRSM_CONFIG is set, patch config before anything else.
 environment_config = _static_config()['environment']['config']
@@ -303,19 +289,55 @@ def _apply_environment_config(env_var):
 _apply_environment_config(environment_config)
 _apply_environment_config(environment_patch)
 
-environment_root_dir = _static_config()['environment']['root']
-if environment_root_dir in os.environ:
-    from meerschaum.config._paths import set_root
-    root_dir_path = pathlib.Path(os.environ[environment_root_dir]).absolute()
-    if not root_dir_path.exists():
-        print(
-            f"Invalid root directory '{str(root_dir_path)}' set for " +
-            f"environment variable '{environment_root_dir}'.\n" +
-            f"Please enter a valid path for {environment_root_dir}.",
-            file = sys.stderr,
-        )
-        sys.exit(1)
-    set_root(root_dir_path)
+#  environment_root_dir = _static_config()['environment']['root']
+#  if environment_root_dir in os.environ:
+    #  from meerschaum.config._paths import set_root
+    #  root_dir_path = pathlib.Path(os.environ[environment_root_dir]).resolve()
+    #  if not root_dir_path.exists():
+        #  print(
+            #  f"Invalid root directory '{str(root_dir_path)}' set for " +
+            #  f"environment variable '{environment_root_dir}'.\n" +
+            #  f"Please enter a valid path for {environment_root_dir}.",
+            #  file = sys.stderr,
+        #  )
+        #  sys.exit(1)
+    #  set_root(root_dir_path)
+
+from meerschaum.config._paths import PATCH_DIR_PATH, PERMANENT_PATCH_DIR_PATH
+from meerschaum.config._read_config import read_config
+patch_config = None
+if PATCH_DIR_PATH.exists():
+    from meerschaum.utils.yaml import yaml, _yaml
+    if _yaml is not None:
+        patch_config = read_config(directory=PATCH_DIR_PATH)
+
+permanent_patch_config = None
+if PERMANENT_PATCH_DIR_PATH.exists():
+    from meerschaum.utils.yaml import yaml, _yaml
+    if _yaml is not None:
+        permanent_patch_config = read_config(directory=PERMANENT_PATCH_DIR_PATH)
+### If patches exist, apply to config.
+if patch_config is not None:
+    from meerschaum.config._paths import PATCH_DIR_PATH
+    set_config(apply_patch_to_config(_config(), patch_config))
+    if PATCH_DIR_PATH.exists():
+        shutil.rmtree(PATCH_DIR_PATH)
+
+### if permanent_patch.yaml exists, apply patch to config, write config, and delete patch
+if permanent_patch_config is not None and PERMANENT_PATCH_DIR_PATH.exists():
+    print(
+        "Found permanent patch configuration. " +
+        "Updating main config and deleting permanent patch..."
+    )
+    set_config(apply_patch_to_config(_config(), permanent_patch_config))
+    write_config(_config())
+    permanent_patch_config = None
+    if PERMANENT_PATCH_DIR_PATH.exists():
+        shutil.rmtree(PERMANENT_PATCH_DIR_PATH)
+    if DEFAULT_CONFIG_DIR_PATH.exists():
+        shutil.rmtree(DEFAULT_CONFIG_DIR_PATH)
+
+
 
 
 ### Make sure readline is available for the portable version.
