@@ -37,7 +37,9 @@ def get_module_path(
         import_name_lower = install_name_lower
     else:
         import_name_lower = import_name.lower().replace('-', '_')
-    vtp = venv_target_path(venv)
+    vtp = venv_target_path(venv, allow_nonexistent=True, debug=debug)
+    if not vtp.exists():
+        return None
     candidates = []
     for file_name in os.listdir(vtp):
         file_name_lower = file_name.lower().replace('-', '_')
