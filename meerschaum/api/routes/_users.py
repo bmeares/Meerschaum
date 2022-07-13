@@ -86,11 +86,11 @@ def register_user(
     allow_users = get_config('system', 'api', 'permissions', 'registration', 'users', patch=True)
     if not allow_users:
         return False, (
-            "The administrator for this server has not allowed user registration.\n\n" +
-            "Please contact the system administrator, or if you are running this server, " +
-            "open the configuration file with `edit config system` and search for 'permissions'. " +
-            " Under the keys api:permissions:registration, " +
-            "you can toggle various registration types."
+            "The administrator for this server has not allowed user registration.\n\n"
+            + "Please contact the system administrator, or if you are running this server, "
+            + "open the configuration file with `edit config system` and search for 'permissions'. "
+            + " Under the keys api:permissions:registration, "
+            + "you can toggle various registration types."
         )
     if type == 'admin':
         return False, (

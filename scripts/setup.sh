@@ -7,6 +7,7 @@ cd "$PARENT"
 ### Install python packages.
 
 reqs_file="/tmp/mrsm_dev_setup_reqs.txt"
+python -m pip install wheel
 python -m meerschaum show packages dev-tools --nopretty > "$reqs_file"
 python -m meerschaum show packages docs --nopretty >> "$reqs_file"
 python -m pip install --upgrade -r "$reqs_file" || exit 1

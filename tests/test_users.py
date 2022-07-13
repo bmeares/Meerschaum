@@ -17,9 +17,6 @@ from meerschaum.core import User
 def test_register_user(flavor: str):
     username, password, email = conns['api'].username, conns['api'].password, 'none@none.com'
     user = User(username, password, email=email)
-    if flavor == 'api':
-        conns['timescaledb'].delete_user(user, debug=debug)
-        conns['timescaledb'].register_user(user, debug=debug)
     conn = conns[flavor]
     conn.delete_user(user, debug=debug)
     success, msg = conn.register_user(user, debug=debug)

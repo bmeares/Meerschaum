@@ -115,8 +115,8 @@ I've included a list of the dynamic dependencies below to credit the open source
 
 *Extensions for Plotly Dash.*
 
-  - emher
-  - [emil.h.eriksen@gmail.com](mailto:emil.h.eriksen@gmail.com)
+  - Emil Eriksen <emil.h.eriksen@gmail.com>
+  - [https://github.com/thedirtyfew/dash-extensions/](https://github.com/thedirtyfew/dash-extensions/)
   - License: MIT
 
 ### databases
@@ -133,6 +133,7 @@ I've included a list of the dynamic dependencies below to credit the open source
 *serialize all of python*
 
   - Mike McKerns
+  - [mmckerns@uqfoundation.org](mailto:mmckerns@uqfoundation.org)
   - [https://github.com/uqfoundation/dill](https://github.com/uqfoundation/dill)
   - License: 3-clause BSD
 
@@ -213,10 +214,8 @@ I've included a list of the dynamic dependencies below to credit the open source
 
 *More routines for operating on iterables, beyond itertools*
 
-  - Erik Rose
-  - [erikrose@grinchcentral.com](mailto:erikrose@grinchcentral.com)
-  - [https://github.com/more-itertools/more-itertools](https://github.com/more-itertools/more-itertools)
-  - License: MIT
+  - [Erik Rose <erikrose@grinchcentral.com>](mailto:Erik Rose <erikrose@grinchcentral.com>)
+
 
 ### more-termcolor
 
@@ -351,6 +350,15 @@ I've included a list of the dynamic dependencies below to credit the open source
   - [https://github.com/dateutil/dateutil](https://github.com/dateutil/dateutil)
   - License: Dual License
 
+### python-dotenv
+
+*Read key-value pairs from a .env file and set them as environment variables*
+
+  - Saurabh Kumar
+  - [me+github@saurabh-kumar.com](mailto:me+github@saurabh-kumar.com)
+  - [https://github.com/theskumar/python-dotenv](https://github.com/theskumar/python-dotenv)
+  - License: BSD-3-Clause
+
 ### python-multipart
 
 *A streaming multipart parser for Python*
@@ -359,13 +367,22 @@ I've included a list of the dynamic dependencies below to credit the open source
   - [http://github.com/andrew-d/python-multipart](http://github.com/andrew-d/python-multipart)
   - License: Apache
 
+### pytz
+
+*World timezone definitions, modern and historical*
+
+  - Stuart Bishop
+  - [stuart@stuartbishop.net](mailto:stuart@stuartbishop.net)
+  - [http://pythonhosted.org/pytz](http://pythonhosted.org/pytz)
+  - License: MIT
+
 ### pyvim
 
 *Pure Python Vi Implementation*
 
   - Jonathan Slenders
   - [https://github.com/jonathanslenders/pyvim](https://github.com/jonathanslenders/pyvim)
-  - License: LICENSE
+  - License: BSD License
 
 ### pywebview
 
@@ -384,6 +401,15 @@ I've included a list of the dynamic dependencies below to credit the open source
   - [xi@resolvent.net](mailto:xi@resolvent.net)
   - [https://pyyaml.org/](https://pyyaml.org/)
   - License: MIT
+
+### redengine
+
+*Advanced scheduling framework*
+
+  - Mikael Koli
+  - [koli.mikael@gmail.com](mailto:koli.mikael@gmail.com)
+  - [https://github.com/Miksus/red-engine.git](https://github.com/Miksus/red-engine.git)
+
 
 ### requests
 
@@ -405,7 +431,7 @@ I've included a list of the dynamic dependencies below to credit the open source
 
 ### semver
 
-*Python helper for Semantic Versioning (http://semver.org/)*
+*Python helper for Semantic Versioning (http://semver.org)*
 
   - Kostiantyn Rybnikov
   - [k-bx@k-bx.com](mailto:k-bx@k-bx.com)
@@ -418,7 +444,7 @@ I've included a list of the dynamic dependencies below to credit the open source
 
   - Mike Bayer
   - [mike_mp@zzzcomputing.com](mailto:mike_mp@zzzcomputing.com)
-  - [http://www.sqlalchemy.org](http://www.sqlalchemy.org)
+  - [https://www.sqlalchemy.org](https://www.sqlalchemy.org)
   - License: MIT
 
 ### sqlalchemy-cockroachdb
@@ -443,9 +469,7 @@ I've included a list of the dynamic dependencies below to credit the open source
 
 *Tornado websocket backend for the Xterm.js Javascript terminal emulator library.*
 
-  - Jupyter Development Team
-  - [jupyter@googlegroups.com](mailto:jupyter@googlegroups.com)
-  - [https://github.com/jupyter/terminado](https://github.com/jupyter/terminado)
+  - [Jupyter Development Team <jupyter@googlegroups.com>](mailto:Jupyter Development Team <jupyter@googlegroups.com>)
 
 
 ### toga
@@ -470,14 +494,12 @@ I've included a list of the dynamic dependencies below to credit the open source
 
 *Utilities for using XStatic in Tornado applications*
 
-  - Thomas Kluyver
-  - [thomas@kluyver.me.uk](mailto:thomas@kluyver.me.uk)
-  - [https://www.github.com/takluyver/tornado_xstatic](https://www.github.com/takluyver/tornado_xstatic)
+  - [Thomas Kluyver <thomas@kluyver.me.uk>](mailto:Thomas Kluyver <thomas@kluyver.me.uk>)
 
 
 ### typing_extensions
 
-*Backported and Experimental Type Hints for Python 3.6+*
+*Backported and Experimental Type Hints for Python 3.7+*
 
   - ["Guido van Rossum, Jukka Lehtosalo, Łukasz Langa, Michael Lee" <levkivskyi@gmail.com>](mailto:"Guido van Rossum, Jukka Lehtosalo, Łukasz Langa, Michael Lee" <levkivskyi@gmail.com>)
 
@@ -515,7 +537,7 @@ I've included a list of the dynamic dependencies below to credit the open source
 
   - Samuel Colvin
   - [s@muelcolvin.com](mailto:s@muelcolvin.com)
-  - [https://github.com/samuelcolvin/watchgod](https://github.com/samuelcolvin/watchgod)
+  - [https://github.com/samuelcolvin/watchfiles](https://github.com/samuelcolvin/watchfiles)
   - License: MIT
 
 ### websockets

@@ -59,15 +59,16 @@ def register_user(
 
 def valid_username(username: str) -> SuccessTuple:
     """Verify that a given username is valid."""
+    from meerschaum.config.static import _static_config
     fail_reasons = []
 
-    min_length = 4
+    min_length = _static_config()['users']['min_username_length']
     if len(username) < min_length:
-        fail_reasons.append(f"Usernames must have at least {min_length} characters")
+        fail_reasons.append(f"Usernames must have at least {min_length} characters.")
 
-    max_length = 26
+    max_length = _static_config()['users']['max_username_length']
     if len(username) > max_length:
-        fail_reasons.append(f"Usernames must contain {max_length} or fewer characters")
+        fail_reasons.append(f"Usernames must contain {max_length} or fewer characters.")
 
     acceptable_chars = {'_', '-'}
     for c in username:
@@ -89,11 +90,12 @@ def valid_username(username: str) -> SuccessTuple:
 
     return True, "Success"
 
+
 def edit_user(
         self,
         user: meerschaum.core.User,
-        debug : bool = False,
-        **kw : Any
+        debug: bool = False,
+        **kw: Any
     ) -> SuccessTuple:
     """Update an existing user's metadata."""
     from meerschaum.utils.packages import attempt_import

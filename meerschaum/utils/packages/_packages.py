@@ -18,8 +18,6 @@ from meerschaum.utils.typing import Dict
 
 packages: Dict[str, Dict[str, str]] = {
     'required': {
-        'wheel'                      : 'wheel>=0.34.2',
-        'yaml'                       : 'PyYAML>=5.3.1',
     },
     'minimal': {},
     'formatting': {
@@ -33,6 +31,8 @@ packages: Dict[str, Dict[str, str]] = {
         'humanfriendly'              : 'humanfriendly>=10.0.0',
     },
     '_required': {
+        'wheel'                      : 'wheel>=0.34.2',
+        'yaml'                       : 'PyYAML>=5.3.1',
         'pip'                        : 'pip>=21.0.1',
         'update_checker'             : 'update-checker>=0.18.0',
         'semver'                     : 'semver>=3.0.0-dev3',
@@ -60,8 +60,8 @@ packages: Dict[str, Dict[str, str]] = {
         'pymysql'                    : 'PyMySQL>=0.9.0',
         'aiomysql'                   : 'aiomysql>=0.0.21',
         'sqlalchemy_cockroachdb'     : 'sqlalchemy-cockroachdb>=1.4.2',
-        'duckdb'                     : 'duckdb>=0.3.2',
-        'duckdb_engine'              : 'duckdb-engine>=0.1.3',
+        'duckdb'                     : 'duckdb>=0.4.0',
+        'duckdb_engine'              : 'duckdb-engine>=0.2.0',
     },
     '_drivers': {
         'pyodbc'                     : 'pyodbc>=4.0.30',
@@ -84,7 +84,7 @@ packages: Dict[str, Dict[str, str]] = {
         'twine'                      : 'twine>=3.2.0',
         'tuna'                       : 'tuna>=0.5.3',
         'snakeviz'                   : 'snakeviz>=2.1.0',
-        'mypy'                       : 'mypy>=0.812',
+        'mypy'                       : 'mypy>=0.812.0',
         'pytest'                     : 'pytest>=6.2.2',
         'heartrate'                  : 'heartrate>=0.2.1',
         'pyheat'                     : 'py-heat>=0.0.6',
@@ -122,6 +122,7 @@ packages: Dict[str, Dict[str, str]] = {
 packages['sql'] = {
     'numpy'                          : 'numpy>=1.18.5',
     'pandas'                         : 'pandas>=1.3.0',
+    'pytz'                           : 'pytz>=2022.1.0',
     'joblib'                         : 'joblib>=0.17.0',
     'sqlalchemy'                     : 'sqlalchemy>=1.4.17',
     'sqlalchemy_utils'               : 'sqlalchemy-utils>=0.38.2',
@@ -141,6 +142,7 @@ packages['dash'] = {
 packages['api'] = {
     'uvicorn'                        : 'uvicorn[standard]>=0.17.5',
     'gunicorn'                       : 'gunicorn>=20.1.0',
+    'dotenv'                         : 'python-dotenv>=0.20.0',
     'websockets'                     : 'websockets>=8.1.0',
     'fastapi'                        : 'fastapi>=0.75.0',
     'fastapi_jwt_auth'               : 'fastapi-jwt-auth>=0.5.0',
@@ -156,6 +158,16 @@ packages['api'].update(packages['dash'])
 all_packages = {}
 for group, import_names in packages.items():
     all_packages.update(import_names)
+install_names = {}
+def get_install_names():
+    """
+    Initialize the mapping between install names and import names.
+    """
+    if not install_names:
+        from meerschaum.utils.packages import get_install_no_version
+        for _import_name, _install_name in all_packages.items():
+            install_names[get_install_no_version(_install_name)] = _import_name
+    return install_names
 
 skip_groups = {'docs', 'build', 'cli', 'dev-tools', 'portable', 'extras', 'stack', '_drivers'}
 full = []
