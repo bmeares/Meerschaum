@@ -3,12 +3,15 @@
 ## 1.0.x Releases
 This is the current release cycle, so future features will be updated below.
 
-### v1.0.3
+### v1.0.3 — v1.0.4
 
 - **Fixed environment bugs.**  
   This patch resolves issues with the environment variables `MRSM_ROOT_DIR`, `MRSM_CONFIG`, and `MRSM_PATCH` as well as the configuration directories `patch_config` and `permanent_patch_config`.
 - **Fixed package management system.**  
-  Meerschaum better handles package metadata, resolving some annoying issues. Also, `wheel` is automatically installed when new packages are installed into new virtual environments.
+  Meerschaum better handles package metadata, resolving some annoying issues. See [`meerschaum.utils.packages.get_module_path()`](https://docs.meerschaum.io/utils/packages/index.html#meerschaum.utils.packages.get_module_path) for an example of the improved virtual environment management system. Also, `wheel` is automatically installed when new packages are installed into new virtual environments.
+- **Set the default venv to `'mrsm'`.**  
+  In all functions declared in [`meerschaum.utils.packages`](https://docs.meerschaum.io/utils/packages/index.html), the default value of `venv` is always `'mrsm'`. Use `None` for the `venv` to use the user's site packages.
+- **Updated dependencies.**
 - **Added `python-dotenv` as a dependency.**
 - **Fixed a catalog issue with `duckdb`.**
 - **Updated the testing suite.**

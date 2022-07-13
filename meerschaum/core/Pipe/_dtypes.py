@@ -140,7 +140,9 @@ def infer_dtypes(self, persist: bool=False, debug: bool=False) -> Dict[str, Any]
         return dtypes
     from meerschaum.utils.sql import get_pd_type
     columns_types = self.get_columns_types(debug=debug)
-    dtypes = {c: get_pd_type(t) for c, t in columns_types.items()}
+    dtypes = {
+        c: get_pd_type(t) for c, t in columns_types.items()
+    } if columns_types else {}
     if persist:
         self.dtypes = dtypes
         self.edit(interactive=False, debug=debug)
