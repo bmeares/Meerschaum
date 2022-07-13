@@ -113,19 +113,22 @@ def get_tables(
                 extend_existing = True,
             ),
             'plugins' : sqlalchemy.Table(
-                'plugins',
-                conn.metadata,
-                sqlalchemy.Column(
-                    *id_col_args['plugin_id'],
-                    **id_col_kw['plugin_id'],
-                ),
-                sqlalchemy.Column(
-                    'plugin_name', sqlalchemy.String(256), index=index_names, nullable=False,
-                ),
-                sqlalchemy.Column('user_id', sqlalchemy.Integer, nullable=False),
-                sqlalchemy.Column('version', sqlalchemy.String(256)),
-                sqlalchemy.Column('attributes', params_type),
-                sqlalchemy.ForeignKeyConstraint(['user_id'], ['users.user_id']),
+                *([
+                    'plugins',
+                    conn.metadata,
+                    sqlalchemy.Column(
+                        *id_col_args['plugin_id'],
+                        **id_col_kw['plugin_id'],
+                    ),
+                    sqlalchemy.Column(
+                        'plugin_name', sqlalchemy.String(256), index=index_names, nullable=False,
+                    ),
+                    sqlalchemy.Column('user_id', sqlalchemy.Integer, nullable=False),
+                    sqlalchemy.Column('version', sqlalchemy.String(256)),
+                    sqlalchemy.Column('attributes', params_type),
+                ] + ([
+                    sqlalchemy.ForeignKeyConstraint(['user_id'], ['users.user_id']),
+                ] if conn.flavor != 'duckdb' else [])),
                 extend_existing = True,
             ),
         }
@@ -168,6 +171,8 @@ def create_tables(
     try:
         conn.metadata.create_all(bind=conn.engine)
     except Exception as e:
+        import traceback
+        traceback.print_exc()
         warn(str(e))
         return False
     return True

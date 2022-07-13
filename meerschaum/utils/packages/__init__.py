@@ -10,7 +10,7 @@ from __future__ import annotations
 import importlib, os, pathlib
 from meerschaum.utils.typing import Any, List, SuccessTuple, Optional, Union, Tuple, Dict
 from meerschaum.utils.threading import Lock, RLock
-from meerschaum.utils.packages._packages import packages, all_packages
+from meerschaum.utils.packages._packages import packages, all_packages, get_install_names
 
 _import_module = importlib.import_module
 _import_hook_venv = None
@@ -121,7 +121,7 @@ def manually_import_module(
         determine_version(
             pathlib.Path(root_spec.origin),
             import_name=root_name, venv=venv, debug=debug
-        ) if root_spec.origin is not None else None
+        ) if root_spec is not None and root_spec.origin is not None else None
     )
 
     if debug:
@@ -145,9 +145,10 @@ def manually_import_module(
                         debug = debug
                     ) and warn:
                         warn_function(
-                            f"There's an update available for '{install_name}', " +
-                            "but it failed to install. " +
-                            "Try install via Meerschaum with `install packages '{install_name}'`.",
+                            f"There's an update available for '{install_name}', "
+                            + "but it failed to install. "
+                            + "Try installig via Meerschaum with "
+                            + "`install packages '{install_name}'`.",
                             ImportWarning,
                             stacklevel = 3,
                             color = False,
@@ -194,21 +195,47 @@ def manually_import_module(
     return mod
 
 
-def _import_to_install_name(import_name: str) -> str:
+def _import_to_install_name(import_name: str, with_version: bool = True) -> str:
     """
     Try to translate an import name to an installation name.
+    """
+    install_name = all_packages.get(import_name, import_name)
+    if with_version:
+        return install_name
+    return get_install_no_version(install_name)
+
+
+def _import_to_dir_name(import_name: str) -> str:
+    """
+    Translate an import name to the package name in the sites-packages directory.
     """
     import re
     return re.split(
         f'[<>=\[]', all_packages.get(import_name, import_name)
-    )[0].replace('-', '_').lower()
+    )[0].replace('-', '_').lower() 
+
+
+def _install_to_import_name(install_name: str) -> str:
+    """
+    Translate an installation name to a package's import name.
+    """
+    _install_no_version = get_install_no_version(install_name)
+    return get_install_names().get(_install_no_version, _install_no_version)
+
+def get_install_no_version(install_name: str) -> str:
+    """
+    Strip the version information from the install name.
+    """
+    import re
+    return re.split('[=<>,! ]', install_name)[0]
 
 
 def determine_version(
         path: pathlib.Path,
         import_name: Optional[str] = None,
-        venv: Optional[str] = None,
+        venv: Optional[str] = 'mrsm',
         search_for_metadata: bool = True,
+        split: bool = True,
         warn: bool = False,
         debug: bool = False,
     ) -> Union[str, None]:
@@ -226,18 +253,18 @@ def determine_version(
         The name of the module. If omitted, it will be determined from the file path.
         Defaults to `None`.
 
-    venv: Optional[str], default None
+    venv: Optional[str], default 'mrsm'
         The virtual environment of the Python interpreter to use if importing is necessary.
-        Defaults to `None`.
 
     search_for_metadata: bool, default True
         If `True`, search the pip site_packages directory (assumed to be the parent)
         for the corresponding dist-info directory.
-        Defaults to `True`.
 
     warn: bool, default True
         If `True`, raise a warning if the module fails to import in the subprocess.
-        Defaults to `False`.
+
+    split: bool, default True
+        If `True`, split the determined import name by periods to get the room name.
 
     Returns
     -------
@@ -251,11 +278,13 @@ def determine_version(
     from meerschaum.utils.warnings import warn as warn_function
     if import_name is None:
         import_name = path.parent.stem if path.stem == '__init__' else path.stem
+        import_name = import_name.split('.')[0] if split else import_name
     _version = None
-    is_dir = path.stem == '__init__'
-    module_parent_dir = path.parent.parent if is_dir else path.parent
+    module_parent_dir = (
+        path.parent.parent if path.stem == '__init__' else path.parent
+    ) if path is not None else venv_target_path(venv, debug=debug)
 
-    installed_dir_name = _import_to_install_name(import_name)
+    installed_dir_name = _import_to_dir_name(import_name)
 
     ### First, check if a dist-info directory exists.
     _found_versions = []
@@ -412,7 +441,7 @@ def need_update(
         return False
     _checked_for_updates.add(install_name)
 
-    _install_no_version = re.split('[=<>,! ]', install_name)[0]
+    _install_no_version = get_install_no_version(install_name)
     if debug:
         dprint(f"_install_no_version: {_install_no_version}", color=color)
     required_version = install_name.replace(_install_no_version, '')
@@ -468,6 +497,10 @@ def need_update(
         if required_version:
             try:
                 return semver.Version.parse(result.available_version).match(required_version)
+            except AttributeError as e:
+                pip_install(_import_to_install_name('semver'), venv='mrsm', debug=True)
+                semver = manually_import_module('semver', venv='mrsm')
+                return semver.Version.parse(version).match(required_version)
             except Exception as e:
                 if debug:
                     dprint(f"Failed to match versions with exception:\n{e}", color=color)
@@ -488,18 +521,18 @@ def need_update(
             (not semver.Version.parse(version).match(required_version))
             if required_version else False
         )
-    except AttributeError:
-        pip_install('semver', venv='mrsm')
+    except AttributeError as e:
+        pip_install(_import_to_install_name('semver'), venv='mrsm', debug=True)
         semver = manually_import_module('semver', venv='mrsm')
         return (
             (not semver.Version.parse(version).match(required_version))
             if required_version else False
         )
-
     except Exception as e:
         print(f"Unable to parse version ({version}) for package '{import_name}'.")
-        import traceback
-        traceback.print_exc()
+        print(e)
+        #  import traceback
+        #  traceback.print_exc()
         if debug:
             dprint(e)
         return False
@@ -835,10 +868,11 @@ def pip_install(
         split : bool = False,
         check_update: bool = True,
         check_pypi: bool = True,
-        check_wheel : bool = True,
-        _uninstall : bool = False,
-        color : bool = True,
-        debug: bool = False
+        check_wheel: bool = True,
+        _uninstall: bool = False,
+        color: bool = True,
+        silent: bool = False,
+        debug: bool = False,
     ) -> bool:
     """
     Install packages from PyPI with `pip`.
@@ -876,6 +910,9 @@ def pip_install(
     color: bool, default True
         If `True`, include color in debug text.
 
+    silent: bool, default False
+        If `True`, skip printing messages.
+
     debug: bool, default False
         Verbosity toggle.
 
@@ -886,6 +923,7 @@ def pip_install(
     """
     from meerschaum.config._paths import VIRTENV_RESOURCES_PATH
     from meerschaum.config.static import _static_config
+    from meerschaum.utils.warnings import warn
     if args is None:
         args = ['--upgrade'] if not _uninstall else []
     if color:
@@ -896,11 +934,7 @@ def pip_install(
     else:
         ANSI, UNICODE = False, False
     if check_wheel:
-        try:
-            import wheel
-            have_wheel = True
-        except ImportError as e:
-            have_wheel = False
+        have_wheel = venv_contains_package('wheel', venv=venv, debug=debug)
     _args = list(args)
     have_pip = venv_contains_package('pip', venv=venv, debug=debug)
     import sys
@@ -931,7 +965,16 @@ def pip_install(
 
     if check_wheel and not _uninstall:
         if not have_wheel:
-            _args.append('wheel')
+            if not pip_install(
+                'wheel',
+                venv=venv, deactivate=False,
+                check_update=False, check_pypi=False,
+                check_wheel=False, debug=debug,
+            ):
+                warn(
+                    f"Failed to install `wheel` for virtual environment '{venv}'.",
+                    color=False,
+                )
 
     if not ANSI and '--no-color' not in _args:
         _args.append('--no-color')
@@ -941,6 +984,9 @@ def pip_install(
 
     if '--no-input' not in _args:
         _args.append('--no-input')
+
+    if _uninstall and '-y' not in _args:
+        _args.append('-y')
 
     if '--no-warn-conflicts' not in _args and not _uninstall:
         _args.append('--no-warn-conflicts')
@@ -971,13 +1017,29 @@ def pip_install(
     _packages = []
     for p in packages:
         root_name = p.split('.')[0] if split else p
-        install_name = all_packages.get(root_name, root_name)
+        install_name = _import_to_install_name(root_name)
+        if _uninstall:
+            install_name = get_install_no_version(install_name)
         _packages.append(install_name)
 
     msg = "Installing packages:" if not _uninstall else "Uninstalling packages:"
     for p in _packages:
         msg += f'\n  - {p}'
-    print(msg)
+    if not silent:
+        print(msg)
+
+    if not _uninstall:
+        for install_name in _packages:
+            _install_no_version = get_install_no_version(install_name)
+            if _install_no_version in ('pip', 'wheel'):
+                continue
+            if not completely_uninstall_package(
+                _install_no_version,
+                venv=venv, debug=debug,
+            ):
+                warn(
+                    f"Failed to clean up package '{_install_no_version}'.",
+                )
 
     success = run_python_package('pip', _args + _packages, venv=venv, debug=debug) == 0
     if deactivate:
@@ -986,10 +1048,39 @@ def pip_install(
         "Successfully " + ('un' if _uninstall else '') + "installed packages." if success 
         else "Failed to " + ('un' if _uninstall else '') + "install packages."
     )
-    print(msg)
+    if not silent:
+        print(msg)
     if debug:
         print('pip ' + ('un' if _uninstall else '') + 'install returned:', success)
     return success
+
+
+def completely_uninstall_package(
+        install_name: str,
+        venv: str = 'mrsm',
+        debug: bool = False,
+    ) -> bool:
+    """
+    Continue calling `pip uninstall` until a package is completely
+    removed from a virtual environment. 
+    This is useful for dealing with multiple installed versions of a package.
+    """
+    attempts, max_attempts = 0, 3
+    while attempts < max_attempts:
+        _install_no_version = get_install_no_version(install_name)
+        if not venv_contains_package(
+            _install_to_import_name(_install_no_version),
+            venv=venv, debug=debug,
+        ):
+            return True
+        if not pip_uninstall(
+            _install_no_version,
+            venv=venv,
+            silent=(not debug), debug=debug
+        ):
+            return False
+        attempts += 1
+    return False
 
 
 def pip_uninstall(
@@ -1286,7 +1377,12 @@ def lazy_import(
         **kw
     )
 
-def import_pandas(deactivate : bool = False, debug : bool = False, lazy : bool = False,  **kw) -> 'ModuleType':
+def import_pandas(
+        deactivate: bool = False,
+        debug: bool = False,
+        lazy: bool = False,
+        **kw
+    ) -> 'ModuleType':
     """
     Quality-of-life function to attempt to import the configured version of `pandas`.
     """
@@ -1298,6 +1394,7 @@ def import_pandas(deactivate : bool = False, debug : bool = False, lazy : bool =
         pandas_module_name = 'modin.pandas'
 
     activate_venv(venv='mrsm', debug=debug)
+    pytz = attempt_import('pytz', deactivate=deactivate, debug=debug, lazy=False, **kw)
     pd = attempt_import(pandas_module_name, deactivate=deactivate, debug=debug, lazy=lazy, **kw)
     if deactivate:
         deactivate_venv(venv='mrsm', debug=debug)
@@ -1501,7 +1598,7 @@ def reload_package(
     return pydoc.safeimport(package_name, forceload=1)
 
 def is_installed(
-        name: str,
+        import_name: str,
         venv: Optional[str] = None,
         deactivate: bool = True,
         debug: bool = False,
@@ -1510,23 +1607,30 @@ def is_installed(
     Check whether a package is installed.
     """
     import importlib.util
-    activate_venv(venv=venv)
+    activate_venv(venv=venv, debug=debug)
     try:
-        found = importlib.util.find_spec(name) is not None
-    except (ModuleNotFoundError, ValueError):
+        found = importlib.util.find_spec(import_name) is not None
+    except (ModuleNotFoundError, ValueError) as e:
         found = False
-    if venv is None:
-        return found
-    mod = attempt_import(name, venv=venv)
-    found = (venv == package_venv(mod))
-    if deactivate:
-        deactivate_venv(venv=venv)
-    return found
-    #  return venv_contains_package(name, venv=venv, debug=debug)
+    if found:
+        return True
+
+    #  try:
+        #  mod = manually_import_module(import_name, split=False, venv=venv, debug=debug)
+    #  except ModuleNotFoundError:
+        #  mod = None
+    #  found = mod is not None and (venv == package_venv(mod))
+    #  if deactivate:
+        #  deactivate_venv(venv=venv)
+    #  return found
+    return venv_contains_package(import_name, venv=venv, debug=debug)
 
 
 def venv_contains_package(
-        name: str, venv: Optional[str] = None, split: bool = True, debug: bool = False,
+        import_name: str,
+        venv: Optional[str] = 'mrsm',
+        split: bool = True,
+        debug: bool = False,
     ) -> bool:
     """
     Search the contents of a virtual environment for a package.
@@ -1535,7 +1639,15 @@ def venv_contains_package(
     vtp = venv_target_path(venv, debug=debug, allow_nonexistent=True)
     if not vtp.exists():
         return False
-    return (name.split('.')[0] if split else name) in os.listdir(vtp)
+    dir_name = _import_to_dir_name(
+        import_name.split('.')[0] if split else import_name
+    )
+    for file_name in os.listdir(vtp):
+        if dir_name in file_name:
+            return True
+        #  if file_name.endswith('dist-info') and file_name.startswith(dir_name):
+            #  return True
+    return False
 
 
 def venv_exists(venv: Union[str, None], debug: bool = False) -> bool:
@@ -1567,22 +1679,18 @@ def venv_target_path(
     The `pathlib.Path` object for the virtual environment's path.
 
     """
-    import os, sys, platform, pathlib
+    import os, sys, platform, pathlib, site
+    from meerschaum.config._paths import VIRTENV_RESOURCES_PATH
 
     ### Check sys.path for a user-writable site-packages directory.
     if venv is None:
-        proc = run_python_package(
-            'site', ['--user-site'],
-            as_proc=True, capture_output=True, debug=debug, universal_newlines=True,
-        )
-        outs, errs = proc.communicate()
-        lines = outs.split('\n')
-        path = pathlib.Path(lines[0])
-        return path
+        if not inside_venv():
+            return pathlib.Path(site.getusersitepackages())
 
-    from meerschaum.config._paths import VIRTENV_RESOURCES_PATH
-
-    venv_root_path = VIRTENV_RESOURCES_PATH / venv
+    venv_root_path = (
+        (VIRTENV_RESOURCES_PATH / venv)
+        if venv is not None else pathlib.Path(sys.prefix)
+    )
     target_path = venv_root_path
 
     ### Ensure 'lib' or 'Lib' exists.

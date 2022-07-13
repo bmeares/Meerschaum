@@ -40,12 +40,13 @@ def login(
             json.loads(response.text)['expires'], 
             '%Y-%m-%dT%H:%M:%S.%f'
         )
-    elif warn:
+    else:
         msg = (
-            f"   Failed to log into '{self}' as user '{login_data['username']}'.\n" +
+            f"Failed to log into '{self}' as user '{login_data['username']}'.\n" +
             f"   Please verify login details for connector '{self}'."
         )
-        _warn(msg, stack=False)
+        if warn:
+            _warn(msg, stack=False)
 
     return response.__bool__(), msg
 

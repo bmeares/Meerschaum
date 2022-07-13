@@ -11,33 +11,13 @@ from meerschaum.utils.typing import Optional, Dict, Any
 
 def post(
         self,
-        r_url : str,
-        headers : Optional[Dict[str, Any]] = None,
-        use_token : bool = True,
-        debug : bool = False,
-        **kw : Any
+        r_url: str,
+        headers: Optional[Dict[str, Any]] = None,
+        use_token: bool = True,
+        debug: bool = False,
+        **kw: Any
     ) -> requests.Response:
-    """Wrapper for requests.post
-
-    Parameters
-    ----------
-    r_url : str :
-        
-    headers : Optional[Dict[str :
-        
-    Any]] :
-         (Default value = None)
-    use_token : bool :
-         (Default value = True)
-    debug : bool :
-         (Default value = False)
-    **kw : Any :
-        
-
-    Returns
-    -------
-
-    """
+    """Wrapper for `requests.post`."""
     if debug:
         from meerschaum.utils.debug import dprint
 
