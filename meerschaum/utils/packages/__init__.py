@@ -22,9 +22,68 @@ _locks = {
 }
 _checked_for_updates = set()
 
+def get_module_path(
+        import_name: str,
+        venv: Optional[str] = 'mrsm',
+        debug: bool = False,
+        _try_install_name_on_fail: bool = True,
+    ) -> Union[pathlib.Path, None]:
+    """
+    Get a module's path without importing.
+    """
+    if not _try_install_name_on_fail:
+        install_name = _import_to_install_name(import_name, with_version=False)
+        install_name_lower = install_name.lower().replace('-', '_')
+        import_name_lower = install_name_lower
+    else:
+        import_name_lower = import_name.lower().replace('-', '_')
+    vtp = venv_target_path(venv)
+    candidates = []
+    for file_name in os.listdir(vtp):
+        file_name_lower = file_name.lower().replace('-', '_')
+        if not file_name_lower.startswith(import_name_lower):
+            continue
+        if file_name.endswith('dist_info'):
+            continue
+        file_path = vtp / file_name
+
+        ### Most likely: Is a directory with __init__.py
+        if file_name_lower == import_name_lower and file_path.is_dir():
+            init_path = file_path / '__init__.py'
+            if init_path.exists():
+                candidates.append(init_path)
+
+        ### May be a standalone .py file.
+        elif file_name_lower == import_name_lower + '.py':
+            candidates.append(file_path)
+
+        ### Compiled wheels (e.g. pyodbc)
+        elif file_name_lower.startswith(import_name_lower + '.'):
+            candidates.append(file_path)
+
+    if len(candidates) == 1:
+        return candidates[0]
+
+    if not candidates:
+        if _try_install_name_on_fail:
+            return get_module_path(
+                import_name, venv=venv, debug=debug,
+                _try_install_name_on_fail=False
+            )
+        return None
+
+    specs_paths = []
+    for candidate_path in candidates:
+        spec = importlib.util.spec_from_file_location(import_name, str(candidate_path))
+        if spec is not None:
+            return candidate_path
+    
+    return None
+
+
 def manually_import_module(
         import_name: str,
-        venv: Optional[str] = None,
+        venv: Optional[str] = 'mrsm',
         check_update: bool = True,
         check_pypi: bool = False,
         install: bool = True,
@@ -42,7 +101,7 @@ def manually_import_module(
     import_name: str
         The name of the module.
         
-    venv: Optional[str], default None
+    venv: Optional[str], default 'mrsm'
         The virtual environment to read from.
 
     check_update: bool, default True
@@ -84,28 +143,26 @@ def manually_import_module(
     from meerschaum.utils.warnings import warn as warn_function
     import warnings
     root_name = import_name.split('.')[0] if split else import_name
-    install_name = all_packages.get(root_name, root_name)
-    venv_path = venv_target_path(venv)
-    mod_path = venv_path
-    for _dir in import_name.split('.')[:-1]:
-        mod_path = mod_path / _dir
-    root_path = venv_path / root_name
-    root_path = (
-        (venv_path / root_name / '__init__.py') if (venv_path / root_name / '__init__.py').exists()
-        else venv_path / (root_name + '.py')
-    )
+    install_name = _import_to_install_name(root_name)
 
-    possible_end_module_filename = import_name.split('.')[-1] + '.py'
-    try:
-        mod_path = (
-            (mod_path / possible_end_module_filename)
-            if possible_end_module_filename in os.listdir(mod_path)
-            else (
-                mod_path / import_name.split('.')[-1] / '__init__.py'
-            )
-        )
-    except Exception as e:
-        mod_path = None
+    root_path = get_module_path(root_name, venv=venv)
+    if root_path is None:
+        return None
+    mod_path = root_path
+    if mod_path.is_dir():
+        for _dir in import_name.split('.')[:-1]:
+            mod_path = mod_path / _dir
+            possible_end_module_filename = import_name.split('.')[-1] + '.py'
+            try:
+                mod_path = (
+                    (mod_path / possible_end_module_filename)
+                    if possible_end_module_filename in os.listdir(mod_path)
+                    else (
+                        mod_path / import_name.split('.')[-1] / '__init__.py'
+                    )
+                )
+            except Exception as e:
+                mod_path = None
 
     spec = (
         importlib.util.find_spec(import_name) if mod_path is None or not mod_path.exists()
@@ -635,7 +692,7 @@ def init_venv(venv: str='mrsm', debug: bool=False) -> bool:
 
     Parameters
     ----------
-    venv: str:
+    venv: str, default 'mrsm'
         The name of the virtual environment to create.
 
     Returns
@@ -761,7 +818,7 @@ def activate_venv(
     return True
 
 
-def venv_executable(venv: Optional[str]=None) -> str:
+def venv_executable(venv: Optional[str] = 'mrsm') -> str:
     """
     The Python interpreter executable for a given virtual environment.
     """
@@ -797,15 +854,12 @@ def venv_exec(
     venv: str, default 'mrsm'
         The virtual environment to use to get the path for the Python executable.
         If `venv` is `None`, use the default `sys.executable` path.
-        Defaults to 'mrsm'.
 
     with_extras: bool, default False
         If `True`, return a tuple of the exit code, stdout bytes, and stderr bytes.
-        Defaults to `False`.
 
     as_proc: bool, default False
         If `True`, return the `subprocess.Popen` object instead of executing.
-        Defaults to `False`.
 
     Returns
     -------
@@ -832,7 +886,7 @@ def venv_exec(
     exit_code = process.returncode
     return exit_code, stdout, stderr
 
-def get_pip(venv: Optional[str]=None, debug: bool=False) -> bool:
+def get_pip(venv: Optional[str] = 'mrsm', debug: bool=False) -> bool:
     """
     Download and run the get-pip.py script.
 
@@ -936,7 +990,7 @@ def pip_install(
     if check_wheel:
         have_wheel = venv_contains_package('wheel', venv=venv, debug=debug)
     _args = list(args)
-    have_pip = venv_contains_package('pip', venv=venv, debug=debug)
+    have_pip = venv_contains_package('pip', venv=venv, debug=True)
     import sys
     if not have_pip:
         if not get_pip(venv=venv, debug=debug):
@@ -1092,10 +1146,11 @@ def pip_uninstall(
     """
     return pip_install(*args, _uninstall=True, **{k: v for k, v in kw.items() if k != '_uninstall'})
 
+
 def run_python_package(
         package_name: str,
         args: Optional[List[str]] = None,
-        venv: Optional[str] = None,
+        venv: Optional[str] = 'mrsm',
         cwd: Optional[str] = None,
         foreground: bool = False,
         as_proc: bool = False,
@@ -1114,11 +1169,9 @@ def run_python_package(
 
     args: Optional[List[str]], default None
         Additional command line arguments to be appended after `-m [package]`.
-        Defaults to `None`.
 
-    venv: Optional[str], default None
+    venv: Optional[str], default 'mrsm'
         If specified, execute the Python interpreter from a virtual environment.
-        Defaults to `None`.
 
     cwd: Optional[str], default None
         If specified, change directories before starting the process.
@@ -1599,21 +1652,23 @@ def reload_package(
 
 def is_installed(
         import_name: str,
-        venv: Optional[str] = None,
+        venv: Optional[str] = 'mrsm',
         deactivate: bool = True,
         debug: bool = False,
     ) -> bool:
     """
     Check whether a package is installed.
     """
+    path = get_module_path(import_name, venv=venv)
+    if path is not None:
+        return True
     import importlib.util
     activate_venv(venv=venv, debug=debug)
     try:
         found = importlib.util.find_spec(import_name) is not None
     except (ModuleNotFoundError, ValueError) as e:
         found = False
-    if found:
-        return True
+    return found
 
     #  try:
         #  mod = manually_import_module(import_name, split=False, venv=venv, debug=debug)
@@ -1623,7 +1678,7 @@ def is_installed(
     #  if deactivate:
         #  deactivate_venv(venv=venv)
     #  return found
-    return venv_contains_package(import_name, venv=venv, debug=debug)
+    #  return venv_contains_package(import_name, venv=venv, debug=debug)
 
 
 def venv_contains_package(
@@ -1635,19 +1690,21 @@ def venv_contains_package(
     """
     Search the contents of a virtual environment for a package.
     """
-    import os
-    vtp = venv_target_path(venv, debug=debug, allow_nonexistent=True)
-    if not vtp.exists():
-        return False
-    dir_name = _import_to_dir_name(
-        import_name.split('.')[0] if split else import_name
-    )
-    for file_name in os.listdir(vtp):
-        if dir_name in file_name:
-            return True
+    #  if debug:
+        #  from meerschaum.utils.debug import dprint
+    return get_module_path(import_name, venv=venv) is not None
+    #  vtp = venv_target_path(venv, debug=debug, allow_nonexistent=True)
+    #  if not vtp.exists():
+        #  return False
+    #  dir_name = _import_to_dir_name(
+        #  import_name.split('.')[0] if split else import_name
+    #  )
+    #  for file_name in os.listdir(vtp):
         #  if file_name.endswith('dist-info') and file_name.startswith(dir_name):
+            #  if debug:
+                #  dprint(f"Found dist-info: {file_name}", color=False)
             #  return True
-    return False
+    #  return False
 
 
 def venv_exists(venv: Union[str, None], debug: bool = False) -> bool:
