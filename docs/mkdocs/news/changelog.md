@@ -3,7 +3,40 @@
 ## 1.0.x Releases
 This is the current release cycle, so future features will be updated below.
 
-### v1.0.3 — v1.0.4
+### v1.0.6
+
+- **Plugins may now have `requirements.txt`.**  
+  If a plugin contains a file named `requirements.txt`, the file will be parsed alongside the packages specified in the `required` list.
+- **Added the module `meerschaum.utils.venv`.**  
+  Functions related to virtual environment management () have been migrated from `meerschaum.utils.packages` to [`meerschaum.utils.venv`]((https://docs.meerschaum.io/utils/venv/index.html)).
+- **Added the `Venv` class.**  
+  You can now manage your virtual environments with the `Venv` context manager:
+
+  ```python
+  from meerschaum.utils.venv import Venv
+
+  with Venv():
+      import pandas
+
+  with Venv('foo'):
+      import bar
+  ```
+
+  You can also activate the environments for a `Plugin`:
+
+  ```python
+  from meerschaum.utils.venv import Venv
+  from meerschaum.plugins import Plugin
+
+  with Venv(Plugin('noaa')):
+      import requests
+  ```
+- **Removed `--isolated` from `pip_install`.**  
+  Virtual environments will now respect environment variables and your global `pip` configuration (`~/.pip/pip.conf`).
+- **Fixed issues for Python 3.7**
+
+
+### v1.0.3 — v1.0.5
 
 - **Fixed environment bugs.**  
   This patch resolves issues with the environment variables `MRSM_ROOT_DIR`, `MRSM_CONFIG`, and `MRSM_PATCH` as well as the configuration directories `patch_config` and `permanent_patch_config`.

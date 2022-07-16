@@ -71,6 +71,7 @@ class Plugin:
             repo_connector = parse_repo_keys(repo_keys)
         self.repo_connector = repo_connector
 
+
     @property
     def version(self):
         """
@@ -82,6 +83,7 @@ class Plugin:
             except Exception as e:
                 self._version = None
         return self._version
+
 
     @property
     def module(self):
@@ -115,6 +117,19 @@ class Plugin:
             return str(potential_file)
 
         return None
+
+
+    @property
+    def requirements_file_path(self) -> Union[pathlib.Path, None]:
+        """
+        If a file named `requirements.txt` exists, return its path.
+        """
+        if self.__file__ is None:
+            return None
+        path = pathlib.Path(self.__file__).parent / 'requirements.txt'
+        if not path.exists():
+            return None
+        return path
 
 
     def is_installed(self, try_import: bool = True) -> bool:
@@ -187,7 +202,7 @@ class Plugin:
             gitignore_path = pathlib.Path(path) / '.gitignore'
             if not gitignore_path.exists():
                 return set()
-            with open(gitignore_path, 'r') as f:
+            with open(gitignore_path, 'r', encoding='utf-8') as f:
                 gitignore_text = f.read()
             return set(pathspec.PathSpec.from_lines(
                 pathspec.patterns.GitWildMatchPattern,
@@ -230,7 +245,7 @@ class Plugin:
     def install(
             self,
             force: bool = False,
-            debug: bool = False
+            debug: bool = False,
         ) -> SuccessTuple:
         """
         Extract a plugin's tar archive to the plugins directory.
@@ -537,6 +552,7 @@ class Plugin:
             return False, f"Setup for Plugin '{self.name}' returned None."
         return False, f"Unknown return value from setup for Plugin '{self.name}': {return_tuple}"
 
+
     def get_dependencies(
             self,
             debug: bool = False,
@@ -712,6 +728,29 @@ class Plugin:
                 )
 
 
+        ### First step: parse `requirements.txt` if it exists.
+        if self.requirements_file_path is not None:
+            if not pip_install(
+                requirements_file_path=self.requirements_file_path,
+                venv=self.name, debug=debug
+            ):
+                warn(
+                    f"Failed to resolve 'requirements.txt' for plugin '{self.name}'.",
+                    stack = False,
+                )
+                if not force:
+                    warn(
+                        "Try installing with `--force` to continue anyway.",
+                        stack = False,
+                    )
+                    return False
+                info(
+                    "Continuing with installation despite the failure "
+                    + "(careful, things might be broken!)...",
+                    icon = False
+                )
+
+
         ### Don't reinstall packages that are already included in required plugins.
         packages = []
         _packages = self.get_required_packages(debug=debug)
@@ -734,7 +773,7 @@ class Plugin:
                     )
                     if not force:
                         warn(
-                            "Try installing with the `--force` flag to continue anyway.",
+                            "Try installing with `--force` to continue anyway.",
                             stack = False,
                         )
                         return False
@@ -755,11 +794,14 @@ class Plugin:
         sep = _static_config()['plugins']['repo_separator']
         return self.name + sep + str(self.repo_connector)
 
+
     def __str__(self):
         return self.name
 
+
     def __repr__(self):
         return f"Plugin('{self.name}', repo='{self.repo_connector}')"
+
 
     def __del__(self):
         pass
