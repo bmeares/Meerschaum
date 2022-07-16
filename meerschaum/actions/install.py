@@ -24,6 +24,7 @@ def install(
     }
     return choose_subaction(action, options, **kw)
 
+
 def _complete_install(
         action: Optional[List[str]] = None,
         **kw: Any
@@ -48,6 +49,7 @@ def _complete_install(
 
     from meerschaum._internal.shell import default_action_completer
     return default_action_completer(action=(['install'] + action), **kw)
+
 
 def _install_plugins(
         action: Optional[List[str]] = None,
@@ -95,6 +97,7 @@ def _install_plugins(
     reload_plugins(debug=debug)
     return True, "Success"
 
+
 def _complete_install_plugins(
         action: Optional[List[str]] = None,
         repository: Optional[str] = None,
@@ -132,6 +135,7 @@ def _complete_install_plugins(
         return []
     return sorted(results)
 
+
 def _install_packages(
         action: Optional[List[str]] = None,
         sub_args: Optional[List[str]] = None,
@@ -158,6 +162,7 @@ def _install_packages(
     return False, (
         f"Failed to install package" + ("s" if len(action) != 1 else '') + f" {items_str(action)}."
     )
+
 
 def _complete_install_packages(
         **kw : Any

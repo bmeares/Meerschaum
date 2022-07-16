@@ -12,7 +12,7 @@ from meerschaum.utils.typing import (
     Sequence, Optional, Union, Mapping, Any, InstanceConnector, PipesDict, List, Dict, Tuple
 )
 
-__pdoc = {'get_pipes': True, 'fetch_pipes_keys': True}
+__pdoc__ = {'get_pipes': True, 'fetch_pipes_keys': True}
 
 def get_pipes(
         connector_keys: Union[str, List[str], None] = None,
