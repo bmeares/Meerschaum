@@ -248,10 +248,18 @@ def venv_executable(venv: Optional[str] = 'mrsm') -> str:
     import sys, platform, os
     return (
         sys.executable if venv is None
-        else os.path.join(
-            VIRTENV_RESOURCES_PATH, venv, (
-                'bin' if platform.system() != 'Windows' else 'Scripts'
-            ), 'python'
+        else str(
+            VIRTENV_RESOURCES_PATH
+            / venv
+            / (
+                'bin' if platform.system() != 'Windows'
+                else 'Scripts'
+            ) / (
+                'python'
+                + str(sys.version_info.major)
+                + '.'
+                + str(sys.version_info.minor)
+            )
         )
     )
 

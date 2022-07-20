@@ -709,10 +709,7 @@ def pip_install(
     if args is None:
         args = ['--upgrade'] if not _uninstall else []
     if color:
-        try:
-            from meerschaum.utils.formatting import ANSI, UNICODE
-        except ImportError:
-            ANSI, UNICODE = False, False
+        ANSI, UNICODE = True, True
     else:
         ANSI, UNICODE = False, False
     if check_wheel:
@@ -723,11 +720,15 @@ def pip_install(
     if not have_pip:
         if not get_pip(venv=venv, debug=debug):
             import sys
+            minor = sys.version_info.minor
             print(
-                "Failed to import pip and ensurepip. " +
-                "Please install pip and restart Meerschaum.\n\n" +
-                "You can find instructions on installing pip here: " +
-                "https://pip.pypa.io/en/stable/installing/"
+                "\nFailed to import `pip` and `ensurepip`.\n"
+                + "If you are running Ubuntu/Debian, "
+                + "you might need to install `python3.{minor}-distutils`:\n\n"
+                + f"    sudo apt install python3.{minor}-pip python3.{minor}-venv\n\n"
+                + "Please install pip and restart Meerschaum.\n\n"
+                + "You can find instructions on installing `pip` here:\n"
+                + "https://pip.pypa.io/en/stable/installing/"
             )
             sys.exit(1)
     activate_venv(venv=venv, debug=debug, color=color)
