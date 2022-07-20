@@ -49,13 +49,30 @@ def _entry_with_args(**kw) -> SuccessTuple:
     if kw.get('trace', None):
         from meerschaum.utils.misc import debug_trace
         debug_trace()
-    if len(kw.get('action', [])) == 0:
+    if (
+        len(kw.get('action', [])) == 0
+        or
+        (kw['action'][0] == 'mrsm' and len(kw['action']) == 0)
+    ):
         return get_shell().cmdloop()
 
     main_action = kw['action'][0]
 
-    ### if action does not exist, execute in bash
+    ### if action does not exist, execute in a subshell
+    try_shell = False
     if main_action not in actions:
+        try_shell = True
+        if len(kw['action']) > 1:
+            secondary_action = kw['action'][1]
+            possible_underscored_action = main_action + '_' + secondary_action
+            if possible_underscored_action in actions:
+                main_action = possible_underscored_action
+                kw['action'] = [main_action] + kw[2:]
+                try_shell = False
+            else:
+                try_shell = True
+                
+    if try_shell:
         main_action = 'sh'
         kw['action'].insert(0, main_action)
 
