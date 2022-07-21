@@ -33,6 +33,7 @@ class Plugin:
         name: str,
         version: Optional[str] = None,
         user_id: Optional[int] = None,
+        required: Optional[List[str]] = None,
         attributes: Optional[Dict[str, Any]] = None,
         archive_path: Optional[pathlib.Path] = None,
         venv_path: Optional[pathlib.Path] = None,
@@ -55,6 +56,8 @@ class Plugin:
         self.attributes = attributes
         self.user_id = user_id
         self._version = version
+        if required:
+            self._required = required
         self.archive_path = (
             archive_path if archive_path is not None
             else PLUGINS_ARCHIVES_RESOURCES_PATH / f"{self.name}.tar.gz"
@@ -573,6 +576,8 @@ class Plugin:
         A list of required packages and plugins (str).
 
         """
+        if '_required' in self.__dict__:
+            return self._required
         import inspect
         self.activate_venv(dependencies=False, debug=debug)
         required = []
@@ -580,6 +585,7 @@ class Plugin:
             if name == 'required':
                 required = val
                 break
+        self._required = required
         self.deactivate_venv(dependencies=False, debug=debug)
         return required
 

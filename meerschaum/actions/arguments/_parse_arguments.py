@@ -13,19 +13,19 @@ from meerschaum.utils.typing import List, Dict, Any, Optional
 from meerschaum.actions.arguments._parser import parser
 
 def parse_arguments(sysargs: List[str]) -> Dict[str, Any]:
-    """Parse a list of arguments into standard Meerschaum arguments.
+    """
+    Parse a list of arguments into standard Meerschaum arguments.
     Returns a dictionary of argument_name -> argument_value.
 
     Parameters
     ----------
-    sysargs :
+    sysargs: List[str]
         List of command-line arguments to process. Does not include the executable.
         E.g. ['show', 'version', '--nopretty']
-    sysargs: List[str] :
-        
 
     Returns
     -------
+    A dictionary of keyword arguments.
 
     """
     import copy
@@ -124,29 +124,28 @@ def parse_arguments(sysargs: List[str]) -> Dict[str, Any]:
 
     return parse_synonyms(args_dict)
 
-def parse_line(line : str) -> dict:
-    """Parse a line of text into standard Meerschaum arguments.
+def parse_line(line: str) -> Dict[str, Any]:
+    """
+    Parse a line of text into standard Meerschaum arguments.
     
-    line: str
-        Line of text to be parsed
-    
-    returns: dict of arguments
-
     Parameters
     ----------
-    line : str :
-        
+    line: str
+        The line of text to be parsed.
 
     Returns
     -------
+    A dictionary of arguments.
+
+    Examples
+    --------
+    >>> parse_line('show pipes --debug')
+    {'action': ['show', 'pipes'], 'debug': True,}
 
     """
     import shlex
     try:
-        args_list = shlex.split(line)
-        return parse_arguments(
-            shlex.split(line)
-        )
+        return parse_arguments(shlex.split(line))
     except Exception as e:
         return {'action': [], 'text': line,}
 

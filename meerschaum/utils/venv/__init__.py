@@ -56,8 +56,6 @@ def activate_venv(
     from meerschaum.config._paths import VIRTENV_RESOURCES_PATH
     if debug:
         from meerschaum.utils.debug import dprint
-    #  old_cwd = pathlib.Path(os.getcwd())
-    #  os.chdir(VIRTENV_RESOURCES_PATH)
     if venv is not None:
         init_venv(venv=venv, debug=debug)
     with LOCKS['active_venvs']:
@@ -68,8 +66,6 @@ def activate_venv(
     target = venv_target_path(venv, debug=debug)
     if str(target) not in sys.path:
         sys.path.insert(0, str(target))
-    if debug:
-        dprint(f'sys.path: {sys.path}', color=color)
     return True
 
 
@@ -116,9 +112,6 @@ def deactivate_venv(
     with LOCKS['sys.path']:
         if str(target) in sys.path:
             sys.path.remove(str(target))
-
-    if debug:
-        dprint(f'sys.path: {sys.path}', color=color)
 
     return True
 
