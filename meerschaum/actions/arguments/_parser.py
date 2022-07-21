@@ -9,7 +9,7 @@ This module creates the argparse Parser.
 from __future__ import annotations
 import sys
 import argparse, json
-from meerschaum.utils.typing import Union, Dict, List, Any, Tuple
+from meerschaum.utils.typing import Union, Dict, List, Any, Tuple, Callable
 from meerschaum.utils.misc import string_to_dict
 
 
@@ -31,17 +31,7 @@ class ArgumentParser(argparse.ArgumentParser):
 
 
 def parse_datetime(dt_str : str) -> datetime.datetime:
-    """Parse a string into a datetime.
-
-    Parameters
-    ----------
-    dt_str : str :
-        
-
-    Returns
-    -------
-
-    """
+    """Parse a string into a datetime."""
     from meerschaum.utils.packages import attempt_import
     import datetime
     dateutil_parser = attempt_import('dateutil.parser')
@@ -59,21 +49,7 @@ def parse_datetime(dt_str : str) -> datetime.datetime:
     return dt
 
 def parse_help(sysargs : Union[List[str], Dict[str, Any]]) -> None:
-    """Parse the `--help` flag to determine which help message to print.
-
-    Parameters
-    ----------
-    sysargs : Union[List[str] :
-        
-    Dict[str :
-        
-    Any]] :
-        
-
-    Returns
-    -------
-
-    """
+    """Parse the `--help` flag to determine which help message to print."""
     from meerschaum.actions.arguments._parse_arguments import parse_arguments, parse_line
     from meerschaum.actions import actions, get_subactions
     import importlib, inspect, textwrap
@@ -108,17 +84,7 @@ def parse_help(sysargs : Union[List[str], Dict[str, Any]]) -> None:
     return print(textwrap.dedent(doc))
 
 def parse_version(sysargs : List[str]):
-    """Print the Meerschaum version.
-
-    Parameters
-    ----------
-    sysargs : List[str] :
-        
-
-    Returns
-    -------
-
-    """
+    """Print the Meerschaum version."""
     from meerschaum.config import __version__ as version
     from meerschaum.config import __doc__ as doc
     if '--nopretty' in sysargs:
@@ -133,10 +99,11 @@ def get_arguments_triggers() -> Dict[str, Tuple[str]]:
         triggers[_a.dest] = tuple(_a.option_strings)
     return triggers
 
+
 parser = ArgumentParser(
     prog = 'mrsm',
     description = "Create and Build Pipes with Meerschaum.",
-    usage = "mrsm [action with optional arguments] {options}",
+    usage = "mrsm [actions] {options}",
     add_help = False,
 )
 _seen_plugin_args = {}

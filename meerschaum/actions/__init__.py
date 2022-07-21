@@ -20,7 +20,7 @@ modules = get_modules_from_package(
     sys.modules[__name__],
     names = False,
 )
-__all__ = ['actions', 'get_subactions',]
+__all__ = ['actions', 'get_subactions', 'get_action']
 
 ### Build the actions dictionary by importing all
 ### functions that do not begin with '_' from all submodules.
@@ -81,7 +81,11 @@ def get_shell(
             _shell.__init__()
     return _shell
 
-def get_subactions(action: str) -> Dict[str, Callable[[Any], Any]]:
+
+def get_subactions(
+        action: Union[str, List[str]],
+        _actions: Optional[Dict[str, Callable[[Any], Any]]] = None,
+    ) -> Dict[str, Callable[[Any], Any]]:
     """
     Return a dictionary of an action's sub-action functions.
 
@@ -93,19 +97,72 @@ def get_subactions(action: str) -> Dict[str, Callable[[Any], Any]]:
     """
     import importlib, inspect
     subactions = {}
+    if isinstance(action, str):
+        action = [action]
+    action_function = get_action(action[0], _actions=_actions)
+    if action_function is None:
+        return subactions
     try:
-        action_module = importlib.import_module(f"meerschaum.actions.{action}")
+        action_module = importlib.import_module(action_function.__module__)
     except ImportError:
         action_module = None
-    if action_module is not None:
-        for name, f in inspect.getmembers(action_module):
-            if not inspect.isfunction(f):
-                continue
-            if action + '_' in name and not name.lstrip('_').startswith('complete'):
-                _name = name.replace(action, '')
-                _name = _name.lstrip('_')
-                subactions[_name] = f
+    if action_module is None:
+        return subactions
+    for name, f in inspect.getmembers(action_module):
+        if not inspect.isfunction(f):
+            continue
+        if action_function.__name__ + '_' in name and not name.lstrip('_').startswith('complete'):
+            _name = name.replace(action.__name__, '')
+            _name = _name.lstrip('_')
+            subactions[_name] = f
     return subactions
+
+
+def get_action(
+        action: Union[str, List[str]],
+        _actions: Optional[Dict[str, Callable[[Any], Any]]] = None,
+    ) -> Union[Callable[[Any], Any], None]:
+    """
+    Return a function corresponding to the given action list.
+    This may be a custom action with an underscore, in which case, allow for underscores.
+    This may also be a subactions, which is handled by `get_subactions()`
+    """
+    if _actions is None:
+        _actions = actions
+    if isinstance(action, str):
+        action = [action]
+
+    if not any(action):
+        return None
+
+    ### Simple case, e.g. ['show']
+    if len(action) == 1:
+        if action[0] in _actions:
+            return _actions[action[0]]
+
+        ### e.g. ['foo'] (and no custom action available)
+        return None
+
+    ### Might be dealing with a subaction.
+    if action[0] in _actions:
+        subactions = get_subactions([action[0]], _actions=_actions)
+        if action[1] not in subactions:
+            return _actions[action[0]]
+        return subactions[action[1]]
+
+    ### Last case: it could be a custom action with an underscore in the name.
+    action_name_with_underscores = '_'.join(action)
+    candidates = []
+    for action_key, action_function in _actions.items():
+        if not '_' in action_key:
+            continue
+        if action_name_with_underscores.startswith(action_key):
+            leftovers = action_name_with_underscores.replace(action_key, '')
+            candidates.append((len(leftovers), action_function))
+    if len(candidates) > 0:
+        return sorted(candidates)[0][1]
+
+    return None
 
 
 def get_completer(action: str) -> Union[

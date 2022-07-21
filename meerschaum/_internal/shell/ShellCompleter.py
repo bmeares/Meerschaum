@@ -9,7 +9,8 @@ Implement the prompt_toolkit Completer base class.
 from __future__ import annotations
 from prompt_toolkit.completion import Completer, Completion
 from meerschaum.utils.typing import Optional
-from meerschaum.actions import get_shell, get_completer
+from meerschaum.actions import get_shell, get_completer, get_action
+from meerschaum.actions.arguments import parse_line
 
 from meerschaum.utils.packages import attempt_import, ensure_readline
 prompt_toolkit = attempt_import('prompt_toolkit', lazy=False, install=True)
@@ -25,10 +26,12 @@ class ShellCompleter(Completer):
         """
         shell_actions = [a[3:] for a in dir(get_shell()) if a.startswith('do_')]
         yielded = []
+        ensure_readline()
         for i, a in enumerate(shell_actions):
-            ensure_readline()
             try:
                 poss = get_shell().complete(document.text, i)
+                if poss:
+                    poss = poss.replace('_', ' ')
             ### Having issues with readline on portable Windows.
             except ModuleNotFoundError:
                 poss = False
@@ -40,9 +43,13 @@ class ShellCompleter(Completer):
         if yielded:
             return
 
-        action = document.text.split(' ')[0]
+        args = parse_line(document.text)
+        action_function = get_action(args['action'])
+        if action_function is None:
+            return
+        action = action_function.__name__
         possibilities = []
-        if action and f'complete_{action}' in dir(get_shell()):
+        if f'complete_{action}' in dir(get_shell()):
             possibilities = getattr(
                 get_shell(), f'complete_{action}'
             )(document.text.split(' ')[-1], document.text, 0, 0)

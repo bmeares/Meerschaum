@@ -30,7 +30,11 @@ class Venv:
     >>> 
     """
 
-    def __init__(self, venv: Union[str, Plugin, None] = 'mrsm') -> None:
+    def __init__(
+            self,
+            venv: Union[str, Plugin, None] = 'mrsm',
+            debug: bool = False,
+        ) -> None:
         if isinstance(venv, Plugin):
             self._venv = venv.name
             self._activate = venv.activate_venv
@@ -41,6 +45,7 @@ class Venv:
             self._activate = activate_venv
             self._deactivate = deactivate_venv
             self._kwargs = {'venv': venv}
+        self._debug = debug
 
 
     def activate(self, debug: bool = False) -> bool:
@@ -49,7 +54,7 @@ class Venv:
         If a `meerschaum.plugins.Plugin` was provided, its dependent virtual environments
         will also be activated.
         """
-        return self._activate(debug=debug, **self._kwargs)
+        return self._activate(debug=(debug or self._debug), **self._kwargs)
 
 
     def deactivate(self, debug: bool = False) -> bool:
@@ -58,7 +63,7 @@ class Venv:
         If a `meerschaum.plugins.Plugin` was provided, its dependent virtual environments
         will also be deactivated.
         """
-        return self._deactivate(debug=debug, **self._kwargs)
+        return self._deactivate(debug=(debug or self._debug), **self._kwargs)
 
 
     @property
@@ -68,7 +73,7 @@ class Venv:
         A `meerschaum.utils.venv.Venv` may have one virtual environment per minor Python version
         (e.g. Python 3.10 and Python 3.7).
         """
-        return venv_target_path(venv=self._venv)
+        return venv_target_path(venv=self._venv, allow_nonexistent=True, debug=self._debug)
 
 
     @property
@@ -81,11 +86,11 @@ class Venv:
 
 
     def __enter__(self) -> None:
-        self.activate()
+        self.activate(debug=self._debug)
 
 
     def __exit__(self, exc_type, exc_value, exc_traceback) -> None:
-        self.deactivate()
+        self.deactivate(debug=self._debug)
 
 
     def __str__(self) -> str:

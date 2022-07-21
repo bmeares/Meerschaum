@@ -58,23 +58,14 @@ def make_action(
     >>>
     """
 
-    from meerschaum.actions import __all__ as _all, actions
+    from meerschaum.actions import actions
     from meerschaum.utils.formatting import pprint
-    from meerschaum.utils.misc import add_method_to_class
     package_name = function.__globals__['__name__']
     plugin_name = (
         package_name.split('.')[1]
         if package_name.startswith('plugins.') else None
     )
     plugin = Plugin(plugin_name) if plugin_name else None
-
-    def _new_action_venv_wrapper(*args, debug: bool = False, **kw):
-        if plugin_name and activate:
-            plugin.activate_venv(debug=debug)
-        result = function(*args, debug=debug, **kw)
-        if plugin_name and deactivate:
-            plugin.deactivate_venv(debug=debug)
-        return result
 
     if debug:
         from meerschaum.utils.debug import dprint
@@ -83,9 +74,7 @@ def make_action(
             f"'{function.__module__.split('.')[-1]}'..."
         )
 
-    if function.__name__ not in _all:
-        _all.append(function.__name__)
-    actions[function.__name__] = _new_action_venv_wrapper
+    actions[function.__name__] = function
     return function
 
 

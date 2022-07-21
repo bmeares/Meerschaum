@@ -39,13 +39,17 @@ def _entry(sysargs: Optional[List[str]] = None) -> SuccessTuple:
         return schedule_function(_entry_with_args, args['schedule'], **args)
     return _entry_with_args(**args)
 
-def _entry_with_args(**kw) -> SuccessTuple:
+def _entry_with_args(
+        _actions: Optional[Dict[str, Callable[[Any], SuccessTuple]]] = None,
+        **kw
+    ) -> SuccessTuple:
     """Execute a Meerschaum action with keyword arguments.
     Use `_entry()` for parsing sysargs before executing.
     """
-    from meerschaum.plugins import Plugin
-    from meerschaum.actions import actions, original_actions, get_shell
     import sys
+    from meerschaum.plugins import Plugin
+    from meerschaum.actions import get_shell, get_action
+    from meerschaum.utils.venv import Venv
     if kw.get('trace', None):
         from meerschaum.utils.misc import debug_trace
         debug_trace()
@@ -56,56 +60,38 @@ def _entry_with_args(**kw) -> SuccessTuple:
     ):
         return get_shell().cmdloop()
 
-    main_action = kw['action'][0]
+    action_function = get_action(kw['action'], _actions=_actions)
 
-    ### if action does not exist, execute in a subshell
-    try_shell = False
-    if main_action not in actions:
-        try_shell = True
-        if len(kw['action']) > 1:
-            secondary_action = kw['action'][1]
-            possible_underscored_action = main_action + '_' + secondary_action
-            if possible_underscored_action in actions:
-                main_action = possible_underscored_action
-                kw['action'] = [main_action] + kw[2:]
-                try_shell = False
-            else:
-                try_shell = True
-                
-    if try_shell:
-        main_action = 'sh'
-        kw['action'].insert(0, main_action)
+    ### If action does not exist, execute in a subshell.
+    if action_function is None:
+        kw['action'].insert(0, 'sh')
 
     ### Check if the action is a plugin, and if so, activate virtual environment.
     plugin_name = (
-        actions[main_action].__module__.split('.')[1] if (
-            actions[main_action].__module__.startswith('plugins.')
+        action_function.__module__.split('.')[1] if (
+            action_function.__module__.startswith('plugins.')
         ) else None
     )
     plugin = Plugin(plugin_name) if plugin_name else None
 
     del kw['action'][0]
 
-    if plugin is not None:
-        plugin.activate_venv(debug=kw.get('debug', False))
-
-    try:
-        result = actions[main_action](**kw)
-    except Exception as e:
-        if kw.get('debug', False):
-            import traceback
-            traceback.print_exception(type(e), e, e.__traceback__)
-        result = False, (
-            f"Failed to execute '{' '.join([main_action] + kw['action'])}' with exception:\n\n" +
-            f"'{e}'."
-            + (
-                "\n\nRun again with '--debug' to see a full stacktrace."
-                if not kw.get('debug', False) else ''
+    with Venv(plugin, debug=kw.get('debug', False)):
+        try:
+            result = action_function(**kw)
+        except Exception as e:
+            if kw.get('debug', False):
+                import traceback
+                traceback.print_exception(type(e), e, e.__traceback__)
+            result = False, (
+                f"Failed to execute '{' '.join([action_function.__name__] + kw['action'])}' "
+                + "with exception:\n\n" +
+                f"{e}."
+                + (
+                    "\n\nRun again with '--debug' to see a full stacktrace."
+                    if not kw.get('debug', False) else ''
+                )
             )
-        )
-
-    if plugin is not None:
-        plugin.deactivate_venv(debug=kw.get('debug', False))
 
     return result
 

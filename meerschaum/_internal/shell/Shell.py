@@ -136,7 +136,7 @@ def default_action_completer(
     from meerschaum.actions import get_subactions
     if action is None:
         action = []
-    subactions = get_subactions(action[0]) if len(action) > 0 else {}
+    subactions = get_subactions(action)
     sub = action[1] if len(action) > 1 else ''
     possibilities = []
     for sa in subactions:
@@ -204,8 +204,8 @@ def _check_complete_keys(line: str) -> Optional[List[str]]:
 class Shell(cmd.Cmd):
     def __init__(
             self,
-            actions : Optional[Dict[str, Any]] = None,
-            sysargs : Optional[List[str]] = None
+            actions: Optional[Dict[str, Any]] = None,
+            sysargs: Optional[List[str]] = None
         ):
         """
         Customize the CLI from configuration
@@ -455,7 +455,16 @@ class Shell(cmd.Cmd):
         ### Make sure an action was provided.
         if not args.get('action', None):
             return ''
-        action = args['action'][0]
+        from meerschaum.actions import get_action
+        action_function = get_action(args['action'], _actions=self._actions)
+        if action_function is None:
+            do_action_name = 'do_' + args['action'][0]
+            if hasattr(self, do_action_name):
+                action_function = getattr(self, do_action_name)
+            else:
+                args['action'].insert(0, 'sh')
+                action_function = getattr(self, f'do_sh')
+        action = action_function.__name__
 
         ### if no instance is provided, use current shell default,
         ### but not for the 'api' command (to avoid recursion)
@@ -475,15 +484,6 @@ class Shell(cmd.Cmd):
             args['action'] = ['start', 'jobs'] + args['action']
             action = 'start'
 
-        ### If the action cannot be found, resort to executing a shell command.
-        try:
-            func = getattr(self, 'do_' + action)
-        except AttributeError as ae:
-            ### if function is not found, default to `shell`
-            action = "sh"
-            args['action'].insert(0, action)
-            func = getattr(self, f'do_{action}')
-
         positional_only = (action not in self._actions)
         if positional_only:
             return original_line
@@ -494,21 +494,21 @@ class Shell(cmd.Cmd):
         def do_func():
             return (
                 _entry_with_args(**args) if action not in self._actions
-                else func(
+                else action_function(
                     action=args['action'][1:],
                     **{k:v for k, v in args.items() if k != 'action'}
                 )
             )
 
         try:
-            success_tuple = do_func()
+            success_tuple = _entry_with_args(_actions=self._actions, **args)
         except Exception as e:
             success_tuple = False, str(e)
 
         from meerschaum.utils.formatting import print_tuple
         if isinstance(success_tuple, tuple):
             print_tuple(
-                success_tuple, skip_common=(not self.debug), upper_padding=1, lower_padding=1
+                success_tuple, skip_common=(not self.debug), upper_padding=1, lower_padding=0,
             )
 
         ### Restore the old working directory.
@@ -519,17 +519,6 @@ class Shell(cmd.Cmd):
 
     def postcmd(self, stop : bool = False, line : str = ""):
         _reload = self._reload
-        #  if not _reload:
-            #  for k, v in self.__dict__.items():
-                #  if k == '_dict_backup':
-                    #  continue
-                #  if (
-                    #  k not in self._dict_backup
-                        #  or self._dict_backup.get(k, None) != self.__dict__.get(k, None)
-                #  ):
-                    #  _reload = True
-        #  import traceback
-        #  traceback.print_stack()
         if _reload:
             self.load_config(self.instance)
         if stop:
