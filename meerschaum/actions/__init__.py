@@ -20,7 +20,7 @@ modules = get_modules_from_package(
     sys.modules[__name__],
     names = False,
 )
-__all__ = ['actions', 'get_subactions', 'get_action']
+__all__ = ['actions', 'get_subactions', 'get_action',]
 
 ### Build the actions dictionary by importing all
 ### functions that do not begin with '_' from all submodules.
@@ -112,7 +112,7 @@ def get_subactions(
         if not inspect.isfunction(f):
             continue
         if action_function.__name__ + '_' in name and not name.lstrip('_').startswith('complete'):
-            _name = name.replace(action.__name__, '')
+            _name = name.replace(action_function.__name__, '')
             _name = _name.lstrip('_')
             subactions[_name] = f
     return subactions
@@ -198,7 +198,7 @@ meerschaum.plugins.load_plugins()
 make_action = meerschaum.plugins.make_action
 ### Instruct pdoc to skip the `meerschaum.actions.plugins` subdirectory.
 __pdoc__ = {
-    'plugins' : False, 'arguments': False, 'shell': False,
+    'plugins' : False, 'arguments': True, 'shell': False,
     #  'actions': ("Access functions"),
     'actions': (
         "Access functions of the standard Meerschaum actions.\n\n"

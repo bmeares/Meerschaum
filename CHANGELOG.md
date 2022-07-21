@@ -8,7 +8,7 @@ This is the current release cycle, so future features will be updated below.
 - **Plugins may now have `requirements.txt`.**  
   If a plugin contains a file named `requirements.txt`, the file will be parsed alongside the packages specified in the `required` list.
 - **Added the module `meerschaum.utils.venv`.**  
-  Functions related to virtual environment management () have been migrated from `meerschaum.utils.packages` to [`meerschaum.utils.venv`]((https://docs.meerschaum.io/utils/venv/index.html)).
+  Functions related to virtual environment management have been migrated from `meerschaum.utils.packages` to [`meerschaum.utils.venv`](https://docs.meerschaum.io/utils/venv/index.html).
 - **Added the `Venv` class.**  
   You can now manage your virtual environments with the `Venv` context manager:
 
