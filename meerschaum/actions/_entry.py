@@ -48,7 +48,8 @@ def _entry_with_args(
     """
     import sys
     from meerschaum.plugins import Plugin
-    from meerschaum.actions import get_shell, get_action
+    from meerschaum.actions import get_shell, get_action, get_main_action_name
+    from meerschaum.actions.arguments import remove_leading_action
     from meerschaum.utils.venv import Venv
     if kw.get('trace', None):
         from meerschaum.utils.misc import debug_trace
@@ -56,7 +57,7 @@ def _entry_with_args(
     if (
         len(kw.get('action', [])) == 0
         or
-        (kw['action'][0] == 'mrsm' and len(kw['action']) == 0)
+        (kw['action'][0] == 'mrsm' and len(kw['action'][1:]) == 0)
     ):
         return get_shell().cmdloop()
 
@@ -65,6 +66,7 @@ def _entry_with_args(
     ### If action does not exist, execute in a subshell.
     if action_function is None:
         kw['action'].insert(0, 'sh')
+        action_function = get_action(['sh'], _actions=_actions)
 
     ### Check if the action is a plugin, and if so, activate virtual environment.
     plugin_name = (
@@ -74,7 +76,7 @@ def _entry_with_args(
     )
     plugin = Plugin(plugin_name) if plugin_name else None
 
-    del kw['action'][0]
+    kw['action'] = remove_leading_action(kw['action'], _actions=_actions)
 
     with Venv(plugin, debug=kw.get('debug', False)):
         try:

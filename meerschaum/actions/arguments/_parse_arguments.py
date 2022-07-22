@@ -8,7 +8,7 @@ This module contains functions for parsing arguments
 """
 
 from __future__ import annotations
-from meerschaum.utils.typing import List, Dict, Any, Optional
+from meerschaum.utils.typing import List, Dict, Any, Optional, Callable, SuccessTuple
 
 from meerschaum.actions.arguments._parser import parser
 
@@ -28,6 +28,7 @@ def parse_arguments(sysargs: List[str]) -> Dict[str, Any]:
     A dictionary of keyword arguments.
 
     """
+    import shlex
     import copy
     from meerschaum.config.static import _static_config
 
@@ -73,20 +74,13 @@ def parse_arguments(sysargs: List[str]) -> Dict[str, Any]:
         args, unknown = parser.parse_known_args(filtered_sysargs, exit_on_error=False)
         args_dict = vars(args)
     except Exception as e:
-        args_dict, unknown = {'action': [], 'sysargs': sysargs, 'text': ' '.join(sysargs)}, []
-
-    ### if --config is not empty, cascade down config
-    ### and update new values on existing keys / add new keys/values
-    if args_dict.get('config', None) is not None:
-        from meerschaum.config._patch import write_patch, apply_patch_to_config
-        from meerschaum.config._paths import PATCH_DIR_PATH
-        from meerschaum.utils.packages import reload_package
-        import os, meerschaum.config, shutil
-        write_patch(args_dict['config'])
-        reload_package('meerschaum')
-        ### clean up patch so it's not loaded next time
-        if PATCH_DIR_PATH.exists():
-            shutil.rmtree(PATCH_DIR_PATH)
+        _action = []
+        for a in filtered_sysargs:
+            if a.startswith('-'):
+                break
+            _action.append(a)
+        args_dict = {'action': _action, 'sysargs': sysargs, 'text': shlex.join(sysargs)}
+        unknown = []
 
     args_dict['sysargs'] = sysargs
     args_dict['filtered_sysargs'] = filtered_sysargs
@@ -124,6 +118,7 @@ def parse_arguments(sysargs: List[str]) -> Dict[str, Any]:
 
     return parse_synonyms(args_dict)
 
+
 def parse_line(line: str) -> Dict[str, Any]:
     """
     Parse a line of text into standard Meerschaum arguments.
@@ -151,7 +146,7 @@ def parse_line(line: str) -> Dict[str, Any]:
 
 
 def parse_synonyms(
-        args_dict : Dict[str, Any]
+        args_dict: Dict[str, Any]
     ) -> Dict[str, Any]:
     """Check for synonyms (e.g. `async` = `True` -> `unblock` = `True`)"""
     if args_dict.get('async', None):
@@ -200,3 +195,56 @@ def parse_dict_to_sysargs(
                 sysargs += [t[0], args_dict[a]]
 
     return sysargs
+
+
+def remove_leading_action(
+        action: List[str],
+        _actions: Optional[Dict[str, Callable[[Any], SuccessTuple]]] = None,
+    ) -> List[str]:
+    """
+    Remove the leading strings in the `action` list.
+
+    Parameters
+    ----------
+    actions: List[str]
+        The standard, unaltered action dictionary.
+
+    Returns
+    -------
+    The portion of the action list without the leading action.
+
+    Examples
+    --------
+    >>> remove_leading_action(['show'])
+    []
+    >>> remove_leading_action(['show', 'pipes'])
+    []
+    >>> remove_leading_action(['show', 'pipes', 'baz'])
+    ['baz']
+    >>> ### foo_bar is a custom action.
+    >>> remove_leading_action(['foo', 'bar'])
+    []
+    >>> remove_leading_action(['foo', 'bar', 'baz'])
+    ['baz']
+    >>> 
+    """
+    from meerschaum.actions import get_action
+    from meerschaum.utils.warnings import warn
+    action_function = get_action(action, _actions=_actions)
+    if action_function is None:
+        return action
+
+    ### e.g. 'show_pipes_baz'
+    action_str = '_'.join(action)
+
+    ### e.g. 'show_pipes'
+    action_name = action_function.__name__.lstrip('_')
+
+    if not action_str.startswith(action_name):
+        warn(f"Unable to parse '{action_str}' for action '{action_name}'.")
+        return action
+    
+    parsed_action = action_str[len(action_name)+1:].split('_')
+    if parsed_action and parsed_action[0] == '' and action[0] != '':
+        del parsed_action[0]
+    return parsed_action
