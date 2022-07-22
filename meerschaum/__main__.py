@@ -22,40 +22,10 @@ limitations under the License.
 import sys, os
 
 def main(sysargs: list = None) -> None:
-    """Main CLI entry point.
-
-    Parameters
-    ----------
-    sysargs: list :
-         (Default value = None)
-
-    Returns
-    -------
-
-    """
+    """Main CLI entry point."""
     if sysargs is None:
         sysargs = sys.argv[1:]
     old_cwd = os.getcwd()
-
-    ### Check for a custom configuration directory.
-    if '--root-dir' in sysargs:
-        from meerschaum.actions.arguments._parse_arguments import parse_arguments
-        from meerschaum.config._paths import set_root
-        import pathlib
-        from meerschaum.config.static import _static_config
-        env_var = _static_config()['environment']['root']
-        if env_var in os.environ:
-            print(f"WARNING: '{env_var}' is set, so --root-dir will be ignored.")
-        else:
-            args = parse_arguments(sysargs)
-            config_dir_path = pathlib.Path(args['root_dir']).absolute()
-            if not config_dir_path.exists():
-                print(
-                    f"Invalid config directory '{str(config_dir_path)}'.\n" +
-                    "Please enter a valid path for `--config-dir`."
-                )
-                sys.exit(1)
-            set_root(config_dir_path)
 
     ### Catch help flags.
     if '--help' in sysargs or '-h' in sysargs:
@@ -93,7 +63,7 @@ def main(sysargs: list = None) -> None:
 
     return _exit(rc, old_cwd=old_cwd)
 
-def _exit(return_code : int = 0, old_cwd : str = None) -> None:
+def _exit(return_code: int = 0, old_cwd: str = None) -> None:
     _close_pools()
     ### Restore the previous working directory.
     if old_cwd is not None and old_cwd != os.getcwd():

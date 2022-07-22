@@ -85,12 +85,13 @@ def _insert_shell_actions(
             class_def = _shell_class,
             method_name = 'do_' + a,
         )
-        if a not in reserved_completers:
-            _completer = get_completer(a)
-            if _completer is None:
-                _completer = shell_pkg.default_action_completer
-            completer = _completer_wrapper(_completer)
-            setattr(_shell_class, 'complete_' + a, completer)
+        if a in reserved_completers:
+            continue
+        _completer = get_completer(a)
+        if _completer is None:
+            _completer = shell_pkg.default_action_completer
+        completer = _completer_wrapper(_completer)
+        setattr(_shell_class, 'complete_' + a, completer)
 
 def _completer_wrapper(
         target: Callable[[Any], List[str]]
@@ -455,50 +456,34 @@ class Shell(cmd.Cmd):
         ### Make sure an action was provided.
         if not args.get('action', None):
             return ''
-        from meerschaum.actions import get_action
-        action_function = get_action(args['action'], _actions=self._actions)
-        if action_function is None:
-            do_action_name = 'do_' + args['action'][0]
-            if hasattr(self, do_action_name):
-                action_function = getattr(self, do_action_name)
-            else:
-                args['action'].insert(0, 'sh')
-                action_function = getattr(self, f'do_sh')
-        action = action_function.__name__
+        from meerschaum.actions import get_main_action_name
+        main_action_name = get_main_action_name(args['action'])
+        if main_action_name is None:
+            args['action'].insert(0, 'sh')
 
         ### if no instance is provided, use current shell default,
         ### but not for the 'api' command (to avoid recursion)
-        if 'mrsm_instance' not in args and action != 'api':
+        if 'mrsm_instance' not in args and main_action_name != 'api':
             args['mrsm_instance'] = str(self.instance_keys)
 
-        if 'repository' not in args and action != 'api':
+        if 'repository' not in args and main_action_name != 'api':
             args['repository'] = str(self.repo_keys)
 
         ### parse out empty strings
-        if action.strip("\"'") == '':
+        if args['action'][0].strip("\"'") == '':
             self.emptyline()
             return ""
 
         ### If the `--daemon` flag is present, prepend 'start job'.
         if args.get('daemon', False) and 'stack' not in args['action']:
             args['action'] = ['start', 'jobs'] + args['action']
-            action = 'start'
+            main_action_name = 'start'
 
-        positional_only = (action not in self._actions)
+        positional_only = (main_action_name not in self._actions)
         if positional_only:
             return original_line
 
         from meerschaum.actions._entry import _entry_with_args
-        from meerschaum.utils.daemon import daemon_action
-
-        def do_func():
-            return (
-                _entry_with_args(**args) if action not in self._actions
-                else action_function(
-                    action=args['action'][1:],
-                    **{k:v for k, v in args.items() if k != 'action'}
-                )
-            )
 
         try:
             success_tuple = _entry_with_args(_actions=self._actions, **args)

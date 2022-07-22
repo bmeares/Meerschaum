@@ -307,19 +307,7 @@ groups['misc'].add_argument(
         "--params key1:value1,key2:value2"
     )
 )
-groups['misc'].add_argument(
-    '--config', type=string_to_dict, help=(
-        "Temporarily update configuration for a single command. "
-        "See --params on formatting details."
-    )
-)
-groups['misc'].add_argument(
-    '--root-dir', help=(
-        "Use an alternate location for the Meerschaum directory. " +
-        "The default location is '~/.config/meerschaum/' on Linux / MacOS and " +
-        "'%%APPDATA%%\Meerschaum\\' on Windows."
-    )
-)
+
 groups['misc'].add_argument(
     '--gui', action='store_true',
     help="Open a DataFrame in an interactive pandasgui or matplotlib window."

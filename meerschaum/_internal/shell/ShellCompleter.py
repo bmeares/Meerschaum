@@ -9,7 +9,7 @@ Implement the prompt_toolkit Completer base class.
 from __future__ import annotations
 from prompt_toolkit.completion import Completer, Completion
 from meerschaum.utils.typing import Optional
-from meerschaum.actions import get_shell, get_completer, get_action
+from meerschaum.actions import get_shell, get_completer, get_main_action_name, get_action
 from meerschaum.actions.arguments import parse_line
 
 from meerschaum.utils.packages import attempt_import, ensure_readline
@@ -27,9 +27,18 @@ class ShellCompleter(Completer):
         shell_actions = [a[3:] for a in dir(get_shell()) if a.startswith('do_')]
         yielded = []
         ensure_readline()
+        parts = document.text.split('-')
+        ends_with_space = parts[0].endswith(' ')
+        part_0_subbed_spaces = parts[0].replace(' ', '_')
+        #  if ends_with_space:
+            #  part_0_subbed_spaces = part_0_subbed_spaces[:-1] + ' '
+        parsed_text = part_0_subbed_spaces + '-'.join(parts[1:])
+
+        ### Index is the rank order (0 is closest match).
+        ### Break when no results are returned.
         for i, a in enumerate(shell_actions):
             try:
-                poss = get_shell().complete(document.text, i)
+                poss = get_shell().complete(parsed_text, i)
                 if poss:
                     poss = poss.replace('_', ' ')
             ### Having issues with readline on portable Windows.
@@ -40,18 +49,20 @@ class ShellCompleter(Completer):
             yield Completion(poss, start_position=(-1 * len(poss)))
             yielded.append(poss)
 
-        if yielded:
-            return
-
         args = parse_line(document.text)
         action_function = get_action(args['action'])
         if action_function is None:
             return
-        action = action_function.__name__
+        main_action_name = get_main_action_name(args['action'])
+
+        ### If we haven't yet hit space, don't suggest subactions.
+        if not parsed_text.replace(action_function.__name__.lstrip('_'), '').startswith('_'):
+            return
+
         possibilities = []
-        if f'complete_{action}' in dir(get_shell()):
+        if f'complete_{main_action_name}' in dir(get_shell()):
             possibilities = getattr(
-                get_shell(), f'complete_{action}'
+                get_shell(), f'complete_{main_action_name}'
             )(document.text.split(' ')[-1], document.text, 0, 0)
 
         if possibilities:
@@ -61,5 +72,6 @@ class ShellCompleter(Completer):
                 )
             return
 
-        yield Completion('')
+        if not yielded:
+            yield Completion('')
 

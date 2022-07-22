@@ -10,8 +10,8 @@ from __future__ import annotations
 from meerschaum.utils.typing import SuccessTuple, Union, Sequence, Any, Optional, List
 
 def show(
-        action : Optional[List[str]] = None,
-        **kw : Any
+        action: Optional[List[str]] = None,
+        **kw: Any
     ) -> SuccessTuple:
     """Show elements of a certain type.
     

@@ -71,7 +71,7 @@ def make_action(
         from meerschaum.utils.debug import dprint
         dprint(
             f"Adding action '{function.__name__}' from plugin " +
-            f"'{function.__module__.split('.')[-1]}'..."
+            f"'{plugin}'..."
         )
 
     actions[function.__name__] = function
