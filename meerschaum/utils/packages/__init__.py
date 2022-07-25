@@ -209,7 +209,6 @@ def manually_import_module(
                 debug = debug,
             ):
                 if install:
-                    print("INSTALL B")
                     if not pip_install(
                         root_name,
                         venv = venv,
@@ -1137,7 +1136,6 @@ def attempt_import(
         if not found_module:
             if install:
                 ### NOTE: pip_install deactivates venv, so deactivate must be False.
-                print("INSTALL A")
                 if not pip_install(
                     install_name,
                     venv = venv,
