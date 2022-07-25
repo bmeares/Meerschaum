@@ -356,6 +356,7 @@ def venv_target_path(
             ### Allow for dist-level paths (running as root).
             if not site_path.exists() and os.geteuid() == 0:
                 return pathlib.Path(site.getsitepackages()[0])
+            return site_path
 
     venv_root_path = (
         (VIRTENV_RESOURCES_PATH / venv)
