@@ -1,32 +1,44 @@
 FROM python:3.9-slim-bullseye AS runtime
 
-ARG dep_group=full
-ENV dep_group $dep_group
+ARG dep_group=full \
+    mrsm_user=meerschaum \
+    mrsm_root_dir=/meerschaum
 
-WORKDIR /src
+ENV MRSM_USER=$mrsm_user \
+    MRSM_DEP_GROUP=$dep_group \
+    MRSM_USER=meerschaum \
+    MRSM_ROOT_DIR=$mrsm_root_dir \
+    MRSM_WORK_DIR=$mrsm_root_dir \
+    MRSM_RUNTIME=docker \
+    MRSM_HOME=/home/meerschaum \
+    MRSM_SRC=/home/meerschaum/src \
+    PATH="/home/meerschaum/.local/bin/:$PATH"
 
 ### Layer 1: Install static dependencies.
-### Does not rebuild cache.
+### Should not rebuild cache unless the base Python image has changed.
 COPY scripts/docker/image_setup.sh /setup/
 RUN /setup/image_setup.sh && rm -rf /setup/
 
+### From this point on, run as a non-privileged user for security.
+USER $MRSM_USER
+WORKDIR $MRSM_WORK_DIR
+
 ### Layer 2: Install Python packages.
 ### Only rebuilds cache if dependencies have changed.
-COPY requirements /requirements
-RUN python -m pip install --no-cache-dir -r /requirements/$dep_group.txt && rm -rf /requirements
+COPY --chown=$MRSM_USER requirements $MRSM_HOME/requirements
+RUN python -m pip install --user --no-cache-dir -r $MRSM_HOME/requirements/$MRSM_DEP_GROUP.txt && \
+  rm -rf $MRSM_HOME/requirements
 
 ### Layer 3: Install Meerschaum.
-### Rebuilds every build.
-COPY setup.py README.md ./
-COPY meerschaum ./meerschaum
-RUN python -m pip install --no-cache-dir . && cd /root && rm -rf /src
+### Recache this every build.
+COPY --chown=$MRSM_USER setup.py README.md $MRSM_SRC/
+COPY --chown=$MRSM_USER meerschaum $MRSM_SRC/meerschaum
+RUN python -m pip install --user --no-cache-dir $MRSM_SRC && rm -rf $MRSM_SRC
 
 ### Start up Meerschaum to bootstrap its environment.
-WORKDIR /meerschaum
-RUN cd /meerschaum && [ "$dep_group" != "minimal" ] && \
-  python -m meerschaum show version || \
-  python -m meerschaum --version
+RUN cd $MRSM_WORK_DIR && [ "$MRSM_DEP_GROUP" != "minimal" ] && \
+  mrsm show version || \
+  mrsm --version
 
-COPY scripts/docker/entrypoint.sh /entrypoint.sh
-
-ENTRYPOINT ["/entrypoint.sh"]
+COPY --chown=$MRSM_USER scripts/docker/entrypoint.sh /mrsm-entrypoint.sh
+ENTRYPOINT ["/mrsm-entrypoint.sh"]

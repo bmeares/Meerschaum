@@ -457,11 +457,24 @@ class Shell(cmd.Cmd):
 
         ### Make sure an action was provided.
         if not args.get('action', None):
+            self.emptyline()
             return ''
+
+        ### Strip a leading 'mrsm' if it's provided.
+        if args['action'][0] == 'mrsm':
+            args['action'] = args['action'][1:]
+            if not args['action']:
+                self.emptyline()
+                return ''
+
+        ### If we don't recognize the action,
+        ### make it a shell action.
         from meerschaum.actions import get_main_action_name
         main_action_name = get_main_action_name(args['action'])
         if main_action_name is None:
-            args['action'].insert(0, 'sh')
+            if not hasattr(self, 'do_'+args['action'][0]):
+                args['action'].insert(0, 'sh')
+                main_action_name = 'sh'
 
         ### if no instance is provided, use current shell default,
         ### but not for the 'api' command (to avoid recursion)
@@ -526,13 +539,13 @@ class Shell(cmd.Cmd):
             Ommitting on / off will toggle the existing value.
         """
         from meerschaum.utils.warnings import info
-        on_commands = {'on', 'true'}
-        off_commands = {'off', 'false'}
+        on_commands = {'on', 'true', 'True'}
+        off_commands = {'off', 'false', 'False'}
         if action is None:
             action = []
         try:
             state = action[0]
-        except IndexError:
+        except (IndexError, AttributeError):
             state = ''
         if state == '':
             self.debug = not self.debug
@@ -586,7 +599,7 @@ class Shell(cmd.Cmd):
             action = []
         try:
             instance_keys = action[0]
-        except:
+        except (IndexError, AttributeError):
             instance_keys = ''
         if instance_keys == '':
             instance_keys = get_config('meerschaum', 'instance', patch=True)
@@ -606,7 +619,7 @@ class Shell(cmd.Cmd):
 
         return True, "Success"
 
-    def complete_instance(self, text : str, line : str, begin_index : int, end_index : int):
+    def complete_instance(self, text: str, line: str, begin_index: int, end_index: int):
         from meerschaum.utils.misc import get_connector_labels
         from meerschaum.actions.arguments._parse_arguments import parse_line
         args = parse_line(line)
@@ -650,7 +663,7 @@ class Shell(cmd.Cmd):
 
         try:
             repo_keys = action[0]
-        except:
+        except (IndexError, AttributeError):
             repo_keys = ''
         if repo_keys == '':
             repo_keys = get_config('meerschaum', 'default_repository', patch=True)
@@ -667,7 +680,7 @@ class Shell(cmd.Cmd):
     def complete_repo(self, *args) -> List[str]:
         return self.complete_instance(*args)
 
-    def do_help(self, line : str) -> List[str]:
+    def do_help(self, line: str) -> List[str]:
         """
         Show help for Meerschaum actions.
         

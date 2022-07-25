@@ -4,7 +4,7 @@
 
 This is the current release cycle, so future features will be updated below.
 
-### v1.1.0
+### v1.1.0 – v1.1.1
 
 **What's New**
 
@@ -81,13 +81,22 @@ This is the current release cycle, so future features will be updated below.
   # /path/to/sqlite.db
   ```
 
+**Bugfixes**
+
+- **Resolved issues with conflicting virtual and base environments.**
+- **Only reinstall a package available at the user-level if its version doesn't match.**  
+  This was a subtle bug, but now packages are handled strictly in virtual environments except when an appropriate version is available. This may slow down performance, but the change is necessary to ensure a consistent environment.
+
 **Potentially Breaking Changes**
 
 - **The database file path for SQLite and DuckDB is now required.**  
   When creating a `SQLConnector` with the flavors `sqlite` or `duckdb`, the attribute `database` (a file path or `:memory:`) is now required.
 - **Removed `--config` and `--root-dir`.**  
   These flags were added very early on but have always caused issues. Instead, please use the environment variables `MRSM_CONFIG` or `MRSM_PATCH` for modifying the runtime configuration, and use `MRSM_ROOT_DIR` to specify a file path to the root Meerschaum directory.
-
+- **Virtual environments must be `None` for standard library packages.**  
+  When importing a built-in module with `attempt_import()`, specify `venv=None` to avoid attempting installation.
+- **The Docker image now runs as `meerschaum` instead of `root`.**  
+  For improved security, the docker image now runs at a lower privilege.
 
 ## 1.0.x Releases
 
