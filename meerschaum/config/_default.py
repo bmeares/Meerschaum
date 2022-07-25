@@ -9,6 +9,7 @@ The default configuration values to write to config.yaml.
 import sys, os, multiprocessing
 
 from meerschaum.connectors import attributes as connector_attributes
+from meerschaum.config._paths import SQLITE_DB_PATH
 
 default_meerschaum_config = {
     'instance' : 'sql:main',
@@ -17,7 +18,6 @@ default_meerschaum_config = {
     'default_repository' : 'api:mrsm',
     'connectors' : {
         'sql' : {
-            #  'default'      : connector_attributes['sql']['flavors']['timescaledb']['defaults'],
             'default'      : {},
             'main'         : {
                 'username' : 'mrsm',
@@ -29,14 +29,12 @@ default_meerschaum_config = {
             },
             'local'        : {
                 'flavor'   : 'sqlite',
+                'database' : str(SQLITE_DB_PATH),
             },
             'memory': {
                 'flavor'   : 'sqlite',
                 'database' : ':memory:',
             },
-            #  'mrsm'         : {
-                #  'host'     : 'mrsm.io',
-            #  },
         },
         'api' : {
             'default'      : connector_attributes['api']['default'],

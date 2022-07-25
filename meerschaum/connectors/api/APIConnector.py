@@ -6,6 +6,7 @@
 Interact with Meerschaum APIs. May be chained together (see 'meerschaum:api_instance' in your config.yaml).
 """
 
+from meerschaum.utils.typing import Optional
 from meerschaum.connectors import Connector
 
 required_attributes = {
@@ -57,15 +58,22 @@ class APIConnector(Connector):
         get_user_type,
         get_user_attributes,
     )
+    from ._uri import from_uri
 
     def __init__(
         self,
-        label : str = 'main',
-        wait : bool = False,
-        debug : bool = False,
+        label: Optional[str] = None,
+        wait: bool = False,
+        debug: bool = False,
         **kw
     ):
         self.wait = wait
+        if 'uri' in kw:
+            from_uri_params = self.from_uri(kw['uri'], as_dict=True)
+            label = label or from_uri_params.get('label', None)
+            from_uri_params.pop('label', None)
+            kw.update(from_uri_params)
+
         super().__init__('api', label=label, **kw)
         if 'protocol' not in self.__dict__:
             self.protocol = 'http'

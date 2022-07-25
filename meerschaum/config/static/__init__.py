@@ -44,6 +44,7 @@ def _static_config():
                 'root': 'MRSM_ROOT_DIR',
                 'runtime': 'MRSM_RUNTIME',
                 'id': 'MRSM_SERVER_ID',
+                'uri_regex': r'MRSM_(SQL|API)_(\d*[a-zA-Z][a-zA-Z0-9-_+]*$)',
             },
             'config': {
                 'default_filetype': 'json',
@@ -55,6 +56,7 @@ def _static_config():
                         '[',
                         ']'
                     ),
+                    'underscore_standin': '<UNDERSCORE>', ### Temporary replacement for parsing.
                 },
                 'urls': {
                     'get-pip.py': 'https://bootstrap.pypa.io/get-pip.py',

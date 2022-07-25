@@ -66,10 +66,11 @@ class SQLConnector(Connector):
         get_user_type,
         get_user_attributes,
     )
+    from ._uri import from_uri, parse_uri
     
     def __init__(
         self,
-        label: str = 'main',
+        label: Optional[str] = None,
         flavor: Optional[str] = None,
         wait: bool = False,
         connect: bool = False,
@@ -107,10 +108,20 @@ class SQLConnector(Connector):
             Therefore, a connector may be made without being registered,
             as long enough parameters are supplied to the constructor.
         """
+        if 'uri' in kw:
+            from_uri_params = self.from_uri(kw['uri'], as_dict=True)
+            label = label or from_uri_params.get('label', None)
+            from_uri_params.pop('label', None)
+            kw.update(from_uri_params)
 
         ### set __dict__ in base class
-        super().__init__('sql', label=label, **kw)
-        if 'flavor' in self.__dict__ and self.flavor == 'sqlite':
+        super().__init__(
+            'sql',
+            label = label or self.__dict__.get('label', None),
+            **kw
+        )
+
+        if self.__dict__.get('flavor', None) == 'sqlite':
             self._reset_attributes()
             self._set_attributes(
                 'sql',
@@ -118,11 +129,17 @@ class SQLConnector(Connector):
                 inherit_default = False,
                 **kw
             )
+            ### For backwards compatability reasons, set the path for sql:local if its missing.
+            if self.label == 'local' and not self.__dict__.get('database', None):
+                from meerschaum.config._paths import SQLITE_DB_PATH
+                self.database = str(SQLITE_DB_PATH)
 
         ### ensure flavor and label are set accordingly
-        if 'flavor' not in self.__dict__ and flavor is None:
-            raise Exception("Missing flavor. Update config.yaml or provide flavor as an argument")
-        elif 'flavor' not in self.__dict__:
+        if 'flavor' not in self.__dict__:
+            if flavor is None and not self.__dict__.get('uri', None):
+                raise Exception(
+                    "Missing flavor. Update config.yaml or provide flavor as an argument."
+                )
             self.flavor = flavor
 
         self._debug = debug
@@ -137,10 +154,11 @@ class SQLConnector(Connector):
         ### verify the flavor's requirements are met
         if self.flavor not in self.flavor_configs:
             error(f"Flavor '{self.flavor}' is not supported by Meerschaum SQLConnector")
-        self.verify_attributes(
-            self.flavor_configs[self.flavor].get('requirements', set()),
-            debug=debug,
-        )
+        if not self.__dict__.get('uri'):
+            self.verify_attributes(
+                self.flavor_configs[self.flavor].get('requirements', set()),
+                debug=debug,
+            )
 
         self.wait = wait
         if self.wait:

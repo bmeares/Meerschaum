@@ -7,7 +7,7 @@ Default actions available to the mrsm CLI.
 """
 
 from __future__ import annotations
-from meerschaum.utils.typing import Callable, Any, Optional, Union, List, Dict
+from meerschaum.utils.typing import Callable, Any, Optional, Union, List, Dict, SuccessTuple
 from meerschaum.utils.packages import get_modules_from_package
 from meerschaum.utils.warnings import enable_depreciation_warnings
 enable_depreciation_warnings(__name__)
@@ -193,7 +193,15 @@ def get_main_action_name(
     clean_name = action_function.__name__.lstrip('_')
     if clean_name in _actions:
         return clean_name
-    return clean_name.split('_')[0]
+    words = clean_name.split('_')
+    first_word = words[0]
+    if first_word in _actions:
+        return first_word
+    ### We might be dealing with shell `do_` functions.
+    second_word = words[1] if len(words) > 1 else None
+    if second_word and second_word in _actions:
+        return second_word
+    return None
 
 
 def get_completer(

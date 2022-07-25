@@ -255,58 +255,11 @@ def write_plugin_config(
     return write_config(cf, **kw)
 
 
-### If environment variable MRSM_CONFIG is set, patch config before anything else.
-environment_config = _static_config()['environment']['config']
-environment_patch = _static_config()['environment']['patch']
+### If environment variable MRSM_CONFIG or MRSM_PATCH is set, patch config before anything else.
+from meerschaum.config._environment import apply_environment_patches, apply_environment_uris
+apply_environment_uris()
+apply_environment_patches()
 
-def _apply_environment_config(env_var):
-    if env_var in os.environ:
-        from meerschaum.utils.misc import string_to_dict
-        try:
-            _patch = string_to_dict(str(os.environ[env_var]))
-        except Exception as e:
-            _patch = None
-        error_msg = (
-            f"Environment variable {env_var} is set but cannot be parsed.\n"
-            f"Unset {env_var} or change to JSON or simplified dictionary format " +
-            "(see --help, under params for formatting)\n" +
-            f"{env_var} is set to:\n{os.environ[env_var]}\n"
-            f"Skipping patching os environment into config..."
-        )
-
-        if not isinstance(_patch, dict):
-            print(error_msg)
-        else:
-            ### Load and patch config files.
-            for k in _patch:
-                try:
-                    _valid, _key_config = get_config(
-                        k, write_missing=False, as_tuple=True, warn=False
-                    )
-                    to_set = (
-                        apply_patch_to_config({k: _key_config}, _patch) if _valid
-                        else _patch
-                    )
-                    set_config(to_set)
-                except Exception as e:
-                    print(e)
-                    print(error_msg)
-_apply_environment_config(environment_config)
-_apply_environment_config(environment_patch)
-
-#  environment_root_dir = _static_config()['environment']['root']
-#  if environment_root_dir in os.environ:
-    #  from meerschaum.config._paths import set_root
-    #  root_dir_path = pathlib.Path(os.environ[environment_root_dir]).resolve()
-    #  if not root_dir_path.exists():
-        #  print(
-            #  f"Invalid root directory '{str(root_dir_path)}' set for " +
-            #  f"environment variable '{environment_root_dir}'.\n" +
-            #  f"Please enter a valid path for {environment_root_dir}.",
-            #  file = sys.stderr,
-        #  )
-        #  sys.exit(1)
-    #  set_root(root_dir_path)
 
 from meerschaum.config._paths import PATCH_DIR_PATH, PERMANENT_PATCH_DIR_PATH
 patch_config = None

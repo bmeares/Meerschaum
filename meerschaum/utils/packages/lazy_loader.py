@@ -29,13 +29,6 @@ class LazyLoader(types.ModuleType):
     
     `contrib`, and `ffmpeg` are examples of modules that are large and not always
     needed, and this allows them to only be loaded when they are used.
-
-    Parameters
-    ----------
-
-    Returns
-    -------
-
     """
 
     # The lint error here is incorrect.

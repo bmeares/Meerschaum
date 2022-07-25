@@ -8,6 +8,7 @@ Custom components are defined here.
 
 from __future__ import annotations
 from dash.dependencies import Input, Output, State
+from meerschaum.utils.venv import Venv
 from meerschaum.utils.packages import attempt_import, import_dcc, import_html
 from meerschaum.utils.typing import SuccessTuple, List
 from meerschaum.config.static import _static_config
