@@ -169,8 +169,8 @@ def get_stopped_daemons(
     return [d for d in daemons if d not in running_daemons]
 
 def get_filtered_daemons(
-        filter_list : Optional[List[str]] = None,
-        warn : bool = False,
+        filter_list: Optional[List[str]] = None,
+        warn: bool = False,
     ) -> List[Daemon]:
     """Return a list of `Daemons` filtered by a list of `daemon_ids`.
     Only `Daemons` that exist are returned.
@@ -179,19 +179,16 @@ def get_filtered_daemons(
 
     Parameters
     ----------
-    filter_list :
+    filter_list: Optional[List[str]], default None
         List of `daemon_ids` to include. If `daemon_ids` is `None` or empty,
         return all `Daemons`.
-    warn :
+
+    warn: bool, default False
         If `True`, raise warnings for non-existent `daemon_ids`.
-        Defaults to `True`.
-    filter_list : Optional[List[str]] :
-         (Default value = None)
-    warn : bool :
-         (Default value = False)
 
     Returns
     -------
+    A list of Daemon objects.
 
     """
     if not filter_list:

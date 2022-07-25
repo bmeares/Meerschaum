@@ -8,6 +8,7 @@ Test SQL utility functions.
 
 import pytest
 from tests.connectors import conns
+from meerschaum.connectors.sql import SQLConnector
 from meerschaum.connectors.sql.tools import dateadd_str, table_exists, sql_item_name
 import datetime
 import dateutil.parser
@@ -46,3 +47,51 @@ def test_exists(flavor: str):
     conn.exec(f"DROP TABLE {tbl_name}", silent=True)
     assert table_exists(tbl, conn, debug=True) is False
  
+
+@pytest.mark.parametrize(
+    "uri,expected_attributes", [
+        (
+            'postgresql://mrsm:mrsm@localhost:5432/meerschaum',
+            {
+                'flavor': 'postgresql',
+                'username': 'mrsm',
+                'password': 'mrsm',
+                'host': 'localhost',
+                'port': 5432,
+                'database': 'meerschaum',
+            }
+        ),
+        (
+            'sqlite:////home/foo/.config/meerschaum/sqlite/mrsm_local.db',
+            {
+                'flavor': 'sqlite',
+                'database': '/home/foo/.config/meerschaum/sqlite/mrsm_local.db',
+            }
+        ),
+        (
+            'mssql+pyodbc://sa:supersecureSECRETPASSWORD123!'
+            + '@localhost:1439/master?driver=ODBC+Driver+17+for+SQL+Server',
+            {
+                'flavor': 'mssql',
+                'username': 'sa',
+                'password': 'supersecureSECRETPASSWORD123!',
+                'host': 'localhost',
+                'port': 1439,
+                'database': 'master',
+                'driver': 'ODBC Driver 17 for SQL Server',
+            },
+        ),
+        (
+            'http://user:pass@localhost:8000',
+            {
+                'username': 'user',
+                'password': 'pass',
+                'host': 'localhost',
+                'port': 8000,
+                'flavor': 'http',
+            }
+        ),
+    ],
+)
+def test_parse_uri(uri: str, expected_attributes):
+    assert SQLConnector.parse_uri(uri) == expected_attributes

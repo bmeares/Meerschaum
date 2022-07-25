@@ -66,6 +66,10 @@ def activate_venv(
     target = venv_target_path(venv, debug=debug)
     if str(target) not in sys.path:
         sys.path.insert(0, str(target))
+
+    if debug:
+        dprint(f"sys.path: {sys.path}", color=False)
+
     return True
 
 
@@ -112,6 +116,9 @@ def deactivate_venv(
     with LOCKS['sys.path']:
         if str(target) in sys.path:
             sys.path.remove(str(target))
+
+    if debug:
+        dprint(f"sys.path: {sys.path}", color=False)
 
     return True
 

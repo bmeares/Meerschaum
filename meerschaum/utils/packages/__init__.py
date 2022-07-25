@@ -13,7 +13,7 @@ from meerschaum.utils.threading import Lock, RLock
 from meerschaum.utils.packages._packages import packages, all_packages, get_install_names
 from meerschaum.utils.venv import (
     activate_venv, deactivate_venv, venv_executable, venv_exec, venv_exists,
-    venv_target_path, inside_venv,
+    venv_target_path, inside_venv, Venv,
 )
 
 _import_module = importlib.import_module
@@ -32,6 +32,8 @@ def get_module_path(
     """
     Get a module's path without importing.
     """
+    if debug:
+        from meerschaum.utils.debug import dprint
     if not _try_install_name_on_fail:
         install_name = _import_to_install_name(import_name, with_version=False)
         install_name_lower = install_name.lower().replace('-', '_')
@@ -40,6 +42,8 @@ def get_module_path(
         import_name_lower = import_name.lower().replace('-', '_')
     vtp = venv_target_path(venv, allow_nonexistent=True, debug=debug)
     if not vtp.exists():
+        if debug:
+            dprint(f"Venv '{venv}' does not exist, cannot import '{import_name}'.", color=False)
         return None
     candidates = []
     for file_name in os.listdir(vtp):
@@ -73,6 +77,8 @@ def get_module_path(
                 import_name, venv=venv, debug=debug,
                 _try_install_name_on_fail=False
             )
+        if debug:
+            dprint(f"No candidates found for '{import_name}' in venv '{venv}'.")
         return None
 
     specs_paths = []
@@ -81,6 +87,11 @@ def get_module_path(
         if spec is not None:
             return candidate_path
     
+    if debug:
+        dprint(
+            f"Was unable to find a file location for '{import_name}' in venv '{venv}'.",
+            color = False,
+        )
     return None
 
 
@@ -233,7 +244,7 @@ def manually_import_module(
             mod = None
         return mod
 
-    activate_venv(venv)
+    activate_venv(venv, debug=debug)
     mod = importlib.util.module_from_spec(spec)
     old_sys_mod = sys.modules.get(import_name, None)
     sys.modules[import_name] = mod
@@ -250,8 +261,8 @@ def manually_import_module(
     else:
         del sys.modules[import_name]
     
-    if deactivate and venv is not None:
-        deactivate_venv(venv)
+    if deactivate:
+        deactivate_venv(venv, debug=debug)
     return mod
 
 
@@ -534,7 +545,9 @@ def need_update(
     elif len(split_version) > 3:
         version = '.'.join(split_version[:3])
 
-    packaging_version = attempt_import('packaging.version', check_update=False, lazy=False)
+    packaging_version = attempt_import(
+        'packaging.version', check_update=False, lazy=False, debug=debug,
+    )
 
     ### Get semver if necessary
     if required_version:
@@ -559,7 +572,7 @@ def need_update(
             try:
                 return semver.Version.parse(result.available_version).match(required_version)
             except AttributeError as e:
-                pip_install(_import_to_install_name('semver'), venv='mrsm', debug=True)
+                pip_install(_import_to_install_name('semver'), venv='mrsm', debug=debug)
                 semver = manually_import_module('semver', venv='mrsm')
                 return semver.Version.parse(version).match(required_version)
             except Exception as e:
@@ -583,7 +596,7 @@ def need_update(
             if required_version else False
         )
     except AttributeError as e:
-        pip_install(_import_to_install_name('semver'), venv='mrsm', debug=True)
+        pip_install(_import_to_install_name('semver'), venv='mrsm', debug=debug)
         semver = manually_import_module('semver', venv='mrsm')
         return (
             (not semver.Version.parse(version).match(required_version))
@@ -715,7 +728,7 @@ def pip_install(
     if check_wheel:
         have_wheel = venv_contains_package('wheel', venv=venv, debug=debug)
     _args = list(args)
-    have_pip = venv_contains_package('pip', venv=venv, debug=True)
+    have_pip = venv_contains_package('pip', venv=venv, debug=debug)
     import sys
     if not have_pip:
         if not get_pip(venv=venv, debug=debug):
@@ -986,6 +999,7 @@ def attempt_import(
         split: bool = True,
         check_update: bool = False,
         check_pypi: bool = False,
+        check_is_installed: bool = False,
         deactivate: bool = True,
         color: bool = True,
         debug: bool = False
@@ -1029,6 +1043,10 @@ def attempt_import(
         If `True` and `check_update` is `True`, check PyPI when determining whether
         an update is required.
 
+    check_is_installed: bool, default True
+        If `True`, check if the package is contained in the virtual environment.
+        Set this to `False` when importing 
+
     Returns
     -------
     The specified modules. If they're not available and `install` is `True`, it will first
@@ -1057,33 +1075,32 @@ def attempt_import(
     warn_function = _warnings.warn
 
     def do_import(_name: str, **kw) -> Union['ModuleType', None]:
-        activate_venv(venv=venv, debug=debug)
-        ### determine the import method (lazy vs normal)
-        from meerschaum.utils.misc import filter_keywords
-        import_method = (
-            (manually_import_module if check_update else _import_module)
-            if not lazy else lazy_import
-        )
-        try:
-            mod = import_method(_name, **(filter_keywords(import_method, **kw)))
-        except Exception as e:
-            if warn:
-                import traceback
-                traceback.print_exception(type(e), e, e.__traceback__)
-                warn_function(
-                    f"Failed to import module '{_name}'.\nException:\n{e}",
-                    ImportWarning,
-                    stacklevel = (5 if lazy else 4),
-                    color = False,
-                )
-            mod = None
-        deactivate_venv(venv=venv, color=color, debug=debug)
+        with Venv(venv=venv, debug=debug):
+            ### determine the import method (lazy vs normal)
+            from meerschaum.utils.misc import filter_keywords
+            import_method = (
+                (manually_import_module if check_update else _import_module)
+                if not lazy else lazy_import
+            )
+            try:
+                mod = import_method(_name, **(filter_keywords(import_method, **kw)))
+            except Exception as e:
+                if warn:
+                    import traceback
+                    traceback.print_exception(type(e), e, e.__traceback__)
+                    warn_function(
+                        f"Failed to import module '{_name}'.\nException:\n{e}",
+                        ImportWarning,
+                        stacklevel = (5 if lazy else 4),
+                        color = False,
+                    )
+                mod = None
         return mod
 
     modules = []
     for name in names:
         ### Enforce virtual environment (something is deactivating in the loop so check each pass).
-        activate_venv(debug=debug)
+        activate_venv(venv=venv, debug=debug)
         ### Check if package is a declared dependency.
         root_name = name.split('.')[0] if split else name
         install_name = all_packages.get(root_name, None)
@@ -1107,8 +1124,9 @@ def attempt_import(
             )
         else:
             found_module = (
-                venv_contains_package(name, venv=venv, debug=debug)
-                or is_installed(name, venv=None, deactivate=False)
+                venv_contains_package(name, venv=venv, split=split, debug=debug)
+                or
+                is_installed(name, venv=venv, split=split, debug=debug)
             )
 
         if not found_module:
@@ -1404,21 +1422,32 @@ def reload_package(
 def is_installed(
         import_name: str,
         venv: Optional[str] = 'mrsm',
+        split: bool = True,
         deactivate: bool = True,
         debug: bool = False,
     ) -> bool:
     """
     Check whether a package is installed.
     """
-    path = get_module_path(import_name, venv=venv)
+    root_name = import_name.split('.')[0] if split else root_name
+    path = get_module_path(root_name, venv=venv, debug=debug)
     if path is not None:
         return True
     import importlib.util
     activate_venv(venv=venv, debug=debug)
     try:
-        found = importlib.util.find_spec(import_name) is not None
+        found_spec = importlib.util.find_spec(root_name)
     except (ModuleNotFoundError, ValueError) as e:
+        found_spec = None
+
+    if found_spec is not None:
+        if venv is not None:
+            found = str(venv_target_path(venv, debug=debug)) in found_spec.origin
+        else:
+            found = True
+    else:
         found = False
+
     if deactivate:
         deactivate_venv(venv=venv, debug=debug)
     return found
@@ -1433,7 +1462,8 @@ def venv_contains_package(
     """
     Search the contents of a virtual environment for a package.
     """
-    return get_module_path(import_name, venv=venv) is not None
+    root_name = import_name.split('.')[0] if split else import_name
+    return get_module_path(root_name, venv=venv, debug=debug) is not None
 
 
 def package_venv(package: 'ModuleType') -> Union[str, None]:

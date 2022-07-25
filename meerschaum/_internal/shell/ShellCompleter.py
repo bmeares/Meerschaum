@@ -20,7 +20,7 @@ class ShellCompleter(Completer):
     Implement the `prompt_toolkit` Completer to use the built-in `complete_` methods
     and the `cmd` completer system.
     """
-    def get_completions(self, document, completer_event):
+    def get_completions(self, document, complete_event):
         """
         Bridge the built-in cmd completer with the `prompt_toolkit` completer system.
         """
@@ -30,8 +30,6 @@ class ShellCompleter(Completer):
         parts = document.text.split('-')
         ends_with_space = parts[0].endswith(' ')
         part_0_subbed_spaces = parts[0].replace(' ', '_')
-        #  if ends_with_space:
-            #  part_0_subbed_spaces = part_0_subbed_spaces[:-1] + ' '
         parsed_text = part_0_subbed_spaces + '-'.join(parts[1:])
 
         ### Index is the rank order (0 is closest match).

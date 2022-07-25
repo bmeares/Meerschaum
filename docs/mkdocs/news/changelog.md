@@ -1,7 +1,97 @@
 # 🪵 Changelog
 
-## 1.0.x Releases
+## 1.1.x Releases
+
 This is the current release cycle, so future features will be updated below.
+
+### v1.1.0
+
+**What's New**
+
+- **Underscores in actions may now be parsed as spaces.**  
+  This took way more work than expected, but anyway, custom actions with underscores in the function names are now treated as spaces! Consider the following:
+
+  ```python
+  @make_action
+  def foo_bar(**kw):
+      return True, "Huzzah!"
+  ```
+
+  The above action may now be executed as `foo bar` or `foo_bar`:
+
+  ```bash
+  mrsm foo bar
+  ```
+- **Create a `SQLConnector` or `APIConnector` directly from a URI.**  
+  If you already have a connection string, you can skip providing credentials and build a connector directly from the URI. If you omit a `label`, then the lowercase form of `'<username>@<host>/<database>'` is used:
+
+  ```python
+  from meerschaum.connectors import SQLConnector
+  uri = 'postgresql://user:pass@localhost:5432/db'
+
+  conn = SQLConnector(uri=uri)
+  print(conn)
+  # sql:user@localhost/db
+
+  conn = SQLConnector('foo', uri=uri)
+  print(conn)
+  # sql:foo
+
+  conn = SQLConnector.from_uri(uri)
+  print(conn)
+  # sql:user@localhost/db
+  ```
+
+  The `APIConnector` may also be built from a URI:
+
+  ```python
+  from meerschaum.connectors import APIConnector
+  uri = 'http://user:pass@localhost:8000'
+
+  conn = APIConnector(uri=uri)
+  print(conn)
+  # api:username@localhost
+
+  conn = APIConnector('bar', uri=uri)
+  print(conn)
+  # api:bar
+
+  conn = APIConnector.from_uri(uri)
+  print(conn)
+  # api:user@localhost
+  ```
+
+- **Define temporary connectors from URIs in environment variables.**  
+  If you set environment variables with the format `MRSM_SQL_<LABEL>` to valid URIs, new connectors will be available under the keys `sql:<label>`, where `<label>` is the lowercase form of `<LABEL>`:
+
+  ```bash
+  export MRSM_SQL_FOO=sqlite://///path/to/sqlite.db
+  mrsm show connectors sql:foo
+  ```
+
+  You can set as many connectors as you like, and they're treated the same as connectors registered in your permanent configuration.
+
+  ```python
+  ### The following environment variable was already exported:
+  ### MRSM_SQL_FOO=sqlite://///path/to/sqlite.db
+
+  import meerschaum as mrsm
+  conn = mrsm.get_connector('sql', 'foo')
+  print(conn.database)
+  # /path/to/sqlite.db
+  ```
+
+**Potentially Breaking Changes**
+
+- **The database file path for SQLite and DuckDB is now required.**  
+  When creating a `SQLConnector` with the flavors `sqlite` or `duckdb`, the attribute `database` (a file path or `:memory:`) is now required.
+- **Removed `--config` and `--root-dir`.**  
+  These flags were added very early on but have always caused issues. Instead, please use the environment variables `MRSM_CONFIG` or `MRSM_PATCH` for modifying the runtime configuration, and use `MRSM_ROOT_DIR` to specify a file path to the root Meerschaum directory.
+
+
+## 1.0.x Releases
+
+The v1.0.0 release was big news. A ton of features, bugfixes, and perfomance improvements were introduced: for example, v1.0.0 brought support for mutable pipes and data type enforcement. Later releases in the v1.0.x series included `--schedule`, the `Venv` context manager, and a whole lot of environment bugfixes.
 
 ### v1.0.6
 

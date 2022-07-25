@@ -13,11 +13,19 @@ import os, platform, sys
 from meerschaum.utils.typing import Union
 from meerschaum.config.static import _static_config
 
-DEFAULT_ROOT_DIR_PATH = (
-    (Path.home() / '.config' / 'meerschaum')
+DOT_CONFIG_DIR_PATH = Path(
+    os.environ.get('XDG_CONFIG_HOME', Path.home() / '.config')
     if platform.system() != 'Windows'
-    else (Path(os.environ['AppData']) / 'Meerschaum')
+    else os.environ.get('AppData', Path.home() / 'AppData' / 'Roaming')
 )
+
+DEFAULT_ROOT_DIR_PATH = (
+    (DOT_CONFIG_DIR_PATH / 'meerschaum')
+    if platform.system() != 'Windows'
+    else (DOT_CONFIG_DIR_PATH / 'Meerschaum')
+)
+
+
 ENVIRONMENT_ROOT_DIR = _static_config()['environment']['root']
 if ENVIRONMENT_ROOT_DIR in os.environ:
     _ROOT_DIR_PATH = Path(os.environ[ENVIRONMENT_ROOT_DIR]).resolve()

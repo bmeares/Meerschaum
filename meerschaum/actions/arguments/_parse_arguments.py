@@ -228,23 +228,47 @@ def remove_leading_action(
     ['baz']
     >>> 
     """
-    from meerschaum.actions import get_action
+    from meerschaum.actions import get_action, get_main_action_name
     from meerschaum.utils.warnings import warn
+    from meerschaum.config.static import _static_config
     action_function = get_action(action, _actions=_actions)
     if action_function is None:
         return action
 
+    UNDERSCORE_STANDIN = _static_config()['system']['arguments']['underscore_standin']
+
+    ### Replace underscores with a standin so we can preserve the exising underscores.
+    _action = []
+    for a in action:
+        _action.append(a.replace('_', UNDERSCORE_STANDIN))
+
     ### e.g. 'show_pipes_baz'
-    action_str = '_'.join(action)
+    action_str = '_'.join(_action)
+
+    ### e.g. 'show'
+    main_action_name = get_main_action_name(_action, _actions)
 
     ### e.g. 'show_pipes'
     action_name = action_function.__name__.lstrip('_')
+
+    ### Could contain a prefix ("do_"), so find where to begin.
+    main_action_index = action_name.find(main_action_name)
+
+    ### Strip away any leading prefices.
+    action_name = action_name[main_action_index:]
 
     if not action_str.startswith(action_name):
         warn(f"Unable to parse '{action_str}' for action '{action_name}'.")
         return action
     
     parsed_action = action_str[len(action_name)+1:].split('_')
-    if parsed_action and parsed_action[0] == '' and action[0] != '':
-        del parsed_action[0]
-    return parsed_action
+
+    ### Substitute the underscores back in.
+    _parsed_action = []
+    for a in parsed_action:
+        _parsed_action.append(
+            a.replace(UNDERSCORE_STANDIN, '_')
+        )
+    if _parsed_action and _parsed_action[0] == '' and action[0] != '':
+        del _parsed_action[0]
+    return _parsed_action

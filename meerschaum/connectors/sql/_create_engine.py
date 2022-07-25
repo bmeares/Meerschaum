@@ -7,7 +7,6 @@ This module contains the logic that builds the sqlalchemy engine string.
 """
 
 from meerschaum.utils.debug import dprint
-from meerschaum.config._paths import SQLITE_DB_PATH, DUCKDB_PATH
 
 ### determine driver and requirements from flavor
 default_requirements = {
@@ -69,7 +68,7 @@ flavor_configs = {
         'requirements' : default_requirements,
         'defaults'     : {
             'port'     : 1433,
-            'driver'   : 'ODBC+Driver+17+for+SQL+Server',
+            'driver'   : 'ODBC Driver 17 for SQL Server',
         },
     },
     'mysql'            : {
@@ -115,11 +114,8 @@ flavor_configs = {
         'to_sql': {
             'method': 'multi',
         },
-        'requirements' : {
-        },
-        'defaults'     : {
-            'database' : SQLITE_DB_PATH,
-        },
+        'requirements' : {'database'},
+        'defaults'     : {},
     },
     'duckdb' : {
         'engine' : 'duckdb',
@@ -129,9 +125,7 @@ flavor_configs = {
             'method': 'multi',
         },
         'requirements' : '',
-        'defaults' : {
-            'database' : DUCKDB_PATH,
-        },
+        'defaults' : {},
     },
     'cockroachdb'      : {
         'engine'       : 'cockroachdb',
@@ -172,27 +166,11 @@ flavor_dialects = {
 
 def create_engine(
         self,
-        include_uri : bool = False,
-        debug : bool = False,
+        include_uri: bool = False,
+        debug: bool = False,
         **kw
     ) -> 'sqlalchemy.engine.Engine':
-    """Create a sqlalchemy engine by building the engine string.
-    
-    returns: sqlalchemy engine
-
-    Parameters
-    ----------
-    include_uri : bool :
-         (Default value = False)
-    debug : bool :
-         (Default value = False)
-    **kw :
-        
-
-    Returns
-    -------
-
-    """
+    """Create a sqlalchemy engine by building the engine string."""
     from meerschaum.utils.packages import attempt_import
     from meerschaum.utils.warnings import error, warn
     sqlalchemy = attempt_import('sqlalchemy')
@@ -230,35 +208,32 @@ def create_engine(
     _port = self.__dict__.get('port', None)
     _database = self.__dict__.get('database', None)
     _driver = self.__dict__.get('driver', None)
+    if _driver is not None:
+        ### URL-encode the driver if a space is detected.
+        ### Not a bullet-proof solution, but this should work for most cases.
+        _driver = urllib.parse.quote_plus(_driver) if ' ' in _driver else _driver
+    _uri = self.__dict__.get('uri', None)
 
     ### Handle registering specific dialects (due to installing in virtual environments).
     if self.flavor in flavor_dialects:
-        #  sqlalchemy.engine.url.registry.register(*flavor_dialects[self.flavor])
         sqlalchemy.dialects.registry.register(*flavor_dialects[self.flavor])
 
     ### self.sys_config was deepcopied and can be updated safely
     if self.flavor in ("sqlite", "duckdb"):
-        ### The duckdb dialect might not be registered.
-        #  if self.flavor == 'duckdb':
-            #  sqlalchemy.engine.url.registry.register("duckdb", "duckdb_engine", "Dialect")
-
-        engine_str = f"{_engine}:///{_database}"
+        engine_str = f"{_engine}:///{_database}" if not _uri else _uri
         if 'create_engine' not in self.sys_config:
             self.sys_config['create_engine'] = {}
         if 'connect_args' not in self.sys_config['create_engine']:
             self.sys_config['create_engine']['connect_args'] = {}
         self.sys_config['create_engine']['connect_args'].update({"check_same_thread" : False})
     else:
-        ### Handle 
-        #  if self.flavor == 'cockroachdb':
-            #  sqlalchemy.engine.url.registry.register('cockroachdb', 'sqlalchemy_cockroachdb', 'Dialect')
         engine_str = (
             _engine + "://" + (_username if _username is not None else '') +
             ((":" + urllib.parse.quote_plus(_password)) if _password is not None else '') +
             "@" + _host + ((":" + str(_port)) if _port is not None else '') +
             (("/" + _database) if _database is not None else '')
             + (("?driver=" + _driver) if _driver is not None else '')
-        )
+        ) if not _uri else _uri
     if debug:
         dprint(
             (

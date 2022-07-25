@@ -11,7 +11,9 @@ from meerschaum.utils.typing import Union, SuccessTuple, Any, Callable, Optional
 import os
 from meerschaum.utils.packages import attempt_import
 from meerschaum.config import __doc__, __version__ as version, get_config
-cmd = attempt_import(get_config('shell', 'cmd', patch=True), warn=False, lazy=False)
+cmd_import_name = get_config('shell', 'cmd')
+cmd_venv = None if cmd_import_name == 'cmd' else 'mrsm'
+cmd = attempt_import(cmd_import_name, venv=cmd_venv, warn=False, lazy=False)
 if cmd is None or isinstance(cmd, dict):
     cmd = attempt_import('cmd', lazy=False, warn=False)
 _old_input = cmd.__builtins__['input']
@@ -691,13 +693,13 @@ class Shell(cmd.Cmd):
         if args['action'][0] not in self._actions:
             try:
                 print(textwrap.dedent(getattr(self, f"do_{args['action'][0]}").__doc__))
-            except:
+            except Exception as e:
                 print(f"No help on '{args['action'][0]}'.")
             return ""
         parse_help(args)
         return ""
 
-    def complete_help(self, text : str, line : str, begin_index : int, end_index : int):
+    def complete_help(self, text: str, line: str, begin_index: int, end_index: int):
         """
         Autocomplete the `help` command.
         """
