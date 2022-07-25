@@ -1,0 +1,15 @@
+build/
+dist/
+*.egg-info/
+'System Volume Information/'
+test*/
+*.log
+*.bzl
+docs/
+portable/
+.venv/
+.tuna/
+.snakeviz/
+.pylintrc
+.git/
+.github/

@@ -78,7 +78,7 @@ def get_module_path(
                 _try_install_name_on_fail=False
             )
         if debug:
-            dprint(f"No candidates found for '{import_name}' in venv '{venv}'.")
+            dprint(f"No candidates found for '{import_name}' in venv '{venv}'.", color=False)
         return None
 
     specs_paths = []
@@ -202,10 +202,14 @@ def manually_import_module(
             dprint(f'_version: {_version}', color=color)
         if check_update:
             if need_update(
-                None, import_name=root_name, version=_version, split=split,
-                check_pypi=check_pypi, debug=debug
+                None,
+                import_name = root_name,
+                version = _version,
+                check_pypi = check_pypi,
+                debug = debug,
             ):
                 if install:
+                    print("INSTALL B")
                     if not pip_install(
                         root_name,
                         venv = venv,
@@ -451,7 +455,7 @@ def _get_package_metadata(import_name: str, venv: Optional[str]) -> Dict[str, st
 
 
 def need_update(
-        package: 'ModuleType',
+        package: Optional['ModuleType'] = None,
         install_name: Optional[str] = None,
         import_name: Optional[str] = None,
         version: Optional[str] = None,
@@ -508,7 +512,7 @@ def need_update(
     ) if import_name is None else (
         import_name.split('.')[0] if split else import_name
     )
-    install_name = all_packages.get(root_name, root_name) if install_name is None else install_name
+    install_name = install_name or all_packages.get(root_name, root_name)
     if install_name in _checked_for_updates:
         return False
     _checked_for_updates.add(install_name)
@@ -526,15 +530,15 @@ def need_update(
         dprint(f"required_version: {required_version}", color=color)
 
     try:
-        version = (
-            determine_version(
-                pathlib.Path(package.__file__),
-                import_name=root_name, warn=False, debug=debug
-            )
-            if version is None else version
+        version = version or determine_version(
+            pathlib.Path(package.__file__),
+            import_name=root_name, warn=False, debug=debug
         )
+        if debug:
+            dprint(f"version: {version}", color=color)
     except Exception as e:
         if debug:
+            dprint(str(e), color=color)
             dprint("No version could be determined from the installed package.", color=color)
         return False
     split_version = version.split('.')
@@ -1103,7 +1107,8 @@ def attempt_import(
         activate_venv(venv=venv, debug=debug)
         ### Check if package is a declared dependency.
         root_name = name.split('.')[0] if split else name
-        install_name = all_packages.get(root_name, None)
+        install_name = _import_to_install_name(root_name)
+
         if install_name is None:
             install_name = root_name
             if warn and root_name != 'plugins':
@@ -1132,12 +1137,12 @@ def attempt_import(
         if not found_module:
             if install:
                 ### NOTE: pip_install deactivates venv, so deactivate must be False.
+                print("INSTALL A")
                 if not pip_install(
-                    root_name,
+                    install_name,
                     venv = venv,
                     deactivate = False,
                     split = False,
-                    #  split = split,
                     check_update = check_update,
                     color = color,
                     debug = debug
@@ -1429,24 +1434,36 @@ def is_installed(
     """
     Check whether a package is installed.
     """
-    root_name = import_name.split('.')[0] if split else root_name
-    path = get_module_path(root_name, venv=venv, debug=debug)
-    if path is not None:
-        return True
+    if debug:
+        from meerschaum.utils.debug import dprint
+    root_name = import_name.split('.')[0] if split else import_name
     import importlib.util
     activate_venv(venv=venv, debug=debug)
     try:
-        found_spec = importlib.util.find_spec(root_name)
-    except (ModuleNotFoundError, ValueError) as e:
-        found_spec = None
+        spec_path = pathlib.Path(
+            get_module_path(root_name, venv=venv, debug=debug)
+            or
+            importlib.util.find_spec(root_name).origin
+        )
+    except (ModuleNotFoundError, ValueError, AttributeError, TypeError) as e:
+        spec_path = None
 
-    if found_spec is not None:
-        if venv is not None:
-            found = str(venv_target_path(venv, debug=debug)) in found_spec.origin
+    if debug:
+        if spec_path is not None:
+            dprint(f"Found a path for '{root_name}':\n{spec_path}", color=False)
         else:
-            found = True
-    else:
-        found = False
+            dprint(f"Could not find a path for '{root_name}':\n{spec_path}", color=False)
+
+    found = (
+        not need_update(
+            None, import_name = root_name,
+            check_pypi = False,
+            version = determine_version(
+                spec_path, venv=venv, debug=debug, import_name=root_name
+            ),
+            debug = debug,
+        )
+    ) if spec_path is not None else False
 
     if deactivate:
         deactivate_venv(venv=venv, debug=debug)

@@ -67,8 +67,8 @@ def activate_venv(
     if str(target) not in sys.path:
         sys.path.insert(0, str(target))
 
-    if debug:
-        dprint(f"sys.path: {sys.path}", color=False)
+    #  if debug:
+        #  dprint(f"sys.path: {sys.path}", color=False)
 
     return True
 
@@ -117,8 +117,8 @@ def deactivate_venv(
         if str(target) in sys.path:
             sys.path.remove(str(target))
 
-    if debug:
-        dprint(f"sys.path: {sys.path}", color=False)
+    #  if debug:
+        #  dprint(f"sys.path: {sys.path}", color=False)
 
     return True
 
@@ -352,7 +352,10 @@ def venv_target_path(
     ### Check sys.path for a user-writable site-packages directory.
     if venv is None:
         if not inside_venv():
-            return pathlib.Path(site.getusersitepackages())
+            site_path = pathlib.Path(site.getusersitepackages())
+            ### Allow for dist-level paths (running as root).
+            if not site_path.exists() and os.geteuid() == 0:
+                return pathlib.Path(site.getsitepackages()[0])
 
     venv_root_path = (
         (VIRTENV_RESOURCES_PATH / venv)
