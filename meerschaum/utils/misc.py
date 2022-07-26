@@ -1210,7 +1210,8 @@ def replace_password(d: Dict[str, Any], replace_with: str = '*') -> Dict[str, An
 
     Returns
     -------
-    Another dictionary where values to the keys `'password'` are replaced with `replace_with` (`'*'`).
+    Another dictionary where values to the keys `'password'`
+    are replaced with `replace_with` (`'*'`).
 
     Examples
     --------
@@ -1230,6 +1231,22 @@ def replace_password(d: Dict[str, Any], replace_with: str = '*') -> Dict[str, An
             _d[k] = replace_password(v)
         elif 'password' in str(k).lower():
             _d[k] = ''.join([replace_with for char in str(v)])
+        elif str(k).lower() == 'uri':
+            from meerschaum.connectors.sql import SQLConnector
+            try:
+                uri_params = SQLConnector.parse_uri(v)
+            except Exception as e:
+                uri_params = None
+            if not uri_params:
+                continue
+            if not 'username' in uri_params or not 'password' in uri_params:
+                continue
+            _d[k] = v.replace(
+                uri_params['username'] + ':' + uri_params['password'],
+                uri_params['username'] + ':' + ''.join(
+                    [replace_with for char in str(uri_params['password'])]
+                )
+            )
     return _d
 
 def filter_keywords(

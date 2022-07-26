@@ -8,6 +8,7 @@ Patch the runtime configuration from environment variables.
 
 import os
 import re
+from meerschaum.utils.typing import List
 from meerschaum.config.static import _static_config
 
 def apply_environment_patches() -> None:
@@ -25,7 +26,7 @@ def apply_environment_config(env_var: str) -> None:
     Parse a dictionary (simple or JSON) from an environment variable
     and apply it to the current configuration.
     """
-    from meerschaum.config import get_config, set_config
+    from meerschaum.config import get_config, set_config, _config
     from meerschaum.config._patch import apply_patch_to_config
     if env_var not in os.environ:
         return
@@ -45,26 +46,34 @@ def apply_environment_config(env_var: str) -> None:
     if not isinstance(_patch, dict):
         print(error_msg)
         return
+
+    valids = []
     ### Load and patch config files.
-    for k in _patch:
-        try:
-            _valid, _key_config = get_config(
-                k, write_missing=False, as_tuple=True, warn=False
-            )
-            to_set = (
-                apply_patch_to_config({k: _key_config}, _patch) if _valid
-                else _patch
-            )
-            set_config(to_set)
-        except Exception as e:
-            print(e)
-            print(error_msg)
+    set_config(
+        apply_patch_to_config(
+            _config(),
+            _patch,
+        )
+    )
 
 
 def apply_environment_uris() -> None:
     """
     Patch temporary connectors defined in environment variables which start with
     `MRSM_SQL_` or `MRSM_API_`.
+    """
+    for env_var in get_connector_env_vars():
+        apply_connector_uri(env_var)
+
+
+def get_connector_env_vars() -> List[str]:
+    """
+    Get the names of the environment variables which match the Meerschaum connector regex.
+
+    Examples
+    --------
+    >>> get_connector_environment_vars()
+    ['MRSM_SQL_FOO']
     """
     uri_regex = _static_config()['environment']['uri_regex']
     env_vars = []
@@ -73,8 +82,7 @@ def apply_environment_uris() -> None:
         if matched is None:
             continue
         env_vars.append(env_var)
-    for env_var in env_vars:
-        apply_connector_uri(env_var)
+    return env_vars
 
 
 def apply_connector_uri(env_var: str) -> None:
@@ -82,7 +90,7 @@ def apply_connector_uri(env_var: str) -> None:
     Parse and validate a URI obtained from an environment variable.
     """
     from meerschaum.connectors import get_connector
-    from meerschaum.config import get_config, set_config
+    from meerschaum.config import get_config, set_config, _config
     from meerschaum.config._patch import apply_patch_to_config
     uri_regex = _static_config()['environment']['uri_regex']
     matched = re.match(uri_regex, env_var)
@@ -94,13 +102,25 @@ def apply_connector_uri(env_var: str) -> None:
     except Exception as e:
         print(msg)
         return
-    m_config = get_config('meerschaum')
     try:
         uri = conn.DATABASE_URL if typ == 'sql' else os.environ[env_var]
     except Exception as e:
         print(msg)
-    set_config(apply_patch_to_config(
-        {'meerschaum': m_config},
-        {'meerschaum': {'connectors': {typ: {label: {'uri': uri}}}}}, 
-    ))
 
+    _config()['meerschaum']['connectors'][typ][label] = {'uri': uri}
+    #  m_config = get_config('meerschaum')
+    #  m_config['connectors'][typ][label] = {'uri': uri}
+    #  set_config(
+        #  apply_patch_to_config(
+            #  _config(),
+            #  {'meerschaum': m_config},
+        #  ),
+    #  )
+
+
+def get_env_vars() -> List[str]:
+    """
+    Return all environment variables which begin with `'MRSM_'`.
+    """
+    prefix = _static_config()['environment']['prefix']
+    return sorted([env_var for env_var in os.environ if env_var.startswith(prefix)])

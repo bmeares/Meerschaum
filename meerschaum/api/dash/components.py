@@ -14,13 +14,13 @@ from meerschaum.utils.typing import SuccessTuple, List
 from meerschaum.config.static import _static_config
 from meerschaum.utils.misc import remove_ansi
 from meerschaum.actions import get_shell
-from meerschaum.api import endpoints
+from meerschaum.api import endpoints, CHECK_UPDATE
 from meerschaum.utils.misc import get_connector_labels
 from meerschaum.config import __doc__ as doc
-dbc = attempt_import('dash_bootstrap_components', lazy=False)
-html, dcc = import_html(), import_dcc()
-dex = attempt_import('dash_extensions', lazy=False, check_update=True)
-dash_ace = attempt_import('dash_ace', lazy=False)
+dbc = attempt_import('dash_bootstrap_components', lazy=False, check_update=CHECK_UPDATE)
+html, dcc = import_html(check_update=CHECK_UPDATE), import_dcc(check_update=CHECK_UPDATE)
+dex = attempt_import('dash_extensions', lazy=False, check_update=CHECK_UPDATE)
+dash_ace = attempt_import('dash_ace', lazy=False, check_update=CHECK_UPDATE)
 
 component_ids = {
 

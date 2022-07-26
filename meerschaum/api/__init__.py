@@ -22,17 +22,24 @@ from meerschaum.utils.get_pipes import get_pipes as _get_pipes
 from meerschaum.config._paths import API_UVICORN_CONFIG_PATH, API_UVICORN_RESOURCES_PATH
 from meerschaum.plugins import _api_plugins
 from meerschaum.utils.warnings import warn
+
+### Skip verifying packages in the docker image.
+CHECK_UPDATE = os.environ.get(_static_config()['environment']['runtime'], None) != 'docker'
+
 endpoints = _static_config()['api']['endpoints']
-aiofiles = attempt_import('aiofiles', lazy=False)
-fastapi = attempt_import('fastapi', lazy=False)
-starlette_reponses = attempt_import('starlette.responses', warn=False, lazy=False)
-python_multipart = attempt_import('multipart', lazy=False)
-packaging_version = attempt_import('packaging.version')
+aiofiles = attempt_import('aiofiles', lazy=False, check_update=CHECK_UPDATE)
+fastapi = attempt_import('fastapi', lazy=False, check_update=CHECK_UPDATE)
+starlette_reponses = attempt_import(
+    'starlette.responses', warn=False, lazy=False,
+    check_update=CHECK_UPDATE,
+)
+python_multipart = attempt_import('multipart', lazy=False, check_update=CHECK_UPDATE)
+packaging_version = attempt_import('packaging.version', check_update=CHECK_UPDATE)
 from meerschaum.api._chain import check_allow_chaining, DISALLOW_CHAINING_MESSAGE
 from meerschaum.config.static import SERVER_ID
-uvicorn_config_path = API_UVICORN_RESOURCES_PATH / SERVER_ID / '.config.json'
+uvicorn_config_path = API_UVICORN_RESOURCES_PATH / SERVER_ID / 'config.json'
 
-uvicorn_workers = attempt_import('uvicorn.workers', venv=None)
+uvicorn_workers = attempt_import('uvicorn.workers', venv=None, check_update=CHECK_UPDATE)
 uvicorn_config = None
 sys_config = get_config('system', 'api')
 permissions_config = get_config('system', 'api', 'permissions')
@@ -203,15 +210,14 @@ app = fastapi.FastAPI(
     'fastapi.responses',
     'fastapi.templating',
     'fastapi.staticfiles',
+    check_update=CHECK_UPDATE,
 )
-#  jinja2 = attempt_import('jinja2')
 
 HTMLResponse = fastapi_responses.HTMLResponse
 Request = fastapi.Request
 
 from meerschaum.config._paths import API_RESOURCES_PATH, API_STATIC_PATH, API_TEMPLATES_PATH
 app.mount('/static', fastapi_staticfiles.StaticFiles(directory=str(API_STATIC_PATH)), name='static')
-#  templates = fastapi_templating.Jinja2Templates(directory=str(API_TEMPLATES_PATH))
 
 _custom_kwargs = {'mrsm_instance'}
 

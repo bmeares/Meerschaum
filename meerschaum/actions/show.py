@@ -28,6 +28,7 @@ def show(
         'pipes'      : _show_pipes,
         'config'     : _show_config,
         'modules'    : _show_modules,
+        'environment': _show_environment,
         'version'    : _show_version,
         'connectors' : _show_connectors,
         'arguments'  : _show_arguments,
@@ -716,6 +717,27 @@ def _show_gui(**kw) -> SuccessTuple:
     from meerschaum.actions import actions
     kw.pop('action', None)
     return actions['start'](['gui'], **kw)
+
+
+def _show_environment(
+        nopretty: bool = False,
+        **kw
+    ) -> SuccessTuple:
+    """
+    Show all of the current environment variables with begin with `'MRSM_'`.
+    """
+    import os
+    from meerschaum.utils.formatting import pprint
+    from meerschaum.config._environment import get_env_vars
+    pprint(
+        {
+            env_var: os.environ[env_var]
+            for env_var in get_env_vars()
+        },
+        nopretty = nopretty,
+    )
+    return True, "Success"
+
 
 
 ### NOTE: This must be the final statement of the module.

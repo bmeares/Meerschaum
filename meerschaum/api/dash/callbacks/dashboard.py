@@ -13,7 +13,7 @@ from dash.exceptions import PreventUpdate
 from meerschaum.config import get_config
 from meerschaum.config.static import _static_config
 from meerschaum.utils.typing import List, Optional, Any
-from meerschaum.api import get_api_connector, endpoints, no_auth
+from meerschaum.api import get_api_connector, endpoints, no_auth, CHECK_UPDATE
 from meerschaum.api.dash import dash_app, debug, pipes, _get_pipes, active_sessions
 from meerschaum.api.dash.connectors import get_web_connector
 from meerschaum.api.dash.websockets import ws_url_from_href
@@ -36,9 +36,9 @@ from meerschaum.actions import get_subactions, actions
 from meerschaum.actions.arguments._parser import get_arguments_triggers, parser
 import meerschaum as mrsm
 import json
-dash = attempt_import('dash', lazy=False)
-dbc = attempt_import('dash_bootstrap_components', lazy=False)
-dcc, html = import_dcc(), import_html()
+dash = attempt_import('dash', lazy=False, check_update=CHECK_UPDATE)
+dbc = attempt_import('dash_bootstrap_components', lazy=False, check_update=CHECK_UPDATE)
+dcc, html = import_dcc(check_update=CHECK_UPDATE), import_html(check_update=CHECK_UPDATE)
 
 keys_state = (
     State('connector-keys-dropdown', 'value'),

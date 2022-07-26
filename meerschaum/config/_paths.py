@@ -67,8 +67,8 @@ paths = {
     'API_UVICORN_CONFIG_PATH'        : ('{API_UVICORN_RESOURCES_PATH}', '.thread_config.json'),
 
     'CACHE_RESOURCES_PATH'           : ('{ROOT_DIR_PATH}', '.cache'),
-    'PIPES_CACHE_RESOURCES_PATH'     : ('{ROOT_DIR_PATH}', 'pipes'),
-    'USERS_CACHE_RESOURCES_PATH'     : ('{ROOT_DIR_PATH}', 'users'),
+    'PIPES_CACHE_RESOURCES_PATH'     : ('{CACHE_RESOURCES_PATH}', 'pipes'),
+    'USERS_CACHE_RESOURCES_PATH'     : ('{CACHE_RESOURCES_PATH}', 'users'),
 
     'PLUGINS_RESOURCES_PATH'         : ('{ROOT_DIR_PATH}', 'plugins'),
     'PLUGINS_ARCHIVES_RESOURCES_PATH': ('{PLUGINS_RESOURCES_PATH}', '.archives'),

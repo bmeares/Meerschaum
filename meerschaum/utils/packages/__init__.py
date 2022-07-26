@@ -106,6 +106,7 @@ def manually_import_module(
         color: bool = True,
         debug: bool = False,
         deactivate: bool = True,
+        use_sys_modules: bool = True,
     ) -> Union['ModuleType', None]:
     """
     Manually import a module from a virtual environment (or the base environment).
@@ -143,6 +144,10 @@ def manually_import_module(
         If `True`, deactivate the virtual envirionment after importing.
          (Default value = True)
 
+    use_sys_modules: bool, default True
+        If `True`, return the module in `sys.modules` if it exists.
+        Otherwise continue with manually importing.
+
     Returns
     -------
     The specified module or `None` if it can't be imported.
@@ -150,7 +155,7 @@ def manually_import_module(
     """
     import sys
     _previously_imported = import_name in sys.modules
-    if _previously_imported and not check_update:
+    if _previously_imported and use_sys_modules:
         return sys.modules[import_name]
     if debug:
         from meerschaum.utils.debug import dprint
@@ -360,6 +365,7 @@ def determine_version(
     ) if path is not None else venv_target_path(venv, debug=debug)
 
     installed_dir_name = _import_to_dir_name(import_name)
+    clean_installed_dir_name = installed_dir_name.lower().replace('-', '_')
 
     ### First, check if a dist-info directory exists.
     _found_versions = []
@@ -367,9 +373,9 @@ def determine_version(
         for filename in os.listdir(module_parent_dir):
             path = module_parent_dir / filename
             if (
-                not path.is_dir() or
-                not filename.lower().startswith(installed_dir_name.replace('-', '_')) or
-                not filename.endswith('.dist-info')
+                not path.is_dir()
+                or not filename.startswith(clean_installed_dir_name + '-')
+                or not filename.endswith('.dist-info')
             ):
                 continue
             _v = filename.replace('.dist-info', '').split("-")[-1]
@@ -1082,8 +1088,8 @@ def attempt_import(
             ### determine the import method (lazy vs normal)
             from meerschaum.utils.misc import filter_keywords
             import_method = (
-                (manually_import_module if check_update else _import_module)
-                if not lazy else lazy_import
+                _import_module if not lazy
+                else lazy_import
             )
             try:
                 mod = import_method(_name, **(filter_keywords(import_method, **kw)))

@@ -7,19 +7,19 @@ Callbacks for the plugins page.
 """
 
 from __future__ import annotations
+import json
 from meerschaum.utils.typing import Optional, Dict, Any
 from meerschaum.api.dash import dash_app, debug, active_sessions
-from meerschaum.api import get_api_connector, endpoints
+from meerschaum.api import get_api_connector, endpoints, CHECK_UPDATE
 from meerschaum.core import Plugin
 from meerschaum.utils.packages import attempt_import, import_dcc, import_html
-dash = attempt_import('dash', lazy=False)
+dash = attempt_import('dash', lazy=False, check_update=CHECK_UPDATE)
 from dash.exceptions import PreventUpdate
 from dash.dependencies import Input, Output, State, ALL, MATCH
-html, dcc = import_html(), import_dcc()
+html, dcc = import_html(check_update=CHECK_UPDATE), import_dcc(check_update=CHECK_UPDATE)
 import dash_bootstrap_components as dbc
 from meerschaum.api.dash.components import alert_from_success_tuple, build_cards_grid
 from dash.exceptions import PreventUpdate
-import json
 from meerschaum.api.dash.plugins import get_plugins_cards, is_plugin_owner
 
 @dash_app.callback(

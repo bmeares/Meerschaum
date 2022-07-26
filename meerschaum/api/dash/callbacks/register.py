@@ -6,16 +6,16 @@
 Callbacks for the registration page.
 """
 
-from meerschaum.api import get_api_connector, endpoints
+import uuid
+from meerschaum.api import get_api_connector, endpoints, CHECK_UPDATE
 from meerschaum.api.dash import dash_app, debug, active_sessions
 from dash.dependencies import Input, Output, State, ALL, MATCH
 from dash.exceptions import PreventUpdate
 from meerschaum.core import User
 from meerschaum.config.static import _static_config
 from meerschaum.utils.packages import attempt_import
-dash = attempt_import('dash')
+dash = attempt_import('dash', check_update=CHECK_UPDATE)
 from fastapi.exceptions import HTTPException
-import uuid
 
 @dash_app.callback(
     [Output("username-input", "valid"), Output("username-input", "invalid")],

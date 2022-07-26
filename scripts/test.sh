@@ -23,7 +23,6 @@ MRSM_ROOT_DIR="$test_root" python -m meerschaum install plugin stress
 ### Start the test API.
 api_exists=$(MRSM_ROOT_DIR="$test_root" python -m meerschaum show jobs test_api --nopretty)
 if [ "$api_exists" != "test_api" ]; then
-  echo "New job!"
   MRSM_ROOT_DIR="$test_root" python -m meerschaum start api -w 1 -p $test_port --name test_api -y -d -i sql:memory
 else
   MRSM_ROOT_DIR="$test_root" python -m meerschaum start jobs test_api -y

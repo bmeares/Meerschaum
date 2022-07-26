@@ -14,7 +14,7 @@ from meerschaum.utils.typing import SuccessTuple, Tuple, Dict, Any, WebState
 from meerschaum.utils.packages import attempt_import, import_html, import_dcc
 from meerschaum.utils.misc import remove_ansi
 from meerschaum.actions import actions, get_shell
-from meerschaum.api import debug
+from meerschaum.api import debug, CHECK_UPDATE
 from meerschaum.api.dash import (
     running_jobs, stopped_jobs, running_monitors, stopped_monitors, active_sessions
 )
@@ -24,7 +24,7 @@ from meerschaum.api.dash.components import alert_from_success_tuple, console_div
 from meerschaum.api.dash.pipes import pipes_from_state, keys_from_state
 from meerschaum.api.dash.websockets import ws_send
 from meerschaum.api._websockets import websockets
-html, dcc = import_html(), import_dcc()
+html, dcc = import_html(check_update=CHECK_UPDATE), import_dcc(check_update=CHECK_UPDATE)
 from meerschaum.config import get_config
 from meerschaum.core import User
 
