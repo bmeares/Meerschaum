@@ -8,13 +8,13 @@ Functions for building graphs of pipes' data.
 
 from __future__ import annotations
 from meerschaum.utils.typing import WebState, List, Optional
-from meerschaum.api import debug
+from meerschaum.api import debug, CHECK_UPDATE
 from meerschaum.utils.packages import attempt_import, import_dcc, import_html, import_pandas
 #  import plotly.express as px
-pd = import_pandas()
-px = attempt_import('plotly.express', warn=False)
-dbc = attempt_import('dash_bootstrap_components')
-html, dcc = import_html(), import_dcc()
+pd = import_pandas(check_update=CHECK_UPDATE)
+px = attempt_import('plotly.express', warn=False, check_update=CHECK_UPDATE)
+dbc = attempt_import('dash_bootstrap_components', check_update=CHECK_UPDATE)
+html, dcc = import_html(check_update=CHECK_UPDATE), import_dcc(check_update=CHECK_UPDATE)
 
 def get_graphs_cards(state: Optional[WebState]):
     """

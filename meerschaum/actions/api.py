@@ -6,6 +6,7 @@ Start the Meerschaum WebAPI with the `api` action.
 """
 
 from __future__ import annotations
+import os
 from meerschaum.utils.typing import SuccessTuple, Optional, List, Any
 
 def api(
@@ -134,6 +135,8 @@ def _api_start(
         API_UVICORN_RESOURCES_PATH, API_UVICORN_CONFIG_PATH, CACHE_RESOURCES_PATH,
         PACKAGE_ROOT_PATH,
     )
+    from meerschaum.config._patch import apply_patch_to_config
+    from meerschaum.config._environment import get_env_vars
     from meerschaum.config.static import _static_config, SERVER_ID
     from meerschaum.connectors.parse import parse_instance_keys
     from meerschaum.utils.pool import get_pool
@@ -150,10 +153,10 @@ def _api_start(
         'uvicorn', 'gunicorn', venv=None, lazy=False, check_update=False,
     )
 
-    uvicorn_config_path = API_UVICORN_RESOURCES_PATH / SERVER_ID / '.config.json'
-    uvicorn_env_path = API_UVICORN_RESOURCES_PATH / SERVER_ID / '.env'
+    uvicorn_config_path = API_UVICORN_RESOURCES_PATH / SERVER_ID / 'config.json'
+    uvicorn_env_path = API_UVICORN_RESOURCES_PATH / SERVER_ID / 'uvicorn.env'
 
-    api_config = get_config('system', 'api')
+    api_config = get_config('system', 'api').copy()
     cf = _config()
     uvicorn_config = api_config['uvicorn']
     if port is None:
@@ -175,6 +178,7 @@ def _api_start(
     
     uvicorn_config['workers'] = workers
     uvicorn_config['debug'] = debug
+    uvicorn_config['reload'] = debug
 
     if mrsm_instance is None:
         mrsm_instance = get_config('meerschaum', 'api_instance', patch=True)
@@ -202,7 +206,6 @@ def _api_start(
     uvicorn_config.update({
         'port': port,
         'host': host,
-        'reload': debug,
         'env_file': str(uvicorn_env_path),
         'mrsm_instance': mrsm_instance,
         'no_dash': no_dash,
@@ -210,7 +213,9 @@ def _api_start(
         'private': private,
     })
     if debug:
+        uvicorn_config['reload'] = debug
         uvicorn_config['reload_dirs'] = [str(PACKAGE_ROOT_PATH)]
+        uvicorn_config['reload_excludes'] = 'plugins/__init__.py'
     uvicorn_config['use_colors'] = (not nopretty) if nopretty else ANSI
 
     api_config['uvicorn'] = uvicorn_config
@@ -227,22 +232,37 @@ def _api_start(
     except Exception as e:
         error(e)
     uvicorn_config_path.parent.mkdir()
-    with open(uvicorn_config_path, 'w+') as f:
+    with open(uvicorn_config_path, 'w+', encoding='utf-8') as f:
         if debug:
             dprint(f"Dumping API config file to '{uvicorn_config_path}'", nopretty=nopretty)
             pprint(uvicorn_config, stream=sys.stderr, nopretty=nopretty)
         json.dump(uvicorn_config, f)
 
+    MRSM_SERVER_ID = _static_config()['environment']['id']
+    MRSM_CONFIG = _static_config()['environment']['config']
+    MRSM_RUNTIME = _static_config()['environment']['runtime']
+    MRSM_PATCH = _static_config()['environment']['patch']
+    MRSM_ROOT_DIR = _static_config()['environment']['root']
     env_dict = {
-        _static_config()['environment']['id']: SERVER_ID,
-        _static_config()['environment']['runtime']: 'api',
-        _static_config()['environment']['config']: {'system': {'api': {'uvicorn': uvicorn_config}}},
+        MRSM_SERVER_ID: SERVER_ID,
+        MRSM_RUNTIME: 'api',
+        MRSM_CONFIG: apply_patch_to_config(
+            get_config('system'),
+            {'system': {'api': {'uvicorn': uvicorn_config}}},
+        ),
     }
+    if MRSM_PATCH in os.environ:
+        env_dict[MRSM_PATCH] = os.environ[MRSM_PATCH]
+    for env_var in get_env_vars():
+        if env_var in env_dict:
+            continue
+        env_dict[env_var] = os.environ[env_var]
+
     env_text = ''
     for key, val in env_dict.items():
         value = json.dumps(json.dumps(val)) if isinstance(val, dict) else val
         env_text += f"{key}={value}\n"
-    with open(uvicorn_env_path, 'w+') as f:
+    with open(uvicorn_env_path, 'w+', encoding='utf-8') as f:
         if debug:
             dprint(f"Writing ENV file to '{uvicorn_env_path}'.")
         f.write(env_text)

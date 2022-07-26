@@ -8,12 +8,12 @@ Functions for interacting with plugins via the web interface.
 
 from __future__ import annotations
 from meerschaum.utils.typing import List, Tuple, SuccessTuple
-from meerschaum.utils.packages import attempt_import, import_dcc, import_html
-html, dcc = import_html(), import_dcc()
+from meerschaum.utils.packages import import_dcc, import_html
+from meerschaum.api import get_api_connector, endpoints, CHECK_UPDATE
+html, dcc = import_html(check_update=CHECK_UPDATE), import_dcc(check_update=CHECK_UPDATE)
 import dash_bootstrap_components as dbc
 from meerschaum.core import Plugin
 from meerschaum.api.dash import dash_app, debug, active_sessions
-from meerschaum.api import get_api_connector, endpoints
 
 
 def get_plugins_cards(

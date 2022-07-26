@@ -41,7 +41,11 @@ def _config(
     global config
     if config is None or reload:
         from meerschaum.config._sync import sync_files as _sync_files
-        config = read_config(keys=keys, substitute=substitute, write_missing=write_missing)
+        config = read_config(
+            keys=[keys[0]] if keys else [],
+            substitute=substitute,
+            write_missing=write_missing,
+        )
         if sync_files:
             _sync_files(keys=[keys[0] if keys else None])
     return config
@@ -197,8 +201,6 @@ def get_config(
             if not in_default:
                 try:
                     if warn:
-                        import traceback
-                        #  traceback.print_stack()
                         from meerschaum.utils.warnings import warn as _warn
                         _warn(warning_msg, stacklevel=3, color=False)
                 except Exception as e:
@@ -293,8 +295,6 @@ if permanent_patch_config is not None and PERMANENT_PATCH_DIR_PATH.exists():
         shutil.rmtree(PERMANENT_PATCH_DIR_PATH)
     if DEFAULT_CONFIG_DIR_PATH.exists():
         shutil.rmtree(DEFAULT_CONFIG_DIR_PATH)
-
-
 
 
 ### Make sure readline is available for the portable version.

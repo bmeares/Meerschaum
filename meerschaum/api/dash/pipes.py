@@ -7,22 +7,22 @@ Functions for interacting with pipes via the web interface.
 """
 
 from __future__ import annotations
+import json
 import shlex
 from dash.dependencies import Input, Output, State
 from meerschaum.utils.typing import List, Optional, Dict, Any, Tuple, Union
 from meerschaum.utils.misc import string_to_dict
 from meerschaum.utils.packages import attempt_import, import_dcc, import_html
+from meerschaum.api import endpoints, CHECK_UPDATE
 from meerschaum.api.dash import (
     dash_app, debug, _get_pipes
 )
-from meerschaum.api import endpoints
 from meerschaum.api.dash.connectors import get_web_connector
 from meerschaum.api.dash.components import alert_from_success_tuple
 import meerschaum as mrsm
-import json
-dbc = attempt_import('dash_bootstrap_components', lazy=False)
-html, dcc = import_html(), import_dcc()
-humanfriendly = attempt_import('humanfriendly')
+dbc = attempt_import('dash_bootstrap_components', lazy=False, check_update=CHECK_UPDATE)
+html, dcc = import_html(check_update=CHECK_UPDATE), import_dcc(check_update=CHECK_UPDATE)
+humanfriendly = attempt_import('humanfriendly', check_update=CHECK_UPDATE)
 
 def pipe_from_ctx(ctx, trigger_property: str = 'n_clicks') -> Union[mrsm.Pipe, None]:
     """

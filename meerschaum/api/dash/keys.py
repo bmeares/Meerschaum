@@ -9,10 +9,11 @@ Define components for choosing keys.
 from __future__ import annotations
 from meerschaum.utils.packages import attempt_import, import_html, import_dcc
 from meerschaum.actions import actions
+from meerschaum.api import CHECK_UPDATE
 from meerschaum.api.dash.components import search_parameters_editor
-dash = attempt_import('dash', lazy=False)
-dbc = attempt_import('dash_bootstrap_components', lazy=False)
-html, dcc = import_html(), import_dcc()
+dash = attempt_import('dash', lazy=False, check_update=CHECK_UPDATE)
+dbc = attempt_import('dash_bootstrap_components', lazy=False, check_update=CHECK_UPDATE)
+html, dcc = import_html(check_update=CHECK_UPDATE), import_dcc(check_update=CHECK_UPDATE)
 
 placeholders = {
     'ck' : 'Connectors',

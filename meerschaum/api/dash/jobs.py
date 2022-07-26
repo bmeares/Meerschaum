@@ -11,9 +11,10 @@ from dash.dependencies import Input, Output, State
 from meerschaum.utils.typing import List, Optional, Dict, Any, Tuple, Union, WebState
 from meerschaum.utils.packages import attempt_import, import_html, import_dcc
 from meerschaum.api.dash.components import alert_from_success_tuple, build_cards_grid
-dbc = attempt_import('dash_bootstrap_components', lazy=False)
+from meerschaum.api import CHECK_UPDATE
+dbc = attempt_import('dash_bootstrap_components', lazy=False, check_update=CHECK_UPDATE)
 html, dcc = import_html(), import_dcc()
-dateutil_parser = attempt_import('dateutil.parser')
+dateutil_parser = attempt_import('dateutil.parser', check_update=CHECK_UPDATE)
 from meerschaum.utils.daemon import get_daemons, get_running_daemons, get_stopped_daemons
 
 def get_jobs_cards(state: WebState):

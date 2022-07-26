@@ -45,6 +45,7 @@ def _static_config():
                 'runtime': 'MRSM_RUNTIME',
                 'id': 'MRSM_SERVER_ID',
                 'uri_regex': r'MRSM_(SQL|API)_(\d*[a-zA-Z][a-zA-Z0-9-_+]*$)',
+                'prefix': 'MRSM_',
             },
             'config': {
                 'default_filetype': 'json',

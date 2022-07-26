@@ -8,10 +8,10 @@ Login page for the Web interface.
 
 from __future__ import annotations
 import json
+from meerschaum.api import permissions_config, endpoints, CHECK_UPDATE
 from meerschaum.utils.packages import import_html, import_dcc
-html, dcc = import_html(), import_dcc()
+html, dcc = import_html(check_update=CHECK_UPDATE), import_dcc(check_update=CHECK_UPDATE)
 import dash_bootstrap_components as dbc
-from meerschaum.api import permissions_config, endpoints
 from meerschaum.config import get_config
 
 dash_endpoint = endpoints['dash']

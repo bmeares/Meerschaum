@@ -7,10 +7,10 @@ View the available plugins hosted by this API instance.
 """
 
 from __future__ import annotations
+from meerschaum.api import get_api_connector, endpoints, CHECK_UPDATE
 from meerschaum.utils.packages import import_html, import_dcc
-html, dcc = import_html(), import_dcc()
+html, dcc = import_html(check_update=CHECK_UPDATE), import_dcc(check_update=CHECK_UPDATE)
 import dash_bootstrap_components as dbc
-from meerschaum.api import get_api_connector, endpoints
 from meerschaum.core import Plugin
 from meerschaum.utils.typing import Optional
 

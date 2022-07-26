@@ -6,9 +6,10 @@
 Create new user accounts.
 """
 
+from meerschaum.api import CHECK_UPDATE
 import dash_bootstrap_components as dbc
 from meerschaum.utils.packages import import_html, import_dcc
-html, dcc = import_html(), import_dcc()
+html, dcc = import_html(check_update=CHECK_UPDATE), import_dcc(check_update=CHECK_UPDATE)
 
 layout = dbc.Container([
     html.Div([
@@ -17,12 +18,14 @@ layout = dbc.Container([
         dbc.Row(
             [
                 dbc.Col([
-                    #  dbc.FormGroup([
                         dbc.Label("Username", html_for='register-username-input'),
-                        dbc.Input(id="register-username-input", type="text", placeholder="Enter username"),
+                        dbc.Input(
+                            id="register-username-input",
+                            type="text",
+                            placeholder="Enter username"
+                        ),
                         dbc.FormFeedback("Username is available.", type="valid"),
                         dbc.FormFeedback("Username is unavailable.", type="invalid"),
-                    #  ]),
                     ],
                     width = 6,
                 ),
@@ -39,20 +42,16 @@ layout = dbc.Container([
                     width = 6,
                 ),
             ],
-            #  form = True,
         ),
         html.Br(),
         dbc.Row(
             dbc.Col([
-                #  dbc.FormGroup([
                     dbc.Label("Email", html_for="register-email-input"),
                     dbc.Input(id="register-email-input", type="email", placeholder="Optional"),
-                #  ]),
-                dbc.FormFeedback("", type="valid"),
-                dbc.FormFeedback("", type="invalid"),
+                    dbc.FormFeedback("", type="valid"),
+                    dbc.FormFeedback("", type="invalid"),
                 ],
             ),
-            #  form = True,
         ),
         html.Br(),
         dbc.Row([
@@ -68,6 +67,4 @@ layout = dbc.Container([
         ]),
 
     ])
-
-
 ])
