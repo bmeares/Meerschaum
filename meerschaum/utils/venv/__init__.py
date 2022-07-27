@@ -14,7 +14,7 @@ __all__ = sorted([
     'activate_venv', 'deactivate_venv', 'init_venv',
     'inside_venv', 'is_venv_active', 'venv_exec',
     'venv_executable', 'venv_exists', 'venv_target_path',
-    'Venv',
+    'Venv', 'get_venvs', 'verify_venv',
 ])
 __pdoc__ = {'Venv': True}
 
@@ -152,9 +152,60 @@ def is_venv_active(
         dprint(f"Checking if virtual environment '{venv}' is active.", color=color)
     return venv in active_venvs
 
+verified_venvs = set()
+def verify_venv(
+        venv: str,
+        debug: bool = False,
+    ) -> None:
+    """
+    Verify that the virtual environment matches the expected state.
+    """
+    import pathlib, platform, os, shutil, subprocess
+    from meerschaum.config._paths import VIRTENV_RESOURCES_PATH
+    from meerschaum.utils.process import run_process
+    venv_path = VIRTENV_RESOURCES_PATH / venv
+    bin_path = venv_path / (
+        'bin' if platform.system() != 'Windows' else "Scripts"
+    )
+    if not bin_path.exists():
+        init_venv(venv, verify=False, debug=debug)
+
+    ### Ensure the versions are symlinked correctly.
+    for filename in os.listdir(bin_path):
+        if not filename.startswith('python'):
+            continue
+        python_path = bin_path / filename
+        try:
+            ### It might be a broken symlink, so skip on errors.
+            proc = run_process(
+                [str(python_path), '-V'],
+                as_proc = True,
+                capture_output = True,
+            )
+            stdout, stderr = proc.communicate(timeout=0.1)
+        except Exception as e:
+            continue
+        version = stdout.decode('utf-8').strip().replace('Python ', '')
+        major_version = version.split('.', maxsplit=1)[0]
+        minor_version = version.split('.', maxsplit=2)[1]
+        python_versioned_name = (
+            'python' + major_version + '.' + minor_version
+            + ('' if platform.system() != 'Windows' else '.exe')
+        )
+        python_versioned_path = bin_path / python_versioned_name
+        if filename == python_versioned_name:
+            continue
+        if python_versioned_path.exists():
+            python_versioned_path.unlink()
+        shutil.move(python_path, python_versioned_path)
+
 
 tried_virtualenv = False
-def init_venv(venv: str='mrsm', debug: bool=False) -> bool:
+def init_venv(
+        venv: str = 'mrsm',
+        verify: bool = True,
+        debug: bool = False,
+    ) -> bool:
     """
     Initialize the virtual environment.
 
@@ -163,12 +214,22 @@ def init_venv(venv: str='mrsm', debug: bool=False) -> bool:
     venv: str, default 'mrsm'
         The name of the virtual environment to create.
 
+    verify: bool, default True
+        If `True`, verify that the virtual environment is in the expected state.
+
     Returns
     -------
     A `bool` indicating success.
     """
+    if venv in verified_venvs:
+        return True
+    if verify:
+        verify_venv(venv, debug=debug)
+        verified_venvs.add(venv)
+        return True
     if venv_exists(venv, debug=debug):
         return True
+
     import sys, platform, os, pathlib
     from meerschaum.config._paths import VIRTENV_RESOURCES_PATH
     from meerschaum.utils.packages import run_python_package, attempt_import
@@ -179,12 +240,9 @@ def init_venv(venv: str='mrsm', debug: bool=False) -> bool:
     except ImportError:
         _venv = None
         virtualenv = None
-
+    
     venv_path = VIRTENV_RESOURCES_PATH / venv
-    bin_path = pathlib.Path(
-        venv_path,
-        ('bin' if platform.system() != 'Windows' else "Scripts")
-    )
+
     _venv_success = False
     if _venv is not None:
         import io
@@ -299,7 +357,6 @@ def venv_exec(
 
     """
     import subprocess
-    from meerschaum.utils.process import run_process
     from meerschaum.utils.debug import dprint
     executable = venv_executable(venv=venv)
     cmd_list = [executable, '-c', code]
@@ -413,6 +470,23 @@ def inside_venv() -> bool:
                 and sys.base_prefix != sys.prefix
         )
     )
+
+
+def get_venvs() -> List[str]:
+    """
+    Return a list of all the virtual environments.
+    """
+    import os
+    from meerschaum.config._paths import VIRTENV_RESOURCES_PATH
+    venvs = []
+    for filename in os.listdir(VIRTENV_RESOURCES_PATH):
+        path = VIRTENV_RESOURCES_PATH / filename
+        if not path.is_dir():
+            continue
+        if not venv_exists(filename):
+            continue
+        venvs.append(filename)
+    return venvs
 
 
 from meerschaum.utils.venv._Venv import Venv

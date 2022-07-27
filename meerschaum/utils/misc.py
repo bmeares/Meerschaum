@@ -7,7 +7,8 @@ Miscellaneous functions go here
 
 from __future__ import annotations
 from meerschaum.utils.typing import (
-    Union, Mapping, Any, Callable, Optional, List, Dict, SuccessTuple, Iterable, PipesDict, Tuple
+    Union, Mapping, Any, Callable, Optional, List, Dict, SuccessTuple, Iterable, PipesDict, Tuple,
+    InstanceConnector,
 )
 
 def add_method_to_class(
@@ -718,12 +719,12 @@ def parse_df_datetimes(
     return df
 
 def timed_input(
-        seconds : int = 10,
-        timeout_message : str = "",
-        prompt : str = "",
-        icon : bool = False,
+        seconds: int = 10,
+        timeout_message: str = "",
+        prompt: str = "",
+        icon: bool = False,
         **kw
-    ) -> Optional[str]:
+    ) -> Union[str, None]:
     """
     Accept user input only for a brief period of time.
 
@@ -751,7 +752,7 @@ def timed_input(
     import signal
 
     class TimeoutExpired(Exception):
-        """ """
+        """Raise this exception when the timeout is reached."""
 
     def alarm_handler(signum, frame):
         raise TimeoutExpired
@@ -768,12 +769,9 @@ def timed_input(
     finally:
         signal.alarm(0) # cancel alarm
 
+
 def retry_connect(
-        connector : Union[
-            meerschaum.connectors.sql.SQLConnector,
-            meerschaum.connectors.api.APIConnector,
-            None
-        ] = None,
+        connector: Union[InstanceConnector, None] = None,
         max_retries: int = 40,
         retry_wait: int = 3,
         workers: int = 1,
@@ -1286,13 +1284,10 @@ def filter_keywords(
     for param, _type in func_params.items():
         if '**' in str(_type):
             return kw
-    func_kw = dict()
-    for k, v in kw.items():
-        if k in func_params:
-            func_kw[k] = v
-    return func_kw
+    return {k: v for k, v in kw.items() if k in func_params}
 
-def dict_from_od(od : collections.OrderedDict) -> Dict[Any, Any]:
+
+def dict_from_od(od: collections.OrderedDict) -> Dict[Any, Any]:
     """
     Convert an ordered dict to a dict.
     Does not mutate the original OrderedDict.

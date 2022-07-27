@@ -4,7 +4,27 @@
 
 This is the current release cycle, so future features will be updated below.
 
-### v1.1.0 – v1.1.1
+### v1.1.1 – v1.1.4
+
+**Bugfixes**
+
+The first four versions following the initial v1.1.0 release addressed breaking changes and edge cases. Below are some notable issues resolved:
+
+- **Fixed broken Docker images.**  
+  Changes to the environment and package systems broke functionality of the Docker images. For example, v1.1.0 switched to a stricter package management policy, but this new policy broke the mechanism behind the Docker images (user-level vs venv-level packages).
+- **Verify virtual environments for multiple Python versions.**  
+  When a virtual environment is first activated, Meerschaum now verifies that the `python` symlinks point to the correct versions. This is necessary due to a quirk in `venv` and `virtualenv` where activating an existing environment with a different Python version overwrites the existing `python` symlink. It also ensures that the symlinks specify the correct version number, e.g. `python3.10`. This bevavior is now automatic but may be invoked with `mrsm verify venvs`.
+- **Fixed inconsistent environment behavior with `gunicorn`.**  
+  This one was tricky to troubleshoot. Due to the migration to the user-level Docker image, a subtle bug surfaced where the environment variables for `gunicorn` were incorrectly serialized.
+- **Fixed slow-performing edge cases in `determine_version()`.**  
+  Inconsistencies in naming conventions in some packages like `pygments` led to failures to quickly determine the version.
+- **Fixed Web API actions.**  
+  In v1.1.0, the default virtual environment was pinned to `mrsm`, and this broke a function which relied on the old inferred default value of `None`. Always remember: explicit is better than implicit.
+- **Fixed `start job` for existing jobs.**  
+  The same naming change broke `daemon_action()`. Explcit code is important, folks!
+
+
+### v1.1.0
 
 **What's New**
 

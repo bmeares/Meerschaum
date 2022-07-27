@@ -281,7 +281,9 @@ def _api_start(
             '--bind', host + f':{port}',
         ]
         for key, val in env_dict.items():
-            gunicorn_args += ['--env', key + '=' + json.dumps(val)]
+            gunicorn_args += [
+                '--env', key + '=' + (json.dumps(val) if isinstance(val, dict) else val)
+            ]
         if workers is not None:
             gunicorn_args += ['--workers', str(workers)]
         if debug:

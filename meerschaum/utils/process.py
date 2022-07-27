@@ -20,7 +20,7 @@ def run_process(
         *args,
         foreground: bool = False,
         as_proc: bool = False,
-        line_callback: Optional[Callable[[str], Any]] = None,
+        line_callback: Optional[Callable[[bytes], Any]] = None,
         store_proc_dict: Optional[Dict[str, Any]] = None,
         store_proc_key: str = 'child_process',
         capture_output: bool = False,
@@ -168,34 +168,8 @@ def poll_process(
         timeout_callback_args: Optional[Tuple[Any]] = None,
         timeout_callback_kwargs: Optional[Dict[str, Any]] = None,
     ) -> int:
-    """Poll a process and execute a callback function for each line printed to the process's `stdout`.
-
-    Parameters
-    ----------
-    proc: subprocess.Popen :
-        
-    line_callback: Callable[[bytes] :
-        
-    Any] :
-        
-    timeout_seconds: Union[int :
-        
-    float :
-        
-    None] :
-         (Default value = None)
-    timeout_callback: Optional[Callable[[Any] :
-        
-    Any]] :
-         (Default value = None)
-    timeout_callback_args: Optional[Tuple[Any]] :
-         (Default value = None)
-    timeout_callback_kwargs: Optional[Dict[str :
-        
-
-    Returns
-    -------
-
+    """
+    Poll a process and execute a callback function for each line printed to the process's `stdout`.
     """
     from meerschaum.utils.threading import Timer
 

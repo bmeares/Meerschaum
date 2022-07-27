@@ -42,17 +42,7 @@ def daemon_entry(sysargs: Optional[List[str]] = None) -> SuccessTuple:
     return success_tuple
 
 def daemon_action(**kw) -> SuccessTuple:
-    """Execute a Meerschaum action as a daemon.
-
-    Parameters
-    ----------
-    **kw :
-        
-
-    Returns
-    -------
-
-    """
+    """Execute a Meerschaum action as a daemon."""
     from meerschaum.utils.packages import run_python_package
     from meerschaum.utils.threading import Thread
     from meerschaum.actions.arguments._parse_arguments import parse_dict_to_sysargs
@@ -70,9 +60,10 @@ def daemon_action(**kw) -> SuccessTuple:
             )
 
     sysargs = parse_dict_to_sysargs(kw)
-    rc = run_python_package('meerschaum', sysargs, debug=False)
+    rc = run_python_package('meerschaum', sysargs, venv=None, debug=False)
     msg = "Success" if rc == 0 else f"Daemon for '{' '.join(sysargs)}' returned code: {rc}"
     return rc == 0, msg
+
 
 def run_daemon(
         func: Callable[[Any], Any],
