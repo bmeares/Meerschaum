@@ -216,7 +216,7 @@ def get_config(
                 patched_default_config.pop(k, None)
             config = apply_patch_to_config(patched_default_config, config)
             if patch and keys[0] != symlinks_key:
-                print("Updating configuration, please wait...")
+                #  print("Updating configuration, please wait...")
                 if write_missing:
                     write_config(config, debug=debug)
     if as_tuple:

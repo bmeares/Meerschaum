@@ -6,5 +6,6 @@ cd "$PARENT"
 
 docker run --rm -it \
   -v "$PARENT"/meerschaum:/home/meerschaum/.local/lib/python3.9/site-packages/meerschaum \
+  --network host \
   bmeares/meerschaum:latest \
   $@

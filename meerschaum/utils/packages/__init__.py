@@ -310,6 +310,7 @@ def get_install_no_version(install_name: str) -> str:
     return re.split('[=<>,! ]', install_name)[0]
 
 
+import_versions = {}
 def determine_version(
         path: pathlib.Path,
         import_name: Optional[str] = None,
@@ -352,6 +353,8 @@ def determine_version(
     If multiple versions are found, it will trigger an import in a subprocess.
 
     """
+    if venv not in import_versions:
+        import_versions[venv] = {}
     import re, os
     if debug:
         from meerschaum.utils.debug import dprint
@@ -359,6 +362,8 @@ def determine_version(
     if import_name is None:
         import_name = path.parent.stem if path.stem == '__init__' else path.stem
         import_name = import_name.split('.')[0] if split else import_name
+    if import_name in import_versions[venv]:
+        return import_versions[venv][import_name]
     _version = None
     module_parent_dir = (
         path.parent.parent if path.stem == '__init__' else path.parent
@@ -371,18 +376,22 @@ def determine_version(
     _found_versions = []
     if search_for_metadata:
         for filename in os.listdir(module_parent_dir):
-            path = module_parent_dir / filename
-            if (
-                not path.is_dir()
-                or not filename.startswith(clean_installed_dir_name + '-')
-                or not filename.endswith('.dist-info')
-            ):
+            if not filename.endswith('.dist-info'):
+                continue
+            filename_lower = filename.lower()
+            if not filename_lower.startswith(clean_installed_dir_name + '-'):
                 continue
             _v = filename.replace('.dist-info', '').split("-")[-1]
             _found_versions.append(_v)
 
     if len(_found_versions) == 1:
+        _version = _found_versions[0]
+        import_versions[venv][import_name] = _version
+        if debug:
+            print(f"Found version {_version} for {import_name}.")
         return _found_versions[0]
+    if debug:
+        print(f'Found multiple versions for {import_name}: {_found_versions}')
 
     ### This is kind of a hack. Normally pathlib handles escaped slashes on Windows,
     ### but because we're passing this to a subprocess, we need to re-escape the slashes.
@@ -414,6 +423,7 @@ def determine_version(
         )
 
     ### If `__version__` doesn't exist, return `None`.
+    import_versions[venv][import_name] = _version
     return _version
 
 
@@ -517,7 +527,7 @@ def need_update(
     ) if import_name is None else (
         import_name.split('.')[0] if split else import_name
     )
-    install_name = install_name or all_packages.get(root_name, root_name)
+    install_name = install_name or _import_to_install_name(import_name)
     if install_name in _checked_for_updates:
         return False
     _checked_for_updates.add(install_name)
@@ -560,10 +570,15 @@ def need_update(
 
     ### Get semver if necessary
     if required_version:
-        semver = attempt_import('semver', check_update=False, lazy=False)
+        semver_path = get_module_path('semver', debug=debug)
+        if semver_path is None:
+            pip_install(_import_to_install_name('semver'), debug=debug)
+        semver = attempt_import('semver', check_update=False, lazy=False, debug=debug)
     if check_pypi:
         ### Check PyPI for updates
-        update_checker = attempt_import('update_checker', lazy=False, check_update=False)
+        update_checker = attempt_import(
+            'update_checker', lazy=False, check_update=False, debug=debug
+        )
         checker = update_checker.UpdateChecker()
         result = checker.check(_install_no_version, version)
     else:
@@ -606,7 +621,7 @@ def need_update(
         )
     except AttributeError as e:
         pip_install(_import_to_install_name('semver'), venv='mrsm', debug=debug)
-        semver = manually_import_module('semver', venv='mrsm')
+        semver = manually_import_module('semver', venv='mrsm', debug=debug)
         return (
             (not semver.Version.parse(version).match(required_version))
             if required_version else False
@@ -1227,7 +1242,9 @@ def import_pandas(
 
 
 def import_rich(
-        lazy: bool = True, deactivate : bool = False, debug : bool = False,
+        lazy: bool = True,
+        deactivate: bool = False,
+        debug: bool = False,
         **kw : Any
     ) -> 'ModuleType':
     """
@@ -1240,16 +1257,21 @@ def import_rich(
     activate_venv(venv='mrsm', debug=debug)
 
     ## need typing_extensions for `from rich import box`
-    typing_extensions = attempt_import('typing_extensions', deactivate=deactivate, lazy=False)
-    pygments = attempt_import('pygments', deactivate=deactivate, lazy=False)
-    rich = attempt_import('rich', lazy=lazy, deactivate=deactivate, **kw)
+    typing_extensions = attempt_import(
+        'typing_extensions', deactivate=deactivate, lazy=False, debug=debug
+    )
+    pygments = attempt_import(
+        'pygments', deactivate=deactivate, lazy=False
+    )
+    rich = attempt_import(
+        'rich', lazy=lazy, deactivate=deactivate, **kw)
     if deactivate:
         deactivate_venv(venv='mrsm', debug=debug)
     return rich
 
 
 def _dash_less_than_2(**kw) -> bool:
-    dash = attempt_import('dash')
+    dash = attempt_import('dash', **kw)
     if dash is None:
         return None
     packaging_version = attempt_import('packaging.version', **kw)
@@ -1275,7 +1297,8 @@ def import_html(warn=False, **kw) -> 'ModuleType':
     """
     return (
         attempt_import('dash_html_components', warn=warn, **kw)
-        if _dash_less_than_2(warn=warn, **kw) else attempt_import('dash.html', warn=warn, **kw)
+        if _dash_less_than_2(warn=warn, **kw)
+        else attempt_import('dash.html', warn=warn, **kw)
     )
 
 

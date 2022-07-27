@@ -29,17 +29,6 @@ class Thread(threading.Thread):
     def wrap_target_with_callback(self, *args, **kw):
         """Wrap the designated target function with a try-except.
         Captures the output and executes either the callback or error_callback.
-
-        Parameters
-        ----------
-        *args :
-            
-        **kw :
-            
-
-        Returns
-        -------
-
         """
         try:
             result = self.method(*args, **kw)
@@ -55,17 +44,7 @@ class Thread(threading.Thread):
 
     def join(self, timeout: Optional[float] = None):
         """
-
-        Parameters
-        ----------
-        timeout: Optional[float] :
-             (Default value = None)
-
-        Returns
-        -------
-        type
-            
-
+        Join the thread with an optional timeout.
         """
         threading.Thread.join(self, timeout=timeout)
         return self._return

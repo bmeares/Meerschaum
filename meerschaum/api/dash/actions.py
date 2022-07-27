@@ -185,9 +185,9 @@ def execute_action(state: WebState):
     def use_process():
         from meerschaum.utils.packages import run_python_package
         from meerschaum.actions.arguments._parse_arguments import parse_dict_to_sysargs
-        max_buffer_size = 30000
+        max_buffer_size = 10000
         line_buffer = ''
-        def send_line(line : str):
+        def send_line(line: str):
             nonlocal line_buffer
             line_buffer += line
             buff_start_idx = max(len(line_buffer) - max_buffer_size, 0)
@@ -215,6 +215,7 @@ def execute_action(state: WebState):
                 capture_output = False,
                 ### Store the `subprocess.Popen` process in case we need to terminate it later.
                 store_proc_dict = running_jobs[session_id],
+                venv = None,
                 debug = debug,
             )
         action_thread = Thread(target=do_process)

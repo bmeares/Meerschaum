@@ -20,8 +20,9 @@ def verify(
     if action is None:
         action = []
     options = {
-        'pipes' : _verify_pipes,
-        'packages' : _verify_packages,
+        'pipes': _verify_pipes,
+        'packages': _verify_packages,
+        'venvs': _verify_venvs,
     }
     return choose_subaction(action, options, **kw)
 
@@ -74,6 +75,21 @@ def _verify_packages(
 
     ### Verify the plugins dependencies.
     return True, f"Verified {len(base_packages) + len(venv_packages)} packages."
+
+
+def _verify_venvs(
+        action: Optional[List[str]],
+        debug: bool = False,
+        **kw
+    ) -> SuccessTuple:
+    """
+    Verify your virtual environments.
+    """
+    from meerschaum.utils.venv import get_venvs, verify_venv
+    for venv in get_venvs():
+        verify_venv(venv)
+    return True, "Success"
+
 
 ### NOTE: This must be the final statement of the module.
 ###       Any subactions added below these lines will not

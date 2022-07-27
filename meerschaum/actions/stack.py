@@ -101,9 +101,17 @@ def stack(
         if not venv_contains_package('compose', _compose_venv):
             _compose_venv = None
 
-    cmd_list = [_arg for _arg in settings_list + compose_command + (
-        sysargs[2:] if (len(sysargs) > 2 and not sub_args) else sub_args
-    ) if _arg != '--debug']
+    cmd_list = [
+        _arg for _arg in (
+            settings_list
+            + compose_command
+            + (
+                sysargs[2:] if len(sysargs) > 2 and not sub_args
+                else sub_args
+            )
+        )
+        if _arg != '--debug'
+    ]
     if debug:
         dprint(cmd_list)
 

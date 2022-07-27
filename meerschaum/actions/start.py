@@ -182,8 +182,7 @@ def _start_jobs(
 
     def _run_new_job(name: Optional[str] = None):
         kw['action'] = action
-        if not name:
-            name = get_new_daemon_name()
+        name = name or get_new_daemon_name()
         kw['name'] = name
         _action_success_tuple = daemon_action(daemon_id=name, **kw)
         return _action_success_tuple, name
@@ -207,9 +206,7 @@ def _start_jobs(
             return False, "Failed to get arguments for daemon '{dameon.daemon_id}'."
         _daemon_kw = parse_arguments(_daemon_sysargs)
         _daemon_kw['name'] = daemon.daemon_id
-        _action_success_tuple = daemon_action(
-            **_daemon_kw
-        )
+        _action_success_tuple = daemon_action(**_daemon_kw)
         if not _action_success_tuple[0]:
             return _action_success_tuple, daemon.daemon_id
         return (True, f"Success"), daemon.daemon_id
