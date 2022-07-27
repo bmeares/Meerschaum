@@ -170,11 +170,10 @@ def verify_venv(
     if not bin_path.exists():
         init_venv(venv, verify=False, debug=debug)
 
-    ### Ensure the versions are symlinked correctly.
-    for filename in os.listdir(bin_path):
-        if not filename.startswith('python'):
-            continue
-        python_path = bin_path / filename
+    def get_python_version(python_path: pathlib.Path) -> Union[str, None]:
+        """
+        Return the version for the python binary at the given path.
+        """
         try:
             ### It might be a broken symlink, so skip on errors.
             proc = run_process(
@@ -184,18 +183,31 @@ def verify_venv(
             )
             stdout, stderr = proc.communicate(timeout=0.1)
         except Exception as e:
+            ### E.g. the symlink may be broken.
+            return None
+        return stdout.decode('utf-8').strip().replace('Python ', '')
+
+    ### Ensure the versions are symlinked correctly.
+    for filename in os.listdir(bin_path):
+        if not filename.startswith('python'):
             continue
-        version = stdout.decode('utf-8').strip().replace('Python ', '')
+        python_path = bin_path / filename
+        version = get_python_version(python_path)
+        if version is None:
+            continue
         major_version = version.split('.', maxsplit=1)[0]
         minor_version = version.split('.', maxsplit=2)[1]
         python_versioned_name = (
             'python' + major_version + '.' + minor_version
             + ('' if platform.system() != 'Windows' else '.exe')
         )
-        python_versioned_path = bin_path / python_versioned_name
         if filename == python_versioned_name:
             continue
+        python_versioned_path = bin_path / python_versioned_name
         if python_versioned_path.exists():
+            ### Avoid circular symlinks.
+            if get_python_version(python_versioned_path) == version:
+                continue
             python_versioned_path.unlink()
         shutil.move(python_path, python_versioned_path)
 
