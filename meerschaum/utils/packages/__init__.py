@@ -527,7 +527,7 @@ def need_update(
     ) if import_name is None else (
         import_name.split('.')[0] if split else import_name
     )
-    install_name = install_name or _import_to_install_name(import_name)
+    install_name = install_name or _import_to_install_name(root_name)
     if install_name in _checked_for_updates:
         return False
     _checked_for_updates.add(install_name)
