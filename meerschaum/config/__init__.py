@@ -8,13 +8,15 @@ and if interactive, print the welcome message.
 """
 
 from __future__ import annotations
+
 import os, shutil, sys, pathlib
 from meerschaum.utils.typing import Any, Dict, Optional, Union
+from meerschaum.utils.threading import RLock
+from meerschaum.utils.warnings import warn
 
 from meerschaum.config._version import __version__
 from meerschaum.config._edit import edit_config, write_config
 from meerschaum.config.static import _static_config
-from meerschaum.config._read_config import read_config
 
 from meerschaum.config._paths import (
     PERMANENT_PATCH_DIR_PATH,
@@ -28,9 +30,10 @@ from meerschaum.config._patch import (
 )
 __all__ = ('get_plugin_config', 'write_plugin_config', 'get_config', 'write_config', 'set_config',)
 __pdoc__ = {'static': False, 'resources': False, 'stack': False, }
+_locks = {'config': RLock()}
 
 ### apply config preprocessing (e.g. main to meta)
-config = None
+config = {}
 def _config(
         *keys: str, reload: bool = False, substitute: bool = True,
         sync_files: bool = True, write_missing: bool = True,
@@ -40,15 +43,21 @@ def _config(
     """
     global config
     if config is None or reload:
+        with _locks['config']:
+            config = {}
+    if keys and keys[0] not in config:
         from meerschaum.config._sync import sync_files as _sync_files
-        config = read_config(
-            keys=[keys[0]] if keys else [],
+        key_config = read_config(
+            keys=[keys[0]],
             substitute=substitute,
             write_missing=write_missing,
         )
-        if sync_files:
-            _sync_files(keys=[keys[0] if keys else None])
+        if keys[0] in key_config:
+            config[keys[0]] = key_config[keys[0]]
+            if sync_files:
+                _sync_files(keys=[keys[0] if keys else None])
     return config
+
 
 def set_config(cf: Dict[str, Any]) -> Dict[str, Any]:
     """
@@ -58,8 +67,10 @@ def set_config(cf: Dict[str, Any]) -> Dict[str, Any]:
     if not isinstance(cf, dict):
         from meerschaum.utils.warnings import error
         error(f"Invalid value for config: {cf}")
-    config = cf
+    with _locks['config']:
+        config = cf
     return config
+
 
 def get_config(
         *keys: str,
@@ -112,21 +123,22 @@ def get_config(
     >>> get_config('does', 'not', 'exist')
     UserWarning: Invalid keys in config: ('does', 'not', 'exist')
     """
-    global config
     import json
 
     symlinks_key = _static_config()['config']['symlinks_key']
     if debug:
         from meerschaum.utils.debug import dprint
-        dprint(f"Indexing keys: {keys}")
+        dprint(f"Indexing keys: {keys}", color=False)
 
     if len(keys) == 0:
         _rc = _config(substitute=substitute, sync_files=sync_files, write_missing=write_missing)
         if as_tuple:
             return True, _rc 
         return _rc
-
-    from meerschaum.config._read_config import search_and_substitute_config
+    
+    ### Weird threading issues, only import if substitute is True.
+    if substitute:
+        from meerschaum.config._read_config import search_and_substitute_config
     ### Invalidate the cache if it was read before with substitute=False
     ### but there still exist substitutions.
     if (
@@ -151,9 +163,7 @@ def get_config(
 
     from meerschaum.config._sync import sync_files as _sync_files
     if config is None:
-        config = read_config(keys=[keys[0]], substitute=substitute, write_missing=write_missing)
-        if sync_files:
-            _sync_files(keys=[keys[0]])
+        _config(*keys, sync_files=sync_files)
 
     invalid_keys = False
     if keys[0] not in config and keys[0] != symlinks_key:
@@ -214,11 +224,18 @@ def get_config(
             not_loaded_keys = [k for k in patched_default_config if k not in config]
             for k in not_loaded_keys:
                 patched_default_config.pop(k, None)
-            config = apply_patch_to_config(patched_default_config, config)
+
+            set_config(
+                apply_patch_to_config(
+                    patched_default_config,
+                    config,
+                )
+            )
             if patch and keys[0] != symlinks_key:
                 #  print("Updating configuration, please wait...")
                 if write_missing:
                     write_config(config, debug=debug)
+
     if as_tuple:
         return (not invalid_keys), c
     return c
@@ -256,6 +273,9 @@ def write_plugin_config(
     cf = {'plugins' : plugins_cf}
     return write_config(cf, **kw)
 
+
+### This need to be below get_config to avoid a circular import.
+from meerschaum.config._read_config import read_config
 
 ### If environment variable MRSM_CONFIG or MRSM_PATCH is set, patch config before anything else.
 from meerschaum.config._environment import apply_environment_patches, apply_environment_uris
@@ -319,4 +339,3 @@ except AttributeError:
 if interactive:
     msg = __doc__
     print(msg, file=sys.stderr)
-

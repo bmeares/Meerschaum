@@ -27,32 +27,13 @@ def get_pool(
         initargs: Optional[List[Any]] = None,
     ):
     """If the requested pool does not exist, instantiate it here.
-    Pools are joined and closed on exit.
-
-    Parameters
-    ----------
-    pool_class_name: str :
-         (Default value = 'ThreadPool')
-    workers: Optional[int] :
-         (Default value = None)
-    initializer: Optional[Callable[[None] :
-        
-    None]] :
-         (Default value = None)
-    initargs: Optional[List[Any]] :
-         (Default value = None)
-
-    Returns
-    -------
-
-    """
+    Pools are joined and closed on exit."""
     global pools
-    _locks['pools'].acquire()
     if pools is None:
-        pools = dict()
+        with _locks['pools']:
+            pools = {}
 
     def build_pool(workers):
-        global pools
         from meerschaum.utils.warnings import warn
         from meerschaum.utils.packages import attempt_import
         try:
@@ -71,10 +52,13 @@ def get_pool(
             from multiprocessing import cpu_count
             workers = cpu_count()
         try:
-            pools[pool_class_name] = Pool(workers, initializer=initializer, initargs=initargs)
+            pool = Pool(workers, initializer=initializer, initargs=initargs)
         except Exception as e:
             print(e)
-            pools[pool_class_name] = None
+            pool = None
+
+        with _locks['pools']:
+            pools[pool_class_name] = pool       
 
     if pool_class_name not in pools or pools.get(pool_class_name, None) is None:
         build_pool(workers)
@@ -90,33 +74,20 @@ def get_pool(
         del pools[pool_class_name]
         build_pool(workers)
 
-    _locks['pools'].release()
     return pools[pool_class_name]
 
+
 def get_pools():
-    """ """
+    """Return the global pools dictionary."""
     global pools
     if pools is None:
-        _locks['pools'].acquire()
-        pools = dict()
-        _locks['pools'].release()
+        with _locks['pools']:
+            pools = {}
     return pools
 
 
 def get_pool_executor(workers: Optional[int] = None):
-    """
-
-    Parameters
-    ----------
-    workers: Optional[int] :
-         (Default value = None)
-
-    Returns
-    -------
-    type
-        
-
-    """
+    """ Return a new `ThreadPoolExecutor`. """
     try:
         from multiprocessing import cpu_count
         from concurrent.futures import ThreadPoolExecutor

@@ -7,6 +7,7 @@ Functions for managing packages and virtual environments reside here.
 """
 
 from __future__ import annotations
+
 import importlib.util, os, pathlib
 from meerschaum.utils.typing import Any, List, SuccessTuple, Optional, Union, Tuple, Dict
 from meerschaum.utils.threading import Lock, RLock
@@ -1567,4 +1568,3 @@ def _monkey_patch_get_distribution(_dist: str, _version: str) -> None:
             return _Dist(_custom_distributions[dist])
         return _pkg_resources_get_distribution(dist)
     pkg_resources.get_distribution = _get_distribution
-

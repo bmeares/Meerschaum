@@ -6,10 +6,10 @@
 Define a context manager for virtual environments.
 """
 
+from __future__ import annotations
+
 import pathlib
 from meerschaum.utils.typing import Union
-from meerschaum.utils.venv import activate_venv, deactivate_venv, venv_target_path
-from meerschaum.plugins import Plugin
 
 class Venv:
     """
@@ -32,10 +32,13 @@ class Venv:
 
     def __init__(
             self,
-            venv: Union[str, Plugin, None] = 'mrsm',
+            venv: Union[str, 'meerschaum.plugins.Plugin', None] = 'mrsm',
             debug: bool = False,
         ) -> None:
-        if isinstance(venv, Plugin):
+        from meerschaum.utils.venv import activate_venv, deactivate_venv
+        ### For some weird threading issue,
+        ### we can't use `isinstance` here.
+        if 'meerschaun.plugins._Plugin' in str(type(venv)):
             self._venv = venv.name
             self._activate = venv.activate_venv
             self._deactivate = venv.deactivate_venv
@@ -73,6 +76,7 @@ class Venv:
         A `meerschaum.utils.venv.Venv` may have one virtual environment per minor Python version
         (e.g. Python 3.10 and Python 3.7).
         """
+        from meerschaum.utils.venv import venv_target_path
         return venv_target_path(venv=self._venv, allow_nonexistent=True, debug=self._debug)
 
 

@@ -7,6 +7,7 @@ Import the config yaml file
 
 from __future__ import annotations
 from meerschaum.utils.typing import Optional, Dict, Any, List, Tuple, Union
+from meerschaum.config import get_config
 
 def read_config(
         directory: Optional[str] = None,
@@ -161,8 +162,12 @@ def read_config(
 
         while True:
             try:
-                with open(filepath, 'r') as f:
-                    _config_key = filetype_loaders[_type](f)
+                with open(filepath, 'r', encoding='utf-8') as f:
+                    try:
+                        _config_key = filetype_loaders[_type](f)
+                    except Exception as e:
+                        import traceback
+                        traceback.print_exc()
                     _single_key_config = (
                         search_and_substitute_config({key: _config_key}) if substitute
                         else {key: _config_key}
@@ -188,6 +193,7 @@ def read_config(
     if with_filenames:
         return config, filekeys
     return config
+
 
 def search_and_substitute_config(
         config: Dict[str, Any],
@@ -236,7 +242,7 @@ def search_and_substitute_config(
     """
 
     _links = []
-    def _find_symlinks(d, _keys : List[str] = []):
+    def _find_symlinks(d, _keys: List[str] = []):
         for k, v in d.items():
             if isinstance(v, dict):
                 _find_symlinks(v, _keys + [k])
@@ -248,9 +254,6 @@ def search_and_substitute_config(
     import json
     needle = leading_key + begin_key
     haystack = json.dumps(config, separators=(',', ':'))
-    from meerschaum.config import get_config
-
-    haystack = json.dumps(config)
     mod_haystack = list(str(haystack))
     buff = str(needle)
     max_index = len(haystack) - len(buff)
@@ -302,9 +305,18 @@ def search_and_substitute_config(
 
         ### Evaluate the parsed keys to extract the referenced value.
         ### TODO This needs to be recursive for chaining symlinks together.
-        valid, value = get_config(
-            *keys, substitute=False, as_tuple=True, write_missing=False, sync_files=False
-        )
+        try:
+            valid, value = get_config(
+                *keys,
+                substitute = False,
+                as_tuple = True,
+                write_missing = False,
+                sync_files = False,
+            )
+        except Exception as e:
+            import traceback
+            traceback.print_exc()
+            valid = False
         if not valid:
             continue
 

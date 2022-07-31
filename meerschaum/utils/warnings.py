@@ -39,7 +39,7 @@ def enable_depreciation_warnings(name) -> None:
         module = name
     )
 
-def warn(*args, stacklevel=2, stack=True, color : bool = True, **kw) -> None:
+def warn(*args, stacklevel=2, stack=True, color: bool = True, **kw) -> None:
     """
     Print a stylized warning message.
     May be captured by `warnings.filterwarnings()`.
