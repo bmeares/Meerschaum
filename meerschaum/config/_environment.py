@@ -8,7 +8,7 @@ Patch the runtime configuration from environment variables.
 
 import os
 import re
-from meerschaum.utils.typing import List
+from meerschaum.utils.typing import List, Union, Dict, Any
 from meerschaum.config.static import _static_config
 
 def apply_environment_patches() -> None:
@@ -48,6 +48,21 @@ def apply_environment_config(env_var: str) -> None:
         return
 
     valids = []
+
+    from meerschaum.utils.pool import get_pool_executor
+    executor = get_pool_executor()
+
+    def load_key(key: str) -> Union[Dict[str, Any], None]:
+        try:
+            c = get_config(key, warn=False)
+        except Exception as e:
+            c = None
+        return c
+
+    keys = list(_patch.keys())
+    with executor:
+        keys_configs = list(executor.map(load_key, keys))
+
     ### Load and patch config files.
     set_config(
         apply_patch_to_config(

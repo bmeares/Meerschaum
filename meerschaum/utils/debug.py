@@ -10,51 +10,23 @@ from __future__ import annotations
 from meerschaum.utils.typing import Union, Optional, List
 
 def dprint(
-        msg : str,
-        leader : bool = True,
+        msg: str,
+        leader: bool = True,
         package: bool = True,
-        color : Optional[Union[str, List[str]]] = None,
-        attrs : Optional[List[str]] = None,
-        nopretty : bool = False,
+        color: Optional[Union[str, List[str]]] = None,
+        attrs: Optional[List[str]] = None,
+        nopretty: bool = False,
         _progress: Optional['rich.progress.Progress'] = None,
         _task: Optional[int] = None,
         **kw
     ) -> None:
-    """Print a debug message.
-
-    Parameters
-    ----------
-    msg : str :
-        
-    leader : bool :
-         (Default value = True)
-    package: bool :
-         (Default value = True)
-    color : Optional[Union[str :
-        
-    List[str]]] :
-         (Default value = None)
-    attrs : Optional[List[str]] :
-         (Default value = None)
-    nopretty : bool :
-         (Default value = False)
-    _progress: Optional['rich.progress.Progress'] :
-         (Default value = None)
-    _task: Optional[int] :
-         (Default value = None)
-    **kw :
-        
-
-    Returns
-    -------
-
-    """
+    """Print a debug message."""
     if attrs is None:
         attrs = []
     if not isinstance(color, bool) and not nopretty:
         try:
             from meerschaum.utils.formatting import CHARSET, ANSI, colored
-        except ImportError:
+        except Exception as e:
             CHARSET, ANSI, colored = 'ascii', False, None
         from meerschaum.config._paths import CONFIG_DIR_PATH, PERMANENT_PATCH_DIR_PATH
         from meerschaum.config import _config
@@ -87,9 +59,8 @@ def dprint(
             for p in [CONFIG_DIR_PATH, PERMANENT_PATCH_DIR_PATH]:
                 print('  - ' + str(p))
             debug_leader = ''
-            ### crash if we can't load the leader
-            #  sys.exit(1)
         premsg = ' ' + debug_leader + ' ' + premsg
+
     if ANSI:
         if _color is not None:
             if isinstance(_color, str):
@@ -104,7 +75,6 @@ def dprint(
                 _color = []
         if colored is not None:
             premsg = colored(premsg, **_color)
-    #  log.warning(premsg + msg, **kw)
     _print = _progress.console.log if _progress is not None else print
     _print(premsg + msg)
 

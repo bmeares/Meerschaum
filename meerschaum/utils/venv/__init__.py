@@ -7,6 +7,7 @@ Manage virtual environments.
 """
 
 from __future__ import annotations
+
 from meerschaum.utils.typing import Optional, Union, Dict, List, Tuple
 from meerschaum.utils.threading import RLock
 
@@ -235,11 +236,10 @@ def init_venv(
     """
     if venv in verified_venvs:
         return True
-    if verify:
-        verify_venv(venv, debug=debug)
-        verified_venvs.add(venv)
-        return True
     if venv_exists(venv, debug=debug):
+        if verify:
+            verify_venv(venv, debug=debug)
+            verified_venvs.add(venv)
         return True
 
     import sys, platform, os, pathlib
@@ -307,6 +307,8 @@ def init_venv(
             import traceback
             traceback.print_exc()
             return False
+    verify_venv(venv, debug=debug)
+    verified_venvs.add(venv)
     return True
 
 

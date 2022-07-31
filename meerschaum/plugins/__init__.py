@@ -163,8 +163,13 @@ def import_plugins(
             warn(e)
             plugins = None
     else:
-        from meerschaum.utils.packages import attempt_import
-        plugins = [importlib.import_module(f'plugins.{p}') for p in flatten_list(plugins_to_import)]
+        plugins = []
+        for plugin_name in flatten_list(plugins_to_import):
+            try:
+                plugins.append(importlib.import_module(f'plugins.{plugin_name}'))
+            except Exception as e:
+                _warn(f"Failed to import plugin '{plugin_name}':\n    {e}", stack=False)
+                plugins.append(None)
 
     if plugins is None and warn:
         _warn(f"Failed to import plugins.", stacklevel=3)
@@ -211,6 +216,7 @@ def load_plugins(debug: bool = False, shell: bool = False) -> None:
                 continue
             if name == module.__name__.split('.')[-1]:
                 make_action(func, **{'shell': shell, 'debug': debug})
+
 
 def reload_plugins(plugins: Optional[List[str]] = None, debug: bool = False) -> None:
     """
