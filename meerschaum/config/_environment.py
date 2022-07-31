@@ -59,9 +59,10 @@ def apply_environment_config(env_var: str) -> None:
             c = None
         return c
 
+    ### This was multi-threaded, but I ran into all sorts of locking issues.
     keys = list(_patch.keys())
-    with executor:
-        keys_configs = list(executor.map(load_key, keys))
+    for key in keys:
+        load_key(key)
 
     ### Load and patch config files.
     set_config(
