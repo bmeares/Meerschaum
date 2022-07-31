@@ -4,6 +4,17 @@
 
 This is the current release cycle, so future features will be updated below.
 
+### v1.1.5 – v1.1.8
+
+- **Fixed `MRSM_PATCH` behavior.**  
+  In the docker image, `MRSM_PATCH` is used to overwrite `host` for `sql:main`. This patch restores that behavior (with a performance boost).
+- **Fixed virtual environment verification.**  
+  This patch prevents circular symlinks.
+- **Fixed `manually_import_module()`.**  
+  Previous refactoring efforts had broken `manually_import_module()`.
+- **Refactoring**  
+  While trying to implement multi-thread configuration patching (discarded for the time being), much of the configuration system was cleaned up.
+
 ### v1.1.1 – v1.1.4
 
 **Bugfixes**
