@@ -35,6 +35,7 @@ sleep 4
 
 ### Execute the pytest tests.
 MRSM_ROOT_DIR="$test_root" python -m pytest \
+  --durations=0 \
   --ignore=portable/ --ignore=test_root/ --ignore=tests/data/ --ignore=docs/; rc="$?"
 
 ### Cleanup

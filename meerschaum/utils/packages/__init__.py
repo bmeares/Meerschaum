@@ -679,7 +679,7 @@ def get_pip(venv: Optional[str] = 'mrsm', debug: bool=False) -> bool:
 def pip_install(
         *packages: str,
         args: Optional[List[str]] = None,
-        requirements_file_path: Optional[pathlib.Path, str] = None,
+        requirements_file_path: Union[pathlib.Path, str, None] = None,
         venv: Optional[str] = 'mrsm',
         deactivate: bool = True,
         split: bool = False,
@@ -751,7 +751,11 @@ def pip_install(
     else:
         ANSI, UNICODE = False, False
     if check_wheel:
-        have_wheel = venv_contains_package('wheel', venv=venv, debug=debug)
+        have_wheel = (
+            venv_contains_package('wheel', venv=venv, debug=debug)
+            and
+            venv_contains_package('setuptools', venv=venv, debug=debug)
+        )
     _args = list(args)
     have_pip = venv_contains_package('pip', venv=venv, debug=debug)
     import sys
@@ -769,6 +773,7 @@ def pip_install(
                 + "https://pip.pypa.io/en/stable/installing/"
             )
             sys.exit(1)
+    
     activate_venv(venv=venv, debug=debug, color=color)
     if venv is not None:
         if '--ignore-installed' not in args and '-I' not in _args and not _uninstall:
@@ -782,12 +787,21 @@ def pip_install(
             pip = attempt_import('pip', venv=venv, install=False, debug=debug, lazy=False)
             if need_update(pip, check_pypi=check_pypi, debug=debug):
                 _args.append(all_packages['pip'])
+
+    if 'wheel' not in ' '.join(_args):
+        if check_update and not _uninstall and have_wheel:
+            wheel, setuptools = attempt_import('wheel', 'setuptools', venv=venv, install=False, debug=debug, lazy=False)
+            if need_update(wheel, check_pypi=check_pypi, debug=debug):
+                _args.append(all_packages['wheel'])
+            if need_update(setuptools, check_pypi=check_pypi, debug=debug):
+                _args.append(all_packages['setuptools'])
+    
     _args = (['install'] if not _uninstall else ['uninstall']) + _args
 
     if check_wheel and not _uninstall:
         if not have_wheel:
             if not pip_install(
-                'wheel',
+                'wheel', 'setuptools',
                 venv=venv, deactivate=False,
                 check_update=False, check_pypi=False,
                 check_wheel=False, debug=debug,
@@ -829,6 +843,7 @@ def pip_install(
             and not _uninstall
     ):
         _args += ['--user']
+
     if debug:
         if '-v' not in _args or '-vv' not in _args or '-vvv' not in _args:
             pass

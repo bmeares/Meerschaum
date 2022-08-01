@@ -38,7 +38,7 @@ class Venv:
         from meerschaum.utils.venv import activate_venv, deactivate_venv
         ### For some weird threading issue,
         ### we can't use `isinstance` here.
-        if 'meerschaun.plugins._Plugin' in str(type(venv)):
+        if 'meerschaum.plugins._Plugin' in str(type(venv)):
             self._venv = venv.name
             self._activate = venv.activate_venv
             self._deactivate = venv.deactivate_venv

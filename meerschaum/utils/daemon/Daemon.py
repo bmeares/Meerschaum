@@ -104,30 +104,25 @@ class Daemon:
 
     def _run_exit(
             self,
-            keep_daemon_output : bool = True,
-            allow_dirty_run : bool = False,
+            keep_daemon_output: bool = True,
+            allow_dirty_run: bool = False,
         ) -> Any:
         """Run the daemon's target function.
         NOTE: This WILL EXIT the parent process!
 
         Parameters
         ----------
-        keep_daemon_output :
+        keep_daemon_output: bool, default True
             If `False`, delete the daemon's output directory upon exiting.
-            Defaults to `True`.
+            
         allow_dirty_run :
             If `True`, run the daemon, even if the `daemon_id` directory exists.
             This option is dangerous because if the same `daemon_id` runs twice,
             the last to finish will overwrite the output of the first.
-            Defaults to `False`.
-        keep_daemon_output : bool :
-             (Default value = True)
-        allow_dirty_run : bool :
-             (Default value = False)
 
         Returns
         -------
-
+        Nothing — this will exit the parent process.
         """
 
         daemoniker = attempt_import('daemoniker')
@@ -136,13 +131,13 @@ class Daemon:
         if self.properties is None:
             self._properties = {}
         self._properties.update({
-            'target' : {
-                'name' : self.target.__name__,
-                'args' : self.target_args,
-                'kw' : self.target_kw,
+            'target': {
+                'name': self.target.__name__,
+                'args': self.target_args,
+                'kw': self.target_kw,
             },
-            'process' : {
-                'began' : began.isoformat(),
+            'process': {
+                'began': began.isoformat(),
             },
         })
         self.mkdir_if_not_exists(allow_dirty_run)
@@ -154,6 +149,13 @@ class Daemon:
         if not _write_pickle_success_tuple[0]:
             error(_write_pickle_success_tuple[1])
 
+        ### TODO: Write a temporary file for Windows daemons.
+        import platform, sys
+        from meerschaum.config._paths import PACKAGE_ROOT_PATH
+        if platform.system() == 'Windows':
+            old_sysargv = sys.argv
+            sys.argv = [str(PACKAGE_ROOT_PATH / '__main__.py')] + self.target_kw.get('sysargs', [])
+
         with daemoniker.Daemonizer() as (is_setup, daemonizer):
             is_parent = daemonizer(
                 str(self.pid_path),
@@ -161,6 +163,9 @@ class Daemon:
                 stderr_goto = str(self.stderr_path),
                 strip_cmd_args = True,
             )
+            if is_parent:
+                if platform.system() == 'Windows':
+                    sys.argv = old_sysargv
 
         self.sighandler.start()
 

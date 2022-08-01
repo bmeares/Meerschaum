@@ -425,8 +425,9 @@ def venv_target_path(
         if not inside_venv():
             site_path = pathlib.Path(site.getusersitepackages())
             ### Allow for dist-level paths (running as root).
-            if not site_path.exists() and os.geteuid() == 0:
-                return pathlib.Path(site.getsitepackages()[0])
+            if not site_path.exists():
+                if platform.system() == 'Windows' or os.geteuid() == 0:
+                    return pathlib.Path(site.getsitepackages()[-1])
             return site_path
 
     venv_root_path = (

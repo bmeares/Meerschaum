@@ -316,12 +316,13 @@ def _start_gui(
     """
     from meerschaum.utils.daemon import Daemon
     from meerschaum.utils.process import run_process
-    from meerschaum.utils.packages import venv_exec, run_python_package, attempt_import
+    from meerschaum.utils.packages import venv_exec, run_python_package, attempt_import, venv_contains_package, pip_install
     from meerschaum.utils.warnings import warn
     from meerschaum.utils.debug import dprint
     from meerschaum.utils.networking import find_open_ports, is_port_in_use
     from meerschaum.connectors.parse import parse_instance_keys
     from meerschaum._internal.term.tools import is_webterm_running
+    import platform
     webview = attempt_import('webview')
     requests = attempt_import('requests')
     import json
@@ -334,7 +335,6 @@ def _start_gui(
 
     if not is_webterm_running(host, port):
         port = next(find_open_ports(port, 9000))
-
 
     api_kw = {
         'action': ['webterm'],
