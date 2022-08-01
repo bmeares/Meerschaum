@@ -24,7 +24,7 @@ import sys, os
 def main(sysargs: list = None) -> None:
     """Main CLI entry point."""
     if sysargs is None:
-        sysargs = sys.argv[1:]
+        sysargs = sys.argv[1:].copy()
     old_cwd = os.getcwd()
 
     ### Catch help flags.

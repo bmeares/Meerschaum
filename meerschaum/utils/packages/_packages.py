@@ -32,6 +32,7 @@ packages: Dict[str, Dict[str, str]] = {
     },
     '_required': {
         'wheel'                      : 'wheel>=0.34.2',
+        'setuptools'                 : 'setuptools>=63.3.0',
         'yaml'                       : 'PyYAML>=5.3.1',
         'pip'                        : 'pip>=22.1.2',
         'update_checker'             : 'update-checker>=0.18.0',
@@ -110,6 +111,7 @@ packages: Dict[str, Dict[str, str]] = {
         'xstatic'                    : 'XStatic>=1.0.2',
         'xstatic.pkg.termjs'         : 'XStatic-term.js>=0.0.7',
         'webview'                    : 'pywebview>=3.6.3',
+        'pycparser'                  : 'pycparser>=2.21.0',
     },
     'extras': {
         'cmd2'                       : 'cmd2>=1.4.0',
