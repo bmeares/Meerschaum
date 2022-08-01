@@ -4,14 +4,12 @@
 
 This is the current release cycle, so future features will be updated below.
 
-### v1.1.9
+### v1.1.9 – v1.1.10
 
 - **Fixed plugins virtual environments.**  
   A typo in v1.1.8 temporarily broke plugins, and this patch fixes that change.
 - **Fixed Meerschaum on Windows.**  
   A change in a previous release allowed for dist-packages for the root user (not advised but supported). The check for root (`os.geteuid()`) does not exist on Windows, so this patch accounts for that behavior.
-- **Added `wheel` and `setuptools` upgrades to `pip_install()`.**  
-  In additional for automatically updating `pip`, `pip_install()` now checks for updates of `wheel` and `setuptools`.
 - **Tweaked screen clearing on Windows.**  
   Meerschaum now always uses `clear` or `cls` on Windows instead of ANSI escape sequences.
 
