@@ -135,10 +135,13 @@ def _complete_install_plugins(
         return []
     return sorted(results)
 
+class NoVenv:
+    pass
 
 def _install_packages(
         action: Optional[List[str]] = None,
         sub_args: Optional[List[str]] = None,
+        venv: Union[str, NoVenv] = NoVenv,
         debug: bool = False,
         **kw: Any
     ) -> SuccessTuple:
@@ -153,7 +156,15 @@ def _install_packages(
     from meerschaum.utils.warnings import info
     from meerschaum.utils.packages import pip_install
     from meerschaum.utils.misc import items_str
-    if pip_install(*action, args=['--upgrade'] + sub_args, debug=debug):
+    if venv is NoVenv:
+        venv = 'mrsm'
+
+    if pip_install(
+        *action,
+        args = ['--upgrade'] + sub_args,
+        venv = venv,
+        debug = debug,
+    ):
         return True, (
             "Successfully installed package" + ("s" if len(action) != 1 else '')
             + f" {items_str(action)}"
