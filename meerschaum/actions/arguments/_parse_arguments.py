@@ -82,6 +82,10 @@ def parse_arguments(sysargs: List[str]) -> Dict[str, Any]:
         args_dict = {'action': _action, 'sysargs': sysargs, 'text': shlex.join(sysargs)}
         unknown = []
 
+    false_flags = [arg for arg, val in args_dict.items() if val is False]
+    for arg in false_flags:
+        args_dict.pop(arg, None)
+
     args_dict['sysargs'] = sysargs
     args_dict['filtered_sysargs'] = filtered_sysargs
     ### append decorated arguments to sub_arguments list
@@ -155,6 +159,8 @@ def parse_synonyms(
         args_dict['instance'] = args_dict['mrsm_instance']
     if args_dict.get('skip_check_existing', None):
         args_dict['check_existing'] = False
+    if args_dict.get('venv', None) in ('None', '[None]'):
+        args_dict['venv'] = None
     return args_dict
 
 
@@ -179,9 +185,7 @@ def parse_dict_to_sysargs(
                 sysargs += [t[0]]
         else:
             ### Add list flags
-            if (
-                isinstance(args_dict[a], list) or isinstance(args_dict[a], tuple)
-            ):
+            if isinstance(args_dict[a], (list, tuple)):
                 if len(args_dict[a]) > 0:
                     sysargs += [t[0]] + list(args_dict[a])
 
