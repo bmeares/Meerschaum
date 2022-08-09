@@ -24,7 +24,7 @@ conns = {
     #  'cockroachdb': get_connector('sql', 'test_cockroachdb',
         #  flavor='cockroachdb', host='localhost', port=26259,
     #  ),
-    'oracle': get_connector('sql', 'oracle_test',
+    'oracle': get_connector('sql', 'test_oracle',
         flavor='oracle', host='localhost', database='xe', username='system', password='oracle',
         port=1529,
     ),
@@ -40,7 +40,7 @@ conns = {
         flavor='citus', username='test', password='test1234', database='testdb',
         port=5499, host='localhost',
     ),
-    'api': get_connector('api', 'test_timescaledb_api',
+    'api': get_connector('api', 'test_api',
         port=8989, username='test', password='test1234', host='localhost',
     ),
 }
