@@ -7,8 +7,8 @@ on:
         description: 'Run the pytest script.'
         required: false
         default: ""
-  # push:
-    # branches: [ main ]
+  push:
+    branches: [ main, staging ]
 
 jobs:
   build:
@@ -19,6 +19,10 @@ jobs:
         env:
           MRSM_SKIP_DOCKER_EXPERIMENTAL: 1
         run: ./scripts/setup.sh
+      - name: Install db drivers
+        run: sudo ./scripts/drivers.sh
+      - name: Image setup
+        run: sudo ./scripts/docker/image_setup.sh
       - name: pytest
         env:
           COMPOSE_INTERACTIVE_NO_CLI: 1
