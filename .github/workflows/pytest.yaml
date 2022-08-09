@@ -28,7 +28,7 @@ jobs:
           MRSM_ROOT_DIR: /meerschaum
           MRSM_WORK_DIR: /meerschaum
           MRSM_DEP_GROUP: minimal
-        run: sudo ./scripts/docker/image_setup.sh
+        run: sudo MRSM_USER=meerschaum MRSM_HOME=/home/meerschaum MRSM_ROOT_DIR=/meerschaum MRSM_WORK_DIR=/meerschaum MRSM_DEP_GROUP=minimal ./scripts/docker/image_setup.sh
       - name: Integration tests
         env:
           COMPOSE_INTERACTIVE_NO_CLI: 1
