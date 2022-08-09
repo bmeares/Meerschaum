@@ -22,8 +22,14 @@ jobs:
       - name: Install db drivers
         run: sudo ./scripts/drivers.sh
       - name: Image setup
+        env:
+          MRSM_USER: meerschaum
+          MRSM_HOME: /home/meerschaum
+          MRSM_ROOT_DIR: /meerschaum
+          MRSM_WORK_DIR: /meerschaum
+          MRSM_DEP_GROUP: minimal
         run: sudo ./scripts/docker/image_setup.sh
-      - name: pytest
+      - name: Integration tests
         env:
           COMPOSE_INTERACTIVE_NO_CLI: 1
         run: ./scripts/test.sh db
