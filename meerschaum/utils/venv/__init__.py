@@ -427,7 +427,14 @@ def venv_target_path(
             ### Allow for dist-level paths (running as root).
             if not site_path.exists():
                 if platform.system() == 'Windows' or os.geteuid() == 0:
-                    return pathlib.Path(site.getsitepackages()[-1])
+                    for possible_dist in reversed(site.getsitepackages()):
+                        dist_path = pathlib.Path(possible_dist)
+                        if not dist_path.exists():
+                            continue
+                        return dist_path
+                    
+                    raise EnvironmentError("Could not determine the dist-packages directory.")
+
             return site_path
 
     venv_root_path = (
