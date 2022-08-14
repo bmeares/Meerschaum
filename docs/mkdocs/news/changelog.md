@@ -1,5 +1,12 @@
 # 🪵 Changelog
 
+## 1.2.x Releases
+
+### v1.2.0
+
+- **Removed version enforcement in `pip_install()`.**  
+  This changed behavior allows for custom version constraints to be specified in Meerschaum plugins.
+
 ## 1.1.x Releases
 
 This is the current release cycle, so future features will be updated below.
