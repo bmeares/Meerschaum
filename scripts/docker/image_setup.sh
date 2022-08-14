@@ -9,7 +9,7 @@ groupadd -r $MRSM_USER \
   && chown -R $MRSM_USER $MRSM_ROOT_DIR \
   && chown -R $MRSM_USER $MRSM_WORK_DIR
 
-### We need doas to switch from root to the user.
+### We need sudo to switch from root to the user.
 apt-get update && apt-get install sudo -y --no-install-recommends
 
 ### Install user-level build tools.

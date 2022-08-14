@@ -677,7 +677,7 @@ def get_pip(venv: Optional[str] = 'mrsm', debug: bool=False) -> bool:
 
 
 def pip_install(
-        *packages: str,
+        *install_names: str,
         args: Optional[List[str]] = None,
         requirements_file_path: Union[pathlib.Path, str, None] = None,
         venv: Optional[str] = 'mrsm',
@@ -696,8 +696,11 @@ def pip_install(
 
     Parameters
     ----------
-    *packages: List[str]
-        The packages to be installed.
+    *install_names: str
+        The installation names of packages to be installed.
+        This includes version restrictions.
+        Use `_import_to_install_name()` to get the predefined `install_name` for a package
+        from its import name.
         
     args: Optional[List[str]], default None
         A list of command line arguments to pass to `pip`.
@@ -824,9 +827,6 @@ def pip_install(
     elif (
         '--target' not in _args
             and '-t' not in _args
-            and os.environ.get(
-                _static_config()['environment']['runtime'], None
-            ) != 'docker'
             and not inside_venv()
             and not _uninstall
     ):
@@ -839,20 +839,10 @@ def pip_install(
         if '-q' not in _args or '-qq' not in _args or '-qqq' not in _args:
             pass
 
-    _packages = []
-    for package_name in packages:
-        root_name = get_install_no_version(
-            package_name.split('.')[0] if split else package_name
-        )
-        import_name = get_install_names().get(root_name, root_name)
-        if root_name in get_install_names():
-            import_name = _install_to_import_name(root_name)
-
-        install_name = _import_to_install_name(import_name)
-        if _uninstall:
-            install_name = get_install_no_version(install_name)
-        _packages.append(install_name)
-
+    _packages = [
+        (install_name if not _uninstall else get_install_no_version(install_name))
+        for install_name in install_names
+    ]
     msg = "Installing packages:" if not _uninstall else "Uninstalling packages:"
     for p in _packages:
         msg += f'\n  - {p}'
