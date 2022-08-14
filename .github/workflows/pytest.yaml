@@ -19,10 +19,6 @@ jobs:
         env:
           MRSM_SKIP_DOCKER_EXPERIMENTAL: 1
         run: ./scripts/setup.sh
-      - uses: actions/cache@v3
-        with:
-          path: /tmp/_oracle.rpm
-          key: ${{ runner.os }}
       - name: Install db drivers
         run: sudo ./scripts/drivers.sh
       - name: Integration tests
@@ -31,5 +27,5 @@ jobs:
         run: ./scripts/test.sh db
       - uses: actions/upload-artifact@v3
         with:
-          name: meerschaum-config
-          path: /root/.config/meerschaum
+          name: api-log
+          path: test_root/logs/test_api.log
