@@ -26,6 +26,7 @@ jobs:
           COMPOSE_INTERACTIVE_NO_CLI: 1
         run: ./scripts/test.sh db
       - uses: actions/upload-artifact@v3
+        if: always()
         with:
           name: api-log
           path: test_root/logs/test_api.log
