@@ -31,6 +31,11 @@ else
 fi
 python -m meerschaum start jobs test_api -y
 
+### This is necessary to trigger installations in a clean environment.
+python -c "
+from tests.connectors import conns
+[conn.URI for conn in conns]
+"
 
 MRSM_CONNS=$(python -c "
 from tests.connectors import conns
