@@ -1,5 +1,38 @@
 # 🪵 Changelog
 
+## 1.2.x Releases
+
+### v1.2.0
+
+**Improvements**
+
+- **Added the action `start connectors`.**  
+  This command allows you to wait until all of the specified connectors are available and accepting connections. This feature is very handy when paired with the new `MRSM_SQL_X` URI environment variables.
+
+- **Allow for symlinking in URI environment variables.**  
+  You may now reference configuration keys within URI variables.
+
+- **Increased token expiration window to 12 hours.**
+
+**Bugfixes**
+
+- **Removed version enforcement in `pip_install()`.**  
+  This changed behavior allows for custom version constraints to be specified in Meerschaum plugins.
+
+- **Backported `UPDATE FROM` query for older versions of SQLite.**  
+  The current mutable data logic uses an `UPDATE FROM` query, but this syntax is only present in versions of SQLite greater than 3.33.0 (released 2020-08-14). This releases splits the same logic into `DELETE` and `INSERT` queries for older versions of SQLite.
+
+- **Fixed missing suggestions for shell-only commands.**  
+  Completions for commands like `instance` are now suggested.
+
+**Breaking changes**
+
+- **API endpoints for registering and editing users changed.**  
+  To comply with Oauth2 convention, the API endpoint for registering a user is now a url-encoded form submission to `/users/register` (`/user/edit` for editing).
+
+- **Replaced `meerschaum.utils.sql.update_query()` with `meerschaum.utils.sql.get_update_queries()`.**  
+  The new function returns a list of query strings rather than a single query.
+
 ## 1.1.x Releases
 
 This is the current release cycle, so future features will be updated below.

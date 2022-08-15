@@ -162,7 +162,7 @@ class SQLConnector(Connector):
 
         self.wait = wait
         if self.wait:
-            from meerschaum.utils.misc import retry_connect
+            from meerschaum.connectors.poll import retry_connect
             retry_connect(connector=self, debug=debug)
 
         if connect:
@@ -210,6 +210,10 @@ class SQLConnector(Connector):
 
     @property
     def DATABASE_URL(self):
+        return str(self.engine.url)
+
+    @property
+    def URI(self):
         return str(self.engine.url)
 
     @property

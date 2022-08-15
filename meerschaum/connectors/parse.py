@@ -7,7 +7,7 @@ Utility functions for parsing connector keys.
 """
 
 from __future__ import annotations
-from meerschaum.utils.typing import Mapping, Any, SuccessTuple, Union, Optional, Dict
+from meerschaum.utils.typing import Mapping, Any, SuccessTuple, Union, Optional, Dict, Tuple
 
 def parse_connector_keys(
         keys: str,

@@ -16,6 +16,7 @@ from meerschaum.utils.typing import (
     SuccessTuple,
     Union,
 )
+from meerschaum.utils.warnings import error, warn
 from meerschaum.config import get_config
 from meerschaum.config._paths import (
     PLUGINS_RESOURCES_PATH,
@@ -40,15 +41,15 @@ class Plugin:
         repo_connector: Optional['meerschaum.connectors.api.APIConnector'] = None,
         repo: Union['meerschaum.connectors.api.APIConnector', str, None] = None,
     ):
-        from meerschaum.utils.warnings import error
-        from meerschaum.config.static import _static_config
-        sep = _static_config()['plugins']['repo_separator']
+        from meerschaum.config.static import STATIC_CONFIG
+        sep = STATIC_CONFIG['plugins']['repo_separator']
         _repo = None
         if sep in name:
             try:
                 name, _repo = name.split(sep)
             except Exception as e:
                 error(f"Invalid plugin name: '{name}'")
+        self._repo_in_name = _repo
 
         if attributes is None:
             attributes = {}
@@ -66,13 +67,26 @@ class Plugin:
             venv_path if venv_path is not None
             else VIRTENV_RESOURCES_PATH / self.name
         )
-        if repo_connector is None:
+        self._repo_connector = repo_connector
+        self._repo_keys = repo
+
+
+    @property
+    def repo_connector(self):
+        """
+        Return the repository connector for this plugin.
+        """
+        if self._repo_connector is None:
             from meerschaum.connectors.parse import parse_repo_keys
-            repo_keys = str(repo) if repo is not None else None
-            if _repo is not None and repo_keys != _repo:
-                error(f"Received inconsistent repos: '{_repo}' and '{repo_keys}'.")
+
+            repo_keys = self._repo_keys or self._repo_in_name
+            if self._repo_in_name and self._repo_keys and self._repo_keys != self._repo_in_name:
+                error(
+                    f"Received inconsistent repos: '{self._repo_in_name}' and '{self._repo_keys}'."
+                )
             repo_connector = parse_repo_keys(repo_keys)
-        self.repo_connector = repo_connector
+            self._repo_connector = repo_connector
+        return self._repo_connector
 
 
     @property

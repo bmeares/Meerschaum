@@ -619,12 +619,16 @@ class Shell(cmd.Cmd):
 
         return True, "Success"
 
+
     def complete_instance(self, text: str, line: str, begin_index: int, end_index: int):
+    #  def complete_instance(action: List[str], **kw):
         from meerschaum.utils.misc import get_connector_labels
         from meerschaum.actions.arguments._parse_arguments import parse_line
         args = parse_line(line)
-        _text = args['action'][1] if len(args['action']) > 1 else ""
+        action = args['action']
+        _text = action[1] if len(action) > 1 else ""
         return get_connector_labels('api', 'sql', search_term=_text, ignore_exact_match=True)
+
 
     def do_repo(
             self,
