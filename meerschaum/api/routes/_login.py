@@ -12,7 +12,8 @@ from fastapi.security import OAuth2PasswordRequestForm
 from starlette.responses import Response, JSONResponse
 from meerschaum.api import endpoints, get_api_connector, app, debug, manager, no_auth
 from meerschaum.core import User
-from meerschaum.config.static import _static_config
+from meerschaum.config.static import STATIC_CONFIG
+
 
 @manager.user_loader()
 def load_user(
@@ -22,6 +23,7 @@ def load_user(
     Create the `meerschaum.core.User` object from the username.
     """
     return User(username, instance=get_api_connector())
+
 
 @app.post(endpoints['login'], tags=['Users'])
 def login(
@@ -43,18 +45,15 @@ def login(
     if not correct_password:
         raise InvalidCredentialsException
 
-    expires_minutes = _static_config()['api']['oauth']['token_expires_minutes']
+    expires_minutes = STATIC_CONFIG['api']['oauth']['token_expires_minutes']
     expires_delta = datetime.timedelta(minutes=expires_minutes)
     expires_dt = datetime.datetime.utcnow() + expires_delta
     access_token = manager.create_access_token(
         data = dict(sub=username),
         expires = expires_delta
     )
-    #  response.set_cookie(key="user_id", value=get_api_connector().get_user_id(user))
     return {
         'access_token': access_token,
         'token_type': 'bearer',
         'expires' : expires_dt,
     }
-
-

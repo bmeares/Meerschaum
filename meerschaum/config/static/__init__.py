@@ -33,7 +33,7 @@ STATIC_CONFIG = {
             'info': '/info',
         },
         'oauth': {
-            'token_expires_minutes': 15,
+            'token_expires_minutes': 720,
         },
     },
     'environment': {

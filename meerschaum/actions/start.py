@@ -23,6 +23,7 @@ def start(
         'jobs': _start_jobs,
         'gui': _start_gui,
         'webterm': _start_webterm,
+        'connectors': _start_connectors,
     }
     return choose_subaction(action, options, **kw)
 
@@ -38,8 +39,10 @@ def _complete_start(
         action = []
 
     options = {
-        'job' : _complete_start_jobs,
-        'jobs' : _complete_start_jobs,
+        'job': _complete_start_jobs,
+        'jobs': _complete_start_jobs,
+        'connector': _complete_start_connectors,
+        'connectors': _complete_start_connectors,
     }
 
     if (
@@ -316,7 +319,10 @@ def _start_gui(
     """
     from meerschaum.utils.daemon import Daemon
     from meerschaum.utils.process import run_process
-    from meerschaum.utils.packages import venv_exec, run_python_package, attempt_import, venv_contains_package, pip_install
+    from meerschaum.utils.venv import venv_exec
+    from meerschaum.utils.packages import (
+        run_python_package, attempt_import, venv_contains_package, pip_install
+    )
     from meerschaum.utils.warnings import warn
     from meerschaum.utils.debug import dprint
     from meerschaum.utils.networking import find_open_ports, is_port_in_use
@@ -375,7 +381,12 @@ def _start_gui(
         return False, f"The webterm failed to start within {timeout} seconds."
 
     try:
-        webview.create_window('Meerschaum Shell', f'http://127.0.0.1:{port}', height=650, width=1000)
+        webview.create_window(
+            'Meerschaum Shell', 
+            f'http://127.0.0.1:{port}',
+            height = 650,
+            width = 1000
+        )
         webview.start(debug=debug)
     except Exception as e:
         import traceback
@@ -441,6 +452,65 @@ def _start_webterm(
         loop.close()
 
     return True, "Success"
+
+
+def _start_connectors(
+        action: Optional[List[str]] = None,
+        connector_keys: Optional[List[str]] = None,
+        debug: bool = False,
+        **kw
+    ) -> SuccessTuple:
+    """
+    Start polling connectors to verify a connection can be made.
+    """
+    from meerschaum.connectors.poll import retry_connect
+    from meerschaum.connectors.parse import parse_instance_keys
+    from meerschaum.utils.pool import get_pool
+    from meerschaum.utils.warnings import warn
+    if action is None:
+        action = []
+    if connector_keys is None:
+        connector_keys = []
+
+    unique_keys = list(set(action + connector_keys))
+    valid_conns = []
+    for keys in unique_keys:
+        try:
+            conn = parse_instance_keys(keys)
+        except Exception as e:
+            warn(f"Invalid connector keys: '{keys}'. Skipping...", stack=False)
+            continue
+        valid_conns.append(conn)
+
+    if not valid_conns:
+        return False, "No valid connector keys were provided."
+
+    def connect(conn):
+        return retry_connect(
+            conn,
+            enforce_chaining = False,
+            enforce_login = False,
+            debug = debug,
+        )
+    
+    successes_list = [connect(conn) for conn in valid_conns]
+    successes = len([s for s in successes_list if s])
+    fails = len([s for s in successes_list if not s])
+
+    success = successes > 0
+    msg = f"Successfully started {successes} connector" + ('s' if successes != 1 else '') + '.'
+    if fails > 0:
+        msg += "\n    Failed to start {fails} connector" + ('s' if fails != 1 else '') + '.'
+
+    return success, msg
+
+
+def _complete_start_connectors(**kw) -> List[str]:
+    """
+    Return a list of connectors.
+    """
+    from meerschaum.actions.show import _complete_show_connectors
+    return _complete_show_connectors(**kw)
 
 
 ### NOTE: This must be the final statement of the module.

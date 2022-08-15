@@ -236,12 +236,14 @@ def _show_connectors(
 
     return True, "Success"
 
+
 def _complete_show_connectors(
         action: Optional[List[str]] = None, **kw: Any
     ) -> List[str]:
     from meerschaum.utils.misc import get_connector_labels
     _text = action[0] if action else ""
     return get_connector_labels(search_term=_text, ignore_exact_match=True)
+
 
 def _show_arguments(
         **kw: Any

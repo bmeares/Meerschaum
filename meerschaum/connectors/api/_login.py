@@ -56,15 +56,14 @@ def test_connection(
         **kw: Any
     ) -> Union[bool, None]:
     """Test if a successful connection to the API may be made."""
-    from meerschaum.utils.misc import retry_connect
+    from meerschaum.connectors.poll import retry_connect
     _default_kw = {
         'max_retries': 1, 'retry_wait': 0, 'warn': False,
-        'connector': self, 'enforce_chaining': False
+        'connector': self, 'enforce_chaining': False,
+        'enforce_login': False,
     }
     _default_kw.update(kw)
     try:
         return retry_connect(**_default_kw)
     except Exception as e:
         return False
-
-
