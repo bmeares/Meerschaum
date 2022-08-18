@@ -627,7 +627,7 @@ def get_update_queries(
         import sqlite3
         if sqlite3.sqlite_version < '3.33.0':
             flavor = 'sqlite_delete_insert'
-    base_queries = update_queries.get(connector.flavor, update_queries['default'])
+    base_queries = update_queries.get(flavor, update_queries['default'])
     if not isinstance(base_queries, list):
         base_queries = [base_queries]
     target_table = get_sqlalchemy_table(target, connector)
