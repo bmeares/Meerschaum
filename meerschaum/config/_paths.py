@@ -11,7 +11,7 @@ from __future__ import annotations
 from pathlib import Path
 import os, platform, sys
 from meerschaum.utils.typing import Union
-from meerschaum.config.static import _static_config
+from meerschaum.config.static import STATIC_CONFIG
 
 DOT_CONFIG_DIR_PATH = Path(
     os.environ.get('XDG_CONFIG_HOME', Path.home() / '.config')
@@ -26,7 +26,7 @@ DEFAULT_ROOT_DIR_PATH = (
 )
 
 
-ENVIRONMENT_ROOT_DIR = _static_config()['environment']['root']
+ENVIRONMENT_ROOT_DIR = STATIC_CONFIG['environment']['root']
 if ENVIRONMENT_ROOT_DIR in os.environ:
     _ROOT_DIR_PATH = Path(os.environ[ENVIRONMENT_ROOT_DIR]).resolve()
     if not _ROOT_DIR_PATH.exists():
@@ -40,6 +40,21 @@ if ENVIRONMENT_ROOT_DIR in os.environ:
 else:
     _ROOT_DIR_PATH = DEFAULT_ROOT_DIR_PATH
 
+ENVIRONMENT_PLUGINS_DIR = STATIC_CONFIG['environment']['plugins']
+if ENVIRONMENT_PLUGINS_DIR in os.environ:
+    _PLUGINS_DIR_PATH = Path(os.environ[ENVIRONMENT_PLUGINS_DIR]).resolve()
+    if not _PLUGINS_DIR_PATH.exists():
+        print(
+            f"Invalid plugins directory '{str(_PLUGINS_DIR_PATH)}' set for " +
+            f"environment variable '{ENVIRONMENT_PLUGINS_DIR}'.\n" +
+            f"Please enter a valid path for {ENVIRONMENT_PLUGINS_DIR}.",
+            file = sys.stderr,
+        )
+        sys.exit(1)
+else:
+    _PLUGINS_DIR_PATH = None
+
+
 paths = {
     'PACKAGE_ROOT_PATH'              : str(Path(__file__).parent.parent.resolve()),
     'ROOT_DIR_PATH'                  : str(_ROOT_DIR_PATH),
@@ -48,6 +63,7 @@ paths = {
     'DEFAULT_CONFIG_DIR_PATH'        : ('{ROOT_DIR_PATH}', 'default_config'),
     'PATCH_DIR_PATH'                 : ('{ROOT_DIR_PATH}', 'patch_config'),
     'PERMANENT_PATCH_DIR_PATH'       : ('{ROOT_DIR_PATH}', 'permanent_patch_config'),
+    'INTERNAL_RESOURCES_PATH'        : ('{ROOT_DIR_PATH}', '.internal'),
 
     'STACK_RESOURCES_PATH'           : ('{ROOT_DIR_PATH}', 'stack'),
     'STACK_COMPOSE_FILENAME'         : 'docker-compose.yaml',
@@ -70,10 +86,15 @@ paths = {
     'PIPES_CACHE_RESOURCES_PATH'     : ('{CACHE_RESOURCES_PATH}', 'pipes'),
     'USERS_CACHE_RESOURCES_PATH'     : ('{CACHE_RESOURCES_PATH}', 'users'),
 
-    'PLUGINS_RESOURCES_PATH'         : ('{ROOT_DIR_PATH}', 'plugins'),
+    'PLUGINS_RESOURCES_PATH'         : (
+        str(_PLUGINS_DIR_PATH) if _PLUGINS_DIR_PATH is not None
+        else ('{ROOT_DIR_PATH}', 'plugins')
+    ),
     'PLUGINS_ARCHIVES_RESOURCES_PATH': ('{PLUGINS_RESOURCES_PATH}', '.archives'),
     'PLUGINS_TEMP_RESOURCES_PATH'    : ('{PLUGINS_RESOURCES_PATH}', '.tmp'),
     'PLUGINS_INIT_PATH'              : ('{PLUGINS_RESOURCES_PATH}', '__init__.py'),
+    'PLUGINS_INTERNAL_DIR_PATH'      : ('{INTERNAL_RESOURCES_PATH}', 'plugins'),
+    'PLUGINS_INTERNAL_LOCK_PATH'     : ('{INTERNAL_RESOURCES_PATH}', 'plugins.lock'),
 
     'SQLITE_RESOURCES_PATH'          : ('{ROOT_DIR_PATH}', 'sqlite'),
     'SQLITE_DB_PATH'                 : ('{SQLITE_RESOURCES_PATH}', 'mrsm_local.db'),
@@ -110,13 +131,12 @@ def __getattr__(name: str) -> Path:
             raise AttributeError(f"Could not import '{name}'.")
         return globals()[name]
 
-    if isinstance(paths[name], (list, tuple)):
+    if isinstance(paths[name], (list, tuple)) and len(paths[name]) > 0:
         ### recurse through paths to create resource directories.
         parts = []
         for p in paths[name]:
             if str(p).startswith('{') and str(p).endswith('}'):
                 parts.append(__getattr__(p[1:-1]))
-                #  parts.append(paths[p[1:-1]])
             else:
                 parts.append(p)
         path = Path(os.path.join(*parts))
@@ -124,7 +144,7 @@ def __getattr__(name: str) -> Path:
         path = Path(paths[name])
 
     ### Create directories or touch files.
-    if 'RESOURCES_PATH' in name or name == 'CONFIG_DIR_PATH':
+    if name.endswith('RESOURCES_PATH') or name == 'CONFIG_DIR_PATH':
         path.mkdir(parents=True, exist_ok=True)
     elif 'FILENAME' in name:
         path = str(path)

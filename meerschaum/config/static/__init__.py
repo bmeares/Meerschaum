@@ -40,6 +40,7 @@ STATIC_CONFIG = {
         'config': 'MRSM_CONFIG',
         'patch': 'MRSM_PATCH',
         'root': 'MRSM_ROOT_DIR',
+        'plugins': 'MRSM_PLUGINS_DIR',
         'runtime': 'MRSM_RUNTIME',
         'id': 'MRSM_SERVER_ID',
         'uri_regex': r'MRSM_(SQL|API)_(\d*[a-zA-Z][a-zA-Z0-9-_+]*$)',
@@ -93,6 +94,8 @@ STATIC_CONFIG = {
     },
     'plugins': {
         'repo_separator': '@',
+        'lock_sleep_total': 1.0,
+        'lock_sleep_increment': 0.1,
     },
     'pipes': {
         'dtypes': {

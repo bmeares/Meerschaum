@@ -6,8 +6,7 @@
 Poll database and API connections.
 """
 
-from meerschaum.utils.typing import InstanceConnector, Union
-from meerschaum.utils.misc import timed_input
+from meerschaum.utils.typing import InstanceConnector, Union, Optional
 
 def retry_connect(
         connector: Union[InstanceConnector, None] = None,
@@ -53,18 +52,87 @@ def retry_connect(
     Whether a connection could be made.
 
     """
+    import json
+    from meerschaum.utils.venv import venv_exec
+    from meerschaum.utils.packages import attempt_import
+
+    kw = {
+        'connector_keys': str(connector),
+        'max_retries': max_retries,
+        'retry_wait': retry_wait,
+        'workers': workers,
+        'warn': warn,
+        'enforce_chaining': enforce_chaining,
+        'enforce_login': enforce_login,
+        'debug': debug,
+    }
+
+    dill = attempt_import('dill', lazy=False)
+    code = (
+        "import sys, json\n"
+        + "from meerschaum.utils.typing import Optional\n\n"
+        + dill.source.getsource(_wrap_retry_connect) + '\n\n'
+        + f"kw = json.loads({json.dumps(json.dumps(kw))})\n"
+        + "success = _wrap_retry_connect(**kw)\n"
+        + "sys.exit((0 if success else 1))"
+    )
+    return venv_exec(code, venv=None, debug=debug)
+
+
+def _wrap_retry_connect(
+        connector_keys: Optional[str] = None,
+        max_retries: int = 40,
+        retry_wait: int = 3,
+        workers: int = 1,
+        warn: bool = True,
+        enforce_chaining: bool = True,
+        enforce_login: bool = True,
+        debug: bool = False,
+    ) -> bool:
+    """
+    Keep trying to connect to the database.
+
+    Parameters
+    ----------
+    connector_keys: Optional[str], default None
+        The keys of the connector to the instance.
+
+    max_retries: int, default 40
+        How many time to try connecting.
+
+    retry_wait: int, default 3
+        The number of seconds between retries.
+
+    workers: int, default 1
+        How many worker thread connections to make.
+
+    warn: bool, default True
+        If `True`, print a warning in case the connection fails.
+
+    enforce_chaining: bool, default True
+        If `False`, ignore the configured chaining option.
+
+    enforce_login: bool, default True
+        If `False`, ignore an invalid login.
+
+    debug: bool, default False
+        Verbosity toggle.
+
+    Returns
+    -------
+    Whether a connection could be made.
+
+    """
     from meerschaum.utils.warnings import warn as _warn, error, info
     from meerschaum.utils.debug import dprint
-    from meerschaum import get_connector
+    from meerschaum.connectors.parse import parse_instance_keys
     from meerschaum.utils.packages import attempt_import
     from meerschaum.utils.sql import test_queries
+    from meerschaum.utils.misc import timed_input
     from functools import partial
     import time
 
-    ### Get default connector if None is provided.
-    if connector is None:
-        connector = get_connector()
-
+    connector = parse_instance_keys(connector_keys)
     if connector.type not in ('sql', 'api'):
         return None
 
@@ -142,4 +210,3 @@ def retry_connect(
         retries += 1
 
     return False
-

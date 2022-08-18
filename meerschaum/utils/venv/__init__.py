@@ -161,15 +161,20 @@ def verify_venv(
     """
     Verify that the virtual environment matches the expected state.
     """
-    import pathlib, platform, os, shutil, subprocess
+    import pathlib, platform, os, shutil, subprocess, sys
     from meerschaum.config._paths import VIRTENV_RESOURCES_PATH
     from meerschaum.utils.process import run_process
     venv_path = VIRTENV_RESOURCES_PATH / venv
     bin_path = venv_path / (
         'bin' if platform.system() != 'Windows' else "Scripts"
     )
-    if not bin_path.exists():
-        init_venv(venv, verify=False, debug=debug)
+    current_python_versioned_name = (
+        'python' + str(sys.version_info.major) + '.' + str(sys.version_info.minor)
+        + ('' if platform.system() != 'Windows' else '.exe')
+    )
+
+    if not bin_path.exists() or current_python_versioned_name not in os.listdir(bin_path):
+        init_venv(venv, verify=False, force=True, debug=debug)
 
     def get_python_version(python_path: pathlib.Path) -> Union[str, None]:
         """
@@ -202,8 +207,24 @@ def verify_venv(
             'python' + major_version + '.' + minor_version
             + ('' if platform.system() != 'Windows' else '.exe')
         )
+
+        ### E.g. python3.10 actually links to Python 3.10.
         if filename == python_versioned_name:
+            real_path = pathlib.Path(os.path.realpath(python_path))
+            if not real_path.exists():
+                print(f"Does not exist:\n{python_path}\n->\n{real_path}")
+                python_path.unlink()
+                init_venv(venv, verify=False, force=True, debug=debug)
+                if not python_path.exists():
+                    raise FileNotFoundError(f"Unable to verify Python symlink:\n{python_path}")
+
+            if python_path == real_path:
+                continue
+
+            python_path.unlink()
+            python_path.symlink_to(real_path)
             continue
+
         python_versioned_path = bin_path / python_versioned_name
         if python_versioned_path.exists():
             ### Avoid circular symlinks.
@@ -217,6 +238,7 @@ tried_virtualenv = False
 def init_venv(
         venv: str = 'mrsm',
         verify: bool = True,
+        force: bool = False,
         debug: bool = False,
     ) -> bool:
     """
@@ -230,13 +252,16 @@ def init_venv(
     verify: bool, default True
         If `True`, verify that the virtual environment is in the expected state.
 
+    force: bool, default False
+        If `True`, recreate the virtual environment, even if already initalized.
+
     Returns
     -------
     A `bool` indicating success.
     """
-    if venv in verified_venvs:
+    if not force and venv in verified_venvs:
         return True
-    if venv_exists(venv, debug=debug):
+    if not force and venv_exists(venv, debug=debug):
         if verify:
             verify_venv(venv, debug=debug)
             verified_venvs.add(venv)
@@ -282,7 +307,6 @@ def init_venv(
                 "Failed to import `venv` or `virtualenv`! "
                 + "Please install `virtualenv` via pip then restart Meerschaum."
             )
-            #  sys.exit(1)
             return False
 
         tried_virtualenv = True
@@ -307,8 +331,9 @@ def init_venv(
             import traceback
             traceback.print_exc()
             return False
-    verify_venv(venv, debug=debug)
-    verified_venvs.add(venv)
+    if verify:
+        verify_venv(venv, debug=debug)
+        verified_venvs.add(venv)
     return True
 
 
@@ -338,7 +363,7 @@ def venv_executable(venv: Optional[str] = 'mrsm') -> str:
 
 def venv_exec(
         code: str,
-        venv: str = 'mrsm',
+        venv: Optional[str] = 'mrsm',
         with_extras: bool = False,
         as_proc: bool = False,
         capture_output: bool = True,

@@ -329,7 +329,12 @@ class Plugin:
             fpath = fpath / '__init__.py'
 
         new_version = determine_version(
-            fpath, import_name=self.name, search_for_metadata=False, warn=True, debug=debug
+            fpath,
+            import_name = self.name,
+            search_for_metadata = False,
+            warn = True,
+            debug = debug,
+            venv = self.name,
         )
         if not new_version:
             warn(
@@ -657,10 +662,25 @@ class Plugin:
         -------
         A bool indicating success.
         """
+        from meerschaum.utils.venv import venv_target_path
         from meerschaum.utils.packages import activate_venv
+        from meerschaum.config._paths import PACKAGE_ROOT_PATH
+
         if dependencies:
             for plugin in self.get_required_plugins(debug=debug):
-                activate_venv(plugin.name, debug=debug)
+                plugin.activate_venv(debug=debug)
+
+        vtp = venv_target_path(self.name, debug=debug)
+        venv_meerschaum_path = vtp / 'meerschaum'
+        if not venv_meerschaum_path.exists():
+            venv_meerschaum_path.symlink_to(PACKAGE_ROOT_PATH)
+        elif (
+            venv_meerschaum_path.is_symlink()
+            and
+            pathlib.Path(os.path.realpath(venv_meerschaum_path)) != PACKAGE_ROOT_PATH
+        ):
+            venv_meerschaum_path.symlink_to(PACKAGE_ROOT_PATH)
+
         return activate_venv(self.name, debug=debug)
 
 
@@ -681,7 +701,7 @@ class Plugin:
         success = deactivate_venv(self.name, debug=debug)
         if dependencies:
             for plugin in self.get_required_plugins(debug=debug):
-                deactivate_venv(plugin.name, debug=debug)
+                plugin.deactivate_venv(debug=debug)
         return success
 
 
