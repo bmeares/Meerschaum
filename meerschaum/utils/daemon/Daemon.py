@@ -192,23 +192,17 @@ class Daemon:
 
         Parameters
         ----------
-        keep_daemon_output :
+        keep_daemon_output: bool, default True
             If `False`, delete the daemon's output directory upon exiting.
-            Defaults to `True`.
-        allow_dirty_run :
+
+        allow_dirty_run: bool, default False
             If `True`, run the daemon, even if the `daemon_id` directory exists.
             This option is dangerous because if the same `daemon_id` runs twice,
             the last to finish will overwrite the output of the first.
-            Defaults to `False`.
-        keep_daemon_output: bool :
-             (Default value = True)
-        allow_dirty_run: bool :
-             (Default value = False)
-        debug: bool :
-             (Default value = False)
 
         Returns
         -------
+        A SuccessTuple indicating success.
 
         """
         self.mkdir_if_not_exists(allow_dirty_run)
@@ -237,6 +231,7 @@ class Daemon:
 
         Returns
         -------
+        A SuccessTuple indicating success.
 
         """
         daemoniker, psutil = attempt_import('daemoniker', 'psutil')
@@ -247,9 +242,9 @@ class Daemon:
         if process is None or not process.is_running():
             return True, "Process has already stopped."
         try:
-            p.terminate()
-            p.kill()
-            p.wait(timeout=10)
+            process.terminate()
+            process.kill()
+            process.wait(timeout=10)
         except Exception as e:
             return False, f"Failed to kill job {self} with exception: {e}"
         return True, "Success"
@@ -273,50 +268,45 @@ class Daemon:
 
     def _send_signal(
             self,
-            signal : daemoniker.DaemonikerSignal,
-            timeout : Optional[Union[float, int]] = 3,
-            check_timeout_interval : float = 0.1,
-        ):
+            signal,
+            timeout: Optional[Union[float, int]] = 3,
+            check_timeout_interval: float = 0.1,
+        ) -> SuccessTuple:
         """Send a signal to the daemon process.
 
         Parameters
         ----------
-        signal :
+        signal:
             The signal the send to the daemon.
             Examples include `daemoniker.SIGINT` and `daemoniker.SIGTERM`.
-        timeout :
+
+        timeout:
             The maximum number of seconds to wait for a process to terminate.
             Defaults to 3.
-        check_timeout_interval :
+
+        check_timeout_interval: float, default 0.1
             The number of seconds to wait between checking if the process is still running.
             Defaults to 0.1.
-        signal : daemoniker.DaemonikerSignal :
-            
-        timeout : Optional[Union[float :
-            
-        int]] :
-             (Default value = 3)
-        check_timeout_interval : float :
-             (Default value = 0.1)
 
         Returns
         -------
-
+        A SuccessTuple indicating success.
         """
         import time
         daemoniker = attempt_import('daemoniker')
 
         try:
-            daemoniker.send(str(self.pid_path), daemoniker.SIGINT)
+            daemoniker.send(str(self.pid_path), signal)
         except Exception as e:
             return False, str(e)
         if timeout is None:
             return True, f"Successfully sent '{signal}' to daemon '{self.daemon_id}'."
         begin = time.time()
-        while (time.time() - begin) < timeout:
+        while (time.perf_counter() - begin) < timeout:
             if not self.pid_path.exists():
                 return True, f"Successfully stopped daemon '{self.daemon_id}'."
             time.sleep(check_timeout_interval)
+
         return False, (
             f"Failed to stop daemon '{self.daemon_id}' within {timeout} second"
             + ('s' if timeout != 1 else '') + '.'
@@ -353,17 +343,8 @@ class Daemon:
 
     def mkdir_if_not_exists(self, allow_dirty_run : bool = False):
         """Create the Daemon's directory.
-        
         If `allow_dirty_run` is `False` and the directory already exists,
-
-        Parameters
-        ----------
-        allow_dirty_run : bool :
-             (Default value = False)
-
-        Returns
-        -------
-
+        raise a `FileExistsError`.
         """
         try:
             self.path.mkdir(parents=True, exist_ok=False)
@@ -384,21 +365,13 @@ class Daemon:
     @property
     def process(self) -> Union['psutil.Process', None]:
         """
-
-        Parameters
-        ----------
-
-        Returns
-        -------
-        type
-            If the job is not running, return `None`.
-
+        Return the psutil process for the Daemon.
         """
         psutil = attempt_import('psutil')
         pid = self.pid
         if pid is None:
             return None
-        if not '_process' in self.__dict__ or self._process.pid != int(pid):
+        if '_process' not in self.__dict__ or self.__dict__['_process'].pid != int(pid):
             try:
                 self._process = psutil.Process(int(pid))
             except Exception as e:
@@ -407,29 +380,40 @@ class Daemon:
                 return None
         return self._process
 
+
     @property
     def path(self) -> pathlib.Path:
-        """ """
+        """
+        Return the path for this Daemon's directory.
+        """
         return DAEMON_RESOURCES_PATH / self.daemon_id
 
     @property
     def properties_path(self):
-        """ """
+        """
+        Return the `propterties.json` path for this Daemon.
+        """
         return self.path / 'properties.json'
 
     @property
     def stdout_path(self):
-        """ """
+        """
+        Return the path to redirect stdout into.
+        """
         return self.log_path
 
     @property
     def stderr_path(self):
-        """ """
+        """
+        Return the path to redirect stderr into.
+        """
         return self.log_path
 
     @property
     def log_path(self):
-        """ """
+        """
+        Return the log path.
+        """
         return LOGS_RESOURCES_PATH / (self.daemon_id + '.log')
 
     @property
@@ -440,35 +424,22 @@ class Daemon:
     def log_text(self) -> Optional[str]:
         """Read the log file and return its contents.
         Returns `None` if the log file does not exist.
-
-        Parameters
-        ----------
-
-        Returns
-        -------
-
         """
         if not self.log_path.exists():
             return None
         try:
-            with open(self.log_path, 'r') as f:
+            with open(self.log_path, 'r', encoding='utf-8') as f:
                 text = f.read()
         except Exception as e:
             warn(e)
             text = None
         return text
 
+
     @property
     def pid(self) -> str:
         """Read the PID file and return its contents.
         Returns `None` if the PID file does not exist.
-
-        Parameters
-        ----------
-
-        Returns
-        -------
-
         """
         if not self.pid_path.exists():
             return None
@@ -480,25 +451,33 @@ class Daemon:
             text = None
         return text.rstrip('\n') if text is not None else text
 
+
     @property
     def pid_path(self) -> pathlib.Path:
-        """ """
+        """
+        Return the path to a file containing the PID for this Daemon.
+        """
         return self.path / 'process.pid'
+
 
     @property
     def pickle_path(self) -> pathlib.Path:
-        """ """
+        """
+        Return the path for the pickle file.
+        """
         return self.path / 'pickle.pkl'
+
 
     def read_properties(self) -> Optional[Dict[str, Any]]:
         """Read the properties JSON file and return the dictionary."""
         if not self.properties_path.exists():
             return None
         try:
-            with open(self.properties_path, 'r') as file:
+            with open(self.properties_path, 'r', encoding='utf-8') as file:
                 return json.load(file)
         except Exception as e:
             return {}
+
 
     def read_pickle(self) -> Daemon:
         """Read a Daemon's pickle file and return the `Daemon`."""
@@ -517,18 +496,11 @@ class Daemon:
             error(msg)
         return daemon
 
+
     @property
     def properties(self) -> Optional[Dict[str, Any]]:
         """
-
-        Parameters
-        ----------
-
-        Returns
-        -------
-        type
-            read the properties JSON file.
-
+        Return the contents of the properties JSON file.
         """
         _file_properties = self.read_properties()
         if not self._properties:
@@ -542,20 +514,15 @@ class Daemon:
 
     @property
     def hidden(self) -> bool:
-        """ """
+        """
+        Return a bool indicating whether this Daemon should be displayed.
+        """
         return self.daemon_id.startswith('_') or self.daemon_id.startswith('.')
 
 
     def write_properties(self) -> SuccessTuple:
         """Write the properties dictionary to the properties JSON file
         (only if self.properties exists).
-
-        Parameters
-        ----------
-
-        Returns
-        -------
-
         """
         success, msg = False, f"No properties to write for daemon '{self.daemon_id}'."
         if self.properties is not None:
@@ -567,6 +534,7 @@ class Daemon:
             except Exception as e:
                 success, msg = False, str(e)
         return success, msg
+
 
     def write_pickle(self) -> SuccessTuple:
         """Write the pickle file for the daemon."""
@@ -581,20 +549,14 @@ class Daemon:
             traceback.print_exception(type(e), e, e.__traceback__)
         return success, msg
 
-    def cleanup(self, keep_logs: bool = False):
+
+    def cleanup(self, keep_logs: bool = False) -> None:
         """Remove a daemon's directory after execution.
 
         Parameters
         ----------
-        keep_logs :
+        keep_logs: bool, default False
             If `True`, skip deleting the daemon's log file.
-            Defaults to `False`.
-        keep_logs: bool :
-             (Default value = False)
-
-        Returns
-        -------
-
         """
         if self.path.exists():
             try:

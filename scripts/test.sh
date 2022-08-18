@@ -13,8 +13,8 @@ export MRSM_ROOT_DIR=$test_root
 if [ "$1" == "db" ]; then
   cd tests/
   docker-compose up -d
-  echo "Sleeping for 15 seconds..."
-  sleep 15
+  # echo "Sleeping for 15 seconds..."
+  # sleep 15
   cd ../
 fi
 
@@ -34,7 +34,7 @@ python -m meerschaum start jobs test_api -y
 ### This is necessary to trigger installations in a clean environment.
 python -c "
 from tests.connectors import conns
-[conn.URI for conn in conns]
+[conn.URI for conn in conns.values()]
 "
 
 MRSM_CONNS=$(python -c "

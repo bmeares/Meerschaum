@@ -245,11 +245,11 @@ def get_completer(
 
 def _get_parent_plugin(stacklevel: int = 1) -> Union[str, None]:
     """If this function is called from outside a Meerschaum plugin, it will return None."""
-    from meerschaum.config._paths import PLUGINS_RESOURCES_PATH
+    from meerschaum.config._paths import PLUGINS_INTERNAL_DIR_PATH
     import inspect, re
     parent_globals = inspect.stack()[stacklevel][0].f_globals
     parent_file = parent_globals.get('__file__', '')
-    if str(PLUGINS_RESOURCES_PATH) not in parent_file:
+    if str(PLUGINS_INTERNAL_DIR_PATH) not in parent_file:
         return None
     return parent_globals['__name__'].replace('plugins.', '').split('.')[0]
 

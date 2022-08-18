@@ -9,10 +9,41 @@
 - **Added the action `start connectors`.**  
   This command allows you to wait until all of the specified connectors are available and accepting connections. This feature is very handy when paired with the new `MRSM_SQL_X` URI environment variables.
 
-- **Allow for symlinking in URI environment variables.**  
-  You may now reference configuration keys within URI variables.
+- **Added `MRSM_PLUGINS_DIR`.**  
+  This one's been on my to-do list for quite a bit! You can now place your plugins in a dedicated, version-controlled directory outside of your root directory.
+  
+  Like `MRSM_ROOT_DIR`, specify a path with the environment variable `MRSM_PLUGINS_DIR`:
 
-- **Increased token expiration window to 12 hours.**
+  ```bash
+  MRSM_PLUGINS_DIR=plugins \
+    mrsm show plugins
+  ```
+
+- **Allow for symlinking in URI environment variables.**  
+  You may now reference configuration keys within URI variables:
+
+  ```bash
+  MRSM_SQL_FOO=postgresql://user:MRSM{meerschaum:connectors:sql:main:password}@localhost:5432/db
+  ```
+
+- **Increased token expiration window to 12 hours.**  
+  This should reduce the number of login requests needed.
+
+- **Improved virtual environment verification.**  
+  More edge cases have been addressed.
+
+- **Symlink Meerschaum into `Plugin` virtual environments.**  
+  If plugins do not specify `Meerschaum` in the `required` list, Meerschaum will be symlinked to the currently running package.
+
+**Breaking changes**
+
+- **API endpoints for registering and editing users changed.**  
+  To comply with OAuth2 convention, the API endpoint for registering a user is now a url-encoded form submission to `/users/register` (`/user/edit` for editing).
+
+  ***You must upgrade both the server and client to v1.2.0+ to login to your API instances.***
+
+- **Replaced `meerschaum.utils.sql.update_query()` with `meerschaum.utils.sql.get_update_queries()`.**  
+  The new function returns a list of query strings rather than a single query. These queries are executed within a single transaction.
 
 **Bugfixes**
 
@@ -25,13 +56,9 @@
 - **Fixed missing suggestions for shell-only commands.**  
   Completions for commands like `instance` are now suggested.
 
-**Breaking changes**
+- **Fixed an issue with killing background jobs.**  
+  The signals were not being sent correctly, so this release includes better job process management.
 
-- **API endpoints for registering and editing users changed.**  
-  To comply with Oauth2 convention, the API endpoint for registering a user is now a url-encoded form submission to `/users/register` (`/user/edit` for editing).
-
-- **Replaced `meerschaum.utils.sql.update_query()` with `meerschaum.utils.sql.get_update_queries()`.**  
-  The new function returns a list of query strings rather than a single query.
 
 ## 1.1.x Releases
 

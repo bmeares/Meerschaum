@@ -12,6 +12,7 @@ scratch/
 /portable/
 /test_root/
 /tests/data/
+/test_plugins/
 docs/pdoc/*
 docs/site/*
 file_system_store/
