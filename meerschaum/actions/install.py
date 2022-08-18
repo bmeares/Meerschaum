@@ -7,7 +7,7 @@ Install plugins and pip packages.
 """
 
 from __future__ import annotations
-from meerschaum.utils.typing import List, Any, SuccessTuple, Optional
+from meerschaum.utils.typing import List, Any, SuccessTuple, Optional, Union
 
 def install(
         action: Optional[List[str]] = None,
@@ -87,7 +87,7 @@ def _install_plugins(
 
     repo_connector = parse_repo_keys(repository)
 
-    successes = dict()
+    successes = {}
     for name in action:
         info(f"Installing plugin '{name}' from Meerschaum repository '{repo_connector}'...")
         success, msg = repo_connector.install_plugin(name, force=force, debug=debug)
@@ -168,7 +168,7 @@ def _install_packages(
         return True, (
             "Successfully installed package" + ("s" if len(action) != 1 else '')
             + f" {items_str(action)}"
-            + " into the Meerschaum virtual environment."
+            + f" into the virtual environment '{venv}'."
         )
     return False, (
         f"Failed to install package" + ("s" if len(action) != 1 else '') + f" {items_str(action)}."
