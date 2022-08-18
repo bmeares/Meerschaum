@@ -765,8 +765,11 @@ def timed_input(
     except TimeoutExpired:
         return None
     except EOFError:
-        print(prompt)
-        time.sleep(seconds)
+        try:
+            print(prompt)
+            time.sleep(seconds)
+        except TimeoutExpired:
+            return None
     finally:
         signal.alarm(0) # cancel alarm
 
