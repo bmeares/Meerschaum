@@ -292,6 +292,7 @@ class Plugin:
         import tarfile
         from meerschaum.plugins import reload_plugins
         from meerschaum.utils.packages import attempt_import, determine_version
+        from meerschaum.utils.venv import init_venv
         old_cwd = os.getcwd()
         old_version = ''
         new_version = ''
@@ -328,6 +329,7 @@ class Plugin:
         if is_dir:
             fpath = fpath / '__init__.py'
 
+        init_venv(self.name, debug=debug)
         new_version = determine_version(
             fpath,
             import_name = self.name,

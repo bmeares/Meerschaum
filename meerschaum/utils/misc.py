@@ -748,8 +748,7 @@ def timed_input(
     The input string entered by the user.
 
     """
-    from meerschaum.utils.prompt import prompt as _prompt
-    import signal
+    import signal, time
 
     class TimeoutExpired(Exception):
         """Raise this exception when the timeout is reached."""
@@ -762,10 +761,12 @@ def timed_input(
     signal.alarm(seconds) # produce SIGALRM in `timeout` seconds
 
     try:
-        #  return _prompt(prompt, icon=icon, **kw)
         return input(prompt)
     except TimeoutExpired:
         return None
+    except EOFError:
+        print(prompt)
+        time.sleep(seconds)
     finally:
         signal.alarm(0) # cancel alarm
 

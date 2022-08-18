@@ -500,7 +500,7 @@ def _start_connectors(
     success = successes > 0
     msg = f"Successfully started {successes} connector" + ('s' if successes != 1 else '') + '.'
     if fails > 0:
-        msg += "\n    Failed to start {fails} connector" + ('s' if fails != 1 else '') + '.'
+        msg += f"\n    Failed to start {fails} connector" + ('s' if fails != 1 else '') + '.'
 
     return success, msg
 
