@@ -301,7 +301,7 @@ class Daemon:
             return False, str(e)
         if timeout is None:
             return True, f"Successfully sent '{signal}' to daemon '{self.daemon_id}'."
-        begin = time.time()
+        begin = time.perf_counter()
         while (time.perf_counter() - begin) < timeout:
             if not self.pid_path.exists():
                 return True, f"Successfully stopped daemon '{self.daemon_id}'."
