@@ -25,15 +25,15 @@ jobs:
         run: ./scripts/setup.sh
       - name: Install db drivers
         run: sudo ./scripts/drivers.sh
-      # - name: Start SSH session
-        # uses: luchihoratiu/debug-via-ssh@main
-        # with:
-          # NGROK_AUTH_TOKEN: ${{ secrets.NGROK_AUTH_TOKEN }}
-          # SSH_PASS: ${{ secrets.SSH_PASS }}
-      - name: Setup upterm session
-        uses: lhotari/action-upterm@v1
+      - name: Start SSH session
+        uses: luchihoratiu/debug-via-ssh@main
         with:
-          limit-access-to-users: bmeares
+          NGROK_AUTH_TOKEN: ${{ secrets.NGROK_AUTH_TOKEN }}
+          SSH_PASS: ${{ secrets.SSH_PASS }}
+      # - name: Setup upterm session
+        # uses: lhotari/action-upterm@v1
+        # with:
+          # limit-access-to-users: bmeares
 
       - name: Integration tests
         env:
