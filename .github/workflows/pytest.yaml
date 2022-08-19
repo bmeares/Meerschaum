@@ -25,20 +25,10 @@ jobs:
         run: ./scripts/setup.sh
       - name: Install db drivers
         run: sudo ./scripts/drivers.sh
-      - name: Setup tmate session
-        uses: mxschmitt/action-tmate@v3
-        with:
-          limit-access-to-actor: true
-      # - name: Start SSH session
-        # uses: luchihoratiu/debug-via-ssh@main
+      # - name: Setup tmate session
+        # uses: mxschmitt/action-tmate@v3
         # with:
-          # NGROK_AUTH_TOKEN: ${{ secrets.NGROK_AUTH_TOKEN }}
-          # SSH_PASS: ${{ secrets.SSH_PASS }}
-      # - name: Setup upterm session
-        # uses: lhotari/action-upterm@v1
-        # with:
-          # limit-access-to-users: bmeares
-
+          # limit-access-to-actor: true
       - name: Integration tests
         env:
           COMPOSE_INTERACTIVE_NO_CLI: 1
