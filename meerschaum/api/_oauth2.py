@@ -31,4 +31,3 @@ def generate_secret_key() -> str:
 
 SECRET = generate_secret_key()
 manager = LoginManager(SECRET, token_url=endpoints['login'])
-

@@ -14,6 +14,10 @@ from meerschaum.utils.typing import Optional, Union, List
 
 
 class Log:
+    """
+    Manage the offset of a rolling logfile.
+    """
+
     def __init__(
         self,
         file_path: pathlib.Path,
@@ -27,7 +31,7 @@ class Log:
         self._handle = None
 
         if self._offset_file_path.exists() and os.path.getsize(self._offset_file_path):
-            with open(self._offset_file_path, 'r') as f:
+            with open(self._offset_file_path, 'r', encoding='utf-8') as f:
                 self._offset = int(f.readline().strip())
 
 
@@ -71,7 +75,8 @@ class Log:
         import gzip
         if not self._handle or self._handle.closed:
             self._handle = (
-                open(self.file_path, 'r', 1) if not str(self.file_path).endswith('.gz')
+                open(self.file_path, 'r', 1, encoding='utf-8')
+                if not str(self.file_path).endswith('.gz')
                 else gzip.open(self.file_path, 'r')
             )
             self._handle.seek(self._offset)
@@ -81,7 +86,7 @@ class Log:
 
     def _update_offset_file_path(self):
         offset = self._file_handle().tell()
-        with open(self._offset_file_path, 'w') as f:
+        with open(self._offset_file_path, 'w', encoding='utf-8') as f:
             f.write(f"{offset}\n")
         self._since_update = 0
 
@@ -109,4 +114,3 @@ class Log:
 
     def __iter__(self):
         return self
-

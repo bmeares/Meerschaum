@@ -168,18 +168,19 @@ def read_config(
                     except Exception as e:
                         import traceback
                         traceback.print_exc()
-                    _single_key_config = (
-                        search_and_substitute_config({key: _config_key}) if substitute
-                        else {key: _config_key}
-                    )
-                    config[key] = _single_key_config[key]
-                    if (
-                        symlinks_key in _single_key_config
-                            and key in _single_key_config[symlinks_key]
-                    ):
-                        if symlinks_key not in config:
-                            config[symlinks_key] = {}
-                        config[symlinks_key][key] = _single_key_config[symlinks_key][key]
+                        _config_key = {}
+                _single_key_config = (
+                    search_and_substitute_config({key: _config_key}) if substitute
+                    else {key: _config_key}
+                )
+                config[key] = _single_key_config[key]
+                if (
+                    symlinks_key in _single_key_config
+                    and key in _single_key_config[symlinks_key]
+                ):
+                    if symlinks_key not in config:
+                        config[symlinks_key] = {}
+                    config[symlinks_key][key] = _single_key_config[symlinks_key][key]
                 break
             except Exception as e:
                 print(f"Unable to parse {filename}!")

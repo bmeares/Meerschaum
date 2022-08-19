@@ -6,8 +6,11 @@
 Interact with Meerschaum APIs. May be chained together (see 'meerschaum:api_instance' in your config.yaml).
 """
 
+import datetime
 from meerschaum.utils.typing import Optional
 from meerschaum.connectors import Connector
+from meerschaum.utils.warnings import warn, error
+from meerschaum.utils.packages import attempt_import
 
 required_attributes = {
     'host',
@@ -89,11 +92,25 @@ class APIConnector(Connector):
         self._expires = None
         self._session = None
 
+
+    @property
+    def URI(self) -> str:
+        """
+        Return the fully qualified URI.
+        """
+        username = self.__dict__.get('username', None)
+        password = self.__dict__.get('password', None)
+        creds = (username + ':' + password + '@') if username and password else ''
+
+        return (
+            self.protocol + '://' + creds
+            + self.host + ':' + str(self.port)
+        )
+
+
     @property
     def session(self):
         if self._session is None:
-            from meerschaum.utils.packages import attempt_import
-            from meerschaum.utils.warnings import error
             requests = attempt_import('requests')
             if requests:
                 self._session = requests.Session()
@@ -103,25 +120,14 @@ class APIConnector(Connector):
 
     @property
     def token(self):
-        import datetime
-
         expired = (
             True if self._expires is None else (
                 (self._expires < datetime.datetime.utcnow() + datetime.timedelta(minutes=1))
             )
         )
 
-        def _print_tup(_tup):
-            from meerschaum.utils.formatting import print_tuple
-            print_tuple(tup)
-
         if self._token is None or expired:
-            tup = self.login()
-            if not tup[0]:
-                _print_tup(tup)
-        elif expired:
-            tup = self.refresh()
-            if not tup[0]:
-                _print_tup(tup)
+            success, msg = self.login()
+            if not success:
+                warn(msg, stack=False)
         return self._token
-

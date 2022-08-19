@@ -740,7 +740,7 @@ def sync_pipe(
     from meerschaum.utils.debug import dprint
     from meerschaum.utils.packages import import_pandas
     from meerschaum.utils.misc import parse_df_datetimes
-    from meerschaum.utils.sql import update_query
+    from meerschaum.utils.sql import get_update_queries
     from meerschaum import Pipe
     import time
     if df is None:
@@ -789,7 +789,8 @@ def sync_pipe(
     if debug:
         dprint("Delta data :\n" + str(delta_df))
         dprint("Unseen data:\n" + str(unseen_df))
-        dprint("Update data:\n" + str(update_df)) if update_df is not None else None
+        if update_df is not None:
+            dprint("Update data:\n" + str(update_df))
 
     if update_df is not None and not update_df.empty:
         temp_target = '_' + pipe.target
@@ -813,16 +814,19 @@ def sync_pipe(
             join_cols.append(pipe.columns['datetime'])
         if 'id' in pipe.columns:
             join_cols.append(pipe.columns['id'])
-        success = (
-            self.exec(
-                update_query(
-                    pipe.target,
-                    temp_target,
-                    self,
-                    join_cols,
-                    debug = debug
-                ), debug=debug) is not None
-        )
+
+        with self.engine.begin() as connection:
+            for update_query in get_update_queries(
+                pipe.target,
+                temp_target,
+                self,
+                join_cols,
+                debug = debug
+            ):
+                success = connection.execute(update_query) is not None
+                if not success:
+                    break
+
         if success:
             temp_pipe.drop(debug=debug)
         else:

@@ -17,6 +17,8 @@ from meerschaum.api import (
     manager, debug, check_allow_chaining, DISALLOW_CHAINING_MESSAGE,
     no_auth, private,
 )
+from meerschaum.utils.misc import string_to_dict
+from meerschaum.config import get_config
 from meerschaum.api.tables import get_tables
 from starlette.responses import Response, JSONResponse
 from meerschaum.core import User
@@ -27,8 +29,7 @@ sqlalchemy = attempt_import('sqlalchemy')
 users_endpoint = endpoints['users']
 
 import fastapi
-from fastapi import HTTPException
-from meerschaum.config.static import _static_config
+from fastapi import HTTPException, Form
 
 @app.get(users_endpoint + "/me", tags=['Users'])
 def read_current_user(
@@ -68,13 +69,14 @@ def get_users(
     """
     return get_api_connector().get_users(debug=debug)
 
-@app.post(users_endpoint + "/{username}/register", tags=['Users'])
+
+@app.post(users_endpoint + "/register", tags=['Users'])
 def register_user(
-        username: str,
-        password: str,
-        type: Optional[str] = None,
-        email: Optional[str] = None,
-        attributes: Optional[Dict[str, Any]] = None,
+        username: str = Form(None),
+        password: str = Form(None),
+        attributes: str = Form(None, examples={'test': {'foo': 'bar'}}),
+        type: str = Form(None),
+        email: str = Form(None),
         curr_user = (
             fastapi.Depends(manager) if private else None
         ),
@@ -82,8 +84,16 @@ def register_user(
     """
     Register a new user.
     """
-    from meerschaum.config import get_config
-    allow_users = get_config('system', 'api', 'permissions', 'registration', 'users', patch=True)
+    if username is None or password is None:
+        raise HTTPException(status_code=406, detail="A username and password must be submitted.")
+
+    if attributes is not None:
+        try:
+            attributes = string_to_dict(attributes)
+        except Exception as e:
+            return False, f"Invalid dictionary string received for attributes."
+
+    allow_users = get_config('system', 'api', 'permissions', 'registration', 'users')
     if not allow_users:
         return False, (
             "The administrator for this server has not allowed user registration.\n\n"
@@ -101,13 +111,14 @@ def register_user(
     user = User(username, password, type=type, email=email, attributes=attributes)
     return get_api_connector().register_user(user, debug=debug)
 
-@app.post(users_endpoint + "/{username}/edit", tags=['Users'])
+
+@app.post(users_endpoint + "/edit", tags=['Users'])
 def edit_user(
-        username: str,
-        password: str,
-        type: Optional[str] = None,
-        email: Optional[str] = None,
-        attributes: Optional[Dict[str, Any]] = None,
+        username: str = Form(None),
+        password: str = Form(None),
+        type: str = Form(None),
+        email: str = Form(None),
+        attributes: str = Form(None),
         curr_user = (
             fastapi.Depends(manager) if not no_auth else None
         ),
@@ -115,6 +126,12 @@ def edit_user(
     """
     Edit an existing user.
     """
+    if attributes is not None:
+        try:
+            attributes = string_to_dict(attributes)
+        except Exception as e:
+            return False, f"Invalid dictionary string received for attributes."
+
     user = User(username, password, email=email, attributes=attributes)
     user_type = get_api_connector().get_user_type(curr_user) if curr_user is not None else 'admin'
     if user_type == 'admin' and type is not None:
@@ -123,6 +140,7 @@ def edit_user(
         return get_api_connector().edit_user(user, debug=debug)
 
     return False, f"Cannot edit user '{user}': Permission denied"
+
 
 @app.get(users_endpoint + "/{username}/id", tags=['Users'])
 def get_user_id(
@@ -135,6 +153,7 @@ def get_user_id(
     Get a user's ID.
     """
     return get_api_connector().get_user_id(User(username), debug=debug)
+
 
 @app.get(users_endpoint + "/{username}/attributes", tags=['Users'])
 def get_user_attributes(
