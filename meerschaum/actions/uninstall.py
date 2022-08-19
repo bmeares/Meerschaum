@@ -144,10 +144,13 @@ def _complete_uninstall_plugins(action: Optional[List[str]] = None, **kw) -> Lis
             possibilities.append(name)
     return possibilities
 
+class NoVenv:
+    pass
 
 def _uninstall_packages(
         action: Optional[List[str]] = None,
         sub_args: Optional[List[str]] = None,
+        venv: Union[str, None, NoVenv] = NoVenv,
         yes: bool = False,
         force: bool = False,
         noask: bool = False,
@@ -162,14 +165,26 @@ def _uninstall_packages(
     """
     if not action:
         return False, f"No packages to uninstall."
+
     from meerschaum.utils.warnings import info
     from meerschaum.utils.packages import pip_uninstall
+
+    if venv is NoVenv:
+        venv = 'mrsm'
+
     if not (yes or force) and noask:
         return False, "Skipping uninstallation. Add `-y` or `-f` to agree to the uninstall prompt."
-    if pip_uninstall(*action, args=sub_args + (['-y'] if (yes or force) else []), debug=debug):
+
+    if pip_uninstall(
+        *action,
+        args = sub_args + (['-y'] if (yes or force) else []),
+        venv = venv,
+        debug = debug,
+    ):
         return True, (
             f"Successfully removed packages from virtual environment 'mrsm':\n" + ', '.join(action)
         )
+
     return False, f"Failed to uninstall packages:\n" + ', '.join(action)
 
 

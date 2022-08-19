@@ -7,7 +7,7 @@ The entry point for launching Meerschaum actions.
 """
 
 from __future__ import annotations
-from meerschaum.utils.typing import SuccessTuple, List, Optional
+from meerschaum.utils.typing import SuccessTuple, List, Optional, Dict
 
 def _entry(sysargs: Optional[List[str]] = None) -> SuccessTuple:
     """Parse arguments and launch a Meerschaum action.
@@ -38,6 +38,7 @@ def _entry(sysargs: Optional[List[str]] = None) -> SuccessTuple:
         from meerschaum.utils.schedule import schedule_function
         return schedule_function(_entry_with_args, args['schedule'], **args)
     return _entry_with_args(**args)
+
 
 def _entry_with_args(
         _actions: Optional[Dict[str, Callable[[Any], SuccessTuple]]] = None,

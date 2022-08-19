@@ -3,7 +3,7 @@ volumes:
   timescaledb_volume:
   mssql_volume:
   mariadb_volume:
-  cockroachdb_volume:
+  # cockroachdb_volume:
   oracle_volume:
   citus_healthcheck_volume:
 services:
@@ -39,13 +39,13 @@ services:
       - 3309:3306
     volumes:
       - mariadb_volume:/var/lib/mysql:z
-  cockroachdb:
-    image: cockroachdb/cockroach:v21.1.2
-    ports:
-      - 26259:26257
-    command: start-single-node --insecure
-    volumes:
-      - cockroachdb_volume:/cockroach/cockroach-data:z
+  # cockroachdb:
+    # image: cockroachdb/cockroach:v21.1.2
+    # ports:
+      # - 26259:26257
+    # command: start-single-node --insecure
+    # volumes:
+      # - cockroachdb_volume:/cockroach/cockroach-data:z
   oracle:
     image: konnecteam/docker-oracle-12c:sequelize
     ports:

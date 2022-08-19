@@ -7,7 +7,7 @@ This module contains functions for printing elements.
 """
 
 from __future__ import annotations
-from meerschaum.utils.typing import SuccessTuple, Union, Sequence, Any, Optional, List
+from meerschaum.utils.typing import SuccessTuple, Union, Sequence, Any, Optional, List, Dict
 
 def show(
         action: Optional[List[str]] = None,
@@ -236,12 +236,14 @@ def _show_connectors(
 
     return True, "Success"
 
+
 def _complete_show_connectors(
         action: Optional[List[str]] = None, **kw: Any
     ) -> List[str]:
     from meerschaum.utils.misc import get_connector_labels
     _text = action[0] if action else ""
     return get_connector_labels(search_term=_text, ignore_exact_match=True)
+
 
 def _show_arguments(
         **kw: Any
@@ -574,6 +576,8 @@ def _show_logs(
     from meerschaum.utils.misc import tail
     from meerschaum.config._paths import LOGS_RESOURCES_PATH
     from meerschaum.config import get_config
+    if not ANSI:
+        info = print
     colors = get_config('jobs', 'logs', 'colors')
     daemons = get_filtered_daemons(action)
 
@@ -596,7 +600,6 @@ def _show_logs(
         if daemon_id not in _buffer_spaces:
             d = Daemon(daemon_id=daemon_id)
             if d not in daemons:
-                #  daemons.append(Daemon(daemon_id=daemon_id))
                 daemons = get_filtered_daemons(action)
             _buffer_spaces = _build_buffer_spaces(daemons)
         return _buffer_spaces[daemon_id]
@@ -607,7 +610,6 @@ def _show_logs(
             d = Daemon(daemon_id=daemon_id)
             if d not in daemons:
                 daemons = get_filtered_daemons(action)
-                #  daemons.append(Daemon(daemon_id=daemon_id))
             _job_colors = _build_job_colors(daemons)
         return _job_colors[daemon_id]
 
@@ -615,8 +617,8 @@ def _show_logs(
         watchgod = attempt_import('watchgod')
         rich = import_rich()
         rich_text = attempt_import('rich.text')
-        _watch_daemon_ids = set([d.daemon_id for d in daemons])
-        info("Watching log files...") if ANSI else print('Watching log files...')
+        _watch_daemon_ids = {d.daemon_id for d in daemons}
+        info("Watching log files...")
 
         def _print_job_line(daemon, line):
             text = rich_text.Text(daemon.daemon_id)
@@ -659,14 +661,14 @@ def _show_logs(
                 end_index = nl_index
             backup_index = ((len(log_text) - nl_index) - 1) if end_index not in (-1, 0) else 0
 
-            with open(d.log_offset_path, 'r') as f:
+            with open(d.log_offset_path, 'r', encoding='utf-8') as f:
                 offset_lines = f.readlines()
                 char_index = int(offset_lines[-1].rstrip('\n'))
                 new_offset_lines = [
                     offset_lines[0],
                     str((len(log_text) - backup_index) if char_index > backup_index else 0) + '\n'
                 ]
-            with open(d.log_offset_path, 'w') as f:
+            with open(d.log_offset_path, 'w', encoding='utf-8') as f:
                 f.writelines(new_offset_lines)
             return True
 

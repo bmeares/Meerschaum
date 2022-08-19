@@ -7,19 +7,34 @@ on:
         description: 'Run the pytest script.'
         required: false
         default: ""
-  # push:
-    # branches: [ main ]
+  push:
+    branches: [ main, staging ]
+  pull_request:
+    branches:
+      - main
+      - staging
 
 jobs:
   build:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v2
+      - uses: actions/checkout@v3
       - name: Setup dev tools
         env:
           MRSM_SKIP_DOCKER_EXPERIMENTAL: 1
         run: ./scripts/setup.sh
-      - name: pytest
+      - name: Install db drivers
+        run: sudo ./scripts/drivers.sh
+      # - name: Setup tmate session
+        # uses: mxschmitt/action-tmate@v3
+        # with:
+          # limit-access-to-actor: true
+      - name: Integration tests
         env:
           COMPOSE_INTERACTIVE_NO_CLI: 1
         run: ./scripts/test.sh db
+      - uses: actions/upload-artifact@v3
+        if: always()
+        with:
+          name: api-log
+          path: test_root/logs/test_api.log

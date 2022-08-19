@@ -16,6 +16,7 @@ from meerschaum.utils.typing import (
     SuccessTuple,
     Union,
 )
+from meerschaum.utils.warnings import error, warn
 from meerschaum.config import get_config
 from meerschaum.config._paths import (
     PLUGINS_RESOURCES_PATH,
@@ -40,15 +41,15 @@ class Plugin:
         repo_connector: Optional['meerschaum.connectors.api.APIConnector'] = None,
         repo: Union['meerschaum.connectors.api.APIConnector', str, None] = None,
     ):
-        from meerschaum.utils.warnings import error
-        from meerschaum.config.static import _static_config
-        sep = _static_config()['plugins']['repo_separator']
+        from meerschaum.config.static import STATIC_CONFIG
+        sep = STATIC_CONFIG['plugins']['repo_separator']
         _repo = None
         if sep in name:
             try:
                 name, _repo = name.split(sep)
             except Exception as e:
                 error(f"Invalid plugin name: '{name}'")
+        self._repo_in_name = _repo
 
         if attributes is None:
             attributes = {}
@@ -66,13 +67,26 @@ class Plugin:
             venv_path if venv_path is not None
             else VIRTENV_RESOURCES_PATH / self.name
         )
-        if repo_connector is None:
+        self._repo_connector = repo_connector
+        self._repo_keys = repo
+
+
+    @property
+    def repo_connector(self):
+        """
+        Return the repository connector for this plugin.
+        """
+        if self._repo_connector is None:
             from meerschaum.connectors.parse import parse_repo_keys
-            repo_keys = str(repo) if repo is not None else None
-            if _repo is not None and repo_keys != _repo:
-                error(f"Received inconsistent repos: '{_repo}' and '{repo_keys}'.")
+
+            repo_keys = self._repo_keys or self._repo_in_name
+            if self._repo_in_name and self._repo_keys and self._repo_keys != self._repo_in_name:
+                error(
+                    f"Received inconsistent repos: '{self._repo_in_name}' and '{self._repo_keys}'."
+                )
             repo_connector = parse_repo_keys(repo_keys)
-        self.repo_connector = repo_connector
+            self._repo_connector = repo_connector
+        return self._repo_connector
 
 
     @property
@@ -278,6 +292,7 @@ class Plugin:
         import tarfile
         from meerschaum.plugins import reload_plugins
         from meerschaum.utils.packages import attempt_import, determine_version
+        from meerschaum.utils.venv import init_venv
         old_cwd = os.getcwd()
         old_version = ''
         new_version = ''
@@ -314,8 +329,14 @@ class Plugin:
         if is_dir:
             fpath = fpath / '__init__.py'
 
+        init_venv(self.name, debug=debug)
         new_version = determine_version(
-            fpath, import_name=self.name, search_for_metadata=False, warn=True, debug=debug
+            fpath,
+            import_name = self.name,
+            search_for_metadata = False,
+            warn = True,
+            debug = debug,
+            venv = self.name,
         )
         if not new_version:
             warn(
@@ -643,10 +664,25 @@ class Plugin:
         -------
         A bool indicating success.
         """
+        from meerschaum.utils.venv import venv_target_path
         from meerschaum.utils.packages import activate_venv
+        from meerschaum.config._paths import PACKAGE_ROOT_PATH
+
         if dependencies:
             for plugin in self.get_required_plugins(debug=debug):
-                activate_venv(plugin.name, debug=debug)
+                plugin.activate_venv(debug=debug)
+
+        vtp = venv_target_path(self.name, debug=debug)
+        venv_meerschaum_path = vtp / 'meerschaum'
+        if not venv_meerschaum_path.exists():
+            venv_meerschaum_path.symlink_to(PACKAGE_ROOT_PATH)
+        elif (
+            venv_meerschaum_path.is_symlink()
+            and
+            pathlib.Path(os.path.realpath(venv_meerschaum_path)) != PACKAGE_ROOT_PATH
+        ):
+            venv_meerschaum_path.symlink_to(PACKAGE_ROOT_PATH)
+
         return activate_venv(self.name, debug=debug)
 
 
@@ -667,7 +703,7 @@ class Plugin:
         success = deactivate_venv(self.name, debug=debug)
         if dependencies:
             for plugin in self.get_required_plugins(debug=debug):
-                deactivate_venv(plugin.name, debug=debug)
+                plugin.deactivate_venv(debug=debug)
         return success
 
 
@@ -704,7 +740,7 @@ class Plugin:
         from meerschaum.connectors.parse import parse_repo_keys
         from meerschaum.config.static import _static_config
         _deps = self.get_dependencies(debug=debug)
-        if not _deps:
+        if not _deps and self.requirements_file_path is None:
             return True
 
         plugins = self.get_required_plugins(debug=debug)

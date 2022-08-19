@@ -14,6 +14,7 @@ For ease of use, you can also import from the root `meerschaum` module:
 from __future__ import annotations
 from meerschaum.utils.typing import Any, SuccessTuple, Union, Optional, Sequence, Mapping
 from meerschaum.utils.threading import Lock, RLock
+from meerschaum.utils.warnings import error, warn
 
 from meerschaum.connectors.Connector import Connector
 from meerschaum.connectors.sql.SQLConnector import SQLConnector
@@ -127,8 +128,6 @@ def get_connector(
     ### Only fall back to 'main' if the type is provided by the label is omitted.
     label = label if label is not None else _static_config()['connectors']['default_label']
 
-    global types, connectors
-
     ### type might actually be a label. Check if so and raise a warning.
     if type not in connectors:
         possibilities, poss_msg = [], ""
@@ -145,24 +144,19 @@ def get_connector(
                 poss_msg += " or"
             poss_msg += f" '{possibilities[-1]}'?"
 
-        from meerschaum.utils.warnings import warn
         warn(f"Cannot create Connector of type '{type}'." + poss_msg, stack=False)
         return None
 
     if len(types) == 0:
-        from meerschaum.connectors.sql import SQLConnector
-        from meerschaum.connectors.api import APIConnector
         from meerschaum.connectors.mqtt import MQTTConnector
         from meerschaum.connectors.plugin import PluginConnector
-        from meerschaum.utils.warnings import warn
-        _locks['types'].acquire()
-        types = {
-            'api'    : APIConnector,
-            'sql'    : SQLConnector,
-            'mqtt'   : MQTTConnector,
-            'plugin' : PluginConnector,
-        }
-        _locks['types'].release()
+        with _locks['types']:
+            types.update({
+                'api'    : APIConnector,
+                'sql'    : SQLConnector,
+                'mqtt'   : MQTTConnector,
+                'plugin' : PluginConnector,
+            })
     
     ### always refresh MQTT Connectors NOTE: test this!
     if type == 'mqtt':
@@ -196,25 +190,22 @@ def get_connector(
         else: ### connector doesn't yet exist
             refresh = True
 
-    ### only create an object if refresh is True (can be manually specified, otherwise determined above)
-    from meerschaum.utils.warnings import error, warn
-    import traceback
-    error_msg = None
+    ### only create an object if refresh is True
+    ### (can be manually specified, otherwise determined above)
     if refresh:
-        _locks['connectors'].acquire()
-        try:
-            ### will raise an error if configuration is incorrect / missing
-            conn = types[type](label=label, debug=debug, **kw)
-            connectors[type][label] = conn
-        except Exception as e:
-            warn(e, stack=False)
-            conn = None
-        finally:
-            _locks['connectors'].release()
+        with _locks['connectors']:
+            try:
+                ### will raise an error if configuration is incorrect / missing
+                conn = types[type](label=label, debug=debug, **kw)
+                connectors[type][label] = conn
+            except Exception as e:
+                warn(e, stack=False)
+                conn = None
         if conn is None:
             return None
 
     return connectors[type][label]
+
 
 def is_connected(keys: str, **kw) -> bool:
     """
@@ -223,7 +214,7 @@ def is_connected(keys: str, **kw) -> bool:
     If the connector exists but cannot communicate with the source, return `False`.
     
     **NOTE:** Only works with instance connectors (`SQLConnectors` and `APIConnectors`).
-    Keyword arguments are passed to `meerschaum.utils.misc.retry_connect`.
+    Keyword arguments are passed to `meerschaum.connectors.poll.retry_connect`.
 
     Parameters
     ----------
@@ -236,7 +227,6 @@ def is_connected(keys: str, **kw) -> bool:
 
     """
     import warnings
-    from meerschaum.utils.warnings import error, warn
     if ':' not in keys:
         warn(f"Invalid connector keys '{keys}'")
 

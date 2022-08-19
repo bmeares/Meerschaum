@@ -67,6 +67,21 @@ update_queries = {
             {and_subquery_t}
         )
     """,
+    'sqlite_delete_insert': [
+    """
+    DELETE FROM {target_table_name} AS f
+    WHERE ROWID IN (
+        SELECT t.ROWID
+        FROM {target_table_name} AS t
+        INNER JOIN (SELECT DISTINCT * FROM {patch_table_name}) AS p
+            ON {and_subquery_t}
+    );
+    """,
+    """
+    INSERT INTO {target_table_name} AS f
+    SELECT DISTINCT * FROM {patch_table_name} AS p
+    """,
+    ],
 }
 table_wrappers = {
     'default'    : ('"', '"'),
@@ -274,7 +289,7 @@ def test_connection(
     Parameters
     ----------
     **kw:
-        The keyword arguments are passed to `meerschaum.utils.misc.retry_connect`.
+        The keyword arguments are passed to `meerschaum.connectors.poll.retry_connect`.
 
     Returns
     -------
@@ -282,7 +297,7 @@ def test_connection(
 
     """
     import warnings
-    from meerschaum.utils.misc import retry_connect
+    from meerschaum.connectors.poll import retry_connect
     _default_kw = {'max_retries': 1, 'retry_wait': 0, 'warn': False, 'connector': self}
     _default_kw.update(kw)
     with warnings.catch_warnings():
@@ -573,18 +588,48 @@ def get_sqlalchemy_table(
     return tables[str(table)]
 
 
-def update_query(
+
+_checked_sqlite_version = None
+def get_update_queries(
         target: str,
         patch: str,
         connector: meerschaum.connectors.sql.SQLConnector,
         join_cols: List[str],
         debug: bool = False,
-    ) -> str:
+    ) -> List[str]:
     """
-    Build a `MERGE` or `UPDATE` query to apply a patch to target table.
+    Build a list of `MERGE`, `UPDATE`, `DELETE`/`INSERT` queries to apply a patch to target table.
+
+    Parameters
+    ----------
+    target: str
+        The name of the target table.
+
+    patch: str
+        The name of the patch table. This should have the same shape as the target.
+
+    connector: meerschaum.connectors.sql.SQLConnector
+        The Meerschaum `SQLConnector` which will later execute the queries.
+
+    join_cols: List[str]
+        The columns to use to join the patch to the target.
+
+    debug: bool, default False
+        Verbosity toggle.
+
+    Returns
+    -------
+    A list of query strings to perform the update operation.
     """
     from meerschaum.utils.debug import dprint
-    base_query = update_queries.get(connector.flavor, update_queries['default'])
+    flavor = connector.flavor
+    if connector.flavor == 'sqlite':
+        import sqlite3
+        if sqlite3.sqlite_version < '3.33.0':
+            flavor = 'sqlite_delete_insert'
+    base_queries = update_queries.get(flavor, update_queries['default'])
+    if not isinstance(base_queries, list):
+        base_queries = [base_queries]
     target_table = get_sqlalchemy_table(target, connector)
     value_cols = []
     if debug:
@@ -618,15 +663,15 @@ def update_query(
                 + r_prefix + sql_item_name(c, connector.flavor)
             ) for c in join_cols
         ])
-    query = base_query.format(
+
+    return [base_query.format(
         sets_subquery_none = sets_subquery('', 'p.'),
         sets_subquery_f = sets_subquery('f.', 'p.'),
         and_subquery_f = and_subquery('p.', 'f.'),
         and_subquery_t = and_subquery('p.', 't.'),
         target_table_name = sql_item_name(target, connector.flavor),
         patch_table_name = sql_item_name(patch, connector.flavor),
-    )
-    return query
+    ) for base_query in base_queries]
 
     
 def get_pd_type(db_type: str) -> str:

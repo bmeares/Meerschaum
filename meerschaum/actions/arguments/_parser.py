@@ -114,6 +114,7 @@ groups['pipes'] = parser.add_argument_group(title='Pipes options')
 groups['sync'] = parser.add_argument_group(title='Sync options')
 groups['api'] = parser.add_argument_group(title='API options')
 groups['plugins'] = parser.add_argument_group(title='Plugins options')
+groups['packages'] = parser.add_argument_group(title='Packages options')
 groups['debug'] = parser.add_argument_group(title='Debugging options')
 groups['misc'] = parser.add_argument_group(title='Miscellaneous options')
 
@@ -247,7 +248,8 @@ groups['api'].add_argument(
     '-p', '--port', type=int, help="The port on which to run the Web API server"
 )
 groups['api'].add_argument(
-    '--host', type=str, help="The host address to bind to for the API server. Defaults to '0.0.0.0'."
+    '--host', type=str,
+    help="The host address to bind to for the API server. Defaults to '0.0.0.0'."
 )
 groups['api'].add_argument(
     '-w', '--workers', type=int,
@@ -276,6 +278,11 @@ groups['plugins'].add_argument(
     help="Meerschaum plugins repository to connect to. Specify an API label (default: 'mrsm')"
 )
 
+### Packages options
+groups['packages'].add_argument(
+    '--venv', type=str,
+    help="Choose which virtual environment to target when installing or removing packages.",
+)
 ### Debugging Arguments
 groups['debug'].add_argument(
     '--debug', action="store_true", help="Print debug statements (max verbosity)"
