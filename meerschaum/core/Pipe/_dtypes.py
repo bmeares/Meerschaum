@@ -18,7 +18,7 @@ def enforce_dtypes(self, df: 'pd.DataFrame', debug: bool=False) -> 'pd.DataFrame
     from meerschaum.utils.debug import dprint
     from meerschaum.utils.warnings import warn
     from meerschaum.utils.formatting import pprint
-    from meerschaum.config.static import _static_config
+    from meerschaum.config.static import STATIC_CONFIG
     from meerschaum.utils.packages import import_pandas
     if df is None:
         if debug:
@@ -95,7 +95,7 @@ def enforce_dtypes(self, df: 'pd.DataFrame', debug: bool=False) -> 'pd.DataFrame
         return df
 
     if len(common_dtypes) == len(df_dtypes):
-        min_ratio = _static_config()['pipes']['dtypes']['min_ratio_columns_changed_for_full_astype']
+        min_ratio = STATIC_CONFIG['pipes']['dtypes']['min_ratio_columns_changed_for_full_astype']
         if (
             len(common_diff_dtypes) >= int(len(common_dtypes) * min_ratio)
         ):
@@ -135,6 +135,8 @@ def infer_dtypes(self, persist: bool=False, debug: bool=False) -> Dict[str, Any]
     """
     if not self.exists(debug=debug):
         dtypes = {}
+        if not self.columns:
+            return {}
         if 'datetime' in self.columns:
             dtypes[self.columns['datetime']] = 'datetime64[ns]'
         return dtypes

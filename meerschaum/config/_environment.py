@@ -9,14 +9,14 @@ Patch the runtime configuration from environment variables.
 import os
 import re
 from meerschaum.utils.typing import List, Union, Dict, Any
-from meerschaum.config.static import _static_config
+from meerschaum.config.static import STATIC_CONFIG
 
 def apply_environment_patches() -> None:
     """
     Apply patches defined in `MRSM_CONFIG` and `MRSM_PATCH`.
     """
-    config_var = _static_config()['environment']['config']
-    patch_var = _static_config()['environment']['patch']
+    config_var = STATIC_CONFIG['environment']['config']
+    patch_var = STATIC_CONFIG['environment']['patch']
     apply_environment_config(config_var)
     apply_environment_config(patch_var)
 
@@ -91,7 +91,7 @@ def get_connector_env_vars() -> List[str]:
     >>> get_connector_environment_vars()
     ['MRSM_SQL_FOO']
     """
-    uri_regex = _static_config()['environment']['uri_regex']
+    uri_regex = STATIC_CONFIG['environment']['uri_regex']
     env_vars = []
     for env_var in os.environ:
         matched = re.match(uri_regex, env_var)
@@ -108,35 +108,29 @@ def apply_connector_uri(env_var: str) -> None:
     from meerschaum.connectors import get_connector
     from meerschaum.config import get_config, set_config, _config
     from meerschaum.config._patch import apply_patch_to_config
-    uri_regex = _static_config()['environment']['uri_regex']
+    from meerschaum.config._read_config import search_and_substitute_config
+    uri_regex = STATIC_CONFIG['environment']['uri_regex']
     matched = re.match(uri_regex, env_var)
     groups = matched.groups()
-    typ, label, uri = groups[0].lower(), groups[1].lower(), os.environ[env_var]
+    typ, label = groups[0].lower(), groups[1].lower()
+    uri = search_and_substitute_config({'uri': os.environ[env_var]})['uri']
     msg = f"An invalid URI was set for environment variable '{env_var}'."
     try:
-        conn = get_connector(typ, label, uri=os.environ[env_var])
+        conn = get_connector(typ, label, uri=uri)
     except Exception as e:
         print(msg)
         return
     try:
-        uri = conn.DATABASE_URL if typ == 'sql' else os.environ[env_var]
+        uri = conn.URI
     except Exception as e:
         print(msg)
 
     _config()['meerschaum']['connectors'][typ][label] = {'uri': uri}
-    #  m_config = get_config('meerschaum')
-    #  m_config['connectors'][typ][label] = {'uri': uri}
-    #  set_config(
-        #  apply_patch_to_config(
-            #  _config(),
-            #  {'meerschaum': m_config},
-        #  ),
-    #  )
 
 
 def get_env_vars() -> List[str]:
     """
     Return all environment variables which begin with `'MRSM_'`.
     """
-    prefix = _static_config()['environment']['prefix']
+    prefix = STATIC_CONFIG['environment']['prefix']
     return sorted([env_var for env_var in os.environ if env_var.startswith(prefix)])

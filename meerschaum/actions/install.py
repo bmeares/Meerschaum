@@ -7,7 +7,7 @@ Install plugins and pip packages.
 """
 
 from __future__ import annotations
-from meerschaum.utils.typing import List, Any, SuccessTuple, Optional
+from meerschaum.utils.typing import List, Any, SuccessTuple, Optional, Union
 
 def install(
         action: Optional[List[str]] = None,
@@ -87,7 +87,7 @@ def _install_plugins(
 
     repo_connector = parse_repo_keys(repository)
 
-    successes = dict()
+    successes = {}
     for name in action:
         info(f"Installing plugin '{name}' from Meerschaum repository '{repo_connector}'...")
         success, msg = repo_connector.install_plugin(name, force=force, debug=debug)
@@ -135,10 +135,13 @@ def _complete_install_plugins(
         return []
     return sorted(results)
 
+class NoVenv:
+    pass
 
 def _install_packages(
         action: Optional[List[str]] = None,
         sub_args: Optional[List[str]] = None,
+        venv: Union[str, NoVenv] = NoVenv,
         debug: bool = False,
         **kw: Any
     ) -> SuccessTuple:
@@ -153,11 +156,19 @@ def _install_packages(
     from meerschaum.utils.warnings import info
     from meerschaum.utils.packages import pip_install
     from meerschaum.utils.misc import items_str
-    if pip_install(*action, args=['--upgrade'] + sub_args, debug=debug):
+    if venv is NoVenv:
+        venv = 'mrsm'
+
+    if pip_install(
+        *action,
+        args = ['--upgrade'] + sub_args,
+        venv = venv,
+        debug = debug,
+    ):
         return True, (
             "Successfully installed package" + ("s" if len(action) != 1 else '')
             + f" {items_str(action)}"
-            + " into the Meerschaum virtual environment."
+            + f" into the virtual environment '{venv}'."
         )
     return False, (
         f"Failed to install package" + ("s" if len(action) != 1 else '') + f" {items_str(action)}."

@@ -32,11 +32,13 @@ class ShellCompleter(Completer):
         part_0_subbed_spaces = parts[0].replace(' ', '_')
         parsed_text = part_0_subbed_spaces + '-'.join(parts[1:])
 
+        shell = get_shell()
+
         ### Index is the rank order (0 is closest match).
         ### Break when no results are returned.
         for i, a in enumerate(shell_actions):
             try:
-                poss = get_shell().complete(parsed_text, i)
+                poss = shell.complete(parsed_text, i)
                 if poss:
                     poss = poss.replace('_', ' ')
             ### Having issues with readline on portable Windows.
@@ -48,20 +50,31 @@ class ShellCompleter(Completer):
             yielded.append(poss)
 
         args = parse_line(document.text)
-        action_function = get_action(args['action'])
+        action_function = get_action(args['action'], _actions=shell._actions)
         if action_function is None:
             return
-        main_action_name = get_main_action_name(args['action'])
+
+        main_action_name = get_main_action_name(args['action'], _actions=shell._actions)
 
         ### If we haven't yet hit space, don't suggest subactions.
-        if not parsed_text.replace(action_function.__name__.lstrip('_'), '').startswith('_'):
+        if not parsed_text.replace(
+            main_action_name,
+            '',
+        ).startswith('_'):
             return
 
         possibilities = []
-        if f'complete_{main_action_name}' in dir(get_shell()):
+        complete_function_name = f'complete_{main_action_name}'
+        if hasattr(shell, complete_function_name):
             possibilities = getattr(
-                get_shell(), f'complete_{main_action_name}'
-            )(document.text.split(' ')[-1], document.text, 0, 0)
+                shell,
+                complete_function_name
+            )(
+                document.text.split(' ')[-1],
+                document.text,
+                0,
+                0
+            )
 
         if possibilities:
             for suggestion in possibilities:

@@ -39,14 +39,16 @@ def edit_user(
     ) -> SuccessTuple:
     """Edit an existing user."""
     import json
-    from meerschaum.config.static import _static_config
-    r_url = f"{_static_config()['api']['endpoints']['users']}/{user.username}/edit"
-    params = {
-        'password' : user.password,
-        'email' : user.email,
-        'attributes' : user.attributes,
+    from meerschaum.config.static import STATIC_CONFIG
+    r_url = f"{STATIC_CONFIG['api']['endpoints']['users']}/edit"
+    data = {
+        'username': user.username,
+        'password': user.password,
+        'type': user.type,
+        'email': user.email,
+        'attributes': json.dumps(user.attributes),
     }
-    response = self.post(r_url, json=user.attributes, params=params, debug=debug)
+    response = self.post(r_url, data=data, debug=debug)
     try:
         _json = json.loads(response.text)
         if isinstance(_json, dict) and 'detail' in _json:
@@ -58,6 +60,7 @@ def edit_user(
 
     return tuple(success_tuple)
 
+
 def register_user(
         self,
         user: 'meerschaum.core.User',
@@ -67,13 +70,17 @@ def register_user(
     """Register a new user."""
     import json
     from meerschaum.config.static import _static_config
-    r_url = f"{_static_config()['api']['endpoints']['users']}/{user.username}/register"
-    params = {
-        'password'  : user.password,
-        'email'     : user.email,
-        'attributes': user.attributes,
+    r_url = f"{_static_config()['api']['endpoints']['users']}/register"
+    data = {
+        'username': user.username,
+        'password': user.password,
+        'attributes': json.dumps(user.attributes),
     }
-    response = self.post(r_url, json=user.attributes, params=params, debug=debug)
+    if user.type:
+        data['type'] = user.type
+    if user.email:
+        data['email'] = user.email
+    response = self.post(r_url, data=data, debug=debug)
     try:
         _json = json.loads(response.text)
         if isinstance(_json, dict) and 'detail' in _json:
@@ -84,6 +91,7 @@ def register_user(
         return False, msg
 
     return tuple(success_tuple)
+
     
 def get_user_id(
         self,

@@ -7,7 +7,7 @@ Upgrade your current Meerschaum environment
 """
 
 from __future__ import annotations
-from meerschaum.utils.typing import SuccessTuple, Any, List, Optional
+from meerschaum.utils.typing import SuccessTuple, Any, List, Optional, Union
 
 def upgrade(
         action: Optional[List[str]] = None,
@@ -104,8 +104,12 @@ def _upgrade_meerschaum(
     return True, "Success"
 
 
+class NoVenv:
+    pass
+
 def _upgrade_packages(
         action: Optional[List[str]] = None,
+        venv: Union[str, None, NoVenv] = NoVenv,
         yes: bool = False,
         force: bool = False,
         noask: bool = False,
@@ -132,6 +136,8 @@ def _upgrade_packages(
     from meerschaum.utils.misc import print_options
     if action is None:
         action = []
+    if venv is NoVenv:
+        venv = 'mrsm'
     if len(action) == 0:
         group = 'full'
     else:

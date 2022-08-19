@@ -16,6 +16,7 @@ _locks = {
     '_api_plugins': RLock(),
     '__path__': RLock(),
     'sys.path': RLock(),
+    'internal_plugins': RLock(),
 }
 __all__ = (
     "Plugin", "make_action", "api_plugin", "import_plugins",
@@ -117,6 +118,7 @@ def api_plugin(function: Callable[[Any], Any]) -> Callable[[Any], Any]:
     return function
 
 
+_symlinked_internal_plugins: bool = False
 def import_plugins(
         *plugins_to_import: Union[str, List[str], None],
         warn: bool = True,
@@ -138,45 +140,82 @@ def import_plugins(
     A module of list of modules, depening on the number of plugins provided.
 
     """
-    import sys
-    import importlib
+    import sys, os, pathlib, time
+    import importlib.util
     from meerschaum.utils.misc import flatten_list
     from meerschaum.utils.warnings import error, warn as _warn
+    from meerschaum.config.static import STATIC_CONFIG
     from meerschaum.config._paths import (
-        PLUGINS_RESOURCES_PATH, PLUGINS_ARCHIVES_RESOURCES_PATH, PLUGINS_INIT_PATH
+        PLUGINS_RESOURCES_PATH, PLUGINS_ARCHIVES_RESOURCES_PATH, PLUGINS_INIT_PATH,
+        PLUGINS_INTERNAL_DIR_PATH, PLUGINS_INTERNAL_LOCK_PATH,
     )
-    PLUGINS_RESOURCES_PATH.mkdir(parents=True, exist_ok=True)
-    PLUGINS_INIT_PATH.touch()
+    global _symlinked_internal_plugins
+
+    ### If the lock file exists, sleep for up to a second or until it's removed before continuing.
+    if PLUGINS_INTERNAL_LOCK_PATH.exists():
+        lock_start = time.perf_counter()
+        while time.perf_counter() - lock_start < STATIC_CONFIG['plugins']['lock_sleep_total']:
+            time.sleep(STATIC_CONFIG['plugins']['lock_sleep_increment'])
+            if not PLUGINS_INTERNAL_LOCK_PATH.exists():
+                PLUGINS_INTERNAL_LOCK_PATH.unlink()
+                break
+
+    ### Begin locking from other processes.
+    PLUGINS_INTERNAL_LOCK_PATH.touch()
+
+    with _locks['internal_plugins']:
+        if not _symlinked_internal_plugins:
+            if PLUGINS_INTERNAL_DIR_PATH.exists():
+                if pathlib.Path(
+                    os.path.realpath(PLUGINS_INTERNAL_DIR_PATH)
+                ) != PLUGINS_RESOURCES_PATH:
+                    PLUGINS_INTERNAL_DIR_PATH.unlink()
+
+            if not PLUGINS_INTERNAL_DIR_PATH.exists():
+                PLUGINS_INTERNAL_DIR_PATH.symlink_to(PLUGINS_RESOURCES_PATH)
+            _symlinked_internal_plugins = True
+
+    ### Release symlink lock file in case other processes need it.
+    PLUGINS_INTERNAL_LOCK_PATH.unlink()
+
+    try:
+        PLUGINS_INIT_PATH.touch()
+    except Exception as e:
+        error(f"Failed to create the file '{PLUGINS_INIT_PATH}':\n{e}")
     plugins_to_import = list(plugins_to_import)
 
-    if str(PLUGINS_RESOURCES_PATH.parent) not in sys.path:
-        with _locks['sys.path']:
-            sys.path.insert(0, str(PLUGINS_RESOURCES_PATH.parent))
-    if str(PLUGINS_RESOURCES_PATH.parent) not in __path__:
+    if str(PLUGINS_INTERNAL_DIR_PATH.parent) not in __path__:
         with _locks['__path__']:
-            __path__.append(str(PLUGINS_RESOURCES_PATH.parent))
+            __path__.append(str(PLUGINS_INTERNAL_DIR_PATH.parent))
 
-    if not plugins_to_import:
-        try:
-            plugins = importlib.import_module('plugins')
-        except ImportError as e:
-            warn(e)
-            plugins = None
-    else:
-        plugins = []
-        for plugin_name in flatten_list(plugins_to_import):
+    with _locks['sys.path']:
+        if not sys.path or sys.path[0] != str(PLUGINS_INTERNAL_DIR_PATH.parent):
+            sys.path.insert(0, str(PLUGINS_INTERNAL_DIR_PATH.parent))
+
+        if not plugins_to_import:
             try:
-                plugins.append(importlib.import_module(f'plugins.{plugin_name}'))
-            except Exception as e:
-                _warn(f"Failed to import plugin '{plugin_name}':\n    {e}", stack=False)
-                plugins.append(None)
+                plugins = importlib.import_module(PLUGINS_INTERNAL_DIR_PATH.stem)
+            except ImportError as e:
+                warn(e)
+                plugins = None
+        else:
+            plugins = []
+            for plugin_name in flatten_list(plugins_to_import):
+                try:
+                    plugins.append(
+                        importlib.import_module(
+                            f'{PLUGINS_INTERNAL_DIR_PATH.stem}.{plugin_name}'
+                        )
+                    )
+                except Exception as e:
+                    _warn(f"Failed to import plugin '{plugin_name}':\n    {e}", stack=False)
+                    plugins.append(None)
 
-    if plugins is None and warn:
-        _warn(f"Failed to import plugins.", stacklevel=3)
+        if plugins is None and warn:
+            _warn(f"Failed to import plugins.", stacklevel=3)
 
-    if str(PLUGINS_RESOURCES_PATH.parent) in sys.path:
-        with _locks['sys.path']:
-            sys.path.remove(str(PLUGINS_RESOURCES_PATH.parent))
+        if str(PLUGINS_INTERNAL_DIR_PATH.parent) in sys.path:
+            sys.path.remove(str(PLUGINS_INTERNAL_DIR_PATH.parent))
 
     if isinstance(plugins, list):
         return (plugins[0] if len(plugins) == 1 else tuple(plugins))
@@ -189,6 +228,7 @@ def load_plugins(debug: bool = False, shell: bool = False) -> None:
     """
     from inspect import isfunction, getmembers
     from meerschaum.actions import __all__ as _all, modules
+    from meerschaum.config._paths import PLUGINS_INTERNAL_DIR_PATH
     from meerschaum.utils.packages import get_modules_from_package
     if debug:
         from meerschaum.utils.debug import dprint
@@ -201,7 +241,10 @@ def load_plugins(debug: bool = False, shell: bool = False) -> None:
     )
     ### I'm appending here to keep from redefining the modules list.
     new_modules = (
-        [mod for mod in modules if not mod.__name__.startswith('plugins.')]
+        [
+            mod for mod in modules
+            if not mod.__name__.startswith(PLUGINS_INTERNAL_DIR_PATH.stem + '.')
+        ]
         + plugins_modules
     )
     n_mods = len(modules)
@@ -243,11 +286,19 @@ def reload_plugins(plugins: Optional[List[str]] = None, debug: bool = False) -> 
     load_plugins(debug=debug)
 
 
-def get_plugins(*to_load) -> Union[Tuple[Plugin], Plugin]:
+def get_plugins(*to_load, try_import: bool = True) -> Union[Tuple[Plugin], Plugin]:
     """
     Return a list of `Plugin` objects.
+
+    Parameters
+    ----------
+    to_load:
+        If specified, only load specific plugins.
+        Otherwise return all plugins.
+
+    try_import: bool, default True
+        If `True`, allow for plugins to be imported.
     """
-    from meerschaum.utils.packages import get_modules_from_package
     from meerschaum.config._paths import PLUGINS_RESOURCES_PATH
     import os
     _plugins = [
@@ -260,23 +311,25 @@ def get_plugins(*to_load) -> Union[Tuple[Plugin], Plugin]:
             ]
         )
     ]
-    plugins = tuple(plugin for plugin in _plugins if plugin.is_installed())
+    plugins = tuple(plugin for plugin in _plugins if plugin.is_installed(try_import=try_import))
     if len(to_load) == 1:
         return plugins[0]
     return plugins
 
 
-def get_plugins_names(*to_load) -> List[str]:
+def get_plugins_names(*to_load, **kw) -> List[str]:
     """
     Return a list of installed plugins.
     """
-    return [plugin.name for plugin in get_plugins(*to_load)]
+    return [plugin.name for plugin in get_plugins(*to_load, **kw)]
 
-def get_plugins_modules(*to_load) -> List['ModuleType']:
+
+def get_plugins_modules(*to_load, **kw) -> List['ModuleType']:
     """
     Return a list of modules for the installed plugins, or `None` if things break.
     """
-    return [plugin.module for plugin in get_plugins(*to_load)]
+    return [plugin.module for plugin in get_plugins(*to_load, **kw)]
+
 
 def get_data_plugins() -> List[Plugin]:
     """
@@ -284,7 +337,6 @@ def get_data_plugins() -> List[Plugin]:
     """
     import inspect
     plugins = get_plugins()
-    mods = get_plugins_modules()
     data_names = {'sync', 'fetch'}
     data_plugins = []
     for plugin in plugins:
@@ -295,6 +347,7 @@ def get_data_plugins() -> List[Plugin]:
                 continue
             data_plugins.append(plugin)
     return data_plugins
+
 
 def add_plugin_argument(*args, **kwargs) -> None:
     """
