@@ -13,8 +13,6 @@ export MRSM_ROOT_DIR=$test_root
 if [ "$1" == "db" ]; then
   cd tests/
   docker-compose up -d
-  # echo "Sleeping for 15 seconds..."
-  # sleep 15
   cd ../
 fi
 
@@ -29,6 +27,8 @@ if [ "$api_exists" != "test_api" ]; then
 else
   python -m meerschaum start jobs test_api -y
 fi
+python -m meerschaum start jobs test_api -y
+MRSM_API_TEST=http://user:pass@localhost:$test_port python -m meerschaum start connectors api:test
 python -m meerschaum start jobs test_api -y
 
 ### This is necessary to trigger installations in a clean environment.
