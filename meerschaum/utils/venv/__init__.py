@@ -212,7 +212,7 @@ def verify_venv(
         if filename == python_versioned_name:
             real_path = pathlib.Path(os.path.realpath(python_path))
             if not real_path.exists():
-                print(f"Does not exist:\n{python_path}\n->\n{real_path}")
+                #  print(f"Does not exist:\n{python_path}\n->\n{real_path}")
                 python_path.unlink()
                 init_venv(venv, verify=False, force=True, debug=debug)
                 if not python_path.exists():

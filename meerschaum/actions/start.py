@@ -457,6 +457,7 @@ def _start_webterm(
 def _start_connectors(
         action: Optional[List[str]] = None,
         connector_keys: Optional[List[str]] = None,
+        min_seconds: int = 3,
         debug: bool = False,
         **kw
     ) -> SuccessTuple:
@@ -467,6 +468,8 @@ def _start_connectors(
     from meerschaum.connectors.parse import parse_instance_keys
     from meerschaum.utils.pool import get_pool
     from meerschaum.utils.warnings import warn
+    from meerschaum.utils.formatting import pprint
+    from meerschaum.utils.misc import items_str
     if action is None:
         action = []
     if connector_keys is None:
@@ -485,22 +488,44 @@ def _start_connectors(
     if not valid_conns:
         return False, "No valid connector keys were provided."
 
+
+    connected = {}
     def connect(conn):
-        return retry_connect(
+        success = retry_connect(
             conn,
+            retry_wait = min_seconds,
             enforce_chaining = False,
             enforce_login = False,
+            print_on_connect = True,
             debug = debug,
         )
+        connected[conn] = success
+        return success
     
-    successes_list = [connect(conn) for conn in valid_conns]
-    successes = len([s for s in successes_list if s])
-    fails = len([s for s in successes_list if not s])
+    pool = get_pool()
+    try:
+        pool.map(connect, valid_conns)
+    except KeyboardInterrupt:
+        pass
 
-    success = successes > 0
-    msg = f"Successfully started {successes} connector" + ('s' if successes != 1 else '') + '.'
-    if fails > 0:
-        msg += f"\n    Failed to start {fails} connector" + ('s' if fails != 1 else '') + '.'
+    ### If a KeyboardInterrupt stopped a connection, mark as `False`.
+    for conn in valid_conns:
+        if conn not in connected:
+            connected[conn] = False
+
+    successes = [conn for conn, success in connected.items() if success]
+    fails = [conn for conn, success in connected.items() if not success]
+
+    success = len(fails) == 0
+    msg = (
+        f"Successfully started connector" + ('s' if len(successes) != 1 else '')
+        + ' ' + items_str(successes) + '.'
+    )
+    if len(fails) > 0:
+        msg += (
+            f"\n    Failed to start connector" + ('s' if len(fails) != 1 else '')
+            + ' ' + items_str(fails) + '.'
+        )
 
     return success, msg
 

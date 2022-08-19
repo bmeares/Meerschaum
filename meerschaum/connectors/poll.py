@@ -10,10 +10,11 @@ from meerschaum.utils.typing import InstanceConnector, Union, Optional
 
 def retry_connect(
         connector: Union[InstanceConnector, None] = None,
-        max_retries: int = 40,
+        max_retries: int = 50,
         retry_wait: int = 3,
         workers: int = 1,
         warn: bool = True,
+        print_on_connect: bool = False,
         enforce_chaining: bool = True,
         enforce_login: bool = True,
         debug: bool = False,
@@ -37,6 +38,9 @@ def retry_connect(
 
     warn: bool, default True
         If `True`, print a warning in case the connection fails.
+
+    print_on_connect: bool, default False
+        If `True`, print a message when a successful connection is established.
 
     enforce_chaining: bool, default True
         If `False`, ignore the configured chaining option.
@@ -62,6 +66,7 @@ def retry_connect(
         'retry_wait': retry_wait,
         'workers': workers,
         'warn': warn,
+        'print_on_connect': print_on_connect,
         'enforce_chaining': enforce_chaining,
         'enforce_login': enforce_login,
         'debug': debug,
@@ -81,9 +86,10 @@ def retry_connect(
 
 def _wrap_retry_connect(
         connector_keys: Optional[str] = None,
-        max_retries: int = 40,
+        max_retries: int = 50,
         retry_wait: int = 3,
         workers: int = 1,
+        print_on_connect: bool = False,
         warn: bool = True,
         enforce_chaining: bool = True,
         enforce_login: bool = True,
@@ -108,6 +114,9 @@ def _wrap_retry_connect(
 
     warn: bool, default True
         If `True`, print a warning in case the connection fails.
+
+    print_on_connect: bool, default False
+        If `True`, print a message when a successful connection is established.
 
     enforce_chaining: bool, default True
         If `False`, ignore the configured chaining option.
@@ -187,19 +196,23 @@ def _wrap_retry_connect(
                     _warn(f"Unable to login to '{connector}'!", stack=False)
 
         if connected:
-            if debug:
-                dprint("Connection established!")
+            if print_on_connect:
+                info(f"Connected to '{connector}'.")
             return True
 
         if warn:
             _warn(
-                f"Connection failed. Press [Enter] to retry or wait {retry_wait} seconds.",
+                f"Connection to '{connector}' failed.\n    "
+                + f"Press [Enter] to retry or wait {retry_wait} seconds.",
                 stack = False
             )
-            info(
-                f"To quit, press CTRL-C, then 'q' + Enter for each worker" +
-                (f" ({workers})." if workers is not None else ".")
-            )
+            if workers and workers > 1:
+                info(
+                    f"To quit, press CTRL-C, then 'q' + [Enter] for each worker"
+                    + f" ({workers})."
+                )
+            info(f"Failed connection attempt ({retries + 1} / {max_retries})")
+
         try:
             if retry_wait > 0:
                 text = timed_input(retry_wait)
