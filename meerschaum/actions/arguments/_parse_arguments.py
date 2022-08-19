@@ -30,11 +30,11 @@ def parse_arguments(sysargs: List[str]) -> Dict[str, Any]:
     """
     import shlex
     import copy
-    from meerschaum.config.static import _static_config
+    from meerschaum.config.static import STATIC_CONFIG
 
     sub_arguments = []
     sub_arg_indices = []
-    begin_decorator, end_decorator = _static_config()['system']['arguments']['sub_decorators']
+    begin_decorator, end_decorator = STATIC_CONFIG['system']['arguments']['sub_decorators']
     found_begin_decorator = False
     for i, word in enumerate(sysargs):
         is_sub_arg = False
@@ -234,12 +234,17 @@ def remove_leading_action(
     """
     from meerschaum.actions import get_action, get_main_action_name
     from meerschaum.utils.warnings import warn
-    from meerschaum.config.static import _static_config
+    from meerschaum.config.static import STATIC_CONFIG
     action_function = get_action(action, _actions=_actions)
     if action_function is None:
         return action
 
-    UNDERSCORE_STANDIN = _static_config()['system']['arguments']['underscore_standin']
+    UNDERSCORE_STANDIN = STATIC_CONFIG['system']['arguments']['underscore_standin']
+
+    ### e.g. 'show'
+    main_action_name = get_main_action_name(action, _actions)
+    if main_action_name is None:
+        return []
 
     ### Replace underscores with a standin so we can preserve the exising underscores.
     _action = []
@@ -248,9 +253,6 @@ def remove_leading_action(
 
     ### e.g. 'show_pipes_baz'
     action_str = '_'.join(_action)
-
-    ### e.g. 'show'
-    main_action_name = get_main_action_name(_action, _actions)
 
     ### e.g. 'show_pipes'
     action_name = action_function.__name__.lstrip('_')
@@ -261,7 +263,7 @@ def remove_leading_action(
     ### Strip away any leading prefices.
     action_name = action_name[main_action_index:]
 
-    if not action_str.startswith(action_name):
+    if not action_str.replace(UNDERSCORE_STANDIN, '_').startswith(action_name):
         warn(f"Unable to parse '{action_str}' for action '{action_name}'.")
         return action
     

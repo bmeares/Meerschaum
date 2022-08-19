@@ -740,7 +740,7 @@ class Plugin:
         from meerschaum.connectors.parse import parse_repo_keys
         from meerschaum.config.static import _static_config
         _deps = self.get_dependencies(debug=debug)
-        if not _deps:
+        if not _deps and self.requirements_file_path is None:
             return True
 
         plugins = self.get_required_plugins(debug=debug)
