@@ -2,7 +2,7 @@
 
 > This tutorial explains how to extend Meerschaum with plugins. For general information, consult the [Types of Plugins reference page](/reference/plugins/types-of-plugins/).
 
-Meerschaum's plugin system is designed to be simple so you can get your plugins working quickly. Plugins are Python packages defined in the Meerschaum configuration `plugins` directory and are imported at startup.
+Meerschaum's plugin system is designed to be simple so you can get your plugins working quickly. Plugins are Python packages defined in the Meerschaum configuration `plugins` directory and are imported at startup under the global namespace `plugins`.
 
 !!! warning "Performance Warning"
     To get the best performance and user experience, try to keep module-level code to a minimum ― especially heavy imports. Plugins are loaded at startup, and those tiny delays add up!
@@ -21,69 +21,65 @@ Meerschaum's plugin system is designed to be simple so you can get your plugins 
 
 To create your plugin, follow these steps:
 
-1. Navigate to the Meerschaum plugins directory.
+1. **Navigate to your Meerschaum plugins directory.**  
 
-    === "Linux / Mac OS"
+    - *Default:* `~/.config/meerschaum/plugins` (Windows: `%APPDATA%\Meerschaum\plugins`)
+    - You may specify a path to a directory with the environment variable `MRSM_PLUGINS_DIR`. In this case, the folder can be named anything.
+    - If you set `MRSM_ROOT_DIR`, then navigate to `$MRSM_ROOT_DIR/plugins`.
 
-        ```console
-        ~/.config/meerschaum/plugins/
-        ```
+2. **Create your package file.**  
+    You may either create `<plugin_name>.py` or `<plugin_name>/__init__.py` (in case your plugin needs submodules).
 
-    === "Windows"
+3. ***(Optional)* Define your plugin's `__version__` string.**
 
-        ```DOS
-        %AppData%\Meerschaum\plugins\
-        ```
-
-    === "Meerschaum Portable"
-
-        ```console
-        root/plugins/
-        ```
-
-2. Create your package file. You may either create a `<plugin_name>.py` file or `<plugin_name>/__init__.py` directory and file (in case your plugin needs sub-modules).
-
-3. *(Optional)* Define your plugin's `__version__` string.
-
-    !!! info "Specify the version number"
-        You must increment your `__version__` (according to [SemVer](https://semver.org/)) to publish changes to a repository. You may omit `__version__` for the initial release, but subsequent releases need the version defined.
+    !!! info "Plugin repositories need `__version__`"
+        To publish changes to a repository with `register plugin`, you must increment `__version__` (according to [SemVer](https://semver.org/)). You may omit `__version__` for the initial release, but subsequent releases need the version defined.
 
     ```python
+    # ~/.config/meerschaum/plugins/example.py
     __version__ = '0.0.1'
     ```
 
-4. *(Optional)* Define your required dependencies. Your plugin will be run from a virtual environment and therefore may not be able to import packages that aren't declared.
+4. ***(Optional)* Define your required dependencies.**  
+
+    Your plugin will be run from a virtual environment and therefore may not be able to import packages that aren't declared.
+
+    These packagess will be installed into the plugin's virtual environment at installation or with `mrsm install required <plugins>`.
 
     !!! tip "Depend on other plugins"
-        Dependencies that start with `plugin:` will be treated as other Meerschaum plugins in the same repository.
+        Dependencies that start with `plugin:` are Meerschaum plugins. To require a plugin from another repository, add add the repository's keys after the plugin name (e.g. `plugin:foo@api:bar`).
 
     ```python
     required = ['rich>=9.8.0', 'pandas', 'plugin:foo']
     ```
 
-5. Write your functions. Special functions are `#!python fetch()`, `#!python sync()`, `#!python register()`, and `#!python <package_name>()`, and you can use the `#!python @make_action` decorator to designate additional functions as actions. Below is more information on these functions.
+5. **Write your functions.**  
+    
+    Special functions are `#!python fetch()`, `#!python sync()`, `#!python register()`, `#!python setup()`, and `#!python <package_name>()`, and you can use the `#!python @make_action` decorator to designate additional functions as actions. Below is more information on these functions.
 
     !!! warning "Don't forget keyword arguments!"
-        You must include a `**kwargs` argument to capture optional arguments. You may find the supplied arguments useful for your implementation (e.g. `begin` and `end` `#!python datetime.datetime` objects). For fetch and sync plugins, you need a `pipe` positional argument for the `#!python meerschaum.Pipe` object being synced.
+        You must include a `**kwargs` argument to capture optional arguments. The functions `#!python fetch()`, `#!python sync()`, and `#!python register()` also require a `pipe` positional argument for the `#!python meerschaum.Pipe` object being synced.
+
+        You may find the supplied arguments useful for your implementation (e.g. `begin` and `end` `#!python datetime.datetime` objects). Run `mrsm -h` or `mrsm show help` to see the available keyword arguments.
 
 ## Functions
 
 Plugins are just modules with functions. This section explains the roles of the following special functions:
 
-- **`#!python register()`**  
-  Executed when new pipes are registered to set their attributes (e.g. to define columns).
-- **`#!python fetch()`**  
-  Return a DataFrame (which is later passed into `#!python Pipe.sync()` by the command `sync pipes`).
-- **`#!python sync()`**  
+- **`#!python register(pipe: mrsm.Pipe, **kw)`**  
+  Return a pipe's parameters dictionary (e.g. {'columns': {'datetime': 'timestamp', 'id': 'id'}}).
+- **`#!python fetch(pipe: mrsm.Pipe, **kw)`**  
+  Return a DataFrame (to be passed into `#!python Pipe.sync()` by the command `mrsm sync pipes`).
+- **`#!python sync(pipe: mrsm.Pipe, **kw)`**  
   Override the default `sync` behavior for certain pipes.
 - **`#!python @make_action`**  
   Create new commands.
 - **`#!python @api_plugin`**  
   Create new FastAPI endpoints.
-- **`#!python setup()`**  
-  Executed upon plugin installation.
+- **`#!python setup(**kw)`**  
+  Executed upon plugin installation or with `mrsm setup plugin(s) <plugin>`.
 
-### The `#!python register()` Function
+### **The `#!python register()` Function**
 
 The `register()` function is called whenever a new pipe is created with your plugin as its connector. This function returns a dictionary which will become your pipe's attributes. For example, if you already know the column names of your data stream, your `register()` function could be this one line:
 
@@ -108,7 +104,7 @@ The below example is the `register()` function from the [`noaa` plugin](/referen
         }
     ```
 
-### The `#!python fetch()` Function
+### **The `#!python fetch()` Function**
 
 The fastest way to leverage Meerschaum's syncing engine is with the `#!python fetch()` function. Simply return a DataFrame or a dictionary of lists.
 
@@ -121,29 +117,31 @@ Below is an example of what a typical fetch plugin may look like:
     ### ~/.config/meerschaum/plugins/example.py
 
     __version__ = '0.0.1'
+    required = []
 
-    required = ['requests', 'pandas']
+    def register(pipe, **kw):
+        return {
+            'columns': {
+                'datetime': 'dt',
+                'id': 'id',
+                'value': 'val',
+            }
+        }
 
     def fetch(pipe, **kw):
-        ### Define columns if undefined.
-        if pipe.columns is None:
-            pipe.columns = { 'datetime' : 'dt_col' }
-            pipe.edit(interactive=False)
-
-        ### Do something here to build a dictionary of lists or DataFrame
-        import pandas as pd
-        import requests
-        url = "https://api.example.com/json"
-        try:
-        	 df = pd.read_json(requests.get(url).text)
-        except:
-          df = None
-        return df
+        import datetime, random
+        return [{
+            'dt': datetime.datetime.utcnow(),
+            'id': 1,
+            'val': random.randint(0, 100),
+        }]
     ```
 
-### The `#!python sync()` Function
+### **The `#!python sync()` Function**
 
-Sometimes you need more granular control over the syncing process. You can override the behavior of `sync pipes` for your pipes with the `#!python sync()` function. Sync plugins allow for much more flexibility than fetch plugins, so what you come up with may differ from the following example. In any case, below is a simple `#!python sync()` plugin.
+The `#!python sync()` function makes `sync pipes` behave as a custom action on a per-pipe basis, allowing you more control over the syncing process.
+
+Sync plugins allow for much more flexibility than fetch plugins, so what you come up with may differ from the following example. In any case, below is a simple `#!python sync()` plugin.
 
 !!! note
     The only required argument is the positional `pipe` argument. The following example demonstrates one use of the `begin` and `end` arguments. Check out [Keyword Arguments](#keyword-arguments) for further information.
@@ -153,44 +151,48 @@ Sometimes you need more granular control over the syncing process. You can overr
     ### ~/.config/meerschaum/plugins/example.py
 
     from __future__ import annotations
-    from typing import Tuple, Any, Optional, Mapping
+    from typing import Tuple, Any, Optional, Dict
 
     __version__ = '0.0.1'
 
     required = ['requests', 'pandas']
 
     def sync(
-            pipe : meerschaum.Pipe,
-            begin : Optional[datetime.datetime] = None,
-            end : Optional[datetime.datetime] = None,
-            params : Mapping[str, Any] = None,
-            **kw : Any
+            pipe: meerschaum.Pipe,
+            begin: Optional[datetime.datetime] = None,
+            end: Optional[datetime.datetime] = None,
+            params: Dict[str, Any] = None,
+            **kw: Any
         ) -> Tuple[bool, str]:
         """
-        An example `sync` plugin.
-        Returns a tuple of (success, message) [bool, str].
+        This example `sync` plugin syncs multiple pipes.
 
-        :param pipe:
-            The pipe to be synced.
+        Parameters
+        ----------
+        pipe: meerschaum.Pipe
+           The pipe to be synced.
 
-        :param begin:
+        begin: Optional[datetime.datetime], default None
             The datetime to start searching for data (specified with `--begin`).
-            Defaults to `None`.
 
-        :param end:
+        end: Optional[datetime.datetime], default None
             The datetime to stop searching for data (specified with `--end`).
-            Defaults to `None`.
 
-        :param kw:
+        kw: Any
             Additional keyword arguments you might find useful.
+
+        Returns
+        -------
+        A tuple in the form (success [bool], message [str]).
         """
 
         ### Get data from somewhere. You decide how!
         import pandas as pd
         import requests
+        import meerschaum as mrsm
 
         url = "https://api.example.com/json"
-        params = {} if params is None else params
+        params = params or {}
         if begin is not None:
             params['begin'] = begin.isoformat()
         if end is not None:
@@ -198,16 +200,21 @@ Sometimes you need more granular control over the syncing process. You can overr
 
         try:
             df = pd.read_json(requests.get(url, params=params).text)
-        except:
+        except Exception as e:
             df = None
 
         if df is None:
             return False, f"Failed to sync data from {url} with params: {params}"
 
-        return pipe.sync(df)
+        success, msg = pipe.sync(df)
+        if not success:
+            return success, msg
+
+        another_pipe = mrsm.Pipe('foo', 'bar', instance='sql:local')
+        return another_pipe.sync(df)
     ```
 
-### The `#!python @make_action` Decorator
+### **The `#!python @make_action` Decorator**
 
 Your plugin may extend Meerschaum by providing additional actions. Actions are regular Python functions but with perks:
 
@@ -216,68 +223,100 @@ Your plugin may extend Meerschaum by providing additional actions. Actions are r
 2. *Actions inherit the standard Meerschaum keyword arguments.*  
     You can use flags such as `--begin`, `--end`, etc., or even [add your own custom flags](#keyword-arguments).
 
-For example, let's write the plugin `example.py` which will provide the action `example`. Functions which share the name of the plugin are automatically considered actions.
+!!! tip "Sub-Actions"
+
+    Actions with underscores are a good way to add sub-actions (e.g. `foo_bar` is the same as `foo bar`).
+
+??? example "Action Plugin Example"
+
+    ```python
+    ### ~/.config/meerschaum/plugins/sing.py
+
+    from meerschaum.plugins import make_action
+
+    @make_action
+    def sing_song(**kw):
+        return True, "This action is called 'sing song'."
+
+    @make_action
+    def sing_tune(**kw):
+        return True, "This action is called 'sing tune'."
+
+    def sing(**kw):
+        """
+        Functions with the same name as the plugin are considered actions.
+        """
+
+        ### An action returns a tuple of success and message.
+        ### If the success bool is `True` and the message is 'Success',
+        ### nothing will be printed.
+
+        return True, "Hello, World!"
+    ```
+
+#### Suggest Auto-Completions
+
+Return a list of options from a function `complete_<action>()`, and these options will be suggested in the Meerschaum shell. The keyword arguments passed to `#!python complete_<action>()` are `line`, `sysargs`, `action`, and the currently parsed flags.
+
+![Meerschaum shell auto-completion.](/assets/screenshots/shell-complete.png){align=left}
 
 ```python
-### ~/.config/meerschaum/plugins/example.py
-
-def example(**kw):
-  	"""
-  	This the help string for the new action `example`.
-  	"""
-
-  	### An action returns a tuple of success and message.
-  	### If the success bool is `True` and the message is 'Success',
-  	### nothing will be printed.
-
-  	return True, "Hello, World!"
-```
-
-#### Multiple Actions
-
-Action plugins can create any number of actions. To make a function into an action, use the `#!python @make_action` decorator.
-
-```python
-### ~/.config/meerschaum/plugins/example.py
-
-from meerschaum.plugins import make_action
-
 @make_action
-def myaction(**kw):
-    return True, "This action is called 'myaction'"
+def foo_bar(**kw):
+    return True, "Success"
 
-@make_action
-def anotheraction(**kw):
-    return True, "This action is called 'anotheraction'"
+def complete_foo_bar(**kw):
+    return ['option 1', 'option 2']
 ```
 
-### The `#!python @api_plugin` Decorator
+### **The `#!python @api_plugin` Decorator**
 
-Meerschaum plugins may also extend the web API by accessing the [`fastapi`](https://fastapi.tiangolo.com/) app. To delay importing the app until the API is actually initialized, use the `#!python @api_plugin` decorator to define an initialization function. The only required argument for your function should be a variable for the `fastapi` app.
+Meerschaum plugins may also extend the web API by accessing the [`FastAPI`](https://fastapi.tiangolo.com/) app. Use the `#!python @api_plugin` decorator to define an initialization function that will be executed on the command `mrsm start api`.
 
-```python
-### ~/.config/meerschaum/plugins/example.py
+The only argument for the initalization function should be `app` for the FastAPI application.
 
-from meerschaum.plugins import api_plugin
+For your endpoints, arguments will be used as HTTP parameters, and to require that the user must be logged in, import `manager` from `meerschaum.api` and add the argument `curr_user = fastapi.Depends(manager)`:
 
-@api_plugin
-def init_plugin(app):
-    """
-    This function is executed immediately after the `app` is initialized.
-    """
+!!! tip "Swagger Endpoint Tester"
+    
+    Navigate to [https://localhost:8000/docs](https://localhost:8000/docs) to test your endpoint in the browser.
 
-    @app.get('/my/new/path')
-    def new_path():
-        return {'message': 'Hello, World!'}
-```
+??? example "API Plugin Example"
 
-### The `#!python setup()` Function
+    ```python
+    ### ~/.config/meerschaum/plugins/example.py
+
+    from meerschaum.plugins import api_plugin
+
+    @api_plugin
+    def init_plugin(app):
+        """
+        This function is executed immediately after the `app` is initialized.
+        """
+
+        import fastapi
+        from meerschaum.api import manager
+
+        @app.get('/my/new/path')
+        def new_path(
+            curr_user = fastapi.Depends(manager)
+        ):
+            """
+            This is my new API endpoint.
+            """
+            return {'message': f'The current user is {curr_user.name}'}
+    ```
+
+    ![Custom Meerschaum API endpoint which requires a login.](/assets/screenshots/api-plugin-endpoint-login-required.png)
+
+
+### **The `#!python setup()` Function**
 
 When your plugin is first installed, its `required` list will be installed, but in case you need to do any extra setup upon installation, you can write a `#!python setup()` function which returns a tuple of a boolean and a message.
 
 Below is a snippet from the `apex` plugin which initializes a Selenium WebDriver.
 
-??? example "Setup function example"
+??? example "Setup Function Example"
 
     ```python
     def setup(**kw):
@@ -360,3 +399,43 @@ Generally, using built-in or custom arguments mentioned above should cover almos
     | `sub_args`         | `Optional[List[str]] = None` | `['-l', '-a', -h']`              | The `sub_args` keyword corresponds to items in `sysargs` enclosed in square brackets (`[]`). |
     | `filtered_sysargs` | `List[str]`                  | `['ls']`                         | `filtered_sysargs` contains the values of `sysargs` without `sub_args`. |
     | `shell`            | `Bool`                       | `True`, `False`                  | The `shell` boolean indicates whether or not an action was executed from within the Meerschaum shell. |
+
+
+## Working With Plugins
+
+Plugins are just Python modules, so you can write custom code and share it amongst other plugins (i.e. a [library plugin](/reference/plugins/types-of-plugins/#-library-plugins)).
+
+At run time, plugins are imported under the global `plugins` namespace, but you'll probably be testing plugins directly when the `plugins` namespace isn't created. That's where [`Plugin` objects](https://docs.meerschaum.io/#meerschaum.Plugin) come in handy: they contain a number of convenience functions so you can cross-pollinate between plugins.
+
+### Import Another Plugin
+
+Accessing the member `module` of the `Plugin` object will import its module:
+
+```python
+# ~/.config/meerschaum/plugins/foo.py
+import meerschaum as mrsm
+bar = mrsm.Plugin('bar').module
+```
+
+### Plugins in a REPL
+
+Plugins run from virtual environments, so to import your plugin in a REPL, you'll need to activate its environment before importing:
+
+```python
+>>> import meerschaum as mrsm
+>>> plugin = mrsm.Plugin('foo')
+>>> plugin.activate_venv()
+>>> foo = plugin.module
+```
+
+### Plugins in Scripts
+
+You can also pass a plugin to the [`Venv` virtual environment manager](https://docs.meerschaum.io/utils/venv/index.html#meerschaum.utils.venv.Venv), which handles activating and deactivating environments. 
+
+```python
+from meerschaum.utils.venv import Venv
+from meerschaum import Plugin
+plugin = Plugin('foo')
+with Venv(plugin):
+    foo = plugin.module
+```

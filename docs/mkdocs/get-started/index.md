@@ -12,67 +12,74 @@ python -m pip install --upgrade meerschaum
 ??? info "Optional dependencies"
     Meerschaum will auto-install packages as you use them (into a virtual environment, to preserve your base environment).
 
-    If you'd rather install all of its dependencies at installation, you can request the `full` version:
+    You can manually install these packages in one command:
+
     ```bash
-    python -m pip install --upgrade meerschaum[full]
+    python -m meerschaum upgrade packages -y
     ```
+
+    You can also install the packages into your base environment by requesting the name of the dependency group, e.g. `api`:
+    ```bash
+    python -m pip install --upgrade meerschaum[api]
+    ```
+
+!!! note ""
+
+    Run Meerschaum commands with `mrsm` or `python -m meerschaum` if `~/.local/bin/` isn't in your `PATH`.
+
 
 ## 🗄️ Choose a Database
 
-1. **Pre-configured DB**  
+Let's pick a database to store our data. Pick one of the three options below and take note of the keys (e.g. `sql:<label>`). We'll use this as our Meerschaum [instance connector](/reference/connectors/#instances-and-repositories).
 
-    If you have [Docker](https://www.docker.com/get-started), you can run the pre-configured [Meerschaum stack](/reference/stack/).
+1. **Pre-configured TimescaleDB (`sql:main`)**  
+
+    The default [database connector](/reference/connectors/) `sql:main` points to the pre-configured [Meerschaum stack](/reference/stack/). If you have [Docker](https://www.docker.com/get-started), start the database service:
 
     ```bash
     mrsm stack up -d db
     ```
 
-    The keys for this pre-configured [connector](/reference/connectors/) are `sql:main`.
-
-    ??? example "Watch an example"
+    ??? example "📽️ Watch an example"
         <asciinema-player src="/assets/casts/stack.cast" size="small" preload="true" rows="10"></asciinema-player>
 
-2. **Built-in SQLite DB**  
+2. **Built-in SQLite DB (`sql:local`)**  
 
-    The keys for the built-in SQLite database are `sql:local`.
+    For your convenience, the keys `sql:local` point to a SQLite database in your Meerschaum root directory.
 
-3. **Use your own DB**  
+3. **Use your own DB (`sql:<label>`)**  
 
-    You can [connect your own database](/reference/connectors/#creating-a-connector) with:
+    You can [connect your own database](/reference/connectors/#creating-a-connector) with `mrsm bootstrap connector`. The keys for your connector will be `sql:<label>`, where `<label>` is the label you assign in the wizard.
 
-    ```bash
-    mrsm bootstrap connector
-    ```
-
-    ??? example "Watch an example"
+    ??? example "📽️ Watch an example"
         <asciinema-player src="/assets/casts/bootstrap-connector.cast" size="small" preload="true"></asciinema-player>
+
+    ??? info "`MRSM_SQL_<LABEL>` environment variables"
+
+        You can also define connectors in your environment. Set an environment variable `MRSM_SQL_<LABEL>` to your database URI:
+
+        ```bash
+        MRSM_SQL_FOO=sqlite:////tmp/foo.db \
+          python -m meerschaum start connector sql:foo
+        ```
 
 ## ⚡ Connect to Your Instance
 
 ![Meerschaum instance prompt](/assets/screenshots/prompt.png){ align=left } Open the Meerschaum shell with `mrsm` or `python -m meerschaum`.
 
-By default, your prompt's instance is the database `sql:main` from the [pre-configured stack](/reference/stack/).
+Your default instance is `sql:main` from the [pre-configured stack](/reference/stack/). Connect to a different instance with `instance sql:<label>`.
 
 To test the connection, run the command `mrsm show pipes`. A successful connection should return the message:
 <div style="background-color: black; padding: 15px;">
 <pre style="color: red">💢 No pipes to show.</pre>
 </div>
-??? tip "Change your instance"
+??? tip "Change your default instance"
 
-    Your default back-end [instance connector](/reference/connectors/#instances-and-repositories) is `sql:main`. You can see other configured connectors (e.g. `sql:local`) with `mrsm show connectors`.
-
-    To temporarily change instances, open the `mrsm` shell and run the command `instance` followed by the keys.
-
-    ```bash
-    mrsm
-    instance sql:local
-    ```
-
-    To permanently change your default instance:
+    The `instance` command temporarily changes your connected instance. To permanently change your default instance:
 
     1. Open your configuration with `mrsm edit config`.
     2. Navigate to the key `instance:` at the bottom of the file.
-    3. Edit the keys to the [`SQL` or `API` connector](/reference/connectors/#instances-and-repositories) of your new instance.
+    3. Edit the value to the keys of your new instance (`mrsm show connectors` to see registered connectors).
 
     ??? example "Watch an example"
         <asciinema-player src="/assets/casts/change-instance.cast" size="small" preload="true"></asciinema-player>
