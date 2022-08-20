@@ -138,13 +138,13 @@ Plugins may also be used to extend the Meerschaum Web API by adding endpoints. F
 
 ??? example "API plugin example"
 
-  ```python
-  # ~/.config/meerschaum/plugins/foo.py
-  from meerschaum.plugins import api_plugin
+    ```python
+    # ~/.config/meerschaum/plugins/foo.py
+    from meerschaum.plugins import api_plugin
 
-  @api_plugin
-  def init_api(app):
-      @app.get('/my/new/path')
-      def my_new_path():
-          return {'message': 'Eureka!'}
-  ```
+    @api_plugin
+    def init_api(app):
+        @app.get('/my/new/path')
+        def my_new_path():
+            return {'message': 'Eureka!'}
+    ```

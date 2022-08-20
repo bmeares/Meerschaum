@@ -27,11 +27,15 @@ See the [bootstrapping reference page](/reference/pipes/bootstrapping/) for furt
 
     1. Choose `plugin:noaa` for the connector, `weather` for the metric, and skip the location.
 
-    2. Enter `timestamp` for the datetime and `station` for the ID.
+    2. The plugin will ask for weather stations. Enter `KATL` for Atlanta.
 
-        > The plugin will ask for weather stations. Enter `KATL` for Atlanta.
+    3. We can keep the default target name `plugin_noaa_weather`. This will be our SQL table.
 
-    3. Answer `y` to sync the pipe.
+    4. Skip tags — those are useful for [grouping together pipes](/reference/pipes/tags/).
+
+    5. Answer `n` to skip editing the definition. Answering `yes` will open a YAML file of your [pipe's parameters](/reference/pipes/#parameters).
+
+    6. Finally, answer `y` to sync the pipe.
 
 
 !!! success "Success! Now what?"

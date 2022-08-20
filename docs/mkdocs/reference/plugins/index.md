@@ -33,11 +33,11 @@ Meerschaum plugins let you ingest any data source into [pipes](/reference/pipes)
 
         def fetch(pipe, **kw):
             import datetime, random
-            return {
-                'dt': [datetime.datetime.utcnow()],
-                'id': [1],
-                'val': [random.randint(0, 100)],
-            }
+            return [{
+                'dt': datetime.datetime.utcnow(),
+                'id': 1,
+                'val': random.randint(0, 100),
+            }]
         ```
 
     3. Create a new pipe with your plugin as the connector and sync data into it.

@@ -40,9 +40,17 @@ Below is a list of common questions and issues you may encounter. If you have su
     If you are planning on integrating Meerschaum into your Python scripts, you can access actions directly via the `meerschaum.actions.actions` dictionary. Please consult [the Python package documentation](https://docs.meerschaum.io) for more information. Also, you might want to consider making your script into a [Meerschaum action by writing an action plugin](/reference/plugins/types-of-plugins/#action-plugins).
 
 ??? faq "Connectors don't work for `<database flavor>`!"
-    Although Connectors *should* work with any database flavor supported by `sqlalchemy` Engines, it is difficult to test against many database flavors. When bugs are encountered, please [open an issue](https://github.com/bmeares/Meerschaum/issues) and describe your configuration!
+    Connectors use `sqlalchemy` Engines under the hood, and here is the [list of supported database flavors](https://github.com/bmeares/Meerschaum/blob/5b91293b378a41aee82c85db541f46248baaac7c/meerschaum/connectors/sql/_create_engine.py#L146) (e.g. `mssql`, `mysql`, `oracle`, `postgresql`, `sqlite`, `duckdb`, `citus`, `cockroachdb`, `mariadb`, `timescaledb`). If your database flavor isn't listed, you might be able to use a supported flavor that shares a driver (e.g. `postgresql` is a commonly shared flavor).
 
-    In cases like Microsoft SQL server or Oracle SQL, make sure you have the appropriate drivers installed:
+    In cases like Microsoft SQL server or Oracle SQL, make sure you have the appropriate drivers installed. [Here is a utility script I wrote to automatically install Microsoft and Oracle drivers](https://raw.githubusercontent.com/bmeares/Meerschaum/main/scripts/drivers.sh) (currently supports Ubuntu / Debian and Fedora / CentOS / RHEL):
+
+    ```bash
+    curl -sf -L https://raw.githubusercontent.com/bmeares/Meerschaum/main/scripts/drivers.sh -o drivers.sh
+    chmod +x drivers.sh
+    sudo ./drivers.sh
+    ```
+
+    Here are the driver links if you want to manually install them:
 
       - [Microsoft SQL Server](https://docs.microsoft.com/en-us/sql/connect/odbc/linux-mac/installing-the-microsoft-odbc-driver-for-sql-server?view=sql-server-ver15)
       - [Oracle SQL](https://docs.oracle.com/en/database/oracle/oracle-database/19/cwlin/installing-odbc-drivers-for-linux-x86-64.html)

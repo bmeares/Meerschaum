@@ -9,4 +9,5 @@ nav:
   - "🔧 Data Analysis Tools": data-analysis-tools.md
   - ...
   - "➕ Plugins": plugins
+  - "🌳 Environment Variables": environment.md
   - "💼 Portable": meerschaum-portable.md
