@@ -407,7 +407,7 @@ def determine_version(
         try:
             os.chdir(module_parent_dir)
             _version = importlib_metadata.metadata(import_name)['Version']
-        except KeyError:
+        except Exception as e:
             _version = None
         finally:
             os.chdir(old_cwd)
