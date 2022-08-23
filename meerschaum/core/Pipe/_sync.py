@@ -116,6 +116,8 @@ def sync(
     """
     from meerschaum.utils.debug import dprint, _checkpoint
     from meerschaum.utils.warnings import warn, error
+    from meerschaum.connectors import custom_types
+    from meerschaum.plugins import Plugin
     import datetime
     import time
     if (callback is not None or error_callback is not None) and blocking:
@@ -123,11 +125,11 @@ def sync(
 
     _checkpoint(_total=2, **kw)
 
-    if (
-          not self.connector_keys.startswith('plugin:')
-          and not self.get_columns('datetime', error=False)
-    ):
-        return False, f"Cannot sync {self} without a datetime column."
+    #  if (
+          #  not self.connector_keys.startswith('plugin:')
+          #  and not self.get_columns('datetime', error=False)
+    #  ):
+        #  return False, f"Cannot sync {self} without a datetime column."
 
     ### NOTE: Setting begin to the sync time for Simple Sync.
     ### TODO: Add flag for specifying syncing method.
@@ -142,7 +144,12 @@ def sync(
 
     def _sync(
         p: 'meerschaum.Pipe',
-        df: Union['pd.DataFrame', Dict[str, List[Any]], InferFetch] = InferFetch,
+        df: Union[
+            'pd.DataFrame',
+            Dict[str, List[Any]],
+            List[Dict[str, Any]],
+            InferFetch
+        ] = InferFetch,
     ) -> SuccessTuple:
         if df is None:
             return (
@@ -172,9 +179,9 @@ def sync(
             except Exception as e:
                 return False, f"Unable to create the connector for {p}."
 
+            ### Activate and invoke `sync(pipe)` for plugin connectors with `sync` methods.
             try:
                 if p.connector.type == 'plugin' and p.connector.sync is not None:
-                    from meerschaum.plugins import Plugin
                     connector_plugin = Plugin(p.connector.label)
                     connector_plugin.activate_venv(debug=debug)
                     return_tuple = p.connector.sync(p, debug=debug, **kw)
@@ -193,21 +200,34 @@ def sync(
                     error(msg, silent=False)
                 return False, msg
 
-        ### default: fetch new data via the connector.
-        ### If new data is provided, skip fetching.
-        #  if df is None:
-            if p.connector is None:
-                return False, f"Cannot fetch data for {p} without a connector."
-            df = p.fetch(debug=debug, **kw)
+            ### Fetch the dataframe from the connector's `fetch()` method.
+            try:
+                ### If was added by `make_connector`, activate the plugin's virtual environment.
+                is_custom = p.connector.type in custom_types
+                plugin = (
+                    Plugin(p.connector.__module__.replace('plugins.', ''))
+                    if is_custom else None
+                )
+                if is_custom:
+                    plugin.activate_venv(debug=debug)
+
+                df = p.fetch(debug=debug, **kw)
+
+                if is_custom and deactivate_plugin_venv:
+                    plugin.deactivate_venv(debug=debug)
+            except Exception as e:
+                msg = f"Failed to fetch data from {p.connector}:\n    {e}"
             if df is None:
-                return False, f"Unable to fetch data for {p}."
+                return False, f"No data was fetched for {p}."
+            ### TODO: Depreciate async?
             if df is True:
                 return True, f"{p} is being synced in parallel."
 
         ### CHECKPOINT: Retrieved the DataFrame.
         _checkpoint(**kw)
+        ### Cast to a dataframe and ensure datatypes are what we expect.
+        df = self.enforce_dtypes(df, debug=debug)
         if debug:
-            df = self.enforce_dtypes(df, debug=debug)
             dprint(
                 "DataFrame to sync:\n"
                 + (str(df)[:255] + '...' if len(str(df)) >= 256 else str(df)),
@@ -293,10 +313,10 @@ def _determine_begin(
 
 def get_sync_time(
         self,
-        params : Optional[Dict[str, Any]] = None,
+        params: Optional[Dict[str, Any]] = None,
         newest: bool = True,
         round_down: bool = True,
-        debug : bool = False
+        debug: bool = False
     ) -> Union['datetime.datetime', None]:
     """
     Get the most recent datetime value for a Pipe.
@@ -325,20 +345,19 @@ def get_sync_time(
     from meerschaum.utils.warnings import error, warn
     if self.columns is None:
         warn(
-            f"No columns found for {self}. " +
-            "Pipe might not be registered or is missing columns in parameters."
+            f"No columns found in parameters for {self}.",
+            stack = False,
         )
-        return None
 
-    if 'datetime' not in self.columns:
+    if 'datetime' not in (self.columns or {}):
         warn(
-            f"'datetime' must be declared in parameters:columns for {self}.\n\n" +
-            f"You can add parameters for this pipe with the following command:\n\n" +
-            f"mrsm edit pipes -c {self.connector_keys} -m " +
-            f"{self.metric_key} -l " +
-            (f"[None]" if self.location_key is None else f"{self.location_key}")
+            f"'datetime' must be declared in parameters:columns for {self}.\n"
+            + f"    You can add parameters for this pipe with the following command:\n\n"
+            + f"    mrsm edit pipes -c {self.connector_keys} -m "
+            + f"{self.metric_key} -l "
+            + (f"[None]" if self.location_key is None else f"{self.location_key}"),
+            stack = False,
         )
-        return None
 
     return self.instance_connector.get_sync_time(
         self,
@@ -476,9 +495,12 @@ def filter_existing(
     delta_df = filter_unseen_df(backtrack_df, df, dtypes=self.dtypes, debug=debug)
 
     ### Separate new rows from changed ones.
-    dt_col = self.columns['datetime']
-    id_col = self.columns.get('id', None)
-    on_cols = [dt_col] + ([id_col] if id_col is not None else [])
+    dt_col = self.columns['datetime'] if self.columns and 'datetime' in self.columns else None
+    id_col = self.columns['id'] if self.columns and 'id' in self.columns else None
+    if dt_col:
+        on_cols = [dt_col] + ([id_col] if id_col is not None else [])
+    else:
+        on_cols = []
 
     joined_df = pd.merge(
         delta_df,
@@ -487,10 +509,10 @@ def filter_existing(
         on=on_cols,
         indicator=True,
         suffixes=('', '_old'),
-    )
+    ) if on_cols else delta_df
 
     ### Determine which rows are completely new.
-    new_rows_mask = (joined_df['_merge'] == 'left_only')
+    new_rows_mask = (joined_df['_merge'] == 'left_only') if on_cols else None
     cols = list(backtrack_df.columns)
 
     unseen_df = (
@@ -498,7 +520,7 @@ def filter_existing(
         .where(new_rows_mask)
         .dropna(how='all')[cols]
         .reset_index(drop=True)
-    )
+    ) if on_cols else delta_df
 
     ### Rows that have already been inserted but values have changed.
     update_df = (
@@ -506,6 +528,6 @@ def filter_existing(
         .where(~new_rows_mask)
         .dropna(how='all')[cols]
         .reset_index(drop=True)
-    )
+    ) if on_cols else None
 
     return unseen_df, update_df, delta_df

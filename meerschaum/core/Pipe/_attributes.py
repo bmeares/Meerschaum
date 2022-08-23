@@ -110,7 +110,7 @@ def dtypes(self) -> Union[Dict[str, Any], None]:
     If defined, return the `dtypes` dictionary defined in `meerschaum.Pipe.parameters`.
     """
     if self.parameters is None or self.parameters.get('dtypes', None) is None:
-        if '_dtypes' in self.__dict__:
+        if self.__dict__.get('_dtypes', None):
             return self._dtypes
         self._dtypes = self.infer_dtypes(persist=False)
         return self._dtypes
@@ -130,21 +130,21 @@ def dtypes(self, _dtypes: Dict[str, Any]) -> None:
         self._parameters['dtypes'] = _dtypes
 
 
-def get_columns(self, *args: str, error : bool = True) -> Tuple[str]:
+def get_columns(self, *args: str, error: bool = True) -> Union[str, Tuple[str]]:
     """
     Check if the requested columns are defined.
 
     Parameters
     ----------
-    *args : str :
+    *args: str
         The column names to be retrieved.
         
-    error : bool, default True:
+    error: bool, default True
         If `True`, raise an `Exception` if the specified column is not defined.
 
     Returns
     -------
-    A tuple of the same size of `args`.
+    A tuple of the same size of `args` or a `str` if `args` is a single argument.
 
     Examples
     --------
@@ -180,7 +180,7 @@ def get_columns_types(self, debug: bool = False) -> Union[Dict[str, str], None]:
 
     Parameters
     ----------
-    debug : bool, default False:
+    debug: bool, default False:
         Verbosity toggle.
 
     Returns
@@ -363,3 +363,14 @@ def target(self, _target: str) -> None:
         self._parameters['target'] = _target
 
 
+def guess_datetime(self) -> Union[str, None]:
+    """
+    Try to determine a pipe's datetime column.
+    """
+    dt_cols = [
+        col for col, typ in self.dtypes.items()
+        if typ.startswith('datetime')
+    ]
+    if not dt_cols:
+        return None
+    return dt_cols[0]    

@@ -51,11 +51,20 @@ def fetch(
         warn(f"No `fetch()` function defined for connector '{self.connector}'")
         return None
 
+    from meerschaum.connectors import custom_types
     from meerschaum.utils.debug import dprint, _checkpoint
-    if self.connector.type == 'plugin':
+    if (
+        self.connector.type == 'plugin'
+        or
+        self.connector.type in custom_types
+    ):
         from meerschaum.plugins import Plugin
         from meerschaum.utils.packages import activate_venv, deactivate_venv
-        connector_plugin = Plugin(self.connector.label)
+        plugin_name = (
+            self.connector.label if self.connector.type == 'plugin'
+            else self.connector.__module__.replace('plugins.', '')
+        )
+        connector_plugin = Plugin(plugin_name)
         connector_plugin.activate_venv(debug=debug)
     
     _chunk_hook = kw.pop('chunk_hook') if 'chunk_hook' in kw else None
@@ -71,7 +80,11 @@ def fetch(
         debug = debug,
         **kw
     )
-    if self.connector.type == 'plugin' and deactivate_plugin_venv:
+    if (
+        self.connector.type == 'plugin'
+        or
+        self.connector.type in custom_types
+    ) and deactivate_plugin_venv:
         connector_plugin.deactivate_venv(debug=debug)
     ### Return True if we're syncing in parallel, else continue as usual.
     if sync_chunks:

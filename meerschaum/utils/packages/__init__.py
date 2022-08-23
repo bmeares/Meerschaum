@@ -21,6 +21,7 @@ _import_module = importlib.import_module
 _import_hook_venv = None
 _locks = {
     '_pkg_resources_get_distribution': RLock(),
+    'import_versions': RLock(),
 }
 _checked_for_updates = set()
 
@@ -354,9 +355,11 @@ def determine_version(
     If multiple versions are found, it will trigger an import in a subprocess.
 
     """
-    if venv not in import_versions:
-        import_versions[venv] = {}
+    with _locks['import_versions']:
+        if venv not in import_versions:
+            import_versions[venv] = {}
     import re, os
+    old_cwd = os.getcwd()
     if debug:
         from meerschaum.utils.debug import dprint
     from meerschaum.utils.warnings import warn as warn_function
@@ -387,10 +390,33 @@ def determine_version(
 
     if len(_found_versions) == 1:
         _version = _found_versions[0]
-        import_versions[venv][import_name] = _version
+        with _locks['import_versions']:
+            import_versions[venv][import_name] = _version
         if debug:
             print(f"Found version {_version} for {import_name}.")
         return _found_versions[0]
+
+    if not _found_versions:
+        try:
+            import importlib.metadata as importlib_metadata
+        except ImportError:
+            importlib_metadata = attempt_import(
+                'importlib_metadata',
+                debug=debug, check_update=False
+            )
+        try:
+            os.chdir(module_parent_dir)
+            _version = importlib_metadata.metadata(import_name)['Version']
+        except KeyError:
+            _version = None
+        finally:
+            os.chdir(old_cwd)
+
+        if _version is not None:
+            with _locks['import_versions']:
+                import_versions[venv][import_name] = _version
+            return _version
+
     if debug:
         print(f'Found multiple versions for {import_name}: {_found_versions}')
 
