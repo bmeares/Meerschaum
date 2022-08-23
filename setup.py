@@ -43,7 +43,7 @@ setup_kw_args = {
     'author_email'                  : setup_cf['author_email'],
     'maintainer_email'              : setup_cf['maintainer_email'],
     'license'                       : setup_cf['license'],
-    'packages'                      : setuptools.find_packages(exclude=['*tests*']),
+    'packages'                      : setuptools.find_packages(exclude=['*test*']),
     'install_requires'              : extras['required'],
     'extras_require'                : extras,
     'entry_points'                  : {

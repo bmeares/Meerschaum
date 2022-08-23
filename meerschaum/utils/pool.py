@@ -29,22 +29,23 @@ def get_pool(
     """If the requested pool does not exist, instantiate it here.
     Pools are joined and closed on exit."""
     global pools
-    if pools is None:
-        with _locks['pools']:
+    with _locks['pools']:
+        if pools is None:
             pools = {}
 
     def build_pool(workers):
         from meerschaum.utils.warnings import warn
         from meerschaum.utils.packages import attempt_import
+        import importlib
         try:
             Pool = getattr(
-                attempt_import('multiprocessing.pool', warn=False, venv=None, lazy=False),
+                importlib.import_module('multiprocessing.pool'),
                 pool_class_name
             )
         except Exception as e:
             warn(e, stacklevel=3)
             Pool = getattr(
-                attempt_import('multiprocessing.pool', warn=False, venv=None, lazy=False),
+                importlib.import_module('multiprocessing.pool'),
                 'ThreadPool'
             )
 

@@ -119,6 +119,7 @@ packages: Dict[str, Dict[str, str]] = {
         'pandasgui'                  : 'pandasgui>=0.2.9',      
         'modin'                      : 'modin[ray]>=0.8.3',
         'nanoid'                     : 'nanoid>=2.0.0',
+        'importlib_metadata'         : 'importlib-metadata>=4.12.0',
     },
 }
 packages['sql'] = {

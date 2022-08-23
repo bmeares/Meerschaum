@@ -12,7 +12,7 @@ For ease of use, you can also import from the root `meerschaum` module:
 """
 
 from __future__ import annotations
-from meerschaum.utils.typing import Any, SuccessTuple, Union, Optional, Sequence, Mapping
+from meerschaum.utils.typing import Any, SuccessTuple, Union, Optional, Sequence, Mapping, Dict
 from meerschaum.utils.threading import Lock, RLock
 from meerschaum.utils.warnings import error, warn
 
@@ -26,14 +26,16 @@ __all__ = ("Connector", "SQLConnector", "APIConnector", "get_connector", "is_con
 ### store connectors partitioned by
 ### type, label for reuse
 connectors = {
-    'api'    : {},
-    'sql'    : {},
-    'mqtt'   : {},
-    'plugin' : {},
+    'api'   : {},
+    'sql'   : {},
+    'mqtt'  : {},
+    'plugin': {},
 }
 _locks = {
-    'connectors': RLock(),
-    'types': RLock(),
+    'connectors'               : RLock(),
+    'types'                    : RLock(),
+    'custom_types'             : RLock(),
+    '_loaded_plugin_connectors': RLock(),
 }
 attributes = {
     'api' : {
@@ -63,7 +65,9 @@ attributes = {
     },
 }
 ### Fill this with objects only when connectors are first referenced.
-types = {}
+types: Dict[str, Any] = {}
+custom_types: set = set()
+_loaded_plugin_connectors: bool = False
 
 def get_connector(
         type: str = None,
@@ -119,6 +123,11 @@ def get_connector(
     from meerschaum.connectors.parse import parse_instance_keys
     from meerschaum.config import get_config
     from meerschaum.config.static import _static_config
+    global _loaded_plugin_connectors
+    with _locks['_loaded_plugin_connectors']:
+        if not _loaded_plugin_connectors:
+            load_plugin_connectors()
+            _loaded_plugin_connectors = True
     if type is None and label is None:
         default_instance_keys = get_config('meerschaum', 'instance', patch=True)
         ### recursive call to get_connector
@@ -147,15 +156,15 @@ def get_connector(
         warn(f"Cannot create Connector of type '{type}'." + poss_msg, stack=False)
         return None
 
-    if len(types) == 0:
+    if 'sql' not in types:
         from meerschaum.connectors.mqtt import MQTTConnector
         from meerschaum.connectors.plugin import PluginConnector
         with _locks['types']:
             types.update({
-                'api'    : APIConnector,
-                'sql'    : SQLConnector,
-                'mqtt'   : MQTTConnector,
-                'plugin' : PluginConnector,
+                'api'   : APIConnector,
+                'sql'   : SQLConnector,
+                'mqtt'  : MQTTConnector,
+                'plugin': PluginConnector,
             })
     
     ### always refresh MQTT Connectors NOTE: test this!
@@ -199,7 +208,7 @@ def get_connector(
                 conn = types[type](label=label, debug=debug, **kw)
                 connectors[type][label] = conn
             except Exception as e:
-                warn(e, stack=False)
+                warn(f"Exception when creating connector '{type}:{label}'\n" + str(e), stack=False)
                 conn = None
         if conn is None:
             return None
@@ -247,3 +256,40 @@ def is_connected(keys: str, **kw) -> bool:
             return conn.test_connection(**kw)
     except Exception as e:
         return False
+
+
+def make_connector(
+        cls,
+    ):
+    """
+    Register a class as a `Connector`.
+    The `type` will be the lower case of the class name, without the suffix `connector`.
+    """
+    import re
+    typ = re.sub(r'connector$', '', cls.__name__.lower())
+    with _locks['types']:
+        types[typ] = cls
+    with _locks['custom_types']:
+        custom_types.add(typ)
+    if typ not in connectors:
+        with _locks['connectors']:
+            connectors[typ] = {}
+    return cls
+
+
+def load_plugin_connectors():
+    """
+    If a plugin makes use of the `make_connector` decorator,
+    load its module.
+    """
+    from meerschaum.plugins import get_plugins, import_plugins
+    to_import = []
+    for plugin in get_plugins():
+        with open(plugin.__file__, encoding='utf-8') as f:
+            text = f.read()
+        if 'make_connector' not in text:
+            to_import.append(plugin.name)
+    if not to_import:
+        return
+    import_plugins(*to_import) 
+
