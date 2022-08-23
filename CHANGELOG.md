@@ -4,6 +4,48 @@
 
 This is the current release cycle, so future features will be updated below.
 
+### v1.2.1
+
+- **Added the `@make_connector` decorator.**  
+  Plugins may now extend the base `Connector` class to provide custom connectors. For most cases, the built-in `plugin` connector should work fine. This addition opens up the internal connector system so that plugin authors may now add new types. See below for a minimal example of a new connector class:
+
+  ```python
+  # ~/.config/meerschaum/plugins/example.py
+
+  from meerschaum.connectors import make_connector, Connector
+
+  REQUIRED_ATTRIBUTES = {'username', 'password'}
+
+  @make_connector
+  class FooConnector(Connector):
+      
+      def __init__(self, label: str, **kw):
+          """
+          Instantiate the base class and verify the required attributes are present.
+          """
+          kw['label'] = label
+          super().__init__('foo', **kw)
+          self.verify_attributes(REQUIRED_ATTRIBUTES)
+
+      
+      def fetch(self, pipe, **kw):
+          """
+          Return a dataframe (or list of dicts / dict of lists).
+          The same as you would in a regular fetch plugin, except that now
+          we can store configuration within the connector itself.
+          """
+          return [{self.username: '2020-01-01'}]
+  ```
+
+- **Allow for omitting `datetime` column index.**  
+  The `datetime` column name is still highly recommended, but recent changes have allowed pipes to be synced without a dedicated datetime axis. Plenty of warnings will be thrown if you sync your pipes without specifying a datetime index. If a datetime column can be found, it will be used as the index.
+
+  ```python
+  import meerschaum as mrsm
+  ### This will work but throw warnings.
+  mrsm.Pipe('foo', 'bar').sync([{'a': 1}])
+  ```
+
 ### v1.2.0
 
 **Improvements**

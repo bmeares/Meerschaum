@@ -10,6 +10,7 @@ from meerschaum.utils.typing import (
     Union, Mapping, Any, Callable, Optional, List, Dict, SuccessTuple, Iterable, PipesDict, Tuple,
     InstanceConnector,
 )
+import meerschaum as mrsm
 
 def add_method_to_class(
         func: Callable[[Any], Any],
@@ -1611,8 +1612,8 @@ def separate_negation_values(
         If `None`, use the system default (`_`).
     """
     if negation_prefix is None:
-        from meerschaum.config.static import _static_config
-        negation_prefix = _static_config()['system']['fetch_pipes_keys']['negation_prefix']
+        from meerschaum.config.static import STATIC_CONFIG
+        negation_prefix = STATIC_CONFIG['system']['fetch_pipes_keys']['negation_prefix']
     _in_vals, _ex_vals = [], []
     for v in vals:
         if str(v).startswith(negation_prefix):
@@ -1632,4 +1633,3 @@ def flatten_list(list_: List[Any]) -> List[Any]:
             yield from flatten_list(item)
         else:
             yield item
-

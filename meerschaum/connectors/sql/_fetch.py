@@ -53,29 +53,40 @@ def fetch(
     A pandas DataFrame or `None`.
 
     """
+    import datetime
     from meerschaum.utils.debug import dprint
     from meerschaum.utils.warnings import warn, error
     from meerschaum.utils.sql import sql_item_name, dateadd_str
     from meerschaum.config import get_config
-    import datetime
 
-    if 'columns' not in pipe.parameters or 'fetch' not in pipe.parameters:
-        warn(f"Parameters for '{pipe}' must include 'columns' and 'fetch'", stack=False)
-        return None
+    definition = get_pipe_query(pipe)
+    btm = get_pipe_backtrack_minutes(pipe) 
 
-    dt_name = None
-    if 'datetime' not in pipe.columns:
-        warn(f"Missing datetime column for '{pipe}'. Will select all data instead.")
+    if not pipe.columns or 'datetime' not in pipe.columns:
+        _dt = pipe.guess_datetime()
+        dt_name = sql_item_name(_dt, self.flavor) if _dt else None
+        is_guess = True
     else:
-        dt_name = sql_item_name(pipe.get_columns('datetime'), self.flavor)
+        _dt = pipe.get_columns('datetime')
+        dt_name = sql_item_name(_dt, self.flavor)
+        is_guess = False
 
+    if begin is not None or end is not None:
+        if is_guess:
+            if _dt is None:
+                warn(
+                    f"Unable to determine a datetime column for {pipe}."
+                    + "\n    Ignoring begin and end...",
+                    stack = False,
+                )
+                begin, end = '', None
+            else:
+                warn(
+                    f"A datetime wasn't specified for {pipe}.\n"
+                    + f"    Using column \"{_dt}\" for datetime bounds...",
+                    stack = False
+                )
 
-    instructions = pipe.parameters['fetch']
-
-    try:
-        definition = instructions['definition']
-    except KeyError:
-        error("Cannot fetch without a definition.", KeyError)
 
     if 'order by' in definition.lower() and 'over' not in definition.lower():
         error("Cannot fetch with an ORDER clause in the definition")
@@ -88,9 +99,6 @@ def fetch(
     da = None
     if dt_name:
         ### default: do not backtrack
-        btm = 0
-        if 'backtrack_minutes' in instructions:
-            btm = instructions['backtrack_minutes']
         begin_da = dateadd_str(
             flavor=self.flavor, datepart='minute', number=(-1 * btm), begin=begin,
         ) if begin else None
@@ -100,7 +108,7 @@ def fetch(
 
     meta_def = (
         _simple_fetch_query(pipe) if (
-            (not pipe.columns.get('id', None))
+            (not (pipe.columns or {}).get('id', None))
             or (not get_config('system', 'experimental', 'join_fetch'))
         ) else _join_fetch_query(pipe, debug=debug, **kw)
     )
@@ -125,9 +133,53 @@ def fetch(
         df = parse_df_datetimes(df, debug=debug)
     return df
 
+
+def get_pipe_query(pipe) -> Union[str, None]:
+    """
+    Run through the possible keys for a pipe's query and return the first match.
+
+    - fetch, definition
+    - definition
+    - query
+    - sql
+    """
+    from meerschaum.utils.warnings import warn
+    if pipe.parameters.get('fetch', {}).get('definition', None):
+        definition = pipe.parameters['fetch']['definition']
+    elif pipe.parameters.get('definition', None):
+        definition = pipe.parameters['definition']
+    elif pipe.parameters.get('query', None):
+        definition = pipe.parameters['query']
+    elif pipe.parameters.get('sql', None):
+        definition = pipe.parameters['sql']
+    else:
+        warn(
+            f"Could not determine a SQL definition for {pipe}.\n"
+            + "    Set the key `query` in `pipe.parameters` to a valid SQL query."
+        )
+        return None
+    return definition
+
+
+def get_pipe_backtrack_minutes(pipe) -> Union[int, float]:
+    """
+    Return the first available value for the following parameter keys:
+    
+    - fetch, backtrack_minutes
+    - backtrack_minutes
+    """
+    if pipe.parameters.get('fetch', {}).get('backtrack_minutes', None):
+        btm = pipe.parameters['fetch']['backtrack_minutes']
+    elif pipe.parameters.get('backtrack_minutes', None):
+        btm = pipe.parameters['backtrack_minutes']
+    else:
+        btm = 0
+    return btm
+
+
 def _simple_fetch_query(pipe, debug: bool=False, **kw) -> str:
     """Build a fetch query from a pipe's definition."""
-    definition = pipe.parameters['fetch']['definition']
+    definition = get_pipe_query(pipe)
     return f"WITH definition AS ({definition}) SELECT * FROM definition"
 
 def _join_fetch_query(
@@ -174,7 +226,7 @@ def _join_fetch_query(
         )
     _sync_times_q = _sync_times_q[:(-1 * len('UNION ALL\n'))] + ")"
 
-    definition = pipe.parameters['fetch']['definition']
+    definition = get_pipe_query(pipe)
     query = f"""
     WITH definition AS ({definition}){_sync_times_q}
     SELECT definition.*
