@@ -176,8 +176,9 @@ def verify_venv(
     if not bin_path.exists() or current_python_versioned_name not in os.listdir(bin_path):
         init_venv(venv, verify=False, force=True, debug=debug)
         current_python_in_venv_path = pathlib.Path(venv_executable(venv=venv))
-        current_python_in_sys = pathlib.Path(venv_executable(venv=None))
-        current_python_in_sys.symlink_to(current_python_in_venv_path)
+        current_python_in_sys_path = pathlib.Path(venv_executable(venv=None))
+        if not current_python_in_venv_path.exists():
+            current_python_in_venv_path.symlink_to(current_python_in_sys_path)
 
     def get_python_version(python_path: pathlib.Path) -> Union[str, None]:
         """
