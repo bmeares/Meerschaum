@@ -97,6 +97,7 @@ class Pipe:
         parents,
         target,
         _target_legacy,
+        guess_datetime,
     )
     from ._show import show
     from ._edit import edit, edit_definition

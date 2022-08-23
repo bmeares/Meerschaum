@@ -93,6 +93,31 @@ def _ask_with_rowcounts(
     """
     from meerschaum.utils.prompt import yes_no
     from meerschaum.utils.misc import print_options
+    from meerschaum.utils.warnings import warn
+    for pipe in pipes:
+        if not pipe.columns or 'datetime' not in pipe.columns:
+            _dt = pipe.guess_datetime()
+            is_guess = True
+        else:
+            _dt = pipe.get_columns('datetime')
+            is_guess = False
+
+        if begin is not None or end is not None:
+            if is_guess:
+                if _dt is None:
+                    warn(
+                        f"No datetime could be determined for {pipe}!\n"
+                        + "    THIS WILL DELETE THE ENTIRE TABLE!",
+                        stack = False
+                    )
+                else:
+                    warn(
+                        f"A datetime wasn't specified for {pipe}.\n"
+                        + f"    Using column \"{_dt}\" for datetime bounds...",
+                        stack = False
+                    )
+
+
     pipes_rowcounts = {p: p.get_rowcount(begin=begin, end=end, debug=debug) for p in pipes} 
     print_options(
         [str(p) + f'\n{rc}\n' for p, rc in pipes_rowcounts.items()],
