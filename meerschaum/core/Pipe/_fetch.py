@@ -62,7 +62,7 @@ def fetch(
         from meerschaum.utils.packages import activate_venv, deactivate_venv
         plugin_name = (
             self.connector.label if self.connector.type == 'plugin'
-            else self.connector.__module__.replace('plugins.', '')
+            else self.connector.__module__.replace('plugins.', '').split('.')[0]
         )
         connector_plugin = Plugin(plugin_name)
         connector_plugin.activate_venv(debug=debug)

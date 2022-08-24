@@ -205,7 +205,7 @@ def sync(
                 ### If was added by `make_connector`, activate the plugin's virtual environment.
                 is_custom = p.connector.type in custom_types
                 plugin = (
-                    Plugin(p.connector.__module__.replace('plugins.', ''))
+                    Plugin(p.connector.__module__.replace('plugins.', '').split('.')[0])
                     if is_custom else None
                 )
                 if is_custom:
