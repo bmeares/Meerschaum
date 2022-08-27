@@ -112,7 +112,10 @@ def dtypes(self) -> Union[Dict[str, Any], None]:
     if self.parameters is None or self.parameters.get('dtypes', None) is None:
         if self.__dict__.get('_dtypes', None):
             return self._dtypes
-        self._dtypes = self.infer_dtypes(persist=False)
+        _dtypes = self.infer_dtypes(persist=False)
+        if not self.exists():
+            return _dtypes
+        self._dtypes = _dtypes
         return self._dtypes
 
     return self.parameters['dtypes']

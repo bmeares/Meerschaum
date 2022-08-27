@@ -13,7 +13,7 @@ from meerschaum.utils.typing import (
 )
 
 class InferFetch:
-    pass
+    MRSM_INFER_FETCH: bool = True
 
 def sync(
         self,
@@ -169,7 +169,7 @@ def sync(
         ### use that instead.
         ### NOTE: The DataFrame must be omitted for the plugin sync method to apply.
         ### If a DataFrame is provided, continue as expected.
-        if df is InferFetch:
+        if hasattr(df, 'MRSM_INFER_FETCH'):
             try:
                 if p.connector is None:
                     msg = f"{p} does not have a valid connector."
@@ -206,14 +206,17 @@ def sync(
                 is_custom = p.connector.type in custom_types
                 plugin = (
                     Plugin(p.connector.__module__.replace('plugins.', '').split('.')[0])
-                    if is_custom else None
+                    if is_custom else (
+                        Plugin(p.connector.label) if p.connector.type == 'plugin'
+                        else None
+                    )
                 )
-                if is_custom:
+                if plugin is not None:
                     plugin.activate_venv(debug=debug)
 
                 df = p.fetch(debug=debug, **kw)
 
-                if is_custom and deactivate_plugin_venv:
+                if plugin is not None and deactivate_plugin_venv:
                     plugin.deactivate_venv(debug=debug)
             except Exception as e:
                 msg = f"Failed to fetch data from {p.connector}:\n    {e}"

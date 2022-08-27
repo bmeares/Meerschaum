@@ -118,7 +118,6 @@ def api_plugin(function: Callable[[Any], Any]) -> Callable[[Any], Any]:
     return function
 
 
-_symlinked_internal_plugins: bool = False
 def import_plugins(
         *plugins_to_import: Union[str, List[str], None],
         warn: bool = True,
@@ -145,41 +144,68 @@ def import_plugins(
     from meerschaum.utils.misc import flatten_list
     from meerschaum.utils.warnings import error, warn as _warn
     from meerschaum.config.static import STATIC_CONFIG
+    from meerschaum.utils.venv import Venv, activate_venv, deactivate_venv, is_venv_active
     from meerschaum.config._paths import (
         PLUGINS_RESOURCES_PATH, PLUGINS_ARCHIVES_RESOURCES_PATH, PLUGINS_INIT_PATH,
         PLUGINS_INTERNAL_DIR_PATH, PLUGINS_INTERNAL_LOCK_PATH,
     )
-    global _symlinked_internal_plugins
 
     ### If the lock file exists, sleep for up to a second or until it's removed before continuing.
     if PLUGINS_INTERNAL_LOCK_PATH.exists():
+        lock_sleep_total     = STATIC_CONFIG['plugins']['lock_sleep_total']
+        lock_sleep_increment = STATIC_CONFIG['plugins']['lock_sleep_increment']
         lock_start = time.perf_counter()
-        while time.perf_counter() - lock_start < STATIC_CONFIG['plugins']['lock_sleep_total']:
-            time.sleep(STATIC_CONFIG['plugins']['lock_sleep_increment'])
+        while (
+            (time.perf_counter() - lock_start) < lock_sleep_total
+        ):
+            time.sleep(lock_sleep_increment)
             if not PLUGINS_INTERNAL_LOCK_PATH.exists():
+                break
+            try:
                 PLUGINS_INTERNAL_LOCK_PATH.unlink()
+            except Exception as e:
+                if warn:
+                    _warn(f"Error while removing lockfile {PLUGINS_INTERNAL_LOCK_PATH}:\n{e}")
                 break
 
     ### Begin locking from other processes.
-    PLUGINS_INTERNAL_LOCK_PATH.touch()
+    try:
+        PLUGINS_INTERNAL_LOCK_PATH.touch()
+    except Exception as e:
+        if warn:
+            _warn(f"Unable to create lockfile {PLUGINS_INTERNAL_LOCK_PATH}:\n{e}")
 
     with _locks['internal_plugins']:
-        if not _symlinked_internal_plugins:
-            if PLUGINS_INTERNAL_DIR_PATH.exists():
-                if pathlib.Path(
-                    os.path.realpath(PLUGINS_INTERNAL_DIR_PATH)
-                ) != PLUGINS_RESOURCES_PATH:
+        if PLUGINS_INTERNAL_DIR_PATH.exists():
+            if pathlib.Path(
+                os.path.realpath(PLUGINS_INTERNAL_DIR_PATH)
+            ) != PLUGINS_RESOURCES_PATH:
+                try:
                     PLUGINS_INTERNAL_DIR_PATH.unlink()
+                except Exception as e:
+                    if warn:
+                        _warn(f"Unable to remove symlink {PLUGINS_INTERNAL_DIR_PATH}:\n    {e}")
 
-            if not PLUGINS_INTERNAL_DIR_PATH.exists():
+        if not PLUGINS_INTERNAL_DIR_PATH.exists():
+            try:
                 PLUGINS_INTERNAL_DIR_PATH.symlink_to(PLUGINS_RESOURCES_PATH)
-            _symlinked_internal_plugins = True
+            except Exception as e:
+                if warn:
+                    _warn(
+                        f"Failed to create symlink {PLUGINS_INTERNAL_DIR_PATH} "
+                        + "to {PLUGINS_RESOURCES_PATH}:\n    {e}"
+                    )
 
     ### Release symlink lock file in case other processes need it.
-    PLUGINS_INTERNAL_LOCK_PATH.unlink()
+    try:
+        PLUGINS_INTERNAL_LOCK_PATH.unlink()
+    except Exception as e:
+        if warn:
+            _warn(f"Error clearning up lockfile {PLUGINS_INTERNAL_LOCK_PATH}:\n{e}")
 
     try:
-        PLUGINS_INIT_PATH.touch()
+        if not PLUGINS_INIT_PATH.exists():
+            PLUGINS_INIT_PATH.touch()
     except Exception as e:
         error(f"Failed to create the file '{PLUGINS_INIT_PATH}':\n{e}")
     plugins_to_import = list(plugins_to_import)
@@ -189,37 +215,70 @@ def import_plugins(
             __path__.append(str(PLUGINS_INTERNAL_DIR_PATH.parent))
 
     with _locks['sys.path']:
+
+        ### Since plugins may depend on other plugins,
+        ### we need to activate the virtual environments for library plugins.
+        ### This logic exists in `Plugin.activate_venv()`,
+        ### but that code requires the plugin's module to already be imported.
+        ### It's not a guarantee of correct activation order,
+        ### e.g. if a library plugin pins a specific package and another 
+        plugins_names = get_plugins_names()
+        already_active_venvs = [is_venv_active(plugin_name) for plugin_name in plugins_names]
+
         if not sys.path or sys.path[0] != str(PLUGINS_INTERNAL_DIR_PATH.parent):
             sys.path.insert(0, str(PLUGINS_INTERNAL_DIR_PATH.parent))
 
         if not plugins_to_import:
+            for plugin_name in plugins_names:
+                activate_venv(plugin_name)
             try:
-                plugins = importlib.import_module(PLUGINS_INTERNAL_DIR_PATH.stem)
+                imported_plugins = importlib.import_module(PLUGINS_INTERNAL_DIR_PATH.stem)
             except ImportError as e:
-                warn(e)
-                plugins = None
-        else:
-            plugins = []
-            for plugin_name in flatten_list(plugins_to_import):
-                try:
-                    plugins.append(
-                        importlib.import_module(
-                            f'{PLUGINS_INTERNAL_DIR_PATH.stem}.{plugin_name}'
-                        )
-                    )
-                except Exception as e:
-                    _warn(f"Failed to import plugin '{plugin_name}':\n    {e}", stack=False)
-                    plugins.append(None)
+                _warn(f"Failed to import the plugins module:\n    {e}")
+                import traceback
+                traceback.print_exc()
+                imported_plugins = None
+            for plugin_name in plugins_names:
+                if plugin_name in already_active_venvs:
+                    continue
+                deactivate_venv(plugin_name)
 
-        if plugins is None and warn:
+        else:
+            imported_plugins = []
+            for plugin_name in flatten_list(plugins_to_import):
+                plugin = Plugin(plugin_name)
+                try:
+                    with Venv(plugin):
+                        imported_plugins.append(
+                            importlib.import_module(
+                                f'{PLUGINS_INTERNAL_DIR_PATH.stem}.{plugin_name}'
+                            )
+                        )
+                except Exception as e:
+                    _warn(
+                        f"Failed to import plugin '{plugin_name}':\n    "
+                        + f"{e}\n\nHere's a stacktrace:",
+                        stack = False,
+                    )
+                    from meerschaum.utils.formatting import get_console
+                    get_console().print_exception(
+                        suppress = [
+                            'meerschaum/plugins/__init__.py',
+                            importlib,
+                            importlib._bootstrap,
+                        ]
+                    )
+                    imported_plugins.append(None)
+
+        if imported_plugins is None and warn:
             _warn(f"Failed to import plugins.", stacklevel=3)
 
         if str(PLUGINS_INTERNAL_DIR_PATH.parent) in sys.path:
             sys.path.remove(str(PLUGINS_INTERNAL_DIR_PATH.parent))
 
-    if isinstance(plugins, list):
-        return (plugins[0] if len(plugins) == 1 else tuple(plugins))
-    return plugins
+    if isinstance(imported_plugins, list):
+        return (imported_plugins[0] if len(imported_plugins) == 1 else tuple(imported_plugins))
+    return imported_plugins
 
 
 def load_plugins(debug: bool = False, shell: bool = False) -> None:

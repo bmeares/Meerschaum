@@ -62,6 +62,7 @@ def sh(
         process = subprocess.Popen(
             command_list,
             shell = False,
+            env = os.environ,
         )
         exit_code = process.wait()
     except FileNotFoundError:

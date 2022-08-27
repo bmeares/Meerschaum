@@ -121,15 +121,6 @@ def is_valid_connector_keys(
         keys : str
     ) -> bool:
     """Verify a connector_keys string references a valid connector.
-
-    Parameters
-    ----------
-    keys : str :
-        
-
-    Returns
-    -------
-
     """
     try:
         success = parse_connector_keys(keys, construct=False) is not None

@@ -18,6 +18,7 @@ def os(
     """
     Launch a subprocess and read its output to stdout.
     """
+    import os as _os
     from meerschaum.config import get_config
 
     import subprocess
@@ -53,7 +54,8 @@ def os(
         command_list,
         shell = False,
         stdout = capture_stdout,
-        stderr = capture_stderr
+        stderr = capture_stderr,
+        env = _os.environ,
     )
 
     try:

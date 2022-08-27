@@ -41,7 +41,6 @@ packages: Dict[str, Dict[str, str]] = {
         'dateutil'                   : 'python-dateutil>=2.7.5',
         'requests'                   : 'requests>=2.23.0',
         'binaryornot'                : 'binaryornot>=0.4.4',
-        'dill'                       : 'dill>=0.3.3',
         'pyvim'                      : 'pyvim>=3.0.2',
         'aiofiles'                   : 'aiofiles>=0.6.0',
         'packaging'                  : 'packaging>=21.3.0',
@@ -51,7 +50,7 @@ packages: Dict[str, Dict[str, str]] = {
         'psutil'                     : 'psutil>=5.8.0',
         'watchgod'                   : 'watchgod>=0.7.0',
         'virtualenv'                 : 'virtualenv>=20.1.0',
-        'redengine'                  : 'redengine>=2.0.1',
+        'rocketry'                   : 'rocketry>=2.3.0',
     },
     'iot': {
         'paho'                       : 'paho-mqtt>=1.5.1',
@@ -132,6 +131,7 @@ packages['sql'] = {
     'databases'                      : 'databases>=0.4.0',
     'aiosqlite'                      : 'aiosqlite>=0.16.0',
     'asyncpg'                        : 'asyncpg>=0.21.0',
+    'dill'                           : 'dill>=0.3.3',
 }
 packages['sql'].update(packages['drivers'])
 packages['dash'] = {
