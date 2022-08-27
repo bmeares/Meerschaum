@@ -10,6 +10,12 @@ allows Pipes to have connectors of type 'plugin'.
 from meerschaum.connectors import Connector
 
 class PluginConnector(Connector):
+    """
+    The `PluginConnector` allows plugins' modules to act as connectors by implementing
+    a `fetch()` or `sync()` class + other special functions.
+    See the documentation for more details:
+    https://meerschaum.io/reference/plugins/writing-plugins/#functions
+    """
 
     def __init__(
         self,

@@ -75,6 +75,7 @@ class Plugin:
     def repo_connector(self):
         """
         Return the repository connector for this plugin.
+        NOTE: This imports the `connectors` module, which imports certain plugin modules.
         """
         if self._repo_connector is None:
             from meerschaum.connectors.parse import parse_repo_keys
@@ -164,15 +165,16 @@ class Plugin:
         -------
         A `bool` indicating whether a plugin exists and is successfully imported.
         """
-        if not self.__file__:
-            return False
-        try:
-            _installed = (
-                self.module is not None and self.__file__ is not None
-            ) if try_import else (self.__file__ is not None)
-        except ModuleNotFoundError as e:
-            _installed = False
-        return _installed
+        #  if not self.__file__:
+            #  return False
+        return self.__file__ is not None
+        #  try:
+            #  _installed = (
+                #  self.__dict__.get('_module', None) is not None and self.__file__ is not None
+            #  ) if try_import else (self.__file__ is not None)
+        #  except ModuleNotFoundError as e:
+            #  _installed = False
+        #  return _installed
 
 
     def make_tar(self, debug: bool = False) -> pathlib.Path:
@@ -599,6 +601,55 @@ class Plugin:
         """
         if '_required' in self.__dict__:
             return self._required
+
+        ### If the plugin has not yet been imported,
+        ### infer the dependencies from the source text.
+        ### This is not super robust, and it doesn't feel right
+        ### having multiple versions of the logic.
+        ### This is necessary when determining the activation order
+        ### without having import the module.
+        ### For consistency's sake, the module-less method does not cache the requirements.
+        if self.__dict__.get('_module', None) is None:
+            with open(self.__file__, 'r', encoding='utf-8') as f:
+                text = f.read()
+
+            if 'required' not in text:
+                return []
+
+            ### This has some limitations:
+            ### It relies on `required` being manually declared.
+            ### We lose the ability to dynamically alter the `required` list,
+            ### which is why we've kept the module-reliant method below.
+            import ast, re
+            ### NOTE: This technically would break 
+            ### if `required` was the very first line of the file.
+            req_start_match = re.search(r'\nrequired(\s?)=', text)
+            if not req_start_match:
+                return []
+            req_start = req_start_match.start()
+            req_end   = req_start + 1 + text[req_start:].find(']')
+            if req_end == -1:
+                return []
+            req_text = (
+                text[req_start:req_end]
+                .lstrip()
+                .replace('required', '', 1)
+                .lstrip()
+                .replace('=', '', 1)
+                .lstrip()
+            )
+            try:
+                required = ast.literal_eval(req_text)
+            except Exception as e:
+                warn(
+                    f"Unable to determine requirements for plugin '{self.name}' "
+                    + "without importing the module.\n"
+                    + "    This may be due to dynamically setting the global `required` list.\n"
+                    + f"    {e}"
+                )
+                return []
+            return required
+
         import inspect
         self.activate_venv(dependencies=False, debug=debug)
         required = []
@@ -616,30 +667,30 @@ class Plugin:
         Return a list of required Plugin objects.
         """
         from meerschaum.utils.warnings import warn
-        from meerschaum.config.static import _static_config
-        from meerschaum.connectors.parse import parse_repo_keys
+        from meerschaum.config import get_config
+        from meerschaum.config.static import STATIC_CONFIG
         plugins = []
         _deps = self.get_dependencies(debug=debug)
-        sep = _static_config()['plugins']['repo_separator']
+        sep = STATIC_CONFIG['plugins']['repo_separator']
         plugin_names = [
             _d[len('plugin:'):] for _d in _deps
             if _d.startswith('plugin:') and len(_d) > len('plugin:')
         ]
+        default_repo_keys = get_config('meerschaum', 'default_repository')
         for _plugin_name in plugin_names:
             if sep in _plugin_name:
                 try:
                     _plugin_name, _repo_keys = _plugin_name.split(sep)
-                    _rc = parse_repo_keys(_repo_keys)
                 except Exception as e:
+                    _repo_keys = default_repo_keys
                     warn(
                         f"Invalid repo keys for required plugin '{_plugin_name}'.\n    "
-                        + f"Will try to use '{self.repo_connector}' instead.",
+                        + f"Will try to use '{_repo_keys}' instead.",
                         stack = False,
                     )
-                    _rc = self.repo_connector
             else:
-                _rc = self.repo_connector
-            plugins.append(Plugin(_plugin_name, repo_connector=_rc))
+                _repo_keys = default_repo_keys
+            plugins.append(Plugin(_plugin_name, repo=_repo_keys))
         return plugins
 
 
@@ -651,7 +702,7 @@ class Plugin:
         return [_d for _d in _deps if not _d.startswith('plugin:')]
 
 
-    def activate_venv(self, dependencies: bool=True, debug: bool=False) -> bool:
+    def activate_venv(self, dependencies: bool=True, debug: bool=False, **kw) -> bool:
         """
         Activate the virtual environments for the plugin and its dependencies.
 
@@ -670,23 +721,23 @@ class Plugin:
 
         if dependencies:
             for plugin in self.get_required_plugins(debug=debug):
-                plugin.activate_venv(debug=debug)
+                plugin.activate_venv(debug=debug, **kw)
 
         vtp = venv_target_path(self.name, debug=debug)
         venv_meerschaum_path = vtp / 'meerschaum'
-        if not venv_meerschaum_path.exists():
-            venv_meerschaum_path.symlink_to(PACKAGE_ROOT_PATH)
-        elif (
-            venv_meerschaum_path.is_symlink()
-            and
-            pathlib.Path(os.path.realpath(venv_meerschaum_path)) != PACKAGE_ROOT_PATH
-        ):
-            venv_meerschaum_path.symlink_to(PACKAGE_ROOT_PATH)
 
-        return activate_venv(self.name, debug=debug)
+        try:
+            if venv_meerschaum_path.is_symlink():
+                if pathlib.Path(os.path.realpath(venv_meerschaum_path)) != PACKAGE_ROOT_PATH:
+                    venv_meerschaum_path.unlink()
+                    venv_meerschaum_path.symlink_to(PACKAGE_ROOT_PATH)
+        except Exception as e:
+            warn(f"Unable to create symlink {venv_meerschaum_path} to {PACKAGE_ROOT_PATH}:\n{e}")
+
+        return activate_venv(self.name, debug=debug, **kw)
 
 
-    def deactivate_venv(self, dependencies: bool=True, debug: bool = False) -> bool:
+    def deactivate_venv(self, dependencies: bool=True, debug: bool = False, **kw) -> bool:
         """
         Deactivate the virtual environments for the plugin and its dependencies.
 
@@ -700,10 +751,10 @@ class Plugin:
         A bool indicating success.
         """
         from meerschaum.utils.packages import deactivate_venv
-        success = deactivate_venv(self.name, debug=debug)
+        success = deactivate_venv(self.name, debug=debug, **kw)
         if dependencies:
             for plugin in self.get_required_plugins(debug=debug):
-                plugin.deactivate_venv(debug=debug)
+                plugin.deactivate_venv(debug=debug, **kw)
         return success
 
 
@@ -738,7 +789,6 @@ class Plugin:
         from meerschaum.utils.debug import dprint
         from meerschaum.utils.warnings import warn, info
         from meerschaum.connectors.parse import parse_repo_keys
-        from meerschaum.config.static import _static_config
         _deps = self.get_dependencies(debug=debug)
         if not _deps and self.requirements_file_path is None:
             return True
@@ -832,8 +882,8 @@ class Plugin:
         """
         Include the repo keys with the plugin's name.
         """
-        from meerschaum.config.static import _static_config
-        sep = _static_config()['plugins']['repo_separator']
+        from meerschaum.config.static import STATIC_CONFIG
+        sep = STATIC_CONFIG['plugins']['repo_separator']
         return self.name + sep + str(self.repo_connector)
 
 

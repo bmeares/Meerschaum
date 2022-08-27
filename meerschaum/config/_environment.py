@@ -32,7 +32,7 @@ def apply_environment_config(env_var: str) -> None:
         return
     from meerschaum.utils.misc import string_to_dict
     try:
-        _patch = string_to_dict(str(os.environ[env_var]))
+        _patch = string_to_dict(str(os.environ[env_var]).lstrip())
     except Exception as e:
         _patch = None
     error_msg = (

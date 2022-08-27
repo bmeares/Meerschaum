@@ -458,7 +458,10 @@ def to_sql(
     from meerschaum.utils.warnings import error
     import warnings
     if name is None:
-        error("Name must not be None to submit to the SQL server")
+        error(f"Name must not be `None` to insert data into {self}.")
+
+    ### We're requiring `name` to be positional, and sometimes it's passed in from background jobs.
+    kw.pop('name', None)
 
     from meerschaum.utils.sql import sql_item_name, table_exists
     from meerschaum.connectors.sql._create_engine import flavor_configs

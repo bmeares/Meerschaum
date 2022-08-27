@@ -71,6 +71,9 @@ def run_process(
         kw['stdout'] = subprocess.PIPE
         kw['stderr'] = subprocess.STDOUT
 
+    if 'env' not in kw:
+        kw['env'] = os.environ
+
     user_preexec_fn = kw.get("preexec_fn", None)
 
     if foreground:

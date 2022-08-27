@@ -11,7 +11,7 @@ from meerschaum.utils.typing import SuccessTuple
 def register(
         self,
         debug: bool = False
-    ):
+    ) -> SuccessTuple:
     """
     Register a new Pipe along with its attributes.
 

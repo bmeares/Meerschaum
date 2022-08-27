@@ -35,7 +35,7 @@ class Venv:
             venv: Union[str, 'meerschaum.plugins.Plugin', None] = 'mrsm',
             debug: bool = False,
         ) -> None:
-        from meerschaum.utils.venv import activate_venv, deactivate_venv
+        from meerschaum.utils.venv import activate_venv, deactivate_venv, active_venvs
         ### For some weird threading issue,
         ### we can't use `isinstance` here.
         if 'meerschaum.plugins._Plugin' in str(type(venv)):
@@ -49,6 +49,8 @@ class Venv:
             self._deactivate = deactivate_venv
             self._kwargs = {'venv': venv}
         self._debug = debug
+        ### In case someone calls `deactivate()` before `activate()`.
+        self._kwargs['previously_active_venvs'] = active_venvs.copy()
 
 
     def activate(self, debug: bool = False) -> bool:
@@ -57,6 +59,8 @@ class Venv:
         If a `meerschaum.plugins.Plugin` was provided, its dependent virtual environments
         will also be activated.
         """
+        from meerschaum.utils.venv import active_venvs
+        self._kwargs['previously_active_venvs'] = active_venvs.copy()
         return self._activate(debug=(debug or self._debug), **self._kwargs)
 
 
