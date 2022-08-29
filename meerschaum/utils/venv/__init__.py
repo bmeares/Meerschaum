@@ -30,7 +30,8 @@ active_venvs = set()
 def activate_venv(
         venv: Optional[str] = 'mrsm',
         color : bool = True,
-        debug: bool = False
+        debug: bool = False,
+        **kw
     ) -> bool:
     """
     Create a virtual environment (if it doesn't exist) and add it to `sys.path` if necessary.
@@ -77,7 +78,9 @@ def activate_venv(
 def deactivate_venv(
         venv: str = 'mrsm',
         color : bool = True,
-        debug: bool = False
+        debug: bool = False,
+        previously_active_venvs: Union['set[str]', List[str], None] = None,
+        **kw
     ) -> bool:
     """
     Remove a virtual environment from `sys.path` (if it's been activated).
@@ -104,10 +107,17 @@ def deactivate_venv(
 
     if debug:
         from meerschaum.utils.debug import dprint
+
+    if previously_active_venvs and venv in previously_active_venvs:
+        if debug:
+            dprint(f"Ignore call to deactivate virtual environment '{venv}'...", color=color)
+        return True
+
+    if debug:
         dprint(f"Deactivating virtual environment '{venv}'...", color=color)
 
-    if venv in active_venvs:
-        with LOCKS['active_venvs']:
+    with LOCKS['active_venvs']:
+        if venv in active_venvs:
             active_venvs.remove(venv)
 
     if sys.path is None:
@@ -173,12 +183,26 @@ def verify_venv(
         + ('' if platform.system() != 'Windows' else '.exe')
     )
 
-    if not bin_path.exists() or current_python_versioned_name not in os.listdir(bin_path):
+    if not (bin_path / current_python_versioned_name).exists():
         init_venv(venv, verify=False, force=True, debug=debug)
         current_python_in_venv_path = pathlib.Path(venv_executable(venv=venv))
         current_python_in_sys_path = pathlib.Path(venv_executable(venv=None))
         if not current_python_in_venv_path.exists():
-            current_python_in_venv_path.symlink_to(current_python_in_sys_path)
+            if current_python_in_venv_path.is_symlink():
+                try:
+                    current_python_in_venv_path.unlink()
+                except Exception as e:
+                    print(f"Unable to remove symlink {current_python_in_venv_path}:\n{e}")
+            try:
+                current_python_in_venv_path.symlink_to(current_python_in_sys_path)
+            except Exception as e:
+                print(
+                    f"Unable to create symlink {current_python_in_venv_path} "
+                    + f"to {current_python_in_sys_path}."
+                )
+        files_to_inspect = sorted(os.listdir(bin_path), reverse=True)
+    else:
+        files_to_inspect = [current_python_versioned_name]
 
     def get_python_version(python_path: pathlib.Path) -> Union[str, None]:
         """
@@ -186,6 +210,8 @@ def verify_venv(
         """
         try:
             ### It might be a broken symlink, so skip on errors.
+            if debug:
+                print(f"Getting python version for {python_path}")
             proc = run_process(
                 [str(python_path), '-V'],
                 as_proc = True,
@@ -194,11 +220,16 @@ def verify_venv(
             stdout, stderr = proc.communicate(timeout=0.1)
         except Exception as e:
             ### E.g. the symlink may be broken.
+            if python_path.is_symlink():
+                try:
+                    python_path.unlink()
+                except Exception as _e:
+                    print(f"Unable to remove broken symlink {python_path}:\n{e}\n{_e}")
             return None
         return stdout.decode('utf-8').strip().replace('Python ', '')
 
     ### Ensure the versions are symlinked correctly.
-    for filename in os.listdir(bin_path):
+    for filename in files_to_inspect:
         if not filename.startswith('python'):
             continue
         python_path = bin_path / filename
@@ -399,6 +430,7 @@ def venv_exec(
     If `with_extras` is `True`, return a tuple of the exit code, stdout bytes, and stderr bytes.
 
     """
+    import os
     import subprocess
     from meerschaum.utils.debug import dprint
     executable = venv_executable(venv=venv)
@@ -406,10 +438,15 @@ def venv_exec(
     if debug:
         dprint(str(cmd_list))
     if not with_extras and not as_proc:
-        return subprocess.call(cmd_list) == 0
+        return subprocess.call(cmd_list, env=os.environ) == 0
 
     stdout, stderr = (None, None) if not capture_output else (subprocess.PIPE, subprocess.PIPE)
-    process = subprocess.Popen(cmd_list, stdout=stdout, stderr=stderr)
+    process = subprocess.Popen(
+        cmd_list,
+        stdout = stdout,
+        stderr = stderr,
+        env = os.environ,
+    )
     if as_proc:
         return process
     stdout, stderr = process.communicate()

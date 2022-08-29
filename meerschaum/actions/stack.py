@@ -119,7 +119,7 @@ def stack(
     stderr = stdout
     proc = subprocess.Popen(
         ['docker', 'compose'] + cmd_list, cwd=STACK_COMPOSE_PATH.parent,
-        stdout=stdout, stderr=stderr,
+        stdout=stdout, stderr=stderr, env=os.environ,
     ) if has_builtin_compose else run_python_package(
         'compose', args=cmd_list, cwd=STACK_COMPOSE_PATH.parent, venv=_compose_venv,
         capture_output=_capture_output, as_proc=True,

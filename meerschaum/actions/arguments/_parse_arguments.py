@@ -79,7 +79,11 @@ def parse_arguments(sysargs: List[str]) -> Dict[str, Any]:
             if a.startswith('-'):
                 break
             _action.append(a)
-        args_dict = {'action': _action, 'sysargs': sysargs, 'text': shlex.join(sysargs)}
+        args_dict = {'action': _action, 'sysargs': sysargs}
+        try:
+            args_dict['text'] = shlex.join(sysargs)
+        except Exception as _e:
+            args_dict['text'] = ' '.join(sysargs)
         unknown = []
 
     false_flags = [arg for arg, val in args_dict.items() if val is False]

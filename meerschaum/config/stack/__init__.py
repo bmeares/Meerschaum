@@ -106,7 +106,7 @@ default_docker_compose_config = {
             'restart' : 'always',
             'image' : 'timescale/timescaledb:' + env_dict['TIMESCALEDB_VERSION'],
             'ports' : [
-                f'{db_port}:{db_port}',
+                f'{db_port}:5432',
             ],
             'hostname' : f'{db_hostname}',
             'volumes' : [

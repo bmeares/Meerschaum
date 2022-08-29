@@ -29,17 +29,28 @@ def schedule_function(
         The frequency at which `function` should be executed (e.g. `'daily'`).
 
     """
+    import warnings
     from meerschaum.utils.packages import attempt_import
     from meerschaum.utils.misc import filter_keywords
+    from concurrent.futures._base import CancelledError
     kw['debug'] = debug
     kw = filter_keywords(function, **kw)
 
     def _wrapper():
         return function(*args, **kw)
 
-    redengine = attempt_import('redengine', debug=debug)
-    app = redengine.RedEngine()
-    FuncTask = redengine.tasks.FuncTask
-    task = FuncTask(_wrapper, start_cond=frequency)
-    app.session.add_task(task)
-    return app.run(debug=debug)
+    rocketry = attempt_import('rocketry', debug=debug, lazy=False)
+    try:
+        app = rocketry.Rocketry()
+        FuncTask = rocketry.tasks.FuncTask
+        with warnings.catch_warnings():
+            warnings.filterwarnings('ignore', 'Task\'s session not defined.')
+            task = FuncTask(_wrapper, start_cond=frequency)
+            app.session.add_task(task)
+        return app.run(debug=debug)
+    except (KeyboardInterrupt, CancelledError):
+        try:
+            app.session.shut_down(force=True)
+        except CancelledError:
+            pass
+        return None
