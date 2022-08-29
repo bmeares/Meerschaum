@@ -101,6 +101,8 @@ def parse_uri(uri: str) -> Dict[str, Any]:
     parser = sqlalchemy.engine.url._parse_rfc1738_args
     params = parser(uri).translate_connect_args()
     params['flavor'] = uri.split(':')[0].split('+')[0]
+    if params['flavor'] == 'postgres':
+        params['flavor'] = 'postgresql'
     if '?' in uri:
         parsed_uri = urlparse(uri)
         for key, value in parse_qs(parsed_uri.query).items():

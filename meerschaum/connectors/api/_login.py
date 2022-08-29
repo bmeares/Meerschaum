@@ -43,7 +43,7 @@ def login(
     else:
         msg = (
             f"Failed to log into '{self}' as user '{login_data['username']}'.\n" +
-            f"   Please verify login details for connector '{self}'."
+            f"     Please verify login details for connector '{self}'."
         )
         if warn:
             _warn(msg, stack=False)

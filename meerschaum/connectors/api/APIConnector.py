@@ -17,6 +17,9 @@ required_attributes = {
 }
 
 class APIConnector(Connector):
+    """
+    Connect to a Meerschaum API instance.
+    """
 
     from ._delete import delete
     from ._post import post
@@ -82,7 +85,14 @@ class APIConnector(Connector):
             self.protocol = 'http'
         if 'port' not in self.__dict__:
             self.port = 8000
-        self.verify_attributes(required_attributes)
+        if 'uri' not in self.__dict__:
+            self.verify_attributes(required_attributes)
+        else:
+            from meerschaum.connectors.sql import SQLConnector
+            conn_attrs = SQLConnector.parse_uri(self.__dict__['uri'])
+            if 'host' not in conn_attrs:
+                raise Exception(f"Invalid URI for '{self}'.")
+            self.__dict__.update(conn_attrs)
         self.url = (
             self.protocol + '://' +
             self.host + ':' +

@@ -1409,14 +1409,14 @@ def items_str(
     and_str: str, default 'and'
         If `and_` is True, insert this string where 'and' normally would in and English list.
 
-    oxford_comma :
+    oxford_comma: bool, default True
         If `True`, include the Oxford Comma (comma before the final 'and').
         Only applies when `and_` is `True`.
 
-    spaces :
+    spaces: bool, default True
         If `True`, separate items with `space_str`
 
-    space_str :
+    space_str: str, default ' '
         If `spaces` is `True`, separate items with this string.
 
     Returns
