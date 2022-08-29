@@ -113,19 +113,21 @@ def apply_connector_uri(env_var: str) -> None:
     matched = re.match(uri_regex, env_var)
     groups = matched.groups()
     typ, label = groups[0].lower(), groups[1].lower()
-    uri = search_and_substitute_config({'uri': os.environ[env_var]})['uri']
-    msg = f"An invalid URI was set for environment variable '{env_var}'."
-    try:
-        conn = get_connector(typ, label, uri=uri)
-    except Exception as e:
-        print(msg)
-        return
-    try:
-        uri = conn.URI
-    except Exception as e:
-        print(msg)
-
-    _config()['meerschaum']['connectors'][typ][label] = {'uri': uri}
+    uri = os.environ[env_var]
+    cf = _config()
+    if 'meerschaum' not in cf:
+        cf['meerschaum'] = {}
+    if 'connectors' not in cf['meerschaum']:
+        cf['meerschaum']['connectors'] = {}
+    if typ not in cf['meerschaum']['connectors']:
+        cf['meerschaum']['connectors'][typ] = {}
+    cf['meerschaum']['connectors'][typ][label] = {'uri': uri}
+    #  set_config(
+        #  apply_patch_to_config(
+            #  {'meerschaum': get_config('meerschaum')},
+            #  {'meerschaum': {'connectors': {typ: {label: {'uri': uri}}}}},
+        #  )
+    #  )
 
 
 def get_env_vars() -> List[str]:

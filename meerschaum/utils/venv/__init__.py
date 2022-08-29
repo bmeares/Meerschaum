@@ -200,6 +200,9 @@ def verify_venv(
                     f"Unable to create symlink {current_python_in_venv_path} "
                     + f"to {current_python_in_sys_path}."
                 )
+        files_to_inspect = sorted(os.listdir(bin_path), reverse=True)
+    else:
+        files_to_inspect = [current_python_versioned_name]
 
     def get_python_version(python_path: pathlib.Path) -> Union[str, None]:
         """
@@ -207,6 +210,8 @@ def verify_venv(
         """
         try:
             ### It might be a broken symlink, so skip on errors.
+            if debug:
+                print(f"Getting python version for {python_path}")
             proc = run_process(
                 [str(python_path), '-V'],
                 as_proc = True,
@@ -215,11 +220,16 @@ def verify_venv(
             stdout, stderr = proc.communicate(timeout=0.1)
         except Exception as e:
             ### E.g. the symlink may be broken.
+            if python_path.is_symlink():
+                try:
+                    python_path.unlink()
+                except Exception as _e:
+                    print(f"Unable to remove broken symlink {python_path}:\n{e}\n{_e}")
             return None
         return stdout.decode('utf-8').strip().replace('Python ', '')
 
     ### Ensure the versions are symlinked correctly.
-    for filename in os.listdir(bin_path):
+    for filename in files_to_inspect:
         if not filename.startswith('python'):
             continue
         python_path = bin_path / filename

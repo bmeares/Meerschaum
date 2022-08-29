@@ -49,6 +49,7 @@ print(' '.join([
 ]))")
 export $MRSM_URIS
 
+python -m meerschaum show connectors
 python -m meerschaum start connectors $MRSM_CONNS
 
 ### Execute the pytest tests.

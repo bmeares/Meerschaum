@@ -21,7 +21,7 @@ def sh(
     Execute system commands.
     """
     import subprocess
-    import sys, os
+    import sys, os, shlex
     from meerschaum.utils.warnings import error
     from meerschaum.utils.debug import dprint
 
@@ -47,8 +47,11 @@ def sh(
     command_list = cmd_list
     if use_bash:
         command_list = ["bash"]
-        if len(action) == 0:
-            command_list += ["-c", " ".join(cmd_list)]
+        if len(action) != 0:
+            try:
+                command_list += ["-c", shlex.join(cmd_list)]
+            except Exception as e:
+                command_list += ["-c", ' '.join(cmd_list)]
     else:
         if len(action) == 0:
             command_list = _shell

@@ -49,6 +49,7 @@ packages: Dict[str, Dict[str, str]] = {
         'daemoniker'                 : 'daemoniker>=0.2.3',
         'psutil'                     : 'psutil>=5.8.0',
         'watchgod'                   : 'watchgod>=0.7.0',
+        'dill'                       : 'dill>=0.3.3',
         'virtualenv'                 : 'virtualenv>=20.1.0',
         'rocketry'                   : 'rocketry>=2.3.0',
     },
@@ -131,9 +132,9 @@ packages['sql'] = {
     'databases'                      : 'databases>=0.4.0',
     'aiosqlite'                      : 'aiosqlite>=0.16.0',
     'asyncpg'                        : 'asyncpg>=0.21.0',
-    'dill'                           : 'dill>=0.3.3',
 }
 packages['sql'].update(packages['drivers'])
+packages['sql'].update(packages['_required'])
 packages['dash'] = {
     'dash'                           : 'dash>=2.0.0',
     'dash_bootstrap_components'      : 'dash-bootstrap-components>=1.1.0',
@@ -154,7 +155,6 @@ packages['api'] = {
     'multipart'                      : 'python-multipart>=0.0.5',
 }
 packages['api'].update(packages['sql'])
-packages['api'].update(packages['_required'])
 packages['api'].update(packages['formatting'])
 packages['api'].update(packages['dash'])
 

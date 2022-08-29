@@ -816,6 +816,7 @@ def sync_pipe(
 
     if not isinstance(df, pd.DataFrame):
         df = pipe.enforce_dtypes(df, debug=debug)
+
     unseen_df, update_df, delta_df = (
         pipe.filter_existing(
             df, chunksize=chunksize, begin=begin, end=end, debug=debug, **kw
@@ -858,8 +859,11 @@ def sync_pipe(
                 join_cols,
                 debug = debug
             ):
+                if debug:
+                    dprint(update_query)
                 success = connection.execute(update_query) is not None
                 if not success:
+                    warn(f"Failed to update {pipe}!")
                     break
 
         if success:
