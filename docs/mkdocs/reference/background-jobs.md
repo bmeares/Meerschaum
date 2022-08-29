@@ -49,7 +49,7 @@ You can run any command regularly with the flag `-s` or `--schedule` ― for exa
   - `daily starting 12:00`
   - `monthly starting 6th`
 
-Here is the complete [documentation for the interval syntax](https://red-engine.readthedocs.io/en/stable/condition_syntax/execution.html).
+Here is the complete [documentation for the interval syntax](https://rocketry.readthedocs.io/en/stable/condition_syntax/index.html).
 
 ```bash
 mrsm sync pipes -m weather -s 'every 30 seconds' -d

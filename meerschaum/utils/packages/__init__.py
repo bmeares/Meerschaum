@@ -1025,7 +1025,7 @@ def run_python_package(
         stdout, stderr = (
             (None, None) if not capture_output else (subprocess.PIPE, subprocess.PIPE)
         )
-        proc = subprocess.Popen(command, stdout=stdout, stderr=stderr)
+        proc = subprocess.Popen(command, stdout=stdout, stderr=stderr, env=os.environ)
         to_return = proc if as_proc else proc.wait()
     except KeyboardInterrupt:
         to_return = 1 if not as_proc else None

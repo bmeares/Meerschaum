@@ -4,7 +4,33 @@
 
 This is the current release cycle, so future features will be updated below.
 
-### v1.2.1
+### v1.2.5 – v1.2.7
+
+- **`Venv` context managers do not deactivate previously activated venvs.**  
+  You can safely use `Venv` without worrying about deactivating your previously activated environments.
+- **Better handling of nested plugin dependencies.**
+- **`Plugin.get_dependencies()` will not trigger an import.**  
+  If you want certainty about a plugin's required list, trigger an import manually. Otherwise, it will use `ast.literal_eval()` to determine the required list from the source itself. This only works for statically set `required` lists.
+- **Provide rich traceback for broken plugins.**  
+  If a plugin fails to import, a nice traceback is printed out in addition to a warning.
+- **Only cache `Pipe.dtypes` if the pipe exists.**
+- **Pass current environment to subprocesses.**  
+  This should retain any custom configuration you've set in the main process.
+- **Hard-code port 5432 as the target DB container port in the stack.**  
+  Changing the host port now will not change the target port in the container.
+- **Fixed a bug with background jobs and `to_sql()`.**  
+  The `--name` flag was conflicting with `to_sql()`.
+- **Reimplemented `apply_patch_to_config()`.**  
+  This patch removes `cascadict` as a vendored dependency and replaces it with a simpler implementation.
+- **Removed network request for shell connectivity status.**  
+  The shell now simply checks for the existence of the connector. This may occasionally print an inaccurate connection status, but the speed benefit is worth it.
+- **Moved `dill` and other required dependencies into the `sql` dependency group.**
+- **Replaced `redengine` with `rocketry`.**
+- **Patched `Literal` into `typing` for Python 3.7.**
+- **Fixed shell commands.**  
+  This includes falling back to `' '.join` instead of `shlex.join` for Python 3.7.
+
+### v1.2.1 – v1.2.4
 
 - **Added the `@make_connector` decorator.**  
   Plugins may now extend the base `Connector` class to provide custom connectors. For most cases, the built-in `plugin` connector should work fine. This addition opens up the internal connector system so that plugin authors may now add new types. See below for a minimal example of a new connector class:

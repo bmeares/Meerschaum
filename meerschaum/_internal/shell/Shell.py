@@ -6,9 +6,8 @@ This module is the entry point for the interactive shell.
 """
 
 from __future__ import annotations
-from meerschaum.utils.typing import Union, SuccessTuple, Any, Callable, Optional, List, Dict
-
 import os
+from meerschaum.utils.typing import Union, SuccessTuple, Any, Callable, Optional, List, Dict
 from meerschaum.utils.packages import attempt_import
 from meerschaum.config import __doc__, __version__ as version, get_config
 cmd_import_name = get_config('shell', 'cmd')
@@ -335,12 +334,11 @@ class Shell(cmd.Cmd):
         ### replace {instance} in prompt with stylized instance string
         self.update_prompt()
         self._dict_backup = {k:v for k, v in self.__dict__.copy().items() if k != '_dict_backup'}
-        #  self._reload = False
 
     def insert_actions(self):
         from meerschaum.actions import actions
 
-    def update_prompt(self, instance : Optional[str] = None, username : Optional[str] = None):
+    def update_prompt(self, instance: Optional[str] = None, username: Optional[str] = None):
         from meerschaum.utils.formatting import ANSI, colored
         cmd.__builtins__['input'] = input_with_sigint(_old_input, self.session, shell=self)
         prompt = self._prompt
@@ -364,14 +362,22 @@ class Shell(cmd.Cmd):
             if username is None:
                 from meerschaum.utils.misc import remove_ansi
                 from meerschaum.connectors.parse import parse_instance_keys
+                from meerschaum.connectors.sql import SQLConnector
                 try:
-                    username = parse_instance_keys(
+                    conn_attrs = parse_instance_keys(
                         remove_ansi(self.instance_keys), construct=False
-                    )['username']
+                    )
+                    if 'username' not in conn_attrs:
+                        if 'uri' in conn_attrs:
+                            username = SQLConnector.parse_uri(conn_attrs['uri'])['username']
+                    else:
+                        username = conn_attrs['username']
                 except KeyError:
                     username = '(no username)'
                 except Exception as e:
                     username = str(e)
+                if username is None:
+                   username = '(no username)'
             self.username = (
                 username if not ANSI else
                 colored(username, **get_config('shell', 'ansi', 'username', 'rich'))
@@ -394,7 +400,8 @@ class Shell(cmd.Cmd):
         ### flush stdout
         print("", end="", flush=True)
 
-    def precmd(self, line : str):
+
+    def precmd(self, line: str):
         """
         Pass line string to parent actions.
         Pass parsed arguments to custom actions
@@ -793,7 +800,7 @@ def input_with_sigint(_input, session, shell: Optional[Shell] = None):
     Replace built-in `input()` with prompt_toolkit.prompt.
     """
     from meerschaum.utils.formatting import CHARSET, ANSI, UNICODE, colored
-    from meerschaum.connectors import is_connected
+    from meerschaum.connectors import is_connected, connectors
     from meerschaum.utils.misc import remove_ansi
     from meerschaum.config import get_config
     import platform
@@ -825,9 +832,14 @@ def input_with_sigint(_input, session, shell: Optional[Shell] = None):
             colored(shell.repo_keys, 'on ' + get_config('shell', 'ansi', 'repo', 'rich', 'style'))
             if ANSI else colored(shell.repo_keys, 'on white')
         )
-        connected = (
-            is_connected(shell.instance_keys) if shell._update_bottom_toolbar else last_connected
-        )
+        #  connected = (
+            #  is_connected(shell.instance_keys) if shell._update_bottom_toolbar else last_connected
+        #  )
+        try:
+            typ, label = shell.instance_keys.split(':')
+            connected = typ in connectors and label in connectors[typ]
+        except Exception as e:
+            connected = False
         last_connected = connected
         connected_str = (('dis' if not connected else '') + 'connected')
         connection_text = (
@@ -850,7 +862,7 @@ def input_with_sigint(_input, session, shell: Optional[Shell] = None):
         )
         buffer = (' ' * buffer_size) if buffer_size > 0 else '\n '
         text = left + buffer + right
-        shell._old_bottom_toolbar =  prompt_toolkit_formatted_text.ANSI(text)
+        shell._old_bottom_toolbar = prompt_toolkit_formatted_text.ANSI(text)
         shell._update_bottom_toolbar = False
         return shell._old_bottom_toolbar
 
@@ -873,9 +885,6 @@ def input_with_sigint(_input, session, shell: Optional[Shell] = None):
         except KeyboardInterrupt:
             print("^C")
             return "pass"
-        #  except RuntimeError:
-            #  print("^C")
-            #  return "pass"
         return parsed
 
     return _patched_prompt

@@ -41,7 +41,6 @@ packages: Dict[str, Dict[str, str]] = {
         'dateutil'                   : 'python-dateutil>=2.7.5',
         'requests'                   : 'requests>=2.23.0',
         'binaryornot'                : 'binaryornot>=0.4.4',
-        'dill'                       : 'dill>=0.3.3',
         'pyvim'                      : 'pyvim>=3.0.2',
         'aiofiles'                   : 'aiofiles>=0.6.0',
         'packaging'                  : 'packaging>=21.3.0',
@@ -50,8 +49,9 @@ packages: Dict[str, Dict[str, str]] = {
         'daemoniker'                 : 'daemoniker>=0.2.3',
         'psutil'                     : 'psutil>=5.8.0',
         'watchgod'                   : 'watchgod>=0.7.0',
+        'dill'                       : 'dill>=0.3.3',
         'virtualenv'                 : 'virtualenv>=20.1.0',
-        'redengine'                  : 'redengine>=2.0.1',
+        'rocketry'                   : 'rocketry>=2.3.0',
     },
     'iot': {
         'paho'                       : 'paho-mqtt>=1.5.1',
@@ -134,6 +134,7 @@ packages['sql'] = {
     'asyncpg'                        : 'asyncpg>=0.21.0',
 }
 packages['sql'].update(packages['drivers'])
+packages['sql'].update(packages['_required'])
 packages['dash'] = {
     'dash'                           : 'dash>=2.0.0',
     'dash_bootstrap_components'      : 'dash-bootstrap-components>=1.1.0',
@@ -154,7 +155,6 @@ packages['api'] = {
     'multipart'                      : 'python-multipart>=0.0.5',
 }
 packages['api'].update(packages['sql'])
-packages['api'].update(packages['_required'])
 packages['api'].update(packages['formatting'])
 packages['api'].update(packages['dash'])
 

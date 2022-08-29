@@ -118,7 +118,7 @@ def get_config(
 
     Examples
     --------
-    >>> get_config('meerschaum', 'intance')
+    >>> get_config('meerschaum', 'instance')
     'sql:main'
     >>> get_config('does', 'not', 'exist')
     UserWarning: Invalid keys in config: ('does', 'not', 'exist')

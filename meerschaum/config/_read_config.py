@@ -166,6 +166,7 @@ def read_config(
                     try:
                         _config_key = filetype_loaders[_type](f)
                     except Exception as e:
+                        print(f"Error processing file: {filepath}")
                         import traceback
                         traceback.print_exc()
                         _config_key = {}

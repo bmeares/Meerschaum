@@ -87,15 +87,19 @@ def _pipes_lap(
     )
     cores = multiprocessing.cpu_count()
     pipes_queue = queue.Queue(remaining_count)
-    [pipes_queue.put_nowait(pipe) for pipe in pipes]
+    for pipe in pipes:
+        pipes_queue.put_nowait(pipe)
     stop_event = Event()
     results_dict = {}
 
     ### Cap the number workers to the pool size or 1 if working in-memory.
     if workers is None:
         workers = (
-            1 if instance_connector.type == 'sql' and instance_connector.database == ':memory:'
-            else min(cores, (conns if conns != 0 else cores))
+            1 if (
+                instance_connector.type == 'sql'
+                and
+                instance_connector.__dict__.get('database', None) == ':memory:'
+            ) else min(cores, (conns if conns != 0 else cores))
         )
     if workers > conns and conns != 0 and instance_connector.type == 'sql':
         warn(

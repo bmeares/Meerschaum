@@ -14,11 +14,17 @@ def apply_patch_to_config(
         patch: Dict[str, Any],
     ):
     """Patch the config dict with a new dict (cascade patching)."""
-    ### Weird threading issues: Must import class, not parent module.
-    from meerschaum.utils.packages.cascadict import CascaDict
-    base = CascaDict(config)
-    new = base.cascade(patch)
-    return new.copy_flat()
+    _base = config.copy()
+
+    def update_dict(base, patch):
+        for key, value in patch.items():
+            if isinstance(value, dict):
+                base[key] = update_dict(base.get(key, {}), value)
+            else:
+                base[key] = value
+        return base
+
+    return update_dict(_base, patch)
 
 
 def write_patch(

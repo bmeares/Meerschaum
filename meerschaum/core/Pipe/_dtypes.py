@@ -33,7 +33,7 @@ def enforce_dtypes(self, df: 'pd.DataFrame', debug: bool=False) -> 'pd.DataFrame
         try:
             df = pd.DataFrame(df)
         except Exception as e:
-            warn(f"Unable to cast incoming data as a DataFrame...")
+            warn(f"Unable to cast incoming data as a DataFrame...:\n{e}")
             return df
 
     if not self.dtypes:
