@@ -360,6 +360,7 @@ def choices_docstring(action: str, globs : Optional[Dict[str, Any]] = None) -> s
     options_str = options_str[:-2] + "]`"
     return options_str
 
+
 def print_options(
         options: Optional[Dict[str, Any]] = None,
         nopretty: bool = False,

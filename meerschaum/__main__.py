@@ -56,7 +56,7 @@ def main(sysargs: list = None) -> None:
     ### Print success or failure message.
     return_tuple = entry(sysargs)
     rc = 0
-    if isinstance(return_tuple, tuple):
+    if isinstance(return_tuple, tuple) and '--nopretty' not in sysargs:
         from meerschaum.utils.formatting import print_tuple
         print_tuple(return_tuple, upper_padding=1)
         rc = 0 if (return_tuple[0] is True) else 1

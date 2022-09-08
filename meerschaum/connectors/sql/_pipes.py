@@ -775,7 +775,7 @@ def sync_pipe(
     from meerschaum.utils.debug import dprint
     from meerschaum.utils.packages import import_pandas
     from meerschaum.utils.misc import parse_df_datetimes
-    from meerschaum.utils.sql import get_update_queries
+    from meerschaum.utils.sql import get_update_queries, sql_item_name
     from meerschaum import Pipe
     import time
     if df is None:
@@ -897,11 +897,14 @@ def sync_pipe(
     if not success:
         return success, stats['msg']
     msg = (
-        f"It took {round(end-start, 2)} seconds to update {pipe} using method {stats['method']} "
-        + f"and chunksize {stats['chunksize']}.\n"
-        + f"    Inserted {len(unseen_df)} rows, "
+        f"Inserted {len(unseen_df)}, "
         + f"updated {len(update_df) if update_df is not None else 0} rows."
     )
+    if debug:
+        msg = msg[:-1] + (
+            f"\non table {sql_item_name(pipe.target, self.flavor)}\n"
+            + f"in {round(end-start, 2)} seconds."
+        )
     return success, msg
 
 

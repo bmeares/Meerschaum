@@ -4,6 +4,17 @@
 
 This is the current release cycle, so future features will be updated below.
 
+### v1.2.8
+
+- **Custom connectors may now have `register(pipe)` methods.**  
+  Just like the module-level `register(pipe)` plugin function, custom connectors may also provide this function as a class member.
+- **Print a traceback if `fetch(pipe)` breaks.**  
+  A more verbose traceback is printed if a plugin breaks during the syncing process.
+- **Cleaned up `sync pipes` output.**  
+  This patch cleans up the syncing process's pretty output.
+- **Respect `--nopretty` in `sync pipes`.**  
+  This flag will only print JSON-encoded dictionaries for `sync pipes`. Tracebacks may still interfere without standard output, however.
+
 ### v1.2.5 – v1.2.7
 
 - **`Venv` context managers do not deactivate previously activated venvs.**  
