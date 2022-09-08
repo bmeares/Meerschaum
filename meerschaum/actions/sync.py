@@ -42,6 +42,7 @@ def _pipes_lap(
         min_seconds: int = 1,
         mrsm_instance: Optional[str] = None,
         timeout_seconds: Optional[int] = None,
+        nopretty: bool = False,
         _progress: Optional['rich.progress.Progress'] = None,
         **kw: Any
     ) -> Tuple[List[meerschaum.Pipe], List[meerschaum.Pipe]]:
@@ -128,7 +129,16 @@ def _pipes_lap(
             return_tuple = sync_pipe(pipe)
             results_dict[pipe] = return_tuple
 
-            print_tuple(return_tuple, _progress=_progress)
+            if not nopretty:
+                success, msg = return_tuple
+                msg = (
+                    f"Finished syncing {pipe}:\n" if success
+                    else f"Error while syncing {pipe}:\n"
+                ) + msg + '\n'
+                print_tuple(
+                    (success, msg),
+                    _progress = _progress,
+                )
             _checkpoint(_progress=_progress, _task=_task)
             if _progress is not None:
                 nonlocal remaining_count
@@ -241,6 +251,7 @@ def _sync_pipes(
         min_seconds: int = 1,
         unblock: bool = False,
         shell: bool = False,
+        nopretty: bool = False,
         debug: bool = False,
         **kw: Any
     ) -> SuccessTuple:
@@ -259,16 +270,20 @@ def _sync_pipes(
     """
     from meerschaum.utils.debug import dprint
     from meerschaum.utils.warnings import warn, info
+    from meerschaum.utils.formatting import UNICODE
     from meerschaum.utils.formatting._shell import progress, live
     from meerschaum.utils.formatting._shell import clear_screen, flush_with_newlines
     from meerschaum.utils.misc import print_options
     import contextlib
-    import time, sys
+    import time
+    import sys
+    import json
     import asyncio
     run = True
     msg = ""
     interrupt_warning_msg = "Syncing was interrupted due to a keyboard interrupt."
     cooldown = 2 * (min_seconds + 1)
+    underline = '\u2015' if UNICODE else '-'
     success = []
     while run:
         _progress = progress() if shell else None
@@ -283,6 +298,7 @@ def _sync_pipes(
                     _progress = _progress,
                     unblock = unblock,
                     debug = debug,
+                    nopretty = nopretty,
                     **kw
                 )
         except Exception as e:
@@ -310,28 +326,58 @@ def _sync_pipes(
         lap_end = time.perf_counter()
         print()
 
-        if success is not None and not loop and shell:
+
+        def get_options_to_print(
+                pipes_list: List['meerschaum.Pipe'],
+                include_msg: bool = True
+            ) -> List[str]:
+            """
+            Format the output strings.
+            """
+            default_tuple = False, "No message returned."
+            options = []
+            for pipe in pipes_list:
+                result = results_dict.get(pipe, default_tuple)
+                if not isinstance(result, tuple):
+                    result = default_tuple
+
+                option = (
+                    str(pipe)
+                    + '\n'
+                    + ((underline * len(str(pipe))) if include_msg else '')
+                    + '\n'
+                    + (str(result[1]) if include_msg else '')
+                    + '\n\n'
+                ) if not nopretty else (
+                    json.dumps({
+                        'pipe': pipe.meta,
+                        'result': result,
+                    })
+                )
+                options.append(option)
+            
+            return options
+
+
+        if success is not None and not loop and shell and not nopretty:
             clear_screen(debug=debug)
-        if fail is not None and len(fail) > 0:
-            print_options(
-                [str(p) + "\n"
-                    + (
-                        results_dict[p][1] if isinstance(results_dict.get(p, None), tuple)
-                        else "No message was returned."
-                    ) + "\n" for p in fail],
-                header = "Failed to sync pipes:"
-            )
 
         if success is not None and len(success) > 0:
             success_msg = "Successfully synced pipes:"
             if unblock:
                 success_msg = "Successfully spawned threads for pipes:"
-            print_options([str(p) + "\n" for p in success], header=success_msg)
+            print_options(
+                get_options_to_print(success),
+                header = success_msg,
+                nopretty = nopretty,
+            )
 
-        if debug:
-            from meerschaum.utils.formatting import pprint
-            dprint("\n" + f"Return values for each pipe:")
-            pprint(results_dict)
+        if fail is not None and len(fail) > 0:
+            print_options(
+                get_options_to_print(fail),
+                header = 'Failed to sync pipes:',
+                nopretty = nopretty,
+            )
 
         msg = (
             f"It took {round(lap_end - lap_begin, 2)} seconds to sync " +

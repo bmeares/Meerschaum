@@ -177,7 +177,7 @@ def colored(text: str, *colors, as_rich_text: bool=False, **kw) -> Union[str, 'r
 
 console = None
 def get_console():
-    """ """
+    """Get the rich console."""
     global console
     from meerschaum.utils.packages import import_rich, attempt_import
     rich = import_rich()
@@ -188,6 +188,7 @@ def get_console():
         console = None
     return console
 
+
 def print_tuple(
         tup: tuple,
         skip_common: bool = True,
@@ -197,14 +198,14 @@ def print_tuple(
         _progress: Optional['rich.progress.Progress'] = None,
     ) -> None:
     """Print `meerschaum.utils.typing.SuccessTuple`."""
-    from meerschaum.config.static import _static_config
+    from meerschaum.config.static import STATIC_CONFIG
     try:
         status = 'success' if tup[0] else 'failure'
     except TypeError:
         status = 'failure'
         tup = None, None
 
-    omit_messages = _static_config()['system']['success']['ignore']
+    omit_messages = STATIC_CONFIG['system']['success']['ignore']
 
     do_print = True
 
@@ -221,9 +222,14 @@ def print_tuple(
         status_config = get_config('formatting', status, patch=True)
 
         msg = ' ' + status_config[CHARSET]['icon'] + ' ' + str(tup[1])
+        lines = msg.split('\n')
+        lines = [lines[0]] + [
+            (('    ' + line if not line.startswith(' ') else line))
+            for line in lines[1:]
+        ]
         if ANSI:
-            msg = fill_ansi(highlight_pipes(msg), **status_config['ansi']['rich'])
-
+            lines[0] = fill_ansi(highlight_pipes(lines[0]), **status_config['ansi']['rich'])
+        msg = '\n'.join(lines)
         msg = ('\n' * upper_padding) + msg + ('\n' * lower_padding)
         print(msg)
 
