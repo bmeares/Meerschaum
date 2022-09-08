@@ -118,18 +118,13 @@ def sync(
     from meerschaum.utils.warnings import warn, error
     from meerschaum.connectors import custom_types
     from meerschaum.plugins import Plugin
+    from meerschaum.utils.formatting import get_console
     import datetime
     import time
     if (callback is not None or error_callback is not None) and blocking:
         warn("Callback functions are only executed when blocking = False. Ignoring...")
 
     _checkpoint(_total=2, **kw)
-
-    #  if (
-          #  not self.connector_keys.startswith('plugin:')
-          #  and not self.get_columns('datetime', error=False)
-    #  ):
-        #  return False, f"Cannot sync {self} without a datetime column."
 
     ### NOTE: Setting begin to the sync time for Simple Sync.
     ### TODO: Add flag for specifying syncing method.
@@ -195,6 +190,7 @@ def sync(
                     return return_tuple
 
             except Exception as e:
+                get_console().print_exception()
                 msg = f"Failed to sync {p} with exception: '" + str(e) + "'"
                 if debug:
                     error(msg, silent=False)
@@ -219,9 +215,18 @@ def sync(
                 if plugin is not None and deactivate_plugin_venv:
                     plugin.deactivate_venv(debug=debug)
             except Exception as e:
+                get_console().print_exception(
+                    suppress = [
+                        'meerschaum/core/Pipe/_sync.py', 
+                        'meerschaum/core/Pipe/_fetch.py', 
+                    ]
+                )
                 msg = f"Failed to fetch data from {p.connector}:\n    {e}"
+                df = None
+
             if df is None:
-                return False, f"No data was fetched for {p}."
+                return False, f"No data were fetched for {p}."
+
             ### TODO: Depreciate async?
             if df is True:
                 return True, f"{p} is being synced in parallel."
