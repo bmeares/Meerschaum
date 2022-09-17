@@ -141,7 +141,7 @@ def import_plugins(
     """
     import sys, os, pathlib, time
     import importlib.util
-    from meerschaum.utils.misc import flatten_list
+    from meerschaum.utils.misc import flatten_list, make_symlink
     from meerschaum.utils.warnings import error, warn as _warn
     from meerschaum.config.static import STATIC_CONFIG
     from meerschaum.utils.venv import Venv, activate_venv, deactivate_venv, is_venv_active
@@ -188,12 +188,14 @@ def import_plugins(
 
         if not PLUGINS_INTERNAL_DIR_PATH.exists():
             try:
-                PLUGINS_INTERNAL_DIR_PATH.symlink_to(PLUGINS_RESOURCES_PATH)
+                success, msg = make_symlink(PLUGINS_INTERNAL_DIR_PATH, PLUGINS_RESOURCES_PATH)
             except Exception as e:
+                success, msg = False, str(e)
+            if not success:
                 if warn:
                     _warn(
                         f"Failed to create symlink {PLUGINS_INTERNAL_DIR_PATH} "
-                        + "to {PLUGINS_RESOURCES_PATH}:\n    {e}"
+                        + f"to {PLUGINS_RESOURCES_PATH}:\n    {msg}"
                     )
 
     ### Release symlink lock file in case other processes need it.
