@@ -175,6 +175,7 @@ def verify_venv(
     from meerschaum.config._paths import VIRTENV_RESOURCES_PATH
     from meerschaum.utils.process import run_process
     from meerschaum.utils.misc import make_symlink, is_symlink
+    from meerschaum.utils.warnings import warn
     venv_path = VIRTENV_RESOURCES_PATH / venv
     bin_path = venv_path / (
         'bin' if platform.system() != 'Windows' else "Scripts"
@@ -185,6 +186,7 @@ def verify_venv(
     )
 
     if not (bin_path / current_python_versioned_name).exists():
+        print(f'DNE: {bin_path / current_python_versioned_name}')
         init_venv(venv, verify=False, force=True, debug=debug)
         current_python_in_venv_path = pathlib.Path(venv_executable(venv=venv))
         current_python_in_sys_path = pathlib.Path(venv_executable(venv=None))
@@ -195,7 +197,7 @@ def verify_venv(
                 except Exception as e:
                     print(f"Unable to remove symlink {current_python_in_venv_path}:\n{e}")
             try:
-                make_symlink(current_python_in_venv_path, current_python_in_sys_path)
+                make_symlink(current_python_in_sys_path, current_python_in_venv_path)
             except Exception as e:
                 print(
                     f"Unable to create symlink {current_python_in_venv_path} "
@@ -248,7 +250,6 @@ def verify_venv(
         if filename == python_versioned_name:
             real_path = pathlib.Path(os.path.realpath(python_path))
             if not real_path.exists():
-                #  print(f"Does not exist:\n{python_path}\n->\n{real_path}")
                 python_path.unlink()
                 init_venv(venv, verify=False, force=True, debug=debug)
                 if not python_path.exists():
@@ -258,7 +259,9 @@ def verify_venv(
                 continue
 
             python_path.unlink()
-            make_symlink(python_path, real_path)
+            success, msg = make_symlink(real_path, python_path)
+            if not success:
+                warn(msg, color=False)
             continue
 
         python_versioned_path = bin_path / python_versioned_name
@@ -359,9 +362,17 @@ def init_venv(
             vtp = venv_target_path(venv=venv, allow_nonexistent=True, debug=debug)
             virtualenv.cli_run([str(venv_path)])
             if dist_packages_path.exists():
+                vtp.mkdir(exist_ok=True, parents=True)
                 import shutil
-                shutil.move(dist_packages_path, vtp)
-                shutil.move(local_bin_path, bin_path)
+                for file_path in dist_packages_path.glob('*'):
+                    shutil.move(file_path, vtp)
+                shutil.rmtree(dist_packages_path)
+                #  shutil.move(dist_packages_path, vtp)
+                bin_path.mkdir(exist_ok=True, parents=True)
+                for file_path in local_bin_path.glob('*'):
+                    shutil.move(file_path, bin_path)
+                #  shutil.move(local_bin_path, bin_path)
+                shutil.rmtree(local_bin_path)
 
         except Exception as e:
             import traceback
