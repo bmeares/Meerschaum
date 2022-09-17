@@ -174,6 +174,7 @@ def verify_venv(
     import pathlib, platform, os, shutil, subprocess, sys
     from meerschaum.config._paths import VIRTENV_RESOURCES_PATH
     from meerschaum.utils.process import run_process
+    from meerschaum.utils.misc import make_symlink, is_symlink
     venv_path = VIRTENV_RESOURCES_PATH / venv
     bin_path = venv_path / (
         'bin' if platform.system() != 'Windows' else "Scripts"
@@ -188,13 +189,13 @@ def verify_venv(
         current_python_in_venv_path = pathlib.Path(venv_executable(venv=venv))
         current_python_in_sys_path = pathlib.Path(venv_executable(venv=None))
         if not current_python_in_venv_path.exists():
-            if current_python_in_venv_path.is_symlink():
+            if is_symlink(current_python_in_venv_path):
                 try:
                     current_python_in_venv_path.unlink()
                 except Exception as e:
                     print(f"Unable to remove symlink {current_python_in_venv_path}:\n{e}")
             try:
-                current_python_in_venv_path.symlink_to(current_python_in_sys_path)
+                make_symlink(current_python_in_venv_path, current_python_in_sys_path)
             except Exception as e:
                 print(
                     f"Unable to create symlink {current_python_in_venv_path} "
@@ -220,7 +221,7 @@ def verify_venv(
             stdout, stderr = proc.communicate(timeout=0.1)
         except Exception as e:
             ### E.g. the symlink may be broken.
-            if python_path.is_symlink():
+            if is_symlink(python_path):
                 try:
                     python_path.unlink()
                 except Exception as _e:
@@ -257,7 +258,7 @@ def verify_venv(
                 continue
 
             python_path.unlink()
-            python_path.symlink_to(real_path)
+            make_symlink(python_path, real_path)
             continue
 
         python_versioned_path = bin_path / python_versioned_name
