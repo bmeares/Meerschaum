@@ -188,7 +188,8 @@ def import_plugins(
 
         if not PLUGINS_INTERNAL_DIR_PATH.exists():
             try:
-                success, msg = make_symlink(PLUGINS_INTERNAL_DIR_PATH, PLUGINS_RESOURCES_PATH)
+                #  success, msg = make_symlink(PLUGINS_INTERNAL_DIR_PATH, PLUGINS_RESOURCES_PATH)
+                success, msg = make_symlink(PLUGINS_RESOURCES_PATH, PLUGINS_INTERNAL_DIR_PATH)
             except Exception as e:
                 success, msg = False, str(e)
             if not success:
