@@ -1634,3 +1634,71 @@ def flatten_list(list_: List[Any]) -> List[Any]:
             yield from flatten_list(item)
         else:
             yield item
+
+
+def make_symlink(src_path: pathlib.Path, dest_path: pathlib.Path) -> SuccessTuple:
+    """
+    Wrap around `pathlib.Path.symlink_to`, but add support for Windows.
+
+    Parameters
+    ----------
+    src_path: pathlib.Path
+        The source path.
+
+    dest_path: pathlib.Path
+        The destination path.
+
+    Returns
+    -------
+    A SuccessTuple indicating success.
+    """
+    try:
+        dest_path.symlink_to(src_path)
+        success = True
+    except Exception as e:
+        success = False
+        msg = str(e)
+    if success:
+        return success, "Success"
+    
+    ### Failed to create a symlink.
+    ### If we're not on Windows, return an error.
+    import platform
+    if platform.system() != 'Windows':
+        return success, msg
+
+    try:
+        import _winapi
+    except ImportError:
+        return False, "Unable to import _winapi."
+
+    if src_path.is_dir():
+        try:
+            _winapi.CreateJunction(str(src_path), str(dest_path))
+        except Exception as e:
+            return False, str(e)
+        return True, "Success"
+
+    ### Last resort: copy the file on Windows.
+    import shutil
+    try:
+        shutil.copy(src_path, dest_path)
+    except Exception as e:
+        return False, str(e)
+    
+    return True, "Success"
+
+
+def is_symlink(path: pathlib.Path) -> bool:
+    """
+    Wrap `path.is_symlink()` but add support for Windows junctions.
+    """
+    if path.is_symlink():
+        return True
+    import platform, os
+    if platform.system() != 'Windows':
+        return False
+    try:
+        return bool(os.readlink(path))
+    except OSError:
+        return False

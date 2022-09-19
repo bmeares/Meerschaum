@@ -8,6 +8,7 @@ Plugin metadata class
 
 from __future__ import annotations
 import os, pathlib, shutil
+from site import venv
 from meerschaum.utils.typing import (
     Dict,
     List,
@@ -717,6 +718,7 @@ class Plugin:
         """
         from meerschaum.utils.venv import venv_target_path
         from meerschaum.utils.packages import activate_venv
+        from meerschaum.utils.misc import make_symlink, is_symlink
         from meerschaum.config._paths import PACKAGE_ROOT_PATH
 
         if dependencies:
@@ -727,12 +729,15 @@ class Plugin:
         venv_meerschaum_path = vtp / 'meerschaum'
 
         try:
-            if venv_meerschaum_path.is_symlink():
+            success, msg = True, "Success"
+            if is_symlink(venv_meerschaum_path):
                 if pathlib.Path(os.path.realpath(venv_meerschaum_path)) != PACKAGE_ROOT_PATH:
                     venv_meerschaum_path.unlink()
-                    venv_meerschaum_path.symlink_to(PACKAGE_ROOT_PATH)
+                    success, msg = make_symlink(venv_meerschaum_path, PACKAGE_ROOT_PATH)
         except Exception as e:
-            warn(f"Unable to create symlink {venv_meerschaum_path} to {PACKAGE_ROOT_PATH}:\n{e}")
+            success, msg = False, str(e)
+        if not success:
+            warn(f"Unable to create symlink {venv_meerschaum_path} to {PACKAGE_ROOT_PATH}:\n{msg}")
 
         return activate_venv(self.name, debug=debug, **kw)
 
