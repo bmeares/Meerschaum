@@ -119,6 +119,9 @@ default_pipes_config       = {
             'id'           : None,
         },
     },
+    'attributes'           : {
+        'local_cache_timeout_seconds': 60,
+    },
 }
 default_plugins_config     = {}
 default_experimental_config = {

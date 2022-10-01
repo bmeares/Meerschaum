@@ -68,19 +68,19 @@ update_queries = {
         )
     """,
     'sqlite_delete_insert': [
-    """
-    DELETE FROM {target_table_name} AS f
-    WHERE ROWID IN (
-        SELECT t.ROWID
-        FROM {target_table_name} AS t
-        INNER JOIN (SELECT DISTINCT * FROM {patch_table_name}) AS p
-            ON {and_subquery_t}
-    );
-    """,
-    """
-    INSERT INTO {target_table_name} AS f
-    SELECT DISTINCT * FROM {patch_table_name} AS p
-    """,
+        """
+        DELETE FROM {target_table_name} AS f
+        WHERE ROWID IN (
+            SELECT t.ROWID
+            FROM {target_table_name} AS t
+            INNER JOIN (SELECT DISTINCT * FROM {patch_table_name}) AS p
+                ON {and_subquery_t}
+        );
+        """,
+        """
+        INSERT INTO {target_table_name} AS f
+        SELECT DISTINCT * FROM {patch_table_name} AS p
+        """,
     ],
 }
 table_wrappers = {
@@ -142,6 +142,24 @@ DB_FLAVORS_CAST_DTYPES = {
     },
     'mysql': {
         'BIGINT': 'DOUBLE',
+    },
+}
+### Map pandas dtypes to flavor-specific dtypes.
+PD_TO_DB_DTYPES_FLAVORS: Dict[str, Dict[str, str]] = {
+    'Int64': {
+        'mysql': 'INT',
+    },
+    'int64': {
+        'mysql': 'INT',
+    },
+    'datetime64[ns]': {
+        'mysql': '',
+    },
+    'bool': {
+        'mysql': '',
+    },
+    'object': {
+        'mysql': '',
     },
 }
 
@@ -588,7 +606,6 @@ def get_sqlalchemy_table(
     return tables[str(table)]
 
 
-
 _checked_sqlite_version = None
 def get_update_queries(
         target: str,
@@ -694,4 +711,18 @@ def get_pd_type(db_type: str) -> str:
         if db_t in db_type.upper():
             return pd_t
     return DB_TO_PD_DTYPES['default']
+
+
+def add_new_columns(
+        table: str,
+        df: pd.DataFrame,
+        connector: meerschaum.connectors.sql.SQLConnector,
+        debug: bool = False,
+    ) -> bool:
+    """
+    Add new null columns of the correct type to a table from a dataframe.
+    """
+    if not table_exists(table, connector, debug=debug):
+        return False
+    table_obj = get_sqlalchemy_table(table, connector, debug=debug)
 

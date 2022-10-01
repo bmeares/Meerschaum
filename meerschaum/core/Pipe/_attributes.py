@@ -18,12 +18,23 @@ def attributes(self) -> Union[Dict[str, Any], None]:
     An unregistered pipe may still set its parameters.
     Use `meerschaum.Pipe.meta` to retrieve keys from unregistered pipes.
     """
-    from meerschaum.utils.debug import dprint
-    from meerschaum.utils.warnings import warn
-    if '_attributes' not in self.__dict__:
-        if self.id is None:
-            return None
-        self._attributes = self.instance_connector.get_pipe_attributes(self)
+    import time
+    from meerschaum.config import get_config
+    from meerschaum.config._patch import apply_patch_to_config
+    timeout_seconds = get_config('pipes', 'attributes', 'local_cache_timeout_seconds')
+
+    now = time.perf_counter()
+    last_refresh = self.__dict__.get('_attributes_sync_time', None)
+    timed_out = (
+        last_refresh is None
+        or
+        (timeout_seconds is not None and (now - last_refresh) >= timeout_seconds)
+    )
+    if timed_out:
+        self._attributes_sync_time = now
+        local_attributes = self.__dict__.get('_attributes', {})
+        instance_attributes = self.instance_connector.get_pipe_attributes(self)
+        self._attributes = apply_patch_to_config(instance_attributes, local_attributes)
     return self._attributes
 
 
@@ -32,33 +43,27 @@ def parameters(self) -> Optional[Dict[str, Any]]:
     """
     Return the parameters dictionary of the pipe.
     """
-    if '_parameters' not in self.__dict__:
-        if not self.attributes:
-            return None
-        self._parameters = self.attributes['parameters']
-    return self._parameters
+    if 'parameters' not in self.attributes:
+        self.attributes['parameters'] = {}
+    return self.attributes['parameters']
 
 
 @parameters.setter
-def parameters(self, parameters : Dict[str, Any]) -> None:
+def parameters(self, parameters: Dict[str, Any]) -> None:
     """
     Set the parameters dictionary of the in-memory pipe.
-    Call `meerschaum.Pipe.edit` to persist changes.
+    Call `meerschaum.Pipe.edit()` to persist changes.
     """
-    self._parameters = parameters
+    self.attributes['parameters'] = parameters
 
 
 @property
 def columns(self) -> Union[Dict[str, str], None]:
     """
-    If defined, return the `columns` dictionary defined in `meerschaum.Pipe.parameters`.
+    Return the `columns` dictionary defined in `meerschaum.Pipe.parameters`.
     """
-    if not self.parameters:
-        if '_columns' in self.__dict__:
-            return self._columns
-        return None
     if 'columns' not in self.parameters:
-        return None
+        self.parameters['columns'] = {}
     return self.parameters['columns']
 
 
@@ -66,24 +71,18 @@ def columns(self) -> Union[Dict[str, str], None]:
 def columns(self, columns: Dict[str, str]) -> None:
     """
     Override the columns dictionary of the in-memory pipe.
-    Call `meerschaum.Pipe.edit` to persist changes.
+    Call `meerschaum.Pipe.edit()` to persist changes.
     """
-    if not self.parameters:
-        self._columns = columns
-    else:
-        self._parameters['columns'] = columns
+    self._parameters['columns'] = columns
+
 
 @property
 def tags(self) -> Union[List[str], None]:
     """
     If defined, return the `tags` list defined in `meerschaum.Pipe.parameters`.
     """
-    if not self.parameters:
-        if '_tags' in self.__dict__:
-            return self._tags
-        return None
     if 'tags' not in self.parameters:
-        return None
+        self.parameters['tags'] = []
     return self.parameters['tags']
 
 
@@ -94,46 +93,34 @@ def tags(self, _tags: List[str, str]) -> None:
     Call `meerschaum.Pipe.edit` to persist changes.
     """
     from meerschaum.utils.warnings import error
-    from meerschaum.config.static import _static_config
-    negation_prefix = _static_config()['system']['fetch_pipes_keys']['negation_prefix']
+    from meerschaum.config.static import STATIC_CONFIG
+    negation_prefix = STATIC_CONFIG['system']['fetch_pipes_keys']['negation_prefix']
     for t in _tags:
         if t.startswith(negation_prefix):
             error(f"Tags cannot begin with '{negation_prefix}'.")
-    if not self.parameters:
-        self._tags = _tags
-    else:
-        self._parameters['tags'] = _tags
+    self.parameters['tags'] = _tags
+
 
 @property
 def dtypes(self) -> Union[Dict[str, Any], None]:
     """
     If defined, return the `dtypes` dictionary defined in `meerschaum.Pipe.parameters`.
     """
-    if self.parameters is None or self.parameters.get('dtypes', None) is None:
-        if self.__dict__.get('_dtypes', None):
-            return self._dtypes
-        _dtypes = self.infer_dtypes(persist=False)
-        if not self.exists():
-            return _dtypes
-        self._dtypes = _dtypes
-        return self._dtypes
-
+    if not self.parameters.get('dtypes', None):
+        self.parameters['dtypes'] = self.infer_dtypes(persist=False)
     return self.parameters['dtypes']
 
 
 @dtypes.setter
 def dtypes(self, _dtypes: Dict[str, Any]) -> None:
     """
-    Override the columns dictionary of the in-memory pipe.
-    Call `meerschaum.Pipe.edit` to persist changes.
+    Override the dtypes dictionary of the in-memory pipe.
+    Call `meerschaum.Pipe.edit()` to persist changes.
     """
-    if not self.parameters:
-        self._dtypes = _dtypes
-    else:
-        self._parameters['dtypes'] = _dtypes
+    self.parameters['dtypes'] = _dtypes
 
 
-def get_columns(self, *args: str, error: bool = True) -> Union[str, Tuple[str]]:
+def get_columns(self, *args: str, error: bool = False) -> Union[str, Tuple[str]]:
     """
     Check if the requested columns are defined.
 
@@ -142,7 +129,7 @@ def get_columns(self, *args: str, error: bool = True) -> Union[str, Tuple[str]]:
     *args: str
         The column names to be retrieved.
         
-    error: bool, default True
+    error: bool, default False
         If `True`, raise an `Exception` if the specified column is not defined.
 
     Returns
@@ -155,7 +142,7 @@ def get_columns(self, *args: str, error: bool = True) -> Union[str, Tuple[str]]:
     >>> pipe.columns = {'datetime': 'dt', 'id': 'id'}
     >>> pipe.get_columns('datetime', 'id')
     ('dt', 'id')
-    >>> pipe.get_columns('value')
+    >>> pipe.get_columns('value', error=True)
     Exception:  🛑 Missing 'value' column for Pipe('test', 'test').
     """
     from meerschaum.utils.warnings import error as _error, warn
@@ -176,6 +163,7 @@ def get_columns(self, *args: str, error: bool = True) -> Union[str, Tuple[str]]:
     if len(col_names) == 1:
         return col_names[0]
     return tuple(col_names)
+
 
 def get_columns_types(self, debug: bool = False) -> Union[Dict[str, str], None]:
     """
@@ -209,6 +197,7 @@ def get_id(self, **kw: Any) -> Union[int, None]:
     """
     return self.instance_connector.get_pipe_id(self, **kw)
 
+
 @property
 def id(self) -> Union[int, None]:
     """
@@ -217,6 +206,7 @@ def id(self) -> Union[int, None]:
     if not ('_id' in self.__dict__ and self._id):
         self._id = self.get_id()
     return self._id
+
 
 def get_val_column(self, debug: bool = False) -> Union[str, None]:
     """
@@ -252,11 +242,11 @@ def get_val_column(self, debug: bool = False) -> Union[str, None]:
             dprint('No columns could be determined. Returning...')
         return None
     try:
-        dt_name = self.get_columns('datetime')
+        dt_name = self.get_columns('datetime', error=False)
     except Exception as e:
         dt_name = None
     try:
-        id_name = self.get_columns('id')
+        id_name = self.get_columns('id', errors=False)
     except Exception as e:
         id_name = None
 
@@ -330,17 +320,15 @@ def target(self) -> str:
       - `target_table`
       - `target_table_name`
     """
-    _target_key = '_target'
-    if _target_key not in self.__dict__:
-        if not self.parameters:
-            self.__dict__[_target_key] = self._target_legacy()
-        else:
-            potential_keys = ('target', 'target_name', 'target_table', 'target_table_name')
-            for k in potential_keys:
-                if k in self.parameters:
-                    self.__dict__[_target_key] = self.parameters[k]
-                    break
-    return self.__dict__.get(_target_key, self._target_legacy())
+    if 'target' not in self.parameters:
+        target = self._target_legacy()
+        potential_keys = ('target_name', 'target_table', 'target_table_name')
+        for k in potential_keys:
+            if k in self.parameters:
+                target = self.parameters[k]
+                break
+        self.target = target
+    return self.parameters['target']
 
 
 def _target_legacy(self) -> str:
@@ -360,10 +348,7 @@ def target(self, _target: str) -> None:
     Override the target of the in-memory pipe.
     Call `meerschaum.Pipe.edit` to persist changes.
     """
-    if not self.parameters:
-        self._target = _target
-    else:
-        self._parameters['target'] = _target
+    self.parameters['target'] = _target
 
 
 def guess_datetime(self) -> Union[str, None]:
