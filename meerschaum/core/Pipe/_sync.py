@@ -351,7 +351,7 @@ def get_sync_time(
 
     """
     from meerschaum.utils.warnings import error, warn
-    if self.columns is None:
+    if not self.columns:
         warn(
             f"No columns found in parameters for {self}.",
             stack = False,

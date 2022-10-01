@@ -116,9 +116,8 @@ def edit_pipe(
 
     values = {
         'parameters' : (
-            #  json.dumps(parameters) if self.flavor not in json_flavors
-            #  else parameters
-            json.dumps(parameters) if self.flavor in ('duckdb',) else parameters
+            json.dumps(parameters) if self.flavor in ('duckdb',)
+            else parameters
         ),
     }
     q = sqlalchemy.update(pipes).values(**values).where(
@@ -127,11 +126,9 @@ def edit_pipe(
 
     result = self.exec(q, debug=debug)
     message = (
-        f"Successfully edited {pipe.__repr__()}."
-        if result is not None else f"Failed to edit {pipe.__repr__()}."
+        f"Successfully edited {pipe}."
+        if result is not None else f"Failed to edit {pipe}."
     )
-    if result is None:
-        message = f"Failed to edit {pipe.__repr__()}."
     return (result is not None), message
 
 
@@ -672,7 +669,7 @@ def get_pipe_attributes(
         self,
         pipe: meerschaum.Pipe,
         debug: bool = False,
-    ) -> Optional[Mapping[Any, Any]]:
+    ) -> Dict[str, Any]:
     """
     Get a Pipe's attributes dictionary.
     """
@@ -684,7 +681,7 @@ def get_pipe_attributes(
     pipes = get_tables(mrsm_instance=self, debug=debug)['pipes']
 
     if pipe.get_id(debug=debug) is None:
-        return None
+        return {}
 
     try:
         q = sqlalchemy.select([pipes]).where(pipes.c.pipe_id == pipe.id)
@@ -700,7 +697,7 @@ def get_pipe_attributes(
         traceback.print_exc()
         warn(e)
         print(pipe)
-        return None
+        return {}
 
     ### handle non-PostgreSQL databases (text vs JSON)
     if not isinstance(attributes.get('parameters', None), dict):
@@ -711,7 +708,7 @@ def get_pipe_attributes(
                 parameters = json.loads(parameters)
             attributes['parameters'] = parameters
         except Exception as e:
-            attributes['parameters'] = dict()
+            attributes['parameters'] = {}
 
     return attributes
 
@@ -736,7 +733,7 @@ def sync_pipe(
     pipe: meerschaum.Pipe
         The Meerschaum Pipe instance into which to sync the data.
 
-    df: Union[pandas.DataFrame, str, Dict[Any, Any]]
+    df: Union[pandas.DataFrame, str, Dict[Any, Any], List[Dict[str, Any]]]
         An optional DataFrame or equivalent to sync into the pipe.
         Defaults to `None`.
 
@@ -813,6 +810,10 @@ def sync_pipe(
     if not pipe.exists(debug=debug):
         check_existing = False
         is_new = True
+    else:
+        ### Check for new columns.
+        from meerschaum.utils.sql import add_new_columns
+        add_new_columns(pipe.target, df, debug=debug)
 
     if not isinstance(df, pd.DataFrame):
         df = pipe.enforce_dtypes(df, debug=debug)

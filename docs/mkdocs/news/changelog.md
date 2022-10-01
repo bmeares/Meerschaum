@@ -1,8 +1,35 @@
 # 🪵 Changelog
 
+## 1.3.x Releases
+
+This is the current release cycle, so stay tuned for future releases!
+
+### v1.3.0
+
+**Improvements**
+
+  - **Added a default 60-second timeout for pipe attributes.**  
+    All parameter properties (e.g. `Pipe.columns`, `Pipe.target`, `Pipe.dtypes`, etc.) will sync with the database every 60 seconds. The in-memory attributes will be patched on top of the database values, so your unsaved state won't be lost (persist your state with `Pipe.edit()`). You can change the timeout duration with `mrsm edit config pipes` under the keys `attributes:local_cache_timeout_seconds`. To disable this caching behavior, set the value to `null`.
+
+**Breaking Changes**
+  
+  - **Removed `None` as default for uninitalized properties for pipes.**  
+    Parameter properties like `Pipe.columns`, `Pipe.parameters`, etc. will now always return a value, even if a pipe is not registered.
+  - **`Pipe.get_columns()` now sets `error` to `False` by default.**  
+    This fixes several breaking datetime checks, such as `Pipe.get_sync_time()`.
+
+**Bugfixes**
+
+  - 
+
 ## 1.2.x Releases
 
-This is the current release cycle, so future features will be updated below.
+This series brought many industry-ready features, such as the `@make_connector` decorator, improvements to the virtual environment system, the environment variable `MRSM_PLUGINS_DIR`, and much more.
+
+### v1.2.9
+
+- **Added support for Windows junctions for virtual environments.**  
+  This included many changes to fix functionality on Windows. For example, the addition of the `MRSM_PLUGINS_DIR` environment variable broke Meerschaum on Windows, because Windows requires administrator rights to create symlinks.
 
 ### v1.2.8
 
