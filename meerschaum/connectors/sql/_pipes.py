@@ -772,7 +772,7 @@ def sync_pipe(
     from meerschaum.utils.debug import dprint
     from meerschaum.utils.packages import import_pandas
     from meerschaum.utils.misc import parse_df_datetimes
-    from meerschaum.utils.sql import get_update_queries, sql_item_name
+    from meerschaum.utils.sql import get_update_queries, sql_item_name, get_add_columns_query
     from meerschaum import Pipe
     import time
     if df is None:
@@ -807,13 +807,16 @@ def sync_pipe(
 
     ### if table does not exist, create it with indices
     is_new = False
+    add_cols_query = None
     if not pipe.exists(debug=debug):
         check_existing = False
         is_new = True
     else:
         ### Check for new columns.
-        from meerschaum.utils.sql import add_new_columns
-        add_new_columns(pipe.target, df, debug=debug)
+        add_cols_query = get_add_columns_query(pipe.target, df, self, debug=debug)
+        if add_cols_query:
+            if not self.exec(add_cols_query, debug=debug):
+                warn(f"Failed to add new columns to {pipe}.")
 
     if not isinstance(df, pd.DataFrame):
         df = pipe.enforce_dtypes(df, debug=debug)

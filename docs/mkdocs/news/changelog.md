@@ -20,7 +20,7 @@ This is the current release cycle, so stay tuned for future releases!
 
 **Bugfixes**
 
-  - 
+  - **Fix tables that begin with underscores in Oracle.**
 
 ## 1.2.x Releases
 
