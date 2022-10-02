@@ -197,29 +197,36 @@ class Pipe:
         self.metric_key = metric
         self.location_key = location
 
+        self._attributes = {
+            'connector_keys': self.connector_keys,
+            'metric_key': self.metric_key,
+            'location_key': self.location_key,
+            'parameters': {},
+        }
+
         ### only set parameters if values are provided
         if isinstance(parameters, dict):
-            self.parameters = parameters
+            self._attributes['parameters'] = parameters
         elif parameters is not None:
             warn(f"The provided parameters are of invalid type '{type(parameters)}'.")
 
         if isinstance(columns, dict):
-            self.columns = columns
+            self._attributes['parameters']['columns'] = columns
         elif columns is not None:
             warn(f"The provided columns are of invalid type '{type(columns)}'.")
 
         if isinstance(tags, (list, tuple)):
-            self.tags = tags
+            self._attributes['parameters']['tags'] = tags
         elif tags is not None:
             warn(f"The provided tags are of invalid type '{type(tags)}'.")
 
         if isinstance(target, str):
-            self.target = target
+            self._attributes['parameters']['target'] = target
         elif target is not None:
             warn(f"The provided target is of invalid type '{type(target)}'.")
 
         if isinstance(dtypes, dict):
-            self.dtypes = dtypes
+            self._attributes['parameters']['dtypes'] = dtypes
         elif dtypes is not None:
             warn(f"The provided dtypes are of invalid type '{type(dtypes)}'.")
 
@@ -230,6 +237,7 @@ class Pipe:
         _mrsm_instance = mrsm_instance if mrsm_instance is not None else instance
         if _mrsm_instance is None:
             _mrsm_instance = get_config('meerschaum', 'instance', patch=True)
+
         if not isinstance(_mrsm_instance, str):
             self._instance_connector = _mrsm_instance
             self.instance_keys = str(_mrsm_instance)

@@ -880,35 +880,38 @@ def filter_unseen_df(
         return new_df
     from meerschaum.utils.packages import import_pandas
     pd = import_pandas(debug=debug)
-    old_cols = list(old_df.columns)
-    try:
-        ### Order matters when checking equality.
-        new_df = new_df[old_cols]
-    except Exception as e:
-        from meerschaum.utils.warnings import warn
-        warn(
-            "Was not able to cast old columns onto new DataFrame. " +
-            f"Are both DataFrames the same shape? Error:\n{e}"
-        )
-        return None
+    same_cols = set(new_df.columns) == set(old_df.columns)
+    if same_cols:
+        try:
+            ### Order matters when checking equality.
+            new_df = new_df[old_df.columns]
+        except Exception as e:
+            from meerschaum.utils.warnings import warn
+            warn(
+                "Was not able to cast old columns onto new DataFrame. " +
+                f"Are both DataFrames the same shape? Error:\n{e}"
+            )
+        #  return None
 
     ### assume the old_df knows what it's doing, even if it's technically wrong.
     if dtypes is None:
         dtypes = dict(old_df.dtypes)
-    try:
-        new_df = new_df.astype(dtypes)
-        cast_cols = False
-    except Exception as e:
-        warn(
-            f"Was not able to cast the new DataFrame to the given dtypes.\n{e}"
-        )
-        cast_cols = True
+    cast_cols = True
+    if set(new_df.columns) == set(old_df.columns):
+        try:
+            new_df = new_df.astype(dtypes)
+            cast_cols = False
+        except Exception as e:
+            warn(
+                f"Was not able to cast the new DataFrame to the given dtypes.\n{e}"
+            )
     if cast_cols:
         for col, dtype in dtypes.items():
-            try:
-                new_df[col] = new_df[col].astype(dtype)
-            except Exception as e:
-                warn(f"Was not able to cast column '{col}' to dtype '{dtype}'.\n{e}")
+            if col in new_df.columns:
+                try:
+                    new_df[col] = new_df[col].astype(dtype)
+                except Exception as e:
+                    warn(f"Was not able to cast column '{col}' to dtype '{dtype}'.\n{e}")
 
     if len(old_df) == 0:
         return new_df

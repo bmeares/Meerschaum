@@ -73,7 +73,7 @@ def columns(self, columns: Dict[str, str]) -> None:
     Override the columns dictionary of the in-memory pipe.
     Call `meerschaum.Pipe.edit()` to persist changes.
     """
-    self._parameters['columns'] = columns
+    self.parameters['columns'] = columns
 
 
 @property

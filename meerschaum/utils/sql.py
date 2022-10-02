@@ -147,19 +147,108 @@ DB_FLAVORS_CAST_DTYPES = {
 ### Map pandas dtypes to flavor-specific dtypes.
 PD_TO_DB_DTYPES_FLAVORS: Dict[str, Dict[str, str]] = {
     'Int64': {
-        'mysql': 'INT',
+        'timescaledb': 'BIGINT',
+        'postgresql': 'BIGINT',
+        'mariadb': 'BIGINT',
+        'mysql': 'BIGINT',
+        'mssql': 'BIGINT',
+        'oracle': 'NUMBER',
+        'sqlite': 'BIGINT',
+        'duckdb': 'BIGINT',
+        'citus': 'BIGINT',
+        'cockroachdb': 'BIGINT',
+        'default': 'INT',
     },
     'int64': {
-        'mysql': 'INT',
+        'timescaledb': 'BIGINT',
+        'postgresql': 'BIGINT',
+        'mariadb': 'BIGINT',
+        'mysql': 'BIGINT',
+        'mssql': 'BIGINT',
+        'oracle': 'NUMBER',
+        'sqlite': 'BIGINT',
+        'duckdb': 'BIGINT',
+        'citus': 'BIGINT',
+        'cockroachdb': 'BIGINT',
+        'default': 'INT',
+    },
+    'float64': {
+        'timescaledb': 'DOUBLE PRECISION',
+        'postgresql': 'DOUBLE PRECISION',
+        'mariadb': 'DOUBLE',
+        'mysql': 'DOUBLE',
+        'mssql': 'FLOAT',
+        'oracle': 'FLOAT',
+        'sqlite': 'FLOAT',
+        'duckdb': 'DOUBLE PRECISION',
+        'citus': 'DOUBLE PRECISION',
+        'cockroachdb': 'DOUBLE PRECISION',
+        'default': 'DOUBLE',
     },
     'datetime64[ns]': {
-        'mysql': '',
+        'timescaledb': 'TIMESTAMP',
+        'postgresql': 'TIMESTAMP',
+        'mariadb': 'DATETIME',
+        'mysql': 'DATETIME',
+        'mssql': 'DATETIME',
+        'oracle': 'DATE',
+        'sqlite': 'DATETIME',
+        'duckdb': 'TIMESTAMP',
+        'citus': 'TIMESTAMP',
+        'cockroachdb': 'TIMESTAMP',
+        'default': 'DATETIME',
+    },
+    'datetime64[ns, UTC]': {
+        'timescaledb': 'TIMESTAMP',
+        'postgresql': 'TIMESTAMP',
+        'mariadb': 'TIMESTAMP',
+        'mysql': 'TIMESTAMP',
+        'mssql': 'TIMESTAMP',
+        'oracle': 'TIMESTAMP',
+        'sqlite': 'TIMESTAMP',
+        'duckdb': 'TIMESTAMP',
+        'citus': 'TIMESTAMP',
+        'cockroachdb': 'TIMESTAMP',
+        'default': 'TIMESTAMP',
     },
     'bool': {
-        'mysql': '',
+        'timescaledb': 'BOOLEAN',
+        'postgresql': 'BOOLEAN',
+        'mariadb': 'TINYINT',
+        'mysql': 'TINYINT',
+        'mssql': 'BIT',
+        'oracle': 'INTEGER',
+        'sqlite': 'BOOLEAN',
+        'duckdb': 'BOOLEAN',
+        'citus': 'BOOLEAN',
+        'cockroachdb': 'BOOLEAN',
+        'default': 'BOOLEAN',
     },
     'object': {
-        'mysql': '',
+        'timescaledb': 'TEXT',
+        'postgresql': 'TEXT',
+        'mariadb': 'TEXT',
+        'mysql': 'TEXT',
+        'mssql': 'NVARCHAR(MAX)',
+        'oracle': 'CLOB',
+        'sqlite': 'TEXT',
+        'duckdb': 'TEXT',
+        'citus': 'TEXT',
+        'cockroachdb': 'TEXT',
+        'default': 'TEXT',
+    },
+    'json': {
+        'timescaledb': 'JSON',
+        'postgresql': 'JSON',
+        'mariadb': 'LONGTEXT',
+        'mysql': 'LONGTEXT',
+        'mssql': 'NVARCHAR(MAX)',
+        'oracle': 'CLOB',
+        'sqlite': 'JSON',
+        'duckdb': 'JSON',
+        'citus': 'JSON',
+        'cockroachdb': 'JSON',
+        'default': 'TEXT',
     },
 }
 
@@ -429,7 +518,7 @@ def pg_capital(s: str) -> str:
     """
     if '"' in s:
         return s
-    needs_quotes = False
+    needs_quotes = s.startswith('_')
     for c in str(s):
         if ord(c) < ord('a') or ord(c) > ord('z'):
             if not c.isdigit() and c != '_':
@@ -568,6 +657,7 @@ def table_exists(
 def get_sqlalchemy_table(
         table: str,
         connector: Optional[meerschaum.connectors.sql.SQLConnector] = None,
+        refresh: bool = False,
         debug: bool = False,
     ) -> 'sqlalchemy.Table':
     """
@@ -580,6 +670,9 @@ def get_sqlalchemy_table(
         
     connector: Optional[meerschaum.connectors.sql.SQLConnector], default None:
         The connector to the database which holds the table. 
+
+    refresh: bool, default False
+        If `True`, rebuild the cached table object.
 
     debug: bool, default False:
         Verbosity toggle.
@@ -595,6 +688,8 @@ def get_sqlalchemy_table(
 
     from meerschaum.connectors.sql.tables import get_tables
     from meerschaum.utils.packages import attempt_import
+    if refresh:
+        connector.metadata.clear()
     tables = get_tables(mrsm_instance=connector, debug=debug)
     sqlalchemy = attempt_import('sqlalchemy')
     if str(table) not in tables:
@@ -713,16 +808,78 @@ def get_pd_type(db_type: str) -> str:
     return DB_TO_PD_DTYPES['default']
 
 
-def add_new_columns(
+def get_db_type(pd_type: str, flavor: str = 'default') -> str:
+    """
+    Parse a Pandas data type into a flavor's database type.
+
+    Parameters
+    ----------
+    pd_type: str
+        The Pandas datatype. This must be a string, not the actual dtype object.
+
+    flavor: str, default 'default'
+        The flavor of the database to be mapped to.
+
+    Returns
+    -------
+    The database data type for the incoming Pandas data type.
+    If nothing can be found, a warning will be thrown and 'TEXT' will be returned.
+    """
+    from meerschaum.utils.warnings import warn
+    if pd_type not in PD_TO_DB_DTYPES_FLAVORS:
+        warn(f"Unknown Pandas data type '{pd_type}'. Falling back to 'TEXT'.")
+        return 'TEXT'
+    flavor_types = PD_TO_DB_DTYPES_FLAVORS.get(pd_type, {'default': 'TEXT'})
+    default_flavor_type = flavor_types.get('default', 'TEXT')
+    if flavor not in flavor_types:
+        warn(f"Unknown flavor '{flavor}'. Falling back to '{default_flavor_type}' (default).")
+    return flavor_types.get(flavor, default_flavor_type)
+
+
+def get_add_columns_query(
         table: str,
         df: pd.DataFrame,
-        connector: meerschaum.connectors.sql.SQLConnector,
+        connector: mrsm.connectors.SQLConnector,
         debug: bool = False,
-    ) -> bool:
+    ) -> Union[str, None]:
     """
     Add new null columns of the correct type to a table from a dataframe.
+
+    Parameters
+    ----------
+    table: str
+        The name of the table to be altered.
+
+    df: pd.DataFrame
+        The pandas DataFrame which contains new columns.
+
+    connector: mrsm.connectors.SQLConnector
+        The connector to the database on which the table resides.
+
+    Returns
+    -------
+    The `ALTER TABLE` SQL query to be executed on the provided connector,
+    or `None` if no query can be made.
     """
     if not table_exists(table, connector, debug=debug):
-        return False
-    table_obj = get_sqlalchemy_table(table, connector, debug=debug)
+        return None
 
+    table_obj = get_sqlalchemy_table(table, connector, refresh=True, debug=debug)
+    df_cols_types = {col: str(typ) for col, typ in df.dtypes.items()}
+    db_cols_types = {col: get_pd_type(str(typ)) for col, typ in table_obj.columns.items()}
+    new_cols = set(df_cols_types) - set(db_cols_types)
+    if not new_cols:
+        return None
+
+    new_cols_types = {
+        col: get_db_type(
+            df_cols_types[col],
+            connector.flavor
+        ) for col in new_cols
+    }
+
+    query = "ALTER TABLE " + sql_item_name(table, connector.flavor)
+    for col, typ in new_cols_types.items():
+        query += "\nADD " + sql_item_name(col, connector.flavor) + " " + typ + ","
+    query = query[:-1]
+    return query
