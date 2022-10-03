@@ -340,10 +340,11 @@ def exec(
 
     Parameters
     ----------
-    query: str
+    query: Union[str, List[str], Tuple[str]]
         The query to execute.
+        If `query` is a list or tuple, call `self.exec_queries()` instead.
 
-    *args: Any
+    args: Any
         Arguments passed to `sqlalchemy.engine.execute`.
         
     silent: bool, default False
@@ -352,22 +353,31 @@ def exec(
     commit: Optional[bool], default None
         If `True`, commit the changes after execution.
         Causes issues with flavors like `'mssql'`.
+        This does not apply if `query` is a list of strings.
 
     close: Optional[bool], default None
         If `True`, close the connection after execution.
         Causes issues with flavors like `'mssql'`.
+        This does not apply if `query` is a list of strings.
 
     with_connection: bool, default False
         If `True`, return a tuple including the connection object.
+        This does not apply if `query` is a list of strings.
     
-    **kw: Any :
-    See `args`.
-
     Returns
     -------
     The `sqlalchemy` result object, or a tuple with the connection if `with_connection` is provided.
 
     """
+    if isinstance(query, (list, tuple)):
+        return self.exec_queries(
+            list(query),
+            *args,
+            silent = silent,
+            debug = debug,
+            **kw
+        )
+
     from meerschaum.utils.packages import attempt_import
     sqlalchemy = attempt_import("sqlalchemy")
     if debug:
@@ -400,6 +410,54 @@ def exec(
             return result, connection
 
     return result
+
+
+def exec_queries(
+        self,
+        queries: List[str],
+        break_on_error: bool = False,
+        silent: bool = False,
+        debug: bool = False,
+    ) -> List[sqlalchemy.engine.cursor.LegacyCursorResult]:
+    """
+    Execute a list of queries in a single transaction.
+
+    Parameters
+    ----------
+    queries: List[str]
+        The queries in the transaction to be executed.
+
+    break_on_error: bool, default False
+        If `True`, stop executing when a query fails.
+
+    silent: bool, default False
+        If `True`, suppress warnings.
+
+    Returns
+    -------
+    A list of SQLAlchemy results.
+    """
+    from meerschaum.utils.warnings import warn
+    from meerschaum.utils.debug import dprint
+
+    results = []
+    with self.engine.begin() as connection:
+        for query in queries:
+            if debug:
+                dprint(query)
+            try:
+                result = connection.execute(query)
+            except Exception as e:
+                msg = (f"Encountered error while executing:\n{e}")
+                if not silent:
+                    warn(msg)
+                elif debug:
+                    dprint(msg)
+                result = None
+            results.append(result)
+            if result is None and break_on_error:
+                break
+    return results
 
 
 def to_sql(
@@ -537,6 +595,7 @@ def to_sql(
     if as_dict:
         return stats
     return success
+
 
 def psql_insert_copy(
         table: pandas.io.sql.SQLTable,

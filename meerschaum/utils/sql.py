@@ -83,6 +83,10 @@ update_queries = {
         """,
     ],
 }
+hypertable_queries = {
+    'timescaledb': 'SELECT hypertable_size(\'{table_name}\')',
+    'citus': 'SELECT citus_table_size(\'{table_name}\')',
+}
 table_wrappers = {
     'default'    : ('"', '"'),
     'timescaledb': ('"', '"'),
@@ -692,7 +696,7 @@ def get_sqlalchemy_table(
         connector.metadata.clear()
     tables = get_tables(mrsm_instance=connector, debug=debug)
     sqlalchemy = attempt_import('sqlalchemy')
-    if str(table) not in tables:
+    if refresh or str(table) not in tables:
         tables[str(table)] = sqlalchemy.Table(
             str(table),
             connector.metadata,
@@ -834,52 +838,3 @@ def get_db_type(pd_type: str, flavor: str = 'default') -> str:
     if flavor not in flavor_types:
         warn(f"Unknown flavor '{flavor}'. Falling back to '{default_flavor_type}' (default).")
     return flavor_types.get(flavor, default_flavor_type)
-
-
-def get_add_columns_query(
-        table: str,
-        df: pd.DataFrame,
-        connector: mrsm.connectors.SQLConnector,
-        debug: bool = False,
-    ) -> Union[str, None]:
-    """
-    Add new null columns of the correct type to a table from a dataframe.
-
-    Parameters
-    ----------
-    table: str
-        The name of the table to be altered.
-
-    df: pd.DataFrame
-        The pandas DataFrame which contains new columns.
-
-    connector: mrsm.connectors.SQLConnector
-        The connector to the database on which the table resides.
-
-    Returns
-    -------
-    The `ALTER TABLE` SQL query to be executed on the provided connector,
-    or `None` if no query can be made.
-    """
-    if not table_exists(table, connector, debug=debug):
-        return None
-
-    table_obj = get_sqlalchemy_table(table, connector, refresh=True, debug=debug)
-    df_cols_types = {col: str(typ) for col, typ in df.dtypes.items()}
-    db_cols_types = {col: get_pd_type(str(typ)) for col, typ in table_obj.columns.items()}
-    new_cols = set(df_cols_types) - set(db_cols_types)
-    if not new_cols:
-        return None
-
-    new_cols_types = {
-        col: get_db_type(
-            df_cols_types[col],
-            connector.flavor
-        ) for col in new_cols
-    }
-
-    query = "ALTER TABLE " + sql_item_name(table, connector.flavor)
-    for col, typ in new_cols_types.items():
-        query += "\nADD " + sql_item_name(col, connector.flavor) + " " + typ + ","
-    query = query[:-1]
-    return query
