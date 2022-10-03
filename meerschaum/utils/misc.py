@@ -831,6 +831,54 @@ def df_from_literal(
     return pd.DataFrame({dt_name : [now], val_name : [val]})
 
 
+def add_missing_cols_to_df(df: pd.DataFrame, dtypes: Dict[str, Any]) -> pd.DataFrame:
+    """
+    Add columns from the dtypes dictionary as null columns to a new DataFrame.
+
+    Parameters
+    ----------
+    df: pd.DataFrame
+        The dataframe we should copy and add null columns.
+
+    dtypes:
+        The data types dictionary which may contain keys not present in `df.columns`.
+
+    Returns
+    -------
+    A new `DataFrame` with the keys from `dtypes` added as null columns.
+    If `df.dtypes` is the same as `dtypes`, then return a reference to `df`.
+    NOTE: This will not ensure that dtypes are enforced!
+
+    Examples
+    --------
+    >>> import pandas as pd
+    >>> df = pd.DataFrame([{'a': 1}])
+    >>> dtypes = {'b': 'Int64'}
+    >>> add_missing_cols_to_df(df, dtypes)
+       a     b
+       0  1  <NA>
+    >>> add_missing_cols_to_df(df, dtypes).dtypes
+    a    int64
+    b    Int64
+    dtype: object
+    >>> add_missing_cols_to_df(df, {'a': 'object'}).dtypes
+    a    int64
+    dtype: object
+    >>> 
+    """
+    if set(df.columns) == set(dtypes):
+        return df
+    
+    df = df.copy()
+    for col, typ in dtypes.items():
+        if col in df.columns:
+            continue
+        df[col] = None
+        df[col] = df[col].astype(typ)
+    
+    return df
+
+
 def filter_unseen_df(
         old_df: 'pd.DataFrame',
         new_df: 'pd.DataFrame',
@@ -876,25 +924,36 @@ def filter_unseen_df(
     ```
 
     """
-    if old_df is None:
+    if old_df is None or len(old_df) == 0:
         return new_df
+
     from meerschaum.utils.packages import import_pandas
     pd = import_pandas(debug=debug)
-    old_cols = list(old_df.columns)
+
+    new_df_dtypes = dict(new_df.dtypes)
+    old_df_dtypes = dict(old_df.dtypes)
+
+    same_cols = set(new_df.columns) == set(old_df.columns)
+    if not same_cols:
+        new_df = add_missing_cols_to_df(new_df, old_df_dtypes)
+        old_df = add_missing_cols_to_df(old_df, new_df_dtypes)
+
     try:
         ### Order matters when checking equality.
-        new_df = new_df[old_cols]
+        new_df = new_df[old_df.columns]
     except Exception as e:
         from meerschaum.utils.warnings import warn
         warn(
             "Was not able to cast old columns onto new DataFrame. " +
-            f"Are both DataFrames the same shape? Error:\n{e}"
+            f"Are both DataFrames the same shape? Error:\n{e}",
+            stacklevel = 3,
         )
-        return None
+        return new_df[list(new_df_dtypes.keys())]
 
     ### assume the old_df knows what it's doing, even if it's technically wrong.
     if dtypes is None:
         dtypes = dict(old_df.dtypes)
+    cast_cols = True
     try:
         new_df = new_df.astype(dtypes)
         cast_cols = False
@@ -902,20 +961,17 @@ def filter_unseen_df(
         warn(
             f"Was not able to cast the new DataFrame to the given dtypes.\n{e}"
         )
-        cast_cols = True
     if cast_cols:
         for col, dtype in dtypes.items():
-            try:
-                new_df[col] = new_df[col].astype(dtype)
-            except Exception as e:
-                warn(f"Was not able to cast column '{col}' to dtype '{dtype}'.\n{e}")
-
-    if len(old_df) == 0:
-        return new_df
+            if col in new_df.columns:
+                try:
+                    new_df[col] = new_df[col].astype(dtype)
+                except Exception as e:
+                    warn(f"Was not able to cast column '{col}' to dtype '{dtype}'.\n{e}")
 
     return new_df[
         ~new_df.fillna(pd.NA).apply(tuple, 1).isin(old_df.fillna(pd.NA).apply(tuple, 1))
-    ].reset_index(drop=True)
+    ].reset_index(drop=True)[list(new_df_dtypes.keys())]
 
 
 def replace_pipes_in_dict(

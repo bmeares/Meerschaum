@@ -90,6 +90,7 @@ class Pipe:
         dtypes,
         get_columns,
         get_columns_types,
+        get_indices,
         tags,
         get_id,
         id,
@@ -166,7 +167,7 @@ class Pipe:
             If `True`, cache fetched data into a local database file.
             Defaults to `False`.
         """
-        from meerschaum.utils.warnings import error
+        from meerschaum.utils.warnings import error, warn
         if (not connector and not connector_keys) or (not metric and not metric_key):
             error(
                 "Please provide strings for the connector and metric\n    "
@@ -186,8 +187,8 @@ class Pipe:
         if location in ('[None]', 'None'):
             location = None
 
-        from meerschaum.config.static import _static_config
-        negation_prefix = _static_config()['system']['fetch_pipes_keys']['negation_prefix']
+        from meerschaum.config.static import STATIC_CONFIG
+        negation_prefix = STATIC_CONFIG['system']['fetch_pipes_keys']['negation_prefix']
         for k in (connector, metric, location, *(tags or [])):
             if str(k).startswith(negation_prefix):
                 error(f"A pipe's keys and tags cannot start with the prefix '{negation_prefix}'.")
@@ -197,30 +198,38 @@ class Pipe:
         self.metric_key = metric
         self.location_key = location
 
+        self._attributes = {
+            'connector_keys': self.connector_keys,
+            'metric_key': self.metric_key,
+            'location_key': self.location_key,
+            'parameters': {},
+        }
+
         ### only set parameters if values are provided
-        if parameters is not None:
-            self._parameters = parameters
+        if isinstance(parameters, dict):
+            self._attributes['parameters'] = parameters
+        elif parameters is not None:
+            warn(f"The provided parameters are of invalid type '{type(parameters)}'.")
 
-        if columns is not None:
-            if self.__dict__.get('_parameters', None) is None:
-                self._parameters = {}
-            self._parameters['columns'] = columns
+        if isinstance(columns, dict):
+            self._attributes['parameters']['columns'] = columns
+        elif columns is not None:
+            warn(f"The provided columns are of invalid type '{type(columns)}'.")
 
-        if tags is not None:
-            if self.__dict__.get('_parameters', None) is None:
-                self._parameters = {}
-            self._parameters['tags'] = tags
+        if isinstance(tags, (list, tuple)):
+            self._attributes['parameters']['tags'] = tags
+        elif tags is not None:
+            warn(f"The provided tags are of invalid type '{type(tags)}'.")
 
-        if target is not None:
-            if self.__dict__.get('_parameters', None) is None:
-                self._parameters = {}
-            self._parameters['target'] = target
+        if isinstance(target, str):
+            self._attributes['parameters']['target'] = target
+        elif target is not None:
+            warn(f"The provided target is of invalid type '{type(target)}'.")
 
-        if dtypes is not None:
-            if self.__dict__.get('_parameters', None) is None:
-                self._parameters = {}
-            self._parameters['dtypes'] = dtypes
-
+        if isinstance(dtypes, dict):
+            self._attributes['parameters']['dtypes'] = dtypes
+        elif dtypes is not None:
+            warn(f"The provided dtypes are of invalid type '{type(dtypes)}'.")
 
         ### NOTE: The parameters dictionary is {} by default.
         ###       A Pipe may be registered without parameters, then edited,
@@ -229,6 +238,7 @@ class Pipe:
         _mrsm_instance = mrsm_instance if mrsm_instance is not None else instance
         if _mrsm_instance is None:
             _mrsm_instance = get_config('meerschaum', 'instance', patch=True)
+
         if not isinstance(_mrsm_instance, str):
             self._instance_connector = _mrsm_instance
             self.instance_keys = str(_mrsm_instance)
@@ -237,14 +247,11 @@ class Pipe:
 
         self._cache = cache and get_config('system', 'experimental', 'cache')
 
+
     @property
     def meta(self):
         """Simulate the MetaPipe model without importing FastAPI."""
-        refresh = False
         if '_meta' not in self.__dict__:
-            refresh = True
-
-        if refresh:
             self._meta = {
                 'connector_keys' : self.connector_keys,
                 'metric_key'     : self.metric_key,
@@ -252,6 +259,7 @@ class Pipe:
                 'instance'       : self.instance_keys,
             }
         return self._meta
+
 
     @property
     def instance_connector(self) -> Union[InstanceConnector, None]:

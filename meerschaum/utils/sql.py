@@ -68,20 +68,24 @@ update_queries = {
         )
     """,
     'sqlite_delete_insert': [
-    """
-    DELETE FROM {target_table_name} AS f
-    WHERE ROWID IN (
-        SELECT t.ROWID
-        FROM {target_table_name} AS t
-        INNER JOIN (SELECT DISTINCT * FROM {patch_table_name}) AS p
-            ON {and_subquery_t}
-    );
-    """,
-    """
-    INSERT INTO {target_table_name} AS f
-    SELECT DISTINCT * FROM {patch_table_name} AS p
-    """,
+        """
+        DELETE FROM {target_table_name} AS f
+        WHERE ROWID IN (
+            SELECT t.ROWID
+            FROM {target_table_name} AS t
+            INNER JOIN (SELECT DISTINCT * FROM {patch_table_name}) AS p
+                ON {and_subquery_t}
+        );
+        """,
+        """
+        INSERT INTO {target_table_name} AS f
+        SELECT DISTINCT * FROM {patch_table_name} AS p
+        """,
     ],
+}
+hypertable_queries = {
+    'timescaledb': 'SELECT hypertable_size(\'{table_name}\')',
+    'citus': 'SELECT citus_table_size(\'{table_name}\')',
 }
 table_wrappers = {
     'default'    : ('"', '"'),
@@ -142,6 +146,113 @@ DB_FLAVORS_CAST_DTYPES = {
     },
     'mysql': {
         'BIGINT': 'DOUBLE',
+    },
+}
+### Map pandas dtypes to flavor-specific dtypes.
+PD_TO_DB_DTYPES_FLAVORS: Dict[str, Dict[str, str]] = {
+    'Int64': {
+        'timescaledb': 'BIGINT',
+        'postgresql': 'BIGINT',
+        'mariadb': 'BIGINT',
+        'mysql': 'BIGINT',
+        'mssql': 'BIGINT',
+        'oracle': 'NUMBER',
+        'sqlite': 'BIGINT',
+        'duckdb': 'BIGINT',
+        'citus': 'BIGINT',
+        'cockroachdb': 'BIGINT',
+        'default': 'INT',
+    },
+    'int64': {
+        'timescaledb': 'BIGINT',
+        'postgresql': 'BIGINT',
+        'mariadb': 'BIGINT',
+        'mysql': 'BIGINT',
+        'mssql': 'BIGINT',
+        'oracle': 'NUMBER',
+        'sqlite': 'BIGINT',
+        'duckdb': 'BIGINT',
+        'citus': 'BIGINT',
+        'cockroachdb': 'BIGINT',
+        'default': 'INT',
+    },
+    'float64': {
+        'timescaledb': 'DOUBLE PRECISION',
+        'postgresql': 'DOUBLE PRECISION',
+        'mariadb': 'DOUBLE',
+        'mysql': 'DOUBLE',
+        'mssql': 'FLOAT',
+        'oracle': 'FLOAT',
+        'sqlite': 'FLOAT',
+        'duckdb': 'DOUBLE PRECISION',
+        'citus': 'DOUBLE PRECISION',
+        'cockroachdb': 'DOUBLE PRECISION',
+        'default': 'DOUBLE',
+    },
+    'datetime64[ns]': {
+        'timescaledb': 'TIMESTAMP',
+        'postgresql': 'TIMESTAMP',
+        'mariadb': 'DATETIME',
+        'mysql': 'DATETIME',
+        'mssql': 'DATETIME',
+        'oracle': 'DATE',
+        'sqlite': 'DATETIME',
+        'duckdb': 'TIMESTAMP',
+        'citus': 'TIMESTAMP',
+        'cockroachdb': 'TIMESTAMP',
+        'default': 'DATETIME',
+    },
+    'datetime64[ns, UTC]': {
+        'timescaledb': 'TIMESTAMP',
+        'postgresql': 'TIMESTAMP',
+        'mariadb': 'TIMESTAMP',
+        'mysql': 'TIMESTAMP',
+        'mssql': 'TIMESTAMP',
+        'oracle': 'TIMESTAMP',
+        'sqlite': 'TIMESTAMP',
+        'duckdb': 'TIMESTAMP',
+        'citus': 'TIMESTAMP',
+        'cockroachdb': 'TIMESTAMP',
+        'default': 'TIMESTAMP',
+    },
+    'bool': {
+        'timescaledb': 'BOOLEAN',
+        'postgresql': 'BOOLEAN',
+        'mariadb': 'TINYINT',
+        'mysql': 'TINYINT',
+        'mssql': 'BIT',
+        'oracle': 'INTEGER',
+        'sqlite': 'BOOLEAN',
+        'duckdb': 'BOOLEAN',
+        'citus': 'BOOLEAN',
+        'cockroachdb': 'BOOLEAN',
+        'default': 'BOOLEAN',
+    },
+    'object': {
+        'timescaledb': 'TEXT',
+        'postgresql': 'TEXT',
+        'mariadb': 'TEXT',
+        'mysql': 'TEXT',
+        'mssql': 'NVARCHAR(MAX)',
+        'oracle': 'CLOB',
+        'sqlite': 'TEXT',
+        'duckdb': 'TEXT',
+        'citus': 'TEXT',
+        'cockroachdb': 'TEXT',
+        'default': 'TEXT',
+    },
+    'json': {
+        'timescaledb': 'JSON',
+        'postgresql': 'JSON',
+        'mariadb': 'LONGTEXT',
+        'mysql': 'LONGTEXT',
+        'mssql': 'NVARCHAR(MAX)',
+        'oracle': 'CLOB',
+        'sqlite': 'JSON',
+        'duckdb': 'JSON',
+        'citus': 'JSON',
+        'cockroachdb': 'JSON',
+        'default': 'TEXT',
     },
 }
 
@@ -411,7 +522,7 @@ def pg_capital(s: str) -> str:
     """
     if '"' in s:
         return s
-    needs_quotes = False
+    needs_quotes = s.startswith('_')
     for c in str(s):
         if ord(c) < ord('a') or ord(c) > ord('z'):
             if not c.isdigit() and c != '_':
@@ -550,6 +661,7 @@ def table_exists(
 def get_sqlalchemy_table(
         table: str,
         connector: Optional[meerschaum.connectors.sql.SQLConnector] = None,
+        refresh: bool = False,
         debug: bool = False,
     ) -> 'sqlalchemy.Table':
     """
@@ -562,6 +674,9 @@ def get_sqlalchemy_table(
         
     connector: Optional[meerschaum.connectors.sql.SQLConnector], default None:
         The connector to the database which holds the table. 
+
+    refresh: bool, default False
+        If `True`, rebuild the cached table object.
 
     debug: bool, default False:
         Verbosity toggle.
@@ -577,16 +692,17 @@ def get_sqlalchemy_table(
 
     from meerschaum.connectors.sql.tables import get_tables
     from meerschaum.utils.packages import attempt_import
+    if refresh:
+        connector.metadata.clear()
     tables = get_tables(mrsm_instance=connector, debug=debug)
     sqlalchemy = attempt_import('sqlalchemy')
-    if str(table) not in tables:
+    if refresh or str(table) not in tables:
         tables[str(table)] = sqlalchemy.Table(
             str(table),
             connector.metadata,
             autoload_with = connector.engine
         )
     return tables[str(table)]
-
 
 
 _checked_sqlite_version = None
@@ -695,3 +811,30 @@ def get_pd_type(db_type: str) -> str:
             return pd_t
     return DB_TO_PD_DTYPES['default']
 
+
+def get_db_type(pd_type: str, flavor: str = 'default') -> str:
+    """
+    Parse a Pandas data type into a flavor's database type.
+
+    Parameters
+    ----------
+    pd_type: str
+        The Pandas datatype. This must be a string, not the actual dtype object.
+
+    flavor: str, default 'default'
+        The flavor of the database to be mapped to.
+
+    Returns
+    -------
+    The database data type for the incoming Pandas data type.
+    If nothing can be found, a warning will be thrown and 'TEXT' will be returned.
+    """
+    from meerschaum.utils.warnings import warn
+    if pd_type not in PD_TO_DB_DTYPES_FLAVORS:
+        warn(f"Unknown Pandas data type '{pd_type}'. Falling back to 'TEXT'.")
+        return 'TEXT'
+    flavor_types = PD_TO_DB_DTYPES_FLAVORS.get(pd_type, {'default': 'TEXT'})
+    default_flavor_type = flavor_types.get('default', 'TEXT')
+    if flavor not in flavor_types:
+        warn(f"Unknown flavor '{flavor}'. Falling back to '{default_flavor_type}' (default).")
+    return flavor_types.get(flavor, default_flavor_type)

@@ -186,7 +186,6 @@ def verify_venv(
     )
 
     if not (bin_path / current_python_versioned_name).exists():
-        print(f'DNE: {bin_path / current_python_versioned_name}')
         init_venv(venv, verify=False, force=True, debug=debug)
         current_python_in_venv_path = pathlib.Path(venv_executable(venv=venv))
         current_python_in_sys_path = pathlib.Path(venv_executable(venv=None))

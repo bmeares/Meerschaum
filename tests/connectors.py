@@ -2,6 +2,7 @@
 # -*- coding: utf-8 -*-
 # vim:fenc=utf-8
 
+from typing import Dict
 import pathlib
 from meerschaum import get_connector
 from meerschaum.config._paths import ROOT_DIR_PATH
@@ -45,3 +46,61 @@ conns = {
     ),
 }
 
+def get_dtypes(debug: bool = False) -> Dict[str, Dict[str, 'sqlalchemy.types.Type']]:
+    """
+    Print every pandas dtype and database dtype.
+    """
+    from meerschaum.utils.packages import attempt_import, import_pandas
+    from meerschaum.utils.sql import get_sqlalchemy_table
+    pd = import_pandas()
+    sqlalchemy = attempt_import('sqlalchemy')
+    result_dtypes = {}
+
+    dtypes = {
+        'datetime64[ns]': {
+            'value': '2022-01-01',
+        },
+        'datetime64[ns, UTC]': {
+            'value': '2022-01-01',
+        },
+        'float': {
+            'value': 1.0,
+        },
+        'int64': {
+            'value': 1,
+        },
+        'Int64': {
+            'value': 1,
+        },
+        'bool': {
+            'value': True,
+        },
+        'object': {
+            'value': 'foo',
+        },
+        'json': {
+            'value': '{"foo": "bar"}',
+            'local': 'object',
+            'to_sql': sqlalchemy.types.JSON,
+        },
+    }
+    table_name_base = '_dtype_temp'
+    for i, (dtype, params) in enumerate(dtypes.items()):
+        df = pd.DataFrame([{'a': params['value']}], dtype=params.get('local', dtype))
+        table_name = table_name_base + '_' + str(i)
+
+        result_dtypes[dtype] = {}
+
+        for flavor, conn in conns.items():
+            if conn.type != 'sql':
+                continue
+            kw = {'debug': debug, 'if_exists': 'replace'}
+            if 'to_sql' in params:
+                kw['dtype'] = {'a': params['to_sql']}
+            if not conn.to_sql(df, table_name, **kw):
+                kw.pop('dtype', None)
+                conn.to_sql(df, table_name, **kw)
+            table_obj = get_sqlalchemy_table(table_name, conn, refresh=True, debug=debug)
+            result_dtypes[dtype][flavor] = str(table_obj.columns['a'].type)
+
+    return result_dtypes
