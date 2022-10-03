@@ -161,6 +161,9 @@ def test_target_mutable(flavor: str):
 
 @pytest.mark.parametrize("flavor", list(remote_pipes.keys()))
 def test_sync_new_columns(flavor: str):
+    """
+    Test that new columns are added.
+    """
     conn = conns[flavor]
     pipe = Pipe('foo', 'bar', columns={'datetime': 'dt', 'id': 'id'}, instance=conn)
     pipe.drop(debug=debug)
@@ -173,4 +176,7 @@ def test_sync_new_columns(flavor: str):
     docs = [
         {'dt': '2022-01-01', 'id': 1, 'b': 20},
     ]
-    assert len(pipe.get_data().columns == 4)
+    pipe.sync(docs, debug=debug)
+    df = pipe.get_data()
+    assert len(df.columns) == 4
+    assert len(df) == 1

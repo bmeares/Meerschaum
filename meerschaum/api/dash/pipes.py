@@ -13,6 +13,7 @@ from dash.dependencies import Input, Output, State
 from meerschaum.utils.typing import List, Optional, Dict, Any, Tuple, Union
 from meerschaum.utils.misc import string_to_dict
 from meerschaum.utils.packages import attempt_import, import_dcc, import_html
+from meerschaum.utils.sql import get_pd_type
 from meerschaum.api import endpoints, CHECK_UPDATE
 from meerschaum.api.dash import (
     dash_app, debug, _get_pipes
@@ -168,13 +169,8 @@ def accordion_items_from_pipe(
             html.Tr([html.Td("Location"), html.Td(f"{pipe.location_key}")]),
             html.Tr([html.Td("Instance"), html.Td(f"{pipe.instance_keys}")]),
         ]
-        if dt_name is not None:
-            overview_rows.append(html.Tr([html.Td("Datetime column"), html.Td(dt_name)]))
-        if id_name is not None:
-            overview_rows.append(html.Tr([html.Td("ID column"), html.Td(id_name)]))
-        if val_name is not None:
-            overview_rows.append(html.Tr([html.Td("Value column"), html.Td(val_name)]))
-
+        for col_key, col in pipe.columns.items():
+            overview_rows.append(html.Tr([html.Td(f"'{col_key}' Index"), html.Td(col)]))
 
         items_bodies['overview'] = dbc.Table(
             overview_header + [html.Tbody(overview_rows)],
@@ -214,10 +210,20 @@ def accordion_items_from_pipe(
 
     if 'columns' in active_items:
         try:
-            columns_header = [html.Thead(html.Tr([html.Th("Column"), html.Th("Type")]))]
+            columns_header = [html.Thead(html.Tr([
+                html.Th("Column"), html.Th("DB Type"), html.Th("PD Type")
+            ]))]
             columns_types = pipe.get_columns_types(debug=debug)
+            #  combined_columns_types = {
+                #  col: {
+                    #  'db': typ,
+                    #  'pd': get_pd_type(typ)
+                #  } for col, typ in columns_types.items()
+            #  }
             columns_rows = [
-                html.Tr([html.Td(col), html.Td(typ)]) for col, typ in columns_types.items()
+                html.Tr([
+                    html.Td(html.Pre(col)), html.Td(html.Pre(typ)), html.Td(html.Pre(get_pd_type(typ)))
+                ]) for col, typ in columns_types.items()
             ]
             columns_body = [html.Tbody(columns_rows)]
             columns_table = dbc.Table(columns_header + columns_body, bordered=False, hover=True)

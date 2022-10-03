@@ -23,13 +23,17 @@ class SQLConnector(Connector):
     """
 
     from ._create_engine import flavor_configs, create_engine
-    from ._sql import read, value, exec, execute, to_sql
+    from ._sql import read, value, exec, execute, to_sql, exec_queries
     from meerschaum.utils.sql import test_connection
     from ._fetch import fetch
     from ._cli import cli
     from ._pipes import (
         fetch_pipes_keys,
         create_indices,
+        drop_indices,
+        get_create_index_queries,
+        get_drop_index_queries,
+        get_add_columns_queries,
         delete_pipe,
         get_backtrack_data,
         get_pipe_data,

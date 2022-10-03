@@ -90,6 +90,7 @@ class Pipe:
         dtypes,
         get_columns,
         get_columns_types,
+        get_indices,
         tags,
         get_id,
         id,

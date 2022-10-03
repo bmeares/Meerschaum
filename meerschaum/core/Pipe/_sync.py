@@ -350,23 +350,6 @@ def get_sync_time(
     A `datetime.datetime` object if the pipe exists, otherwise `None`.
 
     """
-    from meerschaum.utils.warnings import error, warn
-    if not self.columns:
-        warn(
-            f"No columns found in parameters for {self}.",
-            stack = False,
-        )
-
-    if 'datetime' not in (self.columns or {}):
-        warn(
-            f"'datetime' must be declared in parameters:columns for {self}.\n"
-            + f"    You can add parameters for this pipe with the following command:\n\n"
-            + f"    mrsm edit pipes -c {self.connector_keys} -m "
-            + f"{self.metric_key} -l "
-            + (f"[None]" if self.location_key is None else f"{self.location_key}"),
-            stack = False,
-        )
-
     return self.instance_connector.get_sync_time(
         self,
         params = params,
@@ -503,20 +486,15 @@ def filter_existing(
     delta_df = filter_unseen_df(backtrack_df, df, dtypes=self.dtypes, debug=debug)
 
     ### Separate new rows from changed ones.
-    dt_col = self.columns['datetime'] if self.columns and 'datetime' in self.columns else None
-    id_col = self.columns['id'] if self.columns and 'id' in self.columns else None
-    if dt_col:
-        on_cols = [dt_col] + ([id_col] if id_col is not None else [])
-    else:
-        on_cols = []
+    on_cols = [col for col_key, col in self.columns.items() if col_key != 'value']
 
     joined_df = pd.merge(
         delta_df,
         backtrack_df,
-        how='left',
-        on=on_cols,
-        indicator=True,
-        suffixes=('', '_old'),
+        how = 'left',
+        on = on_cols,
+        indicator = True,
+        suffixes = ('', '_old'),
     ) if on_cols else delta_df
 
     ### Determine which rows are completely new.

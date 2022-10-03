@@ -10,18 +10,18 @@ from __future__ import annotations
 from meerschaum.utils.typing import Tuple, Dict, SuccessTuple, Any, Union, Optional, List
 
 @property
-def attributes(self) -> Union[Dict[str, Any], None]:
+def attributes(self) -> Dict[str, Any]:
     """
     Return a dictionary of a pipe's keys and parameters.
-    Is a superset of `meerschaum.Pipe.parameters` and
-    **ONLY** returns a dictionary if the pipe is registered.
-    An unregistered pipe may still set its parameters.
-    Use `meerschaum.Pipe.meta` to retrieve keys from unregistered pipes.
+    These values are reflected directly from the pipes table of the instance.
     """
     import time
     from meerschaum.config import get_config
     from meerschaum.config._patch import apply_patch_to_config
     timeout_seconds = get_config('pipes', 'attributes', 'local_cache_timeout_seconds')
+
+    if '_attributes' not in self.__dict__:
+        self._attributes = {}
 
     now = time.perf_counter()
     last_refresh = self.__dict__.get('_attributes_sync_time', None)
@@ -106,9 +106,10 @@ def dtypes(self) -> Union[Dict[str, Any], None]:
     """
     If defined, return the `dtypes` dictionary defined in `meerschaum.Pipe.parameters`.
     """
-    if not self.parameters.get('dtypes', None):
-        self.parameters['dtypes'] = self.infer_dtypes(persist=False)
-    return self.parameters['dtypes']
+    from meerschaum.config._patch import apply_patch_to_config
+    configured_dtypes = self.parameters.get('dtypes', {})
+    remote_dtypes = self.infer_dtypes(persist=False)
+    return apply_patch_to_config(remote_dtypes, configured_dtypes)
 
 
 @dtypes.setter
@@ -189,6 +190,7 @@ def get_columns_types(self, debug: bool = False) -> Union[Dict[str, str], None]:
     >>>
     """
     return self.instance_connector.get_pipe_columns_types(self, debug=debug)
+
 
 def get_id(self, **kw: Any) -> Union[int, None]:
     """
@@ -362,3 +364,13 @@ def guess_datetime(self) -> Union[str, None]:
     if not dt_cols:
         return None
     return dt_cols[0]    
+
+
+def get_indices(self) -> Dict[str, str]:
+    """
+    Return a dictionary in the form of `pipe.columns` but map to index names.
+    """
+    return {
+        ix: (self.target + '_' + col + '_index')
+        for ix, col in self.columns.items() if col
+    }
