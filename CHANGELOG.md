@@ -1,8 +1,94 @@
 # 🪵 Changelog
 
+## 1.3.x Releases
+
+This is the current release cycle, so stay tuned for future releases!
+
+### v1.3.0: Dynamic Columns
+
+**Improvements**
+
+  - **Syncing now handles dynamic columns.**  
+    Syncing a pipe with new columns will trigger an `ALTER TABLE` query to append the columns to your table:
+
+    ```python
+    import meerschaum as mrsm
+    pipe = mrsm.Pipe('foo', 'bar', instance='sql:memory')
+    
+    pipe.sync([{'a': 1}])
+    print(pipe.get_data())
+    #    a
+    # 0  1
+
+    pipe.sync([{'b': 1}])
+    print(pipe.get_data())
+    #       a     b
+    # 0     1  <NA>
+    # 1  <NA>     1
+    ```
+
+    If you've specified index columns, you can use this feature to fill in `NULL` values in your table:
+
+    ```python
+    import meerschaum as mrsm
+    pipe = mrsm.Pipe(
+        'foo', 'bar',
+        columns = {'id': 'id_col'},
+        instance = 'sql:memory',
+    )
+
+    pipe.sync([{'id_col': 1, 'a': 10.0}])
+    pipe.sync([{'id_col': 1, 'b': 20.0}])
+
+    print(pipe.get_data())
+    #    id_col     a     b
+    # 0       1  10.0  20.0
+    ```
+
+  - **Add as many indices as you like.**  
+    In addition to the special index column labels `datetime`, `id`, and `value`, the values of all keys within the `Pipe.columns` dictionary will be treated as indices when creating and updating tables:
+
+    ```python
+    import meerschaum as mrsm
+    indices = {'micro': 'station', 'macro': 'country'}
+    pipe = mrsm.Pipe('demo', 'weather', columns=indices, instance='sql:memory')
+
+    docs = [{'station': 1, 'country': 'USA', 'temp_f': 80.6}]
+    pipe.sync(docs)
+
+    docs = [{'station': 1, 'country': 'USA', 'temp_c': 27.0}]
+    pipe.sync(docs)
+
+    print(pipe.get_data())
+    #    station  country  temp_f  temp_c
+    # 0        1      USA    80.6    27.0
+    ```
+
+  - **Added a default 60-second timeout for pipe attributes.**  
+    All parameter properties (e.g. `Pipe.columns`, `Pipe.target`, `Pipe.dtypes`, etc.) will sync with the instance every 60 seconds. The in-memory attributes will be patched on top of the database values, so your unsaved state won't be lost (persist your state with `Pipe.edit()`). You can change the timeout duration with `mrsm edit config pipes` under the keys `attributes:local_cache_timeout_seconds`. To disable this caching behavior, set the value to `null`.
+
+  - **Added custom indices and Pandas data types to the Web UI.**
+
+**Breaking Changes**
+  
+  - **Removed `None` as default for uninitalized properties for pipes.**  
+    Parameter properties like `Pipe.columns`, `Pipe.parameters`, etc. will now always return a dictionary, even if a pipe is not registered.
+  - **`Pipe.get_columns()` now sets `error` to `False` by default.**  
+    Pipes are now mostly index-agnostic, so these checks are no longer needed. This downgrades errors in several functions to just warnings, e.g. `Pipe.get_sync_time()`.
+
+**Bugfixes**
+
+  - **Always quote tables that begin with underscores in Oracle.**
+  - **Always refresh the metadata when grabbing `sqlalchemy` tables for pipes to account for dynamic state.**
+
 ## 1.2.x Releases
 
-This is the current release cycle, so future features will be updated below.
+This series brought many industry-ready features, such as the `@make_connector` decorator, improvements to the virtual environment system, the environment variable `MRSM_PLUGINS_DIR`, and much more.
+
+### v1.2.9
+
+- **Added support for Windows junctions for virtual environments.**  
+  This included many changes to fix functionality on Windows. For example, the addition of the `MRSM_PLUGINS_DIR` environment variable broke Meerschaum on Windows, because Windows requires administrator rights to create symlinks.
 
 ### v1.2.8
 
