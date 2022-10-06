@@ -4,6 +4,25 @@
 
 This is the current release cycle, so stay tuned for future releases!
 
+### v1.3.1
+
+- **Fixed data type enforcement issues.**  
+  A serious bug in data type enforcement has been patched.
+- **Allow `Pipe.dtypes` to be edited.**  
+  You can now set keys in `Pipe.dtypes` and persist them with `Pipe.edit()`.
+- **Added `Pipe.update()`.**  
+  `Pipe.update()` is an alias to `Pipe.edit(interactive=False)`.
+- **`Pipe.delete()` no longer deletes local attributes.**  
+  It still removes `Pipe.id`, but local attributes will now remain intact.
+- **Fixed dynamic columns on DuckDB.**  
+  DuckDB does not allow for altering tables when indices are created, so this patch will drop and rebuild indices when tables are altered.
+- **Replaced `CLOB` with `NVARCHAR(2000)` on Oracle SQL.**  
+  This may require migrating existing pipes to use the new data type.
+- **Enforce integers are of type `INTEGER` on Oracle SQL.**  
+  Lots of data type enforcement has been added for Oracle SQL.
+- **Removed datetime warnings when syncing pipes without a datetime column.**
+- **Removed grabbing the current time for the sync time if a sync time cannot be determined.**
+
 ### v1.3.0: Dynamic Columns
 
 **Improvements**

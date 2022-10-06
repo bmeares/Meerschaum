@@ -523,6 +523,8 @@ def to_sql(
 
     from meerschaum.utils.sql import sql_item_name, table_exists
     from meerschaum.connectors.sql._create_engine import flavor_configs
+    from meerschaum.utils.packages import attempt_import
+    sqlalchemy = attempt_import('sqlalchemy', debug=debug)
 
     stats = {'target': name, }
     ### resort to defaults if None
@@ -559,6 +561,17 @@ def to_sql(
             if not success:
                 warn(f"Unable to drop {name}")
 
+
+        ### Enforce NVARCHAR(2000) as text instead of CLOB.
+        dtype = to_sql_kw.get('dtype', {})
+        for col, typ in df.dtypes.items():
+            if str(typ) == 'object':
+                dtype[col] = sqlalchemy.types.NVARCHAR(2000)
+            elif str(typ).lower().startswith('int'):
+                dtype[col] = sqlalchemy.types.INTEGER
+
+        to_sql_kw['dtype'] = dtype
+
     try:
         with warnings.catch_warnings():
             warnings.filterwarnings('ignore', 'case sensitivity issues')
@@ -575,7 +588,7 @@ def to_sql(
     except Exception as e:
         if not silent:
             warn(str(e))
-        success, msg = None, str(e)
+        success, msg = False, str(e)
 
     end = time.perf_counter()
     if success:

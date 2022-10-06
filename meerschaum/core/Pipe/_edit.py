@@ -9,6 +9,14 @@ Edit a Pipe's parameters here.
 from __future__ import annotations
 from meerschaum.utils.typing import Any, SuccessTuple
 
+def update(self, *args, **kw) -> SuccessTuple:
+    """
+    Update a pipe's parameters in its instance.
+    """
+    kw['interactive'] = False
+    return self.edit(*args, **kw)
+
+
 def edit(
         self,
         patch: bool = False,

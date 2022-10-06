@@ -41,7 +41,7 @@ def delete(
     if not isinstance(result, tuple):
         return False, f"Received unexpected result from '{self.instance_connector}': {result}"
     if result[0]:
-        to_delete = ['_id', '_attributes', '_columns', '_tags', '_data']
+        to_delete = ['_id']
         for member in to_delete:
             if member in self.__dict__:
                 del self.__dict__[member]

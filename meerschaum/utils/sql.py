@@ -119,6 +119,7 @@ DB_TO_PD_DTYPES = {
     'DOUBLE_PRECISION': 'float64',
     'DOUBLE': 'float64',
     'BIGINT': 'Int64',
+    'NUMBER': 'float64',
     'TIMESTAMP': 'datetime64[ns]',
     'TIMESTAMP WITH TIMEZONE': 'datetime64[ns, UTC]',
     'TIMESTAMPTZ': 'datetime64[ns, UTC]',
@@ -143,9 +144,20 @@ DB_TO_PD_DTYPES = {
 DB_FLAVORS_CAST_DTYPES = {
     'mariadb': {
         'BIGINT': 'DOUBLE',
+        'TINYINT': 'INT',
+        'TEXT': 'CHAR(10000) CHARACTER SET utf8',
     },
     'mysql': {
         'BIGINT': 'DOUBLE',
+        'TINYINT': 'INT',
+        'TEXT': 'CHAR(10000) CHARACTER SET utf8',
+    },
+    'oracle': {
+        'NVARCHAR(2000)': 'NVARCHAR2(2000)'
+    },
+    'mssql': {
+        'NVARCHAR COLLATE "SQL Latin1 General CP1 CI AS"': 'NVARCHAR(MAX)',
+        'NVARCHAR COLLATE "SQL_Latin1_General_CP1_CI_AS"': 'NVARCHAR(MAX)',
     },
 }
 ### Map pandas dtypes to flavor-specific dtypes.
@@ -156,7 +168,7 @@ PD_TO_DB_DTYPES_FLAVORS: Dict[str, Dict[str, str]] = {
         'mariadb': 'BIGINT',
         'mysql': 'BIGINT',
         'mssql': 'BIGINT',
-        'oracle': 'NUMBER',
+        'oracle': 'INT',
         'sqlite': 'BIGINT',
         'duckdb': 'BIGINT',
         'citus': 'BIGINT',
@@ -169,7 +181,7 @@ PD_TO_DB_DTYPES_FLAVORS: Dict[str, Dict[str, str]] = {
         'mariadb': 'BIGINT',
         'mysql': 'BIGINT',
         'mssql': 'BIGINT',
-        'oracle': 'NUMBER',
+        'oracle': 'INT',
         'sqlite': 'BIGINT',
         'duckdb': 'BIGINT',
         'citus': 'BIGINT',
@@ -234,7 +246,7 @@ PD_TO_DB_DTYPES_FLAVORS: Dict[str, Dict[str, str]] = {
         'mariadb': 'TEXT',
         'mysql': 'TEXT',
         'mssql': 'NVARCHAR(MAX)',
-        'oracle': 'CLOB',
+        'oracle': 'NVARCHAR2(2000)',
         'sqlite': 'TEXT',
         'duckdb': 'TEXT',
         'citus': 'TEXT',
@@ -247,7 +259,7 @@ PD_TO_DB_DTYPES_FLAVORS: Dict[str, Dict[str, str]] = {
         'mariadb': 'LONGTEXT',
         'mysql': 'LONGTEXT',
         'mssql': 'NVARCHAR(MAX)',
-        'oracle': 'CLOB',
+        'oracle': 'NVARCHAR2(2000)',
         'sqlite': 'JSON',
         'duckdb': 'JSON',
         'citus': 'JSON',
@@ -493,7 +505,13 @@ def sql_item_name(item: str, flavor: str) -> str:
     truncated_item = truncate_item_name(str(item), flavor)
     if flavor == 'oracle':
         truncated_item = pg_capital(truncated_item)
-        wrappers = ('', '')
+        if truncated_item.lower() in (
+            'float', 'varchar', 'nvarchar', 'clob',
+            'boolean', 'integer',
+        ):
+            wrappers = ('"', '"')
+        else:
+            wrappers = ('', '')
     else:
         wrappers = table_wrappers.get(flavor, table_wrappers['default'])
     return wrappers[0] + truncated_item + wrappers[1]

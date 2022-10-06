@@ -76,7 +76,7 @@ def enforce_dtypes(self, df: 'pd.DataFrame', debug: bool=False) -> 'pd.DataFrame
     for col, typ in common_diff_dtypes.items():
         if 'datetime' in typ and 'datetime' in common_dtypes[col]:
             df_dtypes[col] = typ
-            detected_dt_cols[col] = (common_dtypes[col], common_diff_dtypes[typ])
+            detected_dt_cols[col] = (common_dtypes[col], common_diff_dtypes[col])
     for col in detected_dt_cols:
         del common_diff_dtypes[col]
 
