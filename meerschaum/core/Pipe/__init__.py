@@ -101,7 +101,7 @@ class Pipe:
         guess_datetime,
     )
     from ._show import show
-    from ._edit import edit, edit_definition
+    from ._edit import edit, edit_definition, update
     from ._sync import sync, get_sync_time, exists, filter_existing
     from ._delete import delete
     from ._drop import drop
