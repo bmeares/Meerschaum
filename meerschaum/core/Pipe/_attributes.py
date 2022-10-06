@@ -109,7 +109,9 @@ def dtypes(self) -> Union[Dict[str, Any], None]:
     from meerschaum.config._patch import apply_patch_to_config
     configured_dtypes = self.parameters.get('dtypes', {})
     remote_dtypes = self.infer_dtypes(persist=False)
-    return apply_patch_to_config(remote_dtypes, configured_dtypes)
+    patched_dtypes = apply_patch_to_config(remote_dtypes, configured_dtypes)
+    self.parameters['dtypes'] = patched_dtypes
+    return self.parameters['dtypes']
 
 
 @dtypes.setter

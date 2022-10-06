@@ -52,10 +52,15 @@ export $MRSM_URIS
 python -m meerschaum show connectors
 python -m meerschaum start connectors $MRSM_CONNS
 
+export ff=""
+if [ "$2" == "--ff" ]; then
+  export ff="--ff"
+fi
+
 ### Execute the pytest tests.
 python -m pytest \
   --durations=0 \
-  --ignore=portable/ --ignore=test_root/ --ignore=tests/data/ --ignore=docs/; rc="$?"
+  --ignore=portable/ --ignore=test_root/ --ignore=tests/data/ --ignore=docs/ $ff; rc="$?"
 
 ### Cleanup
 if [ "$2" == "rm" ]; then

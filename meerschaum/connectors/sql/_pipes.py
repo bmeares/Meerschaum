@@ -682,6 +682,8 @@ def get_pipe_data(
     query = f"SELECT * FROM {sql_item_name(pipe.target, self.flavor)}"
     where = ""
 
+    existing_cols = pipe.get_columns_types(debug=debug)
+
     if not pipe.columns.get('datetime', None):
         _dt = pipe.guess_datetime()
         dt = sql_item_name(_dt, self.flavor) if _dt else None
@@ -708,7 +710,7 @@ def get_pipe_data(
                 )
 
 
-    if begin is not None:
+    if begin is not None and dt in existing_cols:
         begin_da = dateadd_str(
             flavor = self.flavor,
             datepart = 'minute',
@@ -717,7 +719,7 @@ def get_pipe_data(
         )
         where += f"{dt} >= {begin_da}" + (" AND " if end is not None else "")
 
-    if end is not None:
+    if end is not None and dt in existing_cols:
         end_da = dateadd_str(
             flavor = self.flavor,
             datepart = 'minute',
@@ -735,15 +737,23 @@ def get_pipe_data(
     if len(where) > 0:
         query += "\nWHERE " + where
 
-    if _dt:
+    if _dt and dt in existing_cols:
         query += "\nORDER BY " + dt + " DESC"
 
     if debug:
         dprint(f"Getting pipe data with begin = '{begin}' and end = '{end}'")
-    kw['dtype'] = pipe.dtypes
-    if self.flavor == 'sqlite':
-        if _dt and 'datetime' not in kw['dtype'].get(_dt, 'object'):
-            kw['dtype'][_dt] = 'datetime64[ns]'
+
+    existing_cols = pipe.get_columns_types(debug=debug)
+    dtypes = pipe.dtypes
+    if dtypes:
+        if self.flavor == 'sqlite':
+            if _dt and 'datetime' not in dtypes.get(_dt, 'object'):
+                dtypes[_dt] = 'datetime64[ns]'
+    if existing_cols:
+        dtypes = {col: typ for col, typ in dtypes.items() if col in existing_cols}
+    if dtypes:
+        kw['dtypes'] = dtypes
+
     df = self.read(
         query,
         debug = debug,
@@ -926,6 +936,9 @@ def sync_pipe(
     if debug:
         dprint("Fetched data:\n" + str(df))
 
+    if not isinstance(df, pd.DataFrame):
+        df = pipe.enforce_dtypes(df, debug=debug)
+
     ### if table does not exist, create it with indices
     is_new = False
     add_cols_query = None
@@ -939,16 +952,13 @@ def sync_pipe(
             if not self.exec_queries(add_cols_queries, debug=debug):
                 warn(f"Failed to add new columns to {pipe}.")
 
-    if not isinstance(df, pd.DataFrame):
-        df = pipe.enforce_dtypes(df, debug=debug)
-
     unseen_df, update_df, delta_df = (
         pipe.filter_existing(
             df, chunksize=chunksize, begin=begin, end=end, debug=debug, **kw
         ) if check_existing else (df, None, df)
     )
     if debug:
-        dprint("Delta data :\n" + str(delta_df))
+        dprint("Delta data:\n" + str(delta_df))
         dprint("Unseen data:\n" + str(unseen_df))
         if update_df is not None:
             dprint("Update data:\n" + str(update_df))
@@ -1067,7 +1077,6 @@ def get_sync_time(
         is_guess = False
 
     if _dt is None:
-        warn(f"Unable to determine the column for the sync time of {pipe}.", stack=False)
         return None
 
     ASC_or_DESC = "DESC" if newest else "ASC"
@@ -1478,6 +1487,7 @@ def get_add_columns_queries(
     if not pipe.exists(debug=debug):
         return []
     from meerschaum.utils.sql import get_pd_type, get_db_type, sql_item_name
+    from meerschaum.utils.misc import flatten_list
     table_obj = self.get_pipe_table(pipe, debug=debug)
     df_cols_types = {col: str(typ) for col, typ in df.dtypes.items()}
     db_cols_types = {col: get_pd_type(str(typ)) for col, typ in table_obj.columns.items()}
@@ -1498,4 +1508,12 @@ def get_add_columns_queries(
     query = query[:-1]
     if self.flavor != 'duckdb':
         return [query]
-    return [query] + [q for ix, q in self.get_create_index_queries(pipe, debug=debug)]
+
+    drop_index_queries = list(flatten_list(
+        [q for ix, q in self.get_drop_index_queries(pipe, debug=debug).items()]
+    ))
+    create_index_queries = list(flatten_list(
+        [q for ix, q in self.get_create_index_queries(pipe, debug=debug).items()]
+    ))
+
+    return drop_index_queries + [query] + create_index_queries
