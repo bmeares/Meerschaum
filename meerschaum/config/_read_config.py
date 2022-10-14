@@ -245,6 +245,8 @@ def search_and_substitute_config(
 
     _links = []
     def _find_symlinks(d, _keys: Optional[List[str]] = None):
+        if _keys is None:
+            _keys = []
         for k, v in d.items():
             if isinstance(v, dict):
                 _find_symlinks(v, _keys + [k])
