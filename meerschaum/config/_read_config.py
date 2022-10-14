@@ -349,7 +349,7 @@ def search_and_substitute_config(
             haystack = haystack.replace(pattern, str(value))
 
     ### parse back into dict
-    parsed_config = json.loads(haystack)
+    parsed_config = json.loads(haystack) or {}
 
     symlinks = {}
     if keep_symlinks:
