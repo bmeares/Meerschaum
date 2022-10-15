@@ -131,7 +131,7 @@ DB_TO_PD_DTYPES = {
     'BOOLEAN': 'bool',
     'BOOLEAN()': 'bool',
     'substrings': {
-        'CHAR': 'str',
+        'CHAR': 'object',
         'TIMESTAMP': 'datetime64[ns]',
         'DATE': 'datetime64[ns]',
         'DOUBLE': 'float64',
@@ -241,6 +241,19 @@ PD_TO_DB_DTYPES_FLAVORS: Dict[str, Dict[str, str]] = {
         'default': 'BOOLEAN',
     },
     'object': {
+        'timescaledb': 'TEXT',
+        'postgresql': 'TEXT',
+        'mariadb': 'TEXT',
+        'mysql': 'TEXT',
+        'mssql': 'NVARCHAR(MAX)',
+        'oracle': 'NVARCHAR2(2000)',
+        'sqlite': 'TEXT',
+        'duckdb': 'TEXT',
+        'citus': 'TEXT',
+        'cockroachdb': 'TEXT',
+        'default': 'TEXT',
+    },
+    'str': {
         'timescaledb': 'TEXT',
         'postgresql': 'TEXT',
         'mariadb': 'TEXT',

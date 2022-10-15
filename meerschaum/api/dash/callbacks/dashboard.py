@@ -92,9 +92,6 @@ omit_actions = {
     'login',
     'copy',
 }
-trigger_aliases = {
-    'keyboard' : 'go-button',
-}
 _paths = {
     'login'   : pages.login.layout,
     ''        : pages.dashboard.layout,
@@ -148,7 +145,6 @@ def update_page_layout_div(pathname : str, session_store_data : Dict[str, Any]):
     Output('success-alert-div', 'children'),
     Output('check-input-interval', 'disabled'),
     Output('ws', 'url'),
-    Input('keyboard', 'n_keydowns'),
     Input('go-button', 'n_clicks'),
     Input('cancel-button', 'n_clicks'),
     Input('get-pipes-button', 'n_clicks'),
@@ -157,7 +153,6 @@ def update_page_layout_div(pathname : str, session_store_data : Dict[str, Any]):
     Input('get-users-button', 'n_clicks'),
     Input('get-graphs-button', 'n_clicks'),
     Input('check-input-interval', 'n_intervals'),
-    State('keyboard', 'keydown'),
     State('location', 'href'),
     State('ws', 'url'),
     State('session-store', 'data'),
@@ -203,7 +198,6 @@ def update_content(*args):
     if len(ctx.triggered) > 1 and 'check-input-interval.n_intervals' in ctx.triggered:
         ctx.triggered.remove('check-input-interval.n_intervals')
     trigger = ctx.triggered[0]['prop_id'].split('.')[0]
-    trigger = trigger_aliases[trigger] if trigger in trigger_aliases else trigger
 
     check_input_interval_disabled = ctx.states['check-input-interval.disabled']
     enable_check_input_interval = (

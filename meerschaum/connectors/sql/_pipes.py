@@ -7,7 +7,7 @@ Interact with Pipes metadata via SQLConnector.
 """
 from __future__ import annotations
 from meerschaum.utils.typing import (
-    Union, Any, Sequence, SuccessTuple, Mapping, Tuple, Dict, Optional, List
+    Union, Any, SuccessTuple, Tuple, Dict, Optional, List
 )
 
 def register_pipe(
@@ -673,7 +673,9 @@ def get_pipe_data(
     A `pd.DataFrame` of the pipe's data.
 
     """
+    import json
     from meerschaum.utils.debug import dprint
+    from meerschaum.utils.misc import items_str
     from meerschaum.utils.sql import sql_item_name, dateadd_str
     from meerschaum.utils.packages import import_pandas
     from meerschaum.utils.warnings import warn
@@ -693,6 +695,11 @@ def get_pipe_data(
         dt = sql_item_name(_dt, self.flavor)
         is_guess = False
 
+    quoted_indices = {
+        key: sql_item_name(val, self.flavor)
+        for key, val in pipe.columns.items()
+    }
+
     if begin is not None or end is not None:
         if is_guess:
             if _dt is None:
@@ -709,8 +716,8 @@ def get_pipe_data(
                     stack = False,
                 )
 
-
-    if begin is not None and dt in existing_cols:
+    is_dt_bound = False
+    if begin is not None and _dt in existing_cols:
         begin_da = dateadd_str(
             flavor = self.flavor,
             datepart = 'minute',
@@ -718,8 +725,9 @@ def get_pipe_data(
             begin = begin
         )
         where += f"{dt} >= {begin_da}" + (" AND " if end is not None else "")
+        is_dt_bound = True
 
-    if end is not None and dt in existing_cols:
+    if end is not None and _dt in existing_cols:
         end_da = dateadd_str(
             flavor = self.flavor,
             datepart = 'minute',
@@ -727,23 +735,37 @@ def get_pipe_data(
             begin = end
         )
         where += f"{dt} < {end_da}"
+        is_dt_bound = True
 
     if params is not None:
         from meerschaum.utils.sql import build_where
         where += build_where(params, self).replace(
-            'WHERE', ('AND' if (begin is not None or end is not None) else "")
+            'WHERE', ('AND' if is_dt_bound else "")
         )
 
     if len(where) > 0:
         query += "\nWHERE " + where
 
-    if _dt and dt in existing_cols:
-        query += "\nORDER BY " + dt + " DESC"
-
+    ### Sort by indices, starting with datetime.
+    if quoted_indices:
+        query += "\nORDER BY "
+        if _dt and _dt in existing_cols:
+            query += dt + ','
+        for key, quoted_col_name in existing_cols.items():
+            if key == 'datetime':
+                continue
+            query += ' ' + quoted_col_name + ','
+        query = query[:-1]
+    
     if debug:
-        dprint(f"Getting pipe data with begin = '{begin}' and end = '{end}'")
+        to_print = (
+            []
+            + ([f"begin = '{begin}'"] if begin else [])
+            + ([f"end = '{end}'"] if end else [])
+            + ([f"params = '{json.dumps(params)}'"] if params else [])
+        )
+        dprint("Getting pipe data with constraints: " + items_str(to_print, quotes=False))
 
-    existing_cols = pipe.get_columns_types(debug=debug)
     dtypes = pipe.dtypes
     if dtypes:
         if self.flavor == 'sqlite':

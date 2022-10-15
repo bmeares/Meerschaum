@@ -4,6 +4,11 @@
 
 This is the current release cycle, so stay tuned for future releases!
 
+### v1.3.2 – 1.3.3
+
+- **Fixed a bug with `begin` and `end` bounds in `Pipe.get_data()`.**  
+  A safety measure was incorrectly checking if the quoted version of a column was in `pipe.get_columns_types()`, not the unquoted version. This patch restores functionality for `pipe.get_data()`.
+
 ### v1.3.1
 
 - **Fixed data type enforcement issues.**  
