@@ -34,6 +34,7 @@ from meerschaum.utils.misc import (
 )
 from meerschaum.actions import get_subactions, actions
 from meerschaum.actions.arguments._parser import get_arguments_triggers, parser
+from meerschaum.connectors.sql._fetch import set_pipe_query
 import meerschaum as mrsm
 import json
 dash = attempt_import('dash', lazy=False, check_update=CHECK_UPDATE)
@@ -92,9 +93,6 @@ omit_actions = {
     'login',
     'copy',
 }
-trigger_aliases = {
-    'keyboard' : 'go-button',
-}
 _paths = {
     'login'   : pages.login.layout,
     ''        : pages.dashboard.layout,
@@ -148,7 +146,6 @@ def update_page_layout_div(pathname : str, session_store_data : Dict[str, Any]):
     Output('success-alert-div', 'children'),
     Output('check-input-interval', 'disabled'),
     Output('ws', 'url'),
-    Input('keyboard', 'n_keydowns'),
     Input('go-button', 'n_clicks'),
     Input('cancel-button', 'n_clicks'),
     Input('get-pipes-button', 'n_clicks'),
@@ -157,7 +154,6 @@ def update_page_layout_div(pathname : str, session_store_data : Dict[str, Any]):
     Input('get-users-button', 'n_clicks'),
     Input('get-graphs-button', 'n_clicks'),
     Input('check-input-interval', 'n_intervals'),
-    State('keyboard', 'keydown'),
     State('location', 'href'),
     State('ws', 'url'),
     State('session-store', 'data'),
@@ -203,7 +199,6 @@ def update_content(*args):
     if len(ctx.triggered) > 1 and 'check-input-interval.n_intervals' in ctx.triggered:
         ctx.triggered.remove('check-input-interval.n_intervals')
     trigger = ctx.triggered[0]['prop_id'].split('.')[0]
-    trigger = trigger_aliases[trigger] if trigger in trigger_aliases else trigger
 
     check_input_interval_disabled = ctx.states['check-input-interval.disabled']
     enable_check_input_interval = (
@@ -557,3 +552,93 @@ def update_pipe_accordion(item):
     return accordion_items_from_pipe(pipe, active_items=[item])
 
 
+@dash_app.callback(
+    Output({'type': 'update-parameters-success-div', 'index': MATCH}, 'children'),
+    Input({'type': 'update-parameters-button', 'index': MATCH}, 'n_clicks'),
+    State({'type': 'parameters-editor', 'index': MATCH}, 'value')
+)
+def update_pipe_parameters_click(n_clicks, parameters_editor_text):
+    if not n_clicks:
+        raise PreventUpdate
+    ctx = dash.callback_context
+    triggered = dash.callback_context.triggered
+    if triggered[0]['value'] is None:
+        raise PreventUpdate
+    pipe = pipe_from_ctx(triggered, 'n_clicks')
+    if pipe is None:
+        raise PreventUpdate
+
+    if parameters_editor_text is None:
+        success, msg = False, f"Unable to update parameters for {pipe}."
+    else:
+        try:
+            params = json.loads(parameters_editor_text)
+            pipe.parameters = params
+            success, msg = pipe.edit(debug=debug)
+        except Exception as e:
+            success, msg = False, f"Invalid JSON:\n{e}"
+
+    return alert_from_success_tuple((success, msg))
+
+
+@dash_app.callback(
+    Output({'type': 'update-sql-success-div', 'index': MATCH}, 'children'),
+    Input({'type': 'update-sql-button', 'index': MATCH}, 'n_clicks'),
+    State({'type': 'sql-editor', 'index': MATCH}, 'value')
+)
+def update_pipe_sql_click(n_clicks, sql_editor_text):
+    if not n_clicks:
+        raise PreventUpdate
+    ctx = dash.callback_context
+    triggered = dash.callback_context.triggered
+    if triggered[0]['value'] is None:
+        raise PreventUpdate
+    pipe = pipe_from_ctx(triggered, 'n_clicks')
+    if pipe is None:
+        raise PreventUpdate
+
+    if sql_editor_text is None:
+        success, msg = False, f"Unable to update SQL definition for {pipe}."
+    else:
+        try:
+            set_pipe_query(pipe, sql_editor_text)
+            success, msg = pipe.edit(debug=debug)
+        except Exception as e:
+            success, msg = False, f"Invalid SQL query:\n{e}"
+
+    return alert_from_success_tuple((success, msg))
+
+
+@dash_app.callback(
+    Output({'type': 'sync-success-div', 'index': MATCH}, 'children'),
+    Input({'type': 'update-sync-button', 'index': MATCH}, 'n_clicks'),
+    State({'type': 'sync-editor', 'index': MATCH}, 'value')
+)
+def sync_documents_click(n_clicks, sync_editor_text):
+    if not n_clicks:
+        raise PreventUpdate
+    ctx = dash.callback_context
+    triggered = dash.callback_context.triggered
+    if triggered[0]['value'] is None:
+        raise PreventUpdate
+    pipe = pipe_from_ctx(triggered, 'n_clicks')
+    if pipe is None:
+        raise PreventUpdate
+
+    try:
+        msg = '... '
+        docs = json.loads(sync_editor_text)
+    except Exception as e:
+        docs = None
+        msg = str(e)
+    if docs is None:
+        success, msg = False, (msg + f"Unable to sync documents to {pipe}.")
+    else:
+        try:
+            success, msg = pipe.sync(docs, debug=debug)
+        except Exception as e:
+            import traceback
+            traceback.print_exc()
+            success, msg = False, f"Encountered exception:\n{e}"
+
+    return alert_from_success_tuple((success, msg))

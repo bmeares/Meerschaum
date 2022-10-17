@@ -233,6 +233,7 @@ def sync(
 
         ### CHECKPOINT: Retrieved the DataFrame.
         _checkpoint(**kw)
+        
         ### Cast to a dataframe and ensure datatypes are what we expect.
         df = self.enforce_dtypes(df, debug=debug)
         if debug:
@@ -483,7 +484,15 @@ def filter_existing(
         dprint("Existing dtypes:\n" + str(backtrack_df.dtypes))
 
     ### Separate new rows from changed ones.
-    on_cols = [col for col_key, col in self.columns.items() if col_key != 'value']
+    on_cols = [
+        col for col_key, col in self.columns.items()
+        if (
+            col
+            and
+            col_key != 'value'
+            and col in backtrack_df.columns
+        )
+    ]
     on_cols_dtypes = {col: typ for col, typ in self.dtypes.items() if col in on_cols}
 
     ### Detect changes between the old target and new source dataframes.

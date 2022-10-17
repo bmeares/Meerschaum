@@ -257,7 +257,10 @@ def verify_venv(
             if python_path == real_path:
                 continue
 
-            python_path.unlink()
+            try:
+                python_path.unlink()
+            except Exception as e:
+                pass
             success, msg = make_symlink(real_path, python_path)
             if not success:
                 warn(msg, color=False)

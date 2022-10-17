@@ -4,6 +4,27 @@
 
 This is the current release cycle, so stay tuned for future releases!
 
+### v1.3.2 – 1.3.3
+
+- **Fixed a bug with `begin` and `end` bounds in `Pipe.get_data()`.**  
+  A safety measure was incorrectly checking if the quoted version of a column was in `pipe.get_columns_types()`, not the unquoted version. This patch restores functionality for `pipe.get_data()`.
+- **Fixed an issue with an upgraded version of `SQLAlchemy`.**
+- **Added a parameters editor the Web UI.**  
+  You may now edit your pipes' parameters in the browser through the Web UI!
+- **Added a SQL query editor to the Web UI.**  
+  Like the parameters editor, you can edit your pipes' SQL queries in the browser.
+- **Added a Sync Documents option to the Web UI.**  
+  You can directly sync documents into pipes on the Web UI.
+- **Added the arguments `order`, `limit`, `begin_add_minutes`, and `end_add_minutes` to `Pipe.get_data()`.**  
+  These new arguments will give you finer control over the data selection behavior.
+- **Enforce consistent ordering of indices in `Pipe.get_data()`.**
+- **Allow syncing JSON-encoded strings.**  
+  This patch allows pipes to sync JSON strings without first needing them to be deserialized.
+- **Fixed an environment error with Ubuntu 18.04.**
+- **Bumped `duckdb` and `duckdb-engine`.**
+- **Added a basic CLI for `duckdb`.**  
+  This will probably be replaced later down the line.
+
 ### v1.3.1
 
 - **Fixed data type enforcement issues.**  

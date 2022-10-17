@@ -7,7 +7,7 @@ Interact with Pipes metadata via SQLConnector.
 """
 from __future__ import annotations
 from meerschaum.utils.typing import (
-    Union, Any, Sequence, SuccessTuple, Mapping, Tuple, Dict, Optional, List
+    Union, Any, SuccessTuple, Tuple, Dict, Optional, List
 )
 
 def register_pipe(
@@ -562,6 +562,7 @@ def get_backtrack_data(
         backtrack_minutes: int = 0,
         begin: Optional[datetime.datetime] = None,
         params: Optional[Dict[str, Any]] = None,
+        limit: Optional[int] = None,
         chunksize: Optional[int] = -1,
         debug: bool = False
     ) -> Union[pandas.DataFrame, None]:
@@ -584,6 +585,9 @@ def get_backtrack_data(
         Additional parameters to filter by.
         See `meerschaum.connectors.sql.build_where`.
 
+    limit: Optional[int], default None
+        If specified, limit the number of rows retrieved to this value.
+
     chunksize: Optional[int], default -1
         The size of dataframe chunks to load into memory.
 
@@ -595,44 +599,22 @@ def get_backtrack_data(
     A `pd.DataFrame` of backtracked data.
 
     """
-    from meerschaum.utils.warnings import error, warn
+    import datetime
+    from meerschaum.utils.warnings import error
     if pipe is None:
         error("Pipe must be provided.")
-    from meerschaum.utils.debug import dprint
-    from meerschaum.utils.sql import dateadd_str
     if begin is None:
         begin = pipe.get_sync_time(debug=debug)
-    da = dateadd_str(
-        flavor = self.flavor,
-        datepart = 'minute',
-        number = (-1 * backtrack_minutes),
-        begin = begin
+
+    return pipe.get_data(
+        begin = begin,
+        begin_add_minutes = (-1 * backtrack_minutes),
+        order = 'desc',
+        params = params,
+        limit = limit,
+        chunksize = chunksize,
+        debug = debug,
     )
-
-    from meerschaum.utils.sql import sql_item_name, build_where
-    table = sql_item_name(pipe.target, self.flavor)
-    if not pipe.columns.get('datetime', None):
-        _dt = pipe.guess_datetime()
-        dt = sql_item_name(_dt, self.flavor) if _dt else None
-        is_guess = True
-    else:
-        _dt = pipe.get_columns('datetime')
-        dt = sql_item_name(_dt, self.flavor)
-        is_guess = False
-
-    query = (
-        f"SELECT * FROM {table}\n"
-        + (build_where(params, self) if params else '')
-        + (((" AND " if params else " WHERE ") + f"{dt} >= {da}") if da else "")
-    )
-
-    df = self.read(query, chunksize=chunksize, debug=debug)
-
-    if self.flavor == 'sqlite':
-        from meerschaum.utils.misc import parse_df_datetimes
-        df = parse_df_datetimes(df, debug=debug)
-
-    return df
 
 
 def get_pipe_data(
@@ -641,6 +623,10 @@ def get_pipe_data(
         begin: Union[datetime.datetime, str, None] = None,
         end: Union[datetime.datetime, str, None] = None,
         params: Optional[Dict[str, Any]] = None,
+        order: str = 'asc',
+        limit: Optional[int] = None,
+        begin_add_minutes: int = 0,
+        end_add_minutes: int = 0,
         debug: bool = False,
         **kw: Any
     ) -> Union[pd.DataFrame, None]:
@@ -662,6 +648,18 @@ def get_pipe_data(
         Additional parameters to filter by.
         See `meerschaum.connectors.sql.build_where`.
 
+    order: str, default 'asc'
+        The selection order for all of the indices in the query.
+
+    limit: Optional[int], default None
+        If specified, limit the number of rows retrieved to this value.
+
+    begin_add_minutes: int, default 0
+        The number of minutes to add to the `begin` datetime (i.e. `DATEADD`.
+
+    end_add_minutes: int, default 0
+        The number of minutes to add to the `end` datetime (i.e. `DATEADD`.
+
     chunksize: Optional[int], default -1
         The size of dataframe chunks to load into memory.
 
@@ -673,7 +671,9 @@ def get_pipe_data(
     A `pd.DataFrame` of the pipe's data.
 
     """
+    import json
     from meerschaum.utils.debug import dprint
+    from meerschaum.utils.misc import items_str
     from meerschaum.utils.sql import sql_item_name, dateadd_str
     from meerschaum.utils.packages import import_pandas
     from meerschaum.utils.warnings import warn
@@ -681,6 +681,12 @@ def get_pipe_data(
 
     query = f"SELECT * FROM {sql_item_name(pipe.target, self.flavor)}"
     where = ""
+
+    default_order = 'asc'
+    if order not in ('asc', 'desc'):
+        warn(f"Ignoring unsupported order '{order}'. Falling back to '{default_order}'.")
+        order = default_order
+    order = order.upper()
 
     existing_cols = pipe.get_columns_types(debug=debug)
 
@@ -692,6 +698,12 @@ def get_pipe_data(
         _dt = pipe.get_columns('datetime')
         dt = sql_item_name(_dt, self.flavor)
         is_guess = False
+
+    quoted_indices = {
+        key: sql_item_name(val, self.flavor)
+        for key, val in pipe.columns.items()
+        if val
+    }
 
     if begin is not None or end is not None:
         if is_guess:
@@ -709,41 +721,67 @@ def get_pipe_data(
                     stack = False,
                 )
 
-
-    if begin is not None and dt in existing_cols:
+    is_dt_bound = False
+    if begin is not None and _dt in existing_cols:
         begin_da = dateadd_str(
             flavor = self.flavor,
             datepart = 'minute',
-            number = 0,
+            number = begin_add_minutes,
             begin = begin
         )
         where += f"{dt} >= {begin_da}" + (" AND " if end is not None else "")
+        is_dt_bound = True
 
-    if end is not None and dt in existing_cols:
+    if end is not None and _dt in existing_cols:
         end_da = dateadd_str(
             flavor = self.flavor,
             datepart = 'minute',
-            number = 0,
+            number = end_add_minutes,
             begin = end
         )
         where += f"{dt} < {end_da}"
+        is_dt_bound = True
 
     if params is not None:
         from meerschaum.utils.sql import build_where
         where += build_where(params, self).replace(
-            'WHERE', ('AND' if (begin is not None or end is not None) else "")
+            'WHERE', ('AND' if is_dt_bound else "")
         )
 
     if len(where) > 0:
         query += "\nWHERE " + where
 
-    if _dt and dt in existing_cols:
-        query += "\nORDER BY " + dt + " DESC"
+    ### Sort by indices, starting with datetime.
+    order_by = ""
+    if quoted_indices:
+        order_by += "\nORDER BY "
+        if _dt and _dt in existing_cols:
+            order_by += dt + ' ' + order + ','
+        for key, quoted_col_name in quoted_indices.items():
+            if key == 'datetime':
+                continue
+            order_by += ' ' + quoted_col_name + ' ' + order + ','
+        order_by = order_by[:-1]
 
+    query += order_by
+
+    if isinstance(limit, int):
+        if self.flavor == 'mssql':
+            query = f'SELECT TOP {limit} ' + query[len("SELECT *"):]
+        elif self.flavor == 'oracle':
+            query = f"SELECT * FROM (\n  {query}\n)\nWHERE ROWNUM = 1"
+        else:
+            query += f"\nLIMIT {limit}"
+    
     if debug:
-        dprint(f"Getting pipe data with begin = '{begin}' and end = '{end}'")
+        to_print = (
+            []
+            + ([f"begin='{begin}'"] if begin else [])
+            + ([f"end='{end}'"] if end else [])
+            + ([f"params='{json.dumps(params)}'"] if params else [])
+        )
+        dprint("Getting pipe data with constraints: " + items_str(to_print, quotes=False))
 
-    existing_cols = pipe.get_columns_types(debug=debug)
     dtypes = pipe.dtypes
     if dtypes:
         if self.flavor == 'sqlite':
@@ -902,23 +940,16 @@ def sync_pipe(
     from meerschaum.utils.warnings import warn
     from meerschaum.utils.debug import dprint
     from meerschaum.utils.packages import import_pandas
-    from meerschaum.utils.misc import parse_df_datetimes
     from meerschaum.utils.sql import get_update_queries, sql_item_name
     from meerschaum import Pipe
     import time
+    pd = import_pandas()
     if df is None:
         msg = f"DataFrame is None. Cannot sync {pipe}."
         warn(msg)
         return False, msg
 
     start = time.perf_counter()
-
-    ## allow syncing for JSON or dict as well as DataFrame
-    pd = import_pandas()
-    if isinstance(df, dict):
-        df = parse_df_datetimes(df, debug=debug)
-    elif isinstance(df, str):
-        df = parse_df_datetimes(pd.read_json(df, debug=debug))
 
     ### if Pipe is not registered
     if not pipe.get_id(debug=debug):

@@ -61,8 +61,8 @@ packages: Dict[str, Dict[str, str]] = {
         'pymysql'                    : 'PyMySQL>=0.9.0',
         'aiomysql'                   : 'aiomysql>=0.0.21',
         'sqlalchemy_cockroachdb'     : 'sqlalchemy-cockroachdb>=1.4.2',
-        'duckdb'                     : 'duckdb>=0.4.0',
-        'duckdb_engine'              : 'duckdb-engine>=0.2.0',
+        'duckdb'                     : 'duckdb>=0.5.1',
+        'duckdb_engine'              : 'duckdb-engine>=0.6.4',
     },
     '_drivers': {
         'pyodbc'                     : 'pyodbc>=4.0.30',
@@ -73,6 +73,7 @@ packages: Dict[str, Dict[str, str]] = {
         'mycli'                      : 'mycli>=1.23.2',
         'litecli'                    : 'litecli>=1.5.0',
         'mssqlcli'                   : 'mssql-cli>=1.0.0',
+        'gadwall'                    : 'gadwall>=0.2.0',
     },
     'stack': {
         'compose'                    : 'docker-compose>=1.27.4',
@@ -127,7 +128,7 @@ packages['sql'] = {
     'pandas'                         : 'pandas>=1.3.0',
     'pytz'                           : 'pytz>=2022.1.0',
     'joblib'                         : 'joblib>=0.17.0',
-    'sqlalchemy'                     : 'SQLAlchemy>=1.4.39',
+    'sqlalchemy'                     : 'SQLAlchemy>=1.4.42',
     'sqlalchemy_utils'               : 'sqlalchemy-utils>=0.38.2',
     'databases'                      : 'databases>=0.4.0',
     'aiosqlite'                      : 'aiosqlite>=0.16.0',

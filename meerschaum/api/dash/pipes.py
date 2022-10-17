@@ -9,11 +9,13 @@ Functions for interacting with pipes via the web interface.
 from __future__ import annotations
 import json
 import shlex
+from textwrap import dedent
 from dash.dependencies import Input, Output, State
 from meerschaum.utils.typing import List, Optional, Dict, Any, Tuple, Union
-from meerschaum.utils.misc import string_to_dict
+from meerschaum.utils.misc import string_to_dict, json_serialize_datetime
 from meerschaum.utils.packages import attempt_import, import_dcc, import_html
 from meerschaum.utils.sql import get_pd_type
+from meerschaum.connectors.sql._fetch import get_pipe_query
 from meerschaum.api import endpoints, CHECK_UPDATE
 from meerschaum.api.dash import (
     dash_app, debug, _get_pipes
@@ -22,6 +24,7 @@ from meerschaum.api.dash.connectors import get_web_connector
 from meerschaum.api.dash.components import alert_from_success_tuple
 import meerschaum as mrsm
 dbc = attempt_import('dash_bootstrap_components', lazy=False, check_update=CHECK_UPDATE)
+dash_ace = attempt_import('dash_ace', lazy=False, check_update=CHECK_UPDATE)
 html, dcc = import_html(check_update=CHECK_UPDATE), import_dcc(check_update=CHECK_UPDATE)
 humanfriendly = attempt_import('humanfriendly', check_update=CHECK_UPDATE)
 
@@ -42,8 +45,8 @@ def pipe_from_ctx(ctx, trigger_property: str = 'n_clicks') -> Union[mrsm.Pipe, N
     return mrsm.Pipe(**meta)
 
 def keys_from_state(
-        state : Dict[str, Any],
-        with_params : bool = False
+        state: Dict[str, Any],
+        with_params: bool = False
     ) -> Union[
         Tuple[List[str], List[str], List[str]],
         Tuple[List[str], List[str], List[str], str],
@@ -52,9 +55,9 @@ def keys_from_state(
     Read the current state and return the selected keys lists.
     """
     _filters = {
-        'ck' : state[f"connector-keys-{state['pipes-filter-tabs.active_tab']}.value"],
-        'mk' : state[f"metric-keys-{state['pipes-filter-tabs.active_tab']}.value"],
-        'lk' : state[f"location-keys-{state['pipes-filter-tabs.active_tab']}.value"],
+        'ck' : state.get(f"connector-keys-{state['pipes-filter-tabs.active_tab']}.value", None),
+        'mk' : state.get(f"metric-keys-{state['pipes-filter-tabs.active_tab']}.value", None),
+        'lk' : state.get(f"location-keys-{state['pipes-filter-tabs.active_tab']}.value", None),
     }
     if state['pipes-filter-tabs.active_tab'] == 'input':
         try:
@@ -116,14 +119,25 @@ def get_pipes_cards(*keys):
         #  if newest_time is not None and oldest_time is not None
         #  else html.P('No date information available.'))
 
-        footer_children = dbc.Button(
-            'Download data',
-            size = 'sm',
-            color = 'link',
-            id = {'type': 'pipe-download-csv-button', 'index': json.dumps(p.meta)},
-        )
+        footer_children = dbc.Row([
+            dbc.Col(
+                dbc.Button(
+                    'Download data',
+                    size = 'sm',
+                    color = 'link',
+                    id = {'type': 'pipe-download-csv-button', 'index': json.dumps(p.meta)},
+                )
+            ),
+            #  dbc.Col(
+                #  dbc.Button(
+                    #  'Sync',
+                    #  size = 'sm',
+                    #  id = {'type': 'pipe-sync-button', 'index': json.dumps(p.meta)}
+                #  )
+            #  ),
+        ])
         card_body_children = [
-            html.H5(html.B(str(p)), className='card-title'),
+            html.H5(html.B(str(p)), className='card-title', style={'font-family': ['monospace']}),
             #  html.P(str(p)),
             html.Div(dbc.Accordion(accordion_items_from_pipe(p), flush=True,
                 start_collapsed=True,
@@ -155,8 +169,14 @@ def accordion_items_from_pipe(
         'Overview': 'overview',
         'Statistics': 'stats',
         'Columns': 'columns',
-        'Recent Data': 'recent-data',
+        'Parameters': 'parameters',
     }
+    if pipe.connector_keys.startswith('sql:'):
+        items_titles['SQL Query'] = 'sql'
+    items_titles.update({
+        'Recent Data': 'recent-data',
+        'Sync Documents': 'sync-data',
+    })
 
     ### Only generate items if they're in the `active_items` list.
     items_bodies = {}
@@ -168,6 +188,7 @@ def accordion_items_from_pipe(
             html.Tr([html.Td("Metric"), html.Td(f"{pipe.metric_key}")]),
             html.Tr([html.Td("Location"), html.Td(f"{pipe.location_key}")]),
             html.Tr([html.Td("Instance"), html.Td(f"{pipe.instance_keys}")]),
+            html.Tr([html.Td("Target Table"), html.Td(f"{pipe.target}")]),
         ]
         for col_key, col in pipe.columns.items():
             overview_rows.append(html.Tr([html.Td(f"'{col_key}' Index"), html.Td(col)]))
@@ -213,13 +234,10 @@ def accordion_items_from_pipe(
             columns_header = [html.Thead(html.Tr([
                 html.Th("Column"), html.Th("DB Type"), html.Th("PD Type")
             ]))]
-            columns_types = pipe.get_columns_types(debug=debug)
-            #  combined_columns_types = {
-                #  col: {
-                    #  'db': typ,
-                    #  'pd': get_pd_type(typ)
-                #  } for col, typ in columns_types.items()
-            #  }
+            columns_types = {
+                col: typ.replace('_', ' ')
+                for col, typ in pipe.get_columns_types(debug=debug).items()
+            }
             columns_rows = [
                 html.Tr([
                     html.Td(html.Pre(col)), html.Td(html.Pre(typ)), html.Td(html.Pre(get_pd_type(typ)))
@@ -230,13 +248,128 @@ def accordion_items_from_pipe(
         except Exception as e:
             columns_table = html.P("Could not retrieve columns ― please try again.")
         items_bodies['columns'] = columns_table
+
+    if 'parameters' in active_items:
+        parameters_editor = dash_ace.DashAceEditor(
+            value = json.dumps(pipe.parameters, indent=4),
+            mode = 'norm',
+            tabSize = 4,
+            theme = 'twilight',
+            id = {'type': 'parameters-editor', 'index': json.dumps(pipe.meta)},
+            width = '100%',
+            height = '500px',
+            readOnly = False,
+            showGutter = False,
+            showPrintMargin = False,
+            highlightActiveLine = True,
+            wrapEnabled = True,
+            style = {'min-height': '120px'},
+        )
+        update_parameters_button = dbc.Button(
+            "Update",
+            id = {'type': 'update-parameters-button', 'index': json.dumps(pipe.meta)},
+        )
+        items_bodies['parameters'] = html.Div([
+            parameters_editor,
+            html.Br(),
+            dbc.Row([
+                dbc.Col([update_parameters_button], width=2),
+                dbc.Col([
+                    html.Div(
+                        id={'type': 'update-parameters-success-div', 'index': json.dumps(pipe.meta)}
+                    )
+                ],
+                width=True,
+                )
+            ]),
+
+        ])
+
+    if 'sql' in active_items:
+        query = dedent((get_pipe_query(pipe, warn=False) or "")).lstrip().rstrip()
+        sql_editor = dash_ace.DashAceEditor(
+            value = query,
+            mode = 'sql',
+            tabSize = 4,
+            theme = 'twilight',
+            id = {'type': 'sql-editor', 'index': json.dumps(pipe.meta)},
+            width = '100%',
+            height = '500px',
+            readOnly = False,
+            showGutter = False,
+            showPrintMargin = False,
+            highlightActiveLine = True,
+            wrapEnabled = True,
+            style = {'min-height': '120px'},
+        )
+        update_sql_button = dbc.Button(
+            "Update",
+            id = {'type': 'update-sql-button', 'index': json.dumps(pipe.meta)},
+        )
+        items_bodies['sql'] = html.Div([
+            sql_editor,
+            html.Br(),
+            dbc.Row([
+                dbc.Col([update_sql_button], width=2),
+                dbc.Col([
+                    html.Div(
+                        id={'type': 'update-sql-success-div', 'index': json.dumps(pipe.meta)}
+                    )
+                ],
+                width=True,
+                )
+            ]),
+        ])
+
     if 'recent-data' in active_items:
         try:
-            df = pipe.get_backtrack_data(backtrack_minutes=10)
+            df = pipe.get_backtrack_data(backtrack_minutes=10, limit=10, debug=debug)
             table = dbc.Table.from_dataframe(df, bordered=False, hover=True) 
         except Exception as e:
             table = html.P("Could not retrieve recent data.")
         items_bodies['recent-data'] = table
+
+    if 'sync-data' in active_items:
+        backtrack_df = pipe.get_backtrack_data(debug=debug, limit=1)
+        try:
+            json_text = backtrack_df.to_json(
+                orient = 'records',
+                date_format = 'iso',
+                force_ascii = False,
+                indent = 4,
+                date_unit = 'ns',
+            ) if backtrack_df is not None else '[]'
+        except Exception as e:
+            warn(e)
+            json_text = '[]'
+        sync_editor = dash_ace.DashAceEditor(
+            value = json_text,
+            mode = 'norm',
+            tabSize = 4,
+            theme = 'twilight',
+            id = {'type': 'sync-editor', 'index': json.dumps(pipe.meta)},
+            width = '100%',
+            height = '500px',
+            readOnly = False,
+            showGutter = False,
+            showPrintMargin = False,
+            highlightActiveLine = True,
+            wrapEnabled = True,
+            style = {'min-height': '120px'},
+        )
+        update_sync_button = dbc.Button(
+            "Sync",
+            id = {'type': 'update-sync-button', 'index': json.dumps(pipe.meta)},
+        )
+        sync_success_div = html.Div(id={'type': 'sync-success-div', 'index': json.dumps(pipe.meta)})
+        items_bodies['sync-data'] = html.Div([
+            sync_editor,
+            html.Br(),
+            dbc.Row([
+                dbc.Col([update_sync_button], width=1),
+                dbc.Col([sync_success_div], width=True),
+            ]),
+        ])
 
     return [
         dbc.AccordionItem(items_bodies.get(item_id, ''), title=title, item_id=item_id)
