@@ -578,6 +578,8 @@ def need_update(
         )
         if debug:
             dprint(f"version: {version}", color=color)
+        if version is None:
+            return False
     except Exception as e:
         if debug:
             dprint(str(e), color=color)

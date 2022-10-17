@@ -98,7 +98,7 @@ def parse_uri(uri: str) -> Dict[str, Any]:
     """
     from urllib.parse import parse_qs, urlparse
     sqlalchemy = attempt_import('sqlalchemy')
-    parser = sqlalchemy.engine.url._parse_rfc1738_args
+    parser = sqlalchemy.engine.url.make_url
     params = parser(uri).translate_connect_args()
     params['flavor'] = uri.split(':')[0].split('+')[0]
     if params['flavor'] == 'postgres':
