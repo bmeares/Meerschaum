@@ -20,6 +20,8 @@ def enforce_dtypes(self, df: 'pd.DataFrame', debug: bool=False) -> 'pd.DataFrame
     from meerschaum.utils.formatting import pprint
     from meerschaum.config.static import STATIC_CONFIG
     from meerschaum.utils.packages import import_pandas
+    from meerschaum.utils.misc import parse_df_datetimes
+    pd = import_pandas(debug=debug)
     if df is None:
         if debug:
             dprint(
@@ -28,13 +30,14 @@ def enforce_dtypes(self, df: 'pd.DataFrame', debug: bool=False) -> 'pd.DataFrame
             )
         return df
 
-    if not hasattr(df, 'dtypes'):
-        pd = import_pandas(debug=debug)
-        try:
-            df = pd.DataFrame(df)
-        except Exception as e:
-            warn(f"Unable to cast incoming data as a DataFrame...:\n{e}")
-            return df
+    try:
+        if isinstance(df, str):
+            df = parse_df_datetimes(pd.read_json(df), debug=debug)
+        else:
+            df = parse_df_datetimes(df, debug=debug)
+    except Exception as e:
+        warn(f"Unable to cast incoming data as a DataFrame...:\n{e}")
+        return df
 
     if not self.dtypes:
         if debug:

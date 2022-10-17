@@ -7,6 +7,7 @@ Implement the Connector fetch() method
 """
 
 from __future__ import annotations
+import meerschaum as mrsm
 from meerschaum.utils.typing import Optional, Union, Callable, Any
 
 ### NOTE: begin is set in pipe.sync().
@@ -134,7 +135,7 @@ def fetch(
     return df
 
 
-def get_pipe_query(pipe) -> Union[str, None]:
+def get_pipe_query(pipe: mrsm.Pipe, warn: bool = True) -> Union[str, None]:
     """
     Run through the possible keys for a pipe's query and return the first match.
 
@@ -143,7 +144,7 @@ def get_pipe_query(pipe) -> Union[str, None]:
     - query
     - sql
     """
-    from meerschaum.utils.warnings import warn
+    from meerschaum.utils.warnings import warn as _warn
     if pipe.parameters.get('fetch', {}).get('definition', None):
         definition = pipe.parameters['fetch']['definition']
     elif pipe.parameters.get('definition', None):
@@ -153,12 +154,40 @@ def get_pipe_query(pipe) -> Union[str, None]:
     elif pipe.parameters.get('sql', None):
         definition = pipe.parameters['sql']
     else:
-        warn(
-            f"Could not determine a SQL definition for {pipe}.\n"
-            + "    Set the key `query` in `pipe.parameters` to a valid SQL query."
-        )
+        if warn:
+            _warn(
+                f"Could not determine a SQL definition for {pipe}.\n"
+                + "    Set the key `query` in `pipe.parameters` to a valid SQL query."
+            )
         return None
     return definition
+
+
+def set_pipe_query(pipe: mrsm.Pipe, query: str) -> None:
+    """
+    Run through the possible keys for a pipe's query and set the first match.
+
+    - fetch, definition
+    - definition
+    - query
+    - sql
+    """
+    if pipe.parameters.get('fetch', {}).get('definition', None):
+        if pipe.parameters.get('fetch', None) is None:
+            pipe.parameters['fetch'] = {}
+        dict_to_set = pipe.parameters['fetch']
+        key_to_set = 'definition'
+    elif pipe.parameters.get('definition', None):
+        dict_to_set = pipe.parameters
+        key_to_set = 'definition'
+    elif pipe.parameters.get('query', None):
+        dict_to_set = pipe.parameters
+        key_to_set = 'query'
+    else:
+        dict_to_set = pipe.parameters
+        key_to_set = 'sql'
+
+    dict_to_set[key_to_set] = query
 
 
 def get_pipe_backtrack_minutes(pipe) -> Union[int, float]:

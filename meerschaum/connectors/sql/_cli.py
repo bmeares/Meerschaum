@@ -19,6 +19,7 @@ flavor_clis = {
     'percona'     : 'mycli',
     'sqlite'      : 'litecli',
     'mssql'       : 'mssqlcli',
+    'duckdb'      : 'gadwall',
 }
 cli_deps = {
     'pgcli': ['pgspecial', 'pendulum'],
@@ -28,17 +29,7 @@ def cli(
         self,
         debug : bool = False
     ) -> SuccessTuple:
-    """Launch an interactive CLI for the SQLConnector's flavor
-
-    Parameters
-    ----------
-    debug : bool :
-         (Default value = False)
-
-    Returns
-    -------
-
-    """
+    """Launch an interactive CLI for the SQLConnector's flavor."""
     from meerschaum.utils.packages import venv_exec, attempt_import
     from meerschaum.utils.debug import dprint
     from meerschaum.utils.warnings import error
@@ -46,6 +37,15 @@ def cli(
 
     if self.flavor not in flavor_clis:
         return False, f"No CLI available for flavor '{self.flavor}'."
+
+    if self.flavor == 'duckdb':
+        gadwall = attempt_import('gadwall', debug = debug, lazy=False)
+        gadwall_shell = gadwall.Gadwall(self.database)
+        try:
+            gadwall_shell.cmdloop()
+        except KeyboardInterrupt:
+            pass
+        return True, "Success"
 
     cli_name = flavor_clis[self.flavor]
 
@@ -58,7 +58,7 @@ def cli(
     ### NOTE: The `DATABASE_URL` property must be initialized first in case the database is not
     ### yet defined (e.g. 'sql:local').
     cli_arg_str = self.DATABASE_URL
-    if self.flavor == 'sqlite':
+    if self.flavor in ('sqlite', 'duckdb'):
         cli_arg_str = str(self.database)
 
     ### Define the script to execute to launch the CLI.
@@ -80,6 +80,8 @@ def cli(
             + "finally:\n"
             + "    ms_object.shutdown()"
         )
+    elif self.flavor == 'duckdb':
+        launch_cli = ()
 
     try:
         if debug:
