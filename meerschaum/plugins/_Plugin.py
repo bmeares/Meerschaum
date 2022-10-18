@@ -725,7 +725,7 @@ class Plugin:
             for plugin in self.get_required_plugins(debug=debug):
                 plugin.activate_venv(debug=debug, **kw)
 
-        vtp = venv_target_path(self.name, debug=debug)
+        vtp = venv_target_path(self.name, debug=debug, allow_nonexistent=True)
         venv_meerschaum_path = vtp / 'meerschaum'
 
         try:

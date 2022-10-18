@@ -124,7 +124,7 @@ def get_connector(
     """
     from meerschaum.connectors.parse import parse_instance_keys
     from meerschaum.config import get_config
-    from meerschaum.config.static import _static_config
+    from meerschaum.config.static import STATIC_CONFIG
     global _loaded_plugin_connectors
     with _locks['_loaded_plugin_connectors']:
         if not _loaded_plugin_connectors:
@@ -137,7 +137,7 @@ def get_connector(
 
     ### NOTE: the default instance connector may not be main.
     ### Only fall back to 'main' if the type is provided by the label is omitted.
-    label = label if label is not None else _static_config()['connectors']['default_label']
+    label = label if label is not None else STATIC_CONFIG['connectors']['default_label']
 
     ### type might actually be a label. Check if so and raise a warning.
     if type not in connectors:
