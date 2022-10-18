@@ -170,6 +170,7 @@ def fetch_pipes_keys(
     from meerschaum.config.static import _static_config
     sqlalchemy = attempt_import('sqlalchemy')
     import json
+    from copy import deepcopy
 
     if connector_keys is None:
         connector_keys = []
@@ -197,7 +198,7 @@ def fetch_pipes_keys(
     }
 
     ### Make deep copy so we don't mutate this somewhere else.
-    parameters = params.copy()
+    parameters = deepcopy(params)
     for col, vals in cols.items():
         ### Allow for IS NULL to be declared as a single-item list ([None]).
         if vals == [None]:
@@ -702,7 +703,7 @@ def get_pipe_data(
     quoted_indices = {
         key: sql_item_name(val, self.flavor)
         for key, val in pipe.columns.items()
-        if val
+        if val in existing_cols
     }
 
     if begin is not None or end is not None:

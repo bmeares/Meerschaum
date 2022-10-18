@@ -12,7 +12,8 @@ For ease of use, you can also import from the root `meerschaum` module:
 """
 
 from __future__ import annotations
-from meerschaum.utils.typing import Any, SuccessTuple, Union, Optional, Sequence, Mapping, Dict
+
+from meerschaum.utils.typing import Any, SuccessTuple, Union, Optional, List, Dict
 from meerschaum.utils.threading import Lock, RLock
 from meerschaum.utils.warnings import error, warn
 
@@ -31,11 +32,13 @@ connectors = {
     'mqtt'  : {},
     'plugin': {},
 }
+instance_types: List[str] = ['sql', 'api']
 _locks = {
     'connectors'               : RLock(),
     'types'                    : RLock(),
     'custom_types'             : RLock(),
     '_loaded_plugin_connectors': RLock(),
+    'instance_types'           : RLock(),
 }
 attributes = {
     'api' : {
@@ -45,8 +48,6 @@ attributes = {
             'password'
         ],
         'default' : {
-            #  'username' : 'mrsm',
-            #  'password' : 'mrsm',
             'protocol' : 'http',
             'port'     : 8000,
         },
@@ -68,6 +69,7 @@ attributes = {
 types: Dict[str, Any] = {}
 custom_types: set = set()
 _loaded_plugin_connectors: bool = False
+
 
 def get_connector(
         type: str = None,
@@ -243,7 +245,7 @@ def is_connected(keys: str, **kw) -> bool:
         typ, label = keys.split(':')
     except Exception as e:
         return False
-    if typ not in ('sql', 'api'):
+    if typ not in instance_types:
         return False
     if not (label in connectors.get(typ, {})):
         return False
@@ -264,6 +266,25 @@ def make_connector(
     """
     Register a class as a `Connector`.
     The `type` will be the lower case of the class name, without the suffix `connector`.
+
+    Parameters
+    ----------
+    instance: bool, default False
+        If `True`, make this connector type an instance connector.
+        This requires implementing the various pipes functions and lots of testing.
+
+    Examples
+    --------
+    >>> import meerschaum as mrsm
+    >>> from meerschaum.connectors import make_connector, Connector
+    >>> class FooConnector(Connector):
+    ...     def __init__(self, label: str, **kw):
+    ...         super().__init__('foo', label, **kw)
+    ... 
+    >>> make_connector(FooConnector)
+    >>> mrsm.get_connector('foo', 'bar')
+    foo:bar
+    >>> 
     """
     import re
     typ = re.sub(r'connector$', '', cls.__name__.lower())
@@ -271,9 +292,13 @@ def make_connector(
         types[typ] = cls
     with _locks['custom_types']:
         custom_types.add(typ)
-    if typ not in connectors:
-        with _locks['connectors']:
+    with _locks['connectors']:
+        if typ not in connectors:
             connectors[typ] = {}
+    if getattr(cls, 'IS_INSTANCE', False):
+        with _locks['instance_types']:
+            if typ not in instance_types:
+                instance_types.append(typ)
     return cls
 
 
@@ -287,9 +312,8 @@ def load_plugin_connectors():
     for plugin in get_plugins():
         with open(plugin.__file__, encoding='utf-8') as f:
             text = f.read()
-        if 'make_connector' not in text:
+        if 'make_connector' in text:
             to_import.append(plugin.name)
     if not to_import:
         return
     import_plugins(*to_import) 
-

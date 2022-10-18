@@ -134,6 +134,7 @@ def _wrap_retry_connect(
     """
     from meerschaum.utils.warnings import warn as _warn, error, info
     from meerschaum.utils.debug import dprint
+    from meerschaum.connectors import instance_types
     from meerschaum.connectors.parse import parse_instance_keys
     from meerschaum.utils.packages import attempt_import
     from meerschaum.utils.sql import test_queries
@@ -142,7 +143,7 @@ def _wrap_retry_connect(
     import time
 
     connector = parse_instance_keys(connector_keys)
-    if connector.type not in ('sql', 'api'):
+    if connector.type not in instance_types:
         return None
 
     retries = 0

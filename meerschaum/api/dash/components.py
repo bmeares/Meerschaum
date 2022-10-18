@@ -15,6 +15,7 @@ from meerschaum.config.static import _static_config
 from meerschaum.utils.misc import remove_ansi
 from meerschaum.actions import get_shell
 from meerschaum.api import endpoints, CHECK_UPDATE
+from meerschaum.connectors import instance_types
 from meerschaum.utils.misc import get_connector_labels
 from meerschaum.config import __doc__ as doc
 dbc = attempt_import('dash_bootstrap_components', lazy=False, check_update=CHECK_UPDATE)
@@ -92,7 +93,7 @@ instance_select = dbc.Select(
     size = 'sm',
     options = [
         {'label': i, 'value': i}
-        for i in get_connector_labels('sql', 'api')
+        for i in get_connector_labels(*instance_types)
     ],
     class_name = 'dbc_dark custom-select custom-select-sm',
 )
@@ -102,20 +103,40 @@ navbar = dbc.Navbar(
     [
         dbc.Row(
             [
-                dbc.Col(html.Img(src=endpoints['dash'] + "/assets/logo_48x48.png", style = {'padding': '0.5em', 'padding-left': '2em'}), width='auto', align='start'),
-                dbc.Col(dbc.NavbarBrand("Meerschaum Web Console", class_name='ms-2', style={'margin-top': '10px', 'display': 'inline-block'}), align='start', width=2),
+                dbc.Col(
+                    html.Img(
+                        src = endpoints['dash'] + "/assets/logo_48x48.png",
+                        style = {'padding': '0.5em', 'padding-left': '2em'}
+                    ),
+                    width = 'auto', 
+                    align = 'start'
+                ),
+                dbc.Col(
+                    dbc.NavbarBrand(
+                        "Meerschaum Web Console",
+                        class_name = 'ms-2',
+                        style = {'margin-top': '10px', 'display': 'inline-block'}
+                    ), align='start', width=2
+                ),
                 dbc.Col(md=True, lg=True, sm=False),
-                dbc.Col(html.Center(instance_select), sm=2, md=2, lg=1, align='end', class_name='d-flex justify-content-center text-center'),
+                dbc.Col(
+                    html.Center(
+                        instance_select
+                    ),
+                    sm = 2,
+                    md = 2,
+                    lg = 1,
+                    align = 'end',
+                    class_name = 'd-flex justify-content-center text-center'
+                ),
                 dbc.Col(html.Pre(html.A(doc, href='/docs')), width='auto', align='end'),
             ],
-            #  align = 'center',
             style = {'width': '100%'},
             justify = 'around',
         ),
     ],
     color = 'dark', dark=True
 )
-
 
 
 def alert_from_success_tuple(success: SuccessTuple) -> dbc.Alert:
@@ -132,6 +153,7 @@ def alert_from_success_tuple(success: SuccessTuple) -> dbc.Alert:
             color = 'success' if success[0] else 'danger',
         )
     )
+
 
 def build_cards_grid(cards: List[dbc.Card], num_columns: int = 3) -> html.Div:
     """
@@ -152,4 +174,3 @@ def build_cards_grid(cards: List[dbc.Card], num_columns: int = 3) -> html.Div:
         rows.append(r)
         rows.append(html.Br())
     return html.Div(rows)
-

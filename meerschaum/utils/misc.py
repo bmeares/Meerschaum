@@ -194,7 +194,7 @@ def string_to_dict(
         return json.loads(params_string)
 
     import ast
-    params_dict = dict()
+    params_dict = {}
     for param in params_string.split(","):
         _keys = param.split(":")
         keys = _keys[:-1]
@@ -217,13 +217,14 @@ def string_to_dict(
 
     return params_dict
 
+
 def parse_config_substitution(
         value: str,
         leading_key: str = 'MRSM',
         begin_key: str = '{',
         end_key: str = '}',
         delimeter: str = ':'
-    ):
+    ) -> List[Any]:
     """
     Parse Meerschaum substitution syntax
     E.g. MRSM{value1:value2} => ['value1', 'value2']
@@ -278,6 +279,7 @@ def edit_file(
         rc = run_python_package('pyvim', [path], venv=package_venv(pyvim), debug=debug)
     return rc == 0
 
+
 def is_pipe_registered(
         pipe: 'meerschaum.Pipe',
         pipes: PipesDict,
@@ -308,6 +310,7 @@ def is_pipe_registered(
         dprint(f'{pipe}, {pipes}')
     return ck in pipes and mk in pipes[ck] and lk in pipes[ck][mk]
 
+
 def _get_subaction_names(action : str, globs : dict = None) -> List[str]:
     """NOTE: Don't use this function. You should use `meerschaum.actions.get_subactions()` instead.
     This only exists for internal use.
@@ -321,6 +324,7 @@ def _get_subaction_names(action : str, globs : dict = None) -> List[str]:
         if f'_{action}' in item and 'complete' not in item.lstrip('_'):
             subactions.append(globs[item])
     return subactions
+
 
 def choices_docstring(action: str, globs : Optional[Dict[str, Any]] = None) -> str:
     """
@@ -831,7 +835,7 @@ def df_from_literal(
     return pd.DataFrame({dt_name : [now], val_name : [val]})
 
 
-def add_missing_cols_to_df(df: pd.DataFrame, dtypes: Dict[str, Any]) -> pd.DataFrame:
+def add_missing_cols_to_df(df: 'pd.DataFrame', dtypes: Dict[str, Any]) -> pd.DataFrame:
     """
     Add columns from the dtypes dictionary as null columns to a new DataFrame.
 
@@ -876,9 +880,9 @@ def add_missing_cols_to_df(df: pd.DataFrame, dtypes: Dict[str, Any]) -> pd.DataF
     for col, typ in dtypes.items():
         if col in df.columns:
             continue
+        if typ == 'int64':
+            typ = 'Int64'
         df[col] = pd.Series([None] * len(df), dtype=typ)
-        #  df[col] = None
-        #  df[col] = df[col].astype(typ)
     
     return df
 
@@ -956,8 +960,13 @@ def filter_unseen_df(
 
     ### assume the old_df knows what it's doing, even if it's technically wrong.
     if dtypes is None:
-        dtypes = dict(old_df.dtypes)
-    dtypes = {col: typ for col, typ in old_df.dtypes.items()}
+        dtypes = {col: str(typ) for col, typ in old_df.dtypes.items()}
+    dtypes = {
+        col: (
+            str(typ) if str(typ) != 'int64' else 'Int64'
+        ) for col, typ in new_df.dtypes.items()
+    }
+
     cast_cols = True
     try:
         new_df = new_df.astype(dtypes)
@@ -1006,6 +1015,7 @@ def replace_pipes_in_dict(
     A dictionary where every pipe is replaced with the output of a function.
 
     """
+    import copy
     def change_dict(d : Dict[Any, Any], func : 'function') -> None:
         for k, v in d.items():
             if isinstance(v, dict):
@@ -1017,7 +1027,7 @@ def replace_pipes_in_dict(
         from meerschaum import get_pipes
         pipes = get_pipes(debug=debug, **kw)
 
-    result = pipes.copy()
+    result = copy.deepcopy(pipes)
     change_dict(result, func)
     return result
 
@@ -1135,6 +1145,7 @@ def _pyinstaller_traverse_dir(
             paths.append((path, _path))
     return paths
 
+
 def replace_password(d: Dict[str, Any], replace_with: str = '*') -> Dict[str, Any]:
     """
     Recursively replace passwords in a dictionary.
@@ -1164,7 +1175,8 @@ def replace_password(d: Dict[str, Any], replace_with: str = '*') -> Dict[str, An
     {'password': '!!!'}
 
     """
-    _d = d.copy()
+    import copy
+    _d = copy.deepcopy(d)
     for k, v in d.items():
         if isinstance(v, dict):
             _d[k] = replace_password(v)
@@ -1187,6 +1199,7 @@ def replace_password(d: Dict[str, Any], replace_with: str = '*') -> Dict[str, An
                 )
             )
     return _d
+
 
 def filter_keywords(
         func: Callable[[Any], Any],
@@ -1263,6 +1276,7 @@ def remove_ansi(s : str) -> str:
     """
     import re
     return re.compile(r'\x1B(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~])').sub('', s)
+
 
 def get_connector_labels(
         *types: str,
@@ -1763,3 +1777,16 @@ def is_symlink(path: pathlib.Path) -> bool:
         return bool(os.readlink(path))
     except OSError:
         return False
+
+
+def parametrized(dec):
+    """
+    A meta-decorator for allowing other decorator functions to have parameters.
+
+    https://stackoverflow.com/a/26151604/9699829
+    """
+    def layer(*args, **kwargs):
+        def repl(f):
+            return dec(f, *args, **kwargs)
+        return repl
+    return layer

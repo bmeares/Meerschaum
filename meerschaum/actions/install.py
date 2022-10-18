@@ -196,19 +196,23 @@ def _install_required(
         `install required noaa covid`
     """
     from meerschaum.core import Plugin
-    from meerschaum.utils.warnings import warn
+    from meerschaum.utils.warnings import warn, info
     from meerschaum.connectors.parse import parse_repo_keys
     from meerschaum.utils.formatting import print_tuple
+    from meerschaum.plugins import get_plugins_names
     repo_connector = parse_repo_keys(repository)
+
+    plugins_names = action or get_plugins_names()
 
     success_count = 0
     fail_count = 0
 
-    for plugin_name in action:
+    for plugin_name in plugins_names:
         plugin = Plugin(plugin_name, repo_connector=repo_connector)
         if not plugin.is_installed():
             warn(f"Plugin '{plugin}' is not installed. Skipping...", stack=False)
             continue
+        info(f"Installing required packages for plugin '{plugin}'...")
         success = plugin.install_dependencies(force=force, debug=debug)
         if not success:
             warn(f"Failed to install required packages for plugin '{plugin}'.", stack=False)

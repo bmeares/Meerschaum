@@ -175,6 +175,7 @@ def create_engine(
     from meerschaum.utils.warnings import error, warn
     sqlalchemy = attempt_import('sqlalchemy')
     import urllib
+    import copy
     ### Install and patch required drivers.
     if self.flavor in install_flavor_drivers:
         attempt_import(*install_flavor_drivers[self.flavor], debug=debug, lazy=False, warn=False)
@@ -242,7 +243,7 @@ def create_engine(
             ) + '\n' + f"{self.sys_config.get('create_engine', {}).get('connect_args', {})}"
         )
 
-    _kw_copy = kw.copy()
+    _kw_copy = copy.deepcopy(kw)
 
     ### NOTE: Order of inheritance:
     ###       1. Defaults

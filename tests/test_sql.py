@@ -6,15 +6,18 @@
 Test SQL utility functions.
 """
 
+import datetime
 import pytest
 from tests.connectors import conns
 from meerschaum.connectors.sql import SQLConnector
 from meerschaum.connectors.sql.tools import dateadd_str, table_exists, sql_item_name
-import datetime
 import dateutil.parser
 
 @pytest.mark.parametrize("flavor", list(conns.keys()))
 def test_dateadd_str(flavor: str):
+    """
+    Verify that the DATEADD function works for all flavors.
+    """
     conn = conns[flavor]
     if conn.type != 'sql':
         return
@@ -94,4 +97,7 @@ def test_exists(flavor: str):
     ],
 )
 def test_parse_uri(uri: str, expected_attributes):
+    """
+    Text that parsing a URI string returns the expected dictionary.
+    """
     assert SQLConnector.parse_uri(uri) == expected_attributes
