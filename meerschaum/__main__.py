@@ -19,12 +19,12 @@ See the License for the specific language governing permissions and
 limitations under the License.
 """
 
-import sys, os
+import sys, os, copy
 
 def main(sysargs: list = None) -> None:
     """Main CLI entry point."""
     if sysargs is None:
-        sysargs = sys.argv[1:].copy()
+        sysargs = copy.deepcopy(sys.argv[1:])
     old_cwd = os.getcwd()
 
     ### Catch help flags.
@@ -63,12 +63,14 @@ def main(sysargs: list = None) -> None:
 
     return _exit(rc, old_cwd=old_cwd)
 
+
 def _exit(return_code: int = 0, old_cwd: str = None) -> None:
     _close_pools()
     ### Restore the previous working directory.
     if old_cwd is not None and old_cwd != os.getcwd():
         os.chdir(old_cwd)
     sys.exit(return_code)
+
 
 def _close_pools():
     """Close multiprocessing pools before exiting."""

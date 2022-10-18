@@ -142,6 +142,7 @@ def _api_start(
     from meerschaum.utils.pool import get_pool
     import shutil
     import os
+    from copy import deepcopy
 
     if action is None:
         action = []
@@ -156,7 +157,7 @@ def _api_start(
     uvicorn_config_path = API_UVICORN_RESOURCES_PATH / SERVER_ID / 'config.json'
     uvicorn_env_path = API_UVICORN_RESOURCES_PATH / SERVER_ID / 'uvicorn.env'
 
-    api_config = get_config('system', 'api').copy()
+    api_config = deepcopy(get_config('system', 'api'))
     cf = _config()
     uvicorn_config = api_config['uvicorn']
     if port is None:

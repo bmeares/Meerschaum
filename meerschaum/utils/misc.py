@@ -1015,6 +1015,7 @@ def replace_pipes_in_dict(
     A dictionary where every pipe is replaced with the output of a function.
 
     """
+    import copy
     def change_dict(d : Dict[Any, Any], func : 'function') -> None:
         for k, v in d.items():
             if isinstance(v, dict):
@@ -1026,7 +1027,7 @@ def replace_pipes_in_dict(
         from meerschaum import get_pipes
         pipes = get_pipes(debug=debug, **kw)
 
-    result = pipes.copy()
+    result = copy.deepcopy(pipes)
     change_dict(result, func)
     return result
 
@@ -1144,6 +1145,7 @@ def _pyinstaller_traverse_dir(
             paths.append((path, _path))
     return paths
 
+
 def replace_password(d: Dict[str, Any], replace_with: str = '*') -> Dict[str, Any]:
     """
     Recursively replace passwords in a dictionary.
@@ -1173,7 +1175,8 @@ def replace_password(d: Dict[str, Any], replace_with: str = '*') -> Dict[str, An
     {'password': '!!!'}
 
     """
-    _d = d.copy()
+    import copy
+    _d = copy.deepcopy(d)
     for k, v in d.items():
         if isinstance(v, dict):
             _d[k] = replace_password(v)
@@ -1196,6 +1199,7 @@ def replace_password(d: Dict[str, Any], replace_with: str = '*') -> Dict[str, An
                 )
             )
     return _d
+
 
 def filter_keywords(
         func: Callable[[Any], Any],

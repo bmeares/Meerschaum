@@ -7,6 +7,7 @@ This module is the entry point for the interactive shell.
 
 from __future__ import annotations
 import os
+from copy import deepcopy
 from meerschaum.utils.typing import Union, SuccessTuple, Any, Callable, Optional, List, Dict
 from meerschaum.utils.packages import attempt_import
 from meerschaum.config import __doc__, __version__ as version, get_config
@@ -412,8 +413,7 @@ class Shell(cmd.Cmd):
         old_cwd = os.getcwd()
 
         ### make a backup of line for later
-        import copy
-        original_line = copy.deepcopy(line)
+        original_line = deepcopy(line)
 
         ### cmd2 support: check if command exists
         try:
@@ -832,9 +832,6 @@ def input_with_sigint(_input, session, shell: Optional[Shell] = None):
             colored(shell.repo_keys, 'on ' + get_config('shell', 'ansi', 'repo', 'rich', 'style'))
             if ANSI else colored(shell.repo_keys, 'on white')
         )
-        #  connected = (
-            #  is_connected(shell.instance_keys) if shell._update_bottom_toolbar else last_connected
-        #  )
         try:
             typ, label = shell.instance_keys.split(':')
             connected = typ in connectors and label in connectors[typ]
