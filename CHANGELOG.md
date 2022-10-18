@@ -4,6 +4,37 @@
 
 This is the current release cycle, so stay tuned for future releases!
 
+### v1.3.4
+
+- **Define environment connectors with JSON or URIs.**  
+  Connectors defined as environment variables may now have their attributes set as JSON in addition to a URI string.
+
+- **Custom Connectors may now be defined as environment variables.**  
+  You may now set environment variables for custom connectors defined via `@make_connector`, e.g.:
+
+  ```bash
+  MRSM_FOO_BAR='{"foo": "bar"}' mrsm show connectors
+  ```
+
+- **Allow for custom connectors to be instance connectors.**  
+  Add the property `IS_INSTANCE = True` your custom connector to add it to the official list of instance types:
+
+  ```python
+  from meerschaum.connectors import make_connector, Connector
+
+  @make_connector
+  class FooConnector(Connector):
+      IS_INSTANCE = True
+
+      def __init__(label: str, **kw):
+          super().__init__('foo', label, **kw)
+  ```
+
+- **Install packages for all plugins with `mrsm install required`.**  
+  The default behavior for `mrsm install required` with no plugins named is now to install dependencies for all plugins.
+
+- **Syncing bugfixes.**
+
 ### v1.3.2 – 1.3.3
 
 - **Fixed a bug with `begin` and `end` bounds in `Pipe.get_data()`.**  

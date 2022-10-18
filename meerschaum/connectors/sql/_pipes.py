@@ -702,7 +702,7 @@ def get_pipe_data(
     quoted_indices = {
         key: sql_item_name(val, self.flavor)
         for key, val in pipe.columns.items()
-        if val
+        if val in existing_cols
     }
 
     if begin is not None or end is not None:

@@ -36,11 +36,12 @@ def select_pipes(
     from meerschaum.config import get_config
     from meerschaum.utils.warnings import warn
     from meerschaum.utils.misc import flatten_pipes_dict
+    from meerschaum.connectors import instance_types
     clear_screen(debug=debug)
     while True:
         instance = choose(
             "On which instance are the pipes stored?",
-            get_connector_labels('sql', 'api'),
+            get_connector_labels(*instance_types),
             numeric = True,
             default = get_config('meerschaum', 'instance'),
         )

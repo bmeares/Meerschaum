@@ -106,6 +106,7 @@ def parse_instance_keys(
     
     return parse_connector_keys(keys, construct=construct, as_tuple=as_tuple, **kw)
 
+
 def parse_repo_keys(keys: Optional[str] = None, **kw):
     """Parse the Meerschaum repository value into an APIConnector."""
     from meerschaum.config import get_config
@@ -117,8 +118,9 @@ def parse_repo_keys(keys: Optional[str] = None, **kw):
 
     return parse_connector_keys(keys, **kw)
 
+
 def is_valid_connector_keys(
-        keys : str
+        keys: str
     ) -> bool:
     """Verify a connector_keys string references a valid connector.
     """
