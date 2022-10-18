@@ -7,7 +7,7 @@ Execute actions via the web interface.
 """
 
 from __future__ import annotations
-import platform, sys, io, os, shlex, time
+import platform, sys, io, os, shlex, time, copy
 from dash.exceptions import PreventUpdate
 from meerschaum.utils.threading import Thread
 from meerschaum.utils.typing import SuccessTuple, Tuple, Dict, Any, WebState
@@ -200,7 +200,7 @@ def execute_action(state: WebState):
             ### Don't forget to pass the existing environment
             ### in case MRSM_CONFIG and MRSM_PATCH are set.
             try:
-                _env = os.environ.copy()
+                _env = copy.deepcopy(os.environ)
             except Exception as e:
                 _env = {}
             _env.update({'LINES': '120', 'COLUMNS': '100'})

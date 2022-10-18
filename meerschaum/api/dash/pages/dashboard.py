@@ -64,13 +64,8 @@ layout = html.Div(
                             ),
                             html.Br(),
                             bottom_buttons_content,
-                            #  action_row,
                             test_button,
-                            #  go_button,
-                            #  show_pipes_button,
-                            #  get_items_menu,
                             html.Div(id='ws-div'),
-                            #  search_parameters_editor,
                         ],
                         id = 'content-col-left',
                         md=12, lg=6,
@@ -78,7 +73,6 @@ layout = html.Div(
                     dbc.Col(
                         children = [
                             dbc.Col([
-                                ### Place alert divs here.
                                     html.Div(id='success-alert-div'),
                                     html.Div(id='instance-alert-div')
                                 ],

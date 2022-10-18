@@ -53,13 +53,14 @@ def parse_help(sysargs : Union[List[str], Dict[str, Any]]) -> None:
     from meerschaum.actions.arguments._parse_arguments import parse_arguments, parse_line
     from meerschaum.actions import actions, get_subactions
     import importlib, inspect, textwrap
+    from copy import deepcopy
     if isinstance(sysargs, list):
         args = parse_arguments(sysargs)
     elif isinstance(sysargs, dict):
         args = sysargs
     elif isinstance(sysargs, str):
         args = parse_line(sysargs)
-    _args = args.copy()
+    _args = deepcopy(args)
     del _args['action']
     if len(args['action']) == 0:
         return actions['show'](['help'], **_args)

@@ -313,10 +313,6 @@ def _determine_begin(
     ### Datetime has already been provided.
     if begin is not None:
         return begin
-    ### Only manipulate the datetime for SQL or API pipes.
-    if not pipe.instance_connector.type in ('sql', 'api'):
-        return begin
-
     return pipe.get_sync_time(debug=debug)
 
 

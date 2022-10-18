@@ -9,7 +9,7 @@ and if interactive, print the welcome message.
 
 from __future__ import annotations
 
-import os, shutil, sys, pathlib
+import os, shutil, sys, pathlib, copy
 from meerschaum.utils.typing import Any, Dict, Optional, Union
 from meerschaum.utils.threading import RLock
 from meerschaum.utils.warnings import warn
@@ -196,7 +196,7 @@ def get_config(
             in_default = True
             patched_default_config = (
                 search_and_substitute_config(default_config)
-                if substitute else default_config.copy()
+                if substitute else copy.deepcopy(default_config)
             )
             _c = patched_default_config
             for k in keys:

@@ -7,6 +7,7 @@ Functions for patching the configuration dictionary
 """
 
 import sys
+import copy
 from meerschaum.utils.typing import Dict, Any
 
 def apply_patch_to_config(
@@ -14,7 +15,9 @@ def apply_patch_to_config(
         patch: Dict[str, Any],
     ):
     """Patch the config dict with a new dict (cascade patching)."""
-    _base = config.copy()
+    _base = copy.deepcopy(config) if isinstance(config, dict) else {}
+    if not isinstance(patch, dict):
+        return config
 
     def update_dict(base, patch):
         for key, value in patch.items():

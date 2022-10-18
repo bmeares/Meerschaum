@@ -8,6 +8,7 @@ Define a context manager for virtual environments.
 
 from __future__ import annotations
 
+import copy
 import pathlib
 from meerschaum.utils.typing import Union
 
@@ -50,7 +51,7 @@ class Venv:
             self._kwargs = {'venv': venv}
         self._debug = debug
         ### In case someone calls `deactivate()` before `activate()`.
-        self._kwargs['previously_active_venvs'] = active_venvs.copy()
+        self._kwargs['previously_active_venvs'] = copy.deepcopy(active_venvs)
 
 
     def activate(self, debug: bool = False) -> bool:
@@ -60,7 +61,7 @@ class Venv:
         will also be activated.
         """
         from meerschaum.utils.venv import active_venvs
-        self._kwargs['previously_active_venvs'] = active_venvs.copy()
+        self._kwargs['previously_active_venvs'] = copy.deepcopy(active_venvs)
         return self._activate(debug=(debug or self._debug), **self._kwargs)
 
 

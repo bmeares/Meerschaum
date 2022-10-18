@@ -8,6 +8,7 @@ Fetch and manipulate Pipes' attributes
 
 from __future__ import annotations
 from meerschaum.utils.typing import Tuple, Dict, SuccessTuple, Any, Union, Optional, List
+from meerschaum.utils.warnings import warn
 
 @property
 def attributes(self) -> Dict[str, Any]:
@@ -64,7 +65,11 @@ def columns(self) -> Union[Dict[str, str], None]:
     """
     if 'columns' not in self.parameters:
         self.parameters['columns'] = {}
-    return self.parameters['columns']
+    cols = self.parameters['columns']
+    if not isinstance(cols, dict):
+        cols = {}
+        self.parameters['columns'] = cols
+    return cols
 
 
 @columns.setter
@@ -73,6 +78,9 @@ def columns(self, columns: Dict[str, str]) -> None:
     Override the columns dictionary of the in-memory pipe.
     Call `meerschaum.Pipe.edit()` to persist changes.
     """
+    if not isinstance(columns, dict):
+        warn(f"{self}.columns must be a dictionary, received {type(columns)}")
+        return
     self.parameters['columns'] = columns
 
 

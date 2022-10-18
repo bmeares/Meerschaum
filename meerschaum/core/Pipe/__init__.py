@@ -51,6 +51,7 @@ with correct credentials, as well as a network connection and valid permissions.
 """
 
 from __future__ import annotations
+import copy
 from meerschaum.utils.typing import Optional, Dict, Any, Union, InstanceConnector, List
 from meerschaum.utils.formatting._pipes import pipe_repr
 from meerschaum.config import get_config
@@ -208,8 +209,10 @@ class Pipe:
         ### only set parameters if values are provided
         if isinstance(parameters, dict):
             self._attributes['parameters'] = parameters
-        elif parameters is not None:
-            warn(f"The provided parameters are of invalid type '{type(parameters)}'.")
+        else:
+            if parameters is not None:
+                warn(f"The provided parameters are of invalid type '{type(parameters)}'.")
+            self._attributes['parameters'] = {}
 
         if isinstance(columns, dict):
             self._attributes['parameters']['columns'] = columns
@@ -332,7 +335,7 @@ class Pipe:
         if '_cache_pipe' not in self.__dict__:
             from meerschaum.config._patch import apply_patch_to_config
             from meerschaum.utils.sql import sql_item_name
-            _parameters = self.parameters.copy()
+            _parameters = copy.deepcopy(self.parameters)
             _fetch_patch = {
                 'fetch': ({
                     'definition': (
@@ -355,6 +358,7 @@ class Pipe:
             )
 
         return self._cache_pipe
+
 
     @property
     def sync_time(self) -> Union['datetime.datetime', None]:

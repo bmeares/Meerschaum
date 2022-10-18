@@ -71,7 +71,7 @@ def pprint(
         c = a
         ### convert OrderedDict into dict
         if isinstance(a, OrderedDict) or issubclass(type(a), OrderedDict):
-            c = dict_from_od(c.copy())
+            c = dict_from_od(copy.deepcopy(c))
         _args.append(c)
     args = _args
 
@@ -81,7 +81,7 @@ def pprint(
         for a in args:
             c = a
             if isinstance(c, dict):
-                c = replace_password(c.copy())
+                c = replace_password(copy.deepcopy(c))
             if nopretty:
                 try:
                     c = json.dumps(c)

@@ -7,8 +7,9 @@ Fetch Pipe data via the API connector
 """
 
 from __future__ import annotations
-from meerschaum.utils.typing import Any, Optional, Dict
 import datetime
+import copy
+from meerschaum.utils.typing import Any, Optional, Dict
 
 def fetch(
         self,
@@ -43,7 +44,7 @@ def fetch(
     if begin is None:
         begin = pipe.sync_time
 
-    _params = params.copy() if params is not None else {}
+    _params = copy.deepcopy(params) if params is not None else {}
     _params = apply_patch_to_config(_params, instructions.get('params', {}))
 
     from meerschaum import Pipe

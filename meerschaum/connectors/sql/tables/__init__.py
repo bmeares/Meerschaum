@@ -70,6 +70,10 @@ def get_tables(
             return conn.create_metadata(debug=debug)
         return {}
 
+    ### Skip if the connector is not a SQL connector.
+    if getattr(conn, 'type', None) != 'sql':
+        return {}
+
     if conn not in connector_tables:
         if debug:
             dprint(f"Creating tables for connector '{conn}'.")

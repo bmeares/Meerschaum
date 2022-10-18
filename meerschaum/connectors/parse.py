@@ -50,6 +50,7 @@ def parse_connector_keys(
     A connector or dictionary of attributes. If `as_tuple`, also return the connector's keys.
 
     """
+    import copy
     from meerschaum.connectors import get_connector
     from meerschaum.config import get_config
     from meerschaum.config.static import _static_config
@@ -74,8 +75,7 @@ def parse_connector_keys(
             return None
         type_config = get_config('meerschaum', 'connectors', _type)
 
-        ### Forgetting to add `copy()` caused THE MOST frustrating bug to investigate.
-        default_config = type_config.get('default', {}).copy()
+        default_config = copy.deepcopy(type_config.get('default', {}))
         conn = type_config.get(_label, None)
         if default_config is not None and conn is not None:
             default_config.update(conn)
@@ -106,6 +106,7 @@ def parse_instance_keys(
     
     return parse_connector_keys(keys, construct=construct, as_tuple=as_tuple, **kw)
 
+
 def parse_repo_keys(keys: Optional[str] = None, **kw):
     """Parse the Meerschaum repository value into an APIConnector."""
     from meerschaum.config import get_config
@@ -117,8 +118,9 @@ def parse_repo_keys(keys: Optional[str] = None, **kw):
 
     return parse_connector_keys(keys, **kw)
 
+
 def is_valid_connector_keys(
-        keys : str
+        keys: str
     ) -> bool:
     """Verify a connector_keys string references a valid connector.
     """

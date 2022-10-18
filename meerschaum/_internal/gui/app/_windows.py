@@ -21,6 +21,7 @@ def get_windows(**kw) -> Dict[str, toga.window.Window]:
 def get_main_window(instance: Optional[str], debug: bool = False, **kw) -> toga.window.Window:
     from meerschaum.config.static import _static_config
     from meerschaum.utils.misc import get_connector_labels
+    from meerschaum.connectors import instance_types
     from meerschaum._internal.gui.app.pipes import build_pipes_tree
 
     main_window = toga.MainWindow(title=_static_config()['setup']['formal_name'], size=(1280, 720))
@@ -29,7 +30,7 @@ def get_main_window(instance: Optional[str], debug: bool = False, **kw) -> toga.
 
     left_box = toga.Box(children=[
         toga.Box(children=[
-            toga.Selection(items=get_connector_labels('sql', 'api'), style=toga.style.Pack(flex=1)),
+            toga.Selection(items=get_connector_labels(*instance_types), style=toga.style.Pack(flex=1)),
             tree,
             toga.Button('Hello, world!', style=toga.style.Pack(flex=1, padding=10), on_press=show_test_window),
         ], style=toga.style.Pack(flex=1, padding=10, direction='column', width=200))

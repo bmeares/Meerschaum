@@ -87,6 +87,7 @@ def edit(
 
     return self.instance_connector.edit_pipe(self, patch=patch, debug=debug, **kw)
 
+
 def edit_definition(
         self,
         yes: bool = False,
@@ -104,7 +105,8 @@ def edit_definition(
     A `SuccessTuple` of success, message.
 
     """
-    if (self.connector is None) or self.connector.type not in ('sql', 'api'):
+    from meerschaum.connectors import instance_types
+    if (self.connector is None) or self.connector.type not in instance_types:
         return self.edit(interactive=True, debug=debug, **kw)
 
     import json

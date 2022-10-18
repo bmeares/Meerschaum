@@ -62,7 +62,7 @@ def _pipes_lap(
     import queue
     import multiprocessing
     import contextlib
-    import time, os
+    import time, os, copy
     from meerschaum.utils.packages import venv_exec
     from meerschaum.utils.process import poll_process
     import json
@@ -72,7 +72,7 @@ def _pipes_lap(
     rich_table, rich_text, rich_box = attempt_import(
         'rich.table', 'rich.text', 'rich.box',
     )
-    all_kw = kw.copy()
+    all_kw = copy.deepcopy(kw)
     all_kw.update({'workers': workers, 'debug': debug, 'unblock': unblock, 'force': force,
         'min_seconds': min_seconds, 'timeout_seconds': timeout_seconds,
         'mrsm_instance': mrsm_instance,})
