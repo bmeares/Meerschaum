@@ -11,7 +11,7 @@ This is the current release cycle, so stay tuned for future releases!
 
   ```python
   import meerschaum as mrsm
-  pipe = mrsm.Pipe('a', 'b')
+  pipe = mrsm.Pipe('a', 'b', instance='sql:memory')
   
   pipe.sync([{'a': 1}])
   print(pipe.get_data())

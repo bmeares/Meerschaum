@@ -756,9 +756,6 @@ def pip_install(
     check_wheel: bool, default True
         If `True`, check if `wheel` is available.
 
-    check_setuptools: bool, default True
-        If `True`, check if `setuptools` is available.
-
     _uninstall: bool, default False
         If `True`, uninstall packages instead.
 
@@ -787,8 +784,6 @@ def pip_install(
         ANSI, UNICODE = False, False
     if check_wheel:
         have_wheel = venv_contains_package('wheel', venv=venv, debug=debug)
-    if check_setuptools:
-        have_setuptools = venv_contains_package('setuptools', venv=venv, debug=debug)
 
     _args = list(args)
     have_pip = venv_contains_package('pip', venv=venv, debug=debug)
@@ -827,26 +822,13 @@ def pip_install(
     if check_wheel and not _uninstall:
         if not have_wheel:
             if not pip_install(
-                'wheel',
+                'setuptools', 'wheel',
                 venv=venv, deactivate=False,
                 check_update=False, check_pypi=False,
                 check_wheel=False, debug=debug,
             ):
                 warn(
-                    f"Failed to install `wheel` for virtual environment '{venv}'.",
-                    color=False,
-                )
-
-    if check_setuptools and not _uninstall:
-        if not have_setuptools:
-            if not pip_install(
-                'setuptools',
-                venv=venv, deactivate=False,
-                check_update=False, check_pypi=False,
-                check_setuptools=False, debug=debug,
-            ):
-                warn(
-                    f"Failed to install `setuptools` for virtual environment '{venv}'.",
+                    f"Failed to install `setuptools` and `wheel` for virtual environment '{venv}'.",
                     color=False,
                 )
 
