@@ -181,6 +181,31 @@ def test_sync_new_columns(flavor: str):
 
 
 @pytest.mark.parametrize("flavor", list(remote_pipes.keys()))
+def test_sync_change_columns_dtypes(flavor: str):
+    """
+    Test that new columns are added.
+    """
+    conn = conns[flavor]
+    pipe = Pipe('foo', 'bar', columns={'datetime': 'dt', 'id': 'id'}, instance=conn)
+    pipe.drop(debug=debug)
+    docs = [
+        {'dt': '2022-01-01', 'id': 1, 'a': 10},
+    ]
+    pipe.sync(docs, debug=debug)
+    assert len(pipe.get_data().columns) == 3
+
+    docs = [
+        {'dt': '2022-01-01', 'id': 1, 'a': 'foo'},
+    ]
+    pipe.sync(docs, debug=debug)
+    df = pipe.get_data()
+    assert len(df.columns) == 3
+    assert len(df) == 1
+    print(df)
+    assert str(df.dtypes['a']) == 'object'
+
+
+@pytest.mark.parametrize("flavor", list(remote_pipes.keys()))
 def test_dtype_enforcement(flavor: str):
     """
     Test that incoming rows are enforced to the correct data type.
@@ -208,8 +233,6 @@ def test_dtype_enforcement(flavor: str):
     df = pipe.get_data(debug=debug)
     assert len(df) == 1
     assert len(df.columns) == 6
-    print(f"df.dtypes:\n{df.dtypes}")
-    print(f"pipe.dtypes:\n{pipe.dtypes}")
     for col, typ in df.dtypes.items():
         assert str(typ) == pipe.dtypes[col]
     return pipe

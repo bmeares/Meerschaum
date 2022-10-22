@@ -37,7 +37,10 @@ def stack(
     from meerschaum.config._paths import STACK_COMPOSE_PATH
     from meerschaum.utils.prompt import yes_no
     import meerschaum.config
-    from meerschaum.utils.packages import attempt_import, run_python_package, venv_contains_package
+    from meerschaum.utils.packages import (
+        attempt_import, run_python_package, venv_contains_package,
+        pip_install,
+    )
     from meerschaum.config import get_config
     from meerschaum.utils.debug import dprint
     from meerschaum.utils.warnings import warn
@@ -95,11 +98,19 @@ def stack(
 
     if not has_builtin_compose:
         _compose_venv = 'mrsm'
-        compose = attempt_import('compose', lazy=False, venv=_compose_venv)
+        compose = attempt_import('compose', lazy=False, venv=_compose_venv, debug=debug)
 
         ### If docker-compose is installed globally, don't use the `mrsm` venv.
         if not venv_contains_package('compose', _compose_venv):
             _compose_venv = None
+
+        if not venv_contains_package('packaging', _compose_venv):
+            if not pip_install('packaging', venv=_compose_venv, debug=debug):
+                warn_(f"Unable to install `packaging` into venv '{_compose_venv}'.")
+
+        if not venv_contains_package('yaml', _compose_venv):
+            if not pip_install('pyyaml', venv=_compose_venv, debug=debug):
+                warn_(f"Unable to install `pyyaml` into venv '{_compose_venv}'.")
 
     cmd_list = [
         _arg for _arg in (

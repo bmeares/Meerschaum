@@ -229,21 +229,7 @@ def edit_stack(
         debug : bool = False,
         **kw
     ):
-    """Open docker-compose.yaml or .env for editing
-
-    Parameters
-    ----------
-    action : Optional[List[str]] :
-         (Default value = None)
-    debug : bool :
-         (Default value = False)
-    **kw :
-        
-
-    Returns
-    -------
-
-    """
+    """Open docker-compose.yaml or .env for editing."""
     from meerschaum.config._edit import general_edit_config
     if action is None:
         action = []
@@ -253,4 +239,3 @@ def edit_stack(
         'docker-compose.yaml' : STACK_COMPOSE_PATH,
     }
     return general_edit_config(action=action, files=files, default='compose', debug=debug)
-
