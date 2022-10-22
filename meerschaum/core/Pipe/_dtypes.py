@@ -113,8 +113,8 @@ def enforce_dtypes(self, df: 'pd.DataFrame', debug: bool=False) -> 'pd.DataFrame
                     if col in common_dtypes
                 })
             except Exception as e:
-                warn(f"Encountered an error when enforcing data types for {self}:\n{e}")
-                return df
+                if debug:
+                    dprint(f"Encountered an error when enforcing data types for {self}:\n{e}")
     
     new_df = df.copy()
     for d in common_diff_dtypes:
@@ -124,7 +124,8 @@ def enforce_dtypes(self, df: 'pd.DataFrame', debug: bool=False) -> 'pd.DataFrame
         try:
             new_df[d] = new_df[d].astype(t)
         except Exception as e:
-            warn(f"Encountered an error when casting column {d} to type {t}:\n{e}")
+            if debug:
+                dprint(f"Encountered an error when casting column {d} to type {t}:\n{e}")
     return new_df
 
 

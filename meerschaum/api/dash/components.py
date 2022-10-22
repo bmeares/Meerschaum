@@ -100,42 +100,65 @@ instance_select = dbc.Select(
 
 
 navbar = dbc.Navbar(
-    [
-        dbc.Row(
-            [
-                dbc.Col(
-                    html.Img(
-                        src = endpoints['dash'] + "/assets/logo_48x48.png",
-                        style = {'padding': '0.5em', 'padding-left': '2em'}
-                    ),
-                    width = 'auto', 
-                    align = 'start'
+    dbc.Container(
+        [
+            html.A(
+                dbc.Row(
+                    [
+                        dbc.Col(
+                                html.Img(
+                                    src = endpoints['dash'] + "/assets/logo_48x48.png",
+                                    #  style = {'padding': '0.5em', 'padding-left': '2em'},
+                                    title = doc,
+                                ),
+                            #  width = 'auto', 
+                            #  align = 'start'
+                        ),
+                        #  dbc.Col(
+                            #  dbc.NavbarBrand(
+                                #  "Web Console",
+                                #  class_name = 'ms-2',
+                                #  style = {'margin-top': '10px', 'display': 'inline-block'}
+                            #  ),
+                            #  align = 'start',
+                            #  width = 2,
+                        #  ),
+                    ],
+                    #  style = {'width': '100%'},
+                    align = 'center',
+                    className = 'g-0 navbar-logo-row',
+                    #  justify = 'around',
                 ),
-                dbc.Col(
-                    dbc.NavbarBrand(
-                        "Meerschaum Web Console",
-                        class_name = 'ms-2',
-                        style = {'margin-top': '10px', 'display': 'inline-block'}
-                    ), align='start', width=2
+                href = '/docs',
+                style = {"textDecoration": "none"},
+            ),
+            dbc.NavbarToggler(id="navbar-toggler", n_clicks=0),
+            dbc.Collapse(
+                dbc.Row(
+                    [
+                        dbc.Col(
+                            instance_select,
+                        ),
+                        dbc.Col(
+                            dbc.Button(
+                                "Sign out",
+                                color = 'link',
+                                style = {'margin-left': '30px'},
+                                id = 'sign-out-button',
+                            ),
+                        ),
+                    ],
+                    className = "g-0 ms-auto flex-nowrap mt-3 mt-md-0",
                 ),
-                dbc.Col(md=True, lg=True, sm=False),
-                dbc.Col(
-                    html.Center(
-                        instance_select
-                    ),
-                    sm = 2,
-                    md = 2,
-                    lg = 1,
-                    align = 'end',
-                    class_name = 'd-flex justify-content-center text-center'
-                ),
-                dbc.Col(html.Pre(html.A(doc, href='/docs')), width='auto', align='end'),
-            ],
-            style = {'width': '100%'},
-            justify = 'around',
-        ),
-    ],
-    color = 'dark', dark=True
+                id = 'navbar-collapse',
+                is_open = False,
+                navbar = True,
+            ),
+        ],
+        style = {'max-width': '96%'},
+    ),
+    color = 'dark', dark=True,
+    style = {'width': '100% !important'},
 )
 
 

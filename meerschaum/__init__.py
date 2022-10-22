@@ -18,12 +18,12 @@ See the License for the specific language governing permissions and
 limitations under the License.
 """
 
-from meerschaum.config import __version__
-from meerschaum._internal.docs import index as __doc__
 from meerschaum.core.Pipe import Pipe
-from meerschaum.utils import get_pipes
-from meerschaum.connectors import get_connector
 from meerschaum.plugins import Plugin
+from meerschaum.utils import get_pipes
+from meerschaum._internal.docs import index as __doc__
+from meerschaum.connectors import get_connector
+from meerschaum.config import __version__
 
 __pdoc__ = {'gui': False, 'api': False, 'core': False,}
 __all__ = ("Pipe", "get_pipes", "get_connector", "Plugin",)

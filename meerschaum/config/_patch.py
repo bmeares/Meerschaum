@@ -20,6 +20,8 @@ def apply_patch_to_config(
         return config
 
     def update_dict(base, patch):
+        if base is None:
+            return {}
         for key, value in patch.items():
             if isinstance(value, dict):
                 base[key] = update_dict(base.get(key, {}), value)

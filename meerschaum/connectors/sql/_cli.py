@@ -23,6 +23,7 @@ flavor_clis = {
 }
 cli_deps = {
     'pgcli': ['pgspecial', 'pendulum'],
+    'mycli': ['cryptography'],
 }
 
 def cli(

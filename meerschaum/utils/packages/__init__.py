@@ -714,6 +714,7 @@ def pip_install(
         check_update: bool = True,
         check_pypi: bool = True,
         check_wheel: bool = True,
+        check_setuptools: bool = True,
         _uninstall: bool = False,
         color: bool = True,
         silent: bool = False,
@@ -783,6 +784,7 @@ def pip_install(
         ANSI, UNICODE = False, False
     if check_wheel:
         have_wheel = venv_contains_package('wheel', venv=venv, debug=debug)
+
     _args = list(args)
     have_pip = venv_contains_package('pip', venv=venv, debug=debug)
     import sys
@@ -820,13 +822,13 @@ def pip_install(
     if check_wheel and not _uninstall:
         if not have_wheel:
             if not pip_install(
-                'wheel',
+                'setuptools', 'wheel',
                 venv=venv, deactivate=False,
                 check_update=False, check_pypi=False,
                 check_wheel=False, debug=debug,
             ):
                 warn(
-                    f"Failed to install `wheel` for virtual environment '{venv}'.",
+                    f"Failed to install `setuptools` and `wheel` for virtual environment '{venv}'.",
                     color=False,
                 )
 

@@ -60,5 +60,5 @@ a {
 #instance-select {
   background-color : var(--bs-secondary) !important;
   color: white;
-  margin-bottom: 15px;
+  margin-top: 5px;
 }

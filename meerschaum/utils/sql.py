@@ -22,50 +22,50 @@ exists_queries = {
 }
 update_queries = {
     'default': """
-    UPDATE {target_table_name} AS f
-    {sets_subquery_none}
-    FROM {target_table_name} AS t
-    INNER JOIN (SELECT DISTINCT * FROM {patch_table_name}) AS p
-        ON {and_subquery_t}
-    WHERE
-        {and_subquery_f}
+        UPDATE {target_table_name} AS f
+        {sets_subquery_none}
+        FROM {target_table_name} AS t
+        INNER JOIN (SELECT DISTINCT * FROM {patch_table_name}) AS p
+            ON {and_subquery_t}
+        WHERE
+            {and_subquery_f}
     """,
     'mysql': """
-    UPDATE {target_table_name} AS f
-    INNER JOIN (SELECT DISTINCT * FROM {patch_table_name}) AS p
-        ON {and_subquery_f}
-    {sets_subquery_f}
-    WHERE
-        {and_subquery_f}
+        UPDATE {target_table_name} AS f
+        INNER JOIN (SELECT DISTINCT * FROM {patch_table_name}) AS p
+            ON {and_subquery_f}
+        {sets_subquery_f}
+        WHERE
+            {and_subquery_f}
     """,
     'mariadb': """
-    UPDATE {target_table_name} AS f
-    INNER JOIN (SELECT DISTINCT * FROM {patch_table_name}) AS p
-        ON {and_subquery_f}
-    {sets_subquery_f}
-    WHERE
-        {and_subquery_f}
+        UPDATE {target_table_name} AS f
+        INNER JOIN (SELECT DISTINCT * FROM {patch_table_name}) AS p
+            ON {and_subquery_f}
+        {sets_subquery_f}
+        WHERE
+            {and_subquery_f}
     """,
     'mssql': """
-    MERGE {target_table_name} t
-        USING (SELECT DISTINCT * FROM {patch_table_name}) p
-        ON {and_subquery_t}
-    WHEN MATCHED THEN
-        UPDATE
-        {sets_subquery_none};
+        MERGE {target_table_name} t
+            USING (SELECT DISTINCT * FROM {patch_table_name}) p
+            ON {and_subquery_t}
+        WHEN MATCHED THEN
+            UPDATE
+            {sets_subquery_none};
     """,
     'oracle': """
-    MERGE INTO {target_table_name} t
-        USING (SELECT DISTINCT * FROM {patch_table_name}) p
-        ON (
-            {and_subquery_t}
-        )
-    WHEN MATCHED THEN
-        UPDATE
-        {sets_subquery_none}
-        WHERE (
-            {and_subquery_t}
-        )
+        MERGE INTO {target_table_name} t
+            USING (SELECT DISTINCT * FROM {patch_table_name}) p
+            ON (
+                {and_subquery_t}
+            )
+        WHEN MATCHED THEN
+            UPDATE
+            {sets_subquery_none}
+            WHERE (
+                {and_subquery_t}
+            )
     """,
     'sqlite_delete_insert': [
         """
@@ -82,6 +82,16 @@ update_queries = {
         SELECT DISTINCT * FROM {patch_table_name} AS p
         """,
     ],
+    'default': """
+        UPDATE {target_table_name} AS f
+        {sets_subquery_none}
+        FROM {target_table_name} AS t
+        INNER JOIN (SELECT DISTINCT * FROM {patch_table_name}) AS p
+            ON {and_subquery_t}
+        WHERE
+            {and_subquery_f}
+    """,
+
 }
 hypertable_queries = {
     'timescaledb': 'SELECT hypertable_size(\'{table_name}\')',
@@ -795,10 +805,13 @@ def get_update_queries(
         return 'SET ' + ',\n'.join([
             (
                 l_prefix + sql_item_name(c_name, connector.flavor)
-                + ' = ' + 'CAST(' + r_prefix
-                + sql_item_name(c_name, connector.flavor) + ' AS '
-                + c_type.replace('_', ' ')
-                + ')'
+                + ' = '
+                + ('CAST(' if connector.flavor != 'sqlite' else '')
+                + r_prefix
+                + sql_item_name(c_name, connector.flavor)
+                + (' AS ' if connector.flavor != 'sqlite' else '')
+                + (c_type.replace('_', ' ') if connector.flavor != 'sqlite' else '')
+                + (')' if connector.flavor != 'sqlite' else '')
             ) for c_name, c_type in value_cols
         ])
 

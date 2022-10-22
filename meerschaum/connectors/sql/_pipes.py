@@ -94,7 +94,7 @@ def edit_pipe(
     from meerschaum.utils.packages import attempt_import
     from meerschaum.utils.sql import json_flavors
     if not patch:
-        parameters = pipe.parameters
+        parameters = pipe.__dict__.get('_attributes', {}).get('parameters', {})
     else:
         from meerschaum import Pipe
         from meerschaum.config._patch import apply_patch_to_config
@@ -984,6 +984,12 @@ def sync_pipe(
             if not self.exec_queries(add_cols_queries, debug=debug):
                 warn(f"Failed to add new columns to {pipe}.")
 
+        alter_cols_queries = self.get_alter_columns_queries(pipe, df, debug=debug)
+        if alter_cols_queries:
+            if not self.exec_queries(alter_cols_queries, debug=debug):
+                warn(f"Failed to alter columns for {pipe}.")
+
+
     unseen_df, update_df, delta_df = (
         pipe.filter_existing(
             df, chunksize=chunksize, begin=begin, end=end, debug=debug, **kw
@@ -1022,9 +1028,11 @@ def sync_pipe(
             debug = debug
         )
         success = all(self.exec_queries(queries, break_on_error=True, debug=debug))
+        drop_success, drop_msg = temp_pipe.drop(debug=debug)
+        if not drop_success:
+            warn(drop_msg)
         if not success:
             return False, f"Failed to apply update to {pipe}."
-        temp_pipe.drop(debug=debug)
 
     if_exists = kw.get('if_exists', 'append')
     if 'if_exists' in kw:
@@ -1509,9 +1517,6 @@ def get_add_columns_queries(
     df: pd.DataFrame
         The pandas DataFrame which contains new columns.
 
-    connector: mrsm.connectors.SQLConnector
-        The connector to the database on which the table resides.
-
     Returns
     -------
     A list of the `ALTER TABLE` SQL query or queries to be executed on the provided connector.
@@ -1522,7 +1527,7 @@ def get_add_columns_queries(
     from meerschaum.utils.misc import flatten_list
     table_obj = self.get_pipe_table(pipe, debug=debug)
     df_cols_types = {col: str(typ) for col, typ in df.dtypes.items()}
-    db_cols_types = {col: get_pd_type(str(typ)) for col, typ in table_obj.columns.items()}
+    db_cols_types = {col: get_pd_type(str(typ.type)) for col, typ in table_obj.columns.items()}
     new_cols = set(df_cols_types) - set(db_cols_types)
     if not new_cols:
         return []
@@ -1549,3 +1554,134 @@ def get_add_columns_queries(
     ))
 
     return drop_index_queries + [query] + create_index_queries
+
+
+def get_alter_columns_queries(
+        self,
+        pipe: mrsm.Pipe,
+        df: pd.DataFrame,
+        debug: bool = False,
+    ) -> List[str]:
+    """
+    If we encounter a column of a different type, set the entire column to text.
+
+    Parameters
+    ----------
+    pipe: mrsm.Pipe
+        The pipe to be altered.
+
+    df: pd.DataFrame
+        The pandas DataFrame which may contain altered columns.
+
+    Returns
+    -------
+    A list of the `ALTER TABLE` SQL query or queries to be executed on the provided connector.
+    """
+    if self.flavor == 'sqlite':
+        return []
+    if not pipe.exists(debug=debug):
+        return []
+    from meerschaum.utils.sql import get_pd_type, get_db_type, sql_item_name
+    from meerschaum.utils.misc import flatten_list
+    table_obj = self.get_pipe_table(pipe, debug=debug)
+    df_cols_types = {col: str(typ) for col, typ in df.dtypes.items()}
+    db_cols_types = {col: get_pd_type(str(typ.type)) for col, typ in table_obj.columns.items()}
+    altered_cols = [
+        col for col, typ in df_cols_types.items()
+        if typ.lower() != db_cols_types.get(col, 'object').lower()
+        and db_cols_types.get(col, 'object') != 'object'
+    ]
+    if not altered_cols:
+        return []
+
+    text_type = get_db_type('object', self.flavor)
+    altered_cols_types = {
+        col: text_type
+        for col in altered_cols
+    }
+
+    queries = []
+    if self.flavor == 'oracle':
+        add_query = "ALTER TABLE " + sql_item_name(pipe.target, self.flavor)
+        for col, typ in altered_cols_types.items():
+            add_query += "\nADD " + sql_item_name(col + '_temp', self.flavor) + " " + typ + ","
+        add_query = add_query[:-1]
+        queries.append(add_query)
+
+        populate_temp_query = "UPDATE " + sql_item_name(pipe.target, self.flavor)
+        for col, typ in altered_cols_types.items():
+            populate_temp_query += (
+                "\nSET " + sql_item_name(col + '_temp', self.flavor)
+                + ' = ' + sql_item_name(col, self.flavor) + ','
+            )
+        populate_temp_query = populate_temp_query[:-1]
+        queries.append(populate_temp_query)
+
+        set_old_cols_to_null_query = "UPDATE " + sql_item_name(pipe.target, self.flavor)
+        for col, typ in altered_cols_types.items():
+            set_old_cols_to_null_query += (
+                "\nSET " + sql_item_name(col, self.flavor)
+                + ' = NULL,'
+            )
+        set_old_cols_to_null_query = set_old_cols_to_null_query[:-1]
+        queries.append(set_old_cols_to_null_query)
+
+        alter_type_query = "ALTER TABLE " + sql_item_name(pipe.target, self.flavor)
+        for col, typ in altered_cols_types.items():
+            alter_type_query += (
+                "\nMODIFY " + sql_item_name(col, self.flavor) + ' '
+                + typ + ','
+            )
+        alter_type_query = alter_type_query[:-1]
+        queries.append(alter_type_query)
+
+        set_old_to_temp_query = "UPDATE " + sql_item_name(pipe.target, self.flavor)
+        for col, typ in altered_cols_types.items():
+            set_old_to_temp_query += (
+                "\nSET " + sql_item_name(col, self.flavor)
+                + ' = ' + sql_item_name(col + '_temp', self.flavor) + ','
+            )
+        set_old_to_temp_query = set_old_to_temp_query[:-1]
+        queries.append(set_old_to_temp_query)
+
+        drop_temp_query = "ALTER TABLE " + sql_item_name(pipe.target, self.flavor)
+        for col, typ in altered_cols_types.items():
+            drop_temp_query += (
+                "\nDROP COLUMN " + sql_item_name(col + '_temp', self.flavor) + ','
+            )
+        drop_temp_query = drop_temp_query[:-1]
+        queries.append(drop_temp_query)
+
+        return queries
+
+
+    query = "ALTER TABLE " + sql_item_name(pipe.target, self.flavor)
+    for col, typ in altered_cols_types.items():
+        alter_col_prefix = (
+            'ALTER' if self.flavor not in ('mysql', 'mariadb', 'oracle')
+            else 'MODIFY'
+        )
+        type_prefix = (
+            '' if self.flavor in ('mssql', 'mariadb', 'mysql')
+            else 'TYPE '
+        )
+        column_str = 'COLUMN' if self.flavor != 'oracle' else ''
+        query += (
+            f"\n{alter_col_prefix} {column_str} "
+            + sql_item_name(col, self.flavor)
+            + " " + type_prefix + typ + ","
+        )
+
+    query = query[:-1]
+    queries.append(query)
+    if self.flavor != 'duckdb':
+        return queries
+
+    drop_index_queries = list(flatten_list(
+        [q for ix, q in self.get_drop_index_queries(pipe, debug=debug).items()]
+    ))
+    create_index_queries = list(flatten_list(
+        [q for ix, q in self.get_create_index_queries(pipe, debug=debug).items()]
+    ))
+
+    return drop_index_queries + queries + create_index_queries

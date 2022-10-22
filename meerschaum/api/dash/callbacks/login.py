@@ -56,7 +56,6 @@ def login_button_click(
     When the user submits the login form, check the login.
     On successful login, set the session id.
     """
-    global active_sessions
     form_class = 'form-control'
     ctx = dash.callback_context
     if not username or not password or not ctx.triggered:

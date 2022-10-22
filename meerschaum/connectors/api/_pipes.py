@@ -179,8 +179,8 @@ def sync_pipe(
     def get_json_str(c):
         ### allow syncing dict or JSON without needing to import pandas (for IOT devices)
         return (
-            json.dumps(c, default=json_serialize_datetime) if isinstance(c, dict)
-            else c.to_json(date_format='iso', date_unit='us')
+            json.dumps(c, default=json_serialize_datetime) if isinstance(c, (dict, list))
+            else c.to_json(date_format='iso', date_unit='ns')
         )
 
     df = json.loads(df) if isinstance(df, str) else df
@@ -198,14 +198,14 @@ def sync_pipe(
     elif isinstance(df, dict):
         ### `_chunks` is a dict of lists of dicts.
         ### e.g. {'a' : [ {'a':[1, 2]}, {'a':[3, 4]} ] }
-        _chunks = {k:[] for k in keys}
+        _chunks = {k: [] for k in keys}
         rowcount = len(df[keys[0]])
         for k in keys:
             if len(df[k]) != rowcount:
                 return False, "Arrays must all be the same length."
             chunk_iter = more_itertools.chunked(df[k], _chunksize)
             for l in chunk_iter:
-                _chunks[k].append({k:l})
+                _chunks[k].append({k: l})
 
         ### `chunks` is a list of dicts (e.g. orient by rows in pandas JSON).
         for k, l in _chunks.items():
@@ -214,6 +214,9 @@ def sync_pipe(
                     chunks[i].update(c)
                 except IndexError:
                     chunks.append(c)
+    elif isinstance(df, list):
+        chunks = [df[i] for i in more_itertools.chunked(df, _chunksize)]
+        rowcount = len(chunks)
 
     ### Send columns in case the user has defined them locally.
     if pipe.columns:
@@ -223,7 +226,6 @@ def sync_pipe(
     for i, c in enumerate(chunks):
         if debug:
             dprint(f"Posting chunk ({i + 1} / {_chunksize}) to {r_url}...")
-            print(c)
         json_str = get_json_str(c)
 
         try:

@@ -126,7 +126,7 @@ def apply_connector_uri(env_var: str) -> None:
     groups = matched.groups()
     typ, label = groups[0].lower(), groups[1].lower()
     uri = os.environ[env_var]
-    if uri.startswith('{') and uri.endswith('}'):
+    if uri.lstrip().startswith('{') and uri.rstrip().endswith('}'):
         try:
             conn_attrs = json.loads(uri)
         except Exception as e:
