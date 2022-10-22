@@ -10,7 +10,7 @@ This module contains functions for parsing arguments
 from __future__ import annotations
 from meerschaum.utils.typing import List, Dict, Any, Optional, Callable, SuccessTuple
 
-from meerschaum.actions.arguments._parser import parser
+from meerschaum._internal.arguments._parser import parser
 
 def parse_arguments(sysargs: List[str]) -> Dict[str, Any]:
     """
@@ -173,7 +173,7 @@ def parse_dict_to_sysargs(
     ) -> List[str]:
     """Revert an arguments dictionary back to a command line list."""
     import json
-    from meerschaum.actions.arguments._parser import get_arguments_triggers
+    from meerschaum._internal.arguments._parser import get_arguments_triggers
     sysargs = []
     sysargs += args_dict.get('action', [])
     allow_none_args = {'location_keys'}

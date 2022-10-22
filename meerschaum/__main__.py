@@ -29,13 +29,13 @@ def main(sysargs: list = None) -> None:
 
     ### Catch help flags.
     if '--help' in sysargs or '-h' in sysargs:
-        from meerschaum.actions.arguments._parser import parse_help
+        from meerschaum._internal.arguments._parser import parse_help
         parse_help(sysargs)
         return _exit(old_cwd=old_cwd)
 
     ### Catch version flags.
     if '--version' in sysargs or '-V' in sysargs:
-        from meerschaum.actions.arguments._parser import parse_version
+        from meerschaum._internal.arguments._parser import parse_version
         parse_version(sysargs)
         return _exit(old_cwd=old_cwd)
 
@@ -44,7 +44,7 @@ def main(sysargs: list = None) -> None:
         daemon_entry(sysargs)
         return _exit(old_cwd=old_cwd)
 
-    from meerschaum.actions import entry, get_shell
+    from meerschaum._internal.entry import entry, get_shell
 
     ### Try to launch a shell if --shell is provided.
     if len(sysargs) == 0 or '--shell' in sysargs:
@@ -77,17 +77,11 @@ def _close_pools():
     ### Final step: close global pools.
     from meerschaum.utils.pool import get_pools
     for class_name, pool in get_pools().items():
-        #  try:
-            #  pool.shutdown()
-        #  except Exception as e:
-            #  print(e)
         try:
             pool.close()
             pool.terminate()
-            #  pool.join()
         except Exception as e:
             print(e)
-            pass
 
 if __name__ == "__main__":
     main(sys.argv[1:])

@@ -4,7 +4,7 @@
 
 This is the current release cycle, so stay tuned for future releases!
 
-### v1.3.6
+### v1.3.6 – v1.3.7
 
 - **Allow for syncing multiple data types per column.**  
   The highlight of this release is support for syncing multiple data types per column. When different data types are encountered, the underlying column will be converted to `TEXT`:
@@ -27,9 +27,13 @@ This is the current release cycle, so stay tuned for future releases!
 - **Cleaned up the Web Console.**  
   The web console's navbar is now more mobile-friendly, and a "sign out" button has been added.
 
+- **Removed plugins import when checking for environment connectors.**  
+  This should make some commands feel more snappy by lazy loading custom connectors.
 - **Fixed an issue with an updated versin of `uvicorn`.**
 - **Fixed an issue with `docker-compose`.**
+- **Fixed an issue with `FastAPI` on Python 3.7.**
 - **Added support for Python 3.11.**
+- **Renamed `meerschaum.actions.arguments` to `meerschaum._internal.arguments`.**
 
 
 ### v1.3.4 – v1.3.5

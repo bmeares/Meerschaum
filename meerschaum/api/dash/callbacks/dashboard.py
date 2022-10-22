@@ -33,7 +33,7 @@ from meerschaum.utils.misc import (
     string_to_dict, get_connector_labels, json_serialize_datetime, filter_keywords
 )
 from meerschaum.actions import get_subactions, actions
-from meerschaum.actions.arguments._parser import get_arguments_triggers, parser
+from meerschaum._internal.arguments._parser import get_arguments_triggers, parser
 from meerschaum.connectors.sql._fetch import set_pipe_query
 import meerschaum as mrsm
 import json
@@ -73,9 +73,6 @@ omit_flags = {
     'trace',
     'allow_shell_job',
 }
-#  included_flags = {
-    #  ''
-#  }
 omit_actions = {
     'api',
     'sh',

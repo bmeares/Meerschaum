@@ -111,7 +111,7 @@ def _completer_wrapper(
         if _check_keys is not None:
             return _check_keys
 
-        from meerschaum.actions.arguments._parse_arguments import parse_line
+        from meerschaum._internal.arguments._parse_arguments import parse_line
         args = parse_line(line)
         if target.__name__ != 'default_action_completer':
             if len(args['action']) > 0:
@@ -148,8 +148,8 @@ def default_action_completer(
     return sorted(possibilities)
 
 def _check_complete_keys(line: str) -> Optional[List[str]]:
-    from meerschaum.actions.arguments._parser import parser, get_arguments_triggers
-    from meerschaum.actions.arguments._parse_arguments import parse_line
+    from meerschaum._internal.arguments._parser import parser, get_arguments_triggers
+    from meerschaum._internal.arguments._parse_arguments import parse_line
 
     ### TODO Add all triggers
     trigger_args = {
@@ -444,10 +444,10 @@ class Shell(cmd.Cmd):
         if line.startswith(help_token):
             return "help " + line[len(help_token):]
 
-        from meerschaum.actions.arguments import parse_line
+        from meerschaum._internal.arguments import parse_line
         args = parse_line(line)
         if args.get('help', False):
-            from meerschaum.actions.arguments._parser import parse_help
+            from meerschaum._internal.arguments._parser import parse_help
             parse_help(args)
             return ""
 
@@ -505,10 +505,10 @@ class Shell(cmd.Cmd):
         if positional_only:
             return original_line
 
-        from meerschaum.actions._entry import _entry_with_args
+        from meerschaum._internal.entry import entry_with_args
 
         try:
-            success_tuple = _entry_with_args(_actions=self._actions, **args)
+            success_tuple = entry_with_args(_actions=self._actions, **args)
         except Exception as e:
             success_tuple = False, str(e)
 
@@ -628,9 +628,8 @@ class Shell(cmd.Cmd):
 
 
     def complete_instance(self, text: str, line: str, begin_index: int, end_index: int):
-    #  def complete_instance(action: List[str], **kw):
         from meerschaum.utils.misc import get_connector_labels
-        from meerschaum.actions.arguments._parse_arguments import parse_line
+        from meerschaum._internal.arguments._parse_arguments import parse_line
         args = parse_line(line)
         action = args['action']
         _text = action[1] if len(action) > 1 else ""
@@ -706,8 +705,8 @@ class Shell(cmd.Cmd):
         ```
         """
         from meerschaum.actions import actions
-        from meerschaum.actions.arguments._parser import parse_help
-        from meerschaum.actions.arguments._parse_arguments import parse_line
+        from meerschaum._internal.arguments._parser import parse_help
+        from meerschaum._internal.arguments._parse_arguments import parse_line
         import textwrap
         args = parse_line(line)
         if len(args['action']) == 0:
@@ -728,7 +727,7 @@ class Shell(cmd.Cmd):
         Autocomplete the `help` command.
         """
         import inspect
-        from meerschaum.actions.arguments._parse_arguments import parse_line
+        from meerschaum._internal.arguments._parse_arguments import parse_line
         from meerschaum.actions import get_subactions
         from meerschaum._internal.shell import Shell as _Shell
         args = parse_line(line)

@@ -421,7 +421,7 @@ def add_plugin_argument(*args, **kwargs) -> None:
     >>> add_plugin_argument('--foo', type=int, help="This is my help text!")
     >>> 
     """
-    from meerschaum.actions.arguments._parser import groups, _seen_plugin_args, parser
+    from meerschaum._internal.arguments._parser import groups, _seen_plugin_args, parser
     from meerschaum.actions import _get_parent_plugin
     from meerschaum.utils.warnings import warn, error
     _parent_plugin_name = _get_parent_plugin(2)

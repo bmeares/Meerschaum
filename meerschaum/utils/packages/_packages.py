@@ -23,7 +23,7 @@ packages: Dict[str, Dict[str, str]] = {
     'formatting': {
         'pprintpp'                   : 'pprintpp>=0.4.0',
         'asciitree'                  : 'asciitree>=0.3.3',
-        'typing_extensions'          : 'typing_extensions>=4.2.0',
+        'typing_extensions'          : 'typing_extensions>=4.4.0',
         'pygments'                   : 'pygments>=2.7.2',
         'colorama'                   : 'colorama>=0.4.3',
         'rich'                       : 'rich>=12.4.4',
@@ -150,11 +150,12 @@ packages['api'] = {
     'gunicorn'                       : 'gunicorn>=20.1.0',
     'dotenv'                         : 'python-dotenv>=0.20.0',
     'websockets'                     : 'websockets>=8.1.0',
-    'fastapi'                        : 'fastapi>=0.75.0',
+    'fastapi'                        : 'fastapi>=0.85.1',
     'fastapi_jwt_auth'               : 'fastapi-jwt-auth>=0.5.0',
     'passlib'                        : 'passlib>=1.7.4',
     'fastapi_login'                  : 'fastapi-login>=1.7.2',
     'multipart'                      : 'python-multipart>=0.0.5',
+    'pydantic'                       : 'pydantic>=1.10.2',
 }
 packages['api'].update(packages['sql'])
 packages['api'].update(packages['formatting'])

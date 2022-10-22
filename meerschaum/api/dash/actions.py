@@ -126,37 +126,19 @@ def execute_action(state: WebState):
     cap = io.StringIO()
     _sentinel = object()
     def monitor_and_send_stdout():
-        ### allow the process time to execute before sending messages.
-        #  time.sleep(0.5)
         cap_buffer = ''
-        #  while sys.stdout is cap:
         while True:
             if not (sys.stdout) is cap:
                 sys.stdout = cap
-                #  print('lost cap!')
-            #  data = in_q.get()
-            #  print(data, file=sys.stderr)
-            #  if data is _sentinel:
-                #  print('Stopping monitoring.', data, file=sys.stderr)
-                #  in_q.put(data)
-                #  break
             if session_id not in running_jobs:
                 text = cap.getvalue()
                 print('Stopping monitoring and sending final message.', file=sys.stderr)
                 ws_send(text, session_id)
-                #  success_dict = stopped_jobs[session_id].join()
-                #  print('Received success_dict:', success_dict, file=sys.stderr)
-                #  del stopped_jobs[session_id]
                 break
-            #  print('Continuing...', file=sys.stderr)
             text = cap.getvalue()
-            #  if len(cap_buffer) == len(text):
-            #  print('found text:', text, file=sys.stderr)
             if not text or len(text) == len(cap_buffer):
                 continue
             cap_buffer = text
-            #  print('len(text):', len(text), file=sys.stderr)
-            #  text = str(time.time())
             ws_send(text, session_id)
             ### So we don't overwhelm the client.
             time.sleep(0.01)
@@ -171,20 +153,15 @@ def execute_action(state: WebState):
             LINES, COLUMNS = '120', '100'
         os.environ['LINES'], os.environ['COLUMNS'] = '120', '100'
         stdout = sys.stdout
-        #  sys.stdout = cap
-
-        #  success_tuple = use_thread()
         success_tuple = use_process()
-        #  success_tuple = do_action()
-
-        #  sys.stdout = stdout
         os.environ['LINES'], os.environ['COLUMNS'] = LINES, COLUMNS
         text = cap.getvalue()
         return text, success_tuple
 
+
     def use_process():
         from meerschaum.utils.packages import run_python_package
-        from meerschaum.actions.arguments._parse_arguments import parse_dict_to_sysargs
+        from meerschaum._internal.arguments._parse_arguments import parse_dict_to_sysargs
         max_buffer_size = 10000
         line_buffer = ''
         def send_line(line: str):
@@ -223,18 +200,15 @@ def execute_action(state: WebState):
         action_thread.start()
         return True, "Success"
 
+
     def use_thread():
         action_thread = Thread(target=do_action, daemon=True)
         monitor_thread = Thread(target=monitor_and_send_stdout) 
         running_jobs[session_id] = action_thread
         running_monitors[session_id] = monitor_thread
         monitor_thread.start()
-        #  time.sleep(0.5)
         action_thread.start()
-        #  success_tuple = action_thread.join()
-        #  print('Done executing. Success tuple:', success_tuple, file=sys.stderr)
         success_tuple = True, 'Success'
-        #  monitor_thread.join()
         return success_tuple
 
     text, success_tuple = use_stringio()
@@ -248,6 +222,7 @@ def execute_action(state: WebState):
         ],
         [alert_from_success_tuple(success_tuple)]
     )
+
 
 def check_input_interval(state : WebState):
     """
@@ -264,6 +239,7 @@ def check_input_interval(state : WebState):
 
     """
     return (state['content-div-right.children'], state['success-alert-div.children'])
+
 
 def stop_action(state: WebState):
     """
@@ -285,7 +261,6 @@ def stop_action(state: WebState):
     if proc is not None and proc.poll() is None:
         proc.terminate()
         thread.join()
-    #  return [], []
     success_tuple = True, "Success"
     return (
         [console_div],

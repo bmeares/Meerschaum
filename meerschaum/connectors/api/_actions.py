@@ -13,8 +13,9 @@ def get_actions(
         self,
     ) -> list:
     """Get available actions from the API server"""
-    from meerschaum.config.static import _static_config
-    return self.get(_static_config['api']['endpoints']['actions'])
+    from meerschaum.config.static import STATIC_CONFIG
+    return self.get(STATIC_CONFIG['api']['endpoints']['actions'])
+
 
 def do_action(
         self,
@@ -55,7 +56,7 @@ def do_action(
         action = []
 
     if sysargs is not None and action and action[0] == '':
-        from meerschaum.actions.arguments import parse_arguments
+        from meerschaum._internal.arguments import parse_arguments
         if debug:
             dprint(f"Parsing sysargs:\n{sysargs}")
         json_dict = parse_arguments(sysargs)
@@ -66,9 +67,6 @@ def do_action(
 
     root_action = json_dict['action'][0]
     del json_dict['action'][0]
-    ### ensure 0 index exists
-    #  if len(json_dict['action']) == 0:
-        #  json_dict['action'] = ['']
     r_url = f"{_static_config()['api']['endpoints']['actions']}/{root_action}"
     
     if debug:

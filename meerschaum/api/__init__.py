@@ -28,6 +28,13 @@ CHECK_UPDATE = os.environ.get(_static_config()['environment']['runtime'], None) 
 
 endpoints = _static_config()['api']['endpoints']
 aiofiles = attempt_import('aiofiles', lazy=False, check_update=CHECK_UPDATE)
+typing_extensions = attempt_import(
+    'typing_extensions', lazy=False, check_update=CHECK_UPDATE,
+    venv = None,
+)
+pydantic_dataclasses = attempt_import(
+    'pydantic.dataclasses', lazy=False, check_update=CHECK_UPDATE,
+)
 fastapi = attempt_import('fastapi', lazy=False, check_update=CHECK_UPDATE)
 starlette_reponses = attempt_import(
     'starlette.responses', warn=False, lazy=False,
