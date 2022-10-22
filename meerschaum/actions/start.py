@@ -116,7 +116,7 @@ def _start_jobs(
         get_stopped_daemons, get_running_daemons
     )
     from meerschaum.utils.daemon._names import get_new_daemon_name
-    from meerschaum.actions.arguments._parse_arguments import parse_arguments
+    from meerschaum._internal.arguments._parse_arguments import parse_arguments
     from meerschaum.actions import actions
     from meerschaum.utils.prompt import yes_no
     from meerschaum.utils.formatting import print_tuple
