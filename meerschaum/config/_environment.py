@@ -105,6 +105,8 @@ def get_connector_env_vars() -> List[str]:
         matched = re.match(uri_regex, env_var)
         if matched is None:
             continue
+        if env_var in STATIC_CONFIG['environment'].values():
+            continue
         env_vars.append(env_var)
     return env_vars
 
