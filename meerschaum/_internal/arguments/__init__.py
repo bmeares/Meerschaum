@@ -6,11 +6,11 @@
 This package includes argument parsing utilities.
 """
 
-from meerschaum.actions.arguments._parse_arguments import (
+from meerschaum._internal.arguments._parse_arguments import (
     parse_arguments, parse_line, remove_leading_action,
     parse_dict_to_sysargs,
 )
-from meerschaum.actions.arguments._parser import parser
+from meerschaum._internal.arguments._parser import parser
 from meerschaum.plugins import add_plugin_argument
 
 __all__ = [

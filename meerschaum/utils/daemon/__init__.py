@@ -25,10 +25,10 @@ def daemon_entry(sysargs: Optional[List[str]] = None) -> SuccessTuple:
     -------
 
     """
-    from meerschaum.actions._entry import _entry as entry
+    from meerschaum._internal.entry import entry
     _args = None
     if '--name' in sysargs or '--job-name' in sysargs:
-        from meerschaum.actions.arguments._parse_arguments import parse_arguments
+        from meerschaum._internal.arguments._parse_arguments import parse_arguments
         _args = parse_arguments(sysargs)
     success_tuple = run_daemon(
         entry,
@@ -45,7 +45,7 @@ def daemon_action(**kw) -> SuccessTuple:
     """Execute a Meerschaum action as a daemon."""
     from meerschaum.utils.packages import run_python_package
     from meerschaum.utils.threading import Thread
-    from meerschaum.actions.arguments._parse_arguments import parse_dict_to_sysargs
+    from meerschaum._internal.arguments._parse_arguments import parse_dict_to_sysargs
     from meerschaum.actions import actions
 
     kw['daemon'] = True
@@ -74,31 +74,7 @@ def run_daemon(
         label: Optional[str] = None,
         **kw
     ) -> Any:
-    """Execute a function as a daemon.
-
-    Parameters
-    ----------
-    func: Callable[[Any] :
-        
-    Any] :
-        
-    *args :
-        
-    daemon_id: Optional[str] :
-         (Default value = None)
-    keep_daemon_output: bool :
-         (Default value = False)
-    allow_dirty_run: bool :
-         (Default value = False)
-    label: Optional[str] :
-         (Default value = None)
-    **kw :
-        
-
-    Returns
-    -------
-
-    """
+    """Execute a function as a daemon."""
     daemon = Daemon(func, daemon_id=daemon_id, target_args=args, target_kw=kw, label=label)
     return daemon.run(
         keep_daemon_output = keep_daemon_output,
@@ -115,17 +91,7 @@ def get_daemon_ids() -> List[str]:
 
 def get_running_daemons(daemons : Optional[List[Daemon]] = None) -> List[Daemon]:
     """
-
-    Parameters
-    ----------
-    daemons : Optional[List[Daemon]] :
-         (Default value = None)
-
-    Returns
-    -------
-    type
-        
-
+    Return a list of currently running daemons.
     """
     if daemons is None:
         daemons = get_daemons()
@@ -138,19 +104,7 @@ def get_stopped_daemons(
         running_daemons : Optional[List[Daemon]] = None,
     ) -> List[Daemon]:
     """
-
-    Parameters
-    ----------
-    daemons : Optional[List[Daemon]] :
-         (Default value = None)
-    running_daemons : Optional[List[Daemon]] :
-         (Default value = None)
-
-    Returns
-    -------
-    type
-        
-
+    Return a list of stopped daemons.
     """
     if daemons is None:
         daemons = get_daemons()

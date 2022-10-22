@@ -50,7 +50,7 @@ def parse_datetime(dt_str : str) -> datetime.datetime:
 
 def parse_help(sysargs : Union[List[str], Dict[str, Any]]) -> None:
     """Parse the `--help` flag to determine which help message to print."""
-    from meerschaum.actions.arguments._parse_arguments import parse_arguments, parse_line
+    from meerschaum._internal.arguments._parse_arguments import parse_arguments, parse_line
     from meerschaum.actions import actions, get_subactions
     import importlib, inspect, textwrap
     from copy import deepcopy

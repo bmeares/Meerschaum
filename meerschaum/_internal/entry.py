@@ -9,7 +9,7 @@ The entry point for launching Meerschaum actions.
 from __future__ import annotations
 from meerschaum.utils.typing import SuccessTuple, List, Optional, Dict
 
-def _entry(sysargs: Optional[List[str]] = None) -> SuccessTuple:
+def entry(sysargs: Optional[List[str]] = None) -> SuccessTuple:
     """Parse arguments and launch a Meerschaum action.
     The `action` list removes the first element.
     
@@ -17,17 +17,12 @@ def _entry(sysargs: Optional[List[str]] = None) -> SuccessTuple:
         'show actions' -> ['actions']
         'show' -> []
 
-    Parameters
-    ----------
-    sysargs : Optional[List[str]] :
-         (Default value = None)
-
     Returns
     -------
     A `SuccessTuple` indicating success. If `schedule` is provided, this will never return.
 
     """
-    from meerschaum.actions.arguments import parse_arguments
+    from meerschaum._internal.arguments import parse_arguments
     if sysargs is None:
         sysargs = []
     if not isinstance(sysargs, list):
@@ -36,11 +31,11 @@ def _entry(sysargs: Optional[List[str]] = None) -> SuccessTuple:
     args = parse_arguments(sysargs)
     if args.get('schedule', None):
         from meerschaum.utils.schedule import schedule_function
-        return schedule_function(_entry_with_args, args['schedule'], **args)
-    return _entry_with_args(**args)
+        return schedule_function(entry_with_args, args['schedule'], **args)
+    return entry_with_args(**args)
 
 
-def _entry_with_args(
+def entry_with_args(
         _actions: Optional[Dict[str, Callable[[Any], SuccessTuple]]] = None,
         **kw
     ) -> SuccessTuple:
@@ -50,7 +45,7 @@ def _entry_with_args(
     import sys
     from meerschaum.plugins import Plugin
     from meerschaum.actions import get_shell, get_action, get_main_action_name
-    from meerschaum.actions.arguments import remove_leading_action
+    from meerschaum._internal.arguments import remove_leading_action
     from meerschaum.utils.venv import Venv
     if kw.get('trace', None):
         from meerschaum.utils.misc import debug_trace
@@ -98,3 +93,28 @@ def _entry_with_args(
 
     return result
 
+
+_shell = None
+def get_shell(
+        sysargs: Optional[List[str]] = None,
+        reload: bool = False,
+        debug: bool = False
+    ):
+    """Initialize and return the Meerschaum shell object."""
+    global _shell
+    from meerschaum.utils.debug import dprint
+    import meerschaum._internal.shell as shell_pkg
+    from meerschaum.actions import actions
+    if sysargs is None:
+        sysargs = []
+
+    if _shell is None or reload:
+        if debug:
+            dprint("Loading the shell...")
+
+        if _shell is None:
+            shell_pkg._insert_shell_actions()
+            _shell = shell_pkg.Shell(actions, sysargs=sysargs)
+        elif reload:
+            _shell.__init__()
+    return _shell

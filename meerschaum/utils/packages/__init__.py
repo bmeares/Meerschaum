@@ -402,7 +402,8 @@ def determine_version(
         except ImportError:
             importlib_metadata = attempt_import(
                 'importlib_metadata',
-                debug=debug, check_update=False
+                debug=debug, check_update=False, precheck=False,
+                color=False, check_is_installed=False, lazy=False,
             )
         try:
             os.chdir(module_parent_dir)
@@ -505,6 +506,7 @@ def need_update(
         split: bool = True,
         color: bool = True,
         debug: bool = False,
+        _run_determine_version: bool = True,
     ) -> bool:
     """
     Check if a Meerschaum dependency needs an update.
@@ -572,10 +574,12 @@ def need_update(
         dprint(f"required_version: {required_version}", color=color)
 
     try:
-        version = version or determine_version(
-            pathlib.Path(package.__file__),
-            import_name=root_name, warn=False, debug=debug
-        )
+        if not version:
+            if not _run_determine_version:
+                version = determine_version(
+                    pathlib.Path(package.__file__),
+                    import_name=root_name, warn=False, debug=debug
+                )
         if debug:
             dprint(f"version: {version}", color=color)
         if version is None:
@@ -714,7 +718,6 @@ def pip_install(
         check_update: bool = True,
         check_pypi: bool = True,
         check_wheel: bool = True,
-        check_setuptools: bool = True,
         _uninstall: bool = False,
         color: bool = True,
         silent: bool = False,
@@ -1047,7 +1050,7 @@ def attempt_import(
         split: bool = True,
         check_update: bool = False,
         check_pypi: bool = False,
-        check_is_installed: bool = False,
+        check_is_installed: bool = True,
         deactivate: bool = True,
         color: bool = True,
         debug: bool = False
@@ -1093,7 +1096,6 @@ def attempt_import(
 
     check_is_installed: bool, default True
         If `True`, check if the package is contained in the virtual environment.
-        Set this to `False` when importing 
 
     Returns
     -------
@@ -1175,7 +1177,10 @@ def attempt_import(
             found_module = (
                 venv_contains_package(name, venv=venv, split=split, debug=debug)
                 or
-                is_installed(name, venv=venv, split=split, debug=debug)
+                (
+                    is_installed(name, venv=venv, split=split, debug=debug)
+                    if check_is_installed else False
+                )
             )
 
         if not found_module:
@@ -1508,6 +1513,7 @@ def is_installed(
     found = (
         not need_update(
             None, import_name = root_name,
+            _run_determine_version = False,
             check_pypi = False,
             version = determine_version(
                 spec_path, venv=venv, debug=debug, import_name=root_name

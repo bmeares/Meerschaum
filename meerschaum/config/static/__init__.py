@@ -43,7 +43,7 @@ STATIC_CONFIG = {
         'plugins': 'MRSM_PLUGINS_DIR',
         'runtime': 'MRSM_RUNTIME',
         'id': 'MRSM_SERVER_ID',
-        'uri_regex': 'MRSM_({TYPES})_(\d*[a-zA-Z][a-zA-Z0-9-_+]*$)',
+        'uri_regex': 'MRSM_([a-zA-Z]*)_(\d*[a-zA-Z][a-zA-Z0-9-_+]*$)',
         'prefix': 'MRSM_',
     },
     'config': {

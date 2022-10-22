@@ -11,7 +11,6 @@ from meerschaum.utils.typing import Callable, Any, Optional, Union, List, Dict, 
 from meerschaum.utils.packages import get_modules_from_package
 from meerschaum.utils.warnings import enable_depreciation_warnings
 enable_depreciation_warnings(__name__)
-_shell = None
 _custom_actions = []
 
 ### build __all__ from other .py files in this package
@@ -56,30 +55,7 @@ for module in modules:
     )
 
 original_actions = actions.copy()
-from meerschaum.actions._entry import _entry as entry
-
-def get_shell(
-        sysargs: Optional[List[str]] = None,
-        reload: bool = False,
-        debug: bool = False
-    ):
-    """Initialize and return the Meerschaum shell object."""
-    global _shell
-    from meerschaum.utils.debug import dprint
-    import meerschaum._internal.shell as shell_pkg
-    if sysargs is None:
-        sysargs = []
-
-    if _shell is None or reload:
-        if debug:
-            dprint("Loading the shell...")
-
-        if _shell is None:
-            shell_pkg._insert_shell_actions()
-            _shell = shell_pkg.Shell(actions, sysargs=sysargs)
-        elif reload:
-            _shell.__init__()
-    return _shell
+from meerschaum._internal.entry import entry
 
 
 def get_subactions(
@@ -253,6 +229,7 @@ def _get_parent_plugin(stacklevel: int = 1) -> Union[str, None]:
         return None
     return parent_globals['__name__'].replace('plugins.', '').split('.')[0]
 
+from meerschaum._internal.entry import get_shell
 import meerschaum.plugins
 meerschaum.plugins.load_plugins()
 make_action = meerschaum.plugins.make_action

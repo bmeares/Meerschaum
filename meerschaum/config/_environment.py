@@ -87,11 +87,7 @@ def get_connector_env_regex() -> str:
     """
     Return the regex pattern for valid environment variable names for instance connectors.
     """
-    from meerschaum.connectors import connectors, load_plugin_connectors
-    load_plugin_connectors()
-    return STATIC_CONFIG['environment']['uri_regex'].replace(
-        '{TYPES}', '|'.join([typ.upper() for typ in connectors if typ != 'plugin'])
-    )
+    return STATIC_CONFIG['environment']['uri_regex']
 
 
 def get_connector_env_vars() -> List[str]:
@@ -134,20 +130,12 @@ def apply_connector_uri(env_var: str) -> None:
             conn_attrs = {'uri': uri}
     else:
         conn_attrs = {'uri': uri}
-    cf = _config()
-    if 'meerschaum' not in cf:
-        cf['meerschaum'] = {}
-    if 'connectors' not in cf['meerschaum']:
-        cf['meerschaum']['connectors'] = {}
-    if typ not in cf['meerschaum']['connectors']:
-        cf['meerschaum']['connectors'][typ] = {}
-    cf['meerschaum']['connectors'][typ][label] = conn_attrs
-    #  set_config(
-        #  apply_patch_to_config(
-            #  {'meerschaum': get_config('meerschaum')},
-            #  {'meerschaum': {'connectors': {typ: {label: {'uri': uri}}}}},
-        #  )
-    #  )
+    set_config(
+        apply_patch_to_config(
+            {'meerschaum': get_config('meerschaum')},
+            {'meerschaum': {'connectors': {typ: {label: conn_attrs}}}},
+        )
+    )
 
 
 def get_env_vars() -> List[str]:

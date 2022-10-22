@@ -316,8 +316,6 @@ def sync_pipe(
             detail = "Pipe must be registered with the datetime column specified."
         )
 
-    print("--------------")
-    print(f"{data=}")
     result = list(p.sync(
         data,
         debug = debug,
