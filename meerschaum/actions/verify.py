@@ -49,6 +49,7 @@ def _verify_packages(
     """
     from meerschaum.utils.packages import (
         attempt_import, need_update, all_packages, is_installed, venv_contains_package,
+        _monkey_patch_get_distribution,
     )
     from meerschaum.utils.formatting import pprint
     from meerschaum.utils.debug import dprint
@@ -66,6 +67,11 @@ def _verify_packages(
             )
         )
         _where_list.append(import_name)
+
+    if 'flask_compress' in venv_packages or 'dash' in venv_packages:
+        flask_compress = attempt_import('flask_compress', lazy=False, debug=debug)
+        _monkey_patch_get_distribution('flask-compress', flask_compress.__version__)
+        venv_packages.remove('flask-compress')
 
     attempt_import(
         *(base_packages + venv_packages),

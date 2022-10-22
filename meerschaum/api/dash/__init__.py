@@ -8,6 +8,15 @@ Build the Dash app to be hooked into FastAPI.
 
 from __future__ import annotations
 import uuid
+
+from meerschaum.utils.packages import (
+    attempt_import, import_dcc, import_html, _monkey_patch_get_distribution
+)
+flask_compress = attempt_import('flask_compress', lazy=False)
+_monkey_patch_get_distribution('flask-compress', flask_compress.__version__)
+dash = attempt_import('dash', lazy=False)
+
+
 from meerschaum.utils.typing import List, Optional
 from meerschaum.config.static import _static_config
 from meerschaum.api import (
@@ -19,13 +28,8 @@ from meerschaum.api import (
     get_api_connector,
     endpoints,
 )
-from meerschaum.utils.packages import (
-    attempt_import, import_dcc, import_html, _monkey_patch_get_distribution
-)
+
 from meerschaum.connectors.parse import parse_instance_keys
-flask_compress = attempt_import('flask_compress', lazy=False)
-_monkey_patch_get_distribution('flask-compress', flask_compress.__version__)
-dash = attempt_import('dash', lazy=False)
 import warnings
 ### Suppress the depreciation warnings from importing enrich.
 with warnings.catch_warnings():
