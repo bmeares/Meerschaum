@@ -21,6 +21,8 @@ class APIConnector(Connector):
     Connect to a Meerschaum API instance.
     """
 
+    IS_INSTANCE: bool = True
+
     from ._delete import delete
     from ._post import post
     from ._patch import patch

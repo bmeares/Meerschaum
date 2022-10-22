@@ -107,7 +107,7 @@ _required_login = {''}
     Input('location', 'pathname'),
     State('session-store', 'data'),
 )
-def update_page_layout_div(pathname : str, session_store_data : Dict[str, Any]):
+def update_page_layout_div(pathname: str, session_store_data: Dict[str, Any]):
     """
     Route the user to the correct page.
 
@@ -140,6 +140,7 @@ def update_page_layout_div(pathname : str, session_store_data : Dict[str, Any]):
     )
     layout = _paths.get(path, pages.error.layout)
     return layout, session_store_data
+
 
 @dash_app.callback(
     Output('content-div-right', 'children'),
@@ -642,3 +643,50 @@ def sync_documents_click(n_clicks, sync_editor_text):
             success, msg = False, f"Encountered exception:\n{e}"
 
     return alert_from_success_tuple((success, msg))
+
+
+@dash_app.callback(
+    Output("navbar-collapse", "is_open"),
+    [Input("navbar-toggler", "n_clicks")],
+    [State("navbar-collapse", "is_open")],
+)
+def toggle_navbar_collapse(n_clicks: Optional[int], is_open: bool) -> bool:
+    """
+    Toggle the Instance selection collapse in the navbar.
+
+    Parameters
+    ----------
+    n_clicks: Optional[int]
+        The number of times the toggler was clicked.
+
+    is_open: bool
+        The current state of the collapse.
+
+    Returns
+    -------
+    The toggled state of the collapse.
+    """
+    if n_clicks:
+        return not is_open
+    return is_open
+
+
+@dash_app.callback(
+    Output('location', 'pathname'),
+    Output('session-store', 'data'),
+    Input("sign-out-button", "n_clicks"),
+    State('session-store', 'data'),
+)
+def sign_out_button_click(
+        n_clicks: Optional[int],
+        session_store_data: Dict[str, Any],
+    ):
+    """
+    When the sign out button is clicked, remove the session data and redirect to the login page.
+    """
+    if not n_clicks:
+        raise PreventUpdate
+    session_id = session_store_data.get('session-id', None)
+    if session_id and session_id in active_sessions:
+        del active_sessions[session_id]
+    return endpoints['dash'], {}

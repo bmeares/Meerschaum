@@ -263,7 +263,6 @@ def check_input_interval(state : WebState):
     A tuple of children and alerts.
 
     """
-    print('check for input')
     return (state['content-div-right.children'], state['success-alert-div.children'])
 
 def stop_action(state: WebState):

@@ -126,7 +126,7 @@ def _api_start(
     from meerschaum.utils.packages import (
         attempt_import, venv_contains_package, pip_install, run_python_package
     )
-    from meerschaum.utils.misc import is_int
+    from meerschaum.utils.misc import is_int, filter_keywords
     from meerschaum.utils.formatting import pprint, ANSI
     from meerschaum.utils.debug import dprint
     from meerschaum.utils.warnings import error, warn
@@ -222,7 +222,7 @@ def _api_start(
     api_config['uvicorn'] = uvicorn_config
     cf['system']['api']['uvicorn'] = uvicorn_config
 
-    custom_keys = ['mrsm_instance', 'no_dash', 'no_auth', 'private']
+    custom_keys = ['mrsm_instance', 'no_dash', 'no_auth', 'private', 'debug']
 
     ### write config to a temporary file to communicate with uvicorn threads
     import json, sys
@@ -272,7 +272,15 @@ def _api_start(
 
     def _run_uvicorn():
         try:
-            uvicorn.run(**{k: v for k, v in uvicorn_config.items() if k not in custom_keys})
+            uvicorn.run(
+                **filter_keywords(
+                    uvicorn.run,
+                    **{
+                        k: v for k, v in uvicorn_config.items()
+                        if k not in custom_keys
+                    }
+                )
+            )
         except KeyboardInterrupt:
             pass
 

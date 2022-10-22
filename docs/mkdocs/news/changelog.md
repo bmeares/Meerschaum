@@ -4,7 +4,35 @@
 
 This is the current release cycle, so stay tuned for future releases!
 
-### v1.3.4
+### v1.3.6
+
+- **Allow for syncing multiple data types per column.**  
+  The highlight of this release is support for syncing multiple data types per column. When different data types are encountered, the underlying column will be converted to `TEXT`:
+
+  ```python
+  import meerschaum as mrsm
+  pipe = mrsm.Pipe('a', 'b')
+  
+  pipe.sync([{'a': 1}])
+  print(pipe.get_data())
+  #    a
+  # 0  1
+
+  pipe.sync([{'a': 'foo'}])
+  #      a
+  # 0    1
+  # 1  foo
+  ```
+
+- **Cleaned up the Web Console.**  
+  The web console's navbar is now more mobile-friendly, and a "sign out" button has been added.
+
+- **Fixed an issue with an updated versin of `uvicorn`.**
+- **Fixed an issue with `docker-compose`.**
+- **Added support for Python 3.11.**
+
+
+### v1.3.4 – v1.3.5
 
 - **Define environment connectors with JSON or URIs.**  
   Connectors defined as environment variables may now have their attributes set as JSON in addition to a URI string.

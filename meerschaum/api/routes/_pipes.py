@@ -316,9 +316,10 @@ def sync_pipe(
             detail = "Pipe must be registered with the datetime column specified."
         )
 
-    df = parse_df_datetimes(data)
+    print("--------------")
+    print(f"{data=}")
     result = list(p.sync(
-        df,
+        data,
         debug = debug,
         check_existing = check_existing,
         blocking = blocking,

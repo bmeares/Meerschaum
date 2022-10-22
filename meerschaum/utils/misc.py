@@ -705,9 +705,9 @@ def parse_df_datetimes(
         return df
 
     ### apply regex to columns to determine which are ISO datetimes
-    iso_dt_regex = r'\d{4}-\d{2}-\d{2}.\d{2}\:\d{2}\:\d{2}'
+    iso_dt_regex = r'\d{4}-\d{2}-\d{2}.\d{2}\:\d{2}\:\d+'
     dt_mask = df.astype(str).apply(
-        lambda s : s.str.match(iso_dt_regex).all()
+        lambda s: s.str.match(iso_dt_regex).all()
     )
 
     ### list of datetime column names
@@ -1227,7 +1227,7 @@ def filter_keywords(
     ...     return a * b
     >>> filter_keywords(foo, a=2, b=4, c=6)
     {'a': 2, 'b': 4}
-    >>> foo(filter_keywords(foo, **{'a': 2, 'b': 4, 'c': 6}))
+    >>> foo(**filter_keywords(foo, **{'a': 2, 'b': 4, 'c': 6}))
     8
     ```
 
