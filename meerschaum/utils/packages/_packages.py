@@ -138,12 +138,12 @@ packages['sql'] = {
 packages['sql'].update(packages['drivers'])
 packages['sql'].update(packages['_required'])
 packages['dash'] = {
+    'flask_compress'                 : 'Flask-Compress>=1.10.1',
     'dash'                           : 'dash>=2.0.0',
     'dash_bootstrap_components'      : 'dash-bootstrap-components>=1.1.0',
     'dash_ace'                       : 'dash-ace>=0.2.1',
     'dash_extensions'                : 'dash-extensions<0.1.0',
     'dash_daq'                       : 'dash-daq>=0.5.0',
-    'flask_compress'                 : 'Flask-Compress>=1.10.1',
 }
 packages['api'] = {
     'uvicorn'                        : 'uvicorn[standard]>=0.17.5',
