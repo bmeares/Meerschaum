@@ -71,6 +71,7 @@ def _pipes_lap(
 
     rich_table, rich_text, rich_box = attempt_import(
         'rich.table', 'rich.text', 'rich.box',
+        lazy = False,
     )
     all_kw = copy.deepcopy(kw)
     all_kw.update({'workers': workers, 'debug': debug, 'unblock': unblock, 'force': force,
@@ -220,7 +221,7 @@ def _pipes_lap(
     for pipe in pipes:
         try:
             if pipe.connector.type == 'plugin':
-                Plugin(pipe.connector.label).deactivate_venv(debug=debug)
+                Plugin(pipe.connector.label).deactivate_venv(force=True, debug=debug)
         except Exception as e:
             pass
 
@@ -413,16 +414,21 @@ def _wrap_sync_pipe(
     """
     Wrapper function for handling exceptions.
     """
+    from meerschaum.utils.venv import Venv
     try:
-        return_tuple = pipe.sync(
-            blocking = (not unblock),
-            force = force,
-            debug = debug,
-            min_seconds = min_seconds,
-            workers = workers,
-            deactivate_plugin_venv=False,
-            **{k: v for k, v in kw.items() if k != 'blocking'}
-        )
+        venv = getattr(pipe.connector, '_plugin', None)
+    except Exception as e:
+        venv = 'mrsm'
+    try:
+        with Venv(venv, debug=debug):
+            return_tuple = pipe.sync(
+                blocking = (not unblock),
+                force = force,
+                debug = debug,
+                min_seconds = min_seconds,
+                workers = workers,
+                **{k: v for k, v in kw.items() if k != 'blocking'}
+            )
     except Exception as e:
         import traceback
         traceback.print_exception(type(e), e, e.__traceback__)

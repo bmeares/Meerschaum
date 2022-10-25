@@ -9,7 +9,7 @@ Manage virtual environments.
 from __future__ import annotations
 
 from meerschaum.utils.typing import Optional, Union, Dict, List, Tuple
-from meerschaum.utils.threading import RLock
+from meerschaum.utils.threading import RLock, get_ident
 
 __all__ = sorted([
     'activate_venv', 'deactivate_venv', 'init_venv',
@@ -22,9 +22,13 @@ __pdoc__ = {'Venv': True}
 LOCKS = {
     'sys.path': RLock(),
     'active_venvs': RLock(),
+    'venvs_active_counts': RLock(),
 }
 
 active_venvs = set()
+active_venvs_counts: Dict[str, int] = {}
+active_venvs_order: List[Optional[str]] = []
+threads_active_venvs: Dict[int, 'set[str]'] = {}
 
 
 def activate_venv(
@@ -52,8 +56,12 @@ def activate_venv(
     A bool indicating whether the virtual environment was successfully activated.
 
     """
-    if venv in active_venvs:
+    #  debug = True
+    thread_id = get_ident()
+    if active_venvs_order and active_venvs_order[0] == venv:
         return True
+    #  if venv in threads_active_venvs.get(thread_id, {}):
+        #  return True
     import sys, platform, os
     from meerschaum.config._paths import VIRTENV_RESOURCES_PATH
     if debug:
@@ -61,22 +69,32 @@ def activate_venv(
     if venv is not None:
         init_venv(venv=venv, debug=debug)
     with LOCKS['active_venvs']:
+        if thread_id not in threads_active_venvs:
+            threads_active_venvs[thread_id] = {}
         if debug:
             dprint(f"Activating virtual environment '{venv}'...", color=color)
         active_venvs.add(venv)
+        if venv not in threads_active_venvs[thread_id]:
+            threads_active_venvs[thread_id][venv] = 1
+        else:
+            threads_active_venvs[thread_id][venv] += 1
 
-    target = venv_target_path(venv, debug=debug)
-    if str(target) not in sys.path:
-        sys.path.insert(0, str(target))
+        target = str(venv_target_path(venv, debug=debug))
+        if target in active_venvs_order:
+            sys.path.remove(target)
+            active_venvs_order.remove(target)
+        sys.path.insert(0, target)
+        active_venvs_order.insert(0, target)
 
     return True
 
 
 def deactivate_venv(
         venv: str = 'mrsm',
-        color : bool = True,
+        color: bool = True,
         debug: bool = False,
         previously_active_venvs: Union['set[str]', List[str], None] = None,
+        force: bool = False,
         **kw
     ) -> bool:
     """
@@ -93,40 +111,78 @@ def deactivate_venv(
     debug: bool, default False
         Verbosity toggle.
 
+    previously_active_venvs: Union[Set[str], List[str], None]
+        If provided, skip deactivating if a virtual environment is in this iterable.
+
+    force: bool, default False
+        If `True`, forcibly deactivate the virtual environment.
+        This may cause issues with other threads, so be careful!
+
     Returns
     -------
     Return a bool indicating whether the virtual environment was successfully deactivated.
 
     """
     import sys
+    thread_id = get_ident()
     if venv is None:
+        if venv in active_venvs:
+            active_venvs.remove(venv)
         return True
 
     if debug:
         from meerschaum.utils.debug import dprint
 
-    if previously_active_venvs and venv in previously_active_venvs:
+    if previously_active_venvs and venv in previously_active_venvs and not force:
         if debug:
             dprint(f"Ignore call to deactivate virtual environment '{venv}'...", color=color)
         return True
 
-    if debug:
-        dprint(f"Deactivating virtual environment '{venv}'...", color=color)
-
     with LOCKS['active_venvs']:
+        if venv in threads_active_venvs.get(thread_id, {}):
+            new_count = threads_active_venvs[thread_id][venv] - 1
+            if new_count > 0 and not force:
+                threads_active_venvs[thread_id][venv] = new_count
+                if debug:
+                    dprint(
+                        f"Decremented venv '{venv}' to {new_count} on thread {thread_id}, "
+                        + "staying active...",
+                        color = color,
+                    )
+                return True
+            else:
+                del threads_active_venvs[thread_id][venv]
+
+        if not force:
+            for other_thread_id, other_venvs in threads_active_venvs.items():
+                if other_thread_id == thread_id:
+                    continue
+                if venv in other_venvs:
+                    if debug:
+                        dprint(
+                            f"Venv '{venv}' is still being used by other threads, keeping active...",
+                            color = color,
+                        )
+                    return True
+        else:
+            to_delete = [other_thread_id for other_thread_id in threads_active_venvs]
+            for other_thread_id in to_delete:
+                del threads_active_venvs[other_thread_id]
+
         if venv in active_venvs:
             active_venvs.remove(venv)
 
     if sys.path is None:
         return False
 
-    target = venv_target_path(venv, debug=debug)
-    with LOCKS['sys.path']:
-        if str(target) in sys.path:
-            sys.path.remove(str(target))
+    if debug:
+        dprint(f"Deactivating virtual environment '{venv}'...", color=color)
 
-    #  if debug:
-        #  dprint(f"sys.path: {sys.path}", color=False)
+    target = str(venv_target_path(venv, debug=debug))
+    with LOCKS['sys.path']:
+        if target in sys.path:
+            sys.path.remove(target)
+            active_venvs_order.remove(target)
 
     return True
 
@@ -159,6 +215,7 @@ def is_venv_active(
         from meerschaum.utils.debug import dprint
         dprint(f"Checking if virtual environment '{venv}' is active.", color=color)
     return venv in active_venvs
+
 
 verified_venvs = set()
 def verify_venv(

@@ -699,6 +699,7 @@ def table_exists(
     exists = connector.exec(q, debug=debug, silent=True) is not None
     return exists
 
+
 def get_sqlalchemy_table(
         table: str,
         connector: Optional[meerschaum.connectors.sql.SQLConnector] = None,
