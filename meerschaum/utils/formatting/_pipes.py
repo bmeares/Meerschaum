@@ -21,7 +21,7 @@ def pprint_pipes(pipes: PipesDict) -> None:
     rich = import_rich('rich', warn=False)
     Text = None
     if rich is not None:
-        rich_text = attempt_import('rich.text')
+        rich_text = attempt_import('rich.text', lazy=False)
         Text = rich_text.Text
 
     icons = get_config('formatting', 'pipes', CHARSET, 'icons')

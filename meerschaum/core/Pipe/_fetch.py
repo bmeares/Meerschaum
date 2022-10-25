@@ -33,11 +33,6 @@ def fetch(
         If `True` and the pipe's connector is of type `'sql'`, begin syncing chunks while fetching
         loads chunks into memory.
 
-    deactivate_plugin_venv: bool, default True
-        If `True` and the pipe's connector is of type `'plugin'`, deactivate the plugin's
-        virtual environment after retrieving the dataframe.
-        Not intended for general use.
-
     debug: bool, default False
         Verbosity toggle.
 
@@ -84,7 +79,7 @@ def fetch(
         self.connector.type == 'plugin'
         or
         self.connector.type in custom_types
-    ) and deactivate_plugin_venv:
+    ):
         connector_plugin.deactivate_venv(debug=debug)
     ### Return True if we're syncing in parallel, else continue as usual.
     if sync_chunks:

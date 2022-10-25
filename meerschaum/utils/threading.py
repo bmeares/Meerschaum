@@ -14,6 +14,7 @@ Lock = threading.Lock
 RLock = threading.RLock
 Event = threading.Event
 Timer = threading.Timer
+get_ident = threading.get_ident
 
 class Thread(threading.Thread):
     """Wrapper for threading.Thread with optional callback and error_callback functions."""

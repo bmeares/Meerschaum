@@ -32,6 +32,7 @@ def stack(
     import io
     import os
     import sys
+    import pathlib
     import meerschaum.config.stack
     from meerschaum.config.stack import NECESSARY_FILES, write_stack
     from meerschaum.config._paths import STACK_COMPOSE_PATH
@@ -128,12 +129,24 @@ def stack(
 
     stdout = None if not _capture_output else subprocess.PIPE
     stderr = stdout
+
+    has_binary_compose = pathlib.Path('/usr/bin/docker-compose').exists()
     proc = subprocess.Popen(
-        ['docker', 'compose'] + cmd_list, cwd=STACK_COMPOSE_PATH.parent,
-        stdout=stdout, stderr=stderr, env=os.environ,
-    ) if has_builtin_compose else run_python_package(
-        'compose', args=cmd_list, cwd=STACK_COMPOSE_PATH.parent, venv=_compose_venv,
-        capture_output=_capture_output, as_proc=True,
+        (
+            ['docker', 'compose'] if has_builtin_compose
+            else ['docker-compose']
+        ) + cmd_list,
+        cwd = STACK_COMPOSE_PATH.parent,
+        stdout = stdout,
+        stderr = stderr,
+        env = os.environ,
+    ) if (has_builtin_compose or has_binary_compose) else run_python_package(
+        'compose',
+        args = cmd_list,
+        cwd = STACK_COMPOSE_PATH.parent,
+        venv = _compose_venv,
+        capture_output = _capture_output,
+        as_proc = True,
     )
     try:
         rc = proc.wait() if proc is not None else 1

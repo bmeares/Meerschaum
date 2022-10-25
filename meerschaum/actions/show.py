@@ -80,6 +80,7 @@ def _complete_show(
     from meerschaum._internal.shell import default_action_completer
     return default_action_completer(action=(['show'] + action), **kw)
 
+
 def _show_actions(**kw: Any) -> SuccessTuple:
     """
     Show available actions.
@@ -91,13 +92,15 @@ def _show_actions(**kw: Any) -> SuccessTuple:
     print_options(options=_actions, name='actions', actions=False, **kw)
     return True, "Success"
 
+
 def _show_help(**kw: Any) -> SuccessTuple:
     """
     Print the --help menu from `argparse`.
     """
-    from meerschaum.actions.arguments._parser import parser
+    from meerschaum._internal.arguments._parser import parser
     print(parser.format_help())
     return True, "Success"
+
 
 def _show_config(
         action: Optional[List[str]] = None,
@@ -130,6 +133,7 @@ def _show_config(
         pprint(config)
     return (True, "Success")
 
+
 def _complete_show_config(action: Optional[List[str]] = None, **kw : Any):
     from meerschaum.config._read_config import get_possible_keys
     keys = get_possible_keys()
@@ -141,6 +145,7 @@ def _complete_show_config(action: Optional[List[str]] = None, **kw : Any):
             possibilities.append(key)
     return possibilities
 
+
 def _show_modules(**kw: Any) -> SuccessTuple:
     """
     Show the currently imported modules.
@@ -149,6 +154,7 @@ def _show_modules(**kw: Any) -> SuccessTuple:
     from meerschaum.utils.formatting import pprint
     pprint(list(sys.modules.keys()), **kw)
     return (True, "Success")
+
 
 def _show_pipes(
         nopretty: bool = False,
@@ -180,6 +186,7 @@ def _show_pipes(
 
     return (True, "Success")
 
+
 def _show_version(nopretty: bool = False, **kw : Any) -> SuccessTuple:
     """
     Show the Meerschaum doc string.
@@ -198,6 +205,7 @@ def _show_version(nopretty: bool = False, **kw : Any) -> SuccessTuple:
         _print = info
     _print(msg)
     return (True, "Success")
+
 
 def _show_connectors(
         action: Optional[List[str]] = None,
@@ -254,6 +262,7 @@ def _show_arguments(
     from meerschaum.utils.formatting import pprint
     pprint(kw)
     return True, "Success"
+
 
 def _show_data(
         action: Optional[List[str]] = None,
@@ -356,6 +365,7 @@ def _show_data(
                 df.plot()
     return True, "Success"
 
+
 def _show_columns(
         action: Optional[List[str]] = None,
         debug: bool = False,
@@ -372,6 +382,7 @@ def _show_columns(
         pprint_pipe_columns(p, nopretty=nopretty, debug=debug)
 
     return True, "Success"
+
 
 def _show_rowcounts(
         action: Optional[List[str]] = None,

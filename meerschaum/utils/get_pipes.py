@@ -141,10 +141,10 @@ def get_pipes(
         from meerschaum.connectors.parse import parse_instance_keys
         connector = parse_instance_keys(keys=mrsm_instance, wait=wait, debug=debug)
     else: ### NOTE: mrsm_instance MUST be a SQL or API connector for this to work
-        from meerschaum.connectors import Connector
+        from meerschaum.connectors import instance_types
         valid_connector = False
-        if issubclass(type(mrsm_instance), Connector):
-            if mrsm_instance.type in ('api', 'sql'):
+        if hasattr(mrsm_instance, 'type'):
+            if mrsm_instance.type in instance_types:
                 valid_connector = True
         if not valid_connector:
             error(f"Invalid instance connector: {mrsm_instance}")
