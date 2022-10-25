@@ -107,7 +107,6 @@ def manually_import_module(
         warn: bool = True,
         color: bool = True,
         debug: bool = False,
-        deactivate: bool = True,
         use_sys_modules: bool = True,
     ) -> Union['ModuleType', None]:
     """
@@ -141,10 +140,6 @@ def manually_import_module(
 
     debug: bool, default False
         Verbosity toggle.
-
-    deactivate: bool, default True
-        If `True`, deactivate the virtual envirionment after importing.
-         (Default value = True)
 
     use_sys_modules: bool, default True
         If `True`, return the module in `sys.modules` if it exists.
@@ -220,7 +215,6 @@ def manually_import_module(
                         root_name,
                         venv = venv,
                         split = False,
-                        deactivate = False,
                         check_update = check_update,
                         color = color,
                         debug = debug
@@ -254,25 +248,23 @@ def manually_import_module(
             mod = None
         return mod
 
-    activate_venv(venv, debug=debug)
-    mod = importlib.util.module_from_spec(spec)
-    old_sys_mod = sys.modules.get(import_name, None)
-    sys.modules[import_name] = mod
+    with Venv(venv, debug=debug):
+        mod = importlib.util.module_from_spec(spec)
+        old_sys_mod = sys.modules.get(import_name, None)
+        sys.modules[import_name] = mod
 
-    try:
-        with warnings.catch_warnings():
-            warnings.filterwarnings('ignore', 'The NumPy')
-            spec.loader.exec_module(mod)
-    except Exception as e:
-        pass
-    mod = _import_module(import_name)
-    if old_sys_mod is not None:
-        sys.modules[import_name] = old_sys_mod
-    else:
-        del sys.modules[import_name]
+        try:
+            with warnings.catch_warnings():
+                warnings.filterwarnings('ignore', 'The NumPy')
+                spec.loader.exec_module(mod)
+        except Exception as e:
+            pass
+        mod = _import_module(import_name)
+        if old_sys_mod is not None:
+            sys.modules[import_name] = old_sys_mod
+        else:
+            del sys.modules[import_name]
     
-    if deactivate:
-        deactivate_venv(venv, debug=debug)
     return mod
 
 
@@ -713,7 +705,6 @@ def pip_install(
         args: Optional[List[str]] = None,
         requirements_file_path: Union[pathlib.Path, str, None] = None,
         venv: Optional[str] = 'mrsm',
-        deactivate: bool = True,
         split: bool = False,
         check_update: bool = True,
         check_pypi: bool = True,
@@ -743,9 +734,6 @@ def pip_install(
 
     venv: str, default 'mrsm'
         The virtual environment to install into.
-
-    deactivate: bool, default True
-        If `True`, deactivate the virtual environment after installing.
 
     split: bool, default False
         If `True`, split on periods and only install the root package name.
@@ -806,98 +794,96 @@ def pip_install(
             )
             sys.exit(1)
     
-    activate_venv(venv=venv, debug=debug, color=color)
-    if venv is not None:
-        if '--ignore-installed' not in args and '-I' not in _args and not _uninstall:
-            _args += ['--ignore-installed']
-        if '--cache-dir' not in args and not _uninstall:
-            cache_dir_path = VIRTENV_RESOURCES_PATH / venv / 'cache'
-            _args += ['--cache-dir', str(cache_dir_path)]
-
-    if 'pip' not in ' '.join(_args):
-        if check_update and not _uninstall:
-            pip = attempt_import('pip', venv=venv, install=False, debug=debug, lazy=False)
-            if need_update(pip, check_pypi=check_pypi, debug=debug):
-                _args.append(all_packages['pip'])
-    
-    _args = (['install'] if not _uninstall else ['uninstall']) + _args
-
-    if check_wheel and not _uninstall:
-        if not have_wheel:
-            if not pip_install(
-                'setuptools', 'wheel',
-                venv=venv, deactivate=False,
-                check_update=False, check_pypi=False,
-                check_wheel=False, debug=debug,
-            ):
-                warn(
-                    f"Failed to install `setuptools` and `wheel` for virtual environment '{venv}'.",
-                    color=False,
-                )
-
-    if requirements_file_path is not None:
-        _args.append('-r')
-        _args.append(str(pathlib.Path(requirements_file_path).resolve()))
-
-    if not ANSI and '--no-color' not in _args:
-        _args.append('--no-color')
-
-    if '--no-input' not in _args:
-        _args.append('--no-input')
-
-    if _uninstall and '-y' not in _args:
-        _args.append('-y')
-
-    if '--no-warn-conflicts' not in _args and not _uninstall:
-        _args.append('--no-warn-conflicts')
-
-    if '--disable-pip-version-check' not in _args:
-        _args.append('--disable-pip-version-check')
-
-    if '--target' not in _args and '-t' not in _args and not _uninstall:
+    with Venv(venv, debug=debug):
         if venv is not None:
-            _args += ['--target', venv_target_path(venv, debug=debug)]
-    elif (
-        '--target' not in _args
-            and '-t' not in _args
-            and not inside_venv()
-            and not _uninstall
-    ):
-        _args += ['--user']
+            if '--ignore-installed' not in args and '-I' not in _args and not _uninstall:
+                _args += ['--ignore-installed']
+            if '--cache-dir' not in args and not _uninstall:
+                cache_dir_path = VIRTENV_RESOURCES_PATH / venv / 'cache'
+                _args += ['--cache-dir', str(cache_dir_path)]
 
-    if debug:
-        if '-v' not in _args or '-vv' not in _args or '-vvv' not in _args:
-            pass
-    else:
-        if '-q' not in _args or '-qq' not in _args or '-qqq' not in _args:
-            pass
+        if 'pip' not in ' '.join(_args):
+            if check_update and not _uninstall:
+                pip = attempt_import('pip', venv=venv, install=False, debug=debug, lazy=False)
+                if need_update(pip, check_pypi=check_pypi, debug=debug):
+                    _args.append(all_packages['pip'])
+        
+        _args = (['install'] if not _uninstall else ['uninstall']) + _args
 
-    _packages = [
-        (install_name if not _uninstall else get_install_no_version(install_name))
-        for install_name in install_names
-    ]
-    msg = "Installing packages:" if not _uninstall else "Uninstalling packages:"
-    for p in _packages:
-        msg += f'\n  - {p}'
-    if not silent:
-        print(msg)
+        if check_wheel and not _uninstall:
+            if not have_wheel:
+                if not pip_install(
+                    'setuptools', 'wheel',
+                    venv = venv,
+                    check_update = False, check_pypi = False,
+                    check_wheel = False, debug = debug,
+                ):
+                    warn(
+                        f"Failed to install `setuptools` and `wheel` for virtual environment '{venv}'.",
+                        color=False,
+                    )
 
-    if not _uninstall:
-        for install_name in _packages:
-            _install_no_version = get_install_no_version(install_name)
-            if _install_no_version in ('pip', 'wheel'):
-                continue
-            if not completely_uninstall_package(
-                _install_no_version,
-                venv=venv, debug=debug,
-            ):
-                warn(
-                    f"Failed to clean up package '{_install_no_version}'.",
-                )
+        if requirements_file_path is not None:
+            _args.append('-r')
+            _args.append(str(pathlib.Path(requirements_file_path).resolve()))
 
-    success = run_python_package('pip', _args + _packages, venv=venv, debug=debug) == 0
-    if deactivate:
-        deactivate_venv(venv=venv, debug=debug, color=color)
+        if not ANSI and '--no-color' not in _args:
+            _args.append('--no-color')
+
+        if '--no-input' not in _args:
+            _args.append('--no-input')
+
+        if _uninstall and '-y' not in _args:
+            _args.append('-y')
+
+        if '--no-warn-conflicts' not in _args and not _uninstall:
+            _args.append('--no-warn-conflicts')
+
+        if '--disable-pip-version-check' not in _args:
+            _args.append('--disable-pip-version-check')
+
+        if '--target' not in _args and '-t' not in _args and not _uninstall:
+            if venv is not None:
+                _args += ['--target', venv_target_path(venv, debug=debug)]
+        elif (
+            '--target' not in _args
+                and '-t' not in _args
+                and not inside_venv()
+                and not _uninstall
+        ):
+            _args += ['--user']
+
+        if debug:
+            if '-v' not in _args or '-vv' not in _args or '-vvv' not in _args:
+                pass
+        else:
+            if '-q' not in _args or '-qq' not in _args or '-qqq' not in _args:
+                pass
+
+        _packages = [
+            (install_name if not _uninstall else get_install_no_version(install_name))
+            for install_name in install_names
+        ]
+        msg = "Installing packages:" if not _uninstall else "Uninstalling packages:"
+        for p in _packages:
+            msg += f'\n  - {p}'
+        if not silent:
+            print(msg)
+
+        if not _uninstall:
+            for install_name in _packages:
+                _install_no_version = get_install_no_version(install_name)
+                if _install_no_version in ('pip', 'wheel'):
+                    continue
+                if not completely_uninstall_package(
+                    _install_no_version,
+                    venv=venv, debug=debug,
+                ):
+                    warn(
+                        f"Failed to clean up package '{_install_no_version}'.",
+                    )
+
+        success = run_python_package('pip', _args + _packages, venv=venv, debug=debug) == 0
     msg = (
         "Successfully " + ('un' if _uninstall else '') + "installed packages." if success 
         else "Failed to " + ('un' if _uninstall else '') + "install packages."
@@ -1051,7 +1037,6 @@ def attempt_import(
         check_update: bool = False,
         check_pypi: bool = False,
         check_is_installed: bool = True,
-        deactivate: bool = True,
         color: bool = True,
         debug: bool = False
     ) -> Union['ModuleType', Tuple['ModuleType']]:
@@ -1120,7 +1105,6 @@ def attempt_import(
             print(f"Import hook for virtual environment '{_import_hook_venv}' is active.")
         venv = _import_hook_venv
 
-    activate_venv(venv=venv, color=color, debug=debug)
     _warnings = _import_module('meerschaum.utils.warnings')
     warn_function = _warnings.warn
 
@@ -1149,8 +1133,6 @@ def attempt_import(
 
     modules = []
     for name in names:
-        ### Enforce virtual environment (something is deactivating in the loop so check each pass).
-        activate_venv(venv=venv, debug=debug)
         ### Check if package is a declared dependency.
         root_name = name.split('.')[0] if split else name
         install_name = _import_to_install_name(root_name)
@@ -1170,7 +1152,7 @@ def attempt_import(
             found_module = (
                 do_import(
                     name, debug=debug, warn=False, venv=venv, color=color,
-                    check_update=False, check_pypi=False, deactivate=False, split=split,
+                    check_update=False, check_pypi=False, split=split,
                 ) is not None
             )
         else:
@@ -1185,11 +1167,9 @@ def attempt_import(
 
         if not found_module:
             if install:
-                ### NOTE: pip_install deactivates venv, so deactivate must be False.
                 if not pip_install(
                     install_name,
                     venv = venv,
-                    deactivate = False,
                     split = False,
                     check_update = check_update,
                     color = color,
@@ -1199,7 +1179,7 @@ def attempt_import(
                         f"Failed to install '{install_name}'.",
                         ImportWarning,
                         stacklevel = 3,
-                        color = False, ### Color triggers a deactivate, so keep as False
+                        color = False,
                     )
             elif warn:
                 ### Raise a warning if we can't find the package and install = False.
@@ -1217,9 +1197,6 @@ def attempt_import(
             check_update=check_update, check_pypi=check_pypi, install=install, split=split,
         )
         modules.append(m)
-
-    if deactivate:
-        deactivate_venv(venv=venv, debug=debug, color=color)
 
     modules = tuple(modules)
     if len(modules) == 1:
@@ -1247,7 +1224,6 @@ def lazy_import(
 
 
 def import_pandas(
-        deactivate: bool = False,
         debug: bool = False,
         lazy: bool = False,
         **kw
@@ -1262,17 +1238,13 @@ def import_pandas(
     if pandas_module_name == 'modin':
         pandas_module_name = 'modin.pandas'
 
-    activate_venv(venv='mrsm', debug=debug)
-    pytz = attempt_import('pytz', deactivate=deactivate, debug=debug, lazy=False, **kw)
-    pd = attempt_import(pandas_module_name, deactivate=deactivate, debug=debug, lazy=lazy, **kw)
-    if deactivate:
-        deactivate_venv(venv='mrsm', debug=debug)
+    pytz = attempt_import('pytz', debug=debug, lazy=False, **kw)
+    pd = attempt_import(pandas_module_name, debug=debug, lazy=lazy, **kw)
     return pd
 
 
 def import_rich(
         lazy: bool = True,
-        deactivate: bool = False,
         debug: bool = False,
         **kw : Any
     ) -> 'ModuleType':
@@ -1283,19 +1255,15 @@ def import_rich(
     if not ANSI and not UNICODE:
         return None
 
-    activate_venv(venv='mrsm', debug=debug)
-
     ## need typing_extensions for `from rich import box`
     typing_extensions = attempt_import(
-        'typing_extensions', deactivate=deactivate, lazy=False, debug=debug
+        'typing_extensions', lazy=False, debug=debug
     )
     pygments = attempt_import(
-        'pygments', deactivate=deactivate, lazy=False
+        'pygments', lazy=False,
     )
     rich = attempt_import(
-        'rich', lazy=lazy, deactivate=deactivate, **kw)
-    if deactivate:
-        deactivate_venv(venv='mrsm', debug=debug)
+        'rich', lazy=lazy, **kw)
     return rich
 
 
@@ -1484,7 +1452,6 @@ def is_installed(
         import_name: str,
         venv: Optional[str] = 'mrsm',
         split: bool = True,
-        deactivate: bool = True,
         debug: bool = False,
     ) -> bool:
     """
@@ -1494,36 +1461,34 @@ def is_installed(
         from meerschaum.utils.debug import dprint
     root_name = import_name.split('.')[0] if split else import_name
     import importlib.util
-    activate_venv(venv=venv, debug=debug)
-    try:
-        spec_path = pathlib.Path(
-            get_module_path(root_name, venv=venv, debug=debug)
-            or
-            importlib.util.find_spec(root_name).origin
-        )
-    except (ModuleNotFoundError, ValueError, AttributeError, TypeError) as e:
-        spec_path = None
+    with Venv(venv, debug=debug):
+        try:
+            spec_path = pathlib.Path(
+                get_module_path(root_name, venv=venv, debug=debug)
+                or
+                importlib.util.find_spec(root_name).origin
+            )
+        except (ModuleNotFoundError, ValueError, AttributeError, TypeError) as e:
+            spec_path = None
 
-    if debug:
-        if spec_path is not None:
-            dprint(f"Found a path for '{root_name}':\n{spec_path}", color=False)
-        else:
-            dprint(f"Could not find a path for '{root_name}':\n{spec_path}", color=False)
+        if debug:
+            if spec_path is not None:
+                dprint(f"Found a path for '{root_name}':\n{spec_path}", color=False)
+            else:
+                dprint(f"Could not find a path for '{root_name}':\n{spec_path}", color=False)
 
-    found = (
-        not need_update(
-            None, import_name = root_name,
-            _run_determine_version = False,
-            check_pypi = False,
-            version = determine_version(
-                spec_path, venv=venv, debug=debug, import_name=root_name
-            ),
-            debug = debug,
-        )
-    ) if spec_path is not None else False
+        found = (
+            not need_update(
+                None, import_name = root_name,
+                _run_determine_version = False,
+                check_pypi = False,
+                version = determine_version(
+                    spec_path, venv=venv, debug=debug, import_name=root_name
+                ),
+                debug = debug,
+            )
+        ) if spec_path is not None else False
 
-    if deactivate:
-        deactivate_venv(venv=venv, debug=debug)
     return found
 
 

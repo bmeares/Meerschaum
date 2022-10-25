@@ -630,17 +630,18 @@ class Shell(cmd.Cmd):
     def complete_instance(self, text: str, line: str, begin_index: int, end_index: int):
         from meerschaum.utils.misc import get_connector_labels
         from meerschaum._internal.arguments._parse_arguments import parse_line
+        from meerschaum.connectors import instance_types
         args = parse_line(line)
         action = args['action']
         _text = action[1] if len(action) > 1 else ""
-        return get_connector_labels('api', 'sql', search_term=_text, ignore_exact_match=True)
+        return get_connector_labels(*instance_types, search_term=_text, ignore_exact_match=True)
 
 
     def do_repo(
             self,
-            action : Optional[List[str]] = None,
-            debug : bool = False,
-            **kw : Any
+            action: Optional[List[str]] = None,
+            debug: bool = False,
+            **kw: Any
         ) -> SuccessTuple:
         """
         Temporarily set a default Meerschaum repository for the duration of the shell.

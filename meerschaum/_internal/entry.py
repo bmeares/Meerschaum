@@ -46,7 +46,7 @@ def entry_with_args(
     from meerschaum.plugins import Plugin
     from meerschaum.actions import get_shell, get_action, get_main_action_name
     from meerschaum._internal.arguments import remove_leading_action
-    from meerschaum.utils.venv import Venv
+    from meerschaum.utils.venv import Venv, active_venvs, deactivate_venv
     if kw.get('trace', None):
         from meerschaum.utils.misc import debug_trace
         debug_trace()
@@ -90,6 +90,10 @@ def entry_with_args(
                     if not kw.get('debug', False) else ''
                 )
             )
+
+    ### Clean up stray virtual environments.
+    for venv in [venv for venv in active_venvs]:
+        deactivate_venv(venv, debug=kw.get('debug', False), force=True)
 
     return result
 

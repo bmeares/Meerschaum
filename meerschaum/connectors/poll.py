@@ -146,6 +146,9 @@ def _wrap_retry_connect(
     if connector.type not in instance_types:
         return None
 
+    if not hasattr(connector, 'test_connection'):
+        return True
+
     retries = 0
     connected, chaining_status = False, None
     while retries < max_retries:
