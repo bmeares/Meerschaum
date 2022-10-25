@@ -27,6 +27,7 @@ def register(
     """
     from meerschaum.connectors import custom_types
     from meerschaum.utils.formatting import get_console
+    from meerschaum.utils.venv import Venv
     import warnings
     with warnings.catch_warnings():
         warnings.simplefilter('ignore')
@@ -42,8 +43,13 @@ def register(
         and
         getattr(_conn, 'register', None) is not None
     ):
+        if _conn.type == 'plugin':
+            venv = _conn._plugin
+        elif _conn.__module__.startswith('plugins'):
+            venv = _conn.__module__[len('plugins:'):].split('.')[0]
         try:
-            params = self.connector.register(self)
+            with Venv(venv, debug=debug):
+                params = self.connector.register(self)
         except Exception as e:
             get_console().print_exception()
             params = None

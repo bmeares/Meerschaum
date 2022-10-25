@@ -4,7 +4,18 @@
 
 This is the current release cycle, so stay tuned for future releases!
 
-### v1.3.6 – v1.3.7
+### v1.3.10
+
+- **Fixed virtual environment issues when syncing.**  
+  This one's a doozy. Before this patch, there would frequently be warnings and sometimes exceptions thrown when syncing a lot of pipes with a lot of threads. This kind of race condition can be hard to pin down, so this patch reworks the virtual environment resolution system by keeping track of which threads have activated the environments and refusing to deactivate if other threads still depend on the environment. To enforce this behavior, most manual ivocations of [`activate_venv()`](https://docs.meerschaum.io/utils/venv/index.html#meerschaum.utils.venv.activate_venv) were replaced with the [`Venv` context manager](https://docs.meerschaum.io/utils/venv/index.html#meerschaum.utils.venv.Venv). Finally, the last stage of each action is to clean up any stray virtual environments. *Note:* You may still run into the wrong version of a package being imported into your plugin if you're syncing a lot of plugins concurrently.
+
+- **Allow custom instance connectors to be selected on the web console.**  
+  Provided all of the appropriate interface methods are implemented, selecting a custom instance connector from the instance dropdown should no longer throw an error.
+
+- **Bugfixes and improvements to the virtual environment system.**  
+  This patch *should* resolve your virtual environment woes but at a somewhat significant performance penalty. Oh well, 'tis the price we must pay for correct and determinstic code!
+
+### v1.3.6 – v1.3.9
 
 - **Allow for syncing multiple data types per column.**  
   The highlight of this release is support for syncing multiple data types per column. When different data types are encountered, the underlying column will be converted to `TEXT`:
@@ -67,7 +78,7 @@ This is the current release cycle, so stay tuned for future releases!
 
 - **Syncing bugfixes.**
 
-### v1.3.2 – 1.3.3
+### v1.3.2 – v1.3.3
 
 - **Fixed a bug with `begin` and `end` bounds in `Pipe.get_data()`.**  
   A safety measure was incorrectly checking if the quoted version of a column was in `pipe.get_columns_types()`, not the unquoted version. This patch restores functionality for `pipe.get_data()`.

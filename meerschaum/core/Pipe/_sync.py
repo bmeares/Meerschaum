@@ -35,7 +35,6 @@ def sync(
         error_callback: Optional[Callable[[Exception], Any]] = None,
         chunksize: Optional[int] = -1,
         sync_chunks: bool = False,
-        deactivate_plugin_venv: bool = True,
         debug: bool = False,
         **kw: Any
     ) -> SuccessTuple:
@@ -102,10 +101,6 @@ def sync(
         If possible, sync chunks while fetching them into memory.
         Defaults to `False`.
 
-    deactivate_plugin_venv: bool, default True
-        If `True`, deactivate a plugin's virtual environment after syncing.
-        Defaults to `True`.
-
     debug: bool, default False
         Verbosity toggle. Defaults to False.
 
@@ -119,6 +114,7 @@ def sync(
     from meerschaum.connectors import custom_types
     from meerschaum.plugins import Plugin
     from meerschaum.utils.formatting import get_console
+    from meerschaum.utils.venv import Venv
     import datetime
     import time
     if (callback is not None or error_callback is not None) and blocking:
@@ -178,10 +174,8 @@ def sync(
             try:
                 if p.connector.type == 'plugin' and p.connector.sync is not None:
                     connector_plugin = Plugin(p.connector.label)
-                    connector_plugin.activate_venv(debug=debug)
-                    return_tuple = p.connector.sync(p, debug=debug, **kw)
-                    if deactivate_plugin_venv:
-                        connector_plugin.deactivate_venv(debug=debug)
+                    with Venv(connector_plugin, debug=debug):
+                        return_tuple = p.connector.sync(p, debug=debug, **kw)
                     if not isinstance(return_tuple, tuple):
                         return_tuple = (
                             False,
@@ -207,13 +201,9 @@ def sync(
                         else None
                     )
                 )
-                if plugin is not None:
-                    plugin.activate_venv(debug=debug)
+                with Venv(plugin, debug=debug):
+                    df = p.fetch(debug=debug, **kw)
 
-                df = p.fetch(debug=debug, **kw)
-
-                if plugin is not None and deactivate_plugin_venv:
-                    plugin.deactivate_venv(debug=debug)
             except Exception as e:
                 get_console().print_exception(
                     suppress = [

@@ -48,6 +48,7 @@ def _complete_register(
     from meerschaum._internal.shell import default_action_completer
     return default_action_completer(action=(['register'] + action), **kw)
 
+
 def _register_pipes(
         connector_keys: Optional[List[str]] = None,
         metric_keys: Optional[List[str]] = None,
@@ -66,6 +67,7 @@ def _register_pipes(
     from meerschaum import get_pipes, get_connector
     from meerschaum.utils.debug import dprint
     from meerschaum.utils.warnings import warn, info
+    from meerschaum.utils.misc import items_str
 
     if connector_keys is None:
         connector_keys = []
@@ -100,6 +102,8 @@ def _register_pipes(
 
     success, message = True, "Success"
     failed_message = ""
+    failed_pipes = []
+    success_pipes = []
     for p in pipes:
         if debug:
             dprint(f"Registering {p}...")
@@ -107,12 +111,27 @@ def _register_pipes(
         if not ss:
             warn(f"{msg}", stack=False)
             success = False
-            failed_message += f"{p}, "
+            failed_pipes.append(p)
+        else:
+            success_pipes.append(p)
 
-    if len(failed_message) > 0:
-        message = "Failed to register pipes: " + failed_message[:(-1 * len(', '))]
+    message = ""
+    if success_pipes:
+        message += (
+            f"Successfully registered {len(success_pipes)} pipe"
+            + ('s' if len(success_pipes) != 1 else '') + "."
+        )
+        if failed_pipes:
+            message += "\n"
 
-    return success, message
+    if failed_pipes:
+        message += (
+            f"Failed to register {len(failed_pipes)} pipe"
+            + ('s' if len(failed_pipes) != 1 else '') + "."
+        )
+
+    return len(success_pipes) > 0, message
+
 
 def _register_plugins(
         action: Optional[List[str]] = None,

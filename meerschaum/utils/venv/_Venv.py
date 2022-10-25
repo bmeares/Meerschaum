@@ -11,6 +11,8 @@ from __future__ import annotations
 import copy
 import pathlib
 from meerschaum.utils.typing import Union
+from meerschaum.utils.threading import RLock
+
 
 class Venv:
     """
