@@ -142,7 +142,7 @@ packages['dash'] = {
     'dash'                           : 'dash>=2.0.0',
     'dash_bootstrap_components'      : 'dash-bootstrap-components>=1.1.0',
     'dash_ace'                       : 'dash-ace>=0.2.1',
-    'dash_extensions'                : 'dash-extensions<0.1.0',
+    'dash_extensions'                : 'dash-extensions>=0.1.6',
     'dash_daq'                       : 'dash-daq>=0.5.0',
 }
 packages['api'] = {

@@ -27,15 +27,10 @@ component_ids = {
 
 }
 
-keyboard = dex.Keyboard(
-    id = 'keyboard',
-    captureKeys = ['Enter'],
-)
 go_button = dbc.Button('Execute', id='go-button', color='primary', style={'width': '100%'})
 test_button = dbc.Button('Test', id='test-button', color='danger', style={'display' : 'none'})
 get_items_menu = dbc.DropdownMenu(
     label='More', id='get-items-menu', children=[
-        #  dbc.DropdownMenuItem("Pipes", id='get-pipes-button'),
         dbc.DropdownMenuItem("Graphs", id='get-graphs-button'),
         dbc.DropdownMenuItem("Jobs", id='get-jobs-button'),
         dbc.DropdownMenuItem("Plugins", id='get-plugins-button'),
