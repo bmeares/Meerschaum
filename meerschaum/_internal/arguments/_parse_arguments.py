@@ -9,8 +9,13 @@ This module contains functions for parsing arguments
 
 from __future__ import annotations
 from meerschaum.utils.typing import List, Dict, Any, Optional, Callable, SuccessTuple
+from meerschaum.utils.threading import RLock
 
-from meerschaum._internal.arguments._parser import parser
+_locks = {
+    '_loaded_plugins_args': RLock(),
+}
+_loaded_plugins_args: bool = False
+
 
 def parse_arguments(sysargs: List[str]) -> Dict[str, Any]:
     """
@@ -31,6 +36,13 @@ def parse_arguments(sysargs: List[str]) -> Dict[str, Any]:
     import shlex
     import copy
     from meerschaum.config.static import STATIC_CONFIG
+    from meerschaum._internal.arguments._parser import parser
+
+    global _loaded_plugins_args
+    with _locks['_loaded_plugins_args']:
+        if not _loaded_plugins_args:
+            load_plugin_args()
+            _loaded_plugins_args = True
 
     sub_arguments = []
     sub_arg_indices = []
@@ -282,3 +294,20 @@ def remove_leading_action(
     if _parsed_action and _parsed_action[0] == '' and action[0] != '':
         del _parsed_action[0]
     return _parsed_action
+
+
+def load_plugin_args() -> None:
+    """
+    If a plugin makes use of the `add_plugin_argument` function,
+    load its module.
+    """
+    from meerschaum.plugins import get_plugins, import_plugins
+    to_import = []
+    for plugin in get_plugins():
+        with open(plugin.__file__, encoding='utf-8') as f:
+            text = f.read()
+        if 'add_plugin_argument' in text:
+            to_import.append(plugin.name)
+    if not to_import:
+        return
+    import_plugins(*to_import) 

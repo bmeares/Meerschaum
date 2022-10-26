@@ -10,23 +10,22 @@ import time, datetime, uuid
 from meerschaum.api import (
     app, get_api_connector, get_uvicorn_config, debug, fastapi, endpoints
 )
-from meerschaum.config.static import _static_config
 from meerschaum.utils.typing import Optional
 
-#  _websocket_endpoint = _static_config()['api']['endpoints']['websocket']
 _websocket_endpoint = endpoints['websocket']
 
 websockets = {}
 sessions = {}
 
+@app.websocket('/dashws')
+@app.websocket('/dash/ws')
 @app.websocket(_websocket_endpoint)
 async def websocket_endpoint(
-        websocket : fastapi.WebSocket,
+        websocket: fastapi.WebSocket,
     ):
     """
     Communicate with the Web Interface over a websocket.
     """
-    global websockets
     await websocket.accept()
     try:
         initial_data = await websocket.receive_json()
@@ -44,3 +43,4 @@ async def websocket_endpoint(
         except fastapi.WebSocketDisconnect:
             del websockets[session_id]
             break
+

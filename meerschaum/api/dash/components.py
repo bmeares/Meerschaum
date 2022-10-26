@@ -27,15 +27,10 @@ component_ids = {
 
 }
 
-keyboard = dex.Keyboard(
-    id = 'keyboard',
-    captureKeys = ['Enter'],
-)
 go_button = dbc.Button('Execute', id='go-button', color='primary', style={'width': '100%'})
 test_button = dbc.Button('Test', id='test-button', color='danger', style={'display' : 'none'})
 get_items_menu = dbc.DropdownMenu(
     label='More', id='get-items-menu', children=[
-        #  dbc.DropdownMenuItem("Pipes", id='get-pipes-button'),
         dbc.DropdownMenuItem("Graphs", id='get-graphs-button'),
         dbc.DropdownMenuItem("Jobs", id='get-jobs-button'),
         dbc.DropdownMenuItem("Plugins", id='get-plugins-button'),
@@ -65,7 +60,7 @@ bottom_buttons_content = dbc.Card(
 console_div = html.Div(id='console-div', children=[html.Pre(get_shell().intro, id='console-pre')])
 
 location = dcc.Location(id='location', refresh=False)
-websocket = dex.WebSocket(id='ws', url="")
+websocket = dex.WebSocket(id='ws', url='')
 
 search_parameters_editor = dash_ace.DashAceEditor(
     id = 'search-parameters-editor',

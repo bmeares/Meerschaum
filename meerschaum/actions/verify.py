@@ -42,6 +42,7 @@ def _verify_pipes(**kw) -> SuccessTuple:
 
 def _verify_packages(
         debug: bool = False,
+        venv: Optional[str] = 'mrsm',
         **kw
     ) -> SuccessTuple:
     """
@@ -49,7 +50,7 @@ def _verify_packages(
     """
     from meerschaum.utils.packages import (
         attempt_import, need_update, all_packages, is_installed, venv_contains_package,
-        _monkey_patch_get_distribution,
+        _monkey_patch_get_distribution, manually_import_module,
     )
     from meerschaum.utils.formatting import pprint
     from meerschaum.utils.debug import dprint
@@ -60,7 +61,7 @@ def _verify_packages(
     for import_name, install_name in all_packages.items():
         _where_list = (
             venv_packages if venv_contains_package(
-                import_name, split=False, venv='mrsm', debug=debug
+                import_name, split=False, venv=venv, debug=debug
             ) else (
                 base_packages if is_installed(import_name, venv=None)
                 else miss_packages
@@ -71,13 +72,13 @@ def _verify_packages(
     if 'flask_compress' in venv_packages or 'dash' in venv_packages:
         flask_compress = attempt_import('flask_compress', lazy=False, debug=debug)
         _monkey_patch_get_distribution('flask-compress', flask_compress.__version__)
-        venv_packages.remove('flask-compress')
+        if 'flask_compress' in venv_packages:
+            venv_packages.remove('flask_compress')
 
-    attempt_import(
-        *(base_packages + venv_packages),
-        split=False, venv='mrsm', check_update=True, lazy=False, debug=debug,
-    )
-
+    for import_name in base_packages:
+        manually_import_module(import_name, debug=debug, venv=None)
+    for import_name in venv_packages:
+        manually_import_module(import_name, debug=debug, venv=venv)
 
     ### Verify the plugins dependencies.
     return True, f"Verified {len(base_packages) + len(venv_packages)} packages."

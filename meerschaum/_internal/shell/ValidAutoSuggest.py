@@ -15,7 +15,7 @@ prompt_toolkit_auto_suggest, prompt_toolkit_document, prompt_toolkit_buffer = (
     attempt_import('prompt_toolkit.document'),
     attempt_import('prompt_toolkit.buffer'),
 )
-from meerschaum.actions import get_shell
+from meerschaum._internal.entry import get_shell
 
 class ValidAutoSuggest(prompt_toolkit_auto_suggest.AutoSuggest):
     def get_suggestion(
