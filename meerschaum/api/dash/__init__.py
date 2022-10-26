@@ -56,15 +56,12 @@ dash_app = enrich.DashProxy(
     title = 'Meerschaum Web',
     requests_pathname_prefix = endpoints['dash'] + '/',
     external_stylesheets = stylesheets,
-    #  external_scripts = scripts,
     update_title = None,
-    #  prevent_initial_callbacks = True,
     suppress_callback_exceptions = True,
     transforms = [
         enrich.TriggerTransform(),
         enrich.MultiplexerTransform(),
         enrich.ServersideOutputTransform(),
-        #  enrich.NoOutputTransform(),
     ],
 )
 

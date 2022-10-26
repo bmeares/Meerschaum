@@ -4,7 +4,7 @@
 
 This is the current release cycle, so stay tuned for future releases!
 
-### v1.3.10
+### v1.3.10 – v1.3.11
 
 - **Fixed virtual environment issues when syncing.**  
   This one's a doozy. Before this patch, there would frequently be warnings and sometimes exceptions thrown when syncing a lot of pipes with a lot of threads. This kind of race condition can be hard to pin down, so this patch reworks the virtual environment resolution system by keeping track of which threads have activated the environments and refusing to deactivate if other threads still depend on the environment. To enforce this behavior, most manual ivocations of [`activate_venv()`](https://docs.meerschaum.io/utils/venv/index.html#meerschaum.utils.venv.activate_venv) were replaced with the [`Venv` context manager](https://docs.meerschaum.io/utils/venv/index.html#meerschaum.utils.venv.Venv). Finally, the last stage of each action is to clean up any stray virtual environments. *Note:* You may still run into the wrong version of a package being imported into your plugin if you're syncing a lot of plugins concurrently.
@@ -14,6 +14,20 @@ This is the current release cycle, so stay tuned for future releases!
 
 - **Bugfixes and improvements to the virtual environment system.**  
   This patch *should* resolve your virtual environment woes but at a somewhat significant performance penalty. Oh well, 'tis the price we must pay for correct and determinstic code!
+
+- **Fixed custom flags added by `add_plugin_argument()`.**  
+  Refactoring work to decouple plugins from the argument parser had the unintended side effect of skipping over custom flags until after sysargs had already been parsed. This patch ensures all plugins with `add_plugin_argument` in their root module will be loaded before parsing.
+
+- **Upgraded `dash-extensions`, `dash`, and `dash-bootstrap-components`.**  
+  At long last, `dash-extensions` will no longer need to be held back.
+
+- **Added additional websockets endpoints.**  
+  The endpoints `/ws`, `/dash/ws/`, and `/dashws` resolve to the same handler. This is to allow compatability with different versions of `dash-extensions`.
+
+- **Allow for custom arguments to be added from outside plugins.**  
+  The function `add_plugin_argument()` will now accept arguments when executed from outside a plugin.
+
+- **Fixed `verify packages`.**
 
 ### v1.3.6 – v1.3.9
 

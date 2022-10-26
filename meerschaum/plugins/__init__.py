@@ -422,15 +422,13 @@ def add_plugin_argument(*args, **kwargs) -> None:
     >>> 
     """
     from meerschaum._internal.arguments._parser import groups, _seen_plugin_args, parser
-    from meerschaum.actions import _get_parent_plugin
     from meerschaum.utils.warnings import warn, error
     _parent_plugin_name = _get_parent_plugin(2)
-    if _parent_plugin_name is None:
-        error(f"You may only call `add_plugin_argument()` from within a Meerschaum plugin.")
-    group_key = 'plugin_' + _parent_plugin_name
+    title = f"Plugin '{_parent_plugin_name}' options" if _parent_plugin_name else 'Custom options'
+    group_key = 'plugin_' + (_parent_plugin_name or '')
     if group_key not in groups:
         groups[group_key] = parser.add_argument_group(
-            title=f"Plugin '{_parent_plugin_name}' options"
+            title = title,
         )
         _seen_plugin_args[group_key] = set()
     try:
@@ -440,3 +438,13 @@ def add_plugin_argument(*args, **kwargs) -> None:
     except Exception as e:
         warn(e)
 
+
+def _get_parent_plugin(stacklevel: int = 1) -> Union[str, None]:
+    """If this function is called from outside a Meerschaum plugin, it will return None."""
+    import inspect, re
+    try:
+        parent_globals = inspect.stack()[stacklevel][0].f_globals
+        parent_file = parent_globals.get('__file__', '')
+        return parent_globals['__name__'].replace('plugins.', '').split('.')[0]
+    except Exception as e:
+        return None
