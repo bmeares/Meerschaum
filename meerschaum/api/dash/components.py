@@ -60,7 +60,7 @@ bottom_buttons_content = dbc.Card(
 console_div = html.Div(id='console-div', children=[html.Pre(get_shell().intro, id='console-pre')])
 
 location = dcc.Location(id='location', refresh=False)
-websocket = dex.WebSocket(id='ws', url="")
+websocket = dex.WebSocket(id='ws', url='')
 
 search_parameters_editor = dash_ace.DashAceEditor(
     id = 'search-parameters-editor',
