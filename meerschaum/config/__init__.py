@@ -247,7 +247,7 @@ def get_plugin_config(*keys : str, **kw : Any) -> Optional[Any]:
     See `meerschaum.config.get_config` for arguments.
     """
     from meerschaum.utils.warnings import warn, error
-    from meerschaum.actions import _get_parent_plugin
+    from meerschaum.plugins import _get_parent_plugin
     parent_plugin_name = _get_parent_plugin(2)
     if parent_plugin_name is None:
         error(f"You may only call `get_plugin_config()` from within a Meerschaum plugin.")
@@ -262,7 +262,7 @@ def write_plugin_config(
     Write a plugin's configuration dictionary.
     """
     from meerschaum.utils.warnings import warn, error
-    from meerschaum.actions import _get_parent_plugin
+    from meerschaum.plugins import _get_parent_plugin
     parent_plugin_name = _get_parent_plugin(2)
     if parent_plugin_name is None:
         error(f"You may only call `get_plugin_config()` from within a Meerschaum plugin.")
