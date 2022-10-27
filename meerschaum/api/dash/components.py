@@ -7,7 +7,6 @@ Custom components are defined here.
 """
 
 from __future__ import annotations
-from dash.dependencies import Input, Output, State
 from meerschaum.utils.venv import Venv
 from meerschaum.utils.packages import attempt_import, import_dcc, import_html
 from meerschaum.utils.typing import SuccessTuple, List
@@ -60,7 +59,6 @@ bottom_buttons_content = dbc.Card(
 console_div = html.Div(id='console-div', children=[html.Pre(get_shell().intro, id='console-pre')])
 
 location = dcc.Location(id='location', refresh=False)
-websocket = dex.WebSocket(id='ws', url='')
 
 search_parameters_editor = dash_ace.DashAceEditor(
     id = 'search-parameters-editor',
