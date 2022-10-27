@@ -19,7 +19,7 @@ px = attempt_import('plotly.express', warn=False, check_update=CHECK_UPDATE)
 daq = attempt_import('dash_daq', warn=False, check_update=CHECK_UPDATE)
 
 from meerschaum.api.dash.components import (
-    go_button, search_parameters_editor, websocket, test_button,
+    go_button, search_parameters_editor, test_button,
     get_items_menu, bottom_buttons_content, console_div, download_dataframe, navbar,
 )
 from meerschaum.api.dash.keys import (
@@ -29,7 +29,6 @@ from meerschaum.api.dash.keys import (
 layout = html.Div(
     id = 'main-div',
     children = [
-        websocket,
         keys_lists_content,
         download_dataframe,
         dcc.Interval(

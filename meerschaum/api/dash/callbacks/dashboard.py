@@ -41,6 +41,7 @@ import json
 dash = attempt_import('dash', lazy=False, check_update=CHECK_UPDATE)
 dbc = attempt_import('dash_bootstrap_components', lazy=False, check_update=CHECK_UPDATE)
 dcc, html = import_dcc(check_update=CHECK_UPDATE), import_html(check_update=CHECK_UPDATE)
+dex = attempt_import('dash_extensions', lazy=False, check_update=CHECK_UPDATE)
 
 keys_state = (
     State('connector-keys-dropdown', 'value'),
@@ -102,10 +103,12 @@ _required_login = {''}
 @dash_app.callback(
     Output('page-layout-div', 'children'),
     Output('session-store', 'data'),
+    Output('websocket-div', 'children'),
     Input('location', 'pathname'),
     State('session-store', 'data'),
+    State('location', 'href'),
 )
-def update_page_layout_div(pathname: str, session_store_data: Dict[str, Any]):
+def update_page_layout_div(pathname: str, session_store_data: Dict[str, Any], href: str):
     """
     Route the user to the correct page.
 
@@ -117,11 +120,21 @@ def update_page_layout_div(pathname: str, session_store_data: Dict[str, Any]):
     session_store_data: Dict[str, Any]:
         The stored session data.
 
+    href: str
+        The URL as shown to the user in the browser.
+
     Returns
     -------
-    A tuple of the page layout and new session store data.
+    A tuple of the page layout, new session store data, and the web socket connection.
 
     """
+    ctx = dash.callback_context
+    websocket_div_children = dex.WebSocket(
+        id = 'ws',
+        url = ws_url_from_href(href),
+        protocols = ['ws', 'wss']
+    ) if not ctx.states.get('ws.url', None) and href else []
+
     dash_endpoint = endpoints['dash']
     try:
         session_id = session_store_data.get('session-id', None) 
@@ -137,7 +150,7 @@ def update_page_layout_div(pathname: str, session_store_data: Dict[str, Any]):
         _path if session_id in active_sessions else 'login'
     )
     layout = _paths.get(path, pages.error.layout)
-    return layout, session_store_data
+    return layout, session_store_data, websocket_div_children
 
 
 @dash_app.callback(
