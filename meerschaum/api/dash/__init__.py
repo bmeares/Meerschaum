@@ -69,7 +69,6 @@ dash_app.layout = html.Div([
     location,
     dcc.Store(id='session-store', storage_type='session', data={}),
     html.Div([], id='page-layout-div'),
-    html.Div(id='websocket-div'),
 ])
 
 import meerschaum.api.dash.pages as pages

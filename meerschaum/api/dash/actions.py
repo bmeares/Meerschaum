@@ -162,7 +162,7 @@ def execute_action(state: WebState):
     def use_process():
         from meerschaum.utils.packages import run_python_package
         from meerschaum._internal.arguments._parse_arguments import parse_dict_to_sysargs
-        max_buffer_size = 30000
+        max_buffer_size = 10000
         line_buffer = ''
         def send_line(line: str):
             nonlocal line_buffer

@@ -7,10 +7,10 @@ This is the current release cycle, so stay tuned for future releases!
 ### v1.3.13
 
 - **Fixed an issue when displaying backtrack data on the Web Console.**  
-  Certain values like `pd.NA` would break the Recent Data view on the Web Console. Now the values are cast to string before building the table.
+  Certain values like `pd.NA` would break the Recent Data view on the Web Console. Now the values are cast to strings before building the table.
 
 - **Added YAML and JSON support to editing parameters.**  
-  YAML is now the default, and toggle buttons have been added to switch the encoding.
+  YAML is now the default, and toggle buttons have been added to switch the encoding. Line numbers have also been added to the editors.
 
 - **Removed the index column from the CSV downloader.**  
   When the download button is clicked, the dataframe's index column will be omitted from the CSV file.
@@ -23,6 +23,9 @@ This is the current release cycle, so stay tuned for future releases!
 
 - **Activating the virtual environment `None` will not override your current working directory.**  
   This is especially useful when testing the API. Activating the virtual environment `None` will insert behind your current working directory or `''` in `sys.path`.
+
+- **Added WebSocket Secure Support.**  
+  This has been coming a long time, so I'm proud to announce that the web console can now detect whether the client is connecting via HTTPS and (assuming the server has the appropriate [proxy configuration](http://nginx.org/en/docs/http/websocket.html)) will connect via WSS.
 
 ### v1.3.10 – v1.3.12
 
