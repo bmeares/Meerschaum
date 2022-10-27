@@ -8,19 +8,20 @@ Functions for interacting via WebSockets.
 
 import asyncio, sys
 from meerschaum.api._websockets import websockets
-from meerschaum.config.static import _static_config
+from meerschaum.config.static import STATIC_CONFIG
 
-def ws_url_from_href(href : str) -> str:
+def ws_url_from_href(href: str) -> str:
     """
     Generate the websocket URL from the webpage href.
     """
     http_protocol = href.split('://')[0]
-    ws_protocol = 'wss' if http_protocol == 'https' else 'ws'
+    #  ws_protocol = 'wss' if http_protocol == 'https' else 'ws'
+    ws_protocol = 'ws'
     host_and_port = href.replace(http_protocol + '://', '').split('/')[0]
     return (
         ws_protocol + '://' +
         host_and_port +
-        _static_config()['api']['endpoints']['websocket']
+        STATIC_CONFIG['api']['endpoints']['websocket']
     )
 
 def ws_send(msg: str, session_id: str) -> None:

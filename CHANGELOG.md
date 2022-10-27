@@ -4,7 +4,21 @@
 
 This is the current release cycle, so stay tuned for future releases!
 
-### v1.3.10 – v1.3.11
+### v1.3.13
+
+- **Fixed an issue when displaying backtrack data on the Web Console.**  
+  Certain values like `pd.NA` would break the Recent Data view on the Web Console. Now the values are cast to string before building the table.
+
+- **Added YAML and JSON support to editing parameters.**  
+  YAML is now the default, and toggle buttons have been added to switch the encoding.
+
+- **Removed the index column from the CSV downloader.**  
+  When the download button is clicked, the dataframe's index column will be omitted from the CSV file.
+
+- **Changed the download filename to `<target>.csv`.**  
+  The download process will now name the CSV file after the table rather than the pipe.
+
+### v1.3.10 – v1.3.12
 
 - **Fixed virtual environment issues when syncing.**  
   This one's a doozy. Before this patch, there would frequently be warnings and sometimes exceptions thrown when syncing a lot of pipes with a lot of threads. This kind of race condition can be hard to pin down, so this patch reworks the virtual environment resolution system by keeping track of which threads have activated the environments and refusing to deactivate if other threads still depend on the environment. To enforce this behavior, most manual ivocations of [`activate_venv()`](https://docs.meerschaum.io/utils/venv/index.html#meerschaum.utils.venv.activate_venv) were replaced with the [`Venv` context manager](https://docs.meerschaum.io/utils/venv/index.html#meerschaum.utils.venv.Venv). Finally, the last stage of each action is to clean up any stray virtual environments. *Note:* You may still run into the wrong version of a package being imported into your plugin if you're syncing a lot of plugins concurrently.

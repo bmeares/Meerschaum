@@ -32,6 +32,7 @@ from meerschaum.utils.packages import attempt_import, import_html, import_dcc
 from meerschaum.utils.misc import (
     string_to_dict, get_connector_labels, json_serialize_datetime, filter_keywords
 )
+from meerschaum.utils.yaml import yaml
 from meerschaum.actions import get_subactions, actions
 from meerschaum._internal.arguments._parser import get_arguments_triggers, parser
 from meerschaum.connectors.sql._fetch import set_pipe_query
@@ -176,14 +177,14 @@ def update_content(*args):
 
     ### NOTE: functions MUST return a list of content and a list of alerts
     triggers = {
-        'go-button' : execute_action,
-        'cancel-button' : stop_action,
-        'get-pipes-button' : get_pipes_cards,
-        'get-jobs-button' : get_jobs_cards,
-        'get-plugins-button' : get_plugins_cards,
-        'get-users-button' : get_users_cards,
-        'get-graphs-button' : get_graphs_cards,
-        'check-input-interval' : check_input_interval,
+        'go-button': execute_action,
+        'cancel-button': stop_action,
+        'get-pipes-button': get_pipes_cards,
+        'get-jobs-button': get_jobs_cards,
+        'get-plugins-button': get_plugins_cards,
+        'get-users-button': get_users_cards,
+        'get-graphs-button': get_graphs_cards,
+        'check-input-interval': check_input_interval,
     }
     ### Defaults to 3 if not in dict.
     trigger_num_cols = {
@@ -223,7 +224,7 @@ def update_content(*args):
     Input('action-dropdown', 'value'),
     Input('subaction-dropdown', 'value'),
 )
-def update_actions(action : str, subaction : str):
+def update_actions(action: str, subaction: str):
     """
     Update the subactions dropdown to reflect options for the primary action.
     """
@@ -232,16 +233,15 @@ def update_actions(action : str, subaction : str):
         trigger = None
     _actions_options = sorted([
         {
-            'label' : a,
+            'label' : a.replace('_', ' '),
             'value' : a,
             'title' : (textwrap.dedent(f.__doc__).lstrip() if f.__doc__ else 'No help available.'),
         }
         for a, f in actions.items() if a not in omit_actions
     ], key=lambda k: k['label'])
-    _actions = [o['label'] for o in _actions_options]
     _subactions_options = sorted([
         {
-            'label' : sa,
+            'label' : sa.replace('_', ' '),
             'value' : sa,
             'title' : (textwrap.dedent(f.__doc__).lstrip() if f.__doc__ else 'No help available.'),
         }
@@ -522,13 +522,13 @@ def download_pipe_csv(n_clicks):
     pipe = pipe_from_ctx(ctx, 'n_clicks')
     if pipe is None:
         raise PreventUpdate
-    filename = str(pipe) + '.csv'
+    filename = str(pipe.target) + '.csv'
     try:
         df = pipe.get_data(debug=debug)
     except Exception as e:
         df = None
     if df is not None:
-        return dcc.send_data_frame(df.to_csv, filename)
+        return dcc.send_data_frame(df.to_csv, filename, index=False)
     raise PreventUpdate
 
 
@@ -570,11 +570,16 @@ def update_pipe_parameters_click(n_clicks, parameters_editor_text):
         success, msg = False, f"Unable to update parameters for {pipe}."
     else:
         try:
-            params = json.loads(parameters_editor_text)
+            text_format = 'JSON' if parameters_editor_text.lstrip().startswith('{') else 'YAML'
+            params = (
+                json.loads(parameters_editor_text)
+                if text_format == 'JSON'
+                else yaml.load(parameters_editor_text)
+            )
             pipe.parameters = params
             success, msg = pipe.edit(debug=debug)
         except Exception as e:
-            success, msg = False, f"Invalid JSON:\n{e}"
+            success, msg = False, f"Invalid {text_format}:\n{e}"
 
     return alert_from_success_tuple((success, msg))
 
@@ -687,3 +692,34 @@ def sign_out_button_click(
     if session_id and session_id in active_sessions:
         del active_sessions[session_id]
     return endpoints['dash'], {}
+
+
+@dash_app.callback(
+    Output({'type': 'parameters-editor', 'index': MATCH}, 'value'),
+    Input({'type': 'parameters-as-yaml-button', 'index': MATCH}, 'n_clicks'),
+    Input({'type': 'parameters-as-json-button', 'index': MATCH}, 'n_clicks'),
+    prevent_initial_callback = True,
+)
+def parameters_as_yaml_or_json_click(
+        yaml_n_clicks: Optional[int],
+        json_n_clicks: Optional[int],
+        prevent_initial_callback = True,
+    ):
+    """
+    When the `YAML` button is clicked under the parameters editor, switch the content to YAML.
+    """
+    if not yaml_n_clicks and not json_n_clicks:
+        raise PreventUpdate
+
+    ctx = dash.callback_context
+    triggered = dash.callback_context.triggered
+    if triggered[0]['value'] is None:
+        raise PreventUpdate
+    as_yaml = 'yaml' in triggered[0]['prop_id']
+    pipe = pipe_from_ctx(triggered, 'n_clicks')
+    if pipe is None:
+        raise PreventUpdate
+
+    if as_yaml:
+        return yaml.dump(pipe.parameters)
+    return json.dumps(pipe.parameters, indent=4, separators=(',', ': '), sort_keys=True)

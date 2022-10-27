@@ -162,7 +162,7 @@ def execute_action(state: WebState):
     def use_process():
         from meerschaum.utils.packages import run_python_package
         from meerschaum._internal.arguments._parse_arguments import parse_dict_to_sysargs
-        max_buffer_size = 10000
+        max_buffer_size = 30000
         line_buffer = ''
         def send_line(line: str):
             nonlocal line_buffer
@@ -170,6 +170,7 @@ def execute_action(state: WebState):
             buff_start_idx = max(len(line_buffer) - max_buffer_size, 0)
             line_buffer = line_buffer[buff_start_idx:]
             ws_send(line_buffer, session_id)
+
         def do_process():
             keywords['action'] = [action] + subactions
             _sysargs = parse_dict_to_sysargs(keywords)

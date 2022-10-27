@@ -15,6 +15,7 @@ from meerschaum.utils.typing import List, Optional, Dict, Any, Tuple, Union
 from meerschaum.utils.misc import string_to_dict, json_serialize_datetime
 from meerschaum.utils.packages import attempt_import, import_dcc, import_html
 from meerschaum.utils.sql import get_pd_type
+from meerschaum.utils.yaml import yaml
 from meerschaum.connectors.sql._fetch import get_pipe_query
 from meerschaum.api import endpoints, CHECK_UPDATE
 from meerschaum.api.dash import (
@@ -166,16 +167,16 @@ def accordion_items_from_pipe(
         active_items = []
 
     items_titles = {
-        'Overview': 'overview',
-        'Statistics': 'stats',
-        'Columns': 'columns',
-        'Parameters': 'parameters',
+        '🔑 Keys': 'overview',
+        '🧮 Statistics': 'stats',
+        '🏛️ Columns': 'columns',
+        '📔 Parameters': 'parameters',
     }
     if pipe.connector_keys.startswith('sql:'):
         items_titles['SQL Query'] = 'sql'
     items_titles.update({
-        'Recent Data': 'recent-data',
-        'Sync Documents': 'sync-data',
+        '🗃️ Recent Data': 'recent-data',
+        '📝 Sync Documents': 'sync-data',
     })
 
     ### Only generate items if they're in the `active_items` list.
@@ -240,7 +241,9 @@ def accordion_items_from_pipe(
             }
             columns_rows = [
                 html.Tr([
-                    html.Td(html.Pre(col)), html.Td(html.Pre(typ)), html.Td(html.Pre(get_pd_type(typ)))
+                    html.Td(html.Pre(col)),
+                    html.Td(html.Pre(typ)),
+                    html.Td(html.Pre(get_pd_type(typ))),
                 ]) for col, typ in columns_types.items()
             ]
             columns_body = [html.Tbody(columns_rows)]
@@ -251,7 +254,7 @@ def accordion_items_from_pipe(
 
     if 'parameters' in active_items:
         parameters_editor = dash_ace.DashAceEditor(
-            value = json.dumps(pipe.parameters, indent=4),
+            value = yaml.dump(pipe.parameters),
             mode = 'norm',
             tabSize = 4,
             theme = 'twilight',
@@ -259,8 +262,8 @@ def accordion_items_from_pipe(
             width = '100%',
             height = '500px',
             readOnly = False,
-            showGutter = False,
-            showPrintMargin = False,
+            showGutter = True,
+            showPrintMargin = True,
             highlightActiveLine = True,
             wrapEnabled = True,
             style = {'min-height': '120px'},
@@ -269,11 +272,32 @@ def accordion_items_from_pipe(
             "Update",
             id = {'type': 'update-parameters-button', 'index': json.dumps(pipe.meta)},
         )
+
+        as_yaml_button = dbc.Button(
+            "YAML",
+            id = {'type': 'parameters-as-yaml-button', 'index': json.dumps(pipe.meta)},
+            color = 'link',
+            size = 'sm',
+            style = {'text-decoration': 'none', 'margin-left': '10px'},
+        )
+        as_json_button = dbc.Button(
+            "JSON",
+            id = {'type': 'parameters-as-json-button', 'index': json.dumps(pipe.meta)},
+            color = 'link',
+            size = 'sm',
+            style = {'text-decoration': 'none'},
+        )
         items_bodies['parameters'] = html.Div([
             parameters_editor,
             html.Br(),
             dbc.Row([
-                dbc.Col([update_parameters_button], width=2),
+                dbc.Col(html.Span(
+                    [
+                        update_parameters_button,
+                        as_json_button,
+                        as_yaml_button,
+                    ]
+                ), width=4),
                 dbc.Col([
                     html.Div(
                         id={'type': 'update-parameters-success-div', 'index': json.dumps(pipe.meta)}
@@ -296,7 +320,7 @@ def accordion_items_from_pipe(
             width = '100%',
             height = '500px',
             readOnly = False,
-            showGutter = False,
+            showGutter = True,
             showPrintMargin = False,
             highlightActiveLine = True,
             wrapEnabled = True,
@@ -323,7 +347,7 @@ def accordion_items_from_pipe(
 
     if 'recent-data' in active_items:
         try:
-            df = pipe.get_backtrack_data(backtrack_minutes=10, limit=10, debug=debug)
+            df = pipe.get_backtrack_data(backtrack_minutes=10, limit=10, debug=debug).astype(str)
             table = dbc.Table.from_dataframe(df, bordered=False, hover=True) 
         except Exception as e:
             table = html.P("Could not retrieve recent data.")
@@ -342,6 +366,8 @@ def accordion_items_from_pipe(
         except Exception as e:
             warn(e)
             json_text = '[]'
+
+        json_text = json.dumps(json.loads(json_text), indent=4, separators=(',', ': '))
         sync_editor = dash_ace.DashAceEditor(
             value = json_text,
             mode = 'norm',
@@ -351,7 +377,7 @@ def accordion_items_from_pipe(
             width = '100%',
             height = '500px',
             readOnly = False,
-            showGutter = False,
+            showGutter = True,
             showPrintMargin = False,
             highlightActiveLine = True,
             wrapEnabled = True,
