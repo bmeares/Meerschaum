@@ -83,7 +83,13 @@ def activate_venv(
         if target in active_venvs_order:
             sys.path.remove(target)
             active_venvs_order.remove(target)
-        sys.path.insert(0, target)
+        if venv is not None:
+            sys.path.insert(0, target)
+        else:
+            if sys.path and sys.path[0] in (os.getcwd(), ''):
+                sys.path.insert(1, target)
+            else:
+                sys.path.insert(0, target)
         active_venvs_order.insert(0, target)
 
     return True

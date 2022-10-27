@@ -170,6 +170,7 @@ def execute_action(state: WebState):
             buff_start_idx = max(len(line_buffer) - max_buffer_size, 0)
             line_buffer = line_buffer[buff_start_idx:]
             ws_send(line_buffer, session_id)
+
         def do_process():
             keywords['action'] = [action] + subactions
             _sysargs = parse_dict_to_sysargs(keywords)
