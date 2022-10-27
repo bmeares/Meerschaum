@@ -15,8 +15,7 @@ def ws_url_from_href(href: str) -> str:
     Generate the websocket URL from the webpage href.
     """
     http_protocol = href.split('://')[0]
-    #  ws_protocol = 'wss' if http_protocol == 'https' else 'ws'
-    ws_protocol = 'ws'
+    ws_protocol = 'wss' if http_protocol == 'https' else 'ws'
     host_and_port = href.replace(http_protocol + '://', '').split('/')[0]
     return (
         ws_protocol + '://' +

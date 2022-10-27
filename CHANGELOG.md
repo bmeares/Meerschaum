@@ -18,6 +18,12 @@ This is the current release cycle, so stay tuned for future releases!
 - **Changed the download filename to `<target>.csv`.**  
   The download process will now name the CSV file after the table rather than the pipe.
 
+- **Web Console improvements.**  
+  The items in the actions builder now are presented with a monospace font. Actions and subactions will have underscores represented as spaces.
+
+- **Activating the virtual environment `None` will not override your current working directory.**  
+  This is especially useful when testing the API. Activating the virtual environment `None` will insert behind your current working directory or `''` in `sys.path`.
+
 ### v1.3.10 – v1.3.12
 
 - **Fixed virtual environment issues when syncing.**  
