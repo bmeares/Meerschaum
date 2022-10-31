@@ -47,7 +47,7 @@ def enforce_dtypes(self, df: 'pd.DataFrame', debug: bool=False) -> 'pd.DataFrame
             )
         return df
 
-    df_dtypes = {c: t.name for c, t in dict(df.dtypes).items()}
+    df_dtypes = {c: str(t) for c, t in df.dtypes.items()}
     if len(df_dtypes) == 0:
         if debug:
             dprint("Incoming DataFrame has no columns. Skipping enforcement...")

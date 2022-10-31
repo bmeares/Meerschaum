@@ -54,10 +54,53 @@ def fetch(
     A pandas DataFrame or `None`.
 
     """
+    meta_def = self.get_pipe_metadef(
+        pipe,
+        begin = begin,
+        end = end,
+        debug = debug,
+        **kw
+    )
+    df = self.read(meta_def, chunk_hook=chunk_hook, chunksize=chunksize, debug=debug)
+    ### if sqlite, parse for datetimes
+    if self.flavor == 'sqlite':
+        from meerschaum.utils.misc import parse_df_datetimes
+        df = parse_df_datetimes(df, debug=debug)
+    return df
+
+
+def get_pipe_metadef(
+        self,
+        pipe: meerschaum.Pipe,
+        params: Optional[Dict[str, Any]] = None,
+        begin: Union[datetime.datetime, str, None] = '',
+        end: Union[datetime.datetime, str, None] = None,
+        debug: bool = False,
+        **kw: Any
+    ) -> Union[str, None]:
+    """
+    Return a pipe's meta definition fetch query (definition with 
+
+    params: Optional[Dict[str, Any]], default None
+        Optional params dictionary to build the `WHERE` clause.
+        See `meerschaum.utils.sql.build_where`.
+
+    begin: Union[datetime.datetime, str, None], default None
+        Most recent datatime to search for data.
+        If `backtrack_minutes` is provided, subtract `backtrack_minutes`.
+
+    end: Union[datetime.datetime, str, None], default None
+        The latest datetime to search for data.
+        If `end` is `None`, do not bound 
+
+    debug: bool, default False
+        Verbosity toggle.
+ 
+    """
     import datetime
     from meerschaum.utils.debug import dprint
     from meerschaum.utils.warnings import warn, error
-    from meerschaum.utils.sql import sql_item_name, dateadd_str
+    from meerschaum.utils.sql import sql_item_name, dateadd_str, build_where
     from meerschaum.config import get_config
 
     definition = get_pipe_query(pipe)
@@ -114,12 +157,11 @@ def fetch(
         ) else _join_fetch_query(pipe, debug=debug, **kw)
     )
 
+    has_where = 'where' in meta_def.lower()[meta_def.lower().rfind('select'):]
     if dt_name and (begin_da or end_da):
         definition_dt_name = dateadd_str(self.flavor, 'minute', 0, f"definition.{dt_name}")
-        meta_def += "\n" + (
-            "AND" if 'where' in meta_def.lower()[meta_def.lower().rfind('select'):]
-            else "WHERE"
-        ) + " "
+        meta_def += "\n" + ("AND" if has_where else "WHERE") + " "
+        has_where = True
         if begin_da:
             meta_def += f"{definition_dt_name} >= {begin_da}"
         if begin_da and end_da:
@@ -127,12 +169,13 @@ def fetch(
         if end_da:
             meta_def += f"{definition_dt_name} < {end_da}"
 
-    df = self.read(meta_def, chunk_hook=chunk_hook, chunksize=chunksize, debug=debug)
-    ### if sqlite, parse for datetimes
-    if self.flavor == 'sqlite':
-        from meerschaum.utils.misc import parse_df_datetimes
-        df = parse_df_datetimes(df, debug=debug)
-    return df
+    if params is not None:
+        params_where = build_where(params, self, with_where=False)
+        meta_def += "\n" + ("AND" if has_where else "WHERE") + " "
+        has_where = True
+        meta_def += params_where
+
+    return meta_def
 
 
 def get_pipe_query(pipe: mrsm.Pipe, warn: bool = True) -> Union[str, None]:
