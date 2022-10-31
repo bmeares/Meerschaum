@@ -60,6 +60,7 @@ flavor_configs = {
         'engine'       : 'mssql+pyodbc',
         'create_engine' : {
             'fast_executemany': True,
+            'isolation_level': 'AUTOCOMMIT',
         },
         'omit_create_engine': {'method',},
         'to_sql': {
@@ -280,8 +281,6 @@ def create_engine(
             **_create_engine_args
         )
     except Exception as e:
-        #  import traceback
-        #  traceback.print_exc(e)
         warn(e)
         warn(f"Failed to create connector '{self}'.", stack=False)
         engine = None

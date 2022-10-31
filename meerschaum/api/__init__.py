@@ -24,7 +24,7 @@ from meerschaum.plugins import _api_plugins
 from meerschaum.utils.warnings import warn
 from meerschaum.utils.threading import RLock
 
-_locks = {'pipes': RLock(), 'connector': RLock()}
+_locks = {'pipes': RLock(), 'connector': RLock(), 'uvicorn_config': RLock()}
 
 ### Skip verifying packages in the docker image.
 CHECK_UPDATE = os.environ.get(STATIC_CONFIG['environment']['runtime'], None) != 'docker'
@@ -61,20 +61,21 @@ def get_uvicorn_config() -> Dict[str, Any]:
     if runtime == 'api':
         return get_config('system', 'api', 'uvicorn')
     _uvicorn_config = uvicorn_config
-    if uvicorn_config is None:
-        try:
-            with open(uvicorn_config_path, 'r') as f:
-                uvicorn_config = json.load(f)
-            _uvicorn_config = uvicorn_config
-        except Exception as e:
-            _uvicorn_config = sys_config.get('uvicorn', None)
+    with _locks['uvicorn_config']:
+        if uvicorn_config is None:
+            try:
+                with open(uvicorn_config_path, 'r') as f:
+                    uvicorn_config = json.load(f)
+                _uvicorn_config = uvicorn_config
+            except Exception as e:
+                _uvicorn_config = sys_config.get('uvicorn', None)
 
-        if _uvicorn_config is None:
-            _uvicorn_config = dict()
+            if _uvicorn_config is None:
+                _uvicorn_config = {}
 
-        ### Default: main SQL connector
-        if 'mrsm_instance' not in _uvicorn_config:
-            _uvicorn_config['mrsm_instance'] = get_config('meerschaum', 'api_instance', patch=True)
+            ### Default: main SQL connector
+            if 'mrsm_instance' not in _uvicorn_config:
+                _uvicorn_config['mrsm_instance'] = get_config('meerschaum', 'api_instance')
     return _uvicorn_config
 
 debug = get_uvicorn_config().get('debug', False)
