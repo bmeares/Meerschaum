@@ -110,7 +110,7 @@ default_system_config = {
         'cache': True,
         'space': False,
         'join_fetch': False,
-        'inplace_sync': True,
+        'inplace_sync': False,
     },
 }
 default_pipes_config       = {
