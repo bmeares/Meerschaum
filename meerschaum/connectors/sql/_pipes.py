@@ -649,8 +649,9 @@ def get_pipe_data(
         Additional parameters to filter by.
         See `meerschaum.connectors.sql.build_where`.
 
-    order: str, default 'asc'
+    order: Optional[str], default 'asc'
         The selection order for all of the indices in the query.
+        If `None`, omit the `ORDER BY` clause.
 
     limit: Optional[int], default None
         If specified, limit the number of rows retrieved to this value.
@@ -672,6 +673,109 @@ def get_pipe_data(
     A `pd.DataFrame` of the pipe's data.
 
     """
+    from meerschaum.utils.sql import sql_item_name
+    dtypes = pipe.dtypes
+    if dtypes:
+        if self.flavor == 'sqlite':
+            if not pipe.columns.get('datetime', None):
+                _dt = pipe.guess_datetime()
+                dt = sql_item_name(_dt, self.flavor) if _dt else None
+                is_guess = True
+            else:
+                _dt = pipe.get_columns('datetime')
+                dt = sql_item_name(_dt, self.flavor)
+                is_guess = False
+
+            if _dt and 'datetime' not in dtypes.get(_dt, 'object'):
+                dtypes[_dt] = 'datetime64[ns]'
+    existing_cols = pipe.get_columns_types(debug=debug)
+    if existing_cols:
+        dtypes = {col: typ for col, typ in dtypes.items() if col in existing_cols}
+    if dtypes:
+        kw['dtypes'] = dtypes
+
+    query = self.get_pipe_data_query(
+        pipe,
+        begin = begin,
+        end = end,
+        params = params,
+        order = order,
+        limit = limit,
+        begin_add_minutes = begin_add_minutes,
+        end_add_minutes = end_add_minutes,
+        debug = debug,
+        **kw
+    )
+    df = self.read(
+        query,
+        debug = debug,
+        **kw
+    )
+    if self.flavor == 'sqlite':
+        from meerschaum.utils.misc import parse_df_datetimes
+        from meerschaum.utils.packages import import_pandas
+        pd = import_pandas()
+        ### NOTE: We have to consume the iterator here to ensure that datatimes are parsed correctly
+        df = parse_df_datetimes(df, debug=debug) if isinstance(df, pd.DataFrame) else (
+            [parse_df_datetimes(c, debug=debug) for c in df]
+        )
+    return df
+
+
+def get_pipe_data_query(
+        self,
+        pipe: Optional[meerschaum.Pipe] = None,
+        begin: Union[datetime.datetime, str, None] = None,
+        end: Union[datetime.datetime, str, None] = None,
+        params: Optional[Dict[str, Any]] = None,
+        order: str = 'asc',
+        limit: Optional[int] = None,
+        begin_add_minutes: int = 0,
+        end_add_minutes: int = 0,
+        debug: bool = False,
+        **kw: Any
+    ) -> Union[str, None]:
+    """
+    Return the `SELECT` query for retrieving a pipe's data from its instance.
+
+    Parameters
+    ----------
+    pipe: meerschaum.Pipe:
+        The pipe to get data from.
+
+    begin: Optional[datetime.datetime], default None
+        If provided, get rows newer than or equal to this value.
+
+    end: Optional[datetime.datetime], default None
+        If provided, get rows older than or equal to this value.
+
+    params: Optional[Dict[str, Any]], default None
+        Additional parameters to filter by.
+        See `meerschaum.connectors.sql.build_where`.
+
+    order: Optional[str], default 'asc'
+        The selection order for all of the indices in the query.
+        If `None`, omit the `ORDER BY` clause.
+
+    limit: Optional[int], default None
+        If specified, limit the number of rows retrieved to this value.
+
+    begin_add_minutes: int, default 0
+        The number of minutes to add to the `begin` datetime (i.e. `DATEADD`.
+
+    end_add_minutes: int, default 0
+        The number of minutes to add to the `end` datetime (i.e. `DATEADD`.
+
+    chunksize: Optional[int], default -1
+        The size of dataframe chunks to load into memory.
+
+    debug: bool, default False
+        Verbosity toggle.
+
+    Returns
+    -------
+    A `SELECT` query to retrieve a pipe's data.
+    """
     import json
     from meerschaum.utils.debug import dprint
     from meerschaum.utils.misc import items_str
@@ -683,11 +787,12 @@ def get_pipe_data(
     query = f"SELECT * FROM {sql_item_name(pipe.target, self.flavor)}"
     where = ""
 
-    default_order = 'asc'
-    if order not in ('asc', 'desc'):
-        warn(f"Ignoring unsupported order '{order}'. Falling back to '{default_order}'.")
-        order = default_order
-    order = order.upper()
+    if order is not None:
+        default_order = 'asc'
+        if order not in ('asc', 'desc'):
+            warn(f"Ignoring unsupported order '{order}'. Falling back to '{default_order}'.")
+            order = default_order
+        order = order.upper()
 
     existing_cols = pipe.get_columns_types(debug=debug)
 
@@ -745,26 +850,29 @@ def get_pipe_data(
 
     if params is not None:
         from meerschaum.utils.sql import build_where
-        where += build_where(params, self).replace(
-            'WHERE', ('AND' if is_dt_bound else "")
-        )
+        valid_params = {k: v for k, v in params.items() if k in existing_cols}
+        if valid_params:
+            where += build_where(valid_params, self).replace(
+                'WHERE', ('AND' if is_dt_bound else "")
+            )
 
     if len(where) > 0:
         query += "\nWHERE " + where
 
-    ### Sort by indices, starting with datetime.
-    order_by = ""
-    if quoted_indices:
-        order_by += "\nORDER BY "
-        if _dt and _dt in existing_cols:
-            order_by += dt + ' ' + order + ','
-        for key, quoted_col_name in quoted_indices.items():
-            if key == 'datetime':
-                continue
-            order_by += ' ' + quoted_col_name + ' ' + order + ','
-        order_by = order_by[:-1]
+    if order is not None:
+        ### Sort by indices, starting with datetime.
+        order_by = ""
+        if quoted_indices:
+            order_by += "\nORDER BY "
+            if _dt and _dt in existing_cols:
+                order_by += dt + ' ' + order + ','
+            for key, quoted_col_name in quoted_indices.items():
+                if key == 'datetime':
+                    continue
+                order_by += ' ' + quoted_col_name + ' ' + order + ','
+            order_by = order_by[:-1]
 
-    query += order_by
+        query += order_by
 
     if isinstance(limit, int):
         if self.flavor == 'mssql':
@@ -783,28 +891,7 @@ def get_pipe_data(
         )
         dprint("Getting pipe data with constraints: " + items_str(to_print, quotes=False))
 
-    dtypes = pipe.dtypes
-    if dtypes:
-        if self.flavor == 'sqlite':
-            if _dt and 'datetime' not in dtypes.get(_dt, 'object'):
-                dtypes[_dt] = 'datetime64[ns]'
-    if existing_cols:
-        dtypes = {col: typ for col, typ in dtypes.items() if col in existing_cols}
-    if dtypes:
-        kw['dtypes'] = dtypes
-
-    df = self.read(
-        query,
-        debug = debug,
-        **kw
-    )
-    if self.flavor == 'sqlite':
-        from meerschaum.utils.misc import parse_df_datetimes
-        ### NOTE: We have to consume the iterator here to ensure that datatimes are parsed correctly
-        df = parse_df_datetimes(df, debug=debug) if isinstance(df, pd.DataFrame) else (
-            [parse_df_datetimes(c, debug=debug) for c in df]
-        )
-    return df
+    return query
 
 
 def get_pipe_id(
@@ -942,6 +1029,7 @@ def sync_pipe(
     from meerschaum.utils.debug import dprint
     from meerschaum.utils.packages import import_pandas
     from meerschaum.utils.sql import get_update_queries, sql_item_name
+    from meerschaum.utils.misc import generate_password
     from meerschaum import Pipe
     import time
     pd = import_pandas()
@@ -1002,7 +1090,8 @@ def sync_pipe(
             dprint("Update data:\n" + str(update_df))
 
     if update_df is not None and not update_df.empty:
-        temp_target = '_' + pipe.target
+        transact_id = generate_password(6)
+        temp_target = '_' + transact_id + '_' + pipe.target
         self.to_sql(
             update_df,
             name = temp_target,
@@ -1071,6 +1160,544 @@ def sync_pipe(
     return success, msg
 
 
+def sync_pipe_inplace(
+        self,
+        pipe: 'meerschaum.Pipe',
+        params: Optional[Dict[str, Any]] = None,
+        begin: Optional[datetime.datetime] = None,
+        end: Optional[datetime.datetime] = None,
+        chunksize: Optional[int] = -1,
+        check_existing: bool = True,
+        debug: bool = False,
+        **kw: Any
+    ) -> SuccessTuple:
+    """
+    If a pipe's connector is the same as its instance connector,
+    it's more efficient to sync the pipe in-place rather than reading data into Pandas.
+
+    Parameters
+    ----------
+    pipe: meerschaum.Pipe
+        The pipe whose connector is the same as its instance.
+
+    params: Optional[Dict[str, Any]], default None
+        Optional params dictionary to build the `WHERE` clause.
+        See `meerschaum.utils.sql.build_where`.
+
+    begin: Optional[datetime.datetime], default None
+        Optionally specify the earliest datetime to search for data.
+        Defaults to `None`.
+
+    end: Optional[datetime.datetime], default None
+        Optionally specify the latest datetime to search for data.
+        Defaults to `None`.
+
+    chunksize: Optional[int], default -1
+        Specify the number of rows to sync per chunk.
+        If `-1`, resort to system configuration (default is `900`).
+        A `chunksize` of `None` will sync all rows in one transaction.
+        Defaults to `-1`.
+
+    check_existing: bool, default True
+        If `True`, pull and diff with existing data from the pipe. Defaults to `True`.
+
+    debug: bool, default False
+        Verbosity toggle.
+
+    Returns
+    -------
+    A SuccessTuple.
+    """
+    from meerschaum.utils.sql import (
+        sql_item_name, table_exists, get_sqlalchemy_table, get_pd_type,
+        get_update_queries,
+    )
+    from meerschaum.utils.misc import generate_password
+    from meerschaum.utils.debug import dprint
+    metadef = self.get_pipe_metadef(
+        pipe,
+        params = params,
+        begin = begin,
+        end = end,
+        debug = debug,
+    )
+    if self.flavor in ('mssql',):
+        final_select_ix = metadef.lower().rfind('select')
+        def_name = metadef[len('WITH '):].split(' ', maxsplit=1)[0]
+        metadef = (
+            metadef[:final_select_ix].rstrip() + ',\n'
+            + "metadef AS (\n"
+            + metadef[final_select_ix:]
+            + "\n)\n"
+        )
+
+    pipe_name = sql_item_name(pipe.target, self.flavor)
+    if not pipe.exists(debug=debug):
+        if self.flavor in ('mssql',):
+            create_pipe_query = metadef + f"SELECT *\nINTO {pipe_name}\nFROM metadef"
+        elif self.flavor in ('sqlite', 'oracle', 'mysql', 'mariadb', 'duckdb'):
+            create_pipe_query = (
+                f"CREATE TABLE {pipe_name} AS\n"
+                + f"SELECT *\nFROM ({metadef})"
+                + (" AS metadef" if self.flavor in ('mysql', 'mariadb') else '')
+            )
+        else:
+            create_pipe_query = f"SELECT *\nINTO {pipe_name}\nFROM ({metadef}) AS metadef"
+        result = self.exec(create_pipe_query, debug=debug)
+        if result is None:
+            return False, f"Could not insert new data into {pipe} from its SQL query definition."
+        if not self.create_indices(pipe, debug=debug):
+            if debug:
+                dprint(f"Failed to create indices for {pipe}. Continuing...")
+
+        rowcount = pipe.get_rowcount(debug=debug)
+        return True, f"Inserted {rowcount}, updated 0 rows."
+
+    ### Generate names for the tables.
+    transact_id = generate_password(6)
+    def get_temp_table_name(label: str) -> str:
+        return '_' + transact_id + '_' + label + '_' + pipe.target
+
+    backtrack_table_raw = get_temp_table_name('backtrack')
+    backtrack_table_name = sql_item_name(backtrack_table_raw, self.flavor)
+    new_table_raw = get_temp_table_name('new')
+    new_table_name = sql_item_name(new_table_raw, self.flavor)
+    delta_table_raw = get_temp_table_name('delta')
+    delta_table_name = sql_item_name(delta_table_raw, self.flavor)
+    joined_table_raw = get_temp_table_name('joined')
+    joined_table_name = sql_item_name(joined_table_raw, self.flavor)
+    unseen_table_raw = get_temp_table_name('unseen')
+    unseen_table_name = sql_item_name(unseen_table_raw, self.flavor)
+    update_table_raw = get_temp_table_name('update')
+    update_table_name = sql_item_name(update_table_raw, self.flavor)
+
+    new_queries = []
+    drop_new_query = f"DROP TABLE {new_table_name}"
+    if table_exists(new_table_raw, self, debug=debug):
+        new_queries.append(drop_new_query)
+
+    if self.flavor in ('mssql',):
+        create_new_query = metadef + f"SELECT *\nINTO {new_table_name}\nFROM metadef"
+    elif self.flavor in ('sqlite', 'oracle', 'mysql', 'mariadb', 'duckdb'):
+        create_new_query = (
+            f"CREATE TABLE {new_table_name} AS\n"
+            + f"SELECT *\nFROM ({metadef})"
+            + (" AS metadef" if self.flavor in ('mysql', 'mariadb') else '')
+        )
+    else:
+        create_new_query = f"SELECT *\nINTO {new_table_name}\nFROM ({metadef}) AS metadef"
+
+    new_queries.append(create_new_query)
+
+    new_success = all(self.exec_queries(new_queries, break_on_error=True, debug=debug))
+    if not new_success:
+        self.exec_queries([drop_new_query], break_on_error=False, debug=debug)
+        return False, f"Could not fetch new data for {pipe}."
+
+    new_table_obj = get_sqlalchemy_table(
+        new_table_raw,
+        connector = self,
+        refresh = True,
+        debug = debug,
+    )
+    new_cols = {str(col.name): get_pd_type(str(col.type)) for col in new_table_obj.columns}
+
+    add_cols_queries = self.get_add_columns_queries(pipe, new_cols, debug=debug)
+    if add_cols_queries:
+        if not self.exec_queries(add_cols_queries, debug=debug):
+            warn(f"Failed to add new columns to {pipe}.")
+
+    alter_cols_queries = self.get_alter_columns_queries(pipe, new_cols, debug=debug)
+    if alter_cols_queries:
+        if not self.exec_queries(alter_cols_queries, debug=debug):
+            warn(f"Failed to alter columns for {pipe}.")
+
+    if not check_existing:
+        new_count = self.value(f"SELECT COUNT(*) FROM {new_count}", debug=debug)
+        insert_queries = [
+            (
+                f"INSERT INTO {pipe_name}\n"
+                + f"SELECT *\nFROM {new_table_name}"
+            ),
+            f"DROP TABLE {new_table_name}"
+        ]
+        if not self.exec_queries(insert_queries, debug=debug, break_on_error=False):
+            return False, f"Failed to insert into rows into {pipe}."
+        return True, f"Inserted {new_count}, updated 0 rows."
+
+
+    backtrack_queries = []
+    drop_backtrack_query = f"DROP TABLE {backtrack_table_name}"
+    if table_exists(backtrack_table_raw, self, debug=debug):
+        backtrack_queries.append(drop_backtrack_query)
+    backtrack_def = self.get_pipe_data_query(
+        pipe,
+        begin = begin,
+        end = end,
+        params = params,
+        debug = debug,
+        order = None,
+    )
+
+    create_backtrack_query = (
+        (
+            f"WITH backtrack_def AS ({backtrack_def})\n"
+            + f"SELECT *\nINTO {backtrack_table_name}\nFROM backtrack_def"
+        ) if self.flavor not in ('sqlite', 'oracle', 'mysql', 'mariadb', 'duckdb')
+        else (
+            f"CREATE TABLE {backtrack_table_name} AS\n"
+            + f"SELECT *\nFROM ({backtrack_def})"
+            + (" AS backtrack" if self.flavor in ('mysql', 'mariadb') else '')
+        )
+    )
+    backtrack_queries.append(create_backtrack_query)
+    backtrack_success = all(self.exec_queries(backtrack_queries, break_on_error=True, debug=debug))
+    if not backtrack_success:
+        self.exec_queries([drop_new_query, drop_backtrack_query], break_on_error=False, debug=debug)
+        return False, f"Could not fetch backtrack data from {pipe}."
+
+
+    ### Determine which index columns are present in both tables.
+    backtrack_table_obj = get_sqlalchemy_table(
+        backtrack_table_raw,
+        connector = self,
+        refresh = True,
+        debug = debug,
+    )
+    backtrack_cols = {str(col.name): str(col.type) for col in backtrack_table_obj.columns}
+    on_cols = [
+        col for col_key, col in pipe.columns.items()
+        if (
+            col
+            and
+            col_key != 'value'
+            and col in backtrack_cols
+            and col in new_cols
+        )
+    ]
+
+    delta_queries = []
+    drop_delta_query = f"DROP TABLE {delta_table_name}"
+    if table_exists(delta_table_raw, self, debug=debug):
+        delta_queries.append(drop_delta_query)
+
+    create_delta_query = (
+        (
+            f"SELECT new.*\n"
+            + f"INTO {delta_table_name}\n"
+            + f"FROM {new_table_name} AS new\n"
+            + f"LEFT OUTER JOIN {backtrack_table_name} AS old\nON\n"
+            + '\nAND\n'.join([
+                (
+                    'new.' + sql_item_name(c, self.flavor)
+                    + ' = '
+                    + 'old.' + sql_item_name(c, self.flavor)
+                ) for c in new_cols
+            ])
+            + "\nWHERE\n"
+            + '\nAND\n'.join([
+                (
+                    'old.' + sql_item_name(c, self.flavor) + ' IS NULL'
+                ) for c in new_cols
+            ])
+        ) if self.flavor not in ('sqlite', 'oracle', 'mysql', 'mariadb', 'duckdb')
+        else (
+            f"CREATE TABLE {delta_table_name} AS\n"
+            + "SELECT new.*\n"
+            + f"FROM {new_table_name} new\n"
+            + f"LEFT OUTER JOIN {backtrack_table_name} old\nON\n"
+            + '\nAND\n'.join([
+                (
+                    'new.' + sql_item_name(c, self.flavor)
+                    + ' = '
+                    + 'old.' + sql_item_name(c, self.flavor)
+                ) for c in new_cols
+            ])
+            + "\nWHERE\n"
+            + '\nAND\n'.join([
+                (
+                    'old.' + sql_item_name(c, self.flavor) + ' IS NULL'
+                ) for c in new_cols
+            ])
+        )
+    )
+
+    delta_queries.append(create_delta_query)
+
+    delta_success = all(self.exec_queries(delta_queries, break_on_error=True, debug=debug))
+    if not delta_success:
+        self.exec_queries(
+            [
+                drop_new_query,
+                drop_backtrack_query,
+                drop_delta_query,
+            ],
+            break_on_error = False,
+            debug = debug,
+        )
+        return False, f"Could not filter data for {pipe}."
+
+    delta_table_obj = get_sqlalchemy_table(
+        delta_table_raw,
+        connector = self,
+        refresh = True,
+        debug = debug,
+    )
+    delta_cols = {str(col.name): get_pd_type(str(col.type)) for col in delta_table_obj.columns}
+
+    joined_queries = []
+    drop_joined_query = f"DROP TABLE {joined_table_name}"
+    if on_cols and table_exists(joined_table_raw, self, debug=debug):
+        joined_queries.append(drop_joined_query)
+
+    create_joined_query = (
+        (
+            "SELECT "
+            + (', '.join([
+                (
+                    'delta.' + sql_item_name(c, self.flavor)
+                    + " AS " + sql_item_name(c + '_delta', self.flavor)
+                ) for c in delta_cols
+            ]))
+            + ", "
+            + (', '.join([
+                (
+                    'bt.' + sql_item_name(c, self.flavor)
+                    + " AS " + sql_item_name(c + '_backtrack', self.flavor)
+                ) for c in backtrack_cols
+            ]))
+            + f"\nINTO {joined_table_name}\n"
+            + f"FROM {delta_table_name} AS delta\n"
+            + f"LEFT OUTER JOIN {backtrack_table_name} AS bt\nON\n"
+            + '\nAND\n'.join([
+                (
+                    'delta.' + sql_item_name(c, self.flavor)
+                    + ' = '
+                    + 'bt.' + sql_item_name(c, self.flavor)
+                ) for c in on_cols
+            ])
+        ) if self.flavor not in ('sqlite', 'oracle', 'mysql', 'mariadb', 'duckdb')
+        else (
+            f"CREATE TABLE {joined_table_name} AS\n"
+            + "SELECT "
+            + (', '.join([
+                (
+                    'delta.' + sql_item_name(c, self.flavor)
+                    + " AS " + sql_item_name(c + '_delta', self.flavor)
+                ) for c in delta_cols
+            ]))
+            + ", "
+            + (', '.join([
+                (
+                    'bt.' + sql_item_name(c, self.flavor)
+                    + " AS " + sql_item_name(c + '_backtrack', self.flavor)
+                ) for c in backtrack_cols
+            ]))
+            + f"\nFROM {delta_table_name} delta\n"
+            + f"LEFT OUTER JOIN {backtrack_table_name} bt\nON\n"
+            + '\nAND\n'.join([
+                (
+                    'delta.' + sql_item_name(c, self.flavor)
+                    + ' = '
+                    + 'bt.' + sql_item_name(c, self.flavor)
+                ) for c in on_cols
+            ])
+        )
+    )
+
+    joined_queries.append(create_joined_query)
+
+    joined_success = (
+        all(self.exec_queries(joined_queries, break_on_error=True, debug=debug))
+        if on_cols else True
+    )
+    if not joined_success:
+        self.exec_queries(
+            [
+                drop_new_query,
+                drop_backtrack_query,
+                drop_delta_query,
+                drop_joined_query,
+            ],
+            break_on_error = False,
+            debug = debug,
+        )
+        return False, f"Could not separate new and updated data for {pipe}."
+
+    unseen_queries = []
+    drop_unseen_query = f"DROP TABLE {unseen_table_name}"
+    if on_cols and table_exists(unseen_table_raw, self, debug=debug):
+        unseen_queries.append(drop_unseen_query)
+
+    create_unseen_query = (
+        (
+            "SELECT "
+            + (', '.join([
+                (
+                    sql_item_name(c + '_delta', self.flavor)
+                    + " AS " + sql_item_name(c, self.flavor)
+                ) for c in delta_cols
+            ]))
+            + f"\nINTO {unseen_table_name}\n"
+            + f"\nFROM {joined_table_name} AS joined\n"
+            + f"WHERE "
+            + '\nAND\n'.join([
+                (
+                    sql_item_name(c + '_backtrack', self.flavor) + ' IS NULL'
+                ) for c in delta_cols
+            ])
+        ) if self.flavor not in ('sqlite', 'oracle', 'mysql', 'mariadb', 'duckdb') else (
+            f"CREATE TABLE {unseen_table_name} AS\n"
+            + "SELECT "
+            + (', '.join([
+                (
+                    sql_item_name(c + '_delta', self.flavor)
+                    + " AS " + sql_item_name(c, self.flavor)
+                ) for c in delta_cols
+            ]))
+            + f"\nFROM {joined_table_name} joined\n"
+            + f"WHERE "
+            + '\nAND\n'.join([
+                (
+                    sql_item_name(c + '_backtrack', self.flavor) + ' IS NULL'
+                ) for c in delta_cols
+            ])
+        )
+    )
+
+    unseen_queries.append(create_unseen_query)
+
+    unseen_success = (
+        all(self.exec_queries(unseen_queries, break_on_error=True, debug=debug))
+        if on_cols else True
+    )
+    if not unseen_success:
+        self.exec_queries(
+            [
+                drop_new_query,
+                drop_backtrack_query,
+                drop_delta_query,
+                drop_joined_query,
+                drop_unseen_query,
+            ],
+            break_on_error = False,
+            debug = debug,
+        )
+        return False, f"Could not determine new data for {pipe}."
+    unseen_count = self.value(
+        (
+            "SELECT COUNT(*) FROM "
+            + (unseen_table_name if on_cols else delta_table_name)
+        ), debug = debug,
+    )
+
+    update_queries = []
+    drop_update_query = f"DROP TABLE {update_table_name}"
+    if on_cols and table_exists(update_table_raw, self, debug=debug):
+        update_queries.append(drop_unseen_query)
+
+    create_update_query = (
+        (
+            "SELECT "
+            + (', '.join([
+                (
+                    sql_item_name(c + '_delta', self.flavor)
+                    + " AS " + sql_item_name(c, self.flavor)
+                ) for c in delta_cols
+            ]))
+            + f"\nINTO {update_table_name}"
+            + f"\nFROM {joined_table_name} AS joined\n"
+            + f"WHERE "
+            + '\nAND\n'.join([
+                (
+                    sql_item_name(c + '_backtrack', self.flavor) + ' IS NOT NULL'
+                ) for c in delta_cols
+            ])
+        ) if self.flavor not in ('sqlite', 'oracle', 'mysql', 'mariadb', 'duckdb') else (
+            f"CREATE TABLE {update_table_name} AS\n"
+            + "SELECT "
+            + (', '.join([
+                (
+                    sql_item_name(c + '_delta', self.flavor)
+                    + " AS " + sql_item_name(c, self.flavor)
+                ) for c in delta_cols
+            ]))
+            + f"\nFROM {joined_table_name} joined\n"
+            + f"WHERE "
+            + '\nAND\n'.join([
+                (
+                    sql_item_name(c + '_backtrack', self.flavor) + ' IS NOT NULL'
+                ) for c in delta_cols
+            ])
+        )
+    )
+
+    update_queries.append(create_update_query)
+
+    update_success = (
+        all(self.exec_queries(update_queries, break_on_error=True, debug=debug))
+        if on_cols else True
+    )
+    if not update_success:
+        self.exec_queries(
+            [
+                drop_new_query,
+                drop_backtrack_query,
+                drop_delta_query,
+                drop_joined_query,
+                drop_unseen_query,
+                drop_update_query,
+            ],
+            break_on_error = False,
+            debug = debug,
+        )
+        return False, "Could not determine updated data for {pipe}."
+    update_count = (
+        self.value(f"SELECT COUNT(*) FROM {update_table_name}", debug=debug)
+        if on_cols else 0
+    )
+
+    apply_update_queries = (
+        get_update_queries(
+            pipe.target,
+            update_table_raw,
+            self,
+            on_cols,
+            debug = debug
+        )
+        if on_cols else []
+    )
+
+    apply_unseen_queries = [
+        (
+            f"INSERT INTO {pipe_name}\n"
+            + f"SELECT *\nFROM " + (unseen_table_name if on_cols else delta_table_name)
+        ),
+    ]
+
+    apply_queries = (
+        (apply_unseen_queries if unseen_count > 0 else [])
+        + (apply_update_queries if update_count > 0 else [])
+        + [
+            drop_new_query,
+            drop_backtrack_query,
+            drop_delta_query,
+        ] + (
+            [
+                drop_joined_query,
+                drop_unseen_query,
+                drop_update_query,
+            ] if on_cols else []
+        )
+    )
+    success = all(self.exec_queries(apply_queries, break_on_error=False, debug=debug))
+    msg = (
+        f"Was not able to apply changes to {pipe}."
+        if not success else f"Inserted {unseen_count}, updated {update_count} rows."
+    )
+    return success, msg
+
+
 def get_sync_time(
         self,
         pipe: 'meerschaum.Pipe',
@@ -1120,7 +1747,11 @@ def get_sync_time(
         return None
 
     ASC_or_DESC = "DESC" if newest else "ASC"
-    where = "" if params is None else build_where(params, self)
+    existing_cols = pipe.get_columns_types(debug=debug)
+    valid_params = {}
+    if params is not None:
+        valid_params = {k: v for k, v in params.items() if k in existing_cols}
+    where = "" if not valid_params else build_where(valid_params, self)
     q = f"SELECT {dt}\nFROM {table}{where}\nORDER BY {dt} {ASC_or_DESC}\nLIMIT 1"
     if self.flavor == 'mssql':
         q = f"SELECT TOP 1 {dt}\nFROM {table}{where}\nORDER BY {dt} {ASC_or_DESC}"
@@ -1312,11 +1943,14 @@ def get_pipe_rowcount(
         """
     if params is not None:
         from meerschaum.utils.sql import build_where
-        query += build_where(params, self).replace('WHERE', (
-            'AND' if (begin is not None or end is not None)
-                else 'WHERE'
+        existing_cols = pipe.get_columns_types(debug=debug)
+        valid_params = {k: v for k, v in params.items() if k in existing_cols}
+        if valid_params:
+            query += build_where(valid_params, self).replace('WHERE', (
+                'AND' if (begin is not None or end is not None)
+                    else 'WHERE'
+                )
             )
-        )
         
     result = self.value(query, debug=debug)
     try:
@@ -1418,10 +2052,13 @@ def clear_pipe(
                     stack = False,
                 )
 
-
+    valid_params = {}
+    if params is not None:
+        existing_cols = pipe.get_columns_types(debug=debug)
+        valid_params = {k: v for k, v in params.items() if k in existing_cols}
     clear_query = (
         f"DELETE FROM {pipe_name}\nWHERE 1 = 1\n"
-        + ('  AND ' + build_where(params, self, with_where=False) if params is not None else '')
+        + ('  AND ' + build_where(valid_params, self, with_where=False) if valid_params else '')
         + (
             f'  AND {dt_name} >= ' + dateadd_str(self.flavor, 'day', 0, begin)
             if begin is not None else ''
@@ -1503,7 +2140,7 @@ def get_pipe_columns_types(
 def get_add_columns_queries(
         self,
         pipe: mrsm.Pipe,
-        df: pd.DataFrame,
+        df: Union[pd.DataFrame, Dict[str, str]],
         debug: bool = False,
     ) -> List[str]:
     """
@@ -1514,8 +2151,9 @@ def get_add_columns_queries(
     pipe: mrsm.Pipe
         The pipe to be altered.
 
-    df: pd.DataFrame
+    df: Union[pd.DataFrame, Dict[str, str]]
         The pandas DataFrame which contains new columns.
+        If a dictionary is provided, assume it maps columns to Pandas data types.
 
     Returns
     -------
@@ -1526,7 +2164,10 @@ def get_add_columns_queries(
     from meerschaum.utils.sql import get_pd_type, get_db_type, sql_item_name
     from meerschaum.utils.misc import flatten_list
     table_obj = self.get_pipe_table(pipe, debug=debug)
-    df_cols_types = {col: str(typ) for col, typ in df.dtypes.items()}
+    df_cols_types = (
+        {col: str(typ) for col, typ in df.dtypes.items()}
+        if not isinstance(df, dict) else df
+    )
     db_cols_types = {col: get_pd_type(str(typ.type)) for col, typ in table_obj.columns.items()}
     new_cols = set(df_cols_types) - set(db_cols_types)
     if not new_cols:
@@ -1559,7 +2200,7 @@ def get_add_columns_queries(
 def get_alter_columns_queries(
         self,
         pipe: mrsm.Pipe,
-        df: pd.DataFrame,
+        df: Union[pd.DataFrame, Dict[str, str]],
         debug: bool = False,
     ) -> List[str]:
     """
@@ -1570,8 +2211,9 @@ def get_alter_columns_queries(
     pipe: mrsm.Pipe
         The pipe to be altered.
 
-    df: pd.DataFrame
+    df: Union[pd.DataFrame, Dict[str, str]]
         The pandas DataFrame which may contain altered columns.
+        If a dict is provided, assume it maps columns to Pandas data types.
 
     Returns
     -------
@@ -1584,7 +2226,10 @@ def get_alter_columns_queries(
     from meerschaum.utils.sql import get_pd_type, get_db_type, sql_item_name
     from meerschaum.utils.misc import flatten_list
     table_obj = self.get_pipe_table(pipe, debug=debug)
-    df_cols_types = {col: str(typ) for col, typ in df.dtypes.items()}
+    df_cols_types = (
+        {col: str(typ) for col, typ in df.dtypes.items()}
+        if not isinstance(df, dict) else df
+    )
     db_cols_types = {col: get_pd_type(str(typ.type)) for col, typ in table_obj.columns.items()}
     altered_cols = [
         col for col, typ in df_cols_types.items()

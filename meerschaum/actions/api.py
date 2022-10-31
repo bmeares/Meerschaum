@@ -137,7 +137,7 @@ def _api_start(
     )
     from meerschaum.config._patch import apply_patch_to_config
     from meerschaum.config._environment import get_env_vars
-    from meerschaum.config.static import _static_config, SERVER_ID
+    from meerschaum.config.static import STATIC_CONFIG, SERVER_ID
     from meerschaum.connectors.parse import parse_instance_keys
     from meerschaum.utils.pool import get_pool
     import shutil
@@ -239,25 +239,24 @@ def _api_start(
             pprint(uvicorn_config, stream=sys.stderr, nopretty=nopretty)
         json.dump(uvicorn_config, f)
 
-    MRSM_SERVER_ID = _static_config()['environment']['id']
-    MRSM_CONFIG = _static_config()['environment']['config']
-    MRSM_RUNTIME = _static_config()['environment']['runtime']
-    MRSM_PATCH = _static_config()['environment']['patch']
-    MRSM_ROOT_DIR = _static_config()['environment']['root']
+    MRSM_SERVER_ID = STATIC_CONFIG['environment']['id']
+    MRSM_CONFIG = STATIC_CONFIG['environment']['config']
+    MRSM_RUNTIME = STATIC_CONFIG['environment']['runtime']
+    MRSM_PATCH = STATIC_CONFIG['environment']['patch']
+    MRSM_ROOT_DIR = STATIC_CONFIG['environment']['root']
     env_dict = {
         MRSM_SERVER_ID: SERVER_ID,
         MRSM_RUNTIME: 'api',
-        MRSM_CONFIG: apply_patch_to_config(
-            get_config('system'),
-            {'system': {'api': {'uvicorn': uvicorn_config}}},
-        ),
     }
-    if MRSM_PATCH in os.environ:
-        env_dict[MRSM_PATCH] = os.environ[MRSM_PATCH]
     for env_var in get_env_vars():
         if env_var in env_dict:
             continue
         env_dict[env_var] = os.environ[env_var]
+
+    env_dict[MRSM_CONFIG] = apply_patch_to_config(
+        env_dict.get(MRSM_CONFIG, {}),
+        {'system': {'api': {'uvicorn': uvicorn_config}}},
+    )
 
     env_text = ''
     for key, val in env_dict.items():
