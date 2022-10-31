@@ -2092,6 +2092,8 @@ def get_pipe_table(
 
     """
     from meerschaum.utils.sql import get_sqlalchemy_table
+    if not pipe.exists(debug=debug):
+        return None
     return get_sqlalchemy_table(pipe.target, connector=self, debug=debug, refresh=True)
 
 
@@ -2122,6 +2124,8 @@ def get_pipe_columns_types(
     }
     >>> 
     """
+    if not pipe.exists(debug=debug):
+        return {}
     table_columns = {}
     try:
         pipe_table = self.get_pipe_table(pipe, debug=debug)
