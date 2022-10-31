@@ -419,7 +419,7 @@ def dateadd_str(
         dt_format = 'YYYY-MM-DD HH24:MI:SS.FF'
         _begin = f"'{begin}'" if begin_time else begin
         da = (
-            f"TO_TIMESTAMP({_begin}, '{dt_format}')"
+            (f"TO_TIMESTAMP({_begin}, '{dt_format}')" if begin_time else _begin)
             + (f" + INTERVAL '{number}' {datepart}" if number != 0 else "")
         )
     return da
@@ -579,8 +579,6 @@ def oracle_capital(s: str) -> str:
     Capitalize the string of an item on an Oracle database.
     """
     return s
-    #  return s.upper()
-    #  return s.upper() if s[0].isalpha() else s
 
 
 def truncate_item_name(item: str, flavor: str) -> str:
@@ -617,6 +615,9 @@ def build_where(
     ----------
     params: Dict[str, Any]:
         The keywords dictionary to convert into a WHERE clause.
+        If a value is a string which begins with an underscore, negate that value
+        (e.g. `!=` instead of `=` or `NOT IN` instead of `IN`).
+        A value of `_None` will be interpreted as `IS NOT NULL`.
 
     connector: Optional[meerschaum.connectors.sql.SQLConnector], default None:
         The Meerschaum SQLConnector that will be executing the query.
@@ -638,6 +639,9 @@ def build_where(
         "foo" IN ('1', '2', '3')
     ```
     """
+    from meerschaum.config.static import STATIC_CONFIG
+    negation_prefix = STATIC_CONFIG['system']['fetch_pipes_keys']['negation_prefix']
+
     if connector is None:
         from meerschaum import get_connector
         connector = get_connector('sql')
@@ -646,9 +650,16 @@ def build_where(
     for key, value in params.items():
         _key = sql_item_name(key, connector.flavor)
         ### search across a list (i.e. IN syntax)
-        if isinstance(value, list):
+        if isinstance(value, (list, tuple)):
+            includes = [item for item in value if not str(item).startswith(negation_prefix)]
+            excludes = [item for item in value if str(item).startswith(negation_prefix)]
             where += f"{leading_and}{_key} IN ("
-            for item in value:
+            for item in includes:
+                where += f"'{item}', "
+            where = where[:-2] + ")"
+            where += f"{leading_and}{_key} NOT IN ("
+            for item in excludes:
+                item = str(item)[len(negation_prefix):]
                 where += f"'{item}', "
             where = where[:-2] + ")"
             continue
@@ -659,7 +670,16 @@ def build_where(
             where += (f"{leading_and}CAST({_key} AS TEXT) = '" + json.dumps(value) + "'")
             continue
 
-        where += f"{leading_and}{_key} " + ("IS NULL" if value is None else f"= '{value}'")
+        eq_sign = '='
+        is_null = 'IS NULL'
+        if str(value).startswith(negation_prefix):
+            value = str(value)[len(negation_prefix):]
+            eq_sign = '!='
+            if value == 'None':
+                value = None
+                is_null = 'IS NOT NULL'
+        where += f"{leading_and}{_key} " + (is_null if value is None else f"{eq_sign} '{value}'")
+
     if len(where) > 1:
         where = ("\nWHERE\n    " if with_where else '') + where[len(leading_and):]
     return where
@@ -738,13 +758,14 @@ def get_sqlalchemy_table(
         connector.metadata.clear()
     tables = get_tables(mrsm_instance=connector, debug=debug)
     sqlalchemy = attempt_import('sqlalchemy')
-    if refresh or str(table) not in tables:
-        tables[str(table)] = sqlalchemy.Table(
-            str(table),
+    truncated_table_name = truncate_item_name(str(table), connector.flavor)
+    if refresh or truncated_table_name not in tables:
+        tables[truncated_table_name] = sqlalchemy.Table(
+            truncated_table_name,
             connector.metadata,
             autoload_with = connector.engine
         )
-    return tables[str(table)]
+    return tables[truncated_table_name]
 
 
 _checked_sqlite_version = None

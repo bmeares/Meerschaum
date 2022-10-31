@@ -115,6 +115,7 @@ def sync(
     from meerschaum.plugins import Plugin
     from meerschaum.utils.formatting import get_console
     from meerschaum.utils.venv import Venv
+    from meerschaum.config import get_config
     import datetime
     import time
     if (callback is not None or error_callback is not None) and blocking:
@@ -131,7 +132,6 @@ def sync(
         'callback': callback, 'error_callback': error_callback, 'sync_chunks': sync_chunks,
         'chunksize': chunksize,
     })
-
 
     def _sync(
         p: 'meerschaum.Pipe',
@@ -169,6 +169,17 @@ def sync(
                     return False, msg
             except Exception as e:
                 return False, f"Unable to create the connector for {p}."
+
+            ### Sync in place if this is a SQL pipe.
+            if (
+                str(self.connector) == str(self.instance_connector)
+                and 
+                hasattr(self.instance_connector, 'sync_pipe_inplace')
+                and
+                get_config('system', 'experimental', 'inplace_sync')
+            ):
+                return self.instance_connector.sync_pipe_inplace(p, debug=debug, **kw)
+
 
             ### Activate and invoke `sync(pipe)` for plugin connectors with `sync` methods.
             try:

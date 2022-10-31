@@ -1,8 +1,55 @@
 # 🪵 Changelog
 
-## 1.3.x Releases
+## 1.4.x Releases
 
 This is the current release cycle, so stay tuned for future releases!
+
+### v1.4.0
+
+- **Added in-place syncing for SQL pipes.**  
+  This feature is big (enough to warrant a new point release). When pipes with the same instance connector and data source connector are synced, the method `sync_pipe_inplace()` is invoked. For SQL pipes, this means the entire syncing process will now happen entirely in SQL, which can lead to massive performance improvements.
+
+  ```python
+  import meerschaum as mrsm
+  import pandas as pd
+
+  conn = mrsm.get_connector('sql', 'local')
+  conn.to_sql(pd.DataFrame([{'a': 1}]), 'foo')
+  
+  pipe = mrsm.Pipe(
+      "sql:local", "foo",
+      instance = "sql:local",
+      parameters = {
+          "query": "SELECT * FROM foo"
+      },
+  )
+  ### This will no longer load table data into memory.
+  pipe.sync()
+  ```
+
+  To disable this behavior, run the command `edit config system` and set the value under the keys `experimental:inplace_sync` to `false`.
+
+- **Added negation to `--params`.**  
+  The [`build_where()`](https://docs.meerschaum.io/utils/sql.html#meerschaum.utils.sql.build_where) function now allows you to negate certain values when prefixed with an underscore (`_`):
+
+  ```bash
+  ### Show recent data, excluding where `id` equals `2`.
+  mrsm show data --params id:_2
+  ```
+
+- **Added `--params` to SQL pipes' queries.**  
+  Specifying parameters when syncing SQL pipes will add those constraints to the fetch stage.
+
+- **Skip invalid parameters in `--params`.**  
+  If a column does not exist in a pipe's table, the value will be ignored in `--params`.
+
+- **Fixed environment issue when starting the Web API with `gunicorn`.**
+- **Added an emoji to the SQL Query option of the web console.**
+- **Fixed an edge case with data type enforcement.**
+
+## 1.3.x Releases
+
+The 1.3.x series brought a tremendous amount of new features and stability improvements. Read below to see everything that was introduced!
 
 ### v1.3.13
 
