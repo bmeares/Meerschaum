@@ -83,18 +83,29 @@ def test_drop_and_sync_stress(flavor: str):
         success, msg = pipe.sync(debug=debug)
         assert success, msg
 
-#  @pytest.mark.skip(reason="")
 @pytest.mark.parametrize("flavor", list(remote_pipes.keys()))
 def test_drop_and_sync_remote(flavor: str):
-    pipes = remote_pipes[flavor]
-    for pipe in pipes:
-        #  pipe.drop(debug=debug)
-        parent_pipe = Pipe('plugin:stress', 'test', instance=pipe.connector)
-        if not parent_pipe.exists(debug=debug):
-            success, msg = parent_pipe.sync(debug=debug)
-            assert success, msg
-        success, msg = pipe.sync(debug=debug)
-        assert success, msg
+    pipe = None
+    for p in remote_pipes[flavor]:
+        if str(p.connector) == str(p.instance_connector):
+            pipe = p
+            break
+    assert pipe is not None
+    pipe.drop(debug=debug)
+    parent_pipe = Pipe('plugin:stress', 'test', instance=pipe.connector)
+    parent_pipe.drop(debug=debug)
+    success, msg = parent_pipe.sync(debug=debug)
+    assert success, msg
+    success, msg = pipe.sync(debug=debug)
+    assert success, msg
+    success, msg = parent_pipe.sync(
+        [{'datetime': '2100-01-01', 'id': 1, 'foo': 'bar'}],
+        debug = debug,
+    )
+    assert success, msg
+    success, msg = pipe.sync(debug=debug)
+    assert len(pipe.get_columns_types(debug=debug)) == 4
+
 
 @pytest.mark.parametrize("flavor", list(all_pipes.keys()))
 def test_sync_engine(flavor: str):

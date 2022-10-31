@@ -173,7 +173,7 @@ def accordion_items_from_pipe(
         '📔 Parameters': 'parameters',
     }
     if pipe.connector_keys.startswith('sql:'):
-        items_titles['SQL Query'] = 'sql'
+        items_titles['📃 SQL Query'] = 'sql'
     items_titles.update({
         '🗃️ Recent Data': 'recent-data',
         '📝 Sync Documents': 'sync-data',
@@ -278,14 +278,14 @@ def accordion_items_from_pipe(
             id = {'type': 'parameters-as-yaml-button', 'index': json.dumps(pipe.meta)},
             color = 'link',
             size = 'sm',
-            style = {'text-decoration': 'none', 'margin-left': '10px'},
+            style = {'text-decoration': 'none'},
         )
         as_json_button = dbc.Button(
             "JSON",
             id = {'type': 'parameters-as-json-button', 'index': json.dumps(pipe.meta)},
             color = 'link',
             size = 'sm',
-            style = {'text-decoration': 'none'},
+            style = {'text-decoration': 'none', 'margin-left': '10px'},
         )
         items_bodies['parameters'] = html.Div([
             parameters_editor,

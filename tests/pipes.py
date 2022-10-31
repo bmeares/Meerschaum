@@ -32,8 +32,6 @@ for _label, instance in conns.items():
     all_pipes[_label].append(stress_pipe)
     stress_pipes[_label].append(stress_pipe)
     for __label, conn in conns.items():
-        if _label == __label:
-            continue
         remote_pipe = Pipe(
             str(conn), 'test', None,
             mrsm_instance=instance,
