@@ -4,7 +4,7 @@
 
 This is the current release cycle, so stay tuned for future releases!
 
-### v1.4.1
+### v1.4.0 – v1.4.4
 
 - **Added in-place syncing for SQL pipes.**  
   This feature is big (enough to warrant a new point release). When pipes with the same instance connector and data source connector are synced, the method `sync_pipe_inplace()` is invoked. For SQL pipes, this means the entire syncing process will now happen entirely in SQL, which can lead to massive performance improvements.
@@ -27,7 +27,9 @@ This is the current release cycle, so stay tuned for future releases!
   pipe.sync()
   ```
 
-  To disable this behavior, run the command `edit config system` and set the value under the keys `experimental:inplace_sync` to `false`.
+  This applies even when the source table's schema changes, just like the dynamic columns feature added in v1.3.0.
+
+  > *To disable this behavior, run the command `edit config system` and set the value under the keys `experimental:inplace_sync` to `false`.*
 
 - **Added negation to `--params`.**  
   The [`build_where()`](https://docs.meerschaum.io/utils/sql.html#meerschaum.utils.sql.build_where) function now allows you to negate certain values when prefixed with an underscore (`_`):
@@ -46,6 +48,7 @@ This is the current release cycle, so stay tuned for future releases!
 - **Fixed environment issue when starting the Web API with `gunicorn`.**
 - **Added an emoji to the SQL Query option of the web console.**
 - **Fixed an edge case with data type enforcement.**
+- **Other bugfixes**
 
 ## 1.3.x Releases
 

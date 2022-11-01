@@ -10,36 +10,36 @@ import os
 from meerschaum.config.stack import db_host, db_user, db_pass, db_port, db_base
 
 default_datasource = {
-    'apiVersion' : 1,
-    'datasources' : [
+    'apiVersion': 1,
+    'datasources': [
         {
-            'name' : 'Meerschaum Main',
-            'type' : 'postgres',
-            'jsonData' : {
-                'sslmode' : 'disable',
-                'postgresVersion' : 1400,
-                'timescaledb' : True,
+            'name': 'Meerschaum Main',
+            'type': 'postgres',
+            'jsonData': {
+                'sslmode': 'disable',
+                'postgresVersion': 1400,
+                'timescaledb': True,
             },
-            'user' : db_user,
-            'secureJsonData' : {
-                'password' : db_pass,
+            'user': db_user,
+            'secureJsonData': {
+                'password': db_pass,
             },
-            'database' : db_base,
-            'url' : db_host + ':' + str(db_port),
-            'isDefault' : True,
-            'editable' : True,
+            'database': db_base,
+            'url': db_host + ':5432',
+            'isDefault': True,
+            'editable': True,
         }
     ],
 }
 
 default_dashboard = {
-    'apiVersion' : 1,
-    'providers' : [
+    'apiVersion': 1,
+    'providers': [
         {
-            'name' : 'Default',
-            'folder' : 'Meerschaum Dashboards',
-            'options' : {
-                'path' : '/etc/grafana/provisioning/dashboards',
+            'name': 'Default',
+            'folder': 'Meerschaum Dashboards',
+            'options': {
+                'path': '/etc/grafana/provisioning/dashboards',
             },
         }
     ],
@@ -70,4 +70,3 @@ def edit_grafana(
         'dashboard.yaml' : GRAFANA_DASHBOARD_PATH,
     }
     return general_edit_config(action=action, files=files, default='datasource', debug=debug)
-
