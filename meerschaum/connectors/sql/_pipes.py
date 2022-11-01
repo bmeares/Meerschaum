@@ -1407,7 +1407,8 @@ def sync_pipe_inplace(
             + (
                 ', '.join([
                     f"COALESCE(new.{sql_item_name(col, self.flavor)}, "
-                    + f"'{get_null_replacement(typ)}') AS " + sql_item_name(col, self.flavor)
+                    + f"{get_null_replacement(typ, self.flavor)}) AS "
+                    + sql_item_name(col, self.flavor)
                     for col, typ in new_cols.items()
                 ])
             )
@@ -1417,11 +1418,11 @@ def sync_pipe_inplace(
             + f"LEFT OUTER JOIN {backtrack_table_name} AS old\nON\n"
             + '\nAND\n'.join([
                 (
-                    'COALESCE(new.' + sql_item_name(c, self.flavor) + ", '"
-                    + get_null_replacement(typ) + "') "
+                    'COALESCE(new.' + sql_item_name(c, self.flavor) + ", "
+                    + get_null_replacement(typ, self.flavor) + ") "
                     + ' = '
-                    + 'COALESCE(old.' + sql_item_name(c, self.flavor) + ", '"
-                    + get_null_replacement(typ) + "') "
+                    + 'COALESCE(old.' + sql_item_name(c, self.flavor) + ", "
+                    + get_null_replacement(typ, self.flavor) + ") "
                 ) for c, typ in new_cols.items()
             ])
             + "\nWHERE\n"
@@ -1443,7 +1444,8 @@ def sync_pipe_inplace(
             + (
                 ', '.join([
                     f"COALESCE(new.{sql_item_name(col, self.flavor)}, "
-                    + f"'{get_null_replacement(typ)}') AS " + sql_item_name(col, self.flavor)
+                    + f"{get_null_replacement(typ, self.flavor)}) AS "
+                    + sql_item_name(col, self.flavor)
                     for col, typ in new_cols.items()
                 ])
             )
@@ -1452,11 +1454,11 @@ def sync_pipe_inplace(
             + f"LEFT OUTER JOIN {backtrack_table_name} old\nON\n"
             + '\nAND\n'.join([
                 (
-                    'COALESCE(new.' + sql_item_name(c, self.flavor) + ", '"
-                    + get_null_replacement(typ) + "') "
+                    'COALESCE(new.' + sql_item_name(c, self.flavor) + ", "
+                    + get_null_replacement(typ, self.flavor) + ") "
                     + ' = '
-                    + 'COALESCE(old.' + sql_item_name(c, self.flavor) + ", '"
-                    + get_null_replacement(typ) + "') "
+                    + 'COALESCE(old.' + sql_item_name(c, self.flavor) + ", "
+                    + get_null_replacement(typ, self.flavor) + ") "
                 ) for c, typ in new_cols.items()
             ])
             + "\nWHERE\n"
@@ -1524,10 +1526,10 @@ def sync_pipe_inplace(
             + '\nAND\n'.join([
                 (
                     'COALESCE(delta.' + sql_item_name(c, self.flavor)
-                    + ", '" + get_null_replacement(typ) + "')"
+                    + ", " + get_null_replacement(typ, self.flavor) + ")"
                     + ' = '
                     + 'COALESCE(bt.' + sql_item_name(c, self.flavor)
-                    + ", '" + get_null_replacement(typ) + "')"
+                    + ", " + get_null_replacement(typ, self.flavor) + ")"
                 ) for c, typ in on_cols.items()
             ])
         ) if self.flavor not in ('sqlite', 'oracle', 'mysql', 'mariadb', 'duckdb')
@@ -1552,10 +1554,10 @@ def sync_pipe_inplace(
             + '\nAND\n'.join([
                 (
                     'COALESCE(delta.' + sql_item_name(c, self.flavor)
-                    + ", '" + get_null_replacement(typ) + "')"
+                    + ", " + get_null_replacement(typ, self.flavor) + ")"
                     + ' = '
                     + 'COALESCE(bt.' + sql_item_name(c, self.flavor)
-                    + ", '" + get_null_replacement(typ) + "')"
+                    + ", " + get_null_replacement(typ, self.flavor) + ")"
                 ) for c, typ in on_cols.items()
             ])
         )
@@ -1591,7 +1593,7 @@ def sync_pipe_inplace(
             + (', '.join([
                 (
                     "CASE\n    WHEN " + sql_item_name(c + '_delta', self.flavor)
-                    + " != '" + get_null_replacement(typ) + "'"
+                    + " != " + get_null_replacement(typ, self.flavor) 
                     + " THEN " + sql_item_name(c + '_delta', self.flavor)
                     + "\n    ELSE NULL\nEND "
                     + " AS " + sql_item_name(c, self.flavor)
@@ -1617,7 +1619,8 @@ def sync_pipe_inplace(
             + (', '.join([
                 (
                     "CASE\n    WHEN " + sql_item_name(c + '_delta', self.flavor)
-                    + " != '" + get_null_replacement(typ) + "'"
+                    + " != "
+                    + get_null_replacement(typ, self.flavor)
                     + " THEN " + sql_item_name(c + '_delta', self.flavor)
                     + "\n    ELSE NULL\nEND "
                     + " AS " + sql_item_name(c, self.flavor)
@@ -1676,7 +1679,7 @@ def sync_pipe_inplace(
             + (', '.join([
                 (
                     "CASE\n    WHEN " + sql_item_name(c + '_delta', self.flavor)
-                    + " != '" + get_null_replacement(typ) + "'"
+                    + " != " + get_null_replacement(typ, self.flavor)
                     + " THEN " + sql_item_name(c + '_delta', self.flavor)
                     + "\n    ELSE NULL\nEND "
                     + " AS " + sql_item_name(c, self.flavor)
@@ -1685,7 +1688,7 @@ def sync_pipe_inplace(
             + f"\nINTO {update_table_name}"
             + f"\nFROM {joined_table_name} AS joined\n"
             + f"WHERE "
-            + '\nAND\n'.join([
+            + '\nOR\n'.join([
                 (
                     sql_item_name(c + '_backtrack', self.flavor) + ' IS NOT NULL'
                 ) for c in delta_cols
@@ -1696,7 +1699,8 @@ def sync_pipe_inplace(
             + (', '.join([
                 (
                     "CASE\n    WHEN " + sql_item_name(c + '_delta', self.flavor)
-                    + " != '" + get_null_replacement(typ) + "'"
+                    + " != "
+                    + get_null_replacement(typ, self.flavor)
                     + " THEN " + sql_item_name(c + '_delta', self.flavor)
                     + "\n    ELSE NULL\nEND "
                     + " AS " + sql_item_name(c, self.flavor)
@@ -1704,7 +1708,7 @@ def sync_pipe_inplace(
             ]))
             + f"\nFROM {joined_table_name} joined\n"
             + f"WHERE "
-            + '\nAND\n'.join([
+            + '\nOR\n'.join([
                 (
                     sql_item_name(c + '_backtrack', self.flavor) + ' IS NOT NULL'
                 ) for c in delta_cols

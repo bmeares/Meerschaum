@@ -906,7 +906,7 @@ def get_db_type(pd_type: str, flavor: str = 'default') -> str:
     return flavor_types.get(flavor, default_flavor_type)
 
 
-def get_null_replacement(typ: str) -> str:
+def get_null_replacement(typ: str, flavor: str) -> str:
     """
     Return a value that may temporarily be used in place of NULL for this type.
 
@@ -922,14 +922,10 @@ def get_null_replacement(typ: str) -> str:
     """
     if 'int' in typ.lower():
         return '-987654321'
-    if 'char' in typ.lower():
-        return '<MRSM_NULL>'
     if 'bool' in typ.lower():
         return '0'
-    if 'time' in typ.lower():
-        return '1900-01-01'
-    if 'object' in typ.lower():
-        return '<MRSM_NULL>'
+    if 'time' in typ.lower() or 'date' in typ.lower():
+        return dateadd_str(flavor=flavor, begin='1900-01-01')
     if 'float' in typ.lower():
         return '-987654321.0'
-    return 'None'
+    return ('n' if flavor == 'oracle' else '') + "'<MRSM_NULL>'"
