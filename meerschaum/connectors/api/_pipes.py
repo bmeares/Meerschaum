@@ -225,7 +225,7 @@ def sync_pipe(
 
     for i, c in enumerate(chunks):
         if debug:
-            dprint(f"Posting chunk ({i + 1} / {_chunksize}) to {r_url}...")
+            dprint(f"Posting chunk ({i + 1} / {len(chunks)}) to {r_url}...")
         json_str = get_json_str(c)
 
         try:
@@ -301,8 +301,8 @@ def delete_pipe(
 def get_pipe_data(
         self,
         pipe: meerschaum.Pipe,
-        begin: Optional[datetime.datetime] = None,
-        end: Optional[datetime.datetime] = None,
+        begin: Union[str, datetime.datetime, None] = None,
+        end: Union[str, datetime.datetime, None] = None,
         params: Optional[Dict[str, Any]] = None,
         as_chunks: bool = False,
         debug: bool = False,

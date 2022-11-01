@@ -95,16 +95,38 @@ def test_drop_and_sync_remote(flavor: str):
     parent_pipe = Pipe('plugin:stress', 'test', instance=pipe.connector)
     parent_pipe.drop(debug=debug)
     success, msg = parent_pipe.sync(debug=debug)
+    parent_len = parent_pipe.get_rowcount(debug=debug)
     assert success, msg
     success, msg = pipe.sync(debug=debug)
     assert success, msg
+    child_len = pipe.get_rowcount(debug=debug)
+    assert parent_len == child_len
+
     success, msg = parent_pipe.sync(
-        [{'datetime': '2100-01-01', 'id': 1, 'foo': 'bar'}],
+        [{'datetime': '2100-01-01', 'id': 999, 'foo': 'bar'}],
         debug = debug,
     )
     assert success, msg
+    parent_len2 = parent_pipe.get_rowcount(debug=debug)
+    assert parent_len2 == (parent_len + 1)
     success, msg = pipe.sync(debug=debug)
     assert len(pipe.get_columns_types(debug=debug)) == 4
+    child_len2 = pipe.get_rowcount(debug=debug)
+    assert parent_len2 == child_len2
+    success, msg = parent_pipe.sync(
+        [{'datetime': '2100-01-01', 'id': 999, 'foo': 'baz'}],
+        debug = debug,
+    )
+    assert success, msg
+    parent_len3 = parent_pipe.get_rowcount(debug=debug)
+    assert parent_len2 == parent_len3
+    success, msg = pipe.sync(debug=debug, begin='2020-01-01')
+    assert success, msg
+    child_len3 = pipe.get_rowcount(debug=debug)
+    assert child_len3 == parent_len3
+    df = pipe.get_data(params={'id': 999}, debug=debug)
+    assert len(df) == 1
+    assert df.to_dict(orient='records')[0]['foo'] == 'baz'
 
 
 @pytest.mark.parametrize("flavor", list(all_pipes.keys()))

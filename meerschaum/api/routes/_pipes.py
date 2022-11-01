@@ -332,8 +332,8 @@ def get_pipe_data(
         connector_keys: str,
         metric_key: str,
         location_key: str,
-        begin: datetime.datetime = None,
-        end: datetime.datetime = None,
+        begin: str = None,
+        end: str = None,
         params: Optional[str] = None,
         orient: str = 'records',
         curr_user = (
