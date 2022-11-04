@@ -1332,7 +1332,7 @@ def sync_pipe_inplace(
             warn(f"Failed to alter columns for {pipe}.")
 
     if not check_existing:
-        new_count = self.value(f"SELECT COUNT(*) FROM {new_count}", debug=debug)
+        new_count = self.value(f"SELECT COUNT(*) FROM {new_table_name}", debug=debug)
         insert_queries = [
             (
                 f"INSERT INTO {pipe_name}\n"

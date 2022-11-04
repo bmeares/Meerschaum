@@ -639,8 +639,16 @@ def build_where(
         "foo" IN ('1', '2', '3')
     ```
     """
+    import json
     from meerschaum.config.static import STATIC_CONFIG
+    from meerschaum.utils.warnings import warn
     negation_prefix = STATIC_CONFIG['system']['fetch_pipes_keys']['negation_prefix']
+    params_json = json.dumps(params)
+    bad_words = ['drop', '--', ';']
+    for word in bad_words:
+        if word in params_json.lower():
+            warn(f"Aborting build_where() due to possible SQL injection.")
+            return ''
 
     if connector is None:
         from meerschaum import get_connector
@@ -653,15 +661,19 @@ def build_where(
         if isinstance(value, (list, tuple)):
             includes = [item for item in value if not str(item).startswith(negation_prefix)]
             excludes = [item for item in value if str(item).startswith(negation_prefix)]
-            where += f"{leading_and}{_key} IN ("
-            for item in includes:
-                where += f"'{item}', "
-            where = where[:-2] + ")"
-            where += f"{leading_and}{_key} NOT IN ("
-            for item in excludes:
-                item = str(item)[len(negation_prefix):]
-                where += f"'{item}', "
-            where = where[:-2] + ")"
+            if includes:
+                where += f"{leading_and}{_key} IN ("
+                for item in includes:
+                    quoted_item = str(item).replace("'", "''")
+                    where += f"'{quoted_item}', "
+                where = where[:-2] + ")"
+            if excludes:
+                where += f"{leading_and}{_key} NOT IN ("
+                for item in excludes:
+                    quoted_item = str(item).replace("'", "''")
+                    item = str(item)[len(negation_prefix):]
+                    where += f"'{quoted_item}', "
+                where = where[:-2] + ")"
             continue
 
         ### search a dictionary
@@ -678,7 +690,11 @@ def build_where(
             if value == 'None':
                 value = None
                 is_null = 'IS NOT NULL'
-        where += f"{leading_and}{_key} " + (is_null if value is None else f"{eq_sign} '{value}'")
+        quoted_value = str(value).replace("'", "''")
+        where += (
+            f"{leading_and}{_key} "
+            + (is_null if value is None else f"{eq_sign} '{quoted_value}'")
+        )
 
     if len(where) > 1:
         where = ("\nWHERE\n    " if with_where else '') + where[len(leading_and):]
