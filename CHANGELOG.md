@@ -4,7 +4,7 @@
 
 This is the current release cycle, so stay tuned for future releases!
 
-### v1.4.5 – v1.4.7
+### v1.4.5 – v1.4.8
 
 - **Bugfixes and stability improvements.**  
   These versions included several bugfixes, such as patching `--skip-check-existing` for in-place syncs and fixing the behavior of `--params` ([`build_where()`](https://docs.meerschaum.io/utils/sql.html#meerschaum.utils.sql.build_where)).

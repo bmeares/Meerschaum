@@ -17,9 +17,10 @@
   }
 }
 </style>
+
 # 📥 Syncing
 
-Meerschaum efficiently syncs immutable time-series data, such as IoT sensor data streams. The syncing process consists of three basic stages, similar to ETL: **fetch**, **filter**, and **insert**.
+Meerschaum efficiently syncs immutable time-series data, such as IoT sensor data streams. The syncing process consists of three basic stages, similar to ETL: **fetch**, **filter**, and **upsert**.
 
 !!! abstract "Want to read more?"
     I wrote my [master's thesis](https://meerschaum.io/files/pdf/thesis.pdf) on comparing different fetch strategies and came across some intriguing results. [Here are the presentation slides](https://meerschaum.io/files/pdf/slides.pdf) which summarize my findings.
@@ -28,7 +29,7 @@ Meerschaum efficiently syncs immutable time-series data, such as IoT sensor data
     <asciinema-player src="/assets/casts/sync-pipes.cast" preload="true" rows="37"></asciinema-player>
 
 ## Stages
-The primary reason for syncing in this way is to take advantage of the properties of immutable time-series data to minimize the stress imposed on remote source databases.
+The primary reason for syncing in this way is to take advantage of the properties of time-series data to minimize the stress imposed on remote source databases.
 
 ### **Fetch** (*Extract* and *Transform*)  
 This is where the real time-series optimizations come into play. When syncing a SQL pipe, the definition sub-query is executed with additional filtering in the `WHERE` clause to only fetch the newest data.
@@ -37,15 +38,15 @@ For example, if the definition of a pipe is `#!sql SELECT * FROM remote_table`, 
 
 ```sql
 WITH definition AS (
-  SELECT * FROM remote_table
+  SELECT *
+  FROM remote_table
 )
-SELECT DISTINCT *
-FROM
-  definition
+SELECT *
+FROM definition
 WHERE
   definition.datetime >= CAST(
     '2021-06-23 14:52:00' AS TIMESTAMP
-  ) + INTERVAL '0 minute'
+  )
 ```
 
 !!! question "How does fetch work?"
@@ -91,7 +92,7 @@ After fetching remote data, the difference is taken to remove duplicate rows. Th
     To skip the filter stage, you can use the `--skip-check-existing` flag.
 
 
-### Insert (*Load*)
+### Upsert (*Load*)
 
 Once data are fetched and filtered, they are inserted into the table of the corresponding [Meerschaum instance](/reference/connectors/#instances-and-repositories). Depending on the type of instance connector, the data may be bulk uploaded (for TimescaleDB and PostgreSQL), inserted into a table, or posted to an API endpoint.
 
