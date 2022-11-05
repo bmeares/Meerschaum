@@ -10,7 +10,7 @@ This is so switching between PyYAML and ruamel.yaml is smoother.
 
 from meerschaum.utils.misc import filter_keywords
 from meerschaum.utils.packages import attempt_import, all_packages, _import_module
-from meerschaum.utils.warnings import error
+from meerschaum.utils.warnings import error, warn
 from meerschaum.utils.threading import Lock
 
 _lib = None
@@ -55,6 +55,7 @@ class yaml:
             return _yaml.load(*args, **filter_keywords(_yaml.load, **kw))
         return _yaml.safe_load(*args, **filter_keywords(_yaml.safe_load, **kw))
 
+
     @staticmethod
     def load(*args, **kw):
         """
@@ -70,6 +71,7 @@ class yaml:
         ):
             _args += [_yaml.Loader]
         return _yaml.load(*_args, **filter_keywords(_yaml.load, **kw))
+
 
     @staticmethod
     def dump(data, stream=None, **kw):

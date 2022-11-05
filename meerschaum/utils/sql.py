@@ -143,6 +143,7 @@ DB_TO_PD_DTYPES = {
     'substrings': {
         'CHAR': 'object',
         'TIMESTAMP': 'datetime64[ns]',
+        'TIME': 'datetime64[ns]',
         'DATE': 'datetime64[ns]',
         'DOUBLE': 'float64',
         'INT': 'Int64',
@@ -670,8 +671,8 @@ def build_where(
             if excludes:
                 where += f"{leading_and}{_key} NOT IN ("
                 for item in excludes:
-                    quoted_item = str(item).replace("'", "''")
                     item = str(item)[len(negation_prefix):]
+                    quoted_item = str(item).replace("'", "''")
                     where += f"'{quoted_item}', "
                 where = where[:-2] + ")"
             continue
