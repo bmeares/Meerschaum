@@ -116,13 +116,15 @@ class Plugin:
             self._module = import_plugins(str(self), warn=False)
         return self._module
 
+
     @property
     def __file__(self) -> Union[str, None]:
         """
         Return the file path (str) of the plugin if it exists, otherwise `None`.
         """
-        if '_module' in self.__dict__:
+        if self.__dict__.get('_module', None) is not None:
             return self.module.__file__
+
         potential_dir = PLUGINS_RESOURCES_PATH / self.name
         if (
             potential_dir.exists()
