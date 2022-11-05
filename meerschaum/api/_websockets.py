@@ -43,4 +43,3 @@ async def websocket_endpoint(
         except fastapi.WebSocketDisconnect:
             del websockets[session_id]
             break
-
