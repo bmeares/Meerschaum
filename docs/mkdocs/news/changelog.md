@@ -4,31 +4,31 @@
 
 This is the current release cycle, so stay tuned for future releases!
 
-  ### v1.4.9
+### v1.4.9
 
-  - **Fixed in-place syncs for aggregate queries.**  
-    In-place SQL syncs which use aggregation functions are now handled correctly. This version addresses differences in column types between backtrack and new data. For example, the following query will now be correctly synced:
+- **Fixed in-place syncs for aggregate queries.**  
+  In-place SQL syncs which use aggregation functions are now handled correctly. This version addresses differences in column types between backtrack and new data. For example, the following query will now be correctly synced:
 
-    ```sql
-    WITH days_src AS (
-      SELECT *, DATE_TRUNC('day', "datetime") AS days
-      FROM plugin_stress_test
-    )
-    SELECT days, AVG(val) AS avg_value
-    FROM days_src
-    GROUP BY days
-    ```
+  ```sql
+  WITH days_src AS (
+    SELECT *, DATE_TRUNC('day', "datetime") AS days
+    FROM plugin_stress_test
+  )
+  SELECT days, AVG(val) AS avg_value
+  FROM days_src
+  GROUP BY days
+  ```
 
-  - **Activate virtual environments for custom instance connectors.**  
-    All pipe methods now activate virtual environments for custom instance connectors.
+- **Activate virtual environments for custom instance connectors.**  
+  All pipe methods now activate virtual environments for custom instance connectors.
 
-  - **Improved database connection performance.**  
-    Cold connections to a SQL database have been sped up by replacing `sqlalchemy_utils` with handwritten logic (JSON for PostgreSQL-like and SQLite).
+- **Improved database connection performance.**  
+  Cold connections to a SQL database have been sped up by replacing `sqlalchemy_utils` with handwritten logic (JSON for PostgreSQL-like and SQLite).
 
-  - **Fixed an issue with virtual environment verification in a portable environment.**  
-    The portable build has been updated to Python 3.9.15, and this patch includes a check to determine the known `site-package` path for a virtual environment of `None` instead of relying on the default user `site-packages` directory.
+- **Fixed an issue with virtual environment verification in a portable environment.**  
+  The portable build has been updated to Python 3.9.15, and this patch includes a check to determine the known `site-package` path for a virtual environment of `None` instead of relying on the default user `site-packages` directory.
 
-  - **Fixed some environment warnings when starting the API**
+- **Fixed some environment warnings when starting the API**
 
 ### v1.4.5 – v1.4.8
 
