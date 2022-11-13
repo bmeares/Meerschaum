@@ -45,12 +45,12 @@ def get_tables(
     from meerschaum.utils.warnings import error
     from meerschaum.connectors.parse import parse_instance_keys
     from meerschaum.utils.packages import attempt_import
+    from meerschaum.utils.sql import json_flavors
     from meerschaum import get_connector
 
-    sqlalchemy, sqlalchemy_dialects_postgresql, sqlalchemy_utils_types_json = attempt_import(
+    sqlalchemy, sqlalchemy_dialects_postgresql = attempt_import(
         'sqlalchemy',
         'sqlalchemy.dialects.postgresql',
-        'sqlalchemy_utils.types.json',
         lazy = False
     )
     if not sqlalchemy:
@@ -79,15 +79,14 @@ def get_tables(
             dprint(f"Creating tables for connector '{conn}'.")
 
         id_type = sqlalchemy.Integer
-        params_type = (
-            sqlalchemy_utils_types_json.JSONType if conn.flavor not in ('duckdb',)
-            else sqlalchemy.String
-        )
-
+        if conn.flavor in json_flavors:
+            params_type = sqlalchemy.types.JSON
+        else:
+            params_type = sqlalchemy.types.Text
         id_names = ('user_id', 'plugin_id', 'pipe_id')
         sequences = {
             k: sqlalchemy.Sequence(k + '_seq')
-                for k in id_names 
+            for k in id_names 
         }
         id_col_args = { k: [k, id_type] for k in id_names }
         id_col_kw = { k: {'primary_key': True} for k in id_names }

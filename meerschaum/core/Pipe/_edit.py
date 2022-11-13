@@ -41,8 +41,12 @@ def edit(
     A `SuccessTuple` of success, message.
 
     """
+    from meerschaum.utils.venv import Venv
+    from meerschaum.connectors import get_connector_plugin
+
     if not interactive:
-        return self.instance_connector.edit_pipe(self, patch=patch, debug=debug, **kw)
+        with Venv(get_connector_plugin(self.instance_connector)):
+            return self.instance_connector.edit_pipe(self, patch=patch, debug=debug, **kw)
     from meerschaum.config._paths import PIPES_CACHE_RESOURCES_PATH
     from meerschaum.utils.misc import edit_file
     parameters_filename = str(self) + '.yaml'
@@ -84,7 +88,8 @@ def edit(
         from meerschaum.utils.formatting import pprint
         pprint(self.parameters)
 
-    return self.instance_connector.edit_pipe(self, patch=patch, debug=debug, **kw)
+    with Venv(get_connector_plugin(self.instance_connector)):
+        return self.instance_connector.edit_pipe(self, patch=patch, debug=debug, **kw)
 
 
 def edit_definition(
