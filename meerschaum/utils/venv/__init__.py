@@ -368,7 +368,7 @@ def init_venv(
             verified_venvs.add(venv)
         return True
 
-    import sys, platform, os, pathlib
+    import sys, platform, os, pathlib, shutil
     from meerschaum.config._paths import VIRTENV_RESOURCES_PATH
     from meerschaum.utils.packages import run_python_package, attempt_import
     global tried_virtualenv
@@ -395,7 +395,7 @@ def init_venv(
                 venv=None, debug=debug
             ) == 0
         if not _venv_success:
-            print("Please install python3-venv! Falling back to virtualenv...")
+            print(f"Please install python3-venv.\n{f.getvalue()}\nFalling back to virtualenv...")
         if not venv_exists(venv, debug=debug):
             _venv = None
     if not _venv_success:
@@ -422,10 +422,15 @@ def init_venv(
             local_bin_path = VIRTENV_RESOURCES_PATH / venv / 'local' / 'bin'
             bin_path = VIRTENV_RESOURCES_PATH / venv / 'bin'
             vtp = venv_target_path(venv=venv, allow_nonexistent=True, debug=debug)
+            if bin_path.exists():
+                try:
+                    shutil.rmtree(bin_path)
+                except Exception as e:
+                    import traceback
+                    traceback.print_exc()
             virtualenv.cli_run([str(venv_path)])
             if dist_packages_path.exists():
                 vtp.mkdir(exist_ok=True, parents=True)
-                import shutil
                 for file_path in dist_packages_path.glob('*'):
                     shutil.move(file_path, vtp)
                 shutil.rmtree(dist_packages_path)
@@ -559,9 +564,29 @@ def venv_target_path(
     """
     import os, sys, platform, pathlib, site
     from meerschaum.config._paths import VIRTENV_RESOURCES_PATH
+    from meerschaum.config.static import STATIC_CONFIG
 
     ### Check sys.path for a user-writable site-packages directory.
     if venv is None:
+
+        ### Return the known value for the portable environment.
+        environment_runtime = STATIC_CONFIG['environment']['runtime']
+        if os.environ.get(environment_runtime, None) == 'portable':
+            python_version_folder = (
+                'python' + str(sys.version_info.major) + '.' + str(sys.version_info.minor)
+            )
+            executable_path = pathlib.Path(sys.executable)
+            site_packages_path = (
+                (
+                    executable_path.parent.parent / 'lib' / python_version_folder / 'site-packages'
+                ) if platform.system() != 'Windows' else (
+                    executable_path.parent / 'Lib' / 'site-packages'
+                )
+            )
+            if not site_packages_path.exists():
+                raise EnvironmentError(f"Could not find '{site_packages_path}'. Does it exist?")
+            return site_packages_path
+
         if not inside_venv():
             site_path = pathlib.Path(site.getusersitepackages())
             ### Allow for dist-level paths (running as root).

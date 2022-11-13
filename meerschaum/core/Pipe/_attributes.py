@@ -19,6 +19,9 @@ def attributes(self) -> Dict[str, Any]:
     import time
     from meerschaum.config import get_config
     from meerschaum.config._patch import apply_patch_to_config
+    from meerschaum.utils.venv import Venv
+    from meerschaum.connectors import get_connector_plugin
+
     timeout_seconds = get_config('pipes', 'attributes', 'local_cache_timeout_seconds')
 
     if '_attributes' not in self.__dict__:
@@ -34,7 +37,8 @@ def attributes(self) -> Dict[str, Any]:
     if timed_out:
         self._attributes_sync_time = now
         local_attributes = self.__dict__.get('_attributes', {})
-        instance_attributes = self.instance_connector.get_pipe_attributes(self)
+        with Venv(get_connector_plugin(self.instance_connector)):
+            instance_attributes = self.instance_connector.get_pipe_attributes(self)
         self._attributes = apply_patch_to_config(instance_attributes, local_attributes)
     return self._attributes
 
@@ -199,7 +203,11 @@ def get_columns_types(self, debug: bool = False) -> Union[Dict[str, str], None]:
     }
     >>>
     """
-    return self.instance_connector.get_pipe_columns_types(self, debug=debug)
+    from meerschaum.utils.venv import Venv
+    from meerschaum.connectors import get_connector_plugin
+
+    with Venv(get_connector_plugin(self.instance_connector)):
+        return self.instance_connector.get_pipe_columns_types(self, debug=debug)
 
 
 def get_id(self, **kw: Any) -> Union[int, None]:
@@ -207,7 +215,11 @@ def get_id(self, **kw: Any) -> Union[int, None]:
     Fetch a pipe's ID from its instance connector.
     If the pipe does not exist, return `None`.
     """
-    return self.instance_connector.get_pipe_id(self, **kw)
+    from meerschaum.utils.venv import Venv
+    from meerschaum.connectors import get_connector_plugin
+
+    with Venv(get_connector_plugin(self.instance_connector)):
+        return self.instance_connector.get_pipe_id(self, **kw)
 
 
 @property

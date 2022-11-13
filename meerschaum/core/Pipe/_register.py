@@ -28,6 +28,8 @@ def register(
     from meerschaum.connectors import custom_types
     from meerschaum.utils.formatting import get_console
     from meerschaum.utils.venv import Venv
+    from meerschaum.connectors import get_connector_plugin
+
     import warnings
     with warnings.catch_warnings():
         warnings.simplefilter('ignore')
@@ -69,4 +71,5 @@ def register(
             'columns': cols,
         }
 
-    return self.instance_connector.register_pipe(self, debug=debug)
+    with Venv(get_connector_plugin(self.instance_connector)):
+        return self.instance_connector.register_pipe(self, debug=debug)

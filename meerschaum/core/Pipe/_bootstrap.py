@@ -53,6 +53,8 @@ def bootstrap(
     from meerschaum.utils.formatting._shell import clear_screen
     from meerschaum.utils.formatting import print_tuple
     from meerschaum.actions import actions
+    from meerschaum.utils.venv import Venv
+    from meerschaum.connectors import get_connector_plugin
 
     _clear = get_config('shell', 'clear_screen', patch=True)
 
@@ -74,7 +76,10 @@ def bootstrap(
         )
     except KeyboardInterrupt as e:
         return False, f"Aborting bootstrapping {self}."
-    register_tuple = self.instance_connector.register_pipe(self, debug=debug)
+
+    with Venv(get_connector_plugin(self.instance_connector)):
+        register_tuple = self.instance_connector.register_pipe(self, debug=debug)
+
     if not register_tuple[0]:
         return register_tuple
 

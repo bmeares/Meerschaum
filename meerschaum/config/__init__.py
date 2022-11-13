@@ -16,7 +16,7 @@ from meerschaum.utils.warnings import warn
 
 from meerschaum.config._version import __version__
 from meerschaum.config._edit import edit_config, write_config
-from meerschaum.config.static import _static_config
+from meerschaum.config.static import STATIC_CONFIG
 
 from meerschaum.config._paths import (
     PERMANENT_PATCH_DIR_PATH,
@@ -125,7 +125,7 @@ def get_config(
     """
     import json
 
-    symlinks_key = _static_config()['config']['symlinks_key']
+    symlinks_key = STATIC_CONFIG['config']['symlinks_key']
     if debug:
         from meerschaum.utils.debug import dprint
         dprint(f"Indexing keys: {keys}", color=False)
@@ -318,7 +318,7 @@ if permanent_patch_config is not None and PERMANENT_PATCH_DIR_PATH.exists():
 
 
 ### Make sure readline is available for the portable version.
-environment_runtime = _static_config()['environment']['runtime']
+environment_runtime = STATIC_CONFIG['environment']['runtime']
 if environment_runtime in os.environ:
     if os.environ[environment_runtime] == 'portable':
         from meerschaum.utils.packages import ensure_readline

@@ -28,6 +28,9 @@ def delete(
     """
     import os, pathlib
     from meerschaum.utils.warnings import warn
+    from meerschaum.utils.venv import Venv
+    from meerschaum.connectors import get_connector_plugin
+
     if self.cache_pipe is not None:
         _delete_cache_tuple = self.cache_pipe.delete(debug=debug, **kw)
         if not _delete_cache_tuple[0]:
@@ -37,7 +40,10 @@ def delete(
             os.remove(_cache_db_path)
         except Exception as e:
             warn(f"Could not delete cache file '{_cache_db_path}' for {self}:\n{e}")
-    result = self.instance_connector.delete_pipe(self, debug=debug, **kw)
+
+    with Venv(get_connector_plugin(self.instance_connector)):
+        result = self.instance_connector.delete_pipe(self, debug=debug, **kw)
+
     if not isinstance(result, tuple):
         return False, f"Received unexpected result from '{self.instance_connector}': {result}"
     if result[0]:

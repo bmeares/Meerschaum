@@ -115,6 +115,8 @@ def sync(
     from meerschaum.plugins import Plugin
     from meerschaum.utils.formatting import get_console
     from meerschaum.utils.venv import Venv
+    from meerschaum.connectors import get_connector_plugin
+
     from meerschaum.config import get_config
     import datetime
     import time
@@ -178,7 +180,8 @@ def sync(
                 and
                 get_config('system', 'experimental', 'inplace_sync')
             ):
-                return self.instance_connector.sync_pipe_inplace(p, debug=debug, **kw)
+                with Venv(get_connector_plugin(self.instance_connector)):
+                    return self.instance_connector.sync_pipe_inplace(p, debug=debug, **kw)
 
 
             ### Activate and invoke `sync(pipe)` for plugin connectors with `sync` methods.
@@ -249,12 +252,13 @@ def sync(
         run = True
         _retries = 1
         while run:
-            return_tuple = p.instance_connector.sync_pipe(
-                pipe = p,
-                df = df,
-                debug = debug,
-                **kw
-            )
+            with Venv(get_connector_plugin(self.instance_connector)):
+                return_tuple = p.instance_connector.sync_pipe(
+                    pipe = p,
+                    df = df,
+                    debug = debug,
+                    **kw
+                )
             _retries += 1
             run = (not return_tuple[0]) and force and _retries <= retries
             if run and debug:
@@ -348,13 +352,17 @@ def get_sync_time(
     A `datetime.datetime` object if the pipe exists, otherwise `None`.
 
     """
-    return self.instance_connector.get_sync_time(
-        self,
-        params = params,
-        newest = newest,
-        round_down = round_down,
-        debug = debug,
-    )
+    from meerschaum.utils.venv import Venv
+    from meerschaum.connectors import get_connector_plugin
+
+    with Venv(get_connector_plugin(self.instance_connector)):
+        return self.instance_connector.get_sync_time(
+            self,
+            params = params,
+            newest = newest,
+            round_down = round_down,
+            debug = debug,
+        )
 
 
 def exists(
@@ -374,7 +382,11 @@ def exists(
     A `bool` corresponding to whether a pipe's underlying table exists.
 
     """
-    return self.instance_connector.pipe_exists(pipe=self, debug=debug)
+    from meerschaum.utils.venv import Venv
+    from meerschaum.connectors import get_connector_plugin
+
+    with Venv(get_connector_plugin(self.instance_connector)):
+        return self.instance_connector.pipe_exists(pipe=self, debug=debug)
 
 
 def filter_existing(
