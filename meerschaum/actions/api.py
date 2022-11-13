@@ -260,8 +260,8 @@ def _api_start(
 
     env_text = ''
     for key, val in env_dict.items():
-        value = json.dumps(json.dumps(val)) if isinstance(val, dict) else val
-        env_text += f"{key}={value}\n"
+        value = json.dumps(val) if isinstance(val, dict) else val
+        env_text += f"{key}='{value}'\n"
     with open(uvicorn_env_path, 'w+', encoding='utf-8') as f:
         if debug:
             dprint(f"Writing ENV file to '{uvicorn_env_path}'.")

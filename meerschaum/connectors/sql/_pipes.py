@@ -56,8 +56,7 @@ def register_pipe(
         'metric_key'     : pipe.metric_key,
         'location_key'   : pipe.location_key,
         'parameters'     : (
-            json.dumps(parameters) if self.flavor in ('duckdb',) else parameters
-            #  json.dumps(parameters) if self.flavor not in json_flavors else parameters
+            json.dumps(parameters) if self.flavor not in json_flavors else parameters
         ),
     }
     query = sqlalchemy.insert(pipes).values(**values)
@@ -1384,6 +1383,7 @@ def sync_pipe_inplace(
         debug = debug,
     )
     backtrack_cols = {str(col.name): str(col.type) for col in backtrack_table_obj.columns}
+    common_cols = [col for col in new_cols if col in backtrack_cols]
     on_cols = {
         col: new_cols.get(col, 'object')
         for col_key, col in pipe.columns.items()
@@ -1419,17 +1419,17 @@ def sync_pipe_inplace(
             + '\nAND\n'.join([
                 (
                     'COALESCE(new.' + sql_item_name(c, self.flavor) + ", "
-                    + get_null_replacement(typ, self.flavor) + ") "
+                    + get_null_replacement(new_cols[c], self.flavor) + ") "
                     + ' = '
                     + 'COALESCE(old.' + sql_item_name(c, self.flavor) + ", "
-                    + get_null_replacement(typ, self.flavor) + ") "
-                ) for c, typ in new_cols.items()
+                    + get_null_replacement(backtrack_cols[c], self.flavor) + ") "
+                ) for c in common_cols
             ])
             + "\nWHERE\n"
             + '\nAND\n'.join([
                 (
                     'old.' + sql_item_name(c, self.flavor) + ' IS NULL'
-                ) for c in new_cols
+                ) for c in common_cols
             ])
             #  + "\nAND\n"
             #  + '\nAND\n'.join([
@@ -1455,17 +1455,17 @@ def sync_pipe_inplace(
             + '\nAND\n'.join([
                 (
                     'COALESCE(new.' + sql_item_name(c, self.flavor) + ", "
-                    + get_null_replacement(typ, self.flavor) + ") "
+                    + get_null_replacement(new_cols[c], self.flavor) + ") "
                     + ' = '
                     + 'COALESCE(old.' + sql_item_name(c, self.flavor) + ", "
-                    + get_null_replacement(typ, self.flavor) + ") "
-                ) for c, typ in new_cols.items()
+                    + get_null_replacement(backtrack_cols[c], self.flavor) + ") "
+                ) for c in common_cols
             ])
             + "\nWHERE\n"
             + '\nAND\n'.join([
                 (
                     'old.' + sql_item_name(c, self.flavor) + ' IS NULL'
-                ) for c in new_cols
+                ) for c in common_cols
             ])
             #  + "\nAND\n"
             #  + '\nAND\n'.join([

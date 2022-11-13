@@ -130,7 +130,6 @@ packages['sql'] = {
     'pytz'                           : 'pytz>=2022.1.0',
     'joblib'                         : 'joblib>=0.17.0',
     'sqlalchemy'                     : 'SQLAlchemy>=1.4.42',
-    'sqlalchemy_utils'               : 'sqlalchemy-utils>=0.38.3',
     'databases'                      : 'databases>=0.4.0',
     'aiosqlite'                      : 'aiosqlite>=0.16.0',
     'asyncpg'                        : 'asyncpg>=0.21.0',

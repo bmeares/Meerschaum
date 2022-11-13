@@ -188,6 +188,11 @@ def import_plugins(
 
         if not PLUGINS_INTERNAL_DIR_PATH.exists():
             try:
+                ### It could be a broken symlink.
+                PLUGINS_INTERNAL_DIR_PATH.unlink()
+            except Exception as e:
+                pass
+            try:
                 #  success, msg = make_symlink(PLUGINS_INTERNAL_DIR_PATH, PLUGINS_RESOURCES_PATH)
                 success, msg = make_symlink(PLUGINS_RESOURCES_PATH, PLUGINS_INTERNAL_DIR_PATH)
             except Exception as e:

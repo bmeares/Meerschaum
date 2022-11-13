@@ -51,6 +51,8 @@ def get_data(
 
     """
     from meerschaum.utils.warnings import warn
+    from meerschaum.utils.venv import Venv
+    from meerschaum.connectors import get_connector_plugin
     kw.update({'begin': begin, 'end': end, 'params': params,})
 
     if not self.exists(debug=debug):
@@ -69,14 +71,15 @@ def get_data(
                 )
 
     ### If `fresh` or the syncing failed, directly pull from the instance connector.
-    return self.enforce_dtypes(
-        self.instance_connector.get_pipe_data(
-            pipe = self,
+    with Venv(get_connector_plugin(self.instance_connector)):
+        return self.enforce_dtypes(
+            self.instance_connector.get_pipe_data(
+                pipe = self,
+                debug = debug,
+                **kw
+            ),
             debug = debug,
-            **kw
-        ),
-        debug = debug,
-    )
+        )
 
 
 def get_backtrack_data(
@@ -84,8 +87,8 @@ def get_backtrack_data(
         backtrack_minutes: int = 0,
         begin: Optional['datetime.datetime'] = None,
         fresh: bool = False,
-        debug : bool = False,
-        **kw : Any
+        debug: bool = False,
+        **kw: Any
     ) -> Optional['pd.DataFrame']:
     """
     Get the most recent data from the instance connector as a Pandas DataFrame.
@@ -125,6 +128,9 @@ def get_backtrack_data(
 
     """
     from meerschaum.utils.warnings import warn
+    from meerschaum.utils.venv import Venv
+    from meerschaum.connectors import get_connector_plugin
+
     kw.update({'backtrack_minutes': backtrack_minutes, 'begin': begin,})
 
     if not self.exists(debug=debug):
@@ -143,14 +149,15 @@ def get_backtrack_data(
                 )
 
     ### If `fresh` or the syncing failed, directly pull from the instance connector.
-    return self.enforce_dtypes(
-        self.instance_connector.get_backtrack_data(
-            pipe = self,
+    with Venv(get_connector_plugin(self.instance_connector)):
+        return self.enforce_dtypes(
+            self.instance_connector.get_backtrack_data(
+                pipe = self,
+                debug = debug,
+                **kw
+            ),
             debug = debug,
-            **kw
-        ),
-        debug = debug,
-    )
+        )
 
 
 def get_rowcount(
@@ -186,11 +193,15 @@ def get_rowcount(
 
     """
     from meerschaum.utils.warnings import warn
+    from meerschaum.utils.venv import Venv
+    from meerschaum.connectors import get_connector_plugin
+
     connector = self.instance_connector if not remote else self.connector
     try:
-        return connector.get_pipe_rowcount(
-            self, begin=begin, end=end, remote=remote, params=params, debug=debug
-        )
+        with Venv(get_connector_plugin(connector)):
+            return connector.get_pipe_rowcount(
+                self, begin=begin, end=end, remote=remote, params=params, debug=debug
+            )
     except AttributeError as e:
         warn(e)
         if remote:
