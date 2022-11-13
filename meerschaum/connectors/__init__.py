@@ -317,3 +317,31 @@ def load_plugin_connectors():
     if not to_import:
         return
     import_plugins(*to_import) 
+
+
+def get_connector_plugin(
+        connector: Connector,
+    ) -> Union[str, None, 'meerschaum.Plugin']:
+    """
+    Determine the plugin for a connector.
+    This is useful for handling virtual environments for custom instance connectors.
+
+    Parameters
+    ----------
+    connector: Connector
+        The connector which may require a virtual environment.
+
+    Returns
+    -------
+    A Plugin, 'mrsm', or None.
+    """
+    if not hasattr(connector, 'type'):
+        return None
+    from meerschaum import Plugin
+    return (
+        Plugin(connector.__module__.replace('plugins.', '').split('.')[0])
+        if connector.type in custom_types else (
+            Plugin(connector.label) if connector.type == 'plugin'
+            else 'mrsm'
+        )
+    )

@@ -122,7 +122,7 @@ max_name_lens = {
     'mysql'      : 64,
     'mariadb'    : 64,
 }
-json_flavors = {'postgresql', 'timescaledb', 'citus'}
+json_flavors = {'postgresql', 'timescaledb', 'citus', 'sqlite', 'cockroachdb'}
 OMIT_NULLSFIRST_FLAVORS = {'mariadb', 'mysql', 'mssql'}
 DB_TO_PD_DTYPES = {
     'FLOAT': 'float64',
@@ -943,6 +943,6 @@ def get_null_replacement(typ: str, flavor: str) -> str:
         return '0'
     if 'time' in typ.lower() or 'date' in typ.lower():
         return dateadd_str(flavor=flavor, begin='1900-01-01')
-    if 'float' in typ.lower():
+    if 'float' in typ.lower() or 'double' in typ.lower():
         return '-987654321.0'
-    return ('n' if flavor == 'oracle' else '') + "'<MRSM_NULL>'"
+    return ('n' if flavor == 'oracle' else '') + "'-987654321'"

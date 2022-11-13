@@ -52,12 +52,17 @@ def clear(
 
     """
     from meerschaum.utils.warnings import warn
+    from meerschaum.utils.venv import Venv
+    from meerschaum.connectors import get_connector_plugin
+
     if self.cache_pipe is not None:
         success, msg = self.cache_pipe.clear(begin=begin, end=end, debug=debug, **kw)
         if not success:
             warn(msg)
-    return self.instance_connector.clear_pipe(
-        self,
-        begin=begin, end=end, params=params, debug=debug,
-        **kw
-    )
+
+    with Venv(get_connector_plugin(self.instance_connector)):
+        return self.instance_connector.clear_pipe(
+            self,
+            begin=begin, end=end, params=params, debug=debug,
+            **kw
+        )

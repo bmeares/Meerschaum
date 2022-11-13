@@ -41,7 +41,7 @@ def register_user(
         'password_hash' : user.password_hash,
         'user_type' : user.type,
         'attributes' : (
-            json.dumps(user.attributes) if self.flavor in ('duckdb',) else user.attributes
+            json.dumps(user.attributes) if self.flavor not in json_flavors else user.attributes
         ),
     }
     if old_id is not None:
