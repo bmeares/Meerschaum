@@ -309,7 +309,10 @@ def verify_venv(
         if filename == python_versioned_name:
             real_path = pathlib.Path(os.path.realpath(python_path))
             if not real_path.exists():
-                python_path.unlink()
+                try:
+                    python_path.unlink()
+                except Exception as e:
+                    pass
                 init_venv(venv, verify=False, force=True, debug=debug)
                 if not python_path.exists():
                     raise FileNotFoundError(f"Unable to verify Python symlink:\n{python_path}")

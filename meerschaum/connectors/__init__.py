@@ -338,10 +338,13 @@ def get_connector_plugin(
     if not hasattr(connector, 'type'):
         return None
     from meerschaum import Plugin
-    return (
-        Plugin(connector.__module__.replace('plugins.', '').split('.')[0])
+    plugin_name = (
+        connector.__module__.replace('plugins.', '').split('.')[0]
         if connector.type in custom_types else (
-            Plugin(connector.label) if connector.type == 'plugin'
+            connector.label
+            if connector.type == 'plugin'
             else 'mrsm'
         )
     )
+    plugin = Plugin(plugin_name)
+    return plugin if plugin.is_installed() else None
