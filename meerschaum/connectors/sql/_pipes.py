@@ -65,6 +65,7 @@ def register_pipe(
         return False, f"Failed to register {pipe}."
     return True, f"Successfully registered {pipe}."
 
+
 def edit_pipe(
         self,
         pipe : meerschaum.Pipe = None,
@@ -1046,6 +1047,7 @@ def sync_pipe(
     from meerschaum.utils.misc import generate_password
     from meerschaum import Pipe
     import time
+    import copy
     pd = import_pandas()
     if df is None:
         msg = f"DataFrame is None. Cannot sync {pipe}."
@@ -1094,7 +1096,12 @@ def sync_pipe(
 
     unseen_df, update_df, delta_df = (
         pipe.filter_existing(
-            df, chunksize=chunksize, begin=begin, end=end, debug=debug, **kw
+            df,
+            chunksize = chunksize,
+            begin = begin,
+            end = end,
+            debug = debug,
+            **kw
         ) if check_existing else (df, None, df)
     )
     if debug:
@@ -1106,14 +1113,14 @@ def sync_pipe(
     if update_df is not None and not update_df.empty:
         transact_id = generate_password(6)
         temp_target = '_' + transact_id + '_' + pipe.target
-        self.to_sql(
-            update_df,
-            name = temp_target,
-            if_exists = 'append',
-            chunksize = chunksize,
-            debug = debug,
-            **kw
-        )
+        update_kw = copy.deepcopy(kw)
+        update_kw.update({
+            'name': temp_target,
+            'if_exists': 'append',
+            'chunksize': chunksize,
+            'debug': debug,
+        })
+        self.to_sql(update_df, **update_kw)
         temp_pipe = Pipe(
             pipe.connector_keys + '_', pipe.metric_key, pipe.location_key,
             instance = pipe.instance_keys,
@@ -1148,15 +1155,15 @@ def sync_pipe(
         kw.pop('name')
 
     ### Insert new data into Pipe's table.
-    stats = self.to_sql(
-        unseen_df,
-        name = pipe.target,
-        if_exists = if_exists,
-        debug = debug,
-        as_dict = True,
-        chunksize = chunksize,
-        **kw
-    )
+    unseen_kw = copy.deepcopy(kw)
+    unseen_kw.update({
+        'name': pipe.target,
+        'if_exists': if_exists,
+        'debug': debug,
+        'as_dict': True,
+        'chunksize': chunksize,
+    })
+    stats = self.to_sql(unseen_df, **unseen_kw)
     if is_new:
         if not self.create_indices(pipe, debug=debug):
             if debug:

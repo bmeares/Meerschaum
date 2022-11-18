@@ -21,6 +21,7 @@ limitations under the License.
 from meerschaum.core.Pipe import Pipe
 from meerschaum.plugins import Plugin
 from meerschaum.utils import get_pipes
+from meerschaum.utils.venv import Venv
 from meerschaum._internal.docs import index as __doc__
 from meerschaum.connectors import get_connector
 from meerschaum.config import __version__
