@@ -437,12 +437,13 @@ def filter_existing(
         df = self.enforce_dtypes(df, debug=debug)
     ### begin is the oldest data in the new dataframe
     try:
-        min_dt = pd.to_datetime(df[self.get_columns('datetime')].min(skipna=True)).to_pydatetime()
+        min_dt = pd.to_datetime(
+            df[self.columns['datetime']].min(skipna=True)
+        ).to_pydatetime()
     except Exception as e:
         min_dt = None
     if not isinstance(min_dt, datetime.datetime) or str(min_dt) == 'NaT':
-        ### min_dt might be None, a user-supplied value, or the sync time.
-        min_dt = begin
+        min_dt = None
     begin = (
         round_time(
             min_dt,
@@ -452,9 +453,11 @@ def filter_existing(
 
     ### end is the newest data in the new dataframe
     try:
-        max_dt = pd.to_datetime(df[self.get_columns('datetime')].max(skipna=True)).to_pydatetime()
+        max_dt = pd.to_datetime(
+            df[self.columns['datetime']].max(skipna=True)
+        ).to_pydatetime()
     except Exception as e:
-        max_dt = end
+        max_dt = None
     if not isinstance(max_dt, datetime.datetime) or str(max_dt) == 'NaT':
         max_dt = None
 
@@ -507,7 +510,12 @@ def filter_existing(
     ### Detect changes between the old target and new source dataframes.
     from meerschaum.utils.misc import filter_unseen_df, add_missing_cols_to_df
     delta_df = add_missing_cols_to_df(
-        filter_unseen_df(backtrack_df, df, dtypes=self.dtypes, debug=debug),
+        filter_unseen_df(
+            backtrack_df,
+            df,
+            dtypes = self.dtypes,
+            debug = debug
+        ),
         on_cols_dtypes,
     )
     joined_df = pd.merge(

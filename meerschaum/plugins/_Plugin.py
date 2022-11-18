@@ -153,31 +153,15 @@ class Plugin:
         return path
 
 
-    def is_installed(self, try_import: bool = True) -> bool:
+    def is_installed(self, **kw) -> bool:
         """
         Check whether a plugin is correctly installed.
-        **NOTE:** This plugin will import the plugin's module.
-        Set `try_import` to `False` to avoid importing.
-
-        Parameters
-        ----------
-        try_import: bool, default True
-            If `True`, attempt importing the plugin's module.            
 
         Returns
         -------
         A `bool` indicating whether a plugin exists and is successfully imported.
         """
-        #  if not self.__file__:
-            #  return False
         return self.__file__ is not None
-        #  try:
-            #  _installed = (
-                #  self.__dict__.get('_module', None) is not None and self.__file__ is not None
-            #  ) if try_import else (self.__file__ is not None)
-        #  except ModuleNotFoundError as e:
-            #  _installed = False
-        #  return _installed
 
 
     def make_tar(self, debug: bool = False) -> pathlib.Path:

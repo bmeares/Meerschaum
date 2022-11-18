@@ -25,10 +25,10 @@ def register(
     A `SuccessTuple` of success, message.
 
     """
-    from meerschaum.connectors import custom_types
     from meerschaum.utils.formatting import get_console
     from meerschaum.utils.venv import Venv
-    from meerschaum.connectors import get_connector_plugin
+    from meerschaum.connectors import get_connector_plugin, custom_types
+    from meerschaum.config._patch import apply_patch_to_config
 
     import warnings
     with warnings.catch_warnings():
@@ -45,12 +45,8 @@ def register(
         and
         getattr(_conn, 'register', None) is not None
     ):
-        if _conn.type == 'plugin':
-            venv = _conn._plugin
-        elif _conn.__module__.startswith('plugins'):
-            venv = _conn.__module__[len('plugins:'):].split('.')[0]
         try:
-            with Venv(venv, debug=debug):
+            with Venv(get_connector_plugin(_conn), debug=debug):
                 params = self.connector.register(self)
         except Exception as e:
             get_console().print_exception()
@@ -63,7 +59,7 @@ def register(
                 + f"{params}"
             )
         else:
-            self.parameters = params
+            self.parameters = apply_patch_to_config(params, self.parameters)
 
     if not self.parameters:
         cols = self.columns if self.columns else {'datetime': None, 'id': None}

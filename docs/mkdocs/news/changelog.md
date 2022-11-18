@@ -4,6 +4,31 @@
 
 This is the current release cycle, so stay tuned for future releases!
 
+### v1.4.10
+
+- **Fixed an issue with syncing background jobs.**  
+  The `--name` flag of background jobs with colliding with the `name` keyword argument of `SQLConnector.to_sql()`.
+
+- **Fixed a datetime bounding issue when `datetime` index is omitted.**  
+  If the minimum datetime value of the incoming dataframe cannot be determined, do not bound the `get_data()` request.
+
+- **Keep existing parameters when registering plugin pipes.**  
+  When a pipe is registered with a plugin as its connector, the return value of the `register()` function will be patched with the existing in-memory parameters.
+
+- **Fixed a data type syncing issue.**  
+  In cases where fetched data types do not match the data types in the pipe's table (e.g. automatic datetime columns), a bug has been patched to ensure the correct data types are enforced.
+
+- **Added `Venv` to the root namespace.**  
+  Now you can access virtual environments directly from `mrsm`:
+
+  ```python
+  import meerschaum as mrsm
+
+  with mrsm.Venv('noaa'):
+      import pandas as pd
+  ```
+
+
 ### v1.4.9
 
 - **Fixed in-place syncs for aggregate queries.**  

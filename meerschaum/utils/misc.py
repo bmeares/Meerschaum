@@ -652,6 +652,7 @@ def round_time(
 
     return dt + datetime.timedelta(0, rounding - seconds, - dt.microsecond)
 
+
 def parse_df_datetimes(
         df: 'pd.DataFrame',
         debug: bool = False
@@ -961,11 +962,21 @@ def filter_unseen_df(
     ### assume the old_df knows what it's doing, even if it's technically wrong.
     if dtypes is None:
         dtypes = {col: str(typ) for col, typ in old_df.dtypes.items()}
+
     dtypes = {
         col: (
             str(typ) if str(typ) != 'int64' else 'Int64'
-        ) for col, typ in new_df.dtypes.items()
+        ) for col, typ in dtypes.items()
+        if col in new_df_dtypes and col in old_df_dtypes
     }
+    for col, typ in new_df_dtypes.items():
+        if col not in dtypes:
+            dtypes[col] = typ
+    
+    for col, typ in {k: v for k, v in dtypes.items()}.items():
+        if new_df_dtypes.get(col, None) != old_df_dtypes.get(col, None):
+            ### Fallback to object if the types don't match.
+            dtypes[col] = 'object'
 
     cast_cols = True
     try:
