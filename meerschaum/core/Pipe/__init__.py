@@ -97,6 +97,7 @@ class Pipe:
         id,
         get_val_column,
         parents,
+        children,
         target,
         _target_legacy,
         guess_datetime,

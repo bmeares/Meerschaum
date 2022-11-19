@@ -126,6 +126,8 @@ def get_connector(
     from meerschaum.config import get_config
     from meerschaum.config.static import STATIC_CONFIG
     global _loaded_plugin_connectors
+    if isinstance(type, str) and not label and ':' in type:
+        type, label = type.split(':', maxsplit=1)
     with _locks['_loaded_plugin_connectors']:
         if not _loaded_plugin_connectors:
             load_plugin_connectors()

@@ -4,6 +4,56 @@
 
 This is the current release cycle, so stay tuned for future releases!
 
+### v1.4.11
+
+- **Add support for older versions of MySQL.**  
+  The `WITH` keyword for CTE blocks was not introduced until MySQL 8.0. This patch uses the older syntax for older versions of MySQL and MariaDB. MySQL 5.7 was added to the test suite.
+
+- **Allow for any iterable in `items_str()`**  
+  If an iterable other than a list is passed to `items_str()`, it will convert to a list before building the string:
+
+  ```python
+  from meerschaum.utils.misc import items_str
+  print(items_str({'apples': 1, 'bananas': 2}, quotes=False)
+  # apples and bananas
+  ```
+
+- **Fixed an edge case with `datetime` set to `None`.**  
+  This patch will ignore the datetime index even if it was set explicitly to `None`.
+
+- **Added `Pipe.children`.**  
+  To complement `Pipe.parents`, setting the parameters key `children` to a list of pipes' keys will be treated the same as `Pipe.parents`:
+
+  ```python
+  import meerschaum as mrsm
+  pipe = mrsm.Pipe(
+      'a', 'b',
+      parameters = {
+          'children': [
+              {
+                  'connector': 'a',
+                  'metric': 'b',
+                  'location': 'c',
+              },
+          ]
+      }
+  )
+  print(pipe.children)
+  # [Pipe('a', 'b', 'c')]
+  ```
+
+- **Added support for `type:label` syntax in `mrsm.get_connector()`.**  
+  The factory function `mrsm.get_connector()` expects the type and label as two arguments, but this patch allows for passing a single string with both arguments:
+
+  ```python
+  import meerschaum as mrsm
+  print(mrsm.get_connector('sql:local'))
+  # sql:local
+  ```
+
+- **Fixed more edge case bugs.**  
+  For example, converting to `Int64` sometimes breaks with older versions of `pandas`. This patch adds a workaround.
+
 ### v1.4.10
 
 - **Fixed an issue with syncing background jobs.**  

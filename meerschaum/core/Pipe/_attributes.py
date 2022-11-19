@@ -306,10 +306,7 @@ def get_val_column(self, debug: bool = False) -> Union[str, None]:
 @property
 def parents(self) -> List[meerschaum.Pipe]:
     """
-    Return a list of `meerschaum.Pipe` objects.
-    These pipes will be synced before this pipe.
-
-    NOTE: Not yet in use!
+    Return a list of `meerschaum.Pipe` objects to be designated as parents.
     """
     if 'parents' not in self.parameters:
         return []
@@ -331,6 +328,33 @@ def parents(self) -> List[meerschaum.Pipe]:
             continue
         _parents.append(p)
     return _parents
+
+
+@property
+def children(self) -> List[meerschaum.Pipe]:
+    """
+    Return a list of `meerschaum.Pipe` objects to be designated as children.
+    """
+    if 'children' not in self.parameters:
+        return []
+    from meerschaum.utils.warnings import warn
+    _children_keys = self.parameters['children']
+    if not isinstance(_children_keys, list):
+        warn(
+            f"Please ensure the children for {self} are defined as a list of keys.",
+            stacklevel = 4
+        )
+        return []
+    from meerschaum import Pipe
+    _children = []
+    for keys in _children_keys:
+        try:
+            p = Pipe(**keys)
+        except Exception as e:
+            warn(f"Unable to build parent with keys '{keys}' for {self}:\n{e}")
+            continue
+        _children.append(p)
+    return _children
 
 
 @property
