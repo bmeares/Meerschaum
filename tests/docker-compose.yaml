@@ -3,10 +3,13 @@ volumes:
   timescaledb_volume:
   mssql_volume:
   mariadb_volume:
+  mysql_volume:
   # cockroachdb_volume:
   oracle_volume:
   citus_healthcheck_volume:
+
 services:
+
   timescaledb:
     environment:
       - TIMESCALEDB_TELEMETRY=off
@@ -19,6 +22,7 @@ services:
     volumes:
       - timescaledb_volume:/var/lib/postgresql/data:z
     image: timescale/timescaledb:latest-pg14-oss
+
   mssql:
     environment:
       - ACCEPT_EULA=Y
@@ -28,6 +32,7 @@ services:
     image: mcr.microsoft.com/mssql/server:2017-latest
     volumes:
       - mssql_volume:/var/opt/mssql:z
+
   mariadb:
     environment:
       - MARIADB_ROOT_PASSWORD=my-secret-pw
@@ -39,6 +44,19 @@ services:
       - 3309:3306
     volumes:
       - mariadb_volume:/var/lib/mysql:z
+
+  mysql:
+    environment:
+      - MYSQL_ROOT_PASSWORD=my-secret-pw
+      - MYSQL_USER=test
+      - MYSQL_PASSWORD=test1234
+      - MYSQL_DATABASE=testdb
+    image: cytopia/mysql-5.7
+    ports:
+      - 3310:3306
+    volumes:
+      - mysql_volume:/var/lib/mysql:z
+
   # cockroachdb:
     # image: cockroachdb/cockroach:v21.1.2
     # ports:
@@ -52,6 +70,7 @@ services:
       - 1529:1521
     volumes:
       - oracle_volume:/u01/app/oracle
+
   citus_master:
     image: "citusdata/citus:11.0.2"
     ports:
@@ -65,6 +84,7 @@ services:
       PGPASSWORD: test1234
       POSTGRES_HOST_AUTH_METHOD: "${POSTGRES_HOST_AUTH_METHOD:-trust}"
       CITUS_HOST: citus_master
+
   citus_worker:
     image: "citusdata/citus:11.0.2"
     labels: ["com.citusdata.role=Worker"]
@@ -73,6 +93,7 @@ services:
     environment: *CITUS_AUTH
     volumes:
       - citus_healthcheck_volume:/healthcheck
+
   citus_manager:
     image: "citusdata/membership-manager:0.3.0"
     volumes:
