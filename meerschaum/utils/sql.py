@@ -31,17 +31,15 @@ update_queries = {
             {and_subquery_f}
     """,
     'mysql': """
-        UPDATE {target_table_name} AS f
-        INNER JOIN (SELECT DISTINCT * FROM {patch_table_name}) AS p
-            ON {and_subquery_f}
+        UPDATE {target_table_name} AS f,
+            (SELECT DISTINCT * FROM {patch_table_name}) AS p
         {sets_subquery_f}
         WHERE
             {and_subquery_f}
     """,
     'mariadb': """
-        UPDATE {target_table_name} AS f
-        INNER JOIN (SELECT DISTINCT * FROM {patch_table_name}) AS p
-            ON {and_subquery_f}
+        UPDATE {target_table_name} AS f,
+            (SELECT DISTINCT * FROM {patch_table_name}) AS p
         {sets_subquery_f}
         WHERE
             {and_subquery_f}
@@ -128,7 +126,10 @@ DB_TO_PD_DTYPES = {
     'FLOAT': 'float64',
     'DOUBLE_PRECISION': 'float64',
     'DOUBLE': 'float64',
+    'DECIMAL': 'float64',
     'BIGINT': 'Int64',
+    'INT': 'Int64',
+    'INTEGER': 'Int64',
     'NUMBER': 'float64',
     'TIMESTAMP': 'datetime64[ns]',
     'TIMESTAMP WITH TIMEZONE': 'datetime64[ns, UTC]',
@@ -146,6 +147,7 @@ DB_TO_PD_DTYPES = {
         'TIME': 'datetime64[ns]',
         'DATE': 'datetime64[ns]',
         'DOUBLE': 'float64',
+        'DECIMAL': 'float64',
         'INT': 'Int64',
         'BOOL': 'bool',
     },
@@ -154,12 +156,12 @@ DB_TO_PD_DTYPES = {
 ### MySQL doesn't allow for casting as BIGINT, so this is a workaround.
 DB_FLAVORS_CAST_DTYPES = {
     'mariadb': {
-        'BIGINT': 'DOUBLE',
+        'BIGINT': 'DECIMAL',
         'TINYINT': 'INT',
         'TEXT': 'CHAR(10000) CHARACTER SET utf8',
     },
     'mysql': {
-        'BIGINT': 'DOUBLE',
+        'BIGINT': 'DECIMAL',
         'TINYINT': 'INT',
         'TEXT': 'CHAR(10000) CHARACTER SET utf8',
     },
@@ -169,6 +171,8 @@ DB_FLAVORS_CAST_DTYPES = {
     'mssql': {
         'NVARCHAR COLLATE "SQL Latin1 General CP1 CI AS"': 'NVARCHAR(MAX)',
         'NVARCHAR COLLATE "SQL_Latin1_General_CP1_CI_AS"': 'NVARCHAR(MAX)',
+        'VARCHAR COLLATE "SQL Latin1 General CP1 CI AS"': 'NVARCHAR(MAX)',
+        'VARCHAR COLLATE "SQL_Latin1_General_CP1_CI_AS"': 'NVARCHAR(MAX)',
     },
 }
 ### Map pandas dtypes to flavor-specific dtypes.
@@ -202,8 +206,8 @@ PD_TO_DB_DTYPES_FLAVORS: Dict[str, Dict[str, str]] = {
     'float64': {
         'timescaledb': 'DOUBLE PRECISION',
         'postgresql': 'DOUBLE PRECISION',
-        'mariadb': 'DOUBLE',
-        'mysql': 'DOUBLE',
+        'mariadb': 'DECIMAL',
+        'mysql': 'DECIMAL',
         'mssql': 'FLOAT',
         'oracle': 'FLOAT',
         'sqlite': 'FLOAT',
@@ -490,10 +494,19 @@ def get_distinct_col_count(
 
     _col_name = sql_item_name(col, connector.flavor)
 
-    _meta_query = f"""
-    WITH src AS ( {query} ),
-    dist AS ( SELECT DISTINCT {_col_name} FROM src )
-    SELECT COUNT(*) FROM dist"""
+    _meta_query = (
+        f"""
+        WITH src AS ( {query} ),
+        dist AS ( SELECT DISTINCT {_col_name} FROM src )
+        SELECT COUNT(*) FROM dist"""
+    ) if self.flavor not in ('mysql', 'mariadb') else (
+        f"""
+        SELECT COUNT(*)
+        FROM (
+            SELECT DISTINCT {_col_name}
+            FROM ({query}) AS src
+        ) AS dist"""
+    )
 
     result = connector.value(_meta_query, debug=debug)
     try:

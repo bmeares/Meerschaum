@@ -106,7 +106,7 @@ def get_pipe_metadef(
     definition = get_pipe_query(pipe)
     btm = get_pipe_backtrack_minutes(pipe) 
 
-    if not pipe.columns or 'datetime' not in pipe.columns:
+    if not pipe.columns.get('datetime', None):
         _dt = pipe.guess_datetime()
         dt_name = sql_item_name(_dt, self.flavor) if _dt else None
         is_guess = True
@@ -252,7 +252,11 @@ def get_pipe_backtrack_minutes(pipe) -> Union[int, float]:
 def _simple_fetch_query(pipe, debug: bool=False, **kw) -> str:
     """Build a fetch query from a pipe's definition."""
     definition = get_pipe_query(pipe)
-    return f"WITH definition AS ({definition}) SELECT * FROM definition"
+    return (
+        f"WITH definition AS ({definition}) SELECT * FROM definition"
+        if pipe.connector.flavor not in ('mysql', 'mariadb')
+        else f"SELECT * FROM ({definition}) AS definition"
+    )
 
 def _join_fetch_query(
         pipe,
@@ -299,10 +303,17 @@ def _join_fetch_query(
     _sync_times_q = _sync_times_q[:(-1 * len('UNION ALL\n'))] + ")"
 
     definition = get_pipe_query(pipe)
-    query = f"""
+    query = (
+        f"""
     WITH definition AS ({definition}){_sync_times_q}
     SELECT definition.*
-    FROM definition
+    FROM definition"""
+        if pipe.connector.flavor not in ('mysql', 'mariadb')
+        else (
+        f"""
+    SELECT * FROM ({definition}) AS definition"""
+        )
+    ) + f"""
     LEFT OUTER JOIN {sync_times_remote_name} AS st
       ON st.{id_remote_name} = definition.{id_remote_name}
     WHERE definition.{dt_remote_name} > st.{dt_remote_name}

@@ -6,18 +6,19 @@ cd "$PARENT"
 
 ### Install python packages.
 
+[ -z "$PYTHON_BIN" ] && export PYTHON_BIN=python
 reqs_file="/tmp/mrsm_dev_setup_reqs.txt"
-python -m meerschaum install package wheel --venv None --debug
-python -m meerschaum show packages dev-tools --nopretty > "$reqs_file"
-python -m meerschaum show packages docs --nopretty >> "$reqs_file"
-python -m pip install --upgrade -r "$reqs_file" || exit 1
+$PYTHON_BIN -m meerschaum install package wheel --venv None --debug
+$PYTHON_BIN -m meerschaum show packages dev-tools --nopretty > "$reqs_file"
+$PYTHON_BIN -m meerschaum show packages docs --nopretty >> "$reqs_file"
+$PYTHON_BIN -m pip install --upgrade -r "$reqs_file" || exit 1
 ### Install pdoc3 and docker-compose outside of the declared docs dependencies.
-python -m pip install pdoc3 || exit 1
-python -m pip install docker-compose || exit 1
+$PYTHON_BIN -m pip install pdoc3 || exit 1
+$PYTHON_BIN -m pip install docker-compose || exit 1
 rm -f "$reqs_file"
 
 ### Install Meerschaum plugins.
-python -m meerschaum install plugin thanks
+$PYTHON_BIN -m meerschaum install plugin thanks
 
 ### Enable docker buildx.
 

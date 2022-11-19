@@ -2015,11 +2015,18 @@ def get_pipe_rowcount(
         f"SELECT {', '.join(_cols_names)} FROM {_pipe_name}"
         if not remote else get_pipe_query(pipe)
     )
-    query = f"""
-    WITH src AS ({src})
-    SELECT COUNT(*)
-    FROM src
-    """
+    query = (
+        f"""
+        WITH src AS ({src})
+        SELECT COUNT(*)
+        FROM src
+        """
+    ) if self.flavor not in ('mysql', 'mariadb') else (
+        f"""
+        SELECT COUNT(*)
+        FROM ({src}) AS src
+        """
+    )
     if begin is not None or end is not None:
         query += "WHERE"
     if begin is not None:
