@@ -1539,10 +1539,10 @@ def items_str(
     c = comma_str if commas else ''
 
     if len(items) == 1:
-        return q + str(items[0]) + q
+        return q + str(list(items)[0]) + q
 
     if len(items) == 2:
-        return q + str(items[0]) + q + s + a + s + q + str(items[1]) + q
+        return q + str(list(items)[0]) + q + s + a + s + q + str(list(items)[1]) + q
 
     sep = q + c + s + q
     output = q + sep.join(str(i) for i in items[:-1]) + q

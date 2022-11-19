@@ -126,6 +126,12 @@ def enforce_dtypes(self, df: 'pd.DataFrame', debug: bool=False) -> 'pd.DataFrame
         except Exception as e:
             if debug:
                 dprint(f"Encountered an error when casting column {d} to type {t}:\n{e}")
+            if 'int' in str(t.lower()):
+                try:
+                    new_df[d] = new_df[d].astype('float64').astype(t)
+                except Exception as e:
+                    if debug:
+                        dprint(f"Was unable to convert to float then {t}.")
     return new_df
 
 
