@@ -220,12 +220,11 @@ def _ask_for_columns(pipe, debug: bool=False) -> Dict[str, str]:
     info(f"Please enter column names for {pipe}:")
     while True:
         try:
-            datetime_name = prompt(f"Datetime column:", icon=False)
+            datetime_name = prompt(f"Datetime column (empty to omit):", icon=False)
         except KeyboardInterrupt:
             return False, f"Cancelled bootstrapping {pipe}."
         if datetime_name == '':
-            warn(f"Please enter a datetime column.", stack=False)
-            continue
+            datetime_name = None
 
         try:
             id_name = prompt(f"ID column (empty to omit):", icon=False)
@@ -248,5 +247,3 @@ def _ask_for_columns(pipe, debug: bool=False) -> Dict[str, str]:
         'id': id_name,
         'value': value_name,
     }
-
-

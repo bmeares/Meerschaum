@@ -435,6 +435,10 @@ def filter_existing(
     pd = import_pandas()
     if not isinstance(df, pd.DataFrame):
         df = self.enforce_dtypes(df, debug=debug)
+
+    if df.empty:
+        return df, df, df
+
     ### begin is the oldest data in the new dataframe
     try:
         min_dt = pd.to_datetime(

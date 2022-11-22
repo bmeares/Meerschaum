@@ -157,7 +157,7 @@ def get_pipe_metadef(
         ) else _join_fetch_query(pipe, debug=debug, **kw)
     )
 
-    has_where = 'where' in meta_def.lower()[meta_def.lower().rfind('select'):]
+    has_where = 'where' in meta_def.lower()[meta_def.lower().rfind('definition'):]
     if dt_name and (begin_da or end_da):
         definition_dt_name = dateadd_str(self.flavor, 'minute', 0, f"definition.{dt_name}")
         meta_def += "\n" + ("AND" if has_where else "WHERE") + " "
