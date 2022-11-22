@@ -4,6 +4,17 @@
 
 This is the current release cycle, so stay tuned for future releases!
 
+### v1.4.12 – v1.4.13
+
+- **Fixed an issue when syncing empty DataFrames [(#95)](https://github.com/bmeares/Meerschaum/issues/95).**  
+  When syncing an empty list of documents, `Pipe.filter_existing()` would trigger pulling the entire table into memory. This patch adds a check if the dataframe is empty.
+
+- **Allow the `datetime` column to be omitted in the `bootstrap` wizard.**  
+  Now that the `datetime` index is optional, the bootstrapping wizard allows users to skip this index.
+
+- **Fixed a small issue when syncing to MySQL.**  
+  Due to the addition of MySQL 5.7 support in v1.4.11, a slight edge case arose which broke SQL definitions. This patch fixes MySQL behavior when a `WHERE` clause is present in the definition.
+
 ### v1.4.11
 
 - **Add support for older versions of MySQL.**  

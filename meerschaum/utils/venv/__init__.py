@@ -56,12 +56,9 @@ def activate_venv(
     A bool indicating whether the virtual environment was successfully activated.
 
     """
-    #  debug = True
     thread_id = get_ident()
     if active_venvs_order and active_venvs_order[0] == venv:
         return True
-    #  if venv in threads_active_venvs.get(thread_id, {}):
-        #  return True
     import sys, platform, os
     from meerschaum.config._paths import VIRTENV_RESOURCES_PATH
     if debug:
@@ -80,9 +77,12 @@ def activate_venv(
             threads_active_venvs[thread_id][venv] += 1
 
         target = str(venv_target_path(venv, debug=debug))
-        if target in active_venvs_order:
+        if venv in active_venvs_order:
             sys.path.remove(target)
-            active_venvs_order.remove(target)
+            try:
+                active_venvs_order.remove(venv)
+            except Exception as e:
+                pass
         if venv is not None:
             sys.path.insert(0, target)
         else:
@@ -90,7 +90,10 @@ def activate_venv(
                 sys.path.insert(1, target)
             else:
                 sys.path.insert(0, target)
-        active_venvs_order.insert(0, target)
+        try:
+            active_venvs_order.insert(0, venv)
+        except Exception as e:
+            pass
 
     return True
 
@@ -188,7 +191,10 @@ def deactivate_venv(
     with LOCKS['sys.path']:
         if target in sys.path:
             sys.path.remove(target)
-            active_venvs_order.remove(target)
+            try:
+                active_venvs_order.remove(venv)
+            except Exception as e:
+                pass
 
     return True
 
