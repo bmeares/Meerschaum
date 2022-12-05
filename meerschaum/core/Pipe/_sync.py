@@ -151,7 +151,7 @@ def sync(
                 + "Omit the DataFrame to infer fetching.",
             )
         ### Ensure that Pipe is registered.
-        if p.get_id(debug=debug) is None:
+        if not p.temporary and p.get_id(debug=debug) is None:
             ### NOTE: This may trigger an interactive session for plugins!
             register_tuple = p.register(debug=debug)
             if not register_tuple[0]:

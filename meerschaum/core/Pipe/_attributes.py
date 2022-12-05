@@ -34,7 +34,7 @@ def attributes(self) -> Dict[str, Any]:
         or
         (timeout_seconds is not None and (now - last_refresh) >= timeout_seconds)
     )
-    if timed_out:
+    if not self.temporary and timed_out:
         self._attributes_sync_time = now
         local_attributes = self.__dict__.get('_attributes', {})
         with Venv(get_connector_plugin(self.instance_connector)):
@@ -215,6 +215,8 @@ def get_id(self, **kw: Any) -> Union[int, None]:
     Fetch a pipe's ID from its instance connector.
     If the pipe does not exist, return `None`.
     """
+    if self.temporary:
+        return None
     from meerschaum.utils.venv import Venv
     from meerschaum.connectors import get_connector_plugin
 

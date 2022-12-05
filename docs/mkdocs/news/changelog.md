@@ -4,6 +4,59 @@
 
 This is the current release cycle, so stay tuned for future releases!
 
+### v1.4.14
+
+- **Added flag `temporary` to `Pipe` (and `--temporary`).**  
+  Pipes built with `temporary=True`, will not create instance tables (`pipes`, `users`, and `plugins`) or be able to modify registration. This is particularly useful when creating pipes from existing tables when automatic registration is not desired.
+
+  ```python
+  import meerschaum as mrsm
+  import pandas as pd
+  conn = mrsm.get_connector('sql:temp', uri='postgresql://user:pass@localhost:5432/db')
+
+  ### Simulating an existing table.
+  table_name = 'my_table'
+  conn.to_sql(
+      pd.DataFrame([{'id_column': 1, 'value': 1.0}]),
+      name = table_name,
+  )
+
+  ### Create a temporary pipe with the existing table as its target.
+  pipe = mrsm.Pipe(
+      'foo', 'bar',
+      target = table_name,
+      temporary = True,
+      instance = conn,
+      columns = {
+          'id': 'id_column',
+      },
+  )
+
+  docs = [
+      {
+          "id_column": 1,
+          "value": 123.456,
+          "new_column": "hello, world!",
+      },
+  ]
+
+  ### Existing table `my_table` is synced without creating other tables
+  ### or affecting pipes' registration.
+  pipe.sync(docs)
+  ```
+
+- **Fixed potential security of public instance tables.**  
+  The API now refuses to sync or serve data if the target is a protected instance table (`pipes`, `users`, or `plugins`).
+
+- **Added not-null check to `pipe.get_sync_time().`**  
+  The `datetime` column should never contain null values, but just in case, `pipe.get_sync_time()` now passes a not-null check to `params` for the datetime column.
+
+- **Removed prompt for `value` from `pipe.bootstrap()`.**  
+  The prompt for an optional `value` column has been removed from the bootstrapping wizard because `pipe.columns` is now largely used as a collection of indices rather than the original purpose of meta-columns.
+
+- **Pass `--debug` and other flags in `copy pipes`.**  
+  Command line flags are now passed to the new pipe when copying an existing pipe.
+
 ### v1.4.12 – v1.4.13
 
 - **Fixed an issue when syncing empty DataFrames [(#95)](https://github.com/bmeares/Meerschaum/issues/95).**  

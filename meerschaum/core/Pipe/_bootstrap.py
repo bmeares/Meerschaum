@@ -233,17 +233,9 @@ def _ask_for_columns(pipe, debug: bool=False) -> Dict[str, str]:
         if id_name == '':
             id_name = None
 
-        try:
-            value_name = prompt(f"Value column (empty to omit):", icon=False)
-        except KeyboardInterrupt:
-            return False, f"Cancelled bootstrapping {pipe}."
-        if value_name == '':
-            value_name = None
-
         break
 
     return {
         'datetime': datetime_name,
         'id': id_name,
-        'value': value_name,
     }
