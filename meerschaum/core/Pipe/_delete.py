@@ -31,15 +31,23 @@ def delete(
     from meerschaum.utils.venv import Venv
     from meerschaum.connectors import get_connector_plugin
 
+    if self.temporary:
+        return (
+            False,
+            "Cannot delete pipes created with `temporary=True` (read-only). "
+            + "You may want to call `pipe.drop()` instead."
+        )
+
     if self.cache_pipe is not None:
-        _delete_cache_tuple = self.cache_pipe.delete(debug=debug, **kw)
-        if not _delete_cache_tuple[0]:
-            warn(_delete_cache_tuple[1])
-        _cache_db_path = pathlib.Path(self.cache_connector.database)
-        try:
-            os.remove(_cache_db_path)
-        except Exception as e:
-            warn(f"Could not delete cache file '{_cache_db_path}' for {self}:\n{e}")
+        _drop_cache_tuple = self.cache_pipe.drop(debug=debug, **kw)
+        if not _drop_cache_tuple[0]:
+            warn(_drop_cache_tuple[1])
+        if getattr(self.cache_connector, 'flavor', None) == 'sqlite':
+            _cache_db_path = pathlib.Path(self.cache_connector.database)
+            try:
+                os.remove(_cache_db_path)
+            except Exception as e:
+                warn(f"Could not delete cache file '{_cache_db_path}' for {self}:\n{e}")
 
     with Venv(get_connector_plugin(self.instance_connector)):
         result = self.instance_connector.delete_pipe(self, debug=debug, **kw)

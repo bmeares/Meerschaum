@@ -308,6 +308,12 @@ def sync_pipe(
     if data is None:
         data = {}
     p = get_pipe(connector_keys, metric_key, location_key)
+    if p.target in ('users', 'plugins', 'pipes'):
+        raise fastapi.HTTPException(
+            status_code = 409,
+            detail = f"Cannot sync data to protected table '{p.target}'.",
+        )
+
     if not p.columns and columns is not None:
         p.columns = json.loads(columns)
     if not p.columns and not is_pipe_registered(p, pipes(refresh=True)):
@@ -363,7 +369,13 @@ def get_pipe_data(
     if not is_pipe_registered(p, pipes(refresh=True)):
         raise fastapi.HTTPException(
             status_code = 409,
-            detail = "Pipe must be registered with the datetime column specified"
+            detail = "Pipe must be registered with the datetime column specified."
+        )
+
+    if p.target in ('users', 'plugins', 'pipes'):
+        raise fastapi.HTTPException(
+            status_code = 409,
+            detail = f"Cannot retrieve data from protected table '{p.target}'.",
         )
 
     #  chunks = p.get_data(

@@ -25,6 +25,9 @@ def register(
     A `SuccessTuple` of success, message.
 
     """
+    if self.temporary:
+        return False, "Cannot register pipes created with `temporary=True` (read-only)."
+
     from meerschaum.utils.formatting import get_console
     from meerschaum.utils.venv import Venv
     from meerschaum.connectors import get_connector_plugin, custom_types

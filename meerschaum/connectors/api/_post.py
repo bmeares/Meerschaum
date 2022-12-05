@@ -27,14 +27,11 @@ def post(
     if use_token:
         if debug:
             dprint(f"Checking token...")
-        headers.update({ 'Authorization': f'Bearer {self.token}' })
+        headers.update({'Authorization': f'Bearer {self.token}'})
 
     if debug:
         from meerschaum.utils.formatting import pprint
         dprint(f"Sending POST request to {self.url + r_url}")
-        if headers:
-            pprint(headers)
-        pprint(kw)
 
     return self.session.post(
         self.url + r_url,
