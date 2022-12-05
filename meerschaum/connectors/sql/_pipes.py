@@ -25,7 +25,7 @@ def register_pipe(
 
     ### ensure pipes table exists
     from meerschaum.connectors.sql.tables import get_tables
-    pipes = get_tables(mrsm_instance=self, debug=debug)['pipes']
+    pipes = get_tables(mrsm_instance=self, create=(not pipe.temporary), debug=debug)['pipes']
 
     if pipe.get_id(debug=debug) is not None:
         return False, f"{pipe} is already registered."
@@ -109,7 +109,7 @@ def edit_pipe(
 
     ### ensure pipes table exists
     from meerschaum.connectors.sql.tables import get_tables
-    pipes = get_tables(mrsm_instance=self, debug=debug)['pipes']
+    pipes = get_tables(mrsm_instance=self, create=(not pipe.temporary), debug=debug)['pipes']
 
     import json
     sqlalchemy = attempt_import('sqlalchemy')
@@ -166,8 +166,8 @@ def fetch_pipes_keys(
     from meerschaum.utils.debug import dprint
     from meerschaum.utils.packages import attempt_import
     from meerschaum.utils.misc import separate_negation_values
-    from meerschaum.utils.sql import OMIT_NULLSFIRST_FLAVORS
-    from meerschaum.config.static import _static_config
+    from meerschaum.utils.sql import OMIT_NULLSFIRST_FLAVORS, table_exists
+    from meerschaum.config.static import STATIC_CONFIG
     sqlalchemy = attempt_import('sqlalchemy')
     import json
     from copy import deepcopy
@@ -207,15 +207,18 @@ def fetch_pipes_keys(
             parameters[col] = vals
     cols = {k: v for k, v in cols.items() if v != [None]}
 
+    if not table_exists('pipes', self, debug=debug):
+        return []
+
     from meerschaum.connectors.sql.tables import get_tables
-    pipes = get_tables(mrsm_instance=self, debug=debug)['pipes']
+    pipes = get_tables(mrsm_instance=self, create=False, debug=debug)['pipes']
 
     _params = {}
     for k, v in parameters.items():
         _v = json.dumps(v) if isinstance(v, dict) else v
         _params[k] = _v
 
-    negation_prefix = _static_config()['system']['fetch_pipes_keys']['negation_prefix']
+    negation_prefix = STATIC_CONFIG['system']['fetch_pipes_keys']['negation_prefix']
     ### Parse regular params.
     ### If a param begins with '_', negate it instead.
     _where = [
@@ -548,11 +551,11 @@ def delete_pipe(
 
     ### ensure pipes table exists
     from meerschaum.connectors.sql.tables import get_tables
-    pipes = get_tables(mrsm_instance=self, debug=debug)['pipes']
+    pipes = get_tables(mrsm_instance=self, create=(not pipe.temporary), debug=debug)['pipes']
 
     q = sqlalchemy.delete(pipes).where(pipes.c.pipe_id == pipe.id)
     if not self.exec(q, debug=debug):
-        return False, f"Failed to delete registration for '{pipe}'."
+        return False, f"Failed to delete registration for {pipe}."
 
     return True, "Success"
 
@@ -913,15 +916,17 @@ def get_pipe_id(
         self,
         pipe: meerschaum.Pipe,
         debug: bool = False,
-    ) -> int:
+    ) -> Any:
     """
     Get a Pipe's ID from the pipes table.
     """
+    if pipe.temporary:
+        return None
     from meerschaum.utils.packages import attempt_import
     import json
     sqlalchemy = attempt_import('sqlalchemy')
     from meerschaum.connectors.sql.tables import get_tables
-    pipes = get_tables(mrsm_instance=self, debug=debug)['pipes']
+    pipes = get_tables(mrsm_instance=self, create=(not pipe.temporary), debug=debug)['pipes']
 
     query = sqlalchemy.select([pipes.c.pipe_id]).where(
         pipes.c.connector_keys == pipe.connector_keys
@@ -931,7 +936,7 @@ def get_pipe_id(
         (pipes.c.location_key == pipe.location_key) if pipe.location_key is not None
         else pipes.c.location_key.is_(None)
     )
-    _id = self.value(query, debug=debug)
+    _id = self.value(query, debug=debug, silent=pipe.temporary)
     if _id is not None:
         _id = int(_id)
     return _id
@@ -950,10 +955,11 @@ def get_pipe_attributes(
     from meerschaum.connectors.sql.tables import get_tables
     from meerschaum.utils.packages import attempt_import
     sqlalchemy = attempt_import('sqlalchemy')
-    pipes = get_tables(mrsm_instance=self, debug=debug)['pipes']
 
     if pipe.get_id(debug=debug) is None:
         return {}
+
+    pipes = get_tables(mrsm_instance=self, create=(not pipe.temporary), debug=debug)['pipes']
 
     try:
         q = sqlalchemy.select([pipes]).where(pipes.c.pipe_id == pipe.id)
@@ -1056,8 +1062,7 @@ def sync_pipe(
 
     start = time.perf_counter()
 
-    ### if Pipe is not registered
-    if not pipe.get_id(debug=debug):
+    if not pipe.temporary and not pipe.get_id(debug=debug):
         register_tuple = pipe.register(debug=debug)
         if not register_tuple[0]:
             return register_tuple
@@ -1126,6 +1131,7 @@ def sync_pipe(
             instance = pipe.instance_keys,
             columns = pipe.columns,
             target = temp_target,
+            temporary = True,
         )
 
         existing_cols = pipe.get_columns_types(debug=debug)
@@ -1842,6 +1848,11 @@ def get_sync_time(
     valid_params = {}
     if params is not None:
         valid_params = {k: v for k, v in params.items() if k in existing_cols}
+
+    ### If no bounds are provided for the datetime column,
+    ### add IS NOT NULL to the WHERE clause.
+    if _dt not in valid_params:
+        valid_params[_dt] = '_None'
     where = "" if not valid_params else build_where(valid_params, self)
     q = f"SELECT {dt}\nFROM {table}{where}\nORDER BY {dt} {ASC_or_DESC}\nLIMIT 1"
     if self.flavor == 'mssql':
@@ -2050,7 +2061,7 @@ def get_pipe_rowcount(
                 )
             )
         
-    result = self.value(query, debug=debug)
+    result = self.value(query, debug=debug, silent=True)
     try:
         return int(result)
     except Exception as e:

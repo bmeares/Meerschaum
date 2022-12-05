@@ -85,7 +85,7 @@ private = get_uvicorn_config().get('private', False)
 _include_dash = (not no_dash)
 
 connector = None
-def get_api_connector(instance_keys : Optional[str] = None):
+def get_api_connector(instance_keys: Optional[str] = None):
     """Create the instance connector."""
     from meerschaum.utils.debug import dprint
     global connector

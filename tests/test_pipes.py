@@ -8,6 +8,7 @@ from tests import debug
 from tests.pipes import all_pipes, stress_pipes, remote_pipes
 from tests.connectors import conns
 from tests.test_users import test_register_user
+import meerschaum as mrsm
 from meerschaum import Pipe
 from meerschaum.actions import actions
 
@@ -269,3 +270,36 @@ def test_dtype_enforcement(flavor: str):
     for col, typ in df.dtypes.items():
         assert str(typ) == pipe.dtypes[col]
     return pipe
+
+
+@pytest.mark.parametrize("flavor", list(all_pipes.keys()))
+def test_temporary_pipes(flavor: str):
+    """
+    Verify that `temporary=True` will not create instance tables.
+    """
+    from meerschaum.utils.misc import generate_password
+    from meerschaum.utils.sql import table_exists
+    session_id = generate_password(6)
+    db_path = '/tmp/' + session_id + '.db'
+    conn = mrsm.get_connector('sql', session_id, flavor='sqlite', database=db_path) 
+    pipe = Pipe('foo', 'bar', instance=conn, temporary=True, columns={'id': 'id'})
+    _ = pipe.parameters
+    _ = pipe.id
+    _ = pipe.get_rowcount(debug=debug)
+    success, msg = pipe.sync([{'id': 1, 'a': 2}], debug=debug)
+    assert success, msg
+    success, msg = pipe.sync([{'id': 2, 'b': 3}], debug=debug)
+    assert success, msg
+    success, msg = pipe.sync(
+        [
+            {'id': 1, 'b': 4},
+            {'id': 2, 'a': 5},
+        ],
+        debug = debug,
+    )
+    success, msg = pipe.delete(debug=debug)
+    assert (not success), msg
+    assert pipe.get_rowcount(debug=debug) == 2
+    assert not table_exists('pipes', conn, debug=debug)
+    assert not table_exists('users', conn, debug=debug)
+    assert not table_exists('plugins', conn, debug=debug)

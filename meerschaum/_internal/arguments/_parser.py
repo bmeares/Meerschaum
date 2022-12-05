@@ -196,6 +196,7 @@ groups['pipes'].add_argument(
     '-t', '--tags', nargs='+', help="Only include pipes with these tags.",
 )
 
+
 ### Sync options
 groups['sync'].add_argument(
     '--min-seconds', '--cooldown', type=float, help=(
@@ -315,7 +316,14 @@ groups['misc'].add_argument(
         "--params key1:value1,key2:value2"
     )
 )
-
+groups['misc'].add_argument(
+    '--temporary', '--temp',
+    action = 'store_true',
+    help = (
+        "Skip creating or modifying instance tables when working with pipes "
+        + "(plugins and users still trigger table creation)."
+    ),
+)
 groups['misc'].add_argument(
     '--gui', action='store_true',
     help="Open a DataFrame in an interactive pandasgui or matplotlib window."

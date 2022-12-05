@@ -237,8 +237,6 @@ def fetch_pipes_keys(
     [('sql:main', 'weather', None)]
     """
     from meerschaum.utils.warnings import error
-    from meerschaum.connectors.sql.tables import get_tables
-    tables = get_tables(connector)
 
     def _registered(
             connector_keys: Optional[List[str]] = None,
