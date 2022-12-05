@@ -11,33 +11,13 @@ from meerschaum.utils.typing import Optional, Dict, Any
 
 def patch(
         self,
-        r_url : str,
-        headers : Optional[Dict[str, Any]] = None,
-        use_token : bool = True,
-        debug : bool = False,
-        **kw : Any
+        r_url: str,
+        headers: Optional[Dict[str, Any]] = None,
+        use_token: bool = True,
+        debug: bool = False,
+        **kw: Any
     ) -> requests.Response:
-    """Wrapper for requests.patch
-
-    Parameters
-    ----------
-    r_url : str :
-        
-    headers : Optional[Dict[str :
-        
-    Any]] :
-         (Default value = None)
-    use_token : bool :
-         (Default value = True)
-    debug : bool :
-         (Default value = False)
-    **kw : Any :
-        
-
-    Returns
-    -------
-
-    """
+    """Wrapper for `requests.patch`."""
     if debug:
         from meerschaum.utils.debug import dprint
 
@@ -52,9 +32,6 @@ def patch(
     if debug:
         from meerschaum.utils.formatting import pprint
         dprint(f"Sending PATCH request to {self.url + r_url}")
-        if headers:
-            pprint(headers)
-        pprint(kw)
 
     return self.session.patch(
         self.url + r_url,

@@ -17,27 +17,7 @@ def delete(
         debug : bool = False,
         **kw : Ahy,
     ) -> requests.Response:
-    """Wrapper for requests.delete
-
-    Parameters
-    ----------
-    r_url : str :
-        
-    headers : Optional[Dict[str :
-        
-    Any]] :
-         (Default value = None)
-    use_token : bool :
-         (Default value = True)
-    debug : bool :
-         (Default value = False)
-    **kw : Ahy :
-        
-
-    Returns
-    -------
-
-    """
+    """Wrapper for `requests.delete`."""
     if debug:
         from meerschaum.utils.debug import dprint
     
@@ -51,10 +31,7 @@ def delete(
 
     if debug:
         from meerschaum.utils.formatting import pprint
-        dprint(f"Sending DELETE request to {self.url + r_url}")
-        if headers:
-            pprint(headers)
-        pprint(kw)
+        dprint(f"Sending DELETE request to {self.url + r_url}.")
 
     return self.session.delete(
         self.url + r_url,

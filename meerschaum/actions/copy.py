@@ -32,6 +32,7 @@ def copy(
     }
     return choose_subaction(action, options, **kw)
 
+
 def _complete_copy(
         action : Optional[List[str]] = None,
         **kw : Any
@@ -59,6 +60,7 @@ def _complete_copy(
 
     from meerschaum._internal.shell import default_action_completer
     return default_action_completer(action=(['copy'] + action), **kw)
+
 
 def _copy_pipes(
         yes: bool = False,
@@ -115,7 +117,7 @@ def _copy_pipes(
                     noask=noask, yes=yes
                 )
         ):
-            _new_pipe.sync(p.get_data(debug=debug, **kw))
+            _new_pipe.sync(p.get_data(debug=debug, **kw), debug=debug, **kw)
 
     msg = (
         "No pipes were copied." if successes == 0

@@ -122,6 +122,7 @@ class Pipe:
         target: Optional[str] = None,
         dtypes: Optional[Dict[str, str]] = None,
         instance: Optional[Union[str, InstanceConnector]] = None,
+        temporary: bool = False,
         mrsm_instance: Optional[Union[str, InstanceConnector]] = None,
         cache: bool = False,
         debug: bool = False,
@@ -165,6 +166,9 @@ class Pipe:
         instance: Optional[Union[str, InstanceConnector]], default None
             Alias for `mrsm_instance`. If `mrsm_instance` is supplied, this value is ignored.
 
+        temporary: bool, default False
+            If `True`, prevent instance tables (pipes, users, plugins) from being created.
+
         cache: bool, default False
             If `True`, cache fetched data into a local database file.
             Defaults to `False`.
@@ -199,6 +203,7 @@ class Pipe:
         self.connector_key = self.connector_keys ### Alias
         self.metric_key = metric
         self.location_key = location
+        self.temporary = temporary
 
         self._attributes = {
             'connector_keys': self.connector_keys,
@@ -353,9 +358,10 @@ class Pipe:
                 self.instance_keys,
                 (self.connector_keys + '_' + self.metric_key + '_cache'),
                 self.location_key,
-                mrsm_instance=self.cache_connector,
-                parameters=_parameters,
-                cache=False,
+                mrsm_instance = self.cache_connector,
+                parameters = _parameters,
+                cache = False,
+                temporary = True,
             )
 
         return self._cache_pipe

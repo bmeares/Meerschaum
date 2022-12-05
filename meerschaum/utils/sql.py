@@ -786,7 +786,7 @@ def get_sqlalchemy_table(
     from meerschaum.utils.packages import attempt_import
     if refresh:
         connector.metadata.clear()
-    tables = get_tables(mrsm_instance=connector, debug=debug)
+    tables = get_tables(mrsm_instance=connector, debug=debug, create=False)
     sqlalchemy = attempt_import('sqlalchemy')
     truncated_table_name = truncate_item_name(str(table), connector.flavor)
     if refresh or truncated_table_name not in tables:

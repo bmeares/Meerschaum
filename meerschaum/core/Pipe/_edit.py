@@ -44,6 +44,9 @@ def edit(
     from meerschaum.utils.venv import Venv
     from meerschaum.connectors import get_connector_plugin
 
+    if self.temporary:
+        return False, "Cannot edit pipes created with `temporary=True` (read-only)."
+
     if not interactive:
         with Venv(get_connector_plugin(self.instance_connector)):
             return self.instance_connector.edit_pipe(self, patch=patch, debug=debug, **kw)
@@ -109,6 +112,9 @@ def edit_definition(
     A `SuccessTuple` of success, message.
 
     """
+    if self.temporary:
+        return False, "Cannot edit pipes created with `temporary=True` (read-only)."
+
     from meerschaum.connectors import instance_types
     if (self.connector is None) or self.connector.type not in instance_types:
         return self.edit(interactive=True, debug=debug, **kw)

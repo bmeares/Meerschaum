@@ -11,11 +11,11 @@ from meerschaum.utils.typing import Optional, Any, Dict, Union
 
 def get(
         self,
-        r_url : str,
-        headers : Optional[Dict[str, str]] = None,
-        use_token : bool = True,
-        debug : bool = False,
-        **kw : Any
+        r_url: str,
+        headers: Optional[Dict[str, str]] = None,
+        use_token: bool = True,
+        debug: bool = False,
+        **kw: Any
     ) -> requests.Reponse:
     """Wrapper for `requests.get`."""
     if debug:
@@ -27,14 +27,11 @@ def get(
     if use_token:
         if debug:
             dprint(f"Checking login token.")
-        headers.update({ 'Authorization': f'Bearer {self.token}' })
+        headers.update({'Authorization': f'Bearer {self.token}'})
 
     if debug:
         from meerschaum.utils.formatting import pprint
         dprint(f"Sending GET request to {self.url + r_url}.")
-        if headers:
-            pprint(headers)
-        pprint(kw)
 
     return self.session.get(
         self.url + r_url,
@@ -44,12 +41,12 @@ def get(
 
 def wget(
         self,
-        r_url : str,
-        dest : Optional[Union[str, pathlib.Path]] = None,
+        r_url: str,
+        dest: Optional[Union[str, pathlib.Path]] = None,
         headers: Optional[Dict[str, Any]] = None,
         use_token: bool = True,
         debug: bool = False,
-        **kw : Any
+        **kw: Any
     ) -> pathlib.Path:
     """Mimic wget with requests.
     """
@@ -60,5 +57,5 @@ def wget(
     if use_token:
         if debug:
             dprint(f"Checking login token.")
-        headers.update({ 'Authorization': f'Bearer {self.token}' })
+        headers.update({'Authorization': f'Bearer {self.token}'})
     return wget(self.url + r_url, dest=dest, headers=headers, **kw)
