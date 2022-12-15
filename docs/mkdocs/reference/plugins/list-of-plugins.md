@@ -10,6 +10,9 @@ If you have [written a Meerschaum plugin](/reference/plugins/writing-plugins/) a
 ### Register an account at instance `api:mrsm`.
 mrsm register user <myusername> -i api:mrsm
 
+### Login with your new account.
+mrsm login api:mrsm
+
 ### Register your plugin to repository `api:mrsm`.
 mrsm register plugin <myplugin> -r api:mrsm
 ```
@@ -42,6 +45,12 @@ The `sense` plugin fetches environment readings from the Raspberry Pi Sense HAT.
 
 [GitHub](https://github.com/bmeares/sense) | [Source](https://api.mrsm.io/plugins/sense)
 
+### `stress`
+
+The `stress` plugin generates random data with parameters for number of IDs and rows to help you with stress testing (~99% inserts, ~1% updates).
+
+[Source](https://api.mrsm.io/plugins/stress)
+
 ## Action Plugins
 
 [Action plugins](/reference/plugins/types-of-plugins/#action-plugins) add new commands to the Meerschaum system.
@@ -51,6 +60,12 @@ The `sense` plugin fetches environment readings from the Raspberry Pi Sense HAT.
 The `color` plugin provides a shortcut to inverting the ANSI and Unicode configuration settings.
 
 [Source](https://api.mrsm.io/plugins/color)
+
+### `compose`
+
+[Meerschaum Compose](/reference/compose/) lets you define your project in one YAML file, like `docker-compose` but for Meerschaum.
+
+[GitHub](https://github.com/bmeares/compose) | [Source]((https://api.mrsm.io/plugins/compose))
 
 ### `syncx`
 
