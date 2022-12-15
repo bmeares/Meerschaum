@@ -29,7 +29,18 @@ MRSM_SQL_FOO=sqlite:////tmp/foo.db
 ```
 
 !!! note ""
-    Currently, only `api` and `sql` connectors may be created from environment variables.
+    Custom connectors may be set through environment variables if they are defined with the `@make_connector` decorator:
+
+    ```python
+    from meerschaum.connectors import make_connector, Connector
+
+    @make_connector
+    class FooConnector(Connector):
+        IS_INSTANCE = True
+
+        def __init__(label: str, **kw):
+            super().__init__('foo', label, **kw)
+    ```
 
 !!! tip "Did you know?"
 

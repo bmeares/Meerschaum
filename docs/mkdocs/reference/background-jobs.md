@@ -7,7 +7,7 @@ Some actions need to run continuously, such as running the API or syncing pipes 
 
 <asciinema-player src="/assets/casts/jobs.cast" autoplay="true" loop="true" size="small" preload="true"></asciinema-player>
 
-## Jobs
+## 👔 Jobs
 
 All Meerschaum actions may be executed as background jobs by adding `-d` or `--daemon` flags or by prefacing the command with `start job`. New jobs will be given random names, and you can choose to specify a label with `--name`.
 
@@ -38,7 +38,7 @@ mrsm delete job awake_sushi -y
 ```
 
 
-## Schedules
+## ⏲️ Schedules
 
 You can run any command regularly with the flag `-s` or `--schedule` ― for example, `-s hourly` will execute the command once per hour. You can also specify a specific interval, e.g. `-s 'every 10 seconds'`. Here are a few of the supported frequencies:
 
@@ -56,7 +56,7 @@ mrsm sync pipes -m weather -s 'every 30 seconds' -d
 ```
 
 
-## Logs
+## 🪵 Logs
 
 You can monitor the status of jobs with `show logs`, which will follow the logs of running jobs.
 

@@ -4,6 +4,7 @@ nav:
   - "🚰 Pipes": pipes
   - "🔌 Connectors": connectors.md
   - "🥞 Stack": stack.md
+  - "🎼 Compose": compose.md
   - "⏯️ Actions": actions
   - "👷 Background Jobs": background-jobs.md
   - "🔧 Data Analysis Tools": data-analysis-tools.md
