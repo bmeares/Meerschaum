@@ -597,7 +597,10 @@ class Plugin:
         ### without having import the module.
         ### For consistency's sake, the module-less method does not cache the requirements.
         if self.__dict__.get('_module', None) is None:
-            with open(self.__file__, 'r', encoding='utf-8') as f:
+            file_path = self.__file__
+            if file_path is None:
+                return []
+            with open(file_path, 'r', encoding='utf-8') as f:
                 text = f.read()
 
             if 'required' not in text:
@@ -614,9 +617,28 @@ class Plugin:
             if not req_start_match:
                 return []
             req_start = req_start_match.start()
-            req_end   = req_start + 1 + text[req_start:].find(']')
-            if req_end == -1:
+
+            ### Dependencies may have brackets within the strings, so push back the index.
+            first_opening_brace = req_start + 1 + text[req_start:].find('[')
+            if first_opening_brace == -1:
                 return []
+
+            next_closing_brace = req_start + 1 + text[req_start:].find(']')
+            if next_closing_brace == -1:
+                return []
+
+            start_ix = first_opening_brace + 1
+            end_ix = next_closing_brace
+
+            num_braces = 0
+            while True:
+                if '[' not in text[start_ix:end_ix]:
+                    break
+                num_braces += 1
+                start_ix = end_ix
+                end_ix += text[end_ix + 1:].find(']') + 1
+
+            req_end = end_ix + 1
             req_text = (
                 text[req_start:req_end]
                 .lstrip()

@@ -142,7 +142,7 @@ def import_plugins(
     import sys, os, pathlib, time
     from collections import defaultdict
     import importlib.util
-    from meerschaum.utils.misc import flatten_list, make_symlink
+    from meerschaum.utils.misc import flatten_list, make_symlink, is_symlink
     from meerschaum.utils.warnings import error, warn as _warn
     from meerschaum.config.static import STATIC_CONFIG
     from meerschaum.utils.venv import Venv, activate_venv, deactivate_venv, is_venv_active
@@ -180,8 +180,7 @@ def import_plugins(
             _warn(f"Unable to create lockfile {PLUGINS_INTERNAL_LOCK_PATH}:\n{e}")
 
     with _locks['internal_plugins']:
-        if not PLUGINS_RESOURCES_PATH.is_dir():
-            ### It could be a broken symlink.
+        if is_symlink(PLUGINS_RESOURCES_PATH) or not PLUGINS_RESOURCES_PATH.exists():
             try:
                 PLUGINS_RESOURCES_PATH.unlink()
             except Exception as e:
@@ -229,6 +228,7 @@ def import_plugins(
             plugin_symlink_path = PLUGINS_RESOURCES_PATH / plugin_path.name
             try:
                 success, msg = make_symlink(plugin_path, plugin_symlink_path)
+                #  success, msg = make_symlink(plugin_symlink_path, plugin_path)
             except Exception as e:
                 success, msg = False, str(e)
             if not success:
