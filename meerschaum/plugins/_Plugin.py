@@ -24,6 +24,7 @@ from meerschaum.config._paths import (
     PLUGINS_ARCHIVES_RESOURCES_PATH,
     PLUGINS_TEMP_RESOURCES_PATH,
     VIRTENV_RESOURCES_PATH,
+    PLUGINS_DIR_PATHS,
 )
 _tmpversion = None
 _ongoing_installations = set()
@@ -346,8 +347,22 @@ class Plugin:
             )
         except Exception as e:
             is_new_version, is_same_version = True, False
+
+        ### Determine where to permanently store the new plugin.
+        plugin_installation_dir_path = PLUGINS_DIR_PATHS[0]
+        for path in PLUGINS_DIR_PATHS:
+            files_in_plugins_dir = os.listdir(path)
+            if (
+                self.name in files_in_plugins_dir
+                or
+                (self.name + '.py') in files_in_plugins_dir
+            ):
+                plugin_installation_dir_path = path
+                break
+
         success_msg = f"Successfully installed plugin '{self}'."
         success, abort = None, None
+
         if is_same_version and not force:
             success, msg = True, (
                 f"Plugin '{self}' is up-to-date (version {old_version}).\n" +
@@ -358,7 +373,7 @@ class Plugin:
             for src_dir, dirs, files in os.walk(temp_dir):
                 if success is not None:
                     break
-                dst_dir = str(src_dir).replace(str(temp_dir), str(PLUGINS_RESOURCES_PATH))
+                dst_dir = str(src_dir).replace(str(temp_dir), str(plugin_installation_dir_path))
                 if not os.path.exists(dst_dir):
                     os.mkdir(dst_dir)
                 for f in files:

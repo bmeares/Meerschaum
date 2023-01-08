@@ -413,14 +413,12 @@ def determine_version(
     if debug:
         print(f'Found multiple versions for {import_name}: {_found_versions}')
 
-    ### This is kind of a hack. Normally pathlib handles escaped slashes on Windows,
-    ### but because we're passing this to a subprocess, we need to re-escape the slashes.
-    module_parent_dir_str = str(module_parent_dir).replace('\\', '\\\\')
+    module_parent_dir_str = module_parent_dir.as_posix()
 
     ### Not a pip package, so let's try importing the module directly (in a subprocess).
     _no_version_str = 'no-version'
     code = (
-        f"import os, importlib; os.chdir('{module_parent_dir_str}'); "
+        f"import sys, importlib; sys.path.insert(0, '{module_parent_dir_str}');\n"
         + f"module = importlib.import_module('{import_name}');\n"
         + "try:\n"
         + "  print(module.__version__ , end='')\n"

@@ -1830,6 +1830,6 @@ def safely_extract_tar(tarf: 'file', output_dir: Union[str, 'pathlib.Path']) -> 
             if not is_within_directory(path, member_path):
                 raise Exception("Attempted Path Traversal in Tar File")
 
-        tar.extractall(path, members, numeric_owner)
+        tar.extractall(path=path, members=members, numeric_owner=numeric_owner)
 
     return safe_extract(tarf, output_dir)
