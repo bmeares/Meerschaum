@@ -131,11 +131,11 @@ class Plugin:
             and potential_dir.is_dir()
             and (potential_dir / '__init__.py').exists()
         ):
-            return str(potential_dir / '__init__.py')
+            return str((potential_dir / '__init__.py').as_posix())
 
         potential_file = PLUGINS_RESOURCES_PATH / (self.name + '.py')
         if potential_file.exists() and not potential_file.is_dir():
-            return str(potential_file)
+            return str(potential_file.as_posix())
 
         return None
 
@@ -282,6 +282,7 @@ class Plugin:
         from meerschaum.plugins import reload_plugins
         from meerschaum.utils.packages import attempt_import, determine_version
         from meerschaum.utils.venv import init_venv
+        from meerschaum.utils.misc import safely_extract_tar
         old_cwd = os.getcwd()
         old_version = ''
         new_version = ''
@@ -294,15 +295,16 @@ class Plugin:
             old_version = self.version
             if debug:
                 dprint(f"Found existing version '{old_version}' for plugin '{self}'.")
-        try:
-            with tarfile.open(self.archive_path, 'r:gz') as tarf:
-                tarf.extractall(temp_dir)
-        except Exception as e:
-            warn(e)
-            return False, f"Failed to extract plugin '{self.name}'."
 
         if debug:
             dprint(f"Extracting '{self.archive_path}' to '{temp_dir}'...")
+
+        try:
+            with tarfile.open(self.archive_path, 'r:gz') as tarf:
+                safely_extract_tar(tarf, temp_dir)
+        except Exception as e:
+            warn(e)
+            return False, f"Failed to extract plugin '{self.name}'."
 
         ### search for version information
         files = os.listdir(temp_dir)

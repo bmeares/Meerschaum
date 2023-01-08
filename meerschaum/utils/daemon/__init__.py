@@ -7,7 +7,7 @@ Daemonize processes via daemoniker.
 """
 
 from __future__ import annotations
-import os, pathlib, shutil, json, datetime, threading
+import os, pathlib, shutil, json, datetime, threading, shlex
 from meerschaum.utils.typing import SuccessTuple, List, Optional, Callable, Any, Dict
 from meerschaum.config._paths import DAEMON_RESOURCES_PATH
 from meerschaum.utils.daemon.Daemon import Daemon
@@ -18,23 +18,24 @@ def daemon_entry(sysargs: Optional[List[str]] = None) -> SuccessTuple:
 
     Parameters
     ----------
-    sysargs: Optional[List[str]] :
-         (Default value = None)
+    sysargs: Optional[List[str]], default None
+        The command line arguments used in a Meerschaum action.
 
     Returns
     -------
-
+    A SuccessTuple.
     """
     from meerschaum._internal.entry import entry
     _args = None
     if '--name' in sysargs or '--job-name' in sysargs:
         from meerschaum._internal.arguments._parse_arguments import parse_arguments
         _args = parse_arguments(sysargs)
+    filtered_sysargs = [arg for arg in sysargs if arg not in ('-d', '--daemon')]
     success_tuple = run_daemon(
         entry,
-        sysargs,
+        filtered_sysargs,
         daemon_id = _args.get('name', None) if _args else None,
-        label = (' '.join(sysargs) if sysargs else None),
+        label = (shlex.join(filtered_sysargs) if sysargs else None),
         keep_daemon_output = ('--rm' not in sysargs)
     )
     if not isinstance(success_tuple, tuple):
@@ -75,10 +76,16 @@ def run_daemon(
         **kw
     ) -> Any:
     """Execute a function as a daemon."""
-    daemon = Daemon(func, daemon_id=daemon_id, target_args=args, target_kw=kw, label=label)
+    daemon = Daemon(
+        func,
+        daemon_id = daemon_id,
+        target_args = [arg for arg in args],
+        target_kw = kw,
+        label = label,
+    )
     return daemon.run(
         keep_daemon_output = keep_daemon_output,
-        allow_dirty_run = allow_dirty_run
+        allow_dirty_run = allow_dirty_run,
     )
 
 def get_daemons() -> List[Daemon]:

@@ -195,7 +195,13 @@ def import_plugins(
         ]
         plugins_to_be_symlinked = list(flatten_list(
             [
-                [(plugins_path / item) for item in os.listdir(plugins_path)]
+                [
+                    (plugins_path / item)
+                    for item in os.listdir(plugins_path)
+                    if (
+                        not item.startswith('.')
+                    ) or (item in ('__pycache__',))
+                ]
                 for plugins_path in PLUGINS_DIR_PATHS
             ]
         ))
@@ -227,6 +233,9 @@ def import_plugins(
         for plugin_path in plugins_to_be_symlinked:
             plugin_symlink_path = PLUGINS_RESOURCES_PATH / plugin_path.name
             try:
+                ### There might be duplicate folders (e.g. __pycache__).
+                if plugin_symlink_path.exists() and plugin_symlink_path.is_dir() and not is_symlink(plugin_symlink_path):
+                    continue
                 success, msg = make_symlink(plugin_path, plugin_symlink_path)
                 #  success, msg = make_symlink(plugin_symlink_path, plugin_path)
             except Exception as e:

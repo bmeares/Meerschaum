@@ -53,7 +53,7 @@ def warn(*args, stacklevel=2, stack=True, color: bool = True, **kw) -> None:
     if color:
         try:
             from meerschaum.utils.formatting import (
-                CHARSET, ANSI, colored, fill_ansi, highlight_pipes
+                CHARSET, ANSI, colored, fill_ansi, highlight_pipes, _init
             )
         except ImportError:
             CHARSET = 'ascii'
@@ -81,6 +81,7 @@ def warn(*args, stacklevel=2, stack=True, color: bool = True, **kw) -> None:
     a[0] = ' ' + (warn_config[CHARSET]['icon'] if color else '') + ' ' + str(a[0])
     if color:
         if ANSI:
+            _init()
             a[0] = fill_ansi(highlight_pipes(a[0]), **warn_config['ansi']['rich'])
 
     ### Optionally omit the warning location.
@@ -159,7 +160,7 @@ def error(
     Raise an exception with supressed traceback.
     """
     from meerschaum.utils.formatting import (
-        CHARSET, ANSI, get_console, fill_ansi, highlight_pipes
+        CHARSET, ANSI, get_console, fill_ansi, highlight_pipes, _init
     )
     from meerschaum.utils.packages import import_rich
     from meerschaum.config import get_config
@@ -171,6 +172,7 @@ def error(
     color_message = str(message)
     color_exception = exception_with_traceback(color_message, exception_class, stacklevel=3)
     if ANSI and not nopretty:
+        _init()
         color_message = '\n' + fill_ansi(highlight_pipes(message), **error_config['ansi']['rich'])
         color_exception = exception_with_traceback(color_message, exception_class, stacklevel=3)
     try:
@@ -193,13 +195,14 @@ def info(message: str, icon: bool = True, **kw):
     """Print an informative message."""
     from meerschaum.utils.packages import import_rich, attempt_import
     from meerschaum.utils.formatting import (
-        CHARSET, ANSI, highlight_pipes, fill_ansi,
+        CHARSET, ANSI, highlight_pipes, fill_ansi, _init
     )
     from meerschaum.config import get_config
     info_config = get_config('formatting', 'info', patch=True)
     if icon:
         message = ' ' + info_config[CHARSET]['icon'] + ' ' + message
     if ANSI:
+        _init()
         message = highlight_pipes(message)
         lines = message.split('\n')
         message = fill_ansi(lines[0], **info_config['ansi']['rich']) + (

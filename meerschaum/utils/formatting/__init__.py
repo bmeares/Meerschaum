@@ -7,6 +7,9 @@ Utilities for formatting output text
 """
 
 from __future__ import annotations
+import platform
+import os
+import sys
 from meerschaum.utils.typing import Optional, Union, Any
 from meerschaum.utils.formatting._shell import make_header
 from meerschaum.utils.formatting._pprint import pprint
@@ -30,13 +33,6 @@ __all__ = sorted([
     'make_header',
 ])
 __pdoc__ = {}
-
-
-### I encountered a bug in git bash on Windows.
-### This seems to resolve it; not sure if this is the best way.
-import os
-if 'PYTHONIOENCODING' not in os.environ:
-    os.environ['PYTHONIOENCODING'] = 'utf-8'
 
 
 def colored_fallback(*args, **kw):
@@ -74,6 +70,7 @@ def translate_rich_to_termcolor(*colors) -> tuple:
 
     return tuple(_colors)
 
+
 def rich_text_to_str(text: 'rich.text.Text') -> str:
     """Convert a `rich.text.Text` object to a string with ANSI in-tact."""
     _console = get_console()
@@ -81,10 +78,29 @@ def rich_text_to_str(text: 'rich.text.Text') -> str:
         return str(text)
     with console.capture() as cap:
         console.print(text)
-    return cap.get()[:-1]
+    string = cap.get()
+    return string[:-1]
 
 
 def _init():
+    """
+    Initial color settings (mostly for Windows).
+    """
+    if platform.system() != "Windows":
+        return
+    if 'PYTHONIOENCODING' not in os.environ:
+        os.environ['PYTHONIOENCODING'] = 'utf-8'
+    if 'PYTHONLEGACYWINDOWSSTDIO' not in os.environ:
+        os.environ['PYTHONLEGACYWINDOWSSTDIO'] = 'utf-8'
+    sys.stdin.reconfigure(encoding='utf-8')
+    sys.stdout.reconfigure(encoding='utf-8')
+    sys.stderr.reconfigure(encoding='utf-8')
+
+    from ctypes import windll
+    k = windll.kernel32
+    k.SetConsoleMode(k.GetStdHandle(-11), 7)
+    os.system("color")
+
     from meerschaum.utils.packages import attempt_import
     ### init colorama for Windows color output
     colorama, more_termcolor = attempt_import(
@@ -95,7 +111,7 @@ def _init():
         color = False,
     )
     try:
-        colorama.init()
+        colorama.init(autoreset=False)
         success = True
     except Exception as e:
         import traceback
@@ -141,6 +157,9 @@ def colored(text: str, *colors, as_rich_text: bool=False, **kw) -> Union[str, 'r
 
     """
     from meerschaum.utils.packages import import_rich, attempt_import
+    global _colorama_init
+    _init()
+    _colorama_init = _init() if not _colorama_init else True
 
     if 'style' in kw:
         rich = import_rich()
@@ -149,10 +168,6 @@ def colored(text: str, *colors, as_rich_text: bool=False, **kw) -> Union[str, 'r
         if as_rich_text:
             return text_obj
         return rich_text_to_str(text_obj)
-
-    global _colorama_init
-    _init()
-    _colorama_init = _init() if not _colorama_init else True
 
     more_termcolor = attempt_import('more_termcolor', install=False, lazy=False)
     try:
@@ -199,6 +214,7 @@ def print_tuple(
     ) -> None:
     """Print `meerschaum.utils.typing.SuccessTuple`."""
     from meerschaum.config.static import STATIC_CONFIG
+    _init()
     try:
         status = 'success' if tup[0] else 'failure'
     except TypeError:
