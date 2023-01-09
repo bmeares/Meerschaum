@@ -104,13 +104,6 @@ default_docker_compose_config = {
                 'POSTGRES_PASSWORD': env_dict['POSTGRES_PASSWORD'],
                 'ALLOW_IP_RANGE': env_dict['ALLOW_IP_RANGE'],
             },
-            #  'environment': [
-                #  'TIMESCALEDB_TELEMETRY=off',
-                #  'POSTGRES_USER=' + env_dict['POSTGRES_USER'],
-                #  'POSTGRES_DB=' + env_dict['POSTGRES_DB'],
-                #  'POSTGRES_PASSWORD=' + env_dict['POSTGRES_PASSWORD'],
-                #  'ALLOW_IP_RANGE=' + env_dict['ALLOW_IP_RANGE'],
-            #  ],
             'command': 'postgres -c max_connections=1000 -c shared_buffers=1024MB',
             'restart': 'always',
             'image' : 'timescale/timescaledb:' + env_dict['TIMESCALEDB_VERSION'],
@@ -139,10 +132,6 @@ default_docker_compose_config = {
                 'MRSM_CONFIG': env_dict['MEERSCHAUM_API_CONFIG'],
                 'MRSM_PATCH': env_dict['MEERSCHAUM_API_PATCH'],
             },
-            #  'environment': [
-                #  "MRSM_CONFIG='" + env_dict['MEERSCHAUM_API_CONFIG'] + "'",
-                #  "MRSM_PATCH='" + env_dict['MEERSCHAUM_API_PATCH'] + "'",
-            #  ],
             'restart' : 'always',
             'init': True,
             'depends_on' : [
@@ -177,12 +166,6 @@ default_docker_compose_config = {
                 'GF_AUTH_ANONYMOUS_ENABLED': 'true',
                 'GF_AUTH_ANONYMOUS_ORGANIZATION': 'public',
             },
-            #  'environment': [
-                #  'GF_SECURITY_ALLOW_EMBEDDING=true',
-                #  'GF_ANALYTICS_REPORTING_ENABLED=false',
-                #  'GF_AUTH_ANONYMOUS_ENABLED=true',
-                #  'GF_AUTH_ANONYMOUS_ORGANIZATION=public',
-            #  ],
         },
     },
 }

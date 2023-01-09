@@ -89,12 +89,11 @@ class yaml:
 
 
     @staticmethod
-    def dump(data, stream=None, default_style='|', **kw):
+    def dump(data, stream=None, **kw):
         """
         Dump to a stream. If no stream is provided, return a string instead.
         For `ruamel.yaml`, it dumps into a `StringIO` stream and returns `getvalue()`.
         """
-        #  kw.update({'default_style': default_style})
         get_string = False
         if stream is None and _import_name == 'ruamel.yaml':
             stream = _lib.compat.StringIO()
