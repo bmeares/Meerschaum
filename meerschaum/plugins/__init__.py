@@ -183,18 +183,21 @@ def sync_plugins_symlinks(debug: bool = False, warn: bool = True) -> None:
             (PLUGINS_RESOURCES_PATH / item) 
             for item in os.listdir(PLUGINS_RESOURCES_PATH)
         ]
-        plugins_to_be_symlinked = list(flatten_list(
-            [
+        try:
+            plugins_to_be_symlinked = list(flatten_list(
                 [
-                    (plugins_path / item)
-                    for item in os.listdir(plugins_path)
-                    if (
-                        not item.startswith('.')
-                    ) and (item not in ('__pycache__', '__init__.py'))
+                    [
+                        (plugins_path / item)
+                        for item in os.listdir(plugins_path)
+                        if (
+                            not item.startswith('.')
+                        ) and (item not in ('__pycache__', '__init__.py'))
+                    ]
+                    for plugins_path in PLUGINS_DIR_PATHS
                 ]
-                for plugins_path in PLUGINS_DIR_PATHS
-            ]
-        ))
+            ))
+        except Exception as e:
+            return
 
         ### Check for duplicates.
         seen_plugins = defaultdict(lambda: 0)
