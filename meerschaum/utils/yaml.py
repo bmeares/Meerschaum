@@ -30,6 +30,18 @@ __pdoc__ = {
 }
 
 
+def _string_presenter(dumper, data: str):
+    """
+    Format strings with newlines as blocks.
+    https://stackoverflow.com/a/33300001/9699829
+    """
+    tag_str = 'tag:yaml.org,2002:str'
+    kw = {}
+    if len(data.splitlines()) > 1:
+        kw['style'] = '|'
+    return dumper.represent_scalar(tag_str, data, **kw)
+
+
 class yaml:
     """
     Wrapper around `PyYAML` and `ruamel.yaml` so that we may switch between implementations.
@@ -44,6 +56,9 @@ class yaml:
             _lib = attempt_import(_import_name, split=False, lazy=False, install=True)
     with _locks['_yaml']:
         _yaml = _lib if _import_name != 'ruamel.yaml' else _lib.YAML()
+        if _import_name != 'ruamel.yaml':
+            _yaml.add_representer(str, _string_presenter)
+            _yaml.representer.SafeRepresenter.add_representer(str, _string_presenter)
 
 
     @staticmethod

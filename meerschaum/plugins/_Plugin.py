@@ -24,6 +24,7 @@ from meerschaum.config._paths import (
     PLUGINS_ARCHIVES_RESOURCES_PATH,
     PLUGINS_TEMP_RESOURCES_PATH,
     VIRTENV_RESOURCES_PATH,
+    PLUGINS_DIR_PATHS,
 )
 _tmpversion = None
 _ongoing_installations = set()
@@ -131,11 +132,11 @@ class Plugin:
             and potential_dir.is_dir()
             and (potential_dir / '__init__.py').exists()
         ):
-            return str(potential_dir / '__init__.py')
+            return str((potential_dir / '__init__.py').as_posix())
 
         potential_file = PLUGINS_RESOURCES_PATH / (self.name + '.py')
         if potential_file.exists() and not potential_file.is_dir():
-            return str(potential_file)
+            return str(potential_file.as_posix())
 
         return None
 
@@ -273,15 +274,16 @@ class Plugin:
 
         """
         if self.full_name in _ongoing_installations:
-            return True, "Already installing plugin '{self}'."
+            return True, f"Already installing plugin '{self}'."
         _ongoing_installations.add(self.full_name)
         from meerschaum.utils.warnings import warn, error
         if debug:
             from meerschaum.utils.debug import dprint
         import tarfile
-        from meerschaum.plugins import reload_plugins
+        from meerschaum.plugins import reload_plugins, sync_plugins_symlinks
         from meerschaum.utils.packages import attempt_import, determine_version
         from meerschaum.utils.venv import init_venv
+        from meerschaum.utils.misc import safely_extract_tar
         old_cwd = os.getcwd()
         old_version = ''
         new_version = ''
@@ -294,15 +296,16 @@ class Plugin:
             old_version = self.version
             if debug:
                 dprint(f"Found existing version '{old_version}' for plugin '{self}'.")
-        try:
-            with tarfile.open(self.archive_path, 'r:gz') as tarf:
-                tarf.extractall(temp_dir)
-        except Exception as e:
-            warn(e)
-            return False, f"Failed to extract plugin '{self.name}'."
 
         if debug:
             dprint(f"Extracting '{self.archive_path}' to '{temp_dir}'...")
+
+        try:
+            with tarfile.open(self.archive_path, 'r:gz') as tarf:
+                safely_extract_tar(tarf, temp_dir)
+        except Exception as e:
+            warn(e)
+            return False, f"Failed to extract plugin '{self.name}'."
 
         ### search for version information
         files = os.listdir(temp_dir)
@@ -325,7 +328,7 @@ class Plugin:
             search_for_metadata = False,
             warn = True,
             debug = debug,
-            venv = self.name,
+            #  venv = self.name,
         )
         if not new_version:
             warn(
@@ -344,8 +347,22 @@ class Plugin:
             )
         except Exception as e:
             is_new_version, is_same_version = True, False
+
+        ### Determine where to permanently store the new plugin.
+        plugin_installation_dir_path = PLUGINS_DIR_PATHS[0]
+        for path in PLUGINS_DIR_PATHS:
+            files_in_plugins_dir = os.listdir(path)
+            if (
+                self.name in files_in_plugins_dir
+                or
+                (self.name + '.py') in files_in_plugins_dir
+            ):
+                plugin_installation_dir_path = path
+                break
+
         success_msg = f"Successfully installed plugin '{self}'."
         success, abort = None, None
+
         if is_same_version and not force:
             success, msg = True, (
                 f"Plugin '{self}' is up-to-date (version {old_version}).\n" +
@@ -356,7 +373,7 @@ class Plugin:
             for src_dir, dirs, files in os.walk(temp_dir):
                 if success is not None:
                     break
-                dst_dir = str(src_dir).replace(str(temp_dir), str(PLUGINS_RESOURCES_PATH))
+                dst_dir = str(src_dir).replace(str(temp_dir), str(plugin_installation_dir_path))
                 if not os.path.exists(dst_dir):
                     os.mkdir(dst_dir)
                 for f in files:
@@ -388,8 +405,10 @@ class Plugin:
         os.chdir(old_cwd)
 
         ### Reload the plugin's module.
+        sync_plugins_symlinks(debug=debug)
         if '_module' in self.__dict__:
             del self.__dict__['_module']
+        init_venv(venv=self.name, force=True, debug=debug)
         reload_plugins([self.name], debug=debug)
 
         ### if we've already failed, return here
@@ -431,6 +450,7 @@ class Plugin:
             )
 
         _ongoing_installations.remove(self.full_name)
+        module = self.module
         return success, msg
 
 
@@ -466,6 +486,7 @@ class Plugin:
         """
         Remove a plugin, its virtual environment, and archive file.
         """
+        from meerschaum.plugins import reload_plugins, sync_plugins_symlinks
         from meerschaum.utils.warnings import warn, info
         warnings_thrown_count: int = 0
         max_warnings: int = 3
@@ -477,13 +498,14 @@ class Plugin:
                 stack = False,
             )
         else:
+            real_path = pathlib.Path(os.path.realpath(self.__file__))
             try:
-                if '__init__.py' in self.__file__:
-                    shutil.rmtree(self.__file__.replace('__init__.py', ''))
+                if real_path.name == '__init__.py':
+                    shutil.rmtree(real_path.parent)
                 else:
-                    os.remove(self.__file__)
+                    real_path.unlink()
             except Exception as e:
-                warn(f"Could not remove source files of plugin '{self.name}'.", stack=False)
+                warn(f"Could not remove source files for plugin '{self.name}':\n{e}", stack=False)
                 warnings_thrown_count += 1
             else:
                 info(f"Removed source files for plugin '{self.name}'.")
@@ -497,6 +519,9 @@ class Plugin:
                 info(f"Removed virtual environment from plugin '{self.name}'.")
 
         success = warnings_thrown_count < max_warnings
+        sync_plugins_symlinks(debug=debug)
+        self.deactivate_venv(force=True, debug=debug)
+        reload_plugins(debug=debug)
         return success, (
             f"Successfully uninstalled plugin '{self}'." if success
             else f"Failed to uninstall plugin '{self}'."
@@ -597,7 +622,10 @@ class Plugin:
         ### without having import the module.
         ### For consistency's sake, the module-less method does not cache the requirements.
         if self.__dict__.get('_module', None) is None:
-            with open(self.__file__, 'r', encoding='utf-8') as f:
+            file_path = self.__file__
+            if file_path is None:
+                return []
+            with open(file_path, 'r', encoding='utf-8') as f:
                 text = f.read()
 
             if 'required' not in text:
@@ -614,9 +642,28 @@ class Plugin:
             if not req_start_match:
                 return []
             req_start = req_start_match.start()
-            req_end   = req_start + 1 + text[req_start:].find(']')
-            if req_end == -1:
+
+            ### Dependencies may have brackets within the strings, so push back the index.
+            first_opening_brace = req_start + 1 + text[req_start:].find('[')
+            if first_opening_brace == -1:
                 return []
+
+            next_closing_brace = req_start + 1 + text[req_start:].find(']')
+            if next_closing_brace == -1:
+                return []
+
+            start_ix = first_opening_brace + 1
+            end_ix = next_closing_brace
+
+            num_braces = 0
+            while True:
+                if '[' not in text[start_ix:end_ix]:
+                    break
+                num_braces += 1
+                start_ix = end_ix
+                end_ix += text[end_ix + 1:].find(']') + 1
+
+            req_end = end_ix + 1
             req_text = (
                 text[req_start:req_end]
                 .lstrip()

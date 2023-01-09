@@ -8,8 +8,8 @@ Default configuration for jobs.
 
 default_jobs_config = {
     'logs' : {
-        'lines_to_show' : 15,
-        'min_buffer_len' : 15,
+        'lines_to_show': 30,
+        'min_buffer_len': 15,
         'colors' : [
             'cyan', 'magenta', 'orange3', 'green', 'blue', 'red', 'spring_green3',
             'medium_purple3', 'medium_violet_red', 'slate_blue1', 'bright_red', 'steel_blue3',

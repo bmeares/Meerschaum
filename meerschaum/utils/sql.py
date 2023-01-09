@@ -297,11 +297,22 @@ PD_TO_DB_DTYPES_FLAVORS: Dict[str, Dict[str, str]] = {
 }
 
 
+def clean(substring: str) -> str:
+    """
+    Ensure a substring is clean enough to be inserted into a SQL query.
+    Raises an exception when banned words are used.
+    """
+    from meerschaum.utils.warnings import error
+    banned_symbols = [';', '--', 'drop', 'create', 'alter', 'delete', 'commit']
+    for symbol in banned_symbols:
+        if symbol in str(substring).lower():
+            error(f"Invalid string: '{substring}'")
+
 def dateadd_str(
         flavor: str = 'postgresql',
         datepart: str = 'day',
         number: Union[int, float] = 0,
-        begin: Union[str, datetime.datetime] = 'now'
+        begin: Union[str, datetime.datetime, int] = 'now'
     ) -> str:
     """
     Generate a `DATEADD` clause depending on database flavor.
@@ -365,6 +376,8 @@ def dateadd_str(
     from meerschaum.utils.warnings import error
     import datetime
     dateutil = attempt_import('dateutil')
+    if 'int' in str(type(begin)).lower():
+        return str(begin)
     if not begin:
         return None
     _original_begin = begin
@@ -380,11 +393,8 @@ def dateadd_str(
 
     ### Unable to parse into a datetime.
     if begin_time is None:
-        ### Throw an error if any of these banned symbols are included in the `begin` string.
-        banned_symbols = [';', '--', 'drop', 'create', 'alter', 'delete', 'commit']
-        for symbol in banned_symbols:
-            if symbol in str(begin).lower():
-                error(f"Invalid datetime: '{begin}'")
+        ### Throw an error if banned symbols are included in the `begin` string.
+        clean(str(begin))
     ### If begin is a valid datetime, wrap it in quotes.
     else:
         begin = f"'{begin}'"

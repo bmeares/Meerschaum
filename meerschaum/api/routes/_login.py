@@ -13,6 +13,7 @@ from starlette.responses import Response, JSONResponse
 from meerschaum.api import endpoints, get_api_connector, app, debug, manager, no_auth
 from meerschaum.core import User
 from meerschaum.config.static import STATIC_CONFIG
+from meerschaum.utils.typing import Dict, Any
 
 
 @manager.user_loader()
@@ -28,7 +29,7 @@ def load_user(
 @app.post(endpoints['login'], tags=['Users'])
 def login(
         data: OAuth2PasswordRequestForm = fastapi.Depends()
-    ) -> JSONResponse:
+    ) -> Dict[str, Any]:
     """
     Login and set the session token.
     """

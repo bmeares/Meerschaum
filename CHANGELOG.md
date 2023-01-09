@@ -1,8 +1,54 @@
 # 🪵 Changelog
 
-## 1.4.x Releases
+## 1.5.x Releases
 
 This is the current release cycle, so stay tuned for future releases!
+
+### v1.5.0
+
+- **Pipes may now use integers for the `datetime` column.**  
+  If you use an auto-incrementing integer as your primary key, you may now use that column as your pipe's `datetime` column, just specify the `dtype` as an `Int64`:
+
+  ```python
+  import meerschaum as mrsm
+  pipe = mrsm.Pipe(
+      'foo', 'bar',
+      instance = 'sql:memory',
+      columns = {
+          'datetime': 'id',
+      },
+      dtypes = {
+          'id': 'Int64',
+      },
+  )
+  pipe.sync([{'id': 1, 'foo': 'bar'}])
+  pipe.sync([{'id': 2, 'foo': 'baz'}])
+  ```
+
+  This applies the same incremental range filtering logic as is normally done on the datetime axis.
+
+- **Allow for multiple plugins directories.**  
+  You may now set multiple directories for `MRSM_PLUGINS_DIR`. All of the plugins contained in each directory will be symlinked together into a single `plugins` namespace. To do this, just set `MRSM_PLUGINS_DIR` to a JSON-encoded list:
+
+  ```bash
+  export MRSM_PLUGINS_DIR='["./plugins_1", "./plugins_2"]'
+  ```
+
+- **Better Windows support.**  
+  At long last, the color issues plaguing Windows users have finally been resolved. Additionally, support for background jobs has been fixed on Windows, though the daemonization library I use is pretty hacky and doesn't make for the smoothest experience. But at least it works now!
+
+- **Fixed unsafe TAR extraction.**  
+  A [PR about unsafe use of `tar.extractall()`](https://github.com/bmeares/Meerschaum/pull/100) brought this issue to light.
+
+- **Fixed the blank logs bug in `show logs`.**  
+  Backtracking a couple lines before following the rest of the logs has been fixed.
+
+- **Requirements may include brackets.**  
+  Python packages listed in a plugin's `requirements` list may now include brackets (e.g. `meerschaum[api]`).
+
+## 1.4.x Releases
+
+The 1.4.x series brought some incredible, stable releases, and the highlight feature was in-place SQL syncs for massive performance improvement. The addition of `temporary` to Pipes also made using pipes in projects more accessible.
 
 ### v1.4.14
 

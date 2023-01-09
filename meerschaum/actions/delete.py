@@ -455,7 +455,7 @@ def _delete_jobs(
     for d in _to_delete:
         d.cleanup()
         if d.path.exists() and not nopretty:
-            warn("Failed to delete job '{d.daemon_id}'.", stack=False)
+            warn(f"Failed to delete job '{d.daemon_id}'.", stack=False)
             continue
         _deleted.append(d)
 

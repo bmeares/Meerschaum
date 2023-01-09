@@ -127,7 +127,7 @@ def _api_start(
         attempt_import, venv_contains_package, pip_install, run_python_package
     )
     from meerschaum.utils.misc import is_int, filter_keywords
-    from meerschaum.utils.formatting import pprint, ANSI
+    from meerschaum.utils.formatting import pprint, ANSI, _init
     from meerschaum.utils.debug import dprint
     from meerschaum.utils.warnings import error, warn
     from meerschaum.config import get_config, _config
@@ -146,6 +146,9 @@ def _api_start(
 
     if action is None:
         action = []
+
+    ### Initialize colorama for ANSI output.
+    _init()
 
     ### Uvicorn must be installed on the host because of multiprocessing reasons.
     ### `check_update` must be False, because otherwise Uvicorn's hidden imports will break things.
@@ -207,7 +210,7 @@ def _api_start(
     uvicorn_config.update({
         'port': port,
         'host': host,
-        'env_file': str(uvicorn_env_path),
+        'env_file': str(uvicorn_env_path.as_posix()),
         'mrsm_instance': mrsm_instance,
         'no_dash': no_dash,
         'no_auth': no_auth,

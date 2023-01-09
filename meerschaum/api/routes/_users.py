@@ -197,7 +197,7 @@ def get_user_password_hash(
         curr_user = (
             fastapi.Depends(manager) if not no_auth else None
         ),
-    ) -> Union[str, HTTPException]:
+    ) -> str:
     """
     If configured to allow chaining, return a user's password_hash.
     """
@@ -211,7 +211,7 @@ def get_user_type(
         curr_user = (
             fastapi.Depends(manager) if not no_auth else None
         ),
-    ) -> Union[str, HTTPException]:
+    ) -> str:
     """
     If configured to allow chaining, return a user's type.
     """

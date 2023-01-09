@@ -563,6 +563,7 @@ def _show_jobs(
     pprint_jobs(daemons, nopretty=nopretty)
     return True, "Success"
 
+
 def _show_logs(
         action: Optional[List[str]] = None,
         nopretty: bool = False,
@@ -649,35 +650,30 @@ def _show_logs(
         def _print_log_lines(daemon):
             if not daemon.log_path.exists():
                 return
-            for line in Log(daemon.log_path, offset_file_path=daemon.log_offset_path):
+            for line in daemon.log:
                 _print_job_line(daemon, line)
 
         def _seek_back_offset(d) -> bool:
             if not d.log_path.exists():
                 return False
             if not d.log_offset_path.exists():
-                Log(d.log_path, offset_file_path=d.log_offset_path).read()
+                d.log.read()
             if not d.log_offset_path.exists():
                 return False
+
             log_text = d.log_text
             if log_text is None:
                 return False
             lines_to_show = get_config('jobs', 'logs', 'lines_to_show')
-            begin_index, end_index = 0, len(log_text)
-            backup_index = 0
-            for i in range(lines_to_show):
-                nl_index = log_text.rfind('\n', begin_index, end_index)
-                if nl_index == -1:
-                    break
-                end_index = nl_index
-            backup_index = ((len(log_text) - nl_index) - 1) if end_index not in (-1, 0) else 0
+
+            log_text_lines = log_text.splitlines()
+            backup_index = len('\n'.join(log_text_lines[(-1 * lines_to_show):]))
 
             with open(d.log_offset_path, 'r', encoding='utf-8') as f:
                 offset_lines = f.readlines()
                 char_index = int(offset_lines[-1].rstrip('\n'))
                 new_offset_lines = [
-                    offset_lines[0],
-                    str((len(log_text) - backup_index) if char_index > backup_index else 0) + '\n'
+                    str(max(char_index - backup_index, 0))
                 ]
             with open(d.log_offset_path, 'w', encoding='utf-8') as f:
                 f.writelines(new_offset_lines)
