@@ -35,7 +35,7 @@ This is the current release cycle, so stay tuned for future releases!
   ```
 
 - **Better Windows support.**  
-  At long last, the color issues plaguing Windows users have finally been resolves. Additionally, support for background jobs has been fixed on Windows, though the daemonization library I use is pretty hacky and doesn't make for the smoothest experience. But at least it works now!
+  At long last, the color issues plaguing Windows users have finally been resolved. Additionally, support for background jobs has been fixed on Windows, though the daemonization library I use is pretty hacky and doesn't make for the smoothest experience. But at least it works now!
 
 - **Fixed unsafe TAR extraction.**  
   A [PR about unsafe use of `tar.extractall()`](https://github.com/bmeares/Meerschaum/pull/100) brought this issue to light.
