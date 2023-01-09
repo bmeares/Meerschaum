@@ -274,13 +274,13 @@ class Plugin:
 
         """
         if self.full_name in _ongoing_installations:
-            return True, "Already installing plugin '{self}'."
+            return True, f"Already installing plugin '{self}'."
         _ongoing_installations.add(self.full_name)
         from meerschaum.utils.warnings import warn, error
         if debug:
             from meerschaum.utils.debug import dprint
         import tarfile
-        from meerschaum.plugins import reload_plugins
+        from meerschaum.plugins import reload_plugins, sync_plugins_symlinks
         from meerschaum.utils.packages import attempt_import, determine_version
         from meerschaum.utils.venv import init_venv
         from meerschaum.utils.misc import safely_extract_tar
@@ -328,7 +328,7 @@ class Plugin:
             search_for_metadata = False,
             warn = True,
             debug = debug,
-            venv = self.name,
+            #  venv = self.name,
         )
         if not new_version:
             warn(
@@ -405,8 +405,10 @@ class Plugin:
         os.chdir(old_cwd)
 
         ### Reload the plugin's module.
+        sync_plugins_symlinks(debug=debug)
         if '_module' in self.__dict__:
             del self.__dict__['_module']
+        init_venv(venv=self.name, force=True, debug=debug)
         reload_plugins([self.name], debug=debug)
 
         ### if we've already failed, return here
@@ -448,6 +450,7 @@ class Plugin:
             )
 
         _ongoing_installations.remove(self.full_name)
+        module = self.module
         return success, msg
 
 
@@ -483,6 +486,7 @@ class Plugin:
         """
         Remove a plugin, its virtual environment, and archive file.
         """
+        from meerschaum.plugins import reload_plugins, sync_plugins_symlinks
         from meerschaum.utils.warnings import warn, info
         warnings_thrown_count: int = 0
         max_warnings: int = 3
@@ -494,13 +498,14 @@ class Plugin:
                 stack = False,
             )
         else:
+            real_path = pathlib.Path(os.path.realpath(self.__file__))
             try:
-                if '__init__.py' in self.__file__:
-                    shutil.rmtree(self.__file__.replace('__init__.py', ''))
+                if real_path.name == '__init__.py':
+                    shutil.rmtree(real_path.parent)
                 else:
-                    os.remove(self.__file__)
+                    real_path.unlink()
             except Exception as e:
-                warn(f"Could not remove source files of plugin '{self.name}'.", stack=False)
+                warn(f"Could not remove source files for plugin '{self.name}':\n{e}", stack=False)
                 warnings_thrown_count += 1
             else:
                 info(f"Removed source files for plugin '{self.name}'.")
@@ -514,6 +519,9 @@ class Plugin:
                 info(f"Removed virtual environment from plugin '{self.name}'.")
 
         success = warnings_thrown_count < max_warnings
+        sync_plugins_symlinks(debug=debug)
+        self.deactivate_venv(force=True, debug=debug)
+        reload_plugins(debug=debug)
         return success, (
             f"Successfully uninstalled plugin '{self}'." if success
             else f"Failed to uninstall plugin '{self}'."

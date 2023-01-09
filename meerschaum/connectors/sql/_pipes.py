@@ -393,6 +393,7 @@ def get_create_index_queries(
     indices = pipe.get_indices()
 
     _datetime = pipe.get_columns('datetime', error=False)
+    _datetime_type = pipe.dtypes.get(_datetime, 'datetime64[ns]')
     _datetime_name = sql_item_name(_datetime, self.flavor) if _datetime is not None else None
     _datetime_index_name = (
         sql_item_name(indices['datetime'], self.flavor) if indices.get('datetime', None)
@@ -412,14 +413,21 @@ def get_create_index_queries(
                 get_distinct_col_count(_id, f"SELECT {_id_name} FROM {_pipe_name}", self)
                 if (_id is not None and _create_space_partition) else None
             )
+            chunk_time_interval = (
+                pipe.parameters.get('chunk_time_interval', None)
+                or
+                ("INTERVAL '1 DAY'" if not 'int' in _datetime_type.lower() else '100000')
+            )
+
             dt_query = (
                 f"SELECT create_hypertable('{_pipe_name}', " +
                 f"'{_datetime}', "
                 + (
                     f"'{_id}', {_id_count}, " if (_id is not None and _create_space_partition)
                     else ''
-                ) +
-                "migrate_data => true);"
+                )
+                + f'chunk_time_interval => {chunk_time_interval}, '
+                + "migrate_data => true);"
             )
         else: ### mssql, sqlite, etc.
             dt_query = (
@@ -436,7 +444,8 @@ def get_create_index_queries(
             id_query = (
                 None if (_id is not None and _create_space_partition)
                 else (
-                    f"CREATE INDEX {_id_index_name} ON {_pipe_name} ({_id_name})" if _id is not None
+                    f"CREATE INDEX {_id_index_name} ON {_pipe_name} ({_id_name})"
+                    if _id is not None
                     else None
                 )
             )
@@ -455,7 +464,7 @@ def get_create_index_queries(
             index_queries[_id] = [id_query]
 
 
-    ### Create indices for other label in `pipe.columns`.
+    ### Create indices for other labels in `pipe.columns`.
     other_indices = {
         ix_key: ix_unquoted
         for ix_key, ix_unquoted in pipe.get_indices().items()
@@ -689,8 +698,11 @@ def get_pipe_data(
                 dt = sql_item_name(_dt, self.flavor)
                 is_guess = False
 
-            if _dt and 'datetime' not in dtypes.get(_dt, 'object'):
-                dtypes[_dt] = 'datetime64[ns]'
+            if _dt:
+                dt_type = dtypes.get(_dt, 'object').lower()
+                if 'datetime' not in dt_type:
+                    if 'int' not in dt_type:
+                        dtypes[_dt] = 'datetime64[ns]'
     existing_cols = pipe.get_columns_types(debug=debug)
     if existing_cols:
         dtypes = {col: typ for col, typ in dtypes.items() if col in existing_cols}
@@ -857,6 +869,8 @@ def get_pipe_data_query(
         is_dt_bound = True
 
     if end is not None and _dt in existing_cols:
+        if 'int' in str(type(end)).lower() and end == begin:
+            end += 1
         end_da = dateadd_str(
             flavor = self.flavor,
             datepart = 'minute',
@@ -1831,12 +1845,14 @@ def get_sync_time(
     import datetime
     table = sql_item_name(pipe.target, self.flavor)
 
-    if not pipe.columns.get('datetime', None):
+    dt_col = pipe.columns.get('datetime', None)
+    dt_type = pipe.dtypes.get(dt_col, 'datetime64[ns]')
+    if not dt_col:
         _dt = pipe.guess_datetime()
         dt = sql_item_name(_dt, self.flavor) if _dt else None
         is_guess = True
     else:
-        _dt = pipe.get_columns('datetime')
+        _dt = dt_col
         dt = sql_item_name(_dt, self.flavor)
         is_guess = False
 
@@ -1886,6 +1902,9 @@ def get_sync_time(
         ### Sometimes the datetime is actually a date.
         elif isinstance(db_time, datetime.date):
             st = datetime.datetime.combine(db_time, datetime.datetime.min.time())
+        ### Adding support for an integer datetime axis.
+        elif 'int' in str(type(db_time)).lower():
+            st = db_time
         ### Convert pandas timestamp to Python datetime.
         else:
             st = db_time.to_pydatetime()
@@ -1894,7 +1913,7 @@ def get_sync_time(
         sync_time = (
             round_time(st, date_delta=datetime.timedelta(minutes=1), to='down')
             if round_down else st
-        )
+        ) if not isinstance(st, int) else st
 
     except Exception as e:
         sync_time = None

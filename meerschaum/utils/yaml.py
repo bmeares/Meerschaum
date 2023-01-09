@@ -30,6 +30,18 @@ __pdoc__ = {
 }
 
 
+def _string_presenter(dumper, data: str):
+    """
+    Format strings with newlines as blocks.
+    https://stackoverflow.com/a/33300001/9699829
+    """
+    tag_str = 'tag:yaml.org,2002:str'
+    kw = {}
+    if len(data.splitlines()) > 1:
+        kw['style'] = '|'
+    return dumper.represent_scalar(tag_str, data, **kw)
+
+
 class yaml:
     """
     Wrapper around `PyYAML` and `ruamel.yaml` so that we may switch between implementations.
@@ -44,6 +56,9 @@ class yaml:
             _lib = attempt_import(_import_name, split=False, lazy=False, install=True)
     with _locks['_yaml']:
         _yaml = _lib if _import_name != 'ruamel.yaml' else _lib.YAML()
+        if _import_name != 'ruamel.yaml':
+            _yaml.add_representer(str, _string_presenter)
+            _yaml.representer.SafeRepresenter.add_representer(str, _string_presenter)
 
 
     @staticmethod
@@ -74,11 +89,12 @@ class yaml:
 
 
     @staticmethod
-    def dump(data, stream=None, **kw):
+    def dump(data, stream=None, default_style='|', **kw):
         """
         Dump to a stream. If no stream is provided, return a string instead.
         For `ruamel.yaml`, it dumps into a `StringIO` stream and returns `getvalue()`.
         """
+        #  kw.update({'default_style': default_style})
         get_string = False
         if stream is None and _import_name == 'ruamel.yaml':
             stream = _lib.compat.StringIO()

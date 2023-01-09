@@ -516,6 +516,18 @@ class Daemon:
             text = None
         return text
 
+    
+    @property
+    def log(self) -> 'meerschaum.utils.daemon.Log':
+        """
+        Return a `meerschaum.utils.daemon.Log` object for this daemon.
+        """
+        if self.__dict__.get('_log', None) is not None:
+            return self.__dict__['_log']
+        from meerschaum.utils.daemon import Log
+        self._log = Log(self.log_path, self.log_offset_path)
+        return self._log
+
 
     @property
     def pid(self) -> str:

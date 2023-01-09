@@ -47,7 +47,8 @@ env_dict['MEERSCHAUM_API_CONFIG'] = json.dumps(
         'meerschaum' : 'MRSM{!meerschaum}',
         'system' : 'MRSM{!system}',
     },
-    separators = (',', ':'),
+    #  separators = (',', ':'),
+    indent = 4,
 ).replace(
     '"MRSM{!system}"', 'MRSM{!system}'
 ).replace(
@@ -65,7 +66,8 @@ env_dict['MEERSCHAUM_API_PATCH'] = json.dumps(
                 },
             },
         },
-    }
+    },
+    indent = 4,
 )
 
 compose_header = """
@@ -92,18 +94,25 @@ networks = {
 }
 
 default_docker_compose_config = {
-    'version' : '3.2',
+    'version': '3.2',
     'services': {
-        'db' : {
-            'environment' : [
-                'TIMESCALEDB_TELEMETRY=off',
-                'POSTGRES_USER=' + env_dict['POSTGRES_USER'],
-                'POSTGRES_DB=' + env_dict['POSTGRES_DB'],
-                'POSTGRES_PASSWORD=' + env_dict['POSTGRES_PASSWORD'],
-                'ALLOW_IP_RANGE=' + env_dict['ALLOW_IP_RANGE'],
-            ],
+        'db': {
+            'environment': {
+                'TIMESCALEDB_TELEMETRY': 'off',
+                'POSTGRES_USER': env_dict['POSTGRES_USER'],
+                'POSTGRES_DB': env_dict['POSTGRES_DB'],
+                'POSTGRES_PASSWORD': env_dict['POSTGRES_PASSWORD'],
+                'ALLOW_IP_RANGE': env_dict['ALLOW_IP_RANGE'],
+            },
+            #  'environment': [
+                #  'TIMESCALEDB_TELEMETRY=off',
+                #  'POSTGRES_USER=' + env_dict['POSTGRES_USER'],
+                #  'POSTGRES_DB=' + env_dict['POSTGRES_DB'],
+                #  'POSTGRES_PASSWORD=' + env_dict['POSTGRES_PASSWORD'],
+                #  'ALLOW_IP_RANGE=' + env_dict['ALLOW_IP_RANGE'],
+            #  ],
             'command': 'postgres -c max_connections=1000 -c shared_buffers=1024MB',
-            'restart' : 'always',
+            'restart': 'always',
             'image' : 'timescale/timescaledb:' + env_dict['TIMESCALEDB_VERSION'],
             'ports' : [
                 f'{db_port}:5432',
@@ -117,20 +126,25 @@ default_docker_compose_config = {
                 'backend',
             ],
         },
-        'api' : {
-            'image' : 'bmeares/meerschaum:api',
-            'ports' : [f'{api_port}:{api_port}'],
-            'hostname' : f'{api_host}',
-            'networks' : [
+        'api': {
+            'image': 'bmeares/meerschaum:api',
+            'ports': [f'{api_port}:{api_port}'],
+            'hostname': f'{api_host}',
+            'networks': [
                 'frontend',
                 'backend',
             ],
-            'command' : 'start api --production',
-            'environment' : [
-                "MRSM_CONFIG='" + env_dict['MEERSCHAUM_API_CONFIG'] + "'",
-                "MRSM_PATCH='" + env_dict['MEERSCHAUM_API_PATCH'] + "'",
-            ],
+            'command': f'start api --production --port {api_port}',
+            'environment': {
+                'MRSM_CONFIG': env_dict['MEERSCHAUM_API_CONFIG'],
+                'MRSM_PATCH': env_dict['MEERSCHAUM_API_PATCH'],
+            },
+            #  'environment': [
+                #  "MRSM_CONFIG='" + env_dict['MEERSCHAUM_API_CONFIG'] + "'",
+                #  "MRSM_PATCH='" + env_dict['MEERSCHAUM_API_PATCH'] + "'",
+            #  ],
             'restart' : 'always',
+            'init': True,
             'depends_on' : [
                 'db',
             ],
@@ -138,31 +152,37 @@ default_docker_compose_config = {
                 'api_root:' + volumes['api_root'],
             ],
         },
-        'grafana' : {
-            'image' : 'grafana/grafana:latest',
-            'ports' : [
+        'grafana': {
+            'image': 'grafana/grafana:latest',
+            'ports': [
                 '3000:3000',
             ],
-            'networks' : [
+            'networks': [
                 'frontend',
                 'backend',
             ],
-            'restart' : 'always',
-            'depends_on' : [
+            'restart': 'always',
+            'depends_on': [
                 'db',
             ],
-            'volumes' : [
+            'volumes': [
                 'grafana_storage' + ':' + volumes['grafana_storage'],
                 ### NOTE: Mount with the 'z' option for SELinux.
                 f'{GRAFANA_DATASOURCE_PATH.parent}:/etc/grafana/provisioning/datasources:z,ro',
                 f'{GRAFANA_DASHBOARD_PATH.parent}:/etc/grafana/provisioning/dashboards:z,ro',
             ],
-            'environment' : [
-                'GF_SECURITY_ALLOW_EMBEDDING=true',
-                'GF_ANALYTICS_REPORTING_ENABLED=false',
-                'GF_AUTH_ANONYMOUS_ENABLED=true',
-                'GF_AUTH_ANONYMOUS_ORGANIZATION=public',
-            ],
+            'environment': {
+                'GF_SECURITY_ALLOW_EMBEDDING': 'true',
+                'GF_ANALYTICS_REPORTING_ENABLED': 'false',
+                'GF_AUTH_ANONYMOUS_ENABLED': 'true',
+                'GF_AUTH_ANONYMOUS_ORGANIZATION': 'public',
+            },
+            #  'environment': [
+                #  'GF_SECURITY_ALLOW_EMBEDDING=true',
+                #  'GF_ANALYTICS_REPORTING_ENABLED=false',
+                #  'GF_AUTH_ANONYMOUS_ENABLED=true',
+                #  'GF_AUTH_ANONYMOUS_ORGANIZATION=public',
+            #  ],
         },
     },
 }

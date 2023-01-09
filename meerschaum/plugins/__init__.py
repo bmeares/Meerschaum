@@ -120,7 +120,7 @@ def api_plugin(function: Callable[[Any], Any]) -> Callable[[Any], Any]:
 
 
 _synced_symlinks: bool = False
-def sync_plugins_symlinks() -> None:
+def sync_plugins_symlinks(debug: bool = False, warn: bool = True) -> None:
     """
     Update the plugins 
     """

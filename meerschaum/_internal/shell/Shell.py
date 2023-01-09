@@ -321,7 +321,7 @@ class Shell(cmd.Cmd):
             def apply_colors(attr, key):
                 return colored(
                     attr,
-                    *get_config('shell', 'ansi', key, 'rich', patch=patch)
+                    **get_config('shell', 'ansi', key, 'rich', patch=patch)
                 )
 
             for attr_key in get_config('shell', 'ansi'):

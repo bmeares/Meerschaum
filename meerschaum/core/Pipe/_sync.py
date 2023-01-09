@@ -440,52 +440,79 @@ def filter_existing(
         return df, df, df
 
     ### begin is the oldest data in the new dataframe
+    dt_col = self.columns.get('datetime', None)
+    dt_type = self.dtypes.get(dt_col, 'datetime64[ns]') if dt_col else None
     try:
-        min_dt = pd.to_datetime(
-            df[self.columns['datetime']].min(skipna=True)
-        ).to_pydatetime()
+        min_dt_val = df[dt_col].min(skipna=True) if dt_col else None
+        min_dt = (
+            pd.to_datetime(min_dt_val).to_pydatetime()
+            if 'datetime' in dt_type
+            else min_dt_val
+        )
     except Exception as e:
         min_dt = None
-    if not isinstance(min_dt, datetime.datetime) or str(min_dt) == 'NaT':
-        min_dt = None
-    begin = (
-        round_time(
-            min_dt,
-            to = 'down'
-        ) - datetime.timedelta(minutes=1)
-    ) if min_dt is not None else None
+    if not ('datetime' in str(type(min_dt))) or str(min_dt) == 'NaT':
+        if 'int' not in str(type(min_dt)).lower():
+            min_dt = None
+    if isinstance(min_dt, datetime.datetime):
+        begin = (
+            round_time(
+                min_dt,
+                to = 'down'
+            ) - datetime.timedelta(minutes=1)
+        )
+    elif dt_type and 'int' in dt_type.lower():
+        begin = min_dt
+    else:
+        begin = None
 
     ### end is the newest data in the new dataframe
     try:
-        max_dt = pd.to_datetime(
-            df[self.columns['datetime']].max(skipna=True)
-        ).to_pydatetime()
+        max_dt_val = df[dt_col].max(skipna=True) if dt_col else None
+        max_dt = (
+            pd.to_datetime(max_dt_val).to_pydatetime()
+            if 'datetime' in dt_type
+            else max_dt_val
+        )
     except Exception as e:
         max_dt = None
-    if not isinstance(max_dt, datetime.datetime) or str(max_dt) == 'NaT':
-        max_dt = None
+
+    if not ('datetime' in str(type(max_dt))) or str(min_dt) == 'NaT':
+        if 'int' not in str(type(max_dt)).lower():
+            max_dt = None
+
+    if isinstance(max_dt, datetime.datetime):
+        end = (
+            round_time(
+                max_dt,
+                to = 'down'
+            ) + datetime.timedelta(minutes=1)
+        )
+    elif dt_type and 'int' in dt_type.lower():
+        end = max_dt
+    else:
+        end = None
+
 
     if max_dt is not None and min_dt > max_dt:
         warn(f"Detected minimum datetime greater than maximum datetime.")
 
     ### If `max_dt` is `None`, unbound the search.
-    end = (
-        round_time(
-            max_dt,
-            to = 'down'
-        ) + datetime.timedelta(minutes=1)
-    ) if max_dt is not None else end
     if begin is not None and end is not None and begin > end:
-        begin = end - datetime.timedelta(minutes=1)
+        if isinstance(begin, datetime.datetime):
+            begin = end - datetime.timedelta(minutes=1)
+        ### We might be using integers for out datetime axis.
+        else:
+            begin = end - 1
 
     if debug:
         dprint(f"Looking at data between '{begin}' and '{end}'.", **kw)
 
     ### backtrack_df is existing Pipe data that overlaps with the fetched df
-    try:
-        backtrack_minutes = self.parameters['fetch']['backtrack_minutes']
-    except Exception as e:
-        backtrack_minutes = 0
+    #  try:
+        #  backtrack_minutes = self.parameters['fetch']['backtrack_minutes']
+    #  except Exception as e:
+        #  backtrack_minutes = 0
 
     backtrack_df = self.get_data(
         begin = begin,

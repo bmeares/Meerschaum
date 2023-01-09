@@ -14,6 +14,7 @@ from meerschaum.utils.typing import Optional, Union, Any
 from meerschaum.utils.formatting._shell import make_header
 from meerschaum.utils.formatting._pprint import pprint
 from meerschaum.utils.formatting._pipes import pprint_pipes, highlight_pipes
+from meerschaum.utils.threading import Lock, RLock
 
 _attrs = {
     'ANSI': None,
@@ -33,6 +34,9 @@ __all__ = sorted([
     'make_header',
 ])
 __pdoc__ = {}
+_locks = {
+    '_colorama_init': RLock(),
+}
 
 
 def colored_fallback(*args, **kw):
@@ -159,7 +163,9 @@ def colored(text: str, *colors, as_rich_text: bool=False, **kw) -> Union[str, 'r
     from meerschaum.utils.packages import import_rich, attempt_import
     global _colorama_init
     _init()
-    _colorama_init = _init() if not _colorama_init else True
+    with _locks['_colorama_init']:
+        if not _colorama_init:
+            _colorama_init = _init()
 
     if 'style' in kw:
         rich = import_rich()
@@ -169,7 +175,7 @@ def colored(text: str, *colors, as_rich_text: bool=False, **kw) -> Union[str, 'r
             return text_obj
         return rich_text_to_str(text_obj)
 
-    more_termcolor = attempt_import('more_termcolor', install=False, lazy=False)
+    more_termcolor = attempt_import('more_termcolor', lazy=False)
     try:
         colored_text = more_termcolor.colored(text, *colors, **kw)
     except Exception as e:
