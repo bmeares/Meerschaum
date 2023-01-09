@@ -1801,3 +1801,35 @@ def parametrized(dec):
             return dec(f, *args, **kwargs)
         return repl
     return layer
+
+
+def safely_extract_tar(tarf: 'file', output_dir: Union[str, 'pathlib.Path']) -> None:
+    """
+    Safely extract a TAR file to a give directory.
+    This defends against CVE-2007-4559.
+
+    Parameters
+    ----------
+    tarf: file
+        The TAR file opened with `tarfile.open(path, 'r:gz')`.
+
+    output_dir: Union[str, pathlib.Path]
+        The output directory.
+    """
+    import os
+
+    def is_within_directory(directory, target):
+        abs_directory = os.path.abspath(directory)
+        abs_target = os.path.abspath(target)
+        prefix = os.path.commonprefix([abs_directory, abs_target])
+        return prefix == abs_directory 
+
+    def safe_extract(tar, path=".", members=None, *, numeric_owner=False):
+        for member in tar.getmembers():
+            member_path = os.path.join(path, member.name)
+            if not is_within_directory(path, member_path):
+                raise Exception("Attempted Path Traversal in Tar File")
+
+        tar.extractall(path=path, members=members, numeric_owner=numeric_owner)
+
+    return safe_extract(tarf, output_dir)

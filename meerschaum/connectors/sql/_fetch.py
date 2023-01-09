@@ -101,6 +101,7 @@ def get_pipe_metadef(
     from meerschaum.utils.debug import dprint
     from meerschaum.utils.warnings import warn, error
     from meerschaum.utils.sql import sql_item_name, dateadd_str, build_where
+    from meerschaum.utils.misc import is_int
     from meerschaum.config import get_config
 
     definition = get_pipe_query(pipe)
@@ -159,7 +160,11 @@ def get_pipe_metadef(
 
     has_where = 'where' in meta_def.lower()[meta_def.lower().rfind('definition'):]
     if dt_name and (begin_da or end_da):
-        definition_dt_name = dateadd_str(self.flavor, 'minute', 0, f"definition.{dt_name}")
+        definition_dt_name = (
+            dateadd_str(self.flavor, 'minute', 0, f"definition.{dt_name}")
+            if not is_int((begin_da or end_da))
+            else f"definition.{dt_name}"
+        )
         meta_def += "\n" + ("AND" if has_where else "WHERE") + " "
         has_where = True
         if begin_da:

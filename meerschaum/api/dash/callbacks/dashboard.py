@@ -104,7 +104,7 @@ _required_login = {''}
     Output('page-layout-div', 'children'),
     Output('session-store', 'data'),
     Input('location', 'pathname'),
-    State('session-store', 'data'),
+    Input('session-store', 'data'),
 )
 def update_page_layout_div(pathname: str, session_store_data: Dict[str, Any]):
     """
@@ -133,13 +133,16 @@ def update_page_layout_div(pathname: str, session_store_data: Dict[str, Any]):
     if session_id is None and no_auth:
         session_store_data['session-id'] = str(uuid.uuid4())
         active_sessions[session_store_data['session-id']] = {'username': 'no-auth'}
+        session_store_to_return = session_data
+    else:
+        session_store_to_return = dash.no_update
 
     _path = (pathname.rstrip('/') + '/').replace((dash_endpoint + '/'), '').rstrip('/')
     path = _path if no_auth or _path not in _required_login else (
         _path if session_id in active_sessions else 'login'
     )
     layout = _paths.get(path, pages.error.layout)
-    return layout, session_store_data
+    return layout, session_store_to_return
 
 
 @dash_app.callback(

@@ -33,7 +33,8 @@ threads_active_venvs: Dict[int, 'set[str]'] = {}
 
 def activate_venv(
         venv: Optional[str] = 'mrsm',
-        color : bool = True,
+        color: bool = True,
+        force: bool = False,
         debug: bool = False,
         **kw
     ) -> bool:
@@ -48,6 +49,9 @@ def activate_venv(
     color: bool, default True
         If `True`, include color in debug text.
 
+    force: bool, default False
+        If `True`, do not exit early even if the venv is currently active.
+
     debug: bool, default False
         Verbosity toggle.
 
@@ -58,7 +62,8 @@ def activate_venv(
     """
     thread_id = get_ident()
     if active_venvs_order and active_venvs_order[0] == venv:
-        return True
+        if not force:
+            return True
     import sys, platform, os
     from meerschaum.config._paths import VIRTENV_RESOURCES_PATH
     if debug:
@@ -169,7 +174,8 @@ def deactivate_venv(
                 if venv in other_venvs:
                     if debug:
                         dprint(
-                            f"Venv '{venv}' is still being used by other threads, keeping active...",
+                            f"Venv '{venv}' is still being used by other threads,"
+                            + "keeping active...",
                             color = color,
                         )
                     return True
@@ -187,7 +193,7 @@ def deactivate_venv(
     if debug:
         dprint(f"Deactivating virtual environment '{venv}'...", color=color)
 
-    target = str(venv_target_path(venv, debug=debug))
+    target = str(venv_target_path(venv, allow_nonexistent=force, debug=debug))
     with LOCKS['sys.path']:
         if target in sys.path:
             sys.path.remove(target)

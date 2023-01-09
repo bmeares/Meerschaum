@@ -107,21 +107,11 @@ def flush_with_newlines(debug: bool = False) -> None:
 
 def progress(transient: bool = True, **kw):
     """
-
-    Parameters
-    ----------
-    transient: bool :
-         (Default value = True)
-    **kw :
-        
-
-    Returns
-    -------
-    type
-        
-
+    Return the shell's `Progress` object.
     """
     from meerschaum.utils.packages import import_rich, attempt_import
+    from meerschaum.utils.formatting import get_console, _init
+    _init()
     rich = import_rich()
     rich_progress = attempt_import('rich.progress')
     return rich_progress.Progress(
@@ -131,22 +121,13 @@ def progress(transient: bool = True, **kw):
         rich_progress.TextColumn(''),
         rich_progress.BarColumn(bar_width=None,),
         transient = transient,
+        console = get_console(),
         **kw
     )
 
 def live(**kw):
     """
-
-    Parameters
-    ----------
-    **kw :
-        
-
-    Returns
-    -------
-    type
-        
-
+    Return the shell's `Live` object.
     """
     from meerschaum.utils.packages import import_rich, attempt_import
     rich = import_rich()

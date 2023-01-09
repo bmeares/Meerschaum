@@ -153,8 +153,10 @@ def infer_dtypes(self, persist: bool=False, debug: bool=False) -> Dict[str, Any]
         dtypes = {}
         if not self.columns:
             return {}
-        if self.columns.get('datetime', None) is not None:
-            dtypes[self.columns['datetime']] = 'datetime64[ns]'
+        dt_col = self.columns.get('datetime', None)
+        if dt_col:
+            if not self.parameters.get('dtypes', {}).get(dt_col, None):
+                dtypes[dt_col] = 'datetime64[ns]'
         return dtypes
     from meerschaum.utils.sql import get_pd_type
     columns_types = self.get_columns_types(debug=debug)

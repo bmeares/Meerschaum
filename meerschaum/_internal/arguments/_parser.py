@@ -30,8 +30,12 @@ class ArgumentParser(argparse.ArgumentParser):
         return result
 
 
-def parse_datetime(dt_str : str) -> datetime.datetime:
+def parse_datetime(dt_str: str) -> datetime.datetime:
     """Parse a string into a datetime."""
+    from meerschaum.utils.misc import is_int
+    if is_int(dt_str):
+        return int(dt_str)
+
     from meerschaum.utils.packages import attempt_import
     import datetime
     dateutil_parser = attempt_import('dateutil.parser')

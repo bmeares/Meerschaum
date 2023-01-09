@@ -64,12 +64,15 @@ def _setup_plugins(
     from meerschaum.utils.warnings import warn
     from meerschaum.connectors.parse import parse_repo_keys
     from meerschaum.utils.formatting import print_tuple
+    from meerschaum.plugins import get_plugins_names
     repo_connector = parse_repo_keys(repository)
 
     success_count = 0
     fail_count = 0
 
-    for plugin_name in action:
+    plugins_names = action or get_plugins_names()
+
+    for plugin_name in plugins_names:
         plugin = Plugin(plugin_name, repo_connector=repo_connector)
         if not plugin.is_installed():
             warn(f"Plugin '{plugin}' is not installed. Skipping...", stack=False)

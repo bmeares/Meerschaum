@@ -72,11 +72,17 @@ def dprint(
                 except KeyError:
                     _color = {}
             else:
-                _color = []
+                _color = {}
         if colored is not None:
             premsg = colored(premsg, **_color)
-    _print = _progress.console.log if _progress is not None else print
-    _print(premsg + msg)
+    if _progress is not None:
+        from meerschaum.utils.packages import import_rich, attempt_import
+        rich = import_rich()
+        rich_text = attempt_import('rich.text')
+        text = rich_text.Text.from_ansi(premsg + msg)
+        _progress.console.log(text)
+    else:
+        print(premsg + msg)
 
 
 def _checkpoint(

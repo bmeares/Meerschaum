@@ -9,7 +9,7 @@ Define file paths
 from __future__ import annotations
 
 from pathlib import Path
-import os, platform, sys
+import os, platform, sys, json
 from meerschaum.utils.typing import Union
 from meerschaum.config.static import STATIC_CONFIG
 
@@ -42,17 +42,27 @@ else:
 
 ENVIRONMENT_PLUGINS_DIR = STATIC_CONFIG['environment']['plugins']
 if ENVIRONMENT_PLUGINS_DIR in os.environ:
-    _PLUGINS_DIR_PATH = Path(os.environ[ENVIRONMENT_PLUGINS_DIR]).resolve()
-    if not _PLUGINS_DIR_PATH.exists():
+    try:
+        PLUGINS_DIR_PATHS = (
+            [
+                Path(path).resolve()
+                for path in json.loads(os.environ[ENVIRONMENT_PLUGINS_DIR])
+            ] if os.environ[ENVIRONMENT_PLUGINS_DIR].lstrip().startswith('[')
+            else [Path(os.environ[ENVIRONMENT_PLUGINS_DIR]).resolve()]
+        )
+    except Exception as e:
+        PLUGINS_DIR_PATHS = []
+
+    if not PLUGINS_DIR_PATHS:
         print(
-            f"Invalid plugins directory '{str(_PLUGINS_DIR_PATH)}' set for " +
+            "Invalid plugins directories set for " +
             f"environment variable '{ENVIRONMENT_PLUGINS_DIR}'.\n" +
-            f"Please enter a valid path for {ENVIRONMENT_PLUGINS_DIR}.",
+            f"Please enter a valid path or JSON-encoded paths for {ENVIRONMENT_PLUGINS_DIR}.",
             file = sys.stderr,
         )
         sys.exit(1)
 else:
-    _PLUGINS_DIR_PATH = None
+    PLUGINS_DIR_PATHS = [_ROOT_DIR_PATH / 'plugins']
 
 
 paths = {
@@ -86,15 +96,11 @@ paths = {
     'PIPES_CACHE_RESOURCES_PATH'     : ('{CACHE_RESOURCES_PATH}', 'pipes'),
     'USERS_CACHE_RESOURCES_PATH'     : ('{CACHE_RESOURCES_PATH}', 'users'),
 
-    'PLUGINS_RESOURCES_PATH'         : (
-        str(_PLUGINS_DIR_PATH) if _PLUGINS_DIR_PATH is not None
-        else ('{ROOT_DIR_PATH}', 'plugins')
-    ),
+    'PLUGINS_RESOURCES_PATH'         : ('{INTERNAL_RESOURCES_PATH}', 'plugins'),
+    'PLUGINS_INTERNAL_LOCK_PATH'     : ('{INTERNAL_RESOURCES_PATH}', 'plugins.lock'),
     'PLUGINS_ARCHIVES_RESOURCES_PATH': ('{PLUGINS_RESOURCES_PATH}', '.archives'),
     'PLUGINS_TEMP_RESOURCES_PATH'    : ('{PLUGINS_RESOURCES_PATH}', '.tmp'),
     'PLUGINS_INIT_PATH'              : ('{PLUGINS_RESOURCES_PATH}', '__init__.py'),
-    'PLUGINS_INTERNAL_DIR_PATH'      : ('{INTERNAL_RESOURCES_PATH}', 'plugins'),
-    'PLUGINS_INTERNAL_LOCK_PATH'     : ('{INTERNAL_RESOURCES_PATH}', 'plugins.lock'),
 
     'SQLITE_RESOURCES_PATH'          : ('{ROOT_DIR_PATH}', 'sqlite'),
     'SQLITE_DB_PATH'                 : ('{SQLITE_RESOURCES_PATH}', 'mrsm_local.db'),
