@@ -25,6 +25,7 @@ import fastapi
 from meerschaum.api.models import MetaPipe
 from meerschaum.utils.packages import attempt_import
 from meerschaum.utils.misc import is_pipe_registered, round_time
+from meerschaum.utils.typing import List, Dict, Any, Union
 import meerschaum.core.User
 import datetime
 pipes_endpoint = endpoints['pipes']
@@ -146,7 +147,7 @@ async def fetch_pipes_keys(
         curr_user = (
             fastapi.Depends(manager) if not no_auth else None
         ),
-    ) -> list:
+    ) -> List[List[str]]:
     """
     Get a list of tuples of all registered Pipes' keys.
     """
@@ -171,7 +172,7 @@ async def get_pipes(
             fastapi.Depends(manager) if not no_auth else None
         ),
         debug : bool = False
-    ) -> dict:
+    ) -> Dict[str, Any]:
     """
     Get all registered Pipes with metadata, excluding parameters.
     """
@@ -191,7 +192,7 @@ async def get_pipes_by_connector(
         curr_user = (
             fastapi.Depends(manager) if not no_auth else None
         ),
-    ) -> dict:
+    ) -> Dict[str, Any]:
     """
     Get all registered Pipes by connector_keys with metadata, excluding parameters.
     """
@@ -271,7 +272,7 @@ def get_sync_time(
         curr_user = (
             fastapi.Depends(manager) if not no_auth else None
         ),
-    ) -> 'datetime.datetime':
+    ) -> Any:
     """
     Get a Pipe's latest datetime value.
     See `meerschaum.Pipe.get_sync_time`.
@@ -297,7 +298,7 @@ def sync_pipe(
             fastapi.Depends(manager) if not no_auth else None
         ),
         debug: bool = False,
-    ) -> tuple:
+    ) -> List[Union[bool, str]]:
     """
     Add data to an existing Pipe.
     See `meerschaum.Pipe.sync`.
@@ -417,7 +418,7 @@ def get_backtrack_data(
         curr_user = (
             fastapi.Depends(manager) if not no_auth else None
         ),
-    ) -> fastapi.Response:
+    ):
     """
     Get a Pipe's backtrack data. Optionally set query boundaries.
     """
@@ -542,7 +543,7 @@ def get_pipe_attributes(
         curr_user = (
             fastapi.Depends(manager) if not no_auth else None
         ),
-    ) -> dict:
+    ) -> Dict[str, Any]:
     """Get a Pipe's attributes."""
     return get_pipe(connector_keys, metric_key, location_key).attributes
 
@@ -555,7 +556,7 @@ def get_pipe_exists(
         curr_user = (
             fastapi.Depends(manager) if not no_auth else None
         ),
-    ) -> dict:
+    ) -> bool:
     """Determine whether a Pipe exists."""
     return get_pipe(connector_keys, metric_key, location_key).exists()
 
@@ -609,7 +610,7 @@ def get_pipe_columns_types(
         curr_user = (
             fastapi.Depends(manager) if not no_auth else None
         ),
-    ) -> dict:
+    ) -> Dict[str, str]:
     """
     Returm a dictionary of column names and types.
 

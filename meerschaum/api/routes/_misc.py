@@ -7,7 +7,7 @@ Miscellaneous routes
 """
 
 from __future__ import annotations
-from meerschaum.utils.typing import Dict, Union
+from meerschaum.utils.typing import Dict, Union, Any
 
 import os
 from meerschaum import get_pipes
@@ -19,7 +19,7 @@ import fastapi
 from starlette.responses import FileResponse
 
 @app.get(endpoints['favicon'], tags=['Misc'])
-def get_favicon() -> FileResponse:
+def get_favicon() -> Any:
     from meerschaum.config._paths import API_STATIC_PATH
     return FileResponse(os.path.join(API_STATIC_PATH, 'ico', 'logo.ico'))
 

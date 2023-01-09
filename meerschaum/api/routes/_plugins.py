@@ -7,7 +7,7 @@ Routes for managing plugins
 """
 
 from __future__ import annotations
-from meerschaum.utils.typing import Optional, List, SuccessTuple, Union
+from meerschaum.utils.typing import Optional, List, SuccessTuple, Union, Any, Dict
 
 from meerschaum.api import (
     fastapi,
@@ -118,7 +118,7 @@ def get_plugin(
         curr_user = (
             fastapi.Depends(manager) if private else None
         ),
-    ) -> Union[FileResponse, SuccessTuple]:
+    ) -> Any:
     """
     Download a plugin's archive file.
     """
@@ -130,11 +130,11 @@ def get_plugin(
 
 @app.get(plugins_endpoint + '/{name}/attributes', tags=['Plugins'])
 def get_plugin_attributes(
-        name : str,
+        name: str,
         curr_user = (
             fastapi.Depends(manager) if private else None
         ),
-    ) -> dict:
+    ) -> Dict[str, Any]:
     """
     Get a plugin's attributes.
     """
