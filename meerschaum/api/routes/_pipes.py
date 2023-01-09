@@ -147,7 +147,7 @@ async def fetch_pipes_keys(
         curr_user = (
             fastapi.Depends(manager) if not no_auth else None
         ),
-    ) -> List[List[str]]:
+    ):
     """
     Get a list of tuples of all registered Pipes' keys.
     """
@@ -272,7 +272,7 @@ def get_sync_time(
         curr_user = (
             fastapi.Depends(manager) if not no_auth else None
         ),
-    ) -> Any:
+    ):
     """
     Get a Pipe's latest datetime value.
     See `meerschaum.Pipe.get_sync_time`.

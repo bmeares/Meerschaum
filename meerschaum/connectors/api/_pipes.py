@@ -432,7 +432,7 @@ def get_sync_time(
         newest: bool = True,
         round_down: bool = True,
         debug: bool = False,
-    ) -> Union[datetime.datetime, None]:
+    ) -> Union[datetime.datetime, int, None]:
     """Get a Pipe's most recent datetime value from the API.
 
     Parameters
@@ -455,6 +455,7 @@ def get_sync_time(
     The most recent (or oldest if `newest` is `False`) datetime of a pipe,
     rounded down to the closest minute.
     """
+    from meerschaum.utils.misc import is_int
     import datetime, json
     r_url = pipe_r_url(pipe)
     response = self.get(
@@ -470,7 +471,9 @@ def get_sync_time(
         dt = None
     else:
         try:
-            dt = datetime.datetime.fromisoformat(json.loads(response.text))
+            dt = (
+                datetime.datetime.fromisoformat(json.loads(response.text))
+            ) if not is_int(dt) else int(dt)
         except Exception as e:
             dt = None
     return dt
