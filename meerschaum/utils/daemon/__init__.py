@@ -31,11 +31,15 @@ def daemon_entry(sysargs: Optional[List[str]] = None) -> SuccessTuple:
         from meerschaum._internal.arguments._parse_arguments import parse_arguments
         _args = parse_arguments(sysargs)
     filtered_sysargs = [arg for arg in sysargs if arg not in ('-d', '--daemon')]
+    try:
+        label = shlex.join(filtered_sysargs) if sysargs else None
+    except Exception as e:
+        label = ' '.join(filtered_sysargs) if sysargs else None
     success_tuple = run_daemon(
         entry,
         filtered_sysargs,
         daemon_id = _args.get('name', None) if _args else None,
-        label = (shlex.join(filtered_sysargs) if sysargs else None),
+        label = label,
         keep_daemon_output = ('--rm' not in sysargs)
     )
     if not isinstance(success_tuple, tuple):
