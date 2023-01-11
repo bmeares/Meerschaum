@@ -513,7 +513,7 @@ def to_sql(
     Either a `bool` or a `SuccessTuple` (depends on `as_tuple`).
     """
     import time
-    from meerschaum.utils.warnings import error
+    from meerschaum.utils.warnings import error, warn
     import warnings
     if name is None:
         error(f"Name must not be `None` to insert data into {self}.")
@@ -535,7 +535,19 @@ def to_sql(
             ### Should resolve to 'multi' or `None`.
             method = flavor_configs.get(self.flavor, {}).get('to_sql', {}).get('method', 'multi')
     stats['method'] = method.__name__ if hasattr(method, '__name__') else str(method)
-    chunksize = chunksize if chunksize != -1 else self.sys_config.get('chunksize', None)
+
+    default_chunksize = self.sys_config.get('chunksize', None)
+    chunksize = chunksize if chunksize != -1 else default_chunksize
+    if chunksize is not None and self.flavor in _max_chunks_flavors:
+        if chunksize > _max_chunks_flavors[self.flavor]:
+            if chunksize != default_chunksize:
+                warn(
+                    f"The specified chunksize of {chunksize} exceeds the maximum of "
+                    + f"{_max_chunks_flavors[self.flavor]} for flavor '{self.flavor}'.\n"
+                    + f"    Falling back to a chunksize of {_max_chunks_flavors[self.flavor]}.",
+                    stacklevel = 3,
+                )
+            chunksize = _max_chunks_flavors[self.flavor]
     stats['chunksize'] = chunksize
 
     success, msg = False, "Default to_sql message"

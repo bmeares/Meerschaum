@@ -9,6 +9,7 @@ Functions for patching the configuration dictionary
 import sys
 import copy
 from meerschaum.utils.typing import Dict, Any
+from meerschaum.utils.warnings import warn
 
 def apply_patch_to_config(
         config: Dict[str, Any],
@@ -22,6 +23,9 @@ def apply_patch_to_config(
     def update_dict(base, patch):
         if base is None:
             return {}
+        if not isinstance(base, dict):
+            warn(f"Overwriting the value {base} with a dictionary:\n{patch}")
+            base = {}
         for key, value in patch.items():
             if isinstance(value, dict):
                 base[key] = update_dict(base.get(key, {}), value)
