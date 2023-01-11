@@ -555,6 +555,8 @@ def need_update(
     if debug:
         dprint(f"_install_no_version: {_install_no_version}", color=color)
     required_version = install_name.replace(_install_no_version, '')
+    if ']' in required_version:
+        required_version = required_version.split(']')[1]
 
     ### No minimum version was specified, and we're not going to check PyPI.
     if not required_version and not check_pypi:
