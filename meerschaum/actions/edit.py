@@ -7,7 +7,7 @@ Functions for editing elements belong here.
 """
 
 from __future__ import annotations
-from meerschaum.utils.typing import List, Any, SuccessTuple, Optional
+from meerschaum.utils.typing import List, Any, SuccessTuple, Optional, Dict
 
 def edit(
         action: Optional[List[str]] = None,
@@ -90,6 +90,10 @@ def _complete_edit_config(action: Optional[List[str]] = None, **kw : Any) -> Lis
 
 def _edit_pipes(
         action: Optional[List[str]] = None,
+        params: Optional[Dict[str, Any]] = None,
+        yes: bool = False,
+        force: bool = False,
+        noask: bool = False,
         debug: bool = False,
         **kw: Any
     ) -> SuccessTuple:
@@ -110,6 +114,9 @@ def _edit_pipes(
     from meerschaum import get_pipes
     from meerschaum.utils.prompt import prompt
     from meerschaum.utils.misc import print_options
+    from meerschaum.utils.warnings import info
+    from meerschaum.utils.formatting import pprint
+    from meerschaum.config._patch import apply_patch_to_config
 
     if action is None:
         action = []
@@ -124,26 +131,43 @@ def _edit_pipes(
 
     if len(pipes) > 1:
         try:
-            prompt(
-                f"Press [Enter] to begin editing the above {len(pipes)} pipe" +
-                ("s" if len(pipes) != 1 else "") +
-                " or [CTRL-C] to cancel:", icon=False
-            )
+            if not (yes or force or noask):
+                prompt(
+                    f"Press [Enter] to begin editing the above {len(pipes)} pipe"
+                    + ("s" if len(pipes) != 1 else "")
+                    + " or [CTRL-C] to cancel:",
+                    icon = False,
+                )
         except KeyboardInterrupt:
             return False, f"No pipes changed."
 
-    for p in pipes:
+    interactive = (not bool(params))
+    success, msg = True, ""
+    for pipe in pipes:
         try:
-            text = prompt(f"Press [Enter] to edit {p} or [CTRL-C] to skip:", icon=False)
-            if text == 'pass':
-                continue
+            if not (yes or force or noask):
+                text = prompt(f"Press [Enter] to edit {pipe} or [CTRL-C] to skip:", icon=False)
+                if text == 'pass':
+                    continue
         except KeyboardInterrupt:
             continue
-        if edit_definition:
-            p.edit_definition(debug=debug, **kw)
-        else:
-            p.edit(interactive=True, debug=debug, **kw)
-    return (True, "Success")
+
+        if params:
+            info(f"Will patch the following parameters into {pipe}:")
+            pprint(params)
+            pipe.parameters = apply_patch_to_config(pipe.parameters, params)
+
+        edit_success, edit_msg = (
+            pipe.edit_definition(debug=debug, **kw)
+            if edit_definition
+            else pipe.edit(interactive=interactive, debug=debug, **kw)
+        )
+        success = success and edit_success
+        if not edit_success:
+            msg += f"\n{pipe}: {edit_msg}"
+
+    msg = "Success" if success else msg[1:]
+    return success, msg
 
 
 def _edit_definition(

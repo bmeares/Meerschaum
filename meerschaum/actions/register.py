@@ -68,6 +68,7 @@ def _register_pipes(
     from meerschaum.utils.debug import dprint
     from meerschaum.utils.warnings import warn, info
     from meerschaum.utils.misc import items_str
+    from meerschaum.config._patch import apply_patch_to_config
 
     if connector_keys is None:
         connector_keys = []
@@ -99,6 +100,13 @@ def _register_pipes(
         debug = debug,
         **kw
     )
+
+    if params:
+        for pipe in pipes:
+            pipe._attributes['parameters'] = apply_patch_to_config(
+                params,
+                pipe._attributes.get('parameters', {})
+            )
 
     success, message = True, "Success"
     failed_message = ""
