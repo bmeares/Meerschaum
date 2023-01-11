@@ -27,7 +27,6 @@ def show(
         'actions'    : _show_actions,
         'pipes'      : _show_pipes,
         'config'     : _show_config,
-        'modules'    : _show_modules,
         'environment': _show_environment,
         'version'    : _show_version,
         'connectors' : _show_connectors,
@@ -41,7 +40,6 @@ def show(
         'users'      : _show_users,
         'jobs'       : _show_jobs,
         'logs'       : _show_logs,
-        'gui'        : _show_gui,
     }
     return choose_subaction(action, show_options, **kw)
 
@@ -144,16 +142,6 @@ def _complete_show_config(action: Optional[List[str]] = None, **kw : Any):
         if key.startswith(action[0]) and action[0] != key:
             possibilities.append(key)
     return possibilities
-
-
-def _show_modules(**kw: Any) -> SuccessTuple:
-    """
-    Show the currently imported modules.
-    """
-    import sys
-    from meerschaum.utils.formatting import pprint
-    pprint(list(sys.modules.keys()), **kw)
-    return (True, "Success")
 
 
 def _show_pipes(
@@ -717,15 +705,6 @@ def _show_logs(
     _print_log_text()
 
     return True, "Success"
-
-
-def _show_gui(**kw) -> SuccessTuple:
-    """
-    Start the Meerschaum GUI application.
-    """
-    from meerschaum.actions import actions
-    kw.pop('action', None)
-    return actions['start'](['gui'], **kw)
 
 
 def _show_environment(

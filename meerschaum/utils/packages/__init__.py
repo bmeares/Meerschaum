@@ -301,7 +301,7 @@ def get_install_no_version(install_name: str) -> str:
     Strip the version information from the install name.
     """
     import re
-    return re.split('[=<>,! ]', install_name)[0]
+    return re.split('[\[=<>,! \]]', install_name)[0]
 
 
 import_versions = {}
