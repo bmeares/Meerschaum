@@ -197,7 +197,7 @@ def _edit_users(
     from meerschaum.connectors.parse import parse_instance_keys
     from meerschaum.utils.debug import dprint
     from meerschaum.utils.warnings import warn, error, info
-    from meerschaum.User import User
+    from meerschaum.core.User import User
     from meerschaum.connectors.api import APIConnector
     from meerschaum.utils.formatting import print_tuple
     from meerschaum.utils.prompt import prompt, yes_no, get_password, get_email

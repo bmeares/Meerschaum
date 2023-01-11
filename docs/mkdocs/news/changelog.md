@@ -4,7 +4,7 @@
 
 This is the current release cycle, so stay tuned for future releases!
 
-### v1.5.0
+### v1.5.0 – v1.5.2
 
 - **Pipes may now use integers for the `datetime` column.**  
   If you use an auto-incrementing integer as your primary key, you may now use that column as your pipe's `datetime` column, just specify the `dtype` as an `Int64`:
@@ -45,6 +45,18 @@ This is the current release cycle, so stay tuned for future releases!
 
 - **Requirements may include brackets.**  
   Python packages listed in a plugin's `requirements` list may now include brackets (e.g. `meerschaum[api]`).
+
+- **Enforce 1000 row limit in `SQLConnector.to_sql()` for SQLite.**  
+  When inserting rows, the chunksize of 1000 is enforced for SQLite (was previously enforced only for reading).
+
+- **Patch parameters from `--params` in `edit pipes` and `register pipes`.**  
+  When editing or registering pipes, the value of `--params` will now be patched into the pipe's parameters. This should be very helpful when scripting.
+
+- **Fixed `edit users`.**  
+  This really should have been fixed a long time ago. The action `edit users` was broken due to a stray import left over from a major refactor.
+
+- **Fixed a regex bug when cleaning up packages.**
+- **Removed `show gui` and `show modules`.**
 
 ## 1.4.x Releases
 
