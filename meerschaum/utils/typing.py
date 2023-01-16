@@ -11,6 +11,7 @@ try:
         Union,
         Any,
         Iterable,
+        Hashable,
     )
 except Exception as e:
     import urllib.request, sys, pathlib, os

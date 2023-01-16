@@ -120,7 +120,7 @@ max_name_lens = {
     'mysql'      : 64,
     'mariadb'    : 64,
 }
-json_flavors = {'postgresql', 'timescaledb', 'citus', 'sqlite', 'cockroachdb'}
+json_flavors = {'postgresql', 'timescaledb', 'citus', 'cockroachdb'}
 OMIT_NULLSFIRST_FLAVORS = {'mariadb', 'mysql', 'mssql'}
 DB_TO_PD_DTYPES = {
     'FLOAT': 'float64',
@@ -282,20 +282,138 @@ PD_TO_DB_DTYPES_FLAVORS: Dict[str, Dict[str, str]] = {
         'default': 'TEXT',
     },
     'json': {
-        'timescaledb': 'JSON',
-        'postgresql': 'JSON',
-        'mariadb': 'LONGTEXT',
-        'mysql': 'LONGTEXT',
+        'timescaledb': 'JSONB',
+        'postgresql': 'JSONB',
+        'mariadb': 'TEXT',
+        'mysql': 'TEXT',
         'mssql': 'NVARCHAR(MAX)',
         'oracle': 'NVARCHAR2(2000)',
-        'sqlite': 'JSON',
-        'duckdb': 'JSON',
-        'citus': 'JSON',
-        'cockroachdb': 'JSON',
+        'sqlite': 'TEXT',
+        'duckdb': 'TEXT',
+        'citus': 'JSONB',
+        'cockroachdb': 'JSONB',
         'default': 'TEXT',
     },
 }
-
+PD_TO_SQLALCHEMY_DTYPES_FLAVORS: Dict[str, Dict[str, str]] = {
+    'Int64': {
+        'timescaledb': 'BigInteger',
+        'postgresql': 'BigInteger',
+        'mariadb': 'BigInteger',
+        'mysql': 'BigInteger',
+        'mssql': 'BigInteger',
+        'oracle': 'BigInteger',
+        'sqlite': 'BigInteger',
+        'duckdb': 'BigInteger',
+        'citus': 'BigInteger',
+        'cockroachdb': 'BigInteger',
+        'default': 'BigInteger',
+    },
+    'int64': {
+        'timescaledb': 'BigInteger',
+        'postgresql': 'BigInteger',
+        'mariadb': 'BigInteger',
+        'mysql': 'BigInteger',
+        'mssql': 'BigInteger',
+        'oracle': 'BigInteger',
+        'sqlite': 'BigInteger',
+        'duckdb': 'BigInteger',
+        'citus': 'BigInteger',
+        'cockroachdb': 'BigInteger',
+        'default': 'BigInteger',
+    },
+    'float64': {
+        'timescaledb': 'Float',
+        'postgresql': 'Float',
+        'mariadb': 'Float',
+        'mysql': 'Float',
+        'mssql': 'Float',
+        'oracle': 'Float',
+        'sqlite': 'Float',
+        'duckdb': 'Float',
+        'citus': 'Float',
+        'cockroachdb': 'Float',
+        'default': 'Float',
+    },
+    'datetime64[ns]': {
+        'timescaledb': 'DateTime',
+        'postgresql': 'DateTime',
+        'mariadb': 'DateTime',
+        'mysql': 'DateTime',
+        'mssql': 'DateTime',
+        'oracle': 'DateTime',
+        'sqlite': 'DateTime',
+        'duckdb': 'DateTime',
+        'citus': 'DateTime',
+        'cockroachdb': 'DateTime',
+        'default': 'DateTime',
+    },
+    'datetime64[ns, UTC]': {
+        'timescaledb': 'DateTime',
+        'postgresql': 'DateTime',
+        'mariadb': 'DateTime',
+        'mysql': 'DateTime',
+        'mssql': 'DateTime',
+        'oracle': 'DateTime',
+        'sqlite': 'DateTime',
+        'duckdb': 'DateTime',
+        'citus': 'DateTime',
+        'cockroachdb': 'DateTime',
+        'default': 'DateTime',
+    },
+    'bool': {
+        'timescaledb': 'Boolean',
+        'postgresql': 'Boolean',
+        'mariadb': 'Boolean',
+        'mysql': 'Boolean',
+        'mssql': 'Boolean',
+        'oracle': 'Boolean',
+        'sqlite': 'Boolean',
+        'duckdb': 'Boolean',
+        'citus': 'Boolean',
+        'cockroachdb': 'Boolean',
+        'default': 'Boolean',
+    },
+    'object': {
+        'timescaledb': 'UnicodeText',
+        'postgresql': 'UnicodeText',
+        'mariadb': 'UnicodeText',
+        'mysql': 'UnicodeText',
+        'mssql': 'UnicodeText',
+        'oracle': 'UnicodeText',
+        'sqlite': 'UnicodeText',
+        'duckdb': 'UnicodeText',
+        'citus': 'UnicodeText',
+        'cockroachdb': 'UnicodeText',
+        'default': 'UnicodeText',
+    },
+    'str': {
+        'timescaledb': 'UnicodeText',
+        'postgresql': 'UnicodeText',
+        'mariadb': 'UnicodeText',
+        'mysql': 'UnicodeText',
+        'mssql': 'UnicodeText',
+        'oracle': 'UnicodeText',
+        'sqlite': 'UnicodeText',
+        'duckdb': 'UnicodeText',
+        'citus': 'UnicodeText',
+        'cockroachdb': 'UnicodeText',
+        'default': 'UnicodeText',
+    },
+    'json': {
+        'timescaledb': 'JSONB',
+        'postgresql': 'JSONB',
+        'mariadb': 'UnicodeText',
+        'mysql': 'UnicodeText',
+        'mssql': 'UnicodeText',
+        'oracle': 'UnicodeText',
+        'sqlite': 'UnicodeText',
+        'duckdb': 'TEXT',
+        'citus': 'JSONB',
+        'cockroachdb': 'JSONB',
+        'default': 'UnicodeText',
+    },
+}
 
 def clean(substring: str) -> str:
     """
@@ -896,7 +1014,7 @@ def get_update_queries(
     ) for base_query in base_queries]
 
     
-def get_pd_type(db_type: str) -> str:
+def get_pd_type(db_type: str, allow_custom_dtypes: bool = False) -> str:
     """
     Parse a database type to a pandas data type.
 
@@ -905,20 +1023,40 @@ def get_pd_type(db_type: str) -> str:
     db_type: str
         The database type, e.g. `DATETIME`, `BIGINT`, etc.
 
+    allow_custom_dtypes: bool, default False
+        If `True`, allow for custom data types like `json` and `str`.
+
     Returns
     -------
     The equivalent datatype for a pandas DataFrame.
     """
+    def parse_custom(_pd_type: str, _db_type: str) -> str:
+        if 'json' in _db_type.lower():
+            return 'json'
+        return _pd_type
+
     pd_type = DB_TO_PD_DTYPES.get(db_type.upper(), None)
     if pd_type is not None:
-        return pd_type
+        return (
+            parse_custom(pd_type, db_type)
+            if allow_custom_dtypes
+            else pd_type
+        )
     for db_t, pd_t in DB_TO_PD_DTYPES['substrings'].items():
         if db_t in db_type.upper():
-            return pd_t
+            return (
+                parse_custom(pd_t, db_t)
+                if allow_custom_dtypes
+                else pd_t
+            )
     return DB_TO_PD_DTYPES['default']
 
 
-def get_db_type(pd_type: str, flavor: str = 'default') -> str:
+def get_db_type(
+        pd_type: str,
+        flavor: str = 'default',
+        as_sqlalchemy: bool = False,
+    ) -> Union[str, 'sqlalchemy.sql.visitors.TraversibleType']:
     """
     Parse a Pandas data type into a flavor's database type.
 
@@ -930,20 +1068,52 @@ def get_db_type(pd_type: str, flavor: str = 'default') -> str:
     flavor: str, default 'default'
         The flavor of the database to be mapped to.
 
+    as_sqlalchemy: bool, default False
+        If `True`, return a type from `sqlalchemy.types`.
+
     Returns
     -------
     The database data type for the incoming Pandas data type.
     If nothing can be found, a warning will be thrown and 'TEXT' will be returned.
     """
     from meerschaum.utils.warnings import warn
+    from meerschaum.utils.packages import attempt_import
+    sqlalchemy_types = attempt_import('sqlalchemy.types')
     if pd_type not in PD_TO_DB_DTYPES_FLAVORS:
         warn(f"Unknown Pandas data type '{pd_type}'. Falling back to 'TEXT'.")
-        return 'TEXT'
-    flavor_types = PD_TO_DB_DTYPES_FLAVORS.get(pd_type, {'default': 'TEXT'})
-    default_flavor_type = flavor_types.get('default', 'TEXT')
+        return (
+            'TEXT' if not as_sqlalchemy
+            else sqlalchemy_types.UnicodeText
+        )
+    types_registry = (
+        PD_TO_DB_DTYPES_FLAVORS if not as_sqlalchemy
+        else PD_TO_SQLALCHEMY_DTYPES_FLAVORS
+    )
+    flavor_types = types_registry.get(
+        pd_type,
+        {
+            'default': (
+                'TEXT' if not as_sqlalchemy
+                else 'UnicodeText'
+            ),
+        },
+    )
+    default_flavor_type = flavor_types.get(
+        'default',
+        (
+            'TEXT' if not as_sqlalchemy
+            else 'UnicodeText'
+        ),
+    )
     if flavor not in flavor_types:
         warn(f"Unknown flavor '{flavor}'. Falling back to '{default_flavor_type}' (default).")
-    return flavor_types.get(flavor, default_flavor_type)
+    db_type = flavor_types.get(flavor, default_flavor_type)
+    if not as_sqlalchemy:
+        return db_type
+    if db_type == 'JSONB':
+        sqlalchemy_dialects_postgresql = attempt_import('sqlalchemy.dialects.postgresql')
+        return sqlalchemy_dialects_postgresql.JSONB
+    return getattr(sqlalchemy_types, db_type)
 
 
 def get_null_replacement(typ: str, flavor: str) -> str:

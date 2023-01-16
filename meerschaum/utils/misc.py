@@ -8,7 +8,7 @@ Miscellaneous functions go here
 from __future__ import annotations
 from meerschaum.utils.typing import (
     Union, Mapping, Any, Callable, Optional, List, Dict, SuccessTuple, Iterable, PipesDict, Tuple,
-    InstanceConnector,
+    InstanceConnector, Hashable
 )
 import meerschaum as mrsm
 
@@ -965,7 +965,13 @@ def filter_unseen_df(
 
     dtypes = {
         col: (
-            str(typ) if str(typ) != 'int64' else 'Int64'
+            (
+                str(typ)
+                if str(typ) not in ('str', 'json')
+                else 'object'
+            )
+            if str(typ) != 'int64'
+            else 'Int64'
         ) for col, typ in dtypes.items()
         if col in new_df_dtypes and col in old_df_dtypes
     }
@@ -1833,3 +1839,64 @@ def safely_extract_tar(tarf: 'file', output_dir: Union[str, 'pathlib.Path']) -> 
         tar.extractall(path=path, members=members, numeric_owner=numeric_owner)
 
     return safe_extract(tarf, output_dir)
+
+
+def to_pandas_dtype(dtype: str) -> str:
+    """
+    Cast a supported Meerschaum dtype to a Pandas dtype.
+    """
+    if dtype in ('json', 'str', 'object'):
+        return 'object'
+    if dtype.lower().startswith('int'):
+        return 'Int64'
+    if dtype.lower().startswith('float'):
+        return 'float64'
+    if dtype == 'datetime':
+        return 'datetime64[ns]'
+    if dtype.startswith('datetime'):
+        return dtype
+    if dtype == 'bool':
+        return dtype
+    return 'object'
+
+
+def get_unhashable_cols(df: 'pd.DataFrame') -> List[str]:
+    """
+    Get the columns which contain unhashable objects from a Pandas DataFrame.
+
+    Parameters
+    ----------
+    df: pd.DataFrame
+        The DataFrame which may contain unhashable objects.
+
+    Returns
+    -------
+    A list of columns.
+    """
+    if len(df) == 0:
+        return []
+    return [
+        col for col, val in df.iloc[0].items()
+        if not isinstance(val, Hashable)
+    ]
+
+
+def get_json_cols(df: 'pd.DataFrame') -> List[str]:
+    """
+    Get the columns which contain unhashable objects from a Pandas DataFrame.
+
+    Parameters
+    ----------
+    df: pd.DataFrame
+        The DataFrame which may contain unhashable objects.
+
+    Returns
+    -------
+    A list of columns to be encoded as JSON.
+    """
+    if len(df) == 0:
+        return []
+    return [
+        col for col, typ in df.dtypes.items()
+        if isinstance(df.iloc[0][col], (dict, list))
+    ]

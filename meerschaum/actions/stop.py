@@ -102,7 +102,8 @@ def _stop_jobs(
         (("Stopped job" + ("s" if len(_quit_daemons) != 1 else '') +
             " '" + "', '".join([d.daemon_id for d in _quit_daemons]) + "'.")
             if _quit_daemons else '')
-        + (("Killed job" + ("s" if len(_kill_daemons) != 1 else '') +
+        + (("\n" if _quit_daemons else "")
+           + ("Killed job" + ("s" if len(_kill_daemons) != 1 else '') +
             " '" + "', '".join([d.daemon_id for d in _kill_daemons]) + "'.")
             if _kill_daemons else '')
     )

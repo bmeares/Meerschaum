@@ -513,6 +513,7 @@ def to_sql(
     Either a `bool` or a `SuccessTuple` (depends on `as_tuple`).
     """
     import time
+    import json
     from meerschaum.utils.warnings import error, warn
     import warnings
     if name is None:
@@ -521,7 +522,8 @@ def to_sql(
     ### We're requiring `name` to be positional, and sometimes it's passed in from background jobs.
     kw.pop('name', None)
 
-    from meerschaum.utils.sql import sql_item_name, table_exists
+    from meerschaum.utils.sql import sql_item_name, table_exists, json_flavors
+    from meerschaum.utils.misc import get_json_cols
     from meerschaum.connectors.sql._create_engine import flavor_configs
     from meerschaum.utils.packages import attempt_import
     sqlalchemy = attempt_import('sqlalchemy', debug=debug)
@@ -583,6 +585,14 @@ def to_sql(
                 dtype[col] = sqlalchemy.types.INTEGER
 
         to_sql_kw['dtype'] = dtype
+
+    ### Check for JSON columns.
+    if self.flavor not in json_flavors:
+        json_cols = get_json_cols(df)
+        if json_cols:
+            df = df.copy()
+            for col in json_cols:
+                df[col] = df[col].apply(json.dumps)
 
     try:
         with warnings.catch_warnings():
@@ -649,11 +659,20 @@ def psql_insert_copy(
     """
     import csv
     from io import StringIO
+    import json
 
     from meerschaum.utils.sql import sql_item_name
 
     data_iter = (
-        (item if item is not None else r'\N' for item in row) for row in data_iter
+        (
+            (
+                json.dumps(item)
+                if isinstance(item, (dict, list))
+                else item
+            ) if item is not None
+            else r'\N'
+            for item in row
+        ) for row in data_iter
     )
 
     dbapi_conn = conn.connection

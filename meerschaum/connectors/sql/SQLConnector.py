@@ -54,6 +54,7 @@ class SQLConnector(Connector):
         clear_pipe,
         get_pipe_table,
         get_pipe_columns_types,
+        get_to_sql_dtype,
     )
     from ._plugins import (
         register_plugin,
@@ -118,6 +119,10 @@ class SQLConnector(Connector):
             as long enough parameters are supplied to the constructor.
         """
         if 'uri' in kw:
+            uri = kw['uri']
+            if uri.startswith('postgres://'):
+                uri = uri.replace('postgres://', 'postgresql://', 1)
+            kw['uri'] = uri
             from_uri_params = self.from_uri(kw['uri'], as_dict=True)
             label = label or from_uri_params.get('label', None)
             from_uri_params.pop('label', None)
@@ -150,6 +155,9 @@ class SQLConnector(Connector):
                     f"    Missing flavor. Provide flavor as a key for '{self}'."
                 )
             self.flavor = flavor or self.parse_uri(self.__dict__['uri']).get('flavor', None)
+
+        if self.flavor == 'postgres':
+            self.flavor = 'postgresql'
 
         self._debug = debug
         ### Store the PID and thread at initialization

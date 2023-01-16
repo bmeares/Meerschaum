@@ -62,6 +62,16 @@ mkdir awesome-sauce && \
   vim mrsm-compose.yaml
 ```
 
+!!! tip "Plugins directories"
+
+    You may set multiple paths for `plugins_dir`. This is very useful if you want to group plugins together. A value of `null` will include the environment's plugins in your project.
+
+    ```yaml
+    plugins_dir:
+      - "./plugins"
+      - null
+    ```
+
 ## 🪖 Commands
 
 If you've used `docker-compose`, you'll catch on to Meerschaum Compose pretty quickly. Here's a quick summary:
@@ -118,7 +128,7 @@ The supported top-level keys in a Compose file are the following:
 - **`root_dir`** (*optional*, default `./root/`)  
   A path to the root directory; see [`MRSM_ROOT_DIR`](/reference/environment/#mrsm_root_dir).
 - **`plugins_dir`** (*optional*, default `./plugins/`)  
-  A path to the plugins directory; see [`MRSM_PLUGINS_DIR`](/reference/environment/#mrsm_plugins_dir).
+  Either a path or list of paths to the plugins directories. A value of `null` will include the current environment plugins directories in the project. See [`MRSM_PLUGINS_DIR`](/reference/environment/#mrsm_plugins_dir).
 - **`plugins`** (*optional*)  
   A list of plugins expected to be in the plugins directory. Missing plugins will be [installed from `api:mrsm`](/reference/plugins/using-plugins/).  
   To install from a custom repository, append `@api:<label>` to the plugins' names or set the configuration variable `meerschaum:default_repository`.
@@ -126,6 +136,17 @@ The supported top-level keys in a Compose file are the following:
   Configuration keys to be patched on top of your host configuration, see [`MRSM_CONFIG`](/reference/environment/#mrsm_config). Custom connectors should be defined here.
 - **`environment`** (*optional*)  
   Additional environment variables to pass to subprocesses.
+
+!!! tip "Accessing the host configuration"
+
+    The Meerschaum Compose YAML file also supports Meerschaum symlinks. For example, to alias a new connector `sql:foo` to your host's `sql:main`:
+
+    ```yaml
+    config:
+      meerschaum:
+        sql:
+          foo: MRSM{meerschaum:connectors:sql:main}
+    ```
 
 ### The `sync` Key
 

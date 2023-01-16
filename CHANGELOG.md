@@ -4,6 +4,44 @@
 
 This is the current release cycle, so stay tuned for future releases!
 
+### v1.5.3
+
+- **Pipes now support syncing dictionaries and lists.**  
+  Complex columns (dicts or lists) will now be preserved:
+
+  ```python
+  import meerschaum as mrsm
+  pipe = mrsm.Pipe('a', 'b')
+  pipe.sync([{'a': {'b': 1}}])
+  df = pipe.get_data()
+  print(df['a'][0])
+  # {'b': 1}
+  ```
+
+  You can also force strings to be parsed by setting the data type to `json`:
+
+  ```python
+  import meerschaum as mrsm
+  pipe = mrsm.Pipe(
+      'foo', 'bar',
+      columns = {'datetime': 'id'},
+      dtypes = {'data': 'json', 'id': 'Int64'},
+  )
+  docs = [{'id': 1, 'data': '{"foo": "bar"}'}]
+  pipe.sync(docs)
+  df = pipe.get_data()
+  print(df['data'][0])
+  # {'foo': 'bar'}
+  ```
+
+  For PostgreSQL-like databases (e.g. TimescaleDB), this is stored as `JSONB` under the hood. For all others, it's stored as the equivalent for `TEXT`.
+
+- **Fixed determining the version when installing plugins.**  
+  Like the `required` list, the `__version__` string must be explicitly set in order for the correct version to be determined.
+
+- **Automatically cast `postgres` to `postgresql`**  
+  When a `SQLConnector` is built with a flavor of `postgres`, it will be automatically set to `postgresql`.
+
 ### v1.5.0 – v1.5.2
 
 - **Pipes may now use integers for the `datetime` column.**  
