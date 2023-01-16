@@ -184,9 +184,6 @@ class Plugin:
         from meerschaum.utils.packages import attempt_import
         pathspec = attempt_import('pathspec', debug=debug)
 
-        old_cwd = os.getcwd()
-        os.chdir(PLUGINS_RESOURCES_PATH)
-
         if not self.__file__:
             from meerschaum.utils.warnings import error
             error(f"Could not find file for plugin '{self}'.")
@@ -196,6 +193,10 @@ class Plugin:
         else:
             path = self.__file__
             is_dir = False
+
+        old_cwd = os.getcwd()
+        real_parent_path = pathlib.Path(os.path.realpath(path)).parent
+        os.chdir(real_parent_path)
 
         default_patterns_to_ignore = [
             '.pyc',
@@ -280,6 +281,8 @@ class Plugin:
         if debug:
             from meerschaum.utils.debug import dprint
         import tarfile
+        import re
+        import ast
         from meerschaum.plugins import reload_plugins, sync_plugins_symlinks
         from meerschaum.utils.packages import attempt_import, determine_version
         from meerschaum.utils.venv import init_venv
@@ -322,14 +325,17 @@ class Plugin:
             fpath = fpath / '__init__.py'
 
         init_venv(self.name, debug=debug)
-        new_version = determine_version(
-            fpath,
-            import_name = self.name,
-            search_for_metadata = False,
-            warn = True,
-            debug = debug,
-            #  venv = self.name,
-        )
+        with open(fpath, 'r', encoding='utf-8') as f:
+            init_lines = f.readlines()
+        new_version = None
+        for line in init_lines:
+            if '__version__' not in line:
+                continue
+            version_match = re.search(r'__version__(\s?)=', line.lstrip().rstrip())
+            if not version_match:
+                continue
+            new_version = ast.literal_eval(line.split('=')[1].lstrip().rstrip())
+            break
         if not new_version:
             warn(
                 f"No `__version__` defined for plugin '{self}'. "

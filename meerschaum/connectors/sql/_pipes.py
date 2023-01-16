@@ -56,7 +56,9 @@ def register_pipe(
         'metric_key'     : pipe.metric_key,
         'location_key'   : pipe.location_key,
         'parameters'     : (
-            json.dumps(parameters) if self.flavor not in json_flavors else parameters
+            json.dumps(parameters)
+            if self.flavor not in json_flavors
+            else parameters
         ),
     }
     query = sqlalchemy.insert(pipes).values(**values)
@@ -115,8 +117,9 @@ def edit_pipe(
     sqlalchemy = attempt_import('sqlalchemy')
 
     values = {
-        'parameters' : (
-            json.dumps(parameters) if self.flavor in ('duckdb',)
+        'parameters': (
+            json.dumps(parameters)
+            if self.flavor not in json_flavors
             else parameters
         ),
     }
@@ -685,6 +688,7 @@ def get_pipe_data(
     A `pd.DataFrame` of the pipe's data.
 
     """
+    import json
     from meerschaum.utils.sql import sql_item_name
     dtypes = pipe.dtypes
     if dtypes:
@@ -706,9 +710,6 @@ def get_pipe_data(
     existing_cols = pipe.get_columns_types(debug=debug)
     if existing_cols:
         dtypes = {col: typ for col, typ in dtypes.items() if col in existing_cols}
-    if dtypes:
-        kw['dtypes'] = dtypes
-
     query = self.get_pipe_data_query(
         pipe,
         begin = begin,
@@ -734,6 +735,10 @@ def get_pipe_data(
         df = parse_df_datetimes(df, debug=debug) if isinstance(df, pd.DataFrame) else (
             [parse_df_datetimes(c, debug=debug) for c in df]
         )
+        for col, typ in dtypes.items():
+            if typ != 'json':
+                continue
+            df[col] = df[col].apply(lambda x: json.loads(x) if x is not None else x)
     return df
 
 
@@ -1063,8 +1068,8 @@ def sync_pipe(
     from meerschaum.utils.warnings import warn
     from meerschaum.utils.debug import dprint
     from meerschaum.utils.packages import import_pandas
-    from meerschaum.utils.sql import get_update_queries, sql_item_name
-    from meerschaum.utils.misc import generate_password
+    from meerschaum.utils.sql import get_update_queries, sql_item_name, json_flavors
+    from meerschaum.utils.misc import generate_password, get_json_cols
     from meerschaum import Pipe
     import time
     import copy
@@ -1137,6 +1142,7 @@ def sync_pipe(
             'name': temp_target,
             'if_exists': 'append',
             'chunksize': chunksize,
+            'dtype': self.get_to_sql_dtype(pipe, update_df, update_dtypes=False),
             'debug': debug,
         })
         self.to_sql(update_df, **update_kw)
@@ -1182,7 +1188,18 @@ def sync_pipe(
         'debug': debug,
         'as_dict': True,
         'chunksize': chunksize,
+        'dtype': self.get_to_sql_dtype(pipe, unseen_df, update_dtypes=True),
     })
+
+    ### Account for first-time syncs of JSON columns.
+    json_cols = get_json_cols(unseen_df)
+    if json_cols:
+        if not pipe.exists(debug=debug):
+            pipe.dtypes.update({col: 'json' for col in json_cols})
+            edit_success, edit_msg = pipe.edit(interactive=False, debug=debug)
+            if not edit_success:
+                warn(f"Unable to update JSON dtypes for {pipe}:\n{e}")
+
     stats = self.to_sql(unseen_df, **unseen_kw)
     if is_new:
         if not self.create_indices(pipe, debug=debug):
@@ -2293,13 +2310,27 @@ def get_add_columns_queries(
     """
     if not pipe.exists(debug=debug):
         return []
+    import copy
     from meerschaum.utils.sql import get_pd_type, get_db_type, sql_item_name
     from meerschaum.utils.misc import flatten_list
     table_obj = self.get_pipe_table(pipe, debug=debug)
     df_cols_types = (
-        {col: str(typ) for col, typ in df.dtypes.items()}
-        if not isinstance(df, dict) else df
+        {
+            col: str(typ)
+            for col, typ in df.dtypes.items()
+        }
+        if not isinstance(df, dict)
+        else copy.deepcopy(df)
     )
+    if len(df) > 0 and not isinstance(df, dict):
+        for col, typ in list(df_cols_types.items()):
+            if typ != 'object':
+                continue
+            val = df.iloc[0][col]
+            if isinstance(val, (dict, list)):
+                df_cols_types[col] = 'json'
+            elif isinstance(val, str):
+                df_cols_types[col] = 'str'
     db_cols_types = {col: get_pd_type(str(typ.type)) for col, typ in table_obj.columns.items()}
     new_cols = set(df_cols_types) - set(db_cols_types)
     if not new_cols:
@@ -2371,7 +2402,7 @@ def get_alter_columns_queries(
     if not altered_cols:
         return []
 
-    text_type = get_db_type('object', self.flavor)
+    text_type = get_db_type('str', self.flavor)
     altered_cols_types = {
         col: text_type
         for col in altered_cols
@@ -2462,3 +2493,48 @@ def get_alter_columns_queries(
     ))
 
     return drop_index_queries + queries + create_index_queries
+
+
+def get_to_sql_dtype(
+        self,
+        pipe: 'meerschaum.Pipe',
+        df: 'pd.DataFrame',
+        update_dtypes: bool = True,
+    ) -> Dict[str, 'sqlalchemy.sql.visitors.TraversibleType']:
+    """
+    Given a pipe and DataFrame, return the `dtype` dictionary for `to_sql()`.
+
+    Parameters
+    ----------
+    pipe: meerschaum.Pipe
+        The pipe which may contain a `dtypes` parameter.
+
+    df: pd.DataFrame
+        The DataFrame to be pushed via `to_sql()`.
+
+    update_dtypes: bool, default True
+        If `True`, patch the pipe's dtypes onto the DataFrame's dtypes.
+
+    Returns
+    -------
+    A dictionary with `sqlalchemy` datatypes.
+
+    Examples
+    --------
+    >>> import pandas as pd
+    >>> import meerschaum as mrsm
+    >>> 
+    >>> conn = mrsm.get_connector('sql:memory')
+    >>> df = pd.DataFrame([{'a': {'b': 1}}])
+    >>> pipe = mrsm.Pipe('a', 'b', dtypes={'a': 'json'})
+    >>> get_to_sql_dtype(pipe, df)
+    {'a': <class 'sqlalchemy.sql.sqltypes.JSON'>}
+    """
+    from meerschaum.utils.sql import get_db_type
+    df_dtypes = {col: str(typ) for col, typ in df.dtypes.items()}
+    if update_dtypes:
+        df_dtypes.update(pipe.dtypes)
+    return {
+        col: get_db_type(typ, self.flavor, as_sqlalchemy=True)
+        for col, typ in df_dtypes.items()
+    }

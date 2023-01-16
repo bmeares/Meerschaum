@@ -6,11 +6,12 @@
 Register a Pipe object
 """
 
-from meerschaum.utils.typing import SuccessTuple
+from meerschaum.utils.typing import SuccessTuple, Any
 
 def register(
         self,
-        debug: bool = False
+        debug: bool = False,
+        **kw: Any
     ) -> SuccessTuple:
     """
     Register a new Pipe along with its attributes.
@@ -20,10 +21,12 @@ def register(
     debug: bool, default False
         Verbosity toggle.
 
+    kw: Any
+        Keyword arguments to pass to `instance_connector.register_pipe()`.
+
     Returns
     -------
     A `SuccessTuple` of success, message.
-
     """
     if self.temporary:
         return False, "Cannot register pipes created with `temporary=True` (read-only)."
@@ -71,4 +74,4 @@ def register(
         }
 
     with Venv(get_connector_plugin(self.instance_connector)):
-        return self.instance_connector.register_pipe(self, debug=debug)
+        return self.instance_connector.register_pipe(self, debug=debug, **kw)

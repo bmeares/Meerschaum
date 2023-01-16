@@ -27,6 +27,17 @@ MRSM_PLUGINS_DIR=plugins \
   mrsm show plugins
 ```
 
+### Multiple Plugins Directories
+
+To allow you to group plugins together, Meerschaum supports a multiple plugins directories at once. Just set `MRSM_PLUGINS_DIR` to a JSON-encoded list of paths:
+
+```bash
+export MRSM_PLUGINS_DIR='[
+    "./plugins",
+    "./plugins_2"
+]'
+```
+
 ## **`MRSM_<TYPE>_<LABEL>`**
 
 You can temporarily register new connectors in a variable in the form `MRSM_<TYPE>_<LABEL>`, where `<TYPE>` is either `SQL` or `API`, and `<LABEL>` is the label for the connector (converted to lower case). Check here for more information about [environment connectors](/reference/connectors/#-environment-connectors), but in a nutshell, set the variable to the [URI](https://en.wikipedia.org/wiki/Uniform_Resource_Identifier) of your connector.

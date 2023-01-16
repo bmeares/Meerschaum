@@ -427,11 +427,19 @@ def filter_existing(
     A `pd.DataFrame` with existing rows removed.
 
     """
+    import ast
+    import datetime
     from meerschaum.utils.warnings import warn
     from meerschaum.utils.debug import dprint
-    from meerschaum.utils.misc import round_time
     from meerschaum.utils.packages import attempt_import, import_pandas
-    import datetime
+    from meerschaum.utils.misc import (
+        round_time,
+        filter_unseen_df,
+        add_missing_cols_to_df,
+        to_pandas_dtype,
+        get_unhashable_cols,
+    )
+
     pd = import_pandas()
     if not isinstance(df, pd.DataFrame):
         df = self.enforce_dtypes(df, debug=debug)
@@ -508,12 +516,6 @@ def filter_existing(
     if debug:
         dprint(f"Looking at data between '{begin}' and '{end}'.", **kw)
 
-    ### backtrack_df is existing Pipe data that overlaps with the fetched df
-    #  try:
-        #  backtrack_minutes = self.parameters['fetch']['backtrack_minutes']
-    #  except Exception as e:
-        #  backtrack_minutes = 0
-
     backtrack_df = self.get_data(
         begin = begin,
         end = end,
@@ -536,19 +538,35 @@ def filter_existing(
             and col in backtrack_df.columns
         )
     ]
-    on_cols_dtypes = {col: typ for col, typ in self.dtypes.items() if col in on_cols}
+    on_cols_dtypes = {
+        col: to_pandas_dtype(typ)
+        for col, typ in self.dtypes.items()
+        if col in on_cols
+    }
 
     ### Detect changes between the old target and new source dataframes.
-    from meerschaum.utils.misc import filter_unseen_df, add_missing_cols_to_df
     delta_df = add_missing_cols_to_df(
         filter_unseen_df(
             backtrack_df,
             df,
-            dtypes = self.dtypes,
+            dtypes = {
+                col: to_pandas_dtype(typ)
+                for col, typ in self.dtypes.items()
+            },
             debug = debug
         ),
         on_cols_dtypes,
     )
+
+    ### Cast dicts or lists to strings so we can merge.
+    unhashable_delta_cols = get_unhashable_cols(delta_df)
+    unhashable_backtrack_cols = get_unhashable_cols(backtrack_df)
+    for col in unhashable_delta_cols:
+        delta_df[col] = delta_df[col].apply(str)
+    for col in unhashable_backtrack_cols:
+        backtrack_df[col] = backtrack_df[col].apply(str)
+    casted_cols = set(unhashable_delta_cols + unhashable_backtrack_cols)
+
     joined_df = pd.merge(
         delta_df,
         backtrack_df,
@@ -557,6 +575,9 @@ def filter_existing(
         indicator = True,
         suffixes = ('', '_old'),
     ) if on_cols else delta_df
+    for col in casted_cols:
+        if col in joined_df.columns:
+            joined_df[col] = joined_df[col].apply(ast.literal_eval)
 
     ### Determine which rows are completely new.
     new_rows_mask = (joined_df['_merge'] == 'left_only') if on_cols else None

@@ -256,6 +256,8 @@ def test_dtype_enforcement(flavor: str):
             'float': 'float64',
             'bool': 'bool',
             'object': 'object',
+            'json': 'json',
+            'str': 'str',
         },
         instance = conn,
     )
@@ -264,12 +266,20 @@ def test_dtype_enforcement(flavor: str):
     pipe.sync([{'dt': '2022-01-01', 'id': 1, 'float': '1.0'}], debug=debug)
     pipe.sync([{'dt': '2022-01-01', 'id': 1, 'bool': 'True'}], debug=debug)
     pipe.sync([{'dt': '2022-01-01', 'id': 1, 'object': 'foo'}], debug=debug)
+    pipe.sync([{'dt': '2022-01-01', 'id': 1, 'str': 'bar'}], debug=debug)
+    pipe.sync([{'dt': '2022-01-01', 'id': 1, 'json': {'a': {'b': 1}}}], debug=debug)
     df = pipe.get_data(debug=debug)
     assert len(df) == 1
-    assert len(df.columns) == 6
+    assert len(df.columns) == 8
     for col, typ in df.dtypes.items():
-        assert str(typ) == pipe.dtypes[col]
-    return pipe
+        pipe_dtype = pipe.dtypes[col]
+        if pipe_dtype == 'json':
+            assert isinstance(df[col][0], dict)
+            pipe_dtype = 'object'
+        elif pipe_dtype == 'str':
+            assert isinstance(df[col][0], str)
+            pipe_dtype = 'object'
+        assert str(typ) == pipe_dtype
 
 
 @pytest.mark.parametrize("flavor", list(all_pipes.keys()))
@@ -279,6 +289,8 @@ def test_temporary_pipes(flavor: str):
     """
     from meerschaum.utils.misc import generate_password
     from meerschaum.utils.sql import table_exists
+    if flavor != 'sqlite':
+        return
     session_id = generate_password(6)
     db_path = '/tmp/' + session_id + '.db'
     conn = mrsm.get_connector('sql', session_id, flavor='sqlite', database=db_path) 
@@ -303,3 +315,52 @@ def test_temporary_pipes(flavor: str):
     assert not table_exists('pipes', conn, debug=debug)
     assert not table_exists('users', conn, debug=debug)
     assert not table_exists('plugins', conn, debug=debug)
+
+
+@pytest.mark.parametrize("flavor", list(all_pipes.keys()))
+def test_infer_json_dtype(flavor: str):
+    """
+    Ensure that new pipes with complex columns (dict or list) as enforced as JSON. 
+    """
+    from meerschaum.utils.formatting import pprint
+    from meerschaum.utils.misc import generate_password
+    session_id = generate_password(6)
+    conn = conns[flavor]
+    pipe = Pipe('foo', 'bar', session_id, instance=conn)
+    success, msg = pipe.sync([
+        {'a': ['b', 'c']},
+        {'a': {'b': 1}},
+    ])
+    assert success, msg
+    pprint(pipe.get_columns_types())
+    df = pipe.get_data(debug=debug)
+    print(df)
+    assert isinstance(df['a'][0], list)
+    assert isinstance(df['a'][1], dict)
+    success, msg = pipe.delete(debug=debug)
+    assert success, msg
+
+
+@pytest.mark.parametrize("flavor", list(all_pipes.keys()))
+def test_force_json_dtype(flavor: str):
+    """
+    Ensure that new pipes with complex columns (dict or list) as enforced as JSON. 
+    """
+    import json
+    from meerschaum.utils.formatting import pprint
+    from meerschaum.utils.misc import generate_password
+    session_id = generate_password(6)
+    conn = conns[flavor]
+    pipe = Pipe('foo', 'bar', session_id, instance=conn, dtypes={'a': 'json'})
+    success, msg = pipe.sync([
+        {'a': json.dumps(['b', 'c'])},
+        {'a': json.dumps({'b': 1})},
+    ])
+    assert success, msg
+    pprint(pipe.get_columns_types())
+    df = pipe.get_data(debug=debug)
+    print(df)
+    assert isinstance(df['a'][0], list)
+    assert isinstance(df['a'][1], dict)
+    success, msg = pipe.delete(debug=debug)
+    assert success, msg
