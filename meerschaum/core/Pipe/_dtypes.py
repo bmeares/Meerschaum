@@ -15,12 +15,13 @@ def enforce_dtypes(self, df: 'pd.DataFrame', debug: bool=False) -> 'pd.DataFrame
     If the pipe does not exist and dtypes are not set, return the dataframe.
 
     """
+    import json
     from meerschaum.utils.debug import dprint
     from meerschaum.utils.warnings import warn
     from meerschaum.utils.formatting import pprint
     from meerschaum.config.static import STATIC_CONFIG
     from meerschaum.utils.packages import import_pandas
-    from meerschaum.utils.misc import parse_df_datetimes
+    from meerschaum.utils.misc import parse_df_datetimes, to_pandas_dtype
     pd = import_pandas(debug=debug)
     if df is None:
         if debug:
@@ -53,19 +54,41 @@ def enforce_dtypes(self, df: 'pd.DataFrame', debug: bool=False) -> 'pd.DataFrame
             dprint("Incoming DataFrame has no columns. Skipping enforcement...")
         return df
 
+    pipe_dtypes = self.dtypes
+    pipe_pandas_dtypes = {
+        col: to_pandas_dtype(typ)
+        for col, typ in self.dtypes.items()
+    }
+    json_cols = [
+        col
+        for col, typ in pipe_dtypes.items()
+        if typ == 'json'
+    ]
     if debug:
         dprint(f"Data types for {self}:")
-        pprint(self.dtypes)
+        pprint(pipe_dtypes)
         dprint(f"Data types for incoming DataFrame:")
         pprint(df_dtypes)
-    if df_dtypes == self.dtypes:
+
+    if json_cols and len(df) > 0:
         if debug:
-            dprint(f"Data types already match. Skipping enforcement...")
+            dprint(f"Checking columns for JSON encoding: {json_cols}")
+        for col in json_cols:
+            if col in df.columns and isinstance(df.iloc[0][col], str):
+                try:
+                    df[col] = df[col].apply(json.loads)
+                except Exception as e:
+                    if debug:
+                        dprint(f"Unable to parse column '{col}' as JSON:\n{e}")
+
+    if df_dtypes == pipe_pandas_dtypes:
+        if debug:
+            dprint(f"Data types match. Exiting enforcement...")
         return df
 
     common_dtypes = {}
     common_diff_dtypes = {}
-    for col, typ in self.dtypes.items():
+    for col, typ in pipe_pandas_dtypes.items():
         if col in df_dtypes:
             common_dtypes[col] = typ
             if typ != df_dtypes[col]:
@@ -87,7 +110,7 @@ def enforce_dtypes(self, df: 'pd.DataFrame', debug: bool=False) -> 'pd.DataFrame
         dprint(f"Common columns with different dtypes (after dates):")
         pprint(common_diff_dtypes)
 
-    if df_dtypes == self.dtypes:
+    if df_dtypes == pipe_pandas_dtypes:
         if debug:
             dprint(
                 "The incoming DataFrame has mostly the same types as {self}, skipping enforcement."
@@ -109,7 +132,7 @@ def enforce_dtypes(self, df: 'pd.DataFrame', debug: bool=False) -> 'pd.DataFrame
                     list(common_dtypes.keys())
                 ].astype({
                     col: typ
-                    for col, typ in self.dtypes.items()
+                    for col, typ in pipe_pandas_dtypes.items()
                     if col in common_dtypes
                 })
             except Exception as e:
@@ -158,10 +181,12 @@ def infer_dtypes(self, persist: bool=False, debug: bool=False) -> Dict[str, Any]
             if not self.parameters.get('dtypes', {}).get(dt_col, None):
                 dtypes[dt_col] = 'datetime64[ns]'
         return dtypes
+
     from meerschaum.utils.sql import get_pd_type
     columns_types = self.get_columns_types(debug=debug)
     dtypes = {
-        c: get_pd_type(t) for c, t in columns_types.items()
+        c: get_pd_type(t, allow_custom_dtypes=True)
+        for c, t in columns_types.items()
     } if columns_types else {}
     if persist:
         self.dtypes = dtypes

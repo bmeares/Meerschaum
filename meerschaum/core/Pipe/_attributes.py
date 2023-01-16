@@ -407,7 +407,7 @@ def guess_datetime(self) -> Union[str, None]:
     """
     dt_cols = [
         col for col, typ in self.dtypes.items()
-        if typ.startswith('datetime')
+        if str(typ).startswith('datetime')
     ]
     if not dt_cols:
         return None
