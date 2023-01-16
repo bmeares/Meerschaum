@@ -184,9 +184,6 @@ class Plugin:
         from meerschaum.utils.packages import attempt_import
         pathspec = attempt_import('pathspec', debug=debug)
 
-        old_cwd = os.getcwd()
-        os.chdir(PLUGINS_RESOURCES_PATH)
-
         if not self.__file__:
             from meerschaum.utils.warnings import error
             error(f"Could not find file for plugin '{self}'.")
@@ -196,6 +193,10 @@ class Plugin:
         else:
             path = self.__file__
             is_dir = False
+
+        old_cwd = os.getcwd()
+        real_parent_path = pathlib.Path(os.path.realpath(path)).parent
+        os.chdir(real_parent_path)
 
         default_patterns_to_ignore = [
             '.pyc',
