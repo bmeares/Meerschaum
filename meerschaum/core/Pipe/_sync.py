@@ -398,7 +398,7 @@ def filter_existing(
         params: Optional[Dict[str, Any]] = None,
         debug: bool = False,
         **kw
-    ) -> Tuple['pd.DataFrame', Union['pd.DataFrame', None]]:
+    ) -> Tuple['pd.DataFrame', 'pd.DataFrame', 'pd.DataFrame']:
     """
     Inspect a dataframe and filter out rows which already exist in the pipe.
 
@@ -408,10 +408,11 @@ def filter_existing(
         The dataframe to inspect and filter.
         
     begin: Optional[datetime.datetime], default None
-        If provided, use this boundary when searching for existing data.
+        NOTE: This is not used! The minimum datetime value is used.
 
     end: Optional[datetime.datetime], default
         If provided, use this boundary when searching for existing data.
+        Else use the maximum datetime value (+1 for integer datetimes).
 
     chunksize: Optional[int], default -1
         The `chunksize` used when fetching existing data.
@@ -424,8 +425,7 @@ def filter_existing(
 
     Returns
     -------
-    A `pd.DataFrame` with existing rows removed.
-
+    A tuple of three pandas DataFrames: unseen, update, and delta.
     """
     import ast
     import datetime
@@ -462,6 +462,7 @@ def filter_existing(
     if not ('datetime' in str(type(min_dt))) or str(min_dt) == 'NaT':
         if 'int' not in str(type(min_dt)).lower():
             min_dt = None
+
     if isinstance(min_dt, datetime.datetime):
         begin = (
             round_time(
@@ -471,8 +472,6 @@ def filter_existing(
         )
     elif dt_type and 'int' in dt_type.lower():
         begin = min_dt
-    else:
-        begin = None
 
     ### end is the newest data in the new dataframe
     try:
@@ -489,23 +488,20 @@ def filter_existing(
         if 'int' not in str(type(max_dt)).lower():
             max_dt = None
 
-    if isinstance(max_dt, datetime.datetime):
-        end = (
-            round_time(
-                max_dt,
-                to = 'down'
-            ) + datetime.timedelta(minutes=1)
-        )
-    elif dt_type and 'int' in dt_type.lower():
-        end = max_dt
-    else:
-        end = None
+    if end is None:
+        if isinstance(max_dt, datetime.datetime):
+            end = (
+                round_time(
+                    max_dt,
+                    to = 'down'
+                ) + datetime.timedelta(minutes=1)
+            )
+        elif dt_type and 'int' in dt_type.lower():
+            end = max_dt + 1
 
-
-    if max_dt is not None and min_dt > max_dt:
+    if max_dt is not None and min_dt is not None and min_dt > max_dt:
         warn(f"Detected minimum datetime greater than maximum datetime.")
 
-    ### If `max_dt` is `None`, unbound the search.
     if begin is not None and end is not None and begin > end:
         if isinstance(begin, datetime.datetime):
             begin = end - datetime.timedelta(minutes=1)
