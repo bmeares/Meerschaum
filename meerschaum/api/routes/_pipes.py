@@ -21,10 +21,15 @@ from meerschaum.api import (
     debug,
     no_auth, private,
 )
+import json
 import fastapi
+from meerschaum import Pipe
 from meerschaum.api.models import MetaPipe
 from meerschaum.utils.packages import attempt_import
-from meerschaum.utils.misc import is_pipe_registered, round_time, is_int
+from meerschaum.utils.misc import (
+    is_pipe_registered, round_time, is_int, parse_df_datetimes,
+    replace_pipes_in_dict,
+)
 from meerschaum.utils.typing import List, Dict, Any, Union
 import meerschaum.core.User
 import datetime
@@ -152,8 +157,6 @@ async def fetch_pipes_keys(
     """
     Get a list of tuples of all registered Pipes' keys.
     """
-    import json
-
     keys = get_api_connector().fetch_pipes_keys(
         connector_keys = json.loads(connector_keys),
         metric_keys = json.loads(metric_keys),
@@ -177,7 +180,6 @@ async def get_pipes(
     """
     Get all registered Pipes with metadata, excluding parameters.
     """
-    from meerschaum.utils.misc import replace_pipes_in_dict
     kw = {'debug' : debug, 'mrsm_instance' : get_api_connector()}
     if connector_keys != "":
         kw['connector_keys'] = connector_keys
@@ -317,9 +319,6 @@ def sync_pipe(
     Add data to an existing Pipe.
     See `meerschaum.Pipe.sync`.
     """
-    from meerschaum.utils.misc import parse_df_datetimes
-    from meerschaum import Pipe
-    import json
     if data is None:
         data = {}
     p = get_pipe(connector_keys, metric_key, location_key)
@@ -373,7 +372,6 @@ def get_pipe_data(
     if params == 'null':
         params = None
     if params is not None:
-        import json
         try:
             _params = json.loads(params)
         except Exception as e:
@@ -409,7 +407,7 @@ def get_pipe_data(
     df = pipe.get_data(
         begin = begin,
         end = end,
-        params = params,
+        params = _params,
         debug = debug,
     )
     if df is None:
@@ -567,16 +565,9 @@ def get_pipe_id(
     """
     Get a Pipe's ID.
     """
-    try:
-        pipe_id = int(
-            get_pipe(
-                connector_keys,
-                metric_key,
-                location_key
-            ).id
-        )
-    except Exception as e:
-        raise fastapi.HTTPException(status_code=404, detail=str(e))
+    pipe_id = get_pipe(connector_keys, metric_key, location_key).id
+    if pipe_id is None:
+        raise fastapi.HTTPException(status_code=404, detail="Pipe is not registered.")
     return pipe_id
 
 
