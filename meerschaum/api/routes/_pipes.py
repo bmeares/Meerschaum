@@ -24,13 +24,14 @@ from meerschaum.api import (
 import fastapi
 from meerschaum.api.models import MetaPipe
 from meerschaum.utils.packages import attempt_import
-from meerschaum.utils.misc import is_pipe_registered, round_time
+from meerschaum.utils.misc import is_pipe_registered, round_time, is_int
 from meerschaum.utils.typing import List, Dict, Any, Union
 import meerschaum.core.User
 import datetime
 pipes_endpoint = endpoints['pipes']
 from fastapi.responses import StreamingResponse
 import io
+dateutil_parser = attempt_import('dateutil.parser', lazy=False)
 
 
 @app.post(pipes_endpoint + '/{connector_keys}/{metric_key}/{location_key}/register', tags=['Pipes'])
@@ -339,8 +340,8 @@ def get_pipe_data(
         connector_keys: str,
         metric_key: str,
         location_key: str,
-        begin: str = None,
-        end: str = None,
+        begin: Union[str, int, None] = None,
+        end: Union[str, int, None] = None,
         params: Optional[str] = None,
         orient: str = 'records',
         curr_user = (
@@ -350,6 +351,11 @@ def get_pipe_data(
     """
     Get a Pipe's data. Optionally set query boundaries.
     """
+    if is_int(begin):
+        begin = int(begin)
+    if is_int(end):
+        end = int(end)
+
     _params = {}
     if params == 'null':
         params = None
@@ -366,14 +372,14 @@ def get_pipe_data(
             detail = "Params must be a valid JSON-encoded dictionary.",
         )
 
-    p = get_pipe(connector_keys, metric_key, location_key)
-    if not is_pipe_registered(p, pipes(refresh=True)):
+    pipe = get_pipe(connector_keys, metric_key, location_key)
+    if not is_pipe_registered(pipe, pipes(refresh=True)):
         raise fastapi.HTTPException(
             status_code = 409,
             detail = "Pipe must be registered with the datetime column specified."
         )
 
-    if p.target in ('users', 'plugins', 'pipes'):
+    if pipe.target in ('users', 'plugins', 'pipes'):
         raise fastapi.HTTPException(
             status_code = 409,
             detail = f"Cannot retrieve data from protected table '{p.target}'.",
@@ -387,17 +393,25 @@ def get_pipe_data(
         #  debug = debug
     #  )
 
+    df = pipe.get_data(
+        begin = begin,
+        end = end,
+        params = params,
+        debug = debug,
+    )
+    if df is None:
+        raise fastapi.HTTPException(
+            status_code = 400,
+            detail = f"Could not fetch data with the given parameters.",
+        )
+    json_content = df.to_json(
+        date_format = 'iso',
+        orient = orient,
+        date_unit = 'us',
+    )
+
     return fastapi.Response(
-        content = p.get_data(
-            begin = begin,
-            end = end,
-            params = _params, 
-            debug = debug
-        ).to_json(
-            date_format = 'iso',
-            orient = orient,
-            date_unit = 'us',
-        ),
+        json_content,
         media_type = 'application/json',
         #  headers = {'chunk' : chunk, 'max_chunk' : max_chunk},
     )
@@ -411,7 +425,7 @@ def get_backtrack_data(
         connector_keys: str,
         metric_key: str,
         location_key: str,
-        begin: datetime.datetime = None,
+        begin: Union[str, int, None] = None,
         backtrack_minutes: int = 0,
         params: Optional[str] = None,
         orient: str = 'records',
@@ -422,6 +436,9 @@ def get_backtrack_data(
     """
     Get a Pipe's backtrack data. Optionally set query boundaries.
     """
+    if is_int(begin):
+        begin = int(begin)
+
     _params = {}
     if params is not None:
         import json
@@ -460,8 +477,8 @@ def get_pipe_csv(
         connector_keys: str,
         metric_key: str,
         location_key: str,
-        begin: datetime.datetime = None,
-        end: datetime.datetime = None,
+        begin: Union[str, int, None] = None,
+        end: Union[str, int, None] = None,
         params: Optional[str] = None,
         curr_user = (
             fastapi.Depends(manager) if not no_auth else None
@@ -470,6 +487,17 @@ def get_pipe_csv(
     """
     Get a Pipe's data as a CSV file. Optionally set query boundaries.
     """
+    if begin is not None:
+        begin = (
+            int(begin) if is_int(begin)
+            else dateutil_parser.parse(begin)
+        )
+    if end is not None:
+        end = (
+            int(end) if is_int(end)
+            else dateutil_parser.parse(end)
+        )
+
     _params = {}
     if params == 'null':
         params = None
@@ -493,12 +521,19 @@ def get_pipe_csv(
             detail = "Pipe must be registered with the datetime column specified."
         )
 
-    if begin is None:
-        begin = p.get_sync_time(round_down=False, newest=False)
-    if end is None:
-        end = p.get_sync_time(round_down=False, newest=True)
+    dt_col = pipe.columns.get('datetime', None)
+    if dt_col:
+        if begin is None:
+            begin = p.get_sync_time(round_down=False, newest=False)
+        if end is None:
+            end = p.get_sync_time(round_down=False, newest=True)
 
-    filename = str(p) + '-' + str(begin.timestamp()) + '-' + str(end.timestamp()) + '.csv'
+    bounds_text = (
+        ('-' + str(begin) + '-' + str(end))
+        if begin is not None and end is not None
+        else ''
+    )
+    filename = p.target + bounds_text + '.csv'
     df = p.get_data(begin=begin, end=end, params=_params, debug=debug)
     stream = io.StringIO()
     df.to_csv(stream, index=False)
@@ -581,8 +616,8 @@ def get_pipe_rowcount(
         connector_keys: str,
         metric_key: str,
         location_key: str,
-        begin: Optional[datetime.datetime] = None,
-        end: Optional[datetime.datetime] = None,
+        begin: Union[str, int, None] = None,
+        end: Union[str, int, None] = None,
         params: Optional[Dict[str, Any]] = None,
         curr_user = (
             fastapi.Depends(manager) if not no_auth else None
@@ -591,6 +626,10 @@ def get_pipe_rowcount(
     """
     Return a pipe's rowcount.
     """
+    if is_int(begin):
+        begin = int(begin)
+    if is_int(end):
+        end = int(end)
     return get_pipe(connector_keys, metric_key, location_key).get_rowcount(
         begin = begin,
         end = end,

@@ -31,7 +31,7 @@ def register_pipe(
     Returns a tuple of (success_bool, response_dict).
     """
     from meerschaum.utils.debug import dprint
-    from meerschaum.config.static import _static_config
+    from meerschaum.config.static import STATIC_CONFIG
     ### NOTE: if `parameters` is supplied in the Pipe constructor,
     ###       then `pipe.parameters` will exist and not be fetched from the database.
     r_url = pipe_r_url(pipe)
@@ -61,7 +61,6 @@ def edit_pipe(
     Returns a tuple of (success_bool, response_dict).
     """
     from meerschaum.utils.debug import dprint
-    from meerschaum.config.static import _static_config
     ### NOTE: if `parameters` is supplied in the Pipe constructor,
     ###       then `pipe.parameters` will exist and not be fetched from the database.
     r_url = pipe_r_url(pipe)
@@ -121,7 +120,7 @@ def fetch_pipes_keys(
     A list of tuples containing pipes' keys.
     """
     from meerschaum.utils.warnings import error
-    from meerschaum.config.static import _static_config
+    from meerschaum.config.static import STATIC_CONFIG
     import json
     if connector_keys is None:
         connector_keys = []
@@ -132,7 +131,7 @@ def fetch_pipes_keys(
     if tags is None:
         tags = []
 
-    r_url = _static_config()['api']['endpoints']['pipes'] + '/keys'
+    r_url = STATIC_CONFIG['api']['endpoints']['pipes'] + '/keys'
     try:
         j = self.get(
             r_url,
@@ -301,8 +300,8 @@ def delete_pipe(
 def get_pipe_data(
         self,
         pipe: meerschaum.Pipe,
-        begin: Union[str, datetime.datetime, None] = None,
-        end: Union[str, datetime.datetime, None] = None,
+        begin: Union[str, datetime.datetime, int, None] = None,
+        end: Union[str, datetime.datetime, int, None] = None,
         params: Optional[Dict[str, Any]] = None,
         as_chunks: bool = False,
         debug: bool = False,
@@ -320,6 +319,8 @@ def get_pipe_data(
                 params = {'begin': begin, 'end': end, 'params': json.dumps(params)},
                 debug = debug
             )
+            if not response.ok:
+                warn(response.text)
             j = response.json()
         except Exception as e:
             warn(str(e))
@@ -335,7 +336,7 @@ def get_pipe_data(
     except Exception as e:
         warn(str(e))
         return None
-    df = parse_df_datetimes(pd.read_json(response.text), debug=debug)
+    df = parse_df_datetimes(df, debug=debug)
     return df
 
 
@@ -392,7 +393,7 @@ def get_pipe_id(
         debug = debug
     )
     if debug:
-        dprint(response.text)
+        dprint(f"Got pipe ID: {response.text}")
     try:
         return int(response.text)
     except Exception as e:
@@ -518,9 +519,9 @@ def create_metadata(
     A bool indicating success.
     """
     from meerschaum.utils.debug import dprint
-    from meerschaum.config.static import _static_config
+    from meerschaum.config.static import STATIC_CONFIG
     import json
-    r_url = _static_config()['api']['endpoints']['metadata']
+    r_url = STATIC_CONFIG['api']['endpoints']['metadata']
     response = self.post(r_url, debug=debug)
     if debug:
         dprint("Create metadata response: {response.text}")
