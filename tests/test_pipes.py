@@ -388,7 +388,7 @@ def test_id_index_col(flavor: str):
     success, msg = pipe.sync(docs)
     assert success, msg
     df = pipe.get_data(end=100)
-    assert len(df) == len(docs)
+    assert len(df) == len(new_docs)
     synced_docs = df.to_dict(orient='records')
     assert synced_docs == new_docs
 
