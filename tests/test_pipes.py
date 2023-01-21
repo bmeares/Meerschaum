@@ -235,7 +235,6 @@ def test_sync_change_columns_dtypes(flavor: str):
     df = pipe.get_data()
     assert len(df.columns) == 3
     assert len(df) == 1
-    print(df)
     assert str(df.dtypes['a']) == 'object'
 
 
@@ -364,3 +363,41 @@ def test_force_json_dtype(flavor: str):
     assert isinstance(df['a'][1], dict)
     success, msg = pipe.delete(debug=debug)
     assert success, msg
+
+
+@pytest.mark.parametrize("flavor", list(all_pipes.keys()))
+def test_id_index_col(flavor: str):
+    """
+    Verify that the ID column is able to be synced.
+    """
+    conn = conns[flavor]
+    pipe = Pipe(
+        'test_id', 'index_col',
+        instance = conn,
+        dtypes = {'id': 'Int64'},
+        columns = {'datetime': 'id'},
+    )
+    pipe.delete()
+    docs = [{'id': i, 'a': i*2, 'b': {'c': i/2}} for i in range(10_000)]
+    success, msg = pipe.sync(docs, debug=debug)
+    assert success, msg
+    df = pipe.get_data(debug=debug)
+    synced_docs = df.to_dict(orient='records')
+    assert len(df) == len(docs)
+    assert synced_docs == docs
+
+    ### Sync the same docs again and verify nothing has changed.
+    success, msg = pipe.sync(docs, debug=debug)
+    assert success, msg
+    df = pipe.get_data(debug=debug)
+    synced_docs = df.to_dict(orient='records')
+    assert synced_docs == docs
+
+    ### Update the first 100 docs.
+    new_docs = [{'id': i, 'a': i*3, 'b': {'c': round(i/3, 2)}} for i in range(100)]
+    success, msg = pipe.sync(new_docs, debug=debug)
+    small_df = pipe.get_data(end=100, debug=debug)
+    print(small_df)
+    assert len(small_df) == len(new_docs)
+    small_synced_docs = small_df.to_dict(orient='records')
+    assert small_synced_docs == new_docs

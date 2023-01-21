@@ -1180,6 +1180,15 @@ def sync_pipe(
     if 'name' in kw:
         kw.pop('name')
 
+    ### Account for first-time syncs of JSON columns.
+    if is_new:
+        json_cols = get_json_cols(unseen_df)
+        if json_cols:
+            pipe.dtypes.update({col: 'json' for col in json_cols})
+            edit_success, edit_msg = pipe.edit(interactive=False, debug=debug)
+            if not edit_success:
+                warn(f"Unable to update JSON dtypes for {pipe}:\n{edit_msg}")
+
     ### Insert new data into Pipe's table.
     unseen_kw = copy.deepcopy(kw)
     unseen_kw.update({
@@ -1190,15 +1199,6 @@ def sync_pipe(
         'chunksize': chunksize,
         'dtype': self.get_to_sql_dtype(pipe, unseen_df, update_dtypes=True),
     })
-
-    ### Account for first-time syncs of JSON columns.
-    json_cols = get_json_cols(unseen_df)
-    if json_cols:
-        if not pipe.exists(debug=debug):
-            pipe.dtypes.update({col: 'json' for col in json_cols})
-            edit_success, edit_msg = pipe.edit(interactive=False, debug=debug)
-            if not edit_success:
-                warn(f"Unable to update JSON dtypes for {pipe}:\n{e}")
 
     stats = self.to_sql(unseen_df, **unseen_kw)
     if is_new:
@@ -1921,7 +1921,7 @@ def get_sync_time(
             st = datetime.datetime.combine(db_time, datetime.datetime.min.time())
         ### Adding support for an integer datetime axis.
         elif 'int' in str(type(db_time)).lower():
-            st = db_time
+            st = int(db_time)
         ### Convert pandas timestamp to Python datetime.
         else:
             st = db_time.to_pydatetime()
@@ -1937,6 +1937,7 @@ def get_sync_time(
         warn(str(e))
 
     return sync_time
+
 
 def pipe_exists(
         self,
