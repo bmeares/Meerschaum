@@ -4,7 +4,7 @@
 
 This is the current release cycle, so stay tuned for future releases!
 
-### v1.5.3
+### v1.5.3 – v1.5.4
 
 - **Pipes now support syncing dictionaries and lists.**  
   Complex columns (dicts or lists) will now be preserved:
@@ -95,6 +95,7 @@ This is the current release cycle, so stay tuned for future releases!
 
 - **Fixed a regex bug when cleaning up packages.**
 - **Removed `show gui` and `show modules`.**
+
 
 ## 1.4.x Releases
 
@@ -1371,3 +1372,4 @@ Meerschaum's first point release focused on a lot, but mainly stability and impr
 ## 0.0.x Releases
 
 A lot was accomplished in the first 60 releases of Meerschaum. For the most part, the groundwork for core concepts like pipes, syncing, the config system, SQL and API connectors, bulk inserts, and more was laid.
+

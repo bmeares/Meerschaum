@@ -364,3 +364,31 @@ def test_force_json_dtype(flavor: str):
     assert isinstance(df['a'][1], dict)
     success, msg = pipe.delete(debug=debug)
     assert success, msg
+
+
+@pytest.mark.parametrize("flavor", list(all_pipes.keys()))
+def test_id_index_col(flavor: str):
+    """
+    Verify that the ID column is able to be synced.
+    """
+    conn = conns[flavor]
+    pipe = Pipe(
+        'test_id', 'index_col',
+        instance = conn,
+        dtypes = {'id': 'Int64'},
+        columns = {'datetime': 'id'},
+    )
+    docs = [{'id': i, 'a': i*2, 'b': {'c': i/2}} for i in range(10_000)]
+    success, msg = pipe.sync(docs)
+    assert success, msg
+    df = pipe.get_data()
+    assert len(df) == len(docs)
+
+    new_docs = [{'id': i, 'a': i*3, 'b': {'c': i/3}} for i in range(100)]
+    success, msg = pipe.sync(docs)
+    assert success, msg
+    df = pipe.get_data(end=100)
+    assert len(df) == len(docs)
+    synced_docs = df.to_dict(orient='records')
+    assert synced_docs == new_docs
+
