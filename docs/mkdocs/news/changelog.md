@@ -4,7 +4,7 @@
 
 This is the current release cycle, so stay tuned for future releases!
 
-### v1.5.3 – v1.5.4
+### v1.5.3 – v1.5.5
 
 - **Pipes now support syncing dictionaries and lists.**  
   Complex columns (dicts or lists) will now be preserved:

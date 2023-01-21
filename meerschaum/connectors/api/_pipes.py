@@ -320,7 +320,7 @@ def get_pipe_data(
                 debug = debug
             )
             if not response.ok:
-                warn(response.text)
+                return None
             j = response.json()
         except Exception as e:
             warn(str(e))
@@ -457,15 +457,17 @@ def get_sync_time(
     rounded down to the closest minute.
     """
     from meerschaum.utils.misc import is_int
+    from meerschaum.utils.warnings import warn
     import datetime, json
     r_url = pipe_r_url(pipe)
     response = self.get(
         r_url + '/sync_time',
         json = params,
         params = {'newest': newest, 'debug': debug, 'round_down': round_down},
-        debug = debug
+        debug = debug,
     )
     if not response:
+        warn(response.text)
         return None
     j = response.json()
     if j is None:
@@ -473,9 +475,10 @@ def get_sync_time(
     else:
         try:
             dt = (
-                datetime.datetime.fromisoformat(json.loads(response.text))
-            ) if not is_int(dt) else int(dt)
+                datetime.datetime.fromisoformat(j)
+            ) if not is_int(j) else int(j)
         except Exception as e:
+            warn(e)
             dt = None
     return dt
 

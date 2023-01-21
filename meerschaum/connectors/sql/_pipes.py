@@ -1921,7 +1921,7 @@ def get_sync_time(
             st = datetime.datetime.combine(db_time, datetime.datetime.min.time())
         ### Adding support for an integer datetime axis.
         elif 'int' in str(type(db_time)).lower():
-            st = db_time
+            st = int(db_time)
         ### Convert pandas timestamp to Python datetime.
         else:
             st = db_time.to_pydatetime()
@@ -1937,6 +1937,7 @@ def get_sync_time(
         warn(str(e))
 
     return sync_time
+
 
 def pipe_exists(
         self,

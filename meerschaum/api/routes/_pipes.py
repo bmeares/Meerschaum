@@ -266,14 +266,14 @@ def get_sync_time(
         connector_keys: str,
         metric_key: str,
         location_key: str,
-        params: dict = None,
+        params: Optional[Dict[str, Any]] = None,
         newest: bool = True,
         round_down: bool = True,
         debug: bool = False,
         curr_user = (
             fastapi.Depends(manager) if not no_auth else None
         ),
-    ):
+    ) -> Union[str, int, None]:
     """
     Get a Pipe's latest datetime value.
     See `meerschaum.Pipe.get_sync_time`.
@@ -282,7 +282,20 @@ def get_sync_time(
         location_key = None
     pipe = get_pipe(connector_keys, metric_key, location_key)
     if is_pipe_registered(pipe, pipes()):
-        return pipe.get_sync_time(params=params, newest=newest, debug=debug)
+        sync_time = pipe.get_sync_time(
+            params = params,
+            newest = newest,
+            debug = debug,
+            round_down = round_down,
+        )
+        if isinstance(sync_time, datetime.datetime):
+            sync_time = sync_time.isoformat()
+        return sync_time
+    raise fastapi.HTTPException(
+        status_code = 409,
+        detail = f"Could not get sync time for this pipe. Is it registered?",
+    )
+
 
 @app.post(pipes_endpoint + '/{connector_keys}/{metric_key}/{location_key}/data', tags=['Pipes'])
 def sync_pipe(
