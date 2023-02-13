@@ -1012,13 +1012,17 @@ def run_python_package(
             command, foreground=foreground, as_proc=as_proc, capture_output=capture_output, **kw
         )
     except Exception as e:
-        ### For some weird reason, the traceback here breaks the tests (???).
-        #  print(traceback.format_exc(e))
-        warn(e, color=False)
+        msg = f"Failed to execute {command}, will try again:\n{traceback.format_exc()}"
+        warn(msg, color=False)
         stdout, stderr = (
             (None, None) if not capture_output else (subprocess.PIPE, subprocess.PIPE)
         )
-        proc = subprocess.Popen(command, stdout=stdout, stderr=stderr, env=os.environ)
+        proc = subprocess.Popen(
+            command,
+            stdout = stdout,
+            stderr = stderr,
+            env = kw.get('env', os.environ),
+        )
         to_return = proc if as_proc else proc.wait()
     except KeyboardInterrupt:
         to_return = 1 if not as_proc else None
