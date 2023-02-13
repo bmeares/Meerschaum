@@ -421,7 +421,7 @@ def clean(substring: str) -> str:
     Raises an exception when banned words are used.
     """
     from meerschaum.utils.warnings import error
-    banned_symbols = [';', '--', 'drop', 'create', 'alter', 'delete', 'commit']
+    banned_symbols = [';', '--', 'drop ',]
     for symbol in banned_symbols:
         if symbol in str(substring).lower():
             error(f"Invalid string: '{substring}'")

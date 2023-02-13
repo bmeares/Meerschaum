@@ -8,6 +8,7 @@ Synchronize a pipe's data with its source via its connector
 
 from __future__ import annotations
 
+import json
 from meerschaum.utils.typing import (
     Union, Optional, Callable, Any, Tuple, SuccessTuple, Mapping, Dict, List
 )
@@ -558,9 +559,9 @@ def filter_existing(
     unhashable_delta_cols = get_unhashable_cols(delta_df)
     unhashable_backtrack_cols = get_unhashable_cols(backtrack_df)
     for col in unhashable_delta_cols:
-        delta_df[col] = delta_df[col].apply(str)
+        delta_df[col] = delta_df[col].apply(json.dumps)
     for col in unhashable_backtrack_cols:
-        backtrack_df[col] = backtrack_df[col].apply(str)
+        backtrack_df[col] = backtrack_df[col].apply(json.dumps)
     casted_cols = set(unhashable_delta_cols + unhashable_backtrack_cols)
 
     joined_df = pd.merge(
@@ -573,7 +574,7 @@ def filter_existing(
     ) if on_cols else delta_df
     for col in casted_cols:
         if col in joined_df.columns:
-            joined_df[col] = joined_df[col].apply(ast.literal_eval)
+            joined_df[col] = joined_df[col].apply(json.loads)
 
     ### Determine which rows are completely new.
     new_rows_mask = (joined_df['_merge'] == 'left_only') if on_cols else None

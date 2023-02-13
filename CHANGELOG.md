@@ -4,7 +4,18 @@
 
 This is the current release cycle, so stay tuned for future releases!
 
-### v1.5.3 – v1.5.5
+### v1.5.7
+
+- **Replace `ast.literal_eval()` with `json.loads()` when filtering JSON columns.**  
+  This patch replaces the use of `str` and `ast.literal_eval()` with `json.dumps()` and `json.loads()` to preserve accuracy.
+
+- **Fix a subtle bug with subprocesses.**  
+  The function `run_python_package()` now better handles environment passing and raises a more verbose warning when something goes wrong.
+
+- **Allow columns with `'create'` in the name.**  
+  A security measure previously disallowed certain keywords when sanitizing input. Now columns are allowed to contain certain keywords.
+
+### v1.5.3 – v1.5.6
 
 - **Pipes now support syncing dictionaries and lists.**  
   Complex columns (dicts or lists) will now be preserved:
