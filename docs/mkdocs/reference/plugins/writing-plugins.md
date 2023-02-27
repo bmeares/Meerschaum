@@ -374,7 +374,7 @@ In case the built-in command line options are not sufficient, you can add argume
 ```python
 ### ~/.config/meerschaum/plugins/example.py
 
-from meerschaum.actions.arguments import add_plugin_argument
+from meerschaum.plugins import add_plugin_argument
 add_plugin_argument('--foo', type=int, help="This is my help text!")
 
 ```
