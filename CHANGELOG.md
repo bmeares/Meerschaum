@@ -4,6 +4,24 @@
 
 This is the current release cycle, so stay tuned for future releases!
 
+### v1.5.8
+
+- **Infer JSON columns from the first first non-null value.**  
+  When determining complex columns (dictionaries or lists), the first non-null value of the dataframe is checked rather than the first row only. This accounts for documents which contain variable keys in the same sync, e.g.:
+
+  ```python
+  import meerschaum as mrsm
+  pipe = mrsm.Pipe('a', 'b')
+  pipe.sync([
+      {'a': {'b': 1}},
+      {'c': {'d': 2}},
+  ])
+  ```
+
+- **Fix a bug when reconstructing JSON columns.**  
+  When rebuilding JSON values after merging, a check is first performed if the value is in fact a string (sometimes `NULLS` slip in).
+
+
 ### v1.5.7
 
 - **Replace `ast.literal_eval()` with `json.loads()` when filtering JSON columns.**  

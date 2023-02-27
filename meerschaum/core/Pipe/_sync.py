@@ -428,7 +428,6 @@ def filter_existing(
     -------
     A tuple of three pandas DataFrames: unseen, update, and delta.
     """
-    import ast
     import datetime
     from meerschaum.utils.warnings import warn
     from meerschaum.utils.debug import dprint
@@ -574,7 +573,13 @@ def filter_existing(
     ) if on_cols else delta_df
     for col in casted_cols:
         if col in joined_df.columns:
-            joined_df[col] = joined_df[col].apply(json.loads)
+            joined_df[col] = joined_df[col].apply(
+                lambda x: (
+                    json.loads(x)
+                    if isinstance(x, str)
+                    else x
+                )
+            )
 
     ### Determine which rows are completely new.
     new_rows_mask = (joined_df['_merge'] == 'left_only') if on_cols else None

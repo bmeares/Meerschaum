@@ -75,7 +75,7 @@ If you're already using [SQLAlchemy](https://www.sqlalchemy.org/), Meerschaum ca
 
 ```python
 >>> import meerschaum as mrsm
->>> from meerschaum.connectors.sql.tools import get_sqlalchemy_table
+>>> from meerschaum.utils.sql import get_sqlalchemy_table
 >>> conn = mrsm.get_connector()
 >>>
 >>> ### Directly access the `sqlalchemy` engine.
