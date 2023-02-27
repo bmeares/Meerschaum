@@ -141,6 +141,8 @@ DB_TO_PD_DTYPES = {
     'BOOL': 'bool',
     'BOOLEAN': 'bool',
     'BOOLEAN()': 'bool',
+    'JSON': 'object',
+    'JSONB': 'object',
     'substrings': {
         'CHAR': 'object',
         'TIMESTAMP': 'datetime64[ns]',
@@ -150,6 +152,7 @@ DB_TO_PD_DTYPES = {
         'DECIMAL': 'float64',
         'INT': 'Int64',
         'BOOL': 'bool',
+        'JSON': 'object',
     },
     'default': 'object',
 }

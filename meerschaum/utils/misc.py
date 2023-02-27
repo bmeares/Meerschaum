@@ -1896,7 +1896,17 @@ def get_json_cols(df: 'pd.DataFrame') -> List[str]:
     """
     if len(df) == 0:
         return []
+
+    cols_indices = {
+        col: df[col].first_valid_index()
+        for col in df.columns
+    }
     return [
-        col for col, typ in df.dtypes.items()
-        if isinstance(df.iloc[0][col], (dict, list))
+        col
+        for col, ix in cols_indices.items()
+        if (
+            ix is not None
+            and
+            not isinstance(df.loc[ix][col], Hashable)
+        )
     ]
