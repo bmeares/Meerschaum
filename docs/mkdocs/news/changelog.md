@@ -4,7 +4,7 @@
 
 This is the current release cycle, so stay tuned for future releases!
 
-### v1.5.8
+### v1.5.8 – v1.5.9
 
 - **Infer JSON columns from the first first non-null value.**  
   When determining complex columns (dictionaries or lists), the first non-null value of the dataframe is checked rather than the first row only. This accounts for documents which contain variable keys in the same sync, e.g.:

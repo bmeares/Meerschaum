@@ -1181,13 +1181,16 @@ def sync_pipe(
         kw.pop('name')
 
     ### Account for first-time syncs of JSON columns.
-    if is_new:
-        json_cols = get_json_cols(unseen_df)
-        if json_cols:
-            pipe.dtypes.update({col: 'json' for col in json_cols})
-            edit_success, edit_msg = pipe.edit(interactive=False, debug=debug)
-            if not edit_success:
-                warn(f"Unable to update JSON dtypes for {pipe}:\n{edit_msg}")
+    unseen_json_cols = get_json_cols(unseen_df)
+    update_json_cols = get_json_cols(update_df) if update_df is not None else []
+    json_cols = list(set(unseen_json_cols + update_json_cols))
+    existing_json_cols = [col for col, typ in pipe.dtypes.items() if typ == 'json']
+    new_json_cols = [col for col in json_cols if col not in existing_json_cols]
+    if new_json_cols:
+        pipe.dtypes.update({col: 'json' for col in json_cols})
+        edit_success, edit_msg = pipe.edit(interactive=False, debug=debug)
+        if not edit_success:
+            warn(f"Unable to update JSON dtypes for {pipe}:\n{edit_msg}")
 
     ### Insert new data into Pipe's table.
     unseen_kw = copy.deepcopy(kw)
