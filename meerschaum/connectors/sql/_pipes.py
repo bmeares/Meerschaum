@@ -2531,8 +2531,11 @@ def get_to_sql_dtype(
     >>> get_to_sql_dtype(pipe, df)
     {'a': <class 'sqlalchemy.sql.sqltypes.JSON'>}
     """
+    from meerschaum.utils.misc import get_json_cols
     from meerschaum.utils.sql import get_db_type
     df_dtypes = {col: str(typ) for col, typ in df.dtypes.items()}
+    json_cols = get_json_cols(df)
+    df_dtypes.update({col: 'json' for col in json_cols})
     if update_dtypes:
         df_dtypes.update(pipe.dtypes)
     return {
