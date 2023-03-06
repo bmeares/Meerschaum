@@ -4,7 +4,7 @@
 
 This is the current release cycle, so stay tuned for future releases!
 
-### v1.5.8 – v1.5.9
+### v1.5.8 – v1.5.10
 
 - **Infer JSON columns from the first first non-null value.**  
   When determining complex columns (dictionaries or lists), the first non-null value of the dataframe is checked rather than the first row only. This accounts for documents which contain variable keys in the same sync, e.g.:
@@ -20,6 +20,9 @@ This is the current release cycle, so stay tuned for future releases!
 
 - **Fix a bug when reconstructing JSON columns.**  
   When rebuilding JSON values after merging, a check is first performed if the value is in fact a string (sometimes `NULLS` slip in).
+
+- **Increase the timeout when determining Python versions.**  
+  This fixes some difficult-to-reproduce bugs on Windows.
 
 
 ### v1.5.7

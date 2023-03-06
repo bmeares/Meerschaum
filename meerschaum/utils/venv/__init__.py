@@ -291,7 +291,7 @@ def verify_venv(
                 as_proc = True,
                 capture_output = True,
             )
-            stdout, stderr = proc.communicate(timeout=0.1)
+            stdout, stderr = proc.communicate(timeout=1.0)
         except Exception as e:
             ### E.g. the symlink may be broken.
             if is_symlink(python_path):
