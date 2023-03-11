@@ -26,6 +26,16 @@ from meerschaum.utils.formatting import pprint
 from meerschaum._internal.docs import index as __doc__
 from meerschaum.connectors import get_connector
 from meerschaum.config import __version__, get_config
+from meerschaum.utils.packages import attempt_import
 
 __pdoc__ = {'gui': False, 'api': False, 'core': False,}
-__all__ = ("Pipe", "get_pipes", "get_connector", "Plugin", "Venv", "Plugin", "pprint")
+__all__ = (
+    "Pipe",
+    "get_pipes",
+    "get_connector",
+    "Plugin",
+    "Venv",
+    "Plugin",
+    "pprint",
+    "attempt_import",
+)

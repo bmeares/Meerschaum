@@ -22,8 +22,11 @@ _import_hook_venv = None
 _locks = {
     '_pkg_resources_get_distribution': RLock(),
     'import_versions': RLock(),
+    '_checked_for_updates': RLock(),
+    '_is_installed_first_check': RLock(),
 }
 _checked_for_updates = set()
+_is_installed_first_check: Dict[str, bool] = {}
 
 def get_module_path(
         import_name: str,
@@ -547,9 +550,10 @@ def need_update(
         import_name.split('.')[0] if split else import_name
     )
     install_name = install_name or _import_to_install_name(root_name)
-    if install_name in _checked_for_updates:
-        return False
-    _checked_for_updates.add(install_name)
+    with _locks['_checked_for_updates']:
+        if install_name in _checked_for_updates:
+            return False
+        _checked_for_updates.add(install_name)
 
     _install_no_version = get_install_no_version(install_name)
     if debug:
@@ -582,10 +586,16 @@ def need_update(
             dprint("No version could be determined from the installed package.", color=color)
         return False
     split_version = version.split('.')
+    last_part = split_version[-1]
     if len(split_version) == 2:
         version = '.'.join(split_version) + '.0'
-    elif 'dev' in split_version[-1]:
-        version = '.'.join(split_version[:-1]) + '-' + split_version[-1]
+    elif 'dev' in last_part or 'rc' in last_part:
+        tag = 'dev' if 'dev' in last_part else 'rc'
+        last_sep = '-'
+        if not last_part.startswith(tag):
+            last_part = f'-{tag}'.join(last_part.split(tag))
+            last_sep = '.'
+        version = '.'.join(split_version[:-1]) + last_sep + last_part
     elif len(split_version) > 3:
         version = '.'.join(split_version[:3])
 
@@ -1160,14 +1170,24 @@ def attempt_import(
                 ) is not None
             )
         else:
-            found_module = (
-                venv_contains_package(name, venv=venv, split=split, debug=debug)
-                or
-                (
-                    is_installed(name, venv=venv, split=split, debug=debug)
-                    if check_is_installed else False
+            if check_is_installed:
+                with _locks['_is_installed_first_check']:
+                    if name not in _is_installed_first_check:
+                        package_is_installed = is_installed(
+                            name,
+                            venv = venv,
+                            split = split,
+                            debug = debug,
+                        )
+                        _is_installed_first_check[name] = package_is_installed
+                    else:
+                        package_is_installed = _is_installed_first_check[name]
+            else:
+                package_is_installed = _is_installed_first_check.get(
+                    name,
+                    venv_contains_package(name, venv=venv, split=split, debug=debug)
                 )
-            )
+            found_module = package_is_installed
 
         if not found_module:
             if install:

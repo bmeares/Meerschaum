@@ -114,6 +114,7 @@ def get_tables(
                 sqlalchemy.Column('user_type', sqlalchemy.String(256)),
                 sqlalchemy.Column('attributes', params_type),
                 extend_existing = True,
+                #  autoload_with = conn.engine,
             ),
             'plugins' : sqlalchemy.Table(
                 *([
@@ -133,6 +134,7 @@ def get_tables(
                     sqlalchemy.ForeignKeyConstraint(['user_id'], ['users.user_id']),
                 ] if conn.flavor != 'duckdb' else [])),
                 extend_existing = True,
+                #  autoload_with = conn.engine,
             ),
         }
 
@@ -152,6 +154,7 @@ def get_tables(
             sqlalchemy.Column("location_key", sqlalchemy.String(256), index=index_names),
             sqlalchemy.Column("parameters", params_type),
             extend_existing = True,
+            #  autoload_with = conn.engine,
         )
 
         ### store the table dict for reuse (per connector)

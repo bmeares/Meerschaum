@@ -84,7 +84,7 @@ def get_plugin_id(
     from meerschaum.utils.packages import attempt_import
     sqlalchemy = attempt_import('sqlalchemy')
 
-    query = sqlalchemy.select([plugins.c.plugin_id]).where(plugins.c.plugin_name == plugin.name)
+    query = sqlalchemy.select(plugins.c.plugin_id).where(plugins.c.plugin_name == plugin.name)
     
     try:
         return int(self.value(query, debug=debug))
@@ -105,7 +105,7 @@ def get_plugin_version(
     from meerschaum.utils.packages import attempt_import
     sqlalchemy = attempt_import('sqlalchemy')
 
-    query = sqlalchemy.select([plugins.c.version]).where(plugins.c.plugin_name == plugin.name)
+    query = sqlalchemy.select(plugins.c.version).where(plugins.c.plugin_name == plugin.name)
 
     return self.value(query, debug=debug)
 
@@ -123,7 +123,7 @@ def get_plugin_user_id(
     from meerschaum.utils.packages import attempt_import
     sqlalchemy = attempt_import('sqlalchemy')
 
-    query = sqlalchemy.select([plugins.c.user_id]).where(plugins.c.plugin_name == plugin.name)
+    query = sqlalchemy.select(plugins.c.user_id).where(plugins.c.plugin_name == plugin.name)
 
     try:
         return int(self.value(query, debug=debug))
@@ -146,7 +146,7 @@ def get_plugin_username(
     sqlalchemy = attempt_import('sqlalchemy')
 
     query = (
-        sqlalchemy.select([users.c.username]).
+        sqlalchemy.select(users.c.username).
         where(
             users.c.user_id == plugins.c.user_id
             and plugins.c.plugin_name == plugin.name
@@ -171,7 +171,7 @@ def get_plugin_attributes(
     from meerschaum.utils.packages import attempt_import
     sqlalchemy = attempt_import('sqlalchemy')
 
-    query = sqlalchemy.select([plugins.c.attributes]).where(plugins.c.plugin_name == plugin.name)
+    query = sqlalchemy.select(plugins.c.attributes).where(plugins.c.plugin_name == plugin.name)
 
     _attr = self.value(query, debug=debug)
     if isinstance(_attr, str):
@@ -209,7 +209,7 @@ def get_plugins(
     from meerschaum.utils.packages import attempt_import
     sqlalchemy = attempt_import('sqlalchemy')
 
-    query = sqlalchemy.select([plugins.c.plugin_name])
+    query = sqlalchemy.select(plugins.c.plugin_name)
     if user_id is not None:
         query = query.where(plugins.c.user_id == user_id)
     if search_term is not None:

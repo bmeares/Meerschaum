@@ -36,7 +36,7 @@ $PYTHON_BIN -m meerschaum start jobs test_api -y
 ### This is necessary to trigger installations in a clean environment.
 $PYTHON_BIN -c "
 from tests.connectors import conns
-[conn.URI for conn in conns.values()]
+[print((conn.engine if conn.type == 'sql' else conn)) for conn in conns.values()]
 "
 
 MRSM_CONNS=$($PYTHON_BIN -c "

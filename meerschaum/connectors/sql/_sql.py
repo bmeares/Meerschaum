@@ -17,7 +17,7 @@ from meerschaum.utils.warnings import warn
 ### database flavors that can use bulk insert
 _bulk_flavors = {'postgresql', 'timescaledb', 'citus', }
 ### flavors that do not support chunks
-_disallow_chunks_flavors = {'duckdb'}
+_disallow_chunks_flavors = {}
 _max_chunks_flavors = {'sqlite': 1000,}
 
 def read(
@@ -151,29 +151,32 @@ def read(
         query_or_table = sql_item_name(str(query_or_table), self.flavor)
         if debug:
             dprint(f"Reading from table {query_or_table}")
-        formatted_query = str(sqlalchemy.text("SELECT * FROM " + str(query_or_table)))
+        formatted_query = sqlalchemy.text("SELECT * FROM " + str(query_or_table))
     else:
         try:
-            formatted_query = str(sqlalchemy.text(query_or_table))
+            formatted_query = sqlalchemy.text(query_or_table)
         except Exception as e:
             formatted_query = query_or_table
 
     try:
         with warnings.catch_warnings():
             warnings.filterwarnings('ignore', 'case sensitivity issues')
-            chunk_generator = pd.read_sql_query(
-                formatted_query,
-                self.engine,
-                params = params,
-                chunksize = chunksize,
-                dtype = dtype,
-            )
+            with self.engine.connect() as connection:
+                chunk_generator = pd.read_sql_query(
+                    formatted_query,
+                    connection,
+                    params = params,
+                    chunksize = chunksize,
+                    dtype = dtype,
+                )
     except Exception as e:
         import inspect
         if debug:
             dprint(f"Failed to execute query:\n\n{query_or_table}\n\n")
         if not silent:
             warn(str(e), stacklevel=3)
+        from meerschaum.utils.formatting import get_console
+        get_console().print_exception()
 
         return None
 
@@ -200,14 +203,15 @@ def read(
     if len(chunk_list) == 0:
         with warnings.catch_warnings():
             warnings.filterwarnings('ignore', 'case sensitivity issues')
-            chunk_list.append(
-                pd.read_sql_query(
-                    formatted_query,
-                    self.engine,
-                    params = params, 
-                    dtype = dtype,
+            with self.engine.connect() as connection:
+                chunk_list.append(
+                    pd.read_sql_query(
+                        formatted_query,
+                        self.engine,
+                        params = params, 
+                        dtype = dtype,
+                    )
                 )
-            )
 
     ### call the hook on any missed chunks.
     if chunk_hook is not None and len(chunk_list) > len(chunk_hook_results):
@@ -272,8 +276,10 @@ def value(
     Any value returned from the query.
 
     """
-    if self.flavor == 'duckdb':
-        use_pandas = True
+    from meerschaum.utils.packages import attempt_import
+    sqlalchemy = attempt_import('sqlalchemy')
+    #  if self.flavor == 'duckdb':
+        #  use_pandas = True
     if use_pandas:
         try:
             return self.read(query, *args, **kw).iloc[0, 0]
@@ -388,6 +394,11 @@ def exec(
         (self.flavor != 'mssql' or 'select' not in str(query).lower())
     )
 
+    ### Select and Insert objects need to be compiled (SQLAlchemy 2.0.0+).
+    if not hasattr(query, 'compile'):
+        #  query = query.compile(compile_kwargs={"literal_binds": True}).string
+        query = sqlalchemy.text(query)
+
     connection = self.engine.connect()
     transaction = connection.begin() if _commit else None
     try:
@@ -439,12 +450,17 @@ def exec_queries(
     """
     from meerschaum.utils.warnings import warn
     from meerschaum.utils.debug import dprint
+    from meerschaum.utils.packages import attempt_import
+    sqlalchemy = attempt_import('sqlalchemy')
 
     results = []
     with self.engine.begin() as connection:
         for query in queries:
             if debug:
                 dprint(query)
+            if isinstance(query, str):
+                query = sqlalchemy.text(query)
+
             try:
                 result = connection.execute(query)
             except Exception as e:

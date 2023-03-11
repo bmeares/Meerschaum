@@ -231,10 +231,12 @@ def fetch_pipes_keys(
         ) for key, val in _params.items()
             if not isinstance(val, (list, tuple)) and key in pipes.c
     ]
-    q = sqlalchemy.select(
+    select_cols = (
         [pipes.c.connector_keys, pipes.c.metric_key, pipes.c.location_key]
         + ([pipes.c.parameters] if tags else [])
-    ).where(sqlalchemy.and_(True, *_where))
+    )
+
+    q = sqlalchemy.select(*select_cols).where(sqlalchemy.and_(True, *_where))
 
     ### Parse IN params and add OR IS NULL if None in list.
     for c, vals in cols.items():
@@ -282,20 +284,20 @@ def fetch_pipes_keys(
     if debug:
         dprint(q.compile(compile_kwargs={'literal_binds': True}))
     try:
-        rows = self.engine.execute(q).fetchall()
+        rows = self.execute(q).fetchall()
     except Exception as e:
         error(str(e))
 
-    _keys = [(row['connector_keys'], row['metric_key'], row['location_key']) for row in rows]
+    _keys = [(row[0], row[1], row[2]) for row in rows]
     if not tags:
         return _keys
     ### Make 100% sure that the tags are correct.
     keys = []
     for row in rows:
-        ktup = (row['connector_keys'], row['metric_key'], row['location_key'])
+        ktup = (row[0], row[1], row[2])
         _actual_tags = (
-            json.loads(row['parameters']) if isinstance(row['parameters'], str)
-            else row['parameters']
+            json.loads(row[3]) if isinstance(row[3], str)
+            else row[3]
         ).get('tags', [])
         for nt in _in_tags:
             if nt in _actual_tags:
@@ -947,7 +949,7 @@ def get_pipe_id(
     from meerschaum.connectors.sql.tables import get_tables
     pipes = get_tables(mrsm_instance=self, create=(not pipe.temporary), debug=debug)['pipes']
 
-    query = sqlalchemy.select([pipes.c.pipe_id]).where(
+    query = sqlalchemy.select(pipes.c.pipe_id).where(
         pipes.c.connector_keys == pipe.connector_keys
     ).where(
         pipes.c.metric_key == pipe.metric_key
@@ -981,14 +983,15 @@ def get_pipe_attributes(
     pipes = get_tables(mrsm_instance=self, create=(not pipe.temporary), debug=debug)['pipes']
 
     try:
-        q = sqlalchemy.select([pipes]).where(pipes.c.pipe_id == pipe.id)
+        q = sqlalchemy.select(pipes).where(pipes.c.pipe_id == pipe.id)
         if debug:
             dprint(q)
-        attributes = (
-            dict(self.exec(q, silent=True, debug=debug).first())
-            if self.flavor != 'duckdb'
-            else self.read(q, debug=debug).to_dict(orient='records')[0]
-        )
+        attributes = dict(self.exec(q, silent=True, debug=debug).first()._mapping)
+        #  _attributes = (
+            #  self.exec(q, silent=True, debug=debug).first()
+            #  if self.flavor != 'duckdb'
+            #  else self.read(q, debug=debug).to_dict(orient='records')[0]
+        #  )
     except Exception as e:
         import traceback
         traceback.print_exc()
