@@ -161,7 +161,7 @@ def read(
     try:
         with warnings.catch_warnings():
             warnings.filterwarnings('ignore', 'case sensitivity issues')
-            with self.engine.connect() as connection:
+            with self.engine.begin() as connection:
                 chunk_generator = pd.read_sql_query(
                     formatted_query,
                     connection,
@@ -203,7 +203,7 @@ def read(
     if len(chunk_list) == 0:
         with warnings.catch_warnings():
             warnings.filterwarnings('ignore', 'case sensitivity issues')
-            with self.engine.connect() as connection:
+            with self.engine.begin() as connection:
                 chunk_list.append(
                     pd.read_sql_query(
                         formatted_query,
