@@ -108,7 +108,7 @@ def read(
     import warnings
     pd = import_pandas()
     sqlalchemy = attempt_import("sqlalchemy")
-    default_chunksize = self.sys_config.get('chunksize', None)
+    default_chunksize = self._sys_config.get('chunksize', None)
     chunksize = chunksize if chunksize != -1 else default_chunksize
     if chunksize is None and as_iterator:
         if not silent and self.flavor not in _disallow_chunks_flavors:
@@ -538,7 +538,7 @@ def to_sql(
             method = flavor_configs.get(self.flavor, {}).get('to_sql', {}).get('method', 'multi')
     stats['method'] = method.__name__ if hasattr(method, '__name__') else str(method)
 
-    default_chunksize = self.sys_config.get('chunksize', None)
+    default_chunksize = self._sys_config.get('chunksize', None)
     chunksize = chunksize if chunksize != -1 else default_chunksize
     if chunksize is not None and self.flavor in _max_chunks_flavors:
         if chunksize > _max_chunks_flavors[self.flavor]:

@@ -75,7 +75,6 @@ class APIConnector(Connector):
         debug: bool = False,
         **kw
     ):
-        self.wait = wait
         if 'uri' in kw:
             from_uri_params = self.from_uri(kw['uri'], as_dict=True)
             label = label or from_uri_params.get('label', None)

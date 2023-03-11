@@ -99,13 +99,12 @@ class Connector(metaclass=abc.ABCMeta):
 
         ### load user config into self._attributes
         if self.type in conn_configs and self.label in conn_configs[self.type]:
-            print(f"self.label={self.label}")
             self._attributes.update(conn_configs[self.type][self.label])
 
-        ### load system config into self.sys_config
+        ### load system config into self._sys_config
         ### (deep copy so future Connectors don't inherit changes)
         if self.type in connector_config:
-            self.sys_config = copy.deepcopy(connector_config[self.type])
+            self._sys_config = copy.deepcopy(connector_config[self.type])
 
         ### add additional arguments or override configuration
         self._attributes.update(kw)
@@ -179,7 +178,11 @@ class Connector(metaclass=abc.ABCMeta):
         """
         Return the keys needed to reconstruct this Connector.
         """
-        _meta = {key: value for key, value in self._attributes.items()}
+        _meta = {
+            key: value
+            for key, value in self.__dict__.items()
+            if not str(key).startswith('_')
+        }
         _meta.update({
             'type': self.type,
             'label': self.label,

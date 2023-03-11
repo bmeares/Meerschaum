@@ -140,6 +140,7 @@ class SQLConnector(Connector):
             self._set_attributes(
                 'sql',
                 label = label,
+                flavor = 'sqlite',
                 inherit_default = False,
                 **kw
             )
@@ -177,8 +178,7 @@ class SQLConnector(Connector):
                 debug=debug,
             )
 
-        self.wait = wait
-        if self.wait:
+        if wait:
             from meerschaum.connectors.poll import retry_connect
             retry_connect(connector=self, debug=debug)
 
@@ -220,7 +220,6 @@ class SQLConnector(Connector):
 
         ### handle different threads
         if not same_thread:
-            #  print('different thread!')
             pass
 
         return self._engine
