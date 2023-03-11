@@ -140,7 +140,6 @@ class SQLConnector(Connector):
             self._set_attributes(
                 'sql',
                 label = label,
-                flavor = 'sqlite',
                 inherit_default = False,
                 **kw
             )
