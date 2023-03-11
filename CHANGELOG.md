@@ -54,7 +54,7 @@ This is the current release cycle, so stay tuned for future releases!
   ```python
   conn = mrsm.get_connector('sql:temp', flavor='sqlite', database=':memory:')
   print(conn.meta)
-  # {'type': 'sql', 'label': 'temp', 'database': ':memory:'}
+  # {'type': 'sql', 'label': 'temp', 'database': ':memory:', 'flavor': 'sqlite'}
   ```
 
 - **Fix an edge case with subprocesses in headless environments.**  
