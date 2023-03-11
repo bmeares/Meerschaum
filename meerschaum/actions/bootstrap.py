@@ -234,7 +234,7 @@ def _bootstrap_connectors(
 
     """
     from meerschaum.connectors.parse import is_valid_connector_keys
-    from meerschaum.connectors import connectors, get_connector
+    from meerschaum.connectors import connectors, get_connector, types, custom_types
     from meerschaum.utils.prompt import prompt, yes_no, choose
     from meerschaum.config import get_config
     from meerschaum.config._edit import write_config
@@ -258,11 +258,12 @@ def _bootstrap_connectors(
     try:
         _type = choose(
             (
-                'Please choose a connector type.\n' +
-                'For more information on connectors, please visit https://meerschaum.io/reference/connectors'
+                'Please choose a connector type.\n'
+                + 'For more information on connectors, '
+                + 'please visit https://meerschaum.io/reference/connectors'
             ),
             sorted(list(connectors)),
-            default='sql'
+            default = 'sql'
         )
     except KeyboardInterrupt:
         return abort_tuple
@@ -270,10 +271,12 @@ def _bootstrap_connectors(
     if _clear:
         clear_screen(debug=debug)
 
-    _label_choices = sorted(
-        [label for label in get_config('meerschaum', 'connectors', _type)
-            if label != 'default']
-    )
+    existing_labels = get_config('meerschaum', 'connectors', _type, warn=False) or []
+    _label_choices = sorted([
+        label
+        for label in existing_labels
+        if label != 'default' and label is not None
+    ])
     new_connector_label = 'New connector'
     _label_choices.append(new_connector_label)
     while True:
@@ -281,9 +284,14 @@ def _bootstrap_connectors(
             _label = prompt(f"New label for '{_type}' connector:")
         except KeyboardInterrupt:
             return abort_tuple
-        if _label in get_config('meerschaum', 'connectors', _type):
+        if _label in existing_labels:
             warn(f"Connector '{_type}:{_label}' already exists.", stack=False)
-            overwrite = yes_no(f"Do you want to overwrite connector '{_type}:{_label}'?", default='n', yes=yes, noask=noask)
+            overwrite = yes_no(
+                f"Do you want to overwrite connector '{_type}:{_label}'?",
+                default = 'n',
+                yes = yes,
+                noask = noask,
+            )
             if not overwrite and not force:
                 return False, f"No changes made to connector configuration."
                 break
@@ -292,14 +300,19 @@ def _bootstrap_connectors(
         else:
             break
 
+    cls = types.get(_type)
+    cls_required_attrs = getattr(cls, 'REQUIRED_ATTRIBUTES', [])
+    type_attributes = connector_attributes.get(_type, {'required': cls_required_attrs})
+
     new_attributes = {}
-    if 'flavors' in connector_attributes[_type]:
+    if 'flavors' in type_attributes:
         try:
             flavor = choose(
                 f"Flavor for connector '{_type}:{_label}':",
-                sorted(list(connector_attributes[_type]['flavors'])),
+                sorted(list(type_attributes['flavors'])),
                 default = (
-                    'timescaledb' if 'timescaledb' in connector_attributes[_type]['flavors']
+                    'timescaledb'
+                    if 'timescaledb' in type_attributes['flavors']
                     else None
                 )
             )
@@ -307,10 +320,10 @@ def _bootstrap_connectors(
             return abort_tuple
         new_attributes['flavor'] = flavor
         required = sorted(list(connector_attributes[_type]['flavors'][flavor]['requirements']))
-        default = connector_attributes[_type]['flavors'][flavor]['defaults']
+        default = type_attributes['flavors'][flavor].get('defaults', {})
     else:
-        required = sorted(list(connector_attributes[_type]['required']))
-        default = connector_attributes[_type]['default']
+        required = sorted(list(type_attributes.get('required', {})))
+        default = type_attributes.get('default', {})
     info(
         f"Please answer the following questions to configure the new connector '{_type}:{_label}'."
         + '\n' + "Press [Ctrl + C] to skip."

@@ -96,11 +96,12 @@ def parse_arguments(sysargs: List[str]) -> Dict[str, Any]:
             args_dict['text'] = shlex.join(sysargs)
         except Exception as _e:
             args_dict['text'] = ' '.join(sysargs)
+        args_dict[STATIC_CONFIG['system']['arguments']['failure_key']] = e
         unknown = []
 
     false_flags = [arg for arg, val in args_dict.items() if val is False]
     for arg in false_flags:
-        args_dict.pop(arg, None)
+        _ = args_dict.pop(arg, None)
 
     args_dict['sysargs'] = sysargs
     args_dict['filtered_sysargs'] = filtered_sysargs

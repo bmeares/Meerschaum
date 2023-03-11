@@ -57,6 +57,7 @@ STATIC_CONFIG = {
                 ']'
             ),
             'underscore_standin': '<UNDERSCORE>', ### Temporary replacement for parsing.
+            'failure_key': '_argparse_exception',
         },
         'urls': {
             'get-pip.py': 'https://bootstrap.pypa.io/get-pip.py',

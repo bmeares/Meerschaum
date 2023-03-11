@@ -13,6 +13,11 @@ import abc
 import copy
 from meerschaum.utils.typing import Iterable, Optional, Any, Union, List, Dict
 
+class InvalidAttributesError(Exception):
+    """
+    Raised when the incorrect attributes are set in the Connector.
+    """
+
 class Connector(metaclass=abc.ABCMeta):
     """
     The base connector class to hold connection attributes,
@@ -33,11 +38,6 @@ class Connector(metaclass=abc.ABCMeta):
         label: str
             The label for the connection. Used as a key within config.yaml
 
-        pandas: str
-            Custom pandas implementation name.
-            E.g. May change to modin.pandas.
-            **NOTE:** This is experimental!
-
         Run `mrsm edit config` and to edit connectors in the YAML file:
 
         ```
@@ -51,22 +51,40 @@ class Connector(metaclass=abc.ABCMeta):
         """
         self._original_dict = copy.deepcopy(self.__dict__)
         self._set_attributes(type=type, label=label, **kw)
+        self.verify_attributes(getattr(self, 'REQUIRED_ATTRIBUTES', None))
 
     def _reset_attributes(self):
         self.__dict__ = self._original_dict
 
     def _set_attributes(
             self,
-            type: Optional[str] = None,
-            label: str = "main",
-            pandas: Optional[str] = None,
+            *args,
             inherit_default: bool = True,
             **kw: Any
         ):
+        from meerschaum.config.static import STATIC_CONFIG
         from meerschaum.utils.warnings import error
+
+        self._attributes = {}
+
+        default_label = STATIC_CONFIG['connectors']['default_label']
+
+        ### NOTE: Support the legacy method of explicitly passing the type.
+        label = kw.get('label', None)
+        if label is None:
+            if len(args) == 2:
+                label = args[1]
+            elif len(args) == 0:
+                label = None
+            else:
+                label = args[0]
+
         if label == 'default':
-            error("Label cannot be 'default'. Did you mean 'main'?")
-        self.type, self.label = type, label
+            error(
+                f"Label cannot be 'default'. Did you mean '{default_label}'?",
+                InvalidAttributesError,
+            )
+        self.__dict__['label'] = label
 
         from meerschaum.config import get_config
         conn_configs = copy.deepcopy(get_config('meerschaum', 'connectors'))
@@ -77,11 +95,12 @@ class Connector(metaclass=abc.ABCMeta):
             inherit_from = 'default'
             if self.type in conn_configs and inherit_from in conn_configs[self.type]:
                 _inherit_dict = copy.deepcopy(conn_configs[self.type][inherit_from])
-                self.__dict__.update(_inherit_dict)
+                self._attributes.update(_inherit_dict)
 
-        ### load user config into self.__dict__
+        ### load user config into self._attributes
         if self.type in conn_configs and self.label in conn_configs[self.type]:
-            self.__dict__.update(conn_configs[self.type][self.label])
+            print(f"self.label={self.label}")
+            self._attributes.update(conn_configs[self.type][self.label])
 
         ### load system config into self.sys_config
         ### (deep copy so future Connectors don't inherit changes)
@@ -89,7 +108,10 @@ class Connector(metaclass=abc.ABCMeta):
             self.sys_config = copy.deepcopy(connector_config[self.type])
 
         ### add additional arguments or override configuration
-        self.__dict__.update(kw)
+        self._attributes.update(kw)
+
+        ### finally, update __dict__ with _attributes.
+        self.__dict__.update(self._attributes)
 
 
     def verify_attributes(
@@ -131,19 +153,62 @@ class Connector(metaclass=abc.ABCMeta):
         if len(missing_attributes) > 0:
             error(
                 (
-                    "Please provide connection configuration for connector "
-                    + f"'{self.type}:{self.label}' "
-                    + "in the configuration file (open with `mrsm edit config`) or as arguments "
-                    + "for the Connector.\n\n"
-                    + f"Missing {items_str(list(missing_attributes))}."
+                    f"Missing {items_str(list(missing_attributes))} "
+                    + f"for connector '{self.type}:{self.label}'."
                 ),
+                InvalidAttributesError,
                 silent = True,
                 stack = False
             )
 
 
     def __str__(self):
+        """
+        When cast to a string, return type:label.
+        """
         return f"{self.type}:{self.label}"
 
     def __repr__(self):
+        """
+        Represent the connector as type:label.
+        """
         return str(self)
+
+    @property
+    def meta(self) -> Dict[str, Any]:
+        """
+        Return the keys needed to reconstruct this Connector.
+        """
+        _meta = {key: value for key, value in self._attributes.items()}
+        _meta.update({
+            'type': self.type,
+            'label': self.label,
+        })
+        return _meta
+
+
+    @property
+    def type(self) -> str:
+        """
+        Return the type for this connector.
+        """
+        _type = self.__dict__.get('type', None)
+        if _type is None:
+            import re
+            _type = re.sub(r'connector$', '', self.__class__.__name__.lower())
+            self.__dict__['type'] = _type
+        return _type
+
+
+    @property
+    def label(self) -> str:
+        """
+        Return the label for this connector.
+        """
+        _label = self.__dict__.get('label', None)
+        if _label is None:
+            from meerschaum.config.static import STATIC_CONFIG
+            _label = STATIC_CONFIG['connectors']['default_label']
+            self.__dict__['label'] = _label
+        return _label
+

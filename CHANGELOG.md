@@ -1,8 +1,76 @@
 # 🪵 Changelog
 
-## 1.5.x Releases
+## 1.6.x Releases
 
 This is the current release cycle, so stay tuned for future releases!
+
+### v1.6.0
+
+- **Stop execution when improper command-line arguments are passed in.**  
+  Incorrect command-line arguments will now return an error. The previous behavior was to strip the flags and execute the action anyway, which was undesirable.
+
+  ```bash
+  $ mrsm show pipes -c
+
+   💢 Invalid arguments:
+    show pipes -c
+
+     🛑 argument -c/-C/--connector-keys: expected at least one argument
+  ```
+
+- **Allow `bootstrap connector` to create custom connectors.**  
+  The `bootstrap connector` wizard can now handle registering custom connectors. It uses the `REQUIRED_ATTRIBUTES` list set in the custom connector class when determining what to ask for.
+
+- **Allow custom connectors to omit `__init__()`**  
+  If a connector is created via `@make_connector` and doesn't have an `__init__()` function, the base one is used to create the connector with the correct type (derived from the class name) and verify the `REQUIRED_ATTRIBUTES` values if present.
+
+- **Infer a connector's `type` from its class name.**  
+  The `type` of a connector is now determined from its class name (e.g. `FooConnector` would have a type `foo`). When inheriting from `Connector`, it is no longer required to explictly pass the type before the label. For backwards compatability, the legacy method still behaves as expected.
+
+  ```python
+  from meerschaum.connectors import (
+      Connector,
+      make_connector,
+      get_connector,
+  )
+
+  @make_connector
+  class FooConnector:
+      REQUIRED_ATTRIBUTES = ['username', 'password']
+
+  conn = get_connector(
+      'foo',
+      username = 'abc',
+      password = 'def',
+  )
+  ```
+
+- **Allow connectors to omit a `label`.**  
+  The default label `main` will be used if `label` is omitted.
+
+- **Add `meta` keys to connectors.**  
+  Like pipes, the `meta` property of a connector returns a dictionary with the kwargs needed to reconstruct the connector.
+
+  ```python
+  conn = mrsm.get_connector('sql:temp', flavor='sqlite', database=':memory:')
+  print(conn.meta)
+  # {'type': 'sql', 'label': 'temp', 'database': ':memory:'}
+  ```
+
+- **Fix an edge case with subprocesses in headless environments.**  
+  Checks were added to subprocesses to prevent using interactive features when no such features may be available (i.e. `termios`).
+
+- **Added `pprint()` and `get_config()` to the root package namespace.**  
+  Frequently used functions `pprint()` and `get_config()` have been promoted to the root level of the `meerschaum` namespace, i.e.:
+
+  ```python
+  import meerschaum as mrsm
+  mrsm.pprint(mrsm.get_config('meerschaum'))
+  ```
+
+## 1.5.x Releases
+
+The 1.5.x series offered many great improvements, namely the ability to use an integer datetime axis and the addition of JSON columns.
 
 ### v1.5.8 – v1.5.10
 

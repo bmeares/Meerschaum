@@ -17,7 +17,7 @@ from meerschaum.utils.typing import Any, SuccessTuple, Union, Optional, List, Di
 from meerschaum.utils.threading import Lock, RLock
 from meerschaum.utils.warnings import error, warn
 
-from meerschaum.connectors.Connector import Connector
+from meerschaum.connectors.Connector import Connector, InvalidAttributesError
 from meerschaum.connectors.sql.SQLConnector import SQLConnector
 from meerschaum.connectors.api.APIConnector import APIConnector
 from meerschaum.connectors.sql._create_engine import flavor_configs as sql_flavor_configs
@@ -26,40 +26,40 @@ __all__ = ("Connector", "SQLConnector", "APIConnector", "get_connector", "is_con
 
 ### store connectors partitioned by
 ### type, label for reuse
-connectors = {
+connectors: Dict[str, Dict[str, Connector]] = {
     'api'   : {},
     'sql'   : {},
     'mqtt'  : {},
     'plugin': {},
 }
 instance_types: List[str] = ['sql', 'api']
-_locks = {
+_locks: Dict[str, RLock] = {
     'connectors'               : RLock(),
     'types'                    : RLock(),
     'custom_types'             : RLock(),
     '_loaded_plugin_connectors': RLock(),
     'instance_types'           : RLock(),
 }
-attributes = {
-    'api' : {
-        'required' : [
+attributes: Dict[str, Dict[str, Any]] = {
+    'api': {
+        'required': [
             'host',
             'username',
             'password'
         ],
-        'default' : {
-            'protocol' : 'http',
-            'port'     : 8000,
+        'default': {
+            'protocol': 'http',
+            'port'    : 8000,
         },
     },
-    'sql' : {
-        'flavors' : sql_flavor_configs,
+    'sql': {
+        'flavors': sql_flavor_configs,
     },
-    'mqtt' : {
-        'required' : [
+    'mqtt': {
+        'required': [
             'host',
         ],
-        'default' : {
+        'default': {
             'port'     : 1883,
             'keepalive': 60,
         },
@@ -77,7 +77,7 @@ def get_connector(
         refresh: bool = False,
         debug: bool = False,
         **kw: Any
-    ):
+    ) -> Connector:
     """
     Return existing connector or create new connection and store for reuse.
     
@@ -125,6 +125,7 @@ def get_connector(
     from meerschaum.connectors.parse import parse_instance_keys
     from meerschaum.config import get_config
     from meerschaum.config.static import STATIC_CONFIG
+    from meerschaum.utils.warnings import warn
     global _loaded_plugin_connectors
     if isinstance(type, str) and not label and ':' in type:
         type, label = type.split(':', maxsplit=1)
@@ -209,10 +210,24 @@ def get_connector(
         with _locks['connectors']:
             try:
                 ### will raise an error if configuration is incorrect / missing
-                conn = types[type](label=label, debug=debug, **kw)
+                conn = types[type](label=label, **kw)
                 connectors[type][label] = conn
+            except InvalidAttributesError as ie:
+                warn(
+                    f"Incorrect attributes for connector '{type}:{label}'.\n"
+                    + str(ie),
+                    stack = False,
+                )
+                conn = None
             except Exception as e:
-                warn(f"Exception when creating connector '{type}:{label}'\n" + str(e), stack=False)
+                from meerschaum.utils.formatting import get_console
+                console = get_console()
+                if console:
+                    console.print_exception()
+                warn(
+                    f"Exception when creating connector '{type}:{label}'.\n" + str(e),
+                    stack = False,
+                )
                 conn = None
         if conn is None:
             return None
@@ -301,6 +316,7 @@ def make_connector(
         with _locks['instance_types']:
             if typ not in instance_types:
                 instance_types.append(typ)
+
     return cls
 
 
