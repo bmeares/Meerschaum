@@ -278,8 +278,8 @@ def value(
     """
     from meerschaum.utils.packages import attempt_import
     sqlalchemy = attempt_import('sqlalchemy')
-    #  if self.flavor == 'duckdb':
-        #  use_pandas = True
+    if self.flavor == 'duckdb':
+        use_pandas = True
     if use_pandas:
         try:
             return self.read(query, *args, **kw).iloc[0, 0]
