@@ -182,11 +182,16 @@ def get_connector(
         if label in connectors[type]:
             warning_message = None
             for attribute, value in kw.items():
-                if attribute not in connectors[type][label].__dict__:
-                    warning_message = (
-                        f"Received new attribute '{attribute}' not present in connector " +
-                        f"{connectors[type][label]}.\n"
-                    )
+                if attribute not in connectors[type][label].meta:
+                    import inspect
+                    cls = connectors[type][label].__class__
+                    cls_init_signature = inspect.signature(cls)
+                    cls_init_params = cls_init_signature.parameters
+                    if attribute not in cls_init_params:
+                        warning_message = (
+                            f"Received new attribute '{attribute}' not present in connector " +
+                            f"{connectors[type][label]}.\n"
+                        )
                 elif connectors[type][label].__dict__[attribute] != value:
                     warning_message = (
                         f"Mismatched values for attribute '{attribute}' in connector "
