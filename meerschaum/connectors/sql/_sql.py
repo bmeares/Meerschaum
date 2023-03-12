@@ -613,16 +613,15 @@ def to_sql(
     try:
         with warnings.catch_warnings():
             warnings.filterwarnings('ignore', 'case sensitivity issues')
-            with self.engine.begin() as con:
-                df.to_sql(
-                    name = name,
-                    con = con,
-                    index = index,
-                    if_exists = if_exists,
-                    method = method,
-                    chunksize = chunksize,
-                    **to_sql_kw
-                )
+            df.to_sql(
+                name = name,
+                con = self.engine,
+                index = index,
+                if_exists = if_exists,
+                method = method,
+                chunksize = chunksize,
+                **to_sql_kw
+            )
         success = True
     except Exception as e:
         if not silent:
