@@ -1172,7 +1172,7 @@ def attempt_import(
         else:
             if check_is_installed:
                 with _locks['_is_installed_first_check']:
-                    if name not in _is_installed_first_check:
+                    if not _is_installed_first_check.get(name, False):
                         package_is_installed = is_installed(
                             name,
                             venv = venv,
