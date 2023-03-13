@@ -61,6 +61,7 @@ flavor_configs = {
         'create_engine' : {
             'fast_executemany': True,
             'isolation_level': 'AUTOCOMMIT',
+            'use_setinputsizes': False,
         },
         'omit_create_engine': {'method',},
         'to_sql': {

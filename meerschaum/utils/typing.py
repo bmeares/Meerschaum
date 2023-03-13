@@ -68,7 +68,10 @@ except ImportError:
        instead of a type."""
     )
 
-    
+
+import collections.abc
+collections.Iterable = collections.abc.Iterable
+
 SuccessTuple = Tuple[bool, str]
 InstanceConnector = Union[
     'meerschaum.connectors.sql.SQLConnector',

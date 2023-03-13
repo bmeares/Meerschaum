@@ -6,6 +6,14 @@ This is the current release cycle, so stay tuned for future releases!
 
 ### v1.6.0
 
+**Breaking Changes**
+- *Dropped Python 3.7 support.*  
+  The latest `pandas` requires 3.8+, so to use Pandas 1.5.x, we have to finally drop Python 3.7.
+- *Upgrade SQLAlchemy to 2.0.5+.*  
+  This includes better transaction handling with connections. Other packages which use SQLAlchemy may not yet support 2.0+.
+
+**Bugfixes**
+
 - **Stop execution when improper command-line arguments are passed in.**  
   Incorrect command-line arguments will now return an error. The previous behavior was to strip the flags and execute the action anyway, which was undesirable.
 
@@ -67,6 +75,9 @@ This is the current release cycle, so stay tuned for future releases!
   import meerschaum as mrsm
   mrsm.pprint(mrsm.get_config('meerschaum'))
   ```
+
+- **Fix CLI for MSSQL.**  
+  The interactive CLI has been fixed for Microsoft SQL Server.
 
 ## 1.5.x Releases
 

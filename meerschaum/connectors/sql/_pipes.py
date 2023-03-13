@@ -986,12 +986,11 @@ def get_pipe_attributes(
         q = sqlalchemy.select(pipes).where(pipes.c.pipe_id == pipe.id)
         if debug:
             dprint(q)
-        attributes = dict(self.exec(q, silent=True, debug=debug).first()._mapping)
-        #  _attributes = (
-            #  self.exec(q, silent=True, debug=debug).first()
-            #  if self.flavor != 'duckdb'
-            #  else self.read(q, debug=debug).to_dict(orient='records')[0]
-        #  )
+        attributes = (
+            dict(self.exec(q, silent=True, debug=debug).first()._mapping)
+            if self.flavor != 'duckdb'
+            else self.read(q, debug=debug).to_dict(orient='records')[0]
+        )
     except Exception as e:
         import traceback
         traceback.print_exc()

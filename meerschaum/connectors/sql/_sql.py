@@ -15,9 +15,9 @@ from meerschaum.utils.debug import dprint
 from meerschaum.utils.warnings import warn
 
 ### database flavors that can use bulk insert
-_bulk_flavors = {'postgresql', 'timescaledb', 'citus', }
+_bulk_flavors = {'postgresql', 'timescaledb', 'citus'}
 ### flavors that do not support chunks
-_disallow_chunks_flavors = {'duckdb'}
+_disallow_chunks_flavors = {'duckdb', 'mssql'}
 _max_chunks_flavors = {'sqlite': 1000,}
 
 def read(
@@ -532,6 +532,7 @@ def to_sql(
     import json
     from meerschaum.utils.warnings import error, warn
     import warnings
+    import functools
     if name is None:
         error(f"Name must not be `None` to insert data into {self}.")
 
@@ -539,7 +540,7 @@ def to_sql(
     kw.pop('name', None)
 
     from meerschaum.utils.sql import sql_item_name, table_exists, json_flavors
-    from meerschaum.utils.misc import get_json_cols
+    from meerschaum.utils.misc import get_json_cols, is_bcp_available
     from meerschaum.connectors.sql._create_engine import flavor_configs
     from meerschaum.utils.packages import attempt_import
     sqlalchemy = attempt_import('sqlalchemy', debug=debug)
@@ -553,6 +554,21 @@ def to_sql(
             ### Should resolve to 'multi' or `None`.
             method = flavor_configs.get(self.flavor, {}).get('to_sql', {}).get('method', 'multi')
     stats['method'] = method.__name__ if hasattr(method, '__name__') else str(method)
+
+    to_sql_function = df.to_sql
+    ### TODO: When `bcpandas` supports SQLAlchemy 2.0, use `bcp` for bulk inserts.
+    #  if self.flavor == 'mssql':
+        #  have_bcp = is_bcp_available()
+        #  if not have_bcp:
+            #  warn(
+                #  "The \`bcp\` utility is not installed.\n"
+                #  + "    Install \`bcp` for better performance:\n"
+                #  + "    https://learn.microsoft.com/en-us/sql/tools/bcp-utility",
+                #  stack = False,
+            #  )
+        #  else:
+            #  bcpandas = attempt_import('bcpandas')
+            #  to_sql_function = functools.partial(, df)
 
     default_chunksize = self._sys_config.get('chunksize', None)
     chunksize = chunksize if chunksize != -1 else default_chunksize
@@ -577,7 +593,7 @@ def to_sql(
 
     ### filter out non-pandas args
     import inspect
-    to_sql_params = inspect.signature(df.to_sql).parameters
+    to_sql_params = inspect.signature(to_sql_function).parameters
     to_sql_kw = {}
     for k, v in kw.items():
         if k in to_sql_params:
@@ -613,7 +629,7 @@ def to_sql(
     try:
         with warnings.catch_warnings():
             warnings.filterwarnings('ignore', 'case sensitivity issues')
-            df.to_sql(
+            to_sql_function(
                 name = name,
                 con = self.engine,
                 index = index,
@@ -679,12 +695,19 @@ def psql_insert_copy(
 
     from meerschaum.utils.sql import sql_item_name
 
+    ### NOTE: PostgreSQL doesn't support NUL chars in text, so they're removed from strings.
     data_iter = (
         (
             (
-                json.dumps(item)
-                if isinstance(item, (dict, list))
-                else item
+                (
+                    json.dumps(item).replace('\0', '')
+                    if isinstance(item, (dict, list))
+                    else (
+                        item
+                        if not isinstance(item, str)
+                        else item.replace('\0', '')
+                    )
+                )
             ) if item is not None
             else r'\N'
             for item in row

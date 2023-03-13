@@ -19,7 +19,13 @@ if [ "$1" == "db" ]; then
 fi
 
 ### Install the `stress` plugin.
-$PYTHON_BIN -m meerschaum install plugin stress
+$PYTHON_BIN -m meerschaum show plugins
+PLUGINS=$($PYTHON_BIN -m meerschaum show plugins --nopretty)
+if [[ "$PLUGINS" =~ "stress" ]]; then
+  echo "Plugin \`stress\` is already installed."
+else
+  $PYTHON_BIN -m meerschaum install plugin stress
+fi
 
 ### Start the test API.
 api_exists=$(MRSM_ROOT_DIR="$test_root" $PYTHON_BIN -m meerschaum show jobs test_api --nopretty)
