@@ -377,6 +377,17 @@ def target(self) -> str:
             if k in self.parameters:
                 target = self.parameters[k]
                 break
+
+        if self.instance_connector.type == 'sql':
+            from meerschaum.utils.sql import truncate_item_name
+            truncated_target = truncate_item_name(target, self.instance_connector.flavor)
+            if truncated_target != target:
+                warn(
+                    f"The target '{target}' is too long for '{self.instance_connector.flavor}', "
+                    + f"will use {truncated_target} instead."
+                )
+                target = truncated_target
+
         self.target = target
     return self.parameters['target']
 

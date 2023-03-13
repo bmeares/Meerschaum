@@ -915,17 +915,22 @@ def get_sqlalchemy_table(
 
     from meerschaum.connectors.sql.tables import get_tables
     from meerschaum.utils.packages import attempt_import
+    from meerschaum.utils.warnings import warn
     if refresh:
         connector.metadata.clear()
     tables = get_tables(mrsm_instance=connector, debug=debug, create=False)
     sqlalchemy = attempt_import('sqlalchemy')
     truncated_table_name = truncate_item_name(str(table), connector.flavor)
     if refresh or truncated_table_name not in tables:
-        tables[truncated_table_name] = sqlalchemy.Table(
-            truncated_table_name,
-            connector.metadata,
-            autoload_with = connector.engine
-        )
+        try:
+            tables[truncated_table_name] = sqlalchemy.Table(
+                truncated_table_name,
+                connector.metadata,
+                autoload_with = connector.engine,
+            )
+        except sqlalchemy.exc.NoSuchTableError as e:
+            warn(f"Table '{truncated_table_name}' does not exist in '{connector}'.")
+            return None
     return tables[truncated_table_name]
 
 

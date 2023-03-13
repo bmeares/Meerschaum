@@ -1132,7 +1132,7 @@ def sync_pipe(
             dprint("Update data:\n" + str(update_df))
 
     if update_df is not None and not update_df.empty:
-        transact_id = generate_password(6)
+        transact_id = generate_password(3)
         temp_target = '_' + transact_id + '_' + pipe.target
         update_kw = copy.deepcopy(kw)
         update_kw.update({
@@ -1316,7 +1316,7 @@ def sync_pipe_inplace(
         return True, f"Inserted {rowcount}, updated 0 rows."
 
     ### Generate names for the tables.
-    transact_id = generate_password(6)
+    transact_id = generate_password(3)
     def get_temp_table_name(label: str) -> str:
         return '_' + transact_id + '_' + label + '_' + pipe.target
 
@@ -2275,6 +2275,8 @@ def get_pipe_columns_types(
     table_columns = {}
     try:
         pipe_table = self.get_pipe_table(pipe, debug=debug)
+        if pipe_table is None:
+            return {}
         for col in pipe_table.columns:
             table_columns[str(col.name)] = str(col.type)
     except Exception as e:

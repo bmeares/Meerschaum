@@ -103,7 +103,7 @@ def read(
     """
     if chunks is not None and chunks <= 0:
         return []
-    from meerschaum.utils.sql import sql_item_name
+    from meerschaum.utils.sql import sql_item_name, truncate_item_name
     from meerschaum.utils.packages import attempt_import, import_pandas
     import warnings
     pd = import_pandas()
@@ -148,6 +148,13 @@ def read(
             and str(query_or_table).endswith('"')
         )
     ):
+        truncated_table_name = truncated_item(str(query_or_table))
+        if truncated_table_name != str(query_or_table) and not silent:
+            warn(
+                f"Table '{name}' is too long for '{self.flavor}',"
+                + f" will instead create the table '{truncated_name}'."
+            )
+
         query_or_table = sql_item_name(str(query_or_table), self.flavor)
         if debug:
             dprint(f"Reading from table {query_or_table}")
@@ -539,7 +546,7 @@ def to_sql(
     ### We're requiring `name` to be positional, and sometimes it's passed in from background jobs.
     kw.pop('name', None)
 
-    from meerschaum.utils.sql import sql_item_name, table_exists, json_flavors
+    from meerschaum.utils.sql import sql_item_name, table_exists, json_flavors, truncate_item_name
     from meerschaum.utils.misc import get_json_cols, is_bcp_available
     from meerschaum.connectors.sql._create_engine import flavor_configs
     from meerschaum.utils.packages import attempt_import
@@ -617,11 +624,19 @@ def to_sql(
                     )
                 )
 
+    ### Check if the name is too long.
+    truncated_name = truncate_item_name(name, self.flavor)
+    if name != truncated_name:
+        warn(
+            f"Table '{name}' is too long for '{self.flavor}',"
+            + f" will instead create the table '{truncated_name}'."
+        )
+
     try:
         with warnings.catch_warnings():
             warnings.filterwarnings('ignore', 'case sensitivity issues')
             df.to_sql(
-                name = name,
+                name = truncated_name,
                 con = self.engine,
                 index = index,
                 if_exists = if_exists,
