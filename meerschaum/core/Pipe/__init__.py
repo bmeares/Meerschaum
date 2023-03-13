@@ -290,7 +290,6 @@ class Pipe:
     def connector(self) -> Union[meerschaum.connectors.Connector, None]:
         """
         The connector to the data source.
-        May be of type `'sql'`, `'api`', `'mqtt'`, or `'plugin'`.
         """
         if '_connector' not in self.__dict__:
             from meerschaum.connectors.parse import parse_instance_keys

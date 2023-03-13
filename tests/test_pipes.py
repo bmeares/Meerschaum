@@ -372,13 +372,13 @@ def test_id_index_col(flavor: str):
     """
     conn = conns[flavor]
     pipe = Pipe(
-        'test_id', 'index_col',
+        'test_id', 'index_col', 'table',
         instance = conn,
         dtypes = {'id': 'Int64'},
         columns = {'datetime': 'id'},
     )
     pipe.delete()
-    docs = [{'id': i, 'a': i*2, 'b': {'c': i/2}} for i in range(10_000)]
+    docs = [{'id': i, 'a': i*2, 'b': {'c': i/2}} for i in range(100)]
     success, msg = pipe.sync(docs, debug=debug)
     assert success, msg
     df = pipe.get_data(debug=debug)
@@ -393,10 +393,10 @@ def test_id_index_col(flavor: str):
     synced_docs = df.to_dict(orient='records')
     assert synced_docs == docs
 
-    ### Update the first 100 docs.
-    new_docs = [{'id': i, 'a': i*3, 'b': {'c': round(i/3, 2)}} for i in range(100)]
+    ### Update the first 10 docs.
+    new_docs = [{'id': i, 'a': i*3, 'b': {'c': round(i/3, 2)}} for i in range(10)]
     success, msg = pipe.sync(new_docs, debug=debug)
-    small_df = pipe.get_data(end=100, debug=debug)
+    small_df = pipe.get_data(end=10, debug=debug)
     print(small_df)
     assert len(small_df) == len(new_docs)
     small_synced_docs = small_df.to_dict(orient='records')

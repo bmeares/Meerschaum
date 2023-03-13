@@ -231,10 +231,12 @@ def fetch_pipes_keys(
         ) for key, val in _params.items()
             if not isinstance(val, (list, tuple)) and key in pipes.c
     ]
-    q = sqlalchemy.select(
+    select_cols = (
         [pipes.c.connector_keys, pipes.c.metric_key, pipes.c.location_key]
         + ([pipes.c.parameters] if tags else [])
-    ).where(sqlalchemy.and_(True, *_where))
+    )
+
+    q = sqlalchemy.select(*select_cols).where(sqlalchemy.and_(True, *_where))
 
     ### Parse IN params and add OR IS NULL if None in list.
     for c, vals in cols.items():
@@ -282,20 +284,20 @@ def fetch_pipes_keys(
     if debug:
         dprint(q.compile(compile_kwargs={'literal_binds': True}))
     try:
-        rows = self.engine.execute(q).fetchall()
+        rows = self.execute(q).fetchall()
     except Exception as e:
         error(str(e))
 
-    _keys = [(row['connector_keys'], row['metric_key'], row['location_key']) for row in rows]
+    _keys = [(row[0], row[1], row[2]) for row in rows]
     if not tags:
         return _keys
     ### Make 100% sure that the tags are correct.
     keys = []
     for row in rows:
-        ktup = (row['connector_keys'], row['metric_key'], row['location_key'])
+        ktup = (row[0], row[1], row[2])
         _actual_tags = (
-            json.loads(row['parameters']) if isinstance(row['parameters'], str)
-            else row['parameters']
+            json.loads(row[3]) if isinstance(row[3], str)
+            else row[3]
         ).get('tags', [])
         for nt in _in_tags:
             if nt in _actual_tags:
@@ -947,7 +949,7 @@ def get_pipe_id(
     from meerschaum.connectors.sql.tables import get_tables
     pipes = get_tables(mrsm_instance=self, create=(not pipe.temporary), debug=debug)['pipes']
 
-    query = sqlalchemy.select([pipes.c.pipe_id]).where(
+    query = sqlalchemy.select(pipes.c.pipe_id).where(
         pipes.c.connector_keys == pipe.connector_keys
     ).where(
         pipes.c.metric_key == pipe.metric_key
@@ -981,11 +983,11 @@ def get_pipe_attributes(
     pipes = get_tables(mrsm_instance=self, create=(not pipe.temporary), debug=debug)['pipes']
 
     try:
-        q = sqlalchemy.select([pipes]).where(pipes.c.pipe_id == pipe.id)
+        q = sqlalchemy.select(pipes).where(pipes.c.pipe_id == pipe.id)
         if debug:
             dprint(q)
         attributes = (
-            dict(self.exec(q, silent=True, debug=debug).first())
+            dict(self.exec(q, silent=True, debug=debug).first()._mapping)
             if self.flavor != 'duckdb'
             else self.read(q, debug=debug).to_dict(orient='records')[0]
         )
@@ -1086,11 +1088,6 @@ def sync_pipe(
         if not register_tuple[0]:
             return register_tuple
 
-    ### quit here if implicitly syncing MQTT pipes.
-    ### (pipe.sync() is called in the callback of the MQTTConnector.fetch() method)
-    if df is None and pipe.connector.type == 'mqtt':
-        return True, "Success"
-
     ### df is the dataframe returned from the remote source
     ### via the connector
     if debug:
@@ -1135,7 +1132,7 @@ def sync_pipe(
             dprint("Update data:\n" + str(update_df))
 
     if update_df is not None and not update_df.empty:
-        transact_id = generate_password(6)
+        transact_id = generate_password(3)
         temp_target = '_' + transact_id + '_' + pipe.target
         update_kw = copy.deepcopy(kw)
         update_kw.update({
@@ -1319,7 +1316,7 @@ def sync_pipe_inplace(
         return True, f"Inserted {rowcount}, updated 0 rows."
 
     ### Generate names for the tables.
-    transact_id = generate_password(6)
+    transact_id = generate_password(3)
     def get_temp_table_name(label: str) -> str:
         return '_' + transact_id + '_' + label + '_' + pipe.target
 
@@ -1944,8 +1941,8 @@ def get_sync_time(
 
 def pipe_exists(
         self,
-        pipe : meerschaum.Pipe,
-        debug : bool = False
+        pipe: meerschaum.Pipe,
+        debug: bool = False
     ) -> bool:
     """
     Check that a Pipe's table exists.
@@ -1955,7 +1952,7 @@ def pipe_exists(
     pipe: meerschaum.Pipe:
         The pipe to check.
         
-    debug: bool:, default False
+    debug: bool, default False
         Verbosity toggle.
 
     Returns
@@ -2278,6 +2275,8 @@ def get_pipe_columns_types(
     table_columns = {}
     try:
         pipe_table = self.get_pipe_table(pipe, debug=debug)
+        if pipe_table is None:
+            return {}
         for col in pipe_table.columns:
             table_columns[str(col.name)] = str(col.type)
     except Exception as e:

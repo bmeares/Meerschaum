@@ -51,13 +51,6 @@ default_meerschaum_config = {
                 'protocol' : 'https',
             },
         },
-        'mqtt' : {
-            'default'      : connector_attributes['mqtt']['default'],
-            'main'         : {
-                'host'     : 'localhost',
-                'port'     : 1883,
-            },
-        },
     },
 }
 default_system_config = {

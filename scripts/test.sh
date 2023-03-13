@@ -19,7 +19,13 @@ if [ "$1" == "db" ]; then
 fi
 
 ### Install the `stress` plugin.
-$PYTHON_BIN -m meerschaum install plugin stress
+$PYTHON_BIN -m meerschaum show plugins
+PLUGINS=$($PYTHON_BIN -m meerschaum show plugins --nopretty)
+if [[ "$PLUGINS" =~ "stress" ]]; then
+  echo "Plugin \`stress\` is already installed."
+else
+  $PYTHON_BIN -m meerschaum install plugin stress
+fi
 
 ### Start the test API.
 api_exists=$(MRSM_ROOT_DIR="$test_root" $PYTHON_BIN -m meerschaum show jobs test_api --nopretty)
@@ -36,7 +42,7 @@ $PYTHON_BIN -m meerschaum start jobs test_api -y
 ### This is necessary to trigger installations in a clean environment.
 $PYTHON_BIN -c "
 from tests.connectors import conns
-[conn.URI for conn in conns.values()]
+[print((conn.engine if conn.type == 'sql' else conn)) for conn in conns.values()]
 "
 
 MRSM_CONNS=$($PYTHON_BIN -c "

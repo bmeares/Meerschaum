@@ -57,6 +57,7 @@ STATIC_CONFIG = {
                 ']'
             ),
             'underscore_standin': '<UNDERSCORE>', ### Temporary replacement for parsing.
+            'failure_key': '_argparse_exception',
         },
         'urls': {
             'get-pip.py': 'https://bootstrap.pypa.io/get-pip.py',
@@ -101,6 +102,7 @@ STATIC_CONFIG = {
         'dtypes': {
             'min_ratio_columns_changed_for_full_astype': 0.5,
         },
+        'exists_timeout_seconds': 5.0,
     },
     'setup': {
         'name': 'meerschaum',

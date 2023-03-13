@@ -36,7 +36,7 @@ packages: Dict[str, Dict[str, str]] = {
         'yaml'                       : 'PyYAML>=5.3.1',
         'pip'                        : 'pip>=22.1.2',
         'update_checker'             : 'update-checker>=0.18.0',
-        'semver'                     : 'semver>=3.0.0-dev3',
+        'semver'                     : 'semver>=3.0.0-dev4',
         'pathspec'                   : 'pathspec>=0.9.0',
         'dateutil'                   : 'python-dateutil>=2.7.5',
         'requests'                   : 'requests>=2.23.0',
@@ -53,17 +53,14 @@ packages: Dict[str, Dict[str, str]] = {
         'virtualenv'                 : 'virtualenv>=20.1.0',
         'rocketry'                   : 'rocketry>=2.3.0',
     },
-    'iot': {
-        'paho'                       : 'paho-mqtt>=1.5.1',
-    },
     'drivers': {
         'cryptography'               : 'cryptography>=38.0.1',
         'psycopg2'                   : 'psycopg2-binary>=2.8.6',
         'pymysql'                    : 'PyMySQL>=0.9.0',
         'aiomysql'                   : 'aiomysql>=0.0.21',
-        'sqlalchemy_cockroachdb'     : 'sqlalchemy-cockroachdb>=1.4.2',
+        'sqlalchemy_cockroachdb'     : 'sqlalchemy-cockroachdb>=2.0.0',
         'duckdb'                     : 'duckdb>=0.5.1',
-        'duckdb_engine'              : 'duckdb-engine>=0.6.4',
+        'duckdb_engine'              : 'duckdb-engine>=0.7.0-rc1',
     },
     '_drivers': {
         'pyodbc'                     : 'pyodbc>=4.0.30',
@@ -126,10 +123,10 @@ packages: Dict[str, Dict[str, str]] = {
 }
 packages['sql'] = {
     'numpy'                          : 'numpy>=1.18.5',
-    'pandas'                         : 'pandas>=1.3.0',
+    'pandas'                         : 'pandas>=1.5.3',
     'pytz'                           : 'pytz>=2022.1.0',
     'joblib'                         : 'joblib>=0.17.0',
-    'sqlalchemy'                     : 'SQLAlchemy<2.0.0',
+    'sqlalchemy'                     : 'SQLAlchemy>=2.0.5',
     'databases'                      : 'databases>=0.4.0',
     'aiosqlite'                      : 'aiosqlite>=0.16.0',
     'asyncpg'                        : 'asyncpg>=0.21.0',

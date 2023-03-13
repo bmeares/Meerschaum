@@ -8,16 +8,16 @@ This module contains SQLConnector functions for executing SQL queries.
 from __future__ import annotations
 from meerschaum.utils.typing import (
     Union, Mapping, List, Dict, SuccessTuple, Optional, Any, Iterable, Callable,
-    Tuple
+    Tuple, Hashable,
 )
 
 from meerschaum.utils.debug import dprint
 from meerschaum.utils.warnings import warn
 
 ### database flavors that can use bulk insert
-_bulk_flavors = {'postgresql', 'timescaledb', 'citus', }
+_bulk_flavors = {'postgresql', 'timescaledb', 'citus'}
 ### flavors that do not support chunks
-_disallow_chunks_flavors = {'duckdb'}
+_disallow_chunks_flavors = {'duckdb', 'mssql'}
 _max_chunks_flavors = {'sqlite': 1000,}
 
 def read(
@@ -103,12 +103,12 @@ def read(
     """
     if chunks is not None and chunks <= 0:
         return []
-    from meerschaum.utils.sql import sql_item_name
+    from meerschaum.utils.sql import sql_item_name, truncate_item_name
     from meerschaum.utils.packages import attempt_import, import_pandas
     import warnings
     pd = import_pandas()
     sqlalchemy = attempt_import("sqlalchemy")
-    default_chunksize = self.sys_config.get('chunksize', None)
+    default_chunksize = self._sys_config.get('chunksize', None)
     chunksize = chunksize if chunksize != -1 else default_chunksize
     if chunksize is None and as_iterator:
         if not silent and self.flavor not in _disallow_chunks_flavors:
@@ -148,32 +148,42 @@ def read(
             and str(query_or_table).endswith('"')
         )
     ):
+        truncated_table_name = truncate_item_name(str(query_or_table), self.flavor)
+        if truncated_table_name != str(query_or_table) and not silent:
+            warn(
+                f"Table '{name}' is too long for '{self.flavor}',"
+                + f" will instead create the table '{truncated_name}'."
+            )
+
         query_or_table = sql_item_name(str(query_or_table), self.flavor)
         if debug:
             dprint(f"Reading from table {query_or_table}")
-        formatted_query = str(sqlalchemy.text("SELECT * FROM " + str(query_or_table)))
+        formatted_query = sqlalchemy.text("SELECT * FROM " + str(query_or_table))
     else:
         try:
-            formatted_query = str(sqlalchemy.text(query_or_table))
+            formatted_query = sqlalchemy.text(query_or_table)
         except Exception as e:
             formatted_query = query_or_table
 
     try:
         with warnings.catch_warnings():
             warnings.filterwarnings('ignore', 'case sensitivity issues')
-            chunk_generator = pd.read_sql_query(
-                formatted_query,
-                self.engine,
-                params = params,
-                chunksize = chunksize,
-                dtype = dtype,
-            )
+            with self.engine.begin() as connection:
+                chunk_generator = pd.read_sql_query(
+                    formatted_query,
+                    connection,
+                    params = params,
+                    chunksize = chunksize,
+                    dtype = dtype,
+                )
     except Exception as e:
         import inspect
         if debug:
             dprint(f"Failed to execute query:\n\n{query_or_table}\n\n")
         if not silent:
             warn(str(e), stacklevel=3)
+        from meerschaum.utils.formatting import get_console
+        get_console().print_exception()
 
         return None
 
@@ -200,14 +210,15 @@ def read(
     if len(chunk_list) == 0:
         with warnings.catch_warnings():
             warnings.filterwarnings('ignore', 'case sensitivity issues')
-            chunk_list.append(
-                pd.read_sql_query(
-                    formatted_query,
-                    self.engine,
-                    params = params, 
-                    dtype = dtype,
+            with self.engine.begin() as connection:
+                chunk_list.append(
+                    pd.read_sql_query(
+                        formatted_query,
+                        connection,
+                        params = params, 
+                        dtype = dtype,
+                    )
                 )
-            )
 
     ### call the hook on any missed chunks.
     if chunk_hook is not None and len(chunk_list) > len(chunk_hook_results):
@@ -272,6 +283,8 @@ def value(
     Any value returned from the query.
 
     """
+    from meerschaum.utils.packages import attempt_import
+    sqlalchemy = attempt_import('sqlalchemy')
     if self.flavor == 'duckdb':
         use_pandas = True
     if use_pandas:
@@ -388,6 +401,10 @@ def exec(
         (self.flavor != 'mssql' or 'select' not in str(query).lower())
     )
 
+    ### Select and Insert objects need to be compiled (SQLAlchemy 2.0.0+).
+    if not hasattr(query, 'compile'):
+        query = sqlalchemy.text(query)
+
     connection = self.engine.connect()
     transaction = connection.begin() if _commit else None
     try:
@@ -439,12 +456,17 @@ def exec_queries(
     """
     from meerschaum.utils.warnings import warn
     from meerschaum.utils.debug import dprint
+    from meerschaum.utils.packages import attempt_import
+    sqlalchemy = attempt_import('sqlalchemy')
 
     results = []
     with self.engine.begin() as connection:
         for query in queries:
             if debug:
                 dprint(query)
+            if isinstance(query, str):
+                query = sqlalchemy.text(query)
+
             try:
                 result = connection.execute(query)
             except Exception as e:
@@ -516,14 +538,15 @@ def to_sql(
     import json
     from meerschaum.utils.warnings import error, warn
     import warnings
+    import functools
     if name is None:
         error(f"Name must not be `None` to insert data into {self}.")
 
     ### We're requiring `name` to be positional, and sometimes it's passed in from background jobs.
     kw.pop('name', None)
 
-    from meerschaum.utils.sql import sql_item_name, table_exists, json_flavors
-    from meerschaum.utils.misc import get_json_cols
+    from meerschaum.utils.sql import sql_item_name, table_exists, json_flavors, truncate_item_name
+    from meerschaum.utils.misc import get_json_cols, is_bcp_available
     from meerschaum.connectors.sql._create_engine import flavor_configs
     from meerschaum.utils.packages import attempt_import
     sqlalchemy = attempt_import('sqlalchemy', debug=debug)
@@ -538,7 +561,7 @@ def to_sql(
             method = flavor_configs.get(self.flavor, {}).get('to_sql', {}).get('method', 'multi')
     stats['method'] = method.__name__ if hasattr(method, '__name__') else str(method)
 
-    default_chunksize = self.sys_config.get('chunksize', None)
+    default_chunksize = self._sys_config.get('chunksize', None)
     chunksize = chunksize if chunksize != -1 else default_chunksize
     if chunksize is not None and self.flavor in _max_chunks_flavors:
         if chunksize > _max_chunks_flavors[self.flavor]:
@@ -592,13 +615,27 @@ def to_sql(
         if json_cols:
             df = df.copy()
             for col in json_cols:
-                df[col] = df[col].apply(json.dumps)
+                df[col] = df[col].apply(
+                    (
+                        lambda x: json.dumps(x)
+                        if not isinstance(x, Hashable)
+                        else x
+                    )
+                )
+
+    ### Check if the name is too long.
+    truncated_name = truncate_item_name(name, self.flavor)
+    if name != truncated_name:
+        warn(
+            f"Table '{name}' is too long for '{self.flavor}',"
+            + f" will instead create the table '{truncated_name}'."
+        )
 
     try:
         with warnings.catch_warnings():
             warnings.filterwarnings('ignore', 'case sensitivity issues')
             df.to_sql(
-                name = name,
+                name = truncated_name,
                 con = self.engine,
                 index = index,
                 if_exists = if_exists,
@@ -663,12 +700,19 @@ def psql_insert_copy(
 
     from meerschaum.utils.sql import sql_item_name
 
+    ### NOTE: PostgreSQL doesn't support NUL chars in text, so they're removed from strings.
     data_iter = (
         (
             (
-                json.dumps(item)
-                if isinstance(item, (dict, list))
-                else item
+                (
+                    json.dumps(item).replace('\0', '')
+                    if isinstance(item, (dict, list))
+                    else (
+                        item
+                        if not isinstance(item, str)
+                        else item.replace('\0', '')
+                    )
+                )
             ) if item is not None
             else r'\N'
             for item in row

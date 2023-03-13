@@ -177,8 +177,7 @@ class SQLConnector(Connector):
                 debug=debug,
             )
 
-        self.wait = wait
-        if self.wait:
+        if wait:
             from meerschaum.connectors.poll import retry_connect
             retry_connect(connector=self, debug=debug)
 
@@ -205,7 +204,7 @@ class SQLConnector(Connector):
         import os, threading
         ### build the sqlalchemy engine
         if '_engine' not in self.__dict__:
-            self._engine = self.create_engine()
+            self._engine, self._engine_str = self.create_engine(include_uri=True)
 
         same_process = os.getpid() == self._pid
         same_thread = threading.current_thread().ident == self._thread_ident
@@ -220,25 +219,26 @@ class SQLConnector(Connector):
 
         ### handle different threads
         if not same_thread:
-            #  print('different thread!')
             pass
 
         return self._engine
 
     @property
     def DATABASE_URL(self):
-        return str(self.engine.url)
+        _ = self.engine
+        return str(self._engine_str)
 
     @property
     def URI(self):
-        return str(self.engine.url)
+        _ = self.engine
+        return str(self._engine_str)
 
     @property
     def metadata(self):
         from meerschaum.utils.packages import attempt_import
         sqlalchemy = attempt_import('sqlalchemy')
         if '_metadata' not in self.__dict__:
-            self._metadata = sqlalchemy.MetaData(self.engine)
+            self._metadata = sqlalchemy.MetaData()
         return self._metadata
 
     @property

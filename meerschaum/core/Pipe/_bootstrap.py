@@ -155,11 +155,6 @@ def _get_parameters(pipe, debug: bool = False) -> Dict[str, Any]:
                 },
             ],
         },
-        'mqtt': {
-            'fetch': {
-                'topic': '#',
-            },
-        },
     }
     try:
         conn_type = pipe.connector.type
