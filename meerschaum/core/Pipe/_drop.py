@@ -27,6 +27,7 @@ def drop(
     A `SuccessTuple` of success, message.
 
     """
+    self._exists = False
     from meerschaum.utils.warnings import warn
     from meerschaum.utils.venv import Venv
     from meerschaum.connectors import get_connector_plugin
@@ -38,5 +39,4 @@ def drop(
 
     with Venv(get_connector_plugin(self.instance_connector)):
         result = self.instance_connector.drop_pipe(self, debug=debug, **kw)
-    self._exists = False
     return result
