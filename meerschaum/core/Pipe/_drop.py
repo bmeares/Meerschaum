@@ -37,4 +37,6 @@ def drop(
             warn(_drop_cache_tuple[1])
 
     with Venv(get_connector_plugin(self.instance_connector)):
-        return self.instance_connector.drop_pipe(self, debug=debug, **kw)
+        result = self.instance_connector.drop_pipe(self, debug=debug, **kw)
+    self._exists = False
+    return result
