@@ -13,10 +13,10 @@ This is the current release cycle, so stay tuned for future releases!
 - *Upgrade SQLAlchemy to 2.0.5+.*  
   This includes better transaction handling with connections. Other packages which use SQLAlchemy may not yet support 2.0+.
 
-- *Removed `MQTTConnector` from the core package.*  
+- *Removed `MQTTConnector`.*  
   This was one of the original connectors but was never tested or used in production. It may be reintroduced via a future `mqtt` plugin.
 
-**Bugfixes**
+**Bugfixes and Improvements**
 
 - **Stop execution when improper command-line arguments are passed in.**  
   Incorrect command-line arguments will now return an error. The previous behavior was to strip the flags and execute the action anyway, which was undesirable.
@@ -69,15 +69,23 @@ This is the current release cycle, so stay tuned for future releases!
   # {'type': 'sql', 'label': 'temp', 'database': ':memory:', 'flavor': 'sqlite'}
   ```
 
+- **Remove `NUL` bytes when inserting into PostgreSQL.**  
+  PostgreSQL doesn't support `NUL` bytes in text (`'\0'`), so these characters are removed from strings when copying into a table.
+
+- **Cache `pipe.exists()` for 5 seconds.**  
+  Repeated calls to `pipe.exists()` will be sped up due to short-term caching. This cache is invalidated when syncing or dropping a pipe.
+
 - **Fix an edge case with subprocesses in headless environments.**  
   Checks were added to subprocesses to prevent using interactive features when no such features may be available (i.e. `termios`).
 
-- **Added `pprint()` and `get_config()` to the root package namespace.**  
-  Frequently used functions `pprint()` and `get_config()` have been promoted to the root level of the `meerschaum` namespace, i.e.:
+- **Added `pprint()`, `get_config()`, and `attempt_import()` to the top-level namespace.**  
+  Frequently used functions `pprint()`, `get_config()`, and `attempt_import()` have been promoted to the root level of the `meerschaum` namespace, i.e.:
 
   ```python
   import meerschaum as mrsm
   mrsm.pprint(mrsm.get_config('meerschaum'))
+
+  sqlalchemy = mrsm.attempt_import('sqlalchemy')
   ```
 
 - **Fix CLI for MSSQL.**  

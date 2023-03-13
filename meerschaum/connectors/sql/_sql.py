@@ -403,7 +403,6 @@ def exec(
 
     ### Select and Insert objects need to be compiled (SQLAlchemy 2.0.0+).
     if not hasattr(query, 'compile'):
-        #  query = query.compile(compile_kwargs={"literal_binds": True}).string
         query = sqlalchemy.text(query)
 
     connection = self.engine.connect()
