@@ -53,9 +53,6 @@ packages: Dict[str, Dict[str, str]] = {
         'virtualenv'                 : 'virtualenv>=20.1.0',
         'rocketry'                   : 'rocketry>=2.3.0',
     },
-    'iot': {
-        'paho'                       : 'paho-mqtt>=1.5.1',
-    },
     'drivers': {
         'cryptography'               : 'cryptography>=38.0.1',
         'psycopg2'                   : 'psycopg2-binary>=2.8.6',

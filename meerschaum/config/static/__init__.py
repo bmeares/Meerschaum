@@ -102,6 +102,7 @@ STATIC_CONFIG = {
         'dtypes': {
             'min_ratio_columns_changed_for_full_astype': 0.5,
         },
+        'exists_timeout_seconds': 30.0,
     },
     'setup': {
         'name': 'meerschaum',

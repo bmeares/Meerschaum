@@ -9,8 +9,12 @@ This is the current release cycle, so stay tuned for future releases!
 **Breaking Changes**
 - *Dropped Python 3.7 support.*  
   The latest `pandas` requires 3.8+, so to use Pandas 1.5.x, we have to finally drop Python 3.7.
+
 - *Upgrade SQLAlchemy to 2.0.5+.*  
   This includes better transaction handling with connections. Other packages which use SQLAlchemy may not yet support 2.0+.
+
+- *Removed `MQTTConnector` from the core package.*  
+  This was one of the original connectors but was never tested or used in production. It may be reintroduced via a future `mqtt` plugin.
 
 **Bugfixes**
 

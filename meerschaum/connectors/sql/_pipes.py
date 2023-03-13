@@ -1088,11 +1088,6 @@ def sync_pipe(
         if not register_tuple[0]:
             return register_tuple
 
-    ### quit here if implicitly syncing MQTT pipes.
-    ### (pipe.sync() is called in the callback of the MQTTConnector.fetch() method)
-    if df is None and pipe.connector.type == 'mqtt':
-        return True, "Success"
-
     ### df is the dataframe returned from the remote source
     ### via the connector
     if debug:
@@ -1946,8 +1941,8 @@ def get_sync_time(
 
 def pipe_exists(
         self,
-        pipe : meerschaum.Pipe,
-        debug : bool = False
+        pipe: meerschaum.Pipe,
+        debug: bool = False
     ) -> bool:
     """
     Check that a Pipe's table exists.
@@ -1957,7 +1952,7 @@ def pipe_exists(
     pipe: meerschaum.Pipe:
         The pipe to check.
         
-    debug: bool:, default False
+    debug: bool, default False
         Verbosity toggle.
 
     Returns

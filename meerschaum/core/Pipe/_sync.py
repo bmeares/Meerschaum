@@ -136,6 +136,9 @@ def sync(
         'chunksize': chunksize,
     })
 
+    ### NOTE: Invalidate `_exists` cache before and after syncing.
+    self._exists = None
+
     def _sync(
         p: 'meerschaum.Pipe',
         df: Union[
@@ -146,6 +149,7 @@ def sync(
         ] = InferFetch,
     ) -> SuccessTuple:
         if df is None:
+            p._exists = None
             return (
                 False,
                 f"You passed `None` instead of data into `sync()` for {p}.\n"
@@ -156,6 +160,7 @@ def sync(
             ### NOTE: This may trigger an interactive session for plugins!
             register_tuple = p.register(debug=debug)
             if not register_tuple[0]:
+                p._exists = None
                 return register_tuple
 
         ### If connector is a plugin with a `sync()` method, return that instead.
@@ -169,8 +174,10 @@ def sync(
                     msg = f"{p} does not have a valid connector."
                     if p.connector_keys.startswith('plugin:'):
                         msg += f"\n    Perhaps {p.connector_keys} has a syntax error?"
+                    p._exists = None
                     return False, msg
             except Exception as e:
+                p._exists = None
                 return False, f"Unable to create the connector for {p}."
 
             ### Sync in place if this is a SQL pipe.
@@ -182,6 +189,7 @@ def sync(
                 get_config('system', 'experimental', 'inplace_sync')
             ):
                 with Venv(get_connector_plugin(self.instance_connector)):
+                    p._exists = None
                     return self.instance_connector.sync_pipe_inplace(p, debug=debug, **kw)
 
 
@@ -191,6 +199,7 @@ def sync(
                     connector_plugin = Plugin(p.connector.label)
                     with Venv(connector_plugin, debug=debug):
                         return_tuple = p.connector.sync(p, debug=debug, **kw)
+                    p._exists = None
                     if not isinstance(return_tuple, tuple):
                         return_tuple = (
                             False,
@@ -203,6 +212,7 @@ def sync(
                 msg = f"Failed to sync {p} with exception: '" + str(e) + "'"
                 if debug:
                     error(msg, silent=False)
+                p._exists = None
                 return False, msg
 
             ### Fetch the dataframe from the connector's `fetch()` method.
@@ -230,10 +240,12 @@ def sync(
                 df = None
 
             if df is None:
+                p._exists = None
                 return False, f"No data were fetched for {p}."
 
             ### TODO: Depreciate async?
             if df is True:
+                p._exists = None
                 return True, f"{p} is being synced in parallel."
 
         ### CHECKPOINT: Retrieved the DataFrame.
@@ -281,9 +293,11 @@ def sync(
                 if not _sync_cache_tuple[0]:
                     warn(f"Failed to sync local cache for {self}.")
 
+        self._exists = None
         return return_tuple
 
     if blocking:
+        self._exists = None
         return _sync(self, df = df)
 
     ### TODO implement concurrent syncing (split DataFrame? mimic the functionality of modin?)
@@ -307,7 +321,9 @@ def sync(
         )
         thread.start()
     except Exception as e:
+        self._exists = None
         return False, str(e)
+    self._exists = None
     return True, f"Spawned asyncronous sync for {self}."
 
 
@@ -383,11 +399,27 @@ def exists(
     A `bool` corresponding to whether a pipe's underlying table exists.
 
     """
+    import time
     from meerschaum.utils.venv import Venv
     from meerschaum.connectors import get_connector_plugin
+    from meerschaum.config import STATIC_CONFIG
+    now = time.perf_counter()
+    exists_timeout_seconds = STATIC_CONFIG['pipes']['exists_timeout_seconds']
+
+    _exists = self.__dict__.get('_exists', None)
+    if _exists:
+        exists_timestamp = self.__dict__.get('_exists_timestamp', None)
+        if exists_timestamp is not None:
+            delta = now - exists_timestamp
+            if delta < exists_timestamp:
+                return _exists
 
     with Venv(get_connector_plugin(self.instance_connector)):
-        return self.instance_connector.pipe_exists(pipe=self, debug=debug)
+        _exists = self.instance_connector.pipe_exists(pipe=self, debug=debug)
+
+    self.__dict__['_exists'] = _exists
+    self.__dict__['_exists_timestamp'] = now
+    return _exists
 
 
 def filter_existing(

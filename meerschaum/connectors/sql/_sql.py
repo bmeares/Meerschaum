@@ -8,7 +8,7 @@ This module contains SQLConnector functions for executing SQL queries.
 from __future__ import annotations
 from meerschaum.utils.typing import (
     Union, Mapping, List, Dict, SuccessTuple, Optional, Any, Iterable, Callable,
-    Tuple
+    Tuple, Hashable,
 )
 
 from meerschaum.utils.debug import dprint
@@ -555,21 +555,6 @@ def to_sql(
             method = flavor_configs.get(self.flavor, {}).get('to_sql', {}).get('method', 'multi')
     stats['method'] = method.__name__ if hasattr(method, '__name__') else str(method)
 
-    to_sql_function = df.to_sql
-    ### TODO: When `bcpandas` supports SQLAlchemy 2.0, use `bcp` for bulk inserts.
-    #  if self.flavor == 'mssql':
-        #  have_bcp = is_bcp_available()
-        #  if not have_bcp:
-            #  warn(
-                #  "The \`bcp\` utility is not installed.\n"
-                #  + "    Install \`bcp` for better performance:\n"
-                #  + "    https://learn.microsoft.com/en-us/sql/tools/bcp-utility",
-                #  stack = False,
-            #  )
-        #  else:
-            #  bcpandas = attempt_import('bcpandas')
-            #  to_sql_function = functools.partial(, df)
-
     default_chunksize = self._sys_config.get('chunksize', None)
     chunksize = chunksize if chunksize != -1 else default_chunksize
     if chunksize is not None and self.flavor in _max_chunks_flavors:
@@ -593,7 +578,7 @@ def to_sql(
 
     ### filter out non-pandas args
     import inspect
-    to_sql_params = inspect.signature(to_sql_function).parameters
+    to_sql_params = inspect.signature(df.to_sql).parameters
     to_sql_kw = {}
     for k, v in kw.items():
         if k in to_sql_params:
@@ -624,12 +609,18 @@ def to_sql(
         if json_cols:
             df = df.copy()
             for col in json_cols:
-                df[col] = df[col].apply(json.dumps)
+                df[col] = df[col].apply(
+                    (
+                        lambda x: json.dumps(x)
+                        if not isinstance(x, Hashable)
+                        else x
+                    )
+                )
 
     try:
         with warnings.catch_warnings():
             warnings.filterwarnings('ignore', 'case sensitivity issues')
-            to_sql_function(
+            df.to_sql(
                 name = name,
                 con = self.engine,
                 index = index,

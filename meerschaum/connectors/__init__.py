@@ -29,7 +29,6 @@ __all__ = ("Connector", "SQLConnector", "APIConnector", "get_connector", "is_con
 connectors: Dict[str, Dict[str, Connector]] = {
     'api'   : {},
     'sql'   : {},
-    'mqtt'  : {},
     'plugin': {},
 }
 instance_types: List[str] = ['sql', 'api']
@@ -54,15 +53,6 @@ attributes: Dict[str, Dict[str, Any]] = {
     },
     'sql': {
         'flavors': sql_flavor_configs,
-    },
-    'mqtt': {
-        'required': [
-            'host',
-        ],
-        'default': {
-            'port'     : 1883,
-            'keepalive': 60,
-        },
     },
 }
 ### Fill this with objects only when connectors are first referenced.
@@ -162,20 +152,14 @@ def get_connector(
         return None
 
     if 'sql' not in types:
-        from meerschaum.connectors.mqtt import MQTTConnector
         from meerschaum.connectors.plugin import PluginConnector
         with _locks['types']:
             types.update({
                 'api'   : APIConnector,
                 'sql'   : SQLConnector,
-                'mqtt'  : MQTTConnector,
                 'plugin': PluginConnector,
             })
     
-    ### always refresh MQTT Connectors NOTE: test this!
-    if type == 'mqtt':
-        refresh = True
-
     ### determine if we need to call the constructor
     if not refresh:
         ### see if any user-supplied arguments differ from the existing instance

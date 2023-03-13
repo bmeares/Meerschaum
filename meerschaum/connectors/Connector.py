@@ -3,9 +3,7 @@
 # vim:fenc=utf-8
 
 """
-Generic Connector parent class. Reads attributes from the configuration.
-Consult implemented child classes like SQLConnector, APIConnector, MQTTConnector, or
-PluginConnector for further details.
+Define the parent `Connector` class.
 """
 
 from __future__ import annotations
@@ -32,11 +30,10 @@ class Connector(metaclass=abc.ABCMeta):
         Parameters
         ----------
         type: str
-            The type of the connection. Used as a key in config.yaml to get attributes.
-            Supported values are 'sql', 'api', 'mqtt', 'plugin'.
+            The `type` of the connector (e.g. `sql`, `api`, `plugin`).
 
         label: str
-            The label for the connection. Used as a key within config.yaml
+            The `label` for the connector.
 
         Run `mrsm edit config` and to edit connectors in the YAML file:
 

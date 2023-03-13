@@ -74,9 +74,17 @@ def enforce_dtypes(self, df: 'pd.DataFrame', debug: bool=False) -> 'pd.DataFrame
         if debug:
             dprint(f"Checking columns for JSON encoding: {json_cols}")
         for col in json_cols:
-            if col in df.columns and isinstance(df.iloc[0][col], str):
+            if col in df.columns:
                 try:
-                    df[col] = df[col].apply(json.loads)
+                    df[col] = df[col].apply(
+                        (
+                            lambda x: (
+                                json.loads(x)
+                                if isinstance(x, str)
+                                else x
+                            )
+                        )
+                    )
                 except Exception as e:
                     if debug:
                         dprint(f"Unable to parse column '{col}' as JSON:\n{e}")

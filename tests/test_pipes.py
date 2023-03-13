@@ -372,7 +372,7 @@ def test_id_index_col(flavor: str):
     """
     conn = conns[flavor]
     pipe = Pipe(
-        'test_id', 'index_col',
+        'test_id', 'index_col', 'table',
         instance = conn,
         dtypes = {'id': 'Int64'},
         columns = {'datetime': 'id'},
