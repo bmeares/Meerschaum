@@ -203,6 +203,7 @@ def _edit_users(
     from meerschaum.utils.prompt import prompt, yes_no, get_password, get_email
     from meerschaum.utils.misc import edit_file
     from meerschaum.config._paths import USERS_CACHE_RESOURCES_PATH
+    from meerschaum.config.static import STATIC_CONFIG
     from meerschaum.utils.yaml import yaml
     import os, pathlib
     instance_connector = parse_instance_keys(mrsm_instance)
@@ -214,7 +215,10 @@ def _edit_users(
         ### Change the password
         password = ''
         if yes_no(f"Change the password for user '{username}'?", default='n', yes=yes, noask=noask):
-            password = get_password(username, minimum_length=7)
+            password = get_password(
+                username,
+                minimum_length = STATIC_CONFIG['users']['min_password_length'],
+            )
 
         ## Make an admin
         _type = ''

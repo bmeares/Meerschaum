@@ -256,7 +256,7 @@ def _register_users(
     Register a new user to a Meerschaum instance.
     """
     from meerschaum.config import get_config
-    from meerschaum.config.static import _static_config
+    from meerschaum.config.static import STATIC_CONFIG
     from meerschaum import get_connector
     from meerschaum.connectors.parse import parse_instance_keys
     from meerschaum.utils.debug import dprint
@@ -274,7 +274,7 @@ def _register_users(
     ### filter out existing users
     nonregistered_users = []
     for username in action:
-        min_len = _static_config()['users']['min_username_length']
+        min_len = STATIC_CONFIG['users']['min_username_length']
         if len(username) < min_len:
             warn(
                 f"Username '{username}' is too short (less than {min_len} characters). Skipping...",
@@ -296,7 +296,7 @@ def _register_users(
             username = _user.username
             password = get_password(
                 username,
-                minimum_length = _static_config()['users']['min_password_length']
+                minimum_length = STATIC_CONFIG['users']['min_password_length']
             )
             email = get_email(username, allow_omit=True)
         except Exception as e:

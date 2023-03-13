@@ -89,9 +89,9 @@ STATIC_CONFIG = {
             'default': 'pbkdf2_sha256',
             'pbkdf2_sha256__default_rounds': 30000,
         },
-        'min_username_length': 3,
+        'min_username_length': 1,
         'max_username_length': 26,
-        'min_password_length': 5,
+        'min_password_length': 1,
     },
     'plugins': {
         'repo_separator': '@',
