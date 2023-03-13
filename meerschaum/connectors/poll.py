@@ -6,7 +6,7 @@
 Poll database and API connections.
 """
 
-from meerschaum.utils.typing import InstanceConnector, Union, Optional
+from meerschaum.utils.typing import InstanceConnector, Union, Optional, Dict, Any
 
 def retry_connect(
         connector: Union[InstanceConnector, None] = None,
@@ -61,7 +61,7 @@ def retry_connect(
     from meerschaum.utils.packages import attempt_import
 
     kw = {
-        'connector_keys': str(connector),
+        'connector_meta': connector.meta,
         'max_retries': max_retries,
         'retry_wait': retry_wait,
         'workers': workers,
@@ -75,7 +75,7 @@ def retry_connect(
     dill = attempt_import('dill', lazy=False)
     code = (
         "import sys, json\n"
-        + "from meerschaum.utils.typing import Optional\n\n"
+        + "from meerschaum.utils.typing import Optional, Dict, Any\n\n"
         + dill.source.getsource(_wrap_retry_connect) + '\n\n'
         + f"kw = json.loads({json.dumps(json.dumps(kw))})\n"
         + "success = _wrap_retry_connect(**kw)\n"
@@ -85,7 +85,7 @@ def retry_connect(
 
 
 def _wrap_retry_connect(
-        connector_keys: Optional[str] = None,
+        connector_meta: Dict[str, Any],
         max_retries: int = 50,
         retry_wait: int = 3,
         workers: int = 1,
@@ -134,7 +134,7 @@ def _wrap_retry_connect(
     """
     from meerschaum.utils.warnings import warn as _warn, error, info
     from meerschaum.utils.debug import dprint
-    from meerschaum.connectors import instance_types
+    from meerschaum.connectors import instance_types, get_connector
     from meerschaum.connectors.parse import parse_instance_keys
     from meerschaum.utils.packages import attempt_import
     from meerschaum.utils.sql import test_queries
@@ -142,7 +142,7 @@ def _wrap_retry_connect(
     from functools import partial
     import time
 
-    connector = parse_instance_keys(connector_keys)
+    connector = get_connector(**connector_meta)
     if connector.type not in instance_types:
         return None
 

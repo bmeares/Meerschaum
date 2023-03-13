@@ -11,12 +11,17 @@ import sys
 import argparse, json
 from meerschaum.utils.typing import Union, Dict, List, Any, Tuple, Callable
 from meerschaum.utils.misc import string_to_dict
+from meerschaum.utils.warnings import error
 
+class InvalidArgumentException(Exception):
+    """
+    Raised when argparse failes to parse arguments.
+    """
 
 _original_argparse_error = argparse.ArgumentParser.error
 _original_argparse_parse_known_args = argparse.ArgumentParser.parse_known_args
-def _new_argparse_error(self, message):
-    raise argparse.ArgumentError(message)
+def _new_argparse_error(message: str):
+    error(message, InvalidArgumentException, stack=False)
 
 class ArgumentParser(argparse.ArgumentParser):
     """Override the built-in `argparse` error handling."""

@@ -10,11 +10,7 @@ See `meerschaum.utils.pool` for multiprocessing and
 
 from __future__ import annotations
 import os, signal, subprocess, sys, platform
-try:
-    import termios
-except ImportError:
-    termios = None
-from meerschaum.utils.typing import Union, Optional, Any, Callable, Dict
+from meerschaum.utils.typing import Union, Optional, Any, Callable, Dict, Tuple
 
 def run_process(
         *args,
@@ -64,6 +60,11 @@ def run_process(
     -------
     Either an int for the return code or a `subprocess.Popen` object.
     """
+    try:
+        import termios
+    except ImportError:
+        termios = None
+
     if platform.system() == 'Windows':
         foreground = False
 
@@ -80,9 +81,12 @@ def run_process(
         try:
             old_pgrp = os.tcgetpgrp(sys.stdin.fileno())
         except Exception as e:
-            pass
+            termios = None
         if termios:
-            old_attr = termios.tcgetattr(sys.stdin.fileno())
+            try:
+                old_attr = termios.tcgetattr(sys.stdin.fileno())
+            except Exception as e:
+                termios = None
 
     def new_pgid():
         if user_preexec_fn:

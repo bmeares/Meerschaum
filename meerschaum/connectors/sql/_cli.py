@@ -7,6 +7,7 @@ Launch into a CLI environment to interact with the SQL Connector
 """
 
 from __future__ import annotations
+### NOTE: This import adds `Iterable` to collections, which is needed by some CLIs.
 from meerschaum.utils.typing import SuccessTuple
 
 flavor_clis = {
@@ -34,7 +35,7 @@ def cli(
     from meerschaum.utils.packages import venv_exec, attempt_import
     from meerschaum.utils.debug import dprint
     from meerschaum.utils.warnings import error
-    import sys, subprocess
+    import sys, subprocess, os
 
     if self.flavor not in flavor_clis:
         return False, f"No CLI available for flavor '{self.flavor}'."
@@ -47,6 +48,9 @@ def cli(
         except KeyboardInterrupt:
             pass
         return True, "Success"
+    elif self.flavor == 'mssql':
+        if 'DOTNET_SYSTEM_GLOBALIZATION_INVARIANT' not in os.environ:
+            os.environ['DOTNET_SYSTEM_GLOBALIZATION_INVARIANT'] = '1'
 
     cli_name = flavor_clis[self.flavor]
 

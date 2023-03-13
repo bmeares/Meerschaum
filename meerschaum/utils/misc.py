@@ -1570,6 +1570,19 @@ def is_docker_available() -> bool:
     return has_docker
 
 
+def is_bcp_available() -> bool:
+    """Check if the MSSQL `bcp` utility is installed."""
+    import subprocess
+
+    try:
+        has_bcp = subprocess.call(
+            ['bcp', '-v'], stdout=subprocess.DEVNULL, stderr=subprocess.STDOUT
+        ) == 0
+    except Exception as e:
+        has_bcp = False
+    return has_bcp
+
+
 def get_last_n_lines(file_name: str, N: int):
     """
     https://thispointer.com/python-get-last-n-lines-of-a-text-file-like-tail-command/

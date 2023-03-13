@@ -29,17 +29,22 @@ MRSM_SQL_FOO=sqlite:////tmp/foo.db
 ```
 
 !!! note ""
-    Custom connectors may be set through environment variables if they are defined with the `@make_connector` decorator:
+    Create your own custom connectors with the `@make_connector` decorator:
 
     ```python
     from meerschaum.connectors import make_connector, Connector
 
     @make_connector
-    class FooConnector(Connector):
-        IS_INSTANCE = True
+    class DogConnector(Connector):
+        IS_INSTANCE = False
+        REQUIRED_ATTRIBUTES = ['username', 'password']
 
-        def __init__(label: str, **kw):
-            super().__init__('foo', label, **kw)
+    ```
+
+    In the connector's environment variable, define the attributes as JSON:
+
+    ```bash
+    export MRSM_DOG_SPOT='{"username": "foo", "password": "bar"}'
     ```
 
 !!! tip "Did you know?"

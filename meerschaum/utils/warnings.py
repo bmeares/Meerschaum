@@ -155,6 +155,7 @@ def error(
         nopretty: bool = False,
         silent: bool = True,
         stack: bool = True,
+        raise_: bool = True,
     ):
     """
     Raise an exception with supressed traceback.
@@ -162,10 +163,11 @@ def error(
     from meerschaum.utils.formatting import (
         CHARSET, ANSI, get_console, fill_ansi, highlight_pipes, _init
     )
-    from meerschaum.utils.packages import import_rich
+    from meerschaum.utils.packages import import_rich, attempt_import
     from meerschaum.config import get_config
     import types, inspect
     rich = import_rich()
+    rich_traceback = attempt_import('rich.traceback')
     error_config = get_config('formatting', 'errors', patch=True)
     message = ' ' + error_config[CHARSET]['icon'] + ' ' + str(message)
     exception = exception_with_traceback(message, exception_class, stacklevel=3)
@@ -176,10 +178,10 @@ def error(
         color_message = '\n' + fill_ansi(highlight_pipes(message), **error_config['ansi']['rich'])
         color_exception = exception_with_traceback(color_message, exception_class, stacklevel=3)
     try:
-        trace = rich.traceback.Traceback.extract(
+        trace = rich_traceback.Traceback.extract(
             exception_class, exception, exception.__traceback__
         )
-        rtb = rich.traceback.Traceback(trace)
+        rtb = rich_traceback.Traceback(trace)
     except Exception as e:
         trace, rtb = None, None
     if trace is None or rtb is None:
@@ -188,7 +190,8 @@ def error(
         if get_console() is not None:
             get_console().print(rtb)
     frame = sys._getframe(len(inspect.stack()) - 1)
-    raise color_exception
+    if raise_:
+        raise color_exception
 
 
 def info(message: str, icon: bool = True, **kw):

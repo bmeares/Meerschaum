@@ -153,8 +153,8 @@ def get_user_id(
     users = get_tables(mrsm_instance=self, debug=debug)['users']
 
     query = (
-        sqlalchemy.select([users.c.user_id]).
-        where(users.c.username == user.username)
+        sqlalchemy.select(users.c.user_id)
+        .where(users.c.username == user.username)
     )
 
     result = self.value(query, debug=debug)
@@ -180,7 +180,7 @@ def get_user_attributes(
     user_id = user.user_id if user.user_id is not None else self.get_user_id(user, debug=debug)
 
     query = (
-        sqlalchemy.select([users.c.attributes]).
+        sqlalchemy.select(users.c.attributes).
         where(users.c.user_id == user_id)
     )
 
@@ -259,7 +259,7 @@ def get_users(
     from meerschaum.utils.packages import attempt_import
     sqlalchemy = attempt_import('sqlalchemy')
 
-    query = sqlalchemy.select([users.c.username])
+    query = sqlalchemy.select(users.c.username)
 
     return list(self.read(query, debug=debug)['username'])
 
@@ -291,7 +291,7 @@ def get_user_password_hash(
     if user_id is None:
         return None
 
-    query = sqlalchemy.select([users.c.password_hash]).where(users.c.user_id == user_id)
+    query = sqlalchemy.select(users.c.password_hash).where(users.c.user_id == user_id)
 
     return self.value(query, debug=debug)
 
@@ -314,6 +314,6 @@ def get_user_type(
     if user_id is None:
         return None
 
-    query = sqlalchemy.select([users.c.user_type]).where(users.c.user_id == user_id)
+    query = sqlalchemy.select(users.c.user_type).where(users.c.user_id == user_id)
 
     return self.value(query, debug=debug)

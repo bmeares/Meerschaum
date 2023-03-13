@@ -3,7 +3,7 @@
 # vim:fenc=utf-8
 
 """
-Copyright 2021 Bennett Meares
+Copyright 2023 Bennett Meares
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -22,9 +22,20 @@ from meerschaum.core.Pipe import Pipe
 from meerschaum.plugins import Plugin
 from meerschaum.utils import get_pipes
 from meerschaum.utils.venv import Venv
+from meerschaum.utils.formatting import pprint
 from meerschaum._internal.docs import index as __doc__
 from meerschaum.connectors import get_connector
-from meerschaum.config import __version__
+from meerschaum.config import __version__, get_config
+from meerschaum.utils.packages import attempt_import
 
 __pdoc__ = {'gui': False, 'api': False, 'core': False,}
-__all__ = ("Pipe", "get_pipes", "get_connector", "Plugin",)
+__all__ = (
+    "Pipe",
+    "get_pipes",
+    "get_connector",
+    "Plugin",
+    "Venv",
+    "Plugin",
+    "pprint",
+    "attempt_import",
+)

@@ -585,6 +585,10 @@ class Daemon:
             success, msg = False, str(e)
             daemon = None
             traceback.print_exception(type(e), e, e.__traceback__)
+            try:
+                self.pickle_file.unlink()
+            except Exception as ue:
+                traceback.print_exception(type(ue), ue, ue.__traceback__)
         if not success:
             error(msg)
         return daemon

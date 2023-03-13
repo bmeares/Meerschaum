@@ -61,6 +61,7 @@ flavor_configs = {
         'create_engine' : {
             'fast_executemany': True,
             'isolation_level': 'AUTOCOMMIT',
+            'use_setinputsizes': False,
         },
         'omit_create_engine': {'method',},
         'to_sql': {
@@ -220,14 +221,14 @@ def create_engine(
     if self.flavor in flavor_dialects:
         sqlalchemy.dialects.registry.register(*flavor_dialects[self.flavor])
 
-    ### self.sys_config was deepcopied and can be updated safely
+    ### self._sys_config was deepcopied and can be updated safely
     if self.flavor in ("sqlite", "duckdb"):
         engine_str = f"{_engine}:///{_database}" if not _uri else _uri
-        if 'create_engine' not in self.sys_config:
-            self.sys_config['create_engine'] = {}
-        if 'connect_args' not in self.sys_config['create_engine']:
-            self.sys_config['create_engine']['connect_args'] = {}
-        self.sys_config['create_engine']['connect_args'].update({"check_same_thread" : False})
+        if 'create_engine' not in self._sys_config:
+            self._sys_config['create_engine'] = {}
+        if 'connect_args' not in self._sys_config['create_engine']:
+            self._sys_config['create_engine']['connect_args'] = {}
+        self._sys_config['create_engine']['connect_args'].update({"check_same_thread" : False})
     else:
         engine_str = (
             _engine + "://" + (_username if _username is not None else '') +
@@ -241,7 +242,7 @@ def create_engine(
             (
                 (engine_str.replace(':' + _password, ':' + ('*' * len(_password))))
                     if _password is not None else engine_str
-            ) + '\n' + f"{self.sys_config.get('create_engine', {}).get('connect_args', {})}"
+            ) + '\n' + f"{self._sys_config.get('create_engine', {}).get('connect_args', {})}"
         )
 
     _kw_copy = copy.deepcopy(kw)
@@ -260,7 +261,7 @@ def create_engine(
                         or k not in flavor_configs[self.flavor].get('omit_create_engine')
                 }
             )
-    _apply_create_engine_args(self.sys_config.get('create_engine', {}))
+    _apply_create_engine_args(self._sys_config.get('create_engine', {}))
     _apply_create_engine_args(self.__dict__.get('create_engine', {}))
     _apply_create_engine_args(_kw_copy)
 
@@ -273,9 +274,9 @@ def create_engine(
             ### from the module name (sqlalchemy.pool).
             poolclass    = getattr(
                 attempt_import(
-                    ".".join(self.sys_config['poolclass'].split('.')[:-1])
+                    ".".join(self._sys_config['poolclass'].split('.')[:-1])
                 ),
-                self.sys_config['poolclass'].split('.')[-1]
+                self._sys_config['poolclass'].split('.')[-1]
             ),
             echo         = debug,
             **_create_engine_args

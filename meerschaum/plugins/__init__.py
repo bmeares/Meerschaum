@@ -18,6 +18,7 @@ _locks = {
     'sys.path': RLock(),
     'internal_plugins': RLock(),
     '_synced_symlinks': RLock(),
+    'PLUGINS_INTERNAL_LOCK_PATH': RLock(),
 }
 __all__ = (
     "Plugin", "make_action", "api_plugin", "import_plugins",
@@ -145,29 +146,30 @@ def sync_plugins_symlinks(debug: bool = False, warn: bool = True) -> None:
     )
 
     ### If the lock file exists, sleep for up to a second or until it's removed before continuing.
-    if PLUGINS_INTERNAL_LOCK_PATH.exists():
-        lock_sleep_total     = STATIC_CONFIG['plugins']['lock_sleep_total']
-        lock_sleep_increment = STATIC_CONFIG['plugins']['lock_sleep_increment']
-        lock_start = time.perf_counter()
-        while (
-            (time.perf_counter() - lock_start) < lock_sleep_total
-        ):
-            time.sleep(lock_sleep_increment)
-            if not PLUGINS_INTERNAL_LOCK_PATH.exists():
-                break
-            try:
-                PLUGINS_INTERNAL_LOCK_PATH.unlink()
-            except Exception as e:
-                if warn:
-                    _warn(f"Error while removing lockfile {PLUGINS_INTERNAL_LOCK_PATH}:\n{e}")
-                break
+    with _locks['PLUGINS_INTERNAL_LOCK_PATH']:
+        if PLUGINS_INTERNAL_LOCK_PATH.exists():
+            lock_sleep_total     = STATIC_CONFIG['plugins']['lock_sleep_total']
+            lock_sleep_increment = STATIC_CONFIG['plugins']['lock_sleep_increment']
+            lock_start = time.perf_counter()
+            while (
+                (time.perf_counter() - lock_start) < lock_sleep_total
+            ):
+                time.sleep(lock_sleep_increment)
+                if not PLUGINS_INTERNAL_LOCK_PATH.exists():
+                    break
+                try:
+                    PLUGINS_INTERNAL_LOCK_PATH.unlink()
+                except Exception as e:
+                    if warn:
+                        _warn(f"Error while removing lockfile {PLUGINS_INTERNAL_LOCK_PATH}:\n{e}")
+                    break
 
-    ### Begin locking from other processes.
-    try:
-        PLUGINS_INTERNAL_LOCK_PATH.touch()
-    except Exception as e:
-        if warn:
-            _warn(f"Unable to create lockfile {PLUGINS_INTERNAL_LOCK_PATH}:\n{e}")
+        ### Begin locking from other processes.
+        try:
+            PLUGINS_INTERNAL_LOCK_PATH.touch()
+        except Exception as e:
+            if warn:
+                _warn(f"Unable to create lockfile {PLUGINS_INTERNAL_LOCK_PATH}:\n{e}")
 
     with _locks['internal_plugins']:
         if is_symlink(PLUGINS_RESOURCES_PATH) or not PLUGINS_RESOURCES_PATH.exists():
@@ -248,20 +250,22 @@ def sync_plugins_symlinks(debug: bool = False, warn: bool = True) -> None:
                     )
 
     ### Release symlink lock file in case other processes need it.
-    try:
-        PLUGINS_INTERNAL_LOCK_PATH.unlink()
-    except Exception as e:
-        if warn:
-            _warn(f"Error clearning up lockfile {PLUGINS_INTERNAL_LOCK_PATH}:\n{e}")
+    with _locks['PLUGINS_INTERNAL_LOCK_PATH']:
+        try:
+            if PLUGINS_INTERNAL_LOCK_PATH.exists():
+                PLUGINS_INTERNAL_LOCK_PATH.unlink()
+        except Exception as e:
+            if warn:
+                _warn(f"Error cleaning up lockfile {PLUGINS_INTERNAL_LOCK_PATH}:\n{e}")
 
-    try:
-        if not PLUGINS_INIT_PATH.exists():
-            PLUGINS_INIT_PATH.touch()
-    except Exception as e:
-        error(f"Failed to create the file '{PLUGINS_INIT_PATH}':\n{e}")
+        try:
+            if not PLUGINS_INIT_PATH.exists():
+                PLUGINS_INIT_PATH.touch()
+        except Exception as e:
+            error(f"Failed to create the file '{PLUGINS_INIT_PATH}':\n{e}")
 
-    if str(PLUGINS_RESOURCES_PATH.parent) not in __path__:
-        with _locks['__path__']:
+    with _locks['__path__']:
+        if str(PLUGINS_RESOURCES_PATH.parent) not in __path__:
             __path__.append(str(PLUGINS_RESOURCES_PATH.parent))
 
     with _locks['_synced_symlinks']:
