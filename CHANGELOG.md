@@ -4,7 +4,7 @@
 
 This is the current release cycle, so stay tuned for future releases!
 
-### v1.6.0
+### v1.6.0 – v1.6.1
 
 **Breaking Changes**
 

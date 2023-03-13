@@ -12,7 +12,7 @@ from meerschaum.api.dash import dash_app, debug, active_sessions
 from dash.dependencies import Input, Output, State, ALL, MATCH
 from dash.exceptions import PreventUpdate
 from meerschaum.core import User
-from meerschaum.config.static import _static_config
+from meerschaum.config.static import STATIC_CONFIG
 from meerschaum.utils.packages import attempt_import
 dash = attempt_import('dash', check_update=CHECK_UPDATE)
 from fastapi.exceptions import HTTPException
@@ -24,7 +24,7 @@ from fastapi.exceptions import HTTPException
 def validate_username(username):
     if not username:
         raise PreventUpdate
-    valid = (len(username) >= _static_config()['users']['min_username_length'])
+    valid = (len(username) >= STATIC_CONFIG['users']['min_username_length'])
     if not valid:
         return valid, not valid
     conn = get_api_connector()
@@ -40,7 +40,7 @@ def validate_username(username):
 def validate_password(password):
     if not password:
         raise PreventUpdate
-    valid = (len(password) >= _static_config()['users']['min_password_length'])
+    valid = (len(password) >= STATIC_CONFIG['users']['min_password_length'])
     return valid, not valid
 
 @dash_app.callback(
@@ -75,6 +75,11 @@ def register_button_click(
     form_class = 'form-control'
     from meerschaum.api.routes._login import login
     conn = get_api_connector()
+    if not username or not password:
+        success, msg = False, "Invalid username or password."
+        form_class += ' is-invalid'
+        return {}, form_class, dash.no_update
+
     user = User(username, password, email=email, instance=conn)
     user_id = conn.get_user_id(user, debug=debug)
     if user_id is not None:

@@ -60,9 +60,9 @@ def register_plugin(
         query = sqlalchemy.insert(plugins).values(**bind_variables)
     else:
         query = (
-            sqlalchemy.update(plugins).
-            values(**bind_variables).
-            where(plugins.c.plugin_id == old_id)
+            sqlalchemy.update(plugins)
+            .values(**bind_variables)
+            .where(plugins.c.plugin_id == old_id)
         )
 
     result = self.exec(query, debug=debug)
@@ -146,8 +146,8 @@ def get_plugin_username(
     sqlalchemy = attempt_import('sqlalchemy')
 
     query = (
-        sqlalchemy.select(users.c.username).
-        where(
+        sqlalchemy.select(users.c.username)
+        .where(
             users.c.user_id == plugins.c.user_id
             and plugins.c.plugin_name == plugin.name
         )
@@ -215,7 +215,7 @@ def get_plugins(
     if search_term is not None:
         query = query.where(plugins.c.plugin_name.like(search_term + '%'))
 
-    return [row['plugin_name'] for row in self.engine.execute(query).fetchall()]
+    return [row[0] for row in self.execute(query).fetchall()]
 
 
 def delete_plugin(

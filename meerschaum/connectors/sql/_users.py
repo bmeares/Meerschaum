@@ -59,14 +59,14 @@ def register_user(
 
 def valid_username(username: str) -> SuccessTuple:
     """Verify that a given username is valid."""
-    from meerschaum.config.static import _static_config
+    from meerschaum.config.static import STATIC_CONFIG
     fail_reasons = []
 
-    min_length = _static_config()['users']['min_username_length']
+    min_length = STATIC_CONFIG['users']['min_username_length']
     if len(username) < min_length:
         fail_reasons.append(f"Usernames must have at least {min_length} characters.")
 
-    max_length = _static_config()['users']['max_username_length']
+    max_length = STATIC_CONFIG['users']['max_username_length']
     if len(username) > max_length:
         fail_reasons.append(f"Usernames must contain {max_length} or fewer characters.")
 
@@ -235,23 +235,11 @@ def delete_user(
 
 def get_users(
         self,
-        debug : bool = False,
-        **kw : Any
+        debug: bool = False,
+        **kw: Any
     ) -> List[str]:
     """
-
-    Parameters
-    ----------
-    debug : bool :
-         (Default value = False)
-    **kw : Any :
-        
-
-    Returns
-    -------
-    type
-        
-
+    Get the registered usernames.
     """
     ### ensure users table exists
     from meerschaum.connectors.sql.tables import get_tables
