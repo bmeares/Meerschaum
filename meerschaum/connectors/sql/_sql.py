@@ -148,7 +148,7 @@ def read(
             and str(query_or_table).endswith('"')
         )
     ):
-        truncated_table_name = truncated_item(str(query_or_table))
+        truncated_table_name = truncate_item_name(str(query_or_table))
         if truncated_table_name != str(query_or_table) and not silent:
             warn(
                 f"Table '{name}' is too long for '{self.flavor}',"
