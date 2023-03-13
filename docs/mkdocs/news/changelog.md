@@ -7,6 +7,7 @@ This is the current release cycle, so stay tuned for future releases!
 ### v1.6.0
 
 **Breaking Changes**
+
 - *Dropped Python 3.7 support.*  
   The latest `pandas` requires 3.8+, so to use Pandas 1.5.x, we have to finally drop Python 3.7.
 
