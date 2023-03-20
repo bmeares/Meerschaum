@@ -13,8 +13,15 @@ from meerschaum.utils.typing import Any, List, SuccessTuple, Optional, Union, Tu
 from meerschaum.utils.threading import Lock, RLock
 from meerschaum.utils.packages._packages import packages, all_packages, get_install_names
 from meerschaum.utils.venv import (
-    activate_venv, deactivate_venv, venv_executable, venv_exec, venv_exists,
-    venv_target_path, inside_venv, Venv,
+    activate_venv,
+    deactivate_venv,
+    venv_executable,
+    venv_exec,
+    venv_exists,
+    venv_target_path,
+    inside_venv,
+    Venv,
+    init_venv,
 )
 
 _import_module = importlib.import_module
@@ -698,16 +705,18 @@ def get_pip(venv: Optional[str] = 'mrsm', debug: bool=False) -> bool:
     import sys, subprocess
     from meerschaum.utils.misc import wget
     from meerschaum.config._paths import CACHE_RESOURCES_PATH
-    from meerschaum.config.static import _static_config
-    url = _static_config()['system']['urls']['get-pip.py']
+    from meerschaum.config.static import STATIC_CONFIG
+    url = STATIC_CONFIG['system']['urls']['get-pip.py']
     dest = CACHE_RESOURCES_PATH / 'get-pip.py'
     try:
         wget(url, dest, color=False, debug=debug)
     except Exception as e:
         print(f"Failed to fetch pip from '{url}'. Please install pip and restart Meerschaum.") 
         sys.exit(1)
-    cmd_list = [venv_executable(venv=venv), str(dest)] 
-    return subprocess.call(cmd_list) == 0
+    if venv is not None:
+        init_venv(venv=venv, debug=debug)
+    cmd_list = [venv_executable(venv=venv), dest.as_posix()] 
+    return subprocess.call(cmd_list, env=_get_pip_os_env()) == 0
 
 
 def pip_install(
@@ -775,7 +784,6 @@ def pip_install(
 
     """
     from meerschaum.config._paths import VIRTENV_RESOURCES_PATH
-    from meerschaum.config.static import _static_config
     from meerschaum.utils.warnings import warn
     if args is None:
         args = ['--upgrade'] if not _uninstall else []
@@ -893,7 +901,14 @@ def pip_install(
                         f"Failed to clean up package '{_install_no_version}'.",
                     )
 
-        success = run_python_package('pip', _args + _packages, venv=venv, debug=debug) == 0
+        success = run_python_package(
+            'pip',
+            _args + _packages,
+            venv = venv,
+            env = _get_pip_os_env(),
+            debug = debug,
+        ) == 0
+
     msg = (
         "Successfully " + ('un' if _uninstall else '') + "installed packages." if success 
         else "Failed to " + ('un' if _uninstall else '') + "install packages."
@@ -919,13 +934,18 @@ def completely_uninstall_package(
     _install_no_version = get_install_no_version(install_name)
     clean_install_no_version = _install_no_version.lower().replace('-', '_')
     installed_versions = []
-    for file_name in os.listdir(venv_target_path(venv, debug=debug)):
+    vtp = venv_target_path(venv, allow_nonexistent=True, debug=debug)
+    if not vtp.exists():
+        return True
+
+    for file_name in os.listdir(vtp):
         if not file_name.endswith('.dist-info'):
             continue
         clean_dist_info = file_name.replace('-', '_').lower()
         if not clean_dist_info.startswith(clean_install_no_version):
             continue
         installed_versions.append(file_name)
+
     max_attempts = len(installed_versions) + 1
     while attempts < max_attempts:
         if not venv_contains_package(
@@ -1019,13 +1039,19 @@ def run_python_package(
         print(command, file=sys.stderr)
     try:
         to_return = run_process(
-            command, foreground=foreground, as_proc=as_proc, capture_output=capture_output, **kw
+            command,
+            foreground = foreground,
+            as_proc = as_proc,
+            capture_output = capture_output,
+            **kw
         )
     except Exception as e:
         msg = f"Failed to execute {command}, will try again:\n{traceback.format_exc()}"
         warn(msg, color=False)
         stdout, stderr = (
-            (None, None) if not capture_output else (subprocess.PIPE, subprocess.PIPE)
+            (None, None)
+            if not capture_output
+            else (subprocess.PIPE, subprocess.PIPE)
         )
         proc = subprocess.Popen(
             command,
@@ -1208,8 +1234,9 @@ def attempt_import(
             elif warn:
                 ### Raise a warning if we can't find the package and install = False.
                 warn_function(
-                    (f"\n\nMissing package '{name}'; features will not work correctly. "
-                     f"\n\nSet install=True when calling attempt_import.\n"),
+                    (f"\n\nMissing package '{name}' from virtual environment '{venv}'; "
+                     + "some features will not work correctly."
+                     + f"\n\nSet install=True when calling attempt_import.\n"),
                     ImportWarning,
                     stacklevel = 3,
                     color = False,
@@ -1586,3 +1613,16 @@ def _monkey_patch_get_distribution(_dist: str, _version: str) -> None:
             return _Dist(_custom_distributions[dist])
         return _pkg_resources_get_distribution(dist)
     pkg_resources.get_distribution = _get_distribution
+
+
+def _get_pip_os_env():
+    """
+    Return the environment variables context in which `pip` should be run.
+    See PEP 668 for why we are overriding the environment.
+    """
+    import os
+    pip_os_env = os.environ.copy()
+    pip_os_env.update({
+        'PIP_BREAK_SYSTEM_PACKAGES': 'true',
+    })
+    return pip_os_env

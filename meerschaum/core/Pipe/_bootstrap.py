@@ -125,6 +125,8 @@ def _get_parameters(pipe, debug: bool = False) -> Dict[str, Any]:
     from meerschaum.config import get_config
     from meerschaum.config._patch import apply_patch_to_config
     from meerschaum.utils.formatting._shell import clear_screen
+    from meerschaum.utils.venv import Venv
+    from meerschaum.connectors import get_connector_plugin
     _clear = get_config('shell', 'clear_screen', patch=True)
     _types_defaults = {
         'sql': {
@@ -164,7 +166,8 @@ def _get_parameters(pipe, debug: bool = False) -> Dict[str, Any]:
 
     if conn_type == 'plugin':
         if pipe.connector.register is not None:
-            _params = pipe.connector.register(pipe)
+            with Venv(get_connector_plugin(pipe.connector)):
+                _params = pipe.connector.register(pipe)
             if not isinstance(_params, dict):
                 warn(
                     f"Plugin '{pipe.connector_keys[len('plugin:'):]}' "
