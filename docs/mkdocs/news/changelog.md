@@ -4,6 +4,20 @@
 
 This is the current release cycle, so stay tuned for future releases!
 
+### v1.6.2
+
+- **Virtual environment and `pip` tweaks.**  
+  With upcoming changes to `pip` coming due to PEP 668, this patch sets the environment variable `PIP_BREAK_SYSTEM_PACKAGES` when executing `pip` internally. All packages are installed within virtual environments except `uvicorn`, `gunicorn`, and those explicitly installed with a venv of `None`.
+
+- **Change how pipes are pretty-printed.**  
+  Printing the attributes of a single pipe now highlights the keys in blue.
+
+- **Fix an issue with `bootstrap pipes` and plugins.**  
+  When bootstrapping a pipe with a plugin connector, the plugin's virtual environment will now be activated while executing its `register()` function.
+
+- **Update dependencies.**  
+  The minimum version of `duckdb` was bumped to `0.7.1`, `duckdb-engine` was bumped to `0.7.0`, and `pip` was lowered to `22.0.4` to accept older versions. Additionally, `pandas==2.0.0rc1` was tested and confirmed to work, so version 1.7.x of Meerschaum will likely require 2.0+ of `pandas` to make use of its PyArrow backend.
+
 ### v1.6.0 – v1.6.1
 
 **Breaking Changes**
