@@ -586,7 +586,8 @@ class Daemon:
             daemon = None
             traceback.print_exception(type(e), e, e.__traceback__)
             try:
-                self.pickle_file.unlink()
+                if self.pickle_path.exists():
+                    self.pickle_path.unlink()
             except Exception as ue:
                 traceback.print_exception(type(ue), ue, ue.__traceback__)
         if not success:

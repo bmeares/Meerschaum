@@ -4,6 +4,11 @@
 
 This is the current release cycle, so stay tuned for future releases!
 
+### v1.6.3
+
+- **Fixed an issue with background jobs.**  
+  A change had broken daemon functionality has been reverted.
+
 ### v1.6.2
 
 - **Virtual environment and `pip` tweaks.**  
