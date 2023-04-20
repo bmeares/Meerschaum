@@ -1,8 +1,20 @@
 # 🎼 Meerschaum Compose
 
-The [`compose` plugin](https://github.com/bmeares/compose) does the same for Meerschaum as [Docker Compose](https://docs.docker.com/engine/reference/commandline/compose/) did for Docker: with Meerschaum Compose, you can consolidate everything into a single YAML file ― that includes all of the pipes and configuration needed for your project!
+The [`compose` plugin](https://github.com/bmeares/compose) does the same for Meerschaum as [Docker Compose](https://docs.docker.com/engine/reference/commandline/compose/) does for Docker: with Meerschaum Compose, you can consolidate everything into a single YAML file ― that includes all of the pipes and configuration needed for your project!
 
-The purpose of a Compose project is to stand up syncing jobs for your pipes ― one job per instance. Because the configuration is contained in the YAML file (e.g. custom connectors), Compose projects are useful for prototyping, collaboration, and consistency.
+With `mrsm compose up`, you can stand up syncing jobs for your pipes defined in the Compose project ― one job per instance. Because the configuration is contained in the YAML file (e.g. custom connectors), Compose projects are useful for prototyping, collaboration, and consistency.
+
+
+!!! tip "Multiple Compose Files"
+    For complicated projects, a common pattern is to include multiple Compose files and run them with `--file`:
+
+    ```bash
+    mrsm compose run --file mrsm-compose-00-extract.yaml && \
+    mrsm compose run --file mrsm-compose-01-transform.yaml && \
+    mrsm compose run --file mrsm-compose-02-load.yaml
+    ```
+
+    This pattern allows multiple projects to cleanly share root and plugins directories.
 
 ??? example "Example Compose File"
     This compose project demonstrates how to sync two pipes to a new database `awesome.db`:
@@ -78,6 +90,7 @@ If you've used `docker-compose`, you'll catch on to Meerschaum Compose pretty qu
 
 Command | Description | Useful Flags
 --|--|--
+`compose run` | Update and sync the pipes defined in the compose file. | `--debug`: Verbosity toggle. All flags are passed to `sync pipes`.
 `compose up` | Bring up the syncing jobs (process per instance) | `-f`: Follow the logs once the jobs are running.
 `compose down` | Take down the syncing jobs. | `-v`: Drop the pipes ("volumes").
 `compose logs` | Follow the jobs' logs. | `--nopretty`: Print the logs files instead of following.
@@ -125,6 +138,8 @@ The supported top-level keys in a Compose file are the following:
 
 - **`sync`** (**required**)  
   Govern the behavior of the syncing process. See **The `sync` Key** section below for further details.
+- **`project_name`** (*optional*)  
+  The tag given to all pipes in this project. Defaults to the current directory. If you're using multiple compose files, make sure each file has a unique project name.
 - **`root_dir`** (*optional*, default `./root/`)  
   A path to the root directory; see [`MRSM_ROOT_DIR`](/reference/environment/#mrsm_root_dir).
 - **`plugins_dir`** (*optional*, default `./plugins/`)  
