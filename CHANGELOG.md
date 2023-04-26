@@ -18,8 +18,8 @@ This is the current release cycle, so stay tuned for future releases!
   ])
   pipe.get_data().to_dict(orient=records)
   # [
-  #     {'dt': datetime.datetime(2023, 1, 1)},
-  #     {'dt': datetime.datetime(2023, 1, 1, 23, 0)}
+  #     {'dt': Timestamp('2023-01-01 00:00:00')},
+  #     {'dt': Timestamp('2023-01-01 23:00:00')}
   # ]
   ```
 
