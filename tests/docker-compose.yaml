@@ -20,42 +20,43 @@ services:
     ports:
       - 5439:5432
     volumes:
-      - timescaledb_volume:/var/lib/postgresql/data:z
+      - timescaledb_volume:/var/lib/postgresql/data
     image: timescale/timescaledb:latest-pg14-oss
 
   mssql:
     environment:
-      - ACCEPT_EULA=Y
-      - SA_PASSWORD=supersecureSECRETPASSWORD123!
+      ACCEPT_EULA: "Y"
+      SA_PASSWORD: "supersecureSECRETPASSWORD123!"
     ports:
       - 1439:1433
-    image: mcr.microsoft.com/mssql/server:2017-latest
+    image: "mcr.microsoft.com/mssql/server:2017-latest"
     volumes:
-      - mssql_volume:/var/opt/mssql:z
+      - mssql_volume:/var/opt/mssql
 
   mariadb:
     environment:
-      - MARIADB_ROOT_PASSWORD=my-secret-pw
-      - MARIADB_USER=test
-      - MARIADB_PASSWORD=test1234
-      - MARIADB_DATABASE=testdb
-    image: mariadb
+      MARIADB_ROOT_PASSWORD: "my-secret-pw"
+      MARIADB_USER: "test"
+      MARIADB_PASSWORD: "test1234"
+      MARIADB_DATABASE: "testdb"
+      MARIADB_ROOT_HOST: "%"
+    image: "mariadb"
     ports:
       - 3309:3306
     volumes:
-      - mariadb_volume:/var/lib/mysql:z
+      - mariadb_volume:/var/lib/mysql
 
   mysql:
     environment:
-      - MYSQL_ROOT_PASSWORD=my-secret-pw
-      - MYSQL_USER=test
-      - MYSQL_PASSWORD=test1234
-      - MYSQL_DATABASE=testdb
-    image: cytopia/mysql-5.7
+      MYSQL_ROOT_PASSWORD: "my-secret-pw"
+      MYSQL_USER: "test"
+      MYSQL_PASSWORD: "test1234"
+      MYSQL_DATABASE: "testdb"
+    image: "cytopia/mysql-5.7"
     ports:
       - 3310:3306
     volumes:
-      - mysql_volume:/var/lib/mysql:z
+      - mysql_volume:/var/lib/mysql
 
   # cockroachdb:
     # image: cockroachdb/cockroach:v21.1.2
@@ -65,7 +66,7 @@ services:
     # volumes:
       # - cockroachdb_volume:/cockroach/cockroach-data:z
   oracle:
-    image: konnecteam/docker-oracle-12c:sequelize
+    image: "konnecteam/docker-oracle-12c:sequelize"
     ports:
       - 1529:1521
     volumes:
