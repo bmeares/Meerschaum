@@ -484,12 +484,14 @@ def filter_existing(
 
     ### begin is the oldest data in the new dataframe
     dt_col = self.columns.get('datetime', None)
+    if dt_col is None and begin:
+        dt_col = self.guess_datetime()
     dt_type = self.dtypes.get(dt_col, 'datetime64[ns]') if dt_col else None
     try:
         min_dt_val = df[dt_col].min(skipna=True) if dt_col else None
         min_dt = (
             pd.to_datetime(min_dt_val).to_pydatetime()
-            if 'datetime' in dt_type
+            if min_dt_val is not None and 'datetime' in str(dt_type)
             else min_dt_val
         )
     except Exception as e:
@@ -507,16 +509,20 @@ def filter_existing(
         )
     elif dt_type and 'int' in dt_type.lower():
         begin = min_dt
+    elif dt_col is None:
+        begin = None
 
     ### end is the newest data in the new dataframe
     try:
         max_dt_val = df[dt_col].max(skipna=True) if dt_col else None
         max_dt = (
             pd.to_datetime(max_dt_val).to_pydatetime()
-            if 'datetime' in dt_type
+            if max_dt_val is not None and 'datetime' in str(dt_type)
             else max_dt_val
         )
     except Exception as e:
+        import traceback
+        traceback.print_exc()
         max_dt = None
 
     if not ('datetime' in str(type(max_dt))) or str(min_dt) == 'NaT':
