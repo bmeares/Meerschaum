@@ -57,7 +57,7 @@ setup_kw_args = {
     },
     'zip_safe'                      : True,
     'package_data'                  : {'' : ['*.html', '*.css', '*.js', '*.png', '*.ico']},
-    'python_requires'               : '>=3.8',
+    'python_requires'               : '>=3.7',
     'classifiers'                   : [
         "Development Status :: 5 - Production/Stable",
         "Intended Audience :: System Administrators",
