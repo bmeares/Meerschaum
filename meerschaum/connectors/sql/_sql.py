@@ -613,11 +613,10 @@ def to_sql(
     if self.flavor not in json_flavors:
         json_cols = get_json_cols(df)
         if json_cols:
-            df = df.copy()
             for col in json_cols:
                 df[col] = df[col].apply(
                     (
-                        lambda x: json.dumps(x)
+                        lambda x: json.dumps(x, default=str, sort_keys=True)
                         if not isinstance(x, Hashable)
                         else x
                     )
