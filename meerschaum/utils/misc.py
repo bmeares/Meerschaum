@@ -43,7 +43,6 @@ def add_method_to_class(
     
     @wraps(func)
     def wrapper(self, *args, **kw):
-        print(self, args, kw)
         return func(*args, **kw)
 
     if method_name is None:
@@ -655,7 +654,8 @@ def round_time(
 
 def parse_df_datetimes(
         df: 'pd.DataFrame',
-        debug: bool = False
+        ignore_cols: Optional[Iterable[str]] = None,
+        debug: bool = False,
     ) -> 'pd.DataFrame':
     """
     Parse a pandas DataFrame for datetime columns and cast as datetimes.
@@ -664,13 +664,17 @@ def parse_df_datetimes(
     ----------
     df: pd.DataFrame
         The pandas DataFrame to parse.
+
+    ignore_cols: Optional[Iterable[str]], default None
+        If provided, do not attempt to coerce these columns as datetimes.
         
     debug: bool, default False
         Verbosity toggle.
 
     Returns
     -------
-    A new pandas DataFrame with the determined datetime columns (usually ISO strings) cast as datetimes.
+    A new pandas DataFrame with the determined datetime columns
+    (usually ISO strings) cast as datetimes.
 
     Examples
     --------
@@ -689,8 +693,9 @@ def parse_df_datetimes(
 
     """
     from meerschaum.utils.packages import import_pandas
-    ### import pandas (or pandas replacement)
     from meerschaum.utils.debug import dprint
+    from meerschaum.utils.warnings import warn
+    import traceback
     pd = import_pandas()
 
     ### if df is a dict, build DataFrame
@@ -705,25 +710,46 @@ def parse_df_datetimes(
             dprint(f"df is empty. Returning original DataFrame without casting datetime columns...")
         return df
 
+    ignore_cols = ignore_cols or []
+    cols_to_inspect = [col for col in df.columns if col not in ignore_cols]
+
+    if len(cols_to_inspect) == 0:
+        if debug:
+            dprint(f"All columns are ignored, skipping datetime detection...")
+        return df
+
     ### apply regex to columns to determine which are ISO datetimes
     iso_dt_regex = r'\d{4}-\d{2}-\d{2}.\d{2}\:\d{2}\:\d+'
-    dt_mask = df.astype(str).apply(
+    dt_mask = df[cols_to_inspect].astype(str).apply(
         lambda s: s.str.match(iso_dt_regex).all()
     )
 
     ### list of datetime column names
-    datetimes = list(df.loc[:, dt_mask])
+    datetime_cols = [col for col in df[cols_to_inspect].loc[:, dt_mask]]
+    if not datetime_cols:
+        if debug:
+            dprint("No columns detected as datetimes, returning...")
+        return df
+
     if debug:
-        dprint("Converting columns to datetimes: " + str(datetimes))
+        dprint("Converting columns to datetimes: " + str(datetime_cols))
 
-    ### apply to_datetime
-    df[datetimes] = df[datetimes].apply(pd.to_datetime)
+    try:
+        df[datetime_cols] = df[datetime_cols].apply(pd.to_datetime, utc=True)
+    except Exception as e:
+        warn(
+            f"Unable to apply `pd.to_datetime` to {items_str(datetime_cols)}:\n"
+            + f"{traceback.format_exc()}"
+        )
 
-    ### strip timezone information
-    for dt in datetimes:
-        df[dt] = df[dt].dt.tz_localize(None)
+    for dt in datetime_cols:
+        try:
+            df[dt] = df[dt].dt.tz_localize(None)
+        except Exception as e:
+            warn(f"Unable to convert column '{dt}' to naive datetime:\n{traceback.format_exc()}")
 
     return df
+
 
 def timed_input(
         seconds: int = 10,
@@ -1923,3 +1949,151 @@ def get_json_cols(df: 'pd.DataFrame') -> List[str]:
             not isinstance(df.loc[ix][col], Hashable)
         )
     ]
+
+
+def enforce_dtypes(
+        df: 'pd.DataFrame',
+        dtypes: Dict[str, str],
+        debug: bool = False,
+    ) -> 'pd.DataFrame':
+    """
+    Enforce the `dtypes` dictionary on a DataFrame.
+
+    Parameters
+    ----------
+    df: pd.DataFrame
+        The DataFrame on which to enforce dtypes.
+
+    dtypes: Dict[str, str]
+        The data types to attempt to enforce on the DataFrame.
+
+    debug: bool, default False
+        Verbosity toggle.
+
+    Returns
+    -------
+    The Pandas DataFrame with the types enforced.
+    """
+    import json
+    import traceback
+    from meerschaum.utils.debug import dprint
+    from meerschaum.utils.warnings import warn
+    from meerschaum.utils.formatting import pprint
+    from meerschaum.config.static import STATIC_CONFIG
+    from meerschaum.utils.packages import import_pandas
+    df_dtypes = {c: str(t) for c, t in df.dtypes.items()}
+    if len(df_dtypes) == 0:
+        if debug:
+            dprint("Incoming DataFrame has no columns. Skipping enforcement...")
+        return df
+
+    pipe_pandas_dtypes = {
+        col: to_pandas_dtype(typ)
+        for col, typ in dtypes.items()
+    }
+    json_cols = [
+        col
+        for col, typ in dtypes.items()
+        if typ == 'json'
+    ]
+    if debug:
+        dprint(f"Desired data types:")
+        pprint(dtypes)
+        dprint(f"Data types for incoming DataFrame:")
+        pprint(df_dtypes)
+
+    if json_cols and len(df) > 0:
+        if debug:
+            dprint(f"Checking columns for JSON encoding: {json_cols}")
+        for col in json_cols:
+            if col in df.columns:
+                try:
+                    df[col] = df[col].apply(
+                        (
+                            lambda x: (
+                                json.loads(x)
+                                if isinstance(x, str)
+                                else x
+                            )
+                        )
+                    )
+                except Exception as e:
+                    if debug:
+                        dprint(f"Unable to parse column '{col}' as JSON:\n{e}")
+
+    if df_dtypes == pipe_pandas_dtypes:
+        if debug:
+            dprint(f"Data types match. Exiting enforcement...")
+        return df
+
+    common_dtypes = {}
+    common_diff_dtypes = {}
+    for col, typ in pipe_pandas_dtypes.items():
+        if col in df_dtypes:
+            common_dtypes[col] = typ
+            if typ != df_dtypes[col]:
+                common_diff_dtypes[col] = df_dtypes[col]
+
+    if debug:
+        dprint(f"Common columns with different dtypes:")
+        pprint(common_diff_dtypes)
+
+    detected_dt_cols = {}
+    for col, typ in common_diff_dtypes.items():
+        if 'datetime' in typ and 'datetime' in common_dtypes[col]:
+            df_dtypes[col] = typ
+            detected_dt_cols[col] = (common_dtypes[col], common_diff_dtypes[col])
+    for col in detected_dt_cols:
+        del common_diff_dtypes[col]
+
+    if debug:
+        dprint(f"Common columns with different dtypes (after dates):")
+        pprint(common_diff_dtypes)
+
+    if df_dtypes == pipe_pandas_dtypes:
+        if debug:
+            dprint(
+                "The incoming DataFrame has mostly the same types, skipping enforcement."
+                + f"The only detected difference was in the following datetime columns.\n"
+                + "    Timezone information may be stripped."
+            )
+            pprint(detected_dt_cols)
+        return df
+
+    if set(common_dtypes) == set(df_dtypes):
+        min_ratio = STATIC_CONFIG['pipes']['dtypes']['min_ratio_columns_changed_for_full_astype']
+        if (
+            len(common_diff_dtypes) >= int(len(common_dtypes) * min_ratio)
+        ):
+            if debug:
+                dprint(f"Enforcing dtypes columns on incoming DataFrame...")
+                pprint(common_dtypes)
+            try:
+                return df[
+                    list(common_dtypes.keys())
+                ].astype({
+                    col: typ
+                    for col, typ in pipe_pandas_dtypes.items()
+                    if col in common_dtypes
+                })
+            except Exception as e:
+                if debug:
+                    dprint(f"Encountered an error when enforcing data types:\n{e}")
+    
+    for d in common_diff_dtypes:
+        t = common_dtypes[d]
+        if debug:
+            dprint(f"Casting column {d} to dtype {t}.")
+        try:
+            df[d] = df[d].astype(t)
+        except Exception as e:
+            if debug:
+                dprint(f"Encountered an error when casting column {d} to type {t}:\n{e}")
+            if 'int' in str(t.lower()):
+                try:
+                    df[d] = df[d].astype('float64').astype(t)
+                except Exception as e:
+                    if debug:
+                        dprint(f"Was unable to convert to float then {t}.")
+    return df
+
