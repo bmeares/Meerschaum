@@ -416,6 +416,13 @@ def guess_datetime(self) -> Union[str, None]:
     """
     Try to determine a pipe's datetime column.
     """
+    dtypes = self.dtypes
+
+    ### Abort if the user explictly disallows a datetime index.
+    if 'datetime' in dtypes:
+        if dtypes['datetime'] is None:
+            return None
+
     dt_cols = [
         col for col, typ in self.dtypes.items()
         if str(typ).startswith('datetime')

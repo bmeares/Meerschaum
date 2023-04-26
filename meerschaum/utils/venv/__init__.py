@@ -73,8 +73,6 @@ def activate_venv(
     with LOCKS['active_venvs']:
         if thread_id not in threads_active_venvs:
             threads_active_venvs[thread_id] = {}
-        if debug:
-            dprint(f"Activating virtual environment '{venv}'...", color=color)
         active_venvs.add(venv)
         if venv not in threads_active_venvs[thread_id]:
             threads_active_venvs[thread_id][venv] = 1
@@ -144,12 +142,7 @@ def deactivate_venv(
             active_venvs.remove(venv)
         return True
 
-    if debug:
-        from meerschaum.utils.debug import dprint
-
     if previously_active_venvs and venv in previously_active_venvs and not force:
-        if debug:
-            dprint(f"Ignore call to deactivate virtual environment '{venv}'...", color=color)
         return True
 
     with LOCKS['active_venvs']:
@@ -157,12 +150,6 @@ def deactivate_venv(
             new_count = threads_active_venvs[thread_id][venv] - 1
             if new_count > 0 and not force:
                 threads_active_venvs[thread_id][venv] = new_count
-                if debug:
-                    dprint(
-                        f"Decremented venv '{venv}' to {new_count} on thread {thread_id}, "
-                        + "staying active...",
-                        color = color,
-                    )
                 return True
             else:
                 del threads_active_venvs[thread_id][venv]
@@ -172,12 +159,6 @@ def deactivate_venv(
                 if other_thread_id == thread_id:
                     continue
                 if venv in other_venvs:
-                    if debug:
-                        dprint(
-                            f"Venv '{venv}' is still being used by other threads,"
-                            + "keeping active...",
-                            color = color,
-                        )
                     return True
         else:
             to_delete = [other_thread_id for other_thread_id in threads_active_venvs]
@@ -189,9 +170,6 @@ def deactivate_venv(
 
     if sys.path is None:
         return False
-
-    if debug:
-        dprint(f"Deactivating virtual environment '{venv}'...", color=color)
 
     target = str(venv_target_path(venv, allow_nonexistent=force, debug=debug))
     with LOCKS['sys.path']:
@@ -229,9 +207,6 @@ def is_venv_active(
     A bool indicating whether the virtual environment `venv` is active.
 
     """
-    if debug:
-        from meerschaum.utils.debug import dprint
-        dprint(f"Checking if virtual environment '{venv}' is active.", color=color)
     return venv in active_venvs
 
 

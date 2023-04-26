@@ -15,13 +15,10 @@ def enforce_dtypes(self, df: 'pd.DataFrame', debug: bool=False) -> 'pd.DataFrame
     If the pipe does not exist and dtypes are not set, return the dataframe.
 
     """
-    import json
-    from meerschaum.utils.debug import dprint
     from meerschaum.utils.warnings import warn
-    from meerschaum.utils.formatting import pprint
-    from meerschaum.config.static import STATIC_CONFIG
+    from meerschaum.utils.debug import dprint
+    from meerschaum.utils.misc import parse_df_datetimes, enforce_dtypes as _enforce_dtypes
     from meerschaum.utils.packages import import_pandas
-    from meerschaum.utils.misc import parse_df_datetimes, to_pandas_dtype
     pd = import_pandas(debug=debug)
     if df is None:
         if debug:
@@ -31,16 +28,34 @@ def enforce_dtypes(self, df: 'pd.DataFrame', debug: bool=False) -> 'pd.DataFrame
             )
         return df
 
+    pipe_dtypes = self.dtypes
+
     try:
         if isinstance(df, str):
-            df = parse_df_datetimes(pd.read_json(df), debug=debug)
+            df = parse_df_datetimes(
+                pd.read_json(df),
+                ignore_cols = [
+                    col
+                    for col, dtype in pipe_dtypes.items()
+                    if 'datetime' not in str(dtype)
+                ],
+                debug = debug,
+            )
         else:
-            df = parse_df_datetimes(df, debug=debug)
+            df = parse_df_datetimes(
+                df,
+                ignore_cols = [
+                    col
+                    for col, dtype in pipe_dtypes.items()
+                    if 'datetime' not in str(dtype)
+                ],
+                debug = debug,
+            )
     except Exception as e:
         warn(f"Unable to cast incoming data as a DataFrame...:\n{e}")
         return df
 
-    if not self.dtypes:
+    if not pipe_dtypes:
         if debug:
             dprint(
                 f"Could not find dtypes for {self}.\n"
@@ -48,122 +63,7 @@ def enforce_dtypes(self, df: 'pd.DataFrame', debug: bool=False) -> 'pd.DataFrame
             )
         return df
 
-    df_dtypes = {c: str(t) for c, t in df.dtypes.items()}
-    if len(df_dtypes) == 0:
-        if debug:
-            dprint("Incoming DataFrame has no columns. Skipping enforcement...")
-        return df
-
-    pipe_dtypes = self.dtypes
-    pipe_pandas_dtypes = {
-        col: to_pandas_dtype(typ)
-        for col, typ in self.dtypes.items()
-    }
-    json_cols = [
-        col
-        for col, typ in pipe_dtypes.items()
-        if typ == 'json'
-    ]
-    if debug:
-        dprint(f"Data types for {self}:")
-        pprint(pipe_dtypes)
-        dprint(f"Data types for incoming DataFrame:")
-        pprint(df_dtypes)
-
-    if json_cols and len(df) > 0:
-        if debug:
-            dprint(f"Checking columns for JSON encoding: {json_cols}")
-        for col in json_cols:
-            if col in df.columns:
-                try:
-                    df[col] = df[col].apply(
-                        (
-                            lambda x: (
-                                json.loads(x)
-                                if isinstance(x, str)
-                                else x
-                            )
-                        )
-                    )
-                except Exception as e:
-                    if debug:
-                        dprint(f"Unable to parse column '{col}' as JSON:\n{e}")
-
-    if df_dtypes == pipe_pandas_dtypes:
-        if debug:
-            dprint(f"Data types match. Exiting enforcement...")
-        return df
-
-    common_dtypes = {}
-    common_diff_dtypes = {}
-    for col, typ in pipe_pandas_dtypes.items():
-        if col in df_dtypes:
-            common_dtypes[col] = typ
-            if typ != df_dtypes[col]:
-                common_diff_dtypes[col] = df_dtypes[col]
-
-    if debug:
-        dprint(f"Common columns with different dtypes:")
-        pprint(common_diff_dtypes)
-
-    detected_dt_cols = {}
-    for col, typ in common_diff_dtypes.items():
-        if 'datetime' in typ and 'datetime' in common_dtypes[col]:
-            df_dtypes[col] = typ
-            detected_dt_cols[col] = (common_dtypes[col], common_diff_dtypes[col])
-    for col in detected_dt_cols:
-        del common_diff_dtypes[col]
-
-    if debug:
-        dprint(f"Common columns with different dtypes (after dates):")
-        pprint(common_diff_dtypes)
-
-    if df_dtypes == pipe_pandas_dtypes:
-        if debug:
-            dprint(
-                "The incoming DataFrame has mostly the same types as {self}, skipping enforcement."
-                + f"The only detected difference was in the following datetime columns.\n"
-                + "    Timezone information may be stripped."
-            )
-            pprint(detected_dt_cols)
-        return df
-
-    if set(common_dtypes) == set(df_dtypes):
-        min_ratio = STATIC_CONFIG['pipes']['dtypes']['min_ratio_columns_changed_for_full_astype']
-        if (
-            len(common_diff_dtypes) >= int(len(common_dtypes) * min_ratio)
-        ):
-            if debug:
-                dprint(f"Enforcing data types for {self} on incoming DataFrame...")
-            try:
-                return df[
-                    list(common_dtypes.keys())
-                ].astype({
-                    col: typ
-                    for col, typ in pipe_pandas_dtypes.items()
-                    if col in common_dtypes
-                })
-            except Exception as e:
-                if debug:
-                    dprint(f"Encountered an error when enforcing data types for {self}:\n{e}")
-    
-    new_df = df.copy()
-    for d in common_diff_dtypes:
-        t = common_dtypes[d]
-        if debug:
-            dprint(f"Casting column {d} to dtype {t}.")
-        try:
-            new_df[d] = new_df[d].astype(t)
-        except Exception as e:
-            if debug:
-                dprint(f"Encountered an error when casting column {d} to type {t}:\n{e}")
-            if 'int' in str(t.lower()):
-                try:
-                    new_df[d] = new_df[d].astype('float64').astype(t)
-                except Exception as e:
-                    if debug:
-                        dprint(f"Was unable to convert to float then {t}.")
-    return new_df
+    return _enforce_dtypes(df, pipe_dtypes, debug=debug)
 
 
 def infer_dtypes(self, persist: bool=False, debug: bool=False) -> Dict[str, Any]:

@@ -4,6 +4,64 @@
 
 This is the current release cycle, so stay tuned for future releases!
 
+### v1.6.4
+
+- **Allow for mixed UTC offsets in datetimes.**  
+  UTC offsets are now applied to datetime values before timezone information is stripped, which should now reflect accurate values. This patch also fixes edge cases when different offsets are synced within the same transcation.
+
+  ```python
+  import meerschaum as mrsm
+  pipe = mrsm.Pipe('a', 'b', columns={'datetime': 'dt'})
+  pipe.sync([
+      {'dt': '2023-01-01 00:00:00+00:00'},
+      {'dt': '2023-01-02 00:00:00+01:00'},
+  ])
+  pipe.get_data().to_dict(orient=records)
+  # [
+  #     {'dt': datetime.datetime(2023, 1, 1)},
+  #     {'dt': datetime.datetime(2023, 1, 1, 23, 0)}
+  # ]
+  ```
+
+- **Allow skipping datetime detection.**  
+  The automatic datetime detection feature now respects a pipe's `dtypes`; columns that aren't of type `datetime64[ns]` will be ignored.
+
+  ```python
+  import meerschaum as mrsm
+  pipe = mrsm.Pipe('a', 'b', dtypes={'not-date': 'str'})
+  pipe.sync([
+      {'not-date': '2023-01-01 00:00:00'}
+  ])
+  pipe.get_data().to_dict(orient=records)
+  # [
+  #     {'not-date': '2023-01-01 00:00:00'}
+  # ]
+  ```
+
+- **Added utility method `enforce_dtypes()`.**  
+  The DataFrame data type enforcement logic of `pipe.enforce_dtypes()` has been exposed as `meerschaum.utils.misc.enforce_dtypes()`:
+
+  ```python
+  from meerschaum.utils.misc import enforce_dtypes
+  import pandas as pd
+  df = pd.DataFrame([{'a': '1'}])
+  enforce_dtypes(df, {'a': 'Int64'}).dtypes
+  # a    Int64
+  # dtype: object
+  ```
+
+- **Performance improvements.**  
+  Some of the unnecessarily immutable transformations have been replaced with more memory- and compute-efficient in-place operations. Other small improvements like better caching should also speed things up.
+
+- **Removed noise from debug output.**  
+  The virtual environment debug messages have been removed to make `--debug` easier to read.
+
+- **Better handle inferred datetime index.**  
+  The inferred datetime index feature may now be disabled by setting `datetime` to `None`. Improvements were made to be handle incorrectly identified indices.
+
+- **Improve dynamic dtypes for SQLite.**  
+  SQLite doesn't allow for modifying column types but is usually dynamic with data types. A few edge cases have been solved with a workaround for altering the table's definition.
+
 ### v1.6.3
 
 - **Fixed an issue with background jobs.**  

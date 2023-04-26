@@ -18,7 +18,7 @@ def run_before_and_after(flavor: str):
     yield
 
 
-@pytest.mark.parametrize("flavor", list(all_pipes.keys()))
+@pytest.mark.parametrize("flavor", sorted(list(all_pipes.keys())))
 def test_register_and_delete(flavor: str):
     pipe = all_pipes[flavor][0]
     params = pipe.parameters.copy()
@@ -36,7 +36,7 @@ def test_register_and_delete(flavor: str):
     assert success, msg
     assert pipe.parameters is not None
 
-@pytest.mark.parametrize("flavor", list(all_pipes.keys()))
+@pytest.mark.parametrize("flavor", sorted(list(all_pipes.keys())))
 def test_drop_and_sync(flavor: str):
     pipe = all_pipes[flavor][0]
     pipe.drop()
@@ -56,7 +56,7 @@ def test_drop_and_sync(flavor: str):
     assert data is not None
     assert len(data) == 2
 
-@pytest.mark.parametrize("flavor", list(all_pipes.keys()))
+@pytest.mark.parametrize("flavor", sorted(list(all_pipes.keys())))
 def test_drop_and_sync_duplicate(flavor: str):
     pipe = all_pipes[flavor][0]
     pipe.drop(debug=debug)
@@ -130,7 +130,7 @@ def test_drop_and_sync_remote(flavor: str):
     assert df.to_dict(orient='records')[0]['foo'] == 'baz'
 
 
-@pytest.mark.parametrize("flavor", list(all_pipes.keys()))
+@pytest.mark.parametrize("flavor", sorted(list(all_pipes.keys())))
 def test_sync_engine(flavor: str):
     ### Weird concurrency issues with our tests.
     if flavor == 'duckdb':
@@ -159,7 +159,7 @@ def test_sync_engine(flavor: str):
     assert success, msg
 
 
-@pytest.mark.parametrize("flavor", list(all_pipes.keys()))
+@pytest.mark.parametrize("flavor", sorted(list(all_pipes.keys())))
 def test_target_mutable(flavor: str):
     conn = conns[flavor]
     if conn.type != 'sql':
@@ -281,7 +281,7 @@ def test_dtype_enforcement(flavor: str):
         assert str(typ) == pipe_dtype
 
 
-@pytest.mark.parametrize("flavor", list(all_pipes.keys()))
+@pytest.mark.parametrize("flavor", sorted(list(all_pipes.keys())))
 def test_temporary_pipes(flavor: str):
     """
     Verify that `temporary=True` will not create instance tables.
@@ -316,7 +316,7 @@ def test_temporary_pipes(flavor: str):
     assert not table_exists('plugins', conn, debug=debug)
 
 
-@pytest.mark.parametrize("flavor", list(all_pipes.keys()))
+@pytest.mark.parametrize("flavor", sorted(list(all_pipes.keys())))
 def test_infer_json_dtype(flavor: str):
     """
     Ensure that new pipes with complex columns (dict or list) as enforced as JSON. 
@@ -340,7 +340,7 @@ def test_infer_json_dtype(flavor: str):
     assert success, msg
 
 
-@pytest.mark.parametrize("flavor", list(all_pipes.keys()))
+@pytest.mark.parametrize("flavor", sorted(list(all_pipes.keys())))
 def test_force_json_dtype(flavor: str):
     """
     Ensure that new pipes with complex columns (dict or list) as enforced as JSON. 
@@ -365,7 +365,7 @@ def test_force_json_dtype(flavor: str):
     assert success, msg
 
 
-@pytest.mark.parametrize("flavor", list(all_pipes.keys()))
+@pytest.mark.parametrize("flavor", sorted(list(all_pipes.keys())))
 def test_id_index_col(flavor: str):
     """
     Verify that the ID column is able to be synced.
@@ -401,3 +401,103 @@ def test_id_index_col(flavor: str):
     assert len(small_df) == len(new_docs)
     small_synced_docs = small_df.to_dict(orient='records')
     assert small_synced_docs == new_docs
+
+
+@pytest.mark.parametrize("flavor", sorted(list(all_pipes.keys())))
+def test_utc_offset_datetimes(flavor: str):
+    """
+    Verify that we are able to sync rows with UTC offset datetimes.
+    """
+    conn = conns[flavor]
+    pipe = Pipe(
+        'test_utc_offset', 'datetimes',
+        instance = conn,
+        columns = {'datetime': 'dt'},
+    )
+    pipe.delete()
+
+    docs = [
+        {'dt': '2023-01-01 00:00:00+00:00'},
+        {'dt': '2023-01-02 00:00:00+01:00'},
+    ]
+
+    expected_docs = [
+        {'dt': datetime.datetime(2023, 1, 1)},
+        {'dt': datetime.datetime(2023, 1, 1, 23, 0, 0)}
+    ]
+
+    success, msg = pipe.sync(docs, debug=debug)
+    assert success, msg
+    df = pipe.get_data(debug=debug)
+    synced_docs = df.to_dict(orient='records')
+    assert synced_docs == expected_docs
+
+
+@pytest.mark.parametrize("flavor", sorted(list(all_pipes.keys())))
+def test_ignore_datetime_conversion(flavor: str):
+    """
+    If the user specifies, skip columns from being detected as datetimes.
+    """
+    conn = conns[flavor]
+    pipe = Pipe(
+        'test_utc_offset', 'datetimes', 'ignore',
+        instance = conn,
+        dtypes = {
+            'dt': 'str',
+        },
+    )
+    pipe.delete()
+
+    docs = [
+        {'dt': '2023-01-01 00:00:00+00:00'},
+        {'dt': '2023-01-02 00:00:00+01:00'},
+    ]
+
+    expected_docs = [
+        {'dt': '2023-01-01 00:00:00+00:00'},
+        {'dt': '2023-01-02 00:00:00+01:00'},
+    ]
+
+    success, msg = pipe.sync(docs, debug=debug)
+    assert success, msg
+    df = pipe.get_data(debug=debug)
+    synced_docs = df.to_dict(orient='records')
+    assert synced_docs == expected_docs
+
+
+@pytest.mark.parametrize("flavor", sorted(list(all_pipes.keys())))
+def test_no_indices_inferred_datetime_to_text(flavor: str):
+    """
+    Verify that changing dtypes are handled.
+    """
+    conn = conns[flavor]
+    pipe = Pipe(
+        'test_no_indices', 'datetimes', 'text',
+        instance = conn,
+    )
+    pipe.delete()
+    docs = [
+        {'fake-dt': '2023-01-01', 'a': 1},
+    ]
+    success, msg = pipe.sync(docs, debug=debug)
+    assert success, msg
+
+    docs = [
+        {'fake-dt': '2023-01-01', 'a': 1},
+        {'fake-dt': '2023-01-02', 'a': 2},
+    ]
+    success, msg = pipe.sync(docs, debug=debug)
+    assert success, msg
+    df = pipe.get_data()
+    assert len(df) == len(docs)
+
+    docs = [
+        {'fake-dt': '2023-01-01', 'a': 1},
+        {'fake-dt': '2023-01-02', 'a': 2},
+        {'fake-dt': 'foo', 'a': 3},
+    ]
+    success, msg = pipe.sync(docs, debug=debug)
+    assert success, msg
+    df = pipe.get_data()
+    assert len(df) == len(docs)
+

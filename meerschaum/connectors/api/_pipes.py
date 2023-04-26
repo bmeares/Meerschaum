@@ -336,7 +336,15 @@ def get_pipe_data(
     except Exception as e:
         warn(str(e))
         return None
-    df = parse_df_datetimes(df, debug=debug)
+    df = parse_df_datetimes(
+        df,
+        ignore_cols = [
+            col
+            for col, dtype in pipe.dtypes.items()
+            if 'datetime' not in str(dtype)
+        ],
+        debug = debug,
+    )
     return df
 
 

@@ -59,16 +59,10 @@ export $MRSM_URIS
 
 $PYTHON_BIN -m meerschaum show connectors
 $PYTHON_BIN -m meerschaum start connectors $MRSM_CONNS
-
-export ff=""
-if [ "$2" == "--ff" ]; then
-  export ff="--ff"
-fi
-
 ### Execute the pytest tests.
 $PYTHON_BIN -m pytest \
   --durations=0 \
-  --ignore=portable/ --ignore=test_root/ --ignore=tests/data/ --ignore=docs/ $ff; rc="$?"
+  --ignore=portable/ --ignore=test_root/ --ignore=tests/data/ --ignore=docs/ --ff; rc="$?"
 
 ### Cleanup
 if [ "$2" == "rm" ]; then
