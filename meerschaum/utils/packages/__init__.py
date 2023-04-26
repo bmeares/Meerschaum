@@ -89,8 +89,6 @@ def get_module_path(
                 import_name, venv=venv, debug=debug,
                 _try_install_name_on_fail=False
             )
-        if debug:
-            dprint(f"No candidates found for '{import_name}' in venv '{venv}'.", color=False)
         return None
 
     specs_paths = []
@@ -99,11 +97,6 @@ def get_module_path(
         if spec is not None:
             return candidate_path
     
-    if debug:
-        dprint(
-            f"Was unable to find a file location for '{import_name}' in venv '{venv}'.",
-            color = False,
-        )
     return None
 
 
@@ -207,11 +200,7 @@ def manually_import_module(
         ) if root_spec is not None and root_spec.origin is not None else None
     )
 
-    if debug:
-        dprint(f'root_name: {root_name}', color=color)
     if _version is not None:
-        if debug:
-            dprint(f'_version: {_version}', color=color)
         if check_update:
             if need_update(
                 None,
@@ -394,8 +383,6 @@ def determine_version(
         _version = _found_versions[0]
         with _locks['import_versions']:
             import_versions[venv][import_name] = _version
-        if debug:
-            print(f"Found version {_version} for {import_name}.")
         return _found_versions[0]
 
     if not _found_versions:
@@ -563,8 +550,6 @@ def need_update(
         _checked_for_updates.add(install_name)
 
     _install_no_version = get_install_no_version(install_name)
-    if debug:
-        dprint(f"_install_no_version: {_install_no_version}", color=color)
     required_version = install_name.replace(_install_no_version, '')
     if ']' in required_version:
         required_version = required_version.split(']')[1]
@@ -573,9 +558,6 @@ def need_update(
     if not required_version and not check_pypi:
         return False
 
-    if debug:
-        dprint(f"required_version: {required_version}", color=color)
-
     try:
         if not version:
             if not _run_determine_version:
@@ -583,8 +565,6 @@ def need_update(
                     pathlib.Path(package.__file__),
                     import_name=root_name, warn=False, debug=debug
                 )
-        if debug:
-            dprint(f"version: {version}", color=color)
         if version is None:
             return False
     except Exception as e:
@@ -629,10 +609,6 @@ def need_update(
 
     ### Compare PyPI's version with our own.
     if result is not None:
-        if debug:
-            dprint(f"Available version: {result.available_version}", color=color)
-            dprint(f"Required version: {required_version}", color=color)
-
         ### We have a result from PyPI and a stated required version.
         if required_version:
             try:
@@ -1521,12 +1497,6 @@ def is_installed(
             )
         except (ModuleNotFoundError, ValueError, AttributeError, TypeError) as e:
             spec_path = None
-
-        if debug:
-            if spec_path is not None:
-                dprint(f"Found a path for '{root_name}':\n{spec_path}", color=False)
-            else:
-                dprint(f"Could not find a path for '{root_name}':\n{spec_path}", color=False)
 
         found = (
             not need_update(

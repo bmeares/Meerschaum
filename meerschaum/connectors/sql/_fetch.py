@@ -65,7 +65,15 @@ def fetch(
     ### if sqlite, parse for datetimes
     if self.flavor == 'sqlite':
         from meerschaum.utils.misc import parse_df_datetimes
-        df = parse_df_datetimes(df, debug=debug)
+        df = parse_df_datetimes(
+            df,
+            ignore_cols = [
+                col
+                for col, dtype in pipe.dtypes.items()
+                if 'datetime' not in str(dtype)
+            ],
+            debug = debug,
+        )
     return df
 
 
