@@ -637,8 +637,10 @@ def to_sql(
     from meerschaum.utils.sql import sql_item_name, table_exists, json_flavors, truncate_item_name
     from meerschaum.utils.misc import get_json_cols, is_bcp_available
     from meerschaum.connectors.sql._create_engine import flavor_configs
-    from meerschaum.utils.packages import attempt_import
+    from meerschaum.utils.packages import attempt_import, import_pandas
     sqlalchemy = attempt_import('sqlalchemy', debug=debug)
+    pd = import_pandas()
+    is_dask = 'dask' in pd.__name__
 
     stats = {'target': name, }
     ### resort to defaults if None
@@ -671,6 +673,14 @@ def to_sql(
         print(msg, end="", flush=True)
     stats['num_rows'] = len(df)
 
+    ### Check if the name is too long.
+    truncated_name = truncate_item_name(name, self.flavor)
+    if name != truncated_name:
+        warn(
+            f"Table '{name}' is too long for '{self.flavor}',"
+            + f" will instead create the table '{truncated_name}'."
+        )
+
     ### filter out non-pandas args
     import inspect
     to_sql_params = inspect.signature(df.to_sql).parameters
@@ -678,6 +688,15 @@ def to_sql(
     for k, v in kw.items():
         if k in to_sql_params:
             to_sql_kw[k] = v
+
+    to_sql_kw.update({
+        'name': truncated_name,
+        ('con' if not is_dask else 'uri'): (self.engine if not is_dask else self.URI),
+        'index': index,
+        'if_exists': if_exists,
+        'method': method,
+        'chunksize': chunksize,
+    })
 
     if self.flavor == 'oracle':
         ### For some reason 'replace' doesn't work properly in pandas,
@@ -711,26 +730,11 @@ def to_sql(
                     )
                 )
 
-    ### Check if the name is too long.
-    truncated_name = truncate_item_name(name, self.flavor)
-    if name != truncated_name:
-        warn(
-            f"Table '{name}' is too long for '{self.flavor}',"
-            + f" will instead create the table '{truncated_name}'."
-        )
 
     try:
         with warnings.catch_warnings():
             warnings.filterwarnings('ignore', 'case sensitivity issues')
-            df.to_sql(
-                name = truncated_name,
-                con = self.engine,
-                index = index,
-                if_exists = if_exists,
-                method = method,
-                chunksize = chunksize,
-                **to_sql_kw
-            )
+            df.to_sql(**to_sql_kw)
         success = True
     except Exception as e:
         if not silent:
