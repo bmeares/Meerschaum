@@ -707,7 +707,9 @@ def parse_df_datetimes(
         npartitions = chunksize_to_npartitions(chunksize)
 
     ### if df is a dict, build DataFrame
-    if not isinstance(df, pd.DataFrame):
+    if isinstance(df, pd.DataFrame):
+        pdf = df
+    else:
         if debug:
             dprint(f"df is of type '{type(df)}'. Casting to DataFrame...")
 
