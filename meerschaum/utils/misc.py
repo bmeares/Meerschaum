@@ -732,7 +732,7 @@ def parse_df_datetimes(
             else:
                 raise Exception("Can only parse dictionaries or lists of dictionaries with Dask.")
             pandas = attempt_import('pandas')
-            pdf = pandas.DataFrame(df.partitions[0])
+            pdf = df.partitions[0].compute()
 
         else:
             df = pd.DataFrame(df)
@@ -744,7 +744,13 @@ def parse_df_datetimes(
             dprint(f"df is empty. Returning original DataFrame without casting datetime columns...")
         return df
 
-    ignore_cols = ignore_cols or []
+    ignore_cols = set(
+        (ignore_cols or []) + [
+            col
+            for col, dtype in pdf.dtypes.items() 
+            if 'datetime' in str(dtype)
+        ]
+    )
     cols_to_inspect = [col for col in pdf.columns if col not in ignore_cols]
 
     if len(cols_to_inspect) == 0:
@@ -1068,7 +1074,11 @@ def filter_unseen_df(
 
     if is_dask:
         return new_df[
-            ~new_df.fillna(NA).apply(tuple, 1).compute().isin(old_df.fillna(NA).apply(tuple, 1).compute())
+            ~(
+                new_df.fillna(NA).apply(tuple, 1, meta=(None, 'object')).compute()
+            ).isin(
+                old_df.fillna(NA).apply(tuple, 1, meta=(None, 'object')).compute()
+            )
         ].reset_index(drop=True)[list(new_df_dtypes.keys())]
 
     return new_df[
@@ -1931,7 +1941,7 @@ def to_pandas_dtype(dtype: str) -> str:
     """
     Cast a supported Meerschaum dtype to a Pandas dtype.
     """
-    if dtype in ('json', 'str', 'object'):
+    if dtype in ('json', 'str', 'object', 'string'):
         return 'string[pyarrow]'
     if dtype.lower().startswith('int'):
         return 'int64[pyarrow]'
@@ -2247,7 +2257,7 @@ def chunksize_to_npartitions(chunksize: Optional[int]) -> int:
     """
     if chunksize == -1:
         from meerschaum.config import get_config
-        chunksize = get_config('system', 'sql', 'chunksize')
+        chunksize = get_config('system', 'connectors', 'sql', 'chunksize')
     if chunksize is None:
         return 1
     return -1 * chunksize

@@ -3,7 +3,7 @@
 # vim:fenc=utf-8
 
 """
-Enfore data types for a pipe's underlying table.
+Enforce data types for a pipe's underlying table.
 """
 
 from __future__ import annotations

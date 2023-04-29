@@ -575,6 +575,7 @@ def filter_existing(
     )
 
     pd = import_pandas()
+    pandas = attempt_import('pandas')
     is_dask = 'dask' in pd.__name__
     if not isinstance(df, pd.DataFrame):
         df = self.enforce_dtypes(df, chunksize=chunksize, debug=debug)
@@ -588,8 +589,10 @@ def filter_existing(
     dt_type = self.dtypes.get(dt_col, 'datetime64[ns]') if dt_col else None
     try:
         min_dt_val = df[dt_col].min(skipna=True) if dt_col else None
+        if is_dask and min_dt_val is not None:
+            min_dt_val = min_dt_val.compute()
         min_dt = (
-            pd.to_datetime(min_dt_val).to_pydatetime()
+            pandas.to_datetime(min_dt_val).to_pydatetime()
             if min_dt_val is not None and 'datetime' in str(dt_type)
             else min_dt_val
         )
@@ -614,8 +617,10 @@ def filter_existing(
     ### end is the newest data in the new dataframe
     try:
         max_dt_val = df[dt_col].max(skipna=True) if dt_col else None
+        if is_dask and max_dt_val is not None:
+            max_dt_val = max_dt_val.compute()
         max_dt = (
-            pd.to_datetime(max_dt_val).to_pydatetime()
+            pandas.to_datetime(max_dt_val).to_pydatetime()
             if max_dt_val is not None and 'datetime' in str(dt_type)
             else max_dt_val
         )
@@ -660,8 +665,8 @@ def filter_existing(
         **kw
     )
     if debug:
-        dprint("Existing data:\n" + str(backtrack_df), **kw)
-        dprint("Existing dtypes:\n" + str(backtrack_df.dtypes))
+        dprint("Existing data for {self}:\n" + str(backtrack_df), **kw)
+        dprint("Existing dtypes for {self}:\n" + str(backtrack_df.dtypes))
 
     ### Separate new rows from changed ones.
     on_cols = [
@@ -725,10 +730,17 @@ def filter_existing(
     cols = list(backtrack_df.columns)
 
     unseen_df = (
-        joined_df
-        .where(new_rows_mask)
-        .dropna(how='all')[cols]
-        .reset_index(drop=True)
+        (
+            joined_df
+            .where(new_rows_mask)
+            .dropna(how='all')[cols]
+            .reset_index(drop=True)
+        ) if not is_dask else (
+            joined_df
+            .where(new_rows_mask)
+            .dropna(how='all')[cols]
+            .reset_index(drop=True)
+        )
     ) if on_cols else delta_df
 
     ### Rows that have already been inserted but values have changed.
