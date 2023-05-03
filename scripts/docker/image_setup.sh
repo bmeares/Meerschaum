@@ -5,9 +5,9 @@ groupadd -r $MRSM_USER \
   && useradd -r -g $MRSM_USER $MRSM_USER \
   && mkdir -p $MRSM_HOME \
   && mkdir -p $MRSM_WORK_DIR \
-  && chown -R $MRSM_USER $MRSM_HOME \
-  && chown -R $MRSM_USER $MRSM_ROOT_DIR \
-  && chown -R $MRSM_USER $MRSM_WORK_DIR
+  && chown -R $MRSM_USER:$MRSM_USER $MRSM_HOME \
+  && chown -R $MRSM_USER:$MRSM_USER $MRSM_ROOT_DIR \
+  && chown -R $MRSM_USER:$MRSM_USER $MRSM_WORK_DIR
 
 ### We need sudo to switch from root to the user.
 apt-get update && apt-get install sudo -y --no-install-recommends
