@@ -260,8 +260,11 @@ def sync(
             from meerschaum.utils.pool import get_pool
             from meerschaum.utils.misc import get_datetime_bound_from_df
             import threading
-            if p.instance_connector.type == 'sql':
-                engine_pool_size = p.instance_connector.engine.pool.size()
+            engine_pool_size = (
+                p.instance_connector.engine.pool.size()
+                if p.instance_connector.type == 'sql'
+                else 1
+            )
             current_num_threads = len(threading.enumerate())
             workers = kw.get('workers', None)
             desired_workers = min(workers or engine_pool_size, engine_pool_size)
