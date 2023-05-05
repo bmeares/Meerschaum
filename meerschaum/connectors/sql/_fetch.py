@@ -61,20 +61,30 @@ def fetch(
         debug = debug,
         **kw
     )
-    df = self.read(meta_def, chunk_hook=chunk_hook, chunksize=chunksize, debug=debug)
+    chunks = self.read(
+        meta_def,
+        chunk_hook = chunk_hook,
+        chunksize = chunksize,
+        as_iterator = True,
+        debug = debug,
+    )
     ### if sqlite, parse for datetimes
     if self.flavor == 'sqlite':
         from meerschaum.utils.misc import parse_df_datetimes
-        df = parse_df_datetimes(
-            df,
-            ignore_cols = [
-                col
-                for col, dtype in pipe.dtypes.items()
-                if 'datetime' not in str(dtype)
-            ],
-            debug = debug,
+        ignore_cols = [
+            col
+            for col, dtype in pipe.dtypes.items()
+            if 'datetime' not in str(dtype)
+        ]
+        return (
+            parse_df_datetimes(
+                chunk,
+                ignore_cols = ignore_cols,
+                debug = debug,
+            )
+            for chunk in chunks
         )
-    return df
+    return chunks
 
 
 def get_pipe_metadef(
