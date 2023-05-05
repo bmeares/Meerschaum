@@ -59,7 +59,7 @@ default_system_config = {
             'pandas'           : 'pandas',
         },
         'sql' : {
-            'chunksize'        : 1000000,
+            'chunksize'        : 100000,
             'poolclass'        : 'sqlalchemy.pool.QueuePool',
             'create_engine'    : {
                 'method'       : 'multi',

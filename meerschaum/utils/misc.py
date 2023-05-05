@@ -2097,3 +2097,59 @@ def enforce_dtypes(
                         dprint(f"Was unable to convert to float then {t}.")
     return df
 
+
+def get_datetime_bound_from_df(
+        df: Union['pd.DataFrame', dict, list],
+        datetime_column: str,
+        minimum: bool = True,
+    ) -> Union[int, 'datetime.datetime', None]:
+    """
+    Return the minimum or maximum datetime (or integer) from a DataFrame.
+
+    Parameters
+    ----------
+    df: pd.DataFrame
+        The DataFrame, list, or dict which contains the range axis.
+
+    datetime_column: str
+        The name of the datetime (or int) column.
+
+    minimum: bool
+        Whether to return the minimum (default) or maximum value.
+
+    Returns
+    -------
+    The minimum or maximum datetime value in the dataframe, or `None`.
+    """
+    if not datetime_column:
+        return None
+
+    def compare(a, b):
+        if a is None:
+            return b
+        if minimum:
+            return a if a < b else b
+        return a if a > b else b
+
+    if isinstance(df, list):
+        if len(df) == 0:
+            return None
+        best_yet = df[0].get(datetime_column, None)
+        for doc in df:
+            val = doc.get(datetime_column, None)
+            best_yet = compare(best_yet, val)
+        return best_yet
+
+    if isinstance(df, dict):
+        if datetime_column not in df:
+            return None
+        best_yet = df[datetime_column][0]
+        for val in df[datetime_column]:
+            best_yet = compare(best_yet, val)
+        return best_yet
+
+    return (
+        df[datetime_column].min(skipna=True)
+        if minimum
+        else df[datetime_column].max(skipna=True)
+    )

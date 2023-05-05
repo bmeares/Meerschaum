@@ -12,6 +12,7 @@ try:
         Any,
         Iterable,
         Hashable,
+        Generator,
     )
 except Exception as e:
     import urllib.request, sys, pathlib, os

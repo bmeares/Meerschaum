@@ -4,6 +4,39 @@
 
 This is the current release cycle, so stay tuned for future releases!
 
+### v1.6.5
+
+- **Allow pipes to sync DataFrame generators.**  
+  If `pipe.sync()` receives a generator (for `DataFrames`, dictionaries, or lists), it will attempt to consume it and sync its chunks in parallel threads (this can be single-threaded with `--workers 1`). For SQL pipes, this will be capped at your configured pool size (default 5) minus the running number of threads.
+
+  This means you may now return generators to large transcations, such as reading a large CSV: 
+  ```python
+  def fetch(pipe, **kw) -> Iterable['pd.DataFrame']:
+      return pd.read_csv('data.csv', chunksize=1000)
+  ```
+
+  Any iterator of DataFrame-like chunks will work:
+
+  ```python
+  def fetch(pipe, **kw) -> Generator[List[Dict[str, Any]]]:
+      return (
+          [
+              {'id': 1, 'val': 10.0 * i},
+              {'id': 2, 'val': 20.0 * i},
+          ] for i in range(10)
+      )
+  ```
+
+  This new behavior has been added to `SQLConnector.fetch()` so you may now confidently sync very large tables between your databases.
+
+  **NOTE:** The default `chunksize` for SQL queries has been lowered to 100,000 from 1,000,000. You may alter this value with `--chunksize` or setting the value in `MRSM{system:connectors:sql:chunksize}` (you can also edit the default pool size here).
+
+- **Fix edge case with SQL in-place syncs.**  
+  Occasionally, a few docs would be duplicated when running in-place SQL syncs. This patch increases the fetch window size to mitigate the issue.
+
+- **Remove `begin` and `end` from `filter_existing()`.**  
+  The keyword arguments were interfering with the determined datetime bounds, so this patch removes these flags (albeit `begin` was already ignored) to avoid confusion. Date bounds are solely determined from the contents of the DataFrame.
+
 ### v1.6.4
 
 - **Allow for mixed UTC offsets in datetimes.**  

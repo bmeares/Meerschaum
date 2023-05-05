@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import json
 from meerschaum.utils.typing import (
-    Union, Optional, Callable, Any, Tuple, SuccessTuple, Mapping, Dict, List
+    Union, Optional, Callable, Any, Tuple, SuccessTuple, Mapping, Dict, List, Iterable, Generator
 )
 
 class InferFetch:
@@ -251,6 +251,86 @@ def sync(
         ### CHECKPOINT: Retrieved the DataFrame.
         _checkpoint(**kw)
         
+        ### Allow for dataframe generators or iterables.
+        if (
+            not isinstance(df, (dict, list, str))
+            and 'DataFrame' not in str(type(df))
+            and isinstance(df, (Generator, Iterable))
+        ):
+            from meerschaum.utils.pool import get_pool
+            from meerschaum.utils.misc import get_datetime_bound_from_df
+            import threading
+            engine_pool_size = (
+                p.instance_connector.engine.pool.size()
+                if p.instance_connector.type == 'sql'
+                else 1
+            )
+            current_num_threads = len(threading.enumerate())
+            workers = kw.get('workers', None)
+            desired_workers = min(workers or engine_pool_size, engine_pool_size)
+            kw['workers'] = max(
+                (desired_workers - current_num_threads),
+                1,
+            )
+
+            dt_col = p.columns.get('datetime', None)
+            def get_chunk_label(_chunk) -> str:
+                min_dt = get_datetime_bound_from_df(_chunk, dt_col)
+                max_dt = get_datetime_bound_from_df(_chunk, dt_col, minimum=False)
+                return (
+                    f"{min_dt} - {max_dt}"
+                    if min_dt is not None and max_dt is not None
+                    else ''
+                )
+
+
+            pool = get_pool(workers=kw.get('workers', 1))
+            if debug:
+                dprint(f"Received {type(df)}. Attempting to sync first chunk...")
+            chunk = next(df)
+            chunk_success, chunk_msg = _sync(p, chunk)
+            chunk_msg = '\n' + get_chunk_label(chunk) + '\n' + chunk_msg
+            if not chunk_success:
+                return chunk_success, f"Unable to sync initial chunk for {p}:\n{chunk_msg}"
+            if debug:
+                dprint(f"Successfully synced the first chunk, attemping the rest...")
+
+            failed_chunks = []
+            def _process_chunk(_chunk):
+                try:
+                    _chunk_success, _chunk_msg = _sync(p, _chunk)
+                except Exception as e:
+                    _chunk_success, _chunk_msg = False, str(e)
+                if not _chunk_success:
+                    failed_chunks.append(_chunk)
+                return _chunk_success, '\n' + get_chunk_label(_chunk) + '\n' + _chunk_msg
+
+
+            results = sorted(
+                [(chunk_success, chunk_msg)] + pool.map(_process_chunk, df)
+            )
+            chunk_messages = [chunk_msg for _, chunk_msg in results]
+            success_bools = [chunk_success for chunk_success, _ in results]
+            failure_indices = [
+                i for i, _success_bool in enumerate(success_bools)
+                if not _success_bool
+            ]
+            success = all(success_bools)
+            msg = '\n'.join(chunk_messages)
+
+            ### If some chunks succeeded, retry the failures.
+            retry_success = True
+            if not success and any(success_bools):
+                if debug:
+                    dprint(f"Retrying failed chunks...")
+                for chunk in failed_chunks:
+                    chunk_success, chunk_msg = _process_chunk(chunk)
+                    msg += f"\nRetried chunk:\n{chunk_msg}"
+                    retry_success = retry_success and chunk_success
+
+            success = success and retry_success
+            return success, msg
+
         ### Cast to a dataframe and ensure datatypes are what we expect.
         df = self.enforce_dtypes(df, debug=debug)
         if debug:
@@ -428,8 +508,6 @@ def exists(
 def filter_existing(
         self,
         df: 'pd.DataFrame',
-        begin: Optional[datetime.datetime] = None,
-        end: Optional[datetime.datetime] = None,
         chunksize: Optional[int] = -1,
         params: Optional[Dict[str, Any]] = None,
         debug: bool = False,
@@ -443,13 +521,6 @@ def filter_existing(
     df: 'pd.DataFrame'
         The dataframe to inspect and filter.
         
-    begin: Optional[datetime.datetime], default None
-        NOTE: This is not used! The minimum datetime value is used.
-
-    end: Optional[datetime.datetime], default
-        If provided, use this boundary when searching for existing data.
-        Else use the maximum datetime value (+1 for integer datetimes).
-
     chunksize: Optional[int], default -1
         The `chunksize` used when fetching existing data.
 
@@ -483,9 +554,8 @@ def filter_existing(
         return df, df, df
 
     ### begin is the oldest data in the new dataframe
+    begin, end = None, None
     dt_col = self.columns.get('datetime', None)
-    if dt_col is None and begin:
-        dt_col = self.guess_datetime()
     dt_type = self.dtypes.get(dt_col, 'datetime64[ns]') if dt_col else None
     try:
         min_dt_val = df[dt_col].min(skipna=True) if dt_col else None
@@ -529,16 +599,15 @@ def filter_existing(
         if 'int' not in str(type(max_dt)).lower():
             max_dt = None
 
-    if end is None:
-        if isinstance(max_dt, datetime.datetime):
-            end = (
-                round_time(
-                    max_dt,
-                    to = 'down'
-                ) + datetime.timedelta(minutes=1)
-            )
-        elif dt_type and 'int' in dt_type.lower():
-            end = max_dt + 1
+    if isinstance(max_dt, datetime.datetime):
+        end = (
+            round_time(
+                max_dt,
+                to = 'down'
+            ) + datetime.timedelta(minutes=1)
+        )
+    elif dt_type and 'int' in dt_type.lower():
+        end = max_dt + 1
 
     if max_dt is not None and min_dt is not None and min_dt > max_dt:
         warn(f"Detected minimum datetime greater than maximum datetime.")
