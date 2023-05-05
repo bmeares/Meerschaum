@@ -33,12 +33,14 @@ def read(
         chunks: Optional[int] = None,
         as_chunks: bool = False,
         as_iterator: bool = False,
+        as_dask: bool = False,
         index_col: Optional[str] = None,
         silent: bool = False,
         debug: bool = False,
         **kw: Any
     ) -> Union[
         pandas.DataFrame,
+        dask.DataFrame,
         List[pandas.DataFrame],
         List[Any],
         None,
@@ -92,14 +94,17 @@ def read(
         you could specify a `chunksize` of `1000` and `chunks` of `100`.
 
     as_chunks: bool, default False
-        If `True`, return a list of DataFrames. Otherwise return a single DataFrame.
-        Defaults to `False`.
+        If `True`, return a list of DataFrames. 
+        Otherwise return a single DataFrame.
 
     as_iterator: bool, default False
         If `True`, return the pandas DataFrame iterator.
         `chunksize` must not be `None` (falls back to 1000 if so),
         and hooks are not called in this case.
-        Defaults to `False`.
+
+    as_dask: bool, default False
+        If `True`, return a `dask.DataFrame`
+        (which may be loaded into a Pandas DataFrame with `df.compute()`).
 
     index_col: Optional[str], default None
         If using Dask, use this column as the index column.
@@ -127,6 +132,10 @@ def read(
     pd = import_pandas()
     dd = None
     is_dask = 'dask' in pd.__name__
+    pd = attempt_import('pandas')
+    #  pd = import_pandas()
+    dd = attempt_import('dask.dataframe') if as_dask else None
+    is_dask = dd is not None
     npartitions = chunksize_to_npartitions(chunksize)
     if is_dask:
         chunksize = None
@@ -204,6 +213,7 @@ def read(
                 'params': params,
                 'dtype': dtype,
                 'dtype_backend': dtype_backend,
+                'index_col': index_col,
             }
             if is_dask:
                 if index_col is None:
@@ -212,8 +222,10 @@ def read(
                     read_sql_query_kwargs.update({
                         'chunksize': chunksize,
                     })
-                else:
-                    dd = pd
+            else:
+                read_sql_query_kwargs.update({
+                    'chunksize': chunksize,
+                })
 
             if is_dask and dd is not None:
                 ddf = dd.read_sql_query(
