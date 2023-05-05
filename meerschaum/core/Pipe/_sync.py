@@ -551,9 +551,8 @@ def filter_existing(
         return df, df, df
 
     ### begin is the oldest data in the new dataframe
+    begin, end = None, None
     dt_col = self.columns.get('datetime', None)
-    if dt_col is None and begin:
-        dt_col = self.guess_datetime()
     dt_type = self.dtypes.get(dt_col, 'datetime64[ns]') if dt_col else None
     try:
         min_dt_val = df[dt_col].min(skipna=True) if dt_col else None
