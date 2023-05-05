@@ -284,7 +284,7 @@ def sync(
                 )
 
 
-            pool = get_pool(workers=workers)
+            pool = get_pool(workers=kw.get('workers', 1))
             if debug:
                 dprint(f"Received {type(df)}. Attempting to sync first chunk...")
             chunk = next(df)
