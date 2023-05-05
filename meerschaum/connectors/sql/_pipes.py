@@ -1141,8 +1141,6 @@ def sync_pipe(
         pipe.filter_existing(
             df,
             chunksize = chunksize,
-            begin = begin,
-            end = end,
             debug = debug,
             **kw
         ) if check_existing else (df, None, df)
@@ -1420,6 +1418,8 @@ def sync_pipe_inplace(
         pipe,
         begin = begin,
         end = end,
+        begin_add_minutes = -1,
+        end_add_minutes = 1,
         params = params,
         debug = debug,
         order = None,
@@ -1427,7 +1427,7 @@ def sync_pipe_inplace(
 
     create_backtrack_query = (
         (
-            f"WITH backtrack_def AS ({backtrack_def})\n"
+            f"WITH backtrack_def AS (\n{backtrack_def}\n)\n"
             + f"SELECT *\nINTO {backtrack_table_name}\nFROM backtrack_def"
         ) if self.flavor not in ('sqlite', 'oracle', 'mysql', 'mariadb', 'duckdb')
         else (

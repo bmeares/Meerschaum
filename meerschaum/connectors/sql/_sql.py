@@ -106,6 +106,7 @@ def read(
     from meerschaum.utils.sql import sql_item_name, truncate_item_name
     from meerschaum.utils.packages import attempt_import, import_pandas
     import warnings
+    import inspect
     pd = import_pandas()
     sqlalchemy = attempt_import("sqlalchemy")
     default_chunksize = self._sys_config.get('chunksize', None)
@@ -177,9 +178,8 @@ def read(
                     dtype = dtype,
                 )
     except Exception as e:
-        import inspect
         if debug:
-            dprint(f"Failed to execute query:\n\n{query_or_table}\n\n")
+            dprint(f"[{self}] Failed to execute query:\n\n{query_or_table}\n\n")
         if not silent:
             warn(str(e), stacklevel=3)
         from meerschaum.utils.formatting import get_console
@@ -195,15 +195,22 @@ def read(
     elif as_iterator:
         return chunk_generator
     else:
-        for chunk in chunk_generator:
-            if chunk_hook is not None:
-                chunk_hook_results.append(
-                    chunk_hook(chunk, chunksize=chunksize, debug=debug, **kw)
-                )
-            chunk_list.append(chunk)
-            read_chunks += 1
-            if chunks is not None and read_chunks >= chunks:
-                break
+        try:
+            for chunk in chunk_generator:
+                if chunk_hook is not None:
+                    chunk_hook_results.append(
+                        chunk_hook(chunk, chunksize=chunksize, debug=debug, **kw)
+                    )
+                chunk_list.append(chunk)
+                read_chunks += 1
+                if chunks is not None and read_chunks >= chunks:
+                    break
+        except Exception as e:
+            warn(f"[{self}] Failed to retrieve query results:\n" + str(e), stacklevel=3)
+            from meerschaum.utils.formatting import get_console
+            get_console().print_exception()
+
+            return None
 
     ### If no chunks returned, read without chunks
     ### to get columns

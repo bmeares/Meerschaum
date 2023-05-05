@@ -501,3 +501,23 @@ def test_no_indices_inferred_datetime_to_text(flavor: str):
     df = pipe.get_data()
     assert len(df) == len(docs)
 
+
+@pytest.mark.parametrize("flavor", sorted(list(all_pipes.keys())))
+def test_sync_generators(flavor: str):
+    """
+    Verify that we are able to sync generators of chunks.
+    """
+    conn = conns[flavor]
+    pipe = Pipe(
+        'test_generators', 'foo',
+        instance = conn,
+        columns = {'datetime': 'dt'},
+    )
+    pipe.delete()
+    start_time = datetime.datetime(2023, 1, 1)
+    num_docs = 10
+    generator = ([{'dt': start_time + datetime.timedelta(days=i)}] for i in range(num_docs))
+    success, msg = pipe.sync(generator, debug=debug)
+    assert success, msg
+    rowcount = pipe.get_rowcount()
+    assert rowcount == num_docs
