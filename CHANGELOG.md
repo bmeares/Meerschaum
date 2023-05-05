@@ -7,7 +7,7 @@ This is the current release cycle, so stay tuned for future releases!
 ### v1.6.5
 
 - **Allow pipes to sync DataFrame generators.**  
-  If `pipe.sync()` receives a generator (for `DataFrames`, dicctionaries, or lists), it will attempt to consume it and sync its chunks in parallel threads (this can be single-threaded with `--workers 1`). For SQL pipes, this will be capped at your configured pool size (default 5) minus the running number of threads.
+  If `pipe.sync()` receives a generator (for `DataFrames`, dictionaries, or lists), it will attempt to consume it and sync its chunks in parallel threads (this can be single-threaded with `--workers 1`). For SQL pipes, this will be capped at your configured pool size (default 5) minus the running number of threads.
 
   This means you may now return generators to large transcations, such as reading a large CSV: 
   ```python
