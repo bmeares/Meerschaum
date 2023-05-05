@@ -11,8 +11,20 @@ This is the current release cycle, so stay tuned for future releases!
 
   This means you may now return generators to large transcations, such as reading a large CSV: 
   ```python
-  def fetch(pipe, **kw) -> Iterable['pd.DataFrame']
+  def fetch(pipe, **kw) -> Iterable['pd.DataFrame']:
       return pd.read_csv('data.csv', chunksize=1000)
+  ```
+
+  Any iterator of DataFrame-like chunks will work:
+
+  ```python
+  def fetch(pipe, **kw) -> Generator[List[Dict[str, Any]]]:
+      return (
+          [
+              {'id': 1, 'val': 10.0 * i},
+              {'id': 2, 'val': 20.0 * i},
+          ] for i in range(10)
+      )
   ```
 
   This new behavior has been added to `SQLConnector.fetch()` so you may now confidently sync very large tables between your databases.
