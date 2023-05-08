@@ -631,7 +631,7 @@ def get_pipe_data(
     """
     import json
     from meerschaum.utils.sql import sql_item_name
-    from meerschaum.utils.misc import parse_df_datetimes
+    from meerschaum.utils.misc import parse_df_datetimes, to_pandas_dtype
     from meerschaum.utils.packages import import_pandas
     pd = import_pandas()
     is_dask = 'dask' in pd.__name__
@@ -656,6 +656,7 @@ def get_pipe_data(
     existing_cols = pipe.get_columns_types(debug=debug)
     if existing_cols:
         dtypes = {col: typ for col, typ in dtypes.items() if col in existing_cols}
+    dtypes = {col: to_pandas_dtype(typ) for col, typ in dtypes.items()}
     query = self.get_pipe_data_query(
         pipe,
         begin = begin,

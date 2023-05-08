@@ -1053,7 +1053,8 @@ def filter_unseen_df(
         dtypes = {col: str(typ) for col, typ in old_df.dtypes.items()}
 
     dtypes = {
-        col: to_pandas_dtype(typ) for col, typ in dtypes.items()
+        col: to_pandas_dtype(typ)
+        for col, typ in dtypes.items()
         if col in new_df_dtypes and col in old_df_dtypes
     }
     for col, typ in new_df_dtypes.items():
@@ -1958,11 +1959,15 @@ def to_pandas_dtype(dtype: str) -> str:
     """
     Cast a supported Meerschaum dtype to a Pandas dtype.
     """
-    if dtype in ('json', 'str', 'object', 'string'):
+    if dtype == 'json':
+        return 'object'
+    if dtype in ('str', 'string'):
         return 'string[pyarrow]'
+    if 'double' in dtype.lower():
+        return 'double[pyarrow]'
     if dtype.lower().startswith('int'):
         return 'int64[pyarrow]'
-    if dtype.lower().startswith('float'):
+    if dtype.lower().startswith('float') or 'double' in dtype.lower():
         return 'float64[pyarrow]'
     if dtype == 'datetime':
         return 'datetime64[ns]'
