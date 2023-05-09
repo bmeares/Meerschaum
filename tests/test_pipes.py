@@ -529,7 +529,7 @@ def test_add_new_columns(flavor: str):
     Verify that we are able to add new columns dynamically.
     """
     conn = conns[flavor]
-    pipe = Pipe('test', 'add_columns')
+    pipe = Pipe('test', 'add_columns', instance=conn)
     pipe.delete()
     pipe = Pipe(
         'test_add', 'columns',
