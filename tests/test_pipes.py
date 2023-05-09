@@ -521,3 +521,34 @@ def test_sync_generators(flavor: str):
     assert success, msg
     rowcount = pipe.get_rowcount()
     assert rowcount == num_docs
+
+
+@pytest.mark.parametrize("flavor", sorted(list(all_pipes.keys())))
+def test_add_new_columns(flavor: str):
+    """
+    Verify that we are able to add new columns dynamically.
+    """
+    conn = conns[flavor]
+    pipe = Pipe('test_add', 'columns', instance=conn)
+    pipe.delete()
+    pipe = Pipe(
+        'test_add', 'columns',
+        instance = conn,
+        columns = {'datetime': 'dt'},
+    )
+
+    docs = [{'dt': '2023-01-01', 'a': 1}]
+    success, msg = pipe.sync(docs, debug=debug)
+    assert success, msg
+    docs = [{'dt': '2023-01-01', 'b': 'foo', 'c': 12.3, 'd': {'e': 5}}]
+    success, msg = pipe.sync(docs, debug=debug)
+    assert success, msg
+    assert len(pipe.dtypes) == 5
+    df = pipe.get_data()
+    assert len(df) == 1
+    assert 'dt' in df.columns
+    assert 'a' in df.columns
+    assert 'b' in df.columns
+    assert 'c' in df.columns
+    assert 'd' in df.columns
+    assert 'e' in df['d'][0]

@@ -4,6 +4,11 @@
 
 This is the current release cycle, so stay tuned for future releases!
 
+### v1.6.6
+
+- **Issue one `ALTER TABLE` query per column for SQLite, MSSQL, DuckDB, and Oracle SQL.**  
+  SQLite and other flavors do not support multiple columns in an `ALTER TABLE` query. This patch addresses this behavior and adds a specific test for this scenario.
+
 ### v1.6.5
 
 - **Allow pipes to sync DataFrame generators.**  
