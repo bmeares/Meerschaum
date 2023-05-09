@@ -2338,7 +2338,12 @@ def get_add_columns_queries(
     if not pipe.exists(debug=debug):
         return []
     import copy
-    from meerschaum.utils.sql import get_pd_type, get_db_type, sql_item_name
+    from meerschaum.utils.sql import (
+        get_pd_type,
+        get_db_type,
+        sql_item_name,
+        SINGLE_ALTER_TABLE_FLAVORS,
+    )
     from meerschaum.utils.misc import flatten_list
     table_obj = self.get_pipe_table(pipe, debug=debug)
     df_cols_types = (
@@ -2370,13 +2375,25 @@ def get_add_columns_queries(
         ) for col in new_cols
     }
 
-    query = "ALTER TABLE " + sql_item_name(pipe.target, self.flavor)
+    alter_table_query = "ALTER TABLE " + sql_item_name(pipe.target, self.flavor)
+    queries = []
     for col, typ in new_cols_types.items():
-        query += "\nADD " + sql_item_name(col, self.flavor) + " " + typ + ","
-    query = query[:-1]
-    if self.flavor != 'duckdb':
-        return [query]
+        add_col_query = "\nADD " + sql_item_name(col, self.flavor) + " " + typ + ","
 
+        if self.flavor in SINGLE_ALTER_TABLE_FLAVORS:
+            queries.append(alter_table_query + add_col_query[:-1])
+        else:
+            alter_table_query += add_col_query
+
+    ### For most flavors, only one query is required.
+    ### This covers SQLite which requires one query per column.
+    if not queries:
+        queries.append(alter_table_query[:-1])
+
+    if self.flavor != 'duckdb':
+        return queries
+
+    ### NOTE: For DuckDB, we must drop and rebuild the indices.
     drop_index_queries = list(flatten_list(
         [q for ix, q in self.get_drop_index_queries(pipe, debug=debug).items()]
     ))
@@ -2384,7 +2401,7 @@ def get_add_columns_queries(
         [q for ix, q in self.get_create_index_queries(pipe, debug=debug).items()]
     ))
 
-    return drop_index_queries + [query] + create_index_queries
+    return drop_index_queries + queries + create_index_queries
 
 
 def get_alter_columns_queries(

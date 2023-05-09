@@ -122,6 +122,7 @@ max_name_lens = {
 }
 json_flavors = {'postgresql', 'timescaledb', 'citus', 'cockroachdb'}
 OMIT_NULLSFIRST_FLAVORS = {'mariadb', 'mysql', 'mssql'}
+SINGLE_ALTER_TABLE_FLAVORS = {'duckdb', 'sqlite', 'mssql', 'oracle'}
 DB_TO_PD_DTYPES = {
     'FLOAT': 'float64',
     'DOUBLE_PRECISION': 'float64',
