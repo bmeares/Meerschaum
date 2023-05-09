@@ -2396,7 +2396,7 @@ def get_add_columns_queries(
         [q for ix, q in self.get_create_index_queries(pipe, debug=debug).items()]
     ))
 
-    return drop_index_queries + [query] + create_index_queries
+    return drop_index_queries + queries + create_index_queries
 
 
 def get_alter_columns_queries(
