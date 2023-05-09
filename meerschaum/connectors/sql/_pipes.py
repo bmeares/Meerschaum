@@ -2338,7 +2338,12 @@ def get_add_columns_queries(
     if not pipe.exists(debug=debug):
         return []
     import copy
-    from meerschaum.utils.sql import get_pd_type, get_db_type, sql_item_name
+    from meerschaum.utils.sql import (
+        get_pd_type,
+        get_db_type,
+        sql_item_name,
+        SINGLE_ALTER_TABLE_FLAVORS,
+    )
     from meerschaum.utils.misc import flatten_list
     table_obj = self.get_pipe_table(pipe, debug=debug)
     df_cols_types = (
@@ -2375,7 +2380,7 @@ def get_add_columns_queries(
     for col, typ in new_cols_types.items():
         add_col_query = "\nADD " + sql_item_name(col, self.flavor) + " " + typ + ","
 
-        if self.flavor == 'sqlite':
+        if self.flavor in SINGLE_ALTER_TABLE_FLAVORS:
             queries.append(alter_table_query + add_col_query[:-1])
         else:
             alter_table_query += add_col_query
