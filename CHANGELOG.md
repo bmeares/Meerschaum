@@ -4,6 +4,11 @@
 
 This is the current release cycle, so stay tuned for future releases!
 
+### v1.6.7
+
+- **Improve memory usage when syncing generators.**  
+  To more lazily sync chunks from generators, `pool.map()` has been replaced with `pool.imap()`.
+
 ### v1.6.6
 
 - **Issue one `ALTER TABLE` query per column for SQLite, MSSQL, DuckDB, and Oracle SQL.**  
