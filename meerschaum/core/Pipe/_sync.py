@@ -307,7 +307,7 @@ def sync(
 
 
             results = sorted(
-                [(chunk_success, chunk_msg)] + pool.map(_process_chunk, df)
+                [(chunk_success, chunk_msg)] + list(pool.imap(_process_chunk, df))
             )
             chunk_messages = [chunk_msg for _, chunk_msg in results]
             success_bools = [chunk_success for chunk_success, _ in results]
