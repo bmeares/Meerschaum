@@ -65,11 +65,13 @@ def fetch(
     _chunk_hook = kw.pop('chunk_hook', None)
     if sync_chunks and _chunk_hook is None:
 
-        def _chunk_hook(chunk, **kw) -> SuccessTuple:
+        def _chunk_hook(chunk, **_kw) -> SuccessTuple:
             """
             Wrap `Pipe.sync()` with a custom chunk label prepended to the message.
             """
-            chunk_success, chunk_message = self.sync(chunk, **kw)
+            from meerschaum.config._patch import apply_patch_to_config
+            kwargs = apply_patch_to_config(kw, _kw)
+            chunk_success, chunk_message = self.sync(chunk, **kwargs)
             chunk_label = self._get_chunk_label(chunk, self.columns.get('datetime', None))
             if chunk_label:
                 chunk_message = '\n' + chunk_label + '\n' + chunk_message
