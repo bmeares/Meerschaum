@@ -235,11 +235,6 @@ groups['sync'].add_argument(
     ),
 )
 groups['sync'].add_argument(
-    '--sync-chunks', action='store_true',
-    help="Sync chunks while fetching data instead of waiting until all have arrived. " +
-    "Similar to --async. WARNING! This can be very dangerous when used with --async.",
-)
-groups['sync'].add_argument(
     '--skip-check-existing', '--allow-duplicates', action='store_true',
     help = (
         "Skip checking for duplicate rows when syncing. " +

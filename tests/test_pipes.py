@@ -552,3 +552,44 @@ def test_add_new_columns(flavor: str):
     assert 'c' in df.columns
     assert 'd' in df.columns
     assert 'e' in df['d'][0]
+
+
+@pytest.mark.parametrize("flavor", sorted(list(all_pipes.keys())))
+def test_get_data_iterator(flavor: str):
+    """
+    Test the new `as_iterator` flag in `Pipe.get_data()`.
+    """
+    from meerschaum.utils.packages import import_pandas
+    pd = import_pandas()
+    conn = conns[flavor]
+    pipe = mrsm.Pipe('test', 'get_data_iterator', instance=conn)
+    pipe.delete()
+    pipe = mrsm.Pipe(
+        'test', 'get_data_iterator',
+        instance = conn,
+        columns = {'datetime': 'id'},
+        dtypes = {'id': 'Int64'},
+    )
+    docs = [{'id': i, 'color': ('a' if i % 2 == 0 else 'b')} for i in range(7)]
+    success, message = pipe.sync(docs, debug=debug)
+    assert success, message
+    gen = pipe.get_data(
+        begin = 1,
+        end = 6,
+        as_iterator = True,
+        chunk_interval = 2,
+        debug = debug,
+    )
+    chunks = [chunk for chunk in gen]
+    assert len(chunks) == 3
+    assert len(chunks[2]) == 1
+
+    gen = pipe.get_data(
+        params = {'color': 'a'},
+        as_iterator = True,
+        chunk_interval = 3,
+        debug = debug,
+    )
+    chunks = [chunk for chunk in gen]
+    df = pd.concat(chunks)
+    assert df['id'].to_list() == [0, 2, 4, 6]

@@ -62,16 +62,24 @@ def fetch(
         connector_plugin = Plugin(plugin_name)
         connector_plugin.activate_venv(debug=debug)
     
-    _chunk_hook = kw.pop('chunk_hook') if 'chunk_hook' in kw else None
+    _chunk_hook = kw.pop('chunk_hook', None)
+    if sync_chunks and _chunk_hook is None:
+
+        def _chunk_hook(chunk, **kw) -> SuccessTuple:
+            """
+            Wrap `Pipe.sync()` with a custom chunk label prepended to the message.
+            """
+            chunk_success, chunk_message = self.sync(chunk, **kw)
+            chunk_label = self._get_chunk_label(chunk, self.columns.get('datetime', None))
+            if chunk_label:
+                chunk_message = '\n' + chunk_label + '\n' + chunk_message
+            return chunk_success, chunk_message
 
     df = self.connector.fetch(
         self,
         begin = begin,
         end = end,
-        chunk_hook = (
-            self.sync if sync_chunks and _chunk_hook is None
-            else _chunk_hook
-        ),
+        chunk_hook = _chunk_hook,
         debug = debug,
         **kw
     )
@@ -81,7 +89,5 @@ def fetch(
         self.connector.type in custom_types
     ):
         connector_plugin.deactivate_venv(debug=debug)
-    ### Return True if we're syncing in parallel, else continue as usual.
-    if sync_chunks:
-        return True
+
     return df
