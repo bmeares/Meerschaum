@@ -19,9 +19,10 @@ def fetch(
         end: Union[datetime.datetime, str, None] = None,
         chunk_hook: Optional[Callable[[pd.DataFrame], Any]] = None,
         chunksize: Optional[int] = -1,
+        workers: Optional[int] = None,
         debug: bool = False,
         **kw: Any
-    ) -> Union['pd.DataFrame', None]:
+    ) -> Union['pd.DataFrame', List[Any], None]:
     """Execute the SQL definition and return a Pandas DataFrame.
 
     Parameters
@@ -46,13 +47,24 @@ def fetch(
         The latest datetime to search for data.
         If `end` is `None`, do not bound 
 
+    chunk_hook: Callable[[pd.DataFrame], Any], default None
+        A function to pass to `SQLConnector.read()` that accepts a Pandas DataFrame.
+
+    chunksize: Optional[int], default -1
+        How many rows to load into memory at once (when `chunk_hook` is provided).
+        Otherwise the entire result set is loaded into memory.
+
+    workers: Optional[int], default None
+        How many threads to use when consuming the generator (when `chunk_hook is provided).
+        Defaults to the number of cores.
+
     debug: bool, default False
         Verbosity toggle.
        
     Returns
     -------
     A pandas DataFrame or `None`.
-
+    If `chunk_hook` is not None, return a list of the hook function's results.
     """
     meta_def = self.get_pipe_metadef(
         pipe,
@@ -61,15 +73,17 @@ def fetch(
         debug = debug,
         **kw
     )
+    as_hook_results = chunk_hook is not None
     chunks = self.read(
         meta_def,
         chunk_hook = chunk_hook,
+        as_hook_results = as_hook_results,
         chunksize = chunksize,
-        as_iterator = True,
+        workers = workers,
         debug = debug,
     )
     ### if sqlite, parse for datetimes
-    if self.flavor == 'sqlite':
+    if not as_hook_results and self.flavor == 'sqlite':
         from meerschaum.utils.misc import parse_df_datetimes
         ignore_cols = [
             col

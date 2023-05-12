@@ -35,7 +35,7 @@ def sync(
         callback: Optional[Callable[[Tuple[bool, str]], Any]] = None,
         error_callback: Optional[Callable[[Exception], Any]] = None,
         chunksize: Optional[int] = -1,
-        sync_chunks: bool = False,
+        sync_chunks: bool = True,
         debug: bool = False,
         **kw: Any
     ) -> SuccessTuple:
@@ -98,9 +98,8 @@ def sync(
         A `chunksize` of `None` will sync all rows in one transaction.
         Defaults to `-1`.
 
-    sync_chunks: bool, default False
+    sync_chunks: bool, default True
         If possible, sync chunks while fetching them into memory.
-        Defaults to `False`.
 
     debug: bool, default False
         Verbosity toggle. Defaults to False.
@@ -126,7 +125,10 @@ def sync(
 
     _checkpoint(_total=2, **kw)
 
-    ### NOTE: Setting begin to the sync time for Simple Sync.
+    if chunksize == 0:
+        chunksize = None
+        sync_chunks = False
+
     ### TODO: Add flag for specifying syncing method.
     begin = _determine_begin(self, begin, debug=debug)
     kw.update({
@@ -243,6 +245,16 @@ def sync(
                 p._exists = None
                 return False, f"No data were fetched for {p}."
 
+            if isinstance(df, list):
+                if len(df) == 0:
+                    return True, f"No new rows were returned for {p}."
+
+                ### May be a chunk hook results list.
+                if isinstance(df[0], tuple):
+                    success = all([_success for _success, _ in df])
+                    message = '\n'.join([_message for _, _message in df])
+                    return success, message
+
             ### TODO: Depreciate async?
             if df is True:
                 p._exists = None
@@ -258,7 +270,6 @@ def sync(
             and isinstance(df, (Generator, Iterable))
         ):
             from meerschaum.utils.pool import get_pool
-            from meerschaum.utils.misc import get_datetime_bound_from_df
             import threading
             engine_pool_size = (
                 p.instance_connector.engine.pool.size()
@@ -274,22 +285,17 @@ def sync(
             )
 
             dt_col = p.columns.get('datetime', None)
-            def get_chunk_label(_chunk) -> str:
-                min_dt = get_datetime_bound_from_df(_chunk, dt_col)
-                max_dt = get_datetime_bound_from_df(_chunk, dt_col, minimum=False)
-                return (
-                    f"{min_dt} - {max_dt}"
-                    if min_dt is not None and max_dt is not None
-                    else ''
-                )
 
 
             pool = get_pool(workers=kw.get('workers', 1))
             if debug:
                 dprint(f"Received {type(df)}. Attempting to sync first chunk...")
-            chunk = next(df)
+            try:
+                chunk = next(df)
+            except StopIteration:
+                return True, "Received an empty generator; nothing to do."
             chunk_success, chunk_msg = _sync(p, chunk)
-            chunk_msg = '\n' + get_chunk_label(chunk) + '\n' + chunk_msg
+            chunk_msg = '\n' + self._get_chunk_label(chunk, dt_col) + '\n' + chunk_msg
             if not chunk_success:
                 return chunk_success, f"Unable to sync initial chunk for {p}:\n{chunk_msg}"
             if debug:
@@ -303,7 +309,7 @@ def sync(
                     _chunk_success, _chunk_msg = False, str(e)
                 if not _chunk_success:
                     failed_chunks.append(_chunk)
-                return _chunk_success, '\n' + get_chunk_label(_chunk) + '\n' + _chunk_msg
+                return _chunk_success, '\n' + self._get_chunk_label(_chunk, dt_col) + '\n' + _chunk_msg
 
 
             results = sorted(
@@ -711,3 +717,25 @@ def filter_existing(
     ) if on_cols else None
 
     return unseen_df, update_df, delta_df
+
+
+@staticmethod
+def _get_chunk_label(
+        chunk: Union[
+            'pd.DataFrame',
+            List[Dict[str, Any]],
+            Dict[str, List[Any]]
+        ],
+        dt_col: str,
+    ) -> str:
+    """
+    Return the min - max label for the chunk.
+    """
+    from meerschaum.utils.misc import get_datetime_bound_from_df
+    min_dt = get_datetime_bound_from_df(chunk, dt_col)
+    max_dt = get_datetime_bound_from_df(chunk, dt_col, minimum=False)
+    return (
+        f"{min_dt} - {max_dt}"
+        if min_dt is not None and max_dt is not None
+        else ''
+    )

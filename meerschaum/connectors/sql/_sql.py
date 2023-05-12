@@ -26,6 +26,7 @@ def read(
         params: Optional[Dict[str, Any], List[str]] = None,
         dtype: Optional[Dict[str, Any]] = None,
         chunksize: Optional[int] = -1,
+        workers: Optional[int] = None,
         chunk_hook: Optional[Callable[[pandas.DataFrame], Any]] = None,
         as_hook_results: bool = False,
         chunks: Optional[int] = None,
@@ -63,6 +64,10 @@ def read(
         Defaults to system configuration.
 
         **NOTE:** DuckDB does not allow for chunking.
+
+    workers: Optional[int], default None
+        How many threads to use when consuming the generator.
+        Only applies if `chunk_hook` is provided.
 
     chunk_hook: Optional[Callable[[pandas.DataFrame], Any]], default None
         Hook function to execute once per chunk, e.g. writing and reading chunks intermittently.
@@ -105,8 +110,10 @@ def read(
         return []
     from meerschaum.utils.sql import sql_item_name, truncate_item_name
     from meerschaum.utils.packages import attempt_import, import_pandas
+    from meerschaum.utils.pool import get_pool
     import warnings
     import inspect
+    import traceback
     pd = import_pandas()
     sqlalchemy = attempt_import("sqlalchemy")
     default_chunksize = self._sys_config.get('chunksize', None)
@@ -166,17 +173,60 @@ def read(
         except Exception as e:
             formatted_query = query_or_table
 
+    chunk_list = []
+    chunk_hook_results = []
     try:
+        stream_results = not as_iterator and chunk_hook is not None and chunksize is not None
         with warnings.catch_warnings():
             warnings.filterwarnings('ignore', 'case sensitivity issues')
-            with self.engine.begin() as connection:
-                chunk_generator = pd.read_sql_query(
-                    formatted_query,
-                    connection,
-                    params = params,
-                    chunksize = chunksize,
-                    dtype = dtype,
-                )
+            with self.engine.begin() as transaction:
+                with transaction.execution_options(stream_results=stream_results) as connection:
+                    chunk_generator = pd.read_sql_query(
+                        formatted_query,
+                        connection,
+                        params = params,
+                        chunksize = chunksize,
+                        dtype = dtype,
+                    )
+
+                    ### `stream_results` must be False (will load everything into memory).
+                    if as_iterator or chunksize is None:
+                        return chunk_generator
+
+                    ### We must consume the generator in this context if using server-side cursors.
+                    if stream_results:
+
+                        pool = get_pool(workers=workers)
+
+                        def _process_chunk(_chunk, _retry_on_failure: bool = True):
+                            if not as_hook_results:
+                                chunk_list.append(_chunk)
+                            result = None
+                            if chunk_hook is not None:
+                                try:
+                                    result = chunk_hook(
+                                        _chunk,
+                                        workers = workers,
+                                        chunksize = chunksize,
+                                        debug = debug,
+                                        **kw
+                                    )
+                                except Exception as e:
+                                    result = False, traceback.format_exc()
+                                    from meerschaum.utils.formatting import get_console
+                                    get_console().print_exception()
+
+                                ### If the chunk fails to process, try it again one more time.
+                                if isinstance(result, tuple) and result[0] is False:
+                                    if _retry_on_failure:
+                                        return _process_chunk(_chunk, _retry_on_failure=False)
+
+                            return result
+
+                        chunk_hook_results = list(pool.imap(_process_chunk, chunk_generator))
+                        if as_hook_results:
+                            return chunk_hook_results
+
     except Exception as e:
         if debug:
             dprint(f"[{self}] Failed to execute query:\n\n{query_or_table}\n\n")
@@ -187,30 +237,23 @@ def read(
 
         return None
 
-    chunk_list = []
     read_chunks = 0
-    chunk_hook_results = []
-    if chunksize is None:
-        chunk_list.append(chunk_generator)
-    elif as_iterator:
-        return chunk_generator
-    else:
-        try:
-            for chunk in chunk_generator:
-                if chunk_hook is not None:
-                    chunk_hook_results.append(
-                        chunk_hook(chunk, chunksize=chunksize, debug=debug, **kw)
-                    )
-                chunk_list.append(chunk)
-                read_chunks += 1
-                if chunks is not None and read_chunks >= chunks:
-                    break
-        except Exception as e:
-            warn(f"[{self}] Failed to retrieve query results:\n" + str(e), stacklevel=3)
-            from meerschaum.utils.formatting import get_console
-            get_console().print_exception()
+    try:
+        for chunk in chunk_generator:
+            if chunk_hook is not None:
+                chunk_hook_results.append(
+                    chunk_hook(chunk, chunksize=chunksize, debug=debug, **kw)
+                )
+            chunk_list.append(chunk)
+            read_chunks += 1
+            if chunks is not None and read_chunks >= chunks:
+                break
+    except Exception as e:
+        warn(f"[{self}] Failed to retrieve query results:\n" + str(e), stacklevel=3)
+        from meerschaum.utils.formatting import get_console
+        get_console().print_exception()
 
-            return None
+        return None
 
     ### If no chunks returned, read without chunks
     ### to get columns
