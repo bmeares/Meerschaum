@@ -82,7 +82,7 @@ class Pipe:
     """
 
     from ._fetch import fetch
-    from ._data import get_data, get_backtrack_data, get_rowcount
+    from ._data import get_data, get_backtrack_data, get_rowcount, _get_data_as_iterator
     from ._register import register
     from ._attributes import (
         attributes,
@@ -104,7 +104,7 @@ class Pipe:
     )
     from ._show import show
     from ._edit import edit, edit_definition, update
-    from ._sync import sync, get_sync_time, exists, filter_existing
+    from ._sync import sync, get_sync_time, exists, filter_existing, _get_chunk_label
     from ._delete import delete
     from ._drop import drop
     from ._clear import clear

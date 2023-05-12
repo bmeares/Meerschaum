@@ -7,17 +7,21 @@ Retrieve Pipes' data from instances.
 """
 
 from __future__ import annotations
-from meerschaum.utils.typing import Optional, Dict, Any, Union
+import datetime
+from meerschaum.utils.typing import Optional, Dict, Any, Union, Generator
 
 def get_data(
         self,
         begin: Optional[datetime.datetime] = None,
         end: Optional[datetime.datetime] = None,
         params: Optional[Dict[str, Any]] = None,
+        as_iterator: bool = False,
+        as_chunks: bool = False,
+        chunk_interval: Union[datetime.datetime, int, None] = None,
         fresh: bool = False,
         debug: bool = False,
         **kw: Any
-    ) -> Union['pd.DataFrame', None]:
+    ) -> Union['pd.DataFrame', Generator['pd.DataFrame'], None]:
     """
     Get a pipe's data from the instance connector.
 
@@ -37,6 +41,19 @@ def get_data(
         Filter the retrieved data by a dictionary of parameters.
         See `meerschaum.utils.sql.build_where` for more details. 
 
+    as_iterator: bool, default False
+        If `True`, return a generator of chunks of pipe data.
+
+    as_chunks: bool, default False
+        Alias for `as_iterator`.
+
+    chunk_interval: int, default None
+        If `as_iterator`, then return chunks with `begin` and `end` separated by this interval.
+        By default, use a timedelta of 1 day.
+        If the `datetime` axis is an integer, default to the configured chunksize.
+        Note that because `end` is always non-inclusive,
+        there will be `chunk_interval - 1` rows per chunk for integers.
+
     fresh: bool, default True
         If `True`, skip local cache and directly query the instance connector.
         Defaults to `True`.
@@ -53,11 +70,25 @@ def get_data(
     from meerschaum.utils.warnings import warn
     from meerschaum.utils.venv import Venv
     from meerschaum.connectors import get_connector_plugin
+    from meerschaum.utils.misc import iterate_chunks
+    from meerschaum.config import get_config
     kw.update({'begin': begin, 'end': end, 'params': params,})
+
+    as_iterator = as_iterator or as_chunks
+
+    if as_iterator or as_chunks:
+        return self._get_data_as_iterator(
+            begin = begin,
+            end = end,
+            params = params,
+            chunk_interval = chunk_interval,
+            fresh = fresh,
+            debug = debug,
+        )
 
     if not self.exists(debug=debug):
         return None
-
+       
     if self.cache_pipe is not None:
         if not fresh:
             _sync_cache_tuple = self.cache_pipe.sync(debug=debug, **kw)
@@ -78,6 +109,96 @@ def get_data(
                 debug = debug,
                 **kw
             ),
+            debug = debug,
+        )
+
+
+def _get_data_as_iterator(
+        self,
+        begin: Optional[datetime.datetime] = None,
+        end: Optional[datetime.datetime] = None,
+        params: Optional[Dict[str, Any]] = None,
+        chunk_interval: Union[datetime.datetime, int, None] = None,
+        fresh: bool = False,
+        debug: bool = False,
+        **kw: Any
+    ) -> Generator['pd.DataFrame']:
+    """
+    Return a pipe's data as a generator.
+    """
+    from meerschaum.utils.misc import round_time
+    parse_begin = isinstance(begin, str)
+    parse_end = isinstance(end, str)
+    if parse_begin or parse_end:
+        from meerschaum.utils.packages import attempt_import
+        dateutil_parser = attempt_import('dateutil.parser')
+    if parse_begin:
+        begin = dateutil_parser.parse(begin)
+    if parse_end:
+        end = dateutil_parser.parse(end)
+    _ = kw.pop('as_chunks', None)
+    _ = kw.pop('as_iterator', None)
+    min_dt = (
+        begin if begin is not None
+        else self.get_sync_time(round_down=False, newest=False, params=params, debug=debug)
+    )
+    max_dt = (
+        end if end is not None
+        else self.get_sync_time(round_down=False, newest=True, params=params, debug=debug)
+    )
+
+    ### We want to search just past the maximum value.
+    if end is None:
+        if isinstance(max_dt, int):
+            max_dt += 1
+        elif isinstance(max_dt, datetime.datetime):
+            max_dt = round_time(max_dt + datetime.timedelta(minutes=1))
+
+    if chunk_interval is None:
+        chunk_interval = (
+            get_config('system', 'connectors', 'sql', 'chunksize')
+            if isinstance(min_dt, int)
+            else datetime.timedelta(days=1)
+        )
+
+
+    ### If we can't determine bounds
+    ### or if chunk_interval exceeds the max,
+    ### return a single chunk.
+    if (
+        (min_dt is None and max_dt is None)
+        or
+        (min_dt + chunk_interval) > max_dt
+    ):
+        return (
+            self.get_data(
+                begin = begin,
+                end = end,
+                params = params,
+                fresh = fresh,
+                debug = debug,
+            ) for i in range(1)
+        )
+
+    chunk_begin = min_dt
+    chunk_end = min_dt + chunk_interval
+    while chunk_end < max_dt:
+        yield self.get_data(
+            begin = chunk_begin,
+            end = chunk_end,
+            params = params,
+            fresh = fresh,
+            debug = debug,
+        )
+        chunk_begin = chunk_end
+        chunk_end += chunk_interval
+
+    if chunk_begin <= max_dt:
+        yield self.get_data(
+            begin = chunk_begin,
+            end = max_dt,
+            params = params,
+            fresh = fresh,
             debug = debug,
         )
 

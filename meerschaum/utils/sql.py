@@ -497,7 +497,7 @@ def dateadd_str(
     from meerschaum.utils.packages import attempt_import
     from meerschaum.utils.warnings import error
     import datetime
-    dateutil = attempt_import('dateutil')
+    dateutil_parser = attempt_import('dateutil.parser')
     if 'int' in str(type(begin)).lower():
         return str(begin)
     if not begin:
@@ -507,7 +507,7 @@ def dateadd_str(
     ### Sanity check: make sure `begin` is a valid datetime before we inject anything.
     if not isinstance(begin, datetime.datetime):
         try:
-            begin_time = dateutil.parser.parse(begin)
+            begin_time = dateutil_parser.parse(begin)
         except Exception:
             begin_time = None
     else:
