@@ -271,14 +271,21 @@ def sync(
         ):
             from meerschaum.utils.pool import get_pool
             import threading
+            is_thread_safe = getattr(self.instance_connector, 'IS_THREAD_SAFE', False)
             engine_pool_size = (
                 p.instance_connector.engine.pool.size()
                 if p.instance_connector.type == 'sql'
-                else 1
+                else None
             )
             current_num_threads = len(threading.enumerate())
             workers = kw.get('workers', None)
-            desired_workers = min(workers or engine_pool_size, engine_pool_size)
+            desired_workers = (
+                min(workers or engine_pool_size, engine_pool_size)
+                if engine_pool_size is not None
+                else (workers if is_thread_safe else 1)
+            )
+            if desired_workers is None:
+                desired_workers = (current_num_threads if is_thread_safe else 1)
             kw['workers'] = max(
                 (desired_workers - current_num_threads),
                 1,

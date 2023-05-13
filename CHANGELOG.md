@@ -4,6 +4,14 @@
 
 This is the current release cycle, so stay tuned for future releases!
 
+### v1.6.9 — v1.6.10
+
+- **Improve thread safety checks.**  
+  Added checks for `IS_THREAD_SAFE` to connectors to determine whether to use mutlithreading.
+
+- **Fix an issue with custom flags while syncing.**  
+  This patch includes better handling of custom flags added from plugins during the syncing process.
+
 ### v1.6.8
 
 - **Added `as_iterator` to `Pipe.get_data()`.**  

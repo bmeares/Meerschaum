@@ -23,6 +23,7 @@ class SQLConnector(Connector):
     """
 
     IS_INSTANCE: bool = True
+    IS_THREAD_SAFE: bool = True
 
     from ._create_engine import flavor_configs, create_engine
     from ._sql import read, value, exec, execute, to_sql, exec_queries
