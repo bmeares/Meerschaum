@@ -62,7 +62,8 @@ $PYTHON_BIN -m meerschaum start connectors $MRSM_CONNS
 ### Execute the pytest tests.
 $PYTHON_BIN -m pytest \
   --durations=0 \
-  --ignore=portable/ --ignore=test_root/ --ignore=tests/data/ --ignore=docs/ --ff; rc="$?"
+  --ignore=portable/ --ignore=test_root/ --ignore=tests/data/ --ignore=docs/ \
+  --ff --full-trace -v; rc="$?"
 
 ### Cleanup
 if [ "$2" == "rm" ]; then

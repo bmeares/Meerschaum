@@ -77,6 +77,11 @@ def fetch(
                 chunk_message = '\n' + chunk_label + '\n' + chunk_message
             return chunk_success, chunk_message
 
+    workers = kw.get('workers', None)
+    if workers is None and not getattr(self.instance_connector, 'IS_THREAD_SAFE', False):
+        workers = 1
+    kw['workers'] = workers
+
     df = self.connector.fetch(
         self,
         begin = begin,
