@@ -22,6 +22,7 @@ class APIConnector(Connector):
     """
 
     IS_INSTANCE: bool = True
+    IS_THREAD_SAFE: bool = False
 
     from ._delete import delete
     from ._post import post

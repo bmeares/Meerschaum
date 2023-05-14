@@ -102,7 +102,7 @@ def edit_user(
     sqlalchemy = attempt_import('sqlalchemy')
     from meerschaum.connectors.sql.tables import get_tables
     from meerschaum.utils.sql import json_flavors
-    users = get_tables(mrsm_instance=self, debug=debug)['users']
+    users_tbl = get_tables(mrsm_instance=self, debug=debug)['users']
 
     user_id = user.user_id if user.user_id is not None else self.get_user_id(user, debug=debug)
     if user_id is None:
@@ -133,7 +133,12 @@ def edit_user(
     if user.type != '':
         bind_variables['user_type'] = user.type
 
-    query = sqlalchemy.update(users).values(**bind_variables).where(users.c.user_id == user_id)
+    query = (
+        sqlalchemy
+        .update(users_tbl)
+        .values(**bind_variables)
+        .where(users_tbl.c.user_id == user_id)
+    )
 
     result = self.exec(query, debug=debug)
     if result is None:
@@ -150,11 +155,11 @@ def get_user_id(
     from meerschaum.utils.packages import attempt_import
     sqlalchemy = attempt_import('sqlalchemy')
     from meerschaum.connectors.sql.tables import get_tables
-    users = get_tables(mrsm_instance=self, debug=debug)['users']
+    users_tbl = get_tables(mrsm_instance=self, debug=debug)['users']
 
     query = (
-        sqlalchemy.select(users.c.user_id)
-        .where(users.c.username == user.username)
+        sqlalchemy.select(users_tbl.c.user_id)
+        .where(users_tbl.c.username == user.username)
     )
 
     result = self.value(query, debug=debug)
@@ -175,13 +180,13 @@ def get_user_attributes(
     from meerschaum.utils.packages import attempt_import
     sqlalchemy = attempt_import('sqlalchemy')
     from meerschaum.connectors.sql.tables import get_tables
-    users = get_tables(mrsm_instance=self, debug=debug)['users']
+    users_tbl = get_tables(mrsm_instance=self, debug=debug)['users']
 
     user_id = user.user_id if user.user_id is not None else self.get_user_id(user, debug=debug)
 
     query = (
-        sqlalchemy.select(users.c.attributes).
-        where(users.c.user_id == user_id)
+        sqlalchemy.select(users_tbl.c.attributes)
+        .where(users_tbl.c.user_id == user_id)
     )
 
     result = self.value(query, debug=debug)
@@ -210,7 +215,7 @@ def delete_user(
     """Delete a user's record from the users table."""
     ### ensure users table exists
     from meerschaum.connectors.sql.tables import get_tables
-    users = get_tables(mrsm_instance=self, debug=debug)['users']
+    users_tbl = get_tables(mrsm_instance=self, debug=debug)['users']
     plugins = get_tables(mrsm_instance=self, debug=debug)['plugins']
     from meerschaum.utils.packages import attempt_import
     sqlalchemy = attempt_import('sqlalchemy')
@@ -220,7 +225,7 @@ def delete_user(
     if user_id is None:
         return False, f"User '{user.username}' is not registered and cannot be deleted."
 
-    query = sqlalchemy.delete(users).where(users.c.user_id == user_id)
+    query = sqlalchemy.delete(users_tbl).where(users_tbl.c.user_id == user_id)
 
     result = self.exec(query, debug=debug)
     if result is None:
@@ -243,11 +248,11 @@ def get_users(
     """
     ### ensure users table exists
     from meerschaum.connectors.sql.tables import get_tables
-    users = get_tables(mrsm_instance=self, debug=debug)['users']
+    users_tbl = get_tables(mrsm_instance=self, debug=debug)['users']
     from meerschaum.utils.packages import attempt_import
     sqlalchemy = attempt_import('sqlalchemy')
 
-    query = sqlalchemy.select(users.c.username)
+    query = sqlalchemy.select(users_tbl.c.username)
 
     return list(self.read(query, debug=debug)['username'])
 
@@ -263,7 +268,7 @@ def get_user_password_hash(
     """
     from meerschaum.utils.debug import dprint
     from meerschaum.connectors.sql.tables import get_tables
-    users = get_tables(mrsm_instance=self, debug=debug)['users']
+    users_tbl = get_tables(mrsm_instance=self, debug=debug)['users']
     from meerschaum.utils.packages import attempt_import
     sqlalchemy = attempt_import('sqlalchemy')
 
@@ -279,7 +284,7 @@ def get_user_password_hash(
     if user_id is None:
         return None
 
-    query = sqlalchemy.select(users.c.password_hash).where(users.c.user_id == user_id)
+    query = sqlalchemy.select(users_tbl.c.password_hash).where(users_tbl.c.user_id == user_id)
 
     return self.value(query, debug=debug)
 
@@ -293,7 +298,7 @@ def get_user_type(
     Return the user's type.
     """
     from meerschaum.connectors.sql.tables import get_tables
-    users = get_tables(mrsm_instance=self, debug=debug)['users']
+    users_tbl = get_tables(mrsm_instance=self, debug=debug)['users']
     from meerschaum.utils.packages import attempt_import
     sqlalchemy = attempt_import('sqlalchemy')
 
@@ -302,6 +307,6 @@ def get_user_type(
     if user_id is None:
         return None
 
-    query = sqlalchemy.select(users.c.user_type).where(users.c.user_id == user_id)
+    query = sqlalchemy.select(users_tbl.c.user_type).where(users_tbl.c.user_id == user_id)
 
     return self.value(query, debug=debug)

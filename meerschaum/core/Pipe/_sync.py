@@ -10,7 +10,8 @@ from __future__ import annotations
 
 import json
 from meerschaum.utils.typing import (
-    Union, Optional, Callable, Any, Tuple, SuccessTuple, Mapping, Dict, List, Iterable, Generator
+    Union, Optional, Callable, Any, Tuple, SuccessTuple, Mapping, Dict, List, Iterable, Generator,
+    Iterator,
 )
 
 class InferFetch:
@@ -267,22 +268,32 @@ def sync(
         if (
             not isinstance(df, (dict, list, str))
             and 'DataFrame' not in str(type(df))
-            and isinstance(df, (Generator, Iterable))
+            and isinstance(df, (Generator, Iterable, Iterator))
         ):
             from meerschaum.utils.pool import get_pool
             import threading
-            engine_pool_size = (
-                p.instance_connector.engine.pool.size()
-                if p.instance_connector.type == 'sql'
-                else 1
-            )
-            current_num_threads = len(threading.enumerate())
-            workers = kw.get('workers', None)
-            desired_workers = min(workers or engine_pool_size, engine_pool_size)
-            kw['workers'] = max(
-                (desired_workers - current_num_threads),
-                1,
-            )
+            is_thread_safe = getattr(self.instance_connector, 'IS_THREAD_SAFE', False)
+            if is_thread_safe:
+                engine_pool_size = (
+                    p.instance_connector.engine.pool.size()
+                    if p.instance_connector.type == 'sql'
+                    else None
+                )
+                current_num_threads = len(threading.enumerate())
+                workers = kw.get('workers', None)
+                desired_workers = (
+                    min(workers or engine_pool_size, engine_pool_size)
+                    if engine_pool_size is not None
+                    else (workers if is_thread_safe else 1)
+                )
+                if desired_workers is None:
+                    desired_workers = (current_num_threads if is_thread_safe else 1)
+                kw['workers'] = max(
+                    (desired_workers - current_num_threads),
+                    1,
+                )
+            else:
+                kw['workers'] = 1
 
             dt_col = p.columns.get('datetime', None)
 
@@ -309,7 +320,15 @@ def sync(
                     _chunk_success, _chunk_msg = False, str(e)
                 if not _chunk_success:
                     failed_chunks.append(_chunk)
-                return _chunk_success, '\n' + self._get_chunk_label(_chunk, dt_col) + '\n' + _chunk_msg
+                return (
+                    _chunk_success,
+                    (
+                        '\n'
+                        + self._get_chunk_label(_chunk, dt_col)
+                        + '\n'
+                        + _chunk_msg
+                    )
+                )
 
 
             results = sorted(
@@ -317,10 +336,6 @@ def sync(
             )
             chunk_messages = [chunk_msg for _, chunk_msg in results]
             success_bools = [chunk_success for chunk_success, _ in results]
-            failure_indices = [
-                i for i, _success_bool in enumerate(success_bools)
-                if not _success_bool
-            ]
             success = all(success_bools)
             msg = '\n'.join(chunk_messages)
 
@@ -329,9 +344,11 @@ def sync(
             if not success and any(success_bools):
                 if debug:
                     dprint(f"Retrying failed chunks...")
-                for chunk in failed_chunks:
+                chunks_to_retry = [c for c in failed_chunks]
+                failed_chunks = []
+                for chunk in chunks_to_retry:
                     chunk_success, chunk_msg = _process_chunk(chunk)
-                    msg += f"\nRetried chunk:\n{chunk_msg}"
+                    msg += f"\n\nRetried chunk:\n{chunk_msg}\n"
                     retry_success = retry_success and chunk_success
 
             success = success and retry_success

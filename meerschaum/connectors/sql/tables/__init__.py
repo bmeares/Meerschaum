@@ -167,7 +167,7 @@ def get_tables(
 
 def create_tables(
         conn: 'meerschaum.connectors.SQLConnector',
-        tables: Optional[Dict[str, 'sqlalchemy.Table']],
+        tables: Optional[Dict[str, 'sqlalchemy.Table']] = None,
     ) -> bool:
     """
     Create the tables on the database.

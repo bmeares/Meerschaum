@@ -39,7 +39,7 @@ conns = {
     ),
     'duckdb': get_connector('sql', 'test_duckdb',
         #  database=str(data_path / 'test_duckdb.db'),
-        database=':memory:',
+        database=str(data_path / 'test_duck.db'),
         flavor='duckdb',
     ),
     'citus': get_connector('sql', 'test_citus',
