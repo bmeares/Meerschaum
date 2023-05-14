@@ -319,7 +319,6 @@ def read(
             warn(f"[{self}] Failed to retrieve query results:\n" + str(e), stacklevel=3)
             from meerschaum.utils.formatting import get_console
             get_console().print_exception()
->>>>>>> c830881 (Resolve more rebasing conflicts)
 
     read_chunks = 0
     try:
