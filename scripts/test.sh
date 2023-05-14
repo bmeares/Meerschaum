@@ -31,7 +31,7 @@ fi
 api_exists=$(MRSM_ROOT_DIR="$test_root" $PYTHON_BIN -m meerschaum show jobs test_api --nopretty)
 if [ "$api_exists" != "test_api" ]; then
   $PYTHON_BIN -m meerschaum start api \
-    -w 1 -p $test_port --name test_api -y -d -i sql:memory
+    -w 1 -p $test_port --name test_api -y -d -i sql:local
 else
   $PYTHON_BIN -m meerschaum start jobs test_api -y
 fi
