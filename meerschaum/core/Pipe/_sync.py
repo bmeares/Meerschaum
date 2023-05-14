@@ -348,7 +348,7 @@ def sync(
                 failed_chunks = []
                 for chunk in chunks_to_retry:
                     chunk_success, chunk_msg = _process_chunk(chunk)
-                    msg += f"\nRetried chunk:\n{chunk_msg}"
+                    msg += f"\n\nRetried chunk:\n{chunk_msg}\n"
                     retry_success = retry_success and chunk_success
 
             success = success and retry_success
