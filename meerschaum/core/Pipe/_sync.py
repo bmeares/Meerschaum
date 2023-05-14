@@ -344,7 +344,9 @@ def sync(
             if not success and any(success_bools):
                 if debug:
                     dprint(f"Retrying failed chunks...")
-                for chunk in failed_chunks:
+                chunks_to_retry = [c for c in failed_chunks]
+                failed_chunks = []
+                for chunk in chunks_to_retry:
                     chunk_success, chunk_msg = _process_chunk(chunk)
                     msg += f"\nRetried chunk:\n{chunk_msg}"
                     retry_success = retry_success and chunk_success
