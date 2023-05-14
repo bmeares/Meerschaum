@@ -23,7 +23,6 @@ class SQLConnector(Connector):
     """
 
     IS_INSTANCE: bool = True
-    IS_THREAD_SAFE: bool = True
 
     from ._create_engine import flavor_configs, create_engine
     from ._sql import read, value, exec, execute, to_sql, exec_queries
@@ -225,14 +224,27 @@ class SQLConnector(Connector):
         return self._engine
 
     @property
-    def DATABASE_URL(self):
+    def DATABASE_URL(self) -> str:
+        """
+        Return the URI connection string (alias for `SQLConnector.URI`.
+        """
         _ = self.engine
         return str(self._engine_str)
 
     @property
-    def URI(self):
+    def URI(self) -> str:
+        """
+        Return the URI connection string.
+        """
         _ = self.engine
         return str(self._engine_str)
+
+    @property
+    def IS_THREAD_SAFE(self) -> str:
+        """
+        Return whether this connector may be multithreaded.
+        """
+        return self.flavor not in ('duckdb',)
 
     @property
     def metadata(self):
