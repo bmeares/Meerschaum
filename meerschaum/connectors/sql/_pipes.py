@@ -25,7 +25,7 @@ def register_pipe(
 
     ### ensure pipes table exists
     from meerschaum.connectors.sql.tables import get_tables
-    pipes = get_tables(mrsm_instance=self, create=(not pipe.temporary), debug=debug)['pipes']
+    pipes_tbl = get_tables(mrsm_instance=self, create=(not pipe.temporary), debug=debug)['pipes']
 
     if pipe.get_id(debug=debug) is not None:
         return False, f"{pipe} is already registered."
@@ -61,7 +61,7 @@ def register_pipe(
             else parameters
         ),
     }
-    query = sqlalchemy.insert(pipes).values(**values)
+    query = sqlalchemy.insert(pipes_tbl).values(**values)
     result = self.exec(query, debug=debug)
     if result is None:
         return False, f"Failed to register {pipe}."
@@ -111,7 +111,7 @@ def edit_pipe(
 
     ### ensure pipes table exists
     from meerschaum.connectors.sql.tables import get_tables
-    pipes = get_tables(mrsm_instance=self, create=(not pipe.temporary), debug=debug)['pipes']
+    pipes_tbl = get_tables(mrsm_instance=self, create=(not pipe.temporary), debug=debug)['pipes']
 
     import json
     sqlalchemy = attempt_import('sqlalchemy')
@@ -123,8 +123,8 @@ def edit_pipe(
             else parameters
         ),
     }
-    q = sqlalchemy.update(pipes).values(**values).where(
-        pipes.c.pipe_id == pipe.id
+    q = sqlalchemy.update(pipes_tbl).values(**values).where(
+        pipes_tbl.c.pipe_id == pipe.id
     )
 
     result = self.exec(q, debug=debug)
@@ -214,7 +214,7 @@ def fetch_pipes_keys(
         return []
 
     from meerschaum.connectors.sql.tables import get_tables
-    pipes = get_tables(mrsm_instance=self, create=False, debug=debug)['pipes']
+    pipes_tbl = get_tables(mrsm_instance=self, create=False, debug=debug)['pipes']
 
     _params = {}
     for k, v in parameters.items():
@@ -226,30 +226,30 @@ def fetch_pipes_keys(
     ### If a param begins with '_', negate it instead.
     _where = [
         (
-            (pipes.c[key] == val) if not str(val).startswith(negation_prefix)
-            else (pipes.c[key] != key)
+            (pipes_tbl.c[key] == val) if not str(val).startswith(negation_prefix)
+            else (pipes_tbl.c[key] != key)
         ) for key, val in _params.items()
-            if not isinstance(val, (list, tuple)) and key in pipes.c
+            if not isinstance(val, (list, tuple)) and key in pipes_tbl.c
     ]
     select_cols = (
-        [pipes.c.connector_keys, pipes.c.metric_key, pipes.c.location_key]
-        + ([pipes.c.parameters] if tags else [])
+        [pipes_tbl.c.connector_keys, pipes_tbl.c.metric_key, pipes_tbl.c.location_key]
+        + ([pipes_tbl.c.parameters] if tags else [])
     )
 
     q = sqlalchemy.select(*select_cols).where(sqlalchemy.and_(True, *_where))
 
     ### Parse IN params and add OR IS NULL if None in list.
     for c, vals in cols.items():
-        if not isinstance(vals, (list, tuple)) or not vals or not c in pipes.c:
+        if not isinstance(vals, (list, tuple)) or not vals or not c in pipes_tbl.c:
             continue
         _in_vals, _ex_vals = separate_negation_values(vals)
         ### Include params (positive)
         q = (
-            q.where(pipes.c[c].in_(_in_vals)) if None not in _in_vals
-            else q.where(sqlalchemy.or_(pipes.c[c].in_(_in_vals), pipes.c[c].is_(None)))
+            q.where(pipes_tbl.c[c].in_(_in_vals)) if None not in _in_vals
+            else q.where(sqlalchemy.or_(pipes_tbl.c[c].in_(_in_vals), pipes_tbl.c[c].is_(None)))
         ) if _in_vals else q
         ### Exclude params (negative)
-        q = q.where(pipes.c[c].not_in(_ex_vals)) if _ex_vals else q
+        q = q.where(pipes_tbl.c[c].not_in(_ex_vals)) if _ex_vals else q
 
     ### Finally, parse tags.
     _in_tags, _ex_tags = separate_negation_values(tags)
@@ -257,7 +257,7 @@ def fetch_pipes_keys(
     for nt in _in_tags:
         ors.append(
             sqlalchemy.cast(
-                pipes.c['parameters'],
+                pipes_tbl.c['parameters'],
                 sqlalchemy.String,
             ).like(f'%"tags":%"{nt}"%')
         )
@@ -266,17 +266,17 @@ def fetch_pipes_keys(
     for xt in _ex_tags:
         ors.append(
             sqlalchemy.cast(
-                pipes.c['parameters'],
+                pipes_tbl.c['parameters'],
                 sqlalchemy.String,
             ).not_like(f'%"tags":%"{xt}"%')
         )
     q = q.where(sqlalchemy.and_(sqlalchemy.or_(*ors).self_group())) if ors else q
-    loc_asc = sqlalchemy.asc(pipes.c['location_key'])
+    loc_asc = sqlalchemy.asc(pipes_tbl.c['location_key'])
     if self.flavor not in OMIT_NULLSFIRST_FLAVORS:
         loc_asc = sqlalchemy.nullsfirst(loc_asc)
     q = q.order_by(
-        sqlalchemy.asc(pipes.c['connector_keys']),
-        sqlalchemy.asc(pipes.c['metric_key']),
+        sqlalchemy.asc(pipes_tbl.c['connector_keys']),
+        sqlalchemy.asc(pipes_tbl.c['metric_key']),
         loc_asc,
     )
 
@@ -565,9 +565,9 @@ def delete_pipe(
 
     ### ensure pipes table exists
     from meerschaum.connectors.sql.tables import get_tables
-    pipes = get_tables(mrsm_instance=self, create=(not pipe.temporary), debug=debug)['pipes']
+    pipes_tbl = get_tables(mrsm_instance=self, create=(not pipe.temporary), debug=debug)['pipes']
 
-    q = sqlalchemy.delete(pipes).where(pipes.c.pipe_id == pipe.id)
+    q = sqlalchemy.delete(pipes_tbl).where(pipes_tbl.c.pipe_id == pipe.id)
     if not self.exec(q, debug=debug):
         return False, f"Failed to delete registration for {pipe}."
 
@@ -968,15 +968,15 @@ def get_pipe_id(
     import json
     sqlalchemy = attempt_import('sqlalchemy')
     from meerschaum.connectors.sql.tables import get_tables
-    pipes = get_tables(mrsm_instance=self, create=(not pipe.temporary), debug=debug)['pipes']
+    pipes_tbl = get_tables(mrsm_instance=self, create=(not pipe.temporary), debug=debug)['pipes']
 
-    query = sqlalchemy.select(pipes.c.pipe_id).where(
-        pipes.c.connector_keys == pipe.connector_keys
+    query = sqlalchemy.select(pipes_tbl.c.pipe_id).where(
+        pipes_tbl.c.connector_keys == pipe.connector_keys
     ).where(
-        pipes.c.metric_key == pipe.metric_key
+        pipes_tbl.c.metric_key == pipe.metric_key
     ).where(
-        (pipes.c.location_key == pipe.location_key) if pipe.location_key is not None
-        else pipes.c.location_key.is_(None)
+        (pipes_tbl.c.location_key == pipe.location_key) if pipe.location_key is not None
+        else pipes_tbl.c.location_key.is_(None)
     )
     _id = self.value(query, debug=debug, silent=pipe.temporary)
     if _id is not None:
@@ -1001,10 +1001,10 @@ def get_pipe_attributes(
     if pipe.get_id(debug=debug) is None:
         return {}
 
-    pipes = get_tables(mrsm_instance=self, create=(not pipe.temporary), debug=debug)['pipes']
+    pipes_tbl = get_tables(mrsm_instance=self, create=(not pipe.temporary), debug=debug)['pipes']
 
     try:
-        q = sqlalchemy.select(pipes).where(pipes.c.pipe_id == pipe.id)
+        q = sqlalchemy.select(pipes_tbl).where(pipes_tbl.c.pipe_id == pipe.id)
         if debug:
             dprint(q)
         attributes = (

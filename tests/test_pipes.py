@@ -565,7 +565,7 @@ def test_get_data_iterator(flavor: str):
     pipe = mrsm.Pipe('test', 'get_data_iterator', instance=conn)
     pipe.delete()
     pipe = mrsm.Pipe(
-        'test', 'get_data_iterator',
+        'test', 'get_data_iterator', 'foo', 
         instance = conn,
         columns = {'datetime': 'id'},
         dtypes = {'id': 'Int64'},
@@ -591,5 +591,8 @@ def test_get_data_iterator(flavor: str):
         debug = debug,
     )
     chunks = [chunk for chunk in gen]
+    print(chunks)
+    for c in chunks:
+        print(c)
     df = pd.concat(chunks)
     assert df['id'].to_list() == [0, 2, 4, 6]
