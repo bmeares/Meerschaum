@@ -126,6 +126,7 @@ def _get_data_as_iterator(
     """
     Return a pipe's data as a generator.
     """
+    from meerschaum.config import get_config
     from meerschaum.utils.misc import round_time
     parse_begin = isinstance(begin, str)
     parse_end = isinstance(end, str)
@@ -136,6 +137,10 @@ def _get_data_as_iterator(
         begin = dateutil_parser.parse(begin)
     if parse_end:
         end = dateutil_parser.parse(end)
+
+    if not self.exists(debug=debug):
+        return
+
     _ = kw.pop('as_chunks', None)
     _ = kw.pop('as_iterator', None)
     min_dt = (
@@ -161,7 +166,6 @@ def _get_data_as_iterator(
             else datetime.timedelta(days=1)
         )
 
-
     ### If we can't determine bounds
     ### or if chunk_interval exceeds the max,
     ### return a single chunk.
@@ -170,15 +174,14 @@ def _get_data_as_iterator(
         or
         (min_dt + chunk_interval) > max_dt
     ):
-        return (
-            self.get_data(
-                begin = begin,
-                end = end,
-                params = params,
-                fresh = fresh,
-                debug = debug,
-            ) for i in range(1)
+        yield self.get_data(
+            begin = begin,
+            end = end,
+            params = params,
+            fresh = fresh,
+            debug = debug,
         )
+        return
 
     chunk_begin = min_dt
     chunk_end = min_dt + chunk_interval
