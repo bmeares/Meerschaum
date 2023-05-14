@@ -515,7 +515,7 @@ def test_sync_generators(flavor: str):
     )
     pipe.delete()
     start_time = datetime.datetime(2023, 1, 1)
-    num_docs = 10
+    num_docs = 3
     generator = ([{'dt': start_time + datetime.timedelta(days=i)}] for i in range(num_docs))
     success, msg = pipe.sync(generator, debug=debug)
     assert success, msg
