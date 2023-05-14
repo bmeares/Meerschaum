@@ -31,7 +31,7 @@ fi
 api_exists=$(MRSM_ROOT_DIR="$test_root" $PYTHON_BIN -m meerschaum show jobs test_api --nopretty)
 if [ "$api_exists" != "test_api" ]; then
   $PYTHON_BIN -m meerschaum start api \
-    -w 1 -p $test_port --name test_api -y -d -i sql:memory
+    -w 1 -p $test_port --name test_api -y -d -i sql:local
 else
   $PYTHON_BIN -m meerschaum start jobs test_api -y
 fi
@@ -62,7 +62,8 @@ $PYTHON_BIN -m meerschaum start connectors $MRSM_CONNS
 ### Execute the pytest tests.
 $PYTHON_BIN -m pytest \
   --durations=0 \
-  --ignore=portable/ --ignore=test_root/ --ignore=tests/data/ --ignore=docs/ --ff; rc="$?"
+  --ignore=portable/ --ignore=test_root/ --ignore=tests/data/ --ignore=docs/ \
+  --ff --full-trace -v; rc="$?"
 
 ### Cleanup
 if [ "$2" == "rm" ]; then
