@@ -1288,8 +1288,18 @@ def import_pandas(
         with _locks['emitted_pandas_warning']:
             if not emitted_pandas_warning:
                 from meerschaum.utils.warnings import warn
+                emitted_pandas_warning = True
+                warn(
+                    (
+                        "You are using an alternative Pandas implementation "
+                        + f"'{pandas_module_name}'"
+                        + "\nFeatures may not work as expected."
+                    ),
+                    stack = False,
+                )
 
     pytz = attempt_import('pytz', debug=debug, lazy=False, **kw)
+    pandas = attempt_import('pandas', debug=debug, lazy=False, **kw)
     pd = attempt_import(pandas_module_name, debug=debug, lazy=lazy, **kw)
     return pd
 
