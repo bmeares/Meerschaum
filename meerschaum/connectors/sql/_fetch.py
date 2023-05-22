@@ -137,7 +137,7 @@ def get_pipe_metadef(
     from meerschaum.config import get_config
 
     definition = get_pipe_query(pipe)
-    btm = get_pipe_backtrack_minutes(pipe) 
+    btm = self.get_pipe_backtrack_minutes(pipe) 
 
     if not pipe.columns.get('datetime', None):
         _dt = pipe.guess_datetime()
@@ -270,6 +270,7 @@ def set_pipe_query(pipe: mrsm.Pipe, query: str) -> None:
     dict_to_set[key_to_set] = query
 
 
+@staticmethod
 def get_pipe_backtrack_minutes(pipe) -> Union[int, float]:
     """
     Return the first available value for the following parameter keys:
