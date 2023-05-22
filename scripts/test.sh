@@ -18,6 +18,8 @@ if [ "$1" == "db" ]; then
   cd ../
 fi
 
+rm -rf "$test_root/data"
+
 ### Install the `stress` plugin.
 $PYTHON_BIN -m meerschaum show plugins
 PLUGINS=$($PYTHON_BIN -m meerschaum show plugins --nopretty)

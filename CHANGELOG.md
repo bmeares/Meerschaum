@@ -4,6 +4,11 @@
 
 This is the current release cycle, so stay tuned for future releases!
 
+### v.1.6.11
+
+- **Fix an issue with in-place syncing.**  
+  When syncing a SQL pipe in-place with a backtrack interval, the interval is applied to the existing data stage to avoid inserting duplicate rows.
+
 ### v1.6.9 — v1.6.10
 
 - **Improve thread safety checks.**  
