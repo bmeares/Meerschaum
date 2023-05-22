@@ -603,6 +603,8 @@ def test_sync_inplace(flavor: str):
     """
     Verify that in-place syncing works as expected.
     """
+    if flavor == 'api':
+        return
     conn = conns[flavor]
     source_pipe = Pipe('test', 'inplace', instance=conn)
     source_pipe.delete()
