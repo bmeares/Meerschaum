@@ -1414,11 +1414,12 @@ def sync_pipe_inplace(
     drop_backtrack_query = f"DROP TABLE {backtrack_table_name}"
     if table_exists(backtrack_table_raw, self, debug=debug):
         backtrack_queries.append(drop_backtrack_query)
+    btm = max(self.get_pipe_backtrack_minutes(pipe), 1)
     backtrack_def = self.get_pipe_data_query(
         pipe,
         begin = begin,
         end = end,
-        begin_add_minutes = -1,
+        begin_add_minutes = (-1 * btm),
         end_add_minutes = 1,
         params = params,
         debug = debug,

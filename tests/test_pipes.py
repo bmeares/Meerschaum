@@ -596,3 +596,63 @@ def test_get_data_iterator(flavor: str):
         print(c)
     df = pd.concat(chunks)
     assert df['id'].to_list() == [0, 2, 4, 6]
+
+
+@pytest.mark.parametrize("flavor", sorted(list(all_pipes.keys())))
+def test_sync_inplace(flavor: str):
+    """
+    Verify that in-place syncing works as expected.
+    """
+    conn = conns[flavor]
+    source_pipe = Pipe('test', 'inplace', instance=conn)
+    source_pipe.delete()
+    source_pipe = Pipe(
+        'test', 'inplace', 'src',
+        instance = conn,
+        columns = {'datetime': 'dt'}
+    )
+    dest_pipe = Pipe('test', 'inplace', 'dest', instance=conn)
+    dest_pipe.delete()
+    dest_pipe = Pipe(
+        str(conn), 'inplace', 'dest',
+        instance = conn,
+        columns = {'datetime': 'dt'},
+        parameters = {
+            "fetch": {
+                "definition": "SELECT * FROM test_inplace_src",
+                "backtrack_minutes": 1440,
+            }
+        },
+    )
+
+    docs = [
+        {'dt': '2023-01-01 00:00:00'},
+        {'dt': '2023-01-01 00:01:00'},
+        {'dt': '2023-01-01 00:02:00'},
+        {'dt': '2023-01-01 00:03:00'},
+        {'dt': '2023-01-01 00:04:00'},
+    ]
+    success, msg = source_pipe.sync(docs)
+    assert success, msg
+
+    success, msg = dest_pipe.sync(debug=debug)
+    assert success, msg
+    assert dest_pipe.get_rowcount(debug=debug) == len(docs)
+
+    success, msg = dest_pipe.sync(debug=debug)
+    assert success, msg
+    assert dest_pipe.get_rowcount(debug=debug) == len(docs)
+
+    new_docs = [
+        {'dt': '2023-01-02 00:00:00'},
+        {'dt': '2023-01-02 00:01:00'},
+        {'dt': '2023-01-02 00:02:00'},
+        {'dt': '2023-01-02 00:03:00'},
+        {'dt': '2023-01-02 00:04:00'},
+    ]
+    success, msg = source_pipe.sync(new_docs)
+    assert success, msg
+
+    success, msg = dest_pipe.sync(debug=debug)
+    assert success, msg
+    assert dest_pipe.get_rowcount(debug=debug) == len(docs) + len(new_docs)
