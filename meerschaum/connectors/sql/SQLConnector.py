@@ -244,7 +244,11 @@ class SQLConnector(Connector):
         """
         Return whether this connector may be multithreaded.
         """
-        return self.flavor not in ('duckdb',)
+        if self.flavor == 'duckdb':
+            return False
+        if self.flavor == 'sqlite':
+            return ':memory:' not in self.URI
+        return True
 
     @property
     def metadata(self):

@@ -658,3 +658,31 @@ def test_sync_inplace(flavor: str):
     success, msg = dest_pipe.sync(debug=debug)
     assert success, msg
     assert dest_pipe.get_rowcount(debug=debug) == len(docs) + len(new_docs)
+
+
+@pytest.mark.parametrize("flavor", sorted(list(all_pipes.keys())))
+def test_nested_chunks(flavor: str):
+    """
+    Sync nested chunk generators.
+    """
+    conn = conns[flavor]
+    pipe = mrsm.Pipe('test', 'chunks', 'nested', instance=conn)
+    pipe.delete()
+    pipe = mrsm.Pipe('test', 'chunks', 'nested', instance=conn)
+
+    num_docs = 3
+    docs = [{'a': i} for i in range(num_docs)]
+    chunks = ([{'chunk_ix': i, **doc}] for i, doc in enumerate(docs))
+    chunks_of_chunks = (
+        chunk
+        for chunk in chunks
+    )
+    chunks_of_chunks_of_chunks = (
+        g for g in chunks_of_chunks
+    )
+    success, msg = pipe.sync(chunks_of_chunks_of_chunks, debug=debug)
+    from meerschaum.utils.formatting import print_tuple
+    print_tuple((success, msg))
+    assert success, msg
+    df = pipe.get_data()
+    assert len(df) == num_docs

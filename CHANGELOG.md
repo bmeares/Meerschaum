@@ -4,7 +4,57 @@
 
 This is the current release cycle, so stay tuned for future releases!
 
-### v.1.6.11
+### v1.6.12
+
+- **Allow nested chunk generators.**  
+  This patch more gracefully handles labels for situations with nested chunk generators and adds and explicit test for this scenario.
+
+  ```python
+  import meerschaum as mrsm
+  pipe = mrsm.Pipe('foo', 'bar', instance='sql:memory')
+  
+  docs = [{'color': 'red'}, {'color': 'green'}]
+  num_chunks = 3
+  num_batches = 2
+
+  def build_chunks():
+      return (
+          [
+              {'chunk_ix': chunk_ix, **doc}
+              for doc in docs
+          ]
+          for chunk_ix in range(num_chunks)
+      )
+
+  batches = (
+      (
+          [
+              {'batch_ix': batch_ix, **doc}
+              for doc in chunk
+          ]
+          for chunk in build_chunks()
+      )
+      for batch_ix in range(num_batches)
+  )
+
+  pipe.sync(batches)
+  print(pipe.get_data())
+  #     batch_ix  chunk_ix  color
+  # 0          0         0    red
+  # 1          0         0  green
+  # 2          0         1    red
+  # 3          0         1  green
+  # 4          0         2    red
+  # 5          0         2  green
+  # 6          1         0    red
+  # 7          1         0  green
+  # 8          1         1    red
+  # 9          1         1  green
+  # 10         1         2    red
+  # 11         1         2  green
+  ```
+
+### v1.6.11
 
 - **Fix an issue with in-place syncing.**  
   When syncing a SQL pipe in-place with a backtrack interval, the interval is applied to the existing data stage to avoid inserting duplicate rows.
