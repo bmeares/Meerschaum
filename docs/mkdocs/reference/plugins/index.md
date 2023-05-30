@@ -6,10 +6,6 @@ Meerschaum plugins let you ingest any data source into [pipes](/reference/pipes)
 
     Plugins are just Python modules, so the sky is the limit as to what's possible. The main idea behind plugins is to connect to any arbitrary data source: read more about the [types of plugins](/reference/plugins/types-of-plugins/) to get into the specifics.
 
-!!! faq "How do I use plugins?"
-
-    Check out [this page](/reference/plugins/using-plugins/) for information on installing, hosting, and executing your plugins.
-
 !!! faq "Ok, I think I understand. How do I make my own plugins?"
 
     Here is the [complete guide to writing your own plugins](/reference/plugins/writing-plugins/), but the TL;DR is this:

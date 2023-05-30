@@ -1,0 +1,3 @@
+nav:
+  - index.md
+  - "🗄️ Instance Connectors": "instance-connectors.md"
