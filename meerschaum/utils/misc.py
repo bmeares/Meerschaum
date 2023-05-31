@@ -8,7 +8,7 @@ Miscellaneous functions go here
 from __future__ import annotations
 from meerschaum.utils.typing import (
     Union, Mapping, Any, Callable, Optional, List, Dict, SuccessTuple, Iterable, PipesDict, Tuple,
-    InstanceConnector, Hashable
+    InstanceConnector, Hashable, Generator, Iterator,
 )
 import meerschaum as mrsm
 
@@ -2127,6 +2127,8 @@ def get_datetime_bound_from_df(
     def compare(a, b):
         if a is None:
             return b
+        if b is None:
+            return a
         if minimum:
             return a if a < b else b
         return a if a > b else b
@@ -2148,8 +2150,33 @@ def get_datetime_bound_from_df(
             best_yet = compare(best_yet, val)
         return best_yet
 
+    if 'DataFrame' in str(type(df)):
+        return (
+            df[datetime_column].min(skipna=True)
+            if minimum
+            else df[datetime_column].max(skipna=True)
+        )
+
+    return None
+
+
+def df_is_chunk_generator(df: Any) -> bool:
+    """
+    Determine whether to treat `df` as a chunk generator.
+
+    Note this should only be used in a context where generators are expected,
+    as it will return `True` for any iterable.
+
+    Parameters
+    ----------
+    The DataFrame or chunk generator to evaluate.
+
+    Returns
+    -------
+    A `bool` indicating whether to treat `df` as a generator.
+    """
     return (
-        df[datetime_column].min(skipna=True)
-        if minimum
-        else df[datetime_column].max(skipna=True)
+        not isinstance(df, (dict, list, str))
+        and 'DataFrame' not in str(type(df))
+        and isinstance(df, (Generator, Iterable, Iterator))
     )

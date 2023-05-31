@@ -9,6 +9,10 @@ Synchronize a pipe's data with its source via its connector
 from __future__ import annotations
 
 import json
+import datetime
+import time
+import threading
+
 from meerschaum.utils.typing import (
     Union, Optional, Callable, Any, Tuple, SuccessTuple, Mapping, Dict, List, Iterable, Generator,
     Iterator,
@@ -117,10 +121,10 @@ def sync(
     from meerschaum.utils.formatting import get_console
     from meerschaum.utils.venv import Venv
     from meerschaum.connectors import get_connector_plugin
-
+    from meerschaum.utils.misc import df_is_chunk_generator
+    from meerschaum.utils.pool import get_pool
     from meerschaum.config import get_config
-    import datetime
-    import time
+
     if (callback is not None or error_callback is not None) and blocking:
         warn("Callback functions are only executed when blocking = False. Ignoring...")
 
@@ -265,13 +269,7 @@ def sync(
         _checkpoint(**kw)
         
         ### Allow for dataframe generators or iterables.
-        if (
-            not isinstance(df, (dict, list, str))
-            and 'DataFrame' not in str(type(df))
-            and isinstance(df, (Generator, Iterable, Iterator))
-        ):
-            from meerschaum.utils.pool import get_pool
-            import threading
+        if df_is_chunk_generator(df):
             is_thread_safe = getattr(self.instance_connector, 'IS_THREAD_SAFE', False)
             if is_thread_safe:
                 engine_pool_size = (
@@ -332,7 +330,14 @@ def sync(
 
 
             results = sorted(
-                [(chunk_success, chunk_msg)] + list(pool.imap(_process_chunk, df))
+                [(chunk_success, chunk_msg)] + (
+                    list(pool.imap(_process_chunk, df))
+                    if not df_is_chunk_generator(chunk)
+                    else [
+                        _process_chunk(_child_chunks)
+                        for _child_chunks in df
+                    ]
+                )
             )
             chunk_messages = [chunk_msg for _, chunk_msg in results]
             success_bools = [chunk_success for chunk_success, _ in results]
