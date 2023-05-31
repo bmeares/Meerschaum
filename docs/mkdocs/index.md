@@ -111,13 +111,13 @@ h1 {
 
   <h3>Organize ETL Processes into <a href="/reference/pipes">Pipes</a></h3>
 
-  <p>Meerschaum <a href="/reference/pipes">Pipes</a> represent parametrized ETL processes to update your target tables. Pipes are tagged and organized into hierarchies to make scaling up a breeze.</p>
+  <p>Meerschaum <a href="/reference/pipes">Pipes</a> are parametrized ETL processes that are tagged and organized into hierarchies to make scaling up a breeze.</p>
 
   <img src="/assets/screenshots/show-pipes-fred.png"></img>
   <img src="/assets/screenshots/show-pipes-chicken.png"></img>
 
   <h3>Robust <a href="/reference/plugins/writing-plugins/">Plugin System</a></h3>
-  <p>Plugins make it easy to ingest any data source or add functionality to Meerschaum.</p>
+  <p>Plugins make it easy to ingest any data source, add functionality to Meerschaum, and organize your utility scripts.</p>
   <img src="/assets/screenshots/plugin-init.png"></img>
 
 
@@ -150,7 +150,7 @@ h1 {
   </div>
   <div class="grid-child">
 
-    <h3>High Performance SQL Transformations</h3>
+    <h3>Performant SQL Transformations</h3>
 
     <p>SQL pipes with the same instance and source connector are synced in-place ― deltas are resolved entirely through SQL and nothing is loaded into RAM.</p>
 
@@ -158,13 +158,13 @@ h1 {
 
     <h4>Concurrency at its Finest</h4>
 
-    <p>The syncs multiple pipes in parallel.</p>
+    <p>Maximize your throughput by syncing multiple pipes in parallel.</p>
 
     <img src="/assets/screenshots/sql-inplace-parallel.png"></img>
 
     <h4>Elegant Chunking</h4>
 
-    <p>Calm your out-of-memory fears with automatic chunking. Several chunks are synced in parallel to inscrease throughput.</p>
+    <p>Calm your out-of-memory fears with automatic, parallelized chunking.</p>
 
     <img src="/assets/screenshots/sql-chunks.png"></img>
 
