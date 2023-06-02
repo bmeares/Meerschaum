@@ -754,12 +754,12 @@ def psql_insert_copy(
         (
             (
                 (
-                    json.dumps(item).replace('\0', '')
+                    json.dumps(item).replace('\0', '').replace('\\u0000', '')
                     if isinstance(item, (dict, list))
                     else (
                         item
                         if not isinstance(item, str)
-                        else item.replace('\0', '')
+                        else item.replace('\0', '').replace('\\u0000', '')
                     )
                 )
             ) if item is not None
