@@ -4,6 +4,11 @@
 
 This is the current release cycle, so stay tuned for future releases!
 
+### v1.6.13
+
+- **Remove `\\u0000` from strings when inserting into PostgreSQL.**  
+  Replace both `\0` and `\\u0000` with empty strings when streaming rows into PostgreSQL.
+
 ### v1.6.12
 
 - **Allow nested chunk generators.**  
