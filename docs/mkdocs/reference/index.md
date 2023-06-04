@@ -8,10 +8,11 @@ There are a number of resources you can check out when learning Meerschaum:
 
 - **This wiki!**  
   Use the index to the left to navigate through various topics, such as the following:
+    - How to [write your own plugins](/reference/plugins/writing-plugins/).
     - [Bootstrapping pipes](/reference/pipes/bootstrapping/)
     - Inside the [syncing engine](/reference/pipes/syncing/)
     - All about [Connectors](/reference/connectors/)
-    - How to quickly [write your own plugins](/reference/plugins/writing-plugins/).
+- The **[Awesome Meerschaum](https://github.com/bmeares/awesome-meerschaum) project list**.
 - My **video tutorial series** [*Learning Meerschaum*](/tutorials).
 - **Articles** published about Meerschaum:
     - Interview featured in [*Console 100 - The Open Source Newsletter*](https://console.substack.com/p/console-100)

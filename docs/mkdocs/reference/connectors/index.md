@@ -66,17 +66,5 @@ To create a new connector (or redefine an existing one), run the command `bootst
 To delete a connector, run the command `delete connectors` with the `-c` connector keys flag:
 
 ```bash
-delete connectors -c sql:myremoteconnector -y
+mrsm delete connectors -c sql:myremoteconnector -y
 ```
-
-## 🤔 Types
-
-!!! tip "Connectors give you options"
-    A connector's type determines the protocol it uses and its required attributes. Different types of connectors are capable of different tasks and have varying levels of flexibility and performance.
-
-| Type     | Pros                                                         | Cons                                                         | Use Cases                                                    |
-| -------- | ------------------------------------------------------------ | ------------------------------------------------------------ | ------------------------------------------------------------ |
-| `sql`    | - Fast transfer rates<br />- May be instance connector       | - Typically network restricted for security                  | - Internal use behind a firewall<br />- Connect API instance to a database<br />- Large data transfers (>100,000 rows) |
-| `api`    | - Low resource requirements<br />- APIs may be chained together<br />- May be instance / repository connector | - Slower than direct database connection                     | - Endpoint for or deploy on IoT devices<br />- Expose SQLite databases<br />- Connect to a database instance that's behind firewall<br />- Chaining together API instances |
-| `plugin` | - Allows developers to ingest any data source                | - Usually for one specific data source<br />- May not be an instance connector | - Ingesting data from other APIs<br />- Integrating legacy systems into Meerschaum |
-| `mqtt`   | - Subscribe to MQTT topics                                   | - Meerschaum shell must be running to receive data<br />- May not be an instance connector | - Ingesting data from existing IoT devices        

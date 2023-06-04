@@ -2,5 +2,6 @@ title: Get Started
 nav:
   - "🛠️ Setup": index.md
   - "🏗️ Building a Pipe": bootstrap.md
+  - "📦️ Compose Projects": compose-projects.md
   - "🖥️ Web Console": start-api.md
   - ...

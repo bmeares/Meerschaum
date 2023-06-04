@@ -1,6 +1,6 @@
 site_name: Meerschaum Documentation
 site_url: https://meerschaum.io
-site_description: "Build your data pipes with Meerschaum, the data engineer's toolbox!"
+site_description: "Craft elegant data pipes with Meerschaum."
 site_author: Bennett Meares
 theme:
   features:

@@ -1,9 +1,8 @@
 nav:
   - Home: index.md
-#  - Features: features
   - Get Started: get-started
   - Reference: reference
-  - "Video Tutorials": tutorials
-  - Package Docs: https://docs.meerschaum.io
-  - FAQ: faq.md
+  - Tutorials: tutorials
+  - Docs: https://docs.meerschaum.io
+  - Projects: https://github.com/bmeares/awesome-meerschaum
   - News: news

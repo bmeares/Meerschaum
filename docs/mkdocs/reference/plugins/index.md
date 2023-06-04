@@ -1,16 +1,25 @@
 # ➕ Plugins
 
-Meerschaum plugins let you ingest any data source into [pipes](/reference/pipes) as well as definiting custom actions, API endpoints, and more.
+Meerschaum plugins let you ingest any data source into [pipes](/reference/pipes) as well as defining custom actions, API endpoints, and more.
 
-!!! faq "What can I do with plugins?"
+!!! question "What can I do with plugins?"
 
     Plugins are just Python modules, so the sky is the limit as to what's possible. The main idea behind plugins is to connect to any arbitrary data source: read more about the [types of plugins](/reference/plugins/types-of-plugins/) to get into the specifics.
 
-!!! faq "How do I use plugins?"
+!!! question "If plugins are just Python modules, why don't I just use a normal Python package?"
 
-    Check out [this page](/reference/plugins/using-plugins/) for information on installing, hosting, and executing your plugins.
+    Of course you can still use Meerschaum in typical Python packages! The plugins interface provides these benefits for your convenience, however:
 
-!!! faq "Ok, I think I understand. How do I make my own plugins?"
+    - **No boilerplate.**  
+      You might only need to define a short `fetch()` function. Skip `setup.py` / `pyproject.toml` and write only what you need.
+
+    - **Fearless refactoring.**  
+      Plugins are self-contained and portable, which means you can safely refactor your plugins without worrying about breaking imports somewhere else in your codebase.
+
+    - **Get core functionality for free.**  
+      Writing your module as a plugin unlocks access to the rest of the Meerschaum system, e.g. the [connector management system](/reference/connectors), [date-bounded syncing](/reference/pipes/syncing/), and the [Meerschaum Compose workflow](/reference/compose/).
+
+!!! question "Ok, I think I understand. How do I make my own plugins?"
 
     Here is the [complete guide to writing your own plugins](/reference/plugins/writing-plugins/), but the TL;DR is this:
 
