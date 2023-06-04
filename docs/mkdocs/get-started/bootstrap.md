@@ -40,7 +40,7 @@ See the [bootstrapping reference page](/reference/pipes/bootstrapping/) for furt
 
 !!! success "Success! Now what?"
 
-    Well done, you've built your first pipe! Check out [all of the commands](/reference/actions) you have at your disposal.
+    Well done, you've built your first pipe! When you're ready to build your first project, head over the to [compose projects guide](/get-started/compose-projects).
 
     For now, here are some useful commands to manage your pipe:
 

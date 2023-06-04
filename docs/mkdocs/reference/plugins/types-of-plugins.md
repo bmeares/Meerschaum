@@ -66,26 +66,27 @@ Actions are a blank slate, and I'm really excited to see the creativity the comm
 ??? example "Action plugin example"
     ```python
     # ~/.config/meerschaum/plugins/foo.py
+
     __version__ = '0.0.1'
     required = []
 
+    import meerschaum as mrsm
     from meerschaum.plugins import make_action
     from meerschaum.utils.typing import Optional, List, SuccessTuple
 
     @make_action
-    def foo(action: Optional[List[str]] = None, **kw) -> SuccessTuple:
+    def foo(action: Optional[List[str]] = None, **kwargs) -> SuccessTuple:
         """Echo back the words that follow `mrsm foo`."""
         if not action:
             return False, "You didn't say anything."
         return True, "You said: " + ' '.join(action)
 
     @make_action
-    def bar(**kw) -> SuccessTuple:
+    def bar(**kwargs) -> SuccessTuple:
         """Help text for the command `bar`."""
-        from meerschaum.utils.formatting import pprint
         print("This is the entry from the command `mrsm bar`.")
         print("These are the flags you provided:")
-        pprint(kw)
+        mrsm.pprint(kwargs)
         return True, "Success"
     ```
 

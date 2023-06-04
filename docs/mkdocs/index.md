@@ -94,8 +94,9 @@ h1 {
     <h2>What is Meerschaum?</h2>
     <p>Meerschaum is a platform for quickly creating and managing time-series data streams called <b><a href="/reference/pipes/">pipes</a></b>. With Meerschaum, you can have a data visualization stack running in minutes.</p>
     <h2>Why Meerschaum?</h2>
+    <p>Two words: <i>Incremental updates</i>. Fetch the data you need, and Meerschaum will handle the rest.</p>
     <p>If you've worked with time-series data, you know the headaches that come with ETL. Meerschaum is a system that makes consolidating and syncing data easy.</p>
-    <p>Meerschaum instead gives you better tools to define and sync your data streams. And don't worry — you can always incorporate Meerschaum into your existing scripts.</p>
+    <p>Meerschaum instead gives you better tools to define and sync your data streams. And don't worry — you can always incorporate Meerschaum into your existing systems.</p>
 
   </div>
   <div class="grid-child">
@@ -104,7 +105,148 @@ h1 {
   </div>
 </div>
 
-<h2> Video Tutorials</h2>
+<h2>✨ Features</h2>
+<div class="grid-container">
+  <div class="grid-child">
+
+  <h3>Organize ETL Processes into <a href="/reference/pipes">Pipes</a></h3>
+
+  <p>Meerschaum <a href="/reference/pipes">Pipes</a> are parametrized ETL processes that are tagged and organized into hierarchies to make scaling up a breeze.</p>
+
+  <img src="/assets/screenshots/show-pipes-fred.png"></img>
+  <img src="/assets/screenshots/show-pipes-chicken.png"></img>
+
+  <h3>Robust <a href="/reference/plugins/writing-plugins/">Plugin System</a></h3>
+  <p>Plugins make it easy to ingest any data source, add functionality to Meerschaum, and organize your utility scripts.</p>
+  <img src="/assets/screenshots/plugin-init.png"></img>
+
+
+  <h3>Clean Connector Management</h3>
+
+  <p>Define your connectors at any level: through the CLI, in your environment, or dynamically.</p>
+
+  ```bash
+  ### You can follow an interactive wizard.
+  mrsm bootstrap connector
+
+  ### Or define connectors in your environment.
+  export MRSM_SQL_BAZ='postgresql://foo:bar@localhost:5432/baz'
+  export MRSM_MONGODB_LOCAL='{
+    "uri": "mongodb://localhost:27017",
+    "database": "meerschaum"
+  }'
+  ```
+
+  ```python
+  ### Or you can build connectors on-the-fly in code.
+  import meerschaum as mrsm
+  conn = mrsm.get_connector('sql:demo', flavor='sqlite', database='/tmp/demo.db')
+  ```
+
+  <h3>Design, Develop, and Deploy with <a href="/reference/compose">Meerschaum Compose</a></h3>
+
+  <p>The <a href="/reference/compose">compose</a> workflow allows you to iterate with and version-control your pipes, making collaboration and maintainability much smoother.</p>
+  
+  <img src="/assets/screenshots/mrsm-compose-techslamneggs.png"></img>
+
+  </div>
+  <div class="grid-child">
+
+    <h3>Performant SQL Transformations</h3>
+
+    <p>SQL pipes with the same instance and source connector are synced in-place ― deltas are resolved entirely through SQL and nothing is loaded into RAM.</p>
+
+    <img src="/assets/screenshots/sql-inplace.png"></img>
+
+    <h4>Concurrency at its Finest</h4>
+
+    <p>Maximize your throughput by syncing multiple pipes in parallel.</p>
+
+    <img src="/assets/screenshots/sql-inplace-parallel.png"></img>
+
+    <h4>Elegant Chunking</h4>
+
+    <p>Calm your out-of-memory fears with automatic, parallelized chunking.</p>
+
+    <img src="/assets/screenshots/sql-chunks.png"></img>
+
+    <h3>Simple-Yet-Powerful API</h3>
+
+    Want to use Meerschaum in your code? Check out the <a href="https://docs.meerschaum.io">package documentation</a>!
+
+    ```python
+    import meerschaum as mrsm
+    conn = mrsm.get_connector("sql:demo", uri="sqlite:////tmp/demo.db")
+
+    pipe = mrsm.Pipe(
+        'foo', 'bar',
+        instance = conn,
+        columns = {'datetime': 'dt', 'id': 'id'},
+        dtypes = {'attrs': 'json'},
+    )
+    docs = [
+        {'dt': '2023-01-01', 'id': 1, 'val': 123.4},
+        {'dt': '2023-01-01', 'id': 2, 'val': 567.8},
+    ]
+    pipe.sync(docs)
+
+    docs = [
+        {'dt': '2023-01-01', 'id': 1, 'attrs': {'foo': 'bar'}},
+    ]
+    pipe.sync(docs)
+
+    df = pipe.get_data(params={'id': [1, 2]})
+    print(df)
+    #           dt  id    val           attrs
+    # 0 2023-01-01   1  123.4  {'foo': 'bar'}
+    # 1 2023-01-01   2  567.8            None
+    ```
+
+  <h3>Extensible Connectors Interface</h3>
+
+  Add custom connector types with the <a href="/reference/plugins/writing-plugins/#the-make_connector-decorator"><code class="highlight"><span class="nd">@make_connector</span></code> decorator</a>.
+
+  ```python
+  from meerschaum.connectors import make_connector, Connector
+  required = ['requests']
+
+  @make_connector
+  class NWSConnector(Connector):
+
+      REQUIRED_ATTRIBUTES = ['username', 'password']
+
+      def fetch(self, pipe, begin=None, end=None, **kw):
+          params = {}
+          begin = begin or pipe.get_sync_time()
+          if begin:
+              params['start'] = begin.isoformat()
+          if end:
+              params['end'] = end.isoformat()
+
+          stations = pipe.parameters.get('nws', {}).get('stations', [])
+          for station in stations:
+              url = f"https://api.weather.gov/stations/{station}/observations"
+              response = self.session.get(url, params=params)
+              yield [
+                feature['properties']
+                for feature in response.json()['features']
+              ]
+
+      @property
+      def session(self):
+          _sesh = self.__dict__.get('_session', None)
+          if _sesh is not None:
+              return _sesh
+          import requests
+          self._session = requests.Session()
+          self._session.auth = (self.username, self.password)
+          return self._session
+  ```
+
+  </div>
+</div>
+
+<h2>Video Tutorials</h2>
 
 <div class="grid-container">
   <div class="grid-child">

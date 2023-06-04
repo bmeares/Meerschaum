@@ -2,7 +2,7 @@ title: Reference
 nav:
   - index.md
   - "🚰 Pipes": pipes
-  - "🔌 Connectors": connectors.md
+  - "🔌 Connectors": connectors
   - "🥞 Stack": stack.md
   - "🎼 Compose": compose.md
   - "⏯️ Actions": actions
