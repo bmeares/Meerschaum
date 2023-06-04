@@ -123,29 +123,31 @@ h1 {
 
   <h3>Clean Connector Management</h3>
 
-  <p><a href="/reference/connectors/#-creating-a-connector">Register new connectors</a> or add them as environment variables:</p>
+  <p>Define your connectors at any level: through the CLI, in your environment, or dynamically.</p>
 
   ```bash
+  ### You can follow an interactive wizard.
+  mrsm bootstrap connector
+
+  ### Or define connectors in your environment.
   export MRSM_SQL_BAZ='postgresql://foo:bar@localhost:5432/baz'
-  export MRSM_SQL_FUZZ='{
-    "flavor": "timescaledb",
-    "username": "foo",
-    "password": "bar",
-    "host": "localhost",
-    "port": 5432,
-    "database": "fuzz"
-  }'
-  export MRSM_SQL_TEMP='{
-    "flavor": "sqlite",
-    "database": "/tmp/temp.db"
-  }'
   export MRSM_MONGODB_LOCAL='{
     "uri": "mongodb://localhost:27017",
     "database": "meerschaum"
   }'
   ```
 
-  <h3>Develop and Collaborate with <a href="/reference/compose">Meerschaum Compose</a></h3>
+  ```python
+  ### Or you can build connectors on-the-fly in code.
+  import meerschaum as mrsm
+  conn = mrsm.get_connector('sql:demo', flavor='sqlite', database='/tmp/demo.db')
+  ```
+
+  <h3>Design, Develop, and Deploy with <a href="/reference/compose">Meerschaum Compose</a></h3>
+
+  <p>The <a href="/reference/compose">compose</a> workflow allows you to iterate with and version-control your pipes, making collaboration and maintainability much smoother.</p>
+  
+  <img src="/assets/screenshots/mrsm-compose-techslamneggs.png"></img>
 
   </div>
   <div class="grid-child">
@@ -169,6 +171,8 @@ h1 {
     <img src="/assets/screenshots/sql-chunks.png"></img>
 
     <h3>Simple-Yet-Powerful API</h3>
+
+    Want to use Meerschaum in your code? Check out the <a href="https://docs.meerschaum.io">package documentation</a>!
 
     ```python
     import meerschaum as mrsm
@@ -200,24 +204,33 @@ h1 {
 
   <h3>Extensible Connectors Interface</h3>
 
+  Add custom connector types with the <a href="/reference/plugins/writing-plugins/#the-make_connector-decorator"><code class="highlight"><span class="nd">@make_connector</span></code> decorator</a>.
+
   ```python
   from meerschaum.connectors import make_connector, Connector
   required = ['requests']
 
   @make_connector
-  class FooConnector(Connector):
+  class NWSConnector(Connector):
 
       REQUIRED_ATTRIBUTES = ['username', 'password']
 
       def fetch(self, pipe, begin=None, end=None, **kw):
           params = {}
+          begin = begin or pipe.get_sync_time()
           if begin:
-              params['begin'] = begin.isoformat()
+              params['start'] = begin.isoformat()
           if end:
               params['end'] = end.isoformat()
 
-          response = self.session.get("https://foo.com/data", params=params)
-          return response.json()
+          stations = pipe.parameters.get('nws', {}).get('stations', [])
+          for station in stations:
+              url = f"https://api.weather.gov/stations/{station}/observations"
+              response = self.session.get(url, params=params)
+              yield [
+                feature['properties']
+                for feature in response.json()['features']
+              ]
 
       @property
       def session(self):
