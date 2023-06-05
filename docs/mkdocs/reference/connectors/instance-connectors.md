@@ -49,6 +49,7 @@ The attributes row of a pipe includes the pipe's keys (immutable) and parameters
 ??? example "`#!python def register_pipe():`"
     ```python
     def register_pipe(
+            self,
             pipe: mrsm.Pipe,
             debug: bool = False,
             **kwargs: Any
@@ -123,7 +124,6 @@ Return the ID tied to the pipe's connector, metric, and location keys.
     def get_pipe_id(
             self,
             pipe: mrsm.Pipe,
-            _as_oid: bool = False,
             debug: bool = False,
             **kwargs: Any
         ) -> Union[str, int, None]:
