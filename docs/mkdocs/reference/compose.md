@@ -60,6 +60,10 @@ With `mrsm compose up`, you can stand up syncing jobs for your pipes defined in 
 
 ## ⛺ Setup
 
+!!! tip "Template Project"
+
+    Want to skip the setup and work in a pre-configured environment? Create a new repository from the [Meerschaum Compose Project Template](https://github.com/bmeares/mrsm-compose-template).
+
 Install the `compose` plugin from the public repository `api:mrsm`:
 
 ```bash
@@ -74,7 +78,7 @@ mkdir awesome-sauce && \
   vim mrsm-compose.yaml
 ```
 
-!!! tip "Plugins directories"
+!!! tip "Plugins Directories"
 
     You may set multiple paths for `plugins_dir`. This is very useful if you want to group plugins together. A value of `null` will include the environment's plugins in your project.
 

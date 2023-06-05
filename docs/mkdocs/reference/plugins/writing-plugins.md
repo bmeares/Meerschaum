@@ -10,25 +10,36 @@ Meerschaum's plugin system is designed to be simple so you can get your plugins 
     ### BAD - DON'T DO THIS
     import pandas as pd
     def fetch(pipe, **kw):
-    	  return None
+    	  return pd.read_csv('data.csv')
     ```
     ``` python hl_lines="3"
     ### GOOD - DO THIS INSTEAD
     def fetch(pipe, **kw):
     	  import pandas as pd
-    	  return None
+    	  return pd.read_csv('data.csv')
     ```
 
 To create your plugin, follow these steps:
 
-1. **Navigate to your Meerschaum plugins directory.**  
+1. **Navigate to your Meerschaum `plugins` directory.**  
 
-    - *Default:* `~/.config/meerschaum/plugins` (Windows: `%APPDATA%\Meerschaum\plugins`)
-    - You may specify a path to a directory with the environment variable `MRSM_PLUGINS_DIR`. In this case, the folder can be named anything.
-    - If you set `MRSM_ROOT_DIR`, then navigate to `$MRSM_ROOT_DIR/plugins`.
+    === "Linux / MacOS"
+        `~/.config/meerschaum/plugins`  
+    
+    === "Windows"
+        `%APPDATA%\Meerschaum\plugins`
+    
+    === "Meerschaum Compose"
+        `plugins/`
 
-2. **Create your package file.**  
-    You may either create `<plugin_name>.py` or `<plugin_name>/__init__.py` (in case your plugin needs submodules).
+    > If you have set [`MRSM_ROOT_DIR`](/reference/environment/#mrsm_root_dir) or [`MRSM_PLUGINS_DIR`](/reference/environment/#mrsm_plugins_dir), navigate to your designated plugins directory.
+
+2. **Create your Python module.**  
+    Create either `<name>.py` or `<name>/__init__.py`.
+
+    > Plugins may have hyphenated names, e.g. `mongodb-connector`:
+
+    ![An example \`__init__.py`](/assets/screenshots/plugin-init.png)
 
 3. ***(Optional)* Define your plugin's `__version__` string.**
 
@@ -66,29 +77,29 @@ To create your plugin, follow these steps:
 
 Plugins are just modules with functions. This section explains the roles of the following special functions:
 
-- **`#!python register(pipe: mrsm.Pipe, **kw)`**  
-  Return a pipe's parameters dictionary (e.g. {'columns': {'datetime': 'timestamp', 'id': 'id'}}).
-- **`#!python fetch(pipe: mrsm.Pipe, **kw)`**  
-  Return a DataFrame (to be passed into `#!python Pipe.sync()` by the command `mrsm sync pipes`).
-- **`#!python sync(pipe: mrsm.Pipe, **kw)`**  
-  Override the default `sync` behavior for certain pipes.
+- **`#!python register(pipe: mrsm.Pipe, **kwargs)`**  
+  Return a pipe's initial parameters dictionary.
+- **`#!python fetch(pipe: mrsm.Pipe, **kwargs)`**  
+  Return a DataFrame, list of dictionaries, or generator of DataFrame-like chunks.
+- **`#!python sync(pipe: mrsm.Pipe, **kwargs)`**  
+  Override a pipe's `sync` process for finer-grained control.
+- **`#!python @make_connector`**  
+  Create new [connector](/reference/connectors/) types.
 - **`#!python @make_action`**  
   Create new commands.
 - **`#!python @api_plugin`**  
   Create new FastAPI endpoints.
-- **`#!python setup(**kw)`**  
-  Executed upon plugin installation or with `mrsm setup plugin(s) <plugin>`.
+- **`#!python setup(**kwargs)`**  
+  Executed during plugin installation or with `mrsm setup plugins <plugin>`.
 
 ### **The `#!python register()` Function**
 
-The `register()` function is called whenever a new pipe is created with your plugin as its connector. This function returns a dictionary which will become your pipe's attributes. For example, if you already know the column names of your data stream, your `register()` function could be this one line:
+The `register()` function returns a new pipe's parameters dictionary.
 
-```python
-def register(pipe):
-    return {'columns': {'datetime': 'timestamp', 'id': 'station'}}
-```
+!!! note ""
+    If you are using [Meerschaum Compose](/reference/compose/), then `register()` is overriden by `mrsm-compose.yaml` and may be skipped.
 
-The below example is the `register()` function from the [`noaa` plugin](/reference/plugins/list-of-plugins/#noaa):
+The below example is `register()` from the [`noaa` plugin](https://github.com/bmeares/noaa):
 
 ??? example "Register function example"
 
@@ -106,47 +117,79 @@ The below example is the `register()` function from the [`noaa` plugin](/referen
 
 ### **The `#!python fetch()` Function**
 
-The fastest way to leverage Meerschaum's syncing engine is with the `#!python fetch()` function. Simply return a DataFrame or a dictionary of lists.
+The fastest way to leverage Meerschaum's syncing engine is with the `#!python fetch()` function. Simply return a DataFrame (or list of dictionaries) or a chunk generator.
 
 !!! tip
     Just like when [writing sync plugins](#sync-plugins), there are additional keyword arguments available that you might find useful. Go ahead and inspect `**kw` and see if anything is helpful (e.g. `begin`, `end`, `blocking`, etc.). Check out [Keyword Arguments](#keyword-arguments) for further information.
 
-Below is an example of what a typical fetch plugin may look like:
+Below is an example of a simple fetch plugin:
+
 ??? example "Fetch Plugin Example"
+
     ```python
     ### ~/.config/meerschaum/plugins/example.py
 
     __version__ = '0.0.1'
     required = []
+        
+    import random
+    from datetime import datetime
+    import meerschaum as mrsm
 
-    def register(pipe, **kw):
+    def register(pipe: mrsm.Pipe, **kw):
         return {
             'columns': {
                 'datetime': 'dt',
                 'id': 'id',
-                'value': 'val',
             }
         }
 
-    def fetch(pipe, **kw):
-        import datetime, random
+    def fetch(pipe: mrsm.Pipe, **kw):
         return [{
-            'dt': datetime.datetime.utcnow(),
+            'dt': datetime.utcnow(),
             'id': 1,
             'val': random.randint(0, 100),
         }]
     ```
 
+If your plugin will be fetching large amounts of data, you may return a generator of DataFrame-like chunks:
+
+```python
+def fetch(pipe, **kw) -> Generator[List[Dict[str, Any]]]:
+    return (
+        [
+            {'id': i, 'val': 10.0 * i},
+            {'id': i+1, 'val': 20.0 * i},
+        ] for i in range(10)
+    )
+```
+
+Chunking handles any iterable, so you may return a simple generator or `#!python yield` the chunks yourself.
+
+```python
+def fetch(pipe: mrsm.Pipe, **kw) -> Iterator['pd.DataFrame']:
+    import pandas as pd
+    return pd.read_csv('very-large.csv', chunksize=10_000)
+```
+
+```python
+def fetch(pipe: mrsm.Pipe, **kw) -> Iterator['pd.DataFrame']:
+    import pandas as pd
+    for file_name in ['a.csv', 'b.csv', 'c.csv']:
+        yield pd.read_csv(file_name)
+```
+
 ### **The `#!python sync()` Function**
 
-The `#!python sync()` function makes `sync pipes` behave as a custom action on a per-pipe basis, allowing you more control over the syncing process.
+The `#!python sync()` function makes `sync pipes` override the built-in syncing process and behaves more like an [action](/reference/plugins/types-of-plugins/#-action-plugins), returning only a `SuccessTuple` (e.g. `#!python True, "Success"`).
 
-Sync plugins allow for much more flexibility than fetch plugins, so what you come up with may differ from the following example. In any case, below is a simple `#!python sync()` plugin.
+Sync plugins allow for much more flexibility than fetch plugins, so what you come up with may differ from the following example. In any case, below is a simple sync plugin.
 
 !!! note
     The only required argument is the positional `pipe` argument. The following example demonstrates one use of the `begin` and `end` arguments. Check out [Keyword Arguments](#keyword-arguments) for further information.
 
 ??? example "Sync Plugin Example"
+
     ```python
     ### ~/.config/meerschaum/plugins/example.py
 
@@ -213,6 +256,92 @@ Sync plugins allow for much more flexibility than fetch plugins, so what you com
         another_pipe = mrsm.Pipe('foo', 'bar', instance='sql:local')
         return another_pipe.sync(df)
     ```
+
+### **The `#!python @make_connector` Decorator**
+
+Defining a new type of [connector](/reference/connectors) is easy:
+
+1. Create a new class that inherits from `meerschaum.connectors.Connector`.
+2. Decorate the class with `@make_connector`.
+3. Define the class-level list `REQUIRED_ATTRIBUTES`.
+4. Add the method `#!python fetch(pipe, **kwargs)` that returns data.
+
+For example, the following creates a new connector of type `foo`:
+
+??? example "`FooConnector` Example"
+
+    ```python
+    # plugins/foo.py
+
+    from datetime import datetime
+    from typing import List, Dict, Any, Optional
+    import meerschaum as mrsm
+    from meerschaum.connectors import make_connector, Connector
+
+    required = ['requests']
+
+    @make_connector
+    class FooConnector(Connector):
+
+        REQUIRED_ATTRIBUTES = ['username', 'password']
+
+        def fetch(
+            self,
+            pipe: mrsm.Pipe, 
+            begin: Optional[datetime] = None,
+            end: Optional[datetime] = None,
+            **kwargs: Any
+        ) -> List[Dict[str, Any]]:
+            """
+            Make the request to foo.com and return the response.
+            """
+            params = {}
+            if begin:
+                params['begin'] = begin.isoformat()
+            if end:
+                params['end'] = end.isoformat()
+
+            response = self.session.get("https://foo.com/data", params=params)
+            return response.json()
+
+        @property
+        def session(self) -> 'requests.Session':
+            """
+            Return a persistent session object.
+
+            Note that required attributes (username, password)
+            are ensured to be set.
+            """
+            _sesh = self.__dict__.get('_session', None)
+            if _sesh is not None:
+                return _sesh
+
+            import requests
+            self._session = requests.Session()
+            self._session.auth = (self.username, self.password)
+            return self._session
+    ```
+
+You can register new `foo` connectors via `mrsm bootstrap connector`, which would prompt the user for each attribute in `REQUIRED_ATTRIBUTES` (username, password).
+
+You may also define your new `foo` connectors as [environment variables](/reference/connectors/#-environment-connectors), e.g.:
+
+```bash
+export MRSM_FOO_BAR='{
+    "username": "bar",
+    "password": "fuzz"
+}'
+export MRSM_FOO_BAZ='{
+    "username": "baz",
+    "password": "fizz"
+}'
+```
+
+!!! note "Instance Connectors"
+
+    You may designate your connector as an instance connector by adding `#!python IS_INSTANCE = True`.
+
+    If you are creating an instance connector and want to enable multithreading, add `#!python IS_THREAD_SAFE = True`.
 
 ### **The `#!python @make_action` Decorator**
 

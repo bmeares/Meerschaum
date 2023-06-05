@@ -38,3 +38,10 @@
 .md-grid {
   max-width: 1440px;
 }
+
+.md-typeset h1 {
+  color: #000000;
+}
+.md-typeset h2 {
+  color: #000000;
+}
