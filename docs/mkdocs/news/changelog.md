@@ -4,6 +4,14 @@
 
 This is the current release cycle, so stay tuned for future releases!
 
+### v1.6.14
+
+- **Added healthchecks to `mrsm stack up`.**  
+  The internal Docker Compose file for `mrsm stack` was bumped to version 3.9, and secrets were replaced with environment variable references.
+
+- **Fixed `--no-auth` when starting the API.**  
+  The command `mrsm start api --no-auth` now correctly handles sessions.
+
 ### v1.6.13
 
 - **Remove `\\u0000` from strings when inserting into PostgreSQL.**  

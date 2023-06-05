@@ -47,7 +47,6 @@ env_dict['MEERSCHAUM_API_CONFIG'] = json.dumps(
         'meerschaum' : 'MRSM{!meerschaum}',
         'system' : 'MRSM{!system}',
     },
-    #  separators = (',', ':'),
     indent = 4,
 ).replace(
     '"MRSM{!system}"', 'MRSM{!system}'
@@ -94,17 +93,26 @@ networks = {
 }
 
 default_docker_compose_config = {
-    'version': '3.2',
+    'version': '3.9',
     'services': {
         'db': {
             'environment': {
                 'TIMESCALEDB_TELEMETRY': 'off',
-                'POSTGRES_USER': env_dict['POSTGRES_USER'],
-                'POSTGRES_DB': env_dict['POSTGRES_DB'],
-                'POSTGRES_PASSWORD': env_dict['POSTGRES_PASSWORD'],
+                'POSTGRES_USER': '$POSTGRES_USER',
+                'POSTGRES_DB': '$POSTGRES_DB',
+                'POSTGRES_PASSWORD': '$POSTGRES_PASSWORD',
                 'ALLOW_IP_RANGE': env_dict['ALLOW_IP_RANGE'],
             },
             'command': 'postgres -c max_connections=1000 -c shared_buffers=1024MB',
+            'healthcheck': {
+                'test': [
+                    'CMD-SHELL', 'pg_isready',
+                    '-U', '$POSTGRES_USER', '-d', '$POSTGRES_DB',
+                ],
+                'interval': '5s',
+                'timeout': '3s',
+                'retries': 3
+            },
             'restart': 'always',
             'image' : 'timescale/timescaledb:' + env_dict['TIMESCALEDB_VERSION'],
             'ports' : [
@@ -132,11 +140,13 @@ default_docker_compose_config = {
                 'MRSM_CONFIG': env_dict['MEERSCHAUM_API_CONFIG'],
                 'MRSM_PATCH': env_dict['MEERSCHAUM_API_PATCH'],
             },
-            'restart' : 'always',
+            'restart': 'always',
             'init': True,
-            'depends_on' : [
-                'db',
-            ],
+            'depends_on': {
+                'db': {
+                    'condition': 'service_healthy',
+                },
+            },
             'volumes' : [
                 'api_root:' + volumes['api_root'],
             ],
@@ -151,9 +161,11 @@ default_docker_compose_config = {
                 'backend',
             ],
             'restart': 'always',
-            'depends_on': [
-                'db',
-            ],
+            'depends_on': {
+                'db': {
+                    'condition': 'service_healthy',
+                },
+            },
             'volumes': [
                 'grafana_storage' + ':' + volumes['grafana_storage'],
                 ### NOTE: Mount with the 'z' option for SELinux.
