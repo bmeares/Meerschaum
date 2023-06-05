@@ -129,17 +129,23 @@ def update_page_layout_div(pathname: str, session_store_data: Dict[str, Any]):
         session_id = session_store_data.get('session-id', None) 
     except AttributeError:
         session_id = None
+
     ### Bypass login if `--no-auth` is specified.
-    if session_id is None and no_auth:
+    if session_id not in active_sessions and no_auth:
         session_store_data['session-id'] = str(uuid.uuid4())
         active_sessions[session_store_data['session-id']] = {'username': 'no-auth'}
-        session_store_to_return = session_data
+        session_store_to_return = session_store_data
     else:
         session_store_to_return = dash.no_update
 
     _path = (pathname.rstrip('/') + '/').replace((dash_endpoint + '/'), '').rstrip('/')
-    path = _path if no_auth or _path not in _required_login else (
-        _path if session_id in active_sessions else 'login'
+    path = (
+        _path
+        if no_auth or _path not in _required_login else (
+            _path
+            if session_id in active_sessions
+            else 'login'
+        )
     )
     layout = _paths.get(path, pages.error.layout)
     return layout, session_store_to_return
@@ -447,21 +453,22 @@ def show_arguments_collapse(n_clicks : int, is_open : bool):
     Output('ws', 'send'),
     Input('test-button', 'n_clicks'),
     Input('ws', 'url'),
+    Input('session-store', 'data'),
     State('ws', 'state'),
     State('ws', 'message'),
     State('ws', 'error'),
     State('ws', 'protocols'),
-    State('session-store', 'data'),
-    #  prevent_initial_call = True,
 )
-def ws_send(n_clicks: int, url, *states):
+def ws_send(n_clicks: int, url, session_store_data: Dict[str, Any], *states):
     """
     Send an initial connection message over the websocket.
     """
     ctx = dash.callback_context
     if not url:
         raise PreventUpdate
-    session_id = ctx.states['session-store.data']['session-id']
+    session_id = session_store_data.get('session-id', None)
+    if session_id is None:
+        raise PreventUpdate
     return json.dumps({
         'connect-time': json_serialize_datetime(datetime.datetime.utcnow()),
         'session-id': session_id,

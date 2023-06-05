@@ -47,6 +47,15 @@ def stack(
     from meerschaum.utils.warnings import warn
     from meerschaum.utils.formatting import ANSI
     from meerschaum.utils.misc import is_docker_available
+    from meerschaum.config._read_config import search_and_substitute_config
+
+    stack_env_dict = {
+        var: val
+        for var, val in search_and_substitute_config(
+            meerschaum.config.stack.env_dict
+        ).items()
+        if isinstance(val, str)
+    }
 
     if action is None:
         action = []
@@ -139,7 +148,7 @@ def stack(
         cwd = STACK_COMPOSE_PATH.parent,
         stdout = stdout,
         stderr = stderr,
-        env = os.environ,
+        env = stack_env_dict,
     ) if (has_builtin_compose or has_binary_compose) else run_python_package(
         'compose',
         args = cmd_list,
@@ -147,6 +156,7 @@ def stack(
         venv = _compose_venv,
         capture_output = _capture_output,
         as_proc = True,
+        env = stack_env_dict,
     )
     try:
         rc = proc.wait() if proc is not None else 1
