@@ -117,7 +117,15 @@ def _copy_pipes(
                     noask=noask, yes=yes
                 )
         ):
-            _new_pipe.sync(p.get_data(debug=debug, **kw), debug=debug, **kw)
+            _new_pipe.sync(
+                p.get_data(
+                    debug = debug,
+                    as_iterator = True,
+                    **kw
+                ),
+                debug = debug,
+                **kw
+            )
 
     msg = (
         "No pipes were copied." if successes == 0
