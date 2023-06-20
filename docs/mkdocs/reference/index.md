@@ -15,6 +15,7 @@ There are a number of resources you can check out when learning Meerschaum:
 - The **[Awesome Meerschaum](https://github.com/bmeares/awesome-meerschaum) project list**.
 - My **video tutorial series** [*Learning Meerschaum*](/tutorials).
 - **Articles** published about Meerschaum:
+    - [*The Docker Compose of ETL: Meerschaum Compose*](https://towardsdatascience.com/the-docker-compose-of-etl-meerschaum-compose-777e0e7304d1) (Towards Data Science)
     - Interview featured in [*Console 100 - The Open Source Newsletter*](https://console.substack.com/p/console-100)
     - [*A Data Scientist's Guide to Fetching COVID-19 Data in 2022*](https://towardsdatascience.com/a-data-scientists-guide-to-fetching-covid-19-data-in-2022-d952b4697) (Towards Data Science)
     - [*Time-Series ETL with Meerschaum*](https://towardsdatascience.com/easy-time-series-etl-for-data-scientists-with-meerschaum-5aade339b398) (Towards Data Science)
