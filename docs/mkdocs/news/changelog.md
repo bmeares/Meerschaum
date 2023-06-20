@@ -4,6 +4,11 @@
 
 This is the current release cycle, so stay tuned for future releases!
 
+### v1.6.15
+
+- **Sync chunks in the `copy pipes` action.**  
+   This will help with large out-of-memory pipes.
+
 ### v1.6.14
 
 - **Added healthchecks to `mrsm stack up`.**  
