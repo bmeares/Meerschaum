@@ -5,6 +5,6 @@ cd "$DIR"
 TERMINFO_DIRS=/etc/terminfo:/lib/terminfo:/usr/share/terminfo \
 MRSM_ROOT_DIR="$DIR"/root \
 MRSM_RUNTIME=portable \
-./python/bin/python3.9 -m meerschaum $@
+./python/bin/python3.11 -m meerschaum $@
 
 

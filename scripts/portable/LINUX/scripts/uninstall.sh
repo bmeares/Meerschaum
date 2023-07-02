@@ -11,8 +11,8 @@ else
   cd ./scripts
   mv _site-packages_original site-packages
   cd "$ROOT"
-  rm -rf ./python/lib/python3.9/site-packages
-  mv ./scripts/site-packages ./python/python3.9/
+  rm -rf ./python/lib/python3.11/site-packages
+  mv ./scripts/site-packages ./python/python3.11/
 fi
 
 cd "$ROOT"
