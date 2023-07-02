@@ -22,7 +22,3 @@ fi
 ### Publish to Python Package Index.
 cd "$PARENT"
 python -m twine upload dist/*
-
-### Update documentation.
-cd "$PARENT/docs"
-ssh "$remote_docs_user"@"$remote_docs_host" "cd $remote_docs_dir/Meerschaum; git pull origin $publish_branch; scripts/docs.sh"

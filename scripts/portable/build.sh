@@ -23,12 +23,9 @@ else
 fi
 
 declare -A urls
-# urls["WINDOWS"]="https://github.com/indygreg/python-build-standalone/releases/download/20211017/cpython-3.9.7-x86_64-pc-windows-msvc-shared-pgo-20211017T1616.tar.zst"
-urls["WINDOWS"]="https://github.com/indygreg/python-build-standalone/releases/download/20221106/cpython-3.9.15+20221106-x86_64-pc-windows-msvc-shared-pgo-full.tar.zst"
-# urls["LINUX"]="https://github.com/indygreg/python-build-standalone/releases/download/20211017/cpython-3.9.7-x86_64-unknown-linux-gnu-pgo-20211017T1616.tar.zst"
-urls["LINUX"]="https://github.com/indygreg/python-build-standalone/releases/download/20221106/cpython-3.9.15+20221106-x86_64-unknown-linux-gnu-pgo+lto-full.tar.zst"
-# urls["MACOS"]="https://github.com/indygreg/python-build-standalone/releases/download/20211017/cpython-3.9.7-x86_64-apple-darwin-pgo+lto-20211017T1616.tar.zst"
-urls["MACOS"]="https://github.com/indygreg/python-build-standalone/releases/download/20221106/cpython-3.9.15+20221106-x86_64-apple-darwin-pgo+lto-full.tar.zst"
+urls["WINDOWS"]="https://github.com/indygreg/python-build-standalone/releases/download/20230507/cpython-3.11.3+20230507-x86_64-pc-windows-msvc-shared-pgo-full.tar.zst"
+urls["LINUX"]="https://github.com/indygreg/python-build-standalone/releases/download/20230507/cpython-3.11.3+20230507-x86_64-unknown-linux-gnu-pgo+lto-full.tar.zst"
+urls["MACOS"]="https://github.com/indygreg/python-build-standalone/releases/download/20230507/cpython-3.11.3+20230507-x86_64-apple-darwin-pgo+lto-full.tar.zst"
 urls["get-pip.py"]="https://bootstrap.pypa.io/get-pip.py"
 
 declare -A tars
@@ -43,8 +40,8 @@ taropts["MACOS"]="-I zstd -xf "
 
 declare -A sites
 sites["WINDOWS"]="Lib/site-packages"
-sites["LINUX"]="lib/python3.9/site-packages"
-sites["MACOS"]="lib/python3.9/site-packages"
+sites["LINUX"]="lib/python3.11/site-packages"
+sites["MACOS"]="lib/python3.11/site-packages"
 
 ### Check if zstd is installed.
 v=$(zstd -V)

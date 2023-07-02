@@ -11,7 +11,7 @@ export tags=( "api" "minimal" "full" )
 
 export base_name="meerschaum"
 export image="$dockerhub_user/$base_name"
-export python_image="python:3.9-slim-bullseye"
+export python_image="python:3.11-slim-bookworm"
 export platforms="linux/amd64"
 # export platforms="linux/amd64,linux/arm64"
 # export platforms="linux/amd64,linux/arm64,linux/arm/v7"
@@ -20,7 +20,4 @@ export DOCKER_CLI_EXPERIMENTAL=enabled
 export src="$PARENT"
 export port="8000"
 export publish_branch="main"
-export remote_docs_user="meerschaum"
-export remote_docs_host="docs.meerschaum.io"
-export remote_docs_dir="~/docs"
 
