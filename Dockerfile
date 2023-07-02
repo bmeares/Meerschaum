@@ -40,5 +40,4 @@ RUN cd $MRSM_WORK_DIR && [ "$MRSM_DEP_GROUP" != "minimal" ] && \
   mrsm show version || \
   mrsm --version
 
-COPY --chown=$MRSM_USER:$MRSM_USER scripts/docker/entrypoint.sh /mrsm-entrypoint.sh
 ENTRYPOINT ["python", "-m", "meerschaum"]
