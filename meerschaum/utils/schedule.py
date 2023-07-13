@@ -30,6 +30,7 @@ def schedule_function(
 
     """
     import warnings
+    from meerschaum.utils.warnings import warn
     from meerschaum.utils.packages import attempt_import
     from meerschaum.utils.misc import filter_keywords
     from concurrent.futures._base import CancelledError
@@ -54,3 +55,10 @@ def schedule_function(
         except CancelledError:
             pass
         return None
+    except AttributeError:
+        warn(
+            "Failed to import scheduler.\n\n   "
+            + "Run `mrsm install package 'pydantic<2.0.0'` and try again.",
+            stack = False,
+        )
+
