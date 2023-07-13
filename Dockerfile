@@ -1,4 +1,4 @@
-FROM python:3.9-slim-bullseye AS runtime
+FROM python:3.11-slim-bookworm AS runtime
 
 ARG dep_group=full \
     mrsm_user=meerschaum \
@@ -40,5 +40,4 @@ RUN cd $MRSM_WORK_DIR && [ "$MRSM_DEP_GROUP" != "minimal" ] && \
   mrsm show version || \
   mrsm --version
 
-COPY --chown=$MRSM_USER:$MRSM_USER scripts/docker/entrypoint.sh /mrsm-entrypoint.sh
-ENTRYPOINT ["/mrsm-entrypoint.sh"]
+ENTRYPOINT ["python", "-m", "meerschaum"]
