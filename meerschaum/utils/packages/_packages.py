@@ -23,10 +23,10 @@ packages: Dict[str, Dict[str, str]] = {
     'formatting': {
         'pprintpp'                   : 'pprintpp>=0.4.0',
         'asciitree'                  : 'asciitree>=0.3.3',
-        'typing_extensions'          : 'typing_extensions>=4.4.0',
+        'typing_extensions'          : 'typing-extensions>=4.7.1',
         'pygments'                   : 'pygments>=2.7.2',
         'colorama'                   : 'colorama>=0.4.3',
-        'rich'                       : 'rich>=12.4.4',
+        'rich'                       : 'rich>=13.4.2',
         'more_termcolor'             : 'more-termcolor>=1.1.3',
         'humanfriendly'              : 'humanfriendly>=10.0.0',
     },
@@ -44,14 +44,14 @@ packages: Dict[str, Dict[str, str]] = {
         'pyvim'                      : 'pyvim>=3.0.2',
         'aiofiles'                   : 'aiofiles>=0.6.0',
         'packaging'                  : 'packaging>=21.3.0',
-        'prompt_toolkit'             : 'prompt-toolkit>=3.0.11',
+        'prompt_toolkit'             : 'prompt-toolkit>=3.0.39',
         'more_itertools'             : 'more-itertools>=8.7.0',
         'daemoniker'                 : 'daemoniker>=0.2.3',
         'psutil'                     : 'psutil>=5.8.0',
         'watchgod'                   : 'watchgod>=0.7.0',
         'dill'                       : 'dill>=0.3.3',
         'virtualenv'                 : 'virtualenv>=20.1.0',
-        'rocketry'                   : 'rocketry>=2.3.0',
+        'rocketry'                   : 'rocketry>=2.5.1',
     },
     'drivers': {
         'cryptography'               : 'cryptography>=38.0.1',
@@ -143,16 +143,15 @@ packages['dash'] = {
     'dash_daq'                       : 'dash-daq>=0.5.0',
 }
 packages['api'] = {
-    'uvicorn'                        : 'uvicorn[standard]>=0.17.5',
+    'uvicorn'                        : 'uvicorn[standard]>=0.22.0',
     'gunicorn'                       : 'gunicorn>=20.1.0',
     'dotenv'                         : 'python-dotenv>=0.20.0',
-    'websockets'                     : 'websockets>=8.1.0',
-    'fastapi'                        : 'fastapi>=0.89.0',
-    'fastapi_jwt_auth'               : 'fastapi-jwt-auth>=0.5.0',
+    'websockets'                     : 'websockets>=11.0.3',
+    'fastapi'                        : 'fastapi>=0.100.0',
     'passlib'                        : 'passlib>=1.7.4',
     'fastapi_login'                  : 'fastapi-login>=1.7.2',
     'multipart'                      : 'python-multipart>=0.0.5',
-    'pydantic'                       : 'pydantic>=1.10.2',
+    'pydantic'                       : 'pydantic>=1.7.4',
 }
 packages['api'].update(packages['sql'])
 packages['api'].update(packages['formatting'])
