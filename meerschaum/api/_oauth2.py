@@ -27,7 +27,7 @@ def generate_secret_key() -> str:
         with open(API_SECRET_KEY_PATH, 'r') as f:
             secret_key = f.read()
 
-    return secret_key
+    return secret_key.encode('utf-8')
 
 SECRET = generate_secret_key()
 manager = LoginManager(SECRET, token_url=endpoints['login'])

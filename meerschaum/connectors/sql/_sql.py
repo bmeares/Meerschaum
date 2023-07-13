@@ -144,7 +144,7 @@ def read(
         import time
         start = time.perf_counter()
         dprint(query_or_table)
-        dprint(f"Fetching with chunksize: {chunksize}")
+        dprint(f"[{self}] Fetching with chunksize: {chunksize}")
 
     ### This might be sqlalchemy object or the string of a table name.
     ### We check for spaces and quotes to see if it might be a weird table.
@@ -165,7 +165,7 @@ def read(
 
         query_or_table = sql_item_name(str(query_or_table), self.flavor)
         if debug:
-            dprint(f"Reading from table {query_or_table}")
+            dprint(f"[{self}] Reading from table {query_or_table}")
         formatted_query = sqlalchemy.text("SELECT * FROM " + str(query_or_table))
     else:
         try:
@@ -444,7 +444,7 @@ def exec(
     from meerschaum.utils.packages import attempt_import
     sqlalchemy = attempt_import("sqlalchemy")
     if debug:
-        dprint("Executing query:\n" + f"{query}")
+        dprint(f"[{self}] Executing query:\n{query}")
 
     _close = close if close is not None else (self.flavor != 'mssql')
     _commit = commit if commit is not None else (
@@ -463,7 +463,7 @@ def exec(
             transaction.commit()
     except Exception as e:
         if debug:
-            dprint(f"Failed to execute query:\n\n{query}\n\n{e}")
+            dprint(f"[{self}] Failed to execute query:\n\n{query}\n\n{e}")
         if not silent:
             warn(str(e))
         result = None
@@ -513,7 +513,7 @@ def exec_queries(
     with self.engine.begin() as connection:
         for query in queries:
             if debug:
-                dprint(query)
+                dprint(f"[{self}]\n" + str(query))
             if isinstance(query, str):
                 query = sqlalchemy.text(query)
 
@@ -524,7 +524,7 @@ def exec_queries(
                 if not silent:
                     warn(msg)
                 elif debug:
-                    dprint(msg)
+                    dprint(f"[{self}]\n" + str(msg))
                 result = None
             results.append(result)
             if result is None and break_on_error:
@@ -628,7 +628,7 @@ def to_sql(
     success, msg = False, "Default to_sql message"
     start = time.perf_counter()
     if debug:
-        msg = f"Inserting {len(df)} rows with chunksize: {chunksize}..."
+        msg = f"[{self}] Inserting {len(df)} rows with chunksize: {chunksize}..."
         print(msg, end="", flush=True)
     stats['num_rows'] = len(df)
 
