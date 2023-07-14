@@ -74,7 +74,7 @@ def get_users(
 def register_user(
         username: str = Form(None),
         password: str = Form(None),
-        attributes: str = Form(None, examples={'test': {'foo': 'bar'}}),
+        attributes: str = Form(None),
         type: str = Form(None),
         email: str = Form(None),
         curr_user = (

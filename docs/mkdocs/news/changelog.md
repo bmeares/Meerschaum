@@ -4,7 +4,7 @@
 
 This is the current release cycle, so stay tuned for future releases!
 
-### v1.6.16
+### v1.6.16 – v1.6.17
 
 - **Add Pydantic v2 support**  
   The only feature which requires Pydantic v1 is the `--schedule` flag, which will throw a warning with a hint to install an older version. The underlying libraries for this feature should have Pydantic v2 support merged soon.
