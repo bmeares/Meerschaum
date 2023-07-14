@@ -38,7 +38,7 @@ def get_instance_info(
         curr_user = (
             fastapi.Depends(manager) if private else None
         ),
-    ) -> Dict[str, str]:
+    ) -> Dict[str, Union[str, int]]:
     from meerschaum import __version__ as version
     num_plugins = len(get_api_connector().get_plugins(debug=debug))
     num_users = len(get_api_connector().get_users(debug=debug))
