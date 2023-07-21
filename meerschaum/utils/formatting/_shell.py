@@ -43,7 +43,7 @@ def clear_screen(debug: bool = False) -> bool:
     print the ANSI code for clearing. Otherwise, execute `clear` or `cls`.
     """
     import platform
-    import subprocess
+    import os
     from meerschaum.utils.formatting import ANSI, get_console
     from meerschaum.utils.debug import dprint
     from meerschaum.config import get_config
@@ -69,31 +69,23 @@ def clear_screen(debug: bool = False) -> bool:
         return True
     ### ANSI support is disabled, try system level instead
     if _tried_clear_command is not None:
-        return subprocess.call(_tried_clear_command, shell=False) == 0
+        return os.system(_tried_clear_command) == 0
     
-    for command in ('clear', 'cls'):
-        try:
-            rc = subprocess.call(command, shell=False)
-        except Exception as e:
-            continue
-        if rc == 0:
-            with _locks['_tried_clear_command']:
-                _tried_clear_command = command
-            break
+    rc = -1
+    command = 'clear' if platform.system() != 'Windows' else 'cls'
+    try:
+        rc = os.system(command)
+    except Exception as e:
+        pass
+    if rc == 0:
+        with _locks['_tried_clear_command']:
+            _tried_clear_command = command
     return rc == 0
 
 
 def flush_with_newlines(debug: bool = False) -> None:
-    """Print newlines such that the entire terminal is cleared and new text will show up at the bottom.
-
-    Parameters
-    ----------
-    debug: bool :
-         (Default value = False)
-
-    Returns
-    -------
-
+    """
+    Print newlines such that the entire terminal is cleared and new text will show up at the bottom.
     """
     import sys
     from meerschaum.utils.misc import get_cols_lines
