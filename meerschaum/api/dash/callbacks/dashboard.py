@@ -96,7 +96,7 @@ _paths = {
     'login'   : pages.login.layout,
     ''        : pages.dashboard.layout,
     'plugins' : pages.plugins.layout,
-    'register' : pages.register.layout,
+    'register': pages.register.layout,
 }
 _required_login = {''}
  
@@ -138,7 +138,12 @@ def update_page_layout_div(pathname: str, session_store_data: Dict[str, Any]):
     else:
         session_store_to_return = dash.no_update
 
-    _path = (pathname.rstrip('/') + '/').replace((dash_endpoint + '/'), '').rstrip('/')
+    _path = (
+        pathname.rstrip('/') + '/'
+    ).replace(
+        (dash_endpoint + '/'),
+        ''
+    ).rstrip('/').split('/')[0]
     path = (
         _path
         if no_auth or _path not in _required_login else (

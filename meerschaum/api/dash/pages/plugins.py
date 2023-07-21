@@ -15,9 +15,9 @@ from meerschaum.core import Plugin
 from meerschaum.utils.typing import Optional
 
 search_box = dbc.Input(
-    id="search-plugins-input",
-    placeholder="Search for plugins...",
-    type="text"
+    id = "search-plugins-input",
+    placeholder = "Search for plugins...",
+    type = "text",
 )
 
 layout = dbc.Container([
@@ -29,16 +29,15 @@ layout = dbc.Container([
                 html.P('Plugins extend the functionality of Meerschaum.'),
                 html.A(
                     'To find out more, check out the plugins documentation.',
-                    href='https://meerschaum.io/reference/plugins/using-plugins/',
-                    rel="noreferrer noopener",
-                    target="_blank",
+                    href = 'https://meerschaum.io/reference/plugins/',
+                    rel = "noreferrer noopener",
+                    target = "_blank",
                 ),
             ]),
-            className='page-header',
-            style={'background-color': 'var(--dark)', 'padding': '1em'},
+            className = 'page-header',
+            style = {'background-color': 'var(--dark)', 'padding': '1em'},
         ),
         html.Br(),
-        #  html.Div([], id='edit-alert-div'),
         search_box,
         html.Br(),
         html.Div([], id='plugins-cards-div'),
