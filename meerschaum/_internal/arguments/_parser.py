@@ -147,17 +147,13 @@ groups['actions'].add_argument(
     '-f', '--force', action="store_true", help="Override safety checks"
 )
 groups['actions'].add_argument(
-    '--noask', action='store_true',
+    '--noask', '--no-ask', action='store_true',
     help="Automatically choose the defaults answers to questions. Does not result in data loss.",
 )
 groups['actions'].add_argument(
     '-d', '--daemon', action='store_true',
     help = "Run an action as a background daemon."
 )
-#  groups['actions'].add_argument(
-    #  '--keep-logs', '--keep-job', '--save-job', '--keep-daemon-output', '--skip-daemon-cleanup',
-    #  action='store_true', help="Preserve a job's output files for later inspection."
-#  )
 
 groups['actions'].add_argument(
     '--rm', action='store_true', help="Delete a job once it has finished executing."
@@ -268,6 +264,10 @@ groups['api'].add_argument(
 groups['api'].add_argument(
     '--private', '--private-mode', action='store_true',
     help = 'Require authentication for all endpoints.',
+)
+groups['api'].add_argument(
+    '--secure', action='store_true',
+    help = "Start the API in secure mode, only allowing `admin` users to execute actions.",
 )
 groups['api'].add_argument(
     '--no-auth', '--noauth', action='store_true',

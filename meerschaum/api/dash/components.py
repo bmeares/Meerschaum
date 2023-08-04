@@ -30,7 +30,6 @@ go_button = dbc.Button('Execute', id='go-button', color='primary', style={'width
 test_button = dbc.Button('Test', id='test-button', color='danger', style={'display' : 'none'})
 get_items_menu = dbc.DropdownMenu(
     label='More', id='get-items-menu', children=[
-        dbc.DropdownMenuItem("Shell", id='open-shell-button'),
         dbc.DropdownMenuItem("Jobs", id='get-jobs-button'),
         dbc.DropdownMenuItem("Plugins", id='get-plugins-button'),
         dbc.DropdownMenuItem("Users", id='get-users-button'),
@@ -116,13 +115,13 @@ navbar = dbc.Navbar(
             dbc.Collapse(
                 dbc.Row(
                     [
-                        #  dbc.Col(
-                            #  dbc.Button(
-                                #  html.B("Open Shell"),
-                                #  outline = True,
-                                #  id = "open-shell-button"
-                            #  ),
-                        #  ),
+                        dbc.Col(
+                            dbc.Button(
+                                html.B("Open Shell"),
+                                outline = True,
+                                id = "open-shell-button"
+                            ),
+                        ),
                         dbc.Col(instance_select),
                         dbc.Col(
                             dbc.Button(

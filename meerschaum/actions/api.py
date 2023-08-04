@@ -97,6 +97,7 @@ def _api_start(
         no_dash: bool = False,
         no_auth: bool = False,
         private: bool = False,
+        secure: bool = False,
         debug: bool = False,
         nopretty: bool = False,
         production: bool = False,
@@ -123,6 +124,12 @@ def _api_start(
     production: bool, default False
         Start the API server with Gunicorn instead of Uvicorn.
         Useful for production deployments.
+
+    private: bool, default False
+        Require authentication for all endpoints.
+    
+    secure: bool, default False
+        Only allow `admin` users to execute actions.
 
     keyfile: str, default None
         If provided, serve over HTTPS with this key file.
@@ -241,6 +248,8 @@ def _api_start(
 
     api_config['uvicorn'] = uvicorn_config
     cf['system']['api']['uvicorn'] = uvicorn_config
+    if secure:
+        cf['system']['api']['permissions']['actions']['non_admin'] = False
 
     custom_keys = ['mrsm_instance', 'no_dash', 'no_auth', 'private', 'debug']
 

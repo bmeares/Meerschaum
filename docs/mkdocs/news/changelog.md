@@ -10,7 +10,12 @@ This is the current release cycle, so stay tuned for future releases!
   When starting the Web API, you may now run via HTTPS with `--keyfile` and `--certfile`. Older releases required the keys to be set in `MRSM_CONFIG`. This also brings SSL support for `--production` (Gunicorn).
 
 - **Add the Webterm to the Web Console.**  
-  At long last, the webterm is embedded within the web console. Note that for security, this is only available when running the API locally.
+  At long last, the webterm is embedded within the web console.
+  
+  ***Note: the console now binds to `0.0.0.0` by default***, so please be cautious with your deployments!
+
+- **Add `--secure` to `start api`.**  
+  Starting the Web API with `--secure` will now disallow actions from non-administrators. This is recommend for shared deployments.
 
 ## 1.6.x Releases
 

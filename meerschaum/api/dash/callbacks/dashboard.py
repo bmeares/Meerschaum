@@ -191,8 +191,15 @@ def update_content(*args):
         else dash.no_update
     )
 
+    trigger = None
+    ### Open the webterm on the initial load.
     if not ctx.triggered:
+        #  trigger = 'open-shell-button'
         return [], [], True, websocket_div_children
+
+    if len(ctx.triggered) > 1 and 'check-input-interval.n_intervals' in ctx.triggered:
+        ctx.triggered.remove('check-input-interval.n_intervals')
+    trigger = ctx.triggered[0]['prop_id'].split('.')[0] if not trigger else trigger
 
     session_data = args[-1]
 
@@ -216,10 +223,6 @@ def update_content(*args):
     
     ### NOTE: stop the running action if it exists
     stop_action(ctx.states)
-
-    if len(ctx.triggered) > 1 and 'check-input-interval.n_intervals' in ctx.triggered:
-        ctx.triggered.remove('check-input-interval.n_intervals')
-    trigger = ctx.triggered[0]['prop_id'].split('.')[0]
 
     check_input_interval_disabled = ctx.states['check-input-interval.disabled']
     enable_check_input_interval = (
