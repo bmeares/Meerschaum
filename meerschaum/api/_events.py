@@ -11,6 +11,7 @@ from meerschaum.api import app, get_api_connector, get_uvicorn_config, debug, uv
 from meerschaum.utils.debug import dprint
 from meerschaum.connectors.poll import retry_connect
 from meerschaum.utils.threading import Thread
+from meerschaum.utils.warnings import warn
 
 @app.on_event("startup")
 async def startup():
@@ -34,3 +35,21 @@ async def shutdown():
         dprint("Closing connection...")
     if get_api_connector().type == 'sql':
         get_api_connector().engine.dispose()
+
+    ### Terminate any running jobs left over.
+    if 'meerschaum.api.dash' in sys.modules:
+        from meerschaum.api.dash.actions import running_jobs, stop_action
+        from meerschaum.utils.packages import run_python_package
+        from meerschaum.config.static import STATIC_CONFIG
+        from meerschaum._internal.term.tools import is_webterm_running
+        run_python_package(
+            'meerschaum', [
+                'delete', 'job',
+                STATIC_CONFIG['api']['webterm_job_name'], '-y'
+            ],
+            venv = None,
+            foreground = False,
+            capture_output = True,
+        )
+        for session_id in running_jobs:
+            stop_action({'session-store.data': {'session-id': session_id}})

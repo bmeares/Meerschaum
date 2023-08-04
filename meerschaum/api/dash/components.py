@@ -30,10 +30,11 @@ go_button = dbc.Button('Execute', id='go-button', color='primary', style={'width
 test_button = dbc.Button('Test', id='test-button', color='danger', style={'display' : 'none'})
 get_items_menu = dbc.DropdownMenu(
     label='More', id='get-items-menu', children=[
-        dbc.DropdownMenuItem("Graphs", id='get-graphs-button'),
+        dbc.DropdownMenuItem("Shell", id='open-shell-button'),
         dbc.DropdownMenuItem("Jobs", id='get-jobs-button'),
         dbc.DropdownMenuItem("Plugins", id='get-plugins-button'),
         dbc.DropdownMenuItem("Users", id='get-users-button'),
+        dbc.DropdownMenuItem("Graphs", id='get-graphs-button'),
     ],
     style={'width': '100%', 'font-size': '0.5em'},
     menu_variant='dark',
@@ -101,26 +102,12 @@ navbar = dbc.Navbar(
                         dbc.Col(
                                 html.Img(
                                     src = endpoints['dash'] + "/assets/logo_48x48.png",
-                                    #  style = {'padding': '0.5em', 'padding-left': '2em'},
                                     title = doc,
                                 ),
-                            #  width = 'auto', 
-                            #  align = 'start'
                         ),
-                        #  dbc.Col(
-                            #  dbc.NavbarBrand(
-                                #  "Web Console",
-                                #  class_name = 'ms-2',
-                                #  style = {'margin-top': '10px', 'display': 'inline-block'}
-                            #  ),
-                            #  align = 'start',
-                            #  width = 2,
-                        #  ),
                     ],
-                    #  style = {'width': '100%'},
                     align = 'center',
                     className = 'g-0 navbar-logo-row',
-                    #  justify = 'around',
                 ),
                 href = '/docs',
                 style = {"textDecoration": "none"},
@@ -129,9 +116,14 @@ navbar = dbc.Navbar(
             dbc.Collapse(
                 dbc.Row(
                     [
-                        dbc.Col(
-                            instance_select,
-                        ),
+                        #  dbc.Col(
+                            #  dbc.Button(
+                                #  html.B("Open Shell"),
+                                #  outline = True,
+                                #  id = "open-shell-button"
+                            #  ),
+                        #  ),
+                        dbc.Col(instance_select),
                         dbc.Col(
                             dbc.Button(
                                 "Sign out",

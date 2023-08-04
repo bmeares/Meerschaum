@@ -35,6 +35,7 @@ STATIC_CONFIG = {
         'oauth': {
             'token_expires_minutes': 720,
         },
+        'webterm_job_name': '_webterm',
     },
     'environment': {
         'config': 'MRSM_CONFIG',

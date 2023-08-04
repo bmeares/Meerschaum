@@ -20,6 +20,6 @@ def get_users_cards(state: WebState) -> Tuple[List[dbc.Card], List[SuccessTuple]
     conn = get_web_connector(state)
     usernames = conn.get_users(debug=debug)
     for username in usernames:
-        cards.append(dbc.Card(username))
+        cards.append(dbc.Card(html.H4(username)))
 
     return cards, alerts

@@ -1,8 +1,18 @@
 # 🪵 Changelog
 
-## 1.6.x Releases
+## 1.7.x Releases
 
 This is the current release cycle, so stay tuned for future releases!
+
+### v1.7.0
+
+- **Add `--keyfile` and `--certfile` support.**  
+  When starting the Web API, you may now run via HTTPS with `--keyfile` and `--certfile`. Older releases required the keys to be set in `MRSM_CONFIG`. This also brings SSL support for `--production` (Gunicorn).
+
+- **Add the Webterm to the Web Console.**  
+  At long last, the webterm is embedded within the web console. Note that for security, this is only available when running the API locally.
+
+## 1.6.x Releases
 
 ### v1.6.16 – v1.6.18
 

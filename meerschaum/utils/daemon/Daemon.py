@@ -332,18 +332,7 @@ class Daemon:
 
 
     def quit(self, timeout: Optional[int] = 3) -> SuccessTuple:
-        """Gracefully quit a running daemon.
-        Sends a SIGINT signal the to process.
-
-        Parameters
-        ----------
-        timeout: Optional[int] :
-             (Default value = 3)
-
-        Returns
-        -------
-
-        """
+        """Gracefully quit a running daemon."""
         daemoniker, psutil = attempt_import('daemoniker', 'psutil')
         return self._send_signal(daemoniker.SIGINT, timeout=timeout)
 
@@ -396,22 +385,12 @@ class Daemon:
     @property
     def sighandler(self) -> Optional[daemoniker.SignalHandler1]:
         """
-
-        Parameters
-        ----------
-
-        Returns
-        -------
-        type
-            If the process is not running, return `None`.
-
+        If the process is not running, return `None`.
         """
-        # if not self.pid_path.exists():
-        #     return None
-
         def _quit(*args, **kw):
             from meerschaum.__main__ import _exit
             _exit()
+
         daemoniker = attempt_import('daemoniker')
         if '_sighandler' not in self.__dict__:
             self._sighandler = daemoniker.SignalHandler1(

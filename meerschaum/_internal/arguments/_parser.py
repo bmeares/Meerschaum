@@ -277,7 +277,14 @@ groups['api'].add_argument(
     '--production', '--gunicorn', action='store_true',
     help = 'Start the API with the Gunicorn process manager.'
 )
-
+groups['api'].add_argument(
+    '--keyfile', type=str,
+    help = "Start the API server with this keyfile (requires --certfile).",
+)
+groups['api'].add_argument(
+    '--certfile', type=str,
+    help = "Start the API server with this certfile (requires --keyfile).",
+)
 ### Plugins options
 groups['plugins'].add_argument(
     '-r', '--repository', '--repo', type=str,

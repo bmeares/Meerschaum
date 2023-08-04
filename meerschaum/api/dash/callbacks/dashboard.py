@@ -23,6 +23,7 @@ from meerschaum.api.dash.jobs import get_jobs_cards
 from meerschaum.api.dash.plugins import get_plugins_cards
 from meerschaum.api.dash.users import get_users_cards
 from meerschaum.api.dash.graphs import get_graphs_cards
+from meerschaum.api.dash.webterm import get_webterm
 from meerschaum.api.dash.components import alert_from_success_tuple, console_div, build_cards_grid
 from meerschaum.api.dash.actions import execute_action, check_input_interval, stop_action
 import meerschaum.api.dash.pages as pages
@@ -168,6 +169,7 @@ def update_page_layout_div(pathname: str, session_store_data: Dict[str, Any]):
     Input('get-plugins-button', 'n_clicks'),
     Input('get-users-button', 'n_clicks'),
     Input('get-graphs-button', 'n_clicks'),
+    Input('open-shell-button', 'n_clicks'),
     Input('check-input-interval', 'n_intervals'),
     State('location', 'href'),
     State('session-store', 'data'),
@@ -203,6 +205,7 @@ def update_content(*args):
         'get-plugins-button': get_plugins_cards,
         'get-users-button': get_users_cards,
         'get-graphs-button': get_graphs_cards,
+        'open-shell-button': get_webterm,
         'check-input-interval': check_input_interval,
     }
     ### Defaults to 3 if not in dict.
