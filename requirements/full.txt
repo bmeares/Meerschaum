@@ -65,3 +65,4 @@ passlib>=1.7.4
 fastapi-login>=1.7.2
 python-multipart>=0.0.5
 pydantic>=1.7.4
+httpx>=0.24.1

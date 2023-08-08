@@ -7,6 +7,7 @@ passlib>=1.7.4
 fastapi-login>=1.7.2
 python-multipart>=0.0.5
 pydantic>=1.7.4
+httpx>=0.24.1
 numpy>=1.18.5
 pandas>=1.5.3
 pytz>=2022.1.0
