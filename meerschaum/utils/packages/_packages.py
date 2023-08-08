@@ -152,6 +152,8 @@ packages['api'] = {
     'fastapi_login'                  : 'fastapi-login>=1.7.2',
     'multipart'                      : 'python-multipart>=0.0.5',
     'pydantic'                       : 'pydantic>=1.7.4',
+    'httpx'                          : 'httpx>=0.24.1',
+    'websockets'                     : 'websockets>=11.0.3',
 }
 packages['api'].update(packages['sql'])
 packages['api'].update(packages['formatting'])

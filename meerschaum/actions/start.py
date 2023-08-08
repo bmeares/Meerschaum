@@ -415,7 +415,7 @@ def _start_webterm(
     
         - `--host`
             The host interface to which the webterm binds.
-            Defaults to '0.0.0.0'.
+            Defaults to '127.0.0.1'.
     """
     from meerschaum._internal.term import get_webterm_app_and_manager, tornado, tornado_ioloop
     from meerschaum._internal.term.tools import is_webterm_running
@@ -424,7 +424,7 @@ def _start_webterm(
     from meerschaum.utils.warnings import info
 
     if host is None:
-        host = '0.0.0.0'
+        host = '127.0.0.1'
     if port is None:
         port = 8765
     if sysargs is None:

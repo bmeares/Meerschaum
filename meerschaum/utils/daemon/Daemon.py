@@ -73,7 +73,7 @@ class Daemon:
         if daemon_id is not None:
             self.daemon_id = daemon_id
             if not self.pickle_path.exists() and not target and ('target' not in self.__dict__):
-                error(
+                raise Exception(
                     f"Daemon '{self.daemon_id}' does not exist. "
                     + "Pass a target to create a new Daemon."
                 )
@@ -401,7 +401,7 @@ class Daemon:
             )
         return self._sighandler
 
-    def mkdir_if_not_exists(self, allow_dirty_run : bool = False):
+    def mkdir_if_not_exists(self, allow_dirty_run: bool = False):
         """Create the Daemon's directory.
         If `allow_dirty_run` is `False` and the directory already exists,
         raise a `FileExistsError`.

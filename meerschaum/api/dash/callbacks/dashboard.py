@@ -24,7 +24,9 @@ from meerschaum.api.dash.plugins import get_plugins_cards
 from meerschaum.api.dash.users import get_users_cards
 from meerschaum.api.dash.graphs import get_graphs_cards
 from meerschaum.api.dash.webterm import get_webterm
-from meerschaum.api.dash.components import alert_from_success_tuple, console_div, build_cards_grid
+from meerschaum.api.dash.components import (
+    alert_from_success_tuple, console_div, build_cards_grid,
+)
 from meerschaum.api.dash.actions import execute_action, check_input_interval, stop_action
 import meerschaum.api.dash.pages as pages
 from meerschaum.utils.typing import Dict
@@ -106,8 +108,13 @@ _required_login = {''}
     Output('session-store', 'data'),
     Input('location', 'pathname'),
     Input('session-store', 'data'),
+    State('location', 'href'),
 )
-def update_page_layout_div(pathname: str, session_store_data: Dict[str, Any]):
+def update_page_layout_div(
+        pathname: str, 
+        session_store_data: Dict[str, Any],
+        location_href: str,
+    ) -> Tuple[List[Any], Dict[str, Any]]:
     """
     Route the user to the correct page.
 
@@ -121,8 +128,7 @@ def update_page_layout_div(pathname: str, session_store_data: Dict[str, Any]):
 
     Returns
     -------
-    A tuple of the page layout, new session store data, and the web socket connection.
-
+    A tuple of the page layout and new session store data.
     """
     ctx = dash.callback_context
     dash_endpoint = endpoints['dash']
@@ -135,6 +141,9 @@ def update_page_layout_div(pathname: str, session_store_data: Dict[str, Any]):
     if session_id not in active_sessions and no_auth:
         session_store_data['session-id'] = str(uuid.uuid4())
         active_sessions[session_store_data['session-id']] = {'username': 'no-auth'}
+
+        ### Sometimes the href is an empty string, so store it here for later.
+        session_store_data['location.href'] = location_href
         session_store_to_return = session_store_data
     else:
         session_store_to_return = dash.no_update
@@ -169,12 +178,10 @@ def update_page_layout_div(pathname: str, session_store_data: Dict[str, Any]):
     Input('get-plugins-button', 'n_clicks'),
     Input('get-users-button', 'n_clicks'),
     Input('get-graphs-button', 'n_clicks'),
-    Input('open-shell-button', 'n_clicks'),
     Input('check-input-interval', 'n_intervals'),
     State('location', 'href'),
     State('session-store', 'data'),
     *keys_state,
-    #  prevent_initial_call=True,
 )
 def update_content(*args):
     """
@@ -182,20 +189,22 @@ def update_content(*args):
     and execute the appropriate function.
     """
     ctx = dash.callback_context
+    location_href = ctx.states['session-store.data'].get('location.href', None)
     websocket_div_children = (
         dex.WebSocket(
             id = 'ws',
-            url = ws_url_from_href(ctx.states['location.href']),
+            url = ws_url_from_href(location_href),
             protocols = ['ws', 'wss']
-        ) if not ctx.states.get('ws.url', None) and ctx.states.get('location.href', None)
+        ) if not ctx.states.get('ws.url', None) and location_href
         else dash.no_update
     )
 
     trigger = None
+    initial_load = False
     ### Open the webterm on the initial load.
     if not ctx.triggered:
-        #  trigger = 'open-shell-button'
-        return [], [], True, websocket_div_children
+        initial_load = True
+        trigger = 'open-shell-button'
 
     if len(ctx.triggered) > 1 and 'check-input-interval.n_intervals' in ctx.triggered:
         ctx.triggered.remove('check-input-interval.n_intervals')
@@ -235,6 +244,12 @@ def update_content(*args):
         ctx.states,
         **filter_keywords(triggers[trigger], session_data=session_data)
     )
+
+    ### If the webterm fails on initial load (e.g. insufficient permissions),
+    ### don't display the alerts just yet.
+    if initial_load and alerts:
+        return console_div, [], True, websocket_div_children
+
     if trigger.startswith('get-') and trigger.endswith('-button'):
         content = build_cards_grid(content, num_columns=trigger_num_cols.get(trigger, 3))
     return content, alerts, not enable_check_input_interval, websocket_div_children
@@ -497,7 +512,7 @@ def ws_receive(message):
     if not message and message != '':
         raise PreventUpdate
     if not message.get('data', None):
-        return console_div
+        raise PreventUpdate
     return [html.Div(
         [html.Pre(message['data'], id='console-pre')],
         id = 'console-div',

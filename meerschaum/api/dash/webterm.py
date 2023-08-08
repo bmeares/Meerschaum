@@ -7,6 +7,7 @@ Functions for interacting with the Webterm via the dashboard.
 """
 
 import time
+from urllib.parse import urlparse
 from meerschaum.config import get_config
 from meerschaum.api import debug, CHECK_UPDATE, get_api_connector
 from meerschaum.api.dash import active_sessions
@@ -16,10 +17,13 @@ from meerschaum.utils.packages import attempt_import, import_html, import_dcc, r
 from meerschaum._internal.term.tools import is_webterm_running
 from meerschaum.config.static import STATIC_CONFIG
 from meerschaum.core import User
+from meerschaum.utils.threading import Thread, RLock
 dcc, html = import_dcc(check_update=CHECK_UPDATE), import_html(check_update=CHECK_UPDATE)
 dbc = attempt_import('dash_bootstrap_components', lazy=False, check_update=CHECK_UPDATE)
 
 MAX_WEBTERM_ATTEMPTS: int = 10
+
+_locks = {'webterm_thread': RLock()}
 
 def get_webterm(state: WebState) -> Tuple[List[dbc.Card], List[SuccessTuple]]:
     """
@@ -45,24 +49,53 @@ def get_webterm(state: WebState) -> Tuple[List[dbc.Card], List[SuccessTuple]]:
                 ))]
             )
 
+    for i in range(MAX_WEBTERM_ATTEMPTS):
+        if is_webterm_running('localhost', 8765):
+            return (
+                html.Iframe(
+                    src = f"/webterm?s={state['session-store.data']['session-id']}",
+                    id = "webterm-iframe",
+                ),
+                []
+            )
+        time.sleep(1)
+    return console_div, [alert_from_success_tuple((False, "Could not start the webterm server."))]
 
-    protocol, host, port = 'http', '0.0.0.0', 8765
-    if not is_webterm_running(host, port, protocol):
-        run_python_package(
-            'meerschaum', [
-                'start', 'webterm', '-d', '--noask',
-                '--name', STATIC_CONFIG['api']['webterm_job_name'],
-            ],
-            foreground = False,
+
+webterm_procs = {}
+def start_webterm() -> None:
+    """
+    Start the webterm thread.
+    """
+    from meerschaum._internal.entry import entry
+    from meerschaum.utils.packages import run_python_package
+
+    def run():
+        _ = run_python_package(
+            'meerschaum',
+            ['start', 'webterm'],
+            capture_output = True,
+            as_proc = True,
+            store_proc_dict = webterm_procs,
+            store_proc_key = 'process',
             venv = None,
         )
 
-    webterm_iframe = html.Iframe(
-        src = f'{protocol}://{host}:{port}',
-        id = "webterm-iframe",
-    )
-    for i in range(MAX_WEBTERM_ATTEMPTS):
-        if is_webterm_running(host, port, protocol):
-            return webterm_iframe, []
-        time.sleep(1)
-    return console_div, [alert_from_success_tuple((False, "Could not start the webterm server."))]
+    with _locks['webterm_thread']:
+        if webterm_procs.get('thread', None) is None:
+            webterm_thread = Thread(target=run)
+            webterm_procs['thread'] = webterm_thread
+            webterm_thread.start()
+
+
+def stop_webterm() -> None:
+    """
+    Stop the webterm thread.
+    """
+    webterm_thread = webterm_procs.get('thread', None)
+    webterm_proc = webterm_procs.get('process', None)
+    with _locks['webterm_thread']:
+        if webterm_proc is not None:
+            webterm_proc.terminate()
+        if webterm_thread is not None:
+            webterm_thread.join()

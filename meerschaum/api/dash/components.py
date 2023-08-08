@@ -51,9 +51,7 @@ bottom_buttons_content = dbc.Card(
             dbc.Col(show_pipes_button, lg=3, md=3),
             dbc.Col(lg=True, md=False),
             dbc.Col(get_items_menu, lg=2, md=2),
-        ],
-        #  no_gutters=False
-        )
+        ])
     )
 )
 console_div = html.Div(id='console-div', children=[html.Pre(get_shell().intro, id='console-pre')])
@@ -115,13 +113,13 @@ navbar = dbc.Navbar(
             dbc.Collapse(
                 dbc.Row(
                     [
-                        dbc.Col(
-                            dbc.Button(
-                                html.B("Open Shell"),
-                                outline = True,
-                                id = "open-shell-button"
-                            ),
-                        ),
+                        #  dbc.Col(
+                            #  dbc.Button(
+                                #  html.B("Open Shell"),
+                                #  outline = True,
+                                #  id = "open-shell-button"
+                            #  ),
+                        #  ),
                         dbc.Col(instance_select),
                         dbc.Col(
                             dbc.Button(
