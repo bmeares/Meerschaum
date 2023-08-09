@@ -26,13 +26,19 @@ layout = dbc.Container([
         html.Div(
             dbc.Container([
                 html.H3('Plugins'),
-                html.P('Plugins extend the functionality of Meerschaum.'),
-                html.A(
-                    'To find out more, check out the plugins documentation.',
-                    href = 'https://meerschaum.io/reference/plugins/',
-                    rel = "noreferrer noopener",
-                    target = "_blank",
-                ),
+                html.P([
+                    (
+                        'Plugins extend the functionality of Meerschaum.'
+                        + ' To find out more, check out the '
+                    ),
+                    html.A(
+                        'plugins documentation',
+                        href = 'https://meerschaum.io/reference/plugins/',
+                        rel = "noreferrer noopener",
+                        target = "_blank",
+                    ),
+                    '.',
+                ]),
             ]),
             className = 'page-header',
             style = {'background-color': 'var(--dark)', 'padding': '1em'},

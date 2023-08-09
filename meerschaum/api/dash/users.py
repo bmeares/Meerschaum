@@ -16,10 +16,18 @@ dcc, html = import_dcc(check_update=CHECK_UPDATE), import_html(check_update=CHEC
 dbc = attempt_import('dash_bootstrap_components', lazy=False, check_update=CHECK_UPDATE)
 
 def get_users_cards(state: WebState) -> Tuple[List[dbc.Card], List[SuccessTuple]]:
+    """
+    Return the cards and alerts for users.
+    """
     cards, alerts = [], [] 
     conn = get_web_connector(state)
     usernames = conn.get_users(debug=debug)
     for username in usernames:
-        cards.append(dbc.Card(html.H4(username)))
+        cards.append(
+            dbc.Card([
+                dbc.CardHeader(),
+                dbc.CardBody([html.H5(username)]),
+            ])
+        )
 
     return cards, alerts

@@ -25,17 +25,45 @@ PlainTextResponse = fastapi_responses.PlainTextResponse
 @app.get("/webterm", tags=["Webterm"])
 async def get_webterm(
         request: Request,
-        s: Optional[str] = 'no-auth',
+        s: Optional[str] = None,
     ) -> HTMLResponse:
     """
     Get the main HTML template for the Webterm.
     """
     session_id = s
-    if session_id not in active_sessions:
+    if not no_auth and session_id not in active_sessions:
         return HTMLResponse(
             """
-            <h2>Unauthorized</h2>
-            <p>Please <a href="/dash/login">log in</a> and try again.</p>
+            <html>
+                <head>
+                    <style>
+                    body {
+                        background-color: #222222;
+                    }
+                    #message-div {
+                        padding: 15px;
+                        font-size: x-large;
+                        font-family: sans-serif;
+                    }
+                    h2 {
+                        color: #FFFFFF;
+                    }
+                    p {
+                        color: #FFFFFF;
+                    }
+                    a {
+                        color: #FFFFFF;
+                        text-decoration: underline;
+                    }
+                    </style>
+                </head>
+                <body>
+                    <div id="message-div">
+                        <h2>Unauthorized</h2>
+                        <p>Please <a href="/dash/login">log in</a> and try again.</p>
+                    </div>
+                </body>
+            </html>
             """,
             status_code = 401,
         )
@@ -76,8 +104,12 @@ async def webterm_websocket(websocket: WebSocket):
     """
     Connect to the Webterm's websocket.
     """
-    
     await websocket.accept()
+    session_doc = await websocket.receive_json()
+    session_id = (session_doc or {}).get('session-id', 'no-auth')
+    if not no_auth and session_id not in active_sessions:
+        await websocket.close()
+        return
 
     async with websockets.connect("ws://localhost:8765/websocket") as ws:
         async def forward_messages():

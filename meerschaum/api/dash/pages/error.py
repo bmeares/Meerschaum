@@ -13,7 +13,7 @@ import dash_bootstrap_components as dbc
 
 layout = dbc.Container([
     dcc.Markdown(f"""
-    ## Error encountered
+    ## Page not found
     You might have requested an invalid resource.
     Head back to the [dashboard home page]({endpoints['dash']}) and try navigating from there.
     """),
