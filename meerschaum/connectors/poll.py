@@ -140,6 +140,7 @@ def _wrap_retry_connect(
     from meerschaum.utils.sql import test_queries
     from meerschaum.utils.misc import timed_input
     from functools import partial
+    import platform
     import time
 
     connector = get_connector(**connector_meta)
@@ -219,9 +220,12 @@ def _wrap_retry_connect(
 
         try:
             if retry_wait > 0:
-                text = timed_input(retry_wait)
-                if text in ('q', 'quit', 'pass', 'exit', 'stop'):
-                    return None
+                if platform.system() != 'Windows':
+                    text = timed_input(retry_wait)
+                    if text in ('q', 'quit', 'pass', 'exit', 'stop'):
+                        return None
+                else:
+                    time.sleep(retry_wait)
         except KeyboardInterrupt:
             return None
         retries += 1
