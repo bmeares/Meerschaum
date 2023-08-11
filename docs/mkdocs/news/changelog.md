@@ -6,6 +6,9 @@ This is the current release cycle, so stay tuned for future releases!
 
 ### v1.7.0
 
+- **Remove `get_backtrack_data()` for instance connectors.**  
+  If provided, this method will still override the new generic implementation.
+
 - **Add `--keyfile` and `--certfile` support.**  
   When starting the Web API, you may now run via HTTPS with `--keyfile` and `--certfile`. Older releases required the keys to be set in `MRSM_CONFIG`. This also brings SSL support for `--production` (Gunicorn).
 
@@ -20,6 +23,13 @@ This is the current release cycle, so stay tuned for future releases!
 
 - **Held back `dash-extensions`**  
   The recent 1.0.2+ releases have shipped some broken changes, so `dash-extensions` is held back to `1.0.1` until newer releases have been tested.
+
+- **Allow for digits in environment connectors.**  
+  Connectors defined as environment variables may now have digits in the type.
+
+  ```bash
+  export MRSM_A2B_TEST='{"foo": "bar"}'
+  ```
 
 - **Fixed `stack` on Windows.**
 
