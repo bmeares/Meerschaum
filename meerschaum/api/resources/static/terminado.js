@@ -10,11 +10,9 @@ function make_terminal(element, size, ws_url) {
     screenKeys: true,
     useStyle: true,
   });
-  sessionStore = JSON.parse(sessionStorage.getItem("session-store"));
+  sessionStore = sessionStorage.getItem("session-store");
   ws.onopen = function (event) {
-    ws.send(
-      JSON.stringify(sessionStore),
-    );
+    ws.send(sessionStore);
     ws.send(
       JSON.stringify([
         "set_size",

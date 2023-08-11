@@ -29,7 +29,8 @@ STATIC_CONFIG = {
             'chaining': '/chaining',
             'websocket': '/ws',
             'dash': '/dash',
-            'term': '/term',
+            'webterm': '/webterm',
+            'webterm_websocket': '/websocket',
             'info': '/info',
         },
         'oauth': {
@@ -92,7 +93,7 @@ STATIC_CONFIG = {
         },
         'min_username_length': 1,
         'max_username_length': 26,
-        'min_password_length': 1,
+        'min_password_length': 5,
     },
     'plugins': {
         'repo_separator': '@',

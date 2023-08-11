@@ -8,9 +8,10 @@ Routes to the Webterm proxy.
 
 import asyncio
 from meerschaum.utils.typing import Optional
-from meerschaum.api import app, no_auth, manager
+from meerschaum.api import app, no_auth, manager, endpoints
 from meerschaum.utils.packages import attempt_import
 from meerschaum.api.dash import active_sessions
+from meerschaum.api.dash.users import is_session_authenticated
 fastapi, fastapi_responses = attempt_import('fastapi', 'fastapi.responses')
 import starlette
 httpx = attempt_import('httpx')
@@ -22,7 +23,7 @@ Response = fastapi_responses.Response
 PlainTextResponse = fastapi_responses.PlainTextResponse
 
 
-@app.get("/webterm", tags=["Webterm"])
+@app.get(endpoints['webterm'], tags=["Webterm"])
 async def get_webterm(
         request: Request,
         s: Optional[str] = None,
@@ -30,8 +31,7 @@ async def get_webterm(
     """
     Get the main HTML template for the Webterm.
     """
-    session_id = s
-    if not no_auth and session_id not in active_sessions:
+    if not is_session_authenticated(s):
         return HTMLResponse(
             """
             <html>
@@ -77,15 +77,41 @@ async def get_webterm(
         )
 
 
-@app.websocket("/websocket")
+@app.get("/xstatic/termjs/term.js", tags=['Webterm'])
+async def get_termjs(
+        v: str,
+        request: Request,
+    ):
+    """
+    Fetch the `term.js` source file.
+    """
+
+    async with httpx.AsyncClient() as client:
+        response = await client.get(
+            "http://localhost:8765/xstatic/termjs/term.js",
+            params = {'v': v},
+            headers = request.headers,
+        )
+        return Response(
+            content = response.text,
+            status_code = response.status_code,
+            headers = response.headers,
+        )
+
+
+@app.websocket(endpoints['webterm_websocket'])
 async def webterm_websocket(websocket: WebSocket):
     """
     Connect to the Webterm's websocket.
     """
-    await websocket.accept()
-    session_doc = await websocket.receive_json()
+    try:
+        await websocket.accept()
+        session_doc = await websocket.receive_json()
+    except starlette.websockets.WebSocketDisconnect:
+        return
     session_id = (session_doc or {}).get('session-id', 'no-auth')
-    if not no_auth and session_id not in active_sessions:
+
+    if not is_session_authenticated(session_id):
         await websocket.close()
         return
 
@@ -99,7 +125,7 @@ async def webterm_websocket(websocket: WebSocket):
                 websockets.exceptions.ConnectionClosed,
                 starlette.websockets.WebSocketDisconnect
             ):
-                pass
+                await ws.close()
 
         async def backward_messages():
             try:

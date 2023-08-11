@@ -56,5 +56,10 @@ Flask-Compress>=1.10.1
 dash>=2.6.2
 dash-bootstrap-components>=1.2.1
 dash-ace>=0.2.1
-dash-extensions>=0.1.6
+dash-extensions<1.0.2
 dash-daq>=0.5.0
+terminado>=0.12.1
+tornado>=6.1.0
+tornado-xstatic>=0.2.0
+XStatic>=1.0.2
+XStatic-term.js>=0.0.7

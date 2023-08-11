@@ -392,6 +392,8 @@ def _start_gui(
         import traceback
         traceback.print_exc()
         success, msg = False, str(e)
+    except KeyboardInterrupt:
+        success, msg = True, "Success"
     finally:
         process.kill()
     return success, msg

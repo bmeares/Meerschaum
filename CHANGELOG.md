@@ -15,9 +15,18 @@ This is the current release cycle, so stay tuned for future releases!
 - **Add `--secure` to `start api`.**  
   Starting the Web API with `--secure` will now disallow actions from non-administrators. This is recommend for shared deployments.
 
+- **Fixed the registration page on the Web API.**  
+  Users should now be able to create accounts from Dockerized deployments.
+
+- **Fixed `stack` on Windows.**
+
 - **Fixed a false error with background jobs.**
 
+- **Increased the minimum password length to 5.**
+
 ## 1.6.x Releases
+
+The biggest features of the 1.6.x series were all about chunking and adding support for syncing generators. The series was also full of minor bugfixes, contributing to an even more polished experience. It also was the first release to drop support for a Python version, formally deprecating Python 3.7.
 
 ### v1.6.16 – v1.6.18
 
