@@ -21,6 +21,9 @@ def get_plugins_cards(
         search_term: Optional[str] = None,
         session_data: Optional[Dict[str, Any]] = None,
     ) -> Tuple[List[dbc.Card], List[SuccessTuple]]:
+    """
+    Return the cards and alerts for plugins.
+    """
     cards, alerts = [], []
     if session_data is None:
         session_data = {}

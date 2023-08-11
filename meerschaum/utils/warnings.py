@@ -17,10 +17,6 @@ warnings.filterwarnings(
     category = UserWarning
 )
 warnings.filterwarnings(
-    "ignore",
-    category = DeprecationWarning
-)
-warnings.filterwarnings(
     "always",
     category = ImportWarning
 )

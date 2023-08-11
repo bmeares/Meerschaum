@@ -9,8 +9,6 @@ Default actions available to the mrsm CLI.
 from __future__ import annotations
 from meerschaum.utils.typing import Callable, Any, Optional, Union, List, Dict, SuccessTuple
 from meerschaum.utils.packages import get_modules_from_package
-from meerschaum.utils.warnings import enable_depreciation_warnings
-enable_depreciation_warnings(__name__)
 _custom_actions = []
 
 ### build __all__ from other .py files in this package

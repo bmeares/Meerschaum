@@ -44,6 +44,7 @@ def show_registration_disabled_collapse(n_clicks, is_open):
     Input('login-button', 'n_clicks'),
     State('username-input', 'value'),
     State('password-input', 'value'),
+    State('location', 'href'),
 )
 def login_button_click(
         username_submit,
@@ -51,6 +52,7 @@ def login_button_click(
         n_clicks,
         username,
         password,
+        location_href,
     ):
     """
     When the user submits the login form, check the login.
@@ -61,8 +63,8 @@ def login_button_click(
     if not username or not password or not ctx.triggered:
         return {}, form_class, dash.no_update
     try:
-        token_dict = login({'username' : username, 'password' : password})
-        session_data = {'session-id': str(uuid.uuid4())}
+        token_dict = login({'username': username, 'password': password})
+        session_data = {'session-id': str(uuid.uuid4()), 'location.href': location_href}
         active_sessions[session_data['session-id']] = {'username': username}
     except HTTPException:
         form_class += ' is-invalid'

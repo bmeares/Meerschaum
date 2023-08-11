@@ -38,7 +38,6 @@ class SQLConnector(Connector):
         get_add_columns_queries,
         get_alter_columns_queries,
         delete_pipe,
-        get_backtrack_data,
         get_pipe_data,
         get_pipe_data_query,
         register_pipe,

@@ -37,7 +37,7 @@ def register_plugin(
         name: str,
         version: str = None,
         attributes: str = None,
-        archive : UploadFile = File(...),
+        archive: UploadFile = File(...),
         curr_user = (
             fastapi.Depends(manager) if not no_auth else None
         ),

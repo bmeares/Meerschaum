@@ -29,12 +29,14 @@ STATIC_CONFIG = {
             'chaining': '/chaining',
             'websocket': '/ws',
             'dash': '/dash',
-            'term': '/term',
+            'webterm': '/webterm',
+            'webterm_websocket': '/websocket',
             'info': '/info',
         },
         'oauth': {
             'token_expires_minutes': 720,
         },
+        'webterm_job_name': '_webterm',
     },
     'environment': {
         'config': 'MRSM_CONFIG',
@@ -43,7 +45,7 @@ STATIC_CONFIG = {
         'plugins': 'MRSM_PLUGINS_DIR',
         'runtime': 'MRSM_RUNTIME',
         'id': 'MRSM_SERVER_ID',
-        'uri_regex': 'MRSM_([a-zA-Z]*)_(\d*[a-zA-Z][a-zA-Z0-9-_+]*$)',
+        'uri_regex': r'MRSM_([a-zA-Z0-9]*)_(\d*[a-zA-Z][a-zA-Z0-9-_+]*$)',
         'prefix': 'MRSM_',
     },
     'config': {
@@ -91,7 +93,7 @@ STATIC_CONFIG = {
         },
         'min_username_length': 1,
         'max_username_length': 26,
-        'min_password_length': 1,
+        'min_password_length': 5,
     },
     'plugins': {
         'repo_separator': '@',

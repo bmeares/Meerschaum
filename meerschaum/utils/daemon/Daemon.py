@@ -73,7 +73,7 @@ class Daemon:
         if daemon_id is not None:
             self.daemon_id = daemon_id
             if not self.pickle_path.exists() and not target and ('target' not in self.__dict__):
-                error(
+                raise Exception(
                     f"Daemon '{self.daemon_id}' does not exist. "
                     + "Pass a target to create a new Daemon."
                 )
@@ -332,18 +332,7 @@ class Daemon:
 
 
     def quit(self, timeout: Optional[int] = 3) -> SuccessTuple:
-        """Gracefully quit a running daemon.
-        Sends a SIGINT signal the to process.
-
-        Parameters
-        ----------
-        timeout: Optional[int] :
-             (Default value = 3)
-
-        Returns
-        -------
-
-        """
+        """Gracefully quit a running daemon."""
         daemoniker, psutil = attempt_import('daemoniker', 'psutil')
         return self._send_signal(daemoniker.SIGINT, timeout=timeout)
 
@@ -396,22 +385,12 @@ class Daemon:
     @property
     def sighandler(self) -> Optional[daemoniker.SignalHandler1]:
         """
-
-        Parameters
-        ----------
-
-        Returns
-        -------
-        type
-            If the process is not running, return `None`.
-
+        If the process is not running, return `None`.
         """
-        # if not self.pid_path.exists():
-        #     return None
-
         def _quit(*args, **kw):
             from meerschaum.__main__ import _exit
             _exit()
+
         daemoniker = attempt_import('daemoniker')
         if '_sighandler' not in self.__dict__:
             self._sighandler = daemoniker.SignalHandler1(
@@ -422,7 +401,7 @@ class Daemon:
             )
         return self._sighandler
 
-    def mkdir_if_not_exists(self, allow_dirty_run : bool = False):
+    def mkdir_if_not_exists(self, allow_dirty_run: bool = False):
         """Create the Daemon's directory.
         If `allow_dirty_run` is `False` and the directory already exists,
         raise a `FileExistsError`.

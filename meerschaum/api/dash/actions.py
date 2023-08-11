@@ -21,6 +21,7 @@ from meerschaum.api.dash import (
 from meerschaum.api import get_api_connector
 from meerschaum.api.dash.connectors import get_web_connector
 from meerschaum.api.dash.components import alert_from_success_tuple, console_div
+from meerschaum.api.dash.webterm import get_webterm
 from meerschaum.api.dash.pipes import pipes_from_state, keys_from_state
 from meerschaum.api.dash.websockets import ws_send
 from meerschaum.api._websockets import websockets
@@ -263,7 +264,9 @@ def stop_action(state: WebState):
         proc.terminate()
         thread.join()
     success_tuple = True, "Success"
+    webterm_iframe, webterm_alerts = get_webterm(state)
+    console_to_return = console_div if webterm_alerts else webterm_iframe
     return (
-        [console_div],
+        [console_to_return],
         [alert_from_success_tuple(success_tuple)]
     )

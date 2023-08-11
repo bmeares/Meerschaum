@@ -1,8 +1,45 @@
 # 🪵 Changelog
 
-## 1.6.x Releases
+## 1.7.x Releases
 
 This is the current release cycle, so stay tuned for future releases!
+
+### v1.7.0
+
+- **Remove `get_backtrack_data()` for instance connectors.**  
+  If provided, this method will still override the new generic implementation.
+
+- **Add `--keyfile` and `--certfile` support.**  
+  When starting the Web API, you may now run via HTTPS with `--keyfile` and `--certfile`. Older releases required the keys to be set in `MRSM_CONFIG`. This also brings SSL support for `--production` (Gunicorn).
+
+- **Add the Webterm to the Web Console.**  
+  At long last, the webterm is embedded within the web console and is accessible from the Web API at the endpoint `/webterm`. You must provide your active, authorized session ID to access to the Webterm.
+
+- **Add `--secure` to `start api`.**  
+  Starting the Web API with `--secure` will now disallow actions from non-administrators. This is recommend for shared deployments.
+
+- **Fixed the registration page on the Web API.**  
+  Users should now be able to create accounts from Dockerized deployments.
+
+- **Held back `dash-extensions`**  
+  The recent 1.0.2+ releases have shipped some broken changes, so `dash-extensions` is held back to `1.0.1` until newer releases have been tested.
+
+- **Allow for digits in environment connectors.**  
+  Connectors defined as environment variables may now have digits in the type.
+
+  ```bash
+  export MRSM_A2B_TEST='{"foo": "bar"}'
+  ```
+
+- **Fixed `stack` on Windows.**
+
+- **Fixed a false error with background jobs.**
+
+- **Increased the minimum password length to 5.**
+
+## 1.6.x Releases
+
+The biggest features of the 1.6.x series were all about chunking and adding support for syncing generators. The series was also full of minor bugfixes, contributing to an even more polished experience. It also was the first release to drop support for a Python version, formally deprecating Python 3.7.
 
 ### v1.6.16 – v1.6.19
 

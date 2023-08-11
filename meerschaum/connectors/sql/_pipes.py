@@ -574,67 +574,6 @@ def delete_pipe(
     return True, "Success"
 
 
-def get_backtrack_data(
-        self,
-        pipe: Optional[meerschaum.Pipe] = None,
-        backtrack_minutes: int = 0,
-        begin: Optional[datetime.datetime] = None,
-        params: Optional[Dict[str, Any]] = None,
-        limit: Optional[int] = None,
-        chunksize: Optional[int] = -1,
-        debug: bool = False
-    ) -> Union[pandas.DataFrame, None]:
-    """
-    Get the most recent backtrack_minutes' worth of data from a Pipe.
-
-    Parameters
-    ----------
-    pipe: meerschaum.Pipe:
-        The pipe to get data from.
-
-    backtrack_minutes: int, default 0
-        How far into the past to look for data.
-
-    begin: Optional[datetime.datetime], default None
-        Where to start traversing from. Defaults to `None`, which uses the
-        `meerschaum.Pipe.get_sync_time` value.
-
-    params: Optional[Dict[str, Any]], default None
-        Additional parameters to filter by.
-        See `meerschaum.connectors.sql.build_where`.
-
-    limit: Optional[int], default None
-        If specified, limit the number of rows retrieved to this value.
-
-    chunksize: Optional[int], default -1
-        The size of dataframe chunks to load into memory.
-
-    debug: bool, default False
-        Verbosity toggle.
-
-    Returns
-    -------
-    A `pd.DataFrame` of backtracked data.
-
-    """
-    import datetime
-    from meerschaum.utils.warnings import error
-    if pipe is None:
-        error("Pipe must be provided.")
-    if begin is None:
-        begin = pipe.get_sync_time(debug=debug)
-
-    return pipe.get_data(
-        begin = begin,
-        begin_add_minutes = (-1 * backtrack_minutes),
-        order = 'desc',
-        params = params,
-        limit = limit,
-        chunksize = chunksize,
-        debug = debug,
-    )
-
-
 def get_pipe_data(
         self,
         pipe: Optional[meerschaum.Pipe] = None,
