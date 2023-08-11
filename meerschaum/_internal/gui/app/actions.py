@@ -13,17 +13,7 @@ from meerschaum.config._paths import PACKAGE_ROOT_PATH
 icon_path = PACKAGE_ROOT_PATH / 'api' / 'dash' / 'assets' / 'logo_500x500.png'
 
 def add_actions_as_commands(app) -> None:
-    """Add the standard Meerschaum actions as commands.
-
-    Parameters
-    ----------
-    app :
-        
-
-    Returns
-    -------
-
-    """
+    """Add the standard Meerschaum actions as commands."""
     from meerschaum.actions import actions
     commands = []
     for action, fn in actions.items():

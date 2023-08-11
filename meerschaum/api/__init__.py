@@ -137,28 +137,36 @@ app = fastapi.FastAPI(
         'name': 'Apache 2.0',
         'url': 'https://www.apache.org/licenses/LICENSE-2.0.html',
     },
-    open_api_tags = [{
+    open_api_tags = [
+        {
             'name': 'Pipes',
             'description': 'Access pipes by indexing their keys.',
-        }, {
+        },
+        {
             'name': 'Actions',
             'description': 'Perform actions via the API.',
-        }, {
+        },
+        {
             'name': 'Connectors',
             'description': 'Get information about the registered connectors.'
-        }, {
+        },
+        {
             'name': 'Users',
             'description': 'Access, register, and delete users.',
-        }, {
+        },
+        {
             'name': 'Plugins',
             'description': 'Access, register, and delete plugins.',
-        }, {
+        },
+        {
             'name': 'Misc',
             'description': 'Miscellaneous endpoints.',
-        }, {
+        },
+        {
             'name': 'Version',
             'description': 'Version information.'
-    }],
+        }
+    ],
 )
 
 (

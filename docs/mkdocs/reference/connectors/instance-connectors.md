@@ -11,7 +11,7 @@ To use your custom connector type as an instance connector, implement the follow
     from meerschaum.utils.typing import SuccessTuple
     ```
 
-!!! tip "Using the `params` Filter"
+??? tip "Using the `params` Filter"
     Methods which take the `params` argument ([`get_pipe_data()`](#get_pipe_data), [`get_sync_time()`](#get_sync_time), [`get_backtrack_data()`](#get_backtrack_data)) behave similarly to the filters applied to [`fetch_pipes_keys`](#fetch_pipes_keys).
 
     See the definition for [`MongoDBConnector.build_query()`](https://github.com/bmeares/mongodb-connector/blob/main/plugins/mongodb-connector/_mongo.py#L16) for an example of how to adapt the `params` filter to your connector's query specification.
@@ -31,6 +31,66 @@ To use your custom connector type as an instance connector, implement the follow
     >>> 
     >>> build_query({'a': []})
     {}
+    ```
+
+??? warning "`get_backtrack_data()` Deprecation Notice"
+    As of v1.7.0+, `get_backtrack_data()` was replaced with a generic alternative. Your connector may still override this method:
+
+    ```python
+    def get_backtrack_data(
+            self,
+            pipe: mrsm.Pipe,
+            backtrack_minutes: int = 0,
+            begin: Union[datetime, int, None] = None,
+            params: Optional[Dict[str, Any]] = None,
+            debug: bool = False,
+            **kwargs: Any
+        ) -> 'pd.DataFrame':
+        """
+        Return the most recent interval of data leading up to `begin` (defaults to the sync time).
+
+        Parameters
+        ----------
+        pipe: mrsm.Pipe,
+            The number of minutes leading up to `begin` from which to search.
+            If `begin` is an integer, then subtract this value from `begin`.
+
+        backtrack_minutes: int, default 0
+            The number of minutes leading up to `begin` from which to search.
+            If `begin` is an integer, then subtract this value from `begin`.
+
+        begin: Union[datetime, int, None], default None
+            The point from which to begin backtracking.
+            If `None`, then use the pipe's sync time (most recent datetime value).
+
+        params: Optional[Dict[str, Any]], default None
+            Additional filter parameters.
+
+        Returns
+        -------
+        A Pandas DataFrame for the interval of size `backtrack_minutes` leading up to `begin`.
+        """
+        from datetime import datetime, timedelta
+
+        if begin is None:
+            begin = pipe.get_sync_time(params=params, debug=debug)
+
+        backtrack_interval = (
+            timedelta(minutes=backtrack_minutes)
+            if isinstance(begin, datetime)
+            else backtrack_minutes
+        )
+
+        if begin is not None:
+            begin = begin - backtrack_interval
+
+        return self.get_pipe_data(
+            pipe,
+            begin = begin,
+            params = params,
+            debug = debug,
+            **kwargs
+        )
     ```
 
 ## `#!python register_pipe()`
@@ -515,66 +575,6 @@ Return the largest (or smallest) value in target table, according to the `params
 		### TODO write a query to get the largest value for `dt_col`.
         ### If `newest` is `False`, return the smallest value.
         ### Apply the `params` filter in case of multiplexing.
-    ```
-
-## `#!python get_backtrack_data()`
-
-Return the most recent interval of data leading up to `begin` (defaults to the sync time).
-
-**NOTE:** This method will no longer be required in Meerschaum 1.7.0+. You may use the starter code below in your implementation.
-
-??? example "`#!python def get_backtrack_data()`"
-    ```python
-   	def get_backtrack_data(
-            self,
-            pipe: mrsm.Pipe,
-            backtrack_minutes: int = 0,
-            begin: Union[datetime, int] = None, 
-            params: Optional[Dict[str, Any]] = None,
-            debug: bool = False,
-            **kwargs: Any
-        ) -> Union['pd.DataFrame', None]:
-        """
-        Return the most recent interval of data leading up to `begin` (defaults to the sync time).
-
-        Parameters
-        ----------
-        pipe: mrsm.Pipe
-            The pipe to fetch data from.
-
-        backtrack_minutes: int, default 0
-            The number of minutes leading up to `begin` from which to search.
-            If `begin` is an integer, then subtract this value from `begin`.
-
-        begin: Union[datetime, int, None], default None
-            The point from which to begin backtracking.
-            If `None`, then use the pipe's sync time (most recent datetime value).
-
-        params: Optional[Dict[str, Any]], default None
-            Additional filter parameters.
-
-        Returns
-        -------
-        A Pandas DataFrame for the interval of size `backtrack_minutes` leading up to `begin`.
-        """
-        if begin is None:
-            begin = pipe.get_sync_time(debug=debug)
-
-        backtrack_interval = (
-            timedelta(minutes=backtrack_minutes)
-            if isinstance(begin, datetime)
-            else backtrack_minutes
-        )
-        if begin is not None:
-            begin = begin - backtrack_interval
-
-        return self.get_pipe_data(
-            pipe,
-            begin = begin,
-            params = params,
-            debug = debug,
-            **kwargs
-        ) 
     ```
 
 ## `#!python get_pipe_columns_types()`

@@ -210,6 +210,7 @@ def get_backtrack_data(
         self,
         backtrack_minutes: int = 0,
         begin: Optional['datetime.datetime'] = None,
+        params: Optional[Dict[str, Any]] = None,
         fresh: bool = False,
         debug: bool = False,
         **kw: Any
@@ -222,10 +223,14 @@ def get_backtrack_data(
     backtrack_minutes: int, default 0
         How many minutes from `begin` to select from.
         Defaults to 0. This may return a few rows due to a rounding quirk.
+
     begin: Optional[datetime.datetime], default None
         The starting point to search for data.
         If begin is `None` (default), use the most recent observed datetime
         (AKA sync_time).
+
+    params: Optional[Dict[str, Any]], default None
+        The standard Meerschaum `params` query dictionary.
         
         
     ```
@@ -255,33 +260,59 @@ def get_backtrack_data(
     from meerschaum.utils.venv import Venv
     from meerschaum.connectors import get_connector_plugin
 
-    kw.update({'backtrack_minutes': backtrack_minutes, 'begin': begin,})
-
     if not self.exists(debug=debug):
         return None
 
     if self.cache_pipe is not None:
         if not fresh:
-            _sync_cache_tuple = self.cache_pipe.sync(debug=debug, **kw)
+            _sync_cache_tuple = self.cache_pipe.sync(begin=begin, params=params, debug=debug, **kw)
             if not _sync_cache_tuple[0]:
                 warn(f"Failed to sync cache for {self}:\n" + _sync_cache_tuple[1])
                 fresh = True
             else: ### Successfully synced cache.
                 return self.enforce_dtypes(
-                    self.cache_pipe.get_backtrack_data(debug=debug, fresh=True, **kw),
+                    self.cache_pipe.get_backtrack_data(
+                        fresh = True,
+                        begin = begin,
+                        backtrack_minutes = backtrack_minutes,
+                        params = params,
+                        debug = deubg,
+                        **kw
+                    ),
                     debug = debug,
                 )
 
-    ### If `fresh` or the syncing failed, directly pull from the instance connector.
-    with Venv(get_connector_plugin(self.instance_connector)):
-        return self.enforce_dtypes(
-            self.instance_connector.get_backtrack_data(
-                pipe = self,
+    if hasattr(self.instance_connector, 'get_backtrack_data'):
+        with Venv(get_connector_plugin(self.instance_connector)):
+            return self.enforce_dtypes(
+                self.instance_connector.get_backtrack_data(
+                    pipe = self,
+                    begin = begin,
+                    backtrack_minutes = backtrack_minutes,
+                    params = params,
+                    debug = debug,
+                    **kw
+                ),
                 debug = debug,
-                **kw
-            ),
-            debug = debug,
-        )
+            )
+
+    if begin is None:
+        begin = self.get_sync_time(params=params, debug=debug)
+
+    backtrack_interval = (
+        datetime.timedelta(minutes=backtrack_minutes)
+        if isinstance(begin, datetime.datetime)
+        else backtrack_minutes
+    )
+    if begin is not None:
+        begin = begin - backtrack_interval
+
+    return self.get_data(
+        begin = begin,
+        params = params,
+        debug = debug,
+        **kw
+    )
 
 
 def get_rowcount(

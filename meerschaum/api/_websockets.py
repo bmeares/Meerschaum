@@ -41,5 +41,15 @@ async def websocket_endpoint(
             data = await websocket.receive_text()
             await websocket.send_text(str(datetime.datetime.utcnow()))
         except fastapi.WebSocketDisconnect:
-            del websockets[session_id]
+            delete_websocket_session(session_id)
             break
+
+
+def delete_websocket_session(session_id: str) -> None:
+    """
+    Delete a websocket session if it exists.
+    """
+    try:
+        del websockets[session_id]
+    except KeyError:
+        pass

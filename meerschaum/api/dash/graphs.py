@@ -27,13 +27,13 @@ def get_graphs_cards(state: Optional[WebState]):
         dt_name, id_name = pipe.get_columns('datetime', 'id', error=False)
         val_name = pipe.get_val_column(debug=debug)
         if dt_name is not None and val_name is not None:
-            df = pipe.get_backtrack_data(backtrack_minutes=(1440))
+            df = pipe.get_backtrack_data(backtrack_minutes=1440)
             fig_args = {
                 'data_frame': df,
                 'x': dt_name,
                 'y': val_name,
                 'line_group': id_name,
-                'title': f"Recent Data for Pipe\n'{pipe}'"
+                'title': f"{pipe}"
             }
             try:
                 fig = px.line(**fig_args)

@@ -97,9 +97,12 @@ def _api_start(
         no_dash: bool = False,
         no_auth: bool = False,
         private: bool = False,
+        secure: bool = False,
         debug: bool = False,
         nopretty: bool = False,
         production: bool = False,
+        keyfile: Optional[str] = None,
+        certfile: Optional[str] = None,
         **kw: Any
     ) -> SuccessTuple:
     """Start the API server.
@@ -112,7 +115,7 @@ def _api_start(
 
     host: Optional[str], defailt None
         The address to bind to.
-        If `None, use '0.0.0.0'.
+        If `None`, use '0.0.0.0'.
 
     workers: Optional[int], default None
         How many worker threads to run.
@@ -122,6 +125,19 @@ def _api_start(
         Start the API server with Gunicorn instead of Uvicorn.
         Useful for production deployments.
 
+    private: bool, default False
+        Require authentication for all endpoints.
+    
+    secure: bool, default False
+        Only allow `admin` users to execute actions.
+
+    keyfile: str, default None
+        If provided, serve over HTTPS with this key file.
+        Requires `--certfile`.
+
+    certfile: str, default None
+        If provided, serve over HTTPS with this certfile.
+        Requires `--keyfile`.
     """
     from meerschaum.utils.packages import (
         attempt_import, venv_contains_package, pip_install, run_python_package
@@ -173,6 +189,10 @@ def _api_start(
     if host is None:
         host = uvicorn_config['host']
 
+    if keyfile or certfile:
+        if not keyfile or not certfile:
+            return False, f"HTTPS requires both `--keyfile` and `--certfile`."
+
     pool = get_pool(workers=workers)
     if pool is None:
         workers = 1
@@ -220,10 +240,16 @@ def _api_start(
         uvicorn_config['reload'] = debug
         uvicorn_config['reload_dirs'] = [str(PACKAGE_ROOT_PATH)]
         uvicorn_config['reload_excludes'] = 'plugins/__init__.py'
+    if keyfile:
+        uvicorn_config['ssl_keyfile'] = keyfile
+    if certfile:
+        uvicorn_config['ssl_certfile'] = certfile
     uvicorn_config['use_colors'] = (not nopretty) if nopretty else ANSI
 
     api_config['uvicorn'] = uvicorn_config
     cf['system']['api']['uvicorn'] = uvicorn_config
+    if secure:
+        cf['system']['api']['permissions']['actions']['non_admin'] = False
 
     custom_keys = ['mrsm_instance', 'no_dash', 'no_auth', 'private', 'debug']
 
@@ -297,6 +323,11 @@ def _api_start(
             ]
         if workers is not None:
             gunicorn_args += ['--workers', str(workers)]
+        if uvicorn_config.get('ssl_keyfile', None):
+            gunicorn_args += [
+                '--keyfile', uvicorn_config['ssl_keyfile'],
+                '--certfile', uvicorn_config['ssl_certfile'],
+            ]
         if debug:
             gunicorn_args += ['--log-level=debug', '--enable-stdio-inheritance', '--reload']
         try:
