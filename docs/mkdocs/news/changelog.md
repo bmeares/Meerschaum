@@ -4,7 +4,7 @@
 
 This is the current release cycle, so stay tuned for future releases!
 
-### v1.7.0
+### v1.7.0 – v1.7.1 
 
 - **Remove `get_backtrack_data()` for instance connectors.**  
   If provided, this method will still override the new generic implementation.
