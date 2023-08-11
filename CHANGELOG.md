@@ -28,13 +28,16 @@ This is the current release cycle, so stay tuned for future releases!
 
 The biggest features of the 1.6.x series were all about chunking and adding support for syncing generators. The series was also full of minor bugfixes, contributing to an even more polished experience. It also was the first release to drop support for a Python version, formally deprecating Python 3.7.
 
-### v1.6.16 – v1.6.18
+### v1.6.16 – v1.6.19
 
 - **Add Pydantic v2 support**  
   The only feature which requires Pydantic v1 is the `--schedule` flag, which will throw a warning with a hint to install an older version. The underlying libraries for this feature should have Pydantic v2 support merged soon.
 
 - **Bump dependencies.**  
   This patch bumps the minimum required versions for `typing-extensions`, `rich`, `prompt-toolkit`, `rocketry`, `uvicorn`, `websockets`, and `fastapi` and loosens the minimum version of `pydantic`.
+
+- **Fix shell formatting on Windows 10.**  
+  Some edge case issues have been patched for older versions of Windows.
   
 
 ### v1.6.15
