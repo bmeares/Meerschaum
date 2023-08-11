@@ -70,8 +70,11 @@ async def get_webterm(
 
     async with httpx.AsyncClient() as client:
         response = await client.get("http://localhost:8765/")
+        text = response.text
+        if request.url.scheme == 'https':
+            text = text.replace('ws://', 'wss://')
         return HTMLResponse(
-            content = response.text,
+            content = text,
             status_code = response.status_code,
             headers = request.headers,
         )
