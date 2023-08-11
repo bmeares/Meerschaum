@@ -32,7 +32,7 @@ api_port = "MRSM{meerschaum:connectors:api:main:port}"
 api_host = "meerschaum_api"
 
 env_dict = {
-    'COMPOSE_PROJECT_NAME' : 'meerschaum_stack',
+    'COMPOSE_PROJECT_NAME' : 'mrsm',
     'TIMESCALEDB_VERSION' : 'latest-pg14-oss',
     'POSTGRES_USER' : f'{db_user}',
     'POSTGRES_PASSWORD' : f'{db_pass}',

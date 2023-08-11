@@ -17,10 +17,15 @@ a {
 #console-div {
   overflow-y: scroll;
   max-height: 85vh;
-  height: 85vh;
+  height: 84vh;
   color: white;
   background-color: black;
   padding: 0.5em;
+}
+#webterm-iframe {
+  width: 102%;
+  height: 85vh !important;
+  max-height: 85vh;
 }
 .codeblock {
   background-color: var(--bs-secondary) !important;

@@ -18,8 +18,8 @@ dash = attempt_import('dash', check_update=CHECK_UPDATE)
 from fastapi.exceptions import HTTPException
 
 @dash_app.callback(
-    [Output("username-input", "valid"), Output("username-input", "invalid")],
-    [Input("username-input", "value")],
+    [Output("register-username-input", "valid"), Output("register-username-input", "invalid")],
+    [Input("register-username-input", "value")],
 )
 def validate_username(username):
     if not username:
@@ -34,8 +34,8 @@ def validate_username(username):
     return valid, not valid
 
 @dash_app.callback(
-    [Output("password-input", "valid"), Output("password-input", "invalid")],
-    [Input("password-input", "value")],
+    [Output("register-password-input", "valid"), Output("register-password-input", "invalid")],
+    [Input("register-password-input", "value")],
 )
 def validate_password(password):
     if not password:
@@ -44,8 +44,8 @@ def validate_password(password):
     return valid, not valid
 
 @dash_app.callback(
-    [Output("email-input", "valid"), Output("email-input", "invalid")],
-    [Input("email-input", "value")],
+    [Output("register-email-input", "valid"), Output("register-email-input", "invalid")],
+    [Input("register-email-input", "value")],
 )
 def validate_email(email):
     if not email:
@@ -56,7 +56,7 @@ def validate_email(email):
 
 @dash_app.callback(
     Output('session-store', 'data'),
-    Output('username-input', 'className'),
+    Output('register-username-input', 'className'),
     Output('location', 'pathname'),
     Input('register-username-input', 'n_submit'),
     Input('register-password-input', 'n_submit'),
@@ -68,7 +68,10 @@ def validate_email(email):
 def register_button_click(
         username_submit,
         password_submit,
-        n_clicks, username, password, email
+        n_clicks,
+        username,
+        password,
+        email,
     ):
     if not n_clicks:
         raise PreventUpdate
@@ -83,16 +86,17 @@ def register_button_click(
     user = User(username, password, email=email, instance=conn)
     user_id = conn.get_user_id(user, debug=debug)
     if user_id is not None:
+        form_class += ' is-invalid'
         return {}, form_class, dash.no_update
     success, msg = conn.register_user(user, debug=debug)
     if not success:
         form_class += ' is-invalid'
         return {}, form_class, dash.no_update
     try:
-        token_dict = login({'username' : username, 'password' : password})
+        token_dict = login({'username': username, 'password': password})
         session_data = {'session-id': str(uuid.uuid4())}
         active_sessions[session_data['session-id']] = {'username': username}
-    except HTTPException:
+    except HTTPException as e:
         form_class += ' is-invalid'
         session_data = None
     return session_data, form_class, (dash.no_update if not session_data else endpoints['dash'])

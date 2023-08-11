@@ -392,6 +392,8 @@ def _start_gui(
         import traceback
         traceback.print_exc()
         success, msg = False, str(e)
+    except KeyboardInterrupt:
+        success, msg = True, "Success"
     finally:
         process.kill()
     return success, msg
@@ -402,6 +404,7 @@ def _start_webterm(
         host: Optional[str] = None,
         force: bool = False,
         nopretty: bool = False,
+        sysargs: Optional[List[str]] = None,
         **kw
     ) -> SuccessTuple:
     """
@@ -416,7 +419,7 @@ def _start_webterm(
             The host interface to which the webterm binds.
             Defaults to '127.0.0.1'.
     """
-    from meerschaum._internal.term import tornado_app, tornado, term_manager, tornado_ioloop
+    from meerschaum._internal.term import get_webterm_app_and_manager, tornado, tornado_ioloop
     from meerschaum._internal.term.tools import is_webterm_running
     from meerschaum.utils.networking import find_open_ports, is_port_in_use
     from meerschaum.utils.packages import attempt_import
@@ -426,6 +429,9 @@ def _start_webterm(
         host = '127.0.0.1'
     if port is None:
         port = 8765
+    if sysargs is None:
+        sysargs = ['start', 'webterm']
+    tornado_app, term_manager = get_webterm_app_and_manager()
 
     if is_webterm_running(host, port):
         if force:
@@ -447,8 +453,8 @@ def _start_webterm(
         if not nopretty:
             print()
             info("Shutting down webterm...")
-        term_manager.shutdown()
     finally:
+        term_manager.shutdown()
         loop.close()
 
     return True, "Success"

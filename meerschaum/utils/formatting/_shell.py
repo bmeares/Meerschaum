@@ -84,17 +84,7 @@ def clear_screen(debug: bool = False) -> bool:
 
 
 def flush_with_newlines(debug: bool = False) -> None:
-    """Print newlines such that the entire terminal is cleared and new text will show up at the bottom.
-
-    Parameters
-    ----------
-    debug: bool :
-         (Default value = False)
-
-    Returns
-    -------
-
-    """
+    """Print newlines such that the entire terminal is cleared and new text will show up at the bottom."""
     import sys
     from meerschaum.utils.misc import get_cols_lines
     from meerschaum.utils.debug import dprint
