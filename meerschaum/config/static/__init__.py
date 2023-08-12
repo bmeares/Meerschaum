@@ -32,6 +32,7 @@ STATIC_CONFIG = {
             'webterm': '/webterm',
             'webterm_websocket': '/websocket',
             'info': '/info',
+            'healthcheck': '/healthcheck',
         },
         'oauth': {
             'token_expires_minutes': 720,

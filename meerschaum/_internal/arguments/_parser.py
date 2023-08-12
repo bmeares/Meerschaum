@@ -270,7 +270,7 @@ groups['api'].add_argument(
     help = "Start the API in secure mode, only allowing `admin` users to execute actions.",
 )
 groups['api'].add_argument(
-    '--no-auth', '--noauth', action='store_true',
+    '--no-auth', '--noauth', '--insecure', action='store_true',
     help = 'When starting the API, do not require authentication. WARNING: This is dangerous!',
 )
 groups['api'].add_argument(

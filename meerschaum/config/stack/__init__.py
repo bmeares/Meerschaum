@@ -29,11 +29,11 @@ db_base = "MRSM{meerschaum:connectors:sql:main:database}"
 db_hostname = "db"
 db_host = 'MRSM{stack:' + str(STACK_COMPOSE_FILENAME) + ':services:db:hostname}'
 api_port = "MRSM{meerschaum:connectors:api:main:port}"
-api_host = "meerschaum_api"
+api_host = "api"
 
 env_dict = {
     'COMPOSE_PROJECT_NAME' : 'mrsm',
-    'TIMESCALEDB_VERSION' : 'latest-pg14-oss',
+    'TIMESCALEDB_VERSION' : 'latest-pg15-oss',
     'POSTGRES_USER' : f'{db_user}',
     'POSTGRES_PASSWORD' : f'{db_pass}',
     'POSTGRES_DB' : f'{db_base}',
@@ -54,13 +54,25 @@ env_dict['MEERSCHAUM_API_CONFIG'] = json.dumps(
     '"MRSM{!meerschaum}"', 'MRSM{!meerschaum}',
 )
 
+volumes = {
+    'api_root': '/meerschaum',
+    'meerschaum_db_data': '/var/lib/postgresql/data',
+    'grafana_storage': '/var/lib/grafana',
+}
+networks = {
+    'frontend': None,
+    'backend': None,
+}
 env_dict['MEERSCHAUM_API_PATCH'] = json.dumps(
     {
-        'meerschaum' : {
-            'connectors' : {
-                'sql' : {
-                    'main' : {
-                        'host' : db_host,
+        'meerschaum': {
+            'connectors': {
+                'sql': {
+                    'main': {
+                        'host': db_host,
+                    },
+                    'local': {
+                        'database': volumes['api_root'] + '/sqlite/mrsm_local.db'
                     },
                 },
             },
@@ -82,15 +94,6 @@ compose_header = """
 ##############################################################
 """
 
-volumes = {
-    'api_root' : '/meerschaum',
-    'meerschaum_db_data' : '/var/lib/postgresql/data',
-    'grafana_storage' : '/var/lib/grafana',
-}
-networks = {
-    'frontend' : None,
-    'backend' : None,
-}
 
 default_docker_compose_config = {
     'version': '3.9',
@@ -106,8 +109,7 @@ default_docker_compose_config = {
             'command': 'postgres -c max_connections=1000 -c shared_buffers=1024MB',
             'healthcheck': {
                 'test': [
-                    'CMD-SHELL', 'pg_isready',
-                    '-U', '$POSTGRES_USER', '-d', '$POSTGRES_DB',
+                    'CMD-SHELL', 'pg_isready -d $${POSTGRES_DB} -U $${POSTGRES_USER}',
                 ],
                 'interval': '5s',
                 'timeout': '3s',
@@ -136,6 +138,14 @@ default_docker_compose_config = {
                 'backend',
             ],
             'command': f'start api --production --port {api_port}',
+            'healthcheck': {
+                'test': [
+                    'CMD', 'curl', '--fail', f'http://localhost:{api_port}/healthcheck',
+                ],
+                'interval': '5s',
+                'timeout': '3s',
+                'retries': 3
+            },
             'environment': {
                 'MRSM_CONFIG': env_dict['MEERSCHAUM_API_CONFIG'],
                 'MRSM_PATCH': env_dict['MEERSCHAUM_API_PATCH'],

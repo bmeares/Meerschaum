@@ -4,6 +4,30 @@
 
 This is the current release cycle, so stay tuned for future releases!
 
+### v1.7.2
+
+- **Fix `role "root" does not exist` from stack logs.**  
+  Although the healthcheck was working as expected, the log output was filled with `Error FATAL: role "root" does not exist`. These errors have been fixed.
+
+- **Fix `MRSM_CONFIG` behavior when running `start api --production`.**  
+  Starting the Web API through `gunicorn` (i.e. `--production`) now respects `MRSM_CONFIG`. This is useful for running `stack up` with non-default credentials.
+
+- **Added `--insecure` as an alias for `--no-auth`.**  
+  To compliment the newly added `--secure` flag, starting the Web API with `--insecure` will bypass authentication.
+
+- **Bump default TimescaleDB version to PG15.**  
+  The default TimescaleDB version for the Meerschaum stack is now `latest-pg15-oss`.
+
+- **Pass sysargs to `docker compose` via `stack`**  
+  This patch allows for jumping into the `api` container:
+
+  ```bash
+  mrsm stack exec api bash
+  ```
+
+- **Added the API endpoint `/healthcheck`.**  
+  This is used to determine reachability and the health of the local stack.
+
 ### v1.7.0 – v1.7.1 
 
 - **Remove `get_backtrack_data()` for instance connectors.**  

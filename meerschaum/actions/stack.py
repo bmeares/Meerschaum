@@ -125,14 +125,8 @@ def stack(
                 warn(f"Unable to install `pyyaml` into venv '{_compose_venv}'.")
 
     cmd_list = [
-        _arg for _arg in (
-            settings_list
-            + compose_command
-            + (
-                sysargs[2:] if len(sysargs) > 2 and not sub_args
-                else sub_args
-            )
-        )
+        _arg
+        for _arg in (settings_list + sysargs[1:])
         if _arg != '--debug'
     ]
     if debug:

@@ -157,7 +157,6 @@ def _api_start(
     from meerschaum.connectors.parse import parse_instance_keys
     from meerschaum.utils.pool import get_pool
     import shutil
-    import os
     from copy import deepcopy
 
     if action is None:
@@ -276,6 +275,7 @@ def _api_start(
     env_dict = {
         MRSM_SERVER_ID: SERVER_ID,
         MRSM_RUNTIME: 'api',
+        MRSM_CONFIG: json.loads(os.environ.get(MRSM_CONFIG, '{}')),
     }
     for env_var in get_env_vars():
         if env_var in env_dict:
@@ -319,7 +319,8 @@ def _api_start(
         ]
         for key, val in env_dict.items():
             gunicorn_args += [
-                '--env', key + '=' + (json.dumps(val) if isinstance(val, dict) else val)
+                '--env', key + "="
+                + (json.dumps(val) if isinstance(val, (dict, list)) else val)
             ]
         if workers is not None:
             gunicorn_args += ['--workers', str(workers)]
