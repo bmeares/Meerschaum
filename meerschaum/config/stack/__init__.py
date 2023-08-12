@@ -101,15 +101,15 @@ default_docker_compose_config = {
         'db': {
             'environment': {
                 'TIMESCALEDB_TELEMETRY': 'off',
-                'POSTGRES_USER': '$POSTGRES_USER',
-                'POSTGRES_DB': '$POSTGRES_DB',
-                'POSTGRES_PASSWORD': '$POSTGRES_PASSWORD',
+                'POSTGRES_USER': '<DOLLAR>POSTGRES_USER',
+                'POSTGRES_DB': '<DOLLAR>POSTGRES_DB',
+                'POSTGRES_PASSWORD': '<DOLLAR>POSTGRES_PASSWORD',
                 'ALLOW_IP_RANGE': env_dict['ALLOW_IP_RANGE'],
             },
             'command': 'postgres -c max_connections=1000 -c shared_buffers=1024MB',
             'healthcheck': {
                 'test': [
-                    'CMD-SHELL', 'pg_isready -d $${POSTGRES_DB} -U $${POSTGRES_USER}',
+                    'CMD-SHELL', 'pg_isready -d <DOLLAR>POSTGRES_DB -U <DOLLAR>POSTGRES_USER',
                 ],
                 'interval': '5s',
                 'timeout': '3s',

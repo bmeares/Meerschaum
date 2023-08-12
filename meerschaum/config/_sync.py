@@ -41,24 +41,6 @@ def sync_yaml_configs(
         If provided, iterate through a list of tuples,
         replacing the old string (index 0) with the new string (index 1).
         Defaults to `None`.
-    config_path: pathlib.Path :
-        
-    keys: List[str] :
-        
-    sub_path: pathlib.Path :
-        
-    substitute: bool :
-         (Default value = True)
-    permissions: Optional[int] :
-         (Default value = None)
-    replace_tuples: Optional[List[Tuple[str :
-        
-    str]]] :
-         (Default value = None)
-
-    Returns
-    -------
-
     """
     import os, sys
     try:
@@ -73,17 +55,7 @@ def sync_yaml_configs(
         return
 
     def _read_config(path):
-        """Read YAML file with header comment
-
-        Parameters
-        ----------
-        path :
-            
-
-        Returns
-        -------
-
-        """
+        """Read YAML file with header comment."""
         header_comment = ""
         with open(path, 'r') as f:
             if _yaml is not None:
@@ -106,22 +78,21 @@ def sync_yaml_configs(
     if substitute:
         sub_config = search_and_substitute_config(sub_config)
 
-    if c != sub_config:
-        config_time = os.path.getmtime(config_path)
-        sub_time = os.path.getmtime(sub_path)
+    config_time = os.path.getmtime(config_path)
+    sub_time = os.path.getmtime(sub_path)
 
-        sub_config = c
-        new_config_text = yaml.dump(c, sort_keys=False)
-        if replace_tuples:
-            for replace_tuple in replace_tuples:
-                new_config_text = new_config_text.replace(replace_tuple[0], replace_tuple[1])
-        new_header = sub_header
-        new_path = sub_path
+    sub_config = c
+    new_config_text = yaml.dump(c, sort_keys=False)
+    if replace_tuples:
+        for replace_tuple in replace_tuples:
+            new_config_text = new_config_text.replace(replace_tuple[0], replace_tuple[1])
+    new_header = sub_header
+    new_path = sub_path
 
-        ### write changes
-        with open(new_path, 'w+') as f:
-            f.write(new_header)
-            f.write(new_config_text)
+    ### write changes
+    with open(new_path, 'w+') as f:
+        f.write(new_header)
+        f.write(new_config_text)
     if permissions is not None:
         os.chmod(new_path, permissions)
 
@@ -140,7 +111,7 @@ def sync_files(keys: Optional[List[str]] = None):
             ['stack', STACK_COMPOSE_FILENAME],
             STACK_COMPOSE_PATH,
             substitute = True,
-            replace_tuples = [('$', '$$')],
+            replace_tuples = [('$', '$$'), ('<DOLLAR>', '$')],
         )
         sync_yaml_configs(
             CONFIG_DIR_PATH / 'stack.yaml',
