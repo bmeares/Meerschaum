@@ -105,11 +105,6 @@ packages: Dict[str, Dict[str, str]] = {
     },
     'gui': {
         'toga'                       : 'toga>=0.3.0-dev29',
-        'terminado'                  : 'terminado>=0.12.1',
-        'tornado'                    : 'tornado>=6.1.0',
-        'tornado_xstatic'            : 'tornado-xstatic>=0.2.0',
-        'xstatic'                    : 'XStatic>=1.0.2',
-        'xstatic.pkg.termjs'         : 'XStatic-term.js>=0.0.7',
         'webview'                    : 'pywebview>=3.6.3',
         'pycparser'                  : 'pycparser>=2.21.0',
     },
@@ -139,8 +134,14 @@ packages['dash'] = {
     'dash'                           : 'dash>=2.6.2',
     'dash_bootstrap_components'      : 'dash-bootstrap-components>=1.2.1',
     'dash_ace'                       : 'dash-ace>=0.2.1',
-    'dash_extensions'                : 'dash-extensions>=0.1.6',
+    'dash_extensions'                : 'dash-extensions<1.0.2',
     'dash_daq'                       : 'dash-daq>=0.5.0',
+    'terminado'                      : 'terminado>=0.12.1',
+    'tornado'                        : 'tornado>=6.1.0',
+    'tornado_xstatic'                : 'tornado-xstatic>=0.2.0',
+    'xstatic'                        : 'XStatic>=1.0.2',
+    'xstatic.pkg.termjs'             : 'XStatic-term.js>=0.0.7',
+
 }
 packages['api'] = {
     'uvicorn'                        : 'uvicorn[standard]>=0.22.0',
@@ -152,6 +153,8 @@ packages['api'] = {
     'fastapi_login'                  : 'fastapi-login>=1.7.2',
     'multipart'                      : 'python-multipart>=0.0.5',
     'pydantic'                       : 'pydantic>=1.7.4',
+    'httpx'                          : 'httpx>=0.24.1',
+    'websockets'                     : 'websockets>=11.0.3',
 }
 packages['api'].update(packages['sql'])
 packages['api'].update(packages['formatting'])

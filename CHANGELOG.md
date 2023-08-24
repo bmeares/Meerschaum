@@ -1,16 +1,80 @@
 # 🪵 Changelog
 
-## 1.6.x Releases
+## 1.7.x Releases
 
 This is the current release cycle, so stay tuned for future releases!
 
-### v1.6.16 – v1.6.18
+### v1.7.2
+
+- **Fix `role "root" does not exist` from stack logs.**  
+  Although the healthcheck was working as expected, the log output was filled with `Error FATAL: role "root" does not exist`. These errors have been fixed.
+
+- **Fix `MRSM_CONFIG` behavior when running `start api --production`.**  
+  Starting the Web API through `gunicorn` (i.e. `--production`) now respects `MRSM_CONFIG`. This is useful for running `stack up` with non-default credentials.
+
+- **Added `--insecure` as an alias for `--no-auth`.**  
+  To compliment the newly added `--secure` flag, starting the Web API with `--insecure` will bypass authentication.
+
+- **Bump default TimescaleDB version to PG15.**  
+  The default TimescaleDB version for the Meerschaum stack is now `latest-pg15-oss`.
+
+- **Pass sysargs to `docker compose` via `stack`**  
+  This patch allows for jumping into the `api` container:
+
+  ```bash
+  mrsm stack exec api bash
+  ```
+
+- **Added the API endpoint `/healthcheck`.**  
+  This is used to determine reachability and the health of the local stack.
+
+### v1.7.0 – v1.7.1 
+
+- **Remove `get_backtrack_data()` for instance connectors.**  
+  If provided, this method will still override the new generic implementation.
+
+- **Add `--keyfile` and `--certfile` support.**  
+  When starting the Web API, you may now run via HTTPS with `--keyfile` and `--certfile`. Older releases required the keys to be set in `MRSM_CONFIG`. This also brings SSL support for `--production` (Gunicorn).
+
+- **Add the Webterm to the Web Console.**  
+  At long last, the webterm is embedded within the web console and is accessible from the Web API at the endpoint `/webterm`. You must provide your active, authorized session ID to access to the Webterm.
+
+- **Add `--secure` to `start api`.**  
+  Starting the Web API with `--secure` will now disallow actions from non-administrators. This is recommend for shared deployments.
+
+- **Fixed the registration page on the Web API.**  
+  Users should now be able to create accounts from Dockerized deployments.
+
+- **Held back `dash-extensions`**  
+  The recent 1.0.2+ releases have shipped some broken changes, so `dash-extensions` is held back to `1.0.1` until newer releases have been tested.
+
+- **Allow for digits in environment connectors.**  
+  Connectors defined as environment variables may now have digits in the type.
+
+  ```bash
+  export MRSM_A2B_TEST='{"foo": "bar"}'
+  ```
+
+- **Fixed `stack` on Windows.**
+
+- **Fixed a false error with background jobs.**
+
+- **Increased the minimum password length to 5.**
+
+## 1.6.x Releases
+
+The biggest features of the 1.6.x series were all about chunking and adding support for syncing generators. The series was also full of minor bugfixes, contributing to an even more polished experience. It also was the first release to drop support for a Python version, formally deprecating Python 3.7.
+
+### v1.6.16 – v1.6.19
 
 - **Add Pydantic v2 support**  
   The only feature which requires Pydantic v1 is the `--schedule` flag, which will throw a warning with a hint to install an older version. The underlying libraries for this feature should have Pydantic v2 support merged soon.
 
 - **Bump dependencies.**  
   This patch bumps the minimum required versions for `typing-extensions`, `rich`, `prompt-toolkit`, `rocketry`, `uvicorn`, `websockets`, and `fastapi` and loosens the minimum version of `pydantic`.
+
+- **Fix shell formatting on Windows 10.**  
+  Some edge case issues have been patched for older versions of Windows.
   
 
 ### v1.6.15

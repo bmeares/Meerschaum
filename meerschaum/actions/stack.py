@@ -38,6 +38,7 @@ def stack(
     from meerschaum.config._paths import STACK_COMPOSE_PATH
     from meerschaum.utils.prompt import yes_no
     import meerschaum.config
+    from meerschaum.config._patch import apply_patch_to_config
     from meerschaum.utils.packages import (
         attempt_import, run_python_package, venv_contains_package,
         pip_install,
@@ -49,13 +50,16 @@ def stack(
     from meerschaum.utils.misc import is_docker_available
     from meerschaum.config._read_config import search_and_substitute_config
 
-    stack_env_dict = {
-        var: val
-        for var, val in search_and_substitute_config(
-            meerschaum.config.stack.env_dict
-        ).items()
-        if isinstance(val, str)
-    }
+    stack_env_dict = apply_patch_to_config(
+        os.environ.copy(),
+        {
+            var: val
+            for var, val in search_and_substitute_config(
+                meerschaum.config.stack.env_dict
+            ).items()
+            if isinstance(val, str)
+        }
+    )
 
     if action is None:
         action = []
@@ -83,13 +87,11 @@ def stack(
         'stack', 'project_name', patch=True, substitute=True)
     ]
     
-    ### disable ANSI if the user sets ANSI mode to False
-    ansi_list = [] if ANSI else ['--no-ansi']
     ### Debug list used to include --log-level DEBUG, but the flag is not supported on Windows (?)
     debug_list = []
 
     ### prepend settings before the docker-compose action
-    settings_list = project_name_list + ansi_list + debug_list
+    settings_list = project_name_list + debug_list
     if not is_docker_available():
         warn("Could not connect to Docker. Is the Docker service running?", stack=False)
         print(
@@ -116,25 +118,20 @@ def stack(
 
         if not venv_contains_package('packaging', _compose_venv):
             if not pip_install('packaging', venv=_compose_venv, debug=debug):
-                warn_(f"Unable to install `packaging` into venv '{_compose_venv}'.")
+                warn(f"Unable to install `packaging` into venv '{_compose_venv}'.")
 
         if not venv_contains_package('yaml', _compose_venv):
             if not pip_install('pyyaml', venv=_compose_venv, debug=debug):
-                warn_(f"Unable to install `pyyaml` into venv '{_compose_venv}'.")
+                warn(f"Unable to install `pyyaml` into venv '{_compose_venv}'.")
 
     cmd_list = [
-        _arg for _arg in (
-            settings_list
-            + compose_command
-            + (
-                sysargs[2:] if len(sysargs) > 2 and not sub_args
-                else sub_args
-            )
-        )
+        _arg
+        for _arg in (settings_list + sysargs[1:])
         if _arg != '--debug'
     ]
     if debug:
         dprint(cmd_list)
+        dprint(f"has_builtin_compose: {has_builtin_compose}")
 
     stdout = None if not _capture_output else subprocess.PIPE
     stderr = stdout
