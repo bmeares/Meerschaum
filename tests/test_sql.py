@@ -8,12 +8,12 @@ Test SQL utility functions.
 
 import datetime
 import pytest
-from tests.connectors import conns
+from tests.connectors import conns, get_flavors
 from meerschaum.connectors.sql import SQLConnector
 from meerschaum.connectors.sql.tools import dateadd_str, table_exists, sql_item_name
 import dateutil.parser
 
-@pytest.mark.parametrize("flavor", list(conns.keys()))
+@pytest.mark.parametrize("flavor", get_flavors())
 def test_dateadd_str(flavor: str):
     """
     Verify that the DATEADD function works for all flavors.
@@ -36,7 +36,7 @@ def test_dateadd_str(flavor: str):
     assert ((dt + td_advance) - dt_val) <= td_margin
 
 
-@pytest.mark.parametrize("flavor", list(conns.keys()))
+@pytest.mark.parametrize("flavor", get_flavors())
 def test_exists(flavor: str):
     conn = conns[flavor]
     if conn.type != 'sql':

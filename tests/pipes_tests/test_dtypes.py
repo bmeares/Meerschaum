@@ -6,7 +6,7 @@ import pytest
 import datetime
 from tests import debug
 from tests.pipes import all_pipes, stress_pipes, remote_pipes
-from tests.connectors import conns
+from tests.connectors import conns, get_flavors
 from tests.test_users import test_register_user
 import meerschaum as mrsm
 from meerschaum import Pipe
@@ -17,7 +17,7 @@ def run_before_and_after(flavor: str):
     test_register_user(flavor)
     yield
 
-@pytest.mark.parametrize("flavor", list(remote_pipes.keys()))
+@pytest.mark.parametrize("flavor", get_flavors())
 def test_sync_change_columns_dtypes(flavor: str):
     """
     Test that new columns are added.
@@ -41,7 +41,7 @@ def test_sync_change_columns_dtypes(flavor: str):
     assert str(df.dtypes['a']) == 'object'
 
 
-@pytest.mark.parametrize("flavor", list(remote_pipes.keys()))
+@pytest.mark.parametrize("flavor", get_flavors())
 def test_dtype_enforcement(flavor: str):
     """
     Test that incoming rows are enforced to the correct data type.
@@ -84,7 +84,7 @@ def test_dtype_enforcement(flavor: str):
         assert pipe_dtype.lower() in str(typ).lower()
 
 
-@pytest.mark.parametrize("flavor", sorted(list(all_pipes.keys())))
+@pytest.mark.parametrize("flavor", get_flavors())
 def test_infer_json_dtype(flavor: str):
     """
     Ensure that new pipes with complex columns (dict or list) as enforced as JSON. 
@@ -108,7 +108,7 @@ def test_infer_json_dtype(flavor: str):
     assert success, msg
 
 
-@pytest.mark.parametrize("flavor", sorted(list(all_pipes.keys())))
+@pytest.mark.parametrize("flavor", get_flavors())
 def test_force_json_dtype(flavor: str):
     """
     Ensure that new pipes with complex columns (dict or list) as enforced as JSON. 
@@ -133,7 +133,7 @@ def test_force_json_dtype(flavor: str):
     assert success, msg
 
 
-@pytest.mark.parametrize("flavor", sorted(list(all_pipes.keys())))
+@pytest.mark.parametrize("flavor", get_flavors())
 def test_utc_offset_datetimes(flavor: str):
     """
     Verify that we are able to sync rows with UTC offset datetimes.
@@ -163,7 +163,7 @@ def test_utc_offset_datetimes(flavor: str):
     assert synced_docs == expected_docs
 
 
-@pytest.mark.parametrize("flavor", sorted(list(all_pipes.keys())))
+@pytest.mark.parametrize("flavor", get_flavors())
 def test_ignore_datetime_conversion(flavor: str):
     """
     If the user specifies, skip columns from being detected as datetimes.
@@ -195,7 +195,7 @@ def test_ignore_datetime_conversion(flavor: str):
     assert synced_docs == expected_docs
 
 
-@pytest.mark.parametrize("flavor", sorted(list(all_pipes.keys())))
+@pytest.mark.parametrize("flavor", get_flavors())
 def test_no_indices_inferred_datetime_to_text(flavor: str):
     """
     Verify that changing dtypes are handled.

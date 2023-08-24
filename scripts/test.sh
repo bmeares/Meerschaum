@@ -10,11 +10,19 @@ test_port="8989"
 export MRSM_ROOT_DIR=$test_root
 
 [ -z "$PYTHON_BIN" ] && export PYTHON_BIN=python
+[ -z "$MRSM_TEST_FLAVORS" ] && export MRSM_TEST_FLAVORS='api,timescaledb'
+if [ "$MRSM_TEST_FLAVORS" = "all" ]; then
+  unset MRSM_TEST_FLAVORS
+fi
+if [ ! -z "$MRSM_TEST_FLAVORS" ]; then
+  services=`echo "$MRSM_TEST_FLAVORS" | sed 's/,/ /g'`
+  services=`echo "$services" | sed 's/api//g'`
+fi
 
 ### Start the test databases.
 if [ "$1" == "db" ]; then
   cd tests/
-  docker-compose up -d
+  docker-compose up -d $services
   cd ../
 fi
 
@@ -43,19 +51,30 @@ $PYTHON_BIN -m meerschaum start jobs test_api -y
 
 ### This is necessary to trigger installations in a clean environment.
 $PYTHON_BIN -c "
-from tests.connectors import conns
-[print((conn.engine if conn.type == 'sql' else conn)) for conn in conns.values()]
+from tests.connectors import conns, get_flavors
+flavors = get_flavors()
+print(flavors)
+for flavor, conn in conns.items():
+    if flavor not in flavors:
+        continue
+    if conn.type == 'sql':
+        print(conn.engine)
+    else:
+        print(conn)
 "
 
 MRSM_CONNS=$($PYTHON_BIN -c "
-from tests.connectors import conns
-print(' '.join([str(c) for c in conns.values()]))")
+from tests.connectors import get_flavors
+print(get_flavors())
+")
 
 MRSM_URIS=$($PYTHON_BIN -c "
-from tests.connectors import conns
+from tests.connectors import conns, get_flavors
+flavors = get_flavors()
 print(' '.join([
   'MRSM_' + c.type.upper() + '_' + c.label.upper() + '=' + c.URI
-  for c in conns.values()
+  for c, f in conns.items()
+  if f in flavors
 ]))")
 export $MRSM_URIS
 

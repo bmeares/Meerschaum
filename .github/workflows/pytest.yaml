@@ -32,6 +32,7 @@ jobs:
       - name: Integration tests
         env:
           COMPOSE_INTERACTIVE_NO_CLI: 1
+          MRSM_TEST_FLAVORS: "all"
         run: ./scripts/test.sh db
       - uses: actions/upload-artifact@v3
         if: always()

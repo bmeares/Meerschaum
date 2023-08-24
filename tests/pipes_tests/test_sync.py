@@ -6,7 +6,7 @@ import pytest
 import datetime
 from tests import debug
 from tests.pipes import all_pipes, stress_pipes, remote_pipes
-from tests.connectors import conns
+from tests.connectors import conns, get_flavors
 from tests.test_users import test_register_user
 import meerschaum as mrsm
 from meerschaum import Pipe
@@ -18,7 +18,7 @@ def run_before_and_after(flavor: str):
     yield
 
 
-@pytest.mark.parametrize("flavor", sorted(list(all_pipes.keys())))
+@pytest.mark.parametrize("flavor", get_flavors())
 def test_register_and_delete(flavor: str):
     pipe = all_pipes[flavor][0]
     params = pipe.parameters.copy()
@@ -36,7 +36,7 @@ def test_register_and_delete(flavor: str):
     assert success, msg
     assert pipe.parameters is not None
 
-@pytest.mark.parametrize("flavor", sorted(list(all_pipes.keys())))
+@pytest.mark.parametrize("flavor", get_flavors())
 def test_drop_and_sync(flavor: str):
     pipe = all_pipes[flavor][0]
     pipe.drop()
@@ -56,7 +56,7 @@ def test_drop_and_sync(flavor: str):
     assert data is not None
     assert len(data) == 2
 
-@pytest.mark.parametrize("flavor", sorted(list(all_pipes.keys())))
+@pytest.mark.parametrize("flavor", get_flavors())
 def test_drop_and_sync_duplicate(flavor: str):
     pipe = all_pipes[flavor][0]
     pipe.drop(debug=debug)
@@ -76,7 +76,7 @@ def test_drop_and_sync_duplicate(flavor: str):
     data = pipe.get_data(debug=debug)
     assert len(data) == 1
 
-@pytest.mark.parametrize("flavor", list(stress_pipes.keys()))
+@pytest.mark.parametrize("flavor", get_flavors())
 def test_drop_and_sync_stress(flavor: str):
     pipes = stress_pipes[flavor]
     for pipe in pipes:
@@ -84,7 +84,7 @@ def test_drop_and_sync_stress(flavor: str):
         success, msg = pipe.sync(debug=debug)
         assert success, msg
 
-@pytest.mark.parametrize("flavor", list(remote_pipes.keys()))
+@pytest.mark.parametrize("flavor", get_flavors())
 def test_drop_and_sync_remote(flavor: str):
     pipe = None
     for p in remote_pipes[flavor]:
@@ -130,7 +130,7 @@ def test_drop_and_sync_remote(flavor: str):
     assert df.to_dict(orient='records')[0]['foo'] == 'baz'
 
 
-@pytest.mark.parametrize("flavor", sorted(list(all_pipes.keys())))
+@pytest.mark.parametrize("flavor", get_flavors())
 def test_sync_engine(flavor: str):
     ### Weird concurrency issues with our tests.
     if flavor == 'duckdb':
@@ -159,7 +159,7 @@ def test_sync_engine(flavor: str):
     assert success, msg
 
 
-@pytest.mark.parametrize("flavor", sorted(list(all_pipes.keys())))
+@pytest.mark.parametrize("flavor", get_flavors())
 def test_target_mutable(flavor: str):
     conn = conns[flavor]
     if conn.type != 'sql':
@@ -191,7 +191,7 @@ def test_target_mutable(flavor: str):
     assert result is None
 
 
-@pytest.mark.parametrize("flavor", list(remote_pipes.keys()))
+@pytest.mark.parametrize("flavor", get_flavors())
 def test_sync_new_columns(flavor: str):
     """
     Test that new columns are added.
@@ -214,7 +214,7 @@ def test_sync_new_columns(flavor: str):
     assert len(df) == 1
 
 
-@pytest.mark.parametrize("flavor", sorted(list(all_pipes.keys())))
+@pytest.mark.parametrize("flavor", get_flavors())
 def test_temporary_pipes(flavor: str):
     """
     Verify that `temporary=True` will not create instance tables.
@@ -249,7 +249,7 @@ def test_temporary_pipes(flavor: str):
     assert not table_exists('plugins', conn, debug=debug)
 
 
-@pytest.mark.parametrize("flavor", sorted(list(all_pipes.keys())))
+@pytest.mark.parametrize("flavor", get_flavors())
 def test_id_index_col(flavor: str):
     """
     Verify that the ID column is able to be synced.
@@ -287,7 +287,7 @@ def test_id_index_col(flavor: str):
     assert small_synced_docs == new_docs
 
 
-@pytest.mark.parametrize("flavor", sorted(list(all_pipes.keys())))
+@pytest.mark.parametrize("flavor", get_flavors())
 def test_utc_offset_datetimes(flavor: str):
     """
     Verify that we are able to sync rows with UTC offset datetimes.
@@ -317,7 +317,7 @@ def test_utc_offset_datetimes(flavor: str):
     assert synced_docs == expected_docs
 
 
-@pytest.mark.parametrize("flavor", sorted(list(all_pipes.keys())))
+@pytest.mark.parametrize("flavor", get_flavors())
 def test_ignore_datetime_conversion(flavor: str):
     """
     If the user specifies, skip columns from being detected as datetimes.
@@ -349,7 +349,7 @@ def test_ignore_datetime_conversion(flavor: str):
     assert synced_docs == expected_docs
 
 
-@pytest.mark.parametrize("flavor", sorted(list(all_pipes.keys())))
+@pytest.mark.parametrize("flavor", get_flavors())
 def test_no_indices_inferred_datetime_to_text(flavor: str):
     """
     Verify that changing dtypes are handled.
@@ -386,7 +386,7 @@ def test_no_indices_inferred_datetime_to_text(flavor: str):
     assert len(df) == len(docs)
 
 
-@pytest.mark.parametrize("flavor", sorted(list(all_pipes.keys())))
+@pytest.mark.parametrize("flavor", get_flavors())
 def test_sync_generators(flavor: str):
     """
     Verify that we are able to sync generators of chunks.
@@ -407,7 +407,7 @@ def test_sync_generators(flavor: str):
     assert rowcount == num_docs
 
 
-@pytest.mark.parametrize("flavor", sorted(list(all_pipes.keys())))
+@pytest.mark.parametrize("flavor", get_flavors())
 def test_add_new_columns(flavor: str):
     """
     Verify that we are able to add new columns dynamically.
@@ -438,7 +438,7 @@ def test_add_new_columns(flavor: str):
     assert 'e' in df['d'][0]
 
 
-@pytest.mark.parametrize("flavor", sorted(list(all_pipes.keys())))
+@pytest.mark.parametrize("flavor", get_flavors())
 def test_get_data_iterator(flavor: str):
     """
     Test the new `as_iterator` flag in `Pipe.get_data()`.
@@ -482,7 +482,7 @@ def test_get_data_iterator(flavor: str):
     assert df['id'].to_list() == [0, 2, 4, 6]
 
 
-@pytest.mark.parametrize("flavor", sorted(list(all_pipes.keys())))
+@pytest.mark.parametrize("flavor", get_flavors())
 def test_sync_inplace(flavor: str):
     """
     Verify that in-place syncing works as expected.
@@ -544,7 +544,7 @@ def test_sync_inplace(flavor: str):
     assert dest_pipe.get_rowcount(debug=debug) == len(docs) + len(new_docs)
 
 
-@pytest.mark.parametrize("flavor", sorted(list(all_pipes.keys())))
+@pytest.mark.parametrize("flavor", get_flavors())
 def test_nested_chunks(flavor: str):
     """
     Sync nested chunk generators.
