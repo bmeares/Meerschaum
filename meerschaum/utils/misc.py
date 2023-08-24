@@ -701,6 +701,7 @@ def parse_df_datetimes(
     from meerschaum.utils.warnings import warn
     import traceback
     pd = import_pandas()
+    pandas = attempt_import('pandas')
     pd_name = pd.__name__
     is_dask = 'dask' in pd_name
     if is_dask:
@@ -711,13 +712,14 @@ def parse_df_datetimes(
         pdf = df
     else:
         if debug:
-            dprint(f"df is of type '{type(df)}'. Casting to DataFrame...")
+            dprint(f"df is of type '{type(df)}'. Building {pd.DataFrame}...")
 
         if is_dask:
             if isinstance(df, list):
                 keys = set()
                 for doc in df:
-                    keys.add(*[k for k in doc])
+                    for key in doc:
+                        keys.add(key)
                 df = pd.DataFrame.from_dict(
                     {
                         k: [
@@ -777,7 +779,18 @@ def parse_df_datetimes(
         dprint("Converting columns to datetimes: " + str(datetime_cols))
 
     try:
-        df[datetime_cols] = df[datetime_cols].apply(pd.to_datetime, utc=True)
+        if not is_dask:
+            df[datetime_cols] = df[datetime_cols].apply(pd.to_datetime, utc=True)
+        else:
+            df[datetime_cols] = df[datetime_cols].apply(
+                pd.to_datetime,
+                utc = True,
+                axis = 1,
+                meta = {
+                    col: 'datetime64[ns]'
+                    for col in datetime_cols
+                }
+            )
     except Exception as e:
         warn(
             f"Unable to apply `pd.to_datetime` to {items_str(datetime_cols)}:\n"
@@ -942,16 +955,18 @@ def add_missing_cols_to_df(df: 'pd.DataFrame', dtypes: Dict[str, Any]) -> pd.Dat
     if set(df.columns) == set(dtypes):
         return df
 
-    from meerschaum.utils.packages import import_pandas
+    from meerschaum.utils.packages import import_pandas, attempt_import
     pd = import_pandas()
+    pandas = attempt_import('pandas')
+    is_dask = 'dask' in pd.__name__
     
-    df = df.copy()
     for col, typ in dtypes.items():
         if col in df.columns:
             continue
         if typ == 'int64':
-            typ = 'Int64'
-        df[col] = pd.Series([None] * len(df), dtype=typ)
+            typ = 'int64[pyarrow]'
+        ### TODO: Implement from_delayed() for dask.
+        df[col] = pandas.Series([None] * len(df), dtype=typ)
     
     return df
 
@@ -1038,15 +1053,7 @@ def filter_unseen_df(
         dtypes = {col: str(typ) for col, typ in old_df.dtypes.items()}
 
     dtypes = {
-        col: (
-            (
-                str(typ)
-                if str(typ) not in ('str', 'json')
-                else 'object'
-            )
-            if str(typ) != 'int64'
-            else 'Int64'
-        ) for col, typ in dtypes.items()
+        col: to_pandas_dtype(typ) for col, typ in dtypes.items()
         if col in new_df_dtypes and col in old_df_dtypes
     }
     for col, typ in new_df_dtypes.items():
@@ -1056,6 +1063,11 @@ def filter_unseen_df(
     for col, typ in {k: v for k, v in dtypes.items()}.items():
         if new_df_dtypes.get(col, None) != old_df_dtypes.get(col, None):
             ### Fallback to object if the types don't match.
+            warn(
+                f"Detected different types for '{col}' "
+                + f"({new_df_dtypes.get(col, None)} vs {old_df_dtypes.get(col, None)}), "
+                + "falling back to 'object'..."
+            )
             dtypes[col] = 'object'
 
     cast_cols = True
@@ -1074,18 +1086,21 @@ def filter_unseen_df(
                 except Exception as e:
                     warn(f"Was not able to cast column '{col}' to dtype '{dtype}'.\n{e}")
 
-    if is_dask:
-        return new_df[
-            ~(
-                new_df.fillna(NA).apply(tuple, 1, meta=(None, 'object')).compute()
-            ).isin(
-                old_df.fillna(NA).apply(tuple, 1, meta=(None, 'object')).compute()
-            )
-        ].reset_index(drop=True)[list(new_df_dtypes.keys())]
+    #  if is_dask:
+    joined_df = pd.merge(
+        new_df.fillna(NA),
+        old_df.fillna(NA),
+        how = 'left',
+        on = None,
+        indicator = True,
+    )
+    changed_rows_mask = (joined_df['_merge'] == 'left_only')
+    return joined_df[list(new_df_dtypes.keys())][changed_rows_mask].reset_index(drop=True)
 
-    return new_df[
-        ~new_df.fillna(NA).apply(tuple, 1).isin(old_df.fillna(NA).apply(tuple, 1))
-    ].reset_index(drop=True)[new_df_dtypes.keys()]
+
+    #  return new_df[
+        #  ~new_df.fillna(NA).apply(tuple, 1).isin(old_df.fillna(NA).apply(tuple, 1))
+    #  ].reset_index(drop=True)[new_df_dtypes.keys()]
 
 
 
@@ -2263,3 +2278,9 @@ def chunksize_to_npartitions(chunksize: Optional[int]) -> int:
     if chunksize is None:
         return 1
     return -1 * chunksize
+
+
+def is_dataframe_empty(df: Union['pd.DataFrame', 'dd.DataFrame']) -> bool:
+    """
+    Determine whether a dataframe contains data.
+    """

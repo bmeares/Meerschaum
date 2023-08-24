@@ -25,6 +25,7 @@ def read(
         query_or_table: Union[str, sqlalchemy.Query],
         params: Optional[Dict[str, Any], List[str]] = None,
         dtype: Optional[Dict[str, Any]] = None,
+        dtype_backend: str = 'pyarrow',
         chunksize: Optional[int] = -1,
         workers: Optional[int] = None,
         chunk_hook: Optional[Callable[[pandas.DataFrame], Any]] = None,
@@ -59,6 +60,9 @@ def read(
         A dictionary of data types to pass to `pandas.read_sql()`.
         See the pandas documentation for more information:
         https://pandas.pydata.org/pandas-docs/stable/reference/api/pandas.read_sql_query.html
+
+    dtype_backend: str, default 'pyarrow'
+        Which pandas dtype engine to use.
 
     chunksize: Optional[int], default -1
         How many chunks to read at a time. `None` will read everything in one large chunk.
@@ -124,6 +128,8 @@ def read(
     dd = None
     is_dask = 'dask' in pd.__name__
     npartitions = chunksize_to_npartitions(chunksize)
+    if is_dask:
+        chunksize = None
 
     sqlalchemy = attempt_import("sqlalchemy")
     default_chunksize = self._sys_config.get('chunksize', None)
@@ -177,11 +183,15 @@ def read(
         if debug:
             dprint(f"[{self}] Reading from table {query_or_table}")
         formatted_query = sqlalchemy.text("SELECT * FROM " + str(query_or_table))
+        str_query = f"SELECT * FROM {query_or_table}"
     else:
-        try:
-            formatted_query = sqlalchemy.text(query_or_table)
-        except Exception as e:
-            formatted_query = query_or_table
+        str_query = query_or_table
+
+    formatted_query = (
+        sqlalchemy.text(str_query)
+        if not is_dask
+        else format_sql_query_for_dask(str_query)
+    )
 
     chunk_list = []
     chunk_hook_results = []
@@ -192,19 +202,18 @@ def read(
 
             read_sql_query_kwargs = {
                 'params': params,
-                'chunksize': chunksize,
                 'dtype': dtype,
+                'dtype_backend': dtype_backend,
             }
             if is_dask:
                 if index_col is None:
-                    dd = pd
-                    pd = attempt_import('pandas')
-                else:
                     dd = None
+                    pd = attempt_import('pandas')
                     read_sql_query_kwargs.update({
-                        'npartitions': npartitions,
-                        'index_col': index_col,
+                        'chunksize': chunksize,
                     })
+                else:
+                    dd = pd
 
             if is_dask and dd is not None:
                 ddf = dd.read_sql_query(
@@ -275,6 +284,30 @@ def read(
     if is_dask and dd is not None:
         ddf = ddf.reset_index()
         return ddf
+
+    chunk_list = []
+    read_chunks = 0
+    chunk_hook_results = []
+    if chunksize is None:
+        chunk_list.append(chunk_generator)
+    elif as_iterator:
+        return chunk_generator
+    else:
+        try:
+            for chunk in chunk_generator:
+                if chunk_hook is not None:
+                    chunk_hook_results.append(
+                        chunk_hook(chunk, chunksize=chunksize, debug=debug, **kw)
+                    )
+                chunk_list.append(chunk)
+                read_chunks += 1
+                if chunks is not None and read_chunks >= chunks:
+                    break
+        except Exception as e:
+            warn(f"[{self}] Failed to retrieve query results:\n" + str(e), stacklevel=3)
+            from meerschaum.utils.formatting import get_console
+            get_console().print_exception()
+>>>>>>> c830881 (Resolve more rebasing conflicts)
 
     read_chunks = 0
     try:
@@ -697,6 +730,10 @@ def to_sql(
         'method': method,
         'chunksize': chunksize,
     })
+    if is_dask:
+        to_sql_kw.update({
+            'parallel': True,
+        })
 
     if self.flavor == 'oracle':
         ### For some reason 'replace' doesn't work properly in pandas,
@@ -830,3 +867,34 @@ def psql_insert_copy(
 
         sql = f"COPY {table_name} ({columns}) FROM STDIN WITH CSV NULL '\\N'"
         cur.copy_expert(sql=sql, file=s_buf)
+
+
+def format_sql_query_for_dask(query: str) -> 'sqlalchemy.sql.selectable.Select':
+    """
+    Given a `SELECT` query, return a `sqlalchemy` query for Dask to use.
+    This may only work with specific database flavors like PostgreSQL.
+
+    Parameters
+    ----------
+    query: str
+        The `SELECT` query to be parsed.
+
+    Returns
+    -------
+    A `sqlalchemy` selectable.
+    """
+    if 'select ' not in query.lower():
+        raise ValueError(f"Cannot convert query to SQLAlchemy:\n\n{query}")
+
+    def _remove_leading_select(q: str) -> str:
+        return q.replace("SELECT ", "", 1)
+
+    from meerschaum.utils.packages import attempt_import
+    sqlalchemy_sql = attempt_import("sqlalchemy.sql")
+    select, text = sqlalchemy_sql.select, sqlalchemy_sql.text
+
+    parts = query.rsplit('ORDER BY', maxsplit=1)
+    meta_query = f"SELECT * FROM (\n{query}\n) AS s"
+    #  if parts[1]:
+        #  meta_query += "\nORDER BY " + parts[1]
+    return select(text(_remove_leading_select(meta_query)))

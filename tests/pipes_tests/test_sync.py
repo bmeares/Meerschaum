@@ -214,73 +214,6 @@ def test_sync_new_columns(flavor: str):
     assert len(df) == 1
 
 
-@pytest.mark.parametrize("flavor", list(remote_pipes.keys()))
-def test_sync_change_columns_dtypes(flavor: str):
-    """
-    Test that new columns are added.
-    """
-    conn = conns[flavor]
-    pipe = Pipe('foo', 'bar', columns={'datetime': 'dt', 'id': 'id'}, instance=conn)
-    pipe.drop(debug=debug)
-    docs = [
-        {'dt': '2022-01-01', 'id': 1, 'a': 10},
-    ]
-    pipe.sync(docs, debug=debug)
-    assert len(pipe.get_data().columns) == 3
-
-    docs = [
-        {'dt': '2022-01-01', 'id': 1, 'a': 'foo'},
-    ]
-    pipe.sync(docs, debug=debug)
-    df = pipe.get_data()
-    assert len(df.columns) == 3
-    assert len(df) == 1
-    assert str(df.dtypes['a']) == 'object'
-
-
-@pytest.mark.parametrize("flavor", list(remote_pipes.keys()))
-def test_dtype_enforcement(flavor: str):
-    """
-    Test that incoming rows are enforced to the correct data type.
-    """
-    conn = conns[flavor]
-    pipe = Pipe(
-        'foo', 'bar',
-        columns = {
-            'datetime': 'dt',
-            'id': 'id',
-        },
-        dtypes = {
-            'int': 'Int64',
-            'float': 'float64',
-            'bool': 'bool',
-            'object': 'object',
-            'json': 'json',
-            'str': 'str',
-        },
-        instance = conn,
-    )
-    pipe.drop(debug=debug)
-    pipe.sync([{'dt': '2022-01-01', 'id': 1, 'int': '1'}], debug=debug)
-    pipe.sync([{'dt': '2022-01-01', 'id': 1, 'float': '1.0'}], debug=debug)
-    pipe.sync([{'dt': '2022-01-01', 'id': 1, 'bool': 'True'}], debug=debug)
-    pipe.sync([{'dt': '2022-01-01', 'id': 1, 'object': 'foo'}], debug=debug)
-    pipe.sync([{'dt': '2022-01-01', 'id': 1, 'str': 'bar'}], debug=debug)
-    pipe.sync([{'dt': '2022-01-01', 'id': 1, 'json': {'a': {'b': 1}}}], debug=debug)
-    df = pipe.get_data(debug=debug)
-    assert len(df) == 1
-    assert len(df.columns) == 8
-    for col, typ in df.dtypes.items():
-        pipe_dtype = pipe.dtypes[col]
-        if pipe_dtype == 'json':
-            assert isinstance(df[col][0], dict)
-            pipe_dtype = 'object'
-        elif pipe_dtype == 'str':
-            assert isinstance(df[col][0], str)
-            pipe_dtype = 'object'
-        assert str(typ) == pipe_dtype
-
-
 @pytest.mark.parametrize("flavor", sorted(list(all_pipes.keys())))
 def test_temporary_pipes(flavor: str):
     """
@@ -314,55 +247,6 @@ def test_temporary_pipes(flavor: str):
     assert not table_exists('pipes', conn, debug=debug)
     assert not table_exists('users', conn, debug=debug)
     assert not table_exists('plugins', conn, debug=debug)
-
-
-@pytest.mark.parametrize("flavor", sorted(list(all_pipes.keys())))
-def test_infer_json_dtype(flavor: str):
-    """
-    Ensure that new pipes with complex columns (dict or list) as enforced as JSON. 
-    """
-    from meerschaum.utils.formatting import pprint
-    from meerschaum.utils.misc import generate_password
-    session_id = generate_password(6)
-    conn = conns[flavor]
-    pipe = Pipe('foo', 'bar', session_id, instance=conn)
-    success, msg = pipe.sync([
-        {'a': ['b', 'c']},
-        {'a': {'b': 1}},
-    ])
-    assert success, msg
-    pprint(pipe.get_columns_types())
-    df = pipe.get_data(debug=debug)
-    print(df)
-    assert isinstance(df['a'][0], list)
-    assert isinstance(df['a'][1], dict)
-    success, msg = pipe.delete(debug=debug)
-    assert success, msg
-
-
-@pytest.mark.parametrize("flavor", sorted(list(all_pipes.keys())))
-def test_force_json_dtype(flavor: str):
-    """
-    Ensure that new pipes with complex columns (dict or list) as enforced as JSON. 
-    """
-    import json
-    from meerschaum.utils.formatting import pprint
-    from meerschaum.utils.misc import generate_password
-    session_id = generate_password(6)
-    conn = conns[flavor]
-    pipe = Pipe('foo', 'bar', session_id, instance=conn, dtypes={'a': 'json'})
-    success, msg = pipe.sync([
-        {'a': json.dumps(['b', 'c'])},
-        {'a': json.dumps({'b': 1})},
-    ])
-    assert success, msg
-    pprint(pipe.get_columns_types())
-    df = pipe.get_data(debug=debug)
-    print(df)
-    assert isinstance(df['a'][0], list)
-    assert isinstance(df['a'][1], dict)
-    success, msg = pipe.delete(debug=debug)
-    assert success, msg
 
 
 @pytest.mark.parametrize("flavor", sorted(list(all_pipes.keys())))

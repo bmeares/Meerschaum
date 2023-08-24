@@ -665,8 +665,8 @@ def filter_existing(
         **kw
     )
     if debug:
-        dprint("Existing data for {self}:\n" + str(backtrack_df), **kw)
-        dprint("Existing dtypes for {self}:\n" + str(backtrack_df.dtypes))
+        dprint(f"Existing data for {self}:\n" + str(backtrack_df), **kw)
+        dprint(f"Existing dtypes for {self}:\n" + str(backtrack_df.dtypes))
 
     ### Separate new rows from changed ones.
     on_cols = [
@@ -678,9 +678,10 @@ def filter_existing(
             and col in backtrack_df.columns
         )
     ]
+    self_dtypes = self.dtypes
     on_cols_dtypes = {
         col: to_pandas_dtype(typ)
-        for col, typ in self.dtypes.items()
+        for col, typ in self_dtypes.items()
         if col in on_cols
     }
 
@@ -691,7 +692,7 @@ def filter_existing(
             df,
             dtypes = {
                 col: to_pandas_dtype(typ)
-                for col, typ in self.dtypes.items()
+                for col, typ in self_dtypes.items()
             },
             debug = debug
         ),

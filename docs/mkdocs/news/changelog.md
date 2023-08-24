@@ -1,5 +1,10 @@
 # 🪵 Changelog
 
+## 2.0.x Release
+
+- **Improve data type enforcement for SQL pipes.**  
+  A pipe's data types are now passed to `SQLConnector.read()` when fetching its data.
+
 ## 1.7.x Releases
 
 This is the current release cycle, so stay tuned for future releases!

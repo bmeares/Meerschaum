@@ -181,6 +181,19 @@ DB_FLAVORS_CAST_DTYPES = {
 }
 ### Map pandas dtypes to flavor-specific dtypes.
 PD_TO_DB_DTYPES_FLAVORS: Dict[str, Dict[str, str]] = {
+    'int': {
+        'timescaledb': 'BIGINT',
+        'postgresql': 'BIGINT',
+        'mariadb': 'BIGINT',
+        'mysql': 'BIGINT',
+        'mssql': 'BIGINT',
+        'oracle': 'INT',
+        'sqlite': 'BIGINT',
+        'duckdb': 'BIGINT',
+        'citus': 'BIGINT',
+        'cockroachdb': 'BIGINT',
+        'default': 'INT',
+    },
     'Int64': {
         'timescaledb': 'BIGINT',
         'postgresql': 'BIGINT',
@@ -219,6 +232,19 @@ PD_TO_DB_DTYPES_FLAVORS: Dict[str, Dict[str, str]] = {
         'citus': 'BIGINT',
         'cockroachdb': 'BIGINT',
         'default': 'INT',
+    },
+    'float': {
+        'timescaledb': 'DOUBLE PRECISION',
+        'postgresql': 'DOUBLE PRECISION',
+        'mariadb': 'DECIMAL',
+        'mysql': 'DECIMAL',
+        'mssql': 'FLOAT',
+        'oracle': 'FLOAT',
+        'sqlite': 'FLOAT',
+        'duckdb': 'DOUBLE PRECISION',
+        'citus': 'DOUBLE PRECISION',
+        'cockroachdb': 'DOUBLE PRECISION',
+        'default': 'DOUBLE',
     },
     'float64': {
         'timescaledb': 'DOUBLE PRECISION',
@@ -365,6 +391,19 @@ PD_TO_DB_DTYPES_FLAVORS: Dict[str, Dict[str, str]] = {
     },
 }
 PD_TO_SQLALCHEMY_DTYPES_FLAVORS: Dict[str, Dict[str, str]] = {
+    'int': {
+        'timescaledb': 'BigInteger',
+        'postgresql': 'BigInteger',
+        'mariadb': 'BigInteger',
+        'mysql': 'BigInteger',
+        'mssql': 'BigInteger',
+        'oracle': 'BigInteger',
+        'sqlite': 'BigInteger',
+        'duckdb': 'BigInteger',
+        'citus': 'BigInteger',
+        'cockroachdb': 'BigInteger',
+        'default': 'BigInteger',
+    },
     'Int64': {
         'timescaledb': 'BigInteger',
         'postgresql': 'BigInteger',
@@ -403,6 +442,19 @@ PD_TO_SQLALCHEMY_DTYPES_FLAVORS: Dict[str, Dict[str, str]] = {
         'citus': 'BigInteger',
         'cockroachdb': 'BigInteger',
         'default': 'BigInteger',
+    },
+    'float': {
+        'timescaledb': 'Float',
+        'postgresql': 'Float',
+        'mariadb': 'Float',
+        'mysql': 'Float',
+        'mssql': 'Float',
+        'oracle': 'Float',
+        'sqlite': 'Float',
+        'duckdb': 'Float',
+        'citus': 'Float',
+        'cockroachdb': 'Float',
+        'default': 'Float',
     },
     'float64': {
         'timescaledb': 'Float',

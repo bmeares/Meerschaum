@@ -670,10 +670,12 @@ def get_pipe_data(
     )
 
     if is_dask:
-        index_col = None
+        index_col = pipe.columns.get('datetime', None)
+        kw['index_col'] = index_col
 
     df = self.read(
         query,
+        dtype = dtypes,
         debug = debug,
         **kw
     )
@@ -1178,8 +1180,8 @@ def sync_pipe(
     if not success:
         return success, stats['msg']
     msg = (
-        f"Inserted {len(unseen_df)}, "
-        + f"updated {len(update_df) if update_df is not None else 0} rows."
+        f"Inserted {len(unseen_df.index)}, "
+        + f"updated {len(update_df.index) if update_df is not None else 0} rows."
     )
     if debug:
         msg = msg[:-1] + (
@@ -2294,6 +2296,9 @@ def get_add_columns_queries(
     )
     from meerschaum.utils.misc import flatten_list
     table_obj = self.get_pipe_table(pipe, debug=debug)
+    is_dask = 'dask' in df.__module__
+    if is_dask:
+        df = df.partitions[0].compute()
     df_cols_types = (
         {
             col: str(typ)
@@ -2302,7 +2307,7 @@ def get_add_columns_queries(
         if not isinstance(df, dict)
         else copy.deepcopy(df)
     )
-    if len(df) > 0 and not isinstance(df, dict):
+    if len(df.index) > 0 and not isinstance(df, dict):
         for col, typ in list(df_cols_types.items()):
             if typ != 'object':
                 continue

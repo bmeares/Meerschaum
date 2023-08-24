@@ -31,6 +31,7 @@ _locks = {
     'import_versions': RLock(),
     '_checked_for_updates': RLock(),
     '_is_installed_first_check': RLock(),
+    'emitted_pandas_warning': RLock(),
 }
 _checked_for_updates = set()
 _is_installed_first_check: Dict[str, bool] = {}
@@ -1271,6 +1272,7 @@ def pandas_name() -> str:
     return pandas_module_name
 
 
+emitted_pandas_warning: bool = False
 def import_pandas(
         debug: bool = False,
         lazy: bool = False,
@@ -1281,6 +1283,11 @@ def import_pandas(
     """
     import sys
     pandas_module_name = pandas_name()
+
+    if pandas_module_name != 'pandas':
+        with _locks['emitted_pandas_warning']:
+            if not emitted_pandas_warning:
+                from meerschaum.utils.warnings import warn
 
     pytz = attempt_import('pytz', debug=debug, lazy=False, **kw)
     pd = attempt_import(pandas_module_name, debug=debug, lazy=lazy, **kw)
