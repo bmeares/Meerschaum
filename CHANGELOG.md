@@ -4,6 +4,11 @@
 
 This is the current release cycle, so stay tuned for future releases!
 
+### v1.7.3
+
+- **Fix an issue with the local stack healthcheck.**  
+  Due to some edge cases, the local stack `docker-compose.yaml` file would not be correctly formatted until `edit config` had been executed. This patch ensures the files are synced with each invocation of `stack`.
+
 ### v1.7.2
 
 - **Fix `role "root" does not exist` from stack logs.**  

@@ -71,7 +71,7 @@ def write_config(
     if directory is None:
         from meerschaum.config._paths import CONFIG_DIR_PATH
         directory = CONFIG_DIR_PATH
-    from meerschaum.config.static import _static_config
+    from meerschaum.config.static import STATIC_CONFIG
     from meerschaum.config._default import default_header_comment
     from meerschaum.config._patch import apply_patch_to_config
     from meerschaum.config._read_config import get_keyfile_path
@@ -84,14 +84,14 @@ def write_config(
         cf = _config()
         config_dict = cf
 
-    default_filetype = _static_config()['config']['default_filetype']
+    default_filetype = STATIC_CONFIG['config']['default_filetype']
     filetype_dumpers = {
         'yml' : yaml.dump,
         'yaml' : yaml.dump,
         'json' : json.dump,
     }
 
-    symlinks_key = _static_config()['config']['symlinks_key']
+    symlinks_key = STATIC_CONFIG['config']['symlinks_key']
     symlinks = config_dict.pop(symlinks_key) if symlinks_key in config_dict else {}
     config_dict = apply_patch_to_config(config_dict, symlinks)
 
@@ -148,27 +148,17 @@ def write_config(
     return True
 
 def general_write_yaml_config(
-        files : Optional[Dict[str, pathlib.Path]] = None,
-        debug : bool = False
+        files: Optional[Dict[pathlib.Path, Dict[str, Any]]] = None,
+        debug: bool = False
     ):
-    """Write configuration dictionaries to file paths with optional headers.
-    
-    files : dict
-        Dictionary of paths -> dict or tuple of format (dict, header).
-        If item is a tuple, the header will be written at the top of the file.
+    """
+    Write configuration dictionaries to file paths with optional headers.
 
     Parameters
     ----------
-    files : Optional[Dict[str :
-        
-    pathlib.Path]] :
-         (Default value = None)
-    debug : bool :
-         (Default value = False)
-
-    Returns
-    -------
-
+    files: Optional[Dict[str, pathlib.Path]], default None
+        Dictionary of paths -> dict or tuple of format (dict, header).
+        If item is a tuple, the header will be written at the top of the file.
     """
 
     from meerschaum.utils.debug import dprint

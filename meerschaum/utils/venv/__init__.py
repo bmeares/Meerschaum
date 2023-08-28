@@ -579,16 +579,21 @@ def venv_target_path(
 
         if not inside_venv():
             site_path = pathlib.Path(site.getusersitepackages())
-            ### Allow for dist-level paths (running as root).
             if not site_path.exists():
-                if platform.system() == 'Windows' or os.geteuid() == 0:
-                    for possible_dist in reversed(site.getsitepackages()):
-                        dist_path = pathlib.Path(possible_dist)
-                        if not dist_path.exists():
-                            continue
-                        return dist_path
-                    
-                    raise EnvironmentError("Could not determine the dist-packages directory.")
+
+                ### Windows does not have `os.geteuid()`.
+                if platform.system() == 'Windows' or os.geteuid() != 0:
+                    site_path.mkdir(parents=True, exist_ok=True)
+                    return site_path
+
+                ### Allow for dist-level paths (running as root).
+                for possible_dist in reversed(site.getsitepackages()):
+                    dist_path = pathlib.Path(possible_dist)
+                    if not dist_path.exists():
+                        continue
+                    return dist_path
+                
+                raise EnvironmentError("Could not determine the dist-packages directory.")
 
             return site_path
 

@@ -18,7 +18,7 @@ def login(
     """Log in and set the session token."""
     from meerschaum.utils.warnings import warn as _warn, info, error
     from meerschaum.core import User
-    from meerschaum.config.static import _static_config
+    from meerschaum.config.static import STATIC_CONFIG
     import json, datetime
     try:
         login_data = {
@@ -28,7 +28,7 @@ def login(
     except AttributeError:
         return False, f"Please login with the command `login {self}`."
     response = self.post(
-        _static_config()['api']['endpoints']['login'],
+        STATIC_CONFIG['api']['endpoints']['login'],
         data = login_data,
         use_token = False,
         debug = debug

@@ -14,11 +14,7 @@ $PYTHON_BIN -m meerschaum show packages docs --nopretty >> "$reqs_file"
 $PYTHON_BIN -m pip install --upgrade -r "$reqs_file" || exit 1
 ### Install pdoc3 and docker-compose outside of the declared docs dependencies.
 $PYTHON_BIN -m pip install pdoc3 || exit 1
-$PYTHON_BIN -m pip install docker-compose || exit 1
 rm -f "$reqs_file"
-
-### Install Meerschaum plugins.
-$PYTHON_BIN -m meerschaum install plugin thanks
 
 ### Enable docker buildx.
 
@@ -33,7 +29,7 @@ if [ "$MRSM_SKIP_DOCKER_EXPERIMENTAL" != "1" ]; then
       case "$yn" in
         Y ) echo "$daemon_json" | sudo tee /etc/docker/daemon.json && sudo systemctl restart docker
           break ;;
-        N ) echo "Please enable experimental mode." && exit 1 ;;
+        N ) echo "Skipping experimental features." && exit 0 ;;
       esac
     done
   fi
