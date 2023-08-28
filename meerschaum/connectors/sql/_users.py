@@ -70,7 +70,7 @@ def valid_username(username: str) -> SuccessTuple:
     if len(username) > max_length:
         fail_reasons.append(f"Usernames must contain {max_length} or fewer characters.")
 
-    acceptable_chars = {'_', '-'}
+    acceptable_chars = {'_', '-', '.', '@'}
     for c in username:
         if not c.isalnum() and c not in acceptable_chars:
             fail_reasons.append(

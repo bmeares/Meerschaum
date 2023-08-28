@@ -10,7 +10,7 @@ from __future__ import annotations
 from meerschaum.utils.venv import Venv
 from meerschaum.utils.packages import attempt_import, import_dcc, import_html
 from meerschaum.utils.typing import SuccessTuple, List
-from meerschaum.config.static import _static_config
+from meerschaum.config.static import STATIC_CONFIG
 from meerschaum.utils.misc import remove_ansi
 from meerschaum.actions import get_shell
 from meerschaum.api import endpoints, CHECK_UPDATE
@@ -154,7 +154,7 @@ def alert_from_success_tuple(success: SuccessTuple) -> dbc.Alert:
             id = 'success-alert',
             dismissable = True,
             fade = True,
-            is_open = not (success[1] in _static_config()['system']['success']['ignore']),
+            is_open = not (success[1] in STATIC_CONFIG['system']['success']['ignore']),
             color = 'success' if success[0] else 'danger',
         )
     )

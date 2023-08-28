@@ -13,9 +13,9 @@ pwd_context = None
 def get_pwd_context():
     global pwd_context
     if pwd_context is None:
-        from meerschaum.config.static import _static_config
+        from meerschaum.config.static import STATIC_CONFIG
         from meerschaum.utils.packages import attempt_import
-        hash_config = _static_config()['users']['password_hash']
+        hash_config = STATIC_CONFIG['users']['password_hash']
         passlib_context = attempt_import('passlib.context')
         pwd_context = passlib_context.CryptContext(
             schemes = hash_config['schemes'],
@@ -24,7 +24,11 @@ def get_pwd_context():
         )
     return pwd_context
 
-class User():
+class User:
+    """
+    The Meerschaum User object manages authentication to a given instance.
+    """
+
     def __init__(
         self,
         username: str,

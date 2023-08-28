@@ -11,22 +11,12 @@ from meerschaum.utils.typing import Optional
 
 def get_mrsm_version(self, **kw) -> Optional[str]:
     """
-
-    Parameters
-    ----------
-    **kw :
-        
-
-    Returns
-    -------
-    type
-        
-
+    Return the Meerschaum version of the API instance.
     """
-    from meerschaum.config.static import _static_config
+    from meerschaum.config.static import STATIC_CONFIG
     try:
         j = self.get(
-            _static_config()['api']['endpoints']['version'] + '/mrsm',
+            STATIC_CONFIG['api']['endpoints']['version'] + '/mrsm',
             use_token = True,
             **kw
         ).json()
@@ -38,22 +28,12 @@ def get_mrsm_version(self, **kw) -> Optional[str]:
 
 def get_chaining_status(self, **kw) -> Optional[bool]:
     """
-
-    Parameters
-    ----------
-    **kw :
-        
-
-    Returns
-    -------
-    type
-        
-
+    Fetch the chaining status of the API instance.
     """
-    from meerschaum.config.static import _static_config
+    from meerschaum.config.static import STATIC_CONFIG
     try:
         response = self.get(
-            _static_config()['api']['endpoints']['chaining'],
+            STATIC_CONFIG['api']['endpoints']['chaining'],
             use_token = True,
             **kw
         )

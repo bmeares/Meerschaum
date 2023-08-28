@@ -17,10 +17,10 @@ def get_users(
     """
     Return a list of registered usernames.
     """
-    from meerschaum.config.static import _static_config
+    from meerschaum.config.static import STATIC_CONFIG
     import json
     response = self.get(
-        f"{_static_config()['api']['endpoints']['users']}",
+        f"{STATIC_CONFIG['api']['endpoints']['users']}",
         debug = debug,
         use_token = True,
     )
@@ -69,8 +69,8 @@ def register_user(
     ) -> SuccessTuple:
     """Register a new user."""
     import json
-    from meerschaum.config.static import _static_config
-    r_url = f"{_static_config()['api']['endpoints']['users']}/register"
+    from meerschaum.config.static import STATIC_CONFIG
+    r_url = f"{STATIC_CONFIG['api']['endpoints']['users']}/register"
     data = {
         'username': user.username,
         'password': user.password,
@@ -100,9 +100,9 @@ def get_user_id(
         **kw: Any
     ) -> Optional[int]:
     """Get a user's ID."""
-    from meerschaum.config.static import _static_config
+    from meerschaum.config.static import STATIC_CONFIG
     import json
-    r_url = f"{_static_config()['api']['endpoints']['users']}/{user.username}/id"
+    r_url = f"{STATIC_CONFIG['api']['endpoints']['users']}/{user.username}/id"
     response = self.get(r_url, debug=debug, **kw)
     try:
         user_id = int(json.loads(response.text))
@@ -117,9 +117,9 @@ def delete_user(
         **kw: Any
     ) -> SuccessTuple:
     """Delete a user."""
-    from meerschaum.config.static import _static_config
+    from meerschaum.config.static import STATIC_CONFIG
     import json
-    r_url = f"{_static_config()['api']['endpoints']['users']}/{user.username}"
+    r_url = f"{STATIC_CONFIG['api']['endpoints']['users']}/{user.username}"
     response = self.delete(r_url, debug=debug)
     try:
         _json = json.loads(response.text)
@@ -137,9 +137,9 @@ def get_user_attributes(
         **kw
     ) -> int:
     """Get a user's attributes."""
-    from meerschaum.config.static import _static_config
+    from meerschaum.config.static import STATIC_CONFIG
     import json
-    r_url = f"{_static_config()['api']['endpoints']['users']}/{user.username}/attributes"
+    r_url = f"{STATIC_CONFIG['api']['endpoints']['users']}/{user.username}/attributes"
     response = self.get(r_url, debug=debug, **kw)
     try:
         attributes = json.loads(response.text)
@@ -158,8 +158,8 @@ def get_user_password_hash(
         **kw: Any
     ) -> Optional[str]:
     """If configured, get a user's password hash."""
-    from meerschaum.config.static import _static_config
-    r_url = _static_config()['api']['endpoints']['users'] + '/' + user.username + '/password_hash'
+    from meerschaum.config.static import STATIC_CONFIG
+    r_url = STATIC_CONFIG['api']['endpoints']['users'] + '/' + user.username + '/password_hash'
     response = self.get(r_url, debug=debug, **kw)
     if not response:
         return None
@@ -172,8 +172,8 @@ def get_user_type(
         **kw: Any
     ) -> Optional[str]:
     """If configured, get a user's type."""
-    from meerschaum.config.static import _static_config
-    r_url = _static_config()['api']['endpoints']['users'] + '/' + user.username + '/type'
+    from meerschaum.config.static import STATIC_CONFIG
+    r_url = STATIC_CONFIG['api']['endpoints']['users'] + '/' + user.username + '/type'
     response = self.get(r_url, debug=debug, **kw)
     if not response:
         return None

@@ -10,7 +10,6 @@ from __future__ import annotations
 from meerschaum.utils.typing import Optional, List, Tuple
 
 def sync_yaml_configs(
-        config_path: pathlib.Path,
         keys: List[str],
         sub_path: pathlib.Path,
         substitute: bool = True,
@@ -19,28 +18,24 @@ def sync_yaml_configs(
     ) -> None:
     """Synchronize sub-configuration with main configuration file.
     
-    NOTE: This function might need refactoring to work better with the new
-    `read_config` system.
-
     Parameters
     ----------
-    config_path :
-        Not sure if this is necessary.
-    keys :
+    keys: List[str]
         The config keys to read via `get_config()`.
-    sub_path :
+
+    sub_path: pathlib.Path
         The derivative file to write.
-    substitute :
+
+    substitute: bool, default True
         If `True`, parse `MRSM{}` syntax and substitute values.
         See `get_config()` for more information.
-        Defaults to `True`.
-    permissions :
+
+    permissions: Optional[int], default None
         If not `None`, set permissions of the derivative file.
-        Defaults to `None`.
-    replace_tuples :
+
+    replace_tuples: Optional[List[Tuple[str]]], default None
         If provided, iterate through a list of tuples,
         replacing the old string (index 0) with the new string (index 1).
-        Defaults to `None`.
     """
     import os, sys
     try:
@@ -50,12 +45,12 @@ def sync_yaml_configs(
     from meerschaum.config._patch import apply_patch_to_config
     import meerschaum.config
     from meerschaum.utils.packages import reload_package
-    from meerschaum.config._read_config import search_and_substitute_config
-    if not os.path.isfile(config_path) or not os.path.isfile(sub_path):
-        return
+    from meerschaum.config._read_config import search_and_substitute_config, get_keyfile_path
 
-    def _read_config(path):
+    def _read_yaml_config(path):
         """Read YAML file with header comment."""
+        if not path.exists():
+            return "", {}
         header_comment = ""
         with open(path, 'r') as f:
             if _yaml is not None:
@@ -70,16 +65,15 @@ def sync_yaml_configs(
                 header_comment += line
         return header_comment, config
 
-    config_header, config = _read_config(config_path)
-    sub_header, sub_config = _read_config(sub_path)
-
     from meerschaum.config import get_config
+    config_path = get_keyfile_path(keys[0], create_new=True)
     c = get_config(*keys, substitute=substitute, sync_files=False)
+
+    config_header, config = _read_yaml_config(config_path)
+    sub_header, sub_config = _read_yaml_config(sub_path)
+
     if substitute:
         sub_config = search_and_substitute_config(sub_config)
-
-    config_time = os.path.getmtime(config_path)
-    sub_time = os.path.getmtime(sub_path)
 
     sub_config = c
     new_config_text = yaml.dump(c, sort_keys=False)
@@ -99,28 +93,32 @@ def sync_yaml_configs(
 def sync_files(keys: Optional[List[str]] = None):
     if keys is None:
         keys = []
+
     def _stack():
         import os
-        from meerschaum.config._paths import CONFIG_DIR_PATH, STACK_ENV_PATH, STACK_COMPOSE_PATH
-        from meerschaum.config._paths import STACK_COMPOSE_FILENAME, STACK_ENV_FILENAME
-        from meerschaum.config._paths import GRAFANA_DATASOURCE_PATH, GRAFANA_DASHBOARD_PATH
-        from meerschaum.config._paths import MOSQUITTO_CONFIG_PATH
+        from meerschaum.config._paths import (
+            CONFIG_DIR_PATH,
+            STACK_ENV_PATH,
+            STACK_COMPOSE_PATH,
+            STACK_COMPOSE_FILENAME,
+            STACK_ENV_FILENAME,
+            GRAFANA_DATASOURCE_PATH,
+            GRAFANA_DASHBOARD_PATH,
+        )
+        from meerschaum.config.static import STATIC_CONFIG
 
         sync_yaml_configs(
-            CONFIG_DIR_PATH / 'stack.yaml',
             ['stack', STACK_COMPOSE_FILENAME],
             STACK_COMPOSE_PATH,
             substitute = True,
             replace_tuples = [('$', '$$'), ('<DOLLAR>', '$')],
         )
         sync_yaml_configs(
-            CONFIG_DIR_PATH / 'stack.yaml',
             ['stack', 'grafana', 'datasource'],
             GRAFANA_DATASOURCE_PATH,
             substitute = True,
         )
         sync_yaml_configs(
-            CONFIG_DIR_PATH / 'stack.yaml',
             ['stack', 'grafana', 'dashboard'],
             GRAFANA_DASHBOARD_PATH,
             substitute = True,
@@ -128,7 +126,7 @@ def sync_files(keys: Optional[List[str]] = None):
 
 
     key_functions = {
-        'stack' : _stack,
+        'stack': _stack,
     }
     if keys is None:
         keys = list(key_functions.keys())
