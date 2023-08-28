@@ -68,6 +68,11 @@ def stack(
         sysargs = []
     if sub_args is None:
         sub_args = []
+    ### Sometimes `stack()` is called directly from Python and doesn't have sysargs.
+    if action and not sysargs:
+        sysargs = action
+        if sysargs[0] != 'stack':
+            sysargs = ['stack'] + sysargs
 
     bootstrap = False
     for path in NECESSARY_FILES:
@@ -79,14 +84,12 @@ def stack(
     else: 
         sync_files(['stack'])
 
-    compose_command = ['up']
-    ### default: alias stack as docker-compose
-    if len(action) > 0 and action[0] != '':
-        compose_command = action
-
     ### define project name when starting containers
-    project_name_list = ['--project-name', get_config(
-        'stack', 'project_name', patch=True, substitute=True)
+    project_name_list = [
+        '--project-name',
+        get_config(
+            'stack', 'project_name', patch=True, substitute=True,
+        )
     ]
     
     ### Debug list used to include --log-level DEBUG, but the flag is not supported on Windows (?)
