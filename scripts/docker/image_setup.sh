@@ -115,3 +115,4 @@ function PostCommand() {
 }
 PROMPT_COMMAND="PostCommand"
 ' > /home/$MRSM_USER/.bashrc
+chown $MRSM_USER:$MRSM_USER /home/$MRSM_USER/.bashrc
