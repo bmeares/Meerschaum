@@ -4,10 +4,16 @@
 
 This is the current release cycle, so stay tuned for future releases!
 
-### v1.7.3
+### v1.7.3 – v1.7.4
 
 - **Fix an issue with the local stack healthcheck.**  
   Due to some edge cases, the local stack `docker-compose.yaml` file would not be correctly formatted until `edit config` had been executed. This patch ensures the files are synced with each invocation of `stack`.
+
+- **Fix an issue when running the local stack with non-default ports.**  
+  Initializing a local stack with a different database port (e.g. 5433) now routes correctly within the Docker compose network (now patching to internal port to 5432).
+
+- **Fix `upgrade mrsm` behavior.**  
+  Recent changes to `stack` broke the automatic `stack pull` within `mrsm upgrade mrsm`.
 
 ### v1.7.2
 

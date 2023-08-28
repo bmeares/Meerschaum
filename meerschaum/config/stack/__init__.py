@@ -70,6 +70,7 @@ env_dict['MEERSCHAUM_API_PATCH'] = json.dumps(
                 'sql': {
                     'main': {
                         'host': db_host,
+                        'port': 5432,
                     },
                     'local': {
                         'database': volumes['api_root'] + '/sqlite/mrsm_local.db'
