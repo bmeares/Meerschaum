@@ -5,6 +5,9 @@
 - **Improve data type enforcement for SQL pipes.**  
   A pipe's data types are now passed to `SQLConnector.read()` when fetching its data.
 
+- **Replace `daemoniker` with `supervisor`.**  
+  Supervisor is a more feature-complete and well-maintained process management solution. However, this migration removes Windows support for background jobs (which was shoddy already, so no harm there).
+
 ## 1.7.x Releases
 
 This is the current release cycle, so stay tuned for future releases!

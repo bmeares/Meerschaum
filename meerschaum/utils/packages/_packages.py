@@ -46,6 +46,7 @@ packages: Dict[str, Dict[str, str]] = {
         'packaging'                  : 'packaging>=21.3.0',
         'prompt_toolkit'             : 'prompt-toolkit>=3.0.39',
         'more_itertools'             : 'more-itertools>=8.7.0',
+        'supervisor'                 : 'supervisor>=4.2.5',
         'daemoniker'                 : 'daemoniker>=0.2.3',
         'psutil'                     : 'psutil>=5.8.0',
         'watchgod'                   : 'watchgod>=0.7.0',
