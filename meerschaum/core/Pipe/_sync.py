@@ -360,7 +360,7 @@ def sync(
             return success, msg
 
         ### Cast to a dataframe and ensure datatypes are what we expect.
-        df = self.enforce_dtypes(df, debug=debug)
+        df = self.enforce_dtypes(df, chunksize=chunksize, debug=debug)
         if debug:
             dprint(
                 "DataFrame to sync:\n"
@@ -575,10 +575,11 @@ def filter_existing(
     )
 
     pd = import_pandas()
+    is_dask = 'dask' in pd.__name__
     if not isinstance(df, pd.DataFrame):
-        df = self.enforce_dtypes(df, debug=debug)
+        df = self.enforce_dtypes(df, chunksize=chunksize, debug=debug)
 
-    if df.empty:
+    if (df.empty if not is_dask else len(df) == 0):
         return df, df, df
 
     ### begin is the oldest data in the new dataframe

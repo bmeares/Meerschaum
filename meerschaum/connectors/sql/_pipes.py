@@ -631,6 +631,11 @@ def get_pipe_data(
     """
     import json
     from meerschaum.utils.sql import sql_item_name
+    from meerschaum.utils.misc import parse_df_datetimes
+    from meerschaum.utils.packages import import_pandas
+    pd = import_pandas()
+    is_dask = 'dask' in pd.__name__
+
     dtypes = pipe.dtypes
     if dtypes:
         if self.flavor == 'sqlite':
@@ -663,15 +668,16 @@ def get_pipe_data(
         debug = debug,
         **kw
     )
+
+    if is_dask:
+        index_col = None
+
     df = self.read(
         query,
         debug = debug,
         **kw
     )
     if self.flavor == 'sqlite':
-        from meerschaum.utils.misc import parse_df_datetimes
-        from meerschaum.utils.packages import import_pandas
-        pd = import_pandas()
         ### NOTE: We have to consume the iterator here to ensure that datetimes are parsed correctly
         df = (
             parse_df_datetimes(
@@ -681,6 +687,7 @@ def get_pipe_data(
                     for col, dtype in pipe.dtypes.items()
                     if 'datetime' not in str(dtype)
                 ],
+                chunksize = kw.get('chunksize', None),
                 debug = debug,
             ) if isinstance(df, pd.DataFrame) else (
                 [
@@ -691,6 +698,7 @@ def get_pipe_data(
                             for col, dtype in pipe.dtypes.items()
                             if 'datetime' not in str(dtype)
                         ],
+                        chunksize = kw.get('chunksize', None),
                         debug = debug,
                     )
                     for c in df
@@ -1054,7 +1062,7 @@ def sync_pipe(
         dprint("Fetched data:\n" + str(df))
 
     if not isinstance(df, pd.DataFrame):
-        df = pipe.enforce_dtypes(df, debug=debug)
+        df = pipe.enforce_dtypes(df, chunksize=chunksize, debug=debug)
 
     ### if table does not exist, create it with indices
     is_new = False
@@ -1090,7 +1098,7 @@ def sync_pipe(
         if update_df is not None:
             dprint("Update data:\n" + str(update_df))
 
-    if update_df is not None and not update_df.empty:
+    if update_df is not None and not len(update_df) == 0:
         transact_id = generate_password(3)
         temp_target = '_' + transact_id + '_' + pipe.target
         update_kw = copy.deepcopy(kw)

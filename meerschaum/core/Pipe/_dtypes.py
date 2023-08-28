@@ -9,12 +9,17 @@ Enfore data types for a pipe's underlying table.
 from __future__ import annotations
 from meerschaum.utils.typing import Dict, Any, Optional
 
-def enforce_dtypes(self, df: 'pd.DataFrame', debug: bool=False) -> 'pd.DataFrame':
+def enforce_dtypes(
+        self,
+        df: 'pd.DataFrame',
+        chunksize: Optional[int] = -1,
+        debug: bool = False,
+    ) -> 'pd.DataFrame':
     """
     Cast the input dataframe to the pipe's registered data types.
     If the pipe does not exist and dtypes are not set, return the dataframe.
-
     """
+    import traceback
     from meerschaum.utils.warnings import warn
     from meerschaum.utils.debug import dprint
     from meerschaum.utils.misc import parse_df_datetimes, enforce_dtypes as _enforce_dtypes
@@ -39,6 +44,7 @@ def enforce_dtypes(self, df: 'pd.DataFrame', debug: bool=False) -> 'pd.DataFrame
                     for col, dtype in pipe_dtypes.items()
                     if 'datetime' not in str(dtype)
                 ],
+                chunksize = chunksize,
                 debug = debug,
             )
         else:
@@ -49,11 +55,12 @@ def enforce_dtypes(self, df: 'pd.DataFrame', debug: bool=False) -> 'pd.DataFrame
                     for col, dtype in pipe_dtypes.items()
                     if 'datetime' not in str(dtype)
                 ],
+                chunksize = chunksize,
                 debug = debug,
             )
     except Exception as e:
-        warn(f"Unable to cast incoming data as a DataFrame...:\n{e}")
-        return df
+        warn(f"Unable to cast incoming data as a DataFrame...:\n{e}\n\n{traceback.format_exc()}")
+        return None
 
     if not pipe_dtypes:
         if debug:

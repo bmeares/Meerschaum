@@ -32,6 +32,7 @@ def read(
         chunks: Optional[int] = None,
         as_chunks: bool = False,
         as_iterator: bool = False,
+        index_col: Optional[str] = None,
         silent: bool = False,
         debug: bool = False,
         **kw: Any
@@ -96,6 +97,10 @@ def read(
         and hooks are not called in this case.
         Defaults to `False`.
 
+    index_col: Optional[str], default None
+        If using Dask, use this column as the index column.
+        If omitted, a Pandas DataFrame will be fetched and converted to a Dask DataFrame.
+
     silent: bool, default False
         If `True`, don't raise warnings in case of errors.
         Defaults to `False`.
@@ -111,10 +116,15 @@ def read(
     from meerschaum.utils.sql import sql_item_name, truncate_item_name
     from meerschaum.utils.packages import attempt_import, import_pandas
     from meerschaum.utils.pool import get_pool
+    from meerschaum.utils.misc import chunksize_to_npartitions
     import warnings
     import inspect
     import traceback
     pd = import_pandas()
+    dd = None
+    is_dask = 'dask' in pd.__name__
+    npartitions = chunksize_to_npartitions(chunksize)
+
     sqlalchemy = attempt_import("sqlalchemy")
     default_chunksize = self._sys_config.get('chunksize', None)
     chunksize = chunksize if chunksize != -1 else default_chunksize
@@ -179,53 +189,78 @@ def read(
         stream_results = not as_iterator and chunk_hook is not None and chunksize is not None
         with warnings.catch_warnings():
             warnings.filterwarnings('ignore', 'case sensitivity issues')
-            with self.engine.begin() as transaction:
-                with transaction.execution_options(stream_results=stream_results) as connection:
-                    chunk_generator = pd.read_sql_query(
-                        formatted_query,
-                        connection,
-                        params = params,
-                        chunksize = chunksize,
-                        dtype = dtype,
-                    )
 
-                    ### `stream_results` must be False (will load everything into memory).
-                    if as_iterator or chunksize is None:
-                        return chunk_generator
+            read_sql_query_kwargs = {
+                'params': params,
+                'chunksize': chunksize,
+                'dtype': dtype,
+            }
+            if is_dask:
+                if index_col is None:
+                    dd = pd
+                    pd = attempt_import('pandas')
+                else:
+                    dd = None
+                    read_sql_query_kwargs.update({
+                        'npartitions': npartitions,
+                        'index_col': index_col,
+                    })
 
-                    ### We must consume the generator in this context if using server-side cursors.
-                    if stream_results:
+            if is_dask and dd is not None:
+                ddf = dd.read_sql_query(
+                    formatted_query,
+                    self.URI,
+                    **read_sql_query_kwargs
+                )
+            else:
 
-                        pool = get_pool(workers=workers)
+                with self.engine.begin() as transaction:
+                    with transaction.execution_options(stream_results=stream_results) as connection:
+                        chunk_generator = pd.read_sql_query(
+                            formatted_query,
+                            connection,
+                            params = params,
+                            chunksize = chunksize,
+                            dtype = dtype,
+                        )
 
-                        def _process_chunk(_chunk, _retry_on_failure: bool = True):
-                            if not as_hook_results:
-                                chunk_list.append(_chunk)
-                            result = None
-                            if chunk_hook is not None:
-                                try:
-                                    result = chunk_hook(
-                                        _chunk,
-                                        workers = workers,
-                                        chunksize = chunksize,
-                                        debug = debug,
-                                        **kw
-                                    )
-                                except Exception as e:
-                                    result = False, traceback.format_exc()
-                                    from meerschaum.utils.formatting import get_console
-                                    get_console().print_exception()
+                        ### `stream_results` must be False (will load everything into memory).
+                        if as_iterator or chunksize is None:
+                            return chunk_generator
 
-                                ### If the chunk fails to process, try it again one more time.
-                                if isinstance(result, tuple) and result[0] is False:
-                                    if _retry_on_failure:
-                                        return _process_chunk(_chunk, _retry_on_failure=False)
+                        ### We must consume the generator in this context if using server-side cursors.
+                        if stream_results:
 
-                            return result
+                            pool = get_pool(workers=workers)
 
-                        chunk_hook_results = list(pool.imap(_process_chunk, chunk_generator))
-                        if as_hook_results:
-                            return chunk_hook_results
+                            def _process_chunk(_chunk, _retry_on_failure: bool = True):
+                                if not as_hook_results:
+                                    chunk_list.append(_chunk)
+                                result = None
+                                if chunk_hook is not None:
+                                    try:
+                                        result = chunk_hook(
+                                            _chunk,
+                                            workers = workers,
+                                            chunksize = chunksize,
+                                            debug = debug,
+                                            **kw
+                                        )
+                                    except Exception as e:
+                                        result = False, traceback.format_exc()
+                                        from meerschaum.utils.formatting import get_console
+                                        get_console().print_exception()
+
+                                    ### If the chunk fails to process, try it again one more time.
+                                    if isinstance(result, tuple) and result[0] is False:
+                                        if _retry_on_failure:
+                                            return _process_chunk(_chunk, _retry_on_failure=False)
+
+                                return result
+
+                            chunk_hook_results = list(pool.imap(_process_chunk, chunk_generator))
+                            if as_hook_results:
+                                return chunk_hook_results
 
     except Exception as e:
         if debug:
@@ -236,6 +271,10 @@ def read(
         get_console().print_exception()
 
         return None
+
+    if is_dask and dd is not None:
+        ddf = ddf.reset_index()
+        return ddf
 
     read_chunks = 0
     try:

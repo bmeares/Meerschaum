@@ -655,6 +655,7 @@ def round_time(
 def parse_df_datetimes(
         df: 'pd.DataFrame',
         ignore_cols: Optional[Iterable[str]] = None,
+        chunksize: Optional[int] = None,
         debug: bool = False,
     ) -> 'pd.DataFrame':
     """
@@ -667,6 +668,9 @@ def parse_df_datetimes(
 
     ignore_cols: Optional[Iterable[str]], default None
         If provided, do not attempt to coerce these columns as datetimes.
+
+    chunksize: Optional[int], default None
+        If the pandas implementation is `'dask'`, use this chunksize for the distributed dataframe.
         
     debug: bool, default False
         Verbosity toggle.
@@ -692,17 +696,47 @@ def parse_df_datetimes(
     ```
 
     """
-    from meerschaum.utils.packages import import_pandas
+    from meerschaum.utils.packages import import_pandas, attempt_import
     from meerschaum.utils.debug import dprint
     from meerschaum.utils.warnings import warn
     import traceback
     pd = import_pandas()
+    pd_name = pd.__name__
+    is_dask = 'dask' in pd_name
+    if is_dask:
+        npartitions = chunksize_to_npartitions(chunksize)
 
     ### if df is a dict, build DataFrame
     if not isinstance(df, pd.DataFrame):
         if debug:
-            dprint(f"df is not a DataFrame. Casting to DataFrame...")
-        df = pd.DataFrame(df)
+            dprint(f"df is of type '{type(df)}'. Casting to DataFrame...")
+
+        if is_dask:
+            if isinstance(df, list):
+                keys = set()
+                for doc in df:
+                    keys.add(*[k for k in doc])
+                df = pd.DataFrame.from_dict(
+                    {
+                        k: [
+                            doc.get(k, None)
+                            for doc in df
+                        ] for k in keys
+                    },
+                    npartitions = npartitions,
+                )
+            elif isinstance(df, dict):
+                df = pd.DataFrame.from_dict(df, npartitions=npartitions)
+            elif 'pandas.core.frame.DataFrame' in str(type(df)):
+                df = pd.from_pandas(df, npartitions=npartitions)
+            else:
+                raise Exception("Can only parse dictionaries or lists of dictionaries with Dask.")
+            pandas = attempt_import('pandas')
+            pdf = pandas.DataFrame(df.partitions[0])
+
+        else:
+            df = pd.DataFrame(df)
+            pdf = df
 
     ### skip parsing if DataFrame is empty
     if len(df) == 0:
@@ -711,7 +745,7 @@ def parse_df_datetimes(
         return df
 
     ignore_cols = ignore_cols or []
-    cols_to_inspect = [col for col in df.columns if col not in ignore_cols]
+    cols_to_inspect = [col for col in pdf.columns if col not in ignore_cols]
 
     if len(cols_to_inspect) == 0:
         if debug:
@@ -720,12 +754,12 @@ def parse_df_datetimes(
 
     ### apply regex to columns to determine which are ISO datetimes
     iso_dt_regex = r'\d{4}-\d{2}-\d{2}.\d{2}\:\d{2}\:\d+'
-    dt_mask = df[cols_to_inspect].astype(str).apply(
+    dt_mask = pdf[cols_to_inspect].astype(str).apply(
         lambda s: s.str.match(iso_dt_regex).all()
     )
 
     ### list of datetime column names
-    datetime_cols = [col for col in df[cols_to_inspect].loc[:, dt_mask]]
+    datetime_cols = [col for col in pdf[cols_to_inspect].loc[:, dt_mask]]
     if not datetime_cols:
         if debug:
             dprint("No columns detected as datetimes, returning...")
@@ -963,8 +997,14 @@ def filter_unseen_df(
         return new_df
 
     from meerschaum.utils.warnings import warn
-    from meerschaum.utils.packages import import_pandas
+    from meerschaum.utils.packages import import_pandas, attempt_import
     pd = import_pandas(debug=debug)
+    is_dask = 'dask' in pd.__name__
+    if is_dask:
+        pandas = attempt_import('pandas')
+        NA = pandas.NA
+    else:
+        NA = pd.NA
 
     new_df_dtypes = dict(new_df.dtypes)
     old_df_dtypes = dict(old_df.dtypes)
@@ -1026,9 +1066,16 @@ def filter_unseen_df(
                 except Exception as e:
                     warn(f"Was not able to cast column '{col}' to dtype '{dtype}'.\n{e}")
 
+    if is_dask:
+        return new_df[
+            ~new_df.fillna(NA).apply(tuple, 1).compute().isin(old_df.fillna(NA).apply(tuple, 1).compute())
+        ].reset_index(drop=True)[list(new_df_dtypes.keys())]
+
     return new_df[
-        ~new_df.fillna(pd.NA).apply(tuple, 1).isin(old_df.fillna(pd.NA).apply(tuple, 1))
+        ~new_df.fillna(NA).apply(tuple, 1).isin(old_df.fillna(NA).apply(tuple, 1))
     ].reset_index(drop=True)[new_df_dtypes.keys()]
+
+
 
 
 def replace_pipes_in_dict(
@@ -1885,17 +1932,17 @@ def to_pandas_dtype(dtype: str) -> str:
     Cast a supported Meerschaum dtype to a Pandas dtype.
     """
     if dtype in ('json', 'str', 'object'):
-        return 'object'
+        return 'string[pyarrow]'
     if dtype.lower().startswith('int'):
-        return 'Int64'
+        return 'int64[pyarrow]'
     if dtype.lower().startswith('float'):
-        return 'float64'
+        return 'float64[pyarrow]'
     if dtype == 'datetime':
         return 'datetime64[ns]'
     if dtype.startswith('datetime'):
         return dtype
     if dtype == 'bool':
-        return dtype
+        return "bool[pyarrow]"
     return 'object'
 
 
@@ -1914,6 +1961,12 @@ def get_unhashable_cols(df: 'pd.DataFrame') -> List[str]:
     """
     if len(df) == 0:
         return []
+
+    is_dask = 'dask' in df.__module__
+    if is_dask:
+        from meerschaum.utils.packages import attempt_import
+        pandas = attempt_import('pandas')
+        df = pandas.DataFrame(df.partitions[0])
     return [
         col for col, val in df.iloc[0].items()
         if not isinstance(val, Hashable)
@@ -1935,6 +1988,12 @@ def get_json_cols(df: 'pd.DataFrame') -> List[str]:
     """
     if len(df) == 0:
         return []
+
+    is_dask = 'dask' in df.__module__
+    if is_dask:
+        from meerschaum.utils.packages import attempt_import
+        pandas = attempt_import('pandas')
+        df = pandas.DataFrame(df.partitions[0])
 
     cols_indices = {
         col: df[col].first_valid_index()
@@ -2180,3 +2239,15 @@ def df_is_chunk_generator(df: Any) -> bool:
         and 'DataFrame' not in str(type(df))
         and isinstance(df, (Generator, Iterable, Iterator))
     )
+
+
+def chunksize_to_npartitions(chunksize: Optional[int]) -> int:
+    """
+    Return the Dask `npartitions` value for a given `chunksize`.
+    """
+    if chunksize == -1:
+        from meerschaum.config import get_config
+        chunksize = get_config('system', 'sql', 'chunksize')
+    if chunksize is None:
+        return 1
+    return -1 * chunksize

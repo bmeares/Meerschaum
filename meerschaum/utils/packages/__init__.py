@@ -1250,6 +1250,27 @@ def lazy_import(
     )
 
 
+def pandas_name() -> str:
+    """
+    Return the configured name for `pandas`.
+    
+    Below are the expected possible values:
+
+    - 'pandas'
+    - 'modin.pandas'
+    - 'dask.dataframe'
+
+    """
+    from meerschaum.config import get_config
+    pandas_module_name = get_config('system', 'connectors', 'all', 'pandas', patch=True)
+    if pandas_module_name == 'modin':
+        pandas_module_name = 'modin.pandas'
+    elif pandas_module_name == 'dask':
+        pandas_module_name = 'dask.dataframe'
+
+    return pandas_module_name
+
+
 def import_pandas(
         debug: bool = False,
         lazy: bool = False,
@@ -1259,11 +1280,7 @@ def import_pandas(
     Quality-of-life function to attempt to import the configured version of `pandas`.
     """
     import sys
-    from meerschaum.config import get_config
-    pandas_module_name = get_config('system', 'connectors', 'all', 'pandas', patch=True)
-    ### NOTE: modin does NOT currently work!
-    if pandas_module_name == 'modin':
-        pandas_module_name = 'modin.pandas'
+    pandas_module_name = pandas_name()
 
     pytz = attempt_import('pytz', debug=debug, lazy=False, **kw)
     pd = attempt_import(pandas_module_name, debug=debug, lazy=lazy, **kw)
