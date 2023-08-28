@@ -93,6 +93,8 @@ class Venv:
         Return the top-level path for this virtual environment.
         """
         from meerschaum.config._paths import VIRTENV_RESOURCES_PATH
+        if self._venv is None:
+            return self.target_path.parent
         return VIRTENV_RESOURCES_PATH / self._venv
 
 

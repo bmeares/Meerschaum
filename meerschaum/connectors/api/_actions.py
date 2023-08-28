@@ -50,7 +50,7 @@ def do_action(
     """
     import sys, json
     from meerschaum.utils.debug import dprint
-    from meerschaum.config.static import _static_config
+    from meerschaum.config.static import STATIC_CONFIG
     from meerschaum.utils.misc import json_serialize_datetime
     if action is None:
         action = []
@@ -67,7 +67,7 @@ def do_action(
 
     root_action = json_dict['action'][0]
     del json_dict['action'][0]
-    r_url = f"{_static_config()['api']['endpoints']['actions']}/{root_action}"
+    r_url = f"{STATIC_CONFIG['api']['endpoints']['actions']}/{root_action}"
     
     if debug:
         from meerschaum.utils.formatting import pprint

@@ -46,7 +46,7 @@ def read_config(
     from meerschaum.utils.packages import attempt_import
     from meerschaum.utils.yaml import yaml, _yaml
     from meerschaum.config._paths import CONFIG_DIR_PATH
-    from meerschaum.config.static import _static_config
+    from meerschaum.config.static import STATIC_CONFIG
     from meerschaum.config._patch import apply_patch_to_config
     if directory is None:
         directory = CONFIG_DIR_PATH
@@ -57,11 +57,11 @@ def read_config(
         return default_config
 
     ### Each key corresponds to a YAML or JSON file.
-    symlinks_key = _static_config()['config']['symlinks_key']
+    symlinks_key = STATIC_CONFIG['config']['symlinks_key']
     config = {}
     config_to_write = {}
 
-    default_filetype = _static_config()['config']['default_filetype']
+    default_filetype = STATIC_CONFIG['config']['default_filetype']
     filetype_loaders = {
         'yml' : yaml.load,
         'yaml' : yaml.load,
@@ -187,7 +187,6 @@ def read_config(
                 print(f"Unable to parse {filename}!")
                 import traceback
                 traceback.print_exc()
-                #  print(e)
                 input(f"Press [Enter] to open '{filename}' and fix formatting errors.")
                 from meerschaum.utils.misc import edit_file
                 edit_file(filepath)
@@ -363,8 +362,8 @@ def search_and_substitute_config(
             s[_keys[-1]] = _pattern
 
         from meerschaum.config._patch import apply_patch_to_config
-        from meerschaum.config.static import _static_config
-        symlinks_key = _static_config()['config']['symlinks_key']
+        from meerschaum.config.static import STATIC_CONFIG
+        symlinks_key = STATIC_CONFIG['config']['symlinks_key']
         if symlinks_key not in parsed_config:
             parsed_config[symlinks_key] = {}
         parsed_config[symlinks_key] = apply_patch_to_config(parsed_config[symlinks_key], symlinks)
@@ -403,16 +402,16 @@ def get_keyfile_path(
             os.path.join(
                 directory,
                 read_config(
-                    keys=[key],
-                    with_filenames=True,
-                    write_missing=False,
-                    substitute=False,
+                    keys = [key],
+                    with_filenames = True,
+                    write_missing = False,
+                    substitute = False,
                 )[1][0]
             )
         )
     except IndexError as e:
         if create_new:
-            from meerschaum.config.static import _static_config
-            default_filetype = _static_config()['config']['default_filetype']
+            from meerschaum.config.static import STATIC_CONFIG
+            default_filetype = STATIC_CONFIG['config']['default_filetype']
             return pathlib.Path(os.path.join(directory, key + '.' + default_filetype))
         return None

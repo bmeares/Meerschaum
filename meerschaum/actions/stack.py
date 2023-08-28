@@ -43,6 +43,7 @@ def stack(
         attempt_import, run_python_package, venv_contains_package,
         pip_install,
     )
+    from meerschaum.config._sync import sync_files
     from meerschaum.config import get_config
     from meerschaum.utils.debug import dprint
     from meerschaum.utils.warnings import warn
@@ -73,9 +74,10 @@ def stack(
         if not path.exists():
             bootstrap = True
             break
-    ### if bootstrap flag was set, create files
     if bootstrap:
         write_stack(debug=debug)
+    else: 
+        sync_files(['stack'])
 
     compose_command = ['up']
     ### default: alias stack as docker-compose

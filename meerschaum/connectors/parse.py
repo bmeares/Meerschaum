@@ -53,14 +53,14 @@ def parse_connector_keys(
     import copy
     from meerschaum.connectors import get_connector
     from meerschaum.config import get_config
-    from meerschaum.config.static import _static_config
+    from meerschaum.config.static import STATIC_CONFIG
     from meerschaum.utils.warnings import error
 
     ### `get_connector()` handles the logic for falling back to 'main',
     ### so don't make any decisions here.
     vals = str(keys).split(':')
     _type = vals[0]
-    _label = vals[1] if len(vals) > 1 else _static_config()['connectors']['default_label']
+    _label = vals[1] if len(vals) > 1 else STATIC_CONFIG['connectors']['default_label']
     _get_connector_kw = {'type': _type, 'label': _label}
     _get_connector_kw.update(kw)
 
