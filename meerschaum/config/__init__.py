@@ -45,12 +45,13 @@ def _config(
     if config is None or reload:
         with _locks['config']:
             config = {}
+
     if keys and keys[0] not in config:
         from meerschaum.config._sync import sync_files as _sync_files
         key_config = read_config(
-            keys=[keys[0]],
-            substitute=substitute,
-            write_missing=write_missing,
+            keys = [keys[0]],
+            substitute = substitute,
+            write_missing = write_missing,
         )
         if keys[0] in key_config:
             config[keys[0]] = key_config[keys[0]]
@@ -232,7 +233,6 @@ def get_config(
                 )
             )
             if patch and keys[0] != symlinks_key:
-                #  print("Updating configuration, please wait...")
                 if write_missing:
                     write_config(config, debug=debug)
 

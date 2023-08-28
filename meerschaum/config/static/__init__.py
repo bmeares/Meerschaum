@@ -8,12 +8,13 @@ Insert non-user-editable configuration files here.
 
 import os
 import uuid
+from typing import Dict, Any
 from meerschaum.utils.misc import generate_password
 
 __all__ = ['STATIC_CONFIG']
 
-SERVER_ID = os.environ.get('MRSM_SERVER_ID', generate_password(6))
-STATIC_CONFIG = {
+SERVER_ID: str = os.environ.get('MRSM_SERVER_ID', generate_password(6))
+STATIC_CONFIG: Dict[str, Any] = {
     'api': {
         'endpoints': {
             'index': '/',
@@ -83,6 +84,9 @@ STATIC_CONFIG = {
     },
     'connectors': {
         'default_label': 'main',
+    },
+    'stack': {
+        'dollar_standin': '<DOLLAR>', ### Temporary replacement for docker-compose.yaml.
     },
     'users': {
         'password_hash': {

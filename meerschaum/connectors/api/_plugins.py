@@ -13,8 +13,8 @@ def plugin_r_url(
         plugin: Union[meerschaum.core.Plugin, str]
     ) -> str:
     """Generate a relative URL path from a Plugin."""
-    from meerschaum.config.static import _static_config
-    return f"{_static_config()['api']['endpoints']['plugins']}/{plugin}"
+    from meerschaum.config.static import STATIC_CONFIG
+    return f"{STATIC_CONFIG['api']['endpoints']['plugins']}/{plugin}"
 
 def register_plugin(
         self,
@@ -105,9 +105,9 @@ def get_plugins(
     """
     import json
     from meerschaum.utils.warnings import warn, error
-    from meerschaum.config.static import _static_config
+    from meerschaum.config.static import STATIC_CONFIG
     response = self.get(
-        _static_config()['api']['endpoints']['plugins'],
+        STATIC_CONFIG['api']['endpoints']['plugins'],
         params = {'user_id' : user_id, 'search_term' : search_term},
         use_token = True,
         debug = debug
@@ -129,7 +129,6 @@ def get_plugin_attributes(
     """
     import json
     from meerschaum.utils.warnings import warn, error
-    from meerschaum.config.static import _static_config
     r_url = plugin_r_url(plugin) + '/attributes'
     response = self.get(r_url, use_token=True, debug=debug)
     attributes = response.json()
