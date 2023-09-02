@@ -121,6 +121,7 @@ packages: Dict[str, Dict[str, str]] = {
 packages['sql'] = {
     'numpy'                          : 'numpy>=1.18.5',
     'pandas'                         : 'pandas[parquet]>=2.0.1',
+    'dask'                           : 'dask>=2023.9.0',
     'pytz'                           : 'pytz>=2022.1.0',
     'joblib'                         : 'joblib>=0.17.0',
     'sqlalchemy'                     : 'SQLAlchemy>=2.0.5',

@@ -941,7 +941,7 @@ def add_missing_cols_to_df(df: 'pd.DataFrame', dtypes: Dict[str, Any]) -> pd.Dat
     >>> df = pd.DataFrame([{'a': 1}])
     >>> dtypes = {'b': 'Int64'}
     >>> add_missing_cols_to_df(df, dtypes)
-       a     b
+          a  b
        0  1  <NA>
     >>> add_missing_cols_to_df(df, dtypes).dtypes
     a    int64
@@ -956,19 +956,17 @@ def add_missing_cols_to_df(df: 'pd.DataFrame', dtypes: Dict[str, Any]) -> pd.Dat
         return df
 
     from meerschaum.utils.packages import import_pandas, attempt_import
-    pd = import_pandas()
     pandas = attempt_import('pandas')
-    is_dask = 'dask' in pd.__name__
     
-    for col, typ in dtypes.items():
-        if col in df.columns:
-            continue
-        if typ == 'int64':
-            typ = 'int64[pyarrow]'
-        ### TODO: Implement from_delayed() for dask.
-        df[col] = pandas.Series([None] * len(df), dtype=typ)
-    
-    return df
+    def build_series(dtype: str):
+        return pandas.Series([None], dtype=dtype)
+
+    assign_kwargs = {
+        col: build_series(to_pandas_dtype(str(typ)))
+        for col, typ in dtypes.items()
+        if col not in df.columns
+    }
+    return df.assign(**assign_kwargs)
 
 
 def filter_unseen_df(
@@ -1959,6 +1957,9 @@ def to_pandas_dtype(dtype: str) -> str:
     """
     Cast a supported Meerschaum dtype to a Pandas dtype.
     """
+    #  if 'numpy.dtype' in dtype:
+        #  print(f"{dtype=}")
+        #  dtype = dtype.replace('numpy.dtype[', '').replace(']', '')
     if dtype == 'json':
         return 'object'
     if dtype in ('str', 'string'):

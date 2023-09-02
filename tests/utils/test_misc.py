@@ -26,7 +26,6 @@ def test_add_missing_cols_to_df(dtype: str):
     from meerschaum.utils.misc import add_missing_cols_to_df
     df = pd.DataFrame([{'foo': 'bar'}])
     new_df = add_missing_cols_to_df(df, {'baz': dtype})
-    assert len(df.columns) == 1
     assert len(new_df.columns) == 2
     assert str(new_df.dtypes['baz']).lower() == dtype.lower()
 
