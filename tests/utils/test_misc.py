@@ -15,8 +15,14 @@ pd = import_pandas(debug=DEBUG)
 @pytest.mark.parametrize(
     "dtype",
     [
-        'object', 'bool', 'float64', 'datetime64[ns]',
-        'Int64', 'int64', 'datetime64[ns, UTC]'
+        'object',
+        'bool[pyarrow]',
+        'float64',
+        'datetime64[ns]',
+        'int64',
+        'int32',
+        'int64[pyarrow]',
+        'datetime64[ns, UTC]',
     ]
 )
 def test_add_missing_cols_to_df(dtype: str):

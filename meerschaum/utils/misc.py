@@ -739,7 +739,7 @@ def parse_df_datetimes(
             pdf = df.partitions[0].compute()
 
         else:
-            df = pd.DataFrame(df)
+            df = pd.DataFrame(df).convert_dtypes(dtype_backend=dtype_backend)
             pdf = df
 
     ### skip parsing if DataFrame is empty
@@ -955,14 +955,16 @@ def add_missing_cols_to_df(df: 'pd.DataFrame', dtypes: Dict[str, Any]) -> pd.Dat
     if set(df.columns) == set(dtypes):
         return df
 
+    import traceback
     from meerschaum.utils.packages import import_pandas, attempt_import
+    from meerschaum.utils.warnings import warn
     pandas = attempt_import('pandas')
     
     def build_series(dtype: str):
-        return pandas.Series([None], dtype=dtype)
+        return pandas.Series([], dtype=to_pandas_dtype(dtype))
 
     assign_kwargs = {
-        col: build_series(to_pandas_dtype(str(typ)))
+        col: build_series(str(typ))
         for col, typ in dtypes.items()
         if col not in df.columns
     }
@@ -1094,7 +1096,11 @@ def filter_unseen_df(
         indicator = True,
     )
     changed_rows_mask = (joined_df['_merge'] == 'left_only')
-    return joined_df[list(new_df_dtypes.keys())][changed_rows_mask].reset_index(drop=True)
+    return joined_df[
+        list(new_df_dtypes.keys())
+    ][
+        changed_rows_mask
+    ].reset_index(drop=True)
 
 
     #  return new_df[
@@ -1953,29 +1959,34 @@ def safely_extract_tar(tarf: 'file', output_dir: Union[str, 'pathlib.Path']) -> 
     return safe_extract(tarf, output_dir)
 
 
+MRSM_PD_DTYPES: Dict[str, str] = {
+    'json': 'object',
+    'datetime': 'datetime64[ns]',
+    'bool': 'bool[pyarrow]',
+    'int': 'Int64',
+    'int8': 'Int8',
+    'int16': 'Int16',
+    'int32': 'Int32',
+    'int64': 'Int64',
+    'str': 'string[python]',
+}
 def to_pandas_dtype(dtype: str) -> str:
     """
     Cast a supported Meerschaum dtype to a Pandas dtype.
     """
-    #  if 'numpy.dtype' in dtype:
-        #  print(f"{dtype=}")
-        #  dtype = dtype.replace('numpy.dtype[', '').replace(']', '')
-    if dtype == 'json':
-        return 'object'
-    if dtype in ('str', 'string'):
-        return 'string[pyarrow]'
-    if 'double' in dtype.lower():
-        return 'double[pyarrow]'
-    if dtype.lower().startswith('int'):
-        return 'int64[pyarrow]'
-    if dtype.lower().startswith('float') or 'double' in dtype.lower():
-        return 'float64[pyarrow]'
-    if dtype == 'datetime':
-        return 'datetime64[ns]'
-    if dtype.startswith('datetime'):
-        return dtype
-    if dtype == 'bool':
-        return "bool[pyarrow]"
+    known_dtype = MRSM_PD_DTYPES.get(dtype, None)
+    if known_dtype is not None:
+        return known_dtype
+
+    from meerschaum.utils.packages import attempt_import
+    from meerschaum.utils.warnings import warn
+    pandas = attempt_import('pandas', lazy=False)
+
+    try:
+        return str(pandas.api.types.pandas_dtype(dtype))
+    except Exception as e:
+        warn(f"Invalid dtype '{dtype}', will use 'object' instead.", stack=False)
+    
     return 'object'
 
 

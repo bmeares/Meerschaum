@@ -64,16 +64,29 @@ for flavor, conn in conns.items():
 "
 
 MRSM_CONNS=$($PYTHON_BIN -c "
-from tests.connectors import get_flavors
-print(get_flavors())
+from tests.connectors import conns, get_flavors
+flavors = get_flavors()
+conns_to_run = [str(conn) for flavor, conn in conns.items() if flavor in flavors]
+print(' '.join(conns_to_run))
 ")
 
 MRSM_URIS=$($PYTHON_BIN -c "
 from tests.connectors import conns, get_flavors
 flavors = get_flavors()
 print(' '.join([
-  'MRSM_' + c.type.upper() + '_' + c.label.upper() + '=' + c.URI
-  for c, f in conns.items()
+  (
+    'MRSM_'
+    + c.type.upper()
+    + '_'
+    + c.label.upper()
+    + '='
+    + (
+      c.URI.replace('postgresql', 'timescaledb')
+      if f == 'timescaledb'
+      else c.URI
+    )
+  )
+  for f, c in conns.items()
   if f in flavors
 ]))")
 export $MRSM_URIS

@@ -121,11 +121,19 @@ class SQLConnector(Connector):
             uri = kw['uri']
             if uri.startswith('postgres://'):
                 uri = uri.replace('postgres://', 'postgresql://', 1)
+            if uri.startswith('timescaledb://'):
+                uri = uri.replace('timescaledb://', 'postgresql://', 1)
+                flavor = 'timescaledb'
             kw['uri'] = uri
             from_uri_params = self.from_uri(kw['uri'], as_dict=True)
             label = label or from_uri_params.get('label', None)
-            from_uri_params.pop('label', None)
+            _ = from_uri_params.pop('label', None)
+
+            ### Sometimes the flavor may be provided with a URI.
             kw.update(from_uri_params)
+            if flavor:
+                kw['flavor'] = flavor
+
 
         ### set __dict__ in base class
         super().__init__(
