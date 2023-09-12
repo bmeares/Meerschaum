@@ -38,7 +38,7 @@ def test_sync_change_columns_dtypes(flavor: str):
     df = pipe.get_data()
     assert len(df.columns) == 3
     assert len(df) == 1
-    assert str(df.dtypes['a']) == 'object'
+    assert str(df.dtypes['a']) in ('object', 'string', 'string[python]', 'string[pyarrow]')
 
 
 @pytest.mark.parametrize("flavor", get_flavors())

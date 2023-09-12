@@ -1085,7 +1085,7 @@ def sync_pipe(
             if not self.exec_queries(alter_cols_queries, debug=debug):
                 warn(f"Failed to alter columns for {pipe}.")
             else:
-                pipe.infer_dtypes(persist=True)
+                _ = pipe.infer_dtypes(persist=True)
 
     unseen_df, update_df, delta_df = (
         pipe.filter_existing(
@@ -1241,8 +1241,14 @@ def sync_pipe_inplace(
     A SuccessTuple.
     """
     from meerschaum.utils.sql import (
-        sql_item_name, table_exists, get_sqlalchemy_table, get_pd_type,
-        get_update_queries, get_null_replacement,
+        sql_item_name,
+        table_exists,
+        get_sqlalchemy_table,
+        get_update_queries,
+        get_null_replacement,
+    )
+    from meerschaum.utils.dtypes.sql import (
+        get_pd_type_from_db_type,
     )
     from meerschaum.utils.misc import generate_password
     from meerschaum.utils.debug import dprint
@@ -1332,7 +1338,10 @@ def sync_pipe_inplace(
         refresh = True,
         debug = debug,
     )
-    new_cols = {str(col.name): get_pd_type(str(col.type)) for col in new_table_obj.columns}
+    new_cols = {
+        str(col.name): get_pd_type_from_db_type(str(col.type))
+        for col in new_table_obj.columns
+    }
 
     add_cols_queries = self.get_add_columns_queries(pipe, new_cols, debug=debug)
     if add_cols_queries:
@@ -1344,7 +1353,7 @@ def sync_pipe_inplace(
         if not self.exec_queries(alter_cols_queries, debug=debug):
             warn(f"Failed to alter columns for {pipe}.")
         else:
-            pipe.infer_dtypes(persist=True)
+            _ = pipe.infer_dtypes(persist=True)
 
     if not check_existing:
         new_count = self.value(f"SELECT COUNT(*) FROM {new_table_name}", debug=debug)
@@ -1516,7 +1525,10 @@ def sync_pipe_inplace(
         refresh = True,
         debug = debug,
     )
-    delta_cols = {str(col.name): get_pd_type(str(col.type)) for col in delta_table_obj.columns}
+    delta_cols = {
+        str(col.name): get_pd_type_from_db_type(str(col.type))
+        for col in delta_table_obj.columns
+    }
 
     joined_queries = []
     drop_joined_query = f"DROP TABLE {joined_table_name}"
@@ -2290,10 +2302,12 @@ def get_add_columns_queries(
         return []
     import copy
     from meerschaum.utils.sql import (
-        get_pd_type,
-        get_db_type,
         sql_item_name,
         SINGLE_ALTER_TABLE_FLAVORS,
+    )
+    from meerschaum.utils.dtypes.sql import (
+        get_pd_type_from_db_type,
+        get_db_type_from_pd_type,
     )
     from meerschaum.utils.misc import flatten_list
     table_obj = self.get_pipe_table(pipe, debug=debug)
@@ -2317,13 +2331,16 @@ def get_add_columns_queries(
                 df_cols_types[col] = 'json'
             elif isinstance(val, str):
                 df_cols_types[col] = 'str'
-    db_cols_types = {col: get_pd_type(str(typ.type)) for col, typ in table_obj.columns.items()}
+    db_cols_types = {
+        col: get_pd_type_from_db_type(str(typ.type))
+        for col, typ in table_obj.columns.items()
+    }
     new_cols = set(df_cols_types) - set(db_cols_types)
     if not new_cols:
         return []
 
     new_cols_types = {
-        col: get_db_type(
+        col: get_db_type_from_pd_type(
             df_cols_types[col],
             self.flavor
         ) for col in new_cols
@@ -2382,25 +2399,38 @@ def get_alter_columns_queries(
     """
     if not pipe.exists(debug=debug):
         return []
-    from meerschaum.utils.sql import get_pd_type, get_db_type, sql_item_name
+    from meerschaum.utils.sql import sql_item_name
+    from meerschaum.utils.dtypes import are_dtypes_equal
+    from meerschaum.utils.dtypes.sql import (
+        get_pd_type_from_db_type,
+        get_db_type_from_pd_type,
+    )
     from meerschaum.utils.misc import flatten_list, generate_password
     table_obj = self.get_pipe_table(pipe, debug=debug)
     target = pipe.target
     session_id = generate_password(3)
     df_cols_types = (
-        {col: str(typ) for col, typ in df.dtypes.items()}
-        if not isinstance(df, dict) else df
+        {
+            col: str(typ)
+            for col, typ in df.dtypes.items()
+        }
+        if not isinstance(df, dict)
+        else df
     )
-    db_cols_types = {col: get_pd_type(str(typ.type)) for col, typ in table_obj.columns.items()}
+    db_cols_types = {
+        col: get_pd_type_from_db_type(str(typ.type))
+        for col, typ in table_obj.columns.items()
+    }
     altered_cols = [
-        col for col, typ in df_cols_types.items()
-        if typ.lower() != db_cols_types.get(col, 'object').lower()
+        col
+        for col, typ in df_cols_types.items()
+        if not are_dtypes_equal(typ.lower(), db_cols_types.get(col, 'object').lower()
         and db_cols_types.get(col, 'object') != 'object'
     ]
     if not altered_cols:
         return []
 
-    text_type = get_db_type('str', self.flavor)
+    text_type = get_db_type_from_pd_type('str', self.flavor)
     altered_cols_types = {
         col: text_type
         for col in altered_cols
@@ -2573,13 +2603,16 @@ def get_to_sql_dtype(
     {'a': <class 'sqlalchemy.sql.sqltypes.JSON'>}
     """
     from meerschaum.utils.misc import get_json_cols
-    from meerschaum.utils.sql import get_db_type
-    df_dtypes = {col: str(typ) for col, typ in df.dtypes.items()}
+    from meerschaum.utils.dtypes.sql import get_db_type_from_pd_type
+    df_dtypes = {
+        col: str(typ)
+        for col, typ in df.dtypes.items()
+    }
     json_cols = get_json_cols(df)
     df_dtypes.update({col: 'json' for col in json_cols})
     if update_dtypes:
         df_dtypes.update(pipe.dtypes)
     return {
-        col: get_db_type(typ, self.flavor, as_sqlalchemy=True)
+        col: get_db_type_from_pd_type(typ, self.flavor, as_sqlalchemy=True)
         for col, typ in df_dtypes.items()
     }

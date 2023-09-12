@@ -98,9 +98,23 @@ def infer_dtypes(self, persist: bool=False, debug: bool=False) -> Dict[str, Any]
         return dtypes
 
     from meerschaum.utils.sql import get_pd_type
+    from meerschaum.utils.misc import to_pandas_dtype
     columns_types = self.get_columns_types(debug=debug)
+
+    ### TODO: Remove
+    import traceback
+    traceback.print_stack()
+    import meerschaum as mrsm
+    mrsm.pprint(columns_types)
+
+    ### NOTE: get_columns_types() may return either the types as
+    ###       PostgreSQL- or Pandas-style.
     dtypes = {
-        c: get_pd_type(t, allow_custom_dtypes=True)
+        c: (
+            get_pd_type(t, allow_custom_dtypes=True)
+            if str(t).isupper()
+            else to_pandas_dtype(t)
+        )
         for c, t in columns_types.items()
     } if columns_types else {}
     if persist:

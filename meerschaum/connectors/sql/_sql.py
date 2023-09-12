@@ -125,7 +125,7 @@ def read(
     from meerschaum.utils.sql import sql_item_name, truncate_item_name
     from meerschaum.utils.packages import attempt_import, import_pandas
     from meerschaum.utils.pool import get_pool
-    from meerschaum.utils.misc import chunksize_to_npartitions
+    from meerschaum.utils.dataframe import chunksize_to_npartitions
     import warnings
     import inspect
     import traceback

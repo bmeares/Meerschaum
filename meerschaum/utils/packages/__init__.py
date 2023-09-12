@@ -284,7 +284,7 @@ def _import_to_dir_name(import_name: str) -> str:
     """
     import re
     return re.split(
-        f'[<>=\[]', all_packages.get(import_name, import_name)
+        r'[<>=\[]', all_packages.get(import_name, import_name)
     )[0].replace('-', '_').lower() 
 
 
@@ -301,7 +301,7 @@ def get_install_no_version(install_name: str) -> str:
     Strip the version information from the install name.
     """
     import re
-    return re.split('[\[=<>,! \]]', install_name)[0]
+    return re.split(r'[\[=<>,! \]]', install_name)[0]
 
 
 import_versions = {}
