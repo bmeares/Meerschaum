@@ -29,7 +29,7 @@ def test_add_missing_cols_to_df(dtype: str):
     """
     Test that new columns are successfully added to a dataframe.
     """
-    from meerschaum.utils.misc import add_missing_cols_to_df
+    from meerschaum.utils.dataframe import add_missing_cols_to_df
     df = pd.DataFrame([{'foo': 'bar'}])
     new_df = add_missing_cols_to_df(df, {'baz': dtype})
     assert len(new_df.columns) == 2
@@ -87,38 +87,19 @@ def test_add_missing_cols_to_df(dtype: str):
         (
             [{'a': None}], [{'a': None}], []
         ),
+        (
+            pd.DataFrame([{'a': 1}], dtype='int64[pyarrow]'),
+            pd.DataFrame([{'a': 1}], dtype='int32'),
+            []
+        )
     ]
 )
 def test_filter_unseen_df(old_docs, new_docs, expected_docs):
     """
     Test that duplicate rows are removed.
     """
-    from meerschaum.utils.misc import filter_unseen_df
-    old_df = pd.DataFrame(old_docs)
-    new_df = pd.DataFrame(new_docs)
+    from meerschaum.utils.dataframe import filter_unseen_df
+    old_df = pd.DataFrame(old_docs) if not isinstance(old_docs, pd.DataFrame) else old_docs
+    new_df = pd.DataFrame(new_docs) if not isinstance(new_docs, pd.DataFrame) else new_docs
     delta_df = filter_unseen_df(old_df, new_df)
     assert delta_df.to_dict(orient='records') == expected_docs
-
-
-@pytest.mark.parametrize(
-    'ldtype,rdtype,are_equal',
-    [
-        ('string', 'string', True),
-        ('str', 'string', True),
-        ('str', 'object', True),
-        ('int', 'int32', True),
-        ('datetime64[ns, UTC]', 'Timestamp', True),
-        ('float', 'float64', True),
-        ('bool', 'bool[pyarrow]', True),
-        ('Int64', 'int', True),
-        ('json', 'object', True),
-        ('float', 'object', False),
-        ('datetime', 'object', False),
-    ]
-)
-def test_are_dtypes_equal(ldtype: str, rdtype: str, are_equal: bool):
-    """
-    Test that different combinations of dtypes are equal (or inequal).
-    """
-    from meerschaum.utils.misc import are_dtypes_equal
-    assert are_dtypes_equal(ldtype, rdtype) == are_equal

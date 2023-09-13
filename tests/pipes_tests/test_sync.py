@@ -58,6 +58,9 @@ def test_drop_and_sync(flavor: str):
 
 @pytest.mark.parametrize("flavor", get_flavors())
 def test_drop_and_sync_duplicate(flavor: str):
+    """
+    Verify dropping a table and syncing duplicate rows are filtered out.
+    """
     pipe = all_pipes[flavor][0]
     pipe.drop(debug=debug)
     assert not pipe.exists(debug=debug)
@@ -490,14 +493,14 @@ def test_sync_inplace(flavor: str):
     if flavor == 'api':
         return
     conn = conns[flavor]
-    source_pipe = Pipe('test', 'inplace', instance=conn)
+    source_pipe = Pipe('test', 'inplace', 'src', instance=conn)
     source_pipe.delete()
     source_pipe = Pipe(
         'test', 'inplace', 'src',
         instance = conn,
         columns = {'datetime': 'dt'}
     )
-    dest_pipe = Pipe('test', 'inplace', 'dest', instance=conn)
+    dest_pipe = Pipe(str(conn), 'inplace', 'dest', instance=conn)
     dest_pipe.delete()
     dest_pipe = Pipe(
         str(conn), 'inplace', 'dest',
@@ -505,7 +508,7 @@ def test_sync_inplace(flavor: str):
         columns = {'datetime': 'dt'},
         parameters = {
             "fetch": {
-                "definition": "SELECT * FROM test_inplace_src",
+                "definition": f"SELECT * FROM \"{source_pipe.target}\"",
                 "backtrack_minutes": 1440,
             }
         },

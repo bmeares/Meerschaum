@@ -65,6 +65,17 @@ def test_exists(flavor: str):
             }
         ),
         (
+            'timescaledb://mrsm:mrsm@localhost:5432/meerschaum',
+            {
+                'flavor': 'timescaledb',
+                'username': 'mrsm',
+                'password': 'mrsm',
+                'host': 'localhost',
+                'port': 5432,
+                'database': 'meerschaum',
+            }
+        ),
+        (
             'sqlite:////home/foo/.config/meerschaum/sqlite/mrsm_local.db',
             {
                 'flavor': 'sqlite',

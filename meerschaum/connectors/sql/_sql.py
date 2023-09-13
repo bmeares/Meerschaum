@@ -679,7 +679,8 @@ def to_sql(
     kw.pop('name', None)
 
     from meerschaum.utils.sql import sql_item_name, table_exists, json_flavors, truncate_item_name
-    from meerschaum.utils.misc import get_json_cols, is_bcp_available
+    from meerschaum.utils.dataframe import get_json_cols
+    from meerschaum.utils.dtypes import are_dtypes_equal
     from meerschaum.connectors.sql._create_engine import flavor_configs
     from meerschaum.utils.packages import attempt_import, import_pandas
     sqlalchemy = attempt_import('sqlalchemy', debug=debug)
@@ -758,9 +759,9 @@ def to_sql(
         ### Enforce NVARCHAR(2000) as text instead of CLOB.
         dtype = to_sql_kw.get('dtype', {})
         for col, typ in df.dtypes.items():
-            if str(typ) == 'object':
+            if are_dtypes_equal(str(typ), 'object'):
                 dtype[col] = sqlalchemy.types.NVARCHAR(2000)
-            elif str(typ).lower().startswith('int'):
+            elif are_dtypes_equal(str(typ), 'int'):
                 dtype[col] = sqlalchemy.types.INTEGER
 
         to_sql_kw['dtype'] = dtype

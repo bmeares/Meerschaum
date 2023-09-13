@@ -29,6 +29,7 @@ def to_pandas_dtype(dtype: str) -> str:
     if known_dtype is not None:
         return known_dtype
 
+    import traceback
     from meerschaum.utils.packages import attempt_import
     from meerschaum.utils.warnings import warn
     pandas = attempt_import('pandas', lazy=False)
@@ -36,7 +37,11 @@ def to_pandas_dtype(dtype: str) -> str:
     try:
         return str(pandas.api.types.pandas_dtype(dtype))
     except Exception as e:
-        warn(f"Invalid dtype '{dtype}', will use 'object' instead.", stack=False)
+        warn(
+            f"Invalid dtype '{dtype}', will use 'object' instead:\n"
+            + f"{traceback.format_exc()}",
+            stack = False,
+        )
     
     return 'object'
 
@@ -78,6 +83,10 @@ def are_dtypes_equal(
     if ldtype == rdtype:
         return True
 
+    ### Sometimes pandas dtype objects are passed.
+    ldtype = str(ldtype)
+    rdtype = str(rdtype)
+
     json_dtypes = ('json', 'object')
     if ldtype in json_dtypes and rdtype in json_dtypes:
         return True
@@ -105,10 +114,12 @@ def are_dtypes_equal(
     if ldtype_clean.lower() in int_dtypes and rdtype_clean.lower() in int_dtypes:
         return True
 
-    float_dtypes = ('float', 'float64', 'float32', 'float16', 'float128')
-    if ldtype_clean in float_dtypes and rdtype_clean in float_dtypes:
+    float_dtypes = ('float', 'float64', 'float32', 'float16', 'float128', 'double')
+    if ldtype_clean.lower() in float_dtypes and rdtype_clean.lower() in float_dtypes:
+        return True
+
+    bool_dtypes = ('bool', 'boolean')
+    if ldtype_clean in bool_dtypes and rdtype_clean in bool_dtypes:
         return True
 
     return False
-
-

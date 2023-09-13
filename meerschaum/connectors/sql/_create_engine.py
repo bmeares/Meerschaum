@@ -6,6 +6,7 @@
 This module contains the logic that builds the sqlalchemy engine string.
 """
 
+import traceback
 from meerschaum.utils.debug import dprint
 
 ### determine driver and requirements from flavor
@@ -237,6 +238,11 @@ def create_engine(
             (("/" + _database) if _database is not None else '')
             + (("?driver=" + _driver) if _driver is not None else '')
         ) if not _uri else _uri
+
+        ### Sometimes the timescaledb:// flavor can slip in.
+        if _uri and self.flavor in ('timescaledb',) and self.flavor in _uri:
+            engine_str = engine_str.replace(f'{self.flavor}://', 'postgresql://')
+
     if debug:
         dprint(
             (
@@ -282,8 +288,7 @@ def create_engine(
             **_create_engine_args
         )
     except Exception as e:
-        warn(e)
-        warn(f"Failed to create connector '{self}'.", stack=False)
+        warn(f"Failed to create connector '{self}':\n{traceback.format_exc()}", stack=False)
         engine = None
 
     if include_uri:

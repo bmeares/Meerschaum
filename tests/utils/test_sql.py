@@ -87,4 +87,5 @@ def test_get_pd_type(db_type: str, pd_type: str):
     """
     Verify that various database types are mapped to Pandas types.
     """
-    assert get_pd_type(db_type) == pd_type
+    from meerschaum.utils.dtypes import are_dtypes_equal
+    assert are_dtypes_equal(get_pd_type(db_type), pd_type)

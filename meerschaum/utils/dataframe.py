@@ -7,7 +7,10 @@ Utility functions for working with DataFrames.
 """
 
 from __future__ import annotations
-from meerschaum.utils.typing import Optional, Dict, Any, List, Hashable
+from meerschaum.utils.typing import (
+    Optional, Dict, Any, List, Hashable, Generator,
+    Iterator, Iterable,
+)
 
 
 def add_missing_cols_to_df(df: 'pd.DataFrame', dtypes: Dict[str, Any]) -> pd.DataFrame:
@@ -113,7 +116,7 @@ def filter_unseen_df(
     import traceback
     from meerschaum.utils.warnings import warn
     from meerschaum.utils.packages import import_pandas, attempt_import
-    from meerschaum.utils.dtypes import to_pandas_dtype
+    from meerschaum.utils.dtypes import to_pandas_dtype, are_dtypes_equal
     pd = import_pandas(debug=debug)
     is_dask = 'dask' in pd.__name__
     if is_dask:
@@ -159,7 +162,7 @@ def filter_unseen_df(
             dtypes[col] = typ
     
     for col, typ in {k: v for k, v in dtypes.items()}.items():
-        if new_df_dtypes.get(col, None) != old_df_dtypes.get(col, None):
+        if not are_dtypes_equal(new_df_dtypes.get(col, 'None'), old_df_dtypes.get(col, 'None')):
             ### Fallback to object if the types don't match.
             warn(
                 f"Detected different types for '{col}' "
@@ -732,5 +735,3 @@ def df_from_literal(
 
     pd = import_pandas()
     return pd.DataFrame({dt_name: [now], val_name: [val]})
-
-

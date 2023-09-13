@@ -477,6 +477,7 @@ def get_sync_time(
     if not response:
         warn(response.text)
         return None
+
     j = response.json()
     if j is None:
         dt = None
@@ -598,7 +599,8 @@ def drop_pipe(
         pipe: meerschaum.Pipe,
         debug: bool = False
     ) -> SuccessTuple:
-    """Drop a pipe's table but maintain its registration.
+    """
+    Drop a pipe's table but maintain its registration.
 
     Parameters
     ----------
@@ -609,14 +611,24 @@ def drop_pipe(
     -------
     A success tuple (bool, str).
     """
-    return self.do_action(
-        ['drop', 'pipes'],
-        connector_keys = pipe.connector_keys,
-        metric_keys = pipe.metric_key,
-        location_keys = pipe.location_key,
-        force = True,
-        debug = debug
+    from meerschaum.utils.warnings import error
+    from meerschaum.utils.debug import dprint
+    if pipe is None:
+        error(f"Pipe cannot be None.")
+    r_url = pipe_r_url(pipe)
+    response = self.delete(
+        r_url + '/drop',
+        debug = debug,
     )
+    if debug:
+        dprint(response.text)
+    if isinstance(response.json(), list):
+        response_tuple = response.__bool__(), response.json()[1]
+    elif 'detail' in response.json():
+        response_tuple = response.__bool__(), response.json()['detail']
+    else:
+        response_tuple = response.__bool__(), response.text
+    return response_tuple
 
 
 def clear_pipe(

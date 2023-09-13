@@ -11,6 +11,7 @@ from tests.test_users import test_register_user
 import meerschaum as mrsm
 from meerschaum import Pipe
 from meerschaum.actions import actions
+from meerschaum.utils.dtypes import are_dtypes_equal
 
 @pytest.fixture(autouse=True)
 def run_before_and_after(flavor: str):
@@ -24,7 +25,8 @@ def test_sync_change_columns_dtypes(flavor: str):
     """
     conn = conns[flavor]
     pipe = Pipe('foo', 'bar', columns={'datetime': 'dt', 'id': 'id'}, instance=conn)
-    pipe.drop(debug=debug)
+    pipe.delete(debug=debug)
+    pipe = Pipe('foo', 'bar', columns={'datetime': 'dt', 'id': 'id'}, instance=conn)
     docs = [
         {'dt': '2022-01-01', 'id': 1, 'a': 10},
     ]
@@ -38,7 +40,7 @@ def test_sync_change_columns_dtypes(flavor: str):
     df = pipe.get_data()
     assert len(df.columns) == 3
     assert len(df) == 1
-    assert str(df.dtypes['a']) in ('object', 'string', 'string[python]', 'string[pyarrow]')
+    assert are_dtypes_equal(str(df.dtypes['a']), 'string')
 
 
 @pytest.mark.parametrize("flavor", get_flavors())
@@ -47,6 +49,8 @@ def test_dtype_enforcement(flavor: str):
     Test that incoming rows are enforced to the correct data type.
     """
     conn = conns[flavor]
+    pipe = mrsm.Pipe('foo', 'bar', instance=conn)
+    pipe.delete(debug=debug)
     pipe = Pipe(
         'foo', 'bar',
         columns = {
@@ -63,7 +67,6 @@ def test_dtype_enforcement(flavor: str):
         },
         instance = conn,
     )
-    pipe.drop(debug=debug)
     pipe.sync([{'dt': '2022-01-01', 'id': 1, 'int': '1'}], debug=debug)
     pipe.sync([{'dt': '2022-01-01', 'id': 1, 'float': '1.0'}], debug=debug)
     pipe.sync([{'dt': '2022-01-01', 'id': 1, 'bool': 'True'}], debug=debug)
@@ -80,8 +83,7 @@ def test_dtype_enforcement(flavor: str):
             pipe_dtype = 'object'
         elif pipe_dtype == 'str':
             assert isinstance(df[col][0], str)
-            #  pipe_dtype = 'object'
-        assert pipe_dtype.lower() in str(typ).lower()
+        assert are_dtypes_equal(pipe_dtype.lower(), typ)
 
 
 @pytest.mark.parametrize("flavor", get_flavors())

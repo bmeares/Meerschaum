@@ -2311,7 +2311,7 @@ def get_add_columns_queries(
     )
     from meerschaum.utils.misc import flatten_list
     table_obj = self.get_pipe_table(pipe, debug=debug)
-    is_dask = 'dask' in df.__module__
+    is_dask = 'dask' in df.__module__ if not isinstance(df, dict) else False
     if is_dask:
         df = df.partitions[0].compute()
     df_cols_types = (
@@ -2322,7 +2322,7 @@ def get_add_columns_queries(
         if not isinstance(df, dict)
         else copy.deepcopy(df)
     )
-    if len(df.index) > 0 and not isinstance(df, dict):
+    if not isinstance(df, dict) and len(df.index) > 0:
         for col, typ in list(df_cols_types.items()):
             if typ != 'object':
                 continue
@@ -2424,8 +2424,8 @@ def get_alter_columns_queries(
     altered_cols = [
         col
         for col, typ in df_cols_types.items()
-        if not are_dtypes_equal(typ.lower(), db_cols_types.get(col, 'object').lower()
-        and db_cols_types.get(col, 'object') != 'object'
+        if not are_dtypes_equal(typ.lower(), db_cols_types.get(col, 'object').lower())
+        and not are_dtypes_equal(db_cols_types.get(col, 'object'), 'string')
     ]
     if not altered_cols:
         return []
