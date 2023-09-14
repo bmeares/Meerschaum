@@ -198,7 +198,7 @@ def read(
 
     formatted_query = (
         sqlalchemy.text(str_query)
-        if not is_dask
+        if not is_dask and isinstance(str_query, str)
         else format_sql_query_for_dask(str_query)
     )
 
@@ -424,6 +424,8 @@ def value(
         try:
             return self.read(query, *args, **kw).iloc[0, 0]
         except Exception as e:
+            import traceback
+            traceback.print_exc()
             #  warn(e)
             return None
 
@@ -895,6 +897,9 @@ def format_sql_query_for_dask(query: str) -> 'sqlalchemy.sql.selectable.Select':
     -------
     A `sqlalchemy` selectable.
     """
+    if 'sqlalchemy' in str(type(query)):
+        return query
+
     if 'select ' not in query.lower():
         raise ValueError(f"Cannot convert query to SQLAlchemy:\n\n{query}")
 

@@ -490,6 +490,7 @@ def test_sync_inplace(flavor: str):
     """
     Verify that in-place syncing works as expected.
     """
+    from meerschaum.utils.sql import sql_item_name
     if flavor == 'api':
         return
     conn = conns[flavor]
@@ -502,13 +503,14 @@ def test_sync_inplace(flavor: str):
     )
     dest_pipe = Pipe(str(conn), 'inplace', 'dest', instance=conn)
     dest_pipe.delete()
+    query = f"SELECT * FROM {sql_item_name(source_pipe.target, flavor)}"
     dest_pipe = Pipe(
         str(conn), 'inplace', 'dest',
         instance = conn,
         columns = {'datetime': 'dt'},
         parameters = {
             "fetch": {
-                "definition": f"SELECT * FROM \"{source_pipe.target}\"",
+                "definition": query,
                 "backtrack_minutes": 1440,
             }
         },

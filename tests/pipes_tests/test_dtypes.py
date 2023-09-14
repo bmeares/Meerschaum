@@ -96,6 +96,8 @@ def test_infer_json_dtype(flavor: str):
     session_id = generate_password(6)
     conn = conns[flavor]
     pipe = Pipe('foo', 'bar', session_id, instance=conn)
+    _ = pipe.delete(debug=debug)
+    pipe = Pipe('foo', 'bar', session_id, instance=conn)
     success, msg = pipe.sync([
         {'a': ['b', 'c']},
         {'a': {'b': 1}},
@@ -106,8 +108,6 @@ def test_infer_json_dtype(flavor: str):
     print(df)
     assert isinstance(df['a'][0], list)
     assert isinstance(df['a'][1], dict)
-    success, msg = pipe.delete(debug=debug)
-    assert success, msg
 
 
 @pytest.mark.parametrize("flavor", get_flavors())
@@ -121,6 +121,8 @@ def test_force_json_dtype(flavor: str):
     session_id = generate_password(6)
     conn = conns[flavor]
     pipe = Pipe('foo', 'bar', session_id, instance=conn, dtypes={'a': 'json'})
+    _ = pipe.delete(debug=debug)
+    pipe = Pipe('foo', 'bar', session_id, instance=conn, dtypes={'a': 'json'})
     success, msg = pipe.sync([
         {'a': json.dumps(['b', 'c'])},
         {'a': json.dumps({'b': 1})},
@@ -131,8 +133,6 @@ def test_force_json_dtype(flavor: str):
     print(df)
     assert isinstance(df['a'][0], list)
     assert isinstance(df['a'][1], dict)
-    success, msg = pipe.delete(debug=debug)
-    assert success, msg
 
 
 @pytest.mark.parametrize("flavor", get_flavors())

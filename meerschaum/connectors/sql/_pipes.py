@@ -284,7 +284,14 @@ def fetch_pipes_keys(
     if debug:
         dprint(q.compile(compile_kwargs={'literal_binds': True}))
     try:
-        rows = self.execute(q).fetchall()
+        rows = (
+            self.execute(q).fetchall()
+            if self.flavor != 'duckdb'
+            else [
+                (row['connector_keys'], row['metric_key'], row['location_key'])
+                for row in self.read(q).to_dict(orient='records')
+            ]
+        )
     except Exception as e:
         error(str(e))
 
