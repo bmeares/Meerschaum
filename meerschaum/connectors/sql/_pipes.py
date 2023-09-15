@@ -1466,12 +1466,6 @@ def sync_pipe_inplace(
                     'old.' + sql_item_name(c, self.flavor) + ' IS NULL'
                 ) for c in common_cols
             ])
-            #  + "\nAND\n"
-            #  + '\nAND\n'.join([
-                #  (
-                    #  'new.' + sql_item_name(c, self.flavor) + ' IS NOT NULL'
-                #  ) for c in new_cols
-            #  ])
         ) if self.flavor not in ('sqlite', 'oracle', 'mysql', 'mariadb', 'duckdb')
         else (
             f"CREATE TABLE {delta_table_name} AS\n"
@@ -1645,12 +1639,6 @@ def sync_pipe_inplace(
                     sql_item_name(c + '_backtrack', self.flavor) + ' IS NULL'
                 ) for c in delta_cols
             ])
-            #  + "\nAND\n"
-            #  + '\nAND\n'.join([
-                #  (
-                    #  sql_item_name(c + '_delta', self.flavor) + ' IS NOT NULL'
-                #  ) for c in delta_cols
-            #  ])
         ) if self.flavor not in ('sqlite', 'oracle', 'mysql', 'mariadb', 'duckdb') else (
             f"CREATE TABLE {unseen_table_name} AS\n"
             + "SELECT "

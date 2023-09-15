@@ -424,8 +424,8 @@ def value(
         try:
             return self.read(query, *args, **kw).iloc[0, 0]
         except Exception as e:
-            import traceback
-            traceback.print_exc()
+            #  import traceback
+            #  traceback.print_exc()
             #  warn(e)
             return None
 

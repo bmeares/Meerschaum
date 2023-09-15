@@ -1283,6 +1283,7 @@ def import_pandas(
     """
     import sys
     pandas_module_name = pandas_name()
+    global emitted_pandas_warning
 
     if pandas_module_name != 'pandas':
         with _locks['emitted_pandas_warning']:

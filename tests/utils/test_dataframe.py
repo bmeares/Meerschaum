@@ -8,9 +8,9 @@ Test functions from `meerschaum.utils.misc`.
 
 import datetime
 import pytest
-from meerschaum.utils.packages import import_pandas
+from meerschaum.utils.packages import attempt_import
 DEBUG: bool = True
-pd = import_pandas(debug=DEBUG)
+pd = attempt_import('pandas')
 
 @pytest.mark.parametrize(
     "dtype",

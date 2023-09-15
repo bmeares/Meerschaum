@@ -423,12 +423,12 @@ def get_json_cols(df: 'pd.DataFrame') -> List[str]:
     -------
     A list of columns to be encoded as JSON.
     """
-    if len(df) == 0:
-        return []
-
     is_dask = 'dask' in df.__module__
     if is_dask:
         df = df.partitions[0].compute()
+    
+    if len(df) == 0:
+        return []
 
     cols_indices = {
         col: df[col].first_valid_index()

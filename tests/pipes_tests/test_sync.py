@@ -482,7 +482,7 @@ def test_get_data_iterator(flavor: str):
     for c in chunks:
         print(c)
     df = pd.concat(chunks)
-    assert df['id'].to_list() == [0, 2, 4, 6]
+    assert list(df['id']) == [0, 2, 4, 6]
 
 
 @pytest.mark.parametrize("flavor", get_flavors())
