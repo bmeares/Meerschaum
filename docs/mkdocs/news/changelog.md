@@ -1,12 +1,36 @@
 # 🪵 Changelog
 
-## 2.0.x Release
+## 2.0.x Releases
+
+### v2.0.0
+
+
+**TODO**
+
+- `verify pipes`
+- `dask` support
+- replace `daemoniker`
+
+**Wishlist**
+- remove ability to see other users
+- pipe ownership?
+- vendor `compose`?
+- `textual` TUI?
+
+**Features**
+
+- **Added `pyarrow` support.**  
+  The dtypes enforcement system was overhauled to add support for `pyarrow` data types.
+
+- **Added `dask` support.**  
+  
+
 
 - **Improve data type enforcement for SQL pipes.**  
   A pipe's data types are now passed to `SQLConnector.read()` when fetching its data.
 
-- **Replace `daemoniker` with `supervisor`.**  
-  Supervisor is a more feature-complete and well-maintained process management solution. However, this migration removes Windows support for background jobs (which was shoddy already, so no harm there).
+- **Replace `daemoniker` with `python-daemon`.**  
+  `python-daemon` is a well-maintained and well-behaved daemon process library. However, this migration removes Windows support for background jobs (which was shoddy already, so no harm there).
 
 ## 1.7.x Releases
 

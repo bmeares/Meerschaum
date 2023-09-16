@@ -126,7 +126,7 @@ class Daemon:
         Nothing — this will exit the parent process.
         """
         import platform, sys, os
-        daemoniker = attempt_import('daemoniker')
+        daemon = attempt_import('daemon')
 
         if platform.system() == 'Windows':
             success, msg = self._run_windows(
@@ -137,6 +137,10 @@ class Daemon:
             os._exit(rc)
 
         self._setup(allow_dirty_run)
+
+        context = daemon.DaemonContext(
+            pidfile = None,
+        )
 
         with daemoniker.Daemonizer() as (is_setup, daemonizer):
             if is_setup:
