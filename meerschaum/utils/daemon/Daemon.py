@@ -9,11 +9,16 @@ Manage running daemons via the Daemon class.
 from __future__ import annotations
 import os, pathlib, threading, json, shutil, datetime
 from meerschaum.utils.typing import Optional, Dict, Any, SuccessTuple, Callable, List, Union
+from meerschaum.config import get_config
 from meerschaum.config._paths import DAEMON_RESOURCES_PATH, LOGS_RESOURCES_PATH
 from meerschaum.config._patch import apply_patch_to_config
 from meerschaum.utils.warnings import warn, error
 from meerschaum.utils.packages import attempt_import, venv_exec
 from meerschaum.utils.daemon._names import get_new_daemon_name
+from meerschaum.utils.daemon.RotatingFile import RotatingFile
+from meerschaum.utils.daemon.Log import Log
+
+LOG_REFRESH_SECONDS: float = 5.0
 
 class Daemon:
     """Manage running daemons via the Daemon class."""
@@ -139,35 +144,37 @@ class Daemon:
         self._setup(allow_dirty_run)
 
         context = daemon.DaemonContext(
-            pidfile = None,
+            pidfile = self.pid_lock,
+            stdout = self.rotating_log,
+            stderr = self.rotating_log,
+            working_directory = os.getcwd(),
+            detach_process = True,
+            files_preserve = list(self.rotating_log.subfile_objects.values()),
         )
+        log_refresh_timer = threading.Timer(LOG_REFRESH_SECONDS, self.rotating_log.refresh_files)
 
-        with daemoniker.Daemonizer() as (is_setup, daemonizer):
-            if is_setup:
-                pass
-            is_parent = daemonizer(
-                str(self.pid_path.as_posix()),
-                stdout_goto = str(self.stdout_path.as_posix()),
-                stderr_goto = str(self.stderr_path.as_posix()),
-                strip_cmd_args = (platform.system() != 'Windows'),
-            )
-            if is_parent:
-                pass
+        with context:
+            try:
+                with open(self.pid_path, 'w+') as f:
+                    f.write(str(os.getpid()))
 
-        self.sighandler.start()
+                log_refresh_timer.start()
+                result = self.target(*self.target_args, **self.target_kw)
 
-        try:
-            result = self.target(*self.target_args, **self.target_kw)
-        except Exception as e:
-            warn(e, stacklevel=3)
-            result = e
+                ### Stop the timer and perform one final refresh, just in case.
+                log_refresh_timer.cancel()
+                _ = self.rotating_log.refresh_files()
+            except Exception as e:
+                warn(e, stacklevel=3)
+                result = e
 
-        if keep_daemon_output:
-            self.properties['process']['ended'] = datetime.datetime.utcnow().isoformat()
-            self.write_properties()
-        else:
-            self.cleanup()
-        return result
+            if keep_daemon_output:
+                self.properties['process']['ended'] = datetime.datetime.utcnow().isoformat()
+                self.properties['result'] = result
+                self.write_properties()
+            else:
+                self.cleanup()
+            return result
 
 
     def _run_windows(
@@ -453,62 +460,61 @@ class Daemon:
         return DAEMON_RESOURCES_PATH / self.daemon_id
 
     @property
-    def properties_path(self):
+    def properties_path(self) -> pathlib.Path:
         """
         Return the `propterties.json` path for this Daemon.
         """
         return self.path / 'properties.json'
 
-    @property
-    def stdout_path(self):
-        """
-        Return the path to redirect stdout into.
-        """
-        return self.log_path
 
     @property
-    def stderr_path(self):
-        """
-        Return the path to redirect stderr into.
-        """
-        return self.log_path
-
-    @property
-    def log_path(self):
+    def log_path(self) -> pathlib.Path:
         """
         Return the log path.
         """
         return LOGS_RESOURCES_PATH / (self.daemon_id + '.log')
 
-    @property
-    def log_offset_path(self):
-        return self.path / (self.daemon_id + '.log.offset')
 
     @property
-    def log_text(self) -> Optional[str]:
-        """Read the log file and return its contents.
-        Returns `None` if the log file does not exist.
+    def log_offset_path(self) -> pathlib.Path:
         """
-        if not self.log_path.exists():
-            return None
-        try:
-            with open(self.log_path, 'r', encoding='utf-8') as f:
-                text = f.read()
-        except Exception as e:
-            warn(e)
-            text = None
-        return text
+        Return the log offset file path.
+        """
+        return self.path / (self.daemon_id + '.log.offset')
 
     
     @property
-    def log(self) -> 'meerschaum.utils.daemon.Log':
+    def rotating_log(self) -> RotatingFile:
+        if '_rotating_log' in self.__dict__:
+            return self._rotating_log
+
+        num_files_to_keep = get_config('system', 'daemons', 'num_files_to_keep')
+        max_file_size = get_config('system', 'daemons', 'max_file_size')
+        self._rotating_log = RotatingFile(
+            self.log_path,
+            num_files_to_keep = num_files_to_keep,
+            max_file_size = max_file_size,
+            redirect_streams = True,
+        )
+        return self._rotating_log
+
+
+    @property
+    def log_text(self) -> Optional[str]:
+        """Read the log files and return their contents.
+        Returns `None` if the log file does not exist.
+        """
+        return self.rotating_log.read()
+
+
+    @property
+    def log(self) -> List['meerschaum.utils.daemon.Log']:
         """
         Return a `meerschaum.utils.daemon.Log` object for this daemon.
         """
-        if self.__dict__.get('_log', None) is not None:
-            return self.__dict__['_log']
-        from meerschaum.utils.daemon import Log
-        self._log = Log(self.log_path, self.log_offset_path)
+        if '_log' in self.__dict__:
+            return self._log
+        self._log = Log(self.rotating_log, self.log_offset_path)
         return self._log
 
 
@@ -534,6 +540,19 @@ class Daemon:
         Return the path to a file containing the PID for this Daemon.
         """
         return self.path / 'process.pid'
+
+
+    @property
+    def pid_lock(self) -> 'fasteners.InterProcessLock':
+        """
+        Return the process lock context manager.
+        """
+        if '_pid_lock' in self.__dict__:
+            return self._pid_lock
+
+        fasteners = attempt_import('fasteners')
+        self._pid_lock = fasteners.InterProcessLock(self.pid_path)
+        return self._pid_lock
 
 
     @property
@@ -630,6 +649,7 @@ class Daemon:
             traceback.print_exception(type(e), e, e.__traceback__)
         return success, msg
 
+
     def _setup(
             self,
             allow_dirty_run: bool = False,
@@ -668,28 +688,26 @@ class Daemon:
         Parameters
         ----------
         keep_logs: bool, default False
-            If `True`, skip deleting the daemon's log file.
+            If `True`, skip deleting the daemon's log files.
         """
         if self.path.exists():
             try:
                 shutil.rmtree(self.path)
             except Exception as e:
                 warn(e)
-        if self.log_path.exists() and not keep_logs:
-            try:
-                os.remove(self.log_path)
-            except Exception as e:
-                warn(e)
+        if not keep_logs:
+            self.rotating_log.delete()
+
 
     def __getstate__(self):
         dill = attempt_import('dill')
         return {
-            'target' : dill.dumps(self.target),
-            'target_args' : self.target_args,
-            'target_kw' : self.target_kw,
-            'daemon_id' : self.daemon_id,
-            'label' : self.label,
-            'properties' : self.properties,
+            'target': dill.dumps(self.target),
+            'target_args': self.target_args,
+            'target_kw': self.target_kw,
+            'daemon_id': self.daemon_id,
+            'label': self.label,
+            'properties': self.properties,
         }
 
     def __setstate__(self, _state : Dict[str, Any]):

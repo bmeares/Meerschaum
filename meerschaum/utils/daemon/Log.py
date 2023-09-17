@@ -11,6 +11,7 @@ import os
 import pathlib
 import sys
 from meerschaum.utils.typing import Optional, Union, List
+from meerschaum.utils.daemon.RotatingFile import RotatingFile
 
 
 class Log:
@@ -20,11 +21,11 @@ class Log:
 
     def __init__(
         self,
-        file_path: pathlib.Path,
+        rotating_file: RotatingFile,
         offset_file_path: Optional[pathlib.Path] = None,
     ):
-        self.file_path = file_path
-        self._offset_file_path = offset_file_path or self.file_path / '.offset'
+        self.rotating_file = rotating_file
+        self._offset_file_path = offset_file_path or (rotating_file.file_path.parent / '.offset')
         self._offset_inode = 0
         self._offset = 0
         self._since_update = 0
@@ -62,7 +63,7 @@ class Log:
     def read(self) -> Union[str, None]:
         """Read and return the unread lines as a string."""
         lines = self.readlines()
-        return ''.join(lines)
+        return '\n'.join(lines)
 
 
     def readlines(self) -> List[str]:

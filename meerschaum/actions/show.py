@@ -642,8 +642,6 @@ def _show_logs(
                 _print_job_line(daemon, line)
 
         def _seek_back_offset(d) -> bool:
-            if not d.log_path.exists():
-                return False
             if not d.log_offset_path.exists():
                 d.log.read()
             if not d.log_offset_path.exists():
