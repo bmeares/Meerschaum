@@ -7,7 +7,7 @@ Manage running daemons via the Daemon class.
 """
 
 from __future__ import annotations
-import os, pathlib, json, shutil, datetime, signal, sys
+import os, pathlib, json, shutil, datetime, signal, sys, time
 from meerschaum.utils.typing import Optional, Dict, Any, SuccessTuple, Callable, List, Union
 from meerschaum.config import get_config
 from meerschaum.config._paths import DAEMON_RESOURCES_PATH, LOGS_RESOURCES_PATH
@@ -203,13 +203,18 @@ class Daemon:
 
         """
         import platform
+        if platform.system() == 'Windows':
+            return False, "Cannot run background jobs on Windows."
+
+        ### The daemon might exist and be paused.
+        if self.status == 'paused':
+            self.process.resume()
+            return True, f"Resumed daemon '{self.daemon_id}'."
+
         self.mkdir_if_not_exists(allow_dirty_run)
         _write_pickle_success_tuple = self.write_pickle()
         if not _write_pickle_success_tuple[0]:
             return _write_pickle_success_tuple
-
-        if platform.system() == 'Windows':
-            return False, "Cannot run background jobs on Windows."
 
         _launch_daemon_code = (
             "from meerschaum.utils.daemon import Daemon; "
@@ -235,24 +240,102 @@ class Daemon:
         -------
         A SuccessTuple indicating success.
         """
-        success, msg = self._send_signal(signal.SIGTERM, timeout=timeout)
-        if success:
-            return success, msg
-        process = self.process
-        if process is None or not process.is_running():
+        if self.status != 'paused':
+            success, msg = self._send_signal(signal.SIGTERM, timeout=timeout)
+            if success:
+                return success, msg
+
+        if self.status == 'stopped':
             return True, "Process has already stopped."
+
+        process = self.process
         try:
             process.terminate()
             process.kill()
             process.wait(timeout=timeout)
         except Exception as e:
             return False, f"Failed to kill job {self} with exception: {e}"
+        if self.pid_path.exists():
+            try:
+                self.pid_path.unlink()
+            except Exception as e:
+                pass
         return True, "Success"
 
 
     def quit(self, timeout: Optional[int] = 3) -> SuccessTuple:
         """Gracefully quit a running daemon."""
+        if self.status == 'paused':
+            return self.kill(timeout)
         return self._send_signal(signal.SIGINT, timeout=timeout)
+
+
+    def pause(
+            self,
+            timeout: Optional[int] = 3,
+            check_timeout_interval: float = 0.1,
+        ) -> SuccessTuple:
+        """Pause the daemon if it is running."""
+        if self.process is None:
+            return False, f"Daemon '{self.daemon_id}' is not running and cannot be paused."
+
+        if self.status == 'paused':
+            return True, f"Daemon '{self.daemon_id}' is already paused."
+
+        try:
+            self.process.suspend()
+        except Exception as e:
+            return False, f"Failed to pause daemon '{self.daemon_id}':\n{e}"
+
+        if timeout is None:
+            success = self.process.status() == 'stopped'
+            msg = "Success" if success else f"Failed to suspend daemon '{self.daemon_id}'."
+            return success, msg
+
+        begin = time.perf_counter()
+        while (time.perf_counter() - begin) < timeout:
+            if self.process.status() == 'stopped':
+                return True, f"Successfully paused daemon '{self.daemon_id}'."
+            time.sleep(check_timeout_interval)
+
+        return False, (
+            f"Failed to pause daemon '{self.daemon_id}' within {timeout} second"
+            + ('s' if timeout != 1 else '') + '.'
+        )
+
+
+    def resume(
+            self,
+            timeout: Optional[int] = 3,
+            check_timeout_interval: float = 0.1,
+        ) -> SuccessTuple:
+        """Resume the daemon if it is paused."""
+        if self.status == 'running':
+            return True, f"Daemon '{self.daemon_id}' is already running."
+
+        if self.status == 'stopped':
+            return False, f"Daemon '{self.daemon_id}' is stopped and cannot be resumed."
+
+        try:
+            self.process.resume()
+        except Exception as e:
+            return False, f"Failed to resume daemon '{self.daemon_id}':\n{e}"
+
+        if timeout is None:
+            success = self.status == 'running'
+            msg = "Success" if success else f"Failed to resume daemon '{self.daemon_id}'."
+            return success, msg
+
+        begin = time.perf_counter()
+        while (time.perf_counter() - begin) < timeout:
+            if self.status == 'running':
+                return True, f"Successfully resumed daemon '{self.daemon_id}'."
+            time.sleep(check_timeout_interval)
+
+        return False, (
+            f"Failed to resume daemon '{self.daemon_id}' within {timeout} second"
+            + ('s' if timeout != 1 else '') + '.'
+        )
 
 
     def _handle_interrupt(self, signal_number: int, stack_frame: 'frame') -> None:
@@ -317,8 +400,6 @@ class Daemon:
         -------
         A SuccessTuple indicating success.
         """
-        import time
-
         try:
             os.kill(int(self.pid), signal_to_send)
         except Exception as e:
@@ -375,6 +456,20 @@ class Daemon:
                     self.pid_path.unlink()
                 return None
         return self._process
+
+
+    @property
+    def status(self) -> str:
+        """
+        Return the running status of this Daemon.
+        """
+        if self.process is None:
+            return 'stopped'
+
+        if self.process.status() == 'stopped':
+            return 'paused'
+
+        return 'running'
 
 
     @property

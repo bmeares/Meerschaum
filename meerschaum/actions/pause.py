@@ -3,23 +3,24 @@
 # vim:fenc=utf-8
 
 """
-Stop running jobs that were started with `-d` or `start job`.
+Pause running jobs that were started with `-d` or `start job`.
 """
 
 from __future__ import annotations
 from meerschaum.utils.typing import Optional, List, Dict, SuccessTuple, Any
 
-def stop(action: Optional[List[str]] = None, **kw) -> SuccessTuple:
+def pause(action: Optional[List[str]] = None, **kw) -> SuccessTuple:
     """
-    Stop running jobs.
+    Pause running jobs.
     """
     from meerschaum.utils.misc import choose_subaction
     options = {
-        'jobs': _stop_jobs,
+        'jobs': _pause_jobs,
     }
     return choose_subaction(action, options, **kw)
 
-def _complete_stop(
+
+def _complete_pause(
         action: Optional[List[str]] = None,
         **kw: Any
     ) -> List[str]:
@@ -47,7 +48,7 @@ def _complete_stop(
     return default_action_completer(action=(['start'] + action), **kw)
 
 
-def _stop_jobs(
+def _pause_jobs(
         action: Optional[List[str]] = None,
         noask: bool = False,
         force: bool = False,
@@ -56,9 +57,9 @@ def _stop_jobs(
         **kw
     ) -> SuccessTuple:
     """
-    Stop running jobs that were started with `-d` or `start job`.
+    Pause running jobs that were started with `-d` or `start job`.
     
-    To see running processes, run `show jobs`.
+    To see running jobs, run `show jobs`.
     """
     from meerschaum.utils.formatting._jobs import pprint_jobs
     from meerschaum.utils.daemon import (
@@ -66,6 +67,7 @@ def _stop_jobs(
     )
     from meerschaum.utils.warnings import warn
     from meerschaum.utils.prompt import yes_no
+    from meerschaum.utils.misc import items_str
     daemons = get_filtered_daemons(action, warn=(not nopretty))
     _running_daemons = get_running_daemons(daemons)
     _paused_daemons = get_paused_daemons(daemons)
@@ -77,53 +79,50 @@ def _stop_jobs(
             stack = False
         )
 
-    daemons_to_stop = _running_daemons + _paused_daemons
-    if not daemons_to_stop:
-        return False, "No running or paused jobs to stop."
+    daemons_to_pause = _running_daemons + _paused_daemons
+    if not daemons_to_pause:
+        return False, "No running jobs to pause. You can start jobs with `-d` or `start jobs`."
 
     if not action:
         if not force:
-            pprint_jobs(daemons_to_stop)
+            pprint_jobs(_running_daemons)
             if not yes_no(
-                "Stop the above jobs?",
+                "Pause all running jobs?",
                 noask=noask, yes=yes, default='n'
             ):
-                return False, "No jobs were stopped."
+                return False, "No jobs were paused."
 
-    _quit_daemons, _kill_daemons = [], []
-    for d in daemons_to_stop:
-        quit_success, quit_msg = d.quit()
-        if quit_success:
-            _quit_daemons.append(d)
-            continue
-        else:
-            warn(
-                f"Failed to gracefully quit job '{d.daemon_id}', attempting to terminate:\n"
-                + f"{quit_msg}",
-                stack = False,
-            )
-
-        kill_success, kill_msg = d.kill()
-        if kill_success:
-            _kill_daemons.append(d)
-            continue
-        if not nopretty:
-            warn(f"Failed to kill job '{d.daemon_id}' (PID {d.pid}):\n{kill_msg}", stack=False)
+    successes, fails = [], []
+    for d in daemons_to_pause:
+        pause_success, pause_msg = d.pause()
+        (successes if pause_success else fails).append(d.daemon_id)
 
     msg = (
-        (("Stopped job" + ("s" if len(_quit_daemons) != 1 else '') +
-            " '" + "', '".join([d.daemon_id for d in _quit_daemons]) + "'.")
-            if _quit_daemons else '')
-        + (("\n" if _quit_daemons else "")
-           + ("Killed job" + ("s" if len(_kill_daemons) != 1 else '') +
-            " '" + "', '".join([d.daemon_id for d in _kill_daemons]) + "'.")
-            if _kill_daemons else '')
+        (
+            (
+                "Successfully paused job" + ("s" if len(successes) != 1 else '')
+                + f" {items_str(successes)}."
+                + (
+                    '\n'
+                    if fails
+                    else ''
+                )
+            )
+            if successes
+            else ''
+        )
+        + (
+            "Failed to pause job" + ("s" if len(fails) != 1 else '')
+            + f" {items_str(fails)}."
+            if fails
+            else ''
+        )
     )
-    return (len(_quit_daemons + _kill_daemons) > 0), msg
+    return len(fails) == 0, msg
 
 
 ### NOTE: This must be the final statement of the module.
 ###       Any subactions added below these lines will not
 ###       be added to the `help` docstring.
 from meerschaum.utils.misc import choices_docstring as _choices_docstring
-stop.__doc__ += _choices_docstring('stop')
+pause.__doc__ += _choices_docstring('pause')

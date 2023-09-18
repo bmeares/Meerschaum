@@ -113,7 +113,7 @@ def _start_jobs(
     from meerschaum.utils.warnings import warn, info
     from meerschaum.utils.daemon import (
         daemon_action, Daemon, get_daemon_ids, get_daemons, get_filtered_daemons,
-        get_stopped_daemons, get_running_daemons
+        get_stopped_daemons, get_running_daemons, get_paused_daemons,
     )
     from meerschaum.utils.daemon._names import get_new_daemon_name
     from meerschaum._internal.arguments._parse_arguments import parse_arguments
@@ -178,14 +178,15 @@ def _start_jobs(
 
     ### No action or --name was provided. Ask to start all stopped jobs.
     else:
+        _running_daemons = get_running_daemons()
+        _paused_daemons = get_paused_daemons()
         _stopped_daemons = get_stopped_daemons()
-        if not _stopped_daemons:
-            _all_daemons = get_daemons()
-            if not _all_daemons:
+        if not _stopped_daemons and not _paused_daemons:
+            if not _running_daemons:
                 return False, "No jobs to start."
             return True, "All jobs are running."
 
-        names = [d.daemon_id for d in _stopped_daemons]
+        names = [d.daemon_id for d in _stopped_daemons + _paused_daemons]
 
     def _run_new_job(name: Optional[str] = None):
         kw['action'] = action
@@ -196,6 +197,10 @@ def _start_jobs(
 
     def _run_existing_job(name: Optional[str] = None):
         daemon = Daemon(daemon_id=name)
+        if daemon.process is not None:
+            if daemon.status == 'paused':
+                return daemon.resume(), daemon.daemon_id
+            return (True, f"Job '{name}' is already running."), daemon.daemon_id
 
         if not daemon.path.exists():
             if not kw.get('nopretty', False):
@@ -225,10 +230,11 @@ def _start_jobs(
     _filtered_daemons = get_filtered_daemons(names)
     if not kw.get('force', False) and _filtered_daemons:
         _filtered_running_daemons = get_running_daemons(_filtered_daemons)
+        _skipped_daemons = []
         if _filtered_running_daemons:
             pprint_jobs(_filtered_running_daemons)
             if yes_no(
-                "The above jobs are still running. Do you want to first stop these jobs?",
+                "Do you want to first stop these jobs?",
                 default = 'n',
                 yes = kw.get('yes', False),
                 noask = kw.get('noask', False)
@@ -256,9 +262,11 @@ def _start_jobs(
                 for d in _filtered_running_daemons:
                     names.remove(d.daemon_id)
                     _filtered_daemons.remove(d)
+                    _skipped_daemons.append(d)
 
         if not _filtered_daemons:
-            return False, "No jobs to start."
+            return len(_skipped_daemons) > 0, "No jobs to start."
+
         pprint_jobs(_filtered_daemons, nopretty=kw.get('nopretty', False))
         info(
             f"Starting the job"

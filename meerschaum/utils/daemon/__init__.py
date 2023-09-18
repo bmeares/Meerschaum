@@ -102,29 +102,45 @@ def get_daemon_ids() -> List[str]:
     """ """
     return os.listdir(DAEMON_RESOURCES_PATH)
 
-def get_running_daemons(daemons : Optional[List[Daemon]] = None) -> List[Daemon]:
+def get_running_daemons(daemons: Optional[List[Daemon]] = None) -> List[Daemon]:
     """
     Return a list of currently running daemons.
     """
     if daemons is None:
         daemons = get_daemons()
     return [
-        d for d in daemons if d.pid_path.exists()
+        d
+        for d in daemons
+        if d.status == 'running'
     ]
 
-def get_stopped_daemons(
-        daemons : Optional[List[Daemon]] = None,
-        running_daemons : Optional[List[Daemon]] = None,
-    ) -> List[Daemon]:
+
+def get_paused_daemons(daemons: Optional[List[Daemon]] = None) -> List[Daemon]:
+    """
+    Return a list of active but paused daemons.
+    """
+    if daemons is None:
+        daemons = get_daemons()
+    return [
+        d
+        for d in daemons
+        if d.status == 'paused'
+    ]
+
+
+def get_stopped_daemons(daemons: Optional[List[Daemon]] = None) -> List[Daemon]:
     """
     Return a list of stopped daemons.
     """
     if daemons is None:
         daemons = get_daemons()
-    if running_daemons is None:
-        running_daemons = get_running_daemons(daemons)
 
-    return [d for d in daemons if d not in running_daemons]
+    return [
+        d
+        for d in daemons
+        if d.status == 'stopped'
+    ]
+
 
 def get_filtered_daemons(
         filter_list: Optional[List[str]] = None,

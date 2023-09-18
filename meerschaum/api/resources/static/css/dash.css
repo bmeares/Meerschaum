@@ -38,6 +38,9 @@ a {
 .running-job {
   color: green;
 }
+.paused-job {
+  color: yellow;
+}
 .stopped-job {
   color: red;
 }
