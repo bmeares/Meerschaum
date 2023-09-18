@@ -73,10 +73,6 @@ default_system_config = {
         'api' : {
         },
     },
-    'daemons': {
-        'num_files_to_keep': 5,
-        'max_file_size': 100_000,
-    },
     ### not to be confused with system_config['connectors']['api'], this is the configuration
     ### for the API server itself.
     'api' : {

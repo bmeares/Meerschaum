@@ -180,7 +180,11 @@ def _start_jobs(
     else:
         _stopped_daemons = get_stopped_daemons()
         if not _stopped_daemons:
-            return False, "No jobs to start."
+            _all_daemons = get_daemons()
+            if not _all_daemons:
+                return False, "No jobs to start."
+            return True, "All jobs are running."
+
         names = [d.daemon_id for d in _stopped_daemons]
 
     def _run_new_job(name: Optional[str] = None):
@@ -202,7 +206,7 @@ def _start_jobs(
                 )
             return (False, f"Job '{name}' does not exist."), daemon.daemon_id
 
-        daemon.cleanup()
+        daemon.cleanup(keep_logs=True)
         try:
             _daemon_sysargs = daemon.properties['target']['args'][0]
         except KeyError:
@@ -256,18 +260,12 @@ def _start_jobs(
         if not _filtered_daemons:
             return False, "No jobs to start."
         pprint_jobs(_filtered_daemons, nopretty=kw.get('nopretty', False))
-        if not yes_no(
-            (
-                f"Would you like to overwrite the logs and run the job"
-                + ("s" if len(names) != 1 else '') + " " + items_str(names) + "?"
-            ),
-            default = 'n',
-            yes = kw.get('yes', False),
-            nopretty = kw.get('nopretty', False),
-            noask = kw.get('noask', False),
-        ):
-            return (False, "Nothing was started.")
-
+        info(
+            f"Starting the job"
+            + ("s" if len(names) != 1 else "")
+            + " " + items_str(names)
+            + "..."
+        )
 
     _successes, _failures = [], []
     for _name in names:
@@ -283,7 +281,7 @@ def _start_jobs(
         + ("Failed to start job" + ("s" if len(_failures) != 1 else '')
             + f" {items_str(_failures)}." if _failures else '')
     )
-    return len(_successes) > 0, msg
+    return len(_failures) == 0, msg
 
 def _complete_start_jobs(
         action: Optional[List[str]] = None,

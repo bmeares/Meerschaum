@@ -11,6 +11,7 @@ import io
 import re
 import pathlib
 import traceback
+import sys
 import atexit
 from typing import List, Union, Optional, Tuple
 from meerschaum.config import get_config
@@ -42,18 +43,23 @@ class RotatingFile(io.IOBase):
 
         max_file_size: int, default None
             How large in bytes each sub-file can grow before another file is created.
+            Note that this is not a hard limit but rather a threshold
+            which may be slightly exceeded.
             Defaults to the configured value (100_000).
 
         redirect_streams: bool, default False
             If `True`, redirect previous file streams when opening a new file descriptor.
+            
+            NOTE: Only set this to `True` if you are entering into a daemon context.
+            Doing so will redirect `sys.stdout` and `sys.stderr` into the log files.
         """
         self.file_path = pathlib.Path(file_path)
         if num_files_to_keep is None:
-            num_files_to_keep = get_config('system', 'daemons', 'num_files_to_keep')
+            num_files_to_keep = get_config('jobs', 'logs', 'num_files_to_keep')
         if max_file_size is None:
-            max_file_size = get_config('system', 'daemons', 'max_file_size')
-        if num_files_to_keep < 1:
-            raise ValueError("At least 1 file must be kept.")
+            max_file_size = get_config('jobs', 'logs', 'max_file_size')
+        if num_files_to_keep < 2:
+            raise ValueError("At least 2 files must be kept.")
         if max_file_size < 1:
             raise ValueError("Subfiles must contain at least one byte.")
 
@@ -96,6 +102,26 @@ class RotatingFile(io.IOBase):
         )
 
 
+    def get_remaining_subfile_size(self, subfile_index: int) -> int:
+        """
+        Return the remaining buffer size for a subfile.
+
+        Parameters
+        ---------
+        subfile_index: int
+            The index of the subfile to be checked.
+
+        Returns
+        -------
+        The remaining size in bytes.
+        """
+        subfile_path = self.get_subfile_path_from_index(subfile_index)
+        if not subfile_path.exists():
+            return self.max_file_size
+
+        return self.max_file_size - os.path.getsize(subfile_path)
+
+
     def is_subfile_too_large(self, subfile_index: int, potential_new_len: int = 0) -> bool:
         """
         Return whether a given subfile is too large.
@@ -115,6 +141,8 @@ class RotatingFile(io.IOBase):
         subfile_path = self.get_subfile_path_from_index(subfile_index)
         if not subfile_path.exists():
             return False
+
+        self.flush()
 
         return (
             (os.path.getsize(subfile_path) + potential_new_len)
@@ -140,8 +168,12 @@ class RotatingFile(io.IOBase):
     def get_index_from_subfile_name(self, subfile_name: str) -> int:
         """
         Return the index from a given subfile name.
+        If the file name cannot be parsed, return -1.
         """
-        return int(subfile_name.replace(self.file_path.name + '.', ''))
+        try:
+            return int(subfile_name.replace(self.file_path.name + '.', ''))
+        except Exception as e:
+            return -1
 
 
     def get_subfile_name_from_index(self, subfile_index: int) -> str:
@@ -158,6 +190,14 @@ class RotatingFile(io.IOBase):
         return self.file_path.parent / self.get_subfile_name_from_index(subfile_index)
 
 
+    def get_existing_subfile_indices(self) -> List[int]:
+        """
+        Return of list of subfile indices which exist on disk.
+        """
+        existing_subfile_paths = self.get_existing_subfile_paths()
+        return [self.get_index_from_subfile_name(path.name) for path in existing_subfile_paths]
+
+
     def get_existing_subfile_paths(self) -> List[pathlib.Path]:
         """
         Return a list of file paths that match the input filename pattern.
@@ -165,14 +205,17 @@ class RotatingFile(io.IOBase):
         if not self.file_path.parent.exists():
             return []
 
-        subfile_names = sorted([
-            file_name
-            for file_name in os.listdir(self.file_path.parent)
-            if re.match(self.subfile_regex_pattern, file_name)
-        ])
+        subfile_names_indices = sorted(
+            [
+                (file_name, self.get_index_from_subfile_name(file_name))
+                for file_name in os.listdir(self.file_path.parent)
+                if re.match(self.subfile_regex_pattern, file_name)
+            ],
+            key = lambda x: x[1],
+        )
         return [
             (self.file_path.parent / file_name)
-            for file_name in subfile_names
+            for file_name, _ in subfile_names_indices
         ]
 
 
@@ -185,13 +228,32 @@ class RotatingFile(io.IOBase):
         ----------
         potential_new_len: int, default 0
         """
+        self.flush()
+
         latest_subfile_index = self.get_latest_subfile_index()
+        latest_subfile_path = self.get_subfile_path_from_index(latest_subfile_index)
+
+        ### First run with existing log files: open the most recent log file.
+        is_first_run_with_logs = ((latest_subfile_index > -1) and self._current_file_obj is None)
+
+        ### Sometimes a new file is created but output doesn't switch over.
+        lost_latest_handle = (
+            self._current_file_obj is not None
+            and
+            self.get_index_from_subfile_name(self._current_file_obj.name) == -1
+        )
+        if is_first_run_with_logs or lost_latest_handle:
+            self._current_file_obj = open(latest_subfile_path, 'a+', encoding='utf-8')
+            if self.redirect_streams:
+                daemon.daemon.redirect_stream(sys.stdout, self._current_file_obj)
+                daemon.daemon.redirect_stream(sys.stderr, self._current_file_obj)
+
         create_new_file = (
+            (latest_subfile_index == -1)
+            or
             self._current_file_obj is None
             or
             self.is_subfile_too_large(latest_subfile_index, potential_new_len)
-            or
-            self._current_file_obj.closed
         )
         if create_new_file:
             old_subfile_index = latest_subfile_index
@@ -206,6 +268,8 @@ class RotatingFile(io.IOBase):
                 if self.redirect_streams:
                     self._redirected_subfile_objects[old_subfile_index] = self._previous_file_obj
                     daemon.daemon.redirect_stream(self._previous_file_obj, self._current_file_obj)
+                    daemon.daemon.redirect_stream(sys.stdout, self._current_file_obj)
+                    daemon.daemon.redirect_stream(sys.stderr, self._current_file_obj)
                 self.close(unused_only=True)
 
             ### Sanity check in case writing somehow fails.
@@ -232,6 +296,7 @@ class RotatingFile(io.IOBase):
                 continue
             try:
                 if not subfile_object.closed:
+                    #  subfile_object.flush()
                     subfile_object.close()
                 _ = self.subfile_objects.pop(subfile_index, None)
                 if self.redirect_streams:
@@ -249,6 +314,10 @@ class RotatingFile(io.IOBase):
         Write the given text into the latest subfile.
         If the subfile will be too large, create a new subfile.
         If too many subfiles exist at once, the oldest one will be deleted.
+
+        NOTE: This will not split data across multiple files.
+        As such, if data is larger than max_file_size, then the corresponding subfile
+        may exceed this limit.
         """
         self.file_path.parent.mkdir(exist_ok=True, parents=True)
         if isinstance(data, bytes):
@@ -259,6 +328,7 @@ class RotatingFile(io.IOBase):
             self._current_file_obj.write(data)
         except Exception as e:
             warn(f"Failed to write to subfile:\n{traceback.format_exc()}")
+        self.flush()
         self.delete(unused_only=True)
 
 
@@ -275,6 +345,7 @@ class RotatingFile(io.IOBase):
         if unused_only and len(existing_subfile_paths) <= self.num_files_to_keep:
             return
 
+        self.flush()
         self.close(unused_only=unused_only)
 
         end_ix = (
@@ -299,55 +370,128 @@ class RotatingFile(io.IOBase):
         """
         Read the contents of the existing subfiles.
         """
-        existing_subfile_paths = self.get_existing_subfile_paths()
+        existing_subfile_indices = [
+            self.get_index_from_subfile_name(subfile_path.name)
+            for subfile_path in self.get_existing_subfile_paths()
+        ]
+        paths_to_read = [
+            self.get_subfile_path_from_index(subfile_index)
+            for subfile_index in existing_subfile_indices
+            if subfile_index >= self._cursor[0]
+        ]
         buffer = ''
-        for subfile_path in existing_subfile_paths:
+        refresh_cursor = True
+        for subfile_path in paths_to_read:
             subfile_index = self.get_index_from_subfile_name(subfile_path.name)
+            seek_ix = (
+                self._cursor[1]
+                if subfile_index == self._cursor[0]
+                else 0
+            )
+
             if (
                 subfile_index in self.subfile_objects
                 and
                 subfile_index not in self._redirected_subfile_objects
             ):
                 subfile_object = self.subfile_objects[subfile_index]
-                subfile_object.seek(0)
+                subfile_object.seek(seek_ix)
                 buffer += subfile_object.read()
             else:
                 with open(subfile_path, 'r', encoding='utf-8') as f:
+                    f.seek(seek_ix)
                     buffer += f.read()
 
-        if self._current_file_obj is not None:
-            current_ix = self.get_index_from_subfile_name(self._current_file_obj.name)
-            self._file_cursors[current_ix] = self._current_file_obj.tell()
+                    ### Handle the case when no files have yet been opened.
+                    if not self.subfile_objects and subfile_path == paths_to_read[-1]:
+                        self._cursor = (subfile_index, f.tell())
+                        refresh_cursor = False
+
+        if refresh_cursor:
+            self.refresh_cursor()
         return buffer
+
+
+    def refresh_cursor(self) -> None:
+        """
+        Update the cursor to the latest subfile index and file.tell() value.
+        """
+        self.flush()
+        existing_subfile_paths = self.get_existing_subfile_paths()
+        current_ix = (
+            self.get_index_from_subfile_name(existing_subfile_paths[-1].name)
+            if existing_subfile_paths
+            else 0
+        )
+        position = self._current_file_obj.tell() if self._current_file_obj is not None else 0
+        self._cursor = (current_ix, position)
 
 
     def readlines(self) -> List[str]:
         """
         Return a list of lines of text.
         """
-        existing_subfile_paths = self.get_existing_subfile_paths()
+        existing_subfile_indices = [
+            self.get_index_from_subfile_name(subfile_path.name)
+            for subfile_path in self.get_existing_subfile_paths()
+        ]
+        paths_to_read = [
+            self.get_subfile_path_from_index(subfile_index)
+            for subfile_index in existing_subfile_indices
+            if subfile_index >= self._cursor[0]
+        ]
+
         lines = []
-        for subfile_path in existing_subfile_paths:
+        for subfile_path in paths_to_read:
             subfile_index = self.get_index_from_subfile_name(subfile_path.name)
+            seek_ix = (
+                self._cursor[1]
+                if subfile_index == self._cursor[0]
+                else 0
+            )
+
             if (
                 subfile_index in self.subfile_objects
                 and
                 subfile_index not in self._redirected_subfile_objects
             ):
                 subfile_object = self.subfile_objects[subfile_index]
-                subfile_object.seek(0)
-                lines.extend(subfile_object.readlines())
+                subfile_object.seek(seek_ix)
+                subfile_lines = subfile_object.readlines()
             else:
                 with open(subfile_path, 'r', encoding='utf-8') as f:
-                    lines.extend(f.readlines())
+                    f.seek(seek_ix)
+                    subfile_lines = f.readlines()
+
+            ### Sometimes a line may span multiple files.
+            if lines and subfile_lines and not lines[-1].endswith('\n'):
+                lines[-1] += subfile_lines[0]
+                new_lines = subfile_lines[1:]
+            else:
+                new_lines = subfile_lines
+            lines.extend(new_lines)
+
+        self.refresh_cursor()
         return lines
 
 
     def seekable(self) -> bool:
+        return True
+
+
+    def seek(self, position: int) -> None:
         """
-        This file-like class is not randomly accessible. 
+        Seek to the beginning of the logs stream.
         """
-        return False
+        existing_subfile_indices = self.get_existing_subfile_indices()
+        min_ix = existing_subfile_indices[0] if existing_subfile_indices else 0
+        max_ix = existing_subfile_indices[-1] if existing_subfile_indices else 0
+        if position == 0:
+            self._cursor = (min_ix, 0)
+            return
+
+        self._cursor = (max_ix, position)
+        self._current_file_obj.seek(position)
 
     
     def flush(self) -> None:
@@ -360,3 +504,18 @@ class RotatingFile(io.IOBase):
                     subfile_object.flush()
                 except Exception as e:
                     warn(f"Failed to flush subfile:\n{traceback.format_exc()}")
+        if self.redirect_streams:
+            sys.stdout.flush()
+            sys.stderr.flush()
+
+
+    def __repr__(self) -> str:
+        """
+        Return basic info for this `RotatingFile`.
+        """
+        return (
+            "RotatingFile("
+            + f"'{self.file_path.as_posix()}', "
+            + f"num_files_to_keep={self.num_files_to_keep}, "
+            + f"max_file_size={self.max_file_size})"
+        )

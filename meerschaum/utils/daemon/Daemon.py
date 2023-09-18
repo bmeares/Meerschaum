@@ -7,7 +7,7 @@ Manage running daemons via the Daemon class.
 """
 
 from __future__ import annotations
-import os, pathlib, threading, json, shutil, datetime
+import os, pathlib, json, shutil, datetime, signal
 from meerschaum.utils.typing import Optional, Dict, Any, SuccessTuple, Callable, List, Union
 from meerschaum.config import get_config
 from meerschaum.config._paths import DAEMON_RESOURCES_PATH, LOGS_RESOURCES_PATH
@@ -17,8 +17,7 @@ from meerschaum.utils.packages import attempt_import, venv_exec
 from meerschaum.utils.daemon._names import get_new_daemon_name
 from meerschaum.utils.daemon.RotatingFile import RotatingFile
 from meerschaum.utils.daemon.Log import Log
-
-LOG_REFRESH_SECONDS: float = 5.0
+from meerschaum.utils.threading import RepeatTimer
 
 class Daemon:
     """Manage running daemons via the Daemon class."""
@@ -134,39 +133,41 @@ class Daemon:
         daemon = attempt_import('daemon')
 
         if platform.system() == 'Windows':
-            success, msg = self._run_windows(
-                keep_daemon_output = keep_daemon_output,
-                allow_dirty_run = allow_dirty_run,
-            )
-            rc = 0 if success else 1
-            os._exit(rc)
+            return False, "Windows is no longer supported."
 
         self._setup(allow_dirty_run)
 
-        context = daemon.DaemonContext(
+        self._daemon_context = daemon.DaemonContext(
             pidfile = self.pid_lock,
             stdout = self.rotating_log,
             stderr = self.rotating_log,
             working_directory = os.getcwd(),
             detach_process = True,
             files_preserve = list(self.rotating_log.subfile_objects.values()),
+            signal_map = {
+                signal.SIGINT: self._handle_interrupt,
+                signal.SIGTERM: self._handle_sigterm,
+            },
         )
-        log_refresh_timer = threading.Timer(LOG_REFRESH_SECONDS, self.rotating_log.refresh_files)
 
-        with context:
+        log_refresh_seconds = get_config('jobs', 'logs', 'refresh_files_seconds')
+        self._log_refresh_timer = RepeatTimer(log_refresh_seconds, self.rotating_log.refresh_files)
+
+        with self._daemon_context:
             try:
                 with open(self.pid_path, 'w+') as f:
                     f.write(str(os.getpid()))
 
-                log_refresh_timer.start()
+                self._log_refresh_timer.start()
                 result = self.target(*self.target_args, **self.target_kw)
-
-                ### Stop the timer and perform one final refresh, just in case.
-                log_refresh_timer.cancel()
-                _ = self.rotating_log.refresh_files()
             except Exception as e:
                 warn(e, stacklevel=3)
                 result = e
+            finally:
+                self._log_refresh_timer.cancel()
+                self.rotating_log.close()
+                if self.pid_path.exists():
+                    self.pid_path.unlink()
 
             if keep_daemon_output:
                 self.properties['process']['ended'] = datetime.datetime.utcnow().isoformat()
@@ -175,95 +176,6 @@ class Daemon:
             else:
                 self.cleanup()
             return result
-
-
-    def _run_windows(
-            self,
-            keep_daemon_output: bool = True,
-            allow_dirty_run: bool = False,
-            debug: bool = False,
-        ) -> SuccessTuple:
-        """
-        Run the Daemon from Windows.
-        """
-        import sys
-        from meerschaum.utils.process import run_process
-        from meerschaum.config._paths import PACKAGE_ROOT_PATH
-        self._setup(allow_dirty_run)
-        target_module = attempt_import(self.target.__module__, lazy=False, install=False)
-        target_root_module_name = target_module.__name__.split('.')[0]
-        target_root_module = attempt_import(target_root_module_name, lazy=False, install=False)
-        target_root_module_path = pathlib.Path(target_root_module.__file__)
-        target_parent_path = (
-            target_root_module_path.parent.parent
-            if target_root_module_path.name == '__init__.py'
-            else target_root_module.parent
-        )
-
-        temp_script_path = self.path / 'entry.py'
-        temp_script_path.parent.mkdir(exist_ok=True)
-        code_to_write = (
-            "import sys\n"
-            + "import pathlib\n"
-            + "\n"
-            + f"pid_path = '{self.pid_path.as_posix()}'\n"
-            + f"stdout_path = '{self.stdout_path.as_posix()}'\n"
-            + f"stderr_path = '{self.stderr_path.as_posix()}'\n"
-            + f"args = {json.dumps(self.target_args)}\n"
-            + f"kw = {json.dumps(self.target_kw)}\n"
-            + "\n"
-            + f"sys.path[0] = '{PACKAGE_ROOT_PATH.parent.as_posix()}'\n"
-            + "from meerschaum.utils.packages import attempt_import\n"
-            + "daemoniker = attempt_import('daemoniker')\n"
-            + "\n"
-            + "with daemoniker.Daemonizer() as (is_setup, daemonizer):\n"
-            + "    if is_setup:\n"
-            + "        pass\n"
-            + "    is_parent, args, kw = daemonizer(\n"
-            + "        pid_path,\n"
-            + "        args,\n"
-            + "        kw,\n"
-            + "        stdout_goto = stdout_path,\n"
-            + "        stderr_goto = stderr_path,\n"
-            + ")\n"
-            + "    if is_parent:\n"
-            + "        pass"
-            + "\n"
-            + "sighandler = daemoniker.SignalHandler1(pid_path)\n"
-            + "sighandler.start()\n"
-            + "\n"
-            + f"sys.path.insert(0, '{target_parent_path.as_posix()}')\n"
-            + "try:\n"
-            + f"    from {self.target.__module__} import {self.target.__name__}\n"
-            + "    imported = True\n"
-            + "except Exception as e:\n"
-            + "    print(f'Failed to import job module with exception: {e}')\n"
-            + "    imported = False\n"
-            + "if imported:\n"
-            + "    " + self.target.__name__ + "(*args, **kw)\n"
-            + "\n"
-            + "import datetime\n"
-            + "from meerschaum.utils.daemon import Daemon\n"
-            + f"daemon = Daemon(daemon_id='{self.daemon_id}')\n"
-            + f"keep_daemon_output = {keep_daemon_output}\n"
-            + "if keep_daemon_output:\n"
-            + "    now = datetime.datetime.utcnow()\n"
-            + "    daemon.properties['process']['ended'] = now.isoformat()\n"
-            + "    daemon.write_properties()\n"
-            + "else:\n"
-            + "    daemon.cleanup()\n"
-        )
-        with open(temp_script_path, 'w', encoding='utf-8') as f:
-            f.write(code_to_write)
-
-        return_code = run_process([sys.executable, temp_script_path.as_posix()])
-        success = return_code == 0
-        msg = (
-            f"Succesfully started Daemon '{self.daemon_id}'." 
-            if success
-            else f"Failed to start Daemon '{self.daemon_id}'."
-        )
-        return success, msg
 
 
     def run(
@@ -296,11 +208,7 @@ class Daemon:
             return _write_pickle_success_tuple
 
         if platform.system() == 'Windows':
-            return self._run_windows(
-                keep_daemon_output = keep_daemon_output,
-                allow_dirty_run = True,
-                debug = debug,
-            )
+            return False, "Cannot run background jobs on Windows."
 
         _launch_daemon_code = (
             "from meerschaum.utils.daemon import Daemon; "
@@ -319,15 +227,14 @@ class Daemon:
 
         Parameters
         ----------
-        timeout: Optional[int] :
-             (Default value = 3)
+        timeout: Optional[int], default 3
+            How many seconds to wait for the process to terminate.
 
         Returns
         -------
         A SuccessTuple indicating success.
         """
-        daemoniker, psutil = attempt_import('daemoniker', 'psutil')
-        success, msg = self._send_signal(daemoniker.SIGTERM, timeout=timeout)
+        success, msg = self._send_signal(signal.SIGTERM, timeout=timeout)
         if success:
             return success, msg
         process = self.process
@@ -336,7 +243,7 @@ class Daemon:
         try:
             process.terminate()
             process.kill()
-            process.wait(timeout=10)
+            process.wait(timeout=timeout)
         except Exception as e:
             return False, f"Failed to kill job {self} with exception: {e}"
         return True, "Success"
@@ -344,12 +251,40 @@ class Daemon:
 
     def quit(self, timeout: Optional[int] = 3) -> SuccessTuple:
         """Gracefully quit a running daemon."""
-        daemoniker, psutil = attempt_import('daemoniker', 'psutil')
-        return self._send_signal(daemoniker.SIGINT, timeout=timeout)
+        return self._send_signal(signal.SIGINT, timeout=timeout)
 
+
+    def _handle_interrupt(self, signal_number: int, stack_frame: 'frame') -> None:
+        """
+        Handle `SIGINT` within the Daemon context.
+        This method is injected into the `DaemonContext`.
+        """
+        timer = self.__dict__.get('_log_refresh_timer', None)
+        if timer is not None:
+            timer.cancel()
+
+        daemon_context = self.__dict__.get('_daemon_context', None)
+        if daemon_context is not None:
+            daemon_context.close()
+
+        os.kill(os.getpid(), signal.SIGTERM)
+
+
+    def _handle_sigterm(self, signal_number: int, stack_frame: 'frame') -> None:
+        """
+        Handle `SIGTERM` within the `Daemon` context.
+        This method is injected into the `DaemonContext`.
+        """
+        timer = self.__dict__.get('_log_refresh_timer', None)
+        if timer is not None:
+            timer.cancel()
+
+        raise KeyboardInterrupt(f"Exiting on signal {signal_number}.")
+
+ 
     def _send_signal(
             self,
-            signal,
+            signal_to_send,
             timeout: Optional[Union[float, int]] = 3,
             check_timeout_interval: float = 0.1,
         ) -> SuccessTuple:
@@ -357,9 +292,8 @@ class Daemon:
 
         Parameters
         ----------
-        signal:
-            The signal the send to the daemon.
-            Examples include `daemoniker.SIGINT` and `daemoniker.SIGTERM`.
+        signal_to_send:
+            The signal the send to the daemon, e.g. `signals.SIGINT`.
 
         timeout:
             The maximum number of seconds to wait for a process to terminate.
@@ -374,10 +308,9 @@ class Daemon:
         A SuccessTuple indicating success.
         """
         import time
-        daemoniker = attempt_import('daemoniker')
 
         try:
-            daemoniker.send(str(self.pid_path.as_posix()), signal)
+            os.kill(int(self.pid), signal_to_send)
         except Exception as e:
             return False, str(e)
         if timeout is None:
@@ -393,24 +326,6 @@ class Daemon:
             + ('s' if timeout != 1 else '') + '.'
         )
 
-    @property
-    def sighandler(self) -> Optional[daemoniker.SignalHandler1]:
-        """
-        If the process is not running, return `None`.
-        """
-        def _quit(*args, **kw):
-            from meerschaum.__main__ import _exit
-            _exit()
-
-        daemoniker = attempt_import('daemoniker')
-        if '_sighandler' not in self.__dict__:
-            self._sighandler = daemoniker.SignalHandler1(
-                str(self.pid_path.as_posix()),
-                sigint = _quit,
-                sigterm = _quit,
-                sigabrt = _quit,
-            )
-        return self._sighandler
 
     def mkdir_if_not_exists(self, allow_dirty_run: bool = False):
         """Create the Daemon's directory.
@@ -488,14 +403,7 @@ class Daemon:
         if '_rotating_log' in self.__dict__:
             return self._rotating_log
 
-        num_files_to_keep = get_config('system', 'daemons', 'num_files_to_keep')
-        max_file_size = get_config('system', 'daemons', 'max_file_size')
-        self._rotating_log = RotatingFile(
-            self.log_path,
-            num_files_to_keep = num_files_to_keep,
-            max_file_size = max_file_size,
-            redirect_streams = True,
-        )
+        self._rotating_log = RotatingFile(self.log_path, redirect_streams=True)
         return self._rotating_log
 
 
@@ -728,4 +636,4 @@ class Daemon:
         return self.daemon_id == other.daemon_id
 
     def __hash__(self):
-        return hash(self.daemon_id)
+        return hash(self.daemon_id)       

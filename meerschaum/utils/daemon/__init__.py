@@ -52,12 +52,13 @@ def daemon_action(**kw) -> SuccessTuple:
     from meerschaum.utils.packages import run_python_package
     from meerschaum.utils.threading import Thread
     from meerschaum._internal.arguments._parse_arguments import parse_dict_to_sysargs
-    from meerschaum.actions import actions
+    from meerschaum.actions import get_action
 
     kw['daemon'] = True
     kw['shell'] = False
 
-    if kw.get('action', None) and kw.get('action')[0] not in actions:
+    action = kw.get('action', None)
+    if action and get_action(action) is None:
         if not kw.get('allow_shell_job') and not kw.get('force'):
             return False, (
                 f"Action '{kw.get('action')[0]}' isn't recognized.\n\n"

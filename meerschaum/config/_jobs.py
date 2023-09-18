@@ -8,7 +8,10 @@ Default configuration for jobs.
 
 default_jobs_config = {
     'logs' : {
+        'num_files_to_keep': 5,
+        'max_file_size': 100_000,
         'lines_to_show': 30,
+        'refresh_files_seconds': 5.0,
         'min_buffer_len': 15,
         'colors' : [
             'cyan', 'magenta', 'orange3', 'green', 'blue', 'red', 'spring_green3',
