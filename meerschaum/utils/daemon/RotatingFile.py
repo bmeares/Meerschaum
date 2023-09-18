@@ -442,6 +442,7 @@ class RotatingFile(io.IOBase):
         ]
 
         lines = []
+        refresh_cursor = True
         for subfile_path in paths_to_read:
             subfile_index = self.get_index_from_subfile_name(subfile_path.name)
             seek_ix = (
@@ -463,6 +464,11 @@ class RotatingFile(io.IOBase):
                     f.seek(seek_ix)
                     subfile_lines = f.readlines()
 
+                    ### Handle the case when no files have yet been opened.
+                    if not self.subfile_objects and subfile_path == paths_to_read[-1]:
+                        self._cursor = (subfile_index, f.tell())
+                        refresh_cursor = False
+
             ### Sometimes a line may span multiple files.
             if lines and subfile_lines and not lines[-1].endswith('\n'):
                 lines[-1] += subfile_lines[0]
@@ -471,7 +477,8 @@ class RotatingFile(io.IOBase):
                 new_lines = subfile_lines
             lines.extend(new_lines)
 
-        self.refresh_cursor()
+        if refresh_cursor:
+            self.refresh_cursor()
         return lines
 
 

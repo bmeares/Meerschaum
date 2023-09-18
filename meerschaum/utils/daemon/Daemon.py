@@ -7,7 +7,7 @@ Manage running daemons via the Daemon class.
 """
 
 from __future__ import annotations
-import os, pathlib, json, shutil, datetime, signal
+import os, pathlib, json, shutil, datetime, signal, sys
 from meerschaum.utils.typing import Optional, Dict, Any, SuccessTuple, Callable, List, Union
 from meerschaum.config import get_config
 from meerschaum.config._paths import DAEMON_RESOURCES_PATH, LOGS_RESOURCES_PATH
@@ -18,6 +18,7 @@ from meerschaum.utils.daemon._names import get_new_daemon_name
 from meerschaum.utils.daemon.RotatingFile import RotatingFile
 from meerschaum.utils.daemon.Log import Log
 from meerschaum.utils.threading import RepeatTimer
+from meerschaum.__main__ import _close_pools
 
 class Daemon:
     """Manage running daemons via the Daemon class."""
@@ -267,7 +268,10 @@ class Daemon:
         if daemon_context is not None:
             daemon_context.close()
 
-        os.kill(os.getpid(), signal.SIGTERM)
+        _close_pools()
+
+        ### NOTE: SystemExit() does not work here.
+        sys.exit(0)
 
 
     def _handle_sigterm(self, signal_number: int, stack_frame: 'frame') -> None:
@@ -279,7 +283,13 @@ class Daemon:
         if timer is not None:
             timer.cancel()
 
-        raise KeyboardInterrupt(f"Exiting on signal {signal_number}.")
+        daemon_context = self.__dict__.get('_daemon_context', None)
+        if daemon_context is not None:
+            daemon_context.close()
+
+        _close_pools()
+
+        raise SystemExit()
 
  
     def _send_signal(
@@ -395,7 +405,7 @@ class Daemon:
         """
         Return the log offset file path.
         """
-        return self.path / (self.daemon_id + '.log.offset')
+        return LOGS_RESOURCES_PATH / ('.' + self.daemon_id + '.log.offset')
 
     
     @property
@@ -412,7 +422,51 @@ class Daemon:
         """Read the log files and return their contents.
         Returns `None` if the log file does not exist.
         """
-        return self.rotating_log.read()
+        new_rotating_log = RotatingFile(
+            self.rotating_log.file_path,
+            num_files_to_keep = self.rotating_log.num_files_to_keep,
+            max_file_size = self.max_file_size,
+        )
+        return new_rotating_log.read()
+
+
+    def readlines(self) -> List[str]:
+        """
+        Read the next log lines, persisting the cursor for later use.
+        Note this will alter the cursor of `self.rotating_log`.
+        """
+        self.rotating_log._cursor = self._read_log_offset()
+        lines = self.rotating_log.readlines()
+        self._write_log_offset()
+        return lines
+
+
+    def _read_log_offset(self) -> Tuple[int, int]:
+        """
+        Return the current log offset cursor.
+
+        Returns
+        -------
+        A tuple of the form (`subfile_index`, `position`).
+        """
+        if not self.log_offset_path.exists():
+            return 0, 0
+
+        with open(self.log_offset_path, 'r', encoding='utf-8') as f:
+            cursor_text = f.read()
+        cursor_parts = cursor_text.split(' ')
+        subfile_index, subfile_position = int(cursor_parts[0]), int(cursor_parts[1])
+        return subfile_index, subfile_position
+
+
+    def _write_log_offset(self) -> None:
+        """
+        Write the current log offset file.
+        """
+        with open(self.log_offset_path, 'w+', encoding='utf-8') as f:
+            subfile_index = self.rotating_log._cursor[0]
+            subfile_position = self.rotating_log._cursor[1]
+            f.write(f"{subfile_index} {subfile_position}")
 
 
     @property

@@ -617,7 +617,7 @@ def _show_logs(
         watchgod = attempt_import('watchgod')
         rich = import_rich()
         rich_text = attempt_import('rich.text')
-        _watch_daemon_ids = {d.daemon_id for d in daemons}
+        _watch_daemon_ids = {d.daemon_id: d for d in daemons}
         info("Watching log files...")
 
         def _print_job_line(daemon, line):
@@ -636,35 +636,33 @@ def _show_logs(
 
 
         def _print_log_lines(daemon):
-            if not daemon.log_path.exists():
-                return
-            for line in daemon.log:
+            for line in daemon.readlines():
                 _print_job_line(daemon, line)
 
         def _seek_back_offset(d) -> bool:
-            if not d.log_offset_path.exists():
-                d.log.read()
-            if not d.log_offset_path.exists():
-                return False
+            if d.log_offset_path.exists():
+                d.log_offset_path.unlink()
 
-            log_text = d.log_text
-            if log_text is None:
-                return False
+            latest_subfile_path = d.rotating_log.get_latest_subfile_path()
+            latest_subfile_index = d.rotating_log.get_latest_subfile_index()
+            with open(latest_subfile_path, 'r', encoding='utf-8') as f:
+                latest_lines = f.readlines()
+
             lines_to_show = get_config('jobs', 'logs', 'lines_to_show')
+            positions_to_rewind = len(''.join(latest_lines[(-1 * lines_to_show):]))
+            backup_index = len(''.join(latest_lines)) - positions_to_rewind
 
-            log_text_lines = log_text.splitlines()
-            backup_index = len('\n'.join(log_text_lines[(-1 * lines_to_show):]))
-
-            with open(d.log_offset_path, 'r', encoding='utf-8') as f:
-                offset_lines = f.readlines()
-                char_index = int(offset_lines[-1].rstrip('\n'))
-                new_offset_lines = [
-                    str(max(char_index - backup_index, 0))
-                ]
-            with open(d.log_offset_path, 'w', encoding='utf-8') as f:
-                f.writelines(new_offset_lines)
+            d.rotating_log._cursor = (
+                latest_subfile_index,
+                max(0, backup_index)
+            )
+            d._write_log_offset()
             return True
 
+        daemons_being_watched = {
+            d.daemon_id: d
+            for d in daemons
+        }
         for d in daemons:
             _seek_back_offset(d)
             _print_log_lines(d)
@@ -676,17 +674,16 @@ def _show_logs(
                     return
                 for change in changes:
                     file_path_str = change[1]
-                    if '.log' not in file_path_str:
+                    if '.log' not in file_path_str or '.log.offset' in file_path_str:
                         continue
                     file_path = pathlib.Path(file_path_str)
                     if not file_path.exists():
                         continue
-                    daemon_id = file_path.name.replace('.log', '')
+                    daemon_id = file_path.name.split('.log')[0]
                     if daemon_id not in _watch_daemon_ids and action:
                         continue
                     daemon = Daemon(daemon_id=daemon_id)
-                    if daemon.log_path.exists():
-                        _print_log_lines(daemon)
+                    _print_log_lines(daemon)
         loop = asyncio.new_event_loop()
         try:
             loop.run_until_complete(_watch_logs())
