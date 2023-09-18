@@ -21,6 +21,7 @@ daq = attempt_import('dash_daq', warn=False, check_update=CHECK_UPDATE)
 from meerschaum.api.dash.components import (
     go_button, search_parameters_editor, test_button,
     get_items_menu, bottom_buttons_content, console_div, download_dataframe, navbar,
+    download_logs,
 )
 from meerschaum.api.dash.keys import (
     keys_lists_content, text_tab_content, dropdown_tab_content
@@ -32,6 +33,7 @@ layout = html.Div(
         html.Div(id='websocket-div'),
         keys_lists_content,
         download_dataframe,
+        download_logs,
         dcc.Interval(
             id = 'check-input-interval',
             interval = 1 * 1000,

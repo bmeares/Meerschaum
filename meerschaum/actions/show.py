@@ -682,8 +682,15 @@ def _show_logs(
                     daemon_id = file_path.name.split('.log')[0]
                     if daemon_id not in _watch_daemon_ids and action:
                         continue
-                    daemon = Daemon(daemon_id=daemon_id)
-                    _print_log_lines(daemon)
+                    try:
+                        daemon = Daemon(daemon_id=daemon_id)
+                    except Exception as e:
+                        daemon = None
+                        warn(f"Seeing new logs for non-existent job '{daemon_id}'.", stack=False)
+
+                    if daemon is not None:
+                        _print_log_lines(daemon)
+
         loop = asyncio.new_event_loop()
         try:
             loop.run_until_complete(_watch_logs())

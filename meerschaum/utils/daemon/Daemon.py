@@ -161,6 +161,7 @@ class Daemon:
 
                 self._log_refresh_timer.start()
                 result = self.target(*self.target_args, **self.target_kw)
+                self.properties['result'] = result
             except Exception as e:
                 warn(e, stacklevel=3)
                 result = e
@@ -171,12 +172,38 @@ class Daemon:
                     self.pid_path.unlink()
 
             if keep_daemon_output:
-                self.properties['process']['ended'] = datetime.datetime.utcnow().isoformat()
-                self.properties['result'] = result
-                self.write_properties()
+                self._capture_process_timestamp('ended')
             else:
                 self.cleanup()
+
             return result
+
+
+    def _capture_process_timestamp(
+            self,
+            process_key: str,
+            write_properties: bool = True,
+        ) -> None:
+        """
+        Record the current timestamp to the parameters `process:<process_key>`.
+
+        Parameters
+        ----------
+        process_key: str
+            Under which key to store the timestamp.
+
+        write_properties: bool, default True
+            If `True` persist the properties to disk immediately after capturing the timestamp.
+        """
+        if 'process' not in self.properties:
+            self.properties['process'] = {}
+
+        if process_key not in ('began', 'ended', 'paused'):
+            raise ValueError(f"Invalid key '{process_key}'.")
+
+        self.properties['process'][process_key] = datetime.datetime.utcnow().isoformat()
+        if write_properties:
+            self.write_properties()
 
 
     def run(
@@ -209,7 +236,7 @@ class Daemon:
         ### The daemon might exist and be paused.
         if self.status == 'paused':
             self.process.resume()
-            return True, f"Resumed daemon '{self.daemon_id}'."
+            return True, "Success"
 
         self.mkdir_if_not_exists(allow_dirty_run)
         _write_pickle_success_tuple = self.write_pickle()
@@ -224,6 +251,7 @@ class Daemon:
         )
         _launch_success_bool = venv_exec(_launch_daemon_code, debug=debug, venv=None)
         msg = "Success" if _launch_success_bool else f"Failed to start daemon '{self.daemon_id}'."
+        self._capture_process_timestamp('began')
         return _launch_success_bool, msg
 
 
@@ -243,6 +271,7 @@ class Daemon:
         if self.status != 'paused':
             success, msg = self._send_signal(signal.SIGTERM, timeout=timeout)
             if success:
+                self._capture_process_timestamp('ended')
                 return success, msg
 
         if self.status == 'stopped':
@@ -255,6 +284,8 @@ class Daemon:
             process.wait(timeout=timeout)
         except Exception as e:
             return False, f"Failed to kill job {self} with exception: {e}"
+
+        self._capture_process_timestamp('ended')
         if self.pid_path.exists():
             try:
                 self.pid_path.unlink()
@@ -267,7 +298,10 @@ class Daemon:
         """Gracefully quit a running daemon."""
         if self.status == 'paused':
             return self.kill(timeout)
-        return self._send_signal(signal.SIGINT, timeout=timeout)
+        signal_success, signal_msg = self._send_signal(signal.SIGINT, timeout=timeout)
+        if signal_success:
+            self._capture_process_timestamp('ended')
+        return signal_success, signal_msg
 
 
     def pause(
@@ -290,12 +324,15 @@ class Daemon:
         if timeout is None:
             success = self.process.status() == 'stopped'
             msg = "Success" if success else f"Failed to suspend daemon '{self.daemon_id}'."
+            if success:
+                self._capture_process_timestamp('paused')
             return success, msg
 
         begin = time.perf_counter()
         while (time.perf_counter() - begin) < timeout:
             if self.process.status() == 'stopped':
-                return True, f"Successfully paused daemon '{self.daemon_id}'."
+                self._capture_process_timestamp('paused')
+                return True, "Success"
             time.sleep(check_timeout_interval)
 
         return False, (
@@ -324,12 +361,14 @@ class Daemon:
         if timeout is None:
             success = self.status == 'running'
             msg = "Success" if success else f"Failed to resume daemon '{self.daemon_id}'."
+            self._capture_process_timestamp('began')
             return success, msg
 
         begin = time.perf_counter()
         while (time.perf_counter() - begin) < timeout:
             if self.status == 'running':
-                return True, f"Successfully resumed daemon '{self.daemon_id}'."
+                self._capture_process_timestamp('began')
+                return True, "Success"
             time.sleep(check_timeout_interval)
 
         return False, (
@@ -409,7 +448,7 @@ class Daemon:
         begin = time.perf_counter()
         while (time.perf_counter() - begin) < timeout:
             if not self.pid_path.exists():
-                return True, f"Successfully stopped daemon '{self.daemon_id}'."
+                return True, "Success"
             time.sleep(check_timeout_interval)
 
         return False, (
@@ -479,6 +518,7 @@ class Daemon:
         """
         return DAEMON_RESOURCES_PATH / self.daemon_id
 
+
     @property
     def properties_path(self) -> pathlib.Path:
         """
@@ -520,7 +560,7 @@ class Daemon:
         new_rotating_log = RotatingFile(
             self.rotating_log.file_path,
             num_files_to_keep = self.rotating_log.num_files_to_keep,
-            max_file_size = self.max_file_size,
+            max_file_size = self.rotating_log.max_file_size,
         )
         return new_rotating_log.read()
 
@@ -665,7 +705,7 @@ class Daemon:
         if self._properties is None:
             self._properties = {}
         if _file_properties is not None:
-            self._properties = apply_patch_to_config(self._properties, _file_properties)
+            self._properties = apply_patch_to_config(_file_properties, self._properties)
         return self._properties
 
 
@@ -714,7 +754,6 @@ class Daemon:
         """
         Update properties before starting the Daemon.
         """
-        began = datetime.datetime.utcnow()
         if self.properties is None:
             self._properties = {}
 
@@ -724,9 +763,6 @@ class Daemon:
                 'module': self.target.__module__,
                 'args': self.target_args,
                 'kw': self.target_kw,
-            },
-            'process': {
-                'began': began.isoformat(),
             },
         })
         self.mkdir_if_not_exists(allow_dirty_run)

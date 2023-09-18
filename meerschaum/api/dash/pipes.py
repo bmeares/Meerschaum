@@ -37,7 +37,7 @@ def pipe_from_ctx(ctx, trigger_property: str = 'n_clicks') -> Union[mrsm.Pipe, N
     try:
         ### I know this looks confusing and feels like a hack.
         ### Because Dash JSON-ifies the ID dictionary and we are including a JSON-ified dictionary,
-        ### we have to do some crazy parsing to get the pipe's meta-dict bac out of it
+        ### we have to do some crazy parsing to get the pipe's meta-dict back out of it
         meta = json.loads(json.loads(ctx[0]['prop_id'].split('.' + trigger_property)[0])['index'])
     except Exception as e:
         meta = None
@@ -110,16 +110,6 @@ def get_pipes_cards(*keys):
     if not isinstance(_pipes, list):
         _pipes = []
     for p in _pipes:
-        #  newest_time = p.get_sync_time(newest=True, debug=debug)
-        #  oldest_time = p.get_sync_time(newest=False, debug=debug)
-        #  if newest_time is not None and newest_time == oldest_time:
-            #  newest_time = p.get_sync_time(newest=True, round_down=False, debug=debug)
-            #  oldest_time = p.get_sync_time(newest=False, round_down=False, debug=debug)
-
-        #  date_text = (html.Pre(f'Date range:\n{newest_time}\n{oldest_time}')
-        #  if newest_time is not None and oldest_time is not None
-        #  else html.P('No date information available.'))
-
         footer_children = dbc.Row([
             dbc.Col(
                 dbc.Button(
@@ -129,27 +119,17 @@ def get_pipes_cards(*keys):
                     id = {'type': 'pipe-download-csv-button', 'index': json.dumps(p.meta)},
                 )
             ),
-            #  dbc.Col(
-                #  dbc.Button(
-                    #  'Sync',
-                    #  size = 'sm',
-                    #  id = {'type': 'pipe-sync-button', 'index': json.dumps(p.meta)}
-                #  )
-            #  ),
         ])
         card_body_children = [
             html.H5(html.B(str(p)), className='card-title', style={'font-family': ['monospace']}),
-            #  html.P(str(p)),
             html.Div(dbc.Accordion(accordion_items_from_pipe(p), flush=True,
                 start_collapsed=True,
                 id={'type': 'pipe-accordion', 'index': json.dumps(p.meta)},
-                #  persistence=True,
             ))
 
         ]
         cards.append(
             dbc.Card(children=[
-                #  dbc.CardHeader(),
                 dbc.CardBody(children=card_body_children),
                 dbc.CardFooter(children=footer_children),
             ])

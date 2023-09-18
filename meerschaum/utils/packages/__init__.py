@@ -632,7 +632,7 @@ def need_update(
             )
 
     ### We might be depending on a prerelease.
-    ### Sanity check that the required version is not greater than the installed version.
+    ### Sanity check that the required version is not greater than the installed version. 
     try:
         return (
             (not semver.Version.parse(version).match(required_version))
@@ -648,8 +648,6 @@ def need_update(
     except Exception as e:
         print(f"Unable to parse version ({version}) for package '{import_name}'.")
         print(e)
-        #  import traceback
-        #  traceback.print_exc()
         if debug:
             dprint(e)
         return False

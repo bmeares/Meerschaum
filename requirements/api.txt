@@ -11,7 +11,7 @@ httpx>=0.24.1
 numpy>=1.18.5
 pandas[parquet]>=2.0.1
 dask>=2023.9.0
-pytz>=2022.1.0
+pytz
 joblib>=0.17.0
 SQLAlchemy>=2.0.5
 databases>=0.4.0

@@ -78,6 +78,7 @@ sidebar = dbc.Offcanvas(
 )
 
 download_dataframe = dcc.Download(id='download-dataframe-csv')
+download_logs = dcc.Download(id='download-logs')
 
 instance_select = dbc.Select(
     id = 'instance-select',
@@ -113,13 +114,6 @@ navbar = dbc.Navbar(
             dbc.Collapse(
                 dbc.Row(
                     [
-                        #  dbc.Col(
-                            #  dbc.Button(
-                                #  html.B("Open Shell"),
-                                #  outline = True,
-                                #  id = "open-shell-button"
-                            #  ),
-                        #  ),
                         dbc.Col(instance_select),
                         dbc.Col(
                             dbc.Button(

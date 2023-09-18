@@ -30,6 +30,9 @@ default_formatting_config = {
         'idea'             : '💡',
         'connected'        : '🟢',
         'disconnected'     : '🔴',
+        'running'          : '🟢',
+        'paused'           : '🟡',
+        'stopped'          : '🔴',
     },
     'pipes'                : {
         'unicode'          : {

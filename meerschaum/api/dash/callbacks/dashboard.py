@@ -503,7 +503,6 @@ def ws_send(n_clicks: int, url, session_store_data: Dict[str, Any], *states):
 @dash_app.callback(
     Output('content-div-right', 'children'),
     Input('ws', 'message'),
-    #  prevent_initial_call = True,
 )
 def ws_receive(message):
     """
@@ -539,22 +538,9 @@ dash_app.clientside_callback(
     State('location', 'href'),
 )
 
-#  dash_app.clientside_callback(
-    #  """
-    #  function(line_buffer){
-        #  var term = new Terminal();
-        #  term.open(document.getElementById('terminal'));
-        #  term.write('Hello from \x1B[1;3;31mxterm.js\x1B[0m $ ')
-    #  }
-    #  """,
-    #  Output('location', 'href'),
-    #  Input('line-buffer', 'value'),
-#  )
-
 @dash_app.callback(
     Output("download-dataframe-csv", "data"),
     Input({'type': 'pipe-download-csv-button', 'index': ALL}, 'n_clicks'),
-    #  prevent_initial_call = True,
 )
 def download_pipe_csv(n_clicks):
     if not n_clicks:
@@ -741,7 +727,6 @@ def sign_out_button_click(
     Output({'type': 'parameters-editor', 'index': MATCH}, 'value'),
     Input({'type': 'parameters-as-yaml-button', 'index': MATCH}, 'n_clicks'),
     Input({'type': 'parameters-as-json-button', 'index': MATCH}, 'n_clicks'),
-    #  prevent_initial_callback = True,
 )
 def parameters_as_yaml_or_json_click(
         yaml_n_clicks: Optional[int],
