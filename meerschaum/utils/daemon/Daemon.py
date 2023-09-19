@@ -7,7 +7,7 @@ Manage running daemons via the Daemon class.
 """
 
 from __future__ import annotations
-import os, pathlib, json, shutil, datetime, signal, sys, time
+import os, pathlib, json, shutil, datetime, signal, sys, time, traceback
 from meerschaum.utils.typing import Optional, Dict, Any, SuccessTuple, Callable, List, Union
 from meerschaum.config import get_config
 from meerschaum.config._paths import DAEMON_RESOURCES_PATH, LOGS_RESOURCES_PATH
@@ -235,8 +235,7 @@ class Daemon:
 
         ### The daemon might exist and be paused.
         if self.status == 'paused':
-            self.process.resume()
-            return True, "Success"
+            return self.resume()
 
         self.mkdir_if_not_exists(allow_dirty_run)
         _write_pickle_success_tuple = self.write_pickle()
@@ -361,7 +360,8 @@ class Daemon:
         if timeout is None:
             success = self.status == 'running'
             msg = "Success" if success else f"Failed to resume daemon '{self.daemon_id}'."
-            self._capture_process_timestamp('began')
+            if success:
+                self._capture_process_timestamp('began')
             return success, msg
 
         begin = time.perf_counter()
@@ -442,7 +442,8 @@ class Daemon:
         try:
             os.kill(int(self.pid), signal_to_send)
         except Exception as e:
-            return False, str(e)
+            return False, f"Failed to send signal {signal_to_send}:\n{traceback.format_exc()}"
+
         if timeout is None:
             return True, f"Successfully sent '{signal}' to daemon '{self.daemon_id}'."
         begin = time.perf_counter()

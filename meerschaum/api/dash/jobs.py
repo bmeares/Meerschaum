@@ -24,6 +24,7 @@ from meerschaum.utils.daemon import (
     Daemon,
 )
 from meerschaum.config import get_config
+from meerschaum.utils.misc import sorted_dict
 
 STATUS_EMOJI: Dict[str, str] = {
     'running': get_config('formatting', 'emoji', 'running'),
@@ -68,7 +69,7 @@ def get_jobs_cards(state: WebState):
         )
 
         body_children = [
-            html.H4(d.daemon_id, className="card-title"),
+            html.H4(html.B(d.daemon_id), className="card-title"),
             html.Div(
                 html.P(
                     d.label,
@@ -174,7 +175,6 @@ def build_status_children(daemon: Daemon) -> List[html.P]:
     return html.P(
         html.B(status_str),
         className = f"{daemon.status}-job",
-        #  style = {'font-size': 'large'},
     )
 
 
@@ -183,9 +183,11 @@ def build_process_timestamps_children(daemon: Daemon) -> List[dbc.Row]:
     Return the children to the process timestamps in the footer of the job card.
     """
     children = []
-    for timestamp_key, timestamp_val in daemon.properties.get('process', {}).items():
+    for timestamp_key, timestamp_val in sorted_dict(
+        daemon.properties.get('process', {})
+    ).items():
         timestamp = dateutil_parser.parse(timestamp_val)
-        timestamp_str = timestamp.strftime('%Y-%m-%d %-H:%M UTC')
+        timestamp_str = timestamp.strftime('%Y-%m-%d %H:%M UTC')
         children.append(
             dbc.Row(
                 [

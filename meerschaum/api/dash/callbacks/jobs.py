@@ -10,6 +10,7 @@ from __future__ import annotations
 import json
 import functools
 import time
+import traceback
 from meerschaum.utils.typing import Optional, Dict, Any
 from meerschaum.api import get_api_connector, endpoints, CHECK_UPDATE
 from meerschaum.api.dash import dash_app, debug, active_sessions
@@ -114,7 +115,7 @@ def manage_job_button_click(
     try:
         success, msg = manage_functions[manage_job_action]()
     except Exception as e:
-        success, msg = False, str(e)
+        success, msg = False, traceback.format_exc()
 
     ### Wait for a status change before building the elements.
     timeout_seconds = 1.0
