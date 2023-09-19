@@ -11,6 +11,7 @@ import json
 import functools
 import time
 import traceback
+import meerschaum as mrsm
 from meerschaum.utils.typing import Optional, Dict, Any
 from meerschaum.api import get_api_connector, endpoints, CHECK_UPDATE
 from meerschaum.api.dash import dash_app, debug, active_sessions
@@ -18,6 +19,7 @@ from meerschaum.utils.packages import attempt_import, import_dcc, import_html
 dash = attempt_import('dash', lazy=False, check_update=CHECK_UPDATE)
 from dash.exceptions import PreventUpdate
 from dash.dependencies import Input, Output, State, ALL, MATCH
+from dash import Patch
 html, dcc = import_html(check_update=CHECK_UPDATE), import_dcc(check_update=CHECK_UPDATE)
 import dash_bootstrap_components as dbc
 from meerschaum.api.dash.components import alert_from_success_tuple, build_cards_grid
@@ -135,19 +137,53 @@ def manage_job_button_click(
 
 
 @dash_app.callback(
-    Output({'type': 'manage-job-alert-div', 'index': ALL}, 'children'),
     Output({'type': 'manage-job-buttons-div', 'index': ALL}, 'children'),
     Output({'type': 'manage-job-status-div', 'index': ALL}, 'children'),
     Output({'type': 'process-timestamps-div', 'index': ALL}, 'children'),
     Input('refresh-jobs-interval', 'n_intervals'),
+    State('session-store', 'data'),
     prevent_initial_call = True,
 )
-def refresh_jobs_on_interval(n_intervals):
+def refresh_jobs_on_interval(
+        n_intervals: Optional[int] = None,
+        session_data: Optional[Dict[str, Any]] = None,
+    ):
     """
     When the jobs refresh interval fires, rebuild the jobs' onscreen components.
     """
-    ctx = dash.callback_context
-    test_children = [html.P(str(n_intervals))]
-    return test_children, test_children, test_children, test_children
-
     raise PreventUpdate
+    session_id = session_data.get('session-id', None)
+    is_authenticated = is_session_authenticated(session_id)
+
+    daemon_ids = [
+        component_dict['id']['index']
+        for component_dict in dash.callback_context.outputs_grouping[0]
+    ]
+
+    ### NOTE: The daemon may have been deleted, but the card may still exist.
+    daemons = []
+    for daemon_id in daemon_ids:
+        try:
+            daemon = Daemon(daemon_id=daemon_id)
+        except Exception as e:
+            daemon = None
+        daemons.append(daemon)
+
+    return (
+        [
+            (
+                build_manage_job_buttons_div_children(daemon)
+                if is_authenticated
+                else []
+            )
+            for daemon in daemons
+        ],
+        [
+            build_status_children(daemon)
+            for daemon in daemons
+        ],
+        [
+            build_process_timestamps_children(daemon)
+            for daemon in daemons
+        ],
+    )

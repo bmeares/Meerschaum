@@ -94,13 +94,20 @@ def run_daemon(
         allow_dirty_run = allow_dirty_run,
     )
 
+
 def get_daemons() -> List[Daemon]:
-    """ """
+    """
+    Return all existing Daemons.
+    """
     return [Daemon(daemon_id=d_id) for d_id in get_daemon_ids()]
 
+
 def get_daemon_ids() -> List[str]:
-    """ """
-    return os.listdir(DAEMON_RESOURCES_PATH)
+    """
+    Return the IDs of all daemons on disk.
+    """
+    return sorted(os.listdir(DAEMON_RESOURCES_PATH))
+
 
 def get_running_daemons(daemons: Optional[List[Daemon]] = None) -> List[Daemon]:
     """

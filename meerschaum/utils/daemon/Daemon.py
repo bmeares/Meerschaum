@@ -512,12 +512,28 @@ class Daemon:
         return 'running'
 
 
+    @classmethod
+    def _get_path_from_daemon_id(cls, daemon_id: str) -> pathlib.Path:
+        """
+        Return a Daemon's path from its `daemon_id`.
+        """
+        return DAEMON_RESOURCES_PATH / daemon_id
+
+
     @property
     def path(self) -> pathlib.Path:
         """
         Return the path for this Daemon's directory.
         """
-        return DAEMON_RESOURCES_PATH / self.daemon_id
+        return self._get_path_from_daemon_id(self.daemon_id)
+
+
+    @classmethod
+    def _get_properties_path_from_daemon_id(cls, daemon_id: str) -> pathlib.Path:
+        """
+        Return the `properties.json` path for a given `daemon_id`.
+        """
+        return cls._get_path_from_daemon_id(daemon_id) / 'properties.json'
 
 
     @property
@@ -525,7 +541,7 @@ class Daemon:
         """
         Return the `propterties.json` path for this Daemon.
         """
-        return self.path / 'properties.json'
+        return self._get_properties_path_from_daemon_id(self.daemon_id)
 
 
     @property
@@ -685,11 +701,6 @@ class Daemon:
             success, msg = False, str(e)
             daemon = None
             traceback.print_exception(type(e), e, e.__traceback__)
-            try:
-                if self.pickle_path.exists():
-                    self.pickle_path.unlink()
-            except Exception as ue:
-                traceback.print_exception(type(ue), ue, ue.__traceback__)
         if not success:
             error(msg)
         return daemon
@@ -794,6 +805,9 @@ class Daemon:
 
 
     def __getstate__(self):
+        """
+        Pickle this Daemon.
+        """
         dill = attempt_import('dill')
         return {
             'target': dill.dumps(self.target),
@@ -804,11 +818,28 @@ class Daemon:
             'properties': self.properties,
         }
 
-    def __setstate__(self, _state : Dict[str, Any]):
+    def __setstate__(self, _state: Dict[str, Any]):
+        """
+        Restore this Daemon from a pickled state.
+        If the properties file exists, skip the old pickled version.
+        """
         dill = attempt_import('dill')
         _state['target'] = dill.loads(_state['target'])
         self._pickle = True
-        self.__init__(**_state) 
+        daemon_id = _state.get('daemon_id', None)
+        if not daemon_id:
+            raise ValueError("Need a daemon_id to un-pickle a Daemon.")
+
+        properties_path = self._get_properties_path_from_daemon_id(daemon_id)
+        ignore_properties = properties_path.exists()
+        if ignore_properties:
+            _state = {
+                key: val
+                for key, val in _state.items()
+                if key != 'properties'
+            }
+        self.__init__(**_state)
+
 
     def __repr__(self):
         return str(self)

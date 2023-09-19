@@ -30,6 +30,7 @@ STATUS_EMOJI: Dict[str, str] = {
     'running': get_config('formatting', 'emoji', 'running'),
     'paused': get_config('formatting', 'emoji', 'paused'),
     'stopped': get_config('formatting', 'emoji', 'stopped'),
+    'dne': get_config('formatting', 'emoji', 'failure')
 }
 
 def get_jobs_cards(state: WebState):
@@ -79,7 +80,11 @@ def get_jobs_cards(state: WebState):
                 style={"white-space": "pre-wrap"},
             ),
             html.Div(
-                build_manage_job_buttons_div_children(d),
+                (
+                    build_manage_job_buttons_div_children(d)
+                    if is_authenticated
+                    else []
+                ),
                 id={'type': 'manage-job-buttons-div', 'index': d.daemon_id}
             ),
             html.Div(id={'type': 'manage-job-alert-div', 'index': d.daemon_id}),
@@ -119,6 +124,8 @@ def build_manage_job_buttons(daemon: Daemon):
     """
     Return the currently available job management buttons for a given Daemon.
     """
+    if daemon is None:
+        return []
     start_button = dbc.Button(
         'Start',
         size = 'sm',
@@ -167,6 +174,9 @@ def build_status_children(daemon: Daemon) -> List[html.P]:
     """
     Return the status HTML component for this daemon.
     """
+    if daemon is None:
+        return STATUS_EMOJI['dne']
+
     status_str = (
         STATUS_EMOJI.get(daemon.status, STATUS_EMOJI['stopped'])
         + ' '
@@ -182,6 +192,8 @@ def build_process_timestamps_children(daemon: Daemon) -> List[dbc.Row]:
     """
     Return the children to the process timestamps in the footer of the job card.
     """
+    if daemon is None:
+        return []
     children = []
     for timestamp_key, timestamp_val in sorted_dict(
         daemon.properties.get('process', {})

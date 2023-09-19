@@ -30,7 +30,6 @@ go_button = dbc.Button('Execute', id='go-button', color='primary', style={'width
 test_button = dbc.Button('Test', id='test-button', color='danger', style={'display' : 'none'})
 get_items_menu = dbc.DropdownMenu(
     label='More', id='get-items-menu', children=[
-        dbc.DropdownMenuItem("Jobs", id='get-jobs-button'),
         dbc.DropdownMenuItem("Plugins", id='get-plugins-button'),
         dbc.DropdownMenuItem("Users", id='get-users-button'),
         dbc.DropdownMenuItem("Graphs", id='get-graphs-button'),
@@ -41,14 +40,31 @@ get_items_menu = dbc.DropdownMenu(
     color='secondary',
     size='sm',
 )
-show_pipes_button = dbc.Button('Show Pipes', id='get-pipes-button', color='info', style={'width': '100%'})
-cancel_button = dbc.Button('Cancel', id='cancel-button', color='danger', style={'width': '100%'})
+show_pipes_button = dbc.Button(
+    'Pipes',
+    id = 'get-pipes-button',
+    color = 'info',
+    style = {'width': '100%'},
+)
+show_jobs_button = dbc.Button(
+    'Jobs',
+    id = 'get-jobs-button',
+    color = 'success',
+    style = {'width': '100%'},
+)
+cancel_button = dbc.Button(
+    'Terminal',
+    id = 'cancel-button',
+    color = 'dark',
+    style = {'width': '100%', 'background-color': 'black'},
+)
 bottom_buttons_content = dbc.Card(
     dbc.CardBody(
         dbc.Row([
-            dbc.Col(go_button, lg=3, md=3),
-            dbc.Col(cancel_button, lg=3, md=3),
-            dbc.Col(show_pipes_button, lg=3, md=3),
+            dbc.Col(go_button, lg=2, md=2),
+            dbc.Col(cancel_button, lg=2, md=2),
+            dbc.Col(show_pipes_button, lg=2, md=2),
+            dbc.Col(show_jobs_button, lg=2, md=2),
             dbc.Col(lg=True, md=False),
             dbc.Col(get_items_menu, lg=2, md=2),
         ])
