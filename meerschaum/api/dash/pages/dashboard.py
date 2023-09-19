@@ -19,12 +19,21 @@ px = attempt_import('plotly.express', warn=False, check_update=CHECK_UPDATE)
 daq = attempt_import('dash_daq', warn=False, check_update=CHECK_UPDATE)
 
 from meerschaum.api.dash.components import (
-    go_button, search_parameters_editor, test_button,
-    get_items_menu, bottom_buttons_content, console_div, download_dataframe, navbar,
+    go_button,
+    search_parameters_editor,
+    test_button,
+    get_items_menu,
+    bottom_buttons_content,
+    console_div,
+    download_dataframe,
+    navbar,
     download_logs,
+    refresh_jobs_interval,
 )
 from meerschaum.api.dash.keys import (
-    keys_lists_content, text_tab_content, dropdown_tab_content
+    keys_lists_content,
+    text_tab_content,
+    dropdown_tab_content,
 )
 
 layout = html.Div(
@@ -34,12 +43,7 @@ layout = html.Div(
         keys_lists_content,
         download_dataframe,
         download_logs,
-        dcc.Interval(
-            id = 'check-input-interval',
-            interval = 1 * 1000,
-            n_intervals = 0,
-            disabled = True,
-        ),
+        refresh_jobs_interval,
         navbar,
         html.Div(
             dbc.Row(
@@ -70,7 +74,8 @@ layout = html.Div(
                             html.Div(id='ws-div'),
                         ],
                         id = 'content-col-left',
-                        md=12, lg=6,
+                        md = 12,
+                        lg = 6,
                     ),
                     dbc.Col(
                         children = [
@@ -78,7 +83,7 @@ layout = html.Div(
                                     html.Div(id='success-alert-div'),
                                     html.Div(id='instance-alert-div')
                                 ],
-                                width={'size' : 8, 'offset' : 2}
+                                width={'size': 8, 'offset': 2}
                             ),
                             html.Div(
                                 id = 'content-div-right',
@@ -86,11 +91,12 @@ layout = html.Div(
                             ),
                             html.Div(id='terminal'),
                         ],
-                        md=12, lg=6,
+                        md = 12,
+                        lg = 6,
                         id = 'content-col-right',
                     ),
                 ],
-                style = {'max-width' : '100%', 'padding' : '15px'},
+                style = {'max-width': '100%', 'padding': '15px'},
             ), ### end of Row
             className = 'container-fluid',
         ), ### end of Div

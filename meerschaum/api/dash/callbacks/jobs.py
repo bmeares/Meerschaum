@@ -132,3 +132,24 @@ def manage_job_button_click(
         build_status_children(daemon),
         build_process_timestamps_children(daemon),
     )
+
+
+@dash_app.callback(
+    Output({'type': 'manage-job-alert-div', 'index': ALL}, 'children'),
+    Output({'type': 'manage-job-buttons-div', 'index': ALL}, 'children'),
+    Output({'type': 'manage-job-status-div', 'index': ALL}, 'children'),
+    Output({'type': 'process-timestamps-div', 'index': ALL}, 'children'),
+    Input('refresh-jobs-interval', 'n_intervals'),
+    prevent_initial_call = True,
+)
+def refresh_jobs_on_interval(n_intervals):
+    """
+    When the jobs refresh interval fires, rebuild the jobs' onscreen components.
+    """
+    print('refresh jobs')
+
+    ctx = dash.callback_context
+    test_children = [html.P(str(n_intervals))]
+    return test_children, test_children, test_children, test_children
+
+    raise PreventUpdate

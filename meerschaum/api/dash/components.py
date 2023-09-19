@@ -137,6 +137,12 @@ navbar = dbc.Navbar(
     style = {'width': '100% !important'},
 )
 
+refresh_jobs_interval = dcc.Interval(
+    id = 'refresh-jobs-interval',
+    interval = 1 * 1000,
+    n_intervals = 0,
+    disabled = False,
+)
 
 def alert_from_success_tuple(success: SuccessTuple) -> dbc.Alert:
     """

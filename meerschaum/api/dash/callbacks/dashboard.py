@@ -27,7 +27,7 @@ from meerschaum.api.dash.webterm import get_webterm
 from meerschaum.api.dash.components import (
     alert_from_success_tuple, console_div, build_cards_grid,
 )
-from meerschaum.api.dash.actions import execute_action, check_input_interval, stop_action
+from meerschaum.api.dash.actions import execute_action, stop_action
 import meerschaum.api.dash.pages as pages
 from meerschaum.utils.typing import Dict
 from meerschaum.utils.debug import dprint
@@ -54,7 +54,6 @@ keys_state = (
     State('metric-keys-input', 'value'),
     State('location-keys-input', 'value'),
     State('search-parameters-editor', 'value'),
-    #  State('params-textarea', 'value'),
     State('pipes-filter-tabs', 'active_tab'),
     State('action-dropdown', 'value'),
     State('subaction-dropdown', 'value'),
@@ -65,7 +64,6 @@ keys_state = (
     State('instance-select', 'value'),
     State('content-div-right', 'children'),
     State('success-alert-div', 'children'),
-    State('check-input-interval', 'disabled'),
     State('session-store', 'data'),
 )
 
@@ -169,7 +167,6 @@ def update_page_layout_div(
 @dash_app.callback(
     Output('content-div-right', 'children'),
     Output('success-alert-div', 'children'),
-    Output('check-input-interval', 'disabled'),
     Output('websocket-div', 'children'),
     Input('go-button', 'n_clicks'),
     Input('cancel-button', 'n_clicks'),
@@ -178,7 +175,6 @@ def update_page_layout_div(
     Input('get-plugins-button', 'n_clicks'),
     Input('get-users-button', 'n_clicks'),
     Input('get-graphs-button', 'n_clicks'),
-    Input('check-input-interval', 'n_intervals'),
     State('location', 'href'),
     State('session-store', 'data'),
     *keys_state,
@@ -206,8 +202,6 @@ def update_content(*args):
         initial_load = True
         trigger = 'open-shell-button'
 
-    if len(ctx.triggered) > 1 and 'check-input-interval.n_intervals' in ctx.triggered:
-        ctx.triggered.remove('check-input-interval.n_intervals')
     trigger = ctx.triggered[0]['prop_id'].split('.')[0] if not trigger else trigger
 
     session_data = args[-1]
@@ -222,7 +216,6 @@ def update_content(*args):
         'get-users-button': get_users_cards,
         'get-graphs-button': get_graphs_cards,
         'open-shell-button': get_webterm,
-        'check-input-interval': check_input_interval,
     }
     ### Defaults to 3 if not in dict.
     trigger_num_cols = {
@@ -233,13 +226,6 @@ def update_content(*args):
     ### NOTE: stop the running action if it exists
     stop_action(ctx.states)
 
-    check_input_interval_disabled = ctx.states['check-input-interval.disabled']
-    enable_check_input_interval = (
-        trigger == 'check-input-interval'
-        or (trigger == 'go-button' and check_input_interval_disabled)
-    )
-    enable_check_input_interval = False
-
     content, alerts = triggers[trigger](
         ctx.states,
         **filter_keywords(triggers[trigger], session_data=session_data)
@@ -248,11 +234,11 @@ def update_content(*args):
     ### If the webterm fails on initial load (e.g. insufficient permissions),
     ### don't display the alerts just yet.
     if initial_load and alerts:
-        return console_div, [], True, websocket_div_children
+        return console_div, [], websocket_div_children
 
     if trigger.startswith('get-') and trigger.endswith('-button'):
         content = build_cards_grid(content, num_columns=trigger_num_cols.get(trigger, 3))
-    return content, alerts, not enable_check_input_interval, websocket_div_children
+    return content, alerts, websocket_div_children
 
 @dash_app.callback(
     Output('action-dropdown', 'value'),
