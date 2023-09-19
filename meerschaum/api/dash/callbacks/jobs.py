@@ -146,8 +146,6 @@ def refresh_jobs_on_interval(n_intervals):
     """
     When the jobs refresh interval fires, rebuild the jobs' onscreen components.
     """
-    print('refresh jobs')
-
     ctx = dash.callback_context
     test_children = [html.P(str(n_intervals))]
     return test_children, test_children, test_children, test_children
