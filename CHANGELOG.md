@@ -12,15 +12,17 @@
 - **Removed `round_down` from `get_sync_time()` for instance connectors.**  
   To avoid confusion, sync times are no longer truncated by default. `round_down` is still an optional keyword argument on `pipe.get_sync_time()`.
 
-- 
+- **Moved `choose_subaction()` into `meerschaum.actions`.**
 
 **TODO**
 
 - `dask` support
+- relative verify backtrack bound
+- `deduplicate pipes`
 
 **Wishlist**
+- select sub-keys in get_data()
 - pipe ownership?
-- `drop duplicates`
 - vendor `compose`?
 - `textual` TUI?
 
@@ -38,14 +40,45 @@
 - **Add `pipe.get_chunk_interval()`.**
 
 - **Add `pipe.get_num_workers()`.**
-  
 
+- **Add `meerschaum.utils.sql.get_db_version()` and `SQLConnector.db_version`.**
+  
+- **Add `select_columns` and `omit_columns` to `pipe.get_data()`.**  
+  In situations where not all columns are required, you can now either specify which columns you want to include (`select_columns`) and which columns to filter out (`omit_columns`). You may pass a list of columns or a single column, and the value `'*'` for `select_columns` will be treated as `None` (i.e. `SELECT *`).
+
+  ```python
+  pipe = mrsm.Pipe('a', 'b', 'c')
+  pipe.sync([{'a': 1, 'b': 2, 'c': 3}])
+  
+  pipe.get_data(['a', 'b'])
+  #    a  b
+  # 0  1  2
+  
+  pipe.get_data('*', 'b')
+  #    a  c
+  # 0  1  3
+
+  pipe.get_data(None, ['a', 'c'])
+  #    b
+  # 0  2
+
+  pipe.get_data(omit_columns=['b', 'c'])
+  #    a
+  # 0  1
+
+  pipe.get_data(select_columns=['c', 'a'])
+  #    c  a
+  # 0  3  1
+  ```
 
 - **Improve data type enforcement for SQL pipes.**  
   A pipe's data types are now passed to `SQLConnector.read()` when fetching its data.
 
 - **Replace `daemoniker` with `python-daemon`.**  
   `python-daemon` is a well-maintained and well-behaved daemon process library. However, this migration removes Windows support for background jobs (which was shoddy already, so no harm there).
+
+- **Add `pipe.get_chunk_bounds()`.**  
+  Iterating over a pipe's interval 
 
 ## 1.7.x Releases
 
