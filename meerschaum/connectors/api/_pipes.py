@@ -7,6 +7,9 @@ Register or fetch Pipes from the API
 """
 
 from __future__ import annotations
+from datetime import datetime
+from meerschaum.utils.debug import dprint
+from meerschaum.utils.warnings import warn, error
 from meerschaum.utils.typing import SuccessTuple, Union, Any, Optional, Mapping, List, Dict, Tuple
 
 def pipe_r_url(
@@ -119,7 +122,6 @@ def fetch_pipes_keys(
     -------
     A list of tuples containing pipes' keys.
     """
-    from meerschaum.utils.warnings import error
     from meerschaum.config.static import STATIC_CONFIG
     import json
     if connector_keys is None:
@@ -164,7 +166,6 @@ def sync_pipe(
     If Pipe does not exist, it is registered with supplied metadata.
     """
     from meerschaum.utils.debug import dprint
-    from meerschaum.utils.warnings import warn
     from meerschaum.utils.misc import json_serialize_datetime
     from meerschaum.config import get_config
     from meerschaum.utils.packages import attempt_import
@@ -236,16 +237,17 @@ def sync_pipe(
                 debug = debug
             )
         except Exception as e:
-            warn(str(e))
-            return False, str(e)
+            msg = f"Failed to post a chunk to {pipe}:\n{e}"
+            warn(msg)
+            return False, msg
             
         if not response:
-            return False, f"Failed to receive response. Response text: {response.text}"
+            return False, f"Failed to sync a chunk:\n{response.text}"
 
         try:
             j = json.loads(response.text)
         except Exception as e:
-            return False, str(e)
+            return False, f"Failed to parse response from syncing {pipe}:\n{e}"
 
         if isinstance(j, dict) and 'detail' in j:
             return False, j['detail']
@@ -277,8 +279,6 @@ def delete_pipe(
         debug: bool = None,        
     ) -> SuccessTuple:
     """Delete a Pipe and drop its table."""
-    from meerschaum.utils.warnings import error
-    from meerschaum.utils.debug import dprint
     if pipe is None:
         error(f"Pipe cannot be None.")
     r_url = pipe_r_url(pipe)
@@ -300,8 +300,8 @@ def delete_pipe(
 def get_pipe_data(
         self,
         pipe: meerschaum.Pipe,
-        begin: Union[str, datetime.datetime, int, None] = None,
-        end: Union[str, datetime.datetime, int, None] = None,
+        begin: Union[str, datetime, int, None] = None,
+        end: Union[str, datetime, int, None] = None,
         params: Optional[Dict[str, Any]] = None,
         as_chunks: bool = False,
         debug: bool = False,
@@ -309,7 +309,6 @@ def get_pipe_data(
     ) -> Union[pandas.DataFrame, None]:
     """Fetch data from the API."""
     import json
-    from meerschaum.utils.warnings import warn
     r_url = pipe_r_url(pipe)
     chunks_list = []
     while True:
@@ -323,19 +322,21 @@ def get_pipe_data(
                 return None
             j = response.json()
         except Exception as e:
-            warn(str(e))
+            warn(f"Failed to get data for {pipe}:\n{e}")
             return None
         if isinstance(j, dict) and 'detail' in j:
             return False, j['detail']
         break
+
     from meerschaum.utils.packages import import_pandas
-    from meerschaum.utils.misc import parse_df_datetimes
+    from meerschaum.utils.dataframe import parse_df_datetimes
     pd = import_pandas()
     try:
         df = pd.read_json(response.text)
     except Exception as e:
-        warn(str(e))
+        warn(f"Failed to parse response for {pipe}:\n{e}")
         return None
+
     df = parse_df_datetimes(
         df,
         ignore_cols = [
@@ -351,7 +352,7 @@ def get_pipe_data(
 def get_backtrack_data(
         self,
         pipe: meerschaum.Pipe,
-        begin: datetime.datetime,
+        begin: datetime,
         backtrack_minutes: int = 0,
         params: Optional[Dict[str, Any]] = None,
         debug: bool = False,
@@ -359,8 +360,6 @@ def get_backtrack_data(
     ) -> pandas.DataFrame:
     """Get a Pipe's backtrack data from the API."""
     import json
-    from meerschaum.utils.debug import dprint
-    from meerschaum.utils.warnings import warn
     r_url = pipe_r_url(pipe)
     try:
         response = self.get(
@@ -373,18 +372,20 @@ def get_backtrack_data(
             debug = debug
         )
     except Exception as e:
-        warn(f"Failed to parse backtrack data JSON for {pipe}. Exception:\n" + str(e))
+        warn(f"Failed to parse backtrack data JSON for {pipe}:\n{e}")
         return None
+
     from meerschaum.utils.packages import import_pandas
-    from meerschaum.utils.misc import parse_df_datetimes
+    from meerschaum.utils.dataframe import parse_df_datetimes
     if debug:
         dprint(response.text)
     pd = import_pandas()
     try:
         df = pd.read_json(response.text)
     except Exception as e:
-        warn(str(e))
+        warn(f"Failed to read response into a dataframe:\n{e}")
         return None
+
     df = parse_df_datetimes(pd.read_json(response.text), debug=debug)
     return df
 
@@ -394,7 +395,7 @@ def get_pipe_id(
         debug: bool = False,
     ) -> int:
     """Get a Pipe's ID from the API."""
-    from meerschaum.utils.debug import dprint
+    from meerschaum.utils.misc import is_int
     r_url = pipe_r_url(pipe)
     response = self.get(
         r_url + '/id',
@@ -403,9 +404,11 @@ def get_pipe_id(
     if debug:
         dprint(f"Got pipe ID: {response.text}")
     try:
-        return int(response.text)
+        if is_int(response.text):
+            return int(response.text)
     except Exception as e:
-        return None
+        warn(f"Failed to get the ID for {pipe}:\n{e}")
+    return None
 
 
 def get_pipe_attributes(
@@ -431,7 +434,8 @@ def get_pipe_attributes(
     try:
         return json.loads(response.text)
     except Exception as e:
-        return {}
+        warn(f"Failed to get the attributes for {pipe}:\n{e}")
+    return {}
 
 
 def get_sync_time(
@@ -439,9 +443,8 @@ def get_sync_time(
         pipe: 'meerschaum.Pipe',
         params: Optional[Dict[str, Any]] = None,
         newest: bool = True,
-        round_down: bool = True,
         debug: bool = False,
-    ) -> Union[datetime.datetime, int, None]:
+    ) -> Union[datetime, int, None]:
     """Get a Pipe's most recent datetime value from the API.
 
     Parameters
@@ -456,9 +459,6 @@ def get_sync_time(
         If `True`, get the most recent datetime (honoring `params`).
         If `False`, get the oldest datetime (ASC instead of DESC).
 
-    round_down: bool, default True
-        If `True`, round the resulting datetime value down to the nearest minute.
-
     Returns
     -------
     The most recent (or oldest if `newest` is `False`) datetime of a pipe,
@@ -471,11 +471,11 @@ def get_sync_time(
     response = self.get(
         r_url + '/sync_time',
         json = params,
-        params = {'newest': newest, 'debug': debug, 'round_down': round_down},
+        params = {'newest': newest, 'debug': debug},
         debug = debug,
     )
     if not response:
-        warn(response.text)
+        warn(f"Failed to get the sync time for {pipe}:\n" + response.text)
         return None
 
     j = response.json()
@@ -484,10 +484,12 @@ def get_sync_time(
     else:
         try:
             dt = (
-                datetime.datetime.fromisoformat(j)
-            ) if not is_int(j) else int(j)
+                datetime.fromisoformat(j)
+                if not is_int(j)
+                else int(j)
+            )
         except Exception as e:
-            warn(e)
+            warn(f"Failed to parse the sync time '{j}' for {pipe}:\n{e}")
             dt = None
     return dt
 
@@ -512,6 +514,9 @@ def pipe_exists(
     from meerschaum.utils.warnings import warn
     r_url = pipe_r_url(pipe)
     response = self.get(r_url + '/exists', debug=debug)
+    if not response:
+        warn(f"Failed to check if {pipe} exists:\n{response.text}")
+        return False
     if debug:
         dprint("Received response: " + str(response.text))
     j = response.json()
@@ -540,6 +545,7 @@ def create_metadata(
     try:
         metadata_response = json.loads(response.text)
     except Exception as e:
+        warn(f"Failed to create metadata on {self}:\n{e}")
         metadata_response = False
     return False
 
@@ -547,8 +553,8 @@ def create_metadata(
 def get_pipe_rowcount(
         self,
         pipe: 'meerschaum.Pipe',
-        begin: Optional['datetime.datetime'] = None,
-        end: Optional['datetime.datetime'] = None,
+        begin: Optional[datetime] = None,
+        end: Optional[datetime] = None,
         params: Optional[Dict[str, Any]] = None,
         remote: bool = False,
         debug: bool = False,
@@ -560,10 +566,10 @@ def get_pipe_rowcount(
     pipe: 'meerschaum.Pipe':
         The pipe whose row count we are counting.
         
-    begin: Optional[datetime.datetime], default None
+    begin: Optional[datetime], default None
         If provided, bound the count by this datetime.
 
-    end: Optional[datetime.datetime]
+    end: Optional[datetime]
         If provided, bound the count by this datetime.
 
     params: Optional[Dict[str, Any]], default None
@@ -582,16 +588,19 @@ def get_pipe_rowcount(
         r_url + "/rowcount",
         json = params,
         params = {
-            'begin' : begin,
-            'end' : end,
-            'remote' : remote,
+            'begin': begin,
+            'end': end,
+            'remote': remote,
         },
         debug = debug
     )
+    if not response:
+        warn(f"Failed to get the rowcount for {pipe}:\n{response.text}")
     try:
         return int(json.loads(response.text))
     except Exception as e:
-        return 0
+        warn(f"Failed to get the rowcount for {pipe}:\n{e}")
+    return 0
 
 
 def drop_pipe(
@@ -622,12 +631,19 @@ def drop_pipe(
     )
     if debug:
         dprint(response.text)
-    if isinstance(response.json(), list):
-        response_tuple = response.__bool__(), response.json()[1]
+
+    try:
+        data = response.json()
+    except Exception as e:
+        return False, f"Failed to drop {pipe}."
+
+    if isinstance(data, list):
+        response_tuple = response.__bool__(), data[1]
     elif 'detail' in response.json():
-        response_tuple = response.__bool__(), response.json()['detail']
+        response_tuple = response.__bool__(), data['detail']
     else:
         response_tuple = response.__bool__(), response.text
+
     return response_tuple
 
 

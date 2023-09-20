@@ -7,7 +7,10 @@ Formatting functions for printing pipes
 """
 
 from __future__ import annotations
-from meerschaum.utils.typing import PipesDict, Dict, Union, Optional
+import json
+import meerschaum as mrsm
+from meerschaum.utils.typing import PipesDict, Dict, Union, Optional, SuccessTuple, Any
+from meerschaum.config import get_config
 
 def pprint_pipes(pipes: PipesDict) -> None:
     """Print a stylized tree of a Pipes dictionary.
@@ -16,7 +19,6 @@ def pprint_pipes(pipes: PipesDict) -> None:
     from meerschaum.utils.packages import attempt_import, import_rich
     from meerschaum.utils.misc import sorted_dict, replace_pipes_in_dict
     from meerschaum.utils.formatting import UNICODE, ANSI, CHARSET, pprint, colored, get_console
-    from meerschaum.config import get_config
     import copy
     rich = import_rich('rich', warn=False)
     Text = None
@@ -200,13 +202,13 @@ def pprint_pipes(pipes: PipesDict) -> None:
     columns = Columns(cols)
     get_console().print(columns)
 
+
 def pprint_pipe_columns(
         pipe: meerschaum.Pipe,
         nopretty: bool = False,
         debug: bool = False,
     ) -> None:
     """Pretty-print a pipe's columns."""
-    import json
     from meerschaum.utils.warnings import info
     from meerschaum.utils.formatting import pprint, print_tuple, get_console
     from meerschaum.utils.formatting._shell import make_header
@@ -260,7 +262,6 @@ def pipe_repr(
     """
     Return a formatted string for representing a `meerschaum.Pipe`.
     """
-    from meerschaum.config import get_config
     from meerschaum.utils.formatting import UNICODE, ANSI, CHARSET, colored, rich_text_to_str
     from meerschaum.utils.packages import import_rich, attempt_import
     rich = import_rich()
@@ -328,3 +329,141 @@ def highlight_pipes(message: str) -> str:
         msg += segment
     return msg
 
+
+def format_pipe_success_tuple(
+        pipe: mrsm.Pipe,
+        success_tuple: SuccessTuple,
+        nopretty: bool = False,
+    ) -> str:
+    """
+    Return a formatted string of a pipe and its resulting SuccessTuple.
+
+    Parameters
+    ----------
+    pipe: mrsm.Pipe
+        The pipe to print.
+
+    success_tuple: SuccessTuple
+        The output of a pipe's actions (e.g. `pipe.sync()`).
+
+    nopretty: bool, default False
+        If `True`, return a JSON-formatted string instead.
+
+    Returns
+    -------
+    The formatted string of the pipe and its resulting SuccessTuple.
+        
+    """
+    from meerschaum.utils.formatting import UNICODE
+    underline = '\u2015' if UNICODE else '-'
+    success, message = success_tuple
+    success_prefix = (get_config('formatting', 'emoji', 'success_calm') + ' ') if UNICODE else ''
+    failure_prefix = (get_config('formatting', 'emoji', 'failure_calm') + ' ') if UNICODE else ''
+    pipe_str = (success_prefix if success else failure_prefix) + str(pipe)
+    return (
+        (
+            pipe_str
+            + '\n'
+            ### The extra +1 at the end is for double-width emoji.
+            + (underline * (len(pipe_str) + (1 if UNICODE else 0)))
+            + '\n'
+            + str(message)
+            + '\n\n'
+        ) if not nopretty else (
+            json.dumps({
+                'pipe': pipe.meta,
+                'success': success,
+                'message': message,
+            })
+        )
+    )
+
+
+def print_pipes_results(
+        pipes_results: Dict[mrsm.Pipe, SuccessTuple],
+        success_header: Optional[str] = 'Successes',
+        failure_header: Optional[str] = 'Failures',
+        nopretty: bool = False,
+        **kwargs: Any
+    ) -> None:
+    """
+    Print the pipes and their result SuccessTuples.
+
+    Parameters
+    ----------
+    pipes_results: Dict[mrsm.Pipe, SuccessTuple]
+        A dictionary mapping pipes to their resulting SuccessTuples.
+
+    success_header: Optional[str], default 'Successes'
+        The header to print above the successful pipes.
+
+    failure_header: Optional[str], default 'Fails'
+        The header to print above the failed pipes.
+
+    kwargs: Any
+        All other keyword arguments are passed to `meerschaum.utils.misc.print_options`.
+    """
+    from meerschaum.utils.misc import print_options
+    successes = [pipe for pipe, (success, msg) in pipes_results.items() if success]
+    fails = [pipe for pipe, (success, msg) in pipes_results.items() if success]
+    success_options = [
+        format_pipe_success_tuple(pipe, success_tuple, nopretty=nopretty)
+        for pipe, success_tuple in pipes_results.items()
+        if success_tuple[0]
+    ]
+    failure_options = [
+        format_pipe_success_tuple(pipe, success_tuple, nopretty=nopretty)
+        for pipe, success_tuple in pipes_results.items()
+        if not success_tuple[0]
+    ]
+
+    if success_options:
+        print_options(
+            success_options,
+            header = success_header,
+            nopretty = nopretty,
+            **kwargs
+        )
+    if failure_options:
+        print_options(
+            failure_options,
+            header = failure_header,
+            nopretty = nopretty,
+            **kwargs
+        )
+
+
+def extract_stats_from_message(message: str) -> Dict[str, int]:
+    """
+    Given a sync message, return the insert, update stats from within.
+    """
+    stats = {
+        'inserted': 0,
+        'updated': 0,
+    }
+
+    for search_key in list(stats.keys()):
+        if search_key not in message.lower():
+            continue
+
+        ### stat_text starts with the digits we want.
+        stat_text = message.lower().split(search_key + ' ')[1]
+
+        ### find the first non-digit value.
+        end_of_num_ix = -1
+        for i, char in enumerate(stat_text):
+            if not char.isdigit():
+                end_of_num_ix = i
+                break
+        if end_of_num_ix == -1:
+            continue
+
+        try:
+            stat_number = int(stat_text[:end_of_num_ix])
+        except Exception as e:
+            print(e)
+            continue
+
+        stats[search_key] += stat_number
+
+    return stats

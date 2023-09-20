@@ -82,7 +82,13 @@ class Pipe:
     """
 
     from ._fetch import fetch
-    from ._data import get_data, get_backtrack_data, get_rowcount, _get_data_as_iterator
+    from ._data import (
+        get_data,
+        get_backtrack_data,
+        get_rowcount,
+        _get_data_as_iterator,
+        get_chunk_interval,
+    )
     from ._register import register
     from ._attributes import (
         attributes,
@@ -104,7 +110,15 @@ class Pipe:
     )
     from ._show import show
     from ._edit import edit, edit_definition, update
-    from ._sync import sync, get_sync_time, exists, filter_existing, _get_chunk_label
+    from ._sync import (
+        sync,
+        get_sync_time,
+        exists,
+        filter_existing,
+        _get_chunk_label,
+        get_num_workers,
+    )
+    from ._verify import verify
     from ._delete import delete
     from ._drop import drop
     from ._clear import clear
@@ -366,14 +380,6 @@ class Pipe:
 
         return self._cache_pipe
 
-
-    @property
-    def sync_time(self) -> Union['datetime.datetime', None]:
-        """
-        Convenience function to get the pipe's latest datetime.
-        Use `meerschaum.Pipe.get_sync_time()` instead.
-        """
-        return self.get_sync_time()
 
     def __str__(self, ansi: bool=False):
         return pipe_repr(self, ansi=ansi)

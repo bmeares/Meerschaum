@@ -1574,8 +1574,3 @@ def safely_extract_tar(tarf: 'file', output_dir: Union[str, 'pathlib.Path']) -> 
         tar.extractall(path=path, members=members, numeric_owner=numeric_owner)
 
     return safe_extract(tarf, output_dir)
-
-
-
-
-

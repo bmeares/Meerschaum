@@ -7,17 +7,18 @@ Retrieve Pipes' data from instances.
 """
 
 from __future__ import annotations
-import datetime
+from datetime import datetime, timedelta
 from meerschaum.utils.typing import Optional, Dict, Any, Union, Generator
+from meerschaum.config import get_config
 
 def get_data(
         self,
-        begin: Optional[datetime.datetime] = None,
-        end: Optional[datetime.datetime] = None,
+        begin: Union[datetime, int, None] = None,
+        end: Union[datetime, int, None] = None,
         params: Optional[Dict[str, Any]] = None,
         as_iterator: bool = False,
         as_chunks: bool = False,
-        chunk_interval: Union[datetime.datetime, int, None] = None,
+        chunk_interval: Union[timedelta, int, None] = None,
         fresh: bool = False,
         debug: bool = False,
         **kw: Any
@@ -27,12 +28,12 @@ def get_data(
 
     Parameters
     ----------
-    begin: Optional[datetime.datetime], default None
+    begin: Union[datetime, int, None], default None
         Lower bound datetime to begin searching for data (inclusive).
         Translates to a `WHERE` clause like `WHERE datetime >= begin`.
         Defaults to `None`.
 
-    end: Optional[datetime.datetime], default None
+    end: Union[datetime, int, None], default None
         Upper bound datetime to stop searching for data (inclusive).
         Translates to a `WHERE` clause like `WHERE datetime < end`.
         Defaults to `None`.
@@ -47,12 +48,15 @@ def get_data(
     as_chunks: bool, default False
         Alias for `as_iterator`.
 
-    chunk_interval: int, default None
+    chunk_interval: Union[timedelta, int, None], default None
         If `as_iterator`, then return chunks with `begin` and `end` separated by this interval.
-        By default, use a timedelta of 1 day.
+        This may be set under `pipe.parameters['chunk_minutes']`.
+        By default, use a timedelta of 1440 minutes (1 day).
+        If `chunk_interval` is an integer and the `datetime` axis a timestamp,
+        the use a timedelta with the number of minutes configured to this value.
         If the `datetime` axis is an integer, default to the configured chunksize.
-        Note that because `end` is always non-inclusive,
-        there will be `chunk_interval - 1` rows per chunk for integers.
+        If `chunk_interval` is a `timedelta` and the `datetime` axis an integer,
+        use the number of minutes in the `timedelta`.
 
     fresh: bool, default True
         If `True`, skip local cache and directly query the instance connector.
@@ -71,7 +75,6 @@ def get_data(
     from meerschaum.utils.venv import Venv
     from meerschaum.connectors import get_connector_plugin
     from meerschaum.utils.misc import iterate_chunks
-    from meerschaum.config import get_config
     kw.update({'begin': begin, 'end': end, 'params': params,})
 
     as_iterator = as_iterator or as_chunks
@@ -115,10 +118,10 @@ def get_data(
 
 def _get_data_as_iterator(
         self,
-        begin: Optional[datetime.datetime] = None,
-        end: Optional[datetime.datetime] = None,
+        begin: Optional[datetime] = None,
+        end: Optional[datetime] = None,
         params: Optional[Dict[str, Any]] = None,
-        chunk_interval: Union[datetime.datetime, int, None] = None,
+        chunk_interval: Union[timedelta, int, None] = None,
         fresh: bool = False,
         debug: bool = False,
         **kw: Any
@@ -126,7 +129,6 @@ def _get_data_as_iterator(
     """
     Return a pipe's data as a generator.
     """
-    from meerschaum.config import get_config
     from meerschaum.utils.misc import round_time
     parse_begin = isinstance(begin, str)
     parse_end = isinstance(end, str)
@@ -156,15 +158,15 @@ def _get_data_as_iterator(
     if end is None:
         if isinstance(max_dt, int):
             max_dt += 1
-        elif isinstance(max_dt, datetime.datetime):
-            max_dt = round_time(max_dt + datetime.timedelta(minutes=1))
+        elif isinstance(max_dt, datetime):
+            max_dt = round_time(max_dt + timedelta(minutes=1))
 
     if chunk_interval is None:
-        chunk_interval = (
-            get_config('system', 'connectors', 'sql', 'chunksize')
-            if isinstance(min_dt, int)
-            else datetime.timedelta(days=1)
-        )
+        chunk_interval = self.get_chunk_interval(debug=debug)
+    elif isinstance(chunk_interval, int) and isinstance(min_dt, datetime):
+        chunk_interval = timedelta(minutes=1)
+    elif isinstance(chunk_interval, timedelta) and isinstance(min_dt, int):
+        chunk_interval = int(chunk_interval.total_seconds() / 60)
 
     ### If we can't determine bounds
     ### or if chunk_interval exceeds the max,
@@ -209,7 +211,7 @@ def _get_data_as_iterator(
 def get_backtrack_data(
         self,
         backtrack_minutes: int = 0,
-        begin: Optional['datetime.datetime'] = None,
+        begin: Optional[datetime] = None,
         params: Optional[Dict[str, Any]] = None,
         fresh: bool = False,
         debug: bool = False,
@@ -224,7 +226,7 @@ def get_backtrack_data(
         How many minutes from `begin` to select from.
         Defaults to 0. This may return a few rows due to a rounding quirk.
 
-    begin: Optional[datetime.datetime], default None
+    begin: Optional[datetime], default None
         The starting point to search for data.
         If begin is `None` (default), use the most recent observed datetime
         (AKA sync_time).
@@ -300,8 +302,8 @@ def get_backtrack_data(
         begin = self.get_sync_time(params=params, debug=debug)
 
     backtrack_interval = (
-        datetime.timedelta(minutes=backtrack_minutes)
-        if isinstance(begin, datetime.datetime)
+        timedelta(minutes=backtrack_minutes)
+        if isinstance(begin, datetime)
         else backtrack_minutes
     )
     if begin is not None:
@@ -317,8 +319,8 @@ def get_backtrack_data(
 
 def get_rowcount(
         self,
-        begin: Optional['datetime.datetime'] = None,
-        end: Optional['datetime.datetime'] = None,
+        begin: Optional[datetime] = None,
+        end: Optional['datetime'] = None,
         remote: bool = False,
         params: Optional[Dict[str, Any]] = None,
         debug: bool = False
@@ -328,10 +330,10 @@ def get_rowcount(
 
     Parameters
     ----------
-    begin: Optional[datetime.datetime], default None
+    begin: Optional[datetime], default None
         Count rows where datetime > begin.
 
-    end: Optional[datetime.datetime], default None
+    end: Optional[datetime], default None
         Count rows where datetime < end.
 
     remote: bool, default False
@@ -363,3 +365,25 @@ def get_rowcount(
             return None
     warn(f"Failed to get a rowcount for {self}.")
     return None
+
+
+def get_chunk_interval(
+        self,
+        debug: bool = False,
+    ) -> Union[timedelta, int]:
+    """
+    Get the chunk interval to use for this pipe.
+    """
+    default_chunk_minutes = get_config('pipes', 'parameters', 'chunk_minutes')
+    configured_chunk_minutes = self.parameters.get('chunk_minutes', None)
+    chunk_minutes = configured_chunk_minutes or default_chunk_minutes
+
+    dt_col = self.columns.get('datetime', None)
+    if dt_col is None:
+        return timedelta(minutes=chunk_minutes)
+
+    dt_dtype = self.dtypes.get(dt_col, 'datetime64[ns]')
+    if 'datetime' in dt_dtype.lower():
+        return timedelta(minutes=chunk_minutes)
+
+    return chunk_minutes

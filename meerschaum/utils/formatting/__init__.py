@@ -13,7 +13,13 @@ import sys
 from meerschaum.utils.typing import Optional, Union, Any
 from meerschaum.utils.formatting._shell import make_header
 from meerschaum.utils.formatting._pprint import pprint
-from meerschaum.utils.formatting._pipes import pprint_pipes, highlight_pipes
+from meerschaum.utils.formatting._pipes import (
+    pprint_pipes,
+    highlight_pipes,
+    format_pipe_success_tuple,
+    print_pipes_results,
+    extract_stats_from_message,
+)
 from meerschaum.utils.threading import Lock, RLock
 
 _attrs = {

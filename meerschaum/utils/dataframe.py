@@ -61,7 +61,7 @@ def add_missing_cols_to_df(df: 'pd.DataFrame', dtypes: Dict[str, Any]) -> pd.Dat
         return pandas.Series([], dtype=to_pandas_dtype(dtype))
 
     assign_kwargs = {
-        col: build_series(str(typ))
+        str(col): build_series(str(typ))
         for col, typ in dtypes.items()
         if col not in df.columns
     }

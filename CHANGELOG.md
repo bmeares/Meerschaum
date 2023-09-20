@@ -4,16 +4,23 @@
 
 ### v2.0.0
 
+**Breaking Changes**
+
+- **Removed `Pipe.sync_time`.**  
+  Use `pipe.get_sync_time()` instead.
+
+- **Removed `round_down` from `get_sync_time()` for instance connectors.**  
+  To avoid confusion, sync times are no longer truncated by default. `round_down` is still an optional keyword argument on `pipe.get_sync_time()`.
+
+- 
 
 **TODO**
 
-- `verify pipes`
 - `dask` support
-- replace `daemoniker`
 
 **Wishlist**
-- remove ability to see other users
 - pipe ownership?
+- `drop duplicates`
 - vendor `compose`?
 - `textual` TUI?
 
@@ -23,6 +30,14 @@
   The dtypes enforcement system was overhauled to add support for `pyarrow` data types.
 
 - **Added `dask` support.**  
+
+- **Add `verify pipes`**
+
+- **Add `chunk_minutes` to `pipe.parameters`**.
+
+- **Add `pipe.get_chunk_interval()`.**
+
+- **Add `pipe.get_num_workers()`.**
   
 
 

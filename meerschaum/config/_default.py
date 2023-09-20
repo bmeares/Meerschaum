@@ -112,6 +112,7 @@ default_pipes_config       = {
             'datetime'     : None,
             'id'           : None,
         },
+        'chunk_minutes'    : 1440,
     },
     'attributes'           : {
         'local_cache_timeout_seconds': 60,

@@ -1813,7 +1813,6 @@ def get_sync_time(
         pipe: 'meerschaum.Pipe',
         params: Optional[Dict[str, Any]] = None,
         newest: bool = True,
-        round_down: bool = True,
         debug: bool = False,
     ) -> 'datetime.datetime':
     """Get a Pipe's most recent datetime.
@@ -1830,10 +1829,6 @@ def get_sync_time(
     newest: bool, default True
         If `True`, get the most recent datetime (honoring `params`).
         If `False`, get the oldest datetime (ASC instead of DESC).
-
-    round_down: bool, default True
-        If `True`, round the resulting datetime value down to the nearest minute.
-        Defaults to `True`.
 
     Returns
     -------
@@ -1880,7 +1875,6 @@ def get_sync_time(
         )
 
     try:
-        from meerschaum.utils.misc import round_time
         import datetime
         db_time = self.value(q, silent=True, debug=debug)
 
@@ -1908,11 +1902,7 @@ def get_sync_time(
         else:
             st = db_time.to_pydatetime()
 
-        ### round down to smooth timestamp
-        sync_time = (
-            round_time(st, date_delta=datetime.timedelta(minutes=1), to='down')
-            if round_down else st
-        ) if not isinstance(st, int) else st
+        sync_time = st
 
     except Exception as e:
         sync_time = None
