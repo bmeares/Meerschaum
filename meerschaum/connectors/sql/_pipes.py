@@ -6,13 +6,15 @@
 Interact with Pipes metadata via SQLConnector.
 """
 from __future__ import annotations
+from datetime import datetime, date
+import meerschaum as mrsm
 from meerschaum.utils.typing import (
     Union, Any, SuccessTuple, Tuple, Dict, Optional, List
 )
 
 def register_pipe(
         self,
-        pipe: meerschaum.Pipe,
+        pipe: mrsm.Pipe,
         debug: bool = False,
     ) -> SuccessTuple:
     """
@@ -70,7 +72,7 @@ def register_pipe(
 
 def edit_pipe(
         self,
-        pipe : meerschaum.Pipe = None,
+        pipe : mrsm.Pipe = None,
         patch: bool = False,
         debug: bool = False,
         **kw : Any
@@ -80,7 +82,7 @@ def edit_pipe(
 
     Parameters
     ----------
-    pipe: meerschaum.Pipe, default None
+    pipe: mrsm.Pipe, default None
         The pipe to be edited.
     patch: bool, default False
         If patch is `True`, update the existing parameters by cascading.
@@ -319,7 +321,7 @@ def fetch_pipes_keys(
 
 def create_indices(
         self,
-        pipe: meerschaum.Pipe,
+        pipe: mrsm.Pipe,
         indices: Optional[List[str]] = None,
         debug: bool = False
     ) -> bool:
@@ -350,7 +352,7 @@ def create_indices(
 
 def drop_indices(
         self,
-        pipe: meerschaum.Pipe,
+        pipe: mrsm.Pipe,
         indices: Optional[List[str]] = None,
         debug: bool = False
     ) -> bool:
@@ -381,7 +383,7 @@ def drop_indices(
 
 def get_create_index_queries(
         self,
-        pipe: meerschaum.Pipe,
+        pipe: mrsm.Pipe,
         debug: bool = False,
     ) -> Dict[str, List[str]]:
     """
@@ -389,7 +391,7 @@ def get_create_index_queries(
 
     Parameters
     ----------
-    pipe: meerschaum.Pipe
+    pipe: mrsm.Pipe
         The pipe to which the queries will correspond.
 
     Returns
@@ -493,7 +495,7 @@ def get_create_index_queries(
 
 def get_drop_index_queries(
         self,
-        pipe: meerschaum.Pipe,
+        pipe: mrsm.Pipe,
         debug: bool = False,
     ) -> Dict[str, List[str]]:
     """
@@ -501,7 +503,7 @@ def get_drop_index_queries(
 
     Parameters
     ----------
-    pipe: meerschaum.Pipe
+    pipe: mrsm.Pipe
         The pipe to which the queries will correspond.
 
     Returns
@@ -550,7 +552,7 @@ def get_drop_index_queries(
 
 def delete_pipe(
         self,
-        pipe: meerschaum.Pipe,
+        pipe: mrsm.Pipe,
         debug: bool = False,
     ) -> SuccessTuple:
     """
@@ -583,9 +585,11 @@ def delete_pipe(
 
 def get_pipe_data(
         self,
-        pipe: Optional[meerschaum.Pipe] = None,
-        begin: Union[datetime.datetime, str, None] = None,
-        end: Union[datetime.datetime, str, None] = None,
+        pipe: Optional[mrsm.Pipe] = None,
+        select_columns: Optional[List[str]] = None,
+        omit_columns: Optional[List[str]] = None,
+        begin: Union[datetime, str, None] = None,
+        end: Union[datetime, str, None] = None,
         params: Optional[Dict[str, Any]] = None,
         order: str = 'asc',
         limit: Optional[int] = None,
@@ -599,13 +603,20 @@ def get_pipe_data(
 
     Parameters
     ----------
-    pipe: meerschaum.Pipe:
+    pipe: mrsm.Pipe:
         The pipe to get data from.
 
-    begin: Optional[datetime.datetime], default None
+    select_columns: Optional[List[str]], default None
+        If provided, only select these given columns.
+        Otherwise select all available columns (i.e. `SELECT *`).
+
+    omit_columns: Optional[List[str]], default None
+        If provided, remove these columns from the selection.
+
+    begin: Union[datetime, str, None], default None
         If provided, get rows newer than or equal to this value.
 
-    end: Optional[datetime.datetime], default None
+    end: Union[datetime, str, None], default None
         If provided, get rows older than or equal to this value.
 
     params: Optional[Dict[str, Any]], default None
@@ -661,11 +672,31 @@ def get_pipe_data(
                     if 'int' not in dt_type:
                         dtypes[_dt] = 'datetime64[ns]'
     existing_cols = pipe.get_columns_types(debug=debug)
-    if existing_cols:
-        dtypes = {col: typ for col, typ in dtypes.items() if col in existing_cols}
-    dtypes = {col: to_pandas_dtype(typ) for col, typ in dtypes.items()}
+    select_columns = (
+        [
+            col
+            for col in existing_cols
+            if col not in (omit_columns or [])
+        ]
+        if not select_columns
+        else [
+            col
+            for col in select_columns
+            if col in existing_cols
+            and col not in (omit_columns or [])
+        ]
+    )
+    if select_columns:
+        dtypes = {col: typ for col, typ in dtypes.items() if col in select_columns}
+    dtypes = {
+        col: to_pandas_dtype(typ)
+        for col, typ in dtypes.items()
+        if col in select_columns and col not in (omit_columns or [])
+    }
     query = self.get_pipe_data_query(
         pipe,
+        select_columns = select_columns,
+        omit_columns = omit_columns,
         begin = begin,
         end = end,
         params = params,
@@ -724,9 +755,11 @@ def get_pipe_data(
 
 def get_pipe_data_query(
         self,
-        pipe: Optional[meerschaum.Pipe] = None,
-        begin: Union[datetime.datetime, str, None] = None,
-        end: Union[datetime.datetime, str, None] = None,
+        pipe: Optional[mrsm.Pipe] = None,
+        select_columns: Optional[List[str]] = None,
+        omit_columns: Optional[List[str]] = None,
+        begin: Union[datetime, str, None] = None,
+        end: Union[datetime, str, None] = None,
         params: Optional[Dict[str, Any]] = None,
         order: str = 'asc',
         limit: Optional[int] = None,
@@ -741,13 +774,20 @@ def get_pipe_data_query(
 
     Parameters
     ----------
-    pipe: meerschaum.Pipe:
+    pipe: mrsm.Pipe:
         The pipe to get data from.
 
-    begin: Optional[datetime.datetime], default None
+    select_columns: Optional[List[str]], default None
+        If provided, only select these given columns.
+        Otherwise select all available columns (i.e. `SELECT *`).
+
+    omit_columns: Optional[List[str]], default None
+        If provided, remove these columns from the selection.
+
+    begin: Union[datetime, str, None], default None
         If provided, get rows newer than or equal to this value.
 
-    end: Optional[datetime.datetime], default None
+    end: Union[datetime, str, None], default None
         If provided, get rows older than or equal to this value.
 
     params: Optional[Dict[str, Any]], default None
@@ -787,19 +827,31 @@ def get_pipe_data_query(
     from meerschaum.utils.packages import import_pandas
     from meerschaum.utils.warnings import warn
     pd = import_pandas()
+    existing_cols = pipe.get_columns_types(debug=debug)
+    select_columns = (
+        [col for col in existing_cols]
+        if not select_columns
+        else [col for col in select_columns if col in existing_cols]
+    )
+    if omit_columns:
+        select_columns = [col for col in select_columns if col not in omit_columns]
 
-    select_cols = "SELECT *"
-    if replace_nulls:
-        existing_cols = pipe.get_columns_types(debug=debug)
-        if existing_cols:
-            select_cols = "SELECT "
-            for col in existing_cols:
-                select_cols += (
-                    f"\n    COALESCE({sql_item_name(col, self.flavor)}, "
-                    + f"'{replace_nulls}') AS {sql_item_name(col, self.flavor)},"
+    cols_names = [sql_item_name(col, self.flavor) for col in select_columns]
+    select_cols_str = (
+        'SELECT\n'
+        + ',\n    '.join(
+            [
+                (
+                    col_name
+                    if not replace_nulls
+                    else f"COALESCE(col_name, '{replace_nulls}') AS {col_name}"
                 )
-            select_cols = select_cols[:-1]
-    query = f"{select_cols}\nFROM {sql_item_name(pipe.target, self.flavor)}"
+                for col_name in cols_names
+            ]
+        )
+    )
+    pipe_table_name = sql_item_name(pipe.target, self.flavor)
+    query = f"{select_cols_str}\nFROM {pipe_table_name}"
     where = ""
 
     if order is not None:
@@ -808,8 +860,6 @@ def get_pipe_data_query(
             warn(f"Ignoring unsupported order '{order}'. Falling back to '{default_order}'.")
             order = default_order
         order = order.upper()
-
-    existing_cols = pipe.get_columns_types(debug=debug)
 
     if not pipe.columns.get('datetime', None):
         _dt = pipe.guess_datetime()
@@ -913,7 +963,7 @@ def get_pipe_data_query(
 
 def get_pipe_id(
         self,
-        pipe: meerschaum.Pipe,
+        pipe: mrsm.Pipe,
         debug: bool = False,
     ) -> Any:
     """
@@ -943,7 +993,7 @@ def get_pipe_id(
 
 def get_pipe_attributes(
         self,
-        pipe: meerschaum.Pipe,
+        pipe: mrsm.Pipe,
         debug: bool = False,
     ) -> Dict[str, Any]:
     """
@@ -992,10 +1042,10 @@ def get_pipe_attributes(
 
 def sync_pipe(
         self,
-        pipe: meerschaum.Pipe,
+        pipe: mrsm.Pipe,
         df: Union[pandas.DataFrame, str, Dict[Any, Any], None] = None,
-        begin: Optional[datetime.datetime] = None,
-        end: Optional[datetime.datetime] = None,
+        begin: Optional[datetime] = None,
+        end: Optional[datetime] = None,
         chunksize: Optional[int] = -1,
         check_existing: bool = True,
         blocking: bool = True,
@@ -1007,18 +1057,18 @@ def sync_pipe(
 
     Parameters
     ----------
-    pipe: meerschaum.Pipe
+    pipe: mrsm.Pipe
         The Meerschaum Pipe instance into which to sync the data.
 
     df: Union[pandas.DataFrame, str, Dict[Any, Any], List[Dict[str, Any]]]
         An optional DataFrame or equivalent to sync into the pipe.
         Defaults to `None`.
 
-    begin: Optional[datetime.datetime], default None
+    begin: Optional[datetime], default None
         Optionally specify the earliest datetime to search for data.
         Defaults to `None`.
 
-    end: Optional[datetime.datetime], default None
+    end: Optional[datetime], default None
         Optionally specify the latest datetime to search for data.
         Defaults to `None`.
 
@@ -1201,10 +1251,10 @@ def sync_pipe(
 
 def sync_pipe_inplace(
         self,
-        pipe: 'meerschaum.Pipe',
+        pipe: 'mrsm.Pipe',
         params: Optional[Dict[str, Any]] = None,
-        begin: Optional[datetime.datetime] = None,
-        end: Optional[datetime.datetime] = None,
+        begin: Optional[datetime] = None,
+        end: Optional[datetime] = None,
         chunksize: Optional[int] = -1,
         check_existing: bool = True,
         debug: bool = False,
@@ -1216,18 +1266,18 @@ def sync_pipe_inplace(
 
     Parameters
     ----------
-    pipe: meerschaum.Pipe
+    pipe: mrsm.Pipe
         The pipe whose connector is the same as its instance.
 
     params: Optional[Dict[str, Any]], default None
         Optional params dictionary to build the `WHERE` clause.
         See `meerschaum.utils.sql.build_where`.
 
-    begin: Optional[datetime.datetime], default None
+    begin: Optional[datetime], default None
         Optionally specify the earliest datetime to search for data.
         Defaults to `None`.
 
-    end: Optional[datetime.datetime], default None
+    end: Optional[datetime], default None
         Optionally specify the latest datetime to search for data.
         Defaults to `None`.
 
@@ -1253,6 +1303,7 @@ def sync_pipe_inplace(
         get_sqlalchemy_table,
         get_update_queries,
         get_null_replacement,
+        NO_CTE_FLAVORS,
     )
     from meerschaum.utils.dtypes.sql import (
         get_pd_type_from_db_type,
@@ -1266,12 +1317,13 @@ def sync_pipe_inplace(
         end = end,
         debug = debug,
     )
+    metadef_name = sql_item_name('metadef', self.flavor)
     if self.flavor in ('mssql',):
         final_select_ix = metadef.lower().rfind('select')
         def_name = metadef[len('WITH '):].split(' ', maxsplit=1)[0]
         metadef = (
             metadef[:final_select_ix].rstrip() + ',\n'
-            + "metadef AS (\n"
+            + f"{metadef_name} AS (\n"
             + metadef[final_select_ix:]
             + "\n)\n"
         )
@@ -1279,15 +1331,14 @@ def sync_pipe_inplace(
     pipe_name = sql_item_name(pipe.target, self.flavor)
     if not pipe.exists(debug=debug):
         if self.flavor in ('mssql',):
-            create_pipe_query = metadef + f"SELECT *\nINTO {pipe_name}\nFROM metadef"
-        elif self.flavor in ('sqlite', 'oracle', 'mysql', 'mariadb', 'duckdb'):
+            create_pipe_query = metadef + f"SELECT *\nINTO {pipe_name}\nFROM {metadef_name}"
+        elif self.flavor in NO_CTE_FLAVORS:
             create_pipe_query = (
                 f"CREATE TABLE {pipe_name} AS\n"
-                + f"SELECT *\nFROM ({metadef})"
-                + (" AS metadef" if self.flavor in ('mysql', 'mariadb') else '')
+                + f"SELECT *\nFROM ({metadef}) AS {metadef_name}"
             )
         else:
-            create_pipe_query = f"SELECT *\nINTO {pipe_name}\nFROM ({metadef}) AS metadef"
+            create_pipe_query = f"SELECT *\nINTO {pipe_name}\nFROM ({metadef}) AS {metadef_name}"
         result = self.exec(create_pipe_query, debug=debug)
         if result is None:
             return False, f"Could not insert new data into {pipe} from its SQL query definition."
@@ -1315,6 +1366,7 @@ def sync_pipe_inplace(
     unseen_table_name = sql_item_name(unseen_table_raw, self.flavor)
     update_table_raw = get_temp_table_name('update')
     update_table_name = sql_item_name(update_table_raw, self.flavor)
+    metadef_name = sql_item_name('metadef', self.flavor)
 
     new_queries = []
     drop_new_query = f"DROP TABLE {new_table_name}"
@@ -1322,15 +1374,14 @@ def sync_pipe_inplace(
         new_queries.append(drop_new_query)
 
     if self.flavor in ('mssql',):
-        create_new_query = metadef + f"SELECT *\nINTO {new_table_name}\nFROM metadef"
+        create_new_query = metadef + f"SELECT *\nINTO {new_table_name}\nFROM {metadef_name}"
     elif self.flavor in ('sqlite', 'oracle', 'mysql', 'mariadb', 'duckdb'):
         create_new_query = (
             f"CREATE TABLE {new_table_name} AS\n"
-            + f"SELECT *\nFROM ({metadef})"
-            + (" AS metadef" if self.flavor in ('mysql', 'mariadb') else '')
+            + f"SELECT *\nFROM ({metadef}) AS {metadef_name}"
         )
     else:
-        create_new_query = f"SELECT *\nINTO {new_table_name}\nFROM ({metadef}) AS metadef"
+        create_new_query = f"SELECT *\nINTO {new_table_name}\nFROM ({metadef}) AS {metadef_name}"
 
     new_queries.append(create_new_query)
 
@@ -1396,7 +1447,7 @@ def sync_pipe_inplace(
         (
             f"WITH backtrack_def AS (\n{backtrack_def}\n)\n"
             + f"SELECT *\nINTO {backtrack_table_name}\nFROM backtrack_def"
-        ) if self.flavor not in ('sqlite', 'oracle', 'mysql', 'mariadb', 'duckdb')
+        ) if self.flavor not in NO_CTE_FLAVORS
         else (
             f"CREATE TABLE {backtrack_table_name} AS\n"
             + f"SELECT *\nFROM ({backtrack_def})"
@@ -1810,16 +1861,16 @@ def sync_pipe_inplace(
 
 def get_sync_time(
         self,
-        pipe: 'meerschaum.Pipe',
+        pipe: 'mrsm.Pipe',
         params: Optional[Dict[str, Any]] = None,
         newest: bool = True,
         debug: bool = False,
-    ) -> 'datetime.datetime':
-    """Get a Pipe's most recent datetime.
+    ) -> Union[datetime, int, None]:
+    """Get a Pipe's most recent datetime value.
 
     Parameters
     ----------
-    pipe: meerschaum.Pipe
+    pipe: mrsm.Pipe
         The pipe to get the sync time for.
 
     params: Optional[Dict[str, Any]], default None
@@ -1832,11 +1883,10 @@ def get_sync_time(
 
     Returns
     -------
-    A `datetime.datetime` object if the pipe exists, otherwise `None`.
+    A `datetime` object (or `int` if using an integer axis) if the pipe exists, otherwise `None`.
     """
     from meerschaum.utils.sql import sql_item_name, build_where
     from meerschaum.utils.warnings import warn
-    import datetime
     table = sql_item_name(pipe.target, self.flavor)
 
     dt_col = pipe.columns.get('datetime', None)
@@ -1875,7 +1925,6 @@ def get_sync_time(
         )
 
     try:
-        import datetime
         db_time = self.value(q, silent=True, debug=debug)
 
         ### No datetime could be found.
@@ -1887,14 +1936,14 @@ def get_sync_time(
             dateutil_parser = attempt_import('dateutil.parser')
             st = dateutil_parser.parse(db_time)
         ### Do nothing if a datetime object is returned.
-        elif isinstance(db_time, datetime.datetime):
+        elif isinstance(db_time, datetime):
             if hasattr(db_time, 'to_pydatetime'):
                 st = db_time.to_pydatetime()
             else:
                 st = db_time
         ### Sometimes the datetime is actually a date.
-        elif isinstance(db_time, datetime.date):
-            st = datetime.datetime.combine(db_time, datetime.datetime.min.time())
+        elif isinstance(db_time, date):
+            st = datetime.combine(db_time, datetime.min.time())
         ### Adding support for an integer datetime axis.
         elif 'int' in str(type(db_time)).lower():
             st = int(db_time)
@@ -1913,7 +1962,7 @@ def get_sync_time(
 
 def pipe_exists(
         self,
-        pipe: meerschaum.Pipe,
+        pipe: mrsm.Pipe,
         debug: bool = False
     ) -> bool:
     """
@@ -1921,7 +1970,7 @@ def pipe_exists(
 
     Parameters
     ----------
-    pipe: meerschaum.Pipe:
+    pipe: mrsm.Pipe:
         The pipe to check.
         
     debug: bool, default False
@@ -1942,32 +1991,32 @@ def pipe_exists(
 
 def get_pipe_rowcount(
         self,
-        pipe: meerschaum.Pipe,
-        begin: Optional[datetime.datetime] = None,
-        end: Optional[datetime.datetime] = None,
-        remote: bool = False,
+        pipe: mrsm.Pipe,
+        begin: Union[datetime, int, None] = None,
+        end: Union[datetime, int, None] = None,
         params: Optional[Dict[str, Any]] = None,
+        remote: bool = False,
         debug: bool = False
-    ) -> int:
+    ) -> Union[int, None]:
     """
     Get the rowcount for a pipe in accordance with given parameters.
 
     Parameters
     ----------
-    pipe: meerschaum.Pipe
+    pipe: mrsm.Pipe
         The pipe to query with.
         
-    begin: Optional[datetime.datetime], default None
-        The beginning datetime value.
+    begin: Union[datetime, int, None], default None
+        The begin datetime value.
 
-    end: Optional[datetime.datetime], default None
-        The beginning datetime value.
-
-    remote: bool, default False
-        If `True`, get the rowcount for the remote table.
+    end: Union[datetime, int, None], default None
+        The end datetime value.
 
     params: Optional[Dict[str, Any]], default None
         See `meerschaum.utils.sql.build_where`.
+
+    remote: bool, default False
+        If `True`, get the rowcount for the remote table.
 
     debug: bool, default False
         Verbosity toggle.
@@ -1977,7 +2026,7 @@ def get_pipe_rowcount(
     An `int` for the number of rows if the `pipe` exists, otherwise `None`.
 
     """
-    from meerschaum.utils.sql import dateadd_str, sql_item_name
+    from meerschaum.utils.sql import dateadd_str, sql_item_name, NO_CTE_FLAVORS
     from meerschaum.utils.warnings import error, warn
     from meerschaum.connectors.sql._fetch import get_pipe_query
     if remote:
@@ -2033,7 +2082,8 @@ def get_pipe_rowcount(
 
     src = (
         f"SELECT {', '.join(_cols_names)} FROM {_pipe_name}"
-        if not remote else get_pipe_query(pipe)
+        if not remote
+        else get_pipe_query(pipe)
     )
     query = (
         f"""
@@ -2041,7 +2091,7 @@ def get_pipe_rowcount(
         SELECT COUNT(*)
         FROM src
         """
-    ) if self.flavor not in ('mysql', 'mariadb') else (
+    ) if self.flavor not in NO_CTE_FLAVORS else (
         f"""
         SELECT COUNT(*)
         FROM ({src}) AS src
@@ -2079,7 +2129,7 @@ def get_pipe_rowcount(
 
 def drop_pipe(
         self,
-        pipe: meerschaum.Pipe,
+        pipe: mrsm.Pipe,
         debug: bool = False,
         **kw
     ) -> SuccessTuple:
@@ -2088,7 +2138,7 @@ def drop_pipe(
 
     Parameters
     ----------
-    pipe: meerschaum.Pipe
+    pipe: mrsm.Pipe
         The pipe to drop.
         
     """
@@ -2113,9 +2163,9 @@ def drop_pipe(
 
 def clear_pipe(
         self,
-        pipe: meerschaum.Pipe,
-        begin: Optional[datetime.datetime] = None,
-        end: Optional[datetime.datetime] = None,
+        pipe: mrsm.Pipe,
+        begin: Union[datetime, int, None] = None,
+        end: Union[datetime, int, None] = None,
         params: Optional[Dict[str, Any]] = None,
         debug: bool = False,
         **kw
@@ -2125,13 +2175,13 @@ def clear_pipe(
 
     Parameters
     ----------
-    pipe: meerschaum.Pipe
+    pipe: mrsm.Pipe
         The pipe to clear.
         
-    begin: Optional[datetime.datetime], default None
+    begin: Union[datetime, int, None], default None
         Beginning datetime. Inclusive.
 
-    end: Optional[datetime.datetime], default None
+    end: Union[datetime, int, None], default None
          Ending datetime. Exclusive.
 
     params: Optional[Dict[str, Any]], default None
@@ -2192,15 +2242,15 @@ def clear_pipe(
 
 def get_pipe_table(
         self,
-        pipe: meerschaum.Pipe,
+        pipe: mrsm.Pipe,
         debug: bool = False,
     ) -> sqlalchemy.Table:
     """
-    Return the `sqlalchemy.Table` object for a `meerschaum.Pipe`.
+    Return the `sqlalchemy.Table` object for a `mrsm.Pipe`.
 
     Parameters
     ----------
-    pipe: meerschaum.Pipe:
+    pipe: mrsm.Pipe:
         The pipe in question.
         
 
@@ -2217,7 +2267,7 @@ def get_pipe_table(
 
 def get_pipe_columns_types(
         self,
-        pipe: meerschaum.Pipe,
+        pipe: mrsm.Pipe,
         debug: bool = False,
     ) -> Optional[Dict[str, str]]:
     """
@@ -2225,7 +2275,7 @@ def get_pipe_columns_types(
 
     Parameters
     ----------
-    pipe: meerschaum.Pipe:
+    pipe: mrsm.Pipe:
         The pipe to get the columns for.
         
     Returns
@@ -2554,7 +2604,7 @@ def get_alter_columns_queries(
 
 def get_to_sql_dtype(
         self,
-        pipe: 'meerschaum.Pipe',
+        pipe: 'mrsm.Pipe',
         df: 'pd.DataFrame',
         update_dtypes: bool = True,
     ) -> Dict[str, 'sqlalchemy.sql.visitors.TraversibleType']:
@@ -2563,7 +2613,7 @@ def get_to_sql_dtype(
 
     Parameters
     ----------
-    pipe: meerschaum.Pipe
+    pipe: mrsm.Pipe
         The pipe which may contain a `dtypes` parameter.
 
     df: pd.DataFrame
@@ -2601,3 +2651,134 @@ def get_to_sql_dtype(
         col: get_db_type_from_pd_type(typ, self.flavor, as_sqlalchemy=True)
         for col, typ in df_dtypes.items()
     }
+
+
+def _deduplicate_pipe_inplace(
+        self,
+        pipe: mrsm.Pipe,
+        begin: Union[datetime, int, None] = None,
+        end: Union[datetime, int, None] = None,
+        params: Optional[Dict[str, Any]] = None,
+        debug: bool = False,
+    ) -> SuccessTuple:
+    """
+    Delete duplicate values within a pipe's table.
+
+    Parameters
+    ----------
+    pipe: mrsm.Pipe
+        The pipe whose table to deduplicate.
+
+    begin: Union[datetime, int, None], default None
+        If provided, only deduplicate values greater than or equal to this value.
+
+    end: Union[datetime, int, None], default None
+        If provided, only deduplicate values less than this value.
+
+    params: Optional[Dict[str, Any]], default None
+        If provided, further limit deduplication to values which match this query dictionary.
+
+    debug: bool, default False
+        Verbosity toggle.
+
+    Returns
+    -------
+    A `SuccessTuple` indicating success.
+    """
+    from meerschaum.utils.sql import sql_item_name, NO_CTE_FLAVORS
+
+    ### TODO: Handle deleting duplicates without a datetime axis.
+    dt_col = pipe.columns.get('datetime', None)
+    dt_col_name = sql_item_name(dt_col, self.flavor)
+    cols_types = pipe.get_columns_types(debug=debug)
+
+    ### Non-datetime indices that in fact exist.
+    indices = [
+        col
+        for key, col in pipe.columns.items()
+        if col and col != dt_col and col in cols_types
+    ]
+    indices_names = [sql_item_name(index_col, self.flavor) for index_col in indices]
+    pipe_table_name = sql_item_name(pipe.target, self.flavor)
+    duplicates_cte_name = sql_item_name('dups', self.flavor)
+    duplicate_row_number_name = sql_item_name('dup_row_num', self.flavor)
+    previous_row_number_name = sql_item_name('prev_row_num', self.flavor)
+    
+    index_list_str = sql_item_name(dt_col, self.flavor)
+    if indices:
+        index_list_str += (
+            ',\n                '
+            + ',\n                '.join(indices_names)
+        )
+
+    try:
+    	### NOTE: MySQL 5 and below does not support window functions (ROW_NUMBER()).
+        is_old_mysql = (
+            self.flavor in ('mysql', 'mariadb')
+            and
+            int(self.db_version.split('.')[0]) < 8
+        )
+    except Exception as e:
+        is_old_mysql = False
+
+    duplicates_cte_subquery = (
+        f"""
+             SELECT
+                {index_list_str},
+                ROW_NUMBER() OVER (
+                    PARTITION BY
+                    {index_list_str}
+                    ORDER BY {dt_col_name}
+                ) AS {duplicate_row_number_name}
+            FROM {pipe_table_name}
+        """
+        if not is_old_mysql
+        else (
+            f"""
+                SELECT
+                    {index_list_str},
+                    {duplicate_row_number_name}
+                FROM (
+                  SELECT
+                    {index_list_str},
+                    IF(
+                        @{previous_row_number_name} <> {dt_col_name},
+                        @{duplicate_row_number_name} := 0,
+                        @{duplicate_row_number_name}
+                    ),
+                    @{previous_row_number_name} := {dt_col_name},
+                    @{duplicate_row_number_name} := @{duplicate_row_number_name} + 1 AS """
+                + f"""{duplicate_row_number_name}
+                  FROM
+                    {pipe_table_name},
+                    (
+                        SELECT @{duplicate_row_number_name} := 0
+                    ) AS {duplicate_row_number_name},
+                    (
+                        SELECT @{previous_row_number_name} := ''
+                    ) AS {previous_row_number_name}
+                  ORDER BY {index_list_str}
+                ) AS t
+            """
+        )
+    )
+
+
+    query = (
+        f"""
+        WITH {duplicates_cte_name} AS ({duplicates_cte_subquery})
+        DELETE
+        FROM {pipe_table_name}
+        WHERE {duplicate_row_number_name} > 1
+        """
+        if self.flavor not in NO_CTE_FLAVORS
+        else f"""
+        DELETE
+        FROM ({duplicates_cte_subquery}) AS {duplicates_cte_name}
+        WHERE {duplicate_row_number_name} > 1
+        """
+    )
+
+    success = self.execute(query, debug=debug) is not None
+    msg = f"Failed to deduplicate {pipe} in-place."
+    return success, msg

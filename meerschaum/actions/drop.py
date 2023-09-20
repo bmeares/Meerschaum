@@ -15,13 +15,13 @@ def drop(
     """
     Drop pipe data (maintaining registration) or tables.
     """
-    from meerschaum.utils.misc import choose_subaction
-
+    from meerschaum.actions import choose_subaction
     options = {
         'pipes'  : _drop_pipes,
         'tables' : _drop_tables,
     }
     return choose_subaction(action, options, **kw)
+
 
 def _drop_pipes(
         action: Optional[List[str]] = None,

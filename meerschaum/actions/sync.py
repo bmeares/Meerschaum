@@ -28,7 +28,7 @@ def sync(
         - `--debug`
             - Print verbose messages.
     """
-    from meerschaum.utils.misc import choose_subaction
+    from meerschaum.actions import choose_subaction
     options = {
         'pipes': _sync_pipes,
     }
@@ -42,6 +42,7 @@ def _pipes_lap(
         force: bool = False,
         min_seconds: int = 1,
         verify: bool = False,
+        deduplicate: bool = False,
         mrsm_instance: Optional[str] = None,
         timeout_seconds: Optional[int] = None,
         nopretty: bool = False,
@@ -85,6 +86,7 @@ def _pipes_lap(
         'timeout_seconds': timeout_seconds,
         'mrsm_instance': mrsm_instance,
         'verify': verify,
+        'deduplicate': deduplicate,
     })
     locks = {'remaining_count': Lock(), 'results_dict': Lock(), 'pipes_threads': Lock(),}
     pipes = get_pipes(
@@ -235,6 +237,7 @@ def _sync_pipes(
         min_seconds: int = 1,
         unblock: bool = False,
         verify: bool = False,
+        deduplicate: bool = False,
         shell: bool = False,
         nopretty: bool = False,
         debug: bool = False,
@@ -282,6 +285,7 @@ def _sync_pipes(
                     min_seconds = min_seconds,
                     _progress = _progress,
                     verify = verify,
+                    deduplicate = deduplicate,
                     unblock = unblock,
                     debug = debug,
                     nopretty = nopretty,
@@ -326,10 +330,10 @@ def _sync_pipes(
 
         success_msg = (
             "Successfully spawned threads for pipes:"
-            if not verify and unblock
-            else f"Successfully {'synced' if not verify else 'verified'} pipes:"
+            if unblock
+            else f"Successfully synced pipes:"
         )
-        fail_msg = f"Failed to {'sync' if not verify else 'verify'} pipes:"
+        fail_msg = f"Failed to sync pipes:"
         if results_dict:
             print_pipes_results(
                 results_dict,
@@ -368,6 +372,7 @@ def _wrap_sync_pipe(
         min_seconds: int = 1,
         workers = None,
         verify: bool = False,
+        deduplicate: bool = False,
         **kw
     ):
     """
@@ -377,7 +382,13 @@ def _wrap_sync_pipe(
     from meerschaum.utils.venv import Venv
     try:
         with Venv(get_connector_plugin(pipe.connector), debug=debug):
-            sync_method = pipe.sync if not verify else pipe.verify
+            if not verify and not deduplicate:
+                sync_method = pipe.sync
+            elif not verify and deduplicate:
+                sync_method = pipe.deduplicate
+            else:
+                sync_method = pipe.verify
+                kw['deduplicate'] = deduplicate
             return_tuple = sync_method(
                 blocking = (not unblock),
                 force = force,

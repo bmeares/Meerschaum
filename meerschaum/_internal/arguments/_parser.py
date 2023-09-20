@@ -234,6 +234,10 @@ groups['sync'].add_argument(
     '--verify', action="store_true", help="Completely resync a pipe's entire interval.",
 )
 groups['sync'].add_argument(
+    '--deduplicate', '--dedup', action="store_true",
+    help="Remove duplicate rows from a pipe's table.",
+)
+groups['sync'].add_argument(
     '--skip-check-existing', '--allow-duplicates', action='store_true',
     help = (
         "Skip checking for duplicate rows when syncing. " +

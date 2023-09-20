@@ -16,9 +16,7 @@ def verify(
     """
     Verify the states of pipes, packages, and more.
     """
-    from meerschaum.utils.misc import choose_subaction
-    if action is None:
-        action = []
+    from meerschaum.actions import choose_subaction
     options = {
         'pipes': _verify_pipes,
         'packages': _verify_packages,
@@ -34,65 +32,6 @@ def _verify_pipes(**kwargs) -> SuccessTuple:
     from meerschaum.actions.sync import _sync_pipes
     kwargs['verify'] = True
     return _sync_pipes(**kwargs)
-
-    import time
-    from meerschaum.utils.warnings import info
-    running = True
-    while running:
-        try:
-            success, msg = _do_verify_pipes_lap(**kwargs)
-        except KeyboardInterrupt:
-            loop = False
-        running = loop
-        if min_seconds > 0:
-            info(f"Sleeping for {min_seconds} second" + ('s' if min_seconds != 1 else '') + '.')
-            time.sleep(min_seconds)
-
-    return success, msg
-
-
-def _do_verify_pipes_lap(
-        workers: Optional[int] = None,
-        **kw
-    ) -> SuccessTuple:
-    """
-    Verify the contents of pipes.
-    """
-    import time
-    from meerschaum.utils.debug import dprint
-    from meerschaum.utils.warnings import info
-    from meerschaum.utils.formatting import print_pipes_results
-    from meerschaum import get_pipes
-    from meerschaum.utils.pool import get_pool
-    pipes = get_pipes(as_list=True, **kw)
-    if not pipes:
-        return False, "No pipes to verify."
-
-    workers = pipes[0].get_num_workers(workers)
-    pool = get_pool(workers=workers)
-
-    verify_begin = time.perf_counter()
-    results = {}
-    for pipe in pipes:
-        info(f"Verifying the contents of {pipe}.")
-        results[pipe] = pipe.verify(workers=workers, **kw)
-    verify_end = time.perf_counter()
-
-    print_pipes_results(
-        results,
-        success_header = 'Successfully verified pipes:',
-        failure_header = 'Failed to verify pipes:',
-        nopretty = kw.get('nopretty', False),
-    )
-    success_pipes = [pipe for pipe, (_success, _msg) in results.items() if _success]
-    failure_pipes = [pipe for pipe, (_success, _msg) in results.items() if not _success]
-    success = len(failure_pipes) == 0
-    message = (
-        f"It took {round(verify_end - verify_begin, 2)} seconds to verify {len(pipes)} pipe"
-        +  ('s' if len(pipes) != 1 else '')
-        + f"\n    ({len(success_pipes)} succeeded, {len(failure_pipes)} failed)."
-    )
-    return success, message
 
 
 def _verify_packages(

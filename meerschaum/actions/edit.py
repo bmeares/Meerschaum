@@ -16,7 +16,7 @@ def edit(
     """
     Edit an existing element.
     """
-    from meerschaum.utils.misc import choose_subaction
+    from meerschaum.actions import choose_subaction
     options = {
         'config'    : _edit_config,
         'pipes'     : _edit_pipes,
@@ -24,6 +24,7 @@ def edit(
         'users'     : _edit_users,
     }
     return choose_subaction(action, options, **kw)
+
 
 def _complete_edit(
         action: Optional[List[str]] = None,

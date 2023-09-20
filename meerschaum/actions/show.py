@@ -21,8 +21,7 @@ def show(
     Example:
         `show pipes`
     """
-
-    from meerschaum.utils.misc import choose_subaction
+    from meerschaum.actions import choose_subaction
     show_options = {
         'actions'    : _show_actions,
         'pipes'      : _show_pipes,
@@ -42,6 +41,7 @@ def show(
         'logs'       : _show_logs,
     }
     return choose_subaction(action, show_options, **kw)
+
 
 def _complete_show(
         action: Optional[List[str]] = None,

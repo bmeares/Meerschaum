@@ -300,6 +300,8 @@ def delete_pipe(
 def get_pipe_data(
         self,
         pipe: meerschaum.Pipe,
+        select_columns: Optional[List[str]] = None,
+        omit_columns: Optional[List[str]] = None,
         begin: Union[str, datetime, int, None] = None,
         end: Union[str, datetime, int, None] = None,
         params: Optional[Dict[str, Any]] = None,
@@ -315,7 +317,13 @@ def get_pipe_data(
         try:
             response = self.get(
                 r_url + "/data",
-                params = {'begin': begin, 'end': end, 'params': json.dumps(params)},
+                params = {
+                    'select_columns': json.dumps(select_columns),
+                    'omit_columns': json.dumps(omit_columns),
+                    'begin': begin,
+                    'end': end,
+                    'params': json.dumps(params)
+                },
                 debug = debug
             )
             if not response.ok:

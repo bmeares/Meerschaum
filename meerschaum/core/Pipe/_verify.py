@@ -6,7 +6,7 @@
 Verify the contents of a pipe by resyncing its interval.
 """
 
-from datetime import datetime
+from datetime import datetime, timedelta
 from meerschaum.utils.typing import SuccessTuple, Any, Optional, Union, Tuple, List, Dict
 from meerschaum.utils.warnings import warn, info
 from meerschaum.utils.debug import dprint
@@ -15,6 +15,10 @@ def verify(
         self,
         begin: Union[datetime, int, None] = None,
         end: Union[datetime, int, None] = None,
+        params: Optional[Dict[str, Any]] = None,
+        chunk_interval: Union[timedelta, int, None] = None,
+        bounded: bool = False,
+        deduplicate: bool = False,
         workers: Optional[int] = None,
         debug: bool = False,
         **kwargs: Any
@@ -29,6 +33,18 @@ def verify(
 
     end: Union[datetime, int, None], default None
         If specified, only verify rows less than this value.
+
+    chunk_interval: Union[timedelta, int, None], default None
+        If provided, use this as the size of the chunk boundaries.
+        Default to the value set in `pipe.parameters['chunk_minutes']` (1440).
+
+    bounded: bool, default False
+        If `True`, do not verify older than the oldest existing datetime 
+        or newer than the newest existing datetime (i.e. `begin=pipe.get_sync_time(newest=False)`
+        and `end=pipe.get_sync_time() + timedelta(minutes=1)`.
+
+    deduplicate: bool, default False
+        If `True`, deduplicate the pipe's table after the verification syncs.
 
     workers: Optional[int], default None
         If provided, limit the verification to this many threads.
@@ -46,13 +62,20 @@ def verify(
     """
     from meerschaum.utils.pool import get_pool
     workers = self.get_num_workers(workers)
-    sync_less_than_begin = begin is None
-    sync_greater_than_end = end is None
+    sync_less_than_begin = not bounded and begin is None
+    sync_greater_than_end = not bounded and end is None
 
     if begin is None:
         begin = self.get_sync_time(newest=False, debug=debug)
     if end is None:
         end = self.get_sync_time(newest=True, debug=debug)
+
+    if bounded:
+        end += (
+            timedelta(minutes=1)
+            if isinstance(end, datetime)
+            else 1
+        )
 
     cannot_determine_bounds = (
         begin is None
@@ -63,53 +86,47 @@ def verify(
     )
 
     if cannot_determine_bounds:
-        return self.sync(
+        sync_success, sync_msg = self.sync(
             begin = begin,
             end = end,
+            params = params,
             workers = workers,
             debug = debug,
             **kwargs
         )
-    
-    ### Now that we've determined the bounds, prepend this to the final message.
-    message_header = f"{begin} - {end}"
+        if not sync_success:
+            return sync_success, sync_msg
+        if deduplicate:
+            return self.deduplicate(
+                begin = begin,
+                end = end,
+                params = params,
+                workers = workers,
+                debug = debug,
+                **kwargs
+            )
+        return sync_success, sync_msg
 
-    ### Edge case: --begin and --end are the same.
-    if not sync_less_than_begin and not sync_greater_than_end and begin == end:
-        return True, f"Begin and end are equal ('{begin}'); nothing to do."
 
-    ### Set the chunk interval under `pipe.parameters['chunk_minutes']`.
-    chunk_interval = self.get_chunk_interval(debug=debug)
+    if not chunk_interval:
+        chunk_interval = self.get_chunk_interval(debug=debug)
+    chunk_bounds = self.get_chunk_bounds(
+        chunk_interval = chunk_interval,
+        bounded = bounded,
+        debug = debug,
+    )
 
-    ### Build a list of tuples containing the chunk boundaries
-    ### so that we can sync multiple chunks in parallel.
-    ### Run `verify pipes --workers 1` to sync chunks in series.
-    chunk_bounds = []
-    begin_cursor = begin
-    while begin_cursor < end:
-        end_cursor = begin_cursor + chunk_interval
-        chunk_bounds.append((begin_cursor, end_cursor))
-        begin_cursor = end_cursor
-
-    ### The chunk interval might be too large.
-    if not chunk_bounds and end > begin:
-        chunk_bounds = [(begin, end)]
-
-    ### Truncate the last chunk to the end timestamp.
-    if chunk_bounds[-1][1] > end:
-        chunk_bounds[-1] = (chunk_bounds[-1][0], end)
-
-    ### Pop the last chunk if its bounds are equal.
-    if chunk_bounds[-1][0] == chunk_bounds[-1][1]:
-        chunk_bounds = chunk_bounds[:-1]
-
-    if sync_less_than_begin:
-        chunk_bounds = [(None, begin)] + chunk_bounds
-    if sync_greater_than_end:
-        chunk_bounds = chunk_bounds + [(end, None)]
-
-    ### Last check: return if no chunk can be determined.
+    ### Consider it a success if no chunks need to be verified.
     if not chunk_bounds:
+        if deduplicate:
+            return self.deduplicate(
+                begin = begin,
+                end = end,
+                params = params,
+                workers = workers,
+                debug = debug,
+                **kwargs
+            )
         return True, f"Could not determine chunks between '{begin}' and '{end}'; nothing to do."
 
     info(
@@ -130,6 +147,7 @@ def verify(
         return chunk_begin_and_end, self.sync(
             begin = chunk_begin,
             end = chunk_end,
+            params = params,
             workers = workers,
             debug = debug,
             **kwargs
@@ -142,8 +160,20 @@ def verify(
     bounds_success_tuples = dict(pool.map(process_chunk_bounds, chunk_bounds))
     bounds_success_bools = {bounds: tup[0] for bounds, tup in bounds_success_tuples.items()}
 
+    message_header = f"{begin} - {end}"
     if all(bounds_success_bools.values()):
-        return True, get_chunks_success_message(bounds_success_tuples, header=message_header)
+        msg = get_chunks_success_message(bounds_success_tuples, header=message_header)
+        if deduplicate:
+            deduplicate_success, deduplicate_msg = self.deduplicate(
+                begin = begin,
+                end = end,
+                params = params,
+                workers = workers,
+                debug = debug,
+                **kwargs
+            )
+            return deduplicate_success, msg + '\n\n' + deduplicate_msg
+        return True, msg
 
     chunk_bounds_to_resync = [
         bounds
@@ -168,16 +198,33 @@ def verify(
     }
 
     if all(retry_bounds_success_bools.values()):
-        message = get_chunks_success_message(bounds_success_tuples, header=message_header)
-        return (
-            True,
-            (
-                message
-                + f"\nRetried {len(chunk_bounds_to_resync)} chunks."
-            )
+        message = (
+            get_chunks_success_message(bounds_success_tuples, header=message_header)
+            + f"\nRetried {len(chunk_bounds_to_resync)} chunks."
         )
+        if deduplicate:
+            deduplicate_success, deduplicate_msg = self.deduplicate(
+                begin = begin,
+                end = end,
+                params = params,
+                workers = workers,
+                debug = debug,
+                **kwargs
+            )
+            return deduplicate_success, message + '\n\n' + deduplicate_msg
+        return True, message
 
     message = get_chunks_success_message(bounds_success_tuples, header=message_header)
+    if deduplicate:
+        deduplicate_success, deduplicate_msg = self.deduplicate(
+            begin = begin,
+            end = end,
+            params = params,
+            workers = workers,
+            debug = debug,
+            **kwargs
+        )
+        return deduplicate_success, message + '\n\n' + deduplicate_msg
     return False, message
 
 

@@ -20,7 +20,7 @@ def delete(
         `delete {config, pipes, plugins, users, connectors, jobs}`
 
     """
-    from meerschaum.utils.misc import choose_subaction
+    from meerschaum.actions import choose_subaction
     from meerschaum.utils.debug import dprint
     options = {
         'config'     : _delete_config, 
@@ -31,6 +31,7 @@ def delete(
         'jobs'       : _delete_jobs,
     }
     return choose_subaction(action, options, **kw)
+
 
 def _complete_delete(
         action: Optional[List[str]] = None,

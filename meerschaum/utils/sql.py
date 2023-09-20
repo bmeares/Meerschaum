@@ -27,6 +27,12 @@ test_queries = {
 exists_queries = {
     'default'    : "SELECT COUNT(*) FROM {table_name} WHERE 1 = 0",
 }
+version_queries = {
+    'default': "SELECT VERSION() AS {version_name}",
+    'sqlite': "SELECT SQLITE_VERSION() AS {version_name}",
+    'mssql': "SELECT @@version",
+    'oracle': "SELECT version from PRODUCT_COMPONENT_VERSION WHERE rownum = 1",
+}
 update_queries = {
     'default': """
         UPDATE {target_table_name} AS f
@@ -130,6 +136,7 @@ max_name_lens = {
 json_flavors = {'postgresql', 'timescaledb', 'citus', 'cockroachdb'}
 OMIT_NULLSFIRST_FLAVORS = {'mariadb', 'mysql', 'mssql'}
 SINGLE_ALTER_TABLE_FLAVORS = {'duckdb', 'sqlite', 'mssql', 'oracle'}
+NO_CTE_FLAVORS = {'sqlite', 'oracle', 'mysql', 'mariadb', 'duckdb'}
 
 ### MySQL doesn't allow for casting as BIGINT, so this is a workaround.
 DB_FLAVORS_CAST_DTYPES = {
@@ -672,7 +679,6 @@ def get_sqlalchemy_table(
     return tables[truncated_table_name]
 
 
-_checked_sqlite_version = None
 def get_update_queries(
         target: str,
         patch: str,
@@ -706,10 +712,8 @@ def get_update_queries(
     """
     from meerschaum.utils.debug import dprint
     flavor = connector.flavor
-    if connector.flavor == 'sqlite':
-        import sqlite3
-        if sqlite3.sqlite_version < '3.33.0':
-            flavor = 'sqlite_delete_insert'
+    if connector.flavor == 'sqlite' and connector.db_version < '3.33.0':
+        flavor = 'sqlite_delete_insert'
     base_queries = update_queries.get(flavor, update_queries['default'])
     if not isinstance(base_queries, list):
         base_queries = [base_queries]
@@ -784,3 +788,15 @@ def get_null_replacement(typ: str, flavor: str) -> str:
     if 'float' in typ.lower() or 'double' in typ.lower():
         return '-987654321.0'
     return ('n' if flavor == 'oracle' else '') + "'-987654321'"
+
+
+def get_db_version(conn: 'SQLConnector', debug: bool = False) -> None:
+    """
+    Fetch the database version if possible.
+    """
+    version_name = sql_item_name('version', conn.flavor)
+    version_query = version_queries.get(
+        conn.flavor,
+        version_queries['default']
+    ).format(version_name=version_name)
+    return conn.value(version_query, debug=debug)

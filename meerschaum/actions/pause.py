@@ -13,7 +13,7 @@ def pause(action: Optional[List[str]] = None, **kw) -> SuccessTuple:
     """
     Pause running jobs.
     """
-    from meerschaum.utils.misc import choose_subaction
+    from meerschaum.jobs import choose_subaction
     options = {
         'jobs': _pause_jobs,
     }

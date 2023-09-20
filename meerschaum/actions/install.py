@@ -16,7 +16,7 @@ def install(
     """
     Install Meerschaum plugins or Python packages.
     """
-    from meerschaum.utils.misc import choose_subaction
+    from meerschaum.actions import choose_subaction
     options = {
         'plugins'  : _install_plugins,
         'packages' : _install_packages,

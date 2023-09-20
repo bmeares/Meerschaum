@@ -380,6 +380,8 @@ def get_pipe_data(
         connector_keys: str,
         metric_key: str,
         location_key: str,
+        select_columns: Optional[str] = None,
+        omit_columns: Optional[str] = None,
         begin: Union[str, int, None] = None,
         end: Union[str, int, None] = None,
         params: Optional[str] = None,
@@ -388,7 +390,9 @@ def get_pipe_data(
         ),
     ) -> str:
     """
-    Get a Pipe's data. Optionally set query boundaries.
+    Get a pipe's data, applying any filtering.
+
+    Note that `select_columns`, `omit_columns`, and `params` are JSON-encoded strings.
     """
     if is_int(begin):
         begin = int(begin)
@@ -403,11 +407,38 @@ def get_pipe_data(
             _params = json.loads(params)
         except Exception as e:
             _params = None
-
     if not isinstance(_params, dict):
         raise fastapi.HTTPException(
             status_code = 409,
             detail = "Params must be a valid JSON-encoded dictionary.",
+        )
+
+    _select_columns = []
+    if select_columns == 'null':
+        select_columns = None
+    if select_columns is not None:
+        try:
+            _select_columns = json.loads(select_columns)
+        except Exception as e:
+            _select_columns = None
+    if not isinstance(_select_columns, list):
+        raise fastapi.HTTPException(
+            status_code = 409,
+            detail = "Selected columns must be a JSON-encoded list."
+        )
+
+    _omit_columns = []
+    if omit_columns == 'null':
+        omit_columns = None
+    if omit_columns is not None:
+        try:
+            _omit_columns = json.loads(omit_columns)
+        except Exception as e:
+            _omit_columns = None
+    if _omit_columns is None:
+        raise fastapi.HTTPException(
+            status_code = 409,
+            detail = "Omitted columns must be a JSON-encoded list.",
         )
 
     pipe = get_pipe(connector_keys, metric_key, location_key)
@@ -424,14 +455,13 @@ def get_pipe_data(
         )
 
     df = pipe.get_data(
+        select_columns = _select_columns,
+        omit_columns = _omit_columns,
         begin = begin,
         end = end,
         params = _params,
         debug = debug,
     )
-    print(f"{pipe.dtypes=}")
-    if df is not None and 'json' in df.columns:
-        print(f"{df['json'][0]=}")
     if df is None:
         raise fastapi.HTTPException(
             status_code = 400,

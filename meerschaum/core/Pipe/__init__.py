@@ -88,6 +88,7 @@ class Pipe:
         get_rowcount,
         _get_data_as_iterator,
         get_chunk_interval,
+        get_chunk_bounds,
     )
     from ._register import register
     from ._attributes import (
@@ -122,6 +123,7 @@ class Pipe:
     from ._delete import delete
     from ._drop import drop
     from ._clear import clear
+    from ._deduplicate import deduplicate, dedup
     from ._bootstrap import bootstrap
     from ._dtypes import enforce_dtypes, infer_dtypes
 

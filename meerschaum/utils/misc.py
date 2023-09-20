@@ -71,62 +71,6 @@ def add_method_to_class(
     return func
 
 
-def choose_subaction(
-        action: Optional[List[str]] = None,
-        options: Optional[Dict[str, Any]] = None,
-        **kw
-    ) -> SuccessTuple:
-    """
-    Given a dictionary of options and the standard Meerschaum actions list,
-    check if choice is valid and execute chosen function, else show available
-    options and return False
-
-    Parameters
-    ----------
-    action: Optional[List[str]], default None
-        A list of subactions (e.g. `show pipes` -> ['pipes']).
-
-    options: Optional[Dict[str, Any]], default None
-        Available options to execute.
-        option (key) -> function (value)
-        Functions must accept **kw keyword arguments
-        and return a tuple of success bool and message.
-
-    Returns
-    -------
-    The return value of the chosen subaction (assumed to be a `SuccessTuple`).
-
-    """
-    from meerschaum.utils.warnings import warn, info
-    import inspect
-    if action is None:
-        action = []
-    if options is None:
-        options = {}
-    parent_action = inspect.stack()[1][3]
-    if len(action) == 0:
-        action = ['']
-    choice = action[0]
-
-    def valid_choice(_choice : str, _options : dict):
-        if _choice in _options:
-            return _choice
-        if (_choice + 's') in options:
-            return _choice + 's'
-        return None
-
-    parsed_choice = valid_choice(choice, options)
-    if parsed_choice is None:
-        warn(f"Cannot {parent_action} '{choice}'. Choose one:", stack=False)
-        for option in sorted(options):
-            print(f"  - {parent_action} {option}")
-        return (False, f"Invalid choice '{choice}'.")
-    ### remove parent sub-action
-    kw['action'] = list(action)
-    del kw['action'][0]
-    return options[parsed_choice](**kw)
-
-
 def generate_password(length: int = 12) -> str:
     """Generate a secure password of given length.
 

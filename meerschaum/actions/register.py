@@ -18,13 +18,14 @@ def register(
 
     Pipes and users reside on instances (`-i`), and plugins reside on repositories (`-r`).
     """
-    from meerschaum.utils.misc import choose_subaction
+    from meerschaum.actions import choose_subaction
     options = {
         'pipes'     : _register_pipes,
         'plugins'   : _register_plugins,
         'users'     : _register_users,
     }
     return choose_subaction(action, options, **kw)
+
 
 def _complete_register(
         action: Optional[List[str]] = None,

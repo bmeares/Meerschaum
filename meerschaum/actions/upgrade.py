@@ -23,7 +23,7 @@ def upgrade(
         `upgrade meerschaum`
     """
 
-    from meerschaum.utils.misc import choose_subaction
+    from meerschaum.actions import choose_subaction
     options = {
         'plugins'    : _upgrade_plugins,
         'meerschaum' : _upgrade_meerschaum,
@@ -31,6 +31,7 @@ def upgrade(
         'packages'   : _upgrade_packages,
     }
     return choose_subaction(action, options, **kw)
+
 
 def _upgrade_meerschaum(
         action: Optional[List[str]] = None,

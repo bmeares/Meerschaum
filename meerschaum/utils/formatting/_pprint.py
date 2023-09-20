@@ -8,35 +8,34 @@ Pretty printing wrapper
 
 def pprint(
         *args,
-        detect_password : bool = True,
-        nopretty : bool = False,
+        detect_password: bool = True,
+        nopretty: bool = False,
         **kw
-    ):
+    ) -> None:
     """Pretty print an object according to the configured ANSI and UNICODE settings.
     If detect_password is True (default), search and replace passwords with '*' characters.
     Does not mutate objects.
-
-    Parameters
-    ----------
-    *args :
-        
-    detect_password : bool :
-         (Default value = True)
-    nopretty : bool :
-         (Default value = False)
-    **kw :
-        
-
-    Returns
-    -------
-
     """
     from meerschaum.utils.packages import attempt_import, import_rich
-    from meerschaum.utils.formatting import ANSI, UNICODE, get_console
+    from meerschaum.utils.formatting import ANSI, UNICODE, get_console, print_tuple
     from meerschaum.utils.warnings import error
     from meerschaum.utils.misc import replace_password, dict_from_od, filter_keywords
     from collections import OrderedDict
     import copy, json
+
+    if (
+        len(args) == 1
+        and
+        isinstance(args[0], tuple)
+        and
+        len(args[0]) == 2
+        and
+        isinstance(args[0][0], bool)
+        and
+        isinstance(args[0][1], str)
+    ):
+        return print_tuple(args[0])
+
     modify = True
     rich_pprint = None
     if ANSI and not nopretty:

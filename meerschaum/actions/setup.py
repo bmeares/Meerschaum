@@ -19,7 +19,7 @@ def setup(
     Usage:
         setup plugins noaa
     """
-    from meerschaum.utils.misc import choose_subaction
+    from meerschaum.actions import choose_subaction
     options = {
         'plugins'  : _setup_plugins,
     }

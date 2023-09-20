@@ -13,11 +13,12 @@ def stop(action: Optional[List[str]] = None, **kw) -> SuccessTuple:
     """
     Stop running jobs.
     """
-    from meerschaum.utils.misc import choose_subaction
+    from meerschaum.actions import choose_subaction
     options = {
         'jobs': _stop_jobs,
     }
     return choose_subaction(action, options, **kw)
+
 
 def _complete_stop(
         action: Optional[List[str]] = None,

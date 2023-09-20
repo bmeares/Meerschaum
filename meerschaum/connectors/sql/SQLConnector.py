@@ -51,6 +51,7 @@ class SQLConnector(Connector):
         get_pipe_rowcount,
         drop_pipe,
         clear_pipe,
+        _deduplicate_pipe_inplace,
         get_pipe_table,
         get_pipe_columns_types,
         get_to_sql_dtype,
@@ -280,6 +281,21 @@ class SQLConnector(Connector):
                 from meerschaum.utils.warnings import warn
                 self._db = None
         return self._db
+
+
+    @property
+    def db_version(self) -> Union[str, None]:
+        """
+        Return the database version.
+        """
+        _db_version = self.__dict__.get('_db_version', None)
+        if _db_version is not None:
+            return _db_version
+
+        from meerschaum.utils.sql import get_db_version
+        self._db_version = get_db_version(self)
+        return self._db_version
+
 
     def __getstate__(self):
         return self.__dict__

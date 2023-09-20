@@ -22,15 +22,16 @@ def clear(
         - For all pipes, remove rows newer than or equal to `2022-01-01 00:00:00`.
 
     """
-    from meerschaum.utils.misc import choose_subaction
+    from meerschaum.actions import choose_subaction
     if not action:
         from meerschaum.utils.formatting._shell import clear_screen
         return clear_screen(kw.get('debug', False)), ''
 
     options = {
-        'pipes' : _clear_pipes,
+        'pipes': _clear_pipes,
     }
     return choose_subaction(action, options, **kw)
+
 
 def _clear_pipes(
         action: Optional[List[str]] = None,

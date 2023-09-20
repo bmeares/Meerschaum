@@ -16,8 +16,7 @@ def start(
     """
     Start subsystems (API server, background job, etc.).
     """
-
-    from meerschaum.utils.misc import choose_subaction
+    from meerschaum.actions import choose_subaction
     options = {
         'api': _start_api,
         'jobs': _start_jobs,
@@ -26,6 +25,7 @@ def start(
         'connectors': _start_connectors,
     }
     return choose_subaction(action, options, **kw)
+
 
 def _complete_start(
         action: Optional[List[str]] = None,
