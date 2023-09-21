@@ -6,44 +6,72 @@
 
 **Breaking Changes**
 
-- **Removed `Pipe.sync_time`.**  
+- **Removed redundant `Pipe.sync_time` property.**  
   Use `pipe.get_sync_time()` instead.
 
 - **Removed `round_down` from `get_sync_time()` for instance connectors.**  
   To avoid confusion, sync times are no longer truncated by default. `round_down` is still an optional keyword argument on `pipe.get_sync_time()`.
 
-- **Moved `choose_subaction()` into `meerschaum.actions`.**
+- **Moved `choose_subaction()` into `meerschaum.actions`.**  
+  This function is for internal use and as such should not affect any users.
 
-**TODO**
-
-- `dask` support
-- relative verify backtrack bound
-- `deduplicate pipes`
-
-**Wishlist**
-- select sub-keys in get_data()
-- pipe ownership?
-- vendor `compose`?
-- `textual` TUI?
+- **Replaced `pipe.parameters['chunk_time_interval']` with `pipe.parameters['chunk_minutes']`**  
+  For better security and cohesiveness, the TimescaleDB `chunk_time_interval` value is now derived from the standard `chunk_minutes` value. This also means pipes with integer date axes will be created with a new default chunk interval of 1440 (was previously 100,000).
 
 **Features**
 
 - **Added `pyarrow` support.**  
   The dtypes enforcement system was overhauled to add support for `pyarrow` data types.
 
-- **Added `dask` support.**  
+- **Added preliminary `dask` support.**  
+  For example, you may now return Dask DataFrames in your plugins, pass into `pipe.sync()`, and `pipe.get_data()` now has the flag `as_dask`.
 
-- **Add `verify pipes`**
+  ```python
+  pipe = mrsm.Pipe('dask', 'demo', columns={'datetime': 'dt'})
+  pipe.sync([
+      {'dt': '2023-01-01', 'id': 1},
+      {'dt': '2023-01-02', 'id': 2},
+      {'dt': '2023-01-03', 'id': 3},
+  ])
+  ddf = pipe.get_data(as_dask=True)
+  print(ddf)
+  # Dask DataFrame Structure:
+  #                            dt              id
+  # npartitions=4
+  #                datetime64[ns]  int64[pyarrow]
+  #                           ...             ...
+  #                           ...             ...
+  #                           ...             ...
+  #                           ...             ...
+  # Dask Name: from-delayed, 5 graph layers
 
-- **Add `chunk_minutes` to `pipe.parameters`**.
+  print(ddf.compute())
+  #           dt  id
+  # 0 2023-01-01   1
+  # 0 2023-01-02   2
+  # 0 2023-01-03   3
+  ```
 
-- **Add `pipe.get_chunk_interval()`.**
+- **Added `verify pipes` and `--verify`.**
 
-- **Add `pipe.get_num_workers()`.**
+- **Added `deduplicate pipes` and `--deduplicate`.**
 
-- **Add `meerschaum.utils.sql.get_db_version()` and `SQLConnector.db_version`.**
+- **Added `chunk_minutes` to `pipe.parameters`.**
+
+- **Added `--chunk-minutes`, `--chunk-hours`, and `--chunk-days`.**
+
+- **Added `pipe.get_chunk_interval()`.**
+
+- **Added `pipe.get_chunk_bounds()`.**  
+  Iterating over a pipe's interval 
+
+- **Added `--bounded`**
+
+- **Added `pipe.get_num_workers()`.**
+
+- **Added `meerschaum.utils.sql.get_db_version()` and `SQLConnector.db_version`.**
   
-- **Add `select_columns` and `omit_columns` to `pipe.get_data()`.**  
+- **Added `select_columns` and `omit_columns` to `pipe.get_data()`.**  
   In situations where not all columns are required, you can now either specify which columns you want to include (`select_columns`) and which columns to filter out (`omit_columns`). You may pass a list of columns or a single column, and the value `'*'` for `select_columns` will be treated as `None` (i.e. `SELECT *`).
 
   ```python
@@ -75,10 +103,16 @@
   A pipe's data types are now passed to `SQLConnector.read()` when fetching its data.
 
 - **Replace `daemoniker` with `python-daemon`.**  
-  `python-daemon` is a well-maintained and well-behaved daemon process library. However, this migration removes Windows support for background jobs (which was shoddy already, so no harm there).
+  `python-daemon` is a well-maintained and well-behaved daemon process library. However, this migration removes Windows support for background jobs (which was never really fully supported already, so no harm there).
 
-- **Add `pipe.get_chunk_bounds()`.**  
-  Iterating over a pipe's interval 
+- **Added `pause jobs`.**  
+  In addition to `start jobs` and `stop jobs`, `pause jobs` will suspend a job's daemon. Jobs may be resumed with `start jobs` (`Daemon.resume()`).
+
+- **Added job management to the UI.**
+
+- **Logs now roll over and are preserved on job restarts.**  
+  Spin up long-running job with peace of mind now that logs are automatically rolled over, keeping five 500 KB files on disk at any moment (you can tweak these values with `mrsm edit config jobs`).
+  To facilitate this, `meershaum.utils.daemon.RotatingFile` was added to provide a generic file-like object, complete with its own file descriptor.
 
 ## 1.7.x Releases
 

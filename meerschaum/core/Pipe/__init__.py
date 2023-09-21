@@ -119,7 +119,11 @@ class Pipe:
         _get_chunk_label,
         get_num_workers,
     )
-    from ._verify import verify
+    from ._verify import (
+        verify,
+        get_bound_interval,
+        get_bound_time,
+    )
     from ._delete import delete
     from ._drop import drop
     from ._clear import clear

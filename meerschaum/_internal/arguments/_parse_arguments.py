@@ -8,6 +8,8 @@ This module contains functions for parsing arguments
 """
 
 from __future__ import annotations
+import json
+from datetime import timedelta
 from meerschaum.utils.typing import List, Dict, Any, Optional, Callable, SuccessTuple
 from meerschaum.utils.threading import RLock
 
@@ -178,6 +180,16 @@ def parse_synonyms(
         args_dict['check_existing'] = False
     if args_dict.get('venv', None) in ('None', '[None]'):
         args_dict['venv'] = None
+    chunk_minutes = args_dict.get('chunk_minutes', None)
+    chunk_hours = args_dict.get('chunk_hours', None)
+    chunk_days = args_dict.get('chunk_days', None)
+    if isinstance(chunk_minutes, int):
+        args_dict['chunk_interval'] = timedelta(minutes=chunk_minutes)
+    elif isinstance(chunk_hours, int):
+        args_dict['chunk_interval'] = timedelta(hours=chunk_hours)
+    elif isinstance(chunk_days, int):
+        args_dict['chunk_interval'] = timedelta(days=chunk_days)
+
     return args_dict
 
 
@@ -185,7 +197,6 @@ def parse_dict_to_sysargs(
         args_dict : Dict[str, Any]
     ) -> List[str]:
     """Revert an arguments dictionary back to a command line list."""
-    import json
     from meerschaum._internal.arguments._parser import get_arguments_triggers
     sysargs = []
     sysargs += args_dict.get('action', [])

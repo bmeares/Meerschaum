@@ -6,7 +6,7 @@
 Interact with Pipes metadata via SQLConnector.
 """
 from __future__ import annotations
-from datetime import datetime, date
+from datetime import datetime, date, timedelta
 import meerschaum as mrsm
 from meerschaum.utils.typing import (
     Union, Any, SuccessTuple, Tuple, Dict, Optional, List
@@ -427,10 +427,17 @@ def get_create_index_queries(
                 get_distinct_col_count(_id, f"SELECT {_id_name} FROM {_pipe_name}", self)
                 if (_id is not None and _create_space_partition) else None
             )
+
+            chunk_interval = pipe.get_chunk_interval(debug=debug)
+            chunk_interval_minutes = (
+                chunk_interval
+                if isinstance(chunk_interval, int)
+                else int(chunk_interval.total_seconds() / 60)
+            )
             chunk_time_interval = (
-                pipe.parameters.get('chunk_time_interval', None)
-                or
-                ("INTERVAL '1 DAY'" if not 'int' in _datetime_type.lower() else '100000')
+                f"INTERVAL '{chunk_interval_minutes} MINUTES'"
+                if isinstance(chunk_interval, timedelta)
+                else f'{chunk_interval_minutes}'
             )
 
             dt_query = (

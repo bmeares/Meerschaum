@@ -102,10 +102,6 @@ def read(
         `chunksize` must not be `None` (falls back to 1000 if so),
         and hooks are not called in this case.
 
-    as_dask: bool, default False
-        If `True`, return a `dask.DataFrame`
-        (which may be loaded into a Pandas DataFrame with `df.compute()`).
-
     index_col: Optional[str], default None
         If using Dask, use this column as the index column.
         If omitted, a Pandas DataFrame will be fetched and converted to a Dask DataFrame.
@@ -134,7 +130,6 @@ def read(
     is_dask = 'dask' in pd.__name__
     pd = attempt_import('pandas')
     #  pd = import_pandas()
-    dd = attempt_import('dask.dataframe') if as_dask else None
     is_dask = dd is not None
     npartitions = chunksize_to_npartitions(chunksize)
     if is_dask:
@@ -687,7 +682,7 @@ def to_sql(
     from meerschaum.utils.packages import attempt_import, import_pandas
     sqlalchemy = attempt_import('sqlalchemy', debug=debug)
     pd = import_pandas()
-    is_dask = 'dask' in pd.__name__
+    is_dask = 'dask' in df.__module__
 
     stats = {'target': name, }
     ### resort to defaults if None

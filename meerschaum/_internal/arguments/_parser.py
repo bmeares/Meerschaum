@@ -227,7 +227,22 @@ groups['sync'].add_argument(
 )
 groups['sync'].add_argument(
     '--chunksize', type=int, help=(
-        "Specify the chunksize for syncing and retrieving data. Defaults to 900."
+        "Specify the database chunksize. Defaults to 10,000."
+    ),
+)
+groups['sync'].add_argument(
+    '--chunk-minutes', type=int, help=(
+        "Specify the chunk interval in minutes for verification syncs. Defaults to 1440."
+    ),
+)
+groups['sync'].add_argument(
+    '--chunk-hours', type=int, help=(
+        "Specify the chunk interval in days for verification syncs. See `--chunk-minutes`."
+    ),
+)
+groups['sync'].add_argument(
+    '--chunk-days', type=int, help=(
+        "Specify the chunk interval in days for verification syncs. See `--chunk-minutes`."
     ),
 )
 groups['sync'].add_argument(
@@ -236,6 +251,13 @@ groups['sync'].add_argument(
 groups['sync'].add_argument(
     '--deduplicate', '--dedup', action="store_true",
     help="Remove duplicate rows from a pipe's table.",
+)
+groups['sync'].add_argument(
+    '--bounded', '--bound', action="store_true",
+    help = (
+        "When verifying, do not sync outside "
+        + "the existing oldest and newest datetime bounds."
+    )
 )
 groups['sync'].add_argument(
     '--skip-check-existing', '--allow-duplicates', action='store_true',

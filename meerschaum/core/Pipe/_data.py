@@ -20,6 +20,7 @@ def get_data(
         params: Optional[Dict[str, Any]] = None,
         as_iterator: bool = False,
         as_chunks: bool = False,
+        as_dask: bool = False,
         chunk_interval: Union[timedelta, int, None] = None,
         fresh: bool = False,
         debug: bool = False,
@@ -57,6 +58,10 @@ def get_data(
     as_chunks: bool, default False
         Alias for `as_iterator`.
 
+    as_dask: bool, default False
+        If `True`, return a `dask.DataFrame`
+        (which may be loaded into a Pandas DataFrame with `df.compute()`).
+
     chunk_interval: Union[timedelta, int, None], default None
         If `as_iterator`, then return chunks with `begin` and `end` separated by this interval.
         This may be set under `pipe.parameters['chunk_minutes']`.
@@ -85,6 +90,9 @@ def get_data(
     from meerschaum.connectors import get_connector_plugin
     from meerschaum.utils.misc import iterate_chunks, items_str
     from meerschaum.utils.dataframe import add_missing_cols_to_df
+    from meerschaum.utils.packages import attempt_import
+    dd = attempt_import('dask.dataframe') if as_dask else None
+    dask = attempt_import('dask') if as_dask else None
 
     if select_columns == '*':
         select_columns = None
@@ -107,6 +115,33 @@ def get_data(
             fresh = fresh,
             debug = debug,
         )
+
+    if as_dask:
+        from multiprocessing.pool import ThreadPool
+        dask_pool = ThreadPool(self.get_num_workers())
+        dask.config.set(pool=dask_pool)
+        chunk_interval = self.get_chunk_interval(chunk_interval, debug=debug)
+        bounds = self.get_chunk_bounds(
+            begin = begin,
+            end = end,
+            bounded = False,
+            chunk_interval = chunk_interval,
+            debug = debug,
+        )
+        dask_chunks = [
+            dask.delayed(self.get_data)(
+                select_columns = select_columns,
+                omit_columns = omit_columns,
+                begin = chunk_begin,
+                end = chunk_end,
+                params = params,
+                chunk_interval = chunk_interval,
+                fresh = fresh,
+                debug = debug,
+            )
+            for (chunk_begin, chunk_end) in bounds
+        ]
+        return dd.from_delayed(dask_chunks)
 
     if not self.exists(debug=debug):
         return None
@@ -245,12 +280,7 @@ def _get_data_as_iterator(
         elif isinstance(max_dt, datetime):
             max_dt = round_time(max_dt + timedelta(minutes=1))
 
-    if chunk_interval is None:
-        chunk_interval = self.get_chunk_interval(debug=debug)
-    elif isinstance(chunk_interval, int) and isinstance(min_dt, datetime):
-        chunk_interval = timedelta(minutes=1)
-    elif isinstance(chunk_interval, timedelta) and isinstance(min_dt, int):
-        chunk_interval = int(chunk_interval.total_seconds() / 60)
+    chunk_interval = self.get_chunk_interval(chunk_interval, debug=debug)
 
     ### If we can't determine bounds
     ### or if chunk_interval exceeds the max,
@@ -458,14 +488,34 @@ def get_rowcount(
 
 def get_chunk_interval(
         self,
+        chunk_interval: Union[timedelta, int, None] = None,
         debug: bool = False,
     ) -> Union[timedelta, int]:
     """
     Get the chunk interval to use for this pipe.
+
+    Parameters
+    ----------
+    chunk_interval: Union[timedelta, int, None], default None
+        If provided, coerce this value into the correct type.
+        For example, if the datetime axis is an integer, then
+        return the number of minutes.
+
+    Returns
+    -------
+    The chunk interval (`timedelta` or `int`) to use with this pipe's `datetime` axis.
     """
     default_chunk_minutes = get_config('pipes', 'parameters', 'chunk_minutes')
     configured_chunk_minutes = self.parameters.get('chunk_minutes', None)
-    chunk_minutes = configured_chunk_minutes or default_chunk_minutes
+    chunk_minutes = (
+        (configured_chunk_minutes or default_chunk_minutes)
+        if chunk_interval is None
+        else (
+            chunk_interval
+            if isinstance(chunk_interval, int)
+            else int(chunk_interval.total_seconds() / 60)
+        )
+    )
 
     dt_col = self.columns.get('datetime', None)
     if dt_col is None:
@@ -529,8 +579,7 @@ def get_chunk_bounds(
         return [(None, None)]
 
     ### Set the chunk interval under `pipe.parameters['chunk_minutes']`.
-    if chunk_interval is None:
-        chunk_interval = self.get_chunk_interval(debug=debug)
+    chunk_interval = self.get_chunk_interval(chunk_interval, debug=debug)
     
     ### Build a list of tuples containing the chunk boundaries
     ### so that we can sync multiple chunks in parallel.

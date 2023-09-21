@@ -9,7 +9,8 @@ NOTE: `sync` required a SQL connection and is not intended for client use
 """
 
 from __future__ import annotations
-from meerschaum.utils.typing import SuccessTuple, Any, List, Optional, Tuple
+from datetime import timedelta
+from meerschaum.utils.typing import SuccessTuple, Any, List, Optional, Tuple, Union
 
 def sync(
         action: Optional[List[str]] = None,
@@ -43,6 +44,8 @@ def _pipes_lap(
         min_seconds: int = 1,
         verify: bool = False,
         deduplicate: bool = False,
+        bounded: Optional[bool] = None,
+        chunk_interval: Union[timedelta, int, None] = None,
         mrsm_instance: Optional[str] = None,
         timeout_seconds: Optional[int] = None,
         nopretty: bool = False,
@@ -87,6 +90,8 @@ def _pipes_lap(
         'mrsm_instance': mrsm_instance,
         'verify': verify,
         'deduplicate': deduplicate,
+        'bounded': bounded,
+        'chunk_interval': chunk_interval,
     })
     locks = {'remaining_count': Lock(), 'results_dict': Lock(), 'pipes_threads': Lock(),}
     pipes = get_pipes(
@@ -238,6 +243,8 @@ def _sync_pipes(
         unblock: bool = False,
         verify: bool = False,
         deduplicate: bool = False,
+        bounded: Optional[bool] = None,
+        chunk_interval: Union[timedelta, int, None] = None,
         shell: bool = False,
         nopretty: bool = False,
         debug: bool = False,
@@ -286,6 +293,8 @@ def _sync_pipes(
                     _progress = _progress,
                     verify = verify,
                     deduplicate = deduplicate,
+                    bounded = bounded,
+                    chunk_interval = chunk_interval,
                     unblock = unblock,
                     debug = debug,
                     nopretty = nopretty,
@@ -373,6 +382,8 @@ def _wrap_sync_pipe(
         workers = None,
         verify: bool = False,
         deduplicate: bool = False,
+        bounded: Optional[bool] = None,
+        chunk_interval: Union[timedelta, int, None] = None,
         **kw
     ):
     """
@@ -395,6 +406,8 @@ def _wrap_sync_pipe(
                 debug = debug,
                 min_seconds = min_seconds,
                 workers = workers,
+                bounded = bounded,
+                chunk_interval = chunk_interval,
                 **{k: v for k, v in kw.items() if k != 'blocking'}
             )
     except Exception as e:

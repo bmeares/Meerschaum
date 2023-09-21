@@ -280,18 +280,23 @@ def parse_df_datetimes(
     pd = import_pandas()
     pandas = attempt_import('pandas')
     pd_name = pd.__name__
-    is_dask = 'dask' in pd_name
-    if is_dask:
+    using_dask = 'dask' in pd_name
+    df_is_dask = (hasattr(df, '__module__') and 'dask' in df.__module__)
+    dask_dataframe = None
+    if using_dask or df_is_dask:
         npartitions = chunksize_to_npartitions(chunksize)
+        dask_dataframe = attempt_import('dask.dataframe')
 
     ### if df is a dict, build DataFrame
-    if isinstance(df, pd.DataFrame):
+    if isinstance(df, pandas.DataFrame):
         pdf = df
+    elif df_is_dask and isinstance(df, dask_dataframe.DataFrame):
+        pdf = df.partitions[0].compute()
     else:
         if debug:
             dprint(f"df is of type '{type(df)}'. Building {pd.DataFrame}...")
 
-        if is_dask:
+        if using_dask:
             if isinstance(df, list):
                 keys = set()
                 for doc in df:
@@ -356,7 +361,7 @@ def parse_df_datetimes(
         dprint("Converting columns to datetimes: " + str(datetime_cols))
 
     try:
-        if not is_dask:
+        if not using_dask:
             df[datetime_cols] = df[datetime_cols].apply(pd.to_datetime, utc=True)
         else:
             df[datetime_cols] = df[datetime_cols].apply(

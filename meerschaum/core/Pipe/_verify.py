@@ -17,7 +17,7 @@ def verify(
         end: Union[datetime, int, None] = None,
         params: Optional[Dict[str, Any]] = None,
         chunk_interval: Union[timedelta, int, None] = None,
-        bounded: bool = False,
+        bounded: Optional[bool] = None,
         deduplicate: bool = False,
         workers: Optional[int] = None,
         debug: bool = False,
@@ -38,10 +38,11 @@ def verify(
         If provided, use this as the size of the chunk boundaries.
         Default to the value set in `pipe.parameters['chunk_minutes']` (1440).
 
-    bounded: bool, default False
-        If `True`, do not verify older than the oldest existing datetime 
-        or newer than the newest existing datetime (i.e. `begin=pipe.get_sync_time(newest=False)`
-        and `end=pipe.get_sync_time() + timedelta(minutes=1)`.
+    bounded: Optional[bool], default None
+        If `True`, do not verify older than the oldest sync time or newer than the newest.
+        If `False`, verify unbounded syncs outside of the new and old sync times.
+        The default behavior (`None`) is to bound only if a bound interval is set
+        (e.g. `pipe.parameters['verify']['bound_days']`).
 
     deduplicate: bool, default False
         If `True`, deduplicate the pipe's table after the verification syncs.
@@ -62,11 +63,23 @@ def verify(
     """
     from meerschaum.utils.pool import get_pool
     workers = self.get_num_workers(workers)
-    sync_less_than_begin = not bounded and begin is None
-    sync_greater_than_end = not bounded and end is None
+
+    ### Skip configured bounding in parameters
+    ### if `bounded` is explicitly `False`.
+    bound_time = (
+        self.get_bound_time(debug=debug)
+        if bounded is not False
+        else None
+    )
+    if bounded is None:
+        bounded = bound_time is not None
 
     if begin is None:
-        begin = self.get_sync_time(newest=False, debug=debug)
+        begin = (
+            bound_time
+            if bound_time is not None
+            else self.get_sync_time(newest=False, debug=debug)
+        )
     if end is None:
         end = self.get_sync_time(newest=True, debug=debug)
 
@@ -76,6 +89,9 @@ def verify(
             if isinstance(end, datetime)
             else 1
         )
+
+    sync_less_than_begin = not bounded and begin is None
+    sync_greater_than_end = not bounded and end is None
 
     cannot_determine_bounds = (
         begin is None
@@ -108,9 +124,10 @@ def verify(
         return sync_success, sync_msg
 
 
-    if not chunk_interval:
-        chunk_interval = self.get_chunk_interval(debug=debug)
+    chunk_interval = self.get_chunk_interval(chunk_interval, debug=debug)
     chunk_bounds = self.get_chunk_bounds(
+        begin = begin,
+        end = end,
         chunk_interval = chunk_interval,
         bounded = bounded,
         debug = debug,
@@ -131,6 +148,7 @@ def verify(
 
     info(
         f"Syncing {len(chunk_bounds)} chunk" + ('s' if len(chunk_bounds) != 1 else '')
+        + f" ({'un' if not bounded else ''}bounded)"
         + f" of size '{chunk_interval}'"
         + f" between '{begin}' and '{end}'."
     )
@@ -280,3 +298,90 @@ def get_chunks_success_message(
     )
 
     return header + success_msg + fail_msg
+
+
+def get_bound_interval(self, debug: bool = False) -> Union[timedelta, int, None]:
+    """
+    Return the interval used to determine the bound time (limit for verification syncs).
+    If the datetime axis is an integer, just return its value.
+
+    Below are the supported keys for the bound interval:
+
+        - `pipe.parameters['verify']['bound_minutes']`
+        - `pipe.parameters['verify']['bound_hours']`
+        - `pipe.parameters['verify']['bound_days']`
+        - `pipe.parameters['verify']['bound_weeks']`
+        - `pipe.parameters['verify']['bound_years']`
+        - `pipe.parameters['verify']['bound_seconds']`
+
+    If multiple keys are present, the first on this priority list will be used.
+
+    Returns
+    -------
+    A `timedelta` or `int` value to be used to determine the bound time.
+    """
+    verify_params = self.parameters.get('verify', {})
+    prefix = 'bound_'
+    suffixes_to_check = ('minutes', 'hours', 'days', 'weeks', 'years', 'seconds')
+    keys_to_search = {
+        key: val
+        for key, val in verify_params.items()
+        if key.startswith(prefix)
+    }
+    bound_time_key, bound_time_value = None, None
+    for key, value in keys_to_search.items():
+        for suffix in suffixes_to_check:
+            if key == prefix + suffix:
+                bound_time_key = key
+                bound_time_value = value
+                break
+        if bound_time_key is not None:
+            break
+
+    if bound_time_value is None:
+        return bound_time_value
+
+    dt_col = self.columns.get('datetime', None)
+    if not dt_col:
+        return bound_time_value
+
+    dt_typ = self.dtypes.get(dt_col, 'datetime64[ns]')
+    if 'int' in dt_typ.lower():
+        return int(bound_time_value)
+
+    interval_type = bound_time_key.replace(prefix, '')
+    return timedelta(**{interval_type: bound_time_value})
+
+
+def get_bound_time(self, debug: bool = False) -> Union[datetime, int, None]:
+    """
+    The bound time is the limit at which long-running verification syncs should stop.
+    A value of `None` means verification syncs should be unbounded.
+
+    Like deriving a backtrack time from `pipe.get_sync_time()`,
+    the bound time is the sync time minus a large window (e.g. 366 days).
+
+    Unbound verification syncs (i.e. `bound_time is None`)
+    if the oldest sync time is less than the bound interval.
+
+    Returns
+    -------
+    A `datetime` or `int` corresponding to the
+    `begin` bound for verification and deduplication syncs.
+    """ 
+    bound_interval = self.get_bound_interval(debug=debug)
+    if bound_interval is None:
+        return None
+
+    sync_time = self.get_sync_time(debug=debug)
+    if sync_time is None:
+        return None
+
+    bound_time = sync_time - bound_interval
+    oldest_sync_time = self.get_sync_time(newest=False, debug=debug)
+
+    return (
+        bound_time
+        if bound_time > oldest_sync_time
+        else None
+    )
