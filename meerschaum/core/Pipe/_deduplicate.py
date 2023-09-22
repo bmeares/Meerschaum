@@ -10,12 +10,6 @@ from __future__ import annotations
 from datetime import datetime, timedelta
 from meerschaum.utils.typing import SuccessTuple, Any, Optional, Dict
 
-def dedup(self, *args, **kwargs) -> SuccessTuple:
-    """
-    An alias for `pipe.deduplicate()`.
-    """
-    return self.deduplicate(*args, **kwargs)
-
 
 def deduplicate(
         self,
@@ -26,6 +20,7 @@ def deduplicate(
         bounded: Optional[bool] = None,
         workers: Optional[int] = None,
         debug: bool = False,
+        _use_instance_method: bool = True,
         **kwargs: Any
     ) -> SuccessTuple:
     """
@@ -77,6 +72,7 @@ def deduplicate(
             params = params,
             bounded = bounded,
             debug = debug,
+            _use_instance_method = _use_instance_method,
             **kwargs
         )
         if not success:
@@ -85,17 +81,18 @@ def deduplicate(
     workers = self.get_num_workers(workers=workers)
     pool = get_pool(workers=workers)
 
-    with Venv(get_connector_plugin(self.instance_connector)):
-        if hasattr(self.instance_connector, 'deduplicate_pipe_inplace'):
-            return self.instance_connector.deduplicate_pipe(
-                self,
-                begin = begin,
-                end = end,
-                params = params,
-                bounded = bounded,
-                debug = debug,
-                **kwargs
-            )
+    if _use_instance_method:
+        with Venv(get_connector_plugin(self.instance_connector)):
+            if hasattr(self.instance_connector, 'deduplicate_pipe'):
+                return self.instance_connector.deduplicate_pipe(
+                    self,
+                    begin = begin,
+                    end = end,
+                    params = params,
+                    bounded = bounded,
+                    debug = debug,
+                    **kwargs
+                )
 
     ### Only unbound if explicitly False.
     if bounded is None:

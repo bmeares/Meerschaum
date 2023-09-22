@@ -136,7 +136,8 @@ max_name_lens = {
 json_flavors = {'postgresql', 'timescaledb', 'citus', 'cockroachdb'}
 OMIT_NULLSFIRST_FLAVORS = {'mariadb', 'mysql', 'mssql'}
 SINGLE_ALTER_TABLE_FLAVORS = {'duckdb', 'sqlite', 'mssql', 'oracle'}
-NO_CTE_FLAVORS = {'sqlite', 'oracle', 'mysql', 'mariadb', 'duckdb'}
+NO_CTE_FLAVORS = {'mysql', 'mariadb'}
+NO_SELECT_INTO_FLAVORS = {'sqlite', 'oracle', 'mysql', 'mariadb', 'duckdb'}
 
 ### MySQL doesn't allow for casting as BIGINT, so this is a workaround.
 DB_FLAVORS_CAST_DTYPES = {
@@ -800,3 +801,151 @@ def get_db_version(conn: 'SQLConnector', debug: bool = False) -> None:
         version_queries['default']
     ).format(version_name=version_name)
     return conn.value(version_query, debug=debug)
+
+
+def get_rename_table_queries(old_table: str, new_table: str, flavor: str) -> List[str]:
+    """
+    Return queries to alter a table's name.
+
+    Parameters
+    ----------
+    old_table: str
+        The unquoted name of the old table.
+
+    new_table: str
+        The unquoted name of the new table.
+
+    flavor: str
+        The database flavor to use for the query (e.g. `'mssql'`, `'postgresql'`.
+
+    Returns
+    -------
+    A list of `ALTER TABLE` or equivalent queries for the database flavor.
+    """
+    old_table_name = sql_item_name(old_table, flavor)
+    new_table_name = sql_item_name(new_table, flavor)
+    tmp_table = '_tmp_rename_' + new_table
+    tmp_table_name = sql_item_name(tmp_table, flavor)
+    if flavor == 'mssql':
+        return [f"EXEC sp_rename '{old_table}', '{new_table}'"]
+
+    if flavor == 'duckdb':
+        return [
+            get_create_table_query(f"SELECT * FROM {old_table_name}", tmp_table, 'duckdb'),
+            get_create_table_query(f"SELECT * FROM {tmp_table_name}", new_table, 'duckdb'),
+            f"DROP TABLE {tmp_table_name}",
+            f"DROP TABLE {old_table_name}",
+        ]
+
+    return [f"ALTER TABLE {old_table_name} RENAME TO {new_table_name}"]
+
+
+def get_create_table_query(query: str, new_table: str, flavor: str) -> str:
+    """
+    Return a query to create a new table from a `SELECT` query.
+
+    Parameters
+    ----------
+    query: str
+        The select query to use for the creation of the table.
+
+    new_table: str
+        The unquoted name of the new table.
+
+    flavor: str
+        The database flavor to use for the query (e.g. `'mssql'`, `'postgresql'`.
+
+    Returns
+    -------
+    A `CREATE TABLE` (or `SELECT INTO`) query for the database flavor.
+    """
+    import textwrap
+    create_cte = 'create_query'
+    create_cte_name = sql_item_name(create_cte, flavor)
+    new_table_name = sql_item_name(new_table, flavor)
+    if flavor in ('mssql',):
+        query = query.lstrip()
+        original_query = query
+        if 'with ' in query.lower():
+            final_select_ix = query.lower().rfind('select')
+            def_name = query[len('WITH '):].split(' ', maxsplit=1)[0]
+            return (
+                query[:final_select_ix].rstrip() + ',\n'
+                + f"{create_cte_name} AS (\n"
+                + query[final_select_ix:]
+                + "\n)\n"
+                + f"SELECT *\nINTO {new_table_name}\nFROM {create_cte_name}"
+            )
+
+        create_table_query = f"""
+            WITH {create_cte_name} AS ({query})
+            SELECT *
+            INTO {new_table_name}
+            FROM {create_cte_name}
+        """
+    elif flavor in (None,):
+        create_table_query = f"""
+            WITH {create_cte_name} AS ({query})
+            CREATE TABLE {new_table_name} AS
+            SELECT *
+            FROM {create_cte_name}
+        """
+    elif flavor in ('sqlite', 'mysql', 'mariadb', 'duckdb', 'oracle'):
+        create_table_query = f"""
+            CREATE TABLE {new_table_name} AS
+            SELECT *
+            FROM ({query})""" + (f""" AS {create_cte_name}""" if flavor != 'oracle' else '') + """
+        """
+    else:
+        create_table_query = f"""
+            SELECT *
+            INTO {new_table_name}
+            FROM ({query}) AS {create_cte_name}
+        """
+
+    return textwrap.dedent(create_table_query)
+
+
+def format_cte_subquery(
+        sub_query: str,
+        flavor: str,
+        sub_name: str = 'src',
+        cols_to_select: Union[List[str], str] = '*',
+    ) -> str:
+    """
+    Given a subquery, build a wrapper query that selects from the CTE subquery.
+
+    Parameters
+    ----------
+    sub_query: str
+        The subquery to wrap.
+
+    flavor: str
+        The database flavor to use for the query (e.g. `'mssql'`, `'postgresql'`.
+
+    sub_name: str, default 'src'
+        If possible, give this name to the CTE (must be unquoted).
+
+    cols_to_select: Union[List[str], str], default ''
+        If specified, choose which columns to select from the CTE.
+        If a list of strings is provided, each item will be quoted and joined with commas.
+        If a string is given, assume it is quoted and insert it into the query.
+
+    Returns
+    -------
+    A wrapper query that selects from the CTE.
+    """
+    import textwrap
+    quoted_sub_name = sql_item_name(sub_name, flavor)
+    cols_str = (
+        cols_to_select
+        if isinstance(cols_to_select, str)
+        else ', '.join([sql_item_name(col, flavor) for col in cols_to_select])
+    )
+    return textwrap.dedent(
+        f"""
+        SELECT {cols_str}
+        FROM ({sub_query})"""
+        + (f' AS {quoted_sub_name}' if flavor != 'oracle' else '') + """
+        """
+    )

@@ -563,6 +563,7 @@ def exec_queries(
         self,
         queries: List[str],
         break_on_error: bool = False,
+        rollback: bool = True,
         silent: bool = False,
         debug: bool = False,
     ) -> List[sqlalchemy.engine.cursor.LegacyCursorResult]:
@@ -574,8 +575,11 @@ def exec_queries(
     queries: List[str]
         The queries in the transaction to be executed.
 
-    break_on_error: bool, default False
+    break_on_error: bool, default True
         If `True`, stop executing when a query fails.
+
+    rollback: bool, default True
+        If `break_on_error` is `True`, rollback the transaction if a query fails.
 
     silent: bool, default False
         If `True`, suppress warnings.
@@ -608,6 +612,8 @@ def exec_queries(
                 result = None
             results.append(result)
             if result is None and break_on_error:
+                if rollback:
+                    connection.rollback()
                 break
     return results
 

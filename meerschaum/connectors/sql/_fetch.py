@@ -111,7 +111,7 @@ def get_pipe_metadef(
         **kw: Any
     ) -> Union[str, None]:
     """
-    Return a pipe's meta definition fetch query (definition with 
+    Return a pipe's meta definition fetch query.
 
     params: Optional[Dict[str, Any]], default None
         Optional params dictionary to build the `WHERE` clause.

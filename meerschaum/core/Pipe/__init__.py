@@ -130,7 +130,7 @@ class Pipe:
     from ._delete import delete
     from ._drop import drop
     from ._clear import clear
-    from ._deduplicate import deduplicate, dedup
+    from ._deduplicate import deduplicate
     from ._bootstrap import bootstrap
     from ._dtypes import enforce_dtypes, infer_dtypes
 
@@ -286,10 +286,10 @@ class Pipe:
         Return the four keys needed to reconstruct this pipe.
         """
         return {
-            'connector_keys': self.connector_keys,
-            'metric_key'    : self.metric_key,
-            'location_key'  : self.location_key,
-            'instance'      : self.instance_keys,
+            'connector': self.connector_keys,
+            'metric': self.metric_key,
+            'location': self.location_key,
+            'instance': self.instance_keys,
         }
 
 
@@ -435,25 +435,43 @@ class Pipe:
         Define the state dictionary (pickling).
         """
         return {
-            'connector_keys': self.connector_keys,
-            'metric_key': self.metric_key,
-            'location_key': self.location_key,
+            'connector': self.connector_keys,
+            'metric': self.metric_key,
+            'location': self.location_key,
             'parameters': self.parameters,
-            'mrsm_instance': self.instance_keys,
+            'instance': self.instance_keys,
         }
 
     def __setstate__(self, _state: Dict[str, Any]):
         """
         Read the state (unpickling).
         """
-        connector_keys = _state.pop('connector_keys')
-        metric_key = _state.pop('metric_key')
-        location_key = _state.pop('location_key')
-        self.__init__(connector_keys, metric_key, location_key, **_state)
+        self.__init__(**_state)
 
 
-    def __getitem__(self, *args, **kwargs) -> Any:
+    def __getitem__(self, key: str) -> Any:
         """
         Index the pipe's attributes.
+        If the `key` cannot be found`, return `None`.
         """
-        return self.attributes.__getitem__(*args, **kwargs)
+        if key in self.attributes:
+            return self.attributes.get(key, None)
+
+        aliases = {
+            'connector': 'connector_keys',
+            'connector_key': 'connector_keys',
+            'metric': 'metric_key',
+            'location': 'location_key',
+        }
+        aliased_key = aliases.get(key, None)
+        if aliased_key is not None:
+            return self.attributes.get(aliased_key, None)
+
+        property_aliases = {
+            'instance': 'instance_keys',
+            'instance_key': 'instance_keys',
+        }
+        aliased_key = property_aliases.get(key, None)
+        if aliased_key is not None:
+            key = aliased_key
+        return getattr(self, key, None)

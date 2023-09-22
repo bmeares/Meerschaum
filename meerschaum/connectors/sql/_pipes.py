@@ -1311,6 +1311,9 @@ def sync_pipe_inplace(
         get_update_queries,
         get_null_replacement,
         NO_CTE_FLAVORS,
+        NO_SELECT_INTO_FLAVORS,
+        format_cte_subquery,
+        get_create_table_query,
     )
     from meerschaum.utils.dtypes.sql import (
         get_pd_type_from_db_type,
@@ -1336,16 +1339,9 @@ def sync_pipe_inplace(
         )
 
     pipe_name = sql_item_name(pipe.target, self.flavor)
+
     if not pipe.exists(debug=debug):
-        if self.flavor in ('mssql',):
-            create_pipe_query = metadef + f"SELECT *\nINTO {pipe_name}\nFROM {metadef_name}"
-        elif self.flavor in NO_CTE_FLAVORS:
-            create_pipe_query = (
-                f"CREATE TABLE {pipe_name} AS\n"
-                + f"SELECT *\nFROM ({metadef}) AS {metadef_name}"
-            )
-        else:
-            create_pipe_query = f"SELECT *\nINTO {pipe_name}\nFROM ({metadef}) AS {metadef_name}"
+        create_pipe_query = get_create_table_query(metadef, pipe.target, self.flavor)
         result = self.exec(create_pipe_query, debug=debug)
         if result is None:
             return False, f"Could not insert new data into {pipe} from its SQL query definition."
@@ -1380,16 +1376,7 @@ def sync_pipe_inplace(
     if table_exists(new_table_raw, self, debug=debug):
         new_queries.append(drop_new_query)
 
-    if self.flavor in ('mssql',):
-        create_new_query = metadef + f"SELECT *\nINTO {new_table_name}\nFROM {metadef_name}"
-    elif self.flavor in ('sqlite', 'oracle', 'mysql', 'mariadb', 'duckdb'):
-        create_new_query = (
-            f"CREATE TABLE {new_table_name} AS\n"
-            + f"SELECT *\nFROM ({metadef}) AS {metadef_name}"
-        )
-    else:
-        create_new_query = f"SELECT *\nINTO {new_table_name}\nFROM ({metadef}) AS {metadef_name}"
-
+    create_new_query = get_create_table_query(metadef, new_table_raw, self.flavor)
     new_queries.append(create_new_query)
 
     new_success = all(self.exec_queries(new_queries, break_on_error=True, debug=debug))
@@ -1449,23 +1436,21 @@ def sync_pipe_inplace(
         order = None,
     )
 
-    create_backtrack_query = (
-        (
-            f"WITH backtrack_def AS (\n{backtrack_def}\n)\n"
-            + f"SELECT *\nINTO {backtrack_table_name}\nFROM backtrack_def"
-        ) if self.flavor not in NO_CTE_FLAVORS
-        else (
-            f"CREATE TABLE {backtrack_table_name} AS\n"
-            + f"SELECT *\nFROM ({backtrack_def})"
-            + (" AS backtrack" if self.flavor in ('mysql', 'mariadb') else '')
-        )
+    select_backtrack_query = format_cte_subquery(
+        backtrack_def,
+        self.flavor,
+        sub_name = 'backtrack_def',
+    )
+    create_backtrack_query = get_create_table_query(
+        backtrack_def,
+        backtrack_table_raw,
+        self.flavor,
     )
     backtrack_queries.append(create_backtrack_query)
     backtrack_success = all(self.exec_queries(backtrack_queries, break_on_error=True, debug=debug))
     if not backtrack_success:
         self.exec_queries([drop_new_query, drop_backtrack_query], break_on_error=False, debug=debug)
         return False, f"Could not fetch backtrack data from {pipe}."
-
 
     ### Determine which index columns are present in both tables.
     backtrack_table_obj = get_sqlalchemy_table(
@@ -1493,75 +1478,37 @@ def sync_pipe_inplace(
     if table_exists(delta_table_raw, self, debug=debug):
         delta_queries.append(drop_delta_query)
 
-    create_delta_query = (
-        (
-            f"SELECT\n"
-            + (
-                ', '.join([
-                    f"COALESCE(new.{sql_item_name(col, self.flavor)}, "
-                    + f"{get_null_replacement(typ, self.flavor)}) AS "
-                    + sql_item_name(col, self.flavor)
-                    for col, typ in new_cols.items()
-                ])
-            )
-            + "\n"
-            + f"INTO {delta_table_name}\n"
-            + f"FROM {new_table_name} AS new\n"
-            + f"LEFT OUTER JOIN {backtrack_table_name} AS old\nON\n"
-            + '\nAND\n'.join([
-                (
-                    'COALESCE(new.' + sql_item_name(c, self.flavor) + ", "
-                    + get_null_replacement(new_cols[c], self.flavor) + ") "
-                    + ' = '
-                    + 'COALESCE(old.' + sql_item_name(c, self.flavor) + ", "
-                    + get_null_replacement(backtrack_cols[c], self.flavor) + ") "
-                ) for c in common_cols
-            ])
-            + "\nWHERE\n"
-            + '\nAND\n'.join([
-                (
-                    'old.' + sql_item_name(c, self.flavor) + ' IS NULL'
-                ) for c in common_cols
-            ])
-        ) if self.flavor not in ('sqlite', 'oracle', 'mysql', 'mariadb', 'duckdb')
-        else (
-            f"CREATE TABLE {delta_table_name} AS\n"
-            + f"SELECT\n"
-            + (
-                ', '.join([
-                    f"COALESCE(new.{sql_item_name(col, self.flavor)}, "
-                    + f"{get_null_replacement(typ, self.flavor)}) AS "
-                    + sql_item_name(col, self.flavor)
-                    for col, typ in new_cols.items()
-                ])
-            )
-            + "\n"
-            + f"FROM {new_table_name} new\n"
-            + f"LEFT OUTER JOIN {backtrack_table_name} old\nON\n"
-            + '\nAND\n'.join([
-                (
-                    'COALESCE(new.' + sql_item_name(c, self.flavor) + ", "
-                    + get_null_replacement(new_cols[c], self.flavor) + ") "
-                    + ' = '
-                    + 'COALESCE(old.' + sql_item_name(c, self.flavor) + ", "
-                    + get_null_replacement(backtrack_cols[c], self.flavor) + ") "
-                ) for c in common_cols
-            ])
-            + "\nWHERE\n"
-            + '\nAND\n'.join([
-                (
-                    'old.' + sql_item_name(c, self.flavor) + ' IS NULL'
-                ) for c in common_cols
-            ])
-            #  + "\nAND\n"
-            #  + '\nAND\n'.join([
-                #  (
-                    #  'new.' + sql_item_name(c, self.flavor) + ' IS NOT NULL'
-                #  ) for c in new_cols
-            #  ])
-        )
+    null_replace_new_cols_str = (
+        ', '.join([
+            f"COALESCE({new_table_name}.{sql_item_name(col, self.flavor)}, "
+            + f"{get_null_replacement(typ, self.flavor)}) AS "
+            + sql_item_name(col, self.flavor)
+            for col, typ in new_cols.items()
+        ])
     )
 
+    select_delta_query = (
+        f"SELECT\n"
+        + null_replace_new_cols_str + "\n"
+        + f"\nFROM {new_table_name}\n"
+        + f"LEFT OUTER JOIN {backtrack_table_name}\nON\n"
+        + '\nAND\n'.join([
+            (
+                f'COALESCE({new_table_name}.' + sql_item_name(c, self.flavor) + ", "
+                + get_null_replacement(new_cols[c], self.flavor) + ") "
+                + ' = '
+                + f'COALESCE({backtrack_table_name}.' + sql_item_name(c, self.flavor) + ", "
+                + get_null_replacement(backtrack_cols[c], self.flavor) + ") "
+            ) for c in common_cols
+        ])
+        + "\nWHERE\n"
+        + '\nAND\n'.join([
+            (
+                f'{backtrack_table_name}.' + sql_item_name(c, self.flavor) + ' IS NULL'
+            ) for c in common_cols
+        ])
+    )
+    create_delta_query = get_create_table_query(select_delta_query, delta_table_raw, self.flavor)
     delta_queries.append(create_delta_query)
 
     delta_success = all(self.exec_queries(delta_queries, break_on_error=True, debug=debug))
@@ -1593,65 +1540,35 @@ def sync_pipe_inplace(
     if on_cols and table_exists(joined_table_raw, self, debug=debug):
         joined_queries.append(drop_joined_query)
 
-    create_joined_query = (
-        (
-            "SELECT "
-            + (', '.join([
-                (
-                    'delta.' + sql_item_name(c, self.flavor)
-                    + " AS " + sql_item_name(c + '_delta', self.flavor)
-                ) for c in delta_cols
-            ]))
-            + ", "
-            + (', '.join([
-                (
-                    'bt.' + sql_item_name(c, self.flavor)
-                    + " AS " + sql_item_name(c + '_backtrack', self.flavor)
-                ) for c in backtrack_cols
-            ]))
-            + f"\nINTO {joined_table_name}\n"
-            + f"FROM {delta_table_name} AS delta\n"
-            + f"LEFT OUTER JOIN {backtrack_table_name} AS bt\nON\n"
-            + '\nAND\n'.join([
-                (
-                    'COALESCE(delta.' + sql_item_name(c, self.flavor)
-                    + ", " + get_null_replacement(typ, self.flavor) + ")"
-                    + ' = '
-                    + 'COALESCE(bt.' + sql_item_name(c, self.flavor)
-                    + ", " + get_null_replacement(typ, self.flavor) + ")"
-                ) for c, typ in on_cols.items()
-            ])
-        ) if self.flavor not in ('sqlite', 'oracle', 'mysql', 'mariadb', 'duckdb')
-        else (
-            f"CREATE TABLE {joined_table_name} AS\n"
-            + "SELECT "
-            + (', '.join([
-                (
-                    'delta.' + sql_item_name(c, self.flavor)
-                    + " AS " + sql_item_name(c + '_delta', self.flavor)
-                ) for c in delta_cols
-            ]))
-            + ", "
-            + (', '.join([
-                (
-                    'bt.' + sql_item_name(c, self.flavor)
-                    + " AS " + sql_item_name(c + '_backtrack', self.flavor)
-                ) for c in backtrack_cols
-            ]))
-            + f"\nFROM {delta_table_name} delta\n"
-            + f"LEFT OUTER JOIN {backtrack_table_name} bt\nON\n"
-            + '\nAND\n'.join([
-                (
-                    'COALESCE(delta.' + sql_item_name(c, self.flavor)
-                    + ", " + get_null_replacement(typ, self.flavor) + ")"
-                    + ' = '
-                    + 'COALESCE(bt.' + sql_item_name(c, self.flavor)
-                    + ", " + get_null_replacement(typ, self.flavor) + ")"
-                ) for c, typ in on_cols.items()
-            ])
-        )
+    select_joined_query = (
+        "SELECT "
+        + (', '.join([
+            (
+                f'{delta_table_name}.' + sql_item_name(c, self.flavor)
+                + " AS " + sql_item_name(c + '_delta', self.flavor)
+            ) for c in delta_cols
+        ]))
+        + ", "
+        + (', '.join([
+            (
+                f'{backtrack_table_name}.' + sql_item_name(c, self.flavor)
+                + " AS " + sql_item_name(c + '_backtrack', self.flavor)
+            ) for c in backtrack_cols
+        ]))
+        + f"\nFROM {delta_table_name}\n"
+        + f"LEFT OUTER JOIN {backtrack_table_name}\nON\n"
+        + '\nAND\n'.join([
+            (
+                f'COALESCE({delta_table_name}.' + sql_item_name(c, self.flavor)
+                + ", " + get_null_replacement(typ, self.flavor) + ")"
+                + ' = '
+                + f'COALESCE({backtrack_table_name}.' + sql_item_name(c, self.flavor)
+                + ", " + get_null_replacement(typ, self.flavor) + ")"
+            ) for c, typ in on_cols.items()
+        ])
     )
 
+    create_joined_query = get_create_table_query(select_joined_query, joined_table_raw, self.flavor)
     joined_queries.append(create_joined_query)
 
     joined_success = (
@@ -1676,55 +1593,26 @@ def sync_pipe_inplace(
     if on_cols and table_exists(unseen_table_raw, self, debug=debug):
         unseen_queries.append(drop_unseen_query)
 
-    create_unseen_query = (
-        (
-            "SELECT "
-            + (', '.join([
-                (
-                    "CASE\n    WHEN " + sql_item_name(c + '_delta', self.flavor)
-                    + " != " + get_null_replacement(typ, self.flavor) 
-                    + " THEN " + sql_item_name(c + '_delta', self.flavor)
-                    + "\n    ELSE NULL\nEND "
-                    + " AS " + sql_item_name(c, self.flavor)
-                ) for c, typ in delta_cols.items()
-            ]))
-            + f"\nINTO {unseen_table_name}\n"
-            + f"\nFROM {joined_table_name} AS joined\n"
-            + f"WHERE "
-            + '\nAND\n'.join([
-                (
-                    sql_item_name(c + '_backtrack', self.flavor) + ' IS NULL'
-                ) for c in delta_cols
-            ])
-        ) if self.flavor not in ('sqlite', 'oracle', 'mysql', 'mariadb', 'duckdb') else (
-            f"CREATE TABLE {unseen_table_name} AS\n"
-            + "SELECT "
-            + (', '.join([
-                (
-                    "CASE\n    WHEN " + sql_item_name(c + '_delta', self.flavor)
-                    + " != "
-                    + get_null_replacement(typ, self.flavor)
-                    + " THEN " + sql_item_name(c + '_delta', self.flavor)
-                    + "\n    ELSE NULL\nEND "
-                    + " AS " + sql_item_name(c, self.flavor)
-                ) for c, typ in delta_cols.items()
-            ]))
-            + f"\nFROM {joined_table_name} joined\n"
-            + f"WHERE "
-            + '\nAND\n'.join([
-                (
-                    sql_item_name(c + '_backtrack', self.flavor) + ' IS NULL'
-                ) for c in delta_cols
-            ])
-            #  + "\nAND\n"
-            #  + '\nAND\n'.join([
-                #  (
-                    #  sql_item_name(c + '_delta', self.flavor) + ' IS NOT NULL'
-                #  ) for c in delta_cols
-            #  ])
-        )
+    select_unseen_query = (
+        "SELECT "
+        + (', '.join([
+            (
+                "CASE\n    WHEN " + sql_item_name(c + '_delta', self.flavor)
+                + " != " + get_null_replacement(typ, self.flavor) 
+                + " THEN " + sql_item_name(c + '_delta', self.flavor)
+                + "\n    ELSE NULL\nEND "
+                + " AS " + sql_item_name(c, self.flavor)
+            ) for c, typ in delta_cols.items()
+        ]))
+        + f"\nFROM {joined_table_name}\n"
+        + f"WHERE "
+        + '\nAND\n'.join([
+            (
+                sql_item_name(c + '_backtrack', self.flavor) + ' IS NULL'
+            ) for c in delta_cols
+        ])
     )
-
+    create_unseen_query = get_create_table_query(select_unseen_query, unseen_table_raw, self.flavor)
     unseen_queries.append(create_unseen_query)
 
     unseen_success = (
@@ -1756,49 +1644,27 @@ def sync_pipe_inplace(
     if on_cols and table_exists(update_table_raw, self, debug=debug):
         update_queries.append(drop_unseen_query)
 
-    create_update_query = (
-        (
-            "SELECT "
-            + (', '.join([
-                (
-                    "CASE\n    WHEN " + sql_item_name(c + '_delta', self.flavor)
-                    + " != " + get_null_replacement(typ, self.flavor)
-                    + " THEN " + sql_item_name(c + '_delta', self.flavor)
-                    + "\n    ELSE NULL\nEND "
-                    + " AS " + sql_item_name(c, self.flavor)
-                ) for c, typ in delta_cols.items()
-            ]))
-            + f"\nINTO {update_table_name}"
-            + f"\nFROM {joined_table_name} AS joined\n"
-            + f"WHERE "
-            + '\nOR\n'.join([
-                (
-                    sql_item_name(c + '_backtrack', self.flavor) + ' IS NOT NULL'
-                ) for c in delta_cols
-            ])
-        ) if self.flavor not in ('sqlite', 'oracle', 'mysql', 'mariadb', 'duckdb') else (
-            f"CREATE TABLE {update_table_name} AS\n"
-            + "SELECT "
-            + (', '.join([
-                (
-                    "CASE\n    WHEN " + sql_item_name(c + '_delta', self.flavor)
-                    + " != "
-                    + get_null_replacement(typ, self.flavor)
-                    + " THEN " + sql_item_name(c + '_delta', self.flavor)
-                    + "\n    ELSE NULL\nEND "
-                    + " AS " + sql_item_name(c, self.flavor)
-                ) for c, typ in delta_cols.items()
-            ]))
-            + f"\nFROM {joined_table_name} joined\n"
-            + f"WHERE "
-            + '\nOR\n'.join([
-                (
-                    sql_item_name(c + '_backtrack', self.flavor) + ' IS NOT NULL'
-                ) for c in delta_cols
-            ])
-        )
+    select_update_query = (
+        "SELECT "
+        + (', '.join([
+            (
+                "CASE\n    WHEN " + sql_item_name(c + '_delta', self.flavor)
+                + " != " + get_null_replacement(typ, self.flavor)
+                + " THEN " + sql_item_name(c + '_delta', self.flavor)
+                + "\n    ELSE NULL\nEND "
+                + " AS " + sql_item_name(c, self.flavor)
+            ) for c, typ in delta_cols.items()
+        ]))
+        + f"\nFROM {joined_table_name}\n"
+        + f"WHERE "
+        + '\nOR\n'.join([
+            (
+                sql_item_name(c + '_backtrack', self.flavor) + ' IS NOT NULL'
+            ) for c in delta_cols
+        ])
     )
 
+    create_update_query = get_create_table_query(select_update_query, update_table_raw, self.flavor)
     update_queries.append(create_update_query)
 
     update_success = (
@@ -1838,7 +1704,12 @@ def sync_pipe_inplace(
     apply_unseen_queries = [
         (
             f"INSERT INTO {pipe_name}\n"
-            + f"SELECT *\nFROM " + (unseen_table_name if on_cols else delta_table_name)
+            + f"SELECT *\nFROM "
+            + (
+                unseen_table_name
+                if on_cols
+                else delta_table_name
+            )
         ),
     ]
 
@@ -2097,7 +1968,7 @@ def get_pipe_rowcount(
         SELECT COUNT(*)
         FROM src
         """
-    ) if self.flavor not in NO_CTE_FLAVORS else (
+    ) if self.flavor not in ('mysql', 'mariadb') else (
         f"""
         SELECT COUNT(*)
         FROM ({src}) AS src
@@ -2659,13 +2530,14 @@ def get_to_sql_dtype(
     }
 
 
-def _deduplicate_pipe_inplace(
+def deduplicate_pipe(
         self,
         pipe: mrsm.Pipe,
         begin: Union[datetime, int, None] = None,
         end: Union[datetime, int, None] = None,
         params: Optional[Dict[str, Any]] = None,
         debug: bool = False,
+        **kwargs: Any
     ) -> SuccessTuple:
     """
     Delete duplicate values within a pipe's table.
@@ -2691,12 +2563,22 @@ def _deduplicate_pipe_inplace(
     -------
     A `SuccessTuple` indicating success.
     """
-    from meerschaum.utils.sql import sql_item_name, NO_CTE_FLAVORS
+    from meerschaum.utils.sql import (
+        sql_item_name,
+        NO_CTE_FLAVORS,
+        get_rename_table_queries,
+        NO_SELECT_INTO_FLAVORS,
+        get_create_table_query,
+        format_cte_subquery,
+        get_null_replacement,
+    )
+    from meerschaum.utils.misc import generate_password, flatten_list
 
     ### TODO: Handle deleting duplicates without a datetime axis.
     dt_col = pipe.columns.get('datetime', None)
     dt_col_name = sql_item_name(dt_col, self.flavor)
     cols_types = pipe.get_columns_types(debug=debug)
+    existing_cols = pipe.get_columns_types(debug=debug)
 
     ### Non-datetime indices that in fact exist.
     indices = [
@@ -2705,17 +2587,19 @@ def _deduplicate_pipe_inplace(
         if col and col != dt_col and col in cols_types
     ]
     indices_names = [sql_item_name(index_col, self.flavor) for index_col in indices]
+    existing_cols_names = [sql_item_name(col, self.flavor) for col in existing_cols]
     pipe_table_name = sql_item_name(pipe.target, self.flavor)
     duplicates_cte_name = sql_item_name('dups', self.flavor)
     duplicate_row_number_name = sql_item_name('dup_row_num', self.flavor)
     previous_row_number_name = sql_item_name('prev_row_num', self.flavor)
     
     index_list_str = sql_item_name(dt_col, self.flavor)
+    index_list_str_ordered = sql_item_name(dt_col, self.flavor) + " DESC"
     if indices:
-        index_list_str += (
-            ',\n                '
-            + ',\n                '.join(indices_names)
-        )
+        index_list_str += ', ' + ', '.join(indices_names)
+        index_list_str_ordered += ', ' + ', '.join(indices_names)
+
+    cols_list_str = ', '.join(existing_cols_names)
 
     try:
     	### NOTE: MySQL 5 and below does not support window functions (ROW_NUMBER()).
@@ -2727,64 +2611,99 @@ def _deduplicate_pipe_inplace(
     except Exception as e:
         is_old_mysql = False
 
-    duplicates_cte_subquery = (
-        f"""
-             SELECT
-                {index_list_str},
-                ROW_NUMBER() OVER (
-                    PARTITION BY
-                    {index_list_str}
-                    ORDER BY {dt_col_name}
-                ) AS {duplicate_row_number_name}
-            FROM {pipe_table_name}
-        """
-        if not is_old_mysql
-        else (
-            f"""
-                SELECT
-                    {index_list_str},
-                    {duplicate_row_number_name}
-                FROM (
-                  SELECT
-                    {index_list_str},
-                    IF(
-                        @{previous_row_number_name} <> {dt_col_name},
-                        @{duplicate_row_number_name} := 0,
-                        @{duplicate_row_number_name}
-                    ),
-                    @{previous_row_number_name} := {dt_col_name},
-                    @{duplicate_row_number_name} := @{duplicate_row_number_name} + 1 AS """
-                + f"""{duplicate_row_number_name}
-                  FROM
-                    {pipe_table_name},
-                    (
-                        SELECT @{duplicate_row_number_name} := 0
-                    ) AS {duplicate_row_number_name},
-                    (
-                        SELECT @{previous_row_number_name} := ''
-                    ) AS {previous_row_number_name}
-                  ORDER BY {index_list_str}
-                ) AS t
-            """
-        )
-    )
-
-
-    query = (
-        f"""
-        WITH {duplicates_cte_name} AS ({duplicates_cte_subquery})
-        DELETE
+    src_query = f"""
+        SELECT
+            {cols_list_str},
+            ROW_NUMBER() OVER (
+                PARTITION BY
+                {index_list_str}
+                ORDER BY {index_list_str_ordered}
+            ) AS {duplicate_row_number_name}
         FROM {pipe_table_name}
-        WHERE {duplicate_row_number_name} > 1
+    """
+    duplicates_cte_subquery = format_cte_subquery(
+        src_query,
+        self.flavor,
+        sub_name = 'src',
+        cols_to_select = cols_list_str,
+    ) + f"""
+        WHERE {duplicate_row_number_name} = 1
         """
-        if self.flavor not in NO_CTE_FLAVORS
-        else f"""
-        DELETE
-        FROM ({duplicates_cte_subquery}) AS {duplicates_cte_name}
-        WHERE {duplicate_row_number_name} > 1
+    old_mysql_query = (
+        f"""
+        SELECT
+            {index_list_str}
+        FROM (
+          SELECT
+            {index_list_str},
+            IF(
+                @{previous_row_number_name} <> {index_list_str.replace(', ', ' + ')},
+                @{duplicate_row_number_name} := 0,
+                @{duplicate_row_number_name}
+            ),
+            @{previous_row_number_name} := {index_list_str.replace(', ', ' + ')},
+            @{duplicate_row_number_name} := @{duplicate_row_number_name} + 1 AS """
+        + f"""{duplicate_row_number_name}
+          FROM
+            {pipe_table_name},
+            (
+                SELECT @{duplicate_row_number_name} := 0
+            ) AS {duplicate_row_number_name},
+            (
+                SELECT @{previous_row_number_name} := '{get_null_replacement('str', 'mysql')}'
+            ) AS {previous_row_number_name}
+          ORDER BY {index_list_str_ordered}
+        ) AS t
+        WHERE {duplicate_row_number_name} = 1
         """
     )
+    if is_old_mysql:
+        duplicates_cte_subquery = old_mysql_query
 
-    success = self.execute(query, debug=debug) is not None
-    msg = f"Failed to deduplicate {pipe} in-place."
+    session_id = generate_password(3)
+
+    dedup_table = '_' + session_id + f'_dedup_{pipe.target}'
+    temp_old_table = '_' + session_id + f"_old_{pipe.target}"
+
+    dedup_table_name = sql_item_name(dedup_table, self.flavor)
+    temp_old_table_name = sql_item_name(temp_old_table, self.flavor)
+    duplicates_count_name = sql_item_name('num_duplicates', self.flavor)
+
+    create_temporary_table_query = get_create_table_query(
+        duplicates_cte_subquery, 
+        dedup_table,
+        self.flavor,
+    ) + f"""
+    ORDER BY {index_list_str_ordered}
+    """
+    alter_queries = flatten_list([
+        get_rename_table_queries(pipe.target, temp_old_table, self.flavor),
+        get_rename_table_queries(dedup_table, pipe.target, self.flavor),
+        f"""
+        DROP TABLE {temp_old_table_name}
+        """,
+    ])
+
+    create_temporary_result = self.execute(create_temporary_table_query, debug=debug)
+    if create_temporary_result is None:
+        return False, f"Failed to deduplicate table {pipe_table_name}."
+
+    results = self.exec_queries(
+        alter_queries,
+        break_on_error = True,
+        rollback = True,
+        debug = debug,
+    )
+
+    fail_query = None
+    for result, query in zip(results, alter_queries):
+        if result is None:
+            fail_query = query
+            break
+    success = fail_query is None
+    msg = (
+        "Success"
+        if success
+        else f"Failed to execute query:\n{fail_query}"
+    )
     return success, msg

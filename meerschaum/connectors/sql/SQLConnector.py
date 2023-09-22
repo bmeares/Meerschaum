@@ -51,7 +51,7 @@ class SQLConnector(Connector):
         get_pipe_rowcount,
         drop_pipe,
         clear_pipe,
-        _deduplicate_pipe_inplace,
+        deduplicate_pipe,
         get_pipe_table,
         get_pipe_columns_types,
         get_to_sql_dtype,
