@@ -29,6 +29,7 @@ if [ "$1" == "db" ]; then
 fi
 
 rm -rf "$test_root/data"
+rm -f "$test_root/sqlite/mrsm_local.db"
 
 ### Start the test API.
 $PYTHON_BIN -m meerschaum delete jobs test_api -y --timeout 10

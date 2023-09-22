@@ -69,13 +69,13 @@ def test_verify_backfill_inplace(flavor: str):
         },
         parameters = {
             'fetch': {
-                'definition': f"SELECT * FROM {source_table_name}"
+                'definition': f"SELECT * FROM {source_table_name}",
+                'pipe': source_pipe.keys(),
             }
         },
     )
     _ = target_pipe.drop()
     _ = source_pipe.drop()
-
 
     begin = datetime(2023, 1, 1)
     end = datetime(2023, 1, 2)
@@ -92,4 +92,5 @@ def test_verify_backfill_inplace(flavor: str):
     success, msg = target_pipe.verify(debug=debug)
     new_source_rowcount = source_pipe.get_rowcount()
     new_target_rowcount = target_pipe.get_rowcount()
+    return source_pipe, target_pipe
     assert new_source_rowcount == new_target_rowcount

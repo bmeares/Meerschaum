@@ -173,7 +173,12 @@ def deduplicate(
         if not chunk_indices:
             return bounds, (False, f"None of {items_str(indices)} were present in chunk.")
         try:
-            full_chunk = full_chunk.drop_duplicates(subset=chunk_indices, keep='last')
+            full_chunk = full_chunk.drop_duplicates(
+                subset = chunk_indices,
+                keep = 'last'
+            ).reset_index(
+                drop = True,
+            )
         except Exception as e:
             return (
                 bounds,

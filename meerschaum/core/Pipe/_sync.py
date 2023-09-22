@@ -14,7 +14,16 @@ import threading
 from datetime import datetime, timedelta
 
 from meerschaum.utils.typing import (
-    Union, Optional, Callable, Any, Tuple, SuccessTuple, Mapping, Dict, List, Iterable, Generator,
+    Union,
+    Optional,
+    Callable,
+    Any,
+    Tuple,
+    SuccessTuple,
+    Dict,
+    List,
+    Iterable,
+    Generator,
     Iterator,
 )
 
@@ -29,8 +38,8 @@ def sync(
             List[Dict[str, Any]],
             InferFetch
         ] = InferFetch,
-        begin: Optional[datetime] = None,
-        end: Optional[datetime] = None,
+        begin: Union[datetime, int, str, None] = '',
+        end: Union[datetime, int] = None,
         force: bool = False,
         retries: int = 10,
         min_seconds: int = 1,
@@ -55,28 +64,23 @@ def sync(
     df: Union[None, pd.DataFrame, Dict[str, List[Any]]], default None
         An optional DataFrame to sync into the pipe. Defaults to `None`.
 
-    begin: Optional[datetime], default None
+    begin: Union[datetime, int, str, None], default ''
         Optionally specify the earliest datetime to search for data.
-        Defaults to `None`.
 
-    end: Optional[datetime], default None
+    end: Union[datetime, int, str, None], default None
         Optionally specify the latest datetime to search for data.
-        Defaults to `None`.
 
     force: bool, default False
         If `True`, keep trying to sync untul `retries` attempts.
-        Defaults to `False`.
 
     retries: int, default 10
         If `force`, how many attempts to try syncing before declaring failure.
-        Defaults to `10`.
 
     min_seconds: Union[int, float], default 1
         If `force`, how many seconds to sleep between retries. Defaults to `1`.
 
     check_existing: bool, default True
         If `True`, pull and diff with existing data from the pipe.
-        Defaults to `True`.
 
     blocking: bool, default True
         If `True`, wait for sync to finish and return its result, otherwise
@@ -87,7 +91,6 @@ def sync(
         If provided and the instance connector is thread-safe
         (`pipe.instance_connector.IS_THREAD_SAFE is True`),
         limit concurrent sync to this many threads.
-        Defaults to `None`.
 
     callback: Optional[Callable[[Tuple[bool, str]], Any]], default None
         Callback function which expects a SuccessTuple as input.
@@ -101,7 +104,6 @@ def sync(
         Specify the number of rows to sync per chunk.
         If `-1`, resort to system configuration (default is `900`).
         A `chunksize` of `None` will sync all rows in one transaction.
-        Defaults to `-1`.
 
     sync_chunks: bool, default True
         If possible, sync chunks while fetching them into memory.
@@ -112,7 +114,6 @@ def sync(
     Returns
     -------
     A `SuccessTuple` of success (`bool`) and message (`str`).
-
     """
     from meerschaum.utils.debug import dprint, _checkpoint
     from meerschaum.utils.warnings import warn, error
@@ -183,7 +184,7 @@ def sync(
         ### use that instead.
         ### NOTE: The DataFrame must be omitted for the plugin sync method to apply.
         ### If a DataFrame is provided, continue as expected.
-        if hasattr(df, 'MRSM_INFER_FETCH'):
+        if hasattr(df, 'MRSM_INFER_FETCH'):                   
             try:
                 if p.connector is None:
                     msg = f"{p} does not have a valid connector."
@@ -430,13 +431,19 @@ def sync(
 
 def _determine_begin(
         pipe: meerschaum.Pipe,
-        begin: Optional[datetime] = None,
+        begin: Union[datetime, int, str] = '',
         debug: bool = False,
     ) -> Union[datetime, int, None]:
-    ### Datetime has already been provided.
-    if begin is not None:
+    """
+    Apply the backtrack interval if `--begin` is not provided.
+    """
+    if begin != '':
         return begin
-    return pipe.get_sync_time(debug=debug)
+    sync_time = pipe.get_sync_time(debug=debug)
+    if sync_time is None:
+        return sync_time
+    backtrack_interval = pipe.get_backtrack_interval(debug=debug)
+    return sync_time - backtrack_interval
 
 
 def get_sync_time(

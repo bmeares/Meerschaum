@@ -651,6 +651,8 @@ def get_datetime_bound_from_df(
         return best_yet
 
     if 'DataFrame' in str(type(df)):
+        if datetime_column not in df.columns:
+            return None
         return (
             df[datetime_column].min(skipna=True)
             if minimum

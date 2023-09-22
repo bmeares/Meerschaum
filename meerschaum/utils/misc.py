@@ -500,7 +500,7 @@ def timed_input(
         return input(prompt)
     except TimeoutExpired:
         return None
-    except EOFError:
+    except (EOFError, RuntimeError):
         try:
             print(prompt)
             time.sleep(seconds)

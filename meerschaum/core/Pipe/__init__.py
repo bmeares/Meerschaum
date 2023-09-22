@@ -81,7 +81,10 @@ class Pipe:
     ```
     """
 
-    from ._fetch import fetch
+    from ._fetch import (
+        fetch,
+        get_backtrack_interval,
+    )
     from ._data import (
         get_data,
         get_backtrack_data,
@@ -279,15 +282,26 @@ class Pipe:
 
     @property
     def meta(self):
-        """Simulate the MetaPipe model without importing FastAPI."""
-        if '_meta' not in self.__dict__:
-            self._meta = {
-                'connector_keys' : self.connector_keys,
-                'metric_key'     : self.metric_key,
-                'location_key'   : self.location_key,
-                'instance'       : self.instance_keys,
-            }
-        return self._meta
+        """
+        Return the four keys needed to reconstruct this pipe.
+        """
+        return {
+            'connector_keys': self.connector_keys,
+            'metric_key'    : self.metric_key,
+            'location_key'  : self.location_key,
+            'instance'      : self.instance_keys,
+        }
+
+
+    def keys(self) -> List[str]:
+        """
+        Return the ordered keys for this pipe.
+        """
+        return {
+            key: val
+            for key, val in self.meta.items()
+            if key != 'instance'
+        }
 
 
     @property
@@ -436,3 +450,10 @@ class Pipe:
         metric_key = _state.pop('metric_key')
         location_key = _state.pop('location_key')
         self.__init__(connector_keys, metric_key, location_key, **_state)
+
+
+    def __getitem__(self, *args, **kwargs) -> Any:
+        """
+        Index the pipe's attributes.
+        """
+        return self.attributes.__getitem__(*args, **kwargs)

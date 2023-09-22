@@ -3,7 +3,7 @@
 # vim:fenc=utf-8
 
 import pytest
-import datetime
+from datetime import datetime, timedelta
 from tests import debug
 from tests.pipes import all_pipes, stress_pipes, remote_pipes
 from tests.connectors import conns, get_flavors
@@ -42,12 +42,12 @@ def test_drop_and_sync(flavor: str):
     pipe.drop()
     assert pipe.exists(debug=debug) is False
     assert pipe.columns is not None
-    now1 = datetime.datetime(2021, 1, 1, 12, 0)
+    now1 = datetime(2021, 1, 1, 12, 0)
     data = {'datetime' : [now1], 'id' : [1], 'val': [1]}
     success, msg = pipe.sync(data, debug=debug)
     assert success, msg
     assert pipe.exists(debug=debug)
-    now2 = datetime.datetime(2021, 1, 1, 12, 1)
+    now2 = datetime(2021, 1, 1, 12, 1)
     data = {'datetime' : [now2], 'id' : [1], 'val': [1]}
     success, msg = pipe.sync(data, debug=debug)
     assert success, msg
@@ -65,14 +65,14 @@ def test_drop_and_sync_duplicate(flavor: str):
     pipe.drop(debug=debug)
     assert not pipe.exists(debug=debug)
 
-    now1 = datetime.datetime(2021, 1, 1, 12, 0)
+    now1 = datetime(2021, 1, 1, 12, 0)
     data = {'datetime': [now1], 'id': [1], 'val': [1]}
     success, msg = pipe.sync(data, debug=debug)
     assert success, msg
     data = pipe.get_data(debug=debug)
     assert len(data) == 1
 
-    now1 = datetime.datetime(2021, 1, 1, 12, 0)
+    now1 = datetime(2021, 1, 1, 12, 0)
     data = {'datetime': [now1], 'id': [1], 'val': [1]}
     success, msg = pipe.sync(data, debug=debug)
     assert success, msg
@@ -97,16 +97,18 @@ def test_drop_and_sync_remote(flavor: str):
     pipe.drop(debug=debug)
     parent_pipe = Pipe('plugin:stress', 'test', instance=pipe.connector)
     parent_pipe.drop(debug=debug)
-    success, msg = parent_pipe.sync(debug=debug)
+    begin, end = datetime(2020, 1, 1), datetime(2020, 1, 2)
+    success, msg = parent_pipe.sync(begin=begin, end=end, debug=debug)
     parent_len = parent_pipe.get_rowcount(debug=debug)
     assert success, msg
+
     success, msg = pipe.sync(debug=debug)
     assert success, msg
     child_len = pipe.get_rowcount(debug=debug)
     assert parent_len == child_len
 
     success, msg = parent_pipe.sync(
-        [{'datetime': '2100-01-01', 'id': 999, 'foo': 'bar'}],
+        [{'datetime': '2020-01-03', 'id': -1, 'foo': 'bar'}],
         debug = debug,
     )
     assert success, msg
@@ -117,7 +119,7 @@ def test_drop_and_sync_remote(flavor: str):
     child_len2 = pipe.get_rowcount(debug=debug)
     assert parent_len2 == child_len2
     success, msg = parent_pipe.sync(
-        [{'datetime': '2100-01-01', 'id': 999, 'foo': 'baz'}],
+        [{'datetime': '2020-01-03', 'id': -1, 'foo': 'baz'}],
         debug = debug,
     )
     assert success, msg
@@ -127,7 +129,7 @@ def test_drop_and_sync_remote(flavor: str):
     assert success, msg
     child_len3 = pipe.get_rowcount(debug=debug)
     assert child_len3 == parent_len3
-    df = pipe.get_data(params={'id': 999}, debug=debug)
+    df = pipe.get_data(params={'id': -1}, debug=debug)
     assert len(df) == 1
     assert df.to_dict(orient='records')[0]['foo'] == 'baz'
 
@@ -171,19 +173,19 @@ def test_target_mutable(flavor: str):
     pipe.drop(debug=debug)
     assert not pipe.exists(debug=debug)
     success, msg = pipe.sync(
-        {'dt': [datetime.datetime(2022, 6, 8)], 'id': [1], 'vl': [10]},
+        {'dt': [datetime(2022, 6, 8)], 'id': [1], 'vl': [10]},
         debug = debug
     )
     df = conn.read(target)
     assert len(df) == 1
     success, msg = pipe.sync(
-        {'dt': [datetime.datetime(2022, 6, 8)], 'id': [1], 'vl': [10]},
+        {'dt': [datetime(2022, 6, 8)], 'id': [1], 'vl': [10]},
         debug = debug
     )
     df = conn.read(target)
     assert len(df) == 1
     success, msg = pipe.sync(
-        {'dt': [datetime.datetime(2022, 6, 8)], 'id': [1], 'vl': [100]},
+        {'dt': [datetime(2022, 6, 8)], 'id': [1], 'vl': [100]},
         debug = debug
     )
     df = conn.read(target)
@@ -308,8 +310,8 @@ def test_utc_offset_datetimes(flavor: str):
     ]
 
     expected_docs = [
-        {'dt': datetime.datetime(2023, 1, 1)},
-        {'dt': datetime.datetime(2023, 1, 1, 23, 0, 0)}
+        {'dt': datetime(2023, 1, 1)},
+        {'dt': datetime(2023, 1, 1, 23, 0, 0)}
     ]
 
     success, msg = pipe.sync(docs, debug=debug)
@@ -400,9 +402,9 @@ def test_sync_generators(flavor: str):
         columns = {'datetime': 'dt'},
     )
     pipe.delete()
-    start_time = datetime.datetime(2023, 1, 1)
+    start_time = datetime(2023, 1, 1)
     num_docs = 3
-    generator = ([{'dt': start_time + datetime.timedelta(days=i)}] for i in range(num_docs))
+    generator = ([{'dt': start_time + timedelta(days=i)}] for i in range(num_docs))
     success, msg = pipe.sync(generator, debug=debug)
     assert success, msg
     rowcount = pipe.get_rowcount()

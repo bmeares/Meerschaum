@@ -164,9 +164,7 @@ def sync_pipe(
         debug: bool = False,
         **kw: Any
     ) -> SuccessTuple:
-    """Append a pandas DataFrame to a Pipe.
-    If Pipe does not exist, it is registered with supplied metadata.
-    """
+    """Sync a DataFrame into a Pipe."""
     from meerschaum.utils.debug import dprint
     from meerschaum.utils.misc import json_serialize_datetime
     from meerschaum.config import get_config
@@ -186,14 +184,14 @@ def sync_pipe(
 
     df = json.loads(df) if isinstance(df, str) else df
 
-    ### TODO Make separate chunksize for API?
-    _chunksize : Optional[int] = (1 if chunksize is None else (
+    _chunksize: Optional[int] = (1 if chunksize is None else (
         get_config('system', 'connectors', 'sql', 'chunksize') if chunksize == -1
         else chunksize
     ))
-    keys : list = list(df.keys())
+    keys: list = list(df.keys())
     chunks = []
     if hasattr(df, 'index'):
+        df = df.reset_index(drop=True)
         rowcount = len(df)
         chunks = [df.iloc[i] for i in more_itertools.chunked(df.index, _chunksize)]
     elif isinstance(df, dict):

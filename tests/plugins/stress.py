@@ -25,6 +25,7 @@ def register(pipe):
         'fetch': {
             'rows': 1440,
             'ids': 3,
+            'backtrack_minutes': 30,
         },
     }
 

@@ -211,7 +211,7 @@ def verify(
     bounds_success_tuples.update(dict(pool.map(process_chunk_bounds, chunk_bounds)))
     bounds_success_bools = {bounds: tup[0] for bounds, tup in bounds_success_tuples.items()}
 
-    message_header = f"{begin} - {end}"
+    message_header = f"{begin_to_print} - {end_to_print}"
     if all(bounds_success_bools.values()):
         msg = get_chunks_success_message(bounds_success_tuples, header=message_header)
         if deduplicate:

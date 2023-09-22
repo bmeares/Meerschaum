@@ -325,7 +325,7 @@ def _get_data_as_iterator(
 def get_backtrack_data(
         self,
         backtrack_minutes: int = 0,
-        begin: Optional[datetime] = None,
+        begin: Union[datetime, int, None] = None,
         params: Optional[Dict[str, Any]] = None,
         fresh: bool = False,
         debug: bool = False,
@@ -338,7 +338,7 @@ def get_backtrack_data(
     ----------
     backtrack_minutes: int, default 0
         How many minutes from `begin` to select from.
-        Defaults to 0. This may return a few rows due to a rounding quirk.
+        If 0 (default), use `pipe.parameters['fetch']['backtrack_minutes']`.
 
     begin: Optional[datetime], default None
         The starting point to search for data.
@@ -370,7 +370,6 @@ def get_backtrack_data(
     -------
     A `pd.DataFrame` for the pipe's data corresponding to the provided parameters. Backtrack data
     is a convenient way to get a pipe's data "backtracked" from the most recent datetime.
-
     """
     from meerschaum.utils.warnings import warn
     from meerschaum.utils.venv import Venv
@@ -378,6 +377,14 @@ def get_backtrack_data(
 
     if not self.exists(debug=debug):
         return None
+
+    backtrack_interval = self.get_backtrack_interval(debug=debug)
+    if backtrack_minutes == 0:
+        backtrack_minutes = (
+            (backtrack_interval.total_seconds() * 60)
+            if isinstance(backtrack_interval, timedelta)
+            else backtrack_interval
+        )
 
     if self.cache_pipe is not None:
         if not fresh:
@@ -438,7 +445,7 @@ def get_rowcount(
         params: Optional[Dict[str, Any]] = None,
         remote: bool = False,
         debug: bool = False
-    ) -> Union[int, None]:
+    ) -> int:
     """
     Get a Pipe's instance or remote rowcount.
 
@@ -460,8 +467,7 @@ def get_rowcount(
     Returns
     -------
     An `int` of the number of rows in the pipe corresponding to the provided parameters.
-    `None` is returned if the pipe does not exist.
-
+    Returned 0 if the pipe does not exist.
     """
     from meerschaum.utils.warnings import warn
     from meerschaum.utils.venv import Venv
@@ -470,7 +476,7 @@ def get_rowcount(
     connector = self.instance_connector if not remote else self.connector
     try:
         with Venv(get_connector_plugin(connector)):
-            return connector.get_pipe_rowcount(
+            rowcount = connector.get_pipe_rowcount(
                 self,
                 begin = begin,
                 end = end,
@@ -478,12 +484,15 @@ def get_rowcount(
                 remote = remote,
                 debug = debug,
             )
+            if rowcount is None:
+                return 0
+            return rowcount
     except AttributeError as e:
         warn(e)
         if remote:
-            return None
+            return 0
     warn(f"Failed to get a rowcount for {self}.")
-    return None
+    return 0
 
 
 def get_chunk_interval(
@@ -505,8 +514,8 @@ def get_chunk_interval(
     -------
     The chunk interval (`timedelta` or `int`) to use with this pipe's `datetime` axis.
     """
-    default_chunk_minutes = get_config('pipes', 'parameters', 'chunk_minutes')
-    configured_chunk_minutes = self.parameters.get('chunk_minutes', None)
+    default_chunk_minutes = get_config('pipes', 'parameters', 'verify', 'chunk_minutes')
+    configured_chunk_minutes = self.parameters.get('verify', {}).get('chunk_minutes', None)
     chunk_minutes = (
         (configured_chunk_minutes or default_chunk_minutes)
         if chunk_interval is None
@@ -559,7 +568,8 @@ def get_chunk_bounds(
 
     chunk_interval: Union[timedelta, int, None], default None
         If provided, use this interval for the size of chunk boundaries.
-        The default value for this pipe may be set under `pipe.parameters['chunk_minutes']`.
+        The default value for this pipe may be set
+        under `pipe.parameters['verify']['chunk_minutes']`.
 
     debug: bool, default False
         Verbosity toggle.
@@ -578,7 +588,7 @@ def get_chunk_bounds(
     if begin is None and end is None:
         return [(None, None)]
 
-    ### Set the chunk interval under `pipe.parameters['chunk_minutes']`.
+    ### Set the chunk interval under `pipe.parameters['verify']['chunk_minutes']`.
     chunk_interval = self.get_chunk_interval(chunk_interval, debug=debug)
     
     ### Build a list of tuples containing the chunk boundaries

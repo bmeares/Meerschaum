@@ -124,6 +124,9 @@
   export MRSM_PLUGINS_DIR='./plugins:/app/plugins'
   ```
 
+- **Add `pipe.keys()`**  
+  `pipe.keys()` returns the connector, metric, and location keys (i.e. `pipe.meta` without the `instance`).
+
 **Other changes**
 
 - **Moved `print_options()` from `meercshaum.utils.misc` into `meerschaum.utils.formatting`.**  

@@ -112,12 +112,12 @@ default_pipes_config = {
             'datetime': None,
             'id': None,
         },
-        'chunk_minutes': 1440,
         'fetch': {
             'backtrack_minutes': 1440,
         },
         'verify': {
             'bound_days': 366,
+            'chunk_minutes': 1440,
         },
     },
     'attributes': {
