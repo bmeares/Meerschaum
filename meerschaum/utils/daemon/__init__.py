@@ -14,6 +14,7 @@ from meerschaum.utils.daemon.Daemon import Daemon
 from meerschaum.utils.daemon.Log import Log
 from meerschaum.utils.daemon.RotatingFile import RotatingFile
 
+
 def daemon_entry(sysargs: Optional[List[str]] = None) -> SuccessTuple:
     """Parse sysargs and execute a Meerschaum action as a daemon.
 
@@ -27,7 +28,7 @@ def daemon_entry(sysargs: Optional[List[str]] = None) -> SuccessTuple:
     A SuccessTuple.
     """
     from meerschaum._internal.entry import entry
-    _args = None
+    _args = {}
     if '--name' in sysargs or '--job-name' in sysargs:
         from meerschaum._internal.arguments._parse_arguments import parse_arguments
         _args = parse_arguments(sysargs)
@@ -36,6 +37,38 @@ def daemon_entry(sysargs: Optional[List[str]] = None) -> SuccessTuple:
         label = shlex.join(filtered_sysargs) if sysargs else None
     except Exception as e:
         label = ' '.join(filtered_sysargs) if sysargs else None
+
+    name = _args.get('name', None)
+    daemon = None
+    if name:
+        try:
+            daemon = Daemon(daemon_id=name)
+        except Exception as e:
+            daemon = None
+
+    if daemon is not None:
+        existing_sysargs = daemon.properties['target']['args'][0]
+        existing_kwargs = parse_arguments(existing_sysargs)
+
+        ### Remove sysargs because flags are aliased.
+        _ = _args.pop('daemon', None)
+        _ = _args.pop('sysargs', None)
+        _ = _args.pop('filtered_sysargs', None)
+        debug = _args.pop('debug', None)
+        _args['sub_args'] = sorted(_args.get('sub_args', []))
+        _ = existing_kwargs.pop('daemon', None)
+        _ = existing_kwargs.pop('sysargs', None)
+        _ = existing_kwargs.pop('filtered_sysargs', None)
+        _ = existing_kwargs.pop('debug', None)
+        existing_kwargs['sub_args'] = sorted(existing_kwargs.get('sub_args', []))
+
+        ### Only run if the kwargs equal or no actions are provided.
+        if existing_kwargs == _args or not _args.get('action', []):
+            return daemon.run(
+                debug = debug,
+                allow_dirty_run = True,
+            )
+
     success_tuple = run_daemon(
         entry,
         filtered_sysargs,
@@ -46,6 +79,7 @@ def daemon_entry(sysargs: Optional[List[str]] = None) -> SuccessTuple:
     if not isinstance(success_tuple, tuple):
         success_tuple = False, str(success_tuple)
     return success_tuple
+
 
 def daemon_action(**kw) -> SuccessTuple:
     """Execute a Meerschaum action as a daemon."""

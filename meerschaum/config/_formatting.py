@@ -115,6 +115,32 @@ default_formatting_config = {
             },
         },
     },
+    'success_calm'         : {
+        'unicode'          : {
+            'icon'         : 'MRSM{formatting:emoji:success_calm}',
+        },
+        'ascii'            : {
+            'icon'         : '+',
+        },
+        'ansi'             : {
+            'rich'         : {
+                'style'    : 'pale_green3',
+            },
+        },
+    },
+    'failure_calm'         : {
+        'unicode'          : {
+            'icon'         : 'MRSM{formatting:emoji:failure_calm}',
+        },
+        'ascii'            : {
+            'icon'         : 'x',
+        },
+        'ansi'             : {
+            'rich'         : {
+                'style'    : 'indian red',
+            },
+        },
+    },
     'errors'               : {
         'unicode'          : {
             'icon'         : 'MRSM{formatting:emoji:error}',

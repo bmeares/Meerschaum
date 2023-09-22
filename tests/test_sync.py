@@ -81,11 +81,10 @@ def test_drop_and_sync_duplicate(flavor: str):
 
 @pytest.mark.parametrize("flavor", get_flavors())
 def test_drop_and_sync_stress(flavor: str):
-    pipes = stress_pipes[flavor]
-    for pipe in pipes:
-        pipe.drop(debug=debug)
-        success, msg = pipe.sync(debug=debug)
-        assert success, msg
+    pipe = stress_pipes[flavor]
+    pipe.drop(debug=debug)
+    success, msg = pipe.sync(debug=debug)
+    assert success, msg
 
 @pytest.mark.parametrize("flavor", get_flavors())
 def test_drop_and_sync_remote(flavor: str):
@@ -138,13 +137,13 @@ def test_sync_engine(flavor: str):
     ### Weird concurrency issues with our tests.
     if flavor == 'duckdb':
         return
-    pipes = stress_pipes[flavor]
-    mrsm_instance = str(pipes[0].instance_connector)
+    pipe = stress_pipes[flavor]
+    mrsm_instance = str(pipe.instance_connector)
     success, msg = actions['drop'](
         ['pipes'],
-        connector_keys = [p.connector_keys for p in pipes],
-        metric_keys = [p.metric_key for p in pipes],
-        location_keys = [p.location_key for p in pipes],
+        connector_keys = [pipe.connector_keys],
+        metric_keys = [pipe.metric_key],
+        location_keys = [pipe.location_key],
         mrsm_instance = mrsm_instance,
         yes = True,
         #  debug = True,
@@ -153,9 +152,9 @@ def test_sync_engine(flavor: str):
 
     success, msg = actions['sync'](
         ['pipes'],
-        connector_keys = [p.connector_keys for p in pipes],
-        metric_keys = [p.metric_key for p in pipes],
-        location_keys = [p.location_key for p in pipes],
+        connector_keys = [pipe.connector_keys],
+        metric_keys = [pipe.metric_key],
+        location_keys = [pipe.location_key],
         mrsm_instance = mrsm_instance,
         #  debug = True,
     )

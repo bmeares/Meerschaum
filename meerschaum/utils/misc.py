@@ -6,25 +6,39 @@ Miscellaneous functions go here
 """
 
 from __future__ import annotations
+from datetime import timedelta
 from meerschaum.utils.typing import (
-    Union, Mapping, Any, Callable, Optional, List, Dict, SuccessTuple, Iterable, PipesDict, Tuple,
-    InstanceConnector, Hashable, Generator, Iterator,
+    Union,
+    Any,
+    Callable,
+    Optional,
+    List,
+    Dict,
+    SuccessTuple,
+    Iterable,
+    PipesDict,
+    Tuple,
+    InstanceConnector,
+    Hashable,
+    Generator,
+    Iterator,
 )
 import meerschaum as mrsm
 
-### Import from other modules to retain legacy behavior.
-from meerschaum.utils.dtypes import to_pandas_dtype
-from meerschaum.utils.dataframe import (
-    filter_unseen_df,
-    add_missing_cols_to_df,
-    parse_df_datetimes,
-    df_from_literal,
-    get_json_cols,
-    get_unhashable_cols,
-    enforce_dtypes,
-    get_datetime_bound_from_df,
-    df_is_chunk_generator,
-)
+__pdoc__: Dict[str, bool] = {
+    'to_pandas_dtype': False,
+    'filter_unseen_df': False,
+    'add_missing_cols_to_df': False,
+    'parse_df_datetimes': False,
+    'df_from_literal': False,
+    'get_json_cols': False,
+    'get_unhashable_cols': False,
+    'enforce_dtypes': False,
+    'get_datetime_bound_from_df': False,
+    'df_is_chunk_generator': False,
+    'choices_docstring': False,
+    '_get_subaction_names': False,
+}
 
 
 def add_method_to_class(
@@ -268,178 +282,6 @@ def is_pipe_registered(
         dprint(f'{ck}, {mk}, {lk}')
         dprint(f'{pipe}, {pipes}')
     return ck in pipes and mk in pipes[ck] and lk in pipes[ck][mk]
-
-
-def _get_subaction_names(action : str, globs : dict = None) -> List[str]:
-    """NOTE: Don't use this function. You should use `meerschaum.actions.get_subactions()` instead.
-    This only exists for internal use.
-    """
-    if globs is None:
-        import importlib
-        module = importlib.import_module(f'meerschaum.actions.{action}')
-        globs = vars(module)
-    subactions = []
-    for item in globs:
-        if f'_{action}' in item and 'complete' not in item.lstrip('_'):
-            subactions.append(globs[item])
-    return subactions
-
-
-def choices_docstring(action: str, globs : Optional[Dict[str, Any]] = None) -> str:
-    """
-    Append the an action's available options to the module docstring.
-    This function is to be placed at the bottom of each action module.
-
-    Parameters
-    ----------
-    action: str
-        The name of the action module (e.g. 'install').
-        
-    globs: Optional[Dict[str, Any]], default None
-        An optional dictionary of global variables.
-
-    Returns
-    -------
-    The generated docstring for the module.
-
-    Examples
-    --------
-    >>> from meerschaum.utils.misc import choices_docstring as _choices_docstring
-    >>> install.__doc__ += _choices_docstring('install')
-
-    """
-    options_str = f"\n    Options:\n        `{action} "
-    subactions = _get_subaction_names(action, globs=globs)
-    options_str += "["
-    sa_names = []
-    for sa in subactions:
-        try:
-            sa_names.append(sa.__name__[len(f"_{action}") + 1:])
-        except Exception as e:
-            print(e)
-            return ""
-    for sa_name in sorted(sa_names):
-        options_str += f"{sa_name}, "
-    options_str = options_str[:-2] + "]`"
-    return options_str
-
-
-def print_options(
-        options: Optional[Dict[str, Any]] = None,
-        nopretty: bool = False,
-        no_rich: bool = False,
-        name: str = 'options',
-        header: Optional[str] = None,
-        num_cols: Optional[int] = None,
-        adjust_cols: bool = True,
-        **kw
-    ) -> None:
-    """
-    Print items in an iterable as a fancy table.
-
-    Parameters
-    ----------
-    options: Optional[Dict[str, Any]], default None
-        The iterable to be printed.
-
-    nopretty: bool, default False
-        If `True`, don't use fancy formatting.
-
-    no_rich: bool, default False
-        If `True`, don't use `rich` to format the output.
-
-    name: str, default 'options'
-        The text in the default header after `'Available'`.
-
-    header: Optional[str], default None
-        If provided, override `name` and use this as the header text.
-
-    num_cols: Optional[int], default None
-        How many columns in the table. Depends on the terminal size. If `None`, use 8.
-
-    adjust_cols: bool, default True
-        If `True`, adjust the number of columns depending on the terminal size.
-
-    """
-    import os
-    from meerschaum.utils.packages import import_rich
-    from meerschaum.utils.formatting import make_header, highlight_pipes
-    from meerschaum.actions import actions as _actions
-
-
-    if options is None:
-        options = {}
-    _options = []
-    for o in options:
-        _options.append(str(o))
-    _header = f"Available {name}" if header is None else header
-
-    if num_cols is None:
-        num_cols = 8
-
-    def _print_options_no_rich():
-        if not nopretty:
-            print()
-            print(make_header(_header))
-        ### print actions
-        for option in sorted(_options):
-            if not nopretty:
-                print("  - ", end="")
-            print(option)
-        if not nopretty:
-            print()
-
-    rich = import_rich()
-    if rich is None or nopretty or no_rich:
-        _print_options_no_rich()
-        return None
-
-    ### Prevent too many options from being truncated on small terminals.
-    if adjust_cols and _options:
-        _cols, _lines = get_cols_lines()
-        while num_cols > 1:
-            cell_len = int(((_cols - 4) - (3 * (num_cols - 1))) / num_cols)
-            num_too_big = sum([(1 if string_width(o) > cell_len else 0) for o in _options])
-            if num_too_big > int(len(_options) / 3):
-                num_cols -= 1
-                continue
-            break
-
-    from meerschaum.utils.formatting import pprint, get_console
-    from meerschaum.utils.packages import attempt_import
-    rich_columns = attempt_import('rich.columns')
-    rich_panel = attempt_import('rich.panel')
-    rich_table = attempt_import('rich.table')
-    Text = attempt_import('rich.text').Text
-    box = attempt_import('rich.box')
-    Panel = rich_panel.Panel
-    Columns = rich_columns.Columns
-    Table = rich_table.Table
-
-    if _header is not None:
-        table = Table(
-            title = '\n' + _header,
-            box = box.SIMPLE,
-            show_header = False,
-            show_footer = False,
-            title_style = '',
-            expand = True,
-        )
-    else:
-        table = Table.grid(padding=(0, 2))
-    for i in range(num_cols):
-        table.add_column()
-
-    chunks = iterate_chunks(
-        [Text.from_ansi(highlight_pipes(o)) for o in sorted(_options)],
-        num_cols,
-        fillvalue=''
-    )
-    for c in chunks:
-        table.add_row(*c)
-
-    get_console().print(table)
-    return None
 
 
 def get_cols_lines(default_cols: int = 100, default_lines: int = 120) -> Tuple[int, int]:
@@ -1128,6 +970,7 @@ def async_wrap(func):
         return await loop.run_in_executor(executor, pfunc)
     return run 
 
+
 def debug_trace(browser: bool = True):
     """
     Open a web-based debugger to trace the execution of the program.
@@ -1135,6 +978,7 @@ def debug_trace(browser: bool = True):
     from meerschaum.utils.packages import attempt_import
     heartrate = attempt_import('heartrate')
     heartrate.trace(files=heartrate.files.all, browser=browser)
+
 
 def items_str(
         items: List[Any],
@@ -1222,6 +1066,29 @@ def items_str(
         output += c
     output += s + a + (s if and_ else '') + q + str(items[-1]) + q
     return output
+
+
+def interval_str(delta: Union[timedelta, int]) -> str:
+    """
+    Return a human-readable string for a `timedelta` (or `int` minutes).
+
+    Parameters
+    ----------
+    delta: Union[timedelta, int]
+        The interval to print. If `delta` is an integer, assume it corresponds to minutes.
+
+    Returns
+    -------
+    A formatted string, fit for human eyes.
+    """
+    from meerschaum.utils.packages import attempt_import
+    humanfriendly = attempt_import('humanfriendly')
+    delta_seconds = (
+        delta.total_seconds()
+        if isinstance(delta, timedelta)
+        else (delta * 60)
+    )
+    return humanfriendly.format_timespan(delta_seconds)
 
 
 def is_docker_available() -> bool:
@@ -1518,3 +1385,132 @@ def safely_extract_tar(tarf: 'file', output_dir: Union[str, 'pathlib.Path']) -> 
         tar.extractall(path=path, members=members, numeric_owner=numeric_owner)
 
     return safe_extract(tarf, output_dir)
+
+##################
+# Legacy imports #
+##################
+
+def choose_subaction(*args, **kwargs) -> Any:
+    """
+    Placeholder function to prevent breaking legacy behavior.
+    See `meerschaum.actions.choose_subaction`.
+    """
+    from meerschaum.actions import choose_subaction as _choose_subactions
+    return _choose_subactions(*args, **kwargs)
+
+
+def print_options(*args, **kwargs) -> None:
+    """
+    Placeholder function to prevent breaking legacy behavior.
+    See `meerschaum.utils.formatting.print_options`.
+    """
+    from meerschaum.utils.formatting import print_options as _print_options
+    return _print_options(*args, **kwargs)
+
+
+def to_pandas_dtype(*args, **kwargs) -> Any:
+    """
+    Placeholder function to prevent breaking legacy behavior.
+    See `meerschaum.utils.dtypes.to_pandas_dtype`.
+    """
+    from meerschaum.utils.dtypes import to_pandas_dtype as _to_pandas_dtype
+    return _to_pandas_dtype(*args, **kwargs)
+
+
+def filter_unseen_df(*args, **kwargs) -> Any:
+    """
+    Placeholder function to prevent breaking legacy behavior.
+    See `meerschaum.utils.dataframe.filter_unseen_df`.
+    """
+    from meerschaum.utils.dataframe import filter_unseen_df as real_function
+    return real_function(*args, **kwargs)
+
+
+def add_missing_cols_to_df(*args, **kwargs) -> Any:
+    """
+    Placeholder function to prevent breaking legacy behavior.
+    See `meerschaum.utils.dataframe.add_missing_cols_to_df`.
+    """
+    from meerschaum.utils.dataframe import add_missing_cols_to_df as real_function
+    return real_function(*args, **kwargs)
+
+
+def parse_df_datetimes(*args, **kwargs) -> Any:
+    """
+    Placeholder function to prevent breaking legacy behavior.
+    See `meerschaum.utils.dataframe.parse_df_datetimes`.
+    """
+    from meerschaum.utils.dataframe import parse_df_datetimes as real_function
+    return real_function(*args, **kwargs)
+
+
+def df_from_literal(*args, **kwargs) -> Any:
+    """
+    Placeholder function to prevent breaking legacy behavior.
+    See `meerschaum.utils.dataframe.df_from_literal`.
+    """
+    from meerschaum.utils.dataframe import df_from_literal as real_function
+    return real_function(*args, **kwargs)
+
+
+def get_json_cols(*args, **kwargs) -> Any:
+    """
+    Placeholder function to prevent breaking legacy behavior.
+    See `meerschaum.utils.dataframe.get_json_cols`.
+    """
+    from meerschaum.utils.dataframe import get_json_cols as real_function
+    return real_function(*args, **kwargs)
+
+
+def get_unhashable_cols(*args, **kwargs) -> Any:
+    """
+    Placeholder function to prevent breaking legacy behavior.
+    See `meerschaum.utils.dataframe.get_unhashable_cols`.
+    """
+    from meerschaum.utils.dataframe import get_unhashable_cols as real_function
+    return real_function(*args, **kwargs)
+
+
+def enforce_dtypes(*args, **kwargs) -> Any:
+    """
+    Placeholder function to prevent breaking legacy behavior.
+    See `meerschaum.utils.dataframe.enforce_dtypes`.
+    """
+    from meerschaum.utils.dataframe import enforce_dtypes as real_function
+    return real_function(*args, **kwargs)
+
+
+def get_datetime_bound_from_df(*args, **kwargs) -> Any:
+    """
+    Placeholder function to prevent breaking legacy behavior.
+    See `meerschaum.utils.dataframe.get_datetime_bound_from_df`.
+    """
+    from meerschaum.utils.dataframe import get_datetime_bound_from_df as real_function
+    return real_function(*args, **kwargs)
+
+
+def df_is_chunk_generator(*args, **kwargs) -> Any:
+    """
+    Placeholder function to prevent breaking legacy behavior.
+    See `meerschaum.utils.dataframe.df_is_chunk_generator`.
+    """
+    from meerschaum.utils.dataframe import df_is_chunk_generator as real_function
+    return real_function(*args, **kwargs)
+
+
+def choices_docstring(*args, **kwargs) -> Any:
+    """
+    Placeholder function to prevent breaking legacy behavior.
+    See `meerschaum.actions.choices_docstring`.
+    """
+    from meerschaum.actions import choices_docstring as real_function
+    return real_function(*args, **kwargs)
+
+
+def _get_subaction_names(*args, **kwargs) -> Any:
+    """
+    Placeholder function to prevent breaking legacy behavior.
+    See `meerschaum.actions._get_subaction_names`.
+    """
+    from meerschaum.actions import _get_subaction_names as real_function
+    return real_function(*args, **kwargs)

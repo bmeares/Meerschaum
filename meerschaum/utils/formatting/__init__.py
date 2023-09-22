@@ -33,6 +33,7 @@ __all__ = sorted([
     'translate_rich_to_termcolor',
     'get_console',
     'print_tuple',
+    'print_options',
     'fill_ansi',
     'pprint',
     'highlight_pipes',
@@ -222,9 +223,29 @@ def print_tuple(
         common_only: bool = False,
         upper_padding: int = 0,
         lower_padding: int = 0,
+        calm: bool = False,
         _progress: Optional['rich.progress.Progress'] = None,
     ) -> None:
-    """Print `meerschaum.utils.typing.SuccessTuple`."""
+    """
+    Print `meerschaum.utils.typing.SuccessTuple`.
+
+    Parameters
+    ----------
+    skip_common: bool, default True
+        If `True`, do not print common success tuples (i.e. `(True, "Success")`).
+
+    common_only: bool, default False
+        If `True`, only print if the success tuple is common.
+
+    upper_padding: int, default 0
+        How many newlines to prepend to the message.
+
+    lower_padding: int, default 0
+        How many newlines to append to the message.
+
+    calm: bool, default False
+        If `True`, use the default emoji and color scheme.
+    """
     from meerschaum.config.static import STATIC_CONFIG
     _init()
     try:
@@ -232,6 +253,9 @@ def print_tuple(
     except TypeError:
         status = 'failure'
         tup = None, None
+
+    if calm:
+        status += '_calm'
 
     omit_messages = STATIC_CONFIG['system']['success']['ignore']
 
@@ -260,6 +284,125 @@ def print_tuple(
         msg = '\n'.join(lines)
         msg = ('\n' * upper_padding) + msg + ('\n' * lower_padding)
         print(msg)
+
+
+def print_options(
+        options: Optional[Dict[str, Any]] = None,
+        nopretty: bool = False,
+        no_rich: bool = False,
+        name: str = 'options',
+        header: Optional[str] = None,
+        num_cols: Optional[int] = None,
+        adjust_cols: bool = True,
+        **kw
+    ) -> None:
+    """
+    Print items in an iterable as a fancy table.
+
+    Parameters
+    ----------
+    options: Optional[Dict[str, Any]], default None
+        The iterable to be printed.
+
+    nopretty: bool, default False
+        If `True`, don't use fancy formatting.
+
+    no_rich: bool, default False
+        If `True`, don't use `rich` to format the output.
+
+    name: str, default 'options'
+        The text in the default header after `'Available'`.
+
+    header: Optional[str], default None
+        If provided, override `name` and use this as the header text.
+
+    num_cols: Optional[int], default None
+        How many columns in the table. Depends on the terminal size. If `None`, use 8.
+
+    adjust_cols: bool, default True
+        If `True`, adjust the number of columns depending on the terminal size.
+
+    """
+    import os
+    from meerschaum.utils.packages import import_rich
+    from meerschaum.utils.formatting import make_header, highlight_pipes
+    from meerschaum.actions import actions as _actions
+    from meerschaum.utils.misc import get_cols_lines, string_width, iterate_chunks
+
+
+    if options is None:
+        options = {}
+    _options = []
+    for o in options:
+        _options.append(str(o))
+    _header = f"Available {name}" if header is None else header
+
+    if num_cols is None:
+        num_cols = 8
+
+    def _print_options_no_rich():
+        if not nopretty:
+            print()
+            print(make_header(_header))
+        ### print actions
+        for option in sorted(_options):
+            if not nopretty:
+                print("  - ", end="")
+            print(option)
+        if not nopretty:
+            print()
+
+    rich = import_rich()
+    if rich is None or nopretty or no_rich:
+        _print_options_no_rich()
+        return None
+
+    ### Prevent too many options from being truncated on small terminals.
+    if adjust_cols and _options:
+        _cols, _lines = get_cols_lines()
+        while num_cols > 1:
+            cell_len = int(((_cols - 4) - (3 * (num_cols - 1))) / num_cols)
+            num_too_big = sum([(1 if string_width(o) > cell_len else 0) for o in _options])
+            if num_too_big > int(len(_options) / 3):
+                num_cols -= 1
+                continue
+            break
+
+    from meerschaum.utils.formatting import pprint, get_console
+    from meerschaum.utils.packages import attempt_import
+    rich_columns = attempt_import('rich.columns')
+    rich_panel = attempt_import('rich.panel')
+    rich_table = attempt_import('rich.table')
+    Text = attempt_import('rich.text').Text
+    box = attempt_import('rich.box')
+    Panel = rich_panel.Panel
+    Columns = rich_columns.Columns
+    Table = rich_table.Table
+
+    if _header is not None:
+        table = Table(
+            title = '\n' + _header,
+            box = box.SIMPLE,
+            show_header = False,
+            show_footer = False,
+            title_style = '',
+            expand = True,
+        )
+    else:
+        table = Table.grid(padding=(0, 2))
+    for i in range(num_cols):
+        table.add_column()
+
+    chunks = iterate_chunks(
+        [Text.from_ansi(highlight_pipes(o)) for o in sorted(_options)],
+        num_cols,
+        fillvalue=''
+    )
+    for c in chunks:
+        table.add_row(*c)
+
+    get_console().print(table)
+    return None
 
 
 def fill_ansi(string: str, style: str = '') -> str:

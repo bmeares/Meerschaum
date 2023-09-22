@@ -62,6 +62,7 @@ def verify(
     A SuccessTuple indicating whether the pipe was successfully resynced.
     """
     from meerschaum.utils.pool import get_pool
+    from meerschaum.utils.misc import interval_str
     workers = self.get_num_workers(workers)
 
     ### Skip configured bounding in parameters
@@ -74,16 +75,16 @@ def verify(
     if bounded is None:
         bounded = bound_time is not None
 
-    if begin is None:
+    if bounded and begin is None:
         begin = (
             bound_time
             if bound_time is not None
             else self.get_sync_time(newest=False, debug=debug)
         )
-    if end is None:
+    if bounded and end is None:
         end = self.get_sync_time(newest=True, debug=debug)
 
-    if bounded:
+    if bounded and end is not None:
         end += (
             timedelta(minutes=1)
             if isinstance(end, datetime)
@@ -93,13 +94,7 @@ def verify(
     sync_less_than_begin = not bounded and begin is None
     sync_greater_than_end = not bounded and end is None
 
-    cannot_determine_bounds = (
-        begin is None
-        or
-        end is None
-        or
-        not self.exists(debug=debug)
-    )
+    cannot_determine_bounds = not self.exists(debug=debug)
 
     if cannot_determine_bounds:
         sync_success, sync_msg = self.sync(
@@ -146,21 +141,48 @@ def verify(
             )
         return True, f"Could not determine chunks between '{begin}' and '{end}'; nothing to do."
 
+    begin_to_print = (
+        begin
+        if begin is not None
+        else (
+            chunk_bounds[0][0]
+            if bounded
+            else chunk_bounds[0][1]
+        )
+    )
+    end_to_print = (
+        end
+        if end is not None
+        else (
+            chunk_bounds[-1][1]
+            if bounded
+            else chunk_bounds[-1][0]
+        )
+    )
+
     info(
         f"Syncing {len(chunk_bounds)} chunk" + ('s' if len(chunk_bounds) != 1 else '')
         + f" ({'un' if not bounded else ''}bounded)"
-        + f" of size '{chunk_interval}'"
-        + f" between '{begin}' and '{end}'."
+        + f" of size '{interval_str(chunk_interval)}'"
+        + f" between '{begin_to_print}' and '{end_to_print}'."
     )
 
     pool = get_pool(workers=workers)
 
+    ### Dictionary of the form bounds -> success_tuple, e.g.:
+    ### {
+    ###    (2023-01-01, 2023-01-02): (True, "Success")
+    ### }
+    bounds_success_tuples = {}
     def process_chunk_bounds(
             chunk_begin_and_end: Tuple[
                 Union[int, datetime],
                 Union[int, datetime]
             ]
         ):
+        if chunk_begin_and_end in bounds_success_tuples:
+            return chunk_begin_and_end, bounds_success_tuples[chunk_begin_and_end]
+
         chunk_begin, chunk_end = chunk_begin_and_end
         return chunk_begin_and_end, self.sync(
             begin = chunk_begin,
@@ -171,11 +193,22 @@ def verify(
             **kwargs
         )
 
-    ### Dictionary of the form bounds -> success_tuple, e.g.:
-    ### {
-    ###    (2023-01-01, 2023-01-02): (True, "Success")
-    ### }
-    bounds_success_tuples = dict(pool.map(process_chunk_bounds, chunk_bounds))
+    ### If we have more than one chunk, attempt to sync the first one and return if its fails.
+    if len(chunk_bounds) > 1:
+        first_chunk_bounds = chunk_bounds[0]
+        (
+            (first_begin, first_end),
+            (first_success, first_msg)
+        ) = process_chunk_bounds(first_chunk_bounds)
+        if not first_success:
+            return (
+                first_success,
+                f"\n{first_begin} - {first_end}\n"
+                + f"Failed to sync first chunk:\n{first_msg}"
+            )
+        bounds_success_tuples[first_chunk_bounds] = (first_success, first_msg)
+
+    bounds_success_tuples.update(dict(pool.map(process_chunk_bounds, chunk_bounds)))
     bounds_success_bools = {bounds: tup[0] for bounds, tup in bounds_success_tuples.items()}
 
     message_header = f"{begin} - {end}"
@@ -195,18 +228,19 @@ def verify(
 
     chunk_bounds_to_resync = [
         bounds
-        for bounds, success in zip(chunk_bounds, chunk_success_bools)
+        for bounds, success in zip(chunk_bounds, bounds_success_bools)
         if not success
     ]
     bounds_to_print = [
         f"{bounds[0]} - {bounds[1]}"
         for bounds in chunk_bounds_to_resync
     ]
-    warn(
-        f"Will resync the following failed chunks:\n    "
-        + '\n    '.join(bounds_to_print),
-        stack = False,
-    )
+    if bounds_to_print:
+        warn(
+            f"Will resync the following failed chunks:\n    "
+            + '\n    '.join(bounds_to_print),
+            stack = False,
+        )
 
     retry_bounds_success_tuples = dict(pool.map(process_chunk_bounds, chunk_bounds_to_resync))
     bounds_success_tuples.update(retry_bounds_success_tuples)
@@ -289,7 +323,8 @@ def get_chunks_success_message(
         ''
         if num_fails == 0
         else (
-            f"\n\nFailed to sync {num_fails} chunks:\n"
+            f"\n\nFailed to sync {num_fails} chunk"
+            + ('s' if num_fails != 1 else '') + ":\n"
             + '\n'.join([
                 f"{fail_begin} - {fail_end}\n{msg}\n"
                 for (fail_begin, fail_end), (_, msg) in fail_chunk_bounds_tuples.items()

@@ -141,5 +141,5 @@ def _ask_with_rowcounts(
 ### NOTE: This must be the final statement of the module.
 ###       Any subactions added below these lines will not
 ###       be added to the `help` docstring.
-from meerschaum.utils.misc import choices_docstring as _choices_docstring
+from meerschaum.actions import choices_docstring as _choices_docstring
 clear.__doc__ += _choices_docstring('clear')

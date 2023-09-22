@@ -309,19 +309,42 @@ def highlight_pipes(message: str) -> str:
     """
     Add syntax highlighting to an info message containing stringified `meerschaum.Pipe` objects.
     """
-    if 'Pipe(' not in message or ')' not in message:
+    if 'Pipe(' not in message and ')' not in message:
         return message
+
     from meerschaum import Pipe
     segments = message.split('Pipe(')
     msg = ''
     _d = {}
     for i, segment in enumerate(segments):
-        if ',' in segment and ')' in segment:
-            paren_index = segment.find(')') + 1
-            code = "_d['pipe'] = Pipe(" + segment[:paren_index]
+        comma_index = segment.find(',')
+        paren_index = segment.find(')')
+        single_quote_index = segment.find("'")
+        double_quote_index = segment.find('"')
+
+        has_comma = comma_index != -1
+        has_paren = paren_index != -1
+        has_single_quote = single_quote_index != -1
+        has_double_quote = double_quote_index != -1
+        quote_index = double_quote_index if has_double_quote else single_quote_index
+
+        has_pipe = (
+            has_comma
+            and
+            has_paren
+            and
+            (has_single_quote or has_double_quote)
+            and not
+            (has_double_quote and has_double_quote)
+            and not
+            (comma_index > paren_index or quote_index > paren_index)
+        )
+
+        if has_pipe:
+            code = "_d['pipe'] = Pipe(" + segment[:paren_index + 1]
             try:
                 exec(code)
-                _to_add = pipe_repr(_d['pipe']) + segment[paren_index:]
+                _to_add = pipe_repr(_d['pipe']) + segment[paren_index + 1:]
             except Exception as e:
                 _to_add = 'Pipe(' + segment
             msg += _to_add

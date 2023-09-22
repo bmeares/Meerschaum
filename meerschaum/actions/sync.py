@@ -154,6 +154,7 @@ def _pipes_lap(
                 ) + msg + '\n'
                 print_tuple(
                     (success, msg),
+                    calm = True,
                     _progress = _progress,
                 )
             _checkpoint(_progress=_progress, _task=_task)
@@ -287,6 +288,7 @@ def _sync_pipes(
         lap_begin = time.perf_counter()
 
         try:
+            results_dict = {}
             with cm:
                 results_dict = _pipes_lap(
                     min_seconds = min_seconds,
@@ -423,5 +425,5 @@ def _wrap_sync_pipe(
 ### NOTE: This must be the final statement of the module.
 ###       Any subactions added below these lines will not
 ###       be added to the `help` docstring.
-from meerschaum.utils.misc import choices_docstring as _choices_docstring
+from meerschaum.actions import choices_docstring as _choices_docstring
 sync.__doc__ += _choices_docstring('sync')

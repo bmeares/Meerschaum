@@ -5,9 +5,11 @@ DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" >/dev/null 2>&1 && pwd )"
 
 cd "$PARENT"
 test_root="$PARENT/test_root"
+test_plugins="$PARENT/tests/plugins"
 mkdir -p "$test_root"
 test_port="8989"
 export MRSM_ROOT_DIR=$test_root
+export MRSM_PLUGINS_DIR=$test_plugins
 
 [ -z "$PYTHON_BIN" ] && export PYTHON_BIN=python
 [ -z "$MRSM_TEST_FLAVORS" ] && export MRSM_TEST_FLAVORS='api,timescaledb'
@@ -28,26 +30,11 @@ fi
 
 rm -rf "$test_root/data"
 
-### Install the `stress` plugin.
-$PYTHON_BIN -m meerschaum show plugins
-PLUGINS=$($PYTHON_BIN -m meerschaum show plugins --nopretty)
-if [[ "$PLUGINS" =~ "stress" ]]; then
-  echo "Plugin \`stress\` is already installed."
-else
-  $PYTHON_BIN -m meerschaum install plugin stress
-fi
-
 ### Start the test API.
-api_exists=$(MRSM_ROOT_DIR="$test_root" $PYTHON_BIN -m meerschaum show jobs test_api --nopretty)
-if [ "$api_exists" != "test_api" ]; then
-  $PYTHON_BIN -m meerschaum start api \
-    -w 1 -p $test_port --name test_api -y -d -i sql:local
-else
-  $PYTHON_BIN -m meerschaum start jobs test_api -y
-fi
-$PYTHON_BIN -m meerschaum start jobs test_api -y
+$PYTHON_BIN -m meerschaum delete jobs test_api -y --timeout 10
+$PYTHON_BIN -m meerschaum start api \
+  -w 1 -p $test_port --name test_api -y -d -i sql:local
 MRSM_API_TEST=http://user:pass@localhost:$test_port $PYTHON_BIN -m meerschaum start connectors api:test
-$PYTHON_BIN -m meerschaum start jobs test_api -y
 
 ### This is necessary to trigger installations in a clean environment.
 $PYTHON_BIN -c "
@@ -93,11 +80,15 @@ export $MRSM_URIS
 
 $PYTHON_BIN -m meerschaum show connectors
 $PYTHON_BIN -m meerschaum start connectors $MRSM_CONNS
-### Execute the pytest tests.
 $PYTHON_BIN -m pytest \
   --durations=0 \
-  --ignore=portable/ --ignore=test_root/ --ignore=tests/data/ --ignore=docs/ \
-  --ff --full-trace -v; rc="$?"
+  --ignore=portable/ \
+  --ignore=test_root/ \
+  --ignore=tests/data/ \
+  --ignore=docs/ \
+  --ff \
+  --full-trace \
+  -v; rc="$?"
 
 ### Cleanup
 if [ "$2" == "rm" ]; then

@@ -11,7 +11,7 @@ from meerschaum.utils.typing import Union, Any, Sequence, SuccessTuple, Optional
 
 def verify(
         action: Optional[List[str]] = None,
-        **kw
+        **kwargs: Any
     ) -> SuccessTuple:
     """
     Verify the states of pipes, packages, and more.
@@ -21,8 +21,9 @@ def verify(
         'pipes': _verify_pipes,
         'packages': _verify_packages,
         'venvs': _verify_venvs,
+        'plugins': _verify_plugins,
     }
-    return choose_subaction(action, options, **kw)
+    return choose_subaction(action, options, **kwargs)
 
 
 def _verify_pipes(**kwargs) -> SuccessTuple:
@@ -92,8 +93,58 @@ def _verify_venvs(
     return True, "Success"
 
 
+def _verify_plugins(
+        action: Optional[List[str]] = None,
+        **kwargs: Any
+    ) -> SuccessTuple:
+    """
+    Verify that all of the available plugins are able to be imported as expected.
+    """
+    from meerschaum.utils.formatting import print_options, UNICODE, print_tuple
+    from meerschaum.plugins import import_plugins, get_plugins_names, Plugin
+    from meerschaum.config import get_config
+    from meerschaum.utils.misc import items_str
+
+    plugins_names_to_verify = action or get_plugins_names()
+    if not plugins_names_to_verify:
+        if not action:
+            return True, "There are no installed plugins; nothing to do."
+        return False, f"Unable to verify plugins {items_str(action)}."
+
+    header = f"Verifying {len(plugins_names_to_verify)} plugins"
+    print_options(
+        plugins_names_to_verify,
+        header = header,
+    )
+
+    failed_to_import = []
+    for plugin_name in plugins_names_to_verify:
+        plugin = Plugin(plugin_name)
+        plugin_success = plugin.module is not None
+        if not plugin_success:
+            failed_to_import.append(plugin)
+        plugin_msg = (
+            (f"Imported plugin '{plugin}'.")
+            if plugin_success
+            else (f"Failed to import plugin '{plugin}'.")
+        )
+        print_tuple((plugin_success, plugin_msg), calm=True)
+
+    success = len(failed_to_import) == 0
+    message = (
+        f"Successfully imported {len(plugins_names_to_verify)} plugins."
+        if success
+        else (
+            f"Failed to import plugin"
+            + ('s' if len(failed_to_import) != 1 else '')
+            + f" {items_str(failed_to_import)}."
+        )
+    )
+    return success, message
+
+
 ### NOTE: This must be the final statement of the module.
 ###       Any subactions added below these lines will not
 ###       be added to the `help` docstring.
-from meerschaum.utils.misc import choices_docstring as _choices_docstring
+from meerschaum.actions import choices_docstring as _choices_docstring
 verify.__doc__ += _choices_docstring('verify')

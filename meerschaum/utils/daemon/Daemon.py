@@ -168,7 +168,7 @@ class Daemon:
             finally:
                 self._log_refresh_timer.cancel()
                 self.rotating_log.close()
-                if self.pid_path.exists():
+                if self.pid is None and self.pid_path.exists():
                     self.pid_path.unlink()
 
             if keep_daemon_output:
@@ -254,7 +254,7 @@ class Daemon:
         return _launch_success_bool, msg
 
 
-    def kill(self, timeout: Optional[int] = 3) -> SuccessTuple:
+    def kill(self, timeout: Optional[int] = 8) -> SuccessTuple:
         """Forcibly terminate a running daemon.
         Sends a SIGTERM signal to the process.
 
@@ -293,7 +293,7 @@ class Daemon:
         return True, "Success"
 
 
-    def quit(self, timeout: Optional[int] = 3) -> SuccessTuple:
+    def quit(self, timeout: Union[int, float, None] = None) -> SuccessTuple:
         """Gracefully quit a running daemon."""
         if self.status == 'paused':
             return self.kill(timeout)
@@ -305,10 +305,24 @@ class Daemon:
 
     def pause(
             self,
-            timeout: Optional[int] = 3,
-            check_timeout_interval: float = 0.1,
+            timeout: Union[int, float, None] = None,
+            check_timeout_interval: Union[float, int, None] = None,
         ) -> SuccessTuple:
-        """Pause the daemon if it is running."""
+        """
+        Pause the daemon if it is running.
+
+        Parameters
+        ----------
+        timeout: Union[float, int, None], default None
+            The maximum number of seconds to wait for a process to suspend.
+
+        check_timeout_interval: Union[float, int, None], default None
+            The number of seconds to wait between checking if the process is still running.
+
+        Returns
+        -------
+        A `SuccessTuple` indicating whether the `Daemon` process was successfully suspended.
+        """
         if self.process is None:
             return False, f"Daemon '{self.daemon_id}' is not running and cannot be paused."
 
@@ -320,8 +334,18 @@ class Daemon:
         except Exception as e:
             return False, f"Failed to pause daemon '{self.daemon_id}':\n{e}"
 
-        if timeout is None:
-            success = self.process.status() == 'stopped'
+        timeout = self.get_timeout_seconds(timeout)
+        check_timeout_interval = self.get_check_timeout_interval_seconds(
+            check_timeout_interval
+        )
+
+        psutil = attempt_import('psutil')
+
+        if not timeout:
+            try:
+                success = self.process.status() == 'stopped'
+            except psutil.NoSuchProcess as e:
+                success = True
             msg = "Success" if success else f"Failed to suspend daemon '{self.daemon_id}'."
             if success:
                 self._capture_process_timestamp('paused')
@@ -329,9 +353,12 @@ class Daemon:
 
         begin = time.perf_counter()
         while (time.perf_counter() - begin) < timeout:
-            if self.process.status() == 'stopped':
-                self._capture_process_timestamp('paused')
-                return True, "Success"
+            try:
+                if self.process.status() == 'stopped':
+                    self._capture_process_timestamp('paused')
+                    return True, "Success"
+            except psutil.NoSuchProcess as e:
+                return False, f"Process exited unexpectedly. Was it killed?\n{e}"
             time.sleep(check_timeout_interval)
 
         return False, (
@@ -342,10 +369,24 @@ class Daemon:
 
     def resume(
             self,
-            timeout: Optional[int] = 3,
-            check_timeout_interval: float = 0.1,
+            timeout: Union[int, float, None] = None,
+            check_timeout_interval: Union[float, int, None] = None,
         ) -> SuccessTuple:
-        """Resume the daemon if it is paused."""
+        """
+        Resume the daemon if it is paused.
+
+        Parameters
+        ----------
+        timeout: Union[float, int, None], default None
+            The maximum number of seconds to wait for a process to resume.
+
+        check_timeout_interval: Union[float, int, None], default None
+            The number of seconds to wait between checking if the process is still stopped.
+
+        Returns
+        -------
+        A `SuccessTuple` indicating whether the `Daemon` process was successfully resumed.
+        """
         if self.status == 'running':
             return True, f"Daemon '{self.daemon_id}' is already running."
 
@@ -357,7 +398,12 @@ class Daemon:
         except Exception as e:
             return False, f"Failed to resume daemon '{self.daemon_id}':\n{e}"
 
-        if timeout is None:
+        timeout = self.get_timeout_seconds(timeout)
+        check_timeout_interval = self.get_check_timeout_interval_seconds(
+            check_timeout_interval
+        )
+
+        if not timeout:
             success = self.status == 'running'
             msg = "Success" if success else f"Failed to resume daemon '{self.daemon_id}'."
             if success:
@@ -417,8 +463,8 @@ class Daemon:
     def _send_signal(
             self,
             signal_to_send,
-            timeout: Optional[Union[float, int]] = 3,
-            check_timeout_interval: float = 0.1,
+            timeout: Union[float, int, None] = None,
+            check_timeout_interval: Union[float, int, None] = None,
         ) -> SuccessTuple:
         """Send a signal to the daemon process.
 
@@ -427,13 +473,11 @@ class Daemon:
         signal_to_send:
             The signal the send to the daemon, e.g. `signals.SIGINT`.
 
-        timeout:
+        timeout: Union[float, int, None], default None
             The maximum number of seconds to wait for a process to terminate.
-            Defaults to 3.
 
-        check_timeout_interval: float, default 0.1
+        check_timeout_interval: Union[float, int, None], default None
             The number of seconds to wait between checking if the process is still running.
-            Defaults to 0.1.
 
         Returns
         -------
@@ -444,11 +488,17 @@ class Daemon:
         except Exception as e:
             return False, f"Failed to send signal {signal_to_send}:\n{traceback.format_exc()}"
 
-        if timeout is None:
+        timeout = self.get_timeout_seconds(timeout)
+        check_timeout_interval = self.get_check_timeout_interval_seconds(
+            check_timeout_interval
+        )
+
+        if not timeout:
             return True, f"Successfully sent '{signal}' to daemon '{self.daemon_id}'."
+
         begin = time.perf_counter()
         while (time.perf_counter() - begin) < timeout:
-            if not self.pid_path.exists():
+            if not self.status == 'running':
                 return True, "Success"
             time.sleep(check_timeout_interval)
 
@@ -464,8 +514,8 @@ class Daemon:
         raise a `FileExistsError`.
         """
         try:
-            self.path.mkdir(parents=True, exist_ok=False)
-            _already_exists = False
+            self.path.mkdir(parents=True, exist_ok=True)
+            _already_exists = any(os.scandir(self.path))
         except FileExistsError:
             _already_exists = True
 
@@ -506,8 +556,17 @@ class Daemon:
         if self.process is None:
             return 'stopped'
 
-        if self.process.status() == 'stopped':
-            return 'paused'
+        psutil = attempt_import('psutil')
+        try:
+            if self.process.status() == 'stopped':
+                return 'paused'
+        except psutil.NoSuchProcess:
+            if self.pid_path.exists():
+                try:
+                    self.pid_path.unlink()
+                except Exception as e:
+                    pass
+            return 'stopped'
 
         return 'running'
 
@@ -802,6 +861,28 @@ class Daemon:
                 warn(e)
         if not keep_logs:
             self.rotating_log.delete()
+
+
+    def get_timeout_seconds(self, timeout: Union[int, float, None] = None) -> Union[int, float]:
+        """
+        Return the timeout value to use. Use `--timeout-seconds` if provided,
+        else the configured default (8).
+        """
+        if isinstance(timeout, (int, float)):
+            return timeout
+        return get_config('jobs', 'timeout_seconds')
+
+
+    def get_check_timeout_interval_seconds(
+            self,
+            check_timeout_interval: Union[int, float, None] = None,
+        ) -> Union[int, float]:
+        """
+        Return the interval value to check the status of timeouts.
+        """
+        if isinstance(check_timeout_interval, (int, float)):
+            return check_timeout_interval
+        return get_config('jobs', 'check_timeout_interval_seconds')
 
 
     def __getstate__(self):

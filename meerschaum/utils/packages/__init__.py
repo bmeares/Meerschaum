@@ -1292,7 +1292,7 @@ def import_pandas(
                     (
                         "You are using an alternative Pandas implementation "
                         + f"'{pandas_module_name}'"
-                        + "\nFeatures may not work as expected."
+                        + "\n   Features may not work as expected."
                     ),
                     stack = False,
                 )

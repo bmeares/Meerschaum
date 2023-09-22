@@ -42,7 +42,7 @@ def fetch(
     remote_metric_key = instructions.get('metric_key', None)
     remote_location_key = instructions.get('location_key', None)
     if begin is None:
-        begin = pipe.sync_time
+        begin = pipe.get_sync_time(debug=debug)
 
     _params = copy.deepcopy(params) if params is not None else {}
     _params = apply_patch_to_config(_params, instructions.get('params', {}))

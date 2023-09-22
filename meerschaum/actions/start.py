@@ -128,12 +128,16 @@ def _start_jobs(
     daemon_ids = get_daemon_ids()
 
     new_job = len(list(action)) > 0
-    _potential_jobs = {'known' : [], 'unknown' : []}
+    _potential_jobs = {'known': [], 'unknown': []}
 
     if action:
         for a in action:
-            _potential_jobs[('known' if a in daemon_ids else 'unknown')].append(a)
-        
+            _potential_jobs[(
+                'known'
+                if a in daemon_ids
+                else 'unknown'
+            )].append(a)
+
         ### Check if the job is named after an action.
         if (
             _potential_jobs['known']
@@ -144,7 +148,7 @@ def _start_jobs(
             _potential_jobs['unknown'].insert(0, _potential_jobs['known'][0])
             del _potential_jobs['known'][0]
 
-        ### Only spawn a new job if we don't don't find any jobs.
+        ### Only spawn a new job if we don't find any jobs.
         new_job = (len(_potential_jobs['known']) == 0)
         if not new_job and _potential_jobs['unknown']:
             if not kw.get('nopretty', False):
@@ -171,7 +175,7 @@ def _start_jobs(
             return False, msg
 
     ### No action provided but a --name was. Start job if possible.
-    ### E.g. `start job --myjob`
+    ### E.g. `start job --name myjob`
     elif name is not None:
         new_job = False
         names = [name]
@@ -215,7 +219,10 @@ def _start_jobs(
         try:
             _daemon_sysargs = daemon.properties['target']['args'][0]
         except KeyError:
-            return False, "Failed to get arguments for daemon '{dameon.daemon_id}'."
+            return (
+                (False, f"Failed to get arguments for daemon '{daemon.daemon_id}'."),
+                daemon.daemon_id
+            )
         _daemon_kw = parse_arguments(_daemon_sysargs)
         _daemon_kw['name'] = daemon.daemon_id
         _action_success_tuple = daemon_action(**_daemon_kw)
@@ -277,7 +284,11 @@ def _start_jobs(
 
     _successes, _failures = [], []
     for _name in names:
-        success_tuple, __name = _run_new_job(_name) if new_job else _run_existing_job(_name)
+        success_tuple, __name = (
+            _run_new_job(_name)
+            if new_job
+            else _run_existing_job(_name)
+        )
         if not kw.get('nopretty', False):
             print_tuple(success_tuple)
         _successes.append(_name) if success_tuple[0] else _failures.append(_name)

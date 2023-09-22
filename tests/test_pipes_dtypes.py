@@ -5,7 +5,6 @@
 import pytest
 import datetime
 from tests import debug
-from tests.pipes import all_pipes, stress_pipes, remote_pipes
 from tests.connectors import conns, get_flavors
 from tests.test_users import test_register_user
 import meerschaum as mrsm

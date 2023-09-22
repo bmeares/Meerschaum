@@ -10,6 +10,7 @@ pydantic>=1.7.4
 httpx>=0.24.1
 numpy>=1.18.5
 pandas[parquet]>=2.0.1
+pyarrow>=7.0.0
 dask>=2023.9.0
 pytz
 joblib>=0.17.0

@@ -50,6 +50,7 @@ def _complete_stop(
 
 def _stop_jobs(
         action: Optional[List[str]] = None,
+        timeout_seconds: Optional[int] = None,
         noask: bool = False,
         force: bool = False,
         yes: bool = False,
@@ -93,18 +94,18 @@ def _stop_jobs(
 
     _quit_daemons, _kill_daemons = [], []
     for d in daemons_to_stop:
-        quit_success, quit_msg = d.quit()
+        quit_success, quit_msg = d.quit(timeout=timeout_seconds)
         if quit_success:
             _quit_daemons.append(d)
             continue
         else:
             warn(
-                f"Failed to gracefully quit job '{d.daemon_id}', attempting to terminate:\n"
+                f"Failed to gracefully quit job '{d.daemon_id}', attempting to terminate:\n   "
                 + f"{quit_msg}",
                 stack = False,
             )
 
-        kill_success, kill_msg = d.kill()
+        kill_success, kill_msg = d.kill(timeout=timeout_seconds)
         if kill_success:
             _kill_daemons.append(d)
             continue
@@ -126,5 +127,5 @@ def _stop_jobs(
 ### NOTE: This must be the final statement of the module.
 ###       Any subactions added below these lines will not
 ###       be added to the `help` docstring.
-from meerschaum.utils.misc import choices_docstring as _choices_docstring
+from meerschaum.actions import choices_docstring as _choices_docstring
 stop.__doc__ += _choices_docstring('stop')

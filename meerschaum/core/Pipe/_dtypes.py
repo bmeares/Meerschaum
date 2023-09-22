@@ -7,6 +7,7 @@ Enforce data types for a pipe's underlying table.
 """
 
 from __future__ import annotations
+from io import StringIO
 from meerschaum.utils.typing import Dict, Any, Optional
 
 def enforce_dtypes(
@@ -38,7 +39,7 @@ def enforce_dtypes(
     try:
         if isinstance(df, str):
             df = parse_df_datetimes(
-                pd.read_json(df),
+                pd.read_json(StringIO(df)),
                 ignore_cols = [
                     col
                     for col, dtype in pipe_dtypes.items()

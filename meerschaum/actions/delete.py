@@ -374,12 +374,12 @@ def _complete_delete_connectors(
     return get_connector_labels(*types, search_term=search_term)
 
 def _delete_jobs(
-        action : Optional[List[str]] = None,
-        noask : bool = False,
-        nopretty : bool = False,
-        force : bool = False,
-        yes : bool = False,
-        debug : bool = False,
+        action: Optional[List[str]] = None,
+        noask: bool = False,
+        nopretty: bool = False,
+        force: bool = False,
+        yes: bool = False,
+        debug: bool = False,
         **kw
     ) -> SuccessTuple:
     """
@@ -431,6 +431,7 @@ def _delete_jobs(
                 force = force,
                 noask = noask,
                 debug = debug,
+                **kw
             )
             ### Ensure the running jobs are dead.
             if get_running_daemons(daemons):
@@ -473,5 +474,5 @@ def _delete_jobs(
 ### NOTE: This must be the final statement of the module.
 ###       Any subactions added below these lines will not
 ###       be added to the `help` docstring.
-from meerschaum.utils.misc import choices_docstring as _choices_docstring
+from meerschaum.actions import choices_docstring as _choices_docstring
 delete.__doc__ += _choices_docstring('delete')

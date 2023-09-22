@@ -148,7 +148,7 @@ def get_pipe_metadef(
         dt_name = sql_item_name(_dt, self.flavor)
         is_guess = False
 
-    if begin is not None or end is not None:
+    if begin not in (None, '') or end is not None:
         if is_guess:
             if _dt is None:
                 warn(
@@ -168,20 +168,38 @@ def get_pipe_metadef(
     if 'order by' in definition.lower() and 'over' not in definition.lower():
         error("Cannot fetch with an ORDER clause in the definition")
 
+    apply_backtrack = begin == ''
     begin = (
-        begin if not (isinstance(begin, str) and begin == '')
-        else pipe.get_sync_time(debug=debug)
+        pipe.get_sync_time(debug=debug)
+        if begin == ''
+        else begin
     )
-        
+
+    if begin and end and begin >= end:
+        begin = None
+    
     da = None
     if dt_name:
-        ### default: do not backtrack
-        begin_da = dateadd_str(
-            flavor=self.flavor, datepart='minute', number=(-1 * btm), begin=begin,
-        ) if begin else None
-        end_da = dateadd_str(
-            flavor=self.flavor, datepart='minute', number=1, begin=end,
-        ) if end else None
+        begin_da = (
+            dateadd_str(
+                flavor = self.flavor,
+                datepart = 'minute',
+                number = ((-1 * btm) if apply_backtrack else 0), 
+                begin = begin,
+            )
+            if begin
+            else None
+        )
+        end_da = (
+            dateadd_str(
+                flavor = self.flavor,
+                datepart = 'minute',
+                number = 0,
+                begin = end,
+            )
+            if end
+            else None
+        )
 
     meta_def = (
         _simple_fetch_query(pipe) if (

@@ -7,6 +7,9 @@ Register or fetch Pipes from the API
 """
 
 from __future__ import annotations
+import time
+import json
+from io import StringIO
 from datetime import datetime
 from meerschaum.utils.debug import dprint
 from meerschaum.utils.warnings import warn, error
@@ -123,7 +126,6 @@ def fetch_pipes_keys(
     A list of tuples containing pipes' keys.
     """
     from meerschaum.config.static import STATIC_CONFIG
-    import json
     if connector_keys is None:
         connector_keys = []
     if metric_keys is None:
@@ -169,7 +171,6 @@ def sync_pipe(
     from meerschaum.utils.misc import json_serialize_datetime
     from meerschaum.config import get_config
     from meerschaum.utils.packages import attempt_import
-    import json, time
     begin = time.time()
     more_itertools = attempt_import('more_itertools')
     if df is None:
@@ -310,7 +311,6 @@ def get_pipe_data(
         **kw: Any
     ) -> Union[pandas.DataFrame, None]:
     """Fetch data from the API."""
-    import json
     r_url = pipe_r_url(pipe)
     chunks_list = []
     while True:
@@ -340,7 +340,7 @@ def get_pipe_data(
     from meerschaum.utils.dataframe import parse_df_datetimes
     pd = import_pandas()
     try:
-        df = pd.read_json(response.text)
+        df = pd.read_json(StringIO(response.text))
     except Exception as e:
         warn(f"Failed to parse response for {pipe}:\n{e}")
         return None
@@ -367,7 +367,6 @@ def get_backtrack_data(
         **kw: Any,
     ) -> pandas.DataFrame:
     """Get a Pipe's backtrack data from the API."""
-    import json
     r_url = pipe_r_url(pipe)
     try:
         response = self.get(
@@ -389,12 +388,12 @@ def get_backtrack_data(
         dprint(response.text)
     pd = import_pandas()
     try:
-        df = pd.read_json(response.text)
+        df = pd.read_json(StringIO(response.text))
     except Exception as e:
         warn(f"Failed to read response into a dataframe:\n{e}")
         return None
 
-    df = parse_df_datetimes(pd.read_json(response.text), debug=debug)
+    df = parse_df_datetimes(pd.read_json(StringIO(response.text)), debug=debug)
     return df
 
 def get_pipe_id(
@@ -438,7 +437,6 @@ def get_pipe_attributes(
     """
     r_url = pipe_r_url(pipe)
     response = self.get(r_url + '/attributes', debug=debug)
-    import json
     try:
         return json.loads(response.text)
     except Exception as e:
@@ -474,7 +472,6 @@ def get_sync_time(
     """
     from meerschaum.utils.misc import is_int
     from meerschaum.utils.warnings import warn
-    import datetime, json
     r_url = pipe_r_url(pipe)
     response = self.get(
         r_url + '/sync_time',
@@ -545,7 +542,6 @@ def create_metadata(
     """
     from meerschaum.utils.debug import dprint
     from meerschaum.config.static import STATIC_CONFIG
-    import json
     r_url = STATIC_CONFIG['api']['endpoints']['metadata']
     response = self.post(r_url, debug=debug)
     if debug:
@@ -590,7 +586,6 @@ def get_pipe_rowcount(
     The number of rows in the pipe's table, bound the given parameters.
     If the table does not exist, return 0.
     """
-    import json
     r_url = pipe_r_url(pipe)
     response = self.get(
         r_url + "/rowcount",

@@ -114,6 +114,22 @@
   Spin up long-running job with peace of mind now that logs are automatically rolled over, keeping five 500 KB files on disk at any moment (you can tweak these values with `mrsm edit config jobs`).
   To facilitate this, `meershaum.utils.daemon.RotatingFile` was added to provide a generic file-like object, complete with its own file descriptor.
 
+- **Starting existing jobs with `-d` will not throw an exception if the arguments match.**  
+  Similarly, running without any arguments other than `--name` with run the existing job. This matches the behavior of `start jobs`.
+
+- **Allow for colon-separated paths in `MRSM_PLUGINS_DIR`.**  
+  Just like `PATH` in `bash`, you may now specify your plugins' paths in a single variable, separated by colons. Unlike `bash`, however, a blank path will not interpreted as the current directory.
+
+  ```bash
+  export MRSM_PLUGINS_DIR='./plugins:/app/plugins'
+  ```
+
+**Other changes**
+
+- **Moved `print_options()` from `meercshaum.utils.misc` into `meerschaum.utils.formatting`.**  
+  This places `print_options()` next to `print_tuple` and `pprint`. A placeholder function is still present in `meerschaum.utils.misc` to preserve existing behavior.
+
+
 ## 1.7.x Releases
 
 This is the current release cycle, so stay tuned for future releases!

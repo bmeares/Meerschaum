@@ -11,51 +11,6 @@ from meerschaum.utils.typing import Callable, Any, Optional, Union, List, Dict, 
 from meerschaum.utils.packages import get_modules_from_package
 _custom_actions = []
 
-### build __all__ from other .py files in this package
-import sys
-modules = get_modules_from_package(
-    sys.modules[__name__],
-    names = False,
-)
-__all__ = ['actions', 'get_subactions', 'get_action', 'get_main_action_name', 'get_completer']
-
-### Build the actions dictionary by importing all
-### functions that do not begin with '_' from all submodules.
-from inspect import getmembers, isfunction
-actions = {}
-"This docstring will be replaced in __pdoc__ at the end of this file."
-
-for module in modules:
-    ### A couple important things happening here:
-    ### 1. Find all functions in all modules in `actions` package
-    ###     (skip functions that begin with '_')
-    ### 2. Add them as members to the Shell class
-    ###     - Original definition : meerschaum._internal.shell.Shell
-    ###     - New definition      : meerschaum._internal.Shell
-    ### 3. Populate the actions dictionary with function names and functions
-    ###
-    ### UPDATE:
-    ### Shell modifications have been deferred to get_shell in order to improve lazy loading.
-
-    actions.update(
-        dict(
-            [
-                ### __name__ and new function pointer
-                (ob[0], ob[1])
-                    for ob in getmembers(module)
-                        if isfunction(ob[1])
-                            ### check that the function belongs to the module
-                            and ob[0] == module.__name__.replace('_', '').split('.')[-1]
-                            ### skip functions that start with '_'
-                            and ob[0][0] != '_'
-            ]
-        )
-    )
-
-original_actions = actions.copy()
-from meerschaum._internal.entry import entry
-
-
 def get_subactions(
         action: Union[str, List[str]],
         _actions: Optional[Dict[str, Callable[[Any], Any]]] = None,
@@ -273,14 +228,108 @@ def choose_subaction(
     return options[parsed_choice](**kw)
 
 
-from meerschaum._internal.entry import get_shell
+def _get_subaction_names(action: str, globs: dict = None) -> List[str]:
+    """Use `meerschaum.actions.get_subactions()` instead."""
+    if globs is None:
+        import importlib
+        module = importlib.import_module(f'meerschaum.actions.{action}')
+        globs = vars(module)
+    subactions = []
+    for item in globs:
+        if f'_{action}' in item and 'complete' not in item.lstrip('_'):
+            subactions.append(globs[item])
+    return subactions
+
+
+def choices_docstring(action: str, globs : Optional[Dict[str, Any]] = None) -> str:
+    """
+    Append the an action's available options to the module docstring.
+    This function is to be placed at the bottom of each action module.
+
+    Parameters
+    ----------
+    action: str
+        The name of the action module (e.g. 'install').
+        
+    globs: Optional[Dict[str, Any]], default None
+        An optional dictionary of global variables.
+
+    Returns
+    -------
+    The generated docstring for the module.
+
+    Examples
+    --------
+    >>> from meerschaum.utils.misc import choices_docstring as _choices_docstring
+    >>> install.__doc__ += _choices_docstring('install')
+
+    """
+    options_str = f"\n    Options:\n        `{action} "
+    subactions = _get_subaction_names(action, globs=globs)
+    options_str += "["
+    sa_names = []
+    for sa in subactions:
+        try:
+            sa_names.append(sa.__name__[len(f"_{action}") + 1:])
+        except Exception as e:
+            print(e)
+            return ""
+    for sa_name in sorted(sa_names):
+        options_str += f"{sa_name}, "
+    options_str = options_str[:-2] + "]`"
+    return options_str
+
+### build __all__ from other .py files in this package
+import sys
+modules = get_modules_from_package(
+    sys.modules[__name__],
+    names = False,
+)
+__all__ = ['actions', 'get_subactions', 'get_action', 'get_main_action_name', 'get_completer']
+
+### Build the actions dictionary by importing all
+### functions that do not begin with '_' from all submodules.
+from inspect import getmembers, isfunction
+actions = {}
+"This docstring will be replaced in __pdoc__ at the end of this file."
+
+for module in modules:
+    ### A couple important things happening here:
+    ### 1. Find all functions in all modules in `actions` package
+    ###     (skip functions that begin with '_')
+    ### 2. Add them as members to the Shell class
+    ###     - Original definition : meerschaum._internal.shell.Shell
+    ###     - New definition      : meerschaum._internal.Shell
+    ### 3. Populate the actions dictionary with function names and functions
+    ###
+    ### UPDATE:
+    ### Shell modifications have been deferred to get_shell in order to improve lazy loading.
+
+    actions.update(
+        dict(
+            [
+                ### __name__ and new function pointer
+                (ob[0], ob[1])
+                    for ob in getmembers(module)
+                        if isfunction(ob[1])
+                            ### check that the function belongs to the module
+                            and ob[0] == module.__name__.replace('_', '').split('.')[-1]
+                            ### skip functions that start with '_'
+                            and ob[0][0] != '_'
+            ]
+        )
+    )
+
+original_actions = actions.copy()
+from meerschaum._internal.entry import entry, get_shell
 import meerschaum.plugins
-#  meerschaum.plugins.load_plugins()
 make_action = meerschaum.plugins.make_action
 
 ### Instruct pdoc to skip the `meerschaum.actions.plugins` subdirectory.
 __pdoc__ = {
-    'plugins' : False, 'arguments': True, 'shell': False,
+    'plugins': False,
+    'arguments': True,
+    'shell': False,
     'actions': (
         "Access functions of the standard Meerschaum actions.\n\n"
         + "Visit the [actions reference page](https://meerschaum.io/reference/actions/) "

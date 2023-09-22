@@ -65,6 +65,7 @@ def deduplicate(
     A `SuccessTuple` corresponding to whether all of the chunks were successfully deduplicated.
     """
     from meerschaum.utils.warnings import warn, info
+    from meerschaum.utils.misc import interval_str, items_str
     from meerschaum.utils.venv import Venv
     from meerschaum.connectors import get_connector_plugin
     from meerschaum.utils.pool import get_pool
@@ -74,6 +75,7 @@ def deduplicate(
             begin = begin,
             end = end,
             params = params,
+            bounded = bounded,
             debug = debug,
             **kwargs
         )
@@ -90,6 +92,7 @@ def deduplicate(
                 begin = begin,
                 end = end,
                 params = params,
+                bounded = bounded,
                 debug = debug,
                 **kwargs
             )
@@ -104,8 +107,18 @@ def deduplicate(
         begin = (
             bound_time
             if bound_time is not None
-            else self.get_sync_time(debug=debug)
+            else self.get_sync_time(newest=False, debug=debug)
         )
+    if bounded and end is None:
+        end = self.get_sync_time(newest=True, debug=debug)
+
+    if bounded and end is not None:
+        end += (
+            timedelta(minutes=1)
+            if isinstance(end, datetime)
+            else 1
+        )
+
     chunk_bounds = self.get_chunk_bounds(
         bounded = bounded,
         begin = begin,
@@ -115,6 +128,8 @@ def deduplicate(
     )
 
     indices = [col for col in self.columns.values() if col]
+    if not indices:
+        return False, f"Cannot deduplicate without index columns."
     dt_col = self.columns.get('datetime', None)
 
     def process_chunk_bounds(bounds) -> Tuple[
@@ -155,7 +170,15 @@ def deduplicate(
             return bounds, (True, f"{chunk_msg_header}\nChunk is empty, skipping...")
 
         chunk_indices = [ix for ix in indices if ix in full_chunk.columns]
-        full_chunk = full_chunk.drop_duplicates(subset=chunk_indices, keep='last')
+        if not chunk_indices:
+            return bounds, (False, f"None of {items_str(indices)} were present in chunk.")
+        try:
+            full_chunk = full_chunk.drop_duplicates(subset=chunk_indices, keep='last')
+        except Exception as e:
+            return (
+                bounds,
+                (False, f"Failed to deduplicate chunk on {items_str(chunk_indices)}:\n({e})")
+            )
 
         clear_success, clear_msg = self.clear(
             begin = chunk_begin,
@@ -192,19 +215,16 @@ def deduplicate(
             True, (
                 chunk_msg_header + "\n"
                 + chunk_msg_body + ("\n" if chunk_msg_body else '')
-                + f"Chunk succesfully deduplicated to {chunk_rowcount} rows."
+                + f"Deduplicated chunk from {existing_chunk_len} to {chunk_rowcount} rows."
             )
         )
 
-    _start = chunk_bounds[0][(0 if bounded else 1)]
-    _end = chunk_bounds[-1][(0 if not bounded else 1)]
-    message_header = f"{_start} - {_end}"
     info(
         f"Deduplicating {len(chunk_bounds)} chunk"
         + ('s' if len(chunk_bounds) != 1 else '')
         + f" ({'un' if not bounded else ''}bounded)"
-        + f" of size '{chunk_interval}'"
-        + f" from '{_start}' to '{_end}'..."
+        + f" of size '{interval_str(chunk_interval)}'"
+        + f" on {self}."
     )
     bounds_success_tuples = dict(pool.map(process_chunk_bounds, chunk_bounds))
     bounds_successes = {
@@ -223,11 +243,10 @@ def deduplicate(
         return (
             False,
             (
-                message_header + "\n"
-                + f"Failed to deduplicate {len(bounds_failures)} chunk"
+                f"Failed to deduplicate {len(bounds_failures)} chunk"
                 + ('s' if len(bounds_failures) != 1 else '')
-                + ":\n"
-                + "\n".join([msg for _, (_, msg) in bounds_failures.items()])
+                + ".\n"
+                + "\n".join([msg for _, (_, msg) in bounds_failures.items() if msg])
             )
         )
 
@@ -236,11 +255,10 @@ def deduplicate(
         return (
             True,
             (
-                message_header + "\n"
-                + f"Successfully deduplicated {len(bounds_successes)} chunk"
+                f"Successfully deduplicated {len(bounds_successes)} chunk"
                 + ('s' if len(bounds_successes) != 1 else '')
                 + ".\n"
-                + "\n".join([msg for _, (_, msg) in bounds_successes.items()])
+                + "\n".join([msg for _, (_, msg) in bounds_successes.items() if msg])
             ).rstrip('\n')
         )
 
@@ -262,21 +280,19 @@ def deduplicate(
         return (
             True,
             (
-                message_header + "\n"
-                + f"Successfully deduplicated {len(bounds_successes)} chunk"
+                f"Successfully deduplicated {len(bounds_successes)} chunk"
                 + ('s' if len(bounds_successes) != 1 else '')
-                + f" ({len(retry_bounds_successes)} retried):\n"
-                + "\n".join([msg for _, (_, msg) in bounds_successes.items()])
+                + f"({len(retry_bounds_successes)} retried):\n"
+                + "\n".join([msg for _, (_, msg) in bounds_successes.items() if msg])
             ).rstrip('\n')
         )
 
     return (
         False,
         (
-            message_header + "\n"
-            + f"Failed to deduplicate {len(bounds_failures)} chunk"
+            f"Failed to deduplicate {len(bounds_failures)} chunk"
             + ('s' if len(retry_bounds_failures) != 1 else '')
-            + ":\n"
-            + "\n".join([msg for _, (_, msg) in retry_bounds_failures.items()])
+            + ".\n"
+            + "\n".join([msg for _, (_, msg) in retry_bounds_failures.items() if msg])
         ).rstrip('\n')
     )
