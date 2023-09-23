@@ -92,5 +92,4 @@ def test_verify_backfill_inplace(flavor: str):
     success, msg = target_pipe.verify(debug=debug)
     new_source_rowcount = source_pipe.get_rowcount()
     new_target_rowcount = target_pipe.get_rowcount()
-    return source_pipe, target_pipe
     assert new_source_rowcount == new_target_rowcount

@@ -1328,16 +1328,6 @@ def sync_pipe_inplace(
         debug = debug,
     )
     metadef_name = sql_item_name('metadef', self.flavor)
-    if self.flavor in ('mssql',):
-        final_select_ix = metadef.lower().rfind('select')
-        def_name = metadef[len('WITH '):].split(' ', maxsplit=1)[0]
-        metadef = (
-            metadef[:final_select_ix].rstrip() + ',\n'
-            + f"{metadef_name} AS (\n"
-            + metadef[final_select_ix:]
-            + "\n)\n"
-        )
-
     pipe_name = sql_item_name(pipe.target, self.flavor)
 
     if not pipe.exists(debug=debug):

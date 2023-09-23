@@ -9,16 +9,34 @@
 - **Removed redundant `Pipe.sync_time` property.**  
   Use `pipe.get_sync_time()` instead.
 
-- **Removed `round_down` from `get_sync_time()` for instance connectors.**  
-  To avoid confusion, sync times are no longer truncated by default. `round_down` is still an optional keyword argument on `pipe.get_sync_time()`.
-
 - **Moved `choose_subaction()` into `meerschaum.actions`.**  
   This function is for internal use and as such should not affect any users.
 
-- **Replaced `pipe.parameters['chunk_time_interval']` with `pipe.parameters['chunk_minutes']`**  
+- **Replaced `pipe.parameters['chunk_time_interval']` with `pipe.parameters['verify']['chunk_minutes']`**  
   For better security and cohesiveness, the TimescaleDB `chunk_time_interval` value is now derived from the standard `chunk_minutes` value. This also means pipes with integer date axes will be created with a new default chunk interval of 1440 (was previously 100,000).
 
 **Features**
+
+- **Added `verify pipes` and `--verify`.**
+
+- **Added `deduplicate pipes` and `--deduplicate`.**  
+  Running `mrsm deduplicates pipes` or `mrsm sync pipes --deduplicate` will iterate over pipes' entire intervals, chunking at the configured chunk interval (see `pipe.get_chunk_interval()` below) and clearing + resyncing chunks with duplicate rows.
+
+  If your instance connector implements `deduplicate_pipe()` (e.g. `SQLConnector`), then this method will override the default `pipe.deduplicate()`.
+
+  ```python
+  pipe = mrsm.Pipe('demo', 'deduplicate', columns={'datetime': 'dt'})
+  docs = [
+      {'dt': '2023-01-01'},
+      {'dt': '2023-01-01'},
+  ]
+  pipe.sync(docs)
+  print(pipe.get_rowcount())
+  # 2
+  pipe.deduplicate()
+  print(pipe.get_rowcount())
+  # 1
+  ```
 
 - **Added `pyarrow` support.**  
   The dtypes enforcement system was overhauled to add support for `pyarrow` data types.
@@ -52,11 +70,7 @@
   # 0 2023-01-03   3
   ```
 
-- **Added `verify pipes` and `--verify`.**
-
-- **Added `deduplicate pipes` and `--deduplicate`.**
-
-- **Added `chunk_minutes` to `pipe.parameters`.**
+- **Added `chunk_minutes` to `pipe.parameters['verify']`.**
 
 - **Added `--chunk-minutes`, `--chunk-hours`, and `--chunk-days`.**
 
@@ -127,10 +141,53 @@
 - **Add `pipe.keys()`**  
   `pipe.keys()` returns the connector, metric, and location keys (i.e. `pipe.meta` without the `instance`).
 
+- **Pipes are now indexable.**  
+  Indexing a pipe directly is the same as accessing `pipe.attributes`:
+
+  ```python
+  pipe = mrsm.Pipe('a', 'b', columns={'foo': 'bar'})
+  print(pipe['connector'])
+  # 'a'
+  print(pipe['connector_keys'])
+  # 'a'
+  print(pipe['columns'])
+  # {'foo': 'bar'}
+  print(pipe['does_not_exist'])
+  # None
+  ```
+
 **Other changes**
 
-- **Moved `print_options()` from `meercshaum.utils.misc` into `meerschaum.utils.formatting`.**  
+- **Moved `print_options()` from `meerschaum.utils.misc` into `meerschaum.utils.formatting`.**  
   This places `print_options()` next to `print_tuple` and `pprint`. A placeholder function is still present in `meerschaum.utils.misc` to preserve existing behavior.
+
+- **Removed `round_down` from `get_sync_time()` for instance connectors.**  
+  To avoid confusion, sync times are no longer truncated by default. `round_down` is still an optional keyword argument on `pipe.get_sync_time()`.
+
+- **Moved `to_pandas_dtype()` from `meerschaum.utils.misc` into `meerschaum.utils.dtypes`.**
+
+- **Moved `filter_unseen()` from `meerschaum.utils.misc` into `meerschaum.utils.dataframe`.**
+
+- **Moved `add_missing_cols_to_df()` from `meerschaum.utils.misc` into `meerschaum.utils.dataframe`.**
+
+- **Moved `parse_df_datetimes()` from `meerschaum.utils.misc` into `meerschaum.utils.dataframe`.**
+
+- **Moved `df_from_literal()` from `meerschaum.utils.misc` into `meerschaum.utils.dataframe`.**
+
+- **Moved `get_json_cols()` from `meerschaum.utils.misc` into `meerschaum.utils.dataframe`.**
+
+- **Moved `get_unhashable_cols()` from `meerschaum.utils.misc` into `meerschaum.utils.dataframe`.**
+
+- **Moved `enforce_dtypes()` from `meerschaum.utils.misc` into `meerschaum.utils.dataframe`.**
+
+- **Moved `get_datetime_bound_from_df()` from `meerschaum.utils.misc` into `meerschaum.utils.dataframe`.**
+
+- **Moved `df_is_chunk_generator()` from `meerschaum.utils.misc` into `meerschaum.utils.dataframe`.**
+
+- **Moved `df_is_chunk_generator()` from `meerschaum.utils.misc` into `meerschaum.utils.dataframe`.**
+
+- **Moved `choices_docstring()` from `meerschaum.utils.misc` into `meerschaum.actions`.**
+
 
 
 ## 1.7.x Releases

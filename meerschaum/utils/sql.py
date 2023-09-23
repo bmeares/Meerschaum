@@ -878,10 +878,9 @@ def get_create_table_query(query: str, new_table: str, flavor: str) -> str:
             )
 
         create_table_query = f"""
-            WITH {create_cte_name} AS ({query})
             SELECT *
             INTO {new_table_name}
-            FROM {create_cte_name}
+            FROM ({query}) AS {create_cte_name}
         """
     elif flavor in (None,):
         create_table_query = f"""

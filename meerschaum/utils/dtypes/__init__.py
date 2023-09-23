@@ -29,6 +29,12 @@ def to_pandas_dtype(dtype: str) -> str:
     if known_dtype is not None:
         return known_dtype
 
+    ### NOTE: Kind of a hack, but if the first word of the given dtype is in all caps,
+    ### treat it as a SQL db type.
+    if dtype.split(' ')[0].isupper():
+        from meerschaum.utils.dtypes.sql import get_pd_type_from_db_type
+        return get_pd_type_from_db_type(dtype)
+
     import traceback
     from meerschaum.utils.packages import attempt_import
     from meerschaum.utils.warnings import warn
