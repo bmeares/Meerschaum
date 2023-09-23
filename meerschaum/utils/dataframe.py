@@ -161,6 +161,15 @@ def filter_unseen_df(
         if col not in dtypes:
             dtypes[col] = typ
     
+    cast_cols = True
+    try:
+        new_df = new_df.astype(dtypes)
+        cast_cols = False
+    except Exception as e:
+        warn(
+            f"Was not able to cast the new DataFrame to the given dtypes.\n{e}"
+        )
+
     for col, typ in {k: v for k, v in dtypes.items()}.items():
         if not are_dtypes_equal(new_df_dtypes.get(col, 'None'), old_df_dtypes.get(col, 'None')):
             ### Fallback to object if the types don't match.
@@ -170,15 +179,8 @@ def filter_unseen_df(
                 + "falling back to 'object'..."
             )
             dtypes[col] = 'object'
+            cast_cols = True
 
-    cast_cols = True
-    try:
-        new_df = new_df.astype(dtypes)
-        cast_cols = False
-    except Exception as e:
-        warn(
-            f"Was not able to cast the new DataFrame to the given dtypes.\n{e}"
-        )
     if cast_cols:
         for col, dtype in dtypes.items():
             if col in new_df.columns:

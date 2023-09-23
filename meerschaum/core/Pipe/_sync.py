@@ -26,6 +26,7 @@ from meerschaum.utils.typing import (
     Generator,
     Iterator,
 )
+from meerschaum.utils.warnings import warn, error
 
 class InferFetch:
     MRSM_INFER_FETCH: bool = True
@@ -116,7 +117,6 @@ def sync(
     A `SuccessTuple` of success (`bool`) and message (`str`).
     """
     from meerschaum.utils.debug import dprint, _checkpoint
-    from meerschaum.utils.warnings import warn, error
     from meerschaum.connectors import custom_types
     from meerschaum.plugins import Plugin
     from meerschaum.utils.formatting import get_console
@@ -443,7 +443,13 @@ def _determine_begin(
     if sync_time is None:
         return sync_time
     backtrack_interval = pipe.get_backtrack_interval(debug=debug)
-    return sync_time - backtrack_interval
+    if isinstance(sync_time, datetime) and isinstance(backtrack_interval, int):
+        backtrack_interval = timedelta(minutes=backtrack_interval)
+    try:
+        return sync_time - backtrack_interval
+    except Exception as e:
+        warn(f"Unable to substract backtrack interval {backtrack_interval} from {sync_time}.")
+        return sync_time
 
 
 def get_sync_time(
@@ -567,7 +573,6 @@ def filter_existing(
     -------
     A tuple of three pandas DataFrames: unseen, update, and delta.
     """
-    from meerschaum.utils.warnings import warn
     from meerschaum.utils.debug import dprint
     from meerschaum.utils.packages import attempt_import, import_pandas
     from meerschaum.utils.misc import (

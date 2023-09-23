@@ -9,15 +9,49 @@
 - **Removed redundant `Pipe.sync_time` property.**  
   Use `pipe.get_sync_time()` instead.
 
-- **Moved `choose_subaction()` into `meerschaum.actions`.**  
-  This function is for internal use and as such should not affect any users.
-
 - **Replaced `pipe.parameters['chunk_time_interval']` with `pipe.parameters['verify']['chunk_minutes']`**  
   For better security and cohesiveness, the TimescaleDB `chunk_time_interval` value is now derived from the standard `chunk_minutes` value. This also means pipes with integer date axes will be created with a new default chunk interval of 1440 (was previously 100,000).
 
+- **Moved `choose_subaction()` into `meerschaum.actions`.**  
+  This function is for internal use and as such should not affect any users.
+
 **Features**
 
-- **Added `verify pipes` and `--verify`.**
+- **Added `verify pipes` and `--verify`.**  
+  The command `mrsm verify pipes` or `mrsm sync pipes --verify` will resync pipes' chunks with different rowcounts to catch any backfilled data.
+
+  ```python
+  import meerschaum as mrsm
+  foo = mrsm.Pipe(
+      'foo', 'src',
+      target = 'foo',
+      columns = {'datetime': 'dt'},
+      instance = 'sql:local'
+  )
+  docs = [
+      {'dt': '2023-01-01'},
+      {'dt': '2023-01-02'},
+  ]
+  foo.sync(docs)
+
+  pipe = mrsm.Pipe(
+      'sql:local', 'verify', 
+      columns = {'datetime': 'dt'},
+      parameters = {
+          'query': f'SELECT * FROM "{foo.target}"'
+      },
+      instance = 'sql:local',
+  )
+  pipe.sync(docs) 
+
+  backfilled_docs = [
+      {'dt': '2022-12-30'},
+      {'dt': '2022-12-31'},
+  ]
+  foo.sync(backfilled_docs)
+  mrsm.pprint(pipe.verify())
+  assert foo.get_rowcount() == pipe.get_rowcount()
+  ```
 
 - **Added `deduplicate pipes` and `--deduplicate`.**  
   Running `mrsm deduplicates pipes` or `mrsm sync pipes --deduplicate` will iterate over pipes' entire intervals, chunking at the configured chunk interval (see `pipe.get_chunk_interval()` below) and clearing + resyncing chunks with duplicate rows.
@@ -25,7 +59,10 @@
   If your instance connector implements `deduplicate_pipe()` (e.g. `SQLConnector`), then this method will override the default `pipe.deduplicate()`.
 
   ```python
-  pipe = mrsm.Pipe('demo', 'deduplicate', columns={'datetime': 'dt'})
+  pipe = mrsm.Pipe(
+      'demo', 'deduplicate',
+      columns = {'datetime': 'dt'},
+  )
   docs = [
       {'dt': '2023-01-01'},
       {'dt': '2023-01-01'},
@@ -39,12 +76,13 @@
   ```
 
 - **Added `pyarrow` support.**  
-  The dtypes enforcement system was overhauled to add support for `pyarrow` data types.
+  The dtypes enforcement system was overhauled to add support for `pyarrow` data types. Note that `bool` columns must be explictly stated in `pipe.dtypes` to avoid coercion into integers.
 
 - **Added preliminary `dask` support.**  
   For example, you may now return Dask DataFrames in your plugins, pass into `pipe.sync()`, and `pipe.get_data()` now has the flag `as_dask`.
 
   ```python
+  import meerschaum as mrsm
   pipe = mrsm.Pipe('dask', 'demo', columns={'datetime': 'dt'})
   pipe.sync([
       {'dt': '2023-01-01', 'id': 1},
@@ -70,21 +108,73 @@
   # 0 2023-01-03   3
   ```
 
-- **Added `chunk_minutes` to `pipe.parameters['verify']`.**
+- **Added `chunk_minutes` to `pipe.parameters['verify']`.**  
+  Like `pipe.parameters['fetch']['backtrack_minutes']`, you may now specify the default chunk interval to use for verification syncs and iterating over the datetime axis.
 
-- **Added `--chunk-minutes`, `--chunk-hours`, and `--chunk-days`.**
+- **Added `--chunk-minutes`, `--chunk-hours`, and `--chunk-days`.**  
+  You may override a pipe's chunk interval during a verification sync with `--chunk-minutes` (or `--chunk-hours` or `--chunk-days`).
 
-- **Added `pipe.get_chunk_interval()`.**
+- **Added `pipe.get_chunk_interval()` and `pipe.get_backtrack_interval()`.**  
+  Return the `timedelta` (or `int` for integer datetimes) from `verify:chunk_minutes` and `fetch:backtrack_minutes`, respectively.
 
 - **Added `pipe.get_chunk_bounds()`.**  
-  Iterating over a pipe's interval 
-
-- **Added `--bounded`**
-
-- **Added `pipe.get_num_workers()`.**
-
-- **Added `meerschaum.utils.sql.get_db_version()` and `SQLConnector.db_version`.**
+  Return a list of `begin` and `end` values to use when iterating over a pipe's datetime axis.
   
+  ```python
+  from datetime import datetime
+  import meerschaum as mrsm
+  pipe = mrsm.Pipe(
+      'demo', 'chunk_bounds',
+      instance = 'sql:local',
+      columns = {'datetime': 'dt'},
+      parameters = {
+          'verify': {
+              'chunk_minutes': 1440,
+          }
+      },
+  )
+  pipe.sync([
+      {'dt': '2023-01-01'},
+      {'dt': '2023-01-02'},
+      {'dt': '2023-01-03'},
+      {'dt': '2023-01-04'},
+  ])
+
+  open_bounds = pipe.get_chunk_bounds()
+  for i, (begin, end) in enumerate(open_bounds):
+      print(f"Chunk {i}: ({begin}, {end})")
+
+  # Chunk 0: (None, 2023-01-01 00:00:00)
+  # Chunk 1: (2023-01-01 00:00:00, 2023-01-02 00:00:00)
+  # Chunk 2: (2023-01-02 00:00:00, 2023-01-03 00:00:00)
+  # Chunk 3: (2023-01-03 00:00:00, 2023-01-04 00:00:00)
+  # Chunk 4: (2023-01-04 00:00:00, None)
+
+  closed_bounds = pipe.get_chunk_bounds(bounded=True)
+  for i, (begin, end) in enumerate(closed_bounds):
+      print(f"Chunk {i}: ({begin}, {end})")
+
+  # Chunk 0: (2023-01-01 00:00:00, 2023-01-02 00:00:00)
+  # Chunk 1: (2023-01-02 00:00:00, 2023-01-03 00:00:00)
+  # Chunk 2: (2023-01-03 00:00:00, 2023-01-04 00:00:00)
+
+  sub_bounds = pipe.get_chunk_bounds(
+      begin = datetime(2023, 1, 1),
+      end = datetime(2023, 1, 3),
+  )
+  for i, (begin, end) in enumerate(sub_bounds):
+      print(f"Chunk {i}: ({begin}, {end})")
+
+  # Chunk 0: (2023-01-01 00:00:00, 2023-01-02 00:00:00)
+  # Chunk 1: (2023-01-02 00:00:00, 2023-01-03 00:00:00)
+  ```
+
+- **Added `--bounded` to verification syncs.**  
+  By default, `verify pipes` is unbounded, meaning it will sync values beyond the existing minimum and maximum datetime values. Running a verification sync with `--bounded` will bound the search to the existing datetime axis.
+
+- **Added `pipe.get_num_workers()`.**  
+  Return the number of concurrent threads to be used with this pipe (with respect to its instance connector's thread safety).
+
 - **Added `select_columns` and `omit_columns` to `pipe.get_data()`.**  
   In situations where not all columns are required, you can now either specify which columns you want to include (`select_columns`) and which columns to filter out (`omit_columns`). You may pass a list of columns or a single column, and the value `'*'` for `select_columns` will be treated as `None` (i.e. `SELECT *`).
 
@@ -113,23 +203,21 @@
   # 0  3  1
   ```
 
-- **Improve data type enforcement for SQL pipes.**  
-  A pipe's data types are now passed to `SQLConnector.read()` when fetching its data.
-
 - **Replace `daemoniker` with `python-daemon`.**  
   `python-daemon` is a well-maintained and well-behaved daemon process library. However, this migration removes Windows support for background jobs (which was never really fully supported already, so no harm there).
 
 - **Added `pause jobs`.**  
-  In addition to `start jobs` and `stop jobs`, `pause jobs` will suspend a job's daemon. Jobs may be resumed with `start jobs` (`Daemon.resume()`).
+  In addition to `start jobs` and `stop jobs`, the command `pause jobs` will suspend a job's daemon. Jobs may be resumed with `start jobs` (i.e. `Daemon.resume()`).
 
-- **Added job management to the UI.**
+- **Added job management to the UI.**  
+  Now that jobs and logs are much more robust, more job management features have been added to the web UI. Jobs may be started, stopped, paused, and resumed from the web console, and their logs are now available for download.
 
 - **Logs now roll over and are preserved on job restarts.**  
   Spin up long-running job with peace of mind now that logs are automatically rolled over, keeping five 500 KB files on disk at any moment (you can tweak these values with `mrsm edit config jobs`).
   To facilitate this, `meershaum.utils.daemon.RotatingFile` was added to provide a generic file-like object, complete with its own file descriptor.
 
 - **Starting existing jobs with `-d` will not throw an exception if the arguments match.**  
-  Similarly, running without any arguments other than `--name` with run the existing job. This matches the behavior of `start jobs`.
+  Similarly, running without any arguments other than `--name` will run the existing job. This matches the behavior of `start jobs`.
 
 - **Allow for colon-separated paths in `MRSM_PLUGINS_DIR`.**  
   Just like `PATH` in `bash`, you may now specify your plugins' paths in a single variable, separated by colons. Unlike `bash`, however, a blank path will not interpreted as the current directory.
@@ -140,6 +228,12 @@
 
 - **Add `pipe.keys()`**  
   `pipe.keys()` returns the connector, metric, and location keys (i.e. `pipe.meta` without the `instance`).
+
+  ```python
+  pipe = mrsm.Pipe('foo', 'bar')
+  print(pipe.keys())
+  # {'connector': 'foo', 'metric': 'bar', 'location': None}
+  ```
 
 - **Pipes are now indexable.**  
   Indexing a pipe directly is the same as accessing `pipe.attributes`:
@@ -158,8 +252,18 @@
 
 **Other changes**
 
+- **Improved data type enforcement for SQL pipes.**  
+  A pipe's data types are now passed to `SQLConnector.read()` when fetching its data.
+
+- **Added `meerschaum.utils.sql.get_db_version()` and `SQLConnector.db_version`.**
+  
 - **Moved `print_options()` from `meerschaum.utils.misc` into `meerschaum.utils.formatting`.**  
   This places `print_options()` next to `print_tuple` and `pprint`. A placeholder function is still present in `meerschaum.utils.misc` to preserve existing behavior.
+
+- **`mrsm.pprint()` will not pretty-print `SuccessTuples`.**
+
+- **Added `calm` to `print_tuple()`.**  
+  Printing a `SuccessTuple` with `calm=True` will use a more muted color scheme and emoji.
 
 - **Removed `round_down` from `get_sync_time()` for instance connectors.**  
   To avoid confusion, sync times are no longer truncated by default. `round_down` is still an optional keyword argument on `pipe.get_sync_time()`.
@@ -187,7 +291,6 @@
 - **Moved `df_is_chunk_generator()` from `meerschaum.utils.misc` into `meerschaum.utils.dataframe`.**
 
 - **Moved `choices_docstring()` from `meerschaum.utils.misc` into `meerschaum.actions`.**
-
 
 
 ## 1.7.x Releases
