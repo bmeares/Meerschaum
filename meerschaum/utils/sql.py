@@ -246,7 +246,8 @@ def dateadd_str(
     if 'int' in str(type(begin)).lower():
         return str(begin)
     if not begin:
-        return None
+        return ''
+
     _original_begin = begin
     begin_time = None
     ### Sanity check: make sure `begin` is a valid datetime before we inject anything.

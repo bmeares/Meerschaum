@@ -7,16 +7,15 @@ Implement the Connector fetch() method
 """
 
 from __future__ import annotations
+from datetime import datetime, timedelta
 import meerschaum as mrsm
 from meerschaum.utils.typing import Optional, Union, Callable, Any
-
-### NOTE: begin is set in pipe.sync().
 
 def fetch(
         self,
         pipe: meerschaum.Pipe,
-        begin: Union[datetime.datetime, str, None] = '',
-        end: Union[datetime.datetime, str, None] = None,
+        begin: Union[datetime, int, str, None] = '',
+        end: Union[datetime, int, str, None] = None,
         chunk_hook: Optional[Callable[[pd.DataFrame], Any]] = None,
         chunksize: Optional[int] = -1,
         workers: Optional[int] = None,
@@ -39,11 +38,11 @@ def fetch(
         - pipe.parameters['fetch']['backtrack_minutes']: Union[int, float]
             - How many minutes before `begin` to search for data (*optional*).
 
-    begin: Union[datetime.datetime, str, None], default None
+    begin: Union[datetime, int, str, None], default None
         Most recent datatime to search for data.
         If `backtrack_minutes` is provided, subtract `backtrack_minutes`.
 
-    end: Union[datetime.datetime, str, None], default None
+    end: Union[datetime, int, str, None], default None
         The latest datetime to search for data.
         If `end` is `None`, do not bound 
 
@@ -105,8 +104,8 @@ def get_pipe_metadef(
         self,
         pipe: meerschaum.Pipe,
         params: Optional[Dict[str, Any]] = None,
-        begin: Union[datetime.datetime, str, None] = '',
-        end: Union[datetime.datetime, str, None] = None,
+        begin: Union[datetime, int, str, None] = '',
+        end: Union[datetime, int, str, None] = None,
         debug: bool = False,
         **kw: Any
     ) -> Union[str, None]:
@@ -117,11 +116,11 @@ def get_pipe_metadef(
         Optional params dictionary to build the `WHERE` clause.
         See `meerschaum.utils.sql.build_where`.
 
-    begin: Union[datetime.datetime, str, None], default None
+    begin: Union[datetime, int, str, None], default None
         Most recent datatime to search for data.
         If `backtrack_minutes` is provided, subtract `backtrack_minutes`.
 
-    end: Union[datetime.datetime, str, None], default None
+    end: Union[datetime, int, str, None], default None
         The latest datetime to search for data.
         If `end` is `None`, do not bound 
 
@@ -129,7 +128,6 @@ def get_pipe_metadef(
         Verbosity toggle.
  
     """
-    import datetime
     from meerschaum.utils.debug import dprint
     from meerschaum.utils.warnings import warn, error
     from meerschaum.utils.sql import sql_item_name, dateadd_str, build_where
@@ -137,7 +135,6 @@ def get_pipe_metadef(
     from meerschaum.config import get_config
 
     definition = get_pipe_query(pipe)
-    btm = self.get_pipe_backtrack_minutes(pipe) 
 
     if not pipe.columns.get('datetime', None):
         _dt = pipe.guess_datetime()
@@ -169,6 +166,12 @@ def get_pipe_metadef(
         error("Cannot fetch with an ORDER clause in the definition")
 
     apply_backtrack = begin == ''
+    backtrack_interval = pipe.get_backtrack_interval(debug=debug)
+    btm = (
+        int(backtrack_interval.total_seconds() / 60)
+        if isinstance(backtrack_interval, timedelta)
+        else backtrack_interval
+    )
     begin = (
         pipe.get_sync_time(debug=debug)
         if begin == ''
@@ -288,30 +291,14 @@ def set_pipe_query(pipe: mrsm.Pipe, query: str) -> None:
     dict_to_set[key_to_set] = query
 
 
-@staticmethod
-def get_pipe_backtrack_minutes(pipe) -> Union[int, float]:
-    """
-    Return the first available value for the following parameter keys:
-    
-    - fetch, backtrack_minutes
-    - backtrack_minutes
-    """
-    if pipe.parameters.get('fetch', {}).get('backtrack_minutes', None):
-        btm = pipe.parameters['fetch']['backtrack_minutes']
-    elif pipe.parameters.get('backtrack_minutes', None):
-        btm = pipe.parameters['backtrack_minutes']
-    else:
-        btm = 0
-    return btm
-
-
 def _simple_fetch_query(pipe, debug: bool=False, **kw) -> str:
     """Build a fetch query from a pipe's definition."""
+    def_name = 'definition'
     definition = get_pipe_query(pipe)
     return (
-        f"WITH definition AS ({definition}) SELECT * FROM definition"
+        f"WITH {def_name} AS ({definition}) SELECT * FROM {def_name}"
         if pipe.connector.flavor not in ('mysql', 'mariadb')
-        else f"SELECT * FROM ({definition}) AS definition"
+        else f"SELECT * FROM ({definition}) AS {def_name}"
     )
 
 def _join_fetch_query(

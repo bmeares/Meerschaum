@@ -135,8 +135,6 @@ def sync(
         chunksize = None
         sync_chunks = False
 
-    ### TODO: Add flag for specifying syncing method.
-    begin = _determine_begin(self, begin, debug=debug)
     kw.update({
         'begin': begin,
         'end': end,
@@ -429,29 +427,6 @@ def sync(
     return True, f"Spawned asyncronous sync for {self}."
 
 
-def _determine_begin(
-        pipe: meerschaum.Pipe,
-        begin: Union[datetime, int, str] = '',
-        debug: bool = False,
-    ) -> Union[datetime, int, None]:
-    """
-    Apply the backtrack interval if `--begin` is not provided.
-    """
-    if begin != '':
-        return begin
-    sync_time = pipe.get_sync_time(debug=debug)
-    if sync_time is None:
-        return sync_time
-    backtrack_interval = pipe.get_backtrack_interval(debug=debug)
-    if isinstance(sync_time, datetime) and isinstance(backtrack_interval, int):
-        backtrack_interval = timedelta(minutes=backtrack_interval)
-    try:
-        return sync_time - backtrack_interval
-    except Exception as e:
-        warn(f"Unable to substract backtrack interval {backtrack_interval} from {sync_time}.")
-        return sync_time
-
-
 def get_sync_time(
         self,
         params: Optional[Dict[str, Any]] = None,
@@ -573,6 +548,7 @@ def filter_existing(
     -------
     A tuple of three pandas DataFrames: unseen, update, and delta.
     """
+    from meerschaum.utils.warnings import warn
     from meerschaum.utils.debug import dprint
     from meerschaum.utils.packages import attempt_import, import_pandas
     from meerschaum.utils.misc import (

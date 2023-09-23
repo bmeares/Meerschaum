@@ -9,6 +9,9 @@
 - **Removed redundant `Pipe.sync_time` property.**  
   Use `pipe.get_sync_time()` instead.
 
+- **Removed `SQLConnector.get_pipe_backtrack_minutes()`.**  
+  Use `pipe.get_backtrack_interval()` instead.
+
 - **Replaced `pipe.parameters['chunk_time_interval']` with `pipe.parameters['verify']['chunk_minutes']`**  
   For better security and cohesiveness, the TimescaleDB `chunk_time_interval` value is now derived from the standard `chunk_minutes` value. This also means pipes with integer date axes will be created with a new default chunk interval of 1440 (was previously 100,000).
 
@@ -251,6 +254,9 @@
   ```
 
 **Other changes**
+
+- **Fixed backtracking being incorrectly applied to `--begin`.**  
+  Application of the backtracking interval has been consolidated into `pipe.fetch()`.
 
 - **Improved data type enforcement for SQL pipes.**  
   A pipe's data types are now passed to `SQLConnector.read()` when fetching its data.

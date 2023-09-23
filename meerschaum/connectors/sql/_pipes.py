@@ -765,8 +765,8 @@ def get_pipe_data_query(
         pipe: Optional[mrsm.Pipe] = None,
         select_columns: Optional[List[str]] = None,
         omit_columns: Optional[List[str]] = None,
-        begin: Union[datetime, str, None] = None,
-        end: Union[datetime, str, None] = None,
+        begin: Union[datetime, int, str, None] = None,
+        end: Union[datetime, int, str, None] = None,
         params: Optional[Dict[str, Any]] = None,
         order: str = 'asc',
         limit: Optional[int] = None,
@@ -791,7 +791,7 @@ def get_pipe_data_query(
     omit_columns: Optional[List[str]], default None
         If provided, remove these columns from the selection.
 
-    begin: Union[datetime, str, None], default None
+    begin: Union[datetime, int, str, None], default None
         If provided, get rows newer than or equal to this value.
 
     end: Union[datetime, str, None], default None
@@ -809,10 +809,10 @@ def get_pipe_data_query(
         If specified, limit the number of rows retrieved to this value.
 
     begin_add_minutes: int, default 0
-        The number of minutes to add to the `begin` datetime (i.e. `DATEADD`.
+        The number of minutes to add to the `begin` datetime (i.e. `DATEADD`).
 
     end_add_minutes: int, default 0
-        The number of minutes to add to the `end` datetime (i.e. `DATEADD`.
+        The number of minutes to add to the `end` datetime (i.e. `DATEADD`).
 
     chunksize: Optional[int], default -1
         The size of dataframe chunks to load into memory.
@@ -842,6 +842,12 @@ def get_pipe_data_query(
     )
     if omit_columns:
         select_columns = [col for col in select_columns if col not in omit_columns]
+
+    if begin == '':
+        begin = pipe.get_sync_time(debug=debug)
+        backtrack_interval = pipe.get_backtrack_interval(debug=debug)
+        if begin is not None:
+            begin -= backtrack_interval
 
     cols_names = [sql_item_name(col, self.flavor) for col in select_columns]
     select_cols_str = (
