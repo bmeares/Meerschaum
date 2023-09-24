@@ -299,9 +299,7 @@ def parse_df_datetimes(
     if isinstance(df, pandas.DataFrame):
         pdf = df
     elif df_is_dask and isinstance(df, dask_dataframe.DataFrame):
-        pdf = df.partitions[0].compute()
-        if len(pdf) == 0:
-            pdf = df.partitions[1].compute()
+        pdf = get_first_valid_dask_partition(df)
     else:
         if debug:
             dprint(f"df is of type '{type(df)}'. Building {pd.DataFrame}...")
@@ -328,14 +326,14 @@ def parse_df_datetimes(
             else:
                 raise Exception("Can only parse dictionaries or lists of dictionaries with Dask.")
             pandas = attempt_import('pandas')
-            pdf = df.partitions[0].compute()
+            pdf = get_first_valid_dask_partition(df)
 
         else:
             df = pd.DataFrame(df).convert_dtypes(dtype_backend=dtype_backend)
             pdf = df
 
     ### skip parsing if DataFrame is empty
-    if len(df) == 0:
+    if len(pdf) == 0:
         if debug:
             dprint(f"df is empty. Returning original DataFrame without casting datetime columns...")
         return df
@@ -418,7 +416,7 @@ def get_unhashable_cols(df: 'pd.DataFrame') -> List[str]:
     if is_dask:
         from meerschaum.utils.packages import attempt_import
         pandas = attempt_import('pandas')
-        df = pandas.DataFrame(df.partitions[0])
+        df = pandas.DataFrame(get_first_valid_dask_partition(df))
     return [
         col for col, val in df.iloc[0].items()
         if not isinstance(val, Hashable)
@@ -440,7 +438,7 @@ def get_json_cols(df: 'pd.DataFrame') -> List[str]:
     """
     is_dask = 'dask' in df.__module__
     if is_dask:
-        df = df.partitions[0].compute()
+        df = get_first_valid_dask_partition(df)
     
     if len(df) == 0:
         return []
@@ -752,3 +750,18 @@ def df_from_literal(
 
     pd = import_pandas()
     return pd.DataFrame({dt_name: [now], val_name: [val]})
+
+
+def get_first_valid_dask_partition(ddf: 'dask.dataframe.DataFrame') -> Union['pd.DataFrame', None]:
+    """
+    Return the first valid Dask DataFrame partition (if possible).
+    """
+    pdf = None
+    for partition in ddf.partitions:
+        try:
+            pdf = partition.compute()
+        except Exception as e:
+            continue
+        if len(pdf) > 0:
+            return pdf
+    return ddf.compute()

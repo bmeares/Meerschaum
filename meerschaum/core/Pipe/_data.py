@@ -141,7 +141,7 @@ def get_data(
             )
             for (chunk_begin, chunk_end) in bounds
         ]
-        return dd.from_delayed(dask_chunks)
+        return dd.from_delayed(dask_chunks, meta=self.dtypes)
 
     if not self.exists(debug=debug):
         return None
@@ -175,14 +175,14 @@ def get_data(
 
     with Venv(get_connector_plugin(self.instance_connector)):
         df = self.instance_connector.get_pipe_data(
-                pipe = self,
-                select_columns = select_columns,
-                omit_columns = omit_columns,
-                begin = begin,
-                end = end,
-                params = params,
-                debug = debug,
-                **kw
+            pipe = self,
+            select_columns = select_columns,
+            omit_columns = omit_columns,
+            begin = begin,
+            end = end,
+            params = params,
+            debug = debug,
+            **kw
         )
         if df is None:
             return df

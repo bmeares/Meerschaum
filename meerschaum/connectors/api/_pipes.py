@@ -188,20 +188,21 @@ def sync_pipe(
         get_config('system', 'connectors', 'sql', 'chunksize') if chunksize == -1
         else chunksize
     ))
-    keys: list = list(df.keys())
+    keys: list = list(df.columns)
     chunks = []
     if hasattr(df, 'index'):
         df = df.reset_index(drop=True)
-        rowcount = len(df)
-        chunks = [df.iloc[i] for i in more_itertools.chunked(df.index, _chunksize)]
+        is_dask = 'dask' in df.__module__
+        chunks = (
+            (df.iloc[i] for i in more_itertools.chunked(df.index, _chunksize))
+            if not is_dask
+            else [partition.compute() for partition in df.partitions]
+        )
     elif isinstance(df, dict):
         ### `_chunks` is a dict of lists of dicts.
         ### e.g. {'a' : [ {'a':[1, 2]}, {'a':[3, 4]} ] }
         _chunks = {k: [] for k in keys}
-        rowcount = len(df[keys[0]])
         for k in keys:
-            if len(df[k]) != rowcount:
-                return False, "Arrays must all be the same length."
             chunk_iter = more_itertools.chunked(df[k], _chunksize)
             for l in chunk_iter:
                 _chunks[k].append({k: l})
@@ -214,17 +215,22 @@ def sync_pipe(
                 except IndexError:
                     chunks.append(c)
     elif isinstance(df, list):
-        chunks = [df[i] for i in more_itertools.chunked(df, _chunksize)]
-        rowcount = len(chunks)
+        chunks = (df[i] for i in more_itertools.chunked(df, _chunksize))
 
     ### Send columns in case the user has defined them locally.
     if pipe.columns:
         kw['columns'] = json.dumps(pipe.columns)
     r_url = pipe_r_url(pipe) + '/data'
 
+    rowcount = 0
+    num_success_chunks = 0
     for i, c in enumerate(chunks):
         if debug:
-            dprint(f"Posting chunk ({i + 1} / {len(chunks)}) to {r_url}...")
+            dprint(f"[{self}] Posting chunk {i} to {r_url}...")
+        if len(c) == 0:
+            if debug:
+                dprint(f"[{self}] Skipping empty chunk...")
+            continue
         json_str = get_json_str(c)
 
         try:
@@ -261,12 +267,13 @@ def sync_pipe(
         if not j[0]:
             return j
 
-    len_chunks = len(chunks)
+        rowcount += len(c)
+        num_success_chunks += 1
 
     success_tuple = True, (
         f"It took {round(time.time() - begin, 2)} seconds to sync {rowcount} row"
         + ('s' if rowcount != 1 else '')
-        + f" across {len_chunks} chunk" + ('s' if len_chunks != 1 else '') +
+        + f" across {num_success_chunks} chunk" + ('s' if num_success_chunks != 1 else '') +
         f" to {pipe}."
     )
     return success_tuple
@@ -335,13 +342,16 @@ def get_pipe_data(
         break
 
     from meerschaum.utils.packages import import_pandas
-    from meerschaum.utils.dataframe import parse_df_datetimes
+    from meerschaum.utils.dataframe import parse_df_datetimes, add_missing_cols_to_df
     pd = import_pandas()
     try:
         df = pd.read_json(StringIO(response.text))
     except Exception as e:
         warn(f"Failed to parse response for {pipe}:\n{e}")
         return None
+
+    if len(df.columns) == 0:
+        return add_missing_cols_to_df(df, pipe.dtypes)
 
     df = parse_df_datetimes(
         df,

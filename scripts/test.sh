@@ -98,7 +98,6 @@ $PYTHON_BIN -m pytest \
   --ignore=tests/data/ \
   --ignore=docs/ \
   --ff \
-  --full-trace \
   -v; rc="$?"
 
 ### Cleanup
