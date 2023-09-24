@@ -28,6 +28,7 @@ DB_TO_PD_DTYPES: Dict[str, Union[str, Dict[str, str]]] = {
     'BOOL': 'bool[pyarrow]',
     'BOOLEAN': 'bool[pyarrow]',
     'BOOLEAN()': 'bool[pyarrow]',
+    'TINYINT': 'bool[pyarrow]',
     'JSON': 'object',
     'JSONB': 'object',
     'substrings': {

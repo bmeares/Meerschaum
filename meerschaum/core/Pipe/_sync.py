@@ -551,12 +551,14 @@ def filter_existing(
     from meerschaum.utils.warnings import warn
     from meerschaum.utils.debug import dprint
     from meerschaum.utils.packages import attempt_import, import_pandas
-    from meerschaum.utils.misc import (
-        round_time,
+    from meerschaum.utils.misc import round_time
+    from meerschaum.utils.dataframe import (
         filter_unseen_df,
         add_missing_cols_to_df,
-        to_pandas_dtype,
         get_unhashable_cols,
+    )
+    from meerschaum.utils.dtypes import (
+        to_pandas_dtype,
     )
 
     pd = import_pandas()

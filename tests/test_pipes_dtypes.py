@@ -231,3 +231,109 @@ def test_no_indices_inferred_datetime_to_text(flavor: str):
     assert success, msg
     df = pipe.get_data()
     assert len(df) == len(docs)
+
+
+@pytest.mark.parametrize("flavor", get_flavors())
+def test_sync_bools(flavor: str):
+    """
+    Test that pipes are able to sync bools.
+    """
+    conn = conns[flavor]
+    pipe = mrsm.Pipe('test', 'bools', instance=conn)
+    _ = pipe.delete()
+    pipe = mrsm.Pipe(
+        'test', 'bools',
+        instance = conn,
+        columns = {'datetime': 'dt'},
+        dtypes = {'is_bool': 'bool'},
+    )
+    _ = pipe.drop()
+    docs = [
+        {'dt': '2023-01-01', 'is_bool': True},
+        {'dt': '2023-01-02', 'is_bool': False},
+    ]
+    success, msg = pipe.sync(docs, debug=False)
+    assert success, msg
+
+    df = pipe.get_data()
+    assert 'bool' in str(df.dtypes['is_bool'])
+
+    synced_docs = [
+        {
+            'dt': doc['dt'].strftime('%Y-%m-%d'),
+            'is_bool': doc['is_bool'],
+        }
+        for doc in df.to_dict(orient='records')
+    ]
+    assert synced_docs == docs
+
+    new_docs = [
+        {'dt': '2023-01-01', 'is_bool': False},
+        {'dt': '2023-01-02', 'is_bool': True},
+    ]
+    success, msg = pipe.sync(new_docs, debug=debug)
+    assert success, msg
+
+    df = pipe.get_data()
+    synced_docs = [
+        {
+            'dt': doc['dt'].strftime('%Y-%m-%d'),
+            'is_bool': doc['is_bool'],
+        }
+        for doc in df.to_dict(orient='records')
+    ]
+
+    assert synced_docs == new_docs
+
+
+@pytest.mark.parametrize("flavor", get_flavors())
+def test_sync_bools_inferred(flavor: str):
+    """
+    Test that pipes are able to sync bools.
+    """
+    conn = conns[flavor]
+    pipe = mrsm.Pipe('test', 'bools', instance=conn)
+    _ = pipe.delete()
+    pipe = mrsm.Pipe(
+        'test', 'bools',
+        instance = conn,
+        columns = {'datetime': 'dt'},
+    )
+    _ = pipe.drop()
+    docs = [
+        {'dt': '2023-01-01', 'is_bool': True},
+        {'dt': '2023-01-02', 'is_bool': False},
+    ]
+    success, msg = pipe.sync(docs, debug=False)
+    assert success, msg
+
+    df = pipe.get_data()
+    assert 'bool' in str(df.dtypes['is_bool'])
+
+    synced_docs = [
+        {
+            'dt': doc['dt'].strftime('%Y-%m-%d'),
+            'is_bool': doc['is_bool'],
+        }
+        for doc in df.to_dict(orient='records')
+    ]
+    assert synced_docs == docs
+
+    new_docs = [
+        {'dt': '2023-01-01', 'is_bool': False},
+        {'dt': '2023-01-02', 'is_bool': True},
+    ]
+    success, msg = pipe.sync(new_docs, debug=debug)
+    assert success, msg
+
+    df = pipe.get_data()
+    synced_docs = [
+        {
+            'dt': doc['dt'].strftime('%Y-%m-%d'),
+            'is_bool': doc['is_bool'],
+        }
+        for doc in df.to_dict(orient='records')
+    ]
+
+    assert synced_docs == new_docs
+

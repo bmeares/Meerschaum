@@ -2,4 +2,4 @@
 Specify the Meerschaum release version.
 """
 
-__version__ = "2.0.0rc12"
+__version__ = "2.0.0rc13"

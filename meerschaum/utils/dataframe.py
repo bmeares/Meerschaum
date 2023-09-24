@@ -118,7 +118,7 @@ def filter_unseen_df(
     from meerschaum.utils.packages import import_pandas, attempt_import
     from meerschaum.utils.dtypes import to_pandas_dtype, are_dtypes_equal
     pd = import_pandas(debug=debug)
-    is_dask = 'dask' in pd.__name__
+    is_dask = 'dask' in old_df.__module__
     if is_dask:
         pandas = attempt_import('pandas')
         NA = pandas.NA
@@ -173,6 +173,12 @@ def filter_unseen_df(
     for col, typ in {k: v for k, v in dtypes.items()}.items():
         if not are_dtypes_equal(new_df_dtypes.get(col, 'None'), old_df_dtypes.get(col, 'None')):
             ### Fallback to object if the types don't match.
+            import traceback
+            traceback.print_stack()
+            print(old_df)
+            print(f"{old_df.dtypes=}")
+            print(new_df)
+            print(f"{new_df.dtypes=}")
             warn(
                 f"Detected different types for '{col}' "
                 + f"({new_df_dtypes.get(col, None)} vs {old_df_dtypes.get(col, None)}), "

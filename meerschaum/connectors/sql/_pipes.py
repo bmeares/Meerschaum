@@ -2329,12 +2329,26 @@ def get_alter_columns_queries(
         col: get_pd_type_from_db_type(str(typ.type))
         for col, typ in table_obj.columns.items()
     }
-    altered_cols = [
-        col
+    pd_db_df_aliases = {
+        'int': 'bool',
+    }
+
+    altered_cols = {
+        col: (db_cols_types.get(col, 'object'), typ)
         for col, typ in df_cols_types.items()
-        if not are_dtypes_equal(typ.lower(), db_cols_types.get(col, 'object').lower())
+        if not are_dtypes_equal(typ, db_cols_types.get(col, 'object').lower())
         and not are_dtypes_equal(db_cols_types.get(col, 'object'), 'string')
-    ]
+    }
+
+    ### NOTE: Sometimes bools are coerced into ints.
+    altered_cols_to_ignore = set()
+    for col, (db_typ, df_typ) in altered_cols.items():
+        for db_alias, df_alias in pd_db_df_aliases.items():
+            if db_alias in db_typ.lower() and df_alias in df_typ.lower():
+                altered_cols_to_ignore.add(col)
+                continue
+    for col in altered_cols_to_ignore:
+        _ = altered_cols.pop(col, None)
     if not altered_cols:
         return []
 
