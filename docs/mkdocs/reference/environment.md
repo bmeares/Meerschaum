@@ -8,7 +8,7 @@ The command `mrsm show environment` will print out your current set `MRSM_` vari
 
 ## **`MRSM_ROOT_DIR`**
 
-By default, your root Meerschaum directory is located in `~/.config/meerschaum` (Windows: `%APPDATA%\Meerschaum`). This is similar to your base `pip` environment behaves: with `pip`, you isolate packages in virtual environments, and with Meerschaum, you can create an isolated environment by specifying an alternative root directory. This will recreate your configuration files and virtual environments as if you were running a clean installation.
+By default, your root Meerschaum directory is located in `~/.config/meerschaum` (Windows: `%APPDATA%\Meerschaum`). This is similar to how your base `pip` environment behaves: with `pip`, you isolate packages in virtual environments, and with Meerschaum, you can create an isolated environment by specifying an alternative root directory. This will recreate your configuration files and virtual environments as if you were running a clean installation.
 
 ```bash
 mkdir foo
@@ -23,18 +23,25 @@ Like `MRSM_ROOT_DIR`, `MRSM_PLUGINS_DIR` lets you isolate your plugins, e.g. if 
 ```bash
 mkdir plugins
 touch plugins/example.py
+
 MRSM_PLUGINS_DIR=plugins \
   mrsm show plugins
 ```
 
 ### Multiple Plugins Directories
 
-To allow you to group plugins together, Meerschaum supports a multiple plugins directories at once. Just set `MRSM_PLUGINS_DIR` to a JSON-encoded list of paths:
+To allow you to group plugins together, Meerschaum supports loading multiple plugins directories at once. Simply separate the paths with a colon like you would for `$PATH`:
+
+```bash
+export MRSM_PLUGINS_DIR='./plugins:/another/plugins/path'
+```
+
+You could also set `MRSM_PLUGINS_DIR` to a JSON-encoded list of paths:
 
 ```bash
 export MRSM_PLUGINS_DIR='[
     "./plugins",
-    "./plugins_2"
+    "/another/plugins/path"
 ]'
 ```
 

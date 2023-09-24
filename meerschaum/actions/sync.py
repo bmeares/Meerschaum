@@ -9,7 +9,8 @@ NOTE: `sync` required a SQL connection and is not intended for client use
 """
 
 from __future__ import annotations
-from meerschaum.utils.typing import SuccessTuple, Any, List, Optional, Tuple
+from datetime import timedelta
+from meerschaum.utils.typing import SuccessTuple, Any, List, Optional, Tuple, Union
 
 def sync(
         action: Optional[List[str]] = None,
@@ -28,11 +29,12 @@ def sync(
         - `--debug`
             - Print verbose messages.
     """
-    from meerschaum.utils.misc import choose_subaction
+    from meerschaum.actions import choose_subaction
     options = {
         'pipes': _sync_pipes,
     }
     return choose_subaction(action, options, **kw)
+
 
 def _pipes_lap(
         workers: Optional[int] = None,
@@ -40,6 +42,10 @@ def _pipes_lap(
         unblock: bool = False,
         force: bool = False,
         min_seconds: int = 1,
+        verify: bool = False,
+        deduplicate: bool = False,
+        bounded: Optional[bool] = None,
+        chunk_interval: Union[timedelta, int, None] = None,
         mrsm_instance: Optional[str] = None,
         timeout_seconds: Optional[int] = None,
         nopretty: bool = False,
@@ -74,9 +80,19 @@ def _pipes_lap(
         lazy = False,
     )
     all_kw = copy.deepcopy(kw)
-    all_kw.update({'workers': workers, 'debug': debug, 'unblock': unblock, 'force': force,
-        'min_seconds': min_seconds, 'timeout_seconds': timeout_seconds,
-        'mrsm_instance': mrsm_instance,})
+    all_kw.update({
+        'workers': workers,
+        'debug': debug,
+        'unblock': unblock,
+        'force': force,
+        'min_seconds': min_seconds,
+        'timeout_seconds': timeout_seconds,
+        'mrsm_instance': mrsm_instance,
+        'verify': verify,
+        'deduplicate': deduplicate,
+        'bounded': bounded,
+        'chunk_interval': chunk_interval,
+    })
     locks = {'remaining_count': Lock(), 'results_dict': Lock(), 'pipes_threads': Lock(),}
     pipes = get_pipes(
         as_list=True, method='registered', debug=debug, mrsm_instance=mrsm_instance, **kw
@@ -138,6 +154,7 @@ def _pipes_lap(
                 ) + msg + '\n'
                 print_tuple(
                     (success, msg),
+                    calm = True,
                     _progress = _progress,
                 )
             _checkpoint(_progress=_progress, _task=_task)
@@ -218,39 +235,17 @@ def _pipes_lap(
     pipes_queue.join()
     for worker_thread in worker_threads:
         worker_thread.join()
-    for pipe in pipes:
-        try:
-            if pipe.connector.type == 'plugin':
-                Plugin(pipe.connector.label).deactivate_venv(force=True, debug=debug)
-        except Exception as e:
-            pass
+    return results_dict
 
-    results = [results_dict[pipe] for pipe in pipes] if len(results_dict) == len(pipes) else None
-
-    if results is None:
-        warn(f"Failed to fetch results from syncing pipes.")
-        succeeded_pipes = []
-        failed_pipes = pipes
-        results_dict = {
-            p: (results_dict.get(p, (False, f"Could not fetch sync result for {p}.")))
-            for p in pipes
-        }
-    else:
-        ### Determine which pipes failed to sync.
-        try:
-            succeeded_pipes, failed_pipes = [], []
-            for pipe, result in results_dict.items():
-                (succeeded_pipes if result[0] else failed_pipes).append(pipe)
-        except TypeError:
-            succeeded_pipes = []
-            failed_pipes = [p for p in pipes]
-
-    return succeeded_pipes, failed_pipes, results_dict
 
 def _sync_pipes(
         loop: bool = False,
         min_seconds: int = 1,
         unblock: bool = False,
+        verify: bool = False,
+        deduplicate: bool = False,
+        bounded: Optional[bool] = None,
+        chunk_interval: Union[timedelta, int, None] = None,
         shell: bool = False,
         nopretty: bool = False,
         debug: bool = False,
@@ -274,7 +269,7 @@ def _sync_pipes(
     from meerschaum.utils.formatting import UNICODE
     from meerschaum.utils.formatting._shell import progress, live
     from meerschaum.utils.formatting._shell import clear_screen, flush_with_newlines
-    from meerschaum.utils.misc import print_options
+    from meerschaum.utils.formatting import print_pipes_results
     import contextlib
     import time
     import sys
@@ -285,7 +280,7 @@ def _sync_pipes(
     interrupt_warning_msg = "Syncing was interrupted due to a keyboard interrupt."
     cooldown = 2 * (min_seconds + 1)
     underline = '\u2015' if UNICODE else '-'
-    success = []
+    success_pipes, failure_pipes = [], []
     while run:
         _progress = progress() if shell else None
         cm = _progress if _progress is not None else contextlib.nullcontext()
@@ -293,15 +288,30 @@ def _sync_pipes(
         lap_begin = time.perf_counter()
 
         try:
+            results_dict = {}
             with cm:
-                success, fail, results_dict = _pipes_lap(
+                results_dict = _pipes_lap(
                     min_seconds = min_seconds,
                     _progress = _progress,
+                    verify = verify,
+                    deduplicate = deduplicate,
+                    bounded = bounded,
+                    chunk_interval = chunk_interval,
                     unblock = unblock,
                     debug = debug,
                     nopretty = nopretty,
                     **kw
                 )
+                success_pipes = [
+                    pipe
+                    for pipe, (_success, _msg) in results_dict.items()
+                    if _success
+                ]
+                failure_pipes = [
+                    pipe
+                    for pipe, (_success, _msg) in results_dict.items()
+                    if not _success
+                ]
         except Exception as e:
             import traceback
             traceback.print_exc()
@@ -309,8 +319,8 @@ def _sync_pipes(
                 f"Failed to sync all pipes. Waiting for {cooldown} seconds, then trying again.",
                 stack = False
             )
-            success, fail = None, None
             results_dict = {}
+            success_pipes, failure_pipes = None, None
             try:
                 time.sleep(cooldown)
             except KeyboardInterrupt:
@@ -322,70 +332,33 @@ def _sync_pipes(
         except KeyboardInterrupt:
             warn(interrupt_warning_msg, stack=False)
             loop, run = False, False
-            success, fail = None, None
         cooldown = 2 * (min_seconds + 1)
         lap_end = time.perf_counter()
         print()
 
-
-        def get_options_to_print(
-                pipes_list: List['meerschaum.Pipe'],
-                include_msg: bool = True
-            ) -> List[str]:
-            """
-            Format the output strings.
-            """
-            default_tuple = False, "No message returned."
-            options = []
-            for pipe in pipes_list:
-                result = results_dict.get(pipe, default_tuple)
-                if not isinstance(result, tuple):
-                    result = default_tuple
-
-                option = (
-                    str(pipe)
-                    + '\n'
-                    + ((underline * len(str(pipe))) if include_msg else '')
-                    + '\n'
-                    + (str(result[1]) if include_msg else '')
-                    + '\n\n'
-                ) if not nopretty else (
-                    json.dumps({
-                        'pipe': pipe.meta,
-                        'result': result,
-                    })
-                )
-                options.append(option)
-            
-            return options
-
-
-        if success is not None and not loop and shell and not nopretty:
+        if success_pipes is not None and not loop and shell and not nopretty:
             clear_screen(debug=debug)
 
-        if success is not None and len(success) > 0:
-            success_msg = "Successfully synced pipes:"
-            if unblock:
-                success_msg = "Successfully spawned threads for pipes:"
-            print_options(
-                get_options_to_print(success),
-                header = success_msg,
-                nopretty = nopretty,
-            )
-
-        if fail is not None and len(fail) > 0:
-            print_options(
-                get_options_to_print(fail),
-                header = 'Failed to sync pipes:',
+        success_msg = (
+            "Successfully spawned threads for pipes:"
+            if unblock
+            else f"Successfully synced pipes:"
+        )
+        fail_msg = f"Failed to sync pipes:"
+        if results_dict:
+            print_pipes_results(
+                results_dict,
+                success_header = success_msg,
+                failure_header = fail_msg,
                 nopretty = nopretty,
             )
 
         msg = (
             f"It took {round(lap_end - lap_begin, 2)} seconds to sync " +
-            f"{len(success) + len(fail)} pipe" +
-                ("s" if (len(success) + len(fail)) != 1 else "") + "\n" +
-            f"    ({len(success)} succeeded, {len(fail)} failed)."
-        ) if success is not None else "Syncing was aborted."
+            f"{len(success_pipes) + len(failure_pipes)} pipe" +
+                ("s" if (len(success_pipes) + len(failure_pipes)) != 1 else "") + "\n" +
+            f"    ({len(success_pipes)} succeeded, {len(failure_pipes)} failed)."
+        ) if success_pipes is not None else "Syncing was aborted."
         if min_seconds > 0 and loop:
             print()
             info(
@@ -399,7 +372,7 @@ def _sync_pipes(
                 loop, run = False, False
                 warn(interrupt_warning_msg, stack=False)
         run = loop
-    return (len(success) > 0 if success else False), msg
+    return (len(success_pipes) > 0 if success_pipes is not None else False), msg
 
 
 def _wrap_sync_pipe(
@@ -409,24 +382,34 @@ def _wrap_sync_pipe(
         debug: bool = False,
         min_seconds: int = 1,
         workers = None,
+        verify: bool = False,
+        deduplicate: bool = False,
+        bounded: Optional[bool] = None,
+        chunk_interval: Union[timedelta, int, None] = None,
         **kw
     ):
     """
     Wrapper function for handling exceptions.
     """
+    from meerschaum.connectors import get_connector_plugin
     from meerschaum.utils.venv import Venv
     try:
-        venv = getattr(pipe.connector, '_plugin', None)
-    except Exception as e:
-        venv = 'mrsm'
-    try:
-        with Venv(venv, debug=debug):
-            return_tuple = pipe.sync(
+        with Venv(get_connector_plugin(pipe.connector), debug=debug):
+            if not verify and not deduplicate:
+                sync_method = pipe.sync
+            elif not verify and deduplicate:
+                sync_method = pipe.deduplicate
+            else:
+                sync_method = pipe.verify
+                kw['deduplicate'] = deduplicate
+            return_tuple = sync_method(
                 blocking = (not unblock),
                 force = force,
                 debug = debug,
                 min_seconds = min_seconds,
                 workers = workers,
+                bounded = bounded,
+                chunk_interval = chunk_interval,
                 **{k: v for k, v in kw.items() if k != 'blocking'}
             )
     except Exception as e:
@@ -442,5 +425,5 @@ def _wrap_sync_pipe(
 ### NOTE: This must be the final statement of the module.
 ###       Any subactions added below these lines will not
 ###       be added to the `help` docstring.
-from meerschaum.utils.misc import choices_docstring as _choices_docstring
+from meerschaum.actions import choices_docstring as _choices_docstring
 sync.__doc__ += _choices_docstring('sync')

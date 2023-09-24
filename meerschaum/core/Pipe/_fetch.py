@@ -7,7 +7,9 @@ Functions for fetching new data into the Pipe
 """
 
 from __future__ import annotations
+from datetime import timedelta, datetime
 from meerschaum.utils.typing import Optional, Any
+from meerschaum.config import get_config
 
 def fetch(
         self,
@@ -84,17 +86,60 @@ def fetch(
 
     df = self.connector.fetch(
         self,
-        begin = begin,
+        begin = _determine_begin(self, begin, debug=debug),
         end = end,
         chunk_hook = _chunk_hook,
         debug = debug,
         **kw
     )
-    if (
-        self.connector.type == 'plugin'
-        or
-        self.connector.type in custom_types
-    ):
-        connector_plugin.deactivate_venv(debug=debug)
-
     return df
+
+
+def get_backtrack_interval(self, debug: bool = False) -> Union[timedelta, int]:
+    """
+    Get the chunk interval to use for this pipe.
+
+    Returns
+    -------
+    The backtrack interval (`timedelta` or `int`) to use with this pipe's `datetime` axis.
+    """
+    default_backtrack_minutes = get_config('pipes', 'parameters', 'fetch', 'backtrack_minutes')
+    configured_backtrack_minutes = self.parameters.get('fetch', {}).get('backtrack_minutes', None)
+    backtrack_minutes = (
+        configured_backtrack_minutes
+        if configured_backtrack_minutes is not None
+        else default_backtrack_minutes
+    )
+
+    dt_col = self.columns.get('datetime', None)
+    if dt_col is None:
+        return timedelta(minutes=backtrack_minutes)
+
+    dt_dtype = self.dtypes.get(dt_col, 'datetime64[ns]')
+    if 'datetime' in dt_dtype.lower():
+        return timedelta(minutes=backtrack_minutes)
+
+    return backtrack_minutes
+
+
+def _determine_begin(
+        pipe: meerschaum.Pipe,
+        begin: Union[datetime, int, str] = '',
+        debug: bool = False,
+    ) -> Union[datetime, int, None]:
+    """
+    Apply the backtrack interval if `--begin` is not provided.
+    """
+    if begin != '':
+        return begin
+    sync_time = pipe.get_sync_time(debug=debug)
+    if sync_time is None:
+        return sync_time
+    backtrack_interval = pipe.get_backtrack_interval(debug=debug)
+    if isinstance(sync_time, datetime) and isinstance(backtrack_interval, int):
+        backtrack_interval = timedelta(minutes=backtrack_interval)
+    try:
+        return sync_time - backtrack_interval
+    except Exception as e:
+        warn(f"Unable to substract backtrack interval {backtrack_interval} from {sync_time}.")
+        return sync_time

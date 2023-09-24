@@ -48,21 +48,37 @@ if ENVIRONMENT_PLUGINS_DIR in os.environ:
                 Path(path).resolve()
                 for path in json.loads(os.environ[ENVIRONMENT_PLUGINS_DIR])
             ] if os.environ[ENVIRONMENT_PLUGINS_DIR].lstrip().startswith('[')
-            else [Path(os.environ[ENVIRONMENT_PLUGINS_DIR]).resolve()]
+            else [
+                Path(path_str).resolve()
+                for path_str in os.environ[ENVIRONMENT_PLUGINS_DIR].split(':')
+                if path_str
+            ]
         )
     except Exception as e:
         PLUGINS_DIR_PATHS = []
 
     if not PLUGINS_DIR_PATHS:
         print(
-            "Invalid plugins directories set for " +
-            f"environment variable '{ENVIRONMENT_PLUGINS_DIR}'.\n" +
-            f"Please enter a valid path or JSON-encoded paths for {ENVIRONMENT_PLUGINS_DIR}.",
-            file = sys.stderr,
+            "Invalid plugins directories set for "
+            f"environment variable '{ENVIRONMENT_PLUGINS_DIR}'.\n\n"
+            f"Set this to a colon-separated path string:\n\n"
+            f"`export {ENVIRONMENT_PLUGINS_DIR}=./plugins:/another/path/to/plugins`\n\n"
+            "or a JSON-encoded path list:\n\n"
+            f"`export {ENVIRONMENT_PLUGINS_DIR}=" + "'[\"./plugins\", \"/another/path/to/plugins\"]'`"
+            f"",
         )
         sys.exit(1)
 else:
     PLUGINS_DIR_PATHS = [_ROOT_DIR_PATH / 'plugins']
+
+### Remove duplicate plugins paths.
+_seen_plugins_paths, _plugins_paths_to_remove = set(), set()
+for _plugin_path in PLUGINS_DIR_PATHS:
+    if _plugin_path in _seen_plugins_paths:
+        _plugins_paths_to_remove.add(_plugin_path)
+    _seen_plugins_paths.add(_plugin_path)
+for _plugin_path in _plugins_paths_to_remove:
+    PLUGINS_DIR_PATHS.remove(_plugin_path)
 
 
 paths = {

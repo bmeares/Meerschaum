@@ -12,6 +12,8 @@ from meerschaum.utils.typing import SuccessTuple, List, Optional, Callable, Any,
 from meerschaum.config._paths import DAEMON_RESOURCES_PATH
 from meerschaum.utils.daemon.Daemon import Daemon
 from meerschaum.utils.daemon.Log import Log
+from meerschaum.utils.daemon.RotatingFile import RotatingFile
+
 
 def daemon_entry(sysargs: Optional[List[str]] = None) -> SuccessTuple:
     """Parse sysargs and execute a Meerschaum action as a daemon.
@@ -26,7 +28,7 @@ def daemon_entry(sysargs: Optional[List[str]] = None) -> SuccessTuple:
     A SuccessTuple.
     """
     from meerschaum._internal.entry import entry
-    _args = None
+    _args = {}
     if '--name' in sysargs or '--job-name' in sysargs:
         from meerschaum._internal.arguments._parse_arguments import parse_arguments
         _args = parse_arguments(sysargs)
@@ -35,6 +37,38 @@ def daemon_entry(sysargs: Optional[List[str]] = None) -> SuccessTuple:
         label = shlex.join(filtered_sysargs) if sysargs else None
     except Exception as e:
         label = ' '.join(filtered_sysargs) if sysargs else None
+
+    name = _args.get('name', None)
+    daemon = None
+    if name:
+        try:
+            daemon = Daemon(daemon_id=name)
+        except Exception as e:
+            daemon = None
+
+    if daemon is not None:
+        existing_sysargs = daemon.properties['target']['args'][0]
+        existing_kwargs = parse_arguments(existing_sysargs)
+
+        ### Remove sysargs because flags are aliased.
+        _ = _args.pop('daemon', None)
+        _ = _args.pop('sysargs', None)
+        _ = _args.pop('filtered_sysargs', None)
+        debug = _args.pop('debug', None)
+        _args['sub_args'] = sorted(_args.get('sub_args', []))
+        _ = existing_kwargs.pop('daemon', None)
+        _ = existing_kwargs.pop('sysargs', None)
+        _ = existing_kwargs.pop('filtered_sysargs', None)
+        _ = existing_kwargs.pop('debug', None)
+        existing_kwargs['sub_args'] = sorted(existing_kwargs.get('sub_args', []))
+
+        ### Only run if the kwargs equal or no actions are provided.
+        if existing_kwargs == _args or not _args.get('action', []):
+            return daemon.run(
+                debug = debug,
+                allow_dirty_run = True,
+            )
+
     success_tuple = run_daemon(
         entry,
         filtered_sysargs,
@@ -46,17 +80,19 @@ def daemon_entry(sysargs: Optional[List[str]] = None) -> SuccessTuple:
         success_tuple = False, str(success_tuple)
     return success_tuple
 
+
 def daemon_action(**kw) -> SuccessTuple:
     """Execute a Meerschaum action as a daemon."""
     from meerschaum.utils.packages import run_python_package
     from meerschaum.utils.threading import Thread
     from meerschaum._internal.arguments._parse_arguments import parse_dict_to_sysargs
-    from meerschaum.actions import actions
+    from meerschaum.actions import get_action
 
     kw['daemon'] = True
     kw['shell'] = False
 
-    if kw.get('action', None) and kw.get('action')[0] not in actions:
+    action = kw.get('action', None)
+    if action and get_action(action) is None:
         if not kw.get('allow_shell_job') and not kw.get('force'):
             return False, (
                 f"Action '{kw.get('action')[0]}' isn't recognized.\n\n"
@@ -92,37 +128,60 @@ def run_daemon(
         allow_dirty_run = allow_dirty_run,
     )
 
+
 def get_daemons() -> List[Daemon]:
-    """ """
+    """
+    Return all existing Daemons.
+    """
     return [Daemon(daemon_id=d_id) for d_id in get_daemon_ids()]
 
-def get_daemon_ids() -> List[str]:
-    """ """
-    return os.listdir(DAEMON_RESOURCES_PATH)
 
-def get_running_daemons(daemons : Optional[List[Daemon]] = None) -> List[Daemon]:
+def get_daemon_ids() -> List[str]:
+    """
+    Return the IDs of all daemons on disk.
+    """
+    return sorted(os.listdir(DAEMON_RESOURCES_PATH))
+
+
+def get_running_daemons(daemons: Optional[List[Daemon]] = None) -> List[Daemon]:
     """
     Return a list of currently running daemons.
     """
     if daemons is None:
         daemons = get_daemons()
     return [
-        d for d in daemons if d.pid_path.exists()
+        d
+        for d in daemons
+        if d.status == 'running'
     ]
 
-def get_stopped_daemons(
-        daemons : Optional[List[Daemon]] = None,
-        running_daemons : Optional[List[Daemon]] = None,
-    ) -> List[Daemon]:
+
+def get_paused_daemons(daemons: Optional[List[Daemon]] = None) -> List[Daemon]:
+    """
+    Return a list of active but paused daemons.
+    """
+    if daemons is None:
+        daemons = get_daemons()
+    return [
+        d
+        for d in daemons
+        if d.status == 'paused'
+    ]
+
+
+def get_stopped_daemons(daemons: Optional[List[Daemon]] = None) -> List[Daemon]:
     """
     Return a list of stopped daemons.
     """
     if daemons is None:
         daemons = get_daemons()
-    if running_daemons is None:
-        running_daemons = get_running_daemons(daemons)
 
-    return [d for d in daemons if d not in running_daemons]
+    return [
+        d
+        for d in daemons
+        if d.status == 'stopped'
+    ]
+
 
 def get_filtered_daemons(
         filter_list: Optional[List[str]] = None,

@@ -2,7 +2,8 @@
 # -*- coding: utf-8 -*-
 # vim:fenc=utf-8
 
-from typing import Dict
+import os
+from typing import Dict, List
 import pathlib
 from meerschaum import get_connector
 from meerschaum.config._paths import ROOT_DIR_PATH
@@ -26,9 +27,6 @@ conns = {
         flavor='mssql', username='sa', password='supersecureSECRETPASSWORD123!',
         database='master', port=1439, host='localhost',
     ),
-    #  'cockroachdb': get_connector('sql', 'test_cockroachdb',
-        #  flavor='cockroachdb', host='localhost', port=26259,
-    #  ),
     'oracle': get_connector('sql', 'test_oracle',
         flavor='oracle', host='localhost', database='xe', username='system', password='oracle',
         port=1529,
@@ -38,7 +36,6 @@ conns = {
         flavor='sqlite',
     ),
     'duckdb': get_connector('sql', 'test_duckdb',
-        #  database=str(data_path / 'test_duckdb.db'),
         database=str(data_path / 'test_duck.db'),
         flavor='duckdb',
     ),
@@ -109,3 +106,13 @@ def get_dtypes(debug: bool = False) -> Dict[str, Dict[str, 'sqlalchemy.types.Typ
             result_dtypes[dtype][flavor] = str(table_obj.columns['a'].type)
 
     return result_dtypes
+
+
+def get_flavors() -> List[str]:
+    """
+    Get the flavors against which to test in this current environment.
+    If `MRSM_TEST_FLAVORS` is set, split on commas and return the value.
+    Otherwise return all possible flavors.
+    """
+    flavors_str = os.environ.get('MRSM_TEST_FLAVORS', ','.join(list(conns.keys())))
+    return sorted(flavors_str.split(','))

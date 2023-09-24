@@ -7,6 +7,7 @@ Functions for interacting with the user.
 """
 
 from __future__ import annotations
+import os
 from meerschaum.utils.typing import Any, Union, Optional, Tuple, List
 
 def prompt(
@@ -60,6 +61,7 @@ def prompt(
     from meerschaum.utils.formatting import colored, ANSI, CHARSET, highlight_pipes, fill_ansi
     from meerschaum.config import get_config
     from meerschaum.config.static import _static_config
+    noask = check_noask(noask)
     if not noask:
         prompt_toolkit = attempt_import('prompt_toolkit')
     question_config = get_config('formatting', 'question', patch=True)
@@ -162,7 +164,7 @@ def yes_no(
     from meerschaum.utils.packages import attempt_import
 
     default = options[0] if yes else default
-    noask = yes or noask
+    noask = yes or check_noask(noask)
 
     ending = f" {wrappers[0]}" + "/".join(
         [
@@ -241,6 +243,7 @@ def choose(
     """
     from meerschaum.utils.warnings import warn as _warn
     from meerschaum.utils.packages import attempt_import
+    noask = check_noask(noask)
 
     ### Handle empty choices.
     if len(choices) == 0:
@@ -497,3 +500,17 @@ def get_email(username: Optional[str] = None, allow_omit: bool = True, **kw: Any
         if (allow_omit and email == '') or is_valid_email(email):
             return email
         warn(f"Invalid email! Please try again.", stack=False)
+
+
+def check_noask(noask: bool = False) -> bool:
+    """
+    Flip `noask` to `True` if `MRSM_NOASK` is set.
+    """
+    from meerschaum.config.static import STATIC_CONFIG
+    NOASK = STATIC_CONFIG['environment']['noask']
+    if noask:
+        return True
+    return (
+        os.environ.get(NOASK, 'false').lower()
+        in ('1', 'true')
+    )

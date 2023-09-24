@@ -62,24 +62,24 @@ def test_build_where(params: Dict[str, Any], expected_subqueries: List[str]):
 @pytest.mark.parametrize(
     'db_type,pd_type',
     [
-        ('TEXT', 'object'),
+        ('TEXT', 'string[pyarrow]'),
         ('DATETIME', 'datetime64[ns]'),
-        ('NVARCHAR(2000)', 'object'),
+        ('NVARCHAR(2000)', 'string[pyarrow]'),
         ('JSON', 'object'),
         ('DATE', 'datetime64[ns]'),
         ('TIMESTAMP', 'datetime64[ns]'),
-        ('BOOL', 'bool'),
-        ('BOOLEAN', 'bool'),
-        ('FLOAT', 'float64'),
-        ('DOUBLE', 'float64'),
+        ('BOOL', 'bool[pyarrow]'),
+        ('BOOLEAN', 'bool[pyarrow]'),
+        ('FLOAT', 'float64[pyarrow]'),
+        ('DOUBLE', 'float64[pyarrow]'),
         ('TIMESTAMPTZ', 'datetime64[ns, UTC]'),
         ('TIMESTAMP WITH TIMEZONE', 'datetime64[ns, UTC]'),
-        ('CLOB', 'object'),
-        ('NUMBER', 'float64'),
-        ('INT', 'Int64'),
-        ('BIGINT', 'Int64'),
-        ('VARCHAR', 'object'),
-        ('CHAR', 'object'),
+        ('CLOB', 'string[pyarrow]'),
+        ('NUMBER', 'float64[pyarrow]'),
+        ('INT', 'int64[pyarrow]'),
+        ('BIGINT', 'int64[pyarrow]'),
+        ('VARCHAR', 'string[pyarrow]'),
+        ('CHAR', 'string[pyarrow]'),
         ('not a type', 'object'),
     ]
 )
@@ -87,4 +87,5 @@ def test_get_pd_type(db_type: str, pd_type: str):
     """
     Verify that various database types are mapped to Pandas types.
     """
-    assert get_pd_type(db_type) == pd_type
+    from meerschaum.utils.dtypes import are_dtypes_equal
+    assert are_dtypes_equal(get_pd_type(db_type), pd_type)

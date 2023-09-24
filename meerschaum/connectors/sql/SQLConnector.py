@@ -27,7 +27,7 @@ class SQLConnector(Connector):
     from ._create_engine import flavor_configs, create_engine
     from ._sql import read, value, exec, execute, to_sql, exec_queries
     from meerschaum.utils.sql import test_connection
-    from ._fetch import fetch, get_pipe_metadef, get_pipe_backtrack_minutes
+    from ._fetch import fetch, get_pipe_metadef
     from ._cli import cli
     from ._pipes import (
         fetch_pipes_keys,
@@ -51,6 +51,7 @@ class SQLConnector(Connector):
         get_pipe_rowcount,
         drop_pipe,
         clear_pipe,
+        deduplicate_pipe,
         get_pipe_table,
         get_pipe_columns_types,
         get_to_sql_dtype,
@@ -121,11 +122,19 @@ class SQLConnector(Connector):
             uri = kw['uri']
             if uri.startswith('postgres://'):
                 uri = uri.replace('postgres://', 'postgresql://', 1)
+            if uri.startswith('timescaledb://'):
+                uri = uri.replace('timescaledb://', 'postgresql://', 1)
+                flavor = 'timescaledb'
             kw['uri'] = uri
             from_uri_params = self.from_uri(kw['uri'], as_dict=True)
             label = label or from_uri_params.get('label', None)
-            from_uri_params.pop('label', None)
+            _ = from_uri_params.pop('label', None)
+
+            ### Sometimes the flavor may be provided with a URI.
             kw.update(from_uri_params)
+            if flavor:
+                kw['flavor'] = flavor
+
 
         ### set __dict__ in base class
         super().__init__(
@@ -272,6 +281,21 @@ class SQLConnector(Connector):
                 from meerschaum.utils.warnings import warn
                 self._db = None
         return self._db
+
+
+    @property
+    def db_version(self) -> Union[str, None]:
+        """
+        Return the database version.
+        """
+        _db_version = self.__dict__.get('_db_version', None)
+        if _db_version is not None:
+            return _db_version
+
+        from meerschaum.utils.sql import get_db_version
+        self._db_version = get_db_version(self)
+        return self._db_version
+
 
     def __getstate__(self):
         return self.__dict__

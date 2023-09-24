@@ -36,10 +36,13 @@ a {
 
 }
 .running-job {
-  color: green;
+  color: limegreen;
+}
+.paused-job {
+  color: yellow;
 }
 .stopped-job {
-  color: red;
+  color: tomato;
 }
 .plugin-description {
   border: 0px solid transparent !important;

@@ -20,7 +20,7 @@ def delete(
         `delete {config, pipes, plugins, users, connectors, jobs}`
 
     """
-    from meerschaum.utils.misc import choose_subaction
+    from meerschaum.actions import choose_subaction
     from meerschaum.utils.debug import dprint
     options = {
         'config'     : _delete_config, 
@@ -31,6 +31,7 @@ def delete(
         'jobs'       : _delete_jobs,
     }
     return choose_subaction(action, options, **kw)
+
 
 def _complete_delete(
         action: Optional[List[str]] = None,
@@ -372,13 +373,14 @@ def _complete_delete_connectors(
         search_term = action[-1]
     return get_connector_labels(*types, search_term=search_term)
 
+
 def _delete_jobs(
-        action : Optional[List[str]] = None,
-        noask : bool = False,
-        nopretty : bool = False,
-        force : bool = False,
-        yes : bool = False,
-        debug : bool = False,
+        action: Optional[List[str]] = None,
+        noask: bool = False,
+        nopretty: bool = False,
+        force: bool = False,
+        yes: bool = False,
+        debug: bool = False,
         **kw
     ) -> SuccessTuple:
     """
@@ -388,7 +390,7 @@ def _delete_jobs(
 
     """
     from meerschaum.utils.daemon import (
-        Daemon, get_running_daemons, get_stopped_daemons, get_filtered_daemons,
+        Daemon, get_running_daemons, get_stopped_daemons, get_filtered_daemons, get_paused_daemons
     )
     from meerschaum.utils.prompt import yes_no
     from meerschaum.utils.formatting._jobs import pprint_jobs
@@ -398,7 +400,8 @@ def _delete_jobs(
     from meerschaum.actions import actions
     daemons = get_filtered_daemons(action, warn=(not nopretty))
     if not daemons:
-        return False, "No jobs to delete."
+        return True, "No jobs to delete; nothing to do."
+
     _delete_all_jobs = False
     if not action:
         if not force:
@@ -410,32 +413,35 @@ def _delete_jobs(
                 return False, "No jobs were deleted."
             _delete_all_jobs = True
     _running_daemons = get_running_daemons(daemons)
-    _stopped_daemons = get_stopped_daemons(daemons, _running_daemons)
+    _paused_daemons = get_paused_daemons(daemons)
+    _stopped_daemons = get_stopped_daemons(daemons)
     _to_delete = _stopped_daemons
-    if _running_daemons:
+
+    to_stop_daemons = _running_daemons + _paused_daemons
+    if to_stop_daemons:
         clear_screen(debug=debug)
         if not force:
-            pprint_jobs(_running_daemons, nopretty=nopretty)
+            pprint_jobs(to_stop_daemons, nopretty=nopretty)
         if force or yes_no(
-            "The above jobs are still running. Stop these jobs?",
+            "Stop these jobs?",
             default='n', yes=yes, noask=noask
         ):
             actions['stop'](
-                action = (['jobs'] + [d.daemon_id for d in _running_daemons]),
+                action = (['jobs'] + [d.daemon_id for d in to_stop_daemons]),
                 nopretty = nopretty,
                 yes = yes,
                 force = force,
                 noask = noask,
                 debug = debug,
+                **kw
             )
-            #  import time
-            #  time.sleep(1)
             ### Ensure the running jobs are dead.
             if get_running_daemons(daemons):
                 return False, (
                     f"Failed to kill running jobs. Please stop these jobs before deleting."
                 )
-            _to_delete += _running_daemons
+            _to_delete += to_stop_daemons
+
         ### User decided not to kill running jobs.
         else:
             pass
@@ -470,5 +476,5 @@ def _delete_jobs(
 ### NOTE: This must be the final statement of the module.
 ###       Any subactions added below these lines will not
 ###       be added to the `help` docstring.
-from meerschaum.utils.misc import choices_docstring as _choices_docstring
+from meerschaum.actions import choices_docstring as _choices_docstring
 delete.__doc__ += _choices_docstring('delete')

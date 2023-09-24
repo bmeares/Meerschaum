@@ -12,61 +12,61 @@ from meerschaum.connectors import attributes as connector_attributes
 from meerschaum.config._paths import SQLITE_DB_PATH
 
 default_meerschaum_config = {
-    'instance' : 'sql:main',
-    'api_instance' : 'MRSM{meerschaum:instance}',
-    'web_instance' : 'MRSM{meerschaum:instance}',
-    'default_repository' : 'api:mrsm',
-    'connectors' : {
-        'sql' : {
-            'default'      : {},
-            'main'         : {
-                'username' : 'mrsm',
-                'password' : 'mrsm',
-                'flavor'   : 'timescaledb',
-                'host'     : 'localhost',
-                'database' : 'meerschaum',
-                'port'     : 5432,
+    'instance': 'sql:main',
+    'api_instance': 'MRSM{meerschaum:instance}',
+    'web_instance': 'MRSM{meerschaum:instance}',
+    'default_repository': 'api:mrsm',
+    'connectors': {
+        'sql': {
+            'default': {},
+            'main': {
+                'username': 'mrsm',
+                'password': 'mrsm',
+                'flavor': 'timescaledb',
+                'host': 'localhost',
+                'database': 'meerschaum',
+                'port': 5432,
             },
-            'local'        : {
-                'flavor'   : 'sqlite',
-                'database' : str(SQLITE_DB_PATH),
+            'local': {
+                'flavor': 'sqlite',
+                'database': str(SQLITE_DB_PATH),
             },
             'memory': {
-                'flavor'   : 'sqlite',
-                'database' : ':memory:',
+                'flavor': 'sqlite',
+                'database': ':memory:',
             },
         },
-        'api' : {
-            'default'      : connector_attributes['api']['default'],
-            'main'         : {
-                'host'     : 'localhost',
-                'port'     : 8000,
+        'api': {
+            'default': connector_attributes['api']['default'],
+            'main': {
+                'host': 'localhost',
+                'port': 8000,
             },
-            'local'        : {
-                'host'     : 'localhost',
+            'local': {
+                'host': 'localhost',
             },
-            'mrsm'         : {
-                'host'     : 'api.mrsm.io',
-                'port'     : 443,
-                'protocol' : 'https',
+            'mrsm': {
+                'host': 'api.mrsm.io',
+                'port': 443,
+                'protocol': 'https',
             },
         },
     },
 }
 default_system_config = {
-    'connectors' : {
-        'all' : {
-            'pandas'           : 'pandas',
+    'connectors': {
+        'all': {
+            'pandas': 'pandas',
         },
-        'sql' : {
-            'chunksize'        : 100000,
-            'poolclass'        : 'sqlalchemy.pool.QueuePool',
-            'create_engine'    : {
-                'method'       : 'multi',
-                'pool_size'    : 5,
-                'max_overflow' : 10,
-                'pool_recycle' : 3600,
-                'connect_args' : {},
+        'sql': {
+            'chunksize': 100_000,
+            'poolclass': 'sqlalchemy.pool.QueuePool',
+            'create_engine': {
+                'method': 'multi',
+                'pool_size': 5,
+                'max_overflow': 10,
+                'pool_recycle': 3600,
+                'connect_args': {},
             },
         },
 
@@ -75,28 +75,28 @@ default_system_config = {
     },
     ### not to be confused with system_config['connectors']['api'], this is the configuration
     ### for the API server itself.
-    'api' : {
-        'uvicorn'          : {
-            'app'          : 'meerschaum.api:app',
-            'port'         : default_meerschaum_config['connectors']['api']['default']['port'],
-            'host'         : '0.0.0.0',
-            'workers'      : max(int(multiprocessing.cpu_count() / 2), 1),
+    'api': {
+        'uvicorn': {
+            'app': 'meerschaum.api:app',
+            'port': default_meerschaum_config['connectors']['api']['default']['port'],
+            'host': '0.0.0.0',
+            'workers': max(int(multiprocessing.cpu_count() / 2), 1),
         },
         'permissions':       {
-            'registration' : {
-                'users'    : True,
-                'pipes'    : True,
-                'plugins'  : True,
+            'registration': {
+                'users': True,
+                'pipes': True,
+                'plugins': True,
             },
-            'actions'      : {
+            'actions': {
                 'non_admin': True,
             },
             'chaining' : {
-                'insecure_parent_instance' : False,
-                'child_apis' : False,
+                'insecure_parent_instance': False,
+                'child_apis': False,
             },
         },
-        'protocol'         : default_meerschaum_config['connectors']['api']['default']['protocol'],
+        'protocol': default_meerschaum_config['connectors']['api']['default']['protocol'],
     },
     'experimental': {
         'fetch': False,
@@ -106,20 +106,27 @@ default_system_config = {
         'inplace_sync': True,
     },
 }
-default_pipes_config       = {
-    'parameters'           : {
-        'columns'          : {
-            'datetime'     : None,
-            'id'           : None,
+default_pipes_config = {
+    'parameters': {
+        'columns': {
+            'datetime': None,
+            'id': None,
+        },
+        'fetch': {
+            'backtrack_minutes': 1440,
+        },
+        'verify': {
+            'bound_days': 366,
+            'chunk_minutes': 1440,
         },
     },
-    'attributes'           : {
+    'attributes': {
         'local_cache_timeout_seconds': 60,
     },
 }
-default_plugins_config     = {}
+default_plugins_config = {}
 default_experimental_config = {
-    'venv' : True,
+    'venv': True,
 }
 
 

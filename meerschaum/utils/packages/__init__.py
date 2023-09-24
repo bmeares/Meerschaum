@@ -31,6 +31,7 @@ _locks = {
     'import_versions': RLock(),
     '_checked_for_updates': RLock(),
     '_is_installed_first_check': RLock(),
+    'emitted_pandas_warning': RLock(),
 }
 _checked_for_updates = set()
 _is_installed_first_check: Dict[str, bool] = {}
@@ -283,7 +284,7 @@ def _import_to_dir_name(import_name: str) -> str:
     """
     import re
     return re.split(
-        f'[<>=\[]', all_packages.get(import_name, import_name)
+        r'[<>=\[]', all_packages.get(import_name, import_name)
     )[0].replace('-', '_').lower() 
 
 
@@ -300,7 +301,7 @@ def get_install_no_version(install_name: str) -> str:
     Strip the version information from the install name.
     """
     import re
-    return re.split('[\[=<>,! \]]', install_name)[0]
+    return re.split(r'[\[=<>,! \]]', install_name)[0]
 
 
 import_versions = {}
@@ -558,6 +559,12 @@ def need_update(
     if not required_version and not check_pypi:
         return False
 
+    ### NOTE: Sometimes (rarely), we depend on a development build of a package.
+    if '.dev' in required_version:
+        required_version = required_version.split('.dev')[0]
+    if version and '.dev' in version:
+        version = version.split('.dev')[0]
+
     try:
         if not version:
             if not _run_determine_version:
@@ -631,7 +638,7 @@ def need_update(
             )
 
     ### We might be depending on a prerelease.
-    ### Sanity check that the required version is not greater than the installed version.
+    ### Sanity check that the required version is not greater than the installed version. 
     try:
         return (
             (not semver.Version.parse(version).match(required_version))
@@ -647,8 +654,6 @@ def need_update(
     except Exception as e:
         print(f"Unable to parse version ({version}) for package '{import_name}'.")
         print(e)
-        #  import traceback
-        #  traceback.print_exc()
         if debug:
             dprint(e)
         return False
@@ -1250,6 +1255,28 @@ def lazy_import(
     )
 
 
+def pandas_name() -> str:
+    """
+    Return the configured name for `pandas`.
+    
+    Below are the expected possible values:
+
+    - 'pandas'
+    - 'modin.pandas'
+    - 'dask.dataframe'
+
+    """
+    from meerschaum.config import get_config
+    pandas_module_name = get_config('system', 'connectors', 'all', 'pandas', patch=True)
+    if pandas_module_name == 'modin':
+        pandas_module_name = 'modin.pandas'
+    elif pandas_module_name == 'dask':
+        pandas_module_name = 'dask.dataframe'
+
+    return pandas_module_name
+
+
+emitted_pandas_warning: bool = False
 def import_pandas(
         debug: bool = False,
         lazy: bool = False,
@@ -1259,13 +1286,25 @@ def import_pandas(
     Quality-of-life function to attempt to import the configured version of `pandas`.
     """
     import sys
-    from meerschaum.config import get_config
-    pandas_module_name = get_config('system', 'connectors', 'all', 'pandas', patch=True)
-    ### NOTE: modin does NOT currently work!
-    if pandas_module_name == 'modin':
-        pandas_module_name = 'modin.pandas'
+    pandas_module_name = pandas_name()
+    global emitted_pandas_warning
+
+    if pandas_module_name != 'pandas':
+        with _locks['emitted_pandas_warning']:
+            if not emitted_pandas_warning:
+                from meerschaum.utils.warnings import warn
+                emitted_pandas_warning = True
+                warn(
+                    (
+                        "You are using an alternative Pandas implementation "
+                        + f"'{pandas_module_name}'"
+                        + "\n   Features may not work as expected."
+                    ),
+                    stack = False,
+                )
 
     pytz = attempt_import('pytz', debug=debug, lazy=False, **kw)
+    pandas = attempt_import('pandas', debug=debug, lazy=False, **kw)
     pd = attempt_import(pandas_module_name, debug=debug, lazy=lazy, **kw)
     return pd
 

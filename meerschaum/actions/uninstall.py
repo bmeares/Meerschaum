@@ -16,12 +16,13 @@ def uninstall(
     """
     Uninstall Meerschaum plugins or Python packages.
     """
-    from meerschaum.utils.misc import choose_subaction
+    from meerschaum.actions import choose_subaction
     options = {
         'plugins'  : _uninstall_plugins,
         'packages' : _uninstall_packages,
     }
     return choose_subaction(action, options, **kw)
+
 
 def _complete_uninstall(
         action: Optional[List[str]] = None,
@@ -191,5 +192,5 @@ def _uninstall_packages(
 ### NOTE: This must be the final statement of the module.
 ###       Any subactions added below these lines will not
 ###       be added to the `help` docstring.
-from meerschaum.utils.misc import choices_docstring as _choices_docstring
+from meerschaum.actions import choices_docstring as _choices_docstring
 uninstall.__doc__ += _choices_docstring('uninstall')
