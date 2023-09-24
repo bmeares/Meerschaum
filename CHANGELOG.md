@@ -406,6 +406,8 @@
   - **Added `get_rename_table_queries()` to `meerschaum.utils.sql`.**
 
 - **Moved `choices_docstring()` from `meerschaum.utils.misc` into `meerschaum.actions`.**
+- **Fixed handling backslashes for `stack` on Windows.**
+  
 
 
 ## 1.7.x Releases
