@@ -226,23 +226,6 @@ def execute_action(state: WebState):
     )
 
 
-def check_input_interval(state : WebState):
-    """
-    Regularly check if the executing action is blocking on input.
-
-    Parameters
-    ----------
-    state : WebState :
-        The state of the dashboard.    
-
-    Returns
-    -------
-    A tuple of children and alerts.
-
-    """
-    return (state['content-div-right.children'], state['success-alert-div.children'])
-
-
 def stop_action(state: WebState):
     """
     Kill a running action.

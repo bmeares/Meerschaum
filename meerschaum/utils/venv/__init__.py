@@ -468,6 +468,7 @@ def venv_executable(venv: Optional[str] = 'mrsm') -> str:
 def venv_exec(
         code: str,
         venv: Optional[str] = 'mrsm',
+        env: Optional[Dict[str, str]] = None,
         with_extras: bool = False,
         as_proc: bool = False,
         capture_output: bool = True,
@@ -485,6 +486,10 @@ def venv_exec(
     venv: str, default 'mrsm'
         The virtual environment to use to get the path for the Python executable.
         If `venv` is `None`, use the default `sys.executable` path.
+
+    env: Optional[Dict[str, str]], default None
+        Optionally specify the environment variables for the subprocess.
+        Defaults to `os.environ`.
 
     with_extras: bool, default False
         If `True`, return a tuple of the exit code, stdout bytes, and stderr bytes.
@@ -504,17 +509,19 @@ def venv_exec(
     from meerschaum.utils.debug import dprint
     executable = venv_executable(venv=venv)
     cmd_list = [executable, '-c', code]
+    if env is None:
+        env = os.environ
     if debug:
         dprint(str(cmd_list))
     if not with_extras and not as_proc:
-        return subprocess.call(cmd_list, env=os.environ) == 0
+        return subprocess.call(cmd_list, env=env) == 0
 
     stdout, stderr = (None, None) if not capture_output else (subprocess.PIPE, subprocess.PIPE)
     process = subprocess.Popen(
         cmd_list,
         stdout = stdout,
         stderr = stderr,
-        env = os.environ,
+        env = env,
     )
     if as_proc:
         return process

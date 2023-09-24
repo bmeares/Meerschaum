@@ -71,3 +71,16 @@ class Worker(threading.Thread):
                 return None
 
             self.queue.task_done()
+
+
+class RepeatTimer(Timer):
+    """
+    Fire the timer's target function in a loop, every `interval` seconds.
+    """
+
+    def run(self) -> None:
+        """
+        Fire the target function in a loop.
+        """
+        while not self.finished.wait(self.interval):
+            self.function(*self.args, **self.kwargs)

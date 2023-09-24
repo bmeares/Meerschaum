@@ -81,8 +81,18 @@ class Pipe:
     ```
     """
 
-    from ._fetch import fetch
-    from ._data import get_data, get_backtrack_data, get_rowcount, _get_data_as_iterator
+    from ._fetch import (
+        fetch,
+        get_backtrack_interval,
+    )
+    from ._data import (
+        get_data,
+        get_backtrack_data,
+        get_rowcount,
+        _get_data_as_iterator,
+        get_chunk_interval,
+        get_chunk_bounds,
+    )
     from ._register import register
     from ._attributes import (
         attributes,
@@ -104,10 +114,23 @@ class Pipe:
     )
     from ._show import show
     from ._edit import edit, edit_definition, update
-    from ._sync import sync, get_sync_time, exists, filter_existing, _get_chunk_label
+    from ._sync import (
+        sync,
+        get_sync_time,
+        exists,
+        filter_existing,
+        _get_chunk_label,
+        get_num_workers,
+    )
+    from ._verify import (
+        verify,
+        get_bound_interval,
+        get_bound_time,
+    )
     from ._delete import delete
     from ._drop import drop
     from ._clear import clear
+    from ._deduplicate import deduplicate
     from ._bootstrap import bootstrap
     from ._dtypes import enforce_dtypes, infer_dtypes
 
@@ -259,15 +282,26 @@ class Pipe:
 
     @property
     def meta(self):
-        """Simulate the MetaPipe model without importing FastAPI."""
-        if '_meta' not in self.__dict__:
-            self._meta = {
-                'connector_keys' : self.connector_keys,
-                'metric_key'     : self.metric_key,
-                'location_key'   : self.location_key,
-                'instance'       : self.instance_keys,
-            }
-        return self._meta
+        """
+        Return the four keys needed to reconstruct this pipe.
+        """
+        return {
+            'connector': self.connector_keys,
+            'metric': self.metric_key,
+            'location': self.location_key,
+            'instance': self.instance_keys,
+        }
+
+
+    def keys(self) -> List[str]:
+        """
+        Return the ordered keys for this pipe.
+        """
+        return {
+            key: val
+            for key, val in self.meta.items()
+            if key != 'instance'
+        }
 
 
     @property
@@ -367,14 +401,6 @@ class Pipe:
         return self._cache_pipe
 
 
-    @property
-    def sync_time(self) -> Union['datetime.datetime', None]:
-        """
-        Convenience function to get the pipe's latest datetime.
-        Use `meerschaum.Pipe.get_sync_time()` instead.
-        """
-        return self.get_sync_time()
-
     def __str__(self, ansi: bool=False):
         return pipe_repr(self, ansi=ansi)
 
@@ -409,18 +435,43 @@ class Pipe:
         Define the state dictionary (pickling).
         """
         return {
-            'connector_keys': self.connector_keys,
-            'metric_key': self.metric_key,
-            'location_key': self.location_key,
+            'connector': self.connector_keys,
+            'metric': self.metric_key,
+            'location': self.location_key,
             'parameters': self.parameters,
-            'mrsm_instance': self.instance_keys,
+            'instance': self.instance_keys,
         }
 
     def __setstate__(self, _state: Dict[str, Any]):
         """
         Read the state (unpickling).
         """
-        connector_keys = _state.pop('connector_keys')
-        metric_key = _state.pop('metric_key')
-        location_key = _state.pop('location_key')
-        self.__init__(connector_keys, metric_key, location_key, **_state)
+        self.__init__(**_state)
+
+
+    def __getitem__(self, key: str) -> Any:
+        """
+        Index the pipe's attributes.
+        If the `key` cannot be found`, return `None`.
+        """
+        if key in self.attributes:
+            return self.attributes.get(key, None)
+
+        aliases = {
+            'connector': 'connector_keys',
+            'connector_key': 'connector_keys',
+            'metric': 'metric_key',
+            'location': 'location_key',
+        }
+        aliased_key = aliases.get(key, None)
+        if aliased_key is not None:
+            return self.attributes.get(aliased_key, None)
+
+        property_aliases = {
+            'instance': 'instance_keys',
+            'instance_key': 'instance_keys',
+        }
+        aliased_key = property_aliases.get(key, None)
+        if aliased_key is not None:
+            key = aliased_key
+        return getattr(self, key, None)

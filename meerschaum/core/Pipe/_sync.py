@@ -3,20 +3,30 @@
 # vim:fenc=utf-8
 
 """
-Synchronize a pipe's data with its source via its connector
+Synchronize a pipe's data with its source via its connector.
 """
 
 from __future__ import annotations
 
 import json
-import datetime
 import time
 import threading
+from datetime import datetime, timedelta
 
 from meerschaum.utils.typing import (
-    Union, Optional, Callable, Any, Tuple, SuccessTuple, Mapping, Dict, List, Iterable, Generator,
+    Union,
+    Optional,
+    Callable,
+    Any,
+    Tuple,
+    SuccessTuple,
+    Dict,
+    List,
+    Iterable,
+    Generator,
     Iterator,
 )
+from meerschaum.utils.warnings import warn, error
 
 class InferFetch:
     MRSM_INFER_FETCH: bool = True
@@ -29,8 +39,8 @@ def sync(
             List[Dict[str, Any]],
             InferFetch
         ] = InferFetch,
-        begin: Optional[datetime.datetime] = None,
-        end: Optional[datetime.datetime] = None,
+        begin: Union[datetime, int, str, None] = '',
+        end: Union[datetime, int] = None,
         force: bool = False,
         retries: int = 10,
         min_seconds: int = 1,
@@ -55,28 +65,23 @@ def sync(
     df: Union[None, pd.DataFrame, Dict[str, List[Any]]], default None
         An optional DataFrame to sync into the pipe. Defaults to `None`.
 
-    begin: Optional[datetime.datetime], default None
+    begin: Union[datetime, int, str, None], default ''
         Optionally specify the earliest datetime to search for data.
-        Defaults to `None`.
 
-    end: Optional[datetime.datetime], default None
+    end: Union[datetime, int, str, None], default None
         Optionally specify the latest datetime to search for data.
-        Defaults to `None`.
 
     force: bool, default False
         If `True`, keep trying to sync untul `retries` attempts.
-        Defaults to `False`.
 
     retries: int, default 10
         If `force`, how many attempts to try syncing before declaring failure.
-        Defaults to `10`.
 
     min_seconds: Union[int, float], default 1
         If `force`, how many seconds to sleep between retries. Defaults to `1`.
 
     check_existing: bool, default True
         If `True`, pull and diff with existing data from the pipe.
-        Defaults to `True`.
 
     blocking: bool, default True
         If `True`, wait for sync to finish and return its result, otherwise
@@ -84,10 +89,9 @@ def sync(
         Only intended for specific scenarios.
 
     workers: Optional[int], default None
-        No use directly within `Pipe.sync()`. Instead is passed on to
-        instance connectors' `sync_pipe()` methods
-        (e.g. `meerschaum.connectors.plugin.PluginConnector`).
-        Defaults to `None`.
+        If provided and the instance connector is thread-safe
+        (`pipe.instance_connector.IS_THREAD_SAFE is True`),
+        limit concurrent sync to this many threads.
 
     callback: Optional[Callable[[Tuple[bool, str]], Any]], default None
         Callback function which expects a SuccessTuple as input.
@@ -101,7 +105,6 @@ def sync(
         Specify the number of rows to sync per chunk.
         If `-1`, resort to system configuration (default is `900`).
         A `chunksize` of `None` will sync all rows in one transaction.
-        Defaults to `-1`.
 
     sync_chunks: bool, default True
         If possible, sync chunks while fetching them into memory.
@@ -112,10 +115,8 @@ def sync(
     Returns
     -------
     A `SuccessTuple` of success (`bool`) and message (`str`).
-
     """
     from meerschaum.utils.debug import dprint, _checkpoint
-    from meerschaum.utils.warnings import warn, error
     from meerschaum.connectors import custom_types
     from meerschaum.plugins import Plugin
     from meerschaum.utils.formatting import get_console
@@ -134,12 +135,18 @@ def sync(
         chunksize = None
         sync_chunks = False
 
-    ### TODO: Add flag for specifying syncing method.
-    begin = _determine_begin(self, begin, debug=debug)
     kw.update({
-        'begin': begin, 'end': end, 'force': force, 'retries': retries, 'min_seconds': min_seconds,
-        'check_existing': check_existing, 'blocking': blocking, 'workers': workers,
-        'callback': callback, 'error_callback': error_callback, 'sync_chunks': sync_chunks,
+        'begin': begin,
+        'end': end,
+        'force': force,
+        'retries': retries,
+        'min_seconds': min_seconds,
+        'check_existing': check_existing,
+        'blocking': blocking,
+        'workers': workers,
+        'callback': callback,
+        'error_callback': error_callback,
+        'sync_chunks': sync_chunks,
         'chunksize': chunksize,
     })
 
@@ -175,7 +182,7 @@ def sync(
         ### use that instead.
         ### NOTE: The DataFrame must be omitted for the plugin sync method to apply.
         ### If a DataFrame is provided, continue as expected.
-        if hasattr(df, 'MRSM_INFER_FETCH'):
+        if hasattr(df, 'MRSM_INFER_FETCH'):                   
             try:
                 if p.connector is None:
                     msg = f"{p} does not have a valid connector."
@@ -270,39 +277,17 @@ def sync(
         
         ### Allow for dataframe generators or iterables.
         if df_is_chunk_generator(df):
-            is_thread_safe = getattr(self.instance_connector, 'IS_THREAD_SAFE', False)
-            if is_thread_safe:
-                engine_pool_size = (
-                    p.instance_connector.engine.pool.size()
-                    if p.instance_connector.type == 'sql'
-                    else None
-                )
-                current_num_threads = len(threading.enumerate())
-                workers = kw.get('workers', None)
-                desired_workers = (
-                    min(workers or engine_pool_size, engine_pool_size)
-                    if engine_pool_size is not None
-                    else (workers if is_thread_safe else 1)
-                )
-                if desired_workers is None:
-                    desired_workers = (current_num_threads if is_thread_safe else 1)
-                kw['workers'] = max(
-                    (desired_workers - current_num_threads),
-                    1,
-                )
-            else:
-                kw['workers'] = 1
-
+            kw['workers'] = p.get_num_workers(kw.get('workers', None))
             dt_col = p.columns.get('datetime', None)
-
-
             pool = get_pool(workers=kw.get('workers', 1))
             if debug:
                 dprint(f"Received {type(df)}. Attempting to sync first chunk...")
+
             try:
                 chunk = next(df)
             except StopIteration:
                 return True, "Received an empty generator; nothing to do."
+
             chunk_success, chunk_msg = _sync(p, chunk)
             chunk_msg = '\n' + self._get_chunk_label(chunk, dt_col) + '\n' + chunk_msg
             if not chunk_success:
@@ -360,11 +345,16 @@ def sync(
             return success, msg
 
         ### Cast to a dataframe and ensure datatypes are what we expect.
-        df = self.enforce_dtypes(df, debug=debug)
+        df = self.enforce_dtypes(df, chunksize=chunksize, debug=debug)
         if debug:
             dprint(
                 "DataFrame to sync:\n"
-                + (str(df)[:255] + '...' if len(str(df)) >= 256 else str(df)),
+                + (
+                    str(df)[:255]
+                    + '...'
+                    if len(str(df)) >= 256
+                    else str(df)
+                ),
                 **kw
             )
 
@@ -408,12 +398,13 @@ def sync(
         self._exists = None
         return _sync(self, df = df)
 
-    ### TODO implement concurrent syncing (split DataFrame? mimic the functionality of modin?)
     from meerschaum.utils.threading import Thread
     def default_callback(result_tuple : SuccessTuple):
         dprint(f"Asynchronous result from {self}: {result_tuple}", **kw)
+
     def default_error_callback(x : Exception):
         dprint(f"Error received for {self}: {x}", **kw)
+
     if callback is None and debug:
         callback = default_callback
     if error_callback is None and debug:
@@ -431,28 +422,18 @@ def sync(
     except Exception as e:
         self._exists = None
         return False, str(e)
+
     self._exists = None
     return True, f"Spawned asyncronous sync for {self}."
-
-
-def _determine_begin(
-        pipe: meerschaum.Pipe,
-        begin: Optional[datetime.datetime] = None,
-        debug: bool = False,
-    ) -> Union[datetime.datetime, None]:
-    ### Datetime has already been provided.
-    if begin is not None:
-        return begin
-    return pipe.get_sync_time(debug=debug)
 
 
 def get_sync_time(
         self,
         params: Optional[Dict[str, Any]] = None,
         newest: bool = True,
-        round_down: bool = True,
+        round_down: bool = False, 
         debug: bool = False
-    ) -> Union['datetime.datetime', None]:
+    ) -> Union['datetime', None]:
     """
     Get the most recent datetime value for a Pipe.
 
@@ -466,28 +447,33 @@ def get_sync_time(
         If `True`, get the most recent datetime (honoring `params`).
         If `False`, get the oldest datetime (`ASC` instead of `DESC`).
 
-    round_down: bool, default True
-        If `True`, round down the sync time to the nearest minute.
+    round_down: bool, default False
+        If `True`, round down the datetime value to the nearest minute.
 
     debug: bool, default False
         Verbosity toggle.
 
     Returns
     -------
-    A `datetime.datetime` object if the pipe exists, otherwise `None`.
+    A `datetime` object if the pipe exists, otherwise `None`.
 
     """
     from meerschaum.utils.venv import Venv
     from meerschaum.connectors import get_connector_plugin
+    from meerschaum.utils.misc import round_time
 
     with Venv(get_connector_plugin(self.instance_connector)):
-        return self.instance_connector.get_sync_time(
+        sync_time = self.instance_connector.get_sync_time(
             self,
             params = params,
             newest = newest,
-            round_down = round_down,
             debug = debug,
         )
+
+    if not round_down or not isinstance(sync_time, datetime):
+        return sync_time
+
+    return round_time(sync_time, timedelta(minutes=1))
 
 
 def exists(
@@ -562,23 +548,32 @@ def filter_existing(
     -------
     A tuple of three pandas DataFrames: unseen, update, and delta.
     """
-    import datetime
     from meerschaum.utils.warnings import warn
     from meerschaum.utils.debug import dprint
     from meerschaum.utils.packages import attempt_import, import_pandas
-    from meerschaum.utils.misc import (
-        round_time,
+    from meerschaum.utils.misc import round_time
+    from meerschaum.utils.dataframe import (
         filter_unseen_df,
         add_missing_cols_to_df,
-        to_pandas_dtype,
         get_unhashable_cols,
     )
-
+    from meerschaum.utils.dtypes import (
+        to_pandas_dtype,
+    )
     pd = import_pandas()
-    if not isinstance(df, pd.DataFrame):
-        df = self.enforce_dtypes(df, debug=debug)
+    pandas = attempt_import('pandas')
+    if not 'dataframe' in str(type(df)).lower():
+        df = self.enforce_dtypes(df, chunksize=chunksize, debug=debug)
+    is_dask = 'dask' in df.__module__
+    if is_dask:
+        dd = attempt_import('dask.dataframe')
+        merge = dd.merge
+        NA = pandas.NA
+    else:
+        merge = pd.merge
+        NA = pd.NA
 
-    if df.empty:
+    if (df.empty if not is_dask else len(df) == 0):
         return df, df, df
 
     ### begin is the oldest data in the new dataframe
@@ -587,8 +582,10 @@ def filter_existing(
     dt_type = self.dtypes.get(dt_col, 'datetime64[ns]') if dt_col else None
     try:
         min_dt_val = df[dt_col].min(skipna=True) if dt_col else None
+        if is_dask and min_dt_val is not None:
+            min_dt_val = min_dt_val.compute()
         min_dt = (
-            pd.to_datetime(min_dt_val).to_pydatetime()
+            pandas.to_datetime(min_dt_val).to_pydatetime()
             if min_dt_val is not None and 'datetime' in str(dt_type)
             else min_dt_val
         )
@@ -598,12 +595,12 @@ def filter_existing(
         if 'int' not in str(type(min_dt)).lower():
             min_dt = None
 
-    if isinstance(min_dt, datetime.datetime):
+    if isinstance(min_dt, datetime):
         begin = (
             round_time(
                 min_dt,
                 to = 'down'
-            ) - datetime.timedelta(minutes=1)
+            ) - timedelta(minutes=1)
         )
     elif dt_type and 'int' in dt_type.lower():
         begin = min_dt
@@ -613,8 +610,10 @@ def filter_existing(
     ### end is the newest data in the new dataframe
     try:
         max_dt_val = df[dt_col].max(skipna=True) if dt_col else None
+        if is_dask and max_dt_val is not None:
+            max_dt_val = max_dt_val.compute()
         max_dt = (
-            pd.to_datetime(max_dt_val).to_pydatetime()
+            pandas.to_datetime(max_dt_val).to_pydatetime()
             if max_dt_val is not None and 'datetime' in str(dt_type)
             else max_dt_val
         )
@@ -627,12 +626,12 @@ def filter_existing(
         if 'int' not in str(type(max_dt)).lower():
             max_dt = None
 
-    if isinstance(max_dt, datetime.datetime):
+    if isinstance(max_dt, datetime):
         end = (
             round_time(
                 max_dt,
                 to = 'down'
-            ) + datetime.timedelta(minutes=1)
+            ) + timedelta(minutes=1)
         )
     elif dt_type and 'int' in dt_type.lower():
         end = max_dt + 1
@@ -641,8 +640,8 @@ def filter_existing(
         warn(f"Detected minimum datetime greater than maximum datetime.")
 
     if begin is not None and end is not None and begin > end:
-        if isinstance(begin, datetime.datetime):
-            begin = end - datetime.timedelta(minutes=1)
+        if isinstance(begin, datetime):
+            begin = end - timedelta(minutes=1)
         ### We might be using integers for out datetime axis.
         else:
             begin = end - 1
@@ -659,8 +658,8 @@ def filter_existing(
         **kw
     )
     if debug:
-        dprint("Existing data:\n" + str(backtrack_df), **kw)
-        dprint("Existing dtypes:\n" + str(backtrack_df.dtypes))
+        dprint(f"Existing data for {self}:\n" + str(backtrack_df), **kw)
+        dprint(f"Existing dtypes for {self}:\n" + str(backtrack_df.dtypes))
 
     ### Separate new rows from changed ones.
     on_cols = [
@@ -672,9 +671,10 @@ def filter_existing(
             and col in backtrack_df.columns
         )
     ]
+    self_dtypes = self.dtypes
     on_cols_dtypes = {
         col: to_pandas_dtype(typ)
-        for col, typ in self.dtypes.items()
+        for col, typ in self_dtypes.items()
         if col in on_cols
     }
 
@@ -685,7 +685,7 @@ def filter_existing(
             df,
             dtypes = {
                 col: to_pandas_dtype(typ)
-                for col, typ in self.dtypes.items()
+                for col, typ in self_dtypes.items()
             },
             debug = debug
         ),
@@ -701,9 +701,9 @@ def filter_existing(
         backtrack_df[col] = backtrack_df[col].apply(json.dumps)
     casted_cols = set(unhashable_delta_cols + unhashable_backtrack_cols)
 
-    joined_df = pd.merge(
-        delta_df,
-        backtrack_df,
+    joined_df = merge(
+        delta_df.fillna(NA),
+        backtrack_df.fillna(NA),
         how = 'left',
         on = on_cols,
         indicator = True,
@@ -724,10 +724,17 @@ def filter_existing(
     cols = list(backtrack_df.columns)
 
     unseen_df = (
-        joined_df
-        .where(new_rows_mask)
-        .dropna(how='all')[cols]
-        .reset_index(drop=True)
+        (
+            joined_df
+            .where(new_rows_mask)
+            .dropna(how='all')[cols]
+            .reset_index(drop=True)
+        ) if not is_dask else (
+            joined_df
+            .where(new_rows_mask)
+            .dropna(how='all')[cols]
+            .reset_index(drop=True)
+        )
     ) if on_cols else delta_df
 
     ### Rows that have already been inserted but values have changed.
@@ -753,11 +760,47 @@ def _get_chunk_label(
     """
     Return the min - max label for the chunk.
     """
-    from meerschaum.utils.misc import get_datetime_bound_from_df
+    from meerschaum.utils.dataframe import get_datetime_bound_from_df
     min_dt = get_datetime_bound_from_df(chunk, dt_col)
     max_dt = get_datetime_bound_from_df(chunk, dt_col, minimum=False)
     return (
         f"{min_dt} - {max_dt}"
         if min_dt is not None and max_dt is not None
         else ''
+    )
+
+
+def get_num_workers(self, workers: Optional[int] = None) -> int:
+    """
+    Get the number of workers to use for concurrent syncs.
+
+    Parameters
+    ----------
+    The number of workers passed via `--workers`.
+
+    Returns
+    -------
+    The number of workers, capped for safety.
+    """
+    is_thread_safe = getattr(self.instance_connector, 'IS_THREAD_SAFE', False)
+    if not is_thread_safe:
+        return 1
+
+    engine_pool_size = (
+        self.instance_connector.engine.pool.size()
+        if self.instance_connector.type == 'sql'
+        else None
+    )
+    current_num_threads = len(threading.enumerate())
+    desired_workers = (
+        min(workers or engine_pool_size, engine_pool_size)
+        if engine_pool_size is not None
+        else workers
+    )
+    if desired_workers is None:
+        desired_workers = (current_num_threads if is_thread_safe else 1)
+
+    return max(
+        (desired_workers - current_num_threads),
+        1,
     )

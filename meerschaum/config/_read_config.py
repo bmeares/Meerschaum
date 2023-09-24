@@ -339,10 +339,19 @@ def search_and_substitute_config(
     ### replace the patterns with the values
     for pattern, value in patterns.items():
         if isolated_patterns[pattern]:
-            haystack = haystack.replace(json.dumps(pattern), json.dumps(value))
+            haystack = haystack.replace(
+                json.dumps(pattern),
+                json.dumps(value),
+            )
         elif literal_patterns[pattern]:
             haystack = haystack.replace(
-                pattern, json.dumps(value).replace('"', '\\"').replace("'", "\\'")
+                pattern,
+                (
+                    json.dumps(value)
+                    .replace("\\", "\\\\")
+                    .replace('"', '\\"')
+                    .replace("'", "\\'")
+                )
             )
         else:
             haystack = haystack.replace(pattern, str(value))

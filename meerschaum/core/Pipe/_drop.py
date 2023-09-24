@@ -12,10 +12,10 @@ from meerschaum.utils.typing import SuccessTuple, Any
 def drop(
         self,
         debug: bool = False,
-        **kw : Any
+        **kw: Any
     ) -> SuccessTuple:
     """
-    Call the Pipe's instance connector's `drop_pipe()` method
+    Call the Pipe's instance connector's `drop_pipe()` method.
 
     Parameters
     ----------

@@ -15,13 +15,12 @@ def drop(
     """
     Drop pipe data (maintaining registration) or tables.
     """
-    from meerschaum.utils.misc import choose_subaction
-
+    from meerschaum.actions import choose_subaction
     options = {
         'pipes'  : _drop_pipes,
-        'tables' : _drop_tables,
     }
     return choose_subaction(action, options, **kw)
+
 
 def _drop_pipes(
         action: Optional[List[str]] = None,
@@ -79,17 +78,9 @@ def _drop_pipes(
     )
     return successes > 0, msg
 
-def _drop_tables(
-        action: Optional[List[str]] = None,
-        **kw: Any
-    ) -> SuccessTuple:
-    """
-    Drop SQL tables. WARNING: This is very dangerous!
-    """
-    return False, "Not implemented"
 
 ### NOTE: This must be the final statement of the module.
 ###       Any subactions added below these lines will not
 ###       be added to the `help` docstring.
-from meerschaum.utils.misc import choices_docstring as _choices_docstring
+from meerschaum.actions import choices_docstring as _choices_docstring
 drop.__doc__ += _choices_docstring('drop')

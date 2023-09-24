@@ -23,9 +23,7 @@ def copy(
         `copy pipes`
 
     """
-    from meerschaum.utils.misc import choose_subaction
-    if action is None:
-        action = []
+    from meerschaum.actions import choose_subaction
     options = {
         'pipes'      : _copy_pipes,
         'connectors' : _copy_connectors,

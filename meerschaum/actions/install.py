@@ -16,7 +16,7 @@ def install(
     """
     Install Meerschaum plugins or Python packages.
     """
-    from meerschaum.utils.misc import choose_subaction
+    from meerschaum.actions import choose_subaction
     options = {
         'plugins'  : _install_plugins,
         'packages' : _install_packages,
@@ -236,5 +236,5 @@ def _complete_install_required(*args, **kw) -> List[str]:
 ### NOTE: This must be the final statement of the module.
 ###       Any subactions added below these lines will not
 ###       be added to the `help` docstring.
-from meerschaum.utils.misc import choices_docstring as _choices_docstring
+from meerschaum.actions import choices_docstring as _choices_docstring
 install.__doc__ += _choices_docstring('install')

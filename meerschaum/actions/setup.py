@@ -19,7 +19,7 @@ def setup(
     Usage:
         setup plugins noaa
     """
-    from meerschaum.utils.misc import choose_subaction
+    from meerschaum.actions import choose_subaction
     options = {
         'plugins'  : _setup_plugins,
     }
@@ -108,5 +108,5 @@ def _complete_setup_plugins(*args, **kw) -> List[str]:
 ### NOTE: This must be the final statement of the module.
 ###       Any subactions added below these lines will not
 ###       be added to the `help` docstring.
-from meerschaum.utils.misc import choices_docstring as _choices_docstring
+from meerschaum.actions import choices_docstring as _choices_docstring
 setup.__doc__ += _choices_docstring('setup')

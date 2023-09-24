@@ -6,11 +6,40 @@ Miscellaneous functions go here
 """
 
 from __future__ import annotations
+from datetime import timedelta
 from meerschaum.utils.typing import (
-    Union, Mapping, Any, Callable, Optional, List, Dict, SuccessTuple, Iterable, PipesDict, Tuple,
-    InstanceConnector, Hashable, Generator, Iterator,
+    Union,
+    Any,
+    Callable,
+    Optional,
+    List,
+    Dict,
+    SuccessTuple,
+    Iterable,
+    PipesDict,
+    Tuple,
+    InstanceConnector,
+    Hashable,
+    Generator,
+    Iterator,
 )
 import meerschaum as mrsm
+
+__pdoc__: Dict[str, bool] = {
+    'to_pandas_dtype': False,
+    'filter_unseen_df': False,
+    'add_missing_cols_to_df': False,
+    'parse_df_datetimes': False,
+    'df_from_literal': False,
+    'get_json_cols': False,
+    'get_unhashable_cols': False,
+    'enforce_dtypes': False,
+    'get_datetime_bound_from_df': False,
+    'df_is_chunk_generator': False,
+    'choices_docstring': False,
+    '_get_subaction_names': False,
+}
+
 
 def add_method_to_class(
         func: Callable[[Any], Any],
@@ -54,61 +83,6 @@ def add_method_to_class(
     )
 
     return func
-
-def choose_subaction(
-        action: Optional[List[str]] = None,
-        options: Optional[Dict[str, Any]] = None,
-        **kw
-    ) -> SuccessTuple:
-    """
-    Given a dictionary of options and the standard Meerschaum actions list,
-    check if choice is valid and execute chosen function, else show available
-    options and return False
-
-    Parameters
-    ----------
-    action: Optional[List[str]], default None
-        A list of subactions (e.g. `show pipes` -> ['pipes']).
-
-    options: Optional[Dict[str, Any]], default None
-        Available options to execute.
-        option (key) -> function (value)
-        Functions must accept **kw keyword arguments
-        and return a tuple of success bool and message.
-
-    Returns
-    -------
-    The return value of the chosen subaction (assumed to be a `SuccessTuple`).
-
-    """
-    from meerschaum.utils.warnings import warn, info
-    import inspect
-    if action is None:
-        action = []
-    if options is None:
-        options = {}
-    parent_action = inspect.stack()[1][3]
-    if len(action) == 0:
-        action = ['']
-    choice = action[0]
-
-    def valid_choice(_choice : str, _options : dict):
-        if _choice in _options:
-            return _choice
-        if (_choice + 's') in options:
-            return _choice + 's'
-        return None
-
-    parsed_choice = valid_choice(choice, options)
-    if parsed_choice is None:
-        warn(f"Cannot {parent_action} '{choice}'. Choose one:", stack=False)
-        for option in sorted(options):
-            print(f"  - {parent_action} {option}")
-        return (False, f"Invalid choice '{choice}'.")
-    ### remove parent sub-action
-    kw['action'] = list(action)
-    del kw['action'][0]
-    return options[parsed_choice](**kw)
 
 
 def generate_password(length: int = 12) -> str:
@@ -310,178 +284,6 @@ def is_pipe_registered(
     return ck in pipes and mk in pipes[ck] and lk in pipes[ck][mk]
 
 
-def _get_subaction_names(action : str, globs : dict = None) -> List[str]:
-    """NOTE: Don't use this function. You should use `meerschaum.actions.get_subactions()` instead.
-    This only exists for internal use.
-    """
-    if globs is None:
-        import importlib
-        module = importlib.import_module(f'meerschaum.actions.{action}')
-        globs = vars(module)
-    subactions = []
-    for item in globs:
-        if f'_{action}' in item and 'complete' not in item.lstrip('_'):
-            subactions.append(globs[item])
-    return subactions
-
-
-def choices_docstring(action: str, globs : Optional[Dict[str, Any]] = None) -> str:
-    """
-    Append the an action's available options to the module docstring.
-    This function is to be placed at the bottom of each action module.
-
-    Parameters
-    ----------
-    action: str
-        The name of the action module (e.g. 'install').
-        
-    globs: Optional[Dict[str, Any]], default None
-        An optional dictionary of global variables.
-
-    Returns
-    -------
-    The generated docstring for the module.
-
-    Examples
-    --------
-    >>> from meerschaum.utils.misc import choices_docstring as _choices_docstring
-    >>> install.__doc__ += _choices_docstring('install')
-
-    """
-    options_str = f"\n    Options:\n        `{action} "
-    subactions = _get_subaction_names(action, globs=globs)
-    options_str += "["
-    sa_names = []
-    for sa in subactions:
-        try:
-            sa_names.append(sa.__name__[len(f"_{action}") + 1:])
-        except Exception as e:
-            print(e)
-            return ""
-    for sa_name in sorted(sa_names):
-        options_str += f"{sa_name}, "
-    options_str = options_str[:-2] + "]`"
-    return options_str
-
-
-def print_options(
-        options: Optional[Dict[str, Any]] = None,
-        nopretty: bool = False,
-        no_rich: bool = False,
-        name: str = 'options',
-        header: Optional[str] = None,
-        num_cols: Optional[int] = None,
-        adjust_cols: bool = True,
-        **kw
-    ) -> None:
-    """
-    Print items in an iterable as a fancy table.
-
-    Parameters
-    ----------
-    options: Optional[Dict[str, Any]], default None
-        The iterable to be printed.
-
-    nopretty: bool, default False
-        If `True`, don't use fancy formatting.
-
-    no_rich: bool, default False
-        If `True`, don't use `rich` to format the output.
-
-    name: str, default 'options'
-        The text in the default header after `'Available'`.
-
-    header: Optional[str], default None
-        If provided, override `name` and use this as the header text.
-
-    num_cols: Optional[int], default None
-        How many columns in the table. Depends on the terminal size. If `None`, use 8.
-
-    adjust_cols: bool, default True
-        If `True`, adjust the number of columns depending on the terminal size.
-
-    """
-    import os
-    from meerschaum.utils.packages import import_rich
-    from meerschaum.utils.formatting import make_header, highlight_pipes
-    from meerschaum.actions import actions as _actions
-
-
-    if options is None:
-        options = {}
-    _options = []
-    for o in options:
-        _options.append(str(o))
-    _header = f"Available {name}" if header is None else header
-
-    if num_cols is None:
-        num_cols = 8
-
-    def _print_options_no_rich():
-        if not nopretty:
-            print()
-            print(make_header(_header))
-        ### print actions
-        for option in sorted(_options):
-            if not nopretty:
-                print("  - ", end="")
-            print(option)
-        if not nopretty:
-            print()
-
-    rich = import_rich()
-    if rich is None or nopretty or no_rich:
-        _print_options_no_rich()
-        return None
-
-    ### Prevent too many options from being truncated on small terminals.
-    if adjust_cols and _options:
-        _cols, _lines = get_cols_lines()
-        while num_cols > 1:
-            cell_len = int(((_cols - 4) - (3 * (num_cols - 1))) / num_cols)
-            num_too_big = sum([(1 if string_width(o) > cell_len else 0) for o in _options])
-            if num_too_big > int(len(_options) / 3):
-                num_cols -= 1
-                continue
-            break
-
-    from meerschaum.utils.formatting import pprint, get_console
-    from meerschaum.utils.packages import attempt_import
-    rich_columns = attempt_import('rich.columns')
-    rich_panel = attempt_import('rich.panel')
-    rich_table = attempt_import('rich.table')
-    Text = attempt_import('rich.text').Text
-    box = attempt_import('rich.box')
-    Panel = rich_panel.Panel
-    Columns = rich_columns.Columns
-    Table = rich_table.Table
-
-    if _header is not None:
-        table = Table(
-            title = '\n' + _header,
-            box = box.SIMPLE,
-            show_header = False,
-            show_footer = False,
-            title_style = '',
-            expand = True,
-        )
-    else:
-        table = Table.grid(padding=(0, 2))
-    for i in range(num_cols):
-        table.add_column()
-
-    chunks = iterate_chunks(
-        [Text.from_ansi(highlight_pipes(o)) for o in sorted(_options)],
-        num_cols,
-        fillvalue=''
-    )
-    for c in chunks:
-        table.add_row(*c)
-
-    get_console().print(table)
-    return None
-
-
 def get_cols_lines(default_cols: int = 100, default_lines: int = 120) -> Tuple[int, int]:
     """
     Determine the columns and lines in the terminal.
@@ -652,105 +454,6 @@ def round_time(
     return dt + datetime.timedelta(0, rounding - seconds, - dt.microsecond)
 
 
-def parse_df_datetimes(
-        df: 'pd.DataFrame',
-        ignore_cols: Optional[Iterable[str]] = None,
-        debug: bool = False,
-    ) -> 'pd.DataFrame':
-    """
-    Parse a pandas DataFrame for datetime columns and cast as datetimes.
-
-    Parameters
-    ----------
-    df: pd.DataFrame
-        The pandas DataFrame to parse.
-
-    ignore_cols: Optional[Iterable[str]], default None
-        If provided, do not attempt to coerce these columns as datetimes.
-        
-    debug: bool, default False
-        Verbosity toggle.
-
-    Returns
-    -------
-    A new pandas DataFrame with the determined datetime columns
-    (usually ISO strings) cast as datetimes.
-
-    Examples
-    --------
-    ```python
-    >>> import pandas as pd
-    >>> df = pd.DataFrame({'a': ['2022-01-01 00:00:00']}) 
-    >>> df.dtypes
-    a    object
-    dtype: object
-    >>> df = parse_df_datetimes(df)
-    >>> df.dtypes
-    a    datetime64[ns]
-    dtype: object
-
-    ```
-
-    """
-    from meerschaum.utils.packages import import_pandas
-    from meerschaum.utils.debug import dprint
-    from meerschaum.utils.warnings import warn
-    import traceback
-    pd = import_pandas()
-
-    ### if df is a dict, build DataFrame
-    if not isinstance(df, pd.DataFrame):
-        if debug:
-            dprint(f"df is not a DataFrame. Casting to DataFrame...")
-        df = pd.DataFrame(df)
-
-    ### skip parsing if DataFrame is empty
-    if len(df) == 0:
-        if debug:
-            dprint(f"df is empty. Returning original DataFrame without casting datetime columns...")
-        return df
-
-    ignore_cols = ignore_cols or []
-    cols_to_inspect = [col for col in df.columns if col not in ignore_cols]
-
-    if len(cols_to_inspect) == 0:
-        if debug:
-            dprint(f"All columns are ignored, skipping datetime detection...")
-        return df
-
-    ### apply regex to columns to determine which are ISO datetimes
-    iso_dt_regex = r'\d{4}-\d{2}-\d{2}.\d{2}\:\d{2}\:\d+'
-    dt_mask = df[cols_to_inspect].astype(str).apply(
-        lambda s: s.str.match(iso_dt_regex).all()
-    )
-
-    ### list of datetime column names
-    datetime_cols = [col for col in df[cols_to_inspect].loc[:, dt_mask]]
-    if not datetime_cols:
-        if debug:
-            dprint("No columns detected as datetimes, returning...")
-        return df
-
-    if debug:
-        dprint("Converting columns to datetimes: " + str(datetime_cols))
-
-    try:
-        df[datetime_cols] = df[datetime_cols].apply(pd.to_datetime, utc=True)
-    except Exception as e:
-        warn(
-            f"Unable to apply `pd.to_datetime` to {items_str(datetime_cols)}:\n"
-            + f"{traceback.format_exc()}"
-        )
-
-    for dt in datetime_cols:
-        try:
-            df[dt] = df[dt].dt.tz_localize(None)
-        except Exception as e:
-            warn(f"Unable to convert column '{dt}' to naive datetime:\n{traceback.format_exc()}")
-
-    return df
-
-
 def timed_input(
         seconds: int = 10,
         timeout_message: str = "",
@@ -797,7 +500,7 @@ def timed_input(
         return input(prompt)
     except TimeoutExpired:
         return None
-    except EOFError:
+    except (EOFError, RuntimeError):
         try:
             print(prompt)
             time.sleep(seconds)
@@ -807,228 +510,7 @@ def timed_input(
         signal.alarm(0) # cancel alarm
 
 
-def df_from_literal(
-        pipe: Optional['meerschaum.Pipe'] = None,
-        literal: str = None,
-        debug: bool = False
-    ) -> 'pd.DataFrame':
-    """
-    Construct a dataframe from a literal value, using the pipe's datetime and value column names.
 
-    Parameters
-    ----------
-    pipe: Optional['meerschaum.Pipe'], default None
-        The pipe which will consume the literal value.
-
-    literal : str :
-         (Default value = None)
-    debug : bool :
-         (Default value = False)
-
-    Returns
-    -------
-    A 1-row pandas DataFrame from with the current UTC timestamp as the datetime columns and the literal as the value.
-
-    """
-    from meerschaum.utils.packages import import_pandas
-    from meerschaum.utils.warnings import error, warn
-    from meerschaum.utils.debug import dprint
-
-    if pipe is None or literal is None:
-        error("Please provide a Pipe and a literal value")
-    ### this will raise an error if the columns are undefined
-    dt_name, val_name = pipe.get_columns('datetime', 'value')
-
-    val = literal
-    if isinstance(literal, str):
-        if debug:
-            dprint(f"Received literal string: '{literal}'")
-        import ast
-        try:
-            val = ast.literal_eval(literal)
-        except Exception as e:
-            warn(
-                "Failed to parse value from string:\n" + f"{literal}" +
-                "\n\nWill cast as a string instead."\
-            )
-            val = literal
-
-    ### NOTE: we do everything in UTC if possible.
-    ### In dealing with timezones / Daylight Savings lies madness.
-    import datetime
-    now = datetime.datetime.utcnow()
-
-    pd = import_pandas()
-    return pd.DataFrame({dt_name : [now], val_name : [val]})
-
-
-def add_missing_cols_to_df(df: 'pd.DataFrame', dtypes: Dict[str, Any]) -> pd.DataFrame:
-    """
-    Add columns from the dtypes dictionary as null columns to a new DataFrame.
-
-    Parameters
-    ----------
-    df: pd.DataFrame
-        The dataframe we should copy and add null columns.
-
-    dtypes:
-        The data types dictionary which may contain keys not present in `df.columns`.
-
-    Returns
-    -------
-    A new `DataFrame` with the keys from `dtypes` added as null columns.
-    If `df.dtypes` is the same as `dtypes`, then return a reference to `df`.
-    NOTE: This will not ensure that dtypes are enforced!
-
-    Examples
-    --------
-    >>> import pandas as pd
-    >>> df = pd.DataFrame([{'a': 1}])
-    >>> dtypes = {'b': 'Int64'}
-    >>> add_missing_cols_to_df(df, dtypes)
-       a     b
-       0  1  <NA>
-    >>> add_missing_cols_to_df(df, dtypes).dtypes
-    a    int64
-    b    Int64
-    dtype: object
-    >>> add_missing_cols_to_df(df, {'a': 'object'}).dtypes
-    a    int64
-    dtype: object
-    >>> 
-    """
-    if set(df.columns) == set(dtypes):
-        return df
-
-    from meerschaum.utils.packages import import_pandas
-    pd = import_pandas()
-    
-    df = df.copy()
-    for col, typ in dtypes.items():
-        if col in df.columns:
-            continue
-        if typ == 'int64':
-            typ = 'Int64'
-        df[col] = pd.Series([None] * len(df), dtype=typ)
-    
-    return df
-
-
-def filter_unseen_df(
-        old_df: 'pd.DataFrame',
-        new_df: 'pd.DataFrame',
-        primary_key_col: Optional[str] = None,
-        dtypes: Optional[Dict[str, Any]] = None,
-        custom_nan: str = 'mrsm_NaN',
-        debug: bool = False,
-    ) -> 'pd.DataFrame':
-    """
-    Left join two DataFrames to find the newest unseen data.
-
-    Parameters
-    ----------
-    old_df: 'pd.DataFrame'
-        The original (target) dataframe. Acts as a filter on the `new_df`.
-        
-    new_df: 'pd.DataFrame'
-        The fetched (source) dataframe. Rows that are contained in `old_df` are removed.
-        
-    dtypes: Optional[Dict[str, Any]], default None
-        Optionally specify the datatypes of the dataframe.
-
-    custom_nan: str, default 'mrsm_NaN'
-        Fill in `NaN` cells with this string during filtering (later replaced with `NaN`).
-
-    debug: bool, default False
-        Verbosity toggle.
-
-    Returns
-    -------
-    A pandas dataframe of the new, unseen rows in `new_df`.
-
-    Examples
-    --------
-    ```python
-    >>> import pandas as pd
-    >>> df1 = pd.DataFrame({'a': [1,2]})
-    >>> df2 = pd.DataFrame({'a': [2,3]})
-    >>> filter_unseen_df(df1, df2)
-       a
-    0  3
-
-    ```
-
-    """
-    if old_df is None:
-        return new_df
-
-    from meerschaum.utils.warnings import warn
-    from meerschaum.utils.packages import import_pandas
-    pd = import_pandas(debug=debug)
-
-    new_df_dtypes = dict(new_df.dtypes)
-    old_df_dtypes = dict(old_df.dtypes)
-
-    same_cols = set(new_df.columns) == set(old_df.columns)
-    if not same_cols:
-        new_df = add_missing_cols_to_df(new_df, old_df_dtypes)
-        old_df = add_missing_cols_to_df(old_df, new_df_dtypes)
-
-    try:
-        ### Order matters when checking equality.
-        new_df = new_df[old_df.columns]
-    except Exception as e:
-        warn(
-            "Was not able to cast old columns onto new DataFrame. " +
-            f"Are both DataFrames the same shape? Error:\n{e}",
-            stacklevel = 3,
-        )
-        return new_df[list(new_df_dtypes.keys())]
-
-    ### assume the old_df knows what it's doing, even if it's technically wrong.
-    if dtypes is None:
-        dtypes = {col: str(typ) for col, typ in old_df.dtypes.items()}
-
-    dtypes = {
-        col: (
-            (
-                str(typ)
-                if str(typ) not in ('str', 'json')
-                else 'object'
-            )
-            if str(typ) != 'int64'
-            else 'Int64'
-        ) for col, typ in dtypes.items()
-        if col in new_df_dtypes and col in old_df_dtypes
-    }
-    for col, typ in new_df_dtypes.items():
-        if col not in dtypes:
-            dtypes[col] = typ
-    
-    for col, typ in {k: v for k, v in dtypes.items()}.items():
-        if new_df_dtypes.get(col, None) != old_df_dtypes.get(col, None):
-            ### Fallback to object if the types don't match.
-            dtypes[col] = 'object'
-
-    cast_cols = True
-    try:
-        new_df = new_df.astype(dtypes)
-        cast_cols = False
-    except Exception as e:
-        warn(
-            f"Was not able to cast the new DataFrame to the given dtypes.\n{e}"
-        )
-    if cast_cols:
-        for col, dtype in dtypes.items():
-            if col in new_df.columns:
-                try:
-                    new_df[col] = new_df[col].astype(dtype)
-                except Exception as e:
-                    warn(f"Was not able to cast column '{col}' to dtype '{dtype}'.\n{e}")
-
-    return new_df[
-        ~new_df.fillna(pd.NA).apply(tuple, 1).isin(old_df.fillna(pd.NA).apply(tuple, 1))
-    ].reset_index(drop=True)[new_df_dtypes.keys()]
 
 
 def replace_pipes_in_dict(
@@ -1107,7 +589,7 @@ def is_valid_email(email: str) -> Union['re.Match', None]:
 
     """
     import re
-    regex = '^[a-z0-9]+[\._]?[a-z0-9]+[@]\w+[.]\w{2,3}$'
+    regex = r'^[a-z0-9]+[\._]?[a-z0-9]+[@]\w+[.]\w{2,3}$'
     return re.search(regex, email)
 
 def string_width(string: str, widest: bool = True) -> int:
@@ -1488,6 +970,7 @@ def async_wrap(func):
         return await loop.run_in_executor(executor, pfunc)
     return run 
 
+
 def debug_trace(browser: bool = True):
     """
     Open a web-based debugger to trace the execution of the program.
@@ -1495,6 +978,7 @@ def debug_trace(browser: bool = True):
     from meerschaum.utils.packages import attempt_import
     heartrate = attempt_import('heartrate')
     heartrate.trace(files=heartrate.files.all, browser=browser)
+
 
 def items_str(
         items: List[Any],
@@ -1582,6 +1066,29 @@ def items_str(
         output += c
     output += s + a + (s if and_ else '') + q + str(items[-1]) + q
     return output
+
+
+def interval_str(delta: Union[timedelta, int]) -> str:
+    """
+    Return a human-readable string for a `timedelta` (or `int` minutes).
+
+    Parameters
+    ----------
+    delta: Union[timedelta, int]
+        The interval to print. If `delta` is an integer, assume it corresponds to minutes.
+
+    Returns
+    -------
+    A formatted string, fit for human eyes.
+    """
+    from meerschaum.utils.packages import attempt_import
+    humanfriendly = attempt_import('humanfriendly')
+    delta_seconds = (
+        delta.total_seconds()
+        if isinstance(delta, timedelta)
+        else (delta * 60)
+    )
+    return humanfriendly.format_timespan(delta_seconds)
 
 
 def is_docker_available() -> bool:
@@ -1879,304 +1386,131 @@ def safely_extract_tar(tarf: 'file', output_dir: Union[str, 'pathlib.Path']) -> 
 
     return safe_extract(tarf, output_dir)
 
+##################
+# Legacy imports #
+##################
 
-def to_pandas_dtype(dtype: str) -> str:
+def choose_subaction(*args, **kwargs) -> Any:
     """
-    Cast a supported Meerschaum dtype to a Pandas dtype.
+    Placeholder function to prevent breaking legacy behavior.
+    See `meerschaum.actions.choose_subaction`.
     """
-    if dtype in ('json', 'str', 'object'):
-        return 'object'
-    if dtype.lower().startswith('int'):
-        return 'Int64'
-    if dtype.lower().startswith('float'):
-        return 'float64'
-    if dtype == 'datetime':
-        return 'datetime64[ns]'
-    if dtype.startswith('datetime'):
-        return dtype
-    if dtype == 'bool':
-        return dtype
-    return 'object'
+    from meerschaum.actions import choose_subaction as _choose_subactions
+    return _choose_subactions(*args, **kwargs)
 
 
-def get_unhashable_cols(df: 'pd.DataFrame') -> List[str]:
+def print_options(*args, **kwargs) -> None:
     """
-    Get the columns which contain unhashable objects from a Pandas DataFrame.
-
-    Parameters
-    ----------
-    df: pd.DataFrame
-        The DataFrame which may contain unhashable objects.
-
-    Returns
-    -------
-    A list of columns.
+    Placeholder function to prevent breaking legacy behavior.
+    See `meerschaum.utils.formatting.print_options`.
     """
-    if len(df) == 0:
-        return []
-    return [
-        col for col, val in df.iloc[0].items()
-        if not isinstance(val, Hashable)
-    ]
+    from meerschaum.utils.formatting import print_options as _print_options
+    return _print_options(*args, **kwargs)
 
 
-def get_json_cols(df: 'pd.DataFrame') -> List[str]:
+def to_pandas_dtype(*args, **kwargs) -> Any:
     """
-    Get the columns which contain unhashable objects from a Pandas DataFrame.
-
-    Parameters
-    ----------
-    df: pd.DataFrame
-        The DataFrame which may contain unhashable objects.
-
-    Returns
-    -------
-    A list of columns to be encoded as JSON.
+    Placeholder function to prevent breaking legacy behavior.
+    See `meerschaum.utils.dtypes.to_pandas_dtype`.
     """
-    if len(df) == 0:
-        return []
-
-    cols_indices = {
-        col: df[col].first_valid_index()
-        for col in df.columns
-    }
-    return [
-        col
-        for col, ix in cols_indices.items()
-        if (
-            ix is not None
-            and
-            not isinstance(df.loc[ix][col], Hashable)
-        )
-    ]
+    from meerschaum.utils.dtypes import to_pandas_dtype as _to_pandas_dtype
+    return _to_pandas_dtype(*args, **kwargs)
 
 
-def enforce_dtypes(
-        df: 'pd.DataFrame',
-        dtypes: Dict[str, str],
-        debug: bool = False,
-    ) -> 'pd.DataFrame':
+def filter_unseen_df(*args, **kwargs) -> Any:
     """
-    Enforce the `dtypes` dictionary on a DataFrame.
-
-    Parameters
-    ----------
-    df: pd.DataFrame
-        The DataFrame on which to enforce dtypes.
-
-    dtypes: Dict[str, str]
-        The data types to attempt to enforce on the DataFrame.
-
-    debug: bool, default False
-        Verbosity toggle.
-
-    Returns
-    -------
-    The Pandas DataFrame with the types enforced.
+    Placeholder function to prevent breaking legacy behavior.
+    See `meerschaum.utils.dataframe.filter_unseen_df`.
     """
-    import json
-    import traceback
-    from meerschaum.utils.debug import dprint
-    from meerschaum.utils.warnings import warn
-    from meerschaum.utils.formatting import pprint
-    from meerschaum.config.static import STATIC_CONFIG
-    from meerschaum.utils.packages import import_pandas
-    df_dtypes = {c: str(t) for c, t in df.dtypes.items()}
-    if len(df_dtypes) == 0:
-        if debug:
-            dprint("Incoming DataFrame has no columns. Skipping enforcement...")
-        return df
-
-    pipe_pandas_dtypes = {
-        col: to_pandas_dtype(typ)
-        for col, typ in dtypes.items()
-    }
-    json_cols = [
-        col
-        for col, typ in dtypes.items()
-        if typ == 'json'
-    ]
-    if debug:
-        dprint(f"Desired data types:")
-        pprint(dtypes)
-        dprint(f"Data types for incoming DataFrame:")
-        pprint(df_dtypes)
-
-    if json_cols and len(df) > 0:
-        if debug:
-            dprint(f"Checking columns for JSON encoding: {json_cols}")
-        for col in json_cols:
-            if col in df.columns:
-                try:
-                    df[col] = df[col].apply(
-                        (
-                            lambda x: (
-                                json.loads(x)
-                                if isinstance(x, str)
-                                else x
-                            )
-                        )
-                    )
-                except Exception as e:
-                    if debug:
-                        dprint(f"Unable to parse column '{col}' as JSON:\n{e}")
-
-    if df_dtypes == pipe_pandas_dtypes:
-        if debug:
-            dprint(f"Data types match. Exiting enforcement...")
-        return df
-
-    common_dtypes = {}
-    common_diff_dtypes = {}
-    for col, typ in pipe_pandas_dtypes.items():
-        if col in df_dtypes:
-            common_dtypes[col] = typ
-            if typ != df_dtypes[col]:
-                common_diff_dtypes[col] = df_dtypes[col]
-
-    if debug:
-        dprint(f"Common columns with different dtypes:")
-        pprint(common_diff_dtypes)
-
-    detected_dt_cols = {}
-    for col, typ in common_diff_dtypes.items():
-        if 'datetime' in typ and 'datetime' in common_dtypes[col]:
-            df_dtypes[col] = typ
-            detected_dt_cols[col] = (common_dtypes[col], common_diff_dtypes[col])
-    for col in detected_dt_cols:
-        del common_diff_dtypes[col]
-
-    if debug:
-        dprint(f"Common columns with different dtypes (after dates):")
-        pprint(common_diff_dtypes)
-
-    if df_dtypes == pipe_pandas_dtypes:
-        if debug:
-            dprint(
-                "The incoming DataFrame has mostly the same types, skipping enforcement."
-                + f"The only detected difference was in the following datetime columns.\n"
-                + "    Timezone information may be stripped."
-            )
-            pprint(detected_dt_cols)
-        return df
-
-    if set(common_dtypes) == set(df_dtypes):
-        min_ratio = STATIC_CONFIG['pipes']['dtypes']['min_ratio_columns_changed_for_full_astype']
-        if (
-            len(common_diff_dtypes) >= int(len(common_dtypes) * min_ratio)
-        ):
-            if debug:
-                dprint(f"Enforcing dtypes columns on incoming DataFrame...")
-                pprint(common_dtypes)
-            try:
-                return df[
-                    list(common_dtypes.keys())
-                ].astype({
-                    col: typ
-                    for col, typ in pipe_pandas_dtypes.items()
-                    if col in common_dtypes
-                })
-            except Exception as e:
-                if debug:
-                    dprint(f"Encountered an error when enforcing data types:\n{e}")
-    
-    for d in common_diff_dtypes:
-        t = common_dtypes[d]
-        if debug:
-            dprint(f"Casting column {d} to dtype {t}.")
-        try:
-            df[d] = df[d].astype(t)
-        except Exception as e:
-            if debug:
-                dprint(f"Encountered an error when casting column {d} to type {t}:\n{e}")
-            if 'int' in str(t.lower()):
-                try:
-                    df[d] = df[d].astype('float64').astype(t)
-                except Exception as e:
-                    if debug:
-                        dprint(f"Was unable to convert to float then {t}.")
-    return df
+    from meerschaum.utils.dataframe import filter_unseen_df as real_function
+    return real_function(*args, **kwargs)
 
 
-def get_datetime_bound_from_df(
-        df: Union['pd.DataFrame', dict, list],
-        datetime_column: str,
-        minimum: bool = True,
-    ) -> Union[int, 'datetime.datetime', None]:
+def add_missing_cols_to_df(*args, **kwargs) -> Any:
     """
-    Return the minimum or maximum datetime (or integer) from a DataFrame.
-
-    Parameters
-    ----------
-    df: pd.DataFrame
-        The DataFrame, list, or dict which contains the range axis.
-
-    datetime_column: str
-        The name of the datetime (or int) column.
-
-    minimum: bool
-        Whether to return the minimum (default) or maximum value.
-
-    Returns
-    -------
-    The minimum or maximum datetime value in the dataframe, or `None`.
+    Placeholder function to prevent breaking legacy behavior.
+    See `meerschaum.utils.dataframe.add_missing_cols_to_df`.
     """
-    if not datetime_column:
-        return None
-
-    def compare(a, b):
-        if a is None:
-            return b
-        if b is None:
-            return a
-        if minimum:
-            return a if a < b else b
-        return a if a > b else b
-
-    if isinstance(df, list):
-        if len(df) == 0:
-            return None
-        best_yet = df[0].get(datetime_column, None)
-        for doc in df:
-            val = doc.get(datetime_column, None)
-            best_yet = compare(best_yet, val)
-        return best_yet
-
-    if isinstance(df, dict):
-        if datetime_column not in df:
-            return None
-        best_yet = df[datetime_column][0]
-        for val in df[datetime_column]:
-            best_yet = compare(best_yet, val)
-        return best_yet
-
-    if 'DataFrame' in str(type(df)):
-        return (
-            df[datetime_column].min(skipna=True)
-            if minimum
-            else df[datetime_column].max(skipna=True)
-        )
-
-    return None
+    from meerschaum.utils.dataframe import add_missing_cols_to_df as real_function
+    return real_function(*args, **kwargs)
 
 
-def df_is_chunk_generator(df: Any) -> bool:
+def parse_df_datetimes(*args, **kwargs) -> Any:
     """
-    Determine whether to treat `df` as a chunk generator.
-
-    Note this should only be used in a context where generators are expected,
-    as it will return `True` for any iterable.
-
-    Parameters
-    ----------
-    The DataFrame or chunk generator to evaluate.
-
-    Returns
-    -------
-    A `bool` indicating whether to treat `df` as a generator.
+    Placeholder function to prevent breaking legacy behavior.
+    See `meerschaum.utils.dataframe.parse_df_datetimes`.
     """
-    return (
-        not isinstance(df, (dict, list, str))
-        and 'DataFrame' not in str(type(df))
-        and isinstance(df, (Generator, Iterable, Iterator))
-    )
+    from meerschaum.utils.dataframe import parse_df_datetimes as real_function
+    return real_function(*args, **kwargs)
+
+
+def df_from_literal(*args, **kwargs) -> Any:
+    """
+    Placeholder function to prevent breaking legacy behavior.
+    See `meerschaum.utils.dataframe.df_from_literal`.
+    """
+    from meerschaum.utils.dataframe import df_from_literal as real_function
+    return real_function(*args, **kwargs)
+
+
+def get_json_cols(*args, **kwargs) -> Any:
+    """
+    Placeholder function to prevent breaking legacy behavior.
+    See `meerschaum.utils.dataframe.get_json_cols`.
+    """
+    from meerschaum.utils.dataframe import get_json_cols as real_function
+    return real_function(*args, **kwargs)
+
+
+def get_unhashable_cols(*args, **kwargs) -> Any:
+    """
+    Placeholder function to prevent breaking legacy behavior.
+    See `meerschaum.utils.dataframe.get_unhashable_cols`.
+    """
+    from meerschaum.utils.dataframe import get_unhashable_cols as real_function
+    return real_function(*args, **kwargs)
+
+
+def enforce_dtypes(*args, **kwargs) -> Any:
+    """
+    Placeholder function to prevent breaking legacy behavior.
+    See `meerschaum.utils.dataframe.enforce_dtypes`.
+    """
+    from meerschaum.utils.dataframe import enforce_dtypes as real_function
+    return real_function(*args, **kwargs)
+
+
+def get_datetime_bound_from_df(*args, **kwargs) -> Any:
+    """
+    Placeholder function to prevent breaking legacy behavior.
+    See `meerschaum.utils.dataframe.get_datetime_bound_from_df`.
+    """
+    from meerschaum.utils.dataframe import get_datetime_bound_from_df as real_function
+    return real_function(*args, **kwargs)
+
+
+def df_is_chunk_generator(*args, **kwargs) -> Any:
+    """
+    Placeholder function to prevent breaking legacy behavior.
+    See `meerschaum.utils.dataframe.df_is_chunk_generator`.
+    """
+    from meerschaum.utils.dataframe import df_is_chunk_generator as real_function
+    return real_function(*args, **kwargs)
+
+
+def choices_docstring(*args, **kwargs) -> Any:
+    """
+    Placeholder function to prevent breaking legacy behavior.
+    See `meerschaum.actions.choices_docstring`.
+    """
+    from meerschaum.actions import choices_docstring as real_function
+    return real_function(*args, **kwargs)
+
+
+def _get_subaction_names(*args, **kwargs) -> Any:
+    """
+    Placeholder function to prevent breaking legacy behavior.
+    See `meerschaum.actions._get_subaction_names`.
+    """
+    from meerschaum.actions import _get_subaction_names as real_function
+    return real_function(*args, **kwargs)

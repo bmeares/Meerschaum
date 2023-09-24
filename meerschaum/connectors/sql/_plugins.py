@@ -227,7 +227,16 @@ def get_plugins(
     if search_term is not None:
         query = query.where(plugins_tbl.c.plugin_name.like(search_term + '%'))
 
-    return [row[0] for row in self.execute(query).fetchall()]
+    rows = (
+        self.execute(query).fetchall()
+        if self.flavor != 'duckdb'
+        else [
+            (row['plugin_name'],)
+            for row in self.read(query).to_dict(orient='records')
+        ]
+    )
+    
+    return [row[0] for row in rows]
 
 
 def delete_plugin(

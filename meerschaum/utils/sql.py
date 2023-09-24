@@ -8,6 +8,13 @@ Flavor-specific SQL tools.
 
 from __future__ import annotations
 from meerschaum.utils.typing import Optional, Dict, Any, Union, List
+### Preserve legacy imports.
+from meerschaum.utils.dtypes.sql import (
+    DB_TO_PD_DTYPES,
+    PD_TO_DB_DTYPES_FLAVORS,
+    get_pd_type_from_db_type as get_pd_type,
+    get_db_type_from_pd_type as get_db_type,
+)
 
 test_queries = {
     'default'    : 'SELECT 1',
@@ -19,6 +26,12 @@ test_queries = {
 ### `table` is the unescaped name of the table.
 exists_queries = {
     'default'    : "SELECT COUNT(*) FROM {table_name} WHERE 1 = 0",
+}
+version_queries = {
+    'default': "SELECT VERSION() AS {version_name}",
+    'sqlite': "SELECT SQLITE_VERSION() AS {version_name}",
+    'mssql': "SELECT @@version",
+    'oracle': "SELECT version from PRODUCT_COMPONENT_VERSION WHERE rownum = 1",
 }
 update_queries = {
     'default': """
@@ -123,50 +136,19 @@ max_name_lens = {
 json_flavors = {'postgresql', 'timescaledb', 'citus', 'cockroachdb'}
 OMIT_NULLSFIRST_FLAVORS = {'mariadb', 'mysql', 'mssql'}
 SINGLE_ALTER_TABLE_FLAVORS = {'duckdb', 'sqlite', 'mssql', 'oracle'}
-DB_TO_PD_DTYPES = {
-    'FLOAT': 'float64',
-    'DOUBLE_PRECISION': 'float64',
-    'DOUBLE': 'float64',
-    'DECIMAL': 'float64',
-    'BIGINT': 'Int64',
-    'INT': 'Int64',
-    'INTEGER': 'Int64',
-    'NUMBER': 'float64',
-    'TIMESTAMP': 'datetime64[ns]',
-    'TIMESTAMP WITH TIMEZONE': 'datetime64[ns, UTC]',
-    'TIMESTAMPTZ': 'datetime64[ns, UTC]',
-    'DATE': 'datetime64[ns]',
-    'DATETIME': 'datetime64[ns]',
-    'TEXT': 'object',
-    'CLOB': 'object',
-    'BOOL': 'bool',
-    'BOOLEAN': 'bool',
-    'BOOLEAN()': 'bool',
-    'JSON': 'object',
-    'JSONB': 'object',
-    'substrings': {
-        'CHAR': 'object',
-        'TIMESTAMP': 'datetime64[ns]',
-        'TIME': 'datetime64[ns]',
-        'DATE': 'datetime64[ns]',
-        'DOUBLE': 'float64',
-        'DECIMAL': 'float64',
-        'INT': 'Int64',
-        'BOOL': 'bool',
-        'JSON': 'object',
-    },
-    'default': 'object',
-}
+NO_CTE_FLAVORS = {'mysql', 'mariadb'}
+NO_SELECT_INTO_FLAVORS = {'sqlite', 'oracle', 'mysql', 'mariadb', 'duckdb'}
+
 ### MySQL doesn't allow for casting as BIGINT, so this is a workaround.
 DB_FLAVORS_CAST_DTYPES = {
     'mariadb': {
         'BIGINT': 'DECIMAL',
-        'TINYINT': 'INT',
+        'TINYINT': 'UNSIGNED INT',
         'TEXT': 'CHAR(10000) CHARACTER SET utf8',
     },
     'mysql': {
         'BIGINT': 'DECIMAL',
-        'TINYINT': 'INT',
+        'TINYINT': 'UNSIGNED INT',
         'TEXT': 'CHAR(10000) CHARACTER SET utf8',
     },
     'oracle': {
@@ -179,245 +161,7 @@ DB_FLAVORS_CAST_DTYPES = {
         'VARCHAR COLLATE "SQL_Latin1_General_CP1_CI_AS"': 'NVARCHAR(MAX)',
     },
 }
-### Map pandas dtypes to flavor-specific dtypes.
-PD_TO_DB_DTYPES_FLAVORS: Dict[str, Dict[str, str]] = {
-    'Int64': {
-        'timescaledb': 'BIGINT',
-        'postgresql': 'BIGINT',
-        'mariadb': 'BIGINT',
-        'mysql': 'BIGINT',
-        'mssql': 'BIGINT',
-        'oracle': 'INT',
-        'sqlite': 'BIGINT',
-        'duckdb': 'BIGINT',
-        'citus': 'BIGINT',
-        'cockroachdb': 'BIGINT',
-        'default': 'INT',
-    },
-    'int64': {
-        'timescaledb': 'BIGINT',
-        'postgresql': 'BIGINT',
-        'mariadb': 'BIGINT',
-        'mysql': 'BIGINT',
-        'mssql': 'BIGINT',
-        'oracle': 'INT',
-        'sqlite': 'BIGINT',
-        'duckdb': 'BIGINT',
-        'citus': 'BIGINT',
-        'cockroachdb': 'BIGINT',
-        'default': 'INT',
-    },
-    'float64': {
-        'timescaledb': 'DOUBLE PRECISION',
-        'postgresql': 'DOUBLE PRECISION',
-        'mariadb': 'DECIMAL',
-        'mysql': 'DECIMAL',
-        'mssql': 'FLOAT',
-        'oracle': 'FLOAT',
-        'sqlite': 'FLOAT',
-        'duckdb': 'DOUBLE PRECISION',
-        'citus': 'DOUBLE PRECISION',
-        'cockroachdb': 'DOUBLE PRECISION',
-        'default': 'DOUBLE',
-    },
-    'datetime64[ns]': {
-        'timescaledb': 'TIMESTAMP',
-        'postgresql': 'TIMESTAMP',
-        'mariadb': 'DATETIME',
-        'mysql': 'DATETIME',
-        'mssql': 'DATETIME',
-        'oracle': 'DATE',
-        'sqlite': 'DATETIME',
-        'duckdb': 'TIMESTAMP',
-        'citus': 'TIMESTAMP',
-        'cockroachdb': 'TIMESTAMP',
-        'default': 'DATETIME',
-    },
-    'datetime64[ns, UTC]': {
-        'timescaledb': 'TIMESTAMP',
-        'postgresql': 'TIMESTAMP',
-        'mariadb': 'TIMESTAMP',
-        'mysql': 'TIMESTAMP',
-        'mssql': 'TIMESTAMP',
-        'oracle': 'TIMESTAMP',
-        'sqlite': 'TIMESTAMP',
-        'duckdb': 'TIMESTAMP',
-        'citus': 'TIMESTAMP',
-        'cockroachdb': 'TIMESTAMP',
-        'default': 'TIMESTAMP',
-    },
-    'bool': {
-        'timescaledb': 'BOOLEAN',
-        'postgresql': 'BOOLEAN',
-        'mariadb': 'TINYINT',
-        'mysql': 'TINYINT',
-        'mssql': 'BIT',
-        'oracle': 'INTEGER',
-        'sqlite': 'BOOLEAN',
-        'duckdb': 'BOOLEAN',
-        'citus': 'BOOLEAN',
-        'cockroachdb': 'BOOLEAN',
-        'default': 'BOOLEAN',
-    },
-    'object': {
-        'timescaledb': 'TEXT',
-        'postgresql': 'TEXT',
-        'mariadb': 'TEXT',
-        'mysql': 'TEXT',
-        'mssql': 'NVARCHAR(MAX)',
-        'oracle': 'NVARCHAR2(2000)',
-        'sqlite': 'TEXT',
-        'duckdb': 'TEXT',
-        'citus': 'TEXT',
-        'cockroachdb': 'TEXT',
-        'default': 'TEXT',
-    },
-    'str': {
-        'timescaledb': 'TEXT',
-        'postgresql': 'TEXT',
-        'mariadb': 'TEXT',
-        'mysql': 'TEXT',
-        'mssql': 'NVARCHAR(MAX)',
-        'oracle': 'NVARCHAR2(2000)',
-        'sqlite': 'TEXT',
-        'duckdb': 'TEXT',
-        'citus': 'TEXT',
-        'cockroachdb': 'TEXT',
-        'default': 'TEXT',
-    },
-    'json': {
-        'timescaledb': 'JSONB',
-        'postgresql': 'JSONB',
-        'mariadb': 'TEXT',
-        'mysql': 'TEXT',
-        'mssql': 'NVARCHAR(MAX)',
-        'oracle': 'NVARCHAR2(2000)',
-        'sqlite': 'TEXT',
-        'duckdb': 'TEXT',
-        'citus': 'JSONB',
-        'cockroachdb': 'JSONB',
-        'default': 'TEXT',
-    },
-}
-PD_TO_SQLALCHEMY_DTYPES_FLAVORS: Dict[str, Dict[str, str]] = {
-    'Int64': {
-        'timescaledb': 'BigInteger',
-        'postgresql': 'BigInteger',
-        'mariadb': 'BigInteger',
-        'mysql': 'BigInteger',
-        'mssql': 'BigInteger',
-        'oracle': 'BigInteger',
-        'sqlite': 'BigInteger',
-        'duckdb': 'BigInteger',
-        'citus': 'BigInteger',
-        'cockroachdb': 'BigInteger',
-        'default': 'BigInteger',
-    },
-    'int64': {
-        'timescaledb': 'BigInteger',
-        'postgresql': 'BigInteger',
-        'mariadb': 'BigInteger',
-        'mysql': 'BigInteger',
-        'mssql': 'BigInteger',
-        'oracle': 'BigInteger',
-        'sqlite': 'BigInteger',
-        'duckdb': 'BigInteger',
-        'citus': 'BigInteger',
-        'cockroachdb': 'BigInteger',
-        'default': 'BigInteger',
-    },
-    'float64': {
-        'timescaledb': 'Float',
-        'postgresql': 'Float',
-        'mariadb': 'Float',
-        'mysql': 'Float',
-        'mssql': 'Float',
-        'oracle': 'Float',
-        'sqlite': 'Float',
-        'duckdb': 'Float',
-        'citus': 'Float',
-        'cockroachdb': 'Float',
-        'default': 'Float',
-    },
-    'datetime64[ns]': {
-        'timescaledb': 'DateTime',
-        'postgresql': 'DateTime',
-        'mariadb': 'DateTime',
-        'mysql': 'DateTime',
-        'mssql': 'DateTime',
-        'oracle': 'DateTime',
-        'sqlite': 'DateTime',
-        'duckdb': 'DateTime',
-        'citus': 'DateTime',
-        'cockroachdb': 'DateTime',
-        'default': 'DateTime',
-    },
-    'datetime64[ns, UTC]': {
-        'timescaledb': 'DateTime',
-        'postgresql': 'DateTime',
-        'mariadb': 'DateTime',
-        'mysql': 'DateTime',
-        'mssql': 'DateTime',
-        'oracle': 'DateTime',
-        'sqlite': 'DateTime',
-        'duckdb': 'DateTime',
-        'citus': 'DateTime',
-        'cockroachdb': 'DateTime',
-        'default': 'DateTime',
-    },
-    'bool': {
-        'timescaledb': 'Boolean',
-        'postgresql': 'Boolean',
-        'mariadb': 'Boolean',
-        'mysql': 'Boolean',
-        'mssql': 'Boolean',
-        'oracle': 'Boolean',
-        'sqlite': 'Boolean',
-        'duckdb': 'Boolean',
-        'citus': 'Boolean',
-        'cockroachdb': 'Boolean',
-        'default': 'Boolean',
-    },
-    'object': {
-        'timescaledb': 'UnicodeText',
-        'postgresql': 'UnicodeText',
-        'mariadb': 'UnicodeText',
-        'mysql': 'UnicodeText',
-        'mssql': 'UnicodeText',
-        'oracle': 'UnicodeText',
-        'sqlite': 'UnicodeText',
-        'duckdb': 'UnicodeText',
-        'citus': 'UnicodeText',
-        'cockroachdb': 'UnicodeText',
-        'default': 'UnicodeText',
-    },
-    'str': {
-        'timescaledb': 'UnicodeText',
-        'postgresql': 'UnicodeText',
-        'mariadb': 'UnicodeText',
-        'mysql': 'UnicodeText',
-        'mssql': 'UnicodeText',
-        'oracle': 'UnicodeText',
-        'sqlite': 'UnicodeText',
-        'duckdb': 'UnicodeText',
-        'citus': 'UnicodeText',
-        'cockroachdb': 'UnicodeText',
-        'default': 'UnicodeText',
-    },
-    'json': {
-        'timescaledb': 'JSONB',
-        'postgresql': 'JSONB',
-        'mariadb': 'UnicodeText',
-        'mysql': 'UnicodeText',
-        'mssql': 'UnicodeText',
-        'oracle': 'UnicodeText',
-        'sqlite': 'UnicodeText',
-        'duckdb': 'TEXT',
-        'citus': 'JSONB',
-        'cockroachdb': 'JSONB',
-        'default': 'UnicodeText',
-    },
-}
+
 
 def clean(substring: str) -> str:
     """
@@ -429,6 +173,7 @@ def clean(substring: str) -> str:
     for symbol in banned_symbols:
         if symbol in str(substring).lower():
             error(f"Invalid string: '{substring}'")
+
 
 def dateadd_str(
         flavor: str = 'postgresql',
@@ -501,7 +246,8 @@ def dateadd_str(
     if 'int' in str(type(begin)).lower():
         return str(begin)
     if not begin:
-        return None
+        return ''
+
     _original_begin = begin
     begin_time = None
     ### Sanity check: make sure `begin` is a valid datetime before we inject anything.
@@ -935,7 +681,6 @@ def get_sqlalchemy_table(
     return tables[truncated_table_name]
 
 
-_checked_sqlite_version = None
 def get_update_queries(
         target: str,
         patch: str,
@@ -969,17 +714,15 @@ def get_update_queries(
     """
     from meerschaum.utils.debug import dprint
     flavor = connector.flavor
-    if connector.flavor == 'sqlite':
-        import sqlite3
-        if sqlite3.sqlite_version < '3.33.0':
-            flavor = 'sqlite_delete_insert'
+    if connector.flavor == 'sqlite' and connector.db_version < '3.33.0':
+        flavor = 'sqlite_delete_insert'
     base_queries = update_queries.get(flavor, update_queries['default'])
     if not isinstance(base_queries, list):
         base_queries = [base_queries]
     target_table = get_sqlalchemy_table(target, connector)
     value_cols = []
     if debug:
-        dprint(f"target_table.columns: {target_table.columns}")
+        dprint(f"target_table.columns: {dict(target_table.columns)}")
     for c in target_table.columns:
         c_name, c_type = c.name, str(c.type)
         if c_name in join_cols:
@@ -1023,107 +766,6 @@ def get_update_queries(
     ) for base_query in base_queries]
 
     
-def get_pd_type(db_type: str, allow_custom_dtypes: bool = False) -> str:
-    """
-    Parse a database type to a pandas data type.
-
-    Parameters
-    ----------
-    db_type: str
-        The database type, e.g. `DATETIME`, `BIGINT`, etc.
-
-    allow_custom_dtypes: bool, default False
-        If `True`, allow for custom data types like `json` and `str`.
-
-    Returns
-    -------
-    The equivalent datatype for a pandas DataFrame.
-    """
-    def parse_custom(_pd_type: str, _db_type: str) -> str:
-        if 'json' in _db_type.lower():
-            return 'json'
-        return _pd_type
-
-    pd_type = DB_TO_PD_DTYPES.get(db_type.upper(), None)
-    if pd_type is not None:
-        return (
-            parse_custom(pd_type, db_type)
-            if allow_custom_dtypes
-            else pd_type
-        )
-    for db_t, pd_t in DB_TO_PD_DTYPES['substrings'].items():
-        if db_t in db_type.upper():
-            return (
-                parse_custom(pd_t, db_t)
-                if allow_custom_dtypes
-                else pd_t
-            )
-    return DB_TO_PD_DTYPES['default']
-
-
-def get_db_type(
-        pd_type: str,
-        flavor: str = 'default',
-        as_sqlalchemy: bool = False,
-    ) -> Union[str, 'sqlalchemy.sql.visitors.TraversibleType']:
-    """
-    Parse a Pandas data type into a flavor's database type.
-
-    Parameters
-    ----------
-    pd_type: str
-        The Pandas datatype. This must be a string, not the actual dtype object.
-
-    flavor: str, default 'default'
-        The flavor of the database to be mapped to.
-
-    as_sqlalchemy: bool, default False
-        If `True`, return a type from `sqlalchemy.types`.
-
-    Returns
-    -------
-    The database data type for the incoming Pandas data type.
-    If nothing can be found, a warning will be thrown and 'TEXT' will be returned.
-    """
-    from meerschaum.utils.warnings import warn
-    from meerschaum.utils.packages import attempt_import
-    sqlalchemy_types = attempt_import('sqlalchemy.types')
-    if pd_type not in PD_TO_DB_DTYPES_FLAVORS:
-        warn(f"Unknown Pandas data type '{pd_type}'. Falling back to 'TEXT'.")
-        return (
-            'TEXT' if not as_sqlalchemy
-            else sqlalchemy_types.UnicodeText
-        )
-    types_registry = (
-        PD_TO_DB_DTYPES_FLAVORS if not as_sqlalchemy
-        else PD_TO_SQLALCHEMY_DTYPES_FLAVORS
-    )
-    flavor_types = types_registry.get(
-        pd_type,
-        {
-            'default': (
-                'TEXT' if not as_sqlalchemy
-                else 'UnicodeText'
-            ),
-        },
-    )
-    default_flavor_type = flavor_types.get(
-        'default',
-        (
-            'TEXT' if not as_sqlalchemy
-            else 'UnicodeText'
-        ),
-    )
-    if flavor not in flavor_types:
-        warn(f"Unknown flavor '{flavor}'. Falling back to '{default_flavor_type}' (default).")
-    db_type = flavor_types.get(flavor, default_flavor_type)
-    if not as_sqlalchemy:
-        return db_type
-    if db_type == 'JSONB':
-        sqlalchemy_dialects_postgresql = attempt_import('sqlalchemy.dialects.postgresql')
-        return sqlalchemy_dialects_postgresql.JSONB
-    return getattr(sqlalchemy_types, db_type)
-
 
 def get_null_replacement(typ: str, flavor: str) -> str:
     """
@@ -1148,3 +790,162 @@ def get_null_replacement(typ: str, flavor: str) -> str:
     if 'float' in typ.lower() or 'double' in typ.lower():
         return '-987654321.0'
     return ('n' if flavor == 'oracle' else '') + "'-987654321'"
+
+
+def get_db_version(conn: 'SQLConnector', debug: bool = False) -> None:
+    """
+    Fetch the database version if possible.
+    """
+    version_name = sql_item_name('version', conn.flavor)
+    version_query = version_queries.get(
+        conn.flavor,
+        version_queries['default']
+    ).format(version_name=version_name)
+    return conn.value(version_query, debug=debug)
+
+
+def get_rename_table_queries(old_table: str, new_table: str, flavor: str) -> List[str]:
+    """
+    Return queries to alter a table's name.
+
+    Parameters
+    ----------
+    old_table: str
+        The unquoted name of the old table.
+
+    new_table: str
+        The unquoted name of the new table.
+
+    flavor: str
+        The database flavor to use for the query (e.g. `'mssql'`, `'postgresql'`.
+
+    Returns
+    -------
+    A list of `ALTER TABLE` or equivalent queries for the database flavor.
+    """
+    old_table_name = sql_item_name(old_table, flavor)
+    new_table_name = sql_item_name(new_table, flavor)
+    tmp_table = '_tmp_rename_' + new_table
+    tmp_table_name = sql_item_name(tmp_table, flavor)
+    if flavor == 'mssql':
+        return [f"EXEC sp_rename '{old_table}', '{new_table}'"]
+
+    if flavor == 'duckdb':
+        return [
+            get_create_table_query(f"SELECT * FROM {old_table_name}", tmp_table, 'duckdb'),
+            get_create_table_query(f"SELECT * FROM {tmp_table_name}", new_table, 'duckdb'),
+            f"DROP TABLE {tmp_table_name}",
+            f"DROP TABLE {old_table_name}",
+        ]
+
+    return [f"ALTER TABLE {old_table_name} RENAME TO {new_table_name}"]
+
+
+def get_create_table_query(query: str, new_table: str, flavor: str) -> str:
+    """
+    Return a query to create a new table from a `SELECT` query.
+
+    Parameters
+    ----------
+    query: str
+        The select query to use for the creation of the table.
+
+    new_table: str
+        The unquoted name of the new table.
+
+    flavor: str
+        The database flavor to use for the query (e.g. `'mssql'`, `'postgresql'`.
+
+    Returns
+    -------
+    A `CREATE TABLE` (or `SELECT INTO`) query for the database flavor.
+    """
+    import textwrap
+    create_cte = 'create_query'
+    create_cte_name = sql_item_name(create_cte, flavor)
+    new_table_name = sql_item_name(new_table, flavor)
+    if flavor in ('mssql',):
+        query = query.lstrip()
+        original_query = query
+        if 'with ' in query.lower():
+            final_select_ix = query.lower().rfind('select')
+            def_name = query[len('WITH '):].split(' ', maxsplit=1)[0]
+            return (
+                query[:final_select_ix].rstrip() + ',\n'
+                + f"{create_cte_name} AS (\n"
+                + query[final_select_ix:]
+                + "\n)\n"
+                + f"SELECT *\nINTO {new_table_name}\nFROM {create_cte_name}"
+            )
+
+        create_table_query = f"""
+            SELECT *
+            INTO {new_table_name}
+            FROM ({query}) AS {create_cte_name}
+        """
+    elif flavor in (None,):
+        create_table_query = f"""
+            WITH {create_cte_name} AS ({query})
+            CREATE TABLE {new_table_name} AS
+            SELECT *
+            FROM {create_cte_name}
+        """
+    elif flavor in ('sqlite', 'mysql', 'mariadb', 'duckdb', 'oracle'):
+        create_table_query = f"""
+            CREATE TABLE {new_table_name} AS
+            SELECT *
+            FROM ({query})""" + (f""" AS {create_cte_name}""" if flavor != 'oracle' else '') + """
+        """
+    else:
+        create_table_query = f"""
+            SELECT *
+            INTO {new_table_name}
+            FROM ({query}) AS {create_cte_name}
+        """
+
+    return textwrap.dedent(create_table_query)
+
+
+def format_cte_subquery(
+        sub_query: str,
+        flavor: str,
+        sub_name: str = 'src',
+        cols_to_select: Union[List[str], str] = '*',
+    ) -> str:
+    """
+    Given a subquery, build a wrapper query that selects from the CTE subquery.
+
+    Parameters
+    ----------
+    sub_query: str
+        The subquery to wrap.
+
+    flavor: str
+        The database flavor to use for the query (e.g. `'mssql'`, `'postgresql'`.
+
+    sub_name: str, default 'src'
+        If possible, give this name to the CTE (must be unquoted).
+
+    cols_to_select: Union[List[str], str], default ''
+        If specified, choose which columns to select from the CTE.
+        If a list of strings is provided, each item will be quoted and joined with commas.
+        If a string is given, assume it is quoted and insert it into the query.
+
+    Returns
+    -------
+    A wrapper query that selects from the CTE.
+    """
+    import textwrap
+    quoted_sub_name = sql_item_name(sub_name, flavor)
+    cols_str = (
+        cols_to_select
+        if isinstance(cols_to_select, str)
+        else ', '.join([sql_item_name(col, flavor) for col in cols_to_select])
+    )
+    return textwrap.dedent(
+        f"""
+        SELECT {cols_str}
+        FROM ({sub_query})"""
+        + (f' AS {quoted_sub_name}' if flavor != 'oracle' else '') + """
+        """
+    )

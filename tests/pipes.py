@@ -14,13 +14,13 @@ stress_pipes = {}
 remote_pipes = {}
 
 for _label, instance in conns.items():
-    all_pipes[_label], stress_pipes[_label], remote_pipes[_label] = [], [], []
+    all_pipes[_label], remote_pipes[_label] = [], []
     stress_pipe = Pipe(
         'plugin:stress', 'test',
         mrsm_instance = instance,
         parameters = {
             'columns': {
-                'datetime': 'datetime' ,
+                'datetime': 'datetime',
                 'id': 'id',
             },
             'fetch': {
@@ -30,7 +30,7 @@ for _label, instance in conns.items():
         },
     )
     all_pipes[_label].append(stress_pipe)
-    stress_pipes[_label].append(stress_pipe)
+    stress_pipes[_label] = stress_pipe
     for __label, conn in conns.items():
         remote_pipe = Pipe(
             str(conn), 'test', None,

@@ -18,7 +18,9 @@ default_formatting_config = {
         'hand'             : '👋',
         'error'            : '🛑',
         'failure'          : '💢',
+        'failure_calm'     : '❌',
         'success'          : '🎉',
+        'success_calm'     : '✅',
         'warning'          : '🔔',
         'info'             : '💬',
         'debug'            : '🐞',
@@ -30,6 +32,9 @@ default_formatting_config = {
         'idea'             : '💡',
         'connected'        : '🟢',
         'disconnected'     : '🔴',
+        'running'          : '🟢',
+        'paused'           : '🟡',
+        'stopped'          : '🔴',
     },
     'pipes'                : {
         'unicode'          : {
@@ -107,6 +112,32 @@ default_formatting_config = {
         'ansi'             : {
             'rich'         : {
                 'style'    : 'bold red',
+            },
+        },
+    },
+    'success_calm'         : {
+        'unicode'          : {
+            'icon'         : 'MRSM{formatting:emoji:success_calm}',
+        },
+        'ascii'            : {
+            'icon'         : '+',
+        },
+        'ansi'             : {
+            'rich'         : {
+                'style'    : 'pale_green3',
+            },
+        },
+    },
+    'failure_calm'         : {
+        'unicode'          : {
+            'icon'         : 'MRSM{formatting:emoji:failure_calm}',
+        },
+        'ascii'            : {
+            'icon'         : 'x',
+        },
+        'ansi'             : {
+            'rich'         : {
+                'style'    : 'indian red',
             },
         },
     },

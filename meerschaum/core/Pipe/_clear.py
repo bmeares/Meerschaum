@@ -15,7 +15,7 @@ def clear(
         end: Optional[datetime.datetime] = None,
         params: Optional[Dict[str, Any]] = None,
         debug: bool = False,
-        **kw: Any
+        **kwargs: Any
     ) -> SuccessTuple:
     """
     Call the Pipe's instance connector's `clear_pipe` method.
@@ -56,13 +56,22 @@ def clear(
     from meerschaum.connectors import get_connector_plugin
 
     if self.cache_pipe is not None:
-        success, msg = self.cache_pipe.clear(begin=begin, end=end, debug=debug, **kw)
+        success, msg = self.cache_pipe.clear(
+            begin = begin,
+            end = end,
+            params = params,
+            debug = debug,
+            **kwargs
+        )
         if not success:
             warn(msg)
 
     with Venv(get_connector_plugin(self.instance_connector)):
         return self.instance_connector.clear_pipe(
             self,
-            begin=begin, end=end, params=params, debug=debug,
-            **kw
+            begin = begin,
+            end = end,
+            params = params,
+            debug = debug,
+            **kwargs
         )

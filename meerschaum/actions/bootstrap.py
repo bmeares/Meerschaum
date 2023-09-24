@@ -21,15 +21,14 @@ def bootstrap(
         `bootstrap pipes`
 
     """
-    from meerschaum.utils.misc import choose_subaction
-    if action is None:
-        action = []
+    from meerschaum.actions import choose_subaction
     options = {
         'pipes'      : _bootstrap_pipes,
         'config'     : _bootstrap_config,
         'connectors' : _bootstrap_connectors,
     }
     return choose_subaction(action, options, **kw)
+
 
 def _bootstrap_pipes(
         action: Optional[List[str]] = None,
@@ -417,5 +416,5 @@ def _bootstrap_config(
 ### NOTE: This must be the final statement of the module.
 ###       Any subactions added below these lines will not
 ###       be added to the `help` docstring.
-from meerschaum.utils.misc import choices_docstring as _choices_docstring
+from meerschaum.actions import choices_docstring as _choices_docstring
 bootstrap.__doc__ += _choices_docstring('bootstrap')

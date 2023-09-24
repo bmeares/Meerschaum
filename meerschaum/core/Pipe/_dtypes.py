@@ -3,18 +3,24 @@
 # vim:fenc=utf-8
 
 """
-Enfore data types for a pipe's underlying table.
+Enforce data types for a pipe's underlying table.
 """
 
 from __future__ import annotations
+from io import StringIO
 from meerschaum.utils.typing import Dict, Any, Optional
 
-def enforce_dtypes(self, df: 'pd.DataFrame', debug: bool=False) -> 'pd.DataFrame':
+def enforce_dtypes(
+        self,
+        df: 'pd.DataFrame',
+        chunksize: Optional[int] = -1,
+        debug: bool = False,
+    ) -> 'pd.DataFrame':
     """
     Cast the input dataframe to the pipe's registered data types.
     If the pipe does not exist and dtypes are not set, return the dataframe.
-
     """
+    import traceback
     from meerschaum.utils.warnings import warn
     from meerschaum.utils.debug import dprint
     from meerschaum.utils.misc import parse_df_datetimes, enforce_dtypes as _enforce_dtypes
@@ -33,12 +39,13 @@ def enforce_dtypes(self, df: 'pd.DataFrame', debug: bool=False) -> 'pd.DataFrame
     try:
         if isinstance(df, str):
             df = parse_df_datetimes(
-                pd.read_json(df),
+                pd.read_json(StringIO(df)),
                 ignore_cols = [
                     col
                     for col, dtype in pipe_dtypes.items()
                     if 'datetime' not in str(dtype)
                 ],
+                chunksize = chunksize,
                 debug = debug,
             )
         else:
@@ -49,11 +56,12 @@ def enforce_dtypes(self, df: 'pd.DataFrame', debug: bool=False) -> 'pd.DataFrame
                     for col, dtype in pipe_dtypes.items()
                     if 'datetime' not in str(dtype)
                 ],
+                chunksize = chunksize,
                 debug = debug,
             )
     except Exception as e:
-        warn(f"Unable to cast incoming data as a DataFrame...:\n{e}")
-        return df
+        warn(f"Unable to cast incoming data as a DataFrame...:\n{e}\n\n{traceback.format_exc()}")
+        return None
 
     if not pipe_dtypes:
         if debug:
@@ -91,9 +99,17 @@ def infer_dtypes(self, persist: bool=False, debug: bool=False) -> Dict[str, Any]
         return dtypes
 
     from meerschaum.utils.sql import get_pd_type
+    from meerschaum.utils.misc import to_pandas_dtype
     columns_types = self.get_columns_types(debug=debug)
+
+    ### NOTE: get_columns_types() may return either the types as
+    ###       PostgreSQL- or Pandas-style.
     dtypes = {
-        c: get_pd_type(t, allow_custom_dtypes=True)
+        c: (
+            get_pd_type(t, allow_custom_dtypes=True)
+            if str(t).isupper()
+            else to_pandas_dtype(t)
+        )
         for c, t in columns_types.items()
     } if columns_types else {}
     if persist:

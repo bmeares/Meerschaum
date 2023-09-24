@@ -16,8 +16,7 @@ def start(
     """
     Start subsystems (API server, background job, etc.).
     """
-
-    from meerschaum.utils.misc import choose_subaction
+    from meerschaum.actions import choose_subaction
     options = {
         'api': _start_api,
         'jobs': _start_jobs,
@@ -26,6 +25,7 @@ def start(
         'connectors': _start_connectors,
     }
     return choose_subaction(action, options, **kw)
+
 
 def _complete_start(
         action: Optional[List[str]] = None,
@@ -113,7 +113,7 @@ def _start_jobs(
     from meerschaum.utils.warnings import warn, info
     from meerschaum.utils.daemon import (
         daemon_action, Daemon, get_daemon_ids, get_daemons, get_filtered_daemons,
-        get_stopped_daemons, get_running_daemons
+        get_stopped_daemons, get_running_daemons, get_paused_daemons,
     )
     from meerschaum.utils.daemon._names import get_new_daemon_name
     from meerschaum._internal.arguments._parse_arguments import parse_arguments
@@ -128,12 +128,16 @@ def _start_jobs(
     daemon_ids = get_daemon_ids()
 
     new_job = len(list(action)) > 0
-    _potential_jobs = {'known' : [], 'unknown' : []}
+    _potential_jobs = {'known': [], 'unknown': []}
 
     if action:
         for a in action:
-            _potential_jobs[('known' if a in daemon_ids else 'unknown')].append(a)
-        
+            _potential_jobs[(
+                'known'
+                if a in daemon_ids
+                else 'unknown'
+            )].append(a)
+
         ### Check if the job is named after an action.
         if (
             _potential_jobs['known']
@@ -144,7 +148,7 @@ def _start_jobs(
             _potential_jobs['unknown'].insert(0, _potential_jobs['known'][0])
             del _potential_jobs['known'][0]
 
-        ### Only spawn a new job if we don't don't find any jobs.
+        ### Only spawn a new job if we don't find any jobs.
         new_job = (len(_potential_jobs['known']) == 0)
         if not new_job and _potential_jobs['unknown']:
             if not kw.get('nopretty', False):
@@ -171,17 +175,22 @@ def _start_jobs(
             return False, msg
 
     ### No action provided but a --name was. Start job if possible.
-    ### E.g. `start job --myjob`
+    ### E.g. `start job --name myjob`
     elif name is not None:
         new_job = False
         names = [name]
 
     ### No action or --name was provided. Ask to start all stopped jobs.
     else:
+        _running_daemons = get_running_daemons()
+        _paused_daemons = get_paused_daemons()
         _stopped_daemons = get_stopped_daemons()
-        if not _stopped_daemons:
-            return False, "No jobs to start."
-        names = [d.daemon_id for d in _stopped_daemons]
+        if not _stopped_daemons and not _paused_daemons:
+            if not _running_daemons:
+                return False, "No jobs to start."
+            return True, "All jobs are running."
+
+        names = [d.daemon_id for d in _stopped_daemons + _paused_daemons]
 
     def _run_new_job(name: Optional[str] = None):
         kw['action'] = action
@@ -192,6 +201,10 @@ def _start_jobs(
 
     def _run_existing_job(name: Optional[str] = None):
         daemon = Daemon(daemon_id=name)
+        if daemon.process is not None:
+            if daemon.status == 'paused':
+                return daemon.resume(), daemon.daemon_id
+            return (True, f"Job '{name}' is already running."), daemon.daemon_id
 
         if not daemon.path.exists():
             if not kw.get('nopretty', False):
@@ -202,11 +215,13 @@ def _start_jobs(
                 )
             return (False, f"Job '{name}' does not exist."), daemon.daemon_id
 
-        daemon.cleanup()
         try:
             _daemon_sysargs = daemon.properties['target']['args'][0]
         except KeyError:
-            return False, "Failed to get arguments for daemon '{dameon.daemon_id}'."
+            return (
+                (False, f"Failed to get arguments for daemon '{daemon.daemon_id}'."),
+                daemon.daemon_id
+            )
         _daemon_kw = parse_arguments(_daemon_sysargs)
         _daemon_kw['name'] = daemon.daemon_id
         _action_success_tuple = daemon_action(**_daemon_kw)
@@ -221,10 +236,11 @@ def _start_jobs(
     _filtered_daemons = get_filtered_daemons(names)
     if not kw.get('force', False) and _filtered_daemons:
         _filtered_running_daemons = get_running_daemons(_filtered_daemons)
+        _skipped_daemons = []
         if _filtered_running_daemons:
             pprint_jobs(_filtered_running_daemons)
             if yes_no(
-                "The above jobs are still running. Do you want to first stop these jobs?",
+                "Do you want to first stop these jobs?",
                 default = 'n',
                 yes = kw.get('yes', False),
                 noask = kw.get('noask', False)
@@ -252,26 +268,26 @@ def _start_jobs(
                 for d in _filtered_running_daemons:
                     names.remove(d.daemon_id)
                     _filtered_daemons.remove(d)
+                    _skipped_daemons.append(d)
 
         if not _filtered_daemons:
-            return False, "No jobs to start."
-        pprint_jobs(_filtered_daemons, nopretty=kw.get('nopretty', False))
-        if not yes_no(
-            (
-                f"Would you like to overwrite the logs and run the job"
-                + ("s" if len(names) != 1 else '') + " " + items_str(names) + "?"
-            ),
-            default = 'n',
-            yes = kw.get('yes', False),
-            nopretty = kw.get('nopretty', False),
-            noask = kw.get('noask', False),
-        ):
-            return (False, "Nothing was started.")
+            return len(_skipped_daemons) > 0, "No jobs to start."
 
+        pprint_jobs(_filtered_daemons, nopretty=kw.get('nopretty', False))
+        info(
+            f"Starting the job"
+            + ("s" if len(names) != 1 else "")
+            + " " + items_str(names)
+            + "..."
+        )
 
     _successes, _failures = [], []
     for _name in names:
-        success_tuple, __name = _run_new_job(_name) if new_job else _run_existing_job(_name)
+        success_tuple, __name = (
+            _run_new_job(_name)
+            if new_job
+            else _run_existing_job(_name)
+        )
         if not kw.get('nopretty', False):
             print_tuple(success_tuple)
         _successes.append(_name) if success_tuple[0] else _failures.append(_name)
@@ -283,7 +299,7 @@ def _start_jobs(
         + ("Failed to start job" + ("s" if len(_failures) != 1 else '')
             + f" {items_str(_failures)}." if _failures else '')
     )
-    return len(_successes) > 0, msg
+    return len(_failures) == 0, msg
 
 def _complete_start_jobs(
         action: Optional[List[str]] = None,

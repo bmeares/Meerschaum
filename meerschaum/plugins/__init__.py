@@ -254,6 +254,9 @@ def sync_plugins_symlinks(debug: bool = False, warn: bool = True) -> None:
         try:
             if PLUGINS_INTERNAL_LOCK_PATH.exists():
                 PLUGINS_INTERNAL_LOCK_PATH.unlink()
+        ### Sometimes competing threads will delete the lock file at the same time.
+        except FileNotFoundError:
+            pass
         except Exception as e:
             if warn:
                 _warn(f"Error cleaning up lockfile {PLUGINS_INTERNAL_LOCK_PATH}:\n{e}")
