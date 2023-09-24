@@ -215,7 +215,6 @@ def _start_jobs(
                 )
             return (False, f"Job '{name}' does not exist."), daemon.daemon_id
 
-        daemon.cleanup(keep_logs=True)
         try:
             _daemon_sysargs = daemon.properties['target']['args'][0]
         except KeyError:

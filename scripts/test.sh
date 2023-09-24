@@ -6,11 +6,12 @@ DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" >/dev/null 2>&1 && pwd )"
 cd "$PARENT"
 test_root="$PARENT/test_root"
 test_plugins="$PARENT/tests/plugins"
+mrsm="$PARENT/scripts/mrsm.sh"
 mkdir -p "$test_root"
 test_port="8989"
 export MRSM_ROOT_DIR=$test_root
 export MRSM_PLUGINS_DIR=$test_plugins
-
+export MRSM_API_TEST=http://user:pass@localhost:$test_port
 [ -z "$PYTHON_BIN" ] && export PYTHON_BIN=python
 [ -z "$MRSM_TEST_FLAVORS" ] && export MRSM_TEST_FLAVORS='api,timescaledb'
 if [ "$MRSM_TEST_FLAVORS" = "all" ]; then
@@ -32,10 +33,14 @@ rm -rf "$test_root/data"
 rm -f "$test_root/sqlite/mrsm_local.db"
 
 ### Start the test API.
-$PYTHON_BIN -m meerschaum delete jobs test_api -y --timeout 10
-$PYTHON_BIN -m meerschaum start api \
-  -w 1 -p $test_port --name test_api -y -d -i sql:local
-MRSM_API_TEST=http://user:pass@localhost:$test_port $PYTHON_BIN -m meerschaum start connectors api:test
+true && \
+  $mrsm delete jobs test_api -y && \
+  $mrsm start api \
+    -w 1 -p $test_port --name test_api -y -d -i sql:local && \
+  $mrsm start connectors api:test && \
+  $mrsm stop jobs test_api -y && \
+  $mrsm start jobs test_api -y && \
+  $mrsm start connectors api:test
 
 ### This is necessary to trigger installations in a clean environment.
 $PYTHON_BIN -c "
@@ -79,8 +84,11 @@ print(' '.join([
 ]))")
 export $MRSM_URIS
 
-$PYTHON_BIN -m meerschaum show connectors
-$PYTHON_BIN -m meerschaum start connectors $MRSM_CONNS
+true && \
+  $mrsm show connectors && \
+  $mrsm start connectors $MRSM_CONNS; rc="$?"
+[ "$rc" != '0' ] && exit "$rc"
+
 $PYTHON_BIN -m pytest \
   --durations=0 \
   --ignore=portable/ \
@@ -96,7 +104,7 @@ if [ "$2" == "rm" ]; then
   cd tests/
   docker-compose down -v
   cd ../
-  $PYTHON_BIN -m meerschaum delete job test_api -f -y
+  $mrsm delete job test_api -f -y
 fi
 
 exit "$rc"

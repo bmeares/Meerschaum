@@ -373,6 +373,7 @@ def _complete_delete_connectors(
         search_term = action[-1]
     return get_connector_labels(*types, search_term=search_term)
 
+
 def _delete_jobs(
         action: Optional[List[str]] = None,
         noask: bool = False,
@@ -399,7 +400,8 @@ def _delete_jobs(
     from meerschaum.actions import actions
     daemons = get_filtered_daemons(action, warn=(not nopretty))
     if not daemons:
-        return False, "No jobs to delete."
+        return True, "No jobs to delete; nothing to do."
+
     _delete_all_jobs = False
     if not action:
         if not force:

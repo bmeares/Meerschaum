@@ -692,7 +692,7 @@ class Daemon:
 
 
     @property
-    def pid(self) -> str:
+    def pid(self) -> Union[int, None]:
         """Read the PID file and return its contents.
         Returns `None` if the PID file does not exist.
         """
@@ -701,10 +701,12 @@ class Daemon:
         try:
             with open(self.pid_path, 'r') as f:
                 text = f.read()
+            pid = int(text.rstrip())
         except Exception as e:
             warn(e)
             text = None
-        return text.rstrip('\n') if text is not None else text
+            pid = None
+        return pid
 
 
     @property
