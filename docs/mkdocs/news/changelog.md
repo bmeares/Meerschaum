@@ -160,8 +160,40 @@
 - **Added `chunk_minutes` to `pipe.parameters['verify']`.**  
   Like `pipe.parameters['fetch']['backtrack_minutes']`, you may now specify the default chunk interval to use for verification syncs and iterating over the datetime axis.
 
+  ```python
+  import meerschaum as mrsm
+  pipe = mrsm.Pipe(
+      'a', 'b',
+      instance = 'sql:local',
+      columns = {'datetime': 'dt'},
+      parameters = {
+          'verify': {
+              'chunk_minutes': 2880,
+          }
+      },
+  )
+  pipe.sync([
+      {'dt': '2023-01-01'},
+      {'dt': '2023-01-02'},
+      {'dt': '2023-01-03'},
+      {'dt': '2023-01-04'},
+      {'dt': '2023-01-05'},
+  ])
+  chunk_bounds = pipe.get_chunk_bounds(bounded=True)
+  for chunk_begin, chunk_end in chunk_bounds:
+      print(chunk_begin, '-', chunk_end)
+
+  # 2023-01-01 00:00:00 - 2023-01-03 00:00:00
+  # 2023-01-03 00:00:00 - 2023-01-05 00:00:00
+  ```
+
 - **Added `--chunk-minutes`, `--chunk-hours`, and `--chunk-days`.**  
   You may override a pipe's chunk interval during a verification sync with `--chunk-minutes` (or `--chunk-hours` or `--chunk-days`).
+
+  ```python
+  mrsm verify pipes --chunk-days 3
+  ```
+
 
 - **Added `pipe.get_chunk_interval()` and `pipe.get_backtrack_interval()`.**  
   Return the `timedelta` (or `int` for integer datetimes) from `verify:chunk_minutes` and `fetch:backtrack_minutes`, respectively.

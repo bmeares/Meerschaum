@@ -595,7 +595,7 @@ def test_sync_dask_dataframe(flavor: str):
         {'dt': '2023-01-02', 'id': 2},
         {'dt': '2023-01-03', 'id': 3},
     ])
-    ddf = pipe.get_data(as_dask=True)
+    ddf = pipe.get_data(as_dask=True, debug=debug)
 
     pipe2 = mrsm.Pipe(
         'dask', 'insert',
@@ -603,5 +603,5 @@ def test_sync_dask_dataframe(flavor: str):
         instance = conn,
     )
     pipe2.drop()
-    pipe2.sync(ddf)
+    pipe2.sync(ddf, debug=debug)
     assert pipe.get_data().to_dict() == pipe2.get_data().to_dict()

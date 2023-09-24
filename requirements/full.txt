@@ -41,7 +41,7 @@ pycparser>=2.21.0
 numpy>=1.18.5
 pandas[parquet]>=2.0.1
 pyarrow>=7.0.0
-dask>=2023.9.0
+dask>=2023.5.0
 pytz
 joblib>=0.17.0
 SQLAlchemy>=2.0.5

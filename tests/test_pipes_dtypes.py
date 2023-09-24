@@ -23,9 +23,9 @@ def test_sync_change_columns_dtypes(flavor: str):
     Test that new columns are added.
     """
     conn = conns[flavor]
-    pipe = Pipe('foo', 'bar', columns={'datetime': 'dt', 'id': 'id'}, instance=conn)
+    pipe = Pipe('change', 'cols', 'dtypes', columns={'datetime': 'dt', 'id': 'id'}, instance=conn)
     pipe.delete(debug=debug)
-    pipe = Pipe('foo', 'bar', columns={'datetime': 'dt', 'id': 'id'}, instance=conn)
+    pipe = Pipe('change', 'cols', 'dtypes', columns={'datetime': 'dt', 'id': 'id'}, instance=conn)
     docs = [
         {'dt': '2022-01-01', 'id': 1, 'a': 10},
     ]
@@ -48,10 +48,10 @@ def test_dtype_enforcement(flavor: str):
     Test that incoming rows are enforced to the correct data type.
     """
     conn = conns[flavor]
-    pipe = mrsm.Pipe('foo', 'bar', instance=conn)
+    pipe = mrsm.Pipe('dtype', 'enforcement', instance=conn)
     pipe.delete(debug=debug)
     pipe = Pipe(
-        'foo', 'bar',
+        'dtype', 'enforcement',
         columns = {
             'datetime': 'dt',
             'id': 'id',
