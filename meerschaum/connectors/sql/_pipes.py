@@ -1112,7 +1112,9 @@ def sync_pipe(
     from meerschaum.utils.debug import dprint
     from meerschaum.utils.packages import import_pandas
     from meerschaum.utils.sql import get_update_queries, sql_item_name, json_flavors
-    from meerschaum.utils.misc import generate_password, get_json_cols
+    from meerschaum.utils.misc import generate_password
+    from meerschaum.utils.dataframe import get_json_cols
+    from meerschaum.utils.dtypes import are_dtypes_equal
     from meerschaum import Pipe
     import time
     import copy
@@ -1156,6 +1158,22 @@ def sync_pipe(
                 warn(f"Failed to alter columns for {pipe}.")
             else:
                 _ = pipe.infer_dtypes(persist=True)
+
+    ### NOTE: Oracle SQL < 23c (2023) does not support booleans,
+    ### so infer bools and persist them to `dtypes`.
+    if self.flavor == 'oracle':
+        pipe_dtypes = pipe.dtypes
+        new_bool_cols = {
+            col: 'bool[pyarrow]'
+            for col, typ in df.dtypes.items()
+            if col not in pipe_dtypes
+            and are_dtypes_equal(str(typ), 'bool')
+        }
+        pipe_dtypes.update(new_bool_cols)
+        pipe.dtypes = pipe_dtypes
+        infer_bool_success, infer_bool_msg = pipe.edit(debug=debug)
+        if not infer_bool_success:
+            return infer_bool_success, infer_bool_msg
 
     unseen_df, update_df, delta_df = (
         pipe.filter_existing(

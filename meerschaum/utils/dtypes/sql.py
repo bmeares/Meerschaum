@@ -29,7 +29,9 @@ DB_TO_PD_DTYPES: Dict[str, Union[str, Dict[str, str]]] = {
     'BOOLEAN': 'bool[pyarrow]',
     'BOOLEAN()': 'bool[pyarrow]',
     'TINYINT': 'bool[pyarrow]',
+    'TINYINT(1)': 'bool[pyarrow]',
     'BIT': 'bool[pyarrow]',
+    'BIT(1)': 'bool[pyarrow]',
     'JSON': 'object',
     'JSONB': 'object',
     'substrings': {
@@ -115,8 +117,8 @@ PD_TO_DB_DTYPES_FLAVORS: Dict[str, Dict[str, str]] = {
     'bool': {
         'timescaledb': 'BOOLEAN',
         'postgresql': 'BOOLEAN',
-        'mariadb': 'TINYINT',
-        'mysql': 'TINYINT',
+        'mariadb': 'BOOLEAN',
+        'mysql': 'BOOLEAN',
         'mssql': 'BIT',
         'oracle': 'INTEGER',
         'sqlite': 'BOOLEAN',

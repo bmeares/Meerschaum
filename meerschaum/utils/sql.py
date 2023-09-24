@@ -143,12 +143,12 @@ NO_SELECT_INTO_FLAVORS = {'sqlite', 'oracle', 'mysql', 'mariadb', 'duckdb'}
 DB_FLAVORS_CAST_DTYPES = {
     'mariadb': {
         'BIGINT': 'DECIMAL',
-        'TINYINT': 'INT',
+        'TINYINT': 'UNSIGNED INT',
         'TEXT': 'CHAR(10000) CHARACTER SET utf8',
     },
     'mysql': {
         'BIGINT': 'DECIMAL',
-        'TINYINT': 'INT',
+        'TINYINT': 'UNSIGNED INT',
         'TEXT': 'CHAR(10000) CHARACTER SET utf8',
     },
     'oracle': {
@@ -722,7 +722,7 @@ def get_update_queries(
     target_table = get_sqlalchemy_table(target, connector)
     value_cols = []
     if debug:
-        dprint(f"target_table.columns: {target_table.columns}")
+        dprint(f"target_table.columns: {dict(target_table.columns)}")
     for c in target_table.columns:
         c_name, c_type = c.name, str(c.type)
         if c_name in join_cols:
