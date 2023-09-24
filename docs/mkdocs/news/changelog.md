@@ -79,14 +79,52 @@
   ```
 
 - **Added `pyarrow` support.**  
-  The dtypes enforcement system was overhauled to add support for `pyarrow` data types. Note that `bool` columns must be explictly stated in `pipe.dtypes` to avoid coercion into integers.
+  The dtypes enforcement system was overhauled to add support for `pyarrow` data types.
+
+  ```python
+  import meerschaum as mrsm
+  import pandas as pd
+
+  df = pd.DataFrame(
+      [{'a': 1, 'b': 2.3}]
+  ).convert_dtypes(dtype_backend='pyarrow')
+  
+  pipe = mrsm.Pipe(
+      'demo', 'pyarrow',
+      instance = 'sql:local',
+      columns = {'a': 'a'},
+  )
+  pipe.sync(df)
+  ```
+
+- **Added `bool` support.**  
+  Pipes may now sync DataFrames with booleans (even on Oracle and MySQL):
+
+  ```python
+  import meerschaum as mrsm
+  pipe = mrsm.Pipe(
+      'demo', 'bools',
+      instance = 'sql:local',
+      columns = {'id': 'id'},
+  )
+  pipe.sync([{'id': 1, 'is_blue': True}])
+  assert 'bool' in pipe.dtypes['is_blue']
+
+  pipe.sync([{'id': 1, 'is_blue': False}])
+  assert pipe.get_data()['is_blue'][0] == False
+  ```
+
 
 - **Added preliminary `dask` support.**  
   For example, you may now return Dask DataFrames in your plugins, pass into `pipe.sync()`, and `pipe.get_data()` now has the flag `as_dask`.
 
   ```python
   import meerschaum as mrsm
-  pipe = mrsm.Pipe('dask', 'demo', columns={'datetime': 'dt'})
+  pipe = mrsm.Pipe(
+      'dask', 'demo',
+      columns = {'datetime': 'dt'},
+      instance = 'sql:local',
+  )
   pipe.sync([
       {'dt': '2023-01-01', 'id': 1},
       {'dt': '2023-01-02', 'id': 2},
@@ -109,6 +147,14 @@
   # 0 2023-01-01   1
   # 0 2023-01-02   2
   # 0 2023-01-03   3
+  
+  pipe2 = mrsm.Pipe(
+      'dask', 'insert',
+      columns = pipe.columns,
+      instance = 'sql:local',
+  )
+  pipe2.sync(ddf)
+  assert pipe.get_data().to_dict() == pipe2.get_data().to_dict()
   ```
 
 - **Added `chunk_minutes` to `pipe.parameters['verify']`.**  

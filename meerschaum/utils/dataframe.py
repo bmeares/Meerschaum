@@ -300,6 +300,8 @@ def parse_df_datetimes(
         pdf = df
     elif df_is_dask and isinstance(df, dask_dataframe.DataFrame):
         pdf = df.partitions[0].compute()
+        if len(pdf) == 0:
+            pdf = df.partitions[1].compute()
     else:
         if debug:
             dprint(f"df is of type '{type(df)}'. Building {pd.DataFrame}...")

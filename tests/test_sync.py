@@ -576,3 +576,32 @@ def test_nested_chunks(flavor: str):
     assert success, msg
     df = pipe.get_data()
     assert len(df) == num_docs
+
+
+@pytest.mark.parametrize("flavor", get_flavors())
+def test_sync_dask_dataframe(flavor: str):
+    """
+    Verify that we are able to sync Dask DataFrames.
+    """
+    conn = conns[flavor]
+    pipe = mrsm.Pipe(
+        'dask', 'demo',
+        columns = {'datetime': 'dt'},
+        instance = conn,
+    )
+    pipe.drop()
+    pipe.sync([
+        {'dt': '2023-01-01', 'id': 1},
+        {'dt': '2023-01-02', 'id': 2},
+        {'dt': '2023-01-03', 'id': 3},
+    ])
+    ddf = pipe.get_data(as_dask=True)
+
+    pipe2 = mrsm.Pipe(
+        'dask', 'insert',
+        columns = pipe.columns,
+        instance = conn,
+    )
+    pipe2.drop()
+    pipe2.sync(ddf)
+    assert pipe.get_data().to_dict() == pipe2.get_data().to_dict()
