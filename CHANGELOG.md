@@ -65,6 +65,7 @@
   pipe = mrsm.Pipe(
       'demo', 'deduplicate',
       columns = {'datetime': 'dt'},
+      instance = 'sql:local',
   )
   docs = [
       {'dt': '2023-01-01'},
@@ -126,14 +127,14 @@
       instance = 'sql:local',
   )
   pipe.sync([
-      {'dt': '2023-01-01', 'id': 1},
-      {'dt': '2023-01-02', 'id': 2},
-      {'dt': '2023-01-03', 'id': 3},
+      {'dt': '2023-01-01', 'val': 1},
+      {'dt': '2023-01-02', 'val': 2},
+      {'dt': '2023-01-03', 'val': 3},
   ])
   ddf = pipe.get_data(as_dask=True)
   print(ddf)
   # Dask DataFrame Structure:
-  #                            dt              id
+  #                            dt             val
   # npartitions=4
   #                datetime64[ns]  int64[pyarrow]
   #                           ...             ...
@@ -143,10 +144,10 @@
   # Dask Name: from-delayed, 5 graph layers
 
   print(ddf.compute())
-  #           dt  id
-  # 0 2023-01-01   1
-  # 0 2023-01-02   2
-  # 0 2023-01-03   3
+  #           dt  val
+  # 0 2023-01-01    1
+  # 0 2023-01-02    2
+  # 0 2023-01-03    3
   
   pipe2 = mrsm.Pipe(
       'dask', 'insert',
@@ -154,6 +155,10 @@
       instance = 'sql:local',
   )
   pipe2.sync(ddf)
+  assert pipe.get_data().to_dict() == pipe2.get_data().to_dict()
+
+  pipe.sync([{'dt': '2023-01-01', 'val': 10}])
+  pipe2.sync(pipe.get_data(as_dask=True))
   assert pipe.get_data().to_dict() == pipe2.get_data().to_dict()
   ```
 
@@ -194,9 +199,28 @@
   mrsm verify pipes --chunk-days 3
   ```
 
-
 - **Added `pipe.get_chunk_interval()` and `pipe.get_backtrack_interval()`.**  
   Return the `timedelta` (or `int` for integer datetimes) from `verify:chunk_minutes` and `fetch:backtrack_minutes`, respectively.
+
+  ```python
+  import meerschaum as mrsm
+  dt_pipe = mrsm.Pipe(
+      'demo', 'intervals', 'datetime',
+      instance = 'sql:local',
+      columns = {'datetime': 'dt'},
+  )
+  print(dt_pipe.get_chunk_interval())
+  # 1 day, 0:00:00
+
+  int_pipe = mrsm.Pipe(
+      'demo', 'intervals', 'int',
+      instance = 'sql:local',
+      columns = {'datetime': 'dt'},
+      dtypes = {'dt': 'int'},
+  )
+  print(int_pipe.get_chunk_interval())
+  # 1440
+  ```
 
 - **Added `pipe.get_chunk_bounds()`.**  
   Return a list of `begin` and `end` values to use when iterating over a pipe's datetime axis.
@@ -253,6 +277,10 @@
 - **Added `--bounded` to verification syncs.**  
   By default, `verify pipes` is unbounded, meaning it will sync values beyond the existing minimum and maximum datetime values. Running a verification sync with `--bounded` will bound the search to the existing datetime axis.
 
+  ```bash
+  mrsm sync pipes --verify --bounded
+  ```
+
 - **Added `pipe.get_num_workers()`.**  
   Return the number of concurrent threads to be used with this pipe (with respect to its instance connector's thread safety).
 
@@ -260,7 +288,7 @@
   In situations where not all columns are required, you can now either specify which columns you want to include (`select_columns`) and which columns to filter out (`omit_columns`). You may pass a list of columns or a single column, and the value `'*'` for `select_columns` will be treated as `None` (i.e. `SELECT *`).
 
   ```python
-  pipe = mrsm.Pipe('a', 'b', 'c')
+  pipe = mrsm.Pipe('a', 'b', 'c', instance='sql:local')
   pipe.sync([{'a': 1, 'b': 2, 'c': 3}])
   
   pipe.get_data(['a', 'b'])
@@ -344,7 +372,7 @@
 - **Moved `print_options()` from `meerschaum.utils.misc` into `meerschaum.utils.formatting`.**  
   This places `print_options()` next to `print_tuple` and `pprint`. A placeholder function is still present in `meerschaum.utils.misc` to preserve existing behavior.
 
-- **`mrsm.pprint()` will not pretty-print `SuccessTuples`.**
+- **`mrsm.pprint()` will now pretty-print `SuccessTuples`.**
 
 - **Added `calm` to `print_tuple()`.**  
   Printing a `SuccessTuple` with `calm=True` will use a more muted color scheme and emoji.
@@ -352,27 +380,30 @@
 - **Removed `round_down` from `get_sync_time()` for instance connectors.**  
   To avoid confusion, sync times are no longer truncated by default. `round_down` is still an optional keyword argument on `pipe.get_sync_time()`.
 
-- **Moved `to_pandas_dtype()` from `meerschaum.utils.misc` into `meerschaum.utils.dtypes`.**
+- **Created `meerschaum.utils.dtypes`.**  
+  - **Added `are_dtypes_equal()` to `meerschaum.utils.dtypes`.**
+  - **Added `get_db_type_from_pd_type()` to `meerschaum.utils.dtypes.sql`.**
+  - **Added `get_pb_type_from_db_type()` to `meerschaum.utils.dtypes.sql`.**
+  - **Moved `to_pandas_dtype()` from `meerschaum.utils.misc` into `meerschaum.utils.dtypes`.**
 
-- **Moved `filter_unseen()` from `meerschaum.utils.misc` into `meerschaum.utils.dataframe`.**
+- **Created `meerschaum.utils.dataframe`.**  
+  - **Added `chunksize_to_npartitions()` to `meerschaum.utils.dataframe`.**
+  - **Added `get_first_valid_dask_partition()` to `meerschaum.utils.dataframe`.**
+  - **Moved `filter_unseen_df()` from `meerschaum.utils.misc` into `meerschaum.utils.dataframe`.**
+  - **Moved `add_missing_cols_to_df()` from `meerschaum.utils.misc` into `meerschaum.utils.dataframe`.**
+  - **Moved `parse_df_datetimes()` from `meerschaum.utils.misc` into `meerschaum.utils.dataframe`.**
+  - **Moved `df_from_literal()` from `meerschaum.utils.misc` into `meerschaum.utils.dataframe`.**
+  - **Moved `get_json_cols()` from `meerschaum.utils.misc` into `meerschaum.utils.dataframe`.**
+  - **Moved `get_unhashable_cols()` from `meerschaum.utils.misc` into `meerschaum.utils.dataframe`.**
+  - **Moved `enforce_dtypes()` from `meerschaum.utils.misc` into `meerschaum.utils.dataframe`.**
+  - **Moved `get_datetime_bound_from_df()` from `meerschaum.utils.misc` into `meerschaum.utils.dataframe`.**
+  - **Moved `df_is_chunk_generator()` from `meerschaum.utils.misc` into `meerschaum.utils.dataframe`.**
 
-- **Moved `add_missing_cols_to_df()` from `meerschaum.utils.misc` into `meerschaum.utils.dataframe`.**
-
-- **Moved `parse_df_datetimes()` from `meerschaum.utils.misc` into `meerschaum.utils.dataframe`.**
-
-- **Moved `df_from_literal()` from `meerschaum.utils.misc` into `meerschaum.utils.dataframe`.**
-
-- **Moved `get_json_cols()` from `meerschaum.utils.misc` into `meerschaum.utils.dataframe`.**
-
-- **Moved `get_unhashable_cols()` from `meerschaum.utils.misc` into `meerschaum.utils.dataframe`.**
-
-- **Moved `enforce_dtypes()` from `meerschaum.utils.misc` into `meerschaum.utils.dataframe`.**
-
-- **Moved `get_datetime_bound_from_df()` from `meerschaum.utils.misc` into `meerschaum.utils.dataframe`.**
-
-- **Moved `df_is_chunk_generator()` from `meerschaum.utils.misc` into `meerschaum.utils.dataframe`.**
-
-- **Moved `df_is_chunk_generator()` from `meerschaum.utils.misc` into `meerschaum.utils.dataframe`.**
+- **Refactored SQL utilities.**  
+  - **Added `format_cte_subquery()` to `meerschaum.utils.sql`.**
+  - **Added `get_create_table_query()` to `meerschaum.utils.sql`.**
+  - **Added `get_db_version()` to `meerschaum.utils.sql`.**
+  - **Added `get_rename_table_queries()` to `meerschaum.utils.sql`.**
 
 - **Moved `choices_docstring()` from `meerschaum.utils.misc` into `meerschaum.actions`.**
 

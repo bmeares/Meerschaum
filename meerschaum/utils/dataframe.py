@@ -118,11 +118,14 @@ def filter_unseen_df(
     from meerschaum.utils.packages import import_pandas, attempt_import
     from meerschaum.utils.dtypes import to_pandas_dtype, are_dtypes_equal
     pd = import_pandas(debug=debug)
-    is_dask = 'dask' in old_df.__module__
+    is_dask = 'dask' in new_df.__module__
     if is_dask:
         pandas = attempt_import('pandas')
+        dd = attempt_import('dask.dataframe')
+        merge = dd.merge
         NA = pandas.NA
     else:
+        merge = pd.merge
         NA = pd.NA
 
     new_df_dtypes = dict(new_df.dtypes)
@@ -205,7 +208,7 @@ def filter_unseen_df(
         new_df[json_col] = new_df[json_col].apply(serializer)
 
     #  if is_dask:
-    joined_df = pd.merge(
+    joined_df = merge(
         new_df.fillna(NA),
         old_df.fillna(NA),
         how = 'left',

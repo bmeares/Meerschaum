@@ -472,6 +472,53 @@ You may use the built-in method [`pipe.filter_existing()`](https://docs.meerscha
         return True, "Success"
     ```
 
+### `#!python sync_pipe_inplace()` (optional)
+
+For situations where the source and instance connectors are the same, the method `#!python sync_pipe_inplace()` allows you to bypass loading DataFrames into RAM and instead handle the syncs remotely. See the [`#!python SQLConnector.sync_pipe_inplace()`](https://docs.meerschaum.io/connectors/sql/SQLConnector.html#meerschaum.connectors.sql.SQLConnector.SQLConnector.sync_pipe_inplace) method for reference.
+
+## `#!python clear_pipe()`
+
+Delete a pipe's data within a bounded or unbounded interval without dropping the table:
+
+??? example "`#!python def clear_pipe():`"
+    ```python
+    def clear_pipe(
+            self,
+            pipe: mrsm.Pipe,
+            begin: Union[datetime, int, None] = None,
+            end: Union[datetime, int, None] = None,
+            params: Optional[Dict[str, Any]] = None,
+            debug: bool = False,
+        ) -> SuccessTuple:
+        """
+        Delete rows within `begin`, `end`, and `params`.
+
+        Parameters
+        ----------
+        pipe: mrsm.Pipe
+            The pipe whose rows to clear.
+
+        begin: Union[datetime, int, None], default None
+            If provided, remove rows >= `begin`.
+
+        end: Union[datetime, int, None], default None
+            If provided, remove rows < `end`.
+           
+        params: Optional[Dict[str, Any]], default None
+            If provided, only remove rows which match the `params` filter.
+
+        Returns
+        -------
+        A `SuccessTuple` indicating success.
+        """
+        ### TODO Write a query to remove rows which match `begin`, `end`, and `params`.
+        return True, "Success"
+
+    ```
+
+### `#!python deduplicate_pipe()` (optional)
+
+Like `sync_pipe_inplace()`, you may choose to implement `deduplicate_pipe()` for a performance boost. Otherwise, the default implementation relies upon `get_pipe_data()`, `clear_pipe()`, and `get_pipe_rowcount()`. See the [`#!python SQLConnector.deduplicate_pipe()`](https://docs.meerschaum.io/connectors/sql/SQLConnector.html#meerschaum.connectors.sql.SQLConnector.SQLConnector.deduplicate_pipe) method for reference.
 ## `#!python get_pipe_data()`
 
 Return the target table's data according to the filters.
@@ -488,6 +535,8 @@ The `params` argument behaves the same as [`fetch_pipes_keys()`](#fetch_pipes_ke
     def get_pipe_data(
             self,
             pipe: mrsm.Pipe,
+            select_columns: Optional[List[str]] = None,
+            omit_columns: Optional[List[str]] = None,
             begin: Union[datetime, int, None] = None,
             end: Union[datetime, int, None] = None,
             params: Optional[Dict[str, Any]] = None,
@@ -501,6 +550,13 @@ The `params` argument behaves the same as [`fetch_pipes_keys()`](#fetch_pipes_ke
         ----------
         pipe: mrsm.Pipe
             The pipe with the target table from which to read.
+
+        select_columns: Optional[List[str]], default None
+            If provided, only select these given columns.
+            Otherwise select all available columns (i.e. `SELECT *`).
+
+        omit_columns: Optional[List[str]], default None
+            If provided, remove these columns from the selection.
 
         begin: Union[datetime, int, None], default None
             The earliest `datetime` value to search from (inclusive).
@@ -524,10 +580,13 @@ The `params` argument behaves the same as [`fetch_pipes_keys()`](#fetch_pipes_ke
         ### TODO Write a query to fetch from `table_name`
         ###      and apply the filters `begin`, `end`, and `params`.
         ### 
-        ### SELECT *
+        ###      To improve performance, add logic to only read from
+        ###      `select_columns` and not `omit_columns` (if provided).
+        ### 
+        ### SELECT {', '.join(cols_to_select)}
         ### FROM "{table_name}"
         ### WHERE "{dt_col}" >= '{begin}'
-        ###   AND "{dt_col}" < end
+        ###   AND "{dt_col}" <  '{end}'
 
         ### The function `parse_df_datetimes()` is a convenience function
         ### to cast a list of dictionaries into a DataFrame and convert datetime columns.
@@ -579,7 +638,7 @@ Return the largest (or smallest) value in target table, according to the `params
 
 ## `#!python get_pipe_columns_types()`
 
-Return columns and data types (in the style of PostgreSQL).
+Return columns and Pandas data types (you may also return PosgreSQL-style types).
 You may take advantage of automatic dtype enforcement by implementing this method.
 
 ??? example
@@ -606,23 +665,27 @@ You may take advantage of automatic dtype enforcement by implementing this metho
             return {}
 
         table_name = pipe.target
-        ### TODO write a query to fetch the columns contained in `table_name`
-        ### and their data types.
-        ### To ensure proper enforcement, map these types to the corresponding PostgreSQL types
-        ### (e.g. TIMESTAMP, INT, DOUBLE PRECISION, JSON).
+        ### TODO write a query to fetch the columns contained in `table_name`.
         columns_types = {}
+        
+        ### Return a dictionary mapping the columns
+        ### to their Pandas dtypes, e.g.:
+        ### `{'foo': 'int64'`}`
         return columns_types
     ```
 
 ## `#!python get_pipe_rowcount()`
 
-Return the number of rows in the pipe's target table.
+Return the number of rows in the pipe's target table within the `begin`, `end`, and `params` bounds:
 
 ??? example "`#!python def get_pipe_rowcount():`"
     ```python
     def get_pipe_rowcount(
             self,
             pipe: mrsm.Pipe,
+            begin: Union[datetime, int, None] = None,
+            end: Union[datetime, int, None] = None,
+            params: Optional[Dict[str, Any]] = None,
             debug: bool = False,
             **kwargs: Any
         ) -> int:
@@ -634,12 +697,22 @@ Return the number of rows in the pipe's target table.
         pipe: mrsm.Pipe
             The pipe whose table should be counted.
 
+        begin: Union[datetime, int, None], default None
+            If provided, only count rows >= `begin`.
+
+        end: Union[datetime, int, None], default None
+            If provided, only count rows < `end`.
+
+        params: Optional[Dict[str, Any]]
+            If provided, only count rows that match the `params` filter.
+
         Returns
         -------
-        The rowcount for this pipe's table.
+        The rowcount for this pipe's table according the given parameters.
         """
-        ### TODO write a query to count how many rows exist in `table_name`.
+        ### TODO write a query to count how many rows exist in `table_name` according to the filters.
         table_name = pipe.target
         count = 0
         return count
     ```
+

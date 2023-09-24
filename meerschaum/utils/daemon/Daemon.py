@@ -30,7 +30,9 @@ from meerschaum.utils.threading import RepeatTimer
 from meerschaum.__main__ import _close_pools
 
 class Daemon:
-    """Manage running daemons via the Daemon class."""
+    """
+    Daemonize Python functions into background processes.
+    """
 
     def __new__(
         cls,
@@ -58,30 +60,28 @@ class Daemon:
         properties: Optional[Dict[str, Any]] = None,
     ):
         """
-        :param target:
+        Parameters
+        ----------
+        target: Optional[Callable[[Any], Any]], default None,
             The function to execute in a child process.
 
-        :param target_args:
+        target_args: Optional[List[str]], default None
             Positional arguments to pass to the target function.
-            Defaults to `None`.
 
-        :param target_kw:
+        target_kw: Optional[Dict[str, Any]], default None
             Keyword arguments to pass to the target function.
-            Defaults to `None`.
 
-        :param daemon_id:
+        daemon_id: Optional[str], default None
             Build a `Daemon` from an existing `daemon_id`.
             If `daemon_id` is provided, other arguments are ignored and are derived
             from the existing pickled `Daemon`.
 
-        :param label:
+        label: Optional[str], default None
             Label string to help identifiy a daemon.
             If `None`, use the function name instead.
-            Defaults to `None`.
 
-        :param properties:
+        propterties: Optional[Dict[str, Any]], default None
             Override reading from the properties JSON by providing an existing dictionary.
-            Defaults to `None`.
         """
         _pickle = self.__dict__.get('_pickle', False)
         if daemon_id is not None:

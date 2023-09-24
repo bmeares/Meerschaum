@@ -560,12 +560,18 @@ def filter_existing(
     from meerschaum.utils.dtypes import (
         to_pandas_dtype,
     )
-
     pd = import_pandas()
     pandas = attempt_import('pandas')
-    is_dask = 'dask' in pd.__name__
-    if not isinstance(df, pd.DataFrame):
+    if not 'dataframe' in str(type(df)).lower():
         df = self.enforce_dtypes(df, chunksize=chunksize, debug=debug)
+    is_dask = 'dask' in df.__module__
+    if is_dask:
+        dd = attempt_import('dask.dataframe')
+        merge = dd.merge
+        NA = pandas.NA
+    else:
+        merge = pd.merge
+        NA = pd.NA
 
     if (df.empty if not is_dask else len(df) == 0):
         return df, df, df
@@ -695,9 +701,9 @@ def filter_existing(
         backtrack_df[col] = backtrack_df[col].apply(json.dumps)
     casted_cols = set(unhashable_delta_cols + unhashable_backtrack_cols)
 
-    joined_df = pd.merge(
-        delta_df,
-        backtrack_df,
+    joined_df = merge(
+        delta_df.fillna(NA),
+        backtrack_df.fillna(NA),
         how = 'left',
         on = on_cols,
         indicator = True,

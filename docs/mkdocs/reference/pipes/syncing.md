@@ -20,136 +20,254 @@
 
 # 📥 Syncing
 
-Meerschaum efficiently syncs immutable time-series data, such as IoT sensor data streams. The syncing process consists of three basic stages, similar to ETL: **fetch**, **filter**, and **upsert**.
+!!! abstract inline end "Want to read more?"
+    I wrote my [master's thesis](https://tigerprints.clemson.edu/all_theses/3647/) on comparing syncing strategies. [Here are the presentation slides](https://meerschaum.io/files/pdf/slides.pdf) which summarize my findings.
 
-!!! abstract "Want to read more?"
-    I wrote my [master's thesis](https://meerschaum.io/files/pdf/thesis.pdf) on comparing different fetch strategies and came across some intriguing results. [Here are the presentation slides](https://meerschaum.io/files/pdf/slides.pdf) which summarize my findings.
+Meerschaum efficiently syncs time-series data in three basic ETL steps: **fetch**, **filter**, and **upsert**.
 
-??? example "🎦 Watch an example"
-    <asciinema-player src="/assets/casts/sync-pipes.cast" preload="true" rows="37"></asciinema-player>
+## Syncing Stages
 
-## Stages
-The primary reason for syncing in this way is to take advantage of the properties of time-series data to minimize the stress imposed on remote source databases.
+The primary reason for syncing in this way is to take advantage of the properties of time-series data. Note that when writing your plugins, you only need to focus on getting data within `begin` and `end` bounds, and Meerschaum will handle the rest.
 
-### **Fetch** (*Extract* and *Transform*)  
-This is where the real time-series optimizations come into play. When syncing a SQL pipe, the definition sub-query is executed with additional filtering in the `WHERE` clause to only fetch the newest data.
+- **Fetch** (*Extract* and *Transform*)  
+  Because most new data will be newer than the previous sync, the fetch stage returns rows greater than the previous sync time (minus a backtracking window).
 
-For example, if the definition of a pipe is `#!sql SELECT * FROM remote_table`, something like the following query would be executed (query syntax will vary depending on the remote database flavor):
+??? example "Example `fetch` query"
 
-```sql
-WITH definition AS (
-  SELECT *
-  FROM remote_table
-)
-SELECT *
-FROM definition
-WHERE
-  definition.datetime >= CAST(
-    '2021-06-23 14:52:00' AS TIMESTAMP
-  )
-```
+    === "SQL"
+        ```sql
+        WITH "definition" AS (
+          SELECT datetime, id, value
+          FROM remote_table
+        )
+        SELECT
+          "datetime",
+          "id",
+          "value"
+        FROM "definition"
+        WHERE
+          "datetime" >= '2021-06-23 14:52:00'
+        ```
 
-!!! question "How does fetch work?"
-    The fetching process depends on the type of [connector](/reference/connectors/). SQL pipes generate and execute queries, API pipes read JSON from other Meerschaum API servers, MQTT pipes subscribe to a topic, and plugin pipes implement custom functionality. If you have your own data (e.g. a CSV file), you don't need a connector and may instead sync a DataFrame directly:
-    ```python
-    >>> from meerschaum import Pipe
-    >>>
-    >>> ### Columns only need to be defined if you're creating a new pipe.
-    >>> pipe.columns = { 'datetime' : 'time', 'id' : 'station_id' }
-    >>>
-    >>> ### Create a Pandas DataFrame somehow,
-    >>> ### or you can use a dictionary of lists instead.
-    >>> df = pd.read_csv('data.csv')
-    >>>
-    >>> pipe.sync(df)
-    ```
+    === "Python"
+        ```python
+        sync_time = pipe.get_sync_time()
+        fetch(begin=sync_time)
+        ```
 
-### **Filter** (remove duplicates)
+- **Filter** (*remove duplicates*)  
+  After fetching the latest rows, the difference is taken to remove duplicates.
 
-After fetching remote data, the difference is taken to remove duplicate rows. The algorithm looks something like this:
-
-=== "SQL"
-
-    ```sql
-    SELECT new_df.*
-    FROM new_df
-    LEFT JOIN old_df ON new_df.id = old_df.id
-      AND new_df.datetime = old_df.datetime
-    WHERE old_df.datetime IS NULL
-    ```
-
-=== "Pandas"
-
-    ```python
-    new_df[
-      ~new_df.fillna(custom_nan).apply(tuple, 1).isin(
-        old_df.fillna(custom_nan).apply(tuple, 1)
-      )
-    ].reset_index(drop=True)
-    ```
-
-!!! tip "Skip filtering"
-    To skip the filter stage, you can use the `--skip-check-existing` flag.
+!!! tip inline end "Skip filtering"
+    To skip the filter stage, use `--skip-check-existing` or `#!python pipe.sync(check_existing=False)`.
 
 
-### Upsert (*Load*)
 
-Once data are fetched and filtered, they are inserted into the table of the corresponding [Meerschaum instance](/reference/connectors/#instances-and-repositories). Depending on the type of instance connector, the data may be bulk uploaded (for TimescaleDB and PostgreSQL), inserted into a table, or posted to an API endpoint.
+??? example "Example `filter` query"
 
-## Prevent Data Loss
+    === "SQL"
+        ```sql
+        SELECT
+          "new"."datetime",
+          "new"."id",
+          "new"."value"
+        FROM "new"
+        LEFT JOIN "old" ON
+          "new"."id" = "old"."id"
+          AND
+          "new"."datetime" = "old"."datetime"
+        WHERE
+          "old"."datetime" IS NULL
+          AND
+          "old"."id" IS NULL
+        ```
 
-Depending on the nature of your remote source, sometimes data may be missed. For example, when data are backlogged or a pipe contains multiple data streams (i.e. an ID column), the syncing algorithm might overlook old data.
+    === "Pandas"
 
-!!! info "Enable multiplexed fetching"
-    There is an experimental feature that can account for multiplexed data streams, but keep in mind that performance may be negatively affected for a large number of IDs.
+        ```python
+        joined_df = pd.merge(
+            new_df.fillna(pd.NA),
+            old_df.fillna(pd.NA),
+            how = 'left',
+            on = None,
+            indicator = True,
+        ) 
+        mask = (joined_df['_merge'] == 'left_only')
+        delta_df = joined_df[mask]
+        ```
 
-    To enable this feature, run `edit config system` and under the `experimental` section, set `join_fetch` to `true`.
 
-### Specify an ID column
+  - **Upsert** (*Load*)  
 
-When you [bootstrap a pipe](/reference/pipes/bootstrapping/#datetime-and-id-columns), you will be asked for a datetime and ID columns. If you've bootstrapped a pipe and forgot to specify its ID column, you may have to rebuild the [indices](https://docs.meerschaum.io/connectors/sql/SQLConnector.html#meerschaum.connectors.sql.SQLConnector.SQLConnector.create_indices):
+    Once new rows are fetched and filtered, they are inserted into the database table via the pipe's [instance connector](/reference/connectors/#instances-and-repositories).
 
-```python
->>> import meerschaum as mrsm
->>> pipe = mrsm.Pipe('sql:remote', 'weather')
->>>
->>> ### The instance connector is 'sql:main' or wherever the Pipe is stored.
->>> pipe.instance_connector.create_indices(pipe)
-```
+??? example "Example `upsert` queries"
+
+    === "Inserts"
+        ```sql
+        COPY target_table (datetime, id, value)
+        FROM STDIN
+        WITH CSV
+        ```
+
+    === "Updates"
+        ```sql
+        UPDATE target_table AS f
+        SET value = CAST(p.value AS DOUBLE PRECISION)
+        FROM target_table AS t
+        INNER JOIN ( SELECT DISTINCT * FROM patch_table ) AS p
+          ON p.id = t.id
+          AND
+          p.datetime = p.datetime
+        WHERE
+          p.datetime = f.datetime
+          AND
+          p.id = f.id
+        ```
+
+## Backtracking
+
+Depending on your data source, sometimes data may be missed. When rows are backlogged or a pipe contains multiple data streams (i.e. an ID column), a simple sync might overlook old data.
 
 ### Add a backtrack interval
 
-When syncing a SQL pipe, the most recent datetime value is used in the `WHERE` clause. If you have multiple IDs or backlogged data, you need to specify the backtrack minutes in order to catch all of the new remote data.
-
+The backtrack interval is the overlapping window between syncs (default 1440 minutes). 
 <img src="/assets/diagrams/backtrack-minutes.png" alt="Meerschaum backtrack minutes interval" width="75%" style="margin: auto;" id="btm"/>
 
-Consider the image above. There are four data streams that grow at separate rates — the dotted lines represent remote data which have not yet been synced. By default, only data to the right of the red line will be fetched, which will miss data for the "slower" IDs.
+In the example above, there are four data streams that grow at separate rates — the dotted lines represent remote data which have not yet been synced. By default, only data to the right of the red line will be fetched, which will miss data for the "slower" IDs.
 
-To fix this, add a backtrack interval of 720 minutes (12 hours). This moves the starting point backwards to the blue line, and all of the new data will be fetched.
+You can modify the backtrack interval under the key `fetch:backtrack_minutes`:
 
-!!! tip "Choosing a backtrack interval"
-    A larger backtrack interval will cover more ground but be less efficient. The backtrack interval works best when all IDs report within a known interval of each other (e.g. 1440 minutes / 12 hours).
+=== "`mrsm edit pipes`"
 
-To add a backtrack interval, edit a pipe and add the key `backtrack_minutes` under `fetch`:
-
-```yaml
-fetch:
-  backtrack_minutes: 1440
-```
-
-## Troubleshooting
-
-In case a sync fails, you can correct the problem by editing the pipe's attributes with the command `edit pipes`. You may also bootstrap an existing pipe to wipe everything and start the process again from the top.
-
-!!! tip "Try before you sync"
-    When writing the definition for a `sql` pipe, it's a good idea to first test the SQL query before going through the hassle of bootstrapping a pipe. You can open an interactive SQL session with the `sql <label>` command or in the Python REPL with the `python` command and the following code:
-    ```python
-    >>> import meerschaum as mrsm
-    >>> conn = mrsm.get_connector('sql', '<label>')
-    >>> query = """
-    ... SELECT * FROM my_table
-    ... WHERE foo = 'bar'
-    ... """
-    >>> df = conn.read(query)
-    >>> df
+    ```yaml
+    fetch:
+      backtrack_minutes: 1440
     ```
+
+=== "Python"
+
+    ```python
+    import meerschaum as mrsm
+    pipe = mrsm.Pipe(
+        'plugin:noaa', 'weather',
+        instance = 'sql:local',
+        parameters = {
+            'fetch': {
+                'backtrack_minutes': 1440,
+            },
+            'noaa': {
+                'stations': ['KGMU', 'KCEU'],
+            },
+        },
+    )
+    ```
+
+## Verification Syncs
+
+Occasionally it may be necessary to perform a more expensive verification sync across the pipe's entire interval. To do so, run `verify pipes` or `sync pipes --verify`:
+
+=== "Bash"
+
+    ```bash
+    mrsm verify pipes
+    # or
+    mrsm sync pipes --verify
+    ```
+
+=== "Python"
+
+    ```python
+    pipe.verify()
+    # or
+    pipe.sync(verify=True)
+    ```
+
+A verification sync divides a pipe's interval into chunks and resyncs those chunks. Like the backtrack interval, you can configure the chunk interval under the keys `verify:chunk_minutes`:
+
+=== "`mrsm edit pipes`"
+
+    ```yaml
+    verify:
+      chunk_minutes: 1440
+    ```
+
+=== "Python"
+
+    ```python
+    import meerschaum as mrsm
+    pipe = mrsm.Pipe(
+        'plugin:noaa', 'weather',
+        instance = 'sql:local',
+        parameters = {
+            'fetch': {
+                'backtrack_minutes': 1440,
+            },
+            'verify': {
+                'chunk_minutes': 1440,
+            },
+            'noaa': {
+                'stations': ['KGMU', 'KCEU'],
+            },
+        },
+    )
+    ```
+
+When run without explicit date bounds, verification syncs are bounded to a maximum interval (default 366 days). This value may be set under `verify:bound_days` (or minutes, days, hours, etc.):
+
+=== "`mrsm edit pipes`"
+
+    ```yaml
+    verify:
+      bound_days: 366
+    ```
+
+=== "Python"
+
+    ```python
+    import meerschaum as mrsm
+    pipe = mrsm.Pipe(
+        'plugin:noaa', 'weather',
+        instance = 'sql:local',
+        parameters = {
+            'fetch': {
+                'backtrack_minutes': 1440,
+            },
+            'verify': {
+                'chunk_minutes': 1440,
+                'bound_days': 366,
+            },
+            'noaa': {
+                'stations': ['KGMU', 'KCEU'],
+            },
+        },
+    )
+    ```
+
+## Deduplication Syncs
+
+Although duplicates are removed during the filter stage of a sync, duplicate rows may still slip into your table if your data source returns duplicates.
+
+Just like verification syncs, you can run `deduplicate pipes` to detect and delete duplicate rows. This works by deleting and resyncing chunks which contain duplicates.
+
+!!! note inline end ""
+    Your instance connector must provide either `clear_pipe()` or `deduplicate_pipe()` methods to use `pipe.deduplicate()`.
+
+=== "Bash"
+
+    ```bash
+    mrsm deduplicate pipes
+    # or
+    mrsm sync pipes --deduplicate
+    ```
+
+=== "Python"
+
+    ```python
+    pipe.deduplicate()
+    # or
+    pipe.sync(deduplicate=True)
+    ```
+
+!!! tip "Combine `--verify` and `--deduplicate`."
+    You run `mrsm sync pipes --verify --deduplicate` to run verification and deduplication syncs in the same process.
