@@ -7,13 +7,22 @@ Manage running daemons via the Daemon class.
 """
 
 from __future__ import annotations
-import os, pathlib, json, shutil, datetime, signal, sys, time, traceback
+import os
+import pathlib
+import json
+import shutil
+import signal
+import sys
+import time
+import traceback
+from datetime import datetime
 from meerschaum.utils.typing import Optional, Dict, Any, SuccessTuple, Callable, List, Union
 from meerschaum.config import get_config
 from meerschaum.config._paths import DAEMON_RESOURCES_PATH, LOGS_RESOURCES_PATH
 from meerschaum.config._patch import apply_patch_to_config
 from meerschaum.utils.warnings import warn, error
-from meerschaum.utils.packages import attempt_import, venv_exec
+from meerschaum.utils.packages import attempt_import
+from meerschaum.utils.venv import venv_exec
 from meerschaum.utils.daemon._names import get_new_daemon_name
 from meerschaum.utils.daemon.RotatingFile import RotatingFile
 from meerschaum.utils.daemon.Log import Log
@@ -201,7 +210,7 @@ class Daemon:
         if process_key not in ('began', 'ended', 'paused'):
             raise ValueError(f"Invalid key '{process_key}'.")
 
-        self.properties['process'][process_key] = datetime.datetime.utcnow().isoformat()
+        self.properties['process'][process_key] = datetime.utcnow().isoformat()
         if write_properties:
             self.write_properties()
 
@@ -248,8 +257,14 @@ class Daemon:
             + f"daemon._run_exit(keep_daemon_output={keep_daemon_output}, "
             + f"allow_dirty_run=True)"
         )
-        _launch_success_bool = venv_exec(_launch_daemon_code, debug=debug, venv=None)
-        msg = "Success" if _launch_success_bool else f"Failed to start daemon '{self.daemon_id}'."
+        env = dict(os.environ)
+        env['MRSM_NOASK'] = 'true'
+        _launch_success_bool = venv_exec(_launch_daemon_code, debug=debug, venv=None, env=env)
+        msg = (
+            "Success"
+            if _launch_success_bool
+            else f"Failed to start daemon '{self.daemon_id}'."
+        )
         self._capture_process_timestamp('began')
         return _launch_success_bool, msg
 

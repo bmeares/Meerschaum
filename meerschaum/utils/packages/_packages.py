@@ -36,7 +36,7 @@ packages: Dict[str, Dict[str, str]] = {
         'yaml'                       : 'PyYAML>=5.3.1',
         'pip'                        : 'pip>=22.0.4',
         'update_checker'             : 'update-checker>=0.18.0',
-        'semver'                     : 'semver>=3.0.0-dev4',
+        'semver'                     : 'semver>=3.0.0',
         'pathspec'                   : 'pathspec>=0.9.0',
         'dateutil'                   : 'python-dateutil>=2.7.5',
         'requests'                   : 'requests>=2.23.0',
@@ -60,7 +60,7 @@ packages: Dict[str, Dict[str, str]] = {
         'pymysql'                    : 'PyMySQL>=0.9.0',
         'aiomysql'                   : 'aiomysql>=0.0.21',
         'sqlalchemy_cockroachdb'     : 'sqlalchemy-cockroachdb>=2.0.0',
-        'duckdb'                     : 'duckdb>=0.8.1',
+        'duckdb'                     : 'duckdb>=0.8.2.dev4514',
         'duckdb_engine'              : 'duckdb-engine>=0.9.2',
     },
     '_drivers': {

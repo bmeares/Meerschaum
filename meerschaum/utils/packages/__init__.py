@@ -559,6 +559,12 @@ def need_update(
     if not required_version and not check_pypi:
         return False
 
+    ### NOTE: Sometimes (rarely), we depend on a development build of a package.
+    if '.dev' in required_version:
+        required_version = required_version.split('.dev')[0]
+    if version and '.dev' in version:
+        version = version.split('.dev')[0]
+
     try:
         if not version:
             if not _run_determine_version:

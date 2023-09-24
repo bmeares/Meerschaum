@@ -32,8 +32,10 @@ fi
 rm -rf "$test_root/data"
 rm -f "$test_root/sqlite/mrsm_local.db"
 
-### Start the test API.
-true && \
+### Start the test API on port 8989.
+### For whatever reason, GitHub actions only works
+### when the server is started, stopped, and started again.
+[ -z "$MRSM_TEST_FLAVORS" ] || [[ "$MRSM_TEST_FLAVORS" =~ "api" ]] && \
   $mrsm delete jobs test_api -y && \
   $mrsm start api \
     -w 1 -p $test_port --name test_api -y -d -i sql:local && \
