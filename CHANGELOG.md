@@ -2,6 +2,22 @@
 
 ## 2.0.x Releases
 
+This is the current release cycle, so stay tuned for future releases!
+
+### v2.0.1
+
+- **Fix syncing bools within in-place SQL pipes.**  
+  SQL pipes may now sync bools in-place. For database flavors which lack native `BOOLEAN` support (e.g. `sqlite`, `oracle`, `mysql`), then the boolean columns must be stated in `pipe.dtypes`.
+
+- **Fix an issue with multiple users managing jobs.**  
+  Extra validation was added to the web UI to allow for multiple users to interact with jobs.
+
+- **Fix a minor formatting bug with `highlight_pipes()`.**  
+  Improved validation logic was added to prevent incorrectly prepending the `Pipe(` prefix.
+
+- **Hold back `pydantic` to `<2.0.0`**  
+  Pydantic 2 is supported in all features except `--schedule`. Until `rocketry` supports Pydantic 2, it will be held back.
+
 ### v2.0.0
 
 **Breaking Changes**
@@ -412,7 +428,7 @@
 
 ## 1.7.x Releases
 
-This is the current release cycle, so stay tuned for future releases!
+The 1.7 series was short and sweet with a big focus on improving the web API. The highlight feature was the integrated webterm, and the series includes many bugfixes and improvements. 
 
 ### v1.7.3 – v1.7.4
 

@@ -762,7 +762,7 @@ def get_pipe_data(
 
 def get_pipe_data_query(
         self,
-        pipe: Optional[mrsm.Pipe] = None,
+        pipe: mrsm.Pipe,
         select_columns: Optional[List[str]] = None,
         omit_columns: Optional[List[str]] = None,
         begin: Union[datetime, int, str, None] = None,
@@ -1159,9 +1159,11 @@ def sync_pipe(
             else:
                 _ = pipe.infer_dtypes(persist=True)
 
-    ### NOTE: Oracle SQL < 23c (2023) does not support booleans,
+    ### NOTE: Oracle SQL < 23c (2023) and SQLite does not support booleans,
     ### so infer bools and persist them to `dtypes`.
-    if self.flavor == 'oracle':
+    ### MSSQL supports `BIT` for booleans, but we coerce bools to int for MSSQL
+    ### to avoid merge issues.
+    if self.flavor in ('oracle', 'sqlite', 'mssql'):
         pipe_dtypes = pipe.dtypes
         new_bool_cols = {
             col: 'bool[pyarrow]'
@@ -1171,9 +1173,10 @@ def sync_pipe(
         }
         pipe_dtypes.update(new_bool_cols)
         pipe.dtypes = pipe_dtypes
-        infer_bool_success, infer_bool_msg = pipe.edit(debug=debug)
-        if not infer_bool_success:
-            return infer_bool_success, infer_bool_msg
+        if not pipe.temporary:
+            infer_bool_success, infer_bool_msg = pipe.edit(debug=debug)
+            if not infer_bool_success:
+                return infer_bool_success, infer_bool_msg
 
     unseen_df, update_df, delta_df = (
         pipe.filter_existing(
@@ -1243,9 +1246,10 @@ def sync_pipe(
     new_json_cols = [col for col in json_cols if col not in existing_json_cols]
     if new_json_cols:
         pipe.dtypes.update({col: 'json' for col in json_cols})
-        edit_success, edit_msg = pipe.edit(interactive=False, debug=debug)
-        if not edit_success:
-            warn(f"Unable to update JSON dtypes for {pipe}:\n{edit_msg}")
+        if not pipe.temporary:
+            edit_success, edit_msg = pipe.edit(interactive=False, debug=debug)
+            if not edit_success:
+                warn(f"Unable to update JSON dtypes for {pipe}:\n{edit_msg}")
 
     ### Insert new data into Pipe's table.
     unseen_kw = copy.deepcopy(kw)

@@ -143,13 +143,17 @@ NO_SELECT_INTO_FLAVORS = {'sqlite', 'oracle', 'mysql', 'mariadb', 'duckdb'}
 DB_FLAVORS_CAST_DTYPES = {
     'mariadb': {
         'BIGINT': 'DECIMAL',
-        'TINYINT': 'UNSIGNED INT',
+        'TINYINT': 'SIGNED INT',
         'TEXT': 'CHAR(10000) CHARACTER SET utf8',
+        'BOOL': 'SIGNED INT',
+        'BOOLEAN': 'SIGNED INT',
     },
     'mysql': {
         'BIGINT': 'DECIMAL',
-        'TINYINT': 'UNSIGNED INT',
+        'TINYINT': 'SIGNED INT',
         'TEXT': 'CHAR(10000) CHARACTER SET utf8',
+        'BOOL': 'SIGNED INT',
+        'BOOLEAN': 'SIGNED INT',
     },
     'oracle': {
         'NVARCHAR(2000)': 'NVARCHAR2(2000)'
@@ -784,7 +788,19 @@ def get_null_replacement(typ: str, flavor: str) -> str:
     if 'int' in typ.lower():
         return '-987654321'
     if 'bool' in typ.lower():
-        return '0'
+        bool_typ = (
+            PD_TO_DB_DTYPES_FLAVORS
+            .get('bool', {})
+            .get(flavor, PD_TO_DB_DTYPES_FLAVORS['bool']['default'])
+        )
+        if flavor in DB_FLAVORS_CAST_DTYPES:
+            bool_typ = DB_FLAVORS_CAST_DTYPES[flavor].get(bool_typ, bool_typ)
+        val_to_cast = (
+            -987654321
+            if flavor in ('mysql', 'mariadb', 'sqlite', 'mssql')
+            else 0
+        )
+        return f'CAST({val_to_cast} AS {bool_typ})'
     if 'time' in typ.lower() or 'date' in typ.lower():
         return dateadd_str(flavor=flavor, begin='1900-01-01')
     if 'float' in typ.lower() or 'double' in typ.lower():
