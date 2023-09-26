@@ -119,7 +119,7 @@ PD_TO_DB_DTYPES_FLAVORS: Dict[str, Dict[str, str]] = {
         'postgresql': 'BOOLEAN',
         'mariadb': 'BOOLEAN',
         'mysql': 'BOOLEAN',
-        'mssql': 'BIT',
+        'mssql': 'INTEGER',
         'oracle': 'INTEGER',
         'sqlite': 'BOOLEAN',
         'duckdb': 'BOOLEAN',

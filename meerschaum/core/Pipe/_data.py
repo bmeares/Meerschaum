@@ -324,7 +324,7 @@ def _get_data_as_iterator(
 
 def get_backtrack_data(
         self,
-        backtrack_minutes: int = 0,
+        backtrack_minutes: Optional[int] = None,
         begin: Union[datetime, int, None] = None,
         params: Optional[Dict[str, Any]] = None,
         fresh: bool = False,
@@ -336,9 +336,9 @@ def get_backtrack_data(
 
     Parameters
     ----------
-    backtrack_minutes: int, default 0
+    backtrack_minutes: Optional[int], default None
         How many minutes from `begin` to select from.
-        If 0 (default), use `pipe.parameters['fetch']['backtrack_minutes']`.
+        If `None`, use `pipe.parameters['fetch']['backtrack_minutes']`.
 
     begin: Optional[datetime], default None
         The starting point to search for data.
@@ -379,7 +379,7 @@ def get_backtrack_data(
         return None
 
     backtrack_interval = self.get_backtrack_interval(debug=debug)
-    if backtrack_minutes == 0:
+    if backtrack_minutes is None:
         backtrack_minutes = (
             (backtrack_interval.total_seconds() * 60)
             if isinstance(backtrack_interval, timedelta)

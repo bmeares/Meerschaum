@@ -11,6 +11,7 @@ import meerschaum as mrsm
 from meerschaum import Pipe
 from meerschaum.actions import actions
 from meerschaum.utils.dtypes import are_dtypes_equal
+from meerschaum.utils.sql import sql_item_name
 
 @pytest.fixture(autouse=True)
 def run_before_and_after(flavor: str):
@@ -336,4 +337,64 @@ def test_sync_bools_inferred(flavor: str):
     ]
 
     assert synced_docs == new_docs
+
+
+@pytest.mark.parametrize("flavor", get_flavors())
+def test_sync_bools_inplace(flavor: str):
+    """
+    Test that pipes are able to sync bool in-place.
+    """
+    conn = conns[flavor]
+    pipe = mrsm.Pipe('test', 'bools', 'inplace', instance=conn)
+    _ = pipe.delete()
+    pipe = mrsm.Pipe(
+        'test', 'bools', 'inplace',
+        instance = conn,
+        columns = {'datetime': 'dt', 'id': 'id'},
+    )
+    pipe_table = sql_item_name(pipe.target, conn.flavor) if conn.type == 'sql' else pipe.target
+    inplace_pipe = mrsm.Pipe(conn, 'bools', 'inplace', instance=conn)
+    _ = inplace_pipe.delete()
+    inplace_pipe = mrsm.Pipe(
+        conn, 'bools', 'inplace',
+        instance = conn,
+        columns = pipe.columns,
+        dtypes = {
+            'is_bool': 'bool',
+        },
+        parameters = {
+            'fetch': {
+                'definition': f"SELECT * FROM {pipe_table}",
+                'pipe': pipe.keys(),
+            },
+        },
+    )
+    _ = pipe.drop()
+    docs = [
+        {'dt': '2023-01-01', 'id': 1, 'is_bool': True},
+        {'dt': '2023-01-02', 'id': 2, 'is_bool': False},
+        {'dt': '2023-01-03', 'id': 3, 'is_bool': None},
+    ]
+    success, msg = pipe.sync(docs)
+    assert success, msg
+
+    success, msg = inplace_pipe.sync(debug=debug)
+    assert success, msg
+
+    assert 'bool' in inplace_pipe.dtypes['is_bool']
+    assert inplace_pipe.get_rowcount() == len(docs)
+
+    df = inplace_pipe.get_data()
+
+    pipe.sync([{'dt': '2023-01-03', 'id': 3, 'is_bool': True}])
+    success, msg = inplace_pipe.sync(debug=debug)
+    assert success, msg
+    df = inplace_pipe.get_data(params={'id': 3})
+    assert 'true' in str(df['is_bool'][0]).lower()
+
+    pipe.sync([{'dt': '2023-01-03', 'id': 3, 'is_bool': None}])
+    success, msg = inplace_pipe.sync(debug=debug)
+    assert success, msg
+    df = inplace_pipe.get_data(params={'id': 3})
+    assert 'na' in str(df['is_bool'][0]).lower()
 

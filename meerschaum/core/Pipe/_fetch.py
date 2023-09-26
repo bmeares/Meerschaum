@@ -8,7 +8,7 @@ Functions for fetching new data into the Pipe
 
 from __future__ import annotations
 from datetime import timedelta, datetime
-from meerschaum.utils.typing import Optional, Any
+from meerschaum.utils.typing import Optional, Any, Union
 from meerschaum.config import get_config
 
 def fetch(
@@ -111,15 +111,16 @@ def get_backtrack_interval(self, debug: bool = False) -> Union[timedelta, int]:
         else default_backtrack_minutes
     )
 
+    backtrack_interval = timedelta(minutes=backtrack_minutes)
     dt_col = self.columns.get('datetime', None)
     if dt_col is None:
-        return timedelta(minutes=backtrack_minutes)
+        return backtrack_interval
 
     dt_dtype = self.dtypes.get(dt_col, 'datetime64[ns]')
-    if 'datetime' in dt_dtype.lower():
-        return timedelta(minutes=backtrack_minutes)
+    if 'int' in dt_dtype.lower():
+        return backtrack_minutes
 
-    return backtrack_minutes
+    return backtrack_interval
 
 
 def _determine_begin(
