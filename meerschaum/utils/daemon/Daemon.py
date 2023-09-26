@@ -499,7 +499,15 @@ class Daemon:
         A SuccessTuple indicating success.
         """
         try:
-            os.kill(int(self.pid), signal_to_send)
+            pid = self.pid
+            if pid is None:
+                return (
+                    False,
+                    f"Daemon '{self.daemon_id}' is not running, "
+                    + f"cannot send signal '{signal_to_send}'."
+                )
+            
+            os.kill(pid, signal_to_send)
         except Exception as e:
             return False, f"Failed to send signal {signal_to_send}:\n{traceback.format_exc()}"
 

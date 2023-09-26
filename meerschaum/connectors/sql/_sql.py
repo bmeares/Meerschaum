@@ -766,14 +766,13 @@ def to_sql(
                 dtype[col] = sqlalchemy.types.NVARCHAR(2000)
             elif are_dtypes_equal(str(typ), 'int'):
                 dtype[col] = sqlalchemy.types.INTEGER
-
         to_sql_kw['dtype'] = dtype
-    #  elif self.flavor in ('mysql', 'mariadb'):
-        #  dtype = to_sql_kw.get('dtype', {})
-        #  for col, typ in df.dtypes.items():
-            #  if are_dtypes_equal(str(typ), 'bool'):
-                #  dtype[col] = sqlalchemy.types.BOOLEAN
-        #  to_sql_kw['dtype'] = dtype
+    elif self.flavor == 'mssql':
+        dtype = to_sql_kw.get('dtype', {})
+        for col, typ in df.dtypes.items():
+            if are_dtypes_equal(str(typ), 'bool'):
+                dtype[col] = sqlalchemy.types.INTEGER
+        to_sql_kw['dtype'] = dtype
 
     ### Check for JSON columns.
     if self.flavor not in json_flavors:

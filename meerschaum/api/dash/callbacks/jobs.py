@@ -151,7 +151,6 @@ def refresh_jobs_on_interval(
     """
     When the jobs refresh interval fires, rebuild the jobs' onscreen components.
     """
-    raise PreventUpdate
     session_id = session_data.get('session-id', None)
     is_authenticated = is_session_authenticated(session_id)
 

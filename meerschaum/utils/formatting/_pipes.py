@@ -309,7 +309,7 @@ def highlight_pipes(message: str) -> str:
     """
     Add syntax highlighting to an info message containing stringified `meerschaum.Pipe` objects.
     """
-    if 'Pipe(' not in message and ')' not in message:
+    if 'Pipe(' not in message:
         return message
 
     from meerschaum import Pipe
@@ -326,6 +326,7 @@ def highlight_pipes(message: str) -> str:
         has_paren = paren_index != -1
         has_single_quote = single_quote_index != -1
         has_double_quote = double_quote_index != -1
+        has_quote = has_single_quote or has_double_quote
         quote_index = double_quote_index if has_double_quote else single_quote_index
 
         has_pipe = (
@@ -333,9 +334,9 @@ def highlight_pipes(message: str) -> str:
             and
             has_paren
             and
-            (has_single_quote or has_double_quote)
+            has_quote
             and not
-            (has_double_quote and has_double_quote)
+            (has_single_quote and has_double_quote)
             and not
             (comma_index > paren_index or quote_index > paren_index)
         )
@@ -345,6 +346,7 @@ def highlight_pipes(message: str) -> str:
             try:
                 exec(code)
                 _to_add = pipe_repr(_d['pipe']) + segment[paren_index + 1:]
+                _ = _d.pop('pipe', None)
             except Exception as e:
                 _to_add = 'Pipe(' + segment
             msg += _to_add

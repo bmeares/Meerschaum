@@ -11,94 +11,90 @@ import os, random
 from meerschaum.utils.typing import Dict, List, Tuple
 from meerschaum.config._paths import DAEMON_RESOURCES_PATH
 
-_bank : Dict[str, Dict[str, List[str]]] = {
-    'adjectives' : {
-        'colors' : [
+_bank: Dict[str, Dict[str, List[str]]] = {
+    'adjectives': {
+        'colors': [
             'red', 'blue', 'green', 'orange', 'pink', 'amber',
             'bright', 'dark', 'neon',
         ],
-        'sizes' : [
+        'sizes': [
             'big', 'small', 'large', 'huge', 'tiny', 'long', 'short', 'grand', 'mini', 'micro'
         ],
-        'personalities' : [
+        'personalities': [
             'groovy', 'cool', 'awesome', 'nice', 'fantastic', 'sweet', 'great', 'amazing',
             'terrific', 'funky', 'fancy', 'sneaky', 'elegant', 'dreamy',
         ],
-        'emotions' : [
+        'emotions': [
             'angry', 'happy', 'excited', 'suspicious', 'sad', 'thankful', 'grateful', 'satisfied',
         ],
-        'sensations' : [
+        'sensations': [
             'sleepy', 'awake', 'alert', 'thirsty', 'comfy', 'warm', 'cold', 'chilly', 'soft',
             'smooth', 'chunky',
         ],
-        'materials' : [
+        'materials': [
             'golden', 'silver', 'metal', 'plastic', 'wool', 'wooden', 'nylon', 'fuzzy', 'silky',
         ],
-        'qualities' : [
+        'qualities': [
             'expensive', 'cheap', 'premier', 'best', 'favorite', 'better', 'good', 'affordable',
         ],
     },
     'nouns' : {
-        'animals' : [
+        'animals': [
             'mouse', 'fox', 'horse', 'dragon', 'pig', 'hippo', 'elephant' , 'tiger', 'deer',
             'gerbil', 'snake', 'turtle', 'rhino', 'dog', 'cat', 'giraffe', 'rabbit', 'squirrel',
             'unicorn', 'lizard', 'lion', 'bear', 'gazelle', 'whale', 'dolphin', 'fish', 'butterfly',
             'ladybug', 'fly', 'shrimp', 'flamingo', 'parrot', 'tuna', 'panda', 'lemur', 'duck',
             'seal', 'walrus', 'seagull', 'iguana', 'salamander', 'kitten', 'puppy', 'octopus',
         ],
-        'plants' : [
+        'plants': [
             'tree', 'flower', 'vine', 'fern', 'palm', 'palmetto', 'oak', 'pine', 'rose', 'lily',
             'ivy',
         ],
-        'foods' : [
+        'foods': [
             'pizza', 'sushi', 'apple', 'banana', 'sandwich', 'burger', 'taco', 'bratwurst',
             'grape', 'coconut', 'bread', 'toast',
         ],
-        'geographies' : [
+        'geographies': [
             'ocean', 'mountain', 'desert', 'forest', 'tundra', 'savanna', 'grassland', 'prairie',
             'lake', 'city', 'river',
         ],
-        'vehicles' : [
+        'vehicles': [
             'car', 'bike', 'boat', 'bus', 'trolley', 'tram', 'plane', 'skates', 'skateboard',
             'kayak', 'canoe', 'paddleboard', 'skis', 'snowboard', 'truck', 'bicycle', 'unicycle',
             'tricycle',
         ],
-        'clothing' : [
+        'clothing': [
             'socks', 'shirt', 'dress', 'shoes', 'hat', 'glasses', 'pocket', 'shorts', 'pants',
             'skirt', 'capris', 'helmet',
         ],
-        'instruments' : [
+        'instruments': [
             'guitar', 'piano', 'trombone', 'drums', 'viola', 'violin', 'trumpet', 'bass',
             'harmonica', 'banjo',
         ],
     },
 }
 
-_disallow_combinations : List[Tuple[str, str]] = [
-    #  ('colors', 'animals'), ('emotions', 'animals'),
-]
+_disallow_combinations: List[Tuple[str, str]] = []
 
-_adjectives : List[str]= []
+_adjectives: List[str]= []
 for category, items in _bank['adjectives'].items():
     _adjectives += items
 
-_nouns : List[str] = []
+_nouns: List[str] = []
 for category, items in _bank['nouns'].items():
     _nouns += items
 
-def generate_random_name(seperator : str = '_'):
+def generate_random_name(separator: str = '_'):
     """
+    Return a random adjective and noun combination.
 
     Parameters
     ----------
-    seperator : str :
-         (Default value = '_')
+    separator: str, default '_'
 
     Returns
     -------
-    type
-        
-
+    A string containing an random adjective and random noun. 
     """
     while True:
         adjective_category = random.choice(list(_bank['adjectives'].keys()))
@@ -108,23 +104,21 @@ def generate_random_name(seperator : str = '_'):
         break
     return (
         random.choice(_bank['adjectives'][adjective_category])
-        + seperator
+        + separator
         + random.choice(_bank['nouns'][noun_category])
     )
 
-def get_new_daemon_name():
+
+def get_new_daemon_name() -> str:
     """
-
-    Parameters
-    ----------
-
-    Returns
-    -------
-    type
-        Validates that generated names are unique, up to ~6000 maximum possibilities.
-
+    Generate a new random name until a unique one is found
+    (up to ~6000 maximum possibilities).
     """
-    existing_names = os.listdir(DAEMON_RESOURCES_PATH)
+    existing_names = (
+        os.listdir(DAEMON_RESOURCES_PATH)
+        if DAEMON_RESOURCES_PATH.exists()
+        else []
+    )
     while True:
         _name = generate_random_name()
         if _name in existing_names:
