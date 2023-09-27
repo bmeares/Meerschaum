@@ -11,6 +11,7 @@ from __future__ import annotations
 import json
 import time
 import threading
+import multiprocessing
 from datetime import datetime, timedelta
 
 from meerschaum.utils.typing import (
@@ -782,10 +783,11 @@ def get_num_workers(self, workers: Optional[int] = None) -> int:
         if self.instance_connector.type == 'sql'
         else None
     )
+    current_num_threads = threading.active_count()
     current_num_connections = (
         self.instance_connector.engine.pool.checkedout()
         if engine_pool_size is not None
-        else threading.active_count()
+        else current_num_threads
     )
     desired_workers = (
         min(workers or engine_pool_size, engine_pool_size)
@@ -793,7 +795,7 @@ def get_num_workers(self, workers: Optional[int] = None) -> int:
         else workers
     )
     if desired_workers is None:
-        desired_workers = (current_num_connections if is_thread_safe else 1)
+        desired_workers = (multiprocessing.cpu_count() if is_thread_safe else 1)
 
     return max(
         (desired_workers - current_num_connections),

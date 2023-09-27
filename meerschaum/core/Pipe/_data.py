@@ -144,8 +144,7 @@ def get_data(
         ]
         dask_meta = {
             col: to_pandas_dtype(typ)
-            for col, typ
-            in self.dtypes.items()
+            for col, typ in self.dtypes.items()
         }
         return dd.from_delayed(dask_chunks, meta=dask_meta)
 

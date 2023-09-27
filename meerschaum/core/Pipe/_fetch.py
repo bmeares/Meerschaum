@@ -52,7 +52,6 @@ def fetch(
         warn(f"No `fetch()` function defined for connector '{self.connector}'")
         return None
 
-    import contextlib
     from meerschaum.connectors import custom_types, get_connector_plugin
     from meerschaum.utils.debug import dprint, _checkpoint
 

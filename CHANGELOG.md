@@ -21,6 +21,9 @@ This is the current release cycle, so stay tuned for future releases!
 
 - **Bump default SQLAlchemy pool size to 8 connections.**
 
+- **Consider the number of checked out connections when choosing workers.**  
+  For pipes on `sql` instances, `pipe.get_num_workers()` will now consider the number of checked out connections rather than only the number of active threads.
+
 - **Fix `pipe.get_data(as_dask=True)` for JSON columns.**
 
 ### v2.0.1
