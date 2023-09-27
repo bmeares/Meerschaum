@@ -243,6 +243,9 @@ class Pipe:
                 warn(f"The provided parameters are of invalid type '{type(parameters)}'.")
             self._attributes['parameters'] = {}
 
+        columns = columns or self._attributes.get('parameters', {}).get('columns', {})
+        if isinstance(columns, list):
+            columns = {str(col): str(col) for col in columns}
         if isinstance(columns, dict):
             self._attributes['parameters']['columns'] = columns
         elif columns is not None:

@@ -1323,7 +1323,7 @@ def sync_pipe_inplace(
         Defaults to `-1`.
 
     check_existing: bool, default True
-        If `True`, pull and diff with existing data from the pipe. Defaults to `True`.
+        If `True`, pull and diff with existing data from the pipe.
 
     debug: bool, default False
         Verbosity toggle.
@@ -1353,6 +1353,7 @@ def sync_pipe_inplace(
         params = params,
         begin = begin,
         end = end,
+        check_existing = check_existing,
         debug = debug,
     )
     metadef_name = sql_item_name('metadef', self.flavor)
@@ -2606,11 +2607,21 @@ def deduplicate_pipe(
     )
     from meerschaum.utils.misc import generate_password, flatten_list
 
+    pipe_table_name = sql_item_name(pipe.target, self.flavor)
+
+    if not pipe.exists(debug=debug):
+        return False, f"Table {pipe_table_name} does not exist."
+
     ### TODO: Handle deleting duplicates without a datetime axis.
     dt_col = pipe.columns.get('datetime', None)
     dt_col_name = sql_item_name(dt_col, self.flavor)
     cols_types = pipe.get_columns_types(debug=debug)
     existing_cols = pipe.get_columns_types(debug=debug)
+
+    get_rowcount_query = f"SELECT COUNT(*) FROM {pipe_table_name}"
+    old_rowcount = self.value(get_rowcount_query, debug=debug)
+    if old_rowcount is None:
+        return False, f"Failed to get rowcount for table {pipe_table_name}."
 
     ### Non-datetime indices that in fact exist.
     indices = [
@@ -2620,16 +2631,29 @@ def deduplicate_pipe(
     ]
     indices_names = [sql_item_name(index_col, self.flavor) for index_col in indices]
     existing_cols_names = [sql_item_name(col, self.flavor) for col in existing_cols]
-    pipe_table_name = sql_item_name(pipe.target, self.flavor)
     duplicates_cte_name = sql_item_name('dups', self.flavor)
     duplicate_row_number_name = sql_item_name('dup_row_num', self.flavor)
     previous_row_number_name = sql_item_name('prev_row_num', self.flavor)
     
-    index_list_str = sql_item_name(dt_col, self.flavor)
-    index_list_str_ordered = sql_item_name(dt_col, self.flavor) + " DESC"
+    index_list_str = (
+        sql_item_name(dt_col, self.flavor)
+        if dt_col
+        else ''
+    )
+    index_list_str_ordered = (
+        (
+            sql_item_name(dt_col, self.flavor) + " DESC"
+        )
+        if dt_col
+        else ''
+    )
     if indices:
         index_list_str += ', ' + ', '.join(indices_names)
         index_list_str_ordered += ', ' + ', '.join(indices_names)
+    if index_list_str.startswith(','):
+        index_list_str = index_list_str.lstrip(',').lstrip()
+    if index_list_str_ordered.startswith(','):
+        index_list_str_ordered = index_list_str_ordered.lstrip(',').lstrip()
 
     cols_list_str = ', '.join(existing_cols_names)
 
@@ -2733,8 +2757,23 @@ def deduplicate_pipe(
             fail_query = query
             break
     success = fail_query is None
+
+    new_rowcount = (
+        self.value(get_rowcount_query, debug=debug)
+        if success
+        else None
+    )
+
     msg = (
-        "Success"
+        (
+            f"Successfully deduplicated table {pipe_table_name}"
+            + (
+                f"\nfrom {old_rowcount} to {new_rowcount} rows"
+                if old_rowcount != new_rowcount
+                else ''
+            )
+            + '.'
+        )
         if success
         else f"Failed to execute query:\n{fail_query}"
     )

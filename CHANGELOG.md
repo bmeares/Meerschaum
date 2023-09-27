@@ -4,6 +4,25 @@
 
 This is the current release cycle, so stay tuned for future releases!
 
+### v2.0.2
+
+- **Syncing with `--skip-check-existing` will not apply the backtrack interval.**  
+  Because `--skip-check-existing` (or `check_existing=False`) is guaranteed to produce duplicates, the backtrack interval will be set to 0 when running in insert-only mode.
+
+- **Allow for `columns` to be a list.**  
+  Note that building a pipe with `columns` as a list must have the datetime column named `datetime`.
+
+  ```python
+  import meerschaum as mrsm
+  pipe = mrsm.Pipe('a', 'b', columns=['a'])
+  print(pipe.columns)
+  # {'a': 'a'}
+  ```
+
+- **Bump default SQLAlchemy pool size to 8 connections.**
+
+- **Fix `pipe.get_data(as_dask=True)` for JSON columns.**
+
 ### v2.0.1
 
 - **Fix syncing bools within in-place SQL pipes.**  
