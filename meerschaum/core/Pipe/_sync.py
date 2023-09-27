@@ -11,6 +11,7 @@ from __future__ import annotations
 import json
 import time
 import threading
+import multiprocessing
 from datetime import datetime, timedelta
 
 from meerschaum.utils.typing import (
@@ -231,16 +232,7 @@ def sync(
 
             ### Fetch the dataframe from the connector's `fetch()` method.
             try:
-                ### If was added by `make_connector`, activate the plugin's virtual environment.
-                is_custom = p.connector.type in custom_types
-                plugin = (
-                    Plugin(p.connector.__module__.replace('plugins.', '').split('.')[0])
-                    if is_custom else (
-                        Plugin(p.connector.label) if p.connector.type == 'plugin'
-                        else None
-                    )
-                )
-                with Venv(plugin, debug=debug):
+                with Venv(get_connector_plugin(p.connector), debug=debug):
                     df = p.fetch(debug=debug, **kw)
 
             except Exception as e:
@@ -791,16 +783,21 @@ def get_num_workers(self, workers: Optional[int] = None) -> int:
         if self.instance_connector.type == 'sql'
         else None
     )
-    current_num_threads = len(threading.enumerate())
+    current_num_threads = threading.active_count()
+    current_num_connections = (
+        self.instance_connector.engine.pool.checkedout()
+        if engine_pool_size is not None
+        else current_num_threads
+    )
     desired_workers = (
         min(workers or engine_pool_size, engine_pool_size)
         if engine_pool_size is not None
         else workers
     )
     if desired_workers is None:
-        desired_workers = (current_num_threads if is_thread_safe else 1)
+        desired_workers = (multiprocessing.cpu_count() if is_thread_safe else 1)
 
     return max(
-        (desired_workers - current_num_threads),
+        (desired_workers - current_num_connections),
         1,
     )

@@ -13,6 +13,7 @@ For ease of use, you can also import from the root `meerschaum` module:
 
 from __future__ import annotations
 
+import meerschaum as mrsm
 from meerschaum.utils.typing import Any, SuccessTuple, Union, Optional, List, Dict
 from meerschaum.utils.threading import Lock, RLock
 from meerschaum.utils.warnings import error, warn
@@ -328,7 +329,7 @@ def load_plugin_connectors():
 
 def get_connector_plugin(
         connector: Connector,
-    ) -> Union[str, None, 'meerschaum.Plugin']:
+    ) -> Union[str, None, mrsm.Plugin]:
     """
     Determine the plugin for a connector.
     This is useful for handling virtual environments for custom instance connectors.
@@ -344,7 +345,6 @@ def get_connector_plugin(
     """
     if not hasattr(connector, 'type'):
         return None
-    from meerschaum import Plugin
     plugin_name = (
         connector.__module__.replace('plugins.', '').split('.')[0]
         if connector.type in custom_types else (
@@ -353,5 +353,5 @@ def get_connector_plugin(
             else 'mrsm'
         )
     )
-    plugin = Plugin(plugin_name)
+    plugin = mrsm.Plugin(plugin_name)
     return plugin if plugin.is_installed() else None

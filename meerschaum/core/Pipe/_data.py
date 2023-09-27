@@ -89,6 +89,7 @@ def get_data(
     from meerschaum.utils.venv import Venv
     from meerschaum.connectors import get_connector_plugin
     from meerschaum.utils.misc import iterate_chunks, items_str
+    from meerschaum.utils.dtypes import to_pandas_dtype
     from meerschaum.utils.dataframe import add_missing_cols_to_df
     from meerschaum.utils.packages import attempt_import
     dd = attempt_import('dask.dataframe') if as_dask else None
@@ -141,7 +142,11 @@ def get_data(
             )
             for (chunk_begin, chunk_end) in bounds
         ]
-        return dd.from_delayed(dask_chunks, meta=self.dtypes)
+        dask_meta = {
+            col: to_pandas_dtype(typ)
+            for col, typ in self.dtypes.items()
+        }
+        return dd.from_delayed(dask_chunks, meta=dask_meta)
 
     if not self.exists(debug=debug):
         return None

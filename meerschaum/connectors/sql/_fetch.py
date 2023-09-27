@@ -16,6 +16,7 @@ def fetch(
         pipe: meerschaum.Pipe,
         begin: Union[datetime, int, str, None] = '',
         end: Union[datetime, int, str, None] = None,
+        check_existing: bool = True,
         chunk_hook: Optional[Callable[[pd.DataFrame], Any]] = None,
         chunksize: Optional[int] = -1,
         workers: Optional[int] = None,
@@ -46,6 +47,9 @@ def fetch(
         The latest datetime to search for data.
         If `end` is `None`, do not bound 
 
+    check_existing: bool, defult True
+        If `False`, use a backtrack interval of 0 minutes.
+
     chunk_hook: Callable[[pd.DataFrame], Any], default None
         A function to pass to `SQLConnector.read()` that accepts a Pandas DataFrame.
 
@@ -69,6 +73,7 @@ def fetch(
         pipe,
         begin = begin,
         end = end,
+        check_existing = check_existing,
         debug = debug,
         **kw
     )
@@ -106,6 +111,7 @@ def get_pipe_metadef(
         params: Optional[Dict[str, Any]] = None,
         begin: Union[datetime, int, str, None] = '',
         end: Union[datetime, int, str, None] = None,
+        check_existing: bool = True,
         debug: bool = False,
         **kw: Any
     ) -> Union[str, None]:
@@ -124,9 +130,15 @@ def get_pipe_metadef(
         The latest datetime to search for data.
         If `end` is `None`, do not bound 
 
+    check_existing: bool, default True
+        If `True`, apply the backtrack interval.
+
     debug: bool, default False
         Verbosity toggle.
- 
+
+    Returns
+    -------
+    A pipe's meta definition fetch query string.
     """
     from meerschaum.utils.debug import dprint
     from meerschaum.utils.warnings import warn, error
@@ -165,8 +177,8 @@ def get_pipe_metadef(
     if 'order by' in definition.lower() and 'over' not in definition.lower():
         error("Cannot fetch with an ORDER clause in the definition")
 
-    apply_backtrack = begin == ''
-    backtrack_interval = pipe.get_backtrack_interval(debug=debug)
+    apply_backtrack = begin == '' and check_existing
+    backtrack_interval = pipe.get_backtrack_interval(check_existing=check_existing, debug=debug)
     btm = (
         int(backtrack_interval.total_seconds() / 60)
         if isinstance(backtrack_interval, timedelta)
