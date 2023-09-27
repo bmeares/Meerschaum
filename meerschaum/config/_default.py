@@ -63,8 +63,8 @@ default_system_config = {
             'poolclass': 'sqlalchemy.pool.QueuePool',
             'create_engine': {
                 'method': 'multi',
-                'pool_size': 5,
-                'max_overflow': 10,
+                'pool_size': 8,
+                'max_overflow': 12,
                 'pool_recycle': 3600,
                 'connect_args': {},
             },
