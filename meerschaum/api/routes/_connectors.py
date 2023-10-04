@@ -43,7 +43,8 @@ def get_connectors(
     response_dict = {}
     for t in types:
         response_dict[t] = list(get_config('meerschaum', 'connectors', t))
-        response_dict[t].remove('default')
+        if 'default' in response_dict[t]:
+            response_dict[t].remove('default')
     if type is not None:
         return response_dict[type]
     return response_dict

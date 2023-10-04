@@ -75,8 +75,8 @@ def are_dtypes_equal(
     A `bool` indicating whether the two dtypes are to be considered equivalent.
     """
     if isinstance(ldtype, dict) and isinstance(rdtype, dict):
-        lkeys = sorted(list(ldtype.keys()))
-        rkeys = sorted(list(rdtype.keys()))
+        lkeys = sorted([str(k) for k in ldtype.keys()])
+        rkeys = sorted([str(k) for k in rdtype.keys()])
         for lkey, rkey in zip(lkeys, rkeys):
             if lkey != rkey:
                 return False

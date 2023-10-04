@@ -6,7 +6,7 @@
 Stress test for pipes.
 """
 
-__version__ = '0.3.1'
+__version__ = '0.3.4'
 
 import datetime, random, math
 import meerschaum as mrsm
@@ -54,12 +54,11 @@ def fetch(
     if chunksize is None or chunksize < 1:
         chunksize = 1440
 
-    dt_col, id_col = pipe.get_columns('datetime', 'id')
-    val_col = 'val'
+    dt_col, id_col, val_col = 'datetime', 'id', 'val'
 
     fetch_params = pipe.parameters.get('fetch', {})
-    row_limit = fetch_params.get('rows', None)
-    num_ids = fetch_params.get('ids', None)
+    row_limit = fetch_params.get('rows', None) or 1440
+    num_ids = fetch_params.get('ids', None) or 3
 
     def stop_generating(dt_val, num_yielded_rows):
         if end is not None:

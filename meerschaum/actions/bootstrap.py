@@ -159,7 +159,7 @@ def _bootstrap_pipes(
                 + f"    For example, you could create Pipe('{ck}', '{mk}', 'home') and\n"
                 + f"    Pipe('{ck}', '{mk}', 'work'), which would share a connector\n"
                 + "    and metric, but may come from different tables.\n\n"
-                + "    In most cases. you can omit the location.\n\n"
+                + "    In most cases, you can omit the location.\n\n"
                 + f" {get_config('formatting', 'emoji', 'location')} Location (Empty to omit):"
             )
         except KeyboardInterrupt:

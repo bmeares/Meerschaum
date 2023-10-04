@@ -43,7 +43,7 @@ registration_div = html.Div(
                 id = 'user-registration-disabled-collapse',
                 children = [
                     dcc.Markdown(
-                        "For example, to register user `newuser` on instance `sql:main`):"
+                        "For example, to register user `newuser` on instance `sql:main`:"
                     ),
                     html.Pre(
                         html.Code('mrsm register user newuser -i sql:main', className='codeblock'),
