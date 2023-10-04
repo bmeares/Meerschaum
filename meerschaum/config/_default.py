@@ -78,7 +78,7 @@ default_system_config = {
     'api': {
         'uvicorn': {
             'app': 'meerschaum.api:app',
-            'port': default_meerschaum_config['connectors']['api']['default']['port'],
+            'port': 8000,
             'host': '0.0.0.0',
             'workers': max(int(multiprocessing.cpu_count() / 2), 1),
         },
