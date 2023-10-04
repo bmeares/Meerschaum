@@ -327,7 +327,11 @@ def highlight_pipes(message: str) -> str:
         has_single_quote = single_quote_index != -1
         has_double_quote = double_quote_index != -1
         has_quote = has_single_quote or has_double_quote
-        quote_index = double_quote_index if has_double_quote else single_quote_index
+        quote_index = (
+            min(single_quote_index, double_quote_index)
+            if has_double_quote and has_single_quote
+            else (single_quote_index if has_single_quote else double_quote_index)
+        )
 
         has_pipe = (
             has_comma
@@ -335,8 +339,6 @@ def highlight_pipes(message: str) -> str:
             has_paren
             and
             has_quote
-            and not
-            (has_single_quote and has_double_quote)
             and not
             (comma_index > paren_index or quote_index > paren_index)
         )

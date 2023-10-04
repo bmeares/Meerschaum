@@ -6,7 +6,7 @@
 Interact with Meerschaum APIs. May be chained together (see 'meerschaum:api_instance' in your config.yaml).
 """
 
-import datetime
+from datetime import datetime, timedelta
 from meerschaum.utils.typing import Optional
 from meerschaum.connectors import Connector
 from meerschaum.utils.warnings import warn, error
@@ -24,10 +24,15 @@ class APIConnector(Connector):
     IS_INSTANCE: bool = True
     IS_THREAD_SAFE: bool = False
 
-    from ._delete import delete
-    from ._post import post
-    from ._patch import patch
-    from ._get import get, wget
+    from ._request import (
+        make_request,
+        get,
+        post,
+        put,
+        patch,
+        delete,
+        wget,
+    )
     from ._actions import get_actions, do_action
     from ._misc import get_mrsm_version, get_chaining_status
     from ._pipes import (
@@ -85,8 +90,6 @@ class APIConnector(Connector):
         super().__init__('api', label=label, **kw)
         if 'protocol' not in self.__dict__:
             self.protocol = 'http'
-        if 'port' not in self.__dict__:
-            self.port = 8000
         if 'uri' not in self.__dict__:
             self.verify_attributes(required_attributes)
         else:
@@ -97,8 +100,12 @@ class APIConnector(Connector):
             self.__dict__.update(conn_attrs)
         self.url = (
             self.protocol + '://' +
-            self.host + ':' +
-            str(self.port)
+            self.host
+            + (
+                (':' + str(self.port))
+                if self.__dict__.get('port', None)
+                else ''
+            )
         )
         self._token = None
         self._expires = None
@@ -113,10 +120,16 @@ class APIConnector(Connector):
         username = self.__dict__.get('username', None)
         password = self.__dict__.get('password', None)
         creds = (username + ':' + password + '@') if username and password else ''
-
         return (
-            self.protocol + '://' + creds
-            + self.host + ':' + str(self.port)
+            self.protocol
+            + '://'
+            + creds
+            + self.host
+            + (
+                (':' + str(self.port))
+                if self.__dict__.get('port', None)
+                else ''
+            )
         )
 
 
@@ -134,7 +147,7 @@ class APIConnector(Connector):
     def token(self):
         expired = (
             True if self._expires is None else (
-                (self._expires < datetime.datetime.utcnow() + datetime.timedelta(minutes=1))
+                (self._expires < datetime.utcnow() + timedelta(minutes=1))
             )
         )
 

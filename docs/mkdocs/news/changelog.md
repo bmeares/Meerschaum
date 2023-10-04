@@ -4,6 +4,23 @@
 
 This is the current release cycle, so stay tuned for future releases!
 
+### v2.0.3
+
+- **Fix an issue with `--timeout-seconds`.**  
+  Previous refactoring efforts had broken the `--timeout-seconds` polling behavior.
+
+- **Fix a formatting issue when pretty-printing pipes.**  
+  Pipes may now be correctly printed if both single and double quotes appear in a message.
+
+- **Allow omitting `port` for `APIConnectors`.**  
+  You may now omit the `port` attribute for `APIConnectors` to use the protocol-default port (e.g. 443 for HTTPS). Note you will need to delete the key `api:default:port` via `mrsm edit config` if it's present.
+
+- **Add optional `verify` key to API connectors.**  
+  Client API connectors may now be used with self-signed HTTPS instances.
+
+- **Bump `duckdb` to version 0.9.0.**  
+  This adds complete support for PyArrow data types to DuckDB.
+
 ### v2.0.2
 
 - **Syncing with `--skip-check-existing` will not apply the backtrack interval.**  

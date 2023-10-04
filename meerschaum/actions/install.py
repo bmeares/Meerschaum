@@ -220,7 +220,7 @@ def _install_required(
         else:
             success_count += 1
 
-    success = success_count > 0
+    success = fail_count == 0
     msg = (
         f"Installed packages for {success_count + fail_count} plugins\n    "
         + f"({success_count} succeeded, {fail_count} failed)."

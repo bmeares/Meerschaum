@@ -196,8 +196,14 @@ def _pipes_lap(
             )
             write_line((fence_begin + json.dumps((success, msg)) + fence_end).encode('utf-8'))
 
-        src = sync_function_source + '\n\n' + (
-            "import meerschaum as mrsm\n"
+        src = (
+            "from __future__ import annotations\n"
+            + "from datetime import timedelta\n"
+            + "from typing import Optional, Union\n"
+            + "\n\n"
+            + sync_function_source
+            + '\n\n'
+            + "import meerschaum as mrsm\n"
             + "import json\n"
             + f"pipe = mrsm.Pipe(**json.loads({json.dumps(json.dumps(p.meta))}))\n"
             + f"""print(
@@ -216,8 +222,11 @@ def _pipes_lap(
 
         proc = venv_exec(src, venv=None, as_proc=True, debug=debug)
         poll_process(
-            proc, write_line, timeout_seconds,
-            timeout_handler, (p,)
+            proc,
+            write_line,
+            timeout_seconds,
+            timeout_handler,
+            (p,)
         )
         return _success_tuple
 
