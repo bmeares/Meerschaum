@@ -90,8 +90,6 @@ class APIConnector(Connector):
         super().__init__('api', label=label, **kw)
         if 'protocol' not in self.__dict__:
             self.protocol = 'http'
-        if 'port' not in self.__dict__:
-            self.port = 8000
         if 'uri' not in self.__dict__:
             self.verify_attributes(required_attributes)
         else:
@@ -122,7 +120,6 @@ class APIConnector(Connector):
         username = self.__dict__.get('username', None)
         password = self.__dict__.get('password', None)
         creds = (username + ':' + password + '@') if username and password else ''
-
         return (
             self.protocol
             + '://'

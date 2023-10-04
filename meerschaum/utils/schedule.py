@@ -40,6 +40,7 @@ def schedule_function(
     def _wrapper():
         return function(*args, **kw)
 
+    pydantic = attempt_import('pydantic', debug=debug, lazy=False)
     rocketry = attempt_import('rocketry', debug=debug, lazy=False)
     try:
         app = rocketry.Rocketry()

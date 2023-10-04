@@ -49,7 +49,6 @@ attributes: Dict[str, Dict[str, Any]] = {
         ],
         'default': {
             'protocol': 'http',
-            'port'    : 8000,
         },
     },
     'sql': {
