@@ -374,14 +374,14 @@ def get_distinct_col_count(
         from meerschaum import get_connector
         connector = get_connector('sql')
 
-    _col_name = sql_item_name(col, connector.flavor)
+    _col_name = sql_item_name(col, connector.flavor, connector.schema)
 
     _meta_query = (
         f"""
         WITH src AS ( {query} ),
         dist AS ( SELECT DISTINCT {_col_name} FROM src )
         SELECT COUNT(*) FROM dist"""
-    ) if self.flavor not in ('mysql', 'mariadb') else (
+    ) if connector.flavor not in ('mysql', 'mariadb') else (
         f"""
         SELECT COUNT(*)
         FROM (
@@ -397,7 +397,7 @@ def get_distinct_col_count(
         return None
 
 
-def sql_item_name(item: str, flavor: str) -> str:
+def sql_item_name(item: str, flavor: str, schema: Optional[str] = None) -> str:
     """
     Parse SQL items depending on the flavor.
 
@@ -419,6 +419,8 @@ def sql_item_name(item: str, flavor: str) -> str:
     '"table"'
     >>> sql_item_name('table', 'mssql')
     "[table]"
+    >>> sql_item_name('table', 'postgresql', schema='abc')
+    '"abc"."table"'
 
     """
     truncated_item = truncate_item_name(str(item), flavor)
@@ -433,7 +435,14 @@ def sql_item_name(item: str, flavor: str) -> str:
             wrappers = ('', '')
     else:
         wrappers = table_wrappers.get(flavor, table_wrappers['default'])
-    return wrappers[0] + truncated_item + wrappers[1]
+
+    schema_prefix = (
+        (wrappers[0] + schema + wrappers[1] + '.')
+        if schema is not None
+        else ''
+    )
+
+    return schema_prefix + wrappers[0] + truncated_item + wrappers[1]
 
 
 def pg_capital(s: str) -> str:
@@ -552,7 +561,7 @@ def build_where(
     where = ""
     leading_and = "\n    AND "
     for key, value in params.items():
-        _key = sql_item_name(key, connector.flavor)
+        _key = sql_item_name(key, connector.flavor, connector.schema)
         ### search across a list (i.e. IN syntax)
         if isinstance(value, (list, tuple)):
             includes = [item for item in value if not str(item).startswith(negation_prefix)]
@@ -624,7 +633,7 @@ def table_exists(
         from meerschaum import get_connector
         connector = get_connector('sql')
 
-    table_name = sql_item_name(table, connector.flavor)
+    table_name = sql_item_name(table, connector.flavor, connector.schema)
     q = exists_queries.get(connector.flavor, exists_queries['default']).format(
         table=table, table_name=table_name,
     )
@@ -740,11 +749,11 @@ def get_update_queries(
     def sets_subquery(l_prefix: str, r_prefix: str):
         return 'SET ' + ',\n'.join([
             (
-                l_prefix + sql_item_name(c_name, connector.flavor)
+                l_prefix + sql_item_name(c_name, connector.flavor, connector.schema)
                 + ' = '
                 + ('CAST(' if connector.flavor != 'sqlite' else '')
                 + r_prefix
-                + sql_item_name(c_name, connector.flavor)
+                + sql_item_name(c_name, connector.flavor, connector.schema)
                 + (' AS ' if connector.flavor != 'sqlite' else '')
                 + (c_type.replace('_', ' ') if connector.flavor != 'sqlite' else '')
                 + (')' if connector.flavor != 'sqlite' else '')
@@ -754,9 +763,9 @@ def get_update_queries(
     def and_subquery(l_prefix: str, r_prefix: str):
         return '\nAND\n'.join([
             (
-                l_prefix + sql_item_name(c, connector.flavor)
+                l_prefix + sql_item_name(c, connector.flavor, connector.schema)
                 + ' = '
-                + r_prefix + sql_item_name(c, connector.flavor)
+                + r_prefix + sql_item_name(c, connector.flavor, connector.schema)
             ) for c in join_cols
         ])
 
@@ -765,8 +774,8 @@ def get_update_queries(
         sets_subquery_f = sets_subquery('f.', 'p.'),
         and_subquery_f = and_subquery('p.', 'f.'),
         and_subquery_t = and_subquery('p.', 't.'),
-        target_table_name = sql_item_name(target, connector.flavor),
-        patch_table_name = sql_item_name(patch, connector.flavor),
+        target_table_name = sql_item_name(target, connector.flavor, connector.schema),
+        patch_table_name = sql_item_name(patch, connector.flavor, connector.schema),
     ) for base_query in base_queries]
 
     
@@ -779,6 +788,9 @@ def get_null_replacement(typ: str, flavor: str) -> str:
     ----------
     typ: str
         The typ to be converted to NULL.
+
+    flavor: str
+        The database flavor for which this value will be used.
 
     Returns
     -------
@@ -808,11 +820,11 @@ def get_null_replacement(typ: str, flavor: str) -> str:
     return ('n' if flavor == 'oracle' else '') + "'-987654321'"
 
 
-def get_db_version(conn: 'SQLConnector', debug: bool = False) -> None:
+def get_db_version(conn: 'SQLConnector', debug: bool = False) -> Union[str, None]:
     """
     Fetch the database version if possible.
     """
-    version_name = sql_item_name('version', conn.flavor)
+    version_name = sql_item_name('version', conn.flavor, conn.schema)
     version_query = version_queries.get(
         conn.flavor,
         version_queries['default']
@@ -820,7 +832,12 @@ def get_db_version(conn: 'SQLConnector', debug: bool = False) -> None:
     return conn.value(version_query, debug=debug)
 
 
-def get_rename_table_queries(old_table: str, new_table: str, flavor: str) -> List[str]:
+def get_rename_table_queries(
+        old_table: str,
+        new_table: str,
+        flavor: str,
+        schema: Optional[str] = None,
+    ) -> List[str]:
     """
     Return queries to alter a table's name.
 
@@ -835,21 +852,24 @@ def get_rename_table_queries(old_table: str, new_table: str, flavor: str) -> Lis
     flavor: str
         The database flavor to use for the query (e.g. `'mssql'`, `'postgresql'`.
 
+    schema: Optional[str], default None
+        The schema on which the table resides.
+
     Returns
     -------
     A list of `ALTER TABLE` or equivalent queries for the database flavor.
     """
-    old_table_name = sql_item_name(old_table, flavor)
-    new_table_name = sql_item_name(new_table, flavor)
+    old_table_name = sql_item_name(old_table, flavor, schema)
+    new_table_name = sql_item_name(new_table, flavor, schema)
     tmp_table = '_tmp_rename_' + new_table
-    tmp_table_name = sql_item_name(tmp_table, flavor)
+    tmp_table_name = sql_item_name(tmp_table, flavor, schema)
     if flavor == 'mssql':
         return [f"EXEC sp_rename '{old_table}', '{new_table}'"]
 
     if flavor == 'duckdb':
         return [
-            get_create_table_query(f"SELECT * FROM {old_table_name}", tmp_table, 'duckdb'),
-            get_create_table_query(f"SELECT * FROM {tmp_table_name}", new_table, 'duckdb'),
+            get_create_table_query(f"SELECT * FROM {old_table_name}", tmp_table, 'duckdb', schema),
+            get_create_table_query(f"SELECT * FROM {tmp_table_name}", new_table, 'duckdb', schema),
             f"DROP TABLE {tmp_table_name}",
             f"DROP TABLE {old_table_name}",
         ]
@@ -857,7 +877,12 @@ def get_rename_table_queries(old_table: str, new_table: str, flavor: str) -> Lis
     return [f"ALTER TABLE {old_table_name} RENAME TO {new_table_name}"]
 
 
-def get_create_table_query(query: str, new_table: str, flavor: str) -> str:
+def get_create_table_query(
+        query: str,
+        new_table: str,
+        flavor: str,
+        schema: Optional[str] = None,
+    ) -> str:
     """
     Return a query to create a new table from a `SELECT` query.
 
@@ -872,14 +897,17 @@ def get_create_table_query(query: str, new_table: str, flavor: str) -> str:
     flavor: str
         The database flavor to use for the query (e.g. `'mssql'`, `'postgresql'`.
 
+    schema: Optional[str], default None
+        The schema on which the table will reside.
+
     Returns
     -------
     A `CREATE TABLE` (or `SELECT INTO`) query for the database flavor.
     """
     import textwrap
     create_cte = 'create_query'
-    create_cte_name = sql_item_name(create_cte, flavor)
-    new_table_name = sql_item_name(new_table, flavor)
+    create_cte_name = sql_item_name(create_cte, flavor, schema)
+    new_table_name = sql_item_name(new_table, flavor, schema)
     if flavor in ('mssql',):
         query = query.lstrip()
         original_query = query
@@ -925,6 +953,7 @@ def get_create_table_query(query: str, new_table: str, flavor: str) -> str:
 def format_cte_subquery(
         sub_query: str,
         flavor: str,
+        schema: Optional[str] = None,
         sub_name: str = 'src',
         cols_to_select: Union[List[str], str] = '*',
     ) -> str:
@@ -939,6 +968,9 @@ def format_cte_subquery(
     flavor: str
         The database flavor to use for the query (e.g. `'mssql'`, `'postgresql'`.
 
+    schema: Optional[str], default None
+        The schema to use for the query.
+
     sub_name: str, default 'src'
         If possible, give this name to the CTE (must be unquoted).
 
@@ -952,11 +984,11 @@ def format_cte_subquery(
     A wrapper query that selects from the CTE.
     """
     import textwrap
-    quoted_sub_name = sql_item_name(sub_name, flavor)
+    quoted_sub_name = sql_item_name(sub_name, flavor, schema)
     cols_str = (
         cols_to_select
         if isinstance(cols_to_select, str)
-        else ', '.join([sql_item_name(col, flavor) for col in cols_to_select])
+        else ', '.join([sql_item_name(col, flavor, schema) for col in cols_to_select])
     )
     return textwrap.dedent(
         f"""

@@ -23,9 +23,10 @@ _max_chunks_flavors = {'sqlite': 1000,}
 def read(
         self,
         query_or_table: Union[str, sqlalchemy.Query],
-        params: Optional[Dict[str, Any], List[str]] = None,
+        params: Union[Dict[str, Any], List[str], None] = None,
         dtype: Optional[Dict[str, Any]] = None,
         dtype_backend: str = 'pyarrow',
+        coerce_float: bool = True,
         chunksize: Optional[int] = -1,
         workers: Optional[int] = None,
         chunk_hook: Optional[Callable[[pandas.DataFrame], Any]] = None,
@@ -183,7 +184,7 @@ def read(
                 + f" will instead create the table '{truncated_name}'."
             )
 
-        query_or_table = sql_item_name(str(query_or_table), self.flavor)
+        query_or_table = sql_item_name(str(query_or_table), self.flavor, self.schema)
         if debug:
             dprint(f"[{self}] Reading from table {query_or_table}")
         formatted_query = sqlalchemy.text("SELECT * FROM " + str(query_or_table))
@@ -208,6 +209,7 @@ def read(
                 'params': params,
                 'dtype': dtype,
                 'dtype_backend': dtype_backend,
+                'coerce_float': coerce_float,
                 'index_col': index_col,
             }
             if is_dask:
@@ -235,9 +237,11 @@ def read(
                         chunk_generator = pd.read_sql_query(
                             formatted_query,
                             connection,
-                            params = params,
-                            chunksize = chunksize,
-                            dtype = dtype,
+                            **read_sql_query_kwargs
+                            #  params = params,
+                            #  chunksize = chunksize,
+                            #  dtype = dtype,
+                            #  coerce_float = coerce_float,
                         )
 
                         ### `stream_results` must be False (will load everything into memory).
@@ -343,8 +347,10 @@ def read(
                     pd.read_sql_query(
                         formatted_query,
                         connection,
-                        params = params, 
-                        dtype = dtype,
+                        **read_sql_query_kwargs
+                        #  params = params, 
+                        #  dtype = dtype,
+                        #  coerce_float = coerce_float,
                     )
                 )
 
@@ -694,7 +700,7 @@ def to_sql(
     ### resort to defaults if None
     if method == "":
         if self.flavor in _bulk_flavors:
-            method = psql_insert_copy
+            method = functools.partial(psql_insert_copy, schema=self.schema)
         else:
             ### Should resolve to 'multi' or `None`.
             method = flavor_configs.get(self.flavor, {}).get('to_sql', {}).get('method', 'multi')
@@ -739,6 +745,7 @@ def to_sql(
 
     to_sql_kw.update({
         'name': truncated_name,
+        'schema': self.schema,
         ('con' if not is_dask else 'uri'): (self.engine if not is_dask else self.URI),
         'index': index,
         'if_exists': if_exists,
@@ -754,7 +761,9 @@ def to_sql(
         ### For some reason 'replace' doesn't work properly in pandas,
         ### so try dropping first.
         if if_exists == 'replace' and table_exists(name, self, debug=debug):
-            success = self.exec("DROP TABLE " + sql_item_name(name, 'oracle')) is not None
+            success = self.exec(
+                "DROP TABLE " + sql_item_name(name, 'oracle', self.schema)
+            ) is not None
             if not success:
                 warn(f"Unable to drop {name}")
 
@@ -822,7 +831,8 @@ def psql_insert_copy(
         table: pandas.io.sql.SQLTable,
         conn: Union[sqlalchemy.engine.Engine, sqlalchemy.engine.Connection],
         keys: List[str],
-        data_iter: Iterable[Any]
+        data_iter: Iterable[Any],
+        schema: Optional[str] = None,
     ) -> None:
     """
     Execute SQL statement inserting data for PostgreSQL.
@@ -876,15 +886,7 @@ def psql_insert_copy(
         s_buf.seek(0)
 
         columns = ', '.join(f'"{k}"' for k in keys)
-        table_name = (
-            sql_item_name(table.name, 'postgresql')
-            if not table.schema else (
-                sql_item_name(table.schema, 'postgresql')
-                + '.'
-                + sql_item_name(table.name, 'postgresql')
-            )
-        )
-
+        table_name = sql_item_name(table.name, 'postgresql', table.schema)
         sql = f"COPY {table_name} ({columns}) FROM STDIN WITH CSV NULL '\\N'"
         cur.copy_expert(sql=sql, file=s_buf)
 

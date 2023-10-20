@@ -4,6 +4,7 @@
 
 import pytest
 import datetime
+from decimal import Decimal
 from tests import debug
 from tests.connectors import conns, get_flavors
 from tests.test_users import test_register_user
@@ -63,6 +64,7 @@ def test_dtype_enforcement(flavor: str):
             'bool': 'bool',
             'object': 'object',
             'json': 'json',
+            'numeric': 'numeric',
             'str': 'str',
         },
         instance = conn,
@@ -73,13 +75,17 @@ def test_dtype_enforcement(flavor: str):
     pipe.sync([{'dt': '2022-01-01', 'id': 1, 'object': 'foo'}], debug=debug)
     pipe.sync([{'dt': '2022-01-01', 'id': 1, 'str': 'bar'}], debug=debug)
     pipe.sync([{'dt': '2022-01-01', 'id': 1, 'json': {'a': {'b': 1}}}], debug=debug)
+    pipe.sync([{'dt': '2022-01-01', 'id': 1, 'numeric': Decimal(1)}], debug=debug)
     df = pipe.get_data(debug=debug)
     assert len(df) == 1
-    assert len(df.columns) == 8
+    assert len(df.columns) == 9
     for col, typ in df.dtypes.items():
         pipe_dtype = pipe.dtypes[col]
         if pipe_dtype == 'json':
             assert isinstance(df[col][0], dict)
+            pipe_dtype = 'object'
+        elif pipe_dtype == 'numeric':
+            assert isinstance(df[col][0], Decimal)
             pipe_dtype = 'object'
         elif pipe_dtype == 'str':
             assert isinstance(df[col][0], str)
@@ -133,6 +139,58 @@ def test_force_json_dtype(flavor: str):
     print(df)
     assert isinstance(df['a'][0], list)
     assert isinstance(df['a'][1], dict)
+
+
+@pytest.mark.parametrize("flavor", get_flavors())
+def test_infer_numeric_dtype(flavor: str):
+    """
+    Ensure that new pipes with complex columns (dict or list) as enforced as NUMERIC. 
+    """
+    from meerschaum.utils.formatting import pprint
+    from meerschaum.utils.misc import generate_password
+    session_id = generate_password(6)
+    conn = conns[flavor]
+    pipe = Pipe('foo', 'bar', session_id, instance=conn)
+    _ = pipe.delete(debug=debug)
+    pipe = Pipe('foo', 'bar', session_id, instance=conn)
+    success, msg = pipe.sync([
+        {'a': Decimal('1')},
+        {'a': Decimal('2.1')},
+    ])
+    assert success, msg
+    pprint(pipe.get_columns_types())
+    df = pipe.get_data(debug=debug)
+    print(df)
+    assert isinstance(df['a'][0], Decimal)
+    assert df['a'][0] == Decimal('1')
+    assert isinstance(df['a'][1], Decimal)
+    assert df['a'][1] == Decimal('2.1')
+
+
+@pytest.mark.parametrize("flavor", get_flavors())
+def test_force_numeric_dtype(flavor: str):
+    """
+    Ensure that new pipes with complex columns (dict or list) as enforced as NUMERIC. 
+    """
+    from meerschaum.utils.formatting import pprint
+    from meerschaum.utils.misc import generate_password
+    session_id = generate_password(6)
+    conn = conns[flavor]
+    pipe = Pipe('foo', 'bar', session_id, instance=conn, dtypes={'a': 'numeric'})
+    _ = pipe.delete(debug=debug)
+    pipe = Pipe('foo', 'bar', session_id, instance=conn, dtypes={'a': 'numeric'})
+    success, msg = pipe.sync([
+        {'a': '1'},
+        {'a': '2.1'},
+    ])
+    assert success, msg
+    pprint(pipe.get_columns_types())
+    df = pipe.get_data(debug=debug)
+    print(df)
+    assert isinstance(df['a'][0], Decimal)
+    assert df['a'][0] == Decimal('1')
+    assert isinstance(df['a'][1], Decimal)
+    assert df['a'][1] == Decimal('2.1')
 
 
 @pytest.mark.parametrize("flavor", get_flavors())

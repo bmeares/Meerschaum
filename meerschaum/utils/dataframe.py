@@ -114,6 +114,7 @@ def filter_unseen_df(
     import json
     import functools
     import traceback
+    from decimal import Decimal
     from meerschaum.utils.warnings import warn
     from meerschaum.utils.packages import import_pandas, attempt_import
     from meerschaum.utils.dtypes import to_pandas_dtype, are_dtypes_equal
@@ -175,13 +176,17 @@ def filter_unseen_df(
 
     for col, typ in {k: v for k, v in dtypes.items()}.items():
         if not are_dtypes_equal(new_df_dtypes.get(col, 'None'), old_df_dtypes.get(col, 'None')):
+            new_is_float = are_dtypes_equal(new_df_dtypes.get(col, 'None'), 'float')
+            new_is_int = are_dtypes_equal(new_df_dtypes.get(col, 'None'), 'int')
+            old_is_float = are_dtypes_equal(old_df_dtypes.get(col, 'None'), 'float')
+            old_is_int = are_dtypes_equal(old_df_dtypes.get(col, 'None'), 'int')
+
+            if (new_is_float or new_is_int) and (old_is_float or old_is_int):
+                dtypes[col] = 'numeric'
+                cast_cols = True
+                continue
+
             ### Fallback to object if the types don't match.
-            import traceback
-            traceback.print_stack()
-            print(old_df)
-            print(f"{old_df.dtypes=}")
-            print(new_df)
-            print(f"{new_df.dtypes=}")
             warn(
                 f"Detected different types for '{col}' "
                 + f"({new_df_dtypes.get(col, None)} vs {old_df_dtypes.get(col, None)}), "
@@ -207,7 +212,14 @@ def filter_unseen_df(
     for json_col in new_json_cols:
         new_df[json_col] = new_df[json_col].apply(serializer)
 
-    #  if is_dask:
+    new_numeric_cols = get_numeric_cols(new_df)
+    old_numeric_cols = get_numeric_cols(old_df)
+    numeric_cols = set(new_numeric_cols + old_numeric_cols)
+    for numeric_col in old_numeric_cols:
+        old_df[numeric_col] = old_df[numeric_col].apply(str)
+    for numeric_col in new_numeric_cols:
+        new_df[numeric_col] = new_df[numeric_col].apply(str)
+
     joined_df = merge(
         new_df.fillna(NA),
         old_df.fillna(NA),
@@ -230,6 +242,16 @@ def filter_unseen_df(
             delta_df[json_col] = delta_df[json_col].apply(json.loads)
         except Exception as e:
             warn(f"Unable to deserialize JSON column '{json_col}':\n{traceback.format_exc()}")
+
+    for numeric_col in numeric_cols:
+        if numeric_col not in delta_df.columns:
+            continue
+        try:
+            delta_df[numeric_col] = delta_df[numeric_col].apply(
+                lambda x: Decimal(str(x)) if isinstance(x, (str, int, float)) else x
+            )
+        except Exception as e:
+            warn(f"Unable to parse numeric column '{numeric_col}':\n{traceback.format_exc()}")
 
     return delta_df
 
@@ -457,6 +479,42 @@ def get_json_cols(df: 'pd.DataFrame') -> List[str]:
             ix is not None
             and
             not isinstance(df.loc[ix][col], Hashable)
+        )
+    ]
+
+
+def get_numeric_cols(df: 'pd.DataFrame') -> List[str]:
+    """
+    Get the columns which contain `decimal.Decimal` objects from a Pandas DataFrame.
+
+    Parameters
+    ----------
+    df: pd.DataFrame
+        The DataFrame which may contain decimal objects.
+
+    Returns
+    -------
+    A list of columns to treat as numerics.
+    """
+    from decimal import Decimal
+    is_dask = 'dask' in df.__module__
+    if is_dask:
+        df = get_first_valid_dask_partition(df)
+    
+    if len(df) == 0:
+        return []
+
+    cols_indices = {
+        col: df[col].first_valid_index()
+        for col in df.columns
+    }
+    return [
+        col
+        for col, ix in cols_indices.items()
+        if (
+            ix is not None
+            and
+            isinstance(df.loc[ix][col], Decimal)
         )
     ]
 

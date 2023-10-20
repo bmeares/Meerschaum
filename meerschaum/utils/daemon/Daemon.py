@@ -25,7 +25,6 @@ from meerschaum.utils.packages import attempt_import
 from meerschaum.utils.venv import venv_exec
 from meerschaum.utils.daemon._names import get_new_daemon_name
 from meerschaum.utils.daemon.RotatingFile import RotatingFile
-from meerschaum.utils.daemon.Log import Log
 from meerschaum.utils.threading import RepeatTimer
 from meerschaum.__main__ import _close_pools
 
@@ -583,6 +582,8 @@ class Daemon:
         try:
             if self.process.status() == 'stopped':
                 return 'paused'
+            if self.process.status() == 'zombie':
+                raise psutil.NoSuchProcess
         except psutil.NoSuchProcess:
             if self.pid_path.exists():
                 try:
@@ -701,17 +702,6 @@ class Daemon:
             subfile_index = self.rotating_log._cursor[0]
             subfile_position = self.rotating_log._cursor[1]
             f.write(f"{subfile_index} {subfile_position}")
-
-
-    @property
-    def log(self) -> List['meerschaum.utils.daemon.Log']:
-        """
-        Return a `meerschaum.utils.daemon.Log` object for this daemon.
-        """
-        if '_log' in self.__dict__:
-            return self._log
-        self._log = Log(self.rotating_log, self.log_offset_path)
-        return self._log
 
 
     @property

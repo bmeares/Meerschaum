@@ -10,6 +10,7 @@ from meerschaum.utils.typing import Dict, Union
 
 MRSM_PD_DTYPES: Dict[str, str] = {
     'json': 'object',
+    'numeric': 'object',
     'datetime': 'datetime64[ns]',
     'bool': 'bool[pyarrow]',
     'int': 'Int64',

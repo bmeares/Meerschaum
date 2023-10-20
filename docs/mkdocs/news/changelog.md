@@ -4,7 +4,29 @@
 
 This is the current release cycle, so stay tuned for future releases!
 
-### v2.0.3
+### v2.0.5
+
+- **Remove `meerschaum.utils.daemon.Log`.**  
+  This had been replaced by `meerschaum.utils.daemon.RotatingLog` and had been broken since the 2.0 release.
+
+- **Bump `dash-extensions` to `>=1.0.4`.**  
+  The bug that was holding back the version was due to including `enrich.ServersideTransform` in the dash proxy without actually utilizing it.
+
+- **Add the `numeric` dtype (i.e. support for `NUMERIC` columns).**  
+  Specifying a column as `numeric` will coerce it into `decimal.Decimal` objects. For `SQLConnectors`, this will be stored as a `NUMERIC` column. This is useful for syncing a mix of integer and float values.
+  
+- **Add `schema` to `meerschaum.utils.sql.sql_item_name()`.**  
+  You may now pass an optional `schema` when quoting:
+
+  ```python
+  from meerschaum.utils.sql import sql_item_name
+  print(sql_item_name('foo', 'mssql', schema='dbo'))
+  # '[dbo].[foo]'
+  ```
+
+- **Add `schema` to `SQLConnectors`.**  
+
+### v2.0.3 – v2.0.4
 
 - **Fix an issue with `--timeout-seconds`.**  
   Previous refactoring efforts had broken the `--timeout-seconds` polling behavior.
