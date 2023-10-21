@@ -55,6 +55,7 @@ class SQLConnector(Connector):
         get_pipe_table,
         get_pipe_columns_types,
         get_to_sql_dtype,
+        get_pipe_schema,
     )
     from ._plugins import (
         register_plugin,

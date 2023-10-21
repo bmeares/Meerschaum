@@ -150,11 +150,11 @@ def get_pipe_metadef(
 
     if not pipe.columns.get('datetime', None):
         _dt = pipe.guess_datetime()
-        dt_name = sql_item_name(_dt, self.flavor, self.schema) if _dt else None
+        dt_name = sql_item_name(_dt, self.flavor, None) if _dt else None
         is_guess = True
     else:
         _dt = pipe.get_columns('datetime')
-        dt_name = sql_item_name(_dt, self.flavor, self.schema)
+        dt_name = sql_item_name(_dt, self.flavor, None)
         is_guess = False
 
     if begin not in (None, '') or end is not None:
@@ -330,20 +330,20 @@ def _join_fetch_query(
     #  pipe_remote_name = sql_item_name(pipe.target, pipe.connector.flavor)
     sync_times_table = pipe.target + "_sync_times"
     sync_times_instance_name = sql_item_name(
-        sync_times_table, pipe.instance_connector.flavor, pipe.instance_connector.schema
+        sync_times_table, pipe.instance_connector.flavor, None
     )
     sync_times_remote_name = sql_item_name(
-        sync_times_table, pipe.connector.flavor, pipe.connector.schema
+        sync_times_table, pipe.connector.flavor, None
     )
     id_instance_name = sql_item_name(
-        pipe.columns['id'], pipe.instance_connector.flavor, pipe.instance_connector.schema
+        pipe.columns['id'], pipe.instance_connector.flavor, None
     )
-    id_remote_name = sql_item_name(pipe.columns['id'], pipe.connector.flavor, pipe.connector.schema)
+    id_remote_name = sql_item_name(pipe.columns['id'], pipe.connector.flavor, None)
     dt_instance_name = sql_item_name(
-        pipe.columns['datetime'], pipe.connector.flavor, pipe.connector.schema
+        pipe.columns['datetime'], pipe.instance_connector.flavor, None
     )
     dt_remote_name = sql_item_name(
-        pipe.columns['datetime'], pipe.instance_connector.flavor, pipe.instance_connector.schema
+        pipe.columns['datetime'], pipe.connector.flavor, None
     )
     cols_types = pipe.get_columns_types(debug=debug)
     sync_times_query = f"""
@@ -359,7 +359,7 @@ def _join_fetch_query(
         _sync_times_q += (
             f"SELECT CAST('{_id}' AS "
             + sql_item_name(
-                cols_types[pipe.columns['id']], pipe.connector.flavor, pipe.connector.schema
+                cols_types[pipe.columns['id']], pipe.connector.flavor, None
             )
             + f") AS {id_remote_name}, "
             + dateadd_str(

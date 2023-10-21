@@ -548,6 +548,7 @@ def filter_existing(
         filter_unseen_df,
         add_missing_cols_to_df,
         get_unhashable_cols,
+        get_numeric_cols,
     )
     from meerschaum.utils.dtypes import (
         to_pandas_dtype,

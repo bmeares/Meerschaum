@@ -117,7 +117,7 @@ def filter_unseen_df(
     from decimal import Decimal
     from meerschaum.utils.warnings import warn
     from meerschaum.utils.packages import import_pandas, attempt_import
-    from meerschaum.utils.dtypes import to_pandas_dtype, are_dtypes_equal
+    from meerschaum.utils.dtypes import to_pandas_dtype, are_dtypes_equal, attempt_cast_to_numeric
     pd = import_pandas(debug=debug)
     is_dask = 'dask' in new_df.__module__
     if is_dask:
@@ -182,7 +182,7 @@ def filter_unseen_df(
             old_is_int = are_dtypes_equal(old_df_dtypes.get(col, 'None'), 'int')
 
             if (new_is_float or new_is_int) and (old_is_float or old_is_int):
-                dtypes[col] = 'numeric'
+                dtypes[col] = attempt_cast_to_numeric
                 cast_cols = True
                 continue
 
@@ -247,9 +247,7 @@ def filter_unseen_df(
         if numeric_col not in delta_df.columns:
             continue
         try:
-            delta_df[numeric_col] = delta_df[numeric_col].apply(
-                lambda x: Decimal(str(x)) if isinstance(x, (str, int, float)) else x
-            )
+            delta_df[numeric_col] = delta_df[numeric_col].apply(attempt_cast_to_numeric)
         except Exception as e:
             warn(f"Unable to parse numeric column '{numeric_col}':\n{traceback.format_exc()}")
 
@@ -544,12 +542,18 @@ def enforce_dtypes(
     """
     import json
     import traceback
+    from decimal import Decimal
     from meerschaum.utils.debug import dprint
     from meerschaum.utils.warnings import warn
     from meerschaum.utils.formatting import pprint
     from meerschaum.config.static import STATIC_CONFIG
     from meerschaum.utils.packages import import_pandas
-    from meerschaum.utils.dtypes import are_dtypes_equal, to_pandas_dtype
+    from meerschaum.utils.dtypes import (
+        are_dtypes_equal,
+        to_pandas_dtype,
+        is_dtype_numeric,
+        attempt_cast_to_numeric,
+    )
     df_dtypes = {c: str(t) for c, t in df.dtypes.items()}
     if len(df_dtypes) == 0:
         if debug:
@@ -564,6 +568,11 @@ def enforce_dtypes(
         col
         for col, typ in dtypes.items()
         if typ == 'json'
+    ]
+    numeric_cols = [
+        col
+        for col, typ in dtypes.items()
+        if typ == 'numeric'
     ]
     if debug:
         dprint(f"Desired data types:")
@@ -589,6 +598,25 @@ def enforce_dtypes(
                 except Exception as e:
                     if debug:
                         dprint(f"Unable to parse column '{col}' as JSON:\n{e}")
+
+    if numeric_cols and len(df) > 0:
+        if debug:
+            dprint(f"Checking for numerics: {numeric_cols}")
+        for col in numeric_cols:
+            if col in df.columns:
+                try:
+                    df[col] = df[col].apply(
+                        (
+                            lambda x: (
+                                Decimal(str(x))
+                                if str(x).lower() not in ('none', 'na')
+                                else x
+                            )
+                        )
+                    )
+                except Exception as e:
+                    if debug:
+                        dprint(f"Unable to parse column '{col}' as NUMERIC:\n{e}")
 
     if are_dtypes_equal(df_dtypes, pipe_pandas_dtypes):
         if debug:
@@ -629,36 +657,35 @@ def enforce_dtypes(
             pprint(detected_dt_cols)
         return df
 
-    if set(common_dtypes) == set(df_dtypes):
-        min_ratio = STATIC_CONFIG['pipes']['dtypes']['min_ratio_columns_changed_for_full_astype']
-        if (
-            len(common_diff_dtypes) >= int(len(common_dtypes) * min_ratio)
-        ):
-            if debug:
-                dprint(f"Enforcing dtypes columns on incoming DataFrame...")
-                pprint(common_dtypes)
-            try:
-                return df[
-                    list(common_dtypes.keys())
-                ].astype({
-                    col: typ
-                    for col, typ in pipe_pandas_dtypes.items()
-                    if col in common_dtypes
-                })
-            except Exception as e:
-                if debug:
-                    dprint(f"Encountered an error when enforcing data types:\n{e}")
-    
+    for col, typ in {k: v for k, v in common_diff_dtypes.items()}.items():
+        previous_typ = common_dtypes[col]
+        if is_dtype_numeric(typ) and is_dtype_numeric(previous_typ):
+            common_dtypes[col] = attempt_cast_to_numeric
+            common_diff_dtypes[col] = attempt_cast_to_numeric
+    print("common_dtypes")
+    print(common_dtypes)
+
+    print("df_dtypes")
+    print(df_dtypes)
+
+    print("common_diff_dtypes")
+    print(common_diff_dtypes)
+   
     for d in common_diff_dtypes:
         t = common_dtypes[d]
         if debug:
             dprint(f"Casting column {d} to dtype {t}.")
         try:
-            df[d] = df[d].astype(t)
+            df[d] = (
+                df[d].apply(t)
+                if callable(t)
+                else df[d].astype(t)
+            )
         except Exception as e:
+            traceback.print_exc()
             if debug:
                 dprint(f"Encountered an error when casting column {d} to type {t}:\n{e}")
-            if 'int' in str(t.lower()):
+            if 'int' in str(t).lower():
                 try:
                     df[d] = df[d].astype('float64').astype(t)
                 except Exception as e:

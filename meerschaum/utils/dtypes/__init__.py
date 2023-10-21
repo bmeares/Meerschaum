@@ -6,7 +6,8 @@
 Utility functions for working with data types.
 """
 
-from meerschaum.utils.typing import Dict, Union
+from decimal import Decimal
+from meerschaum.utils.typing import Dict, Union, Any
 
 MRSM_PD_DTYPES: Dict[str, str] = {
     'json': 'object',
@@ -98,6 +99,10 @@ def are_dtypes_equal(
     if ldtype in json_dtypes and rdtype in json_dtypes:
         return True
 
+    numeric_dtypes = ('numeric', 'object')
+    if ldtype in numeric_dtypes and rdtype in numeric_dtypes:
+        return True
+
     ldtype_clean = ldtype.split('[')[0]
     rdtype_clean = rdtype.split('[')[0]
 
@@ -130,3 +135,41 @@ def are_dtypes_equal(
         return True
 
     return False
+
+
+def is_dtype_numeric(dtype: str) -> bool:
+    """
+    Determine whether a given `dtype` string
+    should be considered compatible with the Meerschaum dtype `numeric`.
+
+    Parameters
+    ----------
+    dtype: str
+        The pandas-like dtype string.
+
+    Returns
+    -------
+    A bool indicating the dtype is compatible with `numeric`.
+    """
+    dtype_lower = dtype.lower()
+
+    acceptable_substrings = ('numeric', 'float', 'double', 'int')
+    for substring in acceptable_substrings:
+        if substring in dtype_lower:
+            return True
+
+    return False
+
+
+def attempt_cast_to_numeric(value: Any) -> Any:
+    """
+    Given a value, attempt to coerce it into a numeric (Decimal).
+    """
+    try:
+        return (
+            Decimal(str(value))
+            if str(value) not in ('none', 'nan', 'na', '')
+            else value
+        )
+    except Exception as e:
+        return value

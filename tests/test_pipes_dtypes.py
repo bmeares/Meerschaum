@@ -168,6 +168,31 @@ def test_infer_numeric_dtype(flavor: str):
 
 
 @pytest.mark.parametrize("flavor", get_flavors())
+def test_infer_numeric_from_mixed_types(flavor: str):
+    """
+    Ensure that new pipes with complex columns (dict or list) as enforced as NUMERIC. 
+    """
+    from meerschaum.utils.formatting import pprint
+    from meerschaum.utils.misc import generate_password
+    session_id = generate_password(6)
+    conn = conns[flavor]
+    pipe = Pipe('foo', 'bar', session_id, instance=conn)
+    _ = pipe.delete(debug=debug)
+    pipe = Pipe('foo', 'bar', session_id, instance=conn)
+    success, msg = pipe.sync([{'a': 1}])
+    assert success, msg
+    success, msg = pipe.sync([{'a': 2.1}])
+    assert success, msg
+    pprint(pipe.get_columns_types())
+    df = pipe.get_data(debug=debug)
+    print(df)
+    assert isinstance(df['a'][0], Decimal)
+    assert df['a'][0] == Decimal('1')
+    assert isinstance(df['a'][1], Decimal)
+    assert df['a'][1] == Decimal('2.1')
+
+
+@pytest.mark.parametrize("flavor", get_flavors())
 def test_force_numeric_dtype(flavor: str):
     """
     Ensure that new pipes with complex columns (dict or list) as enforced as NUMERIC. 

@@ -13,7 +13,7 @@ data_path.mkdir(exist_ok=True)
 conns = {
     'timescaledb': get_connector('sql', 'test_timescaledb',
         flavor='timescaledb', username='test', password='test1234', database='testdb',
-        port=5439, host='localhost',
+        port=5439, host='localhost', schema='public',
     ),
     'mariadb': get_connector('sql', 'test_mariadb',
         flavor='mariadb', username='test', password='test1234', database='testdb',
@@ -25,7 +25,7 @@ conns = {
     ),
     'mssql': get_connector('sql', 'test_mssql',
         flavor='mssql', username='sa', password='supersecureSECRETPASSWORD123!',
-        database='master', port=1439, host='localhost',
+        database='master', port=1439, host='localhost', schema='dbo',
     ),
     'oracle': get_connector('sql', 'test_oracle',
         flavor='oracle', host='localhost', database='xe', username='system', password='oracle',

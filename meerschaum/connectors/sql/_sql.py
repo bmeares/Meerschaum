@@ -25,13 +25,13 @@ def read(
         query_or_table: Union[str, sqlalchemy.Query],
         params: Union[Dict[str, Any], List[str], None] = None,
         dtype: Optional[Dict[str, Any]] = None,
-        dtype_backend: str = 'pyarrow',
         coerce_float: bool = True,
         chunksize: Optional[int] = -1,
         workers: Optional[int] = None,
         chunk_hook: Optional[Callable[[pandas.DataFrame], Any]] = None,
         as_hook_results: bool = False,
         chunks: Optional[int] = None,
+        schema: Optional[str] = None,
         as_chunks: bool = False,
         as_iterator: bool = False,
         as_dask: bool = False,
@@ -64,9 +64,6 @@ def read(
         See the pandas documentation for more information:
         https://pandas.pydata.org/pandas-docs/stable/reference/api/pandas.read_sql_query.html
 
-    dtype_backend: str, default 'pyarrow'
-        Which pandas dtype engine to use.
-
     chunksize: Optional[int], default -1
         How many chunks to read at a time. `None` will read everything in one large chunk.
         Defaults to system configuration.
@@ -93,6 +90,10 @@ def read(
         return into a single dataframe.
         For example, to limit the returned dataframe to 100,000 rows,
         you could specify a `chunksize` of `1000` and `chunks` of `100`.
+
+    schema: Optional[str], default None
+        If just a table name is provided, optionally specify the table schema.
+        Defaults to `SQLConnector.schema`.
 
     as_chunks: bool, default False
         If `True`, return a list of DataFrames. 
@@ -130,11 +131,11 @@ def read(
     dd = None
     is_dask = 'dask' in pd.__name__
     pd = attempt_import('pandas')
-    #  pd = import_pandas()
     is_dask = dd is not None
     npartitions = chunksize_to_npartitions(chunksize)
     if is_dask:
         chunksize = None
+    schema = schema or self.schema
 
     sqlalchemy = attempt_import("sqlalchemy")
     default_chunksize = self._sys_config.get('chunksize', None)
@@ -184,7 +185,7 @@ def read(
                 + f" will instead create the table '{truncated_name}'."
             )
 
-        query_or_table = sql_item_name(str(query_or_table), self.flavor, self.schema)
+        query_or_table = sql_item_name(str(query_or_table), self.flavor, schema)
         if debug:
             dprint(f"[{self}] Reading from table {query_or_table}")
         formatted_query = sqlalchemy.text("SELECT * FROM " + str(query_or_table))
@@ -208,7 +209,6 @@ def read(
             read_sql_query_kwargs = {
                 'params': params,
                 'dtype': dtype,
-                'dtype_backend': dtype_backend,
                 'coerce_float': coerce_float,
                 'index_col': index_col,
             }
@@ -238,10 +238,6 @@ def read(
                             formatted_query,
                             connection,
                             **read_sql_query_kwargs
-                            #  params = params,
-                            #  chunksize = chunksize,
-                            #  dtype = dtype,
-                            #  coerce_float = coerce_float,
                         )
 
                         ### `stream_results` must be False (will load everything into memory).
@@ -342,15 +338,13 @@ def read(
     if len(chunk_list) == 0:
         with warnings.catch_warnings():
             warnings.filterwarnings('ignore', 'case sensitivity issues')
+            _ = read_sql_query_kwargs.pop('chunksize', None)
             with self.engine.begin() as connection:
                 chunk_list.append(
                     pd.read_sql_query(
                         formatted_query,
                         connection,
                         **read_sql_query_kwargs
-                        #  params = params, 
-                        #  dtype = dtype,
-                        #  coerce_float = coerce_float,
                     )
                 )
 
@@ -632,6 +626,7 @@ def to_sql(
         if_exists: str = 'replace',
         method: str = "",
         chunksize: Optional[int] = -1,
+        schema: Optional[str] = None,
         silent: bool = False,
         debug: bool = False,
         as_tuple: bool = False,
@@ -660,6 +655,13 @@ def to_sql(
     method: str, default ''
         None or multi. Details on pandas.to_sql.
 
+    chunksize: Optional[int], default -1
+        How many rows to insert at a time.
+
+    schema: Optional[str], default None
+        Optionally override the schema for the table.
+        Defaults to `SQLConnector.schema`.
+
     as_tuple: bool, default False
         If `True`, return a (success_bool, message) tuple instead of a `bool`.
         Defaults to `False`.
@@ -686,6 +688,8 @@ def to_sql(
 
     ### We're requiring `name` to be positional, and sometimes it's passed in from background jobs.
     kw.pop('name', None)
+
+    schema = schema or self.schema
 
     from meerschaum.utils.sql import sql_item_name, table_exists, json_flavors, truncate_item_name
     from meerschaum.utils.dataframe import get_json_cols
@@ -745,7 +749,7 @@ def to_sql(
 
     to_sql_kw.update({
         'name': truncated_name,
-        'schema': self.schema,
+        'schema': schema,
         ('con' if not is_dask else 'uri'): (self.engine if not is_dask else self.URI),
         'index': index,
         'if_exists': if_exists,
@@ -760,9 +764,9 @@ def to_sql(
     if self.flavor == 'oracle':
         ### For some reason 'replace' doesn't work properly in pandas,
         ### so try dropping first.
-        if if_exists == 'replace' and table_exists(name, self, debug=debug):
+        if if_exists == 'replace' and table_exists(name, self, schema=schema, debug=debug):
             success = self.exec(
-                "DROP TABLE " + sql_item_name(name, 'oracle', self.schema)
+                "DROP TABLE " + sql_item_name(name, 'oracle', schema)
             ) is not None
             if not success:
                 warn(f"Unable to drop {name}")

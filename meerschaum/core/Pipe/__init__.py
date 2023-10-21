@@ -385,7 +385,7 @@ class Pipe:
                         + sql_item_name(
                             str(self.target),
                             self.instance_connector.flavor,
-                            self.instance_connector.schema,
+                            self.instance_connector.get_pipe_schema(self),
                         )
                     ),
                 }) if self.instance_connector.type == 'sql' else ({

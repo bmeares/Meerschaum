@@ -6,15 +6,46 @@ This is the current release cycle, so stay tuned for future releases!
 
 ### v2.0.5
 
-- **Remove `meerschaum.utils.daemon.Log`.**  
-  This had been replaced by `meerschaum.utils.daemon.RotatingLog` and had been broken since the 2.0 release.
-
-- **Bump `dash-extensions` to `>=1.0.4`.**  
-  The bug that was holding back the version was due to including `enrich.ServersideTransform` in the dash proxy without actually utilizing it.
-
 - **Add the `numeric` dtype (i.e. support for `NUMERIC` columns).**  
   Specifying a column as `numeric` will coerce it into `decimal.Decimal` objects. For `SQLConnectors`, this will be stored as a `NUMERIC` column. This is useful for syncing a mix of integer and float values.
-  
+
+- **Mixing `int` and `float` will cast to `numeric`.**  
+  Rather than always casting to `TEXT`, a column containing a mix of `int` and `float` will be coerced into `numeric`.
+
+  ```python
+  import meerschaum as mrsm
+  pipe = mrsm.Pipe('mix', 'int', 'float', instance='sql:local')
+  pipe.sync([{'a': 1}])
+  pipe.sync([{'a': 1.1}])
+  print(pipe.dtypes)
+  ```
+
+- **Add `schema` to `SQLConnectors`.**  
+  Including the key `schema` or as an argument in the URI will use this schema for created tables. The argument `search_path` will also set `schema` (i.e. for PostgreSQL).
+
+  ```bash
+  export MRSM_SQL_FOO='{
+    "username": "foo",
+    "password": "bar",
+    "port": 5432,
+    "flavor": "timescaledb",
+    "host": "localhost",
+    "database": "db",
+    "schema": "myschema"
+  }'
+
+  export MRSM_SQL_FOO='timescaledb://foo:bar@localhost:5432/db?schema=myschema'
+  export MRSM_SQL_FOO='timescaledb://foo:bar@localhost:5432/db?options=--search_path%3Dmyschema'
+  ```
+
+- **Add `schema` to `pipe.parameters`.**  
+  In addition to the default schema at the connector level, you may override this by setting `schema` under `pipe.parameters`.
+
+  ```python
+  import meerschaum as mrsm
+  pipe = mrsm.Pipe('a', 'b', parameters={'schema': 'myschema'})
+  ```
+ 
 - **Add `schema` to `meerschaum.utils.sql.sql_item_name()`.**  
   You may now pass an optional `schema` when quoting:
 
@@ -24,7 +55,15 @@ This is the current release cycle, so stay tuned for future releases!
   # '[dbo].[foo]'
   ```
 
-- **Add `schema` to `SQLConnectors`.**  
+- **Remove `dtype_backend` from `SQLConnector.read()`.**  
+  This argument previously had no effect. When applied, it was coercing JSON columns into strings, so it was removed.
+
+- **Remove `meerschaum.utils.daemon.Log`.**  
+  This had been replaced by `meerschaum.utils.daemon.RotatingLog` and had been broken since the 2.0 release.
+
+- **Bump `dash-extensions` to `>=1.0.4`.**  
+  The bug that was holding back the version was due to including `enrich.ServersideTransform` in the dash proxy without actually utilizing it.
+
 
 ### v2.0.3 – v2.0.4
 

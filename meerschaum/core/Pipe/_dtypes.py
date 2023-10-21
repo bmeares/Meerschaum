@@ -23,7 +23,7 @@ def enforce_dtypes(
     import traceback
     from meerschaum.utils.warnings import warn
     from meerschaum.utils.debug import dprint
-    from meerschaum.utils.misc import parse_df_datetimes, enforce_dtypes as _enforce_dtypes
+    from meerschaum.utils.dataframe import parse_df_datetimes, enforce_dtypes as _enforce_dtypes
     from meerschaum.utils.packages import import_pandas
     pd = import_pandas(debug=debug)
     if df is None:

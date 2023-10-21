@@ -397,7 +397,8 @@ def get_db_type_from_pd_type(
         pd_type,
         {
             'default': (
-                'TEXT' if not as_sqlalchemy
+                'TEXT'
+                if not as_sqlalchemy
                 else 'UnicodeText'
             ),
         },
@@ -405,7 +406,8 @@ def get_db_type_from_pd_type(
     default_flavor_type = flavor_types.get(
         'default',
         (
-            'TEXT' if not as_sqlalchemy
+            'TEXT'
+            if not as_sqlalchemy
             else 'UnicodeText'
         ),
     )
