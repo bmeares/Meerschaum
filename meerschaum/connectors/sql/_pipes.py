@@ -2414,7 +2414,7 @@ def get_alter_columns_queries(
         get_pd_type_from_db_type,
         get_db_type_from_pd_type,
     )
-    from meerschaum.utils.misc import flatten_list, generate_password
+    from meerschaum.utils.misc import flatten_list, generate_password, items_str
     table_obj = self.get_pipe_table(pipe, debug=debug)
     target = pipe.target
     session_id = generate_password(3)
@@ -2462,13 +2462,24 @@ def get_alter_columns_queries(
     if not altered_cols:
         return []
 
+    pipe_dtypes = pipe.dtypes
+    new_numeric_cols = [col for col in altered_cols if col in numeric_cols]
+    if new_numeric_cols:
+        pipe.dtypes.update({col: 'numeric' for col in new_numeric_cols})
+        edit_success, edit_msg = pipe.edit(debug=debug)
+        if not edit_success:
+            warn(
+                f"Failed to update dtypes for new numeric columns {items_str(new_numeric_cols)}:\n"
+                + f"{edit_msg}"
+            )
+
     text_type = get_db_type_from_pd_type('str', self.flavor, as_sqlalchemy=False)
     numeric_type = get_db_type_from_pd_type('numeric', self.flavor, as_sqlalchemy=False)
     altered_cols_types = {
         col: (
-            text_type
-            if col not in numeric_cols
-            else numeric_type
+            numeric_type
+            if col in numeric_cols
+            else text_type
         )
         for col in altered_cols
     }

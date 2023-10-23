@@ -135,6 +135,7 @@ max_name_lens = {
 }
 json_flavors = {'postgresql', 'timescaledb', 'citus', 'cockroachdb'}
 OMIT_NULLSFIRST_FLAVORS = {'mariadb', 'mysql', 'mssql'}
+
 SINGLE_ALTER_TABLE_FLAVORS = {'duckdb', 'sqlite', 'mssql', 'oracle'}
 NO_CTE_FLAVORS = {'mysql', 'mariadb'}
 NO_SELECT_INTO_FLAVORS = {'sqlite', 'oracle', 'mysql', 'mariadb', 'duckdb'}

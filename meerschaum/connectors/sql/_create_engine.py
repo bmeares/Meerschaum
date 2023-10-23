@@ -71,7 +71,11 @@ flavor_configs = {
         'requirements' : default_requirements,
         'defaults'     : {
             'port'     : 1433,
-            'driver'   : 'ODBC Driver 17 for SQL Server',
+            'options'  : {
+                'driver'   : 'ODBC Driver 17 for SQL Server',
+                'UseFMTONLY': 'Yes',
+            },
+            'UseFMTONLY': 'YES',
         },
     },
     'mysql'            : {
@@ -211,11 +215,7 @@ def create_engine(
     _host = self.__dict__.get('host', None)
     _port = self.__dict__.get('port', None)
     _database = self.__dict__.get('database', None)
-    _driver = self.__dict__.get('driver', None)
-    if _driver is not None:
-        ### URL-encode the driver if a space is detected.
-        ### Not a bullet-proof solution, but this should work for most cases.
-        _driver = urllib.parse.quote_plus(_driver) if ' ' in _driver else _driver
+    _options = self.__dict__.get('options', {}).copy()
     _uri = self.__dict__.get('uri', None)
 
     ### Handle registering specific dialects (due to installing in virtual environments).
@@ -236,7 +236,7 @@ def create_engine(
             ((":" + urllib.parse.quote_plus(_password)) if _password is not None else '') +
             "@" + _host + ((":" + str(_port)) if _port is not None else '') +
             (("/" + _database) if _database is not None else '')
-            + (("?driver=" + _driver) if _driver is not None else '')
+            + (("?" + urllib.parse.urlencode(_options)) if _options else '')
         ) if not _uri else _uri
 
         ### Sometimes the timescaledb:// flavor can slip in.

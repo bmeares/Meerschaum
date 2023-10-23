@@ -55,6 +55,9 @@ This is the current release cycle, so stay tuned for future releases!
   # '[dbo].[foo]'
   ```
 
+- **Add `options` to `SQLConnector`.**  
+  The key `options` will now contain a sub-dictionary of connection options, such as `driver`, `search_path`, or any other query parameters.
+
 - **Remove `dtype_backend` from `SQLConnector.read()`.**  
   This argument previously had no effect. When applied, it was coercing JSON columns into strings, so it was removed.
 

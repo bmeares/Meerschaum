@@ -121,12 +121,14 @@ def read(
     if chunks is not None and chunks <= 0:
         return []
     from meerschaum.utils.sql import sql_item_name, truncate_item_name
+    from meerschaum.utils.dtypes.sql import NUMERIC_PRECISION_FLAVORS
     from meerschaum.utils.packages import attempt_import, import_pandas
     from meerschaum.utils.pool import get_pool
-    from meerschaum.utils.dataframe import chunksize_to_npartitions
+    from meerschaum.utils.dataframe import chunksize_to_npartitions, get_numeric_cols
     import warnings
     import inspect
     import traceback
+    from decimal import Decimal
     pd = import_pandas()
     dd = None
     is_dask = 'dask' in pd.__name__
@@ -367,16 +369,16 @@ def read(
     if as_chunks:
         for c in chunk_list:
             c.reset_index(drop=True, inplace=True)
+            for col in get_numeric_cols(c):
+                c[col] = c[col].apply(lambda x: x.canonical() if isinstance(x, Decimal) else x)
         return chunk_list
 
-    return pd.concat(chunk_list).reset_index(drop=True)
+    df = pd.concat(chunk_list).reset_index(drop=True)
+    ### NOTE: The calls to `canonical()` are to drop leading and trailing zeroes.
+    for col in get_numeric_cols(df):
+        df[col] = df[col].apply(lambda x: x.canonical() if isinstance(x, Decimal) else x)
 
-
-def _read_duckdb(query: str, engine: sqlalchemy.Engine, ):
-    """
-    Implement the `pandas.read_sql()` method for duckdb.
-    """
-    raise NotImplementedError
+    return df
 
 
 def value(
@@ -680,6 +682,7 @@ def to_sql(
     """
     import time
     import json
+    from decimal import Decimal
     from meerschaum.utils.warnings import error, warn
     import warnings
     import functools
@@ -691,9 +694,15 @@ def to_sql(
 
     schema = schema or self.schema
 
-    from meerschaum.utils.sql import sql_item_name, table_exists, json_flavors, truncate_item_name
-    from meerschaum.utils.dataframe import get_json_cols
+    from meerschaum.utils.sql import (
+        sql_item_name,
+        table_exists,
+        json_flavors,
+        truncate_item_name,
+    )
+    from meerschaum.utils.dataframe import get_json_cols, get_numeric_cols
     from meerschaum.utils.dtypes import are_dtypes_equal
+    from meerschaum.utils.dtypes.sql import NUMERIC_PRECISION_FLAVORS
     from meerschaum.connectors.sql._create_engine import flavor_configs
     from meerschaum.utils.packages import attempt_import, import_pandas
     sqlalchemy = attempt_import('sqlalchemy', debug=debug)
@@ -800,6 +809,19 @@ def to_sql(
                     )
                 )
 
+    ### Check for numeric columns.
+    numeric_scale, numeric_precision = NUMERIC_PRECISION_FLAVORS.get(self.flavor, (None, None))
+    if numeric_precision is not None and numeric_scale is not None:
+        numeric_cols = get_numeric_cols(df)
+        precision_decimal = Decimal((('1' * numeric_scale) + '.' + ('1' * numeric_precision)))
+        for col in numeric_cols:
+            df[col] = df[col].apply(
+                lambda x: (
+                    x.quantize(precision_decimal)
+                    if isinstance(x, Decimal)
+                    else x
+                )
+            )
 
     try:
         with warnings.catch_warnings():

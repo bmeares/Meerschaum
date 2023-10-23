@@ -583,7 +583,7 @@ class Daemon:
             if self.process.status() == 'stopped':
                 return 'paused'
             if self.process.status() == 'zombie':
-                raise psutil.NoSuchProcess
+                raise psutil.NoSuchProcess(self.process.pid)
         except psutil.NoSuchProcess:
             if self.pid_path.exists():
                 try:

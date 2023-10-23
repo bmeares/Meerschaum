@@ -264,7 +264,7 @@ class SQLConnector(Connector):
         from meerschaum.utils.packages import attempt_import
         sqlalchemy = attempt_import('sqlalchemy')
         if '_metadata' not in self.__dict__:
-            self._metadata = sqlalchemy.MetaData()
+            self._metadata = sqlalchemy.MetaData(schema=self.schema)
         return self._metadata
 
     @property

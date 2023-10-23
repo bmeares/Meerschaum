@@ -662,15 +662,7 @@ def enforce_dtypes(
         if is_dtype_numeric(typ) and is_dtype_numeric(previous_typ):
             common_dtypes[col] = attempt_cast_to_numeric
             common_diff_dtypes[col] = attempt_cast_to_numeric
-    print("common_dtypes")
-    print(common_dtypes)
 
-    print("df_dtypes")
-    print(df_dtypes)
-
-    print("common_diff_dtypes")
-    print(common_diff_dtypes)
-   
     for d in common_diff_dtypes:
         t = common_dtypes[d]
         if debug:

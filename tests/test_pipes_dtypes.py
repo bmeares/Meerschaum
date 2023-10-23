@@ -74,8 +74,8 @@ def test_dtype_enforcement(flavor: str):
     pipe.sync([{'dt': '2022-01-01', 'id': 1, 'bool': 'True'}], debug=debug)
     pipe.sync([{'dt': '2022-01-01', 'id': 1, 'object': 'foo'}], debug=debug)
     pipe.sync([{'dt': '2022-01-01', 'id': 1, 'str': 'bar'}], debug=debug)
-    pipe.sync([{'dt': '2022-01-01', 'id': 1, 'json': {'a': {'b': 1}}}], debug=debug)
-    pipe.sync([{'dt': '2022-01-01', 'id': 1, 'numeric': Decimal(1)}], debug=debug)
+    pipe.sync([{'dt': '2022-01-01', 'id': 1, 'json': '{"a": {"b": 1}}'}], debug=debug)
+    pipe.sync([{'dt': '2022-01-01', 'id': 1, 'numeric': '1'}], debug=debug)
     df = pipe.get_data(debug=debug)
     assert len(df) == 1
     assert len(df.columns) == 9
@@ -155,7 +155,7 @@ def test_infer_numeric_dtype(flavor: str):
     pipe = Pipe('foo', 'bar', session_id, instance=conn)
     success, msg = pipe.sync([
         {'a': Decimal('1')},
-        {'a': Decimal('2.1')},
+        {'a': Decimal('1234567890.1234')},
     ])
     assert success, msg
     pprint(pipe.get_columns_types())
@@ -164,7 +164,7 @@ def test_infer_numeric_dtype(flavor: str):
     assert isinstance(df['a'][0], Decimal)
     assert df['a'][0] == Decimal('1')
     assert isinstance(df['a'][1], Decimal)
-    assert df['a'][1] == Decimal('2.1')
+    assert df['a'][1] == Decimal('1234567890.1234')
 
 
 @pytest.mark.parametrize("flavor", get_flavors())

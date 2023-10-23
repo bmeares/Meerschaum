@@ -635,7 +635,7 @@ def filter_existing(
     if begin is not None and end is not None and begin > end:
         if isinstance(begin, datetime):
             begin = end - timedelta(minutes=1)
-        ### We might be using integers for out datetime axis.
+        ### We might be using integers for the datetime axis.
         else:
             begin = end - 1
 
