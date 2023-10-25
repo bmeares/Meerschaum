@@ -123,6 +123,9 @@ default_pipes_config = {
     'attributes': {
         'local_cache_timeout_seconds': 60,
     },
+    'sync': {
+        'filter_params_index_limit': 250,
+    },
 }
 default_plugins_config = {}
 default_experimental_config = {

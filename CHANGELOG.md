@@ -64,6 +64,9 @@ This is the current release cycle, so stay tuned for future releases!
 - **Remove `meerschaum.utils.daemon.Log`.**  
   This had been replaced by `meerschaum.utils.daemon.RotatingLog` and had been broken since the 2.0 release.
 
+- **Remove `params` from `Pipe.filter_existing()`.**  
+  To avoid confusion, filter parameters are instead derived from the incoming DataFrame.
+
 - **Bump `dash-extensions` to `>=1.0.4`.**  
   The bug that was holding back the version was due to including `enrich.ServersideTransform` in the dash proxy without actually utilizing it.
 

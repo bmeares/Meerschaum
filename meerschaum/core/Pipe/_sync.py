@@ -515,7 +515,6 @@ def filter_existing(
         self,
         df: 'pd.DataFrame',
         chunksize: Optional[int] = -1,
-        params: Optional[Dict[str, Any]] = None,
         debug: bool = False,
         **kw
     ) -> Tuple['pd.DataFrame', 'pd.DataFrame', 'pd.DataFrame']:
@@ -529,9 +528,6 @@ def filter_existing(
         
     chunksize: Optional[int], default -1
         The `chunksize` used when fetching existing data.
-
-    params: Optional[Dict[str, Any]], default None
-        If provided, use this filter when searching for existing data. 
 
     debug: bool, default False
         Verbosity toggle.
@@ -553,6 +549,7 @@ def filter_existing(
     from meerschaum.utils.dtypes import (
         to_pandas_dtype,
     )
+    from meerschaum.config import get_config
     pd = import_pandas()
     pandas = attempt_import('pandas')
     if not 'dataframe' in str(type(df)).lower():
@@ -639,8 +636,20 @@ def filter_existing(
         else:
             begin = end - 1
 
+    unique_index_vals = {
+        col: df[col].unique()
+        for col in self.columns
+        if col in df.columns and col != dt_col
+    }
+    filter_params_index_limit = get_config('pipes', 'sync', 'filter_params_index_limit')
+    params = {
+        col: list(unique_vals)
+        for col, unique_vals in unique_index_vals.items()
+        if len(unique_vals) <= filter_params_index_limit
+    }
+
     if debug:
-        dprint(f"Looking at data between '{begin}' and '{end}'.", **kw)
+        dprint(f"Looking at data between '{begin}' and '{end}':", **kw)
 
     backtrack_df = self.get_data(
         begin = begin,

@@ -215,7 +215,9 @@ def create_engine(
     _host = self.__dict__.get('host', None)
     _port = self.__dict__.get('port', None)
     _database = self.__dict__.get('database', None)
-    _options = self.__dict__.get('options', {}).copy()
+    _options = self.__dict__.get('options', {})
+    if isinstance(_options, str):
+        _options = dict(urllib.parse.parse_qsl(_options))
     _uri = self.__dict__.get('uri', None)
 
     ### Handle registering specific dialects (due to installing in virtual environments).

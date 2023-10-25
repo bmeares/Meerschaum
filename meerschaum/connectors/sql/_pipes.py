@@ -992,7 +992,7 @@ def get_pipe_data_query(
             []
             + ([f"begin='{begin}'"] if begin else [])
             + ([f"end='{end}'"] if end else [])
-            + ([f"params='{json.dumps(params)}'"] if params else [])
+            + ([f"params={params}"] if params else [])
         )
         dprint("Getting pipe data with constraints: " + items_str(to_print, quotes=False))
 
@@ -1447,6 +1447,7 @@ def sync_pipe_inplace(
     new_table_obj = get_sqlalchemy_table(
         new_table_raw,
         connector = self,
+        schema = self.get_pipe_schema(pipe),
         refresh = True,
         debug = debug,
     )
@@ -1454,6 +1455,10 @@ def sync_pipe_inplace(
         str(col.name): get_pd_type_from_db_type(str(col.type))
         for col in new_table_obj.columns
     }
+    new_cols_str = ', '.join([
+        sql_item_name(col, self.flavor)
+        for col in new_cols
+    ])
 
     add_cols_queries = self.get_add_columns_queries(pipe, new_cols, debug=debug)
     if add_cols_queries:
@@ -1471,8 +1476,8 @@ def sync_pipe_inplace(
         new_count = self.value(f"SELECT COUNT(*) FROM {new_table_name}", debug=debug)
         insert_queries = [
             (
-                f"INSERT INTO {pipe_name}\n"
-                + f"SELECT *\nFROM {new_table_name}"
+                f"INSERT INTO {pipe_name} ({new_cols_str})\n"
+                + f"SELECT {new_cols_str}\nFROM {new_table_name}"
             ),
             f"DROP TABLE {new_table_name}"
         ]
@@ -1596,6 +1601,10 @@ def sync_pipe_inplace(
         str(col.name): get_pd_type_from_db_type(str(col.type))
         for col in delta_table_obj.columns
     }
+    delta_cols_str = ', '.join([
+        sql_item_name(col, self.flavor)
+        for col in delta_cols
+    ])
 
     joined_queries = []
     drop_joined_query = f"DROP TABLE {joined_table_name}"
@@ -1771,8 +1780,8 @@ def sync_pipe_inplace(
 
     apply_unseen_queries = [
         (
-            f"INSERT INTO {pipe_name}\n"
-            + f"SELECT *\nFROM "
+            f"INSERT INTO {pipe_name} ({delta_cols_str})\n"
+            + f"SELECT ({delta_cols_str})\nFROM "
             + (
                 unseen_table_name
                 if on_cols

@@ -7,7 +7,8 @@ Flavor-specific SQL tools.
 """
 
 from __future__ import annotations
-from meerschaum.utils.typing import Optional, Dict, Any, Union, List
+import meerschaum as mrsm
+from meerschaum.utils.typing import Optional, Dict, Any, Union, List, Iterable
 ### Preserve legacy imports.
 from meerschaum.utils.dtypes.sql import (
     DB_TO_PD_DTYPES,
@@ -345,7 +346,7 @@ def test_connection(
 def get_distinct_col_count(
         col: str,
         query: str,
-        connector: Optional[meerschaum.connectors.sql.SQLConnector] = None,
+        connector: Optional[mrsm.connectors.sql.SQLConnector] = None,
         debug: bool = False
     ) -> Optional[int]:
     """
@@ -359,7 +360,7 @@ def get_distinct_col_count(
     query: str:
         The SQL query to count from.
 
-    connector: Optional[meerschaum.connectors.sql.SQLConnector], default None:
+    connector: Optional[mrsm.connectors.sql.SQLConnector], default None:
         The SQLConnector to execute the query.
 
     debug: bool, default False:
@@ -370,10 +371,8 @@ def get_distinct_col_count(
     An `int` of the number of columns in the query or `None` if the query fails.
 
     """
-    
     if connector is None:
-        from meerschaum import get_connector
-        connector = get_connector('sql')
+        connector = mrsm.get_connector('sql')
 
     _col_name = sql_item_name(col, connector.flavor, None)
 
@@ -553,7 +552,10 @@ def build_where(
     from meerschaum.config.static import STATIC_CONFIG
     from meerschaum.utils.warnings import warn
     negation_prefix = STATIC_CONFIG['system']['fetch_pipes_keys']['negation_prefix']
-    params_json = json.dumps(params)
+    try:
+        params_json = json.dumps(params)
+    except Exception as e:
+        params_json = str(params)
     bad_words = ['drop', '--', ';']
     for word in bad_words:
         if word in params_json.lower():
@@ -568,7 +570,7 @@ def build_where(
     for key, value in params.items():
         _key = sql_item_name(key, connector.flavor, None)
         ### search across a list (i.e. IN syntax)
-        if isinstance(value, (list, tuple)):
+        if isinstance(value, Iterable) and not isinstance(value, (dict, str)):
             includes = [item for item in value if not str(item).startswith(negation_prefix)]
             excludes = [item for item in value if str(item).startswith(negation_prefix)]
             if includes:
@@ -656,6 +658,7 @@ def table_exists(
 def get_sqlalchemy_table(
         table: str,
         connector: Optional[meerschaum.connectors.sql.SQLConnector] = None,
+        schema: Optional[str] = None,
         refresh: bool = False,
         debug: bool = False,
     ) -> 'sqlalchemy.Table':
@@ -669,6 +672,10 @@ def get_sqlalchemy_table(
         
     connector: Optional[meerschaum.connectors.sql.SQLConnector], default None:
         The connector to the database which holds the table. 
+
+    schema: Optional[str], default None
+        Specify on which schema the table resides.
+        Defaults to the schema set in `connector`.
 
     refresh: bool, default False
         If `True`, rebuild the cached table object.
@@ -693,12 +700,18 @@ def get_sqlalchemy_table(
     tables = get_tables(mrsm_instance=connector, debug=debug, create=False)
     sqlalchemy = attempt_import('sqlalchemy')
     truncated_table_name = truncate_item_name(str(table), connector.flavor)
+    table_kwargs = {
+        'autoload_with': connector.engine,
+    }
+    if schema:
+        table_kwargs['schema'] = schema
+
     if refresh or truncated_table_name not in tables:
         try:
             tables[truncated_table_name] = sqlalchemy.Table(
                 truncated_table_name,
                 connector.metadata,
-                autoload_with = connector.engine,
+                **table_kwargs
             )
         except sqlalchemy.exc.NoSuchTableError as e:
             warn(f"Table '{truncated_table_name}' does not exist in '{connector}'.")
@@ -709,8 +722,8 @@ def get_sqlalchemy_table(
 def get_update_queries(
         target: str,
         patch: str,
-        connector: meerschaum.connectors.sql.SQLConnector,
-        join_cols: List[str],
+        connector: mrsm.connectors.sql.SQLConnector,
+        join_cols: Iterable[str],
         debug: bool = False,
     ) -> List[str]:
     """
