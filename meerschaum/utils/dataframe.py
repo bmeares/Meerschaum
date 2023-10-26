@@ -609,15 +609,7 @@ def enforce_dtypes(
         for col in numeric_cols:
             if col in df.columns:
                 try:
-                    df[col] = df[col].apply(
-                        (
-                            lambda x: (
-                                Decimal(str(x))
-                                if str(x).lower() not in ('none', 'na')
-                                else x
-                            )
-                        )
-                    )
+                    df[col] = df[col].apply(attempt_cast_to_numeric)
                 except Exception as e:
                     if debug:
                         dprint(f"Unable to parse column '{col}' as NUMERIC:\n{e}")
