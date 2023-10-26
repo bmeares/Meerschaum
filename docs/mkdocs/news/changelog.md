@@ -10,20 +10,20 @@ This is the current release cycle, so stay tuned for future releases!
   Specifying a column as `numeric` will coerce it into `decimal.Decimal` objects. For `SQLConnectors`, this will be stored as a `NUMERIC` column. This is useful for syncing a mix of integer and float values.
 
   ```python
-  from tests.connectors import conns
   import meerschaum as mrsm
   pipe = mrsm.Pipe(
       'demo', 'numeric',
-      instance = conns['mysql'],
+      instance = 'sql:main',
       columns = ['foo'],
       dtypes = {'foo': 'numeric'},
   )
   pipe.sync([{'foo': '1'}, {'foo': '2.01234567890123456789'}])
   df = pipe.get_data()
   print(df.to_dict(orient='records'))
+  # [{'foo': Decimal('1')}, {'foo': Decimal('2.01234567890123456789')}]
   ```
 
-  > **NOTE**: Due to implementation limits, `numeric` has strict precision issues in embedded databases (SQLite, DuckDB).
+  > **NOTE**: Due to implementation limits, `numeric` has strict precision issues in embedded databases (SQLite: `NUMERIC(38, 17)`, DuckDB: `NUMERIC(38, 4)`). PostgreSQL-like database flavors have the best support for `NUMERIC`; MSSQL and MySQL/MariaDB use a precision and scale of `NUMERIC(38, 20)`. Oracle and PostgreSQL are not capped.
 
 - **Mixing `int` and `float` will cast to `numeric`.**  
   Rather than always casting to `TEXT`, a column containing a mix of `int` and `float` will be coerced into `numeric`.
