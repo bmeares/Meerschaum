@@ -4,7 +4,7 @@
 
 This is the current release cycle, so stay tuned for future releases!
 
-### v2.0.5
+### v2.0.5 – v2.0.6
 
 - **Add the `numeric` dtype (i.e. support for `NUMERIC` columns).**  
   Specifying a column as `numeric` will coerce it into `decimal.Decimal` objects. For `SQLConnectors`, this will be stored as a `NUMERIC` column. This is useful for syncing a mix of integer and float values.
