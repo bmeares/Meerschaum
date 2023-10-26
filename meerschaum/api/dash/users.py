@@ -9,7 +9,7 @@ Functions for interacting with users.
 from __future__ import annotations
 
 from meerschaum.api import debug, CHECK_UPDATE, get_api_connector, no_auth
-from meerschaum.api.dash import active_sessions
+from meerschaum.api.dash import active_sessions, authenticated_sessions
 from meerschaum.api.dash.connectors import get_web_connector
 from meerschaum.utils.typing import WebState, SuccessTuple, List, Tuple, Optional
 from meerschaum.utils.packages import attempt_import, import_html, import_dcc
@@ -52,6 +52,8 @@ def is_session_authenticated(session_id: str) -> bool:
     """
     if no_auth:
         return True
+    if session_id in authenticated_sessions:
+        return True
     permissions = get_config('system', 'api', 'permissions')
     allow_non_admin = permissions.get('actions', {}).get('non_admin', False)
     if allow_non_admin:
@@ -60,4 +62,7 @@ def is_session_authenticated(session_id: str) -> bool:
     username = active_sessions.get(session_id, {}).get('username', None)
     user = User(username, instance=conn)
     user_type = conn.get_user_type(user, debug=debug)
-    return user_type == 'admin'
+    is_auth = user_type == 'admin'
+    if is_auth:
+        authenticated_sessions[session_id] = username
+    return is_auth

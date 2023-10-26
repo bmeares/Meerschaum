@@ -14,7 +14,10 @@ from meerschaum.config import get_config
 from meerschaum.config.static import _static_config
 from meerschaum.utils.typing import List, Optional, Any
 from meerschaum.api import get_api_connector, endpoints, no_auth, CHECK_UPDATE
-from meerschaum.api.dash import dash_app, debug, pipes, _get_pipes, active_sessions
+from meerschaum.api.dash import (
+    dash_app, debug, pipes, _get_pipes, active_sessions, authenticated_sessions
+)
+from meerschaum.api.dash.users import is_session_authenticated
 from meerschaum.api.dash.connectors import get_web_connector
 from meerschaum.api.dash.websockets import ws_url_from_href
 from meerschaum.connectors.parse import parse_instance_keys
@@ -550,8 +553,9 @@ def download_pipe_csv(n_clicks):
 @dash_app.callback(
     Output({'type': 'pipe-accordion', 'index': MATCH}, 'children'),
     Input({'type': 'pipe-accordion', 'index': MATCH}, 'active_item'),
+    State('session-store', 'data'),
 )
-def update_pipe_accordion(item):
+def update_pipe_accordion(item, session_store_data):
     if item is None:
         raise PreventUpdate
 
@@ -562,7 +566,9 @@ def update_pipe_accordion(item):
     if pipe is None:
         raise PreventUpdate
 
-    return accordion_items_from_pipe(pipe, active_items=[item])
+    session_id = session_store_data.get('session-id', None)
+    authenticated = is_session_authenticated(str(session_id))
+    return accordion_items_from_pipe(pipe, active_items=[item], authenticated=authenticated)
 
 
 @dash_app.callback(
@@ -704,8 +710,9 @@ def sign_out_button_click(
     if not n_clicks:
         raise PreventUpdate
     session_id = session_store_data.get('session-id', None)
-    if session_id and session_id in active_sessions:
-        del active_sessions[session_id]
+    if session_id:
+        _ = active_sessions.pop(session_id, None)
+        _ = authenticated_sessions.pop(session_id, None)
     return endpoints['dash'], {}
 
 
