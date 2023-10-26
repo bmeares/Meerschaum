@@ -682,7 +682,7 @@ def to_sql(
     """
     import time
     import json
-    from decimal import Decimal
+    from decimal import Decimal, Context
     from meerschaum.utils.warnings import error, warn
     import warnings
     import functools
@@ -817,7 +817,7 @@ def to_sql(
         for col in numeric_cols:
             df[col] = df[col].apply(
                 lambda x: (
-                    x.quantize(precision_decimal)
+                    x.quantize(precision_decimal, context=Context(prec=numeric_scale))
                     if isinstance(x, Decimal)
                     else x
                 )

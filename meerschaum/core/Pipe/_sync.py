@@ -642,8 +642,16 @@ def filter_existing(
         if col in df.columns and col != dt_col
     }
     filter_params_index_limit = get_config('pipes', 'sync', 'filter_params_index_limit')
+    _ = kw.pop('params', None)
     params = {
-        col: list(unique_vals)
+        col: [
+            (
+                val
+                if str(val).lower() not in ('none', 'na', 'nan')
+                else None
+            )
+            for val in unique_vals
+        ]
         for col, unique_vals in unique_index_vals.items()
         if len(unique_vals) <= filter_params_index_limit
     }

@@ -659,7 +659,11 @@ def enforce_dtypes(
 
     for col, typ in {k: v for k, v in common_diff_dtypes.items()}.items():
         previous_typ = common_dtypes[col]
-        if is_dtype_numeric(typ) and is_dtype_numeric(previous_typ):
+        mixed_numeric_types = (is_dtype_numeric(typ) and is_dtype_numeric(previous_typ))
+        explicitly_float = are_dtypes_equal(dtypes.get(col, 'object'), 'float')
+        explicitly_numeric = dtypes.get(col, 'numeric') == 'numeric'
+        cast_to_numeric = explicitly_numeric or (mixed_numeric_types and not explicitly_float)
+        if cast_to_numeric:
             common_dtypes[col] = attempt_cast_to_numeric
             common_diff_dtypes[col] = attempt_cast_to_numeric
 
@@ -674,7 +678,6 @@ def enforce_dtypes(
                 else df[d].astype(t)
             )
         except Exception as e:
-            traceback.print_exc()
             if debug:
                 dprint(f"Encountered an error when casting column {d} to type {t}:\n{e}")
             if 'int' in str(t).lower():

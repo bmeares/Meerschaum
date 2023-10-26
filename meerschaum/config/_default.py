@@ -81,6 +81,8 @@ default_system_config = {
             'port': 8000,
             'host': '0.0.0.0',
             'workers': max(int(multiprocessing.cpu_count() / 2), 1),
+            'proxy_headers': True,
+            'forwarded_allow_ips': '*',
         },
         'permissions':       {
             'registration': {

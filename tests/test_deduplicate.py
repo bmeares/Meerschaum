@@ -17,6 +17,11 @@ import meerschaum as mrsm
 from meerschaum import Pipe
 from meerschaum.actions import actions
 
+@pytest.fixture(autouse=True)
+def run_before_and_after(flavor: str):
+    test_register_user(flavor)
+    yield
+
 @pytest.mark.parametrize("flavor", get_flavors())
 def test_deduplicate_default(flavor: str):
     """

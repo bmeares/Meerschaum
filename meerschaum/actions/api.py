@@ -177,6 +177,7 @@ def _api_start(
 
     api_config = deepcopy(get_config('system', 'api'))
     cf = _config()
+    forwarded_allow_ips = get_config('system', 'api', 'uvicorn', 'forwarded_allow_ips')
     uvicorn_config = api_config['uvicorn']
     if port is None:
         ### default
@@ -276,6 +277,7 @@ def _api_start(
         MRSM_SERVER_ID: SERVER_ID,
         MRSM_RUNTIME: 'api',
         MRSM_CONFIG: json.loads(os.environ.get(MRSM_CONFIG, '{}')),
+        'FORWARDED_ALLOW_IPS': forwarded_allow_ips,
     }
     for env_var in get_env_vars():
         if env_var in env_dict:
@@ -332,7 +334,20 @@ def _api_start(
         if debug:
             gunicorn_args += ['--log-level=debug', '--enable-stdio-inheritance', '--reload']
         try:
-            run_python_package('gunicorn', gunicorn_args, debug=debug, venv=None)
+            run_python_package(
+                'gunicorn',
+                gunicorn_args,
+                env = {
+                    k: (
+                        json.dumps(v)
+                        if isinstance(v, (dict, list))
+                        else v
+                    )
+                    for k, v in env_dict.items()
+                },
+                venv = None,
+                debug = debug,
+            )
         except KeyboardInterrupt:
             pass
 

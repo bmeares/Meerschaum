@@ -717,10 +717,10 @@ def get_pipe_columns_types(
 
     ```
     {
-        "dt": "TIMESTAMP WITHOUT TIMEZONE",
-        "id": "BIGINT",
-        "val": "DOUBLE PRECISION",
+        "dt": "datetime",
+        "id": "int",
+        "val": "float",
     }
     ```
     """
-    return get_pipe(connector_keys, metric_key, location_key).get_columns_types(debug=debug)
+    return get_pipe(connector_keys, metric_key, location_key).dtypes

@@ -149,6 +149,9 @@ DB_FLAVORS_CAST_DTYPES = {
         'TEXT': 'CHAR(10000) CHARACTER SET utf8',
         'BOOL': 'SIGNED INT',
         'BOOLEAN': 'SIGNED INT',
+        'DOUBLE PRECISION': 'DECIMAL',
+        'DOUBLE': 'DECIMAL',
+        'FLOAT': 'DECIMAL',
     },
     'mysql': {
         'BIGINT': 'DECIMAL',
@@ -156,6 +159,9 @@ DB_FLAVORS_CAST_DTYPES = {
         'TEXT': 'CHAR(10000) CHARACTER SET utf8',
         'BOOL': 'SIGNED INT',
         'BOOLEAN': 'SIGNED INT',
+        'DOUBLE PRECISION': 'DECIMAL',
+        'DOUBLE': 'DECIMAL',
+        'FLOAT': 'DECIMAL',
     },
     'oracle': {
         'NVARCHAR(2000)': 'NVARCHAR2(2000)'

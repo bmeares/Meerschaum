@@ -1781,7 +1781,7 @@ def sync_pipe_inplace(
     apply_unseen_queries = [
         (
             f"INSERT INTO {pipe_name} ({delta_cols_str})\n"
-            + f"SELECT ({delta_cols_str})\nFROM "
+            + f"SELECT {delta_cols_str}\nFROM "
             + (
                 unseen_table_name
                 if on_cols
@@ -2450,6 +2450,7 @@ def get_alter_columns_queries(
     }
     pd_db_df_aliases = {
         'int': 'bool',
+        'float': 'bool',
     }
 
     altered_cols = {
@@ -2459,7 +2460,7 @@ def get_alter_columns_queries(
         and not are_dtypes_equal(db_cols_types.get(col, 'object'), 'string')
     }
 
-    ### NOTE: Sometimes bools are coerced into ints.
+    ### NOTE: Sometimes bools are coerced into ints or floats.
     altered_cols_to_ignore = set()
     for col, (db_typ, df_typ) in altered_cols.items():
         for db_alias, df_alias in pd_db_df_aliases.items():
@@ -2471,26 +2472,25 @@ def get_alter_columns_queries(
     if not altered_cols:
         return []
 
-    pipe_dtypes = pipe.dtypes
-    new_numeric_cols = [col for col in altered_cols if col in numeric_cols]
-    if new_numeric_cols:
-        pipe.dtypes.update({col: 'numeric' for col in new_numeric_cols})
+    if numeric_cols:
+        pipe.dtypes.update({col: 'numeric' for col in numeric_cols})
         edit_success, edit_msg = pipe.edit(debug=debug)
         if not edit_success:
             warn(
-                f"Failed to update dtypes for new numeric columns {items_str(new_numeric_cols)}:\n"
+                f"Failed to update dtypes for numeric columns {items_str(numeric_cols)}:\n"
                 + f"{edit_msg}"
             )
 
-    text_type = get_db_type_from_pd_type('str', self.flavor, as_sqlalchemy=False)
+    pipe_dtypes = pipe.dtypes
     numeric_type = get_db_type_from_pd_type('numeric', self.flavor, as_sqlalchemy=False)
+    text_type = get_db_type_from_pd_type('str', self.flavor, as_sqlalchemy=False)
     altered_cols_types = {
         col: (
             numeric_type
             if col in numeric_cols
             else text_type
         )
-        for col in altered_cols
+        for col, (db_typ, typ) in altered_cols.items()
     }
 
     if self.flavor == 'sqlite':
@@ -2522,6 +2522,12 @@ def get_alter_columns_queries(
         insert_query = (
             "INSERT INTO "
             + sql_item_name(target, self.flavor, self.get_pipe_schema(pipe))
+            + ' ('
+            + ', '.join([
+                sql_item_name(col_name, self.flavor, None)
+                for col_name, _ in table_obj.columns.items()
+            ])
+            + ')'
             + "\nSELECT\n"
         )
         for col_name, col_obj in table_obj.columns.items():

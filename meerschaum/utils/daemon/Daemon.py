@@ -767,6 +767,8 @@ class Daemon:
         import pickle, traceback
         if not self.pickle_path.exists():
             error(f"Pickle file does not exist for daemon '{self.daemon_id}'.")
+        if self.pickle_path.stat().st_size == 0:
+            error(f"Pickle was empty for daemon '{self.daemon_id}'.")
         try:
             with open(self.pickle_path, 'rb') as pickle_file:
                 daemon = pickle.load(pickle_file)

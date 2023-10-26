@@ -23,6 +23,7 @@ from meerschaum.api.dash import (
 )
 from meerschaum.api.dash.connectors import get_web_connector
 from meerschaum.api.dash.components import alert_from_success_tuple
+from meerschaum.api.dash.users import is_session_authenticated
 import meerschaum as mrsm
 dbc = attempt_import('dash_bootstrap_components', lazy=False, check_update=CHECK_UPDATE)
 dash_ace = attempt_import('dash_ace', lazy=False, check_update=CHECK_UPDATE)
@@ -98,14 +99,15 @@ def pipes_from_state(
         return False, str(e)
     return _pipes
 
-def get_pipes_cards(*keys):
+def get_pipes_cards(state: Dict[str, Any], *keys):
     """
     Returns a tuple:
         - pipes as a list of cards
         - alert list
     """
     cards = []
-    _pipes = pipes_from_state(*keys, as_list=True)
+    session_id = state['session-store.data']['session-id']
+    _pipes = pipes_from_state(state, *keys, as_list=True)
     alerts = [alert_from_success_tuple(_pipes)]
     if not isinstance(_pipes, list):
         _pipes = []
@@ -138,7 +140,8 @@ def get_pipes_cards(*keys):
 
 def accordion_items_from_pipe(
         pipe: mrsm.Pipe,
-        active_items: Optional[List[str]] = None
+        active_items: Optional[List[str]] = None,
+        session_id: Optional[str] = None,
     ) -> List[dbc.AccordionItem]:
     """
     Build the accordion items for a given pipe.
@@ -156,8 +159,11 @@ def accordion_items_from_pipe(
         items_titles['📃 SQL Query'] = 'sql'
     items_titles.update({
         '🗃️ Recent Data': 'recent-data',
-        '📝 Sync Documents': 'sync-data',
     })
+    if is_session_authenticated(str(session_id)):
+        items_titles.update({
+            '📝 Sync Documents': 'sync-data',
+        })
 
     ### Only generate items if they're in the `active_items` list.
     items_bodies = {}

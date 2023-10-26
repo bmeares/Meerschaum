@@ -9,6 +9,22 @@ This is the current release cycle, so stay tuned for future releases!
 - **Add the `numeric` dtype (i.e. support for `NUMERIC` columns).**  
   Specifying a column as `numeric` will coerce it into `decimal.Decimal` objects. For `SQLConnectors`, this will be stored as a `NUMERIC` column. This is useful for syncing a mix of integer and float values.
 
+  ```python
+  from tests.connectors import conns
+  import meerschaum as mrsm
+  pipe = mrsm.Pipe(
+      'demo', 'numeric',
+      instance = conns['mysql'],
+      columns = ['foo'],
+      dtypes = {'foo': 'numeric'},
+  )
+  pipe.sync([{'foo': '1'}, {'foo': '2.01234567890123456789'}])
+  df = pipe.get_data()
+  print(df.to_dict(orient='records'))
+  ```
+
+  > **NOTE**: Due to implementation limits, `numeric` has strict precision issues in embedded databases (SQLite, DuckDB).
+
 - **Mixing `int` and `float` will cast to `numeric`.**  
   Rather than always casting to `TEXT`, a column containing a mix of `int` and `float` will be coerced into `numeric`.
 
@@ -18,6 +34,7 @@ This is the current release cycle, so stay tuned for future releases!
   pipe.sync([{'a': 1}])
   pipe.sync([{'a': 1.1}])
   print(pipe.dtypes)
+  # {'a': 'numeric'}
   ```
 
 - **Add `schema` to `SQLConnectors`.**  
@@ -34,7 +51,6 @@ This is the current release cycle, so stay tuned for future releases!
     "schema": "myschema"
   }'
 
-  export MRSM_SQL_FOO='timescaledb://foo:bar@localhost:5432/db?schema=myschema'
   export MRSM_SQL_FOO='timescaledb://foo:bar@localhost:5432/db?options=--search_path%3Dmyschema'
   ```
 
@@ -58,6 +74,9 @@ This is the current release cycle, so stay tuned for future releases!
 - **Add `options` to `SQLConnector`.**  
   The key `options` will now contain a sub-dictionary of connection options, such as `driver`, `search_path`, or any other query parameters.
 
+- **Disable the "Sync Documents" accordion item when the session is not authenticated.**  
+  When running the API with `--secure`, only admin users will be able to access the "Sync Documents" accordion items on the pipes' cards.
+
 - **Remove `dtype_backend` from `SQLConnector.read()`.**  
   This argument previously had no effect. When applied, it was coercing JSON columns into strings, so it was removed.
 
@@ -65,7 +84,10 @@ This is the current release cycle, so stay tuned for future releases!
   This had been replaced by `meerschaum.utils.daemon.RotatingLog` and had been broken since the 2.0 release.
 
 - **Remove `params` from `Pipe.filter_existing()`.**  
-  To avoid confusion, filter parameters are instead derived from the incoming DataFrame.
+  To avoid confusion, filter parameters are instead derived from the incoming DataFrame. This will improve performance when repeatedly syncing chunks which span the same interval. The default limit of 250 unique values may be configured under `pipes:sync:filter_params_index_limit`.
+
+- **Add `forwarded_allow_ips` and `proxy_headers` to the web API.**  
+  The default values `forwarded_allow_ips='*'` and `proxy_headers=True` are set when running Uvicorn or Gunicorn and will help when running Meerschaum behind a proxy.
 
 - **Bump `dash-extensions` to `>=1.0.4`.**  
   The bug that was holding back the version was due to including `enrich.ServersideTransform` in the dash proxy without actually utilizing it.

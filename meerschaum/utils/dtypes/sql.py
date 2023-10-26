@@ -10,11 +10,11 @@ from __future__ import annotations
 from meerschaum.utils.typing import Dict, Union, Tuple
 
 NUMERIC_PRECISION_FLAVORS: Dict[str, Tuple[int, int]] = {
-    'mariadb': (20, 10),
-    'mysql': (20, 10),
-    'mssql': (20, 10),
-    'duckdb': (20, 5),
-    'sqlite': (20, 7),
+    'mariadb': (38, 20),
+    'mysql': (38, 20),
+    'mssql': (38, 20),
+    'duckdb': (38, 4),
+    'sqlite': (38, 17),
 }
 
 DB_TO_PD_DTYPES: Dict[str, Union[str, Dict[str, str]]] = {
@@ -76,8 +76,8 @@ PD_TO_DB_DTYPES_FLAVORS: Dict[str, Dict[str, str]] = {
     'float': {
         'timescaledb': 'DOUBLE PRECISION',
         'postgresql': 'DOUBLE PRECISION',
-        'mariadb': 'DECIMAL',
-        'mysql': 'DECIMAL',
+        'mariadb': 'DOUBLE PRECISION',
+        'mysql': 'DOUBLE PRECISION',
         'mssql': 'FLOAT',
         'oracle': 'FLOAT',
         'sqlite': 'FLOAT',
@@ -89,8 +89,8 @@ PD_TO_DB_DTYPES_FLAVORS: Dict[str, Dict[str, str]] = {
     'double': {
         'timescaledb': 'DOUBLE PRECISION',
         'postgresql': 'DOUBLE PRECISION',
-        'mariadb': 'DECIMAL',
-        'mysql': 'DECIMAL',
+        'mariadb': 'DOUBLE PRECISION',
+        'mysql': 'DOUBLE PRECISION',
         'mssql': 'FLOAT',
         'oracle': 'FLOAT',
         'sqlite': 'FLOAT',
