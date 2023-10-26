@@ -75,7 +75,6 @@ flavor_configs = {
                 'driver'   : 'ODBC Driver 17 for SQL Server',
                 'UseFMTONLY': 'Yes',
             },
-            'UseFMTONLY': 'YES',
         },
     },
     'mysql'            : {

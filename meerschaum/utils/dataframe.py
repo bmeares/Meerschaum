@@ -216,9 +216,13 @@ def filter_unseen_df(
     old_numeric_cols = get_numeric_cols(old_df)
     numeric_cols = set(new_numeric_cols + old_numeric_cols)
     for numeric_col in old_numeric_cols:
-        old_df[numeric_col] = old_df[numeric_col].apply(str)
+        old_df[numeric_col] = old_df[numeric_col].apply(
+            lambda x: f'{x:f}' if isinstance(x, Decimal) else x
+        )
     for numeric_col in new_numeric_cols:
-        new_df[numeric_col] = new_df[numeric_col].apply(str)
+        new_df[numeric_col] = new_df[numeric_col].apply(
+            lambda x: f'{x:f}' if isinstance(x, Decimal) else x
+        )
 
     joined_df = merge(
         new_df.fillna(NA),
