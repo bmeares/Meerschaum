@@ -25,7 +25,6 @@ from meerschaum.utils.packages import attempt_import
 from meerschaum.utils.venv import venv_exec
 from meerschaum.utils.daemon._names import get_new_daemon_name
 from meerschaum.utils.daemon.RotatingFile import RotatingFile
-from meerschaum.utils.daemon.Log import Log
 from meerschaum.utils.threading import RepeatTimer
 from meerschaum.__main__ import _close_pools
 
@@ -583,6 +582,8 @@ class Daemon:
         try:
             if self.process.status() == 'stopped':
                 return 'paused'
+            if self.process.status() == 'zombie':
+                raise psutil.NoSuchProcess(self.process.pid)
         except psutil.NoSuchProcess:
             if self.pid_path.exists():
                 try:
@@ -704,17 +705,6 @@ class Daemon:
 
 
     @property
-    def log(self) -> List['meerschaum.utils.daemon.Log']:
-        """
-        Return a `meerschaum.utils.daemon.Log` object for this daemon.
-        """
-        if '_log' in self.__dict__:
-            return self._log
-        self._log = Log(self.rotating_log, self.log_offset_path)
-        return self._log
-
-
-    @property
     def pid(self) -> Union[int, None]:
         """Read the PID file and return its contents.
         Returns `None` if the PID file does not exist.
@@ -777,6 +767,8 @@ class Daemon:
         import pickle, traceback
         if not self.pickle_path.exists():
             error(f"Pickle file does not exist for daemon '{self.daemon_id}'.")
+        if self.pickle_path.stat().st_size == 0:
+            error(f"Pickle was empty for daemon '{self.daemon_id}'.")
         try:
             with open(self.pickle_path, 'rb') as pickle_file:
                 daemon = pickle.load(pickle_file)

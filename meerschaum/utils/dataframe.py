@@ -114,9 +114,10 @@ def filter_unseen_df(
     import json
     import functools
     import traceback
+    from decimal import Decimal
     from meerschaum.utils.warnings import warn
     from meerschaum.utils.packages import import_pandas, attempt_import
-    from meerschaum.utils.dtypes import to_pandas_dtype, are_dtypes_equal
+    from meerschaum.utils.dtypes import to_pandas_dtype, are_dtypes_equal, attempt_cast_to_numeric
     pd = import_pandas(debug=debug)
     is_dask = 'dask' in new_df.__module__
     if is_dask:
@@ -175,13 +176,17 @@ def filter_unseen_df(
 
     for col, typ in {k: v for k, v in dtypes.items()}.items():
         if not are_dtypes_equal(new_df_dtypes.get(col, 'None'), old_df_dtypes.get(col, 'None')):
+            new_is_float = are_dtypes_equal(new_df_dtypes.get(col, 'None'), 'float')
+            new_is_int = are_dtypes_equal(new_df_dtypes.get(col, 'None'), 'int')
+            old_is_float = are_dtypes_equal(old_df_dtypes.get(col, 'None'), 'float')
+            old_is_int = are_dtypes_equal(old_df_dtypes.get(col, 'None'), 'int')
+
+            if (new_is_float or new_is_int) and (old_is_float or old_is_int):
+                dtypes[col] = attempt_cast_to_numeric
+                cast_cols = True
+                continue
+
             ### Fallback to object if the types don't match.
-            import traceback
-            traceback.print_stack()
-            print(old_df)
-            print(f"{old_df.dtypes=}")
-            print(new_df)
-            print(f"{new_df.dtypes=}")
             warn(
                 f"Detected different types for '{col}' "
                 + f"({new_df_dtypes.get(col, None)} vs {old_df_dtypes.get(col, None)}), "
@@ -207,7 +212,18 @@ def filter_unseen_df(
     for json_col in new_json_cols:
         new_df[json_col] = new_df[json_col].apply(serializer)
 
-    #  if is_dask:
+    new_numeric_cols = get_numeric_cols(new_df)
+    old_numeric_cols = get_numeric_cols(old_df)
+    numeric_cols = set(new_numeric_cols + old_numeric_cols)
+    for numeric_col in old_numeric_cols:
+        old_df[numeric_col] = old_df[numeric_col].apply(
+            lambda x: f'{x:f}' if isinstance(x, Decimal) else x
+        )
+    for numeric_col in new_numeric_cols:
+        new_df[numeric_col] = new_df[numeric_col].apply(
+            lambda x: f'{x:f}' if isinstance(x, Decimal) else x
+        )
+
     joined_df = merge(
         new_df.fillna(NA),
         old_df.fillna(NA),
@@ -230,6 +246,14 @@ def filter_unseen_df(
             delta_df[json_col] = delta_df[json_col].apply(json.loads)
         except Exception as e:
             warn(f"Unable to deserialize JSON column '{json_col}':\n{traceback.format_exc()}")
+
+    for numeric_col in numeric_cols:
+        if numeric_col not in delta_df.columns:
+            continue
+        try:
+            delta_df[numeric_col] = delta_df[numeric_col].apply(attempt_cast_to_numeric)
+        except Exception as e:
+            warn(f"Unable to parse numeric column '{numeric_col}':\n{traceback.format_exc()}")
 
     return delta_df
 
@@ -461,6 +485,42 @@ def get_json_cols(df: 'pd.DataFrame') -> List[str]:
     ]
 
 
+def get_numeric_cols(df: 'pd.DataFrame') -> List[str]:
+    """
+    Get the columns which contain `decimal.Decimal` objects from a Pandas DataFrame.
+
+    Parameters
+    ----------
+    df: pd.DataFrame
+        The DataFrame which may contain decimal objects.
+
+    Returns
+    -------
+    A list of columns to treat as numerics.
+    """
+    from decimal import Decimal
+    is_dask = 'dask' in df.__module__
+    if is_dask:
+        df = get_first_valid_dask_partition(df)
+    
+    if len(df) == 0:
+        return []
+
+    cols_indices = {
+        col: df[col].first_valid_index()
+        for col in df.columns
+    }
+    return [
+        col
+        for col, ix in cols_indices.items()
+        if (
+            ix is not None
+            and
+            isinstance(df.loc[ix][col], Decimal)
+        )
+    ]
+
+
 def enforce_dtypes(
         df: 'pd.DataFrame',
         dtypes: Dict[str, str],
@@ -486,12 +546,18 @@ def enforce_dtypes(
     """
     import json
     import traceback
+    from decimal import Decimal
     from meerschaum.utils.debug import dprint
     from meerschaum.utils.warnings import warn
     from meerschaum.utils.formatting import pprint
     from meerschaum.config.static import STATIC_CONFIG
     from meerschaum.utils.packages import import_pandas
-    from meerschaum.utils.dtypes import are_dtypes_equal, to_pandas_dtype
+    from meerschaum.utils.dtypes import (
+        are_dtypes_equal,
+        to_pandas_dtype,
+        is_dtype_numeric,
+        attempt_cast_to_numeric,
+    )
     df_dtypes = {c: str(t) for c, t in df.dtypes.items()}
     if len(df_dtypes) == 0:
         if debug:
@@ -506,6 +572,11 @@ def enforce_dtypes(
         col
         for col, typ in dtypes.items()
         if typ == 'json'
+    ]
+    numeric_cols = [
+        col
+        for col, typ in dtypes.items()
+        if typ == 'numeric'
     ]
     if debug:
         dprint(f"Desired data types:")
@@ -531,6 +602,17 @@ def enforce_dtypes(
                 except Exception as e:
                     if debug:
                         dprint(f"Unable to parse column '{col}' as JSON:\n{e}")
+
+    if numeric_cols and len(df) > 0:
+        if debug:
+            dprint(f"Checking for numerics: {numeric_cols}")
+        for col in numeric_cols:
+            if col in df.columns:
+                try:
+                    df[col] = df[col].apply(attempt_cast_to_numeric)
+                except Exception as e:
+                    if debug:
+                        dprint(f"Unable to parse column '{col}' as NUMERIC:\n{e}")
 
     if are_dtypes_equal(df_dtypes, pipe_pandas_dtypes):
         if debug:
@@ -571,36 +653,30 @@ def enforce_dtypes(
             pprint(detected_dt_cols)
         return df
 
-    if set(common_dtypes) == set(df_dtypes):
-        min_ratio = STATIC_CONFIG['pipes']['dtypes']['min_ratio_columns_changed_for_full_astype']
-        if (
-            len(common_diff_dtypes) >= int(len(common_dtypes) * min_ratio)
-        ):
-            if debug:
-                dprint(f"Enforcing dtypes columns on incoming DataFrame...")
-                pprint(common_dtypes)
-            try:
-                return df[
-                    list(common_dtypes.keys())
-                ].astype({
-                    col: typ
-                    for col, typ in pipe_pandas_dtypes.items()
-                    if col in common_dtypes
-                })
-            except Exception as e:
-                if debug:
-                    dprint(f"Encountered an error when enforcing data types:\n{e}")
-    
+    for col, typ in {k: v for k, v in common_diff_dtypes.items()}.items():
+        previous_typ = common_dtypes[col]
+        mixed_numeric_types = (is_dtype_numeric(typ) and is_dtype_numeric(previous_typ))
+        explicitly_float = are_dtypes_equal(dtypes.get(col, 'object'), 'float')
+        explicitly_numeric = dtypes.get(col, 'numeric') == 'numeric'
+        cast_to_numeric = explicitly_numeric or (mixed_numeric_types and not explicitly_float)
+        if cast_to_numeric:
+            common_dtypes[col] = attempt_cast_to_numeric
+            common_diff_dtypes[col] = attempt_cast_to_numeric
+
     for d in common_diff_dtypes:
         t = common_dtypes[d]
         if debug:
             dprint(f"Casting column {d} to dtype {t}.")
         try:
-            df[d] = df[d].astype(t)
+            df[d] = (
+                df[d].apply(t)
+                if callable(t)
+                else df[d].astype(t)
+            )
         except Exception as e:
             if debug:
                 dprint(f"Encountered an error when casting column {d} to type {t}:\n{e}")
-            if 'int' in str(t.lower()):
+            if 'int' in str(t).lower():
                 try:
                     df[d] = df[d].astype('float64').astype(t)
                 except Exception as e:

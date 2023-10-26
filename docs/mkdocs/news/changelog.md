@@ -4,7 +4,96 @@
 
 This is the current release cycle, so stay tuned for future releases!
 
-### v2.0.3
+### v2.0.5
+
+- **Add the `numeric` dtype (i.e. support for `NUMERIC` columns).**  
+  Specifying a column as `numeric` will coerce it into `decimal.Decimal` objects. For `SQLConnectors`, this will be stored as a `NUMERIC` column. This is useful for syncing a mix of integer and float values.
+
+  ```python
+  import meerschaum as mrsm
+  pipe = mrsm.Pipe(
+      'demo', 'numeric',
+      instance = 'sql:main',
+      columns = ['foo'],
+      dtypes = {'foo': 'numeric'},
+  )
+  pipe.sync([{'foo': '1'}, {'foo': '2.01234567890123456789'}])
+  df = pipe.get_data()
+  print(df.to_dict(orient='records'))
+  # [{'foo': Decimal('1')}, {'foo': Decimal('2.01234567890123456789')}]
+  ```
+
+  > **NOTE**: Due to implementation limits, `numeric` has strict precision issues in embedded databases (SQLite: `NUMERIC(38, 17)`, DuckDB: `NUMERIC(38, 4)`). PostgreSQL-like database flavors have the best support for `NUMERIC`; MSSQL and MySQL/MariaDB use a precision and scale of `NUMERIC(38, 20)`. Oracle and PostgreSQL are not capped.
+
+- **Mixing `int` and `float` will cast to `numeric`.**  
+  Rather than always casting to `TEXT`, a column containing a mix of `int` and `float` will be coerced into `numeric`.
+
+  ```python
+  import meerschaum as mrsm
+  pipe = mrsm.Pipe('mix', 'int', 'float', instance='sql:local')
+  pipe.sync([{'a': 1}])
+  pipe.sync([{'a': 1.1}])
+  print(pipe.dtypes)
+  # {'a': 'numeric'}
+  ```
+
+- **Add `schema` to `SQLConnectors`.**  
+  Including the key `schema` or as an argument in the URI will use this schema for created tables. The argument `search_path` will also set `schema` (i.e. for PostgreSQL).
+
+  ```bash
+  export MRSM_SQL_FOO='{
+    "username": "foo",
+    "password": "bar",
+    "port": 5432,
+    "flavor": "timescaledb",
+    "host": "localhost",
+    "database": "db",
+    "schema": "myschema"
+  }'
+
+  export MRSM_SQL_FOO='timescaledb://foo:bar@localhost:5432/db?options=--search_path%3Dmyschema'
+  ```
+
+- **Add `schema` to `pipe.parameters`.**  
+  In addition to the default schema at the connector level, you may override this by setting `schema` under `pipe.parameters`.
+
+  ```python
+  import meerschaum as mrsm
+  pipe = mrsm.Pipe('a', 'b', parameters={'schema': 'myschema'})
+  ```
+ 
+- **Add `schema` to `meerschaum.utils.sql.sql_item_name()`.**  
+  You may now pass an optional `schema` when quoting:
+
+  ```python
+  from meerschaum.utils.sql import sql_item_name
+  print(sql_item_name('foo', 'mssql', schema='dbo'))
+  # '[dbo].[foo]'
+  ```
+
+- **Add `options` to `SQLConnector`.**  
+  The key `options` will now contain a sub-dictionary of connection options, such as `driver`, `search_path`, or any other query parameters.
+
+- **Disable the "Sync Documents" accordion item when the session is not authenticated.**  
+  When running the API with `--secure`, only admin users will be able to access the "Sync Documents" accordion items on the pipes' cards.
+
+- **Remove `dtype_backend` from `SQLConnector.read()`.**  
+  This argument previously had no effect. When applied, it was coercing JSON columns into strings, so it was removed.
+
+- **Remove `meerschaum.utils.daemon.Log`.**  
+  This had been replaced by `meerschaum.utils.daemon.RotatingLog` and had been broken since the 2.0 release.
+
+- **Remove `params` from `Pipe.filter_existing()`.**  
+  To avoid confusion, filter parameters are instead derived from the incoming DataFrame. This will improve performance when repeatedly syncing chunks which span the same interval. The default limit of 250 unique values may be configured under `pipes:sync:filter_params_index_limit`.
+
+- **Add `forwarded_allow_ips` and `proxy_headers` to the web API.**  
+  The default values `forwarded_allow_ips='*'` and `proxy_headers=True` are set when running Uvicorn or Gunicorn and will help when running Meerschaum behind a proxy.
+
+- **Bump `dash-extensions` to `>=1.0.4`.**  
+  The bug that was holding back the version was due to including `enrich.ServersideTransform` in the dash proxy without actually utilizing it.
+
+
+### v2.0.3 – v2.0.4
 
 - **Fix an issue with `--timeout-seconds`.**  
   Previous refactoring efforts had broken the `--timeout-seconds` polling behavior.

@@ -11,12 +11,13 @@ import time
 import json
 from io import StringIO
 from datetime import datetime
+import meerschaum as mrsm
 from meerschaum.utils.debug import dprint
 from meerschaum.utils.warnings import warn, error
 from meerschaum.utils.typing import SuccessTuple, Union, Any, Optional, Mapping, List, Dict, Tuple
 
 def pipe_r_url(
-        pipe: 'meerschaum.Pipe'
+        pipe: mrsm.Pipe
     ) -> str:
     """Return a relative URL path from a Pipe's keys."""
     from meerschaum.config.static import STATIC_CONFIG
@@ -30,7 +31,7 @@ def pipe_r_url(
 
 def register_pipe(
         self,
-        pipe: meerschaum.Pipe,
+        pipe: mrsm.Pipe,
         debug: bool = False
     ) -> SuccessTuple:
     """Submit a POST to the API to register a new Pipe object.
@@ -59,7 +60,7 @@ def register_pipe(
 
 def edit_pipe(
         self,
-        pipe: meerschaum.Pipe,
+        pipe: mrsm.Pipe,
         patch: bool = False,
         debug: bool = False,
     ) -> SuccessTuple:
@@ -158,17 +159,19 @@ def fetch_pipes_keys(
 
 def sync_pipe(
         self,
-        pipe: Optional[meerschaum.Pipe] = None,
-        df: Optional[Union[pandas.DataFrame, Dict[Any, Any], str]] = None,
+        pipe: mrsm.Pipe,
+        df: Optional[Union['pd.DataFrame', Dict[Any, Any], str]] = None,
         chunksize: Optional[int] = -1,
         debug: bool = False,
         **kw: Any
     ) -> SuccessTuple:
     """Sync a DataFrame into a Pipe."""
+    from decimal import Decimal
     from meerschaum.utils.debug import dprint
-    from meerschaum.utils.misc import json_serialize_datetime
+    from meerschaum.utils.misc import json_serialize_datetime, items_str
     from meerschaum.config import get_config
     from meerschaum.utils.packages import attempt_import
+    from meerschaum.utils.dataframe import get_numeric_cols
     begin = time.time()
     more_itertools = attempt_import('more_itertools')
     if df is None:
@@ -188,7 +191,7 @@ def sync_pipe(
         get_config('system', 'connectors', 'sql', 'chunksize') if chunksize == -1
         else chunksize
     ))
-    keys: list = list(df.columns)
+    keys: List[str] = list(df.columns)
     chunks = []
     if hasattr(df, 'index'):
         df = df.reset_index(drop=True)
@@ -198,6 +201,26 @@ def sync_pipe(
             if not is_dask
             else [partition.compute() for partition in df.partitions]
         )
+        numeric_cols = get_numeric_cols(df)
+        if numeric_cols:
+            for col in numeric_cols:
+                df[col] = df[col].apply(lambda x: f'{x:f}' if isinstance(x, Decimal) else x)
+            pipe_dtypes = pipe.dtypes
+            new_numeric_cols = [
+                col
+                for col in numeric_cols
+                if pipe_dtypes.get(col, None) != 'numeric'
+            ]
+            pipe.dtypes.update({
+                col: 'numeric'
+                for col in new_numeric_cols
+            })
+            edit_success, edit_msg = pipe.edit(debug=debug)
+            if not edit_success:
+                warn(
+                    "Failed to update new numeric columns "
+                    + f"{items_str(new_numeric_cols)}:\n{edit_msg}"
+                )
     elif isinstance(df, dict):
         ### `_chunks` is a dict of lists of dicts.
         ### e.g. {'a' : [ {'a':[1, 2]}, {'a':[3, 4]} ] }
@@ -607,6 +630,7 @@ def get_pipe_rowcount(
     )
     if not response:
         warn(f"Failed to get the rowcount for {pipe}:\n{response.text}")
+        return 0
     try:
         return int(json.loads(response.text))
     except Exception as e:

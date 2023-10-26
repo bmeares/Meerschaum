@@ -137,7 +137,7 @@ packages['dash'] = {
     'dash'                           : 'dash>=2.6.2',
     'dash_bootstrap_components'      : 'dash-bootstrap-components>=1.2.1',
     'dash_ace'                       : 'dash-ace>=0.2.1',
-    'dash_extensions'                : 'dash-extensions<1.0.2',
+    'dash_extensions'                : 'dash-extensions>=1.0.4',
     'dash_daq'                       : 'dash-daq>=0.5.0',
     'terminado'                      : 'terminado>=0.12.1',
     'tornado'                        : 'tornado>=6.1.0',
