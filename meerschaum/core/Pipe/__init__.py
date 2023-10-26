@@ -381,8 +381,12 @@ class Pipe:
             _fetch_patch = {
                 'fetch': ({
                     'definition': (
-                        f"SELECT * "
-                        + f"FROM {sql_item_name(str(self.target), self.instance_connector.flavor)}"
+                        f"SELECT * FROM "
+                        + sql_item_name(
+                            str(self.target),
+                            self.instance_connector.flavor,
+                            self.instance_connector.get_pipe_schema(self),
+                        )
                     ),
                 }) if self.instance_connector.type == 'sql' else ({
                     'connector_keys': self.connector_keys,

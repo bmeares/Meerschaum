@@ -570,7 +570,7 @@ def _show_logs(
     """
     import os, pathlib, random, asyncio
     from meerschaum.utils.packages import attempt_import, import_rich
-    from meerschaum.utils.daemon import get_filtered_daemons, Daemon, Log
+    from meerschaum.utils.daemon import get_filtered_daemons, Daemon
     from meerschaum.utils.warnings import warn, info
     from meerschaum.utils.formatting import get_console, ANSI, UNICODE
     from meerschaum.utils.misc import tail

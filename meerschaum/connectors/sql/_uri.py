@@ -107,4 +107,7 @@ def parse_uri(uri: str) -> Dict[str, Any]:
         parsed_uri = urlparse(uri)
         for key, value in parse_qs(parsed_uri.query).items():
             params.update({key: value[0]})
+
+        if '--search_path' in params.get('options', ''):
+            params.update({'schema': params['options'].replace('--search_path=', '', 1)})
     return params

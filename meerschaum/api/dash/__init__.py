@@ -61,7 +61,6 @@ dash_app = enrich.DashProxy(
     transforms = [
         enrich.TriggerTransform(),
         enrich.MultiplexerTransform(),
-        enrich.ServersideOutputTransform(),
     ],
 )
 

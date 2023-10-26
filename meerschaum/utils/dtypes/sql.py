@@ -7,17 +7,26 @@ Utility functions for working with SQL data types.
 """
 
 from __future__ import annotations
-from meerschaum.utils.typing import Dict, Union
+from meerschaum.utils.typing import Dict, Union, Tuple
+
+NUMERIC_PRECISION_FLAVORS: Dict[str, Tuple[int, int]] = {
+    'mariadb': (38, 20),
+    'mysql': (38, 20),
+    'mssql': (38, 20),
+    'duckdb': (38, 4),
+    'sqlite': (38, 17),
+}
 
 DB_TO_PD_DTYPES: Dict[str, Union[str, Dict[str, str]]] = {
     'FLOAT': 'float64[pyarrow]',
     'DOUBLE_PRECISION': 'float64[pyarrow]',
     'DOUBLE': 'float64[pyarrow]',
-    'DECIMAL': 'float64[pyarrow]',
+    'DECIMAL': 'numeric',
     'BIGINT': 'int64[pyarrow]',
     'INT': 'int64[pyarrow]',
     'INTEGER': 'int64[pyarrow]',
-    'NUMBER': 'float64[pyarrow]',
+    'NUMBER': 'numeric',
+    'NUMERIC': 'numeric',
     'TIMESTAMP': 'datetime64[ns]',
     'TIMESTAMP WITH TIMEZONE': 'datetime64[ns, UTC]',
     'TIMESTAMPTZ': 'datetime64[ns, UTC]',
@@ -32,18 +41,20 @@ DB_TO_PD_DTYPES: Dict[str, Union[str, Dict[str, str]]] = {
     'TINYINT(1)': 'bool[pyarrow]',
     'BIT': 'bool[pyarrow]',
     'BIT(1)': 'bool[pyarrow]',
-    'JSON': 'object',
-    'JSONB': 'object',
+    'JSON': 'json',
+    'JSONB': 'json',
     'substrings': {
         'CHAR': 'string[pyarrow]',
         'TIMESTAMP': 'datetime64[ns]',
         'TIME': 'datetime64[ns]',
         'DATE': 'datetime64[ns]',
         'DOUBLE': 'double[pyarrow]',
-        'DECIMAL': 'float64[pyarrow]',
+        'DECIMAL': 'numeric',
+        'NUMERIC': 'numeric',
+        'NUMBER': 'numeric',
         'INT': 'int64[pyarrow]',
         'BOOL': 'bool[pyarrow]',
-        'JSON': 'object',
+        'JSON': 'json',
     },
     'default': 'object',
 }
@@ -65,8 +76,8 @@ PD_TO_DB_DTYPES_FLAVORS: Dict[str, Dict[str, str]] = {
     'float': {
         'timescaledb': 'DOUBLE PRECISION',
         'postgresql': 'DOUBLE PRECISION',
-        'mariadb': 'DECIMAL',
-        'mysql': 'DECIMAL',
+        'mariadb': 'DOUBLE PRECISION',
+        'mysql': 'DOUBLE PRECISION',
         'mssql': 'FLOAT',
         'oracle': 'FLOAT',
         'sqlite': 'FLOAT',
@@ -78,8 +89,8 @@ PD_TO_DB_DTYPES_FLAVORS: Dict[str, Dict[str, str]] = {
     'double': {
         'timescaledb': 'DOUBLE PRECISION',
         'postgresql': 'DOUBLE PRECISION',
-        'mariadb': 'DECIMAL',
-        'mysql': 'DECIMAL',
+        'mariadb': 'DOUBLE PRECISION',
+        'mysql': 'DOUBLE PRECISION',
         'mssql': 'FLOAT',
         'oracle': 'FLOAT',
         'sqlite': 'FLOAT',
@@ -121,7 +132,7 @@ PD_TO_DB_DTYPES_FLAVORS: Dict[str, Dict[str, str]] = {
         'mysql': 'BOOLEAN',
         'mssql': 'INTEGER',
         'oracle': 'INTEGER',
-        'sqlite': 'BOOLEAN',
+        'sqlite': 'FLOAT',
         'duckdb': 'BOOLEAN',
         'citus': 'BOOLEAN',
         'cockroachdb': 'BOOLEAN',
@@ -165,6 +176,19 @@ PD_TO_DB_DTYPES_FLAVORS: Dict[str, Dict[str, str]] = {
         'citus': 'JSONB',
         'cockroachdb': 'JSONB',
         'default': 'TEXT',
+    },
+    'numeric': {
+        'timescaledb': 'NUMERIC',
+        'postgresql': 'NUMERIC',
+        'mariadb': f'DECIMAL{NUMERIC_PRECISION_FLAVORS["mariadb"]}',
+        'mysql': f'DECIMAL{NUMERIC_PRECISION_FLAVORS["mysql"]}',
+        'mssql': f'NUMERIC{NUMERIC_PRECISION_FLAVORS["mssql"]}',
+        'oracle': 'NUMBER',
+        'sqlite': f'DECIMAL{NUMERIC_PRECISION_FLAVORS["sqlite"]}',
+        'duckdb': 'NUMERIC',
+        'citus': 'NUMERIC',
+        'cockroachdb': 'NUMERIC',
+        'default': 'NUMERIC',
     },
 }
 PD_TO_SQLALCHEMY_DTYPES_FLAVORS: Dict[str, Dict[str, str]] = {
@@ -225,9 +249,9 @@ PD_TO_SQLALCHEMY_DTYPES_FLAVORS: Dict[str, Dict[str, str]] = {
         'postgresql': 'Boolean',
         'mariadb': 'Boolean',
         'mysql': 'Boolean',
-        'mssql': 'Boolean',
-        'oracle': 'Boolean',
-        'sqlite': 'Boolean',
+        'mssql': 'Integer',
+        'oracle': 'Integer',
+        'sqlite': 'Float',
         'duckdb': 'Boolean',
         'citus': 'Boolean',
         'cockroachdb': 'Boolean',
@@ -271,6 +295,19 @@ PD_TO_SQLALCHEMY_DTYPES_FLAVORS: Dict[str, Dict[str, str]] = {
         'citus': 'JSONB',
         'cockroachdb': 'JSONB',
         'default': 'UnicodeText',
+    },
+    'numeric': {
+        'timescaledb': 'Numeric',
+        'postgresql': 'Numeric',
+        'mariadb': 'Numeric',
+        'mysql': 'Numeric',
+        'mssql': 'Numeric',
+        'oracle': 'Numeric',
+        'sqlite': 'Numeric',
+        'duckdb': 'Numeric',
+        'citus': 'Numeric',
+        'cockroachdb': 'Numeric',
+        'default': 'Numeric',
     },
 }
 
@@ -370,7 +407,8 @@ def get_db_type_from_pd_type(
         pd_type,
         {
             'default': (
-                'TEXT' if not as_sqlalchemy
+                'TEXT'
+                if not as_sqlalchemy
                 else 'UnicodeText'
             ),
         },
@@ -378,7 +416,8 @@ def get_db_type_from_pd_type(
     default_flavor_type = flavor_types.get(
         'default',
         (
-            'TEXT' if not as_sqlalchemy
+            'TEXT'
+            if not as_sqlalchemy
             else 'UnicodeText'
         ),
     )
@@ -390,4 +429,10 @@ def get_db_type_from_pd_type(
     if db_type == 'JSONB':
         sqlalchemy_dialects_postgresql = attempt_import('sqlalchemy.dialects.postgresql')
         return sqlalchemy_dialects_postgresql.JSONB
+    if 'numeric' in db_type.lower():
+        numeric_type_str = PD_TO_DB_DTYPES_FLAVORS['numeric'].get(flavor, 'NUMERIC')
+        if flavor not in NUMERIC_PRECISION_FLAVORS:
+            return sqlalchemy_types.Numeric
+        precision, scale = NUMERIC_PRECISION_FLAVORS[flavor]
+        return sqlalchemy_types.Numeric(precision, scale)
     return getattr(sqlalchemy_types, db_type)

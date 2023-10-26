@@ -81,6 +81,8 @@ default_system_config = {
             'port': 8000,
             'host': '0.0.0.0',
             'workers': max(int(multiprocessing.cpu_count() / 2), 1),
+            'proxy_headers': True,
+            'forwarded_allow_ips': '*',
         },
         'permissions':       {
             'registration': {
@@ -122,6 +124,9 @@ default_pipes_config = {
     },
     'attributes': {
         'local_cache_timeout_seconds': 60,
+    },
+    'sync': {
+        'filter_params_index_limit': 250,
     },
 }
 default_plugins_config = {}

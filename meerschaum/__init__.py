@@ -19,6 +19,7 @@ limitations under the License.
 """
 
 import atexit
+from meerschaum.utils.typing import SuccessTuple
 from meerschaum.core.Pipe import Pipe
 from meerschaum.plugins import Plugin
 from meerschaum.utils import get_pipes

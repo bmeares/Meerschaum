@@ -7,7 +7,7 @@ Interface with SQL servers using sqlalchemy.
 """
 
 from __future__ import annotations
-from meerschaum.utils.typing import Optional, Any
+from meerschaum.utils.typing import Optional, Any, Union
 
 from meerschaum.connectors import Connector
 from meerschaum.utils.warnings import error
@@ -55,6 +55,7 @@ class SQLConnector(Connector):
         get_pipe_table,
         get_pipe_columns_types,
         get_to_sql_dtype,
+        get_pipe_schema,
     )
     from ._plugins import (
         register_plugin,
@@ -263,7 +264,7 @@ class SQLConnector(Connector):
         from meerschaum.utils.packages import attempt_import
         sqlalchemy = attempt_import('sqlalchemy')
         if '_metadata' not in self.__dict__:
-            self._metadata = sqlalchemy.MetaData()
+            self._metadata = sqlalchemy.MetaData(schema=self.schema)
         return self._metadata
 
     @property
@@ -295,6 +296,21 @@ class SQLConnector(Connector):
         from meerschaum.utils.sql import get_db_version
         self._db_version = get_db_version(self)
         return self._db_version
+
+
+    @property
+    def schema(self) -> Union[str, None]:
+        """
+        Return the default schema to use.
+        A value of `None` will not prepend a schema.
+        """
+        if 'schema' in self.__dict__:
+            return self.__dict__['schema']
+
+        uri = self.__dict__.get('uri', self.URI)
+        _schema = self.parse_uri(uri).get('schema', None)
+        self.__dict__['schema'] = _schema
+        return _schema
 
 
     def __getstate__(self):

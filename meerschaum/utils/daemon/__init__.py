@@ -11,7 +11,6 @@ import os, pathlib, shutil, json, datetime, threading, shlex
 from meerschaum.utils.typing import SuccessTuple, List, Optional, Callable, Any, Dict
 from meerschaum.config._paths import DAEMON_RESOURCES_PATH
 from meerschaum.utils.daemon.Daemon import Daemon
-from meerschaum.utils.daemon.Log import Log
 from meerschaum.utils.daemon.RotatingFile import RotatingFile
 
 
