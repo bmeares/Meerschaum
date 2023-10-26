@@ -99,15 +99,17 @@ def pipes_from_state(
         return False, str(e)
     return _pipes
 
-def get_pipes_cards(state: Dict[str, Any], *keys):
+def get_pipes_cards(*keys, session_data: Optional[Dict[str, Any]] = None):
     """
     Returns a tuple:
         - pipes as a list of cards
         - alert list
     """
     cards = []
-    session_id = state['session-store.data']['session-id']
-    _pipes = pipes_from_state(state, *keys, as_list=True)
+    session_id = (session_data or {}).get('session-id', None)
+    authenticated = is_session_authenticated(str(session_id))
+
+    _pipes = pipes_from_state(*keys, as_list=True)
     alerts = [alert_from_success_tuple(_pipes)]
     if not isinstance(_pipes, list):
         _pipes = []
@@ -123,11 +125,19 @@ def get_pipes_cards(state: Dict[str, Any], *keys):
             ),
         ])
         card_body_children = [
-            html.H5(html.B(str(p)), className='card-title', style={'font-family': ['monospace']}),
-            html.Div(dbc.Accordion(accordion_items_from_pipe(p), flush=True,
-                start_collapsed=True,
-                id={'type': 'pipe-accordion', 'index': json.dumps(p.meta)},
-            ))
+            html.H5(
+                html.B(str(p)),
+                className = 'card-title',
+                style = {'font-family': ['monospace']}
+            ),
+            html.Div(
+                dbc.Accordion(
+                    accordion_items_from_pipe(p, authenticated=authenticated),
+                    flush = True,
+                    start_collapsed = True,
+                    id = {'type': 'pipe-accordion', 'index': json.dumps(p.meta)},
+                )
+            )
 
         ]
         cards.append(
@@ -138,10 +148,11 @@ def get_pipes_cards(state: Dict[str, Any], *keys):
         )
     return cards, alerts
 
+
 def accordion_items_from_pipe(
         pipe: mrsm.Pipe,
         active_items: Optional[List[str]] = None,
-        session_id: Optional[str] = None,
+        authenticated: bool = False,
     ) -> List[dbc.AccordionItem]:
     """
     Build the accordion items for a given pipe.
@@ -150,20 +161,25 @@ def accordion_items_from_pipe(
         active_items = []
 
     items_titles = {
-        '🔑 Keys': 'overview',
-        '🧮 Statistics': 'stats',
-        '🏛️ Columns': 'columns',
-        '📔 Parameters': 'parameters',
+        'overview': '🔑 Keys',
+        'stats': '🧮 Statistics',
+        'columns': '🏛️ Columns',
+        'parameters': '📔 Parameters',
     }
     if pipe.connector_keys.startswith('sql:'):
-        items_titles['📃 SQL Query'] = 'sql'
+        items_titles['sql'] = '📃 SQL Query'
     items_titles.update({
-        '🗃️ Recent Data': 'recent-data',
+        'recent-data': '🗃️ Recent Data',
+        'sync-data': '📝 Sync Documents',
     })
-    if is_session_authenticated(str(session_id)):
-        items_titles.update({
-            '📝 Sync Documents': 'sync-data',
-        })
+
+    skip_items = (
+        ['sync-data']
+        if not authenticated
+        else []
+    )
+    for item in skip_items:
+        _ = items_titles.pop(item, None)
 
     ### Only generate items if they're in the `active_items` list.
     items_bodies = {}
@@ -278,11 +294,13 @@ def accordion_items_from_pipe(
             html.Br(),
             dbc.Row([
                 dbc.Col(html.Span(
-                    [
-                        update_parameters_button,
-                        as_json_button,
-                        as_yaml_button,
-                    ]
+                    (
+                        ([update_parameters_button] if authenticated else []) +
+                        [
+                            as_json_button,
+                            as_yaml_button,
+                        ]
+                    )
                 ), width=4),
                 dbc.Col([
                     html.Div(
@@ -385,6 +403,6 @@ def accordion_items_from_pipe(
 
     return [
         dbc.AccordionItem(items_bodies.get(item_id, ''), title=title, item_id=item_id)
-        for title, item_id in items_titles.items()
+        for item_id, title in items_titles.items()
     ]
 

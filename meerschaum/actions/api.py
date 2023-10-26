@@ -286,7 +286,7 @@ def _api_start(
 
     env_dict[MRSM_CONFIG] = apply_patch_to_config(
         env_dict.get(MRSM_CONFIG, {}),
-        {'system': {'api': {'uvicorn': uvicorn_config}}},
+        cf
     )
 
     env_text = ''
