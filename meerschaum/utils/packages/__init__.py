@@ -1048,7 +1048,7 @@ def run_python_package(
 
 
 def attempt_import(
-        *names: List[str],
+        *names: str,
         lazy: bool = True,
         warn: bool = True,
         install: bool = True,

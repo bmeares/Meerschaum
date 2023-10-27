@@ -170,7 +170,7 @@ def sync_pipe(
     from meerschaum.utils.debug import dprint
     from meerschaum.utils.misc import json_serialize_datetime, items_str
     from meerschaum.config import get_config
-    from meerschaum.utils.packages import attempt_import
+    from meerschaum.utils.packages import attempt_import, import_pandas
     from meerschaum.utils.dataframe import get_numeric_cols
     begin = time.time()
     more_itertools = attempt_import('more_itertools')
@@ -180,10 +180,10 @@ def sync_pipe(
 
     def get_json_str(c):
         ### allow syncing dict or JSON without needing to import pandas (for IOT devices)
-        return (
-            json.dumps(c, default=json_serialize_datetime) if isinstance(c, (dict, list))
-            else c.to_json(date_format='iso', date_unit='ns')
-        )
+        if isinstance(c, (dict, list)):
+            return json.dumps(c, default=json_serialize_datetime)
+        pd = import_pandas()
+        return c.fillna(pd.NA).to_json(date_format='iso', date_unit='ns')
 
     df = json.loads(df) if isinstance(df, str) else df
 
@@ -387,45 +387,6 @@ def get_pipe_data(
     )
     return df
 
-
-def get_backtrack_data(
-        self,
-        pipe: meerschaum.Pipe,
-        begin: datetime,
-        backtrack_minutes: int = 0,
-        params: Optional[Dict[str, Any]] = None,
-        debug: bool = False,
-        **kw: Any,
-    ) -> pandas.DataFrame:
-    """Get a Pipe's backtrack data from the API."""
-    r_url = pipe_r_url(pipe)
-    try:
-        response = self.get(
-            r_url + "/backtrack_data",
-            params = {
-                'begin': begin,
-                'backtrack_minutes': backtrack_minutes,
-                'params': json.dumps(params),
-            },
-            debug = debug
-        )
-    except Exception as e:
-        warn(f"Failed to parse backtrack data JSON for {pipe}:\n{e}")
-        return None
-
-    from meerschaum.utils.packages import import_pandas
-    from meerschaum.utils.dataframe import parse_df_datetimes
-    if debug:
-        dprint(response.text)
-    pd = import_pandas()
-    try:
-        df = pd.read_json(StringIO(response.text))
-    except Exception as e:
-        warn(f"Failed to read response into a dataframe:\n{e}")
-        return None
-
-    df = parse_df_datetimes(pd.read_json(StringIO(response.text)), debug=debug)
-    return df
 
 def get_pipe_id(
         self,

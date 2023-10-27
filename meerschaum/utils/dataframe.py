@@ -603,7 +603,7 @@ def enforce_dtypes(
                     if debug:
                         dprint(f"Unable to parse column '{col}' as JSON:\n{e}")
 
-    if numeric_cols and len(df) > 0:
+    if numeric_cols:
         if debug:
             dprint(f"Checking for numerics: {numeric_cols}")
         for col in numeric_cols:

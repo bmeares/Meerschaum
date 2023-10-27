@@ -123,9 +123,10 @@ def sql(
     if result is False:
         return (False, f"Failed to execute query:\n\n{query}")
     
-    from meerschaum.utils.packages import attempt_import
+    from meerschaum.utils.packages import attempt_import, import_pandas
     from meerschaum.utils.formatting import print_tuple, pprint
     sqlalchemy_engine_result = attempt_import('sqlalchemy.engine.result')
+    pd = import_pandas()
     if 'sqlalchemy' in str(type(result)):
         if not nopretty:
             print_tuple((True, f"Successfully executed query:\n\n{query}"))
@@ -133,9 +134,13 @@ def sql(
         if not nopretty:
             pprint(result)
         else:
-            print(result.to_json(date_format='iso', orient='split', index=False, date_unit='us'))
-        if gui:
-            pandasgui = attempt_import('pandasgui')
-            pandasgui.show(result)
+            print(
+                result.fillna(pd.NA).to_json(
+                    date_format = 'iso',
+                    orient = 'split',
+                    index = False,
+                    date_unit = 'us'
+                )
+            )
 
     return (True, "Success")

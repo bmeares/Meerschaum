@@ -42,7 +42,6 @@ class APIConnector(Connector):
         sync_pipe,
         delete_pipe,
         get_pipe_data,
-        get_backtrack_data,
         get_pipe_id,
         get_pipe_attributes,
         get_sync_time,

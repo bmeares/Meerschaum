@@ -112,7 +112,6 @@ packages: Dict[str, Dict[str, str]] = {
     'extras': {
         'cmd2'                       : 'cmd2>=1.4.0',
         'ruamel.yaml'                : 'ruamel.yaml>=0.16.12',
-        'pandasgui'                  : 'pandasgui>=0.2.9',      
         'modin'                      : 'modin[ray]>=0.8.3',
         'nanoid'                     : 'nanoid>=2.0.0',
         'importlib_metadata'         : 'importlib-metadata>=4.12.0',
