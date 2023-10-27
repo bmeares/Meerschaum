@@ -1521,6 +1521,7 @@ def sync_pipe_inplace(
     backtrack_table_obj = get_sqlalchemy_table(
         backtrack_table_raw,
         connector = self,
+        schema = self.get_pipe_schema(pipe),
         refresh = True,
         debug = debug,
     )
@@ -1594,6 +1595,7 @@ def sync_pipe_inplace(
     delta_table_obj = get_sqlalchemy_table(
         delta_table_raw,
         connector = self,
+        schema = self.get_pipe_schema(pipe),
         refresh = True,
         debug = debug,
     )
@@ -2224,7 +2226,6 @@ def get_pipe_table(
     ----------
     pipe: mrsm.Pipe:
         The pipe in question.
-        
 
     Returns
     -------
@@ -2234,7 +2235,13 @@ def get_pipe_table(
     from meerschaum.utils.sql import get_sqlalchemy_table
     if not pipe.exists(debug=debug):
         return None
-    return get_sqlalchemy_table(pipe.target, connector=self, debug=debug, refresh=True)
+    return get_sqlalchemy_table(
+        pipe.target,
+        connector = self,
+        schema = self.get_pipe_schema(pipe),
+        debug = debug,
+        refresh = True,
+    )
 
 
 def get_pipe_columns_types(
@@ -2480,6 +2487,8 @@ def get_alter_columns_queries(
                 f"Failed to update dtypes for numeric columns {items_str(numeric_cols)}:\n"
                 + f"{edit_msg}"
             )
+    else:
+        numeric_cols.extend([col for col, typ in pipe.dtypes.items() if typ == 'numeric'])
 
     pipe_dtypes = pipe.dtypes
     numeric_type = get_db_type_from_pd_type('numeric', self.flavor, as_sqlalchemy=False)

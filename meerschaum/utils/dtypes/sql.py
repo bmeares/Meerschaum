@@ -13,8 +13,8 @@ NUMERIC_PRECISION_FLAVORS: Dict[str, Tuple[int, int]] = {
     'mariadb': (38, 20),
     'mysql': (38, 20),
     'mssql': (38, 20),
-    'duckdb': (38, 4),
-    'sqlite': (38, 17),
+    'duckdb': (15, 4),
+    'sqlite': (15, 4),
 }
 
 DB_TO_PD_DTYPES: Dict[str, Union[str, Dict[str, str]]] = {

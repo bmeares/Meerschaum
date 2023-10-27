@@ -13,7 +13,7 @@ from textwrap import dedent
 from dash.dependencies import Input, Output, State
 from meerschaum.utils.typing import List, Optional, Dict, Any, Tuple, Union
 from meerschaum.utils.misc import string_to_dict, json_serialize_datetime
-from meerschaum.utils.packages import attempt_import, import_dcc, import_html
+from meerschaum.utils.packages import attempt_import, import_dcc, import_html, import_pandas
 from meerschaum.utils.sql import get_pd_type
 from meerschaum.utils.yaml import yaml
 from meerschaum.connectors.sql._fetch import get_pipe_query
@@ -29,6 +29,7 @@ dbc = attempt_import('dash_bootstrap_components', lazy=False, check_update=CHECK
 dash_ace = attempt_import('dash_ace', lazy=False, check_update=CHECK_UPDATE)
 html, dcc = import_html(check_update=CHECK_UPDATE), import_dcc(check_update=CHECK_UPDATE)
 humanfriendly = attempt_import('humanfriendly', check_update=CHECK_UPDATE)
+pd = import_pandas()
 
 def pipe_from_ctx(ctx, trigger_property: str = 'n_clicks') -> Union[mrsm.Pipe, None]:
     """
@@ -360,7 +361,7 @@ def accordion_items_from_pipe(
     if 'sync-data' in active_items:
         backtrack_df = pipe.get_backtrack_data(debug=debug, limit=1)
         try:
-            json_text = backtrack_df.to_json(
+            json_text = backtrack_df.fillna(pd.NA).to_json(
                 orient = 'records',
                 date_format = 'iso',
                 force_ascii = False,

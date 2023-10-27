@@ -673,7 +673,7 @@ def get_sqlalchemy_table(
 
     Parameters
     ----------
-    table: str :
+    table: str
         The name of the table on the database. Does not need to be escaped.
         
     connector: Optional[meerschaum.connectors.sql.SQLConnector], default None:
@@ -730,6 +730,7 @@ def get_update_queries(
         patch: str,
         connector: mrsm.connectors.sql.SQLConnector,
         join_cols: Iterable[str],
+        schema: Optional[str] = None,
         debug: bool = False,
     ) -> List[str]:
     """
@@ -749,6 +750,10 @@ def get_update_queries(
     join_cols: List[str]
         The columns to use to join the patch to the target.
 
+    schema: Optional[str], default None
+        If provided, use this schema when quoting the target table.
+        Defaults to `connector.schema`.
+
     debug: bool, default False
         Verbosity toggle.
 
@@ -763,7 +768,8 @@ def get_update_queries(
     base_queries = update_queries.get(flavor, update_queries['default'])
     if not isinstance(base_queries, list):
         base_queries = [base_queries]
-    target_table = get_sqlalchemy_table(target, connector)
+    schema = schema or connector.schema
+    target_table = get_sqlalchemy_table(target, connector, schema=schema)
     value_cols = []
     if debug:
         dprint(f"target_table.columns: {dict(target_table.columns)}")
@@ -805,8 +811,8 @@ def get_update_queries(
         sets_subquery_f = sets_subquery('f.', 'p.'),
         and_subquery_f = and_subquery('p.', 'f.'),
         and_subquery_t = and_subquery('p.', 't.'),
-        target_table_name = sql_item_name(target, connector.flavor, None),
-        patch_table_name = sql_item_name(patch, connector.flavor, None),
+        target_table_name = sql_item_name(target, connector.flavor, schema),
+        patch_table_name = sql_item_name(patch, connector.flavor, schema),
     ) for base_query in base_queries]
 
     

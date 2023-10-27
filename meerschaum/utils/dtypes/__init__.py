@@ -6,7 +6,7 @@
 Utility functions for working with data types.
 """
 
-from decimal import Decimal
+from decimal import Decimal, Context, InvalidOperation
 from meerschaum.utils.typing import Dict, Union, Any
 
 MRSM_PD_DTYPES: Dict[str, str] = {
@@ -165,11 +165,39 @@ def attempt_cast_to_numeric(value: Any) -> Any:
     """
     Given a value, attempt to coerce it into a numeric (Decimal).
     """
+    if isinstance(value, Decimal):
+        return value
     try:
         return (
             Decimal(str(value))
-            if str(value) not in ('none', 'nan', 'na', '')
-            else value
+            if str(value).lower() not in ('none', 'nan', 'na', 'nat', '')
+            else Decimal('NaN')
         )
     except Exception as e:
         return value
+
+
+def quantize_decimal(x: Decimal, scale: int, precision: int) -> Decimal:
+    """
+    Quantize a given `Decimal` to a known scale and precision.
+
+    Parameters
+    ----------
+    x: Decimal
+        The `Decimal` to be quantized.
+
+    scale: int
+        The total number of significant digits.
+
+    precision: int
+        The number of significant digits after the decimal point.
+
+    Returns
+    -------
+    A `Decimal` quantized to the specified scale and precision.
+    """
+    precision_decimal = Decimal((('1' * scale) + '.' + ('1' * precision)))
+    try:
+        return x.quantize(precision_decimal, context=Context(prec=scale))
+    except InvalidOperation:
+        return x

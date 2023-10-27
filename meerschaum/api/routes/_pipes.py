@@ -26,7 +26,7 @@ import fastapi
 from decimal import Decimal
 from meerschaum import Pipe
 from meerschaum.api.models import MetaPipe
-from meerschaum.utils.packages import attempt_import
+from meerschaum.utils.packages import attempt_import, import_pandas
 from meerschaum.utils.dataframe import get_numeric_cols
 from meerschaum.utils.misc import (
     is_pipe_registered, round_time, is_int, parse_df_datetimes,
@@ -39,6 +39,7 @@ pipes_endpoint = endpoints['pipes']
 from fastapi.responses import StreamingResponse
 import io
 dateutil_parser = attempt_import('dateutil.parser', lazy=False)
+pd = attempt_import('pandas')
 
 
 @app.post(pipes_endpoint + '/{connector_keys}/{metric_key}/{location_key}/register', tags=['Pipes'])
@@ -470,6 +471,8 @@ def get_pipe_data(
             detail = f"Could not fetch data with the given parameters.",
         )
 
+    ### NaN cannot be JSON-serialized.
+    df = df.fillna(pd.NA)
     numeric_cols = get_numeric_cols(df)
     for col in numeric_cols:
         df[col] = df[col].apply(lambda x: f'{x:f}' if isinstance(x, Decimal) else x)
@@ -483,61 +486,6 @@ def get_pipe_data(
     return fastapi.Response(
         json_content,
         media_type = 'application/json',
-    )
-
-
-@app.get(
-    pipes_endpoint + '/{connector_keys}/{metric_key}/{location_key}/backtrack_data',
-    tags=['Pipes']
-)
-def get_backtrack_data(
-        connector_keys: str,
-        metric_key: str,
-        location_key: str,
-        begin: Union[str, int, None] = None,
-        backtrack_minutes: int = 0,
-        params: Optional[str] = None,
-        orient: str = 'records',
-        curr_user = (
-            fastapi.Depends(manager) if not no_auth else None
-        ),
-    ):
-    """
-    Get a Pipe's backtrack data. Optionally set query boundaries.
-    """
-    if is_int(begin):
-        begin = int(begin)
-
-    _params = {}
-    if params is not None:
-        import json
-        try:
-            _params = json.loads(params)
-        except Exception as e:
-            _params = None
-
-    pipe = get_pipe(connector_keys, metric_key, location_key)
-    if not pipe.get_columns('datetime', error=False):
-        raise fastapi.HTTPException(
-            status_code = 400,
-            detail = f"Cannot fetch backtrackdata for {pipe} without a datetime column.",
-        )
-    df = pipe.get_backtrack_data(
-        begin = begin,
-        backtrack_minutes = backtrack_minutes,
-        params = _params,
-        debug = debug
-    )
-    if df is None:
-        return None
-    js = df.to_json(
-        date_format = 'iso',
-        orient = orient,
-        date_unit = 'us'
-    )
-    return fastapi.Response(
-        content = js,
-        media_type = 'application/json'
     )
 
 

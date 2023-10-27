@@ -144,18 +144,29 @@ def test_force_json_dtype(flavor: str):
 @pytest.mark.parametrize("flavor", get_flavors())
 def test_infer_numeric_dtype(flavor: str):
     """
-    Ensure that new pipes with complex columns (dict or list) as enforced as NUMERIC. 
+    Ensure that `Decimal` objects are persisted as `numeric`. 
     """
     from meerschaum.utils.formatting import pprint
     from meerschaum.utils.misc import generate_password
-    session_id = generate_password(6)
+    from meerschaum.utils.dtypes.sql import NUMERIC_PRECISION_FLAVORS
+    scale, precision = NUMERIC_PRECISION_FLAVORS.get(
+        flavor, NUMERIC_PRECISION_FLAVORS['sqlite']
+    )
+    digits = (list(reversed(range(0, 10))) * 4)[:(-1 * (40 - scale))]
+    decimal_digits = digits[(-1 * precision):]
+    numeric_digits = digits[:(-1 * precision)]
+    numeric_str = (
+        ''.join([str(digit) for digit in numeric_digits])
+        + '.' +
+        ''.join([str(digit) for digit in decimal_digits])
+    )
     conn = conns[flavor]
-    pipe = Pipe('foo', 'bar', session_id, instance=conn)
+    pipe = Pipe('infer', 'numeric', instance=conn)
     _ = pipe.delete(debug=debug)
-    pipe = Pipe('foo', 'bar', session_id, instance=conn)
+    pipe = Pipe('infer', 'numeric', instance=conn)
     success, msg = pipe.sync([
         {'a': Decimal('1')},
-        {'a': Decimal('1234567890.1234')},
+        {'a': Decimal(numeric_str)},
     ])
     assert success, msg
     pprint(pipe.get_columns_types())
@@ -164,7 +175,7 @@ def test_infer_numeric_dtype(flavor: str):
     assert isinstance(df['a'][0], Decimal)
     assert df['a'][0] == Decimal('1')
     assert isinstance(df['a'][1], Decimal)
-    assert df['a'][1] == Decimal('1234567890.1234')
+    assert df['a'][1] == Decimal(numeric_str)
 
 
 @pytest.mark.parametrize("flavor", get_flavors())
@@ -216,6 +227,15 @@ def test_force_numeric_dtype(flavor: str):
     assert df['a'][0] == Decimal('1')
     assert isinstance(df['a'][1], Decimal)
     assert df['a'][1] == Decimal('2.1')
+
+    success, msg = pipe.sync([{'a': None}], debug=debug)
+    assert success, msg
+    pprint(pipe.get_columns_types())
+    df = pipe.get_data(debug=debug)
+    docs = df.to_dict(orient='records')
+    assert str(docs[-1]['a']) == 'NaN'
+    for doc in docs:
+        assert isinstance(doc['a'], Decimal)
 
 
 @pytest.mark.parametrize("flavor", get_flavors())
