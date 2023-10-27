@@ -333,8 +333,9 @@ def create_indices(
     if debug:
         dprint(f"Creating indices for {pipe}...")
     if not pipe.columns:
-        warn(f"Unable to create indices for {pipe} without columns.", stack=False)
-        return False
+        warn(f"{pipe} has no index columns; skipping index creation.", stack=False)
+        return True
+
     ix_queries = {
         ix: queries
         for ix, queries in self.get_create_index_queries(pipe, debug=debug).items()
@@ -342,11 +343,10 @@ def create_indices(
     }
     success = True
     for ix, queries in ix_queries.items():
-        ix_success = all(self.exec_queries(queries, debug=debug, silent=True))
+        ix_success = all(self.exec_queries(queries, debug=debug, silent=False))
+        success = success and ix_success
         if not ix_success:
-            success = False
-            if debug:
-                dprint(f"Failed to create index on column: {ix}")
+            warn(f"Failed to create index on column: {ix}")
     return success
 
 
@@ -450,13 +450,14 @@ def get_create_index_queries(
             )
 
             dt_query = (
-                f"SELECT create_hypertable('{_pipe_name}', " +
+                f"SELECT public.create_hypertable('{_pipe_name}', " +
                 f"'{_datetime}', "
                 + (
                     f"'{_id}', {_id_count}, " if (_id is not None and _create_space_partition)
                     else ''
                 )
                 + f'chunk_time_interval => {chunk_time_interval}, '
+                + 'if_not_exists => true, '
                 + "migrate_data => true);"
             )
         else: ### mssql, sqlite, etc.
@@ -474,7 +475,7 @@ def get_create_index_queries(
             id_query = (
                 None if (_id is not None and _create_space_partition)
                 else (
-                    f"CREATE INDEX {_id_index_name} ON {_pipe_name} ({_id_name})"
+                    f"CREATE INDEX IF NOT EXISTS {_id_index_name} ON {_pipe_name} ({_id_name})"
                     if _id is not None
                     else None
                 )
@@ -482,7 +483,7 @@ def get_create_index_queries(
             pass
         elif self.flavor == 'citus':
             id_query = [(
-                f"CREATE INDEX {_id_index_name} "
+                f"CREATE INDEX IF NOT EXISTS {_id_index_name} "
                 + f"ON {_pipe_name} ({_id_name});"
             ), (
                 f"SELECT create_distributed_table('{_pipe_name}', '{_id}');"
@@ -491,7 +492,7 @@ def get_create_index_queries(
             id_query = f"CREATE INDEX {_id_index_name} ON {_pipe_name} ({_id_name})"
 
         if id_query is not None:
-            index_queries[_id] = [id_query]
+            index_queries[_id] = id_query if isinstance(id_query, list) else [id_query]
 
 
     ### Create indices for other labels in `pipe.columns`.
@@ -1300,8 +1301,7 @@ def sync_pipe(
     stats = self.to_sql(unseen_df, **unseen_kw)
     if is_new:
         if not self.create_indices(pipe, debug=debug):
-            if debug:
-                dprint(f"Failed to create indices for {pipe}. Continuing...")
+            warn(f"Failed to create indices for {pipe}. Continuing...")
 
     stop = time.perf_counter()
     success = stats['success']
@@ -1402,8 +1402,7 @@ def sync_pipe_inplace(
         if result is None:
             return False, f"Could not insert new data into {pipe} from its SQL query definition."
         if not self.create_indices(pipe, debug=debug):
-            if debug:
-                dprint(f"Failed to create indices for {pipe}. Continuing...")
+            warn(f"Failed to create indices for {pipe}. Continuing...")
 
         rowcount = pipe.get_rowcount(debug=debug)
         return True, f"Inserted {rowcount}, updated 0 rows."
