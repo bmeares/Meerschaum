@@ -12,7 +12,7 @@ from meerschaum.utils.typing import Dict, Union, Tuple
 NUMERIC_PRECISION_FLAVORS: Dict[str, Tuple[int, int]] = {
     'mariadb': (38, 20),
     'mysql': (38, 20),
-    'mssql': (38, 20),
+    'mssql': (28, 10),
     'duckdb': (15, 4),
     'sqlite': (15, 4),
 }
