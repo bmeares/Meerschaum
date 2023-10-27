@@ -682,6 +682,7 @@ def to_sql(
     """
     import time
     import json
+    import decimal
     from decimal import Decimal, Context
     from meerschaum.utils.warnings import error, warn
     import warnings
@@ -701,7 +702,7 @@ def to_sql(
         truncate_item_name,
     )
     from meerschaum.utils.dataframe import get_json_cols, get_numeric_cols
-    from meerschaum.utils.dtypes import are_dtypes_equal
+    from meerschaum.utils.dtypes import are_dtypes_equal, quantize_decimal
     from meerschaum.utils.dtypes.sql import NUMERIC_PRECISION_FLAVORS
     from meerschaum.connectors.sql._create_engine import flavor_configs
     from meerschaum.utils.packages import attempt_import, import_pandas
@@ -813,11 +814,10 @@ def to_sql(
     numeric_scale, numeric_precision = NUMERIC_PRECISION_FLAVORS.get(self.flavor, (None, None))
     if numeric_precision is not None and numeric_scale is not None:
         numeric_cols = get_numeric_cols(df)
-        precision_decimal = Decimal((('1' * numeric_scale) + '.' + ('1' * numeric_precision)))
         for col in numeric_cols:
             df[col] = df[col].apply(
                 lambda x: (
-                    x.quantize(precision_decimal, context=Context(prec=numeric_scale))
+                    quantize_decimal(x, numeric_scale, numeric_precision)
                     if isinstance(x, Decimal)
                     else x
                 )

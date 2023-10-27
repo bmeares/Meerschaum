@@ -287,9 +287,10 @@ def _show_data(
     """
     import sys, json
     from meerschaum import get_pipes
-    from meerschaum.utils.packages import attempt_import
+    from meerschaum.utils.packages import attempt_import, import_pandas
     from meerschaum.utils.warnings import warn, info
     from meerschaum.utils.formatting import pprint
+    pd = import_pandas()
 
     if action is None:
         action = []
@@ -300,7 +301,12 @@ def _show_data(
     except Exception as e:
         backtrack_minutes = (
             1440 if (
-                begin is None and end is None and (not action or (action and action[0] != 'all'))
+                begin is None
+                and end is None
+                and (
+                    not action
+                    or (action and action[0] != 'all')
+                )
             ) else None
         )
 
@@ -308,20 +314,24 @@ def _show_data(
         try:
             if backtrack_minutes is not None:
                 df = p.get_backtrack_data(
-                    backtrack_minutes=backtrack_minutes,
-                    chunksize=chunksize,
-                    params=params,
-                    debug=debug
+                    backtrack_minutes = backtrack_minutes,
+                    chunksize = chunksize,
+                    params = params,
+                    debug = debug,
                 )
             else:
                 df = p.get_data(
-                    begin=begin, end=end, debug=debug, chunksize=chunksize,
-                    params=params,
+                    begin = begin,
+                    end = end,
+                    params = params,
+                    chunksize = chunksize,
+                    debug = debug,
                 )
         except Exception as e:
             import traceback
             print(traceback.format_exc())
             df = None
+
         if df is None:
             warn(f"Failed to fetch data for {p}.", stack=False)
             continue
@@ -343,14 +353,10 @@ def _show_data(
             info(info_msg)
         else:
             print(json.dumps(p.__getstate__()))
-            df = df.to_json(orient='columns')
+            df = df.fillna(pd.NA).to_json(orient='columns')
+
         pprint(df, nopretty=nopretty)
-        if gui and not nopretty:
-            pandasgui = attempt_import('pandasgui')
-            try:
-                pandasgui.show(df)
-            except Exception as e:
-                df.plot()
+
     return True, "Success"
 
 

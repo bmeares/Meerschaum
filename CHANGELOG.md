@@ -4,6 +4,21 @@
 
 This is the current release cycle, so stay tuned for future releases!
 
+### v2.0.8
+
+- **Cast `None` to `Decimal('NaN')` for `numeric` columns.**  
+  To allow for all-null numeric columns, `None` (and other null-like types) are coerced to `Decimal('NaN')`.
+
+- **Schema bugfixes.**  
+  A few minor edge cases have been addressed when working with custom schemas for pipes.
+
+- **Remove `APIConnector.get_backtrack_data()`.**  
+  Since 1.7 released, the `get_backtrack_data()` method for instance connectors has been optional. 
+  > **NOTE:** the `backtrack_data` API endpoint has also been removed.
+
+- **Other bugfixes.**  
+  Issues with changes made to session authentication have been addressed.
+
 ### v2.0.5 – v2.0.7
 
 - **Add the `numeric` dtype (i.e. support for `NUMERIC` columns).**  
@@ -23,7 +38,7 @@ This is the current release cycle, so stay tuned for future releases!
   # [{'foo': Decimal('1')}, {'foo': Decimal('2.01234567890123456789')}]
   ```
 
-  > **NOTE**: Due to implementation limits, `numeric` has strict precision issues in embedded databases (SQLite: `NUMERIC(38, 17)`, DuckDB: `NUMERIC(38, 4)`). PostgreSQL-like database flavors have the best support for `NUMERIC`; MSSQL and MySQL/MariaDB use a precision and scale of `NUMERIC(38, 20)`. Oracle and PostgreSQL are not capped.
+  > **NOTE**: Due to implementation limits, `numeric` has strict precision issues in embedded databases (SQLite and DuckDB: `NUMERIC(15, 4)`). PostgreSQL-like database flavors have the best support for `NUMERIC`; MySQL and MariaDB use a scale and precision of `NUMERIC(38, 20)`, MSSQL uses `NUMERIC(28, 10)`, and Oracle and PostgreSQL are not capped.
 
 - **Mixing `int` and `float` will cast to `numeric`.**  
   Rather than always casting to `TEXT`, a column containing a mix of `int` and `float` will be coerced into `numeric`.
