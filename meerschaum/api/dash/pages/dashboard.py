@@ -85,6 +85,7 @@ layout = html.Div(
                                 ],
                                 width={'size': 8, 'offset': 2}
                             ),
+                            html.Div(id='webterm-div'),
                             html.Div(
                                 id = 'content-div-right',
                                 children = [console_div],

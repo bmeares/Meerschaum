@@ -9,7 +9,12 @@ function make_terminal(element, size, ws_url) {
     rows: size.rows,
     screenKeys: true,
     useStyle: true,
+    scrollback: true,
+    cursorBlink: true,
   });
+  term.attachCustomKeyEventHandler(copyPasteKeyEventHandler);
+  term.open(element);
+
   sessionStore = sessionStorage.getItem("session-store");
   ws.onopen = function (event) {
     ws.send(sessionStore);
@@ -18,20 +23,14 @@ function make_terminal(element, size, ws_url) {
         "set_size",
         size.rows,
         size.cols,
-        window.innerHeight,
-        window.innerWidth,
+        element.innerHeight,
+        element.innerWidth,
       ]),
     );
 
-    term.on("data", function (data) {
+    term.onData(function (data) {
       ws.send(JSON.stringify(["stdin", data]));
     });
-
-    term.on("title", function (title) {
-      document.title = title;
-    });
-
-    term.open(element);
 
     ws.onmessage = function (event) {
       json_msg = JSON.parse(event.data);
@@ -46,4 +45,25 @@ function make_terminal(element, size, ws_url) {
     };
   };
   return { socket: ws, term: term };
+}
+
+function copyPasteKeyEventHandler(event) {
+  if (event.type !== "keydown") {
+    return true;
+  }
+  if (event.ctrlKey && event.shiftKey) {
+    key = event.key.toLowerCase();
+    if (key === "v") {
+      navigator.clipboard.readText().then((toPaste) => {
+        term.writeText(toPaste);
+      });
+      return false;
+    } else if (key === "c" || key === "x") {
+      text_to_be_copied = term.getSelection();
+      navigator.clipboard.writeText(text_to_be_copied);
+      term.focus();
+      return false;
+    }
+  }
+  return true;
 }

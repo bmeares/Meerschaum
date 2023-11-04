@@ -8,7 +8,7 @@ Define the terminal page handler class.
 
 from __future__ import annotations
 from meerschaum.utils.packages import attempt_import
-tornado, tornado_xstatic = attempt_import('tornado', 'tornado_xstatic', lazy=False)
+tornado = attempt_import('tornado', lazy=False)
 
 class TermPageHandler(tornado.web.RequestHandler):
     def get(self):
@@ -16,7 +16,6 @@ class TermPageHandler(tornado.web.RequestHandler):
         return self.render(
             "termpage.html",
             static = self.static_url,
-            xstatic = self.application.settings['xstatic_url'],
             ws_url_path = "/websocket"
         )
 

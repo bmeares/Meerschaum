@@ -12,10 +12,11 @@ from dash.dependencies import Input, Output, State, ALL, MATCH
 from dash.exceptions import PreventUpdate
 from meerschaum.config import get_config
 from meerschaum.config.static import _static_config
-from meerschaum.utils.typing import List, Optional, Any
+from meerschaum.utils.typing import List, Optional, Any, Tuple
 from meerschaum.api import get_api_connector, endpoints, no_auth, CHECK_UPDATE
 from meerschaum.api.dash import (
-    dash_app, debug, pipes, _get_pipes, active_sessions, authenticated_sessions
+    dash_app, debug, pipes, _get_pipes,
+    active_sessions, authenticated_sessions, unauthenticated_sessions,
 )
 from meerschaum.api.dash.users import is_session_authenticated
 from meerschaum.api.dash.connectors import get_web_connector
@@ -83,18 +84,12 @@ omit_actions = {
     'api',
     'sh',
     'os',
-    'bootstrap',
-    'edit',
     'sql',
     'stack',
-    'python',
     'clear',
     'reload',
     'repo',
     'instance',
-    'debug',
-    'login',
-    'copy',
 }
 _paths = {
     'login'   : pages.login.layout,
@@ -171,6 +166,8 @@ def update_page_layout_div(
     Output('content-div-right', 'children'),
     Output('success-alert-div', 'children'),
     Output('websocket-div', 'children'),
+    Output('webterm-div', 'children'),
+    Output('webterm-div', 'style'),
     Input('go-button', 'n_clicks'),
     Input('cancel-button', 'n_clicks'),
     Input('get-pipes-button', 'n_clicks'),
@@ -189,6 +186,9 @@ def update_content(*args):
     """
     ctx = dash.callback_context
     location_href = ctx.states['session-store.data'].get('location.href', None)
+    session_id = ctx.states['session-store.data'].get('session-id', None)
+    authenticated = is_session_authenticated(str(session_id))
+
     websocket_div_children = (
         dex.WebSocket(
             id = 'ws',
@@ -203,7 +203,7 @@ def update_content(*args):
     ### Open the webterm on the initial load.
     if not ctx.triggered:
         initial_load = True
-        trigger = 'open-shell-button'
+        trigger = 'cancel-button'
 
     trigger = ctx.triggered[0]['prop_id'].split('.')[0] if not trigger else trigger
 
@@ -211,14 +211,14 @@ def update_content(*args):
 
     ### NOTE: functions MUST return a list of content and a list of alerts
     triggers = {
-        'go-button': execute_action,
-        'cancel-button': stop_action,
+        'go-button': lambda x: ([], []),
+        'cancel-button': lambda x: ([], []),
         'get-pipes-button': get_pipes_cards,
         'get-jobs-button': get_jobs_cards,
         'get-plugins-button': get_plugins_cards,
         'get-users-button': get_users_cards,
         'get-graphs-button': get_graphs_cards,
-        'open-shell-button': get_webterm,
+        'open-shell-button': lambda x: ([], []),
     }
     ### Defaults to 3 if not in dict.
     trigger_num_cols = {
@@ -233,15 +233,117 @@ def update_content(*args):
         ctx.states,
         **filter_keywords(triggers[trigger], session_data=session_data)
     )
+    webterm_style = {
+        'display': (
+            'none'
+            if trigger not in ('open-shell-button', 'cancel-button', 'go-button')
+            else 'block'
+        )
+    }
 
     ### If the webterm fails on initial load (e.g. insufficient permissions),
     ### don't display the alerts just yet.
+    if initial_load or not authenticated:
+        webterm, webterm_alerts = get_webterm(ctx.states)
+        if webterm_style['display'] == 'block':
+            alerts.extend(webterm_alerts)
+    else:
+        webterm = dash.no_update
+
     if initial_load and alerts:
-        return console_div, [], websocket_div_children
+        return console_div, [], websocket_div_children, [], {'display': 'none'}
 
     if trigger.startswith('get-') and trigger.endswith('-button'):
         content = build_cards_grid(content, num_columns=trigger_num_cols.get(trigger, 3))
-    return content, alerts, websocket_div_children
+    return content, alerts, websocket_div_children, webterm, webterm_style
+
+
+dash_app.clientside_callback(
+    """
+    function(style, url){
+        if (style.display == 'none'){
+            return url;
+        }
+        return url;
+    }
+    """,
+    Output('location', 'href'),
+    Input('webterm-div', 'style'),
+    State('location', 'href'),
+)
+dash_app.clientside_callback(
+    """
+    function(n_clicks, url){
+        if (!n_clicks){ return url; }
+        iframe = document.getElementById('webterm-iframe');
+        if (!iframe){ return url; }
+        action_dropdown = document.getElementById('action-dropdown');
+        subaction_dropdown = document.getElementById('subaction-dropdown');
+        subaction_dropdown_text = document.getElementById('subaction-dropdown-text');
+        connector_keys_dropdown = document.getElementById('connector-keys-dropdown');
+        metric_keys_dropdown = document.getElementById('metric-keys-dropdown');
+        location_keys_dropdown = document.getElementById('location-keys-dropdown');
+        flags_dropdown = document.getElementById('flags-dropdown');
+        instance_select = document.getElementById('instance-select');
+
+        delim = '×';
+        connector_keys_raw = connector_keys_dropdown.textContent.split(delim);
+        connector_keys = [];
+        for (ck of connector_keys_raw){
+            if (ck.length === 0){ continue; }
+            connector_keys.push(ck.trimEnd());
+        }
+        if (!connector_keys_dropdown.textContent.includes(delim)){
+            connector_keys = [];
+        }
+        metric_keys_raw = metric_keys_dropdown.textContent.split(delim);
+        metric_keys = [];
+        for (mk of metric_keys_raw){
+            if (mk.length === 0){ continue; }
+            metric_keys.push(mk.trimEnd());
+        }
+        if (!metric_keys_dropdown.textContent.includes(delim)){
+            metric_keys = [];
+        }
+        location_keys_raw = location_keys_dropdown.textContent.split(delim);
+        location_keys = [];
+        for (lk of location_keys_raw){
+            if (lk.length === 0){ continue; }
+            location_keys.push(lk.trimEnd());
+        }
+        if (!location_keys_dropdown.textContent.includes(delim)){
+            location_keys = [];
+        }
+        flags_raw = flags_dropdown.textContent.split(delim);
+        flags = [];
+        for (fl of flags_raw){
+            if (fl.length === 0){ continue; }
+            flags.push(fl.trimEnd());
+        }
+        if (!flags_dropdown.textContent.includes(delim)){
+            flags = [];
+        }
+
+        iframe.contentWindow.postMessage(
+            {
+                action: action_dropdown.value,
+                subaction: subaction_dropdown.value,
+                subaction_text: subaction_dropdown_text.value,
+                connector_keys: connector_keys,
+                metric_keys: metric_keys,
+                location_keys: location_keys,
+                flags: flags,
+                instance: instance_select.value,
+            },
+            url
+        );
+        return url;
+    }
+    """,
+    Output('location', 'href'),
+    Input('go-button', 'n_clicks'),
+    State('location', 'href'),
+)
 
 @dash_app.callback(
     Output('action-dropdown', 'value'),
@@ -713,6 +815,7 @@ def sign_out_button_click(
     if session_id:
         _ = active_sessions.pop(session_id, None)
         _ = authenticated_sessions.pop(session_id, None)
+        _ = unauthenticated_sessions.pop(session_id, None)
     return endpoints['dash'], {}
 
 

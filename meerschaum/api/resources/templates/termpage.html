@@ -6,25 +6,99 @@
   html {
     background: #000;
   }
-
-  h1 {
-    margin-bottom: 20px;
-    font: 20px/1.5 sans-serif;
-  }
-
-  .terminal {
-    font-size: 16px !important;
-  }
-
-
 </style>
-<script src="{{ xstatic('termjs', 'term.js') }}"></script>
-<script src="{{ static('terminado.js') }}"></script>
+<link rel="stylesheet" href="{{ static('css/xterm.css') }}"/>
+<script src="{{ static('js/xterm.js') }}"></script>
+<script src="{{ static('js/xterm-addon-fit.js') }}"></script>
+<script src="{{ static('js/terminado.js') }}"></script>
 <script>
+function sendCtrlC() {
+    // Create a "keydown" event for Ctrl
+    const ctrlKeyDown = new KeyboardEvent("keydown", {
+        key: "Control",
+        code: "ControlLeft",
+        ctrlKey: true,
+    });
+
+    // Create a "keydown" event for "C"
+    const cKeyDown = new KeyboardEvent("keydown", {
+      key: "C",
+      code: "KeyC",
+    });
+
+    // Dispatch the "keydown" events
+    window.terminal.term.textarea.dispatchEvent(ctrlKeyDown);
+    window.terminal.term.textarea.dispatchEvent(cKeyDown);
+
+    // Create and dispatch "keyup" events for both keys
+    const keyUp = new KeyboardEvent("keyup", {
+      key: "C",
+      code: "KeyC",
+    });
+
+    // Dispatch the "keyup" events
+    window.terminal.term.textarea.dispatchEvent(keyUp);
+
+    const ctrlKeyUp = new KeyboardEvent("keyup", {
+      key: "Control",
+      code: "ControlLeft",
+      ctrlKey: true,
+    });
+
+    // Dispatch the "keyup" events
+    window.terminal.term.textarea.dispatchEvent(ctrlKeyUp);
+}
+
+window.addEventListener(
+  "message",
+  (event) => {
+    if (!event.isTrusted){ return; }
+
+    action_str = event.data.action;
+    if (event.data.subaction.length > 0){
+        action_str += ' ' + event.data.subaction;
+    }
+    if (event.data.subaction_text.length > 0){
+        action_str += ' ' + event.data.subaction_text;
+    }
+
+    connector_keys_str = " -c";
+    for (ck of event.data.connector_keys){
+        connector_keys_str += " '" + ck + "'";
+    }
+    if (event.data.connector_keys.length === 0){
+        connector_keys_str = "";
+    }
+    metric_keys_str = " -m";
+    for (mk of event.data.metric_keys){
+        metric_keys_str += " '" + mk + "'";
+    }
+    if (event.data.metric_keys.length === 0){
+        metric_keys_str = "";
+    }
+    location_keys_str = " -l";
+    for (lk of event.data.location_keys){
+        location_keys_str += " '" + lk + "'";
+    }
+    if (event.data.location_keys.length === 0){
+        location_keys_str = "";
+    }
+    flags_str = " -i " + event.data.instance;
+    for (fl of event.data.flags){
+        flags_str += " " + fl;
+    }
+
+    line = action_str + connector_keys_str + metric_keys_str + location_keys_str + flags_str + '\r';
+    sendCtrlC();
+    window.terminal.socket.send(JSON.stringify(["stdin", line]));
+  },
+  false,
+);
+
+
 window.onload = function() {
-    // Test size: 25x80
-    var termRowHeight = 0.0 + 1.00*document.getElementById("dummy-screen").offsetHeight / 25;
-    var termColWidth = 0.0 + (1.02*document.getElementById("dummy-screen-rows").offsetWidth / 80);
+    var termRowHeight = 0.0 + 0.95*document.getElementById("dummy-screen").offsetHeight / 25;
+    var termColWidth = 0.0 + (0.95*document.getElementById("dummy-screen-rows").offsetWidth / 80);
     document.getElementById("dummy-screen").setAttribute("style", "display: none");
 
     var protocol = (window.location.protocol.indexOf("https") === 0) ? "wss" : "ws";
@@ -33,25 +107,31 @@ window.onload = function() {
     function calculate_size(element) {
         var rows = Math.max(2, Math.floor(element.innerHeight/termRowHeight)-1);
         var cols = Math.max(3, Math.floor(element.innerWidth/termColWidth)-1);
-        console.log("resize:", termRowHeight, termColWidth, element.innerHeight,
-                                        element.innerWidth, rows, cols);
         return {rows: rows, cols: cols};
     }
 
     size = calculate_size(window);
-    var terminal = make_terminal(document.body, size, ws_url);
+    xterm_div = document.getElementById("xterm-div");
+    var terminal = make_terminal(xterm_div, size, ws_url);
+    window.terminal = terminal;
 
     window.onresize = function() {
       var geom = calculate_size(window);
-      terminal.term.resize(geom.cols, geom.rows);
-      terminal.socket.send(JSON.stringify(["set_size", geom.rows, geom.cols,
-                                window.innerHeight, window.innerWidth]));
+      rows = geom.rows;
+      cols = geom.cols;
+      terminal.term.resize(cols, rows);
+      terminal.socket.send(
+          JSON.stringify(
+              ["set_size", rows, cols, xterm_div.innerHeight, xterm_div.innerWidth]
+          )
+      );
     };
 };
 </script>
 </head>
 <body>
 <!-- test size: 25x80 -->
+<div id="xterm-div" style="width: 100%; height: 100%;"></div>
 <pre id="dummy-screen" style="visibility:hidden; border: white solid 5px; font-family: &quot;DejaVu Sans Mono&quot;, &quot;Liberation Mono&quot;, monospace; font-size: 16px;">0
 1
 2
@@ -76,6 +156,6 @@ window.onload = function() {
 1
 2
 3
-<span id="dummy-screen-rows" style="visibility:hidden;">01234567890123456789012345678901234567890123456789012345678901234567890123456789</span>
+<span id="dummy-screen-rows" style="visibility:hidden; overflow-x: hidden;">01234567890123456789012345678901234567890123456789012345678901234567890123456789</span>
 </pre>
 </body>
