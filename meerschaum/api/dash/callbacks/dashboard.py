@@ -86,7 +86,6 @@ omit_actions = {
     'os',
     'sql',
     'stack',
-    'clear',
     'reload',
     'repo',
     'instance',
@@ -169,7 +168,6 @@ def update_page_layout_div(
     Output('webterm-div', 'children'),
     Output('webterm-div', 'style'),
     Input('go-button', 'n_clicks'),
-    Input('cancel-button', 'n_clicks'),
     Input('get-pipes-button', 'n_clicks'),
     Input('get-jobs-button', 'n_clicks'),
     Input('get-plugins-button', 'n_clicks'),
@@ -203,7 +201,7 @@ def update_content(*args):
     ### Open the webterm on the initial load.
     if not ctx.triggered:
         initial_load = True
-        trigger = 'cancel-button'
+        trigger = 'open-shell-button'
 
     trigger = ctx.triggered[0]['prop_id'].split('.')[0] if not trigger else trigger
 
@@ -224,6 +222,7 @@ def update_content(*args):
     trigger_num_cols = {
         'get-graphs-button': 1,
         'get-pipes-button': 1,
+        'get-jobs-button': 2,
     }
     
     ### NOTE: stop the running action if it exists
@@ -273,67 +272,34 @@ dash_app.clientside_callback(
 )
 dash_app.clientside_callback(
     """
-    function(n_clicks, url){
+    function(
+        n_clicks,
+        url,
+        connector_keys,
+        metric_keys,
+        location_keys,
+        flags,
+        instance,
+    ){
         if (!n_clicks){ return url; }
         iframe = document.getElementById('webterm-iframe');
         if (!iframe){ return url; }
-        action_dropdown = document.getElementById('action-dropdown');
-        subaction_dropdown = document.getElementById('subaction-dropdown');
-        subaction_dropdown_text = document.getElementById('subaction-dropdown-text');
-        connector_keys_dropdown = document.getElementById('connector-keys-dropdown');
-        metric_keys_dropdown = document.getElementById('metric-keys-dropdown');
-        location_keys_dropdown = document.getElementById('location-keys-dropdown');
-        flags_dropdown = document.getElementById('flags-dropdown');
-        instance_select = document.getElementById('instance-select');
 
-        delim = '×';
-        connector_keys_raw = connector_keys_dropdown.textContent.split(delim);
-        connector_keys = [];
-        for (ck of connector_keys_raw){
-            if (ck.length === 0){ continue; }
-            connector_keys.push(ck.trimEnd());
-        }
-        if (!connector_keys_dropdown.textContent.includes(delim)){
-            connector_keys = [];
-        }
-        metric_keys_raw = metric_keys_dropdown.textContent.split(delim);
-        metric_keys = [];
-        for (mk of metric_keys_raw){
-            if (mk.length === 0){ continue; }
-            metric_keys.push(mk.trimEnd());
-        }
-        if (!metric_keys_dropdown.textContent.includes(delim)){
-            metric_keys = [];
-        }
-        location_keys_raw = location_keys_dropdown.textContent.split(delim);
-        location_keys = [];
-        for (lk of location_keys_raw){
-            if (lk.length === 0){ continue; }
-            location_keys.push(lk.trimEnd());
-        }
-        if (!location_keys_dropdown.textContent.includes(delim)){
-            location_keys = [];
-        }
-        flags_raw = flags_dropdown.textContent.split(delim);
-        flags = [];
-        for (fl of flags_raw){
-            if (fl.length === 0){ continue; }
-            flags.push(fl.trimEnd());
-        }
-        if (!flags_dropdown.textContent.includes(delim)){
-            flags = [];
-        }
+        // Actions must be obtained from the DOM because of dynamic subactions.
+        action = document.getElementById('action-dropdown').value;
+        subaction = document.getElementById('subaction-dropdown').value;
+        subaction_text = document.getElementById('subaction-dropdown-text').value;
 
         iframe.contentWindow.postMessage(
             {
-                action: action_dropdown.value,
-                subaction: subaction_dropdown.value,
-                subaction_text: subaction_dropdown_text.value,
+                action: action,
+                subaction: subaction,
+                subaction_text: subaction_text,
                 connector_keys: connector_keys,
                 metric_keys: metric_keys,
                 location_keys: location_keys,
                 flags: flags,
-                instance: instance_select.value,
+                instance: instance,
             },
             url
         );
@@ -343,6 +309,11 @@ dash_app.clientside_callback(
     Output('location', 'href'),
     Input('go-button', 'n_clicks'),
     State('location', 'href'),
+    State('connector-keys-dropdown', 'value'),
+    State('metric-keys-dropdown', 'value'),
+    State('location-keys-dropdown', 'value'),
+    State('flags-dropdown', 'value'),
+    State('instance-select', 'value'),
 )
 
 @dash_app.callback(

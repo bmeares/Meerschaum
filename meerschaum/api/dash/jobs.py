@@ -95,7 +95,7 @@ def get_jobs_cards(state: WebState):
                 dbc.CardHeader(header_children),
                 dbc.CardBody(
                     body_children,
-                    style = {"max-width": "100%", "overflow": "auto", "height": "auto"},
+                    #  style = {"max-width": "100%", "overflow": "auto", "height": "auto"},
                 ),
                 dbc.CardFooter(footer_children),
             ])

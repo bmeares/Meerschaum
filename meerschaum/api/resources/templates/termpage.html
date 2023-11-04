@@ -10,44 +10,9 @@
 <link rel="stylesheet" href="{{ static('css/xterm.css') }}"/>
 <script src="{{ static('js/xterm.js') }}"></script>
 <script src="{{ static('js/xterm-addon-fit.js') }}"></script>
+<script src="{{ static('js/xterm-addon-webgl.js') }}"></script>
 <script src="{{ static('js/terminado.js') }}"></script>
 <script>
-function sendCtrlC() {
-    // Create a "keydown" event for Ctrl
-    const ctrlKeyDown = new KeyboardEvent("keydown", {
-        key: "Control",
-        code: "ControlLeft",
-        ctrlKey: true,
-    });
-
-    // Create a "keydown" event for "C"
-    const cKeyDown = new KeyboardEvent("keydown", {
-      key: "C",
-      code: "KeyC",
-    });
-
-    // Dispatch the "keydown" events
-    window.terminal.term.textarea.dispatchEvent(ctrlKeyDown);
-    window.terminal.term.textarea.dispatchEvent(cKeyDown);
-
-    // Create and dispatch "keyup" events for both keys
-    const keyUp = new KeyboardEvent("keyup", {
-      key: "C",
-      code: "KeyC",
-    });
-
-    // Dispatch the "keyup" events
-    window.terminal.term.textarea.dispatchEvent(keyUp);
-
-    const ctrlKeyUp = new KeyboardEvent("keyup", {
-      key: "Control",
-      code: "ControlLeft",
-      ctrlKey: true,
-    });
-
-    // Dispatch the "keyup" events
-    window.terminal.term.textarea.dispatchEvent(ctrlKeyUp);
-}
 
 window.addEventListener(
   "message",
@@ -85,11 +50,18 @@ window.addEventListener(
     }
     flags_str = " -i " + event.data.instance;
     for (fl of event.data.flags){
-        flags_str += " " + fl;
+        flags_str += " --" + fl;
     }
 
-    line = action_str + connector_keys_str + metric_keys_str + location_keys_str + flags_str + '\r';
-    sendCtrlC();
+    line = (
+      "\x03"
+      + action_str
+      + connector_keys_str
+      + metric_keys_str
+      + location_keys_str
+      + flags_str
+      + '\r'
+    );
     window.terminal.socket.send(JSON.stringify(["stdin", line]));
   },
   false,

@@ -56,17 +56,16 @@ cancel_button = dbc.Button(
     'Terminal',
     id = 'cancel-button',
     color = 'dark',
-    style = {'width': '100%', 'background-color': 'black'},
+    style = {'width': '100%', 'background-color': 'black', 'display': 'none'},
 )
 bottom_buttons_content = dbc.Card(
     dbc.CardBody(
         dbc.Row([
-            dbc.Col(go_button, lg=2, md=2),
-            dbc.Col(cancel_button, lg=2, md=2),
-            dbc.Col(show_pipes_button, lg=2, md=2),
-            dbc.Col(show_jobs_button, lg=2, md=2),
-            dbc.Col(lg=True, md=False),
-            dbc.Col(get_items_menu, lg=2, md=2),
+            dbc.Col(go_button, lg=3, md=4, sm=12),
+            dbc.Col(show_pipes_button, lg=3, md=4, sm=12),
+            dbc.Col(show_jobs_button, lg=3, md=4, sm=12),
+            dbc.Col(lg=True, md=False, sm=False),
+            dbc.Col(get_items_menu, lg=2, md=12, sm=12),
         ])
     )
 )
@@ -184,11 +183,11 @@ def build_cards_grid(cards: List[dbc.Card], num_columns: int = 3) -> html.Div:
     for i, card in enumerate(cards):
         if i % num_columns == 0:
             rows_childrens.append([])
-        rows_childrens[-1].append(dbc.Col(card, sm=12, lg=int(12/num_columns)))
+        rows_childrens[-1].append(dbc.Col(card, sm=12, md=12, lg=int(12/num_columns)))
     ### Append mising columns to keep the grid shape.
     if rows_childrens and len(rows_childrens[-1]) != num_columns:
         for i in range(num_columns - len(rows_childrens[-1])):
-            rows_childrens[-1].append(dbc.Col(sm=12, lg=int(12/num_columns)))
+            rows_childrens[-1].append(dbc.Col(sm=12, md=12, lg=int(12/num_columns)))
     _rows = [dbc.Row(children) for children in rows_childrens]
     rows = []
     for r in _rows:
