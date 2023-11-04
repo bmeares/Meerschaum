@@ -25,6 +25,8 @@ class RotatingFile(io.IOBase):
     Under the hood, however, it will create new sub-files and delete old ones.
     """
 
+    SEEK_BACK_ATTEMPTS: int = 5
+
     def __init__(
             self,
             file_path: pathlib.Path,
@@ -395,12 +397,22 @@ class RotatingFile(io.IOBase):
                 subfile_index not in self._redirected_subfile_objects
             ):
                 subfile_object = self.subfile_objects[subfile_index]
-                subfile_object.seek(seek_ix)
-                buffer += subfile_object.read()
+                for i in range(self.SEEK_BACK_ATTEMPTS):
+                    try:
+                        subfile_object.seek(max(seek_ix - i, 0))
+                        buffer += subfile_object.read()
+                    except UnicodeDecodeError:
+                        continue
+                    break
             else:
                 with open(subfile_path, 'r', encoding='utf-8') as f:
-                    f.seek(seek_ix)
-                    buffer += f.read()
+                    for i in range(self.SEEK_BACK_ATTEMPTS):
+                        try:
+                            f.seek(max(seek_ix - i, 0))
+                            buffer += f.read()
+                        except UnicodeDecodeError:
+                            continue
+                        break
 
                     ### Handle the case when no files have yet been opened.
                     if not self.subfile_objects and subfile_path == paths_to_read[-1]:
@@ -457,12 +469,22 @@ class RotatingFile(io.IOBase):
                 subfile_index not in self._redirected_subfile_objects
             ):
                 subfile_object = self.subfile_objects[subfile_index]
-                subfile_object.seek(seek_ix)
-                subfile_lines = subfile_object.readlines()
+                for i in range(self.SEEK_BACK_ATTEMPTS):
+                    try:
+                        subfile_object.seek(max(seek_ix - i), 0)
+                        subfile_lines = subfile_object.readlines()
+                    except UnicodeDecodeError:
+                        continue
+                    break
             else:
                 with open(subfile_path, 'r', encoding='utf-8') as f:
-                    f.seek(seek_ix)
-                    subfile_lines = f.readlines()
+                    for i in range(self.SEEK_BACK_ATTEMPTS):
+                        try:
+                            f.seek(max(seek_ix - i, 0))
+                            subfile_lines = f.readlines()
+                        except UnicodeDecodeError:
+                            continue
+                        break
 
                     ### Handle the case when no files have yet been opened.
                     if not self.subfile_objects and subfile_path == paths_to_read[-1]:

@@ -229,7 +229,7 @@ class Daemon:
 
         allow_dirty_run: bool, default False
             If `True`, run the daemon, even if the `daemon_id` directory exists.
-            This option is dangerous because if the same `daemon_id` runs twice,
+            This option is dangerous because if the same `daemon_id` runs concurrently,
             the last to finish will overwrite the output of the first.
 
         Returns
