@@ -118,7 +118,7 @@ def get_pipes_cards(*keys, session_data: Optional[Dict[str, Any]] = None):
         footer_children = dbc.Row([
             dbc.Col(
                 dbc.Button(
-                    'Download data',
+                    'Download recent data',
                     size = 'sm',
                     color = 'link',
                     id = {'type': 'pipe-download-csv-button', 'index': json.dumps(p.meta)},
