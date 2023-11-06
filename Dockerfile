@@ -9,6 +9,7 @@ ENV MRSM_USER=$mrsm_user \
     MRSM_USER=meerschaum \
     MRSM_ROOT_DIR=$mrsm_root_dir \
     MRSM_WORK_DIR=$mrsm_root_dir \
+    MRSM_VENVS_DIR=/home/meerschaum/venvs \
     MRSM_RUNTIME=docker \
     MRSM_HOME=/home/meerschaum \
     MRSM_SRC=/home/meerschaum/src \

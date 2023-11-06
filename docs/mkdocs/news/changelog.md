@@ -9,14 +9,22 @@ This is the current release cycle, so stay tuned for future releases!
 - **Replace `term.js` with `xterm.js`.**  
   This has been a long time coming. The webterm has been migrated to `xterm.js` which has continuous support from `term.js` which was last updated almost 10 years ago.
 
-- **Deprecate the legacy web pseudo-terminal**  
+- **Deprecate the legacy web pseudo-terminal.**  
   Clicking the "Execute" button on the web console will now execute the command directly in the webterm. Additionally, changing the instance select will now automatically switch the webterm's context to the desired instance.
 
 - **Fix an issue when starting existing jobs.**  
   A bug has been fixed which prevented jobs from restarting specifically by name.
 
+- **Add `MRSM_VENVS_DIR`.**  
+  Like `MRSM_PLUGINS_DIR`, you can now designate a virtual environments directory separate from the root directory. This is particularly useful for production deployments, and `MRSM_VENVS_DIR` has been set to `/home/meerschaum/venvs` in the official Docker images to allow for mounting `/meerschaum` to persistent volumes.
+
 - **Remove `xstatic` dependencies.**  
   The `xterm.js` files are now bundled as static assets, so the `term.js` files are no longer needed. Hurray for removing dependencies!
+
+- **Other bugfixes.**  
+  A handful of minor bugfixes have been included in this release:
+    - Removed non-connector environment variables like `MRSM_WORK_DIR` from the `mrsm show connectors` output.
+    - Improving symlinks handling for multi-processed situations (`mrsm start api`).
 
 ## 2.0.x Releases
 

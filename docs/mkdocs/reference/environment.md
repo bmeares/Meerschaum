@@ -50,7 +50,7 @@ export MRSM_PLUGINS_DIR='[
 You can temporarily register new connectors in a variable in the form `MRSM_<TYPE>_<LABEL>`, where `<TYPE>` is either `SQL` or `API`, and `<LABEL>` is the label for the connector (converted to lower case). Check here for more information about [environment connectors](/reference/connectors/#-environment-connectors), but in a nutshell, set the variable to the [URI](https://en.wikipedia.org/wiki/Uniform_Resource_Identifier) of your connector.
 
 ```bash
-MRSM_SQL_FOO=sqlite:////tmp/temp.db\
+MRSM_SQL_FOO=sqlite:////tmp/temp.db \
 MRSM_API_BAR=http://user:pass@localhost:8000 \
   mrsm show connectors
 ```
@@ -78,4 +78,12 @@ The variable `MRSM_PATCH` behaves the same way as `MRSM_CONFIG`. The difference 
 MRSM_CONFIG='{"foo": "bar": 123}' \
 MRSM_PATCH='baz:MRSM{foo:bar}' \
   mrsm show config baz
+```
+
+## **`MRSM_VENVS_DIR`**  
+
+Like `MRSM_PLUGINS_DIR`, you can designate a separate directory outside of the Meerschaum root to contain virtual environments. Generally you should not need to set this, but this is useful for sharing virtual environments between deployments as well as separating package data from user data (e.g. Kubernetes deployments).
+
+```bash
+MRSM_VENVS_DIR='venvs/' mrsm show plugins
 ```

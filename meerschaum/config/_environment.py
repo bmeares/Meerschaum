@@ -50,9 +50,6 @@ def apply_environment_config(env_var: str) -> None:
 
     valids = []
 
-    from meerschaum.utils.pool import get_pool_executor
-    executor = get_pool_executor()
-
     def load_key(key: str) -> Union[Dict[str, Any], None]:
         try:
             c = get_config(key, warn=False)
@@ -63,7 +60,7 @@ def apply_environment_config(env_var: str) -> None:
     ### This was multi-threaded, but I ran into all sorts of locking issues.
     keys = list(_patch.keys())
     for key in keys:
-        load_key(key)
+        _ = load_key(key)
 
     ### Load and patch config files.
     set_config(

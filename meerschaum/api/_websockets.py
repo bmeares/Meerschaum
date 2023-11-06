@@ -6,10 +6,12 @@
 Implement WebSockets for the Meerschaum API via FastAPI.
 """
 
-import time, datetime, uuid
+import time, uuid
+from datetime import datetime, timezone
 from meerschaum.api import (
     app, get_api_connector, get_uvicorn_config, debug, fastapi, endpoints
 )
+from meerschaum.api.dash.users import is_session_authenticated
 from meerschaum.utils.typing import Optional
 
 _websocket_endpoint = endpoints['websocket']
@@ -32,14 +34,17 @@ async def websocket_endpoint(
     except Exception as e:
         initial_data = {'session-id': None}
     session_id = initial_data.get('session-id', None)
-    now = datetime.datetime.utcnow()
-    join_msg = ""
+    if not is_session_authenticated(str(session_id)):
+        await websocket.close()
+        return
+    now = datetime.now(timezone.utc)
+    join_msg = str(now)
     await websocket.send_text(join_msg)
     websockets[session_id] = websocket
     while True:
         try:
             data = await websocket.receive_text()
-            await websocket.send_text(str(datetime.datetime.utcnow()))
+            await websocket.send_text(str(now))
         except fastapi.WebSocketDisconnect:
             delete_websocket_session(session_id)
             break

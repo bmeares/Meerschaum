@@ -9,7 +9,7 @@ function make_terminal(element, size, ws_url) {
     rows: size.rows,
     screenKeys: true,
     useStyle: true,
-    scrollback: true,
+    scrollback: 9999999,
     cursorBlink: true,
   });
   term.attachCustomKeyEventHandler(copyPasteKeyEventHandler);
