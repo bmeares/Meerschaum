@@ -20,7 +20,6 @@ from meerschaum.api.dash import (
 )
 from meerschaum.api.dash.users import is_session_authenticated
 from meerschaum.api.dash.connectors import get_web_connector
-from meerschaum.api.dash.websockets import ws_url_from_href
 from meerschaum.connectors.parse import parse_instance_keys
 from meerschaum.api.dash.pipes import get_pipes_cards, pipe_from_ctx, accordion_items_from_pipe
 from meerschaum.api.dash.jobs import get_jobs_cards
@@ -164,7 +163,6 @@ def update_page_layout_div(
 @dash_app.callback(
     Output('content-div-right', 'children'),
     Output('success-alert-div', 'children'),
-    Output('websocket-div', 'children'),
     Output('webterm-div', 'children'),
     Output('webterm-div', 'style'),
     Input('go-button', 'n_clicks'),
@@ -175,6 +173,7 @@ def update_page_layout_div(
     Input('get-graphs-button', 'n_clicks'),
     State('location', 'href'),
     State('session-store', 'data'),
+    State('webterm-div', 'children'),
     *keys_state,
 )
 def update_content(*args):
@@ -186,15 +185,6 @@ def update_content(*args):
     location_href = ctx.states['session-store.data'].get('location.href', None)
     session_id = ctx.states['session-store.data'].get('session-id', None)
     authenticated = is_session_authenticated(str(session_id))
-
-    websocket_div_children = (
-        dex.WebSocket(
-            id = 'ws',
-            url = ws_url_from_href(location_href),
-            protocols = ['ws', 'wss']
-        ) if not ctx.states.get('ws.url', None) and location_href
-        else dash.no_update
-    )
 
     trigger = None
     initial_load = False
@@ -242,7 +232,8 @@ def update_content(*args):
 
     ### If the webterm fails on initial load (e.g. insufficient permissions),
     ### don't display the alerts just yet.
-    if initial_load or not authenticated:
+    webterm_loaded = ctx.states.get('webterm-div.children', None) is not None
+    if initial_load or not webterm_loaded or not authenticated:
         webterm, webterm_alerts = get_webterm(ctx.states)
         if webterm_style['display'] == 'block':
             alerts.extend(webterm_alerts)
@@ -250,26 +241,13 @@ def update_content(*args):
         webterm = dash.no_update
 
     if initial_load and alerts:
-        return console_div, [], websocket_div_children, [], {'display': 'none'}
+        return console_div, [], [], {'display': 'none'}
 
     if trigger.startswith('get-') and trigger.endswith('-button'):
         content = build_cards_grid(content, num_columns=trigger_num_cols.get(trigger, 3))
-    return content, alerts, websocket_div_children, webterm, webterm_style
+    return content, alerts, webterm, webterm_style
 
 
-dash_app.clientside_callback(
-    """
-    function(style, url){
-        if (style.display == 'none'){
-            return url;
-        }
-        return url;
-    }
-    """,
-    Output('location', 'href'),
-    Input('webterm-div', 'style'),
-    State('location', 'href'),
-)
 dash_app.clientside_callback(
     """
     function(
@@ -376,6 +354,7 @@ def update_actions(action: str, subaction: str):
         len(_subactions) == 0,
     )
 
+
 @dash_app.callback(
     Output(component_id='connector-keys-dropdown', component_property='options'),
     Output(component_id='connector-keys-list', component_property='children'),
@@ -395,10 +374,10 @@ def update_actions(action: str, subaction: str):
     *keys_state
 )
 def update_keys_options(
-        connector_keys : Optional[List[str]],
-        metric_keys : Optional[List[str]],
-        location_keys : Optional[List[str]],
-        instance_keys : Optional[str],
+        connector_keys: Optional[List[str]],
+        metric_keys: Optional[List[str]],
+        location_keys: Optional[List[str]],
+        instance_keys: Optional[str],
         *keys
     ):
     """
@@ -486,6 +465,38 @@ def update_keys_options(
         instance_alerts,
     )
 
+dash_app.clientside_callback(
+    """
+    function(
+        instance,
+        url,
+    ){
+        if (!instance){ return url; }
+        iframe = document.getElementById('webterm-iframe');
+        if (!iframe){ return url; }
+        if (!window.instance){
+            window.instance = instance;
+            return url;
+        }
+        if (window.instance === instance) { return url; }
+        window.instance = instance;
+
+        iframe.contentWindow.postMessage(
+            {
+                action: "instance",
+                subaction_text: instance,
+            },
+            url
+        );
+        return url;
+    }
+
+    """,
+    Output('location', 'href'),
+    Input('instance-select', 'value'),
+)
+
+
 @dash_app.callback(
     Output(component_id='connector-keys-input', component_property='value'),
     Input(component_id='clear-connector-keys-input-button', component_property='n_clicks'),
@@ -537,47 +548,6 @@ def show_arguments_collapse(n_clicks : int, is_open : bool):
     """
     return not is_open if n_clicks else is_open
 
-@dash_app.callback(
-    Output('ws', 'send'),
-    Input('test-button', 'n_clicks'),
-    Input('ws', 'url'),
-    Input('session-store', 'data'),
-    State('ws', 'state'),
-    State('ws', 'message'),
-    State('ws', 'error'),
-    State('ws', 'protocols'),
-)
-def ws_send(n_clicks: int, url, session_store_data: Dict[str, Any], *states):
-    """
-    Send an initial connection message over the websocket.
-    """
-    ctx = dash.callback_context
-    if not url:
-        raise PreventUpdate
-    session_id = session_store_data.get('session-id', None)
-    if session_id is None:
-        raise PreventUpdate
-    return json.dumps({
-        'connect-time': json_serialize_datetime(datetime.datetime.utcnow()),
-        'session-id': session_id,
-    })
-
-@dash_app.callback(
-    Output('content-div-right', 'children'),
-    Input('ws', 'message'),
-)
-def ws_receive(message):
-    """
-    Display received messages.
-    """
-    if not message and message != '':
-        raise PreventUpdate
-    if not message.get('data', None):
-        raise PreventUpdate
-    return [html.Div(
-        [html.Pre(message['data'], id='console-pre')],
-        id = 'console-div',
-    )]
 
 dash_app.clientside_callback(
     """
@@ -614,8 +584,10 @@ def download_pipe_csv(n_clicks):
     if pipe is None:
         raise PreventUpdate
     filename = str(pipe.target) + '.csv'
+    bounds = pipe.get_chunk_bounds(bounded=True, debug=debug)
+    begin, _ = bounds[-1]
     try:
-        df = pipe.get_data(debug=debug)
+        df = pipe.get_data(begin=begin, end=None, debug=debug)
     except Exception as e:
         df = None
     if df is not None:

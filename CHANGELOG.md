@@ -1,10 +1,28 @@
 # 🪵 Changelog
 
-## 2.0.x Releases
+## 2.1.x Releases
 
 This is the current release cycle, so stay tuned for future releases!
 
-### v2.0.8
+### v2.1.0
+
+- **Replace `term.js` with `xterm.js`.**  
+  This has been a long time coming. The webterm has been migrated to `xterm.js` which has continuous support from `term.js` which was last updated almost 10 years ago.
+
+- **Deprecate the legacy web pseudo-terminal**  
+  Clicking the "Execute" button on the web console will now execute the command directly in the webterm. Additionally, changing the instance select will now automatically switch the webterm's context to the desired instance.
+
+- **Fix an issue when starting existing jobs.**  
+  A bug has been fixed which prevented jobs from restarting specifically by name.
+
+- **Remove `xstatic` dependencies.**  
+  The `xterm.js` files are now bundled as static assets, so the `term.js` files are no longer needed. Hurray for removing dependencies!
+
+## 2.0.x Releases
+
+At long last, 2.0 has arrived! The 2.0 releases brought incredible change, from standardizing chunking to adding `Pipe.verify()` and `Pipe.deduplicate()` to introducing first-class `numeric` support. See the full release notes below for the complete picture.
+
+### v2.0.8 – v2.0.9
 
 - **Cast `None` to `Decimal('NaN')` for `numeric` columns.**  
   To allow for all-null numeric columns, `None` (and other null-like types) are coerced to `Decimal('NaN')`.

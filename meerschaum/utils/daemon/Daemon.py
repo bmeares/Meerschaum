@@ -783,7 +783,7 @@ class Daemon:
 
 
     @property
-    def properties(self) -> Optional[Dict[str, Any]]:
+    def properties(self) -> Dict[str, Any]:
         """
         Return the contents of the properties JSON file.
         """

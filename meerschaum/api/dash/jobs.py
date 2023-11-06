@@ -49,25 +49,22 @@ def get_jobs_cards(state: WebState):
             build_process_timestamps_children(d),
             id = {'type': 'process-timestamps-div', 'index': d.daemon_id},
         )
-        header_children = dbc.Row(
-            [
-                dbc.Col(
-                    html.Div(
-                        build_status_children(d),
-                        id = {'type': 'manage-job-status-div', 'index': d.daemon_id}
-                    ),
+        header_children = [
+            html.Div(
+                build_status_children(d),
+                id = {'type': 'manage-job-status-div', 'index': d.daemon_id},
+                style = {'float': 'left'},
+            ),
+            html.Div(
+                dbc.Button(
+                    'Download logs',
+                    size = 'sm',
+                    color = 'link',
+                    id = {'type': 'job-download-logs-button', 'index': d.daemon_id},
                 ),
-                dbc.Col(
-                    dbc.Button(
-                        'Download logs',
-                        size = 'sm',
-                        color = 'link',
-                        id = {'type': 'job-download-logs-button', 'index': d.daemon_id},
-                    )
-                ),
-            ],
-            justify = 'between',
-        )
+                style = {'float': 'right'},
+            ),
+        ]
 
         body_children = [
             html.H4(html.B(d.daemon_id), className="card-title"),
@@ -93,10 +90,7 @@ def get_jobs_cards(state: WebState):
         cards.append(
             dbc.Card([
                 dbc.CardHeader(header_children),
-                dbc.CardBody(
-                    body_children,
-                    #  style = {"max-width": "100%", "overflow": "auto", "height": "auto"},
-                ),
+                dbc.CardBody(body_children),
                 dbc.CardFooter(footer_children),
             ])
         )

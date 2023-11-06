@@ -9,8 +9,11 @@ This is the current release cycle, so stay tuned for future releases!
 - **Replace `term.js` with `xterm.js`.**  
   This has been a long time coming. The webterm has been migrated to `xterm.js` which has continuous support from `term.js` which was last updated almost 10 years ago.
 
-- **Deprecate old "Execute" button behavior.**  
-  Clicking the "Execute" button on the web console will now execute the command directly in the webterm. This creates a more unified user experience.
+- **Deprecate the legacy web pseudo-terminal**  
+  Clicking the "Execute" button on the web console will now execute the command directly in the webterm. Additionally, changing the instance select will now automatically switch the webterm's context to the desired instance.
+
+- **Fix an issue when starting existing jobs.**  
+  A bug has been fixed which prevented jobs from restarting specifically by name.
 
 - **Remove `xstatic` dependencies.**  
   The `xterm.js` files are now bundled as static assets, so the `term.js` files are no longer needed. Hurray for removing dependencies!

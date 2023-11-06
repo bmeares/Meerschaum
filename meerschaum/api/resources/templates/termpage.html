@@ -20,36 +20,50 @@ window.addEventListener(
     if (!event.isTrusted){ return; }
 
     action_str = event.data.action;
-    if (event.data.subaction.length > 0){
-        action_str += ' ' + event.data.subaction;
+    subaction_str = event.data['subaction'] ? event.data['subaction'] : '';
+    subaction_text = event.data['subaction_text'] ? event.data['subaction_text'] : '';
+    if (subaction_str.length > 0){
+        action_str += ' ' + subaction_str;
     }
-    if (event.data.subaction_text.length > 0){
-        action_str += ' ' + event.data.subaction_text;
+    if (subaction_text.length > 0){
+        action_str += ' ' + subaction_text;
     }
 
+    connector_keys = event.data['connector_keys'] ? event.data['connector_keys'] : [];
+    metric_keys = event.data['metric_keys'] ? event.data['metric_keys'] : [];
+    location_keys = event.data['location_keys'] ? event.data['location_keys'] : [];
     connector_keys_str = " -c";
-    for (ck of event.data.connector_keys){
-        connector_keys_str += " '" + ck + "'";
+    for (ck of connector_keys){
+        quote_str = ck.includes(" ") ? "'" : "";
+        connector_keys_str += " " + quote_str + ck + quote_str;
     }
-    if (event.data.connector_keys.length === 0){
+    if (connector_keys.length === 0){
         connector_keys_str = "";
     }
     metric_keys_str = " -m";
-    for (mk of event.data.metric_keys){
-        metric_keys_str += " '" + mk + "'";
+    for (mk of metric_keys){
+        quote_str = mk.includes(" ") ? "'" : "";
+        metric_keys_str += " " + quote_str + mk + quote_str;
     }
-    if (event.data.metric_keys.length === 0){
+    if (metric_keys.length === 0){
         metric_keys_str = "";
     }
     location_keys_str = " -l";
-    for (lk of event.data.location_keys){
-        location_keys_str += " '" + lk + "'";
+    for (lk of location_keys){
+        quote_str = lk.includes(" ") ? "'" : "";
+        location_keys_str += " " + quote_str + lk + quote_str;
     }
-    if (event.data.location_keys.length === 0){
+    if (location_keys.length === 0){
         location_keys_str = "";
     }
-    flags_str = " -i " + event.data.instance;
-    for (fl of event.data.flags){
+
+    instance = event.data['instance'] ? event.data['instance'] : '';
+    flags_str = "";
+    if (instance.length > 0){
+        flags_str += " -i " + instance;
+    }
+    flags = event.data['flags'] ? event.data['flags'] : [];
+    for (fl of flags){
         flags_str += " --" + fl;
     }
 
@@ -82,8 +96,8 @@ window.onload = function() {
         return {rows: rows, cols: cols};
     }
 
-    size = calculate_size(window);
     xterm_div = document.getElementById("xterm-div");
+    size = calculate_size(window);
     var terminal = make_terminal(xterm_div, size, ws_url);
     window.terminal = terminal;
 
@@ -103,7 +117,7 @@ window.onload = function() {
 </head>
 <body>
 <!-- test size: 25x80 -->
-<div id="xterm-div" style="width: 100%; height: 100%;"></div>
+<div id="xterm-div" style="width: 100%; height: 100%; margin: 0;"></div>
 <pre id="dummy-screen" style="visibility:hidden; border: white solid 5px; font-family: &quot;DejaVu Sans Mono&quot;, &quot;Liberation Mono&quot;, monospace; font-size: 16px;">0
 1
 2
