@@ -164,7 +164,7 @@ def _pipes_lap(
                     remaining_count -= 1
             pipes_queue.task_done()
 
-    sync_function_source = dill.source.getsource(_wrap_sync_pipe)
+    sync_function_source = dill.source.getsource(_wrap_pipe)
     fence_begin, fence_end = '<MRSM_RESULT>', '</MRSM_RESULT>'
 
     def sync_pipe(p):
@@ -173,7 +173,7 @@ def _pipes_lap(
         """
         ### If no timeout is specified, handle syncing in the current thread.
         if timeout_seconds is None:
-            return _wrap_sync_pipe(p, **all_kw)
+            return _wrap_pipe(p, **all_kw)
         _success_tuple = False, "Nothing returned."
         def write_line(line):
             nonlocal _success_tuple
@@ -209,7 +209,7 @@ def _pipes_lap(
             + f"""print(
                     '{fence_begin}'
                     + json.dumps(
-                        _wrap_sync_pipe(
+                        _wrap_pipe(
                             pipe,
                             **json.loads({json.dumps(json.dumps(all_kw))})
                         )
@@ -384,7 +384,7 @@ def _sync_pipes(
     return (len(success_pipes) > 0 if success_pipes is not None else False), msg
 
 
-def _wrap_sync_pipe(
+def _wrap_pipe(
         pipe,
         unblock: bool = False,
         force: bool = False,

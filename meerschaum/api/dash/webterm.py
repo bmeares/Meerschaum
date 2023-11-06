@@ -13,7 +13,7 @@ from meerschaum.api import debug, CHECK_UPDATE, get_api_connector, no_auth
 from meerschaum.api.dash import active_sessions
 from meerschaum.api.dash.users import is_session_authenticated
 from meerschaum.api.dash.components import alert_from_success_tuple, console_div
-from meerschaum.utils.typing import WebState, SuccessTuple, List, Tuple, Optional
+from meerschaum.utils.typing import WebState, SuccessTuple, List, Tuple, Optional, Any
 from meerschaum.utils.packages import attempt_import, import_html, import_dcc, run_python_package
 from meerschaum._internal.term.tools import is_webterm_running
 from meerschaum.config.static import STATIC_CONFIG
@@ -25,7 +25,7 @@ MAX_WEBTERM_ATTEMPTS: int = 10
 
 _locks = {'webterm_thread': RLock()}
 
-def get_webterm(state: WebState) -> Tuple[List[dbc.Card], List[SuccessTuple]]:
+def get_webterm(state: WebState) -> Tuple[Any, Any]:
     """
     Start the webterm and return its iframe.
     """

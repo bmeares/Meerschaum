@@ -6,25 +6,83 @@
   html {
     background: #000;
   }
-
-  h1 {
-    margin-bottom: 20px;
-    font: 20px/1.5 sans-serif;
-  }
-
-  .terminal {
-    font-size: 16px !important;
-  }
-
-
 </style>
-<script src="{{ xstatic('termjs', 'term.js') }}"></script>
-<script src="{{ static('terminado.js') }}"></script>
+<link rel="stylesheet" href="{{ static('css/xterm.css') }}"/>
+<script src="{{ static('js/xterm.js') }}"></script>
+<script src="{{ static('js/terminado.js') }}"></script>
 <script>
+
+window.addEventListener(
+  "message",
+  (event) => {
+    if (!event.isTrusted){ return; }
+
+    action_str = event.data.action;
+    subaction_str = event.data['subaction'] ? event.data['subaction'] : '';
+    subaction_text = event.data['subaction_text'] ? event.data['subaction_text'] : '';
+    if (subaction_str.length > 0){
+        action_str += ' ' + subaction_str;
+    }
+    if (subaction_text.length > 0){
+        action_str += ' ' + subaction_text;
+    }
+
+    connector_keys = event.data['connector_keys'] ? event.data['connector_keys'] : [];
+    metric_keys = event.data['metric_keys'] ? event.data['metric_keys'] : [];
+    location_keys = event.data['location_keys'] ? event.data['location_keys'] : [];
+    connector_keys_str = " -c";
+    for (ck of connector_keys){
+        quote_str = ck.includes(" ") ? "'" : "";
+        connector_keys_str += " " + quote_str + ck + quote_str;
+    }
+    if (connector_keys.length === 0){
+        connector_keys_str = "";
+    }
+    metric_keys_str = " -m";
+    for (mk of metric_keys){
+        quote_str = mk.includes(" ") ? "'" : "";
+        metric_keys_str += " " + quote_str + mk + quote_str;
+    }
+    if (metric_keys.length === 0){
+        metric_keys_str = "";
+    }
+    location_keys_str = " -l";
+    for (lk of location_keys){
+        quote_str = lk.includes(" ") ? "'" : "";
+        location_keys_str += " " + quote_str + lk + quote_str;
+    }
+    if (location_keys.length === 0){
+        location_keys_str = "";
+    }
+
+    instance = event.data['instance'] ? event.data['instance'] : '';
+    flags_str = "";
+    if (instance.length > 0){
+        flags_str += " -i " + instance;
+    }
+    flags = event.data['flags'] ? event.data['flags'] : [];
+    for (fl of flags){
+        flags_str += " --" + fl;
+    }
+
+    line = (
+      "\x03"
+      + action_str
+      + connector_keys_str
+      + metric_keys_str
+      + location_keys_str
+      + flags_str
+      + '\r'
+    );
+    window.terminal.socket.send(JSON.stringify(["stdin", line]));
+  },
+  false,
+);
+
+
 window.onload = function() {
-    // Test size: 25x80
-    var termRowHeight = 0.0 + 1.00*document.getElementById("dummy-screen").offsetHeight / 25;
-    var termColWidth = 0.0 + (1.02*document.getElementById("dummy-screen-rows").offsetWidth / 80);
+    var termRowHeight = 0.0 + 0.95*document.getElementById("dummy-screen").offsetHeight / 25;
+    var termColWidth = 0.0 + (0.95*document.getElementById("dummy-screen-rows").offsetWidth / 80);
     document.getElementById("dummy-screen").setAttribute("style", "display: none");
 
     var protocol = (window.location.protocol.indexOf("https") === 0) ? "wss" : "ws";
@@ -33,25 +91,31 @@ window.onload = function() {
     function calculate_size(element) {
         var rows = Math.max(2, Math.floor(element.innerHeight/termRowHeight)-1);
         var cols = Math.max(3, Math.floor(element.innerWidth/termColWidth)-1);
-        console.log("resize:", termRowHeight, termColWidth, element.innerHeight,
-                                        element.innerWidth, rows, cols);
         return {rows: rows, cols: cols};
     }
 
+    xterm_div = document.getElementById("xterm-div");
     size = calculate_size(window);
-    var terminal = make_terminal(document.body, size, ws_url);
+    var terminal = make_terminal(xterm_div, size, ws_url);
+    window.terminal = terminal;
 
     window.onresize = function() {
       var geom = calculate_size(window);
-      terminal.term.resize(geom.cols, geom.rows);
-      terminal.socket.send(JSON.stringify(["set_size", geom.rows, geom.cols,
-                                window.innerHeight, window.innerWidth]));
+      rows = geom.rows;
+      cols = geom.cols;
+      terminal.term.resize(cols, rows);
+      terminal.socket.send(
+          JSON.stringify(
+              ["set_size", rows, cols, xterm_div.innerHeight, xterm_div.innerWidth]
+          )
+      );
     };
 };
 </script>
 </head>
 <body>
 <!-- test size: 25x80 -->
+<div id="xterm-div" style="width: 100%; height: 100%; margin: 0;"></div>
 <pre id="dummy-screen" style="visibility:hidden; border: white solid 5px; font-family: &quot;DejaVu Sans Mono&quot;, &quot;Liberation Mono&quot;, monospace; font-size: 16px;">0
 1
 2
@@ -76,6 +140,6 @@ window.onload = function() {
 1
 2
 3
-<span id="dummy-screen-rows" style="visibility:hidden;">01234567890123456789012345678901234567890123456789012345678901234567890123456789</span>
+<span id="dummy-screen-rows" style="visibility:hidden; overflow-x: hidden;">01234567890123456789012345678901234567890123456789012345678901234567890123456789</span>
 </pre>
 </body>

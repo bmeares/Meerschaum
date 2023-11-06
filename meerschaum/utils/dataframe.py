@@ -174,14 +174,22 @@ def filter_unseen_df(
             f"Was not able to cast the new DataFrame to the given dtypes.\n{e}"
         )
 
+    new_numeric_cols_existing = get_numeric_cols(new_df)
+    old_numeric_cols = get_numeric_cols(old_df)
     for col, typ in {k: v for k, v in dtypes.items()}.items():
         if not are_dtypes_equal(new_df_dtypes.get(col, 'None'), old_df_dtypes.get(col, 'None')):
             new_is_float = are_dtypes_equal(new_df_dtypes.get(col, 'None'), 'float')
             new_is_int = are_dtypes_equal(new_df_dtypes.get(col, 'None'), 'int')
+            new_is_numeric = col in new_numeric_cols_existing
             old_is_float = are_dtypes_equal(old_df_dtypes.get(col, 'None'), 'float')
             old_is_int = are_dtypes_equal(old_df_dtypes.get(col, 'None'), 'int')
+            old_is_numeric = col in old_numeric_cols
 
-            if (new_is_float or new_is_int) and (old_is_float or old_is_int):
+            if (
+                (new_is_float or new_is_int or new_is_numeric)
+                and
+                (old_is_float or old_is_int or old_is_numeric)
+            ):
                 dtypes[col] = attempt_cast_to_numeric
                 cast_cols = True
                 continue
@@ -199,7 +207,11 @@ def filter_unseen_df(
         for col, dtype in dtypes.items():
             if col in new_df.columns:
                 try:
-                    new_df[col] = new_df[col].astype(dtype)
+                    new_df[col] = (
+                        new_df[col].astype(dtype)
+                        if not callable(dtype)
+                        else new_df[col].apply(dtype)
+                    )
                 except Exception as e:
                     warn(f"Was not able to cast column '{col}' to dtype '{dtype}'.\n{e}")
 
@@ -213,7 +225,6 @@ def filter_unseen_df(
         new_df[json_col] = new_df[json_col].apply(serializer)
 
     new_numeric_cols = get_numeric_cols(new_df)
-    old_numeric_cols = get_numeric_cols(old_df)
     numeric_cols = set(new_numeric_cols + old_numeric_cols)
     for numeric_col in old_numeric_cols:
         old_df[numeric_col] = old_df[numeric_col].apply(
@@ -578,6 +589,7 @@ def enforce_dtypes(
         for col, typ in dtypes.items()
         if typ == 'numeric'
     ]
+    df_numeric_cols = get_numeric_cols(df)
     if debug:
         dprint(f"Desired data types:")
         pprint(dtypes)
@@ -658,7 +670,11 @@ def enforce_dtypes(
         mixed_numeric_types = (is_dtype_numeric(typ) and is_dtype_numeric(previous_typ))
         explicitly_float = are_dtypes_equal(dtypes.get(col, 'object'), 'float')
         explicitly_numeric = dtypes.get(col, 'numeric') == 'numeric'
-        cast_to_numeric = explicitly_numeric or (mixed_numeric_types and not explicitly_float)
+        cast_to_numeric = (
+            explicitly_numeric
+            or col in df_numeric_cols
+            or (mixed_numeric_types and not explicitly_float)
+        )
         if cast_to_numeric:
             common_dtypes[col] = attempt_cast_to_numeric
             common_diff_dtypes[col] = attempt_cast_to_numeric

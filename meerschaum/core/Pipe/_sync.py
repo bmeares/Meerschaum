@@ -548,6 +548,7 @@ def filter_existing(
     )
     from meerschaum.utils.dtypes import (
         to_pandas_dtype,
+        none_if_null,
     )
     from meerschaum.config import get_config
     pd = import_pandas()
@@ -645,11 +646,7 @@ def filter_existing(
     _ = kw.pop('params', None)
     params = {
         col: [
-            (
-                val
-                if str(val).lower() not in ('none', 'na', 'nan')
-                else None
-            )
+            none_if_null(val)
             for val in unique_vals
         ]
         for col, unique_vals in unique_index_vals.items()

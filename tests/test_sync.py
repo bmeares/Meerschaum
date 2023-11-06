@@ -4,6 +4,7 @@
 
 import pytest
 from datetime import datetime, timedelta
+from decimal import Decimal
 from tests import debug
 from tests.pipes import all_pipes, stress_pipes, remote_pipes
 from tests.connectors import conns, get_flavors
@@ -605,3 +606,54 @@ def test_sync_dask_dataframe(flavor: str):
     pipe2.drop()
     pipe2.sync(ddf, debug=debug)
     assert pipe.get_data().to_dict() == pipe2.get_data().to_dict()
+
+
+@pytest.mark.parametrize("flavor", get_flavors())
+def test_sync_null_indices(flavor: str):
+    """
+    Test that null indices are accounted for.
+    """
+    conn = conns[flavor]
+    pipe = mrsm.Pipe('sync', 'null', 'indices', instance=conn)
+    pipe.delete()
+    pipe = mrsm.Pipe(
+        'sync', 'null', 'indices',
+        instance = conn,
+        columns = ['a', 'b'],
+    )
+    docs = [{'a': 1, 'b': 1, 'c': 1}]
+    success, msg = pipe.sync(docs, debug=debug)
+    assert success, msg
+    docs = [{'a': None, 'b': 1, 'c': 1}]
+    success, msg = pipe.sync(docs, debug=debug)
+    assert success, msg
+    df = pipe.get_data(debug=debug)
+    assert len(df) == 2
+
+    docs = [{'a': 1, 'b': None, 'c': 1}]
+    success, msg = pipe.sync(docs, debug=debug)
+    assert success, msg
+    df = pipe.get_data(debug=debug)
+    assert len(df) == 3
+
+    docs = [{'a': 1, 'b': None, 'c': 1}]
+    success, msg = pipe.sync(docs, debug=debug)
+    assert success, msg
+    df = pipe.get_data(debug=debug)
+    assert len(df) == 3
+
+    docs = [{'a': None, 'b': None, 'c': 1}]
+    success, msg = pipe.sync(docs, debug=debug)
+    assert success, msg
+    df = pipe.get_data(debug=debug)
+    assert len(df) == 4
+
+    docs = [{'c': Decimal('2.2')}]
+    success, msg = pipe.sync(docs, debug=debug)
+    assert success, msg
+    df = pipe.get_data(debug=debug)
+    assert len(df) == 4
+    df = pipe.get_data(['c'], params={'a': None, 'b': [None]}, debug=debug)
+    assert len(df) == 1
+    print(f"{df['c'][0]=}")
+    assert df['c'][0] == Decimal('2.2')

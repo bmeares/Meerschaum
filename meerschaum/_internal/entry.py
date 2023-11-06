@@ -92,6 +92,7 @@ def entry_with_args(
     kw['action'] = remove_leading_action(kw['action'], _actions=_actions)
 
     with Venv(plugin, debug=kw.get('debug', False)):
+        action_name = ' '.join(action_function.__name__.split('_') + kw.get('action', []))
         try:
             result = action_function(**kw)
         except Exception as e:
@@ -99,7 +100,7 @@ def entry_with_args(
                 import traceback
                 traceback.print_exception(type(e), e, e.__traceback__)
             result = False, (
-                f"Failed to execute '{' '.join([action_function.__name__] + kw['action'])}' "
+                f"Failed to execute `{action_name}` "
                 + "with exception:\n\n" +
                 f"{e}."
                 + (
@@ -107,6 +108,8 @@ def entry_with_args(
                     if not kw.get('debug', False) else ''
                 )
             )
+        except KeyboardInterrupt:
+            result = False, f"Cancelled action `{action_name}`."
 
     ### Clean up stray virtual environments.
     for venv in [venv for venv in active_venvs]:

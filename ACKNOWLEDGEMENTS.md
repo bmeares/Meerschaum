@@ -333,10 +333,12 @@ I've included a list of the dynamic dependencies below to credit the open source
 
 ### pydantic
 
-*Data validation using Python type hints*
+*Data validation and settings management using python type hints*
 
-  - [Samuel Colvin <s@muelcolvin.com>, Eric Jolibois <em.jolibois@gmail.com>, Hasan Ramezani <hasan.r67@gmail.com>, Adrian Garcia Badaracco <1755071+adriangb@users.noreply.github.com>, Terrence Dorsey <terry@pydantic.dev>, David Montague <david@pydantic.dev>](mailto:Samuel Colvin <s@muelcolvin.com>, Eric Jolibois <em.jolibois@gmail.com>, Hasan Ramezani <hasan.r67@gmail.com>, Adrian Garcia Badaracco <1755071+adriangb@users.noreply.github.com>, Terrence Dorsey <terry@pydantic.dev>, David Montague <david@pydantic.dev>)
-
+  - Samuel Colvin
+  - [s@muelcolvin.com](mailto:s@muelcolvin.com)
+  - [https://github.com/pydantic/pydantic](https://github.com/pydantic/pydantic)
+  - License: MIT
 
 ### Pygments
 
@@ -505,13 +507,6 @@ I've included a list of the dynamic dependencies below to credit the open source
   - [http://www.tornadoweb.org/](http://www.tornadoweb.org/)
   - License: Apache-2.0
 
-### tornado_xstatic
-
-*Utilities for using XStatic in Tornado applications*
-
-  - [Thomas Kluyver <thomas@kluyver.me.uk>](mailto:Thomas Kluyver <thomas@kluyver.me.uk>)
-
-
 ### typing_extensions
 
 *Backported and Experimental Type Hints for Python 3.8+*
@@ -563,19 +558,3 @@ I've included a list of the dynamic dependencies below to credit the open source
 
   - [Daniel Holth <dholth@fastmail.fm>](mailto:Daniel Holth <dholth@fastmail.fm>)
 
-
-### XStatic
-
-*XStatic base package with minimal support code*
-
-  - Thomas Waldmann
-  - [tw@waldmann-edv.de](mailto:tw@waldmann-edv.de)
-  - [https://github.com/xstatic-py/xstatic](https://github.com/xstatic-py/xstatic)
-  - License: MIT license
-
-### XStatic-term.js
-
-*term.js 0.0.7 (XStatic packaging standard)*
-
-  - [https://github.com/chjj/term.js](https://github.com/chjj/term.js)
-  - License: (same as term.js)

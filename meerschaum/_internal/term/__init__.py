@@ -13,20 +13,11 @@ import sys
 from typing import List, Tuple
 from meerschaum.utils.packages import attempt_import
 from meerschaum._internal.term.TermPageHandler import TermPageHandler
-from meerschaum.config._paths import API_TEMPLATES_PATH
+from meerschaum.config._paths import API_TEMPLATES_PATH, API_STATIC_PATH
 
-tornado, tornado_ioloop, terminado, tornado_xstatic = attempt_import(
-    'tornado', 'tornado.ioloop', 'terminado', 'tornado_xstatic', lazy=False, venv=None,
+tornado, tornado_ioloop, terminado = attempt_import(
+    'tornado', 'tornado.ioloop', 'terminado', lazy=False, venv=None,
 )
-try:
-    from xstatic.pkg import termjs
-except ImportError:
-    from meerschaum.utils.packages import pip_install
-    if not pip_install('XStatic-term.js', venv=None):
-        raise ImportError("Failed to install and import Xterm.js.")
-    from xstatic.pkg import termjs
-
-STATIC_DIR = os.path.join(os.path.dirname(terminado.__file__), "_static")
 
 def get_webterm_app_and_manager() -> Tuple[
         tornado.web.Application,
@@ -39,7 +30,13 @@ def get_webterm_app_and_manager() -> Tuple[
     -------
     A tuple of the Tornado web application and term manager.
     """
-    commands = [sys.executable, '-m', 'meerschaum']
+    commands = [
+        sys.executable,
+        '-c',
+        "import os; _ = os.environ.pop('COLUMNS', None); _ = os.environ.pop('LINES', None); "
+        "from meerschaum._internal.entry import get_shell; "
+        "get_shell([]).cmdloop()"
+    ]
 
     term_manager = terminado.UniqueTermManager(shell_command=commands)
     handlers = [
@@ -52,16 +49,10 @@ def get_webterm_app_and_manager() -> Tuple[
             r"/", 
             TermPageHandler
         ),
-        (
-            r"/xstatic/(.*)",
-            tornado_xstatic.XStaticFileHandler,
-            {'allowed_modules': ['termjs']}
-        ),
     ]
     tornado_app = tornado.web.Application(
         handlers,
-        static_path = STATIC_DIR,
+        static_path = API_STATIC_PATH,
         template_path = API_TEMPLATES_PATH,
-        xstatic_url = tornado_xstatic.url_maker('/xstatic/')
     )
     return tornado_app, term_manager

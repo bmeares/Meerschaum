@@ -260,8 +260,8 @@ def _api_start(
             os.remove(uvicorn_config_path)
             assert(not uvicorn_config_path.exists())
     except Exception as e:
-        error(e)
-    uvicorn_config_path.parent.mkdir()
+        error(str(e))
+    uvicorn_config_path.parent.mkdir(parents=True, exist_ok=True)
     with open(uvicorn_config_path, 'w+', encoding='utf-8') as f:
         if debug:
             dprint(f"Dumping API config file to '{uvicorn_config_path}'", nopretty=nopretty)
@@ -291,7 +291,11 @@ def _api_start(
 
     env_text = ''
     for key, val in env_dict.items():
-        value = json.dumps(val) if isinstance(val, dict) else val
+        value = str(
+            json.dumps(val)
+            if isinstance(val, (dict))
+            else val
+        ).replace('\\', '\\\\')
         env_text += f"{key}='{value}'\n"
     with open(uvicorn_env_path, 'w+', encoding='utf-8') as f:
         if debug:
@@ -306,7 +310,8 @@ def _api_start(
                 **filter_keywords(
                     uvicorn.run,
                     **{
-                        k: v for k, v in uvicorn_config.items()
+                        k: v
+                        for k, v in uvicorn_config.items()
                         if k not in custom_keys
                     }
                 )

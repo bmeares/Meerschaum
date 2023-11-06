@@ -215,19 +215,7 @@ def _start_jobs(
                 )
             return (False, f"Job '{name}' does not exist."), daemon.daemon_id
 
-        try:
-            _daemon_sysargs = daemon.properties['target']['args'][0]
-        except KeyError:
-            return (
-                (False, f"Failed to get arguments for daemon '{daemon.daemon_id}'."),
-                daemon.daemon_id
-            )
-        _daemon_kw = parse_arguments(_daemon_sysargs)
-        _daemon_kw['name'] = daemon.daemon_id
-        _action_success_tuple = daemon_action(**_daemon_kw)
-        if not _action_success_tuple[0]:
-            return _action_success_tuple, daemon.daemon_id
-        return (True, f"Success"), daemon.daemon_id
+        return daemon.run(allow_dirty_run=True), daemon.daemon_id
 
     if not names:
         return False, "No jobs to start."

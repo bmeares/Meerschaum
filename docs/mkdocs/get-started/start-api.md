@@ -28,12 +28,12 @@ You can use Meerschaum from its web interface. From within a `mrsm` shell, type 
 
 3. On the left side of the dashboard are the available commands, like in the `mrsm` shell.
 
-    <img src="/assets/screenshots/dash.png"/>
+    <img src="/assets/screenshots/dash-bootstrap.png"/>
 
     !!! tip "Adding custom commands"
         You can add your own actions with [Meerschaum plugins](/reference/plugins/writing-plugins/#action-plugins).
 
-    <img src="/assets/screenshots/dash-statistics.png"/>
+    <img src="/assets/screenshots/dash-pipe-statistics.png"/>
 
     Also like the `mrsm` shell, the web console lets you control pipes from several instances (note the instances drop-down on the top right).
 

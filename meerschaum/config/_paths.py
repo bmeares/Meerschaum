@@ -80,11 +80,26 @@ for _plugin_path in PLUGINS_DIR_PATHS:
 for _plugin_path in _plugins_paths_to_remove:
     PLUGINS_DIR_PATHS.remove(_plugin_path)
 
+ENVIRONMENT_VENVS_DIR = STATIC_CONFIG['environment']['venvs']
+if ENVIRONMENT_VENVS_DIR in os.environ:
+    VENVS_DIR_PATH = Path(os.environ[ENVIRONMENT_VENVS_DIR]).resolve()
+    if not VENVS_DIR_PATH.exists():
+        try:
+            VENVS_DIR_PATH.mkdir(parents=True, exist_ok=True)
+        except Exception as e:
+            print(
+                f"Invalid path set for environment variable '{ENVIRONMENT_VENVS_DIR}':\n"
+                + f"{VENVS_DIR_PATH}"
+            )
+            VENVS_DIR_PATH = (_ROOT_DIR_PATH / 'venvs').resolve()
+            print(f"Will use the following path for venvs instead:\n{VENVS_DIR_PATH}")
+else:
+    VENVS_DIR_PATH = _ROOT_DIR_PATH / 'venvs'
 
 paths = {
     'PACKAGE_ROOT_PATH'              : str(Path(__file__).parent.parent.resolve()),
     'ROOT_DIR_PATH'                  : str(_ROOT_DIR_PATH),
-    'VIRTENV_RESOURCES_PATH'         : ('{ROOT_DIR_PATH}', 'venvs'),
+    'VIRTENV_RESOURCES_PATH'         : str(VENVS_DIR_PATH),
     'CONFIG_DIR_PATH'                : ('{ROOT_DIR_PATH}', 'config'),
     'DEFAULT_CONFIG_DIR_PATH'        : ('{ROOT_DIR_PATH}', 'default_config'),
     'PATCH_DIR_PATH'                 : ('{ROOT_DIR_PATH}', 'patch_config'),

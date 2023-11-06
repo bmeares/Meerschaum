@@ -377,40 +377,10 @@ def _bootstrap_connectors(
     if _type not in meerschaum_config['connectors']:
         meerschaum_config['connectors'][_type] = {}
     meerschaum_config['connectors'][_type][_label] = new_attributes
-    write_config({'meerschaum' : meerschaum_config}, debug=debug)
+    write_config({'meerschaum': meerschaum_config}, debug=debug)
     if return_keys:
         return _type, _label
     return True, "Success"
-
-def _bootstrap_config(
-        action : Optional[List[str]] = None,
-        yes : bool = False,
-        force : bool = False,
-        debug : bool = False,
-        **kw : Any
-    ) -> SuccessTuple:
-    """
-    Delete and regenerate the default Meerschaum configuration.
-
-    """
-    from meerschaum.config._edit import write_default_config, write_config
-    from meerschaum.config._default import default_config
-
-    from meerschaum.actions import actions
-    if not actions['delete'](['config'], debug=debug, yes=yes, force=force, **kw)[0]:
-        return False, "Failed to delete configuration files."
-
-    if not write_config(default_config, debug=debug, **kw):
-        return (False, "Failed to write default configuration.")
-
-    if not write_default_config(debug=debug, **kw):
-        return (False, "Failed to write default configuration.")
-
-    from meerschaum.config.stack import write_stack
-    if not write_stack(debug=debug):
-        return False, "Failed to write stack."
-
-    return (True, "Successfully bootstrapped configuration files.")
 
 
 ### NOTE: This must be the final statement of the module.

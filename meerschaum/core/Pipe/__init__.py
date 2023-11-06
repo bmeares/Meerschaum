@@ -140,7 +140,7 @@ class Pipe:
         metric: str = '',
         location: Optional[str] = None,
         parameters: Optional[Dict[str, Any]] = None,
-        columns: Optional[Dict[str, str]] = None,
+        columns: Union[Dict[str, str], List[str], None] = None,
         tags: Optional[List[str]] = None,
         target: Optional[str] = None,
         dtypes: Optional[Dict[str, str]] = None,

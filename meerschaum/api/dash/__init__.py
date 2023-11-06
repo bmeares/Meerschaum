@@ -40,6 +40,7 @@ from meerschaum.api.dash.components import location
 
 active_sessions = {}
 authenticated_sessions = {}
+unauthenticated_sessions = {}
 running_jobs = {}
 running_monitors = {}
 stopped_jobs = {}

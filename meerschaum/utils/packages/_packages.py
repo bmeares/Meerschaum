@@ -140,10 +140,6 @@ packages['dash'] = {
     'dash_daq'                       : 'dash-daq>=0.5.0',
     'terminado'                      : 'terminado>=0.12.1',
     'tornado'                        : 'tornado>=6.1.0',
-    'tornado_xstatic'                : 'tornado-xstatic>=0.2.0',
-    'xstatic'                        : 'XStatic>=1.0.2',
-    'xstatic.pkg.termjs'             : 'XStatic-term.js>=0.0.7',
-
 }
 packages['api'] = {
     'uvicorn'                        : 'uvicorn[standard]>=0.22.0',

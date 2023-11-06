@@ -1,10 +1,101 @@
 # 🪵 Changelog
 
-## 2.0.x Releases
+## 2.1.x Releases
 
 This is the current release cycle, so stay tuned for future releases!
 
-### v2.0.8
+### v2.1.0
+
+- **Replace `term.js` with `xterm.js`.**  
+  This has been a long time coming. The webterm has been migrated to `xterm.js` which has continuous support from `term.js` which was last updated almost 10 years ago.
+
+- **Deprecate the legacy web pseudo-terminal.**  
+  Clicking the "Execute" button on the web console will now execute the command directly in the webterm. Additionally, changing the instance select will now automatically switch the webterm's context to the desired instance.
+
+- **Fix an issue when starting existing jobs.**  
+  A bug has been fixed which prevented jobs from restarting specifically by name.
+
+- **Add `MRSM_VENVS_DIR`.**  
+  Like `MRSM_PLUGINS_DIR`, you can now designate a virtual environments directory separate from the root directory. This is particularly useful for production deployments, and `MRSM_VENVS_DIR` has been set to `/home/meerschaum/venvs` in the official Docker images to allow for mounting `/meerschaum` to persistent volumes.
+
+- **Allow syncing `NULL` values into indices.**  
+  Syncing `None` within an index will now be coalesced into a magic value when applying updates.
+
+  ```python
+  import meerschaum as mrsm
+
+  pipe = mrsm.Pipe(
+      'allow', 'null', 'indices',
+      instance = 'sql:local',
+      columns = ['a', 'b'],
+  )
+  pipe.sync([{'a': 1, 'b': 1}])
+  pipe.sync([{'b': 1}])
+  pipe.sync([{'a': 1}])
+  pipe.sync([{'c': 1}])
+
+  print(pipe.get_data())
+  #       a     b     c
+  # 0  <NA>  <NA>     1
+  # 1  <NA>     1  <NA>
+  # 2     1  <NA>  <NA>
+  # 3     1     1  <NA>
+  ```
+
+- **Syncing `Decimal` objects will now enforce `numeric` dtypes.**  
+  For example, syncing a `Decimal` onto a integer column will update the dtype to `numeric`, like when syncing a float after an integer.
+
+  ```python
+  import meerschaum as mrsm
+  from decimal import Decimal
+
+  pipe = mrsm.Pipe(
+      'demo', 'decimal', 'coersion',
+      instance = 'sql:local',
+      columns = ['id'],
+  )
+  pipe.sync([{'id': 1, 'foo': 10}])
+  pipe.sync([{'id': 1, 'foo': Decimal('20')}])
+  print(pipe.dtypes)
+  # {'id': 'int64[pyarrow]', 'foo': 'numeric'}
+
+  df = pipe.get_data()
+  print(f"{df['foo'][0]=}")
+  # df['foo'][0]=Decimal('20') 
+  ```
+
+- **Improve `IS NULL` and `IS NOT NULL` checks for `params`.**  
+  Mixing null-like values (e.g. `NaN`, `<NA>`, `None`) in `params` will now separate out nulls.
+
+  ```python
+  from meerschaum.utils.sql import build_where
+  print(build_where({'a': ['_<NA>', '_1', '_2']}))
+  # WHERE
+  #   ("a" NOT IN ('1', '2')
+  #   AND "a" IS NOT NULL)
+  print(build_where({'a': ['NaN', '1', '2']}))
+  # WHERE
+  #   ("a" IN ('1', '2')
+  #   OR "a" IS NULL)
+  ```
+
+- **Add colors to `mrsm show columns`.**
+
+- **Fix a unicode decoding error when showing logs.**
+
+- **Remove `xstatic` dependencies.**  
+  The `xterm.js` files are now bundled as static assets, so the `term.js` files are no longer needed. Hurray for removing dependencies!
+
+- **Other bugfixes.**  
+  A handful of minor bugfixes have been included in this release:
+    - Removed non-connector environment variables like `MRSM_WORK_DIR` from the `mrsm show connectors` output.
+    - Improving symlinks handling for multi-processed situations (`mrsm start api`).
+
+## 2.0.x Releases
+
+At long last, 2.0 has arrived! The 2.0 releases brought incredible change, from standardizing chunking to adding `Pipe.verify()` and `Pipe.deduplicate()` to introducing first-class `numeric` support. See the full release notes below for the complete picture.
+
+### v2.0.8 – v2.0.9
 
 - **Cast `None` to `Decimal('NaN')` for `numeric` columns.**  
   To allow for all-null numeric columns, `None` (and other null-like types) are coerced to `Decimal('NaN')`.
