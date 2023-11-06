@@ -18,6 +18,10 @@ This is the current release cycle, so stay tuned for future releases!
 - **Add `MRSM_VENVS_DIR`.**  
   Like `MRSM_PLUGINS_DIR`, you can now designate a virtual environments directory separate from the root directory. This is particularly useful for production deployments, and `MRSM_VENVS_DIR` has been set to `/home/meerschaum/venvs` in the official Docker images to allow for mounting `/meerschaum` to persistent volumes.
 
+- **Add colors to `mrsm show columns`.**
+
+- **Fix a unicode decoding error when showing logs.**
+
 - **Remove `xstatic` dependencies.**  
   The `xterm.js` files are now bundled as static assets, so the `term.js` files are no longer needed. Hurray for removing dependencies!
 
