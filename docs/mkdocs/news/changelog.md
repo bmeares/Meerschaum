@@ -18,6 +18,67 @@ This is the current release cycle, so stay tuned for future releases!
 - **Add `MRSM_VENVS_DIR`.**  
   Like `MRSM_PLUGINS_DIR`, you can now designate a virtual environments directory separate from the root directory. This is particularly useful for production deployments, and `MRSM_VENVS_DIR` has been set to `/home/meerschaum/venvs` in the official Docker images to allow for mounting `/meerschaum` to persistent volumes.
 
+- **Allow syncing `NULL` values into indices.**  
+  Syncing `None` within an index will now be coalesced into a magic value when applying updates.
+
+  ```python
+  import meerschaum as mrsm
+
+  pipe = mrsm.Pipe(
+      'allow', 'null', 'indices',
+      instance = 'sql:local',
+      columns = ['a', 'b'],
+  )
+  pipe.sync([{'a': 1, 'b': 1}])
+  pipe.sync([{'b': 1}])
+  pipe.sync([{'a': 1}])
+  pipe.sync([{'c': 1}])
+
+  print(pipe.get_data())
+  #       a     b     c
+  # 0  <NA>  <NA>     1
+  # 1  <NA>     1  <NA>
+  # 2     1  <NA>  <NA>
+  # 3     1     1  <NA>
+  ```
+
+- **Syncing `Decimal` objects will now enforce `numeric` dtypes.**  
+  For example, syncing a `Decimal` onto a integer column will update the dtype to `numeric`, like when syncing a float after an integer.
+
+  ```python
+  import meerschaum as mrsm
+  from decimal import Decimal
+
+  pipe = mrsm.Pipe(
+      'demo', 'decimal', 'coersion',
+      instance = 'sql:local',
+      columns = ['id'],
+  )
+  pipe.sync([{'id': 1, 'foo': 10}])
+  pipe.sync([{'id': 1, 'foo': Decimal('20')}])
+  print(pipe.dtypes)
+  # {'id': 'int64[pyarrow]', 'foo': 'numeric'}
+
+  df = pipe.get_data()
+  print(f"{df['foo'][0]=}")
+  # df['foo'][0]=Decimal('20') 
+  ```
+
+- **Improve `IS NULL` and `IS NOT NULL` checks for `params`.**  
+  Mixing null-like values (e.g. `NaN`, `<NA>`, `None`) in `params` will now separate out nulls.
+
+  ```python
+  from meerschaum.utils.sql import build_where
+  print(build_where({'a': ['_<NA>', '_1', '_2']}))
+  # WHERE
+  #   ("a" NOT IN ('1', '2')
+  #   AND "a" IS NOT NULL)
+  print(build_where({'a': ['NaN', '1', '2']}))
+  # WHERE
+  #   ("a" IN ('1', '2')
+  #   OR "a" IS NULL)
+  ```
+
 - **Add colors to `mrsm show columns`.**
 
 - **Fix a unicode decoding error when showing logs.**
