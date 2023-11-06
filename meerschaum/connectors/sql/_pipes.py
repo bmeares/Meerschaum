@@ -481,13 +481,6 @@ def get_create_index_queries(
                 )
             )
             pass
-        elif self.flavor == 'citus':
-            id_query = [(
-                f"CREATE INDEX IF NOT EXISTS {_id_index_name} "
-                + f"ON {_pipe_name} ({_id_name});"
-            ), (
-                f"SELECT create_distributed_table('{_pipe_name}', '{_id}');"
-            )]
         else: ### mssql, sqlite, etc.
             id_query = f"CREATE INDEX {_id_index_name} ON {_pipe_name} ({_id_name})"
 
