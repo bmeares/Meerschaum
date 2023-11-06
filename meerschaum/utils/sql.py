@@ -557,6 +557,7 @@ def build_where(
     import json
     from meerschaum.config.static import STATIC_CONFIG
     from meerschaum.utils.warnings import warn
+    from meerschaum.utils.dtypes import value_is_null, none_if_null
     negation_prefix = STATIC_CONFIG['system']['fetch_pipes_keys']['negation_prefix']
     try:
         params_json = json.dumps(params)
@@ -577,21 +578,47 @@ def build_where(
         _key = sql_item_name(key, connector.flavor, None)
         ### search across a list (i.e. IN syntax)
         if isinstance(value, Iterable) and not isinstance(value, (dict, str)):
-            includes = [item for item in value if not str(item).startswith(negation_prefix)]
-            excludes = [item for item in value if str(item).startswith(negation_prefix)]
+            includes = [
+                none_if_null(item)
+                for item in value
+                if not str(item).startswith(negation_prefix)
+            ]
+            null_includes = [item for item in includes if item is None]
+            not_null_includes = [item for item in includes if item is not None]
+            excludes = [
+                none_if_null(str(item)[len(negation_prefix):])
+                for item in value
+                if str(item).startswith(negation_prefix)
+            ]
+            null_excludes = [item for item in excludes if item is None]
+            not_null_excludes = [item for item in excludes if item is not None]
+
             if includes:
-                where += f"{leading_and}{_key} IN ("
-                for item in includes:
+                where += f"{leading_and}("
+            if not_null_includes:
+                where += f"{_key} IN ("
+                for item in not_null_includes:
                     quoted_item = str(item).replace("'", "''")
                     where += f"'{quoted_item}', "
                 where = where[:-2] + ")"
+            if null_includes:
+                where += ("\n    OR " if not_null_includes else "") + f"{_key} IS NULL"
+            if includes:
+                where += ")"
+
             if excludes:
-                where += f"{leading_and}{_key} NOT IN ("
-                for item in excludes:
-                    item = str(item)[len(negation_prefix):]
+                where += f"{leading_and}("
+            if not_null_excludes:
+                where += f"{_key} NOT IN ("
+                for item in not_null_excludes:
                     quoted_item = str(item).replace("'", "''")
                     where += f"'{quoted_item}', "
                 where = where[:-2] + ")"
+            if null_excludes:
+                where += ("\n    AND " if not_null_excludes else "") + f"{_key} IS NOT NULL"
+            if excludes:
+                where += ")"
+
             continue
 
         ### search a dictionary
@@ -602,10 +629,16 @@ def build_where(
 
         eq_sign = '='
         is_null = 'IS NULL'
+        if value_is_null(str(value).lstrip(negation_prefix)):
+            value = (
+                (negation_prefix + 'None')
+                if str(value).startswith(negation_prefix)
+                else None
+            )
         if str(value).startswith(negation_prefix):
             value = str(value)[len(negation_prefix):]
             eq_sign = '!='
-            if value == 'None':
+            if value_is_null(value):
                 value = None
                 is_null = 'IS NOT NULL'
         quoted_value = str(value).replace("'", "''")
@@ -771,15 +804,18 @@ def get_update_queries(
     schema = schema or connector.schema
     target_table = get_sqlalchemy_table(target, connector, schema=schema)
     value_cols = []
+    join_cols_types = []
     if debug:
         dprint(f"target_table.columns: {dict(target_table.columns)}")
     for c in target_table.columns:
         c_name, c_type = c.name, str(c.type)
-        if c_name in join_cols:
-            continue
         if connector.flavor in DB_FLAVORS_CAST_DTYPES:
             c_type = DB_FLAVORS_CAST_DTYPES[connector.flavor].get(c_type, c_type)
-        value_cols.append((c_name, c_type))
+        (
+            join_cols_types
+            if c_name in join_cols
+            else value_cols
+        ).append((c_name, c_type))
     if debug:
         dprint(f"value_cols: {value_cols}")
 
@@ -800,20 +836,33 @@ def get_update_queries(
     def and_subquery(l_prefix: str, r_prefix: str):
         return '\nAND\n'.join([
             (
-                l_prefix + sql_item_name(c, connector.flavor, None)
+                "COALESCE("
+                + l_prefix
+                + sql_item_name(c_name, connector.flavor, None)
+                + ", "
+                + get_null_replacement(c_type, connector.flavor)
+                + ")"
                 + ' = '
-                + r_prefix + sql_item_name(c, connector.flavor, None)
-            ) for c in join_cols
+                + "COALESCE("
+                + r_prefix
+                + sql_item_name(c_name, connector.flavor, None) 
+                + ", "
+                + get_null_replacement(c_type, connector.flavor)
+                + ")"
+            ) for c_name, c_type in join_cols_types
         ])
 
-    return [base_query.format(
-        sets_subquery_none = sets_subquery('', 'p.'),
-        sets_subquery_f = sets_subquery('f.', 'p.'),
-        and_subquery_f = and_subquery('p.', 'f.'),
-        and_subquery_t = and_subquery('p.', 't.'),
-        target_table_name = sql_item_name(target, connector.flavor, schema),
-        patch_table_name = sql_item_name(patch, connector.flavor, schema),
-    ) for base_query in base_queries]
+    return [
+        base_query.format(
+            sets_subquery_none = sets_subquery('', 'p.'),
+            sets_subquery_f = sets_subquery('f.', 'p.'),
+            and_subquery_f = and_subquery('p.', 'f.'),
+            and_subquery_t = and_subquery('p.', 't.'),
+            target_table_name = sql_item_name(target, connector.flavor, schema),
+            patch_table_name = sql_item_name(patch, connector.flavor, schema),
+        )
+        for base_query in base_queries
+    ]
 
     
 

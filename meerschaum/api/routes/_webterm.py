@@ -80,28 +80,6 @@ async def get_webterm(
         )
 
 
-@app.get("/xstatic/termjs/term.js", tags=['Webterm'])
-async def get_termjs(
-        v: str,
-        request: Request,
-    ):
-    """
-    Fetch the `term.js` source file.
-    """
-
-    async with httpx.AsyncClient() as client:
-        response = await client.get(
-            "http://localhost:8765/xstatic/termjs/term.js",
-            params = {'v': v},
-            headers = request.headers,
-        )
-        return Response(
-            content = response.text,
-            status_code = response.status_code,
-            headers = response.headers,
-        )
-
-
 @app.websocket(endpoints['webterm_websocket'])
 async def webterm_websocket(websocket: WebSocket):
     """

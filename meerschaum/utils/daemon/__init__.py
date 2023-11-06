@@ -94,14 +94,14 @@ def daemon_action(**kw) -> SuccessTuple:
     if action and get_action(action) is None:
         if not kw.get('allow_shell_job') and not kw.get('force'):
             return False, (
-                f"Action '{kw.get('action')[0]}' isn't recognized.\n\n"
+                f"Action '{action}' isn't recognized.\n\n"
                 + "  Include `--allow-shell-job`, `--force`, or `-f`\n  " 
                 + "to enable shell commands to run as Meerschaum jobs."
             )
 
     sysargs = parse_dict_to_sysargs(kw)
     rc = run_python_package('meerschaum', sysargs, venv=None, debug=False)
-    msg = "Success" if rc == 0 else f"Daemon for '{' '.join(sysargs)}' returned code: {rc}"
+    msg = "Success" if rc == 0 else f"Daemon returned code: {rc}"
     return rc == 0, msg
 
 

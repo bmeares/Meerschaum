@@ -228,8 +228,8 @@ h1 {
               url = f"https://api.weather.gov/stations/{station}/observations"
               response = self.session.get(url, params=params)
               yield [
-                feature['properties']
-                for feature in response.json()['features']
+                  feature['properties']
+                  for feature in response.json()['features']
               ]
 
       @property

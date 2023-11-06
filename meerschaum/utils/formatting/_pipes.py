@@ -210,7 +210,7 @@ def pprint_pipe_columns(
     ) -> None:
     """Pretty-print a pipe's columns."""
     from meerschaum.utils.warnings import info
-    from meerschaum.utils.formatting import pprint, print_tuple, get_console
+    from meerschaum.utils.formatting import UNICODE, ANSI, pprint, print_tuple, get_console
     from meerschaum.utils.formatting._shell import make_header
     from meerschaum.utils.packages import attempt_import, import_rich
 
@@ -226,27 +226,48 @@ def pprint_pipe_columns(
 
     def _pretty_print():
         rich = import_rich()
-        rich_table = attempt_import('rich.table')
+        rich_table, rich_text, rich_box = attempt_import(
+            'rich.table',
+            'rich.text',
+            'rich.box',
+        )
 
-        table = rich_table.Table(title=f"Data Types for {pipe}")
-        table.add_column('Column')
-        table.add_column('DB Type', justify='right')
-        table.add_column('PD Type', justify='left')
+        table = rich_table.Table(box=(rich_box.MINIMAL if UNICODE else rich_box.ASCII))
+        styles = {
+            'column': ('white' if ANSI else None),
+            'db_type': ('cyan' if ANSI else None),
+            'pd_type': ('yellow' if ANSI else None),
+        }
+        table.add_column(
+            rich_text.Text('Column', style=styles['column'])
+        )
+        table.add_column(
+            rich_text.Text('DB Type', style=styles['db_type']),
+            justify = 'right',
+        )
+        table.add_column(
+            rich_text.Text('PD Type', style=styles['pd_type']),
+            justify = 'left',
+        )
 
         info(make_header(f"\nIndex Columns for {pipe}:"), icon=False)
         if _cols:
             pprint(_cols, nopretty=nopretty)
             print()
         else:
-            print_tuple((False, f"No registered columns for {pipe}."))
+            print_tuple((False, f"No registered columns for {pipe}."), calm=True)
 
         for c, t in pipe.dtypes.items():
-            table.add_row(c, _cols_types.get(c, None), t)
+            table.add_row(
+                rich_text.Text(c, style=styles['column']),
+                rich_text.Text(_cols_types.get(c, 'None'), style=styles['db_type']),
+                rich_text.Text(t, style=styles['pd_type']),
+            )
 
         if pipe.dtypes:
             get_console().print(table)
         else:
-            print_tuple((False, f"No table columns for {pipe}. Does the pipe exist?"))
+            print_tuple((False, f"No table columns for {pipe}. Does the pipe exist?"), calm=True)
 
     if nopretty:
         _nopretty_print()

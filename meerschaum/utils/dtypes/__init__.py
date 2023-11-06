@@ -170,11 +170,25 @@ def attempt_cast_to_numeric(value: Any) -> Any:
     try:
         return (
             Decimal(str(value))
-            if str(value).lower() not in ('none', 'nan', 'na', 'nat', '')
+            if not value_is_null(value)
             else Decimal('NaN')
         )
     except Exception as e:
         return value
+
+
+def value_is_null(value: Any) -> Any:
+    """
+    Determine if a value is a null-like string.
+    """
+    return str(value).lower() in ('none', 'nan', 'na', 'nat', '', '<na>')
+
+
+def none_if_null(value: Any) -> Any:
+    """
+    Return `None` if a value is a null-like string.
+    """
+    return (None if value_is_null(value) else value)
 
 
 def quantize_decimal(x: Decimal, scale: int, precision: int) -> Decimal:

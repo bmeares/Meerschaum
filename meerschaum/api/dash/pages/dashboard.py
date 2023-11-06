@@ -39,7 +39,6 @@ from meerschaum.api.dash.keys import (
 layout = html.Div(
     id = 'main-div',
     children = [
-        html.Div(id='websocket-div'),
         keys_lists_content,
         download_dataframe,
         download_logs,
@@ -85,6 +84,7 @@ layout = html.Div(
                                 ],
                                 width={'size': 8, 'offset': 2}
                             ),
+                            html.Div(id='webterm-div'),
                             html.Div(
                                 id = 'content-div-right',
                                 children = [console_div],

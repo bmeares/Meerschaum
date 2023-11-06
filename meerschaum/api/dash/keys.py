@@ -25,12 +25,6 @@ placeholders = {
     ),
 }
 widths = {
-    'ck' : {'size' : 4},
-    'mk' : {'size' : 4},
-    'lk' : {'size' : 4},
-    'action' : {'size' : 3},
-    'subaction' : {'size' : 3},
-    'subaction-text' : {'size' : 6},
     'flags' : {'size' : 12},
     'params' : {'size' : 12},
     'begin_end' : {'size' : 8},
@@ -42,11 +36,6 @@ input_group_sizes = {
     'lk' : 'sm',
     'params' : 'sm',
 }
-
-#  show_pipes_button = dbc.Button(
-    #  "Show Pipes", id='show-pipes-button',
-    #  color='secondary', className='mr-1', style={'float' : 'right'}
-#  )
 
 action_dropdown_row = html.Div(
         children = [
@@ -65,7 +54,9 @@ action_dropdown_row = html.Div(
                         id = 'action-dropdown-div',
                         className = 'dbc_dark',
                     ),
-                    width = widths['action']
+                    sm = 12,
+                    md = 6,
+                    lg = 3,
                 ),
                 dbc.Col(
                     html.Div(
@@ -77,7 +68,9 @@ action_dropdown_row = html.Div(
                         id = 'subaction-dropdown-div',
                         className = 'dbc_dark input-text'
                     ),
-                    width = widths['subaction']
+                    sm = 12,
+                    md = 6,
+                    lg = 3,
                 ),
                 dbc.Col(
                     html.Div(
@@ -99,7 +92,9 @@ action_dropdown_row = html.Div(
                         ),
                     ),
                     id = 'subaction-dropdown-text-div',
-                    width = widths['subaction-text'],
+                    lg = 6,
+                    md = 12,
+                    sm = 12,
                     className = 'dbc_dark',
                 ),
             ]
@@ -201,7 +196,9 @@ dropdown_keys_row = dbc.Row(
                 ],
                 className = 'dbc_dark',
             ),
-            width = widths['ck'],
+            lg = 4,
+            md = 12,
+            sm = 12,
         ),
         dbc.Col(
             html.Div(
@@ -215,7 +212,9 @@ dropdown_keys_row = dbc.Row(
                 ],
                 className = 'dbc_dark'
             ),
-            width = widths['mk'],
+            lg = 4,
+            md = 12,
+            sm = 12,
         ),
         dbc.Col(
             html.Div(
@@ -229,7 +228,9 @@ dropdown_keys_row = dbc.Row(
                 ],
                 className = 'dbc_dark'
             ),
-            width = widths['lk'],
+            lg = 4,
+            md = 12,
+            sm = 12,
         ),
     ] ### end of filters row children
 )
@@ -282,7 +283,7 @@ text_tab_content = dbc.Card(
                             ],
                             size = input_group_sizes['ck'],
                         )]),
-                        width = widths['ck'],
+                        width = 4,
                     ),
                     dbc.Col(
                         dbc.InputGroup(
@@ -306,7 +307,7 @@ text_tab_content = dbc.Card(
                             ],
                             size = input_group_sizes['mk'],
                         ),
-                        width = widths['mk'],
+                        width = 4,
                     ),
                     dbc.Col(
                         dbc.InputGroup(
@@ -330,7 +331,7 @@ text_tab_content = dbc.Card(
                             ],
                             size = input_group_sizes['lk'],
                         ),
-                        width = widths['lk'],
+                        width = 4,
                     ),
                 ]
             ),
