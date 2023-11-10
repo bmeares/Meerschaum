@@ -24,8 +24,6 @@ from meerschaum.config._paths import (
     DEFAULT_CONFIG_DIR_PATH,
 )
 from meerschaum.config._patch import (
-    #  permanent_patch_config,
-    #  patch_config,
     apply_patch_to_config,
 )
 __all__ = ('get_plugin_config', 'write_plugin_config', 'get_config', 'write_config', 'set_config',)

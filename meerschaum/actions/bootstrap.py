@@ -15,7 +15,7 @@ def bootstrap(
         **kw: Any
     ) -> SuccessTuple:
     """
-    Bootstrap an element (pipes, connectors, config).
+    Launch an interactive wizard to bootstrap pipes or connectors.
     
     Example:
         `bootstrap pipes`
@@ -24,7 +24,6 @@ def bootstrap(
     from meerschaum.actions import choose_subaction
     options = {
         'pipes'      : _bootstrap_pipes,
-        'config'     : _bootstrap_config,
         'connectors' : _bootstrap_connectors,
     }
     return choose_subaction(action, options, **kw)

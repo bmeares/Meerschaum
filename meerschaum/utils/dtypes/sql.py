@@ -19,6 +19,7 @@ NUMERIC_PRECISION_FLAVORS: Dict[str, Tuple[int, int]] = {
 
 DB_TO_PD_DTYPES: Dict[str, Union[str, Dict[str, str]]] = {
     'FLOAT': 'float64[pyarrow]',
+    'REAL': 'float64[pyarrow]',
     'DOUBLE_PRECISION': 'float64[pyarrow]',
     'DOUBLE': 'float64[pyarrow]',
     'DECIMAL': 'numeric',

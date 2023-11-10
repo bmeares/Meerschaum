@@ -186,8 +186,12 @@ def fetch_pipes_keys(
         location_keys = []
     else:
         location_keys = [
-            (lk if lk not in ('[None]', 'None', 'null') else None)
-                for lk in location_keys
+            (
+                lk
+                if lk not in ('[None]', 'None', 'null')
+                else None
+            )
+            for lk in location_keys
         ]
     if tags is None:
         tags = []
@@ -213,7 +217,7 @@ def fetch_pipes_keys(
             parameters[col] = vals
     cols = {k: v for k, v in cols.items() if v != [None]}
 
-    if not table_exists('pipes', self, debug=debug):
+    if not table_exists('mrsm_pipes', self, schema=self.instance_schema, debug=debug):
         return []
 
     from meerschaum.connectors.sql.tables import get_tables
@@ -329,6 +333,7 @@ def create_indices(
     """
     Create a pipe's indices.
     """
+    from meerschaum.utils.sql import sql_item_name
     from meerschaum.utils.debug import dprint
     if debug:
         dprint(f"Creating indices for {pipe}...")
@@ -347,7 +352,25 @@ def create_indices(
         success = success and ix_success
         if not ix_success:
             warn(f"Failed to create index on column: {ix}")
-    return success
+
+    existing_cols_types = pipe.get_columns_types(debug=debug)
+    indices_cols_str = ', '.join(
+        [sql_item_name(ix, self.flavor) for ix in ix_queries if ix in existing_cols_types]
+    )
+    pipe_name = sql_item_name(pipe.target, self.flavor, self.get_pipe_schema(pipe))
+    upsert = pipe.parameters.get('upsert', False)
+    if not upsert:
+        return success
+
+    constraint_name = sql_item_name(pipe.target + '_constraint', self.flavor)
+    constraint_query = (
+        f"ALTER TABLE {pipe_name} ADD CONSTRAINT {constraint_name} UNIQUE ({indices_cols_str})"
+    )
+    constraint_success = self.exec(constraint_query, debug=debug) is not None
+    if not constraint_success:
+        warn(f"Failed to add unique constraint to {pipe}.")
+
+    return success and constraint_success
 
 
 def drop_indices(
@@ -544,7 +567,7 @@ def get_drop_index_queries(
         temp_table = '_' + pipe.target + '_temp_migration'
         temp_table_name = sql_item_name(temp_table, self.flavor, self.get_pipe_schema(pipe))
 
-        if table_exists(temp_table, self, debug=debug):
+        if table_exists(temp_table, self, schema=self.get_pipe_schema(pipe), debug=debug):
             nuke_queries.append(f"DROP TABLE {temp_table_name}")
         nuke_queries += [
             f"SELECT * INTO {temp_table_name} FROM {pipe_name}",
@@ -572,17 +595,12 @@ def delete_pipe(
         debug: bool = False,
     ) -> SuccessTuple:
     """
-    Delete a Pipe's registration and drop its table.
+    Delete a Pipe's registration.
     """
     from meerschaum.utils.sql import sql_item_name
     from meerschaum.utils.debug import dprint
     from meerschaum.utils.packages import attempt_import
     sqlalchemy = attempt_import('sqlalchemy')
-
-    ### try dropping first
-    drop_tuple = pipe.drop(debug=debug)
-    if not drop_tuple[0]:
-        return drop_tuple
 
     if not pipe.id:
         return False, f"{pipe} is not registered."
@@ -1080,6 +1098,7 @@ def sync_pipe(
         check_existing: bool = True,
         blocking: bool = True,
         debug: bool = False,
+        _check_temporary_tables: bool = True,
         **kw: Any
     ) -> SuccessTuple:
     """
@@ -1126,7 +1145,7 @@ def sync_pipe(
     A `SuccessTuple` of success (`bool`) and message (`str`).
     """
     from meerschaum.utils.packages import import_pandas
-    from meerschaum.utils.sql import get_update_queries, sql_item_name, json_flavors
+    from meerschaum.utils.sql import get_update_queries, sql_item_name, json_flavors, update_queries
     from meerschaum.utils.misc import generate_password
     from meerschaum.utils.dataframe import get_json_cols, get_numeric_cols
     from meerschaum.utils.dtypes import are_dtypes_equal
@@ -1193,6 +1212,10 @@ def sync_pipe(
             if not infer_bool_success:
                 return infer_bool_success, infer_bool_msg
 
+    upsert = pipe.parameters.get('upsert', False) and (self.flavor + '-upsert') in update_queries
+    if upsert:
+        check_existing = False
+
     unseen_df, update_df, delta_df = (
         pipe.filter_existing(
             df,
@@ -1201,52 +1224,14 @@ def sync_pipe(
             **kw
         ) if check_existing else (df, None, df)
     )
+    if upsert:
+        unseen_df, update_df, delta_df = (df.head(0), df, df)
+
     if debug:
         dprint("Delta data:\n" + str(delta_df))
         dprint("Unseen data:\n" + str(unseen_df))
         if update_df is not None:
-            dprint("Update data:\n" + str(update_df))
-
-    if update_df is not None and not len(update_df) == 0:
-        transact_id = generate_password(3)
-        temp_target = '_' + transact_id + '_' + pipe.target
-        update_kw = copy.deepcopy(kw)
-        update_kw.update({
-            'name': temp_target,
-            'if_exists': 'append',
-            'chunksize': chunksize,
-            'dtype': self.get_to_sql_dtype(pipe, update_df, update_dtypes=False),
-            'schema': self.get_pipe_schema(pipe),
-            'debug': debug,
-        })
-        self.to_sql(update_df, **update_kw)
-        temp_pipe = Pipe(
-            pipe.connector_keys + '_', pipe.metric_key, pipe.location_key,
-            instance = pipe.instance_keys,
-            columns = pipe.columns,
-            target = temp_target,
-            temporary = True,
-        )
-
-        existing_cols = pipe.get_columns_types(debug=debug)
-        join_cols = [
-            col for col_key, col in pipe.columns.items()
-            if col and col_key != 'value' and col in existing_cols
-        ]
-
-        queries = get_update_queries(
-            pipe.target,
-            temp_target,
-            self,
-            join_cols,
-            debug = debug
-        )
-        success = all(self.exec_queries(queries, break_on_error=True, debug=debug))
-        drop_success, drop_msg = temp_pipe.drop(debug=debug)
-        if not drop_success:
-            warn(drop_msg)
-        if not success:
-            return False, f"Failed to apply update to {pipe}."
+            dprint(("Update" if not upsert else "Upsert") + " data:\n" + str(update_df))
 
     if_exists = kw.get('if_exists', 'append')
     if 'if_exists' in kw:
@@ -1296,6 +1281,65 @@ def sync_pipe(
         if not self.create_indices(pipe, debug=debug):
             warn(f"Failed to create indices for {pipe}. Continuing...")
 
+    if update_df is not None and len(update_df) > 0:
+        dt_col = pipe.columns.get('datetime', None)
+        dt_typ = pipe.dtypes.get(dt_col, None)
+        dt_name = sql_item_name(dt_col, self.flavor) if dt_col else None
+        update_min = update_df[dt_col].min() if dt_col and dt_col in update_df.columns else None
+        update_max = update_df[dt_col].max() if dt_col and dt_col in update_df.columns else None
+        update_begin = update_min
+        update_end = (
+            update_max
+            + (
+               timedelta(minutes=1)
+               if are_dtypes_equal(str(dt_typ), 'datetime')
+               else 1
+            )
+        ) if dt_col else None
+
+        transact_id = generate_password(3)
+        temp_target = '-' + transact_id + '_' + pipe.target
+        self._log_temporary_tables_creation(temp_target, debug=debug)
+        temp_pipe = Pipe(
+            pipe.connector_keys.replace(':', '_') + '_', pipe.metric_key, pipe.location_key,
+            instance = pipe.instance_keys,
+            columns = pipe.columns,
+            dtypes = pipe.dtypes,
+            target = temp_target,
+            temporary = True,
+            parameters = {
+                'schema': self.internal_schema,
+            },
+        )
+        temp_pipe.sync(update_df, check_existing=False, debug=debug)
+        existing_cols = pipe.get_columns_types(debug=debug)
+        join_cols = [
+            col
+            for col_key, col in pipe.columns.items()
+            if col and col in existing_cols
+        ]
+        update_queries = get_update_queries(
+            pipe.target,
+            temp_target, 
+            self,
+            join_cols,
+            upsert = upsert,
+            schema = self.get_pipe_schema(pipe),
+            patch_schema = self.internal_schema,
+            datetime_col = pipe.columns.get('datetime', None),
+            debug = debug,
+        )
+        update_success = all(
+            self.exec_queries(update_queries, break_on_error=True, rollback=True, debug=debug)
+        )
+        self._log_temporary_tables_creation(
+            temp_target,
+            ready_to_drop = True,
+            debug = debug,
+        )
+        if not update_success:
+            warn(f"Failed to apply update to {pipe}.")
+
     stop = time.perf_counter()
     success = stats['success']
     if not success:
@@ -1309,6 +1353,14 @@ def sync_pipe(
             f"\non table {sql_item_name(pipe.target, self.flavor, self.get_pipe_schema(pipe))}\n"
             + f"in {round(stop - start, 2)} seconds."
         )
+
+    if _check_temporary_tables:
+        drop_stale_success, drop_stale_msg = self._drop_old_temporary_tables(
+            refresh=False, debug=debug
+        )
+        if not drop_stale_success:
+            warn(drop_stale_msg)
+
     return success, msg
 
 
@@ -1362,7 +1414,6 @@ def sync_pipe_inplace(
     """
     from meerschaum.utils.sql import (
         sql_item_name,
-        table_exists,
         get_sqlalchemy_table,
         get_update_queries,
         get_null_replacement,
@@ -1370,12 +1421,17 @@ def sync_pipe_inplace(
         NO_SELECT_INTO_FLAVORS,
         format_cte_subquery,
         get_create_table_query,
+        get_table_cols_types,
+        truncate_item_name,
+        session_execute,
+        table_exists,
     )
     from meerschaum.utils.dtypes.sql import (
         get_pd_type_from_db_type,
     )
     from meerschaum.utils.misc import generate_password
     from meerschaum.utils.debug import dprint
+    sqlalchemy, sqlalchemy_orm = mrsm.attempt_import('sqlalchemy', 'sqlalchemy.orm')
     metadef = self.get_pipe_metadef(
         pipe,
         params = params,
@@ -1384,12 +1440,17 @@ def sync_pipe_inplace(
         check_existing = check_existing,
         debug = debug,
     )
-    metadef_name = sql_item_name('metadef', self.flavor, None)
     pipe_name = sql_item_name(pipe.target, self.flavor, self.get_pipe_schema(pipe))
+    upsert = pipe.parameters.get('upsert', False)
+    internal_schema = self.internal_schema
+    database = getattr(self, 'database', self.parse_uri(self.URI).get('database', None))
 
     if not pipe.exists(debug=debug):
         create_pipe_query = get_create_table_query(
-            metadef, pipe.target, self.flavor, schema=self.get_pipe_schema(pipe)
+            metadef,
+            pipe.target,
+            self.flavor,
+            schema = self.get_pipe_schema(pipe),
         )
         result = self.exec(create_pipe_query, debug=debug)
         if result is None:
@@ -1400,52 +1461,70 @@ def sync_pipe_inplace(
         rowcount = pipe.get_rowcount(debug=debug)
         return True, f"Inserted {rowcount}, updated 0 rows."
 
-    ### Generate names for the tables.
+    session = sqlalchemy_orm.Session(self.engine)
+    connectable = session if self.flavor != 'duckdb' else self
+
     transact_id = generate_password(3)
     def get_temp_table_name(label: str) -> str:
-        return '_' + transact_id + '_' + label + '_' + pipe.target
+        return '-' + transact_id + '_' + label + '_' + pipe.target
 
-    backtrack_table_raw = get_temp_table_name('backtrack')
-    backtrack_table_name = sql_item_name(
-        backtrack_table_raw, self.flavor, self.get_pipe_schema(pipe)
-    )
-    new_table_raw = get_temp_table_name('new')
-    new_table_name = sql_item_name(new_table_raw, self.flavor, self.get_pipe_schema(pipe))
-    delta_table_raw = get_temp_table_name('delta')
-    delta_table_name = sql_item_name(delta_table_raw, self.flavor, self.get_pipe_schema(pipe))
-    joined_table_raw = get_temp_table_name('joined')
-    joined_table_name = sql_item_name(joined_table_raw, self.flavor, self.get_pipe_schema(pipe))
-    unseen_table_raw = get_temp_table_name('unseen')
-    unseen_table_name = sql_item_name(unseen_table_raw, self.flavor, self.get_pipe_schema(pipe))
-    update_table_raw = get_temp_table_name('update')
-    update_table_name = sql_item_name(update_table_raw, self.flavor, self.get_pipe_schema(pipe))
-    metadef_name = sql_item_name('metadef', self.flavor, self.get_pipe_schema(pipe))
+    temp_table_roots = ['backtrack', 'new', 'delta', 'joined', 'unseen', 'update']
+    temp_tables = {
+        table_root: get_temp_table_name(table_root)
+        for table_root in temp_table_roots
+    }
+    temp_table_names = {
+        table_root: sql_item_name(
+            table_name_raw,
+            self.flavor,
+            internal_schema,
+        )
+        for table_root, table_name_raw in temp_tables.items()
+    }
 
-    new_queries = []
-    drop_new_query = f"DROP TABLE {new_table_name}"
-    if table_exists(new_table_raw, self, debug=debug):
-        new_queries.append(drop_new_query)
+    def clean_up_temp_tables(ready_to_drop: bool = False):
+        log_success, log_msg = self._log_temporary_tables_creation(
+            [table for table in temp_tables.values()],
+            ready_to_drop = ready_to_drop,
+            debug = debug,
+        )
+        if not log_success:
+            warn(log_msg)
+
+    ### Clean up in case we have a session collision.
+    _ = clean_up_temp_tables()
 
     create_new_query = get_create_table_query(
-        metadef, new_table_raw, self.flavor, schema=self.get_pipe_schema(pipe)
+        metadef,
+        temp_tables['new'],
+        self.flavor,
+        schema = internal_schema,
     )
-    new_queries.append(create_new_query)
-
-    new_success = all(self.exec_queries(new_queries, break_on_error=True, debug=debug))
-    if not new_success:
-        self.exec_queries([drop_new_query], break_on_error=False, debug=debug)
-        return False, f"Could not fetch new data for {pipe}."
-
-    new_table_obj = get_sqlalchemy_table(
-        new_table_raw,
-        connector = self,
-        schema = self.get_pipe_schema(pipe),
-        refresh = True,
+    (create_new_success, create_new_msg), create_new_results = session_execute(
+        session,
+        create_new_query,
+        with_results = True,
         debug = debug,
     )
+    if not create_new_success:
+        _ = clean_up_temp_tables()
+        return create_new_success, create_new_msg
+    new_count = create_new_results[0].rowcount
+
+    new_cols_types = get_table_cols_types(
+        temp_tables['new'],
+        connectable = connectable,
+        flavor = self.flavor,
+        schema = internal_schema,
+        database = database,
+        debug = debug,
+    )
+    if not new_cols_types:
+        return False, "Failed to get columns for new table."
+
     new_cols = {
-        str(col.name): get_pd_type_from_db_type(str(col.type))
-        for col in new_table_obj.columns
+        str(col_name): get_pd_type_from_db_type(str(col_type))
+        for col_name, col_type in new_cols_types.items()
     }
     new_cols_str = ', '.join([
         sql_item_name(col, self.flavor)
@@ -1453,35 +1532,26 @@ def sync_pipe_inplace(
     ])
 
     add_cols_queries = self.get_add_columns_queries(pipe, new_cols, debug=debug)
-    if add_cols_queries:
-        if not self.exec_queries(add_cols_queries, debug=debug):
-            warn(f"Failed to add new columns to {pipe}.")
-
     alter_cols_queries = self.get_alter_columns_queries(pipe, new_cols, debug=debug)
-    if alter_cols_queries:
-        if not self.exec_queries(alter_cols_queries, debug=debug):
-            warn(f"Failed to alter columns for {pipe}.")
-        else:
-            _ = pipe.infer_dtypes(persist=True)
+    insert_queries = [
+        (
+            f"INSERT INTO {pipe_name} ({new_cols_str})\n"
+            + f"SELECT {new_cols_str}\nFROM {temp_table_names['new']}"
+        ),
+        f"DROP TABLE {temp_table_names['new']}",
+    ] if not check_existing else []
+
+    new_queries = add_cols_queries + alter_cols_queries + insert_queries
+    new_success, new_msg = session_execute(session, new_queries, debug=debug)
+    if not new_success:
+        _ = clean_up_temp_tables()
+        return new_success, new_msg
 
     if not check_existing:
-        new_count = self.value(f"SELECT COUNT(*) FROM {new_table_name}", debug=debug)
-        insert_queries = [
-            (
-                f"INSERT INTO {pipe_name} ({new_cols_str})\n"
-                + f"SELECT {new_cols_str}\nFROM {new_table_name}"
-            ),
-            f"DROP TABLE {new_table_name}"
-        ]
-        if not self.exec_queries(insert_queries, debug=debug, break_on_error=False):
-            return False, f"Failed to insert into rows into {pipe}."
+        session.commit()
+        _ = clean_up_temp_tables()
         return True, f"Inserted {new_count}, updated 0 rows."
 
-
-    backtrack_queries = []
-    drop_backtrack_query = f"DROP TABLE {backtrack_table_name}"
-    if table_exists(backtrack_table_raw, self, debug=debug):
-        backtrack_queries.append(drop_backtrack_query)
     backtrack_def = self.get_pipe_data_query(
         pipe,
         begin = begin,
@@ -1500,25 +1570,31 @@ def sync_pipe_inplace(
     )
     create_backtrack_query = get_create_table_query(
         backtrack_def,
-        backtrack_table_raw,
+        temp_tables['backtrack'],
         self.flavor,
+        schema = internal_schema,
     )
-    backtrack_queries.append(create_backtrack_query)
-    backtrack_success = all(self.exec_queries(backtrack_queries, break_on_error=True, debug=debug))
-    if not backtrack_success:
-        self.exec_queries([drop_new_query, drop_backtrack_query], break_on_error=False, debug=debug)
-        return False, f"Could not fetch backtrack data from {pipe}."
-
-    ### Determine which index columns are present in both tables.
-    backtrack_table_obj = get_sqlalchemy_table(
-        backtrack_table_raw,
-        connector = self,
-        schema = self.get_pipe_schema(pipe),
-        refresh = True,
+    (create_backtrack_success, create_backtrack_msg), create_backtrack_results = session_execute(
+        session,
+        create_backtrack_query,
+        with_results = True,
         debug = debug,
     )
-    backtrack_cols = {str(col.name): str(col.type) for col in backtrack_table_obj.columns}
-    common_cols = [col for col in new_cols if col in backtrack_cols]
+    if not create_backtrack_success:
+        _ = clean_up_temp_tables()
+        return create_backtrack_success, create_backtrack_msg
+    bactrack_count = create_backtrack_results[0].rowcount
+
+    backtrack_cols_types = get_table_cols_types(
+        temp_tables['backtrack'],
+        connectable = connectable,
+        flavor = self.flavor,
+        schema = internal_schema,
+        database = database,
+        debug = debug,
+    )
+
+    common_cols = [col for col in new_cols if col in backtrack_cols_types]
     on_cols = {
         col: new_cols.get(col, 'object')
         for col_key, col in pipe.columns.items()
@@ -1526,19 +1602,14 @@ def sync_pipe_inplace(
             col
             and
             col_key != 'value'
-            and col in backtrack_cols
+            and col in backtrack_cols_types
             and col in new_cols
         )
     }
 
-    delta_queries = []
-    drop_delta_query = f"DROP TABLE {delta_table_name}"
-    if table_exists(delta_table_raw, self, debug=debug):
-        delta_queries.append(drop_delta_query)
-
     null_replace_new_cols_str = (
         ', '.join([
-            f"COALESCE({new_table_name}.{sql_item_name(col, self.flavor, None)}, "
+            f"COALESCE({temp_table_names['new']}.{sql_item_name(col, self.flavor, None)}, "
             + f"{get_null_replacement(typ, self.flavor)}) AS "
             + sql_item_name(col, self.flavor, None)
             for col, typ in new_cols.items()
@@ -1548,117 +1619,105 @@ def sync_pipe_inplace(
     select_delta_query = (
         f"SELECT\n"
         + null_replace_new_cols_str + "\n"
-        + f"\nFROM {new_table_name}\n"
-        + f"LEFT OUTER JOIN {backtrack_table_name}\nON\n"
+        + f"\nFROM {temp_table_names['new']}\n"
+        + f"LEFT OUTER JOIN {temp_table_names['backtrack']}\nON\n"
         + '\nAND\n'.join([
             (
-                f'COALESCE({new_table_name}.' + sql_item_name(c, self.flavor, None) + ", "
-                + get_null_replacement(new_cols[c], self.flavor) + ") "
+                f"COALESCE({temp_table_names['new']}."
+                + sql_item_name(c, self.flavor, None)
+                + ", "
+                + get_null_replacement(new_cols[c], self.flavor)
+                + ") "
                 + ' = '
-                + f'COALESCE({backtrack_table_name}.' + sql_item_name(c, self.flavor, None) + ", "
-                + get_null_replacement(backtrack_cols[c], self.flavor) + ") "
+                + f"COALESCE({temp_table_names['backtrack']}."
+                + sql_item_name(c, self.flavor, None)
+                + ", "
+                + get_null_replacement(backtrack_cols_types[c], self.flavor)
+                + ") "
             ) for c in common_cols
         ])
         + "\nWHERE\n"
         + '\nAND\n'.join([
             (
-                f'{backtrack_table_name}.' + sql_item_name(c, self.flavor, None) + ' IS NULL'
+                f"{temp_table_names['backtrack']}." + sql_item_name(c, self.flavor, None) + ' IS NULL'
             ) for c in common_cols
         ])
     )
     create_delta_query = get_create_table_query(
-        select_delta_query, delta_table_raw, self.flavor, None
+        select_delta_query,
+        temp_tables['delta'],
+        self.flavor,
+        schema = internal_schema,
     )
-    delta_queries.append(create_delta_query)
-
-    delta_success = all(self.exec_queries(delta_queries, break_on_error=True, debug=debug))
-    if not delta_success:
-        self.exec_queries(
-            [
-                drop_new_query,
-                drop_backtrack_query,
-                drop_delta_query,
-            ],
-            break_on_error = False,
-            debug = debug,
-        )
-        return False, f"Could not filter data for {pipe}."
-
-    delta_table_obj = get_sqlalchemy_table(
-        delta_table_raw,
-        connector = self,
-        schema = self.get_pipe_schema(pipe),
-        refresh = True,
+    create_delta_success, create_delta_msg = session_execute(
+        session,
+        create_delta_query,
         debug = debug,
     )
+    if not create_delta_success:
+        _ = clean_up_temp_tables()
+        return create_delta_success, create_delta_msg
+
+    delta_cols_types = get_table_cols_types(
+        temp_tables['delta'],
+        connectable = connectable,
+        flavor = self.flavor,
+        schema = internal_schema,
+        database = database,
+        debug = debug,
+    )
+
     delta_cols = {
-        str(col.name): get_pd_type_from_db_type(str(col.type))
-        for col in delta_table_obj.columns
+        col: get_pd_type_from_db_type(typ)
+        for col, typ in delta_cols_types.items()
     }
     delta_cols_str = ', '.join([
         sql_item_name(col, self.flavor)
         for col in delta_cols
     ])
 
-    joined_queries = []
-    drop_joined_query = f"DROP TABLE {joined_table_name}"
-    if on_cols and table_exists(joined_table_raw, self, debug=debug):
-        joined_queries.append(drop_joined_query)
-
     select_joined_query = (
         "SELECT "
         + (', '.join([
             (
-                f'{delta_table_name}.' + sql_item_name(c, self.flavor, None)
+                f"{temp_table_names['delta']}." + sql_item_name(c, self.flavor, None)
                 + " AS " + sql_item_name(c + '_delta', self.flavor, None)
             ) for c in delta_cols
         ]))
         + ", "
         + (', '.join([
             (
-                f'{backtrack_table_name}.' + sql_item_name(c, self.flavor, None)
+                f"{temp_table_names['backtrack']}." + sql_item_name(c, self.flavor, None)
                 + " AS " + sql_item_name(c + '_backtrack', self.flavor, None)
-            ) for c in backtrack_cols
+            ) for c in backtrack_cols_types
         ]))
-        + f"\nFROM {delta_table_name}\n"
-        + f"LEFT OUTER JOIN {backtrack_table_name}\nON\n"
+        + f"\nFROM {temp_table_names['delta']}\n"
+        + f"LEFT OUTER JOIN {temp_table_names['backtrack']}\nON\n"
         + '\nAND\n'.join([
             (
-                f'COALESCE({delta_table_name}.' + sql_item_name(c, self.flavor, None)
+                f"COALESCE({temp_table_names['delta']}." + sql_item_name(c, self.flavor, None)
                 + ", " + get_null_replacement(typ, self.flavor) + ")"
                 + ' = '
-                + f'COALESCE({backtrack_table_name}.' + sql_item_name(c, self.flavor, None)
+                + f"COALESCE({temp_table_names['backtrack']}." + sql_item_name(c, self.flavor, None)
                 + ", " + get_null_replacement(typ, self.flavor) + ")"
             ) for c, typ in on_cols.items()
         ])
     )
 
     create_joined_query = get_create_table_query(
-        select_joined_query, joined_table_raw, self.flavor, schema=self.get_pipe_schema(pipe)
+        select_joined_query,
+        temp_tables['joined'],
+        self.flavor,
+        schema = internal_schema,
     )
-    joined_queries.append(create_joined_query)
-
-    joined_success = (
-        all(self.exec_queries(joined_queries, break_on_error=True, debug=debug))
-        if on_cols else True
-    )
-    if not joined_success:
-        self.exec_queries(
-            [
-                drop_new_query,
-                drop_backtrack_query,
-                drop_delta_query,
-                drop_joined_query,
-            ],
-            break_on_error = False,
-            debug = debug,
-        )
-        return False, f"Could not separate new and updated data for {pipe}."
-
-    unseen_queries = []
-    drop_unseen_query = f"DROP TABLE {unseen_table_name}"
-    if on_cols and table_exists(unseen_table_raw, self, debug=debug):
-        unseen_queries.append(drop_unseen_query)
+    create_joined_success, create_joined_msg = session_execute(
+        session,
+        create_joined_query,
+        debug = debug,
+    ) if on_cols else (True, "Success")
+    if not create_joined_success:
+        _ = clean_up_temp_tables()
+        return create_joined_success, create_joined_msg
 
     select_unseen_query = (
         "SELECT "
@@ -1671,7 +1730,7 @@ def sync_pipe_inplace(
                 + " AS " + sql_item_name(c, self.flavor, None)
             ) for c, typ in delta_cols.items()
         ]))
-        + f"\nFROM {joined_table_name}\n"
+        + f"\nFROM {temp_table_names['joined']}\n"
         + f"WHERE "
         + '\nAND\n'.join([
             (
@@ -1680,38 +1739,20 @@ def sync_pipe_inplace(
         ])
     )
     create_unseen_query = get_create_table_query(
-        select_unseen_query, unseen_table_raw, self.flavor, self.get_pipe_schema(pipe)
+        select_unseen_query,
+        temp_tables['unseen'],
+        self.flavor,
+        internal_schema,
     )
-    unseen_queries.append(create_unseen_query)
-
-    unseen_success = (
-        all(self.exec_queries(unseen_queries, break_on_error=True, debug=debug))
-        if on_cols else True
+    (create_unseen_success, create_unseen_msg), create_unseen_results = session_execute(
+        session,
+        create_unseen_query,
+        with_results = True,
+        debug = debug
     )
-    if not unseen_success:
-        self.exec_queries(
-            [
-                drop_new_query,
-                drop_backtrack_query,
-                drop_delta_query,
-                drop_joined_query,
-                drop_unseen_query,
-            ],
-            break_on_error = False,
-            debug = debug,
-        )
-        return False, f"Could not determine new data for {pipe}."
-    unseen_count = self.value(
-        (
-            "SELECT COUNT(*) FROM "
-            + (unseen_table_name if on_cols else delta_table_name)
-        ), debug = debug,
-    )
-
-    update_queries = []
-    drop_update_query = f"DROP TABLE {update_table_name}"
-    if on_cols and table_exists(update_table_raw, self, debug=debug):
-        update_queries.append(drop_unseen_query)
+    if not create_unseen_success:
+        _ = clean_up_temp_tables()
+        return create_unseen_success, create_unseen_msg
 
     select_update_query = (
         "SELECT "
@@ -1724,7 +1765,7 @@ def sync_pipe_inplace(
                 + " AS " + sql_item_name(c, self.flavor, None)
             ) for c, typ in delta_cols.items()
         ]))
-        + f"\nFROM {joined_table_name}\n"
+        + f"\nFROM {temp_table_names['joined']}\n"
         + f"WHERE "
         + '\nOR\n'.join([
             (
@@ -1734,39 +1775,28 @@ def sync_pipe_inplace(
     )
 
     create_update_query = get_create_table_query(
-        select_update_query, update_table_raw, self.flavor, self.get_pipe_schema(pipe)
+        select_update_query,
+        temp_tables['update'],
+        self.flavor,
+        internal_schema,
     )
-    update_queries.append(create_update_query)
-
-    update_success = (
-        all(self.exec_queries(update_queries, break_on_error=True, debug=debug))
-        if on_cols else True
-    )
-    if not update_success:
-        self.exec_queries(
-            [
-                drop_new_query,
-                drop_backtrack_query,
-                drop_delta_query,
-                drop_joined_query,
-                drop_unseen_query,
-                drop_update_query,
-            ],
-            break_on_error = False,
-            debug = debug,
-        )
-        return False, "Could not determine updated data for {pipe}."
-    update_count = (
-        self.value(f"SELECT COUNT(*) FROM {update_table_name}", debug=debug)
-        if on_cols else 0
-    )
-
+    (create_update_success, create_update_msg), create_update_results = session_execute(
+        session,
+        create_update_query,
+        with_results = True,
+        debug = debug,
+    ) if on_cols else ((True, "Success"), [])
     apply_update_queries = (
         get_update_queries(
             pipe.target,
-            update_table_raw,
-            self,
+            temp_tables['update'],
+            session,
             on_cols,
+            upsert = upsert,
+            schema = self.get_pipe_schema(pipe),
+            patch_schema = internal_schema,
+            datetime_col = pipe.columns.get('datetime', None),
+            flavor = self.flavor,
             debug = debug
         )
         if on_cols else []
@@ -1777,34 +1807,46 @@ def sync_pipe_inplace(
             f"INSERT INTO {pipe_name} ({delta_cols_str})\n"
             + f"SELECT {delta_cols_str}\nFROM "
             + (
-                unseen_table_name
+                temp_table_names['unseen']
                 if on_cols
-                else delta_table_name
+                else temp_table_names['delta']
             )
         ),
     ]
 
-    apply_queries = (
-        (apply_unseen_queries if unseen_count > 0 else [])
-        + (apply_update_queries if update_count > 0 else [])
-        + [
-            drop_new_query,
-            drop_backtrack_query,
-            drop_delta_query,
-        ] + (
-            [
-                drop_joined_query,
-                drop_unseen_query,
-                drop_update_query,
-            ] if on_cols else []
-        )
+    (apply_unseen_success, apply_unseen_msg), apply_unseen_results = session_execute(
+        session,
+        apply_unseen_queries,
+        with_results = True,
+        debug = debug,
     )
-    success = all(self.exec_queries(apply_queries, break_on_error=False, debug=debug))
-    msg = (
-        f"Was not able to apply changes to {pipe}."
-        if not success else f"Inserted {unseen_count}, updated {update_count} rows."
+    if not apply_unseen_success:
+        _ = clean_up_temp_tables()
+        return apply_unseen_success, apply_unseen_msg
+    unseen_count = apply_unseen_results[0].rowcount
+
+    (apply_update_success, apply_update_msg), apply_update_results = session_execute(
+        session,
+        apply_update_queries,
+        with_results = True,
+        debug = debug,
     )
-    return success, msg
+
+    if not apply_update_success:
+        _ = clean_up_temp_tables()
+        return apply_update_success, apply_update_msg
+    update_count = apply_update_results[0].rowcount
+
+    session.commit()
+
+    msg = f"Inserted {unseen_count}, updated {update_count} rows."
+    _ = clean_up_temp_tables(ready_to_drop=True)
+
+    drop_stale_success, drop_stale_msg = self._drop_old_temporary_tables(refresh=False, debug=debug)
+    if not drop_stale_success:
+        warn(drop_stale_msg)
+
+    return True, msg
 
 
 def get_sync_time(
@@ -1929,7 +1971,12 @@ def pipe_exists(
 
     """
     from meerschaum.utils.sql import table_exists
-    exists = table_exists(pipe.target, self, debug=debug)
+    exists = table_exists(
+        pipe.target,
+        self,
+        schema = self.get_pipe_schema(pipe),
+        debug = debug,
+    )
     if debug:
         from meerschaum.utils.debug import dprint
         dprint(f"{pipe} " + ('exists.' if exists else 'does not exist.'))
@@ -2111,18 +2158,12 @@ def drop_pipe(
     """
     from meerschaum.utils.sql import table_exists, sql_item_name
     success = True
-    target, temp_target = pipe.target, '_' + pipe.target
-    target_name, temp_name = (
-        sql_item_name(target, self.flavor, self.get_pipe_schema(pipe)),
-        sql_item_name(temp_target, self.flavor, self.get_pipe_schema(pipe)),
+    target = pipe.target
+    target_name = (
+        sql_item_name(target, self.flavor, self.get_pipe_schema(pipe))
     )
     if table_exists(target, self, debug=debug):
         success = self.exec(f"DROP TABLE {target_name}", silent=True, debug=debug) is not None
-    if table_exists(temp_target, self, debug=debug):
-        success = (
-            success
-            and self.exec(f"DROP TABLE {temp_name}", silent=True, debug=debug) is not None
-        )
 
     msg = "Success" if success else f"Failed to drop {pipe}."
     return success, msg
@@ -2240,7 +2281,7 @@ def get_pipe_columns_types(
         self,
         pipe: mrsm.Pipe,
         debug: bool = False,
-    ) -> Optional[Dict[str, str]]:
+    ) -> Dict[str, str]:
     """
     Get the pipe's columns and types.
 
@@ -2276,7 +2317,7 @@ def get_pipe_columns_types(
         import traceback
         traceback.print_exc()
         warn(e)
-        table_columns = None
+        table_columns = {}
 
     return table_columns
 
@@ -2806,7 +2847,7 @@ def deduplicate_pipe(
     cols_list_str = ', '.join(existing_cols_names)
 
     try:
-    	### NOTE: MySQL 5 and below does not support window functions (ROW_NUMBER()).
+        ### NOTE: MySQL 5 and below does not support window functions (ROW_NUMBER()).
         is_old_mysql = (
             self.flavor in ('mysql', 'mariadb')
             and

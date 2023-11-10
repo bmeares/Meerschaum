@@ -109,7 +109,7 @@ def test_drop_and_sync_remote(flavor: str):
     assert parent_len == child_len
 
     success, msg = parent_pipe.sync(
-        [{'datetime': '2020-01-03', 'id': -1, 'foo': 'bar'}],
+        [{'datetime': '2020-01-03', 'id': -1, 'val': 1}],
         debug = debug,
     )
     assert success, msg
@@ -120,7 +120,7 @@ def test_drop_and_sync_remote(flavor: str):
     child_len2 = pipe.get_rowcount(debug=debug)
     assert parent_len2 == child_len2
     success, msg = parent_pipe.sync(
-        [{'datetime': '2020-01-03', 'id': -1, 'foo': 'baz'}],
+        [{'datetime': '2020-01-03', 'id': -1, 'val': 2}],
         debug = debug,
     )
     assert success, msg
@@ -132,7 +132,7 @@ def test_drop_and_sync_remote(flavor: str):
     assert child_len3 == parent_len3
     df = pipe.get_data(params={'id': -1}, debug=debug)
     assert len(df) == 1
-    assert df.to_dict(orient='records')[0]['foo'] == 'baz'
+    assert df.to_dict(orient='records')[0][val] == 2
 
 
 @pytest.mark.parametrize("flavor", get_flavors())
@@ -655,5 +655,37 @@ def test_sync_null_indices(flavor: str):
     assert len(df) == 4
     df = pipe.get_data(['c'], params={'a': None, 'b': [None]}, debug=debug)
     assert len(df) == 1
-    print(f"{df['c'][0]=}")
     assert df['c'][0] == Decimal('2.2')
+
+
+@pytest.mark.parametrize("flavor", get_flavors())
+def test_upsert_sync(flavor: str):
+    """
+    Test that setting `upsert` to `True` is able to sync successfully.
+    """
+    conn = conns[flavor]
+    pipe = Pipe('test', 'upsert', instance=conn)
+    pipe.delete()
+    pipe = Pipe(
+        'test', 'upsert', instance=conn,
+        columns = ['datetime', 'id'],
+        dtypes = {'num': 'numeric'},
+        parameters = {'upsert': True},
+    )
+
+    docs = [
+        {'datetime': '2023-01-01', 'id': 1, 'yes': True, 'num': '1.1'},
+        {'datetime': '2023-01-02', 'id': 2, 'yes': False, 'num': '2'},
+    ]
+    success, msg = pipe.sync(docs, debug=debug)
+    assert success, msg
+
+    docs = [
+        {'datetime': '2023-01-02', 'id': 2, 'yes': None, 'num': '2'},
+    ]
+    success, msg = pipe.sync(docs, debug=debug)
+    assert success, msg
+    df = pipe.get_data(params={'id': 2})
+    assert 'na' in str(df['yes'][0]).lower()
+    assert isinstance(df['num'][0], Decimal)
+    assert df['num'][0] == Decimal('2')
