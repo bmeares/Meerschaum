@@ -12,7 +12,7 @@ import meerschaum as mrsm
 from meerschaum.utils.typing import Dict, SuccessTuple, Optional, Union, List
 from meerschaum.utils.warnings import warn
 
-def _get_temporary_tables_pipe(self) -> mrsm.Pipe:
+def _get_temporary_tables_pipe(self) -> 'mrsm.Pipe':
     """
     Return a pipe for logging temporary tables.
     """

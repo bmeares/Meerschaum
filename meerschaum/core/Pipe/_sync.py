@@ -53,6 +53,7 @@ def sync(
         chunksize: Optional[int] = -1,
         sync_chunks: bool = True,
         debug: bool = False,
+        _inplace: bool = True,
         **kw: Any
     ) -> SuccessTuple:
     """
@@ -200,6 +201,8 @@ def sync(
                 str(self.connector) == str(self.instance_connector)
                 and 
                 hasattr(self.instance_connector, 'sync_pipe_inplace')
+                and
+                _inplace
                 and
                 get_config('system', 'experimental', 'inplace_sync')
             ):

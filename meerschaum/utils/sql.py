@@ -72,12 +72,6 @@ update_queries = {
         FROM {patch_table_name}
         ON CONFLICT ({join_cols_str}) DO UPDATE {sets_subquery_none_excluded}
     """,
-    'duckdb-upsert': """
-        INSERT INTO {target_table_name}
-        SELECT {patch_cols_str}
-        FROM {patch_table_name}
-        ON CONFLICT ({join_cols_str}) DO UPDATE {sets_subquery_none_excluded}
-    """,
     'mysql': """
         UPDATE {target_table_name} AS f,
             (SELECT DISTINCT {patch_cols_str} FROM {patch_table_name}) AS p
