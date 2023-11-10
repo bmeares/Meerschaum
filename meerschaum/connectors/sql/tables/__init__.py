@@ -188,7 +188,26 @@ def create_tables(
     """
     Create the tables on the database.
     """
+    from meerschaum.utils.sql import get_rename_table_queries, table_exists
     _tables = tables if tables is not None else get_tables(conn)
+
+    rename_queries = []
+    for table_key, table in _tables.items():
+        if table_exists(
+            table_key,
+            conn,
+            schema = conn.instance_schema,
+        ):
+            rename_queries.extend(get_rename_table_queries(
+                table_key,
+                table,
+                schema = conn.instance_schema,
+                flavor = conn.flavor,
+            ))
+    if rename_queries:
+        conn.exec_queries(rename_queries)
+
+
     try:
         conn.metadata.create_all(bind=conn.engine)
     except Exception as e:
