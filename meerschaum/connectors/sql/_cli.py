@@ -7,6 +7,9 @@ Launch into a CLI environment to interact with the SQL Connector
 """
 
 from __future__ import annotations
+import os
+import json
+import copy
 ### NOTE: This import adds `Iterable` to collections, which is needed by some CLIs.
 from meerschaum.utils.typing import SuccessTuple
 
@@ -27,9 +30,32 @@ cli_deps = {
     'mycli': ['cryptography'],
 }
 
+
 def cli(
         self,
-        debug : bool = False
+        debug: bool = False,
+    ) -> SuccessTuple:
+    """
+    Launch a subprocess for an interactive CLI.
+    """
+    from meerschaum.utils.venv import venv_exec
+    env = copy.deepcopy(dict(os.environ))
+    env[f'MRSM_SQL_{self.label.upper()}'] = json.dumps(self.meta)
+    cli_code = (
+        "import meerschaum as mrsm\n"
+        f"conn = mrsm.get_connector('sql:{self.label}')\n"
+        f"conn._cli_exit()"
+    )
+    try:
+        _ = venv_exec(cli_code, venv=None, debug=debug, capture_output=False)
+    except Exception as e:
+        return False, f"[{self}] Failed to start CLI:\n{e}"
+    return True, "Success"
+
+
+def _cli_exit(
+        self,
+        debug: bool = False
     ) -> SuccessTuple:
     """Launch an interactive CLI for the SQLConnector's flavor."""
     from meerschaum.utils.packages import venv_exec, attempt_import
@@ -85,8 +111,6 @@ def cli(
             + "finally:\n"
             + "    ms_object.shutdown()"
         )
-    elif self.flavor == 'duckdb':
-        launch_cli = ()
 
     try:
         if debug:

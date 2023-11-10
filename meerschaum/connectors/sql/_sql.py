@@ -167,7 +167,7 @@ def read(
     if debug:
         import time
         start = time.perf_counter()
-        dprint(query_or_table)
+        dprint(f"[{self}]\n{query_or_table}")
         dprint(f"[{self}] Fetching with chunksize: {chunksize}")
 
     ### This might be sqlalchemy object or the string of a table name.
@@ -432,9 +432,9 @@ def value(
         result, connection = self.exec(
             query,
             *args,
-            with_connection=True,
-            close=False,
-            commit=_commit,
+            with_connection = True,
+            close = False,
+            commit = _commit,
             **kw
         )
         first = result.first() if result is not None else None
@@ -547,7 +547,7 @@ def exec(
         if debug:
             dprint(f"[{self}] Failed to execute query:\n\n{query}\n\n{e}")
         if not silent:
-            warn(str(e))
+            warn(str(e), stacklevel=3)
         result = None
         if _commit:
             transaction.rollback()
@@ -563,7 +563,12 @@ def exec(
 
 def exec_queries(
         self,
-        queries: List[str],
+        queries: List[
+            Union[
+                str,
+                Tuple[str, Callable[['sqlalchemy.orm.session.Session'], List[str]]]
+            ]
+        ],
         break_on_error: bool = False,
         rollback: bool = True,
         silent: bool = False,
@@ -574,8 +579,16 @@ def exec_queries(
 
     Parameters
     ----------
-    queries: List[str]
+    queries: List[
+        Union[
+            str,
+            Tuple[str, Callable[[], List[str]]]
+        ]
+    ]
         The queries in the transaction to be executed.
+        If a query is a tuple, the second item of the tuple
+        will be considered a callable hook that returns a list of queries to be executed
+        before the next item in the list.
 
     break_on_error: bool, default True
         If `True`, stop executing when a query fails.
@@ -593,18 +606,23 @@ def exec_queries(
     from meerschaum.utils.warnings import warn
     from meerschaum.utils.debug import dprint
     from meerschaum.utils.packages import attempt_import
-    sqlalchemy = attempt_import('sqlalchemy')
+    sqlalchemy, sqlalchemy_orm = attempt_import('sqlalchemy', 'sqlalchemy.orm')
+    session = sqlalchemy_orm.Session(self.engine)
 
     results = []
-    with self.engine.begin() as connection:
+    with session.begin():
         for query in queries:
-            if debug:
-                dprint(f"[{self}]\n" + str(query))
+            hook = None
+            if isinstance(query, tuple):
+                query, hook = query
             if isinstance(query, str):
                 query = sqlalchemy.text(query)
 
+            if debug:
+                dprint(f"[{self}]\n" + str(query))
+ 
             try:
-                result = connection.execute(query)
+                result = session.execute(query)
             except Exception as e:
                 msg = (f"Encountered error while executing:\n{e}")
                 if not silent:
@@ -612,11 +630,25 @@ def exec_queries(
                 elif debug:
                     dprint(f"[{self}]\n" + str(msg))
                 result = None
-            results.append(result)
             if result is None and break_on_error:
                 if rollback:
-                    connection.rollback()
+                    session.rollback()
                 break
+            elif result is not None and hook is not None:
+                session.flush()
+                hook_queries = hook(session)
+                if hook_queries:
+                    hook_results = self.exec_queries(
+                        hook_queries,
+                        break_on_error = break_on_error,
+                        rollback = rollback,
+                        silent = silent,
+                        debug = debug,
+                    )
+                    result = (result, hook_results)
+
+            results.append(result)
+
     return results
 
 
@@ -874,6 +906,9 @@ def psql_insert_copy(
     
     data_iter: Iterable[Any]
         Iterable that iterates the values to be inserted
+
+    schema: Optional[str], default None
+        Optionally specify the schema of the table to be inserted into.
 
     Returns
     -------

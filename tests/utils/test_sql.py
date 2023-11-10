@@ -45,6 +45,22 @@ import meerschaum as mrsm
                 "\"b\" NOT IN ('2', '3')",
             ]
         ),
+        (
+            {'a': [None, 1], 'b': ['_']},
+            [
+                "\"a\" IN ('1')",
+                "\"a\" IS NULL",
+                "\"b\" IS NOT NULL",
+            ],
+        ),
+        (
+            {'a': ['NaN'], 'b': ['_1', '_none']},
+            [
+                "\"a\" IS NULL",
+                "\"b\" NOT IN ('1')",
+                "\"b\" IS NOT NULL",
+            ],
+        ),
     ]
 )
 def test_build_where(params: Dict[str, Any], expected_subqueries: List[str]):
@@ -72,6 +88,7 @@ def test_build_where(params: Dict[str, Any], expected_subqueries: List[str]):
         ('BOOLEAN', 'bool[pyarrow]'),
         ('FLOAT', 'float64[pyarrow]'),
         ('DOUBLE', 'float64[pyarrow]'),
+        ('REAL', 'float64[pyarrow]'),
         ('TIMESTAMPTZ', 'datetime64[ns, UTC]'),
         ('TIMESTAMP WITH TIMEZONE', 'datetime64[ns, UTC]'),
         ('CLOB', 'string[pyarrow]'),

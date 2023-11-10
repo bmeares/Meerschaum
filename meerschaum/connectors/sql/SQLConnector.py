@@ -7,6 +7,7 @@ Interface with SQL servers using sqlalchemy.
 """
 
 from __future__ import annotations
+import meerschaum as mrsm
 from meerschaum.utils.typing import Optional, Any, Union
 
 from meerschaum.connectors import Connector
@@ -28,7 +29,7 @@ class SQLConnector(Connector):
     from ._sql import read, value, exec, execute, to_sql, exec_queries
     from meerschaum.utils.sql import test_connection
     from ._fetch import fetch, get_pipe_metadef
-    from ._cli import cli
+    from ._cli import cli, _cli_exit
     from ._pipes import (
         fetch_pipes_keys,
         create_indices,
@@ -78,6 +79,13 @@ class SQLConnector(Connector):
         get_user_attributes,
     )
     from ._uri import from_uri, parse_uri
+    from ._instance import (
+        _get_temporary_tables_pipe,
+        _log_temporary_tables_creation,
+        _drop_temporary_table,
+        _drop_temporary_tables,
+        _drop_old_temporary_tables,
+    )
     
     def __init__(
         self,
@@ -259,13 +267,45 @@ class SQLConnector(Connector):
             return ':memory:' not in self.URI
         return True
 
+
     @property
     def metadata(self):
+        """
+        Return the metadata bound to this configured schema.
+        """
         from meerschaum.utils.packages import attempt_import
         sqlalchemy = attempt_import('sqlalchemy')
         if '_metadata' not in self.__dict__:
             self._metadata = sqlalchemy.MetaData(schema=self.schema)
         return self._metadata
+
+
+    @property
+    def instance_schema(self):
+        """
+        Return the schema name for Meerschaum tables. 
+        """
+        return self.schema
+
+
+    @property
+    def internal_schema(self):
+        """
+        Return the schema name for internal tables. 
+        """
+        from meerschaum.config.static import STATIC_CONFIG
+        from meerschaum.utils.packages import attempt_import
+        from meerschaum.utils.sql import NO_SCHEMA_FLAVORS
+        schema_name = self.__dict__.get('internal_schema', None) or (
+            STATIC_CONFIG['sql']['internal_schema']
+            if self.flavor not in NO_SCHEMA_FLAVORS
+            else self.schema
+        )
+
+        if '_internal_schema' not in self.__dict__:
+            self._internal_schema = schema_name
+        return self._internal_schema
+
 
     @property
     def db(self) -> Optional[databases.Database]:
@@ -307,8 +347,8 @@ class SQLConnector(Connector):
         if 'schema' in self.__dict__:
             return self.__dict__['schema']
 
-        uri = self.__dict__.get('uri', self.URI)
-        _schema = self.parse_uri(uri).get('schema', None)
+        sqlalchemy = mrsm.attempt_import('sqlalchemy')
+        _schema = sqlalchemy.inspect(self.engine).default_schema_name
         self.__dict__['schema'] = _schema
         return _schema
 
