@@ -72,9 +72,11 @@ def _drop_temporary_table(
     """
     from meerschaum.utils.sql import sql_item_name, table_exists
     temporary_tables_pipe = self._get_temporary_tables_pipe()
-    if table_exists(table, self, self.internal_schema, debug=debug):
+    if not table_exists(table, self, self.internal_schema, debug=debug):
         return True, "Success"
-    drop_query = f"DROP TABLE IF EXISTS " + sql_item_name(
+
+    if_exists = "IF EXISTS" if self.flavor not in SKIP_IF_EXISTS_FLAVORS else ""
+    drop_query = f"DROP TABLE {if_exists} " + sql_item_name(
         table, self.flavor, schema=self.internal_schema
     )
     drop_success = self.exec(drop_query, silent=True, debug=debug) is not None

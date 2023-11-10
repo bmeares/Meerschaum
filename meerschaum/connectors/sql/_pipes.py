@@ -1298,7 +1298,7 @@ def sync_pipe(
         ) if dt_col else None
 
         transact_id = generate_password(3)
-        temp_target = '-' + transact_id + '_' + pipe.target
+        temp_target = '#' + transact_id + '_' + pipe.target
         self._log_temporary_tables_creation(temp_target, debug=debug)
         temp_pipe = Pipe(
             pipe.connector_keys.replace(':', '_') + '_', pipe.metric_key, pipe.location_key,
@@ -1478,7 +1478,7 @@ def sync_pipe_inplace(
 
     transact_id = generate_password(3)
     def get_temp_table_name(label: str) -> str:
-        return '-' + transact_id + '_' + label + '_' + pipe.target
+        return '#' + transact_id + '_' + label + '_' + pipe.target
 
     temp_table_roots = ['backtrack', 'new', 'delta', 'joined', 'unseen', 'update']
     temp_tables = {
@@ -2554,7 +2554,7 @@ def get_alter_columns_queries(
     }
 
     if self.flavor == 'sqlite':
-        temp_table_name = '_' + session_id + '_' + target
+        temp_table_name = '#' + session_id + '_' + target
         rename_query = (
             "ALTER TABLE "
             + sql_item_name(target, self.flavor, self.get_pipe_schema(pipe))
@@ -2925,8 +2925,8 @@ def deduplicate_pipe(
 
     session_id = generate_password(3)
 
-    dedup_table = '_' + session_id + f'_dedup_{pipe.target}'
-    temp_old_table = '_' + session_id + f"_old_{pipe.target}"
+    dedup_table = '#' + session_id + f'_dedup_{pipe.target}'
+    temp_old_table = '#' + session_id + f"_old_{pipe.target}"
 
     dedup_table_name = sql_item_name(dedup_table, self.flavor, self.get_pipe_schema(pipe))
     temp_old_table_name = sql_item_name(temp_old_table, self.flavor, self.get_pipe_schema(pipe))
