@@ -200,7 +200,7 @@ def create_tables(
         ):
             rename_queries.extend(get_rename_table_queries(
                 table_key,
-                table,
+                table.name,
                 schema = conn.instance_schema,
                 flavor = conn.flavor,
             ))
