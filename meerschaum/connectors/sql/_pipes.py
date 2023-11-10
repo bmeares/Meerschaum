@@ -333,7 +333,7 @@ def create_indices(
     """
     Create a pipe's indices.
     """
-    from meerschaum.utils.sql import sql_item_name
+    from meerschaum.utils.sql import sql_item_name, update_queries
     from meerschaum.utils.debug import dprint
     if debug:
         dprint(f"Creating indices for {pipe}...")
@@ -358,7 +358,7 @@ def create_indices(
         [sql_item_name(ix, self.flavor) for ix in ix_queries if ix in existing_cols_types]
     )
     pipe_name = sql_item_name(pipe.target, self.flavor, self.get_pipe_schema(pipe))
-    upsert = pipe.parameters.get('upsert', False)
+    upsert = pipe.parameters.get('upsert', False) and f'{self.flavor}-upsert' in update_queries
     if not upsert:
         return success
 
@@ -1412,6 +1412,17 @@ def sync_pipe_inplace(
     -------
     A SuccessTuple.
     """
+    if self.flavor == 'duckdb':
+        return pipe.sync(
+            params = params,
+            begin = begin,
+            end = end,
+            chunksize = chunksize,
+            check_existing = check_existing,
+            debug = debug,
+            _inplace = False,
+            **kw
+        )
     from meerschaum.utils.sql import (
         sql_item_name,
         get_sqlalchemy_table,
@@ -1431,6 +1442,7 @@ def sync_pipe_inplace(
     )
     from meerschaum.utils.misc import generate_password
     from meerschaum.utils.debug import dprint
+
     sqlalchemy, sqlalchemy_orm = mrsm.attempt_import('sqlalchemy', 'sqlalchemy.orm')
     metadef = self.get_pipe_metadef(
         pipe,
