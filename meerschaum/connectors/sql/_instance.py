@@ -70,7 +70,7 @@ def _drop_temporary_table(
     """
     Drop a temporary table and clear it from the internal table.
     """
-    from meerschaum.utils.sql import sql_item_name, table_exists
+    from meerschaum.utils.sql import sql_item_name, table_exists, SKIP_IF_EXISTS_FLAVORS
     temporary_tables_pipe = self._get_temporary_tables_pipe()
     if not table_exists(table, self, self.internal_schema, debug=debug):
         return True, "Success"
