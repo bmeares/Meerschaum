@@ -1509,7 +1509,7 @@ def sync_pipe_inplace(
     if not create_new_success:
         _ = clean_up_temp_tables()
         return create_new_success, create_new_msg
-    new_count = create_new_results[0].rowcount
+    new_count = create_new_results[0].rowcount if create_new_results else 0
 
     new_cols_types = get_table_cols_types(
         temp_tables['new'],
@@ -1532,7 +1532,13 @@ def sync_pipe_inplace(
     ])
 
     add_cols_queries = self.get_add_columns_queries(pipe, new_cols, debug=debug)
+    if add_cols_queries:
+        self.exec_queries(add_cols_queries, debug=debug)
+
     alter_cols_queries = self.get_alter_columns_queries(pipe, new_cols, debug=debug)
+    if alter_cols_queries:
+        self.exec_queries(alter_cols_queries, debug=debug)
+
     insert_queries = [
         (
             f"INSERT INTO {pipe_name} ({new_cols_str})\n"
@@ -1541,7 +1547,7 @@ def sync_pipe_inplace(
         f"DROP TABLE {temp_table_names['new']}",
     ] if not check_existing else []
 
-    new_queries = add_cols_queries + alter_cols_queries + insert_queries
+    new_queries = insert_queries
     new_success, new_msg = session_execute(session, new_queries, debug=debug)
     if not new_success:
         _ = clean_up_temp_tables()
@@ -1583,7 +1589,7 @@ def sync_pipe_inplace(
     if not create_backtrack_success:
         _ = clean_up_temp_tables()
         return create_backtrack_success, create_backtrack_msg
-    bactrack_count = create_backtrack_results[0].rowcount
+    bactrack_count = create_backtrack_results[0].rowcount if create_backtrack_results else 0
 
     backtrack_cols_types = get_table_cols_types(
         temp_tables['backtrack'],
@@ -1823,7 +1829,7 @@ def sync_pipe_inplace(
     if not apply_unseen_success:
         _ = clean_up_temp_tables()
         return apply_unseen_success, apply_unseen_msg
-    unseen_count = apply_unseen_results[0].rowcount
+    unseen_count = apply_unseen_results[0].rowcount if apply_unseen_results else 0
 
     (apply_update_success, apply_update_msg), apply_update_results = session_execute(
         session,
@@ -1835,7 +1841,7 @@ def sync_pipe_inplace(
     if not apply_update_success:
         _ = clean_up_temp_tables()
         return apply_update_success, apply_update_msg
-    update_count = apply_update_results[0].rowcount
+    update_count = apply_update_results[0].rowcount if apply_update_results else 0
 
     session.commit()
 

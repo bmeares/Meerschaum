@@ -104,7 +104,7 @@ def delete_pipe(
         raise fastapi.HTTPException(
             status_code=409, detail=f"{pipe} is not registered."
         )
-    results = get_api_connector().drop_pipe(pipe, debug=debug)
+    results = get_api_connector().delete_pipe(pipe, debug=debug)
     pipes(refresh=True)
 
     return results

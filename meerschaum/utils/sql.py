@@ -1121,7 +1121,7 @@ def get_update_queries(
         dprint(f"value_cols: {value_cols}")
 
     if not value_cols or not join_cols_types:
-        raise Exception(f"Unable to determine columns for {target}.")
+        return []
 
     def sets_subquery(l_prefix: str, r_prefix: str):
         return 'SET ' + ',\n'.join([

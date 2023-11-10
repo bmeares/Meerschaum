@@ -109,7 +109,7 @@ def test_drop_and_sync_remote(flavor: str):
     assert parent_len == child_len
 
     success, msg = parent_pipe.sync(
-        [{'datetime': '2020-01-03', 'id': -1, 'val': 1}],
+        [{'datetime': '2020-01-03', 'id': -1, 'foo': 'a'}],
         debug = debug,
     )
     assert success, msg
@@ -120,7 +120,7 @@ def test_drop_and_sync_remote(flavor: str):
     child_len2 = pipe.get_rowcount(debug=debug)
     assert parent_len2 == child_len2
     success, msg = parent_pipe.sync(
-        [{'datetime': '2020-01-03', 'id': -1, 'val': 2}],
+        [{'datetime': '2020-01-03', 'id': -1, 'foo': 'b'}],
         debug = debug,
     )
     assert success, msg
@@ -132,7 +132,7 @@ def test_drop_and_sync_remote(flavor: str):
     assert child_len3 == parent_len3
     df = pipe.get_data(params={'id': -1}, debug=debug)
     assert len(df) == 1
-    assert df.to_dict(orient='records')[0][val] == 2
+    assert df.to_dict(orient='records')[0]['foo'] == 'b'
 
 
 @pytest.mark.parametrize("flavor", get_flavors())

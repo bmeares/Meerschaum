@@ -609,10 +609,13 @@ def exec_queries(
     sqlalchemy, sqlalchemy_orm = attempt_import('sqlalchemy', 'sqlalchemy.orm')
     session = sqlalchemy_orm.Session(self.engine)
 
+    result = None
     results = []
     with session.begin():
         for query in queries:
             hook = None
+            result = None
+
             if isinstance(query, tuple):
                 query, hook = query
             if isinstance(query, str):
@@ -623,6 +626,7 @@ def exec_queries(
  
             try:
                 result = session.execute(query)
+                session.flush()
             except Exception as e:
                 msg = (f"Encountered error while executing:\n{e}")
                 if not silent:
@@ -635,7 +639,6 @@ def exec_queries(
                     session.rollback()
                 break
             elif result is not None and hook is not None:
-                session.flush()
                 hook_queries = hook(session)
                 if hook_queries:
                     hook_results = self.exec_queries(
