@@ -347,6 +347,11 @@ class SQLConnector(Connector):
         if 'schema' in self.__dict__:
             return self.__dict__['schema']
 
+        from meerschaum.utils.sql import NO_SCHEMA_FLAVORS
+        if self.flavor in NO_SCHEMA_FLAVORS:
+            self.__dict__['schema'] = None
+            return None
+
         sqlalchemy = mrsm.attempt_import('sqlalchemy')
         _schema = sqlalchemy.inspect(self.engine).default_schema_name
         self.__dict__['schema'] = _schema

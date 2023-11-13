@@ -95,9 +95,9 @@ def test_drop_and_sync_remote(flavor: str):
             pipe = p
             break
     assert pipe is not None
-    pipe.drop(debug=debug)
+    pipe.delete(debug=debug)
     parent_pipe = Pipe('plugin:stress', 'test', instance=pipe.connector)
-    parent_pipe.drop(debug=debug)
+    parent_pipe.delete(debug=debug)
     begin, end = datetime(2020, 1, 1), datetime(2020, 1, 2)
     success, msg = parent_pipe.sync(begin=begin, end=end, debug=debug)
     parent_len = parent_pipe.get_rowcount(debug=debug)
