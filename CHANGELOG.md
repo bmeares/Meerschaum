@@ -33,6 +33,9 @@ This is the current release cycle, so stay tuned for future releases!
 - **Add internal schema `_mrsm_internal` for temporary tables.**  
   To avoid polluting your database schema, temporary tables will now be created within `_mrsm_internal` (for databases which support PostgreSQL-style schemas).
 
+- **Added `mrsm_temporary_tables`.**  
+  Temporary tables are logged to `mrsm_temporary_tables` and deleted when dropped.
+
 - **Drop stale temporary tables.**  
   Temporary tables which are more than 24 hours will be dropped automatically (configurable under `system:sql:instance:stale_temporary_tables_minutes`).
 
@@ -41,6 +44,11 @@ This is the current release cycle, so stay tuned for future releases!
 
 - **Fix an issue with `bootstrap`.**  
   Refactoring work for 2.1.0 had broken the `bootstrap` action.
+
+- **Fix an issue when selecting inverse pipes.**  
+  Null location keys are now coalesced when selecting pipes to produce expected behavior.
+
+- **Avoid a system exit when exiting the SQL CLI.**
 
 ### v2.1.0
 
