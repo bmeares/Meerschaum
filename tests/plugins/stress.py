@@ -6,7 +6,7 @@
 Stress test for pipes.
 """
 
-__version__ = '0.3.4'
+__version__ = '0.3.5'
 
 import datetime, random, math
 import meerschaum as mrsm
@@ -27,6 +27,7 @@ def register(pipe):
             'ids': 3,
             'backtrack_minutes': 30,
         },
+        'upsert': True,
     }
 
 def fetch(

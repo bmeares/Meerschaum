@@ -130,9 +130,17 @@ def run_daemon(
 
 def get_daemons() -> List[Daemon]:
     """
-    Return all existing Daemons.
+    Return all existing Daemons, sorted by end time.
     """
-    return [Daemon(daemon_id=d_id) for d_id in get_daemon_ids()]
+    daemons = [Daemon(daemon_id=d_id) for d_id in get_daemon_ids()]
+    daemons_ended = [
+        (daemon, daemon.properties.get('process', {}).get('ended', '9999'))
+        for daemon in daemons
+    ]
+    return [
+        daemon
+        for daemon, ended in sorted(daemons_ended, key=lambda x: x[1])
+    ]
 
 
 def get_daemon_ids() -> List[str]:

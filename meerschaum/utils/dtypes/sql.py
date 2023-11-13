@@ -17,8 +17,57 @@ NUMERIC_PRECISION_FLAVORS: Dict[str, Tuple[int, int]] = {
     'sqlite': (15, 4),
 }
 
+### MySQL doesn't allow for casting as BIGINT, so this is a workaround.
+DB_FLAVORS_CAST_DTYPES = {
+    'mariadb': {
+        'BIGINT': 'DECIMAL',
+        'TINYINT': 'SIGNED INT',
+        'TEXT': 'CHAR(10000) CHARACTER SET utf8',
+        'BOOL': 'SIGNED INT',
+        'BOOLEAN': 'SIGNED INT',
+        'DOUBLE PRECISION': 'DECIMAL',
+        'DOUBLE': 'DECIMAL',
+        'FLOAT': 'DECIMAL',
+    },
+    'mysql': {
+        'BIGINT': 'DECIMAL',
+        'TINYINT': 'SIGNED INT',
+        'TEXT': 'CHAR(10000) CHARACTER SET utf8',
+        'INT': 'SIGNED INT',
+        'INTEGER': 'SIGNED INT',
+        'BOOL': 'SIGNED INT',
+        'BOOLEAN': 'SIGNED INT',
+        'DOUBLE PRECISION': 'DECIMAL',
+        'DOUBLE': 'DECIMAL',
+        'FLOAT': 'DECIMAL',
+    },
+    'sqlite': {
+        'BOOLEAN': 'INTEGER',
+        'REAL': 'FLOAT',
+    },
+    'oracle': {
+        'NVARCHAR(2000)': 'NVARCHAR2(2000)',
+        'NVARCHAR': 'NVARCHAR2(2000)',
+        'NVARCHAR2': 'NVARCHAR2(2000)',
+    },
+    'mssql': {
+        'NVARCHAR COLLATE "SQL Latin1 General CP1 CI AS"': 'NVARCHAR(MAX)',
+        'NVARCHAR COLLATE "SQL_Latin1_General_CP1_CI_AS"': 'NVARCHAR(MAX)',
+        'VARCHAR COLLATE "SQL Latin1 General CP1 CI AS"': 'NVARCHAR(MAX)',
+        'VARCHAR COLLATE "SQL_Latin1_General_CP1_CI_AS"': 'NVARCHAR(MAX)',
+    },
+}
+for _flavor, (_precision, _scale) in NUMERIC_PRECISION_FLAVORS.items():
+    if _flavor not in DB_FLAVORS_CAST_DTYPES:
+        DB_FLAVORS_CAST_DTYPES[_flavor] = {}
+    DB_FLAVORS_CAST_DTYPES[_flavor].update({
+        'NUMERIC': f"NUMERIC({_precision}, {_scale})",
+        'DECIMAL': f"DECIMAL({_precision}, {_scale})",
+    })
+
 DB_TO_PD_DTYPES: Dict[str, Union[str, Dict[str, str]]] = {
     'FLOAT': 'float64[pyarrow]',
+    'REAL': 'float64[pyarrow]',
     'DOUBLE_PRECISION': 'float64[pyarrow]',
     'DOUBLE': 'float64[pyarrow]',
     'DECIMAL': 'numeric',
@@ -247,8 +296,8 @@ PD_TO_SQLALCHEMY_DTYPES_FLAVORS: Dict[str, Dict[str, str]] = {
     'bool': {
         'timescaledb': 'Boolean',
         'postgresql': 'Boolean',
-        'mariadb': 'Boolean',
-        'mysql': 'Boolean',
+        'mariadb': 'Integer',
+        'mysql': 'Integer',
         'mssql': 'Integer',
         'oracle': 'Integer',
         'sqlite': 'Float',

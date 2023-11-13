@@ -300,6 +300,7 @@ def get_chunks_success_message(
     A success message.
     """
     from meerschaum.utils.formatting import extract_stats_from_message
+    from meerschaum.utils.misc import items_str
     success_chunk_messages = [tup[1] for bounds, tup in chunk_success_tuples.items() if tup[0]]
     fail_chunk_bounds_tuples = {
         bounds: tup
@@ -309,15 +310,28 @@ def get_chunks_success_message(
     chunk_stats = [extract_stats_from_message(msg) for msg in success_chunk_messages]
     inserts = [stat['inserted'] for stat in chunk_stats]
     updates = [stat['updated'] for stat in chunk_stats]
+    upserts = [stat['upserted'] for stat in chunk_stats]
     num_inserted = sum(inserts)
     num_updated = sum(updates)
+    num_upserted = sum(upserts)
     num_fails = len(fail_chunk_bounds_tuples)
 
     header = (header + "\n") if header else ""
+    stats_msg = items_str(
+        (
+            ([f'inserted {num_inserted}'] if num_inserted else [])
+            + ([f'updated {num_updated}'] if num_updated else [])
+            + ([f'upserted {num_upserted}'] if num_upserted else [])
+        ) or ['synced 0'],
+        quotes = False,
+        and_ = False,
+    )
+
     success_msg = (
         f"Successfully synced {len(chunk_success_tuples)} chunk"
         + ('s' if len(chunk_success_tuples) != 1 else '')
-        + f'\n(inserted {num_inserted}, updated {num_updated} rows in total).'
+        + '\n(' + stats_msg
+        + ' rows in total).'
     )
     fail_msg = (
         ''

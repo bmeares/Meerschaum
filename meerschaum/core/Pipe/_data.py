@@ -536,10 +536,9 @@ def get_chunk_interval(
         return timedelta(minutes=chunk_minutes)
 
     dt_dtype = self.dtypes.get(dt_col, 'datetime64[ns]')
-    if 'datetime' in dt_dtype.lower():
-        return timedelta(minutes=chunk_minutes)
-
-    return chunk_minutes
+    if 'int' in dt_dtype.lower():
+        return chunk_minutes
+    return timedelta(minutes=chunk_minutes)
 
 
 def get_chunk_bounds(

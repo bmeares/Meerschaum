@@ -10,6 +10,7 @@ from meerschaum.utils.typing import SuccessTuple
 
 def delete(
         self,
+        drop: bool = True,
         debug: bool = False,
         **kw
     ) -> SuccessTuple:
@@ -18,7 +19,10 @@ def delete(
 
     Parameters
     ----------
-    debug : bool, default False:
+    drop: bool, default True
+        If `True`, drop the pipes' target table.
+
+    debug : bool, default False
         Verbosity toggle.
 
     Returns
@@ -49,11 +53,17 @@ def delete(
             except Exception as e:
                 warn(f"Could not delete cache file '{_cache_db_path}' for {self}:\n{e}")
 
+    if drop:
+        drop_success, drop_msg = self.drop(debug=debug)
+        if not drop_success:
+            warn(f"Failed to drop {self}:\n{drop_msg}")
+
     with Venv(get_connector_plugin(self.instance_connector)):
         result = self.instance_connector.delete_pipe(self, debug=debug, **kw)
 
     if not isinstance(result, tuple):
-        return False, f"Received unexpected result from '{self.instance_connector}': {result}"
+        return False, f"Received an unexpected result from '{self.instance_connector}': {result}"
+
     if result[0]:
         to_delete = ['_id']
         for member in to_delete:

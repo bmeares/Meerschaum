@@ -24,15 +24,9 @@ docs_dir: mkdocs
 plugins:
   - search
   - autolinks
-#  - rss
-  # - add-number
-  # - pdf-export
   - awesome-pages:
       collapse_single_pages: true
   - section-index
-  # - mkdocstrings
-  # - enumerate-headings:
-      # toc_depth: 3
 repo_url: https://github.com/bmeares/Meerschaum
 edit_uri: ""
 markdown_extensions:
@@ -43,8 +37,8 @@ markdown_extensions:
   - pymdownx.superfences
   - pymdownx.inlinehilite
   - pymdownx.emoji:
-      emoji_index: !!python/name:materialx.emoji.twemoji
-      emoji_generator: !!python/name:materialx.emoji.to_svg
+      emoji_index: !!python/name:material.extensions.emoji.twemoji
+      emoji_generator: !!python/name:material.extensions.emoji.to_svg
   - pymdownx.betterem:
       smart_enable: all
   - pymdownx.caret
