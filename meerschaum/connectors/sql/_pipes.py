@@ -1300,7 +1300,7 @@ def sync_pipe(
 
         transact_id = generate_password(3)
         temp_target = '-' + transact_id + '_' + pipe.target
-        self._log_temporary_tables_creation(temp_target, debug=debug)
+        self._log_temporary_tables_creation(temp_target, create=(not pipe.temporary), debug=debug)
         temp_pipe = Pipe(
             pipe.connector_keys.replace(':', '_') + '_', pipe.metric_key, pipe.location_key,
             instance = pipe.instance_keys,
@@ -1337,6 +1337,7 @@ def sync_pipe(
         self._log_temporary_tables_creation(
             temp_target,
             ready_to_drop = True,
+            create = (not pipe.temporary),
             debug = debug,
         )
         if not update_success:
@@ -1515,6 +1516,7 @@ def sync_pipe_inplace(
                 for table in temp_tables.values()
             ] if not upsert else [temp_tables['update']],
             ready_to_drop = ready_to_drop,
+            create = (not pipe.temporary),
             debug = debug,
         )
         if not log_success:
@@ -2532,9 +2534,11 @@ def get_alter_columns_queries(
         col: get_pd_type_from_db_type(str(typ.type))
         for col, typ in table_obj.columns.items()
     }
+    pipe_bool_cols = [col for col, typ in pipe.dtypes.items() if are_dtypes_equal(str(typ), 'bool')]
     pd_db_df_aliases = {
         'int': 'bool',
         'float': 'bool',
+        'numeric': 'bool',
     }
 
     altered_cols = {
@@ -2550,7 +2554,26 @@ def get_alter_columns_queries(
         for db_alias, df_alias in pd_db_df_aliases.items():
             if db_alias in db_typ.lower() and df_alias in df_typ.lower():
                 altered_cols_to_ignore.add(col)
-                continue
+
+    ### Oracle's bool handling sometimes mixed NUMBER and INT.
+    for bool_col in pipe_bool_cols:
+        if bool_col not in altered_cols:
+            continue
+        db_is_bool_compatible = (
+            are_dtypes_equal('int', altered_cols[bool_col][0])
+            or are_dtypes_equal('float', altered_cols[bool_col][0])
+            or are_dtypes_equal('numeric', altered_cols[bool_col][0])
+            or are_dtypes_equal('bool', altered_cols[bool_col][0])
+        )
+        df_is_bool_compatible = (
+            are_dtypes_equal('int', altered_cols[bool_col][1])
+            or are_dtypes_equal('float', altered_cols[bool_col][1])
+            or are_dtypes_equal('numeric', altered_cols[bool_col][1])
+            or are_dtypes_equal('bool', altered_cols[bool_col][1])
+        )
+        if db_is_bool_compatible and df_is_bool_compatible:
+            altered_cols_to_ignore.add(bool_col)
+
     for col in altered_cols_to_ignore:
         _ = altered_cols.pop(col, None)
     if not altered_cols:

@@ -979,7 +979,7 @@ def get_table_cols_types(
                 if flavor != 'oracle' else (
                     (
                         doc['column'].lower()
-                        if (doc['column'].isupper() and doc['column'].isalpha())
+                        if (doc['column'].isupper() and doc['column'].replace('_', '').isalpha())
                         else doc['column']
                     )
                 )

@@ -18,6 +18,7 @@ def _log_temporary_tables_creation(
         self,
         tables: Union[str, List[str]],
         ready_to_drop: bool = False,
+        create: bool = True,
         debug: bool = False,
     ) -> SuccessTuple:
     """
@@ -28,7 +29,7 @@ def _log_temporary_tables_creation(
     sqlalchemy = mrsm.attempt_import('sqlalchemy')
     temp_tables_table = get_tables(
         mrsm_instance = self,
-        create = False,
+        create = create,
         debug = debug,
     )['temp_tables']
     if isinstance(tables, str):
