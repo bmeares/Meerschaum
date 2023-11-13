@@ -438,7 +438,7 @@ def get_create_index_queries(
 
     ### create datetime index
     if _datetime is not None:
-        if self.flavor == 'timescaledb':
+        if self.flavor == 'timescaledb' and pipe.parameters.get('hypertable', True):
             _id_count = (
                 get_distinct_col_count(_id, f"SELECT {_id_name} FROM {_pipe_name}", self)
                 if (_id is not None and _create_space_partition) else None
@@ -1198,7 +1198,7 @@ def sync_pipe(
     ### so infer bools and persist them to `dtypes`.
     ### MSSQL supports `BIT` for booleans, but we coerce bools to int for MSSQL
     ### to avoid merge issues.
-    if self.flavor in ('oracle', 'sqlite', 'mssql'):
+    if self.flavor in ('oracle', 'sqlite', 'mssql', 'mysql', 'mariadb'):
         pipe_dtypes = pipe.dtypes
         new_bool_cols = {
             col: 'bool[pyarrow]'
@@ -1310,6 +1310,7 @@ def sync_pipe(
             temporary = True,
             parameters = {
                 'schema': self.internal_schema,
+                'hypertable': False,
             },
         )
         temp_pipe.sync(update_df, check_existing=False, debug=debug)
@@ -1545,7 +1546,7 @@ def sync_pipe_inplace(
         debug = debug,
     )
     if not new_cols_types:
-        return False, "Failed to get columns for new table."
+        return False, f"Failed to get new columns for {pipe}."
 
     new_cols = {
         str(col_name): get_pd_type_from_db_type(str(col_type))
@@ -1568,8 +1569,7 @@ def sync_pipe_inplace(
         (
             f"INSERT INTO {pipe_name} ({new_cols_str})\n"
             + f"SELECT {new_cols_str}\nFROM {temp_table_names['new']}"
-        ),
-        f"DROP TABLE {temp_table_names['new']}",
+        )
     ] if not check_existing and not upsert else []
 
     new_queries = insert_queries
@@ -1702,6 +1702,11 @@ def sync_pipe_inplace(
         database = database,
         debug = debug,
     ) if not upsert else new_cols_types
+
+    ### This is a weird bug on SQLite.
+    ### Sometimes the backtrack dtypes are all empty strings.
+    if not all(delta_cols_types.values()):
+        delta_cols_types = new_cols_types
 
     delta_cols = {
         col: get_pd_type_from_db_type(typ)
@@ -1867,7 +1872,6 @@ def sync_pipe_inplace(
         with_results = True,
         debug = debug,
     )
-
     if not apply_update_success:
         _ = clean_up_temp_tables()
         return apply_update_success, apply_update_msg

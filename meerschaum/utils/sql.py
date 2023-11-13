@@ -46,42 +46,41 @@ update_queries = {
             ON {and_subquery_t}
         WHERE
             {and_subquery_f}
-            {date_bounds_subquery}
+            AND {date_bounds_subquery}
     """,
     'timescaledb-upsert': """
-        INSERT INTO {target_table_name}
+        INSERT INTO {target_table_name} ({patch_cols_str})
         SELECT {patch_cols_str}
         FROM {patch_table_name}
         ON CONFLICT ({join_cols_str}) DO UPDATE {sets_subquery_none_excluded}
     """,
     'postgresql-upsert': """
-        INSERT INTO {target_table_name}
+        INSERT INTO {target_table_name} ({patch_cols_str})
         SELECT {patch_cols_str}
         FROM {patch_table_name}
         ON CONFLICT ({join_cols_str}) DO UPDATE {sets_subquery_none_excluded}
     """,
     'citus-upsert': """
-        INSERT INTO {target_table_name}
+        INSERT INTO {target_table_name} ({patch_cols_str})
         SELECT {patch_cols_str}
         FROM {patch_table_name}
         ON CONFLICT ({join_cols_str}) DO UPDATE {sets_subquery_none_excluded}
     """,
     'cockroachdb-upsert': """
-        INSERT INTO {target_table_name}
+        INSERT INTO {target_table_name} ({patch_cols_str})
         SELECT {patch_cols_str}
         FROM {patch_table_name}
         ON CONFLICT ({join_cols_str}) DO UPDATE {sets_subquery_none_excluded}
     """,
     'mysql': """
-        UPDATE {target_table_name} AS f,
-            (SELECT DISTINCT {patch_cols_str} FROM {patch_table_name}) AS p
+        UPDATE {target_table_name} AS f
+        JOIN (SELECT DISTINCT {patch_cols_str} FROM {patch_table_name}) AS p
+        ON {and_subquery_f}
         {sets_subquery_f}
-        WHERE
-            {and_subquery_f}
-            {date_bounds_subquery}
+        WHERE {date_bounds_subquery}
     """,
     'mysql-upsert': """
-        REPLACE INTO {target_table_name}
+        REPLACE INTO {target_table_name} ({patch_cols_str})
         SELECT {patch_cols_str}
         FROM {patch_table_name}
     """,
@@ -91,10 +90,10 @@ update_queries = {
         {sets_subquery_f}
         WHERE
             {and_subquery_f}
-            {date_bounds_subquery}
+            AND {date_bounds_subquery}
     """,
     'mariadb-upsert': """
-        REPLACE INTO {target_table_name}
+        REPLACE INTO {target_table_name} ({patch_cols_str})
         SELECT {patch_cols_str}
         FROM {patch_table_name}
     """,
@@ -102,7 +101,7 @@ update_queries = {
         MERGE {target_table_name} f
             USING (SELECT DISTINCT {patch_cols_str} FROM {patch_table_name}) p
             ON {and_subquery_f}
-            {date_bounds_subquery}
+            AND {date_bounds_subquery}
         WHEN MATCHED THEN
             UPDATE
             {sets_subquery_none};
@@ -112,14 +111,14 @@ update_queries = {
             USING (SELECT DISTINCT {patch_cols_str} FROM {patch_table_name}) p
             ON (
                 {and_subquery_f}
-                {date_bounds_subquery}
+                AND {date_bounds_subquery}
             )
         WHEN MATCHED THEN
             UPDATE
             {sets_subquery_none}
     """,
     'sqlite-upsert': """
-        INSERT INTO {target_table_name}
+        INSERT INTO {target_table_name} ({patch_cols_str})
         SELECT {patch_cols_str}
         FROM {patch_table_name}
         WHERE true
@@ -258,41 +257,6 @@ OMIT_NULLSFIRST_FLAVORS = {'mariadb', 'mysql', 'mssql'}
 SINGLE_ALTER_TABLE_FLAVORS = {'duckdb', 'sqlite', 'mssql', 'oracle'}
 NO_CTE_FLAVORS = {'mysql', 'mariadb'}
 NO_SELECT_INTO_FLAVORS = {'sqlite', 'oracle', 'mysql', 'mariadb', 'duckdb'}
-
-### MySQL doesn't allow for casting as BIGINT, so this is a workaround.
-DB_FLAVORS_CAST_DTYPES = {
-    'mariadb': {
-        'BIGINT': 'DECIMAL',
-        'TINYINT': 'SIGNED INT',
-        'TEXT': 'CHAR(10000) CHARACTER SET utf8',
-        'BOOL': 'SIGNED INT',
-        'BOOLEAN': 'SIGNED INT',
-        'DOUBLE PRECISION': 'DECIMAL',
-        'DOUBLE': 'DECIMAL',
-        'FLOAT': 'DECIMAL',
-    },
-    'mysql': {
-        'BIGINT': 'DECIMAL',
-        'TINYINT': 'SIGNED INT',
-        'TEXT': 'CHAR(10000) CHARACTER SET utf8',
-        'BOOL': 'SIGNED INT',
-        'BOOLEAN': 'SIGNED INT',
-        'DOUBLE PRECISION': 'DECIMAL',
-        'DOUBLE': 'DECIMAL',
-        'FLOAT': 'DECIMAL',
-    },
-    'oracle': {
-        'NVARCHAR(2000)': 'NVARCHAR2(2000)',
-        'NVARCHAR': 'NVARCHAR2(2000)',
-        'NVARCHAR2': 'NVARCHAR2(2000)',
-    },
-    'mssql': {
-        'NVARCHAR COLLATE "SQL Latin1 General CP1 CI AS"': 'NVARCHAR(MAX)',
-        'NVARCHAR COLLATE "SQL_Latin1_General_CP1_CI_AS"': 'NVARCHAR(MAX)',
-        'VARCHAR COLLATE "SQL Latin1 General CP1 CI AS"': 'NVARCHAR(MAX)',
-        'VARCHAR COLLATE "SQL_Latin1_General_CP1_CI_AS"': 'NVARCHAR(MAX)',
-    },
-}
 
 
 def clean(substring: str) -> str:
@@ -974,7 +938,7 @@ def get_table_cols_types(
             ]
             if flavor != 'duckdb'
             else [
-                (doc[col] for col in cols)
+                tuple([doc[col] for col in cols])
                 for doc in connectable.read(cols_types_query, debug=debug).to_dict(orient='records')
             ]
         )
@@ -1086,6 +1050,7 @@ def get_update_queries(
     """
     from meerschaum.connectors import SQLConnector
     from meerschaum.utils.debug import dprint
+    from meerschaum.utils.dtypes.sql import DB_FLAVORS_CAST_DTYPES
     flavor = flavor or (connectable.flavor if isinstance(connectable, SQLConnector) else None)
     if not flavor:
         raise ValueError("Provide a flavor if using a SQLAlchemy session.")
@@ -1122,7 +1087,7 @@ def get_update_queries(
     patch_cols_str = ', '.join(
         [
             sql_item_name(col, flavor)
-            for col in target_table_columns
+            for col in patch_table_columns
         ]
     )
     join_cols_str = ','.join(
@@ -1138,6 +1103,8 @@ def get_update_queries(
         dprint(f"target_table_columns:")
         mrsm.pprint(target_table_columns)
     for c_name, c_type in target_table_columns.items():
+        if c_name not in patch_table_columns:
+            continue
         if flavor in DB_FLAVORS_CAST_DTYPES:
             c_type = DB_FLAVORS_CAST_DTYPES[flavor].get(c_type.upper(), c_type)
         (
@@ -1189,11 +1156,11 @@ def get_update_queries(
     dt_col_name = sql_item_name(datetime_col, flavor, None) if datetime_col else None
     date_bounds_subquery = (
         f"""
-        AND f.{dt_col_name} >= (SELECT MIN({dt_col_name}) FROM {patch_table_name})
+        f.{dt_col_name} >= (SELECT MIN({dt_col_name}) FROM {patch_table_name})
         AND f.{dt_col_name} <= (SELECT MAX({dt_col_name}) FROM {patch_table_name})
         """
         if datetime_col
-        else ""
+        else "1 = 1"
     )
 
     return [
@@ -1230,6 +1197,7 @@ def get_null_replacement(typ: str, flavor: str) -> str:
     A value which may stand in place of NULL for this type.
     `'None'` is returned if a value cannot be determined.
     """
+    from meerschaum.utils.dtypes.sql import DB_FLAVORS_CAST_DTYPES
     if 'int' in typ.lower() or typ.lower() in ('numeric', 'number'):
         return '-987654321'
     if 'bool' in typ.lower():
