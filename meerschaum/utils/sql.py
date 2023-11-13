@@ -36,7 +36,7 @@ version_queries = {
     'mssql': "SELECT @@version",
     'oracle': "SELECT version from PRODUCT_COMPONENT_VERSION WHERE rownum = 1",
 }
-SKIP_IF_EXISTS_FLAVORS = {'mssql'}
+SKIP_IF_EXISTS_FLAVORS = {'mssql', 'oracle'}
 update_queries = {
     'default': """
         UPDATE {target_table_name} AS f
@@ -112,13 +112,18 @@ update_queries = {
             USING (SELECT DISTINCT {patch_cols_str} FROM {patch_table_name}) p
             ON (
                 {and_subquery_f}
+                {date_bounds_subquery}
             )
         WHEN MATCHED THEN
             UPDATE
             {sets_subquery_none}
-            WHERE (
-                {and_subquery_f}
-            )
+    """,
+    'sqlite-upsert': """
+        INSERT INTO {target_table_name}
+        SELECT {patch_cols_str}
+        FROM {patch_table_name}
+        WHERE true
+        ON CONFLICT ({join_cols_str}) DO UPDATE {sets_subquery_none_excluded}
     """,
     'sqlite_delete_insert': [
         """
@@ -145,7 +150,7 @@ columns_types_queries = {
             column_name AS column,
             data_type AS type
         FROM information_schema.columns
-        WHERE table_name = '{table}'
+        WHERE table_name IN ('{table}', '{table_trunc}')
     """,
     'sqlite': """
         SELECT
@@ -158,7 +163,7 @@ columns_types_queries = {
         LEFT OUTER JOIN pragma_table_info((m.name)) p
             ON m.name <> p.name
         WHERE m.type = 'table'
-            AND m.name = '{table}'
+            AND m.name IN ('{table}', '{table_trunc}')
     """,
     'mssql': """
         SELECT
@@ -168,7 +173,7 @@ columns_types_queries = {
             COLUMN_NAME AS [column],
             DATA_TYPE AS [type]
         FROM INFORMATION_SCHEMA.COLUMNS 
-        WHERE TABLE_NAME = '{table}'
+        WHERE TABLE_NAME IN ('{table}', '{table_trunc}')
     """,
     'mysql': """
         SELECT
@@ -178,7 +183,7 @@ columns_types_queries = {
             COLUMN_NAME `column`,
             DATA_TYPE `type`
         FROM INFORMATION_SCHEMA.COLUMNS 
-        WHERE TABLE_NAME = '{table}'
+        WHERE TABLE_NAME IN ('{table}', '{table_trunc}')
     """,
     'mariadb': """
         SELECT
@@ -188,7 +193,7 @@ columns_types_queries = {
             COLUMN_NAME `column`,
             DATA_TYPE `type`
         FROM INFORMATION_SCHEMA.COLUMNS 
-        WHERE TABLE_NAME = '{table}'
+        WHERE TABLE_NAME IN ('{table}', '{table_trunc}')
     """,
     'oracle': """
         SELECT
@@ -198,7 +203,14 @@ columns_types_queries = {
             COLUMN_NAME AS "column",
             DATA_TYPE AS "type"
         FROM all_tab_columns
-        WHERE TABLE_NAME = '{table}'
+        WHERE TABLE_NAME IN (
+            '{table}',
+            '{table_trunc}',
+            '{table_lower}',
+            '{table_lower_trunc}',
+            '{table_upper}',
+            '{table_upper_trunc}'
+        )
     """,
 }
 hypertable_queries = {
@@ -231,7 +243,7 @@ max_name_lens = {
     'mariadb'    : 64,
 }
 json_flavors = {'postgresql', 'timescaledb', 'citus', 'cockroachdb'}
-NO_SCHEMA_FLAVORS = {'oracle', 'sqlite', 'mysql', 'mariadb'}
+NO_SCHEMA_FLAVORS = {'oracle', 'sqlite', 'mysql', 'mariadb', 'duckdb'}
 DEFAULT_SCHEMA_FLAVORS = {
     'postgresql': 'public',
     'timescaledb': 'public',
@@ -270,7 +282,9 @@ DB_FLAVORS_CAST_DTYPES = {
         'FLOAT': 'DECIMAL',
     },
     'oracle': {
-        'NVARCHAR(2000)': 'NVARCHAR2(2000)'
+        'NVARCHAR(2000)': 'NVARCHAR2(2000)',
+        'NVARCHAR': 'NVARCHAR2(2000)',
+        'NVARCHAR2': 'NVARCHAR2(2000)',
     },
     'mssql': {
         'NVARCHAR COLLATE "SQL Latin1 General CP1 CI AS"': 'NVARCHAR(MAX)',
@@ -538,9 +552,10 @@ def sql_item_name(item: str, flavor: str, schema: Optional[str] = None) -> str:
     truncated_item = truncate_item_name(str(item), flavor)
     if flavor == 'oracle':
         truncated_item = pg_capital(truncated_item)
+        ### NOTE: System-reserved words must be quoted.
         if truncated_item.lower() in (
             'float', 'varchar', 'nvarchar', 'clob',
-            'boolean', 'integer',
+            'boolean', 'integer', 'table',
         ):
             wrappers = ('"', '"')
         else:
@@ -924,14 +939,24 @@ def get_table_cols_types(
         schema = DEFAULT_SCHEMA_FLAVORS.get(flavor, None)
     if flavor in ('sqlite', 'duckdb', 'oracle'):
         database = None
-    if flavor == 'oracle':
-        table = table.upper() if table.islower() else table
+    table_trunc = truncate_item_name(table, flavor=flavor)
+    table_lower = table.lower()
+    table_upper = table.upper()
+    table_lower_trunc = truncate_item_name(table_lower, flavor=flavor)
+    table_upper_trunc = truncate_item_name(table_upper, flavor=flavor)
 
     cols_types_query = sqlalchemy.text(
         columns_types_queries.get(
             flavor,
             columns_types_queries['default']
-        ).format(table=table)
+        ).format(
+            table = table,
+            table_trunc = table_trunc,
+            table_lower = table_lower,
+            table_lower_trunc = table_lower_trunc,
+            table_upper = table_upper,
+            table_upper_trunc = table_upper_trunc,
+        )
     )
 
     cols = ['database', 'schema', 'table', 'column', 'type']
@@ -985,7 +1010,16 @@ def get_table_cols_types(
             cols_types_docs_filtered = cols_types_docs
 
         return {
-            doc['column']: doc['type'].upper()
+            (
+                doc['column']
+                if flavor != 'oracle' else (
+                    (
+                        doc['column'].lower()
+                        if (doc['column'].isupper() and doc['column'].isalpha())
+                        else doc['column']
+                    )
+                )
+            ): doc['type'].upper()
             for doc in cols_types_docs_filtered
         }
     except Exception as e:
@@ -1158,7 +1192,8 @@ def get_update_queries(
         AND f.{dt_col_name} >= (SELECT MIN({dt_col_name}) FROM {patch_table_name})
         AND f.{dt_col_name} <= (SELECT MAX({dt_col_name}) FROM {patch_table_name})
         """
-        if datetime_col else ""
+        if datetime_col
+        else ""
     )
 
     return [
@@ -1195,7 +1230,7 @@ def get_null_replacement(typ: str, flavor: str) -> str:
     A value which may stand in place of NULL for this type.
     `'None'` is returned if a value cannot be determined.
     """
-    if 'int' in typ.lower() or typ == 'numeric':
+    if 'int' in typ.lower() or typ.lower() in ('numeric', 'number'):
         return '-987654321'
     if 'bool' in typ.lower():
         bool_typ = (
@@ -1213,7 +1248,7 @@ def get_null_replacement(typ: str, flavor: str) -> str:
         return f'CAST({val_to_cast} AS {bool_typ})'
     if 'time' in typ.lower() or 'date' in typ.lower():
         return dateadd_str(flavor=flavor, begin='1900-01-01')
-    if 'float' in typ.lower() or 'double' in typ.lower():
+    if 'float' in typ.lower() or 'double' in typ.lower() or typ.lower() in ('decimal',):
         return '-987654321.0'
     return ('n' if flavor == 'oracle' else '') + "'-987654321'"
 

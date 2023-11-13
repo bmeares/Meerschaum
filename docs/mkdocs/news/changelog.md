@@ -4,6 +4,44 @@
 
 This is the current release cycle, so stay tuned for future releases!
 
+### v2.1.1
+
+- **Add `upsert` for high-performance pipes.**  
+  Setting `upsert` under `pipe.parameters` will create a unique index and combine the insert and update stages into a single upsert. This is particularly useful for pipes with very large tables.
+
+  ```python
+  import meerschaum as mrsm
+
+  pipe = mrsm.Pipe(
+      'demo', 'upsert',
+      instance = 'sql:local',
+      columns = ['datetime', 'id'],
+      parameters = {'upsert': True},
+  )
+
+  mrsm.pprint(
+      pipe.sync(
+          [
+              {'datetime': '2023-01-01', 'id': 1, 'val': 1.1},
+              {'datetime': '2023-01-02', 'id': 2, 'val': 2.2},
+          ]
+      )
+  )
+  #  🎉 Upserted 2 rows.
+  ```
+
+- **Add internal schema `_mrsm_internal` for temporary tables.**  
+  To avoid polluting your database schema, temporary tables will now be created within `_mrsm_internal` (for databases which support PostgreSQL-style schemas).
+
+- **Drop stale temporary tables.**  
+  Temporary tables which are more than 24 hours will be dropped automatically (configurable under `system:sql:instance:stale_temporary_tables_minutes`).
+
+- **Prefix instance tables with `mrsm_`.**  
+  Internal Meerschaum tables still reside on the default schema but will be denoted with a `mrsm_` prefix. The existing instance tables will be automatically renamed (e.g. `pipes` will become `mrsm_pipes`) to add the prefix (this renaming detection will be removed in later releases).
+
+- **Fix an issue with `bootstrap`.**  
+  Refactoring work for 2.1.0 had broken the `bootstrap` action.
+
 ### v2.1.0
 
 - **Replace `term.js` with `xterm.js`.**  
