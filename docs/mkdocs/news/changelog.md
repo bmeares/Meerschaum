@@ -4,7 +4,7 @@
 
 This is the current release cycle, so stay tuned for future releases!
 
-### v2.1.1
+### v2.1.1 – v2.1.2
 
 - **Add `upsert` for high-performance pipes.**  
   Setting `upsert` under `pipe.parameters` will create a unique index and combine the insert and update stages into a single upsert. This is particularly useful for pipes with very large tables.
@@ -44,6 +44,8 @@ This is the current release cycle, so stay tuned for future releases!
 
 - **Fix an issue with `bootstrap`.**  
   Refactoring work for 2.1.0 had broken the `bootstrap` action.
+
+- **Fix an issue with `pause jobs`.**
 
 - **Fix an issue when selecting inverse pipes.**  
   Null location keys are now coalesced when selecting pipes to produce expected behavior.

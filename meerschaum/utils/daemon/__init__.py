@@ -133,14 +133,47 @@ def get_daemons() -> List[Daemon]:
     Return all existing Daemons, sorted by end time.
     """
     daemons = [Daemon(daemon_id=d_id) for d_id in get_daemon_ids()]
-    daemons_ended = [
-        (daemon, daemon.properties.get('process', {}).get('ended', '9999'))
+    daemons_status = {daemon: daemon.status for daemon in daemons}
+    running_daemons = {
+        daemon: daemons_status[daemon]
         for daemon in daemons
-    ]
-    return [
+        if daemons_status[daemon] == 'running'
+    }
+    paused_daemons = {
+        daemon: daemons_status[daemon]
+        for daemon in daemons
+        if daemons_status[daemon] == 'paused'
+    }
+    stopped_daemons = {
+        daemon: daemons_status[daemon]
+        for daemon in daemons
+        if daemons_status[daemon] == 'stopped'
+    }
+    daemons_began = {
+        daemon: daemon.properties.get('process', {}).get('began', '9999')
+        for daemon in daemons
+    }
+    daemons_paused = {
+        daemon: daemon.properties.get('process', {}).get('paused', '9999')
+        for daemon in daemons
+    }
+    daemons_ended = {
+        daemon: daemon.properties.get('process', {}).get('ended', '9999')
+        for daemon in daemons
+    }
+    sorted_stopped_daemons = [
         daemon
-        for daemon, ended in sorted(daemons_ended, key=lambda x: x[1])
+        for daemon in sorted(stopped_daemons, key=lambda x: daemons_ended[x])
     ]
+    sorted_paused_daemons = [
+        daemon
+        for daemon in sorted(paused_daemons, key=lambda x: daemons_paused[x])
+    ]
+    sorted_running_daemons = [
+        daemon
+        for daemon in sorted(running_daemons, key=lambda x: daemons_began[x])
+    ]
+    return sorted_stopped_daemons + sorted_paused_daemons + sorted_running_daemons
 
 
 def get_daemon_ids() -> List[str]:

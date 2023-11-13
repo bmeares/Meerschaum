@@ -506,7 +506,7 @@ def get_create_index_queries(
     indices_cols_str = ', '.join(
         [
             sql_item_name(ix, self.flavor)
-            for ix in pipe.columns
+            for ix_key, ix in pipe.columns.items()
             if ix and ix in existing_cols_types
         ]
     )
@@ -516,7 +516,7 @@ def get_create_index_queries(
         if self.flavor != 'sqlite'
         else f"CREATE UNIQUE INDEX {constraint_name} ON {_pipe_name} ({indices_cols_str})"
     )
-    if upsert:
+    if upsert and indices_cols_str:
         index_queries[constraint_name] = [constraint_query]
 
     return index_queries
