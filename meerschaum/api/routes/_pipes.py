@@ -87,7 +87,7 @@ def delete_pipe(
         ),
     ):
     """
-    Delete a Pipe, dropping its table.
+    Delete a Pipe (without dropping its table).
     """
     from meerschaum.config import get_config
     allow_actions = get_config('system', 'api', 'permissions', 'actions', 'non_admin')
@@ -99,19 +99,19 @@ def delete_pipe(
             " Under the keys `api:permissions:actions`, " +
             "you can toggle non-admin actions."
         )
-    pipe_object = get_pipe(connector_keys, metric_key, location_key)
-    if not is_pipe_registered(pipe_object, pipes(refresh=True)):
+    pipe = get_pipe(connector_keys, metric_key, location_key)
+    if not is_pipe_registered(pipe, pipes(refresh=True)):
         raise fastapi.HTTPException(
-            status_code=409, detail=f"{pipe_object} is not registered."
+            status_code=409, detail=f"{pipe} is not registered."
         )
-    results = get_api_connector().delete_pipe(pipe_object, debug=debug)
+    results = get_api_connector().delete_pipe(pipe, debug=debug)
     pipes(refresh=True)
 
     return results
 
 
 @app.delete(pipes_endpoint + '/{connector_keys}/{metric_key}/{location_key}/drop', tags=['Pipes'])
-def delete_pipe(
+def drop_pipe(
         connector_keys: str,
         metric_key: str,
         location_key: str,
@@ -120,7 +120,7 @@ def delete_pipe(
         ),
     ):
     """
-    Drropping a pipes' table (without deleting its registration).
+    Dropping a pipes' table (without deleting its registration).
     """
     from meerschaum.config import get_config
     allow_actions = get_config('system', 'api', 'permissions', 'actions', 'non_admin')
@@ -133,10 +133,6 @@ def delete_pipe(
             "you can toggle non-admin actions."
         )
     pipe_object = get_pipe(connector_keys, metric_key, location_key)
-    if not is_pipe_registered(pipe_object, pipes(refresh=True)):
-        raise fastapi.HTTPException(
-            status_code=409, detail=f"{pipe_object} is not registered."
-        )
     results = get_api_connector().drop_pipe(pipe_object, debug=debug)
     pipes(refresh=True)
     return results

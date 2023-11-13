@@ -7,7 +7,8 @@ Define SQLAlchemy tables
 """
 
 from __future__ import annotations
-from meerschaum.utils.typing import Optional, Dict, Union, InstanceConnector
+from meerschaum.utils.typing import Optional, Dict, Union, InstanceConnector, List
+from meerschaum.utils.warnings import error, warn
 
 ### store a tables dict for each connector
 connector_tables = {}
@@ -42,7 +43,6 @@ def get_tables(
     """
     from meerschaum.utils.debug import dprint
     from meerschaum.utils.formatting import pprint
-    from meerschaum.utils.warnings import error
     from meerschaum.connectors.parse import parse_instance_keys
     from meerschaum.utils.packages import attempt_import
     from meerschaum.utils.sql import json_flavors
@@ -99,15 +99,18 @@ def get_tables(
                 kw.update({'server_default': sequences[k].next_value()})
 
         _tables = {
-            'users' : sqlalchemy.Table(
-                'users',
+            'users': sqlalchemy.Table(
+                'mrsm_users',
                 conn.metadata,
                 sqlalchemy.Column(
                     *id_col_args['user_id'],
                     **id_col_kw['user_id'],
                 ),
                 sqlalchemy.Column(
-                    'username', sqlalchemy.String(256), index=index_names, nullable=False,
+                    'username',
+                    sqlalchemy.String(256),
+                    index = index_names,
+                    nullable = False,
                 ),
                 sqlalchemy.Column('password_hash', sqlalchemy.String(1024)),
                 sqlalchemy.Column('email', sqlalchemy.String(256)),
@@ -115,9 +118,9 @@ def get_tables(
                 sqlalchemy.Column('attributes', params_type),
                 extend_existing = True,
             ),
-            'plugins' : sqlalchemy.Table(
+            'plugins': sqlalchemy.Table(
                 *([
-                    'plugins',
+                    'mrsm_plugins',
                     conn.metadata,
                     sqlalchemy.Column(
                         *id_col_args['plugin_id'],
@@ -130,26 +133,60 @@ def get_tables(
                     sqlalchemy.Column('version', sqlalchemy.String(256)),
                     sqlalchemy.Column('attributes', params_type),
                 ] + ([
-                    sqlalchemy.ForeignKeyConstraint(['user_id'], ['users.user_id']),
+                    sqlalchemy.ForeignKeyConstraint(['user_id'], ['mrsm_users.user_id']),
                 ] if conn.flavor != 'duckdb' else [])),
+                extend_existing = True,
+            ),
+            'temp_tables': sqlalchemy.Table(
+                'mrsm_temp_tables',
+                conn.metadata,
+                sqlalchemy.Column(
+                    'date_created',
+                    sqlalchemy.DateTime,
+                    index = True,
+                    nullable = False,
+                ),
+                sqlalchemy.Column(
+                    'table',
+                    sqlalchemy.String(256),
+                    index = index_names,
+                    nullable = False,
+                ),
+                sqlalchemy.Column(
+                    'ready_to_drop',
+                    sqlalchemy.DateTime,
+                    index = False,
+                    nullable = True,
+                ),
                 extend_existing = True,
             ),
         }
 
         _tables['pipes'] = sqlalchemy.Table(
-            "pipes",
+            "mrsm_pipes",
             conn.metadata,
             sqlalchemy.Column(
                 *id_col_args['pipe_id'],
                 **id_col_kw['pipe_id'],
             ),
             sqlalchemy.Column(
-                "connector_keys", sqlalchemy.String(256), index=index_names, nullable=False
+                "connector_keys",
+                sqlalchemy.String(256),
+                index = index_names,
+                nullable = False,
             ),
             sqlalchemy.Column(
-                "metric_key", sqlalchemy.String(256), index=index_names, nullable=False
+                "metric_key",
+                sqlalchemy.String(256),
+                index = index_names,
+                nullable = False,
             ),
-            sqlalchemy.Column("location_key", sqlalchemy.String(256), index=index_names),
+            sqlalchemy.Column(
+                "location_key",
+                sqlalchemy.String(256),
+                index = index_names,
+                nullable = True,
+            ),
             sqlalchemy.Column("parameters", params_type),
             extend_existing = True,
         )
@@ -157,6 +194,11 @@ def get_tables(
         ### store the table dict for reuse (per connector)
         connector_tables[conn] = _tables
         if create:
+            create_schemas(
+                conn,
+                schemas = [conn.internal_schema],
+                debug = debug,
+            )
             create_tables(conn, tables=_tables)
 
     return connector_tables[conn]
@@ -169,8 +211,25 @@ def create_tables(
     """
     Create the tables on the database.
     """
-    from meerschaum.utils.warnings import warn
+    from meerschaum.utils.sql import get_rename_table_queries, table_exists
     _tables = tables if tables is not None else get_tables(conn)
+
+    rename_queries = []
+    for table_key, table in _tables.items():
+        if table_exists(
+            table_key,
+            conn,
+            schema = conn.instance_schema,
+        ):
+            rename_queries.extend(get_rename_table_queries(
+                table_key,
+                table.name,
+                schema = conn.instance_schema,
+                flavor = conn.flavor,
+            ))
+    if rename_queries:
+        conn.exec_queries(rename_queries)
+
     try:
         conn.metadata.create_all(bind=conn.engine)
     except Exception as e:
@@ -181,3 +240,37 @@ def create_tables(
     return True
 
 
+def create_schemas(
+        conn: 'meerschaum.connectors.SQLConnector',
+        schemas: List[str],
+        debug: bool = False,
+    ) -> bool:
+    """
+    Create the internal Meerschaum schema on the database.
+    """
+    from meerschaum.config.static import STATIC_CONFIG
+    from meerschaum.utils.packages import attempt_import
+    from meerschaum.utils.sql import sql_item_name, NO_SCHEMA_FLAVORS, SKIP_IF_EXISTS_FLAVORS
+    if conn.flavor in NO_SCHEMA_FLAVORS:
+        return True
+
+    sqlalchemy_schema = attempt_import('sqlalchemy.schema')
+    successes = {}
+    skip_if_not_exists = conn.flavor in SKIP_IF_EXISTS_FLAVORS
+    if_not_exists_str = ("IF NOT EXISTS " if not skip_if_not_exists else "")
+    with conn.engine.connect() as connection:
+        for schema in schemas:
+            if not schema:
+                continue
+            schema_name = sql_item_name(schema, conn.flavor)
+            schema_exists = conn.engine.dialect.has_schema(connection, schema)
+            if schema_exists:
+                continue
+
+            create_schema_query = f"CREATE SCHEMA {if_not_exists_str}{schema_name}"
+            try:
+                result = conn.exec(create_schema_query, debug=debug)
+                successes[schema] = (result is not None)
+            except Exception as e:
+                warn(f"Failed to create internal schema '{schema}':\n{e}")
+    return all(successes.values())

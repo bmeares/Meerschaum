@@ -36,11 +36,11 @@ def register_user(
 
     import json
     bind_variables = {
-        'username' : user.username,
-        'email' : user.email,
-        'password_hash' : user.password_hash,
-        'user_type' : user.type,
-        'attributes' : (
+        'username': user.username,
+        'email': user.email,
+        'password_hash': user.password_hash,
+        'user_type': user.type,
+        'attributes': (
             json.dumps(user.attributes) if self.flavor not in json_flavors else user.attributes
         ),
     }

@@ -59,6 +59,9 @@ default_system_config = {
             'pandas': 'pandas',
         },
         'sql': {
+            'instance': {
+                'stale_temporary_tables_minutes': 1440,
+            },
             'chunksize': 100_000,
             'poolclass': 'sqlalchemy.pool.QueuePool',
             'create_engine': {

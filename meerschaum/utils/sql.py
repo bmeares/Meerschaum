@@ -8,7 +8,7 @@ Flavor-specific SQL tools.
 
 from __future__ import annotations
 import meerschaum as mrsm
-from meerschaum.utils.typing import Optional, Dict, Any, Union, List, Iterable
+from meerschaum.utils.typing import Optional, Dict, Any, Union, List, Iterable, Tuple
 ### Preserve legacy imports.
 from meerschaum.utils.dtypes.sql import (
     DB_TO_PD_DTYPES,
@@ -16,6 +16,8 @@ from meerschaum.utils.dtypes.sql import (
     get_pd_type_from_db_type as get_pd_type,
     get_db_type_from_pd_type as get_db_type,
 )
+from meerschaum.utils.warnings import warn
+from meerschaum.utils.debug import dprint
 
 test_queries = {
     'default'    : 'SELECT 1',
@@ -26,7 +28,7 @@ test_queries = {
 ### `table_name` is the escaped name of the table.
 ### `table` is the unescaped name of the table.
 exists_queries = {
-    'default'    : "SELECT COUNT(*) FROM {table_name} WHERE 1 = 0",
+    'default': "SELECT COUNT(*) FROM {table_name} WHERE 1 = 0",
 }
 version_queries = {
     'default': "SELECT VERSION() AS {version_name}",
@@ -34,50 +36,92 @@ version_queries = {
     'mssql': "SELECT @@version",
     'oracle': "SELECT version from PRODUCT_COMPONENT_VERSION WHERE rownum = 1",
 }
+SKIP_IF_EXISTS_FLAVORS = {'mssql', 'oracle'}
 update_queries = {
     'default': """
         UPDATE {target_table_name} AS f
         {sets_subquery_none}
         FROM {target_table_name} AS t
-        INNER JOIN (SELECT DISTINCT * FROM {patch_table_name}) AS p
+        INNER JOIN (SELECT DISTINCT {patch_cols_str} FROM {patch_table_name}) AS p
             ON {and_subquery_t}
         WHERE
             {and_subquery_f}
+            AND {date_bounds_subquery}
+    """,
+    'timescaledb-upsert': """
+        INSERT INTO {target_table_name} ({patch_cols_str})
+        SELECT {patch_cols_str}
+        FROM {patch_table_name}
+        ON CONFLICT ({join_cols_str}) DO UPDATE {sets_subquery_none_excluded}
+    """,
+    'postgresql-upsert': """
+        INSERT INTO {target_table_name} ({patch_cols_str})
+        SELECT {patch_cols_str}
+        FROM {patch_table_name}
+        ON CONFLICT ({join_cols_str}) DO UPDATE {sets_subquery_none_excluded}
+    """,
+    'citus-upsert': """
+        INSERT INTO {target_table_name} ({patch_cols_str})
+        SELECT {patch_cols_str}
+        FROM {patch_table_name}
+        ON CONFLICT ({join_cols_str}) DO UPDATE {sets_subquery_none_excluded}
+    """,
+    'cockroachdb-upsert': """
+        INSERT INTO {target_table_name} ({patch_cols_str})
+        SELECT {patch_cols_str}
+        FROM {patch_table_name}
+        ON CONFLICT ({join_cols_str}) DO UPDATE {sets_subquery_none_excluded}
     """,
     'mysql': """
-        UPDATE {target_table_name} AS f,
-            (SELECT DISTINCT * FROM {patch_table_name}) AS p
+        UPDATE {target_table_name} AS f
+        JOIN (SELECT DISTINCT {patch_cols_str} FROM {patch_table_name}) AS p
+        ON {and_subquery_f}
         {sets_subquery_f}
-        WHERE
-            {and_subquery_f}
+        WHERE {date_bounds_subquery}
+    """,
+    'mysql-upsert': """
+        REPLACE INTO {target_table_name} ({patch_cols_str})
+        SELECT {patch_cols_str}
+        FROM {patch_table_name}
     """,
     'mariadb': """
-        UPDATE {target_table_name} AS f,
-            (SELECT DISTINCT * FROM {patch_table_name}) AS p
+        UPDATE {target_table_name} AS f
+        JOIN (SELECT DISTINCT {patch_cols_str} FROM {patch_table_name}) AS p
+        ON {and_subquery_f}
         {sets_subquery_f}
-        WHERE
-            {and_subquery_f}
+        WHERE {date_bounds_subquery}
+    """,
+    'mariadb-upsert': """
+        REPLACE INTO {target_table_name} ({patch_cols_str})
+        SELECT {patch_cols_str}
+        FROM {patch_table_name}
     """,
     'mssql': """
-        MERGE {target_table_name} t
-            USING (SELECT DISTINCT * FROM {patch_table_name}) p
-            ON {and_subquery_t}
+        MERGE {target_table_name} f
+            USING (SELECT DISTINCT {patch_cols_str} FROM {patch_table_name}) p
+            ON {and_subquery_f}
+            AND {date_bounds_subquery}
         WHEN MATCHED THEN
             UPDATE
             {sets_subquery_none};
     """,
     'oracle': """
-        MERGE INTO {target_table_name} t
-            USING (SELECT DISTINCT * FROM {patch_table_name}) p
+        MERGE INTO {target_table_name} f
+            USING (SELECT DISTINCT {patch_cols_str} FROM {patch_table_name}) p
             ON (
-                {and_subquery_t}
+                {and_subquery_f}
+                AND {date_bounds_subquery}
             )
         WHEN MATCHED THEN
             UPDATE
             {sets_subquery_none}
-            WHERE (
-                {and_subquery_t}
-            )
+    """,
+    'sqlite-upsert': """
+        INSERT INTO {target_table_name} ({patch_cols_str})
+        SELECT {patch_cols_str}
+        FROM {patch_table_name}
+        WHERE true
+        ON CONFLICT ({join_cols_str}) DO UPDATE {sets_subquery_none_excluded}
     """,
     'sqlite_delete_insert': [
         """
@@ -91,19 +135,81 @@ update_queries = {
         """,
         """
         INSERT INTO {target_table_name} AS f
-        SELECT DISTINCT * FROM {patch_table_name} AS p
+        SELECT DISTINCT {patch_cols_str} FROM {patch_table_name} AS p
         """,
     ],
+}
+columns_types_queries = {
     'default': """
-        UPDATE {target_table_name} AS f
-        {sets_subquery_none}
-        FROM {target_table_name} AS t
-        INNER JOIN (SELECT DISTINCT * FROM {patch_table_name}) AS p
-            ON {and_subquery_t}
-        WHERE
-            {and_subquery_f}
+        SELECT
+            table_catalog AS database,
+            table_schema AS schema,
+            table_name AS table,
+            column_name AS column,
+            data_type AS type
+        FROM information_schema.columns
+        WHERE table_name IN ('{table}', '{table_trunc}')
     """,
-
+    'sqlite': """
+        SELECT
+            '' "database",
+            '' "schema",
+            m.name "table",
+            p.name "column",
+            p.type "type"
+        FROM sqlite_master m
+        LEFT OUTER JOIN pragma_table_info((m.name)) p
+            ON m.name <> p.name
+        WHERE m.type = 'table'
+            AND m.name IN ('{table}', '{table_trunc}')
+    """,
+    'mssql': """
+        SELECT
+            TABLE_CATALOG AS [database],
+            TABLE_SCHEMA AS [schema],
+            TABLE_NAME AS [table],
+            COLUMN_NAME AS [column],
+            DATA_TYPE AS [type]
+        FROM INFORMATION_SCHEMA.COLUMNS 
+        WHERE TABLE_NAME IN ('{table}', '{table_trunc}')
+    """,
+    'mysql': """
+        SELECT
+            TABLE_SCHEMA `database`,
+            TABLE_SCHEMA `schema`,
+            TABLE_NAME `table`,
+            COLUMN_NAME `column`,
+            DATA_TYPE `type`
+        FROM INFORMATION_SCHEMA.COLUMNS 
+        WHERE TABLE_NAME IN ('{table}', '{table_trunc}')
+    """,
+    'mariadb': """
+        SELECT
+            TABLE_SCHEMA `database`,
+            TABLE_SCHEMA `schema`,
+            TABLE_NAME `table`,
+            COLUMN_NAME `column`,
+            DATA_TYPE `type`
+        FROM INFORMATION_SCHEMA.COLUMNS 
+        WHERE TABLE_NAME IN ('{table}', '{table_trunc}')
+    """,
+    'oracle': """
+        SELECT
+            NULL AS "database",
+            NULL AS "schema",
+            TABLE_NAME AS "table",
+            COLUMN_NAME AS "column",
+            DATA_TYPE AS "type"
+        FROM all_tab_columns
+        WHERE TABLE_NAME IN (
+            '{table}',
+            '{table_trunc}',
+            '{table_lower}',
+            '{table_lower_trunc}',
+            '{table_upper}',
+            '{table_upper_trunc}'
+        )
+    """,
 }
 hypertable_queries = {
     'timescaledb': 'SELECT hypertable_size(\'{table_name}\')',
@@ -135,44 +241,21 @@ max_name_lens = {
     'mariadb'    : 64,
 }
 json_flavors = {'postgresql', 'timescaledb', 'citus', 'cockroachdb'}
+NO_SCHEMA_FLAVORS = {'oracle', 'sqlite', 'mysql', 'mariadb', 'duckdb'}
+DEFAULT_SCHEMA_FLAVORS = {
+    'postgresql': 'public',
+    'timescaledb': 'public',
+    'citus': 'public',
+    'cockroachdb': 'public',
+    'mysql': 'mysql',
+    'mariadb': 'mysql',
+    'mssql': 'dbo',
+}
 OMIT_NULLSFIRST_FLAVORS = {'mariadb', 'mysql', 'mssql'}
 
 SINGLE_ALTER_TABLE_FLAVORS = {'duckdb', 'sqlite', 'mssql', 'oracle'}
 NO_CTE_FLAVORS = {'mysql', 'mariadb'}
 NO_SELECT_INTO_FLAVORS = {'sqlite', 'oracle', 'mysql', 'mariadb', 'duckdb'}
-
-### MySQL doesn't allow for casting as BIGINT, so this is a workaround.
-DB_FLAVORS_CAST_DTYPES = {
-    'mariadb': {
-        'BIGINT': 'DECIMAL',
-        'TINYINT': 'SIGNED INT',
-        'TEXT': 'CHAR(10000) CHARACTER SET utf8',
-        'BOOL': 'SIGNED INT',
-        'BOOLEAN': 'SIGNED INT',
-        'DOUBLE PRECISION': 'DECIMAL',
-        'DOUBLE': 'DECIMAL',
-        'FLOAT': 'DECIMAL',
-    },
-    'mysql': {
-        'BIGINT': 'DECIMAL',
-        'TINYINT': 'SIGNED INT',
-        'TEXT': 'CHAR(10000) CHARACTER SET utf8',
-        'BOOL': 'SIGNED INT',
-        'BOOLEAN': 'SIGNED INT',
-        'DOUBLE PRECISION': 'DECIMAL',
-        'DOUBLE': 'DECIMAL',
-        'FLOAT': 'DECIMAL',
-    },
-    'oracle': {
-        'NVARCHAR(2000)': 'NVARCHAR2(2000)'
-    },
-    'mssql': {
-        'NVARCHAR COLLATE "SQL Latin1 General CP1 CI AS"': 'NVARCHAR(MAX)',
-        'NVARCHAR COLLATE "SQL_Latin1_General_CP1_CI_AS"': 'NVARCHAR(MAX)',
-        'VARCHAR COLLATE "SQL Latin1 General CP1 CI AS"': 'NVARCHAR(MAX)',
-        'VARCHAR COLLATE "SQL_Latin1_General_CP1_CI_AS"': 'NVARCHAR(MAX)',
-    },
-}
 
 
 def clean(substring: str) -> str:
@@ -432,9 +515,10 @@ def sql_item_name(item: str, flavor: str, schema: Optional[str] = None) -> str:
     truncated_item = truncate_item_name(str(item), flavor)
     if flavor == 'oracle':
         truncated_item = pg_capital(truncated_item)
+        ### NOTE: System-reserved words must be quoted.
         if truncated_item.lower() in (
             'float', 'varchar', 'nvarchar', 'clob',
-            'boolean', 'integer',
+            'boolean', 'integer', 'table',
         ):
             wrappers = ('"', '"')
         else:
@@ -563,7 +647,7 @@ def build_where(
         params_json = json.dumps(params)
     except Exception as e:
         params_json = str(params)
-    bad_words = ['drop', '--', ';']
+    bad_words = ['drop ', '--', ';']
     for word in bad_words:
         if word in params_json.lower():
             warn(f"Aborting build_where() due to possible SQL injection.")
@@ -654,7 +738,7 @@ def build_where(
 
 def table_exists(
         table: str,
-        connector: Optional[meerschaum.connectors.sql.SQLConnector] = None,
+        connector: mrsm.connectors.sql.SQLConnector,
         schema: Optional[str] = None,
         debug: bool = False,
     ) -> bool:
@@ -665,7 +749,7 @@ def table_exists(
     table: str:
         The name of the table in question.
         
-    connector: Optional[meerschaum.connectors.sql.SQLConnector] :
+    connector: mrsm.connectors.sql.SQLConnector
         The connector to the database which holds the table.
 
     schema: Optional[str], default None
@@ -680,18 +764,11 @@ def table_exists(
     A `bool` indicating whether or not the table exists on the database.
 
     """
-    if connector is None:
-        from meerschaum import get_connector
-        connector = get_connector('sql')
-
+    sqlalchemy = mrsm.attempt_import('sqlalchemy')
     schema = schema or connector.schema
-
-    table_name = sql_item_name(table, connector.flavor, schema)
-    q = exists_queries.get(connector.flavor, exists_queries['default']).format(
-        table=table, table_name=table_name,
-    )
-    exists = connector.exec(q, debug=debug, silent=True) is not None
-    return exists
+    insp = sqlalchemy.inspect(connector.engine)
+    truncated_table_name = truncate_item_name(str(table), connector.flavor)
+    return insp.has_table(truncated_table_name, schema=schema)
 
 
 def get_sqlalchemy_table(
@@ -758,12 +835,167 @@ def get_sqlalchemy_table(
     return tables[truncated_table_name]
 
 
+def get_table_cols_types(
+        table: str,
+        connectable: Union[
+            'mrsm.connectors.sql.SQLConnector',
+            'sqlalchemy.orm.session.Session',
+            'sqlalchemy.engine.base.Engine'
+        ],
+        flavor: Optional[str] = None,
+        schema: Optional[str] = None,
+        database: Optional[str] = None,
+        debug: bool = False,
+    ) -> Dict[str, str]:
+    """
+    Return a dictionary mapping a table's columns to data types.
+    This is useful for inspecting tables creating during a not-yet-committed session.
+
+    NOTE: This may return incorrect columns if the schema is not explicitly stated.
+        Use this function if you are confident the table name is unique or if you have
+        and explicit schema.
+        To use the configured schema, get the columns from `get_sqlalchemy_table()` instead.
+
+    Parameters
+    ----------
+    table: str
+        The name of the table (unquoted).
+
+    connectable: Union[
+        'mrsm.connectors.sql.SQLConnector',
+        'sqlalchemy.orm.session.Session',
+    ]
+        The connection object used to fetch the columns and types.
+
+    flavor: Optional[str], default None
+        The database dialect flavor to use for the query.
+        If omitted, default to `connectable.flavor`.
+
+    schema: Optional[str], default None
+        If provided, restrict the query to this schema.
+
+    database: Optional[str]. default None
+        If provided, restrict the query to this database.
+
+    Returns
+    -------
+    A dictionary mapping column names to data types.
+    """
+    from meerschaum.connectors import SQLConnector
+    from meerschaum.utils.misc import filter_keywords
+    sqlalchemy = mrsm.attempt_import('sqlalchemy')
+    flavor = flavor or getattr(connectable, 'flavor', None)
+    if not flavor:
+        raise ValueError(f"Please provide a database flavor.")
+    if flavor == 'duckdb' and not isinstance(connectable, SQLConnector):
+        raise ValueError(f"You must provide a SQLConnector when using DuckDB.")
+    if flavor in NO_SCHEMA_FLAVORS:
+        schema = None
+    if schema is None:
+        schema = DEFAULT_SCHEMA_FLAVORS.get(flavor, None)
+    if flavor in ('sqlite', 'duckdb', 'oracle'):
+        database = None
+    table_trunc = truncate_item_name(table, flavor=flavor)
+    table_lower = table.lower()
+    table_upper = table.upper()
+    table_lower_trunc = truncate_item_name(table_lower, flavor=flavor)
+    table_upper_trunc = truncate_item_name(table_upper, flavor=flavor)
+
+    cols_types_query = sqlalchemy.text(
+        columns_types_queries.get(
+            flavor,
+            columns_types_queries['default']
+        ).format(
+            table = table,
+            table_trunc = table_trunc,
+            table_lower = table_lower,
+            table_lower_trunc = table_lower_trunc,
+            table_upper = table_upper,
+            table_upper_trunc = table_upper_trunc,
+        )
+    )
+
+    cols = ['database', 'schema', 'table', 'column', 'type']
+    result_cols_ix = dict(enumerate(cols))
+
+    debug_kwargs = {'debug': debug} if isinstance(connectable, SQLConnector) else {}
+    if not debug_kwargs and debug:
+        dprint(cols_types_query)
+
+    try:
+        result_rows = (
+            [
+                row
+                for row in connectable.execute(cols_types_query, **debug_kwargs).fetchall()
+            ]
+            if flavor != 'duckdb'
+            else [
+                tuple([doc[col] for col in cols])
+                for doc in connectable.read(cols_types_query, debug=debug).to_dict(orient='records')
+            ]
+        )
+        cols_types_docs = [
+            {
+                result_cols_ix[i]: val
+                for i, val in enumerate(row)
+            }
+            for row in result_rows
+        ]
+        cols_types_docs_filtered = [
+            doc
+            for doc in cols_types_docs
+            if (
+                (
+                    not schema
+                    or doc['schema'] == schema
+                )
+                and
+                (
+                    not database
+                    or doc['database'] == database
+                )
+            )
+        ]
+        if debug:
+            dprint(f"schema={schema}, database={database}")
+            for doc in cols_types_docs:
+                print(doc)
+
+        ### NOTE: This may return incorrect columns if the schema is not explicitly stated.
+        if cols_types_docs and not cols_types_docs_filtered:
+            cols_types_docs_filtered = cols_types_docs
+
+        return {
+            (
+                doc['column']
+                if flavor != 'oracle' else (
+                    (
+                        doc['column'].lower()
+                        if (doc['column'].isupper() and doc['column'].replace('_', '').isalpha())
+                        else doc['column']
+                    )
+                )
+            ): doc['type'].upper()
+            for doc in cols_types_docs_filtered
+        }
+    except Exception as e:
+        warn(f"Failed to fetch columns for table '{table}':\n{e}")
+        return {}
+
+
 def get_update_queries(
         target: str,
         patch: str,
-        connector: mrsm.connectors.sql.SQLConnector,
+        connectable: Union[
+            mrsm.connectors.sql.SQLConnector,
+            'sqlalchemy.orm.session.Session'
+        ],
         join_cols: Iterable[str],
+        flavor: Optional[str] = None,
+        upsert: bool = False,
+        datetime_col: Optional[str] = None,
         schema: Optional[str] = None,
+        patch_schema: Optional[str] = None,
         debug: bool = False,
     ) -> List[str]:
     """
@@ -777,15 +1009,29 @@ def get_update_queries(
     patch: str
         The name of the patch table. This should have the same shape as the target.
 
-    connector: meerschaum.connectors.sql.SQLConnector
-        The Meerschaum `SQLConnector` which will later execute the queries.
+    connectable: Union[meerschaum.connectors.sql.SQLConnector, sqlalchemy.orm.session.Session]
+        The `SQLConnector` or SQLAlchemy session which will later execute the queries.
 
     join_cols: List[str]
         The columns to use to join the patch to the target.
 
+    flavor: Optional[str], default None
+        If using a SQLAlchemy session, provide the expected database flavor.
+
+    upsert: bool, default False
+        If `True`, return an upsert query rather than an update.
+
+    datetime_col: Optional[str], default None
+        If provided, bound the join query using this column as the datetime index.
+        This must be present on both tables.
+
     schema: Optional[str], default None
         If provided, use this schema when quoting the target table.
         Defaults to `connector.schema`.
+
+    patch_schema: Optional[str], default None
+        If provided, use this schema when quoting the patch table.
+        Defaults to `schema`.
 
     debug: bool, default False
         Verbosity toggle.
@@ -794,23 +1040,65 @@ def get_update_queries(
     -------
     A list of query strings to perform the update operation.
     """
+    from meerschaum.connectors import SQLConnector
     from meerschaum.utils.debug import dprint
-    flavor = connector.flavor
-    if connector.flavor == 'sqlite' and connector.db_version < '3.33.0':
+    from meerschaum.utils.dtypes.sql import DB_FLAVORS_CAST_DTYPES
+    flavor = flavor or (connectable.flavor if isinstance(connectable, SQLConnector) else None)
+    if not flavor:
+        raise ValueError("Provide a flavor if using a SQLAlchemy session.")
+    if (
+        flavor == 'sqlite'
+        and isinstance(connectable, SQLConnector)
+        and connectable.db_version < '3.33.0'
+    ):
         flavor = 'sqlite_delete_insert'
-    base_queries = update_queries.get(flavor, update_queries['default'])
+    flavor_key = (f'{flavor}-upsert' if upsert else flavor)
+    base_queries = update_queries.get(
+        flavor_key,
+        update_queries['default']
+    )
     if not isinstance(base_queries, list):
         base_queries = [base_queries]
-    schema = schema or connector.schema
-    target_table = get_sqlalchemy_table(target, connector, schema=schema)
+    schema = schema or (connectable.schema if isinstance(connectable, SQLConnector) else None)
+    patch_schema = patch_schema or schema
+    target_table_columns = get_table_cols_types(
+        target,
+        connectable,
+        flavor = flavor,
+        schema = schema,
+        debug = debug,
+    )
+    patch_table_columns = get_table_cols_types(
+        patch,
+        connectable,
+        flavor = flavor,
+        schema = patch_schema,
+        debug = debug,
+    )
+
+    patch_cols_str = ', '.join(
+        [
+            sql_item_name(col, flavor)
+            for col in patch_table_columns
+        ]
+    )
+    join_cols_str = ','.join(
+        [
+            sql_item_name(col, flavor)
+            for col in join_cols
+        ]
+    )
+
     value_cols = []
     join_cols_types = []
     if debug:
-        dprint(f"target_table.columns: {dict(target_table.columns)}")
-    for c in target_table.columns:
-        c_name, c_type = c.name, str(c.type)
-        if connector.flavor in DB_FLAVORS_CAST_DTYPES:
-            c_type = DB_FLAVORS_CAST_DTYPES[connector.flavor].get(c_type, c_type)
+        dprint(f"target_table_columns:")
+        mrsm.pprint(target_table_columns)
+    for c_name, c_type in target_table_columns.items():
+        if c_name not in patch_table_columns:
+            continue
+        if flavor in DB_FLAVORS_CAST_DTYPES:
+            c_type = DB_FLAVORS_CAST_DTYPES[flavor].get(c_type.upper(), c_type)
         (
             join_cols_types
             if c_name in join_cols
@@ -819,17 +1107,20 @@ def get_update_queries(
     if debug:
         dprint(f"value_cols: {value_cols}")
 
+    if not value_cols or not join_cols_types:
+        return []
+
     def sets_subquery(l_prefix: str, r_prefix: str):
         return 'SET ' + ',\n'.join([
             (
-                l_prefix + sql_item_name(c_name, connector.flavor, None)
+                l_prefix + sql_item_name(c_name, flavor, None)
                 + ' = '
-                + ('CAST(' if connector.flavor != 'sqlite' else '')
+                + ('CAST(' if flavor != 'sqlite' else '')
                 + r_prefix
-                + sql_item_name(c_name, connector.flavor, None)
-                + (' AS ' if connector.flavor != 'sqlite' else '')
-                + (c_type.replace('_', ' ') if connector.flavor != 'sqlite' else '')
-                + (')' if connector.flavor != 'sqlite' else '')
+                + sql_item_name(c_name, flavor, None)
+                + (' AS ' if flavor != 'sqlite' else '')
+                + (c_type.replace('_', ' ') if flavor != 'sqlite' else '')
+                + (')' if flavor != 'sqlite' else '')
             ) for c_name, c_type in value_cols
         ])
 
@@ -838,33 +1129,48 @@ def get_update_queries(
             (
                 "COALESCE("
                 + l_prefix
-                + sql_item_name(c_name, connector.flavor, None)
+                + sql_item_name(c_name, flavor, None)
                 + ", "
-                + get_null_replacement(c_type, connector.flavor)
+                + get_null_replacement(c_type, flavor)
                 + ")"
                 + ' = '
                 + "COALESCE("
                 + r_prefix
-                + sql_item_name(c_name, connector.flavor, None) 
+                + sql_item_name(c_name, flavor, None) 
                 + ", "
-                + get_null_replacement(c_type, connector.flavor)
+                + get_null_replacement(c_type, flavor)
                 + ")"
             ) for c_name, c_type in join_cols_types
         ])
 
+    target_table_name = sql_item_name(target, flavor, schema)
+    patch_table_name = sql_item_name(patch, flavor, patch_schema)
+    dt_col_name = sql_item_name(datetime_col, flavor, None) if datetime_col else None
+    date_bounds_subquery = (
+        f"""
+        f.{dt_col_name} >= (SELECT MIN({dt_col_name}) FROM {patch_table_name})
+        AND f.{dt_col_name} <= (SELECT MAX({dt_col_name}) FROM {patch_table_name})
+        """
+        if datetime_col
+        else "1 = 1"
+    )
+
     return [
         base_query.format(
             sets_subquery_none = sets_subquery('', 'p.'),
+            sets_subquery_none_excluded = sets_subquery('', 'EXCLUDED.'),
             sets_subquery_f = sets_subquery('f.', 'p.'),
             and_subquery_f = and_subquery('p.', 'f.'),
             and_subquery_t = and_subquery('p.', 't.'),
-            target_table_name = sql_item_name(target, connector.flavor, schema),
-            patch_table_name = sql_item_name(patch, connector.flavor, schema),
+            target_table_name = target_table_name,
+            patch_table_name = patch_table_name,
+            patch_cols_str = patch_cols_str,
+            date_bounds_subquery = date_bounds_subquery,
+            join_cols_str = join_cols_str,
         )
         for base_query in base_queries
     ]
 
-    
 
 def get_null_replacement(typ: str, flavor: str) -> str:
     """
@@ -883,7 +1189,8 @@ def get_null_replacement(typ: str, flavor: str) -> str:
     A value which may stand in place of NULL for this type.
     `'None'` is returned if a value cannot be determined.
     """
-    if 'int' in typ.lower() or typ == 'numeric':
+    from meerschaum.utils.dtypes.sql import DB_FLAVORS_CAST_DTYPES
+    if 'int' in typ.lower() or typ.lower() in ('numeric', 'number'):
         return '-987654321'
     if 'bool' in typ.lower():
         bool_typ = (
@@ -901,7 +1208,7 @@ def get_null_replacement(typ: str, flavor: str) -> str:
         return f'CAST({val_to_cast} AS {bool_typ})'
     if 'time' in typ.lower() or 'date' in typ.lower():
         return dateadd_str(flavor=flavor, begin='1900-01-01')
-    if 'float' in typ.lower() or 'double' in typ.lower():
+    if 'float' in typ.lower() or 'double' in typ.lower() or typ.lower() in ('decimal',):
         return '-987654321.0'
     return ('n' if flavor == 'oracle' else '') + "'-987654321'"
 
@@ -1079,3 +1386,57 @@ def format_cte_subquery(
         + (f' AS {quoted_sub_name}' if flavor != 'oracle' else '') + """
         """
     )
+
+
+def session_execute(
+        session: 'sqlalchemy.orm.session.Session',
+        queries: Union[List[str], str],
+        with_results: bool = False,
+        debug: bool = False,
+    ) -> Union[mrsm.SuccessTuple, Tuple[mrsm.SuccessTuple, List['sqlalchemy.sql.ResultProxy']]]:
+    """
+    Similar to `SQLConnector.exec_queries()`, execute a list of queries
+    and roll back when one fails.
+
+    Parameters
+    ----------
+    session: sqlalchemy.orm.session.Session
+        A SQLAlchemy session representing a transaction.
+
+    queries: Union[List[str], str]
+        A query or list of queries to be executed.
+        If a query fails, roll back the session.
+
+    with_results: bool, default False
+        If `True`, return a list of result objects.
+
+    Returns
+    -------
+    A `SuccessTuple` indicating the queries were successfully executed.
+    If `with_results`, return the `SuccessTuple` and a list of results.
+    """
+    sqlalchemy = mrsm.attempt_import('sqlalchemy')
+    if not isinstance(queries, list):
+        queries = [queries]
+    successes, msgs, results = [], [], []
+    for query in queries:
+        query_text = sqlalchemy.text(query)
+        fail_msg = f"Failed to execute queries."
+        try:
+            result = session.execute(query_text)
+            query_success = result is not None
+            query_msg = "Success" if query_success else fail_msg
+        except Exception as e:
+            query_success = False
+            query_msg = f"{fail_msg}\n{e}"
+            result = None
+        successes.append(query_success)
+        msgs.append(query_msg)
+        results.append(result)
+        if not query_success:
+            session.rollback()
+            break
+    success, msg = all(successes), '\n'.join(msgs)
+    if with_results:
+        return (success, msg), results
+    return success, msg

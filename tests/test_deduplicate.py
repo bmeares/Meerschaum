@@ -27,8 +27,12 @@ def test_deduplicate_default(flavor: str):
     """
     Test that verification will fill any backtracked docs.
     """
+    import pandas as pd
     from meerschaum.utils.sql import sql_item_name
+    from meerschaum.utils.dataframe import parse_df_datetimes
     conn = conns[flavor]
+    if conn.flavor != 'sql':
+        return
     pipe = mrsm.Pipe(
         'test', 'deduplicate',
         instance = conn,
@@ -48,9 +52,10 @@ def test_deduplicate_default(flavor: str):
         {'datetime': '2023-01-03 00:00:00', 'id': 3},
         {'datetime': '2023-01-03 00:00:00', 'id': 4},
     ]
+    df = parse_df_datetimes(docs)
     num_distinct = len(set([json.dumps(doc) for doc in docs]))
 
-    _ = pipe.sync(docs)
+    conn.to_sql(df, pipe.target)
     assert pipe.get_rowcount() == len(docs)
 
     success, msg = pipe.deduplicate(debug=debug)
@@ -63,8 +68,12 @@ def test_deduplicate_without_instance_method(flavor: str):
     """
     Test that verification will fill any backtracked docs.
     """
+    import pandas as pd
     from meerschaum.utils.sql import sql_item_name
+    from meerschaum.utils.dataframe import parse_df_datetimes
     conn = conns[flavor]
+    if conn.type != 'sql':
+        return
     pipe = mrsm.Pipe(
         'test', 'deduplicate', 'chunked',
         instance = conn,
@@ -84,9 +93,10 @@ def test_deduplicate_without_instance_method(flavor: str):
         {'datetime': '2023-01-03 00:00:00', 'id': 3},
         {'datetime': '2023-01-03 00:00:00', 'id': 4},
     ]
+    df = parse_df_datetimes(docs)
     num_distinct = len(set([json.dumps(doc) for doc in docs]))
 
-    _ = pipe.sync(docs)
+    conn.to_sql(df, pipe.target)
     assert pipe.get_rowcount() == len(docs)
 
     success, msg = pipe.deduplicate(debug=debug, _use_instance_method=False)

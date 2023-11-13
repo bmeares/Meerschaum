@@ -40,6 +40,10 @@ STATIC_CONFIG: Dict[str, Any] = {
         },
         'webterm_job_name': '_webterm',
     },
+    'sql': {
+        'internal_schema': '_mrsm_internal',
+        'instance_schema': 'mrsm',
+    },
     'environment': {
         'config': 'MRSM_CONFIG',
         'patch': 'MRSM_PATCH',

@@ -64,6 +64,7 @@ def _complete_delete(
     from meerschaum._internal.shell import default_action_completer
     return default_action_completer(action=(['delete'] + action), **kw)
 
+
 def _delete_pipes(
         debug: bool = False,
         yes: bool = False,
@@ -79,13 +80,26 @@ def _delete_pipes(
     from meerschaum.utils.prompt import yes_no
     from meerschaum.utils.formatting import pprint, highlight_pipes
     from meerschaum.utils.warnings import warn
+    from meerschaum.actions import actions
     pipes = get_pipes(as_list=True, debug=debug, **kw)
     if len(pipes) == 0:
         return False, "No pipes to delete."
+
+    _ = kw.pop('action', None)
+    _ = actions['drop'](
+        ['pipes'],
+        yes = yes,
+        force = force,
+        noask = noask,
+        debug = debug,
+        **kw
+    )
+
     question = "Are you sure you want to delete these pipes? This can't be undone!\n"
     for p in pipes:
         question += f"    - {p}" + "\n"
     question = highlight_pipes(question)
+
     answer = force
     if force:
         answer = True
@@ -98,7 +112,7 @@ def _delete_pipes(
     success_dict = {}
 
     for p in pipes:
-        success_tuple = p.delete(debug=debug)
+        success_tuple = p.delete(drop=False, debug=debug)
         success_dict[p] = success_tuple[1]
         if success_tuple[0]:
             successes += 1

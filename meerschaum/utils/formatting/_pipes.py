@@ -488,6 +488,7 @@ def extract_stats_from_message(message: str) -> Dict[str, int]:
     stats = {
         'inserted': 0,
         'updated': 0,
+        'upserted': 0,
     }
 
     for search_key in list(stats.keys()):
