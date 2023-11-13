@@ -43,8 +43,9 @@ def _log_temporary_tables_creation(
         }
         for table in tables
     ]
+    ### NOTE: We may be running in a temporary context, in which we don't create instance tables.
     queries = [sqlalchemy.insert(temp_tables_table).values(**doc) for doc in docs]
-    results = [self.exec(query, debug=debug) for query in queries]
+    results = [self.exec(query, silent=True, debug=debug) for query in queries]
     success = all(results)
     _in_memory_temp_tables.update(
         {
@@ -125,7 +126,7 @@ def _drop_temporary_tables(self, debug: bool = False) -> SuccessTuple:
             sqlalchemy.delete(temp_tables_table)
             .where(temp_tables_table.c.table.in_(dropped_tables))
         )
-        delete_result = self.exec(delete_query, debug=debug)
+        delete_result = self.exec(delete_query, silent=True, debug=debug)
 
     success = len(failed_tables) == 0
     msg = (
@@ -184,7 +185,7 @@ def _drop_old_temporary_tables(
     ]
     if docs:
         queries = [sqlalchemy.insert(temp_tables_table).values(**doc) for doc in docs]
-        results = [self.exec(query, debug=debug) for query in queries]
+        results = [self.exec(query, silent=True, debug=debug) for query in queries]
         _in_memory_temp_tables.update(
             {
                 table: True

@@ -174,9 +174,10 @@ def fetch_pipes_keys(
     from meerschaum.utils.misc import separate_negation_values
     from meerschaum.utils.sql import OMIT_NULLSFIRST_FLAVORS, table_exists
     from meerschaum.config.static import STATIC_CONFIG
-    sqlalchemy = attempt_import('sqlalchemy')
     import json
     from copy import deepcopy
+    sqlalchemy, sqlalchemy_sql_functions = attempt_import('sqlalchemy', 'sqlalchemy.sql.functions')
+    coalesce = sqlalchemy_sql_functions.coalesce
 
     if connector_keys is None:
         connector_keys = []
@@ -189,7 +190,7 @@ def fetch_pipes_keys(
             (
                 lk
                 if lk not in ('[None]', 'None', 'null')
-                else None
+                else 'None'
             )
             for lk in location_keys
         ]
@@ -202,20 +203,16 @@ def fetch_pipes_keys(
     ### Add three primary keys to params dictionary
     ###   (separated for convenience of arguments).
     cols = {
-        'connector_keys': connector_keys,
-        'metric_key': metric_keys,
-        'location_key': location_keys,
+        'connector_keys': [str(ck) for ck in connector_keys],
+        'metric_key': [str(mk) for mk in metric_keys],
+        'location_key': [str(lk) for lk in location_keys],
     }
 
     ### Make deep copy so we don't mutate this somewhere else.
     parameters = deepcopy(params)
     for col, vals in cols.items():
-        ### Allow for IS NULL to be declared as a single-item list ([None]).
-        if vals == [None]:
-            vals = None
         if vals not in [[], ['*']]:
             parameters[col] = vals
-    cols = {k: v for k, v in cols.items() if v != [None]}
 
     if not table_exists('mrsm_pipes', self, schema=self.instance_schema, debug=debug):
         return []
@@ -233,30 +230,28 @@ def fetch_pipes_keys(
     ### If a param begins with '_', negate it instead.
     _where = [
         (
-            (pipes_tbl.c[key] == val) if not str(val).startswith(negation_prefix)
+            (coalesce(pipes_tbl.c[key], 'None') == val)
+            if not str(val).startswith(negation_prefix)
             else (pipes_tbl.c[key] != key)
         ) for key, val in _params.items()
-            if not isinstance(val, (list, tuple)) and key in pipes_tbl.c
+        if not isinstance(val, (list, tuple)) and key in pipes_tbl.c
     ]
     select_cols = (
-        [pipes_tbl.c.connector_keys, pipes_tbl.c.metric_key, pipes_tbl.c.location_key]
+        [
+            pipes_tbl.c.connector_keys,
+            pipes_tbl.c.metric_key,
+            pipes_tbl.c.location_key,
+        ]
         + ([pipes_tbl.c.parameters] if tags else [])
     )
 
     q = sqlalchemy.select(*select_cols).where(sqlalchemy.and_(True, *_where))
-
-    ### Parse IN params and add OR IS NULL if None in list.
     for c, vals in cols.items():
         if not isinstance(vals, (list, tuple)) or not vals or not c in pipes_tbl.c:
             continue
         _in_vals, _ex_vals = separate_negation_values(vals)
-        ### Include params (positive)
-        q = (
-            q.where(pipes_tbl.c[c].in_(_in_vals)) if None not in _in_vals
-            else q.where(sqlalchemy.or_(pipes_tbl.c[c].in_(_in_vals), pipes_tbl.c[c].is_(None)))
-        ) if _in_vals else q
-        ### Exclude params (negative)
-        q = q.where(pipes_tbl.c[c].not_in(_ex_vals)) if _ex_vals else q
+        q = q.where(coalesce(pipes_tbl.c[c], 'None').in_(_in_vals)) if _in_vals else q
+        q = q.where(coalesce(pipes_tbl.c[c], 'None').not_in(_ex_vals)) if _ex_vals else q
 
     ### Finally, parse tags.
     _in_tags, _ex_tags = separate_negation_values(tags)
@@ -2540,6 +2535,8 @@ def get_alter_columns_queries(
         'float': 'bool',
         'numeric': 'bool',
     }
+    if self.flavor == 'oracle':
+        pd_db_df_aliases['int'] = 'numeric'
 
     altered_cols = {
         col: (db_cols_types.get(col, 'object'), typ)
@@ -2555,7 +2552,7 @@ def get_alter_columns_queries(
             if db_alias in db_typ.lower() and df_alias in df_typ.lower():
                 altered_cols_to_ignore.add(col)
 
-    ### Oracle's bool handling sometimes mixed NUMBER and INT.
+    ### Oracle's bool handling sometimes mixes NUMBER and INT.
     for bool_col in pipe_bool_cols:
         if bool_col not in altered_cols:
             continue

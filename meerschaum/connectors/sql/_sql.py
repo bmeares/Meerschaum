@@ -267,7 +267,8 @@ def read(
                                     except Exception as e:
                                         result = False, traceback.format_exc()
                                         from meerschaum.utils.formatting import get_console
-                                        get_console().print_exception()
+                                        if not silent:
+                                            get_console().print_exception()
 
                                     ### If the chunk fails to process, try it again one more time.
                                     if isinstance(result, tuple) and result[0] is False:
@@ -286,7 +287,8 @@ def read(
         if not silent:
             warn(str(e), stacklevel=3)
         from meerschaum.utils.formatting import get_console
-        get_console().print_exception()
+        if not silent:
+            get_console().print_exception()
 
         return None
 
@@ -315,7 +317,8 @@ def read(
         except Exception as e:
             warn(f"[{self}] Failed to retrieve query results:\n" + str(e), stacklevel=3)
             from meerschaum.utils.formatting import get_console
-            get_console().print_exception()
+            if not silent:
+                get_console().print_exception()
 
     read_chunks = 0
     try:
@@ -331,7 +334,8 @@ def read(
     except Exception as e:
         warn(f"[{self}] Failed to retrieve query results:\n" + str(e), stacklevel=3)
         from meerschaum.utils.formatting import get_console
-        get_console().print_exception()
+        if not silent:
+            get_console().print_exception()
 
         return None
 
@@ -421,9 +425,6 @@ def value(
         try:
             return self.read(query, *args, **kw).iloc[0, 0]
         except Exception as e:
-            #  import traceback
-            #  traceback.print_exc()
-            #  warn(e)
             return None
 
     _close = kw.get('close', True)

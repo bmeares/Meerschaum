@@ -494,7 +494,6 @@ def test_sync_bools_inplace(flavor: str):
     success, msg = inplace_pipe.sync(debug=debug)
     assert success, msg
     df = inplace_pipe.get_data(params={'id': 3})
-    return inplace_pipe
     assert 'true' in str(df['is_bool'][0]).lower()
 
     pipe.sync([{'dt': '2023-01-03', 'id': 3, 'is_bool': None}])

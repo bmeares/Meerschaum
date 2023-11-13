@@ -739,7 +739,7 @@ def build_where(
 
 def table_exists(
         table: str,
-        connector: Optional[meerschaum.connectors.sql.SQLConnector] = None,
+        connector: mrsm.connectors.sql.SQLConnector,
         schema: Optional[str] = None,
         debug: bool = False,
     ) -> bool:
@@ -750,7 +750,7 @@ def table_exists(
     table: str:
         The name of the table in question.
         
-    connector: Optional[meerschaum.connectors.sql.SQLConnector] :
+    connector: mrsm.connectors.sql.SQLConnector
         The connector to the database which holds the table.
 
     schema: Optional[str], default None
@@ -765,18 +765,18 @@ def table_exists(
     A `bool` indicating whether or not the table exists on the database.
 
     """
-    if connector is None:
-        from meerschaum import get_connector
-        connector = get_connector('sql')
-
+    sqlalchemy = mrsm.attempt_import('sqlalchemy')
     schema = schema or connector.schema
+    insp = sqlalchemy.inspect(connector.engine)
+    truncated_table_name = truncate_item_name(str(table), connector.flavor)
+    return insp.has_table(truncated_table_name, schema=schema)
 
-    table_name = sql_item_name(table, connector.flavor, schema)
-    q = exists_queries.get(connector.flavor, exists_queries['default']).format(
-        table=table, table_name=table_name,
-    )
-    exists = connector.exec(q, debug=debug, silent=True) is not None
-    return exists
+    #  table_name = sql_item_name(table, connector.flavor, schema)
+    #  q = exists_queries.get(connector.flavor, exists_queries['default']).format(
+        #  table=table, table_name=table_name,
+    #  )
+    #  exists = connector.exec(q, debug=debug, silent=True) is not None
+    #  return exists
 
 
 def get_sqlalchemy_table(
