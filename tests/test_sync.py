@@ -668,20 +668,20 @@ def test_upsert_sync(flavor: str):
     pipe.delete()
     pipe = Pipe(
         'test', 'upsert', instance=conn,
-        columns = ['datetime', 'id'],
+        columns = {'datetime': 'dt', 'id': 'id'},
         dtypes = {'num': 'numeric'},
         parameters = {'upsert': True},
     )
 
     docs = [
-        {'datetime': '2023-01-01', 'id': 1, 'yes': True, 'num': '1.1'},
-        {'datetime': '2023-01-02', 'id': 2, 'yes': False, 'num': '2'},
+        {'dt': '2023-01-01', 'id': 1, 'yes': True, 'num': '1.1'},
+        {'dt': '2023-01-02', 'id': 2, 'yes': False, 'num': '2'},
     ]
     success, msg = pipe.sync(docs, debug=debug)
     assert success, msg
 
     docs = [
-        {'datetime': '2023-01-02', 'id': 2, 'yes': None, 'num': '2'},
+        {'dt': '2023-01-02', 'id': 2, 'yes': None, 'num': '2'},
     ]
     success, msg = pipe.sync(docs, debug=debug)
     assert success, msg
