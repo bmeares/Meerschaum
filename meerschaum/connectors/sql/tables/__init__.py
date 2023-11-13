@@ -137,6 +137,29 @@ def get_tables(
                 ] if conn.flavor != 'duckdb' else [])),
                 extend_existing = True,
             ),
+            'temp_tables': sqlalchemy.Table(
+                'mrsm_temp_tables',
+                conn.metadata,
+                sqlalchemy.Column(
+                    'date_created',
+                    sqlalchemy.DateTime,
+                    index = True,
+                    nullable = False,
+                ),
+                sqlalchemy.Column(
+                    'table',
+                    sqlalchemy.String(256),
+                    index = index_names,
+                    nullable = False,
+                ),
+                sqlalchemy.Column(
+                    'ready_to_drop',
+                    sqlalchemy.DateTime,
+                    index = False,
+                    nullable = True,
+                ),
+                extend_existing = True,
+            ),
         }
 
         _tables['pipes'] = sqlalchemy.Table(
@@ -206,7 +229,6 @@ def create_tables(
             ))
     if rename_queries:
         conn.exec_queries(rename_queries)
-
 
     try:
         conn.metadata.create_all(bind=conn.engine)

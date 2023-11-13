@@ -408,10 +408,11 @@ def test_sync_bools_inferred(flavor: str):
         {'dt': '2023-01-01', 'is_bool': True},
         {'dt': '2023-01-02', 'is_bool': False},
     ]
-    success, msg = pipe.sync(docs, debug=False)
+    success, msg = pipe.sync(docs, debug=True)
     assert success, msg
 
     df = pipe.get_data()
+    return pipe
     assert 'bool' in str(df.dtypes['is_bool'])
 
     synced_docs = [

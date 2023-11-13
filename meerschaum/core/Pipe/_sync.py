@@ -174,10 +174,11 @@ def sync(
         ### Ensure that Pipe is registered.
         if not p.temporary and p.get_id(debug=debug) is None:
             ### NOTE: This may trigger an interactive session for plugins!
-            register_tuple = p.register(debug=debug)
-            if not register_tuple[0]:
-                p._exists = None
-                return register_tuple
+            register_success, register_msg = p.register(debug=debug)
+            if not register_success:
+                if 'already' not in register_msg:
+                    p._exists = None
+                    return register_success, register_msg
 
         ### If connector is a plugin with a `sync()` method, return that instead.
         ### If the plugin does not have a `sync()` method but does have a `fetch()` method,

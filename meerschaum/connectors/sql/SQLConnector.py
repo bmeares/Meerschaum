@@ -80,7 +80,6 @@ class SQLConnector(Connector):
     )
     from ._uri import from_uri, parse_uri
     from ._instance import (
-        _get_temporary_tables_pipe,
         _log_temporary_tables_creation,
         _drop_temporary_table,
         _drop_temporary_tables,
