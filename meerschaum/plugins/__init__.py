@@ -12,10 +12,12 @@ from meerschaum.utils.threading import Lock, RLock
 from meerschaum.plugins._Plugin import Plugin
 
 _api_plugins: Dict[str, List[Callable[['fastapi.App'], Any]]] = {}
-_sync_hooks: Dict[str, List[Callable[[Any], Any]]] = {}
+_pre_sync_hooks: Dict[str, List[Callable[[Any], Any]]] = {}
+_post_sync_hooks: Dict[str, List[Callable[[Any], Any]]] = {}
 _locks = {
     '_api_plugins': RLock(),
-    '_sync_hooks': RLock(),
+    '_pre_sync_hooks': RLock(),
+    '_post_sync_hooks': RLock(),
     '__path__': RLock(),
     'sys.path': RLock(),
     'internal_plugins': RLock(),
@@ -25,7 +27,7 @@ _locks = {
 __all__ = (
     "Plugin", "make_action", "api_plugin", "import_plugins",
     "reload_plugins", "get_plugins", "get_data_plugins", "add_plugin_argument",
-    "sync_hook",
+    "pre_sync_hook", "post_sync_hook",
 )
 __pdoc__ = {
     'venvs': False, 'data': False, 'stack': False, 'plugins': False,
@@ -84,7 +86,42 @@ def make_action(
     return function
 
 
-def sync_hook(
+def pre_sync_hook(
+        function: Callable[[Any], Any],
+    ) -> Callable[[Any], Any]:
+    """
+    Register a function as a sync hook to be executed right before sync.
+    
+    Parameters
+    ----------
+    function: Callable[[Any], Any]
+        The function to execute right before a sync.
+        
+    Returns
+    -------
+    Another function (this is a decorator function).
+
+    Examples
+    --------
+    >>> from meerschaum.plugins import pre_sync_hook
+    >>>
+    >>> @pre_sync_hook
+    ... def log_sync(pipe, **kwargs):
+    ...     print(f"About to sync {pipe} with kwargs:\n{kwargs}.")
+    >>>
+    """
+    with _locks['_pre_sync_hooks']:
+        try:
+            if function.__module__ not in _pre_sync_hooks:
+                _pre_sync_hooks[function.__module__] = []
+            _pre_sync_hooks[function.__module__].append(function)
+        except Exception as e:
+            from meerschaum.utils.warnings import warn
+            warn(e)
+    return function
+
+
+def post_sync_hook(
         function: Callable[[Any], Any],
     ) -> Callable[[Any], Any]:
     """
@@ -101,18 +138,18 @@ def sync_hook(
 
     Examples
     --------
-    >>> from meerschaum.plugins import sync_hook
+    >>> from meerschaum.plugins import post_sync_hook
     >>>
-    >>> @sync_hook
+    >>> @post_sync_hook
     ... def log_sync(pipe, success_tuple, duration=None, **kwargs):
     ...     print(f"It took {round(duration, 2)} seconds to sync {pipe}.")
     >>>
     """
-    with _locks['_sync_hooks']:
+    with _locks['_post_sync_hooks']:
         try:
-            if function.__module__ not in _sync_hooks:
-                _sync_hooks[function.__module__] = []
-            _sync_hooks[function.__module__].append(function)
+            if function.__module__ not in _post_sync_hooks:
+                _post_sync_hooks[function.__module__] = []
+            _post_sync_hooks[function.__module__].append(function)
         except Exception as e:
             from meerschaum.utils.warnings import warn
             warn(e)

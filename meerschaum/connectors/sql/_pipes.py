@@ -257,7 +257,6 @@ def fetch_pipes_keys(
     tag_groups = [tag.split(',') for tag in tags]
     in_ex_tag_groups = [separate_negation_values(tag_group) for tag_group in tag_groups]
 
-    #  _in_tags, _ex_tags = separate_negation_values(tags)
     ors, nands = [], []
     for _in_tags, _ex_tags in in_ex_tag_groups:
         sub_ands = []

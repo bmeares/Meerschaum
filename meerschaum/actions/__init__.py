@@ -323,7 +323,8 @@ original_actions = actions.copy()
 from meerschaum._internal.entry import entry, get_shell
 import meerschaum.plugins
 make_action = meerschaum.plugins.make_action
-sync_hook = meerschaum.plugins.sync_hook
+pre_sync_hook = meerschaum.plugins.pre_sync_hook
+post_sync_hook = meerschaum.plugins.post_sync_hook
 
 ### Instruct pdoc to skip the `meerschaum.actions.plugins` subdirectory.
 __pdoc__ = {
