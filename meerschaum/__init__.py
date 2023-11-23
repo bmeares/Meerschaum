@@ -22,25 +22,31 @@ import atexit
 from meerschaum.utils.typing import SuccessTuple
 from meerschaum.core.Pipe import Pipe
 from meerschaum.plugins import Plugin
-from meerschaum.utils import get_pipes
 from meerschaum.utils.venv import Venv
+from meerschaum.connectors import get_connector
+from meerschaum.utils import get_pipes
 from meerschaum.utils.formatting import pprint
 from meerschaum._internal.docs import index as __doc__
-from meerschaum.connectors import get_connector
 from meerschaum.config import __version__, get_config
 from meerschaum.utils.packages import attempt_import
 from meerschaum.__main__ import _close_pools
 
 atexit.register(_close_pools)
 
-__pdoc__ = {'gui': False, 'api': False, 'core': False,}
+__pdoc__ = {'gui': False, 'api': False, 'core': False, '_internal': False}
 __all__ = (
-    "Pipe",
     "get_pipes",
     "get_connector",
+    "get_config",
+    "Pipe",
     "Plugin",
     "Venv",
     "Plugin",
     "pprint",
     "attempt_import",
+    "actions",
+    "config",
+    "connectors",
+    "plugins",
+    "utils",
 )

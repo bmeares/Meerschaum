@@ -400,8 +400,14 @@ def _wrap_pipe(
     """
     Wrapper function for handling exceptions.
     """
+    import time
     from meerschaum.connectors import get_connector_plugin
     from meerschaum.utils.venv import Venv
+    from meerschaum.plugins import _sync_hooks
+    from meerschaum.utils.misc import filter_keywords
+
+    sync_start = time.perf_counter()
+    
     try:
         with Venv(get_connector_plugin(pipe.connector), debug=debug):
             if not verify and not deduplicate:
@@ -426,6 +432,11 @@ def _wrap_pipe(
         traceback.print_exception(type(e), e, e.__traceback__)
         print("Error: " + str(e))
         return_tuple = (False, f"Failed to sync {pipe} with exception:" + "\n" + str(e))
+
+    duration = time.perf_counter() - sync_start
+    for plugin_name, sync_hooks in _sync_hooks.items():
+        for sync_hook in sync_hooks:
+            _ = sync_hook(pipe, return_tuple, **filter_keywords(sync_hook, duration=duration))
 
     return return_tuple
 

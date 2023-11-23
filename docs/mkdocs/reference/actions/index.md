@@ -556,7 +556,7 @@ Below are all of the Meerschaum commands and descriptions.
   </tr>
   <tr>
     <td class="tg-yrlk">pipes</td>
-    <td class="tg-3y4y">Verify the contents of pipes using iterative backtracking.<br><br><span style="font-weight:bold">NOTE:</span> Not implemented!<br>See my thesis research for <a href="https://github.com/bmeares/syncx" target="_blank" rel="noopener noreferrer">potential strategies</a>.</td>
+    <td class="tg-3y4y">Verify the contents of pipes using iterative backtracking.<br><br>See my thesis research for <a href="https://github.com/bmeares/syncx" target="_blank" rel="noopener noreferrer">potential strategies</a>.</td>
     <td class="tg-zjt4" colspan="2">• -i, --instance, --mrsm-instance<br>• -c, -C, --connector-keys<br>• -m, -M, --metric-keys<br>• -l, -L, --location-keys<br>• -t, --tags</td>
     <td class="tg-tijg">verify pipes</td>
   </tr>

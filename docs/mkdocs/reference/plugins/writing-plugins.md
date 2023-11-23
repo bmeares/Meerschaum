@@ -89,6 +89,8 @@ Plugins are just modules with functions. This section explains the roles of the 
   Create new commands.
 - **`#!python @api_plugin`**  
   Create new FastAPI endpoints.
+- **`#!python @sync_hook`**  
+  Inject a callback when a pipe is synced by the `sync pipes` action.
 - **`#!python setup(**kwargs)`**  
   Executed during plugin installation or with `mrsm setup plugins <plugin>`.
 
@@ -438,6 +440,10 @@ For your endpoints, arguments will be used as HTTP parameters, and to require th
 
     ![Custom Meerschaum API endpoint which requires a login.](/assets/screenshots/api-plugin-endpoint-login-required.png)
 
+
+### **The `#!python @sync_hook` Decorator**
+
+To insert a pipe-level callback into the `sync pipes` action, decorate your function with `#!python @sync_hook`.
 
 ### **The `#!python setup()` Function**
 

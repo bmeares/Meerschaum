@@ -1,4 +1,4 @@
-<img src="https://meerschaum.io/assets/banner_1920x320.png" alt="Meerschaum banner"/>
+<img src="https://meerschaum.io/assets/banner_1920x320.png" alt="Meerschaum banner" style="width: 100%"/>
 
 | PyPI | GitHub | Info | Stats |
 |---|---|---|---|

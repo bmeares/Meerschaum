@@ -171,7 +171,7 @@ def fetch_pipes_keys(
     """
     from meerschaum.utils.debug import dprint
     from meerschaum.utils.packages import attempt_import
-    from meerschaum.utils.misc import separate_negation_values
+    from meerschaum.utils.misc import separate_negation_values, flatten_list
     from meerschaum.utils.sql import OMIT_NULLSFIRST_FLAVORS, table_exists
     from meerschaum.config.static import STATIC_CONFIG
     import json
@@ -254,25 +254,32 @@ def fetch_pipes_keys(
         q = q.where(coalesce(pipes_tbl.c[c], 'None').not_in(_ex_vals)) if _ex_vals else q
 
     ### Finally, parse tags.
-    _in_tags, _ex_tags = separate_negation_values(tags)
-    ors = []
-    for nt in _in_tags:
-        ors.append(
-            sqlalchemy.cast(
-                pipes_tbl.c['parameters'],
-                sqlalchemy.String,
-            ).like(f'%"tags":%"{nt}"%')
-        )
-    q = q.where(sqlalchemy.and_(sqlalchemy.or_(*ors).self_group())) if ors else q
-    ors = []
-    for xt in _ex_tags:
-        ors.append(
-            sqlalchemy.cast(
-                pipes_tbl.c['parameters'],
-                sqlalchemy.String,
-            ).not_like(f'%"tags":%"{xt}"%')
-        )
-    q = q.where(sqlalchemy.and_(sqlalchemy.or_(*ors).self_group())) if ors else q
+    tag_groups = [tag.split(',') for tag in tags]
+    in_ex_tag_groups = [separate_negation_values(tag_group) for tag_group in tag_groups]
+
+    #  _in_tags, _ex_tags = separate_negation_values(tags)
+    ors, nands = [], []
+    for _in_tags, _ex_tags in in_ex_tag_groups:
+        sub_ands = []
+        for nt in _in_tags:
+            sub_ands.append(
+                sqlalchemy.cast(
+                    pipes_tbl.c['parameters'],
+                    sqlalchemy.String,
+                ).like(f'%"tags":%"{nt}"%')
+            )
+        ors.append(sqlalchemy.and_(*sub_ands))
+
+        for xt in _ex_tags:
+            nands.append(
+                sqlalchemy.cast(
+                    pipes_tbl.c['parameters'],
+                    sqlalchemy.String,
+                ).not_like(f'%"tags":%"{xt}"%')
+            )
+
+    q = q.where(sqlalchemy.and_(*nands)) if nands else q
+    q = q.where(sqlalchemy.or_(*ors)) if ors else q
     loc_asc = sqlalchemy.asc(pipes_tbl.c['location_key'])
     if self.flavor not in OMIT_NULLSFIRST_FLAVORS:
         loc_asc = sqlalchemy.nullsfirst(loc_asc)

@@ -39,6 +39,7 @@ def show(
         'users'      : _show_users,
         'jobs'       : _show_jobs,
         'logs'       : _show_logs,
+        'tags'       : _show_tags,
     }
     return choose_subaction(action, show_options, **kw)
 
@@ -732,6 +733,40 @@ def _show_environment(
         },
         nopretty = nopretty,
     )
+    return True, "Success"
+
+
+def _show_tags(
+        tags: Optional[List[str]] = None,
+        nopretty: bool = False,
+        **kwargs
+    ) -> SuccessTuple:
+    """
+    Show the existing tags and their associated pipes.
+    """
+    from collections import defaultdict
+    import meerschaum as mrsm
+    from meerschaum.utils.formatting import pipe_repr
+    rich_tree = mrsm.attempt_import('rich.tree')
+    tree = rich_tree.Tree('Tags')
+    pipes = mrsm.get_pipes(as_list=True, **kwargs)
+
+    tags_pipes = defaultdict(lambda: [])
+
+    for pipe in pipes:
+        for tag in pipe.tags:
+            tags_pipes[tag].append(pipe)
+
+    sorted_tags = sorted([tag for tag in tags_pipes])
+    for tag in sorted_tags:
+        _pipes = tags_pipes[tag]
+        tag_branch = tree.add(tag)
+        for pipe in _pipes:
+            tag_branch.add(pipe_repr(pipe, as_rich_text=True))
+
+    mrsm.pprint(tree, nopretty=nopretty)
+
+
     return True, "Success"
 
 

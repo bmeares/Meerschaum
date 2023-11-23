@@ -285,8 +285,11 @@ def verify_venv(
         version = get_python_version(python_path)
         if version is None:
             continue
-        major_version = version.split('.', maxsplit=1)[0]
-        minor_version = version.split('.', maxsplit=2)[1]
+        try:
+            major_version = version.split('.', maxsplit=1)[0]
+            minor_version = version.split('.', maxsplit=2)[1]
+        except IndexError:
+            return
         python_versioned_name = (
             'python' + major_version + '.' + minor_version
             + ('' if platform.system() != 'Windows' else '.exe')

@@ -964,7 +964,7 @@ def run_python_package(
         capture_output: bool = False,
         debug: bool = False,
         **kw: Any,
-    ) -> Union[int, subprocess.Popen]:
+    ) -> Union[int, subprocess.Popen, None]:
     """
     Runs an installed python package.
     E.g. Translates to `/usr/bin/python -m [package]`
@@ -1001,7 +1001,7 @@ def run_python_package(
     Returns
     -------
     Either a return code integer or a `subprocess.Popen` object
-
+    (or `None` if a `KeyboardInterrupt` occurs and as_proc is `True`).
     """
     import sys, platform
     import subprocess
@@ -1060,7 +1060,7 @@ def attempt_import(
         check_is_installed: bool = True,
         color: bool = True,
         debug: bool = False
-    ) -> Union['ModuleType', Tuple['ModuleType']]:
+    ) -> Union[Any, Tuple[Any]]:
     """
     Raise a warning if packages are not installed; otherwise import and return modules.
     If `lazy` is `True`, return lazy-imported modules.

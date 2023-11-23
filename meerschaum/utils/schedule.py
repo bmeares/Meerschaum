@@ -18,7 +18,7 @@ def schedule_function(
     ) -> None:
     """
     Block the process and execute the function intermittently according to the frequency.
-    https://red-engine.readthedocs.io/en/stable/condition_syntax/index.html
+    https://rocketry.readthedocs.io/en/stable/condition_syntax/index.html
 
     Parameters
     ----------

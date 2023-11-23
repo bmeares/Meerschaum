@@ -19,6 +19,7 @@ from meerschaum.utils.formatting._pipes import (
     format_pipe_success_tuple,
     print_pipes_results,
     extract_stats_from_message,
+    pipe_repr,
 )
 from meerschaum.utils.threading import Lock, RLock
 
@@ -39,6 +40,9 @@ __all__ = sorted([
     'highlight_pipes',
     'pprint_pipes',
     'make_header',
+    'pipe_repr',
+    'print_pipes_results',
+    'extract_stats_from_message',
 ])
 __pdoc__ = {}
 _locks = {

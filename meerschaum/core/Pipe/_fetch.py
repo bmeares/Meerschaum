@@ -15,8 +15,8 @@ from meerschaum.utils.warnings import warn
 
 def fetch(
         self,
-        begin: Optional[datetime.datetime, str] = '',
-        end: Optional[datetime.datetime] = None,
+        begin: Union[datetime, str, None] = '',
+        end: Optional[datetime] = None,
         check_existing: bool = True,
         sync_chunks: bool = False,
         debug: bool = False,
@@ -27,10 +27,10 @@ def fetch(
 
     Parameters
     ----------
-    begin: Optional[datetime.datetime, str], default '':
+    begin: Union[datetime, str, None], default '':
         If provided, only fetch data newer than or equal to `begin`.
 
-    end: Optional[datetime.datetime], default None:
+    end: Optional[datetime], default None:
         If provided, only fetch data older than or equal to `end`.
 
     check_existing: bool, default True
