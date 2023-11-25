@@ -85,7 +85,7 @@ action_dropdown_row = html.Div(
                                 ),
                                 dbc.Input(
                                     id = 'subaction-dropdown-text',
-                                    placeholder = 'Action arguments',
+                                    placeholder = 'Positional arguments',
                                     className = 'input-text',
                                 ),
                             ],
@@ -107,9 +107,9 @@ action_dropdown_row = html.Div(
                         dcc.Dropdown(
                             id = 'flags-dropdown',
                             multi = True,
-                            placeholder = 'Optional flags',
+                            placeholder = 'Boolean flags',
                             options = [],
-                            value = ['yes'],
+                            value = ['--yes'],
                         ),
                         id = 'flags-dropdown-div',
                         className = 'dbc_dark input-text',
@@ -119,64 +119,43 @@ action_dropdown_row = html.Div(
             ],
         ),
         html.Br(),
-        #  dbc.Row(
-            #  [
-                #  dbc.Col(
-                    #  html.Div(
-                        #  dcc.Dropdown(
-                            #  id = {'type': 'input-flags-dropdown', 'index': 0},
-                            #  multi = False,
-                            #  placeholder = 'Optional flags',
-                            #  options = [],
-                            #  value = ['yes'],
-                        #  ),
-                        #  id = 'flags-dropdown-div',
-                        #  className = 'dbc_dark input-text',
-                    #  ),
-                    #  width = widths['flags'],
-                    #  id = 'input-flags-left-col',
-                #  ),
-                #  dbc.Col(),
-            #  ],
-            #  id = 'input-flags-row',
-            #  className = 'input-text',
-        #  ),
-        #  dbc.Row(
-            #  children = [
-                #  dbc.Col(
-                    #  children = [
-                        #  html.Div(
-                            #  children = [
-                                #  dbc.Button(
-                                    #  'Additional parameters',
-                                    #  id = 'show-arguments-collapse-button',
-                                    #  color = 'link',
-                                    #  size = 'md',
-                                    #  outline = True,
-                                    #  style = {'display': 'none'},
-                                #  ),
-                                #  #  html.Br(),
-                                #  dbc.Collapse(
-                                    #  children = [
-                                        #  dbc.Button(
-                                            #  'Clear',
-                                            #  id = 'clear-begin-end-datepicker-button',
-                                            #  color = 'link',
-                                            #  size = 'sm',
-                                        #  ),
-                                        #  dcc.DatePickerRange(
-                                            #  id = 'begin-end-datepicker',
-                                        #  ),
-                                    #  ],
-                                    #  id = 'arguments-collapse',
-                                #  ),
-                            #  ], ### end of div children
-                        #  ),
-                    #  ], ### end of col children
-                    #  width = widths['arguments'],
-                #  ),
-            #  ], ### end of row children
-        #  ),
+        html.Div(id='input-flags-div'),
+        dbc.Row(
+            children = [
+                dbc.Col(
+                    children = [
+                        html.Div(
+                            children = [
+                                dbc.Button(
+                                    'Additional parameters',
+                                    id = 'show-arguments-collapse-button',
+                                    color = 'link',
+                                    size = 'md',
+                                    outline = True,
+                                    style = {'display': 'none'},
+                                ),
+                                #  html.Br(),
+                                dbc.Collapse(
+                                    children = [
+                                        dbc.Button(
+                                            'Clear',
+                                            id = 'clear-begin-end-datepicker-button',
+                                            color = 'link',
+                                            size = 'sm',
+                                        ),
+                                        dcc.DatePickerRange(
+                                            id = 'begin-end-datepicker',
+                                        ),
+                                    ],
+                                    id = 'arguments-collapse',
+                                ),
+                            ], ### end of div children
+                        ),
+                    ], ### end of col children
+                    width = widths['arguments'],
+                ),
+            ], ### end of row children
+        ),
     ], ### end of parent div children
     id = 'action-div',
 )

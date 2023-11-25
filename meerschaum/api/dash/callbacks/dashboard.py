@@ -36,7 +36,8 @@ from meerschaum.utils.typing import Dict
 from meerschaum.utils.debug import dprint
 from meerschaum.utils.packages import attempt_import, import_html, import_dcc
 from meerschaum.utils.misc import (
-    string_to_dict, get_connector_labels, json_serialize_datetime, filter_keywords
+    string_to_dict, get_connector_labels, json_serialize_datetime, filter_keywords,
+    flatten_list,
 )
 from meerschaum.utils.yaml import yaml
 from meerschaum.actions import get_subactions, actions
@@ -64,6 +65,8 @@ keys_state = (
     State('subaction-dropdown-div', 'hidden'),
     State('subaction-dropdown-text', 'value'),
     State('flags-dropdown', 'value'),
+    State({'type': 'input-flags-dropdown', 'index': ALL}, 'value'),
+    State({'type': 'input-flags-dropdown-text', 'index': ALL}, 'value'),
     State('instance-select', 'value'),
     State('content-div-right', 'children'),
     State('success-alert-div', 'children'),
@@ -78,6 +81,8 @@ omit_flags = {
     'use_bash',
     'trace',
     'allow_shell_job',
+    'action',
+    'mrsm_instance',
 }
 omit_actions = {
     'api',
@@ -257,6 +262,8 @@ dash_app.clientside_callback(
         metric_keys,
         location_keys,
         flags,
+        input_flags,
+        input_flags_texts,
         instance,
     ){
         if (!n_clicks){ return url; }
@@ -277,6 +284,8 @@ dash_app.clientside_callback(
                 metric_keys: metric_keys,
                 location_keys: location_keys,
                 flags: flags,
+                input_flags: input_flags,
+                input_flags_texts: input_flags_texts,
                 instance: instance,
             },
             url
@@ -291,6 +300,8 @@ dash_app.clientside_callback(
     State('metric-keys-dropdown', 'value'),
     State('location-keys-dropdown', 'value'),
     State('flags-dropdown', 'value'),
+    State({'type': 'input-flags-dropdown', 'index': ALL}, 'value'),
+    State({'type': 'input-flags-dropdown-text', 'index': ALL}, 'value'),
     State('instance-select', 'value'),
 )
 
@@ -299,7 +310,6 @@ dash_app.clientside_callback(
     Output('subaction-dropdown', 'value'),
     Output('action-dropdown', 'options'),
     Output('subaction-dropdown', 'options'),
-    Output('flags-dropdown', 'options'),
     Output('subaction-dropdown-div', 'hidden'),
     Input('action-dropdown', 'value'),
     Input('subaction-dropdown', 'value'),
@@ -313,17 +323,17 @@ def update_actions(action: str, subaction: str):
         trigger = None
     _actions_options = sorted([
         {
-            'label' : a.replace('_', ' '),
-            'value' : a,
-            'title' : (textwrap.dedent(f.__doc__).lstrip() if f.__doc__ else 'No help available.'),
+            'label': a.replace('_', ' '),
+            'value': a,
+            'title': (textwrap.dedent(f.__doc__).lstrip() if f.__doc__ else 'No help available.'),
         }
         for a, f in actions.items() if a not in omit_actions
     ], key=lambda k: k['label'])
     _subactions_options = sorted([
         {
-            'label' : sa.replace('_', ' '),
-            'value' : sa,
-            'title' : (textwrap.dedent(f.__doc__).lstrip() if f.__doc__ else 'No help available.'),
+            'label': sa.replace('_', ' '),
+            'value': sa,
+            'title': (textwrap.dedent(f.__doc__).lstrip() if f.__doc__ else 'No help available.'),
         }
         for sa, f in get_subactions(action).items()
     ], key=lambda k: k['label'])
@@ -331,28 +341,121 @@ def update_actions(action: str, subaction: str):
     if subaction is None:
         subaction = _subactions[0] if _subactions else ''
 
-    flags_options = []
-    for a in parser._actions:
-        if a.nargs != 0 or a.dest in omit_flags:
-            continue
-        _op = {'value' : a.dest, 'title' : a.help}
-        for _trigger in a.option_strings:
-            if _trigger.startswith('--'):
-                _op['label'] = _trigger
-                break
-        if not _op.get('label', None):
-            _op['label'] = _op['value']
-        flags_options.append(_op)
-    flags_options = sorted(flags_options, key=lambda k: k['label'])
-
     return (
         action,
         subaction,
         _actions_options,
         _subactions_options,
-        flags_options,
         len(_subactions) == 0,
     )
+
+
+@dash_app.callback(
+    Output('input-flags-div', 'children'),
+    Output('flags-dropdown', 'options'),
+    Input({'type': 'input-flags-dropdown', 'index': ALL}, 'value'),
+    Input({'type': 'input-flags-remove-button', 'index': ALL}, 'n_clicks'),
+    State({'type': 'input-flags-dropdown-text', 'index': ALL}, 'value'),
+)
+def update_flags(input_flags_dropdown_values, n_clicks, input_flags_texts):
+    """
+    Update the flags dropdowns on updates.
+    """
+    ctx = dash.callback_context
+    trigger = ctx.triggered[0]['prop_id'].split('.')[0]
+    trigger_dict = json.loads(trigger) if trigger else {}
+    trigger_type = trigger_dict.get('type', None)
+    taken_input_flags = set(flatten_list(input_flags_dropdown_values))
+
+    def build_flags_options(is_input: bool = False):
+        _flags_options = []
+        for a in parser._actions:
+            acceptable_args = (a.nargs != 0 if not is_input else a.nargs == 0)
+            if acceptable_args or a.dest in omit_flags:
+                continue
+            _op = {'title': a.help}
+            for _trigger in a.option_strings:
+                if _trigger.startswith('--'):
+                    _op['value'] = _trigger
+                    break
+            if not _op.get('value', None):
+                _op['value'] = a.dest
+            _op['label'] = _op['value']
+            _flags_options.append(_op)
+        return sorted(_flags_options, key=lambda k: k['label'])
+
+    def build_row(index: int, val: Optional[str], val_text: Optional[str]):
+        options = [
+            op
+            for op in build_flags_options(is_input=True)
+            if op['value'] == val or op['value'] not in taken_input_flags
+        ]
+        row_children = [
+            dbc.Col(
+                html.Div(
+                    dbc.InputGroup([
+                        dbc.Button(
+                            '❌',
+                            color = 'link',
+                            id = {'type': 'input-flags-remove-button', 'index': index},
+                            size = 'sm',
+                            style = {'text-decoration': 'none'},
+                        ),
+                        dcc.Dropdown(
+                            id = {'type': 'input-flags-dropdown', 'index': index},
+                            multi = False,
+                            placeholder = 'Input flags',
+                            options = options,
+                            value = val,
+                            style = {'flex': 1},
+                        ),
+                    ]),
+                    id = {'type': 'input-flags-dropdown-div', 'index': index},
+                    className = 'dbc_dark',
+                ),
+                sm = 12,
+                md = 5,
+                lg = 5,
+                id = 'input-flags-left-col',
+            ),
+            dbc.Col(
+                html.Div(
+                    dbc.Input(
+                        id = {'type': 'input-flags-dropdown-text', 'index': index},
+                        placeholder = 'Flag value',
+                        className = 'input-text',
+                        value = val_text,
+                    ),
+                    id = {'type': 'input-flags-text-div', 'index': index},
+                    className = 'dbc_dark input-text',
+                ),
+                sm = 12,
+                md = 7,
+                lg = 7,
+            )
+        ]
+        return dbc.Row(
+            row_children,
+            id = {'type': 'input-flags-row', 'index': index},
+            className = 'input-text',
+        )
+
+    rows = [
+        build_row(i, val, val_text)
+        for i, (val, val_text) in enumerate(zip(input_flags_dropdown_values, input_flags_texts))
+    ]
+
+    if trigger_type == 'input-flags-remove-button':
+        remove_index = trigger_dict['index']
+        try:
+            del rows[remove_index]
+        except IndexError:
+            pass
+
+    if not rows or input_flags_dropdown_values[-1]:
+        rows.append(build_row(len(rows), None, None))
+
+    return rows, build_flags_options()
 
 
 @dash_app.callback(
@@ -384,11 +487,15 @@ def update_keys_options(
     Update the keys dropdown menus' options.
     """
     ctx = dash.callback_context
+    trigger = ctx.triggered[0]['prop_id'].split('.')[0]
+    print(f"{trigger=}")
 
     ### Update the instance first.
+    update_instance_keys = False
     if not instance_keys:
         #  instance_keys = get_config('meerschaum', 'web_instance')
         instance_keys = str(get_api_connector())
+        update_instance_keys = True
     instance_alerts = []
     try:
         parse_instance_keys(instance_keys)
@@ -461,7 +568,7 @@ def update_keys_options(
         _locations_options,
         _locations_datalist,
         location_keys,
-        instance_keys,
+        (instance_keys if update_instance_keys else dash.no_update),
         instance_alerts,
     )
 
@@ -471,6 +578,7 @@ dash_app.clientside_callback(
         instance,
         url,
     ){
+        window.instance = instance;
         if (!instance){ return url; }
         iframe = document.getElementById('webterm-iframe');
         if (!iframe){ return url; }
@@ -478,8 +586,9 @@ dash_app.clientside_callback(
             window.instance = instance;
             return url;
         }
-        if (window.instance === instance) { return url; }
         window.instance = instance;
+        console.log('instance', instance);
+        console.log('window.instance', window.instance);
 
         iframe.contentWindow.postMessage(
             {
@@ -490,7 +599,6 @@ dash_app.clientside_callback(
         );
         return url;
     }
-
     """,
     Output('location', 'href'),
     Input('instance-select', 'value'),

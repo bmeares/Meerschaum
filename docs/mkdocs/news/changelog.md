@@ -30,6 +30,9 @@ This is the current release cycle, so stay tuned for future releases!
 - **Add the action `show tags`.**  
   The action `show tags` will now display panels of pipes grouped together by common tags. This is useful for large deployments which share common tags.
 
+- **Add dropdowns and inputs for flags with arguments to the Web Console.**  
+  Leverage the full power of the Meerschaum CLI in the Web Console with the new dynamic flags dropdowns.
+
 - **Fix shell crashes in Docker containers.**  
   Reloading the running Meerschaum session from an interactive shell via a Docker container will no longer cause crashes on custom commands.
 
