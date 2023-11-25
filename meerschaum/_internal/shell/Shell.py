@@ -64,6 +64,10 @@ reserved_completers = {
     'instance', 'repo'
 }
 
+### To handle dynamic reloading, store shell attributes externally.
+### This is because the shell object address gets lost upon reloads.
+shell_attrs = {}
+
 def _insert_shell_actions(
         _shell: Optional['Shell'] = None,
         actions: Optional[Dict[str, Callable[[Any], SuccessTuple]]] = None,
@@ -229,7 +233,7 @@ class Shell(cmd.Cmd):
             pass
 
         from meerschaum.config._paths import SHELL_HISTORY_PATH
-        self.session = prompt_toolkit_shortcuts.PromptSession(
+        shell_attrs['session'] = prompt_toolkit_shortcuts.PromptSession(
             history = prompt_toolkit_history.FileHistory(str(SHELL_HISTORY_PATH)),
             auto_suggest = ValidAutoSuggest(),
             completer = ShellCompleter(),
@@ -260,15 +264,15 @@ class Shell(cmd.Cmd):
                 pass
 
         ### NOTE: custom actions must be added to the self._actions dictionary
-        self._actions = actions
-        self._sysargs = sysargs
-        self._actions['instance'] = self.do_instance
-        self._actions['repo'] = self.do_repo
-        self._actions['debug'] = self.do_debug
-        self._update_bottom_toolbar = True
-        self._old_bottom_toolbar = ''
-        self.debug = False
-        self._reload = True
+        shell_attrs['_actions'] = actions
+        shell_attrs['_sysargs'] = sysargs
+        shell_attrs['_actions']['instance'] = self.do_instance
+        shell_attrs['_actions']['repo'] = self.do_repo
+        shell_attrs['_actions']['debug'] = self.do_debug
+        shell_attrs['_update_bottom_toolbar'] = True
+        shell_attrs['_old_bottom_toolbar'] = ''
+        shell_attrs['debug'] = False
+        shell_attrs['_reload'] = True
         self.load_config()
         self.hidden_commands = []
         ### update hidden commands list (cmd2 only)
@@ -286,7 +290,7 @@ class Shell(cmd.Cmd):
         from meerschaum.utils.misc import remove_ansi
         from meerschaum.utils.formatting import CHARSET, ANSI, UNICODE, colored
         
-        if self.__dict__.get('intro', None) != '':
+        if shell_attrs.get('intro', None) != '':
             self.intro = get_config('shell', CHARSET, 'intro', patch=patch)
             self.intro += '\n' + ''.join(
                 [' '
@@ -297,25 +301,30 @@ class Shell(cmd.Cmd):
             ) + 'v' + version
         else:
             self.intro = ""
-        self._prompt = get_config('shell', CHARSET, 'prompt', patch=patch)
-        self.prompt = self._prompt
-        self.ruler = get_config('shell', CHARSET, 'ruler', patch=patch)
-        self.close_message = get_config('shell', CHARSET, 'close_message', patch=patch)
-        self.doc_header = get_config('shell', CHARSET, 'doc_header', patch=patch)
-        self.undoc_header = get_config('shell', CHARSET, 'undoc_header', patch=patch)
+        shell_attrs['intro'] = self.intro
+        shell_attrs['_prompt'] = get_config('shell', CHARSET, 'prompt', patch=patch)
+        self.prompt = shell_attrs['_prompt']
+        shell_attrs['ruler'] = get_config('shell', CHARSET, 'ruler', patch=patch)
+        self.ruler = shell_attrs['ruler']
+        shell_attrs['close_message'] = get_config('shell', CHARSET, 'close_message', patch=patch)
+        self.close_message = shell_attrs['close_message']
+        shell_attrs['doc_header'] = get_config('shell', CHARSET, 'doc_header', patch=patch)
+        self.doc_header = shell_attrs['doc_header']
+        shell_attrs['undoc_header'] = get_config('shell', CHARSET, 'undoc_header', patch=patch)
+        self.undoc_header = shell_attrs['undoc_header']
 
         if instance is None and self.__dict__.get('instance_keys', None) is None:
             ### create default instance and repository connectors
-            self.instance_keys = remove_ansi(get_config('meerschaum', 'instance', patch=patch))
-            ### self.instance is a stylized version of self.instance_keys
-            self.instance = str(self.instance_keys)
+            shell_attrs['instance_keys'] = remove_ansi(get_config('meerschaum', 'instance', patch=patch))
+            ### instance is a stylized version of instance_keys
+            shell_attrs['instance'] = str(shell_attrs['instance_keys'])
         else:
-            self.instance = instance
-            self.instance_keys = remove_ansi(str(instance))
-        if self.__dict__.get('repo_keys', None) is None:
-            self.repo_keys = get_config('meerschaum', 'default_repository', patch=patch)
+            shell_attrs['instance'] = instance
+            shell_attrs['instance_keys'] = remove_ansi(str(instance))
+        if shell_attrs.get('repo_keys', None) is None:
+            shell_attrs['repo_keys'] = get_config('meerschaum', 'default_repository', patch=patch)
         ### this will be updated later in update_prompt ONLY IF {username} is in the prompt
-        self.username = ''
+        shell_attrs['username'] = ''
 
         if ANSI:
             def apply_colors(attr, key):
@@ -325,48 +334,54 @@ class Shell(cmd.Cmd):
                 )
 
             for attr_key in get_config('shell', 'ansi'):
-                if attr_key not in self.__dict__:
+                if attr_key not in shell_attrs:
                     continue
-                self.__dict__[attr_key] = apply_colors(self.__dict__[attr_key], attr_key)
+                shell_attrs[attr_key] = apply_colors(shell_attrs[attr_key], attr_key)
+                self.__dict__[attr_key] = shell_attrs[attr_key]
 
         ### refresh actions
         _insert_shell_actions(_shell=self, keep_self=True)
 
         ### replace {instance} in prompt with stylized instance string
         self.update_prompt()
-        self._dict_backup = {k:v for k, v in self.__dict__.copy().items() if k != '_dict_backup'}
 
     def insert_actions(self):
         from meerschaum.actions import actions
 
     def update_prompt(self, instance: Optional[str] = None, username: Optional[str] = None):
         from meerschaum.utils.formatting import ANSI, colored
-        cmd.__builtins__['input'] = input_with_sigint(_old_input, self.session, shell=self)
-        prompt = self._prompt
-        mask = prompt
-        self._update_bottom_toolbar = True
+        from meerschaum._internal.entry import _shell, get_shell
 
-        if '{instance}' in self._prompt:
+        cmd.__builtins__['input'] = input_with_sigint(
+            _old_input,
+            shell_attrs['session'],
+            shell = self,
+        )
+        prompt = shell_attrs['_prompt']
+        mask = prompt
+        shell_attrs['_update_bottom_toolbar'] = True
+
+        if '{instance}' in shell_attrs['_prompt']:
             if instance is None:
-                instance = self.instance_keys
-            self.instance = instance
+                instance = shell_attrs['instance_keys']
+            shell_attrs['instance'] = instance
             if ANSI:
-                self.instance = colored(
-                    self.instance, **get_config(
+                shell_attrs['instance'] = colored(
+                    shell_attrs['instance'], **get_config(
                         'shell', 'ansi', 'instance', 'rich'
                     )
                 )
-            prompt = prompt.replace('{instance}', self.instance)
+            prompt = prompt.replace('{instance}', shell_attrs['instance'])
             mask = mask.replace('{instance}', ''.join(['\0' for c in '{instance}']))
 
-        if '{username}' in self._prompt:
+        if '{username}' in shell_attrs['_prompt']:
             if username is None:
                 from meerschaum.utils.misc import remove_ansi
                 from meerschaum.connectors.parse import parse_instance_keys
                 from meerschaum.connectors.sql import SQLConnector
                 try:
                     conn_attrs = parse_instance_keys(
-                        remove_ansi(self.instance_keys), construct=False
+                        remove_ansi(shell_attrs['instance_keys']), construct=False
                     )
                     if 'username' not in conn_attrs:
                         if 'uri' in conn_attrs:
@@ -379,14 +394,14 @@ class Shell(cmd.Cmd):
                     username = str(e)
                 if username is None:
                    username = '(no username)'
-            self.username = (
+            shell_attrs['username'] = (
                 username if not ANSI else
                 colored(username, **get_config('shell', 'ansi', 'username', 'rich'))
             )
-            prompt = prompt.replace('{username}', self.username)
+            prompt = prompt.replace('{username}', shell_attrs['username'])
             mask = mask.replace('{username}', ''.join(['\0' for c in '{username}']))
 
-        remainder_prompt = list(self._prompt)
+        remainder_prompt = list(shell_attrs['_prompt'])
         for i, c in enumerate(mask):
             if c != '\0':
                 _c = c
@@ -394,10 +409,11 @@ class Shell(cmd.Cmd):
                     _c = colored(_c, **get_config('shell', 'ansi', 'prompt', 'rich'))
                 remainder_prompt[i] = _c
         self.prompt = ''.join(remainder_prompt).replace(
-            '{username}', self.username
+            '{username}', shell_attrs['username']
         ).replace(
-            '{instance}', self.instance
+            '{instance}', shell_attrs['instance']
         )
+        shell_attrs['prompt'] = self.prompt
         ### flush stdout
         print("", end="", flush=True)
 
@@ -411,6 +427,9 @@ class Shell(cmd.Cmd):
         """
         ### Preserve the working directory.
         old_cwd = os.getcwd()
+
+        from meerschaum._internal.entry import _shell, get_shell
+        self = get_shell(sysargs=shell_attrs['_sysargs'], debug=shell_attrs.get('debug', False))
 
         ### make a backup of line for later
         original_line = deepcopy(line)
@@ -427,7 +446,7 @@ class Shell(cmd.Cmd):
         ### if the user specifies, clear the screen before executing any commands
         if _clear_screen:
             from meerschaum.utils.formatting._shell import clear_screen
-            clear_screen(debug=self.debug)
+            clear_screen(debug=shell_attrs['debug'])
 
         ### return blank commands (spaces break argparse)
         if original_line is None or len(str(line).strip()) == 0:
@@ -456,11 +475,10 @@ class Shell(cmd.Cmd):
         args['shell'] = True
         args['line'] = line
 
-
         ### if debug is not set on the command line,
         ### default to shell setting
         if not args.get('debug', False):
-            args['debug'] = self.debug
+            args['debug'] = shell_attrs['debug']
 
         ### Make sure an action was provided.
         if not args.get('action', None):
@@ -479,17 +497,19 @@ class Shell(cmd.Cmd):
         from meerschaum.actions import get_main_action_name
         main_action_name = get_main_action_name(args['action'])
         if main_action_name is None:
-            if not hasattr(self, 'do_'+args['action'][0]):
+            if not hasattr(self, 'do_' + args['action'][0]):
                 args['action'].insert(0, 'sh')
                 main_action_name = 'sh'
+            else:
+                main_action_name = args['action'][0]
 
         ### if no instance is provided, use current shell default,
         ### but not for the 'api' command (to avoid recursion)
         if 'mrsm_instance' not in args and main_action_name != 'api':
-            args['mrsm_instance'] = str(self.instance_keys)
+            args['mrsm_instance'] = str(shell_attrs['instance_keys'])
 
         if 'repository' not in args and main_action_name != 'api':
-            args['repository'] = str(self.repo_keys)
+            args['repository'] = str(shell_attrs['repo_keys'])
 
         ### parse out empty strings
         if args['action'][0].strip("\"'") == '':
@@ -501,21 +521,25 @@ class Shell(cmd.Cmd):
             args['action'] = ['start', 'jobs'] + args['action']
             main_action_name = 'start'
 
-        positional_only = (main_action_name not in self._actions)
+        positional_only = (main_action_name not in shell_attrs['_actions'])
         if positional_only:
             return original_line
 
         from meerschaum._internal.entry import entry_with_args
 
         try:
-            success_tuple = entry_with_args(_actions=self._actions, **args)
+            success_tuple = entry_with_args(_actions=shell_attrs['_actions'], **args)
+            #  success_tuple = entry_with_args(**args)
         except Exception as e:
             success_tuple = False, str(e)
 
         from meerschaum.utils.formatting import print_tuple
         if isinstance(success_tuple, tuple):
             print_tuple(
-                success_tuple, skip_common=(not self.debug), upper_padding=1, lower_padding=0,
+                success_tuple,
+                skip_common = (not shell_attrs['debug']),
+                upper_padding = 1,
+                lower_padding = 0,
             )
 
         ### Restore the old working directory.
@@ -525,9 +549,9 @@ class Shell(cmd.Cmd):
         return ""
 
     def postcmd(self, stop : bool = False, line : str = ""):
-        _reload = self._reload
+        _reload = shell_attrs['_reload']
         if _reload:
-            self.load_config(self.instance)
+            self.load_config(shell_attrs['instance'])
         if stop:
             return True
 
@@ -555,15 +579,15 @@ class Shell(cmd.Cmd):
         except (IndexError, AttributeError):
             state = ''
         if state == '':
-            self.debug = not self.debug
+            shell_attrs['debug'] = not shell_attrs['debug']
         elif state.lower() in on_commands:
-            self.debug = True
+            shell_attrs['debug'] = True
         elif state.lower() in off_commands:
-            self.debug = False
+            shell_attrs['debug'] = False
         else:
             info(f"Unknown state '{state}'. Ignoring...")
 
-        info(f"Debug mode is {'on' if self.debug else 'off'}.")
+        info(f"Debug mode is {'on' if shell_attrs['debug'] else 'off'}.")
 
     def do_instance(
             self,
@@ -619,7 +643,7 @@ class Shell(cmd.Cmd):
         else:
             conn_keys = instance_keys
 
-        self.instance_keys = conn_keys
+        shell_attrs['instance_keys'] = conn_keys
 
         self.update_prompt(instance=conn_keys)
         info(f"Default instance for the current shell: {conn_keys}")
@@ -683,7 +707,7 @@ class Shell(cmd.Cmd):
         if conn is None or not conn:
             conn = get_connector('api', debug=debug)
 
-        self.repo_keys = str(conn)
+        shell_attrs['repo_keys'] = str(conn)
 
         info(f"Default repository for the current shell: {conn}")
         return True, "Success"
@@ -712,9 +736,9 @@ class Shell(cmd.Cmd):
         args = parse_line(line)
         if len(args['action']) == 0:
             del args['action']
-            self._actions['show'](['actions'], **args)
+            shell_attrs['_actions']['show'](['actions'], **args)
             return ""
-        if args['action'][0] not in self._actions:
+        if args['action'][0] not in shell_attrs['_actions']:
             try:
                 print(textwrap.dedent(getattr(self, f"do_{args['action'][0]}").__doc__))
             except Exception as e:
@@ -780,17 +804,21 @@ class Shell(cmd.Cmd):
         Patch builtin cmdloop with my own input (defined below).
         """
         import signal, os
-        cmd.__builtins__['input'] = input_with_sigint(_old_input, self.session, shell=self)
+        cmd.__builtins__['input'] = input_with_sigint(
+            _old_input,
+            shell_attrs['session'],
+            shell = self,
+        )
 
         ### if the user specifies, clear the screen before initializing the shell
         if _clear_screen:
             from meerschaum.utils.formatting._shell import clear_screen
-            clear_screen(debug=self.debug)
+            clear_screen(debug=shell_attrs['debug'])
 
         ### if sysargs are provided, skip printing the intro and execute instead
-        if self._sysargs:
-            self.intro = ""
-            self.precmd(' '.join(self._sysargs))
+        if shell_attrs['_sysargs']:
+            shell_attrs['intro'] = ""
+            self.precmd(' '.join(shell_attrs['_sysargs']))
 
     def postloop(self):
         print('\n' + self.close_message)
@@ -816,24 +844,24 @@ def input_with_sigint(_input, session, shell: Optional[Shell] = None):
         nonlocal last_connected
         if not get_config('shell', 'bottom_toolbar', 'enabled'):
             return None
-        if not shell._update_bottom_toolbar and platform.system() == 'Windows':
-            return shell._old_bottom_toolbar
+        if not shell_attrs['_update_bottom_toolbar'] and platform.system() == 'Windows':
+            return shell_attrs['_old_bottom_toolbar']
         size = os.get_terminal_size()
         num_cols, num_lines = size.columns, size.lines
 
         instance_colored = (
             colored(
-                shell.instance_keys, 'on ' + get_config(
+                shell_attrs['instance_keys'], 'on ' + get_config(
                     'shell', 'ansi', 'instance', 'rich', 'style'
                 )
-            ) if ANSI else colored(shell.instance_keys, 'on white')
+            ) if ANSI else colored(shell_attrs['instance_keys'], 'on white')
         )
         repo_colored = (
-            colored(shell.repo_keys, 'on ' + get_config('shell', 'ansi', 'repo', 'rich', 'style'))
-            if ANSI else colored(shell.repo_keys, 'on white')
+            colored(shell_attrs['repo_keys'], 'on ' + get_config('shell', 'ansi', 'repo', 'rich', 'style'))
+            if ANSI else colored(shell_attrs['repo_keys'], 'on white')
         )
         try:
-            typ, label = shell.instance_keys.split(':')
+            typ, label = shell_attrs['instance_keys'].split(':')
             connected = typ in connectors and label in connectors[typ]
         except Exception as e:
             connected = False
@@ -859,9 +887,9 @@ def input_with_sigint(_input, session, shell: Optional[Shell] = None):
         )
         buffer = (' ' * buffer_size) if buffer_size > 0 else '\n '
         text = left + buffer + right
-        shell._old_bottom_toolbar = prompt_toolkit_formatted_text.ANSI(text)
-        shell._update_bottom_toolbar = False
-        return shell._old_bottom_toolbar
+        shell_attrs['_old_bottom_toolbar'] = prompt_toolkit_formatted_text.ANSI(text)
+        shell_attrs['_update_bottom_toolbar'] = False
+        return shell_attrs['_old_bottom_toolbar']
 
     def _patched_prompt(*args):
         _args = []

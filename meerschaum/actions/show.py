@@ -7,7 +7,8 @@ This module contains functions for printing elements.
 """
 
 from __future__ import annotations
-from meerschaum.utils.typing import SuccessTuple, Union, Sequence, Any, Optional, List, Dict
+import meerschaum as mrsm
+from meerschaum.utils.typing import SuccessTuple, Union, Sequence, Any, Optional, List, Dict, Tuple
 
 def show(
         action: Optional[List[str]] = None,
@@ -738,34 +739,69 @@ def _show_environment(
 
 def _show_tags(
         tags: Optional[List[str]] = None,
+        workers: Optional[int] = None,
         nopretty: bool = False,
         **kwargs
     ) -> SuccessTuple:
     """
     Show the existing tags and their associated pipes.
     """
+    import json
     from collections import defaultdict
     import meerschaum as mrsm
-    from meerschaum.utils.formatting import pipe_repr
-    rich_tree = mrsm.attempt_import('rich.tree')
-    tree = rich_tree.Tree('Tags')
+    from meerschaum.utils.formatting import pipe_repr, UNICODE, ANSI
+    from meerschaum.utils.pool import get_pool
+    from meerschaum.config import get_config
+    rich_tree, rich_panel, rich_text, rich_console, rich_columns = (
+        mrsm.attempt_import('rich.tree', 'rich.panel', 'rich.text', 'rich.console', 'rich.columns')
+    )
+    panel = rich_panel.Panel.fit('Tags')
+    tree = rich_tree.Tree(panel)
     pipes = mrsm.get_pipes(as_list=True, **kwargs)
+    pool = get_pool(workers=workers)
+    tag_prefix = get_config('formatting', 'pipes', 'unicode', 'icons', 'tag') if UNICODE else ''
+    tag_style = get_config('formatting', 'pipes', 'ansi', 'styles', 'tags') if ANSI else None
 
     tags_pipes = defaultdict(lambda: [])
+    gather_pipe_tags = lambda pipe: (pipe, (pipe.tags or []))
 
-    for pipe in pipes:
-        for tag in pipe.tags:
+    pipes_tags = dict(pool.map(gather_pipe_tags, pipes))
+
+    for pipe, tags in pipes_tags.items():
+        for tag in tags:
             tags_pipes[tag].append(pipe)
 
+    columns = []
     sorted_tags = sorted([tag for tag in tags_pipes])
     for tag in sorted_tags:
         _pipes = tags_pipes[tag]
-        tag_branch = tree.add(tag)
-        for pipe in _pipes:
-            tag_branch.add(pipe_repr(pipe, as_rich_text=True))
+        tag_text = (
+            rich_text.Text(tag_prefix)
+            + rich_text.Text(
+                tag,
+                style = tag_style,
+            )
+        )
+        pipes_texts = [
+            pipe_repr(pipe, as_rich_text=True)
+            for pipe in _pipes
+        ]
+        tag_group = rich_console.Group(*pipes_texts)
+        tag_panel = rich_panel.Panel(tag_group, title=tag_text, title_align='left')
+        columns.append(tag_panel)
 
-    mrsm.pprint(tree, nopretty=nopretty)
-
+    if not nopretty:
+        mrsm.pprint(
+            rich_columns.Columns(
+                columns,
+                equal = True,
+            ),
+        )
+    else:
+        for tag, _pipes in tags_pipes.items():
+            print(tag)
+            for pipe in _pipes:
+                print(json.dumps(pipe.meta))
 
     return True, "Success"
 

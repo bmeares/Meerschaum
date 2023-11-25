@@ -56,6 +56,8 @@ STATIC_CONFIG: Dict[str, Any] = {
         'dep_group': 'MRSM_DEP_GROUP',
         'home': 'MRSM_HOME',
         'src': 'MRSM_SRC',
+        'uid': 'MRSM_UID',
+        'gid': 'MRSM_GID',
         'noask': 'MRSM_NOASK',
         'id': 'MRSM_SERVER_ID',
         'uri_regex': r'MRSM_([a-zA-Z0-9]*)_(\d*[a-zA-Z][a-zA-Z0-9-_+]*$)',

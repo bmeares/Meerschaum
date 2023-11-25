@@ -9,7 +9,7 @@ Functions for managing packages and virtual environments reside here.
 from __future__ import annotations
 
 import importlib.util, os, pathlib
-from meerschaum.utils.typing import Any, List, SuccessTuple, Optional, Union, Tuple, Dict
+from meerschaum.utils.typing import Any, List, SuccessTuple, Optional, Union, Tuple, Dict, Iterable
 from meerschaum.utils.threading import Lock, RLock
 from meerschaum.utils.packages._packages import packages, all_packages, get_install_names
 from meerschaum.utils.venv import (
@@ -1494,16 +1494,18 @@ def import_children(
     return members
 
 
+_reload_module_cache = {}
 def reload_package(
         package: str,
+        skip_submodules: Optional[List[str]] = None,
         lazy: bool = False,
         debug: bool = False,
         **kw: Any
-    ) -> 'ModuleType':
+    ):
     """
     Recursively load a package's subpackages, even if they were not previously loaded.
     """
-    import pydoc
+    import sys
     if isinstance(package, str):
         package_name = package
     else:
@@ -1511,7 +1513,44 @@ def reload_package(
             package_name = package.__name__
         except Exception as e:
             package_name = str(package)
-    return pydoc.safeimport(package_name, forceload=1)
+
+    skip_submodules = skip_submodules or []
+    if 'meerschaum.utils.packages' not in skip_submodules:
+        skip_submodules.append('meerschaum.utils.packages')
+    def safeimport():
+        subs = [
+            m for m in sys.modules
+            if m.startswith(package_name + '.')
+        ]
+        subs_to_skip = []
+        for skip_mod in skip_submodules:
+            for mod in subs:
+                if mod.startswith(skip_mod):
+                    subs_to_skip.append(mod)
+                    continue
+
+        subs = [m for m in subs if m not in subs_to_skip]
+        for module_name in subs:
+            _reload_module_cache[module_name] = sys.modules.pop(module_name, None)
+        if not subs_to_skip:
+            _reload_module_cache[package_name] = sys.modules.pop(package_name, None)
+
+        return _import_module(package_name)
+
+    return safeimport()
+
+
+def reload_meerschaum(debug: bool = False) -> SuccessTuple:
+    """
+    Reload the currently loaded Meercshaum modules, refreshing plugins and shell configuration.
+    """
+    reload_package('meerschaum', skip_submodules=['meerschaum._internal.shell'])
+
+    from meerschaum.plugins import reload_plugins
+    from meerschaum._internal.shell.Shell import _insert_shell_actions
+    reload_plugins(debug=debug)
+    _insert_shell_actions()
+    return True, "Success"
 
 
 def is_installed(

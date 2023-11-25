@@ -1,8 +1,8 @@
 #! /usr/bin/env bash
 
 ### Create the user and home directory.
-groupadd -r $MRSM_USER \
-  && useradd -r -g $MRSM_USER $MRSM_USER \
+groupadd -r $MRSM_USER -g $MRSM_GID \
+  && useradd $MRSM_USER -u $MRSM_UID -g $MRSM_GID -m -s /bin/bash \
   && mkdir -p $MRSM_HOME \
   && mkdir -p $MRSM_WORK_DIR \
   && chown -R $MRSM_USER:$MRSM_USER $MRSM_HOME \
@@ -83,6 +83,8 @@ if ! shopt -oq posix; then
   fi
 fi
 
+alias sleep-forever="trap exit TERM; while true; do sleep 1; done"
+export PATH="$PATH:$HOME/.local/bin"
 
 RESET="\e[0m"
 export PS1="\n \[$(tput bold)\]\u\[$(tput sgr0)\]\[$(tput sgr0)\]\[\033[38;5;7m\]@\[$(tput sgr0)\]\[\033[38;5;183m\]\[$(tput bold)\]\H\[$(tput sgr0)\]\[$(tput sgr0)\]\[\033[38;5;15m\]\n \[$(tput sgr0)\]\[\033[38;5;2m\][\[$(tput sgr0)\]\[\033[38;5;15m\] \[$(tput sgr0)\]\[\033[38;5;6m\]\W\[$(tput sgr0)\]\[\033[38;5;15m\] \[$(tput sgr0)\]\[\033[38;5;2m\]]\[$(tput sgr0)\]\[\033[38;5;15m\] \[$(tput sgr0)\]\[\033[38;5;10m\]\\$\[$(tput sgr0)\]\[\033[38;5;15m\] \[$(tput sgr0)\]"

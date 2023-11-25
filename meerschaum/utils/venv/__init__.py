@@ -362,7 +362,24 @@ def init_venv(
         return True
 
     import sys, platform, os, pathlib, shutil
+    from meerschaum.config.static import STATIC_CONFIG
     from meerschaum.config._paths import VIRTENV_RESOURCES_PATH
+    venv_path = VIRTENV_RESOURCES_PATH / venv
+    docker_home_venv_path = pathlib.Path('/home/meerschaum/venvs/mrsm')
+
+    runtime_env_var = STATIC_CONFIG['environment']['runtime']
+    if (
+        not force
+        and venv == 'mrsm'
+        and os.environ.get(runtime_env_var, None) == 'docker'
+        and docker_home_venv_path.exists()
+    ):
+        shutil.move(docker_home_venv_path, venv_path)
+        if verify:
+            verify_venv(venv, debug=debug)
+            verified_venvs.add(venv)
+        return True
+
     from meerschaum.utils.packages import run_python_package, attempt_import
     global tried_virtualenv
     try:
@@ -372,7 +389,6 @@ def init_venv(
         _venv = None
         virtualenv = None
     
-    venv_path = VIRTENV_RESOURCES_PATH / venv
 
     _venv_success = False
     if _venv is not None:

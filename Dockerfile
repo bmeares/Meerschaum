@@ -2,23 +2,27 @@ FROM python:3.11-slim-bookworm AS runtime
 
 ARG dep_group=full \
     mrsm_user=meerschaum \
-    mrsm_root_dir=/meerschaum
+    mrsm_root_dir=/meerschaum \
+    mrsm_uid=1000 \
+    mrsm_gid=1000
 
 ENV MRSM_USER=$mrsm_user \
     MRSM_DEP_GROUP=$dep_group \
     MRSM_USER=meerschaum \
+    MRSM_UID=$mrsm_uid \
+    MRSM_GID=$mrsm_gid \
     MRSM_ROOT_DIR=$mrsm_root_dir \
     MRSM_WORK_DIR=$mrsm_root_dir \
-    MRSM_VENVS_DIR=/home/meerschaum/venvs \
     MRSM_RUNTIME=docker \
     MRSM_HOME=/home/meerschaum \
+    HOME=/home/meerschaum \
     MRSM_SRC=/home/meerschaum/src \
-    PATH="/home/meerschaum/.local/bin/:$PATH"
+    PATH=$PATH:/home/meerschaum/.local/bin
 
 ### Layer 1: Install static dependencies.
 ### Should not rebuild cache unless the base Python image has changed.
-COPY scripts/docker/image_setup.sh /setup/
-RUN /setup/image_setup.sh && rm -rf /setup/
+COPY scripts/docker/image_setup.sh scripts/docker/dev.sh scripts/docker/sleep_forever.sh /scripts/
+RUN /scripts/image_setup.sh
 
 ### From this point on, run as a non-privileged user for security.
 USER $MRSM_USER
@@ -38,7 +42,7 @@ RUN python -m pip install --user --no-cache-dir $MRSM_SRC && rm -rf $MRSM_SRC
 
 ### Start up Meerschaum to bootstrap its environment.
 RUN cd $MRSM_WORK_DIR && [ "$MRSM_DEP_GROUP" != "minimal" ] && \
-  mrsm show version || \
-  mrsm --version
+  MRSM_VENVS_DIR=$MRSM_HOME/venvs python -m meerschaum show version || \
+  MRSM_VENVS_DIR=$MRSM_HOME/venvs python -m meerschaum --version
 
 ENTRYPOINT ["python", "-m", "meerschaum"]

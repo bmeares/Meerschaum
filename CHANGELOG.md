@@ -27,6 +27,18 @@ This is the current release cycle, so stay tuned for future releases!
       mrsm.pprint(return_tuple)
   ```
 
+- **Add the action `show tags`.**  
+  The action `show tags` will now display panels of pipes grouped together by common tags. This is useful for large deployments which share common tags.
+
+- **Fix shell crashes in Docker containers.**  
+  Reloading the running Meerschaum session from an interactive shell via a Docker container will no longer cause crashes on custom commands.
+
+- **Improve reloading times.**  
+  Reloading the running Meerschaum session has been sped up by several seconds (due to skipping the internal shell modules).
+
+- **Improve virtual environments in the Docker image.**  
+  Initial startup of Docker containers on a fresh persistent volume has been sped up due to preloading the default virtual environment creation. Additionally, the environment variable `$MRSM_VENVS_DIR` has been unset, reverting the virtual environments to be stored under `/meerschaum/venvs`.
+
 ### v2.1.1 – v2.1.2
 
 - **Add `upsert` for high-performance pipes.**  
