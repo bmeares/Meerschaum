@@ -291,7 +291,6 @@ __all__ = ['actions', 'get_subactions', 'get_action', 'get_main_action_name', 'g
 ### functions that do not begin with '_' from all submodules.
 from inspect import getmembers, isfunction
 actions = {}
-"This docstring will be replaced in __pdoc__ at the end of this file."
 
 for module in modules:
     ### A couple important things happening here:
@@ -324,6 +323,8 @@ original_actions = actions.copy()
 from meerschaum._internal.entry import entry, get_shell
 import meerschaum.plugins
 make_action = meerschaum.plugins.make_action
+pre_sync_hook = meerschaum.plugins.pre_sync_hook
+post_sync_hook = meerschaum.plugins.post_sync_hook
 
 ### Instruct pdoc to skip the `meerschaum.actions.plugins` subdirectory.
 __pdoc__ = {

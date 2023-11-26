@@ -18,7 +18,7 @@ def get_pipes(
         connector_keys: Union[str, List[str], None] = None,
         metric_keys: Union[str, List[str], None] = None,
         location_keys: Union[str, List[str], None] = None,
-        tags: Optional[List[str], None] = None,
+        tags: Optional[List[str]] = None,
         params: Optional[Dict[str, Any]] = None,
         mrsm_instance: Union[str, InstanceConnector, None] = None,
         instance: Union[str, InstanceConnector, None] = None,

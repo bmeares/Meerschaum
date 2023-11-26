@@ -35,6 +35,7 @@ default_formatting_config = {
         'running'          : '🟢',
         'paused'           : '🟡',
         'stopped'          : '🔴',
+        'tag'              : '🏷️',
     },
     'pipes'                : {
         'unicode'          : {
@@ -43,6 +44,7 @@ default_formatting_config = {
                 'metric'   : 'MRSM{formatting:emoji:metric} ',
                 'location' : 'MRSM{formatting:emoji:location} ',
                 'key'      : 'MRSM{formatting:emoji:key} ',
+                'tag'      : 'MRSM{formatting:emoji:tag} ',
             },
         },
         'ascii'            : {
@@ -51,6 +53,7 @@ default_formatting_config = {
                 'metric'   : '',
                 'location' : '',
                 'key'      : '',
+                'tag'      : '',
             },
         },
         'ansi'             : {
@@ -61,6 +64,7 @@ default_formatting_config = {
                 'key'      : '',
                 'guide'    : 'dim',
                 'none'     : 'black on magenta',
+                'tags'     : 'bold yellow underline',
             },
         },
         '__repr__'         : {

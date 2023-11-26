@@ -62,7 +62,15 @@ window.addEventListener(
     }
     flags = event.data['flags'] ? event.data['flags'] : [];
     for (fl of flags){
-        flags_str += " --" + fl;
+        flags_str += " " + fl;
+    }
+    // NOTE: Input flags are not quoted to allow for multiple arguments.
+    input_flags = event.data['input_flags'] ? event.data['input_flags'] : [];
+    for (const [index, fl] of input_flags.entries()){
+        if (!fl){ continue; }
+        fl_val = event.data['input_flags_texts'][index];
+        if (!fl_val){ continue; }
+        flags_str += " " + fl + " " + fl_val;
     }
 
     line = (

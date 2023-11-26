@@ -283,8 +283,8 @@ class Plugin:
         import tarfile
         import re
         import ast
-        from meerschaum.plugins import reload_plugins, sync_plugins_symlinks
-        from meerschaum.utils.packages import attempt_import, determine_version, reload_package
+        from meerschaum.plugins import sync_plugins_symlinks
+        from meerschaum.utils.packages import attempt_import, determine_version, reload_meerschaum
         from meerschaum.utils.venv import init_venv
         from meerschaum.utils.misc import safely_extract_tar
         old_cwd = os.getcwd()
@@ -415,8 +415,7 @@ class Plugin:
         if '_module' in self.__dict__:
             del self.__dict__['_module']
         init_venv(venv=self.name, force=True, debug=debug)
-        reload_package('meerschaum')
-        reload_plugins([self.name], debug=debug)
+        reload_meerschaum(debug=debug)
 
         ### if we've already failed, return here
         if not success or abort:
@@ -493,8 +492,8 @@ class Plugin:
         """
         Remove a plugin, its virtual environment, and archive file.
         """
-        from meerschaum.utils.packages import reload_package
-        from meerschaum.plugins import reload_plugins, sync_plugins_symlinks
+        from meerschaum.utils.packages import reload_meerschaum
+        from meerschaum.plugins import sync_plugins_symlinks
         from meerschaum.utils.warnings import warn, info
         warnings_thrown_count: int = 0
         max_warnings: int = 3
@@ -529,8 +528,7 @@ class Plugin:
         success = warnings_thrown_count < max_warnings
         sync_plugins_symlinks(debug=debug)
         self.deactivate_venv(force=True, debug=debug)
-        reload_package('meerschaum')
-        reload_plugins(debug=debug)
+        reload_meerschaum(debug=debug)
         return success, (
             f"Successfully uninstalled plugin '{self}'." if success
             else f"Failed to uninstall plugin '{self}'."

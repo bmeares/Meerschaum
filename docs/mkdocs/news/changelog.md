@@ -4,6 +4,44 @@
 
 This is the current release cycle, so stay tuned for future releases!
 
+### v2.1.3
+
+- **Add the decorators `@pre_sync_hook` and `@post_sync_hook`.**  
+  The new decorators `@pre_sync_hook` and `@post_sync_hook` let you intercept a Pipe immediately before and after a sync, capturing its return tuple and the duration in seconds.
+
+  ```python
+  import meerschaum as mrsm
+  from meerschaum.plugins import pre_sync_hook, post_sync_hook
+
+  @pre_sync_hook
+  def prepare_for_sync(pipe: mrsm.Pipe, **kwargs):
+      print(f"About to sync {pipe} with kwargs:\n{kwargs}")
+
+  @post_sync_hook
+  def log_sync(
+          pipe: mrsm.Pipe,
+          return_tuple: mrsm.SuccessTuple,
+          duration: float = 0.0
+      ):
+      print(f"It took {round(duration, 2)} seconds to sync {pipe} with result:")
+      mrsm.pprint(return_tuple)
+  ```
+
+- **Add the action `show tags`.**  
+  The action `show tags` will now display panels of pipes grouped together by common tags. This is useful for large deployments which share common tags.
+
+- **Add dropdowns and inputs for flags with arguments to the Web Console.**  
+  Leverage the full power of the Meerschaum CLI in the Web Console with the new dynamic flags dropdowns.
+
+- **Fix shell crashes in Docker containers.**  
+  Reloading the running Meerschaum session from an interactive shell via a Docker container will no longer cause crashes on custom commands.
+
+- **Improve reloading times.**  
+  Reloading the running Meerschaum session has been sped up by several seconds (due to skipping the internal shell modules).
+
+- **Improve virtual environments in the Docker image.**  
+  Initial startup of Docker containers on a fresh persistent volume has been sped up due to preloading the default virtual environment creation. Additionally, the environment variable `$MRSM_VENVS_DIR` has been unset, reverting the virtual environments to be stored under `/meerschaum/venvs`.
+
 ### v2.1.1 – v2.1.2
 
 - **Add `upsert` for high-performance pipes.**  

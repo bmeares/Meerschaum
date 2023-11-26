@@ -89,6 +89,8 @@ Plugins are just modules with functions. This section explains the roles of the 
   Create new commands.
 - **`#!python @api_plugin`**  
   Create new FastAPI endpoints.
+- **`#!python @pre_sync_hook` and `#!python @post_sync_hook`**  
+  Inject callbacks when pipes are synced by the `sync pipes` action.
 - **`#!python setup(**kwargs)`**  
   Executed during plugin installation or with `mrsm setup plugins <plugin>`.
 
@@ -438,6 +440,42 @@ For your endpoints, arguments will be used as HTTP parameters, and to require th
 
     ![Custom Meerschaum API endpoint which requires a login.](/assets/screenshots/api-plugin-endpoint-login-required.png)
 
+
+### **The `#!python @pre_sync_hook` and `#!python @post_sync_hook` Decorators**
+
+You can tap into the built-in syncing engine via the `sync pipes` action by decorating callback functions with `#!python @pre_sync_hook` and/or `#!python @post_sync_hook`. Both callbacks accept a positional `pipe` argument, and `#!python @post_sync_hook` also takes a second positional argument `return_tuple` (`bool` and `str`).
+
+If you add `**kwargs` (optional), you can inspect the state of sync, e.g.:
+
+- `sync_method`  
+  A bound function of either `pipe.sync()`, `pipe.verify()`, or `pipe.deduplicate()`.
+- `min_seconds`
+- `workers`
+- `bounded`
+- `chunk_interval`
+
+For `#!python @post_sync_hook`, the keyword argument `duration` is included as the run-time in seconds of the sync.
+
+??? example "`#!python @pre_sync_hook` and `#!python @post_sync_hook` example"
+
+    ```python
+    import meerschaum as mrsm
+    from meerschaum.plugins import pre_sync_hook, post_sync_hook
+
+    @pre_sync_hook
+    def capture_before_sync(pipe: mrsm.Pipe, **kwargs):
+        print(f"About to sync {pipe} with kwargs:\n{kwargs}")
+
+    @post_sync_hook
+    def capture_after_sync(
+            pipe: mrsm.Pipe,
+            return_tuple: mrsm.SuccessTuple,
+            duration: float | None = None,
+            **kwargs
+        ):
+        print(f"Synced {pipe} in {duration} seconds with result:")
+        mrsm.pprint(return_tuple)
+    ```
 
 ### **The `#!python setup()` Function**
 

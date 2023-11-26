@@ -24,7 +24,9 @@ class ShellCompleter(Completer):
         """
         Bridge the built-in cmd completer with the `prompt_toolkit` completer system.
         """
-        shell_actions = [a[3:] for a in dir(get_shell()) if a.startswith('do_')]
+        from meerschaum._internal.shell.Shell import shell_attrs
+        shell = get_shell()
+        shell_actions = [a[3:] for a in dir(shell) if a.startswith('do_')]
         yielded = []
         ensure_readline()
         parts = document.text.split('-')
@@ -32,7 +34,6 @@ class ShellCompleter(Completer):
         part_0_subbed_spaces = parts[0].replace(' ', '_')
         parsed_text = part_0_subbed_spaces + '-'.join(parts[1:])
 
-        shell = get_shell()
 
         ### Index is the rank order (0 is closest match).
         ### Break when no results are returned.
@@ -50,11 +51,14 @@ class ShellCompleter(Completer):
             yielded.append(poss)
 
         args = parse_line(document.text)
-        action_function = get_action(args['action'], _actions=shell._actions)
+        action_function = get_action(args['action'], _actions=shell_attrs.get('_actions', None))
         if action_function is None:
             return
 
-        main_action_name = get_main_action_name(args['action'], _actions=shell._actions)
+        main_action_name = get_main_action_name(
+            args['action'],
+            _actions = shell_attrs.get('_actions', None)
+        )
 
         ### If we haven't yet hit space, don't suggest subactions.
         if not parsed_text.replace(

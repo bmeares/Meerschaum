@@ -54,16 +54,17 @@ layout = html.Div(
                                 id = 'pipes-filter-tabs',
                                 children = [
                                     dbc.Tab(
-                                        dropdown_tab_content, label='Filter',
-                                        id='pipes-filter-dropdown-tab',
-                                        tab_id='dropdown',
+                                        dropdown_tab_content,
+                                        label = 'Filter',
+                                        id = 'pipes-filter-dropdown-tab',
+                                        tab_id = 'dropdown',
                                     ),
                                     dbc.Tab(
                                         text_tab_content,
-                                        label='Text',
-                                        id='pipes-filter-input-tab',
-                                        tab_id='input',
-                                        tab_style={"display": "none"},
+                                        label = 'Text',
+                                        id = 'pipes-filter-input-tab',
+                                        tab_id = 'input',
+                                        tab_style = {"display": "none"},
                                     ),
                                 ]
                             ),

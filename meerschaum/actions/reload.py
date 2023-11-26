@@ -17,8 +17,5 @@ def reload(
     """
     Reload the running Meerschaum instance.
     """
-    from meerschaum.utils.packages import reload_package
-    from meerschaum.plugins import reload_plugins
-    reload_package('meerschaum')
-    reload_plugins(debug=debug)
-    return True, "Success"
+    from meerschaum.utils.packages import reload_meerschaum
+    return reload_meerschaum(debug=debug)

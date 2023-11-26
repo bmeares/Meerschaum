@@ -118,6 +118,7 @@ def entry_with_args(
     return result
 
 
+_shells = []
 _shell = None
 def get_shell(
         sysargs: Optional[List[str]] = None,
@@ -141,4 +142,6 @@ def get_shell(
             _shell = shell_pkg.Shell(actions, sysargs=sysargs)
         elif reload:
             _shell.__init__()
+
+        _shells.append(_shell)
     return _shell

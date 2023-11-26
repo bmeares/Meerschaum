@@ -11,6 +11,8 @@ cd "$PARENT"
 ### Run setup.sh to ensure everything is set up.
 
 mrsm_version=$($PYTHON_BIN -m meerschaum -V | sed 's/Meerschaum v//g')
+mrsm_uid=$(id -u $USER)
+mrsm_gid=$(id -g $USER)
 
 ./scripts/docker/update_requirements.sh
 
@@ -20,6 +22,8 @@ for tag in "${tags[@]}"; do
 
   docker buildx build ${push:-} \
     --build-arg dep_group="$tag" \
+    --build-arg mrsm_uid="$mrsm_uid" \
+    --build-arg mrsm_gid="$mrsm_gid" \
     --platform "$platforms" \
     -t "$image:$tag" -t "$image:$mrsm_version-$tag" ${tag_latest:-} \
     . || exit 1
