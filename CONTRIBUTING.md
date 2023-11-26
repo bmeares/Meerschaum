@@ -18,7 +18,45 @@ Here are a couple ways you can help out! 💪
 
 ## What About Pull Requests?
 
-If you write code directly and open a PR, I will consider your changes, but due to the development pattern of Meerschaum, I likely may choose to reject PRs for a number of reasons. A more effective method of addressing your concerns is to open an issue or start a discussion.
+PRs are welcome! Due to the development pattern of Meerschaum, I likely may tweak PRs for a number of reasons. A good first step to making changes is to open an issue or start a discussion.
+
+## Setting Up A Development Environment
+
+For local development, you will need the following:
+
+- Docker
+- Git
+- Python
+
+First, clone the Meerschaum repo:
+
+```bash
+git clone https://github.com/bmeares/Meerschaum.git ~/Meerschaum
+cd ~/Meerschaum
+```
+
+Build a local Docker image to install dependencies (note: this will overwrite `bmeares/meerschaum` on your machine):
+
+```bash
+./scripts/docker/buildx.sh
+```
+
+Start the development container, which will mount your cloned repository as the installed package in the container.
+
+
+```bash
+docker compose up -d
+```
+
+Start a new Bash shell in the container:
+
+```bash
+docker exec -it mrsm bash
+```
+
+You can now run `mrsm` commands in the Docker container. Changes you make to your cloned repository will be reflected in the container, so iterate to your heart's content!
+
+The script `./scripts/setup.sh` will install dependencies for local development, and `./scripts/build.sh` will build a wheel and local documentation. This is only needed for local Python development.
 
 ## Sponsorship
 
