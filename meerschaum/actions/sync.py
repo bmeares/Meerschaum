@@ -425,6 +425,7 @@ def _wrap_pipe(
     else:
         sync_method = pipe.verify
         sync_kwargs['deduplicate'] = deduplicate
+    sync_kwargs['sync_method'] = sync_method
 
     for module_name, pre_sync_hooks in _pre_sync_hooks.items():
         plugin_name = module_name.split('.')[-1] if module_name.startswith('plugins.') else None
