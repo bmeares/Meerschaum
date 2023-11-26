@@ -488,7 +488,6 @@ def update_keys_options(
     """
     ctx = dash.callback_context
     trigger = ctx.triggered[0]['prop_id'].split('.')[0]
-    print(f"{trigger=}")
 
     ### Update the instance first.
     update_instance_keys = False
@@ -587,8 +586,6 @@ dash_app.clientside_callback(
             return url;
         }
         window.instance = instance;
-        console.log('instance', instance);
-        console.log('window.instance', window.instance);
 
         iframe.contentWindow.postMessage(
             {

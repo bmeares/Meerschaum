@@ -4,7 +4,7 @@
 
 This is the current release cycle, so stay tuned for future releases!
 
-### v2.1.3
+### v2.1.3 – v2.1.4
 
 - **Add the decorators `@pre_sync_hook` and `@post_sync_hook`.**  
   The new decorators `@pre_sync_hook` and `@post_sync_hook` let you intercept a Pipe immediately before and after a sync, capturing its return tuple and the duration in seconds.
