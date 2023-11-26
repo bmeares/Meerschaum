@@ -3,7 +3,7 @@
 # vim:fenc=utf-8
 
 """
-Daemonize processes via daemoniker.
+Manage Daemons via the `Daemon` class.
 """
 
 from __future__ import annotations

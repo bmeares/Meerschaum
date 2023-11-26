@@ -10,6 +10,7 @@ NOTE: `sync` required a SQL connection and is not intended for client use
 
 from __future__ import annotations
 from datetime import timedelta
+import meerschaum as mrsm
 from meerschaum.utils.typing import SuccessTuple, Any, List, Optional, Tuple, Union
 
 def sync(
@@ -400,33 +401,61 @@ def _wrap_pipe(
     """
     Wrapper function for handling exceptions.
     """
+    import time
     from meerschaum.connectors import get_connector_plugin
     from meerschaum.utils.venv import Venv
+    from meerschaum.plugins import _pre_sync_hooks, _post_sync_hooks
+    from meerschaum.utils.misc import filter_keywords
+
+    sync_start = time.perf_counter()
+    sync_kwargs = {k: v for k, v in kw.items() if k != 'blocking'}
+    sync_kwargs.update({
+        'blocking': (not unblock),
+        'force': force,
+        'debug': debug,
+        'min_seconds': min_seconds,
+        'workers': workers,
+        'bounded': 'bounded',
+        'chunk_interval': chunk_interval,
+    })
+    if not verify and not deduplicate:
+        sync_method = pipe.sync
+    elif not verify and deduplicate:
+        sync_method = pipe.deduplicate
+    else:
+        sync_method = pipe.verify
+        sync_kwargs['deduplicate'] = deduplicate
+    sync_kwargs['sync_method'] = sync_method
+
+    for module_name, pre_sync_hooks in _pre_sync_hooks.items():
+        plugin_name = module_name.split('.')[-1] if module_name.startswith('plugins.') else None
+        plugin = mrsm.Plugin(plugin_name) if plugin_name else None
+        with Venv(plugin):
+            for pre_sync_hook in pre_sync_hooks:
+                _ = pre_sync_hook(pipe, **filter_keywords(pre_sync_hook, **sync_kwargs))
+   
     try:
         with Venv(get_connector_plugin(pipe.connector), debug=debug):
-            if not verify and not deduplicate:
-                sync_method = pipe.sync
-            elif not verify and deduplicate:
-                sync_method = pipe.deduplicate
-            else:
-                sync_method = pipe.verify
-                kw['deduplicate'] = deduplicate
-            return_tuple = sync_method(
-                blocking = (not unblock),
-                force = force,
-                debug = debug,
-                min_seconds = min_seconds,
-                workers = workers,
-                bounded = bounded,
-                chunk_interval = chunk_interval,
-                **{k: v for k, v in kw.items() if k != 'blocking'}
-            )
+            return_tuple = sync_method(**sync_kwargs)
     except Exception as e:
         import traceback
         traceback.print_exception(type(e), e, e.__traceback__)
         print("Error: " + str(e))
         return_tuple = (False, f"Failed to sync {pipe} with exception:" + "\n" + str(e))
 
+    duration = time.perf_counter() - sync_start
+    sync_kwargs['duration'] = duration
+    for module_name, post_sync_hooks in _post_sync_hooks.items():
+        plugin_name = module_name.split('.')[-1] if module_name.startswith('plugins.') else None
+        plugin = mrsm.Plugin(plugin_name) if plugin_name else None
+        with Venv(plugin):
+            for post_sync_hook in post_sync_hooks:
+                _ = post_sync_hook(
+                    pipe,
+                    return_tuple,
+                    **filter_keywords(post_sync_hook, **sync_kwargs)
+                )
+ 
     return return_tuple
 
 

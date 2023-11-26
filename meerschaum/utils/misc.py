@@ -592,6 +592,7 @@ def is_valid_email(email: str) -> Union['re.Match', None]:
     regex = r'^[a-z0-9]+[\._]?[a-z0-9]+[@]\w+[.]\w{2,3}$'
     return re.search(regex, email)
 
+
 def string_width(string: str, widest: bool = True) -> int:
     """
     Calculate the width of a string, either by its widest or last line.
@@ -612,7 +613,7 @@ def string_width(string: str, widest: bool = True) -> int:
     --------
     >>> string_width('a')
     1
-    >>> string_width('a\nbc\nd')
+    >>> string_width('a\\nbc\\nd')
     2
 
     """

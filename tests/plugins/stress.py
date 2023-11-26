@@ -6,7 +6,7 @@
 Stress test for pipes.
 """
 
-__version__ = '0.3.5'
+__version__ = '0.3.6'
 
 import datetime, random, math
 import meerschaum as mrsm

@@ -8,7 +8,7 @@ Retrieve Pipes' data from instances.
 
 from __future__ import annotations
 from datetime import datetime, timedelta
-from meerschaum.utils.typing import Optional, Dict, Any, Union, Generator
+from meerschaum.utils.typing import Optional, Dict, Any, Union, Generator, List, Tuple
 from meerschaum.config import get_config
 
 def get_data(
@@ -350,20 +350,20 @@ def get_backtrack_data(
         If begin is `None` (default), use the most recent observed datetime
         (AKA sync_time).
 
+        ```
+        E.g. begin = 02:00
+
+        Search this region.           Ignore this, even if there's data.
+        /  /  /  /  /  /  /  /  /  |
+        -----|----------|----------|----------|----------|----------|
+        00:00      01:00      02:00      03:00      04:00      05:00
+
+        ```
+
     params: Optional[Dict[str, Any]], default None
         The standard Meerschaum `params` query dictionary.
         
         
-    ```
-    E.g. begin = 02:00
-
-    Search this region.           Ignore this, even if there's data.
-    /  /  /  /  /  /  /  /  /  |
-    -----|----------|----------|----------|----------|----------|
-    00:00      01:00      02:00      03:00      04:00      05:00
-
-    ```
-
     fresh: bool, default False
         If `True`, Ignore local cache and pull directly from the instance connector.
         Only comes into effect if a pipe was created with `cache=True`.

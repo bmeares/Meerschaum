@@ -6,9 +6,9 @@
 Functions for editing the configuration file
 """
 
-#  from meerschaum.utils.debug import dprint
 from __future__ import annotations
 import sys
+import pathlib
 from meerschaum.utils.typing import Optional, Any, SuccessTuple, Mapping, Dict, List, Union
 
 def edit_config(
@@ -21,7 +21,7 @@ def edit_config(
     from meerschaum.config import get_config, config
     from meerschaum.config._read_config import get_keyfile_path
     from meerschaum.config._paths import CONFIG_DIR_PATH
-    from meerschaum.utils.packages import reload_package
+    from meerschaum.utils.packages import reload_meerschaum
     from meerschaum.utils.misc import edit_file
     from meerschaum.utils.debug import dprint
 
@@ -35,10 +35,7 @@ def edit_config(
         get_config(k, write_missing=True, warn=False)
         edit_file(get_keyfile_path(k, create_new=True))
 
-    if debug:
-        dprint("Reloading configuration...")
-    reload_package('meerschaum', debug=debug, **kw)
-
+    reload_meerschaum(debug=debug)
     return (True, "Success")
 
 
@@ -78,7 +75,7 @@ def write_config(
     from meerschaum.utils.debug import dprint
     from meerschaum.utils.yaml import yaml
     from meerschaum.utils.misc import filter_keywords
-    import json, os, pathlib
+    import json, os
     if config_dict is None:
         from meerschaum.config import _config
         cf = _config()
@@ -162,7 +159,6 @@ def general_write_yaml_config(
     """
 
     from meerschaum.utils.debug import dprint
-    from pathlib import Path
 
     if files is None:
         files = {}
@@ -172,7 +168,7 @@ def general_write_yaml_config(
         header = None
         if isinstance(value, tuple):
             config, header = value
-        path = Path(fp)
+        path = pathlib.Path(fp)
         path.parent.mkdir(parents=True, exist_ok=True)
         path.touch(exist_ok=True)
         with open(path, 'w+') as f:
@@ -193,32 +189,12 @@ def general_write_yaml_config(
     return True
 
 def general_edit_config(
-        action : Optional[List[str]] = None,
-        files : Optional[Dict[str, Union[str, pathlib.Path]]] = None,
-        default : str = None,
-        debug : bool = False
+        action: Optional[List[str]] = None,
+        files: Optional[Dict[str, Union[str, pathlib.Path]]] = None,
+        default: Optional[str] = None,
+        debug: bool = False
     ):
-    """Edit any config files
-
-    Parameters
-    ----------
-    action : Optional[List[str]] :
-         (Default value = None)
-    files : Optional[Dict[str :
-        
-    Union[str :
-        
-    pathlib.Path]]] :
-         (Default value = None)
-    default : str :
-         (Default value = None)
-    debug : bool :
-         (Default value = False)
-
-    Returns
-    -------
-
-    """
+    """Prompt the user to edit any config files."""
     if default is None:
         raise Exception("Provide a default choice for which file to edit")
     import os

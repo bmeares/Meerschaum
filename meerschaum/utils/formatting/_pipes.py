@@ -276,8 +276,8 @@ def pprint_pipe_columns(
 
 
 def pipe_repr(
-        pipe: 'meerschaum.Pipe',
-        as_rich_text: bool=False,
+        pipe: mrsm.Pipe,
+        as_rich_text: bool = False,
         ansi: Optional[bool] = None,
     ) -> Union[str, 'rich.text.Text']:
     """
