@@ -4,6 +4,22 @@
 
 This is the current release cycle, so stay tuned for future releases!
 
+### v2.1.5
+
+- **Clean up warnings on Python 3.12.**  
+  All instances of `datetime.utcnow()` have been replaced by `datetime.now(timezone.utc).replace(tzinfo=None)` (to preserve behavior). A full migration to timezone-aware datetimes would have to happen in a minor release.
+
+- **Improve timezone-aware datetime support for MSSQL.**  
+  Passing a timezone-aware datetime as a date bound for MSSQL should now be fixed.
+
+- **Add an explicit `VOLUME` to the `Dockerfile`.**  
+  The path `/meerschaum` is now explicitly set as a `VOLUME` in the Docker image.
+
+- **Add `--tags` filtering to the `show tags` action.**  
+
+- **Improve global `ThreadPool` handling.**  
+  Global pools are now created on a per-worker (and per-class) basis, allowing for switching between workers within the same process. Note that global pools are maintained to allow for nested chunking and the limit the number of connections (e.g. avoid threads creating their own pools).
+
 ### v2.1.3 – v2.1.4
 
 - **Add the decorators `@pre_sync_hook` and `@post_sync_hook`.**  
