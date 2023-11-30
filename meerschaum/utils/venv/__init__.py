@@ -368,10 +368,11 @@ def init_venv(
     docker_home_venv_path = pathlib.Path('/home/meerschaum/venvs/mrsm')
 
     runtime_env_var = STATIC_CONFIG['environment']['runtime']
+    work_dir_env_var = STATIC_CONFIG['environment']['work_dir']
     if (
         not force
         and venv == 'mrsm'
-        and os.environ.get(runtime_env_var, None) == 'docker'
+        and os.environ.get(work_dir_env_var, None) is not None
         and docker_home_venv_path.exists()
     ):
         shutil.move(docker_home_venv_path, venv_path)

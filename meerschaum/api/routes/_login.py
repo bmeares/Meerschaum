@@ -6,7 +6,8 @@
 Manage access and refresh tokens.
 """
 
-import fastapi, datetime
+from datetime import datetime, timedelta, timezone
+import fastapi
 from fastapi_login.exceptions import InvalidCredentialsException
 from fastapi.security import OAuth2PasswordRequestForm
 from starlette.responses import Response, JSONResponse
@@ -47,8 +48,8 @@ def login(
         raise InvalidCredentialsException
 
     expires_minutes = STATIC_CONFIG['api']['oauth']['token_expires_minutes']
-    expires_delta = datetime.timedelta(minutes=expires_minutes)
-    expires_dt = datetime.datetime.utcnow() + expires_delta
+    expires_delta = timedelta(minutes=expires_minutes)
+    expires_dt = datetime.now(timezone.utc).replace(tzinfo=None) + expires_delta
     access_token = manager.create_access_token(
         data = dict(sub=username),
         expires = expires_delta

@@ -15,7 +15,7 @@ import signal
 import sys
 import time
 import traceback
-from datetime import datetime
+from datetime import datetime, timezone
 from meerschaum.utils.typing import Optional, Dict, Any, SuccessTuple, Callable, List, Union
 from meerschaum.config import get_config
 from meerschaum.config._paths import DAEMON_RESOURCES_PATH, LOGS_RESOURCES_PATH
@@ -209,7 +209,9 @@ class Daemon:
         if process_key not in ('began', 'ended', 'paused'):
             raise ValueError(f"Invalid key '{process_key}'.")
 
-        self.properties['process'][process_key] = datetime.utcnow().isoformat()
+        self.properties['process'][process_key] = (
+            datetime.now(timezone.utc).replace(tzinfo=None).isoformat()
+        )
         if write_properties:
             self.write_properties()
 

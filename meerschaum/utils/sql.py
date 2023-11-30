@@ -7,6 +7,7 @@ Flavor-specific SQL tools.
 """
 
 from __future__ import annotations
+from datetime import datetime, timezone, timedelta
 import meerschaum as mrsm
 from meerschaum.utils.typing import Optional, Dict, Any, Union, List, Iterable, Tuple
 ### Preserve legacy imports.
@@ -274,7 +275,7 @@ def dateadd_str(
         flavor: str = 'postgresql',
         datepart: str = 'day',
         number: Union[int, float] = 0,
-        begin: Union[str, datetime.datetime, int] = 'now'
+        begin: Union[str, datetime, int] = 'now'
     ) -> str:
     """
     Generate a `DATEADD` clause depending on database flavor.
@@ -310,7 +311,7 @@ def dateadd_str(
     number: Union[int, float], default `0`
         How many units to add to the date part.
 
-    begin: Union[str, datetime.datetime], default `'now'`
+    begin: Union[str, datetime], default `'now'`
         Base datetime to which to add dateparts.
 
     Returns
@@ -321,13 +322,13 @@ def dateadd_str(
     --------
     >>> dateadd_str(
     ...     flavor = 'mssql',
-    ...     begin = datetime.datetime(2022, 1, 1, 0, 0),
+    ...     begin = datetime(2022, 1, 1, 0, 0),
     ...     number = 1,
     ... )
     "DATEADD(day, 1, CAST('2022-01-01 00:00:00' AS DATETIME))"
     >>> dateadd_str(
     ...     flavor = 'postgresql',
-    ...     begin = datetime.datetime(2022, 1, 1, 0, 0),
+    ...     begin = datetime(2022, 1, 1, 0, 0),
     ...     number = 1,
     ... )
     "CAST('2022-01-01 00:00:00' AS TIMESTAMP) + INTERVAL '1 day'"
@@ -336,7 +337,6 @@ def dateadd_str(
     from meerschaum.utils.debug import dprint
     from meerschaum.utils.packages import attempt_import
     from meerschaum.utils.warnings import error
-    import datetime
     dateutil_parser = attempt_import('dateutil.parser')
     if 'int' in str(type(begin)).lower():
         return str(begin)
@@ -346,7 +346,7 @@ def dateadd_str(
     _original_begin = begin
     begin_time = None
     ### Sanity check: make sure `begin` is a valid datetime before we inject anything.
-    if not isinstance(begin, datetime.datetime):
+    if not isinstance(begin, datetime):
         try:
             begin_time = dateutil_parser.parse(begin)
         except Exception:
@@ -360,7 +360,13 @@ def dateadd_str(
         clean(str(begin))
     ### If begin is a valid datetime, wrap it in quotes.
     else:
-        begin = f"'{begin}'"
+        if isinstance(begin, datetime) and begin.tzinfo is not None:
+            begin = begin.astimezone(timezone.utc)
+        begin = (
+            f"'{begin.replace(tzinfo=None)}'"
+            if isinstance(begin, datetime)
+            else f"'{begin}'"
+        )
 
     da = ""
     if flavor in ('postgresql', 'timescaledb', 'cockroachdb', 'citus'):
@@ -390,7 +396,7 @@ def dateadd_str(
     elif flavor == 'oracle':
         if begin == 'now':
             begin = str(
-                datetime.datetime.utcnow().strftime('%Y:%m:%d %M:%S.%f')
+                datetime.now(timezone.utc).replace(tzinfo=None).strftime('%Y:%m:%d %M:%S.%f')
             )
         elif begin_time:
             begin = str(begin_time.strftime('%Y-%m-%d %H:%M:%S.%f'))

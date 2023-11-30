@@ -738,7 +738,6 @@ def _show_environment(
 
 
 def _show_tags(
-        tags: Optional[List[str]] = None,
         workers: Optional[int] = None,
         nopretty: bool = False,
         **kwargs
@@ -758,6 +757,8 @@ def _show_tags(
     panel = rich_panel.Panel.fit('Tags')
     tree = rich_tree.Tree(panel)
     pipes = mrsm.get_pipes(as_list=True, **kwargs)
+    if not pipes:
+        return False, f"No pipes were found with the given tags."
     pool = get_pool(workers=workers)
     tag_prefix = get_config('formatting', 'pipes', 'unicode', 'icons', 'tag') if UNICODE else ''
     tag_style = get_config('formatting', 'pipes', 'ansi', 'styles', 'tags') if ANSI else None
