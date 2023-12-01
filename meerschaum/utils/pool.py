@@ -11,7 +11,7 @@ from meerschaum.utils.typing import Optional, Callable, List, Any
 from meerschaum.utils.threading import Lock, RLock
 import signal
 
-pools = None
+pools = {}
 _locks = {
     'pools': Lock(),
 }
@@ -28,10 +28,10 @@ def get_pool(
     ):
     """If the requested pool does not exist, instantiate it here.
     Pools are joined and closed on exit."""
-    global pools
-    with _locks['pools']:
-        if pools is None:
-            pools = {}
+    from multiprocessing import cpu_count
+    if workers is None:
+        workers = cpu_count()
+    pool_key = pool_class_name + f'-{workers}'
 
     def build_pool(workers):
         from meerschaum.utils.warnings import warn
@@ -49,9 +49,6 @@ def get_pool(
                 'ThreadPool'
             )
 
-        if workers is None:
-            from multiprocessing import cpu_count
-            workers = cpu_count()
         try:
             pool = Pool(workers, initializer=initializer, initargs=initargs)
         except Exception as e:
@@ -59,23 +56,24 @@ def get_pool(
             pool = None
 
         with _locks['pools']:
-            pools[pool_class_name] = pool       
+            pools[pool_key] = pool
 
-    if pool_class_name not in pools or pools.get(pool_class_name, None) is None:
+    if pools.get(pool_key, None) is None:
         build_pool(workers)
 
     if (
-        pools[pool_class_name] is not None
-        and pools[pool_class_name]._state not in ('RUN', 0)
+        pools[pool_key] is not None
+        and pools[pool_key]._state not in ('RUN', 0)
     ):
         try:
-            pools[pool_class_name].close()
+            pools[pool_key].close()
+            pools[pool_key].terminate()
         except Exception as e:
             pass
-        del pools[pool_class_name]
+        del pools[pool_key]
         build_pool(workers)
 
-    return pools[pool_class_name]
+    return pools[pool_key]
 
 
 def get_pools():
@@ -94,7 +92,6 @@ def get_pool_executor(workers: Optional[int] = None):
         from concurrent.futures import ThreadPoolExecutor
         workers = cpu_count() if workers is None else workers
     except Exception as e:
-        ThreadPoolExecutor = None
+        return None
 
     return ThreadPoolExecutor(max_workers=workers) if ThreadPoolExecutor is not None else None
-

@@ -738,6 +738,7 @@ def _show_environment(
 
 
 def _show_tags(
+        action: Optional[List[str]] = None,
         tags: Optional[List[str]] = None,
         workers: Optional[int] = None,
         nopretty: bool = False,
@@ -757,7 +758,12 @@ def _show_tags(
     )
     panel = rich_panel.Panel.fit('Tags')
     tree = rich_tree.Tree(panel)
-    pipes = mrsm.get_pipes(as_list=True, **kwargs)
+    action = action or []
+    tags = action + (tags or [])
+    pipes = mrsm.get_pipes(as_list=True, tags=tags, **kwargs)
+    if not pipes:
+        return False, f"No pipes were found with the given tags."
+
     pool = get_pool(workers=workers)
     tag_prefix = get_config('formatting', 'pipes', 'unicode', 'icons', 'tag') if UNICODE else ''
     tag_style = get_config('formatting', 'pipes', 'ansi', 'styles', 'tags') if ANSI else None
@@ -769,6 +775,8 @@ def _show_tags(
 
     for pipe, tags in pipes_tags.items():
         for tag in tags:
+            if action and tag not in action:
+                continue
             tags_pipes[tag].append(pipe)
 
     columns = []
@@ -789,6 +797,9 @@ def _show_tags(
         tag_group = rich_console.Group(*pipes_texts)
         tag_panel = rich_panel.Panel(tag_group, title=tag_text, title_align='left')
         columns.append(tag_panel)
+
+    if len(columns) == 0:
+        return False, "No pipes have been tagged."
 
     if not nopretty:
         mrsm.pprint(

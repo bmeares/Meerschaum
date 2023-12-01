@@ -25,7 +25,7 @@ fi
 ### Start the test databases.
 if [ "$1" == "db" ]; then
   cd tests/
-  docker-compose up -d $services
+  docker compose up -d $services
   cd ../
 fi
 
@@ -103,7 +103,7 @@ $PYTHON_BIN -m pytest \
 ### Cleanup
 if [ "$2" == "rm" ]; then
   cd tests/
-  docker-compose down -v
+  docker compose down -v
   cd ../
   $mrsm delete job test_api -f -y
 fi

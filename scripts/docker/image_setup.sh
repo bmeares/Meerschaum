@@ -84,6 +84,7 @@ if ! shopt -oq posix; then
 fi
 
 alias sleep-forever="trap exit TERM; while true; do sleep 1; done"
+export HOME="$MRSM_HOME"
 export PATH="$PATH:$HOME/.local/bin"
 
 RESET="\e[0m"

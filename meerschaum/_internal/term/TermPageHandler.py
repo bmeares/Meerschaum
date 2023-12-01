@@ -8,9 +8,9 @@ Define the terminal page handler class.
 
 from __future__ import annotations
 from meerschaum.utils.packages import attempt_import
-tornado = attempt_import('tornado', lazy=False)
+tornado_web = attempt_import('tornado.web', lazy=False)
 
-class TermPageHandler(tornado.web.RequestHandler):
+class TermPageHandler(tornado_web.RequestHandler):
     def get(self):
         from meerschaum.api import endpoints
         return self.render(

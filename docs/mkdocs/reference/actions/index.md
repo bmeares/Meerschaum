@@ -2,6 +2,11 @@
 
 <link rel="stylesheet" type="text/css" href="/assets/css/grid.css" />
 
+!!! warning "Page out-of-date"
+    This page has not been updated to include the latest changes to actions. Run the command `mrsm show help` or add `-h` to any command to learn more.
+
+    Refer to the [Meerschaum Python API documentation](https://docs.meerschaum.io/meerschaum/actions.html) for using actions programatically.
+
 <div class="grid-container center">
 
   <div class="grid-child">

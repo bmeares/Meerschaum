@@ -28,5 +28,7 @@ __all__ = (
     'venv',
     'warnings',
     'yaml',
+    "get_pipes",
+    "fetch_pipes_keys",
 )
-from meerschaum.utils.get_pipes import get_pipes
+from meerschaum.utils._get_pipes import get_pipes, fetch_pipes_keys

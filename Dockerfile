@@ -15,7 +15,6 @@ ENV MRSM_USER=$mrsm_user \
     MRSM_WORK_DIR=$mrsm_root_dir \
     MRSM_RUNTIME=docker \
     MRSM_HOME=/home/meerschaum \
-    HOME=/home/meerschaum \
     MRSM_SRC=/home/meerschaum/src \
     PATH=$PATH:/home/meerschaum/.local/bin
 
@@ -25,7 +24,7 @@ COPY scripts/docker/image_setup.sh scripts/docker/dev.sh scripts/docker/sleep_fo
 RUN /scripts/image_setup.sh
 
 ### From this point on, run as a non-privileged user for security.
-USER $MRSM_USER
+USER $MRSM_UID:$MRSM_GID
 WORKDIR $MRSM_WORK_DIR
 
 ### Layer 2: Install Python packages.
@@ -45,4 +44,5 @@ RUN cd $MRSM_WORK_DIR && [ "$MRSM_DEP_GROUP" != "minimal" ] && \
   MRSM_VENVS_DIR=$MRSM_HOME/venvs python -m meerschaum show version || \
   MRSM_VENVS_DIR=$MRSM_HOME/venvs python -m meerschaum --version
 
+VOLUME $MRSM_ROOT_DIR
 ENTRYPOINT ["python", "-m", "meerschaum"]
