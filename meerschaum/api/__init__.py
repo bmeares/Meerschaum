@@ -18,7 +18,7 @@ The Meerschaum Web API lets you access and control your data over the Internet.
 from meerschaum.config import get_config
 from meerschaum.config.static import STATIC_CONFIG, SERVER_ID
 from meerschaum.utils.packages import attempt_import
-from meerschaum.utils.get_pipes import get_pipes as _get_pipes
+from meerschaum.utils import get_pipes as _get_pipes
 from meerschaum.config._paths import API_UVICORN_CONFIG_PATH, API_UVICORN_RESOURCES_PATH
 from meerschaum.plugins import _api_plugins
 from meerschaum.utils.warnings import warn
