@@ -11,14 +11,14 @@
 | ![PyPI - Python Version]( https://img.shields.io/pypi/pyversions/meerschaum?label=Python&logo=python&logoColor=%23ffffff ) | ![GitHub Sponsors](https://img.shields.io/github/sponsors/bmeares?color=eadf15&label=Sponsors) | [![meerschaum Tutorials](https://badges.openbase.com/python/tutorials/meerschaum.svg?token=2Yi8Oav9UZYWocO1ncwnIOnpUN5dTnUMWai7lAKTB+k=)](https://openbase.com/python/meerschaum?utm_source=embedded&amp;utm_medium=badge&amp;utm_campaign=rate-badge) | ![Number of registered users]( https://img.shields.io/badge/dynamic/json?color=3098c1&label=Registered%20Users&query=num_users&url=https%3A%2F%2Fapi.mrsm.io%2Finfo ) |
 
 <p align="center">
-<img src="https://meerschaum.io/files/images/demo.gif" alt="Meerschaum demo" height="450px">
+<img src="https://meerschaum.io/files/images/demo.gif" alt="Meerschaum demo" style="width: 100%;">
 </p>
 
 ## What is Meerschaum?
 Meerschaum is a tool for quickly synchronizing time-series data streams called **pipes**. With Meerschaum, you can have a data visualization stack running in minutes.
 
 <p align="center">
-<img src="https://meerschaum.io/assets/screenshots/weather_pipes.png"/>
+<img src="https://meerschaum.io/assets/screenshots/weather_pipes.png" style="width: 100%;"/>
 </p>
 
 ## Why Meerschaum?

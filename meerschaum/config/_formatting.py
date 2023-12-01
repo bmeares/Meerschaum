@@ -35,7 +35,7 @@ default_formatting_config = {
         'running'          : '🟢',
         'paused'           : '🟡',
         'stopped'          : '🔴',
-        'tag'              : '🏷️',
+        'tag'              : '🔖',
     },
     'pipes'                : {
         'unicode'          : {

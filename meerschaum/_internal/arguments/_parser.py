@@ -8,7 +8,9 @@ This module creates the argparse Parser.
 
 from __future__ import annotations
 import sys
-import argparse, json
+import argparse
+import json
+from datetime import datetime, timedelta, timezone
 from meerschaum.utils.typing import Union, Dict, List, Any, Tuple, Callable
 from meerschaum.utils.misc import string_to_dict
 from meerschaum.utils.warnings import error
@@ -35,19 +37,18 @@ class ArgumentParser(argparse.ArgumentParser):
         return result
 
 
-def parse_datetime(dt_str: str) -> datetime.datetime:
+def parse_datetime(dt_str: str) -> datetime:
     """Parse a string into a datetime."""
     from meerschaum.utils.misc import is_int
     if is_int(dt_str):
         return int(dt_str)
 
     from meerschaum.utils.packages import attempt_import
-    import datetime
     dateutil_parser = attempt_import('dateutil.parser')
 
     try:
         if dt_str.lower() == 'now':
-            dt = datetime.datetime.utcnow()
+            dt = datetime.now(timezone.utc).replace(tzinfo=None)
         else:
             dt = dateutil_parser.parse(dt_str)
     except Exception as e:

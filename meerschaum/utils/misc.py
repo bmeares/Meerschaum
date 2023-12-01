@@ -6,7 +6,7 @@ Miscellaneous functions go here
 """
 
 from __future__ import annotations
-from datetime import timedelta
+from datetime import timedelta, datetime, timezone
 from meerschaum.utils.typing import (
     Union,
     Any,
@@ -386,10 +386,10 @@ def flatten_pipes_dict(pipes_dict: PipesDict) -> List[Pipe]:
 
 
 def round_time(
-        dt: Optional['datetime.datetime'] = None,
-        date_delta: Optional['datetime.timedelta'] = None,
+        dt: Optional[datetime] = None,
+        date_delta: Optional[timedelta] = None,
         to: 'str' = 'down'
-    ) -> 'datetime.datetime':
+    ) -> datetime:
     """
     Round a datetime object to a multiple of a timedelta.
     http://stackoverflow.com/questions/3463930/how-to-round-the-minute-of-a-datetime-object-python
@@ -398,10 +398,10 @@ def round_time(
 
     Parameters
     ----------
-    dt: 'datetime.datetime', default None
+    dt: Optional[datetime], default None
         If `None`, grab the current UTC datetime.
 
-    date_delta: 'datetime.timedelta', default None
+    date_delta: Optional[timedelta], default None
         If `None`, use a delta of 1 minute.
 
     to: 'str', default 'down'
@@ -409,36 +409,35 @@ def round_time(
 
     Returns
     -------
-    A rounded `datetime.datetime` object.
+    A rounded `datetime` object.
 
     Examples
     --------
-    >>> round_time(datetime.datetime(2022, 1, 1, 12, 15, 57, 200))
+    >>> round_time(datetime(2022, 1, 1, 12, 15, 57, 200))
     datetime.datetime(2022, 1, 1, 12, 15)
-    >>> round_time(datetime.datetime(2022, 1, 1, 12, 15, 57, 200), to='up')
+    >>> round_time(datetime(2022, 1, 1, 12, 15, 57, 200), to='up')
     datetime.datetime(2022, 1, 1, 12, 16)
-    >>> round_time(datetime.datetime(2022, 1, 1, 12, 15, 57, 200), datetime.timedelta(hours=1))
+    >>> round_time(datetime(2022, 1, 1, 12, 15, 57, 200), timedelta(hours=1))
     datetime.datetime(2022, 1, 1, 12, 0)
     >>> round_time(
-    ...   datetime.datetime(2022, 1, 1, 12, 15, 57, 200),
-    ...   datetime.timedelta(hours=1),
-    ...   to='closest'
+    ...   datetime(2022, 1, 1, 12, 15, 57, 200),
+    ...   timedelta(hours=1),
+    ...   to = 'closest'
     ... )
     datetime.datetime(2022, 1, 1, 12, 0)
     >>> round_time(
-    ...   datetime.datetime(2022, 1, 1, 12, 45, 57, 200),
+    ...   datetime(2022, 1, 1, 12, 45, 57, 200),
     ...   datetime.timedelta(hours=1),
-    ...   to='closest'
+    ...   to = 'closest'
     ... )
     datetime.datetime(2022, 1, 1, 13, 0)
 
     """
-    import datetime
     if date_delta is None:
-        date_delta = datetime.timedelta(minutes=1)
+        date_delta = timedelta(minutes=1)
     round_to = date_delta.total_seconds()
     if dt is None:
-        dt = datetime.datetime.utcnow()
+        dt = datetime.now(timezone.utc).replace(tzinfo=None)
     seconds = (dt.replace(tzinfo=None) - dt.min.replace(tzinfo=None)).seconds
 
     if seconds % round_to == 0 and dt.microsecond == 0:
@@ -451,7 +450,7 @@ def round_time(
         else:
             rounding = (seconds + round_to / 2) // round_to * round_to
 
-    return dt + datetime.timedelta(0, rounding - seconds, - dt.microsecond)
+    return dt + timedelta(0, rounding - seconds, - dt.microsecond)
 
 
 def timed_input(
@@ -857,22 +856,22 @@ def get_connector_labels(
     return sorted(possibilities)
 
 
-def json_serialize_datetime(dt: 'datetime.datetime') -> Union[str, None]:
+def json_serialize_datetime(dt: datetime) -> Union[str, None]:
     """
-    Serialize a datetime.datetime object into JSON (ISO format string).
+    Serialize a datetime object into JSON (ISO format string).
     
     Examples
     --------
-    >>> import json, datetime
-    >>> json.dumps({'a': datetime.datetime(2022, 1, 1)}, default=json_serialize_datetime)
+    >>> import json
+    >>> from datetime import datetime
+    >>> json.dumps({'a': datetime(2022, 1, 1)}, default=json_serialize_datetime)
     '{"a": "2022-01-01T00:00:00Z"}'
 
     """
-    import datetime
-
-    if isinstance(dt, datetime.datetime):
-        return dt.isoformat() + 'Z'
-    return None
+    if not isinstance(dt, datetime):
+        return None
+    tz_suffix = 'Z' if dt.tzinfo is None else ''
+    return dt.isoformat() + tz_suffix
 
 
 def wget(

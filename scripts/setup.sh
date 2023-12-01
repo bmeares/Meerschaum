@@ -12,8 +12,8 @@ $PYTHON_BIN -m meerschaum install package wheel --venv None --debug
 $PYTHON_BIN -m meerschaum show packages dev-tools --nopretty > "$reqs_file"
 $PYTHON_BIN -m meerschaum show packages docs --nopretty >> "$reqs_file"
 $PYTHON_BIN -m pip install --upgrade -r "$reqs_file" || exit 1
-### Install pdoc3 and docker-compose outside of the declared docs dependencies.
-$PYTHON_BIN -m pip install pdoc3 || exit 1
+### Install pdoc outside of the declared docs dependencies.
+$PYTHON_BIN -m pip install --upgrade pdoc || exit 1
 rm -f "$reqs_file"
 
 ### Enable docker buildx.
@@ -49,5 +49,3 @@ builder_name="multiarch_builder"
 [ -z "$(docker buildx ls | grep "$builder_name")" ] && docker buildx create --name "$builder_name" --use
 echo "Reset qemu architectures..."
 docker run --rm --privileged multiarch/qemu-user-static --reset -p yes
-
-

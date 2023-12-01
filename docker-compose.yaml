@@ -1,12 +1,13 @@
 version: '3.9'
 services:
-  mrsm:
+  mrsm-dev:
     image: "bmeares/meerschaum"
     entrypoint: ["/scripts/dev.sh"]
     network_mode: "host"
     init: true
     volumes:
       - "./:/app"
+      - "./scripts/docker:/scripts"
       - "dev_root:/meerschaum"
 
 volumes:

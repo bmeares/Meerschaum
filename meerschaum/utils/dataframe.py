@@ -9,7 +9,7 @@ Utility functions for working with DataFrames.
 from __future__ import annotations
 from meerschaum.utils.typing import (
     Optional, Dict, Any, List, Hashable, Generator,
-    Iterator, Iterable,
+    Iterator, Iterable, Union,
 )
 
 
@@ -840,8 +840,8 @@ def df_from_literal(
             )
             val = literal
 
-    import datetime
-    now = datetime.datetime.utcnow()
+    from datetime import datetime, timezone
+    now = datetime.now(timezone.utc).replace(tzinfo=None)
 
     pd = import_pandas()
     return pd.DataFrame({dt_name: [now], val_name: [val]})

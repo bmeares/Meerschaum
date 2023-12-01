@@ -8,6 +8,7 @@ Return a dictionary (or list) of pipe objects. See documentation below for more 
 
 from __future__ import annotations
 
+import meerschaum as mrsm
 from meerschaum.utils.typing import (
     Sequence, Optional, Union, Mapping, Any, InstanceConnector, PipesDict, List, Dict, Tuple
 )
@@ -27,7 +28,7 @@ def get_pipes(
         wait: bool = False,
         debug: bool = False,
         **kw: Any
-    ) -> Union[PipesDict, List['meerschaum.Pipe']]:
+    ) -> Union[PipesDict, List[mrsm.Pipe]]:
     """
     Return a dictionary or list of `meerschaum.Pipe` objects.
 
@@ -182,8 +183,8 @@ def get_pipes(
 
         pipes[ck][mk][lk] = Pipe(
             ck, mk, lk,
-            mrsm_instance=connector,
-            debug=debug,
+            mrsm_instance = connector,
+            debug = debug,
             **filter_keywords(Pipe, **kw)
         )
 
@@ -278,6 +279,7 @@ def fetch_pipes_keys(
             metric_keys: Optional[List[str]] = None,
             location_keys: Optional[List[str]] = None,
             params: Optional[Dict[str, Any]] = None,
+            tags: Optional[List[str]] = None,
             debug: bool = False,
             **kw
         ) -> List[Tuple[str, str, str]]:
@@ -321,22 +323,9 @@ def fetch_pipes_keys(
                     result.append((ck, mk, lk))
         return result
 
-    def _all(**kw):
-        """
-        Fetch all available metrics and locations and create every combination.
-        Connector keys are required.
-        **NOTE**: Not implemented!
-        """
-        error(
-            "Need to implement metrics and locations logic in SQL and API.",
-            NotImplementedError
-        )
-
     _method_functions = {
         'registered' : _registered,
         'explicit'   : _explicit,
-        'all'        : _all,
-        ### TODO implement 'all'
     }
     if method not in _method_functions:
         error(f"Method '{method}' is not supported!", NotImplementedError)

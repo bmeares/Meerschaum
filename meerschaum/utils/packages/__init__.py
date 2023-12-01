@@ -1544,7 +1544,13 @@ def reload_meerschaum(debug: bool = False) -> SuccessTuple:
     """
     Reload the currently loaded Meercshaum modules, refreshing plugins and shell configuration.
     """
-    reload_package('meerschaum', skip_submodules=['meerschaum._internal.shell'])
+    reload_package(
+        'meerschaum',
+        skip_submodules = [
+            'meerschaum._internal.shell',
+            'meerschaum.utils.pool',
+        ]
+    )
 
     from meerschaum.plugins import reload_plugins
     from meerschaum._internal.shell.Shell import _insert_shell_actions

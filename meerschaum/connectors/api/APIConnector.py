@@ -6,7 +6,7 @@
 Interact with Meerschaum APIs. May be chained together (see 'meerschaum:api_instance' in your config.yaml).
 """
 
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from meerschaum.utils.typing import Optional
 from meerschaum.connectors import Connector
 from meerschaum.utils.warnings import warn, error
@@ -146,7 +146,11 @@ class APIConnector(Connector):
     def token(self):
         expired = (
             True if self._expires is None else (
-                (self._expires < datetime.utcnow() + timedelta(minutes=1))
+                (
+                    self._expires
+                    <
+                    datetime.now(timezone.utc).replace(tzinfo=None) + timedelta(minutes=1)
+                )
             )
         )
 

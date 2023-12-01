@@ -242,7 +242,6 @@ def fetch_pipes_keys(
             pipes_tbl.c.metric_key,
             pipes_tbl.c.location_key,
         ]
-        + ([pipes_tbl.c.parameters] if tags else [])
     )
 
     q = sqlalchemy.select(*select_cols).where(sqlalchemy.and_(True, *_where))
@@ -267,7 +266,8 @@ def fetch_pipes_keys(
                     sqlalchemy.String,
                 ).like(f'%"tags":%"{nt}"%')
             )
-        ors.append(sqlalchemy.and_(*sub_ands))
+        if sub_ands:
+            ors.append(sqlalchemy.and_(*sub_ands))
 
         for xt in _ex_tags:
             nands.append(
@@ -303,26 +303,7 @@ def fetch_pipes_keys(
     except Exception as e:
         error(str(e))
 
-    _keys = [(row[0], row[1], row[2]) for row in rows]
-    if not tags:
-        return _keys
-    ### Make 100% sure that the tags are correct.
-    keys = []
-    for row in rows:
-        ktup = (row[0], row[1], row[2])
-        _actual_tags = (
-            json.loads(row[3]) if isinstance(row[3], str)
-            else row[3]
-        ).get('tags', [])
-        for nt in _in_tags:
-            if nt in _actual_tags:
-                keys.append(ktup)
-        for xt in _ex_tags:
-            if xt in _actual_tags:
-                keys.remove(ktup)
-            else:
-                keys.append(ktup)
-    return keys
+    return [(row[0], row[1], row[2]) for row in rows]
 
 
 def create_indices(
