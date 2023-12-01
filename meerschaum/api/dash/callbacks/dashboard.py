@@ -523,7 +523,7 @@ def update_keys_options(
     _mk_alone = metric_keys and num_filter == 1
     _lk_alone = location_keys and num_filter == 1
 
-    from meerschaum.utils.get_pipes import fetch_pipes_keys
+    from meerschaum.utils import fetch_pipes_keys
 
     try:
         _all_keys = fetch_pipes_keys('registered', get_web_connector(ctx.states))

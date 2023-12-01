@@ -7,8 +7,7 @@ Pipes are the primary metaphor of the Meerschaum system.
 You can interact with pipe data via `meerschaum.Pipe` objects.
 
 If you are working with multiple pipes, it is highly recommended that you instead use
-`meerschaum.utils.get_pipes` (available as `meerschaum.get_pipes`)
-to create a dictionary of Pipe objects.
+`meerschaum.get_pipes` to create a dictionary of Pipe objects.
 
 ```
 >>> from meerschaum import get_pipes

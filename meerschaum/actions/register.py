@@ -7,7 +7,7 @@ Register new Pipes. Requires the API to be running.
 """
 
 from __future__ import annotations
-from meerschaum.utils.typing import SuccessTuple, Any, List, Optional
+from meerschaum.utils.typing import SuccessTuple, Any, List, Optional, Dict
 
 def register(
         action: Optional[List[str]] = None,
@@ -55,6 +55,7 @@ def _register_pipes(
         metric_keys: Optional[List[str]] = None,
         location_keys: Optional[List[str]] = None,
         params: Optional[Dict[str, Any]] = None,
+        tags: Optional[List[str]] = None,
         debug: bool = False,
         **kw: Any
     ) -> SuccessTuple:
@@ -79,6 +80,8 @@ def _register_pipes(
         location_keys = []
     if params is None:
         params = {}
+    if tags:
+        params['tags'] = tags
 
     if (
         len(connector_keys) == 0 or
@@ -96,6 +99,7 @@ def _register_pipes(
         metric_keys = metric_keys,
         location_keys = location_keys,
         params = params,
+        tags = tags,
         as_list = True,
         method = 'explicit',
         debug = debug,

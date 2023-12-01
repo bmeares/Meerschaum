@@ -6,6 +6,20 @@ This is the current release cycle, so stay tuned for future releases!
 
 ### v2.1.5
 
+- **Add the action `tag pipes`.**  
+  Tags may be added or removed with the `tag pipes` action. Note that the flag `--tags` applies to existing tags for filtering; flags to be added or removed are positional arguments.
+
+  ```
+  ### Tag all `sql:main` pipes with `production` and `sync-daily`.
+  mrsm tag pipes production sync-daily -c sql:main
+
+  ### Remove the `production`` tag from all pipes tagged as `production`.
+  mrsm tag pipes _production --tags production
+  ```
+
+- **Add `--tags` support to `register pipes`.**  
+  The action `register pipe` with the `--tags` flag will auto-tag the new pipes.
+
 - **Clean up warnings on Python 3.12.**  
   All instances of `datetime.utcnow()` have been replaced by `datetime.now(timezone.utc).replace(tzinfo=None)` (to preserve behavior). A full migration to timezone-aware datetimes would have to happen in a minor release.
 
@@ -19,6 +33,12 @@ This is the current release cycle, so stay tuned for future releases!
 
 - **Improve global `ThreadPool` handling.**  
   Global pools are now created on a per-worker (and per-class) basis, allowing for switching between workers within the same process. Note that global pools are maintained to allow for nested chunking and the limit the number of connections (e.g. avoid threads creating their own pools).
+
+- **Fix a bug when selecting only by negating tags.**  
+  Pipes may now be selected by only specifying negated tags.
+
+- **Rename `meerschaum.utils.get_pipes` to `meerschaum.utils._get_pipes` to avoid namespace collissions.**  
+  The functions `get_pipes()` and `fetch_pipes_keys()` are available at the `meerschaum.utils` module namespace.
 
 ### v2.1.3 – v2.1.4
 

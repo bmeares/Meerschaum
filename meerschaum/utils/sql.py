@@ -962,10 +962,6 @@ def get_table_cols_types(
                 )
             )
         ]
-        if debug:
-            dprint(f"schema={schema}, database={database}")
-            for doc in cols_types_docs:
-                print(doc)
 
         ### NOTE: This may return incorrect columns if the schema is not explicitly stated.
         if cols_types_docs and not cols_types_docs_filtered:
