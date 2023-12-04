@@ -385,7 +385,13 @@ def get_create_index_queries(
     -------
     A dictionary of column names mapping to lists of queries.
     """
-    from meerschaum.utils.sql import sql_item_name, get_distinct_col_count, update_queries
+    from meerschaum.utils.sql import (
+        sql_item_name,
+        get_distinct_col_count,
+        update_queries,
+        get_null_replacement,
+        COALESCE_UNIQUE_INDEX_FLAVORS,
+    )
     from meerschaum.config import get_config
     index_queries = {}
 
@@ -497,15 +503,37 @@ def get_create_index_queries(
             if ix and ix in existing_cols_types
         ]
     )
-    constraint_name = sql_item_name(pipe.target + '_constraint', self.flavor)
-    constraint_query = (
-        f"ALTER TABLE {_pipe_name} ADD CONSTRAINT {constraint_name} UNIQUE ({indices_cols_str})"
-        if self.flavor != 'sqlite'
-        else f"CREATE UNIQUE INDEX {constraint_name} ON {_pipe_name} ({indices_cols_str})"
+    coalesce_indices_cols_str = ', '.join(
+        [
+            (
+                "COALESCE("
+                + sql_item_name(ix, self.flavor)
+                + ", "
+                + get_null_replacement(existing_cols_types[ix], self.flavor)
+                + ") "
+            ) if ix_key != 'datetime' else (sql_item_name(ix, self.flavor))
+            for ix_key, ix in pipe.columns.items()
+            if ix and ix in existing_cols_types
+        ]
     )
+    unique_index_name = sql_item_name(pipe.target + '_unique_index', self.flavor)
+    constraint_name = sql_item_name(pipe.target + '_constraint', self.flavor)
+    add_constraint_query = (
+        f"ALTER TABLE {_pipe_name} ADD CONSTRAINT {constraint_name} UNIQUE ({indices_cols_str})"
+    )
+    unique_index_cols_str = (
+        indices_cols_str
+        if self.flavor not in COALESCE_UNIQUE_INDEX_FLAVORS
+        else coalesce_indices_cols_str
+    )
+    create_unique_index_query = (
+        f"CREATE UNIQUE INDEX {unique_index_name} ON {_pipe_name} ({unique_index_cols_str})"
+    )
+    constraint_queries = [create_unique_index_query]
+    if self.flavor != 'sqlite':
+        constraint_queries.append(add_constraint_query)
     if upsert and indices_cols_str:
-        index_queries[constraint_name] = [constraint_query]
-
+        index_queries[unique_index_name] = constraint_queries
     return index_queries
 
 
@@ -1074,7 +1102,7 @@ def get_pipe_attributes(
 def sync_pipe(
         self,
         pipe: mrsm.Pipe,
-        df: Union[pandas.DataFrame, str, Dict[Any, Any], None] = None,
+        df: Union[pd.DataFrame, str, Dict[Any, Any], None] = None,
         begin: Optional[datetime] = None,
         end: Optional[datetime] = None,
         chunksize: Optional[int] = -1,
@@ -1286,7 +1314,11 @@ def sync_pipe(
         temp_pipe = Pipe(
             pipe.connector_keys.replace(':', '_') + '_', pipe.metric_key, pipe.location_key,
             instance = pipe.instance_keys,
-            columns = pipe.columns,
+            columns = {
+                ix_key: ix
+                for ix_key, ix in pipe.columns.items()
+                if ix and ix in update_df.columns
+            },
             dtypes = pipe.dtypes,
             target = temp_target,
             temporary = True,

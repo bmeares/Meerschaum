@@ -443,38 +443,71 @@ For your endpoints, arguments will be used as HTTP parameters, and to require th
 
 ### **The `#!python @pre_sync_hook` and `#!python @post_sync_hook` Decorators**
 
-You can tap into the built-in syncing engine via the `sync pipes` action by decorating callback functions with `#!python @pre_sync_hook` and/or `#!python @post_sync_hook`. Both callbacks accept a positional `pipe` argument, and `#!python @post_sync_hook` also takes a second positional argument `return_tuple` (`bool` and `str`).
+You can tap into the built-in syncing engine via the `sync pipes` action by decorating callback functions with `#!python @pre_sync_hook` and/or `#!python @post_sync_hook`. Both callbacks accept a positional `pipe` argument, and other useful contextual arguments as passed as keyword arguments (if your function accepts them).
 
-If you add `**kwargs` (optional), you can inspect the state of sync, e.g.:
+Add `**kwargs` (optional) for additional context of sync, e.g.:
 
-- `sync_method`  
+- **`sync_method`** (`Callable[[], mrsm.SuccessTuple]`)  
   A bound function of either `pipe.sync()`, `pipe.verify()`, or `pipe.deduplicate()`.
-- `min_seconds`
-- `workers`
-- `bounded`
-- `chunk_interval`
+- **`sync_timestamp`** (`datetime`)  
+  The UTC datetime captured right before the sync began. This value is the same for pre- and post-syncs.
 
-For `#!python @post_sync_hook`, the keyword argument `duration` is included as the run-time in seconds of the sync.
+The following keywords arguments are available only for `#!python @post_sync_hook` callbacks:
+
+- **`success_tuple`** (`mrsm.SuccessTuple`)   
+  The return value of `sync_method` (`SuccessTuple` i.e. `Tuple[bool, str]`) to indicate whether the sync completed successfully.
+- **`sync_complete_timestamp`** (`datetime`)  
+  The UTC datetime captured right after the sync completed.
+- **`sync_duration`** (`float`)  
+  The duration of the sync in seconds.
+
+All other keyword arguments correspond to the flags used to initiate the sync. See the following useful arguments:
+
+- **`name`** (`str`)  
+  If the sync was spawned by a background job with a `--name` argument, you may track the job's syncs with `name`.
+- **`schedule`** (`str`)  
+  If you spawn your syncing jobs with `-s`, you may see the job's cadence with `schedule`.
+- **`min_seconds`** (`float`)  
+  If you run continous syncs (i.e. with `--loop`), the value of `--min-seconds` will be available as `min_seconds`.
+- **`begin`** and **`end`** (`datetime` | `int`)  
+  The values for `--begin` and `--end`.
+- **`params`** (`dict[str, Any]`)  
+  The value for `--params`.
+
+Sync hooks don't need to return anything, but if a `SuccessTuple` is returned from your callback function, it will be pretty-printed alongside the normal success messages.
 
 ??? example "`#!python @pre_sync_hook` and `#!python @post_sync_hook` example"
 
     ```python
+    from datetime import datetime
     import meerschaum as mrsm
     from meerschaum.plugins import pre_sync_hook, post_sync_hook
 
     @pre_sync_hook
-    def capture_before_sync(pipe: mrsm.Pipe, **kwargs):
-        print(f"About to sync {pipe} with kwargs:\n{kwargs}")
-
     @post_sync_hook
-    def capture_after_sync(
+    def log_sync(
             pipe: mrsm.Pipe,
-            return_tuple: mrsm.SuccessTuple,
-            duration: float | None = None,
+            success_tuple: mrsm.SuccessTuple | None = None,
+            sync_timestamp: datetime | None = None,
+            sync_complete_timestamp: datetime | None = None,
+            sync_duration: float | None = None,
             **kwargs
-        ):
-        print(f"Synced {pipe} in {duration} seconds with result:")
-        mrsm.pprint(return_tuple)
+        ) -> mrsm.SuccessTuple:
+        """
+        Execute this callback immediately before and after syncing.
+        """
+        if success_tuple is None:
+            print(f"About to sync {pipe} at {sync_timestamp}...")
+            return True, "Success"
+        
+        success, message = success_tuple
+        prefix = "successfully" if success else "fail to"
+
+        msg = (
+            f"It took {sync_duration} seconds to {prefix} sync {pipe}\n"
+            + f"({sync_timestamp} - {sync_complete_timestamp})"
+        )
+        return True, msg
     ```
 
 ### **The `#!python setup()` Function**

@@ -4,6 +4,103 @@
 
 This is the current release cycle, so stay tuned for future releases!
 
+### v2.1.6
+
+- **Move `success_tuple` from arg to kwarg for `@post_sync_hook` functions.**  
+  To match the signature of `@pre_sync_hook` functions, `@post_sync_hook` functions now only accept `pipe` as the positional argument. The return value of the sync will now be passed as the kwarg `success_tuple`. This allows you to use the same callback function as both the pre- and post-sync hooks.
+
+  ```python
+  import meerschaum as mrsm
+  from meerschaum.plugins import pre_sync_hook, post_sync_hook
+
+  @pre_sync_hook
+  @post_sync_hook
+  def log_sync(
+          pipe: mrsm.Pipe,
+          success_tuple: mrsm.SuccessTuple | None = None,
+      ):
+      if success_tuple is None:
+          print(f"About to sync {pipe}!")
+      else:
+          success, msg = success_tuple
+          print(f"Finished syncing {pipe} with message:\n{msg}")
+  ```
+
+- **Add `sync_timestamp` and `sync_complete_timestamp` to sync hooks.**  
+  The UTC datetime right before the sync is added to the sync hook kwargs, allowing for linking the two callbacks to the same datetime. For convenience, the UTC datetime is also captured at the end of the sync and is passed as `sync_complete_timestamp`.
+
+  ```python
+  from datetime import datetime
+  import meerschaum as mrsm
+  from meerschaum.plugins import pre_sync_hook, post_sync_hook
+
+  @pre_sync_hook
+  @post_sync_hook
+  def log_sync(
+          pipe: mrsm.Pipe,
+          sync_timestamp: datetime | None = None,
+          sync_complete_timestamp: datetime | None = None,
+          sync_duration: float | None = None,
+      ) -> mrsm.SuccessTuple:
+
+      if sync_complete_timestamp is None:
+          print(f"About to sync {pipe} at {sync_timestamp}.")
+          return True, "Success"
+
+      msg = (
+          f"It took {sync_duration} seconds to sync {pipe}:\n"
+          + "({sync_timestamp} - {sync_complete_timestamp})"
+      )
+      return True, msg
+  ```
+
+- **Improved performance of sync hooks.**  
+  Sync hooks are now called asynchronously in their own threads to avoid slowing down or crashing the main thread.
+
+- **Rename `duration` to `sync_duration` for sync hooks.**  
+  To avoid potential conflicts, the kwarg `duration` is prefixed with `sync_` to denote that it was specifically added to provide context on the sync.
+
+- **Allow for sync hooks to return `SuccessTuple`.**  
+  If a sync hook returns a `SuccessTuple` (`Tuple[bool, str]`), the result will be printed.
+
+  ```python
+  import meerschaum as mrsm
+  from meerschaum.plugins import post_sync_hook
+
+  @post_sync_hook
+  def log_sync(pipe) -> mrsm.SuccessTuple:
+      return True, f"Logged sync for {pipe}."
+  ```
+
+- **Add `is_success_tuple()` to `meerschaum.utils.typing`.**  
+  You can now quickly check whether an object is a `SuccessTuple`:
+
+  ```python
+  from meerschaum.utils.typing import is_success_tuple
+  assert is_success_tuple((True, "Success"))
+  assert not is_success_tuple(("foo", "bar"))
+  ```
+
+- **Allow for index-only pipes when `upsert=True`.**  
+  If all columns are indices and `upsert` is `True`, then the upsert will insert net-new rows (ignore duplicates).
+
+  ```python
+  import meerschaum as mrsm
+  pipe = mrsm.Pipe(
+      'a', 'b',
+      columns = ['a', 'b'],
+      parameters = {'upsert': True},
+      instance = 'sql:local',
+  )
+  pipe.sync([{'a': 1, 'b': 2}])
+  ```
+
+- **Allow for prelimary null index support for `upsert=True` (inserts only, PostgreSQL only).**  
+  Like with regular syncs, upsert syncs now coalesce indices to allow for syncing null values. **NOTE:** the transaction will fail if a null index is synced again, so this is only for the initial insert.
+
+- **Remove automatic instance table renaming.**  
+  This patch removes automatic detection and renaming of old instance tables to the new names (e.g. `users` -> `mrsm_users`). Users migrating from an old installation will need to rename the tables manually themselves.
+
 ### v2.1.5
 
 - **Add the action `tag pipes`.**  

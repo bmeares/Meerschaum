@@ -8,7 +8,7 @@ Retrieve Pipes' data from instances.
 
 from __future__ import annotations
 from datetime import datetime, timedelta
-from meerschaum.utils.typing import Optional, Dict, Any, Union, Generator, List, Tuple
+from meerschaum.utils.typing import Optional, Dict, Any, Union, Generator, List, Tuple, Iterator
 from meerschaum.config import get_config
 
 def get_data(
@@ -247,7 +247,7 @@ def _get_data_as_iterator(
         fresh: bool = False,
         debug: bool = False,
         **kw: Any
-    ) -> Generator['pd.DataFrame']:
+    ) -> Iterator['pd.DataFrame']:
     """
     Return a pipe's data as a generator.
     """
@@ -267,16 +267,17 @@ def _get_data_as_iterator(
 
     _ = kw.pop('as_chunks', None)
     _ = kw.pop('as_iterator', None)
+    dt_col = self.columns.get('datetime', None)
     min_dt = (
         begin
         if begin is not None
         else self.get_sync_time(round_down=False, newest=False, params=params, debug=debug)
-    )
+    ) if dt_col else None
     max_dt = (
         end
         if end is not None
         else self.get_sync_time(round_down=False, newest=True, params=params, debug=debug)
-    )
+    ) if dt_col else None
 
     ### We want to search just past the maximum value.
     if end is None:
