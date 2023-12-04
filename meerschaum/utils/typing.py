@@ -87,3 +87,14 @@ PipesDict = Dict[
     ]
 ]
 WebState = Dict[str, str]
+
+def is_success_tuple(x: Any) -> bool:
+    """
+    Determine whether an object is a `SuccessTuple`.
+    """
+    return (
+        isinstance(x, tuple)
+        and len(x) == 2
+        and isinstance(x[0], bool)
+        and isinstance(x[1], str)
+    )

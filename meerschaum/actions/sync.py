@@ -9,7 +9,7 @@ NOTE: `sync` required a SQL connection and is not intended for client use
 """
 
 from __future__ import annotations
-from datetime import timedelta
+from datetime import timedelta, datetime, timezone
 import meerschaum as mrsm
 from meerschaum.utils.typing import SuccessTuple, Any, List, Optional, Tuple, Union
 
@@ -39,7 +39,7 @@ def sync(
 
 def _pipes_lap(
         workers: Optional[int] = None,
-        debug: bool = None,
+        debug: Optional[bool] = None,
         unblock: bool = False,
         force: bool = False,
         min_seconds: int = 1,
@@ -52,7 +52,7 @@ def _pipes_lap(
         nopretty: bool = False,
         _progress: Optional['rich.progress.Progress'] = None,
         **kw: Any
-    ) -> Tuple[List[meerschaum.Pipe], List[meerschaum.Pipe]]:
+    ) -> Tuple[List[mrsm.Pipe], List[mrsm.Pipe]]:
     """
     Do a lap of syncing pipes.
     """
@@ -402,11 +402,20 @@ def _wrap_pipe(
     Wrapper function for handling exceptions.
     """
     import time
+    import traceback
+    from datetime import datetime, timedelta, timezone
+    import meerschaum as mrsm
+    from meerschaum.utils.typing import is_success_tuple, SuccessTuple
     from meerschaum.connectors import get_connector_plugin
     from meerschaum.utils.venv import Venv
     from meerschaum.plugins import _pre_sync_hooks, _post_sync_hooks
     from meerschaum.utils.misc import filter_keywords
+    from meerschaum.utils.pool import get_pool
+    from meerschaum.utils.warnings import warn
 
+    pool = get_pool(workers=workers)
+
+    sync_timestamp = datetime.now(timezone.utc)
     sync_start = time.perf_counter()
     sync_kwargs = {k: v for k, v in kw.items() if k != 'blocking'}
     sync_kwargs.update({
@@ -415,8 +424,9 @@ def _wrap_pipe(
         'debug': debug,
         'min_seconds': min_seconds,
         'workers': workers,
-        'bounded': 'bounded',
+        'bounded': bounded,
         'chunk_interval': chunk_interval,
+        'sync_timestamp': sync_timestamp,
     })
     if not verify and not deduplicate:
         sync_method = pipe.sync
@@ -427,12 +437,32 @@ def _wrap_pipe(
         sync_kwargs['deduplicate'] = deduplicate
     sync_kwargs['sync_method'] = sync_method
 
-    for module_name, pre_sync_hooks in _pre_sync_hooks.items():
-        plugin_name = module_name.split('.')[-1] if module_name.startswith('plugins.') else None
+    def call_sync_hook(plugin_name: str, sync_hook) -> SuccessTuple:
         plugin = mrsm.Plugin(plugin_name) if plugin_name else None
-        with Venv(plugin):
-            for pre_sync_hook in pre_sync_hooks:
-                _ = pre_sync_hook(pipe, **filter_keywords(pre_sync_hook, **sync_kwargs))
+        with mrsm.Venv(plugin):
+            try:
+                sync_hook_result = sync_hook(pipe, **filter_keywords(sync_hook, **sync_kwargs))
+                if is_success_tuple(sync_hook_result):
+                    return sync_hook_result
+            except Exception as e:
+                msg = (
+                    f"Failed to execute sync hook '{sync_hook.__name__}' "
+                    + f"from plugin '{plugin}':\n{traceback.format_exc()}"
+                )
+                warn(msg, stack=False)
+                return False, msg
+        return True, "Success"
+
+    hook_results = []
+    def apply_hooks(is_pre_sync: bool):
+        _sync_hooks = (_pre_sync_hooks if is_pre_sync else _post_sync_hooks)
+        for module_name, sync_hooks in _sync_hooks.items():
+            plugin_name = module_name.split('.')[-1] if module_name.startswith('plugins.') else None
+            for sync_hook in sync_hooks:
+                hook_result = pool.apply_async(call_sync_hook, (plugin_name, sync_hook))
+                hook_results.append(hook_result)
+
+    apply_hooks(True)
    
     try:
         with Venv(get_connector_plugin(pipe.connector), debug=debug):
@@ -444,18 +474,16 @@ def _wrap_pipe(
         return_tuple = (False, f"Failed to sync {pipe} with exception:" + "\n" + str(e))
 
     duration = time.perf_counter() - sync_start
-    sync_kwargs['duration'] = duration
-    for module_name, post_sync_hooks in _post_sync_hooks.items():
-        plugin_name = module_name.split('.')[-1] if module_name.startswith('plugins.') else None
-        plugin = mrsm.Plugin(plugin_name) if plugin_name else None
-        with Venv(plugin):
-            for post_sync_hook in post_sync_hooks:
-                _ = post_sync_hook(
-                    pipe,
-                    return_tuple,
-                    **filter_keywords(post_sync_hook, **sync_kwargs)
-                )
- 
+    sync_kwargs.update({
+        'success_tuple': return_tuple,
+        'sync_duration': duration,
+        'sync_complete_timestamp': datetime.now(timezone.utc),
+    })
+    apply_hooks(False)
+    for hook_result in hook_results:
+        hook_success, hook_msg = hook_result.get()
+        mrsm.pprint((hook_success, hook_msg))
+
     return return_tuple
 
 
