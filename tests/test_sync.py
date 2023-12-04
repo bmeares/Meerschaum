@@ -689,3 +689,34 @@ def test_upsert_sync(flavor: str):
     assert 'na' in str(df['yes'][0]).lower()
     assert isinstance(df['num'][0], Decimal)
     assert df['num'][0] == Decimal('2')
+
+
+@pytest.mark.parametrize("flavor", get_flavors())
+def test_upsert_no_value_cols(flavor: str):
+    """
+    Test that setting `upsert` to `True` is able to sync without value columns.
+    """
+    conn = conns[flavor]
+    pipe = Pipe('test', 'upsert', 'no_vals', instance=conn)
+    pipe.delete()
+    pipe = Pipe(
+        'test', 'upsert', 'no_vals', instance=conn,
+        columns = {'datetime': 'dt', 'id': 'id'},
+        parameters = {'upsert': True},
+    )
+
+    docs = [
+        {'dt': '2023-01-01', 'id': 1},
+        {'dt': '2023-01-02', 'id': 2},
+        {'dt': '2023-01-03', 'id': 3},
+    ]
+    success, msg = pipe.sync(docs, debug=debug)
+    assert success, msg
+
+    docs = [
+        {'dt': '2023-01-03', 'id': 3},
+    ]
+    success, msg = pipe.sync(docs, debug=debug)
+    assert success, msg
+    return pipe
+    assert pipe.get_rowcount() == 3

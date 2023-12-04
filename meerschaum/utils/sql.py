@@ -38,6 +38,7 @@ version_queries = {
     'oracle': "SELECT version from PRODUCT_COMPONENT_VERSION WHERE rownum = 1",
 }
 SKIP_IF_EXISTS_FLAVORS = {'mssql', 'oracle'}
+COALESCE_UNIQUE_INDEX_FLAVORS = {'timescaledb', 'postgresql', 'citus'}
 update_queries = {
     'default': """
         UPDATE {target_table_name} AS f
@@ -53,25 +54,25 @@ update_queries = {
         INSERT INTO {target_table_name} ({patch_cols_str})
         SELECT {patch_cols_str}
         FROM {patch_table_name}
-        ON CONFLICT ({join_cols_str}) DO UPDATE {sets_subquery_none_excluded}
+        ON CONFLICT ({join_cols_str}) DO {update_or_nothing} {sets_subquery_none_excluded}
     """,
     'postgresql-upsert': """
         INSERT INTO {target_table_name} ({patch_cols_str})
         SELECT {patch_cols_str}
         FROM {patch_table_name}
-        ON CONFLICT ({join_cols_str}) DO UPDATE {sets_subquery_none_excluded}
+        ON CONFLICT ({join_cols_str}) DO {update_or_nothing} {sets_subquery_none_excluded}
     """,
     'citus-upsert': """
         INSERT INTO {target_table_name} ({patch_cols_str})
         SELECT {patch_cols_str}
         FROM {patch_table_name}
-        ON CONFLICT ({join_cols_str}) DO UPDATE {sets_subquery_none_excluded}
+        ON CONFLICT ({join_cols_str}) DO {update_or_nothing} {sets_subquery_none_excluded}
     """,
     'cockroachdb-upsert': """
         INSERT INTO {target_table_name} ({patch_cols_str})
         SELECT {patch_cols_str}
         FROM {patch_table_name}
-        ON CONFLICT ({join_cols_str}) DO UPDATE {sets_subquery_none_excluded}
+        ON CONFLICT ({join_cols_str}) DO {update_or_nothing} {sets_subquery_none_excluded}
     """,
     'mysql': """
         UPDATE {target_table_name} AS f
@@ -122,7 +123,7 @@ update_queries = {
         SELECT {patch_cols_str}
         FROM {patch_table_name}
         WHERE true
-        ON CONFLICT ({join_cols_str}) DO UPDATE {sets_subquery_none_excluded}
+        ON CONFLICT ({join_cols_str}) DO {update_or_nothing} {sets_subquery_none_excluded}
     """,
     'sqlite_delete_insert': [
         """
@@ -1084,7 +1085,7 @@ def get_update_queries(
             for col in patch_table_columns
         ]
     )
-    join_cols_str = ','.join(
+    join_cols_str = ', '.join(
         [
             sql_item_name(col, flavor)
             for col in join_cols
@@ -1109,10 +1110,27 @@ def get_update_queries(
     if debug:
         dprint(f"value_cols: {value_cols}")
 
-    if not value_cols or not join_cols_types:
+    if not join_cols_types:
+        return []
+    if not value_cols and not upsert:
         return []
 
+    coalesce_join_cols_str = ', '.join(
+        [
+            'COALESCE('
+            + sql_item_name(c_name, flavor)
+            + ', '
+            + get_null_replacement(c_type, flavor)
+            + ')'
+            for c_name, c_type in join_cols_types
+        ]
+    )
+
+    update_or_nothing = ('UPDATE' if value_cols else 'NOTHING')
+
     def sets_subquery(l_prefix: str, r_prefix: str):
+        if not value_cols:
+            return ''
         return 'SET ' + ',\n'.join([
             (
                 l_prefix + sql_item_name(c_name, flavor, None)
@@ -1169,6 +1187,8 @@ def get_update_queries(
             patch_cols_str = patch_cols_str,
             date_bounds_subquery = date_bounds_subquery,
             join_cols_str = join_cols_str,
+            coalesce_join_cols_str = coalesce_join_cols_str,
+            update_or_nothing = update_or_nothing,
         )
         for base_query in base_queries
     ]
