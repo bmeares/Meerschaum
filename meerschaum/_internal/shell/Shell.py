@@ -11,11 +11,7 @@ from copy import deepcopy
 from meerschaum.utils.typing import Union, SuccessTuple, Any, Callable, Optional, List, Dict
 from meerschaum.utils.packages import attempt_import
 from meerschaum.config import __doc__, __version__ as version, get_config
-cmd_import_name = get_config('shell', 'cmd')
-cmd_venv = None if cmd_import_name == 'cmd' else 'mrsm'
-cmd = attempt_import(cmd_import_name, venv=cmd_venv, warn=False, lazy=False)
-if cmd is None or isinstance(cmd, dict):
-    cmd = attempt_import('cmd', lazy=False, warn=False)
+import cmd
 _old_input = cmd.__builtins__['input']
 prompt_toolkit = attempt_import('prompt_toolkit', lazy=False, warn=False, install=True)
 (
@@ -53,7 +49,6 @@ hidden_commands = {
     'os',
     'sh',
     'pass',
-    'exit',
     'quit',
     'eof',
     'exit',
