@@ -174,9 +174,6 @@ def get_pipe_metadef(
                 )
 
 
-    if 'order by' in definition.lower() and 'over' not in definition.lower():
-        error("Cannot fetch with an ORDER clause in the definition")
-
     apply_backtrack = begin == '' and check_existing
     backtrack_interval = pipe.get_backtrack_interval(check_existing=check_existing, debug=debug)
     btm = (
@@ -308,9 +305,9 @@ def _simple_fetch_query(pipe, debug: bool=False, **kw) -> str:
     def_name = 'definition'
     definition = get_pipe_query(pipe)
     return (
-        f"WITH {def_name} AS ({definition}) SELECT * FROM {def_name}"
+        f"WITH {def_name} AS (\n{definition}\n) SELECT * FROM {def_name}"
         if pipe.connector.flavor not in ('mysql', 'mariadb')
-        else f"SELECT * FROM ({definition}) AS {def_name}"
+        else f"SELECT * FROM (\n{definition}\n) AS {def_name}"
     )
 
 def _join_fetch_query(
@@ -363,10 +360,10 @@ def _join_fetch_query(
             )
             + f") AS {id_remote_name}, "
             + dateadd_str(
-                flavor=pipe.connector.flavor,
-                begin=_st,
-                datepart='minute',
-                number=pipe.parameters.get('fetch', {}).get('backtrack_minutes', 0)
+                flavor = pipe.connector.flavor,
+                begin = _st,
+                datepart = 'minute',
+                number = pipe.parameters.get('fetch', {}).get('backtrack_minutes', 0)
             ) + " AS " + dt_remote_name + "\nUNION ALL\n"
         )
     _sync_times_q = _sync_times_q[:(-1 * len('UNION ALL\n'))] + ")"
@@ -374,13 +371,13 @@ def _join_fetch_query(
     definition = get_pipe_query(pipe)
     query = (
         f"""
-    WITH definition AS ({definition}){_sync_times_q}
+    WITH definition AS (\n{definition}\n){_sync_times_q}
     SELECT definition.*
     FROM definition"""
         if pipe.connector.flavor not in ('mysql', 'mariadb')
         else (
         f"""
-    SELECT * FROM ({definition}) AS definition"""
+    SELECT * FROM (\n{definition}\n) AS definition"""
         )
     ) + f"""
     LEFT OUTER JOIN {sync_times_remote_name} AS st
