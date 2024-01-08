@@ -32,6 +32,7 @@ This is the current release cycle, so stay tuned for future releases!
   #   color
   # 1  blue
   ```
+
 - **Add `get_in_ex_params()` to `meerschaum.utils.misc`.**  
   This function parses a standard `params` dictionary into tuples of include and exclude parameters.
 
@@ -43,6 +44,7 @@ This is the current release cycle, so stay tuned for future releases!
   # {'color': (['red', 'green'], ['blue'])}
   in_vals, ex_vals = in_ex_params['color']
   ```
+
 - **Add `coerce_numeric` to `pipe.enforce_dtypes()`.**  
   Setting this to `False` will not cast floats to `Decimal` if the corresponding dtype is `int`.
 - **Improve JSON serialization when filtering for updates.**
