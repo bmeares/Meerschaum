@@ -9,7 +9,7 @@ Formatting functions for printing pipes
 from __future__ import annotations
 import json
 import meerschaum as mrsm
-from meerschaum.utils.typing import PipesDict, Dict, Union, Optional, SuccessTuple, Any
+from meerschaum.utils.typing import PipesDict, Dict, Union, Optional, SuccessTuple, Any, List
 from meerschaum.config import get_config
 
 def pprint_pipes(pipes: PipesDict) -> None:
@@ -481,22 +481,54 @@ def print_pipes_results(
         )
 
 
-def extract_stats_from_message(message: str) -> Dict[str, int]:
+def extract_stats_from_message(
+        message: str,
+        stat_keys: Optional[List[str]] = None,
+    ) -> Dict[str, int]:
     """
-    Given a sync message, return the insert, update stats from within.
-    """
-    stats = {
-        'inserted': 0,
-        'updated': 0,
-        'upserted': 0,
-    }
+    Given a sync message, return the insert, update, upsert stats from within.
 
-    for search_key in list(stats.keys()):
-        if search_key not in message.lower():
+    Parameters
+    ----------
+    message: str
+        The message to parse for statistics.
+
+    stat_keys: Optional[List[str]], default None
+        If provided, search for these words (case insensitive) in the message.
+        Defaults to `['inserted', 'updated', 'upserted']`.
+
+    Returns
+    -------
+    A dictionary mapping the stat keys to the total number of rows affected.
+    """
+    stat_keys = stat_keys or ['inserted', 'updated', 'upserted']
+    lines_stats = [extract_stats_from_line(line, stat_keys) for line in message.split('\n')]
+    message_stats = {
+        stat_key: sum(stats.get(stat_key, 0) for stats in lines_stats)
+        for stat_key in stat_keys
+    }
+    return message_stats
+
+
+def extract_stats_from_line(
+        line: str,
+        stat_keys: List[str],
+    ) -> Dict[str, int]:
+    """
+    Return the insert, update, upsert stats from a single line.
+    """
+    stats = {key: 0 for key in stat_keys}
+
+    for stat_key in stat_keys:
+        search_key = stat_key.lower()
+        if search_key not in line.lower():
             continue
 
         ### stat_text starts with the digits we want.
-        stat_text = message.lower().split(search_key + ' ')[1]
+        try:
+            stat_text = line.lower().split(search_key + ' ')[1]
+        except IndexError:
+            continue
 
         ### find the first non-digit value.
         end_of_num_ix = -1
@@ -504,6 +536,8 @@ def extract_stats_from_message(message: str) -> Dict[str, int]:
             if not char.isdigit():
                 end_of_num_ix = i
                 break
+            if i == len(stat_text) - 1:
+                end_of_num_ix = i + 1
         if end_of_num_ix == -1:
             continue
 

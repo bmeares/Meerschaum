@@ -44,7 +44,7 @@ def api(
         sysargs = []
     if len(action) == 0:
         info(api.__doc__)
-        return False, "Please provide a command to excecute (see above)."
+        return False, "Please provide a command to execute (see above)."
 
     boot_keywords = {'start', 'boot', 'init'}
     if action[0] in boot_keywords:

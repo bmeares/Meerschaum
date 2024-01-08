@@ -1234,7 +1234,7 @@ def truncate_string_sections(item: str, delimeter: str = '_', max_len: int = 128
 
 
 def separate_negation_values(
-        vals: List[str],
+        vals: Union[List[str], Tuple[str]],
         negation_prefix: Optional[str] = None,
     ) -> Tuple[List[str], List[str]]:
     """
@@ -1243,7 +1243,7 @@ def separate_negation_values(
 
     Parameters
     ----------
-    vals: List[str]
+    vals: Union[List[str], Tuple[str]]
         A list of strings to parse.
 
     negation_prefix: Optional[str], default None
@@ -1261,6 +1261,38 @@ def separate_negation_values(
             _in_vals.append(v)
 
     return _in_vals, _ex_vals
+
+
+def get_in_ex_params(params: Optional[Dict[str, Any]]) -> Dict[str, Tuple[List[Any], List[Any]]]:
+    """
+    Translate a params dictionary into lists of include- and exclude-values.
+
+    Parameters
+    ----------
+    params: Optional[Dict[str, Any]]
+        A params query dictionary.
+
+    Returns
+    -------
+    A dictionary mapping keys to a tuple of lists for include and exclude values.
+
+    Examples
+    --------
+    >>> get_in_ex_params({'a': ['b', 'c', '_d', 'e', '_f']})
+    {'a': (['b', 'c', 'e'], ['d', 'f'])}
+    """
+    if not params:
+        return {}
+    return {
+        col: separate_negation_values(
+            (
+                val
+                if isinstance(val, (list, tuple))
+                else [val]
+            )
+        )
+        for col, val in params.items()
+    }
 
 
 def flatten_list(list_: List[Any]) -> List[Any]:

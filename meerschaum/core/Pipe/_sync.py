@@ -12,6 +12,7 @@ import json
 import time
 import threading
 import multiprocessing
+import functools
 from datetime import datetime, timedelta
 
 from meerschaum.utils.typing import (
@@ -518,6 +519,8 @@ def exists(
 def filter_existing(
         self,
         df: 'pd.DataFrame',
+        safe_copy: bool = True,
+        date_bound_only: bool = False,
         chunksize: Optional[int] = -1,
         debug: bool = False,
         **kw
@@ -530,6 +533,14 @@ def filter_existing(
     df: 'pd.DataFrame'
         The dataframe to inspect and filter.
         
+    safe_copy: bool, default True
+        If `True`, create a copy before comparing and modifying the dataframes.
+        Setting to `False` may mutate the DataFrames.
+        See `meerschaum.utils.dataframe.filter_unseen_df`.
+
+    date_bound_only: bool, default False
+        If `True`, only use the datetime index to fetch the sample dataframe.
+
     chunksize: Optional[int], default -1
         The `chunksize` used when fetching existing data.
 
@@ -567,7 +578,8 @@ def filter_existing(
     else:
         merge = pd.merge
         NA = pd.NA
-
+    if df is None:
+        return df, df, df
     if (df.empty if not is_dask else len(df) == 0):
         return df, df, df
 
@@ -617,7 +629,7 @@ def filter_existing(
         traceback.print_exc()
         max_dt = None
 
-    if not ('datetime' in str(type(max_dt))) or str(min_dt) == 'NaT':
+    if ('datetime' not in str(type(max_dt))) or str(min_dt) == 'NaT':
         if 'int' not in str(type(max_dt)).lower():
             max_dt = None
 
@@ -645,7 +657,7 @@ def filter_existing(
         col: df[col].unique()
         for col in self.columns
         if col in df.columns and col != dt_col
-    }
+    } if not date_bound_only else {}
     filter_params_index_limit = get_config('pipes', 'sync', 'filter_params_index_limit')
     _ = kw.pop('params', None)
     params = {
@@ -655,7 +667,7 @@ def filter_existing(
         ]
         for col, unique_vals in unique_index_vals.items()
         if len(unique_vals) <= filter_params_index_limit
-    }
+    } if not date_bound_only else {}
 
     if debug:
         dprint(f"Looking at data between '{begin}' and '{end}':", **kw)
@@ -698,18 +710,23 @@ def filter_existing(
                 col: to_pandas_dtype(typ)
                 for col, typ in self_dtypes.items()
             },
+            safe_copy = safe_copy,
             debug = debug
         ),
         on_cols_dtypes,
     )
 
     ### Cast dicts or lists to strings so we can merge.
+    serializer = functools.partial(json.dumps, sort_keys=True, separators=(',', ':'), default=str)
+    def deserializer(x):
+        return json.loads(x) if isinstance(x, str) else x
+
     unhashable_delta_cols = get_unhashable_cols(delta_df)
     unhashable_backtrack_cols = get_unhashable_cols(backtrack_df)
     for col in unhashable_delta_cols:
-        delta_df[col] = delta_df[col].apply(json.dumps)
+        delta_df[col] = delta_df[col].apply(serializer)
     for col in unhashable_backtrack_cols:
-        backtrack_df[col] = backtrack_df[col].apply(json.dumps)
+        backtrack_df[col] = backtrack_df[col].apply(serializer)
     casted_cols = set(unhashable_delta_cols + unhashable_backtrack_cols)
 
     joined_df = merge(
@@ -722,13 +739,9 @@ def filter_existing(
     ) if on_cols else delta_df
     for col in casted_cols:
         if col in joined_df.columns:
-            joined_df[col] = joined_df[col].apply(
-                lambda x: (
-                    json.loads(x)
-                    if isinstance(x, str)
-                    else x
-                )
-            )
+            joined_df[col] = joined_df[col].apply(deserializer)
+        if col in delta_df.columns:
+            delta_df[col] = delta_df[col].apply(deserializer)
 
     ### Determine which rows are completely new.
     new_rows_mask = (joined_df['_merge'] == 'left_only') if on_cols else None

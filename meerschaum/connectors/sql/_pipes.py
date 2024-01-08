@@ -1182,7 +1182,12 @@ def sync_pipe(
         dprint("Fetched data:\n" + str(df))
 
     if not isinstance(df, pd.DataFrame):
-        df = pipe.enforce_dtypes(df, chunksize=chunksize, debug=debug)
+        df = pipe.enforce_dtypes(
+            df,
+            chunksize = chunksize,
+            safe_copy = kw.get('safe_copy', False),
+            debug = debug,
+        )
 
     ### if table does not exist, create it with indices
     is_new = False
@@ -1226,6 +1231,7 @@ def sync_pipe(
     upsert = pipe.parameters.get('upsert', False) and (self.flavor + '-upsert') in update_queries
     if upsert:
         check_existing = False
+    kw['safe_copy'] = kw.get('safe_copy', False)
 
     unseen_df, update_df, delta_df = (
         pipe.filter_existing(
