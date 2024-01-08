@@ -126,7 +126,6 @@ default_shell_config = {
     'timeout'          : 60,
     'max_history'      : 1000,
     'clear_screen'     : True,
-    'cmd'              : default_cmd,
     'bottom_toolbar'   : {
         'enabled'      : True,
     },

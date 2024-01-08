@@ -7,9 +7,10 @@ Utility functions for working with DataFrames.
 """
 
 from __future__ import annotations
+from datetime import datetime
 from meerschaum.utils.typing import (
     Optional, Dict, Any, List, Hashable, Generator,
-    Iterator, Iterable, Union,
+    Iterator, Iterable, Union, Tuple,
 )
 
 
@@ -71,6 +72,7 @@ def add_missing_cols_to_df(df: 'pd.DataFrame', dtypes: Dict[str, Any]) -> pd.Dat
 def filter_unseen_df(
         old_df: 'pd.DataFrame',
         new_df: 'pd.DataFrame',
+        safe_copy: bool = True,
         dtypes: Optional[Dict[str, Any]] = None,
         debug: bool = False,
     ) -> 'pd.DataFrame':
@@ -84,6 +86,10 @@ def filter_unseen_df(
         
     new_df: 'pd.DataFrame'
         The fetched (source) dataframe. Rows that are contained in `old_df` are removed.
+
+    safe_copy: bool, default True
+        If `True`, create a copy before comparing and modifying the dataframes.
+        Setting to `False` may mutate the DataFrames.
         
     dtypes: Optional[Dict[str, Any]], default None
         Optionally specify the datatypes of the dataframe.
@@ -111,6 +117,10 @@ def filter_unseen_df(
     if old_df is None:
         return new_df
 
+    if safe_copy:
+        old_df = old_df.copy()
+        new_df = new_df.copy()
+
     import json
     import functools
     import traceback
@@ -118,6 +128,7 @@ def filter_unseen_df(
     from meerschaum.utils.warnings import warn
     from meerschaum.utils.packages import import_pandas, attempt_import
     from meerschaum.utils.dtypes import to_pandas_dtype, are_dtypes_equal, attempt_cast_to_numeric
+    from meerschaum.utils.debug import dprint
     pd = import_pandas(debug=debug)
     is_dask = 'dask' in new_df.__module__
     if is_dask:
@@ -243,12 +254,7 @@ def filter_unseen_df(
         indicator = True,
     )
     changed_rows_mask = (joined_df['_merge'] == 'left_only')
-
-    delta_df = joined_df[
-        list(new_df_dtypes.keys())
-    ][
-        changed_rows_mask
-    ].reset_index(drop=True)
+    delta_df = joined_df[list(new_df_dtypes.keys())][changed_rows_mask].reset_index(drop=True)
 
     for json_col in json_cols:
         if json_col not in delta_df.columns:
@@ -535,6 +541,8 @@ def get_numeric_cols(df: 'pd.DataFrame') -> List[str]:
 def enforce_dtypes(
         df: 'pd.DataFrame',
         dtypes: Dict[str, str],
+        safe_copy: bool = True,
+        coerce_numeric: bool = True,
         debug: bool = False,
     ) -> 'pd.DataFrame':
     """
@@ -547,6 +555,14 @@ def enforce_dtypes(
 
     dtypes: Dict[str, str]
         The data types to attempt to enforce on the DataFrame.
+
+    safe_copy: bool, default True
+        If `True`, create a copy before comparing and modifying the dataframes.
+        Setting to `False` may mutate the DataFrames.
+        See `meerschaum.utils.dataframe.filter_unseen_df`.
+
+    coerce_numeric: bool, default True
+        If `True`, convert float and int collisions to numeric.
 
     debug: bool, default False
         Verbosity toggle.
@@ -569,6 +585,8 @@ def enforce_dtypes(
         is_dtype_numeric,
         attempt_cast_to_numeric,
     )
+    if safe_copy:
+        df = df.copy()
     df_dtypes = {c: str(t) for c, t in df.dtypes.items()}
     if len(df_dtypes) == 0:
         if debug:
@@ -674,7 +692,7 @@ def enforce_dtypes(
             explicitly_numeric
             or col in df_numeric_cols
             or (mixed_numeric_types and not explicitly_float)
-        )
+        ) and coerce_numeric
         if cast_to_numeric:
             common_dtypes[col] = attempt_cast_to_numeric
             common_diff_dtypes[col] = attempt_cast_to_numeric
@@ -860,3 +878,160 @@ def get_first_valid_dask_partition(ddf: 'dask.dataframe.DataFrame') -> Union['pd
         if len(pdf) > 0:
             return pdf
     return ddf.compute()
+
+
+def query_df(
+        df: 'pd.DataFrame',
+        params: Optional[Dict[str, Any]] = None,
+        begin: Union[datetime, int, None] = None,
+        end: Union[datetime, int, None] = None,
+        datetime_column: Optional[str] = None,
+        select_columns: Optional[List[str]] = None,
+        omit_columns: Optional[List[str]] = None,
+        inplace: bool = False,
+        reset_index: bool = False,
+        debug: bool = False,
+    ) -> 'pd.DataFrame':
+    """
+    Query the dataframe with the params dictionary.
+
+    Parameters
+    ----------
+    df: pd.DataFrame
+        The DataFrame to query against.
+
+    params: Optional[Dict[str, Any]], default None
+        The parameters dictionary to use for the query.
+
+    begin: Union[datetime, int, None], default None
+        If `begin` and `datetime_column` are provided, only return rows with a timestamp
+        greater than or equal to this value.
+
+    end: Union[datetime, int, None], default None
+        If `begin` and `datetime_column` are provided, only return rows with a timestamp
+        less than this value.
+
+    datetime_column: Optional[str], default None
+        A `datetime_column` must be provided to use `begin` and `end`.
+
+    select_columns: Optional[List[str]], default None
+        If provided, only return these columns.
+
+    omit_columns: Optional[List[str]], default None
+        If provided, do not include these columns in the result.
+
+    inplace: bool, default False
+        If `True`, modify the DataFrame inplace rather than creating a new DataFrame.
+
+    reset_index: bool, default True
+        If `True`, reset the index in the resulting DataFrame.
+
+    Returns
+    -------
+    A Pandas DataFrame query result.
+    """
+    if not params and not begin and not end:
+        return df
+
+    import json
+    import meerschaum as mrsm
+    from meerschaum.utils.debug import dprint
+    from meerschaum.utils.misc import get_in_ex_params
+    from meerschaum.utils.warnings import warn
+
+    dtypes = {col: str(typ) for col, typ in df.dtypes.items()}
+
+    if begin or end:
+        if not datetime_column or datetime_column not in df.columns:
+            warn(
+                f"The datetime column '{datetime_column}' is not present in the Dataframe, "
+                + "ignoring begin and end...",
+            )
+            begin, end = None, None
+
+    if debug:
+        dprint(f"Querying dataframe:\n{params=} {begin=} {end=} {datetime_column=}")
+
+    in_ex_params = get_in_ex_params(params)
+
+    def serialize(x: Any) -> str:
+        if isinstance(x, (dict, list, tuple)):
+            return json.dumps(x, sort_keys=True, separators=(',', ':'), default=str)
+        if hasattr(x, 'isoformat'):
+            return x.isoformat()
+        return str(x)
+
+    masks = [
+        (
+            (df[datetime_column] >= begin)
+            if begin is not None and datetime_column
+            else True
+        ) & (
+            (df[datetime_column] < end)
+            if end is not None and datetime_column
+            else True
+        )
+    ]
+
+    masks.extend([
+        (
+            (
+                df[col].apply(serialize).isin(
+                    [
+                        serialize(_in_val)
+                        for _in_val in in_vals
+                    ]
+                ) if in_vals else True
+            ) & (
+                ~df[col].apply(serialize).isin(
+                    [
+                        serialize(_ex_val)
+                        for _ex_val in ex_vals
+                    ]
+                ) if ex_vals else True
+            )
+        )
+        for col, (in_vals, ex_vals) in in_ex_params.items()
+        if col in df.columns
+    ])
+    query_mask = masks[0]
+    for mask in masks:
+        query_mask = query_mask & mask
+
+    if inplace:
+        df.where(query_mask, inplace=inplace)
+        df.dropna(how='all', inplace=inplace)
+        result_df = df
+    else:
+        result_df = df.where(query_mask).dropna(how='all')
+
+    if reset_index:
+        result_df.reset_index(drop=True, inplace=True)
+
+    result_df = enforce_dtypes(
+        result_df,
+        dtypes,
+        safe_copy = (not inplace),
+        debug = debug,
+        coerce_numeric = False,
+    )
+
+    if select_columns == ['*']:
+        select_columns = None
+
+    if not select_columns and not omit_columns:
+        return result_df
+
+    if select_columns:
+        for col in list(result_df.columns):
+            if col not in select_columns:
+                del result_df[col]
+        return result_df
+
+    if omit_columns:
+        for col in list(result_df.columns):
+            if col in omit_columns:
+                del result_df[col]
+    if debug:
+        dprint(f"{dtypes=}")
+    return result_df

@@ -350,6 +350,7 @@ def determine_version(
     with _locks['import_versions']:
         if venv not in import_versions:
             import_versions[venv] = {}
+    import importlib.metadata
     import re, os
     old_cwd = os.getcwd()
     if debug:
@@ -1379,13 +1380,13 @@ def get_modules_from_package(
     Returns
     -------
     Either list of modules or tuple of lists.
-
     """
     from os.path import dirname, join, isfile, isdir, basename
     import glob
 
     pattern = '*' if recursive else '*.py'
-    module_names = glob.glob(join(dirname(package.__file__), pattern), recursive=recursive)
+    package_path = dirname(package.__file__ or package.__path__[0])
+    module_names = glob.glob(join(package_path, pattern), recursive=recursive)
     _all = [
         basename(f)[:-3] if isfile(f) else basename(f)
         for f in module_names
@@ -1410,7 +1411,7 @@ def get_modules_from_package(
             modules.append(m)
         except Exception as e:
             if debug:
-                dprint(e)
+                dprint(str(e))
         finally:
             if modules_venvs:
                 deactivate_venv(module_name.split('.')[-1], debug=debug)

@@ -4,6 +4,63 @@
 
 This is the current release cycle, so stay tuned for future releases!
 
+### v2.1.7
+
+- **Add `query_df()` to `meerschaum.utils.dataframe`.**  
+  The function `query_df()` allows you to filter dataframes by `params`, `begin`, and `end`.
+
+  ```python
+  import pandas as pd
+  df = pd.DataFrame([
+      {'a': 1, 'color': 'red'},
+      {'a': 2, 'color': 'blue'},
+      {'a': 3, 'color': 'green'},
+      {'a': 4, 'color': 'yellow'},
+  ])
+
+  from meerschaum.utils.dataframe import query_df
+  query_df(df, {'color': ['red', 'yellow']})
+  #    a   color
+  # 0  1     red
+  # 3  4  yellow
+  query_df(df, {'color': '_blue'}, reset_index=True)
+  #    a   color
+  # 0  1     red
+  # 1  3   green
+  # 2  4  yellow
+  query_df(df, {'a': 2}, select_columns=['color'])
+  #   color
+  # 1  blue
+  ```
+- **Add `get_in_ex_params()` to `meerschaum.utils.misc`.**  
+  This function parses a standard `params` dictionary into tuples of include and exclude parameters.
+
+  ```python
+  from meerschaum.utils.misc import get_in_ex_params
+  params = {'color': ['red', '_blue', 'green']}
+  in_ex_params = get_in_ex_params(params)
+  in_ex_params
+  # {'color': (['red', 'green'], ['blue'])}
+  in_vals, ex_vals = in_ex_params['color']
+  ```
+- **Add `coerce_numeric` to `pipe.enforce_dtypes()`.**  
+  Setting this to `False` will not cast floats to `Decimal` if the corresponding dtype is `int`.
+- **Improve JSON serialization when filtering for updates.**
+- **Add `date_bound_only` to `pipe.filter_existing()`.**  
+  The argument `date_bound_only` means that samples retrieved by `pipe.get_data()` will only use `begin` and `end` for bounding. This may improve performance for custom instance connectors which have limited searchability.
+- **Add `safe_copy` to `pipe.enforce_types()`, `pipe.filter_existing()`, `filter_unseen_df()`.**  
+  By default, these functions will create copies of dataframes to avoid mutating the input dataframes. Setting `safe_copy` to `False` may be more memory efficient.
+- **Add multiline support to `extract_stats_from_message`.**  
+  Multiple messages separated by newlines may be parsed at once.
+  ```python
+  from meerschaum.utils.formatting import extract_stats_from_message
+  extract_stats_from_message("Inserted 10, upserted 3\ninserted 11, upserted 4")
+  # {'inserted': 21, 'updated': 0, 'upserted': 7}
+  ```
+- **Remove `order by` check in SQL queries.**
+- **Improve shell startup performance by removing support for `cmd2`.**  
+  The package `cmd2` never behaved properly, so support has been removed and only the built-in `cmd` powers the shell. As such, the configuration key `shell:cmd` has been removed.
+
 ### v2.1.6
 
 - **Move `success_tuple` from arg to kwarg for `@post_sync_hook` functions.**  

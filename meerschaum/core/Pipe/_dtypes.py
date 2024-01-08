@@ -14,6 +14,7 @@ def enforce_dtypes(
         self,
         df: 'pd.DataFrame',
         chunksize: Optional[int] = -1,
+        safe_copy: bool = True,
         debug: bool = False,
     ) -> 'pd.DataFrame':
     """
@@ -71,7 +72,7 @@ def enforce_dtypes(
             )
         return df
 
-    return _enforce_dtypes(df, pipe_dtypes, debug=debug)
+    return _enforce_dtypes(df, pipe_dtypes, safe_copy=safe_copy, debug=debug)
 
 
 def infer_dtypes(self, persist: bool=False, debug: bool=False) -> Dict[str, Any]:
