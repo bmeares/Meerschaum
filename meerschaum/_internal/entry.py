@@ -1,6 +1,7 @@
 #! /usr/bin/env python
 # -*- coding: utf-8 -*-
 # vim:fenc=utf-8
+# type: ignore
 
 """
 The entry point for launching Meerschaum actions.
@@ -61,7 +62,7 @@ def entry_with_args(
     """
     import sys
     from meerschaum.plugins import Plugin
-    from meerschaum.actions import get_shell, get_action, get_main_action_name
+    from meerschaum.actions import get_action, get_main_action_name
     from meerschaum._internal.arguments import remove_leading_action
     from meerschaum.utils.venv import Venv, active_venvs, deactivate_venv
     if kw.get('trace', None):

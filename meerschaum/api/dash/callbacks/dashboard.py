@@ -488,11 +488,11 @@ def update_keys_options(
     """
     ctx = dash.callback_context
     trigger = ctx.triggered[0]['prop_id'].split('.')[0]
+    instance_click = trigger == 'instance-select'
 
     ### Update the instance first.
     update_instance_keys = False
     if not instance_keys:
-        #  instance_keys = get_config('meerschaum', 'web_instance')
         instance_keys = str(get_api_connector())
         update_instance_keys = True
     instance_alerts = []
@@ -519,9 +519,9 @@ def update_keys_options(
     _ck_alone, _mk_alone, _lk_alone = False, False, False
     _ck_filter, _mk_filter, _lk_filter = connector_keys, metric_keys, location_keys
 
-    _ck_alone = connector_keys and num_filter == 1
-    _mk_alone = metric_keys and num_filter == 1
-    _lk_alone = location_keys and num_filter == 1
+    _ck_alone = (connector_keys and num_filter == 1) or instance_click
+    _mk_alone = (metric_keys and num_filter == 1) or instance_click
+    _lk_alone = (location_keys and num_filter == 1) or instance_click
 
     from meerschaum.utils import fetch_pipes_keys
 
@@ -545,15 +545,36 @@ def update_keys_options(
             k = locals()[key_type]
             if k not in _seen_keys[key_type]:
                 _k = 'None' if k in (None, '[None]', 'None', 'null') else k
-                options.append({'label' : _k, 'value' : _k})
+                options.append({'label': _k, 'value': _k})
                 _seen_keys[key_type].add(k)
 
     add_options(_connectors_options, _all_keys if _ck_alone else _keys, 'ck')
     add_options(_metrics_options, _all_keys if _mk_alone else _keys, 'mk')
     add_options(_locations_options, _all_keys if _lk_alone else _keys, 'lk')
-    connector_keys = [ck for ck in connector_keys if ck in [_ck['value'] for _ck in _connectors_options]]
-    metric_keys = [mk for mk in metric_keys if mk in [_mk['value'] for _mk in _metrics_options]]
-    location_keys = [lk for lk in location_keys if lk in [_lk['value'] for _lk in _locations_options]]
+    connector_keys = sorted([
+        ck
+        for ck in connector_keys 
+        if ck in [
+            _ck['value']
+            for _ck in _connectors_options
+        ]
+    ])
+    metric_keys = sorted([
+        mk
+        for mk in metric_keys
+        if mk in [
+            _mk['value']
+            for _mk in _metrics_options
+        ]
+    ])
+    location_keys = sorted([
+        lk
+        for lk in location_keys
+        if lk in [
+            _lk['value']
+            for _lk in _locations_options
+        ]
+    ])
     _connectors_datalist = [html.Option(value=o['value']) for o in _connectors_options]
     _metrics_datalist = [html.Option(value=o['value']) for o in _metrics_options]
     _locations_datalist = [html.Option(value=o['value']) for o in _locations_options]
@@ -680,6 +701,9 @@ dash_app.clientside_callback(
     Input({'type': 'pipe-download-csv-button', 'index': ALL}, 'n_clicks'),
 )
 def download_pipe_csv(n_clicks):
+    """
+    Download the most recent chunk as a CSV file.
+    """
     if not n_clicks:
         raise PreventUpdate
     ctx = dash.callback_context.triggered
@@ -817,6 +841,51 @@ def sync_documents_click(n_clicks, sync_editor_text):
 
     return alert_from_success_tuple((success, msg))
 
+
+dash_app.clientside_callback(
+    """
+    function(n_clicks_arr, url){
+        display_block = {"display": "block"};
+
+        var clicked = false;
+        for (var i = 0; i < n_clicks_arr.length; i++){
+            if (n_clicks_arr[i]){
+                clicked = true;
+                break;
+            }
+        }
+        if (!clicked){ return dash_clientside.no_update; }
+
+        const triggered_id = dash_clientside.callback_context.triggered_id;
+        const action = triggered_id["action"];
+        const pipe_meta = JSON.parse(triggered_id["index"]);
+
+        iframe = document.getElementById('webterm-iframe');
+        if (!iframe){ return dash_clientside.no_update; }
+        var location = pipe_meta.location;
+        if (!pipe_meta.location){
+            location = "None";
+        }
+
+        iframe.contentWindow.postMessage(
+            {
+                action: action,
+                subaction: "pipes",
+                connector_keys: [pipe_meta.connector],
+                metric_keys: [pipe_meta.metric],
+                location_keys: [location],
+                instance: pipe_meta.instance,
+            },
+            url
+        );
+        dash_clientside.set_props("webterm-div", {"style": display_block});
+        return [];
+    }
+    """,
+    Output('content-div-right', 'children'),
+    Input({'type': 'manage-pipe-button', 'index': ALL, 'action': ALL}, 'n_clicks'),
+    State('location', 'href'),
+)
 
 @dash_app.callback(
     Output("navbar-collapse", "is_open"),

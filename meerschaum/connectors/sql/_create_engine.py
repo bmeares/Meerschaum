@@ -154,10 +154,10 @@ install_flavor_drivers = {
     'duckdb': ['duckdb', 'duckdb_engine'],
     'mysql': ['pymysql'],
     'mariadb': ['pymysql'],
-    'timescaledb': ['psycopg2'],
-    'postgresql': ['psycopg2'],
-    'citus': ['psycopg2'],
-    'cockroachdb': ['psycopg2', 'sqlalchemy_cockroachdb', 'sqlalchemy_cockroachdb.psycopg2'],
+    'timescaledb': ['psycopg'],
+    'postgresql': ['psycopg'],
+    'citus': ['psycopg'],
+    'cockroachdb': ['psycopg', 'sqlalchemy_cockroachdb', 'sqlalchemy_cockroachdb.psycopg'],
     'mssql': ['pyodbc'],
     'oracle': ['cx_Oracle'],
 }
@@ -165,7 +165,7 @@ require_patching_flavors = {'cockroachdb': [('sqlalchemy-cockroachdb', 'sqlalche
 
 flavor_dialects = {
     'cockroachdb': (
-        'cockroachdb', 'sqlalchemy_cockroachdb.psycopg2', 'CockroachDBDialect_psycopg2'
+        'cockroachdb', 'sqlalchemy_cockroachdb.psycopg', 'CockroachDBDialect_psycopg'
     ),
     'duckdb': ('duckdb', 'duckdb_engine', 'Dialect'),
 }

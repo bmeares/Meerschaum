@@ -453,16 +453,20 @@ def _wrap_pipe(
                 return False, msg
         return True, "Success"
 
-    hook_results = []
+    pre_hook_results, post_hook_results = [], []
     def apply_hooks(is_pre_sync: bool):
         _sync_hooks = (_pre_sync_hooks if is_pre_sync else _post_sync_hooks)
+        _hook_results = (pre_hook_results if is_pre_sync else post_hook_results)
         for module_name, sync_hooks in _sync_hooks.items():
             plugin_name = module_name.split('.')[-1] if module_name.startswith('plugins.') else None
             for sync_hook in sync_hooks:
                 hook_result = pool.apply_async(call_sync_hook, (plugin_name, sync_hook))
-                hook_results.append(hook_result)
+                _hook_results.append(hook_result)
 
     apply_hooks(True)
+    for hook_result in pre_hook_results:
+        hook_success, hook_msg = hook_result.get()
+        mrsm.pprint((hook_success, hook_msg))
    
     try:
         with Venv(get_connector_plugin(pipe.connector), debug=debug):
@@ -480,7 +484,7 @@ def _wrap_pipe(
         'sync_complete_timestamp': datetime.now(timezone.utc),
     })
     apply_hooks(False)
-    for hook_result in hook_results:
+    for hook_result in post_hook_results:
         hook_success, hook_msg = hook_result.get()
         mrsm.pprint((hook_success, hook_msg))
 

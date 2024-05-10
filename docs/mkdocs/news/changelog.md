@@ -1,5 +1,37 @@
 # 🪵 Changelog
 
+## 2.2.x Releases
+
+### 2.2.0
+
+**Breaking Changes**
+
+- **Upgraded to `psycopg` from `psycopg2`.**  
+  The upgrade to `psycopg` (version 3) 
+
+- **`Daemon.cleanup()` now returns a `SuccessTuple`.**
+
+
+**New Features**
+
+- **Add `--skip-deps`.**  
+  When installing plugins, you may skip dependencies with `--skip-deps`. This should improve the iteration loop during development.
+
+- **Add a Delete button to job cards on the Web UI.**
+
+- **Pre- and post-sync hooks are printed separately.**  
+  The results of sync hooks are now printed right after execution rather than after the sync.
+
+**Bugfixes**
+
+- **Fixed a filtering bug on the Web UI when changing instances.**
+
+**Other changes**
+
+- **Bumped `xterm.js` to v5.5.0.**
+- **Added tags to the pipes card.**
+
+
 ## 2.1.x Releases
 
 This is the current release cycle, so stay tuned for future releases!

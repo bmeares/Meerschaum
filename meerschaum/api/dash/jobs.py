@@ -49,6 +49,17 @@ def get_jobs_cards(state: WebState):
             build_process_timestamps_children(d),
             id = {'type': 'process-timestamps-div', 'index': d.daemon_id},
         )
+        follow_logs_button = dbc.DropdownMenuItem(
+            "Follow logs",
+            id = {'type': 'follow-logs-button', 'index': d.daemon_id},
+        )
+        download_logs_button = dbc.DropdownMenuItem(
+            "Download logs",
+            id = {'type': 'job-download-logs-button', 'index': d.daemon_id},
+        )
+        logs_menu_children = (
+            ([follow_logs_button] if is_authenticated else []) + [download_logs_button]
+        )
         header_children = [
             html.Div(
                 build_status_children(d),
@@ -56,11 +67,13 @@ def get_jobs_cards(state: WebState):
                 style = {'float': 'left'},
             ),
             html.Div(
-                dbc.Button(
-                    'Download logs',
-                    size = 'sm',
-                    color = 'link',
-                    id = {'type': 'job-download-logs-button', 'index': d.daemon_id},
+                dbc.DropdownMenu(
+                    logs_menu_children,
+                    label = "Logs",
+                    size = "sm",
+                    align_end = True,
+                    color = "secondary",
+                    menu_variant = 'dark',
                 ),
                 style = {'float': 'right'},
             ),
@@ -74,7 +87,7 @@ def get_jobs_cards(state: WebState):
                     className = "card-text job-card-text", 
                     style = {"word-wrap": "break-word"}
                 ),
-                style={"white-space": "pre-wrap"},
+                style = {"white-space": "pre-wrap"},
             ),
             html.Div(
                 (
@@ -82,7 +95,7 @@ def get_jobs_cards(state: WebState):
                     if is_authenticated
                     else []
                 ),
-                id={'type': 'manage-job-buttons-div', 'index': d.daemon_id}
+                id = {'type': 'manage-job-buttons-div', 'index': d.daemon_id},
             ),
             html.Div(id={'type': 'manage-job-alert-div', 'index': d.daemon_id}),
         ]
@@ -108,7 +121,7 @@ def build_manage_job_buttons_div_children(daemon: Daemon):
     return [
         html.Br(),
         dbc.Row([
-            dbc.Col(button, width=4)
+            dbc.Col(button, width=6)
             for button in buttons
         ])
     ]
@@ -153,9 +166,22 @@ def build_manage_job_buttons(daemon: Daemon):
             'index': daemon.daemon_id,
         },
     )
+    delete_button = dbc.Button(
+        'Delete',
+        size = 'sm',
+        color = 'danger',
+        style = {'width': '100%'},
+        id = {
+            'type': 'manage-job-button',
+            'action': 'delete',
+            'index': daemon.daemon_id,
+        },
+    )
     buttons = []
     if daemon.status in ('stopped', 'paused'):
         buttons.append(start_button)
+    if daemon.status == 'stopped':
+        buttons.append(delete_button)
     if daemon.status in ('running',):
         buttons.append(pause_button)
     if daemon.status in ('running', 'paused'):

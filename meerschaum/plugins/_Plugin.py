@@ -252,6 +252,7 @@ class Plugin:
 
     def install(
             self,
+            skip_deps: bool = False,
             force: bool = False,
             debug: bool = False,
         ) -> SuccessTuple:
@@ -263,6 +264,9 @@ class Plugin:
 
         Parameters
         ----------
+        skip_deps: bool, default False
+            If `True`, do not install dependencies.
+
         force: bool, default False
             If `True`, continue with installation, even if required packages fail to install.
 
@@ -366,7 +370,11 @@ class Plugin:
                 plugin_installation_dir_path = path
                 break
 
-        success_msg = f"Successfully installed plugin '{self}'."
+        success_msg = (
+            f"Successfully installed plugin '{self}'"
+            + ("\n    (skipped dependencies)" if skip_deps else "")
+            + "."
+        )
         success, abort = None, None
 
         if is_same_version and not force:
@@ -423,7 +431,8 @@ class Plugin:
             return success, msg
 
         ### attempt to install dependencies
-        if not self.install_dependencies(force=force, debug=debug):
+        dependencies_installed = skip_deps or self.install_dependencies(force=force, debug=debug)
+        if not dependencies_installed:
             _ongoing_installations.remove(self.full_name)
             return False, f"Failed to install dependencies for plugin '{self}'."
 
