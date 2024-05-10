@@ -865,21 +865,29 @@ class Daemon:
             error(_write_pickle_success_tuple[1])
 
 
-    def cleanup(self, keep_logs: bool = False) -> None:
-        """Remove a daemon's directory after execution.
+    def cleanup(self, keep_logs: bool = False) -> SuccessTuple:
+        """
+        Remove a daemon's directory after execution.
 
         Parameters
         ----------
         keep_logs: bool, default False
             If `True`, skip deleting the daemon's log files.
+
+        Returns
+        -------
+        A `SuccessTuple` indicating success.
         """
         if self.path.exists():
             try:
                 shutil.rmtree(self.path)
             except Exception as e:
-                warn(e)
+                msg = f"Failed to clean up '{self.daemon_id}':\n{e}"
+                warn(msg)
+                return False, msg
         if not keep_logs:
             self.rotating_log.delete()
+        return True, "Success"
 
 
     def get_timeout_seconds(self, timeout: Union[int, float, None] = None) -> Union[int, float]:

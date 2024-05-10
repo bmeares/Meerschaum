@@ -49,6 +49,7 @@ def register_plugin(
 def install_plugin(
         self,
         name: str,
+        skip_deps: bool = False,
         force: bool = False,
         debug: bool = False
     ) -> SuccessTuple:
@@ -78,7 +79,7 @@ def install_plugin(
             success, msg = False, fail_msg
         return success, msg
     plugin = Plugin(name, archive_path=archive_path, repo_connector=self)
-    return plugin.install(force=force, debug=debug)
+    return plugin.install(skip_deps=skip_deps, force=force, debug=debug)
 
 def get_plugins(
         self,

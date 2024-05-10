@@ -115,16 +115,72 @@ def get_pipes_cards(*keys, session_data: Optional[Dict[str, Any]] = None):
     if not isinstance(_pipes, list):
         _pipes = []
     for p in _pipes:
-        footer_children = dbc.Row([
-            dbc.Col(
-                dbc.Button(
-                    'Download recent data',
-                    size = 'sm',
-                    color = 'link',
-                    id = {'type': 'pipe-download-csv-button', 'index': json.dumps(p.meta)},
-                )
-            ),
-        ])
+        meta_str = json.dumps(p.meta)
+        footer_children = dbc.Row(
+            [
+                dbc.Col(
+                    (
+                        dbc.DropdownMenu(
+                            label = "Manage",
+                            children = [
+                                dbc.DropdownMenuItem(
+                                    'Sync',
+                                    id = {
+                                        'type': 'manage-pipe-button',
+                                        'index': meta_str,
+                                        'action': 'sync',
+                                    },
+                                ),
+                                dbc.DropdownMenuItem(
+                                    'Drop',
+                                    id = {
+                                        'type': 'manage-pipe-button',
+                                        'index': meta_str,
+                                        'action': 'drop',
+                                    },
+                                ),
+                                dbc.DropdownMenuItem(
+                                    'Delete',
+                                    id = {
+                                        'type': 'manage-pipe-button',
+                                        'index': meta_str,
+                                        'action': 'delete',
+                                    },
+                                ),
+                            ],
+                            direction = "end",
+                            menu_variant = "dark",
+                            size = 'sm',
+                            color = 'secondary',
+                        )
+                    ) if authenticated else [],
+                    width = 2,
+                ),
+                #  dbc.Col(
+                    #  (
+                        #  dbc.Button(
+                            #  'Sync',
+                            #  size = 'sm',
+                            #  style = {'width': '100%'},
+                            #  id = {'type': 'pipe-sync-button', 'index': meta_str},
+                        #  ) if authenticated else []
+                    #  ),
+                    #  width = 2,
+                #  ),
+                dbc.Col(width=6),
+                dbc.Col(
+                    dbc.Button(
+                        'Download recent data',
+                        size = 'sm',
+                        color = 'link',
+                        style = {'float': 'right'},
+                        id = {'type': 'pipe-download-csv-button', 'index': meta_str},
+                    ),
+                    width = 4,
+                ),
+            ],
+            justify = 'start',
+        )
         card_body_children = [
             html.H5(
                 html.B(str(p)),
@@ -136,7 +192,7 @@ def get_pipes_cards(*keys, session_data: Optional[Dict[str, Any]] = None):
                     accordion_items_from_pipe(p, authenticated=authenticated),
                     flush = True,
                     start_collapsed = True,
-                    id = {'type': 'pipe-accordion', 'index': json.dumps(p.meta)},
+                    id = {'type': 'pipe-accordion', 'index': meta_str},
                 )
             )
 
@@ -196,6 +252,18 @@ def accordion_items_from_pipe(
         ]
         for col_key, col in pipe.columns.items():
             overview_rows.append(html.Tr([html.Td(f"'{col_key}' Index"), html.Td(col)]))
+        tags = pipe.tags
+        if tags:
+            tags_items = html.Ul([
+                html.Li(tag)
+                for tag in tags
+            ])
+            overview_rows.append(
+                html.Tr([
+                    html.Td("Tags"),
+                    html.Td(tags_items),
+                ])
+            )
 
         items_bodies['overview'] = dbc.Table(
             overview_header + [html.Tbody(overview_rows)],
