@@ -52,7 +52,7 @@ packages: Dict[str, Dict[str, str]] = {
         'watchgod'                   : 'watchgod>=0.7.0',
         'dill'                       : 'dill>=0.3.3',
         'virtualenv'                 : 'virtualenv>=20.1.0',
-        'rocketry'                   : 'rocketry>=2.5.1',
+        'apscheduler'                : 'apscheduler>=4.0.0a4',
     },
     'drivers': {
         'cryptography'               : 'cryptography>=38.0.1',
@@ -75,11 +75,11 @@ packages: Dict[str, Dict[str, str]] = {
         'gadwall'                    : 'gadwall>=0.2.0',
     },
     'stack': {
-        'compose'                    : 'docker-compose>=1.27.4',
+        'compose'                    : 'docker-compose>=1.29.2',
     },
     'build': {
-        'cx_Freeze'                  : 'cx_Freeze>=6.5.1',
-        'PyInstaller'                : 'pyinstaller>=5.0.0-dev0',
+        'cx_Freeze'                  : 'cx_Freeze>=7.0.0',
+        'PyInstaller'                : 'pyinstaller>6.6.0',
     },
     'dev-tools': {
         'twine'                      : 'twine>=3.2.0',
@@ -149,7 +149,7 @@ packages['api'] = {
     'passlib'                        : 'passlib>=1.7.4',
     'fastapi_login'                  : 'fastapi-login>=1.7.2',
     'multipart'                      : 'python-multipart>=0.0.5',
-    'pydantic'                       : 'pydantic<2.0.0',
+    #  'pydantic'                       : 'pydantic>2.0.0',
     'httpx'                          : 'httpx>=0.24.1',
     'websockets'                     : 'websockets>=11.0.3',
 }

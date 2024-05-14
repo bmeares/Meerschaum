@@ -40,21 +40,41 @@ mrsm delete job awake_sushi -y
 
 ## ⏲️ Schedules
 
-You can run any command regularly with the flag `-s` or `--schedule` ― for example, `-s hourly` will execute the command once per hour. You can also specify a specific interval, e.g. `-s 'every 10 seconds'`. Here are a few of the supported frequencies:
+You can run any command regularly with the flag `-s` or `--schedule` ― for example, `-s hourly` will execute the command once per hour. You may specify a specific interval, e.g. `-s 'every 10 seconds'`. Here are a few of the supported frequencies:
 
-  - `every N [seconds | minutes | hours | days]`
+  - `every N [seconds | minutes | hours | days | weeks]`
   - `hourly`
   - `daily`
+  - `weekly`
   - `monthly`
   - `daily starting 12:00`
   - `monthly starting 6th`
-
-Here is the complete [documentation for the interval syntax](https://rocketry.readthedocs.io/en/stable/condition_syntax/index.html).
 
 ```bash
 mrsm sync pipes -m weather -s 'every 30 seconds' -d
 ```
 
+### Cron Format
+
+For more fine-grained control, you may specify your schedule in a `cron` format:
+
+```
+[minute] [hour] [day] [month] [week]
+```
+
+See [APScheduler](https://apscheduler.readthedocs.io/en/3.x/modules/triggers/cron.html#expression-types) for the full `cron` format documentation.
+
+### Schedule Combinations
+
+You may combine schedule with "and" (`&`) and "or" (`|`) logic:
+
+```
+every 10 seconds and * * * may-aug *
+```
+
+
+!!! warning ""
+    As of Meerschaum v2.2.0, scheduling is handled by the library [APScheduler](https://apscheduler.readthedocs.io) rather than [Rocketry](https://rocketry.readthedocs.io/en/stable/condition_syntax/index.html).
 
 ## 🪵 Logs
 

@@ -8,7 +8,7 @@ Functions for managing packages and virtual environments reside here.
 
 from __future__ import annotations
 
-import importlib.util, os, pathlib
+import importlib.util, os, pathlib, re
 from meerschaum.utils.typing import Any, List, SuccessTuple, Optional, Union, Tuple, Dict, Iterable
 from meerschaum.utils.threading import Lock, RLock
 from meerschaum.utils.packages._packages import packages, all_packages, get_install_names
@@ -640,6 +640,9 @@ def need_update(
 
     ### We might be depending on a prerelease.
     ### Sanity check that the required version is not greater than the installed version. 
+    if 'a' in required_version:
+        required_version = required_version.replace('a', '-dev')
+        version = version.replace('a', '-dev')
     try:
         return (
             (not semver.Version.parse(version).match(required_version))

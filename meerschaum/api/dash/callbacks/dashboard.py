@@ -516,9 +516,9 @@ def update_keys_options(
     if location_keys:
         num_filter += 1
 
-    _ck_alone, _mk_alone, _lk_alone = False, False, False
-    _ck_filter, _mk_filter, _lk_filter = connector_keys, metric_keys, location_keys
-
+    _ck_filter = connector_keys
+    _mk_filter = metric_keys
+    _lk_filter = location_keys
     _ck_alone = (connector_keys and num_filter == 1) or instance_click
     _mk_alone = (metric_keys and num_filter == 1) or instance_click
     _lk_alone = (location_keys and num_filter == 1) or instance_click
@@ -528,8 +528,11 @@ def update_keys_options(
     try:
         _all_keys = fetch_pipes_keys('registered', get_web_connector(ctx.states))
         _keys = fetch_pipes_keys(
-            'registered', get_web_connector(ctx.states),
-            connector_keys=_ck_filter, metric_keys=_mk_filter, location_keys=_lk_filter
+            'registered',
+            get_web_connector(ctx.states),
+            connector_keys = _ck_filter,
+            metric_keys = _mk_filter,
+            location_keys = _lk_filter,
         )
     except Exception as e:
         instance_alerts += [alert_from_success_tuple((False, str(e)))]
@@ -551,30 +554,33 @@ def update_keys_options(
     add_options(_connectors_options, _all_keys if _ck_alone else _keys, 'ck')
     add_options(_metrics_options, _all_keys if _mk_alone else _keys, 'mk')
     add_options(_locations_options, _all_keys if _lk_alone else _keys, 'lk')
-    connector_keys = sorted([
+    _connectors_options.sort(key=lambda x: str(x).lower())
+    _metrics_options.sort(key=lambda x: str(x).lower())
+    _locations_options.sort(key=lambda x: str(x).lower())
+    connector_keys = [
         ck
-        for ck in connector_keys 
+        for ck in connector_keys
         if ck in [
             _ck['value']
             for _ck in _connectors_options
         ]
-    ])
-    metric_keys = sorted([
+    ]
+    metric_keys = [
         mk
         for mk in metric_keys
         if mk in [
             _mk['value']
             for _mk in _metrics_options
         ]
-    ])
-    location_keys = sorted([
+    ]
+    location_keys = [
         lk
         for lk in location_keys
         if lk in [
             _lk['value']
             for _lk in _locations_options
         ]
-    ])
+    ]
     _connectors_datalist = [html.Option(value=o['value']) for o in _connectors_options]
     _metrics_datalist = [html.Option(value=o['value']) for o in _metrics_options]
     _locations_datalist = [html.Option(value=o['value']) for o in _locations_options]
