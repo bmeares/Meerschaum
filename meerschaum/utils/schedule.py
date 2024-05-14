@@ -143,7 +143,7 @@ def parse_schedule(schedule: str, now: Optional[datetime] = None):
         else apscheduler_triggers_combining.AndTrigger
     )
     join_kwargs = {
-        'max_iterations': 1_000_000_000,
+        'max_iterations': 1_000_000,
         'threshold': 0,
     } if join_str == '&' else {}
 
@@ -186,7 +186,7 @@ def parse_schedule(schedule: str, now: Optional[datetime] = None):
             if (
                 join_str == '&'
                 and (has_days or has_weeks)
-                and (parts_len := len(schedule_parts)) > 1
+                and len(schedule_parts) > 1
                 and not divided_days
             ):
                 schedule_num /= 2
@@ -196,11 +196,13 @@ def parse_schedule(schedule: str, now: Optional[datetime] = None):
             ### one must be divided by 2.
             if (
                 join_str == '&'
-                and num_hourly_intervals > 1
+                #  and num_hourly_intervals > 1
+                and len(schedule_parts) > 1
                 and not divided_hours
             ):
+                print("divided hours")
                 schedule_num /= 2
-                divided_hours = True
+                #  divided_hours = True
 
             trigger = (
                 apscheduler_triggers_interval.IntervalTrigger(
@@ -233,8 +235,8 @@ def parse_schedule(schedule: str, now: Optional[datetime] = None):
                     **{
                         **cron_kw,
                         'hour': '*',
-                        'minute': '*' if has_minutes else 0,
-                        'second': '*' if has_seconds else 0,
+                        'minute': '*' if has_minutes else starting_ts.minute,
+                        'second': '*' if has_seconds else starting_ts.second,
                         'start_time': starting_ts,
                         'timezone': starting_ts.tzinfo,
                     }
