@@ -200,7 +200,6 @@ def parse_schedule(schedule: str, now: Optional[datetime] = None):
                 and len(schedule_parts) > 1
                 and not divided_hours
             ):
-                print("divided hours")
                 schedule_num /= 2
                 #  divided_hours = True
 
