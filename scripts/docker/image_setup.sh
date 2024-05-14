@@ -22,6 +22,7 @@ if [ "$MRSM_DEP_GROUP" != "minimal" ]; then
     libpq-dev \
     libffi-dev \
     python3-dev \
+    git \
     || exit 1
 
   ### Install graphics dependencies for the full version only.
@@ -36,7 +37,7 @@ if [ "$MRSM_DEP_GROUP" != "minimal" ]; then
       || exit 1
   fi
 
-  sudo -u $MRSM_USER python -m pip install --no-cache-dir --upgrade --user psycopg2 || exit 1
+  sudo -u $MRSM_USER python -m pip install --no-cache-dir --upgrade --user psycopg || exit 1
   sudo -u $MRSM_USER python -m pip install --no-cache-dir --upgrade --user pandas || exit 1
 fi
 

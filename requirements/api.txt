@@ -6,7 +6,6 @@ fastapi>=0.100.0
 passlib>=1.7.4
 fastapi-login>=1.7.2
 python-multipart>=0.0.5
-pydantic<2.0.0
 httpx>=0.24.1
 numpy>=1.18.5
 pandas[parquet]>=2.0.1
@@ -46,7 +45,7 @@ psutil>=5.8.0
 watchgod>=0.7.0
 dill>=0.3.3
 virtualenv>=20.1.0
-rocketry>=2.5.1
+apscheduler>=4.0.0a4
 pprintpp>=0.4.0
 asciitree>=0.3.3
 typing-extensions>=4.7.1

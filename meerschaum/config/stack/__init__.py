@@ -97,7 +97,6 @@ compose_header = """
 
 
 default_docker_compose_config = {
-    'version': '3.9',
     'services': {
         'db': {
             'environment': {

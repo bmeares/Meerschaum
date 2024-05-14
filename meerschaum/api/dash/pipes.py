@@ -124,11 +124,11 @@ def get_pipes_cards(*keys, session_data: Optional[Dict[str, Any]] = None):
                             label = "Manage",
                             children = [
                                 dbc.DropdownMenuItem(
-                                    'Sync',
+                                    'Delete',
                                     id = {
                                         'type': 'manage-pipe-button',
                                         'index': meta_str,
-                                        'action': 'sync',
+                                        'action': 'delete',
                                     },
                                 ),
                                 dbc.DropdownMenuItem(
@@ -140,15 +140,31 @@ def get_pipes_cards(*keys, session_data: Optional[Dict[str, Any]] = None):
                                     },
                                 ),
                                 dbc.DropdownMenuItem(
-                                    'Delete',
+                                    'Clear',
                                     id = {
                                         'type': 'manage-pipe-button',
                                         'index': meta_str,
-                                        'action': 'delete',
+                                        'action': 'clear',
+                                    },
+                                ),
+                                dbc.DropdownMenuItem(
+                                    'Verify',
+                                    id = {
+                                        'type': 'manage-pipe-button',
+                                        'index': meta_str,
+                                        'action': 'verify',
+                                    },
+                                ),
+                                dbc.DropdownMenuItem(
+                                    'Sync',
+                                    id = {
+                                        'type': 'manage-pipe-button',
+                                        'index': meta_str,
+                                        'action': 'sync',
                                     },
                                 ),
                             ],
-                            direction = "end",
+                            direction = "up",
                             menu_variant = "dark",
                             size = 'sm',
                             color = 'secondary',
@@ -156,21 +172,10 @@ def get_pipes_cards(*keys, session_data: Optional[Dict[str, Any]] = None):
                     ) if authenticated else [],
                     width = 2,
                 ),
-                #  dbc.Col(
-                    #  (
-                        #  dbc.Button(
-                            #  'Sync',
-                            #  size = 'sm',
-                            #  style = {'width': '100%'},
-                            #  id = {'type': 'pipe-sync-button', 'index': meta_str},
-                        #  ) if authenticated else []
-                    #  ),
-                    #  width = 2,
-                #  ),
                 dbc.Col(width=6),
                 dbc.Col(
                     dbc.Button(
-                        'Download recent data',
+                        'Download CSV',
                         size = 'sm',
                         color = 'link',
                         style = {'float': 'right'},
@@ -244,14 +249,28 @@ def accordion_items_from_pipe(
         overview_header = [html.Thead(html.Tr([html.Th("Attribute"), html.Th("Value")]))]
         dt_name, id_name, val_name = pipe.get_columns('datetime', 'id', 'value', error=False)
         overview_rows = [
-            html.Tr([html.Td("Connector"), html.Td(f"{pipe.connector_keys}")]),
-            html.Tr([html.Td("Metric"), html.Td(f"{pipe.metric_key}")]),
-            html.Tr([html.Td("Location"), html.Td(f"{pipe.location_key}")]),
-            html.Tr([html.Td("Instance"), html.Td(f"{pipe.instance_keys}")]),
-            html.Tr([html.Td("Target Table"), html.Td(f"{pipe.target}")]),
+            html.Tr([html.Td("Connector"), html.Td(html.Pre(f"{pipe.connector_keys}"))]),
+            html.Tr([html.Td("Metric"), html.Td(html.Pre(f"{pipe.metric_key}"))]),
+            html.Tr([html.Td("Location"), html.Td(html.Pre(f"{pipe.location_key}"))]),
+            html.Tr([html.Td("Instance"), html.Td(html.Pre(f"{pipe.instance_keys}"))]),
+            html.Tr([html.Td("Target Table"), html.Td(html.Pre(f"{pipe.target}"))]),
         ]
-        for col_key, col in pipe.columns.items():
-            overview_rows.append(html.Tr([html.Td(f"'{col_key}' Index"), html.Td(col)]))
+        columns = pipe.columns.copy()
+        if columns:
+            datetime_index = columns.pop('datetime', None)
+            columns_items = []
+            if datetime_index:
+                columns_items.append(html.Li(f"{datetime_index} (datetime)"))
+            columns_items.extend([
+                html.Li(f"{col}")
+                for col_key, col in columns.items()
+            ])
+            overview_rows.append(
+                html.Tr([
+                    html.Td("Indices" if len(columns_items) != 1 else "Index"),
+                    html.Td(html.Pre(html.Ul(columns_items))),
+                ])
+            )
         tags = pipe.tags
         if tags:
             tags_items = html.Ul([
@@ -261,7 +280,7 @@ def accordion_items_from_pipe(
             overview_rows.append(
                 html.Tr([
                     html.Td("Tags"),
-                    html.Td(tags_items),
+                    html.Td(html.Pre(tags_items)),
                 ])
             )
 
