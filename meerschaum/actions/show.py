@@ -41,6 +41,7 @@ def show(
         'jobs'       : _show_jobs,
         'logs'       : _show_logs,
         'tags'       : _show_tags,
+        'schedules'  : _show_schedules,
     }
     return choose_subaction(action, show_options, **kw)
 
@@ -577,6 +578,7 @@ def _show_logs(
         `show logs myjob myotherjob`
     """
     import os, pathlib, random, asyncio
+    from datetime import datetime
     from meerschaum.utils.packages import attempt_import, import_rich
     from meerschaum.utils.daemon import get_filtered_daemons, Daemon
     from meerschaum.utils.warnings import warn, info
@@ -622,13 +624,22 @@ def _show_logs(
         return _job_colors[daemon_id]
 
     def _follow_pretty_print():
-        watchgod = attempt_import('watchgod')
+        watchfiles = attempt_import('watchfiles')
         rich = import_rich()
         rich_text = attempt_import('rich.text')
         _watch_daemon_ids = {d.daemon_id: d for d in daemons}
         info("Watching log files...")
 
         def _print_job_line(daemon, line):
+            date_prefix_str = line[:len('YYYY-MM-DD HH:mm')]
+            try:
+                line_timestamp = datetime.fromisoformat(date_prefix_str)
+            except Exception as e:
+                line_timestamp = None
+            if line_timestamp:
+                line = line[len('YYYY-MM-DD HH:mm | '):]
+            if len(line) == 0:
+                return
             text = rich_text.Text(daemon.daemon_id)
             text.append(
                 _get_buffer_spaces(daemon.daemon_id) + '| '
@@ -676,8 +687,8 @@ def _show_logs(
             _print_log_lines(d)
 
         _quit = False
-        async def _watch_logs():
-            async for changes in watchgod.awatch(LOGS_RESOURCES_PATH):
+        def _watch_logs():
+            for changes in watchfiles.watch(LOGS_RESOURCES_PATH):
                 if _quit:
                     return
                 for change in changes:
@@ -699,10 +710,9 @@ def _show_logs(
                     if daemon is not None:
                         _print_log_lines(daemon)
 
-        loop = asyncio.new_event_loop()
         try:
-            loop.run_until_complete(_watch_logs())
-        except KeyboardInterrupt:
+            _watch_logs()
+        except KeyboardInterrupt as ki:
             _quit = True
 
     def _print_nopretty_log_text():
@@ -816,6 +826,57 @@ def _show_tags(
 
     return True, "Success"
 
+
+def _show_schedules(
+        action: Optional[List[str]] = None,
+        nopretty: bool = False,
+        **kwargs: Any
+    ) -> SuccessTuple:
+    """
+    Print the upcoming timestamps according to the given schedule.
+
+    Examples:
+        show schedule 'daily starting 00:00'
+        show schedule 'every 12 hours and mon-fri starting 2024-01-01'
+    """
+    from meerschaum.utils.schedule import parse_schedule
+    from meerschaum.utils.misc import is_int
+    from meerschaum.utils.formatting import print_options
+    if not action:
+        return False, "Provide a schedule to be parsed."
+    schedule = action[0]
+    default_num_timestamps = 5
+    num_timestamps_str = action[1] if len(action) >= 2 else str(default_num_timestamps)
+    num_timestamps = (
+        int(num_timestamps_str)
+        if is_int(num_timestamps_str)
+        else default_num_timestamps
+    )
+    try:
+        trigger = parse_schedule(schedule)
+    except ValueError as e:
+        return False, str(e)
+
+    next_datetimes = []
+    for _ in range(num_timestamps):
+        try:
+            next_dt = trigger.next()
+            next_datetimes.append(next_dt)
+        except Exception as e:
+            break
+
+    print_options(
+        next_datetimes,
+        num_cols = 1,
+        nopretty = nopretty,
+        header = (
+            f"Next {min(num_timestamps, len(next_datetimes))} timestamps "
+            + f"for schedule '{schedule}':"
+        ),
+    )
+
+    return True, "Success"
+        
 
 
 ### NOTE: This must be the final statement of the module.

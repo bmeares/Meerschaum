@@ -32,11 +32,10 @@ import pytest
             datetime(2024, 5, 8, 0, 0, 0, tzinfo=timezone.utc),
             datetime(2024, 5, 15, 0, 0, 0, tzinfo=timezone.utc),
         ]),
-        ### TODO: Change monthly to UTC when the new APScheduler is released.
         ("monthly starting 2024-05-01", [
-            datetime(2024, 5, 1, 0, 0, 0).astimezone(),
-            datetime(2024, 6, 1, 0, 0, 0).astimezone(),
-            datetime(2024, 7, 1, 0, 0, 0).astimezone(),
+            datetime(2024, 5, 1, 0, 0, 0, tzinfo=timezone.utc),
+            datetime(2024, 6, 1, 0, 0, 0, tzinfo=timezone.utc),
+            datetime(2024, 7, 1, 0, 0, 0, tzinfo=timezone.utc),
         ]),
         ("hourly starting 2024-05-01", [
             datetime(2024, 5, 1, 0, 0, 0, tzinfo=timezone.utc),
@@ -98,10 +97,11 @@ import pytest
             datetime(2024, 5, 3, 0, 5, 0, tzinfo=timezone.utc),
             datetime(2024, 5, 3, 0, 10, 0, tzinfo=timezone.utc),
         ]),
-        ("mon-fri and every 5 days starting 2024-05-13", [
+        ("mon-fri and every 2 days starting 2024-05-13", [
             datetime(2024, 5, 13, 0, 0, 0, tzinfo=timezone.utc),
-            datetime(2024, 5, 20, 0, 5, 0, tzinfo=timezone.utc),
-            datetime(2024, 5, 27, 0, 10, 0, tzinfo=timezone.utc),
+            datetime(2024, 5, 15, 0, 0, 0, tzinfo=timezone.utc),
+            datetime(2024, 5, 17, 0, 0, 0, tzinfo=timezone.utc),
+            datetime(2024, 5, 21, 0, 0, 0, tzinfo=timezone.utc),
         ]),
         ("every 3 hours and every 5 hours starting 2024-05-03", [
             datetime(2024, 5, 3, 0, 0, 0, tzinfo=timezone.utc),

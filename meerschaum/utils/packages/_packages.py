@@ -49,10 +49,10 @@ packages: Dict[str, Dict[str, str]] = {
         'daemon'                     : 'python-daemon>=0.2.3',
         'fasteners'                  : 'fasteners>=0.18.0',
         'psutil'                     : 'psutil>=5.8.0',
-        'watchgod'                   : 'watchgod>=0.7.0',
+        'watchfiles'                 : 'watchfiles>=0.21.0',
         'dill'                       : 'dill>=0.3.3',
         'virtualenv'                 : 'virtualenv>=20.1.0',
-        'apscheduler'                : 'apscheduler>=4.0.0a4',
+        'apscheduler'                : 'APScheduler>=4.0.0a5',
     },
     'drivers': {
         'cryptography'               : 'cryptography>=38.0.1',
@@ -89,6 +89,7 @@ packages: Dict[str, Dict[str, str]] = {
         'pytest'                     : 'pytest>=6.2.2',
         'pytest_xdist'               : 'pytest-xdist>=3.2.1',
         'heartrate'                  : 'heartrate>=0.2.1',
+        'build'                      : 'build>=1.2.1',
     },
     'setup': {
     },
@@ -149,7 +150,6 @@ packages['api'] = {
     'passlib'                        : 'passlib>=1.7.4',
     'fastapi_login'                  : 'fastapi-login>=1.7.2',
     'multipart'                      : 'python-multipart>=0.0.5',
-    #  'pydantic'                       : 'pydantic>2.0.0',
     'httpx'                          : 'httpx>=0.24.1',
     'websockets'                     : 'websockets>=11.0.3',
 }

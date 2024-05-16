@@ -43,8 +43,6 @@ fi
 
 
 ### Remove apt lists, sudo, and cache.
-### We're done installing system-level packages,
-### so prevent futher packages from being installed.
 apt-get clean && \
   apt-get purge -s sudo && \
   rm -rf /var/lib/apt/lists/*

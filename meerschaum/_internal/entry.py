@@ -49,7 +49,7 @@ def entry(sysargs: Optional[List[str]] = None) -> SuccessTuple:
 
     if args.get('schedule', None):
         from meerschaum.utils.schedule import schedule_function
-        return schedule_function(entry_with_args, args['schedule'], **args)
+        return schedule_function(entry_with_args, **args)
     return entry_with_args(**args)
 
 

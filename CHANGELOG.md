@@ -4,20 +4,22 @@
 
 ### 2.2.0
 
-**Breaking Changes**
-
-- **Upgraded to `psycopg` from `psycopg2`.**  
-  The upgrade to `psycopg` (version 3) 
-
-- **`Daemon.cleanup()` now returns a `SuccessTuple`.**
-
 
 **New Features**
+
+- **New, robust scheduling.**  
+  ```bash
+  mrsm sync pipes -s 'daily & mon-fri starting 00:00'
+  ```
+
+- **Add `show schedule`.**
 
 - **Add `--skip-deps`.**  
   When installing plugins, you may skip dependencies with `--skip-deps`. This should improve the iteration loop during development.
 
 - **Add a Delete button to job cards on the Web UI.**
+
+- **Added timestamps to log file lines.**
 
 - **Pre- and post-sync hooks are printed separately.**  
   The results of sync hooks are now printed right after execution rather than after the sync.
@@ -25,11 +27,22 @@
 **Bugfixes**
 
 - **Fixed a filtering bug on the Web UI when changing instances.**
+- **Ctrl+C when exiting `show logs`.**
+- 
+
+**Breaking Changes**
+
+- **Upgraded to `psycopg` from `psycopg2`.**  
+  The upgrade to `psycopg` (version 3) 
+
+- **`Daemon.cleanup()` now returns a `SuccessTuple`.**
 
 **Other changes**
 
 - **Bumped `xterm.js` to v5.5.0.**
 - **Added tags to the pipes card.**
+- **Replaced `watchgod` with `watchfiles`.**
+- **Removed Pydantic<2 dependency.**
 
 
 ## 2.1.x Releases

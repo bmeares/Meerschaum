@@ -12,7 +12,8 @@ from datetime import datetime, timezone, timedelta, timedelta
 import meerschaum as mrsm
 from meerschaum.utils.typing import Callable, Any, Optional, List, Dict
 
-INTERVAL_UNITS: List[str] = ['months', 'weeks', 'days', 'hours', 'minutes', 'seconds']
+STARTING_KEYWORD: str = 'starting'
+INTERVAL_UNITS: List[str] = ['months', 'weeks', 'days', 'hours', 'minutes', 'seconds', 'years']
 FREQUENCY_ALIASES: Dict[str, str] = {
     'daily': 'every 1 day',
     'hourly': 'every 1 hour',
@@ -20,6 +21,7 @@ FREQUENCY_ALIASES: Dict[str, str] = {
     'weekly': 'every 1 week',
     'monthly': 'every 1 month',
     'secondly': 'every 1 second',
+    'yearly': 'every 1 year',
 }
 LOGIC_ALIASES: Dict[str, str] = {
     'and': '&',
@@ -27,7 +29,7 @@ LOGIC_ALIASES: Dict[str, str] = {
     ' through ': '-',
     ' thru ': '-',
     ' - ': '-',
-    'beginning': 'starting',
+    'beginning': STARTING_KEYWORD,
 }
 CRON_DAYS_OF_WEEK: List[str] = ['mon', 'tue', 'wed', 'thu', 'fri', 'sat', 'sun']
 CRON_DAYS_OF_WEEK_ALIASES: Dict[str, str] = {
@@ -65,8 +67,8 @@ SCHEDULE_ALIASES: Dict[str, str] = {
     **CRON_DAYS_OF_WEEK_ALIASES,
     **CRON_MONTHS_ALIASES,
 }
-STARTING_KEYWORD: str = 'starting'
 
+_scheduler = None
 def schedule_function(
         function: Callable[[Any], Any],
         schedule: str,
@@ -87,23 +89,35 @@ def schedule_function(
         The frequency schedule at which `function` should be executed (e.g. `'daily'`).
 
     """
-    import warnings
+    import asyncio
     from meerschaum.utils.warnings import warn
     from meerschaum.utils.misc import filter_keywords, round_time
+    global _scheduler
     kw['debug'] = debug
     kw = filter_keywords(function, **kw)
 
     apscheduler = mrsm.attempt_import('apscheduler', lazy=False)
     now = round_time(datetime.now(timezone.utc), timedelta(minutes=1))
     trigger = parse_schedule(schedule, now=now)
+    _scheduler = apscheduler.AsyncScheduler()
+    try:
+        loop = asyncio.get_running_loop()
+    except RuntimeError:
+        loop = asyncio.new_event_loop()
 
-    with apscheduler.Scheduler() as scheduler:
-        job = scheduler.add_schedule(function, trigger, args=args, kwargs=kw)
-        try:
-            scheduler.run_until_stopped()
-        except KeyboardInterrupt as e:
-            scheduler.stop()
-            scheduler.wait_until_stopped()
+    async def run_scheduler():
+        async with _scheduler:
+            job = await _scheduler.add_schedule(function, trigger, args=args, kwargs=kw)
+            try:
+                await _scheduler.run_until_stopped()
+            except (KeyboardInterrupt, SystemExit) as e:
+                await _stop_scheduler()
+                raise e
+
+    try:
+        loop.run_until_complete(run_scheduler())
+    except (KeyboardInterrupt, SystemExit) as e:
+        loop.run_until_complete(_stop_scheduler())
 
 
 def parse_schedule(schedule: str, now: Optional[datetime] = None):
@@ -134,7 +148,7 @@ def parse_schedule(schedule: str, now: Optional[datetime] = None):
 
     ### TODO Allow for combining `and` + `or` logic.
     if '&' in schedule and '|' in schedule:
-        error(f"Cannot accept both 'and' + 'or' logic in the schedule frequency.", ValueError)
+        raise ValueError(f"Cannot accept both 'and' + 'or' logic in the schedule frequency.")
 
     join_str = '|' if '|' in schedule else '&'
     join_trigger = (
@@ -152,12 +166,6 @@ def parse_schedule(schedule: str, now: Optional[datetime] = None):
 
     has_seconds = 'second' in schedule
     has_minutes = 'minute' in schedule
-    has_days = 'day' in schedule
-    has_weeks = 'week' in schedule
-    has_hours = 'hour' in schedule
-    num_hourly_intervals = schedule.count('hour')
-    divided_days = False
-    divided_hours = False
 
     for schedule_part in schedule_parts:
 
@@ -168,10 +176,9 @@ def parse_schedule(schedule: str, now: Optional[datetime] = None):
             )
             schedule_unit = schedule_unit.rstrip('s') + 's'
             if schedule_unit not in INTERVAL_UNITS:
-                error(
+                raise ValueError(
                     f"Invalid interval '{schedule_unit}'.\n"
-                    + f"    Accepted values are {items_str(INTERVAL_UNITS)}.",
-                    ValueError,
+                    + f"    Accepted values are {items_str(INTERVAL_UNITS)}."
                 )
 
             schedule_num = (
@@ -180,29 +187,6 @@ def parse_schedule(schedule: str, now: Optional[datetime] = None):
                 else float(schedule_num_str)
             )
 
-            ### NOTE: When combining days or weeks with other schedules,
-            ### we must divide one of the day-schedules by 2.
-            ### TODO Remove this when APScheduler is patched.
-            if (
-                join_str == '&'
-                and (has_days or has_weeks)
-                and len(schedule_parts) > 1
-                and not divided_days
-            ):
-                schedule_num /= 2
-                divided_days = True
-
-            ### NOTE: When combining multiple hourly intervals,
-            ### one must be divided by 2.
-            if (
-                join_str == '&'
-                #  and num_hourly_intervals > 1
-                and len(schedule_parts) > 1
-                and not divided_hours
-            ):
-                schedule_num /= 2
-                #  divided_hours = True
-
             trigger = (
                 apscheduler_triggers_interval.IntervalTrigger(
                     **{
@@ -210,12 +194,12 @@ def parse_schedule(schedule: str, now: Optional[datetime] = None):
                         'start_time': starting_ts,
                     }
                 )
-                if schedule_unit != 'months' else (
+                if schedule_unit not in ('months', 'years') else (
                     apscheduler_triggers_calendarinterval.CalendarIntervalTrigger(
                         **{
                             schedule_unit: schedule_num,
                             'start_date': starting_ts,
-                            #  'timezone': starting_ts.tzinfo, TODO Re-enable once APScheduler updates.
+                            'timezone': starting_ts.tzinfo,
                         }
                     )
                 )
@@ -223,12 +207,15 @@ def parse_schedule(schedule: str, now: Optional[datetime] = None):
 
         ### Determine whether this is a pure cron string or a cron subset (e.g. 'may-aug')_.
         else:
-            first_three_prefix = schedule_part[:3] 
+            first_three_prefix = schedule_part[:3].lower()
+            first_four_prefix = schedule_part[:4].lower()
             cron_kw = {}
             if first_three_prefix in CRON_DAYS_OF_WEEK:
                 cron_kw['day_of_week'] = schedule_part
             elif first_three_prefix in CRON_MONTHS:
                 cron_kw['month'] = schedule_part
+            elif is_int(first_four_prefix) and len(first_four_prefix) == 4:
+                cron_kw['year'] = int(first_four_prefix)
             trigger = (
                 apscheduler_triggers_cron.CronTrigger(
                     **{
@@ -301,3 +288,10 @@ def parse_start_time(schedule: str, now: Optional[datetime] = None) -> datetime:
     if not starting_ts.tzinfo:
         starting_ts = starting_ts.replace(tzinfo=timezone.utc)
     return starting_ts
+
+
+async def _stop_scheduler():
+    if _scheduler is None:
+        return
+    await _scheduler.stop()
+    await _scheduler.wait_until_stopped()
