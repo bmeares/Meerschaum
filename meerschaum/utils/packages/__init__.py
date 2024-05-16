@@ -35,6 +35,7 @@ _locks = {
 }
 _checked_for_updates = set()
 _is_installed_first_check: Dict[str, bool] = {}
+_MRSM_PACKAGE_ARCHIVES_PREFIX: str = "https://meerschaum.io/files/archives/"
 
 def get_module_path(
         import_name: str,
@@ -640,9 +641,15 @@ def need_update(
 
     ### We might be depending on a prerelease.
     ### Sanity check that the required version is not greater than the installed version. 
+    required_version = (
+        required_version.replace(_MRSM_PACKAGE_ARCHIVES_PREFIX, '')
+        .replace(' @ ', '').replace('wheels', '').replace('+mrsm', '').replace('/-', '')
+        .replace('-py3-none-any.whl', '')
+    )
+
     if 'a' in required_version:
-        required_version = required_version.replace('a', '-dev')
-        version = version.replace('a', '-dev')
+        required_version = required_version.replace('a', '-dev').replace('+mrsm', '')
+        version = version.replace('a', '-dev').replace('+mrsm', '')
     try:
         return (
             (not semver.Version.parse(version).match(required_version))

@@ -13,9 +13,13 @@ import pathlib
 import traceback
 import sys
 import atexit
+from datetime import datetime, timezone, timedelta
 from typing import List, Union, Optional, Tuple
 from meerschaum.config import get_config
 from meerschaum.utils.warnings import warn
+from meerschaum.utils.misc import round_time
+from meerschaum.utils.daemon.FileDescriptorInterceptor import FileDescriptorInterceptor
+from meerschaum.utils.threading import Thread
 import meerschaum as mrsm
 daemon = mrsm.attempt_import('daemon')
 
@@ -33,6 +37,8 @@ class RotatingFile(io.IOBase):
             num_files_to_keep: Optional[int] = None,
             max_file_size: Optional[int] = None,
             redirect_streams: bool = False,
+            write_timestamps: bool = False,
+            timestamps_format: str = '%Y-%m-%d %H:%M | ',
         ):
         """
         Create a file-like object which manages other files.
@@ -54,6 +60,9 @@ class RotatingFile(io.IOBase):
             
             NOTE: Only set this to `True` if you are entering into a daemon context.
             Doing so will redirect `sys.stdout` and `sys.stderr` into the log files.
+
+        write_timestamps: bool, default False
+            If `True`, prepend the current UTC timestamp to each line of the file.
         """
         self.file_path = pathlib.Path(file_path)
         if num_files_to_keep is None:
@@ -68,6 +77,8 @@ class RotatingFile(io.IOBase):
         self.num_files_to_keep = num_files_to_keep
         self.max_file_size = max_file_size
         self.redirect_streams = redirect_streams
+        self.write_timestamps = write_timestamps
+        self.timestamps_format = timestamps_format
         self.subfile_regex_pattern = re.compile(
             r'^'
             + self.file_path.name
@@ -87,12 +98,32 @@ class RotatingFile(io.IOBase):
         atexit.register(self.close)
 
 
+
     def fileno(self):
         """
         Return the file descriptor for the latest subfile.
         """
+        import inspect
+        stack = inspect.stack()
+        parent_level = stack[1]
+        parent_module = parent_level[0].f_globals.get('__file__')
+        #  if parent_module.endswith('daemon.py'):
+            #  self._monkey_patch_os_write()
         self.refresh_files()
         return self._current_file_obj.fileno()
+
+
+    def _monkey_patch_os_write(self):
+        import os
+        import sys
+        import pathlib
+        path = pathlib.Path('/home/bmeares/test1.log')
+        original_write = os.write
+        def intercept(*args, **kwargs):
+            with open(path, 'w', encoding='utf-8') as f:
+                f.write(str(args))
+            original_write(*args, **kwargs)
+        os.write = intercept
 
 
     def get_latest_subfile_path(self) -> pathlib.Path:
@@ -247,8 +278,10 @@ class RotatingFile(io.IOBase):
         if is_first_run_with_logs or lost_latest_handle:
             self._current_file_obj = open(latest_subfile_path, 'a+', encoding='utf-8')
             if self.redirect_streams:
+                self.stop_log_fd_interception()
                 daemon.daemon.redirect_stream(sys.stdout, self._current_file_obj)
                 daemon.daemon.redirect_stream(sys.stderr, self._current_file_obj)
+                self.start_log_fd_interception()
 
         create_new_file = (
             (latest_subfile_index == -1)
@@ -269,9 +302,11 @@ class RotatingFile(io.IOBase):
             if self._previous_file_obj is not None:
                 if self.redirect_streams:
                     self._redirected_subfile_objects[old_subfile_index] = self._previous_file_obj
+                    self.stop_log_fd_interception()
                     daemon.daemon.redirect_stream(self._previous_file_obj, self._current_file_obj)
                     daemon.daemon.redirect_stream(sys.stdout, self._current_file_obj)
                     daemon.daemon.redirect_stream(sys.stderr, self._current_file_obj)
+                    self.start_log_fd_interception()
                 self.close(unused_only=True)
 
             ### Sanity check in case writing somehow fails.
@@ -279,6 +314,8 @@ class RotatingFile(io.IOBase):
                 self._previous_file_obj is None
 
             self.delete(unused_only=True)
+
+
         return self._current_file_obj
 
 
@@ -311,6 +348,13 @@ class RotatingFile(io.IOBase):
             self._current_file_obj = None
 
 
+    def get_timestamp_prefix_str(self) -> str:
+        """
+        Return the current minute prefixm string.
+        """
+        return datetime.now(timezone.utc).strftime(self.timestamps_format)
+
+
     def write(self, data: str) -> None:
         """
         Write the given text into the latest subfile.
@@ -325,9 +369,15 @@ class RotatingFile(io.IOBase):
         if isinstance(data, bytes):
             data = data.decode('utf-8')
 
-        self.refresh_files(potential_new_len=len(data))
+        prefix_str = self.get_timestamp_prefix_str() if self.write_timestamps else ""
+        suffix_str = "\n" if self.write_timestamps else ""
+        self.refresh_files(potential_new_len=len(prefix_str + data + suffix_str))
         try:
+            if prefix_str:
+                self._current_file_obj.write(prefix_str)
             self._current_file_obj.write(data)
+            if suffix_str:
+                self._current_file_obj.write(suffix_str)
         except Exception as e:
             warn(f"Failed to write to subfile:\n{traceback.format_exc()}")
         self.flush()
@@ -471,7 +521,7 @@ class RotatingFile(io.IOBase):
                 subfile_object = self.subfile_objects[subfile_index]
                 for i in range(self.SEEK_BACK_ATTEMPTS):
                     try:
-                        subfile_object.seek(max(seek_ix - i), 0)
+                        subfile_object.seek(max((seek_ix - i), 0))
                         subfile_lines = subfile_object.readlines()
                     except UnicodeDecodeError:
                         continue
@@ -536,6 +586,43 @@ class RotatingFile(io.IOBase):
         if self.redirect_streams:
             sys.stdout.flush()
             sys.stderr.flush()
+
+
+    def start_log_fd_interception(self):
+        """
+        Start the file descriptor monitoring threads.
+        """
+        self._stdout_interceptor = FileDescriptorInterceptor(
+            sys.stdout.fileno(),
+            self.get_timestamp_prefix_str,
+        )
+        self._stderr_interceptor = FileDescriptorInterceptor(
+            sys.stderr.fileno(),
+            self.get_timestamp_prefix_str,
+        )
+        self._stdout_interceptor_thread = Thread(target=self._stdout_interceptor.start_interception)
+        self._stderr_interceptor_thread = Thread(target=self._stderr_interceptor.start_interception)
+        self._stdout_interceptor_thread.start()
+        self._stderr_interceptor_thread.start()
+
+
+    def stop_log_fd_interception(self):
+        """
+        Stop the file descriptor monitoring threads.
+        """
+        stdout_interceptor = self.__dict__.get('_stdout_interceptor', None)
+        stderr_interceptor = self.__dict__.get('_stderr_interceptor', None)
+        stdout_interceptor_thread = self.__dict__.get('_stdout_interceptor_thread', None)
+        stderr_interceptor_thread = self.__dict__.get('_stderr_interceptor_thread', None)
+        if stdout_interceptor is None:
+            return
+        stdout_interceptor.stop_interception()
+        stderr_interceptor.stop_interception()
+        try:
+            stdout_interceptor_thread.join()
+            stderr_interceptor_thread.join()
+        except Exception:
+            pass
 
 
     def __repr__(self) -> str:

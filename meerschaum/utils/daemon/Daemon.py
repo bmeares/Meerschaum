@@ -36,7 +36,7 @@ class Daemon:
     def __new__(
         cls,
         *args,
-        daemon_id : Optional[str] = None,
+        daemon_id: Optional[str] = None,
         **kw
     ):
         """
@@ -129,7 +129,7 @@ class Daemon:
         keep_daemon_output: bool, default True
             If `False`, delete the daemon's output directory upon exiting.
             
-        allow_dirty_run :
+        allow_dirty_run, bool, default False:
             If `True`, run the daemon, even if the `daemon_id` directory exists.
             This option is dangerous because if the same `daemon_id` runs twice,
             the last to finish will overwrite the output of the first.
@@ -138,7 +138,11 @@ class Daemon:
         -------
         Nothing — this will exit the parent process.
         """
-        import platform, sys, os
+        import platform, sys, os, traceback
+        from meerschaum.config._paths import LOGS_RESOURCES_PATH
+        from meerschaum.utils.warnings import warn
+        daemons_error_log_path = LOGS_RESOURCES_PATH / 'daemons_error.log'
+
         daemon = attempt_import('daemon')
 
         if platform.system() == 'Windows':
@@ -162,29 +166,37 @@ class Daemon:
         log_refresh_seconds = get_config('jobs', 'logs', 'refresh_files_seconds')
         self._log_refresh_timer = RepeatTimer(log_refresh_seconds, self.rotating_log.refresh_files)
 
-        with self._daemon_context:
-            try:
-                with open(self.pid_path, 'w+') as f:
-                    f.write(str(os.getpid()))
+        try:
+            with self._daemon_context:
+                try:
+                    with open(self.pid_path, 'w+', encoding='utf-8') as f:
+                        f.write(str(os.getpid()))
 
-                self._log_refresh_timer.start()
-                result = self.target(*self.target_args, **self.target_kw)
-                self.properties['result'] = result
-            except Exception as e:
-                warn(e, stacklevel=3)
-                result = e
-            finally:
-                self._log_refresh_timer.cancel()
-                self.rotating_log.close()
-                if self.pid is None and self.pid_path.exists():
-                    self.pid_path.unlink()
+                    self._log_refresh_timer.start()
+                    result = self.target(*self.target_args, **self.target_kw)
+                    self.properties['result'] = result
+                except Exception as e:
+                    warn(e, stacklevel=3)
+                    result = e
+                finally:
+                    self._log_refresh_timer.cancel()
+                    self.rotating_log.close()
+                    if self.pid is None and self.pid_path.exists():
+                        self.pid_path.unlink()
 
-            if keep_daemon_output:
-                self._capture_process_timestamp('ended')
-            else:
-                self.cleanup()
+                if keep_daemon_output:
+                    self._capture_process_timestamp('ended')
+                else:
+                    self.cleanup()
 
-            return result
+                return result
+        except Exception as e:
+            daemon_error = traceback.format_exc()
+            with open(LOGS_RESOURCES_PATH, 'a+', encoding='utf-8') as f:
+                f.write(daemon_error)
+
+        if daemon_error:
+            warn("Encountered an error while starting the daemon '{self}':\n{daemon_error}")
 
 
     def _capture_process_timestamp(
@@ -452,10 +464,10 @@ class Daemon:
         if daemon_context is not None:
             daemon_context.close()
 
-        _close_pools()
+        self.rotating_log.stop_log_fd_interception()
 
-        ### NOTE: SystemExit() does not work here.
-        sys.exit(0)
+        _close_pools()
+        raise SystemExit(0)
 
 
     def _handle_sigterm(self, signal_number: int, stack_frame: 'frame') -> None:
@@ -471,9 +483,10 @@ class Daemon:
         if daemon_context is not None:
             daemon_context.close()
 
-        _close_pools()
+        self.rotating_log.stop_log_fd_interception()
 
-        raise SystemExit()
+        _close_pools()
+        raise SystemExit(1)
 
  
     def _send_signal(
@@ -650,7 +663,11 @@ class Daemon:
         if '_rotating_log' in self.__dict__:
             return self._rotating_log
 
-        self._rotating_log = RotatingFile(self.log_path, redirect_streams=True)
+        self._rotating_log = RotatingFile(
+            self.log_path,
+            redirect_streams = True,
+            write_timestamps = True,
+        )
         return self._rotating_log
 
 
@@ -663,6 +680,7 @@ class Daemon:
             self.rotating_log.file_path,
             num_files_to_keep = self.rotating_log.num_files_to_keep,
             max_file_size = self.rotating_log.max_file_size,
+            write_timestamps = True,
         )
         return new_rotating_log.read()
 
@@ -714,7 +732,7 @@ class Daemon:
         if not self.pid_path.exists():
             return None
         try:
-            with open(self.pid_path, 'r') as f:
+            with open(self.pid_path, 'r', encoding='utf-8') as f:
                 text = f.read()
             pid = int(text.rstrip())
         except Exception as e:
@@ -815,7 +833,7 @@ class Daemon:
         if self.properties is not None:
             try:
                 self.path.mkdir(parents=True, exist_ok=True)
-                with open(self.properties_path, 'w+') as properties_file:
+                with open(self.properties_path, 'w+', encoding='utf-8') as properties_file:
                     json.dump(self.properties, properties_file)
                 success, msg = True, 'Success'
             except Exception as e:

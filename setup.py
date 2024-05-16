@@ -7,11 +7,16 @@ from setuptools import setup
 from setuptools.command.install import install
 cx_Freeze, Executable = None, None
 
-### read values from within the package
-exec(open('meerschaum/config/_version.py').read())
-exec(open('meerschaum/utils/packages/_packages.py').read())
-exec(open('meerschaum/config/static/__init__.py').read())
-setup_cf = _static_config()['setup']
+with open('meerschaum/config/_version.py', encoding='utf-8') as version_file:
+    exec(version_file.read())
+with open('meerschaum/utils/packages/_packages.py', encoding='utf-8') as packages_file:
+    exec(packages_file.read())
+with open('meerschaum/config/static/__init__.py', encoding='utf-8') as static_file:
+    exec(static_file.read())
+with open('README.md', 'r', encoding='utf-8') as readme_file:
+    readme = readme_file.read()
+
+setup_cf = STATIC_CONFIG['setup']
 
 class PostInstallCommand(install):
     """Post-installation for installation mode."""
@@ -27,9 +32,6 @@ extras = {}
 ### NOTE: package dependencies are defined in meerschaum.utils.packages._packages
 for group in packages:
     extras[group] = [ install_name for import_name, install_name in packages[group].items() ]
-
-with open('README.md', 'r', encoding='utf-8') as f:
-    readme = f.read()
 
 setup_kw_args = {
     'name'                          : setup_cf['name'],
