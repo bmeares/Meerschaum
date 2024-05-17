@@ -7,8 +7,11 @@ Intercept OS-level file descriptors.
 """
 
 import os
+import traceback
 from datetime import datetime
 from meerschaum.utils.typing import Callable
+from meerschaum.utils.warnings import warn
+from meerschaum.utils.threading import Thread
 
 class FileDescriptorInterceptor:
     """
@@ -45,7 +48,8 @@ class FileDescriptorInterceptor:
             if not data:
                 break
             injected_str = self.injection_hook()
-            modified_data = data.replace(b'\n', f'\n{injected_str}'.encode('utf-8'))
+            injected_bytes = injected_str.encode('utf-8')
+            modified_data = data.replace(b'\n', b'\n' + injected_bytes)
             os.write(self.new_file_descriptor, modified_data)
 
     def stop_interception(self):
@@ -54,7 +58,22 @@ class FileDescriptorInterceptor:
         """
         try:
             os.dup2(self.new_file_descriptor, self.original_file_descriptor)
-            os.close(self.read_pipe)
+        except OSError as e:
+            warn(
+                f"Error while trying to restore the intercepted file descriptor:\n"
+                + f"{traceback.format_exc()}"
+            )
+        try:
             os.close(self.write_pipe)
-        except OSError:
-            pass
+        except OSError as e:
+            warn(
+                f"Error while trying to close the write-pipe to the intercepted file descriptor:\n"
+                + f"{traceback.format_exc()}"
+            )
+        try:
+            os.close(self.read_pipe)
+        except OSError as e:
+            warn(
+                f"Error while trying to close the read-pipe to the intercepted file descriptor:\n"
+                + f"{traceback.format_exc()}"
+            )

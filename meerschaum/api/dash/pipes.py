@@ -24,6 +24,7 @@ from meerschaum.api.dash import (
 from meerschaum.api.dash.connectors import get_web_connector
 from meerschaum.api.dash.components import alert_from_success_tuple
 from meerschaum.api.dash.users import is_session_authenticated
+from meerschaum.config import get_config
 import meerschaum as mrsm
 dbc = attempt_import('dash_bootstrap_components', lazy=False, check_update=CHECK_UPDATE)
 dash_ace = attempt_import('dash_ace', lazy=False, check_update=CHECK_UPDATE)
@@ -110,12 +111,16 @@ def get_pipes_cards(*keys, session_data: Optional[Dict[str, Any]] = None):
     session_id = (session_data or {}).get('session-id', None)
     authenticated = is_session_authenticated(str(session_id))
 
-    _pipes = pipes_from_state(*keys, as_list=True)
-    alerts = [alert_from_success_tuple(_pipes)]
-    if not isinstance(_pipes, list):
-        _pipes = []
-    for p in _pipes:
-        meta_str = json.dumps(p.meta)
+    pipes = pipes_from_state(*keys, as_list=True)
+    alerts = [alert_from_success_tuple(pipes)]
+    if not isinstance(pipes, list):
+        pipes = []
+
+    max_num_pipes_cards = get_config('dash', 'max_num_pipes_cards')
+    overflow_pipes = pipes[max_num_pipes_cards:]
+
+    for pipe in pipes[:max_num_pipes_cards]:
+        meta_str = json.dumps(pipe.meta)
         footer_children = dbc.Row(
             [
                 dbc.Col(
@@ -188,13 +193,13 @@ def get_pipes_cards(*keys, session_data: Optional[Dict[str, Any]] = None):
         )
         card_body_children = [
             html.H5(
-                html.B(str(p)),
+                html.B(str(pipe)),
                 className = 'card-title',
                 style = {'font-family': ['monospace']}
             ),
             html.Div(
                 dbc.Accordion(
-                    accordion_items_from_pipe(p, authenticated=authenticated),
+                    accordion_items_from_pipe(pipe, authenticated=authenticated),
                     flush = True,
                     start_collapsed = True,
                     id = {'type': 'pipe-accordion', 'index': meta_str},
@@ -203,11 +208,30 @@ def get_pipes_cards(*keys, session_data: Optional[Dict[str, Any]] = None):
 
         ]
         cards.append(
-            dbc.Card(children=[
+            dbc.Card([
                 dbc.CardBody(children=card_body_children),
                 dbc.CardFooter(children=footer_children),
             ])
         )
+
+    if overflow_pipes:
+        cards.append(
+            dbc.Card([
+                dbc.CardBody(
+                    html.Ul(
+                        [
+                            html.Li(html.H5(
+                                html.B(str(pipe)),
+                                className = 'card-title',
+                                style = {'font-family': ['monospace']}
+                            ))
+                            for pipe in overflow_pipes
+                        ]
+                    )
+                )
+            ])
+        )
+
     return cards, alerts
 
 

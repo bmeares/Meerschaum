@@ -32,17 +32,22 @@ def get_plugins_cards(
         desc = get_api_connector().get_plugin_attributes(plugin).get(
             'description', 'No description provided.'
         )
-        desc_textarea_kw = dict(
-            value=desc, readOnly=True, debounce=False, className='plugin-description',
-            draggable=False, wrap='overflow',
-            id={'type': 'description-textarea', 'index': plugin_name},
-        )
+        desc_textarea_kw = {
+            'value': desc,
+            'readOnly': True,
+            'debounce': False,
+            'className': 'plugin-description',
+            'draggable': False,
+            'wrap': 'overflow',
+            'placeholder': "Edit the plugin's description",
+            'id': {'type': 'description-textarea', 'index': plugin_name},
+        }
 
         card_body_children = [html.H4(plugin_name)]
 
         if is_plugin_owner(plugin_name, session_data):
             desc_textarea_kw['readOnly'] = False
-        card_body_children += [dbc.Textarea(**desc_textarea_kw)]
+        card_body_children.append(dbc.Textarea(**desc_textarea_kw))
         if not desc_textarea_kw['readOnly']:
             card_body_children += [
                 dbc.Button(
@@ -53,12 +58,23 @@ def get_plugins_cards(
                 ),
                 html.Div(id={'type': 'edit-alert-div', 'index': plugin_name}),
             ]
-        _plugin_username = get_api_connector().get_plugin_username(plugin, debug=debug)
+        plugin_username = get_api_connector().get_plugin_username(plugin, debug=debug)
+        plugin_version = get_api_connector().get_plugin_version(plugin, debug=debug) or ' '
         card_children = [
-            dbc.CardHeader([html.A('👤 ' + str(_plugin_username), href='#')]),
+            dbc.CardHeader(
+                [
+                    dbc.Row(
+                        [
+                            dbc.Col(html.A('👤 ' + str(plugin_username), href='#')),
+                            dbc.Col(html.Pre(str(plugin_version), style={'text-align': 'right'})),
+                        ],
+                        justify = 'between',
+                    ),
+                ],
+            ),
             dbc.CardBody(card_body_children),
             dbc.CardFooter([
-                html.A('⬇️ Download source', href=(endpoints['plugins'] + '/' + plugin_name))
+                html.A('⬇️ Download', href=(endpoints['plugins'] + '/' + plugin_name))
             ]),
         ]
         cards.append(

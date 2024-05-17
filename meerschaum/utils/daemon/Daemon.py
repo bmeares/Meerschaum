@@ -141,9 +141,11 @@ class Daemon:
         import platform, sys, os, traceback
         from meerschaum.config._paths import LOGS_RESOURCES_PATH
         from meerschaum.utils.warnings import warn
+        from meerschaum.config import get_config
         daemons_error_log_path = LOGS_RESOURCES_PATH / 'daemons_error.log'
-
         daemon = attempt_import('daemon')
+        lines = get_config('jobs', 'terminal', 'lines')
+        columns = get_config('jobs','terminal', 'columns')
 
         if platform.system() == 'Windows':
             return False, "Windows is no longer supported."
@@ -167,6 +169,7 @@ class Daemon:
         self._log_refresh_timer = RepeatTimer(log_refresh_seconds, self.rotating_log.refresh_files)
 
         try:
+            os.environ['LINES'], os.environ['COLUMNS'] = str(int(lines)), str(int(columns))
             with self._daemon_context:
                 try:
                     with open(self.pid_path, 'w+', encoding='utf-8') as f:
@@ -464,9 +467,11 @@ class Daemon:
         if daemon_context is not None:
             daemon_context.close()
 
-        self.rotating_log.stop_log_fd_interception()
-
         _close_pools()
+
+        print('coming down!')
+        self.rotating_log.stop_log_fd_interception()
+        print('stopped threads')
         raise SystemExit(0)
 
 
@@ -482,8 +487,6 @@ class Daemon:
         daemon_context = self.__dict__.get('_daemon_context', None)
         if daemon_context is not None:
             daemon_context.close()
-
-        self.rotating_log.stop_log_fd_interception()
 
         _close_pools()
         raise SystemExit(1)
@@ -667,6 +670,7 @@ class Daemon:
             self.log_path,
             redirect_streams = True,
             write_timestamps = True,
+            timestamp_format = get_config('jobs', 'logs', 'timestamp_format'),
         )
         return self._rotating_log
 
@@ -905,6 +909,13 @@ class Daemon:
                 return False, msg
         if not keep_logs:
             self.rotating_log.delete()
+            try:
+                if self.log_offset_path.exists():
+                    self.log_offset_path.unlink()
+            except Exception as e:
+                msg = f"Failed to remove offset file for '{self.daemon_id}':\n{e}"
+                warn(msg)
+                return False, msg
         return True, "Success"
 
 

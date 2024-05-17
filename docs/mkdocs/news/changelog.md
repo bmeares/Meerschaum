@@ -7,19 +7,43 @@
 
 **New Features**
 
-- **New, robust scheduling.**  
+- **New job scheduler**  
+  The job scheduler has been rewritten with a [simpler syntax](/reference/background-jobs/#-schedules).
+
   ```bash
-  mrsm sync pipes -s 'daily & mon-fri starting 00:00'
+  mrsm sync pipes -s 'daily & mon-fri starting 00:00' -d
   ```
 
-- **Add `show schedule`.**
+- **Add `show schedule`.**  
+  Validate your schedules' upcoming timestamps with `show schedule`.
+
+  ```bash
+  mrsm show schedule 'daily & mon-fri starting 2024-05-01'
+
+  Next 5 timestamps for schedule 'daily & mon-fri starting 2024-05-01':
+
+    2024-05-01 00:00:00+00:00
+    2024-05-02 00:00:00+00:00
+    2024-05-03 00:00:00+00:00
+    2024-05-06 00:00:00+00:00
+    2024-05-07 00:00:00+00:00
+  ```
 
 - **Add `--skip-deps`.**  
   When installing plugins, you may skip dependencies with `--skip-deps`. This should improve the iteration loop during development.
 
-- **Add a Delete button to job cards on the Web UI.**
+  ```bash
+  mrsm install plugin noaa --no-deps
+  ```
 
-- **Added timestamps to log file lines.**
+- **Add logs buttons to job cars on the Web UI.**  
+  For your convenience, "Follow logs" and "Download logs" buttons have been added to jobs' cards.
+
+- **Add a Delete button to job cards on the Web UI.**  
+  You may now delete a job from its card (once stopped, that is).
+
+- **Added timestamps to log file lines.**  
+  This was a tricky one to implement ― log files now prepend the current minute
 
 - **Pre- and post-sync hooks are printed separately.**  
   The results of sync hooks are now printed right after execution rather than after the sync.

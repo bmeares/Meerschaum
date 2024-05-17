@@ -578,7 +578,7 @@ def _show_logs(
         `show logs myjob myotherjob`
     """
     import os, pathlib, random, asyncio
-    from datetime import datetime
+    from datetime import datetime, timezone
     from meerschaum.utils.packages import attempt_import, import_rich
     from meerschaum.utils.daemon import get_filtered_daemons, Daemon
     from meerschaum.utils.warnings import warn, info
@@ -589,81 +589,105 @@ def _show_logs(
     if not ANSI:
         info = print
     colors = get_config('jobs', 'logs', 'colors')
+    timestamp_format = get_config('jobs', 'logs', 'timestamp_format')
+    follow_timestamp_format = get_config('jobs', 'logs', 'follow_timestamp_format')
     daemons = get_filtered_daemons(action)
+    now = datetime.now(timezone.utc)
+    now_str = now.strftime(timestamp_format)
+    now_follow_str = now.strftime(follow_timestamp_format)
 
-    def _build_buffer_spaces(daemons) -> Dict[str, str]:
-        _max_len_id = max([len(d.daemon_id) for d in daemons]) if daemons else 0
-        _buffer_len = max(get_config('jobs', 'logs', 'min_buffer_len'), _max_len_id + 2)
+    def build_buffer_spaces(daemons) -> Dict[str, str]:
+        max_len_id = max(len(d.daemon_id) for d in daemons) if daemons else 0
+        buffer_len = max(
+            get_config('jobs', 'logs', 'min_buffer_len'),
+            max_len_id 
+        )
         return {
-            d.daemon_id: ''.join([' ' for i in range(_buffer_len - len(d.daemon_id))])
+            d.daemon_id: ''.join([' ' for i in range(buffer_len - len(d.daemon_id))])
             for d in daemons
         }
 
-    def _build_job_colors(daemons, _old_job_colors = None) -> Dict[str, str]:
+    def build_job_colors(daemons, _old_job_colors = None) -> Dict[str, str]:
         return {d.daemon_id: colors[i % len(colors)] for i, d in enumerate(daemons)}
 
-    _buffer_spaces = _build_buffer_spaces(daemons)
-    _job_colors = _build_job_colors(daemons)
+    buffer_spaces = build_buffer_spaces(daemons)
+    job_colors = build_job_colors(daemons)
 
-    def _get_buffer_spaces(daemon_id):
-        nonlocal _buffer_spaces, daemons
-        if daemon_id not in _buffer_spaces:
+    def get_buffer_spaces(daemon_id):
+        nonlocal buffer_spaces, daemons
+        if daemon_id not in buffer_spaces:
             d = Daemon(daemon_id=daemon_id)
             if d not in daemons:
                 daemons = get_filtered_daemons(action)
-            _buffer_spaces = _build_buffer_spaces(daemons)
-        return _buffer_spaces[daemon_id]
+            buffer_spaces = build_buffer_spaces(daemons)
+        return buffer_spaces[daemon_id]
 
-    def _get_job_colors(daemon_id):
-        nonlocal _job_colors, daemons
-        if daemon_id not in _job_colors:
+    def get_job_colors(daemon_id):
+        nonlocal job_colors, daemons
+        if daemon_id not in job_colors:
             d = Daemon(daemon_id=daemon_id)
             if d not in daemons:
                 daemons = get_filtered_daemons(action)
-            _job_colors = _build_job_colors(daemons)
-        return _job_colors[daemon_id]
+            job_colors = build_job_colors(daemons)
+        return job_colors[daemon_id]
 
-    def _follow_pretty_print():
+    def follow_pretty_print():
         watchfiles = attempt_import('watchfiles')
         rich = import_rich()
         rich_text = attempt_import('rich.text')
-        _watch_daemon_ids = {d.daemon_id: d for d in daemons}
+        watch_daemon_ids = {d.daemon_id: d for d in daemons}
         info("Watching log files...")
 
-        def _print_job_line(daemon, line):
-            date_prefix_str = line[:len('YYYY-MM-DD HH:mm')]
+        previous_line_timestamp = None
+        def print_job_line(daemon, line):
+            nonlocal previous_line_timestamp
+            date_prefix_str = line[:len(now_str)]
             try:
-                line_timestamp = datetime.fromisoformat(date_prefix_str)
+                line_timestamp = datetime.strptime(date_prefix_str, timestamp_format)
+                previous_line_timestamp = line_timestamp
             except Exception as e:
                 line_timestamp = None
             if line_timestamp:
-                line = line[len('YYYY-MM-DD HH:mm | '):]
+                line = line[(len(now_str) + 3):]
+            else:
+                line_timestamp = previous_line_timestamp
             if len(line) == 0:
                 return
+
             text = rich_text.Text(daemon.daemon_id)
-            text.append(
-                _get_buffer_spaces(daemon.daemon_id) + '| '
-                + (line[:-1] if line[-1] == '\n' else line)
+            line_prefix = (
+                get_buffer_spaces(daemon.daemon_id)
+                + (line_timestamp.strftime(follow_timestamp_format) if line_timestamp else '')
+                + ' | '
             )
+            text.append(line_prefix + (line[:-1] if line[-1] == '\n' else line))
             if ANSI:
                 text.stylize(
-                    _get_job_colors(daemon.daemon_id),
+                    get_job_colors(daemon.daemon_id),
                     0,
-                    len(daemon.daemon_id) + len(_get_buffer_spaces(daemon.daemon_id)) + 1
+                    len(daemon.daemon_id) + len(line_prefix)
                 )
             get_console().print(text)
 
 
-        def _print_log_lines(daemon):
+        def print_log_lines(daemon):
             for line in daemon.readlines():
-                _print_job_line(daemon, line)
+                print_job_line(daemon, line)
 
-        def _seek_back_offset(d) -> bool:
+        def seek_back_offset(d) -> bool:
             if d.log_offset_path.exists():
                 d.log_offset_path.unlink()
 
             latest_subfile_path = d.rotating_log.get_latest_subfile_path()
             latest_subfile_index = d.rotating_log.get_latest_subfile_index()
+
+            ### Sometimes the latest file is empty.
+            if os.stat(latest_subfile_path).st_size == 0 and latest_subfile_index > 0:
+                latest_subfile_index -= 1
+                latest_subfile_path = d.rotating_log.get_subfile_path_from_index(
+                    latest_subfile_index
+                )
+
             with open(latest_subfile_path, 'r', encoding='utf-8') as f:
                 latest_lines = f.readlines()
 
@@ -683,11 +707,11 @@ def _show_logs(
             for d in daemons
         }
         for d in daemons:
-            _seek_back_offset(d)
-            _print_log_lines(d)
+            seek_back_offset(d)
+            print_log_lines(d)
 
         _quit = False
-        def _watch_logs():
+        def watch_logs():
             for changes in watchfiles.watch(LOGS_RESOURCES_PATH):
                 if _quit:
                     return
@@ -699,7 +723,7 @@ def _show_logs(
                     if not file_path.exists():
                         continue
                     daemon_id = file_path.name.split('.log')[0]
-                    if daemon_id not in _watch_daemon_ids and action:
+                    if daemon_id not in watch_daemon_ids and action:
                         continue
                     try:
                         daemon = Daemon(daemon_id=daemon_id)
@@ -708,21 +732,21 @@ def _show_logs(
                         warn(f"Seeing new logs for non-existent job '{daemon_id}'.", stack=False)
 
                     if daemon is not None:
-                        _print_log_lines(daemon)
+                        print_log_lines(daemon)
 
         try:
-            _watch_logs()
+            watch_logs()
         except KeyboardInterrupt as ki:
             _quit = True
 
-    def _print_nopretty_log_text():
+    def print_nopretty_log_text():
         for d in daemons:
             log_text = d.log_text
             print(d.daemon_id)
             print(log_text)
 
-    _print_log_text = _follow_pretty_print if not nopretty else _print_nopretty_log_text
-    _print_log_text()
+    print_log_text = follow_pretty_print if not nopretty else print_nopretty_log_text
+    print_log_text()
 
     return True, "Success"
 

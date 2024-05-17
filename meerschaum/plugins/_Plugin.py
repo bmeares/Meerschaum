@@ -209,7 +209,7 @@ class Plugin:
         def parse_gitignore() -> 'Set[str]':
             gitignore_path = pathlib.Path(path) / '.gitignore'
             if not gitignore_path.exists():
-                return set()
+                return set(default_patterns_to_ignore)
             with open(gitignore_path, 'r', encoding='utf-8') as f:
                 gitignore_text = f.read()
             return set(pathspec.PathSpec.from_lines(
