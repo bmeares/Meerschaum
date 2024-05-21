@@ -102,7 +102,7 @@ class RotatingFile(io.IOBase):
         """
         Return the file descriptor for the latest subfile.
         """
-        self.refresh_files()
+        self.refresh_files(start_interception=False)
         return self._current_file_obj.fileno()
 
 
@@ -232,7 +232,11 @@ class RotatingFile(io.IOBase):
         ]
 
 
-    def refresh_files(self, potential_new_len: int = 0) -> '_io.TextUIWrapper':
+    def refresh_files(
+            self,
+            potential_new_len: int = 0,
+            start_interception: bool = False,
+        ) -> '_io.TextUIWrapper':
         """
         Check the state of the subfiles.
         If the latest subfile is too large, create a new file and delete old ones.
@@ -240,6 +244,9 @@ class RotatingFile(io.IOBase):
         Parameters
         ----------
         potential_new_len: int, default 0
+
+        start_interception: bool, default False
+            If `True`, kick off the file interception threads.
         """
         self.flush()
 
@@ -257,7 +264,7 @@ class RotatingFile(io.IOBase):
         )
         if is_first_run_with_logs or lost_latest_handle:
             self._current_file_obj = open(latest_subfile_path, 'a+', encoding='utf-8')
-            if self.redirect_streams:
+            if self.redirect_streams and start_interception:
                 try:
                     daemon.daemon.redirect_stream(sys.stdout, self._current_file_obj)
                     daemon.daemon.redirect_stream(sys.stderr, self._current_file_obj)
@@ -284,14 +291,12 @@ class RotatingFile(io.IOBase):
             self.flush()
 
             if self._previous_file_obj is not None:
-                if self.redirect_streams:
+                if self.redirect_streams and start_interception:
                     self._redirected_subfile_objects[old_subfile_index] = self._previous_file_obj
                     daemon.daemon.redirect_stream(self._previous_file_obj, self._current_file_obj)
                     daemon.daemon.redirect_stream(sys.stdout, self._current_file_obj)
                     daemon.daemon.redirect_stream(sys.stderr, self._current_file_obj)
                 self.close(unused_only=True)
-            #  if self.redirect_streams:
-                #  self.start_log_fd_interception()
 
             ### Sanity check in case writing somehow fails.
             if self._previous_file_obj is self._current_file_obj:
@@ -311,7 +316,7 @@ class RotatingFile(io.IOBase):
         unused_only: bool, default False
             If `True`, only close file descriptors not currently in use.
         """
-        self.stop_log_fd_interception()
+        self.stop_log_fd_interception(unused_only=unused_only)
         subfile_indices = sorted(self.subfile_objects.keys())
         for subfile_index in subfile_indices:
             subfile_object = self.subfile_objects[subfile_index]
@@ -355,7 +360,10 @@ class RotatingFile(io.IOBase):
 
         prefix_str = self.get_timestamp_prefix_str() if self.write_timestamps else ""
         suffix_str = "\n" if self.write_timestamps else ""
-        self.refresh_files(potential_new_len=len(prefix_str + data + suffix_str))
+        self.refresh_files(
+            potential_new_len = len(prefix_str + data + suffix_str),
+            start_interception = True,
+        )
         try:
             if prefix_str:
                 self._current_file_obj.write(prefix_str)
@@ -585,6 +593,7 @@ class RotatingFile(io.IOBase):
             sys.stderr.fileno(),
             self.get_timestamp_prefix_str,
         )
+
         self._stdout_interceptor_thread = Thread(
             target = self._stdout_interceptor.start_interception,
             daemon = True,
@@ -605,31 +614,27 @@ class RotatingFile(io.IOBase):
             self._stdout_interceptor_thread,
             self._stderr_interceptor_thread,
         ])
-        if len(self._interceptor_threads) > 2:
-            del self._interceptor_threads[:2]
-        self._interceptors.extend([
-            self._stdout_interceptor,
-            self._stderr_interceptor, 
-        ])
-        if len(self._interceptors) > 2:
-            del self._interceptors[:2]
+        self.stop_log_fd_interception(unused_only=True)
 
-
-    def stop_log_fd_interception(self):
+    def stop_log_fd_interception(self, unused_only: bool = False):
         """
         Stop the file descriptor monitoring threads.
         """
         interceptors = self.__dict__.get('_interceptors', [])
         interceptor_threads = self.__dict__.get('_interceptor_threads', [])
 
-        for thread in interceptor_threads:
+        end_ix = len(interceptors) if not unused_only else -2
+
+        for interceptor in interceptors[:end_ix]:
+            interceptor.stop_interception()
+        del interceptors[:end_ix]
+
+        for thread in interceptor_threads[:end_ix]:
             try:
                 thread.join()
             except Exception as e:
                 warn(f"Failed to join interceptor threads:\n{traceback.format_exc()}")
-
-        for interceptor in interceptors:
-            interceptor.stop_interception()
+        del interceptor_threads[:end_ix]
 
 
     def __repr__(self) -> str:

@@ -651,7 +651,8 @@ def _show_logs(
                 line = line[(len(now_str) + 3):]
             else:
                 line_timestamp = previous_line_timestamp
-            if len(line) == 0:
+
+            if len(line) == 0 or line == '\n':
                 return
 
             text = rich_text.Text(daemon.daemon_id)

@@ -153,6 +153,7 @@ paths = {
 
     'DAEMON_RESOURCES_PATH'          : ('{ROOT_DIR_PATH}', 'jobs'),
     'LOGS_RESOURCES_PATH'            : ('{ROOT_DIR_PATH}', 'logs'),
+    'DAEMON_ERROR_LOG_PATH'          : ('{ROOT_DIR_PATH}', 'daemon_errors.log'),
 }
 
 def set_root(root: Union[Path, str]):

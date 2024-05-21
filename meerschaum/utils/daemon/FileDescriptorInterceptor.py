@@ -11,7 +11,8 @@ import traceback
 from datetime import datetime
 from meerschaum.utils.typing import Callable
 from meerschaum.utils.warnings import warn
-from meerschaum.utils.threading import Thread
+
+FD_CLOSED: int = 9
 
 class FileDescriptorInterceptor:
     """
@@ -43,13 +44,28 @@ class FileDescriptorInterceptor:
 
         NOTE: This is blocking and is meant to be run in a thread.
         """
+        is_first_read = True
         while True:
             data = os.read(self.read_pipe, 1024)
             if not data:
                 break
+
+            first_char_is_newline = data[0] == b'\n'
+            last_char_is_newline = data[-1] == b'\n'
+
             injected_str = self.injection_hook()
             injected_bytes = injected_str.encode('utf-8')
-            modified_data = data.replace(b'\n', b'\n' + injected_bytes)
+
+            if is_first_read:
+                data = b'\n' + data
+                is_first_read = False
+
+            modified_data = (
+                (data[:-1].replace(b'\n', b'\n' + injected_bytes) + b'\n')
+                if last_char_is_newline
+                else data.replace(b'\n', b'\n' + injected_bytes)
+            )
+
             os.write(self.new_file_descriptor, modified_data)
 
     def stop_interception(self):
@@ -57,23 +73,29 @@ class FileDescriptorInterceptor:
         Restore the file descriptors and close the new pipes.
         """
         try:
-            os.dup2(self.new_file_descriptor, self.original_file_descriptor)
+            os.close(self.new_file_descriptor)
         except OSError as e:
-            warn(
-                f"Error while trying to restore the intercepted file descriptor:\n"
-                + f"{traceback.format_exc()}"
-            )
+            if e.errno != FD_CLOSED:
+                warn(
+                    f"Error while trying to close the duplicated file descriptor:\n"
+                    + f"{traceback.format_exc()}"
+                )
+
         try:
             os.close(self.write_pipe)
         except OSError as e:
-            warn(
-                f"Error while trying to close the write-pipe to the intercepted file descriptor:\n"
-                + f"{traceback.format_exc()}"
-            )
+            if e.errno != FD_CLOSED:
+                warn(
+                    f"Error while trying to close the write-pipe "
+                    + "to the intercepted file descriptor:\n"
+                    + f"{traceback.format_exc()}"
+                )
         try:
             os.close(self.read_pipe)
         except OSError as e:
-            warn(
-                f"Error while trying to close the read-pipe to the intercepted file descriptor:\n"
-                + f"{traceback.format_exc()}"
-            )
+            if e.errno != FD_CLOSED:
+                warn(
+                    f"Error while trying to close the read-pipe "
+                    + "to the intercepted file descriptor:\n"
+                    + f"{traceback.format_exc()}"
+                )

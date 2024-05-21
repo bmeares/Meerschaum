@@ -139,10 +139,9 @@ class Daemon:
         Nothing — this will exit the parent process.
         """
         import platform, sys, os, traceback
-        from meerschaum.config._paths import LOGS_RESOURCES_PATH
+        from meerschaum.config._paths import DAEMON_ERROR_LOG_PATH
         from meerschaum.utils.warnings import warn
         from meerschaum.config import get_config
-        daemons_error_log_path = LOGS_RESOURCES_PATH / 'daemons_error.log'
         daemon = attempt_import('daemon')
         lines = get_config('jobs', 'terminal', 'lines')
         columns = get_config('jobs','terminal', 'columns')
@@ -195,11 +194,11 @@ class Daemon:
                 return result
         except Exception as e:
             daemon_error = traceback.format_exc()
-            with open(LOGS_RESOURCES_PATH, 'a+', encoding='utf-8') as f:
+            with open(DAEMON_ERROR_LOG_PATH, 'a+', encoding='utf-8') as f:
                 f.write(daemon_error)
 
         if daemon_error:
-            warn("Encountered an error while starting the daemon '{self}':\n{daemon_error}")
+            warn(f"Encountered an error while starting the daemon '{self}':\n{daemon_error}")
 
 
     def _capture_process_timestamp(
@@ -468,11 +467,8 @@ class Daemon:
             daemon_context.close()
 
         _close_pools()
-
-        print('coming down!')
         self.rotating_log.stop_log_fd_interception()
-        print('stopped threads')
-        raise SystemExit(0)
+        raise KeyboardInterrupt()
 
 
     def _handle_sigterm(self, signal_number: int, stack_frame: 'frame') -> None:
