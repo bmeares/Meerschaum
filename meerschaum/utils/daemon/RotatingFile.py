@@ -264,7 +264,7 @@ class RotatingFile(io.IOBase):
         )
         if is_first_run_with_logs or lost_latest_handle:
             self._current_file_obj = open(latest_subfile_path, 'a+', encoding='utf-8')
-            if self.redirect_streams and start_interception:
+            if self.redirect_streams:
                 try:
                     daemon.daemon.redirect_stream(sys.stdout, self._current_file_obj)
                     daemon.daemon.redirect_stream(sys.stderr, self._current_file_obj)
@@ -272,7 +272,8 @@ class RotatingFile(io.IOBase):
                     warn(
                         f"Encountered an issue when redirecting streams:\n{traceback.format_exc()}"
                     )
-                self.start_log_fd_interception()
+                if start_interception:
+                    self.start_log_fd_interception()
 
         create_new_file = (
             (latest_subfile_index == -1)
@@ -291,7 +292,7 @@ class RotatingFile(io.IOBase):
             self.flush()
 
             if self._previous_file_obj is not None:
-                if self.redirect_streams and start_interception:
+                if self.redirect_streams:
                     self._redirected_subfile_objects[old_subfile_index] = self._previous_file_obj
                     daemon.daemon.redirect_stream(self._previous_file_obj, self._current_file_obj)
                     daemon.daemon.redirect_stream(sys.stdout, self._current_file_obj)
