@@ -103,11 +103,13 @@ STATIC_CONFIG: Dict[str, Any] = {
     },
     'users': {
         'password_hash': {
+            'algorithm_name': 'sha256',
+            'salt_bytes': 16,
             'schemes': [
                 'pbkdf2_sha256',
             ],
             'default': 'pbkdf2_sha256',
-            'pbkdf2_sha256__default_rounds': 30000,
+            'pbkdf2_sha256__default_rounds': 3_000_000,
         },
         'min_username_length': 1,
         'max_username_length': 26,

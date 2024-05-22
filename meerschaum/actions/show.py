@@ -620,7 +620,7 @@ def _show_logs(
             if d not in daemons:
                 daemons = get_filtered_daemons(action)
             buffer_spaces = build_buffer_spaces(daemons)
-        return buffer_spaces[daemon_id]
+        return buffer_spaces[daemon_id] or ' '
 
     def get_job_colors(daemon_id):
         nonlocal job_colors, daemons

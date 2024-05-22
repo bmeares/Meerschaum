@@ -440,17 +440,12 @@ def update_flags(input_flags_dropdown_values, n_clicks, input_flags_texts):
             className = 'input-text',
         )
 
+    remove_index = trigger_dict['index'] if trigger_type == 'input-flags-remove-button' else None
     rows = [
         build_row(i, val, val_text)
         for i, (val, val_text) in enumerate(zip(input_flags_dropdown_values, input_flags_texts))
+        if i != remove_index
     ]
-
-    if trigger_type == 'input-flags-remove-button':
-        remove_index = trigger_dict['index']
-        try:
-            del rows[remove_index]
-        except IndexError:
-            pass
 
     if not rows or input_flags_dropdown_values[-1]:
         rows.append(build_row(len(rows), None, None))

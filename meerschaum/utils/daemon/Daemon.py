@@ -15,6 +15,7 @@ import signal
 import sys
 import time
 import traceback
+from functools import partial
 from datetime import datetime, timezone
 from meerschaum.utils.typing import Optional, Dict, Any, SuccessTuple, Callable, List, Union
 from meerschaum.config import get_config
@@ -165,7 +166,10 @@ class Daemon:
         )
 
         log_refresh_seconds = get_config('jobs', 'logs', 'refresh_files_seconds')
-        self._log_refresh_timer = RepeatTimer(log_refresh_seconds, self.rotating_log.refresh_files)
+        self._log_refresh_timer = RepeatTimer(
+            log_refresh_seconds,
+            partial(self.rotating_log.refresh_files, start_interception=True),
+        )
         try:
             os.environ['LINES'], os.environ['COLUMNS'] = str(int(lines)), str(int(columns))
             with self._daemon_context:

@@ -577,8 +577,14 @@ class RotatingFile(io.IOBase):
                 except Exception as e:
                     warn(f"Failed to flush subfile {subfile_index}:\n{traceback.format_exc()}")
         if self.redirect_streams:
-            sys.stdout.flush()
-            sys.stderr.flush()
+            try:
+                sys.stdout.flush()
+            except Exception as e:
+                warn(f"Failed to flush STDOUT:\n{traceback.format_exc()}")
+            try:
+                sys.stderr.flush()
+            except Exception as e:
+                warn(f"Failed to flush STDERR:\n{traceback.format_exc()}")
 
 
     def start_log_fd_interception(self):

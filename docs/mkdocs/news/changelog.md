@@ -2,8 +2,9 @@
 
 ## 2.2.x Releases
 
-### 2.2.0
+This is the current release cycle, so stay tuned for future releases!
 
+### 2.2.0
 
 **New Features**
 
@@ -17,7 +18,7 @@
 - **Add `show schedule`.**  
   Validate your schedules' upcoming timestamps with `show schedule`.
 
-  ```bash
+  ```
   mrsm show schedule 'daily & mon-fri starting 2024-05-01'
 
   Next 5 timestamps for schedule 'daily & mon-fri starting 2024-05-01':
@@ -29,6 +30,9 @@
     2024-05-07 00:00:00+00:00
   ```
 
+- **Added timestamps to log file lines.**  
+  Log files now prepend the current minute to each line of the file, and the timestamps are also printed when viewing logs with `show logs`. You may change the timestamp format under the config keys `MRSM{jobs:logs:timestamp_format}` (timestamp written to disk) and `MRSM{jobs:logs:follow_timestamp_format}` (timestamp printed when following via `show logs`.).
+
 - **Add `--skip-deps`.**  
   When installing plugins, you may skip dependencies with `--skip-deps`. This should improve the iteration loop during development.
 
@@ -36,28 +40,30 @@
   mrsm install plugin noaa --no-deps
   ```
 
-- **Add logs buttons to job cars on the Web UI.**  
+- **Add logs buttons to job cards on the Web UI.**  
   For your convenience, "Follow logs" and "Download logs" buttons have been added to jobs' cards.
 
 - **Add a Delete button to job cards on the Web UI.**  
   You may now delete a job from its card (once stopped, that is).
 
-- **Added timestamps to log file lines.**  
-  This was a tricky one to implement ― log files now prepend the current minute
+- **Add management buttons to pipes' cards.**  
+  For your convenience, you may now sync, verify, clear, drop, and delete pipes directly from cards.
 
 - **Pre- and post-sync hooks are printed separately.**  
   The results of sync hooks are now printed right after execution rather than after the sync.
 
 **Bugfixes**
 
-- **Fixed a filtering bug on the Web UI when changing instances.**
-- **Ctrl+C when exiting `show logs`.**
-- 
+- **Fixed a filtering bug on the Web UI when changing instances.**  
+  When changing instances on the Web Console, the connector, metric, and location choices will reset appropriately.
+
+- **Ctrl+C when exiting `show logs`.**  
+  Pressing Ctrl+C will now exit the `show logs` immediately.
 
 **Breaking Changes**
 
 - **Upgraded to `psycopg` from `psycopg2`.**  
-  The upgrade to `psycopg` (version 3) 
+  The upgrade to `psycopg` (version 3) should provide better performance for larger transactions.
 
 - **`Daemon.cleanup()` now returns a `SuccessTuple`.**
 
@@ -66,12 +72,15 @@
 - **Bumped `xterm.js` to v5.5.0.**
 - **Added tags to the pipes card.**
 - **Replaced `watchgod` with `watchfiles`.**
-- **Removed Pydantic<2 dependency.**
+- **Replaced `rocketry` with `APScheduler`.**
+- **Removed `pydantic` from dependencies.**
+- **Removed `passlib` from dependencies.**
+- **Bumped default TimescaleDB image to `latest-pg16-oss`.**
 
 
 ## 2.1.x Releases
 
-This is the current release cycle, so stay tuned for future releases!
+The 2.1.x series added high-performance upserts, improved numerics support and temporary tables performance, and many other bugfixes and improvements.
 
 ### v2.1.7
 
@@ -112,21 +121,29 @@ This is the current release cycle, so stay tuned for future releases!
   # {'color': (['red', 'green'], ['blue'])}
   in_vals, ex_vals = in_ex_params['color']
   ```
+
 - **Add `coerce_numeric` to `pipe.enforce_dtypes()`.**  
   Setting this to `False` will not cast floats to `Decimal` if the corresponding dtype is `int`.
+
 - **Improve JSON serialization when filtering for updates.**
+
 - **Add `date_bound_only` to `pipe.filter_existing()`.**  
   The argument `date_bound_only` means that samples retrieved by `pipe.get_data()` will only use `begin` and `end` for bounding. This may improve performance for custom instance connectors which have limited searchability.
+
 - **Add `safe_copy` to `pipe.enforce_types()`, `pipe.filter_existing()`, `filter_unseen_df()`.**  
   By default, these functions will create copies of dataframes to avoid mutating the input dataframes. Setting `safe_copy` to `False` may be more memory efficient.
+
 - **Add multiline support to `extract_stats_from_message`.**  
   Multiple messages separated by newlines may be parsed at once.
+
   ```python
   from meerschaum.utils.formatting import extract_stats_from_message
   extract_stats_from_message("Inserted 10, upserted 3\ninserted 11, upserted 4")
   # {'inserted': 21, 'updated': 0, 'upserted': 7}
   ```
+
 - **Remove `order by` check in SQL queries.**
+
 - **Improve shell startup performance by removing support for `cmd2`.**  
   The package `cmd2` never behaved properly, so support has been removed and only the built-in `cmd` powers the shell. As such, the configuration key `shell:cmd` has been removed.
 

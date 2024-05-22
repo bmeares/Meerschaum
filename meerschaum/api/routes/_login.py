@@ -39,10 +39,11 @@ def login(
         else (data.username, data.password)
     ) if not no_auth else ('no-auth', 'no-auth')
 
-    from meerschaum.core.User._User import get_pwd_context
+    from meerschaum.core.User._User import verify_password
     user = User(username, password)
-    correct_password = no_auth or get_pwd_context().verify(
-        password, get_api_connector().get_user_password_hash(user, debug=debug)
+    correct_password = no_auth or verify_password(
+        password,
+        get_api_connector().get_user_password_hash(user, debug=debug)
     )
     if not correct_password:
         raise InvalidCredentialsException
@@ -51,7 +52,7 @@ def login(
     expires_delta = timedelta(minutes=expires_minutes)
     expires_dt = datetime.now(timezone.utc).replace(tzinfo=None) + expires_delta
     access_token = manager.create_access_token(
-        data = dict(sub=username),
+        data = {'sub': username},
         expires = expires_delta
     )
     return {
