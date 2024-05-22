@@ -73,7 +73,8 @@ class FileDescriptorInterceptor:
         Restore the file descriptors and close the new pipes.
         """
         try:
-            os.close(self.new_file_descriptor)
+            os.dup2(self.new_file_descriptor, self.original_file_descriptor)
+            #  os.close(self.new_file_descriptor)
         except OSError as e:
             if e.errno != FD_CLOSED:
                 warn(
