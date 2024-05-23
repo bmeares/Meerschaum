@@ -142,14 +142,13 @@ packages['dash'] = {
     'tornado'                        : 'tornado>=6.1.0',
 }
 packages['api'] = {
-    'uvicorn'                        : 'uvicorn[standard]>=0.22.0',
-    'gunicorn'                       : 'gunicorn>=20.1.0',
+    'uvicorn'                        : 'uvicorn[standard]>=0.29.0',
+    'gunicorn'                       : 'gunicorn>=22.0.0',
     'dotenv'                         : 'python-dotenv>=0.20.0',
     'websockets'                     : 'websockets>=11.0.3',
-    'fastapi'                        : 'fastapi>=0.100.0',
-    'passlib'                        : 'passlib>=1.7.4',
+    'fastapi'                        : 'fastapi>=0.111.0',
     'fastapi_login'                  : 'fastapi-login>=1.7.2',
-    'multipart'                      : 'python-multipart>=0.0.5',
+    'multipart'                      : 'python-multipart>=0.0.9',
     'httpx'                          : 'httpx>=0.24.1',
     'websockets'                     : 'websockets>=11.0.3',
 }

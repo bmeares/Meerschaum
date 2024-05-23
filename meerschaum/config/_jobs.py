@@ -18,7 +18,7 @@ default_jobs_config = {
         'max_file_size': 100_000,
         'lines_to_show': 30,
         'refresh_files_seconds': 5,
-        'min_buffer_len': 10,
+        'min_buffer_len': 5,
         'timestamp_format': '%Y-%m-%d %H:%M',
         'follow_timestamp_format': '%H:%M',
         'colors': [

@@ -49,6 +49,29 @@ This is the current release cycle, so stay tuned for future releases!
 - **Add management buttons to pipes' cards.**  
   For your convenience, you may now sync, verify, clear, drop, and delete pipes directly from cards.
 
+- **Designate your packages as plugins with the `meerschaum.plugins` entry point.**  
+  You may now specify your existing packages as Meerschaum plugins by adding the `meerschaum.plugins` [Entrypoint](https://packaging.python.org/en/latest/guides/creating-and-discovering-plugins/#using-package-metadata) to your package metadata:
+
+  ```python
+  from setuptools import setup
+  
+  setup(
+      ...,
+      entry_points = {
+          'meerschaum.plugins': [
+              'foo = foo',
+          ],
+      },
+  )
+  ```
+
+  or if you are using `pyproject.toml`:
+
+  ```toml
+  [project.entry-points."meerschaum.plugins"]
+  foo = "foo"
+  ```
+
 - **Pre- and post-sync hooks are printed separately.**  
   The results of sync hooks are now printed right after execution rather than after the sync.
 

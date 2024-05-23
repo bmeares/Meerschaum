@@ -11,6 +11,7 @@ See `meerschaum.utils.pool` for multiprocessing and
 from __future__ import annotations
 import os, signal, subprocess, sys, platform
 from meerschaum.utils.typing import Union, Optional, Any, Callable, Dict, Tuple
+from meerschaum.config.static import STATIC_CONFIG
 
 def run_process(
         *args,
@@ -68,9 +69,18 @@ def run_process(
     if platform.system() == 'Windows':
         foreground = False
 
-    if line_callback is not None:
+    def print_line(line):
+        sys.stdout.write(line.decode('utf-8'))
+        sys.stdout.flush()
+
+    if capture_output or line_callback is not None:
         kw['stdout'] = subprocess.PIPE
         kw['stderr'] = subprocess.STDOUT
+    elif os.environ.get(STATIC_CONFIG['environment']['daemon_id']):
+        kw['stdout'] = subprocess.PIPE
+        kw['stderr'] = subprocess.STDOUT
+        if line_callback is None:
+            line_callback = print_line
 
     if 'env' not in kw:
         kw['env'] = os.environ
@@ -112,15 +122,6 @@ def run_process(
         kw['preexec_fn'] = new_pgid
 
     try:
-        # fork the child
-        #  stdout, stderr = (
-            #  (sys.stdout, sys.stderr) if not capture_output
-            #  else (subprocess.PIPE, subprocess.PIPE)
-        #  )
-        if capture_output:
-            kw['stdout'] = subprocess.PIPE
-            kw['stderr'] = subprocess.PIPE
-
         child = subprocess.Popen(*args, **kw)
 
         # we can't set the process group id from the parent since the child
@@ -197,6 +198,8 @@ def poll_process(
     while proc.poll() is None:
         line = proc.stdout.readline()
         line_callback(line)
+
     if timeout_seconds is not None:
         watchdog_thread.cancel()
+
     return proc.poll()

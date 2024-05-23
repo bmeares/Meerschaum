@@ -19,6 +19,7 @@ from functools import partial
 from datetime import datetime, timezone
 from meerschaum.utils.typing import Optional, Dict, Any, SuccessTuple, Callable, List, Union
 from meerschaum.config import get_config
+from meerschaum.config.static import STATIC_CONFIG
 from meerschaum.config._paths import DAEMON_RESOURCES_PATH, LOGS_RESOURCES_PATH
 from meerschaum.config._patch import apply_patch_to_config
 from meerschaum.utils.warnings import warn, error
@@ -170,9 +171,11 @@ class Daemon:
             log_refresh_seconds,
             partial(self.rotating_log.refresh_files, start_interception=True),
         )
+
         try:
             os.environ['LINES'], os.environ['COLUMNS'] = str(int(lines)), str(int(columns))
             with self._daemon_context:
+                os.environ[STATIC_CONFIG['environment']['daemon_id']] = self.daemon_id
                 self.rotating_log.refresh_files(start_interception=True)
                 try:
                     with open(self.pid_path, 'w+', encoding='utf-8') as f:
@@ -501,7 +504,7 @@ class Daemon:
             daemon_context.close()
 
         _close_pools()
-        raise SystemExit(1)
+        raise SystemExit(0)
 
  
     def _send_signal(

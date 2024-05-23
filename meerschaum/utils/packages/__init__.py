@@ -829,8 +829,11 @@ def pip_install(
                     check_wheel = False, debug = debug,
                 ):
                     warn(
-                        f"Failed to install `setuptools` and `wheel` for virtual environment '{venv}'.",
-                        color=False,
+                        (
+                            "Failed to install `setuptools` and `wheel` for virtual "
+                            + f"environment '{venv}'."
+                        ),
+                        color = False,
                     )
 
         if requirements_file_path is not None:
@@ -893,13 +896,16 @@ def pip_install(
                         f"Failed to clean up package '{_install_no_version}'.",
                     )
 
-        success = run_python_package(
+        rc = run_python_package(
             'pip',
             _args + _packages,
             venv = venv,
             env = _get_pip_os_env(),
             debug = debug,
-        ) == 0
+        )
+        if debug:
+            print(f"{rc=}")
+        success = rc == 0
 
     msg = (
         "Successfully " + ('un' if _uninstall else '') + "installed packages." if success 
