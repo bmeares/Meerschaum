@@ -262,8 +262,10 @@ def sync_plugins_symlinks(debug: bool = False, warn: bool = True) -> None:
             for package_file_path in ep.dist.files:
                 if package_file_path.suffix != '.py':
                     continue
-                if str(package_file_path) in (f'{module_name}.py', '{module_name}/__init__.py'):
+                if str(package_file_path) == f'{module_name}.py':
                     packaged_plugin_paths.append(package_file_path.locate())
+                elif str(package_file_path) == f'{module_name}/__init__.py':
+                    packaged_plugin_paths.append(package_file_path.locate().parent)
 
         if is_symlink(PLUGINS_RESOURCES_PATH) or not PLUGINS_RESOURCES_PATH.exists():
             try:
@@ -556,6 +558,8 @@ def get_plugins(*to_load, try_import: bool = True) -> Union[Tuple[Plugin], Plugi
     ]
     plugins = tuple(plugin for plugin in _plugins if plugin.is_installed(try_import=try_import))
     if len(to_load) == 1:
+        if len(plugins) == 0:
+            raise ValueError(f"Plugin '{to_load[0]}' is not installed.")
         return plugins[0]
     return plugins
 

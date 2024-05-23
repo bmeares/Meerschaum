@@ -317,6 +317,8 @@ def load_plugin_connectors():
     from meerschaum.plugins import get_plugins, import_plugins
     to_import = []
     for plugin in get_plugins():
+        if plugin is None:
+            continue
         with open(plugin.__file__, encoding='utf-8') as f:
             text = f.read()
         if 'make_connector' in text:

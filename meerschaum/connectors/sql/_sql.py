@@ -943,17 +943,19 @@ def psql_insert_copy(
         ) for row in data_iter
     )
 
+    table_name = sql_item_name(table.name, 'postgresql', table.schema)
+    columns = ', '.join(f'"{k}"' for k in keys)
+    sql = f"COPY {table_name} ({columns}) FROM STDIN WITH CSV NULL '\\N'"
+
     dbapi_conn = conn.connection
     with dbapi_conn.cursor() as cur:
-        s_buf = StringIO()
-        writer = csv.writer(s_buf)
-        writer.writerows(data_iter)
-        s_buf.seek(0)
-
-        columns = ', '.join(f'"{k}"' for k in keys)
-        table_name = sql_item_name(table.name, 'postgresql', table.schema)
-        sql = f"COPY {table_name} ({columns}) FROM STDIN WITH CSV NULL '\\N'"
-        cur.copy_expert(sql=sql, file=s_buf)
+        with cur.copy(sql) as copy:
+            s_buf = StringIO()
+            writer = csv.writer(s_buf)
+            writer.writerows(data_iter)
+            s_buf.seek(0)
+            while data := s_buf.read(1024):
+                copy.write(data)
 
 
 def format_sql_query_for_dask(query: str) -> 'sqlalchemy.sql.selectable.Select':

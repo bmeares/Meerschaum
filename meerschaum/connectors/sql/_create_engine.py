@@ -242,7 +242,7 @@ def create_engine(
 
         ### Sometimes the timescaledb:// flavor can slip in.
         if _uri and self.flavor in ('timescaledb',) and self.flavor in _uri:
-            engine_str = engine_str.replace(f'{self.flavor}://', 'postgresql://')
+            engine_str = engine_str.replace(f'{self.flavor}', 'postgresql', 1)
 
     if debug:
         dprint(
