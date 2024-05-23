@@ -74,15 +74,17 @@ Append the phrase `starting [time]` to a schedule to set the reference point. If
 
  Schedule | Description 
 ----------|-------------
- `hourly starting 00:30 EDT` | Fire every hour on the 30th minute.
- `daily starting April 29th 2024 00:30 EDT` | From April 29th 2024 onward, fire daily at 12:30 AM EDT (04:30 UTC). Be aware this does not change with Daylight Savings time.
- `weekly starting Monday at 12:15 PM EDT` | From the next Monday onward, fire every week at 12:15 PM EDT.
+ `hourly starting 00:30` | Fire every hour on the 30th minute.
+ `daily starting tomorrow 00:30` | Beginning at 30 minutes past midnight UTC, fire daily.
+ `weekly starting Monday at 12:15 PM` | Fire every week on Monday at 12:15 PM.
  `monthly starting 2nd` | Fire once at 00:00 UTC on the second day of the month (will fire immediately if the current day is greater than 2).
  `every 10 seconds starting 2024-01-01` | Relative to the first second of 2024 (UTC), fire every 10 seconds.
- `yearly starting 2025-07-01 12:00 EDT` | Beginning in 2025, fire at noon EDT every July 1st.
+ `yearly starting 2025-07-01 12:00` | Beginning in 2025, fire at noon UTC every July 1st.
 
 !!! note ""
-    Omitting the starting time will use the current time as the starting point. Unless specified, the default timezone is UTC.
+    Omitting the starting time will use the current time as the starting point. Unless specified, the default timezone is UTC. See [Verifying Schedules](#verifying-schedules) below for ways you can experiment with different schedule strings.
+
+The starting time `tomorrow` is a useful keyword for jobs you do not wish to run immediately but wish to keep dynamic. Any time specified alongside `tomorrow` will be added to midnight; for example, the string `daily starting tomorrow` will fire on the next upcoming midnight.
 
 ### Cron Format
 

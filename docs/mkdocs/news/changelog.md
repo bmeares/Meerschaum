@@ -9,10 +9,10 @@ This is the current release cycle, so stay tuned for future releases!
 **New Features**
 
 - **New job scheduler**  
-  The job scheduler has been rewritten with a [simpler syntax](/reference/background-jobs/#-schedules).
+  The job scheduler has been rewritten with a [simpler syntax](https://meerschaum.io/reference/background-jobs/#-schedules).
 
   ```bash
-  mrsm sync pipes -s 'daily & mon-fri starting 00:00' -d
+  mrsm sync pipes -s 'daily & mon-fri starting 00:00 tomorrow' -d
   ```
 
 - **Add `show schedule`.**  
@@ -85,6 +85,9 @@ This is the current release cycle, so stay tuned for future releases!
 
 **Breaking Changes**
 
+- **No longer supporting the old scheduler syntax.**  
+  If you have jobs with the old scheduler syntax (e.g. using the keyword `before`), you may need to delete and recreate your jobs with an updated schedule.
+
 - **Upgraded to `psycopg` from `psycopg2`.**  
   The upgrade to `psycopg` (version 3) should provide better performance for larger transactions.
 
@@ -99,6 +102,7 @@ This is the current release cycle, so stay tuned for future releases!
 - **Removed `pydantic` from dependencies.**
 - **Removed `passlib` from dependencies.**
 - **Bumped default TimescaleDB image to `latest-pg16-oss`.**
+- **Held back `duckdb` to `<0.10.0`.**
 
 
 ## 2.1.x Releases

@@ -155,7 +155,9 @@ def _drop_old_temporary_tables(
     temp_tables_table = get_tables(mrsm_instance=self, create=False, debug=debug)['temp_tables']
     last_check = getattr(self, '_stale_temporary_tables_check_timestamp', 0)
     now_ts = time.perf_counter()
-    if refresh or not last_check or (now_ts - last_check) > 60:
+    if not last_check:
+        self._stale_temporary_tables_check_timestamp = 0
+    if refresh or (now_ts - last_check) < 60:
         self._stale_temporary_tables_check_timestamp = now_ts
         return self._drop_temporary_tables(debug=debug)
 

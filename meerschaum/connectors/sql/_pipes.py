@@ -752,7 +752,7 @@ def get_pipe_data(
         debug = debug,
         **kw
     )
-
+    
     if is_dask:
         index_col = pipe.columns.get('datetime', None)
         kw['index_col'] = index_col
@@ -1501,11 +1501,13 @@ def sync_pipe_inplace(
         )
         result = self.exec(create_pipe_query, debug=debug)
         if result is None:
+            _ = clean_up_temp_tables()
             return False, f"Could not insert new data into {pipe} from its SQL query definition."
         if not self.create_indices(pipe, debug=debug):
             warn(f"Failed to create indices for {pipe}. Continuing...")
 
         rowcount = pipe.get_rowcount(debug=debug)
+        _ = clean_up_temp_tables()
         return True, f"Inserted {rowcount}, updated 0 rows."
 
     session = sqlalchemy_orm.Session(self.engine)
@@ -1541,6 +1543,13 @@ def sync_pipe_inplace(
         )
         if not log_success:
             warn(log_msg)
+        drop_stale_success, drop_stale_msg = self._drop_old_temporary_tables(
+            refresh = False,
+            debug = debug,
+        )
+        if not drop_stale_success:
+            warn(drop_stale_msg)
+        return drop_stale_success, drop_stale_msg
 
     create_new_query = get_create_table_query(
         metadef,
@@ -1907,10 +1916,6 @@ def sync_pipe_inplace(
         else f"Upserted {update_count} row" + ('s' if update_count != 1 else '') + "."
     )
     _ = clean_up_temp_tables(ready_to_drop=True)
-
-    drop_stale_success, drop_stale_msg = self._drop_old_temporary_tables(refresh=False, debug=debug)
-    if not drop_stale_success:
-        warn(drop_stale_msg)
 
     return True, msg
 
@@ -2372,6 +2377,16 @@ def get_pipe_columns_types(
     """
     if not pipe.exists(debug=debug):
         return {}
+
+    if self.flavor == 'duckdb':
+        from meerschaum.utils.sql import get_table_cols_types
+        return get_table_cols_types(
+            pipe.target,
+            self,
+            flavor = self.flavor,
+            schema = self.schema,
+        )
+
     table_columns = {}
     try:
         pipe_table = self.get_pipe_table(pipe, debug=debug)

@@ -950,12 +950,8 @@ def psql_insert_copy(
     dbapi_conn = conn.connection
     with dbapi_conn.cursor() as cur:
         with cur.copy(sql) as copy:
-            s_buf = StringIO()
-            writer = csv.writer(s_buf)
+            writer = csv.writer(copy)
             writer.writerows(data_iter)
-            s_buf.seek(0)
-            while data := s_buf.read(1024):
-                copy.write(data)
 
 
 def format_sql_query_for_dask(query: str) -> 'sqlalchemy.sql.selectable.Select':

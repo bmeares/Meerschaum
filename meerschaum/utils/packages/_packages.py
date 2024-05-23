@@ -60,7 +60,7 @@ packages: Dict[str, Dict[str, str]] = {
         'pymysql'                    : 'PyMySQL>=0.9.0',
         'aiomysql'                   : 'aiomysql>=0.0.21',
         'sqlalchemy_cockroachdb'     : 'sqlalchemy-cockroachdb>=2.0.0',
-        'duckdb'                     : 'duckdb>=0.9.0',
+        'duckdb'                     : 'duckdb<0.10.0',
         'duckdb_engine'              : 'duckdb-engine>=0.9.2',
     },
     '_drivers': {
@@ -120,8 +120,8 @@ packages: Dict[str, Dict[str, str]] = {
 packages['sql'] = {
     'numpy'                          : 'numpy>=1.18.5',
     'pandas'                         : 'pandas[parquet]>=2.0.1',
-    'pyarrow'                        : 'pyarrow>=7.0.0',
-    'dask'                           : 'dask>=2023.5.0',
+    'pyarrow'                        : 'pyarrow>=16.1.0',
+    'dask'                           : 'dask[dataframe]>=2024.5.1',
     'pytz'                           : 'pytz',
     'joblib'                         : 'joblib>=0.17.0',
     'sqlalchemy'                     : 'SQLAlchemy>=2.0.5',

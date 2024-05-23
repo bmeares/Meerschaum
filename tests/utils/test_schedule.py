@@ -108,6 +108,26 @@ import pytest
             datetime(2024, 5, 3, 15, 0, 0, tzinfo=timezone.utc),
             datetime(2024, 5, 4, 6, 0, 0, tzinfo=timezone.utc),
         ]),
+        ("daily starting tomorrow", [
+            datetime(2024, 5, 2, 0, 0, 0, tzinfo=timezone.utc),
+            datetime(2024, 5, 3, 0, 0, 0, tzinfo=timezone.utc),
+            datetime(2024, 5, 4, 0, 0, 0, tzinfo=timezone.utc),
+        ]),
+        ("daily starting 11:00 tomorrow", [
+            datetime(2024, 5, 2, 11, 0, 0, tzinfo=timezone.utc),
+            datetime(2024, 5, 3, 11, 0, 0, tzinfo=timezone.utc),
+            datetime(2024, 5, 4, 11, 0, 0, tzinfo=timezone.utc),
+        ]),
+        ("daily starting 11:00 today", [
+            datetime(2024, 5, 1, 11, 0, 0, tzinfo=timezone.utc),
+            datetime(2024, 5, 2, 11, 0, 0, tzinfo=timezone.utc),
+            datetime(2024, 5, 3, 11, 0, 0, tzinfo=timezone.utc),
+        ]),
+        ("daily starting 12:30 tomorrow", [
+            datetime(2024, 5, 2, 12, 30, 0, tzinfo=timezone.utc),
+            datetime(2024, 5, 3, 12, 30, 0, tzinfo=timezone.utc),
+            datetime(2024, 5, 4, 12, 30, 0, tzinfo=timezone.utc),
+        ]),
     ],
 )
 def test_parse_schedule(schedule, expected_datetimes):
@@ -115,6 +135,7 @@ def test_parse_schedule(schedule, expected_datetimes):
     Test various schedule string formats.
     """
     from meerschaum.utils.schedule import parse_schedule
+    now = datetime(2024, 5, 1, 12, 31, 52, tzinfo=timezone.utc)
     trigger = parse_schedule(schedule)
     for expected_dt in expected_datetimes:
         next_dt = trigger.next()

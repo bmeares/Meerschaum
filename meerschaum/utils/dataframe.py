@@ -397,7 +397,7 @@ def parse_df_datetimes(
         return df
 
     ### apply regex to columns to determine which are ISO datetimes
-    iso_dt_regex = r'\d{4}-\d{2}-\d{2}.\d{2}\:\d{2}\:\d+'
+    iso_dt_regex = r'\d{4}-\d{2}-\d{2}(?:\s\d{2}:\d{2}(?::\d{2}(?:\.\d+)?))?'
     dt_mask = pdf[cols_to_inspect].astype(str).apply(
         lambda s: s.str.match(iso_dt_regex).all()
     )

@@ -212,7 +212,8 @@ def test_sync_new_columns(flavor: str):
     """
     conn = conns[flavor]
     pipe = Pipe('foo', 'bar', columns={'datetime': 'dt', 'id': 'id'}, instance=conn)
-    pipe.drop(debug=debug)
+    pipe.delete(debug=debug)
+    pipe = Pipe('foo', 'bar', columns={'datetime': 'dt', 'id': 'id'}, instance=conn)
     docs = [
         {'dt': '2022-01-01', 'id': 1, 'a': 10},
     ]

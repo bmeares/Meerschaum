@@ -278,7 +278,24 @@ def parse_start_time(schedule: str, now: Optional[datetime] = None) -> datetime:
     starting_str = ('now' if len(starting_parts) == 1 else starting_parts[-1]).strip()
     now = now or round_time(datetime.now(timezone.utc), timedelta(minutes=1))
     try:
-        starting_ts = now if starting_str == 'now' else dateutil_parser.parse(starting_str)
+        if starting_str == 'now':
+            starting_ts = now
+        elif 'tomorrow' in starting_str or 'today' in starting_str:
+            today = round_time(now, timedelta(days=1))
+            tomorrow = today + timedelta(days=1)
+            is_tomorrow = 'tomorrow' in starting_str
+            time_str = starting_str.replace('tomorrow', '').replace('today', '').strip()
+            time_ts = dateutil_parser.parse(time_str) if time_str else today
+            print(f"{today=}")
+            print(f"{tomorrow=}")
+            print(f"{time_ts=}")
+            starting_ts = (
+                (tomorrow if is_tomorrow else today)
+                + timedelta(hours=time_ts.hour)
+                + timedelta(minutes=time_ts.minute)
+            )
+        else:
+            starting_ts = dateutil_parser.parse(starting_str)
         schedule_parse_error = None
     except Exception as e:
         warn(f"Unable to parse starting time from '{starting_str}'.", stack=False)
