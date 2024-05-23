@@ -32,10 +32,10 @@ jobs:
       - name: Integration tests
         env:
           COMPOSE_INTERACTIVE_NO_CLI: 1
-          MRSM_TEST_FLAVORS: "api"
+          MRSM_TEST_FLAVORS: "all"
         run: ./scripts/test.sh db
       - uses: actions/upload-artifact@v4
         if: always()
         with:
           name: api-log
-          path: test_root/logs/test_api.log.0
+          path: test_root/logs/
