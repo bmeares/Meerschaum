@@ -64,6 +64,8 @@ def daemon_entry(sysargs: Optional[List[str]] = None) -> SuccessTuple:
 
         ### Only run if the kwargs equal or no actions are provided.
         if existing_kwargs == _args or not _args.get('action', []):
+            if daemon.status == 'running':
+                return True, f"Daemon '{daemon}' is already running."
             return daemon.run(
                 debug = debug,
                 allow_dirty_run = True,

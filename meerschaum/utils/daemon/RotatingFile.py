@@ -621,6 +621,10 @@ class RotatingFile(io.IOBase):
             self._stdout_interceptor_thread,
             self._stderr_interceptor_thread,
         ])
+        self._interceptors.extend([
+            self._stdout_interceptor,
+            self._stderr_interceptor,
+        ])
         self.stop_log_fd_interception(unused_only=True)
 
     def stop_log_fd_interception(self, unused_only: bool = False):

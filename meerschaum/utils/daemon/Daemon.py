@@ -462,6 +462,9 @@ class Daemon:
         Handle `SIGINT` within the Daemon context.
         This method is injected into the `DaemonContext`.
         """
+        #  from meerschaum.utils.daemon.FileDescriptorInterceptor import STOP_READING_FD_EVENT
+        #  STOP_READING_FD_EVENT.set()
+        self.rotating_log.stop_log_fd_interception(unused_only=False)
         timer = self.__dict__.get('_log_refresh_timer', None)
         if timer is not None:
             timer.cancel()
@@ -471,7 +474,16 @@ class Daemon:
             daemon_context.close()
 
         _close_pools()
-        self.rotating_log.stop_log_fd_interception()
+        import threading
+        for thread in threading.enumerate():
+            if thread.name == 'MainThread':
+                continue
+            try:
+                if thread.is_alive():
+                    stack = traceback.format_stack(sys._current_frames()[thread.ident])
+                    thread.join()
+            except Exception as e:
+                warn(traceback.format_exc())
         raise KeyboardInterrupt()
 
 
