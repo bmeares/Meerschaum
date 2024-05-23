@@ -254,7 +254,16 @@ def sync_plugins_symlinks(debug: bool = False, warn: bool = True) -> None:
             importlib_metadata = attempt_import('importlib_metadata', lazy=False)
             entry_points = importlib_metadata.entry_points
 
-        package_plugins_eps = entry_points(group='meerschaum.plugins')
+        ### NOTE: Allow plugins to be installed via `pip`.
+        packaged_plugin_paths = []
+        discovered_packaged_plugins_eps = entry_points(group='meerschaum.plugins')
+        for ep in discovered_packaged_plugins_eps:
+            module_name = ep.name
+            for package_file_path in ep.dist.files:
+                if package_file_path.suffix != '.py':
+                    continue
+                if str(package_file_path) in (f'{module_name}.py', '{module_name}/__init__.py'):
+                    packaged_plugin_paths.append(package_file_path.locate())
 
         if is_symlink(PLUGINS_RESOURCES_PATH) or not PLUGINS_RESOURCES_PATH.exists():
             try:
@@ -263,7 +272,6 @@ def sync_plugins_symlinks(debug: bool = False, warn: bool = True) -> None:
                 pass
 
         PLUGINS_RESOURCES_PATH.mkdir(exist_ok=True)
-
 
         existing_symlinked_paths = [
             (PLUGINS_RESOURCES_PATH / item) 
@@ -284,6 +292,7 @@ def sync_plugins_symlinks(debug: bool = False, warn: bool = True) -> None:
                 for plugins_path in PLUGINS_DIR_PATHS
             ]
         ))
+        plugins_to_be_symlinked.extend(packaged_plugin_paths)
 
         ### Check for duplicates.
         seen_plugins = defaultdict(lambda: 0)
