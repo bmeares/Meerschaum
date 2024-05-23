@@ -28,7 +28,7 @@ default_create_engine_args = {
 }
 flavor_configs = {
     'timescaledb'      : {
-        'engine'       : 'postgresql',
+        'engine'       : 'postgresql+psycopg',
         'create_engine' : default_create_engine_args,
         'omit_create_engine': {'method',},
         'to_sql' : {},
@@ -38,7 +38,7 @@ flavor_configs = {
         },
     },
     'postgresql'         : {
-        'engine'       : 'postgresql',
+        'engine'       : 'postgresql+psycopg',
         'create_engine' : default_create_engine_args,
         'omit_create_engine': {'method',},
         'to_sql' : {},
@@ -48,7 +48,7 @@ flavor_configs = {
         },
     },
     'citus'            : {
-        'engine'       : 'postgresql',
+        'engine'       : 'postgresql+psycopg',
         'create_engine' : default_create_engine_args,
         'omit_create_engine': {'method',},
         'to_sql' : {},

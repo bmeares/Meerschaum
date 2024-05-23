@@ -247,6 +247,15 @@ def sync_plugins_symlinks(debug: bool = False, warn: bool = True) -> None:
                 _warn(f"Unable to create lockfile {PLUGINS_INTERNAL_LOCK_PATH}:\n{e}")
 
     with _locks['internal_plugins']:
+
+        try:
+            from importlib.metadata import entry_points
+        except ImportError:
+            importlib_metadata = attempt_import('importlib_metadata', lazy=False)
+            entry_points = importlib_metadata.entry_points
+
+        package_plugins_eps = entry_points(group='meerschaum.plugins')
+
         if is_symlink(PLUGINS_RESOURCES_PATH) or not PLUGINS_RESOURCES_PATH.exists():
             try:
                 PLUGINS_RESOURCES_PATH.unlink()
