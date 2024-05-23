@@ -86,6 +86,8 @@ def verify_password(
     -------
     A `bool` indicating whether `password` matches `password_hash`.
     """
+    if password is None or password_hash is None:
+        return False
     hash_config = STATIC_CONFIG['users']['password_hash']
     try:
         digest, rounds_str, encoded_salt, encoded_checksum = password_hash.split('$')[1:]
