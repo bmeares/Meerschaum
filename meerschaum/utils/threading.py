@@ -10,6 +10,7 @@ from __future__ import annotations
 from meerschaum.utils.typing import Optional
 
 import threading
+import traceback
 Lock = threading.Lock
 RLock = threading.RLock
 Event = threading.Event

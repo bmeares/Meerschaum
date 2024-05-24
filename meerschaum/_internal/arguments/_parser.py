@@ -347,6 +347,9 @@ groups['misc'].add_argument(
     '--nopretty', action="store_true", help="Print elements without 'pretty' formatting"
 )
 groups['misc'].add_argument(
+    '--skip-deps', action="store_true", help="Skip dependencies when installing plugins.",
+)
+groups['misc'].add_argument(
     '-P', '--params', type=string_to_dict, help=(
         "Parameters dictionary in JSON format or simple format. " +
         "Simple format is for one-depth dictionaries and does not need braces or quotes." +

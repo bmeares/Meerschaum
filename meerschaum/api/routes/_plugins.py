@@ -90,18 +90,21 @@ def register_plugin(
             pass
 
     plugin = Plugin(name, version=version, attributes=attributes)
+    if curr_user is None:
+        return (
+            False,
+            "Cannot register a plugin without logging in (are you running with `--insecure`)?"
+        )
+
     if curr_user is not None:
         plugin_user_id = get_api_connector().get_plugin_user_id(plugin)
         curr_user_id = get_api_connector().get_user_id(curr_user) if curr_user is not None else -1
         if plugin_user_id is not None and plugin_user_id != curr_user_id:
             return False, f"User '{curr_user.username}' cannot edit plugin '{plugin}'."
         plugin.user_id = curr_user_id
-    else:
-        plugin.user_id = -1
 
     success, msg = get_api_connector().register_plugin(plugin, make_archive=False, debug=debug)
 
-    ### TODO delete and install new version of plugin on success
     if success:
         archive_path = plugin.archive_path
         temp_archive_path = pathlib.Path(str(archive_path) + '.tmp')

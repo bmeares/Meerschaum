@@ -54,6 +54,7 @@ def _complete_install(
 def _install_plugins(
         action: Optional[List[str]] = None,
         repository: Optional[str] = None,
+        skip_deps: bool = False,
         force: bool = False,
         debug: bool = False,
         **kw: Any
@@ -87,11 +88,14 @@ def _install_plugins(
 
     repo_connector = parse_repo_keys(repository)
 
-    successes = {}
     for name in action:
         info(f"Installing plugin '{name}' from Meerschaum repository '{repo_connector}'...")
-        success, msg = repo_connector.install_plugin(name, force=force, debug=debug)
-        successes[name] = (success, msg)
+        success, msg = repo_connector.install_plugin(
+            name,
+            force = force,
+            skip_deps = skip_deps,
+            debug = debug,
+        )
         print_tuple((success, msg))
 
     reload_plugins(debug=debug)

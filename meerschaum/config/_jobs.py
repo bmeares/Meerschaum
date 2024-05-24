@@ -9,13 +9,22 @@ Default configuration for jobs.
 default_jobs_config = {
     'timeout_seconds': 8,
     'check_timeout_interval_seconds': 0.1,
-    'logs' : {
+    'terminal': {
+        'lines': 40,
+        'columns': 70,
+    },
+    'logs': {
+        'timestamps': {
+            'enabled': True,
+            'format': '%Y-%m-%d %H:%M',
+            'follow_format': '%H:%M',
+        },
         'num_files_to_keep': 5,
         'max_file_size': 100_000,
         'lines_to_show': 30,
-        'refresh_files_seconds': 5.0,
-        'min_buffer_len': 15,
-        'colors' : [
+        'refresh_files_seconds': 5,
+        'min_buffer_len': 5,
+        'colors': [
             'cyan',
             'magenta',
             'orange3',

@@ -15,12 +15,18 @@ from meerschaum.actions import actions
 
 @pytest.fixture(autouse=True)
 def run_before_and_after(flavor: str):
+    """
+    Ensure the test user is registered before running tests.
+    """
     test_register_user(flavor)
     yield
 
 
 @pytest.mark.parametrize("flavor", get_flavors())
 def test_register_and_delete(flavor: str):
+    """
+    Verify user registration and deletion.
+    """
     pipe = all_pipes[flavor][0]
     params = pipe.parameters.copy()
     assert params is not None
@@ -39,6 +45,9 @@ def test_register_and_delete(flavor: str):
 
 @pytest.mark.parametrize("flavor", get_flavors())
 def test_drop_and_sync(flavor: str):
+    """
+    Verify dropping and resyncing pipes.
+    """
     pipe = all_pipes[flavor][0]
     pipe.drop()
     assert pipe.exists(debug=debug) is False
@@ -203,7 +212,8 @@ def test_sync_new_columns(flavor: str):
     """
     conn = conns[flavor]
     pipe = Pipe('foo', 'bar', columns={'datetime': 'dt', 'id': 'id'}, instance=conn)
-    pipe.drop(debug=debug)
+    pipe.delete(debug=debug)
+    pipe = Pipe('foo', 'bar', columns={'datetime': 'dt', 'id': 'id'}, instance=conn)
     docs = [
         {'dt': '2022-01-01', 'id': 1, 'a': 10},
     ]
@@ -718,5 +728,4 @@ def test_upsert_no_value_cols(flavor: str):
     ]
     success, msg = pipe.sync(docs, debug=debug)
     assert success, msg
-    return pipe
     assert pipe.get_rowcount() == 3

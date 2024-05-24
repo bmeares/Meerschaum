@@ -6,4 +6,4 @@
 Manager users' metadata via the User class
 """
 
-from meerschaum.core.User._User import User
+from meerschaum.core.User._User import User, hash_password, verify_password

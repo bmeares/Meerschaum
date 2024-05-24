@@ -86,7 +86,7 @@ PipesDict = Dict[
         ]
     ]
 ]
-WebState = Dict[str, str]
+WebState = Dict[str, Union[str, Dict[str, str]]]
 
 def is_success_tuple(x: Any) -> bool:
     """

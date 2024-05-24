@@ -30,25 +30,35 @@ _locks = {'pipes': RLock(), 'connector': RLock(), 'uvicorn_config': RLock()}
 CHECK_UPDATE = os.environ.get(STATIC_CONFIG['environment']['runtime'], None) != 'docker'
 
 endpoints = STATIC_CONFIG['api']['endpoints']
-aiofiles = attempt_import('aiofiles', lazy=False, check_update=CHECK_UPDATE)
-typing_extensions = attempt_import(
-    'typing_extensions', lazy=False, check_update=CHECK_UPDATE,
+
+(
+    fastapi,
+    aiofiles,
+    starlette_responses,
+    multipart,
+    packaging_version,
+) = attempt_import(
+    'fastapi',
+    'aiofiles',
+    'starlette.responses',
+    'multipart',
+    'packaging.version',
+    lazy = False,
+    check_update = CHECK_UPDATE,
+)
+(
+    typing_extensions,
+    uvicorn_workers,
+) = attempt_import(
+    'typing_extensions',
+    'uvicorn.workers',
+    lazy = False,
+    check_update = CHECK_UPDATE,
     venv = None,
 )
-pydantic_dataclasses = attempt_import(
-    'pydantic.dataclasses', lazy=False, check_update=CHECK_UPDATE,
-)
-fastapi = attempt_import('fastapi', lazy=False, check_update=CHECK_UPDATE)
-starlette_reponses = attempt_import(
-    'starlette.responses', warn=False, lazy=False,
-    check_update=CHECK_UPDATE,
-)
-python_multipart = attempt_import('multipart', lazy=False, check_update=CHECK_UPDATE)
-packaging_version = attempt_import('packaging.version', check_update=CHECK_UPDATE)
 from meerschaum.api._chain import check_allow_chaining, DISALLOW_CHAINING_MESSAGE
 uvicorn_config_path = API_UVICORN_RESOURCES_PATH / SERVER_ID / 'config.json'
 
-uvicorn_workers = attempt_import('uvicorn.workers', venv=None, check_update=CHECK_UPDATE)
 uvicorn_config = None
 sys_config = get_config('system', 'api')
 permissions_config = get_config('system', 'api', 'permissions')

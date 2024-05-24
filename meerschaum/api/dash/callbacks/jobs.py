@@ -11,6 +11,7 @@ import json
 import functools
 import time
 import traceback
+from datetime import datetime, timezone
 import meerschaum as mrsm
 from meerschaum.utils.typing import Optional, Dict, Any
 from meerschaum.api import get_api_connector, endpoints, CHECK_UPDATE
@@ -54,9 +55,14 @@ def download_job_logs(n_clicks):
     component_dict = json.loads(ctx[0]['prop_id'].split('.' + 'n_clicks')[0])
     daemon_id = component_dict['index']
     daemon = Daemon(daemon_id=daemon_id)
+    now = datetime.now(timezone.utc)
+    filename = (
+        daemon.rotating_log.file_path.name[:(-1 * len('.log'))]
+        + '_' + str(int(now.timestamp())) + '.log'
+    )
     return {
         'content': daemon.log_text,
-        'filename': daemon.rotating_log.file_path.name,
+        'filename': filename,
     }
 
 
@@ -74,7 +80,7 @@ def manage_job_button_click(
         session_data: Optional[Dict[str, Any]] = None,
     ):
     """
-    Start, stop, or pause the given job.
+    Start, stop, pause, or delete the given job.
     """
     if not n_clicks:
         raise PreventUpdate
@@ -98,12 +104,18 @@ def manage_job_button_click(
     component_dict = json.loads(ctx[0]['prop_id'].split('.' + 'n_clicks')[0])
     daemon_id = component_dict['index']
     manage_job_action = component_dict['action']
-    daemon = Daemon(daemon_id=daemon_id)
+    try:
+        daemon = Daemon(daemon_id=daemon_id)
+    except Exception as e:
+        daemon = None
+    if daemon is None:
+        raise PreventUpdate
 
     manage_functions = {
         'start': functools.partial(daemon.run, allow_dirty_run=True),
         'stop': daemon.quit,
         'pause': daemon.pause,
+        'delete': daemon.cleanup,
     }
     if manage_job_action not in manage_functions:
         return (
@@ -134,6 +146,46 @@ def manage_job_button_click(
         build_status_children(daemon),
         build_process_timestamps_children(daemon),
     )
+
+dash_app.clientside_callback(
+    """
+    function(n_clicks_arr, url){
+        display_block = {"display": "block"};
+
+        var clicked = false;
+        for (var i = 0; i < n_clicks_arr.length; i++){
+            if (n_clicks_arr[i]){
+                clicked = true;
+                break;
+            }
+        }
+
+        if (!clicked){
+            return dash_clientside.no_update;
+        }
+
+        const triggered_id = dash_clientside.callback_context.triggered_id;
+        const job_daemon_id = triggered_id["index"];
+
+        iframe = document.getElementById('webterm-iframe');
+        if (!iframe){ return dash_clientside.no_update; }
+
+        iframe.contentWindow.postMessage(
+            {
+               action: "show",
+               subaction: "logs",
+               subaction_text: job_daemon_id,
+            },
+            url
+        );
+        dash_clientside.set_props("webterm-div", {"style": display_block});
+        return [];
+    }
+    """,
+    Output('content-div-right', 'children'),
+    Input({'type': 'follow-logs-button', 'index': ALL}, 'n_clicks'),
+    State('location', 'href'),
+)
 
 
 @dash_app.callback(

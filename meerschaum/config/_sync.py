@@ -52,7 +52,7 @@ def sync_yaml_configs(
         if not path.exists():
             return "", {}
         header_comment = ""
-        with open(path, 'r') as f:
+        with open(path, 'r', encoding='utf-8') as f:
             if _yaml is not None:
                 config = yaml.load(f)
             else:
@@ -84,7 +84,7 @@ def sync_yaml_configs(
     new_path = sub_path
 
     ### write changes
-    with open(new_path, 'w+') as f:
+    with open(new_path, 'w+', encoding='utf-8') as f:
         f.write(new_header)
         f.write(new_config_text)
     if permissions is not None:
@@ -133,4 +133,3 @@ def sync_files(keys: Optional[List[str]] = None):
     for k in keys:
         if k in key_functions:
             key_functions[k]()
-
