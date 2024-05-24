@@ -24,6 +24,7 @@ from meerschaum.api.dash import (
 from meerschaum.api.dash.connectors import get_web_connector
 from meerschaum.api.dash.components import alert_from_success_tuple
 from meerschaum.api.dash.users import is_session_authenticated
+from meerschaum.config import get_config
 import meerschaum as mrsm
 dbc = attempt_import('dash_bootstrap_components', lazy=False, check_update=CHECK_UPDATE)
 dash_ace = attempt_import('dash_ace', lazy=False, check_update=CHECK_UPDATE)
@@ -110,43 +111,127 @@ def get_pipes_cards(*keys, session_data: Optional[Dict[str, Any]] = None):
     session_id = (session_data or {}).get('session-id', None)
     authenticated = is_session_authenticated(str(session_id))
 
-    _pipes = pipes_from_state(*keys, as_list=True)
-    alerts = [alert_from_success_tuple(_pipes)]
-    if not isinstance(_pipes, list):
-        _pipes = []
-    for p in _pipes:
-        footer_children = dbc.Row([
-            dbc.Col(
-                dbc.Button(
-                    'Download recent data',
-                    size = 'sm',
-                    color = 'link',
-                    id = {'type': 'pipe-download-csv-button', 'index': json.dumps(p.meta)},
-                )
-            ),
-        ])
+    pipes = pipes_from_state(*keys, as_list=True)
+    alerts = [alert_from_success_tuple(pipes)]
+    if not isinstance(pipes, list):
+        pipes = []
+
+    max_num_pipes_cards = get_config('dash', 'max_num_pipes_cards')
+    overflow_pipes = pipes[max_num_pipes_cards:]
+
+    for pipe in pipes[:max_num_pipes_cards]:
+        meta_str = json.dumps(pipe.meta)
+        footer_children = dbc.Row(
+            [
+                dbc.Col(
+                    (
+                        dbc.DropdownMenu(
+                            label = "Manage",
+                            children = [
+                                dbc.DropdownMenuItem(
+                                    'Delete',
+                                    id = {
+                                        'type': 'manage-pipe-button',
+                                        'index': meta_str,
+                                        'action': 'delete',
+                                    },
+                                ),
+                                dbc.DropdownMenuItem(
+                                    'Drop',
+                                    id = {
+                                        'type': 'manage-pipe-button',
+                                        'index': meta_str,
+                                        'action': 'drop',
+                                    },
+                                ),
+                                dbc.DropdownMenuItem(
+                                    'Clear',
+                                    id = {
+                                        'type': 'manage-pipe-button',
+                                        'index': meta_str,
+                                        'action': 'clear',
+                                    },
+                                ),
+                                dbc.DropdownMenuItem(
+                                    'Verify',
+                                    id = {
+                                        'type': 'manage-pipe-button',
+                                        'index': meta_str,
+                                        'action': 'verify',
+                                    },
+                                ),
+                                dbc.DropdownMenuItem(
+                                    'Sync',
+                                    id = {
+                                        'type': 'manage-pipe-button',
+                                        'index': meta_str,
+                                        'action': 'sync',
+                                    },
+                                ),
+                            ],
+                            direction = "up",
+                            menu_variant = "dark",
+                            size = 'sm',
+                            color = 'secondary',
+                        )
+                    ) if authenticated else [],
+                    width = 2,
+                ),
+                dbc.Col(width=6),
+                dbc.Col(
+                    dbc.Button(
+                        'Download CSV',
+                        size = 'sm',
+                        color = 'link',
+                        style = {'float': 'right'},
+                        id = {'type': 'pipe-download-csv-button', 'index': meta_str},
+                    ),
+                    width = 4,
+                ),
+            ],
+            justify = 'start',
+        )
         card_body_children = [
             html.H5(
-                html.B(str(p)),
+                html.B(str(pipe)),
                 className = 'card-title',
                 style = {'font-family': ['monospace']}
             ),
             html.Div(
                 dbc.Accordion(
-                    accordion_items_from_pipe(p, authenticated=authenticated),
+                    accordion_items_from_pipe(pipe, authenticated=authenticated),
                     flush = True,
                     start_collapsed = True,
-                    id = {'type': 'pipe-accordion', 'index': json.dumps(p.meta)},
+                    id = {'type': 'pipe-accordion', 'index': meta_str},
                 )
             )
 
         ]
         cards.append(
-            dbc.Card(children=[
+            dbc.Card([
                 dbc.CardBody(children=card_body_children),
                 dbc.CardFooter(children=footer_children),
             ])
         )
+
+    if overflow_pipes:
+        cards.append(
+            dbc.Card([
+                dbc.CardBody(
+                    html.Ul(
+                        [
+                            html.Li(html.H5(
+                                html.B(str(pipe)),
+                                className = 'card-title',
+                                style = {'font-family': ['monospace']}
+                            ))
+                            for pipe in overflow_pipes
+                        ]
+                    )
+                )
+            ])
+        )
+
     return cards, alerts
 
 
@@ -188,14 +273,40 @@ def accordion_items_from_pipe(
         overview_header = [html.Thead(html.Tr([html.Th("Attribute"), html.Th("Value")]))]
         dt_name, id_name, val_name = pipe.get_columns('datetime', 'id', 'value', error=False)
         overview_rows = [
-            html.Tr([html.Td("Connector"), html.Td(f"{pipe.connector_keys}")]),
-            html.Tr([html.Td("Metric"), html.Td(f"{pipe.metric_key}")]),
-            html.Tr([html.Td("Location"), html.Td(f"{pipe.location_key}")]),
-            html.Tr([html.Td("Instance"), html.Td(f"{pipe.instance_keys}")]),
-            html.Tr([html.Td("Target Table"), html.Td(f"{pipe.target}")]),
+            html.Tr([html.Td("Connector"), html.Td(html.Pre(f"{pipe.connector_keys}"))]),
+            html.Tr([html.Td("Metric"), html.Td(html.Pre(f"{pipe.metric_key}"))]),
+            html.Tr([html.Td("Location"), html.Td(html.Pre(f"{pipe.location_key}"))]),
+            html.Tr([html.Td("Instance"), html.Td(html.Pre(f"{pipe.instance_keys}"))]),
+            html.Tr([html.Td("Target Table"), html.Td(html.Pre(f"{pipe.target}"))]),
         ]
-        for col_key, col in pipe.columns.items():
-            overview_rows.append(html.Tr([html.Td(f"'{col_key}' Index"), html.Td(col)]))
+        columns = pipe.columns.copy()
+        if columns:
+            datetime_index = columns.pop('datetime', None)
+            columns_items = []
+            if datetime_index:
+                columns_items.append(html.Li(f"{datetime_index} (datetime)"))
+            columns_items.extend([
+                html.Li(f"{col}")
+                for col_key, col in columns.items()
+            ])
+            overview_rows.append(
+                html.Tr([
+                    html.Td("Indices" if len(columns_items) != 1 else "Index"),
+                    html.Td(html.Pre(html.Ul(columns_items))),
+                ])
+            )
+        tags = pipe.tags
+        if tags:
+            tags_items = html.Ul([
+                html.Li(tag)
+                for tag in tags
+            ])
+            overview_rows.append(
+                html.Tr([
+                    html.Td("Tags"),
+                    html.Td(html.Pre(tags_items)),
+                ])
+            )
 
         items_bodies['overview'] = dbc.Table(
             overview_header + [html.Tbody(overview_rows)],

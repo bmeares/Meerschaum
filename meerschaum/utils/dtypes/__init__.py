@@ -6,8 +6,10 @@
 Utility functions for working with data types.
 """
 
+import traceback
 from decimal import Decimal, Context, InvalidOperation
 from meerschaum.utils.typing import Dict, Union, Any
+from meerschaum.utils.warnings import warn
 
 MRSM_PD_DTYPES: Dict[str, str] = {
     'json': 'object',
@@ -37,9 +39,7 @@ def to_pandas_dtype(dtype: str) -> str:
         from meerschaum.utils.dtypes.sql import get_pd_type_from_db_type
         return get_pd_type_from_db_type(dtype)
 
-    import traceback
     from meerschaum.utils.packages import attempt_import
-    from meerschaum.utils.warnings import warn
     pandas = attempt_import('pandas', lazy=False)
 
     try:
@@ -88,8 +88,12 @@ def are_dtypes_equal(
                 return False
         return True
 
-    if ldtype == rdtype:
-        return True
+    try:
+        if ldtype == rdtype:
+            return True
+    except Exception as e:
+        warn(f"Exception when comparing dtypes, returning False:\n{traceback.format_exc()}")
+        return False
 
     ### Sometimes pandas dtype objects are passed.
     ldtype = str(ldtype)
@@ -177,7 +181,7 @@ def attempt_cast_to_numeric(value: Any) -> Any:
         return value
 
 
-def value_is_null(value: Any) -> Any:
+def value_is_null(value: Any) -> bool:
     """
     Determine if a value is a null-like string.
     """

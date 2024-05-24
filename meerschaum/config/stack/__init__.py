@@ -33,7 +33,7 @@ api_host = "api"
 
 env_dict = {
     'COMPOSE_PROJECT_NAME' : 'mrsm',
-    'TIMESCALEDB_VERSION' : 'latest-pg15-oss',
+    'TIMESCALEDB_VERSION' : 'latest-pg16-oss',
     'POSTGRES_USER' : f'{db_user}',
     'POSTGRES_PASSWORD' : f'{db_pass}',
     'POSTGRES_DB' : f'{db_base}',
@@ -97,7 +97,6 @@ compose_header = """
 
 
 default_docker_compose_config = {
-    'version': '3.9',
     'services': {
         'db': {
             'environment': {
@@ -233,11 +232,11 @@ NECESSARY_FILES = [STACK_COMPOSE_PATH, GRAFANA_DATASOURCE_PATH, GRAFANA_DASHBOAR
 def get_necessary_files():
     from meerschaum.config import get_config
     return {
-        STACK_COMPOSE_PATH : (
+        STACK_COMPOSE_PATH: (
             get_config('stack', STACK_COMPOSE_FILENAME, substitute=True), compose_header
         ),
-        GRAFANA_DATASOURCE_PATH : get_config('stack', 'grafana', 'datasource', substitute=True),
-        GRAFANA_DASHBOARD_PATH : get_config('stack', 'grafana', 'dashboard', substitute=True),
+        GRAFANA_DATASOURCE_PATH: get_config('stack', 'grafana', 'datasource', substitute=True),
+        GRAFANA_DASHBOARD_PATH: get_config('stack', 'grafana', 'dashboard', substitute=True),
     }
 
 
@@ -251,8 +250,8 @@ def write_stack(
     return sync_files(['stack'])
    
 def edit_stack(
-        action : Optional[List[str]] = None,
-        debug : bool = False,
+        action: Optional[List[str]] = None,
+        debug: bool = False,
         **kw
     ):
     """Open docker-compose.yaml or .env for editing."""

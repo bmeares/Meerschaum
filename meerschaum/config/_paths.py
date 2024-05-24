@@ -129,6 +129,7 @@ paths = {
 
     'PLUGINS_RESOURCES_PATH'         : ('{INTERNAL_RESOURCES_PATH}', 'plugins'),
     'PLUGINS_INTERNAL_LOCK_PATH'     : ('{INTERNAL_RESOURCES_PATH}', 'plugins.lock'),
+    'PLUGINS_PACKAGES_INTERNAL_PATH' : ('{INTERNAL_RESOURCES_PATH}', 'packaged_plugins'),
     'PLUGINS_ARCHIVES_RESOURCES_PATH': ('{PLUGINS_RESOURCES_PATH}', '.archives'),
     'PLUGINS_TEMP_RESOURCES_PATH'    : ('{PLUGINS_RESOURCES_PATH}', '.tmp'),
     'PLUGINS_INIT_PATH'              : ('{PLUGINS_RESOURCES_PATH}', '__init__.py'),
@@ -153,6 +154,7 @@ paths = {
 
     'DAEMON_RESOURCES_PATH'          : ('{ROOT_DIR_PATH}', 'jobs'),
     'LOGS_RESOURCES_PATH'            : ('{ROOT_DIR_PATH}', 'logs'),
+    'DAEMON_ERROR_LOG_PATH'          : ('{ROOT_DIR_PATH}', 'daemon_errors.log'),
 }
 
 def set_root(root: Union[Path, str]):

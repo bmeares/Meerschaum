@@ -247,6 +247,26 @@ def sync_plugins_symlinks(debug: bool = False, warn: bool = True) -> None:
                 _warn(f"Unable to create lockfile {PLUGINS_INTERNAL_LOCK_PATH}:\n{e}")
 
     with _locks['internal_plugins']:
+
+        try:
+            from importlib.metadata import entry_points
+        except ImportError:
+            importlib_metadata = attempt_import('importlib_metadata', lazy=False)
+            entry_points = importlib_metadata.entry_points
+
+        ### NOTE: Allow plugins to be installed via `pip`.
+        packaged_plugin_paths = []
+        discovered_packaged_plugins_eps = entry_points(group='meerschaum.plugins')
+        for ep in discovered_packaged_plugins_eps:
+            module_name = ep.name
+            for package_file_path in ep.dist.files:
+                if package_file_path.suffix != '.py':
+                    continue
+                if str(package_file_path) == f'{module_name}.py':
+                    packaged_plugin_paths.append(package_file_path.locate())
+                elif str(package_file_path) == f'{module_name}/__init__.py':
+                    packaged_plugin_paths.append(package_file_path.locate().parent)
+
         if is_symlink(PLUGINS_RESOURCES_PATH) or not PLUGINS_RESOURCES_PATH.exists():
             try:
                 PLUGINS_RESOURCES_PATH.unlink()
@@ -254,7 +274,6 @@ def sync_plugins_symlinks(debug: bool = False, warn: bool = True) -> None:
                 pass
 
         PLUGINS_RESOURCES_PATH.mkdir(exist_ok=True)
-
 
         existing_symlinked_paths = [
             (PLUGINS_RESOURCES_PATH / item) 
@@ -275,6 +294,7 @@ def sync_plugins_symlinks(debug: bool = False, warn: bool = True) -> None:
                 for plugins_path in PLUGINS_DIR_PATHS
             ]
         ))
+        plugins_to_be_symlinked.extend(packaged_plugin_paths)
 
         ### Check for duplicates.
         seen_plugins = defaultdict(lambda: 0)
@@ -538,6 +558,8 @@ def get_plugins(*to_load, try_import: bool = True) -> Union[Tuple[Plugin], Plugi
     ]
     plugins = tuple(plugin for plugin in _plugins if plugin.is_installed(try_import=try_import))
     if len(to_load) == 1:
+        if len(plugins) == 0:
+            raise ValueError(f"Plugin '{to_load[0]}' is not installed.")
         return plugins[0]
     return plugins
 

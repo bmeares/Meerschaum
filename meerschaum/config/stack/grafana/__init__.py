@@ -17,7 +17,7 @@ default_datasource = {
             'type': 'postgres',
             'jsonData': {
                 'sslmode': 'disable',
-                'postgresVersion': 1400,
+                'postgresVersion': 1500,
                 'timescaledb': True,
             },
             'user': db_user,

@@ -128,8 +128,10 @@ class SQLConnector(Connector):
         """
         if 'uri' in kw:
             uri = kw['uri']
-            if uri.startswith('postgres://'):
-                uri = uri.replace('postgres://', 'postgresql://', 1)
+            if uri.startswith('postgres') and not uri.startswith('postgresql'):
+                uri = uri.replace('postgres', 'postgresql', 1)
+            if uri.startswith('postgresql') and not uri.startswith('postgresql+'):
+                uri = uri.replace('postgresql://', 'postgresql+psycopg', 1)
             if uri.startswith('timescaledb://'):
                 uri = uri.replace('timescaledb://', 'postgresql://', 1)
                 flavor = 'timescaledb'

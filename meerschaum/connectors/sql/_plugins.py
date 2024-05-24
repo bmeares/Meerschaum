@@ -108,9 +108,7 @@ def get_plugin_version(
     plugins_tbl = get_tables(mrsm_instance=self, debug=debug)['plugins']
     from meerschaum.utils.packages import attempt_import
     sqlalchemy = attempt_import('sqlalchemy')
-
     query = sqlalchemy.select(plugins_tbl.c.version).where(plugins_tbl.c.plugin_name == plugin.name)
-
     return self.value(query, debug=debug)
 
 def get_plugin_user_id(

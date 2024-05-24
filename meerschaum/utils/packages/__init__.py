@@ -8,7 +8,7 @@ Functions for managing packages and virtual environments reside here.
 
 from __future__ import annotations
 
-import importlib.util, os, pathlib
+import importlib.util, os, pathlib, re
 from meerschaum.utils.typing import Any, List, SuccessTuple, Optional, Union, Tuple, Dict, Iterable
 from meerschaum.utils.threading import Lock, RLock
 from meerschaum.utils.packages._packages import packages, all_packages, get_install_names
@@ -35,6 +35,7 @@ _locks = {
 }
 _checked_for_updates = set()
 _is_installed_first_check: Dict[str, bool] = {}
+_MRSM_PACKAGE_ARCHIVES_PREFIX: str = "https://meerschaum.io/files/archives/"
 
 def get_module_path(
         import_name: str,
@@ -640,6 +641,15 @@ def need_update(
 
     ### We might be depending on a prerelease.
     ### Sanity check that the required version is not greater than the installed version. 
+    required_version = (
+        required_version.replace(_MRSM_PACKAGE_ARCHIVES_PREFIX, '')
+        .replace(' @ ', '').replace('wheels', '').replace('+mrsm', '').replace('/-', '')
+        .replace('-py3-none-any.whl', '')
+    )
+
+    if 'a' in required_version:
+        required_version = required_version.replace('a', '-dev').replace('+mrsm', '')
+        version = version.replace('a', '-dev').replace('+mrsm', '')
     try:
         return (
             (not semver.Version.parse(version).match(required_version))
@@ -819,8 +829,11 @@ def pip_install(
                     check_wheel = False, debug = debug,
                 ):
                     warn(
-                        f"Failed to install `setuptools` and `wheel` for virtual environment '{venv}'.",
-                        color=False,
+                        (
+                            "Failed to install `setuptools` and `wheel` for virtual "
+                            + f"environment '{venv}'."
+                        ),
+                        color = False,
                     )
 
         if requirements_file_path is not None:
@@ -883,13 +896,16 @@ def pip_install(
                         f"Failed to clean up package '{_install_no_version}'.",
                     )
 
-        success = run_python_package(
+        rc = run_python_package(
             'pip',
             _args + _packages,
             venv = venv,
             env = _get_pip_os_env(),
             debug = debug,
-        ) == 0
+        )
+        if debug:
+            print(f"{rc=}")
+        success = rc == 0
 
     msg = (
         "Successfully " + ('un' if _uninstall else '') + "installed packages." if success 

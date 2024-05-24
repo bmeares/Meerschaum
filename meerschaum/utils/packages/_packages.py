@@ -49,18 +49,18 @@ packages: Dict[str, Dict[str, str]] = {
         'daemon'                     : 'python-daemon>=0.2.3',
         'fasteners'                  : 'fasteners>=0.18.0',
         'psutil'                     : 'psutil>=5.8.0',
-        'watchgod'                   : 'watchgod>=0.7.0',
+        'watchfiles'                 : 'watchfiles>=0.21.0',
         'dill'                       : 'dill>=0.3.3',
         'virtualenv'                 : 'virtualenv>=20.1.0',
-        'rocketry'                   : 'rocketry>=2.5.1',
+        'apscheduler'                : 'APScheduler>=4.0.0a5',
     },
     'drivers': {
         'cryptography'               : 'cryptography>=38.0.1',
-        'psycopg2'                   : 'psycopg2-binary>=2.8.6',
+        'psycopg'                    : 'psycopg[binary]>=3.1.18',
         'pymysql'                    : 'PyMySQL>=0.9.0',
         'aiomysql'                   : 'aiomysql>=0.0.21',
         'sqlalchemy_cockroachdb'     : 'sqlalchemy-cockroachdb>=2.0.0',
-        'duckdb'                     : 'duckdb>=0.9.0',
+        'duckdb'                     : 'duckdb<0.10.3',
         'duckdb_engine'              : 'duckdb-engine>=0.9.2',
     },
     '_drivers': {
@@ -75,11 +75,11 @@ packages: Dict[str, Dict[str, str]] = {
         'gadwall'                    : 'gadwall>=0.2.0',
     },
     'stack': {
-        'compose'                    : 'docker-compose>=1.27.4',
+        'compose'                    : 'docker-compose>=1.29.2',
     },
     'build': {
-        'cx_Freeze'                  : 'cx_Freeze>=6.5.1',
-        'PyInstaller'                : 'pyinstaller>=5.0.0-dev0',
+        'cx_Freeze'                  : 'cx_Freeze>=7.0.0',
+        'PyInstaller'                : 'pyinstaller>6.6.0',
     },
     'dev-tools': {
         'twine'                      : 'twine>=3.2.0',
@@ -89,6 +89,7 @@ packages: Dict[str, Dict[str, str]] = {
         'pytest'                     : 'pytest>=6.2.2',
         'pytest_xdist'               : 'pytest-xdist>=3.2.1',
         'heartrate'                  : 'heartrate>=0.2.1',
+        'build'                      : 'build>=1.2.1',
     },
     'setup': {
     },
@@ -119,8 +120,8 @@ packages: Dict[str, Dict[str, str]] = {
 packages['sql'] = {
     'numpy'                          : 'numpy>=1.18.5',
     'pandas'                         : 'pandas[parquet]>=2.0.1',
-    'pyarrow'                        : 'pyarrow>=7.0.0',
-    'dask'                           : 'dask>=2023.5.0',
+    'pyarrow'                        : 'pyarrow>=16.1.0',
+    'dask'                           : 'dask[dataframe]>=2024.5.1',
     'pytz'                           : 'pytz',
     'joblib'                         : 'joblib>=0.17.0',
     'sqlalchemy'                     : 'SQLAlchemy>=2.0.5',
@@ -141,15 +142,13 @@ packages['dash'] = {
     'tornado'                        : 'tornado>=6.1.0',
 }
 packages['api'] = {
-    'uvicorn'                        : 'uvicorn[standard]>=0.22.0',
-    'gunicorn'                       : 'gunicorn>=20.1.0',
+    'uvicorn'                        : 'uvicorn[standard]>=0.29.0',
+    'gunicorn'                       : 'gunicorn>=22.0.0',
     'dotenv'                         : 'python-dotenv>=0.20.0',
     'websockets'                     : 'websockets>=11.0.3',
-    'fastapi'                        : 'fastapi>=0.100.0',
-    'passlib'                        : 'passlib>=1.7.4',
+    'fastapi'                        : 'fastapi>=0.111.0',
     'fastapi_login'                  : 'fastapi-login>=1.7.2',
-    'multipart'                      : 'python-multipart>=0.0.5',
-    'pydantic'                       : 'pydantic<2.0.0',
+    'multipart'                      : 'python-multipart>=0.0.9',
     'httpx'                          : 'httpx>=0.24.1',
     'websockets'                     : 'websockets>=11.0.3',
 }

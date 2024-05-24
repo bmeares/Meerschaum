@@ -70,6 +70,9 @@ window.addEventListener(
         if (!fl){ continue; }
         fl_val = event.data['input_flags_texts'][index];
         if (!fl_val){ continue; }
+        if (fl_val.includes(' ')){
+          fl_val = "'" + fl_val + "'";
+        }
         flags_str += " " + fl + " " + fl_val;
     }
 

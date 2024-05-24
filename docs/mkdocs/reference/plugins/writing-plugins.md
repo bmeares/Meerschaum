@@ -4,20 +4,9 @@
 
 Meerschaum's plugin system is designed to be simple so you can get your plugins working quickly. Plugins are Python packages defined in the Meerschaum configuration `plugins` directory and are imported at startup under the global namespace `plugins`.
 
-!!! warning "Performance Warning"
-    To get the best performance and user experience, try to keep module-level code to a minimum ― especially heavy imports. Plugins are loaded at startup, and those tiny delays add up!
-    ```python hl_lines="2"
-    ### BAD - DON'T DO THIS
-    import pandas as pd
-    def fetch(pipe, **kw):
-    	  return pd.read_csv('data.csv')
-    ```
-    ``` python hl_lines="3"
-    ### GOOD - DO THIS INSTEAD
-    def fetch(pipe, **kw):
-    	  import pandas as pd
-    	  return pd.read_csv('data.csv')
-    ```
+!!! info inline end ""
+    Looking to make your existing package a plugin? See [Package Management](#package-management) below.
+
 
 To create your plugin, follow these steps:
 
@@ -72,6 +61,22 @@ To create your plugin, follow these steps:
         You must include a `**kwargs` argument to capture optional arguments. The functions `#!python fetch()`, `#!python sync()`, and `#!python register()` also require a `pipe` positional argument for the `#!python meerschaum.Pipe` object being synced.
 
         You may find the supplied arguments useful for your implementation (e.g. `begin` and `end` `#!python datetime.datetime` objects). Run `mrsm -h` or `mrsm show help` to see the available keyword arguments.
+
+!!! info "Imports impact performance"
+    For optimal performance, keep module-level code to a minimum ― especially heavy imports.
+    ```python hl_lines="2"
+    ### BAD - DON'T DO THIS
+    import pandas as pd
+    def fetch(pipe, **kw):
+        return pd.read_csv('data.csv')
+    ```
+    ```python hl_lines="3"
+    ### GOOD - DO THIS INSTEAD
+    def fetch(pipe, **kw):
+        import pandas as pd
+        return pd.read_csv('data.csv')
+    ```
+
 
 ## Functions
 
@@ -606,6 +611,34 @@ Generally, using built-in or custom arguments mentioned above should cover almos
 Plugins are just Python modules, so you can write custom code and share it amongst other plugins (i.e. a [library plugin](/reference/plugins/types-of-plugins/#-library-plugins)).
 
 At run time, plugins are imported under the global `plugins` namespace, but you'll probably be testing plugins directly when the `plugins` namespace isn't created. That's where [`Plugin` objects](https://docs.meerschaum.io/#meerschaum.Plugin) come in handy: they contain a number of convenience functions so you can cross-pollinate between plugins.
+
+### Package Management
+
+Meerschaum plugins only need to be modules ― no package metadata required. But if you plan on managing your plugins as proper packages (e.g. to publish to repositories like [PyPI](https://pypi.org/)), simply add the [entry point](https://packaging.python.org/en/latest/guides/creating-and-discovering-plugins/#using-package-metadata) `meerschaum.plugins` to your package metadata:
+
+??? note "Creating Plugins from a Package Entry Point"
+
+    === "`setup.py`"
+    
+        ```python
+        from setuptools import setup
+        
+        setup(
+            ...,
+            entry_points = {
+                'meerschaum.plugins': [
+                    'foo = foo',
+                ],
+            },
+        )
+        ```
+
+    === "`pyproject.toml`"
+    
+        ```toml
+        [project.entry-points."meerschaum.plugins"]
+        foo = "foo"
+        ```
 
 ### Import Another Plugin
 

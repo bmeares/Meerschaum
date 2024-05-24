@@ -20,7 +20,7 @@ docker pull "$python_image"
 for tag in "${tags[@]}"; do
   [ "$latest_alias" == "$tag" ] && tag_latest="-t $image:latest -t $image:$mrsm_version" || unset tag_latest
 
-  docker buildx build ${push:-} \
+  docker buildx build --progress plain ${push:-} \
     --build-arg dep_group="$tag" \
     --build-arg mrsm_uid="$mrsm_uid" \
     --build-arg mrsm_gid="$mrsm_gid" \

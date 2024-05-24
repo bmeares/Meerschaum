@@ -28,7 +28,7 @@ default_create_engine_args = {
 }
 flavor_configs = {
     'timescaledb'      : {
-        'engine'       : 'postgresql',
+        'engine'       : 'postgresql+psycopg',
         'create_engine' : default_create_engine_args,
         'omit_create_engine': {'method',},
         'to_sql' : {},
@@ -38,7 +38,7 @@ flavor_configs = {
         },
     },
     'postgresql'         : {
-        'engine'       : 'postgresql',
+        'engine'       : 'postgresql+psycopg',
         'create_engine' : default_create_engine_args,
         'omit_create_engine': {'method',},
         'to_sql' : {},
@@ -48,7 +48,7 @@ flavor_configs = {
         },
     },
     'citus'            : {
-        'engine'       : 'postgresql',
+        'engine'       : 'postgresql+psycopg',
         'create_engine' : default_create_engine_args,
         'omit_create_engine': {'method',},
         'to_sql' : {},
@@ -154,10 +154,10 @@ install_flavor_drivers = {
     'duckdb': ['duckdb', 'duckdb_engine'],
     'mysql': ['pymysql'],
     'mariadb': ['pymysql'],
-    'timescaledb': ['psycopg2'],
-    'postgresql': ['psycopg2'],
-    'citus': ['psycopg2'],
-    'cockroachdb': ['psycopg2', 'sqlalchemy_cockroachdb', 'sqlalchemy_cockroachdb.psycopg2'],
+    'timescaledb': ['psycopg'],
+    'postgresql': ['psycopg'],
+    'citus': ['psycopg'],
+    'cockroachdb': ['psycopg', 'sqlalchemy_cockroachdb', 'sqlalchemy_cockroachdb.psycopg'],
     'mssql': ['pyodbc'],
     'oracle': ['cx_Oracle'],
 }
@@ -165,7 +165,7 @@ require_patching_flavors = {'cockroachdb': [('sqlalchemy-cockroachdb', 'sqlalche
 
 flavor_dialects = {
     'cockroachdb': (
-        'cockroachdb', 'sqlalchemy_cockroachdb.psycopg2', 'CockroachDBDialect_psycopg2'
+        'cockroachdb', 'sqlalchemy_cockroachdb.psycopg', 'CockroachDBDialect_psycopg'
     ),
     'duckdb': ('duckdb', 'duckdb_engine', 'Dialect'),
 }
@@ -242,7 +242,7 @@ def create_engine(
 
         ### Sometimes the timescaledb:// flavor can slip in.
         if _uri and self.flavor in ('timescaledb',) and self.flavor in _uri:
-            engine_str = engine_str.replace(f'{self.flavor}://', 'postgresql://')
+            engine_str = engine_str.replace(f'{self.flavor}', 'postgresql', 1)
 
     if debug:
         dprint(
