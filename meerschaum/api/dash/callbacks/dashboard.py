@@ -713,11 +713,11 @@ def download_pipe_csv(n_clicks):
     pipe = pipe_from_ctx(ctx, 'n_clicks')
     if pipe is None:
         raise PreventUpdate
-    filename = str(pipe.target) + '.csv'
     bounds = pipe.get_chunk_bounds(bounded=True, debug=debug)
-    begin, _ = bounds[-1]
+    begin, end = bounds[-1]
+    filename = str(pipe.target) + f" {begin} - {end}.csv"
     try:
-        df = pipe.get_data(begin=begin, end=None, debug=debug)
+        df = pipe.get_data(begin=begin, end=end, debug=debug)
     except Exception as e:
         df = None
     if df is not None:

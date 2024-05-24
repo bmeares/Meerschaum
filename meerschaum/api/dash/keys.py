@@ -108,7 +108,7 @@ action_dropdown_row = html.Div(
                             id = 'flags-dropdown',
                             multi = True,
                             placeholder = 'Boolean flags',
-                            options = [],
+                            options = ['--yes'],
                             value = ['--yes'],
                         ),
                         id = 'flags-dropdown-div',
