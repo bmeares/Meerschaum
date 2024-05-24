@@ -30,7 +30,7 @@ packages: Dict[str, Dict[str, str]] = {
         'more_termcolor'             : 'more-termcolor>=1.1.3',
         'humanfriendly'              : 'humanfriendly>=10.0.0',
     },
-    '_required': {
+    'core': {
         'wheel'                      : 'wheel>=0.34.2',
         'setuptools'                 : 'setuptools>=63.3.0',
         'yaml'                       : 'PyYAML>=5.3.1',
@@ -63,7 +63,7 @@ packages: Dict[str, Dict[str, str]] = {
         'duckdb'                     : 'duckdb<0.10.3',
         'duckdb_engine'              : 'duckdb-engine>=0.9.2',
     },
-    '_drivers': {
+    'drivers-extras': {
         'pyodbc'                     : 'pyodbc>=4.0.30',
         'cx_Oracle'                  : 'cx_Oracle>=8.3.0',
     },
@@ -130,7 +130,7 @@ packages['sql'] = {
     'asyncpg'                        : 'asyncpg>=0.21.0',
 }
 packages['sql'].update(packages['drivers'])
-packages['sql'].update(packages['_required'])
+packages['sql'].update(packages['core'])
 packages['dash'] = {
     'flask_compress'                 : 'Flask-Compress>=1.10.1',
     'dash'                           : 'dash>=2.6.2',
@@ -150,7 +150,6 @@ packages['api'] = {
     'fastapi_login'                  : 'fastapi-login>=1.7.2',
     'multipart'                      : 'python-multipart>=0.0.9',
     'httpx'                          : 'httpx>=0.24.1',
-    'websockets'                     : 'websockets>=11.0.3',
 }
 packages['api'].update(packages['sql'])
 packages['api'].update(packages['formatting'])
@@ -170,7 +169,7 @@ def get_install_names():
             install_names[get_install_no_version(_install_name)] = _import_name
     return install_names
 
-skip_groups = {'docs', 'build', 'cli', 'dev-tools', 'portable', 'extras', 'stack', '_drivers'}
+skip_groups = {'docs', 'build', 'cli', 'dev-tools', 'portable', 'extras', 'stack', 'drivers-extras'}
 full = []
 _full = {}
 for group, import_names in packages.items():
