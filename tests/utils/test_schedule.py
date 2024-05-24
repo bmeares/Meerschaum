@@ -136,7 +136,7 @@ def test_parse_schedule(schedule, expected_datetimes):
     """
     from meerschaum.utils.schedule import parse_schedule
     now = datetime(2024, 5, 1, 12, 31, 52, tzinfo=timezone.utc)
-    trigger = parse_schedule(schedule)
+    trigger = parse_schedule(schedule, now=now)
     for expected_dt in expected_datetimes:
         next_dt = trigger.next()
         assert next_dt == expected_dt

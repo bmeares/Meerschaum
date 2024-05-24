@@ -1478,45 +1478,11 @@ def sync_pipe_inplace(
     from meerschaum.utils.misc import generate_password
     from meerschaum.utils.debug import dprint
 
-    sqlalchemy, sqlalchemy_orm = mrsm.attempt_import('sqlalchemy', 'sqlalchemy.orm')
-    metadef = self.get_pipe_metadef(
-        pipe,
-        params = params,
-        begin = begin,
-        end = end,
-        check_existing = check_existing,
-        debug = debug,
-    )
-    pipe_name = sql_item_name(pipe.target, self.flavor, self.get_pipe_schema(pipe))
-    upsert = pipe.parameters.get('upsert', False) and f'{self.flavor}-upsert' in update_queries
-    internal_schema = self.internal_schema
-    database = getattr(self, 'database', self.parse_uri(self.URI).get('database', None))
-
-    if not pipe.exists(debug=debug):
-        create_pipe_query = get_create_table_query(
-            metadef,
-            pipe.target,
-            self.flavor,
-            schema = self.get_pipe_schema(pipe),
-        )
-        result = self.exec(create_pipe_query, debug=debug)
-        if result is None:
-            _ = clean_up_temp_tables()
-            return False, f"Could not insert new data into {pipe} from its SQL query definition."
-        if not self.create_indices(pipe, debug=debug):
-            warn(f"Failed to create indices for {pipe}. Continuing...")
-
-        rowcount = pipe.get_rowcount(debug=debug)
-        _ = clean_up_temp_tables()
-        return True, f"Inserted {rowcount}, updated 0 rows."
-
-    session = sqlalchemy_orm.Session(self.engine)
-    connectable = session if self.flavor != 'duckdb' else self
-
     transact_id = generate_password(3)
     def get_temp_table_name(label: str) -> str:
         return '-' + transact_id + '_' + label + '_' + pipe.target
 
+    internal_schema = self.internal_schema
     temp_table_roots = ['backtrack', 'new', 'delta', 'joined', 'unseen', 'update']
     temp_tables = {
         table_root: get_temp_table_name(table_root)
@@ -1530,6 +1496,17 @@ def sync_pipe_inplace(
         )
         for table_root, table_name_raw in temp_tables.items()
     }
+    metadef = self.get_pipe_metadef(
+        pipe,
+        params = params,
+        begin = begin,
+        end = end,
+        check_existing = check_existing,
+        debug = debug,
+    )
+    pipe_name = sql_item_name(pipe.target, self.flavor, self.get_pipe_schema(pipe))
+    upsert = pipe.parameters.get('upsert', False) and f'{self.flavor}-upsert' in update_queries
+    database = getattr(self, 'database', self.parse_uri(self.URI).get('database', None))
 
     def clean_up_temp_tables(ready_to_drop: bool = False):
         log_success, log_msg = self._log_temporary_tables_creation(
@@ -1550,6 +1527,29 @@ def sync_pipe_inplace(
         if not drop_stale_success:
             warn(drop_stale_msg)
         return drop_stale_success, drop_stale_msg
+
+    sqlalchemy, sqlalchemy_orm = mrsm.attempt_import('sqlalchemy', 'sqlalchemy.orm')
+    if not pipe.exists(debug=debug):
+        create_pipe_query = get_create_table_query(
+            metadef,
+            pipe.target,
+            self.flavor,
+            schema = self.get_pipe_schema(pipe),
+        )
+        result = self.exec(create_pipe_query, debug=debug)
+        if result is None:
+            _ = clean_up_temp_tables()
+            return False, f"Could not insert new data into {pipe} from its SQL query definition."
+
+        if not self.create_indices(pipe, debug=debug):
+            warn(f"Failed to create indices for {pipe}. Continuing...")
+
+        rowcount = pipe.get_rowcount(debug=debug)
+        _ = clean_up_temp_tables()
+        return True, f"Inserted {rowcount}, updated 0 rows."
+
+    session = sqlalchemy_orm.Session(self.engine)
+    connectable = session if self.flavor != 'duckdb' else self
 
     create_new_query = get_create_table_query(
         metadef,

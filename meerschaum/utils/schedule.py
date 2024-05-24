@@ -286,9 +286,6 @@ def parse_start_time(schedule: str, now: Optional[datetime] = None) -> datetime:
             is_tomorrow = 'tomorrow' in starting_str
             time_str = starting_str.replace('tomorrow', '').replace('today', '').strip()
             time_ts = dateutil_parser.parse(time_str) if time_str else today
-            print(f"{today=}")
-            print(f"{tomorrow=}")
-            print(f"{time_ts=}")
             starting_ts = (
                 (tomorrow if is_tomorrow else today)
                 + timedelta(hours=time_ts.hour)
