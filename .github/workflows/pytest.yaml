@@ -25,14 +25,11 @@ jobs:
         run: ./scripts/setup.sh
       - name: Install db drivers
         run: sudo ./scripts/drivers.sh
-      # - name: Setup tmate session
-        # uses: mxschmitt/action-tmate@v3
-        # with:
-          # limit-access-to-actor: true
       - name: Integration tests
         env:
           COMPOSE_INTERACTIVE_NO_CLI: 1
           MRSM_TEST_FLAVORS: "all"
+          MRSM_INSTALL_PACKAGES: "api"
         run: ./scripts/test.sh db
       - uses: actions/upload-artifact@v4
         if: always()

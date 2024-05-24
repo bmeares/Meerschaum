@@ -763,6 +763,7 @@ def get_pipe_data(
         if typ == 'numeric' and col in dtypes
     ]
     kw['coerce_float'] = kw.get('coerce_float', (len(numeric_columns) == 0))
+    
     df = self.read(
         query,
         dtype = dtypes,

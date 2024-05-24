@@ -60,7 +60,7 @@ packages: Dict[str, Dict[str, str]] = {
         'pymysql'                    : 'PyMySQL>=0.9.0',
         'aiomysql'                   : 'aiomysql>=0.0.21',
         'sqlalchemy_cockroachdb'     : 'sqlalchemy-cockroachdb>=2.0.0',
-        'duckdb'                     : 'duckdb<0.10.0',
+        'duckdb'                     : 'duckdb<0.10.3',
         'duckdb_engine'              : 'duckdb-engine>=0.9.2',
     },
     '_drivers': {

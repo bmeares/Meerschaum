@@ -46,14 +46,19 @@ endpoints = STATIC_CONFIG['api']['endpoints']
     lazy = False,
     check_update = CHECK_UPDATE,
 )
-typing_extensions = attempt_import(
-    'typing_extensions', lazy=False, check_update=CHECK_UPDATE,
+(
+    typing_extensions,
+    uvicorn_workers,
+) = attempt_import(
+    'typing_extensions',
+    'uvicorn.workers',
+    lazy = False,
+    check_update = CHECK_UPDATE,
     venv = None,
 )
 from meerschaum.api._chain import check_allow_chaining, DISALLOW_CHAINING_MESSAGE
 uvicorn_config_path = API_UVICORN_RESOURCES_PATH / SERVER_ID / 'config.json'
 
-uvicorn_workers = attempt_import('uvicorn.workers', venv=None, check_update=CHECK_UPDATE)
 uvicorn_config = None
 sys_config = get_config('system', 'api')
 permissions_config = get_config('system', 'api', 'permissions')

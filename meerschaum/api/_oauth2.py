@@ -7,11 +7,11 @@ Define JWT authorization here.
 """
 
 import os
-from meerschaum.api import app, endpoints
+from meerschaum.api import app, endpoints, CHECK_UPDATE
 from meerschaum.utils.packages import attempt_import
-fastapi = attempt_import('fastapi', lazy=False)
-fastapi_responses = attempt_import('fastapi.responses', lazy=False)
-fastapi_login = attempt_import('fastapi_login')
+fastapi = attempt_import('fastapi', lazy=False, check_update=CHECK_UPDATE)
+fastapi_responses = attempt_import('fastapi.responses', lazy=False, check_update=CHECK_UPDATE)
+fastapi_login = attempt_import('fastapi_login', check_update=CHECK_UPDATE)
 
 LoginManager = fastapi_login.LoginManager
 def generate_secret_key() -> str:

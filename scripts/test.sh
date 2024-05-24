@@ -29,6 +29,10 @@ if [ "$1" == "db" ]; then
   cd ../
 fi
 
+if [ ! -z "$MRSM_INSTALL_PACKAGES" ]; then
+  $mrsm upgrade packages $MRSM_INSTALL_PACKAGES -y
+fi
+
 rm -rf "$test_root/data"
 rm -f "$test_root/sqlite/mrsm_local.db"
 
