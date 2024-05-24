@@ -102,7 +102,7 @@ This is the current release cycle, so stay tuned for future releases!
 - **Removed `pydantic` from dependencies.**
 - **Removed `passlib` from dependencies.**
 - **Bumped default TimescaleDB image to `latest-pg16-oss`.**
-- **Held back `duckdb` to `<0.10.0`.**
+- **Held back `duckdb` to `<0.10.2`.**
 
 
 ## 2.1.x Releases
