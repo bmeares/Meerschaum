@@ -31,7 +31,10 @@ This is the current release cycle, so stay tuned for future releases!
   ```
 
 - **Added timestamps to log file lines.**  
-  Log files now prepend the current minute to each line of the file, and the timestamps are also printed when viewing logs with `show logs`. You may change the timestamp format under the config keys `MRSM{jobs:logs:timestamp_format}` (timestamp written to disk) and `MRSM{jobs:logs:follow_timestamp_format}` (timestamp printed when following via `show logs`.).
+  Log files now prepend the current minute to each line of the file, and the timestamps are also printed when viewing logs with `show logs`.
+  To disable this behavio, set `MRSM{jobs:logs:timestamps:enabled}` to `false`.
+
+  You may change the timestamp format under the config keys `MRSM{jobs:logs:timestamps:format}` (timestamp written to disk) and `MRSM{jobs:logs:timestamps:follow_format}` (timestamp printed when following via `show logs`.).
 
 - **Add `--skip-deps`.**  
   When installing plugins, you may skip dependencies with `--skip-deps`. This should improve the iteration loop during development.

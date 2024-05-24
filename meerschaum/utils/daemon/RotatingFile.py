@@ -272,7 +272,7 @@ class RotatingFile(io.IOBase):
                     warn(
                         f"Encountered an issue when redirecting streams:\n{traceback.format_exc()}"
                     )
-                if start_interception:
+                if start_interception and self.write_timestamps:
                     self.start_log_fd_interception()
 
         create_new_file = (
@@ -363,7 +363,7 @@ class RotatingFile(io.IOBase):
         suffix_str = "\n" if self.write_timestamps else ""
         self.refresh_files(
             potential_new_len = len(prefix_str + data + suffix_str),
-            start_interception = True,
+            start_interception = self.write_timestamps,
         )
         try:
             if prefix_str:
@@ -591,6 +591,9 @@ class RotatingFile(io.IOBase):
         """
         Start the file descriptor monitoring threads.
         """
+        if not self.write_timestamps:
+            return
+
         threads = self.__dict__.get('_interceptor_threads', [])
         self._stdout_interceptor = FileDescriptorInterceptor(
             sys.stdout.fileno(),
@@ -627,10 +630,13 @@ class RotatingFile(io.IOBase):
         ])
         self.stop_log_fd_interception(unused_only=True)
 
+
     def stop_log_fd_interception(self, unused_only: bool = False):
         """
         Stop the file descriptor monitoring threads.
         """
+        if not self.write_timestamps:
+            return
         interceptors = self.__dict__.get('_interceptors', [])
         interceptor_threads = self.__dict__.get('_interceptor_threads', [])
 

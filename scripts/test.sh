@@ -30,6 +30,7 @@ if [ "$1" == "db" ]; then
 fi
 
 if [ ! -z "$MRSM_INSTALL_PACKAGES" ]; then
+  $mrsm install packages setuptools wheel -y
   $mrsm upgrade packages $MRSM_INSTALL_PACKAGES -y
 fi
 
@@ -69,7 +70,7 @@ conns_to_run = [str(conn) for flavor, conn in conns.items() if flavor in flavors
 print(' '.join(conns_to_run))
 ")
 
-MRSM_URIS=$($PYTHON_BIN -c "
+connectors_uri_code="
 from tests.connectors import conns, get_flavors
 flavors = get_flavors()
 print(' '.join([
@@ -87,7 +88,12 @@ print(' '.join([
   )
   for f, c in conns.items()
   if f in flavors
-]))")
+]))
+"
+
+$PYTHON_BIN -c "$connectors_uri_code"
+
+MRSM_URIS=$($PYTHON_BIN -c "$connectors_uri_code")
 export $MRSM_URIS
 
 true && \

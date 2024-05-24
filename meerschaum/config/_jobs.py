@@ -14,13 +14,16 @@ default_jobs_config = {
         'columns': 70,
     },
     'logs': {
+        'timestamps': {
+            'enabled': True,
+            'format': '%Y-%m-%d %H:%M',
+            'follow_format': '%H:%M',
+        },
         'num_files_to_keep': 5,
         'max_file_size': 100_000,
         'lines_to_show': 30,
         'refresh_files_seconds': 5,
         'min_buffer_len': 5,
-        'timestamp_format': '%Y-%m-%d %H:%M',
-        'follow_timestamp_format': '%H:%M',
         'colors': [
             'cyan',
             'magenta',

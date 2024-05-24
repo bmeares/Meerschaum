@@ -684,8 +684,8 @@ class Daemon:
         self._rotating_log = RotatingFile(
             self.log_path,
             redirect_streams = True,
-            write_timestamps = True,
-            timestamp_format = get_config('jobs', 'logs', 'timestamp_format'),
+            write_timestamps = get_config('jobs', 'logs', 'timestamps', 'enabled'),
+            timestamp_format = get_config('jobs', 'logs', 'timestamps', 'format'),
         )
         return self._rotating_log
 
@@ -699,7 +699,8 @@ class Daemon:
             self.rotating_log.file_path,
             num_files_to_keep = self.rotating_log.num_files_to_keep,
             max_file_size = self.rotating_log.max_file_size,
-            write_timestamps = True,
+            write_timestamps = get_config('jobs', 'logs', 'timestamps', 'enabled'),
+            timestamp_format = get_config('jobs', 'logs', 'timestamps', 'format'),
         )
         return new_rotating_log.read()
 

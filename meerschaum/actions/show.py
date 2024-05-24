@@ -589,8 +589,8 @@ def _show_logs(
     if not ANSI:
         info = print
     colors = get_config('jobs', 'logs', 'colors')
-    timestamp_format = get_config('jobs', 'logs', 'timestamp_format')
-    follow_timestamp_format = get_config('jobs', 'logs', 'follow_timestamp_format')
+    timestamp_format = get_config('jobs', 'logs', 'timestamps', 'format')
+    follow_timestamp_format = get_config('jobs', 'logs', 'timestamps', 'follow_format')
     daemons = get_filtered_daemons(action)
     now = datetime.now(timezone.utc)
     now_str = now.strftime(timestamp_format)
