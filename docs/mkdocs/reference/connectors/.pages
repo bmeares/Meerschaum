@@ -1,3 +1,4 @@
 nav:
   - index.md
+  - "🗂️ SQL Connectors": "sql-connectors.md"
   - "🗄️ Instance Connectors": "instance-connectors.md"

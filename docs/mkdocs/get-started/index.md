@@ -5,51 +5,46 @@
 
 ## 🐍 Install from [PyPI](https://pypi.org/project/meerschaum/)
 
+!!! note inline end ""
+
+    Run Meerschaum commands with `mrsm` (or `python -m meerschaum` if `~/.local/bin/` isn't in your `PATH`).
+
 ```bash
 python -m pip install --upgrade meerschaum
 ```
 
-??? info "Optional dependencies"
+
+??? info "Installing dependencies"
     Meerschaum will auto-install packages as you use them (into a virtual environment, to preserve your base environment).
 
     You can manually install these packages in one command:
 
     ```bash
-    python -m meerschaum upgrade packages -y
+    python -m meerschaum upgrade packages api -y
     ```
 
-    You can also install the packages into your base environment by requesting the name of the dependency group, e.g. `api`:
+    To install the packages into your environment (e.g. you're already using a virtual environment) by adding the name of the [dependency group](https://github.com/bmeares/Meerschaum/blob/main/meerschaum/utils/packages/_packages.py), e.g. `api`:
+
     ```bash
     python -m pip install --upgrade meerschaum[api]
     ```
 
-!!! note ""
+## 🥞 Start the [Stack](/reference/stack/)
 
-    Run Meerschaum commands with `mrsm` or `python -m meerschaum` if `~/.local/bin/` isn't in your `PATH`.
+!!! note inline end ""
+    You'll need [Docker](https://docs.docker.com/engine/install/) to start the stack.
 
+```bash
+mrsm stack up -d
+```
 
-## 🗄️ Choose a Database
+??? example "📽️ Watch an example"
+    <asciinema-player src="/assets/casts/stack.cast" size="small" preload="true" rows="10"></asciinema-player>
 
-Let's pick a database to store our data. Pick one of the three options below and take note of the keys (e.g. `sql:<label>`). We'll use this as our Meerschaum [instance connector](/reference/connectors/#instances-and-repositories).
+This will start the pre-configured TimescaleDB instance (`sql:main`).
 
-1. **Pre-configured TimescaleDB (`sql:main`)**  
-
-    The default [database connector](/reference/connectors/) `sql:main` points to the pre-configured [Meerschaum stack](/reference/stack/). If you have [Docker](https://www.docker.com/get-started), start the database service:
-
-    ```bash
-    mrsm stack up -d db
-    ```
-
-    ??? example "📽️ Watch an example"
-        <asciinema-player src="/assets/casts/stack.cast" size="small" preload="true" rows="10"></asciinema-player>
-
-2. **Built-in SQLite DB (`sql:local`)**  
-
-    For your convenience, the keys `sql:local` point to a SQLite database in your Meerschaum root directory.
-
-3. **Use your own DB (`sql:<label>`)**  
-
-    You can [connect your own database](/reference/connectors/#creating-a-connector) with `mrsm bootstrap connector`. The keys for your connector will be `sql:<label>`, where `<label>` is the label you assign in the wizard.
+??? note "Don't have Docker or want to use your own database?"
+    You can use a built-in SQLite database with the keys `sql:local`, or you may use your own database by [creating a new connector](/reference/connectors/#creating-a-connector). Read more about the [`SQLConnector` here](/reference/connectors/sql-connectors/).
 
     ??? example "📽️ Watch an example"
         <asciinema-player src="/assets/casts/bootstrap-connector.cast" size="small" preload="true"></asciinema-player>

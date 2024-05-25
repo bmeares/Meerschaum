@@ -72,6 +72,9 @@ mrsm sync pipes -s 'daily starting 00:00' -d
 
 Append the phrase `starting [time]` to a schedule to set the reference point. If the starting time is in the past, the schedule will also fire immediately.
 
+!!! tip "Tip: Add `tomorrow` to keep a job from immediately firing."
+    If you are creating long-running jobs that run at night, add `tomorrow` to your start time so that the job does not immediately fire (e.g. `daily starting tomorrow 10:00`).
+
  Schedule | Description 
 ----------|-------------
  `hourly starting 00:30` | Fire every hour on the 30th minute.
@@ -83,8 +86,6 @@ Append the phrase `starting [time]` to a schedule to set the reference point. If
 
 !!! note ""
     Omitting the starting time will use the current time as the starting point. Unless specified, the default timezone is UTC. See [Verifying Schedules](#verifying-schedules) below for ways you can experiment with different schedule strings.
-
-The starting time `tomorrow` is a useful keyword for jobs you do not wish to run immediately but wish to keep dynamic. Any time specified alongside `tomorrow` will be added to midnight; for example, the string `daily starting tomorrow` will fire on the next upcoming midnight.
 
 ### Cron Format
 
@@ -138,12 +139,11 @@ For your convenience, common aliases are mapped to keywords:
  Keyword | Aliases 
 ---------|---------
  `&` | `and` 
- `or` | `or` 
+ `|` | `or` 
  `-` | ` through `, ` thru `, ` - ` (with spaces)
  `starting` | `beginning`
- Weekdays (`mon`, etc.) | Full names (e.g. `Monday`) and `tues`, `thurs` 
+ Weekdays (`mon`, `tue`, etc.) | Full names (e.g. `Monday`) and `tues`, `thurs` 
  Months (`jan`, etc.) | Full names (e.g. `January`) 
-
 
 ### Verifying Schedules
 

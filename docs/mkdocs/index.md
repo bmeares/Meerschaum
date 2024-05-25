@@ -114,6 +114,7 @@ h1 {
   <p>Meerschaum <a href="/reference/pipes">Pipes</a> are parametrized ETL processes that are tagged and organized into hierarchies to make scaling up a breeze.</p>
 
   <img src="/assets/screenshots/show-pipes-fred.png"></img>
+  <br>
   <img src="/assets/screenshots/show-pipes-chicken.png"></img>
 
   <h3>Robust <a href="/reference/plugins/writing-plugins/">Plugin System</a></h3>
