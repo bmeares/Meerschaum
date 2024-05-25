@@ -7,5 +7,12 @@
     margin: auto;
   }
   .grid-child {
+    max-width: 100%;
+    overflow: hidden;
+  }
+  .grid-child img {
+    max-width: 100%;
+    height: auto;
+    display: block;
   }
 }

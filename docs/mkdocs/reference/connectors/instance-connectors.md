@@ -1,6 +1,6 @@
 # 🗄️ Instance Connectors
 
-Instance connectors store pipes' registrations and data in addition to the usual `#!python fetch()` functionality of regular connectors, e.g. the `#!python SQLConnector`.
+Instance connectors store pipes' registrations and data in addition to the usual `#!python fetch()` functionality of regular connectors, e.g. the [`#!python SQLConnector`](/reference/connectors/sql-connectors/).
 
 To use your custom connector type as an instance connector, implement the following methods, replacing the pseudocode under the `TODO` comments with your connector's equivalent. See the [`MongoDBConnector`](https://github.com/bmeares/mongodb-connector/blob/main/plugins/mongodb-connector/_pipes.py) for  a specific reference.
 
