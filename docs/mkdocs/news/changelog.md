@@ -4,6 +4,17 @@
 
 This is the current release cycle, so stay tuned for future releases!
 
+### v2.2.1
+
+- **Fix `--schedule` in the interactive shell.**  
+  The `--schedule` flag may now be used from both the CLI and the Shell.
+
+- **Fix the `SQLConnector` CLI.**  
+  The `sql` action now correctly opens an interactive CLI.
+
+- **Bumped `duckdb` to `>=1.0.0`.**  
+  The upstream breaking changes that required `duckdb` to be held back have to do with how indices behave. For now, index creation has been disabled so that `duckdb` may be upgraded to 1.0+.
+
 ### v2.2.0
 
 **New Features**

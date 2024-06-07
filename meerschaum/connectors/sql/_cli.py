@@ -42,9 +42,13 @@ def cli(
     env = copy.deepcopy(dict(os.environ))
     env[f'MRSM_SQL_{self.label.upper()}'] = json.dumps(self.meta)
     cli_code = (
+        "import sys\n"
         "import meerschaum as mrsm\n"
         f"conn = mrsm.get_connector('sql:{self.label}')\n"
-        f"conn._cli_exit()"
+        "success, msg = conn._cli_exit()\n"
+        "mrsm.pprint((success, msg))\n"
+        "if not success:\n"
+        "    raise Exception(msg)"
     )
     try:
         _ = venv_exec(cli_code, venv=None, debug=debug, capture_output=False)
@@ -91,6 +95,8 @@ def _cli_exit(
     cli_arg_str = self.DATABASE_URL
     if self.flavor in ('sqlite', 'duckdb'):
         cli_arg_str = str(self.database)
+    if cli_arg_str.startswith('postgresql+psycopg://'):
+        cli_arg_str = cli_arg_str.replace('postgresql+psycopg://', 'postgresql://')
 
     ### Define the script to execute to launch the CLI.
     ### The `mssqlcli` script is manually written to avoid telemetry
