@@ -47,9 +47,9 @@ def entry(sysargs: Optional[List[str]] = None) -> SuccessTuple:
                 )
             )
 
-    if args.get('schedule', None):
-        from meerschaum.utils.schedule import schedule_function
-        return schedule_function(entry_with_args, **args)
+    #  if args.get('schedule', None):
+        #  from meerschaum.utils.schedule import schedule_function
+        #  return schedule_function(entry_with_args, **args)
     return entry_with_args(**args)
 
 
@@ -61,7 +61,7 @@ def entry_with_args(
     Use `_entry()` for parsing sysargs before executing.
     """
     import sys
-    from meerschaum.plugins import Plugin
+    import functools
     from meerschaum.actions import get_action, get_main_action_name
     from meerschaum._internal.arguments import remove_leading_action
     from meerschaum.utils.venv import Venv, active_venvs, deactivate_venv
@@ -88,10 +88,41 @@ def entry_with_args(
             action_function.__module__.startswith('plugins.')
         ) else None
     )
-    plugin = Plugin(plugin_name) if plugin_name else None
+
+    skip_schedule = False
+    if (
+        kw['action']
+        and kw['action'][0] == 'start'
+        and kw['action'][1] in ('job', 'jobs')
+    ):
+        skip_schedule = True
 
     kw['action'] = remove_leading_action(kw['action'], _actions=_actions)
 
+    do_action = functools.partial(_do_action_wrapper, action_function, plugin_name, **kw)
+    if kw.get('schedule', None) and not skip_schedule:
+        from meerschaum.utils.schedule import schedule_function
+        from meerschaum.utils.misc import interval_str
+        import time
+        from datetime import timedelta
+        start_time = time.perf_counter()
+        schedule_function(do_action, **kw)
+        delta = timedelta(seconds=(time.perf_counter() - start_time))
+        result = True, f"Exited scheduler after {interval_str(delta)}."
+    else:
+        result = do_action()
+
+    ### Clean up stray virtual environments.
+    for venv in [venv for venv in active_venvs]:
+        deactivate_venv(venv, debug=kw.get('debug', False), force=True)
+
+    return result
+
+
+def _do_action_wrapper(action_function, plugin_name, **kw):
+    from meerschaum.plugins import Plugin
+    from meerschaum.utils.venv import Venv, active_venvs, deactivate_venv
+    plugin = Plugin(plugin_name) if plugin_name else None
     with Venv(plugin, debug=kw.get('debug', False)):
         action_name = ' '.join(action_function.__name__.split('_') + kw.get('action', []))
         try:
@@ -111,13 +142,7 @@ def entry_with_args(
             )
         except KeyboardInterrupt:
             result = False, f"Cancelled action `{action_name}`."
-
-    ### Clean up stray virtual environments.
-    for venv in [venv for venv in active_venvs]:
-        deactivate_venv(venv, debug=kw.get('debug', False), force=True)
-
     return result
-
 
 _shells = []
 _shell = None

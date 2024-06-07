@@ -385,6 +385,9 @@ def get_create_index_queries(
     -------
     A dictionary of column names mapping to lists of queries.
     """
+    ### NOTE: Due to recent breaking changes in DuckDB, indices don't behave properly.
+    if self.flavor == 'duckdb':
+        return {}
     from meerschaum.utils.sql import (
         sql_item_name,
         get_distinct_col_count,
@@ -554,6 +557,9 @@ def get_drop_index_queries(
     -------
     A dictionary of column names mapping to lists of queries.
     """
+    ### NOTE: Due to breaking changes within DuckDB, indices must be skipped.
+    if self.flavor == 'duckdb':
+        return {}
     if not pipe.exists(debug=debug):
         return {}
     from meerschaum.utils.sql import sql_item_name, table_exists, hypertable_queries
