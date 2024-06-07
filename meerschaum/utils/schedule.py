@@ -99,7 +99,7 @@ def schedule_function(
     apscheduler = mrsm.attempt_import('apscheduler', lazy=False)
     now = round_time(datetime.now(timezone.utc), timedelta(minutes=1))
     trigger = parse_schedule(schedule, now=now)
-    _scheduler = apscheduler.AsyncScheduler()
+    _scheduler = apscheduler.AsyncScheduler(identity='mrsm-scheduler')
     try:
         loop = asyncio.get_running_loop()
     except RuntimeError:
@@ -107,7 +107,14 @@ def schedule_function(
 
     async def run_scheduler():
         async with _scheduler:
-            job = await _scheduler.add_schedule(function, trigger, args=args, kwargs=kw)
+            job = await _scheduler.add_schedule(
+                function,
+                trigger,
+                args = args,
+                kwargs = kw,
+                max_running_jobs = 1, 
+                conflict_policy = apscheduler.ConflictPolicy.replace,
+            )
             try:
                 await _scheduler.run_until_stopped()
             except (KeyboardInterrupt, SystemExit) as e:

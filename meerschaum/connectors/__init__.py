@@ -23,7 +23,14 @@ from meerschaum.connectors.sql.SQLConnector import SQLConnector
 from meerschaum.connectors.api.APIConnector import APIConnector
 from meerschaum.connectors.sql._create_engine import flavor_configs as sql_flavor_configs
 
-__all__ = ("Connector", "SQLConnector", "APIConnector", "get_connector", "is_connected")
+__all__ = (
+    "Connector",
+    "SQLConnector",
+    "APIConnector",
+    "get_connector",
+    "is_connected",
+    "poll",
+)
 
 ### store connectors partitioned by
 ### type, label for reuse
