@@ -466,12 +466,12 @@ def _get_package_metadata(import_name: str, venv: Optional[str]) -> Dict[str, st
     import re
     from meerschaum.config._paths import VIRTENV_RESOURCES_PATH
     install_name = _import_to_install_name(import_name)
-    _args = ['show', install_name]
+    _args = ['pip', 'show', install_name]
     if venv is not None:
         cache_dir_path = VIRTENV_RESOURCES_PATH / venv / 'cache'
         _args += ['--cache-dir', str(cache_dir_path)]
     proc = run_python_package(
-        'pip', _args,
+        'uv', _args,
         capture_output=True, as_proc=True, venv=venv, universal_newlines=True,
     )
     outs, errs = proc.communicate()
@@ -776,6 +776,7 @@ def pip_install(
 
     """
     from meerschaum.config._paths import VIRTENV_RESOURCES_PATH
+    from meerschaum.config import get_config
     from meerschaum.utils.warnings import warn
     if args is None:
         args = ['--upgrade'] if not _uninstall else []
@@ -787,7 +788,11 @@ def pip_install(
         have_wheel = venv_contains_package('wheel', venv=venv, debug=debug)
 
     _args = list(args)
-    have_pip = venv_contains_package('pip', venv=venv, debug=debug)
+    have_pip = venv_contains_package('pip', venv=None, debug=debug)
+    have_uv_pip = venv_contains_package('uv', venv=None, debug=debug)
+    enable_uv_pip = get_config('system', 'experimental', 'uv_pip')
+    use_uv_pip = enable_uv_pip and have_uv_pip
+
     import sys
     if not have_pip:
         if not get_pip(venv=venv, debug=debug):
@@ -806,7 +811,12 @@ def pip_install(
     
     with Venv(venv, debug=debug):
         if venv is not None:
-            if '--ignore-installed' not in args and '-I' not in _args and not _uninstall:
+            if (
+                '--ignore-installed' not in args
+                and '-I' not in _args
+                and not _uninstall
+                and not use_uv_pip
+            ):
                 _args += ['--ignore-installed']
             if '--cache-dir' not in args and not _uninstall:
                 cache_dir_path = VIRTENV_RESOURCES_PATH / venv / 'cache'
@@ -823,7 +833,7 @@ def pip_install(
         if check_wheel and not _uninstall:
             if not have_wheel:
                 if not pip_install(
-                    'setuptools', 'wheel',
+                    'setuptools', 'wheel', 'uv',
                     venv = venv,
                     check_update = False, check_pypi = False,
                     check_wheel = False, debug = debug,
@@ -843,16 +853,16 @@ def pip_install(
         if not ANSI and '--no-color' not in _args:
             _args.append('--no-color')
 
-        if '--no-input' not in _args:
+        if '--no-input' not in _args and not use_uv_pip:
             _args.append('--no-input')
 
-        if _uninstall and '-y' not in _args:
+        if _uninstall and '-y' not in _args and not use_uv_pip:
             _args.append('-y')
 
-        if '--no-warn-conflicts' not in _args and not _uninstall:
+        if '--no-warn-conflicts' not in _args and not _uninstall and not use_uv_pip:
             _args.append('--no-warn-conflicts')
 
-        if '--disable-pip-version-check' not in _args:
+        if '--disable-pip-version-check' not in _args and not use_uv_pip:
             _args.append('--disable-pip-version-check')
 
         if '--target' not in _args and '-t' not in _args and not _uninstall:
@@ -863,12 +873,14 @@ def pip_install(
                 and '-t' not in _args
                 and not inside_venv()
                 and not _uninstall
+                and not use_uv_pip
         ):
             _args += ['--user']
 
         if debug:
             if '-v' not in _args or '-vv' not in _args or '-vvv' not in _args:
-                pass
+                if use_uv_pip:
+                    _args.append('--verbose')
         else:
             if '-q' not in _args or '-qq' not in _args or '-qqq' not in _args:
                 pass
@@ -883,7 +895,7 @@ def pip_install(
         if not silent:
             print(msg)
 
-        if not _uninstall:
+        if _uninstall:
             for install_name in _packages:
                 _install_no_version = get_install_no_version(install_name)
                 if _install_no_version in ('pip', 'wheel'):
@@ -896,10 +908,15 @@ def pip_install(
                         f"Failed to clean up package '{_install_no_version}'.",
                     )
 
+        if use_uv_pip:
+            _args.insert(0, 'pip')
+            if not _uninstall:
+                _args.append('--prerelease=allow')
+
         rc = run_python_package(
-            'pip',
+            ('pip' if not use_uv_pip else 'uv'),
             _args + _packages,
-            venv = venv,
+            venv = None,
             env = _get_pip_os_env(),
             debug = debug,
         )

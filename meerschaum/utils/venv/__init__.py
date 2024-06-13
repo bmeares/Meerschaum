@@ -329,6 +329,7 @@ def verify_venv(
 
 
 tried_virtualenv = False
+tried_uv = False
 def init_venv(
         venv: str = 'mrsm',
         verify: bool = True,
@@ -361,6 +362,8 @@ def init_venv(
             verified_venvs.add(venv)
         return True
 
+    import io
+    from contextlib import redirect_stdout
     import sys, platform, os, pathlib, shutil
     from meerschaum.config.static import STATIC_CONFIG
     from meerschaum.config._paths import VIRTENV_RESOURCES_PATH
@@ -382,24 +385,34 @@ def init_venv(
         return True
 
     from meerschaum.utils.packages import run_python_package, attempt_import
-    global tried_virtualenv
+    global tried_virtualenv, tried_uv
     try:
         import venv as _venv
+        import uv
         virtualenv = None
     except ImportError:
         _venv = None
+        uv = None
         virtualenv = None
-    
 
     _venv_success = False
-    if _venv is not None:
-        import io
-        from contextlib import redirect_stdout
+
+    if uv is not None:
+        f = io.StringIO()
+        with redirect_stdout(f):
+            _venv_success = run_python_package(
+                'uv',
+                ['venv', venv_path.as_posix()],
+                venv = None,
+                debug = debug,
+            ) == 0
+
+    if _venv is not None and not _venv_success:
         f = io.StringIO()
         with redirect_stdout(f):
             _venv_success = run_python_package(
                 'venv',
-                [str(venv_path)] + (
+                [venv_path.as_posix()] + (
                     ['--symlinks'] if platform.system() != 'Windows' else []
                 ),
                 venv=None, debug=debug
