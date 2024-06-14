@@ -797,7 +797,20 @@ def pip_install(
     except ImportError:
         have_uv_pip = False
     if have_pip and not have_uv_pip and _install_uv_pip:
-        pip_install('uv', venv=None, debug=debug, _install_uv_pip=False)
+        if not pip_install(
+            'uv',
+            venv = None,
+            debug = debug,
+            _install_uv_pip = False,
+            check_update = False,
+            check_pypi = False,
+            check_wheel = False,
+        ):
+            warn(
+                f"Failed to install `uv` for virtual environment '{venv}'.",
+                color = False,
+            )
+
     use_uv_pip = venv_contains_package('uv', venv=None, debug=debug)
 
     import sys
@@ -842,8 +855,11 @@ def pip_install(
                 if not pip_install(
                     'setuptools', 'wheel',
                     venv = venv,
-                    check_update = False, check_pypi = False,
-                    check_wheel = False, debug = debug,
+                    check_update = False,
+                    check_pypi = False,
+                    check_wheel = False,
+                    debug = debug,
+                    _install_uv_pip = False,
                 ):
                     warn(
                         (
