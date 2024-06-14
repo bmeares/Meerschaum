@@ -469,7 +469,8 @@ def _get_package_metadata(import_name: str, venv: Optional[str]) -> Dict[str, st
     _args = ['pip', 'show', install_name]
     if venv is not None:
         cache_dir_path = VIRTENV_RESOURCES_PATH / venv / 'cache'
-        _args += ['--cache-dir', str(cache_dir_path)]
+        _args += ['--cache-dir', cache_dir_path.as_posix()]
+
     proc = run_python_package(
         'uv', _args,
         capture_output=True, as_proc=True, venv=venv, universal_newlines=True,
@@ -721,6 +722,7 @@ def pip_install(
         check_pypi: bool = True,
         check_wheel: bool = True,
         _uninstall: bool = False,
+        _install_uv_pip: bool = True,
         color: bool = True,
         silent: bool = False,
         debug: bool = False,
@@ -789,12 +791,17 @@ def pip_install(
 
     _args = list(args)
     have_pip = venv_contains_package('pip', venv=None, debug=debug)
-    have_uv_pip = venv_contains_package('uv', venv=None, debug=debug)
-    enable_uv_pip = get_config('system', 'experimental', 'uv_pip')
-    use_uv_pip = enable_uv_pip and have_uv_pip
+    try:
+        import uv
+        have_uv_pip = True
+    except ImportError:
+        have_uv_pip = False
+    if have_pip and not have_uv_pip and _install_uv_pip:
+        pip_install('uv', venv=None, debug=debug, _install_uv_pip=False)
+    use_uv_pip = venv_contains_package('uv', venv=None, debug=debug)
 
     import sys
-    if not have_pip:
+    if not have_pip and not use_uv_pip:
         if not get_pip(venv=venv, debug=debug):
             import sys
             minor = sys.version_info.minor
@@ -822,7 +829,7 @@ def pip_install(
                 cache_dir_path = VIRTENV_RESOURCES_PATH / venv / 'cache'
                 _args += ['--cache-dir', str(cache_dir_path)]
 
-        if 'pip' not in ' '.join(_args):
+        if 'pip' not in ' '.join(_args) and not use_uv_pip:
             if check_update and not _uninstall:
                 pip = attempt_import('pip', venv=venv, install=False, debug=debug, lazy=False)
                 if need_update(pip, check_pypi=check_pypi, debug=debug):
@@ -830,10 +837,10 @@ def pip_install(
         
         _args = (['install'] if not _uninstall else ['uninstall']) + _args
 
-        if check_wheel and not _uninstall:
+        if check_wheel and not _uninstall and not use_uv_pip:
             if not have_wheel:
                 if not pip_install(
-                    'setuptools', 'wheel', 'uv',
+                    'setuptools', 'wheel',
                     venv = venv,
                     check_update = False, check_pypi = False,
                     check_wheel = False, debug = debug,
@@ -848,7 +855,7 @@ def pip_install(
 
         if requirements_file_path is not None:
             _args.append('-r')
-            _args.append(str(pathlib.Path(requirements_file_path).resolve()))
+            _args.append(pathlib.Path(requirements_file_path).resolve().as_posix())
 
         if not ANSI and '--no-color' not in _args:
             _args.append('--no-color')
@@ -876,6 +883,8 @@ def pip_install(
                 and not use_uv_pip
         ):
             _args += ['--user']
+        if '--break-system-packages' not in _args and not _uninstall:
+            _args.append('--break-system-packages')
 
         if debug:
             if '-v' not in _args or '-vv' not in _args or '-vvv' not in _args:
@@ -1048,6 +1057,10 @@ def run_python_package(
     if cwd is not None:
         os.chdir(cwd)
     executable = venv_executable(venv=venv)
+    venv_path = (VIRTENV_RESOURCES_PATH / venv) if venv is not None else None
+    env_dict = kw.get('env', os.environ).copy()
+    if venv_path is not None:
+        env_dict.update({'VIRTUAL_ENV': venv_path.as_posix()})
     command = [executable, '-m', str(package_name)] + [str(a) for a in args]
     import traceback
     if debug:
@@ -1072,7 +1085,7 @@ def run_python_package(
             command,
             stdout = stdout,
             stderr = stderr,
-            env = kw.get('env', os.environ),
+            env = env_dict,
         )
         to_return = proc if as_proc else proc.wait()
     except KeyboardInterrupt:

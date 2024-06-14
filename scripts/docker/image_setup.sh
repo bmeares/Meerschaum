@@ -37,8 +37,8 @@ if [ "$MRSM_DEP_GROUP" != "minimal" ]; then
       || exit 1
   fi
 
-  sudo -u $MRSM_USER python -m pip install --no-cache-dir --upgrade --user psycopg || exit 1
-  sudo -u $MRSM_USER python -m pip install --no-cache-dir --upgrade --user pandas || exit 1
+  sudo -u $MRSM_USER python -m pip install \
+    --no-cache-dir --upgrade --user psycopg pandas || exit 1
 fi
 
 

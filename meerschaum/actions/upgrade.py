@@ -140,7 +140,7 @@ def _upgrade_packages(
     if venv is NoVenv:
         venv = 'mrsm'
     if len(action) == 0:
-        group = 'full'
+        group = 'api'
     else:
         group = action[0]
 

@@ -45,6 +45,7 @@ watchfiles>=0.21.0
 dill>=0.3.3
 virtualenv>=20.1.0
 APScheduler>=4.0.0a5
+uv>=0.2.11
 pprintpp>=0.4.0
 asciitree>=0.3.3
 typing-extensions>=4.7.1

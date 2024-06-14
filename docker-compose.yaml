@@ -1,6 +1,6 @@
 services:
   mrsm-dev:
-    image: "bmeares/meerschaum"
+    image: "bmeares/meerschaum:minimal"
     entrypoint: ["/scripts/dev.sh"]
     network_mode: "host"
     init: true

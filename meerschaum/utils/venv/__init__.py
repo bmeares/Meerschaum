@@ -329,7 +329,6 @@ def verify_venv(
 
 
 tried_virtualenv = False
-tried_uv = False
 def init_venv(
         venv: str = 'mrsm',
         verify: bool = True,
@@ -363,7 +362,7 @@ def init_venv(
         return True
 
     import io
-    from contextlib import redirect_stdout
+    from contextlib import redirect_stdout, redirect_stderr
     import sys, platform, os, pathlib, shutil
     from meerschaum.config.static import STATIC_CONFIG
     from meerschaum.config._paths import VIRTENV_RESOURCES_PATH
@@ -384,11 +383,11 @@ def init_venv(
             verified_venvs.add(venv)
         return True
 
-    from meerschaum.utils.packages import run_python_package, attempt_import
-    global tried_virtualenv, tried_uv
+    from meerschaum.utils.packages import run_python_package, attempt_import, _get_pip_os_env
+    global tried_virtualenv
     try:
         import venv as _venv
-        import uv
+        uv = attempt_import('uv', venv=None, debug=debug)
         virtualenv = None
     except ImportError:
         _venv = None
@@ -398,14 +397,13 @@ def init_venv(
     _venv_success = False
 
     if uv is not None:
-        f = io.StringIO()
-        with redirect_stdout(f):
-            _venv_success = run_python_package(
-                'uv',
-                ['venv', venv_path.as_posix()],
-                venv = None,
-                debug = debug,
-            ) == 0
+        _venv_success = run_python_package(
+            'uv',
+            ['venv', venv_path.as_posix(), '-q'],
+            venv = None,
+            env = _get_pip_os_env(),
+            debug = debug,
+        ) == 0
 
     if _venv is not None and not _venv_success:
         f = io.StringIO()
@@ -451,7 +449,7 @@ def init_venv(
                 except Exception as e:
                     import traceback
                     traceback.print_exc()
-            virtualenv.cli_run([str(venv_path)])
+            virtualenv.cli_run([venv_path.as_posix()])
             if dist_packages_path.exists():
                 vtp.mkdir(exist_ok=True, parents=True)
                 for file_path in dist_packages_path.glob('*'):
@@ -627,7 +625,7 @@ def venv_target_path(
                     return site_path
 
                 ### Allow for dist-level paths (running as root).
-                for possible_dist in reversed(site.getsitepackages()):
+                for possible_dist in site.getsitepackages():
                     dist_path = pathlib.Path(possible_dist)
                     if not dist_path.exists():
                         continue

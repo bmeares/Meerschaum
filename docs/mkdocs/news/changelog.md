@@ -4,6 +4,36 @@
 
 This is the current release cycle, so stay tuned for future releases!
 
+### v2.2.2
+
+- **Speed up package installation in virtual environments.**  
+  Dynamic dependencies will now be installed via `uv`, which dramatically speeds up installation times.
+
+- **Allow for custom connectors to implement a `sync()` method.**  
+  Like module-level `sync()` functions for `plugin` connectors, any custom connector may implement `sync()` instead of `fetch()`.
+
+  ```python
+  # example.py
+  from typing import Any
+  import meerschaum as mrsm
+  from meerschaum.connectors import Connector, make_connector
+
+  @make_connector
+  class ExampleConnector(Connector):
+
+      def register(self, pipe: mrsm.Pipe) -> dict[str, Any]:
+          return {
+              'columns': {
+                  'datetime': 'ts',
+                  'id': 'example_id',
+              },
+          }
+
+      def sync(self, pipe: mrsm.Pipe) -> mrsm.SuccessTuple:
+          ### Implement a custom sync.
+          return True, f"Successfully synced {pipe}!"
+  ```
+
 ### v2.2.1
 
 - **Fix `--schedule` in the interactive shell.**  

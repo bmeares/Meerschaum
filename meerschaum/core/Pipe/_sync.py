@@ -215,9 +215,8 @@ def sync(
 
             ### Activate and invoke `sync(pipe)` for plugin connectors with `sync` methods.
             try:
-                if p.connector.type == 'plugin' and p.connector.sync is not None:
-                    connector_plugin = Plugin(p.connector.label)
-                    with Venv(connector_plugin, debug=debug):
+                if getattr(p.connector, 'sync', None) is not None:
+                    with Venv(get_connector_plugin(p.connector), debug=debug):
                         return_tuple = p.connector.sync(p, debug=debug, **kw)
                     p._exists = None
                     if not isinstance(return_tuple, tuple):

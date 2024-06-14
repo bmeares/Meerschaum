@@ -53,6 +53,7 @@ packages: Dict[str, Dict[str, str]] = {
         'dill'                       : 'dill>=0.3.3',
         'virtualenv'                 : 'virtualenv>=20.1.0',
         'apscheduler'                : 'APScheduler>=4.0.0a5',
+        'uv'                         : 'uv>=0.2.11',
     },
     'drivers': {
         'cryptography'               : 'cryptography>=38.0.1',
