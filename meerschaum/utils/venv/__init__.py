@@ -79,7 +79,7 @@ def activate_venv(
         else:
             threads_active_venvs[thread_id][venv] += 1
 
-        target = str(venv_target_path(venv, debug=debug))
+        target = venv_target_path(venv, debug=debug).as_posix()
         if venv in active_venvs_order:
             sys.path.remove(target)
             try:
@@ -171,7 +171,7 @@ def deactivate_venv(
     if sys.path is None:
         return False
 
-    target = str(venv_target_path(venv, allow_nonexistent=force, debug=debug))
+    target = venv_target_path(venv, allow_nonexistent=force, debug=debug).as_posix()
     with LOCKS['sys.path']:
         if target in sys.path:
             sys.path.remove(target)

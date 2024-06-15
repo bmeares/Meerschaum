@@ -9,6 +9,35 @@ This is the current release cycle, so stay tuned for future releases!
 - **Speed up package installation in virtual environments.**  
   Dynamic dependencies will now be installed via `uv`, which dramatically speeds up installation times.
 
+- **Add `--venv` to the `python` action.**  
+  Launching a Python REPL with `mrsm python` will now default to `--venv mrsm`. Run `mrsm install package` to make packages importable.
+
+  ```python
+  # $ mrsm python
+  >>> import requests
+  Traceback (most recent call last):
+    File "<stdin>", line 1, in <module>
+  ModuleNotFoundError: No module named 'requests'
+
+  # $ mrsm install package requests
+  >>> import requests
+  >>> requests.__file__
+  '/meerschaum/venvs/mrsm/lib/python3.12/site-packages/requests/__init__.py'
+
+  # $ mrsm install plugin noaa
+  # $ mrsm python --venv noaa
+  >>> import requests
+  >>> requests.__file__
+  '/meerschaum/venvs/noaa/lib/python3.12/site-packages/requests/__init__.py'
+  ``` 
+
+- **Allow passing flags to venv `python` binaries.**  
+  You may now pass flags directly to the `python` binary of a virtual environment (by escaping with `[]`):
+  
+  ```bash
+  mrsm python [-i] [-c 'print("hi")']
+  ```
+
 - **Allow for custom connectors to implement a `sync()` method.**  
   Like module-level `sync()` functions for `plugin` connectors, any custom connector may implement `sync()` instead of `fetch()`.
 
@@ -29,10 +58,13 @@ This is the current release cycle, so stay tuned for future releases!
               },
           }
 
-      def sync(self, pipe: mrsm.Pipe) -> mrsm.SuccessTuple:
+      def sync(self, pipe: mrsm.Pipe, **kwargs) -> mrsm.SuccessTuple:
           ### Implement a custom sync.
           return True, f"Successfully synced {pipe}!"
   ```
+
+- **Install `uvicorn` and `gunicorn` in virtual environments.**  
+  The packages `uvicorn` and `gunicorn` are now installed into the default virtual environment.
 
 ### v2.2.1
 

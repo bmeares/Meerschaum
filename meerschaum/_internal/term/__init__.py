@@ -16,7 +16,7 @@ from meerschaum._internal.term.TermPageHandler import TermPageHandler
 from meerschaum.config._paths import API_TEMPLATES_PATH, API_STATIC_PATH
 
 tornado, tornado_ioloop, terminado = attempt_import(
-    'tornado', 'tornado.ioloop', 'terminado', lazy=False, venv=None,
+    'tornado', 'tornado.ioloop', 'terminado', lazy=False,
 )
 
 def get_webterm_app_and_manager() -> Tuple[

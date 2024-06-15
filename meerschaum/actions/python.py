@@ -10,35 +10,36 @@ from meerschaum.utils.typing import SuccessTuple, Any, List, Optional
 
 def python(
         action: Optional[List[str]] = None,
+        venv: Optional[str] = 'mrsm',
+        sub_args: Optional[List[str]] = None,
         debug: bool = False,
         **kw: Any
     ) -> SuccessTuple:
     """
-    Launch a Python interpreter with Meerschaum imported. Commands are optional.
-    Note that quotes must be escaped and commands must be separated by semicolons
+    Launch a virtual environment's Python interpreter with Meerschaum imported.
+    You may pass flags to the Python binary by surrounding each flag with `[]`.
     
     Usage:
         `python {commands}`
     
-    Example:
-        `python print(\\'Hello, World!\\'); pipes = mrsm.get_pipes()`
-    
-        ```
-        Hello, World!
-
-        >>> import meerschaum as mrsm
-        >>> print('Hello, World!')
-        >>> pipes = mrsm.get_pipes()
-        ```
+    Examples:
+        mrsm python
+        mrsm python --venv noaa
+        mrsm python [-i] [-c 'print("hi")']
     """
-    import sys, subprocess
+    import sys, subprocess, os
     from meerschaum.utils.debug import dprint
     from meerschaum.utils.warnings import warn, error
     from meerschaum.utils.process import run_process
+    from meerschaum.utils.venv import venv_executable
     from meerschaum.config import __version__ as _version
+    from meerschaum.config.paths import VIRTENV_RESOURCES_PATH
 
     if action is None:
         action = []
+
+    if venv == 'None':
+        venv = None
 
     joined_actions = ['import meerschaum as mrsm']
     line = ""
@@ -51,7 +52,6 @@ def python(
             line = ""
 
     ### ensure meerschaum is imported
-    #  joined_actions = ['import meerschaum as mrsm;'] + joined_actions
     if debug:
         dprint(joined_actions)
 
@@ -75,8 +75,24 @@ def python(
 
     if debug:
         dprint(f"command:\n{command}")
+
+    env_dict = os.environ.copy()
+    venv_path = (VIRTENV_RESOURCES_PATH / venv) if venv is not None else None
+    if venv_path is not None:
+        env_dict.update({'VIRTUAL_ENV': venv_path.as_posix()})
+
+    args_to_run = (
+        [venv_executable(venv), '-i', '-c', command]
+        if not sub_args
+        else [venv_executable(venv)] + sub_args
+    )
+
     try:
-        return_code = run_process([sys.executable, '-i', '-c', command], foreground=True)
+        return_code = run_process(
+            args_to_run,
+            foreground = True,
+            env = env_dict,
+        )
     except KeyboardInterrupt:
         return_code = 1
     return return_code == 0, (

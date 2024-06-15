@@ -1,6 +1,8 @@
 services:
   mrsm-dev:
     image: "bmeares/meerschaum:minimal"
+    # image: ubuntu
+    # image: python
     entrypoint: ["/scripts/dev.sh"]
     network_mode: "host"
     init: true

@@ -46,6 +46,8 @@ def get_module_path(
     """
     Get a module's path without importing.
     """
+    import site
+    import pathlib
     if debug:
         from meerschaum.utils.debug import dprint
     if not _try_install_name_on_fail:
@@ -54,33 +56,52 @@ def get_module_path(
         import_name_lower = install_name_lower
     else:
         import_name_lower = import_name.lower().replace('-', '_')
+
     vtp = venv_target_path(venv, allow_nonexistent=True, debug=debug)
     if not vtp.exists():
         if debug:
             dprint(f"Venv '{venv}' does not exist, cannot import '{import_name}'.", color=False)
         return None
+
+    venv_target_candidate_paths = [vtp]
+    if venv is None:
+        site_user_packages_dirs = [pathlib.Path(site.getusersitepackages())]
+        site_packages_dirs = [pathlib.Path(path) for path in site.getsitepackages()]
+
+        paths_to_add = [
+            path
+            for path in site_user_packages_dirs + site_packages_dirs
+            if path not in venv_target_candidate_paths
+        ]
+        venv_target_candidate_paths += paths_to_add
+
     candidates = []
-    for file_name in os.listdir(vtp):
-        file_name_lower = file_name.lower().replace('-', '_')
-        if not file_name_lower.startswith(import_name_lower):
+    for venv_target_candidate in venv_target_candidate_paths:
+        try:
+            file_names = os.listdir(venv_target_candidate)
+        except FileNotFoundError:
             continue
-        if file_name.endswith('dist_info'):
-            continue
-        file_path = vtp / file_name
+        for file_name in file_names:
+            file_name_lower = file_name.lower().replace('-', '_')
+            if not file_name_lower.startswith(import_name_lower):
+                continue
+            if file_name.endswith('dist_info'):
+                continue
+            file_path = venv_target_candidate / file_name
 
-        ### Most likely: Is a directory with __init__.py
-        if file_name_lower == import_name_lower and file_path.is_dir():
-            init_path = file_path / '__init__.py'
-            if init_path.exists():
-                candidates.append(init_path)
+            ### Most likely: Is a directory with __init__.py
+            if file_name_lower == import_name_lower and file_path.is_dir():
+                init_path = file_path / '__init__.py'
+                if init_path.exists():
+                    candidates.append(init_path)
 
-        ### May be a standalone .py file.
-        elif file_name_lower == import_name_lower + '.py':
-            candidates.append(file_path)
+            ### May be a standalone .py file.
+            elif file_name_lower == import_name_lower + '.py':
+                candidates.append(file_path)
 
-        ### Compiled wheels (e.g. pyodbc)
-        elif file_name_lower.startswith(import_name_lower + '.'):
-            candidates.append(file_path)
+            ### Compiled wheels (e.g. pyodbc)
+            elif file_name_lower.startswith(import_name_lower + '.'):
+                candidates.append(file_path)
 
     if len(candidates) == 1:
         return candidates[0]
@@ -792,9 +813,16 @@ def pip_install(
     _args = list(args)
     have_pip = venv_contains_package('pip', venv=None, debug=debug)
     try:
-        import uv
-        have_uv_pip = True
+        import pip
+        have_pip = True
     except ImportError:
+        have_pip = False
+    try:
+        import uv
+        uv_bin = uv.find_uv_bin()
+        have_uv_pip = True
+    except (ImportError, FileNotFoundError):
+        uv_bin = None
         have_uv_pip = False
     if have_pip and not have_uv_pip and _install_uv_pip:
         if not pip_install(
@@ -811,7 +839,7 @@ def pip_install(
                 color = False,
             )
 
-    use_uv_pip = venv_contains_package('uv', venv=None, debug=debug)
+    use_uv_pip = venv_contains_package('uv', venv=None, debug=debug) and uv_bin is not None
 
     import sys
     if not have_pip and not use_uv_pip:
@@ -853,7 +881,7 @@ def pip_install(
         if check_wheel and not _uninstall and not use_uv_pip:
             if not have_wheel:
                 if not pip_install(
-                    'setuptools', 'wheel',
+                    'setuptools', 'wheel', 'uv',
                     venv = venv,
                     check_update = False,
                     check_pypi = False,
@@ -1669,6 +1697,8 @@ def venv_contains_package(
     """
     Search the contents of a virtual environment for a package.
     """
+    import site
+    import pathlib
     root_name = import_name.split('.')[0] if split else import_name
     return get_module_path(root_name, venv=venv, debug=debug) is not None
 

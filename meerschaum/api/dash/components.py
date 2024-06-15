@@ -12,7 +12,7 @@ from meerschaum.utils.packages import attempt_import, import_dcc, import_html
 from meerschaum.utils.typing import SuccessTuple, List
 from meerschaum.config.static import STATIC_CONFIG
 from meerschaum.utils.misc import remove_ansi
-from meerschaum.actions import get_shell
+from meerschaum._internal.shell.Shell import get_shell_intro
 from meerschaum.api import endpoints, CHECK_UPDATE
 from meerschaum.connectors import instance_types
 from meerschaum.utils.misc import get_connector_labels
@@ -69,7 +69,10 @@ bottom_buttons_content = dbc.Card(
         ])
     )
 )
-console_div = html.Div(id='console-div', children=[html.Pre(get_shell().intro, id='console-pre')])
+console_div = html.Div(
+    id = 'console-div',
+    children = [html.Pre(get_shell_intro(), id='console-pre')],
+)
 
 location = dcc.Location(id='location', refresh=False)
 

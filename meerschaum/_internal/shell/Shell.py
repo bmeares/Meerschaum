@@ -203,6 +203,29 @@ def _check_complete_keys(line: str) -> Optional[List[str]]:
     return None
 
 
+def get_shell_intro(with_color: bool = True) -> str:
+    """
+    Return the introduction message string.
+    """
+    from meerschaum.utils.formatting import CHARSET, ANSI, colored
+    intro = get_config('shell', CHARSET, 'intro', patch=patch)
+    intro += '\n' + ''.join(
+        [' '
+            for i in range(
+                string_width(intro) - len('v' + version)
+            )
+        ]
+    ) + 'v' + version
+
+    if not with_color or not ANSI:
+        return intro
+
+    return colored(
+        intro,
+        **get_config('shell', 'ansi', 'intro', 'rich')
+    )
+
+
 class Shell(cmd.Cmd):
     def __init__(
             self,
@@ -277,25 +300,20 @@ class Shell(cmd.Cmd):
         except Exception as e:
             pass
 
-
     def load_config(self, instance: Optional[str] = None):
         """
         Set attributes from the shell configuration.
         """
         from meerschaum.utils.misc import remove_ansi
-        from meerschaum.utils.formatting import CHARSET, ANSI, UNICODE, colored
+        from meerschaum.utils.formatting import CHARSET, ANSI, colored
         
         if shell_attrs.get('intro', None) != '':
-            self.intro = get_config('shell', CHARSET, 'intro', patch=patch)
-            self.intro += '\n' + ''.join(
-                [' '
-                    for i in range(
-                        string_width(self.intro) - len('v' + version)
-                    )
-                ]
-            ) + 'v' + version
-        else:
-            self.intro = ""
+            self.intro = (
+                get_shell_intro(with_color=False)
+                if shell_attrs.get('intro', None) != ''
+                else ""
+            )
+
         shell_attrs['intro'] = self.intro
         shell_attrs['_prompt'] = get_config('shell', CHARSET, 'prompt', patch=patch)
         self.prompt = shell_attrs['_prompt']
@@ -822,7 +840,7 @@ def input_with_sigint(_input, session, shell: Optional[Shell] = None):
     """
     Replace built-in `input()` with prompt_toolkit.prompt.
     """
-    from meerschaum.utils.formatting import CHARSET, ANSI, UNICODE, colored
+    from meerschaum.utils.formatting import CHARSET, ANSI, colored
     from meerschaum.connectors import is_connected, connectors
     from meerschaum.utils.misc import remove_ansi
     from meerschaum.config import get_config
