@@ -47,7 +47,6 @@ def get_module_path(
     Get a module's path without importing.
     """
     import site
-    import pathlib
     if debug:
         from meerschaum.utils.debug import dprint
     if not _try_install_name_on_fail:
@@ -60,7 +59,13 @@ def get_module_path(
     vtp = venv_target_path(venv, allow_nonexistent=True, debug=debug)
     if not vtp.exists():
         if debug:
-            dprint(f"Venv '{venv}' does not exist, cannot import '{import_name}'.", color=False)
+            dprint(
+                (
+                    "Venv '{venv}' does not exist, cannot import "
+                    + f"'{import_name}'."
+                ),
+                color = False,
+            )
         return None
 
     venv_target_candidate_paths = [vtp]
@@ -702,12 +707,22 @@ def need_update(
     return False
 
 
-def get_pip(venv: Optional[str] = 'mrsm', debug: bool=False) -> bool:
+def get_pip(
+        venv: Optional[str] = 'mrsm',
+        color: bool = True,
+        debug: bool = False,
+    ) -> bool:
     """
     Download and run the get-pip.py script.
 
     Parameters
     ----------
+    venv: Optional[str], default 'mrsm'
+        The virtual environment into which to install `pip`.
+
+    color: bool, default True
+        If `True`, force color output.
+
     debug: bool, default False
         Verbosity toggle.
 
@@ -730,7 +745,7 @@ def get_pip(venv: Optional[str] = 'mrsm', debug: bool=False) -> bool:
     if venv is not None:
         init_venv(venv=venv, debug=debug)
     cmd_list = [venv_executable(venv=venv), dest.as_posix()] 
-    return subprocess.call(cmd_list, env=_get_pip_os_env()) == 0
+    return subprocess.call(cmd_list, env=_get_pip_os_env(color=color)) == 0
 
 
 def pip_install(
@@ -843,7 +858,7 @@ def pip_install(
 
     import sys
     if not have_pip and not use_uv_pip:
-        if not get_pip(venv=venv, debug=debug):
+        if not get_pip(venv=venv, color=color, debug=debug):
             import sys
             minor = sys.version_info.minor
             print(
@@ -960,15 +975,23 @@ def pip_install(
                     )
 
         if use_uv_pip:
+            allow_prerelease = False
+            prelrease_strings = ['dev', 'rc', 'a']
+            for install_name in packages:
+                for prelrease_string in prelrease_strings:
+                    if prelrease_string in install_name:
+                        allow_prerelease = True
+                        break
+
             _args.insert(0, 'pip')
-            if not _uninstall:
+            if not _uninstall and allow_prerelease:
                 _args.append('--prerelease=allow')
 
         rc = run_python_package(
             ('pip' if not use_uv_pip else 'uv'),
             _args + _packages,
             venv = None,
-            env = _get_pip_os_env(),
+            env = _get_pip_os_env(color=color),
             debug = debug,
         )
         if debug:
@@ -1760,7 +1783,7 @@ def _monkey_patch_get_distribution(_dist: str, _version: str) -> None:
     pkg_resources.get_distribution = _get_distribution
 
 
-def _get_pip_os_env():
+def _get_pip_os_env(color: bool = True):
     """
     Return the environment variables context in which `pip` should be run.
     See PEP 668 for why we are overriding the environment.
@@ -1769,5 +1792,6 @@ def _get_pip_os_env():
     pip_os_env = os.environ.copy()
     pip_os_env.update({
         'PIP_BREAK_SYSTEM_PACKAGES': 'true',
+        ('FORCE_COLOR' if color else 'NO_COLOR'): '1',
     })
     return pip_os_env

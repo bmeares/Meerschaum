@@ -15,7 +15,7 @@ __all__ = sorted([
     'activate_venv', 'deactivate_venv', 'init_venv',
     'inside_venv', 'is_venv_active', 'venv_exec',
     'venv_executable', 'venv_exists', 'venv_target_path',
-    'Venv', 'get_venvs', 'verify_venv',
+    'Venv', 'get_venvs', 'verify_venv', 'get_module_venv',
 ])
 __pdoc__ = {'Venv': True}
 
@@ -707,6 +707,30 @@ def get_venvs() -> List[str]:
             continue
         venvs.append(filename)
     return venvs
+
+
+def get_module_venv(module) -> Union[str, None]:
+    """
+    Return the virtual environment where an imported module is installed.
+
+    Parameters
+    ----------
+    module: ModuleType
+        The imported module to inspect.
+
+    Returns
+    -------
+    The name of a venv or `None`.
+    """
+    import pathlib
+    from meerschaum.config.paths import VIRTENV_RESOURCES_PATH
+    module_path = pathlib.Path(module.__file__).resolve()
+    try:
+        rel_path = module_path.relative_to(VIRTENV_RESOURCES_PATH)
+    except ValueError:
+        return None
+
+    return rel_path.as_posix().split('/', maxsplit=1)[0]
 
 
 from meerschaum.utils.venv._Venv import Venv

@@ -147,6 +147,9 @@ def run_process(
             store_proc_dict[store_proc_key] = child
         _ret = poll_process(child, line_callback) if line_callback is not None else child.wait()
         ret = _ret if not as_proc else child
+    except KeyboardInterrupt:
+        child.send_signal(signal.SIGINT)
+        ret = child.wait() if not as_proc else child
     finally:
         if foreground:
             # we have to mask SIGTTOU because tcsetpgrp
