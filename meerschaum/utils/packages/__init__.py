@@ -927,8 +927,6 @@ def pip_install(
                 and not use_uv_pip
         ):
             _args += ['--user']
-        if '--break-system-packages' not in _args and not _uninstall:
-            _args.append('--break-system-packages')
 
         if debug:
             if '-v' not in _args or '-vv' not in _args or '-vvv' not in _args:
