@@ -42,7 +42,7 @@ def python(
     if venv == 'None':
         venv = None
 
-    joined_actions = ['import meerschaum as mrsm']
+    joined_actions = ["import meerschaum as mrsm"]
     line = ""
     for i, a in enumerate(action):
         if a == '':
@@ -56,6 +56,7 @@ def python(
     if debug:
         dprint(str(joined_actions))
 
+    ### TODO: format the pre-executed code using the pygments lexer.
     print_command = (
         'from meerschaum.utils.packages import attempt_import; '
         + 'ptft = attempt_import("prompt_toolkit.formatted_text", lazy=False); '

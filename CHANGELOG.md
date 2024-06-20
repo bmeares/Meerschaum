@@ -22,27 +22,36 @@ This is the current release cycle, so stay tuned for future releases!
   >>> pipe = mrsm.Pipe('plugin:noaa', 'weather', 'gvl', instance='sql:main')
   ```
 
-- **Add the decorator `@web_page`.**  
+- **Add the decorators `@web_page` and `@dash_plugin`.**  
   You may now quickly add your own pages to the web console by decorating your layout functions with `@web_page`:
 
   ```python
-  import meerschaum as mrsm
-  from meerschaum.plugins import web_page, api_plugin
+  # example.py
+  from meerschaum.plugins import dash_plugin, web_page
 
-  dash, html, dcc, dbc = mrsm.attempt_import(
-      'dash', 'dash.html', 'dash_bootstrap_components', 'dash.dcc',
-  )
+  @dash_plugin
+  def init_dash(dash_app):
 
-  @web_page('/foo', login_required=False)
-  def foo():
-      return dbc.Container([
-          html.H1("Hello, World!"),
-          dbc.Button("Click me", id='my-button'),
-          html.Div(id="my-output-div")
-      ])
+      import dash.html as html
+      import dash_bootstrap_components as dbc
+      from dash import Input, Output, no_update
 
-  def my_button_callback(n_clicks)
-
+      @web_page('/my-page', login_required=False)
+      def my_page():
+          return dbc.Container([
+              html.H1("Hello, World!"),
+              dbc.Button("Click me", id='my-button'),
+              html.Div(id="my-output-div"),
+          ])
+      
+      @dash_app.callback(
+          Output('my-output-div', 'children'),
+          Input('my-button', 'n_clicks'),
+      )
+      def my_button_click(n_clicks):
+          if not n_clicks:
+              return no_update
+          return html.P(f'You clicked {n_clicks} times!')
   ```
 
 - **Use `ptpython` for the `python` action.**  

@@ -94,6 +94,8 @@ Plugins are just modules with functions. This section explains the roles of the 
   Create new commands.
 - **`#!python @api_plugin`**  
   Create new FastAPI endpoints.
+- **`#!python @dash_plugin` and `#!python @web_page`**  
+  Create new Dash pages on the Web Console.
 - **`#!python @pre_sync_hook` and `#!python @post_sync_hook`**  
   Inject callbacks when pipes are synced by the `sync pipes` action.
 - **`#!python setup(**kwargs)`**  
@@ -445,6 +447,89 @@ For your endpoints, arguments will be used as HTTP parameters, and to require th
 
     ![Custom Meerschaum API endpoint which requires a login.](/assets/screenshots/api-plugin-endpoint-login-required.png)
 
+### **The `#!python @dash_plugin` and `#!python @web_page` Decorators**
+
+Add new [Plotly Dash](https://dash.plotly.com/) pages to the Web Console with `#!python @dash_plugin` and `#!python @web_page`.
+
+Like `#!python @api_plugin`, `#!python @dash_app` designates an initialization function which accepts the Dash app. Within this function, you can create callbacks with `#!python @dash_app.callback()`.
+
+!!! note inline end ""
+
+    `#!python @web_page` may be used with or without arguments. When invoked without arguments, it will use the name of the function as the path string.
+
+Functions decorated with `#!python @web_page` return a [Dash layout](https://dash.plotly.com/layout). These don't need to reside within the `#!python @dash_app`-decorated function, but this is recommended to improve lazy-loading performance.
+
+??? example "Dash Plugin Example"
+
+    ```python
+    ### ~/.config/meerschaum/plugins/example.py
+
+    from meerschaum.plugins import dash_plugin, web_page
+
+    @dash_plugin
+    def init_dash(dash_app):
+
+        import dash.html as html
+        import dash_bootstrap_components as dbc
+        from dash import Input, Output, no_update
+
+        ### Routes to '/dash/my-page'
+        @web_page('/my-page', login_required=False)
+        def my_page():
+            return dbc.Container([
+                html.H1("Hello, World!"),
+                dbc.Button("Click me", id='my-button'),
+                html.Div(id="my-output-div"),
+            ])
+
+        @dash_app.callback(
+            Output('my-output-div', 'children'),
+            Input('my-button', 'n_clicks'),
+        )
+        def my_button_click(n_clicks):
+            if not n_clicks:
+                return no_update
+            return html.P(f'You clicked {n_clicks} times!')
+    ```
+
+??? tip "Dynamic Routing"
+
+    Sub-paths will be routed to your base callback, e.g. `/items/apple` will be accepted by `#!python @web_page('/items')`. You can then parse the path string with [`dcc.Location`](https://dash.plotly.com/dash-core-components/location).
+
+    ```python
+    from meerschaum.plugins import web_page, dash_plugin
+
+    @dash_plugin
+    def init_dash(dash_app):
+
+        import dash.html as html
+        import dash.dcc as dcc
+        from dash import Input, Output, State, no_update
+        import dash_bootstrap_components as dbc
+
+        ### Omitting arguments will default to the path '/dash/items'.
+        ### `login_required` is `True` by default.
+        @web_page
+        def items():
+            return dbc.Container([
+                dcc.Location(id='my-location'),
+                html.Div(id='my-output-div'),
+            ])
+
+        @dash_app.callback(
+            Output('my-output-div', 'children'),
+            Input('my-location', 'pathname'),
+        )
+        def my_button_click(pathname):
+            if not str(pathname).startswith('/dash/items'):
+                return no_update
+
+            item_id = pathname.replace('/dash/items', '').lstrip('/').rstrip('/').split('/')[0]
+            if not item_id:
+                return html.P("You're looking at the base /items page.")
+
+            return html.P(f"You're looking at item '{item_id}'.")
+    ```
 
 ### **The `#!python @pre_sync_hook` and `#!python @post_sync_hook` Decorators**
 

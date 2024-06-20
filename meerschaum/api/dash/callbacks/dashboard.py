@@ -43,7 +43,6 @@ from meerschaum.utils.yaml import yaml
 from meerschaum.actions import get_subactions, actions
 from meerschaum._internal.arguments._parser import get_arguments_triggers, parser
 from meerschaum.connectors.sql._fetch import set_pipe_query
-from meerschaum.plugins import _plugin_endpoints_to_pages
 import meerschaum as mrsm
 import json
 dash = attempt_import('dash', lazy=False, check_update=CHECK_UPDATE)
@@ -104,12 +103,6 @@ _paths = {
     'register': pages.register.layout,
 }
 _required_login = {''}
-
-### Allow users to add pages via the `@web_page` decorator.
-for _endpoint, _page_dict in _plugin_endpoints_to_pages.items():
-    _paths[_endpoint] = _page_dict['function']()
-    if _page_dict['login_required']:
-        _required_login.add(_endpoint)
 
 
 @dash_app.callback(
