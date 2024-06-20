@@ -9,9 +9,15 @@ See `meerschaum.utils.pool` for multiprocessing and
 """
 
 from __future__ import annotations
-import os, signal, subprocess, sys, platform
+import os, signal, subprocess, sys, platform, traceback
 from meerschaum.utils.typing import Union, Optional, Any, Callable, Dict, Tuple
 from meerschaum.config.static import STATIC_CONFIG
+
+_child_processes = []
+def signal_handler(sig, frame):
+    for child in _child_processes:
+        child.send_signal(sig)
+        child.wait()
 
 def run_process(
         *args,
@@ -73,6 +79,7 @@ def run_process(
         sys.stdout.write(line.decode('utf-8'))
         sys.stdout.flush()
 
+  
     if capture_output or line_callback is not None:
         kw['stdout'] = subprocess.PIPE
         kw['stderr'] = subprocess.STDOUT
@@ -123,6 +130,7 @@ def run_process(
 
     try:
         child = subprocess.Popen(*args, **kw)
+        _child_processes.append(child)
 
         # we can't set the process group id from the parent since the child
         # will already have exec'd. and we can't SIGSTOP it before exec,

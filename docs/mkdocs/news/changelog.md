@@ -9,6 +9,45 @@ This is the current release cycle, so stay tuned for future releases!
 - **Speed up package installation in virtual environments.**  
   Dynamic dependencies will now be installed via `uv`, which dramatically speeds up installation times.
 
+- **Add sub-cards for children pipes.**  
+  Pipes with `children` defined now include cards for these pipes under the Parameters menu item. This is especially useful when working managing pipeline hierarchies.
+
+- **Add "Open in Python" to pipe cards.**  
+  Clicking "Open in Python" on a pipe's card will now launch `ptpython` with the pipe object already created.
+
+  ```python
+  # Clicking "Open in Python" executes the following:
+  # $ mrsm python "pipe = mrsm.Pipe('plugin:noaa', 'weather', 'gvl', instance='sql:main')"
+  >>> import meerschaum as mrsm
+  >>> pipe = mrsm.Pipe('plugin:noaa', 'weather', 'gvl', instance='sql:main')
+  ```
+
+- **Add the decorator `@web_page`.**  
+  You may now quickly add your own pages to the web console by decorating your layout functions with `@web_page`:
+
+  ```python
+  import meerschaum as mrsm
+  from meerschaum.plugins import web_page, api_plugin
+
+  dash, html, dcc, dbc = mrsm.attempt_import(
+      'dash', 'dash.html', 'dash_bootstrap_components', 'dash.dcc',
+  )
+
+  @web_page('/foo', login_required=False)
+  def foo():
+      return dbc.Container([
+          html.H1("Hello, World!"),
+          dbc.Button("Click me", id='my-button'),
+          html.Div(id="my-output-div")
+      ])
+
+  def my_button_callback(n_clicks)
+
+  ```
+
+- **Use `ptpython` for the `python` action.**  
+  Rather than opening a classic REPL, the `python` action will now open a `ptpython` shell.
+
 - **Add `--venv` to the `python` action.**  
   Launching a Python REPL with `mrsm python` will now default to `--venv mrsm`. Run `mrsm install package` to make packages importable.
 
@@ -31,11 +70,11 @@ This is the current release cycle, so stay tuned for future releases!
   '/meerschaum/venvs/noaa/lib/python3.12/site-packages/requests/__init__.py'
   ``` 
 
-- **Allow passing flags to venv `python` binaries.**  
-  You may now pass flags directly to the `python` binary of a virtual environment (by escaping with `[]`):
+- **Allow passing flags to venv `ptpython` binaries.**  
+  You may now pass flags directly to the `ptpython` binary of a virtual environment (by escaping with `[]`):
   
   ```bash
-  mrsm python [-i] [-c 'print("hi")']
+  mrsm python [--help]
   ```
 
 - **Allow for custom connectors to implement a `sync()` method.**  

@@ -114,6 +114,7 @@ paths = {
 
     'SHELL_RESOURCES_PATH'           : ('{ROOT_DIR_PATH}', ),
     'SHELL_HISTORY_PATH'             : ('{SHELL_RESOURCES_PATH}', '.mrsm_history'),
+    'PYTHON_RESOURCES_PATH'          : ('{INTERNAL_RESOURCES_PATH}', 'python'),
 
     'API_RESOURCES_PATH'             : ('{PACKAGE_ROOT_PATH}', 'api', 'resources'),
     'API_STATIC_PATH'                : ('{API_RESOURCES_PATH}', 'static'),

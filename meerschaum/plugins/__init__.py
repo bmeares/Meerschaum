@@ -7,6 +7,7 @@ Expose plugin management APIs from the `meerschaum.plugins` module.
 """
 
 from __future__ import annotations
+import functools
 from meerschaum.utils.typing import Callable, Any, Union, Optional, Dict, List, Tuple
 from meerschaum.utils.threading import Lock, RLock
 from meerschaum.plugins._Plugin import Plugin
@@ -154,6 +155,41 @@ def post_sync_hook(
             from meerschaum.utils.warnings import warn
             warn(e)
     return function
+
+
+_plugin_endpoints_to_pages = {}
+def web_page(
+        page: Union[str, None, Callable[[Any], Any]] = None,
+        login_required: bool = True,
+        *args,
+        **kwargs
+    ) -> Any:
+
+    page_str = None
+
+    def _decorator(_func: Callable[[Any], Any]) -> Callable[[Any], Any]:
+        nonlocal page_str
+
+        @functools.wraps(_func)
+        def wrapper(*_args, **_kwargs):
+            return _func(*_args, **_kwargs)
+
+        if page_str is None:
+            page_str = _func.__name__
+
+        _plugin_endpoints_to_pages[page_str] = {
+            'function': _func,
+            'login_required': login_required,
+        }
+        return wrapper
+
+    if callable(page):
+        decorator_to_return = _decorator(page)
+        page_str = page.__name__
+    else:
+        decorator_to_return = _decorator
+
+    return decorator_to_return
 
 
 def api_plugin(function: Callable[[Any], Any]) -> Callable[[Any], Any]:

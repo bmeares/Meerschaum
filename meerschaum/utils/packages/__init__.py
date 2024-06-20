@@ -758,6 +758,7 @@ def pip_install(
         check_pypi: bool = True,
         check_wheel: bool = True,
         _uninstall: bool = False,
+        _from_completely_uninstall: bool = False,
         _install_uv_pip: bool = True,
         color: bool = True,
         silent: bool = False,
@@ -906,7 +907,7 @@ def pip_install(
                 ):
                     warn(
                         (
-                            "Failed to install `setuptools` and `wheel` for virtual "
+                            "Failed to install `setuptools`, `wheel`, and `uv` for virtual "
                             + f"environment '{venv}'."
                         ),
                         color = False,
@@ -931,7 +932,7 @@ def pip_install(
         if '--disable-pip-version-check' not in _args and not use_uv_pip:
             _args.append('--disable-pip-version-check')
 
-        if '--target' not in _args and '-t' not in _args and not _uninstall:
+        if '--target' not in _args and '-t' not in _args and not (not use_uv_pip and _uninstall):
             if venv is not None:
                 _args += ['--target', venv_target_path(venv, debug=debug)]
         elif (
@@ -961,10 +962,10 @@ def pip_install(
         if not silent:
             print(msg)
 
-        if _uninstall:
+        if _uninstall and not _from_completely_uninstall and not use_uv_pip:
             for install_name in _packages:
                 _install_no_version = get_install_no_version(install_name)
-                if _install_no_version in ('pip', 'wheel'):
+                if _install_no_version in ('pip', 'wheel', 'uv'):
                     continue
                 if not completely_uninstall_package(
                     _install_no_version,
@@ -974,17 +975,10 @@ def pip_install(
                         f"Failed to clean up package '{_install_no_version}'.",
                     )
 
+        ### NOTE: Only append the `--prerelease=allow` flag if we explicitly depend on a prerelease.
         if use_uv_pip:
-            allow_prerelease = False
-            prelrease_strings = ['dev', 'rc', 'a']
-            for install_name in packages:
-                for prelrease_string in prelrease_strings:
-                    if prelrease_string in install_name:
-                        allow_prerelease = True
-                        break
-
             _args.insert(0, 'pip')
-            if not _uninstall and allow_prerelease:
+            if not _uninstall and get_prerelease_dependencies(_packages):
                 _args.append('--prerelease=allow')
 
         rc = run_python_package(
@@ -1007,6 +1001,33 @@ def pip_install(
     if debug:
         print('pip ' + ('un' if _uninstall else '') + 'install returned:', success)
     return success
+
+
+def get_prerelease_dependencies(_packages: Optional[List[str]] = None):
+    """
+    Return a list of explicitly prerelease dependencies from a list of packages.
+    """
+    if _packages is None:
+        _packages = list(all_packages.keys())
+    prelrease_strings = ['dev', 'rc', 'a']
+    prerelease_packages = []
+    for install_name in _packages:
+        _install_no_version = get_install_no_version(install_name)
+        import_name = _install_to_import_name(install_name)
+        install_with_version = _import_to_install_name(import_name)
+        version_only = (
+            install_with_version.lower().replace(_install_no_version.lower(), '')
+            .split(']')[-1]
+        )
+
+        is_prerelease = False
+        for prelrease_string in prelrease_strings:
+            if prelrease_string in version_only:
+                is_prerelease = True
+
+        if is_prerelease:
+            prerelease_packages.append(install_name)
+    return prerelease_packages
 
 
 def completely_uninstall_package(
@@ -1035,7 +1056,7 @@ def completely_uninstall_package(
             continue
         installed_versions.append(file_name)
 
-    max_attempts = len(installed_versions) + 1
+    max_attempts = len(installed_versions)
     while attempts < max_attempts:
         if not venv_contains_package(
             _install_to_import_name(_install_no_version),
@@ -1044,8 +1065,10 @@ def completely_uninstall_package(
             return True
         if not pip_uninstall(
             _install_no_version,
-            venv=venv,
-            silent=(not debug), debug=debug
+            venv = venv,
+            silent = (not debug),
+            _from_completely_uninstall = True,
+            debug = debug,
         ):
             return False
         attempts += 1
@@ -1170,9 +1193,10 @@ def attempt_import(
         check_update: bool = False,
         check_pypi: bool = False,
         check_is_installed: bool = True,
+        allow_outside_venv: bool = True,
         color: bool = True,
         debug: bool = False
-    ) -> Union[Any, Tuple[Any]]:
+    ) -> Any:
     """
     Raise a warning if packages are not installed; otherwise import and return modules.
     If `lazy` is `True`, return lazy-imported modules.
@@ -1214,6 +1238,15 @@ def attempt_import(
 
     check_is_installed: bool, default True
         If `True`, check if the package is contained in the virtual environment.
+
+    allow_outside_venv: bool, default True
+        If `True`, search outside of the specified virtual environment
+        if the package cannot be found.
+        Setting to `False` will reinstall the package into a virtual environment, even if it
+        is installed outside.
+
+    color: bool, default True
+        If `False`, do not print ANSI colors.
 
     Returns
     -------
@@ -1296,6 +1329,7 @@ def attempt_import(
                             name,
                             venv = venv,
                             split = split,
+                            allow_outside_venv = allow_outside_venv,
                             debug = debug,
                         )
                         _is_installed_first_check[name] = package_is_installed
@@ -1441,7 +1475,9 @@ def import_rich(
         'pygments', lazy=False,
     )
     rich = attempt_import(
-        'rich', lazy=lazy, **kw)
+        'rich', lazy=lazy,
+        **kw
+    )
     return rich
 
 
@@ -1675,10 +1711,26 @@ def is_installed(
         import_name: str,
         venv: Optional[str] = 'mrsm',
         split: bool = True,
+        allow_outside_venv: bool = True,
         debug: bool = False,
     ) -> bool:
     """
     Check whether a package is installed.
+
+    Parameters
+    ----------
+    import_name: str
+        The import name of the module.
+
+    venv: Optional[str], default 'mrsm'
+        The venv in which to search for the module.
+
+    split: bool, default True
+        If `True`, split on periods to determine the root module name.
+
+    allow_outside_venv: bool, default True
+        If `True`, search outside of the specified virtual environment
+        if the package cannot be found.
     """
     if debug:
         from meerschaum.utils.debug import dprint
@@ -1689,7 +1741,11 @@ def is_installed(
             spec_path = pathlib.Path(
                 get_module_path(root_name, venv=venv, debug=debug)
                 or
-                importlib.util.find_spec(root_name).origin
+                (
+                    importlib.util.find_spec(root_name).origin 
+                    if venv is not None and allow_outside_venv
+                    else None
+                )
             )
         except (ModuleNotFoundError, ValueError, AttributeError, TypeError) as e:
             spec_path = None

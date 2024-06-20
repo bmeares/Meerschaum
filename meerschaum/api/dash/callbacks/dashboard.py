@@ -43,6 +43,7 @@ from meerschaum.utils.yaml import yaml
 from meerschaum.actions import get_subactions, actions
 from meerschaum._internal.arguments._parser import get_arguments_triggers, parser
 from meerschaum.connectors.sql._fetch import set_pipe_query
+from meerschaum.plugins import _plugin_endpoints_to_pages
 import meerschaum as mrsm
 import json
 dash = attempt_import('dash', lazy=False, check_update=CHECK_UPDATE)
@@ -94,6 +95,8 @@ omit_actions = {
     'repo',
     'instance',
 }
+
+### Map endpoints to page layouts.
 _paths = {
     'login'   : pages.login.layout,
     ''        : pages.dashboard.layout,
@@ -101,7 +104,14 @@ _paths = {
     'register': pages.register.layout,
 }
 _required_login = {''}
- 
+
+### Allow users to add pages via the `@web_page` decorator.
+for _endpoint, _page_dict in _plugin_endpoints_to_pages.items():
+    _paths[_endpoint] = _page_dict['function']()
+    if _page_dict['login_required']:
+        _required_login.add(_endpoint)
+
+
 @dash_app.callback(
     Output('page-layout-div', 'children'),
     Output('session-store', 'data'),
@@ -147,16 +157,31 @@ def update_page_layout_div(
     else:
         session_store_to_return = dash.no_update
 
-    _path = (
+    base_path = (
         pathname.rstrip('/') + '/'
     ).replace(
         (dash_endpoint + '/'),
         ''
     ).rstrip('/').split('/')[0]
+
+    complete_path = (
+        pathname.rstrip('/') + '/'
+    ).replace(
+        dash_endpoint + '/',
+        ''
+    ).rstrip('/')
+
+    if complete_path in _paths:
+        path_str = complete_path
+    elif base_path in _paths:
+        path_str = base_path
+    else:
+        path_str = ''
+
     path = (
-        _path
-        if no_auth or _path not in _required_login else (
-            _path
+        path_str
+        if no_auth or path_str not in _required_login else (
+            path_str
             if session_id in active_sessions
             else 'login'
         )
@@ -868,10 +893,25 @@ dash_app.clientside_callback(
             location = "None";
         }
 
+        var subaction = "pipes";
+        if (action == "python"){
+            subaction = (
+                '"' + "pipe = mrsm.Pipe('"
+                + pipe_meta.connector
+                + "', '"
+                + pipe_meta.metric
+                + "'"
+            );
+            if (location != "None"){
+                subaction += ", '" + location + "'";
+            }
+            subaction += ", instance='" + pipe_meta.instance + "')" + '"';
+        }
+
         iframe.contentWindow.postMessage(
             {
                 action: action,
-                subaction: "pipes",
+                subaction: subaction,
                 connector_keys: [pipe_meta.connector],
                 metric_keys: [pipe_meta.metric],
                 location_keys: [location],

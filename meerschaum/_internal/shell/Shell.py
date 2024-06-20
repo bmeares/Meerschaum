@@ -867,11 +867,17 @@ def input_with_sigint(_input, session, shell: Optional[Shell] = None):
                 shell_attrs['instance_keys'], 'on ' + get_config(
                     'shell', 'ansi', 'instance', 'rich', 'style'
                 )
-            ) if ANSI else colored(shell_attrs['instance_keys'], 'on white')
+            )
+            if ANSI
+            else colored(shell_attrs['instance_keys'], 'on white')
         )
         repo_colored = (
-            colored(shell_attrs['repo_keys'], 'on ' + get_config('shell', 'ansi', 'repo', 'rich', 'style'))
-            if ANSI else colored(shell_attrs['repo_keys'], 'on white')
+            colored(
+                shell_attrs['repo_keys'],
+                'on ' + get_config('shell', 'ansi', 'repo', 'rich', 'style')
+            )
+            if ANSI
+            else colored(shell_attrs['repo_keys'], 'on white')
         )
         try:
             typ, label = shell_attrs['instance_keys'].split(':')
