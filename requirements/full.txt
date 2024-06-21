@@ -28,6 +28,7 @@ watchfiles>=0.21.0
 dill>=0.3.3
 virtualenv>=20.1.0
 APScheduler>=4.0.0a5
+uv>=0.2.11
 cryptography>=38.0.1
 psycopg[binary]>=3.1.18
 PyMySQL>=0.9.0

@@ -13,7 +13,7 @@ groupadd -r $MRSM_USER -g $MRSM_GID \
 apt-get update && apt-get install sudo curl less -y --no-install-recommends
 
 ### Install user-level build tools.
-sudo -u $MRSM_USER python -m pip install --user --upgrade wheel pip setuptools
+sudo -u $MRSM_USER python -m pip install --user --upgrade wheel pip setuptools uv
 
 if [ "$MRSM_DEP_GROUP" != "minimal" ]; then
   apt-get install -y --no-install-recommends \
@@ -37,8 +37,8 @@ if [ "$MRSM_DEP_GROUP" != "minimal" ]; then
       || exit 1
   fi
 
-  sudo -u $MRSM_USER python -m pip install --no-cache-dir --upgrade --user psycopg || exit 1
-  sudo -u $MRSM_USER python -m pip install --no-cache-dir --upgrade --user pandas || exit 1
+  sudo -u $MRSM_USER python -m pip install \
+    --no-cache-dir --upgrade --user psycopg pandas || exit 1
 fi
 
 

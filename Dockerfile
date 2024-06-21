@@ -30,7 +30,8 @@ WORKDIR $MRSM_WORK_DIR
 ### Layer 2: Install Python packages.
 ### Only rebuilds cache if dependencies have changed.
 COPY --chown=$MRSM_USER:$MRSM_USER requirements $MRSM_HOME/requirements
-RUN python -m pip install --user --no-cache-dir -r $MRSM_HOME/requirements/$MRSM_DEP_GROUP.txt && \
+RUN python -m pip install --user --no-cache-dir \
+  -r $MRSM_HOME/requirements/$MRSM_DEP_GROUP.txt && \
   rm -rf $MRSM_HOME/requirements
 
 ### Layer 3: Install Meerschaum.

@@ -436,6 +436,11 @@ class Pipe:
     def __repr__(self, **kw) -> str:
         return pipe_repr(self, **kw)
 
+    def __pt_repr__(self):
+        from meerschaum.utils.packages import attempt_import
+        prompt_toolkit_formatted_text = attempt_import('prompt_toolkit.formatted_text', lazy=False)
+        return prompt_toolkit_formatted_text.ANSI(self.__repr__())
+
     def __getstate__(self) -> Dict[str, Any]:
         """
         Define the state dictionary (pickling).

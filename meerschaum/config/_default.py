@@ -110,6 +110,7 @@ default_system_config = {
         'space': False,
         'join_fetch': False,
         'inplace_sync': True,
+        'uv_pip': True,
     },
 }
 default_pipes_config = {

@@ -28,7 +28,7 @@ services:
       SA_PASSWORD: "supersecureSECRETPASSWORD123!"
     ports:
       - "1439:1433"
-    image: "mcr.microsoft.com/mssql/server:2017-latest"
+    image: "mcr.microsoft.com/mssql/server:2022-latest"
     volumes:
       - "mssql_volume:/var/opt/mssql"
 

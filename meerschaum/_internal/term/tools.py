@@ -17,7 +17,7 @@ def is_webterm_running(host: str, port: int, protocol: str = 'http') -> int:
     requests = attempt_import('requests')
     url = f'{protocol}://{host}:{port}'
     try:
-        r = requests.get(url)
+        r = requests.get(url, timeout=3)
     except Exception as e:
         return False
     if not r:

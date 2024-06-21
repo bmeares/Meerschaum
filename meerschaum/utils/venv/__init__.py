@@ -15,7 +15,7 @@ __all__ = sorted([
     'activate_venv', 'deactivate_venv', 'init_venv',
     'inside_venv', 'is_venv_active', 'venv_exec',
     'venv_executable', 'venv_exists', 'venv_target_path',
-    'Venv', 'get_venvs', 'verify_venv',
+    'Venv', 'get_venvs', 'verify_venv', 'get_module_venv',
 ])
 __pdoc__ = {'Venv': True}
 
@@ -79,7 +79,7 @@ def activate_venv(
         else:
             threads_active_venvs[thread_id][venv] += 1
 
-        target = str(venv_target_path(venv, debug=debug))
+        target = venv_target_path(venv, debug=debug).as_posix()
         if venv in active_venvs_order:
             sys.path.remove(target)
             try:
@@ -171,7 +171,7 @@ def deactivate_venv(
     if sys.path is None:
         return False
 
-    target = str(venv_target_path(venv, allow_nonexistent=force, debug=debug))
+    target = venv_target_path(venv, allow_nonexistent=force, debug=debug).as_posix()
     with LOCKS['sys.path']:
         if target in sys.path:
             sys.path.remove(target)
@@ -361,6 +361,8 @@ def init_venv(
             verified_venvs.add(venv)
         return True
 
+    import io
+    from contextlib import redirect_stdout, redirect_stderr
     import sys, platform, os, pathlib, shutil
     from meerschaum.config.static import STATIC_CONFIG
     from meerschaum.config._paths import VIRTENV_RESOURCES_PATH
@@ -381,25 +383,34 @@ def init_venv(
             verified_venvs.add(venv)
         return True
 
-    from meerschaum.utils.packages import run_python_package, attempt_import
+    from meerschaum.utils.packages import run_python_package, attempt_import, _get_pip_os_env
     global tried_virtualenv
     try:
         import venv as _venv
+        uv = attempt_import('uv', venv=None, debug=debug)
         virtualenv = None
     except ImportError:
         _venv = None
+        uv = None
         virtualenv = None
-    
 
     _venv_success = False
-    if _venv is not None:
-        import io
-        from contextlib import redirect_stdout
+
+    if uv is not None:
+        _venv_success = run_python_package(
+            'uv',
+            ['venv', venv_path.as_posix(), '-q'],
+            venv = None,
+            env = _get_pip_os_env(),
+            debug = debug,
+        ) == 0
+
+    if _venv is not None and not _venv_success:
         f = io.StringIO()
         with redirect_stdout(f):
             _venv_success = run_python_package(
                 'venv',
-                [str(venv_path)] + (
+                [venv_path.as_posix()] + (
                     ['--symlinks'] if platform.system() != 'Windows' else []
                 ),
                 venv=None, debug=debug
@@ -438,7 +449,7 @@ def init_venv(
                 except Exception as e:
                     import traceback
                     traceback.print_exc()
-            virtualenv.cli_run([str(venv_path)])
+            virtualenv.cli_run([venv_path.as_posix()])
             if dist_packages_path.exists():
                 vtp.mkdir(exist_ok=True, parents=True)
                 for file_path in dist_packages_path.glob('*'):
@@ -614,7 +625,7 @@ def venv_target_path(
                     return site_path
 
                 ### Allow for dist-level paths (running as root).
-                for possible_dist in reversed(site.getsitepackages()):
+                for possible_dist in site.getsitepackages():
                     dist_path = pathlib.Path(possible_dist)
                     if not dist_path.exists():
                         continue
@@ -696,6 +707,30 @@ def get_venvs() -> List[str]:
             continue
         venvs.append(filename)
     return venvs
+
+
+def get_module_venv(module) -> Union[str, None]:
+    """
+    Return the virtual environment where an imported module is installed.
+
+    Parameters
+    ----------
+    module: ModuleType
+        The imported module to inspect.
+
+    Returns
+    -------
+    The name of a venv or `None`.
+    """
+    import pathlib
+    from meerschaum.config.paths import VIRTENV_RESOURCES_PATH
+    module_path = pathlib.Path(module.__file__).resolve()
+    try:
+        rel_path = module_path.relative_to(VIRTENV_RESOURCES_PATH)
+    except ValueError:
+        return None
+
+    return rel_path.as_posix().split('/', maxsplit=1)[0]
 
 
 from meerschaum.utils.venv._Venv import Venv

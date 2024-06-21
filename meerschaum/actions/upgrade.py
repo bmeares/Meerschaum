@@ -130,7 +130,7 @@ def _upgrade_packages(
         upgrade packages docs
         ```
     """
-    from meerschaum.utils.packages import packages, pip_install
+    from meerschaum.utils.packages import packages, pip_install, get_prerelease_dependencies
     from meerschaum.utils.warnings import info, warn
     from meerschaum.utils.prompt import yes_no
     from meerschaum.utils.formatting import make_header, pprint
@@ -140,7 +140,7 @@ def _upgrade_packages(
     if venv is NoVenv:
         venv = 'mrsm'
     if len(action) == 0:
-        group = 'full'
+        group = 'api'
     else:
         group = action[0]
 
@@ -148,7 +148,7 @@ def _upgrade_packages(
         invalid_msg = f"Invalid dependency group '{group}'."
         avail_msg = make_header("Available groups:")
         for k in packages:
-            avail_msg += "\n  - {k}"
+            avail_msg += f"\n  - {k}"
 
         warn(invalid_msg + "\n\n" + avail_msg, stack=False)
         return False, invalid_msg
@@ -160,10 +160,18 @@ def _upgrade_packages(
         f"(dependency group '{group}')?"
     )
     to_install = [install_name for import_name, install_name in packages[group].items()]
+    prereleases_to_install = get_prerelease_dependencies(to_install)
+    to_install = [
+        install_name
+        for install_name in to_install
+        if install_name not in prereleases_to_install
+    ]
 
     success, msg = False, f"Nothing installed."
     if force or yes_no(question, noask=noask, yes=yes):
         success = pip_install(*to_install, debug=debug)
+        if success and prereleases_to_install:
+            success = pip_install(*prereleases_to_install, debug=debug)
         msg = (
             f"Successfully installed {len(packages[group])} packages." if success
             else f"Failed to install packages in dependency group '{group}'."

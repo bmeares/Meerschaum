@@ -156,6 +156,7 @@ def _api_start(
     from meerschaum.config.static import STATIC_CONFIG, SERVER_ID
     from meerschaum.connectors.parse import parse_instance_keys
     from meerschaum.utils.pool import get_pool
+    from meerschaum.utils.venv import get_module_venv
     import shutil
     from copy import deepcopy
 
@@ -169,7 +170,10 @@ def _api_start(
     ### `check_update` must be False, because otherwise Uvicorn's hidden imports will break things.
     dotenv = attempt_import('dotenv', lazy=False)
     uvicorn, gunicorn = attempt_import(
-        'uvicorn', 'gunicorn', venv=None, lazy=False, check_update=False,
+        'uvicorn', 'gunicorn',
+        lazy = False,
+        check_update = False,
+        venv = 'mrsm',
     )
 
     uvicorn_config_path = API_UVICORN_RESOURCES_PATH / SERVER_ID / 'config.json'
@@ -305,19 +309,51 @@ def _api_start(
     ### remove custom keys before calling uvicorn
 
     def _run_uvicorn():
-        try:
-            uvicorn.run(
-                **filter_keywords(
-                    uvicorn.run,
-                    **{
-                        k: v
-                        for k, v in uvicorn_config.items()
-                        if k not in custom_keys
-                    }
-                )
-            )
-        except KeyboardInterrupt:
-            pass
+        uvicorn_flags = [
+            '--host', host,
+            '--port', str(port),
+            (
+                '--proxy-headers'
+                if uvicorn_config.get('proxy_headers')
+                else '--no-proxy-headers'
+            ),
+            (
+                '--use-colors'
+                if uvicorn_config.get('use_colors')
+                else '--no-use-colors'
+            ),
+            '--env-file', uvicorn_config['env_file'],
+        ]
+        if uvicorn_reload := uvicorn_config.get('reload'):
+            uvicorn_flags.append('--reload')
+        if (
+            uvicorn_reload
+            and (reload_dirs := uvicorn_config.get('reload_dirs'))
+        ):
+            if not isinstance(reload_dirs, list):
+                reload_dirs = [reload_dirs]
+            for reload_dir in reload_dirs:
+                uvicorn_flags += ['--reload-dir', reload_dir]
+        if (
+            uvicorn_reload
+            and (reload_excludes := uvicorn_config.get('reload_excludes'))
+        ):
+            if not isinstance(reload_excludes, list):
+                reload_excludes = [reload_excludes]
+            for reload_exclude in reload_excludes:
+                uvicorn_flags += ['--reload-exclude', reload_exclude]
+        if (uvicorn_workers := uvicorn_config.get('workers')) is not None:
+            uvicorn_flags += ['--workers', str(uvicorn_workers)]
+
+        uvicorn_args = uvicorn_flags + ['meerschaum.api:app']
+        run_python_package(
+            'uvicorn',
+            uvicorn_args,
+            venv = get_module_venv(uvicorn),
+            as_proc = False,
+            foreground = True,
+            debug = debug,
+        )
 
     def _run_gunicorn():
         gunicorn_args = [
@@ -338,23 +374,21 @@ def _api_start(
             ]
         if debug:
             gunicorn_args += ['--log-level=debug', '--enable-stdio-inheritance', '--reload']
-        try:
-            run_python_package(
-                'gunicorn',
-                gunicorn_args,
-                env = {
-                    k: (
-                        json.dumps(v)
-                        if isinstance(v, (dict, list))
-                        else v
-                    )
-                    for k, v in env_dict.items()
-                },
-                venv = None,
-                debug = debug,
-            )
-        except KeyboardInterrupt:
-            pass
+
+        run_python_package(
+            'gunicorn',
+            gunicorn_args,
+            env = {
+                k: (
+                    json.dumps(v)
+                    if isinstance(v, (dict, list))
+                    else v
+                )
+                for k, v in env_dict.items()
+            },
+            venv = get_module_venv(gunicorn),
+            debug = debug,
+        )
 
 
     _run_uvicorn() if not production else _run_gunicorn()

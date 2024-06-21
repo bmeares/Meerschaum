@@ -465,8 +465,9 @@ class Daemon:
         Handle `SIGINT` within the Daemon context.
         This method is injected into the `DaemonContext`.
         """
-        #  from meerschaum.utils.daemon.FileDescriptorInterceptor import STOP_READING_FD_EVENT
-        #  STOP_READING_FD_EVENT.set()
+        from meerschaum.utils.process import signal_handler
+        signal_handler(signal_number, stack_frame)
+
         self.rotating_log.stop_log_fd_interception(unused_only=False)
         timer = self.__dict__.get('_log_refresh_timer', None)
         if timer is not None:
@@ -477,6 +478,7 @@ class Daemon:
             daemon_context.close()
 
         _close_pools()
+
         import threading
         for thread in threading.enumerate():
             if thread.name == 'MainThread':
@@ -495,6 +497,9 @@ class Daemon:
         Handle `SIGTERM` within the `Daemon` context.
         This method is injected into the `DaemonContext`.
         """
+        from meerschaum.utils.process import signal_handler
+        signal_handler(signal_number, stack_frame)
+
         timer = self.__dict__.get('_log_refresh_timer', None)
         if timer is not None:
             timer.cancel()
