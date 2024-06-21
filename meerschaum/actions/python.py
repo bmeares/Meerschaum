@@ -10,7 +10,6 @@ from meerschaum.utils.typing import SuccessTuple, Any, List, Optional
 
 def python(
         action: Optional[List[str]] = None,
-        venv: Optional[str] = 'mrsm',
         sub_args: Optional[List[str]] = None,
         debug: bool = False,
         **kw: Any
@@ -24,8 +23,7 @@ def python(
     
     Examples:
         mrsm python
-        mrsm python --venv noaa
-        mrsm python [-i] [-c 'print("hi")']
+        mrsm python [-m pip -V]
     """
     import sys, subprocess, os
     from meerschaum.utils.debug import dprint
@@ -38,9 +36,6 @@ def python(
 
     if action is None:
         action = []
-
-    if venv == 'None':
-        venv = None
 
     joined_actions = ["import meerschaum as mrsm"]
     line = ""
@@ -88,19 +83,13 @@ def python(
     with open(init_script_path, 'w', encoding='utf-8') as f:
         f.write(command)
 
-    env_dict = os.environ.copy()
-    venv_path = (VIRTENV_RESOURCES_PATH / venv) if venv is not None else None
-    if venv_path is not None:
-        env_dict.update({'VIRTUAL_ENV': venv_path.as_posix()})
-
     try:
-        ptpython = attempt_import('ptpython', venv=venv, allow_outside_venv=False)
+        ptpython = attempt_import('ptpython', venv=None)
         return_code = run_python_package(
             'ptpython',
             sub_args or ['--dark-bg', '-i', init_script_path.as_posix()],
-            venv = venv,
             foreground = True,
-            env = env_dict,
+            venv = None,
         )
     except KeyboardInterrupt:
         return_code = 1

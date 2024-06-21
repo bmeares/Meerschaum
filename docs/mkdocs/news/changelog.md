@@ -4,7 +4,7 @@
 
 This is the current release cycle, so stay tuned for future releases!
 
-### v2.2.2 – v2.2.3
+### v2.2.2 – v2.2.4
 
 - **Speed up package installation in virtual environments.**  
   Dynamic dependencies will now be installed via `uv`, which dramatically speeds up installation times.
@@ -56,28 +56,6 @@ This is the current release cycle, so stay tuned for future releases!
 
 - **Use `ptpython` for the `python` action.**  
   Rather than opening a classic REPL, the `python` action will now open a `ptpython` shell.
-
-- **Add `--venv` to the `python` action.**  
-  Launching a Python REPL with `mrsm python` will now default to `--venv mrsm`. Run `mrsm install package` to make packages importable.
-
-  ```python
-  # $ mrsm python
-  >>> import requests
-  Traceback (most recent call last):
-    File "<stdin>", line 1, in <module>
-  ModuleNotFoundError: No module named 'requests'
-
-  # $ mrsm install package requests
-  >>> import requests
-  >>> requests.__file__
-  '/meerschaum/venvs/mrsm/lib/python3.12/site-packages/requests/__init__.py'
-
-  # $ mrsm install plugin noaa
-  # $ mrsm python --venv noaa
-  >>> import requests
-  >>> requests.__file__
-  '/meerschaum/venvs/noaa/lib/python3.12/site-packages/requests/__init__.py'
-  ``` 
 
 - **Allow passing flags to venv `ptpython` binaries.**  
   You may now pass flags directly to the `ptpython` binary of a virtual environment (by escaping with `[]`):
