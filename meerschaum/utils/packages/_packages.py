@@ -119,7 +119,7 @@ packages: Dict[str, Dict[str, str]] = {
     },
 }
 packages['sql'] = {
-    'numpy'                          : 'numpy<2.0.0',
+    'numpy'                          : 'numpy>=1.18.5',
     'pandas'                         : 'pandas[parquet]>=2.0.1',
     'pyarrow'                        : 'pyarrow>=16.1.0',
     'dask'                           : 'dask[dataframe]>=2024.5.1',

@@ -855,7 +855,11 @@ def pip_install(
                 color = False,
             )
 
-    use_uv_pip = venv_contains_package('uv', venv=None, debug=debug) and uv_bin is not None
+    use_uv_pip = (
+        venv_contains_package('uv', venv=None, debug=debug)
+        and uv_bin is not None
+        and venv is not None
+    )
 
     import sys
     if not have_pip and not use_uv_pip:

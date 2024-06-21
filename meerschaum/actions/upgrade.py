@@ -148,7 +148,7 @@ def _upgrade_packages(
         invalid_msg = f"Invalid dependency group '{group}'."
         avail_msg = make_header("Available groups:")
         for k in packages:
-            avail_msg += "\n  - {k}"
+            avail_msg += f"\n  - {k}"
 
         warn(invalid_msg + "\n\n" + avail_msg, stack=False)
         return False, invalid_msg
