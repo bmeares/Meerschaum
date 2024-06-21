@@ -74,6 +74,7 @@ packages: Dict[str, Dict[str, str]] = {
         'litecli'                    : 'litecli>=1.5.0',
         'mssqlcli'                   : 'mssql-cli>=1.0.0',
         'gadwall'                    : 'gadwall>=0.2.0',
+        'ptpython'                   : 'ptpython>=3.0.27',
     },
     'stack': {
         'compose'                    : 'docker-compose>=1.29.2',
