@@ -1103,6 +1103,12 @@ def is_docker_available() -> bool:
     return has_docker
 
 
+def is_android() -> bool:
+    """Return `True` if the current platform is Android."""
+    import sys
+    return hasattr(sys, 'getandroidapilevel')
+
+
 def is_bcp_available() -> bool:
     """Check if the MSSQL `bcp` utility is installed."""
     import subprocess

@@ -46,6 +46,7 @@ def get_module_path(
     """
     Get a module's path without importing.
     """
+    import site
     if debug:
         from meerschaum.utils.debug import dprint
     if not _try_install_name_on_fail:
@@ -54,33 +55,58 @@ def get_module_path(
         import_name_lower = install_name_lower
     else:
         import_name_lower = import_name.lower().replace('-', '_')
+
     vtp = venv_target_path(venv, allow_nonexistent=True, debug=debug)
     if not vtp.exists():
         if debug:
-            dprint(f"Venv '{venv}' does not exist, cannot import '{import_name}'.", color=False)
+            dprint(
+                (
+                    "Venv '{venv}' does not exist, cannot import "
+                    + f"'{import_name}'."
+                ),
+                color = False,
+            )
         return None
+
+    venv_target_candidate_paths = [vtp]
+    if venv is None:
+        site_user_packages_dirs = [pathlib.Path(site.getusersitepackages())]
+        site_packages_dirs = [pathlib.Path(path) for path in site.getsitepackages()]
+
+        paths_to_add = [
+            path
+            for path in site_user_packages_dirs + site_packages_dirs
+            if path not in venv_target_candidate_paths
+        ]
+        venv_target_candidate_paths += paths_to_add
+
     candidates = []
-    for file_name in os.listdir(vtp):
-        file_name_lower = file_name.lower().replace('-', '_')
-        if not file_name_lower.startswith(import_name_lower):
+    for venv_target_candidate in venv_target_candidate_paths:
+        try:
+            file_names = os.listdir(venv_target_candidate)
+        except FileNotFoundError:
             continue
-        if file_name.endswith('dist_info'):
-            continue
-        file_path = vtp / file_name
+        for file_name in file_names:
+            file_name_lower = file_name.lower().replace('-', '_')
+            if not file_name_lower.startswith(import_name_lower):
+                continue
+            if file_name.endswith('dist_info'):
+                continue
+            file_path = venv_target_candidate / file_name
 
-        ### Most likely: Is a directory with __init__.py
-        if file_name_lower == import_name_lower and file_path.is_dir():
-            init_path = file_path / '__init__.py'
-            if init_path.exists():
-                candidates.append(init_path)
+            ### Most likely: Is a directory with __init__.py
+            if file_name_lower == import_name_lower and file_path.is_dir():
+                init_path = file_path / '__init__.py'
+                if init_path.exists():
+                    candidates.append(init_path)
 
-        ### May be a standalone .py file.
-        elif file_name_lower == import_name_lower + '.py':
-            candidates.append(file_path)
+            ### May be a standalone .py file.
+            elif file_name_lower == import_name_lower + '.py':
+                candidates.append(file_path)
 
-        ### Compiled wheels (e.g. pyodbc)
-        elif file_name_lower.startswith(import_name_lower + '.'):
-            candidates.append(file_path)
+            ### Compiled wheels (e.g. pyodbc)
+            elif file_name_lower.startswith(import_name_lower + '.'):
+                candidates.append(file_path)
 
     if len(candidates) == 1:
         return candidates[0]
@@ -466,12 +492,13 @@ def _get_package_metadata(import_name: str, venv: Optional[str]) -> Dict[str, st
     import re
     from meerschaum.config._paths import VIRTENV_RESOURCES_PATH
     install_name = _import_to_install_name(import_name)
-    _args = ['show', install_name]
+    _args = ['pip', 'show', install_name]
     if venv is not None:
         cache_dir_path = VIRTENV_RESOURCES_PATH / venv / 'cache'
-        _args += ['--cache-dir', str(cache_dir_path)]
+        _args += ['--cache-dir', cache_dir_path.as_posix()]
+
     proc = run_python_package(
-        'pip', _args,
+        'uv', _args,
         capture_output=True, as_proc=True, venv=venv, universal_newlines=True,
     )
     outs, errs = proc.communicate()
@@ -680,12 +707,22 @@ def need_update(
     return False
 
 
-def get_pip(venv: Optional[str] = 'mrsm', debug: bool=False) -> bool:
+def get_pip(
+        venv: Optional[str] = 'mrsm',
+        color: bool = True,
+        debug: bool = False,
+    ) -> bool:
     """
     Download and run the get-pip.py script.
 
     Parameters
     ----------
+    venv: Optional[str], default 'mrsm'
+        The virtual environment into which to install `pip`.
+
+    color: bool, default True
+        If `True`, force color output.
+
     debug: bool, default False
         Verbosity toggle.
 
@@ -708,7 +745,7 @@ def get_pip(venv: Optional[str] = 'mrsm', debug: bool=False) -> bool:
     if venv is not None:
         init_venv(venv=venv, debug=debug)
     cmd_list = [venv_executable(venv=venv), dest.as_posix()] 
-    return subprocess.call(cmd_list, env=_get_pip_os_env()) == 0
+    return subprocess.call(cmd_list, env=_get_pip_os_env(color=color)) == 0
 
 
 def pip_install(
@@ -721,6 +758,8 @@ def pip_install(
         check_pypi: bool = True,
         check_wheel: bool = True,
         _uninstall: bool = False,
+        _from_completely_uninstall: bool = False,
+        _install_uv_pip: bool = True,
         color: bool = True,
         silent: bool = False,
         debug: bool = False,
@@ -776,7 +815,9 @@ def pip_install(
 
     """
     from meerschaum.config._paths import VIRTENV_RESOURCES_PATH
+    from meerschaum.config import get_config
     from meerschaum.utils.warnings import warn
+    from meerschaum.utils.misc import is_android
     if args is None:
         args = ['--upgrade'] if not _uninstall else []
     if color:
@@ -787,10 +828,43 @@ def pip_install(
         have_wheel = venv_contains_package('wheel', venv=venv, debug=debug)
 
     _args = list(args)
-    have_pip = venv_contains_package('pip', venv=venv, debug=debug)
+    have_pip = venv_contains_package('pip', venv=None, debug=debug)
+    try:
+        import pip
+        have_pip = True
+    except ImportError:
+        have_pip = False
+    try:
+        import uv
+        uv_bin = uv.find_uv_bin()
+        have_uv_pip = True
+    except (ImportError, FileNotFoundError):
+        uv_bin = None
+        have_uv_pip = False
+    if have_pip and not have_uv_pip and _install_uv_pip and not is_android():
+        if not pip_install(
+            'uv',
+            venv = None,
+            debug = debug,
+            _install_uv_pip = False,
+            check_update = False,
+            check_pypi = False,
+            check_wheel = False,
+        ):
+            warn(
+                f"Failed to install `uv` for virtual environment '{venv}'.",
+                color = False,
+            )
+
+    use_uv_pip = (
+        venv_contains_package('uv', venv=None, debug=debug)
+        and uv_bin is not None
+        and venv is not None
+    )
+
     import sys
-    if not have_pip:
-        if not get_pip(venv=venv, debug=debug):
+    if not have_pip and not use_uv_pip:
+        if not get_pip(venv=venv, color=color, debug=debug):
             import sys
             minor = sys.version_info.minor
             print(
@@ -806,13 +880,18 @@ def pip_install(
     
     with Venv(venv, debug=debug):
         if venv is not None:
-            if '--ignore-installed' not in args and '-I' not in _args and not _uninstall:
+            if (
+                '--ignore-installed' not in args
+                and '-I' not in _args
+                and not _uninstall
+                and not use_uv_pip
+            ):
                 _args += ['--ignore-installed']
             if '--cache-dir' not in args and not _uninstall:
                 cache_dir_path = VIRTENV_RESOURCES_PATH / venv / 'cache'
                 _args += ['--cache-dir', str(cache_dir_path)]
 
-        if 'pip' not in ' '.join(_args):
+        if 'pip' not in ' '.join(_args) and not use_uv_pip:
             if check_update and not _uninstall:
                 pip = attempt_import('pip', venv=venv, install=False, debug=debug, lazy=False)
                 if need_update(pip, check_pypi=check_pypi, debug=debug):
@@ -820,17 +899,20 @@ def pip_install(
         
         _args = (['install'] if not _uninstall else ['uninstall']) + _args
 
-        if check_wheel and not _uninstall:
+        if check_wheel and not _uninstall and not use_uv_pip:
             if not have_wheel:
                 if not pip_install(
-                    'setuptools', 'wheel',
+                    'setuptools', 'wheel', 'uv',
                     venv = venv,
-                    check_update = False, check_pypi = False,
-                    check_wheel = False, debug = debug,
+                    check_update = False,
+                    check_pypi = False,
+                    check_wheel = False,
+                    debug = debug,
+                    _install_uv_pip = False,
                 ):
                     warn(
                         (
-                            "Failed to install `setuptools` and `wheel` for virtual "
+                            "Failed to install `setuptools`, `wheel`, and `uv` for virtual "
                             + f"environment '{venv}'."
                         ),
                         color = False,
@@ -838,24 +920,24 @@ def pip_install(
 
         if requirements_file_path is not None:
             _args.append('-r')
-            _args.append(str(pathlib.Path(requirements_file_path).resolve()))
+            _args.append(pathlib.Path(requirements_file_path).resolve().as_posix())
 
         if not ANSI and '--no-color' not in _args:
             _args.append('--no-color')
 
-        if '--no-input' not in _args:
+        if '--no-input' not in _args and not use_uv_pip:
             _args.append('--no-input')
 
-        if _uninstall and '-y' not in _args:
+        if _uninstall and '-y' not in _args and not use_uv_pip:
             _args.append('-y')
 
-        if '--no-warn-conflicts' not in _args and not _uninstall:
+        if '--no-warn-conflicts' not in _args and not _uninstall and not use_uv_pip:
             _args.append('--no-warn-conflicts')
 
-        if '--disable-pip-version-check' not in _args:
+        if '--disable-pip-version-check' not in _args and not use_uv_pip:
             _args.append('--disable-pip-version-check')
 
-        if '--target' not in _args and '-t' not in _args and not _uninstall:
+        if '--target' not in _args and '-t' not in _args and not (not use_uv_pip and _uninstall):
             if venv is not None:
                 _args += ['--target', venv_target_path(venv, debug=debug)]
         elif (
@@ -863,12 +945,14 @@ def pip_install(
                 and '-t' not in _args
                 and not inside_venv()
                 and not _uninstall
+                and not use_uv_pip
         ):
             _args += ['--user']
 
         if debug:
             if '-v' not in _args or '-vv' not in _args or '-vvv' not in _args:
-                pass
+                if use_uv_pip:
+                    _args.append('--verbose')
         else:
             if '-q' not in _args or '-qq' not in _args or '-qqq' not in _args:
                 pass
@@ -883,10 +967,10 @@ def pip_install(
         if not silent:
             print(msg)
 
-        if not _uninstall:
+        if _uninstall and not _from_completely_uninstall and not use_uv_pip:
             for install_name in _packages:
                 _install_no_version = get_install_no_version(install_name)
-                if _install_no_version in ('pip', 'wheel'):
+                if _install_no_version in ('pip', 'wheel', 'uv'):
                     continue
                 if not completely_uninstall_package(
                     _install_no_version,
@@ -896,11 +980,17 @@ def pip_install(
                         f"Failed to clean up package '{_install_no_version}'.",
                     )
 
+        ### NOTE: Only append the `--prerelease=allow` flag if we explicitly depend on a prerelease.
+        if use_uv_pip:
+            _args.insert(0, 'pip')
+            if not _uninstall and get_prerelease_dependencies(_packages):
+                _args.append('--prerelease=allow')
+
         rc = run_python_package(
-            'pip',
+            ('pip' if not use_uv_pip else 'uv'),
             _args + _packages,
-            venv = venv,
-            env = _get_pip_os_env(),
+            venv = None,
+            env = _get_pip_os_env(color=color),
             debug = debug,
         )
         if debug:
@@ -916,6 +1006,33 @@ def pip_install(
     if debug:
         print('pip ' + ('un' if _uninstall else '') + 'install returned:', success)
     return success
+
+
+def get_prerelease_dependencies(_packages: Optional[List[str]] = None):
+    """
+    Return a list of explicitly prerelease dependencies from a list of packages.
+    """
+    if _packages is None:
+        _packages = list(all_packages.keys())
+    prelrease_strings = ['dev', 'rc', 'a']
+    prerelease_packages = []
+    for install_name in _packages:
+        _install_no_version = get_install_no_version(install_name)
+        import_name = _install_to_import_name(install_name)
+        install_with_version = _import_to_install_name(import_name)
+        version_only = (
+            install_with_version.lower().replace(_install_no_version.lower(), '')
+            .split(']')[-1]
+        )
+
+        is_prerelease = False
+        for prelrease_string in prelrease_strings:
+            if prelrease_string in version_only:
+                is_prerelease = True
+
+        if is_prerelease:
+            prerelease_packages.append(install_name)
+    return prerelease_packages
 
 
 def completely_uninstall_package(
@@ -944,7 +1061,7 @@ def completely_uninstall_package(
             continue
         installed_versions.append(file_name)
 
-    max_attempts = len(installed_versions) + 1
+    max_attempts = len(installed_versions)
     while attempts < max_attempts:
         if not venv_contains_package(
             _install_to_import_name(_install_no_version),
@@ -953,8 +1070,10 @@ def completely_uninstall_package(
             return True
         if not pip_uninstall(
             _install_no_version,
-            venv=venv,
-            silent=(not debug), debug=debug
+            venv = venv,
+            silent = (not debug),
+            _from_completely_uninstall = True,
+            debug = debug,
         ):
             return False
         attempts += 1
@@ -1031,6 +1150,10 @@ def run_python_package(
     if cwd is not None:
         os.chdir(cwd)
     executable = venv_executable(venv=venv)
+    venv_path = (VIRTENV_RESOURCES_PATH / venv) if venv is not None else None
+    env_dict = kw.get('env', os.environ).copy()
+    if venv_path is not None:
+        env_dict.update({'VIRTUAL_ENV': venv_path.as_posix()})
     command = [executable, '-m', str(package_name)] + [str(a) for a in args]
     import traceback
     if debug:
@@ -1055,7 +1178,7 @@ def run_python_package(
             command,
             stdout = stdout,
             stderr = stderr,
-            env = kw.get('env', os.environ),
+            env = env_dict,
         )
         to_return = proc if as_proc else proc.wait()
     except KeyboardInterrupt:
@@ -1075,9 +1198,10 @@ def attempt_import(
         check_update: bool = False,
         check_pypi: bool = False,
         check_is_installed: bool = True,
+        allow_outside_venv: bool = True,
         color: bool = True,
         debug: bool = False
-    ) -> Union[Any, Tuple[Any]]:
+    ) -> Any:
     """
     Raise a warning if packages are not installed; otherwise import and return modules.
     If `lazy` is `True`, return lazy-imported modules.
@@ -1119,6 +1243,15 @@ def attempt_import(
 
     check_is_installed: bool, default True
         If `True`, check if the package is contained in the virtual environment.
+
+    allow_outside_venv: bool, default True
+        If `True`, search outside of the specified virtual environment
+        if the package cannot be found.
+        Setting to `False` will reinstall the package into a virtual environment, even if it
+        is installed outside.
+
+    color: bool, default True
+        If `False`, do not print ANSI colors.
 
     Returns
     -------
@@ -1201,6 +1334,7 @@ def attempt_import(
                             name,
                             venv = venv,
                             split = split,
+                            allow_outside_venv = allow_outside_venv,
                             debug = debug,
                         )
                         _is_installed_first_check[name] = package_is_installed
@@ -1346,7 +1480,9 @@ def import_rich(
         'pygments', lazy=False,
     )
     rich = attempt_import(
-        'rich', lazy=lazy, **kw)
+        'rich', lazy=lazy,
+        **kw
+    )
     return rich
 
 
@@ -1580,10 +1716,26 @@ def is_installed(
         import_name: str,
         venv: Optional[str] = 'mrsm',
         split: bool = True,
+        allow_outside_venv: bool = True,
         debug: bool = False,
     ) -> bool:
     """
     Check whether a package is installed.
+
+    Parameters
+    ----------
+    import_name: str
+        The import name of the module.
+
+    venv: Optional[str], default 'mrsm'
+        The venv in which to search for the module.
+
+    split: bool, default True
+        If `True`, split on periods to determine the root module name.
+
+    allow_outside_venv: bool, default True
+        If `True`, search outside of the specified virtual environment
+        if the package cannot be found.
     """
     if debug:
         from meerschaum.utils.debug import dprint
@@ -1594,7 +1746,11 @@ def is_installed(
             spec_path = pathlib.Path(
                 get_module_path(root_name, venv=venv, debug=debug)
                 or
-                importlib.util.find_spec(root_name).origin
+                (
+                    importlib.util.find_spec(root_name).origin 
+                    if venv is not None and allow_outside_venv
+                    else None
+                )
             )
         except (ModuleNotFoundError, ValueError, AttributeError, TypeError) as e:
             spec_path = None
@@ -1623,6 +1779,8 @@ def venv_contains_package(
     """
     Search the contents of a virtual environment for a package.
     """
+    import site
+    import pathlib
     root_name = import_name.split('.')[0] if split else import_name
     return get_module_path(root_name, venv=venv, debug=debug) is not None
 
@@ -1686,7 +1844,7 @@ def _monkey_patch_get_distribution(_dist: str, _version: str) -> None:
     pkg_resources.get_distribution = _get_distribution
 
 
-def _get_pip_os_env():
+def _get_pip_os_env(color: bool = True):
     """
     Return the environment variables context in which `pip` should be run.
     See PEP 668 for why we are overriding the environment.
@@ -1695,5 +1853,6 @@ def _get_pip_os_env():
     pip_os_env = os.environ.copy()
     pip_os_env.update({
         'PIP_BREAK_SYSTEM_PACKAGES': 'true',
+        ('FORCE_COLOR' if color else 'NO_COLOR'): '1',
     })
     return pip_os_env

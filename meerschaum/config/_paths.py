@@ -82,24 +82,24 @@ for _plugin_path in _plugins_paths_to_remove:
 
 ENVIRONMENT_VENVS_DIR = STATIC_CONFIG['environment']['venvs']
 if ENVIRONMENT_VENVS_DIR in os.environ:
-    VENVS_DIR_PATH = Path(os.environ[ENVIRONMENT_VENVS_DIR]).resolve()
-    if not VENVS_DIR_PATH.exists():
+    _VENVS_DIR_PATH = Path(os.environ[ENVIRONMENT_VENVS_DIR]).resolve()
+    if not _VENVS_DIR_PATH.exists():
         try:
-            VENVS_DIR_PATH.mkdir(parents=True, exist_ok=True)
+            _VENVS_DIR_PATH.mkdir(parents=True, exist_ok=True)
         except Exception as e:
             print(
                 f"Invalid path set for environment variable '{ENVIRONMENT_VENVS_DIR}':\n"
-                + f"{VENVS_DIR_PATH}"
+                + f"{_VENVS_DIR_PATH}"
             )
-            VENVS_DIR_PATH = (_ROOT_DIR_PATH / 'venvs').resolve()
-            print(f"Will use the following path for venvs instead:\n{VENVS_DIR_PATH}")
+            _VENVS_DIR_PATH = (_ROOT_DIR_PATH / 'venvs').resolve()
+            print(f"Will use the following path for venvs instead:\n{_VENVS_DIR_PATH}")
 else:
-    VENVS_DIR_PATH = _ROOT_DIR_PATH / 'venvs'
+    _VENVS_DIR_PATH = _ROOT_DIR_PATH / 'venvs'
 
 paths = {
-    'PACKAGE_ROOT_PATH'              : str(Path(__file__).parent.parent.resolve()),
-    'ROOT_DIR_PATH'                  : str(_ROOT_DIR_PATH),
-    'VIRTENV_RESOURCES_PATH'         : str(VENVS_DIR_PATH),
+    'PACKAGE_ROOT_PATH'              : Path(__file__).parent.parent.resolve().as_posix(),
+    'ROOT_DIR_PATH'                  : _ROOT_DIR_PATH.as_posix(),
+    'VIRTENV_RESOURCES_PATH'         : _VENVS_DIR_PATH.as_posix(),
     'CONFIG_DIR_PATH'                : ('{ROOT_DIR_PATH}', 'config'),
     'DEFAULT_CONFIG_DIR_PATH'        : ('{ROOT_DIR_PATH}', 'default_config'),
     'PATCH_DIR_PATH'                 : ('{ROOT_DIR_PATH}', 'patch_config'),
@@ -114,6 +114,7 @@ paths = {
 
     'SHELL_RESOURCES_PATH'           : ('{ROOT_DIR_PATH}', ),
     'SHELL_HISTORY_PATH'             : ('{SHELL_RESOURCES_PATH}', '.mrsm_history'),
+    'PYTHON_RESOURCES_PATH'          : ('{INTERNAL_RESOURCES_PATH}', 'python'),
 
     'API_RESOURCES_PATH'             : ('{PACKAGE_ROOT_PATH}', 'api', 'resources'),
     'API_STATIC_PATH'                : ('{API_RESOURCES_PATH}', 'static'),
@@ -186,7 +187,6 @@ def __getattr__(name: str) -> Path:
     if name.endswith('RESOURCES_PATH') or name == 'CONFIG_DIR_PATH':
         path.mkdir(parents=True, exist_ok=True)
     elif 'FILENAME' in name:
-        path = str(path)
+        path = path.as_posix()
 
     return path
-

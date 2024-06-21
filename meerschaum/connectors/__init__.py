@@ -328,7 +328,7 @@ def load_plugin_connectors():
             continue
         with open(plugin.__file__, encoding='utf-8') as f:
             text = f.read()
-        if 'make_connector' in text:
+        if 'make_connector' in text or 'Connector' in text:
             to_import.append(plugin.name)
     if not to_import:
         return

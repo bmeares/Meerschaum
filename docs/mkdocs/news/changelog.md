@@ -4,6 +4,116 @@
 
 This is the current release cycle, so stay tuned for future releases!
 
+### v2.2.2
+
+- **Speed up package installation in virtual environments.**  
+  Dynamic dependencies will now be installed via `uv`, which dramatically speeds up installation times.
+
+- **Add sub-cards for children pipes.**  
+  Pipes with `children` defined now include cards for these pipes under the Parameters menu item. This is especially useful when working managing pipeline hierarchies.
+
+- **Add "Open in Python" to pipe cards.**  
+  Clicking "Open in Python" on a pipe's card will now launch `ptpython` with the pipe object already created.
+
+  ```python
+  # Clicking "Open in Python" executes the following:
+  # $ mrsm python "pipe = mrsm.Pipe('plugin:noaa', 'weather', 'gvl', instance='sql:main')"
+  >>> import meerschaum as mrsm
+  >>> pipe = mrsm.Pipe('plugin:noaa', 'weather', 'gvl', instance='sql:main')
+  ```
+
+- **Add the decorators `@web_page` and `@dash_plugin`.**  
+  You may now quickly add your own pages to the web console by decorating your layout functions with `@web_page`:
+
+  ```python
+  # example.py
+  from meerschaum.plugins import dash_plugin, web_page
+
+  @dash_plugin
+  def init_dash(dash_app):
+
+      import dash.html as html
+      import dash_bootstrap_components as dbc
+      from dash import Input, Output, no_update
+
+      @web_page('/my-page', login_required=False)
+      def my_page():
+          return dbc.Container([
+              html.H1("Hello, World!"),
+              dbc.Button("Click me", id='my-button'),
+              html.Div(id="my-output-div"),
+          ])
+      
+      @dash_app.callback(
+          Output('my-output-div', 'children'),
+          Input('my-button', 'n_clicks'),
+      )
+      def my_button_click(n_clicks):
+          if not n_clicks:
+              return no_update
+          return html.P(f'You clicked {n_clicks} times!')
+  ```
+
+- **Use `ptpython` for the `python` action.**  
+  Rather than opening a classic REPL, the `python` action will now open a `ptpython` shell.
+
+- **Add `--venv` to the `python` action.**  
+  Launching a Python REPL with `mrsm python` will now default to `--venv mrsm`. Run `mrsm install package` to make packages importable.
+
+  ```python
+  # $ mrsm python
+  >>> import requests
+  Traceback (most recent call last):
+    File "<stdin>", line 1, in <module>
+  ModuleNotFoundError: No module named 'requests'
+
+  # $ mrsm install package requests
+  >>> import requests
+  >>> requests.__file__
+  '/meerschaum/venvs/mrsm/lib/python3.12/site-packages/requests/__init__.py'
+
+  # $ mrsm install plugin noaa
+  # $ mrsm python --venv noaa
+  >>> import requests
+  >>> requests.__file__
+  '/meerschaum/venvs/noaa/lib/python3.12/site-packages/requests/__init__.py'
+  ``` 
+
+- **Allow passing flags to venv `ptpython` binaries.**  
+  You may now pass flags directly to the `ptpython` binary of a virtual environment (by escaping with `[]`):
+  
+  ```bash
+  mrsm python [--help]
+  ```
+
+- **Allow for custom connectors to implement a `sync()` method.**  
+  Like module-level `sync()` functions for `plugin` connectors, any custom connector may implement `sync()` instead of `fetch()`.
+
+  ```python
+  # example.py
+  from typing import Any
+  import meerschaum as mrsm
+  from meerschaum.connectors import Connector, make_connector
+
+  @make_connector
+  class ExampleConnector(Connector):
+
+      def register(self, pipe: mrsm.Pipe) -> dict[str, Any]:
+          return {
+              'columns': {
+                  'datetime': 'ts',
+                  'id': 'example_id',
+              },
+          }
+
+      def sync(self, pipe: mrsm.Pipe, **kwargs) -> mrsm.SuccessTuple:
+          ### Implement a custom sync.
+          return True, f"Successfully synced {pipe}!"
+  ```
+
+- **Install `uvicorn` and `gunicorn` in virtual environments.**  
+  The packages `uvicorn` and `gunicorn` are now installed into the default virtual environment.
+
 ### v2.2.1
 
 - **Fix `--schedule` in the interactive shell.**  

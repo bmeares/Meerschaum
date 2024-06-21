@@ -7,7 +7,7 @@ Uninstall plugins and pip packages.
 """
 
 from __future__ import annotations
-from meerschaum.utils.typing import List, Any, SuccessTuple, Optional
+from meerschaum.utils.typing import List, Any, SuccessTuple, Optional, Union
 
 def uninstall(
         action: Optional[List[str]] = None,
@@ -145,13 +145,10 @@ def _complete_uninstall_plugins(action: Optional[List[str]] = None, **kw) -> Lis
             possibilities.append(name)
     return possibilities
 
-class NoVenv:
-    pass
-
 def _uninstall_packages(
         action: Optional[List[str]] = None,
         sub_args: Optional[List[str]] = None,
-        venv: Union[str, None, NoVenv] = NoVenv,
+        venv: Optional[str] = 'mrsm',
         yes: bool = False,
         force: bool = False,
         noask: bool = False,
@@ -169,9 +166,7 @@ def _uninstall_packages(
 
     from meerschaum.utils.warnings import info
     from meerschaum.utils.packages import pip_uninstall
-
-    if venv is NoVenv:
-        venv = 'mrsm'
+    from meerschaum.utils.misc import items_str
 
     if not (yes or force) and noask:
         return False, "Skipping uninstallation. Add `-y` or `-f` to agree to the uninstall prompt."
@@ -183,7 +178,8 @@ def _uninstall_packages(
         debug = debug,
     ):
         return True, (
-            f"Successfully removed packages from virtual environment 'mrsm':\n" + ', '.join(action)
+            f"Successfully removed packages from virtual environment '{venv}':\n"
+            + items_str(action)
         )
 
     return False, f"Failed to uninstall packages:\n" + ', '.join(action)

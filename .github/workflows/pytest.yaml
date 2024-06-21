@@ -18,7 +18,7 @@ jobs:
   build_and_test:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v3
+      - uses: actions/checkout@v4
       - name: Setup dev tools
         env:
           MRSM_SKIP_DOCKER_EXPERIMENTAL: 1

@@ -45,6 +45,7 @@ def show_registration_disabled_collapse(n_clicks, is_open):
     State('username-input', 'value'),
     State('password-input', 'value'),
     State('location', 'href'),
+    State('location', 'pathname'),
 )
 def login_button_click(
         username_submit,
@@ -53,6 +54,7 @@ def login_button_click(
         username,
         password,
         location_href,
+        location_pathname,
     ):
     """
     When the user submits the login form, check the login.
@@ -69,4 +71,4 @@ def login_button_click(
     except HTTPException:
         form_class += ' is-invalid'
         session_data = None
-    return session_data, form_class, (dash.no_update if not session_data else endpoints['dash'])
+    return session_data, form_class, dash.no_update

@@ -333,8 +333,7 @@ def _start_gui(
     from meerschaum.connectors.parse import parse_instance_keys
     from meerschaum._internal.term.tools import is_webterm_running
     import platform
-    webview = attempt_import('webview')
-    requests = attempt_import('requests')
+    webview, requests = attempt_import('webview', 'requests')
     import json
     import time
 
@@ -365,7 +364,7 @@ def _start_gui(
     base_url = 'http://' + api_kw['host'] + ':' + str(api_kw['port'])
 
     process = venv_exec(
-        start_tornado_code, as_proc=True, venv=None, debug=debug, capture_output=(not debug)
+        start_tornado_code, as_proc=True, debug=debug, capture_output=(not debug)
     )
     timeout = 10
     start = time.perf_counter()
@@ -446,7 +445,6 @@ def _start_webterm(
                 + "    Include `-f` to start another server on a new port\n"
                 + "    or specify a different port with `-p`."
             )
-
     if not nopretty:
         info(f"Starting the webterm at http://{host}:{port} ...\n    Press CTRL+C to quit.")
     tornado_app.listen(port, host)
