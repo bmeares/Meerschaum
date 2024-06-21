@@ -4,7 +4,7 @@
 
 This is the current release cycle, so stay tuned for future releases!
 
-### v2.2.2
+### v2.2.2 – v2.2.3
 
 - **Speed up package installation in virtual environments.**  
   Dynamic dependencies will now be installed via `uv`, which dramatically speeds up installation times.
@@ -110,9 +110,6 @@ This is the current release cycle, so stay tuned for future releases!
           ### Implement a custom sync.
           return True, f"Successfully synced {pipe}!"
   ```
-
-- **Install `uvicorn` and `gunicorn` in virtual environments.**  
-  The packages `uvicorn` and `gunicorn` are now installed into the default virtual environment.
 
 ### v2.2.1
 

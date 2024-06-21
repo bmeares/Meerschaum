@@ -32,7 +32,7 @@ def get_webterm_app_and_manager() -> Tuple[
     A tuple of the Tornado web application and term manager.
     """
     commands = [
-        venv_executable('mrsm'),
+        venv_executable(None),
         '-c',
         "import os; _ = os.environ.pop('COLUMNS', None); _ = os.environ.pop('LINES', None); "
         "from meerschaum._internal.entry import get_shell; "
