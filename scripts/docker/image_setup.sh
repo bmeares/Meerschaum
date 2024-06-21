@@ -13,7 +13,7 @@ groupadd -r $MRSM_USER -g $MRSM_GID \
 apt-get update && apt-get install sudo curl less -y --no-install-recommends
 
 ### Install user-level build tools.
-sudo -u $MRSM_USER python -m pip install --user --upgrade wheel pip setuptools uv
+sudo -u $MRSM_USER python -m pip install --user --upgrade wheel pip setuptools uv ptpython
 
 if [ "$MRSM_DEP_GROUP" != "minimal" ]; then
   apt-get install -y --no-install-recommends \
