@@ -817,6 +817,7 @@ def pip_install(
     from meerschaum.config._paths import VIRTENV_RESOURCES_PATH
     from meerschaum.config import get_config
     from meerschaum.utils.warnings import warn
+    from meerschaum.utils.misc import is_android
     if args is None:
         args = ['--upgrade'] if not _uninstall else []
     if color:
@@ -840,7 +841,7 @@ def pip_install(
     except (ImportError, FileNotFoundError):
         uv_bin = None
         have_uv_pip = False
-    if have_pip and not have_uv_pip and _install_uv_pip:
+    if have_pip and not have_uv_pip and _install_uv_pip and not is_android():
         if not pip_install(
             'uv',
             venv = None,

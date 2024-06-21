@@ -39,7 +39,7 @@ duckdb-engine>=0.13.0
 toga>=0.3.0-dev29
 pywebview>=3.6.3
 pycparser>=2.21.0
-numpy<2.0.0
+numpy>=1.18.5
 pandas[parquet]>=2.0.1
 pyarrow>=16.1.0
 dask[dataframe]>=2024.5.1
