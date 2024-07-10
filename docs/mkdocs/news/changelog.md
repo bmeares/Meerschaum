@@ -4,6 +4,41 @@
 
 This is the current release cycle, so stay tuned for future releases!
 
+### v2.2.5
+
+- **Allow actions to omit `**kwargs`.**  
+  Adding `**kwargs` is not optional, and you may instead explicitly state only the arguments required.
+
+  ```python
+  from meerschaum.actions import make_action
+
+  @make_action
+  def do_the_thing(shell=False):
+      msg = (
+          "You're in the mrsm shell."
+          if shell
+          else "You called this from bash."
+      )
+      return True, msg
+  ```
+
+- **Fixed minor bug with subaction detection.**  
+  Subaction functions must now explicitly begin with the name of the parent action (underscore prefix allowed).
+
+  ```python
+  from meerschaum.actions import make_action
+
+  @make_action
+  def sing():
+      return True, "~la la la~"
+
+  def sing_song():
+      return True, "~do re mi~"
+
+  def _sing_tune():
+      return True, "~fo so la ti~"
+  ```
+
 ### v2.2.2 – v2.2.4
 
 - **Speed up package installation in virtual environments.**  

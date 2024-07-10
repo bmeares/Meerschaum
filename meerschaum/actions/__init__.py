@@ -40,7 +40,11 @@ def get_subactions(
     for name, f in inspect.getmembers(action_module):
         if not inspect.isfunction(f):
             continue
-        if action_function.__name__ + '_' in name and not name.lstrip('_').startswith('complete'):
+
+        ### Detect subactions which may contain an underscore prefix.
+        if (
+            name.lstrip('_').startswith(action_function.__name__.lstrip('_') + '_')
+        ):
             _name = name.replace(action_function.__name__, '')
             _name = _name.lstrip('_')
             subactions[_name] = f

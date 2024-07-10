@@ -42,6 +42,7 @@ packages: Dict[str, Dict[str, str]] = {
         'requests'                   : 'requests>=2.23.0',
         'binaryornot'                : 'binaryornot>=0.4.4',
         'pyvim'                      : 'pyvim>=3.0.2',
+        'ptpython'                   : 'ptpython>=3.0.27',
         'aiofiles'                   : 'aiofiles>=0.6.0',
         'packaging'                  : 'packaging>=21.3.0',
         'prompt_toolkit'             : 'prompt-toolkit>=3.0.39',
@@ -74,7 +75,6 @@ packages: Dict[str, Dict[str, str]] = {
         'litecli'                    : 'litecli>=1.5.0',
         'mssqlcli'                   : 'mssql-cli>=1.0.0',
         'gadwall'                    : 'gadwall>=0.2.0',
-        'ptpython'                   : 'ptpython>=3.0.27',
     },
     'stack': {
         'compose'                    : 'docker-compose>=1.29.2',
