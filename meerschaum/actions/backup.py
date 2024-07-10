@@ -30,6 +30,7 @@ def _backup_database(
     Backup the stack's database to a sql file.
     """
     from meerschaum.actions import get_action
+    from meerschaum.config.paths import BACKUP_RESOURCES_PATH
     do_stack = get_action('stack')
     cmd_list = ['exec', 'db', 'pg']
     stack_success, stack_msg = do_stack(['exec'])

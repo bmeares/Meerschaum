@@ -22,28 +22,29 @@ With `mrsm compose up`, you can stand up syncing jobs for your pipes defined in 
     ```yaml
     sync:
       schedule: "every 30 seconds"
-      pipes:
-        - connector: "plugin:noaa"
-          metric: "weather"
-          location: "atlanta"
-          parameters:
-            noaa:
-              stations:
-                - "KATL"
 
-        - connector: "sql:awesome"
-          metric: "fahrenheit"
-          target: "atl_temp"
-          parameters:
-            query: >
-              SELECT
-                timestamp,
-                station,
-                (("temperature (wmoUnit:degC)" * 1.8) + 32) AS fahrenheit
-              FROM plugin_noaa_weather_atlanta
-          columns:
-            datetime: "timestamp"
-            id: "station"
+    pipes:
+    - connector: "plugin:noaa"
+      metric: "weather"
+      location: "atlanta"
+      parameters:
+        noaa:
+          stations:
+            - "KATL"
+
+    - connector: "sql:awesome"
+      metric: "fahrenheit"
+      target: "atl_temp"
+      parameters:
+        query: |-
+          SELECT
+            timestamp,
+            station,
+            (("temperature (wmoUnit:degC)" * 1.8) + 32) AS fahrenheit
+          FROM plugin_noaa_weather_atlanta
+        columns:
+          datetime: "timestamp"
+          id: "station"
 
     plugins:
       - "noaa"
@@ -94,6 +95,7 @@ If you've used `docker-compose`, you'll catch on to Meerschaum Compose pretty qu
 
 Command | Description | Useful Flags
 --|--|--
+`compose init` | Initialize a new project and install dependencies.
 `compose run` | Update and sync the pipes defined in the compose file. | `--debug`: Verbosity toggle. All flags are passed to `sync pipes`.
 `compose up` | Bring up the syncing jobs (process per instance) | `-f`: Follow the logs once the jobs are running.
 `compose down` | Take down the syncing jobs. | `-v`: Drop the pipes ("volumes").

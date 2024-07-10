@@ -39,6 +39,10 @@ This is the current release cycle, so stay tuned for future releases!
       return True, "~fo so la ti~"
   ```
 
+- **Persist user packages in stack Docker container**  
+
+- **Cleaned up OAuth flow**
+
 ### v2.2.2 – v2.2.4
 
 - **Speed up package installation in virtual environments.**  

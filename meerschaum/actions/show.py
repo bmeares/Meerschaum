@@ -42,6 +42,7 @@ def show(
         'logs'       : _show_logs,
         'tags'       : _show_tags,
         'schedules'  : _show_schedules,
+        'venvs'      : _show_venvs,
     }
     return choose_subaction(action, show_options, **kw)
 
@@ -902,6 +903,31 @@ def _show_schedules(
 
     return True, "Success"
         
+
+def _show_venvs(
+        **kwargs: Any    
+    ):
+    """
+    Print the available virtual environments in the current MRSM_ROOT_DIR.
+    """
+    import os
+    import pathlib
+    from meerschaum.config.paths import VIRTENV_RESOURCES_PATH
+    from meerschaum.utils.venv import venv_exists
+    from meerschaum.utils.misc import print_options
+
+    venvs = [
+        _venv
+        for _venv in os.listdir(VIRTENV_RESOURCES_PATH)
+        if venv_exists(_venv)
+    ]
+    print_options(
+        venvs,
+        name = 'Venvs:',
+        **kwargs
+    )
+
+    return True, "Success"
 
 
 ### NOTE: This must be the final statement of the module.

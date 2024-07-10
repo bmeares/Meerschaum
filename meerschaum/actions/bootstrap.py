@@ -25,6 +25,7 @@ def bootstrap(
     options = {
         'pipes'      : _bootstrap_pipes,
         'connectors' : _bootstrap_connectors,
+        'plugins'    : _bootstrap_plugins,
     }
     return choose_subaction(action, options, **kw)
 
@@ -379,6 +380,59 @@ def _bootstrap_connectors(
     write_config({'meerschaum': meerschaum_config}, debug=debug)
     if return_keys:
         return _type, _label
+    return True, "Success"
+
+
+def _bootstrap_plugins(
+        action: Optional[List[str]] = None,
+        debug: bool = False,
+        **kwargs: Any
+    ) -> SuccessTuple:
+    """
+    Launch an interactive wizard to guide the user to creating a new plugin.
+    """
+    from meerschaum.utils.warnings import info
+    from meerschaum.utils.prompt import prompt, choose
+    from meerschaum.utils.formatting._shell import clear_screen
+
+    if not action:
+        action = [prompt("Enter the name of your new plugin:")]
+        
+    clear_screen(debug=debug)
+    info(
+        "Answer the questions below to pick out features.\n"
+        + "    See https://meerschaum.io/reference/plugins/writing-plugins/ for documentation.\n"
+    )
+
+    import_lines = {
+        'action': ['from meerschaum.actions import make_action'],
+    }
+
+    for plugin_name in action:
+        plugin_types = choose(
+            "",
+
+        )
+
+        is_data_plugin = yes_no(
+            "Is this a data plugin?\n    (i.e. will you be extracting data and syncing pipes?)",
+            **kwargs,
+        )
+
+        features = choose(
+            "Which of the following features would you like to add to your plugin?",
+            [
+                'Fetch data\n     (e.g. extracting from a remote API)\n',
+                'New actions\n     (e.g. `mrsm sing song`)\n',
+                'New API endpoints\n     (e.g. `POST /my/new/endpoint`)\n',
+                'New web console page\n     (e.g. `/dash/my-web-app`)',
+                'Custom sync function\n     (advanced)\n',
+            ],
+            multiple = True,
+        )
+
+        
+
     return True, "Success"
 
 
