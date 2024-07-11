@@ -61,6 +61,7 @@ def prompt(
     from meerschaum.utils.formatting import colored, ANSI, CHARSET, highlight_pipes, fill_ansi
     from meerschaum.config import get_config
     from meerschaum.config.static import _static_config
+    from meerschaum.utils.misc import filter_keywords
     noask = check_noask(noask)
     if not noask:
         prompt_toolkit = attempt_import('prompt_toolkit')
@@ -101,7 +102,7 @@ def prompt(
         prompt_toolkit.prompt(
             prompt_toolkit.formatted_text.ANSI(question),
             wrap_lines = wrap_lines,
-            **kw
+            **filter_keywords(prompt_toolkit.prompt, **kw)
         ) if not noask else ''
     )
     if noask:
@@ -193,7 +194,7 @@ def yes_no(
 def choose(
         question: str,
         choices: List[Union[str, Tuple[str, str]]],
-        default: Optional[str] = None,
+        default: Union[str, List[str], None] = None,
         numeric: bool = True,
         multiple: bool = False,
         as_indices: bool = False,
@@ -216,7 +217,7 @@ def choose(
         If an option is a tuple of two strings, the first string is treated as the index
         and not displayed. In this case, set `as_indices` to `True` to return the index.
 
-    default: Optional[str], default None
+    default: Union[str, List[str], None], default None
         If the user declines to enter a choice, return this value.
 
     numeric: bool, default True
@@ -262,8 +263,14 @@ def choose(
     if isinstance(default, list):
         multiple = True
 
+    choices_indices = {}
+    for i, c in enumerate(choices):
+        if isinstance(c, tuple):
+            i, c = c
+        choices_indices[i] = c
+
     def _enforce_default(d):
-        if d is not None and d not in choices and warn:
+        if d is not None and d not in choices and d not in choices_indices and warn:
             _warn(
                 f"Default choice '{default}' is not contained in the choices {choices}. "
                 + "Setting numeric = False.",
@@ -277,12 +284,6 @@ def choose(
         if not _enforce_default(d):
             numeric = False
             break
-
-    choices_indices = {}
-    for i, c in enumerate(choices):
-        if isinstance(c, tuple):
-            i, c = c
-        choices_indices[i] = c
 
     _default = default
     _choices = list(choices_indices.values())
@@ -337,6 +338,19 @@ def choose(
         _default = ''
         if default is not None:
             for d in (default.split(delimiter) if multiple else [default]):
+                if d not in choices and d in choices_indices:
+                    d_index = d
+                    d_value = choices_indices[d]
+                    for _i, _option in enumerate(choices):
+                        if (
+                            isinstance(_option, tuple) and (
+                                _option[1] == d_value
+                                or
+                                _option[0] == d_index
+                            )
+                        ) or d_index == _i:
+                            d = _option
+
                 _d = str(choices.index(d) + 1)
                 _default += _d + delimiter
         _default = _default[:-1 * len(delimiter)]
