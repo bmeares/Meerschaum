@@ -400,13 +400,16 @@ def print_options(
     for i in range(num_cols):
         table.add_column()
 
-    chunks = iterate_chunks(
-        [Text.from_ansi(highlight_pipes(o)) for o in _options],
-        num_cols,
-        fillvalue=''
-    )
-    for c in chunks:
-        table.add_row(*c)
+    num_rows = (len(_options) + num_cols - 1) // num_cols
+    for i in range(num_rows):
+        row = []
+        for j in range(num_cols):
+            index = i + j * num_rows
+            if index < len(_options):
+                row.append(Text.from_ansi(highlight_pipes(_options[index])))
+            else:
+                row.append('')
+        table.add_row(*row)
 
     get_console().print(table)
     return None
