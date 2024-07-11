@@ -388,7 +388,7 @@ def print_options(
 
     if _header is not None:
         table = Table(
-            title = '\n' + _header,
+            title = ('\n' + _header) if header else header,
             box = box.SIMPLE,
             show_header = False,
             show_footer = False,
