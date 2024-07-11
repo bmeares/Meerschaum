@@ -10,7 +10,7 @@ from __future__ import annotations
 import platform
 import os
 import sys
-from meerschaum.utils.typing import Optional, Union, Any
+from meerschaum.utils.typing import Optional, Union, Any, Dict
 from meerschaum.utils.formatting._shell import make_header
 from meerschaum.utils.formatting._pprint import pprint
 from meerschaum.utils.formatting._pipes import (
@@ -298,6 +298,7 @@ def print_options(
         header: Optional[str] = None,
         num_cols: Optional[int] = None,
         adjust_cols: bool = True,
+        sort_options: bool = False,
         **kw
     ) -> None:
     """
@@ -339,6 +340,8 @@ def print_options(
     _options = []
     for o in options:
         _options.append(str(o))
+    if sort_options:
+        _options = sorted(_options)
     _header = f"Available {name}" if header is None else header
 
     if num_cols is None:
@@ -349,7 +352,7 @@ def print_options(
             print()
             print(make_header(_header))
         ### print actions
-        for option in sorted(_options):
+        for option in _options:
             if not nopretty:
                 print("  - ", end="")
             print(option)
@@ -398,7 +401,7 @@ def print_options(
         table.add_column()
 
     chunks = iterate_chunks(
-        [Text.from_ansi(highlight_pipes(o)) for o in sorted(_options)],
+        [Text.from_ansi(highlight_pipes(o)) for o in _options],
         num_cols,
         fillvalue=''
     )
