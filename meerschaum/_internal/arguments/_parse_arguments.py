@@ -80,8 +80,9 @@ def parse_arguments(sysargs: List[str]) -> Dict[str, Any]:
 
     ### rebuild sysargs without sub_arguments
     filtered_sysargs = [
-        word for i, word in enumerate(sysargs)
-            if i not in sub_arg_indices
+        word
+        for i, word in enumerate(sysargs)
+        if i not in sub_arg_indices
     ]
 
     try:
@@ -99,7 +100,6 @@ def parse_arguments(sysargs: List[str]) -> Dict[str, Any]:
         except Exception as _e:
             args_dict['text'] = ' '.join(sysargs)
         args_dict[STATIC_CONFIG['system']['arguments']['failure_key']] = e
-        unknown = []
 
     false_flags = [arg for arg, val in args_dict.items() if val is False]
     for arg in false_flags:
@@ -126,17 +126,26 @@ def parse_arguments(sysargs: List[str]) -> Dict[str, Any]:
 
     ### remove None (but not False) args
     none_args = []
+    none_args_keep = []
     for a, v in args_dict.items():
         if v is None:
             none_args.append(a)
+        elif v == 'None':
+            none_args_keep.append(a)
     for a in none_args:
         del args_dict[a]
+    for a in none_args_keep:
+        args_dict[a] = None
 
     ### location_key '[None]' or 'None' -> None
     if 'location_keys' in args_dict:
         args_dict['location_keys'] = [
-            None if lk in ('[None]', 'None')
-            else lk for lk in args_dict['location_keys'] 
+            (
+                None
+                if lk in ('[None]', 'None')
+                else lk
+            )
+            for lk in args_dict['location_keys']
         ]
 
     return parse_synonyms(args_dict)
@@ -145,7 +154,7 @@ def parse_arguments(sysargs: List[str]) -> Dict[str, Any]:
 def parse_line(line: str) -> Dict[str, Any]:
     """
     Parse a line of text into standard Meerschaum arguments.
-    
+
     Parameters
     ----------
     line: str
@@ -165,12 +174,12 @@ def parse_line(line: str) -> Dict[str, Any]:
     try:
         return parse_arguments(shlex.split(line))
     except Exception as e:
-        return {'action': [], 'text': line,}
+        return {'action': [], 'text': line}
 
 
 def parse_synonyms(
-        args_dict: Dict[str, Any]
-    ) -> Dict[str, Any]:
+    args_dict: Dict[str, Any]
+) -> Dict[str, Any]:
     """Check for synonyms (e.g. `async` = `True` -> `unblock` = `True`)"""
     if args_dict.get('async', None):
         args_dict['unblock'] = True
@@ -194,8 +203,8 @@ def parse_synonyms(
 
 
 def parse_dict_to_sysargs(
-        args_dict : Dict[str, Any]
-    ) -> List[str]:
+    args_dict: Dict[str, Any]
+) -> List[str]:
     """Revert an arguments dictionary back to a command line list."""
     from meerschaum._internal.arguments._parser import get_arguments_triggers
     sysargs = []
@@ -230,9 +239,9 @@ def parse_dict_to_sysargs(
 
 
 def remove_leading_action(
-        action: List[str],
-        _actions: Optional[Dict[str, Callable[[Any], SuccessTuple]]] = None,
-    ) -> List[str]:
+    action: List[str],
+    _actions: Optional[Dict[str, Callable[[Any], SuccessTuple]]] = None,
+) -> List[str]:
     """
     Remove the leading strings in the `action` list.
 

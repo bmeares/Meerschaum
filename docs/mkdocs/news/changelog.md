@@ -6,7 +6,11 @@ This is the current release cycle, so stay tuned for future releases!
 
 ### v2.2.5
 
-- **Allow actions to omit `**kwargs`.**  
+- **Add `bootstrap plugin`.**
+
+- **Add `edit plugin`.**  
+
+- **Allow actions, `fetch()`, and `sync()` to omit `**kwargs`.**  
   Adding `**kwargs` is not optional, and you may instead explicitly state only the arguments required.
 
   ```python
@@ -38,6 +42,8 @@ This is the current release cycle, so stay tuned for future releases!
   def _sing_tune():
       return True, "~fo so la ti~"
   ```
+
+- **Allow for `--begin None`.**
 
 - **Persist user packages in stack Docker container**  
 

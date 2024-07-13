@@ -252,6 +252,7 @@ def choose(
     """
     from meerschaum.utils.warnings import warn as _warn
     from meerschaum.utils.packages import attempt_import
+    from meerschaum.utils.misc import print_options
     noask = check_noask(noask)
 
     ### Handle empty choices.
@@ -333,6 +334,7 @@ def choose(
             choices_indices[i] = new_c
         default = delimiter.join(default) if isinstance(default, list) else default
 
+    question_options = []
     if numeric:
         _choices = [str(i + 1) for i, c in enumerate(choices)]
         _default = ''
@@ -354,16 +356,20 @@ def choose(
                 _d = str(choices.index(d) + 1)
                 _default += _d + delimiter
         _default = _default[:-1 * len(delimiter)]
-        question += '\n'
+        #  question += '\n'
         choices_digits = len(str(len(choices)))
         for i, c in enumerate(choices_indices.values()):
-            question += f"  {i + 1}. " + (" " * (choices_digits - len(str(i + 1)))) + f"{c}\n"
+            question_options.append(
+                f"  {i + 1}. "
+                + (" " * (choices_digits - len(str(i + 1))))
+                + f"{c}\n"
+            )
         default_tuple = (_default, default) if default is not None else None
     else:
         default_tuple = default
-        question += '\n'
+        #  question += '\n'
         for c in choices_indices.values():
-            question += f"  - {c}\n"
+            question_options.append(f"{c}\n")
 
     if 'completer' not in kw:
         WordCompleter = attempt_import('prompt_toolkit.completion').WordCompleter
@@ -371,6 +377,7 @@ def choose(
 
     valid = False
     while not valid:
+        print_options(question_options, header='')
         answer = prompt(
             question,
             icon = icon,

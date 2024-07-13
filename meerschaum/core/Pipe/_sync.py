@@ -34,29 +34,29 @@ class InferFetch:
     MRSM_INFER_FETCH: bool = True
 
 def sync(
-        self,
-        df: Union[
-            pd.DataFrame,
-            Dict[str, List[Any]],
-            List[Dict[str, Any]],
-            InferFetch
-        ] = InferFetch,
-        begin: Union[datetime, int, str, None] = '',
-        end: Union[datetime, int] = None,
-        force: bool = False,
-        retries: int = 10,
-        min_seconds: int = 1,
-        check_existing: bool = True,
-        blocking: bool = True,
-        workers: Optional[int] = None,
-        callback: Optional[Callable[[Tuple[bool, str]], Any]] = None,
-        error_callback: Optional[Callable[[Exception], Any]] = None,
-        chunksize: Optional[int] = -1,
-        sync_chunks: bool = True,
-        debug: bool = False,
-        _inplace: bool = True,
-        **kw: Any
-    ) -> SuccessTuple:
+    self,
+    df: Union[
+        pd.DataFrame,
+        Dict[str, List[Any]],
+        List[Dict[str, Any]],
+        InferFetch
+    ] = InferFetch,
+    begin: Union[datetime, int, str, None] = '',
+    end: Union[datetime, int, None] = None,
+    force: bool = False,
+    retries: int = 10,
+    min_seconds: int = 1,
+    check_existing: bool = True,
+    blocking: bool = True,
+    workers: Optional[int] = None,
+    callback: Optional[Callable[[Tuple[bool, str]], Any]] = None,
+    error_callback: Optional[Callable[[Exception], Any]] = None,
+    chunksize: Optional[int] = -1,
+    sync_chunks: bool = True,
+    debug: bool = False,
+    _inplace: bool = True,
+    **kw: Any
+) -> SuccessTuple:
     """
     Fetch new data from the source and update the pipe's table with new data.
     
@@ -125,7 +125,7 @@ def sync(
     from meerschaum.utils.formatting import get_console
     from meerschaum.utils.venv import Venv
     from meerschaum.connectors import get_connector_plugin
-    from meerschaum.utils.misc import df_is_chunk_generator
+    from meerschaum.utils.misc import df_is_chunk_generator, filter_keywords
     from meerschaum.utils.pool import get_pool
     from meerschaum.config import get_config
 
@@ -186,7 +186,7 @@ def sync(
         ### use that instead.
         ### NOTE: The DataFrame must be omitted for the plugin sync method to apply.
         ### If a DataFrame is provided, continue as expected.
-        if hasattr(df, 'MRSM_INFER_FETCH'):                   
+        if hasattr(df, 'MRSM_INFER_FETCH'):
             try:
                 if p.connector is None:
                     msg = f"{p} does not have a valid connector."
@@ -194,7 +194,7 @@ def sync(
                         msg += f"\n    Perhaps {p.connector_keys} has a syntax error?"
                     p._exists = None
                     return False, msg
-            except Exception as e:
+            except Exception:
                 p._exists = None
                 return False, f"Unable to create the connector for {p}."
 
@@ -210,14 +210,28 @@ def sync(
             ):
                 with Venv(get_connector_plugin(self.instance_connector)):
                     p._exists = None
-                    return self.instance_connector.sync_pipe_inplace(p, debug=debug, **kw)
+                    return self.instance_connector.sync_pipe_inplace(
+                        p,
+                        **filter_keywords(
+                            p.instance_connector.sync_pipe_inplace,
+                            debug=debug,
+                            **kw
+                        )
+                    )
 
 
             ### Activate and invoke `sync(pipe)` for plugin connectors with `sync` methods.
             try:
                 if getattr(p.connector, 'sync', None) is not None:
                     with Venv(get_connector_plugin(p.connector), debug=debug):
-                        return_tuple = p.connector.sync(p, debug=debug, **kw)
+                        return_tuple = p.connector.sync(
+                            p,
+                            **filter_keywords(
+                                p.connector.sync,
+                                debug=debug,
+                                **kw
+                            )
+                        )
                     p._exists = None
                     if not isinstance(return_tuple, tuple):
                         return_tuple = (
@@ -237,13 +251,19 @@ def sync(
             ### Fetch the dataframe from the connector's `fetch()` method.
             try:
                 with Venv(get_connector_plugin(p.connector), debug=debug):
-                    df = p.fetch(debug=debug, **kw)
+                    df = p.fetch(
+                        **filter_keywords(
+                            p.fetch,
+                            debug=debug,
+                            **kw
+                        )
+                    )
 
             except Exception as e:
                 get_console().print_exception(
-                    suppress = [
-                        'meerschaum/core/Pipe/_sync.py', 
-                        'meerschaum/core/Pipe/_fetch.py', 
+                    suppress=[
+                        'meerschaum/core/Pipe/_sync.py',
+                        'meerschaum/core/Pipe/_fetch.py',
                     ]
                 )
                 msg = f"Failed to fetch data from {p.connector}:\n    {e}"
@@ -289,7 +309,7 @@ def sync(
             if not chunk_success:
                 return chunk_success, f"Unable to sync initial chunk for {p}:\n{chunk_msg}"
             if debug:
-                dprint(f"Successfully synced the first chunk, attemping the rest...")
+                dprint("Successfully synced the first chunk, attemping the rest...")
 
             failed_chunks = []
             def _process_chunk(_chunk):
@@ -308,7 +328,6 @@ def sync(
                         + _chunk_msg
                     )
                 )
-
 
             results = sorted(
                 [(chunk_success, chunk_msg)] + (
@@ -329,7 +348,7 @@ def sync(
             retry_success = True
             if not success and any(success_bools):
                 if debug:
-                    dprint(f"Retrying failed chunks...")
+                    dprint("Retrying failed chunks...")
                 chunks_to_retry = [c for c in failed_chunks]
                 failed_chunks = []
                 for chunk in chunks_to_retry:
@@ -361,9 +380,9 @@ def sync(
         while run:
             with Venv(get_connector_plugin(self.instance_connector)):
                 return_tuple = p.instance_connector.sync_pipe(
-                    pipe = p,
-                    df = df,
-                    debug = debug,
+                    pipe=p,
+                    df=df,
+                    debug=debug,
                     **kw
                 )
             _retries += 1
@@ -382,7 +401,7 @@ def sync(
         _checkpoint(**kw)
         if self.cache_pipe is not None:
             if debug:
-                dprint(f"Caching retrieved dataframe.", **kw)
+                dprint("Caching retrieved dataframe.", **kw)
                 _sync_cache_tuple = self.cache_pipe.sync(df, debug=debug, **kw)
                 if not _sync_cache_tuple[0]:
                     warn(f"Failed to sync local cache for {self}.")
@@ -395,10 +414,10 @@ def sync(
         return _sync(self, df = df)
 
     from meerschaum.utils.threading import Thread
-    def default_callback(result_tuple : SuccessTuple):
+    def default_callback(result_tuple: SuccessTuple):
         dprint(f"Asynchronous result from {self}: {result_tuple}", **kw)
 
-    def default_error_callback(x : Exception):
+    def default_error_callback(x: Exception):
         dprint(f"Error received for {self}: {x}", **kw)
 
     if callback is None and debug:
@@ -407,12 +426,12 @@ def sync(
         error_callback = default_error_callback
     try:
         thread = Thread(
-            target = _sync,
-            args = (self,),
-            kwargs = {'df' : df},
-            daemon = False,
-            callback = callback,
-            error_callback = error_callback
+            target=_sync,
+            args=(self,),
+            kwargs={'df': df},
+            daemon=False,
+            callback=callback,
+            error_callback=error_callback,
         )
         thread.start()
     except Exception as e:
@@ -424,12 +443,13 @@ def sync(
 
 
 def get_sync_time(
-        self,
-        params: Optional[Dict[str, Any]] = None,
-        newest: bool = True,
-        round_down: bool = False, 
-        debug: bool = False
-    ) -> Union['datetime', None]:
+    self,
+    params: Optional[Dict[str, Any]] = None,
+    newest: bool = True,
+    apply_backtrack_interval: bool = False,
+    round_down: bool = False,
+    debug: bool = False
+) -> Union['datetime', None]:
     """
     Get the most recent datetime value for a Pipe.
 
@@ -442,6 +462,9 @@ def get_sync_time(
     newest: bool, default True
         If `True`, get the most recent datetime (honoring `params`).
         If `False`, get the oldest datetime (`ASC` instead of `DESC`).
+
+    apply_backtrack_interval: bool, default False
+        If `True`, subtract the backtrack interval from the sync time.
 
     round_down: bool, default False
         If `True`, round down the datetime value to the nearest minute.
@@ -461,15 +484,22 @@ def get_sync_time(
     with Venv(get_connector_plugin(self.instance_connector)):
         sync_time = self.instance_connector.get_sync_time(
             self,
-            params = params,
-            newest = newest,
-            debug = debug,
+            params=params,
+            newest=newest,
+            debug=debug,
         )
 
-    if not round_down or not isinstance(sync_time, datetime):
-        return sync_time
+    if round_down and isinstance(sync_time, datetime):
+        sync_time = round_time(sync_time, timedelta(minutes=1))
 
-    return round_time(sync_time, timedelta(minutes=1))
+    if apply_backtrack_interval and sync_time is not None:
+        backtrack_interval = self.get_backtrack_interval(debug=debug)
+        try:
+            sync_time -= backtrack_interval
+        except Exception as e:
+            warn(f"Failed to apply backtrack interval:\n{e}")
+
+    return sync_time
 
 
 def exists(

@@ -103,12 +103,14 @@ def _bootstrap_pipes(
         )
         try:
             ck = choose(
-                f"Where are the data coming from?\n\n" +
-                f"    Please type the keys of a connector from below,\n" +
-                f"    or enter '{new_label}' to register a new connector.\n\n" +
-                f" {get_config('formatting', 'emoji', 'connector')} Connector:\n",
+                (
+                    "Where are the data coming from?\n\n" +
+                    f"    Please type the keys of a connector or enter '{new_label}'\n" +
+                    "    to register a new connector.\n\n" +
+                    f" {get_config('formatting', 'emoji', 'connector')} Connector:"
+                ),
                 get_connector_labels() + [new_label],
-                numeric = False
+                numeric = False,
             )
         except KeyboardInterrupt:
             return abort_tuple
@@ -258,8 +260,8 @@ def _bootstrap_connectors(
         _type = choose(
             (
                 'Please choose a connector type.\n'
-                + 'For more information on connectors, '
-                + 'please visit https://meerschaum.io/reference/connectors'
+                + '    See https://meerschaum.io/reference/connectors '
+                + 'for documentation on connectors.\n'
             ),
             sorted(list(connectors)),
             default = 'sql'
@@ -391,239 +393,16 @@ def _bootstrap_plugins(
     """
     Launch an interactive wizard to guide the user to creating a new plugin.
     """
-    import pathlib
-    import meerschaum as mrsm
-    from meerschaum.utils.warnings import info, warn
-    from meerschaum.utils.prompt import prompt, choose, yes_no
-    from meerschaum.utils.formatting._shell import clear_screen
-    from meerschaum.utils.misc import edit_file
-    from meerschaum.config.paths import PLUGINS_DIR_PATHS
-    from meerschaum._internal.entry import entry
+    from meerschaum.utils.prompt import prompt
+    from meerschaum.plugins.bootstrap import bootstrap_plugin
 
     if not action:
         action = [prompt("Enter the name of your new plugin:")]
 
-    if len(PLUGINS_DIR_PATHS) > 1:
-        plugins_dir_path = pathlib.Path(
-            choose(
-                "In which directory do you want to write your plugin?",
-                [path.as_posix() for path in PLUGINS_DIR_PATHS],
-                numeric = True,
-                multiple = False,
-                default = PLUGINS_DIR_PATHS[0].as_posix(),
-            )
-        )
-    else:
-        plugins_dir_path = PLUGINS_DIR_PATHS[0]
-        
-    clear_screen(debug=debug)
-    info(
-        "Answer the questions below to pick out features.\n"
-        + "    See the Writing Plugins guide for documentation:\n"
-        + "    https://meerschaum.io/reference/plugins/writing-plugins/ for documentation.\n"
-    )
-
-    imports_lines = {
-        'default': (
-            "import meerschaum as mrsm\n"
-        ),
-        'action': (
-            "from meerschaum.actions import make_action\n"
-        ),
-        'api': (
-            "from meerschaum.plugins import api_plugin\n"
-        ),
-        'web': (
-            "from meerschaum.plugins import web_page, dash_plugin\n"
-        ),
-        'api+web': (
-            "from meerschaum.plugins import api_plugin, web_page, dash_plugin\n"
-        ),
-    }
-
-    ### TODO: Add feature for custom connectors.
-    feature_lines = {
-        'header': (
-            "# {plugin_name}.py\n\n"
-        ),
-        'default': (
-            "__version__ = '0.0.1'\n"
-            "\n# Add any depedencies to `required` (similar to `requirements.txt`).\n"
-            "required = []\n\n"
-        ),
-        'setup': (
-            "def setup(**kwargs) -> mrsm.SuccessTuple:\n"
-            "    \"\"\"Executed during installation and `mrsm setup plugin {plugin_name}`.\"\"\"\n"
-            "    return True, \"Success\"\n\n\n"
-        ),
-        'register': (
-            "def register(pipe: mrsm.Pipe):\n"
-            "    \"\"\"Return the default parameters for a new pipe.\"\"\"\n"
-            "    return {\n"
-            "        'columns': {\n"
-            "            'datetime': None,\n"
-            "        }\n"
-            "    }\n\n\n"
-        ),
-        'fetch': (
-            "def fetch(pipe: mrsm.Pipe, **kwargs):\n"
-            "    \"\"\"Return or yield dataframe-like objects.\"\"\"\n"
-            "    docs = []\n"
-            "    # populate docs with dictionaries (rows).\n"
-            "    return docs\n\n\n"
-        ),
-        'action': (
-            "@make_action\n"
-            "def {action_name}(**kwargs) -> mrsm.SuccessTuple:\n"
-            "    \"\"\"Run `mrsm {action_spaces}` to trigger.\"\"\"\n"
-            "    return True, \"Success\"\n\n\n"
-        ),
-        'api': (
-            "@api_plugin\n"
-            "def init_app(fastapi_app):\n"
-            "    \"\"\"Add new endpoints to the FastAPI app.\"\"\"\n\n"
-            "    import fastapi\n"
-            "    from meerschaum.api import manager\n\n"
-            "    @fastapi_app.get('/my/endpoint')\n"
-            "    def get_my_endpoint(curr_user=fastapi.Depends(manager)):\n"
-            "        return {'message': 'Hello, World!'}\n\n\n"
-        ),
-        'web': (
-            "@dash_plugin\n"
-            "def init_dash(dash_app):\n"
-            "    \"\"\"Initialize the Plotly Dash application.\"\"\"\n"
-            "    import dash.html as html\n"
-            "    import dash.dcc as dcc\n"
-            "    from dash import Input, Output, State, no_update\n"
-            "    import dash_bootstrap_components as dbc\n\n"
-            "    # Create a new page at the path `/dash/{plugin_name}`.\n"
-            "    @web_page('{plugin_name}', login_required=False)\n"
-            "    def page_layout():\n"
-            "        \"\"\"Return the layout objects for this page.\"\"\"\n"
-            "        return dbc.Container([\n"
-            "            dcc.Location(id='{plugin_name}-location'),\n"
-            "            html.Div(id='output-div'),\n"
-            "        ])\n\n"
-            "    @dash_app.callback(\n"
-            "        Output('output-div', 'children'),\n"
-            "        Input('{plugin_name}-location', 'pathname'),\n"
-            "    )\n"
-            "    def render_page_on_url_change(pathname: str):\n"
-            "        \"\"\"Reload page contents when the URL path changes.\"\"\"\n"
-            "        return html.H1(\"Hello from plugin '{plugin_name}'!\")\n\n\n"
-        ),
-    }
-
     for plugin_name in action:
-        plugin_path = plugins_dir_path / (plugin_name + '.py')
-        plugin = mrsm.Plugin(plugin_name)
-        if plugin.is_installed():
-            warn(f"Plugin '{plugin_name}' is already installed!", stack=False)
-            uninstall_plugin = yes_no(
-                f"Do you want to first uninstall '{plugin}'?",
-                default = 'n',
-                **kwargs
-            )
-            if not uninstall_plugin:
-                return False, f"Plugin '{plugin_name}' already exists."
-
-            uninstall_success, uninstall_msg = entry(['uninstall', 'plugin', plugin_name, '-f'])
-            if not uninstall_success:
-                return uninstall_success, uninstall_msg
-            clear_screen(debug=debug)
-
-        features = choose(
-            "Which of the following features would you like to add to your plugin?",
-            [
-                (
-                    'fetch',
-                    'Fetch data\n     (e.g. extracting from a remote API)\n'
-                ),
-                (
-                    'action',
-                    'New actions\n     (e.g. `mrsm sing song`)\n'
-                ),
-                (
-                    'api',
-                    'New API endpoints\n     (e.g. `POST /my/new/endpoint`)\n',
-                ),
-                (
-                    'web',
-                    'New web console page\n     (e.g. `/dash/my-web-app`)\n',
-                ),
-            ],
-            default = 'fetch',
-            multiple = True,
-            as_indices = True,
-            **kwargs
-        )
-
-        action_name = ''
-        if 'action' in features:
-            while True:
-                try:
-                    action_name = prompt(
-                        "What is name of your action?\n    "
-                        + "(separate subactions with spaces, e.g. `sing song`):"
-                    ).replace(' ', '_')
-                except KeyboardInterrupt as e:
-                    return False, "Aborted plugin creation."
-
-                if action_name:
-                    break
-                warn("Please enter an action.", stack=False)
-
-        action_spaces = action_name.replace('_', ' ')
-
-        plugin_labels = {
-            'plugin_name': plugin_name,
-            'action_name': action_name,
-            'action_spaces': action_spaces,
-        }
-
-        body_text = ""
-        body_text += feature_lines['header'].format(**plugin_labels)
-        body_text += imports_lines['default'].format(**plugin_labels)
-        if 'action' in features:
-            body_text += imports_lines['action']
-        if 'api' in features and 'web' in features:
-            body_text += imports_lines['api+web']
-        elif 'api' in features:
-            body_text += imports_lines['api']
-        elif 'web' in features:
-            body_text += imports_lines['web']
-
-        body_text += "\n"
-        body_text += feature_lines['default'].format(**plugin_labels)
-        body_text += feature_lines['setup'].format(**plugin_labels)
-
-        if 'fetch' in features:
-            body_text += feature_lines['register']
-            body_text += feature_lines['fetch']
-
-        if 'action' in features:
-            body_text += feature_lines['action'].format(**plugin_labels)
-
-        if 'api' in features:
-            body_text += feature_lines['api']
-
-        if 'web' in features:
-            body_text += feature_lines['web'].format(**plugin_labels)
-
-        try:
-            with open(plugin_path, 'w+', encoding='utf-8') as f:
-                f.write(body_text.rstrip())
-        except Exception as e:
-            error_msg = f"Failed to write file '{plugin_path}':\n{e}"
-            return False, error_msg
-
-        mrsm.pprint((True, f"Successfully created file '{plugin_path}'."))
-        try:
-            _ = prompt(f"Press [Enter] to edit plugin '{plugin_name}', [CTRL+C] to skip.")
-        except (KeyboardInterrupt, Exception):
-            continue
-
-        edit_file(plugin_path, debug=debug)
+        bootstrap_success, bootstrap_msg = bootstrap_plugin(plugin_name)
+        if not bootstrap_success:
+            return bootstrap_success, bootstrap_msg
 
     return True, "Success"
 

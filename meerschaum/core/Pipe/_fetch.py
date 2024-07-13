@@ -12,6 +12,7 @@ import meerschaum as mrsm
 from meerschaum.utils.typing import Optional, Any, Union, SuccessTuple, Iterator
 from meerschaum.config import get_config
 from meerschaum.utils.warnings import warn
+from meerschaum.utils.misc import filter_keywords
 
 def fetch(
         self,
@@ -75,25 +76,28 @@ def fetch(
     with mrsm.Venv(get_connector_plugin(self.connector)):
         df = self.connector.fetch(
             self,
-            begin = _determine_begin(
-                self,
-                begin,
-                check_existing = check_existing,
-                debug = debug,
-            ),
-            end = end,
-            chunk_hook = _chunk_hook,
-            debug = debug,
-            **kw
+            **filter_keywords(
+                self.connector.fetch,
+                begin=_determine_begin(
+                    self,
+                    begin,
+                    check_existing=check_existing,
+                    debug=debug,
+                ),
+                end=end,
+                chunk_hook=_chunk_hook,
+                debug=debug,
+                **kw
+            )
         )
     return df
 
 
 def get_backtrack_interval(
-        self,
-        check_existing: bool = True,
-        debug: bool = False,
-    ) -> Union[timedelta, int]:
+    self,
+    check_existing: bool = True,
+    debug: bool = False,
+) -> Union[timedelta, int]:
     """
     Get the chunk interval to use for this pipe.
 
@@ -127,17 +131,17 @@ def get_backtrack_interval(
 
 
 def _determine_begin(
-        pipe: mrsm.Pipe,
-        begin: Union[datetime, int, str] = '',
-        check_existing: bool = True,
-        debug: bool = False,
-    ) -> Union[datetime, int, None]:
+    pipe: mrsm.Pipe,
+    begin: Union[datetime, int, str, None] = '',
+    check_existing: bool = True,
+    debug: bool = False,
+) -> Union[datetime, int, None]:
     """
     Apply the backtrack interval if `--begin` is not provided.
 
     Parameters
     ----------
-    begin: Union[datetime, int, str], default ''
+    begin: Union[datetime, int, str, None], default ''
         The provided begin timestamp.
 
     check_existing: bool, default True
@@ -160,4 +164,4 @@ def _determine_begin(
         return sync_time - backtrack_interval
     except Exception as e:
         warn(f"Unable to substract backtrack interval {backtrack_interval} from {sync_time}.")
-        return sync_time
+    return sync_time
