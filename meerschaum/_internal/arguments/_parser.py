@@ -158,7 +158,6 @@ groups['actions'].add_argument(
     '-d', '--daemon', action='store_true',
     help = "Run an action as a background daemon."
 )
-
 groups['actions'].add_argument(
     '--rm', action='store_true', help="Delete a job once it has finished executing."
 )

@@ -219,15 +219,24 @@ def _show_connectors(
     from meerschaum.config import get_config
     from meerschaum.utils.formatting import make_header
     from meerschaum.utils.formatting import pprint
+
+    conn_type = action[0].split(':')[0] if action else None
+
     if not nopretty:
-        print(make_header("\nConfigured connectors:"))
-    pprint(get_config('meerschaum', 'connectors'), nopretty=nopretty)
-    if not nopretty:
+        print(make_header(
+            f"""\nConfigured {"'" + (conn_type + "' ") if conn_type else ''}Connectors:"""
+        ))
+
+    keys = ['meerschaum', 'connectors']
+    if conn_type:
+        keys.append(conn_type)
+    pprint(get_config(*keys), nopretty=nopretty)
+    if not nopretty and not conn_type:
         print(make_header("\nActive connectors:"))
         pprint(connectors, nopretty=nopretty)
 
     from meerschaum.connectors.parse import parse_instance_keys
-    if action:
+    if action and ':' in action[0]:
         attr, keys = parse_instance_keys(action[0], construct=False, as_tuple=True, debug=debug)
         if attr:
             if not nopretty:

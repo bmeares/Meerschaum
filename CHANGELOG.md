@@ -49,6 +49,18 @@ This is the current release cycle, so stay tuned for future releases!
 
 - **Cleaned up OAuth flow**
 
+- **Throw a warning if a `@dash_plugin` function raises an exception.**
+
+- **Added connector type to `show connectors`**  
+  Append a connector type to the `show connectors` command (e.g. `show connectors sql`) to see only connectors of a certain type.
+
+- **Allow `dprint` to be imported from `meerschaum.utils.warnings`.**  
+  For convenience, you may now import `dprint` alongside `info`, `warn`, and `error`.
+
+  ```python
+  from meerschaum.utils.warnings import dprint, warn, info, error
+  ```
+
 ### v2.2.2 – v2.2.4
 
 - **Speed up package installation in virtual environments.**  

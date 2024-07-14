@@ -8,6 +8,7 @@ Handle all things warnings and errors here
 
 from __future__ import annotations
 from meerschaum.utils.typing import Any, Union
+from meerschaum.utils.debug import dprint
 
 import sys
 import warnings
