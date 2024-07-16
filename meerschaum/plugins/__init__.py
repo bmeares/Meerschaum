@@ -27,7 +27,7 @@ _locks = {
     'PLUGINS_INTERNAL_LOCK_PATH': RLock(),
 }
 __all__ = (
-    "Plugin", "make_action", "api_plugin", "import_plugins",
+    "Plugin", "make_action", "api_plugin", "dash_plugin", "import_plugins",
     "reload_plugins", "get_plugins", "get_data_plugins", "add_plugin_argument",
     "pre_sync_hook", "post_sync_hook",
 )
