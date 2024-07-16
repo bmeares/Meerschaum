@@ -24,6 +24,7 @@ from meerschaum.connectors.api.APIConnector import APIConnector
 from meerschaum.connectors.sql._create_engine import flavor_configs as sql_flavor_configs
 
 __all__ = (
+    "make_connector",
     "Connector",
     "SQLConnector",
     "APIConnector",
@@ -290,13 +291,14 @@ def make_connector(
     --------
     >>> import meerschaum as mrsm
     >>> from meerschaum.connectors import make_connector, Connector
+    >>> 
+    >>> @make_connector
     >>> class FooConnector(Connector):
-    ...     def __init__(self, label: str, **kw):
-    ...         super().__init__('foo', label, **kw)
+    ...     REQUIRED_ATTRIBUTES: list[str] = ['username', 'password']
     ... 
-    >>> make_connector(FooConnector)
-    >>> mrsm.get_connector('foo', 'bar')
-    foo:bar
+    >>> conn = mrsm.get_connector('foo:bar', username='dog', password='cat')
+    >>> print(conn.username, conn.password)
+    dog cat
     >>> 
     """
     import re

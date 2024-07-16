@@ -9,9 +9,22 @@
 
 Welcome to the Meerschaum Python API technical documentation!
 
+## Quickstart
+
+For your convenience, the following classes and functions may be imported from the root `meerschaum` namespace.
+
+```python
+import meerschaum as mrsm
+```
+
+### Pipes
+
+## Submodules
+
 - `meerschaum.actions`  
-  Access functions for actions and subactions.
-- `meerschaum.connectors`
+  Access functions for actions and subactions.\n
+- `meerschaum.connectors`  
+  Build connectors to interact with databases and fetch data.\n
 - `meerschaum.utils`  
   Utility functions are available in several submodules, such as functions for:
   - `meerschaum.utils.daemon`  
