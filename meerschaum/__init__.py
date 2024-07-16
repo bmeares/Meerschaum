@@ -23,7 +23,7 @@ from meerschaum.utils.typing import SuccessTuple
 from meerschaum.core.Pipe import Pipe
 from meerschaum.plugins import Plugin
 from meerschaum.utils.venv import Venv
-from meerschaum.connectors import get_connector
+from meerschaum.connectors import get_connector, Connector, make_connector
 from meerschaum.utils import get_pipes
 from meerschaum.utils.formatting import pprint
 from meerschaum._internal.docs import index as __doc__
@@ -49,4 +49,7 @@ __all__ = (
     "connectors",
     "plugins",
     "utils",
+    "SuccessTuple",
+    "Connector",
+    "make_connector",
 )
