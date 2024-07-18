@@ -53,7 +53,7 @@ This is the current release cycle, so stay tuned for future releases!
 - **Allow for `--begin None`.**  
   Explicitly setting `--begin None` will now pass `None` to `fetch()`.
 
-- **Persist user packages in stack Docker container**  
+- **Persist user packages in stack Docker container.**  
   The stack Docker Compose file now persists user-level packages (under `~/.local`).
 
 - **Throw a warning if a `@dash_plugin` function raises an exception.**
