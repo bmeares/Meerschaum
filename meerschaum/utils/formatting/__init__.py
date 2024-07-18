@@ -10,7 +10,7 @@ from __future__ import annotations
 import platform
 import os
 import sys
-from meerschaum.utils.typing import Optional, Union, Any
+from meerschaum.utils.typing import Optional, Union, Any, Dict
 from meerschaum.utils.formatting._shell import make_header
 from meerschaum.utils.formatting._pprint import pprint
 from meerschaum.utils.formatting._pipes import (
@@ -298,6 +298,7 @@ def print_options(
         header: Optional[str] = None,
         num_cols: Optional[int] = None,
         adjust_cols: bool = True,
+        sort_options: bool = False,
         **kw
     ) -> None:
     """
@@ -339,6 +340,8 @@ def print_options(
     _options = []
     for o in options:
         _options.append(str(o))
+    if sort_options:
+        _options = sorted(_options)
     _header = f"Available {name}" if header is None else header
 
     if num_cols is None:
@@ -349,7 +352,7 @@ def print_options(
             print()
             print(make_header(_header))
         ### print actions
-        for option in sorted(_options):
+        for option in _options:
             if not nopretty:
                 print("  - ", end="")
             print(option)
@@ -385,7 +388,7 @@ def print_options(
 
     if _header is not None:
         table = Table(
-            title = '\n' + _header,
+            title = ('\n' + _header) if header else header,
             box = box.SIMPLE,
             show_header = False,
             show_footer = False,
@@ -397,13 +400,22 @@ def print_options(
     for i in range(num_cols):
         table.add_column()
 
-    chunks = iterate_chunks(
-        [Text.from_ansi(highlight_pipes(o)) for o in sorted(_options)],
-        num_cols,
-        fillvalue=''
-    )
-    for c in chunks:
-        table.add_row(*c)
+    if len(_options) < 12:
+        # If fewer than 12 items, use a single column
+        for option in _options:
+            table.add_row(Text.from_ansi(highlight_pipes(option)))
+    else:
+        # Otherwise, use multiple columns as before
+        num_rows = (len(_options) + num_cols - 1) // num_cols
+        for i in range(num_rows):
+            row = []
+            for j in range(num_cols):
+                index = i + j * num_rows
+                if index < len(_options):
+                    row.append(Text.from_ansi(highlight_pipes(_options[index])))
+                else:
+                    row.append('')
+            table.add_row(*row)
 
     get_console().print(table)
     return None
@@ -454,6 +466,7 @@ def fill_ansi(string: str, style: str = '') -> str:
         msg = Text(str(msg), style)
 
     return rich_text_to_str(msg)
+
 
 def __getattr__(name: str) -> str:
     """

@@ -7,7 +7,7 @@ Functions for interacting with plugins via the web interface.
 """
 
 from __future__ import annotations
-from meerschaum.utils.typing import List, Tuple, SuccessTuple
+from meerschaum.utils.typing import List, Tuple, SuccessTuple, Optional, WebState, Dict, Any
 from meerschaum.utils.packages import import_dcc, import_html
 from meerschaum.api import get_api_connector, endpoints, CHECK_UPDATE
 html, dcc = import_html(check_update=CHECK_UPDATE), import_dcc(check_update=CHECK_UPDATE)
@@ -17,10 +17,10 @@ from meerschaum.api.dash import dash_app, debug, active_sessions
 
 
 def get_plugins_cards(
-        state: Optional[WebState] = None,
-        search_term: Optional[str] = None,
-        session_data: Optional[Dict[str, Any]] = None,
-    ) -> Tuple[List[dbc.Card], List[SuccessTuple]]:
+    state: Optional[WebState] = None,
+    search_term: Optional[str] = None,
+    session_data: Optional[Dict[str, Any]] = None,
+) -> Tuple[List[dbc.Card], List[SuccessTuple]]:
     """
     Return the cards and alerts for plugins.
     """
@@ -96,4 +96,3 @@ def is_plugin_owner(plugin_name: str, session_data: Dict['str', Any]) -> bool:
         _username is not None
         and _username == _plugin_username
     )
-

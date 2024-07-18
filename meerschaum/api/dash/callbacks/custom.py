@@ -21,7 +21,7 @@ def init_dash_plugins():
         for _function in _functions:
             try:
                 _function(dash_app)
-            except Exception as e:
+            except Exception:
                 warn(
                     f"Failed to load function '{_function.__name__}' "
                     + f"from plugin '{_module_name}':\n"

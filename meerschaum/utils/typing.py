@@ -14,6 +14,7 @@ try:
         Hashable,
         Generator,
         Iterator,
+        TYPE_CHECKING,
     )
 except Exception as e:
     import urllib.request, sys, pathlib, os

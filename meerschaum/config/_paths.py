@@ -138,6 +138,9 @@ paths = {
     'SQLITE_RESOURCES_PATH'          : ('{ROOT_DIR_PATH}', 'sqlite'),
     'SQLITE_DB_PATH'                 : ('{SQLITE_RESOURCES_PATH}', 'mrsm_local.db'),
 
+    'BACKUP_RESOURCES_PATH'          : ('{ROOT_DIR_PATH}', 'backup'),
+    'BACKUP_DATABASE_PATH'           : ('{BACKUP_RESOURCES_PATH}', 'backup.sql'),
+
     'DUCKDB_RESOURCES_PATH'          : ('{ROOT_DIR_PATH}', 'duckdb'),
     'DUCKDB_PATH'                    : ('{DUCKDB_RESOURCES_PATH}', 'duck.db'),
 

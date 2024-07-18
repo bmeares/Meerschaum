@@ -11,6 +11,9 @@ from meerschaum.utils.typing import SuccessTuple, Any, List, Optional
 def python(
         action: Optional[List[str]] = None,
         sub_args: Optional[List[str]] = None,
+        nopretty: bool = False,
+        noask: bool = False,
+        venv: Optional[str] = None,
         debug: bool = False,
         **kw: Any
     ) -> SuccessTuple:
@@ -24,6 +27,21 @@ def python(
     Examples:
         mrsm python
         mrsm python [-m pip -V]
+
+    Flags:
+        `--nopretty`
+        Open a plain Pyhthon REPL rather than ptpython.
+
+        `--noask`
+        Run the supplied Python code and do not open a REPL.
+
+        `--venv`
+        Run the Python interpreter from a virtual environment.
+        Will not have Meercshaum imported.
+
+        `--sub-args` (or flags surrounded by `[]`)
+        Rather than run Python code, execute the interpreter with the given sub-flags
+        (e.g. `mrsm python [-V]`)
     """
     import sys, subprocess, os
     from meerschaum.utils.debug import dprint
@@ -33,11 +51,16 @@ def python(
     from meerschaum.config import __version__ as _version
     from meerschaum.config.paths import VIRTENV_RESOURCES_PATH, PYTHON_RESOURCES_PATH
     from meerschaum.utils.packages import run_python_package, attempt_import
+    from meerschaum.utils.process import run_process
 
     if action is None:
         action = []
 
-    joined_actions = ["import meerschaum as mrsm"]
+    joined_actions = (
+        ["import meerschaum as mrsm"]
+        if venv is None and not sub_args
+        else []
+    )
     line = ""
     for i, a in enumerate(action):
         if a == '':
@@ -68,6 +91,11 @@ def python(
         '"""); '
         + 'pts.print_formatted_text(ansi); '
     )
+    if nopretty or venv is not None or sub_args:
+        print_command = ""
+
+    if sub_args:
+        nopretty = True
 
     command = print_command
     for a in joined_actions:
@@ -89,7 +117,21 @@ def python(
             'ptpython',
             sub_args or ['--dark-bg', '-i', init_script_path.as_posix()],
             foreground = True,
-            venv = None,
+            venv = venv,
+        ) if not nopretty else run_process(
+            (
+                [venv_executable(venv)] + (
+                    sub_args or
+                    (
+                        (
+                            ['-i']
+                            if not noask
+                            else []
+                        ) + [init_script_path.as_posix()]
+                    )
+                )
+            ),
+            foreground = True,
         )
     except KeyboardInterrupt:
         return_code = 1

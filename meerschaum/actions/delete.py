@@ -29,6 +29,7 @@ def delete(
         'users'      : _delete_users,
         'connectors' : _delete_connectors,
         'jobs'       : _delete_jobs,
+        'venvs'      : _delete_venvs,
     }
     return choose_subaction(action, options, **kw)
 
@@ -485,6 +486,67 @@ def _delete_jobs(
             + f" {items_str([d.daemon_id for d in _deleted])}."),
     )
 
+
+def _delete_venvs(
+        action: Optional[List[str]] = None,
+        yes: bool = False,
+        force: bool = False,
+        **kwargs: Any
+    ) -> SuccessTuple:
+    """
+    Remove virtual environments.
+    Specify which venvs to remove, or remove everything at once.
+    """
+    import os
+    import shutil
+    import pathlib
+    from meerschaum.config.paths import VIRTENV_RESOURCES_PATH
+    from meerschaum.utils.venv import venv_exists
+    from meerschaum.utils.prompt import yes_no
+    from meerschaum.utils.misc import print_options
+    from meerschaum.utils.warnings import warn
+
+    venvs_to_skip = ['mrsm']
+    venvs = [
+        _venv
+        for _venv in action or os.listdir(VIRTENV_RESOURCES_PATH)
+        if venv_exists(_venv)
+        and _venv not in venvs_to_skip
+    ]
+
+    if not venvs:
+        msg = "No venvs to delete."
+        if action:
+            return False, msg
+        return True, msg
+
+    print_options(
+        venvs,
+        header = 'Venvs to Delete:',
+        **kwargs
+    )
+    confirm_delete = yes_no(
+        (
+            "Remove the above venv" + ('s' if len(venvs) != 1 else '') + "?\n    "
+            + "Run `mrsm upgrade packages` and `mrsm install required` to reinstall dependencies.\n"
+        ),
+        yes = yes,
+        default = 'n',
+        force = force,
+    )
+    if not confirm_delete:
+        return True, "Nothing was deleted."
+
+    for venv in venvs:
+        venv_path = pathlib.Path(VIRTENV_RESOURCES_PATH / venv)
+        try:
+            shutil.rmtree(venv_path)
+        except Exception as e:
+            error_msg = f"Failed to remove '{venv_path}':\n{e}"
+            return False, error_msg
+
+    msg = f"Removed {len(venvs)} venv" + ('s' if len(venvs) != 1 else '') + '.'
+    return True, msg
 
 
 ### NOTE: This must be the final statement of the module.

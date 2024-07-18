@@ -7,6 +7,7 @@ Functions for editing elements belong here.
 """
 
 from __future__ import annotations
+import meerschaum as mrsm 
 from meerschaum.utils.typing import List, Any, SuccessTuple, Optional, Dict
 
 def edit(
@@ -22,19 +23,22 @@ def edit(
         'pipes'     : _edit_pipes,
         'definition': _edit_definition,
         'users'     : _edit_users,
+        'plugins'   : _edit_plugins,
     }
     return choose_subaction(action, options, **kw)
 
 
 def _complete_edit(
-        action: Optional[List[str]] = None,
-        **kw: Any
-    ) -> List[str]:
+    action: Optional[List[str]] = None,
+    **kw: Any
+) -> List[str]:
     """
     Override the default Meerschaum `complete_` function.
     """
     options = {
         'config': _complete_edit_config,
+        'plugin': _complete_edit_plugins,
+        'plugins': _complete_edit_plugins,
     }
 
     if action is None:
@@ -78,7 +82,7 @@ def _edit_config(action : Optional[List[str]] = None, **kw : Any) -> SuccessTupl
         action.append('meerschaum')
     return edit_config(keys=action, **kw)
 
-def _complete_edit_config(action: Optional[List[str]] = None, **kw : Any) -> List[str]:
+def _complete_edit_config(action: Optional[List[str]] = None, **kw: Any) -> List[str]:
     from meerschaum.config._read_config import get_possible_keys
     keys = get_possible_keys()
     if not action:
@@ -172,9 +176,9 @@ def _edit_pipes(
 
 
 def _edit_definition(
-        action: Optional[List[str]] = None,
-        **kw
-    ) -> SuccessTuple:
+    action: Optional[List[str]] = None,
+    **kw
+) -> SuccessTuple:
     """
     Edit pipes' definitions.
     Alias for `edit pipes definition`.
@@ -183,13 +187,13 @@ def _edit_definition(
 
 
 def _edit_users(
-        action: Optional[List[str]] = None,
-        mrsm_instance: Optional[str] = None,
-        yes: bool = False,
-        noask: bool = False,
-        debug: bool = False,
-        **kw: Any
-    ) -> SuccessTuple:
+    action: Optional[List[str]] = None,
+    mrsm_instance: Optional[str] = None,
+    yes: bool = False,
+    noask: bool = False,
+    debug: bool = False,
+    **kw: Any
+) -> SuccessTuple:
     """
     Edit users' registration information.
     """
@@ -262,7 +266,7 @@ def _edit_users(
     if not action:
         return False, "No users to edit."
 
-    success = dict()
+    success = {}
     for username in action:
         try:
             user = build_user(username)
@@ -288,6 +292,85 @@ def _edit_users(
     )
     info(msg)
     return True, msg
+
+
+def _edit_plugins(
+    action: Optional[List[str]] = None,
+    debug: bool = False,
+    **kwargs: Any
+):
+    """
+    Edit a plugin's source code.
+    """
+    import pathlib
+    from meerschaum.utils.warnings import warn
+    from meerschaum.utils.prompt import prompt, yes_no
+    from meerschaum.utils.misc import edit_file
+    from meerschaum.utils.packages import reload_meerschaum
+    from meerschaum.actions import actions
+
+    if not action:
+        return False, "Specify which plugin to edit."
+
+    for plugin_name in action:
+        plugin = mrsm.Plugin(plugin_name)
+
+        if not plugin.is_installed():
+            warn(f"Plugin '{plugin_name}' is not installed.", stack=False)
+
+            if not yes_no(
+                f"Would you like to create a new plugin '{plugin_name}'?",
+                **kwargs
+            ):
+                return False, f"Plugin '{plugin_name}' does not exist."
+
+            actions['bootstrap'](
+                ['plugins', plugin_name],
+                debug = debug,
+                **kwargs
+            )
+            continue
+
+        plugin_file_path = pathlib.Path(plugin.__file__).resolve()
+
+        try:
+            _ = prompt(f"Press [Enter] to open '{plugin_file_path}':", icon=False)
+        except (KeyboardInterrupt, Exception):
+            continue
+
+        edit_file(plugin_file_path)
+        reload_meerschaum(debug=debug)
+
+    return True, "Success"
+
+
+def _complete_edit_plugins(
+    action: Optional[List[str]] = None,
+    line: Optional[str] = None,
+    **kw: Any
+) -> List[str]:
+    from meerschaum.plugins import get_plugins_names
+    plugins_names = get_plugins_names(try_import=False)
+    if not action:
+        return plugins_names
+
+    last_word = action[-1]
+    if last_word in plugins_names and (line or '')[-1] == ' ':
+        return [
+            plugin_name
+            for plugin_name in plugins_names
+            if plugin_name not in action
+        ]
+
+    possibilities = []
+    for plugin_name in plugins_names:
+        if (
+            plugin_name.startswith(last_word)
+            and plugin_name not in action
+        ):
+            possibilities.append(plugin_name)
+    return possibilities
+
 
 ### NOTE: This must be the final statement of the module.
 ###       Any subactions added below these lines will not

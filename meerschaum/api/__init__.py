@@ -237,4 +237,3 @@ for module_name, functions_list in _api_plugins.items():
                 + f"when executing function '{function.__name__}' with exception:\n{e}",
                 stack=False,
             )
-

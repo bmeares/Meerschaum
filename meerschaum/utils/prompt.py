@@ -61,6 +61,7 @@ def prompt(
     from meerschaum.utils.formatting import colored, ANSI, CHARSET, highlight_pipes, fill_ansi
     from meerschaum.config import get_config
     from meerschaum.config.static import _static_config
+    from meerschaum.utils.misc import filter_keywords
     noask = check_noask(noask)
     if not noask:
         prompt_toolkit = attempt_import('prompt_toolkit')
@@ -101,7 +102,7 @@ def prompt(
         prompt_toolkit.prompt(
             prompt_toolkit.formatted_text.ANSI(question),
             wrap_lines = wrap_lines,
-            **kw
+            **filter_keywords(prompt_toolkit.prompt, **kw)
         ) if not noask else ''
     )
     if noask:
@@ -192,10 +193,11 @@ def yes_no(
 
 def choose(
         question: str,
-        choices: List[str],
-        default: Optional[str] = None,
+        choices: List[Union[str, Tuple[str, str]]],
+        default: Union[str, List[str], None] = None,
         numeric: bool = True,
         multiple: bool = False,
+        as_indices: bool = False,
         delimiter: str = ',',
         icon: bool = True,
         warn: bool = True,
@@ -210,10 +212,12 @@ def choose(
     question: str
         The question to be printed.
 
-    choices: List[str]
+    choices: List[Union[str, Tuple[str, str]]
         A list of options.
+        If an option is a tuple of two strings, the first string is treated as the index
+        and not displayed. In this case, set `as_indices` to `True` to return the index.
 
-    default: Optional[str], default None
+    default: Union[str, List[str], None], default None
         If the user declines to enter a choice, return this value.
 
     numeric: bool, default True
@@ -222,6 +226,11 @@ def choose(
 
     multiple: bool, default False
         If `True`, allow the user to choose multiple answers separated by `delimiter`.
+
+    as_indices: bool, default False
+        If `True`, return the indices for the choices.
+        If a choice is a tuple of two strings, the first is assumed to be the index.
+        Otherwise the index in the list is returned.
 
     delimiter: str, default ','
         If `multiple`, separate answers by this string. Raise a warning if this string is contained
@@ -243,6 +252,7 @@ def choose(
     """
     from meerschaum.utils.warnings import warn as _warn
     from meerschaum.utils.packages import attempt_import
+    from meerschaum.utils.misc import print_options
     noask = check_noask(noask)
 
     ### Handle empty choices.
@@ -254,8 +264,14 @@ def choose(
     if isinstance(default, list):
         multiple = True
 
+    choices_indices = {}
+    for i, c in enumerate(choices):
+        if isinstance(c, tuple):
+            i, c = c
+        choices_indices[i] = c
+
     def _enforce_default(d):
-        if d is not None and d not in choices and warn:
+        if d is not None and d not in choices and d not in choices_indices and warn:
             _warn(
                 f"Default choice '{default}' is not contained in the choices {choices}. "
                 + "Setting numeric = False.",
@@ -271,16 +287,18 @@ def choose(
             break
 
     _default = default
-    _choices = choices
+    _choices = list(choices_indices.values())
     if multiple:
-        question += f"\n    Enter your choices, separated by '{delimiter}'."
+        question += f"\n    Enter your choices, separated by '{delimiter}'.\n"
 
     altered_choices = {}
     altered_indices = {}
     altered_default_indices = {}
     delim_replacement = '_' if delimiter != '_' else '-'
     can_strip_start_spaces, can_strip_end_spaces = True, True
-    for c in choices:
+    for i, c in choices_indices.items():
+        if isinstance(c, tuple):
+            key, c = c
         if can_strip_start_spaces and c.startswith(' '):
             can_strip_start_spaces = False
         if can_strip_end_spaces and c.endswith(' '):
@@ -301,8 +319,8 @@ def choose(
             default[i] = new_d
 
         ### Check if the choices have the delimiter.
-        for i, c in enumerate(choices):
-            if delimiter in c and warn:
+        for i, c in choices_indices.items():
+            if delimiter in c and not numeric and warn:
                 _warn(
                     f"The delimiter '{delimiter}' is contained within choice '{c}'.\n"
                     + f"Replacing the string '{delimiter}' with '{delim_replacement}' in "
@@ -313,34 +331,53 @@ def choose(
                 altered_choices[new_c] = c
                 altered_indices[i] = new_c
         for i, new_c in altered_indices.items():
-            choices[i] = new_c
+            choices_indices[i] = new_c
         default = delimiter.join(default) if isinstance(default, list) else default
 
+    question_options = []
     if numeric:
         _choices = [str(i + 1) for i, c in enumerate(choices)]
         _default = ''
         if default is not None:
             for d in (default.split(delimiter) if multiple else [default]):
+                if d not in choices and d in choices_indices:
+                    d_index = d
+                    d_value = choices_indices[d]
+                    for _i, _option in enumerate(choices):
+                        if (
+                            isinstance(_option, tuple) and (
+                                _option[1] == d_value
+                                or
+                                _option[0] == d_index
+                            )
+                        ) or d_index == _i:
+                            d = _option
+
                 _d = str(choices.index(d) + 1)
                 _default += _d + delimiter
         _default = _default[:-1 * len(delimiter)]
-        question += '\n'
+        #  question += '\n'
         choices_digits = len(str(len(choices)))
-        for i, c in enumerate(choices):
-            question += f"  {i + 1}. " + (" " * (choices_digits - len(str(i + 1)))) + f"{c}\n"
+        for i, c in enumerate(choices_indices.values()):
+            question_options.append(
+                f"  {i + 1}. "
+                + (" " * (choices_digits - len(str(i + 1))))
+                + f"{c}\n"
+            )
         default_tuple = (_default, default) if default is not None else None
     else:
         default_tuple = default
-        question += '\n'
-        for c in choices:
-            question += f"  - {c}\n"
+        #  question += '\n'
+        for c in choices_indices.values():
+            question_options.append(f"{c}\n")
 
     if 'completer' not in kw:
         WordCompleter = attempt_import('prompt_toolkit.completion').WordCompleter
-        kw['completer'] = WordCompleter(choices, sentence=True)
+        kw['completer'] = WordCompleter(choices_indices.values(), sentence=True)
 
     valid = False
     while not valid:
+        print_options(question_options, header='')
         answer = prompt(
             question,
             icon = icon,
@@ -383,7 +420,10 @@ def choose(
         if not numeric:
             return answer
         try:
-            return choices[int(answer) - 1]
+            _answer = choices[int(answer) - 1]
+            if as_indices and isinstance(choice, tuple):
+                return _answer[0]
+            return _answer
         except Exception as e:
             _warn(f"Could not cast answer '{answer}' to an integer.", stacklevel=3)
 
@@ -393,7 +433,10 @@ def choose(
     for a in answers:
         try:
             _answer = choices[int(a) - 1]
-            _answers.append(altered_choices.get(_answer, _answer))
+            _answer_to_return = altered_choices.get(_answer, _answer)
+            if isinstance(_answer_to_return, tuple) and as_indices:
+                _answer_to_return = _answer_to_return[0]
+            _answers.append(_answer_to_return)
         except Exception as e:
             _warn(f"Could not cast answer '{a}' to an integer.", stacklevel=3)
     return _answers

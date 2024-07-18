@@ -8,7 +8,12 @@ Enforce data types for a pipe's underlying table.
 
 from __future__ import annotations
 from io import StringIO
+import meerschaum as mrsm
 from meerschaum.utils.typing import Dict, Any, Optional
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    pd = mrsm.attempt_import('pandas')
 
 def enforce_dtypes(
         self,

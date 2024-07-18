@@ -42,6 +42,7 @@ def show(
         'logs'       : _show_logs,
         'tags'       : _show_tags,
         'schedules'  : _show_schedules,
+        'venvs'      : _show_venvs,
     }
     return choose_subaction(action, show_options, **kw)
 
@@ -218,15 +219,24 @@ def _show_connectors(
     from meerschaum.config import get_config
     from meerschaum.utils.formatting import make_header
     from meerschaum.utils.formatting import pprint
+
+    conn_type = action[0].split(':')[0] if action else None
+
     if not nopretty:
-        print(make_header("\nConfigured connectors:"))
-    pprint(get_config('meerschaum', 'connectors'), nopretty=nopretty)
-    if not nopretty:
+        print(make_header(
+            f"""\nConfigured {"'" + (conn_type + "' ") if conn_type else ''}Connectors:"""
+        ))
+
+    keys = ['meerschaum', 'connectors']
+    if conn_type:
+        keys.append(conn_type)
+    pprint(get_config(*keys), nopretty=nopretty)
+    if not nopretty and not conn_type:
         print(make_header("\nActive connectors:"))
         pprint(connectors, nopretty=nopretty)
 
     from meerschaum.connectors.parse import parse_instance_keys
-    if action:
+    if action and ':' in action[0]:
         attr, keys = parse_instance_keys(action[0], construct=False, as_tuple=True, debug=debug)
         if attr:
             if not nopretty:
@@ -902,6 +912,31 @@ def _show_schedules(
 
     return True, "Success"
         
+
+def _show_venvs(
+        **kwargs: Any    
+    ):
+    """
+    Print the available virtual environments in the current MRSM_ROOT_DIR.
+    """
+    import os
+    import pathlib
+    from meerschaum.config.paths import VIRTENV_RESOURCES_PATH
+    from meerschaum.utils.venv import venv_exists
+    from meerschaum.utils.misc import print_options
+
+    venvs = [
+        _venv
+        for _venv in os.listdir(VIRTENV_RESOURCES_PATH)
+        if venv_exists(_venv)
+    ]
+    print_options(
+        venvs,
+        name = 'Venvs:',
+        **kwargs
+    )
+
+    return True, "Success"
 
 
 ### NOTE: This must be the final statement of the module.

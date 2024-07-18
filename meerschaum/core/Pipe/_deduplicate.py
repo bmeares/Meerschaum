@@ -8,7 +8,7 @@ Delete duplicate rows within a pipe's table.
 
 from __future__ import annotations
 from datetime import datetime, timedelta
-from meerschaum.utils.typing import SuccessTuple, Any, Optional, Dict, Tuple
+from meerschaum.utils.typing import SuccessTuple, Any, Optional, Dict, Tuple, Union
 
 
 def deduplicate(

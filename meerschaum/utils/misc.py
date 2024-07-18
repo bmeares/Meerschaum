@@ -6,6 +6,7 @@ Miscellaneous functions go here
 """
 
 from __future__ import annotations
+import sys
 from datetime import timedelta, datetime, timezone
 from meerschaum.utils.typing import (
     Union,
@@ -22,8 +23,11 @@ from meerschaum.utils.typing import (
     Hashable,
     Generator,
     Iterator,
+    TYPE_CHECKING,
 )
 import meerschaum as mrsm
+if TYPE_CHECKING:
+    import collections
 
 __pdoc__: Dict[str, bool] = {
     'to_pandas_dtype': False,
@@ -208,6 +212,7 @@ def parse_config_substitution(
 
     return leading_key[len(leading_key):][len():-1].split(delimeter)
 
+
 def edit_file(
         path: Union[pathlib.Path, str],
         default_editor: str = 'pyvim',
@@ -233,7 +238,6 @@ def edit_file(
     Returns
     -------
     A bool indicating the file was successfully edited.
-
     """
     import os
     from subprocess import call
@@ -254,7 +258,7 @@ def edit_file(
 
 
 def is_pipe_registered(
-        pipe: 'meerschaum.Pipe',
+        pipe: mrsm.Pipe,
         pipes: PipesDict,
         debug: bool = False
     ) -> bool:
@@ -726,25 +730,53 @@ def replace_password(d: Dict[str, Any], replace_with: str = '*') -> Dict[str, An
     return _d
 
 
-def filter_keywords(
-        func: Callable[[Any], Any],
-        **kw: Any
-    ) -> Dict[str, Any]:
+def filter_arguments(
+    func: Callable[[Any], Any],
+    *args: Any,
+    **kwargs: Any
+) -> Tuple[Tuple[Any], Dict[str, Any]]:
     """
-    Filter out unsupported keywords.
+    Filter out unsupported positional and keyword arguments.
 
     Parameters
     ----------
     func: Callable[[Any], Any]
         The function to inspect.
-        
+
+    *args: Any
+        Positional arguments to filter and pass to `func`.
+
+    **kwargs
+        Keyword arguments to filter and pass to `func`.
+
+    Returns
+    -------
+    The `args` and `kwargs` accepted by `func`.
+    """
+    args = filter_positionals(func, *args)
+    kwargs = filter_keywords(func, **kwargs)
+    return args, kwargs
+
+
+def filter_keywords(
+    func: Callable[[Any], Any],
+    **kw: Any
+) -> Dict[str, Any]:
+    """
+    Filter out unsupported keyword arguments.
+
+    Parameters
+    ----------
+    func: Callable[[Any], Any]
+        The function to inspect.
+
     **kw: Any
         The arguments to be filtered and passed into `func`.
 
     Returns
     -------
     A dictionary of keyword arguments accepted by `func`.
-    
+
     Examples
     --------
     ```python
@@ -764,6 +796,69 @@ def filter_keywords(
         if '**' in str(_type):
             return kw
     return {k: v for k, v in kw.items() if k in func_params}
+
+
+def filter_positionals(
+    func: Callable[[Any], Any],
+    *args: Any
+) -> Tuple[Any]:
+    """
+    Filter out unsupported positional arguments.
+
+    Parameters
+    ----------
+    func: Callable[[Any], Any]
+        The function to inspect.
+
+    *args: Any
+        The arguments to be filtered and passed into `func`.
+        NOTE: If the function signature expects more arguments than provided,
+        the missing slots will be filled with `None`.
+
+    Returns
+    -------
+    A tuple of positional arguments accepted by `func`.
+
+    Examples
+    --------
+    ```python
+    >>> def foo(a, b):
+    ...     return a * b
+    >>> filter_positionals(foo, 2, 4, 6)
+    (2, 4)
+    >>> foo(*filter_positionals(foo, 2, 4, 6))
+    8
+    ```
+
+    """
+    import inspect
+    from meerschaum.utils.warnings import warn
+    func_params = inspect.signature(func).parameters
+    acceptable_args: List[Any] = []
+
+    def _warn_invalids(_num_invalid):
+        if _num_invalid > 0:
+            warn(
+                "Too few arguments were provided. "
+                + f"{_num_invalid} argument"
+                + ('s have ' if _num_invalid != 1 else " has ")
+                + " been filled with `None`.",
+            )
+
+    num_invalid: int = 0
+    for i, (param, val) in enumerate(func_params.items()):
+        if '=' in str(val) or '*' in str(val):
+            _warn_invalids(num_invalid)
+            return tuple(acceptable_args)
+
+        try:
+            acceptable_args.append(args[i])
+        except IndexError:
+            acceptable_args.append(None)
+            num_invalid += 1
+
+    _warn_invalids(num_invalid)
+    return tuple(acceptable_args)
 
 
 def dict_from_od(od: collections.OrderedDict) -> Dict[Any, Any]:
@@ -974,10 +1069,11 @@ def async_wrap(func):
 def debug_trace(browser: bool = True):
     """
     Open a web-based debugger to trace the execution of the program.
+
+    This is an alias import for `meerschaum.utils.debug.debug_trace`.
     """
-    from meerschaum.utils.packages import attempt_import
-    heartrate = attempt_import('heartrate')
-    heartrate.trace(files=heartrate.files.all, browser=browser)
+    from meerschaum.utils.debug import trace
+    trace(browser=browser)
 
 
 def items_str(
@@ -1554,3 +1650,13 @@ def _get_subaction_names(*args, **kwargs) -> Any:
     """
     from meerschaum.actions import _get_subaction_names as real_function
     return real_function(*args, **kwargs)
+
+
+_current_module = sys.modules[__name__]
+__all__ = tuple(
+    name
+    for name, obj in globals().items()
+    if callable(obj)
+        and name not in __pdoc__
+        and getattr(obj, '__module__', None) == _current_module.__name__
+)

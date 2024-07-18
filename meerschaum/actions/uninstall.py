@@ -25,9 +25,9 @@ def uninstall(
 
 
 def _complete_uninstall(
-        action: Optional[List[str]] = None,
-        **kw: Any
-    ) -> List[str]:
+    action: Optional[List[str]] = None,
+    **kw: Any
+) -> List[str]:
     """
     Override the default Meerschaum `complete_` function.
     """
@@ -49,15 +49,16 @@ def _complete_uninstall(
     from meerschaum._internal.shell import default_action_completer
     return default_action_completer(action=(['uninstall'] + action), **kw)
 
+
 def _uninstall_plugins(
-        action: Optional[List[str]] = None,
-        repository: Optional[str] = None,
-        yes: bool = False,
-        force: bool = False,
-        noask: bool = False,
-        debug: bool = False,
-        **kw: Any
-    ) -> SuccessTuple:
+    action: Optional[List[str]] = None,
+    repository: Optional[str] = None,
+    yes: bool = False,
+    force: bool = False,
+    noask: bool = False,
+    debug: bool = False,
+    **kw: Any
+) -> SuccessTuple:
     """
     Remove installed plugins. Does not affect repository registrations.
     """
@@ -135,26 +136,20 @@ def _uninstall_plugins(
 
 
 def _complete_uninstall_plugins(action: Optional[List[str]] = None, **kw) -> List[str]:
-    from meerschaum.plugins import get_plugins_names
-    _plugin_names = get_plugins_names()
-    if not action:
-        return _plugin_names
-    possibilities = []
-    for name in _plugin_names:
-        if name.startswith(action[0]) and action[0] != name:
-            possibilities.append(name)
-    return possibilities
+    from meerschaum.actions.edit import _complete_edit_plugins
+    return _complete_edit_plugins(action=action, **kw)
+
 
 def _uninstall_packages(
-        action: Optional[List[str]] = None,
-        sub_args: Optional[List[str]] = None,
-        venv: Optional[str] = 'mrsm',
-        yes: bool = False,
-        force: bool = False,
-        noask: bool = False,
-        debug: bool = False,
-        **kw: Any
-    ) -> SuccessTuple:
+    action: Optional[List[str]] = None,
+    sub_args: Optional[List[str]] = None,
+    venv: Optional[str] = 'mrsm',
+    yes: bool = False,
+    force: bool = False,
+    noask: bool = False,
+    debug: bool = False,
+    **kw: Any
+) -> SuccessTuple:
     """
     Uninstall PyPI packages from the Meerschaum virtual environment.
     

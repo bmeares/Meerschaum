@@ -355,26 +355,29 @@ class RotatingFile(io.IOBase):
         As such, if data is larger than max_file_size, then the corresponding subfile
         may exceed this limit.
         """
-        self.file_path.parent.mkdir(exist_ok=True, parents=True)
-        if isinstance(data, bytes):
-            data = data.decode('utf-8')
-
-        prefix_str = self.get_timestamp_prefix_str() if self.write_timestamps else ""
-        suffix_str = "\n" if self.write_timestamps else ""
-        self.refresh_files(
-            potential_new_len = len(prefix_str + data + suffix_str),
-            start_interception = self.write_timestamps,
-        )
         try:
-            if prefix_str:
-                self._current_file_obj.write(prefix_str)
-            self._current_file_obj.write(data)
-            if suffix_str:
-                self._current_file_obj.write(suffix_str)
+            self.file_path.parent.mkdir(exist_ok=True, parents=True)
+            if isinstance(data, bytes):
+                data = data.decode('utf-8')
+
+            prefix_str = self.get_timestamp_prefix_str() if self.write_timestamps else ""
+            suffix_str = "\n" if self.write_timestamps else ""
+            self.refresh_files(
+                potential_new_len = len(prefix_str + data + suffix_str),
+                start_interception = self.write_timestamps,
+            )
+            try:
+                if prefix_str:
+                    self._current_file_obj.write(prefix_str)
+                self._current_file_obj.write(data)
+                if suffix_str:
+                    self._current_file_obj.write(suffix_str)
+            except Exception as e:
+                warn(f"Failed to write to subfile:\n{traceback.format_exc()}")
+            self.flush()
+            self.delete(unused_only=True)
         except Exception as e:
-            warn(f"Failed to write to subfile:\n{traceback.format_exc()}")
-        self.flush()
-        self.delete(unused_only=True)
+            warn(f"Unexpected error in RotatingFile.write: {e}")
 
 
     def delete(self, unused_only: bool = False) -> None:

@@ -13,6 +13,23 @@ fastapi = attempt_import('fastapi', lazy=False, check_update=CHECK_UPDATE)
 fastapi_responses = attempt_import('fastapi.responses', lazy=False, check_update=CHECK_UPDATE)
 fastapi_login = attempt_import('fastapi_login', check_update=CHECK_UPDATE)
 
+class CustomOAuth2PasswordRequestForm:
+    def __init__(
+        self,
+        grant_type: str = fastapi.Form(None, regex="password|client_credentials"),
+        username: str = fastapi.Form(...),
+        password: str = fastapi.Form(...),
+        scope: str = fastapi.Form(""),
+        client_id: str = fastapi.Form(None),
+        client_secret: str = fastapi.Form(None),
+    ):
+        self.grant_type = grant_type
+        self.username = username
+        self.password = password
+        self.scope = scope
+        self.client_id = client_id
+        self.client_secret = client_secret
+
 LoginManager = fastapi_login.LoginManager
 def generate_secret_key() -> str:
     """

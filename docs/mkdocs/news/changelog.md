@@ -4,6 +4,88 @@
 
 This is the current release cycle, so stay tuned for future releases!
 
+### v2.2.5
+
+- **Add `bootstrap plugin`.**  
+  The `bootstrap plugin` wizard provides a convenient way to create new plugins from templates.
+
+- **Add `edit plugin`.**  
+  The action `edit plugin` will open a plugin's source file in your editor (`$EDITOR` or `pyvim`).
+
+- **Allow actions, `fetch()`, and `sync()` to omit `pipe` and `**kwargs`.**  
+  Adding `**kwargs` (and `pipe`) is now optional, and you may instead explicitly state only the arguments required.
+
+  ```python
+  from meerschaum.actions import make_action
+
+  @make_action
+  def do_the_thing(shell=False):
+      msg = (
+          "You're in the mrsm shell."
+          if shell
+          else "You called this from bash."
+      )
+      return True, msg
+
+
+  # You may now omit the positional argument `pipe`.
+  def fetch(begin=None, end=None):
+      return [{'ts': '2024-01-01'}]
+  ```
+
+- **Fixed minor bug with subaction detection.**  
+  Subaction functions must now explicitly begin with the name of the parent action (underscore prefix allowed).
+
+  ```python
+  from meerschaum.actions import make_action
+
+  @make_action
+  def sing():
+      return True, "~la la la~"
+
+  def sing_song():
+      return True, "~do re mi~"
+
+  def _sing_tune():
+      return True, "~fo so la ti~"
+  ```
+
+- **Allow for `--begin None`.**  
+  Explicitly setting `--begin None` will now pass `None` to `fetch()`.
+
+- **Persist user packages in stack Docker container.**  
+  The stack Docker Compose file now persists user-level packages (under `~/.local`).
+
+- **Throw a warning if a `@dash_plugin` function raises an exception.**
+
+- **Added connector type to `show connectors`.**  
+  Append a connector type to the `show connectors` command (e.g. `show connectors sql`) to see only connectors of a certain type.
+
+- **Allow `dprint` to be imported from `meerschaum.utils.warnings`.**  
+  For convenience, you may now import `dprint` alongside `info`, `warn`, and `error`.
+
+  ```python
+  from meerschaum.utils.warnings import dprint, warn, info, error
+  ```
+
+- **Add positional arguments filtering (`filter_positional()` and `filter_arguments()`)**  
+  In addition to keyword argument filtering, you may now filter positional arguments.
+
+  ```python
+  from meerschaum.utils.misc import filter_arguments, filter_positional
+
+  def foo(a, b, c=0):
+      return (a * b) + c
+
+  filter_positional(foo, 1, 2, 3)
+  # (1, 2)
+
+  filter_arguments(foo, 1, 2, c=3, d=4)
+  # ((1, 2), {'c': 3})
+  ```
+  
+- **Cleaned up OAuth flow (`/login`).**
+
 ### v2.2.2 – v2.2.4
 
 - **Speed up package installation in virtual environments.**  

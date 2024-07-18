@@ -56,6 +56,7 @@ env_dict['MEERSCHAUM_API_CONFIG'] = json.dumps(
 
 volumes = {
     'api_root': '/meerschaum',
+    'api_user_local': '/home/meerschaum/.local',
     'meerschaum_db_data': '/var/lib/postgresql/data',
     'grafana_storage': '/var/lib/grafana',
 }
@@ -122,7 +123,7 @@ default_docker_compose_config = {
             ],
             'hostname' : f'{db_hostname}',
             'volumes' : [
-                'meerschaum_db_data' + ':' + volumes['meerschaum_db_data'],
+                'meerschaum_db_data:' + volumes['meerschaum_db_data'],
             ],
             'shm_size': '1024m',
             'networks' : [
@@ -159,6 +160,7 @@ default_docker_compose_config = {
             },
             'volumes' : [
                 'api_root:' + volumes['api_root'],
+                'api_user_local:' + volumes['api_user_local'],
             ],
         },
         'grafana': {

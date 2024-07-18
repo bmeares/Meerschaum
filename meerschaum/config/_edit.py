@@ -171,7 +171,7 @@ def general_write_yaml_config(
         path = pathlib.Path(fp)
         path.parent.mkdir(parents=True, exist_ok=True)
         path.touch(exist_ok=True)
-        with open(path, 'w+') as f:
+        with open(path, 'w+', encoding='utf-8') as f:
             if header is not None:
                 if debug:
                     dprint(f"Header detected, writing to {path}...")
