@@ -238,7 +238,6 @@ def edit_file(
     Returns
     -------
     A bool indicating the file was successfully edited.
-
     """
     import os
     from subprocess import call
