@@ -222,7 +222,7 @@ def sync(
                         **kw
                     )
                     return self.instance_connector.sync_pipe_inplace(
-                        _args,
+                        *_args,
                         **_kwargs
                     )
 

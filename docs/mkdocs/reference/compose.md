@@ -40,7 +40,7 @@ With `mrsm compose up`, you can stand up syncing jobs for your pipes defined in 
           SELECT
             timestamp,
             station,
-            (("temperature (wmoUnit:degC)" * 1.8) + 32) AS fahrenheit
+            (("temperature (degC)" * 1.8) + 32) AS fahrenheit
           FROM plugin_noaa_weather_atlanta
         columns:
           datetime: "timestamp"
@@ -142,20 +142,22 @@ Flag | Description | Example
 
 The supported top-level keys in a Compose file are the following:
 
-- **`sync`** (**required**)  
-  Govern the behavior of the syncing process. See **The `sync` Key** section below for further details.
-- **`project_name`** (*optional*)  
+- **`pipes`**  
+  List all of the pipes to be used in this project. See the **The `pipes` Key** section below.
+- **`sync`**  
+  Govern the behavior of the syncing process. See **The `sync` Key** section below.
+- **`project_name`** (default to directory name)  
   The tag given to all pipes in this project. Defaults to the current directory. If you're using multiple compose files, make sure each file has a unique project name.
-- **`root_dir`** (*optional*, default `./root/`)  
+- **`root_dir`** (default `./root/`)  
   A path to the root directory; see [`MRSM_ROOT_DIR`](/reference/environment/#mrsm_root_dir).
-- **`plugins_dir`** (*optional*, default `./plugins/`)  
+- **`plugins_dir`** (default `./plugins/`)  
   Either a path or list of paths to the plugins directories. A value of `null` will include the current environment plugins directories in the project. See [`MRSM_PLUGINS_DIR`](/reference/environment/#mrsm_plugins_dir).
-- **`plugins`** (*optional*)  
+- **`plugins`**  
   A list of plugins expected to be in the plugins directory. Missing plugins will be [installed from `api:mrsm`](/reference/plugins/using-plugins/).  
   To install from a custom repository, append `@api:<label>` to the plugins' names or set the configuration variable `meerschaum:default_repository`.
-- **`config`** (*optional*)  
+- **`config`**  
   Configuration keys to be patched on top of your host configuration, see [`MRSM_CONFIG`](/reference/environment/#mrsm_config). Custom connectors should be defined here.
-- **`environment`** (*optional*)  
+- **`environment`**  
   Additional environment variables to pass to subprocesses.
 
 !!! tip "Accessing the host configuration"
@@ -169,25 +171,26 @@ The supported top-level keys in a Compose file are the following:
           foo: MRSM{meerschaum:connectors:sql:main}
     ```
 
+### The `pipes` Key
+The `pipes` key contains a list of [keyword arguments to build `mrsm.Pipe` objects](https://docs.meerschaum.io/index.html#meerschaum.Pipe), notably:
+  - `connector` (required)
+  - `metric` (required)
+  - `location` (default `null`)
+  - `instance` (default to `config:meerschaum:instance`)
+  - `parameters`
+  - `columns`  
+    Alias for `parameters:columns`.
+  - `target`  
+    Alias for `parameters:target`.
+  - `tags`  
+    Alias for `parameters:tags`.
+  - `dtypes`  
+    Alias for `parameters:dtypes`.
+
 ### The `sync` Key
 
 Keys under the root key `sync` are the following:
 
-- **`pipes`** (**required**)  
-  The `pipes` key contains a list of [keyword arguments to build `mrsm.Pipe` objects](https://docs.meerschaum.io/index.html#meerschaum.Pipe), notably:
-    - `connector` (**required**)
-    - `metric` (**required**)
-    - `location` (*optional*, default `null`)
-    - `instance` (*optional*, defaults to `config:meerschaum:instance`)
-    - `parameters` (*optional*)
-    - `columns` (*optional*)  
-      Alias for `parameters:columns`.
-    - `target` (*optional*)  
-      Alias for `parameters:target`.
-    - `tags` (*optional*)  
-      Alias for `parameters:tags`.
-    - `dtypes` (*optional*)  
-    Alias for `parameters:dtypes`.
 - **`schedule`** (*optional*)  
   Define a regular interval for syncing processes by setting a [schedule](/reference/background-jobs/#schedules).  
   This corresponds to the flag `-s` / `--schedule`.
