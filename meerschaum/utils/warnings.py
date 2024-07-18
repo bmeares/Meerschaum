@@ -3,7 +3,7 @@
 # vim:fenc=utf-8
 
 """
-Handle all things warnings and errors here
+Handle all things warnings and errors.
 """
 
 from __future__ import annotations
@@ -12,6 +12,13 @@ from meerschaum.utils.debug import dprint
 
 import sys
 import warnings
+
+__all__ = (
+    'warn',
+    'info',
+    'error',
+    'dprint',
+)
 
 warnings.filterwarnings(
     "always",

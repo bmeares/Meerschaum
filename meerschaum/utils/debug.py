@@ -93,22 +93,16 @@ def _checkpoint(
     ) -> None:
     """If the `_progress` and `_task` objects are provided, increment the task by one step.
     If `_total` is provided, update the total instead.
-
-    Parameters
-    ----------
-    _progress: Optional['rich.progress.Progress'] :
-         (Default value = None)
-    _task: Optional[int] :
-         (Default value = None)
-    _total: Optional[int] :
-         (Default value = None)
-    **kw :
-        
-
-    Returns
-    -------
-
     """
     if _progress is not None and _task is not None:
         _kw = {'total': _total} if _total is not None else {'advance': 1}
         _progress.update(_task, **_kw)
+
+
+def trace(browser: bool = True):
+    """
+    Open a web-based debugger to trace the execution of the program.
+    """
+    from meerschaum.utils.packages import attempt_import
+    heartrate = attempt_import('heartrate')
+    heartrate.trace(files=heartrate.files.all, browser=browser)

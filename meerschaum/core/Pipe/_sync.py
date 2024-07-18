@@ -14,7 +14,9 @@ import threading
 import multiprocessing
 import functools
 from datetime import datetime, timedelta
+from typing import TYPE_CHECKING
 
+import meerschaum as mrsm
 from meerschaum.utils.typing import (
     Union,
     Optional,
@@ -26,12 +28,15 @@ from meerschaum.utils.typing import (
     List,
     Iterable,
     Generator,
-    Iterator,
 )
 from meerschaum.utils.warnings import warn, error
 
+if TYPE_CHECKING:
+    pd = mrsm.attempt_import('pandas')
+
 class InferFetch:
     MRSM_INFER_FETCH: bool = True
+
 
 def sync(
     self,
@@ -125,7 +130,7 @@ def sync(
     from meerschaum.utils.formatting import get_console
     from meerschaum.utils.venv import Venv
     from meerschaum.connectors import get_connector_plugin
-    from meerschaum.utils.misc import df_is_chunk_generator, filter_keywords
+    from meerschaum.utils.misc import df_is_chunk_generator, filter_keywords, filter_arguments
     from meerschaum.utils.pool import get_pool
     from meerschaum.config import get_config
 
@@ -210,28 +215,28 @@ def sync(
             ):
                 with Venv(get_connector_plugin(self.instance_connector)):
                     p._exists = None
-                    return self.instance_connector.sync_pipe_inplace(
+                    _args, _kwargs = filter_arguments(
+                        p.instance_connector.sync_pipe_inplace,
                         p,
-                        **filter_keywords(
-                            p.instance_connector.sync_pipe_inplace,
-                            debug=debug,
-                            **kw
-                        )
+                        debug=debug,
+                        **kw
                     )
-
+                    return self.instance_connector.sync_pipe_inplace(
+                        _args,
+                        **_kwargs
+                    )
 
             ### Activate and invoke `sync(pipe)` for plugin connectors with `sync` methods.
             try:
                 if getattr(p.connector, 'sync', None) is not None:
                     with Venv(get_connector_plugin(p.connector), debug=debug):
-                        return_tuple = p.connector.sync(
+                        _args, _kwargs = filter_arguments(
+                            p.connector.sync,
                             p,
-                            **filter_keywords(
-                                p.connector.sync,
-                                debug=debug,
-                                **kw
-                            )
+                            debug=debug,
+                            **kw
                         )
+                        return_tuple = p.connector.sync(*_args, **_kwargs)
                     p._exists = None
                     if not isinstance(return_tuple, tuple):
                         return_tuple = (

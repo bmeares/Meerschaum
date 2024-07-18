@@ -467,6 +467,7 @@ def fill_ansi(string: str, style: str = '') -> str:
 
     return rich_text_to_str(msg)
 
+
 def __getattr__(name: str) -> str:
     """
     Lazily load module-level variables.

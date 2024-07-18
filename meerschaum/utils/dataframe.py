@@ -8,13 +8,21 @@ Utility functions for working with DataFrames.
 
 from __future__ import annotations
 from datetime import datetime
+
+import meerschaum as mrsm
 from meerschaum.utils.typing import (
     Optional, Dict, Any, List, Hashable, Generator,
-    Iterator, Iterable, Union, Tuple,
+    Iterator, Iterable, Union, TYPE_CHECKING,
 )
 
+if TYPE_CHECKING:
+    pd, dask = mrsm.attempt_import('pandas', 'dask')
 
-def add_missing_cols_to_df(df: 'pd.DataFrame', dtypes: Dict[str, Any]) -> pd.DataFrame:
+
+def add_missing_cols_to_df(
+    df: 'pd.DataFrame',
+    dtypes: Dict[str, Any],
+) -> 'pd.DataFrame':
     """
     Add columns from the dtypes dictionary as null columns to a new DataFrame.
 
@@ -723,7 +731,7 @@ def get_datetime_bound_from_df(
         df: Union['pd.DataFrame', dict, list],
         datetime_column: str,
         minimum: bool = True,
-    ) -> Union[int, 'datetime.datetime', None]:
+    ) -> Union[int, datetime, None]:
     """
     Return the minimum or maximum datetime (or integer) from a DataFrame.
 
@@ -818,7 +826,7 @@ def chunksize_to_npartitions(chunksize: Optional[int]) -> int:
 
 
 def df_from_literal(
-        pipe: Optional['meerschaum.Pipe'] = None,
+        pipe: Optional[mrsm.Pipe] = None,
         literal: str = None,
         debug: bool = False
     ) -> 'pd.DataFrame':

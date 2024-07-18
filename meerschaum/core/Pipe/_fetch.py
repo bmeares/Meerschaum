@@ -8,11 +8,14 @@ Functions for fetching new data into the Pipe
 
 from __future__ import annotations
 from datetime import timedelta, datetime
+
 import meerschaum as mrsm
-from meerschaum.utils.typing import Optional, Any, Union, SuccessTuple, Iterator
+from meerschaum.utils.typing import Optional, Any, Union, SuccessTuple, Iterator, TYPE_CHECKING
 from meerschaum.config import get_config
 from meerschaum.utils.warnings import warn
-from meerschaum.utils.misc import filter_keywords
+
+if TYPE_CHECKING:
+    pd = mrsm.attempt_import('pandas')
 
 def fetch(
         self,
@@ -55,6 +58,7 @@ def fetch(
 
     from meerschaum.connectors import custom_types, get_connector_plugin
     from meerschaum.utils.debug import dprint, _checkpoint
+    from meerschaum.utils.misc import filter_arguments
 
     _chunk_hook = kw.pop('chunk_hook', None)
     kw['workers'] = self.get_num_workers(kw.get('workers', None))
@@ -72,24 +76,22 @@ def fetch(
                 chunk_message = '\n' + chunk_label + '\n' + chunk_message
             return chunk_success, chunk_message
 
-
     with mrsm.Venv(get_connector_plugin(self.connector)):
-        df = self.connector.fetch(
+        _args, _kwargs = filter_arguments(
+            self.connector.fetch,
             self,
-            **filter_keywords(
-                self.connector.fetch,
-                begin=_determine_begin(
-                    self,
-                    begin,
-                    check_existing=check_existing,
-                    debug=debug,
-                ),
-                end=end,
-                chunk_hook=_chunk_hook,
+            begin=_determine_begin(
+                self,
+                begin,
+                check_existing=check_existing,
                 debug=debug,
-                **kw
-            )
+            ),
+            end=end,
+            chunk_hook=_chunk_hook,
+            debug=debug,
+            **kw
         )
+        df = self.connector.fetch(*_args, **_kwargs)
     return df
 
 
