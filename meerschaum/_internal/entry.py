@@ -47,9 +47,6 @@ def entry(sysargs: Optional[List[str]] = None) -> SuccessTuple:
                 )
             )
 
-    #  if args.get('schedule', None):
-        #  from meerschaum.utils.schedule import schedule_function
-        #  return schedule_function(entry_with_args, **args)
     return entry_with_args(**args)
 
 
@@ -122,11 +119,12 @@ def entry_with_args(
 def _do_action_wrapper(action_function, plugin_name, **kw):
     from meerschaum.plugins import Plugin
     from meerschaum.utils.venv import Venv, active_venvs, deactivate_venv
+    from meerschaum.utils.misc import filter_keywords
     plugin = Plugin(plugin_name) if plugin_name else None
     with Venv(plugin, debug=kw.get('debug', False)):
         action_name = ' '.join(action_function.__name__.split('_') + kw.get('action', []))
         try:
-            result = action_function(**kw)
+            result = action_function(**filter_keywords(action_function, **kw))
         except Exception as e:
             if kw.get('debug', False):
                 import traceback

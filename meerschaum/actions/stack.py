@@ -7,7 +7,7 @@ Functions for running the Docker Compose stack
 """
 
 from __future__ import annotations
-from meerschaum.utils.typing import SuccessTuple, Any, List, Optional
+from meerschaum.utils.typing import SuccessTuple, Any, List, Optional, Union
 
 def stack(
         action: Optional[List[str]] = None,
@@ -19,7 +19,7 @@ def stack(
         debug: bool = False,
         _capture_output: bool = False,
         **kw: Any
-    ) -> SuccessTuple:
+    ) -> Union[SuccessTuple, 'subprocess.Popen']:
     """
     Control the Meerschaum stack with Docker Compose.
     Usage: `stack {command}`
@@ -147,18 +147,18 @@ def stack(
             ['docker', 'compose'] if has_builtin_compose
             else ['docker-compose']
         ) + cmd_list,
-        cwd = STACK_COMPOSE_PATH.parent,
-        stdout = stdout,
-        stderr = stderr,
-        env = stack_env_dict,
+        cwd=STACK_COMPOSE_PATH.parent,
+        stdout=stdout,
+        stderr=stderr,
+        env=stack_env_dict,
     ) if (has_builtin_compose or has_binary_compose) else run_python_package(
         'compose',
-        args = cmd_list,
-        cwd = STACK_COMPOSE_PATH.parent,
-        venv = _compose_venv,
-        capture_output = _capture_output,
-        as_proc = True,
-        env = stack_env_dict,
+        args=cmd_list,
+        cwd=STACK_COMPOSE_PATH.parent,
+        venv=_compose_venv,
+        capture_output=_capture_output,
+        as_proc=True,
+        env=stack_env_dict,
     )
     try:
         rc = proc.wait() if proc is not None else 1

@@ -50,7 +50,6 @@ stylesheets = [
     '/static/css/bootstrap.min.css',
     '/static/css/dbc_dark.css',
     '/static/css/dash.css',
-    #  '/static/js/node_modules/xterm/css/xterm.css',
 ]
 scripts = ['/static/js/node_modules/xterm/lib/xterm.js']
 dash_app = enrich.DashProxy(

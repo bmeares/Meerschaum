@@ -37,11 +37,14 @@ class ArgumentParser(argparse.ArgumentParser):
         return result
 
 
-def parse_datetime(dt_str: str) -> datetime:
+def parse_datetime(dt_str: str) -> Union[datetime, int, str]:
     """Parse a string into a datetime."""
     from meerschaum.utils.misc import is_int
     if is_int(dt_str):
         return int(dt_str)
+
+    if dt_str in ('None', '[None]'):
+        return 'None'
 
     from meerschaum.utils.packages import attempt_import
     dateutil_parser = attempt_import('dateutil.parser')
@@ -155,7 +158,6 @@ groups['actions'].add_argument(
     '-d', '--daemon', action='store_true',
     help = "Run an action as a background daemon."
 )
-
 groups['actions'].add_argument(
     '--rm', action='store_true', help="Delete a job once it has finished executing."
 )

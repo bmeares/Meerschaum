@@ -18,7 +18,7 @@ class InvalidAttributesError(Exception):
 
 class Connector(metaclass=abc.ABCMeta):
     """
-    The base connector class to hold connection attributes,
+    The base connector class to hold connection attributes.
     """
     def __init__(
             self,
@@ -27,6 +27,8 @@ class Connector(metaclass=abc.ABCMeta):
             **kw: Any
         ):
         """
+        Set the given keyword arguments as attributes.
+
         Parameters
         ----------
         type: str
@@ -35,9 +37,12 @@ class Connector(metaclass=abc.ABCMeta):
         label: str
             The `label` for the connector.
 
+
+        Examples
+        --------
         Run `mrsm edit config` and to edit connectors in the YAML file:
 
-        ```
+        ```yaml
         meerschaum:
             connections:
                 {type}:

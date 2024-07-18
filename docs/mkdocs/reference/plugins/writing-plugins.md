@@ -520,7 +520,7 @@ Functions decorated with `#!python @web_page` return a [Dash layout](https://das
             Output('my-output-div', 'children'),
             Input('my-location', 'pathname'),
         )
-        def my_button_click(pathname):
+        def render_page_from_url(pathname):
             if not str(pathname).startswith('/dash/items'):
                 return no_update
 

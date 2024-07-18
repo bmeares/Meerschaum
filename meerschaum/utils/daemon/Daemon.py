@@ -185,7 +185,7 @@ class Daemon:
                     result = self.target(*self.target_args, **self.target_kw)
                     self.properties['result'] = result
                 except Exception as e:
-                    warn(e, stacklevel=3)
+                    warn(f"Exception in daemon target function: {e}", stacklevel=3)
                     result = e
                 finally:
                     self._log_refresh_timer.cancel()
@@ -203,9 +203,20 @@ class Daemon:
             daemon_error = traceback.format_exc()
             with open(DAEMON_ERROR_LOG_PATH, 'a+', encoding='utf-8') as f:
                 f.write(daemon_error)
+            warn(f"Encountered an error while running the daemon '{self}':\n{daemon_error}")
+        finally:
+            self._cleanup_on_exit()
 
-        if daemon_error:
-            warn(f"Encountered an error while starting the daemon '{self}':\n{daemon_error}")
+    def _cleanup_on_exit(self):
+        """Perform cleanup operations when the daemon exits."""
+        try:
+            self._log_refresh_timer.cancel()
+            self.rotating_log.close()
+            if self.pid is None and self.pid_path.exists():
+                self.pid_path.unlink()
+            self._capture_process_timestamp('ended')
+        except Exception as e:
+            warn(f"Error during daemon cleanup: {e}")
 
 
     def _capture_process_timestamp(

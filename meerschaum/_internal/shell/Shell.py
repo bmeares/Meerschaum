@@ -182,7 +182,6 @@ def _check_complete_keys(line: str) -> Optional[List[str]]:
             is_trigger = True
         elif line.endswith(' '):
             ### return empty list so we don't try to parse an incomplete line.
-            #  print('ABORT')
             return []
 
     from meerschaum.utils.misc import get_connector_labels
@@ -196,8 +195,6 @@ def _check_complete_keys(line: str) -> Optional[List[str]]:
             if line.rstrip(' ').endswith(trigger):
                 return get_connector_labels()
 
-            #  args = parse_line(line.rstrip(' '))
-            #  search_term = args[var] if var != 'connector_keys' else args[var][0]
             return get_connector_labels(search_term=last_word.rstrip(' '))
 
     return None

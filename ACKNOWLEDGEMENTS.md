@@ -27,6 +27,13 @@ I've included a list of the dynamic dependencies below to credit the open source
   - [Amethyst Reese <amy@n7.gg>](mailto:Amethyst Reese <amy@n7.gg>)
 
 
+### APScheduler
+
+*In-process task scheduler with Cron-like capabilities*
+
+  - [Alex Grönholm <alex.gronholm@nextday.fi>](mailto:Alex Grönholm <alex.gronholm@nextday.fi>)
+  - License: MIT
+
 ### asciitree
 
 *Draws ASCII trees.*
@@ -57,6 +64,7 @@ I've included a list of the dynamic dependencies below to credit the open source
 *Cross-platform colored terminal text.*
 
   - [Jonathan Hartley <tartley@tartley.com>](mailto:Jonathan Hartley <tartley@tartley.com>)
+  - [https://github.com/tartley/colorama](https://github.com/tartley/colorama)
 
 
 ### cryptography
@@ -64,6 +72,7 @@ I've included a list of the dynamic dependencies below to credit the open source
 *cryptography is a package which provides cryptographic recipes and primitives to Python developers.*
 
   - [The Python Cryptographic Authority and individual contributors <cryptography-dev@python.org>](mailto:The Python Cryptographic Authority and individual contributors <cryptography-dev@python.org>)
+  - [https://github.com/pyca/cryptography](https://github.com/pyca/cryptography)
   - License: Apache-2.0 OR BSD-3-Clause
 
 ### dash
@@ -75,7 +84,7 @@ I've included a list of the dynamic dependencies below to credit the open source
   - [https://plotly.com/dash](https://plotly.com/dash)
   - License: MIT
 
-### dash-ace
+### dash_ace
 
 *Dash Ace Editor Component*
 
@@ -93,7 +102,7 @@ I've included a list of the dynamic dependencies below to credit the open source
   - [https://dash-bootstrap-components.opensource.faculty.ai/](https://dash-bootstrap-components.opensource.faculty.ai/)
   - License: Apache Software License
 
-### dash-daq
+### dash_daq
 
 *DAQ components for Dash*
 
@@ -115,6 +124,7 @@ I've included a list of the dynamic dependencies below to credit the open source
 
 *Parallel PyData with Task Scheduling*
 
+  - [https://github.com/dask/dask/](https://github.com/dask/dask/)
   - License: BSD-3-Clause
 
 ### databases
@@ -137,12 +147,12 @@ I've included a list of the dynamic dependencies below to credit the open source
 
 ### duckdb
 
-*DuckDB embedded database*
+*DuckDB in-process database*
 
   - [https://www.duckdb.org](https://www.duckdb.org)
   - License: MIT
 
-### duckdb-engine
+### duckdb_engine
 
 *SQLAlchemy driver for duckdb*
 
@@ -155,7 +165,8 @@ I've included a list of the dynamic dependencies below to credit the open source
 
 *FastAPI framework, high performance, easy to learn, fast to code, ready for production*
 
-  - [Sebastián Ramírez <tiangolo@gmail.com>](mailto:Sebastián Ramírez <tiangolo@gmail.com>)
+  - [Sebastián Ramírez](mailto:Sebastián Ramírez)
+  - [https://github.com/tiangolo/fastapi](https://github.com/tiangolo/fastapi)
 
 
 ### fastapi-login
@@ -177,7 +188,7 @@ I've included a list of the dynamic dependencies below to credit the open source
 
 ### Flask-Compress
 
-*Compress responses in your Flask app with gzip, deflate or brotli.*
+*Compress responses in your Flask app with gzip, deflate, brotli or zstandard.*
 
   - Thomas Mansencal
   - [thomas.mansencal@gmail.com](mailto:thomas.mansencal@gmail.com)
@@ -188,8 +199,7 @@ I've included a list of the dynamic dependencies below to credit the open source
 
 *WSGI HTTP Server for UNIX*
 
-  - Benoit Chesneau
-  - [benoitc@gunicorn.org](mailto:benoitc@gunicorn.org)
+  - [Benoit Chesneau <benoitc@gunicorn.org>](mailto:Benoit Chesneau <benoitc@gunicorn.org>)
   - [https://gunicorn.org](https://gunicorn.org)
   - License: MIT
 
@@ -198,6 +208,7 @@ I've included a list of the dynamic dependencies below to credit the open source
 *The next generation HTTP client.*
 
   - [Tom Christie <tom@tomchristie.com>](mailto:Tom Christie <tom@tomchristie.com>)
+  - [https://github.com/encode/httpx](https://github.com/encode/httpx)
 
 
 ### humanfriendly
@@ -214,6 +225,7 @@ I've included a list of the dynamic dependencies below to credit the open source
 *Lightweight pipelining with Python functions*
 
   - [Gael Varoquaux <gael.varoquaux@normalesup.org>](mailto:Gael Varoquaux <gael.varoquaux@normalesup.org>)
+  - [https://joblib.readthedocs.io](https://joblib.readthedocs.io)
   - License: BSD 3-Clause
 
 ### more-itertools
@@ -221,6 +233,7 @@ I've included a list of the dynamic dependencies below to credit the open source
 *More routines for operating on iterables, beyond itertools*
 
   - [Erik Rose <erikrose@grinchcentral.com>](mailto:Erik Rose <erikrose@grinchcentral.com>)
+  - [https://github.com/more-itertools/more-itertools](https://github.com/more-itertools/more-itertools)
 
 
 ### more-termcolor
@@ -238,7 +251,7 @@ I've included a list of the dynamic dependencies below to credit the open source
 
   - Travis E. Oliphant et al.
   - [https://numpy.org](https://numpy.org)
-  - License: Copyright (c) 2005-2023, NumPy Developers.
+  - License: Copyright (c) 2005-2024, NumPy Developers.
 
 ### packaging
 
@@ -255,15 +268,6 @@ I've included a list of the dynamic dependencies below to credit the open source
   - [https://pandas.pydata.org](https://pandas.pydata.org)
   - License: BSD 3-Clause License
 
-### passlib
-
-*comprehensive password hashing framework supporting over 30 schemes*
-
-  - Eli Collins
-  - [elic@assurancetechnologies.com](mailto:elic@assurancetechnologies.com)
-  - [https://passlib.readthedocs.io](https://passlib.readthedocs.io)
-  - License: BSD
-
 ### pathspec
 
 *Utility library for gitignore style pattern matching of file paths.*
@@ -275,8 +279,7 @@ I've included a list of the dynamic dependencies below to credit the open source
 
 *The PyPA recommended tool for installing Python packages.*
 
-  - The pip developers
-  - [distutils-sig@python.org](mailto:distutils-sig@python.org)
+  - [The pip developers <distutils-sig@python.org>](mailto:The pip developers <distutils-sig@python.org>)
   - [https://pip.pypa.io/](https://pip.pypa.io/)
   - License: MIT
 
@@ -289,7 +292,7 @@ I've included a list of the dynamic dependencies below to credit the open source
   - [https://github.com/wolever/pprintpp](https://github.com/wolever/pprintpp)
   - License: BSD
 
-### prompt-toolkit
+### prompt_toolkit
 
 *Library for building powerful interactive command lines in Python*
 
@@ -306,14 +309,22 @@ I've included a list of the dynamic dependencies below to credit the open source
   - [https://github.com/giampaolo/psutil](https://github.com/giampaolo/psutil)
   - License: BSD-3-Clause
 
-### psycopg2-binary
+### psycopg
 
-*psycopg2 - Python-PostgreSQL Database Adapter*
+*PostgreSQL database adapter for Python*
 
-  - Federico Di Gregorio
-  - [fog@initd.org](mailto:fog@initd.org)
-  - [https://psycopg.org/](https://psycopg.org/)
-  - License: LGPL with exceptions
+  - Daniele Varrazzo
+  - [daniele.varrazzo@gmail.com](mailto:daniele.varrazzo@gmail.com)
+  - [https://psycopg.org/psycopg3/](https://psycopg.org/psycopg3/)
+  - License: GNU Lesser General Public License v3 (LGPLv3)
+
+### ptpython
+
+*Python REPL build on top of prompt_toolkit*
+
+  - Jonathan Slenders
+  - [https://github.com/prompt-toolkit/ptpython](https://github.com/prompt-toolkit/ptpython)
+
 
 ### pyarrow
 
@@ -329,22 +340,14 @@ I've included a list of the dynamic dependencies below to credit the open source
   - Eli Bendersky
   - [eliben@gmail.com](mailto:eliben@gmail.com)
   - [https://github.com/eliben/pycparser](https://github.com/eliben/pycparser)
-  - License: BSD
-
-### pydantic
-
-*Data validation and settings management using python type hints*
-
-  - Samuel Colvin
-  - [s@muelcolvin.com](mailto:s@muelcolvin.com)
-  - [https://github.com/pydantic/pydantic](https://github.com/pydantic/pydantic)
-  - License: MIT
+  - License: BSD-3-Clause
 
 ### Pygments
 
 *Pygments is a syntax highlighting package written in Python.*
 
   - [Georg Brandl <georg@python.org>](mailto:Georg Brandl <georg@python.org>)
+  - [https://pygments.org](https://pygments.org)
   - License: BSD-2-Clause
 
 ### PyMySQL
@@ -386,6 +389,7 @@ I've included a list of the dynamic dependencies below to credit the open source
 *A streaming multipart parser for Python*
 
   - [Andrew Dunham <andrew@du.nham.ca>](mailto:Andrew Dunham <andrew@du.nham.ca>)
+  - [https://github.com/andrew-d/python-multipart](https://github.com/andrew-d/python-multipart)
 
 
 ### pytz
@@ -410,6 +414,7 @@ I've included a list of the dynamic dependencies below to credit the open source
 *Build GUI for your Python program with JavaScript, HTML, and CSS*
 
   - [Roman Sirokov <roman@flowrl.com>](mailto:Roman Sirokov <roman@flowrl.com>)
+  - [https://pywebview.flowrl.com/](https://pywebview.flowrl.com/)
   - License: BSD 3-Clause License
 
 ### PyYAML
@@ -428,7 +433,7 @@ I've included a list of the dynamic dependencies below to credit the open source
   - Kenneth Reitz
   - [me@kennethreitz.org](mailto:me@kennethreitz.org)
   - [https://requests.readthedocs.io](https://requests.readthedocs.io)
-  - License: Apache 2.0
+  - License: Apache-2.0
 
 ### rich
 
@@ -438,13 +443,6 @@ I've included a list of the dynamic dependencies below to credit the open source
   - [willmcgugan@gmail.com](mailto:willmcgugan@gmail.com)
   - [https://github.com/Textualize/rich](https://github.com/Textualize/rich)
   - License: MIT
-
-### rocketry
-
-*Advanced scheduling framework*
-
-  - [Mikael Koli <koli.mikael@gmail.com>](mailto:Mikael Koli <koli.mikael@gmail.com>)
-  - License: MIT License
 
 ### semver
 
@@ -459,9 +457,7 @@ I've included a list of the dynamic dependencies below to credit the open source
 
 *Easily download, build, install, upgrade, and uninstall Python packages*
 
-  - Python Packaging Authority
-  - [distutils-sig@python.org](mailto:distutils-sig@python.org)
-  - [https://github.com/pypa/setuptools](https://github.com/pypa/setuptools)
+  - [Python Packaging Authority <distutils-sig@python.org>](mailto:Python Packaging Authority <distutils-sig@python.org>)
 
 
 ### SQLAlchemy
@@ -487,14 +483,14 @@ I've included a list of the dynamic dependencies below to credit the open source
 *Tornado websocket backend for the Xterm.js Javascript terminal emulator library.*
 
   - [Jupyter Development Team <jupyter@googlegroups.com>](mailto:Jupyter Development Team <jupyter@googlegroups.com>)
-
+  - [https://github.com/jupyter/terminado](https://github.com/jupyter/terminado)
+  - License: BSD 2-Clause License
 
 ### toga
 
 *A Python native, OS native GUI toolkit.*
 
-  - Russell Keith-Magee
-  - [russell@keith-magee.com](mailto:russell@keith-magee.com)
+  - [Russell Keith-Magee <russell@keith-magee.com>](mailto:Russell Keith-Magee <russell@keith-magee.com>)
   - [https://beeware.org/project/projects/libraries/toga/](https://beeware.org/project/projects/libraries/toga/)
   - License: New BSD
 
@@ -523,25 +519,35 @@ I've included a list of the dynamic dependencies below to credit the open source
   - [https://github.com/bboe/update_checker](https://github.com/bboe/update_checker)
   - License: Simplified BSD License
 
+### uv
+
+*An extremely fast Python package installer and resolver, written in Rust.*
+
+  - uv
+  - ["Astral Software Inc." <hey@astral.sh>](mailto:"Astral Software Inc." <hey@astral.sh>)
+  - [https://pypi.org/project/uv/](https://pypi.org/project/uv/)
+  - License: MIT OR Apache-2.0
+
 ### uvicorn
 
 *The lightning-fast ASGI server.*
 
   - [Tom Christie <tom@tomchristie.com>](mailto:Tom Christie <tom@tomchristie.com>)
+  - [https://www.uvicorn.org/](https://www.uvicorn.org/)
 
 
 ### virtualenv
 
 *Virtual Python Environment builder*
 
+  - [https://github.com/pypa/virtualenv](https://github.com/pypa/virtualenv)
 
 
-### watchgod
+### watchfiles
 
-*Simple, modern file watching and code reload in python.*
+*Simple, modern and high performance file watching and code reload in python.*
 
-  - Samuel Colvin
-  - [s@muelcolvin.com](mailto:s@muelcolvin.com)
+  - [Samuel Colvin <s@muelcolvin.com>](mailto:Samuel Colvin <s@muelcolvin.com>)
   - [https://github.com/samuelcolvin/watchfiles](https://github.com/samuelcolvin/watchfiles)
   - License: MIT
 
@@ -550,6 +556,7 @@ I've included a list of the dynamic dependencies below to credit the open source
 *An implementation of the WebSocket Protocol (RFC 6455 & 7692)*
 
   - [Aymeric Augustin <aymeric.augustin@m4x.org>](mailto:Aymeric Augustin <aymeric.augustin@m4x.org>)
+  - [https://github.com/python-websockets/websockets](https://github.com/python-websockets/websockets)
   - License: BSD-3-Clause
 
 ### wheel

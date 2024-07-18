@@ -8,24 +8,32 @@ Retrieve Pipes' data from instances.
 
 from __future__ import annotations
 from datetime import datetime, timedelta
-from meerschaum.utils.typing import Optional, Dict, Any, Union, Generator, List, Tuple, Iterator
+
+import meerschaum as mrsm
+from meerschaum.utils.typing import (
+    Optional, Dict, Any, Union, List, Tuple, Iterator, TYPE_CHECKING,
+)
 from meerschaum.config import get_config
 
+if TYPE_CHECKING:
+    pd = mrsm.attempt_import('pandas')
+
+
 def get_data(
-        self,
-        select_columns: Optional[List[str]] = None,
-        omit_columns: Optional[List[str]] = None,
-        begin: Union[datetime, int, None] = None,
-        end: Union[datetime, int, None] = None,
-        params: Optional[Dict[str, Any]] = None,
-        as_iterator: bool = False,
-        as_chunks: bool = False,
-        as_dask: bool = False,
-        chunk_interval: Union[timedelta, int, None] = None,
-        fresh: bool = False,
-        debug: bool = False,
-        **kw: Any
-    ) -> Union['pd.DataFrame', Generator['pd.DataFrame'], None]:
+    self,
+    select_columns: Optional[List[str]] = None,
+    omit_columns: Optional[List[str]] = None,
+    begin: Union[datetime, int, None] = None,
+    end: Union[datetime, int, None] = None,
+    params: Optional[Dict[str, Any]] = None,
+    as_iterator: bool = False,
+    as_chunks: bool = False,
+    as_dask: bool = False,
+    chunk_interval: Union[timedelta, int, None] = None,
+    fresh: bool = False,
+    debug: bool = False,
+    **kw: Any
+) -> Union['pd.DataFrame', Iterator['pd.DataFrame'], None]:
     """
     Get a pipe's data from the instance connector.
 

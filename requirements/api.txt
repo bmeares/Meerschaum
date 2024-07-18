@@ -34,6 +34,7 @@ python-dateutil>=2.7.5
 requests>=2.23.0
 binaryornot>=0.4.4
 pyvim>=3.0.2
+ptpython>=3.0.27
 aiofiles>=0.6.0
 packaging>=21.3.0
 prompt-toolkit>=3.0.39

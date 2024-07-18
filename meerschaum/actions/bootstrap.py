@@ -25,6 +25,7 @@ def bootstrap(
     options = {
         'pipes'      : _bootstrap_pipes,
         'connectors' : _bootstrap_connectors,
+        'plugins'    : _bootstrap_plugins,
     }
     return choose_subaction(action, options, **kw)
 
@@ -102,12 +103,14 @@ def _bootstrap_pipes(
         )
         try:
             ck = choose(
-                f"Where are the data coming from?\n\n" +
-                f"    Please type the keys of a connector from below,\n" +
-                f"    or enter '{new_label}' to register a new connector.\n\n" +
-                f" {get_config('formatting', 'emoji', 'connector')} Connector:\n",
+                (
+                    "Where are the data coming from?\n\n" +
+                    f"    Please type the keys of a connector or enter '{new_label}'\n" +
+                    "    to register a new connector.\n\n" +
+                    f" {get_config('formatting', 'emoji', 'connector')} Connector:"
+                ),
                 get_connector_labels() + [new_label],
-                numeric = False
+                numeric = False,
             )
         except KeyboardInterrupt:
             return abort_tuple
@@ -257,8 +260,8 @@ def _bootstrap_connectors(
         _type = choose(
             (
                 'Please choose a connector type.\n'
-                + 'For more information on connectors, '
-                + 'please visit https://meerschaum.io/reference/connectors'
+                + '    See https://meerschaum.io/reference/connectors '
+                + 'for documentation on connectors.\n'
             ),
             sorted(list(connectors)),
             default = 'sql'
@@ -379,6 +382,28 @@ def _bootstrap_connectors(
     write_config({'meerschaum': meerschaum_config}, debug=debug)
     if return_keys:
         return _type, _label
+    return True, "Success"
+
+
+def _bootstrap_plugins(
+        action: Optional[List[str]] = None,
+        debug: bool = False,
+        **kwargs: Any
+    ) -> SuccessTuple:
+    """
+    Launch an interactive wizard to guide the user to creating a new plugin.
+    """
+    from meerschaum.utils.prompt import prompt
+    from meerschaum.plugins.bootstrap import bootstrap_plugin
+
+    if not action:
+        action = [prompt("Enter the name of your new plugin:")]
+
+    for plugin_name in action:
+        bootstrap_success, bootstrap_msg = bootstrap_plugin(plugin_name)
+        if not bootstrap_success:
+            return bootstrap_success, bootstrap_msg
+
     return True, "Success"
 
 

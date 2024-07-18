@@ -65,24 +65,31 @@ class FileDescriptorInterceptor:
             except BlockingIOError:
                 continue
             except OSError as e:
-                continue
+                from meerschaum.utils.warnings import warn
+                warn(f"OSError in FileDescriptorInterceptor: {e}")
+                break
 
-            first_char_is_newline = data[0] == b'\n'
-            last_char_is_newline = data[-1] == b'\n'
+            try:
+                first_char_is_newline = data[0] == b'\n'
+                last_char_is_newline = data[-1] == b'\n'
 
-            injected_str = self.injection_hook()
-            injected_bytes = injected_str.encode('utf-8')
+                injected_str = self.injection_hook()
+                injected_bytes = injected_str.encode('utf-8')
 
-            if is_first_read:
-                data = b'\n' + data
-                is_first_read = False
+                if is_first_read:
+                    data = b'\n' + data
+                    is_first_read = False
 
-            modified_data = (
-                (data[:-1].replace(b'\n', b'\n' + injected_bytes) + b'\n')
-                if last_char_is_newline
-                else data.replace(b'\n', b'\n' + injected_bytes)
-            )
-            os.write(self.new_file_descriptor, modified_data)
+                modified_data = (
+                    (data[:-1].replace(b'\n', b'\n' + injected_bytes) + b'\n')
+                    if last_char_is_newline
+                    else data.replace(b'\n', b'\n' + injected_bytes)
+                )
+                os.write(self.new_file_descriptor, modified_data)
+            except Exception as e:
+                from meerschaum.utils.warnings import warn
+                warn(f"Error in FileDescriptorInterceptor data processing: {e}")
+                break
 
 
     def stop_interception(self):

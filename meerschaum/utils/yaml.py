@@ -18,6 +18,7 @@ _lib = None
 _import_name = 'yaml'
 
 _yaml = None
+_dumper = None
 _locks = {
     '_lib': Lock(),
     '_yaml': Lock(),
@@ -46,7 +47,7 @@ class yaml:
     """
     Wrapper around `PyYAML` and `ruamel.yaml` so that we may switch between implementations.
     """
-    global _yaml, _lib
+    global _yaml, _lib, _dumper
     if _import_name is None:
         error(f"No YAML library declared.")
     with _locks['_lib']:
@@ -85,6 +86,7 @@ class yaml:
             and packaging_version.parse(_yaml.__version__) >= packaging_version.parse('6.0')
         ):
             _args += [_yaml.Loader]
+        
         return _yaml.load(*_args, **filter_keywords(_yaml.load, **kw))
 
 
@@ -98,7 +100,36 @@ class yaml:
         if stream is None and _import_name == 'ruamel.yaml':
             stream = _lib.compat.StringIO()
             get_string = True
+
+        if _import_name == 'yaml' and 'Dumper' not in kw:
+            kw['Dumper'] = get_dumper_class()
+
         result = _yaml.dump(data, stream, **filter_keywords(_yaml.dump, **kw))
         if get_string:
             return stream.getvalue()
         return result
+
+
+def get_dumper_class():
+    """
+    Return the dumper class to use when writing.
+    Only supports `yaml`.
+    """
+    global _dumper
+    if _dumper is not None:
+        return _dumper
+
+    if _import_name != 'yaml':
+        return None
+
+    class CustomDumper(_yaml.Dumper):
+        """
+        Add an extra line break when writing.
+        """
+        def write_line_break(self, data=None):
+            if len(self.indents) == 1:
+                super(CustomDumper, self).write_line_break(data)
+            super(CustomDumper, self).write_line_break(data)
+
+    _dumper = CustomDumper
+    return _dumper

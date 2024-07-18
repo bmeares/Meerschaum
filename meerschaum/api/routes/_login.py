@@ -8,13 +8,17 @@ Manage access and refresh tokens.
 
 from datetime import datetime, timedelta, timezone
 import fastapi
+from fastapi import Request, status
 from fastapi_login.exceptions import InvalidCredentialsException
-from fastapi.security import OAuth2PasswordRequestForm
+from fastapi.exceptions import RequestValidationError
 from starlette.responses import Response, JSONResponse
 from meerschaum.api import endpoints, get_api_connector, app, debug, manager, no_auth
 from meerschaum.core import User
 from meerschaum.config.static import STATIC_CONFIG
-from meerschaum.utils.typing import Dict, Any
+from meerschaum.utils.typing import Dict, Any, Optional
+from meerschaum.core.User._User import verify_password
+from meerschaum.utils.warnings import warn
+from meerschaum.api._oauth2 import CustomOAuth2PasswordRequestForm
 
 
 @manager.user_loader()
@@ -28,18 +32,18 @@ def load_user(
 
 
 @app.post(endpoints['login'], tags=['Users'])
-def login(
-        data: OAuth2PasswordRequestForm = fastapi.Depends()
+async def login(
+        data: CustomOAuth2PasswordRequestForm = fastapi.Depends()
+        #  data: dict[str, str],
+        #  request: Request
     ) -> Dict[str, Any]:
     """
     Login and set the session token.
     """
     username, password = (
-        (data['username'], data['password']) if isinstance(data, dict)
-        else (data.username, data.password)
+        (data.username, data.password)
     ) if not no_auth else ('no-auth', 'no-auth')
 
-    from meerschaum.core.User._User import verify_password
     user = User(username, password)
     correct_password = no_auth or verify_password(
         password,
@@ -60,3 +64,15 @@ def login(
         'token_type': 'bearer',
         'expires' : expires_dt,
     }
+
+
+@app.exception_handler(RequestValidationError)
+async def validation_exception_handler(request: Request, exc: RequestValidationError):
+    """
+    Log validation errors as warnings.
+    """
+    warn(f"Validation error: {exc.errors()}", stack=False)
+    return JSONResponse(
+        status_code = status.HTTP_422_UNPROCESSABLE_ENTITY,
+        content = {"detail": exc.errors()},
+    )
