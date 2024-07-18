@@ -140,12 +140,14 @@ Flag | Description | Example
 
 ## 🧬 Schema
 
-The supported top-level keys in a Compose file are the following:
+Below are the supported top-level keys in a Compose file. Note that all keys are optional.
 
 - **`pipes`**  
   List all of the pipes to be used in this project. See the **The `pipes` Key** section below.
 - **`sync`**  
   Govern the behavior of the syncing process. See **The `sync` Key** section below.
+- **`jobs`**  
+  If provided, `compose up` will start the defined jobs. See **The `jobs` Key** below.
 - **`project_name`** (default to directory name)  
   The tag given to all pipes in this project. Defaults to the current directory. If you're using multiple compose files, make sure each file has a unique project name.
 - **`root_dir`** (default `./root/`)  
@@ -172,34 +174,46 @@ The supported top-level keys in a Compose file are the following:
     ```
 
 ### The `pipes` Key
+
 The `pipes` key contains a list of [keyword arguments to build `mrsm.Pipe` objects](https://docs.meerschaum.io/index.html#meerschaum.Pipe), notably:
-  - `connector` (required)
-  - `metric` (required)
-  - `location` (default `null`)
-  - `instance` (default to `config:meerschaum:instance`)
-  - `parameters`
-  - `columns`  
-    Alias for `parameters:columns`.
-  - `target`  
-    Alias for `parameters:target`.
-  - `tags`  
-    Alias for `parameters:tags`.
-  - `dtypes`  
-    Alias for `parameters:dtypes`.
+
+- `connector` (required)
+- `metric` (required)
+- `location` (default `null`)
+- `instance` (default to `config:meerschaum:instance`)
+- `parameters`
+- `columns` (alias for `parameters:columns`)
+- `target` (alias for `parameters:target`)
+- `tags` (alias for `parameters:tags`)
+- `dtypes` (alias for `parameters:dtypes`)
 
 ### The `sync` Key
 
-Keys under the root key `sync` are the following:
+Keys under the parent key `sync` are the following:
 
-- **`schedule`** (*optional*)  
+- **`schedule`**  
   Define a regular interval for syncing processes by setting a [schedule](/reference/background-jobs/#schedules).  
   This corresponds to the flag `-s` / `--schedule`.
-- **`min_seconds`** (*optional*, default `1`)  
+- **`min_seconds`** (default `1`)  
   If a schedule is not set, pipes will be constantly synced and sleep `min_seconds` between laps.  
   This corresponds to the flags `--min-seconds` and `--loop`.
-- **`timeout_seconds`** (*optional*)  
+- **`timeout_seconds`**  
   If this value is set, long-running syncing processes which exceed this value will be terminated.  
   This corresponds to the flag `--timeout-seconds` / `--timeout`.
-- **`args`** (*optional*)  
+- **`args`**  
   This value may be a string or list of command-line arguments to append to the syncing command.  
   This option is available for specific edge case scenarios, such as when working with custom flags or specific intervals (i.e. `--begin` and `--end`).
+
+
+### The `jobs` Key
+
+Keys under `jobs` are the names of jobs to be run with `compose up`. If defined, these jobs override the default syncing jobs.
+
+!!! example "Example jobs"
+    ```yaml
+    jobs:
+      sync: "sync pipes -s 'every 2 hours starting 00:30'"
+      verify: "verify pipes -s 'daily starting 12:00 tomorrow'"
+      date: "date -s 'every 10 seconds'"
+      echo: "echo 'Hello, World!'"
+    ```
