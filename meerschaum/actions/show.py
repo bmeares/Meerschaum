@@ -91,7 +91,13 @@ def _show_actions(**kw: Any) -> SuccessTuple:
     from meerschaum.utils.misc import print_options
     from meerschaum._internal.shell.Shell import hidden_commands
     _actions = [ _a for _a in actions if _a not in hidden_commands ]
-    print_options(options=_actions, name='actions', actions=False, **kw)
+    print_options(
+        options=_actions,
+        name='actions',
+        actions=False,
+        sort_options=True,
+        **kw
+    )
     return True, "Success"
 
 
