@@ -9,14 +9,14 @@ from __future__ import annotations
 from meerschaum.utils.typing import SuccessTuple, Any, List, Optional
 
 def python(
-        action: Optional[List[str]] = None,
-        sub_args: Optional[List[str]] = None,
-        nopretty: bool = False,
-        noask: bool = False,
-        venv: Optional[str] = None,
-        debug: bool = False,
-        **kw: Any
-    ) -> SuccessTuple:
+    action: Optional[List[str]] = None,
+    sub_args: Optional[List[str]] = None,
+    nopretty: bool = False,
+    noask: bool = False,
+    venv: Optional[str] = None,
+    debug: bool = False,
+    **kw: Any
+) -> SuccessTuple:
     """
     Launch a virtual environment's Python interpreter with Meerschaum imported.
     You may pass flags to the Python binary by surrounding each flag with `[]`.
@@ -55,6 +55,9 @@ def python(
 
     if action is None:
         action = []
+
+    if noask:
+        nopretty = True
 
     joined_actions = (
         ["import meerschaum as mrsm"]
