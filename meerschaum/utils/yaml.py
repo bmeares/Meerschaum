@@ -10,7 +10,7 @@ This is so switching between PyYAML and ruamel.yaml is smoother.
 
 from meerschaum.utils.misc import filter_keywords
 from meerschaum.utils.packages import attempt_import, all_packages, _import_module
-from meerschaum.utils.warnings import error, warn
+from meerschaum.utils.warnings import error
 from meerschaum.utils.threading import Lock
 
 _lib = None
@@ -49,7 +49,7 @@ class yaml:
     """
     global _yaml, _lib, _dumper
     if _import_name is None:
-        error(f"No YAML library declared.")
+        error("No YAML library declared.")
     with _locks['_lib']:
         try:
             _lib = _import_module(_import_name)
