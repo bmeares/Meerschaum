@@ -6,6 +6,9 @@ This is the current release cycle, so stay tuned for future releases!
 
 ### v2.2.6
 
+- **Fix a critical login issue.**  
+  The previous release (v2.2.5) broke the login functionality of the Web UI and has been yanked. If you are running v2.2.5, it is recommended you upgrade immediately.
+
 - **Add `register connector`.**  
   Like `bootstrap connector`, you may now programmatically create connectors.
 
