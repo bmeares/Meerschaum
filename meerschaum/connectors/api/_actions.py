@@ -30,23 +30,6 @@ def do_action(
     
     NOTE: The first index of `action` should NOT be removed!
     Example: action = ['show', 'config']
-    
-    Returns: tuple (succeeded : bool, message : str)
-
-    Parameters
-    ----------
-    action: Optional[List[str]] :
-         (Default value = None)
-    sysargs: Optional[List[str]] :
-         (Default value = None)
-    debug: bool :
-         (Default value = False)
-    **kw :
-        
-
-    Returns
-    -------
-
     """
     import sys, json
     from meerschaum.utils.debug import dprint
