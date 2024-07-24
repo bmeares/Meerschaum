@@ -48,9 +48,9 @@ def show(
 
 
 def _complete_show(
-        action: Optional[List[str]] = None,
-        **kw: Any
-    ) -> List[str]:
+    action: Optional[List[str]] = None,
+    **kw: Any
+) -> List[str]:
     """
     Override the default Meerschaum `complete_` function.
     """
@@ -253,16 +253,16 @@ def _show_connectors(
 
 
 def _complete_show_connectors(
-        action: Optional[List[str]] = None, **kw: Any
-    ) -> List[str]:
+    action: Optional[List[str]] = None, **kw: Any
+) -> List[str]:
     from meerschaum.utils.misc import get_connector_labels
     _text = action[0] if action else ""
     return get_connector_labels(search_term=_text, ignore_exact_match=True)
 
 
 def _show_arguments(
-        **kw: Any
-    ) -> SuccessTuple:
+    **kw: Any
+) -> SuccessTuple:
     """
     Show the parsed keyword arguments.
     """
@@ -272,16 +272,16 @@ def _show_arguments(
 
 
 def _show_data(
-        action: Optional[List[str]] = None,
-        gui: bool = False,
-        begin: Optional[datetime.datetime] = None,
-        end: Optional[datetime.datetime] = None,
-        params: Optional[Dict[str, Any]] = None,
-        chunksize: Optional[int] = -1,
-        nopretty: bool = False,
-        debug: bool = False,
-        **kw: Any
-    ) -> SuccessTuple:
+    action: Optional[List[str]] = None,
+    gui: bool = False,
+    begin: Optional[datetime.datetime] = None,
+    end: Optional[datetime.datetime] = None,
+    params: Optional[Dict[str, Any]] = None,
+    chunksize: Optional[int] = -1,
+    nopretty: bool = False,
+    debug: bool = False,
+    **kw: Any
+) -> SuccessTuple:
     """
     Show pipes data as Pandas DataFrames.
     
@@ -380,11 +380,11 @@ def _show_data(
 
 
 def _show_columns(
-        action: Optional[List[str]] = None,
-        debug: bool = False,
-        nopretty: bool = False,
-        **kw: Any
-    ) -> SuccessTuple:
+    action: Optional[List[str]] = None,
+    debug: bool = False,
+    nopretty: bool = False,
+    **kw: Any
+) -> SuccessTuple:
     """
     Show the registered and table columns for pipes.
     """
@@ -398,11 +398,11 @@ def _show_columns(
 
 
 def _show_rowcounts(
-        action: Optional[List[str]] = None,
-        workers: Optional[int] = None,
-        debug: bool = False,
-        **kw: Any
-    ) -> SuccessTuple:
+    action: Optional[List[str]] = None,
+    workers: Optional[int] = None,
+    debug: bool = False,
+    **kw: Any
+) -> SuccessTuple:
     """
     Show the rowcounts for pipes.
     
@@ -439,12 +439,12 @@ def _show_rowcounts(
     return True, "Success"
 
 def _show_plugins(
-        action: Optional[List[str]] = None,
-        repository: Optional[str] = None,
-        nopretty: bool = False,
-        debug: bool = False,
-        **kw: Any
-    ) -> SuccessTuple:
+    action: Optional[List[str]] = None,
+    repository: Optional[str] = None,
+    nopretty: bool = False,
+    debug: bool = False,
+    **kw: Any
+) -> SuccessTuple:
     """
     Show the installed plugins.
     """
@@ -481,10 +481,10 @@ def _show_plugins(
     return True, "Success"
 
 def _show_users(
-        mrsm_instance: Optional[str] = None,
-        debug: bool = False,
-        **kw: Any
-    ) -> SuccessTuple:
+    mrsm_instance: Optional[str] = None,
+    debug: bool = False,
+    **kw: Any
+) -> SuccessTuple:
     """
     Show the registered users in a Meerschaum instance (default is the current instance).
     """
@@ -504,10 +504,10 @@ def _show_users(
     return True, "Success"
 
 def _show_packages(
-        action: Optional[List[str]] = None,
-        nopretty: bool = False,
-        **kw: Any
-    ) -> SuccessTuple:
+    action: Optional[List[str]] = None,
+    nopretty: bool = False,
+    **kw: Any
+) -> SuccessTuple:
     """
     Show the packages in dependency groups, or as a list with `--nopretty`.
     """
@@ -536,9 +536,9 @@ def _show_packages(
     return True, "Success"
 
 def _complete_show_packages(
-        action: Optional[List[str]] = None,
-        **kw: Any
-    ) -> List[str]:
+    action: Optional[List[str]] = None,
+    **kw: Any
+) -> List[str]:
     from meerschaum.utils.packages import packages
     if not action:
         return sorted(list(packages.keys()))
@@ -551,10 +551,10 @@ def _complete_show_packages(
     return possibilities
 
 def _show_jobs(
-        action: Optional[List[str]] = None,
-        nopretty: bool = False,
-        **kw: Any
-    ) -> SuccessTuple:
+    action: Optional[List[str]] = None,
+    nopretty: bool = False,
+    **kw: Any
+) -> SuccessTuple:
     """
     Show the currently running and stopped jobs.
     """
@@ -578,10 +578,10 @@ def _show_jobs(
 
 
 def _show_logs(
-        action: Optional[List[str]] = None,
-        nopretty: bool = False,
-        **kw
-    ) -> SuccessTuple:
+    action: Optional[List[str]] = None,
+    nopretty: bool = False,
+    **kw
+) -> SuccessTuple:
     """
     Show the logs for jobs.
     
@@ -613,13 +613,15 @@ def _show_logs(
     now_follow_str = now.strftime(follow_timestamp_format)
 
     def build_buffer_spaces(daemons) -> Dict[str, str]:
-        max_len_id = max(len(d.daemon_id) for d in daemons) if daemons else 0
+        max_len_id = (
+            max(len(d.daemon_id) for d in daemons) + 1
+        ) if daemons else 0
         buffer_len = max(
             get_config('jobs', 'logs', 'min_buffer_len'),
-            max_len_id 
+            max_len_id
         )
         return {
-            d.daemon_id: ''.join([' ' for i in range(buffer_len - len(d.daemon_id))])
+            d.daemon_id: ''.join([' '] * (buffer_len - len(d.daemon_id)))
             for d in daemons
         }
 
@@ -769,9 +771,9 @@ def _show_logs(
 
 
 def _show_environment(
-        nopretty: bool = False,
-        **kw
-    ) -> SuccessTuple:
+    nopretty: bool = False,
+    **kw
+) -> SuccessTuple:
     """
     Show all of the current environment variables with begin with `'MRSM_'`.
     """
@@ -789,12 +791,12 @@ def _show_environment(
 
 
 def _show_tags(
-        action: Optional[List[str]] = None,
-        tags: Optional[List[str]] = None,
-        workers: Optional[int] = None,
-        nopretty: bool = False,
-        **kwargs
-    ) -> SuccessTuple:
+    action: Optional[List[str]] = None,
+    tags: Optional[List[str]] = None,
+    workers: Optional[int] = None,
+    nopretty: bool = False,
+    **kwargs
+) -> SuccessTuple:
     """
     Show the existing tags and their associated pipes.
     """
@@ -869,10 +871,10 @@ def _show_tags(
 
 
 def _show_schedules(
-        action: Optional[List[str]] = None,
-        nopretty: bool = False,
-        **kwargs: Any
-    ) -> SuccessTuple:
+    action: Optional[List[str]] = None,
+    nopretty: bool = False,
+    **kwargs: Any
+) -> SuccessTuple:
     """
     Print the upcoming timestamps according to the given schedule.
 
@@ -920,8 +922,8 @@ def _show_schedules(
         
 
 def _show_venvs(
-        **kwargs: Any    
-    ):
+    **kwargs: Any    
+):
     """
     Print the available virtual environments in the current MRSM_ROOT_DIR.
     """

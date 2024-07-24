@@ -61,6 +61,7 @@ def parse_datetime(dt_str: str) -> Union[datetime, int, str]:
         error(f"'{dt_str}' is not a valid datetime format.", stack=False)
     return dt
 
+
 def parse_help(sysargs : Union[List[str], Dict[str, Any]]) -> None:
     """Parse the `--help` flag to determine which help message to print."""
     from meerschaum._internal.arguments._parse_arguments import parse_arguments, parse_line
@@ -97,13 +98,23 @@ def parse_help(sysargs : Union[List[str], Dict[str, Any]]) -> None:
         doc = "No help available for '" + f"{args['action'][0]}" + "'."
     return print(textwrap.dedent(doc))
 
-def parse_version(sysargs : List[str]):
+
+def parse_version(sysargs: List[str]):
     """Print the Meerschaum version."""
     from meerschaum.config import __version__ as version
     from meerschaum.config import __doc__ as doc
     if '--nopretty' in sysargs:
         return print(version)
     return print(doc)
+
+
+def parse_name(name_str: str) -> str:
+    """
+    Ensure that `--name` is not an empty string.
+    """
+    if not name_str:
+        return None
+    return name_str
 
 def get_arguments_triggers() -> Dict[str, Tuple[str]]:
     """ """
@@ -162,7 +173,7 @@ groups['actions'].add_argument(
     '--rm', action='store_true', help="Delete a job once it has finished executing."
 )
 groups['actions'].add_argument(
-    '--name', '--job-name', type=str, help=(
+    '--name', '--job-name', type=parse_name, help=(
         "Assign a name to a job. If no name is provided, a random name will be assigned."
     ),
 )

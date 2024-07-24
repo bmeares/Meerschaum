@@ -32,14 +32,14 @@ class RotatingFile(io.IOBase):
     SEEK_BACK_ATTEMPTS: int = 5
 
     def __init__(
-            self,
-            file_path: pathlib.Path,
-            num_files_to_keep: Optional[int] = None,
-            max_file_size: Optional[int] = None,
-            redirect_streams: bool = False,
-            write_timestamps: bool = False,
-            timestamp_format: str = '%Y-%m-%d %H:%M',
-        ):
+        self,
+        file_path: pathlib.Path,
+        num_files_to_keep: Optional[int] = None,
+        max_file_size: Optional[int] = None,
+        redirect_streams: bool = False,
+        write_timestamps: bool = False,
+        timestamp_format: str = '%Y-%m-%d %H:%M',
+    ):
         """
         Create a file-like object which manages other files.
 
@@ -79,11 +79,7 @@ class RotatingFile(io.IOBase):
         self.redirect_streams = redirect_streams
         self.write_timestamps = write_timestamps
         self.timestamp_format = timestamp_format
-        self.subfile_regex_pattern = re.compile(
-            r'^'
-            + self.file_path.name
-            + r'(?:\.\d+)?$'
-        )
+        self.subfile_regex_pattern = re.compile(r'(.*)\.log(?:\.\d+)?$')
 
         ### When subfiles are opened, map from their index to the file objects.
         self.subfile_objects = {}
@@ -173,7 +169,7 @@ class RotatingFile(io.IOBase):
         latest_index = (
             self.get_index_from_subfile_name(existing_subfile_paths[-1].name)
             if existing_subfile_paths
-            else -1
+            else 0
         )
         return latest_index
 
@@ -222,9 +218,12 @@ class RotatingFile(io.IOBase):
             [
                 (file_name, self.get_index_from_subfile_name(file_name))
                 for file_name in os.listdir(self.file_path.parent)
-                if re.match(self.subfile_regex_pattern, file_name)
+                if (
+                    file_name.startswith(self.file_path.name)
+                    and re.match(self.subfile_regex_pattern, file_name)
+                )
             ],
-            key = lambda x: x[1],
+            key=lambda x: x[1],
         )
         return [
             (self.file_path.parent / file_name)

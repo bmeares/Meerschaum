@@ -4,6 +4,26 @@
 
 This is the current release cycle, so stay tuned for future releases!
 
+### v2.2.6
+
+- **Add `register connector`.**  
+  Like `bootstrap connector`, you may now programmatically create connectors.
+
+- **Allow for job names to contain spaces and parentheses.**  
+  Jobs may now be created with more dynamic names. This issue in particular affected Meerschaum Compose.
+
+- **Allow for type annotations in `required`.**  
+  Plugins may now annotate `required`:
+
+  ```python
+  # plugins/example.py
+
+  __version__: str = '0.0.1'
+  required: list[str] = ['requests']
+  ```
+
+- **Fixed a formatting issue with `show logs`.**
+
 ### v2.2.5
 
 - **Add `bootstrap plugin`.**  
