@@ -7,10 +7,12 @@ Schedule processes and threads.
 """
 
 from __future__ import annotations
-import sys
+import signal
+import traceback
 from datetime import datetime, timezone, timedelta
 import meerschaum as mrsm
 from meerschaum.utils.typing import Callable, Any, Optional, List, Dict
+from meerschaum.utils.warnings import warn, error
 
 STARTING_KEYWORD: str = 'starting'
 INTERVAL_UNITS: List[str] = ['months', 'weeks', 'days', 'hours', 'minutes', 'seconds', 'years']
@@ -70,15 +72,15 @@ SCHEDULE_ALIASES: Dict[str, str] = {
 
 _scheduler = None
 def schedule_function(
-        function: Callable[[Any], Any],
-        schedule: str,
-        *args,
-        debug: bool = False,
-        **kw
-    ) -> None:
+    function: Callable[[Any], Any],
+    schedule: str,
+    *args,
+    debug: bool = False,
+    **kw
+) -> mrsm.SuccessTuple:
     """
     Block the process and execute the function intermittently according to the frequency.
-    https://rocketry.readthedocs.io/en/stable/condition_syntax/index.html
+    https://meerschaum.io/reference/background-jobs/#-schedules
 
     Parameters
     ----------
@@ -88,10 +90,13 @@ def schedule_function(
     schedule: str
         The frequency schedule at which `function` should be executed (e.g. `'daily'`).
 
+    Returns
+    -------
+    A `SuccessTuple` upon exit.
     """
     import asyncio
-    from meerschaum.utils.warnings import warn
     from meerschaum.utils.misc import filter_keywords, round_time
+
     global _scheduler
     kw['debug'] = debug
     kw = filter_keywords(function, **kw)
@@ -105,15 +110,31 @@ def schedule_function(
     except RuntimeError:
         loop = asyncio.new_event_loop()
 
+    def sigint_handler(signum, frame):
+        """We need to re-raise KeyboardInterrupt SIGINT when daemonizing."""
+        print(f"{frame=}")
+        print('sigint in schedule')
+        from meerschaum.utils.daemon.Daemon import _daemons
+        print(f"{_daemons=}")
+        for daemon in _daemons:
+            try:
+                daemon._handle_interrupt(signum, frame)
+            except KeyboardInterrupt:
+                pass
+        raise KeyboardInterrupt
+
+    signal.signal(signal.SIGINT, sigint_handler)
+
+
     async def run_scheduler():
         async with _scheduler:
             job = await _scheduler.add_schedule(
                 function,
                 trigger,
-                args = args,
-                kwargs = kw,
-                max_running_jobs = 1, 
-                conflict_policy = apscheduler.ConflictPolicy.replace,
+                args=args,
+                kwargs=kw,
+                max_running_jobs=1,
+                conflict_policy=apscheduler.ConflictPolicy.replace,
             )
             try:
                 await _scheduler.run_until_stopped()
@@ -126,12 +147,13 @@ def schedule_function(
     except (KeyboardInterrupt, SystemExit) as e:
         loop.run_until_complete(_stop_scheduler())
 
+    return True, "Success"
+
 
 def parse_schedule(schedule: str, now: Optional[datetime] = None):
     """
     Parse a schedule string (e.g. 'daily') into a Trigger object.
     """
-    from meerschaum.utils.warnings import error
     from meerschaum.utils.misc import items_str, is_int
     (
         apscheduler_triggers_cron,
@@ -279,7 +301,6 @@ def parse_start_time(schedule: str, now: Optional[datetime] = None) -> datetime:
     datetime.datetime(2024, 5, 13, 0, 30, tzinfo=datetime.timezone.utc)
     """
     from meerschaum.utils.misc import round_time
-    from meerschaum.utils.warnings import error, warn
     dateutil_parser = mrsm.attempt_import('dateutil.parser')
     starting_parts = schedule.split(STARTING_KEYWORD)
     starting_str = ('now' if len(starting_parts) == 1 else starting_parts[-1]).strip()

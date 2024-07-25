@@ -74,12 +74,9 @@ def daemon_entry(sysargs: Optional[List[str]] = None) -> SuccessTuple:
     success_tuple = run_daemon(
         entry,
         filtered_sysargs,
-        daemon_id = _args.get('name', None) if _args else None,
-        label = label,
-        keep_daemon_output = ('--rm' not in sysargs)
+        daemon_id=_args.get('name', None) if _args else None,
+        label=label,
     )
-    if not isinstance(success_tuple, tuple):
-        success_tuple = False, str(success_tuple)
     return success_tuple
 
 
@@ -268,3 +265,12 @@ def get_filtered_daemons(
             pass
         daemons.append(d)
     return daemons
+
+
+def running_in_daemon() -> bool:
+    """
+    Return whether the current thread is running in a Daemon context.
+    """
+    from meerschaum.config.static import STATIC_CONFIG
+    daemon_env_var = STATIC_CONFIG['environment']['daemon_id']
+    return daemon_env_var in os.environ

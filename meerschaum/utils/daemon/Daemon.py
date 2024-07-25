@@ -17,7 +17,12 @@ import time
 import traceback
 from functools import partial
 from datetime import datetime, timezone
-from meerschaum.utils.typing import Optional, Dict, Any, SuccessTuple, Callable, List, Union
+
+import meerschaum as mrsm
+from meerschaum.utils.typing import (
+    Optional, Dict, Any, SuccessTuple, Callable, List, Union,
+    is_success_tuple,
+)
 from meerschaum.config import get_config
 from meerschaum.config.static import STATIC_CONFIG
 from meerschaum.config._paths import DAEMON_RESOURCES_PATH, LOGS_RESOURCES_PATH
@@ -29,6 +34,8 @@ from meerschaum.utils.daemon._names import get_new_daemon_name
 from meerschaum.utils.daemon.RotatingFile import RotatingFile
 from meerschaum.utils.threading import RepeatTimer
 from meerschaum.__main__ import _close_pools
+
+_daemons = []
 
 class Daemon:
     """
@@ -119,10 +126,10 @@ class Daemon:
 
 
     def _run_exit(
-            self,
-            keep_daemon_output: bool = True,
-            allow_dirty_run: bool = False,
-        ) -> Any:
+        self,
+        keep_daemon_output: bool = True,
+        allow_dirty_run: bool = False,
+    ) -> Any:
         """Run the daemon's target function.
         NOTE: This WILL EXIT the parent process!
 
@@ -154,17 +161,21 @@ class Daemon:
         self._setup(allow_dirty_run)
 
         self._daemon_context = daemon.DaemonContext(
-            pidfile = self.pid_lock,
-            stdout = self.rotating_log,
-            stderr = self.rotating_log,
-            working_directory = os.getcwd(),
-            detach_process = True,
-            files_preserve = list(self.rotating_log.subfile_objects.values()),
-            signal_map = {
+            pidfile=self.pid_lock,
+            stdout=self.rotating_log,
+            stderr=self.rotating_log,
+            working_directory=os.getcwd(),
+            detach_process=True,
+            files_preserve=list(self.rotating_log.subfile_objects.values()),
+            signal_map={
                 signal.SIGINT: self._handle_interrupt,
                 signal.SIGTERM: self._handle_sigterm,
             },
         )
+
+        #  signal.signal(signal.SIGINT, self._handle_interrupt)
+        #  signal.signal(signal.SIGTERM, self._handle_sigterm)
+        _daemons.append(self)
 
         log_refresh_seconds = get_config('jobs', 'logs', 'refresh_files_seconds')
         self._log_refresh_timer = RepeatTimer(
@@ -183,11 +194,20 @@ class Daemon:
 
                     self._log_refresh_timer.start()
                     result = self.target(*self.target_args, **self.target_kw)
+                    #  if is_success_tuple(result):
+                        #  mrsm.pprint(result)
                     self.properties['result'] = result
+                except KeyboardInterrupt:
+                    print('CAUGHT KEYBOARD INTERRUPT')
+                except SystemExit:
+                    print('CAUGHT SYSTEM EXIT')
                 except Exception as e:
-                    warn(f"Exception in daemon target function: {e}", stacklevel=3)
+                    warn(
+                        f"Exception in daemon target function: {traceback.format_exc()}",
+                    )
                     result = e
                 finally:
+                    #  print('daemon finally!')
                     self._log_refresh_timer.cancel()
                     self.rotating_log.close()
                     if self.pid is None and self.pid_path.exists():
@@ -205,8 +225,10 @@ class Daemon:
                 f.write(daemon_error)
             warn(f"Encountered an error while running the daemon '{self}':\n{daemon_error}")
         finally:
+            print('cleanup...')
             self._cleanup_on_exit()
-
+            print('end')
+            
     def _cleanup_on_exit(self):
         """Perform cleanup operations when the daemon exits."""
         try:
@@ -217,7 +239,6 @@ class Daemon:
             self._capture_process_timestamp('ended')
         except Exception as e:
             warn(f"Error during daemon cleanup: {e}")
-
 
     def _capture_process_timestamp(
             self,
@@ -246,7 +267,6 @@ class Daemon:
         )
         if write_properties:
             self.write_properties()
-
 
     def run(
             self,
@@ -301,8 +321,7 @@ class Daemon:
         self._capture_process_timestamp('began')
         return _launch_success_bool, msg
 
-
-    def kill(self, timeout: Optional[int] = 8) -> SuccessTuple:
+    def kill(self, timeout: Union[int, float, None] = 8) -> SuccessTuple:
         """Forcibly terminate a running daemon.
         Sends a SIGTERM signal to the process.
 
@@ -340,7 +359,6 @@ class Daemon:
                 pass
         return True, "Success"
 
-
     def quit(self, timeout: Union[int, float, None] = None) -> SuccessTuple:
         """Gracefully quit a running daemon."""
         if self.status == 'paused':
@@ -350,12 +368,11 @@ class Daemon:
             self._capture_process_timestamp('ended')
         return signal_success, signal_msg
 
-
     def pause(
-            self,
-            timeout: Union[int, float, None] = None,
-            check_timeout_interval: Union[float, int, None] = None,
-        ) -> SuccessTuple:
+        self,
+        timeout: Union[int, float, None] = None,
+        check_timeout_interval: Union[float, int, None] = None,
+    ) -> SuccessTuple:
         """
         Pause the daemon if it is running.
 
@@ -414,7 +431,6 @@ class Daemon:
             + ('s' if timeout != 1 else '') + '.'
         )
 
-
     def resume(
             self,
             timeout: Union[int, float, None] = None,
@@ -470,12 +486,12 @@ class Daemon:
             + ('s' if timeout != 1 else '') + '.'
         )
 
-
     def _handle_interrupt(self, signal_number: int, stack_frame: 'frame') -> None:
         """
         Handle `SIGINT` within the Daemon context.
         This method is injected into the `DaemonContext`.
         """
+        print('daemon sigint!')
         from meerschaum.utils.process import signal_handler
         signal_handler(signal_number, stack_frame)
 
@@ -502,7 +518,6 @@ class Daemon:
                 warn(traceback.format_exc())
         raise KeyboardInterrupt()
 
-
     def _handle_sigterm(self, signal_number: int, stack_frame: 'frame') -> None:
         """
         Handle `SIGTERM` within the `Daemon` context.
@@ -522,7 +537,6 @@ class Daemon:
         _close_pools()
         raise SystemExit(0)
 
- 
     def _send_signal(
             self,
             signal_to_send,
@@ -578,7 +592,6 @@ class Daemon:
             + ('s' if timeout != 1 else '') + '.'
         )
 
-
     def mkdir_if_not_exists(self, allow_dirty_run: bool = False):
         """Create the Daemon's directory.
         If `allow_dirty_run` is `False` and the directory already exists,
@@ -618,7 +631,6 @@ class Daemon:
                 return None
         return self._process
 
-
     @property
     def status(self) -> str:
         """
@@ -633,7 +645,7 @@ class Daemon:
                 return 'paused'
             if self.process.status() == 'zombie':
                 raise psutil.NoSuchProcess(self.process.pid)
-        except psutil.NoSuchProcess:
+        except (psutil.NoSuchProcess, AttributeError):
             if self.pid_path.exists():
                 try:
                     self.pid_path.unlink()
@@ -643,14 +655,12 @@ class Daemon:
 
         return 'running'
 
-
     @classmethod
     def _get_path_from_daemon_id(cls, daemon_id: str) -> pathlib.Path:
         """
         Return a Daemon's path from its `daemon_id`.
         """
         return DAEMON_RESOURCES_PATH / daemon_id
-
 
     @property
     def path(self) -> pathlib.Path:
@@ -659,14 +669,12 @@ class Daemon:
         """
         return self._get_path_from_daemon_id(self.daemon_id)
 
-
     @classmethod
     def _get_properties_path_from_daemon_id(cls, daemon_id: str) -> pathlib.Path:
         """
         Return the `properties.json` path for a given `daemon_id`.
         """
         return cls._get_path_from_daemon_id(daemon_id) / 'properties.json'
-
 
     @property
     def properties_path(self) -> pathlib.Path:
@@ -675,14 +683,12 @@ class Daemon:
         """
         return self._get_properties_path_from_daemon_id(self.daemon_id)
 
-
     @property
     def log_path(self) -> pathlib.Path:
         """
         Return the log path.
         """
         return LOGS_RESOURCES_PATH / (self.daemon_id + '.log')
-
 
     @property
     def log_offset_path(self) -> pathlib.Path:
@@ -691,7 +697,6 @@ class Daemon:
         """
         return LOGS_RESOURCES_PATH / ('.' + self.daemon_id + '.log.offset')
 
-    
     @property
     def rotating_log(self) -> RotatingFile:
         if '_rotating_log' in self.__dict__:
@@ -704,7 +709,6 @@ class Daemon:
             timestamp_format = get_config('jobs', 'logs', 'timestamps', 'format'),
         )
         return self._rotating_log
-
 
     @property
     def log_text(self) -> Optional[str]:
@@ -720,7 +724,6 @@ class Daemon:
         )
         return new_rotating_log.read()
 
-
     def readlines(self) -> List[str]:
         """
         Read the next log lines, persisting the cursor for later use.
@@ -730,7 +733,6 @@ class Daemon:
         lines = self.rotating_log.readlines()
         self._write_log_offset()
         return lines
-
 
     def _read_log_offset(self) -> Tuple[int, int]:
         """
@@ -749,7 +751,6 @@ class Daemon:
         subfile_index, subfile_position = int(cursor_parts[0]), int(cursor_parts[1])
         return subfile_index, subfile_position
 
-
     def _write_log_offset(self) -> None:
         """
         Write the current log offset file.
@@ -758,7 +759,6 @@ class Daemon:
             subfile_index = self.rotating_log._cursor[0]
             subfile_position = self.rotating_log._cursor[1]
             f.write(f"{subfile_index} {subfile_position}")
-
 
     @property
     def pid(self) -> Union[int, None]:
@@ -777,14 +777,12 @@ class Daemon:
             pid = None
         return pid
 
-
     @property
     def pid_path(self) -> pathlib.Path:
         """
         Return the path to a file containing the PID for this Daemon.
         """
         return self.path / 'process.pid'
-
 
     @property
     def pid_lock(self) -> 'fasteners.InterProcessLock':
@@ -798,14 +796,12 @@ class Daemon:
         self._pid_lock = fasteners.InterProcessLock(self.pid_path)
         return self._pid_lock
 
-
     @property
     def pickle_path(self) -> pathlib.Path:
         """
         Return the path for the pickle file.
         """
         return self.path / 'pickle.pkl'
-
 
     def read_properties(self) -> Optional[Dict[str, Any]]:
         """Read the properties JSON file and return the dictionary."""
@@ -816,7 +812,6 @@ class Daemon:
                 return json.load(file)
         except Exception as e:
             return {}
-
 
     def read_pickle(self) -> Daemon:
         """Read a Daemon's pickle file and return the `Daemon`."""
@@ -837,21 +832,30 @@ class Daemon:
             error(msg)
         return daemon
 
-
     @property
     def properties(self) -> Dict[str, Any]:
         """
         Return the contents of the properties JSON file.
         """
-        _file_properties = self.read_properties()
+        try:
+            _file_properties = self.read_properties()
+        except Exception:
+            traceback.print_exc()
+            _file_properties = None
+
         if not self._properties:
             self._properties = _file_properties
+
         if self._properties is None:
             self._properties = {}
-        if _file_properties is not None:
-            self._properties = apply_patch_to_config(_file_properties, self._properties)
-        return self._properties
 
+        if _file_properties is not None:
+            self._properties = apply_patch_to_config(
+                _file_properties,
+                self._properties,
+            )
+
+        return self._properties
 
     @property
     def hidden(self) -> bool:
@@ -860,12 +864,14 @@ class Daemon:
         """
         return self.daemon_id.startswith('_') or self.daemon_id.startswith('.')
 
-
     def write_properties(self) -> SuccessTuple:
         """Write the properties dictionary to the properties JSON file
         (only if self.properties exists).
         """
-        success, msg = False, f"No properties to write for daemon '{self.daemon_id}'."
+        success, msg = (
+            False,
+            f"No properties to write for daemon '{self.daemon_id}'."
+        )
         if self.properties is not None:
             try:
                 self.path.mkdir(parents=True, exist_ok=True)
@@ -875,7 +881,6 @@ class Daemon:
             except Exception as e:
                 success, msg = False, str(e)
         return success, msg
-
 
     def write_pickle(self) -> SuccessTuple:
         """Write the pickle file for the daemon."""
@@ -892,9 +897,9 @@ class Daemon:
 
 
     def _setup(
-            self,
-            allow_dirty_run: bool = False,
-        ) -> None:
+        self,
+        allow_dirty_run: bool = False,
+    ) -> None:
         """
         Update properties before starting the Daemon.
         """
@@ -917,7 +922,6 @@ class Daemon:
         _write_pickle_success_tuple = self.write_pickle()
         if not _write_pickle_success_tuple[0]:
             error(_write_pickle_success_tuple[1])
-
 
     def cleanup(self, keep_logs: bool = False) -> SuccessTuple:
         """

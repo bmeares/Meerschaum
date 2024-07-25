@@ -1178,7 +1178,7 @@ def interval_str(delta: Union[timedelta, int]) -> str:
     A formatted string, fit for human eyes.
     """
     from meerschaum.utils.packages import attempt_import
-    humanfriendly = attempt_import('humanfriendly')
+    humanfriendly = attempt_import('humanfriendly', silent=True)
     delta_seconds = (
         delta.total_seconds()
         if isinstance(delta, timedelta)
