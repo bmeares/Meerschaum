@@ -9,6 +9,7 @@ Intercept OS-level file descriptors.
 import os
 import select
 import traceback
+import errno
 from threading import Event
 from datetime import datetime
 from meerschaum.utils.typing import Callable
@@ -68,6 +69,8 @@ class FileDescriptorInterceptor:
                 from meerschaum.utils.warnings import warn
                 if e.errno == errno.EBADF:
                     warn("File descriptor closed. Stopping interception.")
+                elif e.errno == errno.EINTR:
+                    continue  # Interrupted system call, just try again
                 else:
                     warn(f"OSError in FileDescriptorInterceptor: {e}")
                 break
