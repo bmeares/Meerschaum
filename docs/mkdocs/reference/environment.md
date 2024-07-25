@@ -80,9 +80,13 @@ MRSM_PATCH='baz:MRSM{foo:bar}' \
   mrsm show config baz
 ```
 
+## **`MRSM_PLUGINS_DIR`**
+
+Like `MRSM_PLUGINS_DIR`, you can designate a separate directory outside of the root to isolate your secrets and segment your configuration.
+
 ## **`MRSM_VENVS_DIR`**  
 
-Like `MRSM_PLUGINS_DIR`, you can designate a separate directory outside of the Meerschaum root to contain virtual environments. Generally you should not need to set this, but this is useful for sharing virtual environments between deployments as well as separating package data from user data (e.g. Kubernetes deployments).
+Like `MRSM_PLUGINS_DIR`, you can designate a separate directory outside of the Meerschaum root to contain virtual environments. This is useful for sharing virtual environments between deployments as well as separating package data from user data (e.g. Kubernetes deployments).
 
 ```bash
 MRSM_VENVS_DIR='venvs/' mrsm show plugins

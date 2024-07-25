@@ -87,9 +87,9 @@ class APIConnector(Connector):
             kw.update(from_uri_params)
 
         super().__init__('api', label=label, **kw)
-        if 'protocol' not in self.__dict__:
-            self.protocol = 'http'
         if 'uri' not in self.__dict__:
+            if 'protocol' not in self.__dict__:
+                self.protocol = 'http'
             self.verify_attributes(required_attributes)
         else:
             from meerschaum.connectors.sql import SQLConnector
@@ -97,6 +97,7 @@ class APIConnector(Connector):
             if 'host' not in conn_attrs:
                 raise Exception(f"Invalid URI for '{self}'.")
             self.__dict__.update(conn_attrs)
+
         self.url = (
             self.protocol + '://' +
             self.host
@@ -105,7 +106,7 @@ class APIConnector(Connector):
                 if self.__dict__.get('port', None)
                 else ''
             )
-        )
+        ) if not self.__dict__.get('uri') else self.uri
         self._token = None
         self._expires = None
         self._session = None
@@ -116,6 +117,9 @@ class APIConnector(Connector):
         """
         Return the fully qualified URI.
         """
+        if 'uri' in self.__dict__:
+            return self.uri
+
         username = self.__dict__.get('username', None)
         password = self.__dict__.get('password', None)
         creds = (username + ':' + password + '@') if username and password else ''

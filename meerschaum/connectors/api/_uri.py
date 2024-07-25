@@ -11,11 +11,11 @@ from meerschaum.utils.warnings import warn, error
 
 @classmethod
 def from_uri(
-        cls,
-        uri: str,
-        label: Optional[str] = None,
-        as_dict: bool = False,
-    ) -> Union[
+    cls,
+    uri: str,
+    label: Optional[str] = None,
+    as_dict: bool = False,
+) -> Union[
         'meerschaum.connectors.APIConnector',
         Dict[str, Union[str, int]],
     ]:

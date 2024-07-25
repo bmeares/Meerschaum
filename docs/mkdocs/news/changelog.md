@@ -7,7 +7,10 @@ This is the current release cycle, so stay tuned for future releases!
 ### v2.2.6
 
 - **Fix a critical login issue.**  
-  The previous release (v2.2.5) broke the login functionality of the Web UI and has been yanked. If you are running v2.2.5, it is recommended you upgrade immediately.
+  The previous release (v2.2.5) broke the login functionality of the Web UI and has been yanked. If you are running v2.2.5, it is urgent that you upgrade immediately.
+
+- **Add environment variable `MRSM_CONFIG_DIR`.**  
+  You may now isolate your configuration directory outside of the root (like with `MRSM_PLUGINS_DIR`, and `MRSM_VENVS_DIR`). This will be useful in certain production deployments where secrets need to be segmented and isolated.
 
 - **Add `register connector`.**  
   Like `bootstrap connector`, you may now programmatically create connectors.
@@ -24,6 +27,12 @@ This is the current release cycle, so stay tuned for future releases!
   __version__: str = '0.0.1'
   required: list[str] = ['requests']
   ```
+
+- **Automatically include `--noask` and `--yes` in remote actions.**  
+  For your convenience, the flags `--noask` and `--yes` are included in remote actions sent by `APIConnector.do_action()`.
+
+- **Fixed an issue with URIs for `api` connectors.**  
+  Creating an `APIConnector` via a URI connection string now properly handles the protocol.
 
 - **Fixed a formatting issue with `show logs`.**
 
