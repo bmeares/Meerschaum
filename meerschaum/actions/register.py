@@ -7,12 +7,13 @@ Register new Pipes. Requires the API to be running.
 """
 
 from __future__ import annotations
+import meerschaum as mrsm
 from meerschaum.utils.typing import SuccessTuple, Any, List, Optional, Dict
 
 def register(
-        action: Optional[List[str]] = None,
-        **kw: Any
-    ) -> SuccessTuple:
+    action: Optional[List[str]] = None,
+    **kw: Any
+) -> SuccessTuple:
     """
     Register new items (pipes, plugins, users).
 
@@ -23,22 +24,25 @@ def register(
         'pipes'     : _register_pipes,
         'plugins'   : _register_plugins,
         'users'     : _register_users,
+        'connectors': _register_connectors,
     }
     return choose_subaction(action, options, **kw)
 
 
 def _complete_register(
-        action: Optional[List[str]] = None,
-        **kw: Any
-    ) -> List[str]:
+    action: Optional[List[str]] = None,
+    **kw: Any
+) -> List[str]:
     """
     Override the default Meerschaum `complete_` function.
     """
     if action is None:
         action = []
     options = {
-        'plugin' : _complete_register_plugins,
-        'plugins' : _complete_register_plugins,
+        'plugin': _complete_register_plugins,
+        'plugins': _complete_register_plugins,
+        'connector': _complete_register_connectors,
+        'connectors': _complete_register_connectors,
     }
 
     if len(action) > 0 and action[0] in options:
@@ -51,14 +55,14 @@ def _complete_register(
 
 
 def _register_pipes(
-        connector_keys: Optional[List[str]] = None,
-        metric_keys: Optional[List[str]] = None,
-        location_keys: Optional[List[str]] = None,
-        params: Optional[Dict[str, Any]] = None,
-        tags: Optional[List[str]] = None,
-        debug: bool = False,
-        **kw: Any
-    ) -> SuccessTuple:
+    connector_keys: Optional[List[str]] = None,
+    metric_keys: Optional[List[str]] = None,
+    location_keys: Optional[List[str]] = None,
+    params: Optional[Dict[str, Any]] = None,
+    tags: Optional[List[str]] = None,
+    debug: bool = False,
+    **kw: Any
+) -> SuccessTuple:
     """
     Create and register Pipe objects.
 
@@ -147,15 +151,18 @@ def _register_pipes(
 
 
 def _register_plugins(
-        action: Optional[List[str]] = None,
-        repository: Optional[str] = None,
-        shell: bool = False,
-        debug: bool = False,
-        yes: bool = False,
-        noask: bool = False,
-        force: bool = False,
-        **kw: Any
-    ) -> SuccessTuple:
+    action: Optional[List[str]] = None,
+    repository: Optional[str] = None,
+    shell: bool = False,
+    debug: bool = False,
+    yes: bool = False,
+    noask: bool = False,
+    force: bool = False,
+    **kw: Any
+) -> SuccessTuple:
+    """
+    Upload plugins to an API instance (repository).
+    """
     from meerschaum.utils.debug import dprint
     from meerschaum.plugins import reload_plugins, get_plugins_names
     from meerschaum.connectors.parse import parse_repo_keys
@@ -246,17 +253,19 @@ def _register_plugins(
     reload_plugins(debug=debug)
     return total_success > 0, msg
 
+
 def _complete_register_plugins(*args, **kw):
     from meerschaum.actions.uninstall import _complete_uninstall_plugins
     return _complete_uninstall_plugins(*args, **kw)
 
+
 def _register_users(
-        action: Optional[List[str]] = None,
-        mrsm_instance: Optional[str] = None,
-        shell: bool = False,
-        debug: bool = False,
-        **kw: Any
-    ) -> SuccessTuple:
+    action: Optional[List[str]] = None,
+    mrsm_instance: Optional[str] = None,
+    shell: bool = False,
+    debug: bool = False,
+    **kw: Any
+) -> SuccessTuple:
     """
     Register a new user to a Meerschaum instance.
     """
@@ -294,7 +303,7 @@ def _register_users(
         nonregistered_users.append(user)
 
     ### prompt for passwords and emails, then try to register
-    success = dict()
+    success = {}
     successfully_registered_users = set()
     for _user in nonregistered_users:
         try:
@@ -336,6 +345,95 @@ def _register_users(
         f"  ({succeeded} succeeded, {failed} failed)"
     )
     return succeeded > 0, msg
+
+
+def _register_connectors(
+    action: Optional[List[str]] = None,
+    connector_keys: Optional[List[str]] = None,
+    params: Optional[Dict[str, Any]] = None,
+    **kwargs: Any
+) -> SuccessTuple:
+    """
+    Create new connectors programmatically with `--params`.
+    See `bootstrap connector`.
+
+    Examples:
+
+    mrsm register connector sql:tmp --params 'uri:sqlite:////tmp/tmp.db'
+
+    mrsm register connector -c sql:new --params '{"database": "/tmp/new.db"}'
+    """
+    from meerschaum.config import get_config, write_config
+    from meerschaum.utils.prompt import yes_no
+    from meerschaum.utils.warnings import warn
+    all_keys = (action or []) + (connector_keys or [])
+    if len(all_keys) != 1:
+        return (
+            False,
+            "Provide one pair of keys for the connector to be registered."
+        )
+
+    keys = all_keys[0]
+
+    if keys.count(':') != 1:
+        return False, "Connector keys must be in the format `type:label`."
+
+    type_, label = keys.split(':', maxsplit=1)
+    mrsm_config = get_config('meerschaum')
+    if 'connectors' not in mrsm_config:
+        mrsm_config['connectors'] = {}
+
+    if type_ not in mrsm_config['connectors']:
+        mrsm_config['connectors'] = {}
+
+    is_new = True
+    if label in mrsm_config['connectors'][type_]:
+        rich_table, rich_json, rich_box = mrsm.attempt_import(
+            'rich.table',
+            'rich.json',
+            'rich.box',
+        )
+        existing_params = mrsm_config['connectors'][type_][label]
+        if existing_params == params:
+            return True, "Connector exists, nothing to do."
+
+        table = rich_table.Table(box=rich_box.MINIMAL)
+        table.add_column('Existing Parameters')
+        table.add_column('New Parameters')
+        table.add_row(
+            rich_json.JSON.from_data(existing_params),
+            rich_json.JSON.from_data(params or {}),
+        )
+
+        mrsm.pprint(table)
+        warn(f"Connector '{keys}' already exists.", stack=False)
+        if not yes_no(
+            f"Do you want to overwrite connector '{keys}'?",
+            default='n',
+            **kwargs
+        ):
+            return False, "Nothing was changed."
+
+        is_new = False
+
+    mrsm_config['connectors'][type_][label] = params
+    if not write_config({'meerschaum': mrsm_config}):
+        return False, "Failed to update configuration."
+
+    msg = (
+        "Successfully "
+        + ("registered" if is_new else "updated")
+        + f" connector '{keys}'."
+    )
+    return True, msg
+
+
+def _complete_register_connectors(
+    action: Optional[List[str]] = None, **kw: Any
+) -> List[str]:
+    from meerschaum.actions.show import _complete_show_connectors
+    return _complete_show_connectors(action)
+
 
 ### NOTE: This must be the final statement of the module.
 ###       Any subactions added below these lines will not

@@ -1849,10 +1849,16 @@ def _get_pip_os_env(color: bool = True):
     Return the environment variables context in which `pip` should be run.
     See PEP 668 for why we are overriding the environment.
     """
-    import os
+    import os, sys, platform
+    python_bin_path = pathlib.Path(sys.executable)
     pip_os_env = os.environ.copy()
+    path_str = pip_os_env.get('PATH', '') or ''
+    path_sep = ':' if platform.system() != 'Windows' else ';'
     pip_os_env.update({
         'PIP_BREAK_SYSTEM_PACKAGES': 'true',
         ('FORCE_COLOR' if color else 'NO_COLOR'): '1',
     })
+    if str(python_bin_path) not in path_str:
+        pip_os_env['PATH'] = str(python_bin_path.parent) + path_sep + path_str
+
     return pip_os_env

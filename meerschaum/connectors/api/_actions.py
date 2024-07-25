@@ -9,44 +9,31 @@ Functions to interact with /mrsm/actions
 from __future__ import annotations
 from meerschaum.utils.typing import SuccessTuple, Optional, List
 
-def get_actions(
-        self,
-    ) -> list:
-    """Get available actions from the API server"""
+def get_actions(self) -> list:
+    """Get available actions from the API instance."""
     from meerschaum.config.static import STATIC_CONFIG
     return self.get(STATIC_CONFIG['api']['endpoints']['actions'])
 
 
 def do_action(
-        self,
-        action: Optional[List[str]] = None,
-        sysargs: Optional[List[str]] = None,
-        debug: bool = False,
-        **kw
-    ) -> SuccessTuple:
+    self,
+    action: Optional[List[str]] = None,
+    sysargs: Optional[List[str]] = None,
+    debug: bool = False,
+    **kw
+) -> SuccessTuple:
     """Execute a Meerschaum action remotely.
-    
-    If sysargs is provided, parse those instead. Otherwise infer everything from keyword arguments.
-    
-    NOTE: The first index of `action` should NOT be removed!
-    Example: action = ['show', 'config']
-    
-    Returns: tuple (succeeded : bool, message : str)
 
-    Parameters
-    ----------
-    action: Optional[List[str]] :
-         (Default value = None)
-    sysargs: Optional[List[str]] :
-         (Default value = None)
-    debug: bool :
-         (Default value = False)
-    **kw :
-        
+    If `sysargs` are provided, parse those instead.
+    Otherwise infer everything from keyword arguments.
 
-    Returns
-    -------
-
+    Examples
+    --------
+    >>> conn = mrsm.get_connector('api:main')
+    >>> conn.do_action(['show', 'pipes'])
+    (True, "Success")
+    >>> conn.do_action(['show', 'arguments'], name='test')
+    (True, "Success")
     """
     import sys, json
     from meerschaum.utils.debug import dprint
@@ -63,7 +50,12 @@ def do_action(
     else:
         json_dict = kw
         json_dict['action'] = action
-        json_dict['debug'] = debug
+        if 'noask' not in kw:
+            json_dict['noask'] = True
+        if 'yes' not in kw:
+            json_dict['yes'] = True
+        if debug:
+            json_dict['debug'] = debug
 
     root_action = json_dict['action'][0]
     del json_dict['action'][0]

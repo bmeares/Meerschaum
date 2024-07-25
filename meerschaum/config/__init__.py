@@ -26,7 +26,14 @@ from meerschaum.config._paths import (
 from meerschaum.config._patch import (
     apply_patch_to_config,
 )
-__all__ = ('get_plugin_config', 'write_plugin_config', 'get_config', 'write_config', 'set_config',)
+__all__ = (
+    'get_plugin_config',
+    'write_plugin_config',
+    'get_config',
+    'write_config',
+    'set_config',
+    'paths',
+)
 __pdoc__ = {'static': False, 'resources': False, 'stack': False, }
 _locks = {'config': RLock()}
 

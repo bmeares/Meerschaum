@@ -46,6 +46,7 @@ STATIC_CONFIG: Dict[str, Any] = {
     },
     'environment': {
         'config': 'MRSM_CONFIG',
+        'config_dir': 'MRSM_CONFIG_DIR',
         'patch': 'MRSM_PATCH',
         'root': 'MRSM_ROOT_DIR',
         'plugins': 'MRSM_PLUGINS_DIR',

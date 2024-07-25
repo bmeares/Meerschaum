@@ -221,18 +221,17 @@ def _bootstrap_pipes(
     return (successes > 0), msg
 
 def _bootstrap_connectors(
-        action : Optional[List[str]] = None,
-        connector_keys : Optional[List[str]] = None,
-        yes : bool = False,
-        force : bool = False,
-        noask : bool = False,
-        debug : bool = False,
-        return_keys : bool = False,
-        **kw : Any
-    ) -> Union[SuccessTuple, Tuple[str, str]]:
+    action: Optional[List[str]] = None,
+    connector_keys: Optional[List[str]] = None,
+    yes: bool = False,
+    force: bool = False,
+    noask: bool = False,
+    debug: bool = False,
+    return_keys: bool = False,
+    **kw: Any
+) -> Union[SuccessTuple, Tuple[str, str]]:
     """
     Prompt the user for the details necessary to create a Connector.
-
     """
     from meerschaum.connectors.parse import is_valid_connector_keys
     from meerschaum.connectors import connectors, get_connector, types, custom_types
@@ -386,10 +385,10 @@ def _bootstrap_connectors(
 
 
 def _bootstrap_plugins(
-        action: Optional[List[str]] = None,
-        debug: bool = False,
-        **kwargs: Any
-    ) -> SuccessTuple:
+    action: Optional[List[str]] = None,
+    debug: bool = False,
+    **kwargs: Any
+) -> SuccessTuple:
     """
     Launch an interactive wizard to guide the user to creating a new plugin.
     """

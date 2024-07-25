@@ -83,12 +83,16 @@ class APIConnector(Connector):
         if 'uri' in kw:
             from_uri_params = self.from_uri(kw['uri'], as_dict=True)
             label = label or from_uri_params.get('label', None)
-            from_uri_params.pop('label', None)
+            _ = from_uri_params.pop('label', None)
             kw.update(from_uri_params)
 
         super().__init__('api', label=label, **kw)
         if 'protocol' not in self.__dict__:
-            self.protocol = 'http'
+            self.protocol = (
+                'https' if self.__dict__.get('uri', '').startswith('https')
+                else 'http'
+            )
+
         if 'uri' not in self.__dict__:
             self.verify_attributes(required_attributes)
         else:
@@ -97,6 +101,7 @@ class APIConnector(Connector):
             if 'host' not in conn_attrs:
                 raise Exception(f"Invalid URI for '{self}'.")
             self.__dict__.update(conn_attrs)
+
         self.url = (
             self.protocol + '://' +
             self.host

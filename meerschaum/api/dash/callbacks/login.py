@@ -17,6 +17,7 @@ from dash.dependencies import Input, Output, State
 from meerschaum.api.dash import dash_app, debug, pipes, _get_pipes, active_sessions
 from meerschaum.api.dash.connectors import get_web_connector
 from meerschaum.api.routes._login import login
+from meerschaum.api.dash.components import alert_from_success_tuple
 from fastapi_login.exceptions import InvalidCredentialsException
 from fastapi.exceptions import HTTPException
 dbc = attempt_import('dash_bootstrap_components', lazy=False, check_update=CHECK_UPDATE)
@@ -39,6 +40,7 @@ def show_registration_disabled_collapse(n_clicks, is_open):
     Output('session-store', 'data'),
     Output('username-input', 'className'),
     Output('location', 'pathname'),
+    Output('login-alert-div', 'children'),
     Input('username-input', 'n_submit'),
     Input('password-input', 'n_submit'),
     Input('login-button', 'n_clicks'),
@@ -48,14 +50,14 @@ def show_registration_disabled_collapse(n_clicks, is_open):
     State('location', 'pathname'),
 )
 def login_button_click(
-        username_submit,
-        password_submit,
-        n_clicks,
-        username,
-        password,
-        location_href,
-        location_pathname,
-    ):
+    username_submit,
+    password_submit,
+    n_clicks,
+    username,
+    password,
+    location_href,
+    location_pathname,
+):
     """
     When the user submits the login form, check the login.
     On successful login, set the session id.
@@ -63,12 +65,18 @@ def login_button_click(
     form_class = 'form-control'
     ctx = dash.callback_context
     if not username or not password or not ctx.triggered:
-        return {}, form_class, dash.no_update
+        raise PreventUpdate
+
     try:
-        token_dict = login({'username': username, 'password': password})
-        session_data = {'session-id': str(uuid.uuid4()), 'location.href': location_href}
+        _ = login({'username': username, 'password': password})
+        session_data = {
+            'session-id': str(uuid.uuid4()),
+            'location.href': location_href,
+        }
         active_sessions[session_data['session-id']] = {'username': username}
+        alerts = []
     except HTTPException:
         form_class += ' is-invalid'
-        session_data = None
-    return session_data, form_class, dash.no_update
+        session_data = dash.no_update
+        alerts = alert_from_success_tuple((False, "Invalid login."))
+    return session_data, form_class, dash.no_update, alerts

@@ -34,11 +34,28 @@ if ENVIRONMENT_ROOT_DIR in os.environ:
             f"Invalid root directory '{str(_ROOT_DIR_PATH)}' set for " +
             f"environment variable '{ENVIRONMENT_ROOT_DIR}'.\n" +
             f"Please enter a valid path for {ENVIRONMENT_ROOT_DIR}.",
-            file = sys.stderr,
+            file=sys.stderr,
         )
         sys.exit(1)
 else:
     _ROOT_DIR_PATH = DEFAULT_ROOT_DIR_PATH
+
+
+ENVIRONMENT_CONFIG_DIR = STATIC_CONFIG['environment']['config_dir']
+if ENVIRONMENT_CONFIG_DIR in os.environ:
+    _CONFIG_DIR_PATH = Path(os.environ[ENVIRONMENT_CONFIG_DIR]).resolve()
+    if not _CONFIG_DIR_PATH.exists():
+        print(
+            (
+                f"Invalid configuration directory '{_CONFIG_DIR_PATH}' set"
+                + f" for environment variable '{ENVIRONMENT_CONFIG_DIR}'\n"
+                + f"Please enter a valid path for {ENVIRONMENT_CONFIG_DIR}."
+            ),
+            file=sys.stderr,
+        )
+        sys.exit(1)
+else:
+    _CONFIG_DIR_PATH = _ROOT_DIR_PATH / 'config'
 
 ENVIRONMENT_PLUGINS_DIR = STATIC_CONFIG['environment']['plugins']
 if ENVIRONMENT_PLUGINS_DIR in os.environ:
@@ -100,7 +117,7 @@ paths = {
     'PACKAGE_ROOT_PATH'              : Path(__file__).parent.parent.resolve().as_posix(),
     'ROOT_DIR_PATH'                  : _ROOT_DIR_PATH.as_posix(),
     'VIRTENV_RESOURCES_PATH'         : _VENVS_DIR_PATH.as_posix(),
-    'CONFIG_DIR_PATH'                : ('{ROOT_DIR_PATH}', 'config'),
+    'CONFIG_DIR_PATH'                : _CONFIG_DIR_PATH.as_posix(),
     'DEFAULT_CONFIG_DIR_PATH'        : ('{ROOT_DIR_PATH}', 'default_config'),
     'PATCH_DIR_PATH'                 : ('{ROOT_DIR_PATH}', 'patch_config'),
     'PERMANENT_PATCH_DIR_PATH'       : ('{ROOT_DIR_PATH}', 'permanent_patch_config'),
@@ -167,6 +184,7 @@ def set_root(root: Union[Path, str]):
     for path_name, path_parts in paths.items():
         if isinstance(path_parts, tuple) and path_parts[0] == '{ROOT_DIR_PATH}':
             globals()[path_name] = __getattr__(path_name)
+
 
 def __getattr__(name: str) -> Path:
     if name not in paths:

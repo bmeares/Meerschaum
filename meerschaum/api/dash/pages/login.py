@@ -31,7 +31,7 @@ registration_div = html.Div(
         else [
             dcc.Markdown("""
                 #### **Web registration is disabled for security.**
-                You can still register users on this instance with a SQL connector.
+                You can register users via the CLI with `mrsm register user`.
             """),
             dbc.Button(
                 'More information.',
@@ -80,6 +80,7 @@ layout = dbc.Container([
     html.Br(),
     dbc.Container([
         dcc.Location(id='location-login', refresh=True),
+        html.Div(id="login-alert-div"),
         html.Div([
             dbc.Container(
                 html.Img(
@@ -129,4 +130,3 @@ layout = dbc.Container([
         ]),
     ], className='jumbotron')
 ])
-

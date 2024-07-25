@@ -654,17 +654,18 @@ class Plugin:
             import ast, re
             ### NOTE: This technically would break 
             ### if `required` was the very first line of the file.
-            req_start_match = re.search(r'\nrequired(\s?)=', text)
+            req_start_match = re.search(r'required(:\s*)?.*=', text)
             if not req_start_match:
                 return []
             req_start = req_start_match.start()
+            equals_sign = req_start + text[req_start:].find('=')
 
             ### Dependencies may have brackets within the strings, so push back the index.
-            first_opening_brace = req_start + 1 + text[req_start:].find('[')
+            first_opening_brace = equals_sign + 1 + text[equals_sign:].find('[')
             if first_opening_brace == -1:
                 return []
 
-            next_closing_brace = req_start + 1 + text[req_start:].find(']')
+            next_closing_brace = equals_sign + 1 + text[equals_sign:].find(']')
             if next_closing_brace == -1:
                 return []
 
@@ -681,12 +682,11 @@ class Plugin:
 
             req_end = end_ix + 1
             req_text = (
-                text[req_start:req_end]
-                .lstrip()
-                .replace('required', '', 1)
+                text[(first_opening_brace-1):req_end]
                 .lstrip()
                 .replace('=', '', 1)
                 .lstrip()
+                .rstrip()
             )
             try:
                 required = ast.literal_eval(req_text)
