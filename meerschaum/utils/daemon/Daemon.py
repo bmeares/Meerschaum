@@ -101,7 +101,7 @@ class Daemon:
                 )
         if 'target' not in self.__dict__:
             if target is None:
-                error(f"Cannot create a Daemon without a target.")
+                error("Cannot create a Daemon without a target.")
             self.target = target
         if 'target_args' not in self.__dict__:
             self.target_args = target_args if target_args is not None else []
@@ -153,7 +153,7 @@ class Daemon:
         from meerschaum.config import get_config
         daemon = attempt_import('daemon')
         lines = get_config('jobs', 'terminal', 'lines')
-        columns = get_config('jobs','terminal', 'columns')
+        columns = get_config('jobs', 'terminal', 'columns')
 
         if platform.system() == 'Windows':
             return False, "Windows is no longer supported."
@@ -173,8 +173,6 @@ class Daemon:
             },
         )
 
-        #  signal.signal(signal.SIGINT, self._handle_interrupt)
-        #  signal.signal(signal.SIGTERM, self._handle_sigterm)
         _daemons.append(self)
 
         log_refresh_seconds = get_config('jobs', 'logs', 'refresh_files_seconds')
@@ -194,22 +192,18 @@ class Daemon:
 
                     self._log_refresh_timer.start()
                     result = self.target(*self.target_args, **self.target_kw)
-                    #  if is_success_tuple(result):
-                        #  mrsm.pprint(result)
                     self.properties['result'] = result
-                except KeyboardInterrupt:
-                    print('CAUGHT KEYBOARD INTERRUPT')
-                except SystemExit:
-                    print('CAUGHT SYSTEM EXIT')
+                    if is_success_tuple(result):
+                        mrsm.pprint(result)
+                except (BrokenPipeError, KeyboardInterrupt, SystemExit):
+                    pass
                 except Exception as e:
                     warn(
                         f"Exception in daemon target function: {traceback.format_exc()}",
                     )
                     result = e
                 finally:
-                    #  print('daemon finally!')
                     self._log_refresh_timer.cancel()
-                    self.rotating_log.close()
                     if self.pid is None and self.pid_path.exists():
                         self.pid_path.unlink()
 
@@ -225,10 +219,8 @@ class Daemon:
                 f.write(daemon_error)
             warn(f"Encountered an error while running the daemon '{self}':\n{daemon_error}")
         finally:
-            print('cleanup...')
             self._cleanup_on_exit()
-            print('end')
-            
+
     def _cleanup_on_exit(self):
         """Perform cleanup operations when the daemon exits."""
         try:
@@ -237,6 +229,7 @@ class Daemon:
             if self.pid is None and self.pid_path.exists():
                 self.pid_path.unlink()
             self._capture_process_timestamp('ended')
+            self.rotating_log.close()
         except Exception as e:
             warn(f"Error during daemon cleanup: {e}")
 
@@ -491,7 +484,6 @@ class Daemon:
         Handle `SIGINT` within the Daemon context.
         This method is injected into the `DaemonContext`.
         """
-        print('daemon sigint!')
         from meerschaum.utils.process import signal_handler
         signal_handler(signal_number, stack_frame)
 
