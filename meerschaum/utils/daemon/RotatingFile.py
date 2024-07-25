@@ -371,6 +371,9 @@ class RotatingFile(io.IOBase):
                 self._current_file_obj.write(data)
                 if suffix_str:
                     self._current_file_obj.write(suffix_str)
+            except BrokenPipeError:
+                warn("BrokenPipeError encountered. The daemon may have been terminated.")
+                return
             except Exception as e:
                 warn(f"Failed to write to subfile:\n{traceback.format_exc()}")
             self.flush()

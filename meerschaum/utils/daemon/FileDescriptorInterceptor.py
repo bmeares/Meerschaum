@@ -66,7 +66,10 @@ class FileDescriptorInterceptor:
                 continue
             except OSError as e:
                 from meerschaum.utils.warnings import warn
-                warn(f"OSError in FileDescriptorInterceptor: {e}")
+                if e.errno == errno.EBADF:
+                    warn("File descriptor closed. Stopping interception.")
+                else:
+                    warn(f"OSError in FileDescriptorInterceptor: {e}")
                 break
 
             try:
@@ -86,6 +89,10 @@ class FileDescriptorInterceptor:
                     else data.replace(b'\n', b'\n' + injected_bytes)
                 )
                 os.write(self.new_file_descriptor, modified_data)
+            except BrokenPipeError:
+                from meerschaum.utils.warnings import warn
+                warn("BrokenPipeError encountered. The daemon may have been terminated.")
+                break
             except Exception as e:
                 from meerschaum.utils.warnings import warn
                 warn(f"Error in FileDescriptorInterceptor data processing: {e}")
