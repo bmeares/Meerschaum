@@ -39,9 +39,9 @@ def login(
     Login and set the session token.
     """
     username, password = (
-        (data.username, data.password)
-        if hasattr(data, 'username')
-        else (data['username'], data['password'])
+        (data['username'], data['password'])
+        if isinstance(data, dict)
+        else (data.username, data.password)
     ) if not no_auth else ('no-auth', 'no-auth')
 
     user = User(username, password)
