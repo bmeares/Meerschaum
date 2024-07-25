@@ -50,6 +50,7 @@ with correct credentials, as well as a network connection and valid permissions.
 """
 
 from __future__ import annotations
+import sys
 import copy
 from meerschaum.utils.typing import Optional, Dict, Any, Union, InstanceConnector, List
 from meerschaum.utils.formatting._pipes import pipe_repr
@@ -433,13 +434,16 @@ class Pipe:
             + str(self.instance_keys) + sep
         )
 
-    def __repr__(self, **kw) -> str:
-        return pipe_repr(self, **kw)
+    def __repr__(self, ansi: bool=True, **kw) -> str:
+        if not hasattr(sys, 'ps1'):
+            ansi = False
+
+        return pipe_repr(self, ansi=ansi, **kw)
 
     def __pt_repr__(self):
         from meerschaum.utils.packages import attempt_import
         prompt_toolkit_formatted_text = attempt_import('prompt_toolkit.formatted_text', lazy=False)
-        return prompt_toolkit_formatted_text.ANSI(self.__repr__())
+        return prompt_toolkit_formatted_text.ANSI(pipe_repr(self, ansi=True))
 
     def __getstate__(self) -> Dict[str, Any]:
         """

@@ -590,7 +590,6 @@ def test_nested_chunks(flavor: str):
     assert len(df) == num_docs
 
 
-@pytest.mark.skipif(sys.version_info >= (3, 12), reason="Dask / Numpy 2.0 failing on Python 3.12")
 @pytest.mark.parametrize("flavor", get_flavors())
 def test_sync_dask_dataframe(flavor: str):
     """

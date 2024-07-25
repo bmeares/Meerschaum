@@ -291,16 +291,16 @@ def print_tuple(
 
 
 def print_options(
-        options: Optional[Dict[str, Any]] = None,
-        nopretty: bool = False,
-        no_rich: bool = False,
-        name: str = 'options',
-        header: Optional[str] = None,
-        num_cols: Optional[int] = None,
-        adjust_cols: bool = True,
-        sort_options: bool = False,
-        **kw
-    ) -> None:
+    options: Optional[Dict[str, Any]] = None,
+    nopretty: bool = False,
+    no_rich: bool = False,
+    name: str = 'options',
+    header: Optional[str] = None,
+    num_cols: Optional[int] = None,
+    adjust_cols: bool = True,
+    sort_options: bool = False,
+    **kw
+) -> None:
     """
     Print items in an iterable as a fancy table.
 
@@ -342,7 +342,7 @@ def print_options(
         _options.append(str(o))
     if sort_options:
         _options = sorted(_options)
-    _header = f"Available {name}" if header is None else header
+    _header = f"\nAvailable {name}" if header is None else header
 
     if num_cols is None:
         num_cols = 8
@@ -388,7 +388,7 @@ def print_options(
 
     if _header is not None:
         table = Table(
-            title = ('\n' + _header) if header else header,
+            title = _header,
             box = box.SIMPLE,
             show_header = False,
             show_footer = False,

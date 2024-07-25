@@ -616,7 +616,11 @@ def venv_target_path(
             return site_packages_path
 
         if not inside_venv():
-            site_path = pathlib.Path(site.getusersitepackages())
+            user_site_packages = site.getusersitepackages()
+            if user_site_packages is None:
+                raise EnvironmentError("Could not determine user site packages.")
+
+            site_path = pathlib.Path(user_site_packages)
             if not site_path.exists():
 
                 ### Windows does not have `os.geteuid()`.

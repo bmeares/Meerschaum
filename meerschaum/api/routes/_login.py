@@ -32,16 +32,16 @@ def load_user(
 
 
 @app.post(endpoints['login'], tags=['Users'])
-async def login(
+def login(
         data: CustomOAuth2PasswordRequestForm = fastapi.Depends()
-        #  data: dict[str, str],
-        #  request: Request
     ) -> Dict[str, Any]:
     """
     Login and set the session token.
     """
     username, password = (
-        (data.username, data.password)
+        (data['username'], data['password'])
+        if isinstance(data, dict)
+        else (data.username, data.password)
     ) if not no_auth else ('no-auth', 'no-auth')
 
     user = User(username, password)
@@ -62,7 +62,7 @@ async def login(
     return {
         'access_token': access_token,
         'token_type': 'bearer',
-        'expires' : expires_dt,
+        'expires': expires_dt,
     }
 
 

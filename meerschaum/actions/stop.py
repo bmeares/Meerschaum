@@ -21,9 +21,9 @@ def stop(action: Optional[List[str]] = None, **kw) -> SuccessTuple:
 
 
 def _complete_stop(
-        action: Optional[List[str]] = None,
-        **kw: Any
-    ) -> List[str]:
+    action: Optional[List[str]] = None,
+    **kw: Any
+) -> List[str]:
     """
     Override the default Meerschaum `complete_` function.
     """
@@ -49,14 +49,14 @@ def _complete_stop(
 
 
 def _stop_jobs(
-        action: Optional[List[str]] = None,
-        timeout_seconds: Optional[int] = None,
-        noask: bool = False,
-        force: bool = False,
-        yes: bool = False,
-        nopretty: bool = False,
-        **kw
-    ) -> SuccessTuple:
+    action: Optional[List[str]] = None,
+    timeout_seconds: Optional[int] = None,
+    noask: bool = False,
+    force: bool = False,
+    yes: bool = False,
+    nopretty: bool = False,
+    **kw
+) -> SuccessTuple:
     """
     Stop running jobs that were started with `-d` or `start job`.
     

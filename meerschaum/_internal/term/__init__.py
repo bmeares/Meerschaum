@@ -22,7 +22,7 @@ tornado, tornado_ioloop, terminado = attempt_import(
 
 def get_webterm_app_and_manager() -> Tuple[
         tornado.web.Application,
-        terminado.UniqueTermManager, 
+        terminado.UniqueTermManager,
     ]:
     """
     Construct the Tornado web app and term manager from the provided sysargs.
@@ -47,7 +47,7 @@ def get_webterm_app_and_manager() -> Tuple[
             {'term_manager': term_manager}
         ),
         (
-            r"/", 
+            r"/",
             TermPageHandler
         ),
     ]
