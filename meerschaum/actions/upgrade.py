@@ -10,9 +10,9 @@ from __future__ import annotations
 from meerschaum.utils.typing import SuccessTuple, Any, List, Optional, Union
 
 def upgrade(
-        action: Optional[List[str]] = None,
-        **kw: Any
-    ) -> SuccessTuple:
+    action: Optional[List[str]] = None,
+    **kw: Any
+) -> SuccessTuple:
     """
     Upgrade Meerschaum, plugins, or packages.
     
@@ -34,13 +34,13 @@ def upgrade(
 
 
 def _upgrade_meerschaum(
-        action: Optional[List[str]] = None,
-        yes: bool = False,
-        force: bool = False,
-        noask: bool = False,
-        debug: bool = False,
-        **kw: Any
-    ) -> SuccessTuple:
+    action: Optional[List[str]] = None,
+    yes: bool = False,
+    force: bool = False,
+    noask: bool = False,
+    debug: bool = False,
+    **kw: Any
+) -> SuccessTuple:
     """
     Upgrade the current Meerschaum instance.
     Optionally specify dependency groups.
@@ -109,26 +109,21 @@ class NoVenv:
     pass
 
 def _upgrade_packages(
-        action: Optional[List[str]] = None,
-        venv: Union[str, None, NoVenv] = NoVenv,
-        yes: bool = False,
-        force: bool = False,
-        noask: bool = False,
-        debug: bool = False,
-        **kw: Any
-    ) -> SuccessTuple:
+    action: Optional[List[str]] = None,
+    venv: Union[str, None, NoVenv] = NoVenv,
+    yes: bool = False,
+    force: bool = False,
+    noask: bool = False,
+    debug: bool = False,
+    **kw: Any
+) -> SuccessTuple:
     """
     Upgrade and install dependencies.
     If provided, upgrade only a dependency group, otherwise default to `full`.
     
     Examples:
-        ```
         upgrade packages
-        ```
-    
-        ```
-        upgrade packages docs
-        ```
+        upgrade packages full
     """
     from meerschaum.utils.packages import packages, pip_install, get_prerelease_dependencies
     from meerschaum.utils.warnings import info, warn
@@ -178,14 +173,15 @@ def _upgrade_packages(
         )
     return success, msg
 
+
 def _upgrade_plugins(
-        action: Optional[List[str]] = None,
-        yes: bool = False,
-        force: bool = False,
-        noask: bool = False,
-        debug: bool = False,
-        **kw: Any
-    ) -> SuccessTuple:
+    action: Optional[List[str]] = None,
+    yes: bool = False,
+    force: bool = False,
+    noask: bool = False,
+    debug: bool = False,
+    **kw: Any
+) -> SuccessTuple:
     """
     Upgrade all installed plugins to the latest versions.
     If no plugins are specified, attempt to upgrade all,
@@ -193,12 +189,8 @@ def _upgrade_plugins(
     
     Examples:
     
-    ```
     upgrade plugins
-    ```
-    ```
-    upgrade plugins testing
-    ```
+    upgrade plugins noaa
     """
     from meerschaum.actions import actions
     from meerschaum.plugins import get_plugins_names

@@ -14,6 +14,7 @@ def prompt(
         question: str,
         icon: bool = True,
         default: Union[str, Tuple[str, str], None] = None,
+        default_editable: Optional[str] = None,
         detect_password: bool = True,
         is_password: bool = False,
         wrap_lines: bool = True,
@@ -36,6 +37,9 @@ def prompt(
 
     default: Union[str, Tuple[str, str], None], default None
         If the response is '', return the default value.
+
+    default_editable: Optional[str], default None
+        If provided, auto-type this user-editable string in the prompt.
 
     detect_password: bool, default True
         If `True`, set the input method to a censored password box if the word `password`
@@ -102,6 +106,7 @@ def prompt(
         prompt_toolkit.prompt(
             prompt_toolkit.formatted_text.ANSI(question),
             wrap_lines = wrap_lines,
+            default = default_editable or '',
             **filter_keywords(prompt_toolkit.prompt, **kw)
         ) if not noask else ''
     )

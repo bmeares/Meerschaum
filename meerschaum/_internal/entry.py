@@ -8,20 +8,15 @@ The entry point for launching Meerschaum actions.
 """
 
 from __future__ import annotations
-from meerschaum.utils.typing import SuccessTuple, List, Optional, Dict
+from meerschaum.utils.typing import SuccessTuple, List, Optional, Dict, Callable, Any
 
 def entry(sysargs: Optional[List[str]] = None) -> SuccessTuple:
-    """Parse arguments and launch a Meerschaum action.
-    The `action` list removes the first element.
-    
-    Examples of action:
-        'show actions' -> ['actions']
-        'show' -> []
+    """
+    Parse arguments and launch a Meerschaum action.
 
     Returns
     -------
-    A `SuccessTuple` indicating success. If `schedule` is provided, this will never return.
-
+    A `SuccessTuple` indicating success.
     """
     from meerschaum._internal.arguments import parse_arguments
     from meerschaum.config.static import STATIC_CONFIG
@@ -51,9 +46,9 @@ def entry(sysargs: Optional[List[str]] = None) -> SuccessTuple:
 
 
 def entry_with_args(
-        _actions: Optional[Dict[str, Callable[[Any], SuccessTuple]]] = None,
-        **kw
-    ) -> SuccessTuple:
+    _actions: Optional[Dict[str, Callable[[Any], SuccessTuple]]] = None,
+    **kw
+) -> SuccessTuple:
     """Execute a Meerschaum action with keyword arguments.
     Use `_entry()` for parsing sysargs before executing.
     """
@@ -96,7 +91,12 @@ def entry_with_args(
 
     kw['action'] = remove_leading_action(kw['action'], _actions=_actions)
 
-    do_action = functools.partial(_do_action_wrapper, action_function, plugin_name, **kw)
+    do_action = functools.partial(
+        _do_action_wrapper,
+        action_function,
+        plugin_name,
+        **kw
+    )
     if kw.get('schedule', None) and not skip_schedule:
         from meerschaum.utils.schedule import schedule_function
         from meerschaum.utils.misc import interval_str

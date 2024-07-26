@@ -19,9 +19,15 @@ See the License for the specific language governing permissions and
 limitations under the License.
 """
 
-import sys, os, copy
+import sys
+import os
+import copy
 
-def main(sysargs: list = None) -> None:
+from meerschaum.utils.typing import List, Optional
+from meerschaum.utils.formatting import print_tuple as _print_tuple
+
+
+def main(sysargs: Optional[List[str]] = None) -> None:
     """Main CLI entry point."""
     if sysargs is None:
         sysargs = copy.deepcopy(sys.argv[1:])
@@ -41,7 +47,7 @@ def main(sysargs: list = None) -> None:
 
     if ('-d' in sysargs or '--daemon' in sysargs) and ('stack' not in sysargs):
         from meerschaum.utils.daemon import daemon_entry
-        daemon_entry(sysargs)
+        _print_tuple(daemon_entry(sysargs), upper_padding=1)
         return _exit(old_cwd=old_cwd)
 
     from meerschaum._internal.entry import entry, get_shell
@@ -57,8 +63,7 @@ def main(sysargs: list = None) -> None:
     return_tuple = entry(sysargs)
     rc = 0
     if isinstance(return_tuple, tuple) and '--nopretty' not in sysargs:
-        from meerschaum.utils.formatting import print_tuple
-        print_tuple(return_tuple, upper_padding=1)
+        _print_tuple(return_tuple, upper_padding=1)
         rc = 0 if (return_tuple[0] is True) else 1
 
     return _exit(rc, old_cwd=old_cwd)
