@@ -39,6 +39,7 @@ STATIC_CONFIG: Dict[str, Any] = {
             'token_expires_minutes': 720,
         },
         'webterm_job_name': '_webterm',
+        'default_timeout': 600,
     },
     'sql': {
         'internal_schema': '_mrsm_internal',

@@ -44,14 +44,14 @@ pd = attempt_import('pandas')
 
 @app.post(pipes_endpoint + '/{connector_keys}/{metric_key}/{location_key}/register', tags=['Pipes'])
 def register_pipe(
-        connector_keys: str,
-        metric_key: str,
-        location_key: str,
-        parameters: dict,
-        curr_user = (
-            fastapi.Depends(manager) if not no_auth else None
-        ),
-    ):
+    connector_keys: str,
+    metric_key: str,
+    location_key: str,
+    parameters: dict,
+    curr_user = (
+        fastapi.Depends(manager) if not no_auth else None
+    ),
+):
     """
     Register a new pipe.
     """
@@ -376,18 +376,18 @@ def sync_pipe(
 
 @app.get(pipes_endpoint + '/{connector_keys}/{metric_key}/{location_key}/data', tags=['Pipes'])
 def get_pipe_data(
-        connector_keys: str,
-        metric_key: str,
-        location_key: str,
-        select_columns: Optional[str] = None,
-        omit_columns: Optional[str] = None,
-        begin: Union[str, int, None] = None,
-        end: Union[str, int, None] = None,
-        params: Optional[str] = None,
-        curr_user = (
-            fastapi.Depends(manager) if not no_auth else None
-        ),
-    ) -> str:
+    connector_keys: str,
+    metric_key: str,
+    location_key: str,
+    select_columns: Optional[str] = None,
+    omit_columns: Optional[str] = None,
+    begin: Union[str, int, None] = None,
+    end: Union[str, int, None] = None,
+    params: Optional[str] = None,
+    curr_user = (
+        fastapi.Depends(manager) if not no_auth else None
+    ),
+) -> str:
     """
     Get a pipe's data, applying any filtering.
 

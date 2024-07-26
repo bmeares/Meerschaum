@@ -194,6 +194,9 @@ def sync(
         if hasattr(df, 'MRSM_INFER_FETCH'):
             try:
                 if p.connector is None:
+                    if ':' not in p.connector_keys:
+                        return True, f"{p} does not support fetching; nothing to do."
+
                     msg = f"{p} does not have a valid connector."
                     if p.connector_keys.startswith('plugin:'):
                         msg += f"\n    Perhaps {p.connector_keys} has a syntax error?"

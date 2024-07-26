@@ -9,10 +9,12 @@ Intercept OS-level file descriptors.
 import os
 import select
 import traceback
+import errno
 from threading import Event
 from datetime import datetime
 from meerschaum.utils.typing import Callable
 from meerschaum.utils.warnings import warn
+from meerschaum.config.paths import DAEMON_ERROR_LOG_PATH
 
 FD_CLOSED: int = 9
 STOP_READING_FD_EVENT: Event = Event()
@@ -65,8 +67,13 @@ class FileDescriptorInterceptor:
             except BlockingIOError:
                 continue
             except OSError as e:
-                from meerschaum.utils.warnings import warn
-                warn(f"OSError in FileDescriptorInterceptor: {e}")
+                if e.errno == errno.EBADF:
+                    ### File descriptor is closed.
+                    pass
+                elif e.errno == errno.EINTR:
+                    continue  # Interrupted system call, just try again
+                else:
+                    warn(f"OSError in FileDescriptorInterceptor: {e}")
                 break
 
             try:
@@ -86,9 +93,11 @@ class FileDescriptorInterceptor:
                     else data.replace(b'\n', b'\n' + injected_bytes)
                 )
                 os.write(self.new_file_descriptor, modified_data)
-            except Exception as e:
-                from meerschaum.utils.warnings import warn
-                warn(f"Error in FileDescriptorInterceptor data processing: {e}")
+            except (BrokenPipeError, OSError):
+                break
+            except Exception:
+                with open(DAEMON_ERROR_LOG_PATH, 'a+', encoding='utf-8') as f:
+                    f.write(traceback.format_exc())
                 break
 
 

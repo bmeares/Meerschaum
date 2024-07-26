@@ -17,7 +17,7 @@ def get_mrsm_version(self, **kw) -> Optional[str]:
     try:
         j = self.get(
             STATIC_CONFIG['api']['endpoints']['version'] + '/mrsm',
-            use_token = True,
+            use_token=False,
             **kw
         ).json()
     except Exception as e:

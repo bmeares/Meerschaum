@@ -6,127 +6,139 @@
 Default configuration for the Meerschaum shell.
 """
 
-#  import platform
-#  default_cmd = 'cmd' if platform.system() != 'Windows' else 'cmd2'
 default_cmd = 'cmd'
 
 default_shell_config = {
-    'ansi'             : {
-        'intro'        : {
-            'rich'     : {
-                'style' : "bold bright_blue",
+    'ansi'               : {
+        'intro'          : {
+            'rich'       : {
+                'style'  : "bold bright_blue",
             },
-            'color'    : [
+            'color'      : [
                 'bold',
                 'bright blue',
             ],
         },
-        'close_message': {
-            'rich' : {
-                'style' : 'bright_blue',
+        'close_message'  : {
+            'rich'       : {
+                'style'  : 'bright_blue',
             },
-            'color'    : [
+            'color'      : [
                 'bright blue',
             ],
         },
-        'doc_header': {
-            'rich' : {
-                'style' : 'bright_blue',
+        'doc_header'     : {
+            'rich'       : {
+                'style'  : 'bright_blue',
             },
-            'color'    : [
+            'color'      : [
                 'bright blue',
             ],
         },
-        'undoc_header': {
-            'rich' : {
-                'style' : 'bright_blue',
+        'undoc_header'   : {
+            'rich'       : {
+                'style'  : 'bright_blue',
             },
-            'color'    : [
+            'color'      : [
                 'bright blue',
             ],
         },
-        'ruler': {
-            'rich' : {
-                'style' : 'bold bright_blue',
+        'ruler'          : {
+            'rich'       : {
+                'style'  : 'bold bright_blue',
             },
-            'color'    : [
+            'color'      : [
                 'bold',
                 'bright blue',
             ],
         },
-        'prompt': {
-            'rich' : {
-                'style' : 'green',
+        'prompt'         : {
+            'rich'       : {
+                'style'  : 'green',
             },
-            'color'    : [
+            'color'      : [
                 'green',
             ],
         },
-        'instance' : {
-            'rich' : {
-                'style' : 'cyan',
+        'instance'       : {
+            'rich'       : {
+                'style'  : 'cyan',
             },
-            'color'    : [
+            'color'      : [
                 'cyan',
             ],
         },
-        'repo' : {
-            'rich': {
-                'style': 'magenta',
+        'repo'           : {
+            'rich'       : {
+                'style'  : 'magenta',
             },
-            'color': [
+            'color'      : [
                 'magenta',
             ],
         },
-        'username' : {
-            'rich' : {
-                'style' : 'white',
+        'username'       : {
+            'rich'       : {
+                'style'  : 'white',
             },
-            'color'    : [
+            'color'      : [
                 'white',
             ],
         },
-        'connected' : {
-            'rich' : {
-                'style' : 'green',
+        'connected'      : {
+            'rich'       : {
+                'style'  : 'green',
             },
-            'color'    : [
+            'color'      : [
                 'green',
             ],
         },
-        'disconnected' : {
-            'rich' : {
-                'style' : 'red',
+        'disconnected'   : {
+            'rich'       : {
+                'style'  : 'red',
             },
-            'color'    : [
+            'color'      : [
+                'red',
+            ],
+        },
+        'update_message' : {
+            'rich'       : {
+                'style'  : 'red',
+            },
+            'color'      : [
                 'red',
             ],
         },
     },
-    'ascii'            : {
-        'intro'        : """       ___  ___  __   __   __
+    'ascii'              : {
+        'intro'          : r"""       ___  ___  __   __   __
  |\/| |__  |__  |__) /__` /  ` |__|  /\  |  |  |\/|
  |  | |___ |___ |  \ .__/ \__, |  | /~~\ \__/  |  |\n""",
-        'prompt'       : '\n [ {username}@{instance} ] > ',
-        'ruler'        : '-',
-        'close_message': 'Thank you for using Meerschaum!',
-        'doc_header'   : 'Meerschaum actions (`help <action>` for usage):',
-        'undoc_header' : 'Unimplemented actions:',
+        'prompt'         : '\n [ {username}@{instance} ] > ',
+        'ruler'          : '-',
+        'close_message'  : 'Thank you for using Meerschaum!',
+        'doc_header'     : 'Meerschaum actions (`help <action>` for usage):',
+        'undoc_header'   : 'Unimplemented actions:',
+        'update_message' : "Update available!",
     },
-    'unicode'          : {
-        'intro'        : """
+    'unicode'            : {
+        'intro'          : """
  █▄ ▄█ ██▀ ██▀ █▀▄ ▄▀▀ ▄▀▀ █▄█ ▄▀▄ █ █ █▄ ▄█
  █ ▀ █ █▄▄ █▄▄ █▀▄ ▄██ ▀▄▄ █ █ █▀█ ▀▄█ █ ▀ █\n""",
-        'prompt'       : '\n [ {username}@{instance} ] ➤ ',
-        'ruler'        : '─',
-        'close_message': ' MRSM{formatting:emoji:hand} Thank you for using Meerschaum! ',
-        'doc_header'   : 'Meerschaum actions (`help <action>` for usage):',
-        'undoc_header' : 'Unimplemented actions:',
+        'prompt'         : '\n [ {username}@{instance} ] ➤ ',
+        'ruler'          : '─',
+        'close_message'  : ' MRSM{formatting:emoji:hand} Thank you for using Meerschaum! ',
+        'doc_header'     : 'Meerschaum actions (`help <action>` for usage):',
+        'undoc_header'   : 'Unimplemented actions:',
+        'update_message' : "MRSM{formatting:emoji:announcement} Update available!",
     },
-    'timeout'          : 60,
-    'max_history'      : 1000,
-    'clear_screen'     : True,
-    'bottom_toolbar'   : {
-        'enabled'      : True,
+    'timeout'            : 60,
+    'max_history'        : 1000,
+    'clear_screen'       : True,
+    'bottom_toolbar'     : {
+        'enabled'        : True,
+    },
+    'updates'            : {
+        'check_remote'   : True,
+        'refresh_minutes': 180,
     },
 }

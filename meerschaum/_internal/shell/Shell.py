@@ -95,8 +95,8 @@ def _insert_shell_actions(
         setattr(_shell_class, 'complete_' + a, completer)
 
 def _completer_wrapper(
-        target: Callable[[Any], List[str]]
-    ) -> Callable[['meerschaum._internal.shell.Shell', str, str, int, int], Any]:
+    target: Callable[[Any], List[str]]
+) -> Callable[['meerschaum._internal.shell.Shell', str, str, int, int], Any]:
     """
     Wrapper for `complete_` functions so they can instead use Meerschaum arguments.
     """
@@ -125,13 +125,13 @@ def _completer_wrapper(
 
 
 def default_action_completer(
-        text: Optional[str] = None,
-        line: Optional[str] = None,
-        begin_index: Optional[int] = None,
-        end_index: Optional[int] = None,
-        action: Optional[List[str]] = None,
-        **kw: Any
-    ) -> List[str]:
+    text: Optional[str] = None,
+    line: Optional[str] = None,
+    begin_index: Optional[int] = None,
+    end_index: Optional[int] = None,
+    action: Optional[List[str]] = None,
+    **kw: Any
+) -> List[str]:
     """
     Search for subactions by default. This may be overridden by each action.
     """
@@ -206,13 +206,11 @@ def get_shell_intro(with_color: bool = True) -> str:
     """
     from meerschaum.utils.formatting import CHARSET, ANSI, colored
     intro = get_config('shell', CHARSET, 'intro', patch=patch)
-    intro += '\n' + ''.join(
-        [' '
-            for i in range(
-                string_width(intro) - len('v' + version)
-            )
-        ]
-    ) + 'v' + version
+    intro += (
+        '\n'
+        + (' ' * (string_width(intro) - len('v' + version)))
+        + f'v{version}'
+    )
 
     if not with_color or not ANSI:
         return intro
@@ -225,10 +223,10 @@ def get_shell_intro(with_color: bool = True) -> str:
 
 class Shell(cmd.Cmd):
     def __init__(
-            self,
-            actions: Optional[Dict[str, Any]] = None,
-            sysargs: Optional[List[str]] = None
-        ):
+        self,
+        actions: Optional[Dict[str, Any]] = None,
+        sysargs: Optional[List[str]] = None
+    ):
         """
         Customize the CLI from configuration
         """
@@ -297,19 +295,25 @@ class Shell(cmd.Cmd):
         except Exception as e:
             pass
 
+        ### Finally, spawn the version update thread.
+        from meerschaum._internal.shell.updates import run_version_check_thread
+        self._update_thread = run_version_check_thread(debug=shell_attrs.get('debug', False))
+
+
     def load_config(self, instance: Optional[str] = None):
         """
         Set attributes from the shell configuration.
         """
         from meerschaum.utils.misc import remove_ansi
         from meerschaum.utils.formatting import CHARSET, ANSI, colored
-        
+        from meerschaum._internal.shell.updates import get_update_message
+
         if shell_attrs.get('intro', None) != '':
             self.intro = (
                 get_shell_intro(with_color=False)
                 if shell_attrs.get('intro', None) != ''
                 else ""
-            )
+            ) + get_update_message()
 
         shell_attrs['intro'] = self.intro
         shell_attrs['_prompt'] = get_config('shell', CHARSET, 'prompt', patch=patch)

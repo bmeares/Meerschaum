@@ -14,9 +14,9 @@ import meerschaum as mrsm
 from meerschaum.utils.typing import SuccessTuple, Any, List, Optional, Tuple, Union
 
 def sync(
-        action: Optional[List[str]] = None,
-        **kw: Any
-    ) -> SuccessTuple:
+    action: Optional[List[str]] = None,
+    **kw: Any
+) -> SuccessTuple:
     """
     Fetch and sync data for pipes.
 

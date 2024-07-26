@@ -4,6 +4,33 @@
 
 This is the current release cycle, so stay tuned for future releases!
 
+
+### v2.2.7
+
+- **Fix daemon stability.**  
+  Broken file handlers are now better handled, and this should keep background jobs from crashing.
+
+- **Improve `show jobs` output.**  
+  The `show jobs` table now includes the `SuccessTuple` of the most recent run (when jobs are stopped).
+
+- **Use a plugin's `__doc__` string as the default description.**  
+  When registering a new plugin, the `__doc__` string will be used as the default value for the description.
+
+- **Pipes without connectors are no longer considered errors when syncing.**  
+  When a pipe has an ordinary string in place of a connector (e.g. externally managed), return early and consider success rather than throwing an error.
+
+  ```python
+  import meerschaum as mrsm
+  pipe = mrsm.Pipe('a', 'b')
+  pipe.sync()
+  # (True, "Pipe('a', 'b') does not support fetching; nothing to do.")
+  ```
+
+- **Add update announcements.**  
+  When new Meerschaum releases become available, you will now be presented with an update message when starting the shell. Update checks may be disabled by setting `shell:updates:check_remote` to `false`.
+
+- **Enforce a 10-minute max timeout for `APIConnectors`.**
+
 ### v2.2.6
 
 - **Fix a critical login issue.**  

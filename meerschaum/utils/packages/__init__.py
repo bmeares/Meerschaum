@@ -816,6 +816,7 @@ def pip_install(
     """
     from meerschaum.config._paths import VIRTENV_RESOURCES_PATH
     from meerschaum.config import get_config
+    from meerschaum.config.static import STATIC_CONFIG
     from meerschaum.utils.warnings import warn
     from meerschaum.utils.misc import is_android
     if args is None:
@@ -826,6 +827,11 @@ def pip_install(
         ANSI, UNICODE = False, False
     if check_wheel:
         have_wheel = venv_contains_package('wheel', venv=venv, debug=debug)
+
+    daemon_env_var = STATIC_CONFIG['environment']['daemon_id']
+    inside_daemon = daemon_env_var in os.environ
+    if inside_daemon:
+        silent = True
 
     _args = list(args)
     have_pip = venv_contains_package('pip', venv=None, debug=debug)
@@ -844,16 +850,16 @@ def pip_install(
     if have_pip and not have_uv_pip and _install_uv_pip and not is_android():
         if not pip_install(
             'uv',
-            venv = None,
-            debug = debug,
-            _install_uv_pip = False,
-            check_update = False,
-            check_pypi = False,
-            check_wheel = False,
-        ):
+            venv=None,
+            debug=debug,
+            _install_uv_pip=False,
+            check_update=False,
+            check_pypi=False,
+            check_wheel=False,
+        ) and not silent:
             warn(
                 f"Failed to install `uv` for virtual environment '{venv}'.",
-                color = False,
+                color=False,
             )
 
     use_uv_pip = (
@@ -909,13 +915,13 @@ def pip_install(
                     check_wheel = False,
                     debug = debug,
                     _install_uv_pip = False,
-                ):
+                ) and not silent:
                     warn(
                         (
                             "Failed to install `setuptools`, `wheel`, and `uv` for virtual "
                             + f"environment '{venv}'."
                         ),
-                        color = False,
+                        color=False,
                     )
 
         if requirements_file_path is not None:
@@ -975,7 +981,7 @@ def pip_install(
                 if not completely_uninstall_package(
                     _install_no_version,
                     venv=venv, debug=debug,
-                ):
+                ) and not silent:
                     warn(
                         f"Failed to clean up package '{_install_no_version}'.",
                     )
@@ -989,9 +995,9 @@ def pip_install(
         rc = run_python_package(
             ('pip' if not use_uv_pip else 'uv'),
             _args + _packages,
-            venv = None,
-            env = _get_pip_os_env(color=color),
-            debug = debug,
+            venv=None,
+            env=_get_pip_os_env(color=color),
+            debug=debug,
         )
         if debug:
             print(f"{rc=}")
@@ -1003,7 +1009,7 @@ def pip_install(
     )
     if not silent:
         print(msg)
-    if debug:
+    if debug and not silent:
         print('pip ' + ('un' if _uninstall else '') + 'install returned:', success)
     return success
 
