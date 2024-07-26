@@ -816,9 +816,9 @@ def pip_install(
     """
     from meerschaum.config._paths import VIRTENV_RESOURCES_PATH
     from meerschaum.config import get_config
+    from meerschaum.config.static import STATIC_CONFIG
     from meerschaum.utils.warnings import warn
     from meerschaum.utils.misc import is_android
-    from meerschaum.utils.daemon import running_in_daemon
     if args is None:
         args = ['--upgrade'] if not _uninstall else []
     if color:
@@ -827,7 +827,10 @@ def pip_install(
         ANSI, UNICODE = False, False
     if check_wheel:
         have_wheel = venv_contains_package('wheel', venv=venv, debug=debug)
-    if running_in_daemon:
+
+    daemon_env_var = STATIC_CONFIG['environment']['daemon_id']
+    inside_daemon = daemon_env_var in os.environ
+    if inside_daemon:
         silent = True
 
     _args = list(args)

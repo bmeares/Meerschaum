@@ -25,7 +25,9 @@ from meerschaum.utils.typing import (
 )
 from meerschaum.config import get_config
 from meerschaum.config.static import STATIC_CONFIG
-from meerschaum.config._paths import DAEMON_RESOURCES_PATH, LOGS_RESOURCES_PATH
+from meerschaum.config._paths import (
+    DAEMON_RESOURCES_PATH, LOGS_RESOURCES_PATH, DAEMON_ERROR_LOG_PATH,
+)
 from meerschaum.config._patch import apply_patch_to_config
 from meerschaum.utils.warnings import warn, error
 from meerschaum.utils.packages import attempt_import
@@ -36,6 +38,7 @@ from meerschaum.utils.threading import RepeatTimer
 from meerschaum.__main__ import _close_pools
 
 _daemons = []
+_results = {}
 
 class Daemon:
     """
@@ -148,7 +151,6 @@ class Daemon:
         Nothing — this will exit the parent process.
         """
         import platform, sys, os, traceback
-        from meerschaum.config._paths import DAEMON_ERROR_LOG_PATH
         from meerschaum.utils.warnings import warn
         from meerschaum.config import get_config
         daemon = attempt_import('daemon')
@@ -160,6 +162,9 @@ class Daemon:
 
         self._setup(allow_dirty_run)
 
+        ### NOTE: The SIGINT handler has been removed so that child processes may handle
+        ###       KeyboardInterrupts themselves.
+        ###       The previous aggressive approach was redundant because of the SIGTERM handler.
         self._daemon_context = daemon.DaemonContext(
             pidfile=self.pid_lock,
             stdout=self.rotating_log,
@@ -168,7 +173,6 @@ class Daemon:
             detach_process=True,
             files_preserve=list(self.rotating_log.subfile_objects.values()),
             signal_map={
-                signal.SIGINT: self._handle_interrupt,
                 signal.SIGTERM: self._handle_sigterm,
             },
         )
@@ -186,6 +190,7 @@ class Daemon:
             with self._daemon_context:
                 os.environ[STATIC_CONFIG['environment']['daemon_id']] = self.daemon_id
                 self.rotating_log.refresh_files(start_interception=True)
+                result = None
                 try:
                     with open(self.pid_path, 'w+', encoding='utf-8') as f:
                         f.write(str(os.getpid()))
@@ -193,8 +198,7 @@ class Daemon:
                     self._log_refresh_timer.start()
                     result = self.target(*self.target_args, **self.target_kw)
                     self.properties['result'] = result
-                    if is_success_tuple(result):
-                        mrsm.pprint(result)
+                    _results[self.daemon_id] = result
                 except (BrokenPipeError, KeyboardInterrupt, SystemExit):
                     pass
                 except Exception as e:
@@ -207,37 +211,29 @@ class Daemon:
                     if self.pid is None and self.pid_path.exists():
                         self.pid_path.unlink()
 
+                    if is_success_tuple(result):
+                        try:
+                            mrsm.pprint(result)
+                        except BrokenPipeError:
+                            pass
+
                 if keep_daemon_output:
                     self._capture_process_timestamp('ended')
                 else:
                     self.cleanup()
 
-                return result
         except Exception as e:
             daemon_error = traceback.format_exc()
             with open(DAEMON_ERROR_LOG_PATH, 'a+', encoding='utf-8') as f:
                 f.write(daemon_error)
             warn(f"Encountered an error while running the daemon '{self}':\n{daemon_error}")
-        finally:
-            self._cleanup_on_exit()
 
-    def _cleanup_on_exit(self):
-        """Perform cleanup operations when the daemon exits."""
-        try:
-            self._log_refresh_timer.cancel()
-            self.rotating_log.close()
-            if self.pid is None and self.pid_path.exists():
-                self.pid_path.unlink()
-            self._capture_process_timestamp('ended')
-            self.rotating_log.close()
-        except Exception as e:
-            warn(f"Error during daemon cleanup: {e}")
 
     def _capture_process_timestamp(
-            self,
-            process_key: str,
-            write_properties: bool = True,
-        ) -> None:
+        self,
+        process_key: str,
+        write_properties: bool = True,
+    ) -> None:
         """
         Record the current timestamp to the parameters `process:<process_key>`.
 
@@ -262,11 +258,11 @@ class Daemon:
             self.write_properties()
 
     def run(
-            self,
-            keep_daemon_output: bool = True,
-            allow_dirty_run: bool = False,
-            debug: bool = False,
-        ) -> SuccessTuple:
+        self,
+        keep_daemon_output: bool = True,
+        allow_dirty_run: bool = False,
+        debug: bool = False,
+    ) -> SuccessTuple:
         """Run the daemon as a child process and continue executing the parent.
 
         Parameters
@@ -301,7 +297,7 @@ class Daemon:
             "from meerschaum.utils.daemon import Daemon; "
             + f"daemon = Daemon(daemon_id='{self.daemon_id}'); "
             + f"daemon._run_exit(keep_daemon_output={keep_daemon_output}, "
-            + f"allow_dirty_run=True)"
+            + "allow_dirty_run=True)"
         )
         env = dict(os.environ)
         env['MRSM_NOASK'] = 'true'
@@ -479,36 +475,6 @@ class Daemon:
             + ('s' if timeout != 1 else '') + '.'
         )
 
-    def _handle_interrupt(self, signal_number: int, stack_frame: 'frame') -> None:
-        """
-        Handle `SIGINT` within the Daemon context.
-        This method is injected into the `DaemonContext`.
-        """
-        from meerschaum.utils.process import signal_handler
-        signal_handler(signal_number, stack_frame)
-
-        self.rotating_log.stop_log_fd_interception(unused_only=False)
-        timer = self.__dict__.get('_log_refresh_timer', None)
-        if timer is not None:
-            timer.cancel()
-
-        daemon_context = self.__dict__.get('_daemon_context', None)
-        if daemon_context is not None:
-            daemon_context.close()
-
-        _close_pools()
-
-        import threading
-        for thread in threading.enumerate():
-            if thread.name == 'MainThread':
-                continue
-            try:
-                if thread.is_alive():
-                    stack = traceback.format_stack(sys._current_frames()[thread.ident])
-                    thread.join()
-            except Exception as e:
-                warn(traceback.format_exc())
-        raise KeyboardInterrupt()
 
     def _handle_sigterm(self, signal_number: int, stack_frame: 'frame') -> None:
         """

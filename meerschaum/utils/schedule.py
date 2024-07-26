@@ -110,21 +110,6 @@ def schedule_function(
     except RuntimeError:
         loop = asyncio.new_event_loop()
 
-    def sigint_handler(signum, frame):
-        """We need to re-raise KeyboardInterrupt SIGINT when daemonizing."""
-        print(f"{frame=}")
-        print('sigint in schedule')
-        from meerschaum.utils.daemon.Daemon import _daemons
-        print(f"{_daemons=}")
-        for daemon in _daemons:
-            try:
-                daemon._handle_interrupt(signum, frame)
-            except KeyboardInterrupt:
-                pass
-        raise KeyboardInterrupt
-
-    signal.signal(signal.SIGINT, sigint_handler)
-
 
     async def run_scheduler():
         async with _scheduler:

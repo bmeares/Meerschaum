@@ -67,8 +67,8 @@ def daemon_entry(sysargs: Optional[List[str]] = None) -> SuccessTuple:
             if daemon.status == 'running':
                 return True, f"Daemon '{daemon}' is already running."
             return daemon.run(
-                debug = debug,
-                allow_dirty_run = True,
+                debug=debug,
+                allow_dirty_run=True,
             )
 
     success_tuple = run_daemon(
@@ -76,6 +76,7 @@ def daemon_entry(sysargs: Optional[List[str]] = None) -> SuccessTuple:
         filtered_sysargs,
         daemon_id=_args.get('name', None) if _args else None,
         label=label,
+        keep_daemon_output=('--rm' not in sysargs),
     )
     return success_tuple
 
@@ -106,25 +107,25 @@ def daemon_action(**kw) -> SuccessTuple:
 
 
 def run_daemon(
-        func: Callable[[Any], Any],
-        *args,
-        daemon_id: Optional[str] = None,
-        keep_daemon_output: bool = False,
-        allow_dirty_run: bool = False,
-        label: Optional[str] = None,
-        **kw
-    ) -> Any:
+    func: Callable[[Any], Any],
+    *args,
+    daemon_id: Optional[str] = None,
+    keep_daemon_output: bool = True,
+    allow_dirty_run: bool = False,
+    label: Optional[str] = None,
+    **kw
+) -> Any:
     """Execute a function as a daemon."""
     daemon = Daemon(
         func,
-        daemon_id = daemon_id,
-        target_args = [arg for arg in args],
-        target_kw = kw,
-        label = label,
+        daemon_id=daemon_id,
+        target_args=[arg for arg in args],
+        target_kw=kw,
+        label=label,
     )
     return daemon.run(
-        keep_daemon_output = keep_daemon_output,
-        allow_dirty_run = allow_dirty_run,
+        keep_daemon_output=keep_daemon_output,
+        allow_dirty_run=allow_dirty_run,
     )
 
 

@@ -11,7 +11,7 @@ import urllib.parse
 import pathlib
 from meerschaum.utils.typing import Any, Optional, Dict, Union
 from meerschaum.utils.debug import dprint
-from meerschaum.utils.formatting import pprint
+from meerschaum.config.static import STATIC_CONFIG
 
 METHODS = {
     'GET',
@@ -23,15 +23,16 @@ METHODS = {
     'DELETE',
 }
 
+
 def make_request(
-        self,
-        method: str,
-        r_url: str,
-        headers: Optional[Dict[str, Any]] = None,
-        use_token: bool = True,
-        debug: bool = False,
-        **kwargs: Any
-    ) -> 'requests.Response':
+    self,
+    method: str,
+    r_url: str,
+    headers: Optional[Dict[str, Any]] = None,
+    use_token: bool = True,
+    debug: bool = False,
+    **kwargs: Any
+) -> 'requests.Response':
     """
     Make a request to this APIConnector's endpoint using the in-memory session.
 
@@ -83,6 +84,9 @@ def make_request(
 
     if use_token:
         headers.update({'Authorization': f'Bearer {self.token}'})
+
+    if 'timeout' not in kwargs:
+        kwargs['timeout'] = STATIC_CONFIG['api']['default_timeout']
 
     request_url = urllib.parse.urljoin(self.url, r_url)
     if debug:

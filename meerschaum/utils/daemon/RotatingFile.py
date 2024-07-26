@@ -584,10 +584,14 @@ class RotatingFile(io.IOBase):
         if self.redirect_streams:
             try:
                 sys.stdout.flush()
+            except BrokenPipeError:
+                pass
             except Exception as e:
                 warn(f"Failed to flush STDOUT:\n{traceback.format_exc()}")
             try:
                 sys.stderr.flush()
+            except BrokenPipeError:
+                pass
             except Exception as e:
                 warn(f"Failed to flush STDERR:\n{traceback.format_exc()}")
 
@@ -599,7 +603,6 @@ class RotatingFile(io.IOBase):
         if not self.write_timestamps:
             return
 
-        threads = self.__dict__.get('_interceptor_threads', [])
         self._stdout_interceptor = FileDescriptorInterceptor(
             sys.stdout.fileno(),
             self.get_timestamp_prefix_str,
@@ -642,6 +645,7 @@ class RotatingFile(io.IOBase):
         """
         if not self.write_timestamps:
             return
+
         interceptors = self.__dict__.get('_interceptors', [])
         interceptor_threads = self.__dict__.get('_interceptor_threads', [])
 

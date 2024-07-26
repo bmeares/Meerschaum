@@ -123,6 +123,10 @@ paths = {
     'PERMANENT_PATCH_DIR_PATH'       : ('{ROOT_DIR_PATH}', 'permanent_patch_config'),
     'INTERNAL_RESOURCES_PATH'        : ('{ROOT_DIR_PATH}', '.internal'),
 
+    'UPDATES_RESOURCES_PATH'         : ('{INTERNAL_RESOURCES_PATH}', 'updates'),
+    'UPDATES_CACHE_PATH'             : ('{UPDATES_RESOURCES_PATH}', 'cache.json'),
+    'UPDATES_LOCK_PATH'              : ('{UPDATES_RESOURCES_PATH}', '.updates.lock'),
+
     'STACK_RESOURCES_PATH'           : ('{ROOT_DIR_PATH}', 'stack'),
     'STACK_COMPOSE_FILENAME'         : 'docker-compose.yaml',
     'STACK_COMPOSE_PATH'             : ('{STACK_RESOURCES_PATH}', '{STACK_COMPOSE_FILENAME}'),

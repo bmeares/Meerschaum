@@ -10,6 +10,7 @@ from __future__ import annotations
 import platform
 import os
 import sys
+import meerschaum as mrsm
 from meerschaum.utils.typing import Optional, Union, Any, Dict
 from meerschaum.utils.formatting._shell import make_header
 from meerschaum.utils.formatting._pprint import pprint
@@ -33,6 +34,7 @@ __all__ = sorted([
     'colored',
     'translate_rich_to_termcolor',
     'get_console',
+    'format_success_tuple',
     'print_tuple',
     'print_options',
     'fill_ansi',
@@ -222,16 +224,17 @@ def get_console():
 
 
 def print_tuple(
-        tup: tuple,
-        skip_common: bool = True,
-        common_only: bool = False,
-        upper_padding: int = 0,
-        lower_padding: int = 0,
-        calm: bool = False,
-        _progress: Optional['rich.progress.Progress'] = None,
-    ) -> None:
+    tup: mrsm.SuccessTuple,
+    skip_common: bool = True,
+    common_only: bool = False,
+    upper_padding: int = 0,
+    lower_padding: int = 0,
+    left_padding: int = 1,
+    calm: bool = False,
+    _progress: Optional['rich.progress.Progress'] = None,
+) -> None:
     """
-    Print `meerschaum.utils.typing.SuccessTuple`.
+    Format `meerschaum.utils.typing.SuccessTuple`.
 
     Parameters
     ----------
@@ -247,6 +250,59 @@ def print_tuple(
     lower_padding: int, default 0
         How many newlines to append to the message.
 
+    left_padding: int, default 1
+        How mant spaces to preprend to the message.
+
+    calm: bool, default False
+        If `True`, use the default emoji and color scheme.
+
+    """
+    from meerschaum.config.static import STATIC_CONFIG
+    do_print = True
+
+    omit_messages = STATIC_CONFIG['system']['success']['ignore']
+
+    if common_only:
+        skip_common = False
+        do_print = tup[1] in omit_messages
+
+    if skip_common:
+        do_print = tup[1] not in omit_messages
+
+    if not do_print:
+        return
+
+    print(format_success_tuple(
+        tup,
+        upper_padding=upper_padding,
+        lower_padding=lower_padding,
+        calm=calm,
+        _progress=_progress,
+    ))
+
+
+def format_success_tuple(
+    tup: mrsm.SuccessTuple,
+    upper_padding: int = 0,
+    lower_padding: int = 0,
+    left_padding: int = 1,
+    calm: bool = False,
+    _progress: Optional['rich.progress.Progress'] = None,
+) -> str:
+    """
+    Format `meerschaum.utils.typing.SuccessTuple`.
+
+    Parameters
+    ----------
+    upper_padding: int, default 0
+        How many newlines to prepend to the message.
+
+    lower_padding: int, default 0
+        How many newlines to append to the message.
+
+    left_padding: int, default 1
+        How mant spaces to preprend to the message.
+
     calm: bool, default False
         If `True`, use the default emoji and color scheme.
     """
@@ -261,33 +317,22 @@ def print_tuple(
     if calm:
         status += '_calm'
 
-    omit_messages = STATIC_CONFIG['system']['success']['ignore']
+    ANSI, CHARSET = __getattr__('ANSI'), __getattr__('CHARSET')
+    from meerschaum.config import get_config
+    status_config = get_config('formatting', status, patch=True)
 
-    do_print = True
+    msg = (' ' * left_padding) + status_config[CHARSET]['icon'] + ' ' + str(tup[1])
+    lines = msg.split('\n')
+    lines = [lines[0]] + [
+        (('    ' + line if not line.startswith(' ') else line))
+        for line in lines[1:]
+    ]
+    if ANSI:
+        lines[0] = fill_ansi(highlight_pipes(lines[0]), **status_config['ansi']['rich'])
 
-    if common_only:
-        skip_common = False
-        do_print = tup[1] in omit_messages
-
-    if skip_common:
-        do_print = tup[1] not in omit_messages
-
-    if do_print:
-        ANSI, CHARSET = __getattr__('ANSI'), __getattr__('CHARSET')
-        from meerschaum.config import get_config
-        status_config = get_config('formatting', status, patch=True)
-
-        msg = ' ' + status_config[CHARSET]['icon'] + ' ' + str(tup[1])
-        lines = msg.split('\n')
-        lines = [lines[0]] + [
-            (('    ' + line if not line.startswith(' ') else line))
-            for line in lines[1:]
-        ]
-        if ANSI:
-            lines[0] = fill_ansi(highlight_pipes(lines[0]), **status_config['ansi']['rich'])
-        msg = '\n'.join(lines)
-        msg = ('\n' * upper_padding) + msg + ('\n' * lower_padding)
-        print(msg)
+    msg = '\n'.join(lines)
+    msg = ('\n' * upper_padding) + msg + ('\n' * lower_padding)
+    return msg
 
 
 def print_options(

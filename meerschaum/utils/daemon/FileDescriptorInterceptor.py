@@ -14,6 +14,7 @@ from threading import Event
 from datetime import datetime
 from meerschaum.utils.typing import Callable
 from meerschaum.utils.warnings import warn
+from meerschaum.config.paths import DAEMON_ERROR_LOG_PATH
 
 FD_CLOSED: int = 9
 STOP_READING_FD_EVENT: Event = Event()
@@ -66,9 +67,9 @@ class FileDescriptorInterceptor:
             except BlockingIOError:
                 continue
             except OSError as e:
-                from meerschaum.utils.warnings import warn
                 if e.errno == errno.EBADF:
-                    warn("File descriptor closed. Stopping interception.")
+                    ### File descriptor is closed.
+                    pass
                 elif e.errno == errno.EINTR:
                     continue  # Interrupted system call, just try again
                 else:
@@ -93,12 +94,10 @@ class FileDescriptorInterceptor:
                 )
                 os.write(self.new_file_descriptor, modified_data)
             except BrokenPipeError:
-                from meerschaum.utils.warnings import warn
-                warn("BrokenPipeError encountered. The daemon may have been terminated.")
                 break
-            except Exception as e:
-                from meerschaum.utils.warnings import warn
-                warn(f"Error in FileDescriptorInterceptor data processing: {e}")
+            except Exception:
+                with open(DAEMON_ERROR_LOG_PATH, 'a+', encoding='utf-8') as f:
+                    f.write(traceback.format_exc())
                 break
 
 
