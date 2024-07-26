@@ -93,7 +93,7 @@ class FileDescriptorInterceptor:
                     else data.replace(b'\n', b'\n' + injected_bytes)
                 )
                 os.write(self.new_file_descriptor, modified_data)
-            except BrokenPipeError:
+            except (BrokenPipeError, OSError):
                 break
             except Exception:
                 with open(DAEMON_ERROR_LOG_PATH, 'a+', encoding='utf-8') as f:

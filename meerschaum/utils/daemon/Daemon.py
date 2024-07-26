@@ -123,7 +123,7 @@ class Daemon:
             self._properties = properties
         if self._properties is None:
             self._properties = {}
-        self._properties.update({'label' : self.label})
+        self._properties.update({'label': self.label})
         ### Instantiate the process and if it doesn't exist, make sure the PID is removed.
         _ = self.process
 
@@ -140,7 +140,7 @@ class Daemon:
         ----------
         keep_daemon_output: bool, default True
             If `False`, delete the daemon's output directory upon exiting.
-            
+
         allow_dirty_run, bool, default False:
             If `True`, run the daemon, even if the `daemon_id` directory exists.
             This option is dangerous because if the same `daemon_id` runs twice,
@@ -196,9 +196,10 @@ class Daemon:
                         f.write(str(os.getpid()))
 
                     self._log_refresh_timer.start()
+                    self.properties['result'] = None
+                    self.write_properties()
                     result = self.target(*self.target_args, **self.target_kw)
                     self.properties['result'] = result
-                    _results[self.daemon_id] = result
                 except (BrokenPipeError, KeyboardInterrupt, SystemExit):
                     pass
                 except Exception as e:
@@ -207,6 +208,13 @@ class Daemon:
                     )
                     result = e
                 finally:
+                    _results[self.daemon_id] = result
+
+                    if keep_daemon_output:
+                        self._capture_process_timestamp('ended')
+                    else:
+                        self.cleanup()
+
                     self._log_refresh_timer.cancel()
                     if self.pid is None and self.pid_path.exists():
                         self.pid_path.unlink()
@@ -217,17 +225,11 @@ class Daemon:
                         except BrokenPipeError:
                             pass
 
-                if keep_daemon_output:
-                    self._capture_process_timestamp('ended')
-                else:
-                    self.cleanup()
-
         except Exception as e:
             daemon_error = traceback.format_exc()
             with open(DAEMON_ERROR_LOG_PATH, 'a+', encoding='utf-8') as f:
                 f.write(daemon_error)
             warn(f"Encountered an error while running the daemon '{self}':\n{daemon_error}")
-
 
     def _capture_process_timestamp(
         self,
@@ -307,7 +309,6 @@ class Daemon:
             if _launch_success_bool
             else f"Failed to start daemon '{self.daemon_id}'."
         )
-        self._capture_process_timestamp('began')
         return _launch_success_bool, msg
 
     def kill(self, timeout: Union[int, float, None] = 8) -> SuccessTuple:
@@ -326,7 +327,6 @@ class Daemon:
         if self.status != 'paused':
             success, msg = self._send_signal(signal.SIGTERM, timeout=timeout)
             if success:
-                self._capture_process_timestamp('ended')
                 return success, msg
 
         if self.status == 'stopped':
@@ -340,7 +340,6 @@ class Daemon:
         except Exception as e:
             return False, f"Failed to kill job {self} with exception: {e}"
 
-        self._capture_process_timestamp('ended')
         if self.pid_path.exists():
             try:
                 self.pid_path.unlink()
@@ -353,8 +352,6 @@ class Daemon:
         if self.status == 'paused':
             return self.kill(timeout)
         signal_success, signal_msg = self._send_signal(signal.SIGINT, timeout=timeout)
-        if signal_success:
-            self._capture_process_timestamp('ended')
         return signal_success, signal_msg
 
     def pause(
@@ -799,7 +796,7 @@ class Daemon:
             _file_properties = self.read_properties()
         except Exception:
             traceback.print_exc()
-            _file_properties = None
+            _file_properties = {}
 
         if not self._properties:
             self._properties = _file_properties
