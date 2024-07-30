@@ -135,6 +135,7 @@ _seen_plugin_args = {}
 
 groups = {}
 groups['actions'] = parser.add_argument_group(title='Actions options')
+groups['jobs'] = parser.add_argument_group(title='Jobs options')
 groups['pipes'] = parser.add_argument_group(title='Pipes options')
 groups['sync'] = parser.add_argument_group(title='Sync options')
 groups['api'] = parser.add_argument_group(title='API options')
@@ -166,18 +167,28 @@ groups['actions'].add_argument(
     help="Automatically choose the defaults answers to questions. Does not result in data loss.",
 )
 groups['actions'].add_argument(
-    '-d', '--daemon', action='store_true',
-    help = "Run an action as a background daemon."
+    '-A', '--sub-args', nargs=argparse.REMAINDER,
+    help = (
+        "Provide a list of arguments for subprocesses. " +
+        "You can also type sub-arguments in [] instead." +
+        " E.g. `stack -A='--version'`, `ls [-lh]`, `echo -A these are sub-arguments`"
+    )
 )
-groups['actions'].add_argument(
+
+### Jobs options
+groups['jobs'].add_argument(
+    '-d', '--daemon', action='store_true',
+    help = "Run an action as a background daemon to create a job."
+)
+groups['jobs'].add_argument(
     '--rm', action='store_true', help="Delete a job once it has finished executing."
 )
-groups['actions'].add_argument(
+groups['jobs'].add_argument(
     '--name', '--job-name', type=parse_name, help=(
         "Assign a name to a job. If no name is provided, a random name will be assigned."
     ),
 )
-groups['actions'].add_argument(
+groups['jobs'].add_argument(
     '-s', '--schedule', '--cron', type=str,
     help = (
         "Continue executing the action according to a schedule (e.g. 'every 1 seconds'). \n"
@@ -185,13 +196,9 @@ groups['actions'].add_argument(
         + "https://red-engine.readthedocs.io/en/stable/condition_syntax/index.html"
     )
 )
-groups['actions'].add_argument(
-    '-A', '--sub-args', nargs=argparse.REMAINDER,
-    help = (
-        "Provide a list of arguments for subprocesses. " +
-        "You can also type sub-arguments in [] instead." +
-        " E.g. `stack -A='--version'`, `ls [-lh]`, `echo -A these are sub-arguments`"
-    )
+groups['jobs'].add_argument(
+    '--restart', action='store_true',
+    help=("Restart a job if not stopped manually."),
 )
 
 ### Pipes options

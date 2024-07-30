@@ -21,7 +21,7 @@ from datetime import datetime, timezone
 import meerschaum as mrsm
 from meerschaum.utils.typing import (
     Optional, Dict, Any, SuccessTuple, Callable, List, Union,
-    is_success_tuple,
+    is_success_tuple, Tuple,
 )
 from meerschaum.config import get_config
 from meerschaum.config.static import STATIC_CONFIG
@@ -43,6 +43,32 @@ _results = {}
 class Daemon:
     """
     Daemonize Python functions into background processes.
+
+    Examples
+    --------
+    >>> import meerschaum as mrsm
+    >>> from meerschaum.utils.daemons import Daemon
+    >>> daemon = Daemon(print, ('hi',))
+    >>> success, msg = daemon.run()
+    >>> print(daemon.log_text)
+
+    2024-07-29 18:03 | hi
+    2024-07-29 18:03 |
+    >>> daemon.run(allow_dirty_run=True)
+    >>> print(daemon.log_text)
+
+    2024-07-29 18:03 | hi
+    2024-07-29 18:03 |
+    2024-07-29 18:05 | hi
+    2024-07-29 18:05 |
+    >>> mrsm.pprint(daemon.properties)
+    {
+        'label': 'print',
+        'target': {'name': 'print', 'module': 'builtins', 'args': ['hi'], 'kw': {}},
+        'result': None,
+        'process': {'ended': '2024-07-29T18:03:33.752806'}
+    }
+
     """
 
     def __new__(
@@ -91,7 +117,7 @@ class Daemon:
             Label string to help identifiy a daemon.
             If `None`, use the function name instead.
 
-        propterties: Optional[Dict[str, Any]], default None
+        properties: Optional[Dict[str, Any]], default None
             Override reading from the properties JSON by providing an existing dictionary.
         """
         _pickle = self.__dict__.get('_pickle', False)
@@ -197,7 +223,7 @@ class Daemon:
 
                     self._log_refresh_timer.start()
                     self.properties['result'] = None
-                    self.write_properties()
+                    self._capture_process_timestamp('began')
                     result = self.target(*self.target_args, **self.target_kw)
                     self.properties['result'] = result
                 except (BrokenPipeError, KeyboardInterrupt, SystemExit):
@@ -250,7 +276,7 @@ class Daemon:
         if 'process' not in self.properties:
             self.properties['process'] = {}
 
-        if process_key not in ('began', 'ended', 'paused'):
+        if process_key not in ('began', 'ended', 'paused', 'stopped'):
             raise ValueError(f"Invalid key '{process_key}'.")
 
         self.properties['process'][process_key] = (
@@ -289,6 +315,10 @@ class Daemon:
         ### The daemon might exist and be paused.
         if self.status == 'paused':
             return self.resume()
+
+        self._remove_stop_file()
+        if self.status == 'running':
+            return True, f"Daemon '{self}' is already running."
 
         self.mkdir_if_not_exists(allow_dirty_run)
         _write_pickle_success_tuple = self.write_pickle()
@@ -332,6 +362,7 @@ class Daemon:
         if self.status == 'stopped':
             return True, "Process has already stopped."
 
+        self._write_stop_file('kill')
         process = self.process
         try:
             process.terminate()
@@ -351,6 +382,8 @@ class Daemon:
         """Gracefully quit a running daemon."""
         if self.status == 'paused':
             return self.kill(timeout)
+
+        self._write_stop_file('quit')
         signal_success, signal_msg = self._send_signal(signal.SIGINT, timeout=timeout)
         return signal_success, signal_msg
 
@@ -380,6 +413,7 @@ class Daemon:
         if self.status == 'paused':
             return True, f"Daemon '{self.daemon_id}' is already paused."
 
+        self._write_stop_file('pause')
         try:
             self.process.suspend()
         except Exception as e:
@@ -418,10 +452,10 @@ class Daemon:
         )
 
     def resume(
-            self,
-            timeout: Union[int, float, None] = None,
-            check_timeout_interval: Union[float, int, None] = None,
-        ) -> SuccessTuple:
+        self,
+        timeout: Union[int, float, None] = None,
+        check_timeout_interval: Union[float, int, None] = None,
+    ) -> SuccessTuple:
         """
         Resume the daemon if it is paused.
 
@@ -443,6 +477,7 @@ class Daemon:
         if self.status == 'stopped':
             return False, f"Daemon '{self.daemon_id}' is stopped and cannot be resumed."
 
+        self._remove_stop_file()
         try:
             self.process.resume()
         except Exception as e:
@@ -472,6 +507,27 @@ class Daemon:
             + ('s' if timeout != 1 else '') + '.'
         )
 
+    def _write_stop_file(self, action: str) -> SuccessTuple:
+        """Write the stop file timestamp and action."""
+        if action not in ('quit', 'kill', 'pause'):
+            return False, f"Unsupported action '{action}'."
+
+        with open(self.stop_path, 'w+', encoding='utf-8') as f:
+            json.dump({'stop_time': datetime.now(timezone.utc).isoformat()}, f)
+
+        return True, "Success"
+
+    def _remove_stop_file(self) -> SuccessTuple:
+        """Remove the stop file"""
+        if not self.stop_path.exists():
+            return True, "Stop file does not exist."
+
+        try:
+            self.stop_path.unlink()
+        except Exception as e:
+            return False, f"Failed to remove stop file:\n{e}"
+
+        return True, "Success"
 
     def _handle_sigterm(self, signal_number: int, stack_frame: 'frame') -> None:
         """
@@ -637,6 +693,13 @@ class Daemon:
         Return the `propterties.json` path for this Daemon.
         """
         return self._get_properties_path_from_daemon_id(self.daemon_id)
+
+    @property
+    def stop_path(self) -> pathlib.Path:
+        """
+        Return the path for the stop file (created when manually stopped).
+        """
+        return self.path / '.stop.json'
 
     @property
     def log_path(self) -> pathlib.Path:

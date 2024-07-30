@@ -20,15 +20,16 @@ limitations under the License.
 
 import atexit
 from meerschaum.utils.typing import SuccessTuple
+from meerschaum.utils.packages import attempt_import
 from meerschaum.core.Pipe import Pipe
 from meerschaum.plugins import Plugin
 from meerschaum.utils.venv import Venv
+from meerschaum.utils.jobs import Job
 from meerschaum.connectors import get_connector, Connector, make_connector
 from meerschaum.utils import get_pipes
 from meerschaum.utils.formatting import pprint
 from meerschaum._internal.docs import index as __doc__
 from meerschaum.config import __version__, get_config
-from meerschaum.utils.packages import attempt_import
 from meerschaum.__main__ import _close_pools
 
 atexit.register(_close_pools)
@@ -42,6 +43,8 @@ __all__ = (
     "Plugin",
     "Venv",
     "Plugin",
+    "Job",
+    "Daemon",
     "pprint",
     "attempt_import",
     "actions",

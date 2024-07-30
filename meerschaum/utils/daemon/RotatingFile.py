@@ -232,10 +232,10 @@ class RotatingFile(io.IOBase):
 
 
     def refresh_files(
-            self,
-            potential_new_len: int = 0,
-            start_interception: bool = False,
-        ) -> '_io.TextUIWrapper':
+        self,
+        potential_new_len: int = 0,
+        start_interception: bool = False,
+    ) -> '_io.TextUIWrapper':
         """
         Check the state of the subfiles.
         If the latest subfile is too large, create a new file and delete old ones.
@@ -339,7 +339,7 @@ class RotatingFile(io.IOBase):
 
     def get_timestamp_prefix_str(self) -> str:
         """
-        Return the current minute prefixm string.
+        Return the current minute prefix string.
         """
         return datetime.now(timezone.utc).strftime(self.timestamp_format) + ' | '
 

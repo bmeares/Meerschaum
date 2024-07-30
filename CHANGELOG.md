@@ -4,6 +4,27 @@
 
 This is the current release cycle, so stay tuned for future releases!
 
+### v2.2.8
+
+- **Add `from_plugin_import()`.**  
+  You may now easily access attributes from a plugin's submodule with `meerschaum.plugins.from_plugin_import()`.
+  
+  ```python
+  from meerschaum.plugins import from_plugin_import
+
+  build_parent_pipe, get_defined_pipes = from_plugin_import(
+      'compose.utils.pipes',
+      'build_parent_pipe',
+      'get_defined_pipes',
+  )
+  ```
+
+- **Add `Job` interface.**  
+  You may now manage jobs with `Job`:
+
+  ```python
+  from meerschaum
+  ```
 
 ### v2.2.7
 

@@ -76,7 +76,7 @@ def daemon_entry(sysargs: Optional[List[str]] = None) -> SuccessTuple:
         filtered_sysargs,
         daemon_id=_args.get('name', None) if _args else None,
         label=label,
-        keep_daemon_output=('--rm' not in sysargs),
+        keep_daemon_output=('--rm' not in (sysargs or [])),
     )
     return success_tuple
 
