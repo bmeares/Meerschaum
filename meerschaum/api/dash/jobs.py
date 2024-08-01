@@ -16,6 +16,7 @@ from meerschaum.api import CHECK_UPDATE
 dbc = attempt_import('dash_bootstrap_components', lazy=False, check_update=CHECK_UPDATE)
 html, dcc = import_html(), import_dcc()
 dateutil_parser = attempt_import('dateutil.parser', check_update=CHECK_UPDATE)
+from meerschaum.utils.jobs import get_jobs, Job
 from meerschaum.utils.daemon import (
     get_daemons,
     get_running_daemons,
@@ -38,13 +39,15 @@ def get_jobs_cards(state: WebState):
     Build cards and alerts lists for jobs.
     """
     daemons = get_daemons()
+    jobs = get_jobs()
     session_id = state['session-store.data'].get('session-id', None)
     is_authenticated = is_session_authenticated(session_id)
 
     alert = alert_from_success_tuple(daemons)
     cards = []
 
-    for d in daemons:
+    for name, job in jobs.items():
+        d = job.daemon
         footer_children = html.Div(
             build_process_timestamps_children(d),
             id = {'type': 'process-timestamps-div', 'index': d.daemon_id},
@@ -80,7 +83,7 @@ def get_jobs_cards(state: WebState):
         ]
 
         body_children = [
-            html.H4(html.B(d.daemon_id), className="card-title"),
+            html.H4(html.B(name), className="card-title"),
             html.Div(
                 html.P(
                     d.label,

@@ -56,7 +56,7 @@ hidden_commands = {
     'ipy',
 }
 reserved_completers = {
-    'instance', 'repo'
+    'instance', 'repo', 'executor',
 }
 
 ### To handle dynamic reloading, store shell attributes externally.
@@ -247,11 +247,11 @@ class Shell(cmd.Cmd):
 
         from meerschaum.config._paths import SHELL_HISTORY_PATH
         shell_attrs['session'] = prompt_toolkit_shortcuts.PromptSession(
-            history = prompt_toolkit_history.FileHistory(str(SHELL_HISTORY_PATH)),
-            auto_suggest = ValidAutoSuggest(),
-            completer = ShellCompleter(),
-            complete_while_typing = True,
-            reserve_space_for_menu = False,
+            history=prompt_toolkit_history.FileHistory(SHELL_HISTORY_PATH.as_posix()),
+            auto_suggest=ValidAutoSuggest(),
+            completer=ShellCompleter(),
+            complete_while_typing=True,
+            reserve_space_for_menu=False,
         )
 
         try: ### try cmd2 arguments first
@@ -281,6 +281,7 @@ class Shell(cmd.Cmd):
         shell_attrs['_sysargs'] = sysargs
         shell_attrs['_actions']['instance'] = self.do_instance
         shell_attrs['_actions']['repo'] = self.do_repo
+        shell_attrs['_actions']['executor'] = self.do_executor
         shell_attrs['_actions']['debug'] = self.do_debug
         shell_attrs['_update_bottom_toolbar'] = True
         shell_attrs['_old_bottom_toolbar'] = ''
@@ -337,6 +338,12 @@ class Shell(cmd.Cmd):
             shell_attrs['instance_keys'] = remove_ansi(str(instance))
         if shell_attrs.get('repo_keys', None) is None:
             shell_attrs['repo_keys'] = get_config('meerschaum', 'default_repository', patch=patch)
+        if shell_attrs.get('executor_keys', None) is None:
+            shell_attrs['executor_keys'] = get_config(
+                'meerschaum', 'default_executor',
+                patch=patch,
+            ) or 'local'
+
         ### this will be updated later in update_prompt ONLY IF {username} is in the prompt
         shell_attrs['username'] = ''
 
@@ -525,6 +532,9 @@ class Shell(cmd.Cmd):
         if 'repository' not in args and main_action_name != 'api':
             args['repository'] = str(shell_attrs['repo_keys'])
 
+        if 'executor_keys' not in args:
+            args['executor_keys'] = shell_attrs['executor_keys']
+
         ### parse out empty strings
         if args['action'][0].strip("\"'") == '':
             self.emptyline()
@@ -676,11 +686,11 @@ class Shell(cmd.Cmd):
 
 
     def do_repo(
-            self,
-            action: Optional[List[str]] = None,
-            debug: bool = False,
-            **kw: Any
-        ) -> SuccessTuple:
+        self,
+        action: Optional[List[str]] = None,
+        debug: bool = False,
+        **kw: Any
+    ) -> SuccessTuple:
         """
         Temporarily set a default Meerschaum repository for the duration of the shell.
         The default repository (mrsm.io) is loaded from the Meerschaum configuraton file
@@ -727,7 +737,56 @@ class Shell(cmd.Cmd):
         return True, "Success"
 
     def complete_repo(self, *args) -> List[str]:
-        return self.complete_instance(*args)
+        results = self.complete_instance(*args)
+        return [result for result in results if result.startswith('api:')]
+
+    def do_executor(
+        self,
+        action: Optional[List[str]] = None,
+        debug: bool = False,
+        **kw: Any
+    ) -> SuccessTuple:
+        """
+        Temporarily set a default Meerschaum executor for the duration of the shell.
+        
+        You can change the default repository with `edit config`.
+        
+        Usage:
+            executor {API label}
+        
+        Examples:
+            ### reset to default executor
+            executor
+        
+            ### set the executor to 'api:main'
+            executor api:main
+        
+        Note that executors are API instances.
+        """
+        from meerschaum import get_connector
+        from meerschaum.connectors.parse import parse_executor_keys
+        from meerschaum.utils.warnings import warn, info
+
+        if action is None:
+            action = []
+
+        try:
+            executor_keys = action[0]
+        except (IndexError, AttributeError):
+            executor_keys = ''
+        if executor_keys == '':
+            executor_keys = get_config('meerschaum', 'default_executor') or 'local'
+        
+        conn = parse_executor_keys(executor_keys, debug=debug)
+
+        shell_attrs['executor_keys'] = str(conn)
+
+        info(f"Default executor for the current shell: {executor_keys}")
+        return True, "Success"
+
+    def complete_executor(self, *args) -> List[str]:
+        results = self.complete_instance(*args)
+        return ['local'] + [result for result in results if result.startswith('api:')]
 
     def do_help(self, line: str) -> List[str]:
         """
@@ -880,6 +939,15 @@ def input_with_sigint(_input, session, shell: Optional[Shell] = None):
             if ANSI
             else colored(shell_attrs['repo_keys'], 'on white')
         )
+        executor_colored = (
+            colored(
+                shell_attrs['executor_keys'],
+                'on ' + get_config('shell', 'ansi', 'executor', 'rich', 'style')
+            )
+            if ANSI
+            else colored(shell_attrs['executor_keys'], 'on white')
+        )
+
         try:
             typ, label = shell_attrs['instance_keys'].split(':')
             connected = typ in connectors and label in connectors[typ]
@@ -898,8 +966,12 @@ def input_with_sigint(_input, session, shell: Optional[Shell] = None):
         )
 
         left = (
-            colored(' Instance: ', 'on white') + instance_colored
-            + colored('   Repo: ', 'on white') + repo_colored
+            ' '
+            + instance_colored
+            + colored(' | ', 'on white')
+            + executor_colored
+            + colored(' | ', 'on white')
+            + repo_colored
         )
         right = connection_text
         buffer_size = (

@@ -72,6 +72,22 @@ class APIConnector(Connector):
         get_user_attributes,
     )
     from ._uri import from_uri
+    from ._jobs import (
+        get_jobs,
+        get_job,
+        get_job_metadata,
+        get_job_properties,
+        get_job_exists,
+        delete_job,
+        start_job,
+        create_job,
+        stop_job,
+        pause_job,
+        get_logs,
+        get_job_stop_time,
+        monitor_logs,
+        monitor_logs_async,
+    )
 
     def __init__(
         self,

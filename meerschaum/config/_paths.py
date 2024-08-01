@@ -180,6 +180,7 @@ paths = {
     'DAEMON_RESOURCES_PATH'          : ('{ROOT_DIR_PATH}', 'jobs'),
     'LOGS_RESOURCES_PATH'            : ('{ROOT_DIR_PATH}', 'logs'),
     'DAEMON_ERROR_LOG_PATH'          : ('{ROOT_DIR_PATH}', 'daemon_errors.log'),
+    'CHECK_LOGS_LOCK_PATH'           : ('{INTERNAL_RESOURCES_PATH}', 'check-jobs.lock'),
 }
 
 def set_root(root: Union[Path, str]):

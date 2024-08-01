@@ -552,16 +552,19 @@ def _complete_show_packages(
 
 def _show_jobs(
     action: Optional[List[str]] = None,
+    executor_keys: Optional[str] = None,
     nopretty: bool = False,
+    debug: bool = False,
     **kw: Any
 ) -> SuccessTuple:
     """
     Show the currently running and stopped jobs.
     """
-    from meerschaum.utils.daemon import get_filtered_daemons
+    from meerschaum.utils.jobs import get_filtered_jobs
     from meerschaum.utils.formatting._jobs import pprint_jobs
-    daemons = get_filtered_daemons(action)
-    if not daemons:
+
+    jobs = get_filtered_jobs(executor_keys, action, debug=debug)
+    if not jobs:
         if not action and not nopretty:
             from meerschaum.utils.warnings import info
             info('No running or stopped jobs.')
@@ -573,12 +576,14 @@ def _show_jobs(
                 "      - start job sync pipes --loop"
             )
         return False, "No jobs to show."
-    pprint_jobs(daemons, nopretty=nopretty)
+
+    pprint_jobs(jobs, nopretty=nopretty)
     return True, "Success"
 
 
 def _show_logs(
     action: Optional[List[str]] = None,
+    executor_keys: Optional[str] = None,
     nopretty: bool = False,
     **kw
 ) -> SuccessTuple:

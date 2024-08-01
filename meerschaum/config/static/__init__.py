@@ -23,6 +23,8 @@ STATIC_CONFIG: Dict[str, Any] = {
             'pipes': '/pipes',
             'metadata': '/metadata',
             'actions': '/actions',
+            'jobs': '/jobs',
+            'logs': '/logs',
             'users': '/users',
             'login': '/login',
             'connectors': '/connectors',
@@ -128,6 +130,9 @@ STATIC_CONFIG: Dict[str, Any] = {
             'min_ratio_columns_changed_for_full_astype': 0.5,
         },
         'exists_timeout_seconds': 5.0,
+    },
+    'jobs': {
+        'check_restart_seconds': 1.0,
     },
     'setup': {
         'name': 'meerschaum',

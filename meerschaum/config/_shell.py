@@ -76,6 +76,14 @@ default_shell_config = {
                 'magenta',
             ],
         },
+        'executor'       : {
+            'rich'       : {
+                'style'  : 'green',
+            },
+            'color'      : [
+                'green',
+            ],
+        },
         'username'       : {
             'rich'       : {
                 'style'  : 'white',

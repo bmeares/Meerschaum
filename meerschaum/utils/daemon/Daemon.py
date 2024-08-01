@@ -90,7 +90,7 @@ class Daemon:
     def __init__(
         self,
         target: Optional[Callable[[Any], Any]] = None,
-        target_args: Optional[List[str]] = None,
+        target_args: Union[List[Any], Tuple[Any], None] = None,
         target_kw: Optional[Dict[str, Any]] = None,
         daemon_id: Optional[str] = None,
         label: Optional[str] = None,
@@ -102,7 +102,7 @@ class Daemon:
         target: Optional[Callable[[Any], Any]], default None,
             The function to execute in a child process.
 
-        target_args: Optional[List[str]], default None
+        target_args: Union[List[Any], Tuple[Any], None], default None
             Positional arguments to pass to the target function.
 
         target_kw: Optional[Dict[str, Any]], default None
@@ -357,12 +357,13 @@ class Daemon:
         if self.status != 'paused':
             success, msg = self._send_signal(signal.SIGTERM, timeout=timeout)
             if success:
+                self._write_stop_file('kill')
                 return success, msg
 
         if self.status == 'stopped':
+            self._write_stop_file('kill')
             return True, "Process has already stopped."
 
-        self._write_stop_file('kill')
         process = self.process
         try:
             process.terminate()
@@ -376,6 +377,8 @@ class Daemon:
                 self.pid_path.unlink()
             except Exception as e:
                 pass
+
+        self._write_stop_file('kill')
         return True, "Success"
 
     def quit(self, timeout: Union[int, float, None] = None) -> SuccessTuple:
@@ -383,8 +386,9 @@ class Daemon:
         if self.status == 'paused':
             return self.kill(timeout)
 
-        self._write_stop_file('quit')
         signal_success, signal_msg = self._send_signal(signal.SIGINT, timeout=timeout)
+        if signal_success:
+            self._write_stop_file('quit')
         return signal_success, signal_msg
 
     def pause(
@@ -513,7 +517,13 @@ class Daemon:
             return False, f"Unsupported action '{action}'."
 
         with open(self.stop_path, 'w+', encoding='utf-8') as f:
-            json.dump({'stop_time': datetime.now(timezone.utc).isoformat()}, f)
+            json.dump(
+                {
+                    'stop_time': datetime.now(timezone.utc).isoformat(),
+                    'action': action,
+                },
+                f
+            )
 
         return True, "Success"
 
@@ -780,7 +790,8 @@ class Daemon:
 
     @property
     def pid(self) -> Union[int, None]:
-        """Read the PID file and return its contents.
+        """
+        Read the PID file and return its contents.
         Returns `None` if the PID file does not exist.
         """
         if not self.pid_path.exists():
@@ -788,6 +799,8 @@ class Daemon:
         try:
             with open(self.pid_path, 'r', encoding='utf-8') as f:
                 text = f.read()
+            if len(text) == 0:
+                return None
             pid = int(text.rstrip())
         except Exception as e:
             warn(e)

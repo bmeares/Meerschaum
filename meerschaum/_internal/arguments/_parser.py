@@ -62,7 +62,24 @@ def parse_datetime(dt_str: str) -> Union[datetime, int, str]:
     return dt
 
 
-def parse_help(sysargs : Union[List[str], Dict[str, Any]]) -> None:
+def parse_executor_keys(executor_keys_str: str) -> Union[str, None]:
+    """
+    Ensure that only API keys are provided for executor_keys.
+    """
+    if executor_keys_str == 'local':
+        return executor_keys_str
+
+    if executor_keys_str.lower() == 'none':
+        return 'local'
+
+    if not executor_keys_str.startswith('api:'):
+        from meerschaum.utils.warnings import error
+        error(f"Invalid exectutor keys '{executor_keys_str}'.", stack=False)
+
+    return executor_keys_str
+
+
+def parse_help(sysargs: Union[List[str], Dict[str, Any]]) -> None:
     """Parse the `--help` flag to determine which help message to print."""
     from meerschaum._internal.arguments._parse_arguments import parse_arguments, parse_line
     from meerschaum.actions import actions, get_subactions
@@ -181,9 +198,6 @@ groups['jobs'].add_argument(
     help = "Run an action as a background daemon to create a job."
 )
 groups['jobs'].add_argument(
-    '--rm', action='store_true', help="Delete a job once it has finished executing."
-)
-groups['jobs'].add_argument(
     '--name', '--job-name', type=parse_name, help=(
         "Assign a name to a job. If no name is provided, a random name will be assigned."
     ),
@@ -200,7 +214,15 @@ groups['jobs'].add_argument(
     '--restart', action='store_true',
     help=("Restart a job if not stopped manually."),
 )
-
+groups['jobs'].add_argument(
+    '--executor-keys', '--executor', '-e', type=parse_executor_keys,
+    help=(
+        "Remotely execute jobs on an API instance."
+    ),
+)
+groups['jobs'].add_argument(
+    '--rm', action='store_true', help="Delete a job once it has finished executing."
+)
 ### Pipes options
 groups['pipes'].add_argument(
     '-c', '-C', '--connector-keys', nargs='+',

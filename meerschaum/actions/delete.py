@@ -391,6 +391,7 @@ def _complete_delete_connectors(
 
 def _delete_jobs(
         action: Optional[List[str]] = None,
+        executor_keys: Optional[str] = None,
         noask: bool = False,
         nopretty: bool = False,
         force: bool = False,
@@ -404,8 +405,12 @@ def _delete_jobs(
     If the job is running, ask to kill the job first.
 
     """
-    from meerschaum.utils.daemon import (
-        Daemon, get_running_daemons, get_stopped_daemons, get_filtered_daemons, get_paused_daemons
+    from meerschaum.utils.jobs import (
+        Job,
+        get_running_jobs,
+        get_stopped_jobs,
+        get_filtered_jobs,
+        get_paused_jobs,
     )
     from meerschaum.utils.prompt import yes_no
     from meerschaum.utils.formatting._jobs import pprint_jobs
@@ -413,49 +418,53 @@ def _delete_jobs(
     from meerschaum.utils.warnings import warn
     from meerschaum.utils.misc import items_str
     from meerschaum.actions import actions
-    daemons = get_filtered_daemons(action, warn=(not nopretty))
-    if not daemons:
+
+    jobs = get_filtered_jobs(executor_keys, action, debug=debug)
+    if not jobs:
         return True, "No jobs to delete; nothing to do."
 
     _delete_all_jobs = False
     if not action:
         if not force:
-            pprint_jobs(daemons)
+            pprint_jobs(jobs)
             if not yes_no(
                 "Delete all jobs? This cannot be undone!",
                 noask=noask, yes=yes, default='n'
             ):
                 return False, "No jobs were deleted."
-            _delete_all_jobs = True
-    _running_daemons = get_running_daemons(daemons)
-    _paused_daemons = get_paused_daemons(daemons)
-    _stopped_daemons = get_stopped_daemons(daemons)
-    _to_delete = _stopped_daemons
 
-    to_stop_daemons = _running_daemons + _paused_daemons
-    if to_stop_daemons:
+            _delete_all_jobs = True
+
+    _running_jobs = get_running_jobs(executor_keys, jobs, debug=debug)
+    _paused_jobs = get_paused_jobs(executor_keys, jobs, debug=debug)
+    _stopped_jobs = get_stopped_jobs(executor_keys, jobs, debug=debug)
+    _to_delete = _stopped_jobs
+
+    to_stop_jobs =  {**_running_jobs, **_paused_jobs}
+    if to_stop_jobs:
         clear_screen(debug=debug)
         if not force:
-            pprint_jobs(to_stop_daemons, nopretty=nopretty)
+            pprint_jobs(to_stop_jobs, nopretty=nopretty)
         if force or yes_no(
             "Stop these jobs?",
             default='n', yes=yes, noask=noask
         ):
             actions['stop'](
-                action = (['jobs'] + [d.daemon_id for d in to_stop_daemons]),
-                nopretty = nopretty,
-                yes = yes,
-                force = force,
-                noask = noask,
-                debug = debug,
+                action=(['jobs'] + [_name for _name in to_stop_jobs]),
+                executor_keys=executor_keys,
+                nopretty=nopretty,
+                yes=yes,
+                force=force,
+                noask=noask,
+                debug=debug,
                 **kw
             )
             ### Ensure the running jobs are dead.
-            if get_running_daemons(daemons):
+            if get_running_jobs(executor_keys, jobs, debug=debug):
                 return False, (
                     f"Failed to kill running jobs. Please stop these jobs before deleting."
                 )
-            _to_delete += to_stop_daemons
+            _to_delete.update(to_stop_jobs)
 
         ### User decided not to kill running jobs.
         else:
@@ -473,17 +482,17 @@ def _delete_jobs(
             return False, "No jobs were deleted."
 
     _deleted = []
-    for d in _to_delete:
-        d.cleanup()
-        if d.path.exists() and not nopretty:
-            warn(f"Failed to delete job '{d.daemon_id}'.", stack=False)
+    for name, job in _to_delete.items():
+        delete_success, delete_msg = job.delete()
+        if not delete_success:
+            warn(f"Failed to delete job '{name}'.", stack=False)
             continue
-        _deleted.append(d)
+        _deleted.append(name)
 
     return (
         len(_deleted) > 0,
         ("Deleted job" + ("s" if len(_deleted) != 1 else '')
-            + f" {items_str([d.daemon_id for d in _deleted])}."),
+            + f" {items_str([_name for _name in _deleted])}."),
     )
 
 

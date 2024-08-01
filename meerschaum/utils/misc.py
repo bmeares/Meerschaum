@@ -1522,6 +1522,7 @@ def safely_extract_tar(tarf: 'file', output_dir: Union[str, 'pathlib.Path']) -> 
 
     return safe_extract(tarf, output_dir)
 
+
 ##################
 # Legacy imports #
 ##################

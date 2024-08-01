@@ -225,10 +225,11 @@ def get_stopped_daemons(daemons: Optional[List[Daemon]] = None) -> List[Daemon]:
 
 
 def get_filtered_daemons(
-        filter_list: Optional[List[str]] = None,
-        warn: bool = False,
-    ) -> List[Daemon]:
-    """Return a list of `Daemons` filtered by a list of `daemon_ids`.
+    filter_list: Optional[List[str]] = None,
+    warn: bool = False,
+) -> List[Daemon]:
+    """
+    Return a list of `Daemons` filtered by a list of `daemon_ids`.
     Only `Daemons` that exist are returned.
     
     If `filter_list` is `None` or empty, return all `Daemons` (from `get_daemons()`).
@@ -250,13 +251,14 @@ def get_filtered_daemons(
     if not filter_list:
         daemons = get_daemons()
         return [d for d in daemons if not d.hidden]
+
     from meerschaum.utils.warnings import warn as _warn
     daemons = []
     for d_id in filter_list:
         try:
             d = Daemon(daemon_id=d_id)
             _exists = d.path.exists()
-        except Exception as e:
+        except Exception:
             _exists = False
         if not _exists:
             if warn:

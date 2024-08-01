@@ -26,6 +26,13 @@ This is the current release cycle, so stay tuned for future releases!
   from meerschaum
   ```
 
+- **Add remote job execution.**  
+  Jobs may be executed remotely on an API instance.
+
+  ```bash
+  
+  ```
+
 ### v2.2.7
 
 - **Fix daemon stability.**  

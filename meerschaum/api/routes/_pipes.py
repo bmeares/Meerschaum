@@ -201,13 +201,13 @@ async def fetch_pipes_keys(
 
 @app.get(pipes_endpoint, tags=['Pipes'])
 async def get_pipes(
-        connector_keys : str = "",
-        metric_keys : str = "",
-        location_keys : str = "",
-        curr_user = (
+        connector_keys: str = "",
+        metric_keys: str = "",
+        location_keys: str = "",
+        curr_user=(
             fastapi.Depends(manager) if not no_auth else None
         ),
-        debug : bool = False
+        debug: bool = False,
     ) -> Dict[str, Any]:
     """
     Get all registered Pipes with metadata, excluding parameters.

@@ -119,9 +119,25 @@ def parse_repo_keys(keys: Optional[str] = None, **kw):
     return parse_connector_keys(keys, **kw)
 
 
+def parse_executor_keys(keys: Optional[str] = None, **kw):
+    """Parse the executor keys into an APIConnector or None."""
+    from meerschaum.config import get_config
+    if keys is None:
+        keys = get_config('meerschaum', 'default_executor')
+
+    if keys is None or keys == 'local':
+        return 'local'
+
+    keys = str(keys)
+    if ':' not in keys:
+        keys = 'api:' + keys
+
+    return parse_connector_keys(keys, **kw)
+
+
 def is_valid_connector_keys(
-        keys: str
-    ) -> bool:
+    keys: str
+) -> bool:
     """Verify a connector_keys string references a valid connector.
     """
     try:

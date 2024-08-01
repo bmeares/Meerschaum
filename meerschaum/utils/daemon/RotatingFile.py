@@ -568,7 +568,8 @@ class RotatingFile(io.IOBase):
             return
 
         self._cursor = (max_ix, position)
-        self._current_file_obj.seek(position)
+        if self._current_file_obj is not None:
+            self._current_file_obj.seek(position)
 
     
     def flush(self) -> None:
