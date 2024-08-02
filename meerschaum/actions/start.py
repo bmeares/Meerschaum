@@ -299,24 +299,26 @@ def _start_jobs(
 
 
 def _complete_start_jobs(
-        action: Optional[List[str]] = None,
-        line: str = '',
-        **kw
-    ) -> List[str]:
-    from meerschaum.utils.daemon import get_daemon_ids
-    daemon_ids = get_daemon_ids()
+    action: Optional[List[str]] = None,
+    executor_keys: Optional[str] = None,
+    line: str = '',
+    **kw
+) -> List[str]:
+    from meerschaum.utils.jobs import get_jobs
+    jobs = get_jobs(executor_keys)
     if not action:
-        return daemon_ids
+        return list(jobs)
+
     possibilities = []
     _line_end = line.split(' ')[-1]
-    for daemon_id in daemon_ids:
-        if daemon_id in action:
+    for name in jobs:
+        if name in action:
             continue
         if _line_end == '':
-            possibilities.append(daemon_id)
+            possibilities.append(name)
             continue
-        if daemon_id.startswith(action[-1]):
-            possibilities.append(daemon_id)
+        if name.startswith(action[-1]):
+            possibilities.append(name)
     return possibilities
 
 

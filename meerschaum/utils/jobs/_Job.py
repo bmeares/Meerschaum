@@ -13,6 +13,7 @@ import json
 import pathlib
 import os
 import traceback
+from functools import partial
 from datetime import datetime
 
 import meerschaum as mrsm
@@ -27,6 +28,18 @@ from meerschaum.config import get_config
 BANNED_CHARS: List[str] = [
     ',', ';', "'", '"',
 ]
+RESTART_FLAGS: List[str] = [
+    '-s',
+    '--restart',
+    '--loop',
+    '--schedule',
+    '--cron',
+]
+
+class StopMonitoringLogs(Exception):
+    """
+    Raise this exception to stop the logs monitoring.
+    """
 
 
 class Job:
@@ -93,8 +106,10 @@ class Job:
             for arg in (daemon_sysargs or sysargs or [])
             if arg not in ('-d', '--daemon')
         ]
-        if '--restart' in self._sysargs or '--loop' in self._sysargs:
-            self._properties_patch.update({'restart': True})
+        for restart_flag in RESTART_FLAGS:
+            if restart_flag in self._sysargs:
+                self._properties_patch.update({'restart': True})
+                break
 
     def start(self, debug: bool = False) -> SuccessTuple:
         """
@@ -199,11 +214,22 @@ class Job:
 
     def monitor_logs(
         self,
-        callback_function: Callable[[Any], Any],
+        callback_function: Callable[[str], None] = partial(print, end=''),
         stop_event: Optional[threading.Event] = None,
     ):
         """
         Monitor the job's log files and execute a callback on new lines.
+
+        Parameters
+        ----------
+        callback_function: Callable[[str], None], default partial(print, end='')
+            The callback to execute as new data comes in.
+            Defaults to printing the output directly to `stdout`.
+
+        stop_event: Optional[threading.Event], default None
+            If provided, stop monitoring when this event is set.
+            You may instead raise `meerschaum.utils.jobs.StopMonitoringLogs`
+            from within `callback_function` to stop monitoring.
         """
         if self.executor is not None:
             self.executor.monitor_logs(self.name, callback_function)
@@ -215,11 +241,16 @@ class Job:
         for line in lines[(-1 * lines_to_show):]:
             try:
                 callback_function(line)
+            except StopMonitoringLogs:
+                return
             except Exception:
                 warn(f"Error in logs callback:\n{traceback.format_exc()}")
 
         watchfiles = mrsm.attempt_import('watchfiles')
-        for changes in watchfiles.watch(LOGS_RESOURCES_PATH, stop_event=stop_event):
+        for changes in watchfiles.watch(
+            LOGS_RESOURCES_PATH,
+            stop_event=stop_event,
+        ):
             for change in changes:
                 file_path_str = change[1]
                 file_path = pathlib.Path(file_path_str)
@@ -230,17 +261,30 @@ class Job:
                 text = log.read()
                 try:
                     callback_function(text)
+                except StopMonitoringLogs:
+                    return
                 except Exception:
                     warn(f"Error in logs callback:\n{traceback.format_exc()}")
 
 
     async def monitor_logs_async(
         self,
-        callback_function: Callable[[Any], Any],
+        callback_function: Callable[[str], None] = partial(print, end=''),
         stop_event: Optional[asyncio.Event] = None,
     ):
         """
         Monitor the job's log files and await a callback on new lines.
+
+        Parameters
+        ----------
+        callback_function: Callable[[str], None], default partial(print, end='')
+            The callback to execute as new data comes in.
+            Defaults to printing the output directly to `stdout`.
+
+        stop_event: Optional[asyncio.Event], default None
+            If provided, stop monitoring when this event is set.
+            You may instead raise `meerschaum.utils.jobs.StopMonitoringLogs`
+            from within `callback_function` to stop monitoring.
         """
         if self.executor is not None:
             await self.executor.monitor_logs_async(self.name, callback_function)
@@ -250,39 +294,42 @@ class Job:
         lines = log.readlines()
         lines_to_show = get_config('jobs', 'logs', 'lines_to_show')
         for line in lines[(-1 * lines_to_show):]:
+            if stop_event is not None and stop_event.is_set():
+                return
             try:
                 if asyncio.iscoroutinefunction(callback_function):
                     await callback_function(line)
                 else:
                     callback_function(line)
+            except StopMonitoringLogs:
+                return
             except Exception:
                 warn(f"Error in logs callback:\n{traceback.format_exc()}")
 
         watchfiles = mrsm.attempt_import('watchfiles')
-        try:
-            async for changes in watchfiles.awatch(LOGS_RESOURCES_PATH, stop_event=stop_event):
-                if stop_event is not None and stop_event.is_set():
-                    break
-                for change in changes:
-                    file_path_str = change[1]
-                    file_path = pathlib.Path(file_path_str)
-                    latest_subfile_path = log.get_latest_subfile_path()
-                    if latest_subfile_path != file_path:
-                        continue
+        async for changes in watchfiles.awatch(
+            LOGS_RESOURCES_PATH,
+            stop_event=stop_event,
+        ):
+            for change in changes:
+                file_path_str = change[1]
+                file_path = pathlib.Path(file_path_str)
+                latest_subfile_path = log.get_latest_subfile_path()
+                if latest_subfile_path != file_path:
+                    continue
 
-                    text = log.read()
+                lines = log.readlines()
+                for line in lines:
                     try:
                         if asyncio.iscoroutinefunction(callback_function):
-                            await callback_function(text)
+                            await callback_function(line)
                         else:
-                            callback_function(text)
+                            callback_function(line)
+                    except StopMonitoringLogs:
+                        return
                     except Exception:
                         warn(f"Error in logs callback:\n{traceback.format_exc()}")
-        except asyncio.CancelledError:
-            return
-        except Exception:
-            warn(f"Error in logs callback:\n{traceback.format_exc()}")
-            return
+                        return
 
     @property
     def executor(self) -> Union['APIConnector', None]:
@@ -476,3 +523,6 @@ class Job:
 
     def __repr__(self) -> str:
         return str(self)
+
+    def __hash__(self) -> int:
+        return hash(self.name)

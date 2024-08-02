@@ -193,13 +193,16 @@ async def monitor_logs_async(
     """
     Monitor a job's log files and await a callback with the changes.
     """
-    websockets = mrsm.attempt_import('websockets')
+    websockets, websockets_exceptions = mrsm.attempt_import('websockets', 'websockets.exceptions')
     protocol = 'ws' if self.URI.startswith('http://') else 'wss'
     port = self.port if 'port' in self.__dict__ else ''
     uri = f"{protocol}://{self.host}:{port}{LOGS_ENDPOINT}/{name}/ws"
 
     async with websockets.connect(uri) as websocket:
-        await websocket.send(self.token)
+        try:
+            await websocket.send(self.token or 'no-login')
+        except websockets_exceptions.ConnectionClosedOK:
+            pass
         while True:
             try:
                 response = await websocket.recv()

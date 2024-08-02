@@ -30,6 +30,7 @@ class CustomOAuth2PasswordRequestForm:
         self.client_id = client_id
         self.client_secret = client_secret
 
+
 LoginManager = fastapi_login.LoginManager
 def generate_secret_key() -> str:
     """
@@ -45,6 +46,7 @@ def generate_secret_key() -> str:
             secret_key = f.read()
 
     return secret_key.encode('utf-8')
+
 
 SECRET = generate_secret_key()
 manager = LoginManager(SECRET, token_url=endpoints['login'])

@@ -70,12 +70,12 @@ _loaded_plugin_connectors: bool = False
 
 
 def get_connector(
-        type: str = None,
-        label: str = None,
-        refresh: bool = False,
-        debug: bool = False,
-        **kw: Any
-    ) -> Connector:
+    type: str = None,
+    label: str = None,
+    refresh: bool = False,
+    debug: bool = False,
+    **kw: Any
+) -> Connector:
     """
     Return existing connector or create new connection and store for reuse.
     
@@ -274,9 +274,7 @@ def is_connected(keys: str, **kw) -> bool:
         return False
 
 
-def make_connector(
-        cls,
-    ):
+def make_connector(cls):
     """
     Register a class as a `Connector`.
     The `type` will be the lower case of the class name, without the suffix `connector`.
@@ -338,8 +336,8 @@ def load_plugin_connectors():
 
 
 def get_connector_plugin(
-        connector: Connector,
-    ) -> Union[str, None, mrsm.Plugin]:
+    connector: Connector,
+) -> Union[str, None, mrsm.Plugin]:
     """
     Determine the plugin for a connector.
     This is useful for handling virtual environments for custom instance connectors.

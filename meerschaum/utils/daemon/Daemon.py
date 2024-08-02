@@ -8,6 +8,7 @@ Manage running daemons via the Daemon class.
 
 from __future__ import annotations
 import os
+import importlib
 import pathlib
 import json
 import shutil
@@ -87,6 +88,53 @@ class Daemon:
                 instance = instance.read_pickle()
         return instance
 
+    @classmethod
+    def from_properties_file(cls, daemon_id: str) -> Daemon:
+        """
+        Return a Daemon from a properties dictionary.
+        """
+        properties_path = cls._get_properties_path_from_daemon_id(daemon_id)
+        if not properties_path.exists():
+            raise OSError(f"Properties file '{properties_path}' does not exist.")
+
+        try:
+            with open(properties_path, 'r', encoding='utf-8') as f:
+                properties = json.load(f)
+        except Exception:
+            properties = {}
+
+        if not properties:
+            raise ValueError(f"No properties could be read for daemon '{daemon_id}'.")
+
+        daemon_id = properties_path.parent.name
+        target_cf = properties.get('target', {})
+        target_module_name = target_cf.get('module', None)
+        target_function_name = target_cf.get('name', None)
+        target_args = target_cf.get('args', None)
+        target_kw = target_cf.get('kw', None)
+        label = properties.get('label', None)
+
+        if None in [
+            target_module_name,
+            target_function_name,
+            target_args,
+            target_kw,
+        ]:
+            raise ValueError("Missing target function information.")
+
+        target_module = importlib.import_module(target_module_name)
+        target_function = getattr(target_module, target_function_name)
+
+        return Daemon(
+            daemon_id=daemon_id,
+            target=target_function,
+            target_args=target_args,
+            target_kw=target_kw,
+            properties=properties,
+            label=label,
+        )
+
+
     def __init__(
         self,
         target: Optional[Callable[[Any], Any]] = None,
@@ -124,18 +172,49 @@ class Daemon:
         if daemon_id is not None:
             self.daemon_id = daemon_id
             if not self.pickle_path.exists() and not target and ('target' not in self.__dict__):
-                raise Exception(
-                    f"Daemon '{self.daemon_id}' does not exist. "
-                    + "Pass a target to create a new Daemon."
-                )
+
+                if not self.properties_path.exists():
+                    raise Exception(
+                        f"Daemon '{self.daemon_id}' does not exist. "
+                        + "Pass a target to create a new Daemon."
+                    )
+
+                try:
+                    new_daemon = self.from_properties_file(daemon_id)
+                except Exception:
+                    new_daemon = None
+
+                if new_daemon is not None:
+                    target = new_daemon.target
+                    target_args = new_daemon.target_args
+                    target_kw = new_daemon.target_kw
+                    label = new_daemon.label
+                    self._properties = new_daemon.properties
+                else:
+                    try:
+                        self.properties_path.unlink()
+                    except Exception:
+                        pass
+
+                    raise Exception(
+                        f"Could not recover daemon '{self.daemon_id}' "
+                        + "from its properties file."
+                    )
+
         if 'target' not in self.__dict__:
             if target is None:
                 error("Cannot create a Daemon without a target.")
             self.target = target
-        if 'target_args' not in self.__dict__:
-            self.target_args = target_args if target_args is not None else []
-        if 'target_kw' not in self.__dict__:
-            self.target_kw = target_kw if target_kw is not None else {}
+
+        self._target_args = target_args
+        #  if '_target_args' not in self.__dict__:
+            #  self.target_args = target_args
+            #  self.target_args = target_args if target_args is not None else []
+
+        self._target_kw = target_kw
+        #  if '_target_kw' not in self.__dict__:
+            #  self.target_kw = target_kw
+            #  self.target_kw = target_kw if target_kw is not None else {}
         if 'label' not in self.__dict__:
             if label is None:
                 label = (
@@ -849,8 +928,10 @@ class Daemon:
         import pickle, traceback
         if not self.pickle_path.exists():
             error(f"Pickle file does not exist for daemon '{self.daemon_id}'.")
+
         if self.pickle_path.stat().st_size == 0:
             error(f"Pickle was empty for daemon '{self.daemon_id}'.")
+
         try:
             with open(self.pickle_path, 'rb') as pickle_file:
                 daemon = pickle.load(pickle_file)
@@ -1007,6 +1088,33 @@ class Daemon:
             return check_timeout_interval
         return get_config('jobs', 'check_timeout_interval_seconds')
 
+    @property
+    def target_args(self) -> Tuple[Any]:
+        """
+        Return the positional arguments to pass to the target function.
+        """
+        if self._target_args is not None:
+            return self._target_args
+
+        target_args = self.properties.get('target', {}).get('args', None)
+        if target_args is None:
+            raise EnvironmentError("No target args could be found for daemon '{self}'.")
+
+        return tuple(target_args)
+
+    @property
+    def target_kw(self) -> Dict[str, Any]:
+        """
+        Return the keyword arguments to pass to the target function.
+        """
+        if self._target_kw is not None:
+            return self._target_kw
+
+        target_kw = self.properties.get('target', {}).get('kw', None)
+        if target_kw is None:
+            raise EnvironmentError("No target kwargs could be found for daemon '{self}'.")
+
+        return {key: val for key, val in target_kw.items()}
 
     def __getstate__(self):
         """
@@ -1057,4 +1165,4 @@ class Daemon:
         return self.daemon_id == other.daemon_id
 
     def __hash__(self):
-        return hash(self.daemon_id)       
+        return hash(self.daemon_id)

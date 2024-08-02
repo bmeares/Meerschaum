@@ -9,8 +9,22 @@ Higher-level utilities for managing `meerschaum.utils.daemon.Daemon`.
 import pathlib
 
 import meerschaum as mrsm
-from meerschaum.utils.jobs._Job import Job
+from meerschaum.utils.jobs._Job import Job, StopMonitoringLogs
 from meerschaum.utils.typing import Dict, Optional, List, Callable, Any
+
+__all__ = (
+    'Job',
+    'get_jobs',
+    'get_filtered_jobs',
+    'get_restart_jobs',
+    'get_running_jobs',
+    'get_stopped_jobs',
+    'get_paused_jobs',
+    'get_restart_jobs',
+    'check_restart_jobs',
+    'start_check_jobs_thread',
+    'stop_check_jobs_thread',
+)
 
 
 def get_jobs(
@@ -30,12 +44,17 @@ def get_jobs(
     -------
     A dictionary mapping job names to jobs.
     """
+    from meerschaum.connectors.parse import parse_connector_keys
     if executor_keys == 'local':
         executor_keys = None
 
     if executor_keys is not None:
-        conn = mrsm.get_connector(executor_keys)
-        return conn.get_jobs(debug=debug)
+        try:
+            _ = parse_connector_keys(executor_keys, construct=False)
+            conn = mrsm.get_connector(executor_keys)
+            return conn.get_jobs(debug=debug)
+        except Exception:
+            return {}
 
     from meerschaum.utils.daemon import get_daemons
     daemons = get_daemons()
@@ -174,6 +193,14 @@ def check_restart_jobs(
             mrsm.pprint((success, msg))
 
 
+def _check_restart_jobs_against_lock(*args, **kwargs):
+    from meerschaum.config.paths import CHECK_JOBS_LOCK_PATH
+    fasteners = mrsm.attempt_import('fasteners')
+    lock = fasteners.InterProcessLock(CHECK_JOBS_LOCK_PATH)
+    with lock:
+        check_restart_jobs(*args, **kwargs)
+
+
 _check_loop_stop_thread = None
 def start_check_jobs_thread():
     """
@@ -183,15 +210,6 @@ def start_check_jobs_thread():
     from functools import partial
     from meerschaum.utils.threading import RepeatTimer
     from meerschaum.config.static import STATIC_CONFIG
-    from meerschaum.config.paths import CHECK_LOGS_LOCK_PATH
-
-    if CHECK_LOGS_LOCK_PATH.exists():
-        return
-
-    try:
-        CHECK_LOGS_LOCK_PATH.touch()
-    except Exception:
-        pass
 
     global _check_loop_stop_thread
     sleep_seconds = STATIC_CONFIG['jobs']['check_restart_seconds']
@@ -199,11 +217,11 @@ def start_check_jobs_thread():
     _check_loop_stop_thread = RepeatTimer(
         sleep_seconds,
         partial(
-            check_restart_jobs,
+            _check_restart_jobs_against_lock,
             silent=True,
         )
     )
-    _check_loop_stop_thread.daemon = True
+    _check_loop_stop_thread.daemon = False
     atexit.register(stop_check_jobs_thread)
 
     _check_loop_stop_thread.start()
@@ -213,13 +231,15 @@ def stop_check_jobs_thread():
     """
     Stop the job monitoring thread.
     """
-    from meerschaum.config.paths import CHECK_LOGS_LOCK_PATH
+    from meerschaum.config.paths import CHECK_JOBS_LOCK_PATH
+    from meerschaum.utils.warnings import warn
     if _check_loop_stop_thread is None:
         return
 
     _check_loop_stop_thread.cancel()
 
     try:
-        CHECK_LOGS_LOCK_PATH.unlink()
-    except Exception:
-        pass
+        if CHECK_JOBS_LOCK_PATH.exists():
+            CHECK_JOBS_LOCK_PATH.unlink()
+    except Exception as e:
+        warn(f"Failed to remove check jobs lock file:\n{e}")

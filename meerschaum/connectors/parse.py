@@ -10,11 +10,11 @@ from __future__ import annotations
 from meerschaum.utils.typing import Mapping, Any, SuccessTuple, Union, Optional, Dict, Tuple
 
 def parse_connector_keys(
-        keys: str,
-        construct: bool = True,
-        as_tuple: bool = False,
-        **kw:  Any
-    ) -> (
+    keys: str,
+    construct: bool = True,
+    as_tuple: bool = False,
+    **kw:  Any
+) -> (
         Union[
             meerschaum.connectors.Connector,
             Dict[str, Any],

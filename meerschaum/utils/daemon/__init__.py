@@ -181,7 +181,11 @@ def get_daemon_ids() -> List[str]:
     """
     Return the IDs of all daemons on disk.
     """
-    return sorted(os.listdir(DAEMON_RESOURCES_PATH))
+    return [
+        daemon_dir
+        for daemon_dir in sorted(os.listdir(DAEMON_RESOURCES_PATH))
+        if (DAEMON_RESOURCES_PATH / daemon_dir / 'properties.json').exists()
+    ]
 
 
 def get_running_daemons(daemons: Optional[List[Daemon]] = None) -> List[Daemon]:
