@@ -185,6 +185,7 @@ class Daemon:
                     new_daemon = None
 
                 if new_daemon is not None:
+                    new_daemon.write_pickle()
                     target = new_daemon.target
                     target_args = new_daemon.target_args
                     target_kw = new_daemon.target_kw
