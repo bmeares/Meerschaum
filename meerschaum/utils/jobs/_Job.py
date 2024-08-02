@@ -393,7 +393,11 @@ class Job:
         if self._sysargs:
             return self._sysargs
 
-        self._sysargs = self.daemon.properties.get('target', {}).get('args', [[]])[0]
+        #  target_args = self.daemon.properties.get('target', {}).get('args', None)
+        target_args = self.daemon.target_args
+        if target_args is None:
+            return []
+        self._sysargs = target_args[0] if len(target_args) > 0 else []
         return self._sysargs
 
     @property
@@ -415,6 +419,7 @@ class Job:
         self._daemon = Daemon(
             target=entry,
             target_args=[self._sysargs],
+            target_kw={},
             daemon_id=self.name,
             label=shlex.join(self._sysargs),
             properties=properties,

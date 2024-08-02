@@ -207,14 +207,8 @@ class Daemon:
             self.target = target
 
         self._target_args = target_args
-        #  if '_target_args' not in self.__dict__:
-            #  self.target_args = target_args
-            #  self.target_args = target_args if target_args is not None else []
-
         self._target_kw = target_kw
-        #  if '_target_kw' not in self.__dict__:
-            #  self.target_kw = target_kw
-            #  self.target_kw = target_kw if target_kw is not None else {}
+
         if 'label' not in self.__dict__:
             if label is None:
                 label = (
@@ -1089,30 +1083,30 @@ class Daemon:
         return get_config('jobs', 'check_timeout_interval_seconds')
 
     @property
-    def target_args(self) -> Tuple[Any]:
+    def target_args(self) -> Union[Tuple[Any], None]:
         """
         Return the positional arguments to pass to the target function.
         """
-        if self._target_args is not None:
-            return self._target_args
-
-        target_args = self.properties.get('target', {}).get('args', None)
+        target_args = (
+            self.__dict__.get('_target_args', None)
+            or self.properties.get('target', {}).get('args', None)
+        )
         if target_args is None:
-            raise EnvironmentError("No target args could be found for daemon '{self}'.")
+            return tuple([])
 
         return tuple(target_args)
 
     @property
-    def target_kw(self) -> Dict[str, Any]:
+    def target_kw(self) -> Union[Dict[str, Any], None]:
         """
         Return the keyword arguments to pass to the target function.
         """
-        if self._target_kw is not None:
-            return self._target_kw
-
-        target_kw = self.properties.get('target', {}).get('kw', None)
+        target_kw = (
+            self.__dict__.get('_target_kw', None)
+            or self.properties.get('target', {}).get('kw', None)
+        )
         if target_kw is None:
-            raise EnvironmentError("No target kwargs could be found for daemon '{self}'.")
+            return {}
 
         return {key: val for key, val in target_kw.items()}
 
