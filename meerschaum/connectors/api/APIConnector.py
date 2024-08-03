@@ -33,7 +33,7 @@ class APIConnector(Connector):
         delete,
         wget,
     )
-    from ._actions import get_actions, do_action
+    from ._actions import get_actions, do_action, do_action_async
     from ._misc import get_mrsm_version, get_chaining_status
     from ._pipes import (
         register_pipe,

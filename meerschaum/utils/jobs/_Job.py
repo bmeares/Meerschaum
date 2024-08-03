@@ -68,6 +68,9 @@ class Job:
 
         executor_keys: Optional[str], default None
             If provided, execute the job remotely on an API instance, e.g. 'api:main'.
+
+        _properties: Optional[Dict[str, Any]], default None
+            If provided, use this to patch the daemon's properties.
         """
         from meerschaum.utils.daemon import Daemon
         for char in BANNED_CHARS:
@@ -216,6 +219,7 @@ class Job:
         self,
         callback_function: Callable[[str], None] = partial(print, end=''),
         stop_event: Optional[threading.Event] = None,
+        stop_on_exit: bool = False,
     ):
         """
         Monitor the job's log files and execute a callback on new lines.
@@ -230,6 +234,9 @@ class Job:
             If provided, stop monitoring when this event is set.
             You may instead raise `meerschaum.utils.jobs.StopMonitoringLogs`
             from within `callback_function` to stop monitoring.
+
+        stop_on_exit: bool, default False
+            If `True`, stop monitoring when the job stops.
         """
         if self.executor is not None:
             self.executor.monitor_logs(self.name, callback_function)
@@ -266,11 +273,15 @@ class Job:
                 except Exception:
                     warn(f"Error in logs callback:\n{traceback.format_exc()}")
 
+            if stop_on_exit and self.status == 'stopped':
+                return
+
 
     async def monitor_logs_async(
         self,
         callback_function: Callable[[str], None] = partial(print, end=''),
         stop_event: Optional[asyncio.Event] = None,
+        stop_on_exit: bool = False,
     ):
         """
         Monitor the job's log files and await a callback on new lines.
@@ -285,6 +296,9 @@ class Job:
             If provided, stop monitoring when this event is set.
             You may instead raise `meerschaum.utils.jobs.StopMonitoringLogs`
             from within `callback_function` to stop monitoring.
+
+        stop_on_exit: bool, default False
+            If `True`, stop monitoring when the job stops.
         """
         if self.executor is not None:
             await self.executor.monitor_logs_async(self.name, callback_function)
@@ -330,6 +344,10 @@ class Job:
                     except Exception:
                         warn(f"Error in logs callback:\n{traceback.format_exc()}")
                         return
+
+            if stop_on_exit and self.status == 'stopped':
+                return
+
 
     @property
     def executor(self) -> Union['APIConnector', None]:

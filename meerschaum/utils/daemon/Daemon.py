@@ -207,8 +207,11 @@ class Daemon:
                 error("Cannot create a Daemon without a target.")
             self.target = target
 
-        self._target_args = target_args
-        self._target_kw = target_kw
+        ### NOTE: We have to check self.__dict__ in case we un-pickling.
+        if '_target_args' not in self.__dict__:
+            self._target_args = target_args
+        if '_target_kw' not in self.__dict__:
+            self._target_kw = target_kw
 
         if 'label' not in self.__dict__:
             if label is None:
@@ -801,14 +804,24 @@ class Daemon:
 
     @property
     def rotating_log(self) -> RotatingFile:
+        """
+        The rotating log file for the daemon's output.
+        """
         if '_rotating_log' in self.__dict__:
             return self._rotating_log
 
+        write_timestamps = (
+            self.properties.get('logs', {}).get('write_timestamps', None)
+        )
+        if write_timestamps is None:
+            write_timestamps = get_config('jobs', 'logs', 'timestamps', 'enabled')
+
+
         self._rotating_log = RotatingFile(
             self.log_path,
-            redirect_streams = True,
-            write_timestamps = get_config('jobs', 'logs', 'timestamps', 'enabled'),
-            timestamp_format = get_config('jobs', 'logs', 'timestamps', 'format'),
+            redirect_streams=True,
+            write_timestamps=write_timestamps,
+            timestamp_format=get_config('jobs', 'logs', 'timestamps', 'format'),
         )
         return self._rotating_log
 
@@ -914,9 +927,11 @@ class Daemon:
             return None
         try:
             with open(self.properties_path, 'r', encoding='utf-8') as file:
-                return json.load(file)
+                properties = json.load(file)
         except Exception as e:
-            return {}
+            properties = {}
+        
+        return properties
 
     def read_pickle(self) -> Daemon:
         """Read a Daemon's pickle file and return the `Daemon`."""
@@ -1073,9 +1088,9 @@ class Daemon:
 
 
     def get_check_timeout_interval_seconds(
-            self,
-            check_timeout_interval: Union[int, float, None] = None,
-        ) -> Union[int, float]:
+        self,
+        check_timeout_interval: Union[int, float, None] = None,
+    ) -> Union[int, float]:
         """
         Return the interval value to check the status of timeouts.
         """

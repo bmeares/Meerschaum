@@ -54,6 +54,7 @@ def entry_with_args(
     """
     import sys
     import functools
+    import inspect
     from meerschaum.actions import get_action, get_main_action_name
     from meerschaum._internal.arguments import remove_leading_action
     from meerschaum.utils.venv import Venv, active_venvs, deactivate_venv
@@ -66,6 +67,25 @@ def entry_with_args(
         (kw['action'][0] == 'mrsm' and len(kw['action'][1:]) == 0)
     ):
         return get_shell().cmdloop()
+
+    skip_schedule = False
+
+    executor_keys = kw.get('executor_keys', None)
+    if executor_keys is None:
+        executor_keys = 'local'
+
+    if executor_keys.startswith('api:'):
+        intended_action_function = get_action(kw['action'], _actions=_actions)
+        function_accepts_executor_keys = (
+            'executor_keys' in inspect.signature(intended_action_function).parameters
+            if intended_action_function is not None
+            else False
+        )
+        if not function_accepts_executor_keys:
+            api_label = executor_keys.split(':')[-1]
+            kw['action'].insert(0, 'api')
+            kw['action'].insert(1, api_label)
+            skip_schedule = True
 
     action_function = get_action(kw['action'], _actions=_actions)
 
@@ -81,7 +101,6 @@ def entry_with_args(
         ) else None
     )
 
-    skip_schedule = False
     if (
         kw['action']
         and kw['action'][0] == 'start'
@@ -97,6 +116,8 @@ def entry_with_args(
         plugin_name,
         **kw
     )
+
+
     if kw.get('schedule', None) and not skip_schedule:
         from meerschaum.utils.schedule import schedule_function
         from meerschaum.utils.misc import interval_str

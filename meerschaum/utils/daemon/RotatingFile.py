@@ -63,6 +63,9 @@ class RotatingFile(io.IOBase):
 
         write_timestamps: bool, default False
             If `True`, prepend the current UTC timestamp to each line of the file.
+
+        timestamp_format: str, default '%Y-%m-%d %H:%M'
+            If `write_timestamps` is `True`, use this format for the timestamps.
         """
         self.file_path = pathlib.Path(file_path)
         if num_files_to_keep is None:
