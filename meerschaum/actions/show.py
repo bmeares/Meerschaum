@@ -11,9 +11,9 @@ import meerschaum as mrsm
 from meerschaum.utils.typing import SuccessTuple, Union, Sequence, Any, Optional, List, Dict, Tuple
 
 def show(
-        action: Optional[List[str]] = None,
-        **kw: Any
-    ) -> SuccessTuple:
+    action: Optional[List[str]] = None,
+    **kw: Any
+) -> SuccessTuple:
     """Show elements of a certain type.
     
     Command:
@@ -710,7 +710,7 @@ def _show_logs(
             for name, task in [(k, v) for k, v in job_tasks.items()]:
                 if name not in jobs:
                     job_stop_events[name].set()
-                    await task.cancel()
+                    task.cancel()
 
                     try:
                         await task
@@ -727,6 +727,7 @@ def _show_logs(
         await asyncio.gather(*tasks)
 
     if not nopretty:
+        info("Watching logs...")
         try:
             asyncio.run(gather_tasks())
         except KeyboardInterrupt:

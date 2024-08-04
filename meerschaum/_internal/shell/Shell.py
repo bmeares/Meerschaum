@@ -398,7 +398,6 @@ class Shell(cmd.Cmd):
                     )
                 )
             prompt = prompt.replace('{instance}', shell_attrs['instance'])
-            prompt = prompt.replace('{executor_keys}', shell_attrs['executor_keys'])
             mask = mask.replace('{instance}', ''.join(['\0' for c in '{instance}']))
 
         if '{username}' in shell_attrs['_prompt']:
@@ -436,7 +435,10 @@ class Shell(cmd.Cmd):
             shell_attrs['executor_keys'] = (
                 executor_keys
                 if not ANSI
-                else colored(executor_keys, **get_config('shell', 'ansi', 'executor', 'rich'))
+                else colored(
+                    remove_ansi(executor_keys),
+                    **get_config('shell', 'ansi', 'executor', 'rich')
+                )
             )
             prompt = prompt.replace('{executor_keys}', shell_attrs['executor_keys'])
             mask = mask.replace('{executor_keys}', ''.join(['\0' for c in '{executor_keys}']))
@@ -922,7 +924,7 @@ def input_with_sigint(_input, session, shell: Optional[Shell] = None):
     """
     Replace built-in `input()` with prompt_toolkit.prompt.
     """
-    from meerschaum.utils.formatting import CHARSET, ANSI, RESET, colored
+    from meerschaum.utils.formatting import CHARSET, ANSI, colored
     from meerschaum.connectors import is_connected, connectors
     from meerschaum.utils.misc import remove_ansi
     from meerschaum.config import get_config
@@ -966,7 +968,7 @@ def input_with_sigint(_input, session, shell: Optional[Shell] = None):
                 'on ' + get_config('shell', 'ansi', 'executor', 'rich', 'style')
             )
             if ANSI
-            else colored(shell_attrs['executor_keys'], 'on white')
+            else colored(remove_ansi(shell_attrs['executor_keys']), 'on white')
         )
 
         try:

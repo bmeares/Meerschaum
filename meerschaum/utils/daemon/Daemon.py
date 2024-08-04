@@ -421,7 +421,8 @@ class Daemon:
         return _launch_success_bool, msg
 
     def kill(self, timeout: Union[int, float, None] = 8) -> SuccessTuple:
-        """Forcibly terminate a running daemon.
+        """
+        Forcibly terminate a running daemon.
         Sends a SIGTERM signal to the process.
 
         Parameters
@@ -803,7 +804,13 @@ class Daemon:
         Return the stdin file path.
         """
         return self.path / 'input.stdin'
-        #  return LOGS_RESOURCES_PATH / (self.daemon_id + '.stdin')
+
+    @property
+    def blocking_stdin_file_path(self) -> pathlib.Path:
+        """
+        Return the stdin file path.
+        """
+        return self.path / 'input.stdin.block'
 
     @property
     def log_offset_path(self) -> pathlib.Path:
@@ -842,7 +849,10 @@ class Daemon:
         if '_stdin_file' in self.__dict__:
             return self._stdin_file
 
-        self._stdin_file = StdinFile(self.stdin_file_path)
+        self._stdin_file = StdinFile(
+            self.stdin_file_path,
+            lock_file_path=self.blocking_stdin_file_path,
+        )
         return self._stdin_file
 
     @property

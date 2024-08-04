@@ -12,13 +12,24 @@ import time
 import os
 import selectors
 
+from meerschaum.utils.typing import Optional
+
 
 class StdinFile(io.TextIOBase):
     """
     Redirect user input into a Daemon's context.
     """
-    def __init__(self, file_path: pathlib.Path):
+    def __init__(
+        self,
+        file_path: pathlib.Path,
+        lock_file_path: Optional[pathlib.Path] = None,
+    ):
         self.file_path = file_path
+        self.blocking_file_path = (
+            lock_file_path
+            if lock_file_path is not None
+            else (file_path.parent / (file_path.name + '.block'))
+        )
         self._file_handler = None
         self._fd = None
         self.sel = selectors.DefaultSelector()
@@ -41,11 +52,21 @@ class StdinFile(io.TextIOBase):
         self.sel.register(self._file_handler, selectors.EVENT_READ)
         return self._file_handler
 
+    def write(self, data):
+        if isinstance(data, str):
+            data = data.encode('utf-8')
+
+        with open(self.file_path, 'wb') as f:
+            f.write(data)
+
     def fileno(self):
         fileno = self.file_handler.fileno()
         return fileno
 
     def read(self, size=-1):
+        """
+        Read from the FIFO pipe, blocking on EOFError.
+        """
         _ = self.file_handler
         while True:
             try:
@@ -53,20 +74,23 @@ class StdinFile(io.TextIOBase):
                 for key, _ in events:
                     data = key.fileobj.read(size)
                     if data:
+                        try:
+                            if self.blocking_file_path.exists():
+                                self.blocking_file_path.unlink()
+                        except Exception:
+                            pass
                         return data.decode('utf-8')
 
             except (OSError, EOFError):
                 pass
 
+            self.blocking_file_path.touch()
             time.sleep(0.1)
 
     def readline(self, size=-1):
         line = ''
         while True:
-            try:
-                data = self.read(1)
-            except Exception:
-                return ''
+            data = self.read(1)
             if not data or data == '\n':
                 break
             line += data

@@ -348,6 +348,23 @@ class Job:
             if stop_on_exit and self.status == 'stopped':
                 return
 
+    def is_blocking_on_stdin(self) -> bool:
+        """
+        Return whether a job's daemon is blocking on stdin.
+        """
+        if self.executor is not None:
+            pass
+
+        return self.daemon.blocking_stdin_file_path.exists()
+
+    def write_stdin(self, data):
+        """
+        Write to a job's daemon's `stdin`.
+        """
+        if self.executor is not None:
+            pass
+
+        self.daemon.stdin_file.write(data)
 
     @property
     def executor(self) -> Union['APIConnector', None]:

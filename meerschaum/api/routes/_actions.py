@@ -73,7 +73,7 @@ async def notify_client(client, content: str):
     except WebSocketDisconnect:
         pass
 
-
+_temp_jobs = {}
 @app.websocket(actions_endpoint + '/ws')
 async def do_action_websocket(websocket: WebSocket):
     """
@@ -125,6 +125,7 @@ async def do_action_websocket(websocket: WebSocket):
                 },
             },
         )
+        _temp_jobs[job_name] = job
         monitor_task = asyncio.create_task(monitor_logs(job))
         await monitor_task
         await websocket.close()
@@ -139,4 +140,5 @@ async def do_action_websocket(websocket: WebSocket):
         warn(f"Error in logs websocket:\n{traceback.format_exc()}")
     finally:
         job.delete()
+        _ = _temp_jobs.pop(job_name, None)
         stop_event.set()

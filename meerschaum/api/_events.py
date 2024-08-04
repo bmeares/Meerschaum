@@ -61,6 +61,9 @@ async def shutdown():
         get_api_connector().engine.dispose()
 
     stop_check_jobs_thread()
+    from meerschaum.api.routes._actions import _temp_jobs
+    for name, job in _temp_jobs.items():
+        job.delete()
 
     ### Terminate any running jobs left over.
     if 'meerschaum.api.dash' in sys.modules:

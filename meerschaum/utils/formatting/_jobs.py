@@ -96,12 +96,17 @@ def pprint_jobs(
         for name, job in running_jobs.items():
             if job.hidden:
                 continue
+
+            status_text = (
+                rich_text.Text(job.status, style=('green' if ANSI else ''))
+                if not job.is_blocking_on_stdin()
+                else rich_text.Text('waiting for input', style=('yellow' if ANSI else ''))
+            )
+
             table.add_row(
                 job.name,
                 job.label,
-                rich_console.Group(
-                    rich_text.Text(job.status, style=('green' if ANSI else '')),
-                ),
+                rich_console.Group(status_text),
             )
 
         for name, job in paused_jobs.items():
