@@ -138,5 +138,5 @@ async def do_action_websocket(websocket: WebSocket):
     except Exception:
         warn(f"Error in logs websocket:\n{traceback.format_exc()}")
     finally:
-        job.stop()
+        job.delete()
         stop_event.set()

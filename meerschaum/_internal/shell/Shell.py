@@ -28,7 +28,7 @@ prompt_toolkit = attempt_import('prompt_toolkit', lazy=False, warn=False, instal
 from meerschaum._internal.shell.ValidAutoSuggest import ValidAutoSuggest
 from meerschaum._internal.shell.ShellCompleter import ShellCompleter
 _clear_screen = get_config('shell', 'clear_screen', patch=True)
-from meerschaum.utils.misc import string_width
+from meerschaum.utils.misc import string_width, remove_ansi
 
 patch = True
 ### remove default cmd2 commands
@@ -369,14 +369,19 @@ class Shell(cmd.Cmd):
     def insert_actions(self):
         from meerschaum.actions import actions
 
-    def update_prompt(self, instance: Optional[str] = None, username: Optional[str] = None):
+    def update_prompt(
+        self,
+        instance: Optional[str] = None,
+        username: Optional[str] = None,
+        executor_keys: Optional[str] = None,
+    ):
         from meerschaum.utils.formatting import ANSI, colored
         from meerschaum._internal.entry import _shell, get_shell
 
         cmd.__builtins__['input'] = input_with_sigint(
             _old_input,
             shell_attrs['session'],
-            shell = self,
+            shell=self,
         )
         prompt = shell_attrs['_prompt']
         mask = prompt
@@ -393,6 +398,7 @@ class Shell(cmd.Cmd):
                     )
                 )
             prompt = prompt.replace('{instance}', shell_attrs['instance'])
+            prompt = prompt.replace('{executor_keys}', shell_attrs['executor_keys'])
             mask = mask.replace('{instance}', ''.join(['\0' for c in '{instance}']))
 
         if '{username}' in shell_attrs['_prompt']:
@@ -402,7 +408,8 @@ class Shell(cmd.Cmd):
                 from meerschaum.connectors.sql import SQLConnector
                 try:
                     conn_attrs = parse_instance_keys(
-                        remove_ansi(shell_attrs['instance_keys']), construct=False
+                        remove_ansi(shell_attrs['instance_keys']),
+                        construct=False,
                     )
                     if 'username' not in conn_attrs:
                         if 'uri' in conn_attrs:
@@ -416,11 +423,23 @@ class Shell(cmd.Cmd):
                 if username is None:
                    username = '(no username)'
             shell_attrs['username'] = (
-                username if not ANSI else
-                colored(username, **get_config('shell', 'ansi', 'username', 'rich'))
+                username
+                if not ANSI
+                else colored(username, **get_config('shell', 'ansi', 'username', 'rich'))
             )
             prompt = prompt.replace('{username}', shell_attrs['username'])
             mask = mask.replace('{username}', ''.join(['\0' for c in '{username}']))
+
+        if '{executor_keys}' in shell_attrs['_prompt']:
+            if executor_keys is None:
+                executor_keys = shell_attrs.get('executor_keys', None) or 'local'
+            shell_attrs['executor_keys'] = (
+                executor_keys
+                if not ANSI
+                else colored(executor_keys, **get_config('shell', 'ansi', 'executor', 'rich'))
+            )
+            prompt = prompt.replace('{executor_keys}', shell_attrs['executor_keys'])
+            mask = mask.replace('{executor_keys}', ''.join(['\0' for c in '{executor_keys}']))
 
         remainder_prompt = list(shell_attrs['_prompt'])
         for i, c in enumerate(mask):
@@ -429,10 +448,13 @@ class Shell(cmd.Cmd):
                 if ANSI:
                     _c = colored(_c, **get_config('shell', 'ansi', 'prompt', 'rich'))
                 remainder_prompt[i] = _c
+
         self.prompt = ''.join(remainder_prompt).replace(
             '{username}', shell_attrs['username']
         ).replace(
             '{instance}', shell_attrs['instance']
+        ).replace(
+            '{executor_keys}', shell_attrs['executor_keys']
         )
         shell_attrs['prompt'] = self.prompt
         ### flush stdout
@@ -533,7 +555,7 @@ class Shell(cmd.Cmd):
             args['repository'] = str(shell_attrs['repo_keys'])
 
         if 'executor_keys' not in args:
-            args['executor_keys'] = shell_attrs['executor_keys']
+            args['executor_keys'] = remove_ansi(str(shell_attrs['executor_keys']))
 
         ### parse out empty strings
         if args['action'][0].strip("\"'") == '':
@@ -900,7 +922,7 @@ def input_with_sigint(_input, session, shell: Optional[Shell] = None):
     """
     Replace built-in `input()` with prompt_toolkit.prompt.
     """
-    from meerschaum.utils.formatting import CHARSET, ANSI, colored
+    from meerschaum.utils.formatting import CHARSET, ANSI, RESET, colored
     from meerschaum.connectors import is_connected, connectors
     from meerschaum.utils.misc import remove_ansi
     from meerschaum.config import get_config
@@ -924,16 +946,15 @@ def input_with_sigint(_input, session, shell: Optional[Shell] = None):
 
         instance_colored = (
             colored(
-                shell_attrs['instance_keys'], 'on ' + get_config(
-                    'shell', 'ansi', 'instance', 'rich', 'style'
-                )
+                remove_ansi(shell_attrs['instance_keys']),
+                'on ' + get_config('shell', 'ansi', 'instance', 'rich', 'style')
             )
             if ANSI
             else colored(shell_attrs['instance_keys'], 'on white')
         )
         repo_colored = (
             colored(
-                shell_attrs['repo_keys'],
+                remove_ansi(shell_attrs['repo_keys']),
                 'on ' + get_config('shell', 'ansi', 'repo', 'rich', 'style')
             )
             if ANSI
@@ -941,7 +962,7 @@ def input_with_sigint(_input, session, shell: Optional[Shell] = None):
         )
         executor_colored = (
             colored(
-                shell_attrs['executor_keys'],
+                remove_ansi(shell_attrs['executor_keys']),
                 'on ' + get_config('shell', 'ansi', 'executor', 'rich', 'style')
             )
             if ANSI

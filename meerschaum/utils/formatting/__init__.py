@@ -28,9 +28,10 @@ _attrs = {
     'ANSI': None,
     'UNICODE': None,
     'CHARSET': None,
+    'RESET': '\033[0m',
 }
 __all__ = sorted([
-    'ANSI', 'CHARSET', 'UNICODE',
+    'ANSI', 'CHARSET', 'UNICODE', 'RESET',
     'colored',
     'translate_rich_to_termcolor',
     'get_console',

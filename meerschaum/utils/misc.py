@@ -875,7 +875,7 @@ def dict_from_od(od: collections.OrderedDict) -> Dict[Any, Any]:
             _d[k] = dict_from_od(v)
     return _d
 
-def remove_ansi(s : str) -> str:
+def remove_ansi(s: str) -> str:
     """
     Remove ANSI escape characters from a string.
 
@@ -899,10 +899,10 @@ def remove_ansi(s : str) -> str:
 
 
 def get_connector_labels(
-        *types: str,
-        search_term: str = '',
-        ignore_exact_match = True,
-    ) -> List[str]:
+    *types: str,
+    search_term: str = '',
+    ignore_exact_match = True,
+) -> List[str]:
     """
     Read connector labels from the configuration dictionary.
 
@@ -1063,7 +1063,7 @@ def async_wrap(func):
             loop = asyncio.get_event_loop()
         pfunc = partial(func, *args, **kwargs)
         return await loop.run_in_executor(executor, pfunc)
-    return run 
+    return run
 
 
 def debug_trace(browser: bool = True):
@@ -1077,17 +1077,17 @@ def debug_trace(browser: bool = True):
 
 
 def items_str(
-        items: List[Any],
-        quotes: bool = True,
-        quote_str: str = "'",
-        commas: bool = True,
-        comma_str: str = ',',
-        and_: bool = True,
-        and_str: str = 'and',
-        oxford_comma: bool = True,
-        spaces: bool = True,
-        space_str = ' ',
-    ) -> str:
+    items: List[Any],
+    quotes: bool = True,
+    quote_str: str = "'",
+    commas: bool = True,
+    comma_str: str = ',',
+    and_: bool = True,
+    and_str: str = 'and',
+    oxford_comma: bool = True,
+    spaces: bool = True,
+    space_str = ' ',
+) -> str:
     """
     Return a formatted string if list items separated by commas.
 

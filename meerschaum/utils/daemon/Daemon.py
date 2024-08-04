@@ -35,6 +35,7 @@ from meerschaum.utils.packages import attempt_import
 from meerschaum.utils.venv import venv_exec
 from meerschaum.utils.daemon._names import get_new_daemon_name
 from meerschaum.utils.daemon.RotatingFile import RotatingFile
+from meerschaum.utils.daemon.STDINFile import STDINFile
 from meerschaum.utils.threading import RepeatTimer
 from meerschaum.__main__ import _close_pools
 
@@ -272,9 +273,12 @@ class Daemon:
             pidfile=self.pid_lock,
             stdout=self.rotating_log,
             stderr=self.rotating_log,
+            stdin=self.stdin_file,
             working_directory=os.getcwd(),
             detach_process=True,
-            files_preserve=list(self.rotating_log.subfile_objects.values()),
+            files_preserve=list(
+                self.rotating_log.subfile_objects.values()
+            ) + [self.stdin_file.file_handler],
             signal_map={
                 signal.SIGTERM: self._handle_sigterm,
             },
@@ -291,6 +295,7 @@ class Daemon:
         try:
             os.environ['LINES'], os.environ['COLUMNS'] = str(int(lines)), str(int(columns))
             with self._daemon_context:
+                #  sys.stdin = self.stdin_file
                 os.environ[STATIC_CONFIG['environment']['daemon_id']] = self.daemon_id
                 self.rotating_log.refresh_files(start_interception=True)
                 result = None
@@ -796,6 +801,14 @@ class Daemon:
         return LOGS_RESOURCES_PATH / (self.daemon_id + '.log')
 
     @property
+    def stdin_file_path(self) -> pathlib.Path:
+        """
+        Return the stdin file path.
+        """
+        return self.path / '.stdin'
+        #  return LOGS_RESOURCES_PATH / (self.daemon_id + '.stdin')
+
+    @property
     def log_offset_path(self) -> pathlib.Path:
         """
         Return the log offset file path.
@@ -816,7 +829,6 @@ class Daemon:
         if write_timestamps is None:
             write_timestamps = get_config('jobs', 'logs', 'timestamps', 'enabled')
 
-
         self._rotating_log = RotatingFile(
             self.log_path,
             redirect_streams=True,
@@ -826,8 +838,20 @@ class Daemon:
         return self._rotating_log
 
     @property
+    def stdin_file(self):
+        """
+        Return the file handler for the stdin file.
+        """
+        if '_stdin_file' in self.__dict__:
+            return self._stdin_file
+
+        self._stdin_file = STDINFile(self.stdin_file_path)
+        return self._stdin_file
+
+    @property
     def log_text(self) -> Optional[str]:
-        """Read the log files and return their contents.
+        """
+        Read the log files and return their contents.
         Returns `None` if the log file does not exist.
         """
         new_rotating_log = RotatingFile(

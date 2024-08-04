@@ -78,11 +78,8 @@ default_shell_config = {
         },
         'executor'       : {
             'rich'       : {
-                'style'  : 'green',
+                'style'  : 'gold1',
             },
-            'color'      : [
-                'green',
-            ],
         },
         'username'       : {
             'rich'       : {
@@ -121,8 +118,7 @@ default_shell_config = {
         'intro'          : r"""       ___  ___  __   __   __
  |\/| |__  |__  |__) /__` /  ` |__|  /\  |  |  |\/|
  |  | |___ |___ |  \ .__/ \__, |  | /~~\ \__/  |  |""" + '\n',
-        #  'prompt'         : '\n [ {username}@{instance} ] > ',
-        'prompt'  : '\n [ {username}@{instance} ({executor_keys}) ] > ',
+        'prompt'         : '\n [ {username}@{instance} | {executor_keys} ] > ',
         'ruler'          : '-',
         'close_message'  : 'Thank you for using Meerschaum!',
         'doc_header'     : 'Meerschaum actions (`help <action>` for usage):',
@@ -133,8 +129,7 @@ default_shell_config = {
         'intro'          : """
  █▄ ▄█ ██▀ ██▀ █▀▄ ▄▀▀ ▄▀▀ █▄█ ▄▀▄ █ █ █▄ ▄█
  █ ▀ █ █▄▄ █▄▄ █▀▄ ▄██ ▀▄▄ █ █ █▀█ ▀▄█ █ ▀ █\n""",
-        #  'prompt'         : '\n [ {username}@{instance} ] ➤ ',
-        'prompt'  : '\n [ {username}@{instance} ({executor_keys}) ] ➤ ',
+        'prompt'         : '\n [ {username}@{instance} | {executor_keys} ] ➤ ',
         'ruler'          : '─',
         'close_message'  : ' MRSM{formatting:emoji:hand} Thank you for using Meerschaum! ',
         'doc_header'     : 'Meerschaum actions (`help <action>` for usage):',

@@ -133,7 +133,7 @@ def _start_jobs(
     from meerschaum.utils.misc import items_str
 
     names = []
-    jobs = get_jobs(executor_keys, debug=debug)
+    jobs = get_filtered_jobs(executor_keys, debug=debug)
 
     new_job = len(list(action)) > 0
     _potential_jobs = {'known': [], 'unknown': []}
@@ -212,7 +212,6 @@ def _start_jobs(
     def _run_existing_job(name: str):
         job = Job(name, executor_keys=executor_keys)
         return job.start(debug=debug), name
-
 
     if not names:
         return False, "No jobs to start."
