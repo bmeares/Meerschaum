@@ -13,7 +13,7 @@ import os
 import selectors
 
 
-class STDINFile(io.TextIOBase):
+class StdinFile(io.TextIOBase):
     """
     Redirect user input into a Daemon's context.
     """
@@ -22,7 +22,6 @@ class STDINFile(io.TextIOBase):
         self._file_handler = None
         self._fd = None
         self.sel = selectors.DefaultSelector()
-        print(f"{self.file_handler=}")
 
     @property
     def file_handler(self):
@@ -32,14 +31,12 @@ class STDINFile(io.TextIOBase):
         if self._file_handler is not None:
             return self._file_handler
 
-        print(f"{self.file_path=}")
-        print(f"{self.file_path.exists()=}")
-        if not self.file_path.exists():
-            os.mkfifo(self.file_path.as_posix())
-        self.file_path.chmod(777)
+        if self.file_path.exists():
+            self.file_path.unlink()
+
+        os.mkfifo(self.file_path.as_posix(), mode=0o600)
 
         self._fd = os.open(self.file_path, os.O_RDONLY | os.O_NONBLOCK)
-        #  self._file_handler = open(self.file_path, 'rb', buffering=0)
         self._file_handler = os.fdopen(self._fd, 'rb', buffering=0)
         self.sel.register(self._file_handler, selectors.EVENT_READ)
         return self._file_handler
@@ -50,22 +47,27 @@ class STDINFile(io.TextIOBase):
 
     def read(self, size=-1):
         _ = self.file_handler
-        try:
-            events = self.sel.select(timeout=0)
-            for key, _ in events:
-                data = key.fileobj.read(size)
-                if data:
-                    return data
+        while True:
+            try:
+                events = self.sel.select(timeout=0)
+                for key, _ in events:
+                    data = key.fileobj.read(size)
+                    if data:
+                        return data.decode('utf-8')
 
-            return b''
-        except OSError:
-            return b''
+            except (OSError, EOFError):
+                pass
+
+            time.sleep(0.1)
 
     def readline(self, size=-1):
-        line = b''
+        line = ''
         while True:
-            data = self.read(1)
-            if not data or data == b'\n':
+            try:
+                data = self.read(1)
+            except Exception:
+                return ''
+            if not data or data == '\n':
                 break
             line += data
 

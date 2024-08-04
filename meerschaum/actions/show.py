@@ -727,7 +727,10 @@ def _show_logs(
         await asyncio.gather(*tasks)
 
     if not nopretty:
-        asyncio.run(gather_tasks())
+        try:
+            asyncio.run(gather_tasks())
+        except KeyboardInterrupt:
+            pass
     else:
         for name, job in jobs.items():
             print(f'\n-*-\nMRSM_JOB: {name}\n-*-')
