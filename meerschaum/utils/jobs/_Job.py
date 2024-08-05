@@ -12,16 +12,15 @@ import threading
 import json
 import pathlib
 import os
+import sys
 import traceback
 from functools import partial
-from datetime import datetime
+from datetime import datetime, timezone
 
 import meerschaum as mrsm
 from meerschaum.utils.typing import List, Optional, Union, SuccessTuple, Any, Dict, Callable
 from meerschaum._internal.entry import entry
-from meerschaum._internal.arguments._parse_arguments import parse_arguments
 from meerschaum.utils.warnings import warn
-from meerschaum.utils.misc import is_int
 from meerschaum.config.paths import LOGS_RESOURCES_PATH
 from meerschaum.config import get_config
 
@@ -220,6 +219,7 @@ class Job:
         callback_function: Callable[[str], None] = partial(print, end=''),
         stop_event: Optional[threading.Event] = None,
         stop_on_exit: bool = False,
+        strip_timestamps: bool = False,
     ):
         """
         Monitor the job's log files and execute a callback on new lines.
@@ -230,51 +230,31 @@ class Job:
             The callback to execute as new data comes in.
             Defaults to printing the output directly to `stdout`.
 
-        stop_event: Optional[threading.Event], default None
+        stop_event: Optional[asyncio.Event], default None
             If provided, stop monitoring when this event is set.
             You may instead raise `meerschaum.utils.jobs.StopMonitoringLogs`
             from within `callback_function` to stop monitoring.
 
         stop_on_exit: bool, default False
             If `True`, stop monitoring when the job stops.
+
+        strip_timestamps: bool, default False
+            If `True`, remove leading timestamps from lines.
+
         """
         if self.executor is not None:
             self.executor.monitor_logs(self.name, callback_function)
             return
 
-        log = self.daemon.rotating_log
-        lines = log.readlines()
-        lines_to_show = get_config('jobs', 'logs', 'lines_to_show')
-        for line in lines[(-1 * lines_to_show):]:
-            try:
-                callback_function(line)
-            except StopMonitoringLogs:
-                return
-            except Exception:
-                warn(f"Error in logs callback:\n{traceback.format_exc()}")
-
-        watchfiles = mrsm.attempt_import('watchfiles')
-        for changes in watchfiles.watch(
-            LOGS_RESOURCES_PATH,
+        monitor_logs_coroutine = self.monitor_logs_async(
+            callback_function=callback_function,
             stop_event=stop_event,
-        ):
-            for change in changes:
-                file_path_str = change[1]
-                file_path = pathlib.Path(file_path_str)
-                latest_subfile_path = log.get_latest_subfile_path()
-                if latest_subfile_path != file_path:
-                    continue
-
-                text = log.read()
-                try:
-                    callback_function(text)
-                except StopMonitoringLogs:
-                    return
-                except Exception:
-                    warn(f"Error in logs callback:\n{traceback.format_exc()}")
-
-            if stop_on_exit and self.status == 'stopped':
-                return
+            stop_on_exit=stop_on_exit,
+            strip_timestamps=strip_timestamps,
+        )
+        nest_asyncio = mrsm.attempt_import('nest_asyncio')
+        nest_asyncio.apply()
+        return asyncio.run(monitor_logs_coroutine)
 
 
     async def monitor_logs_async(
@@ -282,6 +262,7 @@ class Job:
         callback_function: Callable[[str], None] = partial(print, end=''),
         stop_event: Optional[asyncio.Event] = None,
         stop_on_exit: bool = False,
+        strip_timestamps: bool = False,
     ):
         """
         Monitor the job's log files and await a callback on new lines.
@@ -299,31 +280,123 @@ class Job:
 
         stop_on_exit: bool, default False
             If `True`, stop monitoring when the job stops.
+
+        strip_timestamps: bool, default False
+            If `True`, remove leading timestamps from lines.
         """
         if self.executor is not None:
             await self.executor.monitor_logs_async(self.name, callback_function)
             return
 
-        log = self.daemon.rotating_log
-        lines = log.readlines()
-        lines_to_show = get_config('jobs', 'logs', 'lines_to_show')
-        for line in lines[(-1 * lines_to_show):]:
-            if stop_event is not None and stop_event.is_set():
+        from meerschaum.utils.prompt import prompt
+        from meerschaum.utils.formatting._jobs import strip_timestamp_from_line
+
+        events = {
+            'user': stop_event,
+            'stopped': (asyncio.Event() if stop_on_exit else None),
+        }
+        combined_event = asyncio.Event()
+        emitted_text = False
+
+        async def check_job_status():
+            nonlocal emitted_text
+            stopped_event = events.get('stopped', None)
+            if stopped_event is None:
                 return
+            sleep_time = 0.1
+            while sleep_time < 60:
+                if self.status == 'stopped':
+                    if not emitted_text:
+                        await asyncio.sleep(sleep_time)
+                        sleep_time = round(sleep_time * 1.1, 2)
+                        continue
+                    events['stopped'].set()
+                    break
+                await asyncio.sleep(0.1)
+
+        async def check_blocking_on_input():
+            while True:
+                if not emitted_text or not self.is_blocking_on_stdin():
+                    try:
+                        await asyncio.sleep(0.1)
+                    except asyncio.exceptions.CancelledError:
+                        break
+                    continue
+
+                if not self.is_running():
+                    break
+
+                await emit_latest_lines()
+
+                ### TODO parametrize stdin callback
+                try:
+                    print('getting data...')
+                    data = prompt('', icon=False)
+                    print(f'{data=}')
+                except KeyboardInterrupt:
+                    break
+                if not data.endswith('\n'):
+                    data += '\n'
+                self.daemon.stdin_file.write(data)
+                await asyncio.sleep(0.1)
+
+        async def combine_events():
+            event_tasks = [
+                asyncio.create_task(event.wait())
+                for event in events.values()
+                if event is not None
+            ]
+            if not event_tasks:
+                return
+
             try:
-                if asyncio.iscoroutinefunction(callback_function):
-                    await callback_function(line)
-                else:
-                    callback_function(line)
-            except StopMonitoringLogs:
-                return
-            except Exception:
-                warn(f"Error in logs callback:\n{traceback.format_exc()}")
+                await asyncio.wait(
+                    event_tasks,
+                    return_when=asyncio.FIRST_COMPLETED,
+                )
+            except asyncio.exceptions.CancelledError:
+                pass
+            finally:
+                combined_event.set()
+
+        check_job_status_task = asyncio.create_task(check_job_status())
+        check_blocking_on_input_task = asyncio.create_task(check_blocking_on_input())
+        combine_events_task = asyncio.create_task(combine_events())
+
+        log = self.daemon.rotating_log
+        lines_to_show = get_config('jobs', 'logs', 'lines_to_show')
+
+        async def emit_latest_lines():
+            nonlocal emitted_text
+            lines = log.readlines()
+            for line in lines[(-1 * lines_to_show):]:
+                if stop_event is not None and stop_event.is_set():
+                    return
+
+                if strip_timestamps:
+                    line = strip_timestamp_from_line(line)
+
+                try:
+                    if asyncio.iscoroutinefunction(callback_function):
+                        await callback_function(line)
+                    else:
+                        callback_function(line)
+                    emitted_text = True
+                except StopMonitoringLogs:
+                    return
+                except Exception:
+                    warn(f"Error in logs callback:\n{traceback.format_exc()}")
+
+        await emit_latest_lines()
+        try:
+            asyncio.gather(check_job_status_task, check_blocking_on_input_task, combine_events_task)
+        except Exception as e:
+            warn(f"Failed to run async checks:\n{traceback.format_exc()}")
 
         watchfiles = mrsm.attempt_import('watchfiles')
         async for changes in watchfiles.awatch(
             LOGS_RESOURCES_PATH,
-            stop_event=stop_event,
+            stop_event=combined_event,
         ):
             for change in changes:
                 file_path_str = change[1]
@@ -334,28 +407,32 @@ class Job:
 
                 lines = log.readlines()
                 for line in lines:
+                    if strip_timestamps:
+                        line = strip_timestamp_from_line(line)
                     try:
                         if asyncio.iscoroutinefunction(callback_function):
                             await callback_function(line)
                         else:
                             callback_function(line)
+                        emitted_text = True
+                    except RuntimeError:
+                        return
                     except StopMonitoringLogs:
                         return
                     except Exception:
                         warn(f"Error in logs callback:\n{traceback.format_exc()}")
                         return
 
-            if stop_on_exit and self.status == 'stopped':
-                return
+        await emit_latest_lines()
 
-    def is_blocking_on_stdin(self) -> bool:
+    def is_blocking_on_stdin(self, debug: bool = False) -> bool:
         """
         Return whether a job's daemon is blocking on stdin.
         """
         if self.executor is not None:
-            pass
+            return self.executor.get_job_is_blocking_on_stdin(self.name, debug=debug)
 
-        return self.daemon.blocking_stdin_file_path.exists()
+        return self.is_running() and self.daemon.blocking_stdin_file_path.exists()
 
     def write_stdin(self, data):
         """
