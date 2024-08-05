@@ -217,10 +217,12 @@ class Job:
     def monitor_logs(
         self,
         callback_function: Callable[[str], None] = partial(print, end=''),
+        input_callback_function: Optional[Callable[[], str]] = None,
         stop_event: Optional[threading.Event] = None,
         stop_on_exit: bool = False,
         strip_timestamps: bool = False,
         accept_input: bool = True,
+        debug: bool = False,
     ):
         """
         Monitor the job's log files and execute a callback on new lines.
@@ -230,6 +232,10 @@ class Job:
         callback_function: Callable[[str], None], default partial(print, end='')
             The callback to execute as new data comes in.
             Defaults to printing the output directly to `stdout`.
+
+        input_callback_function: Optional[Callable[[], str]], default None
+            If provided, execute this callback when the daemon is blocking on stdin.
+            Defaults to `sys.stdin.readline()`.
 
         stop_event: Optional[asyncio.Event], default None
             If provided, stop monitoring when this event is set.
@@ -251,6 +257,7 @@ class Job:
 
         monitor_logs_coroutine = self.monitor_logs_async(
             callback_function=callback_function,
+            input_callback_function=input_callback_function,
             stop_event=stop_event,
             stop_on_exit=stop_on_exit,
             strip_timestamps=strip_timestamps,
@@ -262,10 +269,12 @@ class Job:
     async def monitor_logs_async(
         self,
         callback_function: Callable[[str], None] = partial(print, end='', flush=True),
+        input_callback_function: Optional[Callable[[], str]] = None,
         stop_event: Optional[asyncio.Event] = None,
         stop_on_exit: bool = False,
         strip_timestamps: bool = False,
         accept_input: bool = True,
+        debug: bool = False,
     ):
         """
         Monitor the job's log files and await a callback on new lines.
@@ -275,6 +284,10 @@ class Job:
         callback_function: Callable[[str], None], default partial(print, end='')
             The callback to execute as new data comes in.
             Defaults to printing the output directly to `stdout`.
+
+        input_callback_function: Optional[Callable[[], str]], default None
+            If provided, execute this callback when the daemon is blocking on stdin.
+            Defaults to `sys.stdin.readline()`.
 
         stop_event: Optional[asyncio.Event], default None
             If provided, stop monitoring when this event is set.
@@ -290,8 +303,20 @@ class Job:
         accept_input: bool, default True
             If `True`, accept input when the daemon blocks on stdin.
         """
+        def default_input_callback_function():
+            return sys.stdin.readline()
+
+        if input_callback_function is None:
+            input_callback_function = default_input_callback_function
+
         if self.executor is not None:
-            await self.executor.monitor_logs_async(self.name, callback_function)
+            await self.executor.monitor_logs_async(
+                self.name,
+                callback_function,
+                input_callback_function=input_callback_function,
+                accept_input=accept_input,
+                debug=debug,
+            )
             return
 
         from meerschaum.utils.formatting._jobs import strip_timestamp_from_line
@@ -333,10 +358,12 @@ class Job:
 
                 await emit_latest_lines()
 
-                ### TODO parametrize stdin callback
                 try:
                     print('', end='', flush=True)
-                    data = sys.stdin.readline()
+                    if asyncio.iscoroutinefunction(callback_function):
+                        data = await input_callback_function()
+                    else:
+                        data = input_callback_function()
                 except KeyboardInterrupt:
                     break
                 if not data.endswith('\n'):
@@ -354,10 +381,12 @@ class Job:
                 return
 
             try:
-                await asyncio.wait(
+                done, pending = await asyncio.wait(
                     event_tasks,
                     return_when=asyncio.FIRST_COMPLETED,
                 )
+                for task in pending:
+                    task.cancel()
             except asyncio.exceptions.CancelledError:
                 pass
             finally:
@@ -400,7 +429,7 @@ class Job:
         )
         try:
             _ = asyncio.gather(*tasks, return_exceptions=True)
-        except Exception as e:
+        except Exception:
             warn(f"Failed to run async checks:\n{traceback.format_exc()}")
 
         watchfiles = mrsm.attempt_import('watchfiles')

@@ -303,8 +303,8 @@ def _complete_start_jobs(
     line: str = '',
     **kw
 ) -> List[str]:
-    from meerschaum.utils.jobs import get_jobs
-    jobs = get_jobs(executor_keys)
+    from meerschaum.utils.jobs import get_filtered_jobs
+    jobs = get_filtered_jobs(executor_keys, action)
     if not action:
         return list(jobs)
 

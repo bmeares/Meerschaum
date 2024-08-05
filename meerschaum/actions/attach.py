@@ -19,6 +19,7 @@ def attach(
     from meerschaum.actions import choose_subaction
     attach_options = {
         'jobs': _attach_jobs,
+        'logs': _attach_logs,
     }
     return choose_subaction(action, attach_options, **kwargs)
 
@@ -38,6 +39,8 @@ def _complete_attach(
     options = {
         'job': _complete_start_jobs,
         'jobs': _complete_start_jobs,
+        'log': _complete_start_jobs,
+        'logs': _complete_start_jobs,
     }
 
     if (
@@ -49,7 +52,7 @@ def _complete_attach(
         return options[sub](action=action, **kw)
 
     from meerschaum._internal.shell import default_action_completer
-    return default_action_completer(action=(['show'] + action), **kw)
+    return default_action_completer(action=(['attach'] + action), **kw)
 
 
 def _attach_jobs(
@@ -75,6 +78,14 @@ def _attach_jobs(
     )
 
     return True, "Success"
+
+
+def _attach_logs(*args, **kwargs) -> SuccessTuple:
+    """
+    Attach to jobs' logs.
+    """
+    from meerschaum.actions.show import _show_logs
+    return _show_logs(*args, **kwargs)
 
 
 ### NOTE: This must be the final statement of the module.

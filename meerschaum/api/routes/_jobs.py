@@ -31,6 +31,9 @@ from meerschaum.api import (
     no_auth,
     private,
 )
+from meerschaum.config.static import STATIC_CONFIG
+
+JOBS_STDIN_MESSAGE: str = STATIC_CONFIG['api']['jobs']['stdin_message']
 
 
 @app.get(endpoints['jobs'], tags=['Jobs'])
@@ -249,7 +252,7 @@ async def notify_clients(name: str, content: str):
     if not _job_clients[name]:
         _job_stop_events[name].set()
 
-    for client in [c for c in _job_clients[name]]:
+    async def _notify_client(client):
         try:
             await client.send_text(content)
         except WebSocketDisconnect:
@@ -257,6 +260,43 @@ async def notify_clients(name: str, content: str):
                 _job_clients[name].remove(client)
         except Exception:
             pass
+
+    notify_tasks = [
+        asyncio.create_task(_notify_client(client))
+        for client in _job_clients[name]
+    ]
+    await asyncio.wait(notify_tasks)
+
+
+async def get_input_from_clients(name):
+    """
+    When a job is blocking on input, return input from the first client which provides it.
+    """
+    print('GET INPUT FROM CLIENTS')
+    if not _job_clients[name]:
+        print('NO CLIENTS')
+        return ''
+
+    async def _read_client(client):
+        try:
+            await client.send_text(JOBS_STDIN_MESSAGE)
+            data = await client.receive_text()
+        except WebSocketDisconnect:
+            if client in _job_clients[name]:
+                _job_clients[name].remove(client)
+        except Exception:
+            pass
+        return data
+
+    read_tasks = [
+        asyncio.create_task(_read_client(client))
+        for client in _job_clients[name]
+    ]
+    done, pending = await asyncio.wait(read_tasks, return_when=asyncio.FIRST_COMPLETED)
+    for task in pending:
+        task.cancel()
+    for task in done:
+        return task.result()
 
 
 @app.websocket(endpoints['logs'] + '/{name}/ws')
@@ -271,6 +311,7 @@ async def logs_websocket(name: str, websocket: WebSocket):
     async def monitor_logs():
         await job.monitor_logs_async(
             partial(notify_clients, name),
+            input_callback_function=partial(get_input_from_clients, name),
             stop_event=_job_stop_events[name],
         )
 

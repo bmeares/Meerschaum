@@ -17,6 +17,7 @@ from meerschaum.utils.warnings import warn
 
 JOBS_ENDPOINT: str = STATIC_CONFIG['api']['endpoints']['jobs']
 LOGS_ENDPOINT: str = STATIC_CONFIG['api']['endpoints']['logs']
+JOBS_STDIN_MESSAGE: str = STATIC_CONFIG['api']['jobs']['stdin_message']
 
 
 def get_jobs(self, debug: bool = False) -> Dict[str, Job]:
@@ -189,6 +190,8 @@ async def monitor_logs_async(
     self,
     name: str,
     callback_function: Callable[[Any], Any],
+    input_callback_function: Callable[[], str],
+    accept_input: bool = True,
     debug: bool = False,
 ):
     """
@@ -204,9 +207,19 @@ async def monitor_logs_async(
             await websocket.send(self.token or 'no-login')
         except websockets_exceptions.ConnectionClosedOK:
             pass
+
         while True:
             try:
                 response = await websocket.recv()
+                if response == JOBS_STDIN_MESSAGE:
+                    if asyncio.iscoroutinefunction(input_callback_function):
+                        data = await input_callback_function()
+                    else:
+                        data = input_callback_function()
+
+                    await websocket.send(data)
+                    continue
+
                 if asyncio.iscoroutinefunction(callback_function):
                     await callback_function(response)
                 else:
@@ -219,12 +232,22 @@ def monitor_logs(
     self,
     name: str,
     callback_function: Callable[[Any], Any],
+    input_callback_function: Callable[[None], str],
+    accept_input: bool = True,
     debug: bool = False,
 ):
     """
     Monitor a job's log files and execute a callback with the changes.
     """
-    return asyncio.run(self.monitor_logs_async(name, callback_function, debug=debug))
+    return asyncio.run(
+        self.monitor_logs_async(
+            name,
+            callback_function,
+            input_callback_function=input_callback_function,
+            accept_input=accept_input,
+            debug=debug
+        )
+    )
 
 def get_job_is_blocking_on_stdin(self, name: str, debug: bool = False) -> bool:
     """

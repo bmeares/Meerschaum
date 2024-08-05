@@ -42,6 +42,9 @@ STATIC_CONFIG: Dict[str, Any] = {
         },
         'webterm_job_name': '_webterm',
         'default_timeout': 600,
+        'jobs': {
+            'stdin_message': 'MRSM_STDIN'
+        },
     },
     'sql': {
         'internal_schema': '_mrsm_internal',

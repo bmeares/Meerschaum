@@ -603,12 +603,12 @@ class Shell(cmd.Cmd):
         if stop:
             return True
 
-    def do_pass(self, line):
+    def do_pass(self, line, executor_keys=None):
         """
         Do nothing.
         """
 
-    def do_debug(self, action: Optional[List[str]] = None, **kw):
+    def do_debug(self, action: Optional[List[str]] = None, executor_keys=None, **kw):
         """
         Toggle the shell's debug mode.
         If debug = on, append `--debug` to all commands.
@@ -639,9 +639,10 @@ class Shell(cmd.Cmd):
 
     def do_instance(
             self,
-            action : Optional[List[str]] = None,
-            debug : bool = False,
-            **kw : Any
+            action: Optional[List[str]] = None,
+            executor_keys=None,
+            debug: bool = False,
+            **kw: Any
         ) -> SuccessTuple:
         """
         Temporarily set a default Meerschaum instance for the duration of the shell.
@@ -712,6 +713,7 @@ class Shell(cmd.Cmd):
     def do_repo(
         self,
         action: Optional[List[str]] = None,
+        executor_keys=None,
         debug: bool = False,
         **kw: Any
     ) -> SuccessTuple:
@@ -767,6 +769,7 @@ class Shell(cmd.Cmd):
     def do_executor(
         self,
         action: Optional[List[str]] = None,
+        executor_keys=None,
         debug: bool = False,
         **kw: Any
     ) -> SuccessTuple:
@@ -812,7 +815,7 @@ class Shell(cmd.Cmd):
         results = self.complete_instance(*args)
         return ['local'] + [result for result in results if result.startswith('api:')]
 
-    def do_help(self, line: str) -> List[str]:
+    def do_help(self, line: str, executor_keys=None) -> List[str]:
         """
         Show help for Meerschaum actions.
         
@@ -883,7 +886,7 @@ class Shell(cmd.Cmd):
                 possibilities.append(name.replace('do_', ''))
         return possibilities
 
-    def do_exit(self, params) -> True:
+    def do_exit(self, params, executor_keys=None) -> True:
         """
         Exit the Meerschaum shell.
         """
