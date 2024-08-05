@@ -91,6 +91,7 @@ async def do_action_websocket(websocket: WebSocket):
             stop_on_exit=True,
         )
 
+    job = None
     try:
         token = await websocket.receive_text()
         user = await manager.get_current_user(token) if not no_auth else None
@@ -115,7 +116,7 @@ async def do_action_websocket(websocket: WebSocket):
         _ = kwargs.pop('shell', None)
         sysargs = parse_dict_to_sysargs(kwargs)
 
-        job_name = '.-' + shlex.join(sysargs) + '-' + generate_password(12)
+        job_name = '.' + generate_password(12)
         job = Job(
             job_name,
             sysargs,
@@ -128,7 +129,10 @@ async def do_action_websocket(websocket: WebSocket):
         _temp_jobs[job_name] = job
         monitor_task = asyncio.create_task(monitor_logs(job))
         await monitor_task
-        await websocket.close()
+        try:
+            await websocket.close()
+        except RuntimeError:
+            pass
     except fastapi.HTTPException:
         await websocket.send_text("Invalid credentials.")
         await websocket.close()
@@ -139,6 +143,7 @@ async def do_action_websocket(websocket: WebSocket):
     except Exception:
         warn(f"Error in logs websocket:\n{traceback.format_exc()}")
     finally:
-        job.delete()
+        if job is not None:
+            job.delete()
         _ = _temp_jobs.pop(job_name, None)
         stop_event.set()

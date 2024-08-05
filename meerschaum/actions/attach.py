@@ -37,13 +37,13 @@ def _attach_jobs(
 
     name = name or action[0]
     job = mrsm.Job(name, executor_keys=executor_keys)
+    if not job.exists():
+        return False, f"Job '{job.name}' does not exist."
 
-    while True:
-        try:
-            pass
-            #  job.mon
-        except KeyboardInterrupt:
-            break
+    job.monitor_logs(
+        stop_on_exit=True,
+        strip_timestamps=True,
+    )
 
     return True, "Success"
 

@@ -59,13 +59,14 @@ def get_job_metadata(self, name: str, debug: bool = False) -> Dict[str, Any]:
     Return the metadata for a single job.
     """
     response = self.get(JOBS_ENDPOINT + f"/{name}", debug=debug)
-    if not response and debug:
-        msg = (
-            response.json()['detail']
-            if 'detail' in response.text
-            else response.text
-        )
-        warn(f"Failed to get metadata for job '{name}':\n{msg}")
+    if not response:
+        if debug:
+            msg = (
+                response.json()['detail']
+                if 'detail' in response.text
+                else response.text
+            )
+            warn(f"Failed to get metadata for job '{name}':\n{msg}")
         return {}
 
     return response.json()
@@ -224,3 +225,13 @@ def monitor_logs(
     Monitor a job's log files and execute a callback with the changes.
     """
     return asyncio.run(self.monitor_logs_async(name, callback_function, debug=debug))
+
+def get_job_is_blocking_on_stdin(self, name: str, debug: bool = False) -> bool:
+    """
+    Return whether a remote job is blocking on stdin.
+    """
+    response = self.get(JOBS_ENDPOINT + f'/{name}/is_blocking_on_stdin', debug=debug)
+    if not response:
+        return False
+
+    return response.json()

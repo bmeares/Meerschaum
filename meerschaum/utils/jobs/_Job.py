@@ -252,14 +252,12 @@ class Job:
             stop_on_exit=stop_on_exit,
             strip_timestamps=strip_timestamps,
         )
-        nest_asyncio = mrsm.attempt_import('nest_asyncio')
-        nest_asyncio.apply()
         return asyncio.run(monitor_logs_coroutine)
 
 
     async def monitor_logs_async(
         self,
-        callback_function: Callable[[str], None] = partial(print, end=''),
+        callback_function: Callable[[str], None] = partial(print, end='', flush=True),
         stop_event: Optional[asyncio.Event] = None,
         stop_on_exit: bool = False,
         strip_timestamps: bool = False,
@@ -288,7 +286,6 @@ class Job:
             await self.executor.monitor_logs_async(self.name, callback_function)
             return
 
-        from meerschaum.utils.prompt import prompt
         from meerschaum.utils.formatting._jobs import strip_timestamp_from_line
 
         events = {
@@ -330,9 +327,8 @@ class Job:
 
                 ### TODO parametrize stdin callback
                 try:
-                    print('Waiting for input...')
-                    data = await asyncio.get_event_loop().run_in_executor(None, prompt, '', {'icon': False})
-                    print(f'Input received: {data}')
+                    print('', end='', flush=True)
+                    data = sys.stdin.readline()
                 except KeyboardInterrupt:
                     break
                 if not data.endswith('\n'):
@@ -389,7 +385,12 @@ class Job:
 
         await emit_latest_lines()
         try:
-            asyncio.gather(check_job_status_task, check_blocking_on_input_task, combine_events_task)
+            _ = asyncio.gather(
+                check_job_status_task,
+                check_blocking_on_input_task,
+                combine_events_task,
+                return_exceptions=True,
+            )
         except Exception as e:
             warn(f"Failed to run async checks:\n{traceback.format_exc()}")
 

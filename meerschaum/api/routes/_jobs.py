@@ -226,6 +226,20 @@ def get_stop_time(
     return job.stop_time
 
 
+@app.get(endpoints['jobs'] + '/{name}/is_blocking_on_stdin', tags=['Jobs'])
+def get_is_blocking_on_stdin(
+    name: str,
+    curr_user=(
+        fastapi.Depends(manager) if not no_auth else None
+    ),
+) -> bool:
+    """
+    Return whether a job is blocking on stdin.
+    """
+    job = Job(name)
+    return job.is_blocking_on_stdin()
+
+
 _job_clients = defaultdict(lambda: [])
 _job_stop_events = defaultdict(lambda: asyncio.Event())
 async def notify_clients(name: str, content: str):

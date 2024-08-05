@@ -8,6 +8,8 @@ Print jobs information.
 
 from __future__ import annotations
 
+from datetime import datetime, timezone
+
 import meerschaum as mrsm
 from meerschaum.utils.typing import List, Optional, Any, is_success_tuple, Dict
 from meerschaum.utils.jobs import (
@@ -17,6 +19,7 @@ from meerschaum.utils.jobs import (
     get_stopped_jobs,
     get_paused_jobs,
 )
+from meerschaum.config import get_config
 
 
 def pprint_jobs(
@@ -152,3 +155,22 @@ def pprint_job(
         print('\n' + job.label + '\n')
     else:
         print(job.name)
+
+
+def strip_timestamp_from_line(line: str) -> str:
+    """
+    Remove the leading timestamp from a job's line (if present).
+    """
+    now = datetime.now(timezone.utc)
+    timestamp_format = get_config('jobs', 'logs', 'timestamps', 'format')
+    now_str = now.strftime(timestamp_format)
+
+    date_prefix_str = line[:len(now_str)]
+    try:
+        line_timestamp = datetime.strptime(date_prefix_str, timestamp_format)
+    except Exception:
+        line_timestamp = None
+    if line_timestamp:
+        line = line[(len(now_str) + 3):]
+
+    return line
