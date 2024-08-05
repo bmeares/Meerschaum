@@ -11,6 +11,7 @@ import pathlib
 import time
 import os
 import selectors
+import fcntl
 
 from meerschaum.utils.typing import Optional
 
@@ -70,9 +71,8 @@ class StdinFile(io.TextIOBase):
         _ = self.file_handler
         while True:
             try:
-                events = self.sel.select(timeout=0)
-                for key, _ in events:
-                    data = key.fileobj.read(size)
+                if self.has_data():
+                    data = self._file_handler.read(size)
                     if data:
                         try:
                             if self.blocking_file_path.exists():
@@ -80,12 +80,22 @@ class StdinFile(io.TextIOBase):
                         except Exception:
                             pass
                         return data.decode('utf-8')
+                else:
+                    self.blocking_file_path.touch()
+                    time.sleep(0.1)
 
             except (OSError, EOFError):
                 pass
 
-            self.blocking_file_path.touch()
-            time.sleep(0.1)
+    def has_data(self):
+        """
+        Check if there's data available to read without blocking.
+        """
+        try:
+            events = self.sel.select(timeout=0)
+            return bool(events)
+        except Exception:
+            return False
 
     def readline(self, size=-1):
         line = ''

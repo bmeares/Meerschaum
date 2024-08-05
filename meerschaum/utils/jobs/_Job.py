@@ -330,9 +330,9 @@ class Job:
 
                 ### TODO parametrize stdin callback
                 try:
-                    print('getting data...')
-                    data = prompt('', icon=False)
-                    print(f'{data=}')
+                    print('Waiting for input...')
+                    data = await asyncio.get_event_loop().run_in_executor(None, prompt, '', {'icon': False})
+                    print(f'Input received: {data}')
                 except KeyboardInterrupt:
                     break
                 if not data.endswith('\n'):
