@@ -704,6 +704,8 @@ def _show_logs(
                         job.monitor_logs_async(
                             partial(print_job_line, job),
                             stop_event=job_stop_events[name],
+                            accept_input=False,
+                            stop_on_exit=False,
                         )
                     )
 

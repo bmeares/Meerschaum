@@ -66,6 +66,7 @@ def prompt(
     from meerschaum.config import get_config
     from meerschaum.config.static import _static_config
     from meerschaum.utils.misc import filter_keywords
+    from meerschaum.utils.daemon import running_in_daemon
     noask = check_noask(noask)
     if not noask:
         prompt_toolkit = attempt_import('prompt_toolkit')
@@ -102,14 +103,21 @@ def prompt(
         question += '\n' + other_lines
     question += ' '
 
-    answer = (
-        prompt_toolkit.prompt(
-            prompt_toolkit.formatted_text.ANSI(question),
-            wrap_lines = wrap_lines,
-            default = default_editable or '',
-            **filter_keywords(prompt_toolkit.prompt, **kw)
-        ) if not noask else ''
-    )
+    if not running_in_daemon():
+        answer = (
+            prompt_toolkit.prompt(
+                prompt_toolkit.formatted_text.ANSI(question),
+                wrap_lines = wrap_lines,
+                default = default_editable or '',
+                **filter_keywords(prompt_toolkit.prompt, **kw)
+            ) if not noask else ''
+        )
+    else:
+        print(question, end='', flush=True)
+        try:
+            answer = input()
+        except EOFError:
+            answer = ''
     if noask:
         print(question)
     if answer == '' and default is not None:

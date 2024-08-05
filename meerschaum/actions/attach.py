@@ -23,6 +23,35 @@ def attach(
     return choose_subaction(action, attach_options, **kwargs)
 
 
+def _complete_attach(
+    action: Optional[List[str]] = None,
+    **kw: Any
+) -> List[str]:
+    """
+    Override the default Meerschaum `complete_` function.
+    """
+    from meerschaum.actions.start import _complete_start_jobs
+
+    if action is None:
+        action = []
+
+    options = {
+        'job': _complete_start_jobs,
+        'jobs': _complete_start_jobs,
+    }
+
+    if (
+        len(action) > 0 and action[0] in options
+            and kw.get('line', '').split(' ')[-1] != action[0]
+    ):
+        sub = action[0]
+        del action[0]
+        return options[sub](action=action, **kw)
+
+    from meerschaum._internal.shell import default_action_completer
+    return default_action_completer(action=(['show'] + action), **kw)
+
+
 def _attach_jobs(
     action: Optional[List[str]] = None,
     name: Optional[str] = None,
@@ -46,6 +75,7 @@ def _attach_jobs(
     )
 
     return True, "Success"
+
 
 ### NOTE: This must be the final statement of the module.
 ###       Any subactions added below these lines will not

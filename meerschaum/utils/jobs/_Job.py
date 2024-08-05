@@ -220,6 +220,7 @@ class Job:
         stop_event: Optional[threading.Event] = None,
         stop_on_exit: bool = False,
         strip_timestamps: bool = False,
+        accept_input: bool = True,
     ):
         """
         Monitor the job's log files and execute a callback on new lines.
@@ -241,6 +242,8 @@ class Job:
         strip_timestamps: bool, default False
             If `True`, remove leading timestamps from lines.
 
+        accept_input: bool, default True
+            If `True`, accept input when the daemon blocks on stdin.
         """
         if self.executor is not None:
             self.executor.monitor_logs(self.name, callback_function)
@@ -251,6 +254,7 @@ class Job:
             stop_event=stop_event,
             stop_on_exit=stop_on_exit,
             strip_timestamps=strip_timestamps,
+            accept_input=accept_input,
         )
         return asyncio.run(monitor_logs_coroutine)
 
@@ -261,6 +265,7 @@ class Job:
         stop_event: Optional[asyncio.Event] = None,
         stop_on_exit: bool = False,
         strip_timestamps: bool = False,
+        accept_input: bool = True,
     ):
         """
         Monitor the job's log files and await a callback on new lines.
@@ -281,6 +286,9 @@ class Job:
 
         strip_timestamps: bool, default False
             If `True`, remove leading timestamps from lines.
+
+        accept_input: bool, default True
+            If `True`, accept input when the daemon blocks on stdin.
         """
         if self.executor is not None:
             await self.executor.monitor_logs_async(self.name, callback_function)
@@ -384,13 +392,14 @@ class Job:
                     warn(f"Error in logs callback:\n{traceback.format_exc()}")
 
         await emit_latest_lines()
+
+        tasks = (
+            [check_job_status_task]
+            + ([check_blocking_on_input_task] if accept_input else [])
+            + [combine_events_task]
+        )
         try:
-            _ = asyncio.gather(
-                check_job_status_task,
-                check_blocking_on_input_task,
-                combine_events_task,
-                return_exceptions=True,
-            )
+            _ = asyncio.gather(*tasks, return_exceptions=True)
         except Exception as e:
             warn(f"Failed to run async checks:\n{traceback.format_exc()}")
 
