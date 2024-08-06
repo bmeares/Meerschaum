@@ -272,9 +272,7 @@ async def get_input_from_clients(name):
     """
     When a job is blocking on input, return input from the first client which provides it.
     """
-    print('GET INPUT FROM CLIENTS')
     if not _job_clients[name]:
-        print('NO CLIENTS')
         return ''
 
     async def _read_client(client):

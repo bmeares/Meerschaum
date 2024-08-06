@@ -78,7 +78,7 @@ default_shell_config = {
         },
         'executor'       : {
             'rich'       : {
-                'style'  : 'gold1',
+                'style'  : 'yellow',
             },
         },
         'username'       : {

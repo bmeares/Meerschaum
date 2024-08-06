@@ -191,12 +191,15 @@ async def monitor_logs_async(
     name: str,
     callback_function: Callable[[Any], Any],
     input_callback_function: Callable[[], str],
+    strip_timestamps: bool = False,
     accept_input: bool = True,
     debug: bool = False,
 ):
     """
     Monitor a job's log files and await a callback with the changes.
     """
+    from meerschaum.utils.formatting._jobs import strip_timestamp_from_line
+
     websockets, websockets_exceptions = mrsm.attempt_import('websockets', 'websockets.exceptions')
     protocol = 'ws' if self.URI.startswith('http://') else 'wss'
     port = self.port if 'port' in self.__dict__ else ''
@@ -220,6 +223,9 @@ async def monitor_logs_async(
                     await websocket.send(data)
                     continue
 
+                if strip_timestamps:
+                    response = strip_timestamp_from_line(response)
+
                 if asyncio.iscoroutinefunction(callback_function):
                     await callback_function(response)
                 else:
@@ -233,6 +239,7 @@ def monitor_logs(
     name: str,
     callback_function: Callable[[Any], Any],
     input_callback_function: Callable[[None], str],
+    strip_timestamps: bool = False,
     accept_input: bool = True,
     debug: bool = False,
 ):
@@ -244,6 +251,7 @@ def monitor_logs(
             name,
             callback_function,
             input_callback_function=input_callback_function,
+            strip_timestamps=strip_timestamps,
             accept_input=accept_input,
             debug=debug
         )

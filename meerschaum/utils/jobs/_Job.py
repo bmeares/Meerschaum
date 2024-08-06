@@ -218,7 +218,7 @@ class Job:
         self,
         callback_function: Callable[[str], None] = partial(print, end=''),
         input_callback_function: Optional[Callable[[], str]] = None,
-        stop_event: Optional[threading.Event] = None,
+        stop_event: Optional[asyncio.Event] = None,
         stop_on_exit: bool = False,
         strip_timestamps: bool = False,
         accept_input: bool = True,
@@ -251,8 +251,21 @@ class Job:
         accept_input: bool, default True
             If `True`, accept input when the daemon blocks on stdin.
         """
+        def default_input_callback_function():
+            return sys.stdin.readline()
+
+        if input_callback_function is None:
+            input_callback_function = default_input_callback_function
+
         if self.executor is not None:
-            self.executor.monitor_logs(self.name, callback_function)
+            self.executor.monitor_logs(
+                self.name,
+                callback_function,
+                input_callback_function=input_callback_function,
+                accept_input=accept_input,
+                strip_timestamps=strip_timestamps,
+                debug=debug,
+            )
             return
 
         monitor_logs_coroutine = self.monitor_logs_async(
