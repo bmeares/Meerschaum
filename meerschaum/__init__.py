@@ -30,6 +30,7 @@ from meerschaum.utils import get_pipes
 from meerschaum.utils.formatting import pprint
 from meerschaum._internal.docs import index as __doc__
 from meerschaum.config import __version__, get_config
+from meerschaum._internal.entry import entry
 from meerschaum.__main__ import _close_pools
 
 atexit.register(_close_pools)
@@ -55,4 +56,5 @@ __all__ = (
     "SuccessTuple",
     "Connector",
     "make_connector",
+    "entry",
 )

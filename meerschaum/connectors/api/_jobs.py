@@ -7,17 +7,21 @@ Manage jobs via the Meerschaum API.
 """
 
 import asyncio
+import time
+import json
 from datetime import datetime
 
 import meerschaum as mrsm
 from meerschaum.utils.typing import Dict, Any, SuccessTuple, List, Union, Callable
 from meerschaum.utils.jobs import Job
 from meerschaum.config.static import STATIC_CONFIG
-from meerschaum.utils.warnings import warn
+from meerschaum.utils.warnings import warn, dprint
 
 JOBS_ENDPOINT: str = STATIC_CONFIG['api']['endpoints']['jobs']
 LOGS_ENDPOINT: str = STATIC_CONFIG['api']['endpoints']['logs']
 JOBS_STDIN_MESSAGE: str = STATIC_CONFIG['api']['jobs']['stdin_message']
+JOBS_STOP_MESSAGE: str = STATIC_CONFIG['api']['jobs']['stop_message']
+JOB_METADATA_CACHE_SECONDS: int = STATIC_CONFIG['api']['jobs']['metadata_cache_seconds']
 
 
 def get_jobs(self, debug: bool = False) -> Dict[str, Job]:
@@ -59,6 +63,20 @@ def get_job_metadata(self, name: str, debug: bool = False) -> Dict[str, Any]:
     """
     Return the metadata for a single job.
     """
+    now = time.perf_counter()
+    _job_metadata_cache = self.__dict__.get('_job_metadata_cache', None)
+    _job_metadata_timestamp = (
+        _job_metadata_cache.get(name, {}).get('timestamp', None)
+    ) if _job_metadata_cache is not None else None
+
+    if (
+        _job_metadata_timestamp is not None
+        and (now - _job_metadata_timestamp) < JOB_METADATA_CACHE_SECONDS
+    ):
+        if debug:
+            dprint(f"Returning cached metadata for job '{name}'.")
+        return _job_metadata_cache[name]['metadata']
+
     response = self.get(JOBS_ENDPOINT + f"/{name}", debug=debug)
     if not response:
         if debug:
@@ -70,7 +88,15 @@ def get_job_metadata(self, name: str, debug: bool = False) -> Dict[str, Any]:
             warn(f"Failed to get metadata for job '{name}':\n{msg}")
         return {}
 
-    return response.json()
+    metadata = response.json()
+    if _job_metadata_cache is None:
+        self._job_metadata_cache = {}
+
+    self._job_metadata_cache[name] = {
+        'timestamp': now,
+        'metadata': metadata,
+    }
+    return metadata
 
 
 def get_job_properties(self, name: str, debug: bool = False) -> Dict[str, Any]:
@@ -191,6 +217,8 @@ async def monitor_logs_async(
     name: str,
     callback_function: Callable[[Any], Any],
     input_callback_function: Callable[[], str],
+    stop_callback_function: Callable[[SuccessTuple], str],
+    stop_on_exit: bool = False,
     strip_timestamps: bool = False,
     accept_input: bool = True,
     debug: bool = False,
@@ -198,12 +226,45 @@ async def monitor_logs_async(
     """
     Monitor a job's log files and await a callback with the changes.
     """
+    from meerschaum.utils.jobs import StopMonitoringLogs
     from meerschaum.utils.formatting._jobs import strip_timestamp_from_line
 
     websockets, websockets_exceptions = mrsm.attempt_import('websockets', 'websockets.exceptions')
     protocol = 'ws' if self.URI.startswith('http://') else 'wss'
     port = self.port if 'port' in self.__dict__ else ''
     uri = f"{protocol}://{self.host}:{port}{LOGS_ENDPOINT}/{name}/ws"
+
+    async def _stdin_callback(client):
+        if input_callback_function is None:
+            return
+
+        if asyncio.iscoroutinefunction(input_callback_function):
+            data = await input_callback_function()
+        else:
+            data = input_callback_function()
+
+        await client.send(data)
+
+    async def _stop_callback(client):
+        try:
+            result = tuple(json.loads(await client.recv()))
+        except Exception as e:
+            warn(traceback.format_exc())
+            result = False, str(e)
+
+        if stop_callback_function is not None:
+            if asyncio.iscoroutinefunction(stop_callback_function):
+                await stop_callback_function(result)
+            else:
+                stop_callback_function(result)
+
+        if stop_on_exit:
+            raise StopMonitoringLogs
+
+    message_callbacks = {
+        JOBS_STDIN_MESSAGE: _stdin_callback,
+        JOBS_STOP_MESSAGE: _stop_callback,
+    }
 
     async with websockets.connect(uri) as websocket:
         try:
@@ -214,13 +275,9 @@ async def monitor_logs_async(
         while True:
             try:
                 response = await websocket.recv()
-                if response == JOBS_STDIN_MESSAGE:
-                    if asyncio.iscoroutinefunction(input_callback_function):
-                        data = await input_callback_function()
-                    else:
-                        data = input_callback_function()
-
-                    await websocket.send(data)
+                callback = message_callbacks.get(response, None)
+                if callback is not None:
+                    await callback(websocket)
                     continue
 
                 if strip_timestamps:
@@ -230,15 +287,18 @@ async def monitor_logs_async(
                     await callback_function(response)
                 else:
                     callback_function(response)
-            except KeyboardInterrupt:
+            except (KeyboardInterrupt, StopMonitoringLogs):
                 await websocket.close()
                 break
+
 
 def monitor_logs(
     self,
     name: str,
     callback_function: Callable[[Any], Any],
     input_callback_function: Callable[[None], str],
+    stop_callback_function: Callable[[None], str],
+    stop_on_exit: bool = False,
     strip_timestamps: bool = False,
     accept_input: bool = True,
     debug: bool = False,
@@ -251,6 +311,8 @@ def monitor_logs(
             name,
             callback_function,
             input_callback_function=input_callback_function,
+            stop_callback_function=stop_callback_function,
+            stop_on_exit=stop_on_exit,
             strip_timestamps=strip_timestamps,
             accept_input=accept_input,
             debug=debug

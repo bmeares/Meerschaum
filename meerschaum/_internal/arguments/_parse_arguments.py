@@ -288,9 +288,6 @@ def remove_leading_action(
     for a in action:
         _action.append(a.replace('_', UNDERSCORE_STANDIN))
 
-    ### e.g. 'show_pipes_baz'
-    action_str = '_'.join(_action)
-
     ### e.g. 'show_pipes'
     action_name = action_function.__name__.lstrip('_')
 
@@ -299,6 +296,16 @@ def remove_leading_action(
 
     ### Strip away any leading prefices.
     action_name = action_name[main_action_index:]
+
+    subaction_parts = action_name.replace(main_action_name, '').lstrip('_').split('_')
+    subaction_name = subaction_parts[0] if subaction_parts else None
+
+    ### e.g. 'pipe' -> 'pipes'
+    if subaction_name and subaction_name.endswith('s') and not action[1].endswith('s'):
+        _action[1] += 's'
+
+    ### e.g. 'show_pipes_baz'
+    action_str = '_'.join(_action)
 
     if not action_str.replace(UNDERSCORE_STANDIN, '_').startswith(action_name):
         warn(f"Unable to parse '{action_str}' for action '{action_name}'.")

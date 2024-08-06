@@ -11,6 +11,7 @@ from meerschaum.utils.typing import Optional, List, Any, SuccessTuple
 
 def attach(
     action: Optional[List[str]] = None,
+    executor_keys: Optional[str] = None,
     **kwargs: Any
 ) -> SuccessTuple:
     """
@@ -21,7 +22,7 @@ def attach(
         'jobs': _attach_jobs,
         'logs': _attach_logs,
     }
-    return choose_subaction(action, attach_options, **kwargs)
+    return choose_subaction(action, attach_options, executor_keys=executor_keys, **kwargs)
 
 
 def _complete_attach(
@@ -64,6 +65,7 @@ def _attach_jobs(
     """
     Attach to a job, and prompt the user when blocking on input.
     """
+    action = action or []
     if not action and not name:
         return False, "Provide the name of the job to attach to."
 
@@ -72,12 +74,23 @@ def _attach_jobs(
     if not job.exists():
         return False, f"Job '{job.name}' does not exist."
 
-    job.monitor_logs(
-        stop_on_exit=True,
-        strip_timestamps=True,
-    )
+    success, message = True, "Success"
 
-    return True, "Success"
+    def _capture_result(result: SuccessTuple):
+        nonlocal success, message
+        success, message = result
+
+    try:
+        job.monitor_logs(
+            stop_callback_function=_capture_result,
+            accept_input=True,
+            stop_on_exit=True,
+            strip_timestamps=True,
+        )
+    except KeyboardInterrupt:
+        pass
+
+    return success, message
 
 
 def _attach_logs(*args, **kwargs) -> SuccessTuple:

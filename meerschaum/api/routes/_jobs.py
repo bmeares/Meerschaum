@@ -34,6 +34,7 @@ from meerschaum.api import (
 from meerschaum.config.static import STATIC_CONFIG
 
 JOBS_STDIN_MESSAGE: str = STATIC_CONFIG['api']['jobs']['stdin_message']
+JOBS_STOP_MESSAGE: str = STATIC_CONFIG['api']['jobs']['stop_message']
 
 
 @app.get(endpoints['jobs'], tags=['Jobs'])
@@ -245,13 +246,10 @@ def get_is_blocking_on_stdin(
 
 _job_clients = defaultdict(lambda: [])
 _job_stop_events = defaultdict(lambda: asyncio.Event())
-async def notify_clients(name: str, content: str):
+async def notify_clients(name: str, websocket: WebSocket, content: str):
     """
     Write the given content to all connected clients.
     """
-    if not _job_clients[name]:
-        _job_stop_events[name].set()
-
     async def _notify_client(client):
         try:
             await client.send_text(content)
@@ -261,14 +259,10 @@ async def notify_clients(name: str, content: str):
         except Exception:
             pass
 
-    notify_tasks = [
-        asyncio.create_task(_notify_client(client))
-        for client in _job_clients[name]
-    ]
-    await asyncio.wait(notify_tasks)
+    await _notify_client(websocket)
 
 
-async def get_input_from_clients(name):
+async def get_input_from_clients(name: str, websocket: WebSocket) -> str:
     """
     When a job is blocking on input, return input from the first client which provides it.
     """
@@ -297,6 +291,23 @@ async def get_input_from_clients(name):
         return task.result()
 
 
+async def send_stop_message(name: str, client: WebSocket, result: SuccessTuple):
+    """
+    Send a stop message to clients when the job stops.
+    """
+    try:
+        await client.send_text(JOBS_STOP_MESSAGE)
+        await client.send_json(result)
+    except WebSocketDisconnect:
+        _job_stop_events[name].set()
+        if client in _job_clients[name]:
+            _job_clients[name].remove(client)
+    except RuntimeError:
+        pass
+    except Exception:
+        warn(traceback.format_exc())
+
+
 @app.websocket(endpoints['logs'] + '/{name}/ws')
 async def logs_websocket(name: str, websocket: WebSocket):
     """
@@ -307,11 +318,32 @@ async def logs_websocket(name: str, websocket: WebSocket):
     _job_clients[name].append(websocket)
 
     async def monitor_logs():
-        await job.monitor_logs_async(
-            partial(notify_clients, name),
-            input_callback_function=partial(get_input_from_clients, name),
-            stop_event=_job_stop_events[name],
-        )
+        try:
+            callback_function = partial(
+                notify_clients,
+                name,
+                websocket,
+            )
+            input_callback_function = partial(
+                get_input_from_clients,
+                name,
+                websocket,
+            )
+            stop_callback_function = partial(
+                send_stop_message,
+                name,
+                websocket,
+            )
+            await job.monitor_logs_async(
+                callback_function=callback_function,
+                input_callback_function=input_callback_function,
+                stop_callback_function=stop_callback_function,
+                stop_event=_job_stop_events[name],
+                stop_on_exit=True,
+                accept_input=True,
+            )
+        except Exception:
+            warn(traceback.format_exc())
 
     try:
         token = await websocket.receive_text()
@@ -327,7 +359,8 @@ async def logs_websocket(name: str, websocket: WebSocket):
         await websocket.send_text("Invalid credentials.")
         await websocket.close()
     except WebSocketDisconnect:
-        pass
+        _job_stop_events[name].set()
+        monitor_task.cancel()
     except asyncio.CancelledError:
         pass
     except Exception:

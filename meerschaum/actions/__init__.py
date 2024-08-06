@@ -12,9 +12,9 @@ from meerschaum.utils.packages import get_modules_from_package
 _custom_actions = []
 
 def get_subactions(
-        action: Union[str, List[str]],
-        _actions: Optional[Dict[str, Callable[[Any], Any]]] = None,
-    ) -> Dict[str, Callable[[Any], Any]]:
+    action: Union[str, List[str]],
+    _actions: Optional[Dict[str, Callable[[Any], Any]]] = None,
+) -> Dict[str, Callable[[Any], Any]]:
     """
     Return a dictionary of an action's sub-action functions.
 
@@ -52,9 +52,9 @@ def get_subactions(
 
 
 def get_action(
-        action: Union[str, List[str]],
-        _actions: Optional[Dict[str, Callable[[Any], Any]]] = None,
-    ) -> Union[Callable[[Any], Any], None]:
+    action: Union[str, List[str]],
+    _actions: Optional[Dict[str, Callable[[Any], Any]]] = None,
+) -> Union[Callable[[Any], Any], None]:
     """
     Return a function corresponding to the given action list.
     This may be a custom action with an underscore, in which case, allow for underscores.
@@ -92,6 +92,8 @@ def get_action(
     if action[0] in _actions:
         subactions = get_subactions([action[0]], _actions=_actions)
         if action[1] not in subactions:
+            if (action[1] + 's') in subactions:
+                return subactions[action[1] + 's']
             return _actions[action[0]]
         return subactions[action[1]]
 

@@ -218,6 +218,7 @@ class Job:
         self,
         callback_function: Callable[[str], None] = partial(print, end=''),
         input_callback_function: Optional[Callable[[], str]] = None,
+        stop_callback_function: Optional[Callable[[SuccessTuple], None]] = None,
         stop_event: Optional[asyncio.Event] = None,
         stop_on_exit: bool = False,
         strip_timestamps: bool = False,
@@ -236,6 +237,10 @@ class Job:
         input_callback_function: Optional[Callable[[], str]], default None
             If provided, execute this callback when the daemon is blocking on stdin.
             Defaults to `sys.stdin.readline()`.
+
+        stop_callback_function: Optional[Callable[[SuccessTuple]], str], default None
+            If provided, execute this callback when the daemon stops.
+            The job's SuccessTuple will be passed to the callback.
 
         stop_event: Optional[asyncio.Event], default None
             If provided, stop monitoring when this event is set.
@@ -262,6 +267,8 @@ class Job:
                 self.name,
                 callback_function,
                 input_callback_function=input_callback_function,
+                stop_callback_function=stop_callback_function,
+                stop_on_exit=stop_on_exit,
                 accept_input=accept_input,
                 strip_timestamps=strip_timestamps,
                 debug=debug,
@@ -271,6 +278,7 @@ class Job:
         monitor_logs_coroutine = self.monitor_logs_async(
             callback_function=callback_function,
             input_callback_function=input_callback_function,
+            stop_callback_function=stop_callback_function,
             stop_event=stop_event,
             stop_on_exit=stop_on_exit,
             strip_timestamps=strip_timestamps,
@@ -283,6 +291,7 @@ class Job:
         self,
         callback_function: Callable[[str], None] = partial(print, end='', flush=True),
         input_callback_function: Optional[Callable[[], str]] = None,
+        stop_callback_function: Optional[Callable[[SuccessTuple], None]] = None,
         stop_event: Optional[asyncio.Event] = None,
         stop_on_exit: bool = False,
         strip_timestamps: bool = False,
@@ -301,6 +310,10 @@ class Job:
         input_callback_function: Optional[Callable[[], str]], default None
             If provided, execute this callback when the daemon is blocking on stdin.
             Defaults to `sys.stdin.readline()`.
+
+        stop_callback_function: Optional[Callable[[SuccessTuple]], str], default None
+            If provided, execute this callback when the daemon stops.
+            The job's SuccessTuple will be passed to the callback.
 
         stop_event: Optional[asyncio.Event], default None
             If provided, stop monitoring when this event is set.
@@ -327,6 +340,8 @@ class Job:
                 self.name,
                 callback_function,
                 input_callback_function=input_callback_function,
+                stop_callback_function=stop_callback_function,
+                stop_on_exit=stop_on_exit,
                 accept_input=accept_input,
                 debug=debug,
             )
@@ -336,7 +351,7 @@ class Job:
 
         events = {
             'user': stop_event,
-            'stopped': (asyncio.Event() if stop_on_exit else None),
+            'stopped': asyncio.Event(),
         }
         combined_event = asyncio.Event()
         emitted_text = False
@@ -353,7 +368,19 @@ class Job:
                         await asyncio.sleep(sleep_time)
                         sleep_time = round(sleep_time * 1.1, 2)
                         continue
-                    events['stopped'].set()
+                    
+                    if stop_callback_function is not None:
+                        try:
+                            if asyncio.iscoroutinefunction(stop_callback_function):
+                                await stop_callback_function(self.result)
+                            else:
+                                stop_callback_function(self.result)
+                        except Exception:
+                            warn(traceback.format_exc())
+
+                    if stop_on_exit:
+                        events['stopped'].set()
+
                     break
                 await asyncio.sleep(0.1)
 
@@ -373,7 +400,7 @@ class Job:
 
                 try:
                     print('', end='', flush=True)
-                    if asyncio.iscoroutinefunction(callback_function):
+                    if asyncio.iscoroutinefunction(input_callback_function):
                         data = await input_callback_function()
                     else:
                         data = input_callback_function()
@@ -457,23 +484,8 @@ class Job:
                 if latest_subfile_path != file_path:
                     continue
 
-                lines = log.readlines()
-                for line in lines:
-                    if strip_timestamps:
-                        line = strip_timestamp_from_line(line)
-                    try:
-                        if asyncio.iscoroutinefunction(callback_function):
-                            await callback_function(line)
-                        else:
-                            callback_function(line)
-                        emitted_text = True
-                    except RuntimeError:
-                        return
-                    except StopMonitoringLogs:
-                        return
-                    except Exception:
-                        warn(f"Error in logs callback:\n{traceback.format_exc()}")
-                        return
+                await emit_latest_lines()
+                await emit_latest_lines()
 
         await emit_latest_lines()
 
@@ -490,6 +502,7 @@ class Job:
         """
         Write to a job's daemon's `stdin`.
         """
+        ### TODO implement remote method?
         if self.executor is not None:
             pass
 

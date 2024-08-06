@@ -232,7 +232,7 @@ def _start_jobs(
                 stop_success_tuple = actions['stop'](
                     action=['jobs'] + [_name for _name in _filtered_running_jobs],
                     force=True,
-                    mrsm_instance=mrsm_instance,
+                    executor_keys=executor_keys,
                     debug=debug,
                 )
                 if not stop_success_tuple[0]:
