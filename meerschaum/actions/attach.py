@@ -15,7 +15,7 @@ def attach(
     **kwargs: Any
 ) -> SuccessTuple:
     """
-    Attach to a job.
+    Attach to a job, and prompt the user when blocking on input.
     """
     from meerschaum.actions import choose_subaction
     attach_options = {
@@ -32,16 +32,16 @@ def _complete_attach(
     """
     Override the default Meerschaum `complete_` function.
     """
-    from meerschaum.actions.start import _complete_start_jobs
+    from meerschaum.actions.delete import _complete_delete_jobs
 
     if action is None:
         action = []
 
     options = {
-        'job': _complete_start_jobs,
-        'jobs': _complete_start_jobs,
-        'log': _complete_start_jobs,
-        'logs': _complete_start_jobs,
+        'job': _complete_delete_jobs,
+        'jobs': _complete_delete_jobs,
+        'log': _complete_delete_jobs,
+        'logs': _complete_delete_jobs,
     }
 
     if (

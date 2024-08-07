@@ -10,9 +10,9 @@ from __future__ import annotations
 from meerschaum.utils.typing import Any, SuccessTuple, Union, Optional, List
 
 def delete(
-        action: Optional[List[str]] = None,
-        **kw: Any
-    ) -> SuccessTuple:
+    action: Optional[List[str]] = None,
+    **kw: Any
+) -> SuccessTuple:
     """
     Delete an element.
 
@@ -35,23 +35,21 @@ def delete(
 
 
 def _complete_delete(
-        action: Optional[List[str]] = None,
-        **kw: Any
-    ) -> List[str]:
+    action: Optional[List[str]] = None,
+    **kw: Any
+) -> List[str]:
     """
     Override the default Meerschaum `complete_` function.
-
     """
-    from meerschaum.actions.start import _complete_start_jobs
     from meerschaum.actions.edit import _complete_edit_config
     if action is None:
         action = []
     options = {
         'connector': _complete_delete_connectors,
         'connectors': _complete_delete_connectors,
-        'config' : _complete_edit_config,
-        'job' : _complete_start_jobs,
-        'jobs' : _complete_start_jobs,
+        'config': _complete_edit_config,
+        'job': _complete_delete_jobs,
+        'jobs': _complete_delete_jobs,
     }
 
     if (
@@ -494,6 +492,50 @@ def _delete_jobs(
         ("Deleted job" + ("s" if len(_deleted) != 1 else '')
             + f" {items_str([_name for _name in _deleted])}."),
     )
+
+
+def _complete_delete_jobs(
+    action: Optional[List[str]] = None,
+    executor_keys: Optional[str] = None,
+    line: str = '',
+    _get_job_method: Optional[str, List[str]] = None,
+    **kw
+) -> List[str]:
+    from meerschaum._internal.shell.Shell import shell_attrs
+    from meerschaum.utils.jobs import (
+        get_filtered_jobs,
+        get_restart_jobs,
+        get_stopped_jobs,
+        get_paused_jobs,
+        get_running_jobs,
+    )
+    from meerschaum.utils.misc import remove_ansi
+
+    executor_keys = executor_keys or remove_ansi(shell_attrs.get('executor_keys', 'local'))
+
+    jobs = get_filtered_jobs(executor_keys, action)
+    if _get_job_method:
+        method_keys = [_get_job_method] if isinstance(_get_job_method, str) else _get_job_method
+        method_jobs = {}
+        for method_key in method_keys:
+            method_func = locals()[f'get_{method_key}_jobs']
+            method_jobs.update(method_func(jobs=jobs))
+        jobs = method_jobs
+
+    if not action:
+        return list(jobs)
+
+    possibilities = []
+    _line_end = line.split(' ')[-1]
+    for name in jobs:
+        if name in action:
+            continue
+        if _line_end == '':
+            possibilities.append(name)
+            continue
+        if name.startswith(action[-1]):
+            possibilities.append(name)
+    return possibilities
 
 
 def _delete_venvs(

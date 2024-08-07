@@ -160,7 +160,7 @@ def _do_action_wrapper(action_function, plugin_name, **kw):
                 )
             )
         except KeyboardInterrupt:
-            result = False, f"Cancelled action `{action_name}`."
+            result = False, f"Cancelled action `{action_name.lstrip()}`."
     return result
 
 _shells = []

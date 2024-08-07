@@ -27,13 +27,20 @@ def _complete_pause(
     """
     Override the default Meerschaum `complete_` function.
     """
-    from meerschaum.actions.start import _complete_start_jobs
+    from meerschaum.actions.delete import _complete_delete_jobs
+    from functools import partial
+
     if action is None:
         action = []
 
+    _complete_pause_jobs = partial(
+        _complete_delete_jobs,
+        _get_job_method='running',
+    )
+
     options = {
-        'job' : _complete_start_jobs,
-        'jobs' : _complete_start_jobs,
+        'job': _complete_pause_jobs,
+        'jobs': _complete_pause_jobs,
     }
 
     if (
@@ -49,43 +56,53 @@ def _complete_pause(
 
 
 def _pause_jobs(
-        action: Optional[List[str]] = None,
-        noask: bool = False,
-        force: bool = False,
-        yes: bool = False,
-        nopretty: bool = False,
-        **kw
-    ) -> SuccessTuple:
+    action: Optional[List[str]] = None,
+    executor_keys: Optional[str] = None,
+    noask: bool = False,
+    force: bool = False,
+    yes: bool = False,
+    nopretty: bool = False,
+    debug: bool = False,
+    **kw
+) -> SuccessTuple:
     """
-    Pause running jobs that were started with `-d` or `start job`.
-    
-    To see running jobs, run `show jobs`.
+    Pause (suspend) running jobs.
     """
     from meerschaum.utils.formatting._jobs import pprint_jobs
     from meerschaum.utils.daemon import (
         get_filtered_daemons, get_running_daemons, get_stopped_daemons, get_paused_daemons,
     )
+    from meerschaum.utils.jobs import (
+        get_filtered_jobs,
+        get_running_jobs,
+        get_stopped_jobs,
+        get_paused_jobs,
+    )
     from meerschaum.utils.warnings import warn
     from meerschaum.utils.prompt import yes_no
     from meerschaum.utils.misc import items_str
-    daemons = get_filtered_daemons(action, warn=(not nopretty))
-    _running_daemons = get_running_daemons(daemons)
-    _paused_daemons = get_paused_daemons(daemons)
-    _stopped_daemons = get_stopped_daemons(daemons)
-    if action and _stopped_daemons and not nopretty:
+
+    jobs = get_filtered_jobs(executor_keys, action, debug=debug, warn=(not nopretty))
+    running_jobs = get_running_jobs(executor_keys, jobs, debug=debug)
+    paused_jobs = get_paused_jobs(executor_keys, jobs, debug=debug)
+    stopped_jobs = get_stopped_jobs(executor_keys, jobs, debug=debug)
+
+    if action and stopped_jobs and not nopretty:
         warn(
-            f"Skipping stopped job" + ("s" if len(_stopped_daemons) > 1 else '') + " '" +
-                ("', '".join(d.daemon_id for d in _stopped_daemons)) + "'.",
-            stack = False
+            f"Skipping stopped job" + ("s" if len(stopped_jobs) > 1 else '')
+            + " '"
+            + ("', '".join(stopped_jobs.keys()))
+            + "'.",
+            stack=False,
         )
 
-    daemons_to_pause = _running_daemons + _paused_daemons
-    if not daemons_to_pause:
+    jobs_to_pause = {**running_jobs, **paused_jobs}
+    if not jobs_to_pause:
         return False, "No running jobs to pause. You can start jobs with `-d` or `start jobs`."
 
     if not action:
         if not force:
-            pprint_jobs(_running_daemons)
+            pprint_jobs(running_jobs)
             if not yes_no(
                 "Pause all running jobs?",
                 noask=noask, yes=yes, default='n'
@@ -93,9 +110,9 @@ def _pause_jobs(
                 return False, "No jobs were paused."
 
     successes, fails = [], []
-    for d in daemons_to_pause:
-        pause_success, pause_msg = d.pause()
-        (successes if pause_success else fails).append(d.daemon_id)
+    for name, job in jobs_to_pause.items():
+        pause_success, pause_msg = job.pause()
+        (successes if pause_success else fails).append(name)
 
     msg = (
         (

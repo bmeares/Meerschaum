@@ -27,13 +27,20 @@ def _complete_stop(
     """
     Override the default Meerschaum `complete_` function.
     """
-    from meerschaum.actions.start import _complete_start_jobs
+    from meerschaum.actions.delete import _complete_delete_jobs
+    from functools import partial
+
     if action is None:
         action = []
 
+    _complete_stop_jobs = partial(
+        _complete_delete_jobs,
+        _get_job_method=('running', 'paused', 'restart'),
+    )
+
     options = {
-        'job' : _complete_start_jobs,
-        'jobs' : _complete_start_jobs,
+        'job' : _complete_stop_jobs,
+        'jobs' : _complete_stop_jobs,
     }
 
     if (

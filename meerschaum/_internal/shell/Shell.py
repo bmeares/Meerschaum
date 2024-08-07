@@ -300,6 +300,9 @@ class Shell(cmd.Cmd):
         from meerschaum._internal.shell.updates import run_version_check_thread
         self._update_thread = run_version_check_thread(debug=shell_attrs.get('debug', False))
 
+        from meerschaum.utils.jobs import start_check_jobs_thread
+        self._check_jobs_thread = start_check_jobs_thread()
+
 
     def load_config(self, instance: Optional[str] = None):
         """

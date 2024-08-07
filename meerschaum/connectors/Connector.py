@@ -21,11 +21,11 @@ class Connector(metaclass=abc.ABCMeta):
     The base connector class to hold connection attributes.
     """
     def __init__(
-            self,
-            type: Optional[str] = None,
-            label: Optional[str] = None,
-            **kw: Any
-        ):
+        self,
+        type: Optional[str] = None,
+        label: Optional[str] = None,
+        **kw: Any
+    ):
         """
         Set the given keyword arguments as attributes.
 
@@ -101,7 +101,7 @@ class Connector(metaclass=abc.ABCMeta):
 
         ### load user config into self._attributes
         if self.type in conn_configs and self.label in conn_configs[self.type]:
-            self._attributes.update(conn_configs[self.type][self.label])
+            self._attributes.update(conn_configs[self.type][self.label] or {})
 
         ### load system config into self._sys_config
         ### (deep copy so future Connectors don't inherit changes)

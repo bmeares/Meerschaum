@@ -54,7 +54,7 @@ def _complete_show(
     """
     Override the default Meerschaum `complete_` function.
     """
-    from meerschaum.actions.start import _complete_start_jobs
+    from meerschaum.actions.delete import _complete_delete_jobs
 
     if action is None:
         action = []
@@ -65,10 +65,10 @@ def _complete_show(
         'config'    : _complete_show_config,
         'package'   : _complete_show_packages,
         'packages'  : _complete_show_packages,
-        'job'       : _complete_start_jobs,
-        'jobs'      : _complete_start_jobs,
-        'log'       : _complete_start_jobs,
-        'logs'      : _complete_start_jobs,
+        'job'       : _complete_delete_jobs,
+        'jobs'      : _complete_delete_jobs,
+        'log'       : _complete_delete_jobs,
+        'logs'      : _complete_delete_jobs,
     }
 
     if (

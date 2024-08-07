@@ -144,6 +144,8 @@ class Job:
         if self.daemon.status == 'stopped':
             if not self.restart:
                 return True, f"{self} is not running."
+            elif self.stop_time is not None:
+                return True, f"{self} will not restart until manually started."
 
         quit_success, quit_msg = self.daemon.quit(timeout=timeout_seconds)
         if quit_success:

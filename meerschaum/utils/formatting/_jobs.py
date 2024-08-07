@@ -100,40 +100,58 @@ def pprint_jobs(
             if job.hidden:
                 continue
 
-            status_text = (
-                rich_text.Text(job.status, style=('green' if ANSI else ''))
-                if not job.is_blocking_on_stdin()
-                else rich_text.Text('waiting for input', style=('yellow' if ANSI else ''))
-            )
+            status_group = [
+                (
+                    rich_text.Text(job.status, style=('green' if ANSI else ''))
+                    if not job.is_blocking_on_stdin()
+                    else rich_text.Text('waiting for input', style=('yellow' if ANSI else ''))
+                ),
+                rich_text.Text(f'PID: {job.pid}'),
+            ]
+            if job.restart:
+                status_group.append(rich_text.Text('(restarts)'))
 
             table.add_row(
                 job.name,
                 job.label,
-                rich_console.Group(status_text),
+                rich_console.Group(*status_group),
             )
 
         for name, job in paused_jobs.items():
             if job.hidden:
                 continue
+
+            status_group = [
+                rich_text.Text(job.status, style=('yellow' if ANSI else '')),
+            ]
+            if job.restart:
+                status_group.append(rich_text.Text('(restarts)'))
+
             table.add_row(
                 job.name,
                 job.label,
-                rich_console.Group(
-                    rich_text.Text(job.status, style=('yellow' if ANSI else '')),
-                ),
+                rich_console.Group(*status_group),
             )
 
         for name, job in stopped_jobs.items():
             if job.hidden:
                 continue
 
+            status_group = [
+                rich_text.Text(job.status, style=('red' if ANSI else '')),
+            ]
+            if job.restart:
+                if job.stop_time is None:
+                    status_group.append(rich_text.Text('(restarts)'))
+                else:
+                    status_group.append(rich_text.Text('(start to resume restarts)'))
+
+            status_group.append(get_success_text(job))
+
             table.add_row(
                 job.name,
                 job.label,
-                rich_console.Group(
-                    rich_text.Text(job.status, style=('red' if ANSI else '')),
-                    get_success_text(job)
-                ),
+                rich_console.Group(*status_group),
             )
         get_console().print(table)
 

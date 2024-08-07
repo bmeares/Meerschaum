@@ -10,9 +10,9 @@ from __future__ import annotations
 from meerschaum.utils.typing import SuccessTuple, Optional, List, Any
 
 def start(
-        action: Optional[List[str]] = None,
-        **kw: Any,
-    ) -> SuccessTuple:
+    action: Optional[List[str]] = None,
+    **kw: Any,
+) -> SuccessTuple:
     """
     Start subsystems (API server, background job, etc.).
     """
@@ -28,19 +28,26 @@ def start(
 
 
 def _complete_start(
-        action: Optional[List[str]] = None,
-        **kw: Any
-    ) -> List[str]:
+    action: Optional[List[str]] = None,
+    **kw: Any
+) -> List[str]:
     """
     Override the default Meerschaum `complete_` function.
     """
+    from meerschaum.actions.delete import _complete_delete_jobs
+    from functools import partial
 
     if action is None:
         action = []
 
+    _complete_start_jobs = partial(
+        _complete_delete_jobs,
+        _get_job_method=['stopped', 'paused'],
+    )
+
     options = {
-        'job': _complete_start_jobs,
-        'jobs': _complete_start_jobs,
+        'job': _complete_delete_jobs,
+        'jobs': _complete_delete_jobs,
         'connector': _complete_start_connectors,
         'connectors': _complete_start_connectors,
     }
@@ -295,30 +302,6 @@ def _start_jobs(
             + f" {items_str(_failures)}." if _failures else '')
     )
     return len(_failures) == 0, msg
-
-
-def _complete_start_jobs(
-    action: Optional[List[str]] = None,
-    executor_keys: Optional[str] = None,
-    line: str = '',
-    **kw
-) -> List[str]:
-    from meerschaum.utils.jobs import get_filtered_jobs
-    jobs = get_filtered_jobs(executor_keys, action)
-    if not action:
-        return list(jobs)
-
-    possibilities = []
-    _line_end = line.split(' ')[-1]
-    for name in jobs:
-        if name in action:
-            continue
-        if _line_end == '':
-            possibilities.append(name)
-            continue
-        if name.startswith(action[-1]):
-            possibilities.append(name)
-    return possibilities
 
 
 def _start_gui(

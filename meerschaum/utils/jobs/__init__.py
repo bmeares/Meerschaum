@@ -10,7 +10,7 @@ import pathlib
 
 import meerschaum as mrsm
 from meerschaum.utils.jobs._Job import Job, StopMonitoringLogs
-from meerschaum.utils.typing import Dict, Optional, List, Callable, Any
+from meerschaum.utils.typing import Dict, Optional, List, Callable, Any, SuccessTuple
 
 __all__ = (
     'Job',
@@ -29,6 +29,7 @@ __all__ = (
 
 def get_jobs(
     executor_keys: Optional[str] = None,
+    include_hidden: bool = False,
     debug: bool = False,
 ) -> Dict[str, Job]:
     """
@@ -39,6 +40,9 @@ def get_jobs(
     executor_keys: Optional[str], default None
         If provided, return remote jobs on the given API instance.
         Otherwise return local jobs.
+
+    include_hidden: bool, default False
+        If `True`, include jobs with the `hidden` attribute.
 
     Returns
     -------
@@ -58,15 +62,21 @@ def get_jobs(
 
     from meerschaum.utils.daemon import get_daemons
     daemons = get_daemons()
-    return {
+    jobs = {
         daemon.daemon_id: Job(name=daemon.daemon_id)
         for daemon in daemons
+    }
+    return {
+        name: job
+        for name, job in jobs.items()
+        if include_hidden or not job.hidden
     }
 
 
 def get_filtered_jobs(
     executor_keys: Optional[str] = None,
     filter_list: Optional[List[str]] = None,
+    include_hidden: bool = False,
     warn: bool = False,
     debug: bool = False,
 ) -> Dict[str, Job]:
@@ -74,14 +84,10 @@ def get_filtered_jobs(
     Return a list of jobs filtered by the user.
     """
     from meerschaum.utils.warnings import warn as _warn
-    jobs = get_jobs(executor_keys, debug=debug)
+    jobs = get_jobs(executor_keys, include_hidden=include_hidden, debug=debug)
 
     if not filter_list:
-        return {
-            name: job
-            for name, job in jobs.items()
-            if not job.hidden
-        }
+        return jobs
 
     jobs_to_return = {}
     for name in filter_list:
@@ -101,13 +107,14 @@ def get_filtered_jobs(
 def get_restart_jobs(
     executor_keys: Optional[str] = None,
     jobs: Optional[Dict[str, Job]] = None,
+    include_hidden: bool = False,
     debug: bool = False,
 ) -> Dict[str, Job]:
     """
     Return jobs which were created with `--restart` or `--loop`.
     """
     if jobs is None:
-        jobs = get_jobs(executor_keys, debug=debug)
+        jobs = get_jobs(executor_keys, include_hidden=include_hidden, debug=debug)
 
     return {
         name: job
@@ -119,13 +126,14 @@ def get_restart_jobs(
 def get_running_jobs(
     executor_keys: Optional[str] = None,
     jobs: Optional[Dict[str, Job]] = None,
+    include_hidden: bool = False,
     debug: bool = False,
 ) -> Dict[str, Job]:
     """
     Return a dictionary of running jobs.
     """
     if jobs is None:
-        jobs = get_jobs(executor_keys, debug=debug)
+        jobs = get_jobs(executor_keys, include_hidden=include_hidden, debug=debug)
 
     return {
         name: job
@@ -137,13 +145,14 @@ def get_running_jobs(
 def get_paused_jobs(
     executor_keys: Optional[str] = None,
     jobs: Optional[Dict[str, Job]] = None,
+    include_hidden: bool = False,
     debug: bool = False,
 ) -> Dict[str, Job]:
     """
     Return a dictionary of paused jobs.
     """
     if jobs is None:
-        jobs = get_jobs(executor_keys, debug=debug)
+        jobs = get_jobs(executor_keys, include_hidden=include_hidden, debug=debug)
 
     return {
         name: job
@@ -155,13 +164,14 @@ def get_paused_jobs(
 def get_stopped_jobs(
     executor_keys: Optional[str] = None,
     jobs: Optional[Dict[str, Job]] = None,
+    include_hidden: bool = False,
     debug: bool = False,
 ) -> Dict[str, Job]:
     """
     Return a dictionary of stopped jobs.
     """
     if jobs is None:
-        jobs = get_jobs(executor_keys, debug=debug)
+        jobs = get_jobs(executor_keys, include_hidden=include_hidden, debug=debug)
 
     return {
         name: job
@@ -172,8 +182,11 @@ def get_stopped_jobs(
 
 def check_restart_jobs(
     executor_keys: Optional[str] = None,
+    jobs: Optional[Dict[str, Job]] = None,
+    include_hidden: bool = True,
     silent: bool = False,
-) -> None:
+    debug: bool = False,
+) -> SuccessTuple:
     """
     Restart any stopped jobs which were created with `--restart`.
 
@@ -183,14 +196,44 @@ def check_restart_jobs(
         If provided, check jobs on the given remote API instance.
         Otherwise check local jobs.
 
+    include_hidden: bool, default True
+        If `True`, include hidden jobs in the check.
+
     silent: bool, default False
         If `True`, do not print the restart success message.
     """
-    jobs = get_jobs(executor_keys)
+    from meerschaum.utils.misc import items_str
+
+    if jobs is None:
+        jobs = get_jobs(executor_keys, include_hidden=include_hidden, debug=debug)
+
+    if not jobs:
+        return True, "No jobs to restart."
+
+    results = {}
     for name, job in jobs.items():
-        success, msg = job.check_restart()
+        check_success, check_msg = job.check_restart()
+        results[job.name] = (check_success, check_msg)
         if not silent:
-            mrsm.pprint((success, msg))
+            mrsm.pprint((check_success, check_msg))
+
+    success_names = [name for name, (check_success, check_msg) in results.items() if check_success]
+    fail_names = [name for name, (check_success, check_msg) in results.items() if not check_success]
+    success = len(success_names) == len(jobs)
+    msg = (
+        (
+            "Successfully restarted job"
+            + ('s' if len(success_names) != 1 else '')
+            + ' ' + items_str(success_names) + '.'
+        )
+        if success
+        else (
+            "Failed to restart job"
+            + ('s' if len(success_names) != 1 else '')
+            + ' ' + items_str(fail_names) + '.'
+        )
+    )
+    return success, msg
 
 
 def _check_restart_jobs_against_lock(*args, **kwargs):
@@ -221,10 +264,11 @@ def start_check_jobs_thread():
             silent=True,
         )
     )
-    _check_loop_stop_thread.daemon = False
+    _check_loop_stop_thread.daemon = True
     atexit.register(stop_check_jobs_thread)
 
     _check_loop_stop_thread.start()
+    return _check_loop_stop_thread
 
 
 def stop_check_jobs_thread():
@@ -243,3 +287,5 @@ def stop_check_jobs_thread():
             CHECK_JOBS_LOCK_PATH.unlink()
     except Exception as e:
         warn(f"Failed to remove check jobs lock file:\n{e}")
+
+    return _check_loop_stop_thread
