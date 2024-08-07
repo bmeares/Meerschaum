@@ -215,6 +215,10 @@ groups['jobs'].add_argument(
     help=("Restart a job if not stopped manually."),
 )
 groups['jobs'].add_argument(
+    '--systemd', action='store_true',
+    help=("Install and run the job as a systemd service."),
+)
+groups['jobs'].add_argument(
     '--executor-keys', '--executor', '-e', type=parse_executor_keys,
     help=(
         "Remotely execute jobs on an API instance."

@@ -46,8 +46,8 @@ def _complete_start(
     )
 
     options = {
-        'job': _complete_delete_jobs,
-        'jobs': _complete_delete_jobs,
+        'job': _complete_start_jobs,
+        'jobs': _complete_start_jobs,
         'connector': _complete_start_connectors,
         'connectors': _complete_start_connectors,
     }
@@ -83,13 +83,13 @@ def _start_api(action: Optional[List[str]] = None, **kw):
     return actions['api'](action=['start'], **kw)
 
 def _start_jobs(
-        action: Optional[List[str]] = None,
-        name: Optional[str] = None,
-        sysargs: Optional[List[str]] = None,
-        executor_keys: Optional[str] = None,
-        debug: bool = False,
-        **kw
-    ) -> SuccessTuple:
+    action: Optional[List[str]] = None,
+    name: Optional[str] = None,
+    sysargs: Optional[List[str]] = None,
+    executor_keys: Optional[str] = None,
+    debug: bool = False,
+    **kw
+) -> SuccessTuple:
     """
     Run a Meerschaum action as a background job.
     
@@ -140,7 +140,7 @@ def _start_jobs(
     from meerschaum.utils.misc import items_str
 
     names = []
-    jobs = get_filtered_jobs(executor_keys, debug=debug)
+    jobs = get_filtered_jobs(executor_keys, action, debug=debug)
 
     new_job = len(list(action)) > 0
     _potential_jobs = {'known': [], 'unknown': []}
@@ -173,7 +173,7 @@ def _start_jobs(
                         + items_str(_potential_jobs['unknown'])
                         + " will be ignored."
                     ),
-                    stack = False
+                    stack=False
                 )
 
         ### Determine the `names` list.

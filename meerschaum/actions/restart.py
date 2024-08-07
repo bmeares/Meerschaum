@@ -60,33 +60,48 @@ def _complete_restart(
 def _restart_jobs(
     action: Optional[List[str]] = None,
     executor_keys: Optional[str] = None,
+    loop: bool = False,
+    min_seconds: Optional[float] = 1.0,
     debug: bool = False,
     **kwargs: Any
 ) -> SuccessTuple:
     """
     Restart stopped jobs which have not been manually stopped.
     """
+    import time
     from meerschaum.utils.jobs import (
         get_restart_jobs,
         get_filtered_jobs,
-        get_jobs,
         check_restart_jobs,
     )
     from meerschaum.utils.misc import items_str
     from meerschaum.utils.warnings import info
     action = action or []
-    jobs = get_filtered_jobs(executor_keys, action, include_hidden=True, debug=debug)
-    restart_jobs = get_restart_jobs(executor_keys, jobs, debug=debug) if not action else jobs
 
-    if not restart_jobs:
-        return True, "No jobs need to be restarted."
+    while True:
+        jobs = get_filtered_jobs(executor_keys, action, include_hidden=True, debug=debug)
+        restart_jobs = get_restart_jobs(executor_keys, jobs, debug=debug) if not action else jobs
+        if not restart_jobs and not loop:
+            return True, "No jobs need to be restarted."
 
-    info(
-        "Checking job"
-        + ('s' if len(restart_jobs) != 1 else '')
-        + ' '
-        + items_str(list(restart_jobs.keys()))
-        + '...'
-    )
+        info(
+            "Checking job"
+            + ('s' if len(restart_jobs) != 1 else '')
+            + ' '
+            + items_str(list(restart_jobs.keys()))
+            + '...'
+        )
 
-    return check_restart_jobs(executor_keys, restart_jobs, debug=debug)
+        check_success, check_msg = check_restart_jobs(
+            executor_keys,
+            restart_jobs,
+            debug=debug,
+        )
+        if not loop:
+            break
+
+        if min_seconds is not None and min_seconds != 0.0:
+            info(f"Sleeping for {min_seconds} seconds...")
+            time.sleep(min_seconds)
+
+    return check_success, check_msg

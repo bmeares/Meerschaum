@@ -287,5 +287,3 @@ def stop_check_jobs_thread():
             CHECK_JOBS_LOCK_PATH.unlink()
     except Exception as e:
         warn(f"Failed to remove check jobs lock file:\n{e}")
-
-    return _check_loop_stop_thread

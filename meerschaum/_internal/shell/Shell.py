@@ -301,7 +301,7 @@ class Shell(cmd.Cmd):
         self._update_thread = run_version_check_thread(debug=shell_attrs.get('debug', False))
 
         from meerschaum.utils.jobs import start_check_jobs_thread
-        self._check_jobs_thread = start_check_jobs_thread()
+        #  start_check_jobs_thread()
 
 
     def load_config(self, instance: Optional[str] = None):
@@ -567,11 +567,6 @@ class Shell(cmd.Cmd):
             self.emptyline()
             return ""
 
-        ### If the `--daemon` flag is present, prepend 'start job'.
-        if args.get('daemon', False) and 'stack' not in args['action']:
-            args['action'] = ['start', 'jobs'] + args['action']
-            main_action_name = 'start'
-
         positional_only = (main_action_name not in shell_attrs['_actions'])
         if positional_only:
             return original_line
@@ -580,7 +575,6 @@ class Shell(cmd.Cmd):
 
         try:
             success_tuple = entry_with_args(_actions=shell_attrs['_actions'], **args)
-            #  success_tuple = entry_with_args(**args)
         except Exception as e:
             success_tuple = False, str(e)
 
@@ -588,9 +582,9 @@ class Shell(cmd.Cmd):
         if isinstance(success_tuple, tuple):
             print_tuple(
                 success_tuple,
-                skip_common = (not shell_attrs['debug']),
-                upper_padding = 1,
-                lower_padding = 0,
+                skip_common=(not shell_attrs['debug']),
+                upper_padding=1,
+                lower_padding=0,
             )
 
         ### Restore the old working directory.

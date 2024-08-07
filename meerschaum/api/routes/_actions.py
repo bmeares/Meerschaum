@@ -79,7 +79,9 @@ async def do_action_websocket(websocket: WebSocket):
     """
     Execute an action and stream the output to the client.
     """
+    print('waiting to accept...')
     await websocket.accept()
+    print('accepted!')
 
     stop_event = asyncio.Event()
 
@@ -92,6 +94,7 @@ async def do_action_websocket(websocket: WebSocket):
         )
 
     job = None
+    job_name = '.' + generate_password(12)
     try:
         token = await websocket.receive_text()
         user = await manager.get_current_user(token) if not no_auth else None
@@ -101,7 +104,11 @@ async def do_action_websocket(websocket: WebSocket):
                 detail="Invalid credentials.",
             )
 
-        auth_success, auth_msg = is_user_allowed_to_execute(user)
+        auth_success, auth_msg = (
+            is_user_allowed_to_execute(user)
+            if not no_auth
+            else (True, "Success")
+        )
         auth_payload = {
             'is_authenticated': auth_success,
             'timestamp': datetime.now(timezone.utc).isoformat(),
@@ -116,7 +123,6 @@ async def do_action_websocket(websocket: WebSocket):
         _ = kwargs.pop('shell', None)
         sysargs = parse_dict_to_sysargs(kwargs)
 
-        job_name = '.' + generate_password(12)
         job = Job(
             job_name,
             sysargs,

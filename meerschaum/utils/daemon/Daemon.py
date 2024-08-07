@@ -294,6 +294,7 @@ class Daemon:
             with self._daemon_context:
                 sys.stdin = self.stdin_file
                 os.environ[STATIC_CONFIG['environment']['daemon_id']] = self.daemon_id
+                os.environ['PYTHONUNBUFFERED'] = '1'
                 self.rotating_log.refresh_files(start_interception=True)
                 result = None
                 try:

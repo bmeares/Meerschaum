@@ -11,9 +11,9 @@ import meerschaum as mrsm
 from meerschaum.utils.typing import List, Any, SuccessTuple, Optional, Dict
 
 def edit(
-        action: Optional[List[str]] = None,
-        **kw: Any
-    ) -> SuccessTuple:
+    action: Optional[List[str]] = None,
+    **kw: Any
+) -> SuccessTuple:
     """
     Edit an existing element.
     """

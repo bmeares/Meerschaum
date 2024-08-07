@@ -87,6 +87,10 @@ def entry_with_args(
             kw['action'].insert(1, api_label)
             skip_schedule = True
 
+    ### If the `--daemon` flag is present, prepend 'start job'.
+    if kw.get('daemon', False) and kw['action'][0] != 'stack':
+        kw['action'] = ['start', 'jobs'] + kw['action']
+
     action_function = get_action(kw['action'], _actions=_actions)
 
     ### If action does not exist, execute in a subshell.
@@ -166,10 +170,10 @@ def _do_action_wrapper(action_function, plugin_name, **kw):
 _shells = []
 _shell = None
 def get_shell(
-        sysargs: Optional[List[str]] = None,
-        reload: bool = False,
-        debug: bool = False
-    ):
+    sysargs: Optional[List[str]] = None,
+    reload: bool = False,
+    debug: bool = False
+):
     """Initialize and return the Meerschaum shell object."""
     global _shell
     from meerschaum.utils.debug import dprint
