@@ -560,7 +560,7 @@ def _show_jobs(
     """
     Show the currently running and stopped jobs.
     """
-    from meerschaum.utils.jobs import get_filtered_jobs
+    from meerschaum.jobs import get_filtered_jobs
     from meerschaum.utils.formatting._jobs import pprint_jobs
 
     jobs = get_filtered_jobs(executor_keys, action, debug=debug)
@@ -602,7 +602,7 @@ def _show_logs(
     from functools import partial
     from datetime import datetime, timezone
     from meerschaum.utils.packages import attempt_import, import_rich
-    from meerschaum.utils.jobs import get_filtered_jobs, Job
+    from meerschaum.jobs import get_filtered_jobs, Job
     from meerschaum.utils.warnings import warn, info
     from meerschaum.utils.formatting import get_console, ANSI, UNICODE
     from meerschaum.utils.misc import tail

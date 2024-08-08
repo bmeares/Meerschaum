@@ -16,7 +16,7 @@ from meerschaum.api import CHECK_UPDATE
 dbc = attempt_import('dash_bootstrap_components', lazy=False, check_update=CHECK_UPDATE)
 html, dcc = import_html(), import_dcc()
 dateutil_parser = attempt_import('dateutil.parser', check_update=CHECK_UPDATE)
-from meerschaum.utils.jobs import (
+from meerschaum.jobs import (
     get_jobs,
     get_running_jobs,
     get_paused_jobs,

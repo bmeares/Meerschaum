@@ -122,7 +122,7 @@ def _start_jobs(
     import textwrap
     from meerschaum.utils.warnings import warn, info
     from meerschaum.utils.daemon._names import get_new_daemon_name
-    from meerschaum.utils.jobs import (
+    from meerschaum.jobs import (
         Job,
         get_jobs,
         get_filtered_jobs,

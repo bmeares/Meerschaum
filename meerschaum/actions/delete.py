@@ -403,7 +403,7 @@ def _delete_jobs(
     If the job is running, ask to kill the job first.
 
     """
-    from meerschaum.utils.jobs import (
+    from meerschaum.jobs import (
         Job,
         get_running_jobs,
         get_stopped_jobs,
@@ -502,7 +502,7 @@ def _complete_delete_jobs(
     **kw
 ) -> List[str]:
     from meerschaum._internal.shell.Shell import shell_attrs
-    from meerschaum.utils.jobs import (
+    from meerschaum.jobs import (
         get_filtered_jobs,
         get_restart_jobs,
         get_stopped_jobs,

@@ -71,7 +71,7 @@ def _stop_jobs(
     
     To see running processes, run `show jobs`.
     """
-    from meerschaum.utils.jobs import (
+    from meerschaum.jobs import (
         get_filtered_jobs,
         get_running_jobs,
         get_paused_jobs,

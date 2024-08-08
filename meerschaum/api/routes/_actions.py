@@ -16,7 +16,7 @@ from datetime import datetime, timezone
 from fastapi import WebSocket, WebSocketDisconnect
 
 from meerschaum.utils.misc import generate_password
-from meerschaum.utils.jobs import Job
+from meerschaum.jobs import Job
 from meerschaum.utils.warnings import warn
 from meerschaum.utils.typing import SuccessTuple, Union, List, Dict
 from meerschaum.api import (

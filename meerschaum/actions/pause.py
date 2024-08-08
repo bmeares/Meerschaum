@@ -72,7 +72,7 @@ def _pause_jobs(
     from meerschaum.utils.daemon import (
         get_filtered_daemons, get_running_daemons, get_stopped_daemons, get_paused_daemons,
     )
-    from meerschaum.utils.jobs import (
+    from meerschaum.jobs import (
         get_filtered_jobs,
         get_running_jobs,
         get_stopped_jobs,

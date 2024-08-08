@@ -9,8 +9,10 @@ Higher-level utilities for managing `meerschaum.utils.daemon.Daemon`.
 import pathlib
 
 import meerschaum as mrsm
-from meerschaum.utils.jobs._Job import Job, StopMonitoringLogs
 from meerschaum.utils.typing import Dict, Optional, List, Callable, Any, SuccessTuple
+
+from meerschaum.jobs._Job import Job, StopMonitoringLogs
+from meerschaum.jobs._Executor import Executor
 
 __all__ = (
     'Job',
@@ -21,6 +23,8 @@ __all__ = (
     'get_stopped_jobs',
     'get_paused_jobs',
     'get_restart_jobs',
+    'Executor',
+    'make_executor',
     'check_restart_jobs',
     'start_check_jobs_thread',
     'stop_check_jobs_thread',
@@ -52,7 +56,7 @@ def get_jobs(
     if executor_keys == 'local':
         executor_keys = None
 
-    if executor_keys is not None:
+    if executor_keys not in (None, 'systemd'):
         try:
             _ = parse_connector_keys(executor_keys, construct=False)
             conn = mrsm.get_connector(executor_keys)
@@ -178,6 +182,14 @@ def get_stopped_jobs(
         for name, job in jobs.items()
         if job.status == 'stopped'
     }
+
+
+def make_executor(cls):
+    """
+    Register a class as an `Executor`.
+    """
+    from meerschaum.connectors import make_connector
+    return make_connector(cls, _is_executor=True)
 
 
 def check_restart_jobs(

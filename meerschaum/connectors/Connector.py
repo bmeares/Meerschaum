@@ -200,7 +200,13 @@ class Connector(metaclass=abc.ABCMeta):
         _type = self.__dict__.get('type', None)
         if _type is None:
             import re
-            _type = re.sub(r'connector$', '', self.__class__.__name__.lower())
+            is_executor = self.__class__.__name__.lower().endswith('executor')
+            suffix_regex = (
+                r'connector$'
+                if not is_executor
+                else r'executor$'
+            )
+            _type = re.sub(suffix_regex, '', self.__class__.__name__.lower())
             self.__dict__['type'] = _type
         return _type
 

@@ -69,7 +69,7 @@ def _restart_jobs(
     Restart stopped jobs which have not been manually stopped.
     """
     import time
-    from meerschaum.utils.jobs import (
+    from meerschaum.jobs import (
         get_restart_jobs,
         get_filtered_jobs,
         check_restart_jobs,

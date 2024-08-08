@@ -12,7 +12,7 @@ from datetime import datetime, timezone
 
 import meerschaum as mrsm
 from meerschaum.utils.typing import List, Optional, Any, is_success_tuple, Dict
-from meerschaum.utils.jobs import (
+from meerschaum.jobs import (
     Job,
     get_jobs,
     get_running_jobs,

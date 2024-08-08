@@ -19,7 +19,7 @@ from meerschaum.utils.debug import dprint
 from meerschaum.connectors.poll import retry_connect
 from meerschaum.utils.warnings import warn
 from meerschaum._internal.term.tools import is_webterm_running
-from meerschaum.utils.jobs import start_check_jobs_thread, stop_check_jobs_thread
+from meerschaum.jobs import start_check_jobs_thread, stop_check_jobs_thread
 
 _check_jobs_thread = None
 

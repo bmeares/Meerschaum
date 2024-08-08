@@ -37,12 +37,12 @@ __pdoc__ = {
 }
 
 def make_action(
-        function: Callable[[Any], Any],
-        shell: bool = False,
-        activate: bool = True,
-        deactivate: bool = True,
-        debug: bool = False
-    ) -> Callable[[Any], Any]:
+    function: Callable[[Any], Any],
+    shell: bool = False,
+    activate: bool = True,
+    deactivate: bool = True,
+    debug: bool = False
+) -> Callable[[Any], Any]:
     """
     Make a function a Meerschaum action. Useful for plugins that are adding multiple actions.
     

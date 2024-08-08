@@ -13,7 +13,7 @@ from datetime import datetime
 
 import meerschaum as mrsm
 from meerschaum.utils.typing import Dict, Any, SuccessTuple, List, Union, Callable
-from meerschaum.utils.jobs import Job
+from meerschaum.jobs import Job
 from meerschaum.config.static import STATIC_CONFIG
 from meerschaum.utils.warnings import warn, dprint
 
@@ -226,7 +226,7 @@ async def monitor_logs_async(
     """
     Monitor a job's log files and await a callback with the changes.
     """
-    from meerschaum.utils.jobs import StopMonitoringLogs
+    from meerschaum.jobs import StopMonitoringLogs
     from meerschaum.utils.formatting._jobs import strip_timestamp_from_line
 
     websockets, websockets_exceptions = mrsm.attempt_import('websockets', 'websockets.exceptions')

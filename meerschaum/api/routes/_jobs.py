@@ -19,7 +19,7 @@ from functools import partial
 from fastapi import WebSocket, WebSocketDisconnect
 
 from meerschaum.utils.typing import Dict, Any, SuccessTuple, List, Optional, Union
-from meerschaum.utils.jobs import get_jobs as _get_jobs, Job, StopMonitoringLogs
+from meerschaum.jobs import get_jobs as _get_jobs, Job, StopMonitoringLogs
 from meerschaum.utils.warnings import warn
 
 from meerschaum.api import (

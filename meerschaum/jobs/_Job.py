@@ -6,6 +6,8 @@
 Define the Meerschaum abstraction atop daemons.
 """
 
+from __future__ import annotations
+
 import shlex
 import asyncio
 import threading
@@ -18,12 +20,17 @@ from functools import partial
 from datetime import datetime, timezone
 
 import meerschaum as mrsm
-from meerschaum.utils.typing import List, Optional, Union, SuccessTuple, Any, Dict, Callable
+from meerschaum.utils.typing import (
+    List, Optional, Union, SuccessTuple, Any, Dict, Callable, TYPE_CHECKING,
+)
 from meerschaum._internal.entry import entry
 from meerschaum.utils.warnings import warn
 from meerschaum.config.paths import LOGS_RESOURCES_PATH
 from meerschaum.config import get_config
 from meerschaum.config.static import STATIC_CONFIG
+
+if TYPE_CHECKING:
+    from meerschaum.jobs._Executor import Executor
 
 BANNED_CHARS: List[str] = [
     ',', ';', "'", '"',
@@ -114,36 +121,6 @@ class Job:
                 self._properties_patch.update({'restart': True})
                 break
 
-        if '--systemd' in self._sysargs:
-            self._properties_patch.update({'systemd': True})
-
-    def _start_systemd(self, debug: bool = False) -> SuccessTuple:
-        """
-        Start the job's systemd service (only if created with `--systemd`).
-        """
-        return self.install_systemd_service(debug=debug)
-
-    def _stop_systemd(self, debug: bool = False) -> SuccessTuple:
-        """
-        Stop the job's systemd service (only if created with `--systemd`).
-        """
-        commands = ['stop', self.systemd_service_name]
-        return self._run_systemd_command(commands, debug=debug)
-
-    def _delete_systemd(self, debug: bool = False) -> SuccessTuple:
-        """
-        Delete the job's systemd service (only if created with `--systemd`).
-        """
-        self._stop_systemd(debug=debug)
-        commands = ['disable', self.systemd_service_name]
-        disable_success, disable_msg = self._run_systemd_command(commands, debug=debug)
-        if self.systemd_service_file_path.exists():
-            try:
-                self.systemd_service_file_path.unlink()
-            except Exception:
-                pass
-        return disable_success, disable_msg
-
     def start(self, debug: bool = False) -> SuccessTuple:
         """
         Start the job's daemon.
@@ -155,9 +132,6 @@ class Job:
 
         if self.is_running():
             return True, f"{self} is already running."
-
-        if self.systemd:
-            return self._start_systemd(debug=debug)
 
         success, msg = self.daemon.run(
             keep_daemon_output=True,
@@ -174,9 +148,6 @@ class Job:
         """
         if self.executor is not None:
             return self.executor.stop_job(self.name, debug=debug)
-
-        if self.systemd:
-            return self._stop_systemd(debug=debug)
 
         if self.daemon.status == 'stopped':
             if not self.restart:
@@ -205,9 +176,6 @@ class Job:
         if self.executor is not None:
             return self.executor.pause_job(self.name, debug=debug)
 
-        if self.systemd:
-            return False, "Not implemented."
-
         pause_success, pause_msg = self.daemon.pause(timeout=timeout_seconds)
         if not pause_success:
             return pause_success, pause_msg
@@ -220,9 +188,6 @@ class Job:
         """
         if self.executor is not None:
             return self.executor.delete_job(self.name, debug=debug)
-
-        if self.systemd:
-            return self._delete_systemd(debug=debug)
 
         if self.is_running():
             stop_success, stop_msg = self.stop()
@@ -289,7 +254,7 @@ class Job:
 
         stop_event: Optional[asyncio.Event], default None
             If provided, stop monitoring when this event is set.
-            You may instead raise `meerschaum.utils.jobs.StopMonitoringLogs`
+            You may instead raise `meerschaum.jobs.StopMonitoringLogs`
             from within `callback_function` to stop monitoring.
 
         stop_on_exit: bool, default False
@@ -362,7 +327,7 @@ class Job:
 
         stop_event: Optional[asyncio.Event], default None
             If provided, stop monitoring when this event is set.
-            You may instead raise `meerschaum.utils.jobs.StopMonitoringLogs`
+            You may instead raise `meerschaum.jobs.StopMonitoringLogs`
             from within `callback_function` to stop monitoring.
 
         stop_on_exit: bool, default False
@@ -553,7 +518,7 @@ class Job:
         self.daemon.stdin_file.write(data)
 
     @property
-    def executor(self) -> Union['APIConnector', None]:
+    def executor(self) -> Union[Executor, None]:
         """
         If the job is remote, return the connector to the remote API instance.
         """
@@ -743,111 +708,6 @@ class Job:
         Return the job's Daemon label (joined sysargs).
         """
         return shlex.join(self.sysargs)
-
-    def as_systemd_text(self) -> str:
-        """
-        Convert this job to text for a `systemd` service file.
-        """
-        sysargs_str = shlex.join(self.sysargs)
-        mrsm_env_var_names = set([var for var in STATIC_CONFIG['environment'].values()])
-        mrsm_env_vars = {
-            key: val
-            for key, val in os.environ.items()
-            if key in mrsm_env_var_names
-        }
-
-        ### Add new environment variables for the service process.
-        mrsm_env_vars.update({
-            'MRSM_DAEMON_ID': self.name,
-            'PYTHONUNBUFFERED': '1',
-
-        })
-        environment_lines = [
-            f"Environment={key}={val}"
-            for key, val in mrsm_env_vars.items()
-        ]
-        environment_str = '\n'.join(environment_lines)
-
-        service_text = (
-            "[Unit]\n"
-            f"Description=Run the job '{self.name}'\n"
-            "\n"
-            "[Service]\n"
-            f"ExecStart={sys.executable} -m meerschaum {sysargs_str}\n"
-            f"{environment_str}\n"
-            "\n"
-            "[Install]\n"
-            "WantedBy=default.target\n"
-        )
-        return service_text
-
-    def _run_systemd_command(self, command_args: List[str], debug: bool = False) -> SuccessTuple:
-        """
-        Run a command via systemd.
-        """
-        if not self.systemd:
-            return False, f"{self} is not managed by systemd."
-
-        from meerschaum.utils.process import run_process
-        if len(command_args) < 2:
-            return False, "Not enough arguments."
-
-        if command_args[:2] != ['systemctl', '--user']:
-            command_args = ['systemctl', '--user'] + command_args
-
-        command_success = run_process(
-            command_args,
-            foreground=True,
-            capture_output=False,
-        ) == 0
-        command_msg = (
-            "Success"
-            if command_success
-            else f"Failed to execute command `{shlex.join(command_args)}`."
-        )
-        return command_success, command_msg
-
-    @property
-    def systemd_service_name(self) -> str:
-        """
-        Return the name to use for a `systemd` service.
-        """
-        return f"mrsm-{self.name}.service"
-
-    @property
-    def systemd_service_file_path(self) -> pathlib.Path:
-        """
-        Return the systemd service path.
-        """
-        from meerschaum.config.paths import SYSTEMD_USER_RESOURCES_PATH
-        return SYSTEMD_USER_RESOURCES_PATH / self.systemd_service_name
-
-    def install_systemd_service(self, debug: bool = False) -> SuccessTuple:
-        """
-        Install this job as a service to be run by `systemd`.
-        """
-        service_name = self.systemd_service_name
-        service_file_path =  self.systemd_service_file_path
-
-        with open(service_file_path, 'w+', encoding='utf-8') as f:
-            f.write(self.as_systemd_text())
-
-        commands = [
-            ['daemon-reload'],
-            ['enable', service_name],
-            ['start', service_name],
-        ]
-
-        fails = 0
-        for command_list in commands:
-            command_success, command_msg = self._run_systemd_command(command_list)
-            if not command_success:
-                fails += 1
-
-        if fails > 1:
-            return False, "Failed to reload systemd."
-
-        return True, f"Started {self} via systemd."
 
     def __str__(self) -> str:
         sysargs = self.sysargs

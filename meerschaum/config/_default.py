@@ -53,6 +53,9 @@ default_meerschaum_config = {
                 'protocol': 'https',
             },
         },
+        'systemd': {
+            'main': {},
+        },
     },
 }
 default_system_config = {
