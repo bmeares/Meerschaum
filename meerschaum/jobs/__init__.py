@@ -30,6 +30,8 @@ __all__ = (
     'stop_check_jobs_thread',
 )
 
+executor_types: List[str] = ['api']
+
 
 def get_jobs(
     executor_keys: Optional[str] = None,
@@ -56,7 +58,7 @@ def get_jobs(
     if executor_keys == 'local':
         executor_keys = None
 
-    if executor_keys not in (None, 'systemd'):
+    if executor_keys is not None:
         try:
             _ = parse_connector_keys(executor_keys, construct=False)
             conn = mrsm.get_connector(executor_keys)
@@ -188,7 +190,12 @@ def make_executor(cls):
     """
     Register a class as an `Executor`.
     """
+    import re
     from meerschaum.connectors import make_connector
+    suffix_regex = r'executor$'
+    typ = re.sub(suffix_regex, '', cls.__name__.lower())
+    if typ not in executor_types:
+        executor_types.append(typ)
     return make_connector(cls, _is_executor=True)
 
 

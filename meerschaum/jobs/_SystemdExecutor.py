@@ -11,8 +11,9 @@ import shlex
 import sys
 
 from meerschaum.jobs import Job, Executor, make_executor
-from meerschaum.utils.typing import Dict, Any, List, SuccessTuple
+from meerschaum.utils.typing import Dict, Any, List, SuccessTuple, Union
 from meerschaum.config.static import STATIC_CONFIG
+from meerschaum.utils.warnings import warn, dprint
 
 
 @make_executor
@@ -21,28 +22,31 @@ class SystemdExecutor(Executor):
     Execute Meerschaum jobs via `systemd`.
     """
 
+    def get_job_names(self, debug: bool = False) -> List[str]:
+        """
+        Return a list of existing jobs.
+        """
+        from meerschaum.config.paths import SYSTEMD_USER_RESOURCES_PATH
+        return [
+            service_name[len('mrsm-'):(-1 * len('.service'))]
+            for service_name in os.listdir(SYSTEMD_USER_RESOURCES_PATH)
+            if service_name.startswith('mrsm-')
+        ]
+
     def get_job_exists(self, name: str, debug: bool = False) -> bool:
         """
         Return whether a job exists.
         """
-        from meerschaum.config.paths import SYSTEMD_USER_RESOURCES_PATH
-        user_services = [
-            name
-            for name in os.listdir(SYSTEMD_USER_RESOURCES_PATH)
-            if name.startswith('mrsm-')
-        ]
+        user_services = self.get_job_names(debug=debug)
+        if debug:
+            dprint(f'Existing services: {user_services}')
         return name in user_services
     
-    def get_jobs(self) -> Dict[str, Job]:
+    def get_jobs(self, debug: bool = False) -> Dict[str, Job]:
         """
         Return a dictionary of `systemd` Jobs.
         """
-        from meerschaum.config.paths import SYSTEMD_USER_RESOURCES_PATH
-        user_services = [
-            name
-            for name in os.listdir(SYSTEMD_USER_RESOURCES_PATH)
-            if name.startswith('mrsm-')
-        ]
+        user_services = self.get_job_names(debug=debug)
         return {
             name: Job(name, executor_keys=str(self))
             for name in user_services
@@ -99,7 +103,30 @@ class SystemdExecutor(Executor):
         )
         return service_text
 
-    def run_command(self, command_args: List[str]) -> SuccessTuple:
+    def get_job_properties(name: str, debug: bool = False) -> Dict[str, Any]:
+        ### TODO: store properties
+        return {}
+
+    def get_sysargs(self, name: str, debug: bool = False) -> Union[List[str], None]:
+        """
+        Return the sysargs from the service file.
+        """
+        service_file_path = self.get_service_file_path(name, debug=debug)
+        if not service_file_path.exists():
+            return None
+
+        with open(service_file_path, 'r', encoding='utf-8') as f:
+            service_lines = f.readlines()
+
+        for line in service_lines:
+            if line.startswith('ExecStart='):
+                sysargs_str = line.split(' -m meerschaum ')[-1]
+                return shlex.split(sysargs_str)
+
+        return None
+
+
+    def run_command(self, command_args: List[str], debug: bool = False,) -> SuccessTuple:
         """
         Run a `systemd` command and return success.
         """
@@ -113,7 +140,7 @@ class SystemdExecutor(Executor):
         command_success = run_process(
             command_args,
             foreground=True,
-            capture_output=False,
+            capture_output=(not debug),
         ) == 0
         command_msg = (
             "Success"
@@ -147,7 +174,7 @@ class SystemdExecutor(Executor):
         if fails > 1:
             return False, "Failed to reload systemd."
 
-        return True, f"Started {self} via systemd."
+        return True, f"Started job '{name}' via systemd."
 
     def start_job(self, name: str, debug: bool = False) -> SuccessTuple:
         """

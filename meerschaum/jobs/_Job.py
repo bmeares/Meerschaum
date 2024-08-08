@@ -558,13 +558,6 @@ class Job:
         return self.daemon.properties.get('restart', False)
 
     @property
-    def systemd(self) -> bool:
-        """
-        Return whether to run this job via systemd.
-        """
-        return self.daemon.properties.get('systemd', False)
-
-    @property
     def result(self) -> SuccessTuple:
         """
         Return the `SuccessTuple` when the job has terminated.

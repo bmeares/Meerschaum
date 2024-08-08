@@ -697,14 +697,27 @@ class Shell(cmd.Cmd):
         return True, "Success"
 
 
-    def complete_instance(self, text: str, line: str, begin_index: int, end_index: int):
+    def complete_instance(
+        self,
+        text: str,
+        line: str,
+        begin_index: int,
+        end_index: int,
+        _executor: bool = False,
+    ):
         from meerschaum.utils.misc import get_connector_labels
         from meerschaum._internal.arguments._parse_arguments import parse_line
-        from meerschaum.connectors import instance_types
+        from meerschaum.connectors import instance_types, _load_builtin_custom_connectors
+        if _executor:
+            _load_builtin_custom_connectors()
+            from meerschaum.jobs import executor_types
+
+        conn_types = instance_types if not _executor else executor_types
+
         args = parse_line(line)
         action = args['action']
         _text = action[1] if len(action) > 1 else ""
-        return get_connector_labels(*instance_types, search_term=_text, ignore_exact_match=True)
+        return get_connector_labels(*conn_types, search_term=_text, ignore_exact_match=True)
 
 
     def do_repo(
@@ -809,8 +822,9 @@ class Shell(cmd.Cmd):
         return True, "Success"
 
     def complete_executor(self, *args) -> List[str]:
-        results = self.complete_instance(*args)
-        return ['local'] + [result for result in results if result.startswith('api:')]
+        from meerschaum.jobs import executor_types
+        results = self.complete_instance(*args, _executor=True)
+        return ['local'] + [result for result in results if result.split(':')[0] in executor_types]
 
     def do_help(self, line: str, executor_keys=None) -> List[str]:
         """
