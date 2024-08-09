@@ -60,6 +60,10 @@ class Job:
         sysargs: Union[List[str], str, None] = None,
         executor_keys: Optional[str] = None,
         _properties: Optional[Dict[str, Any]] = None,
+        _rotating_log = None,
+        _stdin_file = None,
+        _status_hook = None,
+        _result_hook = None,
     ):
         """
         Create a new job to manage a `meerschaum.utils.daemon.Daemon`.
@@ -87,18 +91,39 @@ class Job:
         if isinstance(sysargs, str):
             sysargs = shlex.split(sysargs)
 
-        if executor_keys == 'local':
-            executor_keys = None
+        ### NOTE: 'local' and 'systemd' executors are being coalesced.
+        if executor_keys is None:
+            from meerschaum.jobs import get_executor_keys_from_context
+            executor_keys = get_executor_keys_from_context()
+
         self.executor_keys = executor_keys
         self.name = name
         try:
             self._daemon = (
                 Daemon(daemon_id=name)
-                if executor_keys is not None
+                if executor_keys == 'local'
                 else None
             )
         except Exception:
             self._daemon = None
+
+        ### Handle any injected dependencies.
+        if _rotating_log is not None:
+            self._rotating_log = _rotating_log
+            if self._daemon is not None:
+                self._daemon._rotating_log = _rotating_log
+
+        if _stdin_file is not None:
+            self._stdin_file = _stdin_file
+            if self._daemon is not None:
+                self._daemon._stdin_file = _stdin_file
+                self._daemon._blocking_stdin_file_path = _stdin_file.blocking_file_path
+
+        if _status_hook is not None:
+            self._status_hook = _status_hook
+
+        if _result_hook is not None:
+            self._result_hook = _result_hook
 
         self._properties_patch = _properties or {}
 
@@ -120,6 +145,71 @@ class Job:
             if restart_flag in self._sysargs:
                 self._properties_patch.update({'restart': True})
                 break
+
+        if '--systemd' in self._sysargs:
+            self._properties_patch.update({'systemd': True})
+
+    @staticmethod
+    def from_pid(pid: int, executor_keys: Optional[str] = None) -> Job:
+        """
+        Build a `Job` from the PID of a running Meerschaum process.
+
+        Parameters
+        ----------
+        pid: int
+            The PID of the process.
+
+        executor_keys: Optional[str], default None
+            The executor keys to assign to the job.
+        """
+        from meerschaum.config.paths import DAEMON_RESOURCES_PATH
+
+        psutil = mrsm.attempt_import('psutil')
+        try:
+            process = psutil.Process(pid)
+        except psutil.NoSuchProcess as e:
+            warn(f"Process with PID {pid} does not exist.", stack=False)
+            raise e
+
+        command_args = process.cmdline()
+        is_daemon = command_args[1] == '-c'
+
+        if is_daemon:
+            daemon_id = command_args[-1].split('daemon_id=')[-1].split(')')[0].replace("'", '')
+            root_dir = process.environ().get(STATIC_CONFIG['environment']['root'], None)
+            if root_dir is None:
+                from meerschaum.config.paths import ROOT_DIR_PATH
+                root_dir = ROOT_DIR_PATH
+            jobs_dir = root_dir / DAEMON_RESOURCES_PATH.name
+            daemon_dir = jobs_dir / daemon_id
+            pid_file = daemon_dir / 'process.pid'
+            properties_path = daemon_dir / 'properties.json'
+            pickle_path = daemon_dir / 'pickle.pkl'
+
+            if pid_file.exists():
+                with open(pid_file, 'r', encoding='utf-8') as f:
+                    daemon_pid = int(f.read())
+                
+                if pid != daemon_pid:
+                    raise EnvironmentError(f"Differing PIDs: {pid=}, {daemon_pid=}")
+            else:
+                raise EnvironmentError(f"Is job '{daemon_id}' running?")
+
+            return Job(daemon_id, executor_keys=executor_keys)
+
+        from meerschaum._internal.arguments._parse_arguments import parse_arguments
+        from meerschaum.utils.daemon import get_new_daemon_name
+
+        mrsm_ix = 0
+        for i, arg in enumerate(command_args):
+            if 'mrsm' in arg or 'meerschaum' in arg.lower():
+                mrsm_ix = i
+                break
+
+        sysargs = command_args[mrsm_ix+1:]
+        kwargs = parse_arguments(sysargs)
+        name = kwargs.get('name', get_new_daemon_name())
+        return Job(name, sysargs, executor_keys=executor_keys)
 
     def start(self, debug: bool = False) -> SuccessTuple:
         """
@@ -306,6 +396,9 @@ class Job:
         stop_on_exit: bool = False,
         strip_timestamps: bool = False,
         accept_input: bool = True,
+        _logs_path: Optional[pathlib.Path] = None,
+        _log = None,
+        _stdin_file = None,
         debug: bool = False,
     ):
         """
@@ -365,12 +458,14 @@ class Job:
         }
         combined_event = asyncio.Event()
         emitted_text = False
+        stdin_file = _stdin_file if _stdin_file is not None else self.daemon.stdin_file
 
         async def check_job_status():
             nonlocal emitted_text
             stopped_event = events.get('stopped', None)
             if stopped_event is None:
                 return
+
             sleep_time = 0.1
             while sleep_time < 60:
                 if self.status == 'stopped':
@@ -418,7 +513,8 @@ class Job:
                     break
                 if not data.endswith('\n'):
                     data += '\n'
-                self.daemon.stdin_file.write(data)
+
+                stdin_file.write(data)
                 await asyncio.sleep(0.1)
 
         async def combine_events():
@@ -446,7 +542,7 @@ class Job:
         check_blocking_on_input_task = asyncio.create_task(check_blocking_on_input())
         combine_events_task = asyncio.create_task(combine_events())
 
-        log = self.daemon.rotating_log
+        log = _log if _log is not None else self.daemon.rotating_log
         lines_to_show = get_config('jobs', 'logs', 'lines_to_show')
 
         async def emit_latest_lines():
@@ -484,7 +580,7 @@ class Job:
 
         watchfiles = mrsm.attempt_import('watchfiles')
         async for changes in watchfiles.awatch(
-            LOGS_RESOURCES_PATH,
+            _logs_path or LOGS_RESOURCES_PATH,
             stop_event=combined_event,
         ):
             for change in changes:
@@ -511,10 +607,6 @@ class Job:
         """
         Write to a job's daemon's `stdin`.
         """
-        ### TODO implement remote method?
-        if self.executor is not None:
-            pass
-
         self.daemon.stdin_file.write(data)
 
     @property
@@ -524,7 +616,7 @@ class Job:
         """
         return (
             mrsm.get_connector(self.executor_keys)
-            if self.executor_keys is not None
+            if self.executor_keys != 'local'
             else None
         )
 
@@ -533,10 +625,11 @@ class Job:
         """
         Return the running status of the job's daemon.
         """
+        if '_status_hook' in self.__dict__:
+            return self._status_hook()
+
         if self.executor is not None:
-            return self.executor.get_job_metadata(
-                self.name
-            ).get('daemon', {}).get('status', 'stopped')
+            return self.executor.get_job_status(self.name)
 
         return self.daemon.status
 
@@ -555,6 +648,9 @@ class Job:
         """
         Return whether to restart a stopped job.
         """
+        if self.executor is not None:
+            return self.executor.get_job_metadata(self.name).get('restart', False)
+
         return self.daemon.properties.get('restart', False)
 
     @property
@@ -564,6 +660,15 @@ class Job:
         """
         if self.is_running():
             return True, f"{self} is running."
+
+        if '_result_hook' in self.__dict__:
+            return self._result_hook()
+
+        if self.executor is not None:
+            return (
+                self.executor.get_job_metadata(self.name)
+                .get('result', (False, "No result available."))
+            )
 
         _result = self.daemon.properties.get('result', None)
         if _result is None:
@@ -579,7 +684,9 @@ class Job:
         if self._sysargs:
             return self._sysargs
 
-        #  target_args = self.daemon.properties.get('target', {}).get('args', None)
+        if self.executor is not None:
+            return self.executor.get_job_metadata(self.name).get('sysargs', [])
+
         target_args = self.daemon.target_args
         if target_args is None:
             return []
@@ -610,6 +717,12 @@ class Job:
             label=shlex.join(self._sysargs),
             properties=properties,
         )
+        if '_rotating_log' in self.__dict__:
+            self._daemon._rotating_log = self._rotating_log
+
+        if '_stdin_file' in self.__dict__:
+            self._daemon._stdin_file = self._stdin_file
+            self._daemon._blocking_stdin_file_path = self._stdin_file.blocking_file_path
 
         return self._daemon
 
@@ -618,6 +731,16 @@ class Job:
         """
         The datetime when the job began running.
         """
+        if self.executor is not None:
+            began_str = self.executor.get_job_began(name)
+            if began_str is None:
+                return None
+            return (
+                datetime.fromisoformat(began_str)
+                .astimezone(timezone.utc)
+                .replace(tzinfo=None)
+            )
+
         began_str = self.daemon.properties.get('process', {}).get('began', None)
         if began_str is None:
             return None
@@ -629,6 +752,14 @@ class Job:
         """
         The datetime when the job stopped running.
         """
+        if self.executor is not None:
+            ended_str = self.executor.get_job_ended(self.name)
+            return (
+                datetime.fromisoformat(ended_str)
+                .astimezone(timezone.utc)
+                .replace(tzinfo=None)
+            )
+
         ended_str = self.daemon.properties.get('process', {}).get('ended', None)
         if ended_str is None:
             return None

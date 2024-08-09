@@ -8,7 +8,29 @@ The entry point for launching Meerschaum actions.
 """
 
 from __future__ import annotations
+
+import os
+import sys
 from meerschaum.utils.typing import SuccessTuple, List, Optional, Dict, Callable, Any
+from meerschaum.config.static import STATIC_CONFIG as _STATIC_CONFIG
+
+_systemd_result_path = None
+if (_STATIC_CONFIG['environment']['systemd_log_path']) in os.environ:
+    from meerschaum.utils.daemon import RotatingFile as _RotatingFile, StdinFile as _StdinFile
+    from meerschaum.config import get_config as _get_config
+
+    _systemd_result_path = os.environ[_STATIC_CONFIG['environment']['systemd_result_path']]
+    _systemd_log_path = os.environ[_STATIC_CONFIG['environment']['systemd_log_path']]
+    _systemd_log = _RotatingFile(
+        _systemd_log_path,
+        write_timestamps=True,
+        timestamp_format=_get_config('jobs', 'logs', 'timestamps', 'format'),
+    )
+    sys.stdout = _systemd_log
+    sys.stderr = _systemd_log
+    _systemd_stdin_path = os.environ.get(_STATIC_CONFIG['environment']['systemd_stdin_path'], None)
+    if _systemd_stdin_path:
+        sys.stdin = _StdinFile(_systemd_stdin_path)
 
 def entry(sysargs: Optional[List[str]] = None) -> SuccessTuple:
     """
@@ -121,7 +143,6 @@ def entry_with_args(
         **kw
     )
 
-
     if kw.get('schedule', None) and not skip_schedule:
         from meerschaum.utils.schedule import schedule_function
         from meerschaum.utils.misc import interval_str
@@ -137,6 +158,11 @@ def entry_with_args(
     ### Clean up stray virtual environments.
     for venv in [venv for venv in active_venvs]:
         deactivate_venv(venv, debug=kw.get('debug', False), force=True)
+
+    if _systemd_result_path:
+        import json
+        with open(_systemd_result_path, 'w+', encoding='utf-8') as f:
+            json.dump(result, f)
 
     return result
 

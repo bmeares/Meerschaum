@@ -130,6 +130,7 @@ def _start_jobs(
         get_running_jobs,
         get_paused_jobs,
         get_restart_jobs,
+        _install_healthcheck_job,
     )
     from meerschaum._internal.arguments._parse_arguments import parse_arguments
     from meerschaum.actions import actions
@@ -301,6 +302,7 @@ def _start_jobs(
         + ("Failed to start job" + ("s" if len(_failures) != 1 else '')
             + f" {items_str(_failures)}." if _failures else '')
     )
+    _install_healthcheck_job()
     return len(_failures) == 0, msg
 
 

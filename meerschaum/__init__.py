@@ -24,7 +24,7 @@ from meerschaum.utils.packages import attempt_import
 from meerschaum.core.Pipe import Pipe
 from meerschaum.plugins import Plugin
 from meerschaum.utils.venv import Venv
-from meerschaum.jobs import Job
+from meerschaum.jobs import Job, Executor, make_executor
 from meerschaum.connectors import get_connector, Connector, make_connector
 from meerschaum.utils import get_pipes
 from meerschaum.utils.formatting import pprint
@@ -45,7 +45,8 @@ __all__ = (
     "Venv",
     "Plugin",
     "Job",
-    "Daemon",
+    "Executor",
+    "make_executor",
     "pprint",
     "attempt_import",
     "actions",

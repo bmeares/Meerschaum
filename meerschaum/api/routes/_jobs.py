@@ -19,7 +19,12 @@ from functools import partial
 from fastapi import WebSocket, WebSocketDisconnect
 
 from meerschaum.utils.typing import Dict, Any, SuccessTuple, List, Optional, Union
-from meerschaum.jobs import get_jobs as _get_jobs, Job, StopMonitoringLogs
+from meerschaum.jobs import (
+    get_jobs as _get_jobs,
+    Job,
+    StopMonitoringLogs,
+    get_executor_keys_from_context,
+)
 from meerschaum.utils.warnings import warn
 
 from meerschaum.api import (
@@ -35,6 +40,7 @@ from meerschaum.config.static import STATIC_CONFIG
 
 JOBS_STDIN_MESSAGE: str = STATIC_CONFIG['api']['jobs']['stdin_message']
 JOBS_STOP_MESSAGE: str = STATIC_CONFIG['api']['jobs']['stop_message']
+EXECUTOR_KEYS: str = get_executor_keys_from_context()
 
 
 @app.get(endpoints['jobs'], tags=['Jobs'])
@@ -46,15 +52,21 @@ def get_jobs(
     """
     Return metadata about the current jobs.
     """
-    jobs = _get_jobs()
+    jobs = _get_jobs(executor_keys=EXECUTOR_KEYS, combine_local_and_systemd=False)
     return {
         name: {
             'sysargs': job.sysargs,
             'result': job.result,
+            'restart': job.restart,
+            'status': job.status,
             'daemon': {
-                'status': job.daemon.status,
-                'pid': job.daemon.pid,
-                'properties': job.daemon.properties,
+                'status': job.daemon.status if job.executor_keys is None else job.status,
+                'pid': job.pid,
+                'properties': (
+                    job.daemon.properties
+                    if job.executor is None
+                    else job.executor.get_job_properties(name)
+                ),
             },
         }
         for name, job in jobs.items()
@@ -71,7 +83,7 @@ def get_job(
     """
     Return metadata for a single job.
     """
-    job = Job(name)
+    job = Job(name, executor_keys=EXECUTOR_KEYS)
     if not job.exists():
         raise fastapi.HTTPException(
             status_code=404,
@@ -81,10 +93,16 @@ def get_job(
     return {
         'sysargs': job.sysargs,
         'result': job.result,
+        'restart': job.restart,
+        'status': job.status,
         'daemon': {
-            'status': job.daemon.status,
-            'pid': job.daemon.pid,
-            'properties': job.daemon.properties,
+            'status': job.daemon.status if job.executor_keys is None else job.status,
+            'pid': job.pid,
+            'properties': (
+                job.daemon.properties
+                if job.executor is None
+                else job.executor.get_job_properties(job.name)
+            ),
         },
     }
 
@@ -100,7 +118,7 @@ def create_job(
     """
     Create and start a new job.
     """
-    job = Job(name, sysargs)
+    job = Job(name, sysargs, executor_keys=EXECUTOR_KEYS)
     if job.exists():
         raise fastapi.HTTPException(
             status_code=409,
@@ -120,7 +138,7 @@ def delete_job(
     """
     Delete a job.
     """
-    job = Job(name)
+    job = Job(name, executor_keys=EXECUTOR_KEYS)
     return job.delete()
 
 
@@ -134,7 +152,7 @@ def get_job_exists(
     """
     Return whether a job exists.
     """
-    job = Job(name)
+    job = Job(name, executor_keys=EXECUTOR_KEYS)
     return job.exists()
 
 
@@ -149,7 +167,7 @@ def get_logs(
     Return a job's log text.
     To stream log text, connect to the WebSocket endpoint `/logs/{name}/ws`.
     """
-    job = Job(name)
+    job = Job(name, executor_keys=EXECUTOR_KEYS)
     if not job.exists():
         raise fastapi.HTTPException(
             status_code=404,
@@ -169,7 +187,7 @@ def start_job(
     """
     Start a job if stopped.
     """
-    job = Job(name)
+    job = Job(name, executor_keys=EXECUTOR_KEYS)
     if not job.exists():
         raise fastapi.HTTPException(
             status_code=404,
@@ -188,7 +206,7 @@ def stop_job(
     """
     Stop a job if running.
     """
-    job = Job(name)
+    job = Job(name, executor_keys=EXECUTOR_KEYS)
     if not job.exists():
         raise fastapi.HTTPException(
             status_code=404,
@@ -207,7 +225,7 @@ def pause_job(
     """
     Pause a job if running.
     """
-    job = Job(name)
+    job = Job(name, executor_keys=EXECUTOR_KEYS)
     if not job.exists():
         raise fastapi.HTTPException(
             status_code=404,
@@ -226,7 +244,7 @@ def get_stop_time(
     """
     Get the timestamp when the job was manually stopped.
     """
-    job = Job(name)
+    job = Job(name, executor_keys=EXECUTOR_KEYS)
     return job.stop_time
 
 
@@ -240,7 +258,7 @@ def get_is_blocking_on_stdin(
     """
     Return whether a job is blocking on stdin.
     """
-    job = Job(name)
+    job = Job(name, executor_keys=EXECUTOR_KEYS)
     return job.is_blocking_on_stdin()
 
 
@@ -314,7 +332,7 @@ async def logs_websocket(name: str, websocket: WebSocket):
     Stream logs from a job over a websocket.
     """
     await websocket.accept()
-    job = Job(name)
+    job = Job(name, executor_keys=EXECUTOR_KEYS)
     _job_clients[name].append(websocket)
 
     async def monitor_logs():

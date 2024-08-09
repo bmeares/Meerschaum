@@ -13,7 +13,7 @@ import os
 import selectors
 import traceback
 
-from meerschaum.utils.typing import Optional
+from meerschaum.utils.typing import Optional, Union
 from meerschaum.utils.warnings import warn
 
 
@@ -23,9 +23,12 @@ class StdinFile(io.TextIOBase):
     """
     def __init__(
         self,
-        file_path: pathlib.Path,
+        file_path: Union[pathlib.Path, str],
         lock_file_path: Optional[pathlib.Path] = None,
     ):
+        if isinstance(file_path, str):
+            file_path = pathlib.Path(file_path)
+
         self.file_path = file_path
         self.blocking_file_path = (
             lock_file_path
@@ -108,3 +111,10 @@ class StdinFile(io.TextIOBase):
 
     def is_open(self):
         return self._file_handler is not None
+
+
+    def __str__(self) -> str:
+        return f"StdinFile('{self.file_path}')"
+
+    def __repr__(self) -> str:
+        return str(self)

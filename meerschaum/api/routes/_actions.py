@@ -79,9 +79,7 @@ async def do_action_websocket(websocket: WebSocket):
     """
     Execute an action and stream the output to the client.
     """
-    print('waiting to accept...')
     await websocket.accept()
-    print('accepted!')
 
     stop_event = asyncio.Event()
 
@@ -126,6 +124,7 @@ async def do_action_websocket(websocket: WebSocket):
         job = Job(
             job_name,
             sysargs,
+            executor_keys='local',
             _properties={
                 'logs': {
                     'write_timestamps': False,

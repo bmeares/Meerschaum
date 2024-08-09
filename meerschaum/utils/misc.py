@@ -902,6 +902,7 @@ def get_connector_labels(
     *types: str,
     search_term: str = '',
     ignore_exact_match = True,
+    _additional_options: Optional[List[str]] = None,
 ) -> List[str]:
     """
     Read connector labels from the configuration dictionary.
@@ -941,12 +942,16 @@ def get_connector_labels(
             continue
         conns += [ f'{t}:{label}' for label in connectors.get(t, {}) if label != 'default' ]
 
+    if _additional_options:
+        conns += _additional_options
+
     possibilities = [
-        c for c in conns
-            if c.startswith(search_term)
-                and c != (
-                    search_term if ignore_exact_match else ''
-                )
+        c
+        for c in conns
+        if c.startswith(search_term)
+            and c != (
+                search_term if ignore_exact_match else ''
+            )
     ]
     return sorted(possibilities)
 
@@ -1217,6 +1222,19 @@ def is_bcp_available() -> bool:
         has_bcp = False
     return has_bcp
 
+
+def is_systemd_available() -> bool:
+    """Check if running on systemd."""
+    import subprocess
+    try:
+        has_systemctl = subprocess.call(
+            ['systemctl', '-h'],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.STDOUT,
+        ) == 0
+    except Exception:
+        has_systemctl = False
+    return has_systemctl
 
 def get_last_n_lines(file_name: str, N: int):
     """

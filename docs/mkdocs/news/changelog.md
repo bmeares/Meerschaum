@@ -1,10 +1,10 @@
 # 🪵 Changelog
 
-## 2.2.x Releases
+## 2.3.x Releases
 
 This is the current release cycle, so stay tuned for future releases!
 
-### v2.2.8
+### v2.3.0
 
 - **Add `from_plugin_import()`.**  
   You may now easily access attributes from a plugin's submodule with `meerschaum.plugins.from_plugin_import()`.
@@ -32,6 +32,10 @@ This is the current release cycle, so stay tuned for future releases!
   ```bash
   
   ```
+
+## 2.2.x Releases
+
+The 2.2.x series introduced new features improvements, such as the improved scheduler, the switch to `uv`, the `@dash_plugin` and `@web_page()` decorators, and much more.
 
 ### v2.2.7
 

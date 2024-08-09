@@ -18,6 +18,7 @@ from meerschaum.jobs import (
     get_running_jobs,
     get_stopped_jobs,
     get_paused_jobs,
+    get_executor_keys_from_context,
 )
 from meerschaum.config import get_config
 
@@ -28,11 +29,17 @@ def pprint_jobs(
 ):
     """Pretty-print a list of Daemons."""
     from meerschaum.utils.formatting import make_header
+    from meerschaum.utils.misc import items_str
     
     running_jobs = get_running_jobs(jobs=jobs)
     paused_jobs = get_paused_jobs(jobs=jobs)
     stopped_jobs = get_stopped_jobs(jobs=jobs)
-    executor_keys = (list(jobs.values())[0].executor_keys if jobs else None) or 'local'
+    executor_keys_list = list(set(
+        [
+            job.executor_keys.replace('systemd:main', 'systemd')
+            for job in jobs.values()
+        ]
+    )) if jobs else [get_executor_keys_from_context()]
 
     def _nopretty_print():
         from meerschaum.utils.misc import print_options
@@ -62,12 +69,20 @@ def pprint_jobs(
             'rich.table', 'rich.text', 'rich.box', 'rich.json', 'rich.panel', 'rich.console',
         )
         table = rich_table.Table(
-            title=rich_text.Text(f"\nJobs on Executor '{executor_keys}'"),
+            title=rich_text.Text(
+                f"\nJobs on Executor"
+                + ('s' if len(executor_keys_list) != 1 else '')
+                + f" {items_str(executor_keys_list)}"
+            ),
             box=(rich_box.ROUNDED if UNICODE else rich_box.ASCII),
             show_lines=True,
             show_header=ANSI,
         )
         table.add_column("Name", justify='right', style=('magenta' if ANSI else ''))
+        table.add_column(
+            "Executor",
+            style=(get_config('shell', 'ansi', 'executor', 'rich', 'style') if ANSI else ''),
+        )
         table.add_column("Command")
         table.add_column("Status")
 
@@ -113,6 +128,7 @@ def pprint_jobs(
 
             table.add_row(
                 job.name,
+                job.executor_keys.replace('systemd:main', 'systemd'),
                 job.label,
                 rich_console.Group(*status_group),
             )
@@ -129,6 +145,7 @@ def pprint_jobs(
 
             table.add_row(
                 job.name,
+                job.executor_keys.replace('systemd:main', 'systemd'),
                 job.label,
                 rich_console.Group(*status_group),
             )
@@ -150,6 +167,7 @@ def pprint_jobs(
 
             table.add_row(
                 job.name,
+                job.executor_keys.replace('systemd:main', 'systemd'),
                 job.label,
                 rich_console.Group(*status_group),
             )

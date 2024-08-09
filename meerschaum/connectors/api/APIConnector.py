@@ -88,6 +88,9 @@ class APIConnector(Connector):
         monitor_logs,
         monitor_logs_async,
         get_job_is_blocking_on_stdin,
+        get_job_began,
+        get_job_ended,
+        get_job_status,
     )
 
     def __init__(

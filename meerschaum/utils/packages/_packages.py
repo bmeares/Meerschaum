@@ -53,7 +53,6 @@ packages: Dict[str, Dict[str, str]] = {
         'uv'                         : 'uv>=0.2.11',
     },
     'jobs': {
-        'cysystemd'                  : 'cysystemd>=1.6.2',
         'dill'                       : 'dill>=0.3.3',
         'daemon'                     : 'python-daemon>=0.2.3',
         'watchfiles'                 : 'watchfiles>=0.21.0',

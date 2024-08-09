@@ -597,6 +597,9 @@ class Daemon:
         if action not in ('quit', 'kill', 'pause'):
             return False, f"Unsupported action '{action}'."
 
+        if not self.stop_path.parent.exists():
+            self.stop_path.parent.mkdir(parents=True, exist_ok=True)
+
         with open(self.stop_path, 'w+', encoding='utf-8') as f:
             json.dump(
                 {
@@ -811,6 +814,9 @@ class Daemon:
         """
         Return the stdin file path.
         """
+        if '_blocking_stdin_file_path' in self.__dict__:
+            return self._blocking_stdin_file_path
+
         return self.path / 'input.stdin.block'
 
     @property

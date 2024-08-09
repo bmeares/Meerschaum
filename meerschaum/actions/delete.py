@@ -388,15 +388,15 @@ def _complete_delete_connectors(
 
 
 def _delete_jobs(
-        action: Optional[List[str]] = None,
-        executor_keys: Optional[str] = None,
-        noask: bool = False,
-        nopretty: bool = False,
-        force: bool = False,
-        yes: bool = False,
-        debug: bool = False,
-        **kw
-    ) -> SuccessTuple:
+    action: Optional[List[str]] = None,
+    executor_keys: Optional[str] = None,
+    noask: bool = False,
+    nopretty: bool = False,
+    force: bool = False,
+    yes: bool = False,
+    debug: bool = False,
+    **kw
+) -> SuccessTuple:
     """
     Remove a job's log files and delete the job's ID.
     
@@ -503,6 +503,7 @@ def _complete_delete_jobs(
 ) -> List[str]:
     from meerschaum._internal.shell.Shell import shell_attrs
     from meerschaum.jobs import (
+        get_jobs,
         get_filtered_jobs,
         get_restart_jobs,
         get_stopped_jobs,
@@ -513,7 +514,7 @@ def _complete_delete_jobs(
 
     executor_keys = executor_keys or remove_ansi(shell_attrs.get('executor_keys', 'local'))
 
-    jobs = get_filtered_jobs(executor_keys, action)
+    jobs = get_jobs(executor_keys)
     if _get_job_method:
         method_keys = [_get_job_method] if isinstance(_get_job_method, str) else _get_job_method
         method_jobs = {}

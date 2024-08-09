@@ -98,7 +98,6 @@ def get_job_metadata(self, name: str, debug: bool = False) -> Dict[str, Any]:
     }
     return metadata
 
-
 def get_job_properties(self, name: str, debug: bool = False) -> Dict[str, Any]:
     """
     Return the daemon properties for a single job.
@@ -106,6 +105,34 @@ def get_job_properties(self, name: str, debug: bool = False) -> Dict[str, Any]:
     metadata = self.get_job_metadata(name, debug=debug)
     return metadata.get('daemon', {}).get('properties', {})
 
+def get_job_status(self, name: str, debug: bool = False) -> str:
+    """
+    Return the job's status.
+    """
+    metadata = self.get_job_metadata(name, debug=debug)
+    return metadata.get('status', 'stopped')
+
+def get_job_began(self, name: str, debug: bool = False) -> str:
+    """
+    Return a job's `began` timestamp, if it exists.
+    """
+    properties = self.get_job_properties(name, debug=debug)
+    began_str = properties.get('daemon', {}).get('began', None)
+    if began_str is None:
+        return None
+
+    return began_str
+
+def get_job_ended(self, name: str, debug: bool = False) -> str:
+    """
+    Return a job's `ended` timestamp, if it exists.
+    """
+    properties = self.get_job_properties(name, debug=debug)
+    ended_str = properties.get('daemon', {}).get('ended', None)
+    if ended_str is None:
+        return None
+
+    return ended_str
 
 def get_job_exists(self, name: str, debug: bool = False) -> bool:
     """

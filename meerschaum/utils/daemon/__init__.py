@@ -10,9 +10,11 @@ from __future__ import annotations
 import os, pathlib, shutil, json, datetime, threading, shlex
 from meerschaum.utils.typing import SuccessTuple, List, Optional, Callable, Any, Dict
 from meerschaum.config._paths import DAEMON_RESOURCES_PATH
+from meerschaum.utils.daemon.StdinFile import StdinFile
 from meerschaum.utils.daemon.Daemon import Daemon
 from meerschaum.utils.daemon.RotatingFile import RotatingFile
 from meerschaum.utils.daemon.FileDescriptorInterceptor import FileDescriptorInterceptor
+from meerschaum.utils.daemon._names import get_new_daemon_name
 
 
 def daemon_entry(sysargs: Optional[List[str]] = None) -> SuccessTuple:

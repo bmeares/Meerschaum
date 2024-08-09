@@ -119,9 +119,10 @@ def parse_repo_keys(keys: Optional[str] = None, **kw):
 
 def parse_executor_keys(keys: Optional[str] = None, **kw):
     """Parse the executor keys into an APIConnector or string."""
+    from meerschaum.jobs import get_executor_keys_from_context
     from meerschaum.config import get_config
     if keys is None:
-        keys = get_config('meerschaum', 'default_executor')
+        keys = get_executor_keys_from_context()
 
     if keys is None or keys == 'local':
         return 'local'

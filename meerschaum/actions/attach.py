@@ -71,8 +71,13 @@ def _attach_jobs(
 
     name = name or action[0]
     job = mrsm.Job(name, executor_keys=executor_keys)
+    other_executor_keys = 'systemd' if executor_keys in (None, 'local') else 'local'
     if not job.exists():
-        return False, f"Job '{job.name}' does not exist."
+        other_job = mrsm.Job(name, executor_keys=other_executor_keys)
+        if not other_job.exists():
+            return False, f"Job '{job.name}' does not exist."
+
+        job = other_job
 
     success, message = True, "Success"
 

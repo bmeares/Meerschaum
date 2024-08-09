@@ -184,6 +184,8 @@ paths = {
     
     'SYSTEMD_RESOURCES_PATH'         : ('{DOT_CONFIG_DIR_PATH}', 'systemd'),
     'SYSTEMD_USER_RESOURCES_PATH'    : ('{SYSTEMD_RESOURCES_PATH}', 'user'),
+    'SYSTEMD_ROOT_RESOURCES_PATH'    : ('{ROOT_DIR_PATH}', 'systemd'),
+    'SYSTEMD_LOGS_RESOURCES_PATH'    : ('{SYSTEMD_ROOT_RESOURCES_PATH}', 'logs'),
 }
 
 def set_root(root: Union[Path, str]):

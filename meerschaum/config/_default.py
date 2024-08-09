@@ -16,7 +16,7 @@ default_meerschaum_config = {
     'api_instance': 'MRSM{meerschaum:instance}',
     'web_instance': 'MRSM{meerschaum:instance}',
     'default_repository': 'api:mrsm',
-    'default_executor': 'local',
+    #  'default_executor': 'local',
     'connectors': {
         'sql': {
             'default': {},
@@ -52,9 +52,6 @@ default_meerschaum_config = {
                 'port': 443,
                 'protocol': 'https',
             },
-        },
-        'systemd': {
-            'main': {},
         },
     },
 }

@@ -30,12 +30,13 @@ __all__ = (
     'stop_check_jobs_thread',
 )
 
-executor_types: List[str] = ['api']
+executor_types: List[str] = ['api', 'local']
 
 
 def get_jobs(
     executor_keys: Optional[str] = None,
     include_hidden: bool = False,
+    combine_local_and_systemd: bool = True,
     debug: bool = False,
 ) -> Dict[str, Job]:
     """
@@ -55,28 +56,52 @@ def get_jobs(
     A dictionary mapping job names to jobs.
     """
     from meerschaum.connectors.parse import parse_connector_keys
-    if executor_keys == 'local':
-        executor_keys = None
+    include_local_and_system = (
+        combine_local_and_systemd
+        and str(executor_keys).split(':')[0] in ('None', 'local', 'systemd')
+    )
 
-    if executor_keys is not None:
-        try:
-            _ = parse_connector_keys(executor_keys, construct=False)
-            conn = mrsm.get_connector(executor_keys)
-            return conn.get_jobs(debug=debug)
-        except Exception:
-            return {}
+    def _get_local_jobs():
+        from meerschaum.utils.daemon import get_daemons
+        daemons = get_daemons()
+        jobs = {
+            daemon.daemon_id: Job(name=daemon.daemon_id, executor_keys='local')
+            for daemon in daemons
+        }
+        return {
+            name: job
+            for name, job in jobs.items()
+            if include_hidden or not job.hidden
+        }
 
-    from meerschaum.utils.daemon import get_daemons
-    daemons = get_daemons()
-    jobs = {
-        daemon.daemon_id: Job(name=daemon.daemon_id)
-        for daemon in daemons
-    }
-    return {
-        name: job
-        for name, job in jobs.items()
-        if include_hidden or not job.hidden
-    }
+    def _get_systemd_jobs():
+        conn = mrsm.get_connector('systemd')
+        return conn.get_jobs(debug=debug)
+
+    if include_local_and_system:
+        local_jobs = _get_local_jobs()
+        systemd_jobs = _get_systemd_jobs()
+        shared_jobs = set(local_jobs) & set(systemd_jobs)
+        if shared_jobs:
+            from meerschaum.utils.misc import items_str
+            from meerschaum.utils.warnings import warn
+            warn(
+                "Job"
+                + ('s' if len(shared_jobs) != 1 else '')
+                + f" {items_str(list(shared_jobs))} "
+                + "exist"
+                + ('s' if len(shared_jobs) == 1 else '')
+                + " in both `local` and `systemd`.",
+                stack=False,
+            )
+        return {**local_jobs, **systemd_jobs}
+
+    try:
+        _ = parse_connector_keys(executor_keys, construct=False)
+        conn = mrsm.get_connector(executor_keys)
+        return conn.get_jobs(debug=debug)
+    except Exception:
+        return {}
 
 
 def get_filtered_jobs(
@@ -200,7 +225,7 @@ def make_executor(cls):
 
 
 def check_restart_jobs(
-    executor_keys: Optional[str] = None,
+    executor_keys: Optional[str] = 'local',
     jobs: Optional[Dict[str, Job]] = None,
     include_hidden: bool = True,
     silent: bool = False,
@@ -224,7 +249,11 @@ def check_restart_jobs(
     from meerschaum.utils.misc import items_str
 
     if jobs is None:
-        jobs = get_jobs(executor_keys, include_hidden=include_hidden, debug=debug)
+        jobs = get_jobs(
+            executor_keys,
+            include_hidden=include_hidden,
+            debug=debug,
+        )
 
     if not jobs:
         return True, "No jobs to restart."
@@ -306,3 +335,31 @@ def stop_check_jobs_thread():
             CHECK_JOBS_LOCK_PATH.unlink()
     except Exception as e:
         warn(f"Failed to remove check jobs lock file:\n{e}")
+
+
+def get_executor_keys_from_context() -> str:
+    """
+    If we are running on the host with the default root, default to `'systemd'`.
+    Otherwise return `'local'`.
+    """
+    from meerschaum.config.paths import ROOT_DIR_PATH, DEFAULT_ROOT_DIR_PATH
+    from meerschaum.utils.misc import is_systemd_available
+    if is_systemd_available() and ROOT_DIR_PATH == DEFAULT_ROOT_DIR_PATH:
+        return 'systemd'
+
+    return 'local' 
+
+
+def _install_healthcheck_job() -> SuccessTuple:
+    """
+    Install the systemd job which checks local jobs.
+    """
+    if get_executor_keys_from_context() != 'systemd':
+        return False, "Not running systemd."
+
+    job = Job(
+        '.local_healthcheck',
+        ['restart', 'jobs', '-e', 'local', '--loop'],
+        executor_keys='systemd',
+    )
+    return job.start()

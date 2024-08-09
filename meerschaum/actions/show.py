@@ -575,7 +575,7 @@ def _show_jobs(
                 "      - start api -d\n" +
                 "      - start job sync pipes --loop"
             )
-        return False, "No jobs to show."
+        return True, "No jobs to show."
 
     pprint_jobs(jobs, nopretty=nopretty)
     return True, "Success"
