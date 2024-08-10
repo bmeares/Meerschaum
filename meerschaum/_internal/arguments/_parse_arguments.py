@@ -10,7 +10,7 @@ This module contains functions for parsing arguments
 from __future__ import annotations
 import json
 from datetime import timedelta
-from meerschaum.utils.typing import List, Dict, Any, Optional, Callable, SuccessTuple
+from meerschaum.utils.typing import List, Dict, Any, Optional, Callable, SuccessTuple, Tuple
 from meerschaum.utils.threading import RLock
 
 _locks = {
@@ -18,10 +18,24 @@ _locks = {
 }
 _loaded_plugins_args: bool = False
 
+def split_pipeline_sysargs(sysargs: List[str]) -> Tuple[List[str], List[str]]:
+    """
+    Split `sysargs` into the main pipeline and the flags following the pipeline separator (`::`).
+    """
+    from meerschaum.config.static import STATIC_CONFIG
+    pipeline_key = STATIC_CONFIG['system']['arguments']['pipeline_key']
+    if pipeline_key not in sysargs:
+        return sysargs, []
+
+    pipeline_ix = sysargs.index(pipeline_key)
+    sysargs_after_pipeline_key = sysargs[pipeline_ix+1:]
+    sysargs = sysargs[:pipeline_ix]
+    return sysargs, sysargs_after_pipeline_key
+
 
 def split_chained_sysargs(sysargs: List[str]) -> List[List[str]]:
     """
-    Split a `sysargs` list containing "and" keys (`&&`)
+    Split a `sysargs` list containing "and" keys (`+`)
     into a list of individual `sysargs`.
     """
     from meerschaum.config.static import STATIC_CONFIG
@@ -249,17 +263,7 @@ def parse_dict_to_sysargs(
     from meerschaum.config.static import STATIC_CONFIG
     from meerschaum.utils.warnings import warn
 
-    and_key = STATIC_CONFIG['system']['arguments']['and_key']
-    if (line := args_dict.get('line', None)):
-        return shlex.split(line)
-
-    if (_sysargs := args_dict.get('sysargs', None)):
-        return _sysargs
-
     action = args_dict.get('action', None)
-    if action and and_key in action:
-        warn(f"Cannot determine flags from chained actions:\n{args_dict}")
-
     sysargs: List[str] = []
     sysargs.extend(action or [])
     allow_none_args = {'location_keys'}

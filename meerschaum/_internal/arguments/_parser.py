@@ -215,13 +215,10 @@ groups['jobs'].add_argument(
     help=("Restart a job if not stopped manually."),
 )
 groups['jobs'].add_argument(
-    '--systemd', action='store_true',
-    help=("Create a job via systemd. Shorthand for `-e systemd`."),
-)
-groups['jobs'].add_argument(
-    '--executor-keys', '--executor', '-e', type=parse_executor_keys,
+    '-e', '--executor-keys', type=parse_executor_keys,
     help=(
-        "Execute jobs on an API instance or via systemd."
+        "Execute jobs locally or remotely. "
+        "Supported values are 'local', 'systemd', and 'api:{label}'."
     ),
 )
 groups['jobs'].add_argument(

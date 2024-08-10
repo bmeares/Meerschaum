@@ -32,7 +32,10 @@ if (_STATIC_CONFIG['environment']['systemd_log_path']) in os.environ:
     if _systemd_stdin_path:
         sys.stdin = _StdinFile(_systemd_stdin_path)
 
-def entry(sysargs: Optional[List[str]] = None) -> SuccessTuple:
+def entry(
+    sysargs: Optional[List[str]] = None,
+    _patch_args: Optional[Dict[str, Any]] = None,
+) -> SuccessTuple:
     """
     Parse arguments and launch a Meerschaum action.
 
@@ -42,12 +45,20 @@ def entry(sysargs: Optional[List[str]] = None) -> SuccessTuple:
     """
     import shlex
     from meerschaum.utils.formatting import make_header
-    from meerschaum._internal.arguments import parse_arguments, split_chained_sysargs
+    from meerschaum._internal.arguments import (
+        parse_arguments,
+        split_chained_sysargs,
+        split_pipeline_sysargs,
+    )
     from meerschaum.config.static import STATIC_CONFIG
     if sysargs is None:
         sysargs = []
     if not isinstance(sysargs, list):
         sysargs = shlex.split(sysargs)
+
+    pipeline_key = STATIC_CONFIG['system']['arguments']['pipeline_key']
+    escaped_pipeline_key = STATIC_CONFIG['system']['arguments']['escaped_pipeline_key']
+    sysargs, pipeline_args = split_pipeline_sysargs(sysargs)
 
     has_daemon = '-d' in sysargs or '--daemon' in sysargs
     has_start_job = sysargs[:2] == ['start', 'job']
@@ -56,10 +67,27 @@ def entry(sysargs: Optional[List[str]] = None) -> SuccessTuple:
         if has_daemon or has_start_job
         else split_chained_sysargs(sysargs)
     )
+    if pipeline_args:
+        chained_sysargs = [
+            ['start', 'pipeline']
+            + [str(arg) for arg in pipeline_args]
+            + ['--sub-args', shlex.join(sysargs)]
+        ]
+
     results: List[SuccessTuple] = []
 
     for _sysargs in chained_sysargs:
+        if escaped_pipeline_key in _sysargs:
+            _sysargs = [
+                pipeline_key
+                if _arg == escaped_pipeline_key
+                else _arg
+                for _arg in _sysargs
+            ]
+
         args = parse_arguments(_sysargs)
+        if _patch_args:
+            args.update(_patch_args)
         argparse_exception = args.get(
             STATIC_CONFIG['system']['arguments']['failure_key'],
             None,
@@ -76,7 +104,7 @@ def entry(sysargs: Optional[List[str]] = None) -> SuccessTuple:
                     )
                 )
 
-        entry_success, entry_msg = entry_with_args(**args)
+        entry_success, entry_msg = entry_with_args(_patch_args=_patch_args, **args)
         if not entry_success:
             return entry_success, entry_msg
 
@@ -106,6 +134,7 @@ def entry(sysargs: Optional[List[str]] = None) -> SuccessTuple:
 
 def entry_with_args(
     _actions: Optional[Dict[str, Callable[[Any], SuccessTuple]]] = None,
+    _patch_args: Optional[Dict[str, Any]] = None,
     **kw
 ) -> SuccessTuple:
     """Execute a Meerschaum action with keyword arguments.
@@ -119,12 +148,15 @@ def entry_with_args(
     from meerschaum.utils.venv import active_venvs, deactivate_venv
     from meerschaum.config.static import STATIC_CONFIG
 
+    if _patch_args:
+        kw.update(_patch_args)
+
     and_key = STATIC_CONFIG['system']['arguments']['and_key']
     escaped_and_key = STATIC_CONFIG['system']['arguments']['escaped_and_key']
     if and_key in (sysargs := kw.get('sysargs', [])):
         if '-d' in sysargs or '--daemon' in sysargs:
             sysargs = [(arg if arg != and_key else escaped_and_key) for arg in sysargs]
-        return entry(sysargs)
+        return entry(sysargs, _patch_args=_patch_args)
 
     if kw.get('trace', None):
         from meerschaum.utils.misc import debug_trace

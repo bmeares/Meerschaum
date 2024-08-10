@@ -13,6 +13,7 @@ import asyncio
 import json
 import time
 import traceback
+import shutil
 from datetime import datetime, timezone
 from functools import partial
 
@@ -37,10 +38,10 @@ class SystemdExecutor(Executor):
         """
         Return a list of existing jobs, including hidden ones.
         """
-        from meerschaum.config.paths import SYSTEMD_ROOT_RESOURCES_PATH
+        from meerschaum.config.paths import SYSTEMD_USER_RESOURCES_PATH
         return [
             service_name[len('mrsm-'):(-1 * len('.service'))]
-            for service_name in os.listdir(SYSTEMD_ROOT_RESOURCES_PATH)
+            for service_name in os.listdir(SYSTEMD_USER_RESOURCES_PATH)
             if service_name.startswith('mrsm-') and service_name.endswith('.service')
         ]
 
@@ -73,6 +74,13 @@ class SystemdExecutor(Executor):
         """
         return f"mrsm-{name.replace(' ', '-')}.service"
 
+    def get_service_job_path(self, name: str, debug: bool = False) -> pathlib.Path:
+        """
+        Return the path for the job's files under the root directory.
+        """
+        from meerschaum.config.paths import SYSTEMD_JOBS_RESOURCES_PATH
+        return SYSTEMD_JOBS_RESOURCES_PATH / name
+
     def get_service_symlink_file_path(self, name: str, debug: bool = False) -> pathlib.Path:
         """
         Return the path to where to create the service symlink.
@@ -84,8 +92,10 @@ class SystemdExecutor(Executor):
         """
         Return the path to a Job's service file.
         """
-        from meerschaum.config.paths import SYSTEMD_ROOT_RESOURCES_PATH
-        return SYSTEMD_ROOT_RESOURCES_PATH / self.get_service_name(name, debug=debug)
+        return (
+            self.get_service_job_path(name, debug=debug)
+            / self.get_service_name(name, debug=debug)
+        )
 
     def get_service_logs_path(self, name: str, debug: bool = False) -> pathlib.Path:
         """
@@ -94,29 +104,22 @@ class SystemdExecutor(Executor):
         from meerschaum.config.paths import SYSTEMD_LOGS_RESOURCES_PATH
         return SYSTEMD_LOGS_RESOURCES_PATH / (self.get_service_name(name, debug=debug) + '.log')
 
-    def get_service_socket_path(self, name: str, debug: bool = False) -> pathlib.Path:
-        """
-        Return the path to the unit file for the socket (not the socket itself).
-        """
-        from meerschaum.config.paths import SYSTEMD_USER_RESOURCES_PATH
-        return SYSTEMD_USER_RESOURCES_PATH / (
-            self.get_service_name(name, debug=debug).replace('.service', '.socket')
-        )
-
     def get_socket_path(self, name: str, debug: bool = False) -> pathlib.Path:
         """
         Return the path to the FIFO file.
         """
-        from meerschaum.config.paths import SYSTEMD_ROOT_RESOURCES_PATH
-        return SYSTEMD_ROOT_RESOURCES_PATH / (self.get_service_name(name, debug=debug) + '.stdin')
+        return (
+            self.get_service_job_path(name, debug=debug)
+            / (self.get_service_name(name, debug=debug) + '.stdin')
+        )
 
     def get_result_path(self, name: str, debug: bool = False) -> pathlib.Path:
         """
         Return the path to the result file.
         """
-        from meerschaum.config.paths import SYSTEMD_ROOT_RESOURCES_PATH
-        return SYSTEMD_ROOT_RESOURCES_PATH / (
-            self.get_service_name(name, debug=debug) + '.result.json'
+        return (
+            self.get_service_job_path(name, debug=debug)
+            / (self.get_service_name(name, debug=debug) + '.result.json')
         )
 
     def get_service_file_text(self, name: str, sysargs: List[str], debug: bool = False) -> str:
@@ -191,17 +194,19 @@ class SystemdExecutor(Executor):
         """
         Return the hidden "sister" job to store a job's parameters.
         """
-        hidden_name = f'.systemd-{self.get_service_name(name, debug=debug)}' 
-
-        return Job(
-            hidden_name,
+        job = Job(
+            name,
             sysargs,
             executor_keys='local',
             _rotating_log=self.get_job_rotating_file(name, debug=debug),
             _stdin_file=self.get_job_stdin_file(name, debug=debug),
             _status_hook=partial(self.get_job_status, name),
             _result_hook=partial(self.get_job_result, name),
+            _externally_managed=True,
         )
+        job._set_externally_managed()
+        return job
+
 
     def get_job_metadata(self, name: str, debug: bool = False) -> Dict[str, Any]:
         """
@@ -489,6 +494,7 @@ class SystemdExecutor(Executor):
 
         if name not in self._stdin_files:
             socket_path = self.get_socket_path(name, debug=debug)
+            socket_path.parent.mkdir(parents=True, exist_ok=True)
             self._stdin_files[name] = StdinFile(socket_path)
 
         return self._stdin_files[name]
@@ -503,6 +509,9 @@ class SystemdExecutor(Executor):
         service_symlink_file_path = self.get_service_symlink_file_path(name, debug=debug)
         socket_stdin = self.get_job_stdin_file(name, debug=debug)
         _ = socket_stdin.file_handler
+
+        ### Init the `externally_managed file`.
+        _ = self.get_hidden_job(name, debug=debug)
 
         with open(service_file_path, 'w+', encoding='utf-8') as f:
             f.write(self.get_service_file_text(name, sysargs, debug=debug))
@@ -593,6 +602,14 @@ class SystemdExecutor(Executor):
             ['disable', self.get_service_name(name, debug=debug)],
             debug=debug,
         )
+
+        service_job_path = self.get_service_job_path(name, debug=debug)
+        try:
+            if service_job_path.exists():
+                shutil.rmtree(service_job_path)
+        except Exception as e:
+            warn(e)
+            return False, str(e)
 
         service_logs_path = self.get_service_logs_path(name, debug=debug)
         logs_paths = [

@@ -90,6 +90,8 @@ STATIC_CONFIG: Dict[str, Any] = {
             'failure_key': '_argparse_exception',
             'and_key': '+',
             'escaped_and_key': '++',
+            'pipeline_key': ':',
+            'escaped_pipeline_key': '::',
         },
         'urls': {
             'get-pip.py': 'https://bootstrap.pypa.io/get-pip.py',

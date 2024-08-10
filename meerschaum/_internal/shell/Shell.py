@@ -9,6 +9,7 @@ from __future__ import annotations
 import os
 from copy import deepcopy
 from itertools import chain
+import shlex
 
 from meerschaum.utils.typing import Union, SuccessTuple, Any, Callable, Optional, List, Dict
 from meerschaum.utils.packages import attempt_import
@@ -31,12 +32,14 @@ from meerschaum._internal.shell.ValidAutoSuggest import ValidAutoSuggest
 from meerschaum._internal.shell.ShellCompleter import ShellCompleter
 _clear_screen = get_config('shell', 'clear_screen', patch=True)
 from meerschaum.utils.misc import string_width, remove_ansi
+from meerschaum.utils.warnings import warn
 from meerschaum.jobs import get_executor_keys_from_context
 from meerschaum.config.static import STATIC_CONFIG
 from meerschaum._internal.arguments._parse_arguments import (
     split_chained_sysargs,
     parse_arguments,
     parse_line,
+    parse_dict_to_sysargs,
 )
 
 patch = True
@@ -173,7 +176,6 @@ def _check_complete_keys(line: str) -> Optional[List[str]]:
 
     ### TODO Find out arg possibilities
     possibilities = []
-    #  last_word = line.split(' ')[-1]
     last_word = line.rstrip(' ').split(' ')[-1]
 
     if last_word.startswith('-'):
@@ -485,6 +487,9 @@ class Shell(cmd.Cmd):
         ### make a backup of line for later
         original_line = deepcopy(line)
 
+        ### Escape backslashes to allow for multi-line input.
+        line = line.replace('\\\n', ' ')
+
         ### cmd2 support: check if command exists
         try:
             command = line.command
@@ -515,48 +520,70 @@ class Shell(cmd.Cmd):
             return "help " + line[len(help_token):]
 
         from meerschaum._internal.arguments import parse_line
-        args = parse_line(line)
-        if args.get('help', False):
-            from meerschaum._internal.arguments._parser import parse_help
-            parse_help(args)
+        try:
+            sysargs = shlex.split(line)
+        except ValueError as e:
+            warn(e, stack=False)
             return ""
+
+        chained_sysargs = split_chained_sysargs(sysargs)
+        chained_kwargs = [
+            parse_arguments(_sysargs)
+            for _sysargs in chained_sysargs
+        ]
+
+        if '--help' in sysargs or '-h' in sysargs:
+            from meerschaum._internal.arguments._parser import parse_help
+            parse_help(sysargs)
+            return ""
+
+        patch_args: Dict[str, Any] = {}
 
         ### NOTE: pass `shell` flag in case actions need to distinguish between
         ###       being run on the command line and being run in the shell
-        args['shell'] = True
-        args['line'] = line
+        patch_args.update({
+            'shell': True,
+            'line': line,
+        })
+        patches: List[Dict[str, Any]] = [{} for _ in chained_kwargs]
 
         ### if debug is not set on the command line,
         ### default to shell setting
-        if not args.get('debug', False):
-            args['debug'] = shell_attrs['debug']
+        for kwargs in chained_kwargs:
+            if not kwargs.get('debug', False):
+                kwargs['debug'] = shell_attrs['debug']
 
         ### Make sure an action was provided.
-        if not args.get('action', None):
+        if (
+            not chained_kwargs
+            or not chained_kwargs[0].get('action', None)
+        ):
             self.emptyline()
             return ''
 
         ### Strip a leading 'mrsm' if it's provided.
-        if args['action'][0] == 'mrsm':
-            args['action'] = args['action'][1:]
-            if not args['action']:
-                self.emptyline()
-                return ''
+        for kwargs in chained_kwargs:
+            if kwargs['action'][0] == 'mrsm':
+                kwargs['action'] = kwargs['action'][1:]
+                if not kwargs['action']:
+                    self.emptyline()
+                    return ''
 
         ### If we don't recognize the action,
         ### make it a shell action.
-        from meerschaum.actions import get_main_action_name
-        main_action_name = get_main_action_name(args['action'])
-        if main_action_name is None:
-            if not hasattr(self, 'do_' + args['action'][0]):
-                args['action'].insert(0, 'sh')
-                main_action_name = 'sh'
-            else:
-                main_action_name = args['action'][0]
+        ### TODO: make this work for chained actions
+        def _get_main_action_name(kwargs):
+            from meerschaum.actions import get_main_action_name
+            main_action_name = get_main_action_name(kwargs['action'])
+            if main_action_name is None:
+                if not hasattr(self, 'do_' + kwargs['action'][0]):
+                    kwargs['action'].insert(0, 'sh')
+                    main_action_name = 'sh'
+                else:
+                    main_action_name = kwargs['action'][0]
+            return main_action_name
 
-        def _add_flag_to_sysargs(
-                chained_sysargs, key, value, flag, shell_key=None,
-            ):
+        def _add_flag_to_kwargs(kwargs, i, key, shell_key=None):
             shell_key = shell_key or key
             shell_value = remove_ansi(shell_attrs.get(shell_key) or '')
             if key == 'mrsm_instance':
@@ -568,68 +595,47 @@ class Shell(cmd.Cmd):
             else:
                 default_value = None
 
-            if shell_value == default_value:
+            if key in kwargs or shell_value == default_value:
                 return
 
-            for sysargs in chained_sysargs:
-                kwargs = parse_arguments(sysargs)
-                if key in kwargs:
-                    continue
-                sysargs.extend([flag, value])
-
-            args['sysargs'] = list(
-                chain.from_iterable(
-                    sub_sysargs + [AND_KEY]
-                    for sub_sysargs in chained_sysargs
-                )
-            )[:-1]
-
+            patches[i][key] = shell_value
 
         ### if no instance is provided, use current shell default,
         ### but not for the 'api' command (to avoid recursion)
-        if main_action_name != 'api':
-            chained_sysargs = split_chained_sysargs(args['sysargs'])
-            chained_filtered_sysargs = split_chained_sysargs(args['filtered_sysargs'])
-            mrsm_instance = shell_attrs['instance_keys']
-            args['mrsm_instance'] = mrsm_instance
-            _add_flag_to_sysargs(
-                chained_sysargs, 'mrsm_instance', mrsm_instance, '-i', 'instance_keys',
-            )
-            _add_flag_to_sysargs(
-                chained_filtered_sysargs, 'mrsm_instance', mrsm_instance, '-i', 'instance_keys',
-            )
+        for i, kwargs in enumerate(chained_kwargs):
+            main_action_name = _get_main_action_name(kwargs)
+            if main_action_name == 'api':
+                continue
 
-            repo_keys = str(shell_attrs['repo_keys'])
-            args['repository'] = repo_keys
-            _add_flag_to_sysargs(
-                chained_sysargs, 'repository', repo_keys, '-r', 'repo_keys',
-            )
-            _add_flag_to_sysargs(
-                chained_filtered_sysargs, 'repository', repo_keys, '-r', 'repo_keys',
-            )
-
-            executor_keys = remove_ansi(str(shell_attrs['executor_keys']))
-            args['executor_keys'] = remove_ansi(executor_keys)
-            _add_flag_to_sysargs(
-                chained_sysargs, 'executor_keys', executor_keys, '-e',
-            )
-            _add_flag_to_sysargs(
-                chained_filtered_sysargs, 'executor_keys', executor_keys, '-e',
-            )
+            _add_flag_to_kwargs(kwargs, i, 'mrsm_instance', shell_key='instance_keys')
+            _add_flag_to_kwargs(kwargs, i, 'repository', shell_key='repo_keys')
+            _add_flag_to_kwargs(kwargs, i, 'executor_keys')
 
         ### parse out empty strings
-        if args['action'][0].strip("\"'") == '':
+        if chained_kwargs[0]['action'][0].strip("\"'") == '':
             self.emptyline()
             return ""
 
-        positional_only = (main_action_name not in shell_attrs['_actions'])
+        positional_only = (_get_main_action_name(chained_kwargs[0]) not in shell_attrs['_actions'])
         if positional_only:
             return original_line
 
-        from meerschaum._internal.entry import entry_with_args
+        ### Apply patch to all kwargs.
+        for i, kwargs in enumerate([_ for _ in chained_kwargs]):
+            kwargs.update(patches[i])
+
+        from meerschaum._internal.entry import entry_with_args, entry
+        sysargs_to_execute = []
+        for i, kwargs in enumerate(chained_kwargs):
+            step_kwargs = {k: v for k, v in kwargs.items() if k != 'line'}
+            step_sysargs = parse_dict_to_sysargs(step_kwargs)
+            sysargs_to_execute.extend(step_sysargs)
+            sysargs_to_execute.append(AND_KEY)
+        if sysargs_to_execute[-1] == AND_KEY:
+            sysargs_to_execute = sysargs_to_execute[:-1]
 
         try:
-            success_tuple = entry_with_args(_actions=shell_attrs['_actions'], **args)
+            success_tuple = entry(sysargs_to_execute, _patch_args=patch_args)
         except Exception as e:
             success_tuple = False, str(e)
 

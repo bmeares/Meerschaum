@@ -3,7 +3,7 @@
 
 # 👷 Background Jobs
 
-Meerschaum's job management system lets you run any process in the background. Thanks to the built-in [scheduler](#️-schedules), you no longer have to worry about manually configuring `crontab` or `systemd`.
+Meerschaum's job management system lets you run any process in the background ― just add `-d` to any command. Thanks to the built-in [scheduler](#️-schedules), you no longer have to worry about manually configuring `crontab` or `systemd`.
 
 !!! tip inline end ""
     Jobs are created as `systemd` services or managed Unix daemons.
@@ -15,7 +15,7 @@ Meerschaum's job management system lets you run any process in the background. T
 Any Meerschaum action may be executed as a background job by adding the `-d` (`--daemon`) flag or by prefacing the command with `start job`.
 
 ```bash
-mrsm sync pipes -c plugin:foo --loop -d
+mrsm sync pipes --loop -d
 ```
 
 New jobs will be given random names, and you can specify a label with `--name`.
@@ -25,10 +25,10 @@ mrsm sync pipes --loop --name syncing-engine -d
 ```
 
 !!! tip "Chaining commands"
-    Combine multiple commands with `+`, similar to `&&` in `bash`.
+    Combine multiple commands with `+`, similar to `&&` in `bash`:
 
     ```bash
-    mrsm sync pipes -i sql:raw + \
+    sync pipes -i sql:raw + \
     sync pipes -c sql:raw -i sql:etl + \
     sync pipes -c sql:etl -i sql:dest
     ```

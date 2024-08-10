@@ -23,6 +23,7 @@ def start(
         'gui': _start_gui,
         'webterm': _start_webterm,
         'connectors': _start_connectors,
+        'pipeline': _start_pipeline,
     }
     return choose_subaction(action, options, **kw)
 
@@ -535,6 +536,74 @@ def _complete_start_connectors(**kw) -> List[str]:
     """
     from meerschaum.actions.show import _complete_show_connectors
     return _complete_show_connectors(**kw)
+
+
+def _start_pipeline(
+    action: Optional[List[str]] = None,
+    sub_args: Optional[List[str]] = None,
+    loop: bool = False,
+    min_seconds: Union[float, int, None] = 1.0,
+    **kwargs
+) -> SuccessTuple:
+    """
+    Run a series of Meerschaum commands as a single action.
+
+    Add `:` to the end of chained arguments to apply additional flags to the pipeline.
+
+    Examples
+    --------
+
+    `sync pipes -i sql:local + sync pipes -i sql:main :: -s 'daily'`
+
+    `show version + show arguments :: --loop`
+
+    """
+    import time
+    from meerschaum._internal.entry import entry
+    from meerschaum.utils.warnings import info, warn
+    from meerschaum.utils.misc import is_int
+
+    do_n_times = (
+        int(action[0].lstrip('x'))
+        if action and is_int(action[0].lstrip('x'))
+        else 1
+    )
+
+    if not sub_args:
+        return False, "Nothing to do."
+
+    if min_seconds is None:
+        min_seconds = 1.0
+
+    ran_n_times = 0
+    success, msg = False, "Did not run pipeline."
+    def run_loop():
+        nonlocal ran_n_times, success, msg
+        while True:
+            success, msg = entry(sub_args)
+            ran_n_times += 1
+
+            if not loop and do_n_times == 1:
+                break
+
+            if min_seconds != 0:
+                info(f"Sleeping for {min_seconds} seconds...")
+                time.sleep(min_seconds)
+
+            if loop:
+                continue
+
+            if ran_n_times >= do_n_times:
+                break
+
+    try:
+        run_loop()
+    except KeyboardInterrupt:
+        warn("Cancelled pipeline.", stack=False)
+
+    if do_n_times != 1:
+        info(f"Ran pipeline {ran_n_times} time" + ('s' if ran_n_times != 1 else '') + '.')
+    return success, msg
 
 
 ### NOTE: This must be the final statement of the module.

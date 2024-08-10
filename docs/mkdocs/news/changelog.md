@@ -32,6 +32,9 @@ This is the current release cycle, so stay tuned for future releases!
   $ mrsm show pipes + sync pipes --loop -d
   ```
 
+- **Add `--restart`.**  
+  Your job will be automatically restarted if you use any of flags `--loop`, `--schedule`, or `--restart`.
+
 - **Execute actions remotely.**  
   You may execute an action on an API instance by setting the executor to the connector keys. You may run the `executor` command in the Meercshaum shell (like `instance`) or pass the flag `-e` (`--executor-keys`).
 
@@ -39,7 +42,7 @@ This is the current release cycle, so stay tuned for future releases!
   mrsm sync pipes -e api:main
   ```
 
-  The output is streamed directly from the API instance (via websocket).
+  The output is streamed directly from the API instance (via a websocket).
 
 - **Add `from_plugin_import()`.**  
   You may now easily access attributes from a plugin's submodule with `meerschaum.plugins.from_plugin_import()`.

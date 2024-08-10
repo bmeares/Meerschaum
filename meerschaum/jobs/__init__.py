@@ -72,7 +72,8 @@ def get_jobs(
         return {
             name: job
             for name, job in jobs.items()
-            if include_hidden or not job.hidden
+            if (include_hidden or not job.hidden) and not job._is_externally_managed
+
         }
 
     def _get_systemd_jobs():
@@ -387,7 +388,7 @@ def _install_healthcheck_job() -> SuccessTuple:
         return False, "Not running systemd."
 
     job = Job(
-        '.local_healthcheck',
+        '.local-healthcheck',
         ['restart', 'jobs', '-e', 'local', '--loop'],
         executor_keys='systemd',
     )

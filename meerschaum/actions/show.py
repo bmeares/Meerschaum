@@ -155,10 +155,10 @@ def _complete_show_config(action: Optional[List[str]] = None, **kw : Any):
 
 
 def _show_pipes(
-        nopretty: bool = False,
-        debug: bool = False,
-        **kw: Any
-    ) -> SuccessTuple:
+    nopretty: bool = False,
+    debug: bool = False,
+    **kw: Any
+) -> SuccessTuple:
     """
     Print a stylized tree of available Meerschaum pipes.
     Respects global ANSI and UNICODE settings.
@@ -170,7 +170,7 @@ def _show_pipes(
     pipes = get_pipes(debug=debug, **kw)
 
     if len(pipes) == 0:
-        return False, "No pipes to show."
+        return True, "No pipes to show."
 
     if len(flatten_pipes_dict(pipes)) == 1:
         return flatten_pipes_dict(pipes)[0].show(debug=debug, nopretty=nopretty, **kw)

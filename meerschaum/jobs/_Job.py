@@ -62,8 +62,9 @@ class Job:
         _properties: Optional[Dict[str, Any]] = None,
         _rotating_log = None,
         _stdin_file = None,
-        _status_hook = None,
-        _result_hook = None,
+        _status_hook: Optional[Callable[[], str]] = None,
+        _result_hook: Optional[Callable[[], SuccessTuple]] = None,
+        _externally_managed: bool = False,
     ):
         """
         Create a new job to manage a `meerschaum.utils.daemon.Daemon`.
@@ -133,7 +134,10 @@ class Job:
         if _result_hook is not None:
             self._result_hook = _result_hook
 
+        self._externally_managed = _externally_managed
         self._properties_patch = _properties or {}
+        if _externally_managed:
+            self._properties_patch.update({'externally_managed': _externally_managed})
 
         daemon_sysargs = (
             self._daemon.properties.get('target', {}).get('args', [None])[0]
@@ -153,9 +157,6 @@ class Job:
             if restart_flag in self._sysargs:
                 self._properties_patch.update({'restart': True})
                 break
-
-        if '--systemd' in self._sysargs:
-            self._properties_patch.update({'systemd': True})
 
     @staticmethod
     def from_pid(pid: int, executor_keys: Optional[str] = None) -> Job:
@@ -824,7 +825,11 @@ class Job:
         """
         Return a bool indicating whether this job should be displayed.
         """
-        return self.name.startswith('_') or self.name.startswith('.')
+        return (
+            self.name.startswith('_')
+            or self.name.startswith('.')
+            or self._is_externally_managed
+        )
 
     def check_restart(self) -> SuccessTuple:
         """
@@ -849,6 +854,33 @@ class Job:
         Return the job's Daemon label (joined sysargs).
         """
         return shlex.join(self.sysargs).replace(' + ', '\n+ ')
+
+    @property
+    def _externally_managed_file(self) -> pathlib.Path:
+        """
+        Return the path to the externally managed file.
+        """
+        return self.daemon.path / '.externally-managed'
+
+    def _set_externally_managed(self):
+        """
+        Set this job as externally managed.
+        """
+        self._externally_managed = True
+        try:
+            self._externally_managed_file.parent.mkdir(exist_ok=True, parents=True)
+            self._externally_managed_file.touch()
+        except Exception as e:
+            warn(e)
+
+    @property
+    def _is_externally_managed(self) -> bool:
+        """
+        Return whether this job is externally managed.
+        """
+        return self.executor_keys in (None, 'local') and (
+            self._externally_managed or self._externally_managed_file.exists()
+        )
 
     def __str__(self) -> str:
         sysargs = self.sysargs
