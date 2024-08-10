@@ -19,6 +19,44 @@ _locks = {
 _loaded_plugins_args: bool = False
 
 
+def split_chained_sysargs(sysargs: List[str]) -> List[List[str]]:
+    """
+    Split a `sysargs` list containing "and" keys (`&&`)
+    into a list of individual `sysargs`.
+    """
+    from meerschaum.config.static import STATIC_CONFIG
+    and_key = STATIC_CONFIG['system']['arguments']['and_key']
+
+    if not sysargs or and_key not in sysargs:
+        return [sysargs]
+
+    ### Coalesce and consecutive joiners into one.
+    coalesce_args = []
+    previous_arg = None
+    for arg in [_arg for _arg in sysargs]:
+        if arg == and_key and previous_arg == and_key:
+            continue
+        coalesce_args.append(arg)
+        previous_arg = arg
+
+    ### Remove any joiners from the ends.
+    if coalesce_args[0] == and_key:
+        coalesce_args = coalesce_args[1:]
+    if coalesce_args[-1] == and_key:
+        coalesce_args = coalesce_args[:-1]
+
+    chained_sysargs = []
+    current_sysargs = []
+    for arg in coalesce_args:
+        if arg != and_key:
+            current_sysargs.append(arg)
+        else:
+            chained_sysargs.append(current_sysargs)
+            current_sysargs = []
+    chained_sysargs.append(current_sysargs)
+    return chained_sysargs
+
+
 def parse_arguments(sysargs: List[str]) -> Dict[str, Any]:
     """
     Parse a list of arguments into standard Meerschaum arguments.
@@ -206,9 +244,24 @@ def parse_dict_to_sysargs(
     args_dict: Dict[str, Any]
 ) -> List[str]:
     """Revert an arguments dictionary back to a command line list."""
+    import shlex
     from meerschaum._internal.arguments._parser import get_arguments_triggers
-    sysargs = []
-    sysargs += args_dict.get('action', [])
+    from meerschaum.config.static import STATIC_CONFIG
+    from meerschaum.utils.warnings import warn
+
+    and_key = STATIC_CONFIG['system']['arguments']['and_key']
+    if (line := args_dict.get('line', None)):
+        return shlex.split(line)
+
+    if (_sysargs := args_dict.get('sysargs', None)):
+        return _sysargs
+
+    action = args_dict.get('action', None)
+    if action and and_key in action:
+        warn(f"Cannot determine flags from chained actions:\n{args_dict}")
+
+    sysargs: List[str] = []
+    sysargs.extend(action or [])
     allow_none_args = {'location_keys'}
 
     triggers = get_arguments_triggers()
@@ -216,6 +269,7 @@ def parse_dict_to_sysargs(
     for a, t in triggers.items():
         if a == 'action' or a not in args_dict:
             continue
+
         ### Add boolean flags
         if isinstance(args_dict[a], bool):
             if args_dict[a] is True:

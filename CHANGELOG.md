@@ -6,31 +6,48 @@ This is the current release cycle, so stay tuned for future releases!
 
 ### v2.3.0
 
+- **Add the `Job` class.**  
+  You may now manage jobs with `Job`:
+
+  ```python
+  import meerschaum as mrsm
+  job = Job('syncing-engine', 'sync pipes --loop')
+  job.start()
+  ```
+
+  If you are running on `systemd`, jobs will be created as user services. Otherwise (e.g. running in Docker) jobs are created as Unix daemons and kept alive by the API server.
+
+  You may choose the executor with `-e` (`--executor-keys`). Supported values are `local`, `systemd`, and the keys for any API instance. See the jobs documentation for more information.
+
+- **Chain actions with `+`.**  
+  Run multiple commands by joining them with `+`, similar to `&&` in `bash` but with better performance (one process).
+
+  ```
+  $ mrsm show pipes + sync pipes
+  ```
+
+  Adding `-d` (`--daemon`) will escape these joiners and run all of the chained commands in the job:
+
+  ```
+  $ mrsm show pipes + sync pipes --loop -d
+  ```
+
+- **Execute actions remotely.**  
+  You may execute an action on an API instance by setting the executor to the connector keys. You may run the `executor` command in the Meercshaum shell (like `instance`) or pass the flag `-e` (`--executor-keys`).
+
+  ```
+  mrsm sync pipes -e api:main
+  ```
+
+  The output is streamed directly from the API instance (via websocket).
+
 - **Add `from_plugin_import()`.**  
   You may now easily access attributes from a plugin's submodule with `meerschaum.plugins.from_plugin_import()`.
   
   ```python
   from meerschaum.plugins import from_plugin_import
 
-  build_parent_pipe, get_defined_pipes = from_plugin_import(
-      'compose.utils.pipes',
-      'build_parent_pipe',
-      'get_defined_pipes',
-  )
-  ```
-
-- **Add `Job` interface.**  
-  You may now manage jobs with `Job`:
-
-  ```python
-  from meerschaum
-  ```
-
-- **Add remote job execution.**  
-  Jobs may be executed remotely on an API instance.
-
-  ```bash
-  
+  get_defined_pipes = from_plugin_import('compose.utils.pipes', 'get_defined_pipes')
   ```
 
 ## 2.2.x Releases

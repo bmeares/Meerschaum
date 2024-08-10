@@ -88,6 +88,8 @@ STATIC_CONFIG: Dict[str, Any] = {
             ),
             'underscore_standin': '<UNDERSCORE>', ### Temporary replacement for parsing.
             'failure_key': '_argparse_exception',
+            'and_key': '+',
+            'escaped_and_key': '++',
         },
         'urls': {
             'get-pip.py': 'https://bootstrap.pypa.io/get-pip.py',

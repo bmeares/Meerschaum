@@ -112,17 +112,14 @@ def pprint_jobs(
 
 
         for name, job in running_jobs.items():
-            if job.hidden:
-                continue
-
             status_group = [
                 (
                     rich_text.Text(job.status, style=('green' if ANSI else ''))
                     if not job.is_blocking_on_stdin()
                     else rich_text.Text('waiting for input', style=('yellow' if ANSI else ''))
                 ),
-                rich_text.Text(f'PID: {job.pid}'),
-            ]
+            ] + ([rich_text.Text(f"PID: {pid}")] if (pid := job.pid) else [])
+
             if job.restart:
                 status_group.append(rich_text.Text('(restarts)'))
 
@@ -134,9 +131,6 @@ def pprint_jobs(
             )
 
         for name, job in paused_jobs.items():
-            if job.hidden:
-                continue
-
             status_group = [
                 rich_text.Text(job.status, style=('yellow' if ANSI else '')),
             ]
@@ -151,9 +145,6 @@ def pprint_jobs(
             )
 
         for name, job in stopped_jobs.items():
-            if job.hidden:
-                continue
-
             status_group = [
                 rich_text.Text(job.status, style=('red' if ANSI else '')),
             ]
@@ -182,9 +173,6 @@ def pprint_job(
     nopretty: bool = False,
 ):
     """Pretty-print a single `Job`."""
-    if job.hidden:
-        return
-
     from meerschaum.utils.warnings import info
     if not nopretty:
         info(f"Command for job '{job.name}':")

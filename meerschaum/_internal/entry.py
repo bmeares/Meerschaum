@@ -40,31 +40,68 @@ def entry(sysargs: Optional[List[str]] = None) -> SuccessTuple:
     -------
     A `SuccessTuple` indicating success.
     """
-    from meerschaum._internal.arguments import parse_arguments
+    import shlex
+    from meerschaum.utils.formatting import make_header
+    from meerschaum._internal.arguments import parse_arguments, split_chained_sysargs
     from meerschaum.config.static import STATIC_CONFIG
     if sysargs is None:
         sysargs = []
     if not isinstance(sysargs, list):
-        import shlex
         sysargs = shlex.split(sysargs)
-    args = parse_arguments(sysargs)
-    argparse_exception = args.get(
-        STATIC_CONFIG['system']['arguments']['failure_key'],
-        None,
-    )
-    if argparse_exception is not None:
-        args_text = args.get('text', '')
-        if not args_text.startswith('show arguments'):
-            return (
-                False,
-                (
-                    "Invalid arguments:"
-                    + (f"\n{args_text}" if args_text else '')
-                    + f"\n    {argparse_exception}"
-                )
-            )
 
-    return entry_with_args(**args)
+    has_daemon = '-d' in sysargs or '--daemon' in sysargs
+    has_start_job = sysargs[:2] == ['start', 'job']
+    chained_sysargs = (
+        [sysargs]
+        if has_daemon or has_start_job
+        else split_chained_sysargs(sysargs)
+    )
+    results: List[SuccessTuple] = []
+
+    for _sysargs in chained_sysargs:
+        args = parse_arguments(_sysargs)
+        argparse_exception = args.get(
+            STATIC_CONFIG['system']['arguments']['failure_key'],
+            None,
+        )
+        if argparse_exception is not None:
+            args_text = args.get('text', '')
+            if not args_text.startswith('show arguments'):
+                return (
+                    False,
+                    (
+                        "Invalid arguments:"
+                        + (f"\n{args_text}" if args_text else '')
+                        + f"\n    {argparse_exception}"
+                    )
+                )
+
+        entry_success, entry_msg = entry_with_args(**args)
+        if not entry_success:
+            return entry_success, entry_msg
+
+        results.append((entry_success, entry_msg))
+
+    success = all(_success for _success, _ in results)
+    msg = (
+        results[0][1]
+        if len(results) == 1
+        else 'Successfully completed steps:\n\n' + '\n'.join(
+            [
+                (
+                    make_header(shlex.join(_sysargs))
+                    + '\n    ' + _msg + '\n'
+                )
+                for i, ((_, _msg), _sysargs) in enumerate(zip(results, chained_sysargs))
+            ]
+        )
+    )
+    if _systemd_result_path:
+        import json
+        with open(_systemd_result_path, 'w+', encoding='utf-8') as f:
+            json.dump((success, msg), f)
+
+    return success, msg
 
 
 def entry_with_args(
@@ -79,7 +116,16 @@ def entry_with_args(
     import inspect
     from meerschaum.actions import get_action, get_main_action_name
     from meerschaum._internal.arguments import remove_leading_action
-    from meerschaum.utils.venv import Venv, active_venvs, deactivate_venv
+    from meerschaum.utils.venv import active_venvs, deactivate_venv
+    from meerschaum.config.static import STATIC_CONFIG
+
+    and_key = STATIC_CONFIG['system']['arguments']['and_key']
+    escaped_and_key = STATIC_CONFIG['system']['arguments']['escaped_and_key']
+    if and_key in (sysargs := kw.get('sysargs', [])):
+        if '-d' in sysargs or '--daemon' in sysargs:
+            sysargs = [(arg if arg != and_key else escaped_and_key) for arg in sysargs]
+        return entry(sysargs)
+
     if kw.get('trace', None):
         from meerschaum.utils.misc import debug_trace
         debug_trace()
@@ -158,11 +204,6 @@ def entry_with_args(
     ### Clean up stray virtual environments.
     for venv in [venv for venv in active_venvs]:
         deactivate_venv(venv, debug=kw.get('debug', False), force=True)
-
-    if _systemd_result_path:
-        import json
-        with open(_systemd_result_path, 'w+', encoding='utf-8') as f:
-            json.dump(result, f)
 
     return result
 

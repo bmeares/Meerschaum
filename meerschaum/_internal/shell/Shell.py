@@ -8,6 +8,8 @@ This module is the entry point for the interactive shell.
 from __future__ import annotations
 import os
 from copy import deepcopy
+from itertools import chain
+
 from meerschaum.utils.typing import Union, SuccessTuple, Any, Callable, Optional, List, Dict
 from meerschaum.utils.packages import attempt_import
 from meerschaum.config import __doc__, __version__ as version, get_config
@@ -30,6 +32,12 @@ from meerschaum._internal.shell.ShellCompleter import ShellCompleter
 _clear_screen = get_config('shell', 'clear_screen', patch=True)
 from meerschaum.utils.misc import string_width, remove_ansi
 from meerschaum.jobs import get_executor_keys_from_context
+from meerschaum.config.static import STATIC_CONFIG
+from meerschaum._internal.arguments._parse_arguments import (
+    split_chained_sysargs,
+    parse_arguments,
+    parse_line,
+)
 
 patch = True
 ### remove default cmd2 commands
@@ -63,6 +71,8 @@ reserved_completers = {
 ### To handle dynamic reloading, store shell attributes externally.
 ### This is because the shell object address gets lost upon reloads.
 shell_attrs = {}
+AND_KEY: str = STATIC_CONFIG['system']['arguments']['and_key']
+ESCAPED_AND_KEY: str = STATIC_CONFIG['system']['arguments']['escaped_and_key']
 
 def _insert_shell_actions(
         _shell: Optional['Shell'] = None,
@@ -111,7 +121,6 @@ def _completer_wrapper(
         if _check_keys is not None:
             return _check_keys
 
-        from meerschaum._internal.arguments._parse_arguments import parse_line
         args = parse_line(line)
         if target.__name__ != 'default_action_completer':
             if len(args['action']) > 0:
@@ -149,7 +158,6 @@ def default_action_completer(
 
 def _check_complete_keys(line: str) -> Optional[List[str]]:
     from meerschaum._internal.arguments._parser import parser, get_arguments_triggers
-    from meerschaum._internal.arguments._parse_arguments import parse_line
 
     ### TODO Add all triggers
     trigger_args = {
@@ -546,16 +554,68 @@ class Shell(cmd.Cmd):
             else:
                 main_action_name = args['action'][0]
 
+        def _add_flag_to_sysargs(
+                chained_sysargs, key, value, flag, shell_key=None,
+            ):
+            shell_key = shell_key or key
+            shell_value = remove_ansi(shell_attrs.get(shell_key) or '')
+            if key == 'mrsm_instance':
+                default_value = get_config('meerschaum', 'instance')
+            elif key == 'repository':
+                default_value = get_config('meerschaum', 'default_repository')
+            elif key == 'executor_keys':
+                default_value = get_executor_keys_from_context()
+            else:
+                default_value = None
+
+            if shell_value == default_value:
+                return
+
+            for sysargs in chained_sysargs:
+                kwargs = parse_arguments(sysargs)
+                if key in kwargs:
+                    continue
+                sysargs.extend([flag, value])
+
+            args['sysargs'] = list(
+                chain.from_iterable(
+                    sub_sysargs + [AND_KEY]
+                    for sub_sysargs in chained_sysargs
+                )
+            )[:-1]
+
+
         ### if no instance is provided, use current shell default,
         ### but not for the 'api' command (to avoid recursion)
-        if 'mrsm_instance' not in args and main_action_name != 'api':
-            args['mrsm_instance'] = str(shell_attrs['instance_keys'])
+        if main_action_name != 'api':
+            chained_sysargs = split_chained_sysargs(args['sysargs'])
+            chained_filtered_sysargs = split_chained_sysargs(args['filtered_sysargs'])
+            mrsm_instance = shell_attrs['instance_keys']
+            args['mrsm_instance'] = mrsm_instance
+            _add_flag_to_sysargs(
+                chained_sysargs, 'mrsm_instance', mrsm_instance, '-i', 'instance_keys',
+            )
+            _add_flag_to_sysargs(
+                chained_filtered_sysargs, 'mrsm_instance', mrsm_instance, '-i', 'instance_keys',
+            )
 
-        if 'repository' not in args and main_action_name != 'api':
-            args['repository'] = str(shell_attrs['repo_keys'])
+            repo_keys = str(shell_attrs['repo_keys'])
+            args['repository'] = repo_keys
+            _add_flag_to_sysargs(
+                chained_sysargs, 'repository', repo_keys, '-r', 'repo_keys',
+            )
+            _add_flag_to_sysargs(
+                chained_filtered_sysargs, 'repository', repo_keys, '-r', 'repo_keys',
+            )
 
-        if 'executor_keys' not in args:
-            args['executor_keys'] = remove_ansi(str(shell_attrs['executor_keys']))
+            executor_keys = remove_ansi(str(shell_attrs['executor_keys']))
+            args['executor_keys'] = remove_ansi(executor_keys)
+            _add_flag_to_sysargs(
+                chained_sysargs, 'executor_keys', executor_keys, '-e',
+            )
+            _add_flag_to_sysargs(
+                chained_filtered_sysargs, 'executor_keys', executor_keys, '-e',
+            )
 
         ### parse out empty strings
         if args['action'][0].strip("\"'") == '':
@@ -630,12 +690,12 @@ class Shell(cmd.Cmd):
         info(f"Debug mode is {'on' if shell_attrs['debug'] else 'off'}.")
 
     def do_instance(
-            self,
-            action: Optional[List[str]] = None,
-            executor_keys=None,
-            debug: bool = False,
-            **kw: Any
-        ) -> SuccessTuple:
+        self,
+        action: Optional[List[str]] = None,
+        executor_keys=None,
+        debug: bool = False,
+        **kw: Any
+    ) -> SuccessTuple:
         """
         Temporarily set a default Meerschaum instance for the duration of the shell.
         The default instance is loaded from the Meerschaum configuraton file
@@ -804,6 +864,7 @@ class Shell(cmd.Cmd):
         from meerschaum import get_connector
         from meerschaum.connectors.parse import parse_executor_keys
         from meerschaum.utils.warnings import warn, info
+        from meerschaum.jobs import get_executor_keys_from_context
 
         if action is None:
             action = []
@@ -814,6 +875,10 @@ class Shell(cmd.Cmd):
             executor_keys = ''
         if executor_keys == '':
             executor_keys = get_executor_keys_from_context()
+
+        if executor_keys == 'systemd' and get_executor_keys_from_context() != 'systemd':
+            warn(f"Cannot execute via `systemd`, falling back to `local`...", stack=False)
+            executor_keys = 'local'
         
         conn = parse_executor_keys(executor_keys, debug=debug)
 
@@ -987,7 +1052,7 @@ def input_with_sigint(_input, session, shell: Optional[Shell] = None):
         )
 
         try:
-            typ, label = shell_attrs['instance_keys'].split(':')
+            typ, label = shell_attrs['instance_keys'].split(':', maxsplit=1)
             connected = typ in connectors and label in connectors[typ]
         except Exception as e:
             connected = False

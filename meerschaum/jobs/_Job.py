@@ -91,6 +91,14 @@ class Job:
         if isinstance(sysargs, str):
             sysargs = shlex.split(sysargs)
 
+        and_key = STATIC_CONFIG['system']['arguments']['and_key']
+        escaped_and_key = STATIC_CONFIG['system']['arguments']['escaped_and_key']
+        if sysargs:
+            sysargs = [
+                (arg if arg != escaped_and_key else and_key)
+                for arg in sysargs
+            ]
+
         ### NOTE: 'local' and 'systemd' executors are being coalesced.
         if executor_keys is None:
             from meerschaum.jobs import get_executor_keys_from_context
@@ -831,7 +839,7 @@ class Job:
         """
         Return the job's Daemon label (joined sysargs).
         """
-        return shlex.join(self.sysargs)
+        return shlex.join(self.sysargs).replace(' + ', '\n+ ')
 
     def __str__(self) -> str:
         sysargs = self.sysargs

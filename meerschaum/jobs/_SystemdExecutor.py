@@ -21,7 +21,7 @@ from meerschaum.jobs import Job, Executor, make_executor
 from meerschaum.utils.typing import Dict, Any, List, SuccessTuple, Union, Optional, Callable
 from meerschaum.config.static import STATIC_CONFIG
 from meerschaum.utils.warnings import warn, dprint
-from meerschaum._internal.arguments._parse_arguments import parse_arguments, parse_dict_to_sysargs
+from meerschaum._internal.arguments._parse_arguments import parse_arguments
 
 JOB_METADATA_CACHE_SECONDS: int = STATIC_CONFIG['api']['jobs']['metadata_cache_seconds']
 
@@ -36,11 +36,11 @@ class SystemdExecutor(Executor):
         """
         Return a list of existing jobs, including hidden ones.
         """
-        from meerschaum.config.paths import SYSTEMD_USER_RESOURCES_PATH
+        from meerschaum.config.paths import SYSTEMD_ROOT_RESOURCES_PATH
         return [
             service_name[len('mrsm-'):(-1 * len('.service'))]
-            for service_name in os.listdir(SYSTEMD_USER_RESOURCES_PATH)
-            if service_name.startswith('mrsm-')
+            for service_name in os.listdir(SYSTEMD_ROOT_RESOURCES_PATH)
+            if service_name.startswith('mrsm-') and service_name.endswith('.service')
         ]
 
     def get_job_exists(self, name: str, debug: bool = False) -> bool:
@@ -51,10 +51,10 @@ class SystemdExecutor(Executor):
         if debug:
             dprint(f'Existing services: {user_services}')
         return name in user_services
-    
+
     def get_jobs(self, debug: bool = False) -> Dict[str, Job]:
         """
-        Return a dictionary of `systemd` Jobs (excluding hidden jobs).
+        Return a dictionary of `systemd` Jobs (including hidden jobs).
         """
         user_services = self.get_job_names(debug=debug)
         jobs = {
@@ -64,7 +64,6 @@ class SystemdExecutor(Executor):
         return {
             name: job
             for name, job in jobs.items()
-            if not job.hidden
         }
 
     def get_service_name(self, name: str, debug: bool = False) -> str:
@@ -73,12 +72,19 @@ class SystemdExecutor(Executor):
         """
         return f"mrsm-{name.replace(' ', '-')}.service"
 
+    def get_service_symlink_file_path(self, name: str, debug: bool = False) -> pathlib.Path:
+        """
+        Return the path to where to create the service symlink.
+        """
+        from meerschaum.config.paths import SYSTEMD_USER_RESOURCES_PATH
+        return SYSTEMD_USER_RESOURCES_PATH / self.get_service_name(name, debug=debug)
+
     def get_service_file_path(self, name: str, debug: bool = False) -> pathlib.Path:
         """
         Return the path to a Job's service file.
         """
-        from meerschaum.config.paths import SYSTEMD_USER_RESOURCES_PATH
-        return SYSTEMD_USER_RESOURCES_PATH / self.get_service_name(name, debug=debug)
+        from meerschaum.config.paths import SYSTEMD_ROOT_RESOURCES_PATH
+        return SYSTEMD_ROOT_RESOURCES_PATH / self.get_service_name(name, debug=debug)
 
     def get_service_logs_path(self, name: str, debug: bool = False) -> pathlib.Path:
         """
@@ -150,8 +156,7 @@ class SystemdExecutor(Executor):
             "\n"
             "[Service]\n"
             f"ExecStart={exec_str}\n"
-            "KillSignal=SIGINT\n"
-            "TimeoutStopSpec=8\n"
+            "KillSignal=SIGTERM\n"
             "Restart=always\n"
             "RestartPreventExitStatus=0\n"
             f"SyslogIdentifier={service_name}\n"
@@ -180,23 +185,11 @@ class SystemdExecutor(Executor):
         )
         return socket_text
 
-    @staticmethod
-    def clean_sysargs(sysargs: List[str]) -> List[str]:
-        """
-        Return a sysargs list with the executor key set to 'local'.
-        """
-        kwargs = parse_arguments(sysargs)
-        _ = kwargs.pop('executor_keys', None)
-        _ = kwargs.pop('systemd', None)
-        return parse_dict_to_sysargs(kwargs)
-
     def get_hidden_job(self, name: str, sysargs: Optional[List[str]] = None, debug: bool = False):
         """
         Return the hidden "sister" job to store a job's parameters.
         """
         hidden_name = f'.systemd-{self.get_service_name(name, debug=debug)}' 
-        if sysargs:
-            sysargs = self.clean_sysargs(sysargs)
 
         return Job(
             hidden_name,
@@ -309,6 +302,9 @@ class SystemdExecutor(Executor):
             return None
 
         pid_str = output[len('MainPID='):]
+        if pid_str == '0':
+            return None
+
         if is_int(pid_str):
             return int(pid_str)
         
@@ -438,19 +434,19 @@ class SystemdExecutor(Executor):
         """
         Create a job as a service to be run by `systemd`.
         """
-
+        from meerschaum.utils.misc import make_symlink
         service_name = self.get_service_name(name, debug=debug)
         service_file_path = self.get_service_file_path(name, debug=debug)
-        service_socket_path = self.get_service_socket_path(name, debug=debug)
-        socket_path = self.get_socket_path(name, debug=debug)
+        service_symlink_file_path = self.get_service_symlink_file_path(name, debug=debug)
         socket_stdin = self.get_job_stdin_file(name, debug=debug)
         _ = socket_stdin.file_handler
 
-        job = self.get_hidden_job(name, sysargs, debug=debug)
-
-        clean_sysargs = self.clean_sysargs(sysargs)
         with open(service_file_path, 'w+', encoding='utf-8') as f:
-            f.write(self.get_service_file_text(name, clean_sysargs, debug=debug))
+            f.write(self.get_service_file_text(name, sysargs, debug=debug))
+
+        symlink_success, symlink_msg = make_symlink(service_file_path, service_symlink_file_path)
+        if not symlink_success:
+            return symlink_success, symlink_msg
 
         commands = [
             ['daemon-reload'],
@@ -494,6 +490,18 @@ class SystemdExecutor(Executor):
         """
         job = self.get_hidden_job(name, debug=debug)
         job.daemon._write_stop_file('quit')
+        sigint_success, sigint_msg = self.run_command(
+            ['kill', '-s', 'SIGINT', self.get_service_name(name, debug=debug)],
+            debug=debug,
+        )
+
+        loop_start = time.perf_counter()
+        while (time.perf_counter() - loop_start) < 5:
+            if self.get_job_status(name, debug=debug) == 'stopped':
+                return True, 'Success'
+
+            time.sleep(0.1)
+
         return self.run_command(
             ['stop', self.get_service_name(name, debug=debug)],
             debug=debug,
@@ -516,28 +524,25 @@ class SystemdExecutor(Executor):
         """
         from meerschaum.config.paths import SYSTEMD_LOGS_RESOURCES_PATH
 
-        stop_success, stop_msg = self.stop_job(name, debug=debug)
-        if not stop_success:
-            return stop_success, stop_msg
-
-        disable_success, disable_msg = self.run_command(
+        _ = self.stop_job(name, debug=debug)
+        _ = self.run_command(
             ['disable', self.get_service_name(name, debug=debug)],
             debug=debug,
         )
-        if not disable_success:
-            return disable_success, disable_msg
 
-        service_file_path = self.get_service_file_path(name, debug=debug)
-        service_socket_path = self.get_service_socket_path(name, debug=debug)
-        socket_path = self.get_socket_path(name, debug=debug)
-        result_path = self.get_result_path(name, debug=debug)
         service_logs_path = self.get_service_logs_path(name, debug=debug)
         logs_paths = [
             (SYSTEMD_LOGS_RESOURCES_PATH / name)
             for name in os.listdir(SYSTEMD_LOGS_RESOURCES_PATH)
             if name.startswith(service_logs_path.name + '.')
         ]
-        paths = [service_file_path, service_socket_path, socket_path, result_path] + logs_paths
+        paths = [
+            self.get_service_file_path(name, debug=debug),
+            self.get_service_symlink_file_path(name, debug=debug),
+            self.get_socket_path(name, debug=debug),
+            self.get_result_path(name, debug=debug),
+        ] + logs_paths
+
         for path in paths:
             if path.exists():
                 try:
@@ -547,7 +552,7 @@ class SystemdExecutor(Executor):
                     return False, str(e)
 
         job = self.get_hidden_job(name, debug=debug)
-        job.delete()
+        _ = job.delete()
 
         return self.run_command(['daemon-reload'], debug=debug)
 

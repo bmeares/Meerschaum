@@ -509,12 +509,18 @@ def _complete_delete_jobs(
         get_stopped_jobs,
         get_paused_jobs,
         get_running_jobs,
+        get_executor_keys_from_context,
     )
     from meerschaum.utils.misc import remove_ansi
 
-    executor_keys = executor_keys or remove_ansi(shell_attrs.get('executor_keys', 'local'))
+    executor_keys = (
+        executor_keys
+        or remove_ansi(
+            shell_attrs.get('executor_keys', get_executor_keys_from_context())
+        )
+    )
 
-    jobs = get_jobs(executor_keys)
+    jobs = get_jobs(executor_keys, include_hidden=False)
     if _get_job_method:
         method_keys = [_get_job_method] if isinstance(_get_job_method, str) else _get_job_method
         method_jobs = {}
@@ -540,11 +546,11 @@ def _complete_delete_jobs(
 
 
 def _delete_venvs(
-        action: Optional[List[str]] = None,
-        yes: bool = False,
-        force: bool = False,
-        **kwargs: Any
-    ) -> SuccessTuple:
+    action: Optional[List[str]] = None,
+    yes: bool = False,
+    force: bool = False,
+    **kwargs: Any
+) -> SuccessTuple:
     """
     Remove virtual environments.
     Specify which venvs to remove, or remove everything at once.

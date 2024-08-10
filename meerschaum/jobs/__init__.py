@@ -55,10 +55,11 @@ def get_jobs(
     -------
     A dictionary mapping job names to jobs.
     """
-    from meerschaum.connectors.parse import parse_connector_keys
+    from meerschaum.connectors.parse import parse_executor_keys
     include_local_and_system = (
         combine_local_and_systemd
-        and str(executor_keys).split(':')[0] in ('None', 'local', 'systemd')
+        and str(executor_keys).split(':', maxsplit=1)[0] in ('None', 'local', 'systemd')
+        and get_executor_keys_from_context() == 'systemd'
     )
 
     def _get_local_jobs():
@@ -76,7 +77,12 @@ def get_jobs(
 
     def _get_systemd_jobs():
         conn = mrsm.get_connector('systemd')
-        return conn.get_jobs(debug=debug)
+        jobs = conn.get_jobs(debug=debug)
+        return {
+            name: job
+            for name, job in jobs.items()
+            if include_hidden or not job.hidden
+        }
 
     if include_local_and_system:
         local_jobs = _get_local_jobs()
@@ -97,9 +103,14 @@ def get_jobs(
         return {**local_jobs, **systemd_jobs}
 
     try:
-        _ = parse_connector_keys(executor_keys, construct=False)
-        conn = mrsm.get_connector(executor_keys)
-        return conn.get_jobs(debug=debug)
+        _ = parse_executor_keys(executor_keys, construct=False)
+        conn = parse_executor_keys(executor_keys)
+        jobs = conn.get_jobs(debug=debug)
+        return {
+            name: job
+            for name, job in jobs.items()
+            if include_hidden or not job.hidden
+        }
     except Exception:
         return {}
 
@@ -115,10 +126,13 @@ def get_filtered_jobs(
     Return a list of jobs filtered by the user.
     """
     from meerschaum.utils.warnings import warn as _warn
-    jobs = get_jobs(executor_keys, include_hidden=include_hidden, debug=debug)
-
+    jobs = get_jobs(executor_keys, include_hidden=True, debug=debug)
     if not filter_list:
-        return jobs
+        return {
+            name: job
+            for name, job in jobs.items()
+            if include_hidden or not job.hidden
+        }
 
     jobs_to_return = {}
     for name in filter_list:
@@ -337,17 +351,26 @@ def stop_check_jobs_thread():
         warn(f"Failed to remove check jobs lock file:\n{e}")
 
 
+_context_keys = None
 def get_executor_keys_from_context() -> str:
     """
     If we are running on the host with the default root, default to `'systemd'`.
     Otherwise return `'local'`.
     """
+    global _context_keys
+
+    if _context_keys is not None:
+        return _context_keys
+
     from meerschaum.config.paths import ROOT_DIR_PATH, DEFAULT_ROOT_DIR_PATH
     from meerschaum.utils.misc import is_systemd_available
-    if is_systemd_available() and ROOT_DIR_PATH == DEFAULT_ROOT_DIR_PATH:
-        return 'systemd'
 
-    return 'local' 
+    _context_keys = (
+        'systemd'
+        if is_systemd_available() and ROOT_DIR_PATH == DEFAULT_ROOT_DIR_PATH
+        else 'local'
+    )
+    return _context_keys
 
 
 def _install_healthcheck_job() -> SuccessTuple:

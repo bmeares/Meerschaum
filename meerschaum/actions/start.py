@@ -82,6 +82,7 @@ def _start_api(action: Optional[List[str]] = None, **kw):
     from meerschaum.actions import actions
     return actions['api'](action=['start'], **kw)
 
+
 def _start_jobs(
     action: Optional[List[str]] = None,
     name: Optional[str] = None,
@@ -119,25 +120,20 @@ def _start_jobs(
                 Start the job 'happy_seal' but via the `--name` flag.
                 This only applies when no text follows the words 'start job'.
     """
-    import textwrap
     from meerschaum.utils.warnings import warn, info
     from meerschaum.utils.daemon._names import get_new_daemon_name
     from meerschaum.jobs import (
         Job,
-        get_jobs,
         get_filtered_jobs,
         get_stopped_jobs,
         get_running_jobs,
         get_paused_jobs,
-        get_restart_jobs,
         _install_healthcheck_job,
     )
-    from meerschaum._internal.arguments._parse_arguments import parse_arguments
     from meerschaum.actions import actions
     from meerschaum.utils.prompt import yes_no
     from meerschaum.utils.formatting import print_tuple
-    from meerschaum.utils.formatting._jobs import pprint_job, pprint_jobs
-    from meerschaum.utils.formatting._shell import clear_screen
+    from meerschaum.utils.formatting._jobs import pprint_jobs
     from meerschaum.utils.misc import items_str
 
     names = []
