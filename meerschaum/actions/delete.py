@@ -512,6 +512,7 @@ def _complete_delete_jobs(
         get_executor_keys_from_context,
     )
     from meerschaum.utils.misc import remove_ansi
+    from meerschaum.connectors.parse import parse_executor_keys
 
     executor_keys = (
         executor_keys
@@ -519,6 +520,9 @@ def _complete_delete_jobs(
             shell_attrs.get('executor_keys', get_executor_keys_from_context())
         )
     )
+
+    if parse_executor_keys(executor_keys, construct=False) is None:
+        return []
 
     jobs = get_jobs(executor_keys, include_hidden=False)
     if _get_job_method:

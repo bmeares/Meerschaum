@@ -740,7 +740,7 @@ class Job:
         The datetime when the job began running.
         """
         if self.executor is not None:
-            began_str = self.executor.get_job_began(name)
+            began_str = self.executor.get_job_began(self.name)
             if began_str is None:
                 return None
             return (
@@ -762,6 +762,8 @@ class Job:
         """
         if self.executor is not None:
             ended_str = self.executor.get_job_ended(self.name)
+            if ended_str is None:
+                return None
             return (
                 datetime.fromisoformat(ended_str)
                 .astimezone(timezone.utc)
@@ -779,6 +781,16 @@ class Job:
         """
         The datetime when the job was suspended while running.
         """
+        if self.executor is not None:
+            paused_str = self.executor.get_job_paused(self.name)
+            if paused_str is None:
+                return None
+            return (
+                datetime.fromisoformat(paused_str)
+                .astimezone(timezone.utc)
+                .replace(tzinfo=None)
+            )
+
         paused_str = self.daemon.properties.get('process', {}).get('paused', None)
         if paused_str is None:
             return None
@@ -796,11 +808,8 @@ class Job:
         if not self.daemon.stop_path.exists():
             return None
 
-        try:
-            with open(self.daemon.stop_path, 'r', encoding='utf-8') as f:
-                stop_data = json.load(f)
-        except Exception as e:
-            warn(f"Failed to read stop file for {self}:\n{e}")
+        stop_data = self.daemon._read_stop_file()
+        if not stop_data:
             return None
 
         stop_time_str = stop_data.get('stop_time', None)

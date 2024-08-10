@@ -87,6 +87,7 @@ def get_jobs_cards(state: WebState):
                     job.label,
                     className="card-text job-card-text",
                     style={"word-wrap": "break-word"},
+                    id={'type': 'job-label-p', 'index': name},
                 ),
                 style={"white-space": "pre-wrap"},
             ),
@@ -180,13 +181,14 @@ def build_manage_job_buttons(job: Job):
         },
     )
     buttons = []
-    if job.status in ('stopped', 'paused'):
+    status = job.status
+    if status in ('stopped', 'paused'):
         buttons.append(start_button)
-    if job.status == 'stopped':
+    if status == 'stopped':
         buttons.append(delete_button)
-    if job.status in ('running',):
+    if status in ('running',):
         buttons.append(pause_button)
-    if job.status in ('running', 'paused'):
+    if status in ('running', 'paused'):
         buttons.append(stop_button)
 
     return buttons

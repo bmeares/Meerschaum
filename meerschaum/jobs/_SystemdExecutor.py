@@ -19,6 +19,7 @@ from functools import partial
 import meerschaum as mrsm
 from meerschaum.jobs import Job, Executor, make_executor
 from meerschaum.utils.typing import Dict, Any, List, SuccessTuple, Union, Optional, Callable
+from meerschaum.config import get_config
 from meerschaum.config.static import STATIC_CONFIG
 from meerschaum.utils.warnings import warn, dprint
 from meerschaum._internal.arguments._parse_arguments import parse_arguments
@@ -141,7 +142,8 @@ class SystemdExecutor(Executor):
             STATIC_CONFIG['environment']['systemd_log_path']: service_logs_path.as_posix(),
             STATIC_CONFIG['environment']['systemd_result_path']: result_path.as_posix(),
             STATIC_CONFIG['environment']['systemd_stdin_path']: socket_path.as_posix(),
-
+            'LINES': get_config('jobs', 'terminal', 'lines'),
+            'COLUMNS': get_config('jobs', 'terminal', 'columns'),
         })
         environment_lines = [
             f"Environment={key}={val}"
@@ -259,7 +261,10 @@ class SystemdExecutor(Executor):
             return None
 
         psutil = mrsm.attempt_import('psutil')
-        return psutil.Process(pid)
+        try:
+            return psutil.Process(pid)
+        except Exception:
+            return None
 
     def get_job_status(self, name: str, debug: bool = False) -> str:
         """
@@ -271,13 +276,19 @@ class SystemdExecutor(Executor):
             debug=debug,
         )
 
+        if output == 'activating':
+            return 'running'
+
         if output == 'active':
             process = self.get_job_process(name, debug=debug)
             if process is None:
                 return 'stopped'
 
-            if process.status() == 'stopped':
-                return 'paused'
+            try:
+                if process.status() == 'stopped':
+                    return 'paused'
+            except Exception:
+                return 'stopped'
 
             return 'running'
 
@@ -310,7 +321,7 @@ class SystemdExecutor(Executor):
         
         return None
 
-    def get_job_began(self, name: str, debug: bool = False) -> Union[datetime, None]:
+    def get_job_began(self, name: str, debug: bool = False) -> Union[str, None]:
         """
         Return when a job began running.
         """
@@ -326,9 +337,61 @@ class SystemdExecutor(Executor):
         if not output.startswith('ActiveEnterTimestamp'):
             return None
 
+        dt_str = output.split('=')[-1]
+        if not dt_str:
+            return None
+
         dateutil_parser = mrsm.attempt_import('dateutil.parser')
-        dt = dateutil_parser.parse(output.split('=')[-1])
+        try:
+            dt = dateutil_parser.parse(dt_str)
+        except Exception as e:
+            warn(f"Cannot parse '{output}' as a datetime:\n{e}")
+            return None
+
         return dt.astimezone(timezone.utc).isoformat()
+
+    def get_job_ended(self, name: str, debug: bool = False) -> Union[str, None]:
+        """
+        Return when a job began running.
+        """
+        output = self.run_command(
+            [
+                'show',
+                self.get_service_name(name, debug=debug),
+                '--property=InactiveEnterTimestamp'
+            ],
+            as_output=True,
+            debug=debug,
+        )
+        if not output.startswith('InactiveEnterTimestamp'):
+            return None
+
+        dt_str = output.split('=')[-1]
+        if not dt_str:
+            return None
+
+        dateutil_parser = mrsm.attempt_import('dateutil.parser')
+
+        try:
+            dt = dateutil_parser.parse(dt_str)
+        except Exception as e:
+            warn(f"Cannot parse '{output}' as a datetime:\n{e}")
+            return None
+        return dt.astimezone(timezone.utc).isoformat()
+
+    def get_job_paused(self, name: str, debug: bool = False) -> Union[str, None]:
+        """
+        Return when a job was paused.
+        """
+        job = self.get_hidden_job(name, debug=debug)
+        if self.get_job_status(name, debug=debug) != 'paused':
+            return None
+
+        stop_time = job.stop_time
+        if stop_time is None:
+            return None
+
+        return stop_time.isoformat()
 
     def get_job_result(self, name: str, debug: bool = False) -> SuccessTuple:
         """
@@ -495,12 +558,13 @@ class SystemdExecutor(Executor):
             debug=debug,
         )
 
+        check_timeout_interval = get_config('jobs', 'check_timeout_interval_seconds')
         loop_start = time.perf_counter()
-        while (time.perf_counter() - loop_start) < 5:
+        while (time.perf_counter() - loop_start) < get_config('jobs', 'timeout_seconds'):
             if self.get_job_status(name, debug=debug) == 'stopped':
                 return True, 'Success'
 
-            time.sleep(0.1)
+            time.sleep(check_timeout_interval)
 
         return self.run_command(
             ['stop', self.get_service_name(name, debug=debug)],

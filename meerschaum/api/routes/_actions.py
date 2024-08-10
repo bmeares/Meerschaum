@@ -26,6 +26,7 @@ from meerschaum.actions import actions
 import meerschaum.core
 from meerschaum.config import get_config
 from meerschaum._internal.arguments._parse_arguments import parse_dict_to_sysargs, parse_arguments
+from meerschaum.api.routes._jobs import clean_sysargs
 
 actions_endpoint = endpoints['actions']
 
@@ -115,11 +116,11 @@ async def do_action_websocket(websocket: WebSocket):
         if not auth_success:
             await websocket.close()
 
-        sysargs = await websocket.receive_json()
-        kwargs = parse_arguments(sysargs)
-        _ = kwargs.pop('executor_keys', None)
-        _ = kwargs.pop('shell', None)
-        sysargs = parse_dict_to_sysargs(kwargs)
+        sysargs = clean_sysargs(await websocket.receive_json())
+        #  kwargs = parse_arguments(sysargs)
+        #  _ = kwargs.pop('executor_keys', None)
+        #  _ = kwargs.pop('shell', None)
+        #  sysargs = parse_dict_to_sysargs(kwargs)
 
         job = Job(
             job_name,

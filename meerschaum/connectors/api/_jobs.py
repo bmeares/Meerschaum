@@ -112,7 +112,7 @@ def get_job_status(self, name: str, debug: bool = False) -> str:
     metadata = self.get_job_metadata(name, debug=debug)
     return metadata.get('status', 'stopped')
 
-def get_job_began(self, name: str, debug: bool = False) -> str:
+def get_job_began(self, name: str, debug: bool = False) -> Union[str, None]:
     """
     Return a job's `began` timestamp, if it exists.
     """
@@ -123,7 +123,7 @@ def get_job_began(self, name: str, debug: bool = False) -> str:
 
     return began_str
 
-def get_job_ended(self, name: str, debug: bool = False) -> str:
+def get_job_ended(self, name: str, debug: bool = False) -> Union[str, None]:
     """
     Return a job's `ended` timestamp, if it exists.
     """
@@ -133,6 +133,17 @@ def get_job_ended(self, name: str, debug: bool = False) -> str:
         return None
 
     return ended_str
+
+def get_job_paused(self, name: str, debug: bool = False) -> Union[str, None]:
+    """
+    Return a job's `paused` timestamp, if it exists.
+    """
+    properties = self.get_job_properties(name, debug=debug)
+    paused_str = properties.get('daemon', {}).get('paused', None)
+    if paused_str is None:
+        return None
+
+    return paused_str
 
 def get_job_exists(self, name: str, debug: bool = False) -> bool:
     """

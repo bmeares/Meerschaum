@@ -24,36 +24,27 @@ New jobs will be given random names, and you can specify a label with `--name`.
 mrsm sync pipes --loop --name syncing-engine -d
 ```
 
-### Starting Jobs
+!!! tip "Chaining commands"
+    Combine multiple commands with `+`, similar to `&&` in `bash`.
 
-Start a previous job by typing its name after `start job[s]`:
+    ```bash
+    mrsm sync pipes -i sql:raw + \
+    sync pipes -c sql:raw -i sql:etl + \
+    sync pipes -c sql:etl -i sql:dest
+    ```
 
-```bash
-mrsm start job syncing-engine
-```
+### Job Management
 
-### Stopping Jobs
-
-Stop a running job with `stop job[s]`:
-
-```bash
-mrsm stop job syncing-engine -y
-```
-
-You can stop and remove a job with `delete job[s]`:
-
-```bash
-mrsm delete job awake_sushi -y
-```
-
-### Attaching to Jobs
-
-The command `attach job` follows the job's output. Because jobs block on STDIN, you can provide input to jobs as if they were run interactively.
-
-```bash
-mrsm bootstrap pipe --name interactive-job -d
-mrsm attach job interactive-job
-```
+| Command       | Description                                                                          | Flags              |
+|---------------|--------------------------------------------------------------------------------------|--------------------|
+| `show jobs`   | Print the existing jobs.                                                             | `--nopretty`, `-e` |
+| `start jobs`  | Start the service(s).                                                                | `-e`               |
+| `stop jobs`   | Stop the service(s).                                                                 | `-y`, `-e`         |
+| `pause jobs`  | Suspend the service(s).                                                              | `-e`               |
+| `delete jobs` | Stop and remove the service(s).                                                      | `-y`               |
+| `attach job`  | Stream the job's output, and write user input to the process `STDIN` (if necessary). | `-e`               |
+| `show logs`   | Stream jobs' output (similar to `docker compose logs -f`).                           | `-e`               |
+| `attach logs` | Alias for `show logs`.                                                               | `-e`               |
 
 ### Python API
 
@@ -65,35 +56,34 @@ job = mrsm.Job('syncing-engine', 'sync pipes --loop')
 success, msg = job.start()
 ```
 
-??? More examples
+??? "More examples"
     ```python
     import meerschaum as mrsm
 
     job = mrsm.Job('syncing-engine', 'sync pipes --loop')
+    job.start()
+
+    print(job.pid)
+    # 12155
+
+    print(job.began)
+    # datetime.datetime(2024, 8, 10, 3, 38, 40, 573621)
+
+    job.pause()
+
+    print(job.paused)
+    # datetime.datetime(2024, 8, 10, 3, 38, 42, 998261)
+
+    job.stop()
+
+    print(job.ended)
+    # datetime.datetime(2024, 8, 10, 3, 38, 44, 618737)
+
+    ### Stream the job's output.
+    job.monitor_logs()
+
+    job.delete()
     ```
-
-## 🪵 Logs
-
-Monitor the status of jobs with `show logs`, which will follow the logs of running jobs.
-
-!!! tip inline end ""
-    An alias for `show logs` is `attach logs`.
-
-```bash
-mrsm show logs
-```
-
-You can attach to specific jobs by listing their names:
-
-```bash
-mrsm show logs syncing-engine another-job
-```
-
-You can get a plain printout by adding `--nopretty`:
-
-```bash
-mrsm show logs --nopretty
-```
 
 ## ⏲️ Schedules
 

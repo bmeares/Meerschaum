@@ -69,11 +69,13 @@ def download_job_logs(n_clicks):
     Output({'type': 'process-timestamps-div', 'index': MATCH}, 'children'),
     Input({'type': 'manage-job-button', 'action': ALL, 'index': MATCH}, 'n_clicks'),
     State('session-store', 'data'),
+    State({'type': 'job-label-p', 'index': MATCH}, 'children'),
     prevent_initial_call = True,
 )
 def manage_job_button_click(
     n_clicks: Optional[int] = None,
     session_data: Optional[Dict[str, Any]] = None,
+    job_label: Optional[str] = None,
 ):
     """
     Start, stop, pause, or delete the given job.
@@ -101,7 +103,7 @@ def manage_job_button_click(
     job_name = component_dict['index']
     manage_job_action = component_dict['action']
     try:
-        job = Job(job_name)
+        job = Job(job_name, job_label.replace('\n', ' ') if job_label else None)
     except Exception as e:
         job = None
     if job is None:

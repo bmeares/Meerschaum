@@ -623,6 +623,20 @@ class Daemon:
 
         return True, "Success"
 
+    def _read_stop_file(self) -> Dict[str, Any]:
+        """
+        Read the stop file if it exists.
+        """
+        if not self.stop_path.exists():
+            return {}
+
+        try:
+            with open(self.stop_path, 'r', encoding='utf-8') as f:
+                data = json.load(f)
+            return data
+        except Exception:
+            return {}
+
     def _handle_sigterm(self, signal_number: int, stack_frame: 'frame') -> None:
         """
         Handle `SIGTERM` within the `Daemon` context.

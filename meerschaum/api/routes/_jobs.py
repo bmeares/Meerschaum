@@ -107,6 +107,24 @@ def get_job(
     }
 
 
+def clean_sysargs(sysargs: List[str]) -> List[str]:
+    """
+    Remove the executor flag or leading `api {label}` action.
+    """
+    clean_sysargs = []
+    executor_flag = False
+    for arg in sysargs:
+        if arg in ('-e', '--executor', 'api'):
+            executor_flag = True
+            continue
+        if executor_flag:
+            executor_flag = False
+            continue
+
+        clean_sysargs.append(arg)
+    return clean_sysargs
+
+
 @app.post(endpoints['jobs'] + '/{name}', tags=['Jobs'])
 def create_job(
     name: str,
@@ -118,7 +136,7 @@ def create_job(
     """
     Create and start a new job.
     """
-    job = Job(name, sysargs, executor_keys=EXECUTOR_KEYS)
+    job = Job(name, clean_sysargs(sysargs), executor_keys=EXECUTOR_KEYS)
     if job.exists():
         raise fastapi.HTTPException(
             status_code=409,
