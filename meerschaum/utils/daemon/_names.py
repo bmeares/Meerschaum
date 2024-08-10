@@ -84,7 +84,7 @@ _nouns: List[str] = []
 for category, items in _bank['nouns'].items():
     _nouns += items
 
-def generate_random_name(separator: str = '_'):
+def generate_random_name(separator: str = '-'):
     """
     Return a random adjective and noun combination.
 

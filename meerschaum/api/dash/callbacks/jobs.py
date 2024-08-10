@@ -24,13 +24,13 @@ from dash import Patch
 html, dcc = import_html(check_update=CHECK_UPDATE), import_dcc(check_update=CHECK_UPDATE)
 import dash_bootstrap_components as dbc
 from meerschaum.api.dash.components import alert_from_success_tuple, build_cards_grid
-from meerschaum.utils.daemon import Daemon
 from dash.exceptions import PreventUpdate
 from meerschaum.api.dash.jobs import (
     build_manage_job_buttons_div_children,
     build_status_children,
     build_process_timestamps_children,
 )
+from meerschaum.jobs import Job
 from meerschaum.api.dash.users import is_session_authenticated
 
 @dash_app.callback(
@@ -53,15 +53,11 @@ def download_job_logs(n_clicks):
         raise PreventUpdate
 
     component_dict = json.loads(ctx[0]['prop_id'].split('.' + 'n_clicks')[0])
-    daemon_id = component_dict['index']
-    daemon = Daemon(daemon_id=daemon_id)
+    job_name = component_dict['index']
     now = datetime.now(timezone.utc)
-    filename = (
-        daemon.rotating_log.file_path.name[:(-1 * len('.log'))]
-        + '_' + str(int(now.timestamp())) + '.log'
-    )
+    filename = job_name + '_' + str(int(now.timestamp())) + '.log'
     return {
-        'content': daemon.log_text,
+        'content': job.get_logs(),
         'filename': filename,
     }
 
@@ -76,9 +72,9 @@ def download_job_logs(n_clicks):
     prevent_initial_call = True,
 )
 def manage_job_button_click(
-        n_clicks: Optional[int] = None,
-        session_data: Optional[Dict[str, Any]] = None,
-    ):
+    n_clicks: Optional[int] = None,
+    session_data: Optional[Dict[str, Any]] = None,
+):
     """
     Start, stop, pause, or delete the given job.
     """
@@ -102,20 +98,20 @@ def manage_job_button_click(
         raise PreventUpdate
 
     component_dict = json.loads(ctx[0]['prop_id'].split('.' + 'n_clicks')[0])
-    daemon_id = component_dict['index']
+    job_name = component_dict['index']
     manage_job_action = component_dict['action']
     try:
-        daemon = Daemon(daemon_id=daemon_id)
+        job = Job(job_name)
     except Exception as e:
-        daemon = None
-    if daemon is None:
+        job = None
+    if job is None:
         raise PreventUpdate
 
     manage_functions = {
-        'start': functools.partial(daemon.run, allow_dirty_run=True),
-        'stop': daemon.quit,
-        'pause': daemon.pause,
-        'delete': daemon.cleanup,
+        'start': job.start,
+        'stop': job.stop,
+        'pause': job.pause,
+        'delete': job.delete,
     }
     if manage_job_action not in manage_functions:
         return (
@@ -125,7 +121,7 @@ def manage_job_button_click(
             dash.no_update,
         )
 
-    old_status = daemon.status
+    old_status = job.status
     try:
         success, msg = manage_functions[manage_job_action]()
     except Exception as e:
@@ -136,15 +132,15 @@ def manage_job_button_click(
     check_interval_seconds = 0.01
     begin = time.perf_counter()
     while (time.perf_counter() - begin) < timeout_seconds:
-        if daemon.status != old_status:
+        if job.status != old_status:
             break
         time.sleep(check_interval_seconds)
 
     return (
         alert_from_success_tuple((success, msg)),
-        build_manage_job_buttons_div_children(daemon),
-        build_status_children(daemon),
-        build_process_timestamps_children(daemon),
+        build_manage_job_buttons_div_children(job),
+        build_status_children(job),
+        build_process_timestamps_children(job),
     )
 
 dash_app.clientside_callback(
@@ -165,7 +161,7 @@ dash_app.clientside_callback(
         }
 
         const triggered_id = dash_clientside.callback_context.triggered_id;
-        const job_daemon_id = triggered_id["index"];
+        const job_name = triggered_id["index"];
 
         iframe = document.getElementById('webterm-iframe');
         if (!iframe){ return dash_clientside.no_update; }
@@ -174,7 +170,7 @@ dash_app.clientside_callback(
             {
                action: "show",
                subaction: "logs",
-               subaction_text: job_daemon_id,
+               subaction_text: job_name,
             },
             url
         );
@@ -197,44 +193,38 @@ dash_app.clientside_callback(
     prevent_initial_call = True,
 )
 def refresh_jobs_on_interval(
-        n_intervals: Optional[int] = None,
-        session_data: Optional[Dict[str, Any]] = None,
-    ):
+    n_intervals: Optional[int] = None,
+    session_data: Optional[Dict[str, Any]] = None,
+):
     """
     When the jobs refresh interval fires, rebuild the jobs' onscreen components.
     """
     session_id = session_data.get('session-id', None)
     is_authenticated = is_session_authenticated(session_id)
 
-    daemon_ids = [
+    job_names = [
         component_dict['id']['index']
         for component_dict in dash.callback_context.outputs_grouping[0]
     ]
 
-    ### NOTE: The daemon may have been deleted, but the card may still exist.
-    daemons = []
-    for daemon_id in daemon_ids:
-        try:
-            daemon = Daemon(daemon_id=daemon_id)
-        except Exception as e:
-            daemon = None
-        daemons.append(daemon)
+    ### NOTE: The job may have been deleted, but the card may still exist.
+    jobs = [Job(name) for name in job_names]
 
     return (
         [
             (
-                build_manage_job_buttons_div_children(daemon)
+                build_manage_job_buttons_div_children(job)
                 if is_authenticated
                 else []
             )
-            for daemon in daemons
+            for job in jobs
         ],
         [
-            build_status_children(daemon)
-            for daemon in daemons
+            build_status_children(job)
+            for job in jobs
         ],
         [
-            build_process_timestamps_children(daemon)
-            for daemon in daemons
+            build_process_timestamps_children(job)
+            for job in jobs
         ],
     )

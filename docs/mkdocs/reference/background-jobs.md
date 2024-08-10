@@ -3,16 +3,25 @@
 
 # 👷 Background Jobs
 
-Some actions need to run continuously, such as running the API or syncing pipes in a loop. Rather than relying on `systemd` or `cron`, you can use the built-in jobs system.
+Meerschaum's job management system lets you run any process in the background. Thanks to the built-in [scheduler](#️-schedules), you no longer have to worry about manually configuring `crontab` or `systemd`.
+
+!!! tip inline end ""
+    Jobs are created as `systemd` services or managed Unix daemons.
 
 <asciinema-player src="/assets/casts/jobs.cast" autoplay="true" loop="true" size="small" preload="true"></asciinema-player>
 
 ## 👔 Jobs
 
-All Meerschaum actions may be executed as background jobs by adding `-d` or `--daemon` flags or by prefacing the command with `start job`. New jobs will be given random names, and you can choose to specify a label with `--name`.
+Any Meerschaum action may be executed as a background job by adding the `-d` (`--daemon`) flag or by prefacing the command with `start job`.
 
 ```bash
 mrsm sync pipes -c plugin:foo --loop -d
+```
+
+New jobs will be given random names, and you can specify a label with `--name`.
+
+```bash
+mrsm sync pipes --loop --name syncing-engine -d
 ```
 
 ### Starting Jobs
@@ -20,7 +29,7 @@ mrsm sync pipes -c plugin:foo --loop -d
 Start a previous job by typing its name after `start job[s]`:
 
 ```bash
-mrsm start job awake_sushi -y
+mrsm start job syncing-engine
 ```
 
 ### Stopping Jobs
@@ -28,7 +37,7 @@ mrsm start job awake_sushi -y
 Stop a running job with `stop job[s]`:
 
 ```bash
-mrsm stop job awake_sushi -y
+mrsm stop job syncing-engine -y
 ```
 
 You can stop and remove a job with `delete job[s]`:
@@ -37,6 +46,54 @@ You can stop and remove a job with `delete job[s]`:
 mrsm delete job awake_sushi -y
 ```
 
+### Attaching to Jobs
+
+The command `attach job` follows the job's output. Because jobs block on STDIN, you can provide input to jobs as if they were run interactively.
+
+```bash
+mrsm bootstrap pipe --name interactive-job -d
+mrsm attach job interactive-job
+```
+
+### Python API
+
+Jobs may be managed with the [Job](https://docs.meerschaum.io/meerschaum.html#Job) class.
+
+```python
+import meerschaum as mrsm
+job = mrsm.Job('syncing-engine', 'sync pipes --loop')
+success, msg = job.start()
+```
+
+??? More examples
+    ```python
+    import meerschaum as mrsm
+
+    job = mrsm.Job('syncing-engine', 'sync pipes --loop')
+    ```
+
+## 🪵 Logs
+
+Monitor the status of jobs with `show logs`, which will follow the logs of running jobs.
+
+!!! tip inline end ""
+    An alias for `show logs` is `attach logs`.
+
+```bash
+mrsm show logs
+```
+
+You can attach to specific jobs by listing their names:
+
+```bash
+mrsm show logs syncing-engine another-job
+```
+
+You can get a plain printout by adding `--nopretty`:
+
+```bash
+mrsm show logs --nopretty
+```
 
 ## ⏲️ Schedules
 
@@ -184,24 +241,3 @@ Next 5 timestamps for schedule 'daily and mon-fri starting May 2, 2024':
     trigger.next()
     # datetime.datetime(2024, 1, 2, 0, 0, tzinfo=datetime.timezone.utc)
     ```
-
-## 🪵 Logs
-
-Monitor the status of jobs with `show logs`, which will follow the logs of running jobs.
-
-```bash
-mrsm show logs
-```
-
-You can attach to specific jobs by listing their names:
-
-```bash
-mrsm show logs awake_sushi my_job
-```
-
-You can get a plain printout by adding `--nopretty`:
-
-```bash
-mrsm show logs --nopretty
-```
-

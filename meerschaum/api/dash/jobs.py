@@ -15,12 +15,12 @@ from meerschaum.api.dash.users import is_session_authenticated
 from meerschaum.api import CHECK_UPDATE
 dbc = attempt_import('dash_bootstrap_components', lazy=False, check_update=CHECK_UPDATE)
 html, dcc = import_html(), import_dcc()
-dateutil_parser = attempt_import('dateutil.parser', check_update=CHECK_UPDATE)
 from meerschaum.jobs import (
     get_jobs,
     get_running_jobs,
     get_paused_jobs,
     get_stopped_jobs,
+    get_executor_keys_from_context,
     Job,
 )
 from meerschaum.config import get_config
@@ -33,20 +33,21 @@ STATUS_EMOJI: Dict[str, str] = {
     'dne': get_config('formatting', 'emoji', 'failure')
 }
 
+EXECUTOR_KEYS: str = get_executor_keys_from_context()
+
 def get_jobs_cards(state: WebState):
     """
     Build cards and alerts lists for jobs.
     """
-    jobs = get_jobs(include_hidden=False)
+    jobs = get_jobs(executor_keys=EXECUTOR_KEYS, include_hidden=False)
     session_id = state['session-store.data'].get('session-id', None)
     is_authenticated = is_session_authenticated(session_id)
 
     cards = []
 
     for name, job in jobs.items():
-        d = job.daemon
         footer_children = html.Div(
-            build_process_timestamps_children(d),
+            build_process_timestamps_children(job),
             id = {'type': 'process-timestamps-div', 'index': name},
         )
         follow_logs_button = dbc.DropdownMenuItem(
@@ -62,7 +63,7 @@ def get_jobs_cards(state: WebState):
         )
         header_children = [
             html.Div(
-                build_status_children(d),
+                build_status_children(job),
                 id={'type': 'manage-job-status-div', 'index': name},
                 style={'float': 'left'},
             ),
@@ -83,7 +84,7 @@ def get_jobs_cards(state: WebState):
             html.H4(html.B(name), className="card-title"),
             html.Div(
                 html.P(
-                    d.label,
+                    job.label,
                     className="card-text job-card-text",
                     style={"word-wrap": "break-word"},
                 ),
@@ -91,7 +92,7 @@ def get_jobs_cards(state: WebState):
             ),
             html.Div(
                 (
-                    build_manage_job_buttons_div_children(d)
+                    build_manage_job_buttons_div_children(job)
                     if is_authenticated
                     else []
                 ),
@@ -193,7 +194,7 @@ def build_manage_job_buttons(job: Job):
 
 def build_status_children(job: Job) -> List[html.P]:
     """
-    Return the status HTML component for this daemon.
+    Return the status HTML component for this Job.
     """
     if job is None:
         return STATUS_EMOJI['dne']
@@ -217,10 +218,16 @@ def build_process_timestamps_children(job: Job) -> List[dbc.Row]:
         return []
 
     children = []
-    for timestamp_key, timestamp_val in sorted_dict(
-        job.daemon.properties.get('process', {})
+    for timestamp_key, timestamp in sorted_dict(
+        {
+            'began': job.began,
+            'paused': job.paused,
+            'ended': job.ended,
+        }
     ).items():
-        timestamp = dateutil_parser.parse(timestamp_val)
+        if timestamp is None:
+            continue
+
         timestamp_str = timestamp.strftime('%Y-%m-%d %H:%M UTC')
         children.append(
             dbc.Row(

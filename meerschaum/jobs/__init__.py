@@ -102,6 +102,12 @@ def get_jobs(
             )
         return {**local_jobs, **systemd_jobs}
 
+    if executor_keys == 'local':
+        return _get_local_jobs()
+
+    if executor_keys == 'systemd':
+        return _get_systemd_jobs()
+
     try:
         _ = parse_executor_keys(executor_keys, construct=False)
         conn = parse_executor_keys(executor_keys)
