@@ -8,6 +8,9 @@ This module is the entry point for the interactive shell.
 from __future__ import annotations
 import os
 from copy import deepcopy
+from itertools import chain
+import shlex
+
 from meerschaum.utils.typing import Union, SuccessTuple, Any, Callable, Optional, List, Dict
 from meerschaum.utils.packages import attempt_import
 from meerschaum.config import __doc__, __version__ as version, get_config
@@ -28,7 +31,17 @@ prompt_toolkit = attempt_import('prompt_toolkit', lazy=False, warn=False, instal
 from meerschaum._internal.shell.ValidAutoSuggest import ValidAutoSuggest
 from meerschaum._internal.shell.ShellCompleter import ShellCompleter
 _clear_screen = get_config('shell', 'clear_screen', patch=True)
-from meerschaum.utils.misc import string_width
+from meerschaum.utils.misc import string_width, remove_ansi
+from meerschaum.utils.warnings import warn
+from meerschaum.jobs import get_executor_keys_from_context
+from meerschaum.config.static import STATIC_CONFIG
+from meerschaum._internal.arguments._parse_arguments import (
+    split_chained_sysargs,
+    split_pipeline_sysargs,
+    parse_arguments,
+    parse_line,
+    parse_dict_to_sysargs,
+)
 
 patch = True
 ### remove default cmd2 commands
@@ -56,12 +69,16 @@ hidden_commands = {
     'ipy',
 }
 reserved_completers = {
-    'instance', 'repo'
+    'instance', 'repo', 'executor',
 }
 
 ### To handle dynamic reloading, store shell attributes externally.
 ### This is because the shell object address gets lost upon reloads.
 shell_attrs = {}
+AND_KEY: str = STATIC_CONFIG['system']['arguments']['and_key']
+ESCAPED_AND_KEY: str = STATIC_CONFIG['system']['arguments']['escaped_and_key']
+PIPELINE_KEY: str = STATIC_CONFIG['system']['arguments']['pipeline_key']
+ESCAPED_PIPELINE_KEY: str = STATIC_CONFIG['system']['arguments']['escaped_pipeline_key']
 
 def _insert_shell_actions(
         _shell: Optional['Shell'] = None,
@@ -110,7 +127,6 @@ def _completer_wrapper(
         if _check_keys is not None:
             return _check_keys
 
-        from meerschaum._internal.arguments._parse_arguments import parse_line
         args = parse_line(line)
         if target.__name__ != 'default_action_completer':
             if len(args['action']) > 0:
@@ -148,7 +164,6 @@ def default_action_completer(
 
 def _check_complete_keys(line: str) -> Optional[List[str]]:
     from meerschaum._internal.arguments._parser import parser, get_arguments_triggers
-    from meerschaum._internal.arguments._parse_arguments import parse_line
 
     ### TODO Add all triggers
     trigger_args = {
@@ -164,7 +179,6 @@ def _check_complete_keys(line: str) -> Optional[List[str]]:
 
     ### TODO Find out arg possibilities
     possibilities = []
-    #  last_word = line.split(' ')[-1]
     last_word = line.rstrip(' ').split(' ')[-1]
 
     if last_word.startswith('-'):
@@ -247,11 +261,11 @@ class Shell(cmd.Cmd):
 
         from meerschaum.config._paths import SHELL_HISTORY_PATH
         shell_attrs['session'] = prompt_toolkit_shortcuts.PromptSession(
-            history = prompt_toolkit_history.FileHistory(str(SHELL_HISTORY_PATH)),
-            auto_suggest = ValidAutoSuggest(),
-            completer = ShellCompleter(),
-            complete_while_typing = True,
-            reserve_space_for_menu = False,
+            history=prompt_toolkit_history.FileHistory(SHELL_HISTORY_PATH.as_posix()),
+            auto_suggest=ValidAutoSuggest(),
+            completer=ShellCompleter(),
+            complete_while_typing=True,
+            reserve_space_for_menu=False,
         )
 
         try: ### try cmd2 arguments first
@@ -281,6 +295,7 @@ class Shell(cmd.Cmd):
         shell_attrs['_sysargs'] = sysargs
         shell_attrs['_actions']['instance'] = self.do_instance
         shell_attrs['_actions']['repo'] = self.do_repo
+        shell_attrs['_actions']['executor'] = self.do_executor
         shell_attrs['_actions']['debug'] = self.do_debug
         shell_attrs['_update_bottom_toolbar'] = True
         shell_attrs['_old_bottom_toolbar'] = ''
@@ -337,6 +352,9 @@ class Shell(cmd.Cmd):
             shell_attrs['instance_keys'] = remove_ansi(str(instance))
         if shell_attrs.get('repo_keys', None) is None:
             shell_attrs['repo_keys'] = get_config('meerschaum', 'default_repository', patch=patch)
+        if shell_attrs.get('executor_keys', None) is None:
+            shell_attrs['executor_keys'] = get_executor_keys_from_context()
+
         ### this will be updated later in update_prompt ONLY IF {username} is in the prompt
         shell_attrs['username'] = ''
 
@@ -362,14 +380,19 @@ class Shell(cmd.Cmd):
     def insert_actions(self):
         from meerschaum.actions import actions
 
-    def update_prompt(self, instance: Optional[str] = None, username: Optional[str] = None):
+    def update_prompt(
+        self,
+        instance: Optional[str] = None,
+        username: Optional[str] = None,
+        executor_keys: Optional[str] = None,
+    ):
         from meerschaum.utils.formatting import ANSI, colored
         from meerschaum._internal.entry import _shell, get_shell
 
         cmd.__builtins__['input'] = input_with_sigint(
             _old_input,
             shell_attrs['session'],
-            shell = self,
+            shell=self,
         )
         prompt = shell_attrs['_prompt']
         mask = prompt
@@ -395,7 +418,8 @@ class Shell(cmd.Cmd):
                 from meerschaum.connectors.sql import SQLConnector
                 try:
                     conn_attrs = parse_instance_keys(
-                        remove_ansi(shell_attrs['instance_keys']), construct=False
+                        remove_ansi(shell_attrs['instance_keys']),
+                        construct=False,
                     )
                     if 'username' not in conn_attrs:
                         if 'uri' in conn_attrs:
@@ -409,11 +433,26 @@ class Shell(cmd.Cmd):
                 if username is None:
                    username = '(no username)'
             shell_attrs['username'] = (
-                username if not ANSI else
-                colored(username, **get_config('shell', 'ansi', 'username', 'rich'))
+                username
+                if not ANSI
+                else colored(username, **get_config('shell', 'ansi', 'username', 'rich'))
             )
             prompt = prompt.replace('{username}', shell_attrs['username'])
             mask = mask.replace('{username}', ''.join(['\0' for c in '{username}']))
+
+        if '{executor_keys}' in shell_attrs['_prompt']:
+            if executor_keys is None:
+                executor_keys = shell_attrs.get('executor_keys', None) or 'local'
+            shell_attrs['executor_keys'] = (
+                executor_keys
+                if not ANSI
+                else colored(
+                    remove_ansi(executor_keys),
+                    **get_config('shell', 'ansi', 'executor', 'rich')
+                )
+            )
+            prompt = prompt.replace('{executor_keys}', shell_attrs['executor_keys'])
+            mask = mask.replace('{executor_keys}', ''.join(['\0' for c in '{executor_keys}']))
 
         remainder_prompt = list(shell_attrs['_prompt'])
         for i, c in enumerate(mask):
@@ -422,10 +461,13 @@ class Shell(cmd.Cmd):
                 if ANSI:
                     _c = colored(_c, **get_config('shell', 'ansi', 'prompt', 'rich'))
                 remainder_prompt[i] = _c
+
         self.prompt = ''.join(remainder_prompt).replace(
             '{username}', shell_attrs['username']
         ).replace(
             '{instance}', shell_attrs['instance']
+        ).replace(
+            '{executor_keys}', shell_attrs['executor_keys']
         )
         shell_attrs['prompt'] = self.prompt
         ### flush stdout
@@ -447,6 +489,9 @@ class Shell(cmd.Cmd):
 
         ### make a backup of line for later
         original_line = deepcopy(line)
+
+        ### Escape backslashes to allow for multi-line input.
+        line = line.replace('\\\n', ' ')
 
         ### cmd2 support: check if command exists
         try:
@@ -478,72 +523,125 @@ class Shell(cmd.Cmd):
             return "help " + line[len(help_token):]
 
         from meerschaum._internal.arguments import parse_line
-        args = parse_line(line)
-        if args.get('help', False):
-            from meerschaum._internal.arguments._parser import parse_help
-            parse_help(args)
+        try:
+            sysargs = shlex.split(line)
+        except ValueError as e:
+            warn(e, stack=False)
             return ""
+
+        sysargs, pipeline_args = split_pipeline_sysargs(sysargs)
+        chained_sysargs = split_chained_sysargs(sysargs)
+        chained_kwargs = [
+            parse_arguments(_sysargs)
+            for _sysargs in chained_sysargs
+        ]
+
+        if '--help' in sysargs or '-h' in sysargs:
+            from meerschaum._internal.arguments._parser import parse_help
+            parse_help(sysargs)
+            return ""
+
+        patch_args: Dict[str, Any] = {}
 
         ### NOTE: pass `shell` flag in case actions need to distinguish between
         ###       being run on the command line and being run in the shell
-        args['shell'] = True
-        args['line'] = line
+        patch_args.update({
+            'shell': True,
+            'line': line,
+        })
+        patches: List[Dict[str, Any]] = [{} for _ in chained_kwargs]
 
         ### if debug is not set on the command line,
         ### default to shell setting
-        if not args.get('debug', False):
-            args['debug'] = shell_attrs['debug']
+        for kwargs in chained_kwargs:
+            if not kwargs.get('debug', False):
+                kwargs['debug'] = shell_attrs['debug']
 
         ### Make sure an action was provided.
-        if not args.get('action', None):
+        if (
+            not chained_kwargs
+            or not chained_kwargs[0].get('action', None)
+        ):
             self.emptyline()
             return ''
 
         ### Strip a leading 'mrsm' if it's provided.
-        if args['action'][0] == 'mrsm':
-            args['action'] = args['action'][1:]
-            if not args['action']:
-                self.emptyline()
-                return ''
+        for kwargs in chained_kwargs:
+            if kwargs['action'][0] == 'mrsm':
+                kwargs['action'] = kwargs['action'][1:]
+                if not kwargs['action']:
+                    self.emptyline()
+                    return ''
 
         ### If we don't recognize the action,
         ### make it a shell action.
-        from meerschaum.actions import get_main_action_name
-        main_action_name = get_main_action_name(args['action'])
-        if main_action_name is None:
-            if not hasattr(self, 'do_' + args['action'][0]):
-                args['action'].insert(0, 'sh')
-                main_action_name = 'sh'
+        ### TODO: make this work for chained actions
+        def _get_main_action_name(kwargs):
+            from meerschaum.actions import get_main_action_name
+            main_action_name = get_main_action_name(kwargs['action'])
+            if main_action_name is None:
+                if not hasattr(self, 'do_' + kwargs['action'][0]):
+                    kwargs['action'].insert(0, 'sh')
+                    main_action_name = 'sh'
+                else:
+                    main_action_name = kwargs['action'][0]
+            return main_action_name
+
+        def _add_flag_to_kwargs(kwargs, i, key, shell_key=None):
+            shell_key = shell_key or key
+            shell_value = remove_ansi(shell_attrs.get(shell_key) or '')
+            if key == 'mrsm_instance':
+                default_value = get_config('meerschaum', 'instance')
+            elif key == 'repository':
+                default_value = get_config('meerschaum', 'default_repository')
+            elif key == 'executor_keys':
+                default_value = get_executor_keys_from_context()
             else:
-                main_action_name = args['action'][0]
+                default_value = None
+
+            if key in kwargs or shell_value == default_value:
+                return
+
+            patches[i][key] = shell_value
 
         ### if no instance is provided, use current shell default,
         ### but not for the 'api' command (to avoid recursion)
-        if 'mrsm_instance' not in args and main_action_name != 'api':
-            args['mrsm_instance'] = str(shell_attrs['instance_keys'])
+        for i, kwargs in enumerate(chained_kwargs):
+            main_action_name = _get_main_action_name(kwargs)
+            if main_action_name == 'api':
+                continue
 
-        if 'repository' not in args and main_action_name != 'api':
-            args['repository'] = str(shell_attrs['repo_keys'])
+            _add_flag_to_kwargs(kwargs, i, 'mrsm_instance', shell_key='instance_keys')
+            _add_flag_to_kwargs(kwargs, i, 'repository', shell_key='repo_keys')
+            _add_flag_to_kwargs(kwargs, i, 'executor_keys')
 
         ### parse out empty strings
-        if args['action'][0].strip("\"'") == '':
+        if chained_kwargs[0]['action'][0].strip("\"'") == '':
             self.emptyline()
             return ""
 
-        ### If the `--daemon` flag is present, prepend 'start job'.
-        if args.get('daemon', False) and 'stack' not in args['action']:
-            args['action'] = ['start', 'jobs'] + args['action']
-            main_action_name = 'start'
-
-        positional_only = (main_action_name not in shell_attrs['_actions'])
+        positional_only = (_get_main_action_name(chained_kwargs[0]) not in shell_attrs['_actions'])
         if positional_only:
             return original_line
 
-        from meerschaum._internal.entry import entry_with_args
+        ### Apply patch to all kwargs.
+        for i, kwargs in enumerate([_ for _ in chained_kwargs]):
+            kwargs.update(patches[i])
+
+        from meerschaum._internal.entry import entry_with_args, entry
+        sysargs_to_execute = []
+        for i, kwargs in enumerate(chained_kwargs):
+            step_kwargs = {k: v for k, v in kwargs.items() if k != 'line'}
+            step_sysargs = parse_dict_to_sysargs(step_kwargs)
+            sysargs_to_execute.extend(step_sysargs)
+            sysargs_to_execute.append(AND_KEY)
+        
+        sysargs_to_execute = sysargs_to_execute[:-1] + (
+            ([':'] + pipeline_args) if pipeline_args else []
+        )
 
         try:
-            success_tuple = entry_with_args(_actions=shell_attrs['_actions'], **args)
-            #  success_tuple = entry_with_args(**args)
+            success_tuple = entry(sysargs_to_execute, _patch_args=patch_args)
         except Exception as e:
             success_tuple = False, str(e)
 
@@ -551,9 +649,9 @@ class Shell(cmd.Cmd):
         if isinstance(success_tuple, tuple):
             print_tuple(
                 success_tuple,
-                skip_common = (not shell_attrs['debug']),
-                upper_padding = 1,
-                lower_padding = 0,
+                skip_common=(not shell_attrs['debug']),
+                upper_padding=1,
+                lower_padding=0,
             )
 
         ### Restore the old working directory.
@@ -569,12 +667,12 @@ class Shell(cmd.Cmd):
         if stop:
             return True
 
-    def do_pass(self, line):
+    def do_pass(self, line, executor_keys=None):
         """
         Do nothing.
         """
 
-    def do_debug(self, action: Optional[List[str]] = None, **kw):
+    def do_debug(self, action: Optional[List[str]] = None, executor_keys=None, **kw):
         """
         Toggle the shell's debug mode.
         If debug = on, append `--debug` to all commands.
@@ -604,11 +702,12 @@ class Shell(cmd.Cmd):
         info(f"Debug mode is {'on' if shell_attrs['debug'] else 'off'}.")
 
     def do_instance(
-            self,
-            action : Optional[List[str]] = None,
-            debug : bool = False,
-            **kw : Any
-        ) -> SuccessTuple:
+        self,
+        action: Optional[List[str]] = None,
+        executor_keys=None,
+        debug: bool = False,
+        **kw: Any
+    ) -> SuccessTuple:
         """
         Temporarily set a default Meerschaum instance for the duration of the shell.
         The default instance is loaded from the Meerschaum configuraton file
@@ -665,22 +764,42 @@ class Shell(cmd.Cmd):
         return True, "Success"
 
 
-    def complete_instance(self, text: str, line: str, begin_index: int, end_index: int):
+    def complete_instance(
+        self,
+        text: str,
+        line: str,
+        begin_index: int,
+        end_index: int,
+        _executor: bool = False,
+        _additional_options: Optional[List[str]] = None,
+    ):
         from meerschaum.utils.misc import get_connector_labels
         from meerschaum._internal.arguments._parse_arguments import parse_line
-        from meerschaum.connectors import instance_types
+        from meerschaum.connectors import instance_types, _load_builtin_custom_connectors
+        if _executor:
+            _load_builtin_custom_connectors()
+            from meerschaum.jobs import executor_types
+
+        conn_types = instance_types if not _executor else executor_types
+
         args = parse_line(line)
         action = args['action']
         _text = action[1] if len(action) > 1 else ""
-        return get_connector_labels(*instance_types, search_term=_text, ignore_exact_match=True)
+        return get_connector_labels(
+            *conn_types,
+            search_term=_text,
+            ignore_exact_match=True,
+            _additional_options=_additional_options,
+        )
 
 
     def do_repo(
-            self,
-            action: Optional[List[str]] = None,
-            debug: bool = False,
-            **kw: Any
-        ) -> SuccessTuple:
+        self,
+        action: Optional[List[str]] = None,
+        executor_keys=None,
+        debug: bool = False,
+        **kw: Any
+    ) -> SuccessTuple:
         """
         Temporarily set a default Meerschaum repository for the duration of the shell.
         The default repository (mrsm.io) is loaded from the Meerschaum configuraton file
@@ -727,9 +846,65 @@ class Shell(cmd.Cmd):
         return True, "Success"
 
     def complete_repo(self, *args) -> List[str]:
-        return self.complete_instance(*args)
+        results = self.complete_instance(*args)
+        return [result for result in results if result.startswith('api:')]
 
-    def do_help(self, line: str) -> List[str]:
+    def do_executor(
+        self,
+        action: Optional[List[str]] = None,
+        executor_keys=None,
+        debug: bool = False,
+        **kw: Any
+    ) -> SuccessTuple:
+        """
+        Temporarily set a default Meerschaum executor for the duration of the shell.
+        
+        You can change the default repository with `edit config`.
+        
+        Usage:
+            executor {API label}
+        
+        Examples:
+            ### reset to default executor
+            executor
+        
+            ### set the executor to 'api:main'
+            executor api:main
+        
+        Note that executors are API instances.
+        """
+        from meerschaum import get_connector
+        from meerschaum.connectors.parse import parse_executor_keys
+        from meerschaum.utils.warnings import warn, info
+        from meerschaum.jobs import get_executor_keys_from_context
+
+        if action is None:
+            action = []
+
+        try:
+            executor_keys = action[0]
+        except (IndexError, AttributeError):
+            executor_keys = ''
+        if executor_keys == '':
+            executor_keys = get_executor_keys_from_context()
+
+        if executor_keys == 'systemd' and get_executor_keys_from_context() != 'systemd':
+            warn(f"Cannot execute via `systemd`, falling back to `local`...", stack=False)
+            executor_keys = 'local'
+        
+        conn = parse_executor_keys(executor_keys, debug=debug)
+
+        shell_attrs['executor_keys'] = str(conn).replace('systemd:main', 'systemd')
+
+        info(f"Default executor for the current shell: {executor_keys}")
+        return True, "Success"
+
+    def complete_executor(self, *args) -> List[str]:
+        from meerschaum.jobs import executor_types
+        results = self.complete_instance(*args, _executor=True, _additional_options=['local'])
+        return [result for result in results if result.split(':')[0] in executor_types]
+
+    def do_help(self, line: str, executor_keys=None) -> List[str]:
         """
         Show help for Meerschaum actions.
         
@@ -800,7 +975,7 @@ class Shell(cmd.Cmd):
                 possibilities.append(name.replace('do_', ''))
         return possibilities
 
-    def do_exit(self, params) -> True:
+    def do_exit(self, params, executor_keys=None) -> True:
         """
         Exit the Meerschaum shell.
         """
@@ -865,23 +1040,31 @@ def input_with_sigint(_input, session, shell: Optional[Shell] = None):
 
         instance_colored = (
             colored(
-                shell_attrs['instance_keys'], 'on ' + get_config(
-                    'shell', 'ansi', 'instance', 'rich', 'style'
-                )
+                remove_ansi(shell_attrs['instance_keys']),
+                'on ' + get_config('shell', 'ansi', 'instance', 'rich', 'style')
             )
             if ANSI
             else colored(shell_attrs['instance_keys'], 'on white')
         )
         repo_colored = (
             colored(
-                shell_attrs['repo_keys'],
+                remove_ansi(shell_attrs['repo_keys']),
                 'on ' + get_config('shell', 'ansi', 'repo', 'rich', 'style')
             )
             if ANSI
             else colored(shell_attrs['repo_keys'], 'on white')
         )
+        executor_colored = (
+            colored(
+                remove_ansi(shell_attrs['executor_keys']),
+                'on ' + get_config('shell', 'ansi', 'executor', 'rich', 'style')
+            )
+            if ANSI
+            else colored(remove_ansi(shell_attrs['executor_keys']), 'on white')
+        )
+
         try:
-            typ, label = shell_attrs['instance_keys'].split(':')
+            typ, label = shell_attrs['instance_keys'].split(':', maxsplit=1)
             connected = typ in connectors and label in connectors[typ]
         except Exception as e:
             connected = False
@@ -898,8 +1081,12 @@ def input_with_sigint(_input, session, shell: Optional[Shell] = None):
         )
 
         left = (
-            colored(' Instance: ', 'on white') + instance_colored
-            + colored('   Repo: ', 'on white') + repo_colored
+            ' '
+            + instance_colored
+            + colored(' | ', 'on white')
+            + executor_colored
+            + colored(' | ', 'on white')
+            + repo_colored
         )
         right = connection_text
         buffer_size = (

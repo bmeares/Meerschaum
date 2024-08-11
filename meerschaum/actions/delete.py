@@ -10,9 +10,9 @@ from __future__ import annotations
 from meerschaum.utils.typing import Any, SuccessTuple, Union, Optional, List
 
 def delete(
-        action: Optional[List[str]] = None,
-        **kw: Any
-    ) -> SuccessTuple:
+    action: Optional[List[str]] = None,
+    **kw: Any
+) -> SuccessTuple:
     """
     Delete an element.
 
@@ -35,23 +35,21 @@ def delete(
 
 
 def _complete_delete(
-        action: Optional[List[str]] = None,
-        **kw: Any
-    ) -> List[str]:
+    action: Optional[List[str]] = None,
+    **kw: Any
+) -> List[str]:
     """
     Override the default Meerschaum `complete_` function.
-
     """
-    from meerschaum.actions.start import _complete_start_jobs
     from meerschaum.actions.edit import _complete_edit_config
     if action is None:
         action = []
     options = {
         'connector': _complete_delete_connectors,
         'connectors': _complete_delete_connectors,
-        'config' : _complete_edit_config,
-        'job' : _complete_start_jobs,
-        'jobs' : _complete_start_jobs,
+        'config': _complete_edit_config,
+        'job': _complete_delete_jobs,
+        'jobs': _complete_delete_jobs,
     }
 
     if (
@@ -390,22 +388,27 @@ def _complete_delete_connectors(
 
 
 def _delete_jobs(
-        action: Optional[List[str]] = None,
-        noask: bool = False,
-        nopretty: bool = False,
-        force: bool = False,
-        yes: bool = False,
-        debug: bool = False,
-        **kw
-    ) -> SuccessTuple:
+    action: Optional[List[str]] = None,
+    executor_keys: Optional[str] = None,
+    noask: bool = False,
+    nopretty: bool = False,
+    force: bool = False,
+    yes: bool = False,
+    debug: bool = False,
+    **kw
+) -> SuccessTuple:
     """
     Remove a job's log files and delete the job's ID.
     
     If the job is running, ask to kill the job first.
 
     """
-    from meerschaum.utils.daemon import (
-        Daemon, get_running_daemons, get_stopped_daemons, get_filtered_daemons, get_paused_daemons
+    from meerschaum.jobs import (
+        Job,
+        get_running_jobs,
+        get_stopped_jobs,
+        get_filtered_jobs,
+        get_paused_jobs,
     )
     from meerschaum.utils.prompt import yes_no
     from meerschaum.utils.formatting._jobs import pprint_jobs
@@ -413,49 +416,53 @@ def _delete_jobs(
     from meerschaum.utils.warnings import warn
     from meerschaum.utils.misc import items_str
     from meerschaum.actions import actions
-    daemons = get_filtered_daemons(action, warn=(not nopretty))
-    if not daemons:
+
+    jobs = get_filtered_jobs(executor_keys, action, debug=debug)
+    if not jobs:
         return True, "No jobs to delete; nothing to do."
 
     _delete_all_jobs = False
     if not action:
         if not force:
-            pprint_jobs(daemons)
+            pprint_jobs(jobs)
             if not yes_no(
                 "Delete all jobs? This cannot be undone!",
                 noask=noask, yes=yes, default='n'
             ):
                 return False, "No jobs were deleted."
-            _delete_all_jobs = True
-    _running_daemons = get_running_daemons(daemons)
-    _paused_daemons = get_paused_daemons(daemons)
-    _stopped_daemons = get_stopped_daemons(daemons)
-    _to_delete = _stopped_daemons
 
-    to_stop_daemons = _running_daemons + _paused_daemons
-    if to_stop_daemons:
+            _delete_all_jobs = True
+
+    _running_jobs = get_running_jobs(executor_keys, jobs, debug=debug)
+    _paused_jobs = get_paused_jobs(executor_keys, jobs, debug=debug)
+    _stopped_jobs = get_stopped_jobs(executor_keys, jobs, debug=debug)
+    _to_delete = _stopped_jobs
+
+    to_stop_jobs =  {**_running_jobs, **_paused_jobs}
+    if to_stop_jobs:
         clear_screen(debug=debug)
         if not force:
-            pprint_jobs(to_stop_daemons, nopretty=nopretty)
+            pprint_jobs(to_stop_jobs, nopretty=nopretty)
         if force or yes_no(
             "Stop these jobs?",
             default='n', yes=yes, noask=noask
         ):
             actions['stop'](
-                action = (['jobs'] + [d.daemon_id for d in to_stop_daemons]),
-                nopretty = nopretty,
-                yes = yes,
-                force = force,
-                noask = noask,
-                debug = debug,
+                action=(['jobs'] + [_name for _name in to_stop_jobs]),
+                executor_keys=executor_keys,
+                nopretty=nopretty,
+                yes=yes,
+                force=force,
+                noask=noask,
+                debug=debug,
                 **kw
             )
             ### Ensure the running jobs are dead.
-            if get_running_daemons(daemons):
+            if get_running_jobs(executor_keys, jobs, debug=debug):
                 return False, (
                     f"Failed to kill running jobs. Please stop these jobs before deleting."
                 )
-            _to_delete += to_stop_daemons
+            _to_delete.update(to_stop_jobs)
 
         ### User decided not to kill running jobs.
         else:
@@ -473,26 +480,81 @@ def _delete_jobs(
             return False, "No jobs were deleted."
 
     _deleted = []
-    for d in _to_delete:
-        d.cleanup()
-        if d.path.exists() and not nopretty:
-            warn(f"Failed to delete job '{d.daemon_id}'.", stack=False)
+    for name, job in _to_delete.items():
+        delete_success, delete_msg = job.delete()
+        if not delete_success:
+            warn(f"Failed to delete job '{name}'.", stack=False)
             continue
-        _deleted.append(d)
+        _deleted.append(name)
 
     return (
         len(_deleted) > 0,
         ("Deleted job" + ("s" if len(_deleted) != 1 else '')
-            + f" {items_str([d.daemon_id for d in _deleted])}."),
+            + f" {items_str([_name for _name in _deleted])}."),
     )
 
 
+def _complete_delete_jobs(
+    action: Optional[List[str]] = None,
+    executor_keys: Optional[str] = None,
+    line: str = '',
+    _get_job_method: Optional[str, List[str]] = None,
+    **kw
+) -> List[str]:
+    from meerschaum._internal.shell.Shell import shell_attrs
+    from meerschaum.jobs import (
+        get_jobs,
+        get_filtered_jobs,
+        get_restart_jobs,
+        get_stopped_jobs,
+        get_paused_jobs,
+        get_running_jobs,
+        get_executor_keys_from_context,
+    )
+    from meerschaum.utils.misc import remove_ansi
+    from meerschaum.connectors.parse import parse_executor_keys
+
+    executor_keys = (
+        executor_keys
+        or remove_ansi(
+            shell_attrs.get('executor_keys', get_executor_keys_from_context())
+        )
+    )
+
+    if parse_executor_keys(executor_keys, construct=False) is None:
+        return []
+
+    jobs = get_jobs(executor_keys, include_hidden=False)
+    if _get_job_method:
+        method_keys = [_get_job_method] if isinstance(_get_job_method, str) else _get_job_method
+        method_jobs = {}
+        for method_key in method_keys:
+            method_func = locals()[f'get_{method_key}_jobs']
+            method_jobs.update(method_func(jobs=jobs))
+        jobs = method_jobs
+
+    if not action:
+        return list(jobs)
+
+    possibilities = []
+    _line_end = line.split(' ')[-1]
+    for name in jobs:
+        if name in action:
+            continue
+        if _line_end == '':
+            possibilities.append(name)
+            continue
+        if name.startswith(action[-1]):
+            possibilities.append(name)
+    return possibilities
+
+
 def _delete_venvs(
-        action: Optional[List[str]] = None,
-        yes: bool = False,
-        force: bool = False,
-        **kwargs: Any
-    ) -> SuccessTuple:
+    action: Optional[List[str]] = None,
+    yes: bool = False,
+    force: bool = False,
+    **kwargs: Any
+) -> SuccessTuple:
     """
     Remove virtual environments.
     Specify which venvs to remove, or remove everything at once.

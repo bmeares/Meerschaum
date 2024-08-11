@@ -21,8 +21,11 @@ Below is a brief description of the Meerschaum internal modules. For further inf
     - `APIConnector`: Interact with pipes via web requests.
     - `PluginConnector`: Wrapper for plugins' `fetch()` or `sync()` methods.
 
-- `core`
+- `core`  
   Primary class definitions reside here, such as `Pipe` and `User`.
+
+- `jobs`  
+  Definition for `Job` and utilities such as `get_filtered_jobs()`.
 
 - `plugins`  
   Public plugins API functions such as `@make_action` and `@api_plugin` as well as the `Plugin` class are defined here.

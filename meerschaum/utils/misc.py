@@ -875,7 +875,7 @@ def dict_from_od(od: collections.OrderedDict) -> Dict[Any, Any]:
             _d[k] = dict_from_od(v)
     return _d
 
-def remove_ansi(s : str) -> str:
+def remove_ansi(s: str) -> str:
     """
     Remove ANSI escape characters from a string.
 
@@ -899,10 +899,11 @@ def remove_ansi(s : str) -> str:
 
 
 def get_connector_labels(
-        *types: str,
-        search_term: str = '',
-        ignore_exact_match = True,
-    ) -> List[str]:
+    *types: str,
+    search_term: str = '',
+    ignore_exact_match = True,
+    _additional_options: Optional[List[str]] = None,
+) -> List[str]:
     """
     Read connector labels from the configuration dictionary.
 
@@ -941,12 +942,16 @@ def get_connector_labels(
             continue
         conns += [ f'{t}:{label}' for label in connectors.get(t, {}) if label != 'default' ]
 
+    if _additional_options:
+        conns += _additional_options
+
     possibilities = [
-        c for c in conns
-            if c.startswith(search_term)
-                and c != (
-                    search_term if ignore_exact_match else ''
-                )
+        c
+        for c in conns
+        if c.startswith(search_term)
+            and c != (
+                search_term if ignore_exact_match else ''
+            )
     ]
     return sorted(possibilities)
 
@@ -1063,7 +1068,7 @@ def async_wrap(func):
             loop = asyncio.get_event_loop()
         pfunc = partial(func, *args, **kwargs)
         return await loop.run_in_executor(executor, pfunc)
-    return run 
+    return run
 
 
 def debug_trace(browser: bool = True):
@@ -1077,17 +1082,17 @@ def debug_trace(browser: bool = True):
 
 
 def items_str(
-        items: List[Any],
-        quotes: bool = True,
-        quote_str: str = "'",
-        commas: bool = True,
-        comma_str: str = ',',
-        and_: bool = True,
-        and_str: str = 'and',
-        oxford_comma: bool = True,
-        spaces: bool = True,
-        space_str = ' ',
-    ) -> str:
+    items: List[Any],
+    quotes: bool = True,
+    quote_str: str = "'",
+    commas: bool = True,
+    comma_str: str = ',',
+    and_: bool = True,
+    and_str: str = 'and',
+    oxford_comma: bool = True,
+    spaces: bool = True,
+    space_str = ' ',
+) -> str:
     """
     Return a formatted string if list items separated by commas.
 
@@ -1217,6 +1222,19 @@ def is_bcp_available() -> bool:
         has_bcp = False
     return has_bcp
 
+
+def is_systemd_available() -> bool:
+    """Check if running on systemd."""
+    import subprocess
+    try:
+        has_systemctl = subprocess.call(
+            ['systemctl', '-h'],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.STDOUT,
+        ) == 0
+    except Exception:
+        has_systemctl = False
+    return has_systemctl
 
 def get_last_n_lines(file_name: str, N: int):
     """
@@ -1521,6 +1539,7 @@ def safely_extract_tar(tarf: 'file', output_dir: Union[str, 'pathlib.Path']) -> 
         tar.extractall(path=path, members=members, numeric_owner=numeric_owner)
 
     return safe_extract(tarf, output_dir)
+
 
 ##################
 # Legacy imports #

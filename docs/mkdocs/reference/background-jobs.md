@@ -3,40 +3,87 @@
 
 # 👷 Background Jobs
 
-Some actions need to run continuously, such as running the API or syncing pipes in a loop. Rather than relying on `systemd` or `cron`, you can use the built-in jobs system.
+Meerschaum's job management system lets you run any process in the background ― just add `-d` to any command. Thanks to the built-in [scheduler](#️-schedules), you no longer have to worry about manually configuring `crontab` or `systemd`.
+
+!!! tip inline end ""
+    Jobs are created as `systemd` services or managed Unix daemons.
 
 <asciinema-player src="/assets/casts/jobs.cast" autoplay="true" loop="true" size="small" preload="true"></asciinema-player>
 
 ## 👔 Jobs
 
-All Meerschaum actions may be executed as background jobs by adding `-d` or `--daemon` flags or by prefacing the command with `start job`. New jobs will be given random names, and you can choose to specify a label with `--name`.
+Any Meerschaum action may be executed as a background job by adding the `-d` (`--daemon`) flag or by prefacing the command with `start job`.
 
 ```bash
-mrsm sync pipes -c plugin:foo --loop -d
+mrsm sync pipes --loop -d
 ```
 
-### Starting Jobs
-
-Start a previous job by typing its name after `start job[s]`:
+New jobs will be given random names, and you can specify a label with `--name`.
 
 ```bash
-mrsm start job awake_sushi -y
+mrsm sync pipes --loop --name syncing-engine -d
 ```
 
-### Stopping Jobs
+!!! tip "Chaining commands"
+    Combine multiple commands with `+`, similar to `&&` in `bash`:
 
-Stop a running job with `stop job[s]`:
+    ```bash
+    sync pipes -i sql:raw + \
+    sync pipes -c sql:raw -i sql:etl + \
+    sync pipes -c sql:etl -i sql:dest
+    ```
 
-```bash
-mrsm stop job awake_sushi -y
+### Job Management
+
+| Command       | Description                                                                          | Flags              |
+|---------------|--------------------------------------------------------------------------------------|--------------------|
+| `show jobs`   | Print the existing jobs.                                                             | `--nopretty`, `-e` |
+| `start jobs`  | Start the service(s).                                                                | `-e`               |
+| `stop jobs`   | Stop the service(s).                                                                 | `-y`, `-e`         |
+| `pause jobs`  | Suspend the service(s).                                                              | `-e`               |
+| `delete jobs` | Stop and remove the service(s).                                                      | `-y`               |
+| `attach job`  | Stream the job's output, and write user input to the process `STDIN` (if necessary). | `-e`               |
+| `show logs`   | Stream jobs' output (similar to `docker compose logs -f`).                           | `-e`               |
+| `attach logs` | Alias for `show logs`.                                                               | `-e`               |
+
+### Python API
+
+Jobs may be managed with the [Job](https://docs.meerschaum.io/meerschaum.html#Job) class.
+
+```python
+import meerschaum as mrsm
+job = mrsm.Job('syncing-engine', 'sync pipes --loop')
+success, msg = job.start()
 ```
 
-You can stop and remove a job with `delete job[s]`:
+??? "More examples"
+    ```python
+    import meerschaum as mrsm
 
-```bash
-mrsm delete job awake_sushi -y
-```
+    job = mrsm.Job('syncing-engine', 'sync pipes --loop')
+    job.start()
 
+    print(job.pid)
+    # 12155
+
+    print(job.began)
+    # datetime.datetime(2024, 8, 10, 3, 38, 40, 573621)
+
+    job.pause()
+
+    print(job.paused)
+    # datetime.datetime(2024, 8, 10, 3, 38, 42, 998261)
+
+    job.stop()
+
+    print(job.ended)
+    # datetime.datetime(2024, 8, 10, 3, 38, 44, 618737)
+
+    ### Stream the job's output.
+    job.monitor_logs()
+
+    job.delete()
+    ```
 
 ## ⏲️ Schedules
 
@@ -184,24 +231,3 @@ Next 5 timestamps for schedule 'daily and mon-fri starting May 2, 2024':
     trigger.next()
     # datetime.datetime(2024, 1, 2, 0, 0, tzinfo=datetime.timezone.utc)
     ```
-
-## 🪵 Logs
-
-Monitor the status of jobs with `show logs`, which will follow the logs of running jobs.
-
-```bash
-mrsm show logs
-```
-
-You can attach to specific jobs by listing their names:
-
-```bash
-mrsm show logs awake_sushi my_job
-```
-
-You can get a plain printout by adding `--nopretty`:
-
-```bash
-mrsm show logs --nopretty
-```
-

@@ -36,8 +36,9 @@ For your convenience, the following classes and functions may be imported from t
 <li><code>meerschaum.Connector</code></li>
 <li><code>meerschaum.Pipe</code></li>
 <li><code>meerschaum.Plugin</code></li>
-<li><code>meerschaum.SuccessTuple</code></li>
+<li><code>meerschaum.Job</code></li>
 <li><code>meerschaum.Venv</code></li>
+<li><code>meerschaum.SuccessTuple</code></li>
 </ul>
 
 </div>
@@ -54,6 +55,7 @@ For your convenience, the following classes and functions may be imported from t
 <li><code>meerschaum.make_connector()</code></li>
 <li><code>meerschaum.pprint()</code></li>
 <li><code>meerschaum.attempt_import()</code></li>
+<li><code>meerschaum.entry()</code></li>
 </ul>
 
 </div>
@@ -61,7 +63,10 @@ For your convenience, the following classes and functions may be imported from t
 
 ### Examples
 
-#### Build a Connector
+<details>
+    <summary><b>Build a Connector</b></summary>
+
+Get existing connectors or build a new one in-memory with the `meerschaum.get_connector()` factory function:
 
 ```python
 import meerschaum as mrsm
@@ -80,9 +85,14 @@ sql_conn.to_sql(df, 'foo')
 print(sql_conn.read('foo'))
 #    foo
 # 0    1
-```
 
-#### Create a Custom Connector Class
+```
+</details>
+
+<details>
+    <summary><b>Create a Custom Connector Class</b></summary>
+
+Decorate your connector classes with `meerschaum.make_connector()` to designate it as a custom connector:
 
 ```python
 from datetime import datetime, timezone
@@ -113,8 +123,12 @@ foo_conn = mrsm.get_connector(
 )
 docs = foo_conn.fetch()
 ```
+</details>
 
-#### Build a Pipe
+<details>
+    <summary><b>Build a Pipe</b></summary>
+
+Build a `meerschaum.Pipe` in-memory:
 
 ```python
 from datetime import datetime
@@ -135,7 +149,23 @@ print(df)
 # 2 2024-01-01   3  96
 ```
 
-#### Get Registered Pipes
+Add `temporary=True` to skip registering the pipe in the pipes table.
+
+</details>
+
+<details>
+    <summary><b>Get Registered Pipes</b></summary>
+
+The `meerschaum.get_pipes()` function returns a dictionary hierarchy of pipes by connector, metric, and location:
+
+```python
+import meerschaum as mrsm
+
+pipes = mrsm.get_pipes(instance='sql:temp')
+pipe = pipes['foo:bar']['demo'][None]
+```
+
+Add `as_list=True` to flatten the hierarchy:
 
 ```python
 import meerschaum as mrsm
@@ -148,8 +178,12 @@ pipes = mrsm.get_pipes(
 print(pipes)
 # [Pipe('foo:bar', 'demo', instance='sql:temp')]
 ```
+</details>
 
-#### Access a Plugin's Module
+<details>
+    <summary><b>Import Plugins</b></summary>
+
+You can import a plugin's module through `meerschaum.Plugin.module`:
 
 ```python
 import meerschaum as mrsm
@@ -157,9 +191,210 @@ import meerschaum as mrsm
 plugin = mrsm.Plugin('noaa')
 with mrsm.Venv(plugin):
     noaa = plugin.module
-    print(noaa.get_station_info('KGMU'))
-# {'name': 'Greenville Downtown Airport', 'geometry': {'type': 'Point', 'coordinates': [-82.35004, 34.84873]}}
 ```
+
+If your plugin has submodules, use `meerschaum.plugins.from_plugin_import`:
+
+```python
+from meerschaum.plugins import from_plugin_import
+get_defined_pipes = from_plugin_import('compose.utils.pipes', 'get_defined_pipes')
+```
+
+Import multiple plugins with `meerschaum.plugins.import_plugins`:
+
+```python
+from meerschaum.plugins import import_plugins
+noaa, compose = import_plugins('noaa', 'compose')
+```
+
+</details>
+
+<details>
+    <summary><b>Create a Job</b></summary>
+
+Create a `meerschaum.Job` with `name` and `sysargs`:
+
+```python
+import meerschaum as mrsm
+
+job = mrsm.Job('syncing-engine', 'sync pipes --loop')
+success, msg = job.start()
+```
+
+Pass `executor_keys` as the connectors keys of an API instance to create a remote job:
+
+```python
+import meerschaum as mrsm
+
+job = mrsm.Job(
+    'foo',
+    'sync pipes -s daily',
+    executor_keys='api:main',
+)
+```
+
+</details>
+
+<details>
+    <summary><b>Import from a Virtual Environment</b></summary>
+Use the `meerschaum.Venv` context manager to activate a virtual environment:
+```python
+import meerschaum as mrsm
+
+with mrsm.Venv('noaa'):
+    import requests
+
+print(requests.__file__)
+# /home/bmeares/.config/meerschaum/venvs/noaa/lib/python3.12/site-packages/requests/__init__.py
+```
+
+To import packages which may not be installed, use `meerschaum.attempt_import()`:
+
+```python
+import meerschaum as mrsm
+
+requests = mrsm.attempt_import('requests', venv='noaa')
+print(requests.__file__)
+# /home/bmeares/.config/meerschaum/venvs/noaa/lib/python3.12/site-packages/requests/__init__.py
+```
+
+</details>
+
+<details>
+    <summary><b>Run Actions</b></summary>
+
+Run `sysargs` with `meerschaum.entry()`:
+
+```python
+import meerschaum as mrsm
+
+success, msg = mrsm.entry('show pipes + show version : x2')
+```
+
+Use `meerschaum.actions.get_action()` to access an action function directly:
+
+```python
+from meerschaum.actions import get_action
+
+show_pipes = get_action(['show', 'pipes'])
+success, msg = show_pipes(connector_keys=['plugin:noaa'])
+```
+
+Get a dictionary of available subactions with `meerschaum.actions.get_subactions()`:
+
+```python
+from meerschaum.actions import get_subactions
+
+subactions = get_subactions('show')
+success, msg = subactions['pipes']()
+```
+
+</details>
+
+<details>
+    <summary><b>Create a Plugin</b></summary>
+
+Run `bootstrap plugin` to create a new plugin:
+
+```
+mrsm bootstrap plugin example
+```
+
+This will create `example.py` in your plugins directory (default `~/.config/meerschaum/plugins/`, Windows: `%APPDATA%\Meerschaum\plugins`). You may paste the example code from the "Create a Custom Action" example below.
+
+Open your plugin with `edit plugin`:
+
+```
+mrsm edit plugin example
+```
+
+*Run `edit plugin` and paste the example code below to try out the features.*
+
+See the [writing plugins guide](https://meerschaum.io/reference/plugins/writing-plugins/) for more in-depth documentation.
+
+</details>
+
+<details>
+    <summary><b>Create a Custom Action</b></summary>
+
+Decorate a function with `meerschaum.actions.make_action` to designate it as an action. Subactions will be automatically detected if not decorated:
+
+```python
+from meerschaum.actions import make_action
+
+@make_action
+def sing():
+    print('What would you like me to sing?')
+    return True, "Success"
+
+def sing_tune():
+    return False, "I don't know that song!"
+
+def sing_song():
+    print('Hello, World!')
+    return True, "Success"
+
+```
+
+Use `meerschaum.plugins.add_plugin_argument()` to create new parameters for your action:
+
+```python
+from meerschaum.plugins import make_action, add_plugin_argument
+
+add_plugin_argument(
+    '--song', type=str, help='What song to sing.',
+)
+
+@make_action
+def sing_melody(action=None, song=None):
+    to_sing = action[0] if action else song
+    if not to_sing:
+        return False, "Please tell me what to sing!"
+
+    return True, f'~I am singing {to_sing}~'
+```
+
+```
+mrsm sing melody lalala
+
+mrsm sing melody --song do-re-mi
+```
+
+</details>
+
+<details>
+    <summary><b>Add a Page to the Web Dashboard</b></summary>
+    Use the decorators `meerschaum.plugins.dash_plugin()` and `meerschaum.plugins.web_page()` to add new pages to the web dashboard:
+
+```python
+from meerschaum.plugins import dash_plugin, web_page
+
+@dash_plugin
+def init_dash(dash_app):
+
+    import dash.html as html
+    import dash_bootstrap_components as dbc
+    from dash import Input, Output, no_update
+
+    ### Routes to '/dash/my-page'
+    @web_page('/my-page', login_required=False)
+    def my_page():
+        return dbc.Container([
+            html.H1("Hello, World!"),
+            dbc.Button("Click me", id='my-button'),
+            html.Div(id="my-output-div"),
+        ])
+
+    @dash_app.callback(
+        Output('my-output-div', 'children'),
+        Input('my-button', 'n_clicks'),
+    )
+    def my_button_click(n_clicks):
+        if not n_clicks:
+            return no_update
+        return html.P(f'You clicked {n_clicks} times!')
+```
+</details>
 
 ## Submodules
 
@@ -203,6 +438,28 @@ with mrsm.Venv(plugin):
   - `meerschaum.connectors.Connector`
   - `meerschaum.connectors.SQLConnector`
   - `meerschaum.connectors.APIConnector`
+
+</details>
+
+<details>
+    <summary>
+    `meerschaum.jobs`<br>
+    Start background jobs.
+    </summary>
+
+  - `meerschaum.jobs.Job`
+  - `meerschaum.jobs.Executor`
+  - `meerschaum.jobs.systemd.SystemdExecutor`
+  - `meerschaum.jobs.get_jobs()`
+  - `meerschaum.jobs.get_filtered_jobs()`
+  - `meerschaum.jobs.get_running_jobs()`
+  - `meerschaum.jobs.get_stopped_jobs()`
+  - `meerschaum.jobs.get_paused_jobs()`
+  - `meerschaum.jobs.get_restart_jobs()`
+  - `meerschaum.jobs.make_executor()`
+  - `meerschaum.jobs.check_restart_jobs()`
+  - `meerschaum.jobs.start_check_jobs_thread()`
+  - `meerschaum.jobs.stop_check_jobs_thread()`
 
 </details>
 

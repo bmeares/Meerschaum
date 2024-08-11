@@ -10,9 +10,9 @@ from __future__ import annotations
 from meerschaum.utils.typing import Union, Any, Sequence, SuccessTuple, Optional, Tuple, List
 
 def copy(
-        action: Optional[List[str]] = None,
-        **kw : Any
-    ) -> SuccessTuple:
+    action: Optional[List[str]] = None,
+    **kw : Any
+) -> SuccessTuple:
     """
     Duplicate connectors or pipes.
     
@@ -32,17 +32,16 @@ def copy(
 
 
 def _complete_copy(
-        action : Optional[List[str]] = None,
-        **kw : Any
-    ) -> List[str]:
+    action: Optional[List[str]] = None,
+    **kw: Any
+) -> List[str]:
     """
     Override the default Meerschaum `complete_` function.
-
     """
-    from meerschaum.actions.start import _complete_start_jobs
     from meerschaum.actions.edit import _complete_edit_config
     if action is None:
         action = []
+
     options = {
         'connector': _complete_copy_connectors,
         'connectors': _complete_copy_connectors,
@@ -61,15 +60,14 @@ def _complete_copy(
 
 
 def _copy_pipes(
-        yes: bool = False,
-        noask: bool = False,
-        force: bool = False,
-        debug: bool = False,
-        **kw
-    ) -> SuccessTuple:
+    yes: bool = False,
+    noask: bool = False,
+    force: bool = False,
+    debug: bool = False,
+    **kw
+) -> SuccessTuple:
     """
     Copy pipes' attributes and make new pipes.
-
     """
     from meerschaum import get_pipes, Pipe
     from meerschaum.utils.prompt import prompt, yes_no
@@ -132,16 +130,15 @@ def _copy_pipes(
 
     return successes > 0, msg
 
+
 def _copy_connectors(
-        action: Optional[List[str]] = None,
-        connector_keys: Optional[List[str]] = None,
-        nopretty: bool = False,
-        yes: bool = False,
-        force: bool = False,
-        noask: bool = False,
-        debug: bool = False,
-        **kw
-    ) -> SuccessTuple:
+    action: Optional[List[str]] = None,
+    connector_keys: Optional[List[str]] = None,
+    nopretty: bool = False,
+    force: bool = False,
+    debug: bool = False,
+    **kwargs: Any
+) -> SuccessTuple:
     """
     Create a new connector from an existing one.
 
@@ -153,39 +150,69 @@ def _copy_connectors(
     from meerschaum.config._edit import write_config
     from meerschaum.utils.warnings import info, warn
     from meerschaum.utils.formatting import pprint
+    from meerschaum.actions import get_action
     cf = _config()
     if action is None:
         action = []
     if connector_keys is None:
         connector_keys = []
 
-    _keys = list(set(action + connector_keys))
+    _keys = (action or []) + connector_keys
 
     if not _keys:
         return False, "No connectors to copy."
 
-    for ck in _keys:
-        try:
-            conn = parse_connector_keys(ck)
-        except Exception as e:
-            warn(f"Unable to parse connector '{ck}'. Skipping...", stack=False)
-            continue
+    if len(_keys) < 1 or len(_keys) > 2:
+        return False, "Provide one set of connector keys."
 
-        attrs = get_config('meerschaum', 'connectors', conn.type, conn.label)
-        pprint(attrs, nopretty=nopretty)
+    ck = _keys[0]
 
-        asking = True
-        #  while asking:
-            #  new_ck = prompt("Please enter a new label for the new connector ():")
+    try:
+        conn = parse_connector_keys(ck)
+    except Exception as e:
+        return False, f"Unable to parse connector '{ck}'."
 
+    if len(_keys) == 2:
+        new_ck = _keys[1] if ':' in _keys[1] else None
+        new_label = _keys[1].split(':')[-1]
+    else:
+        new_ck = None
+        new_label = None
 
-    return False, "Not implemented."
+    try:
+        if new_label is None:
+            new_label = prompt(f"Enter a label for the new '{conn.type}' connector:")
+    except KeyboardInterrupt:
+        return False, "Nothing was copied."
+
+    if new_ck is None:
+        new_ck = f"{conn.type}:{new_label}"
+
+    info(f"Registering connector '{new_ck}' from '{ck}'...")
+
+    attrs = get_config('meerschaum', 'connectors', conn.type, conn.label)
+    pprint(attrs, nopretty=nopretty)
+    if not force and not yes_no(
+        f"Register connector '{new_ck}' with the above attributes?",
+        default='n',
+        **kwargs
+    ):
+        return False, "Nothing was copied."
+
+    register_connector = get_action(['register', 'connector'])
+    register_success, register_msg = register_connector(
+        [new_ck],
+        params=attrs,
+        **kwargs
+    )
+    return register_success, register_msg
+
 
 def _complete_copy_connectors(
-        action : Optional[List[str]] = None,
-        line : str = '',
-        **kw : Any
-    ) -> List[str]:
+    action: Optional[List[str]] = None,
+    line: str = '',
+    **kw: Any
+) -> List[str]:
     from meerschaum.config import get_config
     from meerschaum.utils.misc import get_connector_labels
     types = list(get_config('meerschaum', 'connectors').keys())

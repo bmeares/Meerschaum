@@ -8,9 +8,34 @@ The entry point for launching Meerschaum actions.
 """
 
 from __future__ import annotations
-from meerschaum.utils.typing import SuccessTuple, List, Optional, Dict, Callable, Any
 
-def entry(sysargs: Optional[List[str]] = None) -> SuccessTuple:
+import os
+import sys
+from meerschaum.utils.typing import SuccessTuple, List, Optional, Dict, Callable, Any
+from meerschaum.config.static import STATIC_CONFIG as _STATIC_CONFIG
+
+_systemd_result_path = None
+if (_STATIC_CONFIG['environment']['systemd_log_path']) in os.environ:
+    from meerschaum.utils.daemon import RotatingFile as _RotatingFile, StdinFile as _StdinFile
+    from meerschaum.config import get_config as _get_config
+
+    _systemd_result_path = os.environ[_STATIC_CONFIG['environment']['systemd_result_path']]
+    _systemd_log_path = os.environ[_STATIC_CONFIG['environment']['systemd_log_path']]
+    _systemd_log = _RotatingFile(
+        _systemd_log_path,
+        write_timestamps=True,
+        timestamp_format=_get_config('jobs', 'logs', 'timestamps', 'format'),
+    )
+    sys.stdout = _systemd_log
+    sys.stderr = _systemd_log
+    _systemd_stdin_path = os.environ.get(_STATIC_CONFIG['environment']['systemd_stdin_path'], None)
+    if _systemd_stdin_path:
+        sys.stdin = _StdinFile(_systemd_stdin_path)
+
+def entry(
+    sysargs: Optional[List[str]] = None,
+    _patch_args: Optional[Dict[str, Any]] = None,
+) -> SuccessTuple:
     """
     Parse arguments and launch a Meerschaum action.
 
@@ -18,35 +43,104 @@ def entry(sysargs: Optional[List[str]] = None) -> SuccessTuple:
     -------
     A `SuccessTuple` indicating success.
     """
-    from meerschaum._internal.arguments import parse_arguments
+    import shlex
+    import json
+    from meerschaum.utils.formatting import make_header
+    from meerschaum._internal.arguments import (
+        parse_arguments,
+        split_chained_sysargs,
+        split_pipeline_sysargs,
+    )
     from meerschaum.config.static import STATIC_CONFIG
     if sysargs is None:
         sysargs = []
     if not isinstance(sysargs, list):
-        import shlex
         sysargs = shlex.split(sysargs)
-    args = parse_arguments(sysargs)
-    argparse_exception = args.get(
-        STATIC_CONFIG['system']['arguments']['failure_key'],
-        None,
-    )
-    if argparse_exception is not None:
-        args_text = args.get('text', '')
-        if not args_text.startswith('show arguments'):
-            return (
-                False,
-                (
-                    "Invalid arguments:"
-                    + (f"\n{args_text}" if args_text else '')
-                    + f"\n    {argparse_exception}"
-                )
-            )
 
-    return entry_with_args(**args)
+    pipeline_key = STATIC_CONFIG['system']['arguments']['pipeline_key']
+    escaped_pipeline_key = STATIC_CONFIG['system']['arguments']['escaped_pipeline_key']
+    sysargs, pipeline_args = split_pipeline_sysargs(sysargs)
+
+    has_daemon = '-d' in sysargs or '--daemon' in sysargs
+    has_start_job = sysargs[:2] == ['start', 'job']
+    chained_sysargs = (
+        [sysargs]
+        if has_daemon or has_start_job
+        else split_chained_sysargs(sysargs)
+    )
+    if pipeline_args:
+        chained_sysargs = [
+            ['start', 'pipeline']
+            + [str(arg) for arg in pipeline_args]
+            + (
+                ['--params', json.dumps(_patch_args)]
+                if _patch_args
+                else []
+            )
+            + ['--sub-args', shlex.join(sysargs)]
+        ]
+
+    results: List[SuccessTuple] = []
+
+    for _sysargs in chained_sysargs:
+        if escaped_pipeline_key in _sysargs:
+            _sysargs = [
+                pipeline_key
+                if _arg == escaped_pipeline_key
+                else _arg
+                for _arg in _sysargs
+            ]
+
+        args = parse_arguments(_sysargs)
+        if _patch_args:
+            args.update(_patch_args)
+        argparse_exception = args.get(
+            STATIC_CONFIG['system']['arguments']['failure_key'],
+            None,
+        )
+        if argparse_exception is not None:
+            args_text = args.get('text', '')
+            if not args_text.startswith('show arguments'):
+                return (
+                    False,
+                    (
+                        "Invalid arguments:"
+                        + (f"\n{args_text}" if args_text else '')
+                        + f"\n    {argparse_exception}"
+                    )
+                )
+
+        entry_success, entry_msg = entry_with_args(_patch_args=_patch_args, **args)
+        if not entry_success:
+            return entry_success, entry_msg
+
+        results.append((entry_success, entry_msg))
+
+    success = all(_success for _success, _ in results)
+    msg = (
+        results[0][1]
+        if len(results) == 1
+        else 'Successfully completed steps:\n\n' + '\n'.join(
+            [
+                (
+                    make_header(shlex.join(_sysargs))
+                    + '\n    ' + _msg + '\n'
+                )
+                for i, ((_, _msg), _sysargs) in enumerate(zip(results, chained_sysargs))
+            ]
+        )
+    )
+    if _systemd_result_path:
+        import json
+        with open(_systemd_result_path, 'w+', encoding='utf-8') as f:
+            json.dump((success, msg), f)
+
+    return success, msg
 
 
 def entry_with_args(
     _actions: Optional[Dict[str, Callable[[Any], SuccessTuple]]] = None,
+    _patch_args: Optional[Dict[str, Any]] = None,
     **kw
 ) -> SuccessTuple:
     """Execute a Meerschaum action with keyword arguments.
@@ -54,9 +148,22 @@ def entry_with_args(
     """
     import sys
     import functools
+    import inspect
     from meerschaum.actions import get_action, get_main_action_name
     from meerschaum._internal.arguments import remove_leading_action
-    from meerschaum.utils.venv import Venv, active_venvs, deactivate_venv
+    from meerschaum.utils.venv import active_venvs, deactivate_venv
+    from meerschaum.config.static import STATIC_CONFIG
+
+    if _patch_args:
+        kw.update(_patch_args)
+
+    and_key = STATIC_CONFIG['system']['arguments']['and_key']
+    escaped_and_key = STATIC_CONFIG['system']['arguments']['escaped_and_key']
+    if and_key in (sysargs := kw.get('sysargs', [])):
+        if '-d' in sysargs or '--daemon' in sysargs:
+            sysargs = [(arg if arg != and_key else escaped_and_key) for arg in sysargs]
+        return entry(sysargs, _patch_args=_patch_args)
+
     if kw.get('trace', None):
         from meerschaum.utils.misc import debug_trace
         debug_trace()
@@ -66,6 +173,29 @@ def entry_with_args(
         (kw['action'][0] == 'mrsm' and len(kw['action'][1:]) == 0)
     ):
         return get_shell().cmdloop()
+
+    skip_schedule = False
+
+    executor_keys = kw.get('executor_keys', None)
+    if executor_keys is None:
+        executor_keys = 'local'
+
+    if executor_keys.startswith('api:'):
+        intended_action_function = get_action(kw['action'], _actions=_actions)
+        function_accepts_executor_keys = (
+            'executor_keys' in inspect.signature(intended_action_function).parameters
+            if intended_action_function is not None
+            else False
+        )
+        if not function_accepts_executor_keys:
+            api_label = executor_keys.split(':')[-1]
+            kw['action'].insert(0, 'api')
+            kw['action'].insert(1, api_label)
+            skip_schedule = True
+
+    ### If the `--daemon` flag is present, prepend 'start job'.
+    if kw.get('daemon', False) and kw['action'][0] != 'stack':
+        kw['action'] = ['start', 'jobs'] + kw['action']
 
     action_function = get_action(kw['action'], _actions=_actions)
 
@@ -81,7 +211,6 @@ def entry_with_args(
         ) else None
     )
 
-    skip_schedule = False
     if (
         kw['action']
         and kw['action'][0] == 'start'
@@ -97,6 +226,7 @@ def entry_with_args(
         plugin_name,
         **kw
     )
+
     if kw.get('schedule', None) and not skip_schedule:
         from meerschaum.utils.schedule import schedule_function
         from meerschaum.utils.misc import interval_str
@@ -139,16 +269,16 @@ def _do_action_wrapper(action_function, plugin_name, **kw):
                 )
             )
         except KeyboardInterrupt:
-            result = False, f"Cancelled action `{action_name}`."
+            result = False, f"Cancelled action `{action_name.lstrip()}`."
     return result
 
 _shells = []
 _shell = None
 def get_shell(
-        sysargs: Optional[List[str]] = None,
-        reload: bool = False,
-        debug: bool = False
-    ):
+    sysargs: Optional[List[str]] = None,
+    reload: bool = False,
+    debug: bool = False
+):
     """Initialize and return the Meerschaum shell object."""
     global _shell
     from meerschaum.utils.debug import dprint

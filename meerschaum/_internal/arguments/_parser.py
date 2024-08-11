@@ -62,7 +62,24 @@ def parse_datetime(dt_str: str) -> Union[datetime, int, str]:
     return dt
 
 
-def parse_help(sysargs : Union[List[str], Dict[str, Any]]) -> None:
+def parse_executor_keys(executor_keys_str: str) -> Union[str, None]:
+    """
+    Ensure that only API keys are provided for executor_keys.
+    """
+    if executor_keys_str in ('local', 'systemd'):
+        return executor_keys_str
+
+    if executor_keys_str.lower() == 'none':
+        return 'local'
+
+    if not executor_keys_str.startswith('api:'):
+        from meerschaum.utils.warnings import error
+        error(f"Invalid exectutor keys '{executor_keys_str}'.", stack=False)
+
+    return executor_keys_str
+
+
+def parse_help(sysargs: Union[List[str], Dict[str, Any]]) -> None:
     """Parse the `--help` flag to determine which help message to print."""
     from meerschaum._internal.arguments._parse_arguments import parse_arguments, parse_line
     from meerschaum.actions import actions, get_subactions
@@ -135,6 +152,7 @@ _seen_plugin_args = {}
 
 groups = {}
 groups['actions'] = parser.add_argument_group(title='Actions options')
+groups['jobs'] = parser.add_argument_group(title='Jobs options')
 groups['pipes'] = parser.add_argument_group(title='Pipes options')
 groups['sync'] = parser.add_argument_group(title='Sync options')
 groups['api'] = parser.add_argument_group(title='API options')
@@ -166,26 +184,6 @@ groups['actions'].add_argument(
     help="Automatically choose the defaults answers to questions. Does not result in data loss.",
 )
 groups['actions'].add_argument(
-    '-d', '--daemon', action='store_true',
-    help = "Run an action as a background daemon."
-)
-groups['actions'].add_argument(
-    '--rm', action='store_true', help="Delete a job once it has finished executing."
-)
-groups['actions'].add_argument(
-    '--name', '--job-name', type=parse_name, help=(
-        "Assign a name to a job. If no name is provided, a random name will be assigned."
-    ),
-)
-groups['actions'].add_argument(
-    '-s', '--schedule', '--cron', type=str,
-    help = (
-        "Continue executing the action according to a schedule (e.g. 'every 1 seconds'). \n"
-        + "Often used with `-d`. See this page for scheduling syntax:\n "
-        + "https://red-engine.readthedocs.io/en/stable/condition_syntax/index.html"
-    )
-)
-groups['actions'].add_argument(
     '-A', '--sub-args', nargs=argparse.REMAINDER,
     help = (
         "Provide a list of arguments for subprocesses. " +
@@ -194,6 +192,38 @@ groups['actions'].add_argument(
     )
 )
 
+### Jobs options
+groups['jobs'].add_argument(
+    '-d', '--daemon', action='store_true',
+    help = "Run an action as a background daemon to create a job."
+)
+groups['jobs'].add_argument(
+    '--name', '--job-name', type=parse_name, help=(
+        "Assign a name to a job. If no name is provided, a random name will be assigned."
+    ),
+)
+groups['jobs'].add_argument(
+    '-s', '--schedule', '--cron', type=str,
+    help = (
+        "Continue executing the action according to a schedule (e.g. 'every 1 seconds'). \n"
+        + "Often used with `-d`. See this page for scheduling syntax:\n "
+        + "https://red-engine.readthedocs.io/en/stable/condition_syntax/index.html"
+    )
+)
+groups['jobs'].add_argument(
+    '--restart', action='store_true',
+    help=("Restart a job if not stopped manually."),
+)
+groups['jobs'].add_argument(
+    '-e', '--executor-keys', type=parse_executor_keys,
+    help=(
+        "Execute jobs locally or remotely. "
+        "Supported values are 'local', 'systemd', and 'api:{label}'."
+    ),
+)
+groups['jobs'].add_argument(
+    '--rm', action='store_true', help="Delete a job once it has finished executing."
+)
 ### Pipes options
 groups['pipes'].add_argument(
     '-c', '-C', '--connector-keys', nargs='+',

@@ -263,8 +263,8 @@ def verify_venv(
                 print(f"Getting python version for {python_path}")
             proc = run_process(
                 [str(python_path), '-V'],
-                as_proc = True,
-                capture_output = True,
+                as_proc=True,
+                capture_output=True,
             )
             stdout, stderr = proc.communicate(timeout=1.0)
         except Exception as e:

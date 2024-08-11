@@ -88,21 +88,29 @@ def bootstrap(
 
     try:
         if yes_no(
-            f"Would you like to edit the definition for {self}?", yes=yes, noask=noask
+            f"Would you like to edit the definition for {self}?",
+            yes=yes,
+            noask=noask,
+            default='n',
         ):
             edit_tuple = self.edit_definition(debug=debug)
             if not edit_tuple[0]:
                 return edit_tuple
 
-        if yes_no(f"Would you like to try syncing {self} now?", yes=yes, noask=noask):
+        if yes_no(
+            f"Would you like to try syncing {self} now?",
+            yes=yes,
+            noask=noask,
+            default='n',
+        ):
             sync_tuple = actions['sync'](
                 ['pipes'],
-                connector_keys = [self.connector_keys],
-                metric_keys = [self.metric_key],
-                location_keys = [self.location_key],
-                mrsm_instance = str(self.instance_connector),
-                debug = debug,
-                shell = shell,
+                connector_keys=[self.connector_keys],
+                metric_keys=[self.metric_key],
+                location_keys=[self.location_key],
+                mrsm_instance=str(self.instance_connector),
+                debug=debug,
+                shell=shell,
             )
             if not sync_tuple[0]:
                 return sync_tuple

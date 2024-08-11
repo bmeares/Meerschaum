@@ -7,7 +7,7 @@ Default configuration for jobs.
 """
 
 default_jobs_config = {
-    'timeout_seconds': 8,
+    'timeout_seconds': 4,
     'check_timeout_interval_seconds': 0.1,
     'terminal': {
         'lines': 40,

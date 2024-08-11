@@ -8,6 +8,7 @@ Import all routes from other modules in package
 
 from meerschaum.api.routes._login import *
 from meerschaum.api.routes._actions import *
+from meerschaum.api.routes._jobs import *
 from meerschaum.api.routes._connectors import *
 from meerschaum.api.routes._index import *
 from meerschaum.api.routes._misc import *

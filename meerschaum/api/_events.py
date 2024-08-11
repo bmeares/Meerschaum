@@ -19,14 +19,24 @@ from meerschaum.utils.debug import dprint
 from meerschaum.connectors.poll import retry_connect
 from meerschaum.utils.warnings import warn
 from meerschaum._internal.term.tools import is_webterm_running
+from meerschaum.jobs import (
+    start_check_jobs_thread,
+    stop_check_jobs_thread,
+    get_executor_keys_from_context,
+)
+
+_check_jobs_thread = None
 
 @app.on_event("startup")
 async def startup():
-    conn = get_api_connector()
+    """
+    Connect to the instance database and begin monitoring jobs.
+    """
     try:
         if not no_dash:
             from meerschaum.api.dash.webterm import start_webterm
             start_webterm()
+
         connected = retry_connect(
             get_api_connector(),
             workers = get_uvicorn_config().get('workers', None),
@@ -36,17 +46,31 @@ async def startup():
         import traceback
         traceback.print_exc()
         connected = False
+
     if not connected:
         await shutdown()
         os._exit(1)
 
+    if get_executor_keys_from_context() == 'local':
+        start_check_jobs_thread()
+
 
 @app.on_event("shutdown")
 async def shutdown():
+    """
+    Close the database connection and stop monitoring jobs.
+    """
     if debug:
         dprint("Closing connection...")
     if get_api_connector().type == 'sql':
         get_api_connector().engine.dispose()
+
+    if get_executor_keys_from_context() == 'local':
+        stop_check_jobs_thread()
+
+    from meerschaum.api.routes._actions import _temp_jobs
+    for name, job in _temp_jobs.items():
+        job.delete()
 
     ### Terminate any running jobs left over.
     if 'meerschaum.api.dash' in sys.modules:

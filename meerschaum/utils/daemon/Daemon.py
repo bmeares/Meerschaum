@@ -8,6 +8,7 @@ Manage running daemons via the Daemon class.
 
 from __future__ import annotations
 import os
+import importlib
 import pathlib
 import json
 import shutil
@@ -21,7 +22,7 @@ from datetime import datetime, timezone
 import meerschaum as mrsm
 from meerschaum.utils.typing import (
     Optional, Dict, Any, SuccessTuple, Callable, List, Union,
-    is_success_tuple,
+    is_success_tuple, Tuple,
 )
 from meerschaum.config import get_config
 from meerschaum.config.static import STATIC_CONFIG
@@ -34,6 +35,7 @@ from meerschaum.utils.packages import attempt_import
 from meerschaum.utils.venv import venv_exec
 from meerschaum.utils.daemon._names import get_new_daemon_name
 from meerschaum.utils.daemon.RotatingFile import RotatingFile
+from meerschaum.utils.daemon.StdinFile import StdinFile
 from meerschaum.utils.threading import RepeatTimer
 from meerschaum.__main__ import _close_pools
 
@@ -43,6 +45,32 @@ _results = {}
 class Daemon:
     """
     Daemonize Python functions into background processes.
+
+    Examples
+    --------
+    >>> import meerschaum as mrsm
+    >>> from meerschaum.utils.daemons import Daemon
+    >>> daemon = Daemon(print, ('hi',))
+    >>> success, msg = daemon.run()
+    >>> print(daemon.log_text)
+
+    2024-07-29 18:03 | hi
+    2024-07-29 18:03 |
+    >>> daemon.run(allow_dirty_run=True)
+    >>> print(daemon.log_text)
+
+    2024-07-29 18:03 | hi
+    2024-07-29 18:03 |
+    2024-07-29 18:05 | hi
+    2024-07-29 18:05 |
+    >>> mrsm.pprint(daemon.properties)
+    {
+        'label': 'print',
+        'target': {'name': 'print', 'module': 'builtins', 'args': ['hi'], 'kw': {}},
+        'result': None,
+        'process': {'ended': '2024-07-29T18:03:33.752806'}
+    }
+
     """
 
     def __new__(
@@ -61,10 +89,57 @@ class Daemon:
                 instance = instance.read_pickle()
         return instance
 
+    @classmethod
+    def from_properties_file(cls, daemon_id: str) -> Daemon:
+        """
+        Return a Daemon from a properties dictionary.
+        """
+        properties_path = cls._get_properties_path_from_daemon_id(daemon_id)
+        if not properties_path.exists():
+            raise OSError(f"Properties file '{properties_path}' does not exist.")
+
+        try:
+            with open(properties_path, 'r', encoding='utf-8') as f:
+                properties = json.load(f)
+        except Exception:
+            properties = {}
+
+        if not properties:
+            raise ValueError(f"No properties could be read for daemon '{daemon_id}'.")
+
+        daemon_id = properties_path.parent.name
+        target_cf = properties.get('target', {})
+        target_module_name = target_cf.get('module', None)
+        target_function_name = target_cf.get('name', None)
+        target_args = target_cf.get('args', None)
+        target_kw = target_cf.get('kw', None)
+        label = properties.get('label', None)
+
+        if None in [
+            target_module_name,
+            target_function_name,
+            target_args,
+            target_kw,
+        ]:
+            raise ValueError("Missing target function information.")
+
+        target_module = importlib.import_module(target_module_name)
+        target_function = getattr(target_module, target_function_name)
+
+        return Daemon(
+            daemon_id=daemon_id,
+            target=target_function,
+            target_args=target_args,
+            target_kw=target_kw,
+            properties=properties,
+            label=label,
+        )
+
+
     def __init__(
         self,
         target: Optional[Callable[[Any], Any]] = None,
-        target_args: Optional[List[str]] = None,
+        target_args: Union[List[Any], Tuple[Any], None] = None,
         target_kw: Optional[Dict[str, Any]] = None,
         daemon_id: Optional[str] = None,
         label: Optional[str] = None,
@@ -76,7 +151,7 @@ class Daemon:
         target: Optional[Callable[[Any], Any]], default None,
             The function to execute in a child process.
 
-        target_args: Optional[List[str]], default None
+        target_args: Union[List[Any], Tuple[Any], None], default None
             Positional arguments to pass to the target function.
 
         target_kw: Optional[Dict[str, Any]], default None
@@ -91,25 +166,54 @@ class Daemon:
             Label string to help identifiy a daemon.
             If `None`, use the function name instead.
 
-        propterties: Optional[Dict[str, Any]], default None
+        properties: Optional[Dict[str, Any]], default None
             Override reading from the properties JSON by providing an existing dictionary.
         """
         _pickle = self.__dict__.get('_pickle', False)
         if daemon_id is not None:
             self.daemon_id = daemon_id
             if not self.pickle_path.exists() and not target and ('target' not in self.__dict__):
-                raise Exception(
-                    f"Daemon '{self.daemon_id}' does not exist. "
-                    + "Pass a target to create a new Daemon."
-                )
+
+                if not self.properties_path.exists():
+                    raise Exception(
+                        f"Daemon '{self.daemon_id}' does not exist. "
+                        + "Pass a target to create a new Daemon."
+                    )
+
+                try:
+                    new_daemon = self.from_properties_file(daemon_id)
+                except Exception:
+                    new_daemon = None
+
+                if new_daemon is not None:
+                    new_daemon.write_pickle()
+                    target = new_daemon.target
+                    target_args = new_daemon.target_args
+                    target_kw = new_daemon.target_kw
+                    label = new_daemon.label
+                    self._properties = new_daemon.properties
+                else:
+                    try:
+                        self.properties_path.unlink()
+                    except Exception:
+                        pass
+
+                    raise Exception(
+                        f"Could not recover daemon '{self.daemon_id}' "
+                        + "from its properties file."
+                    )
+
         if 'target' not in self.__dict__:
             if target is None:
                 error("Cannot create a Daemon without a target.")
             self.target = target
-        if 'target_args' not in self.__dict__:
-            self.target_args = target_args if target_args is not None else []
-        if 'target_kw' not in self.__dict__:
-            self.target_kw = target_kw if target_kw is not None else {}
+
+        ### NOTE: We have to check self.__dict__ in case we un-pickling.
+        if '_target_args' not in self.__dict__:
+            self._target_args = target_args
+        if '_target_kw' not in self.__dict__:
+            self._target_kw = target_kw
+
         if 'label' not in self.__dict__:
             if label is None:
                 label = (
@@ -188,7 +292,9 @@ class Daemon:
         try:
             os.environ['LINES'], os.environ['COLUMNS'] = str(int(lines)), str(int(columns))
             with self._daemon_context:
+                sys.stdin = self.stdin_file
                 os.environ[STATIC_CONFIG['environment']['daemon_id']] = self.daemon_id
+                os.environ['PYTHONUNBUFFERED'] = '1'
                 self.rotating_log.refresh_files(start_interception=True)
                 result = None
                 try:
@@ -197,7 +303,7 @@ class Daemon:
 
                     self._log_refresh_timer.start()
                     self.properties['result'] = None
-                    self.write_properties()
+                    self._capture_process_timestamp('began')
                     result = self.target(*self.target_args, **self.target_kw)
                     self.properties['result'] = result
                 except (BrokenPipeError, KeyboardInterrupt, SystemExit):
@@ -250,7 +356,7 @@ class Daemon:
         if 'process' not in self.properties:
             self.properties['process'] = {}
 
-        if process_key not in ('began', 'ended', 'paused'):
+        if process_key not in ('began', 'ended', 'paused', 'stopped'):
             raise ValueError(f"Invalid key '{process_key}'.")
 
         self.properties['process'][process_key] = (
@@ -290,6 +396,10 @@ class Daemon:
         if self.status == 'paused':
             return self.resume()
 
+        self._remove_stop_file()
+        if self.status == 'running':
+            return True, f"Daemon '{self}' is already running."
+
         self.mkdir_if_not_exists(allow_dirty_run)
         _write_pickle_success_tuple = self.write_pickle()
         if not _write_pickle_success_tuple[0]:
@@ -312,7 +422,8 @@ class Daemon:
         return _launch_success_bool, msg
 
     def kill(self, timeout: Union[int, float, None] = 8) -> SuccessTuple:
-        """Forcibly terminate a running daemon.
+        """
+        Forcibly terminate a running daemon.
         Sends a SIGTERM signal to the process.
 
         Parameters
@@ -327,9 +438,11 @@ class Daemon:
         if self.status != 'paused':
             success, msg = self._send_signal(signal.SIGTERM, timeout=timeout)
             if success:
+                self._write_stop_file('kill')
                 return success, msg
 
         if self.status == 'stopped':
+            self._write_stop_file('kill')
             return True, "Process has already stopped."
 
         process = self.process
@@ -345,13 +458,18 @@ class Daemon:
                 self.pid_path.unlink()
             except Exception as e:
                 pass
+
+        self._write_stop_file('kill')
         return True, "Success"
 
     def quit(self, timeout: Union[int, float, None] = None) -> SuccessTuple:
         """Gracefully quit a running daemon."""
         if self.status == 'paused':
             return self.kill(timeout)
+
         signal_success, signal_msg = self._send_signal(signal.SIGINT, timeout=timeout)
+        if signal_success:
+            self._write_stop_file('quit')
         return signal_success, signal_msg
 
     def pause(
@@ -380,6 +498,7 @@ class Daemon:
         if self.status == 'paused':
             return True, f"Daemon '{self.daemon_id}' is already paused."
 
+        self._write_stop_file('pause')
         try:
             self.process.suspend()
         except Exception as e:
@@ -418,10 +537,10 @@ class Daemon:
         )
 
     def resume(
-            self,
-            timeout: Union[int, float, None] = None,
-            check_timeout_interval: Union[float, int, None] = None,
-        ) -> SuccessTuple:
+        self,
+        timeout: Union[int, float, None] = None,
+        check_timeout_interval: Union[float, int, None] = None,
+    ) -> SuccessTuple:
         """
         Resume the daemon if it is paused.
 
@@ -443,6 +562,7 @@ class Daemon:
         if self.status == 'stopped':
             return False, f"Daemon '{self.daemon_id}' is stopped and cannot be resumed."
 
+        self._remove_stop_file()
         try:
             self.process.resume()
         except Exception as e:
@@ -472,6 +592,50 @@ class Daemon:
             + ('s' if timeout != 1 else '') + '.'
         )
 
+    def _write_stop_file(self, action: str) -> SuccessTuple:
+        """Write the stop file timestamp and action."""
+        if action not in ('quit', 'kill', 'pause'):
+            return False, f"Unsupported action '{action}'."
+
+        if not self.stop_path.parent.exists():
+            self.stop_path.parent.mkdir(parents=True, exist_ok=True)
+
+        with open(self.stop_path, 'w+', encoding='utf-8') as f:
+            json.dump(
+                {
+                    'stop_time': datetime.now(timezone.utc).isoformat(),
+                    'action': action,
+                },
+                f
+            )
+
+        return True, "Success"
+
+    def _remove_stop_file(self) -> SuccessTuple:
+        """Remove the stop file"""
+        if not self.stop_path.exists():
+            return True, "Stop file does not exist."
+
+        try:
+            self.stop_path.unlink()
+        except Exception as e:
+            return False, f"Failed to remove stop file:\n{e}"
+
+        return True, "Success"
+
+    def _read_stop_file(self) -> Dict[str, Any]:
+        """
+        Read the stop file if it exists.
+        """
+        if not self.stop_path.exists():
+            return {}
+
+        try:
+            with open(self.stop_path, 'r', encoding='utf-8') as f:
+                data = json.load(f)
+            return data
+        except Exception:
+            return {}
 
     def _handle_sigterm(self, signal_number: int, stack_frame: 'frame') -> None:
         """
@@ -639,11 +803,35 @@ class Daemon:
         return self._get_properties_path_from_daemon_id(self.daemon_id)
 
     @property
+    def stop_path(self) -> pathlib.Path:
+        """
+        Return the path for the stop file (created when manually stopped).
+        """
+        return self.path / '.stop.json'
+
+    @property
     def log_path(self) -> pathlib.Path:
         """
         Return the log path.
         """
         return LOGS_RESOURCES_PATH / (self.daemon_id + '.log')
+
+    @property
+    def stdin_file_path(self) -> pathlib.Path:
+        """
+        Return the stdin file path.
+        """
+        return self.path / 'input.stdin'
+
+    @property
+    def blocking_stdin_file_path(self) -> pathlib.Path:
+        """
+        Return the stdin file path.
+        """
+        if '_blocking_stdin_file_path' in self.__dict__:
+            return self._blocking_stdin_file_path
+
+        return self.path / 'input.stdin.block'
 
     @property
     def log_offset_path(self) -> pathlib.Path:
@@ -654,20 +842,44 @@ class Daemon:
 
     @property
     def rotating_log(self) -> RotatingFile:
+        """
+        The rotating log file for the daemon's output.
+        """
         if '_rotating_log' in self.__dict__:
             return self._rotating_log
 
+        write_timestamps = (
+            self.properties.get('logs', {}).get('write_timestamps', None)
+        )
+        if write_timestamps is None:
+            write_timestamps = get_config('jobs', 'logs', 'timestamps', 'enabled')
+
         self._rotating_log = RotatingFile(
             self.log_path,
-            redirect_streams = True,
-            write_timestamps = get_config('jobs', 'logs', 'timestamps', 'enabled'),
-            timestamp_format = get_config('jobs', 'logs', 'timestamps', 'format'),
+            redirect_streams=True,
+            write_timestamps=write_timestamps,
+            timestamp_format=get_config('jobs', 'logs', 'timestamps', 'format'),
         )
         return self._rotating_log
 
     @property
+    def stdin_file(self):
+        """
+        Return the file handler for the stdin file.
+        """
+        if '_stdin_file' in self.__dict__:
+            return self._stdin_file
+
+        self._stdin_file = StdinFile(
+            self.stdin_file_path,
+            lock_file_path=self.blocking_stdin_file_path,
+        )
+        return self._stdin_file
+
+    @property
     def log_text(self) -> Optional[str]:
-        """Read the log files and return their contents.
+        """
+        Read the log files and return their contents.
         Returns `None` if the log file does not exist.
         """
         new_rotating_log = RotatingFile(
@@ -717,7 +929,8 @@ class Daemon:
 
     @property
     def pid(self) -> Union[int, None]:
-        """Read the PID file and return its contents.
+        """
+        Read the PID file and return its contents.
         Returns `None` if the PID file does not exist.
         """
         if not self.pid_path.exists():
@@ -725,6 +938,8 @@ class Daemon:
         try:
             with open(self.pid_path, 'r', encoding='utf-8') as f:
                 text = f.read()
+            if len(text) == 0:
+                return None
             pid = int(text.rstrip())
         except Exception as e:
             warn(e)
@@ -764,17 +979,21 @@ class Daemon:
             return None
         try:
             with open(self.properties_path, 'r', encoding='utf-8') as file:
-                return json.load(file)
+                properties = json.load(file)
         except Exception as e:
-            return {}
+            properties = {}
+        
+        return properties
 
     def read_pickle(self) -> Daemon:
         """Read a Daemon's pickle file and return the `Daemon`."""
         import pickle, traceback
         if not self.pickle_path.exists():
             error(f"Pickle file does not exist for daemon '{self.daemon_id}'.")
+
         if self.pickle_path.stat().st_size == 0:
             error(f"Pickle was empty for daemon '{self.daemon_id}'.")
+
         try:
             with open(self.pickle_path, 'rb') as pickle_file:
                 daemon = pickle.load(pickle_file)
@@ -921,9 +1140,9 @@ class Daemon:
 
 
     def get_check_timeout_interval_seconds(
-            self,
-            check_timeout_interval: Union[int, float, None] = None,
-        ) -> Union[int, float]:
+        self,
+        check_timeout_interval: Union[int, float, None] = None,
+    ) -> Union[int, float]:
         """
         Return the interval value to check the status of timeouts.
         """
@@ -931,6 +1150,33 @@ class Daemon:
             return check_timeout_interval
         return get_config('jobs', 'check_timeout_interval_seconds')
 
+    @property
+    def target_args(self) -> Union[Tuple[Any], None]:
+        """
+        Return the positional arguments to pass to the target function.
+        """
+        target_args = (
+            self.__dict__.get('_target_args', None)
+            or self.properties.get('target', {}).get('args', None)
+        )
+        if target_args is None:
+            return tuple([])
+
+        return tuple(target_args)
+
+    @property
+    def target_kw(self) -> Union[Dict[str, Any], None]:
+        """
+        Return the keyword arguments to pass to the target function.
+        """
+        target_kw = (
+            self.__dict__.get('_target_kw', None)
+            or self.properties.get('target', {}).get('kw', None)
+        )
+        if target_kw is None:
+            return {}
+
+        return {key: val for key, val in target_kw.items()}
 
     def __getstate__(self):
         """
@@ -981,4 +1227,4 @@ class Daemon:
         return self.daemon_id == other.daemon_id
 
     def __hash__(self):
-        return hash(self.daemon_id)       
+        return hash(self.daemon_id)
