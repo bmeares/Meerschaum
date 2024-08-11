@@ -38,7 +38,7 @@ class RotatingFile(io.IOBase):
         max_file_size: Optional[int] = None,
         redirect_streams: bool = False,
         write_timestamps: bool = False,
-        timestamp_format: str = '%Y-%m-%d %H:%M',
+        timestamp_format: Optional[str] = None,
     ):
         """
         Create a file-like object which manages other files.
@@ -63,12 +63,18 @@ class RotatingFile(io.IOBase):
 
         write_timestamps: bool, default False
             If `True`, prepend the current UTC timestamp to each line of the file.
+
+        timestamp_format: str, default None
+            If `write_timestamps` is `True`, use this format for the timestamps.
+            Defaults to `'%Y-%m-%d %H:%M'`.
         """
         self.file_path = pathlib.Path(file_path)
         if num_files_to_keep is None:
             num_files_to_keep = get_config('jobs', 'logs', 'num_files_to_keep')
         if max_file_size is None:
             max_file_size = get_config('jobs', 'logs', 'max_file_size')
+        if timestamp_format is None:
+            timestamp_format = get_config('jobs', 'logs', 'timestamps', 'format')
         if num_files_to_keep < 2:
             raise ValueError("At least 2 files must be kept.")
         if max_file_size < 1:
@@ -232,10 +238,10 @@ class RotatingFile(io.IOBase):
 
 
     def refresh_files(
-            self,
-            potential_new_len: int = 0,
-            start_interception: bool = False,
-        ) -> '_io.TextUIWrapper':
+        self,
+        potential_new_len: int = 0,
+        start_interception: bool = False,
+    ) -> '_io.TextUIWrapper':
         """
         Check the state of the subfiles.
         If the latest subfile is too large, create a new file and delete old ones.
@@ -339,7 +345,7 @@ class RotatingFile(io.IOBase):
 
     def get_timestamp_prefix_str(self) -> str:
         """
-        Return the current minute prefixm string.
+        Return the current minute prefix string.
         """
         return datetime.now(timezone.utc).strftime(self.timestamp_format) + ' | '
 
@@ -568,7 +574,8 @@ class RotatingFile(io.IOBase):
             return
 
         self._cursor = (max_ix, position)
-        self._current_file_obj.seek(position)
+        if self._current_file_obj is not None:
+            self._current_file_obj.seek(position)
 
     
     def flush(self) -> None:

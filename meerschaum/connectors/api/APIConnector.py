@@ -33,7 +33,12 @@ class APIConnector(Connector):
         delete,
         wget,
     )
-    from ._actions import get_actions, do_action
+    from ._actions import (
+        get_actions,
+        do_action,
+        do_action_async,
+        do_action_legacy,
+    )
     from ._misc import get_mrsm_version, get_chaining_status
     from ._pipes import (
         register_pipe,
@@ -72,6 +77,27 @@ class APIConnector(Connector):
         get_user_attributes,
     )
     from ._uri import from_uri
+    from ._jobs import (
+        get_jobs,
+        get_job,
+        get_job_metadata,
+        get_job_properties,
+        get_job_exists,
+        delete_job,
+        start_job,
+        create_job,
+        stop_job,
+        pause_job,
+        get_logs,
+        get_job_stop_time,
+        monitor_logs,
+        monitor_logs_async,
+        get_job_is_blocking_on_stdin,
+        get_job_began,
+        get_job_ended,
+        get_job_paused,
+        get_job_status,
+    )
 
     def __init__(
         self,

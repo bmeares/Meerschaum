@@ -47,18 +47,20 @@ packages: Dict[str, Dict[str, str]] = {
         'packaging'                  : 'packaging>=21.3.0',
         'prompt_toolkit'             : 'prompt-toolkit>=3.0.39',
         'more_itertools'             : 'more-itertools>=8.7.0',
-        'daemon'                     : 'python-daemon>=0.2.3',
-        'fasteners'                  : 'fasteners>=0.18.0',
-        'psutil'                     : 'psutil>=5.8.0',
-        'watchfiles'                 : 'watchfiles>=0.21.0',
-        'dill'                       : 'dill>=0.3.3',
+        'fasteners'                  : 'fasteners>=0.19.0',
         'virtualenv'                 : 'virtualenv>=20.1.0',
         'apscheduler'                : 'APScheduler>=4.0.0a5',
         'uv'                         : 'uv>=0.2.11',
     },
+    'jobs': {
+        'dill'                       : 'dill>=0.3.3',
+        'daemon'                     : 'python-daemon>=0.2.3',
+        'watchfiles'                 : 'watchfiles>=0.21.0',
+        'psutil'                     : 'psutil>=5.8.0',
+    },
     'drivers': {
         'cryptography'               : 'cryptography>=38.0.1',
-        'psycopg'                    : 'psycopg[binary]>=3.1.18',
+        'psycopg'                    : 'psycopg[binary]>=3.2.1',
         'pymysql'                    : 'PyMySQL>=0.9.0',
         'aiomysql'                   : 'aiomysql>=0.0.21',
         'sqlalchemy_cockroachdb'     : 'sqlalchemy-cockroachdb>=2.0.0',
@@ -156,6 +158,7 @@ packages['api'] = {
 packages['api'].update(packages['sql'])
 packages['api'].update(packages['formatting'])
 packages['api'].update(packages['dash'])
+packages['api'].update(packages['jobs'])
 
 all_packages = {}
 for group, import_names in packages.items():

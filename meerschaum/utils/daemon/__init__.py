@@ -10,9 +10,11 @@ from __future__ import annotations
 import os, pathlib, shutil, json, datetime, threading, shlex
 from meerschaum.utils.typing import SuccessTuple, List, Optional, Callable, Any, Dict
 from meerschaum.config._paths import DAEMON_RESOURCES_PATH
+from meerschaum.utils.daemon.StdinFile import StdinFile
 from meerschaum.utils.daemon.Daemon import Daemon
 from meerschaum.utils.daemon.RotatingFile import RotatingFile
 from meerschaum.utils.daemon.FileDescriptorInterceptor import FileDescriptorInterceptor
+from meerschaum.utils.daemon._names import get_new_daemon_name
 
 
 def daemon_entry(sysargs: Optional[List[str]] = None) -> SuccessTuple:
@@ -76,7 +78,7 @@ def daemon_entry(sysargs: Optional[List[str]] = None) -> SuccessTuple:
         filtered_sysargs,
         daemon_id=_args.get('name', None) if _args else None,
         label=label,
-        keep_daemon_output=('--rm' not in sysargs),
+        keep_daemon_output=('--rm' not in (sysargs or [])),
     )
     return success_tuple
 
@@ -181,7 +183,11 @@ def get_daemon_ids() -> List[str]:
     """
     Return the IDs of all daemons on disk.
     """
-    return sorted(os.listdir(DAEMON_RESOURCES_PATH))
+    return [
+        daemon_dir
+        for daemon_dir in sorted(os.listdir(DAEMON_RESOURCES_PATH))
+        if (DAEMON_RESOURCES_PATH / daemon_dir / 'properties.json').exists()
+    ]
 
 
 def get_running_daemons(daemons: Optional[List[Daemon]] = None) -> List[Daemon]:
@@ -225,10 +231,11 @@ def get_stopped_daemons(daemons: Optional[List[Daemon]] = None) -> List[Daemon]:
 
 
 def get_filtered_daemons(
-        filter_list: Optional[List[str]] = None,
-        warn: bool = False,
-    ) -> List[Daemon]:
-    """Return a list of `Daemons` filtered by a list of `daemon_ids`.
+    filter_list: Optional[List[str]] = None,
+    warn: bool = False,
+) -> List[Daemon]:
+    """
+    Return a list of `Daemons` filtered by a list of `daemon_ids`.
     Only `Daemons` that exist are returned.
     
     If `filter_list` is `None` or empty, return all `Daemons` (from `get_daemons()`).
@@ -250,13 +257,14 @@ def get_filtered_daemons(
     if not filter_list:
         daemons = get_daemons()
         return [d for d in daemons if not d.hidden]
+
     from meerschaum.utils.warnings import warn as _warn
     daemons = []
     for d_id in filter_list:
         try:
             d = Daemon(daemon_id=d_id)
             _exists = d.path.exists()
-        except Exception as e:
+        except Exception:
             _exists = False
         if not _exists:
             if warn:

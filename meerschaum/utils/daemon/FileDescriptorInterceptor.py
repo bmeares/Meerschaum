@@ -112,7 +112,7 @@ class FileDescriptorInterceptor:
         except OSError as e:
             if e.errno != FD_CLOSED:
                 warn(
-                    f"Error while trying to close the duplicated file descriptor:\n"
+                    "Error while trying to close the duplicated file descriptor:\n"
                     + f"{traceback.format_exc()}"
                 )
 
@@ -121,7 +121,7 @@ class FileDescriptorInterceptor:
         except OSError as e:
             if e.errno != FD_CLOSED:
                 warn(
-                    f"Error while trying to close the write-pipe "
+                    "Error while trying to close the write-pipe "
                     + "to the intercepted file descriptor:\n"
                     + f"{traceback.format_exc()}"
                 )
@@ -130,7 +130,7 @@ class FileDescriptorInterceptor:
         except OSError as e:
             if e.errno != FD_CLOSED:
                 warn(
-                    f"Error while trying to close the read-pipe "
+                    "Error while trying to close the read-pipe "
                     + "to the intercepted file descriptor:\n"
                     + f"{traceback.format_exc()}"
                 )
@@ -140,7 +140,7 @@ class FileDescriptorInterceptor:
         except OSError as e:
             if e.errno != FD_CLOSED:
                 warn(
-                    f"Error while trying to close the signal-read-pipe "
+                    "Error while trying to close the signal-read-pipe "
                     + "to the intercepted file descriptor:\n"
                     + f"{traceback.format_exc()}"
                 )
@@ -150,7 +150,7 @@ class FileDescriptorInterceptor:
         except OSError as e:
             if e.errno != FD_CLOSED:
                 warn(
-                    f"Error while trying to close the signal-write-pipe "
+                    "Error while trying to close the signal-write-pipe "
                     + "to the intercepted file descriptor:\n"
                     + f"{traceback.format_exc()}"
                 )

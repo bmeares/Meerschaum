@@ -10,13 +10,66 @@ This module contains functions for parsing arguments
 from __future__ import annotations
 import json
 from datetime import timedelta
-from meerschaum.utils.typing import List, Dict, Any, Optional, Callable, SuccessTuple
+from meerschaum.utils.typing import List, Dict, Any, Optional, Callable, SuccessTuple, Tuple
 from meerschaum.utils.threading import RLock
 
 _locks = {
     '_loaded_plugins_args': RLock(),
 }
 _loaded_plugins_args: bool = False
+
+def split_pipeline_sysargs(sysargs: List[str]) -> Tuple[List[str], List[str]]:
+    """
+    Split `sysargs` into the main pipeline and the flags following the pipeline separator (`:`).
+    """
+    from meerschaum.config.static import STATIC_CONFIG
+    pipeline_key = STATIC_CONFIG['system']['arguments']['pipeline_key']
+    if pipeline_key not in sysargs:
+        return sysargs, []
+
+    ### Find the index of the last occurrence of `:`.
+    pipeline_ix = len(sysargs) - 1 - sysargs[::-1].index(pipeline_key)
+    sysargs_after_pipeline_key = sysargs[pipeline_ix+1:]
+    sysargs = [arg for arg in sysargs[:pipeline_ix] if arg != pipeline_key]
+    return sysargs, sysargs_after_pipeline_key
+
+
+def split_chained_sysargs(sysargs: List[str]) -> List[List[str]]:
+    """
+    Split a `sysargs` list containing "and" keys (`+`)
+    into a list of individual `sysargs`.
+    """
+    from meerschaum.config.static import STATIC_CONFIG
+    and_key = STATIC_CONFIG['system']['arguments']['and_key']
+
+    if not sysargs or and_key not in sysargs:
+        return [sysargs]
+
+    ### Coalesce and consecutive joiners into one.
+    coalesce_args = []
+    previous_arg = None
+    for arg in [_arg for _arg in sysargs]:
+        if arg == and_key and previous_arg == and_key:
+            continue
+        coalesce_args.append(arg)
+        previous_arg = arg
+
+    ### Remove any joiners from the ends.
+    if coalesce_args[0] == and_key:
+        coalesce_args = coalesce_args[1:]
+    if coalesce_args[-1] == and_key:
+        coalesce_args = coalesce_args[:-1]
+
+    chained_sysargs = []
+    current_sysargs = []
+    for arg in coalesce_args:
+        if arg != and_key:
+            current_sysargs.append(arg)
+        else:
+            chained_sysargs.append(current_sysargs)
+            current_sysargs = []
+    chained_sysargs.append(current_sysargs)
+    return chained_sysargs
 
 
 def parse_arguments(sysargs: List[str]) -> Dict[str, Any]:
@@ -206,9 +259,14 @@ def parse_dict_to_sysargs(
     args_dict: Dict[str, Any]
 ) -> List[str]:
     """Revert an arguments dictionary back to a command line list."""
+    import shlex
     from meerschaum._internal.arguments._parser import get_arguments_triggers
-    sysargs = []
-    sysargs += args_dict.get('action', [])
+    from meerschaum.config.static import STATIC_CONFIG
+    from meerschaum.utils.warnings import warn
+
+    action = args_dict.get('action', None)
+    sysargs: List[str] = []
+    sysargs.extend(action or [])
     allow_none_args = {'location_keys'}
 
     triggers = get_arguments_triggers()
@@ -216,6 +274,7 @@ def parse_dict_to_sysargs(
     for a, t in triggers.items():
         if a == 'action' or a not in args_dict:
             continue
+
         ### Add boolean flags
         if isinstance(args_dict[a], bool):
             if args_dict[a] is True:
@@ -288,9 +347,6 @@ def remove_leading_action(
     for a in action:
         _action.append(a.replace('_', UNDERSCORE_STANDIN))
 
-    ### e.g. 'show_pipes_baz'
-    action_str = '_'.join(_action)
-
     ### e.g. 'show_pipes'
     action_name = action_function.__name__.lstrip('_')
 
@@ -299,6 +355,16 @@ def remove_leading_action(
 
     ### Strip away any leading prefices.
     action_name = action_name[main_action_index:]
+
+    subaction_parts = action_name.replace(main_action_name, '').lstrip('_').split('_')
+    subaction_name = subaction_parts[0] if subaction_parts else None
+
+    ### e.g. 'pipe' -> 'pipes'
+    if subaction_name and subaction_name.endswith('s') and not action[1].endswith('s'):
+        _action[1] += 's'
+
+    ### e.g. 'show_pipes_baz'
+    action_str = '_'.join(_action)
 
     if not action_str.replace(UNDERSCORE_STANDIN, '_').startswith(action_name):
         warn(f"Unable to parse '{action_str}' for action '{action_name}'.")

@@ -7,46 +7,59 @@ Print jobs information.
 """
 
 from __future__ import annotations
+
+from datetime import datetime, timezone
+
 import meerschaum as mrsm
-from meerschaum.utils.typing import List, Optional, Any, is_success_tuple
-from meerschaum.utils.daemon import (
-    Daemon,
-    get_daemons,
-    get_running_daemons,
-    get_stopped_daemons,
-    get_paused_daemons,
+from meerschaum.utils.typing import List, Optional, Any, is_success_tuple, Dict
+from meerschaum.jobs import (
+    Job,
+    get_jobs,
+    get_running_jobs,
+    get_stopped_jobs,
+    get_paused_jobs,
+    get_executor_keys_from_context,
 )
+from meerschaum.config import get_config
+
 
 def pprint_jobs(
-    daemons: List[Daemon],
+    jobs: Dict[str, Job],
     nopretty: bool = False,
 ):
     """Pretty-print a list of Daemons."""
     from meerschaum.utils.formatting import make_header
+    from meerschaum.utils.misc import items_str
     
-    running_daemons = get_running_daemons(daemons)
-    paused_daemons = get_paused_daemons(daemons)
-    stopped_daemons = get_stopped_daemons(daemons)
+    running_jobs = get_running_jobs(jobs=jobs)
+    paused_jobs = get_paused_jobs(jobs=jobs)
+    stopped_jobs = get_stopped_jobs(jobs=jobs)
+    executor_keys_list = list(set(
+        [
+            job.executor_keys.replace('systemd:main', 'systemd')
+            for job in jobs.values()
+        ]
+    )) if jobs else [get_executor_keys_from_context()]
 
     def _nopretty_print():
         from meerschaum.utils.misc import print_options
-        if running_daemons:
+        if running_jobs:
             if not nopretty:
                 print('\n' + make_header('Running jobs'))
-            for d in running_daemons:
-                pprint_job(d, nopretty=nopretty)
+            for name, job in running_jobs.items():
+                pprint_job(job, nopretty=nopretty)
 
-        if paused_daemons:
+        if paused_jobs:
             if not nopretty:
                 print('\n' + make_header('Paused jobs'))
-            for d in paused_daemons:
-                pprint_job(d, nopretty=nopretty)
+            for name, job in paused_jobs.items():
+                pprint_job(job, nopretty=nopretty)
 
-        if stopped_daemons:
+        if stopped_jobs:
             if not nopretty:
                 print('\n' + make_header('Stopped jobs'))
-            for d in stopped_daemons:
-                pprint_job(d, nopretty=nopretty)
+            for name, job in stopped_jobs.items():
+                pprint_job(job, nopretty=nopretty)
 
     def _pretty_print():
         from meerschaum.utils.formatting import get_console, UNICODE, ANSI, format_success_tuple
@@ -56,19 +69,25 @@ def pprint_jobs(
             'rich.table', 'rich.text', 'rich.box', 'rich.json', 'rich.panel', 'rich.console',
         )
         table = rich_table.Table(
-            title = rich_text.Text('Jobs'),
-            box = (rich_box.ROUNDED if UNICODE else rich_box.ASCII),
-            show_lines = True,
-            show_header = ANSI,
+            title=rich_text.Text(
+                f"\nJobs on Executor"
+                + ('s' if len(executor_keys_list) != 1 else '')
+                + f" {items_str(executor_keys_list)}"
+            ),
+            box=(rich_box.ROUNDED if UNICODE else rich_box.ASCII),
+            show_lines=True,
+            show_header=ANSI,
         )
         table.add_column("Name", justify='right', style=('magenta' if ANSI else ''))
+        table.add_column(
+            "Executor",
+            style=(get_config('shell', 'ansi', 'executor', 'rich', 'style') if ANSI else ''),
+        )
         table.add_column("Command")
         table.add_column("Status")
 
-        def get_success_text(d):
-            success_tuple = d.properties.get('result', None)
-            if isinstance(success_tuple, list):
-                success_tuple = tuple(success_tuple)
+        def get_success_text(job):
+            success_tuple = job.result
             if not is_success_tuple(success_tuple):
                 return rich_text.Text('')
 
@@ -92,39 +111,56 @@ def pprint_jobs(
             return rich_text.Text('\n') + success_tuple_text
 
 
-        for d in running_daemons:
-            if d.hidden:
-                continue
-            table.add_row(
-                d.daemon_id,
-                d.label,
-                rich_console.Group(
-                    rich_text.Text(d.status, style=('green' if ANSI else '')),
+        for name, job in running_jobs.items():
+            status_group = [
+                (
+                    rich_text.Text(job.status, style=('green' if ANSI else ''))
+                    if not job.is_blocking_on_stdin()
+                    else rich_text.Text('waiting for input', style=('yellow' if ANSI else ''))
                 ),
+            ] + ([rich_text.Text(f"PID: {pid}")] if (pid := job.pid) else [])
+
+            if job.restart:
+                status_group.append(rich_text.Text('(restarts)'))
+
+            table.add_row(
+                job.name,
+                job.executor_keys.replace('systemd:main', 'systemd'),
+                job.label,
+                rich_console.Group(*status_group),
             )
 
-        for d in paused_daemons:
-            if d.hidden:
-                continue
+        for name, job in paused_jobs.items():
+            status_group = [
+                rich_text.Text(job.status, style=('yellow' if ANSI else '')),
+            ]
+            if job.restart:
+                status_group.append(rich_text.Text('(restarts)'))
+
             table.add_row(
-                d.daemon_id,
-                d.label,
-                rich_console.Group(
-                    rich_text.Text(d.status, style=('yellow' if ANSI else '')),
-                ),
+                job.name,
+                job.executor_keys.replace('systemd:main', 'systemd'),
+                job.label,
+                rich_console.Group(*status_group),
             )
 
-        for d in stopped_daemons:
-            if d.hidden:
-                continue
+        for name, job in stopped_jobs.items():
+            status_group = [
+                rich_text.Text(job.status, style=('red' if ANSI else '')),
+            ]
+            if job.restart:
+                if job.stop_time is None:
+                    status_group.append(rich_text.Text('(restarts)'))
+                else:
+                    status_group.append(rich_text.Text('(start to resume restarts)'))
+
+            status_group.append(get_success_text(job))
 
             table.add_row(
-                d.daemon_id,
-                d.label,
-                rich_console.Group(
-                    rich_text.Text(d.status, style=('red' if ANSI else '')),
-                    get_success_text(d)
-                ),
+                job.name,
+                job.executor_keys.replace('systemd:main', 'systemd'),
+                job.label,
+                rich_console.Group(*status_group),
             )
         get_console().print(table)
 
@@ -133,15 +169,32 @@ def pprint_jobs(
 
 
 def pprint_job(
-        daemon: Daemon,
-        nopretty: bool = False,
-    ):
-    """Pretty-print a single Daemon."""
-    if daemon.hidden:
-        return
+    job: Job,
+    nopretty: bool = False,
+):
+    """Pretty-print a single `Job`."""
     from meerschaum.utils.warnings import info
     if not nopretty:
-        info(f"Command for job '{daemon.daemon_id}':")
-        print('\n' + daemon.label + '\n')
+        info(f"Command for job '{job.name}':")
+        print('\n' + job.label + '\n')
     else:
-        print(daemon.daemon_id)
+        print(job.name)
+
+
+def strip_timestamp_from_line(line: str) -> str:
+    """
+    Remove the leading timestamp from a job's line (if present).
+    """
+    now = datetime.now(timezone.utc)
+    timestamp_format = get_config('jobs', 'logs', 'timestamps', 'format')
+    now_str = now.strftime(timestamp_format)
+
+    date_prefix_str = line[:len(now_str)]
+    try:
+        line_timestamp = datetime.strptime(date_prefix_str, timestamp_format)
+    except Exception:
+        line_timestamp = None
+    if line_timestamp:
+        line = line[(len(now_str) + 3):]
+
+    return line

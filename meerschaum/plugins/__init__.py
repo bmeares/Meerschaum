@@ -8,6 +8,7 @@ Expose plugin management APIs from the `meerschaum.plugins` module.
 
 from __future__ import annotations
 import functools
+import meerschaum as mrsm
 from meerschaum.utils.typing import Callable, Any, Union, Optional, Dict, List, Tuple
 from meerschaum.utils.threading import Lock, RLock
 from meerschaum.plugins._Plugin import Plugin
@@ -27,7 +28,8 @@ _locks = {
     'PLUGINS_INTERNAL_LOCK_PATH': RLock(),
 }
 __all__ = (
-    "Plugin", "make_action", "api_plugin", "dash_plugin", "import_plugins",
+    "Plugin", "make_action", "api_plugin", "dash_plugin", "web_page",
+    "import_plugins", "from_plugin_import",
     "reload_plugins", "get_plugins", "get_data_plugins", "add_plugin_argument",
     "pre_sync_hook", "post_sync_hook",
 )
@@ -36,12 +38,12 @@ __pdoc__ = {
 }
 
 def make_action(
-        function: Callable[[Any], Any],
-        shell: bool = False,
-        activate: bool = True,
-        deactivate: bool = True,
-        debug: bool = False
-    ) -> Callable[[Any], Any]:
+    function: Callable[[Any], Any],
+    shell: bool = False,
+    activate: bool = True,
+    deactivate: bool = True,
+    debug: bool = False
+) -> Callable[[Any], Any]:
     """
     Make a function a Meerschaum action. Useful for plugins that are adding multiple actions.
     
@@ -429,11 +431,11 @@ def sync_plugins_symlinks(debug: bool = False, warn: bool = True) -> None:
 
 
 def import_plugins(
-        *plugins_to_import: Union[str, List[str], None],
-        warn: bool = True,
-    ) -> Union[
-        'ModuleType', Tuple['ModuleType', None]
-    ]:
+    *plugins_to_import: Union[str, List[str], None],
+    warn: bool = True,
+) -> Union[
+    'ModuleType', Tuple['ModuleType', None]
+]:
     """
     Import the Meerschaum plugins directory.
 
@@ -522,6 +524,89 @@ def import_plugins(
     if isinstance(imported_plugins, list):
         return (imported_plugins[0] if len(imported_plugins) == 1 else tuple(imported_plugins))
     return imported_plugins
+
+
+def from_plugin_import(plugin_import_name: str, *attrs: str) -> Any:
+    """
+    Emulate the `from module import x` behavior.
+
+    Parameters
+    ----------
+    plugin_import_name: str
+        The import name of the plugin's module.
+        Separate submodules with '.' (e.g. 'compose.utils.pipes')
+
+    attrs: str
+        Names of the attributes to return.
+
+    Returns
+    -------
+    Objects from a plugin's submodule.
+    If multiple objects are provided, return a tuple.
+
+    Examples
+    --------
+    >>> init = from_plugin_import('compose.utils', 'init')
+    >>> with mrsm.Venv('compose'):
+    ...     cf = init()
+    >>> build_parent_pipe, get_defined_pipes = from_plugin_import(
+    ...     'compose.utils.pipes',
+    ...     'build_parent_pipe',
+    ...     'get_defined_pipes',
+    ... )
+    >>> parent_pipe = build_parent_pipe(cf)
+    >>> defined_pipes = get_defined_pipes(cf)
+    """
+    import importlib
+    from meerschaum.config._paths import PLUGINS_RESOURCES_PATH
+    from meerschaum.utils.warnings import warn as _warn
+    if plugin_import_name.startswith('plugins.'):
+        plugin_import_name = plugin_import_name[len('plugins.'):]
+    plugin_import_parts = plugin_import_name.split('.')
+    plugin_root_name = plugin_import_parts[0]
+    plugin = mrsm.Plugin(plugin_root_name)
+
+    submodule_import_name = '.'.join(
+        [PLUGINS_RESOURCES_PATH.stem]
+        + plugin_import_parts
+    )
+    if len(attrs) == 0:
+        raise ValueError(f"Provide which attributes to return from '{submodule_import_name}'.")
+
+    attrs_to_return = []
+    with mrsm.Venv(plugin):
+        if plugin.module is None:
+            return None
+
+        try:
+            submodule = importlib.import_module(submodule_import_name)
+        except ImportError as e:
+            _warn(
+                f"Failed to import plugin '{submodule_import_name}':\n    "
+                + f"{e}\n\nHere's a stacktrace:",
+                stack=False,
+            )
+            from meerschaum.utils.formatting import get_console
+            get_console().print_exception(
+                suppress=[
+                    'meerschaum/plugins/__init__.py',
+                    importlib,
+                    importlib._bootstrap,
+                ]
+            )
+            return None
+
+        for attr in attrs:
+            try:
+                attrs_to_return.append(getattr(submodule, attr))
+            except Exception:
+                _warn(f"Failed to access '{attr}' from '{submodule_import_name}'.")
+                attrs_to_return.append(None)
+        
+        if len(attrs) == 1:
+            return attrs_to_return[0]
+
+        return tuple(attrs_to_return)
 
 
 def load_plugins(debug: bool = False, shell: bool = False) -> None:

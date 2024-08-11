@@ -7,12 +7,12 @@ Start subsystems (API server, logging daemon, etc.).
 """
 
 from __future__ import annotations
-from meerschaum.utils.typing import SuccessTuple, Optional, List, Any
+from meerschaum.utils.typing import SuccessTuple, Optional, List, Any, Union
 
 def start(
-        action: Optional[List[str]] = None,
-        **kw: Any,
-    ) -> SuccessTuple:
+    action: Optional[List[str]] = None,
+    **kw: Any,
+) -> SuccessTuple:
     """
     Start subsystems (API server, background job, etc.).
     """
@@ -23,20 +23,28 @@ def start(
         'gui': _start_gui,
         'webterm': _start_webterm,
         'connectors': _start_connectors,
+        'pipeline': _start_pipeline,
     }
     return choose_subaction(action, options, **kw)
 
 
 def _complete_start(
-        action: Optional[List[str]] = None,
-        **kw: Any
-    ) -> List[str]:
+    action: Optional[List[str]] = None,
+    **kw: Any
+) -> List[str]:
     """
     Override the default Meerschaum `complete_` function.
     """
+    from meerschaum.actions.delete import _complete_delete_jobs
+    from functools import partial
 
     if action is None:
         action = []
+
+    _complete_start_jobs = partial(
+        _complete_delete_jobs,
+        _get_job_method=['stopped', 'paused'],
+    )
 
     options = {
         'job': _complete_start_jobs,
@@ -75,11 +83,15 @@ def _start_api(action: Optional[List[str]] = None, **kw):
     from meerschaum.actions import actions
     return actions['api'](action=['start'], **kw)
 
+
 def _start_jobs(
-        action: Optional[List[str]] = None,
-        name: Optional[str] = None,
-        **kw
-    ) -> SuccessTuple:
+    action: Optional[List[str]] = None,
+    name: Optional[str] = None,
+    sysargs: Optional[List[str]] = None,
+    executor_keys: Optional[str] = None,
+    debug: bool = False,
+    **kw
+) -> SuccessTuple:
     """
     Run a Meerschaum action as a background job.
     
@@ -109,23 +121,24 @@ def _start_jobs(
                 Start the job 'happy_seal' but via the `--name` flag.
                 This only applies when no text follows the words 'start job'.
     """
-    import textwrap
     from meerschaum.utils.warnings import warn, info
-    from meerschaum.utils.daemon import (
-        daemon_action, Daemon, get_daemon_ids, get_daemons, get_filtered_daemons,
-        get_stopped_daemons, get_running_daemons, get_paused_daemons,
-    )
     from meerschaum.utils.daemon._names import get_new_daemon_name
-    from meerschaum._internal.arguments._parse_arguments import parse_arguments
+    from meerschaum.jobs import (
+        Job,
+        get_filtered_jobs,
+        get_stopped_jobs,
+        get_running_jobs,
+        get_paused_jobs,
+        _install_healthcheck_job,
+    )
     from meerschaum.actions import actions
     from meerschaum.utils.prompt import yes_no
     from meerschaum.utils.formatting import print_tuple
-    from meerschaum.utils.formatting._jobs import pprint_job, pprint_jobs
-    from meerschaum.utils.formatting._shell import clear_screen
+    from meerschaum.utils.formatting._jobs import pprint_jobs
     from meerschaum.utils.misc import items_str
 
     names = []
-    daemon_ids = get_daemon_ids()
+    jobs = get_filtered_jobs(executor_keys, action, debug=debug)
 
     new_job = len(list(action)) > 0
     _potential_jobs = {'known': [], 'unknown': []}
@@ -134,7 +147,7 @@ def _start_jobs(
         for a in action:
             _potential_jobs[(
                 'known'
-                if a in daemon_ids
+                if a in jobs
                 else 'unknown'
             )].append(a)
 
@@ -158,7 +171,7 @@ def _start_jobs(
                         + items_str(_potential_jobs['unknown'])
                         + " will be ignored."
                     ),
-                    stack = False
+                    stack=False
                 )
 
         ### Determine the `names` list.
@@ -182,88 +195,83 @@ def _start_jobs(
 
     ### No action or --name was provided. Ask to start all stopped jobs.
     else:
-        _running_daemons = get_running_daemons()
-        _paused_daemons = get_paused_daemons()
-        _stopped_daemons = get_stopped_daemons()
-        if not _stopped_daemons and not _paused_daemons:
-            if not _running_daemons:
-                return False, "No jobs to start."
+        running_jobs = get_running_jobs(executor_keys, jobs, debug=debug)
+        paused_jobs = get_paused_jobs(executor_keys, jobs, debug=debug)
+        stopped_jobs = get_stopped_jobs(executor_keys, jobs, debug=debug)
+
+        if not stopped_jobs and not paused_jobs:
+            if not running_jobs:
+                return False, "No jobs to start"
             return True, "All jobs are running."
 
-        names = [d.daemon_id for d in _stopped_daemons + _paused_daemons]
+        names = [
+            name
+            for name in list(stopped_jobs) + list(paused_jobs)
+        ]
 
     def _run_new_job(name: Optional[str] = None):
-        kw['action'] = action
         name = name or get_new_daemon_name()
-        kw['name'] = name
-        _action_success_tuple = daemon_action(daemon_id=name, **kw)
-        return _action_success_tuple, name
+        job = Job(name, sysargs, executor_keys=executor_keys)
+        return job.start(debug=debug), name
 
-    def _run_existing_job(name: Optional[str] = None):
-        daemon = Daemon(daemon_id=name)
-        if daemon.process is not None:
-            if daemon.status == 'paused':
-                return daemon.resume(), daemon.daemon_id
-            return (True, f"Job '{name}' is already running."), daemon.daemon_id
-
-        if not daemon.path.exists():
-            if not kw.get('nopretty', False):
-                warn(f"There isn't a job with the name '{name}'.", stack=False)
-                print(
-                    f"You can start a new job named '{name}' with `start job "
-                    + "{options}" + f" --name {name}`"
-                )
-            return (False, f"Job '{name}' does not exist."), daemon.daemon_id
-
-        return daemon.run(allow_dirty_run=True), daemon.daemon_id
+    def _run_existing_job(name: str):
+        job = Job(name, executor_keys=executor_keys)
+        return job.start(debug=debug), name
 
     if not names:
         return False, "No jobs to start."
 
     ### Get user permission to clear logs.
-    _filtered_daemons = get_filtered_daemons(names)
-    if not kw.get('force', False) and _filtered_daemons:
-        _filtered_running_daemons = get_running_daemons(_filtered_daemons)
-        _skipped_daemons = []
-        if _filtered_running_daemons:
-            pprint_jobs(_filtered_running_daemons)
+    _filtered_jobs = get_filtered_jobs(executor_keys, names, debug=debug)
+    if not kw.get('force', False) and _filtered_jobs:
+        _filtered_running_jobs = get_running_jobs(executor_keys, _filtered_jobs, debug=debug)
+        _skipped_jobs = []
+        if _filtered_running_jobs:
+            pprint_jobs(_filtered_running_jobs)
             if yes_no(
                 "Do you want to first stop these jobs?",
-                default = 'n',
-                yes = kw.get('yes', False),
-                noask = kw.get('noask', False)
+                default='n',
+                yes=kw.get('yes', False),
+                noask=kw.get('noask', False)
             ):
                 stop_success_tuple = actions['stop'](
-                    action = ['jobs'] + [d.daemon_id for d in _filtered_running_daemons],
-                    force = True,
+                    action=['jobs'] + [_name for _name in _filtered_running_jobs],
+                    force=True,
+                    executor_keys=executor_keys,
+                    debug=debug,
                 )
                 if not stop_success_tuple[0]:
                     warn(
-                        "Failed to stop job" + ("s" if len(_filtered_running_daemons) != 1 else '')
-                        + items_str([d.daemon_id for d in _filtered_running_daemons])
-                        + ".",
-                        stack = False
+                        (
+                            "Failed to stop job"
+                            + ("s" if len(_filtered_running_jobs) != 1 else '')
+                            + items_str([_name for _name in _filtered_running_jobs])
+                            + "."
+                        ),
+                        stack=False
                     )
-                    for d in _filtered_running_daemons:
-                        names.remove(d.daemon_id)
-                        _filtered_daemons.remove(d)
+                    for _name in _filtered_running_jobs:
+                        names.remove(_name)
+                        _filtered_jobs.pop(_name)
             else:
                 info(
                     "Skipping already running job"
-                    + ("s" if len(_filtered_running_daemons) != 1 else '') + ' '
-                    + items_str([d.daemon_id for d in _filtered_running_daemons]) + '.'
+                    + ("s" if len(_filtered_running_jobs) != 1 else '')
+                    + ' '
+                    + items_str([_name for _name in _filtered_running_jobs])
+                    + '.'
                 )
-                for d in _filtered_running_daemons:
-                    names.remove(d.daemon_id)
-                    _filtered_daemons.remove(d)
-                    _skipped_daemons.append(d)
+                for _name in _filtered_running_jobs:
+                    names.remove(_name)
+                    _filtered_jobs.pop(_name)
+                    _skipped_jobs.append(_name)
 
-        if not _filtered_daemons:
-            return len(_skipped_daemons) > 0, "No jobs to start."
+        if not _filtered_jobs:
+            return len(_skipped_jobs) > 0, "No jobs to start."
 
-        pprint_jobs(_filtered_daemons, nopretty=kw.get('nopretty', False))
+        pprint_jobs(_filtered_jobs, nopretty=kw.get('nopretty', False))
         info(
-            f"Starting the job"
+            "Starting the job"
             + ("s" if len(names) != 1 else "")
             + " " + items_str(names)
             + "..."
@@ -278,7 +286,11 @@ def _start_jobs(
         )
         if not kw.get('nopretty', False):
             print_tuple(success_tuple)
-        _successes.append(_name) if success_tuple[0] else _failures.append(_name)
+
+        if success_tuple[0]:
+            _successes.append(_name)
+        else:
+            _failures.append(_name)
 
     msg = (
         (("Successfully started job" + ("s" if len(_successes) != 1 else '')
@@ -287,28 +299,8 @@ def _start_jobs(
         + ("Failed to start job" + ("s" if len(_failures) != 1 else '')
             + f" {items_str(_failures)}." if _failures else '')
     )
+    _install_healthcheck_job()
     return len(_failures) == 0, msg
-
-def _complete_start_jobs(
-        action: Optional[List[str]] = None,
-        line: str = '',
-        **kw
-    ) -> List[str]:
-    from meerschaum.utils.daemon import get_daemon_ids
-    daemon_ids = get_daemon_ids()
-    if not action:
-        return daemon_ids
-    possibilities = []
-    _line_end = line.split(' ')[-1]
-    for daemon_id in daemon_ids:
-        if daemon_id in action:
-            continue
-        if _line_end == '':
-            possibilities.append(daemon_id)
-            continue
-        if daemon_id.startswith(action[-1]):
-            possibilities.append(daemon_id)
-    return possibilities
 
 
 def _start_gui(
@@ -544,6 +536,75 @@ def _complete_start_connectors(**kw) -> List[str]:
     """
     from meerschaum.actions.show import _complete_show_connectors
     return _complete_show_connectors(**kw)
+
+
+def _start_pipeline(
+    action: Optional[List[str]] = None,
+    sub_args: Optional[List[str]] = None,
+    loop: bool = False,
+    min_seconds: Union[float, int, None] = 1.0,
+    params: Optional[Dict[str, Any]] = None,
+    **kwargs
+) -> SuccessTuple:
+    """
+    Run a series of Meerschaum commands as a single action.
+
+    Add `:` to the end of chained arguments to apply additional flags to the pipeline.
+
+    Examples
+    --------
+
+    `sync pipes -i sql:local + sync pipes -i sql:main :: -s 'daily'`
+
+    `show version + show arguments :: --loop`
+
+    """
+    import time
+    from meerschaum._internal.entry import entry
+    from meerschaum.utils.warnings import info, warn
+    from meerschaum.utils.misc import is_int
+
+    do_n_times = (
+        int(action[0].lstrip('x'))
+        if action and is_int(action[0].lstrip('x'))
+        else 1
+    )
+
+    if not sub_args:
+        return False, "Nothing to do."
+
+    if min_seconds is None:
+        min_seconds = 1.0
+
+    ran_n_times = 0
+    success, msg = False, "Did not run pipeline."
+    def run_loop():
+        nonlocal ran_n_times, success, msg
+        while True:
+            success, msg = entry(sub_args, _patch_args=params)
+            ran_n_times += 1
+
+            if not loop and do_n_times == 1:
+                break
+
+            if min_seconds != 0 and ran_n_times != do_n_times:
+                info(f"Sleeping for {min_seconds} seconds...")
+                time.sleep(min_seconds)
+
+            if loop:
+                continue
+
+            if ran_n_times >= do_n_times:
+                break
+
+    try:
+        run_loop()
+    except KeyboardInterrupt:
+        warn("Cancelled pipeline.", stack=False)
+
+    if do_n_times != 1:
+        info(f"Ran pipeline {ran_n_times} time" + ('s' if ran_n_times != 1 else '') + '.')
+    return success, msg
 
 
 ### NOTE: This must be the final statement of the module.

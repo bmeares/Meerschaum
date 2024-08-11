@@ -10,12 +10,12 @@ import os
 from meerschaum.utils.typing import SuccessTuple, Optional, List, Any
 
 def api(
-        action: Optional[List[str]] = None,
-        sysargs: Optional[List[str]] = None,
-        debug: bool = False,
-        mrsm_instance: Optional[str] = None,
-        **kw: Any
-    ) -> SuccessTuple:
+    action: Optional[List[str]] = None,
+    sysargs: Optional[List[str]] = None,
+    debug: bool = False,
+    mrsm_instance: Optional[str] = None,
+    **kw: Any
+) -> SuccessTuple:
     """
     Send commands to a Meerschaum WebAPI instance.
     
@@ -37,7 +37,8 @@ def api(
     """
     from meerschaum.utils.warnings import warn, info
     from meerschaum.utils.formatting import print_tuple
-    from meerschaum.utils.packages import attempt_import
+    from meerschaum._internal.arguments._parse_arguments import parse_dict_to_sysargs
+
     if action is None:
         action = []
     if sysargs is None:
@@ -52,7 +53,6 @@ def api(
 
     from meerschaum.config import get_config
     from meerschaum.connectors import get_connector
-    requests = attempt_import('requests')
     if debug:
         from meerschaum.utils.formatting import pprint
     api_configs = get_config('meerschaum', 'connectors', 'api', patch=True)
@@ -68,12 +68,13 @@ def api(
         del action[0]
         if len(args_to_send) > 1:
             del args_to_send[0]
+
     kw['action'] = action
     kw['debug'] = debug
     kw['sysargs'] = args_to_send
     kw['yes'] = True
  
-    api_conn = get_connector(type='api', label=api_label)
+    api_conn = get_connector(f'api:{api_label}')
     
     if mrsm_instance is not None and str(mrsm_instance) == str(api_conn):
         warn(
@@ -83,9 +84,8 @@ def api(
     elif mrsm_instance is not None:
         kw['mrsm_instance'] = str(mrsm_instance)
 
-    success, message = api_conn.do_action(**kw)
-    print_tuple((success, message), common_only=True)
-    msg = f"Action " + ('succeeded' if success else 'failed') + " with message:\n" + str(message)
+    sysargs = parse_dict_to_sysargs(kw)
+    success, message = api_conn.do_action(sysargs)
     return success, message
 
 def _api_start(

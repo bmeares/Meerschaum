@@ -23,6 +23,8 @@ STATIC_CONFIG: Dict[str, Any] = {
             'pipes': '/pipes',
             'metadata': '/metadata',
             'actions': '/actions',
+            'jobs': '/jobs',
+            'logs': '/logs',
             'users': '/users',
             'login': '/login',
             'connectors': '/connectors',
@@ -40,6 +42,11 @@ STATIC_CONFIG: Dict[str, Any] = {
         },
         'webterm_job_name': '_webterm',
         'default_timeout': 600,
+        'jobs': {
+            'stdin_message': 'MRSM_STDIN',
+            'stop_message': 'MRSM_STOP',
+            'metadata_cache_seconds': 5,
+        },
     },
     'sql': {
         'internal_schema': '_mrsm_internal',
@@ -63,6 +70,9 @@ STATIC_CONFIG: Dict[str, Any] = {
         'noask': 'MRSM_NOASK',
         'id': 'MRSM_SERVER_ID',
         'daemon_id': 'MRSM_DAEMON_ID',
+        'systemd_log_path': 'MRSM_SYSTEMD_LOG_PATH',
+        'systemd_stdin_path': 'MRSM_SYSTEMD_STDIN_PATH',
+        'systemd_result_path': 'MRSM_SYSTEMD_RESULT_PATH',
         'uri_regex': r'MRSM_([a-zA-Z0-9]*)_(\d*[a-zA-Z][a-zA-Z0-9-_+]*$)',
         'prefix': 'MRSM_',
     },
@@ -78,6 +88,10 @@ STATIC_CONFIG: Dict[str, Any] = {
             ),
             'underscore_standin': '<UNDERSCORE>', ### Temporary replacement for parsing.
             'failure_key': '_argparse_exception',
+            'and_key': '+',
+            'escaped_and_key': '++',
+            'pipeline_key': ':',
+            'escaped_pipeline_key': '::',
         },
         'urls': {
             'get-pip.py': 'https://bootstrap.pypa.io/get-pip.py',
@@ -128,6 +142,9 @@ STATIC_CONFIG: Dict[str, Any] = {
             'min_ratio_columns_changed_for_full_astype': 0.5,
         },
         'exists_timeout_seconds': 5.0,
+    },
+    'jobs': {
+        'check_restart_seconds': 1.0,
     },
     'setup': {
         'name': 'meerschaum',

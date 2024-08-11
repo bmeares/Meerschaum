@@ -36,9 +36,9 @@ __all__ = (
 ### store connectors partitioned by
 ### type, label for reuse
 connectors: Dict[str, Dict[str, Connector]] = {
-    'api'   : {},
-    'sql'   : {},
-    'plugin': {},
+    'api'    : {},
+    'sql'    : {},
+    'plugin' : {},
 }
 instance_types: List[str] = ['sql', 'api']
 _locks: Dict[str, RLock] = {
@@ -70,12 +70,12 @@ _loaded_plugin_connectors: bool = False
 
 
 def get_connector(
-        type: str = None,
-        label: str = None,
-        refresh: bool = False,
-        debug: bool = False,
-        **kw: Any
-    ) -> Connector:
+    type: str = None,
+    label: str = None,
+    refresh: bool = False,
+    debug: bool = False,
+    **kw: Any
+) -> Connector:
     """
     Return existing connector or create new connection and store for reuse.
     
@@ -127,10 +127,13 @@ def get_connector(
     global _loaded_plugin_connectors
     if isinstance(type, str) and not label and ':' in type:
         type, label = type.split(':', maxsplit=1)
+
     with _locks['_loaded_plugin_connectors']:
         if not _loaded_plugin_connectors:
             load_plugin_connectors()
+            _load_builtin_custom_connectors()
             _loaded_plugin_connectors = True
+
     if type is None and label is None:
         default_instance_keys = get_config('meerschaum', 'instance', patch=True)
         ### recursive call to get_connector
@@ -274,9 +277,7 @@ def is_connected(keys: str, **kw) -> bool:
         return False
 
 
-def make_connector(
-        cls,
-    ):
+def make_connector(cls, _is_executor: bool = False):
     """
     Register a class as a `Connector`.
     The `type` will be the lower case of the class name, without the suffix `connector`.
@@ -302,7 +303,12 @@ def make_connector(
     >>> 
     """
     import re
-    typ = re.sub(r'connector$', '', cls.__name__.lower())
+    suffix_regex = (
+        r'connector$'
+        if not _is_executor
+        else r'executor$'
+    )
+    typ = re.sub(suffix_regex, '', cls.__name__.lower())
     with _locks['types']:
         types[typ] = cls
     with _locks['custom_types']:
@@ -338,8 +344,8 @@ def load_plugin_connectors():
 
 
 def get_connector_plugin(
-        connector: Connector,
-    ) -> Union[str, None, mrsm.Plugin]:
+    connector: Connector,
+) -> Union[str, None, mrsm.Plugin]:
     """
     Determine the plugin for a connector.
     This is useful for handling virtual environments for custom instance connectors.
@@ -365,3 +371,10 @@ def get_connector_plugin(
     )
     plugin = mrsm.Plugin(plugin_name)
     return plugin if plugin.is_installed() else None
+
+
+def _load_builtin_custom_connectors():
+    """
+    Import custom connectors decorated with `@make_connector` or `@make_executor`.
+    """
+    import meerschaum.jobs.systemd

@@ -10,9 +10,9 @@ from __future__ import annotations
 from meerschaum.utils.typing import List, Any, SuccessTuple, Optional, Union
 
 def install(
-        action: Optional[List[str]] = None,
-        **kw: Any
-    ) -> SuccessTuple:
+    action: Optional[List[str]] = None,
+    **kw: Any
+) -> SuccessTuple:
     """
     Install Meerschaum plugins or Python packages.
     """
@@ -26,9 +26,9 @@ def install(
 
 
 def _complete_install(
-        action: Optional[List[str]] = None,
-        **kw: Any
-    ) -> List[str]:
+    action: Optional[List[str]] = None,
+    **kw: Any
+) -> List[str]:
     """
     Override the default Meerschaum `complete_` function.
     """
@@ -52,13 +52,13 @@ def _complete_install(
 
 
 def _install_plugins(
-        action: Optional[List[str]] = None,
-        repository: Optional[str] = None,
-        skip_deps: bool = False,
-        force: bool = False,
-        debug: bool = False,
-        **kw: Any
-    ) -> SuccessTuple:
+    action: Optional[List[str]] = None,
+    repository: Optional[str] = None,
+    skip_deps: bool = False,
+    force: bool = False,
+    debug: bool = False,
+    **kw: Any
+) -> SuccessTuple:
     """
     Install a plugin.
     
@@ -103,10 +103,10 @@ def _install_plugins(
 
 
 def _complete_install_plugins(
-        action: Optional[List[str]] = None,
-        repository: Optional[str] = None,
-        **kw: Any
-    ) -> List[str]:
+    action: Optional[List[str]] = None,
+    repository: Optional[str] = None,
+    **kw: Any
+) -> List[str]:
     """
     Search for plugins to autocomplete command line text.
     NOTE: Disabled for the time being so we don't interrupt the user typing.
@@ -143,12 +143,12 @@ class NoVenv:
     pass
 
 def _install_packages(
-        action: Optional[List[str]] = None,
-        sub_args: Optional[List[str]] = None,
-        venv: Union[str, NoVenv] = NoVenv,
-        debug: bool = False,
-        **kw: Any
-    ) -> SuccessTuple:
+    action: Optional[List[str]] = None,
+    sub_args: Optional[List[str]] = None,
+    venv: Union[str, NoVenv] = NoVenv,
+    debug: bool = False,
+    **kw: Any
+) -> SuccessTuple:
     """
     Install PyPI packages into the Meerschaum virtual environment.
     
@@ -179,19 +179,17 @@ def _install_packages(
     )
 
 
-def _complete_install_packages(
-        **kw : Any
-    ) -> List[str]:
+def _complete_install_packages(**kw : Any) -> List[str]:
     return []
 
 
 def _install_required(
-        action: Optional[List[str]] = None,
-        repository: Optional[str] = None,
-        force: bool = False,
-        debug: bool = False,
-        **kw
-    ) -> SuccessTuple:
+    action: Optional[List[str]] = None,
+    repository: Optional[str] = None,
+    force: bool = False,
+    debug: bool = False,
+    **kw
+) -> SuccessTuple:
     """
     Install the required packages for Meerschaum plugins.
     Each plugin's packages will be installed into its virtual environment.
@@ -235,6 +233,16 @@ def _install_required(
 def _complete_install_required(*args, **kw) -> List[str]:
     from meerschaum.actions.uninstall import _complete_uninstall_plugins
     return _complete_uninstall_plugins(*args, **kw)
+
+
+def _install_systemd(
+    action: Optional[List[str]] = None,
+    **kwargs: Any
+) -> SuccessTuple:
+    """
+    Install the Meerschaum job monitor as a systemd service.
+    """
+    import sys
 
 
 ### NOTE: This must be the final statement of the module.

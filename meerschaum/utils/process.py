@@ -20,15 +20,15 @@ def signal_handler(sig, frame):
         child.wait()
 
 def run_process(
-        *args,
-        foreground: bool = False,
-        as_proc: bool = False,
-        line_callback: Optional[Callable[[bytes], Any]] = None,
-        store_proc_dict: Optional[Dict[str, Any]] = None,
-        store_proc_key: str = 'child_process',
-        capture_output: bool = False,
-        **kw: Any
-    ) -> Union[int, subprocess.Popen]:
+    *args,
+    foreground: bool = False,
+    as_proc: bool = False,
+    line_callback: Optional[Callable[[bytes], Any]] = None,
+    store_proc_dict: Optional[Dict[str, Any]] = None,
+    store_proc_key: str = 'child_process',
+    capture_output: bool = False,
+    **kw: Any
+) -> Union[int, subprocess.Popen]:
     """Original foreground solution found here:
     https://stackoverflow.com/questions/23826695/handling-keyboard-interrupt-when-using-subproccess
 

@@ -45,11 +45,6 @@ def main(sysargs: Optional[List[str]] = None) -> None:
         parse_version(sysargs)
         return _exit(old_cwd=old_cwd)
 
-    if ('-d' in sysargs or '--daemon' in sysargs) and ('stack' not in sysargs):
-        from meerschaum.utils.daemon import daemon_entry
-        _print_tuple(daemon_entry(sysargs), upper_padding=1)
-        return _exit(old_cwd=old_cwd)
-
     from meerschaum._internal.entry import entry, get_shell
 
     ### Try to launch a shell if --shell is provided.

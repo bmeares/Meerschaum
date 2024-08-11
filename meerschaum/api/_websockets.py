@@ -23,8 +23,8 @@ sessions = {}
 @app.websocket('/dash/ws')
 @app.websocket(_websocket_endpoint)
 async def websocket_endpoint(
-        websocket: fastapi.WebSocket,
-    ):
+    websocket: fastapi.WebSocket,
+):
     """
     Communicate with the Web Interface over a websocket.
     """

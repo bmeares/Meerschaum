@@ -11,9 +11,9 @@ import meerschaum as mrsm
 from meerschaum.utils.typing import SuccessTuple, Union, Sequence, Any, Optional, List, Dict, Tuple
 
 def show(
-        action: Optional[List[str]] = None,
-        **kw: Any
-    ) -> SuccessTuple:
+    action: Optional[List[str]] = None,
+    **kw: Any
+) -> SuccessTuple:
     """Show elements of a certain type.
     
     Command:
@@ -54,7 +54,7 @@ def _complete_show(
     """
     Override the default Meerschaum `complete_` function.
     """
-    from meerschaum.actions.start import _complete_start_jobs
+    from meerschaum.actions.delete import _complete_delete_jobs
 
     if action is None:
         action = []
@@ -65,10 +65,10 @@ def _complete_show(
         'config'    : _complete_show_config,
         'package'   : _complete_show_packages,
         'packages'  : _complete_show_packages,
-        'job'       : _complete_start_jobs,
-        'jobs'      : _complete_start_jobs,
-        'log'       : _complete_start_jobs,
-        'logs'      : _complete_start_jobs,
+        'job'       : _complete_delete_jobs,
+        'jobs'      : _complete_delete_jobs,
+        'log'       : _complete_delete_jobs,
+        'logs'      : _complete_delete_jobs,
     }
 
     if (
@@ -155,10 +155,10 @@ def _complete_show_config(action: Optional[List[str]] = None, **kw : Any):
 
 
 def _show_pipes(
-        nopretty: bool = False,
-        debug: bool = False,
-        **kw: Any
-    ) -> SuccessTuple:
+    nopretty: bool = False,
+    debug: bool = False,
+    **kw: Any
+) -> SuccessTuple:
     """
     Print a stylized tree of available Meerschaum pipes.
     Respects global ANSI and UNICODE settings.
@@ -170,7 +170,7 @@ def _show_pipes(
     pipes = get_pipes(debug=debug, **kw)
 
     if len(pipes) == 0:
-        return False, "No pipes to show."
+        return True, "No pipes to show."
 
     if len(flatten_pipes_dict(pipes)) == 1:
         return flatten_pipes_dict(pipes)[0].show(debug=debug, nopretty=nopretty, **kw)
@@ -552,16 +552,19 @@ def _complete_show_packages(
 
 def _show_jobs(
     action: Optional[List[str]] = None,
+    executor_keys: Optional[str] = None,
     nopretty: bool = False,
+    debug: bool = False,
     **kw: Any
 ) -> SuccessTuple:
     """
     Show the currently running and stopped jobs.
     """
-    from meerschaum.utils.daemon import get_filtered_daemons
+    from meerschaum.jobs import get_filtered_jobs
     from meerschaum.utils.formatting._jobs import pprint_jobs
-    daemons = get_filtered_daemons(action)
-    if not daemons:
+
+    jobs = get_filtered_jobs(executor_keys, action, debug=debug)
+    if not jobs:
         if not action and not nopretty:
             from meerschaum.utils.warnings import info
             info('No running or stopped jobs.')
@@ -572,13 +575,15 @@ def _show_jobs(
                 "      - start api -d\n" +
                 "      - start job sync pipes --loop"
             )
-        return False, "No jobs to show."
-    pprint_jobs(daemons, nopretty=nopretty)
+        return True, "No jobs to show."
+
+    pprint_jobs(jobs, nopretty=nopretty)
     return True, "Success"
 
 
 def _show_logs(
     action: Optional[List[str]] = None,
+    executor_keys: Optional[str] = None,
     nopretty: bool = False,
     **kw
 ) -> SuccessTuple:
@@ -594,179 +599,145 @@ def _show_logs(
         `show logs myjob myotherjob`
     """
     import os, pathlib, random, asyncio
+    from functools import partial
     from datetime import datetime, timezone
     from meerschaum.utils.packages import attempt_import, import_rich
-    from meerschaum.utils.daemon import get_filtered_daemons, Daemon
+    from meerschaum.jobs import get_filtered_jobs, Job
     from meerschaum.utils.warnings import warn, info
     from meerschaum.utils.formatting import get_console, ANSI, UNICODE
     from meerschaum.utils.misc import tail
     from meerschaum.config._paths import LOGS_RESOURCES_PATH
     from meerschaum.config import get_config
+    rich = import_rich()
+    rich_text = attempt_import('rich.text')
+
     if not ANSI:
         info = print
     colors = get_config('jobs', 'logs', 'colors')
     timestamp_format = get_config('jobs', 'logs', 'timestamps', 'format')
     follow_timestamp_format = get_config('jobs', 'logs', 'timestamps', 'follow_format')
-    daemons = get_filtered_daemons(action)
+
+    jobs = get_filtered_jobs(executor_keys, action)
     now = datetime.now(timezone.utc)
     now_str = now.strftime(timestamp_format)
     now_follow_str = now.strftime(follow_timestamp_format)
 
-    def build_buffer_spaces(daemons) -> Dict[str, str]:
+    def build_buffer_spaces(_jobs) -> Dict[str, str]:
         max_len_id = (
-            max(len(d.daemon_id) for d in daemons) + 1
-        ) if daemons else 0
+            max(len(name) for name in _jobs) + 1
+        ) if _jobs else 0
         buffer_len = max(
             get_config('jobs', 'logs', 'min_buffer_len'),
             max_len_id
         )
         return {
-            d.daemon_id: ''.join([' '] * (buffer_len - len(d.daemon_id)))
-            for d in daemons
+            name: ' ' * (buffer_len - len(name))
+            for name in _jobs
         }
 
-    def build_job_colors(daemons, _old_job_colors = None) -> Dict[str, str]:
-        return {d.daemon_id: colors[i % len(colors)] for i, d in enumerate(daemons)}
+    def build_job_colors(_jobs, _old_job_colors=None) -> Dict[str, str]:
+        return {name: colors[i % len(colors)] for i, name in enumerate(_jobs)}
 
-    buffer_spaces = build_buffer_spaces(daemons)
-    job_colors = build_job_colors(daemons)
+    buffer_spaces = build_buffer_spaces(jobs)
+    job_colors = build_job_colors(jobs)
 
-    def get_buffer_spaces(daemon_id):
-        nonlocal buffer_spaces, daemons
-        if daemon_id not in buffer_spaces:
-            d = Daemon(daemon_id=daemon_id)
-            if d not in daemons:
-                daemons = get_filtered_daemons(action)
-            buffer_spaces = build_buffer_spaces(daemons)
-        return buffer_spaces[daemon_id] or ' '
+    def get_buffer_spaces(name):
+        nonlocal buffer_spaces, jobs
+        if name not in buffer_spaces:
+            if name not in jobs:
+                jobs = get_filtered_jobs(executor_keys, action)
+            buffer_spaces = build_buffer_spaces(jobs)
+        return buffer_spaces[name] or ' '
 
-    def get_job_colors(daemon_id):
-        nonlocal job_colors, daemons
-        if daemon_id not in job_colors:
-            d = Daemon(daemon_id=daemon_id)
-            if d not in daemons:
-                daemons = get_filtered_daemons(action)
-            job_colors = build_job_colors(daemons)
-        return job_colors[daemon_id]
+    def get_job_colors(name):
+        nonlocal job_colors, jobs
+        if name not in job_colors:
+            if name not in jobs:
+                jobs = get_filtered_jobs(executor_keys, action)
+            job_colors = build_job_colors(jobs)
+        return job_colors[name]
 
-    def follow_pretty_print():
-        watchfiles = attempt_import('watchfiles')
-        rich = import_rich()
-        rich_text = attempt_import('rich.text')
-        watch_daemon_ids = {d.daemon_id: d for d in daemons}
-        info("Watching log files...")
-
-        previous_line_timestamp = None
-        def print_job_line(daemon, line):
-            nonlocal previous_line_timestamp
-            date_prefix_str = line[:len(now_str)]
-            try:
-                line_timestamp = datetime.strptime(date_prefix_str, timestamp_format)
-                previous_line_timestamp = line_timestamp
-            except Exception as e:
-                line_timestamp = None
-            if line_timestamp:
-                line = line[(len(now_str) + 3):]
-            else:
-                line_timestamp = previous_line_timestamp
-
-            if len(line) == 0 or line == '\n':
-                return
-
-            text = rich_text.Text(daemon.daemon_id)
-            line_prefix = (
-                get_buffer_spaces(daemon.daemon_id)
-                + (line_timestamp.strftime(follow_timestamp_format) if line_timestamp else '')
-                + ' | '
-            )
-            text.append(line_prefix + (line[:-1] if line[-1] == '\n' else line))
-            if ANSI:
-                text.stylize(
-                    get_job_colors(daemon.daemon_id),
-                    0,
-                    len(daemon.daemon_id) + len(line_prefix)
-                )
-            get_console().print(text)
-
-
-        def print_log_lines(daemon):
-            for line in daemon.readlines():
-                print_job_line(daemon, line)
-
-        def seek_back_offset(d) -> bool:
-            if d.log_offset_path.exists():
-                d.log_offset_path.unlink()
-
-            latest_subfile_path = d.rotating_log.get_latest_subfile_path()
-            latest_subfile_index = d.rotating_log.get_latest_subfile_index()
-
-            ### Sometimes the latest file is empty.
-            if os.stat(latest_subfile_path).st_size == 0 and latest_subfile_index > 0:
-                latest_subfile_index -= 1
-                latest_subfile_path = d.rotating_log.get_subfile_path_from_index(
-                    latest_subfile_index
-                )
-
-            with open(latest_subfile_path, 'r', encoding='utf-8') as f:
-                latest_lines = f.readlines()
-
-            lines_to_show = get_config('jobs', 'logs', 'lines_to_show')
-            positions_to_rewind = len(''.join(latest_lines[(-1 * lines_to_show):]))
-            backup_index = len(''.join(latest_lines)) - positions_to_rewind
-
-            d.rotating_log._cursor = (
-                latest_subfile_index,
-                max(0, backup_index)
-            )
-            d._write_log_offset()
-            return True
-
-        daemons_being_watched = {
-            d.daemon_id: d
-            for d in daemons
-        }
-        for d in daemons:
-            seek_back_offset(d)
-            print_log_lines(d)
-
-        _quit = False
-        def watch_logs():
-            for changes in watchfiles.watch(LOGS_RESOURCES_PATH):
-                if _quit:
-                    return
-                for change in changes:
-                    file_path_str = change[1]
-                    if '.log' not in file_path_str or '.log.offset' in file_path_str:
-                        continue
-                    file_path = pathlib.Path(file_path_str)
-                    if not file_path.exists():
-                        continue
-                    daemon_id = file_path.name.split('.log')[0]
-                    if daemon_id not in watch_daemon_ids and action:
-                        continue
-                    try:
-                        daemon = Daemon(daemon_id=daemon_id)
-                    except Exception as e:
-                        daemon = None
-                        warn(f"Seeing new logs for non-existent job '{daemon_id}'.", stack=False)
-
-                    if daemon is not None:
-                        print_log_lines(daemon)
-
+    previous_line_timestamp = None
+    def print_job_line(job, line):
+        nonlocal previous_line_timestamp
+        date_prefix_str = line[:len(now_str)]
         try:
-            watch_logs()
-        except KeyboardInterrupt as ki:
-            _quit = True
+            line_timestamp = datetime.strptime(date_prefix_str, timestamp_format)
+            previous_line_timestamp = line_timestamp
+        except Exception as e:
+            line_timestamp = None
+        if line_timestamp:
+            line = line[(len(now_str) + 3):]
+        else:
+            line_timestamp = previous_line_timestamp
 
-    def print_nopretty_log_text():
-        for d in daemons:
-            log_text = d.log_text
-            print(d.daemon_id)
-            print(log_text)
+        if len(line) == 0 or line == '\n':
+            return
 
-    print_log_text = follow_pretty_print if not nopretty else print_nopretty_log_text
-    print_log_text()
+        text = rich_text.Text(job.name)
+        line_prefix = (
+            get_buffer_spaces(job.name)
+            + (line_timestamp.strftime(follow_timestamp_format) if line_timestamp else '')
+            + ' | '
+        )
+        text.append(line_prefix + (line[:-1] if line[-1] == '\n' else line))
+        if ANSI:
+            text.stylize(
+                get_job_colors(job.name),
+                0,
+                len(job.name) + len(line_prefix)
+            )
+        get_console().print(text)
 
+    stop_event = asyncio.Event()
+    job_tasks = {}
+    job_stop_events = {}
+
+    async def refresh_job_tasks():
+        nonlocal job_tasks, jobs
+        while not stop_event.is_set():
+            jobs = get_filtered_jobs(executor_keys, action)
+            for name, job in jobs.items():
+                if name not in job_tasks:
+                    job_stop_events[name] = asyncio.Event()
+                    job_tasks[name] = asyncio.create_task(
+                        job.monitor_logs_async(
+                            partial(print_job_line, job),
+                            stop_event=job_stop_events[name],
+                            accept_input=False,
+                            stop_on_exit=False,
+                        )
+                    )
+
+            for name, task in [(k, v) for k, v in job_tasks.items()]:
+                if name not in jobs:
+                    job_stop_events[name].set()
+                    task.cancel()
+
+                    try:
+                        await task
+                    except asyncio.CancelledError:
+                        pass
+                    finally:
+                        _ = job_tasks.pop(name, None)
+                        _ = job_stop_events.pop(name, None)
+
+            await asyncio.sleep(1)
+
+    async def gather_tasks():
+        tasks = [refresh_job_tasks()] + list(job_tasks.values())
+        await asyncio.gather(*tasks)
+
+    if not nopretty:
+        info("Watching logs...")
+        try:
+            asyncio.run(gather_tasks())
+        except KeyboardInterrupt:
+            pass
+    else:
+        for name, job in jobs.items():
+            print(f'\n-*-\nMRSM_JOB: {name}\n-*-')
+            print(job.get_logs())
     return True, "Success"
 
 

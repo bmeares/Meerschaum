@@ -10,11 +10,11 @@ from __future__ import annotations
 from meerschaum.utils.typing import Mapping, Any, SuccessTuple, Union, Optional, Dict, Tuple
 
 def parse_connector_keys(
-        keys: str,
-        construct: bool = True,
-        as_tuple: bool = False,
-        **kw:  Any
-    ) -> (
+    keys: str,
+    construct: bool = True,
+    as_tuple: bool = False,
+    **kw:  Any
+) -> (
         Union[
             meerschaum.connectors.Connector,
             Dict[str, Any],
@@ -87,18 +87,16 @@ def parse_connector_keys(
 
 
 def parse_instance_keys(
-        keys: Optional[str],
-        construct: bool = True,
-        as_tuple: bool = False,
-        **kw
-    ):
+    keys: Optional[str],
+    construct: bool = True,
+    as_tuple: bool = False,
+    **kw
+):
     """
     Parse the Meerschaum instance value into a Connector object.
     """
     from meerschaum.utils.warnings import warn
     from meerschaum.config import get_config
-
-    ### TODO Check for valid types? Not sure how to do that if construct = False.
 
     if keys is None:
         keys = get_config('meerschaum', 'instance')
@@ -119,10 +117,24 @@ def parse_repo_keys(keys: Optional[str] = None, **kw):
     return parse_connector_keys(keys, **kw)
 
 
+def parse_executor_keys(keys: Optional[str] = None, **kw):
+    """Parse the executor keys into an APIConnector or string."""
+    from meerschaum.jobs import get_executor_keys_from_context
+    if keys is None:
+        keys = get_executor_keys_from_context()
+
+    if keys is None or keys == 'local':
+        return 'local'
+
+    keys = str(keys)
+    return parse_connector_keys(keys, **kw)
+
+
 def is_valid_connector_keys(
-        keys: str
-    ) -> bool:
-    """Verify a connector_keys string references a valid connector.
+    keys: str
+) -> bool:
+    """
+    Verify a connector_keys string references a valid connector.
     """
     try:
         success = parse_connector_keys(keys, construct=False) is not None
