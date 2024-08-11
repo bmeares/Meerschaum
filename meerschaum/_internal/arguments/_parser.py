@@ -125,7 +125,7 @@ def parse_version(sysargs: List[str]):
     return print(doc)
 
 
-def parse_name(name_str: str) -> str:
+def parse_name(name_str: str) -> Union[str, None]:
     """
     Ensure that `--name` is not an empty string.
     """

@@ -106,8 +106,8 @@ def parse_arguments(sysargs: List[str]) -> Dict[str, Any]:
     for i, word in enumerate(sysargs):
         is_sub_arg = False
         if not found_begin_decorator:
-            found_begin_decorator = word.startswith(begin_decorator)
-            found_end_decorator = word.endswith(end_decorator)
+            found_begin_decorator = str(word).startswith(begin_decorator)
+            found_end_decorator = str(word).endswith(end_decorator)
 
         if found_begin_decorator:
             ### check if sub arg is ever closed
@@ -117,15 +117,15 @@ def parse_arguments(sysargs: List[str]) -> Dict[str, Any]:
                     found_begin_decorator = False
         elif found_end_decorator:
             for a in sysargs[:i]:
-                if a.startswith(begin_decorator):
+                if str(a).startswith(begin_decorator):
                     is_sub_arg = True
                     found_begin_decorator = False
         if is_sub_arg:
             ### remove decorators
             sa = word
-            if sa.startswith(begin_decorator):
+            if str(sa).startswith(begin_decorator):
                 sa = sa[len(begin_decorator):]
-            if sa.endswith(end_decorator):
+            if str(sa).endswith(end_decorator):
                 sa = sa[:-1 * len(end_decorator)]
             sub_arguments.append(sa)
             ### remove sub-argument from action list
@@ -144,7 +144,7 @@ def parse_arguments(sysargs: List[str]) -> Dict[str, Any]:
     except Exception as e:
         _action = []
         for a in filtered_sysargs:
-            if a.startswith('-'):
+            if str(a).startswith('-'):
                 break
             _action.append(a)
         args_dict = {'action': _action, 'sysargs': sysargs}
@@ -267,7 +267,7 @@ def parse_dict_to_sysargs(
     action = args_dict.get('action', None)
     sysargs: List[str] = []
     sysargs.extend(action or [])
-    allow_none_args = {'location_keys'}
+    allow_none_args = {'location_keys', 'begin', 'end', 'executor_keys'}
 
     triggers = get_arguments_triggers()
 
@@ -278,12 +278,18 @@ def parse_dict_to_sysargs(
         ### Add boolean flags
         if isinstance(args_dict[a], bool):
             if args_dict[a] is True:
-                sysargs += [t[0]]
+                sysargs.extend([t[0]])
         else:
             ### Add list flags
             if isinstance(args_dict[a], (list, tuple)):
                 if len(args_dict[a]) > 0:
-                    sysargs += [t[0]] + list(args_dict[a])
+                    sysargs.extend(
+                        [t[0]]
+                        + [
+                            str(item)
+                            for item in args_dict[a]
+                        ]
+                    )
 
             ### Add dict flags
             elif isinstance(args_dict[a], dict):
@@ -292,7 +298,7 @@ def parse_dict_to_sysargs(
 
             ### Account for None and other values
             elif (args_dict[a] is not None) or (args_dict[a] is None and a in allow_none_args):
-                sysargs += [t[0], args_dict[a]]
+                sysargs += [t[0], str(args_dict[a])]
 
     return sysargs
 

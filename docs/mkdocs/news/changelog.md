@@ -4,14 +4,14 @@
 
 This is the current release cycle, so stay tuned for future releases!
 
-### v2.3.0
+### v2.3.0 – v2.3.1
 
 - **Add the `Job` class.**  
   You may now manage jobs with `Job`:
 
   ```python
   import meerschaum as mrsm
-  job = Job('syncing-engine', 'sync pipes --loop')
+  job = mrsm.Job('syncing-engine', 'sync pipes --loop')
   job.start()
   ```
 
