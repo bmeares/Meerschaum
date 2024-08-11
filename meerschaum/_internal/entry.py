@@ -73,18 +73,8 @@ def entry(
             ['start', 'pipeline']
             + [str(arg) for arg in pipeline_args]
             + (
-                (
-                    [
-                        '--params',
-                        ' '.join(
-                            [
-                                f"{k}:{v}"
-                                for k, v in _patch_args.items()
-                                if ' ' not in str(v)
-                            ]
-                        )
-                    ]
-                ) if _patch_args
+                ['--params', json.dumps(_patch_args)]
+                if _patch_args
                 else []
             )
             + ['--sub-args', shlex.join(sysargs)]
