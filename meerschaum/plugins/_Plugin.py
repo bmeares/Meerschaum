@@ -654,7 +654,7 @@ class Plugin:
             import ast, re
             ### NOTE: This technically would break 
             ### if `required` was the very first line of the file.
-            req_start_match = re.search(r'required(:\s*)?.*=', text)
+            req_start_match = re.search(r'\nrequired(:\s*)?.*=', text)
             if not req_start_match:
                 return []
             req_start = req_start_match.start()
