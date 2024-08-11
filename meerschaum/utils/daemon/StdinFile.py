@@ -50,6 +50,7 @@ class StdinFile(io.TextIOBase):
         if self.file_path.exists():
             self.file_path.unlink()
 
+        self.file_path.parent.mkdir(parents=True, exist_ok=True)
         os.mkfifo(self.file_path.as_posix(), mode=0o600)
 
         self._fd = os.open(self.file_path, os.O_RDONLY | os.O_NONBLOCK)
