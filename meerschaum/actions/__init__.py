@@ -11,6 +11,16 @@ from meerschaum.utils.typing import Callable, Any, Optional, Union, List, Dict, 
 from meerschaum.utils.packages import get_modules_from_package
 _custom_actions = []
 
+__all__ = (
+    'get_action',
+    'get_subactions',
+    'make_action',
+    'pre_sync_hook',
+    'post_sync_hook',
+    'get_main_action_name',
+    'get_completer',
+)
+
 def get_subactions(
     action: Union[str, List[str]],
     _actions: Optional[Dict[str, Callable[[Any], Any]]] = None,
@@ -101,9 +111,9 @@ def get_action(
 
 
 def get_main_action_name(
-        action: Union[List[str], str],
-        _actions: Optional[Dict[str, Callable[[Any], SuccessTuple]]] = None,
-    ) -> Union[str, None]:
+    action: Union[List[str], str],
+    _actions: Optional[Dict[str, Callable[[Any], SuccessTuple]]] = None,
+) -> Union[str, None]:
     """
     Given an action list, return the name of the main function.
     For subactions, this will return the root function.
@@ -140,9 +150,9 @@ def get_main_action_name(
 
 
 def get_completer(
-        action: Union[List[str], str],
-        _actions: Optional[Dict[str, Callable[[Any], SuccessTuple]]] = None,
-    ) -> Union[
+    action: Union[List[str], str],
+    _actions: Optional[Dict[str, Callable[[Any], SuccessTuple]]] = None,
+) -> Union[
         Callable[['meerschaum._internal.shell.Shell', str, str, int, int], List[str]], None
     ]:
     """Search for a custom completer function for an action."""
@@ -179,10 +189,10 @@ def get_completer(
 
 
 def choose_subaction(
-        action: Optional[List[str]] = None,
-        options: Optional[Dict[str, Any]] = None,
-        **kw
-    ) -> SuccessTuple:
+    action: Optional[List[str]] = None,
+    options: Optional[Dict[str, Any]] = None,
+    **kw
+) -> SuccessTuple:
     """
     Given a dictionary of options and the standard Meerschaum actions list,
     check if choice is valid and execute chosen function, else show available
@@ -247,7 +257,7 @@ def _get_subaction_names(action: str, globs: dict = None) -> List[str]:
     return subactions
 
 
-def choices_docstring(action: str, globs : Optional[Dict[str, Any]] = None) -> str:
+def choices_docstring(action: str, globs: Optional[Dict[str, Any]] = None) -> str:
     """
     Append the an action's available options to the module docstring.
     This function is to be placed at the bottom of each action module.

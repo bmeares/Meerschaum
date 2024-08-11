@@ -377,5 +377,4 @@ def _load_builtin_custom_connectors():
     """
     Import custom connectors decorated with `@make_connector` or `@make_executor`.
     """
-    import meerschaum.jobs._SystemdExecutor
-    #  import meerschaum.jobs._LocalExecutor
+    import meerschaum.jobs.systemd

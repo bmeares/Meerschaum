@@ -16,6 +16,7 @@ from meerschaum.jobs._Executor import Executor
 
 __all__ = (
     'Job',
+    'systemd',
     'get_jobs',
     'get_filtered_jobs',
     'get_restart_jobs',
@@ -23,8 +24,8 @@ __all__ = (
     'get_stopped_jobs',
     'get_paused_jobs',
     'get_restart_jobs',
-    'Executor',
     'make_executor',
+    'Executor',
     'check_restart_jobs',
     'start_check_jobs_thread',
     'stop_check_jobs_thread',
