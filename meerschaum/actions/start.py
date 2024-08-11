@@ -7,7 +7,7 @@ Start subsystems (API server, logging daemon, etc.).
 """
 
 from __future__ import annotations
-from meerschaum.utils.typing import SuccessTuple, Optional, List, Any
+from meerschaum.utils.typing import SuccessTuple, Optional, List, Any, Union
 
 def start(
     action: Optional[List[str]] = None,
@@ -543,6 +543,7 @@ def _start_pipeline(
     sub_args: Optional[List[str]] = None,
     loop: bool = False,
     min_seconds: Union[float, int, None] = 1.0,
+    params: Optional[Dict[str, Any]] = None,
     **kwargs
 ) -> SuccessTuple:
     """
@@ -580,13 +581,13 @@ def _start_pipeline(
     def run_loop():
         nonlocal ran_n_times, success, msg
         while True:
-            success, msg = entry(sub_args)
+            success, msg = entry(sub_args, _patch_args=params)
             ran_n_times += 1
 
             if not loop and do_n_times == 1:
                 break
 
-            if min_seconds != 0:
+            if min_seconds != 0 and ran_n_times != do_n_times:
                 info(f"Sleeping for {min_seconds} seconds...")
                 time.sleep(min_seconds)
 

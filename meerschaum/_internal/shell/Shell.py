@@ -37,6 +37,7 @@ from meerschaum.jobs import get_executor_keys_from_context
 from meerschaum.config.static import STATIC_CONFIG
 from meerschaum._internal.arguments._parse_arguments import (
     split_chained_sysargs,
+    split_pipeline_sysargs,
     parse_arguments,
     parse_line,
     parse_dict_to_sysargs,
@@ -76,6 +77,8 @@ reserved_completers = {
 shell_attrs = {}
 AND_KEY: str = STATIC_CONFIG['system']['arguments']['and_key']
 ESCAPED_AND_KEY: str = STATIC_CONFIG['system']['arguments']['escaped_and_key']
+PIPELINE_KEY: str = STATIC_CONFIG['system']['arguments']['pipeline_key']
+ESCAPED_PIPELINE_KEY: str = STATIC_CONFIG['system']['arguments']['escaped_pipeline_key']
 
 def _insert_shell_actions(
         _shell: Optional['Shell'] = None,
@@ -526,6 +529,7 @@ class Shell(cmd.Cmd):
             warn(e, stack=False)
             return ""
 
+        sysargs, pipeline_args = split_pipeline_sysargs(sysargs)
         chained_sysargs = split_chained_sysargs(sysargs)
         chained_kwargs = [
             parse_arguments(_sysargs)
@@ -631,8 +635,10 @@ class Shell(cmd.Cmd):
             step_sysargs = parse_dict_to_sysargs(step_kwargs)
             sysargs_to_execute.extend(step_sysargs)
             sysargs_to_execute.append(AND_KEY)
-        if sysargs_to_execute[-1] == AND_KEY:
-            sysargs_to_execute = sysargs_to_execute[:-1]
+        
+        sysargs_to_execute = sysargs_to_execute[:-1] + (
+            ([':'] + pipeline_args) if pipeline_args else []
+        )
 
         try:
             success_tuple = entry(sysargs_to_execute, _patch_args=patch_args)

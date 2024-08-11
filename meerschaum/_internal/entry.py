@@ -44,6 +44,7 @@ def entry(
     A `SuccessTuple` indicating success.
     """
     import shlex
+    import json
     from meerschaum.utils.formatting import make_header
     from meerschaum._internal.arguments import (
         parse_arguments,
@@ -71,6 +72,21 @@ def entry(
         chained_sysargs = [
             ['start', 'pipeline']
             + [str(arg) for arg in pipeline_args]
+            + (
+                (
+                    [
+                        '--params',
+                        ' '.join(
+                            [
+                                f"{k}:{v}"
+                                for k, v in _patch_args.items()
+                                if ' ' not in str(v)
+                            ]
+                        )
+                    ]
+                ) if _patch_args
+                else []
+            )
             + ['--sub-args', shlex.join(sysargs)]
         ]
 

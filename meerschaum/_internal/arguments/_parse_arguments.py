@@ -20,16 +20,17 @@ _loaded_plugins_args: bool = False
 
 def split_pipeline_sysargs(sysargs: List[str]) -> Tuple[List[str], List[str]]:
     """
-    Split `sysargs` into the main pipeline and the flags following the pipeline separator (`::`).
+    Split `sysargs` into the main pipeline and the flags following the pipeline separator (`:`).
     """
     from meerschaum.config.static import STATIC_CONFIG
     pipeline_key = STATIC_CONFIG['system']['arguments']['pipeline_key']
     if pipeline_key not in sysargs:
         return sysargs, []
 
-    pipeline_ix = sysargs.index(pipeline_key)
+    ### Find the index of the last occurrence of `:`.
+    pipeline_ix = len(sysargs) - 1 - sysargs[::-1].index(pipeline_key)
     sysargs_after_pipeline_key = sysargs[pipeline_ix+1:]
-    sysargs = sysargs[:pipeline_ix]
+    sysargs = [arg for arg in sysargs[:pipeline_ix] if arg != pipeline_key]
     return sysargs, sysargs_after_pipeline_key
 
 

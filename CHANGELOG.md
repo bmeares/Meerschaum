@@ -32,6 +32,23 @@ This is the current release cycle, so stay tuned for future releases!
   $ mrsm show pipes + sync pipes --loop -d
   ```
 
+- **Run chained actions as a pipeline with `:`.**  
+  You can schedule chained actions by adding `:` to the end of your command:
+
+  ```bash
+  mrsm sync pipes -i sql:local + sync pipes : -s 'daily starting 00:00' -d
+  ```
+
+  Other supported flags are `--loop`, `--min-seconds`, and the number of times to run the pipeline (e.g. `x2` or `2`):
+
+  ```bash
+  mrsm sync pipes + verify pipes : --loop --min-seconds 600
+  ```
+
+  ```bash
+  mrsm show pipes + sync pipes : x2
+  ```
+
 - **Add `--restart`.**  
   Your job will be automatically restarted if you use any of flags `--loop`, `--schedule`, or `--restart`.
 

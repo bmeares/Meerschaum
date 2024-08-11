@@ -11,14 +11,15 @@ import time
 import json
 from io import StringIO
 from datetime import datetime
+
 import meerschaum as mrsm
 from meerschaum.utils.debug import dprint
 from meerschaum.utils.warnings import warn, error
 from meerschaum.utils.typing import SuccessTuple, Union, Any, Optional, Mapping, List, Dict, Tuple
 
 def pipe_r_url(
-        pipe: mrsm.Pipe
-    ) -> str:
+    pipe: mrsm.Pipe
+) -> str:
     """Return a relative URL path from a Pipe's keys."""
     from meerschaum.config.static import STATIC_CONFIG
     location_key = pipe.location_key
@@ -30,10 +31,10 @@ def pipe_r_url(
     )
 
 def register_pipe(
-        self,
-        pipe: mrsm.Pipe,
-        debug: bool = False
-    ) -> SuccessTuple:
+    self,
+    pipe: mrsm.Pipe,
+    debug: bool = False
+) -> SuccessTuple:
     """Submit a POST to the API to register a new Pipe object.
     Returns a tuple of (success_bool, response_dict).
     """
@@ -59,11 +60,11 @@ def register_pipe(
 
 
 def edit_pipe(
-        self,
-        pipe: mrsm.Pipe,
-        patch: bool = False,
-        debug: bool = False,
-    ) -> SuccessTuple:
+    self,
+    pipe: mrsm.Pipe,
+    patch: bool = False,
+    debug: bool = False,
+) -> SuccessTuple:
     """Submit a PATCH to the API to edit an existing Pipe object.
     Returns a tuple of (success_bool, response_dict).
     """
@@ -89,14 +90,14 @@ def edit_pipe(
 
 
 def fetch_pipes_keys(
-        self,
-        connector_keys: Optional[List[str]] = None,
-        metric_keys: Optional[List[str]] = None,
-        location_keys: Optional[List[str]] = None,
-        tags: Optional[List[str]] = None,
-        params: Optional[Dict[str, Any]] = None,
-        debug: bool = False
-    ) -> Union[List[Tuple[str, str, Union[str, None]]]]:
+    self,
+    connector_keys: Optional[List[str]] = None,
+    metric_keys: Optional[List[str]] = None,
+    location_keys: Optional[List[str]] = None,
+    tags: Optional[List[str]] = None,
+    params: Optional[Dict[str, Any]] = None,
+    debug: bool = False
+) -> Union[List[Tuple[str, str, Union[str, None]]]]:
     """
     Fetch registered Pipes' keys from the API.
     
@@ -158,13 +159,13 @@ def fetch_pipes_keys(
 
 
 def sync_pipe(
-        self,
-        pipe: mrsm.Pipe,
-        df: Optional[Union['pd.DataFrame', Dict[Any, Any], str]] = None,
-        chunksize: Optional[int] = -1,
-        debug: bool = False,
-        **kw: Any
-    ) -> SuccessTuple:
+    self,
+    pipe: mrsm.Pipe,
+    df: Optional[Union['pd.DataFrame', Dict[Any, Any], str]] = None,
+    chunksize: Optional[int] = -1,
+    debug: bool = False,
+    **kw: Any
+) -> SuccessTuple:
     """Sync a DataFrame into a Pipe."""
     from decimal import Decimal
     from meerschaum.utils.debug import dprint
@@ -303,10 +304,10 @@ def sync_pipe(
 
 
 def delete_pipe(
-        self,
-        pipe: Optional[meerschaum.Pipe] = None,
-        debug: bool = None,        
-    ) -> SuccessTuple:
+    self,
+    pipe: Optional[meerschaum.Pipe] = None,
+    debug: bool = None,        
+) -> SuccessTuple:
     """Delete a Pipe and drop its table."""
     if pipe is None:
         error(f"Pipe cannot be None.")
@@ -327,17 +328,17 @@ def delete_pipe(
 
 
 def get_pipe_data(
-        self,
-        pipe: meerschaum.Pipe,
-        select_columns: Optional[List[str]] = None,
-        omit_columns: Optional[List[str]] = None,
-        begin: Union[str, datetime, int, None] = None,
-        end: Union[str, datetime, int, None] = None,
-        params: Optional[Dict[str, Any]] = None,
-        as_chunks: bool = False,
-        debug: bool = False,
-        **kw: Any
-    ) -> Union[pandas.DataFrame, None]:
+    self,
+    pipe: meerschaum.Pipe,
+    select_columns: Optional[List[str]] = None,
+    omit_columns: Optional[List[str]] = None,
+    begin: Union[str, datetime, int, None] = None,
+    end: Union[str, datetime, int, None] = None,
+    params: Optional[Dict[str, Any]] = None,
+    as_chunks: bool = False,
+    debug: bool = False,
+    **kw: Any
+) -> Union[pandas.DataFrame, None]:
     """Fetch data from the API."""
     r_url = pipe_r_url(pipe)
     chunks_list = []
@@ -389,10 +390,10 @@ def get_pipe_data(
 
 
 def get_pipe_id(
-        self,
-        pipe: meerschuam.Pipe,
-        debug: bool = False,
-    ) -> int:
+    self,
+    pipe: meerschuam.Pipe,
+    debug: bool = False,
+) -> int:
     """Get a Pipe's ID from the API."""
     from meerschaum.utils.misc import is_int
     r_url = pipe_r_url(pipe)
@@ -411,10 +412,10 @@ def get_pipe_id(
 
 
 def get_pipe_attributes(
-        self,
-        pipe: meerschaum.Pipe,
-        debug: bool = False,
-    ) -> Dict[str, Any]:
+    self,
+    pipe: meerschaum.Pipe,
+    debug: bool = False,
+) -> Dict[str, Any]:
     """Get a Pipe's attributes from the API
 
     Parameters
@@ -437,12 +438,12 @@ def get_pipe_attributes(
 
 
 def get_sync_time(
-        self,
-        pipe: 'meerschaum.Pipe',
-        params: Optional[Dict[str, Any]] = None,
-        newest: bool = True,
-        debug: bool = False,
-    ) -> Union[datetime, int, None]:
+    self,
+    pipe: 'meerschaum.Pipe',
+    params: Optional[Dict[str, Any]] = None,
+    newest: bool = True,
+    debug: bool = False,
+) -> Union[datetime, int, None]:
     """Get a Pipe's most recent datetime value from the API.
 
     Parameters
@@ -492,10 +493,10 @@ def get_sync_time(
 
 
 def pipe_exists(
-        self,
-        pipe: 'meerschaum.Pipe',
-        debug: bool = False
-    ) -> bool:
+    self,
+    pipe: mrsm.Pipe,
+    debug: bool = False
+) -> bool:
     """Check the API to see if a Pipe exists.
 
     Parameters
@@ -523,9 +524,9 @@ def pipe_exists(
 
 
 def create_metadata(
-        self,
-        debug: bool = False
-    ) -> bool:
+    self,
+    debug: bool = False
+) -> bool:
     """Create metadata tables.
 
     Returns
@@ -547,14 +548,14 @@ def create_metadata(
 
 
 def get_pipe_rowcount(
-        self,
-        pipe: 'meerschaum.Pipe',
-        begin: Optional[datetime] = None,
-        end: Optional[datetime] = None,
-        params: Optional[Dict[str, Any]] = None,
-        remote: bool = False,
-        debug: bool = False,
-    ) -> int:
+    self,
+    pipe: mrsm.Pipe,
+    begin: Optional[datetime] = None,
+    end: Optional[datetime] = None,
+    params: Optional[Dict[str, Any]] = None,
+    remote: bool = False,
+    debug: bool = False,
+) -> int:
     """Get a pipe's row count from the API.
 
     Parameters
@@ -600,10 +601,10 @@ def get_pipe_rowcount(
 
 
 def drop_pipe(
-        self,
-        pipe: meerschaum.Pipe,
-        debug: bool = False
-    ) -> SuccessTuple:
+    self,
+    pipe: mrsm.Pipe,
+    debug: bool = False
+) -> SuccessTuple:
     """
     Drop a pipe's table but maintain its registration.
 
@@ -644,11 +645,11 @@ def drop_pipe(
 
 
 def clear_pipe(
-        self,
-        pipe: meerschaum.Pipe,
-        debug: bool = False,
-        **kw
-    ) -> SuccessTuple:
+    self,
+    pipe: mrsm.Pipe,
+    debug: bool = False,
+    **kw
+) -> SuccessTuple:
     """
     Delete rows in a pipe's table.
 
@@ -666,7 +667,7 @@ def clear_pipe(
     kw.pop('location_keys', None)
     kw.pop('action', None)
     kw.pop('force', None)
-    return self.do_action(
+    return self.do_action_legacy(
         ['clear', 'pipes'],
         connector_keys = pipe.connector_keys,
         metric_keys = pipe.metric_key,
@@ -678,10 +679,10 @@ def clear_pipe(
 
 
 def get_pipe_columns_types(
-        self,
-        pipe: meerschaum.Pipe,
-        debug: bool = False,
-    ) -> Union[Dict[str, str], None]:
+    self,
+    pipe: mrsm.Pipe,
+    debug: bool = False,
+) -> Union[Dict[str, str], None]:
     """
     Fetch the columns and types of the pipe's table.
 

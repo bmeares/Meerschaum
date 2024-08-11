@@ -72,6 +72,11 @@ def test_parse_sysargs(sysargs, expected_kwargs):
             ['blue', '::', '-s', 'daily'],
             ['--loop'],
         ),
+        (
+            ['a', ':', 'b', ':', 'c'],
+            ['a', 'b'],
+            ['c'],
+        ),
     ]
 )
 def test_split_pipeline_sysargs(sysargs, expected_sysargs, expected_pipeline_args):
