@@ -111,25 +111,55 @@ def entry(
                 )
 
         entry_success, entry_msg = entry_with_args(_patch_args=_patch_args, **args)
-        if not entry_success:
-            return entry_success, entry_msg
-
         results.append((entry_success, entry_msg))
 
+        if not entry_success:
+            break
+
     success = all(_success for _success, _ in results)
-    msg = (
-        results[0][1]
-        if len(results) == 1
-        else 'Successfully completed steps:\n\n' + '\n'.join(
-            [
-                (
-                    make_header(shlex.join(_sysargs))
-                    + '\n    ' + _msg + '\n'
-                )
-                for i, ((_, _msg), _sysargs) in enumerate(zip(results, chained_sysargs))
-            ]
+    any_success = any(_success for _success, _ in results)
+    success_messages = [_msg for _success, _msg in results if _success]
+
+    successes_msg = (
+        success_messages[0]
+        if len(success_messages) and len(results) == 1
+        else (
+            (
+                'Successfully c'
+                if success
+                else 'C'
+            ) + 'ompleted step'
+                + ('s' if len(success_messages) != 1 else '') 
+            + ':\n\n'
+            + '\n'.join(
+                [
+                    (
+                        make_header(shlex.join(_sysargs))
+                        + '\n    ' + _msg + '\n'
+                    )
+                    for i, (_msg, _sysargs) in enumerate(zip(success_messages, chained_sysargs))
+                ]
+            )
         )
     )
+    has_fail = results[-1][0] is False
+    fail_ix = len(results) - 1
+    fail_sysargs = chained_sysargs[fail_ix] if has_fail else None
+    fail_msg = results[-1][1] if has_fail else ''
+    fails_msg = (
+        'Failed to complete step:\n\n'
+        + make_header(shlex.join(fail_sysargs))
+        + '\n    '
+        + fail_msg
+
+    ) if not results[-1][0] else ''
+
+    msg = (
+        successes_msg
+        + ('\n\n' if any_success else '')
+        + fails_msg
+    ).rstrip()
+
     if _systemd_result_path:
         import json
         with open(_systemd_result_path, 'w+', encoding='utf-8') as f:

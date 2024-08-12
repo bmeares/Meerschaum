@@ -265,10 +265,10 @@ def print_tuple(
 
     if common_only:
         skip_common = False
-        do_print = tup[1] in omit_messages
+        do_print = tup[1].strip() in omit_messages
 
     if skip_common:
-        do_print = tup[1] not in omit_messages
+        do_print = tup[1].strip() not in omit_messages
 
     if not do_print:
         return
