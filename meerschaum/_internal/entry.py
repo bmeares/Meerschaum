@@ -127,7 +127,12 @@ def entry(
             (
                 'Successfully c'
                 if success
-                else 'C'
+                else (
+                    'Failed pipeline after '
+                    + f"{len(success_messages)} step"
+                    + ('s' if len(success_messages) != 1 else '')
+                    + '.\n\nC'
+                )
             ) + 'ompleted step'
                 + ('s' if len(success_messages) != 1 else '') 
             + ':\n\n'
@@ -158,7 +163,7 @@ def entry(
         successes_msg
         + ('\n\n' if any_success else '')
         + fails_msg
-    ).rstrip()
+    ).rstrip() if len(chained_sysargs) > 1 else results[0][1]
 
     if _systemd_result_path:
         import json
