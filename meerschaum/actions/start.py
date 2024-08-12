@@ -99,7 +99,7 @@ def _start_jobs(
     To start a stopped job, pass the job name after `start job`.
     
     You may also run a background job with the `-d` or `--daemon` flags.
-    
+
     Examples:
     
         Create new jobs:
@@ -108,9 +108,9 @@ def _start_jobs(
                 Run the action `sync pipes --loop` as a background job.
                 Generates a random name; e.g. 'happy_seal'.
     
-          - `start api --daemon --name api_server`
+          - `start api --daemon --name api-server`
                 Run the action `start api` as a background job, and assign the job
-                the name 'api_server'.
+                the name 'api-server'.
     
         Start stopped jobs:
     
@@ -119,7 +119,6 @@ def _start_jobs(
     
           - `start job --name happy_seal`
                 Start the job 'happy_seal' but via the `--name` flag.
-                This only applies when no text follows the words 'start job'.
     """
     from meerschaum.utils.warnings import warn, info
     from meerschaum.utils.daemon._names import get_new_daemon_name

@@ -141,6 +141,7 @@ class Daemon:
         target: Optional[Callable[[Any], Any]] = None,
         target_args: Union[List[Any], Tuple[Any], None] = None,
         target_kw: Optional[Dict[str, Any]] = None,
+        env: Optional[Dict[str, str]] = None,
         daemon_id: Optional[str] = None,
         label: Optional[str] = None,
         properties: Optional[Dict[str, Any]] = None,
@@ -156,6 +157,9 @@ class Daemon:
 
         target_kw: Optional[Dict[str, Any]], default None
             Keyword arguments to pass to the target function.
+
+        env: Optional[Dict[str, str]], default None
+            If provided, set these environment variables in the daemon process.
 
         daemon_id: Optional[str], default None
             Build a `Daemon` from an existing `daemon_id`.
@@ -227,7 +231,11 @@ class Daemon:
             self._properties = properties
         if self._properties is None:
             self._properties = {}
+
         self._properties.update({'label': self.label})
+        if env:
+            self._properties.update({'env': env})
+
         ### Instantiate the process and if it doesn't exist, make sure the PID is removed.
         _ = self.process
 
@@ -295,6 +303,12 @@ class Daemon:
                 sys.stdin = self.stdin_file
                 os.environ[STATIC_CONFIG['environment']['daemon_id']] = self.daemon_id
                 os.environ['PYTHONUNBUFFERED'] = '1'
+
+                ### Allow the user to override environment variables.
+                env = self.properties.get('env', {})
+                if env and isinstance(env, dict):
+                    os.environ.update({str(k): str(v) for k, v in env.items()})
+
                 self.rotating_log.refresh_files(start_interception=True)
                 result = None
                 try:

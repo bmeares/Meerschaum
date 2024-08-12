@@ -128,7 +128,7 @@ def clean_sysargs(sysargs: List[str]) -> List[str]:
 @app.post(endpoints['jobs'] + '/{name}', tags=['Jobs'])
 def create_job(
     name: str,
-    sysargs: List[str],
+    metadata: Union[List[str], Dict[str, Any]],
     curr_user=(
         fastapi.Depends(manager) if not no_auth else None
     ),
@@ -136,7 +136,14 @@ def create_job(
     """
     Create and start a new job.
     """
-    job = Job(name, clean_sysargs(sysargs), executor_keys=EXECUTOR_KEYS)
+    sysargs = metadata if isinstance(metadata, list) else metadata['sysargs']
+    properties = metadata['properties'] if isinstance(metadata, dict) else None
+    job = Job(
+        name,
+        clean_sysargs(sysargs),
+        executor_keys=EXECUTOR_KEYS,
+        _properties=properties,
+    )
     if job.exists():
         raise fastapi.HTTPException(
             status_code=409,

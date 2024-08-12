@@ -129,6 +129,7 @@ class SystemdExecutor(Executor):
         service_logs_path = self.get_service_logs_path(name, debug=debug)
         socket_path = self.get_socket_path(name, debug=debug)
         result_path = self.get_result_path(name, debug=debug)
+        job = self.get_hidden_job(name, debug=debug)
 
         sysargs_str = shlex.join(sysargs)
         exec_str = f'{sys.executable} -m meerschaum {sysargs_str}'
@@ -145,9 +146,11 @@ class SystemdExecutor(Executor):
             STATIC_CONFIG['environment']['systemd_log_path']: service_logs_path.as_posix(),
             STATIC_CONFIG['environment']['systemd_result_path']: result_path.as_posix(),
             STATIC_CONFIG['environment']['systemd_stdin_path']: socket_path.as_posix(),
-            'LINES': get_config('jobs', 'terminal', 'lines'),
-            'COLUMNS': get_config('jobs', 'terminal', 'columns'),
         })
+
+        ### Allow for user-defined environment variables.
+        mrsm_env_vars.update(job.env)
+
         environment_lines = [
             f"Environment={key}={val}"
             for key, val in mrsm_env_vars.items()
@@ -190,7 +193,13 @@ class SystemdExecutor(Executor):
         )
         return socket_text
 
-    def get_hidden_job(self, name: str, sysargs: Optional[List[str]] = None, debug: bool = False):
+    def get_hidden_job(
+        self,
+        name: str,
+        sysargs: Optional[List[str]] = None,
+        properties: Optional[Dict[str, Any]] = None,
+        debug: bool = False,
+    ):
         """
         Return the hidden "sister" job to store a job's parameters.
         """
@@ -198,13 +207,13 @@ class SystemdExecutor(Executor):
             name,
             sysargs,
             executor_keys='local',
+            _properties=properties,
             _rotating_log=self.get_job_rotating_file(name, debug=debug),
             _stdin_file=self.get_job_stdin_file(name, debug=debug),
             _status_hook=partial(self.get_job_status, name),
             _result_hook=partial(self.get_job_result, name),
             _externally_managed=True,
         )
-        job._set_externally_managed()
         return job
 
 
@@ -213,6 +222,7 @@ class SystemdExecutor(Executor):
         Return metadata about a job.
         """
         now = time.perf_counter()
+
         if '_jobs_metadata' not in self.__dict__:
             self._jobs_metadata: Dict[str, Any] = {}
 
@@ -231,6 +241,7 @@ class SystemdExecutor(Executor):
             'daemon': {
                 'status': self.get_job_status(name, debug=debug),
                 'pid': self.get_job_pid(name, debug=debug),
+                'properties': self.get_job_properties(name, debug=debug),
             },
         }
         self._jobs_metadata[name] = {
@@ -245,17 +256,24 @@ class SystemdExecutor(Executor):
         """
         from meerschaum.jobs._Job import RESTART_FLAGS
         sysargs = self.get_job_sysargs(name, debug=debug)
+        if not sysargs:
+            return False
+
         for flag in RESTART_FLAGS:
             if flag in sysargs:
                 return True
+
         return False
 
     def get_job_properties(self, name: str, debug: bool = False) -> Dict[str, Any]:
         """
         Return the properties for a job.
         """
-        metadata = self.get_job_metadata(name, debug=debug)
-        return metadata.get('daemon', {}).get('properties', {})
+        job = self.get_hidden_job(name, debug=debug)
+        return {
+            k: v for k, v in job.daemon.properties.items()
+            if k != 'externally_managed'
+        }
 
     def get_job_process(self, name: str, debug: bool = False):
         """
@@ -499,7 +517,13 @@ class SystemdExecutor(Executor):
 
         return self._stdin_files[name]
 
-    def create_job(self, name: str, sysargs: List[str], debug: bool = False) -> SuccessTuple:
+    def create_job(
+        self,
+        name: str,
+        sysargs: List[str],
+        properties: Optional[Dict[str, Any]] = None,
+        debug: bool = False,
+    ) -> SuccessTuple:
         """
         Create a job as a service to be run by `systemd`.
         """
@@ -510,8 +534,18 @@ class SystemdExecutor(Executor):
         socket_stdin = self.get_job_stdin_file(name, debug=debug)
         _ = socket_stdin.file_handler
 
-        ### Init the `externally_managed file`.
-        _ = self.get_hidden_job(name, debug=debug)
+        ### Init the externally_managed file.
+        ### NOTE: We must write the pickle file in addition to the properties file.
+        job = self.get_hidden_job(name, sysargs=sysargs, properties=properties, debug=debug)
+        job._set_externally_managed()
+        pickle_success, pickle_msg = job.daemon.write_pickle()
+        if not pickle_success:
+            return pickle_success, pickle_msg
+        properties_success, properties_msg = job.daemon.write_properties()
+        if not properties_success:
+            return properties_success, properties_msg
+
+        service_file_path.parent.mkdir(parents=True, exist_ok=True)
 
         with open(service_file_path, 'w+', encoding='utf-8') as f:
             f.write(self.get_service_file_text(name, sysargs, debug=debug))

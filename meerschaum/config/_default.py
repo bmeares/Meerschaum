@@ -112,6 +112,7 @@ default_system_config = {
         'join_fetch': False,
         'inplace_sync': True,
         'uv_pip': True,
+        'systemd_healthcheck': False,
     },
 }
 default_pipes_config = {

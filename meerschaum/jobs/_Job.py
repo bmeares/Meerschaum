@@ -58,6 +58,7 @@ class Job:
         self,
         name: str,
         sysargs: Union[List[str], str, None] = None,
+        env: Optional[Dict[str, str]] = None,
         executor_keys: Optional[str] = None,
         _properties: Optional[Dict[str, Any]] = None,
         _rotating_log = None,
@@ -77,6 +78,9 @@ class Job:
 
         sysargs: Union[List[str], str, None], default None
             The sysargs of the command to be executed, e.g. 'start api'.
+
+        env: Optional[Dict[str, str]], default None
+            If provided, set these environment variables in the job's process.
 
         executor_keys: Optional[str], default None
             If provided, execute the job remotely on an API instance, e.g. 'api:main'.
@@ -138,6 +142,9 @@ class Job:
         self._properties_patch = _properties or {}
         if _externally_managed:
             self._properties_patch.update({'externally_managed': _externally_managed})
+
+        if env:
+            self._properties_patch.update({'env': env})
 
         daemon_sysargs = (
             self._daemon.properties.get('target', {}).get('args', [None])[0]
@@ -226,7 +233,12 @@ class Job:
         """
         if self.executor is not None:
             if not self.exists(debug=debug):
-                return self.executor.create_job(self.name, self.sysargs, debug=debug)
+                return self.executor.create_job(
+                    self.name,
+                    self.sysargs,
+                    properties=self.daemon.properties,
+                    debug=debug,
+                )
             return self.executor.start_job(self.name, debug=debug)
 
         if self.is_running():
@@ -881,6 +893,24 @@ class Job:
         return self.executor_keys in (None, 'local') and (
             self._externally_managed or self._externally_managed_file.exists()
         )
+
+    @property
+    def env(self) -> Dict[str, str]:
+        """
+        Return the environment variables to set for the job's process.
+        """
+        if '_env' in self.__dict__:
+            return self.__dict__['_env']
+
+        _env = self.daemon.properties.get('env', {})
+        default_env = {
+            'PYTHONUNBUFFERED': '1',
+            'LINES': str(get_config('jobs', 'terminal', 'lines')),
+            'COLUMNS': str(get_config('jobs', 'terminal', 'columns')),
+        }
+        self._env = {**default_env, **_env}
+        return self._env
+
 
     def __str__(self) -> str:
         sysargs = self.sysargs

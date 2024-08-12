@@ -127,6 +127,7 @@ def get_filtered_jobs(
     executor_keys: Optional[str] = None,
     filter_list: Optional[List[str]] = None,
     include_hidden: bool = False,
+    combine_local_and_systemd: bool = True,
     warn: bool = False,
     debug: bool = False,
 ) -> Dict[str, Job]:
@@ -134,7 +135,12 @@ def get_filtered_jobs(
     Return a list of jobs filtered by the user.
     """
     from meerschaum.utils.warnings import warn as _warn
-    jobs = get_jobs(executor_keys, include_hidden=True, debug=debug)
+    jobs = get_jobs(
+        executor_keys,
+        include_hidden=True,
+        combine_local_and_systemd=combine_local_and_systemd,
+        debug=debug,
+    )
     if not filter_list:
         return {
             name: job
@@ -161,13 +167,19 @@ def get_restart_jobs(
     executor_keys: Optional[str] = None,
     jobs: Optional[Dict[str, Job]] = None,
     include_hidden: bool = False,
+    combine_local_and_systemd: bool = True,
     debug: bool = False,
 ) -> Dict[str, Job]:
     """
     Return jobs which were created with `--restart` or `--loop`.
     """
     if jobs is None:
-        jobs = get_jobs(executor_keys, include_hidden=include_hidden, debug=debug)
+        jobs = get_jobs(
+            executor_keys,
+            include_hidden=include_hidden,
+            combine_local_and_systemd=combine_local_and_systemd,
+            debug=debug,
+        )
 
     return {
         name: job
@@ -180,13 +192,19 @@ def get_running_jobs(
     executor_keys: Optional[str] = None,
     jobs: Optional[Dict[str, Job]] = None,
     include_hidden: bool = False,
+    combine_local_and_systemd: bool = True,
     debug: bool = False,
 ) -> Dict[str, Job]:
     """
     Return a dictionary of running jobs.
     """
     if jobs is None:
-        jobs = get_jobs(executor_keys, include_hidden=include_hidden, debug=debug)
+        jobs = get_jobs(
+            executor_keys,
+            include_hidden=include_hidden,
+            combine_local_and_systemd=combine_local_and_systemd,
+            debug=debug,
+        )
 
     return {
         name: job
@@ -199,13 +217,19 @@ def get_paused_jobs(
     executor_keys: Optional[str] = None,
     jobs: Optional[Dict[str, Job]] = None,
     include_hidden: bool = False,
+    combine_local_and_systemd: bool = True,
     debug: bool = False,
 ) -> Dict[str, Job]:
     """
     Return a dictionary of paused jobs.
     """
     if jobs is None:
-        jobs = get_jobs(executor_keys, include_hidden=include_hidden, debug=debug)
+        jobs = get_jobs(
+            executor_keys,
+            include_hidden=include_hidden,
+            combine_local_and_systemd=combine_local_and_systemd,
+            debug=debug,
+        )
 
     return {
         name: job
@@ -218,13 +242,19 @@ def get_stopped_jobs(
     executor_keys: Optional[str] = None,
     jobs: Optional[Dict[str, Job]] = None,
     include_hidden: bool = False,
+    combine_local_and_systemd: bool = True,
     debug: bool = False,
 ) -> Dict[str, Job]:
     """
     Return a dictionary of stopped jobs.
     """
     if jobs is None:
-        jobs = get_jobs(executor_keys, include_hidden=include_hidden, debug=debug)
+        jobs = get_jobs(
+            executor_keys,
+            include_hidden=include_hidden,
+            combine_local_and_systemd=combine_local_and_systemd,
+            debug=debug,
+        )
 
     return {
         name: job
@@ -274,6 +304,7 @@ def check_restart_jobs(
         jobs = get_jobs(
             executor_keys,
             include_hidden=include_hidden,
+            combine_local_and_systemd=False,
             debug=debug,
         )
 
@@ -385,12 +416,18 @@ def _install_healthcheck_job() -> SuccessTuple:
     """
     Install the systemd job which checks local jobs.
     """
+    from meerschaum.config import get_config
+
+    enable_healthcheck = get_config('system', 'experimental', 'systemd_healthcheck')
+    if not enable_healthcheck:
+        return False, "Local healthcheck is disabled."
+
     if get_executor_keys_from_context() != 'systemd':
         return False, "Not running systemd."
 
     job = Job(
         '.local-healthcheck',
-        ['restart', 'jobs', '-e', 'local', '--loop'],
+        ['restart', 'jobs', '-e', 'local', '--loop', '--min-seconds', '60'],
         executor_keys='systemd',
     )
     return job.start()

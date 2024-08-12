@@ -10,7 +10,7 @@ from __future__ import annotations
 from abc import abstractmethod
 
 from meerschaum.connectors import Connector
-from meerschaum.utils.typing import List, Dict, SuccessTuple, TYPE_CHECKING
+from meerschaum.utils.typing import List, Dict, SuccessTuple, TYPE_CHECKING, Optional, Any
 
 if TYPE_CHECKING:
     from meerschaum.jobs import Job
@@ -33,7 +33,13 @@ class Executor(Connector):
         """
 
     @abstractmethod
-    def create_job(self, name: str, sysargs: List[str], debug: bool = False) -> SuccessTuple:
+    def create_job(
+        self,
+        name: str,
+        sysargs: List[str],
+        properties: Optional[Dict[str, Any]] = None,
+        debug: bool = False,
+    ) -> SuccessTuple:
         """
         Create a new job.
         """
