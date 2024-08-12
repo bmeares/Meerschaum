@@ -57,6 +57,8 @@ def get_jobs(
     A dictionary mapping job names to jobs.
     """
     from meerschaum.connectors.parse import parse_executor_keys
+    executor_keys = executor_keys or get_executor_keys_from_context()
+
     include_local_and_system = (
         combine_local_and_systemd
         and str(executor_keys).split(':', maxsplit=1)[0] in ('None', 'local', 'systemd')

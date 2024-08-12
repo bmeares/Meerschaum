@@ -4,7 +4,7 @@
 
 This is the current release cycle, so stay tuned for future releases!
 
-### v2.3.0 – v2.3.2
+### v2.3.0 – v2.3.3
 
 - **Add the `Job` class.**  
   You may now manage jobs with `Job`:
