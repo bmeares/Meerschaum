@@ -79,7 +79,13 @@ def _restart_jobs(
     action = action or []
 
     while True:
-        jobs = get_filtered_jobs(executor_keys, action, include_hidden=True, debug=debug)
+        jobs = get_filtered_jobs(
+            executor_keys or 'local',
+            action,
+            include_hidden=True,
+            combine_local_and_systemd=False,
+            debug=debug,
+        )
         restart_jobs = get_restart_jobs(executor_keys, jobs, debug=debug) if not action else jobs
         if not restart_jobs and not loop:
             return True, "No jobs need to be restarted."

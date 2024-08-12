@@ -12,7 +12,7 @@ import json
 from datetime import datetime
 
 import meerschaum as mrsm
-from meerschaum.utils.typing import Dict, Any, SuccessTuple, List, Union, Callable
+from meerschaum.utils.typing import Dict, Any, SuccessTuple, List, Union, Callable, Optional
 from meerschaum.jobs import Job
 from meerschaum.config.static import STATIC_CONFIG
 from meerschaum.utils.warnings import warn, dprint
@@ -184,11 +184,24 @@ def start_job(self, name: str, debug: bool = False) -> SuccessTuple:
     return tuple(response.json())
 
 
-def create_job(self, name: str, sysargs: List[str], debug: bool = False) -> SuccessTuple:
+def create_job(
+    self,
+    name: str,
+    sysargs: List[str],
+    properties: Optional[Dict[str, str]] = None,
+    debug: bool = False,
+) -> SuccessTuple:
     """
     Create a job.
     """
-    response = self.post(JOBS_ENDPOINT + f"/{name}", json=sysargs, debug=debug)
+    response = self.post(
+        JOBS_ENDPOINT + f"/{name}",
+        json={
+            'sysargs': sysargs,
+            'properties': properties,
+        },
+        debug=debug,
+    )
     if not response:
         if 'detail' in response.text:
             return False, response.json()['detail']
