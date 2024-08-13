@@ -60,9 +60,10 @@ class Job:
         sysargs: Union[List[str], str, None] = None,
         env: Optional[Dict[str, str]] = None,
         executor_keys: Optional[str] = None,
+        delete_after_completion: bool = False,
         _properties: Optional[Dict[str, Any]] = None,
-        _rotating_log = None,
-        _stdin_file = None,
+        _rotating_log=None,
+        _stdin_file=None,
         _status_hook: Optional[Callable[[], str]] = None,
         _result_hook: Optional[Callable[[], SuccessTuple]] = None,
         _externally_managed: bool = False,
@@ -84,6 +85,9 @@ class Job:
 
         executor_keys: Optional[str], default None
             If provided, execute the job remotely on an API instance, e.g. 'api:main'.
+
+        delete_after_completion: bool, default False
+            If `True`, delete this job when it has finished executing.
 
         _properties: Optional[Dict[str, Any]], default None
             If provided, use this to patch the daemon's properties.
@@ -145,6 +149,9 @@ class Job:
 
         if env:
             self._properties_patch.update({'env': env})
+
+        if delete_after_completion:
+            self._properties_patch.update({'delete_after_completion': delete_after_completion})
 
         daemon_sysargs = (
             self._daemon.properties.get('target', {}).get('args', [None])[0]
@@ -245,7 +252,7 @@ class Job:
             return True, f"{self} is already running."
 
         success, msg = self.daemon.run(
-            keep_daemon_output=True,
+            keep_daemon_output=(not self.delete_after_completion),
             allow_dirty_run=True,
         )
         if not success:
@@ -916,6 +923,16 @@ class Job:
         self._env = {**default_env, **_env}
         return self._env
 
+    @property
+    def delete_after_completion(self) -> bool:
+        """
+        Return whether this job is configured to delete itself after completion.
+        """
+        if '_delete_after_completion' in self.__dict__:
+            return self.__dict__.get('_delete_after_completion', False)
+
+        self._delete_after_completion = self.daemon.properties.get('delete_after_completion', False)
+        return self._delete_after_completion
 
     def __str__(self) -> str:
         sysargs = self.sysargs

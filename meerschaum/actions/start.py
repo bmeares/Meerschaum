@@ -89,6 +89,7 @@ def _start_jobs(
     name: Optional[str] = None,
     sysargs: Optional[List[str]] = None,
     executor_keys: Optional[str] = None,
+    rm: bool = False,
     debug: bool = False,
     **kw
 ) -> SuccessTuple:
@@ -210,7 +211,7 @@ def _start_jobs(
 
     def _run_new_job(name: Optional[str] = None):
         name = name or get_new_daemon_name()
-        job = Job(name, sysargs, executor_keys=executor_keys)
+        job = Job(name, sysargs, executor_keys=executor_keys, delete_after_completion=rm)
         return job.start(debug=debug), name
 
     def _run_existing_job(name: str):
@@ -568,6 +569,7 @@ def _start_pipeline(
         else 1
     )
 
+    params = params or {}
     sub_args_line = params.get('sub_args_line', None)
     patch_args = params.get('patch_args', None)
 

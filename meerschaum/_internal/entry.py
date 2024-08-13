@@ -11,6 +11,8 @@ from __future__ import annotations
 
 import os
 import sys
+import pathlib
+
 from meerschaum.utils.typing import SuccessTuple, List, Optional, Dict, Callable, Any
 from meerschaum.config.static import STATIC_CONFIG as _STATIC_CONFIG
 
@@ -19,8 +21,17 @@ if (_STATIC_CONFIG['environment']['systemd_log_path']) in os.environ:
     from meerschaum.utils.daemon import RotatingFile as _RotatingFile, StdinFile as _StdinFile
     from meerschaum.config import get_config as _get_config
 
-    _systemd_result_path = os.environ[_STATIC_CONFIG['environment']['systemd_result_path']]
-    _systemd_log_path = os.environ[_STATIC_CONFIG['environment']['systemd_log_path']]
+    _systemd_result_path = pathlib.Path(
+        os.environ[_STATIC_CONFIG['environment']['systemd_result_path']]
+    )
+    _systemd_log_path = pathlib.Path(
+        os.environ[_STATIC_CONFIG['environment']['systemd_log_path']]
+    )
+    _systemd_delete_job = (
+        (os.environ.get(_STATIC_CONFIG['environment']['systemd_delete_job'], None) or '0')
+        not in (None, '0', 'false')
+    )
+    _job_name = os.environ[_STATIC_CONFIG['environment']['daemon_id']]
     _systemd_log = _RotatingFile(
         _systemd_log_path,
         write_timestamps=True,
@@ -162,8 +173,20 @@ def entry(
 
     if _systemd_result_path:
         import json
-        with open(_systemd_result_path, 'w+', encoding='utf-8') as f:
-            json.dump((success, msg), f)
+        from meerschaum.utils.warnings import warn
+        import meerschaum as mrsm
+
+        job = mrsm.Job(_job_name, executor_keys='systemd')
+        if job.delete_after_completion:
+            delete_success, delete_msg = job.delete()
+            mrsm.pprint((delete_success, delete_msg))
+        else:
+            try:
+                if _systemd_result_path.parent.exists():
+                    with open(_systemd_result_path, 'w+', encoding='utf-8') as f:
+                        json.dump((success, msg), f)
+            except Exception as e:
+                warn(f"Failed to write job result:\n{e}")
 
     return success, msg
 

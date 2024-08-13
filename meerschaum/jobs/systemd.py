@@ -42,7 +42,12 @@ class SystemdExecutor(Executor):
         return [
             service_name[len('mrsm-'):(-1 * len('.service'))]
             for service_name in os.listdir(SYSTEMD_USER_RESOURCES_PATH)
-            if service_name.startswith('mrsm-') and service_name.endswith('.service')
+            if (
+                service_name.startswith('mrsm-')
+                and service_name.endswith('.service')
+                ### Check for broken symlinks.
+                and (SYSTEMD_USER_RESOURCES_PATH / service_name).exists()
+            )
         ]
 
     def get_job_exists(self, name: str, debug: bool = False) -> bool:
@@ -146,6 +151,11 @@ class SystemdExecutor(Executor):
             STATIC_CONFIG['environment']['systemd_log_path']: service_logs_path.as_posix(),
             STATIC_CONFIG['environment']['systemd_result_path']: result_path.as_posix(),
             STATIC_CONFIG['environment']['systemd_stdin_path']: socket_path.as_posix(),
+            STATIC_CONFIG['environment']['systemd_delete_job']: (
+                '1'
+                if job.delete_after_completion
+                else '0',
+            ),
         })
 
         ### Allow for user-defined environment variables.
@@ -603,7 +613,8 @@ class SystemdExecutor(Executor):
 
         check_timeout_interval = get_config('jobs', 'check_timeout_interval_seconds')
         loop_start = time.perf_counter()
-        while (time.perf_counter() - loop_start) < get_config('jobs', 'timeout_seconds'):
+        timeout_seconds = get_config('jobs', 'timeout_seconds')
+        while (time.perf_counter() - loop_start) < timeout_seconds:
             if self.get_job_status(name, debug=debug) == 'stopped':
                 return True, 'Success'
 
@@ -630,12 +641,14 @@ class SystemdExecutor(Executor):
         Delete a job's service.
         """
         from meerschaum.config.paths import SYSTEMD_LOGS_RESOURCES_PATH
+        job = self.get_hidden_job(name, debug=debug)
 
-        _ = self.stop_job(name, debug=debug)
-        _ = self.run_command(
-            ['disable', self.get_service_name(name, debug=debug)],
-            debug=debug,
-        )
+        if not job.delete_after_completion:
+            _ = self.stop_job(name, debug=debug)
+            _ = self.run_command(
+                ['disable', self.get_service_name(name, debug=debug)],
+                debug=debug,
+            )
 
         service_job_path = self.get_service_job_path(name, debug=debug)
         try:
@@ -666,7 +679,6 @@ class SystemdExecutor(Executor):
                     warn(e)
                     return False, str(e)
 
-        job = self.get_hidden_job(name, debug=debug)
         _ = job.delete()
 
         return self.run_command(['daemon-reload'], debug=debug)

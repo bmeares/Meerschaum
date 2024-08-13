@@ -73,6 +73,7 @@ STATIC_CONFIG: Dict[str, Any] = {
         'systemd_log_path': 'MRSM_SYSTEMD_LOG_PATH',
         'systemd_stdin_path': 'MRSM_SYSTEMD_STDIN_PATH',
         'systemd_result_path': 'MRSM_SYSTEMD_RESULT_PATH',
+        'systemd_delete_job': 'MRSM_SYSTEMD_DELETE_JOB',
         'uri_regex': r'MRSM_([a-zA-Z0-9]*)_(\d*[a-zA-Z][a-zA-Z0-9-_+]*$)',
         'prefix': 'MRSM_',
     },
