@@ -494,13 +494,15 @@ class Job:
                         await asyncio.sleep(sleep_time)
                         sleep_time = round(sleep_time * 1.1, 2)
                         continue
-                    
+
                     if stop_callback_function is not None:
                         try:
                             if asyncio.iscoroutinefunction(stop_callback_function):
                                 await stop_callback_function(self.result)
                             else:
                                 stop_callback_function(self.result)
+                        except asyncio.exceptions.CancelledError:
+                            break
                         except Exception:
                             warn(traceback.format_exc())
 
@@ -555,6 +557,7 @@ class Job:
                 for task in pending:
                     task.cancel()
             except asyncio.exceptions.CancelledError:
+                print('cancelled?')
                 pass
             finally:
                 combined_event.set()
@@ -596,6 +599,8 @@ class Job:
         )
         try:
             _ = asyncio.gather(*tasks, return_exceptions=True)
+        except asyncio.exceptions.CancelledError:
+            raise
         except Exception:
             warn(f"Failed to run async checks:\n{traceback.format_exc()}")
 

@@ -7,7 +7,7 @@ Start subsystems (API server, logging daemon, etc.).
 """
 
 from __future__ import annotations
-from meerschaum.utils.typing import SuccessTuple, Optional, List, Any, Union
+from meerschaum.utils.typing import SuccessTuple, Optional, List, Any, Union, Dict
 
 def start(
     action: Optional[List[str]] = None,
@@ -539,7 +539,6 @@ def _complete_start_connectors(**kw) -> List[str]:
 
 def _start_pipeline(
     action: Optional[List[str]] = None,
-    sub_args: Optional[List[str]] = None,
     loop: bool = False,
     min_seconds: Union[float, int, None] = 1.0,
     params: Optional[Dict[str, Any]] = None,
@@ -569,7 +568,10 @@ def _start_pipeline(
         else 1
     )
 
-    if not sub_args:
+    sub_args_line = params.get('sub_args_line', None)
+    patch_args = params.get('patch_args', None)
+
+    if not sub_args_line:
         return False, "Nothing to do."
 
     if min_seconds is None:
@@ -580,7 +582,7 @@ def _start_pipeline(
     def run_loop():
         nonlocal ran_n_times, success, msg
         while True:
-            success, msg = entry(sub_args, _patch_args=params)
+            success, msg = entry(sub_args_line, _patch_args=patch_args)
             ran_n_times += 1
 
             if not loop and do_n_times == 1:

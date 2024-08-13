@@ -50,6 +50,7 @@ def entry(
         parse_arguments,
         split_chained_sysargs,
         split_pipeline_sysargs,
+        sysargs_has_api_executor_keys,
     )
     from meerschaum.config.static import STATIC_CONFIG
     if sysargs is None:
@@ -63,21 +64,22 @@ def entry(
 
     has_daemon = '-d' in sysargs or '--daemon' in sysargs
     has_start_job = sysargs[:2] == ['start', 'job']
+    pipeline_has_api_executor_keys = sysargs_has_api_executor_keys(pipeline_args)
+
     chained_sysargs = (
         [sysargs]
-        if has_daemon or has_start_job
+        if has_daemon or has_start_job or pipeline_has_api_executor_keys
         else split_chained_sysargs(sysargs)
     )
     if pipeline_args:
+        start_pipeline_params = {
+            'sub_args_line': shlex.join(sysargs),
+            'patch_args': _patch_args,
+        }
         chained_sysargs = [
             ['start', 'pipeline']
             + [str(arg) for arg in pipeline_args]
-            + (
-                ['--params', json.dumps(_patch_args)]
-                if _patch_args
-                else []
-            )
-            + ['--sub-args', shlex.join(sysargs)]
+            + ['-P', json.dumps(start_pipeline_params, separators=(',', ':'))]
         ]
 
     results: List[SuccessTuple] = []

@@ -114,7 +114,7 @@ def clean_sysargs(sysargs: List[str]) -> List[str]:
     clean_sysargs = []
     executor_flag = False
     for arg in sysargs:
-        if arg in ('-e', '--executor', 'api'):
+        if arg in ('-e', '--executor-keys', 'api'):
             executor_flag = True
             continue
         if executor_flag:

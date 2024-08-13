@@ -14,6 +14,7 @@ from functools import partial
 from datetime import datetime, timezone
 
 from fastapi import WebSocket, WebSocketDisconnect
+from websockets.exceptions import ConnectionClosedError
 
 from meerschaum.utils.misc import generate_password
 from meerschaum.jobs import Job
@@ -27,6 +28,7 @@ import meerschaum.core
 from meerschaum.config import get_config
 from meerschaum._internal.arguments._parse_arguments import parse_dict_to_sysargs, parse_arguments
 from meerschaum.api.routes._jobs import clean_sysargs
+from meerschaum.jobs._Job import StopMonitoringLogs
 
 actions_endpoint = endpoints['actions']
 
@@ -71,8 +73,8 @@ async def notify_client(client, content: str):
     """
     try:
         await client.send_text(content)
-    except WebSocketDisconnect:
-        pass
+    except (RuntimeError, WebSocketDisconnect, Exception):
+        raise StopMonitoringLogs
 
 _temp_jobs = {}
 @app.websocket(actions_endpoint + '/ws')
@@ -83,6 +85,8 @@ async def do_action_websocket(websocket: WebSocket):
     await websocket.accept()
 
     stop_event = asyncio.Event()
+    job_name = '.' + generate_password(12)
+    job = None
 
     async def monitor_logs(job):
         success, msg = job.start()
@@ -92,12 +96,14 @@ async def do_action_websocket(websocket: WebSocket):
             stop_on_exit=True,
         )
 
-    job = None
-    job_name = '.' + generate_password(12)
     try:
         token = await websocket.receive_text()
         user = await manager.get_current_user(token) if not no_auth else None
         if user is None and not no_auth:
+            stop_event.set()
+            if job is not None:
+                job.delete()
+                _ = _temp_jobs.pop(job_name, None)
             raise fastapi.HTTPException(
                 status_code=401,
                 detail="Invalid credentials.",
@@ -114,14 +120,11 @@ async def do_action_websocket(websocket: WebSocket):
         }
         await websocket.send_json(auth_payload)
         if not auth_success:
+            stop_event.set()
+            job.stop()
             await websocket.close()
 
         sysargs = clean_sysargs(await websocket.receive_json())
-        #  kwargs = parse_arguments(sysargs)
-        #  _ = kwargs.pop('executor_keys', None)
-        #  _ = kwargs.pop('shell', None)
-        #  sysargs = parse_dict_to_sysargs(kwargs)
-
         job = Job(
             job_name,
             sysargs,
@@ -134,25 +137,32 @@ async def do_action_websocket(websocket: WebSocket):
         )
         _temp_jobs[job_name] = job
         monitor_task = asyncio.create_task(monitor_logs(job))
-        await monitor_task
+
+        ### NOTE: Await incoming text to trigger `WebSocketDisconnect`.
+        while True:
+            await websocket.receive_text()
+
+    except fastapi.HTTPException:
+        await websocket.send_text("Invalid credentials.")
+        await websocket.close()
+    except (WebSocketDisconnect, asyncio.CancelledError):
+        stop_event.set()
+        job.stop()
+    except Exception:
+        stop_event.set()
+        job.stop()
+        warn(f"Error in logs websocket:\n{traceback.format_exc()}")
+    finally:
+        stop_event.set()
+        job.stop()
+        monitor_task.cancel()
+        if job is not None:
+            job.delete()
+        _ = _temp_jobs.pop(job_name, None)
         try:
             await websocket.close()
         except RuntimeError:
             pass
-    except fastapi.HTTPException:
-        await websocket.send_text("Invalid credentials.")
-        await websocket.close()
-    except WebSocketDisconnect:
-        pass
-    except asyncio.CancelledError:
-        pass
-    except Exception:
-        warn(f"Error in logs websocket:\n{traceback.format_exc()}")
-    finally:
-        if job is not None:
-            job.delete()
-        _ = _temp_jobs.pop(job_name, None)
-        stop_event.set()
 
 
 @app.post(actions_endpoint + "/{action}", tags=['Actions'])

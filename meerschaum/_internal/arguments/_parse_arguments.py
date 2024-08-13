@@ -283,18 +283,29 @@ def parse_dict_to_sysargs(
             ### Add list flags
             if isinstance(args_dict[a], (list, tuple)):
                 if len(args_dict[a]) > 0:
-                    sysargs.extend(
-                        [t[0]]
-                        + [
-                            str(item)
-                            for item in args_dict[a]
-                        ]
-                    )
+                    if a == 'sub_args' and args_dict[a] != ['']:
+                        print(f"{args_dict[a]=}")
+                        sysargs.extend(
+                            [
+                                '-A',
+                                shlex.join([
+                                    str(item) for item in args_dict[a]
+                                ]),
+                            ]
+                        )
+                    else:
+                        sysargs.extend(
+                            [t[0]]
+                            + [
+                                str(item)
+                                for item in args_dict[a]
+                            ]
+                        )
 
             ### Add dict flags
             elif isinstance(args_dict[a], dict):
                 if len(args_dict[a]) > 0:
-                    sysargs += [t[0], json.dumps(args_dict[a])]
+                    sysargs += [t[0], json.dumps(args_dict[a], separators=(',', ':'))]
 
             ### Account for None and other values
             elif (args_dict[a] is not None) or (args_dict[a] is None and a in allow_none_args):
@@ -403,4 +414,22 @@ def load_plugin_args() -> None:
             to_import.append(plugin.name)
     if not to_import:
         return
-    import_plugins(*to_import) 
+    import_plugins(*to_import)
+
+
+def sysargs_has_api_executor_keys(sysargs: List[str]) -> bool:
+    """
+    Check whether a `sysargs` list contains an `api` executor.
+    """
+    if '-e' not in sysargs and '--executor-keys' not in sysargs:
+        return False
+
+    executor_keys_flag = '-e' if '-e' in sysargs else '--executor-keys'
+    executor_keys_flag_ix = sysargs.index(executor_keys_flag)
+    executor_keys_ix = executor_keys_flag_ix + 1
+
+    if len(sysargs) < executor_keys_ix:
+        return False
+
+    executor_keys = sysargs[executor_keys_ix]
+    return executor_keys.startswith('api:')

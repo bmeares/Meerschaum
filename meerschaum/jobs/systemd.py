@@ -152,7 +152,7 @@ class SystemdExecutor(Executor):
         mrsm_env_vars.update(job.env)
 
         environment_lines = [
-            f"Environment={key}={val}"
+            f"Environment={key}={shlex.quote(str(val))}"
             for key, val in mrsm_env_vars.items()
         ]
         environment_str = '\n'.join(environment_lines)
