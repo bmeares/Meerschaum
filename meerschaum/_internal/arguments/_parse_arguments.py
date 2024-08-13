@@ -433,3 +433,54 @@ def sysargs_has_api_executor_keys(sysargs: List[str]) -> bool:
 
     executor_keys = sysargs[executor_keys_ix]
     return executor_keys.startswith('api:')
+
+
+def get_pipeline_sysargs(
+    sysargs: List[str],
+    pipeline_args: List[str],
+    _patch_args: Optional[Dict[str, Any]] = None,
+) -> List[str]:
+    """
+    Parse `sysargs` and `pipeline_args` into a single `start pipeline` sysargs.
+    """
+    import shlex
+    start_pipeline_params = {
+        'sub_args_line': shlex.join(sysargs),
+        'patch_args': _patch_args,
+    }
+    return (
+        ['start', 'pipeline']
+        + [str(arg) for arg in pipeline_args]
+        + ['-P', json.dumps(start_pipeline_params, separators=(',', ':'))]
+    )
+
+
+def compress_pipeline_sysargs(pipeline_sysargs: List[str]) -> List[str]:
+    """
+    Given a `start pipeline` sysargs, return a condensed syntax rendition.
+    """
+    import shlex
+
+    if pipeline_sysargs[:2] != ['start', 'pipeline']:
+        return pipeline_sysargs
+
+    if '-P' not in pipeline_sysargs:
+        return pipeline_sysargs
+
+    params_ix = pipeline_sysargs.index('-P')
+    pipeline_args = pipeline_sysargs[2:params_ix]
+    params_str = pipeline_sysargs[-1]
+    try:
+        start_pipeline_params = json.loads(params_str)
+    except Exception:
+        return pipeline_sysargs
+
+    sub_args_line = start_pipeline_params.get('sub_args_line', None)
+    if not sub_args_line:
+        return pipeline_sysargs
+
+    return (
+        shlex.split(sub_args_line)
+        + [':']
+        + pipeline_args
+    )

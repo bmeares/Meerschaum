@@ -51,6 +51,7 @@ def entry(
         split_chained_sysargs,
         split_pipeline_sysargs,
         sysargs_has_api_executor_keys,
+        get_pipeline_sysargs,
     )
     from meerschaum.config.static import STATIC_CONFIG
     if sysargs is None:
@@ -72,15 +73,7 @@ def entry(
         else split_chained_sysargs(sysargs)
     )
     if pipeline_args:
-        start_pipeline_params = {
-            'sub_args_line': shlex.join(sysargs),
-            'patch_args': _patch_args,
-        }
-        chained_sysargs = [
-            ['start', 'pipeline']
-            + [str(arg) for arg in pipeline_args]
-            + ['-P', json.dumps(start_pipeline_params, separators=(',', ':'))]
-        ]
+        chained_sysargs = [get_pipeline_sysargs(sysargs, pipeline_args, _patch_args=_patch_args)]
 
     results: List[SuccessTuple] = []
 

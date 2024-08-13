@@ -407,7 +407,6 @@ class Job:
         )
         return asyncio.run(monitor_logs_coroutine)
 
-
     async def monitor_logs_async(
         self,
         callback_function: Callable[[str], None] = partial(print, end='', flush=True),
@@ -418,8 +417,8 @@ class Job:
         strip_timestamps: bool = False,
         accept_input: bool = True,
         _logs_path: Optional[pathlib.Path] = None,
-        _log = None,
-        _stdin_file = None,
+        _log=None,
+        _stdin_file=None,
         debug: bool = False,
     ):
         """
@@ -557,7 +556,6 @@ class Job:
                 for task in pending:
                     task.cancel()
             except asyncio.exceptions.CancelledError:
-                print('cancelled?')
                 pass
             finally:
                 combined_event.set()
@@ -870,7 +868,9 @@ class Job:
         """
         Return the job's Daemon label (joined sysargs).
         """
-        return shlex.join(self.sysargs).replace(' + ', '\n+ ')
+        from meerschaum._internal.arguments import compress_pipeline_sysargs
+        sysargs = compress_pipeline_sysargs(self.sysargs)
+        return shlex.join(sysargs).replace(' + ', '\n+ ')
 
     @property
     def _externally_managed_file(self) -> pathlib.Path:

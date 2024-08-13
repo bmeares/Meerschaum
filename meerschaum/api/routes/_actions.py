@@ -121,7 +121,8 @@ async def do_action_websocket(websocket: WebSocket):
         await websocket.send_json(auth_payload)
         if not auth_success:
             stop_event.set()
-            job.stop()
+            if job is not None:
+                job.stop()
             await websocket.close()
 
         sysargs = clean_sysargs(await websocket.receive_json())
@@ -138,23 +139,28 @@ async def do_action_websocket(websocket: WebSocket):
         _temp_jobs[job_name] = job
         monitor_task = asyncio.create_task(monitor_logs(job))
 
+        await monitor_task
+
         ### NOTE: Await incoming text to trigger `WebSocketDisconnect`.
-        while True:
-            await websocket.receive_text()
+        #  while True:
+            #  await websocket.receive_text()
 
     except fastapi.HTTPException:
         await websocket.send_text("Invalid credentials.")
         await websocket.close()
     except (WebSocketDisconnect, asyncio.CancelledError):
         stop_event.set()
-        job.stop()
+        if job is not None:
+            job.stop()
     except Exception:
         stop_event.set()
-        job.stop()
+        if job is not None:
+            job.stop()
         warn(f"Error in logs websocket:\n{traceback.format_exc()}")
     finally:
         stop_event.set()
-        job.stop()
+        if job is not None:
+            job.stop()
         monitor_task.cancel()
         if job is not None:
             job.delete()

@@ -39,6 +39,17 @@ async def do_action_async(
     """
     Monitor a job's log files and await a callback with the changes.
     """
+    from meerschaum.utils.misc import generate_password
+    from meerschaum.actions import get_action
+    job_name = '.' + generate_password(12)
+    job = mrsm.Job(job_name, sysargs, executor_keys=str(self))
+    start_success, start_msg = job.start()
+    if not start_success:
+        return start_success, start_msg
+
+    attach_function = get_action(['attach', 'jobs'])
+    return attach_function([job_name, '-e', str(self)])
+
     websockets, websockets_exceptions = mrsm.attempt_import('websockets', 'websockets.exceptions')
     protocol = 'ws' if self.URI.startswith('http://') else 'wss'
     port = self.port if 'port' in self.__dict__ else ''

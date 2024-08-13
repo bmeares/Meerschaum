@@ -277,6 +277,7 @@ async def monitor_logs_async(
     """
     Monitor a job's log files and await a callback with the changes.
     """
+    import traceback
     from meerschaum.jobs import StopMonitoringLogs
     from meerschaum.utils.formatting._jobs import strip_timestamp_from_line
 
