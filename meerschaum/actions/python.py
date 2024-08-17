@@ -14,6 +14,7 @@ def python(
     nopretty: bool = False,
     noask: bool = False,
     venv: Optional[str] = None,
+    executor_keys: Optional[str] = None,
     debug: bool = False,
     **kw: Any
 ) -> SuccessTuple:
@@ -52,6 +53,9 @@ def python(
     from meerschaum.config.paths import VIRTENV_RESOURCES_PATH, PYTHON_RESOURCES_PATH
     from meerschaum.utils.packages import run_python_package, attempt_import
     from meerschaum.utils.process import run_process
+
+    if executor_keys and executor_keys.startswith('api:'):
+        warn("Cannot open a Python REPL remotely, falling back to local...", stack=False)
 
     if action is None:
         action = []

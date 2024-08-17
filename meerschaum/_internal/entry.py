@@ -11,6 +11,8 @@ from __future__ import annotations
 
 import os
 import sys
+import pathlib
+
 from meerschaum.utils.typing import SuccessTuple, List, Optional, Dict, Callable, Any
 from meerschaum.config.static import STATIC_CONFIG as _STATIC_CONFIG
 
@@ -19,8 +21,17 @@ if (_STATIC_CONFIG['environment']['systemd_log_path']) in os.environ:
     from meerschaum.utils.daemon import RotatingFile as _RotatingFile, StdinFile as _StdinFile
     from meerschaum.config import get_config as _get_config
 
-    _systemd_result_path = os.environ[_STATIC_CONFIG['environment']['systemd_result_path']]
-    _systemd_log_path = os.environ[_STATIC_CONFIG['environment']['systemd_log_path']]
+    _systemd_result_path = pathlib.Path(
+        os.environ[_STATIC_CONFIG['environment']['systemd_result_path']]
+    )
+    _systemd_log_path = pathlib.Path(
+        os.environ[_STATIC_CONFIG['environment']['systemd_log_path']]
+    )
+    _systemd_delete_job = (
+        (os.environ.get(_STATIC_CONFIG['environment']['systemd_delete_job'], None) or '0')
+        not in (None, '0', 'false')
+    )
+    _job_name = os.environ[_STATIC_CONFIG['environment']['daemon_id']]
     _systemd_log = _RotatingFile(
         _systemd_log_path,
         write_timestamps=True,
@@ -50,6 +61,8 @@ def entry(
         parse_arguments,
         split_chained_sysargs,
         split_pipeline_sysargs,
+        sysargs_has_api_executor_keys,
+        get_pipeline_sysargs,
     )
     from meerschaum.config.static import STATIC_CONFIG
     if sysargs is None:
@@ -63,22 +76,15 @@ def entry(
 
     has_daemon = '-d' in sysargs or '--daemon' in sysargs
     has_start_job = sysargs[:2] == ['start', 'job']
+    pipeline_has_api_executor_keys = sysargs_has_api_executor_keys(pipeline_args)
+
     chained_sysargs = (
         [sysargs]
-        if has_daemon or has_start_job
+        if has_daemon or has_start_job or pipeline_has_api_executor_keys
         else split_chained_sysargs(sysargs)
     )
     if pipeline_args:
-        chained_sysargs = [
-            ['start', 'pipeline']
-            + [str(arg) for arg in pipeline_args]
-            + (
-                ['--params', json.dumps(_patch_args)]
-                if _patch_args
-                else []
-            )
-            + ['--sub-args', shlex.join(sysargs)]
-        ]
+        chained_sysargs = [get_pipeline_sysargs(sysargs, pipeline_args, _patch_args=_patch_args)]
 
     results: List[SuccessTuple] = []
 
@@ -167,8 +173,20 @@ def entry(
 
     if _systemd_result_path:
         import json
-        with open(_systemd_result_path, 'w+', encoding='utf-8') as f:
-            json.dump((success, msg), f)
+        from meerschaum.utils.warnings import warn
+        import meerschaum as mrsm
+
+        job = mrsm.Job(_job_name, executor_keys='systemd')
+        if job.delete_after_completion:
+            delete_success, delete_msg = job.delete()
+            mrsm.pprint((delete_success, delete_msg))
+        else:
+            try:
+                if _systemd_result_path.parent.exists():
+                    with open(_systemd_result_path, 'w+', encoding='utf-8') as f:
+                        json.dump((success, msg), f)
+            except Exception as e:
+                warn(f"Failed to write job result:\n{e}")
 
     return success, msg
 

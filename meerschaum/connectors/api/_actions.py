@@ -17,6 +17,7 @@ from meerschaum.utils.typing import SuccessTuple, List, Callable, Optional
 from meerschaum.config.static import STATIC_CONFIG
 
 ACTIONS_ENDPOINT: str = STATIC_CONFIG['api']['endpoints']['actions']
+TEMP_PREFIX: str = STATIC_CONFIG['api']['jobs']['temp_prefix']
 
 
 def get_actions(self):
@@ -37,43 +38,28 @@ async def do_action_async(
     callback_function: Callable[[str], None] = partial(print, end=''),
 ) -> SuccessTuple:
     """
-    Monitor a job's log files and await a callback with the changes.
+    Execute an action as a temporary remote job.
     """
-    websockets, websockets_exceptions = mrsm.attempt_import('websockets', 'websockets.exceptions')
-    protocol = 'ws' if self.URI.startswith('http://') else 'wss'
-    port = self.port if 'port' in self.__dict__ else ''
-    uri = f"{protocol}://{self.host}:{port}{ACTIONS_ENDPOINT}/ws"
-    if sysargs and sysargs[0] == 'api' and len(sysargs) > 2:
-        sysargs = sysargs[2:]
+    from meerschaum._internal.arguments import remove_api_executor_keys
+    from meerschaum.utils.misc import generate_password
+    sysargs = remove_api_executor_keys(sysargs)
 
-    sysargs_str = json.dumps(sysargs)
+    job_name = TEMP_PREFIX + generate_password(12)
+    job = mrsm.Job(job_name, sysargs, executor_keys=str(self))
 
-    async with websockets.connect(uri) as websocket:
-        try:
-            await websocket.send(self.token or 'no-login')
-            response = await websocket.recv()
-            init_data = json.loads(response)
-            if not init_data.get('is_authenticated'):
-                return False, "Cannot authenticate with actions endpoint."
+    start_success, start_msg = job.start()
+    if not start_success:
+        return start_success, start_msg
 
-            await websocket.send(sysargs_str)
-        except websockets_exceptions.ConnectionClosedOK:
-            return False, "Connection was closed."
+    await job.monitor_logs_async(
+        callback_function=callback_function,
+        stop_on_exit=True,
+        strip_timestamps=True,
+    )
 
-        while True:
-            try:
-                line = await websocket.recv()
-                if asyncio.iscoroutinefunction(callback_function):
-                    await callback_function(line)
-                else:
-                    callback_function(line)
-            except KeyboardInterrupt:
-                await websocket.close()
-                break
-            except websockets_exceptions.ConnectionClosedOK:
-                break
-
-    return True, "Success"
+    success, msg = job.result
+    job.delete()
+    return success, msg
 
 
 def do_action_legacy(

@@ -89,22 +89,22 @@ def api(
     return success, message
 
 def _api_start(
-        action: Optional[List[str]] = None,
-        host: Optional[str] = None,
-        port: Optional[int] = None,
-        workers: Optional[int] = None,
-        mrsm_instance: Optional[str] = None,
-        no_dash: bool = False,
-        no_auth: bool = False,
-        private: bool = False,
-        secure: bool = False,
-        debug: bool = False,
-        nopretty: bool = False,
-        production: bool = False,
-        keyfile: Optional[str] = None,
-        certfile: Optional[str] = None,
-        **kw: Any
-    ) -> SuccessTuple:
+    action: Optional[List[str]] = None,
+    host: Optional[str] = None,
+    port: Optional[int] = None,
+    workers: Optional[int] = None,
+    mrsm_instance: Optional[str] = None,
+    no_dash: bool = False,
+    no_auth: bool = False,
+    private: bool = False,
+    secure: bool = False,
+    debug: bool = False,
+    nopretty: bool = False,
+    production: bool = False,
+    keyfile: Optional[str] = None,
+    certfile: Optional[str] = None,
+    **kw: Any
+) -> SuccessTuple:
     """Start the API server.
    
     Parameters
