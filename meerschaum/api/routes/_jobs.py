@@ -323,12 +323,8 @@ async def get_input_from_clients(name: str, websocket: WebSocket) -> str:
 
     async def _read_client(client):
         try:
-            print(f"sending {JOBS_STDIN_MESSAGE}...")
             await client.send_text(JOBS_STDIN_MESSAGE)
-            print(f"awaiting input...")
             data = await _job_queues[name].get()
-            #  data = await client.receive_text()
-            print(f"{data=}")
         except WebSocketDisconnect:
             if client in _job_clients[name]:
                 _job_clients[name].remove(client)
