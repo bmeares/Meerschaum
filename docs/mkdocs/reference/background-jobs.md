@@ -231,3 +231,20 @@ Next 5 timestamps for schedule 'daily and mon-fri starting May 2, 2024':
     trigger.next()
     # datetime.datetime(2024, 1, 2, 0, 0, tzinfo=datetime.timezone.utc)
     ```
+
+## ⚙️ Executors
+
+Executors are to jobs as connectors are to pipes; all jobs run on an executor. There are three built-in kinds of executors:
+
+- `systemd` (services)  
+  Run jobs as `systemd` user services. This only the case if `systemd` is available (and using the default root directory).
+
+- `local` (daemons)  
+  Run jobs as Unix daemons. The API server creates all jobs as `local` and restarts killed jobs.
+
+- `api:{label}` (remote)  
+  Run jobs remotely. You can "remote into" your API instances by specifying the connector keys for your API instance (e.g. `-e api:prod`).
+
+
+!!! tip "Custom executors"
+    You can implement a custom executor with the [`#!python @make_executor` decorator](). See [`Executor`](https://docs.meerschaum.io/meerschaum/jobs.html#Executor) and [`SystemdExecutor`](https://docs.meerschaum.io/meerschaum/jobs/systemd.html) for an example implementation.

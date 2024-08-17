@@ -40,7 +40,15 @@ from meerschaum.config.static import STATIC_CONFIG
 
 JOBS_STDIN_MESSAGE: str = STATIC_CONFIG['api']['jobs']['stdin_message']
 JOBS_STOP_MESSAGE: str = STATIC_CONFIG['api']['jobs']['stop_message']
-EXECUTOR_KEYS: str = get_executor_keys_from_context()
+EXECUTOR_KEYS: str = 'local'
+
+
+def _get_job(name: str):
+    systemd_job = Job(name, executor_keys='systemd')
+    if systemd_job.exists():
+        return systemd_job
+
+    return Job(name, executor_keys=EXECUTOR_KEYS)
 
 
 @app.get(endpoints['jobs'], tags=['Jobs'])
@@ -52,7 +60,7 @@ def get_jobs(
     """
     Return metadata about the current jobs.
     """
-    jobs = _get_jobs(executor_keys=EXECUTOR_KEYS, combine_local_and_systemd=False)
+    jobs = _get_jobs(executor_keys=EXECUTOR_KEYS, combine_local_and_systemd=True)
     return {
         name: {
             'sysargs': job.sysargs,
@@ -83,7 +91,7 @@ def get_job(
     """
     Return metadata for a single job.
     """
-    job = Job(name, executor_keys=EXECUTOR_KEYS)
+    job = _get_job(name)
     if not job.exists():
         raise fastapi.HTTPException(
             status_code=404,
@@ -163,7 +171,7 @@ def delete_job(
     """
     Delete a job.
     """
-    job = Job(name, executor_keys=EXECUTOR_KEYS)
+    job = _get_job(name)
     return job.delete()
 
 
@@ -177,7 +185,7 @@ def get_job_exists(
     """
     Return whether a job exists.
     """
-    job = Job(name, executor_keys=EXECUTOR_KEYS)
+    job = _get_job(name)
     return job.exists()
 
 
@@ -192,7 +200,7 @@ def get_logs(
     Return a job's log text.
     To stream log text, connect to the WebSocket endpoint `/logs/{name}/ws`.
     """
-    job = Job(name, executor_keys=EXECUTOR_KEYS)
+    job = _get_job(name)
     if not job.exists():
         raise fastapi.HTTPException(
             status_code=404,
@@ -212,7 +220,7 @@ def start_job(
     """
     Start a job if stopped.
     """
-    job = Job(name, executor_keys=EXECUTOR_KEYS)
+    job = _get_job(name)
     if not job.exists():
         raise fastapi.HTTPException(
             status_code=404,
@@ -231,7 +239,7 @@ def stop_job(
     """
     Stop a job if running.
     """
-    job = Job(name, executor_keys=EXECUTOR_KEYS)
+    job = _get_job(name)
     if not job.exists():
         raise fastapi.HTTPException(
             status_code=404,
@@ -250,7 +258,7 @@ def pause_job(
     """
     Pause a job if running.
     """
-    job = Job(name, executor_keys=EXECUTOR_KEYS)
+    job = _get_job(name)
     if not job.exists():
         raise fastapi.HTTPException(
             status_code=404,
@@ -269,7 +277,7 @@ def get_stop_time(
     """
     Get the timestamp when the job was manually stopped.
     """
-    job = Job(name, executor_keys=EXECUTOR_KEYS)
+    job = _get_job(name)
     return job.stop_time
 
 
@@ -283,7 +291,7 @@ def get_is_blocking_on_stdin(
     """
     Return whether a job is blocking on stdin.
     """
-    job = Job(name, executor_keys=EXECUTOR_KEYS)
+    job = _get_job(name)
     return job.is_blocking_on_stdin()
 
 
@@ -357,10 +365,12 @@ async def logs_websocket(name: str, websocket: WebSocket):
     Stream logs from a job over a websocket.
     """
     await websocket.accept()
-    job = Job(name, executor_keys=EXECUTOR_KEYS)
+    job = _get_job(name)
     _job_clients[name].append(websocket)
 
+    _task = None
     async def monitor_logs():
+        nonlocal _task
         try:
             callback_function = partial(
                 notify_clients,
@@ -377,16 +387,17 @@ async def logs_websocket(name: str, websocket: WebSocket):
                 name,
                 websocket,
             )
-            await job.monitor_logs_async(
+            _task = asyncio.create_task(job.monitor_logs_async(
                 callback_function=callback_function,
                 input_callback_function=input_callback_function,
                 stop_callback_function=stop_callback_function,
                 stop_event=_job_stop_events[name],
                 stop_on_exit=True,
                 accept_input=True,
-            )
+            ))
         except Exception:
             warn(traceback.format_exc())
+            _task.cancel()
 
     try:
         token = await websocket.receive_text()
@@ -397,7 +408,10 @@ async def logs_websocket(name: str, websocket: WebSocket):
                 detail="Invalid credentials.",
             )
         monitor_task = asyncio.create_task(monitor_logs())
-        await monitor_task
+        #  await monitor_task
+        while True:
+            await websocket.receive_text()
+
     except fastapi.HTTPException:
         await websocket.send_text("Invalid credentials.")
         await websocket.close()

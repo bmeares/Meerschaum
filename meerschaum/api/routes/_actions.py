@@ -139,11 +139,11 @@ async def do_action_websocket(websocket: WebSocket):
         _temp_jobs[job_name] = job
         monitor_task = asyncio.create_task(monitor_logs(job))
 
-        await monitor_task
+        #  await monitor_task
 
         ### NOTE: Await incoming text to trigger `WebSocketDisconnect`.
-        #  while True:
-            #  await websocket.receive_text()
+        while True:
+            await websocket.receive_text()
 
     except fastapi.HTTPException:
         await websocket.send_text("Invalid credentials.")

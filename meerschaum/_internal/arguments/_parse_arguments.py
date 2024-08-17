@@ -424,15 +424,43 @@ def sysargs_has_api_executor_keys(sysargs: List[str]) -> bool:
     if '-e' not in sysargs and '--executor-keys' not in sysargs:
         return False
 
-    executor_keys_flag = '-e' if '-e' in sysargs else '--executor-keys'
-    executor_keys_flag_ix = sysargs.index(executor_keys_flag)
-    executor_keys_ix = executor_keys_flag_ix + 1
+    for i, arg in enumerate(sysargs):
+        if arg not in ('-e', '--executor-keys'):
+            continue
 
-    if len(sysargs) < executor_keys_ix:
-        return False
+        executor_keys_ix = i + 1
+        if len(sysargs) <= executor_keys_ix:
+            return False
 
-    executor_keys = sysargs[executor_keys_ix]
-    return executor_keys.startswith('api:')
+        executor_keys = sysargs[executor_keys_ix]
+        if executor_keys.startswith('api:'):
+            return True
+
+    return False
+
+
+def remove_api_executor_keys(sysargs: List[str]) -> List[str]:
+    """
+    Remove any api executor keys from `sysargs`.
+    """
+    from meerschaum.utils.misc import flatten_list
+
+    if not sysargs_has_api_executor_keys(sysargs):
+        return sysargs
+
+    skip_indices = set(flatten_list(
+        [
+            [i, i+1]
+            for i, arg in enumerate(sysargs)
+            if arg in ('-e', '--executor-keys')
+        ]
+    ))
+
+    return [
+        arg
+        for i, arg in enumerate(sysargs)
+        if i not in skip_indices
+    ]
 
 
 def get_pipeline_sysargs(
