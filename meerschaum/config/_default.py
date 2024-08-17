@@ -16,7 +16,6 @@ default_meerschaum_config = {
     'api_instance': 'MRSM{meerschaum:instance}',
     'web_instance': 'MRSM{meerschaum:instance}',
     'default_repository': 'api:mrsm',
-    #  'default_executor': 'local',
     'connectors': {
         'sql': {
             'default': {},
