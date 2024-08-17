@@ -13,6 +13,33 @@ Starting the Meerschaum API server lets you treat your host as the following:
 - [Remote executor](/reference/background-jobs/#-executors)  
   For running jobs.
 
+### Adding Connectors
+
+Add new `api` connectors with `bootstrap connector` or declaring an [environment connector](/reference/connectors/#-environment-connectors):
+
+```bash
+# URI is in the form 'protocol://user:pass@host:port'
+export MRSM_API_FOO='https://foo:bar@mrsm.example.com'
+```
+
+### Remote Actions
+
+Add `-e` to client commands to [execute them remotely](/reference/background-jobs/#-executors) on your API instance:
+
+```
+sync pipes -e api:main
+```
+
+When running the `mrsm` shell, the `executor` command allows you to temporarily run all the commands in your session remotely (like the `instance` command):
+
+```
+executor api:main
+```
+
+### API Documentation
+
+You can visit your API instance's Swagger documentation by navigating to `/docs` or `/redoc`.
+
 ## Deployment
 
 It's common in production deployments to stand up a public-facing API instance. See below for deployment tips:

@@ -297,6 +297,7 @@ def get_is_blocking_on_stdin(
 
 _job_clients = defaultdict(lambda: [])
 _job_stop_events = defaultdict(lambda: asyncio.Event())
+_job_queues = defaultdict(lambda: asyncio.Queue())
 async def notify_clients(name: str, websocket: WebSocket, content: str):
     """
     Write the given content to all connected clients.
@@ -322,13 +323,21 @@ async def get_input_from_clients(name: str, websocket: WebSocket) -> str:
 
     async def _read_client(client):
         try:
+            print(f"sending {JOBS_STDIN_MESSAGE}...")
             await client.send_text(JOBS_STDIN_MESSAGE)
-            data = await client.receive_text()
+            print(f"awaiting input...")
+            data = await _job_queues[name].get()
+            #  data = await client.receive_text()
+            print(f"{data=}")
         except WebSocketDisconnect:
             if client in _job_clients[name]:
                 _job_clients[name].remove(client)
+            if not _job_clients[name]:
+                _job_stop_events[name].set()
         except Exception:
             pass
+        finally:
+            _job_queues[name].task_done()
         return data
 
     read_tasks = [
@@ -408,16 +417,17 @@ async def logs_websocket(name: str, websocket: WebSocket):
                 detail="Invalid credentials.",
             )
         monitor_task = asyncio.create_task(monitor_logs())
-        #  await monitor_task
         while True:
-            await websocket.receive_text()
+            text = await websocket.receive_text()
+            await _job_queues[name].put(text)
 
     except fastapi.HTTPException:
         await websocket.send_text("Invalid credentials.")
         await websocket.close()
     except WebSocketDisconnect:
-        _job_stop_events[name].set()
-        monitor_task.cancel()
+        if not _job_clients[name]:
+            _job_stop_events[name].set()
+            monitor_task.cancel()
     except asyncio.CancelledError:
         pass
     except Exception:

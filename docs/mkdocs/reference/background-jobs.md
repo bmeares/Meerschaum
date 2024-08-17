@@ -245,6 +245,34 @@ Executors are to jobs as connectors are to pipes; all jobs run on an executor. T
 - `api:{label}` (remote)  
   Run jobs remotely. You can "remote into" your API instances by specifying the connector keys for your API instance (e.g. `-e api:prod`).
 
+Add the flag `-e` (`--executor-keys`) to your commands to specify the executor, e.g.:
 
-!!! tip "Custom executors"
+```
+# Create the job 'syncing engine' on 'api:prod':
+sync pipes --name syncing-engine -e api:prod -d
+
+# Run `show pipes` on 'api:prod':
+show pipes -e api:prod
+```
+
+### Instance vs Executor
+
+Note the distinction between `-e` and `-i`:
+
+- `-e` executes the code remotely, streaming back the output.  
+- `-i` still executes locally but syncs data back to the API.
+
+```
+# Run `sync pipes` remotely:
+sync pipes -e api:main
+
+# Run `sync pipes` locally against the instance 'api:main':
+sync pipes -i api:main
+
+# Run `sync pipes` remotely, against the server's 'sql:local':
+sync pipes -i sql:local -e api:main
+```
+
+
+!!! note "Custom executors"
     You can implement a custom executor with the [`#!python @make_executor` decorator](). See [`Executor`](https://docs.meerschaum.io/meerschaum/jobs.html#Executor) and [`SystemdExecutor`](https://docs.meerschaum.io/meerschaum/jobs/systemd.html) for an example implementation.

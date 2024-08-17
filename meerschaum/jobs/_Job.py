@@ -472,6 +472,7 @@ class Job:
                 input_callback_function=input_callback_function,
                 stop_callback_function=stop_callback_function,
                 stop_on_exit=stop_on_exit,
+                strip_timestamps=strip_timestamps,
                 accept_input=accept_input,
                 debug=debug,
             )

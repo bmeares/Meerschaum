@@ -46,6 +46,7 @@ STATIC_CONFIG: Dict[str, Any] = {
             'stdin_message': 'MRSM_STDIN',
             'stop_message': 'MRSM_STOP',
             'metadata_cache_seconds': 5,
+            'temp_prefix': '.api-temp-',
         },
     },
     'sql': {
