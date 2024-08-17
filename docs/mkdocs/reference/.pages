@@ -4,6 +4,7 @@ nav:
   - "🚰 Pipes": pipes
   - "🔌 Connectors": connectors
   - "🥞 Stack": stack.md
+  - "🌐 API Instance": api-instance
   - "🎼 Compose": compose.md
   - "⏯️ Actions": actions
   - "👷 Background Jobs": background-jobs.md

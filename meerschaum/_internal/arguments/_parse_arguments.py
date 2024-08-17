@@ -283,18 +283,29 @@ def parse_dict_to_sysargs(
             ### Add list flags
             if isinstance(args_dict[a], (list, tuple)):
                 if len(args_dict[a]) > 0:
-                    sysargs.extend(
-                        [t[0]]
-                        + [
-                            str(item)
-                            for item in args_dict[a]
-                        ]
-                    )
+                    if a == 'sub_args' and args_dict[a] != ['']:
+                        print(f"{args_dict[a]=}")
+                        sysargs.extend(
+                            [
+                                '-A',
+                                shlex.join([
+                                    str(item) for item in args_dict[a]
+                                ]),
+                            ]
+                        )
+                    else:
+                        sysargs.extend(
+                            [t[0]]
+                            + [
+                                str(item)
+                                for item in args_dict[a]
+                            ]
+                        )
 
             ### Add dict flags
             elif isinstance(args_dict[a], dict):
                 if len(args_dict[a]) > 0:
-                    sysargs += [t[0], json.dumps(args_dict[a])]
+                    sysargs += [t[0], json.dumps(args_dict[a], separators=(',', ':'))]
 
             ### Account for None and other values
             elif (args_dict[a] is not None) or (args_dict[a] is None and a in allow_none_args):
@@ -403,4 +414,101 @@ def load_plugin_args() -> None:
             to_import.append(plugin.name)
     if not to_import:
         return
-    import_plugins(*to_import) 
+    import_plugins(*to_import)
+
+
+def sysargs_has_api_executor_keys(sysargs: List[str]) -> bool:
+    """
+    Check whether a `sysargs` list contains an `api` executor.
+    """
+    if '-e' not in sysargs and '--executor-keys' not in sysargs:
+        return False
+
+    for i, arg in enumerate(sysargs):
+        if arg not in ('-e', '--executor-keys'):
+            continue
+
+        executor_keys_ix = i + 1
+        if len(sysargs) <= executor_keys_ix:
+            return False
+
+        executor_keys = sysargs[executor_keys_ix]
+        if executor_keys.startswith('api:'):
+            return True
+
+    return False
+
+
+def remove_api_executor_keys(sysargs: List[str]) -> List[str]:
+    """
+    Remove any api executor keys from `sysargs`.
+    """
+    from meerschaum.utils.misc import flatten_list
+
+    if not sysargs_has_api_executor_keys(sysargs):
+        return sysargs
+
+    skip_indices = set(flatten_list(
+        [
+            [i, i+1]
+            for i, arg in enumerate(sysargs)
+            if arg in ('-e', '--executor-keys')
+        ]
+    ))
+
+    return [
+        arg
+        for i, arg in enumerate(sysargs)
+        if i not in skip_indices
+    ]
+
+
+def get_pipeline_sysargs(
+    sysargs: List[str],
+    pipeline_args: List[str],
+    _patch_args: Optional[Dict[str, Any]] = None,
+) -> List[str]:
+    """
+    Parse `sysargs` and `pipeline_args` into a single `start pipeline` sysargs.
+    """
+    import shlex
+    start_pipeline_params = {
+        'sub_args_line': shlex.join(sysargs),
+        'patch_args': _patch_args,
+    }
+    return (
+        ['start', 'pipeline']
+        + [str(arg) for arg in pipeline_args]
+        + ['-P', json.dumps(start_pipeline_params, separators=(',', ':'))]
+    )
+
+
+def compress_pipeline_sysargs(pipeline_sysargs: List[str]) -> List[str]:
+    """
+    Given a `start pipeline` sysargs, return a condensed syntax rendition.
+    """
+    import shlex
+
+    if pipeline_sysargs[:2] != ['start', 'pipeline']:
+        return pipeline_sysargs
+
+    if '-P' not in pipeline_sysargs:
+        return pipeline_sysargs
+
+    params_ix = pipeline_sysargs.index('-P')
+    pipeline_args = pipeline_sysargs[2:params_ix]
+    params_str = pipeline_sysargs[-1]
+    try:
+        start_pipeline_params = json.loads(params_str)
+    except Exception:
+        return pipeline_sysargs
+
+    sub_args_line = start_pipeline_params.get('sub_args_line', None)
+    if not sub_args_line:
+        return pipeline_sysargs
+
+    return (
+        shlex.split(sub_args_line)
+        + [':']
+        + pipeline_args
+    )

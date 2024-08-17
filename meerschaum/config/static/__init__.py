@@ -46,6 +46,7 @@ STATIC_CONFIG: Dict[str, Any] = {
             'stdin_message': 'MRSM_STDIN',
             'stop_message': 'MRSM_STOP',
             'metadata_cache_seconds': 5,
+            'temp_prefix': '.api-temp-',
         },
     },
     'sql': {
@@ -73,6 +74,7 @@ STATIC_CONFIG: Dict[str, Any] = {
         'systemd_log_path': 'MRSM_SYSTEMD_LOG_PATH',
         'systemd_stdin_path': 'MRSM_SYSTEMD_STDIN_PATH',
         'systemd_result_path': 'MRSM_SYSTEMD_RESULT_PATH',
+        'systemd_delete_job': 'MRSM_SYSTEMD_DELETE_JOB',
         'uri_regex': r'MRSM_([a-zA-Z0-9]*)_(\d*[a-zA-Z][a-zA-Z0-9-_+]*$)',
         'prefix': 'MRSM_',
     },

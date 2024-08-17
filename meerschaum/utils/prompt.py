@@ -113,7 +113,7 @@ def prompt(
             ) if not noask else ''
         )
     else:
-        print(question, end='', flush=True)
+        print(question, end='\n', flush=True)
         try:
             answer = input()
         except EOFError:

@@ -4,6 +4,23 @@
 
 This is the current release cycle, so stay tuned for future releases!
 
+### v2.3.5
+
+- **Properly handle remote jobs.**  
+  Long-running remote jobs are now properly handled, allowing for graceful API shutdown.
+  
+- **Detect when creating a remote pipeline.**  
+  Running a pipeline action with a remote executor will pass through the pipeline to the API server:
+
+  ```bash
+  mrsm show version + show arguments : --loop -e api:main
+  ```
+
+- **Remove actions websocket endpoint with temporary jobs.**
+
+- **Properly quote environment variables in `systemd` services.**
+
+
 ### v2.3.0 – v2.3.4
 
 - **Add the `Job` class.**  

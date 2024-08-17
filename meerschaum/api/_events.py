@@ -20,12 +20,14 @@ from meerschaum.connectors.poll import retry_connect
 from meerschaum.utils.warnings import warn
 from meerschaum._internal.term.tools import is_webterm_running
 from meerschaum.jobs import (
+    get_jobs,
     start_check_jobs_thread,
     stop_check_jobs_thread,
     get_executor_keys_from_context,
 )
+from meerschaum.config.static import STATIC_CONFIG
 
-_check_jobs_thread = None
+TEMP_PREFIX: str = STATIC_CONFIG['api']['jobs']['temp_prefix']
 
 @app.on_event("startup")
 async def startup():
@@ -51,8 +53,7 @@ async def startup():
         await shutdown()
         os._exit(1)
 
-    if get_executor_keys_from_context() == 'local':
-        start_check_jobs_thread()
+    start_check_jobs_thread()
 
 
 @app.on_event("shutdown")
@@ -65,11 +66,14 @@ async def shutdown():
     if get_api_connector().type == 'sql':
         get_api_connector().engine.dispose()
 
-    if get_executor_keys_from_context() == 'local':
-        stop_check_jobs_thread()
+    stop_check_jobs_thread()
 
-    from meerschaum.api.routes._actions import _temp_jobs
-    for name, job in _temp_jobs.items():
+    temp_jobs = {
+        name: job
+        for name, job in get_jobs(include_hidden=True).items()
+        if name.startswith(TEMP_PREFIX)
+    }
+    for job in temp_jobs.values():
         job.delete()
 
     ### Terminate any running jobs left over.
