@@ -4,7 +4,7 @@
 
 This is the current release cycle, so stay tuned for future releases!
 
-### v2.3.5
+### v2.3.5 — v2.3.6
 
 - **Properly handle remote jobs.**  
   Long-running remote jobs are now properly handled, allowing for graceful API shutdown.
@@ -19,6 +19,9 @@ This is the current release cycle, so stay tuned for future releases!
 - **Remove actions websocket endpoint with temporary jobs.**
 
 - **Properly quote environment variables in `systemd` services.**
+
+- **Remove `~/.local` volume from `api` service in the stack.**  
+  This was overwriting the new Docker image version and such needed to be removed.
 
 
 ### v2.3.0 – v2.3.4
