@@ -80,9 +80,9 @@ MRSM_PATCH='baz:MRSM{foo:bar}' \
   mrsm show config baz
 ```
 
-## **`MRSM_PLUGINS_DIR`**
+## **`MRSM_CONFIG_DIR`**
 
-Like `MRSM_PLUGINS_DIR`, you can designate a separate directory outside of the root to isolate your secrets and segment your configuration.
+Not to be confused with `MRSM_CONFIG`, setting `MRSM_CONFIG_DIR` allows you can designate a separate directory outside of the root to isolate your secrets and segment your configuration. If unset, the default directory is `$MRSM_ROOT_DIR/config`.
 
 ## **`MRSM_VENVS_DIR`**  
 
