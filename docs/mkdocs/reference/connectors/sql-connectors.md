@@ -8,7 +8,7 @@ Connector | Description | URI
 **`sql:local`** | A SQLite file within the [Meerschaum root directory](/reference/environment/#mrsm_root_dir). Because `sql:local` is contained in the root directory, it is isolated between environments. | `sqlite:///$MRSM_ROOT_DIR/sqlite/mrsm_local.db`
 **`sql:memory`** | An in-memory SQLite database. This is not persistent and is isolated per-process. | `sqlite:///:memory:`
 
-Add new connectors with [`bootstrap connectors`](http://localhost:8000/reference/connectors/#-creating-a-connector) or by setting [environment variables](http://localhost:8000/reference/connectors/#-environment-connectors).
+Add new connectors with [`bootstrap connectors`](/reference/connectors/#-creating-a-connector) or by setting [environment variables](/reference/connectors/#-environment-connectors).
 
 ## Supported Flavors
 
