@@ -50,16 +50,17 @@ stylesheets = [
     '/static/css/bootstrap.min.css',
     '/static/css/dbc_dark.css',
     '/static/css/dash.css',
+    '/static/css/bootstrap-icons/font/bootstrap-icons.min.css',
 ]
 scripts = ['/static/js/node_modules/xterm/lib/xterm.js']
 dash_app = enrich.DashProxy(
     __name__,
-    title = 'Meerschaum Web',
-    requests_pathname_prefix = endpoints['dash'] + '/',
-    external_stylesheets = stylesheets,
-    update_title = None,
-    suppress_callback_exceptions = True,
-    transforms = [
+    title='Meerschaum Web',
+    requests_pathname_prefix=endpoints['dash'] + '/',
+    external_stylesheets=stylesheets,
+    update_title=None,
+    suppress_callback_exceptions=True,
+    transforms=[
         enrich.TriggerTransform(),
         enrich.MultiplexerTransform(),
     ],

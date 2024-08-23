@@ -18,6 +18,7 @@ from meerschaum.core import User
 dcc, html = import_dcc(check_update=CHECK_UPDATE), import_html(check_update=CHECK_UPDATE)
 dbc = attempt_import('dash_bootstrap_components', lazy=False, check_update=CHECK_UPDATE)
 
+
 def get_users_cards(state: WebState) -> Tuple[List[dbc.Card], List[SuccessTuple]]:
     """
     Return the cards and alerts for users.
@@ -52,21 +53,33 @@ def is_session_authenticated(session_id: str) -> bool:
     """
     if no_auth:
         return True
+    if session_id not in active_sessions:
+        return False
     if session_id in unauthenticated_sessions:
         return False
     if session_id in authenticated_sessions:
         return True
+
     permissions = get_config('system', 'api', 'permissions')
     allow_non_admin = permissions.get('actions', {}).get('non_admin', False)
-    if allow_non_admin:
-        return True
-    conn = get_api_connector()
+
+    is_auth = True if allow_non_admin else session_is_admin(session_id)
     username = active_sessions.get(session_id, {}).get('username', None)
-    user = User(username, instance=conn)
-    user_type = conn.get_user_type(user, debug=debug)
-    is_auth = user_type == 'admin'
+
     if is_auth:
         authenticated_sessions[session_id] = username
     else:
         unauthenticated_sessions[session_id] = username
+
     return is_auth
+
+
+def session_is_admin(session_id: str) -> bool:
+    """
+    Check whether a session ID corresponds to an admin user.
+    """
+    conn = get_api_connector()
+    username = active_sessions.get(session_id, {}).get('username', None)
+    user = User(username, instance=conn)
+    user_type = conn.get_user_type(user, debug=debug)
+    return user_type == 'admin'

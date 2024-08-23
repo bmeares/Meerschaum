@@ -101,6 +101,7 @@ _paths = {
     ''        : pages.dashboard.layout,
     'plugins' : pages.plugins.layout,
     'register': pages.register.layout,
+    'pipes'   : pages.pipes.layout,
 }
 _required_login = {''}
 
@@ -113,10 +114,10 @@ _required_login = {''}
     State('location', 'href'),
 )
 def update_page_layout_div(
-        pathname: str, 
-        session_store_data: Dict[str, Any],
-        location_href: str,
-    ) -> Tuple[List[Any], Dict[str, Any]]:
+    pathname: str, 
+    session_store_data: Dict[str, Any],
+    location_href: str,
+) -> Tuple[List[Any], Dict[str, Any]]:
     """
     Route the user to the correct page.
 
@@ -135,7 +136,7 @@ def update_page_layout_div(
     ctx = dash.callback_context
     dash_endpoint = endpoints['dash']
     try:
-        session_id = session_store_data.get('session-id', None) 
+        session_id = session_store_data.get('session-id', None)
     except AttributeError:
         session_id = None
 
@@ -760,6 +761,7 @@ def update_pipe_accordion(item, session_store_data):
         raise PreventUpdate
 
     session_id = session_store_data.get('session-id', None)
+    print(f"{session_id=}")
     authenticated = is_session_authenticated(str(session_id))
     return accordion_items_from_pipe(pipe, active_items=[item], authenticated=authenticated)
 

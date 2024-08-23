@@ -58,6 +58,7 @@ volumes = {
     'api_root': '/meerschaum',
     'meerschaum_db_data': '/var/lib/postgresql/data',
     'grafana_storage': '/var/lib/grafana',
+    'redis_data': '/data',
 }
 networks = {
     'frontend': None,
@@ -113,7 +114,7 @@ default_docker_compose_config = {
                 ],
                 'interval': '5s',
                 'timeout': '3s',
-                'retries': 3
+                'retries': 5
             },
             'restart': 'always',
             'image' : 'timescale/timescaledb:' + env_dict['TIMESCALEDB_VERSION'],
@@ -156,10 +157,28 @@ default_docker_compose_config = {
                 'db': {
                     'condition': 'service_healthy',
                 },
+                'redis': {
+                    'condition': 'service_healthy',
+                },
             },
-            'volumes' : [
+            'volumes': [
                 'api_root:' + volumes['api_root'],
             ],
+        },
+        'redis': {
+            'image': 'redis:alpine',
+            'restart': 'always',
+            'volumes': [
+                'redis_data:' + volumes['redis_data'],
+            ],
+            'healthcheck': {
+                'test': [
+                    'CMD', 'redis-cli', 'ping',
+                ],
+                'interval': '5s',
+                'timeout': '3s',
+                'retries': 5
+            },
         },
         'grafana': {
             'image': 'grafana/grafana:latest',

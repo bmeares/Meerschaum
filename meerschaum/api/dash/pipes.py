@@ -48,13 +48,14 @@ def pipe_from_ctx(ctx, trigger_property: str = 'n_clicks') -> Union[mrsm.Pipe, N
         return None
     return mrsm.Pipe(**meta)
 
+
 def keys_from_state(
-        state: Dict[str, Any],
-        with_params: bool = False
-    ) -> Union[
-        Tuple[List[str], List[str], List[str]],
-        Tuple[List[str], List[str], List[str], str],
-    ]:
+    state: Dict[str, Any],
+    with_params: bool = False
+) -> Union[
+    Tuple[List[str], List[str], List[str]],
+    Tuple[List[str], List[str], List[str], str],
+]:
     """
     Read the current state and return the selected keys lists.
     """
@@ -85,10 +86,11 @@ def keys_from_state(
         keys.append(params)
     return tuple(keys)
 
+
 def pipes_from_state(
-        state: Dict[str, Any],
-        **kw
-    ):
+    state: Dict[str, Any],
+    **kw
+):
     _ck, _mk, _lk, _params = keys_from_state(state, with_params=True)
     try:
         _pipes = _get_pipes(
@@ -103,10 +105,10 @@ def pipes_from_state(
 
 
 def build_pipe_card(
-        pipe: mrsm.Pipe,
-        authenticated: bool = False,
-        _build_children_num: int = 10,
-    ) -> 'dbc.Card':
+    pipe: mrsm.Pipe,
+    authenticated: bool = False,
+    _build_children_num: int = 10,
+) -> 'dbc.Card':
     """
     Return a card for the given pipe.
 
@@ -128,11 +130,11 @@ def build_pipe_card(
             dbc.Col(
                 (
                     dbc.DropdownMenu(
-                        label = "Manage",
-                        children = [
+                        label="Manage",
+                        children=[
                             dbc.DropdownMenuItem(
                                 'Open in Python',
-                                id = {
+                                id={
                                     'type': 'manage-pipe-button',
                                     'index': meta_str,
                                     'action': 'python',
@@ -140,7 +142,7 @@ def build_pipe_card(
                             ),
                             dbc.DropdownMenuItem(
                                 'Delete',
-                                id = {
+                                id={
                                     'type': 'manage-pipe-button',
                                     'index': meta_str,
                                     'action': 'delete',
@@ -148,7 +150,7 @@ def build_pipe_card(
                             ),
                             dbc.DropdownMenuItem(
                                 'Drop',
-                                id = {
+                                id={
                                     'type': 'manage-pipe-button',
                                     'index': meta_str,
                                     'action': 'drop',
@@ -156,7 +158,7 @@ def build_pipe_card(
                             ),
                             dbc.DropdownMenuItem(
                                 'Clear',
-                                id = {
+                                id={
                                     'type': 'manage-pipe-button',
                                     'index': meta_str,
                                     'action': 'clear',
@@ -164,7 +166,7 @@ def build_pipe_card(
                             ),
                             dbc.DropdownMenuItem(
                                 'Verify',
-                                id = {
+                                id={
                                     'type': 'manage-pipe-button',
                                     'index': meta_str,
                                     'action': 'verify',
@@ -172,56 +174,86 @@ def build_pipe_card(
                             ),
                             dbc.DropdownMenuItem(
                                 'Sync',
-                                id = {
+                                id={
                                     'type': 'manage-pipe-button',
                                     'index': meta_str,
                                     'action': 'sync',
                                 },
                             ),
                         ],
-                        direction = "up",
-                        menu_variant = "dark",
-                        size = 'sm',
-                        color = 'secondary',
+                        direction="up",
+                        menu_variant="dark",
+                        size='sm',
+                        color='secondary',
                     )
                 ) if authenticated else [],
-                width = 2,
+                width=2,
             ),
             dbc.Col(width=6),
             dbc.Col(
                 dbc.Button(
                     'Download CSV',
-                    size = 'sm',
-                    color = 'link',
-                    style = {'float': 'right'},
-                    id = {'type': 'pipe-download-csv-button', 'index': meta_str},
+                    size='sm',
+                    color='link',
+                    style={'float': 'right'},
+                    id={'type': 'pipe-download-csv-button', 'index': meta_str},
                 ),
-                width = 4,
+                width=4,
             ),
         ],
-        justify = 'start',
+        justify='start',
     )
     card_body_children = [
-        html.H5(
-            html.B(str(pipe)),
-            className = 'card-title',
-            style = {'font-family': ['monospace']}
-        ),
         html.Div(
             dbc.Accordion(
                 accordion_items_from_pipe(
                     pipe,
-                    authenticated = authenticated,
-                    _build_children_num = _build_children_num,
+                    authenticated=authenticated,
+                    _build_children_num=_build_children_num,
                 ),
-                flush = True,
-                start_collapsed = True,
-                id = {'type': 'pipe-accordion', 'index': meta_str},
+                flush=True,
+                start_collapsed=True,
+                id={'type': 'pipe-accordion', 'index': meta_str},
             )
         )
 
     ]
+
+    pipe_url = (
+        f"/dash/pipes/{pipe.connector_keys}/{pipe.metric_key}/{pipe.location_key}"
+    )
+
+    card_header_children = dbc.Row(
+        [
+            dbc.Col(
+                html.H5(
+                    html.B(str(pipe)),
+                    className='card-title',
+                    style={'font-family': ['monospace']}
+                ),
+                width=11,
+            ),
+            dbc.Col(
+                dbc.Button(
+                    [
+                        html.I(
+                            className="bi bi-share",
+                        ),
+                    ],
+                    #  href=pipe_url,
+                    style={'float': 'right'},
+                    outline=True,
+                    color='link',
+                    id={'type': 'share-pipe-button', 'index': meta_str},
+                ),
+                width=1,
+            ),
+        ],
+        justify='start',
+    )
+
     return dbc.Card([
+        dbc.CardHeader(children=card_header_children),
         dbc.CardBody(children=card_body_children),
         dbc.CardFooter(children=footer_children),
     ])
@@ -270,11 +302,11 @@ def get_pipes_cards(*keys, session_data: Optional[Dict[str, Any]] = None):
 
 
 def accordion_items_from_pipe(
-        pipe: mrsm.Pipe,
-        active_items: Optional[List[str]] = None,
-        authenticated: bool = False,
-        _build_children_num: int = 10,
-    ) -> 'List[dbc.AccordionItem]':
+    pipe: mrsm.Pipe,
+    active_items: Optional[List[str]] = None,
+    authenticated: bool = False,
+    _build_children_num: int = 10,
+) -> 'List[dbc.AccordionItem]':
     """
     Build the accordion items for a given pipe.
     """
