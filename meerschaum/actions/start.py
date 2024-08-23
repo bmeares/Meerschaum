@@ -455,12 +455,12 @@ def _start_webterm(
 
 
 def _start_connectors(
-        action: Optional[List[str]] = None,
-        connector_keys: Optional[List[str]] = None,
-        min_seconds: int = 3,
-        debug: bool = False,
-        **kw
-    ) -> SuccessTuple:
+    action: Optional[List[str]] = None,
+    connector_keys: Optional[List[str]] = None,
+    min_seconds: int = 3,
+    debug: bool = False,
+    **kw
+) -> SuccessTuple:
     """
     Start polling connectors to verify a connection can be made.
     """
@@ -480,14 +480,13 @@ def _start_connectors(
     for keys in unique_keys:
         try:
             conn = parse_instance_keys(keys)
-        except Exception as e:
+        except Exception:
             warn(f"Invalid connector keys: '{keys}'. Skipping...", stack=False)
             continue
         valid_conns.append(conn)
 
     if not valid_conns:
         return False, "No valid connector keys were provided."
-
 
     connected = {}
     def connect(conn):

@@ -9,16 +9,16 @@ Poll database and API connections.
 from meerschaum.utils.typing import InstanceConnector, Union, Optional, Dict, Any
 
 def retry_connect(
-        connector: Union[InstanceConnector, None] = None,
-        max_retries: int = 50,
-        retry_wait: int = 3,
-        workers: int = 1,
-        warn: bool = True,
-        print_on_connect: bool = False,
-        enforce_chaining: bool = True,
-        enforce_login: bool = True,
-        debug: bool = False,
-    ) -> bool:
+    connector: Union[InstanceConnector, None] = None,
+    max_retries: int = 50,
+    retry_wait: int = 3,
+    workers: int = 1,
+    warn: bool = True,
+    print_on_connect: bool = False,
+    enforce_chaining: bool = True,
+    enforce_login: bool = True,
+    debug: bool = False,
+) -> bool:
     """
     Keep trying to connect to the database.
 
@@ -85,16 +85,16 @@ def retry_connect(
 
 
 def _wrap_retry_connect(
-        connector_meta: Dict[str, Any],
-        max_retries: int = 50,
-        retry_wait: int = 3,
-        workers: int = 1,
-        print_on_connect: bool = False,
-        warn: bool = True,
-        enforce_chaining: bool = True,
-        enforce_login: bool = True,
-        debug: bool = False,
-    ) -> bool:
+    connector_meta: Dict[str, Any],
+    max_retries: int = 50,
+    retry_wait: int = 3,
+    workers: int = 1,
+    print_on_connect: bool = False,
+    warn: bool = True,
+    enforce_chaining: bool = True,
+    enforce_login: bool = True,
+    debug: bool = False,
+) -> bool:
     """
     Keep trying to connect to the database.
 
@@ -144,8 +144,6 @@ def _wrap_retry_connect(
     import time
 
     connector = get_connector(**connector_meta)
-    if connector.type not in instance_types:
-        return None
 
     if not hasattr(connector, 'test_connection'):
         return True
@@ -157,7 +155,15 @@ def _wrap_retry_connect(
             dprint(f"Trying to connect to '{connector}'...")
             dprint(f"Attempt ({retries + 1} / {max_retries})")
 
-        if connector.type == 'sql':
+        if connector.type not in ('sql', 'api'):
+            try:
+                connected = connector.test_connection()
+            except Exception as e:
+                if warn:
+                    print(e)
+                connected = False
+
+        elif connector.type == 'sql':
 
             def _connect(_connector):
                 ### Test queries like `SELECT 1`.
@@ -185,7 +191,7 @@ def _wrap_retry_connect(
                             _warn(
                                 f"Meerschaum instance '{connector}' does not allow chaining " +
                                 "and cannot be used as the parent for this instance.",
-                                stack = False
+                                stack=False,
                             )
                         return False
 

@@ -234,7 +234,13 @@ def _bootstrap_connectors(
     Prompt the user for the details necessary to create a Connector.
     """
     from meerschaum.connectors.parse import is_valid_connector_keys
-    from meerschaum.connectors import connectors, get_connector, types, custom_types
+    from meerschaum.connectors import (
+        connectors,
+        get_connector,
+        types,
+        custom_types,
+        _load_builtin_custom_connectors,
+    )
     from meerschaum.utils.prompt import prompt, yes_no, choose
     from meerschaum.config import get_config
     from meerschaum.config._edit import write_config
@@ -246,6 +252,7 @@ def _bootstrap_connectors(
 
     abort_tuple = False, "No connectors bootstrapped."
     _clear = get_config('shell', 'clear_screen', patch=True)
+    _load_builtin_custom_connectors()
 
     if action is None:
         action = []
@@ -262,8 +269,8 @@ def _bootstrap_connectors(
                 + '    See https://meerschaum.io/reference/connectors '
                 + 'for documentation on connectors.\n'
             ),
-            sorted(list(connectors)),
-            default = 'sql'
+            sorted([k for k in connectors if k != 'plugin']),
+            default='sql',
         )
     except KeyboardInterrupt:
         return abort_tuple
@@ -303,7 +310,7 @@ def _bootstrap_connectors(
     cls = types.get(_type)
     cls_required_attrs = getattr(cls, 'REQUIRED_ATTRIBUTES', [])
     cls_optional_attrs = getattr(cls, 'OPTIONAL_ATTRIBUTES', [])
-    cls_default_attrs = getattr(cls, 'DEFAULT_ATTRIBUTES', [])
+    cls_default_attrs = getattr(cls, 'DEFAULT_ATTRIBUTES', {})
     type_attributes = connector_attributes.get(
         _type,
         {

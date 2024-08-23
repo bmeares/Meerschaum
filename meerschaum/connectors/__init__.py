@@ -39,6 +39,7 @@ connectors: Dict[str, Dict[str, Connector]] = {
     'api'    : {},
     'sql'    : {},
     'plugin' : {},
+    'redis'  : {},
 }
 instance_types: List[str] = ['sql', 'api']
 _locks: Dict[str, RLock] = {
@@ -164,13 +165,15 @@ def get_connector(
 
     if 'sql' not in types:
         from meerschaum.connectors.plugin import PluginConnector
+        from meerschaum.connectors.redis import RedisConnector
         with _locks['types']:
             types.update({
-                'api'   : APIConnector,
-                'sql'   : SQLConnector,
+                'api': APIConnector,
+                'sql': SQLConnector,
                 'plugin': PluginConnector,
+                'redis': RedisConnector,
             })
-    
+
     ### determine if we need to call the constructor
     if not refresh:
         ### see if any user-supplied arguments differ from the existing instance
@@ -273,7 +276,7 @@ def is_connected(keys: str, **kw) -> bool:
         with warnings.catch_warnings():
             warnings.filterwarnings('ignore')
             return conn.test_connection(**kw)
-    except Exception as e:
+    except Exception:
         return False
 
 
@@ -340,7 +343,7 @@ def load_plugin_connectors():
             to_import.append(plugin.name)
     if not to_import:
         return
-    import_plugins(*to_import) 
+    import_plugins(*to_import)
 
 
 def get_connector_plugin(
