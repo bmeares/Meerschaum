@@ -52,6 +52,14 @@ default_meerschaum_config = {
                 'protocol': 'https',
             },
         },
+        'redis': {
+            'main': {
+                'host': 'localhost',
+                'username': 'default',
+                'password': 'mrsm',
+                'port': 6379,
+            },
+        },
     },
 }
 default_system_config = {
@@ -74,7 +82,7 @@ default_system_config = {
             },
         },
 
-        'api' : {
+        'api': {
         },
     },
     ### not to be confused with system_config['connectors']['api'], this is the configuration

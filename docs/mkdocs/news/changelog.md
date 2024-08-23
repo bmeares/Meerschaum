@@ -4,6 +4,11 @@
 
 This is the current release cycle, so stay tuned for future releases!
 
+### v2.3.7
+
+- **Add `OPTIONAL_ATTRIBUTES` to connectors.**  
+  Connectors may now set `OPTIONAL_ATTRIBUTES`, which will add skippable prompts in `bootstrap connector`.
+
 ### v2.3.5 — v2.3.6
 
 - **Properly handle remote jobs.**  

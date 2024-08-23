@@ -31,15 +31,23 @@ db_host = 'MRSM{stack:' + str(STACK_COMPOSE_FILENAME) + ':services:db:hostname}'
 api_port = "MRSM{meerschaum:connectors:api:main:port}"
 api_host = "api"
 
+redis_hostname = "redis"
+redis_host = 'MRSM{stack:' + str(STACK_COMPOSE_FILENAME) + ':services:redis:hostname}'
+redis_port = "MRSM{meerschaum:connectors:redis:main:port}"
+redis_username = 'MRSM{meerschaum:connectors:redis:main:username}'
+redis_password = 'MRSM{meerschaum:connectors:redis:main:password}'
+
 env_dict = {
-    'COMPOSE_PROJECT_NAME' : 'mrsm',
-    'TIMESCALEDB_VERSION' : 'latest-pg16-oss',
-    'POSTGRES_USER' : f'{db_user}',
-    'POSTGRES_PASSWORD' : f'{db_pass}',
-    'POSTGRES_DB' : f'{db_base}',
-    'MEERSCHAUM_API_HOSTNAME' : f'{api_host}',
-    'ALLOW_IP_RANGE' : '0.0.0.0/0',
-    'MEERSCHAUM_API_CONFIG_RESOURCES' : '/meerschaum',
+    'COMPOSE_PROJECT_NAME': 'mrsm',
+    'TIMESCALEDB_VERSION': 'latest-pg16-oss',
+    'POSTGRES_USER': db_user,
+    'POSTGRES_PASSWORD': db_pass,
+    'POSTGRES_DB': db_base,
+    'REDIS_USERNAME': redis_username,
+    'REDIS_PASSWORD': redis_password,
+    'MEERSCHAUM_API_HOSTNAME': api_host,
+    'ALLOW_IP_RANGE': '0.0.0.0/0',
+    'MEERSCHAUM_API_CONFIG_RESOURCES': '/meerschaum',
 }
 ### apply patch to host config to change hostname to the Docker service name
 env_dict['MEERSCHAUM_API_CONFIG'] = json.dumps(
@@ -77,10 +85,14 @@ env_dict['MEERSCHAUM_API_PATCH'] = json.dumps(
                         'database': volumes['api_root'] + '/sqlite/mrsm_local.db'
                     },
                 },
+                'redis': {
+                    'host': redis_host,
+                    'port': 6379,
+                },
             },
         },
     },
-    indent = 4,
+    indent=4,
 )
 
 compose_header = """
@@ -117,16 +129,16 @@ default_docker_compose_config = {
                 'retries': 5
             },
             'restart': 'always',
-            'image' : 'timescale/timescaledb:' + env_dict['TIMESCALEDB_VERSION'],
-            'ports' : [
+            'image': 'timescale/timescaledb:' + env_dict['TIMESCALEDB_VERSION'],
+            'ports': [
                 f'{db_port}:5432',
             ],
-            'hostname' : f'{db_hostname}',
-            'volumes' : [
+            'hostname': f'{db_hostname}',
+            'volumes': [
                 'meerschaum_db_data:' + volumes['meerschaum_db_data'],
             ],
             'shm_size': '1024m',
-            'networks' : [
+            'networks': [
                 'backend',
             ],
         },
@@ -168,6 +180,16 @@ default_docker_compose_config = {
         'redis': {
             'image': 'redis:alpine',
             'restart': 'always',
+            'command': [
+                '/bin/sh', '-c', 'redis-server --requirepass <DOLLAR>REDIS_PASSWORD',
+            ],
+            'environment': {
+                'REDIS_PASSWORD': '<DOLLAR>REDIS_PASSWORD',
+            },
+            'hostname': redis_hostname,
+            'ports': [
+                f'{redis_port}:6379',
+            ],
             'volumes': [
                 'redis_data:' + volumes['redis_data'],
             ],
@@ -177,8 +199,11 @@ default_docker_compose_config = {
                 ],
                 'interval': '5s',
                 'timeout': '3s',
-                'retries': 5
+                'retries': 5,
             },
+            'networks': [
+                'backend',
+            ],
         },
         'grafana': {
             'image': 'grafana/grafana:latest',

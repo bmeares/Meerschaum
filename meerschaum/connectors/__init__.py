@@ -378,3 +378,4 @@ def _load_builtin_custom_connectors():
     Import custom connectors decorated with `@make_connector` or `@make_executor`.
     """
     import meerschaum.jobs.systemd
+    import meerschaum.connectors.redis
