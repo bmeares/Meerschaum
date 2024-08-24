@@ -284,12 +284,12 @@ def filter_unseen_df(
 
 
 def parse_df_datetimes(
-        df: 'pd.DataFrame',
-        ignore_cols: Optional[Iterable[str]] = None,
-        chunksize: Optional[int] = None,
-        dtype_backend: str = 'numpy_nullable',
-        debug: bool = False,
-    ) -> 'pd.DataFrame':
+    df: 'pd.DataFrame',
+    ignore_cols: Optional[Iterable[str]] = None,
+    chunksize: Optional[int] = None,
+    dtype_backend: str = 'numpy_nullable',
+    debug: bool = False,
+) -> 'pd.DataFrame':
     """
     Parse a pandas DataFrame for datetime columns and cast as datetimes.
 
@@ -889,17 +889,17 @@ def get_first_valid_dask_partition(ddf: 'dask.dataframe.DataFrame') -> Union['pd
 
 
 def query_df(
-        df: 'pd.DataFrame',
-        params: Optional[Dict[str, Any]] = None,
-        begin: Union[datetime, int, None] = None,
-        end: Union[datetime, int, None] = None,
-        datetime_column: Optional[str] = None,
-        select_columns: Optional[List[str]] = None,
-        omit_columns: Optional[List[str]] = None,
-        inplace: bool = False,
-        reset_index: bool = False,
-        debug: bool = False,
-    ) -> 'pd.DataFrame':
+    df: 'pd.DataFrame',
+    params: Optional[Dict[str, Any]] = None,
+    begin: Union[datetime, int, None] = None,
+    end: Union[datetime, int, None] = None,
+    datetime_column: Optional[str] = None,
+    select_columns: Optional[List[str]] = None,
+    omit_columns: Optional[List[str]] = None,
+    inplace: bool = False,
+    reset_index: bool = False,
+    debug: bool = False,
+) -> 'pd.DataFrame':
     """
     Query the dataframe with the params dictionary.
 

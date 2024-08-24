@@ -492,15 +492,15 @@ def _start_connectors(
     def connect(conn):
         success = retry_connect(
             conn,
-            retry_wait = min_seconds,
-            enforce_chaining = False,
-            enforce_login = False,
-            print_on_connect = True,
-            debug = debug,
+            retry_wait=min_seconds,
+            enforce_chaining=False,
+            enforce_login=False,
+            print_on_connect=True,
+            debug=debug,
         )
         connected[conn] = success
         return success
-    
+
     pool = get_pool()
     try:
         pool.map(connect, valid_conns)
