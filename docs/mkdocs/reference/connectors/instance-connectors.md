@@ -146,7 +146,7 @@ The attributes row of a pipe includes the pipe's keys (immutable) and parameters
         """
         attributes = {
             'connector_keys': str(pipe.connector_keys),
-            'metric_key': str(pipe.connector_key),
+            'metric_key': str(pipe.metric_key),
             'location_key': str(pipe.location_key),
             'parameters': pipe._attributes.get('parameters', {}),
         }
@@ -183,7 +183,7 @@ Note that a pipe's attributes must be JSON-serializable, so objects like MongoDB
         The document that matches the keys of the pipe.
         """
         query = {
-            'connector_keys': str(pipe.connector_keys,
+            'connector_keys': str(pipe.connector_keys),
             'metric_key': str(pipe.metric_key),
             'location_key': str(pipe.location_key),
         }

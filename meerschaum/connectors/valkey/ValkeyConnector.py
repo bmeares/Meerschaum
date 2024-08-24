@@ -35,6 +35,15 @@ class ValkeyConnector(Connector):
 
     from ._pipes import (
         register_pipe,
+        get_pipe_id,
+        get_pipe_attributes,
+        edit_pipe,
+        pipe_exists,
+        drop_pipe,
+        delete_pipe,
+        get_pipe_data,
+        sync_pipe,
+        get_pipe_columns_types,
     )
 
     @property
@@ -231,6 +240,7 @@ class ValkeyConnector(Connector):
                 doc,
                 default=json_serialize_datetime,
                 separators=(',', ':'),
+                sort_keys=True,
             )
             self.client.zadd(table_name, {doc_str: ts})
 
@@ -267,8 +277,8 @@ class ValkeyConnector(Connector):
     def read(
         self,
         table: str,
-        begin: Optional[datetime] = None,
-        end: Optional[datetime] = None,
+        begin: Union[datetime, int, str, None] = None,
+        end: Union[datetime, int, str, None] = None,
         params: Optional[Dict[str, Any]] = None,
         datetime_column: Optional[str] = None,
         select_columns: Optional[List[str]] = None,
@@ -283,10 +293,10 @@ class ValkeyConnector(Connector):
         table: str
             The "table" name to be queried.
 
-        begin: Optional[datetime], default None
+        begin: Union[datetime, int, str, None], default None
             If provided, only return rows greater than or equal to this datetime.
 
-        end: Optional[datetime], default None
+        end: Union[datetime, int, str, None], default None
             If provided, only return rows older than this datetime.
 
         params: Optional[Dict[str, Any]]
@@ -319,8 +329,8 @@ class ValkeyConnector(Connector):
 
         return query_df(
             df,
-            begin=begin,
-            end=end,
+            begin=(begin if datetime_column is not None else None),
+            end=(end if datetime_column is not None else None),
             params=params,
             datetime_column=datetime_column,
             select_columns=select_columns,
@@ -333,8 +343,8 @@ class ValkeyConnector(Connector):
     def read_docs(
         self,
         table: str,
-        begin: Optional[datetime] = None,
-        end: Optional[datetime] = None,
+        begin: Union[datetime, int, str, None] = None,
+        end: Union[datetime, int, str, None] = None,
         debug: bool = False,
     ) -> Iterator[Dict[str, str]]:
         """
@@ -345,13 +355,17 @@ class ValkeyConnector(Connector):
         table: str
             The "table" name (root key) under which the docs were pushed.
 
-        begin: Optional[datetime], default None
+        begin: Union[datetime, int, str, None], default None
             If provided and the table was created with a datetime index, only return documents
             newer than this datetime.
+            If the table was not created with a datetime index and `begin` is an `int`,
+            return documents with a positional index greater than or equal to this value.
 
-        end: Optional[datetime], default None
+        end: Union[datetime, int, str, None], default None
             If provided and the table was created with a datetime index, only return documents
             older than this datetime.
+            If the table was not created with a datetime index and `begin` is an `int`,
+            return documents with a positional index less than this value.
 
         Returns
         -------
@@ -361,8 +375,16 @@ class ValkeyConnector(Connector):
         datetime_column_key = self.get_datetime_column_key(table)
         datetime_column = self.get(datetime_column_key)
 
+        if debug:
+            dprint(f"Reading documents from '{table}' with {begin=}, {end=}")
+
         if not datetime_column:
-            return self._read_docs_from_list(table)
+            return self._read_docs_from_list(
+                table,
+                begin_ix=(begin if isinstance(begin, int) else None),
+                end_ix=(end if isinstance(end, int) else None),
+                debug=debug,
+            )
 
         dateutil_parser = mrsm.attempt_import('dateutil.parser')
 
@@ -372,8 +394,22 @@ class ValkeyConnector(Connector):
         if isinstance(end, str):
             end = dateutil_parser.parse(end)
 
-        begin_ts = int(begin.replace(tzinfo=timezone.utc).timestamp()) if begin else '-inf'
-        end_ts = (int(end.replace(tzinfo=timezone.utc).timestamp()) - 1) if end else '+inf'
+        begin_ts = (
+            (
+                int(begin.replace(tzinfo=timezone.utc).timestamp())
+                if isinstance(begin, datetime)
+                else begin
+            )
+            if begin else '-inf'
+        )
+        end_ts = (
+            (
+                int(end.replace(tzinfo=timezone.utc).timestamp())
+                if isinstance(end, datetime)
+                else end
+            )
+            if end else '+inf'
+        )
 
         if debug:
             dprint(f"Reading documents with {begin_ts=}, {end_ts=}")
@@ -388,16 +424,51 @@ class ValkeyConnector(Connector):
             )
         )
 
-    def _read_docs_from_list(self, table):
+    def _read_docs_from_list(
+        self,
+        table: str,
+        begin_ix: Optional[int] = 0,
+        end_ix: Optional[int] = -1,
+        debug: bool = False,
+    ):
+        """
+        Read a list of documents from a "table".
+
+        Parameters
+        ----------
+        table: str
+            The "table" (root key) from which to read docs.
+
+        begin_ix: Optional[int], default 0
+            If provided, only read documents from this starting index.
+
+        end_ix: Optional[int], default -1
+            If provided, only read documents up to (not including) this index.
+
+        Returns
+        -------
+        A list of documents.
+        """
+        if begin_ix is None:
+            begin_ix = 0
+
+        if end_ix == 0:
+            return
+
+        if end_ix is None:
+            end_ix = -1
+        else:
+            end_ix -= 1
+
         table_name = self.quote_table(table)
-        doc_keys = self.client.lrange(table_name, 0, -1)
+        doc_keys = self.client.lrange(table_name, begin_ix, end_ix)
         for doc_key in doc_keys:
             yield {
                 key.decode('utf-8'): value.decode('utf-8')
                 for key, value in self.client.hgetall(doc_key).items()
             }
 
-    def drop_table(self, table: str) -> None:
+    def drop_table(self, table: str, debug: bool = False) -> None:
         """
         Drop a "table" of documents.
 

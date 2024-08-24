@@ -461,6 +461,8 @@ def get_unhashable_cols(df: 'pd.DataFrame') -> List[str]:
     -------
     A list of columns.
     """
+    if df is None:
+        return []
     if len(df) == 0:
         return []
 

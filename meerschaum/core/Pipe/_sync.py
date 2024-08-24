@@ -554,14 +554,14 @@ def exists(
 
 
 def filter_existing(
-        self,
-        df: 'pd.DataFrame',
-        safe_copy: bool = True,
-        date_bound_only: bool = False,
-        chunksize: Optional[int] = -1,
-        debug: bool = False,
-        **kw
-    ) -> Tuple['pd.DataFrame', 'pd.DataFrame', 'pd.DataFrame']:
+    self,
+    df: 'pd.DataFrame',
+    safe_copy: bool = True,
+    date_bound_only: bool = False,
+    chunksize: Optional[int] = -1,
+    debug: bool = False,
+    **kw
+) -> Tuple['pd.DataFrame', 'pd.DataFrame', 'pd.DataFrame']:
     """
     Inspect a dataframe and filter out rows which already exist in the pipe.
 
@@ -661,7 +661,7 @@ def filter_existing(
             if max_dt_val is not None and 'datetime' in str(dt_type)
             else max_dt_val
         )
-    except Exception as e:
+    except Exception:
         import traceback
         traceback.print_exc()
         max_dt = None
@@ -681,7 +681,7 @@ def filter_existing(
         end = max_dt + 1
 
     if max_dt is not None and min_dt is not None and min_dt > max_dt:
-        warn(f"Detected minimum datetime greater than maximum datetime.")
+        warn("Detected minimum datetime greater than maximum datetime.")
 
     if begin is not None and end is not None and begin > end:
         if isinstance(begin, datetime):
@@ -710,13 +710,18 @@ def filter_existing(
         dprint(f"Looking at data between '{begin}' and '{end}':", **kw)
 
     backtrack_df = self.get_data(
-        begin = begin,
-        end = end,
-        chunksize = chunksize,
-        params = params,
-        debug = debug,
+        begin=begin,
+        end=end,
+        chunksize=chunksize,
+        params=params,
+        debug=debug,
         **kw
     )
+    if backtrack_df is None:
+        if debug:
+            dprint(f"No backtrack data was found for {self}.")
+        return df, df, df
+
     if debug:
         dprint(f"Existing data for {self}:\n" + str(backtrack_df), **kw)
         dprint(f"Existing dtypes for {self}:\n" + str(backtrack_df.dtypes))
@@ -743,18 +748,19 @@ def filter_existing(
         filter_unseen_df(
             backtrack_df,
             df,
-            dtypes = {
+            dtypes={
                 col: to_pandas_dtype(typ)
                 for col, typ in self_dtypes.items()
             },
-            safe_copy = safe_copy,
-            debug = debug
+            safe_copy=safe_copy,
+            debug=debug
         ),
         on_cols_dtypes,
     )
 
     ### Cast dicts or lists to strings so we can merge.
     serializer = functools.partial(json.dumps, sort_keys=True, separators=(',', ':'), default=str)
+
     def deserializer(x):
         return json.loads(x) if isinstance(x, str) else x
 
@@ -769,10 +775,10 @@ def filter_existing(
     joined_df = merge(
         delta_df.fillna(NA),
         backtrack_df.fillna(NA),
-        how = 'left',
-        on = on_cols,
-        indicator = True,
-        suffixes = ('', '_old'),
+        how='left',
+        on=on_cols,
+        indicator=True,
+        suffixes=('', '_old'),
     ) if on_cols else delta_df
     for col in casted_cols:
         if col in joined_df.columns:
