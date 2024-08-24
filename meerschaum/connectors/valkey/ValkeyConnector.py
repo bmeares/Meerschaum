@@ -33,6 +33,10 @@ class ValkeyConnector(Connector):
         'socket_timeout': 300,
     }
 
+    from ._pipes import (
+        register_pipe,
+    )
+
     @property
     def client(self):
         """
@@ -195,7 +199,6 @@ class ValkeyConnector(Connector):
         """
         from meerschaum.utils.misc import json_serialize_datetime
         table_name = self.quote_table(table)
-        counter_key = self.get_counter_key(table)
         datetime_column_key = self.get_datetime_column_key(table)
         remote_datetime_column = self.get(datetime_column_key)
         datetime_column = datetime_column or remote_datetime_column
@@ -207,11 +210,23 @@ class ValkeyConnector(Connector):
 
         old_len = self.client.zcard(table_name)
         for doc in docs:
-            dt_str = str(doc[datetime_column]) if datetime_column in doc else '1970-01-01'
-            dt_val = dateutil_parser.parse(dt_str)
-            ts = int(dt_val.replace(tzinfo=timezone.utc).timestamp())
+            original_dt_val = (
+                doc[datetime_column]
+                if datetime_column in doc
+                else 0
+            )
+            dt_val = (
+                dateutil_parser.parse(str(original_dt_val))
+                if not isinstance(original_dt_val, int)
+                else original_dt_val
+            )
+            ts = (
+                int(dt_val.replace(tzinfo=timezone.utc).timestamp())
+                if isinstance(dt_val, datetime)
+                else dt_val
+            )
             if debug:
-                dprint(f"Adding doc with {dt_val=}, {ts=}")
+                dprint(f"Adding doc with {ts=}")
             doc_str = json.dumps(
                 doc,
                 default=json_serialize_datetime,
