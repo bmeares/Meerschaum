@@ -31,11 +31,11 @@ db_host = 'MRSM{stack:' + str(STACK_COMPOSE_FILENAME) + ':services:db:hostname}'
 api_port = "MRSM{meerschaum:connectors:api:main:port}"
 api_host = "api"
 
-redis_hostname = "redis"
-redis_host = 'MRSM{stack:' + str(STACK_COMPOSE_FILENAME) + ':services:redis:hostname}'
-redis_port = "MRSM{meerschaum:connectors:redis:main:port}"
-redis_username = 'MRSM{meerschaum:connectors:redis:main:username}'
-redis_password = 'MRSM{meerschaum:connectors:redis:main:password}'
+valkey_hostname = "valkey"
+valkey_host = 'MRSM{stack:' + str(STACK_COMPOSE_FILENAME) + ':services:valkey:hostname}'
+valkey_port = "MRSM{meerschaum:connectors:valkey:main:port}"
+valkey_username = 'MRSM{meerschaum:connectors:valkey:main:username}'
+valkey_password = 'MRSM{meerschaum:connectors:valkey:main:password}'
 
 env_dict = {
     'COMPOSE_PROJECT_NAME': 'mrsm',
@@ -43,8 +43,8 @@ env_dict = {
     'POSTGRES_USER': db_user,
     'POSTGRES_PASSWORD': db_pass,
     'POSTGRES_DB': db_base,
-    'REDIS_USERNAME': redis_username,
-    'REDIS_PASSWORD': redis_password,
+    'VALKEY_USERNAME': valkey_username,
+    'VALKEY_PASSWORD': valkey_password,
     'MEERSCHAUM_API_HOSTNAME': api_host,
     'ALLOW_IP_RANGE': '0.0.0.0/0',
     'MEERSCHAUM_API_CONFIG_RESOURCES': '/meerschaum',
@@ -66,7 +66,7 @@ volumes = {
     'api_root': '/meerschaum',
     'meerschaum_db_data': '/var/lib/postgresql/data',
     'grafana_storage': '/var/lib/grafana',
-    'redis_data': '/data',
+    'valkey_data': '/data',
 }
 networks = {
     'frontend': None,
@@ -85,8 +85,8 @@ env_dict['MEERSCHAUM_API_PATCH'] = json.dumps(
                         'database': volumes['api_root'] + '/sqlite/mrsm_local.db'
                     },
                 },
-                'redis': {
-                    'host': redis_host,
+                'valkey': {
+                    'host': valkey_host,
                     'port': 6379,
                 },
             },
@@ -169,7 +169,7 @@ default_docker_compose_config = {
                 'db': {
                     'condition': 'service_healthy',
                 },
-                'redis': {
+                'valkey': {
                     'condition': 'service_healthy',
                 },
             },
@@ -177,25 +177,27 @@ default_docker_compose_config = {
                 'api_root:' + volumes['api_root'],
             ],
         },
-        'redis': {
-            'image': 'redis:alpine',
+        'valkey': {
+            'image': 'valkey/valkey',
             'restart': 'always',
             'command': [
-                '/bin/sh', '-c', 'redis-server --requirepass <DOLLAR>REDIS_PASSWORD',
+                '/bin/sh',
+                '-c',
+                'valkey-server --requirepass <DOLLAR>VALKEY_PASSWORD --save 60 1 --loglevel warning',
             ],
             'environment': {
-                'REDIS_PASSWORD': '<DOLLAR>REDIS_PASSWORD',
+                'VALKEY_PASSWORD': '<DOLLAR>VALKEY_PASSWORD',
             },
-            'hostname': redis_hostname,
+            'hostname': valkey_hostname,
             'ports': [
-                f'{redis_port}:6379',
+                f'{valkey_port}:6379',
             ],
             'volumes': [
-                'redis_data:' + volumes['redis_data'],
+                'valkey_data:' + volumes['valkey_data'],
             ],
             'healthcheck': {
                 'test': [
-                    'CMD', 'redis-cli', 'ping',
+                    'CMD', 'valkey-cli', 'ping',
                 ],
                 'interval': '5s',
                 'timeout': '3s',

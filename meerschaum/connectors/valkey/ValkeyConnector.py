@@ -2,7 +2,7 @@
 # vim:fenc=utf-8
 
 """
-Define the `RedisConnector`.
+Define the `ValkeyConnector`.
 """
 
 import shlex
@@ -16,11 +16,11 @@ from meerschaum.utils.warnings import warn, dprint
 
 
 @make_connector
-class RedisConnector(Connector):
+class ValkeyConnector(Connector):
     """
-    Manage a Redis instance.
+    Manage a Valkey instance.
 
-    Build a `RedisConnector` from connection attributes or a URI string.
+    Build a `ValkeyConnector` from connection attributes or a URI string.
     """
     REQUIRED_ATTRIBUTES: List[str] = ['host']
     OPTIONAL_ATTRIBUTES: List[str] = [
@@ -36,15 +36,15 @@ class RedisConnector(Connector):
     @property
     def client(self):
         """
-        Return the Redis client.
+        Return the Valkey client.
         """
         if '_client' in self.__dict__:
             return self.__dict__['_client']
 
-        redis = mrsm.attempt_import('redis')
+        valkey = mrsm.attempt_import('valkey')
 
         if 'uri' in self.__dict__:
-            self._client = redis.Redis.from_url(self.__dict__.get('uri'))
+            self._client = valkey.Valkey.from_url(self.__dict__.get('uri'))
             return self._client
 
         optional_kwargs = {
@@ -57,7 +57,7 @@ class RedisConnector(Connector):
             **optional_kwargs
         }
 
-        self._client = redis.Redis(**connection_kwargs)
+        self._client = valkey.Valkey(**connection_kwargs)
         return self._client
 
     @property
@@ -70,7 +70,7 @@ class RedisConnector(Connector):
         if 'uri' in self.__dict__:
             return self.__dict__.get('uri')
 
-        uri = "redis://"
+        uri = "valkey://"
         if 'username' in self.__dict__:
             uri += urllib.parse.quote_plus(self.username) + ':'
 
@@ -206,7 +206,6 @@ class RedisConnector(Connector):
         dateutil_parser = mrsm.attempt_import('dateutil.parser')
 
         old_len = self.client.zcard(table_name)
-        #  next_ix = int((self.client.get(counter_key) or b'0').decode('utf-8'))
         for doc in docs:
             dt_str = str(doc[datetime_column]) if datetime_column in doc else '1970-01-01'
             dt_val = dateutil_parser.parse(dt_str)
@@ -220,7 +219,6 @@ class RedisConnector(Connector):
             )
             self.client.zadd(table_name, {doc_str: ts})
 
-        #  self.client.incrby(counter_key, len(docs))
         self.set(datetime_column_key, datetime_column)
         new_len = self.client.zcard(table_name)
 

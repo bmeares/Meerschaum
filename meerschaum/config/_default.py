@@ -52,7 +52,7 @@ default_meerschaum_config = {
                 'protocol': 'https',
             },
         },
-        'redis': {
+        'valkey': {
             'main': {
                 'host': 'localhost',
                 'username': 'default',

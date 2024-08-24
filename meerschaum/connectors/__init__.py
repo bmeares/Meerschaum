@@ -39,7 +39,7 @@ connectors: Dict[str, Dict[str, Connector]] = {
     'api'    : {},
     'sql'    : {},
     'plugin' : {},
-    'redis'  : {},
+    'valkey' : {},
 }
 instance_types: List[str] = ['sql', 'api']
 _locks: Dict[str, RLock] = {
@@ -165,13 +165,13 @@ def get_connector(
 
     if 'sql' not in types:
         from meerschaum.connectors.plugin import PluginConnector
-        from meerschaum.connectors.redis import RedisConnector
+        from meerschaum.connectors.valkey import ValkeyConnector
         with _locks['types']:
             types.update({
                 'api': APIConnector,
                 'sql': SQLConnector,
                 'plugin': PluginConnector,
-                'redis': RedisConnector,
+                'valkey': ValkeyConnector,
             })
 
     ### determine if we need to call the constructor
@@ -381,4 +381,4 @@ def _load_builtin_custom_connectors():
     Import custom connectors decorated with `@make_connector` or `@make_executor`.
     """
     import meerschaum.jobs.systemd
-    import meerschaum.connectors.redis
+    import meerschaum.connectors.valkey
