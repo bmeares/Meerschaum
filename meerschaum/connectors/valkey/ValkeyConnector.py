@@ -11,7 +11,7 @@ from datetime import datetime, timezone
 
 import meerschaum as mrsm
 from meerschaum.connectors import Connector, make_connector
-from meerschaum.utils.typing import List, Dict, Any, SuccessTuple, Iterator, Optional, Union
+from meerschaum.utils.typing import List, Dict, Any, Iterator, Optional, Union
 from meerschaum.utils.warnings import warn, dprint
 
 
@@ -22,6 +22,7 @@ class ValkeyConnector(Connector):
 
     Build a `ValkeyConnector` from connection attributes or a URI string.
     """
+    IS_INSTANCE: bool = True
     REQUIRED_ATTRIBUTES: List[str] = ['host']
     OPTIONAL_ATTRIBUTES: List[str] = [
         'port', 'username', 'password', 'db', 'socket_timeout',
@@ -44,6 +45,7 @@ class ValkeyConnector(Connector):
         get_pipe_data,
         sync_pipe,
         get_pipe_columns_types,
+        clear_pipe,
     )
 
     @property

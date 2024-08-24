@@ -365,14 +365,33 @@ def sync_pipe(
                 return edit_success, edit_msg
 
     unseen_df, update_df, delta_df = pipe.filter_existing(df, debug=debug)
-    if not unseen_df.empty:
-        self.push_df(
-            unseen_df,
-            pipe.target,
-            datetime_column=dt_col,
-            debug=debug,
+    if not delta_df.empty:
+        min_dt = delta_df[dt_col].min() if dt_col in delta_df.columns else None
+        max_dt = delta_df[dt_col].max() if dt_col in delta_df.columns else None
+
+        ### TODO implement clear_pipe
+        clear_success, clear_msg = pipe.clear(
+            begin=min_dt,
+            end=max_dt,
+            params={
+                col: list(delta_df[col])
+                for col_key, col in pipe.columns.items()
+                if col_key not in ('datetime', 'value')
+            },
         )
-    ### TODO implement updates
+        if not clear_success:
+            return clear_success, clear_msg
+
+        try:
+            self.push_df(
+                delta_df,
+                pipe.target,
+                datetime_column=dt_col,
+                debug=debug,
+            )
+        except Exception as e:
+            return False, f"Failed to push docs to '{pipe.target}':\n{e}"
+
     return True, "Success"
 
 
@@ -400,3 +419,52 @@ def get_pipe_columns_types(
     columns_types = {}
 
     return columns_types
+
+
+def clear_pipe(
+    self,
+    pipe: mrsm.Pipe,
+    begin: Union[datetime, int, None] = None,
+    end: Union[datetime, int, None] = None,
+    params: Optional[Dict[str, Any]] = None,
+    debug: bool = False,
+) -> mrsm.SuccessTuple:
+    """
+    Delete rows within `begin`, `end`, and `params`.
+
+    Parameters
+    ----------
+    pipe: mrsm.Pipe
+        The pipe whose rows to clear.
+
+    begin: Union[datetime, int, None], default None
+        If provided, remove rows >= `begin`.
+
+    end: Union[datetime, int, None], default None
+        If provided, remove rows < `end`.
+
+    params: Optional[Dict[str, Any]], default None
+        If provided, only remove rows which match the `params` filter.
+
+    Returns
+    -------
+    A `SuccessTuple` indicating success.
+    """
+    from meerschaum.utils.misc import json_serialize_datetime
+    existing_df = pipe.get_data(
+        begin=begin,
+        end=end,
+        params=params,
+        debug=debug,
+    )
+    docs = existing_df.to_dict(orient='records')
+    table_name = self.quote_table(pipe.target)
+    for doc in docs:
+        doc_str = json.dumps(
+            doc,
+            default=json_serialize_datetime,
+            separators=(',', ':'),
+            sort_keys=True,
+        )
+        self.client.zrem(table_name, doc_str)
+    return True, "Success"
