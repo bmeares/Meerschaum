@@ -569,7 +569,7 @@ def filter_existing(
     ----------
     df: 'pd.DataFrame'
         The dataframe to inspect and filter.
-        
+
     safe_copy: bool, default True
         If `True`, create a copy before comparing and modifying the dataframes.
         Setting to `False` may mutate the DataFrames.
@@ -605,7 +605,7 @@ def filter_existing(
     from meerschaum.config import get_config
     pd = import_pandas()
     pandas = attempt_import('pandas')
-    if not 'dataframe' in str(type(df)).lower():
+    if 'dataframe' not in str(type(df)).lower():
         df = self.enforce_dtypes(df, chunksize=chunksize, debug=debug)
     is_dask = 'dask' in df.__module__
     if is_dask:
@@ -615,8 +615,17 @@ def filter_existing(
     else:
         merge = pd.merge
         NA = pd.NA
+
+    def get_empty_df():
+        empty_df = pd.DataFrame([])
+        if df is not None:
+            add_missing_cols_to_df(empty_df, dict(df.dtypes))
+        return empty_df
+
     if df is None:
-        return df, df, df
+        empty_df = get_empty_df()
+        return empty_df, empty_df, empty_df
+
     if (df.empty if not is_dask else len(df) == 0):
         return df, df, df
 
@@ -643,7 +652,7 @@ def filter_existing(
         begin = (
             round_time(
                 min_dt,
-                to = 'down'
+                to='down'
             ) - timedelta(minutes=1)
         )
     elif dt_type and 'int' in dt_type.lower():
@@ -720,7 +729,7 @@ def filter_existing(
     if backtrack_df is None:
         if debug:
             dprint(f"No backtrack data was found for {self}.")
-        return df, df, df
+        return df, get_empty_df(), df
 
     if debug:
         dprint(f"Existing data for {self}:\n" + str(backtrack_df), **kw)
@@ -810,20 +819,20 @@ def filter_existing(
         .where(~new_rows_mask)
         .dropna(how='all')[cols]
         .reset_index(drop=True)
-    ) if on_cols else None
+    ) if on_cols else get_empty_df()
 
     return unseen_df, update_df, delta_df
 
 
 @staticmethod
 def _get_chunk_label(
-        chunk: Union[
-            'pd.DataFrame',
-            List[Dict[str, Any]],
-            Dict[str, List[Any]]
-        ],
-        dt_col: str,
-    ) -> str:
+    chunk: Union[
+        'pd.DataFrame',
+        List[Dict[str, Any]],
+        Dict[str, List[Any]]
+    ],
+    dt_col: str,
+) -> str:
     """
     Return the min - max label for the chunk.
     """

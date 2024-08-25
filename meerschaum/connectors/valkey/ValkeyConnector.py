@@ -13,6 +13,7 @@ import meerschaum as mrsm
 from meerschaum.connectors import Connector, make_connector
 from meerschaum.utils.typing import List, Dict, Any, Iterator, Optional, Union
 from meerschaum.utils.warnings import warn, dprint
+from meerschaum.utils.misc import json_serialize_datetime
 
 
 @make_connector
@@ -208,7 +209,6 @@ class ValkeyConnector(Connector):
         -------
         The current index counter value (how many docs have been pushed).
         """
-        from meerschaum.utils.misc import json_serialize_datetime
         table_name = self.quote_table(table)
         datetime_column_key = self.get_datetime_column_key(table)
         remote_datetime_column = self.get(datetime_column_key)
@@ -229,12 +229,12 @@ class ValkeyConnector(Connector):
             dt_val = (
                 dateutil_parser.parse(str(original_dt_val))
                 if not isinstance(original_dt_val, int)
-                else original_dt_val
+                else int(original_dt_val)
             )
             ts = (
                 int(dt_val.replace(tzinfo=timezone.utc).timestamp())
                 if isinstance(dt_val, datetime)
-                else dt_val
+                else int(dt_val)
             )
             if debug:
                 dprint(f"Adding doc with {ts=}")
@@ -400,17 +400,17 @@ class ValkeyConnector(Connector):
             (
                 int(begin.replace(tzinfo=timezone.utc).timestamp())
                 if isinstance(begin, datetime)
-                else begin
+                else int(begin)
             )
-            if begin else '-inf'
+            if begin is not None else '-inf'
         )
         end_ts = (
             (
                 int(end.replace(tzinfo=timezone.utc).timestamp())
                 if isinstance(end, datetime)
-                else end
+                else int(end)
             )
-            if end else '+inf'
+            if end is not None else '+inf'
         )
 
         if debug:

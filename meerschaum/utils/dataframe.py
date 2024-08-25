@@ -8,6 +8,7 @@ Utility functions for working with DataFrames.
 
 from __future__ import annotations
 from datetime import datetime
+from collections import defaultdict
 
 import meerschaum as mrsm
 from meerschaum.utils.typing import (
@@ -156,6 +157,19 @@ def filter_unseen_df(
         new_df = add_missing_cols_to_df(new_df, old_df_dtypes)
         old_df = add_missing_cols_to_df(old_df, new_df_dtypes)
 
+        new_types_missing_from_old = {
+            col: typ
+            for col, typ in new_df_dtypes.items()
+            if col not in old_df_dtypes
+        }
+        old_types_missing_from_new = {
+            col: typ
+            for col, typ in new_df_dtypes.items()
+            if col not in old_df_dtypes
+        }
+        old_df_dtypes.update(new_types_missing_from_old)
+        new_df_dtypes.update(old_types_missing_from_new)
+
     ### Edge case: two empty lists cast to DFs.
     elif len(new_df.columns) == 0:
         return new_df
@@ -163,6 +177,7 @@ def filter_unseen_df(
     try:
         ### Order matters when checking equality.
         new_df = new_df[old_df.columns]
+
     except Exception as e:
         warn(
             "Was not able to cast old columns onto new DataFrame. " +
@@ -183,7 +198,7 @@ def filter_unseen_df(
     for col, typ in new_df_dtypes.items():
         if col not in dtypes:
             dtypes[col] = typ
-    
+
     cast_cols = True
     try:
         new_df = new_df.astype(dtypes)
@@ -619,9 +634,9 @@ def enforce_dtypes(
     ]
     df_numeric_cols = get_numeric_cols(df)
     if debug:
-        dprint(f"Desired data types:")
+        dprint("Desired data types:")
         pprint(dtypes)
-        dprint(f"Data types for incoming DataFrame:")
+        dprint("Data types for incoming DataFrame:")
         pprint(df_dtypes)
 
     if json_cols and len(df) > 0:
@@ -687,7 +702,7 @@ def enforce_dtypes(
         if debug:
             dprint(
                 "The incoming DataFrame has mostly the same types, skipping enforcement."
-                + f"The only detected difference was in the following datetime columns.\n"
+                + "The only detected difference was in the following datetime columns.\n"
                 + "    Timezone information may be stripped."
             )
             pprint(detected_dt_cols)
@@ -723,23 +738,23 @@ def enforce_dtypes(
             if 'int' in str(t).lower():
                 try:
                     df[d] = df[d].astype('float64').astype(t)
-                except Exception as e:
+                except Exception:
                     if debug:
                         dprint(f"Was unable to convert to float then {t}.")
     return df
 
 
 def get_datetime_bound_from_df(
-        df: Union['pd.DataFrame', dict, list],
-        datetime_column: str,
-        minimum: bool = True,
-    ) -> Union[int, datetime, None]:
+    df: Union['pd.DataFrame', Dict[str, List[Any]], List[Dict[str, Any]]],
+    datetime_column: str,
+    minimum: bool = True,
+) -> Union[int, datetime, None]:
     """
     Return the minimum or maximum datetime (or integer) from a DataFrame.
 
     Parameters
     ----------
-    df: pd.DataFrame
+    df: Union['pd.DataFrame', Dict[str, List[Any]], List[Dict[str, Any]]]
         The DataFrame, list, or dict which contains the range axis.
 
     datetime_column: str
@@ -782,15 +797,68 @@ def get_datetime_bound_from_df(
         return best_yet
 
     if 'DataFrame' in str(type(df)):
+        from meerschaum.utils.dtypes import are_dtypes_equal
+        pandas = mrsm.attempt_import('pandas')
+        is_dask = 'dask' in df.__module__
+
         if datetime_column not in df.columns:
             return None
-        return (
+
+        dt_val = (
             df[datetime_column].min(skipna=True)
-            if minimum
-            else df[datetime_column].max(skipna=True)
+            if minimum else df[datetime_column].max(skipna=True)
+        )
+        if is_dask and dt_val is not None:
+            dt_val = dt_val.compute()
+
+        return (
+            pandas.to_datetime(dt_val).to_pydatetime()
+            if are_dtypes_equal(str(type(dt_val)), 'datetime')
+            else dt_val
         )
 
     return None
+
+
+def get_unique_index_values(
+    df: Union['pd.DataFrame', Dict[str, List[Any]], List[Dict[str, Any]]],
+    indices: List[str],
+) -> Dict[str, List[Any]]:
+    """
+    Return a dictionary of the unique index values in a DataFrame.
+
+    Parameters
+    ----------
+    df: Union['pd.DataFrame', Dict[str, List[Any]], List[Dict[str, Any]]]
+        The dataframe (or list or dict) which contains index values.
+
+    indices: List[str]
+        The list of index columns.
+
+    Returns
+    -------
+    A dictionary mapping indices to unique values.
+    """
+    if 'dataframe' in str(type(df)).lower():
+        return {
+            col: list(df[col].unique())
+            for col in indices
+            if col in df.columns
+        }
+
+    unique_indices = defaultdict(lambda: set())
+    if isinstance(df, list):
+        for doc in df:
+            for index in indices:
+                if index in doc:
+                    unique_indices[index].add(doc[index])
+
+    elif isinstance(df, dict):
+        for index in indices:
+            if index in df:
+                unique_indices[index] = unique_indices[index].union(set(df[index]))
+
+    return {key: list(val) for key, val in unique_indices.items()}
 
 
 def df_is_chunk_generator(df: Any) -> bool:
@@ -828,10 +896,10 @@ def chunksize_to_npartitions(chunksize: Optional[int]) -> int:
 
 
 def df_from_literal(
-        pipe: Optional[mrsm.Pipe] = None,
-        literal: str = None,
-        debug: bool = False
-    ) -> 'pd.DataFrame':
+    pipe: Optional[mrsm.Pipe] = None,
+    literal: str = None,
+    debug: bool = False
+) -> 'pd.DataFrame':
     """
     Construct a dataframe from a literal value, using the pipe's datetime and value column names.
 
