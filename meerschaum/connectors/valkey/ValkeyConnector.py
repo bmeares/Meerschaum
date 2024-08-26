@@ -49,6 +49,10 @@ class ValkeyConnector(Connector):
         clear_pipe,
     )
 
+    from ._users import (
+        register_user,
+    )
+
     @property
     def client(self):
         """
@@ -97,7 +101,7 @@ class ValkeyConnector(Connector):
             uri += self.host
 
         if 'port' in self.__dict__:
-            uri += f'{self.port}'
+            uri += f':{self.port}'
 
         if 'db' in self.__dict__:
             uri += f"/{self.db}"
@@ -214,6 +218,7 @@ class ValkeyConnector(Connector):
         remote_datetime_column = self.get(datetime_column_key)
         datetime_column = datetime_column or remote_datetime_column
 
+        print(f"{datetime_column=}")
         if not datetime_column:
             return self._push_hash_docs_to_list(docs, table)
 
@@ -348,7 +353,7 @@ class ValkeyConnector(Connector):
         begin: Union[datetime, int, str, None] = None,
         end: Union[datetime, int, str, None] = None,
         debug: bool = False,
-    ) -> Iterator[Dict[str, str]]:
+    ) -> List[Dict[str, str]]:
         """
         Return a list of previously pushed docs.
 
@@ -416,7 +421,7 @@ class ValkeyConnector(Connector):
         if debug:
             dprint(f"Reading documents with {begin_ts=}, {end_ts=}")
 
-        return (
+        return [
             json.loads(doc_bytes.decode('utf-8'))
             for doc_bytes in self.client.zrangebyscore(
                 table_name,
@@ -424,7 +429,7 @@ class ValkeyConnector(Connector):
                 end_ts,
                 withscores=False,
             )
-        )
+        ]
 
     def _read_docs_from_list(
         self,

@@ -7,14 +7,15 @@ Manage users via the SQL Connector
 """
 
 from __future__ import annotations
+import meerschaum as mrsm
 from meerschaum.utils.typing import SuccessTuple, Optional, Any, Dict, List, Union
 
 def register_user(
-        self,
-        user: meerschaum.core.User,
-        debug: bool = False,
-        **kw: Any
-    ) -> SuccessTuple:
+    self,
+    user: mrsm.core.User,
+    debug: bool = False,
+    **kw: Any
+) -> SuccessTuple:
     """Register a new user."""
     from meerschaum.utils.warnings import warn, error, info
     from meerschaum.utils.packages import attempt_import

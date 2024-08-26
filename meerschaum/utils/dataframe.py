@@ -814,7 +814,7 @@ def get_datetime_bound_from_df(
         return (
             pandas.to_datetime(dt_val).to_pydatetime()
             if are_dtypes_equal(str(type(dt_val)), 'datetime')
-            else dt_val
+            else (dt_val if dt_val is not pandas.NA else None)
         )
 
     return None
@@ -840,8 +840,12 @@ def get_unique_index_values(
     A dictionary mapping indices to unique values.
     """
     if 'dataframe' in str(type(df)).lower():
+        pandas = mrsm.attempt_import('pandas')
         return {
-            col: list(df[col].unique())
+            col: list({
+                (val if val is not pandas.NA else None)
+                for val in df[col].unique()
+            })
             for col in indices
             if col in df.columns
         }
@@ -1016,10 +1020,17 @@ def query_df(
     from meerschaum.utils.debug import dprint
     from meerschaum.utils.misc import get_in_ex_params
     from meerschaum.utils.warnings import warn
+    from meerschaum.utils.dtypes import are_dtypes_equal
 
     dtypes = {col: str(typ) for col, typ in df.dtypes.items()}
 
-    if begin or end:
+    if are_dtypes_equal(str(type(begin)), 'int'):
+        begin = int(begin)
+
+    if are_dtypes_equal(str(type(end)), 'int'):
+        end = int(end)
+
+    if begin is not None or end is not None:
         if not datetime_column or datetime_column not in df.columns:
             warn(
                 f"The datetime column '{datetime_column}' is not present in the Dataframe, "
@@ -1076,22 +1087,27 @@ def query_df(
     for mask in masks:
         query_mask = query_mask & mask
 
+    print(f"query_mask:\n{query_mask}")
+    print(f"df:\n{df}")
     if inplace:
-        df.where(query_mask, inplace=inplace)
-        df.dropna(how='all', inplace=inplace)
+        df.where(query_mask, inplace=True)
+        df.dropna(how='all', inplace=True)
         result_df = df
     else:
         result_df = df.where(query_mask).dropna(how='all')
 
     if reset_index:
-        result_df.reset_index(drop=True, inplace=True)
+        if inplace:
+            result_df.reset_index(drop=True, inplace=True)
+        else:
+            result_df = result_df.reset_index(drop=True, inplace=False)
 
     result_df = enforce_dtypes(
         result_df,
         dtypes,
-        safe_copy = (not inplace),
-        debug = debug,
-        coerce_numeric = False,
+        safe_copy=(not inplace),
+        debug=debug,
+        coerce_numeric=False,
     )
 
     if select_columns == ['*']:

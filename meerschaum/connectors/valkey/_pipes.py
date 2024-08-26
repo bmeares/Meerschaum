@@ -12,8 +12,8 @@ import meerschaum as mrsm
 from meerschaum.utils.typing import SuccessTuple, Any, Union, Optional, Dict, List
 from meerschaum.utils.misc import json_serialize_datetime
 
-PIPES_TABLE: str = 'pipes'
-PIPES_COUNTER: str = 'pipes:counter'
+PIPES_TABLE: str = 'mrsm_pipes'
+PIPES_COUNTER: str = 'mrsm_pipes:counter'
 
 def get_pipe_key(pipe: mrsm.Pipe) -> str:
     """
@@ -85,6 +85,26 @@ def get_pipe_document_key(pipe: mrsm.Pipe, doc: Dict[str, Any], indices: List[st
     )
     pipe_key = get_pipe_key(pipe)
     return pipe_key + ':indices:' + indices_str
+
+
+def get_pipe_quoted_doc_key(
+    pipe: mrsm.Pipe,
+    doc: Dict[str, Any],
+    indices: List[str],
+    datetime_column: Optional[str] = None,
+) -> str:
+    """
+    Return the document string as stored in the underling set.
+    """
+    return json.dumps(
+        {
+            get_pipe_document_key(pipe, doc, indices): serialize_document(doc),
+            **({datetime_column: doc.get(datetime_column, 0)} if datetime_column else {}) 
+        },
+        sort_keys=True,
+        separators=(',', ':'),
+    )
+
 
 
 def register_pipe(
@@ -376,8 +396,15 @@ def get_pipe_data(
             debug=debug,
         )
     ]
+    df = parse_df_datetimes(docs)
+    if len(df) == 0:
+        return df
     return query_df(
-        parse_df_datetimes(docs),
+        df,
+        params=params,
+        begin=begin,
+        end=end,
+        datetime_column=dt_col,
         inplace=True,
         reset_index=True,
     )
@@ -438,14 +465,9 @@ def sync_pipe(
             return edit_success, edit_msg
 
     unseen_df, update_df, delta_df = pipe.filter_existing(df, debug=debug)
-    num_docs = len(df)
     num_insert = len(unseen_df)
     num_update = len(update_df)
-    msg = (
-        f"Successfully synced {num_docs} row"
-        + ('s' if num_docs != 1 else '')
-        + f"\n    (inserted {num_insert}, updated {num_update})."
-    )
+    msg = f"Inserted {num_insert}, updated {num_update} rows."
     if len(delta_df) == 0:
         return True, msg
 
@@ -465,26 +487,27 @@ def sync_pipe(
     update_max_dt = get_datetime_bound_from_df(update_df, dt_col, minimum=False)
     update_params = get_unique_index_values(update_df, [col for col in indices if col != dt_col])
 
-    clear_success, clear_msg = pipe.clear(
-        begin=update_min_dt,
-        end=update_max_dt,
-        params=update_params,
-        debug=debug,
-    )
-    if not clear_success:
-        return clear_success, clear_msg
-
-    update_docs = _serialize_docs(update_df)
-
-    try:
-        self.push_docs(
-            update_docs,
-            pipe.target,
-            datetime_column=dt_col,
+    if len(update_df) != 0:
+        clear_success, clear_msg = pipe.clear(
+            begin=update_min_dt,
+            end=update_max_dt,
+            params=update_params,
             debug=debug,
         )
-    except Exception as e:
-        return False, f"Failed to push docs to '{pipe.target}':\n{e}"
+        if not clear_success:
+            return clear_success, clear_msg
+
+        update_docs = _serialize_docs(update_df)
+
+        try:
+            self.push_docs(
+                update_docs,
+                pipe.target,
+                datetime_column=dt_col,
+                debug=debug,
+            )
+        except Exception as e:
+            return False, f"Failed to push docs to '{pipe.target}':\n{e}"
 
     return True, msg
 
@@ -552,14 +575,16 @@ def clear_pipe(
         params=params,
         debug=debug,
     )
+    if existing_df is None or len(existing_df) == 0:
+        return True, "Success"
+
     docs = existing_df.to_dict(orient='records')
     table_name = self.quote_table(pipe.target)
     indices = [col for col in pipe.columns.values() if col]
     for doc in docs:
-        doc_key = get_pipe_document_key(pipe, doc, indices)
-        print(f"{doc_key=}")
+        quoted_doc_key = get_pipe_quoted_doc_key(pipe, doc, indices, dt_col)
         if dt_col:
-            self.client.zrem(table_name, doc_key)
+            self.client.zrem(table_name, quoted_doc_key)
         else:
             print('TODO non-dt deletes')
     return True, "Success"

@@ -15,10 +15,10 @@ from meerschaum.utils.warnings import warn, error, info
 from meerschaum.utils.debug import dprint
 
 def register_pipe(
-        self,
-        pipe: mrsm.Pipe,
-        debug: bool = False,
-    ) -> SuccessTuple:
+    self,
+    pipe: mrsm.Pipe,
+    debug: bool = False,
+) -> SuccessTuple:
     """
     Register a new pipe.
     A pipe's attributes must be set before registering.
@@ -1191,9 +1191,9 @@ def sync_pipe(
     if not isinstance(df, pd.DataFrame):
         df = pipe.enforce_dtypes(
             df,
-            chunksize = chunksize,
-            safe_copy = kw.get('safe_copy', False),
-            debug = debug,
+            chunksize=chunksize,
+            safe_copy=kw.get('safe_copy', False),
+            debug=debug,
         )
 
     ### if table does not exist, create it with indices
@@ -1243,8 +1243,8 @@ def sync_pipe(
     unseen_df, update_df, delta_df = (
         pipe.filter_existing(
             df,
-            chunksize = chunksize,
-            debug = debug,
+            chunksize=chunksize,
+            debug=debug,
             **kw
         ) if check_existing else (df, None, df)
     )
@@ -1326,16 +1326,16 @@ def sync_pipe(
         self._log_temporary_tables_creation(temp_target, create=(not pipe.temporary), debug=debug)
         temp_pipe = Pipe(
             pipe.connector_keys.replace(':', '_') + '_', pipe.metric_key, pipe.location_key,
-            instance = pipe.instance_keys,
-            columns = {
+            instance=pipe.instance_keys,
+            columns={
                 ix_key: ix
                 for ix_key, ix in pipe.columns.items()
                 if ix and ix in update_df.columns
             },
-            dtypes = pipe.dtypes,
-            target = temp_target,
-            temporary = True,
-            parameters = {
+            dtypes=pipe.dtypes,
+            target=temp_target,
+            temporary=True,
+            parameters={
                 'schema': self.internal_schema,
                 'hypertable': False,
             },
@@ -1352,20 +1352,20 @@ def sync_pipe(
             temp_target, 
             self,
             join_cols,
-            upsert = upsert,
-            schema = self.get_pipe_schema(pipe),
-            patch_schema = self.internal_schema,
-            datetime_col = pipe.columns.get('datetime', None),
-            debug = debug,
+            upsert=upsert,
+            schema=self.get_pipe_schema(pipe),
+            patch_schema=self.internal_schema,
+            datetime_col=pipe.columns.get('datetime', None),
+            debug=debug,
         )
         update_success = all(
             self.exec_queries(update_queries, break_on_error=True, rollback=True, debug=debug)
         )
         self._log_temporary_tables_creation(
             temp_target,
-            ready_to_drop = True,
-            create = (not pipe.temporary),
-            debug = debug,
+            ready_to_drop=True,
+            create=(not pipe.temporary),
+            debug=debug,
         )
         if not update_success:
             warn(f"Failed to apply update to {pipe}.")

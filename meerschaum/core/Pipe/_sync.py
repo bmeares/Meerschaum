@@ -618,9 +618,13 @@ def filter_existing(
 
     def get_empty_df():
         empty_df = pd.DataFrame([])
-        if df is not None:
-            add_missing_cols_to_df(empty_df, dict(df.dtypes))
-        return empty_df
+        dtypes = dict(df.dtypes) if df is not None else {}
+        dtypes.update(self.dtypes)
+        pd_dtypes = {
+            col: to_pandas_dtype(typ)
+            for col, typ in dtypes.items()
+        }
+        return add_missing_cols_to_df(empty_df, pd_dtypes)
 
     if df is None:
         empty_df = get_empty_df()
@@ -642,7 +646,7 @@ def filter_existing(
             if min_dt_val is not None and 'datetime' in str(dt_type)
             else min_dt_val
         )
-    except Exception as e:
+    except Exception:
         min_dt = None
     if not ('datetime' in str(type(min_dt))) or str(min_dt) == 'NaT':
         if 'int' not in str(type(min_dt)).lower():
@@ -683,7 +687,7 @@ def filter_existing(
         end = (
             round_time(
                 max_dt,
-                to = 'down'
+                to='down'
             ) + timedelta(minutes=1)
         )
     elif dt_type and 'int' in dt_type.lower():
@@ -797,20 +801,13 @@ def filter_existing(
 
     ### Determine which rows are completely new.
     new_rows_mask = (joined_df['_merge'] == 'left_only') if on_cols else None
-    cols = list(backtrack_df.columns)
+    cols = list(delta_df.columns)
 
     unseen_df = (
-        (
-            joined_df
-            .where(new_rows_mask)
-            .dropna(how='all')[cols]
-            .reset_index(drop=True)
-        ) if not is_dask else (
-            joined_df
-            .where(new_rows_mask)
-            .dropna(how='all')[cols]
-            .reset_index(drop=True)
-        )
+        joined_df
+        .where(new_rows_mask)
+        .dropna(how='all')[cols]
+        .reset_index(drop=True)
     ) if on_cols else delta_df
 
     ### Rows that have already been inserted but values have changed.
