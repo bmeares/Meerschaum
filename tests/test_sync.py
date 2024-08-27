@@ -154,22 +154,20 @@ def test_sync_engine(flavor: str):
     mrsm_instance = str(pipe.instance_connector)
     success, msg = actions['drop'](
         ['pipes'],
-        connector_keys = [pipe.connector_keys],
-        metric_keys = [pipe.metric_key],
-        location_keys = [pipe.location_key],
-        mrsm_instance = mrsm_instance,
-        yes = True,
-        #  debug = True,
+        connector_keys=[pipe.connector_keys],
+        metric_keys=[pipe.metric_key],
+        location_keys=[pipe.location_key],
+        mrsm_instance=mrsm_instance,
+        yes=True,
     )
     assert success, msg
 
     success, msg = actions['sync'](
         ['pipes'],
-        connector_keys = [pipe.connector_keys],
-        metric_keys = [pipe.metric_key],
-        location_keys = [pipe.location_key],
-        mrsm_instance = mrsm_instance,
-        #  debug = True,
+        connector_keys=[pipe.connector_keys],
+        metric_keys=[pipe.metric_key],
+        location_keys=[pipe.location_key],
+        mrsm_instance=mrsm_instance,
     )
     assert success, msg
 
@@ -185,19 +183,19 @@ def test_target_mutable(flavor: str):
     assert not pipe.exists(debug=debug)
     success, msg = pipe.sync(
         {'dt': [datetime(2022, 6, 8)], 'id': [1], 'vl': [10]},
-        debug = debug
+        debug=debug,
     )
     df = conn.read(target)
     assert len(df) == 1
     success, msg = pipe.sync(
         {'dt': [datetime(2022, 6, 8)], 'id': [1], 'vl': [10]},
-        debug = debug
+        debug=debug,
     )
     df = conn.read(target)
     assert len(df) == 1
     success, msg = pipe.sync(
         {'dt': [datetime(2022, 6, 8)], 'id': [1], 'vl': [100]},
-        debug = debug
+        debug=debug,
     )
     df = conn.read(target)
     assert len(df) == 1

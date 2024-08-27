@@ -19,6 +19,7 @@ def run_before_and_after(flavor: str):
     test_register_user(flavor)
     yield
 
+
 @pytest.mark.parametrize("flavor", get_flavors())
 def test_sync_change_columns_dtypes(flavor: str):
     """

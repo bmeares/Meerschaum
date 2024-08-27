@@ -6,12 +6,12 @@ Define pipes methods for `ValkeyConnector`.
 """
 
 import json
-import traceback
-from datetime import datetime
+from datetime import datetime, timedelta
 
 import meerschaum as mrsm
 from meerschaum.utils.typing import SuccessTuple, Any, Union, Optional, Dict, List, Tuple
 from meerschaum.utils.misc import json_serialize_datetime
+from meerschaum.utils.warnings import dprint
 
 PIPES_TABLE: str = 'mrsm_pipes'
 PIPES_COUNTER: str = 'mrsm_pipes:counter'
@@ -446,6 +446,7 @@ def sync_pipe(
         get_datetime_bound_from_df,
         get_unique_index_values,
     )
+    from meerschaum.utils.dtypes import are_dtypes_equal
 
     dt_col = pipe.columns.get('datetime', None)
     indices = [col for col in pipe.columns.values() if col]
@@ -464,12 +465,18 @@ def sync_pipe(
             for doc in _df.to_dict(orient='records')
         ]
 
+    non_dt_cols = [
+        col
+        for col, typ in df.dtypes.items()
+        if not are_dtypes_equal(str(typ), 'datetime')
+    ]
     existing_dtypes = pipe.dtypes
     new_dtypes = {
-        str(key): 'str'
+        str(key): 'string'
         for key, val in df.dtypes.items()
-        if str(key) not in existing_dtypes
+        if str(key) not in existing_dtypes and key in non_dt_cols
     }
+
     if new_dtypes:
         pipe.dtypes.update(new_dtypes)
         edit_success, edit_msg = pipe.edit(debug=debug)
@@ -503,16 +510,22 @@ def sync_pipe(
 
     update_min_dt = get_datetime_bound_from_df(update_df, dt_col, minimum=True)
     update_max_dt = get_datetime_bound_from_df(update_df, dt_col, minimum=False)
+    if update_max_dt is not None:
+        update_max_dt += (
+            timedelta(minutes=1)
+            if hasattr(update_max_dt, 'tzinfo')
+            else 1
+        )
     update_params = get_unique_index_values(update_df, [col for col in indices if col != dt_col])
 
     if update_df is not None and len(update_df) != 0:
-        #  old_df = pipe.get_data(
-            #  begin=update_min_dt,
-            #  end=update_max_dt,
-            #  params=update_params,
-            #  debug=debug,
-        #  )
-
+        if debug:
+            dprint(
+                "Clearing update documents:\n"
+                + f"begin={update_min_dt}\n"
+                + f"end={update_max_dt}\n"
+                + f"params={update_params}"
+            )
         clear_success, clear_msg = pipe.clear(
             begin=update_min_dt,
             end=update_max_dt,
@@ -521,10 +534,6 @@ def sync_pipe(
         )
         if not clear_success:
             return clear_success, clear_msg
-
-        #  old_docs = old_df.to_dict(orient='records')
-        #  for doc in old_docs:
-            #  doc.up
 
         serialized_update_docs = _serialize_docs(update_df)
 
@@ -615,6 +624,7 @@ def clear_pipe(
     indices = [col for col in pipe.columns.values() if col]
     for doc in docs:
         quoted_doc_key = get_table_quoted_doc_key(table_name, doc, indices, dt_col)
+        print(f"{quoted_doc_key=}")
         if dt_col:
             self.client.zrem(table_name, quoted_doc_key)
         else:
@@ -716,11 +726,11 @@ def fetch_pipes_keys(
     """
     from meerschaum.utils.dataframe import query_df, parse_df_datetimes
     try:
-        docs = self.read(PIPES_TABLE, debug=debug)
+        df = self.read(PIPES_TABLE, debug=debug)
     except Exception:
         return []
 
-    if not docs:
+    if df is None or len(df) == 0:
         return []
 
     query = {}
@@ -733,11 +743,7 @@ def fetch_pipes_keys(
     if params:
         query.update(params)
 
-    df = query_df(
-        parse_df_datetimes(docs),
-        query,
-        inplace=True,
-    )
+    df = query_df(df, query, inplace=True)
     return [
         (
             doc['connector_keys'],

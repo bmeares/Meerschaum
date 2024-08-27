@@ -203,14 +203,36 @@ def filter_unseen_df(
         if col not in dtypes:
             dtypes[col] = typ
 
-    cast_cols = True
+    dt_dtypes = {
+        col: typ
+        for col, typ in dtypes.items()
+        if are_dtypes_equal(typ, 'datetime')
+    }
+    non_dt_dtypes = {
+        col: typ
+        for col, typ in dtypes.items()
+        if col not in dt_dtypes
+    }
+
+    cast_non_dt_cols = True
     try:
-        new_df = new_df.astype(dtypes)
-        cast_cols = False
+        new_df = new_df.astype(non_dt_dtypes)
+        cast_non_dt_cols = False
     except Exception as e:
         warn(
             f"Was not able to cast the new DataFrame to the given dtypes.\n{e}"
         )
+
+    cast_dt_cols = True
+    try:
+        for col, typ in dt_dtypes.items():
+            tz = typ.split(',')[-1].strip() if ',' in typ else None
+            new_df[col] = pd.to_datetime(new_df[col], tz)
+        cast_dt_cols = False
+    except Exception as e:
+        warn(f"Could not cast datetime columns:\n{e}")
+
+    cast_cols = cast_dt_cols or cast_non_dt_cols
 
     new_numeric_cols_existing = get_numeric_cols(new_df)
     old_numeric_cols = get_numeric_cols(old_df)

@@ -824,8 +824,13 @@ def filter_existing(
     ) if on_cols else get_empty_df()
 
     if include_unchanged_columns:
+        unchanged_backtrack_cols = [
+            col
+            for col in backtrack_df.columns
+            if col in on_cols or col not in update_df.columns
+        ]
         update_df = merge(
-            backtrack_df,
+            backtrack_df[unchanged_backtrack_cols],
             update_df,
             how='inner',
             on=on_cols,
