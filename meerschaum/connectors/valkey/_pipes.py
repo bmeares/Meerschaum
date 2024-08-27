@@ -479,7 +479,7 @@ def sync_pipe(
     df = pipe.enforce_dtypes(df, debug=debug)
 
     unseen_df, update_df, delta_df = (
-        pipe.filter_existing(df, debug=debug)
+        pipe.filter_existing(df, include_unchanged_columns=True, debug=debug)
         if check_existing
         else (df, None, df)
     )

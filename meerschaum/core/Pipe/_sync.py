@@ -558,6 +558,7 @@ def filter_existing(
     df: 'pd.DataFrame',
     safe_copy: bool = True,
     date_bound_only: bool = False,
+    include_unchanged_columns: bool = False,
     chunksize: Optional[int] = -1,
     debug: bool = False,
     **kw
@@ -577,6 +578,10 @@ def filter_existing(
 
     date_bound_only: bool, default False
         If `True`, only use the datetime index to fetch the sample dataframe.
+
+    include_unchanged_columns: bool, default False
+        If `True`, include the backtrack columns which haven't changed in the update dataframe.
+        This is useful if you can't update individual keys.
 
     chunksize: Optional[int], default -1
         The `chunksize` used when fetching existing data.
@@ -617,7 +622,6 @@ def filter_existing(
         NA = pd.NA
 
     def get_empty_df():
-        return None
         empty_df = pd.DataFrame([])
         dtypes = dict(df.dtypes) if df is not None else {}
         dtypes.update(self.dtypes)
@@ -818,6 +822,14 @@ def filter_existing(
         .dropna(how='all')[cols]
         .reset_index(drop=True)
     ) if on_cols else get_empty_df()
+
+    if include_unchanged_columns:
+        update_df = merge(
+            backtrack_df,
+            update_df,
+            how='inner',
+            on=on_cols,
+        )
 
     return unseen_df, update_df, delta_df
 

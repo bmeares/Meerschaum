@@ -83,6 +83,7 @@ def filter_unseen_df(
     new_df: 'pd.DataFrame',
     safe_copy: bool = True,
     dtypes: Optional[Dict[str, Any]] = None,
+    include_unchanged_columns: bool = False,
     debug: bool = False,
 ) -> 'pd.DataFrame':
     """
@@ -102,6 +103,9 @@ def filter_unseen_df(
         
     dtypes: Optional[Dict[str, Any]], default None
         Optionally specify the datatypes of the dataframe.
+
+    include_unchanged_columns: bool, default False
+        If `True`, include columns which haven't changed on rows which have changed.
 
     debug: bool, default False
         Verbosity toggle.
@@ -277,7 +281,8 @@ def filter_unseen_df(
         indicator=True,
     )
     changed_rows_mask = (joined_df['_merge'] == 'left_only')
-    delta_df = joined_df[list(new_df_dtypes.keys())][changed_rows_mask].reset_index(drop=True)
+    new_cols = list(new_df_dtypes)
+    delta_df = joined_df[new_cols][changed_rows_mask].reset_index(drop=True)
 
     for json_col in json_cols:
         if json_col not in delta_df.columns:
