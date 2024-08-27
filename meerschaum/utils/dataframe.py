@@ -7,7 +7,7 @@ Utility functions for working with DataFrames.
 """
 
 from __future__ import annotations
-from datetime import datetime
+from datetime import datetime, timezone
 from collections import defaultdict
 
 import meerschaum as mrsm
@@ -79,12 +79,12 @@ def add_missing_cols_to_df(
 
 
 def filter_unseen_df(
-        old_df: 'pd.DataFrame',
-        new_df: 'pd.DataFrame',
-        safe_copy: bool = True,
-        dtypes: Optional[Dict[str, Any]] = None,
-        debug: bool = False,
-    ) -> 'pd.DataFrame':
+    old_df: 'pd.DataFrame',
+    new_df: 'pd.DataFrame',
+    safe_copy: bool = True,
+    dtypes: Optional[Dict[str, Any]] = None,
+    debug: bool = False,
+) -> 'pd.DataFrame':
     """
     Left join two DataFrames to find the newest unseen data.
 
@@ -272,9 +272,9 @@ def filter_unseen_df(
     joined_df = merge(
         new_df.fillna(NA),
         old_df.fillna(NA),
-        how = 'left',
-        on = None,
-        indicator = True,
+        how='left',
+        on=None,
+        indicator=True,
     )
     changed_rows_mask = (joined_df['_merge'] == 'left_only')
     delta_df = joined_df[list(new_df_dtypes.keys())][changed_rows_mask].reset_index(drop=True)
@@ -1016,19 +1016,20 @@ def query_df(
         return df
 
     import json
-    import meerschaum as mrsm
     from meerschaum.utils.debug import dprint
     from meerschaum.utils.misc import get_in_ex_params
     from meerschaum.utils.warnings import warn
     from meerschaum.utils.dtypes import are_dtypes_equal
+    dateutil_parser = mrsm.attempt_import('dateutil.parser')
 
     dtypes = {col: str(typ) for col, typ in df.dtypes.items()}
+    if not inplace:
+        df = df.copy()
 
-    if are_dtypes_equal(str(type(begin)), 'int'):
-        begin = int(begin)
-
-    if are_dtypes_equal(str(type(end)), 'int'):
-        end = int(end)
+    if isinstance(begin, str):
+        begin = dateutil_parser.parse(begin)
+    if isinstance(end, str):
+        end = dateutil_parser.parse(end)
 
     if begin is not None or end is not None:
         if not datetime_column or datetime_column not in df.columns:
@@ -1040,6 +1041,47 @@ def query_df(
 
     if debug:
         dprint(f"Querying dataframe:\n{params=} {begin=} {end=} {datetime_column=}")
+
+    if datetime_column and (begin is not None or end is not None):
+        if debug:
+            dprint("Checking for datetime column compatability.")
+
+        from meerschaum.utils.dtypes import are_dtypes_equal, coerce_timezone
+        df_is_dt = are_dtypes_equal(str(df.dtypes[datetime_column]), 'datetime')
+        begin_is_int = are_dtypes_equal(str(type(begin)), 'int')
+        end_is_int = are_dtypes_equal(str(type(end)), 'int')
+
+        if df_is_dt:
+            df_tz = (
+                getattr(df[datetime_column].dt, 'tz', None)
+                if hasattr(df[datetime_column], 'dt')
+                else None
+            )
+
+            if begin_is_int:
+                begin = datetime.fromtimestamp(int(begin), timezone.utc)
+                if df_tz is None:
+                    begin = begin.replace(tzinfo=None)
+                if debug:
+                    dprint(f"`begin` will be cast to '{begin}'.")
+            if end_is_int:
+                end = datetime.fromtimestamp(int(end), timezone.utc)
+                if df_tz is None:
+                    end = end.replace(tzinfo=None)
+                if debug:
+                    dprint(f"`end` will be cast to '{end}'.")
+
+            begin_tz = begin.tzinfo if begin is not None else None
+            end_tz = end.tzinfo if end is not None else None
+
+            if begin_tz is not None or end_tz is not None or df_tz is not None:
+                begin = coerce_timezone(begin)
+                end = coerce_timezone(end)
+                if df_tz != timezone.utc:
+                    if debug:
+                        dprint(f"Casting column '{datetime_column}' to UTC...")
+                    df[datetime_column] = coerce_timezone(df[datetime_column])
+                dprint(f"Using datetime bounds:\n{begin=}\n{end=}")
 
     in_ex_params = get_in_ex_params(params)
 
@@ -1087,25 +1129,18 @@ def query_df(
     for mask in masks:
         query_mask = query_mask & mask
 
-    print(f"query_mask:\n{query_mask}")
-    print(f"df:\n{df}")
-    if inplace:
-        df.where(query_mask, inplace=True)
-        df.dropna(how='all', inplace=True)
-        result_df = df
-    else:
-        result_df = df.where(query_mask).dropna(how='all')
+    ### NOTE: `inplace` is ok here because we're working with a copy.
+    df.where(query_mask, inplace=True)
+    df.dropna(how='all', inplace=True)
+    result_df = df
 
     if reset_index:
-        if inplace:
-            result_df.reset_index(drop=True, inplace=True)
-        else:
-            result_df = result_df.reset_index(drop=True, inplace=False)
+        result_df.reset_index(drop=True, inplace=True)
 
     result_df = enforce_dtypes(
         result_df,
         dtypes,
-        safe_copy=(not inplace),
+        safe_copy=False,
         debug=debug,
         coerce_numeric=False,
     )

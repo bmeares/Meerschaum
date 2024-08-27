@@ -140,14 +140,14 @@ def edit_pipe(
 
 
 def fetch_pipes_keys(
-        self,
-        connector_keys: Optional[List[str]] = None,
-        metric_keys: Optional[List[str]] = None,
-        location_keys: Optional[List[str]] = None,
-        tags: Optional[List[str]] = None,
-        params: Optional[Dict[str, Any]] = None,
-        debug: bool = False
-    ) -> Optional[List[Tuple[str, str, Optional[str]]]]:
+    self,
+    connector_keys: Optional[List[str]] = None,
+    metric_keys: Optional[List[str]] = None,
+    location_keys: Optional[List[str]] = None,
+    tags: Optional[List[str]] = None,
+    params: Optional[Dict[str, Any]] = None,
+    debug: bool = False
+) -> Optional[List[Tuple[str, str, Optional[str]]]]:
     """
     Return a list of tuples corresponding to the parameters provided.
 
@@ -1406,16 +1406,16 @@ def sync_pipe(
 
 
 def sync_pipe_inplace(
-        self,
-        pipe: 'mrsm.Pipe',
-        params: Optional[Dict[str, Any]] = None,
-        begin: Optional[datetime] = None,
-        end: Optional[datetime] = None,
-        chunksize: Optional[int] = -1,
-        check_existing: bool = True,
-        debug: bool = False,
-        **kw: Any
-    ) -> SuccessTuple:
+    self,
+    pipe: 'mrsm.Pipe',
+    params: Optional[Dict[str, Any]] = None,
+    begin: Optional[datetime] = None,
+    end: Optional[datetime] = None,
+    chunksize: Optional[int] = -1,
+    check_existing: bool = True,
+    debug: bool = False,
+    **kw: Any
+) -> SuccessTuple:
     """
     If a pipe's connector is the same as its instance connector,
     it's more efficient to sync the pipe in-place rather than reading data into Pandas.
@@ -1455,13 +1455,13 @@ def sync_pipe_inplace(
     """
     if self.flavor == 'duckdb':
         return pipe.sync(
-            params = params,
-            begin = begin,
-            end = end,
-            chunksize = chunksize,
-            check_existing = check_existing,
-            debug = debug,
-            _inplace = False,
+            params=params,
+            begin=begin,
+            end=end,
+            chunksize=chunksize,
+            check_existing=check_existing,
+            debug=debug,
+            _inplace=False,
             **kw
         )
     from meerschaum.utils.sql import (
@@ -2062,14 +2062,14 @@ def pipe_exists(
 
 
 def get_pipe_rowcount(
-        self,
-        pipe: mrsm.Pipe,
-        begin: Union[datetime, int, None] = None,
-        end: Union[datetime, int, None] = None,
-        params: Optional[Dict[str, Any]] = None,
-        remote: bool = False,
-        debug: bool = False
-    ) -> Union[int, None]:
+    self,
+    pipe: mrsm.Pipe,
+    begin: Union[datetime, int, None] = None,
+    end: Union[datetime, int, None] = None,
+    params: Optional[Dict[str, Any]] = None,
+    remote: bool = False,
+    debug: bool = False
+) -> Union[int, None]:
     """
     Get the rowcount for a pipe in accordance with given parameters.
 

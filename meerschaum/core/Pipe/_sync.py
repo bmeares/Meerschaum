@@ -617,11 +617,12 @@ def filter_existing(
         NA = pd.NA
 
     def get_empty_df():
+        return None
         empty_df = pd.DataFrame([])
         dtypes = dict(df.dtypes) if df is not None else {}
         dtypes.update(self.dtypes)
         pd_dtypes = {
-            col: to_pandas_dtype(typ)
+            col: to_pandas_dtype(str(typ))
             for col, typ in dtypes.items()
         }
         return add_missing_cols_to_df(empty_df, pd_dtypes)

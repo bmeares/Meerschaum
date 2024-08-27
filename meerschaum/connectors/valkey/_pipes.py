@@ -6,20 +6,22 @@ Define pipes methods for `ValkeyConnector`.
 """
 
 import json
+import traceback
 from datetime import datetime
 
 import meerschaum as mrsm
-from meerschaum.utils.typing import SuccessTuple, Any, Union, Optional, Dict, List
+from meerschaum.utils.typing import SuccessTuple, Any, Union, Optional, Dict, List, Tuple
 from meerschaum.utils.misc import json_serialize_datetime
 
 PIPES_TABLE: str = 'mrsm_pipes'
 PIPES_COUNTER: str = 'mrsm_pipes:counter'
 
+
 def get_pipe_key(pipe: mrsm.Pipe) -> str:
     """
     Return the key to store a pipe's ID.
     """
-    return f"pipe:{pipe.connector_keys}:{pipe.metric_key}:{pipe.location_key}"
+    return f"mrsm_pipe:{pipe.connector_keys}:{pipe.metric_key}:{pipe.location_key}"
 
 
 def get_pipe_parameters_key(pipe: mrsm.Pipe) -> str:
@@ -50,7 +52,7 @@ def serialize_document(doc: Dict[str, Any]) -> str:
     )
 
 
-def get_pipe_document_key(pipe: mrsm.Pipe, doc: Dict[str, Any], indices: List[str]) -> str:
+def get_table_document_key(table_name: str, doc: Dict[str, Any], indices: List[str]) -> str:
     """
     Return a serialized string for a document's indices only.
 
@@ -66,11 +68,12 @@ def get_pipe_document_key(pipe: mrsm.Pipe, doc: Dict[str, Any], indices: List[st
     -------
     A serialized string of the document's indices.
     """
+    from meerschaum.utils.dtypes import coerce_timezone
     index_vals = {
         key: (
             str(val)
             if not isinstance(val, datetime)
-            else str(int(val.timestamp()))
+            else str(int(coerce_timezone(val).timestamp()))
         )
         for key, val in doc.items()
         if key in indices
@@ -83,12 +86,11 @@ def get_pipe_document_key(pipe: mrsm.Pipe, doc: Dict[str, Any], indices: List[st
             ]
         )
     )
-    pipe_key = get_pipe_key(pipe)
-    return pipe_key + ':indices:' + indices_str
+    return table_name + ':indices:' + indices_str
 
 
-def get_pipe_quoted_doc_key(
-    pipe: mrsm.Pipe,
+def get_table_quoted_doc_key(
+    table_name: str,
     doc: Dict[str, Any],
     indices: List[str],
     datetime_column: Optional[str] = None,
@@ -98,13 +100,17 @@ def get_pipe_quoted_doc_key(
     """
     return json.dumps(
         {
-            get_pipe_document_key(pipe, doc, indices): serialize_document(doc),
-            **({datetime_column: doc.get(datetime_column, 0)} if datetime_column else {}) 
+            get_table_document_key(table_name, doc, indices): serialize_document(doc),
+            **(
+                {datetime_column: doc.get(datetime_column, 0)}
+                if datetime_column
+                else {}
+            )
         },
         sort_keys=True,
         separators=(',', ':'),
+        default=json_serialize_datetime,
     )
-
 
 
 def register_pipe(
@@ -414,6 +420,7 @@ def sync_pipe(
     self,
     pipe: mrsm.Pipe,
     df: 'pd.DataFrame' = None,
+    check_existing: bool = True,
     debug: bool = False,
     **kwargs: Any
 ) -> mrsm.SuccessTuple:
@@ -428,6 +435,9 @@ def sync_pipe(
     df: Union['pd.DataFrame', Iterator['pd.DataFrame']], default None
         The data to be synced.
 
+    check_existing: bool, default True
+        If `False`, do not check the documents against existing data and instead insert directly.
+
     Returns
     -------
     A `SuccessTuple` indicating success.
@@ -439,10 +449,12 @@ def sync_pipe(
 
     dt_col = pipe.columns.get('datetime', None)
     indices = [col for col in pipe.columns.values() if col]
+    table_name = self.quote_table(pipe.target)
+
     def _serialize_docs(_df):
         return [
             {
-                get_pipe_document_key(pipe, doc, indices): serialize_document(doc),
+                get_table_document_key(table_name, doc, indices): serialize_document(doc),
                 **(
                     {dt_col: doc.get(dt_col, 0)}
                     if dt_col
@@ -454,7 +466,7 @@ def sync_pipe(
 
     existing_dtypes = pipe.dtypes
     new_dtypes = {
-        str(key): str(val)
+        str(key): 'str'
         for key, val in df.dtypes.items()
         if str(key) not in existing_dtypes
     }
@@ -464,9 +476,15 @@ def sync_pipe(
         if not edit_success:
             return edit_success, edit_msg
 
-    unseen_df, update_df, delta_df = pipe.filter_existing(df, debug=debug)
-    num_insert = len(unseen_df)
-    num_update = len(update_df)
+    df = pipe.enforce_dtypes(df, debug=debug)
+
+    unseen_df, update_df, delta_df = (
+        pipe.filter_existing(df, debug=debug)
+        if check_existing
+        else (df, None, df)
+    )
+    num_insert = len(unseen_df) if unseen_df is not None else 0
+    num_update = len(update_df) if update_df is not None else 0
     msg = f"Inserted {num_insert}, updated {num_update} rows."
     if len(delta_df) == 0:
         return True, msg
@@ -487,7 +505,14 @@ def sync_pipe(
     update_max_dt = get_datetime_bound_from_df(update_df, dt_col, minimum=False)
     update_params = get_unique_index_values(update_df, [col for col in indices if col != dt_col])
 
-    if len(update_df) != 0:
+    if update_df is not None and len(update_df) != 0:
+        #  old_df = pipe.get_data(
+            #  begin=update_min_dt,
+            #  end=update_max_dt,
+            #  params=update_params,
+            #  debug=debug,
+        #  )
+
         clear_success, clear_msg = pipe.clear(
             begin=update_min_dt,
             end=update_max_dt,
@@ -497,11 +522,15 @@ def sync_pipe(
         if not clear_success:
             return clear_success, clear_msg
 
-        update_docs = _serialize_docs(update_df)
+        #  old_docs = old_df.to_dict(orient='records')
+        #  for doc in old_docs:
+            #  doc.up
+
+        serialized_update_docs = _serialize_docs(update_df)
 
         try:
             self.push_docs(
-                update_docs,
+                serialized_update_docs,
                 pipe.target,
                 datetime_column=dt_col,
                 debug=debug,
@@ -567,6 +596,9 @@ def clear_pipe(
     -------
     A `SuccessTuple` indicating success.
     """
+    if begin is None and end is None and params is None:
+        return self.drop_pipe(pipe, debug=debug)
+
     dt_col = pipe.columns.get('datetime', None)
 
     existing_df = pipe.get_data(
@@ -576,18 +608,141 @@ def clear_pipe(
         debug=debug,
     )
     if existing_df is None or len(existing_df) == 0:
-        return True, "Success"
+        return True, "Deleted 0 rows."
 
     docs = existing_df.to_dict(orient='records')
     table_name = self.quote_table(pipe.target)
     indices = [col for col in pipe.columns.values() if col]
     for doc in docs:
-        quoted_doc_key = get_pipe_quoted_doc_key(pipe, doc, indices, dt_col)
+        quoted_doc_key = get_table_quoted_doc_key(table_name, doc, indices, dt_col)
         if dt_col:
             self.client.zrem(table_name, quoted_doc_key)
         else:
-            print('TODO non-dt deletes')
-    return True, "Success"
+            self.client.srem(table_name, quoted_doc_key)
+    msg = (
+        f"Deleted {len(docs)} row"
+        + ('s' if len(docs) != 1 else '')
+        + '.'
+    )
+    return True, msg
 
 
+def get_sync_time(
+    self,
+    pipe: mrsm.Pipe,
+    newest: bool = True,
+    **kwargs: Any
+) -> Union[datetime, int, None]:
+    """
+    Return the newest (or oldest) timestamp in a pipe.
+    """
+    dt_col = pipe.columns.get('datetime', None)
+    dt_typ = pipe.dtypes.get(dt_col, 'datetime64[ns]')
+    if not dt_col:
+        return None
 
+    dateutil_parser = mrsm.attempt_import('dateutil.parser')
+    table_name = self.quote_table(pipe.target)
+    try:
+        vals = (
+            self.client.zrevrange(table_name, 0, 0)
+            if newest
+            else self.client.zrange(table_name, 0, 0)
+        )
+        if not vals:
+            return None
+        val = vals[0]
+    except Exception:
+        return None
+
+    doc = json.loads(val)
+    dt_val = doc.get(dt_col, None)
+    if dt_val is None:
+        return None
+
+    return (
+        dateutil_parser.parse(str(dt_val))
+        if 'datetime' in dt_typ
+        else int(dt_val)
+    )
+
+
+def get_pipe_rowcount(
+    self,
+    pipe: mrsm.Pipe,
+    begin: Union[datetime, int, None] = None,
+    end: Union[datetime, int, None] = None,
+    params: Optional[Dict[str, Any]] = None,
+    debug: bool = False,
+    **kwargs: Any
+) -> Union[int, None]:
+    """
+    Return the number of documents in the pipe's set.
+    """
+    dt_col = pipe.columns.get('datetime', None)
+    table_name = self.quote_table(pipe.target)
+
+    if not pipe.exists():
+        return 0
+
+    try:
+        if begin is None and end is None and params is None:
+            return (
+                self.client.zcard(table_name)
+                if dt_col
+                else self.client.llen(table_name)
+            )
+    except Exception:
+        return None
+
+    df = pipe.get_data(begin=begin, end=end, params=params, debug=debug)
+    if df is None:
+        return 0
+
+    return len(df)
+
+
+def fetch_pipes_keys(
+    self,
+    connector_keys: Optional[List[str]] = None,
+    metric_keys: Optional[List[str]] = None,
+    location_keys: Optional[List[str]] = None,
+    tags: Optional[List[str]] = None,
+    params: Optional[Dict[str, Any]] = None,
+    debug: bool = False
+) -> Optional[List[Tuple[str, str, Optional[str]]]]:
+    """
+    Return the keys for the registered pipes.
+    """
+    from meerschaum.utils.dataframe import query_df, parse_df_datetimes
+    try:
+        docs = self.read(PIPES_TABLE, debug=debug)
+    except Exception:
+        return []
+
+    if not docs:
+        return []
+
+    query = {}
+    if connector_keys:
+        query['connector_keys'] = connector_keys
+    if metric_keys:
+        query['metric_key'] = metric_keys
+    if location_keys:
+        query['location_key'] = location_keys
+    if params:
+        query.update(params)
+
+    df = query_df(
+        parse_df_datetimes(docs),
+        query,
+        inplace=True,
+    )
+    return [
+        (
+            doc['connector_keys'],
+            doc['metric_key'],
+            doc['location_key'],
+        )
+        for doc in df.to_dict(orient='records')
+    ]

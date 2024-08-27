@@ -11,7 +11,7 @@ import os
 import hashlib
 import hmac
 from binascii import b2a_base64, a2b_base64, Error as _BinAsciiError
-from meerschaum.utils.typing import Optional, Dict, Any, Tuple
+from meerschaum.utils.typing import Optional, Dict, Any, Union
 from meerschaum.config.static import STATIC_CONFIG
 from meerschaum.utils.warnings import warn
 
@@ -19,10 +19,10 @@ from meerschaum.utils.warnings import warn
 __all__ = ('hash_password', 'verify_password', 'User')
 
 def hash_password(
-        password: str,
-        salt: Optional[bytes] = None,
-        rounds: Optional[int] = None,
-    ) -> str:
+    password: str,
+    salt: Optional[bytes] = None,
+    rounds: Optional[int] = None,
+) -> str:
     """
     Return an encoded hash string from the given password.
 
@@ -68,9 +68,9 @@ def hash_password(
 
 
 def verify_password(
-        password: str,
-        password_hash: str,
-    ) -> bool:
+    password: str,
+    password_hash: str,
+) -> bool:
     """
     Return `True` if the password matches the provided hash.
 
@@ -197,26 +197,28 @@ class User:
         return self._attributes
 
     @property
-    def instance_connector(self) -> meerschaum.connectors.Connector:
-        """ """
+    def instance_connector(self) -> 'mrsm.connectors.Connector':
         from meerschaum.connectors.parse import parse_instance_keys
         if '_instance_connector' not in self.__dict__:
             self._instance_connector = parse_instance_keys(self._instance_keys)
         return self._instance_connector
 
     @property
-    def user_id(self) -> int:
+    def user_id(self) -> Union[int, str, None]:
         """NOTE: This causes recursion with the API,
               so don't try to get fancy with read-only attributes.
         """
         return self._user_id
 
     @user_id.setter
-    def user_id(self, user_id):
+    def user_id(self, user_id: Union[int, str, None]):
         self._user_id = user_id
 
     @property
     def password_hash(self):
+        """
+        Return the hash of the user's password.
+        """
         _password_hash = self.__dict__.get('_password_hash', None)
         if _password_hash is not None:
             return _password_hash

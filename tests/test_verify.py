@@ -34,7 +34,7 @@ def test_verify_backfill_simple(flavor: str):
     existing_df_in_clear_interval = pipe.get_data(begin=clear_begin, end=clear_end)
 
     _ = pipe.clear(begin=clear_begin, end=clear_end)
-    assert pipe.get_rowcount(begin=clear_begin, end=clear_end) == 0 
+    assert pipe.get_rowcount(begin=clear_begin, end=clear_end) == 0
     success, msg = pipe.verify(debug=debug)
     new_df_in_clear_interval = pipe.get_data(begin=clear_begin, end=clear_end)
 
@@ -58,16 +58,18 @@ def test_verify_backfill_inplace(flavor: str):
     """
     from meerschaum.utils.sql import sql_item_name
     conn = conns[flavor]
+    if not hasattr(conn, 'sync_pipe_inplace'):
+        return
     source_pipe = stress_pipes[flavor]
     source_table_name = sql_item_name(source_pipe.target, source_pipe.instance_connector.flavor)
     target_pipe = Pipe(
         source_pipe.instance_connector, 'test_verify', 'backfill',
-        instance = conn,
-        columns = {
+        instance=conn,
+        columns={
             'datetime': 'datetime',
             'id': 'id',
         },
-        parameters = {
+        parameters={
             'fetch': {
                 'definition': f"SELECT * FROM {source_table_name}",
                 'pipe': source_pipe.keys(),

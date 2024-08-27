@@ -31,7 +31,7 @@ def test_deduplicate_default(flavor: str):
     from meerschaum.utils.sql import sql_item_name
     from meerschaum.utils.dataframe import parse_df_datetimes
     conn = conns[flavor]
-    if conn.flavor != 'sql':
+    if conn.type != 'sql':
         return
     pipe = mrsm.Pipe(
         'test', 'deduplicate',

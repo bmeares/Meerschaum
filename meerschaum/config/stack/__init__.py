@@ -66,7 +66,7 @@ volumes = {
     'api_root': '/meerschaum',
     'meerschaum_db_data': '/var/lib/postgresql/data',
     'grafana_storage': '/var/lib/grafana',
-    'valkey_data': '/data',
+    'valkey_data': '/bitnami/valkey/data',
 }
 networks = {
     'frontend': None,
@@ -178,15 +178,12 @@ default_docker_compose_config = {
             ],
         },
         'valkey': {
-            'image': 'valkey/valkey',
+            'image': 'bitnami/valkey',
             'restart': 'always',
-            'command': [
-                '/bin/sh',
-                '-c',
-                'valkey-server --requirepass <DOLLAR>VALKEY_PASSWORD --save 60 1 --loglevel warning',
-            ],
             'environment': {
                 'VALKEY_PASSWORD': '<DOLLAR>VALKEY_PASSWORD',
+                'VALKEY_RDB_POLICY_DISABLED': 'no',
+                'VALKEY_RDB_POLICY': '900#1 600#5 300#10 120#50 60#1000 30#10000',
             },
             'hostname': valkey_hostname,
             'ports': [

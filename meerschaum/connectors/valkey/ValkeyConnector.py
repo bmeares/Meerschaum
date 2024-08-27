@@ -47,10 +47,23 @@ class ValkeyConnector(Connector):
         sync_pipe,
         get_pipe_columns_types,
         clear_pipe,
+        get_sync_time,
+        get_pipe_rowcount,
+        fetch_pipes_keys,
     )
 
     from ._users import (
+        get_users_pipe,
+        get_user_key,
+        get_user_keys_vals,
         register_user,
+        get_user_id,
+        edit_user,
+        get_user_attributes,
+        delete_user,
+        get_users,
+        get_user_password_hash,
+        get_user_type,
     )
 
     @property
@@ -217,49 +230,53 @@ class ValkeyConnector(Connector):
         datetime_column_key = self.get_datetime_column_key(table)
         remote_datetime_column = self.get(datetime_column_key)
         datetime_column = datetime_column or remote_datetime_column
-
-        print(f"{datetime_column=}")
-        if not datetime_column:
-            return self._push_hash_docs_to_list(docs, table)
-
         dateutil_parser = mrsm.attempt_import('dateutil.parser')
 
-        old_len = self.client.zcard(table_name)
+        old_len = (
+            self.client.zcard(table_name)
+            if datetime_column
+            else self.client.scard(table_name)
+        )
         for doc in docs:
             original_dt_val = (
                 doc[datetime_column]
-                if datetime_column in doc
+                if datetime_column and datetime_column in doc
                 else 0
             )
             dt_val = (
                 dateutil_parser.parse(str(original_dt_val))
                 if not isinstance(original_dt_val, int)
                 else int(original_dt_val)
-            )
+            ) if datetime_column else None
             ts = (
                 int(dt_val.replace(tzinfo=timezone.utc).timestamp())
                 if isinstance(dt_val, datetime)
                 else int(dt_val)
-            )
-            if debug:
-                dprint(f"Adding doc with {ts=}")
+            ) if datetime_column else None
             doc_str = json.dumps(
                 doc,
                 default=json_serialize_datetime,
                 separators=(',', ':'),
                 sort_keys=True,
             )
-            self.client.zadd(table_name, {doc_str: ts})
+            if datetime_column:
+                self.client.zadd(table_name, {doc_str: ts})
+            else:
+                self.client.sadd(table_name, doc_str)
 
-        self.set(datetime_column_key, datetime_column)
-        new_len = self.client.zcard(table_name)
+        if datetime_column:
+            self.set(datetime_column_key, datetime_column)
+        new_len = (
+            self.client.zcard(table_name)
+            if datetime_column
+            else self.client.scard(table_name)
+        )
 
         return new_len - old_len
 
     def _push_hash_docs_to_list(self, docs: List[Dict[str, Any]], table: str) -> int:
         table_name = self.quote_table(table)
-        counter_key = self.get_counter_key(table)
-        next_ix = int((self.client.get(counter_key) or b'0').decode('utf-8'))
+        next_ix = max(self.client.llen(table_name) or 0, 1)
         for i, doc in enumerate(docs):
             doc_key = f"{table_name}:{next_ix + i}"
             self.client.hset(
@@ -271,7 +288,6 @@ class ValkeyConnector(Connector):
             )
             self.client.rpush(table_name, doc_key)
 
-        self.client.incrby(counter_key, len(docs))
         return next_ix + len(docs)
 
     def get_datetime_column_key(self, table: str) -> str:
@@ -386,12 +402,10 @@ class ValkeyConnector(Connector):
             dprint(f"Reading documents from '{table}' with {begin=}, {end=}")
 
         if not datetime_column:
-            return self._read_docs_from_list(
-                table,
-                begin_ix=(begin if isinstance(begin, int) else None),
-                end_ix=(end if isinstance(end, int) else None),
-                debug=debug,
-            )
+            return [
+                json.loads(doc_bytes.decode('utf-8'))
+                for doc_bytes in self.client.smembers(table_name)
+            ]
 
         dateutil_parser = mrsm.attempt_import('dateutil.parser')
 
@@ -485,17 +499,6 @@ class ValkeyConnector(Connector):
             The "table" name (root key) to be deleted.
         """
         table_name = self.quote_table(table)
-
         datetime_column_key = self.get_datetime_column_key(table)
-        datetime_column = self.get(datetime_column_key)
-
-        if not datetime_column:
-            doc_keys = self.client.lrange(table_name, 0, -1)
-            for doc_key in doc_keys:
-                self.client.delete(doc_key)
-                self.client.lrem(table_name, 0, doc_key)
-
-        counter_key = self.get_counter_key(table)
-        self.client.delete(counter_key)
         self.client.delete(table_name)
         self.client.delete(datetime_column_key)

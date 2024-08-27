@@ -7,8 +7,10 @@ Manage users via the SQL Connector
 """
 
 from __future__ import annotations
+
 import meerschaum as mrsm
 from meerschaum.utils.typing import SuccessTuple, Optional, Any, Dict, List, Union
+
 
 def register_user(
     self,
@@ -58,6 +60,7 @@ def register_user(
         return False, f"Failed to register user '{user}'."
     return True, f"Successfully registered user '{user}'."
 
+
 def valid_username(username: str) -> SuccessTuple:
     """Verify that a given username is valid."""
     from meerschaum.config.static import STATIC_CONFIG
@@ -76,7 +79,7 @@ def valid_username(username: str) -> SuccessTuple:
         if not c.isalnum() and c not in acceptable_chars:
             fail_reasons.append(
                 (
-                    f"Usernames may only contain alphanumeric characters " +
+                    "Usernames may only contain alphanumeric characters " +
                     "and the following special characters: "
                     + str(list(acceptable_chars))
                 )
@@ -93,11 +96,11 @@ def valid_username(username: str) -> SuccessTuple:
 
 
 def edit_user(
-        self,
-        user: meerschaum.core.User,
-        debug: bool = False,
-        **kw: Any
-    ) -> SuccessTuple:
+    self,
+    user: 'mrsm.core.User',
+    debug: bool = False,
+    **kw: Any
+) -> SuccessTuple:
     """Update an existing user's metadata."""
     from meerschaum.utils.packages import attempt_import
     sqlalchemy = attempt_import('sqlalchemy')
@@ -146,11 +149,12 @@ def edit_user(
         return False, f"Failed to edit user '{user}'."
     return True, f"Successfully edited user '{user}'."
 
+
 def get_user_id(
-        self,
-        user: meerschaum.core.User,
-        debug : bool = False
-    ) -> Optional[int]:
+    self,
+    user: 'mrsm.core.User',
+    debug: bool = False
+) -> Optional[int]:
     """If a user is registered, return the `user_id`."""
     ### ensure users table exists
     from meerschaum.utils.packages import attempt_import
@@ -169,10 +173,10 @@ def get_user_id(
     return None
 
 def get_user_attributes(
-        self,
-        user: meerschaum.core.User,
-        debug: bool = False
-    ) -> Union[Dict[str, Any], None]:
+    self,
+    user: 'mrsm.core.User',
+    debug: bool = False
+) -> Union[Dict[str, Any], None]:
     """
     Return the user's attributes.
     """
@@ -209,10 +213,10 @@ def get_user_attributes(
     return result
 
 def delete_user(
-        self,
-        user: meerschaum.core.User,
-        debug: bool = False
-    ) -> SuccessTuple:
+    self,
+    user: 'mrsm.core.User',
+    debug: bool = False
+) -> SuccessTuple:
     """Delete a user's record from the users table."""
     ### ensure users table exists
     from meerschaum.connectors.sql.tables import get_tables
@@ -239,11 +243,12 @@ def delete_user(
 
     return True, f"Successfully deleted user '{user}'"
 
+
 def get_users(
-        self,
-        debug: bool = False,
-        **kw: Any
-    ) -> List[str]:
+    self,
+    debug: bool = False,
+    **kw: Any
+) -> List[str]:
     """
     Get the registered usernames.
     """
@@ -257,12 +262,13 @@ def get_users(
 
     return list(self.read(query, debug=debug)['username'])
 
+
 def get_user_password_hash(
-        self,
-        user: meerschaum.core.User,
-        debug: bool = False,
-        **kw: Any
-    ) -> Optional[str]:
+    self,
+    user: 'mrsm.core.User',
+    debug: bool = False,
+    **kw: Any
+) -> Optional[str]:
     """
     Return the password has for a user.
     **NOTE**: This may be dangerous and is only allowed if the security settings explicity allow it.
@@ -279,7 +285,7 @@ def get_user_password_hash(
             dprint(f"Already given user_id: {user_id}")
     else:
         if debug:
-            dprint(f"Fetching user_id...")
+            dprint("Fetching user_id...")
         user_id = self.get_user_id(user, debug=debug)
 
     if user_id is None:
@@ -289,12 +295,13 @@ def get_user_password_hash(
 
     return self.value(query, debug=debug)
 
+
 def get_user_type(
-        self,
-        user: meerschaum.core.User,
-        debug: bool = False,
-        **kw: Any
-    ) -> Optional[str]:
+    self,
+    user: 'mrsm.core.User',
+    debug: bool = False,
+    **kw: Any
+) -> Optional[str]:
     """
     Return the user's type.
     """
